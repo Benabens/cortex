@@ -20,7 +20,7 @@ const tools = [
     title: "Examens générés",
     desc: "Un examen inédit au format de la prof, ciblé sur tes faiblesses + les sujets à revoir.",
     accent: "var(--color-accent-tree)",
-    ready: false,
+    ready: true,
   },
   {
     href: "/sources",
