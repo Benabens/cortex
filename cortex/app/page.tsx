@@ -6,7 +6,7 @@ const tools = [
     title: "Recherche globale",
     desc: "Ctrl-F universel sur tous tes sites : tape « memory image » → tous les endroits où ça apparaît.",
     accent: "var(--color-accent-soft)",
-    ready: false,
+    ready: true,
   },
   {
     href: "/faiblesses",
