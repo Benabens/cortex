@@ -12,6 +12,7 @@
     "exam:save": "tsx scripts/exam-save.ts",
     "weakness:brief": "tsx scripts/weakness-brief.ts",
     "weakness:save": "tsx scripts/weakness-save.ts",
+    "db:checkpoint": "tsx scripts/db-checkpoint.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push"
   },

@@ -30,12 +30,15 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — la CLÉ API n'est JAMAIS commitée
 .env*
 !.env.example
 
-# base de données locale (jamais commitée)
-/data
+# Données utilisateur : SYNCHRONISÉES via git (faiblesses, planning, exams, uploads)
+# pour que la routine nocturne (cloud) et tous tes appareils partagent le même cerveau.
+# Seuls les fichiers temporaires WAL/SHM de SQLite restent hors git.
+/data/*.db-wal
+/data/*.db-shm
 
 # vercel
 .vercel
