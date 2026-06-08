@@ -77,9 +77,23 @@ function fuzzyCandidates(t: string, k = 4): string[] {
   return out.slice(0, k).map((o) => o.term);
 }
 
-/** Saisie libre -> requête FTS5, avec expansion floue uniquement sur les termes inconnus. */
-function toFtsQuery(raw: string): string | null {
-  const terms = tokenize(raw, 2);
+// Mots vides FR/EN à ignorer pour le matching « lâche » (lien de faiblesse).
+const STOP = new Set([
+  "le", "la", "les", "un", "une", "des", "de", "du", "et", "ou", "que", "qui", "quoi",
+  "je", "tu", "il", "on", "ce", "ça", "se", "sa", "son", "ses", "mon", "ma", "mes",
+  "au", "aux", "en", "dans", "sur", "pour", "par", "avec", "sans", "est", "sont", "pas",
+  "ne", "plus", "moins", "comme", "quand", "ou", "ai", "the", "and", "for", "with", "you",
+  "confonds", "comprends", "compris", "sais", "fait", "faire",
+]);
+
+/**
+ * Saisie libre -> requête FTS5.
+ * mode 'and' (défaut, recherche précise) : tous les termes requis.
+ * mode 'or'  (lien de faiblesse)        : OU sur les termes significatifs (mots vides retirés).
+ */
+function toFtsQuery(raw: string, mode: "and" | "or" = "and"): string | null {
+  let terms = tokenize(raw, 2);
+  if (mode === "or") terms = terms.filter((t) => t.length >= 3 && !STOP.has(t));
   if (!terms.length) return null;
   const groups = terms.map((t) => {
     const parts = [`"${t}"*`];
@@ -88,7 +102,7 @@ function toFtsQuery(raw: string): string | null {
     }
     return parts.length > 1 ? `(${parts.join(" OR ")})` : parts[0];
   });
-  return groups.join(" AND ");
+  return groups.join(mode === "and" ? " AND " : " OR ");
 }
 
 const stmt = sqlite.prepare(`
@@ -103,8 +117,8 @@ const stmt = sqlite.prepare(`
   LIMIT ?
 `);
 
-export function search(raw: string, limit = 60): SearchGroup[] {
-  const q = toFtsQuery(raw);
+export function search(raw: string, limit = 60, mode: "and" | "or" = "and"): SearchGroup[] {
+  const q = toFtsQuery(raw, mode);
   if (!q) return [];
   let rows: SearchHit[];
   try {

@@ -13,7 +13,7 @@ const tools = [
     title: "Faiblesses",
     desc: "Dépose un exo raté (note + screenshot). Cortex retient et structure tes points faibles.",
     accent: "var(--color-accent)",
-    ready: false,
+    ready: true,
   },
   {
     href: "/examens",

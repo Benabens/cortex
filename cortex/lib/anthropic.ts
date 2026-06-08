@@ -18,5 +18,6 @@ export function anthropic(): Anthropic {
   return _client;
 }
 
-// Modèle par défaut pour la génération (révisable).
-export const GEN_MODEL = "claude-sonnet-4-5";
+// Modèle par défaut pour la génération + analyse (révisable ici).
+// Opus 4.8 = le plus capable ; idéal pour analyser les faiblesses et générer des exams pertinents.
+export const GEN_MODEL = "claude-opus-4-8";
