@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+/* Design tokens repris des sites de révision existants (reviews.html, index.html) */
+:root {
+  --color-bg-primary: #1f1e1d;
+  --color-bg-secondary: #2a2927;
+  --color-bg-tertiary: #353330;
+  --color-text-primary: #e8e6df;
+  --color-text-secondary: #a8a59c;
+  --color-text-tertiary: #6e6c66;
+  --color-accent: #c58a4f; /* gold/tan */
+  --color-accent-soft: #6fa8d6; /* bleu */
+  --color-accent-tree: #4fb89b; /* vert */
+  --color-border: #3f3d39;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+}
+
+@theme inline {
+  --color-bg: var(--color-bg-primary);
+  --color-bg-2: var(--color-bg-secondary);
+  --color-bg-3: var(--color-bg-tertiary);
+  --color-ink: var(--color-text-primary);
+  --color-ink-2: var(--color-text-secondary);
+  --color-ink-3: var(--color-text-tertiary);
+  --color-accent: var(--color-accent);
+  --color-accent-soft: var(--color-accent-soft);
+  --color-accent-tree: var(--color-accent-tree);
+  --color-line: var(--color-border);
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "SF Mono", Menlo, Monaco, "Courier New", monospace;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--color-accent-soft);
+}
