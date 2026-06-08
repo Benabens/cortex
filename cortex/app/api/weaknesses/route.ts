@@ -22,13 +22,18 @@ export function GET() {
 
 export async function POST(req: NextRequest) {
   const form = await req.formData();
-  const topic = String(form.get("topic") ?? "").trim();
+  let topic = String(form.get("topic") ?? "").trim();
   const description = String(form.get("description") ?? "").trim();
   const severity = Number(form.get("severity") ?? 2);
-  if (!topic) return NextResponse.json({ error: "Le sujet est requis." }, { status: 400 });
 
   let screenshotPath: string | null = null;
   const file = form.get("screenshot");
+  const hasFile = file && file instanceof File && file.size > 0;
+  // Sujet optionnel : l'IA le déduira. Il faut au moins un screenshot OU une note.
+  if (!topic && !description && !hasFile) {
+    return NextResponse.json({ error: "Mets au moins un screenshot ou une note." }, { status: 400 });
+  }
+  if (!topic) topic = "(à analyser)";
   if (file && file instanceof File && file.size > 0) {
     const ext = EXT[file.type] ?? "png";
     if (file.size > 12 * 1024 * 1024)

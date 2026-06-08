@@ -17,6 +17,7 @@ type Weakness = {
   description: string | null;
   screenshotUrl: string | null;
   severity: number;
+  analyzed: boolean;
   loggedAt: string | null;
   related: Related[];
 };
@@ -72,9 +73,11 @@ export default function FaiblessesPage() {
     return () => window.removeEventListener("paste", onPaste);
   }, [onPaste]);
 
+  const canSubmit = !!(topic.trim() || description.trim() || file);
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!topic.trim()) return;
+    if (!canSubmit) return;
     setSaving(true);
     setErr(null);
     try {
@@ -131,17 +134,20 @@ export default function FaiblessesPage() {
 
       {/* Formulaire d'intake */}
       <form onSubmit={submit} className="mb-8 rounded-lg border p-4" style={{ borderColor: "var(--color-border)", background: "var(--color-bg-secondary)" }}>
+        <p className="mb-3 text-xs" style={{ color: "var(--color-text-tertiary)" }}>
+          Dépose juste un <strong style={{ color: "var(--color-text-secondary)" }}>screenshot de l'exo</strong> — l'IA comprend tout, pas besoin d'expliquer. Ou écris simplement une note (ex. « j'ai du mal avec le code où il y a des fork / pthread »). Le sujet est optionnel, l'IA le déduit.
+        </p>
         <input
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
-          placeholder="Sujet (ex. waitpid / état zombie)"
+          placeholder="Sujet (optionnel — l'IA le déduit du screenshot)"
           className="mb-3 w-full rounded-md border px-3 py-2 text-sm outline-none"
           style={{ background: "var(--color-bg-tertiary)", borderColor: "var(--color-border)", color: "var(--color-text-primary)" }}
         />
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Ce que je n'ai pas compris (ta note / l'analyse de ta faiblesse)…"
+          placeholder="Optionnel : ce que tu n'as pas compris…"
           rows={3}
           className="mb-3 w-full resize-y rounded-md border px-3 py-2 text-sm outline-none"
           style={{ background: "var(--color-bg-tertiary)", borderColor: "var(--color-border)", color: "var(--color-text-primary)" }}
@@ -179,7 +185,7 @@ export default function FaiblessesPage() {
         )}
         <button
           type="submit"
-          disabled={saving || !topic.trim()}
+          disabled={saving || !canSubmit}
           className="rounded-md px-4 py-2 text-sm font-medium disabled:opacity-40"
           style={{ background: "var(--color-accent)", color: "#1f1e1d" }}
         >
@@ -187,6 +193,14 @@ export default function FaiblessesPage() {
         </button>
         {err && <p className="mt-2 text-xs" style={{ color: "#d9774f" }}>{err}</p>}
       </form>
+
+      {/* Bandeau : faiblesses à analyser par l'IA */}
+      {list.some((w) => !w.analyzed) && (
+        <div className="mb-5 rounded-md border px-4 py-3 text-xs" style={{ borderColor: "var(--color-accent)", background: "var(--color-bg-secondary)", color: "var(--color-text-secondary)" }}>
+          <strong style={{ color: "var(--color-accent)" }}>{list.filter((w) => !w.analyzed).length} faiblesse(s) à analyser.</strong>{" "}
+          Dis à Claude Code « <em>analyse mes faiblesses</em> » (gratuit, via ton Max) — il lit tes screenshots et remplit tout. Ou clique ✦ sur une carte (utilise l'API, payant).
+        </div>
+      )}
 
       {/* Liste */}
       <div className="space-y-4">
@@ -203,6 +217,11 @@ export default function FaiblessesPage() {
                 <div className="flex items-center gap-2">
                   <span className="inline-block h-2 w-2 rounded-full" style={{ background: sev.color }} />
                   <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>{w.topic}</h3>
+                  {!w.analyzed && (
+                    <span className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide" style={{ border: "1px solid var(--color-accent)", color: "var(--color-accent)" }}>
+                      à analyser
+                    </span>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <button onClick={() => analyze(w.id)} disabled={analyzing === w.id} className="text-xs disabled:opacity-40" style={{ color: "var(--color-accent-soft)" }}>

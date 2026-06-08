@@ -29,8 +29,10 @@ function recencyWeight(year?: number, type?: string): number {
     if (year === 2021) return 1.3;
     return 1; // <= 2020
   }
-  // cours de cette année / reviews : important par défaut
+  // notes du staff (attendus prof) = priorité haute ; cours/reviews élevé ; labs/code moyen
+  if (type === "note") return 2;
   if (type === "course_pdf" || type === "review") return 1.8;
+  if (type === "lab" || type === "code") return 1.4;
   return 1.2;
 }
 
@@ -217,7 +219,83 @@ function ingestCheatsheets(): number {
   return total;
 }
 
-// ---------- 5. PDF du cours (les 2 PDF principaux) ----------
+// ---------- helper : liste récursive de fichiers par extension ----------
+function listFiles(relDir: string, exts: string[]): string[] {
+  const base = path.join(CONTENT_ROOT, relDir);
+  if (!fs.existsSync(base)) return [];
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, e.name);
+      if (e.isDirectory()) walk(abs);
+      else if (exts.some((x) => e.name.toLowerCase().endsWith(x))) out.push(path.relative(CONTENT_ROOT, abs));
+    }
+  };
+  walk(base);
+  return out;
+}
+
+function htmlToText(rel: string): { title: string; text: string } {
+  const $ = cheerio.load(read(rel));
+  $("script, style").remove();
+  const title = clean($("title").first().text()) || clean($("h1, h2").first().text()) || path.basename(rel);
+  return { title, text: clean($("body").text()) };
+}
+
+function labId(rel: string): string | null {
+  const m = rel.toLowerCase().match(/lab\s*0*(\d+)/);
+  return m ? `lab${m[1]}` : null;
+}
+
+// ---------- 5. labs/ : énoncés (html/md/tex) + CODE C (.c/.h) ----------
+function ingestLabs(): number {
+  let total = 0;
+  for (const rel of listFiles("labs", [".html", ".md", ".c", ".h", ".tex"])) {
+    const isCode = /\.(c|h)$/.test(rel);
+    let title: string, text: string;
+    if (rel.endsWith(".html")) ({ title, text } = htmlToText(rel));
+    else {
+      title = path.basename(rel);
+      text = read(rel); // .md/.c/.h/.tex : contenu brut (le code reste lisible/cherchable)
+    }
+    const type = isCode ? "code" : "lab";
+    total += addSource(type, title, rel, null, [
+      { type, lectureId: labId(rel), title, text, anchor: rel },
+    ]);
+  }
+  return total;
+}
+
+// ---------- 6. notes/ : checklists, plan, attendus du staff ----------
+function ingestNotes(): number {
+  let total = 0;
+  for (const rel of listFiles("notes", [".md"])) {
+    total += addSource("note", path.basename(rel, ".md"), rel, null, [
+      { type: "note", lectureId: null, title: path.basename(rel, ".md"), text: read(rel), anchor: rel },
+    ]);
+  }
+  return total;
+}
+
+// ---------- 7. autres HTML à la racine (finals d'énoncé, packets, lab walk…) ----------
+function ingestRootDocs(): number {
+  const handled = new Set([
+    "reviews.html", "index.html", "c_cheatsheet.html", "cheatsheet_v5_preview.html", "c_errors_journal.html",
+  ]);
+  let total = 0;
+  for (const f of fs.readdirSync(CONTENT_ROOT)) {
+    if (!f.endsWith(".html") || handled.has(f)) continue;
+    const { title, text } = htmlToText(f);
+    const ym = f.match(/(\d{4})/);
+    const type = /final/i.test(f) ? "final" : /midterm|mi.?term/i.test(f) ? "midterm" : "doc";
+    total += addSource(type, title, f, ym ? +ym[1] : null, [
+      { type: "exercise", lectureId: labId(f), title, text, anchor: f },
+    ]);
+  }
+  return total;
+}
+
+// ---------- 8. PDF du cours (les 2 PDF principaux) ----------
 async function ingestPdfs(): Promise<number> {
   const pdfs = [
     ["cours/CS202_Lectures_Part1_Networks_L1-L10.pdf", "Cours — Part 1 Networks (L1-L10)"],
@@ -276,6 +354,9 @@ async function main() {
     console.log("• index.html   :", ingestIndex(), "définitions/méthodes");
     console.log("• exercices/   :", ingestExercices(), "exos");
     console.log("• cheatsheets  :", ingestCheatsheets(), "boxes");
+    console.log("• labs/        :", ingestLabs(), "fichiers (énoncés + code C)");
+    console.log("• notes/       :", ingestNotes(), "notes (dont attendus staff)");
+    console.log("• docs racine  :", ingestRootDocs(), "HTML (finals/énoncés)");
   });
   tx();
 

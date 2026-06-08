@@ -14,10 +14,12 @@ type Hit = {
   snippet: string;
 };
 
-/** PDF -> lien direct (#page). HTML -> viewer Cortex (déplie + surligne). */
+/** PDF/code/markdown -> fichier brut ; HTML -> viewer Cortex (déplie + surligne). */
 function hitHref(h: Hit, q: string): string {
-  if (h.sourcePath.endsWith(".pdf")) return `/sites/${h.anchor}`;
-  return `/voir?src=${encodeURIComponent(h.sourcePath)}&item=${h.itemId}&q=${encodeURIComponent(q)}`;
+  if (h.sourcePath.endsWith(".html")) {
+    return `/voir?src=${encodeURIComponent(h.sourcePath)}&item=${h.itemId}&q=${encodeURIComponent(q)}`;
+  }
+  return `/sites/${h.anchor}`; // pdf (#page), .c/.h/.md/.tex : ouverts en brut
 }
 type Group = { sourceType: string; label: string; hits: Hit[] };
 

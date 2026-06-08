@@ -32,15 +32,30 @@ function gatherContext() {
 
   const due = dueConcepts(6);
 
-  // Style : extraits des anciens finals/midterms, les plus récents d'abord
-  const style = (
-    sqlite
-      .prepare(
-        `SELECT s.title src, i.text FROM items i JOIN sources s ON s.id = i.source_id
-         WHERE s.type IN ('final','midterm') ORDER BY s.recency_weight DESC LIMIT 3`
-      )
-      .all() as { src: string; text: string }[]
-  ).map((r) => ({ src: r.src, excerpt: trunc(r.text, 1100) }));
+  // Style : UNIQUEMENT les 2 examens les plus récents (le format à imiter), en détail.
+  const maxYear =
+    (sqlite
+      .prepare(`SELECT MAX(year) y FROM sources WHERE type IN ('final','midterm') AND year IS NOT NULL`)
+      .get() as { y: number | null }).y ?? 2024;
+  const styleRows = sqlite
+    .prepare(
+      `SELECT s.title src, i.text, i.images FROM items i JOIN sources s ON s.id = i.source_id
+       WHERE s.type IN ('final','midterm') AND s.year >= ?
+       ORDER BY s.year DESC, s.recency_weight DESC LIMIT 8`
+    )
+    .all(maxYear - 1) as { src: string; text: string; images: string | null }[];
+  const style = styleRows.map((r) => ({ src: r.src, excerpt: trunc(r.text, 2400) }));
+  const styleImages = [
+    ...new Set(
+      styleRows.flatMap((r) => {
+        try {
+          return r.images ? (JSON.parse(r.images) as string[]) : [];
+        } catch {
+          return [];
+        }
+      })
+    ),
+  ];
 
   // Matière de cours pertinente pour les sujets ciblés
   const seed = [...weaknesses.map((w) => w.topic), ...due].join(" ");
@@ -56,7 +71,7 @@ function gatherContext() {
     if (courseItems.length >= 8) break;
   }
 
-  return { weaknesses, due, style, courseItems };
+  return { weaknesses, due, style, styleImages, courseItems };
 }
 
 const EXAM_SCHEMA = {
@@ -86,20 +101,26 @@ const EXAM_SCHEMA = {
 function buildPrompt(ctx: ReturnType<typeof gatherContext>): string {
   return [
     `Tu es le professeur du cours Computer Systems (CS202, EPFL). Tu rédiges un NOUVEL examen, inédit — surtout PAS une copie des anciens.`,
-    `Objectif : 4 à 6 questions originales qui (1) ciblent en priorité MES faiblesses, (2) couvrent les concepts à revoir, (3) restent fidèles au format et au niveau d'exigence de la prof.`,
+    `Objectif : 4 à 6 questions originales qui (1) ciblent en priorité MES faiblesses, (2) couvrent les concepts à revoir, (3) reproduisent EXACTEMENT le format des 2 examens les plus récents ci-dessous.`,
     ``,
     `MES FAIBLESSES (à mettre à l'épreuve avec de nouveaux énoncés) :`,
-    ...ctx.weaknesses.map((w) => `- ${w.topic}${w.note ? " — " + w.note : ""}`),
+    ...(ctx.weaknesses.length ? ctx.weaknesses.map((w) => `- ${w.topic}${w.note ? " — " + w.note : ""}`) : ["(aucune enregistrée — couvre alors largement les concepts à revoir)"]),
     ``,
     `CONCEPTS À REVOIR (courbe de l'oubli) : ${ctx.due.join(" · ") || "(aucun)"}`,
     ``,
-    `STYLE & FORMAT DES ANCIENS EXAMENS (imite la forme, pas le contenu) :`,
+    `>>> FORMAT À REPRODUIRE — UNIQUEMENT les 2 examens les plus récents <<<`,
+    `Calque la FORME CONCRÈTE de ces examens, pas seulement l'esthétique :`,
+    `- la même structure (découpage en Problems / sous-questions a) b) c)…),`,
+    `- les mêmes TYPES de questions (ex. tracer des paquets et remplir un tableau, accès disque inode/data blocks, reconvergence de routage, lecture/raisonnement sur du code C avec fork/pthread…),`,
+    `- les mêmes schémas/diagrammes et tableaux à remplir quand l'original en a (recrée-les en HTML/ASCII, NE recopie PAS les images d'origine),`,
+    `- le même niveau d'exigence. Mais des énoncés et des valeurs NOUVEAUX (pas de copie).`,
     ...ctx.style.map((s) => `### ${s.src}\n${s.excerpt}`),
+    ctx.styleImages.length ? `\n(Ces examens comportent des schémas/figures, ex. : ${ctx.styleImages.slice(0, 8).join(", ")} — prévois des schémas équivalents, recréés.)` : ``,
     ``,
     `MATIÈRE DE COURS PERTINENTE (ancre tes questions là-dessus, reste correct) :`,
     ...ctx.courseItems.map((c) => `- (${c.src}) ${c.text}`),
     ``,
-    `Consignes : énoncés clairs et autonomes ; corrigés détaillés et pédagogiques (raisonnement étape par étape, pas juste la réponse) ; utilise du HTML simple (<p>, <ul>, <li>, <code>, <pre>) ; pas de balises <script>/<style>. Réponds uniquement avec l'objet JSON demandé.`,
+    `Consignes : énoncés clairs et autonomes ; corrigés détaillés et pédagogiques (raisonnement étape par étape, pas juste la réponse) ; quand tu fais un tableau ou un schéma, utilise <pre> (ASCII) ou des <ul>/<table> ; HTML simple uniquement (<p>, <ul>, <li>, <code>, <pre>, <table>) ; pas de <script>/<style>. Réponds uniquement avec l'objet JSON demandé.`,
   ].join("\n");
 }
 

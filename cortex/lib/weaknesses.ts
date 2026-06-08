@@ -1,6 +1,15 @@
 import { sqlite } from "@/db/client";
 import { search } from "@/lib/search";
 
+// Ajoute la colonne `analyzed` si absente (suivi "à analyser / analysé par l'IA").
+function ensureSchema() {
+  const cols = sqlite.prepare(`PRAGMA table_info(weaknesses)`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === "analyzed")) {
+    sqlite.exec(`ALTER TABLE weaknesses ADD COLUMN analyzed INTEGER NOT NULL DEFAULT 0`);
+  }
+}
+ensureSchema();
+
 export type RelatedItem = {
   itemId: number;
   title: string | null;
@@ -17,16 +26,17 @@ export type Weakness = {
   screenshotPath: string | null;
   screenshotUrl: string | null;
   severity: number;
+  analyzed: boolean;
   timesSeen: number;
   loggedAt: string | null;
   lastReviewedAt: string | null;
   related: RelatedItem[];
 };
 
-/** Lien vers l'endroit exact : PDF -> #page, HTML -> viewer (déplie + surligne). */
+/** Lien vers l'endroit exact : HTML -> viewer (déplie + surligne) ; pdf/code/md -> brut. */
 function itemHref(anchor: string, sourcePath: string, itemId: number, q: string): string {
-  if (sourcePath.endsWith(".pdf")) return `/sites/${anchor}`;
-  return `/voir?src=${encodeURIComponent(sourcePath)}&item=${itemId}&q=${encodeURIComponent(q)}`;
+  if (sourcePath.endsWith(".html")) return `/voir?src=${encodeURIComponent(sourcePath)}&item=${itemId}&q=${encodeURIComponent(q)}`;
+  return `/sites/${anchor}`;
 }
 
 /** Auto-link : retrouve les items du corpus les plus proches du texte de la faiblesse (matching lâche). */
@@ -114,6 +124,7 @@ export function listWeaknesses(): Weakness[] {
     screenshotPath: r.screenshot_path,
     screenshotUrl: r.screenshot_path ? `/uploads/${r.screenshot_path}` : null,
     severity: r.severity,
+    analyzed: !!r.analyzed,
     timesSeen: r.times_seen,
     loggedAt: r.logged_at,
     lastReviewedAt: r.last_reviewed_at,
@@ -134,10 +145,18 @@ export function deleteWeakness(id: number): string | null {
   return row?.screenshot_path ?? null;
 }
 
-/** Met à jour l'analyse (topic/description) et recalcule les liens. */
+/** Met à jour l'analyse (topic/description), recalcule les liens, marque analysé. */
 export function updateWeaknessAnalysis(id: number, topic: string, description: string) {
   const related = autoLink(`${topic} ${description}`);
   sqlite
-    .prepare(`UPDATE weaknesses SET topic = ?, description = ?, related_item_ids = ? WHERE id = ?`)
+    .prepare(`UPDATE weaknesses SET topic = ?, description = ?, related_item_ids = ?, analyzed = 1 WHERE id = ?`)
     .run(topic, description, JSON.stringify(related), id);
+}
+
+/** Faiblesses pas encore analysées par l'IA (pour le traitement par Claude Code). */
+export function listPending(): { id: number; topic: string; description: string | null; screenshotPath: string | null }[] {
+  ensureSchema();
+  return sqlite
+    .prepare(`SELECT id, topic, description, screenshot_path AS screenshotPath FROM weaknesses WHERE analyzed = 0 ORDER BY id`)
+    .all() as any[];
 }
