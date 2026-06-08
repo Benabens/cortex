@@ -7,11 +7,18 @@ type Hit = {
   itemId: number;
   sourceType: string;
   sourceTitle: string;
+  sourcePath: string;
   lectureId: string | null;
   title: string | null;
   anchor: string;
   snippet: string;
 };
+
+/** PDF -> lien direct (#page). HTML -> viewer Cortex (déplie + surligne). */
+function hitHref(h: Hit, q: string): string {
+  if (h.sourcePath.endsWith(".pdf")) return `/sites/${h.anchor}`;
+  return `/voir?src=${encodeURIComponent(h.sourcePath)}&item=${h.itemId}&q=${encodeURIComponent(q)}`;
+}
 type Group = { sourceType: string; label: string; hits: Hit[] };
 
 const ACCENT: Record<string, string> = {
@@ -119,7 +126,7 @@ export default function RecherchePage() {
               {g.hits.map((h) => (
                 <li key={h.itemId}>
                   <a
-                    href={`/sites/${h.anchor}`}
+                    href={hitHref(h, q)}
                     target="_blank"
                     rel="noopener"
                     className="block rounded-md border px-4 py-3 transition-colors hover:brightness-125"

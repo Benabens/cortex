@@ -12,6 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { extractText, getDocumentProxy } from "unpdf";
 import { ensureFts, sqlite } from "../db/client";
+import { tokenize } from "../lib/text";
 
 const CONTENT_ROOT = path.resolve(process.cwd(), ".."); // dossier Compsys-claude
 
@@ -241,6 +242,30 @@ async function ingestPdfs(): Promise<number> {
   return total;
 }
 
+// ---------- Vocabulaire : termes distincts + fréquence documentaire ----------
+function buildVocab(): number {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS vocab (term TEXT PRIMARY KEY, df INTEGER NOT NULL);
+    DELETE FROM vocab;
+  `);
+  const df = new Map<string, number>();
+  const rows = sqlite.prepare("SELECT text FROM items").all() as { text: string }[];
+  for (const { text } of rows) {
+    const seen = new Set<string>();
+    for (const t of tokenize(text, 3)) {
+      if (t.length > 24 || /^\d+$/.test(t)) continue; // pas les très longs / purs nombres
+      seen.add(t);
+    }
+    for (const t of seen) df.set(t, (df.get(t) ?? 0) + 1);
+  }
+  const ins = sqlite.prepare("INSERT OR REPLACE INTO vocab (term, df) VALUES (?,?)");
+  const tx = sqlite.transaction(() => {
+    for (const [term, n] of df) ins.run(term, n);
+  });
+  tx();
+  return df.size;
+}
+
 async function main() {
   ensureFts();
   console.log("Nettoyage des données dérivées (sources/items/fts)…");
@@ -256,6 +281,9 @@ async function main() {
 
   // PDF : hors transaction (async)
   console.log("• PDF cours    :", await ingestPdfs(), "pages");
+
+  // Vocabulaire (pour la recherche tolérante aux fautes)
+  console.log("• vocabulaire  :", buildVocab(), "termes");
 
   const counts = sqlite.prepare("SELECT (SELECT count(*) FROM sources) s, (SELECT count(*) FROM items) i, (SELECT count(*) FROM fts_items) f").get() as any;
   console.log(`\n✓ Ingestion terminée : ${counts.s} sources, ${counts.i} items, ${counts.f} indexés (FTS).`);
