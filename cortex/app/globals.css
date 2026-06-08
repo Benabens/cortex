@@ -6,34 +6,34 @@
    (clin d'œil aux sites de révision) sur fond gris très clair.
    ─────────────────────────────────────────────────────────────── */
 :root {
-  --bg: #f5f5f7; /* gris Apple */
-  --surface: #ffffff;
-  --surface-2: #fbfbfd;
-  --surface-hover: #f0f0f3;
+  --bg: #0f0f11; /* presque noir, neutre */
+  --surface: #1a1a1d;
+  --surface-2: #151517;
+  --surface-hover: #232327;
 
-  --ink: #1d1d1f; /* quasi-noir Apple */
-  --ink-2: #56565b;
-  --ink-3: #8a8a8f;
+  --ink: #f2f2f4; /* presque blanc */
+  --ink-2: #a1a1a6;
+  --ink-3: #6c6c72;
 
-  --line: rgba(0, 0, 0, 0.08);
-  --line-strong: rgba(0, 0, 0, 0.14);
+  --line: rgba(255, 255, 255, 0.10);
+  --line-strong: rgba(255, 255, 255, 0.17);
 
-  --accent: #b8743a; /* ambre chaud */
-  --accent-ink: #8a5424; /* ambre foncé (texte sur clair) */
-  --accent-wash: #fbf3ea;
-  --blue: #2f7fd6;
-  --green: #1f9d7a;
-  --red: #d1573a;
+  --accent: #d49355; /* ambre chaud (un cran plus clair pour le fond sombre) */
+  --accent-ink: #e6ab6f; /* ambre clair (texte sur sombre) */
+  --accent-wash: rgba(212, 147, 85, 0.15);
+  --blue: #5aa8ef;
+  --green: #3ec9a0;
+  --red: #ef6f52;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.05);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.10), 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 14px 36px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.4);
 
   --r-sm: 10px;
   --r: 14px;
   --r-lg: 20px;
 
-  /* Compat anciens tokens (transition douce, encore référencés ici/là) */
+  /* Compat anciens tokens (encore référencés ici/là) */
   --color-bg-primary: var(--bg);
   --color-bg-secondary: var(--surface);
   --color-bg-tertiary: var(--surface-2);
@@ -59,6 +59,8 @@
 
 html {
   height: 100%;
+  background: var(--bg);
+  color-scheme: dark;
 }
 
 body {
@@ -69,8 +71,8 @@ body {
 }
 
 ::selection {
-  background: var(--accent-wash);
-  color: var(--accent-ink);
+  background: rgba(212, 147, 85, 0.3);
+  color: #fff;
 }
 
 a {
@@ -88,7 +90,7 @@ a {
   gap: 6px;
   height: 52px;
   padding: 0 max(20px, calc((100% - 1024px) / 2));
-  background: rgba(245, 245, 247, 0.72);
+  background: rgba(18, 18, 20, 0.72);
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
   border-bottom: 1px solid var(--line);
