@@ -86,13 +86,16 @@ export default function FaiblessesPage() {
       fd.set("severity", String(severity));
       if (file) fd.set("screenshot", file);
       const r = await fetch("/api/weaknesses", { method: "POST", body: fd });
-      if (!r.ok) throw new Error((await r.json()).error ?? "Échec");
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "Échec");
       setTopic("");
       setDescription("");
       setSeverity(2);
       pickFile(null);
       if (fileRef.current) fileRef.current.value = "";
       await load();
+      // Traitement IA automatique via Claude Code (Max) — structure la faiblesse juste après l'ajout.
+      if (d.id) process(d.id);
     } catch (e: any) {
       setErr(String(e.message ?? e));
     } finally {
@@ -100,20 +103,28 @@ export default function FaiblessesPage() {
     }
   }
 
-  async function analyze(id: number) {
+  // Analyse via Claude Code (abonnement Max, gratuit) — pas l'API payante.
+  async function process(id: number) {
     setAnalyzing(id);
     setErr(null);
     try {
-      const r = await fetch("/api/weaknesses/analyze", {
+      const r = await fetch("/api/weaknesses/process", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ id }),
       });
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error ?? "Échec analyse");
+      if (!r.ok) {
+        if (r.status === 503) {
+          throw new Error(
+            "Claude Code (Max) n'est pas joignable ici. Lance l'app sur ta machine où `claude` est installé et connecté à ton Max, puis réessaie."
+          );
+        }
+        throw new Error(d.error ?? "Échec de l'analyse");
+      }
       await load();
     } catch (e: any) {
-      setErr(String(e.message ?? e).includes("ANTHROPIC_API_KEY") ? "Ajoute ta clé API dans cortex/.env.local pour activer l'analyse Claude." : String(e.message ?? e));
+      setErr(String(e.message ?? e));
     } finally {
       setAnalyzing(null);
     }
@@ -134,7 +145,7 @@ export default function FaiblessesPage() {
       {/* Formulaire d'intake */}
       <form onSubmit={submit} className="card card-pad mb-8">
         <p className="mb-4 text-[13px] leading-relaxed" style={{ color: "var(--ink-2)" }}>
-          Dépose juste un <strong style={{ color: "var(--ink)" }}>screenshot de l'exo</strong> — l'IA comprend tout, pas besoin d'expliquer. Ou écris une note (ex. « j'ai du mal avec le code fork / pthread »). Le sujet est optionnel.
+          Dépose juste un <strong style={{ color: "var(--ink)" }}>screenshot d'exo</strong>, un <strong style={{ color: "var(--ink)" }}>slide de cours</strong>, ou écris une note. Dès l'ajout, <strong style={{ color: "var(--ink)" }}>Claude lit l'image et structure ta faiblesse automatiquement</strong> — via ton abonnement Max (gratuit, pas l'API payante). Le sujet est optionnel.
         </p>
         <input
           value={topic}
@@ -184,11 +195,11 @@ export default function FaiblessesPage() {
         {err && <p className="mt-2.5 text-[12px]" style={{ color: "var(--red)" }}>{err}</p>}
       </form>
 
-      {/* Bandeau : faiblesses à analyser par l'IA */}
+      {/* Bandeau : faiblesses pas encore structurées par l'IA */}
       {list.some((w) => !w.analyzed) && (
         <div className="mb-5 rounded-xl px-4 py-3 text-[13px] leading-relaxed" style={{ background: "var(--accent-wash)", color: "var(--ink-2)" }}>
-          <strong style={{ color: "var(--accent-ink)" }}>{list.filter((w) => !w.analyzed).length} faiblesse(s) à analyser.</strong>{" "}
-          Dis à Claude Code « <em>analyse mes faiblesses</em> » (gratuit, via ton Max) — il lit tes screenshots et remplit tout. Ou clique ✦ sur une carte (utilise l'API, payant).
+          <strong style={{ color: "var(--accent-ink)" }}>{list.filter((w) => !w.analyzed).length} faiblesse(s) pas encore structurée(s).</strong>{" "}
+          L'analyse se lance toute seule à l'ajout ; si l'une est restée en attente (app pas lancée sur ta machine, ou erreur), clique <strong style={{ color: "var(--accent-ink)" }}>✦ analyser</strong> dessus — c'est gratuit via ton Max.
         </div>
       )}
 
@@ -210,8 +221,8 @@ export default function FaiblessesPage() {
                   {!w.analyzed && <span className="badge">à analyser</span>}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <button onClick={() => analyze(w.id)} disabled={analyzing === w.id} className="btn btn-quiet" style={{ color: "var(--blue)" }}>
-                    {analyzing === w.id ? "analyse…" : "✦ analyser"}
+                  <button onClick={() => process(w.id)} disabled={analyzing === w.id} className="btn btn-quiet" style={{ color: "var(--blue)" }}>
+                    {analyzing === w.id ? "Claude analyse… (~20s)" : w.analyzed ? "↻ ré-analyser" : "✦ analyser"}
                   </button>
                   <button onClick={() => remove(w.id)} className="btn btn-quiet">suppr</button>
                 </div>
