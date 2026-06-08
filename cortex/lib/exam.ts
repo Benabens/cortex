@@ -1,5 +1,6 @@
 import { sqlite } from "@/db/client";
 import { anthropic, GEN_MODEL } from "@/lib/anthropic";
+import { extractJson, runClaudeCode } from "@/lib/claude-code";
 import { dueConcepts, markTested } from "@/lib/schedule";
 import { search } from "@/lib/search";
 import { referencePaths } from "@/lib/sources";
@@ -440,5 +441,28 @@ export function persistExam(spec: ExamSpec): { id: number; url: string } {
 /** Voie API directe (optionnelle, payante) : rédige via Claude API puis enregistre. */
 export async function generateExam(opts: { dry?: boolean } = {}): Promise<{ id: number; url: string }> {
   const spec = opts.dry ? stubExam(gatherContext()) : await callClaude(gatherContext());
+  return persistExam(spec);
+}
+
+/** Prompt pour Claude Code (headless) : le brief complet + sortie JSON stricte (aucun outil/fichier). */
+function buildClaudeCodePrompt(ctx: ReturnType<typeof gatherContext>): string {
+  return [
+    buildPrompt(ctx),
+    ``,
+    `--- SORTIE ATTENDUE ---`,
+    `Réponds UNIQUEMENT avec un objet JSON valide conforme EXACTEMENT à ce schéma (clés en anglais, contenu en français).`,
+    `N'écris aucun fichier, n'utilise aucun outil, n'ajoute aucune prose ni balise markdown autour : juste l'objet JSON.`,
+    JSON.stringify(EXAM_SCHEMA, null, 2),
+  ].join("\n");
+}
+
+/** Voie gratuite (abonnement Max) : rédige via Claude Code en sous-processus puis enregistre. */
+export async function generateExamViaClaudeCode(): Promise<{ id: number; url: string }> {
+  const text = await runClaudeCode({
+    prompt: buildClaudeCodePrompt(gatherContext()),
+    model: "opus",
+    timeoutMs: 280_000,
+  });
+  const spec = extractJson<ExamSpec>(text);
   return persistExam(spec);
 }

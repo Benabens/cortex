@@ -114,6 +114,13 @@ export async function ingestRefFile(relPath: string): Promise<number> {
     }).lastInsertRowid as number;
     insFts.run(label, text, "", String(itemId), String(sid));
   });
+
+  // Tout fichier de data/refs/ EST un examen de référence (la sélection survit au ré-ingest).
+  ensureRefsSchema();
+  const wasUploaded = (sqlite.prepare(`SELECT uploaded FROM exam_refs WHERE path = ?`).get(relPath) as { uploaded: number } | undefined)?.uploaded ?? 1;
+  sqlite
+    .prepare(`INSERT OR REPLACE INTO exam_refs (path, title, year, kind, uploaded) VALUES (?,?,?,?,?)`)
+    .run(relPath, title, year, kind, wasUploaded);
   return sid;
 }
 

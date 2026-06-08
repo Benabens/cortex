@@ -25,12 +25,18 @@ export default function ExamensPage() {
     try {
       const r = await fetch(`/api/exams/generate${dry ? "?dry=1" : ""}`, { method: "POST" });
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error ?? "Échec");
+      if (!r.ok) {
+        if (r.status === 503) {
+          throw new Error(
+            "Claude Code (Max) n'est pas joignable ici. Lance l'app sur ta machine où `claude` est installé et connecté à ton Max, puis réessaie."
+          );
+        }
+        throw new Error(d.error ?? "Échec");
+      }
       await load();
       if (d.url) window.open(d.url, "_blank");
     } catch (e: any) {
-      const m = String(e.message ?? e);
-      setErr(m.includes("ANTHROPIC_API_KEY") ? "Ajoute ta clé API dans cortex/.env.local pour générer un vrai examen (le dry-run marche sans clé)." : m);
+      setErr(String(e.message ?? e));
     } finally {
       setBusy("");
     }
@@ -50,7 +56,7 @@ export default function ExamensPage() {
 
       <div className="card card-pad mb-7">
         <p className="text-[14px] leading-relaxed" style={{ color: "var(--ink-2)" }}>
-          Un examen <strong style={{ color: "var(--ink)" }}>inédit</strong>, calqué sur le format des vrais examens EPFL récents, ciblé sur tes faiblesses et les concepts à revoir — prêt à imprimer en PDF.
+          Un examen <strong style={{ color: "var(--ink)" }}>inédit</strong>, calqué sur le format des vrais examens EPFL récents (tes examens de référence), ciblé sur tes faiblesses et les concepts à revoir — prêt à imprimer en PDF. Généré via ton abonnement <strong style={{ color: "var(--ink)" }}>Max</strong> (gratuit).
         </p>
         {sched && (
           <p className="mt-2.5 text-[13px]" style={{ color: "var(--ink-3)" }}>
