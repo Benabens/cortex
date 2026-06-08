@@ -1,4 +1,32 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+/**
+ * Localise le binaire `claude`. Le serveur Node peut ne pas avoir le même PATH
+ * que le shell interactif (ou `claude` peut être un alias) → on cherche aussi
+ * aux emplacements d'install classiques. Surchargeable via CORTEX_CLAUDE_BIN.
+ */
+function resolveClaudeBin(): string {
+  const fromEnv = process.env.CORTEX_CLAUDE_BIN;
+  if (fromEnv && fs.existsSync(fromEnv)) return fromEnv;
+  const home = os.homedir();
+  const candidates = [
+    path.join(home, ".local/bin/claude"),
+    path.join(home, ".claude/local/claude"),
+    "/opt/homebrew/bin/claude",
+    "/usr/local/bin/claude",
+  ];
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c)) return c;
+    } catch {
+      /* ignore */
+    }
+  }
+  return "claude"; // dernier recours : laisser le PATH résoudre
+}
 
 /**
  * Pont vers Claude Code en mode headless (`claude -p`).
@@ -48,7 +76,7 @@ export function runClaudeCode(opts: RunOpts): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     let child;
     try {
-      child = spawn("claude", args, { env, cwd: process.cwd() });
+      child = spawn(resolveClaudeBin(), args, { env, cwd: process.cwd() });
     } catch (e: any) {
       return reject(new ClaudeCodeError(String(e?.message ?? e)));
     }
