@@ -42,7 +42,23 @@ Anti-théâtre de productivité : aucune feature « jolie pour rien ». Chaque �
 - `npm run ingest` — (ré)indexe tout le contenu (HTML + PDF) → DB + FTS.
 - `npm run nightly` — avance la répétition espacée + génère un examen ciblant les concepts dus → écrit un `.html` au format des sites exos.
 
-## Deux régimes « nuit »
+## Moteur IA : Claude Code (via abonnement Max), PAS l'API payante
 
-1. **Phase construction (maintenant)** : Claude (moi) construit l'app sur plusieurs runs nocturnes. Continuité assurée par STATE.md + git.
-2. **Phase exploitation (plus tard)** : l'app tourne `npm run nightly` via une routine planifiée → exam frais chaque matin, via l'API.
+Décision (Ben) : pour éviter tout coût API (l'API est facturée séparément du Max),
+**le moteur de génération/analyse = Claude Code (moi)**, pas un appel API in-app.
+
+Workflow « moi = moteur » (zéro coût, via Max) :
+- `npm run exam:brief` → imprime le contexte (faiblesses + concepts dus + style anciens
+  examens + matière) + le schéma JSON. Je lis, je rédige l'examen, j'écris un `.json`.
+- `npm run exam:save -- <fichier.json>` → `persistExam()` : DB + HTML + répétition espacée.
+- `npm run weakness:brief -- <id>` → contexte + chemin du screenshot (je le lis comme image).
+- `npm run weakness:save -- <id> <fichier.json>` → met à jour la faiblesse + recalcule les liens.
+
+La voie API directe (`/api/exams/generate`, `/api/weaknesses/analyze`, Opus 4.8) reste
+en place mais **optionnelle** (payante) ; elles renvoient un message clair si pas de clé.
+
+## Deux régimes
+
+1. **Construction (en cours)** : Claude (moi) construit l'app. Continuité via STATE.md + git.
+2. **Exploitation** : routine planifiée nocturne où je lance `exam:brief`, je rédige,
+   je `exam:save` → un examen frais le matin, sans coût API.

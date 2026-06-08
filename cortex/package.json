@@ -8,6 +8,10 @@
     "start": "next start",
     "lint": "eslint",
     "ingest": "tsx scripts/ingest.ts",
+    "exam:brief": "tsx scripts/exam-brief.ts",
+    "exam:save": "tsx scripts/exam-save.ts",
+    "weakness:brief": "tsx scripts/weakness-brief.ts",
+    "weakness:save": "tsx scripts/weakness-save.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push"
   },

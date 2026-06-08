@@ -232,15 +232,25 @@ export function deleteExam(id: number) {
   }
 }
 
-export async function generateExam(opts: { dry?: boolean } = {}): Promise<{ id: number; url: string }> {
+/** Brief de génération destiné à Claude Code (moi) : tout le contexte + le format JSON attendu. */
+export function buildBrief(): string {
   const ctx = gatherContext();
-  const spec = opts.dry ? stubExam(ctx) : await callClaude(ctx);
+  return [
+    buildPrompt(ctx),
+    ``,
+    `--- FORMAT DE SORTIE ATTENDU ---`,
+    `Écris un fichier JSON valide conforme exactement à ce schéma (clés en anglais, contenu en français) :`,
+    JSON.stringify(EXAM_SCHEMA, null, 2),
+  ].join("\n");
+}
+
+/** Enregistre un examen rédigé (par Claude Code OU par l'API) : DB + HTML + répétition espacée. */
+export function persistExam(spec: ExamSpec): { id: number; url: string } {
+  if (!spec?.questions?.length) throw new Error("ExamSpec vide ou invalide (aucune question).");
 
   const weaknessIds = (sqlite.prepare(`SELECT id FROM weaknesses`).all() as { id: number }[]).map((r) => r.id);
   const id = sqlite
-    .prepare(
-      `INSERT INTO exams (format_template, targeted_weakness_ids, status) VALUES (?,?,?)`
-    )
+    .prepare(`INSERT INTO exams (format_template, targeted_weakness_ids, status) VALUES (?,?,?)`)
     .run("final", JSON.stringify(weaknessIds), "ready").lastInsertRowid as number;
 
   const insQ = sqlite.prepare(
@@ -257,8 +267,14 @@ export async function generateExam(opts: { dry?: boolean } = {}): Promise<{ id: 
   fs.writeFileSync(path.join(EXAM_DIR, fileName), renderExamHtml(spec, id, dateLabel));
   sqlite.prepare(`UPDATE exams SET html_path = ? WHERE id = ?`).run(fileName, id);
 
-  // Avance la répétition espacée sur les concepts couverts + les concepts dus
-  markTested([...spec.questions.map((q) => q.concept), ...ctx.due]);
+  // Avance la répétition espacée : concepts couverts + concepts qui étaient dus
+  markTested([...spec.questions.map((q) => q.concept), ...dueConcepts(6)]);
 
   return { id, url: `/exam/${fileName}` };
+}
+
+/** Voie API directe (optionnelle, payante) : rédige via Claude API puis enregistre. */
+export async function generateExam(opts: { dry?: boolean } = {}): Promise<{ id: number; url: string }> {
+  const spec = opts.dry ? stubExam(gatherContext()) : await callClaude(gatherContext());
+  return persistExam(spec);
 }
