@@ -2,7 +2,6 @@ import { sqlite } from "@/db/client";
 import { anthropic, GEN_MODEL } from "@/lib/anthropic";
 import { extractJson, runClaudeCode } from "@/lib/claude-code";
 import { dueConcepts, markTested } from "@/lib/schedule";
-import { search } from "@/lib/search";
 import { referencePaths } from "@/lib/sources";
 import fs from "node:fs";
 import path from "node:path";
@@ -11,6 +10,7 @@ const EXAM_DIR = path.join(process.cwd(), "data", "exams");
 
 export type ExamQuestion = {
   concept: string;
+  category?: string; // 'Networking' | 'OS' | 'C' | 'Project'
   statement_html: string;
   solution_html: string;
   source_inspiration?: string;
@@ -24,94 +24,92 @@ function trunc(s: string, n: number) {
   return s.length > n ? s.slice(0, n) + " […]" : s;
 }
 
+/** Échantillon diversifié d'items du corpus pour un ou plusieurs types de source. */
+function sampleByType(types: string[], perItem: number, maxItems: number): { src: string; text: string }[] {
+  const ph = types.map(() => "?").join(",");
+  const rows = sqlite
+    .prepare(
+      `SELECT s.title src, i.text text
+       FROM items i JOIN sources s ON s.id = i.source_id
+       WHERE s.type IN (${ph}) AND length(i.text) > 120
+       ORDER BY s.recency_weight DESC, RANDOM() LIMIT ?`
+    )
+    .all(...types, maxItems * 4) as { src: string; text: string }[];
+  const out: { src: string; text: string }[] = [];
+  const perSrc = new Map<string, number>();
+  for (const r of rows) {
+    const n = perSrc.get(r.src) ?? 0;
+    if (n >= 2) continue; // max 2 extraits par source → diversité
+    perSrc.set(r.src, n + 1);
+    out.push({ src: r.src, text: trunc(r.text, perItem) });
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
 function gatherContext() {
+  // Faiblesses : en RETRAIT pour l'instant (légère inflexion seulement).
   const weaknesses = (
     sqlite
-      .prepare(
-        `SELECT topic, description FROM weaknesses ORDER BY severity DESC, datetime(logged_at) DESC LIMIT 8`
-      )
+      .prepare(`SELECT topic, description FROM weaknesses ORDER BY severity DESC, datetime(logged_at) DESC LIMIT 6`)
       .all() as { topic: string; description: string | null }[]
-  ).map((w) => ({ topic: w.topic, note: trunc(w.description ?? "", 600) }));
+  ).map((w) => ({ topic: w.topic, note: trunc(w.description ?? "", 400) }));
 
-  const due = dueConcepts(6);
+  const due = dueConcepts(8);
 
-  // Style = le FORMAT à imiter. Priorité ABSOLUE aux examens que Ben a cochés comme
-  // « références » (cf. page Sources) ; à défaut, repli sur les 2 examens les plus récents.
+  // FORMAT = les vrais finals cochés en référence (priorité absolue). Sinon repli récents.
   const refs = referencePaths();
-  let styleRows: { src: string; text: string; images: string | null }[];
+  let styleRows: { src: string; text: string }[];
   let styleSource: "selected" | "recent";
   if (refs.length) {
-    const placeholders = refs.map(() => "?").join(",");
+    const ph = refs.map(() => "?").join(",");
     styleRows = sqlite
       .prepare(
-        `SELECT s.title src, i.text, i.images FROM items i JOIN sources s ON s.id = i.source_id
-         WHERE s.path IN (${placeholders})
-         ORDER BY s.year DESC, s.recency_weight DESC LIMIT 14`
+        `SELECT s.title src, i.text text FROM items i JOIN sources s ON s.id = i.source_id
+         WHERE s.path IN (${ph}) AND length(i.text) > 120
+         ORDER BY s.year DESC, RANDOM() LIMIT 18`
       )
-      .all(...refs) as { src: string; text: string; images: string | null }[];
+      .all(...refs) as { src: string; text: string }[];
     styleSource = "selected";
   } else {
-    const maxYear =
-      (sqlite
-        .prepare(`SELECT MAX(year) y FROM sources WHERE type IN ('final','midterm') AND year IS NOT NULL`)
-        .get() as { y: number | null }).y ?? 2024;
     styleRows = sqlite
       .prepare(
-        `SELECT s.title src, i.text, i.images FROM items i JOIN sources s ON s.id = i.source_id
-         WHERE s.type IN ('final','midterm') AND s.year >= ?
-         ORDER BY s.year DESC, s.recency_weight DESC LIMIT 8`
+        `SELECT s.title src, i.text text FROM items i JOIN sources s ON s.id = i.source_id
+         WHERE s.type IN ('final','midterm') ORDER BY s.year DESC, RANDOM() LIMIT 12`
       )
-      .all(maxYear - 1) as { src: string; text: string; images: string | null }[];
+      .all() as { src: string; text: string }[];
     styleSource = "recent";
   }
-  const style = styleRows.map((r) => ({ src: r.src, excerpt: trunc(r.text, 2400) }));
-  const styleImages = [
-    ...new Set(
-      styleRows.flatMap((r) => {
-        try {
-          return r.images ? (JSON.parse(r.images) as string[]) : [];
-        } catch {
-          return [];
-        }
-      })
-    ),
-  ];
+  const style = styleRows.map((r) => ({ src: r.src, excerpt: trunc(r.text, 1900) }));
 
-  // Matière de cours pertinente pour les sujets ciblés
-  const seed = [...weaknesses.map((w) => w.topic), ...due].join(" ");
-  const courseItems: { src: string; text: string }[] = [];
-  for (const g of search(seed, 12, "or")) {
-    for (const h of g.hits) {
-      const row = sqlite.prepare(`SELECT text FROM items WHERE id = ?`).get(h.itemId) as
-        | { text: string }
-        | undefined;
-      if (row) courseItems.push({ src: h.sourceTitle, text: trunc(row.text, 500) });
-      if (courseItems.length >= 8) break;
-    }
-    if (courseItems.length >= 8) break;
-  }
+  // CONTENU = tout le corpus, en priorité les séries d'exos + le reste.
+  const exercises = sampleByType(["exercise", "serie"], 650, 12);
+  const reviews = sampleByType(["review"], 360, 10); // reviews de lectures = concepts flagués prof
+  const staff = sampleByType(["note", "doc"], 700, 4); // attendus du staff
+  const cheats = sampleByType(["cheatsheet"], 450, 4);
+  const course = sampleByType(["course_pdf"], 360, 6);
 
-  return { weaknesses, due, style, styleImages, courseItems, styleSource };
+  return { weaknesses, due, style, styleSource, exercises, reviews, staff, cheats, course };
 }
 
 const EXAM_SCHEMA = {
   type: "object",
   properties: {
-    title: { type: "string" },
-    duration_min: { type: "integer", description: "Durée conseillée en minutes (ex. 120)" },
+    title: { type: "string", description: "ex. « CS-202 Computer Systems — Final Exam »" },
+    duration_min: { type: "integer", description: "180 (3 heures)" },
     questions: {
       type: "array",
       items: {
         type: "object",
         properties: {
-          concept: { type: "string" },
-          statement_html: { type: "string", description: "Énoncé en HTML simple (p, ul, code, pre, table)" },
-          solution_html: { type: "string", description: "Corrigé détaillé en HTML simple" },
-          source_inspiration: { type: "string", description: "D'où s'inspire la question (lecture/exam)" },
-          difficulty: { type: "integer", description: "1 à 3" },
-          points: { type: "integer", description: "Barème de la question (ex. 8, 12, 20)" },
+          category: { type: "string", description: "« Networking » | « OS » | « C » | « Project »" },
+          concept: { type: "string", description: "Titre court de l'exercice (ex. « Subnets and packets »)" },
+          statement_html: { type: "string", description: "Énoncé COMPLET avec sous-questions N.M [pts], énumérateurs ➀➁➂, code/tableaux en <pre>. HTML simple." },
+          solution_html: { type: "string", description: "Corrigé détaillé étape par étape, par sous-question." },
+          source_inspiration: { type: "string", description: "D'où vient l'inspiration (final/série/lecture)" },
+          points: { type: "integer", description: "Barème total de l'exercice (ex. 50, 30, 25, 15, 10)" },
         },
-        required: ["concept", "statement_html", "solution_html"],
+        required: ["category", "concept", "statement_html", "solution_html", "points"],
         additionalProperties: false,
       },
     },
@@ -121,38 +119,55 @@ const EXAM_SCHEMA = {
 } as const;
 
 function buildPrompt(ctx: ReturnType<typeof gatherContext>): string {
+  const block = (title: string, items: { src: string; excerpt?: string; text?: string }[]) =>
+    items.length ? [``, title, ...items.map((c) => `• (${c.src}) ${c.excerpt ?? c.text}`)] : [];
   return [
-    `Tu es le professeur du cours Computer Systems (CS202, EPFL). Tu rédiges un NOUVEL examen, inédit — surtout PAS une copie des anciens.`,
-    `Objectif : 4 à 6 questions originales qui (1) ciblent en priorité MES faiblesses, (2) couvrent les concepts à revoir, (3) reproduisent EXACTEMENT le format des 2 examens les plus récents ci-dessous.`,
+    `Tu es l'équipe enseignante de CS-202 Computer Systems à l'EPFL (Argyraki, Kashyap, Chappelier).`,
+    `Tu rédiges le FINAL de l'an prochain : un « Final 2026 » INÉDIT qui doit être INDISCERNABLE d'un vrai final EPFL. Un étudiant qui le voit doit dire « ça aurait pu tomber tel quel ».`,
     ``,
-    `MES FAIBLESSES (à mettre à l'épreuve avec de nouveaux énoncés) :`,
-    ...(ctx.weaknesses.length ? ctx.weaknesses.map((w) => `- ${w.topic}${w.note ? " — " + w.note : ""}`) : ["(aucune enregistrée — couvre alors largement les concepts à revoir)"]),
+    `═══ RÈGLE D'OR : LE FORMAT VIENT EXACTEMENT DES FINALS 2024 & 2025 FOURNIS ═══`,
+    `Structure imposée : 6 exercices indépendants, notés séparément, regroupés par catégorie :`,
+    `  • Networking : 2 exercices (gros, ~50 pts chacun)`,
+    `  • OS : 2 exercices (~25 et ~30 pts)`,
+    `  • C : 1 exercice (~10 pts)`,
+    `  • Project : 1 exercice (~15 pts)`,
+    `Total ≈ 180 points, durée 3 heures (duration_min = 180).`,
+    `Chaque exercice a un thème puis des SOUS-QUESTIONS « N.M – Titre [Y points] » (mets-les en <h4>).`,
+    `À l'intérieur : énumérateurs ➀ ➁ ➂ ➃, listes « On vous donne : » (<ul>), options a) b) c) d), code en <code>/<pre>.`,
     ``,
-    `CONCEPTS À REVOIR (courbe de l'oubli) : ${ctx.due.join(" · ") || "(aucun)"}`,
+    `═══ TYPES DE QUESTIONS : SURTOUT APPLIQUÉ ET QUANTITATIF (PAS de pur « définissez X ») ═══`,
+    `Networking : sous-réseaux & paquets (assigner des préfixes IP de taille minimale, REMPLIR un tableau des paquets/interfaces vus par un routeur), encapsulation (qui ajoute quel header à quelle couche), routage (reconvergence type Bellman-Ford après panne de lien), TCP (séquence/ACK, slow start / congestion control).`,
+    `OS : mémoire virtuelle↔physique (CALCULER à partir de bits VPN/PFN/offset, taille de page, nb d'entrées de page table), accès disque & inodes (COMPTER les blocs lus/écrits par une séquence open/write/lseek/read), ordonnancement (MLFQ, états des processus), syscalls kernel vs user (Vrai/Faux à JUSTIFIER), fork/exec/wait, threads/locks/data races.`,
+    `C : LIRE et TRACER du code C (que vaut le buffer après ces appels ? combien de processus créés ? quelle sortie ?), pointeurs, layout mémoire.`,
+    `Project : question liée aux labs (inode walk / file system / etc.).`,
+    `Chaque exercice doit demander de CALCULER / TRACER / REMPLIR UN TABLEAU / JUSTIFIER, avec des valeurs numériques concrètes et NOUVELLES. Au plus 1 petite sous-question conceptuelle par exercice.`,
     ``,
-    ctx.styleSource === "selected"
-      ? `>>> FORMAT À REPRODUIRE — les examens de RÉFÉRENCE que Ben a sélectionnés (les plus pertinents) <<<`
-      : `>>> FORMAT À REPRODUIRE — UNIQUEMENT les 2 examens les plus récents <<<`,
-    `Calque la FORME CONCRÈTE de ces examens, pas seulement l'esthétique :`,
-    `- la même structure (découpage en Problems / sous-questions a) b) c)…),`,
-    `- les mêmes TYPES de questions (ex. tracer des paquets et remplir un tableau, accès disque inode/data blocks, reconvergence de routage, lecture/raisonnement sur du code C avec fork/pthread…),`,
-    `- les mêmes schémas/diagrammes et tableaux à remplir quand l'original en a (recrée-les en HTML/ASCII, NE recopie PAS les images d'origine),`,
-    `- le même niveau d'exigence. Mais des énoncés et des valeurs NOUVEAUX (pas de copie).`,
+    `═══ LES VRAIS FINALS À IMITER (forme, types, ton, niveau) ═══`,
     ...ctx.style.map((s) => `### ${s.src}\n${s.excerpt}`),
-    ctx.styleImages.length ? `\n(Ces examens comportent des schémas/figures, ex. : ${ctx.styleImages.slice(0, 8).join(", ")} — prévois des schémas équivalents, recréés.)` : ``,
+    ...block(`═══ SÉRIES D'EXERCICES & EXOS (la matière d'entraînement — inspire-toi des mécaniques, pas du copier-coller) ═══`, ctx.exercises),
+    ...block(`═══ REVIEWS DE LECTURES / CONCEPTS FLAGUÉS IMPORTANTS ═══`, ctx.reviews),
+    ...block(`═══ ATTENDUS DU STAFF ═══`, ctx.staff),
+    ...block(`═══ CHEAT SHEETS ═══`, ctx.cheats),
+    ...block(`═══ COURS (slides) ═══`, ctx.course),
     ``,
-    `MATIÈRE DE COURS PERTINENTE (ancre tes questions là-dessus, reste correct) :`,
-    ...ctx.courseItems.map((c) => `- (${c.src}) ${c.text}`),
+    `(léger) Si pertinent, glisse une difficulté sur mes points faibles : ${ctx.weaknesses.length ? ctx.weaknesses.map((w) => w.topic).join(" · ") : "(aucun pour l'instant — couvre alors largement le programme)"}.`,
+    `Concepts à ne pas oublier (révision espacée) : ${ctx.due.join(" · ") || "(aucun)"}.`,
     ``,
-    `Barème : attribue à chaque question un \`points\` réaliste (questions simples ~6-8, moyennes ~10-14, lourdes ~16-22) et une \`duration_min\` cohérente pour l'ensemble (typiquement 120). Le total doit ressembler à un vrai examen (≈ 60-100 points).`,
-    `Consignes : énoncés clairs et autonomes ; corrigés détaillés et pédagogiques (raisonnement étape par étape, pas juste la réponse) ; quand tu fais un tableau ou un schéma, utilise <pre> (ASCII) ou des <ul>/<table> ; HTML simple uniquement (<p>, <ul>, <li>, <code>, <pre>, <table>) ; pas de <script>/<style>. Réponds uniquement avec l'objet JSON demandé.`,
+    `═══ POUR CHAQUE EXERCICE, FOURNIS ═══`,
+    `- category : « Networking » | « OS » | « C » | « Project »`,
+    `- concept : titre court (ex. « Subnets and packets », « Virtual vs physical memory »)`,
+    `- points : barème total de l'exercice`,
+    `- statement_html : énoncé COMPLET, autonome, avec sous-questions <h4>N.M – Titre [Y points]</h4>, énumérateurs ➀➁➂, tableaux/schémas en <pre> ASCII, code en <pre>/<code>. HTML simple uniquement (<p>,<h4>,<ul>,<ol>,<li>,<code>,<pre>,<table>,<strong>,<em>). PAS d'images.`,
+    `- solution_html : corrigé détaillé étape par étape (valeurs, raisonnement, points par sous-question).`,
+    ``,
+    `Rédige en français ; le vocabulaire technique peut rester en anglais (comme dans les vrais examens). Réponds uniquement avec l'objet JSON.`,
   ].join("\n");
 }
 
 async function callClaude(ctx: ReturnType<typeof gatherContext>): Promise<ExamSpec> {
   const stream = anthropic().messages.stream({
     model: GEN_MODEL,
-    max_tokens: 8000,
+    max_tokens: 16000,
     thinking: { type: "adaptive" },
     output_config: { format: { type: "json_schema", schema: EXAM_SCHEMA }, effort: "high" },
     messages: [{ role: "user", content: buildPrompt(ctx) }],
@@ -162,204 +177,273 @@ async function callClaude(ctx: ReturnType<typeof gatherContext>): Promise<ExamSp
   return JSON.parse(text) as ExamSpec;
 }
 
-// Examen factice pour tester le rendu/DB/planning sans clé API.
+// Examen factice pour tester le rendu/DB sans IA.
 function stubExam(ctx: ReturnType<typeof gatherContext>): ExamSpec {
-  const w = ctx.weaknesses[0]?.topic ?? "fork / processus";
-  const due = ctx.due[0] ?? "ordonnancement CPU";
   return {
-    title: "Examen blanc Cortex (dry-run)",
-    duration_min: 120,
+    title: "CS-202 Computer Systems — Final Exam (dry-run)",
+    duration_min: 180,
     questions: [
       {
-        concept: w,
-        difficulty: 3,
-        points: 20,
-        statement_html: `<p>[DRY-RUN] Problème ciblant ta faiblesse : <strong>${w}</strong>.</p><p>Considérez le code C suivant et répondez aux sous-questions (a)–(c). Un vrai énoncé inédit apparaîtra ici une fois ta clé API en place (ou via <code>npm run exam:brief</code> + Claude Code).</p><pre>int main(){ pid_t p = fork(); /* ... */ }</pre>`,
-        solution_html: `<p>Corrigé détaillé, étape par étape, généré à partir du cours et de ta faiblesse.</p>`,
-        source_inspiration: "faiblesse enregistrée",
+        category: "Networking",
+        concept: "Subnets and packets",
+        points: 50,
+        statement_html: `<p>[DRY-RUN] Considérez la topologie suivante (deux AS reliés par des routeurs de bord).</p><h4>1.1 – IP subnets [20 points]</h4><p>➀ Identifiez tous les sous-réseaux. ➁ Parmi les scénarios a)–d), un seul convient : lequel et pourquoi ?</p><h4>1.2 – Packets [30 points]</h4><p>Remplissez le tableau des paquets vus par R3.</p><pre>| Interface | Src IP | Dst IP |\n|-----------|--------|--------|\n|     ?     |   ?    |   ?    |</pre>`,
+        solution_html: `<p>Corrigé détaillé (un vrai énoncé apparaît avec la génération réelle via Max).</p>`,
       },
       {
-        concept: due,
-        difficulty: 2,
-        points: 12,
-        statement_html: `<p>[DRY-RUN] Problème de révision espacée sur : <strong>${due}</strong>. Remplissez le tableau ci-dessous.</p>`,
+        category: "OS",
+        concept: "Virtual vs physical memory",
+        points: 30,
+        statement_html: `<p>[DRY-RUN] Pour chaque scénario, calculez la mémoire physique adressable.</p><h4>3.1 – Memory accesses [12 points]</h4><p>On vous donne : taille de frame 256 octets, VPN 10 bits…</p>`,
         solution_html: `<p>Corrigé étape par étape.</p>`,
-        source_inspiration: "répétition espacée",
       },
     ],
   };
 }
 
-// ---------- Rendu HTML : un vrai papier d'examen EPFL, imprimable en PDF ----------
+// ---------- Rendu HTML : réplique fidèle du papier d'examen EPFL CS-202 ----------
+const CAT_ORDER = ["Networking", "OS", "C", "Project"];
+function catRank(c?: string) {
+  const i = CAT_ORDER.indexOf(c ?? "");
+  return i < 0 ? CAT_ORDER.length : i;
+}
 function questionPoints(q: ExamQuestion): number {
   return q.points ?? [6, 10, 16][Math.max(1, Math.min(3, q.difficulty ?? 2)) - 1];
 }
 
-function renderExamHtml(spec: ExamSpec, id: number, dateLabel: string): string {
-  const total = spec.questions.reduce((s, q) => s + questionPoints(q), 0);
-  const duration = spec.duration_min ?? 120;
+/** Faux QR-code déterministe (esthétique de l'anonymisation EPFL). */
+function qrSvg(seed: number): string {
+  let s = (seed >>> 0) || 1;
+  const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0), s / 4294967296);
+  const N = 21, c = 4;
+  let r = `<rect width="${N * c}" height="${N * c}" fill="#fff"/>`;
+  const finder = (x: number, y: number) => {
+    r += `<rect x="${x * c}" y="${y * c}" width="${7 * c}" height="${7 * c}"/>`;
+    r += `<rect x="${(x + 1) * c}" y="${(y + 1) * c}" width="${5 * c}" height="${5 * c}" fill="#fff"/>`;
+    r += `<rect x="${(x + 2) * c}" y="${(y + 2) * c}" width="${3 * c}" height="${3 * c}"/>`;
+  };
+  finder(0, 0); finder(N - 7, 0); finder(0, N - 7);
+  const inF = (x: number, y: number) => (x < 8 && y < 8) || (x >= N - 8 && y < 8) || (x < 8 && y >= N - 8);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    if (inF(x, y)) continue;
+    if (rnd() > 0.5) r += `<rect x="${x * c}" y="${y * c}" width="${c}" height="${c}"/>`;
+  }
+  return `<svg viewBox="0 0 ${N * c} ${N * c}" xmlns="http://www.w3.org/2000/svg" fill="#000">${r}</svg>`;
+}
 
-  const problems = spec.questions
+function gradingTable(qs: ExamQuestion[]): string {
+  // groupes de catégories consécutives
+  const groups: { cat: string; span: number }[] = [];
+  for (const q of qs) {
+    const cat = q.category ?? "Autre";
+    const last = groups[groups.length - 1];
+    if (last && last.cat === cat) last.span++;
+    else groups.push({ cat, span: 1 });
+  }
+  const total = qs.reduce((s, q) => s + questionPoints(q), 0);
+  const groupCells = groups.map((g) => `<td colspan="${g.span}" class="gt-cat">${g.cat}</td>`).join("");
+  const qCells = qs.map((_, i) => `<td>Question ${i + 1}</td>`).join("");
+  const ptCells = qs.map((q) => `<td>${questionPoints(q)}</td>`).join("");
+  const emptyCells = qs.map(() => `<td></td>`).join("");
+  return `<table class="grading">
+    <tr><td colspan="${qs.length + 1}" class="gt-title">LEAVE THIS EMPTY</td></tr>
+    <tr class="gt-cats">${groupCells}<td rowspan="2" class="gt-total">TOTAL</td></tr>
+    <tr class="gt-q">${qCells}</tr>
+    <tr class="gt-pts">${ptCells}<td>${total}</td></tr>
+    <tr class="gt-blank">${emptyCells}<td></td></tr>
+  </table>`;
+}
+
+function renderExamHtml(spec: ExamSpec, id: number, dateLabel: string): string {
+  const qs = [...spec.questions].sort((a, b) => catRank(a.category) - catRank(b.category));
+  const total = qs.reduce((s, q) => s + questionPoints(q), 0);
+  const duration = spec.duration_min ?? 180;
+  const qr = qrSvg(id * 7919 + 13);
+
+  const problems = qs
     .map((q, i) => {
       const pts = questionPoints(q);
+      const space = Math.min(22, Math.max(9, pts * 0.42)); // espace réponse ∝ barème
       return `
     <section class="problem">
-      <h2 class="problem-h">
-        <span>Problème ${i + 1}</span>
-        <span class="problem-topic">${q.concept}</span>
-        <span class="problem-pts">${pts} pts</span>
-      </h2>
+      <h2 class="q-head">Question ${i + 1} <span class="q-dash">–</span> ${q.concept} <span class="q-pts">[${pts} points]</span></h2>
       <div class="statement">${q.statement_html}</div>
-      <div class="answer">
-        <span class="answer-label">Réponse</span>
-      </div>
+      <p class="ans-label">Answers and justifications:</p>
+      <div class="answer" style="min-height:${space}cm"></div>
     </section>`;
     })
     .join("\n");
 
-  const solutions = spec.questions
-    .map((q, i) => {
-      const pts = questionPoints(q);
-      return `
+  const solutions = qs
+    .map((q, i) => `
     <section class="sol">
-      <h3 class="sol-h">Problème ${i + 1} — ${q.concept} <span class="problem-pts">${pts} pts</span></h3>
+      <h3 class="sol-h">Question ${i + 1} — ${q.concept} <span class="q-pts">[${questionPoints(q)} points]</span></h3>
       <div class="sol-body">${q.solution_html}</div>
       ${q.source_inspiration ? `<p class="sol-src">Inspiré de : ${q.source_inspiration}</p>` : ""}
-    </section>`;
-    })
+    </section>`)
     .join("\n");
 
-  return `<!doctype html><html lang="fr"><head><meta charset="utf-8">
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${spec.title} — CS-202</title>
+<title>${spec.title}</title>
 <style>
-  :root{ --red:#FF0000; --ink:#1a1a1a; --ink2:#555; --line:#d0d0d0; --paper:#fff; }
+  @import url('https://fonts.cdnfonts.com/css/cmu-serif');
+  :root{ --red:#e30613; --ink:#000; --line:#000; }
   *{box-sizing:border-box}
-  html{background:#e9e9ec;}
+  html{background:#d8d8db;}
   body{margin:0;color:var(--ink);
-    font:13.5px/1.5 "Helvetica Neue",Helvetica,Arial,system-ui,sans-serif;}
+    font-family:'CMU Serif','Latin Modern Roman','Times New Roman',Georgia,serif;
+    font-size:12pt;line-height:1.32;}
 
-  /* Barre d'outils (écran uniquement) */
-  .toolbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:14px;
-    padding:10px 18px;background:rgba(255,255,255,.85);backdrop-filter:blur(12px);
-    border-bottom:1px solid var(--line);}
+  /* Barre d'outils (écran seulement) */
+  .toolbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;
+    padding:9px 16px;background:rgba(20,20,22,.92);color:#fff;font-family:system-ui,sans-serif;}
   .toolbar .sp{flex:1}
-  .btn{display:inline-flex;align-items:center;gap:6px;border:none;cursor:pointer;
-    font-size:13px;font-weight:600;padding:8px 16px;border-radius:999px;background:#111;color:#fff;}
-  .toolbar label{font-size:13px;color:var(--ink2);display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+  .btn{display:inline-flex;align-items:center;gap:6px;border:none;cursor:pointer;font-size:13px;
+    font-weight:600;padding:8px 15px;border-radius:999px;background:#fff;color:#111;}
+  .toolbar label{font-size:13px;display:inline-flex;align-items:center;gap:6px;cursor:pointer;opacity:.9}
 
-  /* La feuille A4 */
-  .sheet{background:var(--paper);max-width:21cm;margin:22px auto;padding:2cm 2cm 2.4cm;
-    box-shadow:0 4px 24px rgba(0,0,0,.12);}
+  .epfl{color:var(--red);font-family:Arial,Helvetica,sans-serif;font-weight:800;letter-spacing:-1px;}
 
-  .exam-head{border-bottom:2px solid var(--ink);padding-bottom:12px;margin-bottom:6px;}
-  .exam-head .row{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;}
-  .epfl{font-weight:700;letter-spacing:.02em;font-size:13px;}
-  .epfl .bar{color:var(--red);}
-  .school{color:var(--ink2);font-size:11px;margin-top:2px;}
-  .course-code{text-align:right;font-size:12px;color:var(--ink2);}
-  .course-code b{display:block;color:var(--ink);font-size:15px;letter-spacing:.04em;}
-  h1.title{font-size:20px;margin:18px 0 2px;text-align:center;letter-spacing:-.01em;}
-  .subtitle{text-align:center;color:var(--ink2);font-size:12.5px;margin-bottom:16px;}
+  /* Feuilles A4 */
+  .sheet{background:#fff;width:21cm;min-height:29.7cm;margin:20px auto;padding:1.7cm 1.9cm 2cm;
+    box-shadow:0 3px 18px rgba(0,0,0,.18);position:relative;}
 
-  .candidate{display:flex;gap:24px;margin:14px 0 6px;font-size:12.5px;}
-  .candidate .field{flex:1;border-bottom:1px solid #888;padding-bottom:3px;color:var(--ink2);}
-  .instructions{border:1px solid var(--line);background:#fafafa;border-radius:6px;
-    padding:12px 14px;font-size:12px;color:#333;margin:14px 0 24px;}
-  .instructions b{color:var(--ink)}
-  .instructions ul{margin:6px 0 0;padding-left:18px;}
-  .instructions li{margin:2px 0}
+  /* —— Page de garde —— */
+  .cover-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;
+    border-bottom:1.5px solid var(--ink);padding-bottom:8px;}
+  .cover-head .epfl{font-size:34px;line-height:1;}
+  .inst{font-variant:small-caps;font-size:9.5pt;line-height:1.25;text-align:left;letter-spacing:.02em;}
+  .faculty{font-size:9.5pt;margin:6px 0 0;}
+  .faculty b{font-weight:700;}
+  .cand{display:flex;justify-content:space-between;align-items:flex-start;margin:16px 0 4px;font-size:11pt;}
+  .cand .qr{width:2.6cm;height:2.6cm;}
+  .seat{margin-top:6px;font-weight:700;}
+  .title-block{text-align:center;margin:34px 0 6px;}
+  .title-block .t1{font-size:19pt;font-weight:700;letter-spacing:.02em;}
+  .title-block .t2{font-size:17pt;font-weight:700;margin-top:6px;}
+  .title-block .t3{font-size:12pt;margin-top:6px;}
+  .instr h3{font-size:13pt;margin:26px 0 8px;}
+  .instr ol{margin:0;padding-left:20px;}
+  .instr li{margin:5px 0;}
+  .grading{border-collapse:collapse;width:100%;margin:18px 0 0;text-align:center;font-size:10.5pt;}
+  .grading td{border:1px solid var(--ink);padding:4px 3px;}
+  .gt-title{font-weight:700;letter-spacing:.06em;border:1px solid var(--ink);}
+  .gt-cat,.gt-total{font-weight:700;}
+  .gt-blank td{height:34px;}
 
-  .problem{margin:0 0 22px;page-break-inside:avoid;}
-  .problem-h{display:flex;align-items:baseline;gap:10px;font-size:15px;margin:0 0 8px;
-    border-bottom:1px solid var(--line);padding-bottom:5px;}
-  .problem-h>span:first-child{font-weight:700;}
-  .problem-topic{flex:1;font-weight:400;color:var(--ink2);font-size:13px;}
-  .problem-pts{font-weight:700;font-size:12px;color:var(--ink2);white-space:nowrap;}
-  .statement{font-size:13px;}
-  .statement p{margin:.5em 0}
-  .statement code,.sol-body code{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.9em;
-    background:#f1f1f1;padding:1px 4px;border-radius:3px;}
-  .statement pre,.sol-body pre{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:11.5px;
-    background:#f7f7f7;border:1px solid var(--line);border-radius:5px;padding:10px 12px;overflow:auto;line-height:1.45;}
-  .statement table,.sol-body table{border-collapse:collapse;margin:8px 0;font-size:12px;}
-  .statement th,.statement td,.sol-body th,.sol-body td{border:1px solid #999;padding:4px 9px;text-align:left;}
-  .answer{margin-top:10px;min-height:84px;border:1px dashed #bbb;border-radius:5px;position:relative;
-    background:repeating-linear-gradient(transparent,transparent 27px,#eee 27px,#eee 28px);}
-  .answer-label{position:absolute;top:5px;left:8px;font-size:9.5px;text-transform:uppercase;
-    letter-spacing:.08em;color:#bbb;}
+  /* —— Questions —— */
+  .problem{page-break-before:always;padding-top:4px;}
+  .q-head{font-size:14pt;font-weight:700;margin:0 0 12px;}
+  .q-head .q-dash{font-weight:400;}
+  .q-head .q-pts{font-weight:700;}
+  .statement{font-size:11.5pt;}
+  .statement p{margin:.5em 0;text-align:justify;}
+  .statement h4{font-size:12pt;font-weight:700;margin:16px 0 6px;}
+  .statement ul,.statement ol{margin:.4em 0;padding-left:22px;}
+  .statement li{margin:3px 0;}
+  .statement code,.sol-body code{font-family:'Courier New',monospace;font-size:.93em;}
+  .statement pre,.sol-body pre{font-family:'Courier New',monospace;font-size:10pt;line-height:1.3;
+    border:1px solid var(--ink);padding:8px 10px;overflow:auto;white-space:pre;background:#fff;margin:8px 0;}
+  .statement table,.sol-body table{border-collapse:collapse;margin:8px 0;font-size:10.5pt;}
+  .statement th,.statement td,.sol-body th,.sol-body td{border:1px solid var(--ink);padding:3px 8px;}
+  .ans-label{font-weight:700;margin:14px 0 0;}
+  .answer{border-top:1px solid transparent;}
 
-  /* Corrigé */
-  .solutions{page-break-before:always;border-top:2px solid var(--ink);margin-top:28px;padding-top:14px;}
-  .solutions h2.corr-title{font-size:17px;margin:0 0 4px;}
-  .solutions .corr-note{color:var(--ink2);font-size:12px;margin-bottom:18px;}
-  .sol{margin-bottom:20px;page-break-inside:avoid;}
-  .sol-h{font-size:13.5px;margin:0 0 6px;display:flex;gap:10px;align-items:baseline;border-bottom:1px solid var(--line);padding-bottom:4px;}
-  .sol-h .problem-pts{margin-left:auto}
-  .sol-body{font-size:12.5px;}
-  .sol-src{color:var(--ink2);font-size:11px;font-style:italic;margin-top:8px;}
+  /* —— En-tête / pied récurrents + marge (impression) —— */
+  .runhead,.runfoot,.bindmargin{display:none;}
+  .runfoot .epfl{font-size:15px;}
+  .corner-note{display:none;}
 
-  .foot{margin-top:24px;text-align:center;color:#aaa;font-size:10px;}
-
-  /* Masquage du corrigé (toggle) */
+  /* —— Corrigé —— */
+  .solutions{page-break-before:always;}
+  .solutions .corr-title{font-size:16pt;font-weight:700;border-bottom:1.5px solid var(--ink);padding-bottom:6px;}
+  .solutions .corr-note{font-size:10.5pt;font-style:italic;margin:8px 0 18px;}
+  .sol{margin-bottom:18px;page-break-inside:avoid;}
+  .sol-h{font-size:12.5pt;font-weight:700;border-bottom:1px solid #999;padding-bottom:4px;}
+  .sol-body{font-size:11pt;}
+  .sol-src{font-size:9.5pt;font-style:italic;color:#444;margin-top:6px;}
   body.hide-sol .solutions{display:none;}
 
   @media print{
     html,body{background:#fff;}
     .toolbar{display:none;}
-    .sheet{box-shadow:none;margin:0;max-width:none;padding:0;}
-    .answer{break-inside:avoid;}
+    .sheet{width:auto;min-height:0;margin:0;padding:0;box-shadow:none;}
+    .problem,.solutions{page-break-before:always;}
+    /* en-tête + pied + marge répétés sur chaque page */
+    .runfoot{display:flex;position:fixed;left:1.4cm;right:1.4cm;bottom:0.7cm;
+      align-items:center;justify-content:space-between;border-top:1px solid var(--ink);
+      padding-top:3px;font-size:9.5pt;}
+    .runfoot .mid{text-align:center;font-weight:700;}
+    .bindmargin{display:block;position:fixed;right:0.18cm;top:35%;
+      writing-mode:vertical-rl;transform:rotate(180deg);font-size:9pt;letter-spacing:.05em;}
   }
-  @page{ size:A4; margin:1.6cm; }
+  @page{ size:A4; margin:1.6cm 1.7cm 2.1cm; }
 </style></head>
 <body>
   <div class="toolbar">
     <button class="btn" onclick="window.print()">🖨 Télécharger le PDF</button>
     <label><input type="checkbox" id="tsol" checked onchange="document.body.classList.toggle('hide-sol',!this.checked)"> inclure le corrigé</label>
     <span class="sp"></span>
-    <span style="font-size:12px;color:#888">Cortex · examen #${id}</span>
+    <span style="font-size:12px;opacity:.7">Cortex · examen #${id}</span>
   </div>
 
+  <!-- éléments récurrents (impression) -->
+  <div class="runfoot">
+    <span class="epfl">EPFL</span>
+    <span class="mid">CS-202, Final Exam – IN &amp; SC<br><span style="font-weight:400">${spec.title}</span></span>
+    <span>${dateLabel}</span>
+  </div>
+  <div class="bindmargin">Do NOT write anything here!</div>
+
   <div class="sheet">
-    <div class="exam-head">
-      <div class="row">
-        <div>
-          <div class="epfl">EPFL <span class="bar">·</span> CS-202</div>
-          <div class="school">School of Computer and Communication Sciences</div>
-        </div>
-        <div class="course-code">
-          <b>Computer Systems</b>
-          Examen · ${dateLabel}
-        </div>
+    <!-- PAGE DE GARDE -->
+    <div class="cover-head">
+      <span class="epfl">EPFL</span>
+      <div class="inst">
+        École Polytechnique Fédérale de Lausanne<br>
+        Eidgenössische Technische Hochschule – Lausanne<br>
+        Politecnico Federale – Losanna<br>
+        Swiss Federal Institute of Technology – Lausanne
       </div>
     </div>
+    <p class="faculty"><b>Faculté Informatique et Communications</b><br>CS–202 Computer Systems<br>Argyraki K., Kashyap S. &amp; Chappelier J.-C.</p>
 
-    <h1 class="title">${spec.title}</h1>
-    <div class="subtitle">Durée : ${duration} minutes · Total : ${total} points · ${spec.questions.length} problèmes</div>
-
-    <div class="candidate">
-      <span class="field">Nom, Prénom :</span>
-      <span class="field">SCIPER :</span>
+    <div class="cand">
+      <div>
+        NOM : ______________________ ( ______ )
+        <div class="seat">Seat #: _____</div>
+      </div>
+      <div class="qr">${qr}</div>
     </div>
 
-    <div class="instructions">
-      <b>Consignes.</b>
-      <ul>
-        <li>Documents autorisés : une feuille A4 manuscrite recto-verso. Pas de calculatrice.</li>
-        <li>Justifiez chaque réponse ; une réponse non justifiée ne rapporte aucun point.</li>
-        <li>Répondez dans l'espace prévu sous chaque problème. Le barème est indiqué à droite.</li>
-      </ul>
+    <div class="title-block">
+      <div class="t1">CS–202 COMPUTER SYSTEMS</div>
+      <div class="t2">Final Exam</div>
+      <div class="t3">${dateLabel}</div>
+    </div>
+
+    <div class="instr">
+      <h3>INSTRUCTIONS (please read carefully)</h3>
+      <p><b>IMPORTANT!</b> Please strictly follow these instructions, otherwise your exam may be canceled.</p>
+      <ol>
+        <li>You have three hours to complete this examination.</li>
+        <li>You must <b>use black or dark blue ink</b>, neither pencil nor any other color.</li>
+        <li>This is a closed book exam. Personal notes, four times dual-sided A4 sheets (8 sides in total), allowed. You may not use any personal computer, mobile phone or any other electronic equipment.</li>
+        <li>Answer the questions directly on the exam sheet; only this document will be graded.</li>
+        <li>Carefully and <em>completely</em> read each question so as to do only what we actually ask for.</li>
+        <li>The exam consists of six independent exercises, which can be addressed in any order, but which do not score the same (points are indicated, the total is ${total} points); all exercises count for the final grade.</li>
+      </ol>
+      ${gradingTable(qs)}
     </div>
 
     ${problems}
 
     <div class="solutions">
-      <h2 class="corr-title">Corrigé</h2>
-      <p class="corr-note">Décoche « inclure le corrigé » ci-dessus pour imprimer l'examen seul, puis te corriger ensuite.</p>
+      <div class="corr-title">Corrigé</div>
+      <p class="corr-note">Décoche « inclure le corrigé » en haut pour imprimer l'examen seul, puis te corriger ensuite.</p>
       ${solutions}
     </div>
-
-    <div class="foot">Généré par Cortex à partir de ton corpus CS-202 · examen blanc inédit</div>
   </div>
 </body></html>`;
 }
@@ -461,7 +545,7 @@ export async function generateExamViaClaudeCode(): Promise<{ id: number; url: st
   const text = await runClaudeCode({
     prompt: buildClaudeCodePrompt(gatherContext()),
     model: "opus",
-    timeoutMs: 280_000,
+    timeoutMs: 560_000,
   });
   const spec = extractJson<ExamSpec>(text);
   return persistExam(spec);
