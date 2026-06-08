@@ -1,35 +1,60 @@
 @import "tailwindcss";
 
-/* Design tokens repris des sites de révision existants (reviews.html, index.html) */
+/* ───────────────────────────────────────────────────────────────
+   Cortex — design system (clair, épuré, inspiration Apple)
+   Surfaces blanches, beaucoup d'air, typo système, accent ambré
+   (clin d'œil aux sites de révision) sur fond gris très clair.
+   ─────────────────────────────────────────────────────────────── */
 :root {
-  --color-bg-primary: #1f1e1d;
-  --color-bg-secondary: #2a2927;
-  --color-bg-tertiary: #353330;
-  --color-text-primary: #e8e6df;
-  --color-text-secondary: #a8a59c;
-  --color-text-tertiary: #6e6c66;
-  --color-accent: #c58a4f; /* gold/tan */
-  --color-accent-soft: #6fa8d6; /* bleu */
-  --color-accent-tree: #4fb89b; /* vert */
-  --color-border: #3f3d39;
-  --radius-md: 6px;
-  --radius-lg: 10px;
+  --bg: #f5f5f7; /* gris Apple */
+  --surface: #ffffff;
+  --surface-2: #fbfbfd;
+  --surface-hover: #f0f0f3;
+
+  --ink: #1d1d1f; /* quasi-noir Apple */
+  --ink-2: #56565b;
+  --ink-3: #8a8a8f;
+
+  --line: rgba(0, 0, 0, 0.08);
+  --line-strong: rgba(0, 0, 0, 0.14);
+
+  --accent: #b8743a; /* ambre chaud */
+  --accent-ink: #8a5424; /* ambre foncé (texte sur clair) */
+  --accent-wash: #fbf3ea;
+  --blue: #2f7fd6;
+  --green: #1f9d7a;
+  --red: #d1573a;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.10), 0 4px 12px rgba(0, 0, 0, 0.06);
+
+  --r-sm: 10px;
+  --r: 14px;
+  --r-lg: 20px;
+
+  /* Compat anciens tokens (transition douce, encore référencés ici/là) */
+  --color-bg-primary: var(--bg);
+  --color-bg-secondary: var(--surface);
+  --color-bg-tertiary: var(--surface-2);
+  --color-text-primary: var(--ink);
+  --color-text-secondary: var(--ink-2);
+  --color-text-tertiary: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--blue);
+  --color-accent-tree: var(--green);
+  --color-border: var(--line);
 }
 
 @theme inline {
-  --color-bg: var(--color-bg-primary);
-  --color-bg-2: var(--color-bg-secondary);
-  --color-bg-3: var(--color-bg-tertiary);
-  --color-ink: var(--color-text-primary);
-  --color-ink-2: var(--color-text-secondary);
-  --color-ink-3: var(--color-text-tertiary);
-  --color-accent: var(--color-accent);
-  --color-accent-soft: var(--color-accent-soft);
-  --color-accent-tree: var(--color-accent-tree);
-  --color-line: var(--color-border);
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --font-mono: "SF Mono", Menlo, Monaco, "Courier New", monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, Menlo, Monaco, "Courier New", monospace;
+}
+
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 html {
@@ -37,12 +62,229 @@ html {
 }
 
 body {
-  background: var(--color-bg-primary);
-  color: var(--color-text-primary);
+  background: var(--bg);
+  color: var(--ink);
   font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.011em;
+}
+
+::selection {
+  background: var(--accent-wash);
+  color: var(--accent-ink);
 }
 
 a {
-  color: var(--color-accent-soft);
+  color: var(--blue);
+  text-decoration: none;
+}
+
+/* ── Barre de navigation (frosted, sticky) ─────────────────────── */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 52px;
+  padding: 0 max(20px, calc((100% - 1024px) / 2));
+  background: rgba(245, 245, 247, 0.72);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--line);
+}
+.nav-brand {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+  margin-right: 8px;
+}
+.nav-link {
+  color: var(--ink-2);
+  font-size: 13.5px;
+  font-weight: 450;
+  padding: 6px 11px;
+  border-radius: 8px;
+  transition: background 0.15s, color 0.15s;
+}
+.nav-link:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+.nav-link[data-active="true"] {
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── Conteneur de page ─────────────────────────────────────────── */
+.page {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 48px 24px 96px;
+}
+.page-narrow {
+  max-width: 720px;
+}
+.eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
+.h1 {
+  font-size: 34px;
+  line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+.sub {
+  color: var(--ink-2);
+  font-size: 15px;
+}
+
+/* ── Cartes ────────────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-sm);
+}
+.card-pad {
+  padding: 20px;
+}
+.card-link {
+  display: block;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.18s cubic-bezier(0.2, 0.7, 0.3, 1), box-shadow 0.18s,
+    border-color 0.18s;
+}
+.card-link:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--line-strong);
+}
+
+/* ── Boutons ───────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
+  font-weight: 550;
+  padding: 9px 16px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.15s, background 0.15s,
+    border-color 0.15s, opacity 0.15s;
+  white-space: nowrap;
+}
+.btn:active {
+  transform: scale(0.97);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+.btn-primary:hover:not(:disabled) {
+  background: #a5632e;
+}
+.btn-ghost {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.btn-quiet {
+  background: transparent;
+  color: var(--ink-3);
+  padding: 6px 10px;
+}
+.btn-quiet:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+/* ── Champs ────────────────────────────────────────────────────── */
+.input,
+.textarea {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  font-size: 15px;
+  padding: 11px 14px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--ink-3);
+}
+.input:focus,
+.textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+.textarea {
+  resize: vertical;
+}
+
+/* ── Chips / badges ────────────────────────────────────────────── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-2);
+  background: var(--surface);
+}
+.badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+}
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: none;
+}
+
+mark {
+  background: transparent;
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.muted {
+  color: var(--ink-3);
+}
+.divider {
+  height: 1px;
+  background: var(--line);
+  border: 0;
 }

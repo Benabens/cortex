@@ -12,6 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { extractText, getDocumentProxy } from "unpdf";
 import { ensureFts, sqlite } from "../db/client";
+import { ingestAllRefs } from "../lib/sources";
 import { tokenize } from "../lib/text";
 
 const CONTENT_ROOT = path.resolve(process.cwd(), ".."); // dossier Compsys-claude
@@ -362,6 +363,9 @@ async function main() {
 
   // PDF : hors transaction (async)
   console.log("• PDF cours    :", await ingestPdfs(), "pages");
+
+  // Examens de référence uploadés (data/refs/) : hors transaction (async, parse PDF/HTML)
+  console.log("• refs uploadés:", await ingestAllRefs(), "examen(s) de référence");
 
   // Vocabulaire (pour la recherche tolérante aux fautes)
   console.log("• vocabulaire  :", buildVocab(), "termes");

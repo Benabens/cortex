@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 type Hit = {
@@ -24,13 +23,13 @@ function hitHref(h: Hit, q: string): string {
 type Group = { sourceType: string; label: string; hits: Hit[] };
 
 const ACCENT: Record<string, string> = {
-  review: "var(--color-accent-tree)",
-  course_pdf: "var(--color-accent-soft)",
-  final: "var(--color-accent)",
-  midterm: "var(--color-accent)",
-  serie: "var(--color-accent-soft)",
-  exercise: "var(--color-accent-soft)",
-  cheatsheet: "var(--color-text-secondary)",
+  review: "var(--green)",
+  course_pdf: "var(--blue)",
+  final: "var(--accent)",
+  midterm: "var(--accent)",
+  serie: "var(--blue)",
+  exercise: "var(--blue)",
+  cheatsheet: "var(--ink-3)",
 };
 
 /** Rend le snippet FTS (marqueurs « ») avec surlignage. */
@@ -40,9 +39,7 @@ function Snippet({ text }: { text: string }) {
     <>
       {parts.map((p, i) =>
         p.startsWith("«") && p.endsWith("»") ? (
-          <mark key={i} style={{ background: "transparent", color: "var(--color-accent)", fontWeight: 600 }}>
-            {p.slice(1, -1)}
-          </mark>
+          <mark key={i}>{p.slice(1, -1)}</mark>
         ) : (
           <span key={i}>{p}</span>
         )
@@ -92,58 +89,46 @@ export default function RecherchePage() {
   }, [q]);
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-6 py-10">
-      <div className="mb-6 flex items-center gap-3 text-sm">
-        <Link href="/" style={{ color: "var(--color-text-tertiary)" }}>
-          ← Cortex
-        </Link>
-        <span style={{ color: "var(--color-text-tertiary)" }}>/ Recherche globale</span>
-      </div>
+    <main className="page page-narrow">
+      <header className="mb-6">
+        <p className="eyebrow">Recherche globale</p>
+        <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Cherche partout, d'un coup.</h1>
+      </header>
 
       <input
         ref={inputRef}
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="ex. memory image, fork, TCP, page fault…"
-        className="w-full rounded-lg border px-4 py-3 text-base outline-none"
-        style={{
-          background: "var(--color-bg-secondary)",
-          borderColor: "var(--color-border)",
-          color: "var(--color-text-primary)",
-        }}
+        className="input"
+        style={{ fontSize: 16, padding: "13px 16px" }}
       />
-      <p className="mt-2 h-4 text-xs" style={{ color: "var(--color-text-tertiary)" }}>
-        {loading ? "recherche…" : searched ? `${total} résultat${total > 1 ? "s" : ""} dans tous tes supports` : "Cherche à travers reviews, exos, finals, cheatsheets et slides de cours."}
+      <p className="mt-2.5 h-4 text-[13px]" style={{ color: "var(--ink-3)" }}>
+        {loading ? "recherche…" : searched ? `${total} résultat${total > 1 ? "s" : ""} dans tous tes supports` : "reviews · exos · finals · cheatsheets · slides de cours"}
       </p>
 
-      <div className="mt-6 space-y-8">
+      <div className="mt-7 space-y-8">
         {groups.map((g) => (
           <section key={g.sourceType}>
-            <h2 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--color-text-secondary)" }}>
-              <span className="inline-block h-2 w-2 rounded-full" style={{ background: ACCENT[g.sourceType] ?? "var(--color-text-secondary)" }} />
+            <h2 className="mb-3 flex items-center gap-2 text-[12px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink-2)", letterSpacing: "0.04em" }}>
+              <span className="dot" style={{ background: ACCENT[g.sourceType] ?? "var(--ink-3)" }} />
               {g.label}
-              <span style={{ color: "var(--color-text-tertiary)" }}>· {g.hits.length}</span>
+              <span style={{ color: "var(--ink-3)" }}>· {g.hits.length}</span>
             </h2>
-            <ul className="space-y-2">
+            <ul className="space-y-2.5">
               {g.hits.map((h) => (
                 <li key={h.itemId}>
-                  <a
-                    href={hitHref(h, q)}
-                    target="_blank"
-                    rel="noopener"
-                    className="block rounded-md border px-4 py-3 transition-colors hover:brightness-125"
-                    style={{ borderColor: "var(--color-border)", background: "var(--color-bg-secondary)" }}
-                  >
+                  <a href={hitHref(h, q)} target="_blank" rel="noopener" className="card-link" style={{ padding: "14px 16px", borderRadius: "var(--r)" }}>
                     <div className="flex items-baseline justify-between gap-3">
-                      <span className="truncate text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>
+                      <span className="truncate text-[14px] font-semibold" style={{ color: "var(--ink)" }}>
                         {h.title || h.sourceTitle}
                       </span>
-                      <span className="shrink-0 text-[11px]" style={{ color: "var(--color-text-tertiary)" }}>
+                      <span className="shrink-0 text-[11px]" style={{ color: "var(--ink-3)" }}>
                         {h.lectureId ? h.lectureId.toUpperCase() + " · " : ""}
                         {h.sourceTitle}
                       </span>
                     </div>
-                    <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>
+                    <p className="mt-1.5 text-[13px] leading-relaxed" style={{ color: "var(--ink-2)" }}>
                       <Snippet text={h.snippet} />
                     </p>
                   </a>

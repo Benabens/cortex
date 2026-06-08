@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Related = {
@@ -23,9 +22,9 @@ type Weakness = {
 };
 
 const SEV = [
-  { v: 1, label: "léger", color: "var(--color-accent-tree)" },
-  { v: 2, label: "moyen", color: "var(--color-accent)" },
-  { v: 3, label: "gros", color: "#d9774f" },
+  { v: 1, label: "léger", color: "var(--green)" },
+  { v: 2, label: "moyen", color: "var(--accent)" },
+  { v: 3, label: "gros", color: "var(--red)" },
 ];
 
 export default function FaiblessesPage() {
@@ -126,78 +125,69 @@ export default function FaiblessesPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-6 py-10">
-      <div className="mb-6 flex items-center gap-3 text-sm">
-        <Link href="/" style={{ color: "var(--color-text-tertiary)" }}>← Cortex</Link>
-        <span style={{ color: "var(--color-text-tertiary)" }}>/ Faiblesses</span>
-      </div>
+    <main className="page page-narrow">
+      <header className="mb-6">
+        <p className="eyebrow">Faiblesses</p>
+        <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Tes points faibles, capturés.</h1>
+      </header>
 
       {/* Formulaire d'intake */}
-      <form onSubmit={submit} className="mb-8 rounded-lg border p-4" style={{ borderColor: "var(--color-border)", background: "var(--color-bg-secondary)" }}>
-        <p className="mb-3 text-xs" style={{ color: "var(--color-text-tertiary)" }}>
-          Dépose juste un <strong style={{ color: "var(--color-text-secondary)" }}>screenshot de l'exo</strong> — l'IA comprend tout, pas besoin d'expliquer. Ou écris simplement une note (ex. « j'ai du mal avec le code où il y a des fork / pthread »). Le sujet est optionnel, l'IA le déduit.
+      <form onSubmit={submit} className="card card-pad mb-8">
+        <p className="mb-4 text-[13px] leading-relaxed" style={{ color: "var(--ink-2)" }}>
+          Dépose juste un <strong style={{ color: "var(--ink)" }}>screenshot de l'exo</strong> — l'IA comprend tout, pas besoin d'expliquer. Ou écris une note (ex. « j'ai du mal avec le code fork / pthread »). Le sujet est optionnel.
         </p>
         <input
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
           placeholder="Sujet (optionnel — l'IA le déduit du screenshot)"
-          className="mb-3 w-full rounded-md border px-3 py-2 text-sm outline-none"
-          style={{ background: "var(--color-bg-tertiary)", borderColor: "var(--color-border)", color: "var(--color-text-primary)" }}
+          className="input mb-3"
+          style={{ fontSize: 14 }}
         />
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="Optionnel : ce que tu n'as pas compris…"
           rows={3}
-          className="mb-3 w-full resize-y rounded-md border px-3 py-2 text-sm outline-none"
-          style={{ background: "var(--color-bg-tertiary)", borderColor: "var(--color-border)", color: "var(--color-text-primary)" }}
+          className="textarea mb-3"
+          style={{ fontSize: 14 }}
         />
         <div className="mb-3 flex flex-wrap items-center gap-3">
-          <div className="flex gap-1">
+          <div className="flex gap-1.5">
             {SEV.map((s) => (
               <button
                 key={s.v}
                 type="button"
                 onClick={() => setSeverity(s.v)}
-                className="rounded-md border px-2.5 py-1 text-xs"
+                className="chip"
                 style={{
-                  borderColor: severity === s.v ? s.color : "var(--color-border)",
-                  color: severity === s.v ? s.color : "var(--color-text-secondary)",
-                  background: "transparent",
+                  borderColor: severity === s.v ? s.color : "var(--line-strong)",
+                  color: severity === s.v ? s.color : "var(--ink-2)",
+                  fontWeight: severity === s.v ? 600 : 400,
                 }}
               >
                 {s.label}
               </button>
             ))}
           </div>
-          <label className="cursor-pointer text-xs" style={{ color: "var(--color-text-secondary)" }}>
+          <label className="cursor-pointer">
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => pickFile(e.target.files?.[0] ?? null)} />
-            <span className="rounded-md border px-2.5 py-1" style={{ borderColor: "var(--color-border)" }}>
-              📎 screenshot
-            </span>
+            <span className="chip">📎 screenshot</span>
           </label>
-          <span className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>
-            …ou colle une image (Cmd+V)
-          </span>
+          <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>…ou colle une image (Cmd+V)</span>
         </div>
         {preview && (
-          <img src={preview} alt="aperçu" className="mb-3 max-h-40 rounded-md border" style={{ borderColor: "var(--color-border)" }} />
+          <img src={preview} alt="aperçu" className="mb-3 max-h-40 rounded-lg border" style={{ borderColor: "var(--line)" }} />
         )}
-        <button
-          type="submit"
-          disabled={saving || !canSubmit}
-          className="rounded-md px-4 py-2 text-sm font-medium disabled:opacity-40"
-          style={{ background: "var(--color-accent)", color: "#1f1e1d" }}
-        >
+        <button type="submit" disabled={saving || !canSubmit} className="btn btn-primary">
           {saving ? "Enregistrement…" : "Ajouter la faiblesse"}
         </button>
-        {err && <p className="mt-2 text-xs" style={{ color: "#d9774f" }}>{err}</p>}
+        {err && <p className="mt-2.5 text-[12px]" style={{ color: "var(--red)" }}>{err}</p>}
       </form>
 
       {/* Bandeau : faiblesses à analyser par l'IA */}
       {list.some((w) => !w.analyzed) && (
-        <div className="mb-5 rounded-md border px-4 py-3 text-xs" style={{ borderColor: "var(--color-accent)", background: "var(--color-bg-secondary)", color: "var(--color-text-secondary)" }}>
-          <strong style={{ color: "var(--color-accent)" }}>{list.filter((w) => !w.analyzed).length} faiblesse(s) à analyser.</strong>{" "}
+        <div className="mb-5 rounded-xl px-4 py-3 text-[13px] leading-relaxed" style={{ background: "var(--accent-wash)", color: "var(--ink-2)" }}>
+          <strong style={{ color: "var(--accent-ink)" }}>{list.filter((w) => !w.analyzed).length} faiblesse(s) à analyser.</strong>{" "}
           Dis à Claude Code « <em>analyse mes faiblesses</em> » (gratuit, via ton Max) — il lit tes screenshots et remplit tout. Ou clique ✦ sur une carte (utilise l'API, payant).
         </div>
       )}
@@ -205,44 +195,40 @@ export default function FaiblessesPage() {
       {/* Liste */}
       <div className="space-y-4">
         {list.length === 0 && (
-          <p className="text-sm" style={{ color: "var(--color-text-tertiary)" }}>
+          <p className="text-[14px]" style={{ color: "var(--ink-3)" }}>
             Aucune faiblesse pour l'instant. Ajoute un exo raté ci-dessus.
           </p>
         )}
         {list.map((w) => {
           const sev = SEV.find((s) => s.v === w.severity) ?? SEV[1];
           return (
-            <div key={w.id} className="rounded-lg border p-4" style={{ borderColor: "var(--color-border)", background: "var(--color-bg-secondary)" }}>
+            <div key={w.id} className="card card-pad">
               <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="inline-block h-2 w-2 rounded-full" style={{ background: sev.color }} />
-                  <h3 className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>{w.topic}</h3>
-                  {!w.analyzed && (
-                    <span className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide" style={{ border: "1px solid var(--color-accent)", color: "var(--color-accent)" }}>
-                      à analyser
-                    </span>
-                  )}
+                <div className="flex items-center gap-2.5">
+                  <span className="dot" style={{ background: sev.color }} />
+                  <h3 className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>{w.topic}</h3>
+                  {!w.analyzed && <span className="badge">à analyser</span>}
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <button onClick={() => analyze(w.id)} disabled={analyzing === w.id} className="text-xs disabled:opacity-40" style={{ color: "var(--color-accent-soft)" }}>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button onClick={() => analyze(w.id)} disabled={analyzing === w.id} className="btn btn-quiet" style={{ color: "var(--blue)" }}>
                     {analyzing === w.id ? "analyse…" : "✦ analyser"}
                   </button>
-                  <button onClick={() => remove(w.id)} className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>suppr</button>
+                  <button onClick={() => remove(w.id)} className="btn btn-quiet">suppr</button>
                 </div>
               </div>
               {w.screenshotUrl && (
-                <img src={w.screenshotUrl} alt="" className="mt-3 max-h-56 rounded-md border" style={{ borderColor: "var(--color-border)" }} />
+                <img src={w.screenshotUrl} alt="" className="mt-3 max-h-56 rounded-lg border" style={{ borderColor: "var(--line)" }} />
               )}
               {w.description && (
-                <p className="mt-3 whitespace-pre-wrap text-xs leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>{w.description}</p>
+                <p className="mt-3 whitespace-pre-wrap text-[13px] leading-relaxed" style={{ color: "var(--ink-2)" }}>{w.description}</p>
               )}
               {w.related.length > 0 && (
-                <div className="mt-3">
-                  <div className="mb-1 text-[10px] uppercase tracking-wide" style={{ color: "var(--color-text-tertiary)" }}>À revoir dans ton corpus</div>
+                <div className="mt-4">
+                  <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink-3)" }}>À revoir dans ton corpus</div>
                   <ul className="flex flex-wrap gap-1.5">
                     {w.related.map((r) => (
                       <li key={r.itemId}>
-                        <a href={r.href} target="_blank" rel="noopener" className="inline-block rounded-md border px-2 py-0.5 text-[11px]" style={{ borderColor: "var(--color-border)", color: "var(--color-text-secondary)" }}>
+                        <a href={r.href} target="_blank" rel="noopener" className="chip" style={{ color: "var(--ink-2)" }}>
                           {r.lectureId ? r.lectureId.toUpperCase() + " · " : ""}{(r.title ?? r.sourceTitle).slice(0, 42)}
                         </a>
                       </li>

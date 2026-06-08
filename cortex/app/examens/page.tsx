@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 type Exam = { id: number; createdAt: string; status: string; questionCount: number; url: string | null };
@@ -43,61 +42,51 @@ export default function ExamensPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-6 py-10">
-      <div className="mb-6 flex items-center gap-3 text-sm">
-        <Link href="/" style={{ color: "var(--color-text-tertiary)" }}>← Cortex</Link>
-        <span style={{ color: "var(--color-text-tertiary)" }}>/ Examens générés</span>
-      </div>
+    <main className="page page-narrow">
+      <header className="mb-6">
+        <p className="eyebrow">Examens générés</p>
+        <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Un examen qui aurait pu tomber.</h1>
+      </header>
 
-      <div className="mb-6 rounded-lg border p-5" style={{ borderColor: "var(--color-border)", background: "var(--color-bg-secondary)" }}>
-        <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
-          Un examen <strong style={{ color: "var(--color-text-primary)" }}>inédit</strong>, généré à partir du cours, du format des anciens examens, de tes faiblesses et des concepts à revoir.
+      <div className="card card-pad mb-7">
+        <p className="text-[14px] leading-relaxed" style={{ color: "var(--ink-2)" }}>
+          Un examen <strong style={{ color: "var(--ink)" }}>inédit</strong>, calqué sur le format des vrais examens EPFL récents, ciblé sur tes faiblesses et les concepts à revoir — prêt à imprimer en PDF.
         </p>
         {sched && (
-          <p className="mt-2 text-xs" style={{ color: "var(--color-text-tertiary)" }}>
-            Répétition espacée : <strong style={{ color: "var(--color-accent)" }}>{sched.due}</strong> concept(s) à revoir sur {sched.total}.
+          <p className="mt-2.5 text-[13px]" style={{ color: "var(--ink-3)" }}>
+            Répétition espacée : <strong style={{ color: "var(--accent-ink)" }}>{sched.due}</strong> concept(s) à revoir sur {sched.total}.
           </p>
         )}
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => generate(false)}
-            disabled={busy !== ""}
-            className="rounded-md px-4 py-2 text-sm font-medium disabled:opacity-40"
-            style={{ background: "var(--color-accent)", color: "#1f1e1d" }}
-          >
-            {busy === "real" ? "Génération… (peut prendre 1 min)" : "✦ Générer un examen"}
+          <button onClick={() => generate(false)} disabled={busy !== ""} className="btn btn-primary">
+            {busy === "real" ? "Génération… (~1 min)" : "✦ Générer un examen"}
           </button>
-          <button
-            onClick={() => generate(true)}
-            disabled={busy !== ""}
-            className="text-xs disabled:opacity-40"
-            style={{ color: "var(--color-text-tertiary)" }}
-          >
+          <button onClick={() => generate(true)} disabled={busy !== ""} className="btn btn-quiet">
             {busy === "dry" ? "test…" : "tester le rendu (dry-run, sans clé)"}
           </button>
         </div>
-        {err && <p className="mt-2 text-xs" style={{ color: "#d9774f" }}>{err}</p>}
+        {err && <p className="mt-2.5 text-[12px]" style={{ color: "var(--red)" }}>{err}</p>}
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         {exams.length === 0 && (
-          <p className="text-sm" style={{ color: "var(--color-text-tertiary)" }}>Aucun examen pour l'instant.</p>
+          <p className="text-[14px]" style={{ color: "var(--ink-3)" }}>Aucun examen pour l'instant.</p>
         )}
         {exams.map((e) => (
-          <div key={e.id} className="flex items-center justify-between gap-3 rounded-md border px-4 py-3" style={{ borderColor: "var(--color-border)", background: "var(--color-bg-secondary)" }}>
+          <div key={e.id} className="card flex items-center justify-between gap-3" style={{ padding: "14px 18px" }}>
             <div>
-              <a href={e.url ?? "#"} target="_blank" rel="noopener" className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>
+              <a href={e.url ?? "#"} target="_blank" rel="noopener" className="text-[14px] font-semibold" style={{ color: "var(--ink)" }}>
                 Examen #{e.id}
               </a>
-              <span className="ml-2 text-xs" style={{ color: "var(--color-text-tertiary)" }}>
+              <span className="ml-2 text-[12px]" style={{ color: "var(--ink-3)" }}>
                 {e.questionCount} question(s) · {e.createdAt}
               </span>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1">
               {e.url && (
-                <a href={e.url} target="_blank" rel="noopener" className="text-xs" style={{ color: "var(--color-accent-soft)" }}>ouvrir</a>
+                <a href={e.url} target="_blank" rel="noopener" className="btn btn-quiet" style={{ color: "var(--blue)" }}>ouvrir</a>
               )}
-              <button onClick={() => remove(e.id)} className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>suppr</button>
+              <button onClick={() => remove(e.id)} className="btn btn-quiet">suppr</button>
             </div>
           </div>
         ))}
