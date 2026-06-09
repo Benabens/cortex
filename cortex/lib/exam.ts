@@ -80,13 +80,13 @@ function gatherContext() {
       )
       .all() as { src: string; text: string }[];
   }
-  const style = styleRows.map((r) => ({ src: r.src, excerpt: trunc(r.text, 1900) }));
+  const style = styleRows.slice(0, 12).map((r) => ({ src: r.src, excerpt: trunc(r.text, 1600) }));
 
-  // CONTENU = tout le corpus, en priorité les séries d'exos + le reste.
-  const exercises = sampleByType(["exercise", "serie"], 650, 12);
-  const reviews = sampleByType(["review"], 360, 10);
-  const cheats = sampleByType(["cheatsheet"], 450, 4);
-  const course = sampleByType(["course_pdf"], 360, 6);
+  // CONTENU = tout le corpus, en priorité les séries d'exos + le reste (trimé pour la vitesse).
+  const exercises = sampleByType(["exercise", "serie"], 550, 8);
+  const reviews = sampleByType(["review"], 320, 6);
+  const cheats = sampleByType(["cheatsheet"], 400, 3);
+  const course = sampleByType(["course_pdf"], 320, 4);
 
   return { weaknesses, due, style, exercises, reviews, cheats, course };
 }
@@ -165,7 +165,7 @@ function buildPrompt(ctx: ReturnType<typeof gatherContext>): string {
     ...ctx.style.map((s) => `### ${s.src}\n${s.excerpt}`),
     ``,
     `═══ SCOPE OFFICIEL (Study Guide + hints staff — ne génère QUE sur ces sujets) ═══`,
-    staffNotesText(7000),
+    staffNotesText(5000),
     ...block(`═══ SÉRIES D'EXERCICES & EXOS (matière d'entraînement — inspire-toi des mécaniques) ═══`, ctx.exercises),
     ...block(`═══ REVIEWS DE LECTURES / CONCEPTS FLAGUÉS ═══`, ctx.reviews),
     ...block(`═══ CHEAT SHEETS ═══`, ctx.cheats),
@@ -374,7 +374,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean } = {})
   const text = await runClaudeCode({
     prompt: buildClaudeCodePrompt(gatherContext()),
     model: "opus",
-    timeoutMs: 1_200_000,
+    timeoutMs: 1_500_000,
   });
   let spec = extractJson<ExamSpec>(text);
   let report: VerifyReport | undefined;

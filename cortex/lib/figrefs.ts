@@ -18,13 +18,23 @@ export const FIGURE_REFS: FigRef[] = [
   { type: "C / Labs — lecture de code (2025)", img: "data/refs/figref/code_2025.png", shows: "autre vraie question de code." },
 ];
 
+// Sous-ensemble d'images-étalon pour la GÉNÉRATION (5, pas 8 → plus rapide ; 1 par grand type).
+const GEN_REF_TYPES = [
+  "Networking — topologie",
+  "Networking — TCP",
+  "OS — file system / inodes",
+  "OS — fork & threads (ÉTALON DE PROFONDEUR)",
+  "C / Labs — lecture de code",
+];
+
 /** Bloc à insérer dans le prompt : demande au modèle de REGARDER les vraies pages. */
 export function visionBlock(): string {
+  const refs = FIGURE_REFS.filter((f) => GEN_REF_TYPES.includes(f.type));
   return [
     `═══ ANCRAGE VISUEL — REGARDE D'ABORD CES VRAIES PAGES D'EXAMEN (outil Read) ═══`,
-    `Avant d'écrire quoi que ce soit, OUVRE et OBSERVE ces images (vraies pages de finals EPFL). Calque la RICHESSE des figures, la DENSITÉ, la DIFFICULTÉ et les PIÈGES sur ces exemplaires — produis du NEUF du même niveau, sans recopier :`,
-    ...FIGURE_REFS.map((f) => `  - ${f.img}  →  ${f.type} : ${f.shows}`),
-    `Pour chaque exercice que tu écris, identifie son TYPE et vise le niveau visuel + de difficulté de la page correspondante ci-dessus.`,
+    `Avant d'écrire, OUVRE et OBSERVE ces images (vraies pages de finals EPFL). Calque la RICHESSE des figures, la DENSITÉ, la DIFFICULTÉ et les PIÈGES sur ces exemplaires — produis du NEUF du même niveau, sans recopier :`,
+    ...refs.map((f) => `  - ${f.img}  →  ${f.type} : ${f.shows}`),
+    `Pour chaque exercice, identifie son TYPE et vise le niveau visuel + de difficulté de la page correspondante.`,
   ].join("\n");
 }
 
