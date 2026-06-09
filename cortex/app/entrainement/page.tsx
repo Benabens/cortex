@@ -1,0 +1,169 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+
+type Drill = { concept: string; statement_html: string; hints: string[]; solution_html: string };
+type Check = { verdict: "correct" | "partial" | "wrong"; feedback: string; correct_solution: string };
+
+const VERDICT: Record<string, { label: string; color: string }> = {
+  correct: { label: "Juste ✓", color: "var(--green)" },
+  partial: { label: "Partiel", color: "var(--accent)" },
+  wrong: { label: "Faux", color: "var(--red)" },
+};
+
+export default function EntrainementPage() {
+  // ---- Drilling ----
+  const [due, setDue] = useState<string[]>([]);
+  const [weak, setWeak] = useState<string[]>([]);
+  const [concept, setConcept] = useState("");
+  const [drill, setDrill] = useState<Drill | null>(null);
+  const [shown, setShown] = useState(0);
+  const [showSol, setShowSol] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // ---- Check my solution ----
+  const [statement, setStatement] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [check, setCheck] = useState<Check | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [cerr, setCerr] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const d = await (await fetch("/api/drill")).json();
+      setDue(d.due ?? []);
+      setWeak(d.weaknesses ?? []);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function genDrill(c: string) {
+    if (!c.trim()) return;
+    setBusy(true);
+    setErr(null);
+    setDrill(null);
+    setShown(0);
+    setShowSol(false);
+    try {
+      const r = await fetch("/api/drill", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ concept: c }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(r.status === 503 ? "Claude Code (Max) non joignable — lance l'app sur ta machine connectée." : d.error ?? "Échec");
+      setDrill(d.drill);
+    } catch (e: any) {
+      setErr(String(e.message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runCheck(e: React.FormEvent) {
+    e.preventDefault();
+    if (!statement.trim() || (!answer.trim() && !file)) return;
+    setChecking(true);
+    setCerr(null);
+    setCheck(null);
+    try {
+      const fd = new FormData();
+      fd.set("statement", statement);
+      fd.set("answer", answer);
+      if (file) fd.set("image", file);
+      const r = await fetch("/api/check-solution", { method: "POST", body: fd });
+      const d = await r.json();
+      if (!r.ok) throw new Error(r.status === 503 ? "Claude Code (Max) non joignable — lance l'app sur ta machine connectée." : d.error ?? "Échec");
+      setCheck(d.result);
+    } catch (e: any) {
+      setCerr(String(e.message ?? e));
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <main className="page page-narrow">
+      <header className="mb-6">
+        <p className="eyebrow">Entraînement</p>
+        <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Drille et fais-toi corriger.</h1>
+      </header>
+
+      {/* ---------- Drilling ---------- */}
+      <section className="card card-pad mb-8">
+        <h2 className="text-[15px] font-semibold mb-1" style={{ color: "var(--ink)" }}>Drilling ciblé</h2>
+        <p className="text-[13px] mb-3" style={{ color: "var(--ink-2)" }}>
+          Une question ciblée sur un concept, avec 5 indices révélés un par un (du plus vague au plus précis).
+        </p>
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {[...weak.map((w) => ({ t: w, k: "w" })), ...due.map((d) => ({ t: d, k: "d" }))].slice(0, 14).map((x, i) => (
+            <button key={i} className="chip" onClick={() => { setConcept(x.t); genDrill(x.t); }}
+              style={x.k === "w" ? { borderColor: "var(--accent)", color: "var(--accent-ink)" } : undefined}>
+              {x.t.slice(0, 40)}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input className="input" placeholder="…ou tape un concept (ex. TCP slow start, inode walk)" value={concept} onChange={(e) => setConcept(e.target.value)} style={{ fontSize: 14 }} />
+          <button className="btn btn-primary" disabled={busy} onClick={() => genDrill(concept)}>{busy ? "Génère…" : "✦ Drill"}</button>
+        </div>
+        {err && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>{err}</p>}
+
+        {drill && (
+          <div className="mt-5">
+            <div className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: "var(--ink-3)" }}>{drill.concept}</div>
+            <div className="prose-exam text-[14px]" style={{ color: "var(--ink)" }} dangerouslySetInnerHTML={{ __html: drill.statement_html }} />
+            <div className="mt-4 space-y-2">
+              {drill.hints.slice(0, shown).map((h, i) => (
+                <div key={i} className="rounded-lg px-3 py-2 text-[13px]" style={{ background: "var(--accent-wash)", color: "var(--ink-2)" }}>
+                  <strong style={{ color: "var(--accent-ink)" }}>Indice {i + 1} :</strong> <span dangerouslySetInnerHTML={{ __html: h }} />
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {shown < drill.hints.length && (
+                <button className="btn btn-ghost" onClick={() => setShown(shown + 1)}>💡 Indice suivant ({shown}/{drill.hints.length})</button>
+              )}
+              <button className="btn btn-quiet" style={{ color: "var(--blue)" }} onClick={() => setShowSol(!showSol)}>{showSol ? "cacher le corrigé" : "voir le corrigé"}</button>
+            </div>
+            {showSol && (
+              <div className="mt-3 rounded-lg p-3 text-[13px]" style={{ background: "var(--surface-2)", border: "1px solid var(--line)" }} dangerouslySetInnerHTML={{ __html: drill.solution_html }} />
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* ---------- Check my solution ---------- */}
+      <section className="card card-pad">
+        <h2 className="text-[15px] font-semibold mb-1" style={{ color: "var(--ink)" }}>Vérifie ma solution</h2>
+        <p className="text-[13px] mb-3" style={{ color: "var(--ink-2)" }}>
+          Colle une question + ta réponse (texte ou photo). L'IA la re-résout et te dit où tu te trompes.
+        </p>
+        <form onSubmit={runCheck}>
+          <textarea className="textarea mb-2" rows={3} placeholder="L'énoncé de la question…" value={statement} onChange={(e) => setStatement(e.target.value)} style={{ fontSize: 13 }} />
+          <textarea className="textarea mb-2" rows={3} placeholder="Ta réponse (ou joins une photo ci-dessous)…" value={answer} onChange={(e) => setAnswer(e.target.value)} style={{ fontSize: 13 }} />
+          <div className="flex items-center gap-3 mb-2">
+            <label className="chip cursor-pointer">📎 photo de ta réponse
+              <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+            </label>
+            {file && <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>{file.name}</span>}
+          </div>
+          <button className="btn btn-primary" disabled={checking}>{checking ? "Correction…" : "Vérifier ma réponse"}</button>
+          {cerr && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>{cerr}</p>}
+        </form>
+        {check && (
+          <div className="mt-4">
+            <span className="badge" style={{ background: "transparent", border: `1px solid ${VERDICT[check.verdict]?.color}`, color: VERDICT[check.verdict]?.color }}>
+              {VERDICT[check.verdict]?.label ?? check.verdict}
+            </span>
+            <p className="mt-2 text-[13px] whitespace-pre-wrap" style={{ color: "var(--ink)" }}>{check.feedback}</p>
+            <details className="mt-2">
+              <summary className="text-[12px] cursor-pointer" style={{ color: "var(--blue)" }}>solution correcte</summary>
+              <p className="mt-1 text-[13px] whitespace-pre-wrap" style={{ color: "var(--ink-2)" }}>{check.correct_solution}</p>
+            </details>
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}

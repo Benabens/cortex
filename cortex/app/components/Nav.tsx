@@ -7,6 +7,7 @@ const LINKS = [
   { href: "/recherche", label: "Recherche" },
   { href: "/faiblesses", label: "Faiblesses" },
   { href: "/examens", label: "Examens" },
+  { href: "/entrainement", label: "Entraînement" },
   { href: "/sources", label: "Sources" },
 ];
 

@@ -120,7 +120,7 @@ export function runClaudeCode(opts: RunOpts): Promise<string> {
   });
 }
 
-/** Extrait un objet JSON du texte du modèle (retire prose/balises markdown éventuelles). */
+/** Extrait un objet JSON du texte du modèle (retire prose/balises markdown/virgules traînantes). */
 export function extractJson<T = unknown>(text: string): T {
   let t = text.trim();
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -128,5 +128,11 @@ export function extractJson<T = unknown>(text: string): T {
   const start = t.indexOf("{");
   const end = t.lastIndexOf("}");
   if (start >= 0 && end > start) t = t.slice(start, end + 1);
-  return JSON.parse(t) as T;
+  try {
+    return JSON.parse(t) as T;
+  } catch {
+    // tolère les virgules traînantes (`,]` / `,}`) fréquentes en sortie de modèle
+    const cleaned = t.replace(/,(\s*[}\]])/g, "$1");
+    return JSON.parse(cleaned) as T;
+  }
 }
