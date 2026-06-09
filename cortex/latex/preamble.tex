@@ -1,0 +1,94 @@
+% ============================================================================
+% Préambule « EPFL CS-202 Final Exam » — reconstruit d'après data/refs/final_2025_handout.pdf
+% Utilisé par cortex/lib/exam-latex.ts (le corps du document est injecté après \begin{document}).
+% Compilable avec tectonic OU pdflatex.
+% ============================================================================
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}          % Computer Modern (la police des examens EPFL)
+\usepackage[a4paper,margin=2cm,top=2.5cm,bottom=2.6cm,headheight=2.3cm,headsep=0.45cm,footskip=1.1cm]{geometry}
+\usepackage{fancyhdr}
+\usepackage{graphicx}
+\usepackage[table,dvipsnames]{xcolor}
+\usepackage{pifont}           % énumérateurs entourés
+\usepackage{enumitem}
+\usepackage{listings}         % code
+\usepackage{qrcode}           % QR d'anonymisation
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\usepackage{eso-pic}          % marge « Do NOT write anything here! »
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,shapes.geometric,fit,backgrounds,calc,chains,shapes.misc}
+\usepackage{needspace}
+\usepackage{ragged2e}
+
+\definecolor{epflred}{HTML}{FF0000}
+\definecolor{codebg}{HTML}{FFFFFF}
+
+% ---- Logo EPFL : image officielle si présente, sinon mot-type rouge ----
+\newcommand{\epfllogo}[1][30]{%
+  \IfFileExists{epfl-logo.pdf}{\includegraphics[height=#1pt]{epfl-logo.pdf}}{%
+  \IfFileExists{epfl-logo.png}{\includegraphics[height=#1pt]{epfl-logo.png}}{%
+  {\fontsize{#1}{#1}\selectfont\textsf{\textbf{\textcolor{epflred}{EPFL}}}}}}%
+}
+
+% ---- énumérateurs entourés : \cn{1}=①, \cn{2}=② ... ----
+\newcommand{\cn}[1]{\ding{\numexpr191+#1\relax}}
+
+% ---- en-tête de question : \examq{1}{Subnets and packets}{50} ----
+\newcounter{exq}
+\newcommand{\examq}[3]{%
+  \clearpage\setcounter{exq}{#1}%
+  \needspace{3\baselineskip}%
+  {\large\textbf{Question #1 \quad-- #2 \hfill [#3 points]}}\par\vspace{4pt}\hrule\vspace{10pt}%
+}
+% ---- sous-question : \subq{1.1}{IP subnets}{16} ----
+\newcommand{\subq}[3]{\par\medskip\needspace{3\baselineskip}{\textbf{#1 \quad-- #2 \hfill [#3 points]}}\par\smallskip}
+
+% ---- encadré centré (« This question is FOR ALL STUDENTS. ») ----
+\newcommand{\callout}[1]{\begin{center}\fbox{\large #1}\end{center}\medskip}
+
+% ---- espace réponse ----
+\newcommand{\ansspace}[1]{\par\medskip\noindent\textbf{Answers and justifications:}\par\vspace*{#1}}
+\newcommand{\ansplain}[1]{\par\vspace*{#1}}
+
+% ---- style de code ----
+\lstdefinestyle{exam}{basicstyle=\ttfamily\small,frame=single,framesep=5pt,
+  columns=fullflexible,keepspaces=true,xleftmargin=2pt,breaklines=true,
+  showstringspaces=false,language=C,backgroundcolor=\color{codebg}}
+\lstset{style=exam}
+
+% ---- listes serrées ----
+\setlist[enumerate]{leftmargin=2.1em,itemsep=2pt,topsep=2pt}
+\setlist[itemize]{leftmargin=1.6em,itemsep=2pt,topsep=2pt}
+
+% ---- styles TikZ réutilisables pour les figures (topologies, FS, états, timelines) ----
+\tikzset{
+  rtr/.style={draw,circle,minimum size=20pt,inner sep=1pt,font=\footnotesize,fill=blue!8},
+  host/.style={draw,rectangle,minimum size=16pt,inner sep=1pt,font=\footnotesize,fill=gray!8},
+  sw/.style={draw,rounded corners,minimum width=26pt,minimum height=14pt,inner sep=1pt,font=\scriptsize,fill=gray!5},
+  srv/.style={draw,rectangle,minimum width=16pt,minimum height=22pt,inner sep=1pt,font=\footnotesize,fill=gray!8},
+  lnk/.style={thick},
+  iface/.style={draw,fill=orange!75,rectangle,minimum size=8pt,inner sep=0pt,font=\tiny\bfseries},
+  state/.style={draw,rounded corners,minimum width=46pt,minimum height=20pt,font=\small,fill=blue!6},
+  blk/.style={draw,minimum width=18pt,minimum height=18pt,inner sep=0pt,font=\scriptsize},
+}
+
+% ---- en-tête / pied récurrents ----
+\pagestyle{fancy}\fancyhf{}
+\renewcommand{\headrulewidth}{0.6pt}\renewcommand{\footrulewidth}{0.6pt}
+\fancyhead[L]{\small Question \theexq}
+\fancyhead[C]{\small Anonymisation : \#0000\\[-2pt]p. \thepage}
+\fancyhead[R]{\qrcode[height=1.25cm]{CS-202-FINAL-EXAM}}
+\fancyfoot[L]{\epfllogo[15]}
+\fancyfoot[C]{\small\textbf{CS-202, Final Exam -- IN \& SC}\\[-2pt]\small Argyraki K., Kashyap S. \& Chappelier J.-C.}
+\fancyfoot[R]{\small\FOOTDATE}
+
+% ---- marge verticale « Do NOT write anything here! » sur chaque page ----
+\AddToShipoutPictureFG{\put(\LenToUnit{\dimexpr\paperwidth-0.42cm},\LenToUnit{0.32\paperheight}){\rotatebox{90}{\scriptsize\textsf{Do NOT write anything here!}}}}
+
+% le style de la page de garde (sans en-tête de question)
+\fancypagestyle{cover}{\fancyhf{}\renewcommand{\headrulewidth}{0pt}\renewcommand{\footrulewidth}{0pt}}

@@ -12,5 +12,9 @@ if (!file) {
   process.exit(1);
 }
 const spec = JSON.parse(fs.readFileSync(file, "utf8"));
-const res = persistExam(spec);
-console.log(`✓ Examen #${res.id} enregistré → ${res.url}`);
+persistExam(spec)
+  .then((res) => console.log(`✓ Examen #${res.id} enregistré → ${res.url}`))
+  .catch((e) => {
+    console.error("Échec :", e?.message ?? e);
+    process.exit(1);
+  });
