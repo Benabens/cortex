@@ -127,7 +127,11 @@ export async function ingestRefFile(relPath: string): Promise<number> {
 /** Réingère tous les fichiers de data/refs/ (appelé par scripts/ingest.ts). */
 export async function ingestAllRefs(): Promise<number> {
   if (!fs.existsSync(REFS_DIR)) return 0;
-  const files = fs.readdirSync(REFS_DIR).filter((f) => !f.startsWith("."));
+  // uniquement des FICHIERS d'examen (ignore les sous-dossiers figref/ img/ et les fichiers cachés)
+  const files = fs
+    .readdirSync(REFS_DIR, { withFileTypes: true })
+    .filter((e) => e.isFile() && !e.name.startsWith(".") && /\.(pdf|html?|txt|md)$/i.test(e.name))
+    .map((e) => e.name);
   for (const f of files) await ingestRefFile(`refs/${f}`);
   return files.length;
 }
