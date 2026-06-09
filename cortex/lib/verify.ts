@@ -1,109 +1,152 @@
 import { extractJson, runClaudeCode } from "@/lib/claude-code";
 import { directivesBlock } from "@/lib/directives";
-import { visionBlock } from "@/lib/figrefs";
-import type { ExamSpec } from "@/lib/exam";
+import { refImageFor } from "@/lib/figrefs";
+import type { ExamQuestion, ExamSpec } from "@/lib/exam";
 
 export type VerifyResult = {
-  index: number;
   verdict: "ok" | "wrong" | "ambiguous";
+  my_solution?: string;
   issue?: string;
   corrected_solution_tex?: string;
   violates_exclusion?: boolean;
+  too_easy?: boolean;
 };
+export type ResultRow = { index: number; verdict: string; issue?: string; verified: 1 | 0 | null };
 export type VerifyReport = {
-  results: VerifyResult[];
-  fixed: number; // corrigés remplacés
-  flagged: number; // exos signalés (ambigu / exclusion)
+  results: ResultRow[];
   ok: number;
+  fixed: number;
+  regenerated: number;
+  removed: number;
+  unverified: number;
+  // alias historique (compat persistExam)
+  flagged: number;
 };
 
-const VERIFY_SCHEMA = {
+const ONE_SCHEMA = {
   type: "object",
   properties: {
-    results: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          index: { type: "integer", description: "index de l'exercice (0-based)" },
-          verdict: { type: "string", description: "ok | wrong | ambiguous" },
-          issue: { type: "string", description: "court : ce qui ne va pas (vide si ok)" },
-          corrected_solution_tex: { type: "string", description: "corrigé LaTeX correct, UNIQUEMENT si verdict != ok" },
-          violates_exclusion: { type: "boolean", description: "true si l'énoncé porte sur un sujet EXCLU par les directives" },
-        },
-        required: ["index", "verdict"],
-        additionalProperties: false,
-      },
-    },
+    my_solution: { type: "string", description: "TA solution complète, résolue de zéro (avant de regarder le corrigé proposé)." },
+    verdict: { type: "string", description: "ok | wrong | ambiguous" },
+    issue: { type: "string", description: "Court : ce qui ne va pas / ce qui manque (piège, interaction, nombres). Vide si ok." },
+    corrected_solution_tex: { type: "string", description: "Corrigé LaTeX correct, UNIQUEMENT si verdict=wrong." },
+    violates_exclusion: { type: "boolean", description: "true si l'énoncé porte sur un sujet EXCLU." },
+    too_easy: { type: "boolean", description: "true si, comparé à la vraie page de référence : pas de piège / nombres ronds / faible charge / pas de cas-limite / snippet déconnecté." },
   },
-  required: ["results"],
+  required: ["my_solution", "verdict"],
   additionalProperties: false,
 } as const;
 
-function buildVerifyPrompt(spec: ExamSpec): string {
-  const items = spec.questions
-    .map((q, i) =>
-      [
-        `--- EXERCICE ${i} (index=${i}) — ${q.category ?? ""} — ${q.concept} [${q.points ?? "?"} pts] ---`,
-        `ÉNONCÉ (LaTeX) :`,
-        q.statement_tex,
-        ``,
-        `CORRIGÉ PROPOSÉ (LaTeX) :`,
-        q.solution_tex,
-      ].join("\n")
-    )
-    .join("\n\n");
-  return [
-    `Tu es un assistant (TA) rigoureux de CS-202 Computer Systems (EPFL). Tu CONTRÔLES un examen blanc.`,
+/** Contrôle UN exercice : résolution à l'aveugle (avec la vraie page de réf) PUIS verdict. */
+async function verifyOne(q: ExamQuestion): Promise<VerifyResult | null> {
+  const img = refImageFor(q.category, q.concept);
+  const prompt = [
+    `Tu es un assistant (TA) rigoureux de CS-202 Computer Systems (EPFL). Tu contrôles UN SEUL exercice d'examen blanc.`,
     directivesBlock(),
     ``,
-    visionBlock(),
+    `ÉTAPE 1 — Ouvre la vraie page de référence du MÊME TYPE : ${img} (outil Read). Puis RÉSOUS L'EXERCICE CI-DESSOUS DE ZÉRO, toi-même, rigoureusement (calcule, trace, compte). Écris ta solution complète dans "my_solution". Ne te laisse PAS influencer par le corrigé proposé (tu le verras à l'étape 2).`,
     ``,
-    `Pour CHAQUE exercice ci-dessous :`,
-    `1) RÉSOUS-LE TOI-MÊME DE ZÉRO, en ignorant d'abord le corrigé proposé (calcule les vraies valeurs, trace, compte).`,
-    `2) Compare ensuite ta solution au CORRIGÉ PROPOSÉ. Verdict :`,
-    `   - "ok" : énoncé bien posé, corrigé correct ET difficulté/richesse au niveau des vraies pages.`,
-    `   - "wrong" : le corrigé proposé est FAUX ou incomplet. Donne alors corrected_solution_tex = LE BON corrigé en LaTeX.`,
-    `   - "ambiguous" : énoncé mal posé / non résoluble / ambigu / incohérent avec son barème, OU TROP FACILE (pas de piège, nombres ronds, snippets déconnectés au lieu d'un artefact creusé) par rapport aux vrais exemplaires. Explique dans issue ce qui manque (quel piège ajouter, quelle interaction tester, quels nombres salir).`,
-    `3) Marque violates_exclusion=true si l'énoncé porte sur un sujet EXCLU par les directives ci-dessus.`,
-    `Sois STRICT : un corrigé faux ou un exo trop sage est un problème. Si tu hésites entre ok et wrong, choisis wrong et fournis ta version.`,
-    `corrected_solution_tex doit être du LaTeX compilable (mêmes conventions : \\texttt, $...$, lstlisting, pas de \\section).`,
+    `ÉNONCÉ (LaTeX) :`,
+    q.statement_tex,
     ``,
-    items,
+    `ÉTAPE 2 — Compare maintenant ta solution au CORRIGÉ PROPOSÉ ci-dessous, et donne un verdict honnête :`,
+    `CORRIGÉ PROPOSÉ (LaTeX) :`,
+    q.solution_tex,
     ``,
-    `Réponds UNIQUEMENT avec l'objet JSON conforme au schéma. N'utilise aucun outil, n'écris aucun fichier.`,
-    JSON.stringify(VERIFY_SCHEMA, null, 2),
+    `- "ok" : énoncé bien posé, corrigé proposé correct et complet, ET difficulté/richesse/piège au niveau de la vraie page de référence.`,
+    `- "wrong" : corrigé proposé FAUX ou incomplet → fournis corrected_solution_tex (le BON corrigé en LaTeX).`,
+    `- "ambiguous" : énoncé mal posé / non résoluble / ambigu / incohérent avec son barème.`,
+    `too_easy=true si, COMPARÉ à la vraie page : pas de vrai piège, nombres ronds, faible charge de calcul/bookkeeping, pas de cas-limite/frontière, ou simple snippet déconnecté au lieu d'un artefact creusé. Dans issue, dis QUOI ajouter.`,
+    `violates_exclusion=true si l'énoncé porte sur un sujet EXCLU par les directives.`,
+    `Réponds UNIQUEMENT avec l'objet JSON conforme. N'écris aucun fichier.`,
+    JSON.stringify(ONE_SCHEMA, null, 2),
   ].join("\n");
+  try {
+    const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 340_000 });
+    const r = extractJson<VerifyResult>(text);
+    return r && r.verdict ? r : null;
+  } catch {
+    return null; // fallback honnête : non vérifié (jamais "ok" par défaut)
+  }
 }
 
-/**
- * Re-résout chaque exo indépendamment (via Claude Code / Max), remplace les corrigés faux
- * par la version validée, et signale les énoncés mal posés / hors-scope.
- */
-export async function verifyExam(spec: ExamSpec): Promise<{ spec: ExamSpec; report: VerifyReport }> {
-  const text = await runClaudeCode({
-    prompt: buildVerifyPrompt(spec),
-    model: "opus",
-    timeoutMs: 360_000,
-  });
-  let parsed: { results: VerifyResult[] };
-  try {
-    parsed = extractJson<{ results: VerifyResult[] }>(text);
-  } catch {
-    return { spec, report: { results: [], fixed: 0, flagged: 0, ok: spec.questions.length } };
-  }
-  const results = Array.isArray(parsed.results) ? parsed.results : [];
-  let fixed = 0;
-  let flagged = 0;
-  for (const r of results) {
-    const q = spec.questions[r.index];
-    if (!q) continue;
-    if (r.verdict === "wrong" && r.corrected_solution_tex && r.corrected_solution_tex.length > 10) {
-      q.solution_tex = r.corrected_solution_tex;
-      fixed++;
+async function mapPool<T, R>(items: T[], n: number, fn: (x: T, i: number) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let idx = 0;
+  const worker = async () => {
+    while (idx < items.length) {
+      const i = idx++;
+      out[i] = await fn(items[i], i);
     }
-    if (r.verdict === "ambiguous" || r.violates_exclusion) flagged++;
-  }
-  const ok = results.filter((r) => r.verdict === "ok" && !r.violates_exclusion).length;
-  return { spec, report: { results, fixed, flagged, ok } };
+  };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker));
+  return out;
+}
+
+const isInvalid = (r: VerifyResult | null) =>
+  !!r && (r.verdict === "wrong" || r.verdict === "ambiguous" || !!r.violates_exclusion || !!r.too_easy);
+
+/**
+ * Vérifie CHAQUE exercice à l'aveugle (1 appel/exo, parallélisme borné), puis DURCIT :
+ * un exo faux/ambigu/hors-scope/trop-facile est régénéré (via `regenerate`) + re-vérifié,
+ * jusqu'à N=maxAttempts. S'il reste invalide → retiré. Fallback honnête : jamais de faux "ok".
+ */
+export async function verifyAndHarden(
+  spec: ExamSpec,
+  regenerate: (q: ExamQuestion, diagnostic: string) => Promise<ExamQuestion>,
+  maxAttempts = 2
+): Promise<{ spec: ExamSpec; report: VerifyReport }> {
+  const processed = await mapPool(spec.questions, 3, async (q0) => {
+    let q = q0;
+    let attempts = 0;
+    let res = await verifyOne(q);
+    while (isInvalid(res) && attempts < maxAttempts) {
+      const r = res!;
+      const diag = [
+        r.issue ?? "",
+        r.too_easy ? "TROP FACILE vs la vraie page de référence : ajoute un VRAI piège (cas-limite / multi-saut / frontière direct-indirect / égalité longest-prefix), augmente la charge de calcul, et utilise des NOMBRES NON RONDS." : "",
+        r.violates_exclusion ? "HORS-SCOPE : remplace par un sujet AUTORISÉ par les directives." : "",
+        r.verdict === "ambiguous" ? "ÉNONCÉ MAL POSÉ : rends-le résoluble et non ambigu, cohérent avec son barème." : "",
+      ].filter(Boolean).join(" ");
+      let ng: ExamQuestion | null = null;
+      try { ng = await regenerate(q, diag); } catch { ng = null; }
+      if (!ng) break;
+      q = ng;
+      attempts++;
+      res = await verifyOne(q);
+    }
+    let verified: 1 | 0 | null;
+    let dropped = false;
+    let fixedSol = false;
+    if (!res) verified = null;
+    else if (res.verdict === "ok" && !res.violates_exclusion && !res.too_easy) verified = 1;
+    else if (res.verdict === "wrong" && res.corrected_solution_tex && res.corrected_solution_tex.length > 10) {
+      q.solution_tex = res.corrected_solution_tex;
+      verified = 1;
+      fixedSol = true;
+    } else {
+      dropped = true;
+      verified = 0;
+    }
+    return { q, res, verified, dropped, regenerated: attempts > 0, fixedSol };
+  });
+
+  const kept = processed.filter((p) => !p.dropped);
+  const finalSpec: ExamSpec = { ...spec, questions: kept.map((p) => p.q) };
+  const results: ResultRow[] = kept.map((p, i) => ({
+    index: i,
+    verdict: p.res?.verdict ?? "unverified",
+    issue: p.res?.issue,
+    verified: p.verified,
+  }));
+  const report: VerifyReport = {
+    results,
+    ok: processed.filter((p) => p.verified === 1 && !p.fixedSol && !p.regenerated).length,
+    fixed: processed.filter((p) => p.fixedSol).length,
+    regenerated: processed.filter((p) => p.regenerated && !p.dropped).length,
+    removed: processed.filter((p) => p.dropped).length,
+    unverified: processed.filter((p) => p.verified === null).length,
+    flagged: processed.filter((p) => p.dropped || p.verified === null).length,
+  };
+  return { spec: finalSpec, report };
 }

@@ -3,10 +3,10 @@ import { anthropic, GEN_MODEL } from "@/lib/anthropic";
 import { extractJson, runClaudeCode } from "@/lib/claude-code";
 import { directivesBlock, staffNotesText } from "@/lib/directives";
 import { buildExamArtifact } from "@/lib/exam-latex";
-import { visionBlock } from "@/lib/figrefs";
+import { refImageFor, visionBlock } from "@/lib/figrefs";
 import { dueConcepts, markTested } from "@/lib/schedule";
 import { referencePaths } from "@/lib/sources";
-import { verifyExam, type VerifyReport } from "@/lib/verify";
+import { verifyAndHarden, type VerifyReport } from "@/lib/verify";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -151,7 +151,7 @@ function buildPrompt(ctx: ReturnType<typeof gatherContext>): string {
     `═══ STRUCTURE (calquée sur le Final 2025) ═══`,
     `6 exercices indépendants, notés séparément, regroupés : Networking (2, ~50 pts), OS (2, ~25 et ~30 pts), C (1, ~10 pts), Labs (1, ~15 pts). Total ≈ 180 pts, 3 h.`,
     `PRINCIPE (cf. directives) : chaque grosse question (≥25 pts) = UN artefact unique (programme/topologie/FS+programme/trace) creusé par 5-7 sous-questions \\subq{N.M}{...}{pts} EN ESCALIER (difficulté croissante), qui testent les INTERACTIONS entre concepts, avec AU MOINS UN VRAI PIÈGE et des nombres NON RONDS. Profondeur > largeur. Modèle de profondeur = Final 2024 Q3 (regarde son image).`,
-    `Archétypes (en respectant les EXCLUSIONS) : Networking = topologie riche (utilise une figure type Figure 1 : routeurs/switches/clusters/coûts roses/débits verts/interfaces orange/« Rest of the Internet ») + sous-réseaux & paquets (préfixes en PETIT, tableau des paquets/interfaces vus par un routeur), routage Dijkstra/Bellman-Ford, TCP (diagramme en échelle \\tcpladder : SEQ/ACK/cwnd/ssthresh/état + handshake, slow start, Tahoe/Reno, fast recovery), forwarding/longest-prefix, ARP, délais bout-en-bout (multi-saut, bottleneck). OS = accès disque & inodes (compter blocs par open/lseek/read/write, multi-level indexing, frontière direct/indirect), CPU scheduling (FIFO/SJF/STCF/RR/MLFQ, turnaround/response), états de processus, fork/exec/wait/waitpid (arbre de processus), kernel vs user (V/F à justifier). C = LIRE du code lab-style, reconnaître syscalls/fork/exec/wait/file descriptors (jamais écrire/débugger). Labs = lecture/compréhension de code des labs (client-serveur get_file/send_file/socket_layer, filesystem direntv6, multi-threading) — PAS « DKVS ».`,
+    `Archétypes (en respectant les EXCLUSIONS) : Networking = TOPOLOGIE DENSE au niveau de la Figure 1 réelle (regarde data/refs/figref/topo_2024.png) : DEUX Autonomous Systems (AS1/AS2) avec un border router chacun, ~4 routeurs au total, 2-4 switches L2, PLUSIEURS clusters d'end-systems étiquetés (A1…A150, B1…B100, C1…C100, D1…D10), un serveur DNS (root/authoritative) ET un serveur web nommés, un cloud « Rest of the Internet ». COÛTS roses ET DÉBITS verts sur CHAQUE lien ; interfaces orange nommées sur CHAQUE port de routeur. Layout propre et lisible (dense mais pas fouillis), pleine largeur, légende « Figure 1 ». Sur cette topologie : sous-réseaux & paquets (préfixes en PETIT, tableau des paquets/interfaces vus par un routeur), routage Dijkstra/Bellman-Ford, TCP (\\tcpladder : SEQ/ACK/cwnd/ssthresh/état + handshake, slow start, Tahoe/Reno, fast recovery), forwarding/longest-prefix (avec égalité piège), ARP, délais bout-en-bout (multi-saut, bottleneck). OS = accès disque & inodes (compter blocs par open/lseek/read/write, multi-level indexing, frontière direct/indirect piège), CPU scheduling (FIFO/SJF/STCF/RR/MLFQ, turnaround/response), états de processus, fork/exec/wait/waitpid (arbre de processus), kernel vs user (V/F à justifier). C = LIRE du code lab-style, reconnaître syscalls/fork/exec/wait/file descriptors (jamais écrire/débugger). Labs = lecture/compréhension de code des labs (client-serveur get_file/send_file/socket_layer, filesystem direntv6, multi-threading) — PAS « DKVS ».`,
     ``,
     `═══ LES VRAIS FINALS À IMITER (forme, types, ton, niveau, MISE EN PAGE) ═══`,
     ...ctx.style.map((s) => `### ${s.src}\n${s.excerpt}`),
@@ -294,7 +294,7 @@ export async function persistExam(spec: ExamSpec, report?: VerifyReport): Promis
   );
   spec.questions.forEach((q, i) => {
     const r = report?.results?.find((x) => x.index === i);
-    const verified = r ? (r.verdict === "ok" && !r.violates_exclusion ? 1 : 0) : null;
+    const verified = r ? r.verified : null;
     insQ.run(id, q.concept, q.statement_tex, q.solution_tex, q.source_inspiration ?? null, verified, r?.issue ?? null);
   });
 
@@ -303,7 +303,7 @@ export async function persistExam(spec: ExamSpec, report?: VerifyReport): Promis
   sqlite.prepare(`UPDATE exams SET html_path = ? WHERE id = ?`).run(file, id);
   if (report) {
     sqlite.prepare(`UPDATE exams SET verify_summary = ? WHERE id = ?`)
-      .run(`ok=${report.ok} corrigés=${report.fixed} signalés=${report.flagged}`, id);
+      .run(`ok=${report.ok} corrigés=${report.fixed} durcis=${report.regenerated} retirés=${report.removed} non-vérifiés=${report.unverified}`, id);
   }
 
   markTested([...spec.questions.map((q) => q.concept), ...dueConcepts(6)]);
@@ -328,7 +328,41 @@ function buildClaudeCodePrompt(ctx: ReturnType<typeof gatherContext>): string {
   ].join("\n");
 }
 
-/** Voie gratuite (abonnement Max) : rédige via Claude Code, VÉRIFIE chaque exo, puis compile le PDF. */
+const ONE_EX_SCHEMA = {
+  type: "object",
+  properties: {
+    category: { type: "string" },
+    concept: { type: "string" },
+    statement_tex: { type: "string" },
+    solution_tex: { type: "string" },
+    points: { type: "integer" },
+  },
+  required: ["category", "concept", "statement_tex", "solution_tex", "points"],
+  additionalProperties: false,
+} as const;
+
+/** Régénère UN exercice ciblé (même catégorie/barème) en corrigeant le diagnostic — boucle de durcissement. */
+export async function regenerateExercise(q: ExamQuestion, diagnostic: string): Promise<ExamQuestion> {
+  const prompt = [
+    directivesBlock(),
+    ``,
+    `Regarde la vraie page de référence du même type : ${refImageFor(q.category, q.concept)} (outil Read), pour viser sa richesse/difficulté.`,
+    ``,
+    `Régénère UN SEUL exercice de Final CS-202 EN ANGLAIS, catégorie « ${q.category} », concept proche de « ${q.concept} », barème ${q.points} points.`,
+    `La version précédente a ce PROBLÈME à corriger : ${diagnostic}`,
+    `Applique le PRINCIPE DE CONSTRUCTION : UN artefact concret creusé par des sous-questions \\subq{N.M}{...}{pts} en escalier qui testent les INTERACTIONS, avec AU MOINS UN VRAI PIÈGE et des NOMBRES NON RONDS, au niveau de la vraie page.`,
+    ``,
+    LATEX_CONTRACT,
+    ``,
+    `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points}. statement_tex/solution_tex en LaTeX. Aucun fichier.`,
+    JSON.stringify(ONE_EX_SCHEMA, null, 2),
+  ].join("\n");
+  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 420_000 });
+  const r = extractJson<ExamQuestion>(text);
+  return { ...r, category: q.category, points: q.points };
+}
+
+/** Voie gratuite (abonnement Max) : rédige via Claude Code, VÉRIFIE+DURCIT chaque exo, puis compile le PDF. */
 export async function generateExamViaClaudeCode(opts: { verify?: boolean } = {}): Promise<{ id: number; url: string }> {
   const text = await runClaudeCode({
     prompt: buildClaudeCodePrompt(gatherContext()),
@@ -339,7 +373,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean } = {})
   let report: VerifyReport | undefined;
   if (opts.verify !== false) {
     try {
-      const v = await verifyExam(spec);
+      const v = await verifyAndHarden(spec, regenerateExercise);
       spec = v.spec;
       report = v.report;
     } catch (e) {

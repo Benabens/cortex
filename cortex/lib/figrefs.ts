@@ -32,3 +32,15 @@ export function visionBlock(): string {
 export function verifyVisionImages(): string[] {
   return FIGURE_REFS.map((f) => f.img);
 }
+
+/** Image de la vraie page-étalon du même type qu'un exercice (pour vérif/régénération ciblées). */
+export function refImageFor(category?: string, concept?: string): string {
+  const c = `${category ?? ""} ${concept ?? ""}`.toLowerCase();
+  if (/tcp|congestion|reno|tahoe|slow start|seq|ack|throughput/.test(c)) return "data/refs/figref/tcp_2024.png";
+  if (/topolog|subnet|forward|packet|routing|prefix|\barp\b|delay|bellman|dijkstra/.test(c)) return "data/refs/figref/topo_2024.png";
+  if (/schedul|mlfq|round robin|turnaround/.test(c)) return "data/refs/figref/scheduling_2024.png";
+  if (/fork|thread|process|race|exec|wait/.test(c)) return "data/refs/figref/fork_threads_2024.png";
+  if (/inode|disk|file system|filesystem|block|offset|index/.test(c)) return "data/refs/figref/filesystem_2024.png";
+  if (/lab|code|socket|client|server|direntv6|syscall/.test(c)) return "data/refs/figref/code_2024.png";
+  return "data/refs/figref/topo_2024.png";
+}
