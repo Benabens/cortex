@@ -5,6 +5,7 @@ import { directivesBlock, staffNotesText } from "@/lib/directives";
 import { buildExamArtifact } from "@/lib/exam-latex";
 import { dueConcepts, markTested } from "@/lib/schedule";
 import { referencePaths } from "@/lib/sources";
+import { verifyExam, type VerifyReport } from "@/lib/verify";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -213,9 +214,14 @@ export function listExams() {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS exams (
     id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT DEFAULT (datetime('now')),
     format_template TEXT, targeted_weakness_ids TEXT, html_path TEXT, status TEXT DEFAULT 'draft');`);
+  let verifyCol = "NULL";
+  try {
+    if ((sqlite.prepare(`PRAGMA table_info(exams)`).all() as { name: string }[]).some((c) => c.name === "verify_summary"))
+      verifyCol = "e.verify_summary";
+  } catch {}
   const rows = sqlite
     .prepare(
-      `SELECT e.id, e.created_at, e.status, e.html_path,
+      `SELECT e.id, e.created_at, e.status, e.html_path, ${verifyCol} verify_summary,
               (SELECT count(*) FROM exam_questions q WHERE q.exam_id = e.id) nq
        FROM exams e ORDER BY datetime(e.created_at) DESC, e.id DESC`
     )
@@ -225,6 +231,7 @@ export function listExams() {
     createdAt: r.created_at,
     status: r.status,
     questionCount: r.nq,
+    verifySummary: r.verify_summary ?? null,
     url: r.html_path ? `/exam/${path.basename(r.html_path)}` : null,
   }));
 }
@@ -256,9 +263,18 @@ export function buildBrief(): string {
   ].join("\n");
 }
 
+function ensureExamCols() {
+  const has = (t: string, c: string) =>
+    (sqlite.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).some((r) => r.name === c);
+  try { if (!has("exam_questions", "verified")) sqlite.exec(`ALTER TABLE exam_questions ADD COLUMN verified INTEGER`); } catch {}
+  try { if (!has("exam_questions", "verify_issue")) sqlite.exec(`ALTER TABLE exam_questions ADD COLUMN verify_issue TEXT`); } catch {}
+  try { if (!has("exams", "verify_summary")) sqlite.exec(`ALTER TABLE exams ADD COLUMN verify_summary TEXT`); } catch {}
+}
+
 /** Enregistre un examen rédigé : DB + artefact (PDF LaTeX, sinon HTML) + répétition espacée. */
-export async function persistExam(spec: ExamSpec): Promise<{ id: number; url: string }> {
+export async function persistExam(spec: ExamSpec, report?: VerifyReport): Promise<{ id: number; url: string }> {
   if (!spec?.questions?.length) throw new Error("ExamSpec vide ou invalide (aucune question).");
+  ensureExamCols();
 
   const weaknessIds = (sqlite.prepare(`SELECT id FROM weaknesses`).all() as { id: number }[]).map((r) => r.id);
   const id = sqlite
@@ -266,16 +282,22 @@ export async function persistExam(spec: ExamSpec): Promise<{ id: number; url: st
     .run("final", JSON.stringify(weaknessIds), "ready").lastInsertRowid as number;
 
   const insQ = sqlite.prepare(
-    `INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration)
-     VALUES (?,?,?,?,?)`
+    `INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration, verified, verify_issue)
+     VALUES (?,?,?,?,?,?,?)`
   );
-  for (const q of spec.questions) {
-    insQ.run(id, q.concept, q.statement_tex, q.solution_tex, q.source_inspiration ?? null);
-  }
+  spec.questions.forEach((q, i) => {
+    const r = report?.results?.find((x) => x.index === i);
+    const verified = r ? (r.verdict === "ok" && !r.violates_exclusion ? 1 : 0) : null;
+    insQ.run(id, q.concept, q.statement_tex, q.solution_tex, q.source_inspiration ?? null, verified, r?.issue ?? null);
+  });
 
   const dateLabel = (sqlite.prepare(`SELECT date('now') d`).get() as any).d;
   const { file } = await buildExamArtifact(spec, id, dateLabel);
   sqlite.prepare(`UPDATE exams SET html_path = ? WHERE id = ?`).run(file, id);
+  if (report) {
+    sqlite.prepare(`UPDATE exams SET verify_summary = ? WHERE id = ?`)
+      .run(`ok=${report.ok} corrigés=${report.fixed} signalés=${report.flagged}`, id);
+  }
 
   markTested([...spec.questions.map((q) => q.concept), ...dueConcepts(6)]);
   return { id, url: `/exam/${file}` };
@@ -299,13 +321,23 @@ function buildClaudeCodePrompt(ctx: ReturnType<typeof gatherContext>): string {
   ].join("\n");
 }
 
-/** Voie gratuite (abonnement Max) : rédige via Claude Code puis compile le PDF. */
-export async function generateExamViaClaudeCode(): Promise<{ id: number; url: string }> {
+/** Voie gratuite (abonnement Max) : rédige via Claude Code, VÉRIFIE chaque exo, puis compile le PDF. */
+export async function generateExamViaClaudeCode(opts: { verify?: boolean } = {}): Promise<{ id: number; url: string }> {
   const text = await runClaudeCode({
     prompt: buildClaudeCodePrompt(gatherContext()),
     model: "opus",
     timeoutMs: 560_000,
   });
-  const spec = extractJson<ExamSpec>(text);
-  return persistExam(spec);
+  let spec = extractJson<ExamSpec>(text);
+  let report: VerifyReport | undefined;
+  if (opts.verify !== false) {
+    try {
+      const v = await verifyExam(spec);
+      spec = v.spec;
+      report = v.report;
+    } catch (e) {
+      console.error("[verify] échec, examen conservé non vérifié :", (e as Error).message);
+    }
+  }
+  return persistExam(spec, report);
 }
