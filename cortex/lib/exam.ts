@@ -3,6 +3,7 @@ import { anthropic, GEN_MODEL } from "@/lib/anthropic";
 import { extractJson, runClaudeCode } from "@/lib/claude-code";
 import { directivesBlock, staffNotesText } from "@/lib/directives";
 import { buildExamArtifact } from "@/lib/exam-latex";
+import { visionBlock } from "@/lib/figrefs";
 import { dueConcepts, markTested } from "@/lib/schedule";
 import { referencePaths } from "@/lib/sources";
 import { verifyExam, type VerifyReport } from "@/lib/verify";
@@ -128,7 +129,11 @@ const LATEX_CONTRACT = [
   `  - Code inline : \\texttt{find\\_all()} ; bloc de code : \\begin{lstlisting}[language=C] ... \\end{lstlisting}.`,
   `  - Variables/maths en italique : $R_1$, $A_{100}$, $C_{1000}$, $2^{16}$.`,
   `  - Tableaux À REMPLIR : \\begin{tabular}{|l|c|c|}\\hline ... \\\\\\hline \\end{tabular} avec des \\rule{2.5cm}{0.4pt} pour les cases vides.`,
-  `  - FIGURES = vraies figures TikZ (PAS d'ASCII), au moins une là où c'est pertinent : topologie réseau (styles rtr/host/sw/srv/iface), inode walk / blocs FS (style blk), diagramme d'états de processus (style state), timeline SEQ/ACK. Mets-les dans \\begin{center}\\begin{tikzpicture}[node distance=1.2cm] ... \\end{tikzpicture}\\end{center}. Reproduis le style visuel des vrais énoncés CompNet.`,
+  `  - FIGURES = vraies figures TikZ RICHES (PAS d'ASCII), PLEINE LARGEUR, centrées, avec une légende numérotée — au niveau des images de référence que tu as regardées :`,
+  `      • TCP : utilise la macro \\tcpladder{D_1}{A_1}{5 Kbytes}{1 MSS}{$\\infty$}{7} (diagramme en échelle scaffoldé : colonnes + handshake + espace à remplir).`,
+  `      • Topologie réseau : compose avec les styles rtr/host/sw/srv/iface + helpers \\cost{10} (coûts roses), \\rate{1G} (débits verts), node[cloudnode]{Rest of the\\\\Internet}. Vise la densité de la Figure 1 (routeurs/switches/clusters d'end-systems étiquetés/interfaces nommées).`,
+  `      • OS : inode + direct/indirect/double-indirect → data blocks (style blk) ; arbre de processus fork/exec ; Gantt + table d'états pour le scheduling.`,
+  `    Mets chaque figure dans \\begin{center}\\begin{tikzpicture}[node distance=1.2cm] ... \\end{tikzpicture}\\end{center}\\figcaption{Figure N: ...}. La géométrie doit être propre et lisible.`,
   `RÈGLES DE COMPILATION (impératif) : échappe \\% \\& \\# \\_ dans le texte courant ; équilibre toutes les accolades et environnements ; pas de markdown ; pas d'images externes ; LaTeX qui COMPILE du premier coup.`,
 ].join("\n");
 
@@ -138,13 +143,15 @@ function buildPrompt(ctx: ReturnType<typeof gatherContext>): string {
   return [
     directivesBlock(),
     ``,
+    visionBlock(),
+    ``,
     `Tu es l'équipe enseignante de CS-202 Computer Systems à l'EPFL (Argyraki, Kashyap, Chappelier).`,
-    `Tu rédiges le FINAL de l'an prochain : un « Final 2026 » INÉDIT qui doit être INDISCERNABLE d'un vrai final EPFL (« ça aurait pu tomber tel quel »). Les CONTRAINTES DURES ci-dessus priment sur tout.`,
+    `Tu rédiges le FINAL de l'an prochain : un « Final 2026 » INÉDIT, EN ANGLAIS, qui doit être INDISCERNABLE d'un vrai final EPFL (« ça aurait pu tomber tel quel »). Les CONTRAINTES DURES + l'ANCRAGE VISUEL ci-dessus priment sur tout.`,
     ``,
     `═══ STRUCTURE (calquée sur le Final 2025) ═══`,
-    `6 exercices indépendants, notés séparément, regroupés : Networking (2, ~50 pts), OS (2, ~25 et ~30 pts), C (1, ~10 pts), Project (1, ~15 pts). Total ≈ 180 pts, 3 h.`,
-    `Chaque exercice : un thème, des sous-questions \\subq{N.M}{...}{pts}, des énumérateurs \\cn{...}, surtout de l'APPLIQUÉ et du QUANTITATIF (calculer / tracer / remplir un tableau / justifier) — au plus 1 petite sous-question conceptuelle par exercice.`,
-    `Archétypes (en respectant les EXCLUSIONS) : Networking = sous-réseaux & paquets (préfixes IP de taille minimale en PETIT, tableau des paquets/interfaces vus par un routeur), encapsulation, routage Dijkstra/Bellman-Ford, TCP (SEQ/ACK, slow start, Tahoe/Reno, fast recovery), forwarding/longest-prefix, ARP, délais bout-en-bout. OS = accès disque & inodes (compter blocs lus/écrits par open/lseek/read/write, multi-level indexing), CPU scheduling (FIFO/SJF/STCF/RR/MLFQ, turnaround/response), états de processus, fork/exec/wait, kernel vs user (V/F à justifier), virtualisation/RAID. C = LIRE du code lab-style et reconnaître syscalls/fork/exec/wait/file descriptors (jamais écrire/débugger). Project = inode walk / file system / DKVS ring (lié aux labs).`,
+    `6 exercices indépendants, notés séparément, regroupés : Networking (2, ~50 pts), OS (2, ~25 et ~30 pts), C (1, ~10 pts), Labs (1, ~15 pts). Total ≈ 180 pts, 3 h.`,
+    `PRINCIPE (cf. directives) : chaque grosse question (≥25 pts) = UN artefact unique (programme/topologie/FS+programme/trace) creusé par 5-7 sous-questions \\subq{N.M}{...}{pts} EN ESCALIER (difficulté croissante), qui testent les INTERACTIONS entre concepts, avec AU MOINS UN VRAI PIÈGE et des nombres NON RONDS. Profondeur > largeur. Modèle de profondeur = Final 2024 Q3 (regarde son image).`,
+    `Archétypes (en respectant les EXCLUSIONS) : Networking = topologie riche (utilise une figure type Figure 1 : routeurs/switches/clusters/coûts roses/débits verts/interfaces orange/« Rest of the Internet ») + sous-réseaux & paquets (préfixes en PETIT, tableau des paquets/interfaces vus par un routeur), routage Dijkstra/Bellman-Ford, TCP (diagramme en échelle \\tcpladder : SEQ/ACK/cwnd/ssthresh/état + handshake, slow start, Tahoe/Reno, fast recovery), forwarding/longest-prefix, ARP, délais bout-en-bout (multi-saut, bottleneck). OS = accès disque & inodes (compter blocs par open/lseek/read/write, multi-level indexing, frontière direct/indirect), CPU scheduling (FIFO/SJF/STCF/RR/MLFQ, turnaround/response), états de processus, fork/exec/wait/waitpid (arbre de processus), kernel vs user (V/F à justifier). C = LIRE du code lab-style, reconnaître syscalls/fork/exec/wait/file descriptors (jamais écrire/débugger). Labs = lecture/compréhension de code des labs (client-serveur get_file/send_file/socket_layer, filesystem direntv6, multi-threading) — PAS « DKVS ».`,
     ``,
     `═══ LES VRAIS FINALS À IMITER (forme, types, ton, niveau, MISE EN PAGE) ═══`,
     ...ctx.style.map((s) => `### ${s.src}\n${s.excerpt}`),

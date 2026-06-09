@@ -42,8 +42,12 @@ export const DIRECTIVES: Directives = {
     "RÉDUIS le volume : pas de très grandes allocations de préfixes IP ni de très longues listes d'échanges de paquets (le mécanisme reste examinable, mais en PETIT).",
   ],
   format: [
+    "LANGUE : 100% ANGLAIS — titres ET corps de tous les énoncés et corrigés en anglais. Aucun français dans l'examen.",
     "Modèles de format = past-exams avec leurs exclusions : CompSys Final '25 (SAUF Q3.3 et Q6), Final '24 (SAUF Q5), CompNet finals Problem 2 (sauf Q4) & Problem 3.",
-    "Structure calquée sur le Final 2025 : 6 exercices indépendants, ~180 points, répartition Networking (2) / OS (2) / C (1) / Project (1).",
+    "Structure calquée sur le Final 2025 : 6 exercices indépendants, ~180 points, répartition Networking (2) / OS (2) / C (1) / Labs (1).",
+    "Cette année les LABS remplacent le Projet (8% = Labs : code client-serveur, filesystem direntv6, multi-threading). La 6e question = LABS : lecture/compréhension d'un bout de code lab-style (reconnaître syscalls, fork/exec/wait, file descriptors, sockets) — PAS « Project/DKVS ».",
+    "PRINCIPE DE CONSTRUCTION (le plus important) : chaque grosse question (≥25 pts) part d'UN SEUL artefact concret et non-trivial (un programme, une topologie, un file system + programme, une trace) creusé par 5-7 SOUS-QUESTIONS EN ESCALIER (difficulté croissante) qui testent les INTERACTIONS entre concepts (fork×threads×section critique ; routage×ARP×forwarding ; inode×cache×offsets), avec AU MOINS UN VRAI PIÈGE (cas-limite, frontière, déterminisme). Profondeur > largeur. Pas de snippets déconnectés ni de simples vrai/faux.",
+    "DIFFICULTÉ : niveau d'un vrai final EPFL — nombres NON RONDS (P=3 ms, R=12 Mbps…), charge de calcul/bookkeeping réelle, cas multi-saut / frontière. L'étudiant moyen doit transpirer.",
   ],
 };
 

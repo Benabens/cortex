@@ -90,7 +90,9 @@ function coverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string): string
 /** Construit le source .tex complet à partir d'un ExamSpec (énoncés + corrigé en annexe). */
 export function renderExamTex(spec: ExamSpec, dateLabel: string): string {
   const qs = [...spec.questions].sort((a, b) => catRank(a.category) - catRank(b.category));
-  const preamble = fs.readFileSync(path.join(LATEX_DIR, "preamble.tex"), "utf8");
+  let preamble = fs.readFileSync(path.join(LATEX_DIR, "preamble.tex"), "utf8");
+  const figPath = path.join(LATEX_DIR, "figures.tex");
+  if (fs.existsSync(figPath)) preamble += "\n" + fs.readFileSync(figPath, "utf8");
 
   const body = qs
     .map((q, i) => {
