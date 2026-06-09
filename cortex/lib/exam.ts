@@ -134,6 +134,14 @@ const LATEX_CONTRACT = [
   `      • Topologie réseau : compose avec les styles rtr/host/sw/srv/iface + helpers \\cost{10} (coûts roses), \\rate{1G} (débits verts), node[cloudnode]{Rest of the\\\\Internet}. Vise la densité de la Figure 1 (routeurs/switches/clusters d'end-systems étiquetés/interfaces nommées).`,
   `      • OS : inode + direct/indirect/double-indirect → data blocks (style blk) ; arbre de processus fork/exec ; Gantt + table d'états pour le scheduling.`,
   `    Mets chaque figure dans \\begin{center}\\begin{tikzpicture}[node distance=1.2cm] ... \\end{tikzpicture}\\end{center}\\figcaption{Figure N: ...}. La géométrie doit être propre et lisible.`,
+  `  - GRILLES DE RÉPONSE (OBLIGATOIRE) : APRÈS CHAQUE sous-question, émets son échafaudage de réponse PRÉ-DESSINÉ, dimensionné comme chez la prof — JAMAIS un simple blanc ni « Answers: » :`,
+  `      • packet-trace (« list ALL packets seen at interface X », ARP + DNS + TCP) → \\packetgrid{12} (12-15 lignes).`,
+  `      • simulation d'états de processus / scheduling → \\statesim{16} (15-20 lignes).`,
+  `      • comptage d'accès disque / inode → \\diskgrid{8}.`,
+  `      • décisions de forwarding / longest-prefix → \\forwardgrid{6}.`,
+  `      • diagramme TCP → \\tcpladder{D_1}{A_1}{5 Kbytes}{1 MSS}{$\\infty$}{8} (échelle scaffoldée).`,
+  `      • question ouverte / justification (V/F, « explain », « justify ») → \\rulelines{6}.`,
+  `    Choisis la grille ET son nombre de lignes selon le type de sous-question. Chaque sous-question DOIT finir par sa grille.`,
   `RÈGLES DE COMPILATION (impératif) : échappe \\% \\& \\# \\_ dans le texte courant ; équilibre toutes les accolades et environnements ; pas de markdown ; pas d'images externes ; LaTeX qui COMPILE du premier coup.`,
 ].join("\n");
 
@@ -197,20 +205,19 @@ function stubExam(_ctx: ReturnType<typeof gatherContext>): ExamSpec {
         points: 50,
         statement_tex: String.raw`Consider an Autonomous System (AS1) connected to the Internet.
 \begin{center}\begin{tikzpicture}[node distance=1.3cm]
-\node[host](A){A};\node[rtr,right=of A](R1){$R_1$};\node[rtr,right=of R1](R2){$R_2$};\node[srv,right=of R2](D){$D_1$};
-\draw[lnk](A)--(R1);\draw[lnk](R1)--(R2);\draw[lnk](R2)--(D);
-\end{tikzpicture}\end{center}
-\subq{1.1}{IP subnets}{20}
-\cn{1} Identify all the IP subnets inside AS1. \cn{2} Assign each subnet a prefix of minimal size starting at \texttt{18.0.0.0}.
-\begin{center}\begin{tabular}{|l|c|c|}\hline Subnet & \# hosts & Prefix \\\hline A & 100 & \rule{2.5cm}{0.4pt}\\\hline\end{tabular}\end{center}`,
-        solution_tex: String.raw`A needs $\geq 100$ hosts $\Rightarrow$ a \texttt{/25} (126 usable). Prefix \texttt{18.0.0.0/25}.`,
+\node[host](A){$A_1$};\node[rtr,right=of A](R1){$R_1$};\node[rtr,right=of R1](R2){$R_2$};\node[srv,right=of R2](D){$D_1$};
+\node[cloudnode,right=1.2cm of D]{Rest of the\\Internet};
+\draw[netlink](A)--(R1) node[midway,above]{\cost{5}};\draw[netlink](R1)--(R2) node[midway,above]{\rate{1G}};\draw[netlink](R2)--(D);
+\end{tikzpicture}\end{center}\figcaption{Figure 1: topology.}
+\subq{1.1}{Packets seen by $R_1$}{30} List all packets seen at interface $e$ when $A_1$ loads \texttt{http://d1.epfl.ch}.\packetgrid{12}`,
+        solution_tex: String.raw`ARP (resolve gateway), DNS query/response, TCP SYN/SYNACK/ACK, HTTP GET/response.`,
       },
       {
         category: "OS",
         concept: "Disk access and inodes",
         points: 25,
-        statement_tex: String.raw`\subq{3.1}{Block accesses}{12} A process runs \texttt{open}, then \texttt{lseek}, then \texttt{read} 4\,KB. Count the disk block accesses.`,
-        solution_tex: String.raw`Path resolution + inode + data block(s); justify each access.`,
+        statement_tex: String.raw`\subq{3.1}{Block accesses}{12} A process runs \texttt{open}, then \texttt{lseek} to offset 9000, then \texttt{read} 4\,KB. List the disk block accesses (4\,KB blocks, 12 direct pointers).\diskgrid{8}`,
+        solution_tex: String.raw`Path resolution + inode + (single-indirect since offset 9000 with small blocks) index block + data block; justify each.`,
       },
     ],
   };

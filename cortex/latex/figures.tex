@@ -40,3 +40,58 @@
 \end{tikzpicture}
 \end{center}
 \figcaption{Figure: TCP diagram (time flows downward).}}
+
+% ============================================================================
+% GRILLES DE RÉPONSE pré-dessinées (calquées sur les vrais examens : le générateur
+% en émet une APRÈS chaque sous-question selon le type, au lieu d'un blanc).
+% Lignes émises par boucle \loop (sûre en tabular).
+% ============================================================================
+\newcounter{grx}
+\newcommand{\ansintro}[1]{\par\smallskip\noindent{\footnotesize\itshape #1}\par\smallskip}
+% émetteurs de lignes récursifs (sûrs en tabular)
+\newcommand\Rnum[2]{\ifnum#1>0 \stepcounter{grx}\arabic{grx}#2\tabularnewline\hline\expandafter\Rnum\expandafter{\the\numexpr#1-1\relax}{#2}\fi}
+\newcommand\Rblank[2]{\ifnum#1>0 #2\tabularnewline\hline\expandafter\Rblank\expandafter{\the\numexpr#1-1\relax}{#2}\fi}
+% lignes numérotées : #1 = nb, #2 = cellules après le numéro (ex. " & & & ")
+\newcommand{\nrowsnum}[2]{\setcounter{grx}{0}\Rnum{#1}{#2}}
+% lignes vierges : #2 = toutes les cellules (ex. " & & ")
+\newcommand{\nrowsblank}[2]{\Rblank{#1}{#2}}
+
+% packet-trace (Table 1 du Final 2024)
+\newcommand{\packetgrid}[1]{%
+\ansintro{Fill in the table below (one row per packet seen, in order):}%
+\renewcommand{\arraystretch}{1.5}\scriptsize\noindent
+\begin{tabularx}{\linewidth}{|c|c|c|c|c|c|c|c|X|}\hline
+\# & Src MAC & Dst MAC & Src IP & Dst IP & Transp. & Src port & Dst port & Application \& purpose\tabularnewline\hline
+\nrowsnum{#1}{ & & & & & & & & }%
+\end{tabularx}\par\medskip}
+
+% simulation d'états / scheduling
+\newcommand{\statesim}[1]{%
+\ansintro{Fill in the simulation table below (one row per time unit):}%
+\renewcommand{\arraystretch}{1.5}\footnotesize\noindent
+\begin{tabularx}{\linewidth}{|c|X|X|X|}\hline
+Time & Running & Ready & Blocked\tabularnewline\hline
+\nrowsnum{#1}{ & & & }%
+\end{tabularx}\par\medskip}
+
+% accès disque / inode
+\newcommand{\diskgrid}[1]{%
+\ansintro{List the disk block accesses, in order:}%
+\renewcommand{\arraystretch}{1.5}\footnotesize\noindent
+\begin{tabularx}{\linewidth}{|c|X|c|c|}\hline
+Step & Operation (syscall / what triggers it) & Block \# & Type (inode/index/data, R/W)\tabularnewline\hline
+\nrowsnum{#1}{ & & & }%
+\end{tabularx}\par\medskip}
+
+% forwarding table
+\newcommand{\forwardgrid}[1]{%
+\ansintro{Fill in the forwarding decisions below:}%
+\renewcommand{\arraystretch}{1.5}\footnotesize\noindent
+\begin{tabularx}{\linewidth}{|c|c|X|}\hline
+Destination IP & Out interface & Justification\tabularnewline\hline
+\nrowsblank{#1}{ & & }%
+\end{tabularx}\par\medskip}
+
+% lignes lignées pour une question ouverte
+\newcommand\Rline[1]{\ifnum#1>0 \noindent\rule{\linewidth}{0.2pt}\par\vspace{6.5mm}\expandafter\Rline\expandafter{\the\numexpr#1-1\relax}\fi}
+\newcommand{\rulelines}[1]{\par\smallskip\Rline{#1}}

@@ -94,7 +94,7 @@ const isInvalid = (r: VerifyResult | null) =>
 export async function verifyAndHarden(
   spec: ExamSpec,
   regenerate: (q: ExamQuestion, diagnostic: string) => Promise<ExamQuestion>,
-  maxAttempts = 2
+  maxAttempts = 3
 ): Promise<{ spec: ExamSpec; report: VerifyReport }> {
   const processed = await mapPool(spec.questions, 3, async (q0) => {
     let q = q0;
@@ -124,8 +124,12 @@ export async function verifyAndHarden(
       q.solution_tex = res.corrected_solution_tex;
       verified = 1;
       fixedSol = true;
-    } else {
+    } else if (res.violates_exclusion) {
+      // hors-scope = retiré (dernier recours documenté ; on préfère remplacer mais ici on ne tombe à <6 que pour ça)
       dropped = true;
+      verified = 0;
+    } else {
+      // en scope mais faible/ambigu après N tentatives → GARDÉ (on garde 6 exos), marqué non-validé
       verified = 0;
     }
     return { q, res, verified, dropped, regenerated: attempts > 0, fixedSol };

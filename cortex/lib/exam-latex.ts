@@ -63,26 +63,25 @@ function coverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string): string
   const hours = Math.round(dur / 60);
   return [
     String.raw`\thispagestyle{empty}`,
-    String.raw`\noindent\begin{minipage}[t]{0.34\textwidth}\vspace{0pt}\epfllogo[34]\end{minipage}\hfill`,
-    String.raw`\begin{minipage}[t]{0.6\textwidth}\vspace{6pt}\raggedleft\footnotesize\scshape`,
+    String.raw`\noindent\begin{minipage}[t]{0.30\textwidth}\vspace{0pt}\epfllogo[30]\end{minipage}\hfill`,
+    String.raw`\begin{minipage}[t]{0.64\textwidth}\vspace{2pt}\raggedleft\footnotesize\scshape`,
     String.raw`École Polytechnique Fédérale de Lausanne\\ Eidgenössische Technische Hochschule -- Lausanne\\ Politecnico Federale -- Losanna\\ Swiss Federal Institute of Technology -- Lausanne\end{minipage}`,
-    String.raw`\vspace{3pt}\noindent\rule{\textwidth}{1pt}`,
-    String.raw`\noindent\footnotesize\textbf{Faculté Informatique et Communications}\\ CS--202 Computer Systems\\ Argyraki K., Kashyap S. \& Chappelier J.-C.`,
-    String.raw`\vspace{0.9cm}\noindent\normalsize`,
-    String.raw`\begin{minipage}[t]{0.7\textwidth}\vspace{0pt}NOM :\rule{5cm}{0.4pt} (\rule{1.6cm}{0.4pt})\\[10pt]\textbf{Seat \#:} \rule{1.6cm}{0.4pt}\end{minipage}\hfill`,
-    String.raw`\begin{minipage}[t]{0.25\textwidth}\vspace{0pt}\raggedleft\qrcode[height=2.5cm]{CS-202-FINAL-EXAM}\end{minipage}`,
-    String.raw`\vspace{1.1cm}\begin{center}{\Large\textbf{CS--202 COMPUTER SYSTEMS}}\\[8pt]{\large\textbf{Final Exam}}\\[6pt]${footDate(dateLabel)}\end{center}`,
-    String.raw`\vspace{0.5cm}\noindent{\large\textbf{INSTRUCTIONS (please read carefully)}}\par\medskip`,
+    String.raw`\vspace{2pt}\noindent\rule{\textwidth}{1pt}`,
+    String.raw`\noindent\begin{minipage}[t]{0.7\textwidth}\vspace{0pt}\footnotesize\textbf{Faculté Informatique et Communications}\\ CS--202 Computer Systems\\ Argyraki K., Kashyap S. \& Chappelier J.-C.\end{minipage}\hfill`,
+    String.raw`\begin{minipage}[t]{0.25\textwidth}\vspace{0pt}\raggedleft\footnotesize Anonymisation:\\ \textbf{\#0000}\end{minipage}`,
+    String.raw`\vspace{10pt}\noindent\normalsize NOM : Hanon Ymous \quad(000000)\hfill\textbf{Seat \#:} 0`,
+    String.raw`\vspace{0.5cm}\begin{center}{\Large\textbf{CS--202 COMPUTER SYSTEMS}}\\[6pt]{\large\textbf{Final Exam}}\\[5pt]${footDate(dateLabel)}\end{center}`,
+    String.raw`\vspace{0.25cm}\noindent{\large\textbf{INSTRUCTIONS (please read carefully)}}\par\smallskip`,
     String.raw`\noindent\textbf{IMPORTANT!} Please strictly follow these instructions, otherwise your exam may be canceled.`,
-    String.raw`\begin{enumerate}`,
+    String.raw`\begin{enumerate}\setlength{\itemsep}{2pt}`,
     String.raw`\item You have ${hours} hours to complete this examination.`,
     String.raw`\item You must \textbf{use black or dark blue ink}, neither pencil nor any other color.`,
-    String.raw`\item This is a closed book exam. Personal notes, four times dual-sided A4 sheets (8 sides in total), allowed. You may not use any personal computer, mobile phone or any other electronic equipment.`,
-    String.raw`\item Answer the questions directly on the exam sheet; only this document will be graded.`,
-    String.raw`\item Carefully and \emph{completely} read each question so as to do only what we actually ask for.`,
+    String.raw`\item This is a closed book exam. Personal notes, four times dual-sided A4 sheets (8 sides in total), are allowed. You may not use any personal computer, mobile phone or any other electronic equipment.`,
+    String.raw`\item Answer the questions \textbf{directly on the exam sheet}, in the space provided; do not use your own paper.`,
+    String.raw`\item Carefully and \emph{completely} read each question so as to do only what we actually ask for. If a statement seems unclear, ask one of the assistants for clarification.`,
     String.raw`\item The exam consists of ${qs.length} independent exercises (points are indicated, the total is ${total} points); all exercises count for the final grade.`,
     String.raw`\end{enumerate}`,
-    String.raw`\vspace{0.4cm}`,
+    String.raw`\vspace{0.25cm}`,
     gradingTableTex(qs),
   ].join("\n");
 }
@@ -95,15 +94,13 @@ export function renderExamTex(spec: ExamSpec, dateLabel: string): string {
   if (fs.existsSync(figPath)) preamble += "\n" + fs.readFileSync(figPath, "utf8");
 
   const body = qs
-    .map((q, i) => {
-      const pts = qPoints(q);
-      const space = Math.min(20, Math.max(8, pts * 0.4)).toFixed(1);
-      return [
-        String.raw`\examq{${i + 1}}{${texEscape(q.concept)}}{${pts}}`,
+    .map((q, i) =>
+      [
+        String.raw`\examq{${i + 1}}{${texEscape(q.concept)}}{${qPoints(q)}}`,
+        // l'énoncé contient lui-même les grilles de réponse (\packetgrid, \statesim, …) par sous-question
         (q as any).statement_tex ?? "",
-        String.raw`\ansspace{${space}cm}`,
-      ].join("\n");
-    })
+      ].join("\n")
+    )
     .join("\n\n");
 
   const solutions = [
