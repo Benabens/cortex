@@ -333,7 +333,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean } = {})
   const text = await runClaudeCode({
     prompt: buildClaudeCodePrompt(gatherContext()),
     model: "opus",
-    timeoutMs: 560_000,
+    timeoutMs: 840_000,
   });
   let spec = extractJson<ExamSpec>(text);
   let report: VerifyReport | undefined;
