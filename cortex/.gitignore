@@ -49,3 +49,10 @@ next-env.d.ts
 data/refs/img/
 data/exams/img/
 data/exams/.gen-checkpoint.json
+# Artefacts d'examens GÉNÉRÉS localement (régénérables — ne pas versionner)
+data/exams/*.pdf
+data/exams/*.tex
+data/exams/*.log
+data/exams/*.aux
+data/exams/*.out
+data/exams/epfl-logo.*
