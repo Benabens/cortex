@@ -31,6 +31,8 @@ export default function EntrainementPage() {
   const exoPoll = useRef<any>(null);
   const [exoErr, setExoErr] = useState<string | null>(null);
   const [exoErrCmd, setExoErrCmd] = useState<string | null>(null);
+  const [exoImg, setExoImg] = useState<File | null>(null);
+  const [exoNote, setExoNote] = useState("");
 
   // ---- Check my solution ----
   const [statement, setStatement] = useState("");
@@ -78,15 +80,25 @@ export default function EntrainementPage() {
   }
 
   async function genExo(target: string) {
-    if (!target.trim()) return;
+    if (!target.trim() && !exoImg) return;
     setExoErr(null);
     setExoErrCmd(null);
     setExoJob(null);
     try {
-      const r = await fetch("/api/exercises/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ target }) });
+      let r: Response;
+      if (exoImg) {
+        // Phase 3 — image → exo : multipart (image + sujet optionnel + note)
+        const fd = new FormData();
+        if (target.trim()) fd.set("target", target);
+        if (exoNote.trim()) fd.set("note", exoNote);
+        fd.set("image", exoImg);
+        r = await fetch("/api/exercises/generate", { method: "POST", body: fd });
+      } else {
+        r = await fetch("/api/exercises/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ target }) });
+      }
       const d = await r.json();
       if (!r.ok) { setExoErr(d.error ?? "Échec"); setExoErrCmd(d.command ?? null); return; }
-      if (d.jobId) { setExoJob({ id: d.jobId, status: "queued", progress: 0, currentStep: "Démarrage…", resultPath: null, log: [] }); pollExo(d.jobId); }
+      if (d.jobId) { setExoJob({ id: d.jobId, status: "queued", progress: 0, currentStep: "Démarrage…", resultPath: null, log: [] }); pollExo(d.jobId); setExoImg(null); setExoNote(""); }
     } catch (e: any) { setExoErr(String(e.message ?? e)); }
   }
 
@@ -142,7 +154,7 @@ export default function EntrainementPage() {
       <section className="card card-pad mb-8">
         <h2 className="text-[15px] font-semibold mb-1" style={{ color: "var(--ink)" }}>Exercice ciblé — format examen (PDF)</h2>
         <p className="text-[13px] mb-3" style={{ color: "var(--ink-2)" }}>
-          Tape un point faible précis → UN exercice qualité examen sur ce point, <strong style={{ color: "var(--ink)" }}>sans page de garde</strong>, ancré sur les vrais finals. Généré en arrière-plan (~3-5 min) — tu peux recharger.
+          Tape un point faible précis <strong style={{ color: "var(--ink)" }}>ou colle une image d'exo</strong> (screenshot d'examen, de série, ou un exo que tu as raté) → UN exercice qualité examen du même type, <strong style={{ color: "var(--ink)" }}>sans page de garde</strong>, ancré sur les vrais finals. Généré en arrière-plan — tu peux recharger.
         </p>
         {exoJob && EXO_ACTIVE.includes(exoJob.status) ? (
           <div>
@@ -155,9 +167,22 @@ export default function EntrainementPage() {
             </div>
           </div>
         ) : (
-          <div className="flex gap-2">
-            <input className="input" placeholder="ex. TCP Reno : cwnd après triple-dup-ACK · inode : accès disque across boundary · direntv6 inode walk" value={exoTarget} onChange={(e) => setExoTarget(e.target.value)} style={{ fontSize: 14 }} />
-            <button className="btn btn-primary" onClick={() => genExo(exoTarget)}>✦ Exo</button>
+          <div>
+            <div className="flex gap-2">
+              <input className="input" placeholder="ex. TCP Reno : cwnd après triple-dup-ACK · ou laisse vide si tu joins une image" value={exoTarget} onChange={(e) => setExoTarget(e.target.value)} style={{ fontSize: 14 }} />
+              <button className="btn btn-primary" onClick={() => genExo(exoTarget)}>✦ Exo</button>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <label className="chip cursor-pointer">📎 image d'un exo
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => setExoImg(e.target.files?.[0] ?? null)} />
+              </label>
+              {exoImg && <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>{exoImg.name}</span>}
+              {exoImg && <button className="btn btn-quiet" onClick={() => setExoImg(null)}>retirer</button>}
+              {exoImg && (
+                <input className="input" style={{ fontSize: 13, flex: 1, minWidth: 180 }} placeholder="(optionnel) ce que tu n'as pas compris / pourquoi tu as raté" value={exoNote} onChange={(e) => setExoNote(e.target.value)} />
+              )}
+            </div>
+            {exoImg && <p className="mt-1 text-[12px]" style={{ color: "var(--accent-ink)" }}>→ exo neuf du même type que l'image, format examen, vérifié.</p>}
           </div>
         )}
         {exoJob?.status === "done" && exoJob.resultPath && (

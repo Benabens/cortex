@@ -336,21 +336,49 @@ function gatherTargetedContext(target: string) {
   };
 }
 
-export async function generateTargetedExercise(target: string, opts: { onStep?: StepCb } = {}): Promise<{ id: number; url: string; texError?: string }> {
+export type ExerciseInput = { target?: string; imageRel?: string; note?: string };
+
+export async function generateTargetedExercise(
+  input: string | ExerciseInput,
+  opts: { onStep?: StepCb } = {}
+): Promise<{ id: number; url: string; texError?: string }> {
   const t0 = Date.now();
   const step = opts.onStep ?? (() => {});
-  if (!target.trim()) throw new Error("Sujet d'exercice vide.");
+  // entrée : texte simple, objet {target,imageRel,note}, ou JSON encodé (target du job).
+  const norm: ExerciseInput = typeof input === "string" ? (input.trim().startsWith("{") ? JSON.parse(input) : { target: input }) : input;
+  const target = (norm.target ?? "").trim();
+  const imageRel = norm.imageRel?.trim() || undefined;
+  if (!target && !imageRel) throw new Error("Donne un sujet OU une image d'exercice.");
   step("Contexte ciblé assemblé (cours + séries + past-exams + staff)", 12);
-  const ctx = gatherTargetedContext(target);
-  const a = pickArchetype(target);
+  // mots-clés d'ancrage : le texte si fourni, sinon le nom du concept de la note
+  const seed = target || (norm.note ?? "");
+  const ctx = gatherTargetedContext(seed);
+  const a = pickArchetype(seed);
   const pts = a.id === "c-reading" ? 10 : a.id === "labs-reading" ? 15 : a.category === "Networking" ? 40 : 25;
   const block = (title: string, items: { src: string; text: string }[]) =>
     items.length ? [``, title, ...items.map((c) => `• (${c.src}) ${c.text}`)] : [];
   const p = profile();
+  // Phase 3 — image → exo : si une image est fournie, le modèle l'ouvre, comprend le concept/type
+  // (et l'erreur de l'étudiant si une note est jointe), puis génère un NOUVEL exo du même type.
+  const imageLead = imageRel
+    ? [
+        `═══ IMAGE D'EXERCICE FOURNIE — POINT DE DÉPART ═══`,
+        `Ouvre et observe attentivement l'image : ${imageRel} (outil Read). C'est un exercice (d'examen, de série, ou un exo que l'étudiant a raté).`,
+        norm.note ? `Note de l'étudiant (ce qu'il n'a pas compris / pourquoi il a buté) : « ${norm.note} »` : ``,
+        `Identifie le CONCEPT et le TYPE de raisonnement testés${norm.note ? " ET l'erreur sous-jacente" : ""}. Puis génère un NOUVEL exercice qui teste LE MÊME concept / la même technique, sur un SETUP DIFFÉRENT (autres nombres, autre instance, nombres NON RONDS), dans le FORMAT des examens du cours. NE recopie PAS l'image — produis du neuf du même niveau.`,
+        target ? `Sujet additionnel précisé par l'étudiant : « ${target} ».` : ``,
+        ``,
+      ].filter((x) => x !== ``).concat(``)
+    : [];
+  // Ancrage vision : cs-202 l'a déjà dans exerciseLead (refImage) → on n'ajoute le bloc QUE pour
+  // les cours additionnels (Phase 2) ou quand une image est fournie → cs-202 sans image inchangé.
+  const visionLead = currentCourse() !== DEFAULT_COURSE || imageRel ? [p.visionBlock(), ``] : [];
   const prompt = [
     p.directivesBlock(),
     ``,
-    ...p.exerciseLead(target, a, pts, ctx.refImage),
+    ...visionLead,
+    ...imageLead,
+    ...p.exerciseLead(target || a.concept, a, pts, imageRel ?? ctx.refImage),
     ...block(`═══ PAST-EXAMS DU MÊME TYPE (PRIORITÉ ABSOLUE — le format de la prof) ═══`, ctx.pastexams),
     ...block(`═══ SÉRIES D'EXERCICES + CORRIGÉS ═══`, ctx.exercises),
     ...block(`═══ COURS ═══`, ctx.course),
@@ -362,7 +390,7 @@ export async function generateTargetedExercise(target: string, opts: { onStep?: 
     JSON.stringify(ONE_EX_SCHEMA, null, 2),
   ].join("\n");
 
-  step("Génération de l'exercice (Claude · Max)…", 30);
+  step(imageRel ? "Lecture de l'image + génération (Claude · Max)…" : "Génération de l'exercice (Claude · Max)…", 30);
   const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 480_000 });
   let q = extractJson<ExamQuestion>(text);
   step("Vérification à l'aveugle + durcissement…", 70);
