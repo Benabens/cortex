@@ -25,6 +25,18 @@ function texEscape(s: string): string {
     .replace(/\^/g, "\\textasciicircum{}");
 }
 
+/**
+ * \examinode et \examstates ouvrent déjà leur propre center+tikzpicture : si le
+ * générateur les emballe dans un tikzpicture (et/ou un center) manuel, l'imbrication
+ * de tikzpicture est fatale à la compilation → on déballe la figure.
+ */
+function unwrapLockedFigures(t: string): string {
+  const FIG = String.raw`\\(?:examinode|examstates)\b`;
+  return t
+    .replace(new RegExp(String.raw`\\begin\{tikzpicture\}(?:\[[^\]]*\])?\s*(${FIG})\s*\\end\{tikzpicture\}`, "g"), "$1")
+    .replace(new RegExp(String.raw`\\begin\{center\}\s*(${FIG})\s*\\end\{center\}`, "g"), "$1");
+}
+
 function footDate(dateLabel: string): string {
   const m = dateLabel.match(/(\d{4})-(\d{2})-(\d{2})/);
   const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -108,7 +120,7 @@ export function renderExamTex(spec: ExamSpec, dateLabel: string, includeSolution
       [
         String.raw`\examq{${i + 1}}{${texEscape(q.concept)}}{${qPoints(q)}}`,
         // l'énoncé contient lui-même les grilles de réponse (\packetgrid, \statesim, …) par sous-question
-        (q as any).statement_tex ?? "",
+        unwrapLockedFigures((q as any).statement_tex ?? ""),
       ].join("\n")
     )
     .join("\n\n");
@@ -118,7 +130,7 @@ export function renderExamTex(spec: ExamSpec, dateLabel: string, includeSolution
     ...qs.map((q, i) =>
       [
         String.raw`\par\medskip\needspace{4\baselineskip}{\large\textbf{Question ${i + 1} — ${texEscape(q.concept)} \hfill [${qPoints(q)} points]}}\par\smallskip`,
-        (q as any).solution_tex ?? "",
+        unwrapLockedFigures((q as any).solution_tex ?? ""),
       ].join("\n")
     ),
   ].join("\n\n");
@@ -363,7 +375,7 @@ export function renderExerciseLatex(q: ExamQuestion, dateLabel: string, includeS
   if (fs.existsSync(figPath)) preamble += "\n" + fs.readFileSync(figPath, "utf8");
   const pts = qPoints(q);
   const sol = includeSolutions
-    ? [String.raw`\clearpage{\large\textbf{Solution}}\par\vspace{6pt}\hrule\medskip`, (q as any).solution_tex ?? ""].join("\n")
+    ? [String.raw`\clearpage{\large\textbf{Solution}}\par\vspace{6pt}\hrule\medskip`, unwrapLockedFigures((q as any).solution_tex ?? "")].join("\n")
     : "";
   return [
     preamble,
@@ -371,7 +383,7 @@ export function renderExerciseLatex(q: ExamQuestion, dateLabel: string, includeS
     String.raw`\examchromefalse\pagestyle{empty}`,
     String.raw`\begin{document}`,
     String.raw`\noindent{\large\textbf{Exercise \quad-- ${texEscape(q.concept)} \hfill [${pts} points]}}\par\vspace{4pt}\hrule\vspace{10pt}`,
-    (q as any).statement_tex ?? "",
+    unwrapLockedFigures((q as any).statement_tex ?? ""),
     sol,
     String.raw`\end{document}`,
   ].join("\n");
