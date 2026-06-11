@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+const EXO_ACTIVE = ["queued", "running", "verifying", "compiling"];
 
 type Drill = { concept: string; statement_html: string; hints: string[]; solution_html: string };
 type Check = { verdict: "correct" | "partial" | "wrong"; feedback: string; correct_solution: string };
@@ -22,6 +24,12 @@ export default function EntrainementPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // ---- Exercice ciblé (PDF format examen, via job arrière-plan) ----
+  const [exoTarget, setExoTarget] = useState("");
+  const [exoJob, setExoJob] = useState<any>(null);
+  const exoPoll = useRef<any>(null);
+  const [exoErr, setExoErr] = useState<string | null>(null);
+
   // ---- Check my solution ----
   const [statement, setStatement] = useState("");
   const [answer, setAnswer] = useState("");
@@ -37,9 +45,39 @@ export default function EntrainementPage() {
       setWeak(d.weaknesses ?? []);
     } catch {}
   }, []);
+  const pollExo = useCallback((id: number) => {
+    clearInterval(exoPoll.current);
+    exoPoll.current = setInterval(async () => {
+      try {
+        const j = await (await fetch(`/api/jobs/${id}`)).json();
+        setExoJob(j);
+        if (!EXO_ACTIVE.includes(j.status)) clearInterval(exoPoll.current);
+      } catch {}
+    }, 2000);
+  }, []);
+
   useEffect(() => {
     load();
-  }, [load]);
+    (async () => {
+      try {
+        const d = await (await fetch("/api/jobs?type=exercise")).json();
+        if (d.active && EXO_ACTIVE.includes(d.active.status)) { setExoJob(d.active); pollExo(d.active.id); }
+      } catch {}
+    })();
+    return () => clearInterval(exoPoll.current);
+  }, [load, pollExo]);
+
+  async function genExo(target: string) {
+    if (!target.trim()) return;
+    setExoErr(null);
+    setExoJob(null);
+    try {
+      const r = await fetch("/api/exercises/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ target }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "Échec");
+      if (d.jobId) { setExoJob({ id: d.jobId, status: "queued", progress: 0, currentStep: "Démarrage…", resultPath: null, log: [] }); pollExo(d.jobId); }
+    } catch (e: any) { setExoErr(String(e.message ?? e)); }
+  }
 
   async function genDrill(c: string) {
     if (!c.trim()) return;
@@ -88,6 +126,36 @@ export default function EntrainementPage() {
         <p className="eyebrow">Entraînement</p>
         <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Drille et fais-toi corriger.</h1>
       </header>
+
+      {/* ---------- Exercice ciblé (PDF format examen) ---------- */}
+      <section className="card card-pad mb-8">
+        <h2 className="text-[15px] font-semibold mb-1" style={{ color: "var(--ink)" }}>Exercice ciblé — format examen (PDF)</h2>
+        <p className="text-[13px] mb-3" style={{ color: "var(--ink-2)" }}>
+          Tape un point faible précis → UN exercice qualité examen sur ce point, <strong style={{ color: "var(--ink)" }}>sans page de garde</strong>, ancré sur les vrais finals. Généré en arrière-plan (~3-5 min) — tu peux recharger.
+        </p>
+        {exoJob && EXO_ACTIVE.includes(exoJob.status) ? (
+          <div>
+            <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--surface-2)" }}>
+              <div className="h-full transition-all" style={{ width: `${exoJob.progress}%`, background: "var(--accent)" }} />
+            </div>
+            <div className="mt-2 text-[13px]" style={{ color: "var(--ink-2)" }}>{exoJob.currentStep}</div>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <input className="input" placeholder="ex. TCP Reno : cwnd après triple-dup-ACK · inode : accès disque across boundary · direntv6 inode walk" value={exoTarget} onChange={(e) => setExoTarget(e.target.value)} style={{ fontSize: 14 }} />
+            <button className="btn btn-primary" onClick={() => genExo(exoTarget)}>✦ Exo</button>
+          </div>
+        )}
+        {exoJob?.status === "done" && exoJob.resultPath && (
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-[13px]" style={{ color: "var(--green)" }}>Exercice prêt ✓</span>
+            <a className="btn btn-ghost" href={exoJob.resultPath} target="_blank" rel="noopener">ouvrir l'énoncé (PDF)</a>
+            <a className="btn btn-quiet" style={{ color: "var(--green)" }} href={exoJob.resultPath.replace(/\.pdf$/, "-corrige.pdf")} target="_blank" rel="noopener">corrigé</a>
+          </div>
+        )}
+        {exoJob?.status === "error" && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>Échec : {exoJob.error}</p>}
+        {exoErr && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>{exoErr}</p>}
+      </section>
 
       {/* ---------- Drilling ---------- */}
       <section className="card card-pad mb-8">
