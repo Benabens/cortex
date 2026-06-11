@@ -1,4 +1,4 @@
-import { createWeakness, deleteWeakness, listWeaknesses } from "@/lib/weaknesses";
+import { createWeakness, deleteWeakness, listWeaknesses, weaknessesByTheme } from "@/lib/weaknesses";
 import { useCourse } from "@/lib/req";
 import { uploadsDir } from "@/lib/paths";
 import crypto from "node:crypto";
@@ -19,7 +19,7 @@ const EXT: Record<string, string> = {
 
 export function GET(req: NextRequest) {
   useCourse(req);
-  return NextResponse.json({ weaknesses: listWeaknesses() });
+  return NextResponse.json({ weaknesses: listWeaknesses(), byTheme: weaknessesByTheme() });
 }
 
 export async function POST(req: NextRequest) {

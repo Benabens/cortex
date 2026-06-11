@@ -1,13 +1,13 @@
 import { sqlite } from "@/db/client";
 import { search } from "@/lib/search";
 
-// Ajoute la colonne `analyzed` si absente (suivi "à analyser / analysé par l'IA").
-// Appelé en tête de chaque fonction publique (idempotent) — s'applique à la DB du cours courant.
+// Colonnes ajoutées au fil de l'eau (idempotent, s'applique à la DB du cours courant) :
+// - `analyzed` (suivi IA), `source` (manual|conversation|image), `theme` (regroupement).
 function ensureSchema() {
-  const cols = sqlite.prepare(`PRAGMA table_info(weaknesses)`).all() as { name: string }[];
-  if (!cols.some((c) => c.name === "analyzed")) {
-    sqlite.exec(`ALTER TABLE weaknesses ADD COLUMN analyzed INTEGER NOT NULL DEFAULT 0`);
-  }
+  const cols = (sqlite.prepare(`PRAGMA table_info(weaknesses)`).all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes("analyzed")) sqlite.exec(`ALTER TABLE weaknesses ADD COLUMN analyzed INTEGER NOT NULL DEFAULT 0`);
+  if (!cols.includes("source")) sqlite.exec(`ALTER TABLE weaknesses ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`);
+  if (!cols.includes("theme")) sqlite.exec(`ALTER TABLE weaknesses ADD COLUMN theme TEXT`);
 }
 
 export type RelatedItem = {
@@ -27,6 +27,8 @@ export type Weakness = {
   screenshotUrl: string | null;
   severity: number;
   analyzed: boolean;
+  source: string;
+  theme: string | null;
   timesSeen: number;
   loggedAt: string | null;
   lastReviewedAt: string | null;
@@ -97,20 +99,26 @@ export function createWeakness(input: {
   description?: string;
   severity?: number;
   screenshotPath?: string | null;
+  source?: string; // 'manual' | 'conversation' | 'image'
+  theme?: string | null;
+  analyzed?: boolean;
 }): number {
   ensureSchema();
-  const related = autoLink(`${input.topic} ${input.description ?? ""}`);
+  const related = autoLink(`${input.topic} ${input.description ?? ""} ${input.theme ?? ""}`);
   const id = sqlite
     .prepare(
-      `INSERT INTO weaknesses (topic, description, screenshot_path, severity, related_item_ids)
-       VALUES (?,?,?,?,?)`
+      `INSERT INTO weaknesses (topic, description, screenshot_path, severity, related_item_ids, source, theme, analyzed)
+       VALUES (?,?,?,?,?,?,?,?)`
     )
     .run(
       input.topic,
       input.description ?? null,
       input.screenshotPath ?? null,
       input.severity ?? 2,
-      JSON.stringify(related)
+      JSON.stringify(related),
+      input.source ?? "manual",
+      input.theme ?? null,
+      input.analyzed ? 1 : 0
     ).lastInsertRowid as number;
   return id;
 }
@@ -128,11 +136,31 @@ export function listWeaknesses(): Weakness[] {
     screenshotUrl: r.screenshot_path ? `/uploads/${r.screenshot_path}` : null,
     severity: r.severity,
     analyzed: !!r.analyzed,
+    source: r.source ?? "manual",
+    theme: r.theme ?? null,
     timesSeen: r.times_seen,
     loggedAt: r.logged_at,
     lastReviewedAt: r.last_reviewed_at,
     related: relatedFor(r.related_item_ids, r.topic),
   }));
+}
+
+/** Tableau de bord : faiblesses regroupées par thème (le « classement des incompréhensions »). */
+export function weaknessesByTheme(): { theme: string; count: number; avgSeverity: number; topics: string[] }[] {
+  const list = listWeaknesses();
+  const map = new Map<string, Weakness[]>();
+  for (const w of list) {
+    const t = w.theme || "(non classé)";
+    (map.get(t) ?? map.set(t, []).get(t)!).push(w);
+  }
+  return [...map.entries()]
+    .map(([theme, ws]) => ({
+      theme,
+      count: ws.length,
+      avgSeverity: Math.round((ws.reduce((s, w) => s + w.severity, 0) / ws.length) * 10) / 10,
+      topics: ws.map((w) => w.topic),
+    }))
+    .sort((a, b) => b.count - a.count || b.avgSeverity - a.avgSeverity);
 }
 
 export function getWeakness(id: number): Weakness | null {

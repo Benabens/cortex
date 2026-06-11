@@ -50,8 +50,17 @@ export function makeGenericProfile(courseId: string, archetypes: Archetype[]): C
   const matiere = `${c.examCode} ${c.examName} (${c.university})`;
 
   const slotsFromArchetypes = (): Slot[] => {
-    // 6 slots (ou moins) : archétypes triés par poids, points dégressifs ≈ 180 total.
-    const sorted = [...archetypes].sort((a, b) => b.weight - a.weight);
+    // 6 slots (ou moins) : archétypes triés par poids × boost faiblesses (la boucle Phase 5),
+    // points dégressifs ≈ 180 total.
+    let hay = "";
+    try {
+      hay = (sqlite.prepare(`SELECT topic, description FROM weaknesses ORDER BY severity DESC LIMIT 10`).all() as { topic: string; description: string | null }[])
+        .map((w) => `${w.topic} ${w.description ?? ""}`)
+        .join(" ")
+        .toLowerCase();
+    } catch {}
+    const boost = (a: Archetype) => (a.topics.some((t) => hay.includes(t)) ? 1.5 : 1);
+    const sorted = [...archetypes].sort((a, b) => b.weight * boost(b) - a.weight * boost(a));
     const picks = sorted.slice(0, 6);
     const pts = [35, 35, 30, 30, 25, 25];
     return picks.map((a, i) => ({

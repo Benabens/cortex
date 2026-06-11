@@ -17,9 +17,12 @@ type Weakness = {
   screenshotUrl: string | null;
   severity: number;
   analyzed: boolean;
+  source: string;
+  theme: string | null;
   loggedAt: string | null;
   related: Related[];
 };
+type ThemeRow = { theme: string; count: number; avgSeverity: number; topics: string[] };
 
 const SEV = [
   { v: 1, label: "léger", color: "var(--green)" },
@@ -29,6 +32,7 @@ const SEV = [
 
 export default function FaiblessesPage() {
   const [list, setList] = useState<Weakness[]>([]);
+  const [byTheme, setByTheme] = useState<ThemeRow[]>([]);
   const [topic, setTopic] = useState("");
   const [description, setDescription] = useState("");
   const [severity, setSeverity] = useState(2);
@@ -38,15 +42,40 @@ export default function FaiblessesPage() {
   const [analyzing, setAnalyzing] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // intake conversation (Phase 5)
+  const [convo, setConvo] = useState("");
+  const [mining, setMining] = useState(false);
+  const [mineMsg, setMineMsg] = useState<string | null>(null);
+  const [mineErr, setMineErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const r = await fetch("/api/weaknesses");
     const d = await r.json();
     setList(d.weaknesses ?? []);
+    setByTheme(d.byTheme ?? []);
   }, []);
   useEffect(() => {
     load();
   }, [load]);
+
+  async function mine() {
+    if (convo.trim().length < 40) return;
+    setMining(true);
+    setMineErr(null);
+    setMineMsg(null);
+    try {
+      const r = await fetch("/api/weaknesses/mine", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: convo }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(r.status === 503 ? "Claude Code (Max) non joignable — lance l'app sur ta machine connectée." : d.error ?? "Échec");
+      setMineMsg(d.created ? `${d.created} faiblesse(s) extraite(s) et classée(s).` : (d.note ?? "Aucune faiblesse claire détectée."));
+      setConvo("");
+      await load();
+    } catch (e: any) {
+      setMineErr(String(e.message ?? e));
+    } finally {
+      setMining(false);
+    }
+  }
 
   function pickFile(f: File | null) {
     setFile(f);
@@ -142,6 +171,45 @@ export default function FaiblessesPage() {
         <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Tes points faibles, capturés.</h1>
       </header>
 
+      {/* Tableau de bord par thème (le « classement » des incompréhensions) */}
+      {byTheme.length > 0 && (
+        <div className="card card-pad mb-6">
+          <h2 className="text-[12px] font-semibold uppercase tracking-wide mb-3" style={{ color: "var(--ink-2)", letterSpacing: "0.04em" }}>
+            Par thème — où ça coince le plus
+          </h2>
+          <div className="flex flex-col gap-2">
+            {byTheme.map((t) => {
+              const sev = SEV.find((s) => s.v === Math.round(t.avgSeverity)) ?? SEV[1];
+              const max = Math.max(...byTheme.map((x) => x.count));
+              return (
+                <div key={t.theme} className="flex items-center gap-3">
+                  <span className="text-[13px] font-medium shrink-0" style={{ color: "var(--ink)", width: 150 }} title={t.topics.join(" · ")}>{t.theme}</span>
+                  <div className="flex-1 h-2.5 rounded-full overflow-hidden" style={{ background: "var(--surface-2)" }}>
+                    <div className="h-full" style={{ width: `${(t.count / max) * 100}%`, background: sev.color }} />
+                  </div>
+                  <span className="text-[12px] tabular-nums shrink-0" style={{ color: "var(--ink-3)", width: 90, textAlign: "right" }}>{t.count} · grav {t.avgSeverity}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Importer une discussion → faiblesses (Phase 5) */}
+      <div className="card card-pad mb-6">
+        <h2 className="text-[15px] font-semibold mb-1" style={{ color: "var(--ink)" }}>💬 Importer une discussion</h2>
+        <p className="text-[13px] mb-3" style={{ color: "var(--ink-2)" }}>
+          Colle une conversation (questions posées à Claude, exos résolus ensemble, là où tu as buté). Cortex en extrait tes
+          <strong style={{ color: "var(--ink)" }}> faiblesses classées par thème</strong>, auto-liées au corpus — elles ciblent ensuite les exos/examens générés.
+        </p>
+        <textarea className="textarea mb-2" rows={4} placeholder="Colle ici une discussion entière (ou une journée de chat)…" value={convo} onChange={(e) => setConvo(e.target.value)} style={{ fontSize: 13 }} />
+        <div className="flex items-center gap-3">
+          <button className="btn btn-primary" disabled={mining || convo.trim().length < 40} onClick={mine}>{mining ? "Analyse… (~30s)" : "Extraire mes faiblesses"}</button>
+          {mineMsg && <span className="text-[12px]" style={{ color: "var(--green)" }}>{mineMsg}</span>}
+          {mineErr && <span className="text-[12px]" style={{ color: "var(--red)" }}>{mineErr}</span>}
+        </div>
+      </div>
+
       {/* Formulaire d'intake */}
       <form onSubmit={submit} className="card card-pad mb-8">
         <p className="mb-4 text-[13px] leading-relaxed" style={{ color: "var(--ink-2)" }}>
@@ -215,10 +283,12 @@ export default function FaiblessesPage() {
           return (
             <div key={w.id} className="card card-pad">
               <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-2.5">
+                <div className="flex flex-wrap items-center gap-2.5">
                   <span className="dot" style={{ background: sev.color }} />
                   <h3 className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>{w.topic}</h3>
                   {!w.analyzed && <span className="badge">à analyser</span>}
+                  {w.source === "conversation" && <span className="badge" style={{ borderColor: "var(--blue)", color: "var(--blue)" }}>💬 discussion</span>}
+                  {w.theme && <span className="text-[11px]" style={{ color: "var(--ink-3)" }}>{w.theme}</span>}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <button onClick={() => process(w.id)} disabled={analyzing === w.id} className="btn btn-quiet" style={{ color: "var(--blue)" }}>
