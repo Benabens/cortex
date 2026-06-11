@@ -94,8 +94,11 @@ const isInvalid = (r: VerifyResult | null) =>
 export async function verifyAndHarden(
   spec: ExamSpec,
   regenerate: (q: ExamQuestion, diagnostic: string) => Promise<ExamQuestion>,
-  maxAttempts = 3
+  maxAttempts = 3,
+  onProgress?: (msg: string) => void
 ): Promise<{ spec: ExamSpec; report: VerifyReport }> {
+  let done = 0;
+  const total = spec.questions.length;
   const processed = await mapPool(spec.questions, 3, async (q0) => {
     let q = q0;
     let attempts = 0;
@@ -132,6 +135,9 @@ export async function verifyAndHarden(
       // en scope mais faible/ambigu après N tentatives → GARDÉ (on garde 6 exos), marqué non-validé
       verified = 0;
     }
+    done++;
+    const tag = !res ? "non vérifié" : verified === 1 ? (fixedSol ? "corrigé" : "ok") : dropped ? "retiré" : "gardé (faible)";
+    onProgress?.(`Vérif ${done}/${total} — « ${q.concept.slice(0, 48)} » : ${tag}${attempts ? ` (durci ×${attempts})` : ""}`);
     return { q, res, verified, dropped, regenerated: attempts > 0, fixedSol };
   });
 

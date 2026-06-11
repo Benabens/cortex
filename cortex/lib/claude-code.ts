@@ -8,7 +8,8 @@ import path from "node:path";
  * que le shell interactif (ou `claude` peut être un alias) → on cherche aussi
  * aux emplacements d'install classiques. Surchargeable via CORTEX_CLAUDE_BIN.
  */
-function resolveClaudeBin(): string {
+/** Chemin du binaire `claude` s'il existe (env, emplacements connus, ou PATH), sinon null. */
+export function claudeBinPath(): string | null {
   const fromEnv = process.env.CORTEX_CLAUDE_BIN;
   if (fromEnv && fs.existsSync(fromEnv)) return fromEnv;
   const home = os.homedir();
@@ -17,15 +18,21 @@ function resolveClaudeBin(): string {
     path.join(home, ".claude/local/claude"),
     "/opt/homebrew/bin/claude",
     "/usr/local/bin/claude",
+    "/usr/bin/claude",
+    "/opt/node22/bin/claude",
   ];
   for (const c of candidates) {
-    try {
-      if (fs.existsSync(c)) return c;
-    } catch {
-      /* ignore */
-    }
+    try { if (fs.existsSync(c)) return c; } catch { /* ignore */ }
   }
-  return "claude"; // dernier recours : laisser le PATH résoudre
+  for (const d of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (!d) continue;
+    try { const p = path.join(d, "claude"); if (fs.existsSync(p)) return p; } catch { /* ignore */ }
+  }
+  return null;
+}
+
+function resolveClaudeBin(): string {
+  return claudeBinPath() ?? "claude"; // dernier recours : laisser le PATH résoudre
 }
 
 /**

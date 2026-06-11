@@ -9,6 +9,8 @@ const dbPath = path.join(process.cwd(), "data", "cortex.db");
 const sqlite = new Database(dbPath);
 sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("foreign_keys = ON");
+// le worker de job (autre process) écrit pendant que le serveur lit → patiente au lieu d'échouer
+sqlite.pragma("busy_timeout = 8000");
 
 export const db = drizzle(sqlite, { schema });
 

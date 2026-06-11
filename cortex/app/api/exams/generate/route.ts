@@ -1,23 +1,34 @@
-import { generateExam, generateExamViaClaudeCode } from "@/lib/exam";
-import { ClaudeCodeError } from "@/lib/claude-code";
+import { generateExam } from "@/lib/exam";
+import { activeJob, createJob, startWorker } from "@/lib/jobs";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 800;
 
+/**
+ * Génération d'examen : crée un JOB en arrière-plan et retourne immédiatement {jobId}.
+ * Le worker détaché (scripts/run-job.ts) fait le travail (lots + vérif + compile) et survit
+ * à la requête / au reload. L'UI poll /api/jobs/:id. (dry-run = stub local synchrone.)
+ */
 export async function POST(req: NextRequest) {
   const dry = req.nextUrl.searchParams.get("dry") === "1";
-  try {
-    // Dry-run = stub local (sans IA). Sinon : génération via Claude Code (abonnement Max, gratuit).
-    const res = dry ? await generateExam({ dry: true }) : await generateExamViaClaudeCode();
-    return NextResponse.json({ ok: true, ...res });
-  } catch (e: unknown) {
-    const err = e as ClaudeCodeError;
-    const msg = err?.message ?? String(e);
-    if (err?.code === "UNAVAILABLE") {
-      return NextResponse.json({ error: msg, code: err.code }, { status: 503 });
+  if (dry) {
+    try {
+      const res = await generateExam({ dry: true });
+      return NextResponse.json({ ok: true, ...res });
+    } catch (e: any) {
+      return NextResponse.json({ error: String(e?.message ?? e) }, { status: 502 });
     }
-    return NextResponse.json({ error: msg }, { status: 502 });
   }
+
+  const existing = activeJob("exam");
+  if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
+
+  const jobId = createJob("exam");
+  try {
+    startWorker(jobId);
+  } catch (e: any) {
+    return NextResponse.json({ error: `Impossible de lancer le worker : ${e?.message ?? e}` }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true, jobId });
 }

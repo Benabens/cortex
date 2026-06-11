@@ -1,9 +1,11 @@
 import { sqlite } from "@/db/client";
 import { anthropic, GEN_MODEL } from "@/lib/anthropic";
+import { ARCHETYPES } from "@/lib/archetypes";
 import { buildBlueprint } from "@/lib/blueprint";
 import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { search } from "@/lib/search";
 import { directivesBlock, staffNotesText } from "@/lib/directives";
-import { buildExamArtifact } from "@/lib/exam-latex";
+import { buildExamArtifact, buildExerciseArtifact } from "@/lib/exam-latex";
 import { refImageFor, visionBlock } from "@/lib/figrefs";
 import { dueConcepts, markTested } from "@/lib/schedule";
 import { referencePaths } from "@/lib/sources";
@@ -238,7 +240,8 @@ export function listExams() {
     .prepare(
       `SELECT e.id, e.created_at, e.status, e.html_path, ${verifyCol} verify_summary,
               (SELECT count(*) FROM exam_questions q WHERE q.exam_id = e.id) nq
-       FROM exams e ORDER BY datetime(e.created_at) DESC, e.id DESC`
+       FROM exams e WHERE e.format_template IS NULL OR e.format_template != 'exercise'
+       ORDER BY datetime(e.created_at) DESC, e.id DESC`
     )
     .all() as any[];
   return rows.map((r) => ({
@@ -321,6 +324,102 @@ export async function persistExam(spec: ExamSpec, report?: VerifyReport): Promis
   }
 
   markTested([...spec.questions.map((q) => q.concept), ...dueConcepts(6)]);
+  return { id, url: `/exam/${file}` };
+}
+
+// ---------------- EXERCICE CIBLÉ (Phase 3) : 1 exo qualité examen, sans garde ----------------
+
+function pickArchetype(target: string) {
+  const t = target.toLowerCase();
+  let best = ARCHETYPES[0];
+  let score = -1;
+  for (const a of ARCHETYPES) {
+    const s = a.topics.filter((k) => t.includes(k)).length + (t.includes(a.category.toLowerCase()) ? 1 : 0);
+    if (s > score) { score = s; best = a; }
+  }
+  return best;
+}
+
+/** Ratisse le corpus pour un sujet ciblé — priorité ABSOLUE aux past-exams (Final/Midterm). */
+function gatherTargetedContext(target: string) {
+  const groups = search(target, 40, "or");
+  const byType: Record<string, { src: string; text: string }[]> = {};
+  for (const g of groups)
+    for (const h of g.hits) {
+      const row = sqlite.prepare("SELECT text FROM items WHERE id = ?").get(h.itemId) as { text: string } | undefined;
+      if (!row) continue;
+      (byType[g.sourceType] ??= []).push({ src: h.sourceTitle, text: trunc(row.text, 500) });
+    }
+  const take = (types: string[], n: number) => types.flatMap((t) => byType[t] ?? []).slice(0, n);
+  return {
+    pastexams: take(["final", "midterm"], 6),
+    exercises: take(["exercise", "serie"], 6),
+    course: take(["course_pdf"], 4),
+    reviews: take(["review"], 5),
+    cheats: take(["cheatsheet"], 3),
+    refImage: refImageFor(undefined, target),
+  };
+}
+
+export async function generateTargetedExercise(target: string, opts: { onStep?: StepCb } = {}): Promise<{ id: number; url: string }> {
+  const t0 = Date.now();
+  const step = opts.onStep ?? (() => {});
+  if (!target.trim()) throw new Error("Sujet d'exercice vide.");
+  step("Contexte ciblé assemblé (cours + séries + past-exams + staff)", 12);
+  const ctx = gatherTargetedContext(target);
+  const a = pickArchetype(target);
+  const pts = a.id === "c-reading" ? 10 : a.id === "labs-reading" ? 15 : a.category === "Networking" ? 40 : 25;
+  const block = (title: string, items: { src: string; text: string }[]) =>
+    items.length ? [``, title, ...items.map((c) => `• (${c.src}) ${c.text}`)] : [];
+  const prompt = [
+    directivesBlock(),
+    ``,
+    `═══ ANCRAGE VISUEL ═══ Regarde la vraie page de référence du même type : ${ctx.refImage} (outil Read). Vise sa richesse/difficulté.`,
+    ``,
+    `Tu rédiges UN SEUL exercice de Final CS-202 EN ANGLAIS, qualité examen, CIBLÉ sur : « ${target} ».`,
+    `Archétype à RÉ-INSTANCIER (ne recopie pas) : ${a.concept}. Construction : ${a.structure} Grille de réponse : ${a.grid}. Figure : ${a.figure}. PIÈGE à inclure : ${a.trap}.`,
+    `Barème ~${pts} points. UN artefact concret creusé par des sous-questions \\subq{N.M}{...}{pts} en escalier, NOMBRES NON RONDS.`,
+    ...block(`═══ PAST-EXAMS DU MÊME TYPE (PRIORITÉ ABSOLUE — le format de la prof) ═══`, ctx.pastexams),
+    ...block(`═══ SÉRIES D'EXERCICES + CORRIGÉS ═══`, ctx.exercises),
+    ...block(`═══ COURS ═══`, ctx.course),
+    ...block(`═══ REVIEWS / CHEAT SHEETS ═══`, [...ctx.reviews, ...ctx.cheats]),
+    ``,
+    LATEX_CONTRACT,
+    ``,
+    `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points}. Aucun outil au-delà de Read, aucun fichier.`,
+    JSON.stringify(ONE_EX_SCHEMA, null, 2),
+  ].join("\n");
+
+  step("Génération de l'exercice (Claude · Max)…", 30);
+  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 480_000 });
+  let q = extractJson<ExamQuestion>(text);
+  step("Vérification à l'aveugle + durcissement…", 70);
+  let report: VerifyReport | undefined;
+  try {
+    const v = await verifyAndHarden({ title: q.concept, questions: [q] }, regenerateExercise, 2, (m) => step(m, 78));
+    q = v.spec.questions[0] ?? q;
+    report = v.report;
+  } catch (e) {
+    step(`Vérif interrompue : ${(e as Error).message}`, 82);
+  }
+  step("Compilation du PDF (sans garde)…", 92);
+  const out = await persistExercise(q, report);
+  step(`Terminé ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 100);
+  return out;
+}
+
+async function persistExercise(q: ExamQuestion, report?: VerifyReport): Promise<{ id: number; url: string }> {
+  ensureExamCols();
+  const id = sqlite.prepare(`INSERT INTO exams (format_template, status) VALUES ('exercise','ready')`).run().lastInsertRowid as number;
+  const r = report?.results?.[0];
+  sqlite
+    .prepare(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration, verified, verify_issue) VALUES (?,?,?,?,?,?,?)`)
+    .run(id, q.concept, q.statement_tex, q.solution_tex, null, r?.verified ?? null, r?.issue ?? null);
+  const dateLabel = (sqlite.prepare(`SELECT date('now') d`).get() as any).d;
+  const { file } = await buildExerciseArtifact(q, id, dateLabel);
+  sqlite.prepare(`UPDATE exams SET html_path = ? WHERE id = ?`).run(file, id);
+  if (report) sqlite.prepare(`UPDATE exams SET verify_summary = ? WHERE id = ?`).run(`ok=${report.ok} corrigés=${report.fixed} durcis=${report.regenerated}`, id);
+  markTested([q.concept]);
   return { id, url: `/exam/${file}` };
 }
 
@@ -429,8 +528,12 @@ async function generateBatch(ctx: ReturnType<typeof gatherContext>, slots: typeo
  * checkpoint disque par lot (résumable : un lot déjà réussi n'est pas rebrûlé),
  * puis vérif à l'aveugle + durcissement (garde-6), puis compilation PDF.
  */
-export async function generateExamViaClaudeCode(opts: { verify?: boolean } = {}): Promise<{ id: number; url: string }> {
+export type StepCb = (step: string, progress: number) => void;
+
+export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep?: StepCb } = {}): Promise<{ id: number; url: string }> {
   const t0 = Date.now();
+  const step = opts.onStep ?? (() => {});
+  step("Contexte assemblé (corpus + directives + blueprint)", 5);
   const ctx = gatherContext();
   // Blueprint : 6 slots pilotés par archétypes × poids study guide × faiblesses (repli : EXAM_SLOTS).
   let slots: { category: string; points: number; brief: string }[];
@@ -448,35 +551,52 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean } = {})
     if (Array.isArray(j?.batches) && Date.now() - (j.at ?? 0) < 2 * 3600_000) saved = j.batches;
   } catch {}
 
+  let batchesDone = 0;
   const results = await Promise.all(
-    batches.map(async (slots, i) => {
-      if (saved[i]?.length === slots.length) {
-        console.log(`[gen] lot ${i + 1}/2 repris du checkpoint`);
+    batches.map(async (bslots, i) => {
+      if (saved[i]?.length === bslots.length) {
+        batchesDone++;
+        step(`Lot ${i + 1}/2 repris du checkpoint`, 10 + 25 * batchesDone);
         return saved[i]!;
       }
-      const qs = await generateBatch(ctx, slots as any);
-      if (qs.length < slots.length) throw new Error(`Lot ${i + 1} incomplet (${qs.length}/${slots.length}).`);
-      saved[i] = qs;
+      step(`Lot ${i + 1}/2 — génération de 3 exercices…`, 10 + i * 5);
+      let qs: ExamQuestion[] | null = null;
+      for (let attempt = 1; attempt <= 2 && !qs; attempt++) {
+        try {
+          const got = await generateBatch(ctx, bslots as any);
+          if (got.length < bslots.length) throw new Error(`incomplet (${got.length}/${bslots.length})`);
+          qs = got;
+        } catch (e) {
+          if (attempt === 2) throw new Error(`Lot ${i + 1} échoué : ${(e as Error).message}`);
+          step(`Lot ${i + 1}/2 — réessai (${(e as Error).message})`, 10 + i * 5);
+        }
+      }
+      saved[i] = qs!;
       try { fs.mkdirSync(path.dirname(CKPT), { recursive: true }); fs.writeFileSync(CKPT, JSON.stringify({ at: Date.now(), batches: saved })); } catch {}
-      console.log(`[gen] lot ${i + 1}/2 ok (${Math.round((Date.now() - t0) / 1000)}s)`);
-      return qs;
+      batchesDone++;
+      step(`Lot ${i + 1}/2 généré ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 10 + 25 * batchesDone);
+      return qs!;
     })
   );
 
   let spec: ExamSpec = { title: "CS-202 Computer Systems — Final Exam", duration_min: 180, questions: results.flat() };
   let report: VerifyReport | undefined;
   if (opts.verify !== false) {
+    step("Vérification à l'aveugle + durcissement des 6 exercices…", 62);
     try {
-      const v = await verifyAndHarden(spec, regenerateExercise);
+      const v = await verifyAndHarden(spec, regenerateExercise, 3, (msg) => step(msg, 65));
       spec = v.spec;
       report = v.report;
+      step(`Vérification terminée (${report.ok} ok, ${report.fixed} corrigés, ${report.regenerated} durcis, ${report.unverified} non-vérifiés)`, 88);
     } catch (e) {
       console.error("[verify] échec, examen conservé non vérifié :", (e as Error).message);
+      step(`Vérification interrompue : ${(e as Error).message}`, 88);
     }
   }
+  step("Compilation du PDF (LaTeX)…", 92);
   const out = await persistExam(spec, report);
   try { fs.unlinkSync(CKPT); } catch {} // run complet → checkpoint consommé
-  console.log(`[gen] total ${Math.round((Date.now() - t0) / 1000)}s`);
+  step(`Terminé ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 100);
   return out;
 }
 

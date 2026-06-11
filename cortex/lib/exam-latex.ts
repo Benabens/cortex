@@ -154,6 +154,19 @@ function texCandidates(): { bin: string; kind: "tectonic" | "pdflatex" }[] {
 }
 
 /** Compile <base>.tex (déjà écrit dans EXAM_DIR) en <base>.pdf. Renvoie le nom du PDF ou throw. */
+/** Un moteur LaTeX (tectonic ou pdflatex) est-il disponible ? (pré-check). */
+export function texAvailable(): boolean {
+  for (const { bin } of texCandidates()) {
+    if (bin.includes("/")) { try { if (fs.existsSync(bin)) return true; } catch {} }
+    else {
+      for (const d of (process.env.PATH ?? "").split(path.delimiter)) {
+        try { if (d && fs.existsSync(path.join(d, bin))) return true; } catch {}
+      }
+    }
+  }
+  return false;
+}
+
 export async function compileExamPdf(base: string): Promise<string> {
   const tex = `${base}.tex`;
   const pdf = `${base}.pdf`;
@@ -205,6 +218,49 @@ h1{font-size:20px}h2{font-size:15px;border-top:1px solid #ddd;padding-top:14px}p
 <h1>${esc(spec.title)}</h1>
 <p class="warn">⚠️ La compilation LaTeX (PDF) a échoué — voici le contenu brut. Installe <code>tectonic</code> (brew install tectonic) pour le vrai PDF EPFL.</p>
 ${blocks}`;
+}
+
+/** Rendu d'UN exercice ciblé : page d'exo SANS garde / en-tête EPFL / barème (juste l'énoncé). */
+export function renderExerciseLatex(q: ExamQuestion, dateLabel: string, includeSolutions = true): string {
+  let preamble = fs.readFileSync(path.join(LATEX_DIR, "preamble.tex"), "utf8");
+  const figPath = path.join(LATEX_DIR, "figures.tex");
+  if (fs.existsSync(figPath)) preamble += "\n" + fs.readFileSync(figPath, "utf8");
+  const pts = qPoints(q);
+  const sol = includeSolutions
+    ? [String.raw`\clearpage{\large\textbf{Solution}}\par\vspace{6pt}\hrule\medskip`, (q as any).solution_tex ?? ""].join("\n")
+    : "";
+  return [
+    preamble,
+    String.raw`\newcommand{\FOOTDATE}{${footDate(dateLabel)}}`,
+    String.raw`\examchromefalse\pagestyle{empty}`,
+    String.raw`\begin{document}`,
+    String.raw`\noindent{\large\textbf{Exercise \quad-- ${texEscape(q.concept)} \hfill [${pts} points]}}\par\vspace{4pt}\hrule\vspace{10pt}`,
+    (q as any).statement_tex ?? "",
+    sol,
+    String.raw`\end{document}`,
+  ].join("\n");
+}
+
+/** Construit l'artefact d'UN exercice ciblé : PDF énoncé (sans corrigé) + PDF corrigé, sans garde. */
+export async function buildExerciseArtifact(q: ExamQuestion, id: number, dateLabel: string): Promise<{ file: string; kind: "pdf" | "html" }> {
+  fs.mkdirSync(EXAM_DIR, { recursive: true });
+  const base = `exam-${id}`;
+  for (const ext of ["pdf", "png"]) {
+    const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
+    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(EXAM_DIR, `epfl-logo.${ext}`));
+  }
+  fs.writeFileSync(path.join(EXAM_DIR, `${base}.tex`), renderExerciseLatex(q, dateLabel, false));
+  fs.writeFileSync(path.join(EXAM_DIR, `${base}-corrige.tex`), renderExerciseLatex(q, dateLabel, true));
+  try {
+    const pdf = await compileExamPdf(base);
+    try { await compileExamPdf(`${base}-corrige`); } catch (e) { console.error(`[exo] corrigé #${id} non compilé :`, (e as Error).message); }
+    return { file: pdf, kind: "pdf" };
+  } catch (e) {
+    const html = `${base}.html`;
+    fs.writeFileSync(path.join(EXAM_DIR, html), htmlFallback({ title: q.concept, questions: [q] } as ExamSpec, id, dateLabel));
+    console.error(`[exo] compilation LaTeX échouée pour #${id} → repli HTML :`, (e as Error).message);
+    return { file: html, kind: "html" };
+  }
 }
 
 /** Construit les artefacts : PDF examen SEUL (mode mock) + PDF corrigé ; HTML de repli sinon. */
