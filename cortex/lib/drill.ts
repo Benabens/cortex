@@ -1,5 +1,5 @@
 import { extractJson, runClaudeCode } from "@/lib/claude-code";
-import { directivesBlock } from "@/lib/directives";
+import { profile } from "@/lib/course-profile";
 
 export type Drill = {
   concept: string;
@@ -22,9 +22,10 @@ const DRILL_SCHEMA = {
 
 /** Génère UNE question ciblée façon examen CS-202 + 5 indices progressifs (via Max). */
 export async function generateDrill(concept: string): Promise<Drill> {
+  const p = profile();
   const prompt = [
-    `Tu es l'équipe enseignante de CS-202 Computer Systems (EPFL).`,
-    directivesBlock(),
+    p.qaIntro(),
+    p.directivesBlock(),
     ``,
     `Génère UNE seule question d'entraînement ciblée sur : « ${concept} ».`,
     `Elle doit être APPLIQUÉE (calculer / tracer / remplir / justifier), au format et niveau d'un vrai final EPFL, en respectant les CONTRAINTES DURES ci-dessus.`,

@@ -11,11 +11,21 @@ import * as cheerio from "cheerio";
 import fs from "node:fs";
 import path from "node:path";
 import { extractText, getDocumentProxy } from "unpdf";
-import { ensureFts, sqlite } from "../db/client";
+import { currentCourse, enterCourse, ensureFts, sqlite } from "../db/client";
+import { coursePaths, DEFAULT_COURSE } from "../lib/courses";
 import { ingestAllRefs } from "../lib/sources";
 import { tokenize } from "../lib/text";
 
-const CONTENT_ROOT = path.resolve(process.cwd(), ".."); // dossier Compsys-claude
+// Cours à ingérer : `npm run ingest -- --course=algo` (défaut cs-202). À FIXER avant les
+// prepared statements/CONTENT_ROOT ci-dessous → ils ciblent la DB et le contenu du bon cours.
+const courseArg = process.argv.find((a) => a.startsWith("--course="))?.split("=")[1];
+if (courseArg) process.env.CORTEX_COURSE = courseArg;
+enterCourse(courseArg);
+const COURSE = currentCourse();
+const CONTENT_ROOT = coursePaths(COURSE).contentRoot; // cs-202 → racine du repo ; autres → data/<id>/content
+// La table FTS doit exister AVANT les prepared statements top-level ci-dessous (DB neuve d'un
+// nouveau cours : le schéma de base ne crée pas fts_items). No-op pour cs-202 (déjà présente).
+ensureFts();
 
 const clean = (s: string) =>
   s.replace(/\s+/g, " ").replace(/ /g, " ").trim();
@@ -345,27 +355,78 @@ function buildVocab(): number {
   return df.size;
 }
 
+// ---------- Ingestion GÉNÉRIQUE (cours ≠ cs-202) : tout le contenu de data/<id>/content ----------
+function inferGenericType(rel: string): { type: string; year: number | null } {
+  const f = rel.toLowerCase();
+  let m;
+  if ((m = f.match(/final.*?(\d{4})|(\d{4}).*?final/))) return { type: "final", year: +(m[1] || m[2]) };
+  if ((m = f.match(/midterm.*?(\d{4})|(\d{4}).*?midterm/))) return { type: "midterm", year: +(m[1] || m[2]) };
+  if (/\/notes?\/|study.?guide|hints|scope|checklist|\bplan\b/.test(f)) return { type: "note", year: null };
+  if (/s[ée]rie|exercise|\bexo\b|tutorial|homework|pset|problem.?set|\/series?\//.test(f)) return { type: "serie", year: null };
+  if (/cheat|formula|recap|summary/.test(f)) return { type: "cheatsheet", year: null };
+  if (/lecture|cours|slides|chapter/.test(f)) return { type: "course_pdf", year: null };
+  if (/\.(md|txt)$/.test(f)) return { type: "note", year: null };
+  return { type: "exercise", year: null };
+}
+
+async function ingestGenericContent(): Promise<void> {
+  if (!fs.existsSync(CONTENT_ROOT)) {
+    console.log(`⚠ Dossier de contenu absent : ${CONTENT_ROOT}. Dépose le matériel du cours là (sites/séries/notes/cours) puis relance.`);
+    return;
+  }
+  let nSources = 0;
+  const files = listFiles(".", [".html", ".htm", ".md", ".txt", ".tex", ".c", ".h", ".pdf"]);
+  for (const rel of files) {
+    const { type, year } = inferGenericType(rel);
+    try {
+      if (rel.toLowerCase().endsWith(".pdf")) {
+        const buf = fs.readFileSync(path.join(CONTENT_ROOT, rel));
+        const pdf = await getDocumentProxy(new Uint8Array(buf));
+        const { text } = await extractText(pdf, { mergePages: false });
+        const pages = (Array.isArray(text) ? text : [text]).map(clean).filter((t) => t.length > 3);
+        const title = path.basename(rel, ".pdf");
+        addSource(type, title, rel, year, pages.map((t, i) => ({ type, lectureId: null, title: `${title} — p.${i + 1}`, text: t, anchor: `${rel}#page=${i + 1}` })));
+      } else if (/\.html?$/.test(rel)) {
+        const { title, text } = htmlToText(rel);
+        addSource(type, title, rel, year, [{ type, lectureId: null, title, text, anchor: rel }]);
+      } else {
+        const title = path.basename(rel);
+        addSource(type, title, rel, year, [{ type, lectureId: null, title, text: read(rel), anchor: rel }]);
+      }
+      nSources++;
+    } catch (e) {
+      console.log(`  ⚠ ${rel} ignoré : ${(e as Error).message}`);
+    }
+  }
+  console.log(`• contenu      : ${nSources} fichier(s) indexé(s) depuis ${CONTENT_ROOT}`);
+}
+
 async function main() {
   ensureFts();
+  console.log(`Cours : ${COURSE}`);
   console.log("Nettoyage des données dérivées (sources/items/fts)…");
   sqlite.exec("DELETE FROM items; DELETE FROM sources; DELETE FROM fts_items;");
 
-  const tx = sqlite.transaction(() => {
-    console.log("• reviews.html :", ingestReviews(), "cartes");
-    console.log("• index.html   :", ingestIndex(), "définitions/méthodes");
-    console.log("• exercices/   :", ingestExercices(), "exos");
-    console.log("• cheatsheets  :", ingestCheatsheets(), "boxes");
-    console.log("• labs/        :", ingestLabs(), "fichiers (énoncés + code C)");
-    console.log("• notes/       :", ingestNotes(), "notes (dont attendus staff)");
-    console.log("• docs racine  :", ingestRootDocs(), "HTML (finals/énoncés)");
-  });
-  tx();
+  if (COURSE === DEFAULT_COURSE) {
+    // ---- cs-202 : flux historique INCHANGÉ ----
+    const tx = sqlite.transaction(() => {
+      console.log("• reviews.html :", ingestReviews(), "cartes");
+      console.log("• index.html   :", ingestIndex(), "définitions/méthodes");
+      console.log("• exercices/   :", ingestExercices(), "exos");
+      console.log("• cheatsheets  :", ingestCheatsheets(), "boxes");
+      console.log("• labs/        :", ingestLabs(), "fichiers (énoncés + code C)");
+      console.log("• notes/       :", ingestNotes(), "notes (dont attendus staff)");
+      console.log("• docs racine  :", ingestRootDocs(), "HTML (finals/énoncés)");
+    });
+    tx();
+    console.log("• PDF cours    :", await ingestPdfs(), "pages");
+  } else {
+    // ---- autres cours : ingestion générique du dossier de contenu ----
+    await ingestGenericContent();
+  }
 
-  // PDF : hors transaction (async)
-  console.log("• PDF cours    :", await ingestPdfs(), "pages");
-
-  // Examens de référence uploadés (data/refs/) : hors transaction (async, parse PDF/HTML)
-  console.log("• refs uploadés:", await ingestAllRefs(), "examen(s) de référence");
+  // Examens de référence (data/<course>/refs/) : pour TOUS les cours.
+  console.log("• refs         :", await ingestAllRefs(), "examen(s) de référence");
 
   // Vocabulaire (pour la recherche tolérante aux fautes)
   console.log("• vocabulaire  :", buildVocab(), "termes");

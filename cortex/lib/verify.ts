@@ -1,6 +1,7 @@
+import { currentCourse } from "@/db/client";
 import { extractJson, runClaudeCode } from "@/lib/claude-code";
-import { directivesBlock } from "@/lib/directives";
-import { refImageFor } from "@/lib/figrefs";
+import { profile } from "@/lib/course-profile";
+import { getCourse } from "@/lib/courses";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
 
 export type VerifyResult = {
@@ -39,12 +40,17 @@ const ONE_SCHEMA = {
 
 /** Contrôle UN exercice : résolution à l'aveugle (avec la vraie page de réf) PUIS verdict. */
 async function verifyOne(q: ExamQuestion): Promise<VerifyResult | null> {
-  const img = refImageFor(q.category, q.concept);
+  const p = profile();
+  const c = getCourse(currentCourse());
+  const img = p.refImageFor(q.category, q.concept);
+  const step1 = img
+    ? `ÉTAPE 1 — Ouvre la vraie page de référence du MÊME TYPE : ${img} (outil Read). Puis RÉSOUS L'EXERCICE CI-DESSOUS DE ZÉRO, toi-même, rigoureusement (calcule, trace, compte). Écris ta solution complète dans "my_solution". Ne te laisse PAS influencer par le corrigé proposé (tu le verras à l'étape 2).`
+    : `ÉTAPE 1 — RÉSOUS L'EXERCICE CI-DESSOUS DE ZÉRO, toi-même, rigoureusement (calcule, trace, prouve). Écris ta solution complète dans "my_solution". Ne te laisse PAS influencer par le corrigé proposé (tu le verras à l'étape 2).`;
   const prompt = [
-    `Tu es un assistant (TA) rigoureux de CS-202 Computer Systems (EPFL). Tu contrôles UN SEUL exercice d'examen blanc.`,
-    directivesBlock(),
+    `Tu es un assistant (TA) rigoureux de ${c.examCode} ${c.examName} (${c.university}). Tu contrôles UN SEUL exercice d'examen blanc.`,
+    p.directivesBlock(),
     ``,
-    `ÉTAPE 1 — Ouvre la vraie page de référence du MÊME TYPE : ${img} (outil Read). Puis RÉSOUS L'EXERCICE CI-DESSOUS DE ZÉRO, toi-même, rigoureusement (calcule, trace, compte). Écris ta solution complète dans "my_solution". Ne te laisse PAS influencer par le corrigé proposé (tu le verras à l'étape 2).`,
+    step1,
     ``,
     `ÉNONCÉ (LaTeX) :`,
     q.statement_tex,

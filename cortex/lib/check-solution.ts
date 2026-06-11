@@ -1,4 +1,6 @@
+import { currentCourse } from "@/db/client";
 import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { getCourse } from "@/lib/courses";
 
 export type CheckResult = {
   verdict: "correct" | "partial" | "wrong";
@@ -11,8 +13,9 @@ export type CheckResult = {
  * Moteur = Claude Code (Max). `imageRel` = chemin relatif au cwd d'une photo de la réponse.
  */
 export async function checkSolution(input: { statement: string; answer?: string; imageRel?: string | null }): Promise<CheckResult> {
+  const c = getCourse(currentCourse());
   const lines = [
-    `Tu es un correcteur rigoureux de CS-202 Computer Systems (EPFL).`,
+    `Tu es un correcteur rigoureux de ${c.examCode} ${c.examName} (${c.university}).`,
     `VOICI LA QUESTION D'EXAMEN :`,
     input.statement,
     ``,

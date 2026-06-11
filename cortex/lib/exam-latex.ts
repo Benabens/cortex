@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { currentCourse } from "@/db/client";
+import { getCourse } from "@/lib/courses";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
 import { examsDir } from "@/lib/paths";
 
@@ -61,16 +63,24 @@ function coverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string): string
   const total = qs.reduce((s, q) => s + qPoints(q), 0);
   const dur = spec.duration_min ?? 180;
   const hours = Math.round(dur / 60);
+  // métadonnées du cours courant (cs-202 reproduit le texte historique à l'identique)
+  const c = getCourse(currentCourse());
+  const examCodeTex = c.examCode.replace(/-/g, "--"); // « CS-202 » → « CS--202 » (en-dash LaTeX)
+  const uniLines = c.universityLines.join("\\\\ ");
+  const profsTex = c.profs.length
+    ? c.profs.slice(0, -1).join(", ") + (c.profs.length > 1 ? " \\& " : "") + c.profs[c.profs.length - 1]
+    : "";
+  const facultyLine = [`\\textbf{${c.faculty}}`, `${examCodeTex} ${c.examName}`, profsTex].filter(Boolean).join("\\\\ ");
   return [
     String.raw`\thispagestyle{empty}`,
     String.raw`\noindent\begin{minipage}[t]{0.30\textwidth}\vspace{0pt}\epfllogo[30]\end{minipage}\hfill`,
     String.raw`\begin{minipage}[t]{0.64\textwidth}\vspace{2pt}\raggedleft\footnotesize\scshape`,
-    String.raw`École Polytechnique Fédérale de Lausanne\\ Eidgenössische Technische Hochschule -- Lausanne\\ Politecnico Federale -- Losanna\\ Swiss Federal Institute of Technology -- Lausanne\end{minipage}`,
+    `${uniLines}\\end{minipage}`,
     String.raw`\vspace{2pt}\noindent\rule{\textwidth}{1pt}`,
-    String.raw`\noindent\begin{minipage}[t]{0.7\textwidth}\vspace{0pt}\footnotesize\textbf{Faculté Informatique et Communications}\\ CS--202 Computer Systems\\ Argyraki K., Kashyap S. \& Chappelier J.-C.\end{minipage}\hfill`,
+    `\\noindent\\begin{minipage}[t]{0.7\\textwidth}\\vspace{0pt}\\footnotesize${facultyLine}\\end{minipage}\\hfill`,
     String.raw`\begin{minipage}[t]{0.25\textwidth}\vspace{0pt}\raggedleft\footnotesize Anonymisation:\\ \textbf{\#0000}\end{minipage}`,
     String.raw`\vspace{10pt}\noindent\normalsize NOM : Hanon Ymous \quad(000000)\hfill\textbf{Seat \#:} 0`,
-    String.raw`\vspace{0.5cm}\begin{center}{\Large\textbf{CS--202 COMPUTER SYSTEMS}}\\[6pt]{\large\textbf{Final Exam}}\\[5pt]${footDate(dateLabel)}\end{center}`,
+    `\\vspace{0.5cm}\\begin{center}{\\Large\\textbf{${examCodeTex} ${c.examName.toUpperCase()}}}\\\\[6pt]{\\large\\textbf{${c.examKind}}}\\\\[5pt]${footDate(dateLabel)}\\end{center}`,
     String.raw`\vspace{0.25cm}\noindent{\large\textbf{INSTRUCTIONS (please read carefully)}}\par\smallskip`,
     String.raw`\noindent\textbf{IMPORTANT!} Please strictly follow these instructions, otherwise your exam may be canceled.`,
     String.raw`\begin{enumerate}\setlength{\itemsep}{2pt}`,

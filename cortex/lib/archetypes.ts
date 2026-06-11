@@ -5,7 +5,7 @@
  */
 export type Archetype = {
   id: string;
-  category: "Networking" | "OS" | "C" | "Labs";
+  category: string; // cs-202 : "Networking" | "OS" | "C" | "Labs" ; autres cours : leurs propres catégories
   concept: string;
   structure: string; // comment construire la question (sous-questions en escalier)
   grid: string; // grille(s) de réponse à émettre
