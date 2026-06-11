@@ -158,8 +158,8 @@ export default function EntrainementPage() {
         </p>
         {exoJob && EXO_ACTIVE.includes(exoJob.status) ? (
           <div>
-            <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--surface-2)" }}>
-              <div className="h-full transition-all" style={{ width: `${exoJob.progress}%`, background: "var(--accent)" }} />
+            <div className="progress">
+              <div className="progress-bar" style={{ width: `${exoJob.progress}%` }} />
             </div>
             <div className="mt-2 flex items-center justify-between gap-3">
               <div className="text-[13px]" style={{ color: "var(--ink-2)" }}>{exoJob.currentStep}</div>

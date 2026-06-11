@@ -150,8 +150,8 @@ export default function ExamensPage() {
               <span className="text-[13px] font-medium" style={{ color: "var(--ink)" }}>Génération en cours…</span>
               <button className="btn btn-quiet" onClick={cancel}>annuler</button>
             </div>
-            <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--surface-2)" }}>
-              <div className="h-full transition-all" style={{ width: `${job!.progress}%`, background: "var(--accent)" }} />
+            <div className="progress">
+              <div className="progress-bar" style={{ width: `${job!.progress}%` }} />
             </div>
             <div className="mt-2 text-[13px]" style={{ color: "var(--ink-2)" }}>{job!.currentStep}</div>
             {job!.log.length > 0 && (

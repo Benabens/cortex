@@ -135,8 +135,8 @@ export default function SourcesPage() {
           </p>
           {importJob && INGEST_ACTIVE.includes(importJob.status) ? (
             <div>
-              <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--surface-2)" }}>
-                <div className="h-full transition-all" style={{ width: `${importJob.progress}%`, background: "var(--accent)" }} />
+              <div className="progress">
+                <div className="progress-bar" style={{ width: `${importJob.progress}%` }} />
               </div>
               <div className="mt-2 text-[13px]" style={{ color: "var(--ink-2)" }}>{importJob.currentStep}</div>
             </div>
