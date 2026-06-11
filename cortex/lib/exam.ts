@@ -1,5 +1,6 @@
 import { sqlite } from "@/db/client";
 import { anthropic, GEN_MODEL } from "@/lib/anthropic";
+import { buildBlueprint } from "@/lib/blueprint";
 import { extractJson, runClaudeCode } from "@/lib/claude-code";
 import { directivesBlock, staffNotesText } from "@/lib/directives";
 import { buildExamArtifact } from "@/lib/exam-latex";
@@ -425,7 +426,14 @@ async function generateBatch(ctx: ReturnType<typeof gatherContext>, slots: typeo
 export async function generateExamViaClaudeCode(opts: { verify?: boolean } = {}): Promise<{ id: number; url: string }> {
   const t0 = Date.now();
   const ctx = gatherContext();
-  const batches = [EXAM_SLOTS.slice(0, 3), EXAM_SLOTS.slice(3, 6)];
+  // Blueprint : 6 slots pilotés par archétypes × poids study guide × faiblesses (repli : EXAM_SLOTS).
+  let slots: { category: string; points: number; brief: string }[];
+  try {
+    slots = buildBlueprint();
+  } catch {
+    slots = EXAM_SLOTS as any;
+  }
+  const batches = [slots.slice(0, 3), slots.slice(3, 6)];
 
   // checkpoint : lots déjà générés lors d'un run précédent interrompu
   let saved: (ExamQuestion[] | null)[] = [null, null];
