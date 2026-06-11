@@ -86,8 +86,8 @@ function coverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string): string
   ].join("\n");
 }
 
-/** Construit le source .tex complet à partir d'un ExamSpec (énoncés + corrigé en annexe). */
-export function renderExamTex(spec: ExamSpec, dateLabel: string): string {
+/** Construit le source .tex complet à partir d'un ExamSpec (corrigé en annexe optionnel). */
+export function renderExamTex(spec: ExamSpec, dateLabel: string, includeSolutions = true): string {
   const qs = [...spec.questions].sort((a, b) => catRank(a.category) - catRank(b.category));
   let preamble = fs.readFileSync(path.join(LATEX_DIR, "preamble.tex"), "utf8");
   const figPath = path.join(LATEX_DIR, "figures.tex");
@@ -119,7 +119,7 @@ export function renderExamTex(spec: ExamSpec, dateLabel: string): string {
     String.raw`\begin{document}`,
     coverTex(spec, qs, dateLabel),
     body,
-    solutions,
+    includeSolutions ? solutions : "",
     String.raw`\end{document}`,
   ].join("\n");
 }
@@ -207,7 +207,7 @@ h1{font-size:20px}h2{font-size:15px;border-top:1px solid #ddd;padding-top:14px}p
 ${blocks}`;
 }
 
-/** Construit l'artefact d'examen : PDF LaTeX si possible, sinon HTML de repli. */
+/** Construit les artefacts : PDF examen SEUL (mode mock) + PDF corrigé ; HTML de repli sinon. */
 export async function buildExamArtifact(spec: ExamSpec, id: number, dateLabel: string): Promise<{ file: string; kind: "pdf" | "html" }> {
   fs.mkdirSync(EXAM_DIR, { recursive: true });
   const base = `exam-${id}`;
@@ -216,9 +216,14 @@ export async function buildExamArtifact(spec: ExamSpec, id: number, dateLabel: s
     const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
     if (fs.existsSync(src)) fs.copyFileSync(src, path.join(EXAM_DIR, `epfl-logo.${ext}`));
   }
-  fs.writeFileSync(path.join(EXAM_DIR, `${base}.tex`), renderExamTex(spec, dateLabel));
+  // 1) examen seul (corrigé caché — mode mock) ; 2) version corrigée
+  fs.writeFileSync(path.join(EXAM_DIR, `${base}.tex`), renderExamTex(spec, dateLabel, false));
+  fs.writeFileSync(path.join(EXAM_DIR, `${base}-corrige.tex`), renderExamTex(spec, dateLabel, true));
   try {
     const pdf = await compileExamPdf(base);
+    try { await compileExamPdf(`${base}-corrige`); } catch (e) {
+      console.error(`[exam] corrigé #${id} non compilé :`, (e as Error).message);
+    }
     return { file: pdf, kind: "pdf" };
   } catch (e) {
     const html = `${base}.html`;

@@ -248,6 +248,10 @@ export function listExams() {
     questionCount: r.nq,
     verifySummary: r.verify_summary ?? null,
     url: r.html_path ? `/exam/${path.basename(r.html_path)}` : null,
+    solutionsUrl:
+      r.html_path && r.html_path.endsWith(".pdf") && fs.existsSync(path.join(EXAM_DIR, path.basename(r.html_path, ".pdf") + "-corrige.pdf"))
+        ? `/exam/${path.basename(r.html_path, ".pdf")}-corrige.pdf`
+        : null,
   }));
 }
 
@@ -259,9 +263,11 @@ export function deleteExam(id: number) {
   sqlite.prepare(`DELETE FROM exams WHERE id = ?`).run(id);
   if (row?.html_path) {
     const baseNoExt = path.basename(row.html_path).replace(/\.[^.]+$/, "");
-    for (const ext of ["pdf", "html", "tex", "log", "aux"]) {
-      const p = path.join(EXAM_DIR, `${baseNoExt}.${ext}`);
-      if (fs.existsSync(p)) fs.unlinkSync(p);
+    for (const b of [baseNoExt, `${baseNoExt}-corrige`]) {
+      for (const ext of ["pdf", "html", "tex", "log", "aux"]) {
+        const p = path.join(EXAM_DIR, `${b}.${ext}`);
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+      }
     }
   }
 }

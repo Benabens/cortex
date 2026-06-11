@@ -12,7 +12,7 @@ const MIME: Record<string, string> = {
 
 export async function GET(_req: Request, { params }: { params: Promise<{ file: string }> }) {
   const { file } = await params;
-  if (!/^exam-\d+\.(pdf|html)$/.test(file)) return new NextResponse("Bad name", { status: 400 });
+  if (!/^exam-\d+(-corrige)?\.(pdf|html)$/.test(file)) return new NextResponse("Bad name", { status: 400 });
   const abs = path.join(EXAM_DIR, file);
   if (!abs.startsWith(EXAM_DIR + path.sep) || !fs.existsSync(abs))
     return new NextResponse("Not found", { status: 404 });
