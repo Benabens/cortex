@@ -5,17 +5,20 @@ import {
   removeUploadedRef,
   toggleReference,
 } from "@/lib/sources";
+import { useCourse } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export function GET() {
+export function GET(req: NextRequest) {
+  useCourse(req);
   return NextResponse.json({ exams: listExamSources(), corpus: corpusSummary() });
 }
 
 /** Upload d'un examen de référence (multipart) OU bascule d'une référence (JSON). */
 export async function POST(req: NextRequest) {
+  useCourse(req);
   const ct = req.headers.get("content-type") ?? "";
 
   if (ct.includes("multipart/form-data")) {
@@ -48,6 +51,7 @@ export async function POST(req: NextRequest) {
 }
 
 export function DELETE(req: NextRequest) {
+  useCourse(req);
   const srcPath = req.nextUrl.searchParams.get("path");
   if (!srcPath) return NextResponse.json({ error: "path manquant" }, { status: 400 });
   removeUploadedRef(srcPath);

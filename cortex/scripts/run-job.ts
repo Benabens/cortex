@@ -4,13 +4,15 @@
  * et au rechargement de page. Écrit l'avancement dans la table `jobs`.
  * Lancer : tsx scripts/run-job.ts <jobId>
  */
-import { sqlite } from "../db/client";
+import { enterCourse, sqlite } from "../db/client";
 import { claudeBinPath } from "../lib/claude-code";
 import { generateExamViaClaudeCode, generateTargetedExercise } from "../lib/exam";
 import { texAvailable } from "../lib/exam-latex";
 import { getJob, logJob, setJob } from "../lib/jobs";
 
 const jobId = Number(process.argv[2]);
+// Cours du job (argv[3] ; CORTEX_COURSE est aussi posé par startWorker) → ouvre la BONNE DB.
+enterCourse(process.argv[3]);
 
 function fail(msg: string): never {
   try { setJob(jobId, { status: "error", error: msg }); logJob(jobId, "ERREUR : " + msg); } catch {}

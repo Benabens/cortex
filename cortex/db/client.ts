@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs";
 import path from "node:path";
-import { courseDbPath, DEFAULT_COURSE } from "../lib/courses";
+import { courseDbPath, DEFAULT_COURSE, normalizeCourse } from "../lib/courses";
 import * as schema from "./schema";
 
 /**
@@ -29,6 +29,17 @@ export function runWithCourse<T>(courseId: string | null | undefined, fn: () => 
 /** Cours courant : contexte ALS → env CORTEX_COURSE → cs-202. */
 export function currentCourse(): string {
   return courseCtx.getStore() ?? process.env.CORTEX_COURSE ?? DEFAULT_COURSE;
+}
+
+/**
+ * Installe le cours courant pour le reste de l'exécution asynchrone en cours
+ * (ex. 1ʳᵉ ligne d'un route handler). Chaque requête HTTP a sa propre chaîne async →
+ * pas de fuite entre requêtes. Cours inconnu → cs-202.
+ */
+export function enterCourse(courseId: string | null | undefined): string {
+  const c = normalizeCourse(courseId);
+  courseCtx.enterWith(c);
+  return c;
 }
 
 // ---- schéma de base pour les DB NEUVES (cours ≠ cs-202) ----

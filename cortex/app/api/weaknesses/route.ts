@@ -1,4 +1,5 @@
 import { createWeakness, deleteWeakness, listWeaknesses } from "@/lib/weaknesses";
+import { useCourse } from "@/lib/req";
 import { uploadsDir } from "@/lib/paths";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -16,11 +17,13 @@ const EXT: Record<string, string> = {
   "image/webp": "webp",
 };
 
-export function GET() {
+export function GET(req: NextRequest) {
+  useCourse(req);
   return NextResponse.json({ weaknesses: listWeaknesses() });
 }
 
 export async function POST(req: NextRequest) {
+  useCourse(req);
   const form = await req.formData();
   let topic = String(form.get("topic") ?? "").trim();
   const description = String(form.get("description") ?? "").trim();
@@ -50,6 +53,7 @@ export async function POST(req: NextRequest) {
 }
 
 export function DELETE(req: NextRequest) {
+  useCourse(req);
   const id = Number(req.nextUrl.searchParams.get("id"));
   if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
   const screenshot = deleteWeakness(id);

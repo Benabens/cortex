@@ -1,4 +1,5 @@
-import { sqlite } from "@/db/client";
+import { currentCourse, sqlite } from "@/db/client";
+import { DEFAULT_COURSE } from "@/lib/courses";
 import { anthropic, GEN_MODEL } from "@/lib/anthropic";
 import { ARCHETYPES } from "@/lib/archetypes";
 import { buildBlueprint } from "@/lib/blueprint";
@@ -15,6 +16,12 @@ import fs from "node:fs";
 import path from "node:path";
 
 const EXAM_DIR = () => examsDir();
+
+/** Suffixe `?course=` pour les liens fichiers servis (vide pour cs-202 → URLs identiques à avant). */
+function courseQ(): string {
+  const c = currentCourse();
+  return c === DEFAULT_COURSE ? "" : `?course=${c}`;
+}
 
 export type ExamQuestion = {
   concept: string;
@@ -251,10 +258,10 @@ export function listExams() {
     status: r.status,
     questionCount: r.nq,
     verifySummary: r.verify_summary ?? null,
-    url: r.html_path ? `/exam/${path.basename(r.html_path)}` : null,
+    url: r.html_path ? `/exam/${path.basename(r.html_path)}${courseQ()}` : null,
     solutionsUrl:
       r.html_path && r.html_path.endsWith(".pdf") && fs.existsSync(path.join(EXAM_DIR(), path.basename(r.html_path, ".pdf") + "-corrige.pdf"))
-        ? `/exam/${path.basename(r.html_path, ".pdf")}-corrige.pdf`
+        ? `/exam/${path.basename(r.html_path, ".pdf")}-corrige.pdf${courseQ()}`
         : null,
   }));
 }
@@ -325,7 +332,7 @@ export async function persistExam(spec: ExamSpec, report?: VerifyReport): Promis
   }
 
   markTested([...spec.questions.map((q) => q.concept), ...dueConcepts(6)]);
-  return { id, url: `/exam/${file}`, texError };
+  return { id, url: `/exam/${file}${courseQ()}`, texError };
 }
 
 // ---------------- EXERCICE CIBLÉ (Phase 3) : 1 exo qualité examen, sans garde ----------------
@@ -422,7 +429,7 @@ async function persistExercise(q: ExamQuestion, report?: VerifyReport): Promise<
   sqlite.prepare(`UPDATE exams SET html_path = ? WHERE id = ?`).run(file, id);
   if (report) sqlite.prepare(`UPDATE exams SET verify_summary = ? WHERE id = ?`).run(`ok=${report.ok} corrigés=${report.fixed} durcis=${report.regenerated}`, id);
   markTested([q.concept]);
-  return { id, url: `/exam/${file}`, texError };
+  return { id, url: `/exam/${file}${courseQ()}`, texError };
 }
 
 /** Voie API directe (optionnelle, payante). */

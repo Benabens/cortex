@@ -1,4 +1,4 @@
-import { sqlite } from "@/db/client";
+import { currentCourse, sqlite } from "@/db/client";
 import { examsDir } from "@/lib/paths";
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
@@ -102,14 +102,19 @@ export function listJobs(limit = 10): Job[] {
   return (sqlite.prepare(`SELECT * FROM jobs ORDER BY id DESC LIMIT ?`).all(limit) as any[]).map(rowToJob);
 }
 
-/** Lance le worker DÉTACHÉ : il survit à la requête HTTP et au rechargement de page. */
-export function startWorker(jobId: number) {
+/**
+ * Lance le worker DÉTACHÉ : il survit à la requête HTTP et au rechargement de page.
+ * Le `course` est passé en argv ET en env (CORTEX_COURSE) → le worker ouvre la BONNE DB.
+ */
+export function startWorker(jobId: number, course?: string) {
   const cwd = process.cwd();
+  const c = course ?? currentCourse();
   const tsxLocal = path.join(cwd, "node_modules", ".bin", "tsx");
   const useLocal = fs.existsSync(tsxLocal);
   const bin = useLocal ? tsxLocal : "npx";
-  const args = useLocal ? ["scripts/run-job.ts", String(jobId)] : ["tsx", "scripts/run-job.ts", String(jobId)];
-  const env = { ...process.env };
+  const tail = ["scripts/run-job.ts", String(jobId), c];
+  const args = useLocal ? tail : ["tsx", ...tail];
+  const env = { ...process.env, CORTEX_COURSE: c };
   const child = spawn(bin, args, { cwd, detached: true, stdio: "ignore", env });
   // PID persisté tout de suite (le worker le ré-écrit au démarrage) → annulable même pendant le démarrage
   if (child.pid) setJob(jobId, { pid: child.pid });

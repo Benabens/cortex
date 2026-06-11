@@ -1,5 +1,6 @@
 import { sqlite } from "@/db/client";
 import { tokenize } from "@/lib/text";
+import { useCourse } from "@/lib/req";
 import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
@@ -148,6 +149,7 @@ function injectedScript(targetTitle: string, terms: string[]): string {
 }
 
 export function GET(req: NextRequest) {
+  useCourse(req);
   const sp = req.nextUrl.searchParams;
   const src = sp.get("src") ?? "";
   const q = sp.get("q") ?? "";

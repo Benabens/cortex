@@ -1,4 +1,5 @@
 import { sqlite } from "@/db/client";
+import { useCourse } from "@/lib/req";
 import { uploadsDir } from "@/lib/paths";
 import { ClaudeCodeError, extractJson, runClaudeCode } from "@/lib/claude-code";
 import { getWeakness, updateWeaknessAnalysis } from "@/lib/weaknesses";
@@ -33,6 +34,7 @@ function buildPrompt(w: { topic: string; description: string | null; imageRel: s
 }
 
 export async function POST(req: NextRequest) {
+  useCourse(req);
   const { id, model } = await req.json().catch(() => ({ id: null }));
   if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
 

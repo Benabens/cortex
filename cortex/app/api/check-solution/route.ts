@@ -1,5 +1,6 @@
 import { checkSolution } from "@/lib/check-solution";
 import { ClaudeCodeError } from "@/lib/claude-code";
+import { useCourse } from "@/lib/req";
 import { uploadsDir } from "@/lib/paths";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -13,6 +14,7 @@ export const maxDuration = 220;
 const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
 
 export async function POST(req: NextRequest) {
+  useCourse(req);
   const ct = req.headers.get("content-type") ?? "";
   let statement = "";
   let answer = "";

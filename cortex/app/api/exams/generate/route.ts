@@ -1,4 +1,5 @@
 import { generateExam } from "@/lib/exam";
+import { useCourse } from "@/lib/req";
 import { activeJob, createJob, startWorker } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
 import { NextRequest, NextResponse } from "next/server";
@@ -12,6 +13,7 @@ export const dynamic = "force-dynamic";
  * à la requête / au reload. L'UI poll /api/jobs/:id. (dry-run = stub local synchrone.)
  */
 export async function POST(req: NextRequest) {
+  const course = useCourse(req);
   const dry = req.nextUrl.searchParams.get("dry") === "1";
   if (dry) {
     try {
@@ -31,7 +33,7 @@ export async function POST(req: NextRequest) {
 
   const jobId = createJob("exam");
   try {
-    startWorker(jobId);
+    startWorker(jobId, course);
   } catch (e: any) {
     return NextResponse.json({ error: `Impossible de lancer le worker : ${e?.message ?? e}` }, { status: 500 });
   }

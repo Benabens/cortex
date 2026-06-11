@@ -1,6 +1,7 @@
 import { sqlite } from "@/db/client";
 import { anthropic, GEN_MODEL } from "@/lib/anthropic";
 import { updateWeaknessAnalysis } from "@/lib/weaknesses";
+import { useCourse } from "@/lib/req";
 import { uploadsDir } from "@/lib/paths";
 import fs from "node:fs";
 import path from "node:path";
@@ -37,6 +38,7 @@ const SCHEMA = {
 } as const;
 
 export async function POST(req: NextRequest) {
+  useCourse(req);
   const { id } = await req.json().catch(() => ({ id: null }));
   if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
 
