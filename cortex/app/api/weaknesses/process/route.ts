@@ -1,4 +1,5 @@
 import { sqlite } from "@/db/client";
+import { uploadsDir } from "@/lib/paths";
 import { ClaudeCodeError, extractJson, runClaudeCode } from "@/lib/claude-code";
 import { getWeakness, updateWeaknessAnalysis } from "@/lib/weaknesses";
 import fs from "node:fs";
@@ -43,8 +44,8 @@ export async function POST(req: NextRequest) {
   // Chemin image relatif au cwd (l'outil Read de Claude Code lit dans le projet).
   let imageRel: string | null = null;
   if (row.screenshot_path) {
-    const abs = path.join(process.cwd(), "data", "uploads", path.basename(row.screenshot_path));
-    if (fs.existsSync(abs)) imageRel = `data/uploads/${path.basename(row.screenshot_path)}`;
+    const abs = path.join(uploadsDir(), path.basename(row.screenshot_path));
+    if (fs.existsSync(abs)) imageRel = `${path.relative(process.cwd(), uploadsDir())}/${path.basename(row.screenshot_path)}`;
   }
 
   try {

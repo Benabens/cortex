@@ -8,9 +8,10 @@
  */
 import path from "node:path";
 import { sqlite } from "../db/client";
+import { uploadsDir } from "../lib/paths";
 import { listPending } from "../lib/weaknesses";
 
-const upDir = (p: string) => path.join(process.cwd(), "data", "uploads", p);
+const upDir = (p: string) => path.join(uploadsDir(), p);
 
 const idArg = process.argv[2];
 if (idArg) {

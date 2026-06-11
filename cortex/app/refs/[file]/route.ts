@@ -1,10 +1,10 @@
+import { coursePaths } from "@/lib/courses";
 import fs from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const REFS_DIR = path.join(process.cwd(), "data", "refs");
 const MIME: Record<string, string> = {
   pdf: "application/pdf",
   html: "text/html",
@@ -13,9 +13,10 @@ const MIME: Record<string, string> = {
   md: "text/plain; charset=utf-8",
 };
 
-export async function GET(_req: Request, { params }: { params: Promise<{ file: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ file: string }> }) {
   const { file } = await params;
   if (!/^[a-zA-Z0-9._-]+$/.test(file)) return new NextResponse("Bad name", { status: 400 });
+  const REFS_DIR = coursePaths(new URL(req.url).searchParams.get("course")).refsDir;
   const abs = path.join(REFS_DIR, file);
   if (!abs.startsWith(REFS_DIR + path.sep) || !fs.existsSync(abs))
     return new NextResponse("Not found", { status: 404 });

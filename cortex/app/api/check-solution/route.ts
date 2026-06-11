@@ -1,5 +1,6 @@
 import { checkSolution } from "@/lib/check-solution";
 import { ClaudeCodeError } from "@/lib/claude-code";
+import { uploadsDir } from "@/lib/paths";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -9,7 +10,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 220;
 
-const UPLOAD_DIR = path.join(process.cwd(), "data", "uploads");
 const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
 
 export async function POST(req: NextRequest) {
@@ -26,9 +26,9 @@ export async function POST(req: NextRequest) {
     if (file instanceof File && file.size > 0) {
       const ext = EXT[file.type] ?? "png";
       if (file.size > 12 * 1024 * 1024) return NextResponse.json({ error: "Image trop lourde (max 12 Mo)." }, { status: 400 });
-      fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+      fs.mkdirSync(uploadsDir(), { recursive: true });
       const name = `${crypto.randomUUID()}.${ext}`;
-      fs.writeFileSync(path.join(UPLOAD_DIR, name), Buffer.from(await file.arrayBuffer()));
+      fs.writeFileSync(path.join(uploadsDir(), name), Buffer.from(await file.arrayBuffer()));
       imageRel = `data/uploads/${name}`;
     }
   } else {

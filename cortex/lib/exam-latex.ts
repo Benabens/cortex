@@ -3,9 +3,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
+import { examsDir } from "@/lib/paths";
 
 const LATEX_DIR = path.join(process.cwd(), "latex");
-const EXAM_DIR = path.join(process.cwd(), "data", "exams");
 
 const CAT_ORDER = ["Networking", "OS", "C", "Project"];
 const catRank = (c?: string) => {
@@ -153,7 +153,7 @@ function texCandidates(): { bin: string; kind: "tectonic" | "pdflatex" }[] {
   return c;
 }
 
-/** Compile <base>.tex (déjà écrit dans EXAM_DIR) en <base>.pdf. Renvoie le nom du PDF ou throw. */
+/** Compile <base>.tex (déjà écrit dans examsDir()) en <base>.pdf. Renvoie le nom du PDF ou throw. */
 /** Un moteur LaTeX (tectonic ou pdflatex) est-il disponible ? (pré-check). */
 export function texAvailable(): boolean {
   for (const { bin } of texCandidates()) {
@@ -170,19 +170,19 @@ export function texAvailable(): boolean {
 export async function compileExamPdf(base: string): Promise<string> {
   const tex = `${base}.tex`;
   const pdf = `${base}.pdf`;
-  const pdfAbs = path.join(EXAM_DIR, pdf);
+  const pdfAbs = path.join(examsDir(), pdf);
   let lastErr = "Aucun moteur LaTeX trouvé (installe tectonic : brew install tectonic).";
   for (const { bin, kind } of texCandidates()) {
     try {
       if (kind === "tectonic") {
-        const r = await spawnP(bin, ["--chatter", "minimal", "--keep-logs", tex], EXAM_DIR, 240_000);
+        const r = await spawnP(bin, ["--chatter", "minimal", "--keep-logs", tex], examsDir(), 240_000);
         if (r.code === 0 && fs.existsSync(pdfAbs)) return pdf;
         lastErr = tailLog(base) || r.err || `tectonic code ${r.code}`;
       } else {
         // pdflatex : 2 passes (header/page refs)
         const a = ["-interaction=nonstopmode", "-halt-on-error", tex];
-        const r1 = await spawnP(bin, a, EXAM_DIR, 120_000);
-        if (r1.code === 0) await spawnP(bin, a, EXAM_DIR, 120_000);
+        const r1 = await spawnP(bin, a, examsDir(), 120_000);
+        if (r1.code === 0) await spawnP(bin, a, examsDir(), 120_000);
         if (fs.existsSync(pdfAbs) && r1.code === 0) return pdf;
         lastErr = tailLog(base) || `pdflatex code ${r1.code}`;
       }
@@ -195,7 +195,7 @@ export async function compileExamPdf(base: string): Promise<string> {
 }
 
 function tailLog(base: string): string {
-  const log = path.join(EXAM_DIR, `${base}.log`);
+  const log = path.join(examsDir(), `${base}.log`);
   if (!fs.existsSync(log)) return "";
   const txt = fs.readFileSync(log, "utf8");
   const lines = txt.split("\n").filter((l) => /^!|error|Undefined|Runaway/i.test(l));
@@ -371,14 +371,14 @@ export type ArtifactResult = { file: string; kind: "pdf" | "html"; texError?: st
 
 /** Construit l'artefact d'UN exercice ciblé : PDF énoncé (sans corrigé) + PDF corrigé, sans garde. */
 export async function buildExerciseArtifact(q: ExamQuestion, id: number, dateLabel: string): Promise<ArtifactResult> {
-  fs.mkdirSync(EXAM_DIR, { recursive: true });
+  fs.mkdirSync(examsDir(), { recursive: true });
   const base = `exam-${id}`;
   for (const ext of ["pdf", "png"]) {
     const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(EXAM_DIR, `epfl-logo.${ext}`));
+    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
   }
-  fs.writeFileSync(path.join(EXAM_DIR, `${base}.tex`), renderExerciseLatex(q, dateLabel, false));
-  fs.writeFileSync(path.join(EXAM_DIR, `${base}-corrige.tex`), renderExerciseLatex(q, dateLabel, true));
+  fs.writeFileSync(path.join(examsDir(), `${base}.tex`), renderExerciseLatex(q, dateLabel, false));
+  fs.writeFileSync(path.join(examsDir(), `${base}-corrige.tex`), renderExerciseLatex(q, dateLabel, true));
   try {
     const pdf = await compileExamPdf(base);
     try { await compileExamPdf(`${base}-corrige`); } catch (e) { console.error(`[exo] corrigé #${id} non compilé :`, (e as Error).message); }
@@ -386,7 +386,7 @@ export async function buildExerciseArtifact(q: ExamQuestion, id: number, dateLab
   } catch (e) {
     const msg = (e as Error).message;
     const html = `${base}.html`;
-    fs.writeFileSync(path.join(EXAM_DIR, html), htmlFallback({ title: q.concept, questions: [q] } as ExamSpec, id, dateLabel, msg));
+    fs.writeFileSync(path.join(examsDir(), html), htmlFallback({ title: q.concept, questions: [q] } as ExamSpec, id, dateLabel, msg));
     console.error(`[exo] compilation LaTeX échouée pour #${id} → repli HTML lisible :`, msg);
     return { file: html, kind: "html", texError: msg };
   }
@@ -394,16 +394,16 @@ export async function buildExerciseArtifact(q: ExamQuestion, id: number, dateLab
 
 /** Construit les artefacts : PDF examen SEUL (mode mock) + PDF corrigé ; HTML lisible de repli sinon. */
 export async function buildExamArtifact(spec: ExamSpec, id: number, dateLabel: string): Promise<ArtifactResult> {
-  fs.mkdirSync(EXAM_DIR, { recursive: true });
+  fs.mkdirSync(examsDir(), { recursive: true });
   const base = `exam-${id}`;
   // copie un éventuel logo officiel pour la compilation
   for (const ext of ["pdf", "png"]) {
     const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(EXAM_DIR, `epfl-logo.${ext}`));
+    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
   }
   // 1) examen seul (corrigé caché — mode mock) ; 2) version corrigée
-  fs.writeFileSync(path.join(EXAM_DIR, `${base}.tex`), renderExamTex(spec, dateLabel, false));
-  fs.writeFileSync(path.join(EXAM_DIR, `${base}-corrige.tex`), renderExamTex(spec, dateLabel, true));
+  fs.writeFileSync(path.join(examsDir(), `${base}.tex`), renderExamTex(spec, dateLabel, false));
+  fs.writeFileSync(path.join(examsDir(), `${base}-corrige.tex`), renderExamTex(spec, dateLabel, true));
   try {
     const pdf = await compileExamPdf(base);
     try { await compileExamPdf(`${base}-corrige`); } catch (e) {
@@ -413,7 +413,7 @@ export async function buildExamArtifact(spec: ExamSpec, id: number, dateLabel: s
   } catch (e) {
     const msg = (e as Error).message;
     const html = `${base}.html`;
-    fs.writeFileSync(path.join(EXAM_DIR, html), htmlFallback(spec, id, dateLabel, msg));
+    fs.writeFileSync(path.join(examsDir(), html), htmlFallback(spec, id, dateLabel, msg));
     console.error(`[exam] compilation LaTeX échouée pour #${id} → repli HTML lisible :`, msg);
     return { file: html, kind: "html", texError: msg };
   }

@@ -1,4 +1,5 @@
 import { ensureFts, sqlite } from "@/db/client";
+import { refsDir } from "@/lib/paths";
 import * as cheerio from "cheerio";
 import fs from "node:fs";
 import path from "node:path";
@@ -16,7 +17,8 @@ import { extractText, getDocumentProxy } from "unpdf";
  * survivre à `npm run ingest` qui reconstruit sources/items à chaque fois.
  */
 
-export const REFS_DIR = path.join(process.cwd(), "data", "refs");
+/** Dossier des examens de référence du cours COURANT (cs-202 → data/refs ; autres → data/<id>/refs). */
+export const REFS_DIR = () => refsDir();
 
 export function ensureRefsSchema() {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS exam_refs (
@@ -28,7 +30,6 @@ export function ensureRefsSchema() {
     added_at TEXT DEFAULT (datetime('now'))
   );`);
 }
-ensureRefsSchema();
 
 const clean = (s: string) => s.replace(/\s+/g, " ").replace(/ /g, " ").trim();
 
@@ -50,17 +51,15 @@ export function inferExamMeta(filename: string): { kind: "final" | "midterm"; ye
   return { kind, year: m ? +m[1] : null };
 }
 
-// ---- insertion bas niveau (mêmes tables que l'ingestion) ----
-const insSource = sqlite.prepare(
-  `INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`
-);
-const insItem = sqlite.prepare(
-  `INSERT INTO items (source_id, type, lecture_id, title, text, html, images, tags, anchor)
-   VALUES (@sourceId,@type,@lectureId,@title,@text,@html,@images,@tags,@anchor)`
-);
-const insFts = sqlite.prepare(
-  `INSERT INTO fts_items (title, text, lecture_id, item_id, source_id) VALUES (?,?,?,?,?)`
-);
+// ---- insertion bas niveau (mêmes tables que l'ingestion), préparée sur la DB du cours courant ----
+const insStmts = () => ({
+  insSource: sqlite.prepare(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`),
+  insItem: sqlite.prepare(
+    `INSERT INTO items (source_id, type, lecture_id, title, text, html, images, tags, anchor)
+     VALUES (@sourceId,@type,@lectureId,@title,@text,@html,@images,@tags,@anchor)`
+  ),
+  insFts: sqlite.prepare(`INSERT INTO fts_items (title, text, lecture_id, item_id, source_id) VALUES (?,?,?,?,?)`),
+});
 
 /** Lit un fichier de référence et en extrait un titre + des pages de texte. */
 async function parseRefFile(abs: string): Promise<{ title: string; pages: string[] }> {
@@ -90,7 +89,8 @@ async function parseRefFile(abs: string): Promise<{ title: string; pages: string
  */
 export async function ingestRefFile(relPath: string): Promise<number> {
   ensureFts();
-  const filePath = path.join(REFS_DIR, path.basename(relPath));
+  const { insSource, insItem, insFts } = insStmts();
+  const filePath = path.join(REFS_DIR(), path.basename(relPath));
   const { kind, year } = inferExamMeta(path.basename(relPath));
   const { title, pages } = await parseRefFile(filePath);
 
@@ -126,10 +126,11 @@ export async function ingestRefFile(relPath: string): Promise<number> {
 
 /** Réingère tous les fichiers de data/refs/ (appelé par scripts/ingest.ts). */
 export async function ingestAllRefs(): Promise<number> {
-  if (!fs.existsSync(REFS_DIR)) return 0;
+  const dir = REFS_DIR();
+  if (!fs.existsSync(dir)) return 0;
   // uniquement des FICHIERS d'examen (ignore les sous-dossiers figref/ img/ et les fichiers cachés)
   const files = fs
-    .readdirSync(REFS_DIR, { withFileTypes: true })
+    .readdirSync(dir, { withFileTypes: true })
     .filter((e) => e.isFile() && !e.name.startsWith(".") && /\.(pdf|html?|txt|md)$/i.test(e.name))
     .map((e) => e.name);
   for (const f of files) await ingestRefFile(`refs/${f}`);
@@ -207,14 +208,15 @@ function safeName(name: string): string {
 
 /** Enregistre un examen uploadé : fichier → data/refs/, indexation, marqué référence. */
 export async function addUploadedRef(buffer: Buffer, filename: string): Promise<ExamSource> {
-  fs.mkdirSync(REFS_DIR, { recursive: true });
+  const dir = REFS_DIR();
+  fs.mkdirSync(dir, { recursive: true });
   let name = safeName(filename);
-  let abs = path.join(REFS_DIR, name);
+  let abs = path.join(dir, name);
   let n = 1;
   while (fs.existsSync(abs)) {
     const ext = path.extname(name);
     name = `${path.basename(name, ext)}-${n++}${ext}`;
-    abs = path.join(REFS_DIR, name);
+    abs = path.join(dir, name);
   }
   fs.writeFileSync(abs, buffer);
 
@@ -243,7 +245,7 @@ export function removeUploadedRef(srcPath: string) {
   }
   sqlite.prepare(`DELETE FROM exam_refs WHERE path = ?`).run(srcPath);
   if (row?.uploaded) {
-    const abs = path.join(REFS_DIR, path.basename(srcPath));
+    const abs = path.join(REFS_DIR(), path.basename(srcPath));
     if (fs.existsSync(abs)) fs.unlinkSync(abs);
   }
 }

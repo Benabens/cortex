@@ -1,6 +1,7 @@
 import { sqlite } from "@/db/client";
 import { anthropic, GEN_MODEL } from "@/lib/anthropic";
 import { updateWeaknessAnalysis } from "@/lib/weaknesses";
+import { uploadsDir } from "@/lib/paths";
 import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
@@ -9,7 +10,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-const UPLOAD_DIR = path.join(process.cwd(), "data", "uploads");
 const MEDIA: Record<string, "image/png" | "image/jpeg" | "image/gif" | "image/webp"> = {
   png: "image/png",
   jpg: "image/jpeg",
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
   ];
 
   if (w.screenshot_path) {
-    const abs = path.join(UPLOAD_DIR, path.basename(w.screenshot_path));
+    const abs = path.join(uploadsDir(), path.basename(w.screenshot_path));
     const ext = w.screenshot_path.split(".").pop()?.toLowerCase() ?? "png";
     if (fs.existsSync(abs) && MEDIA[ext]) {
       content.unshift({

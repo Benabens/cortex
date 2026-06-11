@@ -8,12 +8,13 @@ import { directivesBlock, staffNotesText } from "@/lib/directives";
 import { buildExamArtifact, buildExerciseArtifact } from "@/lib/exam-latex";
 import { refImageFor, visionBlock } from "@/lib/figrefs";
 import { dueConcepts, markTested } from "@/lib/schedule";
+import { examsDir } from "@/lib/paths";
 import { referencePaths } from "@/lib/sources";
 import { verifyAndHarden, type VerifyReport } from "@/lib/verify";
 import fs from "node:fs";
 import path from "node:path";
 
-const EXAM_DIR = path.join(process.cwd(), "data", "exams");
+const EXAM_DIR = () => examsDir();
 
 export type ExamQuestion = {
   concept: string;
@@ -252,7 +253,7 @@ export function listExams() {
     verifySummary: r.verify_summary ?? null,
     url: r.html_path ? `/exam/${path.basename(r.html_path)}` : null,
     solutionsUrl:
-      r.html_path && r.html_path.endsWith(".pdf") && fs.existsSync(path.join(EXAM_DIR, path.basename(r.html_path, ".pdf") + "-corrige.pdf"))
+      r.html_path && r.html_path.endsWith(".pdf") && fs.existsSync(path.join(EXAM_DIR(), path.basename(r.html_path, ".pdf") + "-corrige.pdf"))
         ? `/exam/${path.basename(r.html_path, ".pdf")}-corrige.pdf`
         : null,
   }));
@@ -268,7 +269,7 @@ export function deleteExam(id: number) {
     const baseNoExt = path.basename(row.html_path).replace(/\.[^.]+$/, "");
     for (const b of [baseNoExt, `${baseNoExt}-corrige`]) {
       for (const ext of ["pdf", "html", "tex", "log", "aux"]) {
-        const p = path.join(EXAM_DIR, `${b}.${ext}`);
+        const p = path.join(EXAM_DIR(), `${b}.${ext}`);
         if (fs.existsSync(p)) fs.unlinkSync(p);
       }
     }
@@ -510,7 +511,7 @@ function buildBatchPrompt(ctx: ReturnType<typeof gatherContext>, slots: { catego
   ].join("\n");
 }
 
-const CKPT = path.join(process.cwd(), "data", "exams", ".gen-checkpoint.json");
+const CKPT = () => path.join(examsDir(), ".gen-checkpoint.json");
 
 async function generateBatch(ctx: ReturnType<typeof gatherContext>, slots: typeof EXAM_SLOTS[number][]): Promise<ExamQuestion[]> {
   const text = await runClaudeCode({
@@ -548,7 +549,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep
   // checkpoint : lots déjà générés lors d'un run précédent interrompu
   let saved: (ExamQuestion[] | null)[] = [null, null];
   try {
-    const j = JSON.parse(fs.readFileSync(CKPT, "utf8"));
+    const j = JSON.parse(fs.readFileSync(CKPT(), "utf8"));
     if (Array.isArray(j?.batches) && Date.now() - (j.at ?? 0) < 2 * 3600_000) saved = j.batches;
   } catch {}
 
@@ -573,7 +574,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep
         }
       }
       saved[i] = qs!;
-      try { fs.mkdirSync(path.dirname(CKPT), { recursive: true }); fs.writeFileSync(CKPT, JSON.stringify({ at: Date.now(), batches: saved })); } catch {}
+      try { fs.mkdirSync(path.dirname(CKPT()), { recursive: true }); fs.writeFileSync(CKPT(), JSON.stringify({ at: Date.now(), batches: saved })); } catch {}
       batchesDone++;
       step(`Lot ${i + 1}/2 généré ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 10 + 25 * batchesDone);
       return qs!;
@@ -596,7 +597,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep
   }
   step("Compilation du PDF (LaTeX)…", 92);
   const out = await persistExam(spec, report);
-  try { fs.unlinkSync(CKPT); } catch {} // run complet → checkpoint consommé
+  try { fs.unlinkSync(CKPT()); } catch {} // run complet → checkpoint consommé
   if (out.texError) step(`⚠ Compilation LaTeX échouée → repli HTML lisible (${out.texError.slice(0, 180)})`, 97);
   step(`Terminé ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 100);
   return out;

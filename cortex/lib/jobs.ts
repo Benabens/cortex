@@ -1,4 +1,5 @@
 import { sqlite } from "@/db/client";
+import { examsDir } from "@/lib/paths";
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -42,7 +43,7 @@ export function ensureJobsSchema() {
     updated_at TEXT DEFAULT (datetime('now'))
   );`);
 }
-ensureJobsSchema();
+// (pas d'appel top-level : la table jobs est créée à la demande dans la DB du cours courant)
 
 export function createJob(type: "exam" | "exercise", target?: string): number {
   ensureJobsSchema();
@@ -115,7 +116,6 @@ export function startWorker(jobId: number) {
   child.unref();
 }
 
-const EXAM_DIR = path.join(process.cwd(), "data", "exams");
 
 /**
  * Groupe de processus réel d'un PID (via ps, portable macOS/Linux).
@@ -157,7 +157,7 @@ export function cancelJob(id: number): Job | null {
 /** Restes d'un job tué : checkpoint de génération + examen inséré mais jamais finalisé (compile interrompue). */
 function cleanupPartial(job: Job) {
   if (job.type === "exam") {
-    try { fs.unlinkSync(path.join(EXAM_DIR, ".gen-checkpoint.json")); } catch {}
+    try { fs.unlinkSync(path.join(examsDir(), ".gen-checkpoint.json")); } catch {}
   }
   try {
     // un examen fini a toujours html_path ; NULL + créé après le début du job = artefact partiel de CE job
@@ -169,7 +169,7 @@ function cleanupPartial(job: Job) {
       sqlite.prepare(`DELETE FROM exams WHERE id = ?`).run(examId);
       for (const suffix of ["", "-corrige"])
         for (const ext of ["tex", "pdf", "html", "log", "aux"]) {
-          try { fs.unlinkSync(path.join(EXAM_DIR, `exam-${examId}${suffix}.${ext}`)); } catch {}
+          try { fs.unlinkSync(path.join(examsDir(), `exam-${examId}${suffix}.${ext}`)); } catch {}
         }
     }
   } catch {}

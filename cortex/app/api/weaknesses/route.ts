@@ -1,4 +1,5 @@
 import { createWeakness, deleteWeakness, listWeaknesses } from "@/lib/weaknesses";
+import { uploadsDir } from "@/lib/paths";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -7,7 +8,6 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const UPLOAD_DIR = path.join(process.cwd(), "data", "uploads");
 const EXT: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -38,10 +38,10 @@ export async function POST(req: NextRequest) {
     const ext = EXT[file.type] ?? "png";
     if (file.size > 12 * 1024 * 1024)
       return NextResponse.json({ error: "Image trop lourde (max 12 Mo)." }, { status: 400 });
-    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    fs.mkdirSync(uploadsDir(), { recursive: true });
     const name = `${crypto.randomUUID()}.${ext}`;
     const buf = Buffer.from(await file.arrayBuffer());
-    fs.writeFileSync(path.join(UPLOAD_DIR, name), buf);
+    fs.writeFileSync(path.join(uploadsDir(), name), buf);
     screenshotPath = name;
   }
 
@@ -54,7 +54,7 @@ export function DELETE(req: NextRequest) {
   if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
   const screenshot = deleteWeakness(id);
   if (screenshot) {
-    const p = path.join(UPLOAD_DIR, path.basename(screenshot));
+    const p = path.join(uploadsDir(), path.basename(screenshot));
     if (fs.existsSync(p)) fs.unlinkSync(p);
   }
   return NextResponse.json({ ok: true });

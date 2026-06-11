@@ -2,13 +2,13 @@ import { sqlite } from "@/db/client";
 import { search } from "@/lib/search";
 
 // Ajoute la colonne `analyzed` si absente (suivi "à analyser / analysé par l'IA").
+// Appelé en tête de chaque fonction publique (idempotent) — s'applique à la DB du cours courant.
 function ensureSchema() {
   const cols = sqlite.prepare(`PRAGMA table_info(weaknesses)`).all() as { name: string }[];
   if (!cols.some((c) => c.name === "analyzed")) {
     sqlite.exec(`ALTER TABLE weaknesses ADD COLUMN analyzed INTEGER NOT NULL DEFAULT 0`);
   }
 }
-ensureSchema();
 
 export type RelatedItem = {
   itemId: number;
@@ -60,12 +60,12 @@ function autoLink(text: string, max = 8): number[] {
   return ids;
 }
 
-const resolveItems = sqlite.prepare(`
+const RESOLVE_ITEM_SQL = `
   SELECT i.id itemId, i.title, i.anchor, i.lecture_id lectureId,
          s.type sourceType, s.title sourceTitle, s.path sourcePath
   FROM items i JOIN sources s ON s.id = i.source_id
   WHERE i.id = ?
-`);
+`;
 
 function relatedFor(idsJson: string | null, q: string): RelatedItem[] {
   if (!idsJson) return [];
@@ -75,6 +75,7 @@ function relatedFor(idsJson: string | null, q: string): RelatedItem[] {
   } catch {
     return [];
   }
+  const resolveItems = sqlite.prepare(RESOLVE_ITEM_SQL); // lié à la connexion du cours courant
   const out: RelatedItem[] = [];
   for (const id of ids) {
     const r = resolveItems.get(id) as any;
@@ -97,6 +98,7 @@ export function createWeakness(input: {
   severity?: number;
   screenshotPath?: string | null;
 }): number {
+  ensureSchema();
   const related = autoLink(`${input.topic} ${input.description ?? ""}`);
   const id = sqlite
     .prepare(
@@ -114,6 +116,7 @@ export function createWeakness(input: {
 }
 
 export function listWeaknesses(): Weakness[] {
+  ensureSchema();
   const rows = sqlite
     .prepare(`SELECT * FROM weaknesses ORDER BY datetime(logged_at) DESC, id DESC`)
     .all() as any[];
@@ -147,6 +150,7 @@ export function deleteWeakness(id: number): string | null {
 
 /** Met à jour l'analyse (topic/description), recalcule les liens, marque analysé. */
 export function updateWeaknessAnalysis(id: number, topic: string, description: string) {
+  ensureSchema();
   const related = autoLink(`${topic} ${description}`);
   sqlite
     .prepare(`UPDATE weaknesses SET topic = ?, description = ?, related_item_ids = ?, analyzed = 1 WHERE id = ?`)

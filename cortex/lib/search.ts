@@ -1,4 +1,4 @@
-import { sqlite } from "@/db/client";
+import { currentCourse, sqlite } from "@/db/client";
 import { boundedEdit, tokenize } from "@/lib/text";
 
 export type SearchHit = {
@@ -31,10 +31,13 @@ const TYPE_LABELS: Record<string, string> = {
 
 const TYPE_ORDER = ["review", "final", "midterm", "serie", "exercise", "cheatsheet", "course_pdf"];
 
-// ----- Vocabulaire en cache (pour la correction de fautes) -----
-let _vocab: { sorted: string[]; set: Set<string>; df: Map<string, number> } | null = null;
-function vocab() {
-  if (!_vocab) {
+// ----- Vocabulaire en cache PAR COURS (pour la correction de fautes) -----
+type Vocab = { sorted: string[]; set: Set<string>; df: Map<string, number> };
+const _vocabByCourse = new Map<string, Vocab>();
+function vocab(): Vocab {
+  const course = currentCourse();
+  let v = _vocabByCourse.get(course);
+  if (!v) {
     let rows: { term: string; df: number }[] = [];
     try {
       rows = sqlite.prepare("SELECT term, df FROM vocab").all() as typeof rows;
@@ -43,9 +46,10 @@ function vocab() {
     }
     const sorted = rows.map((r) => r.term).sort();
     const df = new Map(rows.map((r) => [r.term, r.df]));
-    _vocab = { sorted, set: new Set(sorted), df };
+    v = { sorted, set: new Set(sorted), df };
+    _vocabByCourse.set(course, v);
   }
-  return _vocab;
+  return v;
 }
 
 /** Existe-t-il un terme du vocabulaire égal à `t` ou commençant par `t` ? */
@@ -105,7 +109,7 @@ function toFtsQuery(raw: string, mode: "and" | "or" = "and"): string | null {
   return groups.join(mode === "and" ? " AND " : " OR ");
 }
 
-const stmt = sqlite.prepare(`
+const SEARCH_SQL = `
   SELECT i.id itemId, s.id sourceId, s.type sourceType, s.title sourceTitle, s.path sourcePath,
          i.lecture_id lectureId, i.title title, i.anchor anchor,
          snippet(fts_items, 1, '«', '»', ' … ', 12) snippet
@@ -115,14 +119,15 @@ const stmt = sqlite.prepare(`
   WHERE fts_items MATCH ?
   ORDER BY bm25(fts_items) * (1.0 / (0.5 + s.recency_weight)), rank
   LIMIT ?
-`);
+`;
 
 export function search(raw: string, limit = 60, mode: "and" | "or" = "and"): SearchGroup[] {
   const q = toFtsQuery(raw, mode);
   if (!q) return [];
   let rows: SearchHit[];
   try {
-    rows = stmt.all(q, limit) as SearchHit[];
+    // préparé à l'appel → lié à la connexion du cours courant (proxy `sqlite`)
+    rows = sqlite.prepare(SEARCH_SQL).all(q, limit) as SearchHit[];
   } catch {
     return [];
   }

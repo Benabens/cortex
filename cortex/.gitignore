@@ -39,6 +39,18 @@ yarn-error.log*
 # Seuls les fichiers temporaires WAL/SHM de SQLite restent hors git.
 /data/*.db-wal
 /data/*.db-shm
+data/**/*.db-wal
+data/**/*.db-shm
+
+# Multi-cours : la DB et les artefacts générés des AUTRES cours sont reconstructibles par
+# `npm run ingest -- --course=<id>` → hors git. Ben committe le CONTENU source
+# (data/<id>/content + data/<id>/refs), pas la base ni les PDF générés.
+data/algo/*.db
+data/ml/*.db
+data/algo/exams/
+data/ml/exams/
+data/algo/uploads/
+data/ml/uploads/
 
 # vercel
 .vercel
