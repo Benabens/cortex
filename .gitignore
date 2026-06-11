@@ -1,1 +1,4 @@
 .DS_Store
+
+# artefacts Playwright MCP (screenshots de session)
+.playwright-mcp/

@@ -104,8 +104,22 @@ export default function RecherchePage() {
         style={{ fontSize: 16, padding: "13px 16px" }}
       />
       <p className="mt-2.5 h-4 text-[13px]" style={{ color: "var(--ink-3)" }}>
-        {loading ? "recherche…" : searched ? `${total} résultat${total > 1 ? "s" : ""} dans tous tes supports` : "reviews · exos · finals · cheatsheets · slides de cours"}
+        {loading ? <><span className="spinner" /> recherche…</> : searched ? `${total} résultat${total > 1 ? "s" : ""} dans tous tes supports` : "reviews · exos · finals · cheatsheets · slides de cours"}
       </p>
+
+      {/* état vide : suggestions cliquables */}
+      {!searched && !loading && (
+        <div className="mt-6">
+          <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink-3)", letterSpacing: "0.04em" }}>Essaie</p>
+          <div className="flex flex-wrap gap-1.5">
+            {["memory image", "fork", "TCP slow start", "inode", "page fault", "longest prefix", "scheduling"].map((s) => (
+              <button key={s} className="chip" style={{ cursor: "pointer" }} onClick={() => { setQ(s); inputRef.current?.focus(); }}>
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="mt-7 space-y-8">
         {groups.map((g) => (

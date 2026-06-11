@@ -82,7 +82,7 @@ async function main() {
   const onStep = (s: string, p: number) => {
     const j = getJob(jobId);
     if (j?.status === "canceled") { logJob(jobId, "Annulé."); process.exit(0); }
-    const status = p >= 100 ? "done" : p >= 92 ? "compiling" : p >= 62 ? "verifying" : "running";
+    const status = p >= 100 ? "done" : p >= 92 ? "compiling" : p >= 45 ? "verifying" : "running";
     setJob(jobId, { currentStep: s, progress: p, status });
     logJob(jobId, s);
   };

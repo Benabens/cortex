@@ -1,5 +1,5 @@
 import { currentCourse, sqlite } from "@/db/client";
-import { DEFAULT_COURSE } from "@/lib/courses";
+import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import { anthropic, GEN_MODEL } from "@/lib/anthropic";
 import type { Archetype } from "@/lib/archetypes";
 import { profile, type Slot } from "@/lib/course-profile";
@@ -520,9 +520,12 @@ export type StepCb = (step: string, progress: number) => void;
 
 export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep?: StepCb } = {}): Promise<{ id: number; url: string; texError?: string }> {
   const t0 = Date.now();
-  const step = opts.onStep ?? (() => {});
+  // progression MONOTONE : les lots/vérifs parallèles rapportent dans le désordre → max courant.
+  const raw = opts.onStep ?? (() => {});
+  let prog = 0;
+  const step: StepCb = (s, pr) => { prog = Math.max(prog, pr); raw(s, prog); };
   step("Contexte assemblé (corpus + directives + blueprint)", 5);
-  const ctx = gatherContext();
+  const ctx = gatherContext(); // construit UNE fois par job (cache de contexte)
   // Blueprint : slots pilotés par les archétypes du cours × poids × faiblesses (repli : slots du profil).
   const p = profile();
   let slots: Slot[];
@@ -532,6 +535,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep
     slots = p.examSlots();
   }
   const batches = [slots.slice(0, 3), slots.slice(3, 6)];
+  const doVerify = opts.verify !== false;
 
   // checkpoint : lots déjà générés lors d'un run précédent interrompu
   let saved: (ExamQuestion[] | null)[] = [null, null];
@@ -540,47 +544,74 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep
     if (Array.isArray(j?.batches) && Date.now() - (j.at ?? 0) < 2 * 3600_000) saved = j.batches;
   } catch {}
 
-  let batchesDone = 0;
-  const results = await Promise.all(
+  /**
+   * PIPELINE (Phase 4 V2) : chaque lot est vérifié+durci DÈS qu'il est généré, sans attendre
+   * l'autre lot (avant : gen des 2 lots PUIS vérif des 6) → les chaînes de vérif des 2 lots
+   * tournent en parallèle (3+3), le mur d'attente séquentiel gen→verify disparaît.
+   * maxAttempts de durcissement 3→2 (validé NS15 : cap du pire cas sans perte mesurée).
+   */
+  const settled = await Promise.all(
     batches.map(async (bslots, i) => {
+      let qs: ExamQuestion[];
       if (saved[i]?.length === bslots.length) {
-        batchesDone++;
-        step(`Lot ${i + 1}/2 repris du checkpoint`, 10 + 25 * batchesDone);
-        return saved[i]!;
-      }
-      step(`Lot ${i + 1}/2 — génération de 3 exercices…`, 10 + i * 5);
-      let qs: ExamQuestion[] | null = null;
-      for (let attempt = 1; attempt <= 2 && !qs; attempt++) {
-        try {
-          const got = await generateBatch(ctx, bslots as any);
-          if (got.length < bslots.length) throw new Error(`incomplet (${got.length}/${bslots.length})`);
-          qs = got;
-        } catch (e) {
-          if (attempt === 2) throw new Error(`Lot ${i + 1} échoué : ${(e as Error).message}`);
-          step(`Lot ${i + 1}/2 — réessai (${(e as Error).message})`, 10 + i * 5);
+        step(`Lot ${i + 1}/2 repris du checkpoint`, 20);
+        qs = saved[i]!;
+      } else {
+        step(`Lot ${i + 1}/2 — génération de 3 exercices…`, 8 + i * 2);
+        let got: ExamQuestion[] | null = null;
+        for (let attempt = 1; attempt <= 2 && !got; attempt++) {
+          try {
+            const g = await generateBatch(ctx, bslots as any);
+            if (g.length < bslots.length) throw new Error(`incomplet (${g.length}/${bslots.length})`);
+            got = g;
+          } catch (e) {
+            if (attempt === 2) throw new Error(`Lot ${i + 1} échoué : ${(e as Error).message}`);
+            step(`Lot ${i + 1}/2 — réessai (${(e as Error).message})`, 8 + i * 2);
+          }
         }
+        qs = got!;
+        saved[i] = qs;
+        try { fs.mkdirSync(path.dirname(CKPT()), { recursive: true }); fs.writeFileSync(CKPT(), JSON.stringify({ at: Date.now(), batches: saved })); } catch {}
+        step(`Lot ${i + 1}/2 généré ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 30);
       }
-      saved[i] = qs!;
-      try { fs.mkdirSync(path.dirname(CKPT()), { recursive: true }); fs.writeFileSync(CKPT(), JSON.stringify({ at: Date.now(), batches: saved })); } catch {}
-      batchesDone++;
-      step(`Lot ${i + 1}/2 généré ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 10 + 25 * batchesDone);
-      return qs!;
+      if (!doVerify) return { questions: qs, report: null as VerifyReport | null };
+      step(`Lot ${i + 1}/2 — vérification à l'aveugle + durcissement…`, 45);
+      try {
+        const v = await verifyAndHarden({ title: "", questions: qs }, regenerateExercise, 2, (m) => step(`Lot ${i + 1} · ${m}`, 0));
+        step(`Lot ${i + 1}/2 vérifié ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 70);
+        return { questions: v.spec.questions, report: v.report as VerifyReport | null };
+      } catch (e) {
+        step(`Lot ${i + 1} — vérif interrompue : ${(e as Error).message}`, 70);
+        return { questions: qs, report: null as VerifyReport | null };
+      }
     })
   );
 
-  let spec: ExamSpec = { title: "CS-202 Computer Systems — Final Exam", duration_min: 180, questions: results.flat() };
+  const c = getCourse(currentCourse());
+  const spec: ExamSpec = {
+    title: `${c.examCode} ${c.examName} — ${c.examKind}`,
+    duration_min: c.durationMin,
+    questions: settled.flatMap((s) => s.questions),
+  };
+  // fusion des rapports par lot (résultats ré-indexés sur l'ordre fusionné)
   let report: VerifyReport | undefined;
-  if (opts.verify !== false) {
-    step("Vérification à l'aveugle + durcissement des 6 exercices…", 62);
-    try {
-      const v = await verifyAndHarden(spec, regenerateExercise, 3, (msg) => step(msg, 65));
-      spec = v.spec;
-      report = v.report;
-      step(`Vérification terminée (${report.ok} ok, ${report.fixed} corrigés, ${report.regenerated} durcis, ${report.unverified} non-vérifiés)`, 88);
-    } catch (e) {
-      console.error("[verify] échec, examen conservé non vérifié :", (e as Error).message);
-      step(`Vérification interrompue : ${(e as Error).message}`, 88);
+  if (doVerify) {
+    const results: VerifyReport["results"] = [];
+    let base = 0;
+    let ok = 0, fixed = 0, regenerated = 0, removed = 0, unverified = 0;
+    for (const s of settled) {
+      if (s.report) {
+        for (const r of s.report.results) results.push({ ...r, index: base + r.index });
+        ok += s.report.ok; fixed += s.report.fixed; regenerated += s.report.regenerated;
+        removed += s.report.removed; unverified += s.report.unverified;
+      } else {
+        for (let k = 0; k < s.questions.length; k++) results.push({ index: base + k, verdict: "unverified", verified: null });
+        unverified += s.questions.length;
+      }
+      base += s.questions.length;
     }
+    report = { results, ok, fixed, regenerated, removed, unverified, flagged: removed + unverified };
+    step(`Vérification terminée (${ok} ok, ${fixed} corrigés, ${regenerated} durcis, ${unverified} non-vérifiés)`, 88);
   }
   step("Compilation du PDF (LaTeX)…", 92);
   const out = await persistExam(spec, report);
