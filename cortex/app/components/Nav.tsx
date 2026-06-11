@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import CourseSwitcher from "./CourseSwitcher";
 
 const LINKS = [
   { href: "/recherche", label: "Recherche" },
@@ -28,6 +29,9 @@ export default function Nav() {
           {l.label}
         </Link>
       ))}
+      <span style={{ marginLeft: "auto" }}>
+        <CourseSwitcher />
+      </span>
     </nav>
   );
 }

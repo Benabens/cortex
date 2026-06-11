@@ -164,7 +164,7 @@ export default function EntrainementPage() {
           <div className="mt-3 flex items-center gap-2">
             <span className="text-[13px]" style={{ color: "var(--green)" }}>Exercice prêt ✓</span>
             <a className="btn btn-ghost" href={exoJob.resultPath} target="_blank" rel="noopener">ouvrir l'énoncé (PDF)</a>
-            <a className="btn btn-quiet" style={{ color: "var(--green)" }} href={exoJob.resultPath.replace(/\.pdf$/, "-corrige.pdf")} target="_blank" rel="noopener">corrigé</a>
+            <a className="btn btn-quiet" style={{ color: "var(--green)" }} href={exoJob.resultPath.replace(/(\.pdf)(\?|$)/, "-corrige$1$2")} target="_blank" rel="noopener">corrigé</a>
           </div>
         )}
         {exoJob?.status === "error" && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>Échec : {exoJob.error}</p>}
