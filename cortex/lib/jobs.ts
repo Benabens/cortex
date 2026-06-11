@@ -1,5 +1,5 @@
 import { sqlite } from "@/db/client";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -110,7 +110,69 @@ export function startWorker(jobId: number) {
   const args = useLocal ? ["scripts/run-job.ts", String(jobId)] : ["tsx", "scripts/run-job.ts", String(jobId)];
   const env = { ...process.env };
   const child = spawn(bin, args, { cwd, detached: true, stdio: "ignore", env });
+  // PID persisté tout de suite (le worker le ré-écrit au démarrage) → annulable même pendant le démarrage
+  if (child.pid) setJob(jobId, { pid: child.pid });
   child.unref();
+}
+
+const EXAM_DIR = path.join(process.cwd(), "data", "exams");
+
+/**
+ * Groupe de processus réel d'un PID (via ps, portable macOS/Linux).
+ * Indispensable : `tsx` est un wrapper qui re-spawne le script → le PID enregistré par le
+ * worker (process.pid) n'est PAS le leader du groupe ; seul kill(-pgid) emporte tout le monde.
+ */
+function pgidOf(pid: number): number | null {
+  try {
+    const out = execFileSync("ps", ["-o", "pgid=", "-p", String(pid)]).toString().trim();
+    const n = Number(out);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Annule un job : statut `canceled`, puis TUE le worker pour de vrai.
+ * On tue le GROUPE de processus du worker détaché → emporte aussi ses enfants
+ * (`claude`, tectonic/pdflatex). Pas de génération zombie.
+ */
+export function cancelJob(id: number): Job | null {
+  const job = getJob(id);
+  if (!job) return null;
+  if (["done", "error", "canceled"].includes(job.status)) return job;
+  setJob(id, { status: "canceled", currentStep: "Annulé" });
+  if (job.pid) {
+    const pgid = pgidOf(job.pid);
+    const target = pgid ? -pgid : job.pid; // repli : au moins le worker lui-même
+    try { process.kill(target, "SIGTERM"); } catch {}
+    const t = setTimeout(() => { try { process.kill(target, "SIGKILL"); } catch {} }, 3_000);
+    (t as any).unref?.();
+  }
+  cleanupPartial(job);
+  logJob(id, "Annulé par l'utilisateur — worker tué, artefacts partiels nettoyés.");
+  return getJob(id);
+}
+
+/** Restes d'un job tué : checkpoint de génération + examen inséré mais jamais finalisé (compile interrompue). */
+function cleanupPartial(job: Job) {
+  if (job.type === "exam") {
+    try { fs.unlinkSync(path.join(EXAM_DIR, ".gen-checkpoint.json")); } catch {}
+  }
+  try {
+    // un examen fini a toujours html_path ; NULL + créé après le début du job = artefact partiel de CE job
+    const orphans = sqlite
+      .prepare(`SELECT id FROM exams WHERE html_path IS NULL AND datetime(created_at) >= datetime(?)`)
+      .all(job.createdAt) as { id: number }[];
+    for (const { id: examId } of orphans) {
+      sqlite.prepare(`DELETE FROM exam_questions WHERE exam_id = ?`).run(examId);
+      sqlite.prepare(`DELETE FROM exams WHERE id = ?`).run(examId);
+      for (const suffix of ["", "-corrige"])
+        for (const ext of ["tex", "pdf", "html", "log", "aux"]) {
+          try { fs.unlinkSync(path.join(EXAM_DIR, `exam-${examId}${suffix}.${ext}`)); } catch {}
+        }
+    }
+  } catch {}
 }
 
 /** Le job actif le plus récent (pour réafficher la progression au reload). */

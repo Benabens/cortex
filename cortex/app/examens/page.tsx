@@ -23,6 +23,7 @@ export default function ExamensPage() {
   const [exams, setExams] = useState<Exam[]>([]);
   const [sched, setSched] = useState<{ total: number; due: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [dryBusy, setDryBusy] = useState(false);
   const pollRef = useRef<any>(null);
@@ -79,6 +80,7 @@ export default function ExamensPage() {
 
   async function generate() {
     setErr(null);
+    setNote(null);
     openedRef.current = false;
     try {
       const r = await fetch("/api/exams/generate", { method: "POST" });
@@ -99,9 +101,10 @@ export default function ExamensPage() {
   }
   async function cancel() {
     if (!job) return;
-    await fetch(`/api/jobs/${job.id}`, { method: "POST" });
     clearInterval(pollRef.current);
+    try { await fetch(`/api/jobs/${job.id}/cancel`, { method: "POST" }); } catch {}
     setJob(null);
+    setNote("Génération annulée — le worker a été arrêté.");
   }
   async function remove(id: number) { await fetch(`/api/exams?id=${id}`, { method: "DELETE" }); await load(); }
 
@@ -162,6 +165,7 @@ export default function ExamensPage() {
         )}
         {job?.status === "error" && <p className="mt-2.5 text-[12px]" style={{ color: "var(--red)" }}>Échec : {job.error}</p>}
         {err && <p className="mt-2.5 text-[12px]" style={{ color: "var(--red)" }}>{err}</p>}
+        {note && <p className="mt-2.5 text-[12px]" style={{ color: "var(--ink-3)" }}>{note}</p>}
       </div>
 
       <div className="space-y-2.5">

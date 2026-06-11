@@ -67,6 +67,14 @@ export default function EntrainementPage() {
     return () => clearInterval(exoPoll.current);
   }, [load, pollExo]);
 
+  async function cancelExo() {
+    if (!exoJob) return;
+    clearInterval(exoPoll.current);
+    try { await fetch(`/api/jobs/${exoJob.id}/cancel`, { method: "POST" }); } catch {}
+    setExoJob(null);
+    setExoErr(null);
+  }
+
   async function genExo(target: string) {
     if (!target.trim()) return;
     setExoErr(null);
@@ -138,7 +146,10 @@ export default function EntrainementPage() {
             <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--surface-2)" }}>
               <div className="h-full transition-all" style={{ width: `${exoJob.progress}%`, background: "var(--accent)" }} />
             </div>
-            <div className="mt-2 text-[13px]" style={{ color: "var(--ink-2)" }}>{exoJob.currentStep}</div>
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <div className="text-[13px]" style={{ color: "var(--ink-2)" }}>{exoJob.currentStep}</div>
+              <button className="btn btn-quiet" onClick={cancelExo}>annuler</button>
+            </div>
           </div>
         ) : (
           <div className="flex gap-2">
