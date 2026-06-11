@@ -323,17 +323,7 @@ export async function generateExam(opts: { dry?: boolean } = {}): Promise<{ id: 
   return persistExam(spec);
 }
 
-/** Prompt pour Claude Code (headless) : le brief complet + sortie JSON stricte. */
-function buildClaudeCodePrompt(ctx: ReturnType<typeof gatherContext>): string {
-  return [
-    buildPrompt(ctx),
-    ``,
-    `--- SORTIE ATTENDUE ---`,
-    `Réponds UNIQUEMENT avec un objet JSON valide conforme EXACTEMENT à ce schéma (statement_tex/solution_tex = LaTeX compilable).`,
-    `N'écris aucun fichier, n'utilise aucun outil, n'ajoute aucune prose ni balise markdown autour : juste l'objet JSON.`,
-    JSON.stringify(EXAM_SCHEMA, null, 2),
-  ].join("\n");
-}
+// ---------------- Génération en LOTS (fiable, parallèle, résumable) ----------------
 
 const ONE_EX_SCHEMA = {
   type: "object",
@@ -369,14 +359,97 @@ export async function regenerateExercise(q: ExamQuestion, diagnostic: string): P
   return { ...r, category: q.category, points: q.points };
 }
 
-/** Voie gratuite (abonnement Max) : rédige via Claude Code, VÉRIFIE+DURCIT chaque exo, puis compile le PDF. */
-export async function generateExamViaClaudeCode(opts: { verify?: boolean } = {}): Promise<{ id: number; url: string }> {
+/** Les 6 slots du Final (structure 2025) : catégorie, points, thèmes imposés au lot. */
+const EXAM_SLOTS = [
+  { category: "Networking", points: 50, brief: "Subnets / forwarding / longest-prefix (with a trap) / FULL packet-trace at a router interface (ARP + recursive DNS + TCP, \\packetgrid{12}) — anchored on the FIXED canonical topology \\examtopo (use its routers R1-R4, interfaces e-q, clusters A/B/C/D, B1=DNS, D1=d1.epfl.ch). The statement MUST start with \\examtopo." },
+  { category: "Networking", points: 50, brief: "TCP on the canonical topology (no need to repeat the figure; refer to Figure 1): \\tcpladder diagram (slow start, Tahoe vs Reno, fast recovery, SEQ/ACK bookkeeping) + end-to-end delay computation across two links with a bottleneck and non-round numbers." },
+  { category: "OS", points: 25, brief: "Disk access & inodes: multi-level indexing, count block accesses for an open/lseek/read/write sequence crossing the direct→single-indirect boundary (trap: sparse file / cache hit), \\diskgrid{8}. Optionally \\examinode figure." },
+  { category: "OS", points: 30, brief: "Processes & CPU scheduling: ONE concrete program with fork/exec/wait (process tree via \\examproctree if helpful) + a multi-line state/scheduling simulation \\statesim{16} (FIFO/SJF/STCF/RR or MLFQ, turnaround/response, single-core, RR assumes no known durations) + a data race fixed by lock()/unlock() (max allowed concurrency).", },
+  { category: "C", points: 10, brief: "READING lab-style C code (client socket code or file I/O): recognize syscalls, file descriptors, fork/exec/wait — never write/debug code. \\begin{lstlisting} with the code, then short questions with \\rulelines." },
+  { category: "Labs", points: 15, brief: "A REAL lab artifact in READING: client-server get_file/send_file/socket_layer OR filesystem direntv6 inode walk. Recognize what the code does, trace a call, identify the syscalls involved." },
+] as const;
+
+const BATCH_SCHEMA = {
+  type: "object",
+  properties: {
+    questions: { type: "array", items: ONE_EX_SCHEMA },
+  },
+  required: ["questions"],
+  additionalProperties: false,
+} as const;
+
+function buildBatchPrompt(ctx: ReturnType<typeof gatherContext>, slots: { category: string; points: number; brief: string }[]): string {
+  return [
+    directivesBlock(),
+    ``,
+    visionBlock(),
+    ``,
+    `Tu es l'équipe enseignante de CS-202 Computer Systems (EPFL). Tu rédiges ${slots.length} exercices INÉDITS, EN ANGLAIS, d'un « Final 2026 » indiscernable d'un vrai final EPFL.`,
+    `PRINCIPE : chaque exercice = UN artefact concret creusé par des sous-questions \\subq{N.M}{...}{pts} en escalier qui testent les INTERACTIONS, avec AU MOINS UN VRAI PIÈGE et des NOMBRES NON RONDS.`,
+    ``,
+    `═══ LES ${slots.length} EXERCICES À PRODUIRE (slots IMPOSÉS — respecte catégorie, barème, thème) ═══`,
+    ...slots.map((s, i) => `${i + 1}. [${s.category}, ${s.points} pts] ${s.brief}`),
+    ``,
+    `═══ MATIÈRE (extraits du corpus, pour ancrer le contenu) ═══`,
+    ...ctx.style.slice(0, 6).map((s) => `### ${s.src}\n${s.excerpt}`),
+    ...ctx.exercises.slice(0, 5).map((c) => `• (${c.src}) ${c.text}`),
+    ``,
+    `Concepts à couvrir si naturel : ${ctx.due.slice(0, 5).join(" · ")}${ctx.weaknesses.length ? " · faiblesses: " + ctx.weaknesses.map((w) => w.topic).join(" · ") : ""}`,
+    ``,
+    LATEX_CONTRACT,
+    ``,
+    `Réponds UNIQUEMENT avec l'objet JSON {"questions":[{category,concept,statement_tex,solution_tex,points}, …]} — ${slots.length} exercices, dans l'ordre des slots. Aucun outil, aucun fichier, aucune prose.`,
+    JSON.stringify(BATCH_SCHEMA, null, 2),
+  ].join("\n");
+}
+
+const CKPT = path.join(process.cwd(), "data", "exams", ".gen-checkpoint.json");
+
+async function generateBatch(ctx: ReturnType<typeof gatherContext>, slots: typeof EXAM_SLOTS[number][]): Promise<ExamQuestion[]> {
   const text = await runClaudeCode({
-    prompt: buildClaudeCodePrompt(gatherContext()),
+    prompt: buildBatchPrompt(ctx, slots as any),
     model: "opus",
-    timeoutMs: 1_500_000,
+    timeoutMs: 600_000, // un lot de 3 << un appel de 6
   });
-  let spec = extractJson<ExamSpec>(text);
+  const r = extractJson<{ questions: ExamQuestion[] }>(text);
+  const qs = Array.isArray(r.questions) ? r.questions : [];
+  // réaligne catégorie/points sur les slots imposés
+  return qs.slice(0, slots.length).map((q, i) => ({ ...q, category: slots[i].category, points: slots[i].points }));
+}
+
+/**
+ * Voie gratuite (Max) — GÉNÉRATION EN LOTS : 2 lots de 3 exos en parallèle (timeouts courts),
+ * checkpoint disque par lot (résumable : un lot déjà réussi n'est pas rebrûlé),
+ * puis vérif à l'aveugle + durcissement (garde-6), puis compilation PDF.
+ */
+export async function generateExamViaClaudeCode(opts: { verify?: boolean } = {}): Promise<{ id: number; url: string }> {
+  const t0 = Date.now();
+  const ctx = gatherContext();
+  const batches = [EXAM_SLOTS.slice(0, 3), EXAM_SLOTS.slice(3, 6)];
+
+  // checkpoint : lots déjà générés lors d'un run précédent interrompu
+  let saved: (ExamQuestion[] | null)[] = [null, null];
+  try {
+    const j = JSON.parse(fs.readFileSync(CKPT, "utf8"));
+    if (Array.isArray(j?.batches) && Date.now() - (j.at ?? 0) < 2 * 3600_000) saved = j.batches;
+  } catch {}
+
+  const results = await Promise.all(
+    batches.map(async (slots, i) => {
+      if (saved[i]?.length === slots.length) {
+        console.log(`[gen] lot ${i + 1}/2 repris du checkpoint`);
+        return saved[i]!;
+      }
+      const qs = await generateBatch(ctx, slots as any);
+      if (qs.length < slots.length) throw new Error(`Lot ${i + 1} incomplet (${qs.length}/${slots.length}).`);
+      saved[i] = qs;
+      try { fs.mkdirSync(path.dirname(CKPT), { recursive: true }); fs.writeFileSync(CKPT, JSON.stringify({ at: Date.now(), batches: saved })); } catch {}
+      console.log(`[gen] lot ${i + 1}/2 ok (${Math.round((Date.now() - t0) / 1000)}s)`);
+      return qs;
+    })
+  );
+
+  let spec: ExamSpec = { title: "CS-202 Computer Systems — Final Exam", duration_min: 180, questions: results.flat() };
   let report: VerifyReport | undefined;
   if (opts.verify !== false) {
     try {
@@ -387,5 +460,21 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean } = {})
       console.error("[verify] échec, examen conservé non vérifié :", (e as Error).message);
     }
   }
-  return persistExam(spec, report);
+  const out = await persistExam(spec, report);
+  try { fs.unlinkSync(CKPT); } catch {} // run complet → checkpoint consommé
+  console.log(`[gen] total ${Math.round((Date.now() - t0) / 1000)}s`);
+  return out;
 }
+
+/** Prompt pour Claude Code (headless) : le brief complet + sortie JSON stricte. */
+function buildClaudeCodePrompt(ctx: ReturnType<typeof gatherContext>): string {
+  return [
+    buildPrompt(ctx),
+    ``,
+    `--- SORTIE ATTENDUE ---`,
+    `Réponds UNIQUEMENT avec un objet JSON valide conforme EXACTEMENT à ce schéma (statement_tex/solution_tex = LaTeX compilable).`,
+    `N'écris aucun fichier, n'utilise aucun outil, n'ajoute aucune prose ni balise markdown autour : juste l'objet JSON.`,
+    JSON.stringify(EXAM_SCHEMA, null, 2),
+  ].join("\n");
+}
+

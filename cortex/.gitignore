@@ -48,3 +48,4 @@ yarn-error.log*
 next-env.d.ts
 data/refs/img/
 data/exams/img/
+data/exams/.gen-checkpoint.json
