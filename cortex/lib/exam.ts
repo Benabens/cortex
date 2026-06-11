@@ -295,8 +295,8 @@ function ensureExamCols() {
   try { if (!has("exams", "verify_summary")) sqlite.exec(`ALTER TABLE exams ADD COLUMN verify_summary TEXT`); } catch {}
 }
 
-/** Enregistre un examen rédigé : DB + artefact (PDF LaTeX, sinon HTML) + répétition espacée. */
-export async function persistExam(spec: ExamSpec, report?: VerifyReport): Promise<{ id: number; url: string }> {
+/** Enregistre un examen rédigé : DB + artefact (PDF LaTeX, sinon HTML lisible) + répétition espacée. */
+export async function persistExam(spec: ExamSpec, report?: VerifyReport): Promise<{ id: number; url: string; texError?: string }> {
   if (!spec?.questions?.length) throw new Error("ExamSpec vide ou invalide (aucune question).");
   ensureExamCols();
 
@@ -316,7 +316,7 @@ export async function persistExam(spec: ExamSpec, report?: VerifyReport): Promis
   });
 
   const dateLabel = (sqlite.prepare(`SELECT date('now') d`).get() as any).d;
-  const { file } = await buildExamArtifact(spec, id, dateLabel);
+  const { file, texError } = await buildExamArtifact(spec, id, dateLabel);
   sqlite.prepare(`UPDATE exams SET html_path = ? WHERE id = ?`).run(file, id);
   if (report) {
     sqlite.prepare(`UPDATE exams SET verify_summary = ? WHERE id = ?`)
@@ -324,7 +324,7 @@ export async function persistExam(spec: ExamSpec, report?: VerifyReport): Promis
   }
 
   markTested([...spec.questions.map((q) => q.concept), ...dueConcepts(6)]);
-  return { id, url: `/exam/${file}` };
+  return { id, url: `/exam/${file}`, texError };
 }
 
 // ---------------- EXERCICE CIBLÉ (Phase 3) : 1 exo qualité examen, sans garde ----------------
@@ -361,7 +361,7 @@ function gatherTargetedContext(target: string) {
   };
 }
 
-export async function generateTargetedExercise(target: string, opts: { onStep?: StepCb } = {}): Promise<{ id: number; url: string }> {
+export async function generateTargetedExercise(target: string, opts: { onStep?: StepCb } = {}): Promise<{ id: number; url: string; texError?: string }> {
   const t0 = Date.now();
   const step = opts.onStep ?? (() => {});
   if (!target.trim()) throw new Error("Sujet d'exercice vide.");
@@ -404,11 +404,12 @@ export async function generateTargetedExercise(target: string, opts: { onStep?: 
   }
   step("Compilation du PDF (sans garde)…", 92);
   const out = await persistExercise(q, report);
+  if (out.texError) step(`⚠ Compilation LaTeX échouée → repli HTML lisible (${out.texError.slice(0, 180)})`, 97);
   step(`Terminé ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 100);
   return out;
 }
 
-async function persistExercise(q: ExamQuestion, report?: VerifyReport): Promise<{ id: number; url: string }> {
+async function persistExercise(q: ExamQuestion, report?: VerifyReport): Promise<{ id: number; url: string; texError?: string }> {
   ensureExamCols();
   const id = sqlite.prepare(`INSERT INTO exams (format_template, status) VALUES ('exercise','ready')`).run().lastInsertRowid as number;
   const r = report?.results?.[0];
@@ -416,11 +417,11 @@ async function persistExercise(q: ExamQuestion, report?: VerifyReport): Promise<
     .prepare(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration, verified, verify_issue) VALUES (?,?,?,?,?,?,?)`)
     .run(id, q.concept, q.statement_tex, q.solution_tex, null, r?.verified ?? null, r?.issue ?? null);
   const dateLabel = (sqlite.prepare(`SELECT date('now') d`).get() as any).d;
-  const { file } = await buildExerciseArtifact(q, id, dateLabel);
+  const { file, texError } = await buildExerciseArtifact(q, id, dateLabel);
   sqlite.prepare(`UPDATE exams SET html_path = ? WHERE id = ?`).run(file, id);
   if (report) sqlite.prepare(`UPDATE exams SET verify_summary = ? WHERE id = ?`).run(`ok=${report.ok} corrigés=${report.fixed} durcis=${report.regenerated}`, id);
   markTested([q.concept]);
-  return { id, url: `/exam/${file}` };
+  return { id, url: `/exam/${file}`, texError };
 }
 
 /** Voie API directe (optionnelle, payante). */
@@ -530,7 +531,7 @@ async function generateBatch(ctx: ReturnType<typeof gatherContext>, slots: typeo
  */
 export type StepCb = (step: string, progress: number) => void;
 
-export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep?: StepCb } = {}): Promise<{ id: number; url: string }> {
+export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep?: StepCb } = {}): Promise<{ id: number; url: string; texError?: string }> {
   const t0 = Date.now();
   const step = opts.onStep ?? (() => {});
   step("Contexte assemblé (corpus + directives + blueprint)", 5);
@@ -596,6 +597,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep
   step("Compilation du PDF (LaTeX)…", 92);
   const out = await persistExam(spec, report);
   try { fs.unlinkSync(CKPT); } catch {} // run complet → checkpoint consommé
+  if (out.texError) step(`⚠ Compilation LaTeX échouée → repli HTML lisible (${out.texError.slice(0, 180)})`, 97);
   step(`Terminé ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 100);
   return out;
 }

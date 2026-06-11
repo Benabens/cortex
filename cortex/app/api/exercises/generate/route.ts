@@ -1,4 +1,5 @@
 import { activeJob, createJob, startWorker } from "@/lib/jobs";
+import { preflightGeneration } from "@/lib/preflight";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -12,6 +13,10 @@ export async function POST(req: NextRequest) {
 
   const existing = activeJob("exercise");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
+
+  // pré-checks AVANT de lancer le worker : claude (Max) + corpus + moteur LaTeX
+  const issue = preflightGeneration();
+  if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
 
   const jobId = createJob("exercise", t);
   try {

@@ -1,5 +1,6 @@
 "use client";
 
+import CmdHint from "@/app/components/CmdHint";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const EXO_ACTIVE = ["queued", "running", "verifying", "compiling"];
@@ -29,6 +30,7 @@ export default function EntrainementPage() {
   const [exoJob, setExoJob] = useState<any>(null);
   const exoPoll = useRef<any>(null);
   const [exoErr, setExoErr] = useState<string | null>(null);
+  const [exoErrCmd, setExoErrCmd] = useState<string | null>(null);
 
   // ---- Check my solution ----
   const [statement, setStatement] = useState("");
@@ -78,11 +80,12 @@ export default function EntrainementPage() {
   async function genExo(target: string) {
     if (!target.trim()) return;
     setExoErr(null);
+    setExoErrCmd(null);
     setExoJob(null);
     try {
       const r = await fetch("/api/exercises/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ target }) });
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error ?? "Échec");
+      if (!r.ok) { setExoErr(d.error ?? "Échec"); setExoErrCmd(d.command ?? null); return; }
       if (d.jobId) { setExoJob({ id: d.jobId, status: "queued", progress: 0, currentStep: "Démarrage…", resultPath: null, log: [] }); pollExo(d.jobId); }
     } catch (e: any) { setExoErr(String(e.message ?? e)); }
   }
@@ -165,7 +168,7 @@ export default function EntrainementPage() {
           </div>
         )}
         {exoJob?.status === "error" && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>Échec : {exoJob.error}</p>}
-        {exoErr && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>{exoErr}</p>}
+        {exoErr && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>{exoErr}<CmdHint cmd={exoErrCmd} /></p>}
       </section>
 
       {/* ---------- Drilling ---------- */}

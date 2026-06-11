@@ -1,5 +1,6 @@
 "use client";
 
+import CmdHint from "@/app/components/CmdHint";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Exam = {
@@ -23,6 +24,7 @@ export default function ExamensPage() {
   const [exams, setExams] = useState<Exam[]>([]);
   const [sched, setSched] = useState<{ total: number; due: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [errCmd, setErrCmd] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [dryBusy, setDryBusy] = useState(false);
@@ -80,12 +82,13 @@ export default function ExamensPage() {
 
   async function generate() {
     setErr(null);
+    setErrCmd(null);
     setNote(null);
     openedRef.current = false;
     try {
       const r = await fetch("/api/exams/generate", { method: "POST" });
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error ?? "Échec");
+      if (!r.ok) { setErr(d.error ?? "Échec"); setErrCmd(d.command ?? null); return; }
       if (d.jobId) { setJob({ id: d.jobId, type: "exam", status: "queued", currentStep: "Démarrage…", progress: 0, resultPath: null, error: null, log: [] }); poll(d.jobId); }
     } catch (e: any) { setErr(String(e.message ?? e)); }
   }
@@ -164,7 +167,7 @@ export default function ExamensPage() {
           </div>
         )}
         {job?.status === "error" && <p className="mt-2.5 text-[12px]" style={{ color: "var(--red)" }}>Échec : {job.error}</p>}
-        {err && <p className="mt-2.5 text-[12px]" style={{ color: "var(--red)" }}>{err}</p>}
+        {err && <p className="mt-2.5 text-[12px]" style={{ color: "var(--red)" }}>{err}<CmdHint cmd={errCmd} /></p>}
         {note && <p className="mt-2.5 text-[12px]" style={{ color: "var(--ink-3)" }}>{note}</p>}
       </div>
 

@@ -46,6 +46,11 @@ async function main() {
       job.type === "exercise"
         ? await generateTargetedExercise(job.target ?? "", { onStep })
         : await generateExamViaClaudeCode({ onStep });
+    if (res.texError) {
+      // le résultat existe (HTML lisible) mais le PDF a échoué → erreur LaTeX gardée pour debug
+      setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, repli HTML lisible. Détail : ${res.texError.slice(0, 500)}` });
+      logJob(jobId, `⚠ Erreur LaTeX : ${res.texError.slice(0, 300)}`);
+    }
     setJob(jobId, { status: "done", progress: 100, resultPath: res.url, resultId: res.id, currentStep: "Terminé ✓" });
     logJob(jobId, `${job.type === "exercise" ? "Exercice" : "Examen"} #${res.id} prêt → ${res.url}`);
     process.exit(0);

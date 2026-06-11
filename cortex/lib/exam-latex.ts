@@ -202,21 +202,147 @@ function tailLog(base: string): string {
   return lines.slice(0, 8).join(" | ").slice(0, 800);
 }
 
-/** Repli HTML lisible si la compilation LaTeX échoue (rare). */
-export function htmlFallback(spec: ExamSpec, id: number, dateLabel: string): string {
-  const esc = (s: string) => (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// ---------------- Repli HTML LISIBLE (quand la compilation LaTeX échoue) ----------------
+
+const escHtml = (s: string) => (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** Remplace \cmd{...} (accolades ÉQUILIBRÉES, contenu nestable) par wrap(contenu). */
+function replaceBalanced(src: string, cmd: string, wrap: (inner: string) => string): string {
+  const needle = cmd + "{";
+  let out = "";
+  let i = 0;
+  for (;;) {
+    const k = src.indexOf(needle, i);
+    if (k < 0) return out + src.slice(i);
+    out += src.slice(i, k);
+    let depth = 0;
+    let end = -1;
+    for (let p = k + cmd.length; p < src.length; p++) {
+      if (src[p] === "{") depth++;
+      else if (src[p] === "}" && --depth === 0) { end = p; break; }
+    }
+    if (end < 0) return out + src.slice(k);
+    out += wrap(src.slice(k + cmd.length + 1, end));
+    i = end + 1;
+  }
+}
+
+const CIRCLED = "⓪①②③④⑤⑥⑦⑧⑨";
+
+/**
+ * Convertit le LaTeX du modèle en HTML basique LISIBLE. Repli best-effort (PAS un rendu
+ * fidèle) : code en <pre>, gras/italique/code inline, listes, sous-questions en titres,
+ * notes à la place des figures/grilles. Le vrai rendu reste le PDF.
+ */
+export function texToHtml(tex: string): string {
+  let t = tex ?? "";
+  const stash: string[] = [];
+  const NUL = String.fromCharCode(0); // sentinelle impossible dans du LaTeX, survit a escHtml -> zero collision
+  const keep = (html: string) => `${NUL}${stash.push(html) - 1}${NUL}`;
+
+  // blocs préservés (code, tableaux) ou remplacés par une note (figures/grilles non rendables en HTML)
+  t = t.replace(/\\begin\{lstlisting\}(?:\[[^\]]*\])?\n?([\s\S]*?)\\end\{lstlisting\}/g, (_, c) => keep(`<pre class="code">${escHtml(c.replace(/\s+$/, ""))}</pre>`));
+  t = t.replace(/\\begin\{verbatim\}\n?([\s\S]*?)\\end\{verbatim\}/g, (_, c) => keep(`<pre class="code">${escHtml(c.replace(/\s+$/, ""))}</pre>`));
+  t = t.replace(/\\begin\{tabular\}[\s\S]*?\\end\{tabular\}/g, (m) => keep(`<pre class="tab">${escHtml(m)}</pre>`));
+  t = t.replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, () => keep(`<div class="fig">⬚ figure TikZ — visible uniquement dans le PDF</div>`));
+  t = t.replace(/\\begin\{examproctree\}[\s\S]*?\\end\{examproctree\}/g, () => keep(`<div class="fig">⬚ arbre de processus (fork/exec) — visible uniquement dans le PDF</div>`));
+  t = t.replace(/\\tcpladder(\{[^{}]*\}){0,6}/g, () => keep(`<div class="fig">⬚ diagramme TCP en échelle (window/cwnd/ssthresh/état + handshake) — à tracer sur papier</div>`));
+  t = t.replace(/\\examtopo\b/g, () => keep(`<div class="fig">⬚ Figure : topologie canonique 2-AS (R1–R4, SW1/SW2, clusters A/B/C/D, B1=DNS, D1=d1.epfl.ch, coûts/débits, cloud Internet)</div>`));
+  t = t.replace(/\\examinode\b/g, () => keep(`<div class="fig">⬚ Figure : inode v6 (addr[0..7], single/double-indirect → index → data)</div>`));
+  t = t.replace(/\\examstates\b/g, () => keep(`<div class="fig">⬚ Figure : états de processus (Running/Ready/Blocked + transitions)</div>`));
+  t = t.replace(/\\(packetgrid|statesim|diskgrid|forwardgrid|rulelines)\{(\d+)\}/g, (_, k, n) => keep(`<div class="grid">✎ grille de réponse (${k}, ${n} lignes) — réponds sur papier</div>`));
+  t = t.replace(/\\\$/g, () => keep("$")); // dollar littéral ≠ délimiteur math
+
+  // échappe le texte courant
+  t = escHtml(t);
+
+  // macros inline
+  t = t.replace(/\\subq\{([^{}]*)\}\{([^{}]*)\}\{([^{}]*)\}/g, `<h3>$1 — $2 <span class="pts">[$3 pts]</span></h3>`);
+  for (let pass = 0; pass < 3; pass++) {
+    t = replaceBalanced(t, "\\callout", (x) => `<div class="callout">${x}</div>`);
+    t = replaceBalanced(t, "\\textbf", (x) => `<b>${x}</b>`);
+    t = replaceBalanced(t, "\\textit", (x) => `<i>${x}</i>`);
+    t = replaceBalanced(t, "\\emph", (x) => `<i>${x}</i>`);
+    t = replaceBalanced(t, "\\texttt", (x) => `<code>${x}</code>`);
+    t = replaceBalanced(t, "\\underline", (x) => `<u>${x}</u>`);
+    t = replaceBalanced(t, "\\figcaption", (x) => `<p class="caption">${x}</p>`);
+  }
+  t = t.replace(/\\cn\{(\d)\}/g, (_, d) => CIRCLED[+d] ?? `(${d})`);
+
+  // math inline : $...$ → italique + exposants/indices/symboles basiques
+  t = t.replace(/\$([^$]+)\$/g, (_, m: string) =>
+    `<em>${m
+      .replace(/\^\{([^}]*)\}/g, "<sup>$1</sup>")
+      .replace(/_\{([^}]*)\}/g, "<sub>$1</sub>")
+      .replace(/\^(\w)/g, "<sup>$1</sup>")
+      .replace(/_(\w)/g, "<sub>$1</sub>")
+      .replace(/\\(ldots|dots|cdots)/g, "…")
+      .replace(/\\infty/g, "∞")
+      .replace(/\\times/g, "×")
+      .replace(/\\(rightarrow|to)\b/g, "→")
+      .replace(/\\le\b/g, "≤")
+      .replace(/\\ge\b/g, "≥")
+      .replace(/\\,/g, " ")}</em>`
+  );
+
+  // listes & structure
+  t = t.replace(/\\begin\{itemize\}(\[[^\]]*\])?/g, "<ul>").replace(/\\end\{itemize\}/g, "</ul>");
+  t = t.replace(/\\begin\{enumerate\}(\[[^\]]*\])?/g, "<ol>").replace(/\\end\{enumerate\}/g, "</ol>");
+  t = t.replace(/\\item\s*/g, "<li>");
+  t = t.replace(/\\begin\{center\}/g, '<div class="center">').replace(/\\end\{center\}/g, "</div>");
+
+  // nettoyage final
+  t = t.replace(/\\(hline|cline\{[^}]*\}|hfill|noindent|par\b|smallskip|medskip|bigskip|clearpage|newpage|centering|raggedright)/g, " ");
+  t = t.replace(/\\rule\{[^}]*\}\{[^}]*\}/g, "________");
+  t = t.replace(/\\(vspace|hspace|needspace)\*?\{[^}]*\}/g, " ");
+  t = t.replace(/\\\\(\[[^\]]*\])?/g, "<br>");
+  t = t.replace(/\\(quad|qquad|;|,|!)/g, " ");
+  t = t.replace(/\\&/g, "&amp;").replace(/\\([%#_])/g, "$1").replace(/\\textbackslash\{?\}?/g, "\\");
+  t = t.replace(/~/g, " ");
+  t = t.replace(/\\ldots/g, "…");
+  // macro inconnue : garde l'argument, puis retire les commandes nues et accolades restantes
+  for (let pass = 0; pass < 2; pass++) t = t.replace(/\\[a-zA-Z]+\*?\{([^{}]*)\}/g, "$1");
+  t = t.replace(/\\[a-zA-Z]+\*?/g, "");
+  t = t.replace(/[{}]/g, "");
+  t = t.replace(/\n{2,}/g, "<br><br>");
+
+  // blocs préservés réinjectés
+  t = t.replace(new RegExp(`${NUL}(\\d+)${NUL}`, "g"), (_, i) => stash[+i]);
+  return t;
+}
+
+/** Repli HTML LISIBLE si la compilation LaTeX échoue : plus de LaTeX source brut. */
+export function htmlFallback(spec: ExamSpec, id: number, dateLabel: string, reason?: string): string {
   const qs = [...spec.questions].sort((a, b) => catRank(a.category) - catRank(b.category));
   const blocks = qs
-    .map((q, i) => `<section><h2>Question ${i + 1} — ${esc(q.concept)} [${qPoints(q)} points]</h2>
-      <pre>${esc((q as any).statement_tex ?? "")}</pre>
-      <details><summary>Corrigé</summary><pre>${esc((q as any).solution_tex ?? "")}</pre></details></section>`)
+    .map(
+      (q, i) => `<section>
+<h2>Question ${i + 1} — ${escHtml(q.concept)} <span class="pts">[${qPoints(q)} points]</span></h2>
+<div class="stmt">${texToHtml((q as any).statement_tex ?? "")}</div>
+<details><summary>Corrigé</summary><div class="sol">${texToHtml((q as any).solution_tex ?? "")}</div></details>
+</section>`
+    )
     .join("\n");
-  return `<!doctype html><meta charset="utf-8"><title>${esc(spec.title)}</title>
-<style>body{font:14px/1.5 -apple-system,system-ui,sans-serif;max-width:820px;margin:24px auto;padding:0 16px;color:#1d1d1f}
-h1{font-size:20px}h2{font-size:15px;border-top:1px solid #ddd;padding-top:14px}pre{white-space:pre-wrap;background:#f6f6f7;padding:10px;border-radius:8px;font-size:12px}
-.warn{background:#fff3e0;border:1px solid #e0a96d;padding:10px 14px;border-radius:8px}</style>
-<h1>${esc(spec.title)}</h1>
-<p class="warn">⚠️ La compilation LaTeX (PDF) a échoué — voici le contenu brut. Installe <code>tectonic</code> (brew install tectonic) pour le vrai PDF EPFL.</p>
+  return `<!doctype html><meta charset="utf-8"><title>${escHtml(spec.title)}</title>
+<style>
+body{font:15px/1.55 -apple-system,system-ui,sans-serif;max-width:840px;margin:24px auto;padding:0 16px;color:#1d1d1f}
+h1{font-size:21px}h2{font-size:16px;border-top:1px solid #ddd;padding-top:16px;margin-top:22px}h3{font-size:14px;margin:16px 0 4px}
+.pts{color:#8a6d3b;font-weight:600;font-size:12px}
+pre{white-space:pre-wrap;background:#f6f6f7;padding:10px;border-radius:8px;font-size:12.5px;overflow-x:auto}
+code{background:#f2f2f3;padding:1px 5px;border-radius:5px;font-size:.92em}
+.fig,.grid{background:#f0f4fa;border:1px dashed #9db4d0;color:#3a5a80;padding:8px 12px;border-radius:8px;margin:10px 0;font-size:13px}
+.callout{border:1.5px solid #1d1d1f;padding:8px 14px;margin:12px auto;text-align:center;max-width:85%}
+.caption{text-align:center;font-size:12.5px;color:#666;margin:4px 0 12px}
+.center{text-align:center}
+.warn{background:#fff3e0;border:1px solid #e0a96d;padding:10px 14px;border-radius:8px;font-size:13.5px}
+details{margin:8px 0}summary{cursor:pointer;color:#2563eb;font-size:13px}
+.sol{border-left:3px solid #cfe3cf;padding-left:12px;margin-top:6px}
+ul,ol{margin:6px 0 6px 22px}
+</style>
+<h1>${escHtml(spec.title)}</h1>
+<p class="warn">⚠️ La compilation LaTeX (PDF) a échoué — rendu HTML lisible de secours (figures/grilles remplacées par des notes).${
+    reason ? `<br><b>Erreur LaTeX :</b> <code>${escHtml(reason.slice(0, 300))}</code>` : ""
+  }<br>Pour le vrai PDF EPFL : <code>brew install tectonic</code>, redémarre l'app, régénère.</p>
 ${blocks}`;
 }
 
@@ -241,8 +367,10 @@ export function renderExerciseLatex(q: ExamQuestion, dateLabel: string, includeS
   ].join("\n");
 }
 
+export type ArtifactResult = { file: string; kind: "pdf" | "html"; texError?: string };
+
 /** Construit l'artefact d'UN exercice ciblé : PDF énoncé (sans corrigé) + PDF corrigé, sans garde. */
-export async function buildExerciseArtifact(q: ExamQuestion, id: number, dateLabel: string): Promise<{ file: string; kind: "pdf" | "html" }> {
+export async function buildExerciseArtifact(q: ExamQuestion, id: number, dateLabel: string): Promise<ArtifactResult> {
   fs.mkdirSync(EXAM_DIR, { recursive: true });
   const base = `exam-${id}`;
   for (const ext of ["pdf", "png"]) {
@@ -256,15 +384,16 @@ export async function buildExerciseArtifact(q: ExamQuestion, id: number, dateLab
     try { await compileExamPdf(`${base}-corrige`); } catch (e) { console.error(`[exo] corrigé #${id} non compilé :`, (e as Error).message); }
     return { file: pdf, kind: "pdf" };
   } catch (e) {
+    const msg = (e as Error).message;
     const html = `${base}.html`;
-    fs.writeFileSync(path.join(EXAM_DIR, html), htmlFallback({ title: q.concept, questions: [q] } as ExamSpec, id, dateLabel));
-    console.error(`[exo] compilation LaTeX échouée pour #${id} → repli HTML :`, (e as Error).message);
-    return { file: html, kind: "html" };
+    fs.writeFileSync(path.join(EXAM_DIR, html), htmlFallback({ title: q.concept, questions: [q] } as ExamSpec, id, dateLabel, msg));
+    console.error(`[exo] compilation LaTeX échouée pour #${id} → repli HTML lisible :`, msg);
+    return { file: html, kind: "html", texError: msg };
   }
 }
 
-/** Construit les artefacts : PDF examen SEUL (mode mock) + PDF corrigé ; HTML de repli sinon. */
-export async function buildExamArtifact(spec: ExamSpec, id: number, dateLabel: string): Promise<{ file: string; kind: "pdf" | "html" }> {
+/** Construit les artefacts : PDF examen SEUL (mode mock) + PDF corrigé ; HTML lisible de repli sinon. */
+export async function buildExamArtifact(spec: ExamSpec, id: number, dateLabel: string): Promise<ArtifactResult> {
   fs.mkdirSync(EXAM_DIR, { recursive: true });
   const base = `exam-${id}`;
   // copie un éventuel logo officiel pour la compilation
@@ -282,9 +411,10 @@ export async function buildExamArtifact(spec: ExamSpec, id: number, dateLabel: s
     }
     return { file: pdf, kind: "pdf" };
   } catch (e) {
+    const msg = (e as Error).message;
     const html = `${base}.html`;
-    fs.writeFileSync(path.join(EXAM_DIR, html), htmlFallback(spec, id, dateLabel));
-    console.error(`[exam] compilation LaTeX échouée pour #${id} → repli HTML :`, (e as Error).message);
-    return { file: html, kind: "html" };
+    fs.writeFileSync(path.join(EXAM_DIR, html), htmlFallback(spec, id, dateLabel, msg));
+    console.error(`[exam] compilation LaTeX échouée pour #${id} → repli HTML lisible :`, msg);
+    return { file: html, kind: "html", texError: msg };
   }
 }
