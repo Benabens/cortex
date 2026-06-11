@@ -19,6 +19,8 @@ const TYPE_FR: Record<string, string> = {
   lab: "Labs", note: "Notes", doc: "Docs",
 };
 
+const INGEST_ACTIVE = ["queued", "running", "verifying", "compiling"];
+
 export default function SourcesPage() {
   const [exams, setExams] = useState<ExamSource[]>([]);
   const [corpus, setCorpus] = useState<Corpus[]>([]);
@@ -26,15 +28,53 @@ export default function SourcesPage() {
   const [err, setErr] = useState<string | null>(null);
   const [drag, setDrag] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  // import de dossier (cours additionnels)
+  const [course, setCourse] = useState("cs-202");
+  const [importPath, setImportPath] = useState("");
+  const [importJob, setImportJob] = useState<any>(null);
+  const [importErr, setImportErr] = useState<string | null>(null);
+  const importPoll = useRef<any>(null);
 
   const load = useCallback(async () => {
     const d = await (await fetch("/api/sources")).json();
     setExams(d.exams ?? []);
     setCorpus(d.corpus ?? []);
   }, []);
+
+  const pollImport = useCallback((id: number) => {
+    clearInterval(importPoll.current);
+    importPoll.current = setInterval(async () => {
+      try {
+        const j = await (await fetch(`/api/jobs/${id}`)).json();
+        setImportJob(j);
+        if (!INGEST_ACTIVE.includes(j.status)) { clearInterval(importPoll.current); if (j.status === "done") load(); }
+      } catch {}
+    }, 1500);
+  }, [load]);
+
   useEffect(() => {
     load();
-  }, [load]);
+    try { setCourse(localStorage.getItem("cortex-course") || "cs-202"); } catch {}
+    (async () => {
+      try {
+        const d = await (await fetch("/api/jobs?type=ingest")).json();
+        if (d.active && INGEST_ACTIVE.includes(d.active.status)) { setImportJob(d.active); pollImport(d.active.id); }
+      } catch {}
+    })();
+    return () => clearInterval(importPoll.current);
+  }, [load, pollImport]);
+
+  async function startImport() {
+    if (!importPath.trim()) return;
+    setImportErr(null);
+    setImportJob(null);
+    try {
+      const r = await fetch("/api/sources/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: importPath.trim() }) });
+      const d = await r.json();
+      if (!r.ok) { setImportErr(d.error ?? "Échec"); return; }
+      if (d.jobId) { setImportJob({ id: d.jobId, status: "queued", progress: 0, currentStep: "Démarrage…", log: [] }); pollImport(d.jobId); }
+    } catch (e: any) { setImportErr(String(e.message ?? e)); }
+  }
 
   async function toggle(path: string, reference: boolean) {
     setExams((xs) => xs.map((e) => (e.path === path ? { ...e, isReference: reference } : e)));
@@ -84,6 +124,42 @@ export default function SourcesPage() {
           types de questions, structure, analyse de code — en puisant le contenu dans tout ton corpus.
         </p>
       </header>
+
+      {/* Import d'un DOSSIER entier (cours additionnels uniquement) */}
+      {course !== "cs-202" && (
+        <div className="card card-pad mb-5">
+          <h2 className="text-[15px] font-semibold mb-1" style={{ color: "var(--ink)" }}>📂 Importer un dossier entier</h2>
+          <p className="text-[13px] mb-3" style={{ color: "var(--ink-2)" }}>
+            Donne le chemin d'un dossier (cours, séries+corrigés, sites, <strong style={{ color: "var(--ink)" }}>vrais examens</strong>, images d'exos).
+            Cortex classe tout, détecte les examens de référence et indexe la matière. Cours courant : <strong style={{ color: "var(--accent-ink)" }}>{course}</strong>.
+          </p>
+          {importJob && INGEST_ACTIVE.includes(importJob.status) ? (
+            <div>
+              <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--surface-2)" }}>
+                <div className="h-full transition-all" style={{ width: `${importJob.progress}%`, background: "var(--accent)" }} />
+              </div>
+              <div className="mt-2 text-[13px]" style={{ color: "var(--ink-2)" }}>{importJob.currentStep}</div>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <input className="input" placeholder="/Users/ben/Documents/Cowork/ALGO 1" value={importPath} onChange={(e) => setImportPath(e.target.value)} style={{ fontSize: 14 }} />
+              <button className="btn btn-primary" onClick={startImport}>Importer</button>
+            </div>
+          )}
+          {importJob?.status === "done" && (
+            <div className="mt-3">
+              <p className="text-[13px]" style={{ color: "var(--green)" }}>Dossier ingéré ✓</p>
+              {importJob.log?.length > 0 && (
+                <div className="mt-2 rounded-lg p-2 text-[11px] leading-relaxed max-h-40 overflow-auto" style={{ background: "var(--surface-2)", color: "var(--ink-3)", fontFamily: "ui-monospace, monospace" }}>
+                  {importJob.log.filter((l: any) => /Compris|examens de référence|types|conventions|importé|refs|lectures|series|notes|sites|images/.test(l.msg)).slice(-12).map((l: any, i: number) => <div key={i}>{l.msg}</div>)}
+                </div>
+              )}
+            </div>
+          )}
+          {importJob?.status === "error" && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>Échec : {importJob.error}</p>}
+          {importErr && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>{importErr}</p>}
+        </div>
+      )}
 
       {/* Upload */}
       <div

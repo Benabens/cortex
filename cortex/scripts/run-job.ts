@@ -4,6 +4,8 @@
  * et au rechargement de page. Écrit l'avancement dans la table `jobs`.
  * Lancer : tsx scripts/run-job.ts <jobId>
  */
+import { spawn } from "node:child_process";
+import path from "node:path";
 import { enterCourse, sqlite } from "../db/client";
 import { claudeBinPath } from "../lib/claude-code";
 import { generateExamViaClaudeCode, generateTargetedExercise } from "../lib/exam";
@@ -11,19 +13,61 @@ import { texAvailable } from "../lib/exam-latex";
 import { getJob, logJob, setJob } from "../lib/jobs";
 
 const jobId = Number(process.argv[2]);
+const COURSE = process.argv[3];
 // Cours du job (argv[3] ; CORTEX_COURSE est aussi posé par startWorker) → ouvre la BONNE DB.
-enterCourse(process.argv[3]);
+enterCourse(COURSE);
 
 function fail(msg: string): never {
   try { setJob(jobId, { status: "error", error: msg }); logJob(jobId, "ERREUR : " + msg); } catch {}
   process.exit(1);
 }
 
+/** Job d'INGESTION (Phase 1) : (re)construit le corpus du cours, en important un dossier si fourni. */
+async function runIngestJob(target: string | null): Promise<void> {
+  setJob(jobId, { status: "running", pid: process.pid, currentStep: "Ingestion…", progress: 5 });
+  const tsxLocal = path.join(process.cwd(), "node_modules", ".bin", "tsx");
+  const args = ["scripts/ingest.ts", "--course", COURSE ?? "cs-202"];
+  if (target) args.push("--from", target);
+  logJob(jobId, `Lancement : ingest --course=${COURSE}${target ? ` --from ${target}` : ""}`);
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(tsxLocal, args, { cwd: process.cwd(), env: { ...process.env, CORTEX_COURSE: COURSE } });
+    let last = "";
+    const onData = (d: Buffer) => {
+      for (const line of d.toString().split("\n")) {
+        const t = line.trim();
+        if (!t) continue;
+        last = t;
+        logJob(jobId, t);
+        if (/Import du dossier/.test(t)) setJob(jobId, { currentStep: "Import du dossier…", progress: 20 });
+        else if (/Nettoyage/.test(t)) setJob(jobId, { currentStep: "Indexation…", progress: 45 });
+        else if (/vocabulaire/.test(t)) setJob(jobId, { currentStep: "Vocabulaire…", progress: 80 });
+        else if (/Compris pour/.test(t)) setJob(jobId, { currentStep: "Récap…", progress: 95 });
+      }
+    };
+    child.stdout.on("data", onData);
+    child.stderr.on("data", onData);
+    child.on("error", reject);
+    child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(last || `ingest a quitté (code ${code})`))));
+  });
+}
+
 async function main() {
-  if (!jobId) { console.error("usage: run-job <jobId>"); process.exit(1); }
+  if (!jobId) { console.error("usage: run-job <jobId> <course>"); process.exit(1); }
   const job = getJob(jobId);
   if (!job) { console.error("job introuvable: " + jobId); process.exit(1); }
   if (job.status === "canceled") process.exit(0);
+
+  if (job.type === "ingest") {
+    try {
+      await runIngestJob(job.target);
+      setJob(jobId, { status: "done", progress: 100, currentStep: "Ingestion terminée ✓" });
+      logJob(jobId, "Ingestion terminée ✓");
+      process.exit(0);
+    } catch (e) {
+      fail((e as Error)?.message || String(e));
+    }
+    return;
+  }
 
   setJob(jobId, { status: "running", pid: process.pid, currentStep: "Pré-vérifications…", progress: 2 });
   logJob(jobId, `Worker démarré (PID ${process.pid})`);

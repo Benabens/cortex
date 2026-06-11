@@ -13,12 +13,20 @@ import path from "node:path";
 import { extractText, getDocumentProxy } from "unpdf";
 import { currentCourse, enterCourse, ensureFts, sqlite } from "../db/client";
 import { coursePaths, DEFAULT_COURSE } from "../lib/courses";
+import { importFolder } from "../lib/import-folder";
 import { ingestAllRefs } from "../lib/sources";
 import { tokenize } from "../lib/text";
 
-// Cours à ingérer : `npm run ingest -- --course=algo` (défaut cs-202). À FIXER avant les
-// prepared statements/CONTENT_ROOT ci-dessous → ils ciblent la DB et le contenu du bon cours.
-const courseArg = process.argv.find((a) => a.startsWith("--course="))?.split("=")[1];
+// Args : `npm run ingest -- --course=algo --from "<dossier>"` (défaut cs-202, pas d'import).
+function argVal(name: string): string | undefined {
+  const eq = process.argv.find((a) => a.startsWith(`--${name}=`));
+  if (eq) return eq.split("=").slice(1).join("=");
+  const i = process.argv.indexOf(`--${name}`);
+  if (i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith("--")) return process.argv[i + 1];
+  return undefined;
+}
+const courseArg = argVal("course");
+const fromDir = argVal("from");
 if (courseArg) process.env.CORTEX_COURSE = courseArg;
 enterCourse(courseArg);
 const COURSE = currentCourse();
@@ -404,6 +412,16 @@ async function ingestGenericContent(): Promise<void> {
 async function main() {
   ensureFts();
   console.log(`Cours : ${COURSE}`);
+
+  // --from <dossier> : importe+classe un dossier entier dans le cours AVANT d'ingérer (Phase 1).
+  if (fromDir) {
+    console.log(`\n📂 Import du dossier : ${fromDir}`);
+    const m = importFolder(fromDir);
+    console.log(`  ${m.total} fichier(s) importé(s) (${m.skipped} ignoré(s))`);
+    for (const [b, n] of Object.entries(m.byBucket)) console.log(`    - ${b} : ${n}`);
+    if (m.recentRefs.length) console.log(`  examens de référence récents : ${m.recentRefs.map((r) => r.name + (r.year ? ` (${r.year})` : "")).join(", ")}`);
+  }
+
   console.log("Nettoyage des données dérivées (sources/items/fts)…");
   sqlite.exec("DELETE FROM items; DELETE FROM sources; DELETE FROM fts_items;");
 
@@ -433,6 +451,16 @@ async function main() {
 
   const counts = sqlite.prepare("SELECT (SELECT count(*) FROM sources) s, (SELECT count(*) FROM items) i, (SELECT count(*) FROM fts_items) f").get() as any;
   console.log(`\n✓ Ingestion terminée : ${counts.s} sources, ${counts.i} items, ${counts.f} indexés (FTS).`);
+
+  // Récap « ce qui a été compris » (la matière, les examens de réf, les conventions).
+  const byType = sqlite.prepare("SELECT type, count(*) n FROM sources GROUP BY type ORDER BY n DESC").all() as { type: string; n: number }[];
+  const refs = sqlite.prepare("SELECT count(*) n FROM exam_refs").get() as { n: number };
+  const notes = sqlite.prepare("SELECT count(*) n FROM sources WHERE type='note'").get() as { n: number };
+  const recent = sqlite.prepare("SELECT title, year FROM sources WHERE type IN ('final','midterm') AND year IS NOT NULL ORDER BY year DESC LIMIT 3").all() as { title: string; year: number }[];
+  console.log(`\n📊 Compris pour « ${COURSE} » :`);
+  console.log(`   types : ${byType.map((t) => `${t.type}×${t.n}`).join(", ")}`);
+  console.log(`   examens de référence (format) : ${refs.n}${recent.length ? " — récents : " + recent.map((r) => `${r.title} (${r.year})`).join(", ") : ""}`);
+  console.log(`   conventions/attendus (notes)  : ${notes.n}`);
 }
 
 main().catch((e) => {
