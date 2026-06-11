@@ -134,3 +134,53 @@ Destination IP & Out interface & Justification\tabularnewline\hline
 \end{scope}
 \end{tikzpicture}\end{center}
 \figcaption{Figure 1: Network topology. Link costs are in pink, link rates in green; the small orange boxes are named router interfaces.}}
+
+% ============================================================================
+% FIGURES OS/FS VERROUILLÉES (style EPFL sobre). Le générateur les PARAMÈTRE.
+% ============================================================================
+% \examinode{<taille fichier en blocs, 1..N affichés>}{<nb direct ptrs>} :
+% inode v6-style : zone métadonnées + addr[0..7], direct → data, indirect → index → data.
+\newcommand{\examinode}{%
+\begin{center}\begin{tikzpicture}[font=\scriptsize,>=Latex,node distance=3.5mm]
+\node[draw,minimum width=2.5cm,minimum height=4mm](meta){metadata (size, \ldots)};
+\node[draw,below=0mm of meta,minimum width=2.5cm,minimum height=4mm](a0){addr[0] $\rightarrow$ direct};
+\node[draw,below=0mm of a0,minimum width=2.5cm,minimum height=4mm](a1){addr[1] $\rightarrow$ direct};
+\node[draw,below=0mm of a1,minimum width=2.5cm,minimum height=4mm](dots){\vdots};
+\node[draw,below=0mm of dots,minimum width=2.5cm,minimum height=4mm](a6){addr[6] $\rightarrow$ single ind.};
+\node[draw,below=0mm of a6,minimum width=2.5cm,minimum height=4mm](a7){addr[7] $\rightarrow$ double ind.};
+\node[blk,right=14mm of a0](d0){data};
+\node[blk,right=14mm of a1](d1){data};
+\node[draw,right=14mm of a6,minimum width=1.4cm,minimum height=4mm](idx){index blk};
+\node[blk,right=6mm of idx](d2){data};
+\node[draw,right=14mm of a7,minimum width=1.4cm,minimum height=4mm](idx2){index blk};
+\node[draw,right=6mm of idx2,minimum width=1.4cm,minimum height=4mm](idx3){index blk};
+\node[blk,right=6mm of idx3](d3){data};
+\draw[->](a0.east)--(d0.west); \draw[->](a1.east)--(d1.west);
+\draw[->](a6.east)--(idx.west); \draw[->](idx.east)--(d2.west);
+\draw[->](a7.east)--(idx2.west); \draw[->](idx2.east)--(idx3.west); \draw[->](idx3.east)--(d3.west);
+\node[above=1mm of meta,font=\small\bfseries]{inode};
+\end{tikzpicture}\end{center}
+\figcaption{Figure: v6-style inode with direct, single-indirect and double-indirect pointers.}}
+
+% \examproctree : arbre fork/exec. Usage :
+% \begin{examproctree} \node[pnode](p0){\texttt{./a.out}\\x=3}; \node[pnode,below left=of p0](p1){...};
+% \draw[forkarrow](p0)--(p1); \draw[execarrow](p1)--(p2); \end{examproctree}
+\tikzset{
+  pnode/.style={draw,rounded corners=2pt,inner sep=3pt,font=\scriptsize\ttfamily,align=center},
+  forkarrow/.style={->,>=Latex,thick},
+  execarrow/.style={->,>=Latex,thick,densely dashed},
+}
+\newenvironment{examproctree}{\begin{center}\begin{tikzpicture}[node distance=9mm and 11mm,font=\scriptsize]}{\end{tikzpicture}\\[2pt]{\scriptsize solid arrow = \texttt{fork()} \quad dashed arrow = \texttt{exec()}}\end{center}}
+
+% \examstates : diagramme d'états processus (Running/Ready/Blocked + transitions standard).
+\newcommand{\examstates}{%
+\begin{center}\begin{tikzpicture}[font=\scriptsize,>=Latex,node distance=16mm]
+\node[state](RUN){Running};
+\node[state,right=22mm of RUN](RDY){Ready};
+\node[state,below right=10mm and 4mm of RUN](BLK){Blocked};
+\draw[->,thick] (RUN.10) -- (RDY.170) node[midway,above]{descheduled / timer};
+\draw[->,thick] (RDY.190) -- (RUN.350) node[midway,below]{scheduled};
+\draw[->,thick] (RUN.290) -- (BLK.150) node[midway,left]{I/O request};
+\draw[->,thick] (BLK.30) -- (RDY.250) node[midway,right]{I/O done};
+\end{tikzpicture}\end{center}
+\figcaption{Figure: process state diagram.}}
