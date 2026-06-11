@@ -68,3 +68,7 @@ data/exams/*.log
 data/exams/*.aux
 data/exams/*.out
 data/exams/epfl-logo.*
+
+# figref auto-générés des cours additionnels (rendus depuis les PDF de réf, reconstructibles)
+data/algo/refs/figref/
+data/ml/refs/figref/

@@ -92,7 +92,8 @@ function gatherContext() {
   const style = styleRows.slice(0, 12).map((r) => ({ src: r.src, excerpt: trunc(r.text, 1600) }));
 
   // CONTENU = tout le corpus, en priorité les séries d'exos + le reste (trimé pour la vitesse).
-  const exercises = sampleByType(["exercise", "serie"], 550, 8);
+  // 'site' (sites HTML de révision des cours additionnels) est sans effet pour cs-202 (aucun item de ce type).
+  const exercises = sampleByType(["exercise", "serie", "site"], 550, 8);
   const reviews = sampleByType(["review"], 320, 6);
   const cheats = sampleByType(["cheatsheet"], 400, 3);
   const course = sampleByType(["course_pdf"], 320, 4);

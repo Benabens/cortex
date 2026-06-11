@@ -1,5 +1,6 @@
 import { sqlite } from "@/db/client";
 import type { Archetype } from "@/lib/archetypes";
+import { genericRefImageFor, genericVisionBlock } from "@/lib/course-vision";
 import type { CourseProfile, Slot } from "@/lib/course-profile";
 import { getCourse } from "@/lib/courses";
 import { genericDirectivesBlock } from "@/lib/profiles/generic-directives";
@@ -68,9 +69,9 @@ export function makeGenericProfile(courseId: string, archetypes: Archetype[]): C
 
   return {
     directivesBlock: () => genericDirectivesBlock(c.examCode, c.examName),
-    visionBlock: () => "", // pas d'images-étalon par défaut (Ben pourra en fournir)
+    visionBlock: genericVisionBlock, // images-étalon rendues depuis les vrais examens du cours (Phase 2)
     staffNotesText: genericStaffNotes,
-    refImageFor: () => null,
+    refImageFor: genericRefImageFor,
     latexContract: () => GENERIC_LATEX_CONTRACT,
     archetypes,
     examSlots: slotsFromArchetypes,

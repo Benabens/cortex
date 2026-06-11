@@ -446,6 +446,13 @@ async function main() {
   // Examens de référence (data/<course>/refs/) : pour TOUS les cours.
   console.log("• refs         :", await ingestAllRefs(), "examen(s) de référence");
 
+  // Ancrage VISION (Phase 2) : rend les pages des examens de réf PDF en images-étalon (cours ≠ cs-202).
+  if (COURSE !== DEFAULT_COURSE) {
+    const { renderCourseRefImages } = await import("../lib/course-vision");
+    const imgs = renderCourseRefImages(COURSE);
+    if (imgs) console.log(`• vision       : ${imgs} image(s)-étalon rendue(s) depuis les examens de référence`);
+  }
+
   // Vocabulaire (pour la recherche tolérante aux fautes)
   console.log("• vocabulaire  :", buildVocab(), "termes");
 
