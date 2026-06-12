@@ -106,7 +106,7 @@ function contextBlock(ctx: ReturnType<typeof gatherTargetedContext>): string {
     block(`═══ PAST-EXAMS DU MÊME TYPE (le format/difficulté de la prof — PRIORITÉ) ═══`, ctx.pastexams),
     block(`═══ SÉRIES + CORRIGÉS ═══`, ctx.exercises),
     block(`═══ COURS ═══`, ctx.course),
-  ].filter(Boolean).join("\n");
+  ].filter((l) => l != null).join("\n");
 }
 
 /** P0+P1 — étudier la vraie page la plus dure + concevoir le piège (avant de rédiger). */
@@ -127,7 +127,7 @@ async function designTrap(a: Archetype, target: string, refImage: string | null,
     `NE RÉDIGE PAS encore la question. CONÇOIS-LA : choisis UN piège précis, le cas-limite qui le déclenche, la chaîne de raisonnement de l'étudiant fort, les NOMBRES NON RONDS, la grille de réponse, et la réponse erronée du pattern-matcher (ce qui discrimine). Plan des sous-questions en escalier.`,
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier.`,
     JSON.stringify(DESIGN_SCHEMA, null, 2),
-  ].filter(Boolean).join("\n");
+  ].filter((l) => l != null).join("\n");
   step("P1 — conception du piège (étude de la vraie page + design)…", 22);
   const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 300_000 });
   return extractJson<DesignBrief>(text);
@@ -162,7 +162,7 @@ async function writeFromDesign(a: Archetype, target: string, pts: number, design
     `Rédige l'énoncé COMPLET (statement_tex) avec ses sous-questions \\subq{N.M}{...}{pts} et ses grilles de réponse, et le corrigé COMPLET (solution_tex) résolu étape par étape (le piège y est explicité). Le piège doit être RÉELLEMENT testé : un étudiant qui pattern-matche se trompe.`,
     `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points}. Aucun outil au-delà de Read, aucun fichier.`,
     JSON.stringify(ONE_EX_SCHEMA, null, 2),
-  ].filter(Boolean).join("\n");
+  ].filter((l) => l != null).join("\n");
   step("P2 — rédaction de l'énoncé multi-étapes (format EPFL + piège)…", 38);
   const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 480_000 });
   const q = extractJson<ExamQuestion>(text);
@@ -198,7 +198,7 @@ async function adversarialAudit(a: Archetype, q: ExamQuestion, refImage: string 
     `Si le pattern-matcher réussit OU le piège est absent → verdict « too_easy » + hardening CHIRURGICAL (quoi ajouter/salir/agrandir/enchaîner, sans tout réécrire). Si le fort cale → « broken » + comment simplifier au bon endroit. Sinon « good ».`,
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier.`,
     JSON.stringify(AUDIT_SCHEMA, null, 2),
-  ].filter(Boolean).join("\n");
+  ].filter((l) => l != null).join("\n");
   const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 340_000 });
   return extractJson<Audit>(text);
 }
@@ -231,7 +231,7 @@ async function reviseFromAudit(a: Archetype, q: ExamQuestion, audit: Audit, refI
     ``,
     `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points} (version durcie/réparée). Le corrigé doit rester JUSTE. Aucun fichier.`,
     JSON.stringify(ONE_EX_SCHEMA, null, 2),
-  ].filter(Boolean).join("\n");
+  ].filter((l) => l != null).join("\n");
   const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 480_000 });
   const r = extractJson<ExamQuestion>(text);
   return { ...r, category: a.category, points: q.points };
