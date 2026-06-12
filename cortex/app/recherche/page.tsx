@@ -90,9 +90,10 @@ export default function RecherchePage() {
 
   return (
     <main className="page page-narrow">
-      <header className="mb-6">
+      <header className="mb-6 rise">
         <p className="eyebrow">Recherche globale</p>
         <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Cherche partout, d'un coup.</h1>
+        <p className="sub mt-2">Un Ctrl-F universel sur tous tes supports — cours, séries, finals, cheat sheets, code des labs.</p>
       </header>
 
       <input

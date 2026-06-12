@@ -115,7 +115,7 @@ export default function SourcesPage() {
 
   return (
     <main className="page page-narrow">
-      <header className="mb-6">
+      <header className="mb-6 rise">
         <p className="eyebrow">Sources</p>
         <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Les examens qui servent de modèle.</h1>
         <p className="sub mt-3">

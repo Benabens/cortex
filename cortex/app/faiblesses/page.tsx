@@ -166,9 +166,10 @@ export default function FaiblessesPage() {
 
   return (
     <main className="page page-narrow">
-      <header className="mb-6">
+      <header className="mb-6 rise">
         <p className="eyebrow">Faiblesses</p>
         <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Tes points faibles, capturés.</h1>
+        <p className="sub mt-2">Dépose un exo raté ou colle une discussion — Cortex en extrait tes lacunes et les relie au corpus.</p>
       </header>
 
       {/* Tableau de bord par thème (le « classement » des incompréhensions) */}

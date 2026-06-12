@@ -178,7 +178,7 @@ export default function ProgrammePage() {
 
   return (
     <main className="page">
-      <header className="mb-6">
+      <header className="mb-6 rise">
         <p className="eyebrow">Programme &amp; Maîtrise</p>
         <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Couvre tout le programme — au bon moment.</h1>
         <p className="text-[14px] mt-2" style={{ color: "var(--ink-2)", maxWidth: 680 }}>

@@ -197,9 +197,10 @@ export default function EntrainementPage() {
 
   return (
     <main className="page page-narrow">
-      <header className="mb-6">
+      <header className="mb-6 rise">
         <p className="eyebrow">Entraînement</p>
         <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Drille et fais-toi corriger.</h1>
+        <p className="sub mt-2">Exo ciblé au format examen, série Labs, drilling avec indices, et correction de tes réponses.</p>
       </header>
 
       {/* ---------- Exercice ciblé (PDF format examen) ---------- */}
