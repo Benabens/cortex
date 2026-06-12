@@ -46,7 +46,7 @@ export function verifyVisionImages(): string[] {
 /** Image de la vraie page-étalon du même type qu'un exercice (pour vérif/régénération ciblées). */
 export function refImageFor(category?: string, concept?: string): string {
   const c = `${category ?? ""} ${concept ?? ""}`.toLowerCase();
-  if (/tcp|congestion|reno|tahoe|slow start|seq|ack|throughput/.test(c)) return "data/refs/figref/tcp_2024.png";
+  if (/tcp|congestion|reno|tahoe|slow start|\bseq\b|\back\b|throughput/.test(c)) return "data/refs/figref/tcp_2024.png";
   if (/topolog|subnet|forward|packet|routing|prefix|\barp\b|delay|bellman|dijkstra/.test(c)) return "data/refs/figref/topo_2024.png";
   if (/schedul|mlfq|round robin|turnaround/.test(c)) return "data/refs/figref/scheduling_2024.png";
   if (/fork|thread|process|race|exec|wait/.test(c)) return "data/refs/figref/fork_threads_2024.png";
