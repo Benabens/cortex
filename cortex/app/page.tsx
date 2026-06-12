@@ -20,6 +20,11 @@ const CAT_COLOR: Record<string, string> = {
   Networking: "var(--blue)", OS: "var(--green)", C: "var(--violet)", Labs: "var(--accent)",
 };
 
+function greeting(): string {
+  const h = new Date().getHours();
+  return h < 5 ? "Bonne nuit" : h < 12 ? "Bonjour" : h < 18 ? "Bon après-midi" : "Bonsoir";
+}
+
 function Ring({ val, color, label }: { val: number; color: string; label: string }) {
   return (
     <div className="ring" style={{ ["--val" as any]: val, ["--c" as any]: color }}>
@@ -51,13 +56,19 @@ export default function Home() {
     <main className="page page-wide">
       {/* ── En-tête ── */}
       <header className="rise" style={{ marginBottom: 28 }}>
-        <p className="eyebrow">{d?.course.name ?? "Cortex"} · {d?.course.examCode ?? ""}</p>
+        <p className="eyebrow">{greeting()} · {d?.course.name ?? "Cortex"} · {d?.course.examCode ?? ""}</p>
         <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
           <h1 className="h1 text-gradient" style={{ maxWidth: 620 }}>
             {d?.analyzed ? "Voici où tu en es." : "Révise ce qui tombe vraiment."}
           </h1>
           {d?.countdown && d.countdown.days >= 0 && (
-            <div className="card card-pad" style={{ padding: "12px 18px", display: "flex", alignItems: "center", gap: 14 }}>
+            <div
+              className="card"
+              style={{
+                padding: "12px 18px", display: "flex", alignItems: "center", gap: 14,
+                ...(d.countdown.days <= 7 ? { borderColor: "var(--accent-line)", boxShadow: "var(--shadow-accent), var(--hairline-top)" } : {}),
+              }}
+            >
               <div className="stat" style={{ alignItems: "center" }}>
                 <div className="stat-value" style={{ color: d.countdown.days <= 7 ? "var(--accent-ink)" : "var(--ink)" }}>J−{d.countdown.days}</div>
                 <div className="stat-label">avant l'examen</div>

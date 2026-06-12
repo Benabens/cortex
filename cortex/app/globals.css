@@ -8,56 +8,59 @@
    sont conservés (compat pages) et raffinés.
    ═══════════════════════════════════════════════════════════════════ */
 :root {
-  /* — Surfaces (stratification : bg < surface-2 < surface < hover) — */
-  --bg: #0a0a0c;
-  --bg-2: #0d0d10;
-  --surface: #161619;
-  --surface-2: #101013;
-  --surface-hover: #1e1e22;
-  --surface-inset: #0c0c0f;
+  /* — Fonds stratifiés (spec PERFECT : profondeur par surfaces empilées + hairlines) — */
+  --bg: #0b0b0e;
+  --bg-2: #0d0d11;
+  --surface: #141418;
+  --surface-3: #1b1b20; /* surface élevée (nav active, segmented actif, popover) */
+  --surface-2: #0f0f12; /* surface en retrait (inset des barres/progress) */
+  --surface-hover: #212127;
+  --surface-inset: #0e0e11;
 
-  /* — Encre — */
-  --ink: #f4f4f6;
-  --ink-2: #a6a6ad;
+  /* — Encre (jamais de blanc pur) — */
+  --ink: #ececef;
+  --ink-2: #a1a1aa;
   --ink-3: #6b6b73;
   --ink-4: #47474e;
 
-  /* — Hairlines — */
-  --line: rgba(255, 255, 255, 0.07);
-  --line-2: rgba(255, 255, 255, 0.11);
-  --line-strong: rgba(255, 255, 255, 0.16);
+  /* — Hairlines (signature Linear : bordures fines qui dessinent la structure) — */
+  --line: #232329;
+  --line-2: #27272e;
+  --line-strong: #2e2e36;
 
-  /* — Accent (ambre = marque) + data viz — */
-  --accent: #e0985a;
-  --accent-ink: #eab07a;
-  --accent-2: #c97f45;
-  --accent-wash: rgba(224, 152, 90, 0.14);
-  --accent-line: rgba(224, 152, 90, 0.34);
+  /* — Accent ambré raffiné + glow (parcimonie : CTA, anneaux, focus, recommandé) — */
+  --accent: #e0843c;
+  --accent-ink: #f0a968;
+  --accent-2: #c9722f;
+  --accent-wash: rgba(224, 132, 60, 0.13);
+  --accent-line: rgba(224, 132, 60, 0.36);
+  --glow-accent: 0 0 0 1px rgba(224, 132, 60, 0.55), 0 8px 24px rgba(224, 132, 60, 0.18);
 
+  /* — Data-viz : vives mais classes (sauge / violet doux / bleu), léger glow — */
   --blue: #5aa8ef;
   --blue-ink: #7cbcf5;
-  --blue-wash: rgba(90, 168, 239, 0.13);
-  --green: #43cda4;
-  --green-ink: #5fd9b4;
-  --green-wash: rgba(67, 205, 164, 0.13);
-  --red: #f0735a;
+  --blue-wash: rgba(90, 168, 239, 0.12);
+  --green: #5fb389;
+  --green-ink: #7cc6a1;
+  --green-wash: rgba(95, 179, 137, 0.13);
+  --red: #ef6f5c;
   --red-ink: #f58d78;
-  --red-wash: rgba(240, 115, 90, 0.13);
-  --violet: #a98bf0;
-  --violet-wash: rgba(169, 139, 240, 0.13);
+  --red-wash: rgba(239, 111, 92, 0.12);
+  --violet: #9a8cff;
+  --violet-wash: rgba(154, 140, 255, 0.12);
 
-  /* — Profondeur — */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 1px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.35);
-  --shadow-lg: 0 18px 44px rgba(0, 0, 0, 0.55), 0 6px 14px rgba(0, 0, 0, 0.4);
-  --shadow-accent: 0 4px 18px rgba(224, 152, 90, 0.30);
+  /* — Profondeur (légère : les hairlines font le travail) — */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.38), 0 2px 5px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5), 0 5px 12px rgba(0, 0, 0, 0.35);
+  --shadow-accent: 0 4px 18px rgba(224, 132, 60, 0.26);
   --ring: 0 0 0 3px var(--accent-wash);
-  --hairline-top: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --hairline-top: inset 0 1px 0 rgba(255, 255, 255, 0.045);
 
-  /* — Rayons — */
+  /* — Rayons (spec : cartes 14, boutons/inputs 10) — */
   --r-xs: 7px;
   --r-sm: 10px;
-  --r: 13px;
+  --r: 14px;
   --r-lg: 18px;
   --r-xl: 24px;
 
@@ -100,7 +103,7 @@ html {
 
 body {
   background:
-    radial-gradient(1200px 620px at 50% -300px, rgba(224, 152, 90, 0.10), transparent 70%),
+    radial-gradient(1200px 620px at 50% -300px, rgba(224, 132, 60, 0.10), transparent 70%),
     radial-gradient(1000px 520px at 100% -120px, rgba(90, 168, 239, 0.045), transparent 60%),
     var(--bg);
   background-attachment: fixed;
@@ -109,7 +112,7 @@ body {
   letter-spacing: -0.011em;
 }
 
-::selection { background: rgba(224, 152, 90, 0.28); color: #fff; }
+::selection { background: rgba(224, 132, 60, 0.28); color: #fff; }
 a { color: var(--blue); text-decoration: none; }
 
 /* fine scrollbar */
@@ -160,7 +163,7 @@ a { color: var(--blue); text-decoration: none; }
 .nav-link:hover { color: var(--ink); background: var(--surface-hover); }
 .nav-link[data-active="true"] {
   color: var(--ink);
-  background: var(--surface);
+  background: var(--surface-3);
   box-shadow: var(--shadow-sm), var(--hairline-top);
 }
 
@@ -232,11 +235,11 @@ a { color: var(--blue); text-decoration: none; }
 .btn-sm { font-size: 13px; padding: 6px 12px; }
 .btn-lg { font-size: 15px; padding: 11px 20px; }
 .btn-primary {
-  background: linear-gradient(180deg, #e9a86b, var(--accent));
-  color: #2a1a08; font-weight: 600;
+  background: linear-gradient(180deg, #ef9a52, var(--accent));
+  color: #241404; font-weight: 600;
   box-shadow: var(--shadow-accent), var(--hairline-top);
 }
-.btn-primary:hover:not(:disabled) { background: linear-gradient(180deg, #eeb076, #cf8a4c); box-shadow: 0 6px 22px rgba(224, 152, 90, 0.42); }
+.btn-primary:hover:not(:disabled) { background: linear-gradient(180deg, #f0a968, #d57c33); box-shadow: var(--glow-accent); }
 .btn-primary:focus-visible { outline: none; box-shadow: var(--shadow-accent), var(--ring); }
 .btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--line-strong); box-shadow: var(--hairline-top); }
 .btn-ghost:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--line-strong); }
@@ -300,6 +303,7 @@ mark { background: transparent; color: var(--accent-ink); font-weight: 600; }
   width: 56px; height: 56px; border-radius: 999px; flex: none;
   background: conic-gradient(var(--c) calc(var(--val) * 1%), var(--surface-2) 0);
   display: grid; place-items: center; position: relative;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--c) 28%, transparent));
 }
 .ring::before { content: ""; position: absolute; inset: 5px; border-radius: 999px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
 .ring > span { position: relative; font-size: 13px; font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; }
@@ -312,7 +316,7 @@ mark { background: transparent; color: var(--accent-ink); font-weight: 600; }
   transition: color 0.15s, background 0.15s;
 }
 .segmented > button:hover { color: var(--ink); }
-.segmented > button[data-active="true"] { color: var(--ink); background: var(--surface); box-shadow: var(--shadow-sm), var(--hairline-top); }
+.segmented > button[data-active="true"] { color: var(--ink); background: var(--surface-3); box-shadow: var(--shadow-sm), var(--hairline-top); }
 
 /* ── Table ─────────────────────────────────────────────────────── */
 .t-row { display: grid; align-items: center; gap: 12px; padding: 11px 14px; border-radius: var(--r-sm); transition: background 0.14s; }
