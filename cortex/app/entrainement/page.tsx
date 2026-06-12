@@ -102,6 +102,15 @@ export default function EntrainementPage() {
     return () => { clearInterval(exoPoll.current); clearInterval(labPoll.current); };
   }, [load, loadLabSeries, pollExo, pollLab]);
 
+  // Intégration faiblesse → drill : ?drill=<concept> pré-remplit et lance la question.
+  useEffect(() => {
+    try {
+      const c = new URLSearchParams(window.location.search).get("drill");
+      if (c) { setConcept(c); genDrill(c); window.history.replaceState({}, "", "/entrainement"); }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function cancelLab() {
     if (!labJob) return;
     clearInterval(labPoll.current);

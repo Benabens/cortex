@@ -292,10 +292,11 @@ export default function FaiblessesPage() {
                   {w.theme && <span className="text-[11px]" style={{ color: "var(--ink-3)" }}>{w.theme}</span>}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <button onClick={() => process(w.id)} disabled={analyzing === w.id} className="btn btn-quiet" style={{ color: "var(--blue)" }}>
-                    {analyzing === w.id ? "Claude analyse… (~20s)" : w.analyzed ? "↻ ré-analyser" : "✦ analyser"}
+                  <a href={`/entrainement?drill=${encodeURIComponent(w.topic)}`} className="btn btn-ghost btn-sm" title="M'entraîner sur ce point">🎯 drill</a>
+                  <button onClick={() => process(w.id)} disabled={analyzing === w.id} className="btn btn-quiet btn-sm" style={{ color: "var(--blue)" }}>
+                    {analyzing === w.id ? "Claude analyse…" : w.analyzed ? "↻" : "✦ analyser"}
                   </button>
-                  <button onClick={() => remove(w.id)} className="btn btn-quiet">suppr</button>
+                  <button onClick={() => remove(w.id)} className="btn btn-quiet btn-sm" title="supprimer">✕</button>
                 </div>
               </div>
               {w.screenshotUrl && (
