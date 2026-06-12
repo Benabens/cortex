@@ -38,17 +38,24 @@ const ONE_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+/**
+ * Surcharges optionnelles de la vérif (NS13) : les exos LABS (8%) ont leurs propres directives
+ * (écrire/débugger du C AUTORISÉ) et leur propre étape 1 (moule Q6 2025 + fichiers du lab).
+ * `opts` absent = comportement historique byte-identique.
+ */
+export type VerifyOpts = { directives?: string; step1?: string };
+
 /** Contrôle UN exercice : résolution à l'aveugle (avec la vraie page de réf) PUIS verdict. */
-async function verifyOne(q: ExamQuestion): Promise<VerifyResult | null> {
+async function verifyOne(q: ExamQuestion, opts?: VerifyOpts): Promise<VerifyResult | null> {
   const p = profile();
   const c = getCourse(currentCourse());
   const img = p.refImageFor(q.category, q.concept);
-  const step1 = img
+  const step1 = opts?.step1 ?? (img
     ? `ÉTAPE 1 — Ouvre la vraie page de référence du MÊME TYPE : ${img} (outil Read). Puis RÉSOUS L'EXERCICE CI-DESSOUS DE ZÉRO, toi-même, rigoureusement (calcule, trace, compte). Écris ta solution complète dans "my_solution". Ne te laisse PAS influencer par le corrigé proposé (tu le verras à l'étape 2).`
-    : `ÉTAPE 1 — RÉSOUS L'EXERCICE CI-DESSOUS DE ZÉRO, toi-même, rigoureusement (calcule, trace, prouve). Écris ta solution complète dans "my_solution". Ne te laisse PAS influencer par le corrigé proposé (tu le verras à l'étape 2).`;
+    : `ÉTAPE 1 — RÉSOUS L'EXERCICE CI-DESSOUS DE ZÉRO, toi-même, rigoureusement (calcule, trace, prouve). Écris ta solution complète dans "my_solution". Ne te laisse PAS influencer par le corrigé proposé (tu le verras à l'étape 2).`);
   const prompt = [
     `Tu es un assistant (TA) rigoureux de ${c.examCode} ${c.examName} (${c.university}). Tu contrôles UN SEUL exercice d'examen blanc.`,
-    p.directivesBlock(),
+    opts?.directives ?? p.directivesBlock(),
     ``,
     step1,
     ``,
@@ -101,14 +108,15 @@ export async function verifyAndHarden(
   spec: ExamSpec,
   regenerate: (q: ExamQuestion, diagnostic: string) => Promise<ExamQuestion>,
   maxAttempts = 3,
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  opts?: VerifyOpts
 ): Promise<{ spec: ExamSpec; report: VerifyReport }> {
   let done = 0;
   const total = spec.questions.length;
   const processed = await mapPool(spec.questions, 3, async (q0) => {
     let q = q0;
     let attempts = 0;
-    let res = await verifyOne(q);
+    let res = await verifyOne(q, opts);
     while (isInvalid(res) && attempts < maxAttempts) {
       const r = res!;
       const diag = [
@@ -122,7 +130,7 @@ export async function verifyAndHarden(
       if (!ng) break;
       q = ng;
       attempts++;
-      res = await verifyOne(q);
+      res = await verifyOne(q, opts);
     }
     let verified: 1 | 0 | null;
     let dropped = false;

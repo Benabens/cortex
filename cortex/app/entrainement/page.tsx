@@ -34,6 +34,13 @@ export default function EntrainementPage() {
   const [exoImg, setExoImg] = useState<File | null>(null);
   const [exoNote, setExoNote] = useState("");
 
+  // ---- Exo Labs (NS13) : moule Q6 2025, contenu = le vrai code du lab ----
+  const [labTopic, setLabTopic] = useState("");
+  const [labJob, setLabJob] = useState<any>(null);
+  const labPoll = useRef<any>(null);
+  const [labErr, setLabErr] = useState<string | null>(null);
+  const [labErrCmd, setLabErrCmd] = useState<string | null>(null);
+
   // ---- Check my solution ----
   const [statement, setStatement] = useState("");
   const [answer, setAnswer] = useState("");
@@ -60,6 +67,17 @@ export default function EntrainementPage() {
     }, 2000);
   }, []);
 
+  const pollLab = useCallback((id: number) => {
+    clearInterval(labPoll.current);
+    labPoll.current = setInterval(async () => {
+      try {
+        const j = await (await fetch(`/api/jobs/${id}`)).json();
+        setLabJob(j);
+        if (!EXO_ACTIVE.includes(j.status)) clearInterval(labPoll.current);
+      } catch {}
+    }, 2000);
+  }, []);
+
   useEffect(() => {
     load();
     (async () => {
@@ -67,9 +85,34 @@ export default function EntrainementPage() {
         const d = await (await fetch("/api/jobs?type=exercise")).json();
         if (d.active && EXO_ACTIVE.includes(d.active.status)) { setExoJob(d.active); pollExo(d.active.id); }
       } catch {}
+      try {
+        const d = await (await fetch("/api/jobs?type=lab-exercise")).json();
+        if (d.active && EXO_ACTIVE.includes(d.active.status)) { setLabJob(d.active); pollLab(d.active.id); }
+      } catch {}
     })();
-    return () => clearInterval(exoPoll.current);
-  }, [load, pollExo]);
+    return () => { clearInterval(exoPoll.current); clearInterval(labPoll.current); };
+  }, [load, pollExo, pollLab]);
+
+  async function cancelLab() {
+    if (!labJob) return;
+    clearInterval(labPoll.current);
+    try { await fetch(`/api/jobs/${labJob.id}/cancel`, { method: "POST" }); } catch {}
+    setLabJob(null);
+    setLabErr(null);
+  }
+
+  async function genLab(lab: string, topic: string) {
+    if (!lab && !topic.trim()) return;
+    setLabErr(null);
+    setLabErrCmd(null);
+    setLabJob(null);
+    try {
+      const r = await fetch("/api/labs/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ lab, topic }) });
+      const d = await r.json();
+      if (!r.ok) { setLabErr(d.error ?? "Échec"); setLabErrCmd(d.command ?? null); return; }
+      if (d.jobId) { setLabJob({ id: d.jobId, status: "queued", progress: 0, currentStep: "Démarrage…", resultPath: null, log: [] }); pollLab(d.jobId); }
+    } catch (e: any) { setLabErr(String(e.message ?? e)); }
+  }
 
   async function cancelExo() {
     if (!exoJob) return;
@@ -194,6 +237,53 @@ export default function EntrainementPage() {
         )}
         {exoJob?.status === "error" && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>Échec : {exoJob.error}</p>}
         {exoErr && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>{exoErr}<CmdHint cmd={exoErrCmd} /></p>}
+      </section>
+
+      {/* ---------- Exo Labs : moule Q6 2025 (les 8% du final) ---------- */}
+      <section className="card card-pad mb-8">
+        <h2 className="text-[15px] font-semibold mb-1" style={{ color: "var(--ink)" }}>Exo Labs — format « question Projet » (Q6 2025)</h2>
+        <p className="text-[13px] mb-3" style={{ color: "var(--ink-2)" }}>
+          Les <strong style={{ color: "var(--ink)" }}>8% Labs</strong> du final auront le format de la Q6 du Final 2025 (décision staff) : conceptuel + <strong style={{ color: "var(--ink)" }}>écrire une fonction C du lab</strong> + ownership/debug. Choisis un lab (ou un sujet) → un exo NEUF dans ce moule, sur le <strong style={{ color: "var(--ink)" }}>vrai code de tes labs</strong>, vérifié.
+        </p>
+        {labJob && EXO_ACTIVE.includes(labJob.status) ? (
+          <div>
+            <div className="progress">
+              <div className="progress-bar" style={{ width: `${labJob.progress}%` }} />
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <div className="text-[13px]" style={{ color: "var(--ink-2)" }}>{labJob.currentStep}</div>
+              <button className="btn btn-quiet" onClick={cancelLab}>annuler</button>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {[
+                { id: "lab1", t: "Lab 1 · Warmup C" },
+                { id: "lab2", t: "Lab 2 · Client-serveur UDP" },
+                { id: "lab4", t: "Lab 4 · Filesystem direntv6" },
+                { id: "lab5", t: "Lab 5 · Multi-threading" },
+              ].map((l) => (
+                <button key={l.id} className="chip" onClick={() => genLab(l.id, labTopic)} style={{ borderColor: "var(--blue)", color: "var(--blue)" }}>
+                  {l.t}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input className="input" placeholder="…ou un sujet précis : « inode walk », « table de mutex », « ownership buffer réseau »" value={labTopic} onChange={(e) => setLabTopic(e.target.value)} style={{ fontSize: 14 }} />
+              <button className="btn btn-primary" onClick={() => genLab("", labTopic)}>✦ Exo Labs</button>
+            </div>
+          </div>
+        )}
+        {labJob?.status === "done" && labJob.resultPath && (
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-[13px]" style={{ color: "var(--green)" }}>Exercice Labs prêt ✓</span>
+            <a className="btn btn-ghost" href={labJob.resultPath} target="_blank" rel="noopener">ouvrir l'énoncé (PDF)</a>
+            <a className="btn btn-quiet" style={{ color: "var(--green)" }} href={labJob.resultPath.replace(/(\.pdf)(\?|$)/, "-corrige$1$2")} target="_blank" rel="noopener">corrigé</a>
+          </div>
+        )}
+        {labJob?.status === "error" && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>Échec : {labJob.error}</p>}
+        {labErr && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>{labErr}<CmdHint cmd={labErrCmd} /></p>}
       </section>
 
       {/* ---------- Drilling ---------- */}

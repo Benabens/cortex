@@ -11,6 +11,7 @@ import { claudeBinPath } from "../lib/claude-code";
 import { generateExamViaClaudeCode, generateTargetedExercise } from "../lib/exam";
 import { texAvailable } from "../lib/exam-latex";
 import { getJob, logJob, setJob } from "../lib/jobs";
+import { generateLabExercise } from "../lib/labs";
 import { analyzeBlueprint } from "../lib/program";
 
 const jobId = Number(process.argv[2]);
@@ -116,14 +117,16 @@ async function main() {
     const res =
       job.type === "exercise"
         ? await generateTargetedExercise(job.target ?? "", { onStep })
-        : await generateExamViaClaudeCode({ onStep });
+        : job.type === "lab-exercise"
+          ? await generateLabExercise(job.target ?? "", { onStep })
+          : await generateExamViaClaudeCode({ onStep });
     if (res.texError) {
       // le résultat existe (HTML lisible) mais le PDF a échoué → erreur LaTeX gardée pour debug
       setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, repli HTML lisible. Détail : ${res.texError.slice(0, 500)}` });
       logJob(jobId, `⚠ Erreur LaTeX : ${res.texError.slice(0, 300)}`);
     }
     setJob(jobId, { status: "done", progress: 100, resultPath: res.url, resultId: res.id, currentStep: "Terminé ✓" });
-    logJob(jobId, `${job.type === "exercise" ? "Exercice" : "Examen"} #${res.id} prêt → ${res.url}`);
+    logJob(jobId, `${job.type === "exercise" ? "Exercice" : job.type === "lab-exercise" ? "Exercice Labs" : "Examen"} #${res.id} prêt → ${res.url}`);
     process.exit(0);
   } catch (e) {
     fail((e as Error)?.message || String(e));

@@ -409,13 +409,13 @@ export async function generateTargetedExercise(
   return out;
 }
 
-async function persistExercise(q: ExamQuestion, report?: VerifyReport): Promise<{ id: number; url: string; texError?: string }> {
+export async function persistExercise(q: ExamQuestion, report?: VerifyReport, sourceTag?: string): Promise<{ id: number; url: string; texError?: string }> {
   ensureExamCols();
   const id = sqlite.prepare(`INSERT INTO exams (format_template, status) VALUES ('exercise','ready')`).run().lastInsertRowid as number;
   const r = report?.results?.[0];
   sqlite
     .prepare(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration, verified, verify_issue) VALUES (?,?,?,?,?,?,?)`)
-    .run(id, q.concept, q.statement_tex, q.solution_tex, null, r?.verified ?? null, r?.issue ?? null);
+    .run(id, q.concept, q.statement_tex, q.solution_tex, sourceTag ?? null, r?.verified ?? null, r?.issue ?? null);
   const dateLabel = (sqlite.prepare(`SELECT date('now') d`).get() as any).d;
   const { file, texError } = await buildExerciseArtifact(q, id, dateLabel);
   sqlite.prepare(`UPDATE exams SET html_path = ? WHERE id = ?`).run(file, id);
