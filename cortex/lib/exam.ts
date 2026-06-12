@@ -303,7 +303,7 @@ export async function persistExam(spec: ExamSpec, report?: VerifyReport): Promis
 
 // ---------------- EXERCICE CIBLÉ (Phase 3) : 1 exo qualité examen, sans garde ----------------
 
-function pickArchetype(target: string): Archetype {
+export function pickArchetype(target: string): Archetype {
   const t = target.toLowerCase();
   const archetypes = profile().archetypes;
   let best = archetypes[0];
@@ -316,7 +316,7 @@ function pickArchetype(target: string): Archetype {
 }
 
 /** Ratisse le corpus pour un sujet ciblé — priorité ABSOLUE aux past-exams (Final/Midterm). */
-function gatherTargetedContext(target: string) {
+export function gatherTargetedContext(target: string) {
   const groups = search(target, 40, "or");
   const byType: Record<string, { src: string; text: string }[]> = {};
   for (const g of groups)
@@ -349,6 +349,16 @@ export async function generateTargetedExercise(
   const target = (norm.target ?? "").trim();
   const imageRel = norm.imageRel?.trim() || undefined;
   if (!target && !imageRel) throw new Error("Donne un sujet OU une image d'exercice.");
+
+  // V3 — cs-202 + sujet TEXTE (pas d'image) → pipeline ARCHITECTE multi-passes (difficulté + style
+  // prof : conception du piège → rédaction → critique adversariale + révision → vérif justesse).
+  // L'image→exo et les autres cours gardent la voie mono-passe ci-dessous (inchangée).
+  if (currentCourse() === DEFAULT_COURSE && target && !imageRel) {
+    const { architectExercise } = await import("@/lib/architect");
+    const res = await architectExercise(target, { onStep: opts.onStep });
+    return { id: res.id, url: res.url, texError: res.texError };
+  }
+
   step("Contexte ciblé assemblé (cours + séries + past-exams + staff)", 12);
   // mots-clés d'ancrage : le texte si fourni, sinon le nom du concept de la note
   const seed = target || (norm.note ?? "");
