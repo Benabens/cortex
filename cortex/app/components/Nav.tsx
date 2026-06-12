@@ -18,6 +18,7 @@ export default function Nav() {
   return (
     <nav className="nav">
       <Link href="/" className="nav-brand">
+        <span className="nav-logo">C</span>
         Cortex
       </Link>
       {LINKS.map((l) => (
