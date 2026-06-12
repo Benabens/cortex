@@ -115,6 +115,12 @@ export const TRAPS: Record<string, Trap[]> = {
       patternMatchFail: "Le pattern-matcher compte un accès par read sans distinguer trou/cache ⇒ sur-compte.",
     },
     {
+      misconception: "Compter les accès disque d'un open(O_CREAT)/write/lseek/read sans distinguer inode vs data, Read vs Write.",
+      setup: "UN programme C concret (open avec O_CREAT|O_TRUNC sur /home/<u>/x.txt, write, lseek, read, close) ; remplir une TABLE À DOUBLE ENTRÉE : accès inode-block et data-block, en lecture ET en écriture, PAR syscall et PAR composant du path (midterm '24 Q4).",
+      edge: "open résout le path (lecture des inodes/data de chaque répertoire) ET ÉCRIT (créer l'inode + l'entrée du répertoire parent) ; lseek ne touche RIEN ; read après write se sert du cache (0 accès) ; close = 0.",
+      patternMatchFail: "Le pattern-matcher met un accès par syscall (lseek compris) et oublie les ÉCRITURES de la création (inode + data du répertoire parent).",
+    },
+    {
       misconception: "Confondre taille adressable max par niveau d'indirection.",
       setup: "Demander la taille de fichier maximale en direct seul, puis direct+single-indirect, avec SECTOR_SIZE et ADDRESSES_PER_SECTOR donnés (non ronds).",
       edge: "direct = 8×512 ; single-indirect ajoute 256 pointeurs × 512 ; la frontière exacte décide direct vs indirect pour un offset donné.",
@@ -133,6 +139,18 @@ export const TRAPS: Record<string, Trap[]> = {
       setup: "Une cascade de fork (avec une condition / une boucle bornée) ; demander combien de processus, qui imprime quoi, et l'arbre.",
       edge: "fork renvoie 2 fois ; le fils reprend APRÈS le fork (pas de re-exécution du début) ; waitpid/zombie pour la terminaison.",
       patternMatchFail: "Le pattern-matcher calcule 2^n sans tenir compte des conditions / suppose un fork infini.",
+    },
+    {
+      misconception: "Croire que la sortie d'un programme fork+wait est forcément non-déterministe (ou l'inverse).",
+      setup: "Un programme fork/exec/wait CONCRET (ex. le fils execvp un `ls`, le parent wait puis imprime) ; demander la sortie exacte ET « is this output deterministic? Justify ».",
+      edge: "wait() ORDONNE le parent après le fils ⇒ la sortie EST déterministe ici (midterm '24 Q1) ; sans wait, l'entrelacement ne l'est pas. Et execvp REMPLACE l'image : le code après execvp ne s'exécute pas (sauf échec).",
+      patternMatchFail: "Le pattern-matcher répond « non-déterministe » par réflexe (ou imprime le code situé après execvp), sans voir que wait() fixe l'ordre.",
+    },
+    {
+      misconception: "Estimer l'épuisement de la pile sans compter TOUT ce qu'un appel empile.",
+      setup: "Une fonction récursive (ex. fibonacci) avec convention d'appel donnée (arguments sur la pile, pas d'optimisation) et une taille de pile NON RONDE (ex. 8 KiB) ; demander après ~combien d'appels la pile déborde, et l'effet de retirer UNE variable.",
+      edge: "Chaque frame = arguments + adresse de retour + variables locales (midterm '24 Q2 : 5 mots de 8 octets → ~204 appels) ; la récursion est DEPTH-FIRST (la première branche épuise la pile avant l'autre) ; retirer une variable fait 5→4 mots (recalcul).",
+      patternMatchFail: "Le pattern-matcher oublie l'adresse de retour (ou compte les deux branches en parallèle) ⇒ estimation fausse.",
     },
     {
       misconception: "Simuler un scheduler sans ses hypothèses (RR sans durées, single-core).",
@@ -182,6 +200,12 @@ export const TRAPS: Record<string, Trap[]> = {
       patternMatchFail: "Le pattern-matcher croit que le fils repart avec des fd neufs.",
     },
     {
+      misconception: "Libérer une structure imbriquée dans le mauvais ordre (ou pas entièrement).",
+      setup: "Une structure avec tableau de pointeurs mallocés (ex. lignes d'un set, midterm '24 Q5) ; LIRE une fonction free_set proposée et dire si elle fuit / double-free / utilise après free.",
+      edge: "Ordre : libérer chaque ligne, PUIS le tableau de lignes, PUIS (selon le contrat) pas le set lui-même ; NULL-check d'abord ; un free du tableau avant les lignes = fuite.",
+      patternMatchFail: "Le pattern-matcher valide un free(set->lines) sans la boucle sur les lignes (fuite invisible à ses yeux).",
+    },
+    {
       misconception: "Mauvais ordre / rôle des appels socket.",
       setup: "Un extrait client OU serveur ; demander l'ordre des appels et quel côté fait quoi.",
       edge: "Serveur : socket→bind→listen→accept ; client : socket→connect. Confondre les deux côtés est l'erreur.",
@@ -211,6 +235,9 @@ const KATERINA_STYLE = [
   `  - « smallest possible size », « minimum size of the queue » : demande l'OPTIMUM, pas une valeur quelconque.`,
   `  - Sous-questions QUI S'ENCHAÎNENT : la sous-question N réutilise le résultat/scénario de N-1.`,
   `  - NOMBRES NON RONDS et volumes réalistes (P=10 ms, R=10 Mbps, MSS=1250 B, 30 000 hôtes, 8000/16000 octets).`,
+  `  - Préambule « Background: » pour rappeler un appel/une convention (« Background: The library call execvp(cmd, …) replaces the current process image… ») puis « Assume… » pour les hypothèses (calling convention, tailles).`,
+  `  - TABLES À DOUBLE ENTRÉE à remplir (le bookkeeping signature du midterm '24 Q4) : lignes = syscalls, colonnes = composants/types d'accès (inode vs data × Read vs Write).`,
+  `  - « Is this output deterministic? Justify. » — questionne le déterminisme et son POURQUOI (wait(), entrelacement), pas juste la valeur.`,
 ];
 
 const JCC_STYLE = [
