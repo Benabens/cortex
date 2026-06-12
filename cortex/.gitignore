@@ -61,6 +61,8 @@ next-env.d.ts
 data/refs/img/
 data/exams/img/
 data/exams/.gen-checkpoint.json
+# journaux d'audit architecte (copie de preuve committée dans data/refs/proof/)
+data/exams/*.audit.json
 # Artefacts d'examens GÉNÉRÉS localement (régénérables — ne pas versionner)
 data/exams/*.pdf
 data/exams/*.tex
