@@ -34,7 +34,11 @@ function unwrapLockedFigures(t: string): string {
   const FIG = String.raw`\\(?:examinode|examstates)\b`;
   return t
     .replace(new RegExp(String.raw`\\begin\{tikzpicture\}(?:\[[^\]]*\])?\s*(${FIG})\s*\\end\{tikzpicture\}`, "g"), "$1")
-    .replace(new RegExp(String.raw`\\begin\{center\}\s*(${FIG})\s*\\end\{center\}`, "g"), "$1");
+    .replace(new RegExp(String.raw`\\begin\{center\}\s*(${FIG})\s*\\end\{center\}`, "g"), "$1")
+    // glyphes Unicode que le modèle émet parfois et que pdflatex ne connaît pas (vécu : corrigé
+    // exam-14 cassé par ✓/✗). Translittération minimale — amssymb est dans le préambule.
+    .replace(/[✓✔]/g, String.raw`\ensuremath{\checkmark}`)
+    .replace(/[✗✘✕]/g, String.raw`\ensuremath{\times}`);
 }
 
 function footDate(dateLabel: string): string {
