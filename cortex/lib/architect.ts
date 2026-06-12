@@ -237,24 +237,26 @@ async function reviseFromAudit(a: Archetype, q: ExamQuestion, audit: Audit, refI
   return { ...r, category: a.category, points: q.points };
 }
 
+export type ArchitectAudit = Audit;
 export type ArchitectResult = { id: number; url: string; texError?: string; auditLog: Audit[] };
 
 /**
- * Pipeline complet pour UN exercice ciblé (cs-202). Renvoie l'exo persité + le journal d'audit.
- * Boucle adversariale bornée (maxRounds), puis vérif de justesse (verifyAndHarden, maxAttempts=1).
+ * CŒUR réutilisable (PERFECT B1) : P0 étudier → P1 concevoir le piège → P2 rédiger →
+ * P3 critique adversariale + révision (boucle bornée). SANS la vérif de justesse ni la
+ * persistance — l'appelant choisit (exo ciblé : verify+persistExercise ; examen complet :
+ * verify par lots existante + persistExam). Renvoie la question + le journal d'audit.
  */
-export async function architectExercise(
+export async function architectQuestion(
+  a: Archetype,
   target: string,
+  pts: number,
   opts: { onStep?: StepCb; maxRounds?: number } = {}
-): Promise<ArchitectResult> {
-  const t0 = Date.now();
+): Promise<{ q: ExamQuestion; auditLog: Audit[] }> {
   const step = opts.onStep ?? (() => {});
   const maxRounds = opts.maxRounds ?? 2;
   const p = profile();
-  const a = pickArchetype(target);
-  const pts = pointsFor(a);
   const refImage = p.refImageFor(a.category, target || a.concept);
-  const ctx = gatherTargetedContext(target);
+  const ctx = gatherTargetedContext(target || a.concept);
 
   step(`P0 — étude : archétype « ${a.id} » (${a.category}), vraie page ${refImage ?? "—"}`, 12);
   // P1 — concevoir le piège
@@ -288,6 +290,23 @@ export async function architectExercise(
       break;
     }
   }
+  return { q, auditLog };
+}
+
+/**
+ * Pipeline complet pour UN exercice ciblé (cs-202). Renvoie l'exo persité + le journal d'audit.
+ * Boucle adversariale bornée (maxRounds), puis vérif de justesse (verifyAndHarden, maxAttempts=1).
+ */
+export async function architectExercise(
+  target: string,
+  opts: { onStep?: StepCb; maxRounds?: number } = {}
+): Promise<ArchitectResult> {
+  const t0 = Date.now();
+  const step = opts.onStep ?? (() => {});
+  const a = pickArchetype(target);
+  const pts = pointsFor(a);
+  const { q: built, auditLog } = await architectQuestion(a, target, pts, opts);
+  let q = built;
 
   // P4 — justesse + scope (vérif à l'aveugle existante ; 1 tentative car la difficulté est déjà calée)
   step("P4 — vérification de la justesse + scope (à l'aveugle)…", 80);

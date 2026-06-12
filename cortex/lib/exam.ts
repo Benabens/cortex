@@ -553,6 +553,12 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep
   }
   const batches = [slots.slice(0, 3), slots.slice(3, 6)];
   const doVerify = opts.verify !== false;
+  // PERFECT B1 — cs-202 : CHAQUE question de l'examen complet passe par l'ARCHITECTE
+  // (concevoir le piège → rédiger → audit adversarial → réviser), en parallèle borné.
+  const useArchitect = currentCourse() === DEFAULT_COURSE;
+  const auditAll: Record<string, unknown> = {};
+  let qDone = 0;
+  const qTotal = slots.length;
 
   // checkpoint : lots déjà générés lors d'un run précédent interrompu
   let saved: (ExamQuestion[] | null)[] = [null, null];
@@ -560,6 +566,43 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep
     const j = JSON.parse(fs.readFileSync(CKPT(), "utf8"));
     if (Array.isArray(j?.batches) && Date.now() - (j.at ?? 0) < 2 * 3600_000) saved = j.batches;
   } catch {}
+
+  /** Architecte par slot (pool de 2 dans le lot → ≤4 pipelines claude en parallèle au pic). */
+  async function architectBatch(bslots: Slot[], lotIdx: number): Promise<ExamQuestion[]> {
+    const { architectQuestion } = await import("@/lib/architect");
+    const archs = profile().archetypes;
+    const out: (ExamQuestion | null)[] = new Array(bslots.length).fill(null);
+    const failed: number[] = [];
+    let idx = 0;
+    const worker = async () => {
+      while (idx < bslots.length) {
+        const k = idx++;
+        const slot = bslots[k] as Slot & { archetypeId?: string };
+        const a = (slot.archetypeId && archs.find((x) => x.id === slot.archetypeId)) || pickArchetype(`${slot.category} ${slot.brief}`);
+        try {
+          const r = await architectQuestion(a, a.concept, slot.points, {
+            maxRounds: 1,
+            onStep: (m) => step(`Lot ${lotIdx + 1} · Q${k + 1} (${a.id}) · ${m}`, 10 + Math.round((qDone / qTotal) * 30)),
+          });
+          out[k] = { ...r.q, category: slot.category, points: slot.points };
+          auditAll[`lot${lotIdx + 1}-q${k + 1}-${a.id}`] = r.auditLog;
+        } catch (e) {
+          failed.push(k);
+          step(`Lot ${lotIdx + 1} · Q${k + 1} — architecte échoué (${(e as Error).message.slice(0, 80)}) → repli one-shot`, 0);
+        }
+        qDone++;
+        step(`Architecte : ${qDone}/${qTotal} questions construites`, 10 + Math.round((qDone / qTotal) * 30));
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    if (failed.length) {
+      const fqs = await generateBatch(ctx, failed.map((k) => bslots[k]) as any);
+      failed.forEach((k, j) => { if (fqs[j]) out[k] = fqs[j]; });
+    }
+    const qs = out.filter((q): q is ExamQuestion => !!q);
+    if (qs.length < bslots.length) throw new Error(`Lot ${lotIdx + 1} : ${qs.length}/${bslots.length} questions seulement (architecte + repli)`);
+    return qs;
+  }
 
   /**
    * PIPELINE (Phase 4 V2) : chaque lot est vérifié+durci DÈS qu'il est généré, sans attendre
@@ -573,7 +616,15 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep
       if (saved[i]?.length === bslots.length) {
         step(`Lot ${i + 1}/2 repris du checkpoint`, 20);
         qs = saved[i]!;
+        qDone += bslots.length;
+      } else if (useArchitect) {
+        step(`Lot ${i + 1}/2 — ARCHITECTE par question (piège → rédaction → audit adversarial)…`, 8 + i * 2);
+        qs = await architectBatch(bslots, i);
+        saved[i] = qs;
+        try { fs.mkdirSync(path.dirname(CKPT()), { recursive: true }); fs.writeFileSync(CKPT(), JSON.stringify({ at: Date.now(), batches: saved })); } catch {}
+        step(`Lot ${i + 1}/2 construit par l'architecte ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 40);
       } else {
+        // cours sans architecte (pas de trap library) : voie one-shot historique
         step(`Lot ${i + 1}/2 — génération de 3 exercices…`, 8 + i * 2);
         let got: ExamQuestion[] | null = null;
         for (let attempt = 1; attempt <= 2 && !got; attempt++) {
@@ -632,6 +683,10 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep
   }
   step("Compilation du PDF (LaTeX)…", 92);
   const out = await persistExam(spec, report);
+  // journal d'audit adversarial de l'architecte (preuve B1) — à côté des artefacts de l'examen
+  if (Object.keys(auditAll).length) {
+    try { fs.writeFileSync(path.join(examsDir(), `exam-${out.id}.audit.json`), JSON.stringify(auditAll, null, 2)); } catch {}
+  }
   try { fs.unlinkSync(CKPT()); } catch {} // run complet → checkpoint consommé
   if (out.texError) step(`⚠ Compilation LaTeX échouée → repli HTML lisible (${out.texError.slice(0, 180)})`, 97);
   step(`Terminé ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 100);
