@@ -5,6 +5,7 @@ import type { Archetype } from "@/lib/archetypes";
 import { profile, type Slot } from "@/lib/course-profile";
 import { extractJson, runClaudeCode } from "@/lib/claude-code";
 import { search } from "@/lib/search";
+import { difficultyBlockForExam } from "@/lib/difficulty";
 import { buildExamArtifact, buildExerciseArtifact } from "@/lib/exam-latex";
 import { dueConcepts, markTested } from "@/lib/schedule";
 import { examsDir } from "@/lib/paths";
@@ -131,11 +132,14 @@ export function buildPrompt(ctx: ReturnType<typeof gatherContext>): string {
   const p = profile();
   const block = (title: string, items: { src: string; excerpt?: string; text?: string }[]) =>
     items.length ? [``, title, ...items.map((c) => `• (${c.src}) ${c.excerpt ?? c.text}`)] : [];
+  // V3 — calibrage de difficulté (cs-202) : la prof punit une idée fausse précise par exo.
+  const diff = currentCourse() === DEFAULT_COURSE ? difficultyBlockForExam() : "";
   return [
     p.directivesBlock(),
     ``,
     p.visionBlock(),
     ``,
+    ...(diff ? [diff, ``] : []),
     ...p.promptIntroFull(),
     ``,
     `═══ LES VRAIS FINALS À IMITER (forme, types, ton, niveau, MISE EN PAGE) ═══`,
@@ -484,11 +488,14 @@ const BATCH_SCHEMA = {
 
 export function buildBatchPrompt(ctx: ReturnType<typeof gatherContext>, slots: { category: string; points: number; brief: string }[]): string {
   const p = profile();
+  // V3 — calibrage de difficulté (cs-202) : menu de pièges réels + style prof + distribution.
+  const diff = currentCourse() === DEFAULT_COURSE ? difficultyBlockForExam() : "";
   return [
     p.directivesBlock(),
     ``,
     p.visionBlock(),
     ``,
+    ...(diff ? [diff, ``] : []),
     ...p.promptIntroBatch(slots.length),
     ``,
     `═══ LES ${slots.length} EXERCICES À PRODUIRE (slots IMPOSÉS — respecte catégorie, barème, thème) ═══`,
