@@ -122,9 +122,10 @@ export default function ExamensPage() {
 
   return (
     <main className="page page-narrow">
-      <header className="mb-6">
+      <header className="mb-6 rise">
         <p className="eyebrow">Examens générés</p>
         <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Un examen qui aurait pu tomber.</h1>
+        <p className="sub mt-2">Final blanc complet au format EPFL — figures verrouillées, difficulté calibrée, vérifié exo par exo.</p>
       </header>
 
       {mock && (
@@ -171,27 +172,34 @@ export default function ExamensPage() {
         {note && <p className="mt-2.5 text-[12px]" style={{ color: "var(--ink-3)" }}>{note}</p>}
       </div>
 
-      <div className="space-y-2.5">
-        {exams.length === 0 && <p className="text-[14px]" style={{ color: "var(--ink-3)" }}>Aucun examen pour l'instant.</p>}
-        {exams.map((e) => {
+      {exams.length > 0 && <div className="section-head"><span className="section-title">Tes examens</span></div>}
+      <div className="card rise" style={{ padding: 8 }}>
+        {exams.length === 0 ? (
+          <div className="empty">
+            <div className="empty-ico">✦</div>
+            <div className="empty-title">Aucun examen pour l'instant</div>
+            <div className="empty-sub">Génère ton premier final blanc — il apparaîtra ici.</div>
+          </div>
+        ) : exams.map((e) => {
           const revealed = finished.includes(e.id) || !e.solutionsUrl;
           return (
-            <div key={e.id} className="card" style={{ padding: "14px 18px" }}>
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
+            <div key={e.id} className="t-row" style={{ gridTemplateColumns: "auto 1fr auto" }}>
+              <span className="icon-tile icon-tile-sm" style={{ fontSize: 14 }}>📄</span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
                   <span className="text-[14px] font-semibold" style={{ color: "var(--ink)" }}>Examen #{e.id}</span>
-                  <span className="ml-2 text-[12px]" style={{ color: "var(--ink-3)" }}>{e.questionCount} question(s) · {e.createdAt}</span>
-                  {e.verifySummary && <div className="text-[11px] mt-0.5" style={{ color: "var(--green)" }}>vérif : {e.verifySummary}</div>}
+                  {e.verifySummary && <span className="tag tag-green" title={e.verifySummary}>vérifié</span>}
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  {e.url && <>
-                    <button onClick={() => startMock(e)} className="btn btn-ghost" disabled={!!mock}>▶ Mock 3 h</button>
-                    <a href={e.url} target="_blank" rel="noopener" className="btn btn-quiet" style={{ color: "var(--blue)" }}>sujet</a>
-                  </>}
-                  {e.solutionsUrl && revealed && <a href={e.solutionsUrl} target="_blank" rel="noopener" className="btn btn-quiet" style={{ color: "var(--green)" }}>corrigé</a>}
-                  {e.solutionsUrl && !revealed && <span className="text-[11px] px-2" style={{ color: "var(--ink-3)" }}>corrigé caché</span>}
-                  <button onClick={() => remove(e.id)} className="btn btn-quiet">suppr</button>
-                </div>
+                <div className="text-[11.5px] mt-0.5" style={{ color: "var(--ink-3)" }}>{e.questionCount} questions · {e.createdAt}</div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {e.url && <>
+                  <button onClick={() => startMock(e)} className="btn btn-ghost btn-sm" disabled={!!mock}>▶ Mock 3 h</button>
+                  <a href={e.url} target="_blank" rel="noopener" className="btn btn-quiet btn-sm" style={{ color: "var(--blue)" }}>sujet</a>
+                </>}
+                {e.solutionsUrl && revealed && <a href={e.solutionsUrl} target="_blank" rel="noopener" className="btn btn-quiet btn-sm" style={{ color: "var(--green)" }}>corrigé</a>}
+                {e.solutionsUrl && !revealed && <span className="text-[11px] px-2" style={{ color: "var(--ink-3)" }}>corrigé caché</span>}
+                <button onClick={() => remove(e.id)} className="btn btn-quiet btn-sm" title="supprimer">✕</button>
               </div>
             </div>
           );
