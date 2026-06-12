@@ -285,6 +285,55 @@ function ingestLabs(): number {
   return total;
 }
 
+// ---------- 5b. data/cs-202/labs/ : le VRAI code des labs 2026 déposé par Ben (NS13) ----------
+// Repo « grilledcheese » (provided/ + done/ = solutions de Ben) + dossiers lab1_entrainement,
+// lab5, lab5_upload. Indexé par lab → le générateur d'exos Labs connaît chaque lab ligne par ligne.
+const DEPOSITED_LABS_REL = path.join("data", "cs-202", "labs"); // relatif au cwd (cortex/), PAS à CONTENT_ROOT
+
+/** lab id d'un fichier déposé : motif labN n'importe où, sinon warmup grilledcheese → lab1. */
+function depositedLabId(rel: string): string | null {
+  const direct = labId(rel);
+  if (direct) return direct;
+  // le repo grilledcheese est le warmup (Lab 1) : ex_single / ex_multiple / bigprj / README
+  if (/grilledcheese\/(README|provided\/(ex_single|ex_multiple|bigprj|ex\d))/i.test(rel)) return "lab1";
+  return null;
+}
+
+function ingestDepositedLabs(): number {
+  const base = path.join(process.cwd(), DEPOSITED_LABS_REL);
+  if (!fs.existsSync(base)) return 0;
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, e.name);
+      if (e.isDirectory()) walk(abs);
+      else if ([".c", ".h", ".md", ".html", ".tex"].some((x) => e.name.toLowerCase().endsWith(x)))
+        files.push(path.relative(base, abs));
+    }
+  };
+  walk(base);
+  let total = 0;
+  for (const rel of files) {
+    const isCode = /\.(c|h)$/.test(rel);
+    const lab = depositedLabId(rel);
+    let title: string, text: string;
+    if (rel.endsWith(".html")) {
+      const $ = cheerio.load(fs.readFileSync(path.join(base, rel), "utf8"));
+      $("script, style").remove();
+      title = clean($("title").first().text()) || clean($("h1, h2").first().text()) || path.basename(rel);
+      text = clean($("body").text());
+    } else {
+      title = `${lab ? lab + " — " : ""}${path.basename(rel)}`;
+      text = fs.readFileSync(path.join(base, rel), "utf8");
+    }
+    const type = isCode ? "code" : "lab";
+    total += addSource(type, title, path.join(DEPOSITED_LABS_REL, rel), null, [
+      { type, lectureId: lab, title, text, anchor: path.join(DEPOSITED_LABS_REL, rel) },
+    ]);
+  }
+  return total;
+}
+
 // ---------- 6. notes/ : checklists, plan, attendus du staff ----------
 function ingestNotes(): number {
   let total = 0;
@@ -433,6 +482,7 @@ async function main() {
       console.log("• exercices/   :", ingestExercices(), "exos");
       console.log("• cheatsheets  :", ingestCheatsheets(), "boxes");
       console.log("• labs/        :", ingestLabs(), "fichiers (énoncés + code C)");
+      console.log("• labs déposés :", ingestDepositedLabs(), "fichiers (code réel 2026 : grilledcheese + lab1/2/4/5)");
       console.log("• notes/       :", ingestNotes(), "notes (dont attendus staff)");
       console.log("• docs racine  :", ingestRootDocs(), "HTML (finals/énoncés)");
     });
