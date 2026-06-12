@@ -33,6 +33,8 @@ export type CourseConfig = {
   profile: string;
   /** Durée d'examen par défaut (minutes). */
   durationMin: number;
+  /** Date de l'examen (ISO, optionnel) — alimente le compte à rebours du dashboard. */
+  examDate?: string;
   /**
    * Chemins. Pour cs-202 = l'existant exact. Pour les autres = sous data/<id>/.
    * Tous résolus en absolu par `coursePaths()`.
@@ -69,6 +71,7 @@ export const COURSES: Record<string, CourseConfig> = {
     profs: ["Argyraki K.", "Kashyap S.", "Chappelier J.-C."],
     profile: "cs-202",
     durationMin: 180,
+    examDate: "2026-06-16",
     dbFile: "cortex.db",
     refsRel: "refs",
     examsRel: "exams",
