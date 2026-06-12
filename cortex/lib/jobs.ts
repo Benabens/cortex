@@ -10,9 +10,10 @@ import path from "node:path";
  * Le worker (scripts/run-job.ts) écrit ici après chaque étape → survit au reload.
  */
 export type JobStatus = "queued" | "running" | "verifying" | "compiling" | "done" | "error" | "canceled";
+export type JobType = "exam" | "exercise" | "ingest" | "blueprint";
 export type Job = {
   id: number;
-  type: "exam" | "exercise" | "ingest";
+  type: JobType;
   target: string | null;
   status: JobStatus;
   currentStep: string | null;
@@ -45,7 +46,7 @@ export function ensureJobsSchema() {
 }
 // (pas d'appel top-level : la table jobs est créée à la demande dans la DB du cours courant)
 
-export function createJob(type: "exam" | "exercise" | "ingest", target?: string): number {
+export function createJob(type: JobType, target?: string): number {
   ensureJobsSchema();
   return sqlite
     .prepare(`INSERT INTO jobs (type, target, status, current_step, progress) VALUES (?,?,'queued','En file…',0)`)
@@ -181,7 +182,7 @@ function cleanupPartial(job: Job) {
 }
 
 /** Le job actif le plus récent (pour réafficher la progression au reload). */
-export function activeJob(type?: "exam" | "exercise" | "ingest"): Job | null {
+export function activeJob(type?: JobType): Job | null {
   ensureJobsSchema();
   const where = type ? `AND type = '${type}'` : "";
   const r = sqlite.prepare(`SELECT * FROM jobs WHERE status IN ('queued','running','verifying','compiling') ${where} ORDER BY id DESC LIMIT 1`).get();

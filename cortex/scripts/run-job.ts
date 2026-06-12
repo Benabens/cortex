@@ -11,6 +11,7 @@ import { claudeBinPath } from "../lib/claude-code";
 import { generateExamViaClaudeCode, generateTargetedExercise } from "../lib/exam";
 import { texAvailable } from "../lib/exam-latex";
 import { getJob, logJob, setJob } from "../lib/jobs";
+import { analyzeBlueprint } from "../lib/program";
 
 const jobId = Number(process.argv[2]);
 const COURSE = process.argv[3];
@@ -62,6 +63,30 @@ async function main() {
       await runIngestJob(job.target);
       setJob(jobId, { status: "done", progress: 100, currentStep: "Ingestion terminée ✓" });
       logJob(jobId, "Ingestion terminée ✓");
+      process.exit(0);
+    } catch (e) {
+      fail((e as Error)?.message || String(e));
+    }
+    return;
+  }
+
+  // PHASE 1 — analyse de blueprint (taxonomie typée + pondérée via Max + vision).
+  if (job.type === "blueprint") {
+    setJob(jobId, { status: "running", pid: process.pid, currentStep: "Analyse du programme…", progress: 4 });
+    logJob(jobId, `Worker démarré (PID ${process.pid})`);
+    if (!claudeBinPath()) fail("Claude Code (binaire « claude ») introuvable. Lance « claude » une fois pour te connecter à ton Max.");
+    const n = (sqlite.prepare("SELECT count(*) n FROM items").get() as { n: number } | undefined)?.n ?? 0;
+    if (!n) fail("Corpus non ingéré. Lance « npm run ingest » d'abord.");
+    try {
+      const onStep = (s: string, p: number) => {
+        const j = getJob(jobId);
+        if (j?.status === "canceled") { logJob(jobId, "Annulé."); process.exit(0); }
+        setJob(jobId, { currentStep: s, progress: p, status: p >= 100 ? "done" : "running" });
+        logJob(jobId, s);
+      };
+      const res = await analyzeBlueprint({ onStep });
+      setJob(jobId, { status: "done", progress: 100, resultId: res.count, currentStep: `Taxonomie : ${res.count} types ✓` });
+      logJob(jobId, `Blueprint prêt → ${res.count} types d'exercices identifiés.`);
       process.exit(0);
     } catch (e) {
       fail((e as Error)?.message || String(e));
