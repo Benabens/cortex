@@ -40,6 +40,14 @@ export default function EntrainementPage() {
   const labPoll = useRef<any>(null);
   const [labErr, setLabErr] = useState<string | null>(null);
   const [labErrCmd, setLabErrCmd] = useState<string | null>(null);
+  const [labSeries, setLabSeries] = useState<any[]>([]);
+
+  const loadLabSeries = useCallback(async () => {
+    try {
+      const d = await (await fetch("/api/labs/generate")).json();
+      setLabSeries(d.series ?? []);
+    } catch {}
+  }, []);
 
   // ---- Check my solution ----
   const [statement, setStatement] = useState("");
@@ -73,13 +81,14 @@ export default function EntrainementPage() {
       try {
         const j = await (await fetch(`/api/jobs/${id}`)).json();
         setLabJob(j);
-        if (!EXO_ACTIVE.includes(j.status)) clearInterval(labPoll.current);
+        if (!EXO_ACTIVE.includes(j.status)) { clearInterval(labPoll.current); loadLabSeries(); }
       } catch {}
     }, 2000);
-  }, []);
+  }, [loadLabSeries]);
 
   useEffect(() => {
     load();
+    loadLabSeries();
     (async () => {
       try {
         const d = await (await fetch("/api/jobs?type=exercise")).json();
@@ -91,7 +100,7 @@ export default function EntrainementPage() {
       } catch {}
     })();
     return () => { clearInterval(exoPoll.current); clearInterval(labPoll.current); };
-  }, [load, pollExo, pollLab]);
+  }, [load, loadLabSeries, pollExo, pollLab]);
 
   async function cancelLab() {
     if (!labJob) return;
@@ -284,6 +293,25 @@ export default function EntrainementPage() {
         )}
         {labJob?.status === "error" && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>Échec : {labJob.error}</p>}
         {labErr && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>{labErr}<CmdHint cmd={labErrCmd} /></p>}
+        {labSeries.some((s) => s.exams?.length) && (
+          <div className="mt-4 pt-3" style={{ borderTop: "1px solid var(--line)" }}>
+            <div className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--ink-3)" }}>Série Labs — un exo par lab</div>
+            <div className="space-y-1.5">
+              {labSeries.filter((s) => s.exams?.length).map((s) => (
+                <div key={s.lab.id} className="flex flex-wrap items-center gap-2 text-[13px]">
+                  <span style={{ color: "var(--ink)" }}>{s.lab.label}</span>
+                  {s.exams.map((e: any) => (
+                    <span key={e.id} className="flex items-center gap-1.5">
+                      {e.verified === 1 && <span title="vérifié à l'aveugle" style={{ color: "var(--green)" }}>✓</span>}
+                      {e.url && <a className="btn btn-quiet" href={e.url} target="_blank" rel="noopener">énoncé</a>}
+                      {e.solutionsUrl && <a className="btn btn-quiet" style={{ color: "var(--green)" }} href={e.solutionsUrl} target="_blank" rel="noopener">corrigé</a>}
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* ---------- Drilling ---------- */}

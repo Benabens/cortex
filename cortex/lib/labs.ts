@@ -378,19 +378,38 @@ export async function generateLabExercise(
   return out;
 }
 
-/** La série figée : un exo par lab (UI + preuve NS13). */
-export function labSeries(): { lab: LabDef; exams: { id: number; file: string | null; verified: number | null }[] }[] {
+export type LabSeriesEntry = {
+  lab: { id: string; label: string };
+  exams: { id: number; concept: string; verified: number | null; url: string | null; solutionsUrl: string | null }[];
+};
+
+/** La série figée : un exo par lab, avec liens PDF durables (UI /entrainement + preuve NS13). */
+export function labSeries(): LabSeriesEntry[] {
+  // les exos Labs sont par construction dans la DB cs-202 → liens explicites ?course=cs-202
+  const link = (file: string | null, suffix = "") =>
+    file ? `/exam/${path.basename(file, ".pdf")}${suffix}${file.endsWith(".pdf") ? ".pdf" : ""}?course=cs-202` : null;
   try {
     const rows = sqlite
       .prepare(
-        `SELECT e.id, e.html_path file, q.verified, q.source_inspiration tag
+        `SELECT e.id, e.html_path file, q.concept, q.verified, q.source_inspiration tag
          FROM exams e JOIN exam_questions q ON q.exam_id = e.id
          WHERE q.source_inspiration LIKE 'labs:%' AND e.status = 'ready'
-         ORDER BY e.id`
+         ORDER BY e.id DESC`
       )
-      .all() as { id: number; file: string | null; verified: number | null; tag: string }[];
-    return LABS.map((lab) => ({ lab, exams: rows.filter((r) => r.tag === `labs:${lab.id}`) }));
+      .all() as { id: number; file: string | null; concept: string; verified: number | null; tag: string }[];
+    return LABS.map((lab) => ({
+      lab: { id: lab.id, label: lab.label },
+      exams: rows
+        .filter((r) => r.tag === `labs:${lab.id}`)
+        .map((r) => ({
+          id: r.id,
+          concept: r.concept,
+          verified: r.verified,
+          url: link(r.file),
+          solutionsUrl: r.file?.endsWith(".pdf") ? link(r.file, "-corrige") : null,
+        })),
+    }));
   } catch {
-    return LABS.map((lab) => ({ lab, exams: [] }));
+    return LABS.map((lab) => ({ lab: { id: lab.id, label: lab.label }, exams: [] }));
   }
 }

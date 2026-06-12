@@ -1,11 +1,17 @@
 import { activeJob, createJob, startWorker } from "@/lib/jobs";
-import { resolveLab } from "@/lib/labs";
+import { labSeries, resolveLab } from "@/lib/labs";
 import { preflightGeneration } from "@/lib/preflight";
 import { useCourse } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/** GET : la série Labs (un exo par lab, liens PDF énoncé+corrigé). */
+export function GET(req: NextRequest) {
+  useCourse(req);
+  return NextResponse.json({ series: labSeries() });
+}
 
 /**
  * NS13 — Exo « Labs » à la demande (moule Q6 2025, contenu = le vrai code du lab).
