@@ -56,6 +56,7 @@ export default function EntrainementPage() {
   const [check, setCheck] = useState<Check | null>(null);
   const [checking, setChecking] = useState(false);
   const [cerr, setCerr] = useState<string | null>(null);
+  const [weakAdded, setWeakAdded] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -188,6 +189,7 @@ export default function EntrainementPage() {
     setChecking(true);
     setCerr(null);
     setCheck(null);
+    setWeakAdded(false);
     try {
       const fd = new FormData();
       fd.set("statement", statement);
@@ -388,9 +390,29 @@ export default function EntrainementPage() {
         </form>
         {check && (
           <div className="mt-4">
-            <span className="badge" style={{ background: "transparent", border: `1px solid ${VERDICT[check.verdict]?.color}`, color: VERDICT[check.verdict]?.color }}>
-              {VERDICT[check.verdict]?.label ?? check.verdict}
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="badge" style={{ background: "transparent", border: `1px solid ${VERDICT[check.verdict]?.color}`, color: VERDICT[check.verdict]?.color }}>
+                {VERDICT[check.verdict]?.label ?? check.verdict}
+              </span>
+              {check.verdict !== "correct" && !weakAdded && (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={async () => {
+                    try {
+                      const fd = new FormData();
+                      fd.set("topic", statement.slice(0, 120));
+                      fd.set("description", `Exo raté à l'entraînement (verdict : ${check.verdict}).\nMa réponse : ${answer.slice(0, 400)}\nFeedback : ${check.feedback.slice(0, 500)}`);
+                      fd.set("severity", check.verdict === "wrong" ? "3" : "2");
+                      const r = await fetch("/api/weaknesses", { method: "POST", body: fd });
+                      if (r.ok) setWeakAdded(true);
+                    } catch {}
+                  }}
+                >
+                  🎯 ajouter en faiblesse
+                </button>
+              )}
+              {weakAdded && <span className="tag tag-green">ajoutée aux faiblesses ✓</span>}
+            </div>
             <p className="mt-2 text-[13px] whitespace-pre-wrap" style={{ color: "var(--ink)" }}>{check.feedback}</p>
             <details className="mt-2">
               <summary className="text-[12px] cursor-pointer" style={{ color: "var(--blue)" }}>solution correcte</summary>
