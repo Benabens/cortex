@@ -3,7 +3,7 @@ import { search } from "@/lib/search";
 
 // Colonnes ajoutées au fil de l'eau (idempotent, s'applique à la DB du cours courant) :
 // - `analyzed` (suivi IA), `source` (manual|conversation|image), `theme` (regroupement).
-function ensureSchema() {
+export function ensureSchema() {
   const cols = (sqlite.prepare(`PRAGMA table_info(weaknesses)`).all() as { name: string }[]).map((c) => c.name);
   if (!cols.includes("analyzed")) sqlite.exec(`ALTER TABLE weaknesses ADD COLUMN analyzed INTEGER NOT NULL DEFAULT 0`);
   if (!cols.includes("source")) sqlite.exec(`ALTER TABLE weaknesses ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`);

@@ -1,7 +1,7 @@
 import { sqlite } from "@/db/client";
 import { extractJson, runClaudeCode } from "@/lib/claude-code";
 import { profile } from "@/lib/course-profile";
-import { createWeakness } from "@/lib/weaknesses";
+import { createWeakness, ensureSchema as ensureWeaknessSchema } from "@/lib/weaknesses";
 
 /**
  * « Programme & Maîtrise » (NEXT STEP 12). PAR COURS, 100 % additif.
@@ -45,6 +45,7 @@ export type TopicView = Topic & {
   attempts: number;
   lastScore: number | null;
   lastDoneAt: string | null;
+  lastExamId: number | null; // dernier exo généré pour ce type (reprise du panneau de score au reload)
   dueAt: string | null;
   status: "never" | "due" | "ok"; // jamais vu / à revoir / à jour
 };
@@ -264,10 +265,10 @@ export type ProgramOverview = {
 export function programOverview(): ProgramOverview {
   ensureProgramSchema();
   const topics = topicRows();
-  const mast = new Map<number, MasteryRow>();
+  const mast = new Map<number, MasteryRow & { lastExamId: number | null }>();
   for (const m of sqlite
-    .prepare(`SELECT topic_id topicId, score, attempts, last_score lastScore, last_done_at lastDoneAt, due_at dueAt, ease, interval_days intervalDays FROM mastery`)
-    .all() as MasteryRow[])
+    .prepare(`SELECT topic_id topicId, score, attempts, last_score lastScore, last_done_at lastDoneAt, due_at dueAt, ease, interval_days intervalDays, last_exam_id lastExamId FROM mastery`)
+    .all() as (MasteryRow & { lastExamId: number | null })[])
     mast.set(m.topicId, m);
 
   const now = Date.now();
@@ -284,6 +285,7 @@ export function programOverview(): ProgramOverview {
       attempts,
       lastScore: m?.lastScore ?? null,
       lastDoneAt: m?.lastDoneAt ?? null,
+      lastExamId: m?.lastExamId ?? null,
       dueAt,
       status,
     };
@@ -397,21 +399,28 @@ export function recordScore(topicId: number, rawScore: number, lastExamId?: numb
     )
     .run(topicId, smoothed, attempts, score, interval, ease, interval, lastExamId ?? null);
 
+  // Score bas → renforce une faiblesse (réutilise le système faiblesses → pilote aussi les examens).
+  // Jamais bloquant : une erreur ici ne doit pas faire échouer l'enregistrement du score.
   let weaknessId: number | undefined;
   if (score <= 3) {
-    // ne pas spammer : une seule faiblesse 'program' par type
-    const exists = sqlite
-      .prepare(`SELECT id FROM weaknesses WHERE source = 'program' AND topic = ? LIMIT 1`)
-      .get(topic.label) as { id: number } | undefined;
-    if (!exists) {
-      weaknessId = createWeakness({
-        topic: topic.label,
-        description: `Score ${score}/10 en entraînement « Programme ». Méthode à retravailler : ${topic.method ?? topic.label}.`,
-        severity: score <= 1 ? 3 : 2,
-        source: "program",
-        theme: topic.category ?? undefined,
-        analyzed: true,
-      });
+    try {
+      ensureWeaknessSchema(); // garantit les colonnes source/theme (no-op si déjà là, ex. cs-202)
+      // ne pas spammer : une seule faiblesse 'program' par type
+      const exists = sqlite
+        .prepare(`SELECT id FROM weaknesses WHERE source = 'program' AND topic = ? LIMIT 1`)
+        .get(topic.label) as { id: number } | undefined;
+      if (!exists) {
+        weaknessId = createWeakness({
+          topic: topic.label,
+          description: `Score ${score}/10 en entraînement « Programme ». Méthode à retravailler : ${topic.method ?? topic.label}.`,
+          severity: score <= 1 ? 3 : 2,
+          source: "program",
+          theme: topic.category ?? undefined,
+          analyzed: true,
+        });
+      }
+    } catch (e) {
+      console.error("[program] création de faiblesse ignorée :", (e as Error).message);
     }
   }
 

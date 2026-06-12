@@ -18,6 +18,7 @@ type TopicView = {
   mastery: number | null;
   attempts: number;
   lastScore: number | null;
+  lastExamId: number | null;
   dueAt: string | null;
   status: "never" | "due" | "ok";
 };
@@ -108,13 +109,19 @@ export default function ProgrammePage() {
       } catch {}
       try {
         const e = await (await fetch("/api/jobs?type=exercise")).json();
+        const tidOf = (job: any) => { try { return JSON.parse(job?.target ?? "{}")?.topicId as number | undefined; } catch { return undefined; } };
         if (e.active) {
-          let tid: number | undefined;
-          try { tid = JSON.parse(e.active.target ?? "{}")?.topicId; } catch {}
-          const topic = (d?.topics ?? []).find((t) => t.id === tid) ?? null;
+          const topic = (d?.topics ?? []).find((t) => t.id === tidOf(e.active)) ?? null;
           setExoJob(e.active);
           if (topic) setTrainTopic(topic);
           if (ACTIVE.includes(e.active.status)) pollExo(e.active.id, topic);
+        } else {
+          // reprise au reload : dernier exo d'entraînement TERMINÉ mais pas encore noté → ré-affiche le panneau de score.
+          const last = (e.recent ?? []).find((j: any) => j.status === "done" && j.resultPath && tidOf(j));
+          if (last) {
+            const topic = (d?.topics ?? []).find((t) => t.id === tidOf(last)) ?? null;
+            if (topic && topic.lastExamId !== last.resultId) { setExoJob(last); setTrainTopic(topic); }
+          }
         }
       } catch {}
     })();
