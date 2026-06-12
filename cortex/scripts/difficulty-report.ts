@@ -12,15 +12,17 @@ if (!slug) { console.error("usage: difficulty-report.ts <slug>"); process.exit(1
 const dir = path.join(process.cwd(), "data", "refs", "proof");
 const load = (m: string) => JSON.parse(fs.readFileSync(path.join(dir, `${slug}.${m}.json`), "utf8"));
 
-const RE_SUBQ = /\\subq\{([^}]*)\}\{([^}]*)\}\{([0-9]*)\}/g;
+// titres avec \texttt{} imbriqués → on compte les \subq et on extrait les points (…}{N} final).
 const RE_GRID = /\\(packetgrid|forwardgrid|diskgrid|statesim|rulelines|tcpladder)\{?([0-9]*)\}?/g;
 
 function metrics(rec: any) {
   const st: string = rec.statement_tex ?? "";
-  const subs = [...st.matchAll(RE_SUBQ)].map((m) => `${m[1]} (${m[3]}pts)`);
+  const subqCount = (st.match(/\\subq\{/g) ?? []).length;
+  const pts = [...st.matchAll(/\}\{(\d{1,3})\}/g)].map((m) => +m[1]).filter((n) => n <= 60);
   const grids = [...st.matchAll(RE_GRID)].map((m) => `${m[1]}${m[2] ? `{${m[2]}}` : ""}`);
+  const tf = (st.match(/True or False|True\\\/False|vrai\s*\/\s*faux/gi) ?? []).length;
   const awk = [...new Set((st.match(/\b\d{3,}\b/g) ?? []))].slice(0, 14);
-  return { subs, grids, awk, lenS: st.length, lenSol: (rec.solution_tex ?? "").length, verified: rec.verified, seconds: rec.seconds, examId: rec.examId };
+  return { subqCount, pts, grids, tf, awk, lenS: st.length, lenSol: (rec.solution_tex ?? "").length, verified: rec.verified, seconds: rec.seconds, examId: rec.examId };
 }
 
 const a = load("avant"), b = load("apres");
@@ -32,14 +34,15 @@ lines.push(`Cible : ${a.target}`, "");
 lines.push(`| | AVANT (mono-passe) | APRÈS (architecte) |`);
 lines.push(`|---|---|---|`);
 lines.push(`| exam id (PDF) | #${ma.examId} | #${mb.examId} |`);
-lines.push(`| sous-questions | ${ma.subs.length} | ${mb.subs.length} |`);
+lines.push(`| sous-questions | ${ma.subqCount} | ${mb.subqCount} |`);
+lines.push(`| barèmes (pts) | ${ma.pts.join("+")} | ${mb.pts.join("+")} |`);
 lines.push(`| grilles | ${ma.grids.join(" ") || "—"} | ${mb.grids.join(" ") || "—"} |`);
+lines.push(`| sous-questions vrai/faux | ${ma.tf} | ${mb.tf} |`);
 lines.push(`| nombres non ronds | ${ma.awk.join(", ")} | ${mb.awk.join(", ")} |`);
 lines.push(`| longueur énoncé / corrigé | ${ma.lenS} / ${ma.lenSol} | ${mb.lenS} / ${mb.lenSol} |`);
 lines.push(`| vérifié (justesse) | ${ma.verified} | ${mb.verified} |`);
 lines.push(`| temps | ${ma.seconds}s | ${mb.seconds}s |`);
 lines.push("");
-lines.push(`## Sous-questions`, "", `**AVANT :**`, ...ma.subs.map((s) => `- ${s}`), "", `**APRÈS :**`, ...mb.subs.map((s) => `- ${s}`), "");
 
 if (Array.isArray(b.auditLog) && b.auditLog.length) {
   lines.push(`## Journal d'audit adversarial (APRÈS) — la preuve « ça discrimine »`, "");
