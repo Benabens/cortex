@@ -331,6 +331,18 @@ async function regenerateLabExercise(lab: LabDef, topic: string, q: ExamQuestion
   return { ...r, category: "Labs", points: 15 };
 }
 
+/**
+ * LaTeX : hors lstlisting, `\0` (le NUL du C, omniprésent dans les corrigés Labs) est une
+ * séquence de contrôle INDÉFINIE → compile cassée (vécu : corrigé lab2). On le remplace par
+ * \textbackslash 0 hors blocs de code. Sanitizer LABS-ONLY (le chemin 92% reste intouché).
+ */
+function sanitizeLabTex(tex: string): string {
+  return tex
+    .split(/(\\begin\{lstlisting\}[\s\S]*?\\end\{lstlisting\})/)
+    .map((part, i) => (i % 2 === 1 ? part : part.replace(/\\0(?![a-zA-Z])/g, "\\textbackslash 0")))
+    .join("");
+}
+
 export type LabExerciseInput = { lab?: string; topic?: string };
 
 /**
@@ -372,6 +384,8 @@ export async function generateLabExercise(
   }
 
   step("Compilation du PDF (sans garde)…", 92);
+  q.statement_tex = sanitizeLabTex(q.statement_tex);
+  q.solution_tex = sanitizeLabTex(q.solution_tex);
   const out = await persistExercise(q, report, `labs:${lab.id}`);
   if (out.texError) step(`⚠ Compilation LaTeX échouée → repli HTML lisible (${out.texError.slice(0, 180)})`, 97);
   step(`Terminé ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 100);
