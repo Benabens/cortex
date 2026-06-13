@@ -21,6 +21,8 @@ export type Topic = {
   id: number;
   label: string;
   method: string | null;
+  exoType: string | null; // V5 : format réel de l'exo
+  trap: string | null; // V5 : piège typique
   category: string | null;
   archetype: string | null;
   examWeight: number; // part d'emphase à l'examen (%)
@@ -65,6 +67,10 @@ export function ensureProgramSchema() {
     description TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   );`);
+  // V5 — blueprint approfondi : type d'exo (format réel) + piège type, ajoutés au fil de l'eau.
+  const cols = (sqlite.prepare(`PRAGMA table_info(topics)`).all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes("exo_type")) sqlite.exec(`ALTER TABLE topics ADD COLUMN exo_type TEXT`);
+  if (!cols.includes("trap")) sqlite.exec(`ALTER TABLE topics ADD COLUMN trap TEXT`);
   sqlite.exec(`CREATE TABLE IF NOT EXISTS mastery (
     topic_id INTEGER PRIMARY KEY,
     score REAL,
@@ -122,6 +128,8 @@ const TOPIC_SCHEMA = {
         properties: {
           label: { type: "string" },
           method: { type: "string" },
+          exo_type: { type: "string", description: "Le FORMAT/la forme réelle de l'exo tel qu'il tombe (ex. « remplir une échelle TCP », « tableau de comptage d'accès », « vrai/faux à justifier », « écrire une fonction C », « tracer un arbre de processus »)." },
+          trap: { type: "string", description: "Le PIÈGE typique de ce type d'exo dans les vrais examens (l'idée fausse qu'il punit), en une phrase." },
           category: { type: "string" },
           archetype: { type: "string" },
           exam_weight: { type: "number" },
@@ -141,6 +149,7 @@ const TOPIC_SCHEMA = {
 type RawTopic = {
   label: string; method?: string; category?: string; archetype?: string;
   exam_weight?: number; exam_count?: number; source?: string; description?: string;
+  exo_type?: string; trap?: string;
 };
 
 export type AnalyzeResult = { count: number; topics: TopicView[] };
@@ -191,7 +200,7 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
     `1) Classe CHAQUE exercice des past-exams en un TYPE/MÉTHODE précis (ex. « intégrale double — Fubini / changement de variable », « plus court chemin — Dijkstra / Bellman-Ford », « programmation dynamique — récurrence + table »…). Regroupe les exercices équivalents sous UN seul type.`,
     `2) Compte combien de fois chaque type apparaît dans les past-exams (exam_count) et déduis son POIDS exam_weight = part d'emphase en % (sur les past-exams ; la somme de TOUS les exam_weight ≈ 100).`,
     `3) Ajoute les types présents dans les SÉRIES ou le PLAN mais PAS (encore) tombés en final : source="serie" ou "cours", exam_count=0, exam_weight petit mais > 0.`,
-    `4) Pour chaque type : un "label" COURT (EN ANGLAIS, comme sur l'examen), "method" = la méthode/technique testée, "category" (regroupement), "archetype" (id ci-dessus le plus proche ou ""), "source" ("final" si vu en final, sinon "serie"/"cours"), "description" (une phrase).`,
+    `4) Pour chaque type : un "label" COURT (EN ANGLAIS, comme sur l'examen), "method" = la méthode/technique testée, "exo_type" = le FORMAT réel de l'exo (échelle à remplir, tableau d'accès, vrai/faux à justifier, écrire une fonction C, arbre de processus…), "trap" = le PIÈGE typique (l'idée fausse punie), "category" (regroupement), "archetype" (id ci-dessus le plus proche ou ""), "source" ("final" si vu en final, sinon "serie"/"cours"), "description" (une phrase).`,
     `Vise 6 à 14 types — ni trop fin, ni trop grossier. Pas de doublon.`,
     ``,
     `Réponds UNIQUEMENT avec l'objet JSON { "topics": [ … ] } (aucun texte autour, aucun outil au-delà de Read d'images) :`,
@@ -209,10 +218,11 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
   // normalise les poids pour qu'ils somment ~100
   const sum = cleaned.reduce((s, t) => s + (Number(t.exam_weight) || 0), 0) || 1;
   const up = sqlite.prepare(
-    `INSERT INTO topics (label, method, category, archetype, exam_weight, exam_count, source, description)
-     VALUES (@label,@method,@category,@archetype,@exam_weight,@exam_count,@source,@description)
+    `INSERT INTO topics (label, method, exo_type, trap, category, archetype, exam_weight, exam_count, source, description)
+     VALUES (@label,@method,@exo_type,@trap,@category,@archetype,@exam_weight,@exam_count,@source,@description)
      ON CONFLICT(label) DO UPDATE SET
-       method=excluded.method, category=excluded.category, archetype=excluded.archetype,
+       method=excluded.method, exo_type=excluded.exo_type, trap=excluded.trap,
+       category=excluded.category, archetype=excluded.archetype,
        exam_weight=excluded.exam_weight, exam_count=excluded.exam_count,
        source=excluded.source, description=excluded.description`
   );
@@ -222,6 +232,8 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
       up.run({
         label: t.label.trim().slice(0, 160),
         method: (t.method ?? "").slice(0, 400) || null,
+        exo_type: (t.exo_type ?? "").slice(0, 200) || null,
+        trap: (t.trap ?? "").slice(0, 400) || null,
         category: (t.category ?? "").slice(0, 80) || null,
         archetype: t.archetype && knownArche.has(t.archetype) ? t.archetype : null,
         exam_weight: Math.round(((Number(t.exam_weight) || 0) / sum) * 1000) / 10,
@@ -242,7 +254,7 @@ function topicRows(): Topic[] {
   return (
     sqlite
       .prepare(
-        `SELECT id, label, method, category, archetype, exam_weight examWeight, exam_count examCount, source, description
+        `SELECT id, label, method, exo_type exoType, trap, category, archetype, exam_weight examWeight, exam_count examCount, source, description
          FROM topics ORDER BY exam_weight DESC, exam_count DESC, label`
       )
       .all() as any[]
@@ -308,7 +320,7 @@ export function programOverview(): ProgramOverview {
 export function getTopic(id: number): Topic | null {
   ensureProgramSchema();
   const r = sqlite
-    .prepare(`SELECT id, label, method, category, archetype, exam_weight examWeight, exam_count examCount, source, description FROM topics WHERE id = ?`)
+    .prepare(`SELECT id, label, method, exo_type exoType, trap, category, archetype, exam_weight examWeight, exam_count examCount, source, description FROM topics WHERE id = ?`)
     .get(id) as any;
   return r ?? null;
 }
@@ -348,7 +360,14 @@ export function coverageNext(threshold = MASTERY_THRESHOLD): TopicView | null {
 
 /** Sujet d'ancrage passé au générateur d'exo ciblé pour rester sur CE type. */
 export function topicTarget(t: Topic): string {
-  return [t.label, t.method ? `Méthode : ${t.method}.` : ""].filter(Boolean).join(" ");
+  // V5 — la cible de génération porte la méthode, le FORMAT réel de l'exo et le piège typique
+  // (dérivés des vrais finals) → l'architecte produit le bon type, pas une version générique.
+  return [
+    t.label,
+    t.method ? `Méthode : ${t.method}.` : "",
+    t.exoType ? `Format réel de l'exo : ${t.exoType}.` : "",
+    t.trap ? `Piège typique à punir : ${t.trap}.` : "",
+  ].filter(Boolean).join(" ");
 }
 
 /**
