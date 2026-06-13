@@ -99,6 +99,52 @@ function pointsFor(a: Archetype): number {
   return a.id === "c-reading" ? 10 : a.id === "labs-reading" ? 15 : a.category === "Networking" ? 50 : 25;
 }
 
+// ───────── Image → exo : identification du concept par VISION (avant l'architecte) ─────────
+const ARCHETYPE_IDS = ["packet-trace", "tcp-reno", "inode-walk", "fork-sched", "c-reading", "labs-reading"] as const;
+type ImageId = { archetype_id: string; concept: string; technique: string; student_error: string };
+const IMAGE_ID_SCHEMA = {
+  type: "object",
+  properties: {
+    archetype_id: { type: "string", description: `L'archétype CS-202 le plus proche, EXACTEMENT l'un de : ${ARCHETYPE_IDS.join(" | ")}.` },
+    concept: { type: "string", description: "Le concept testé par l'exercice de l'image (court, ex. « TCP slow start + perte »)." },
+    technique: { type: "string", description: "La TECHNIQUE/MÉTHODE précise à maîtriser (ce que le nouvel exo doit retester sur un autre setup)." },
+    student_error: { type: "string", description: "Si une note d'erreur est fournie : l'erreur sous-jacente à punir ; sinon vide." },
+  },
+  required: ["archetype_id", "concept", "technique", "student_error"],
+  additionalProperties: false,
+} as const;
+
+/** Lit l'image d'un exo (vision) et identifie l'archétype + le concept + la technique à retester. */
+async function identifyFromImage(image: string, note: string | undefined, step: StepCb): Promise<ImageId> {
+  step("Lecture de l'image (vision) — identification du concept…", 8);
+  const prompt = [
+    `Tu es l'équipe enseignante de CS-202 (EPFL). OUVRE et observe attentivement cette image : ${image} (outil Read).`,
+    `C'est un exercice (d'examen, de série, ou un exo que l'étudiant a raté).`,
+    note ? `Note de l'étudiant (pourquoi il a buté) : « ${note} ».` : ``,
+    `Identifie le CONCEPT et la TECHNIQUE précise testés, et l'archétype CS-202 le plus proche.`,
+    `Réponds UNIQUEMENT avec l'objet JSON conforme.`,
+    JSON.stringify(IMAGE_ID_SCHEMA, null, 2),
+  ].filter((l) => l != null).join("\n");
+  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 220_000 });
+  const r = extractJson<ImageId>(text);
+  if (!ARCHETYPE_IDS.includes(r.archetype_id as any)) r.archetype_id = "";
+  return r;
+}
+
+/** Bloc « dérivé d'une image » : même concept, setup ENTIÈREMENT différent, JAMAIS un copier-coller. */
+function fromImageBlock(image: string | null | undefined, note: string | null | undefined): string {
+  if (!image) return "";
+  return [
+    `═══ DÉRIVÉ D'UNE IMAGE D'EXERCICE (point de départ) ═══`,
+    `L'étudiant est parti de l'exercice montré dans : ${image} (outil Read — observe-le).`,
+    note ? `Il a buté ici : « ${note} ». Ta question doit faire travailler PRÉCISÉMENT cette difficulté.` : ``,
+    `IMPÉRATIF : ta question teste EXACTEMENT le même concept / la même technique, mais sur un SETUP ENTIÈREMENT DIFFÉRENT`,
+    `(autres nombres NON RONDS, autre instance/contexte/structure, autre figure si pertinent). INTERDICTION ABSOLUE`,
+    `de recopier l'image ou de simplement échanger les constantes : un étudiant ne doit PAS pouvoir résoudre ta`,
+    `question en recopiant la solution de l'image. Produis du NEUF, au niveau d'un vrai final.`,
+  ].filter((l) => l != null).join("\n");
+}
+
 function contextBlock(ctx: ReturnType<typeof gatherTargetedContext>): string {
   const block = (title: string, items: { src: string; text: string }[]) =>
     items.length ? [``, title, ...items.map((c) => `• (${c.src}) ${c.text}`)].join("\n") : "";
@@ -110,12 +156,14 @@ function contextBlock(ctx: ReturnType<typeof gatherTargetedContext>): string {
 }
 
 /** P0+P1 — étudier la vraie page la plus dure + concevoir le piège (avant de rédiger). */
-async function designTrap(a: Archetype, target: string, refImage: string | null, step: StepCb): Promise<DesignBrief> {
+async function designTrap(a: Archetype, target: string, refImage: string | null, step: StepCb, image?: string | null, note?: string | null): Promise<DesignBrief> {
   const p = profile();
   const r = rubricFor(a.id);
+  const imgBlock = fromImageBlock(image, note);
   const prompt = [
     `Tu es l'équipe enseignante de CS-202 (EPFL) et tu CONÇOIS une question d'examen DURE, dans le style de la prof.`,
     refImage ? `ÉTUDIE D'ABORD la vraie page d'examen la plus dure de ce type : ${refImage} (outil Read) — observe sa densité, son piège, sa charge.` : ``,
+    imgBlock || null,
     ``,
     `Type : ${a.concept} (archétype « ${a.id} », catégorie ${a.category}). Sujet ciblé : « ${target} ».`,
     ``,
@@ -134,9 +182,10 @@ async function designTrap(a: Archetype, target: string, refImage: string | null,
 }
 
 /** P2 — rédiger l'énoncé multi-étapes au format EPFL, piège intégré, style prof. */
-async function writeFromDesign(a: Archetype, target: string, pts: number, design: DesignBrief, ctx: ReturnType<typeof gatherTargetedContext>, refImage: string | null, step: StepCb): Promise<ExamQuestion> {
+async function writeFromDesign(a: Archetype, target: string, pts: number, design: DesignBrief, ctx: ReturnType<typeof gatherTargetedContext>, refImage: string | null, step: StepCb, image?: string | null, note?: string | null): Promise<ExamQuestion> {
   const p = profile();
   const corpus = contextBlock(ctx);
+  const imgBlock = fromImageBlock(image, note);
   const prompt = [
     p.directivesBlock(),
     ``,
@@ -144,6 +193,8 @@ async function writeFromDesign(a: Archetype, target: string, pts: number, design
     ``,
     ...p.exerciseLead(target || a.concept, a, pts, refImage),
     ``,
+    imgBlock || null,
+    imgBlock ? `` : null,
     corpus,
     corpus ? `` : null,
     `═══ FICHE DE CONCEPTION À RESPECTER (tu l'as conçue — RÉDIGE-LA fidèlement) ═══`,
@@ -250,19 +301,20 @@ export async function architectQuestion(
   a: Archetype,
   target: string,
   pts: number,
-  opts: { onStep?: StepCb; maxRounds?: number } = {}
+  opts: { onStep?: StepCb; maxRounds?: number; image?: string | null; note?: string | null } = {}
 ): Promise<{ q: ExamQuestion; auditLog: Audit[] }> {
   const step = opts.onStep ?? (() => {});
   const maxRounds = opts.maxRounds ?? 2;
+  const { image, note } = opts;
   const p = profile();
   const refImage = p.refImageFor(a.category, target || a.concept);
   const ctx = gatherTargetedContext(target || a.concept);
 
   step(`P0 — étude : archétype « ${a.id} » (${a.category}), vraie page ${refImage ?? "—"}`, 12);
-  // P1 — concevoir le piège
-  const design = await designTrap(a, target, refImage, step);
+  // P1 — concevoir le piège (en s'appuyant sur l'image si fournie)
+  const design = await designTrap(a, target, refImage, step, image, note);
   // P2 — rédiger (avec le contexte corpus pour ancrer le contenu)
-  let q = await writeFromDesign(a, target, pts, design, ctx, refImage, step);
+  let q = await writeFromDesign(a, target, pts, design, ctx, refImage, step, image, note);
 
   // P3 — boucle adversariale + révision
   const auditLog: Audit[] = [];
@@ -299,13 +351,30 @@ export async function architectQuestion(
  */
 export async function architectExercise(
   target: string,
-  opts: { onStep?: StepCb; maxRounds?: number } = {}
+  opts: { onStep?: StepCb; maxRounds?: number; image?: string | null; note?: string | null } = {}
 ): Promise<ArchitectResult> {
   const t0 = Date.now();
   const step = opts.onStep ?? (() => {});
-  const a = pickArchetype(target);
+  const { image, note } = opts;
+  // Image → exo : la VISION identifie d'abord l'archétype + la technique à retester ;
+  // sinon on choisit l'archétype d'après le sujet texte.
+  let a: Archetype;
+  let seed = target;
+  if (image) {
+    try {
+      const id = await identifyFromImage(image, note ?? undefined, step);
+      a = (id.archetype_id && profile().archetypes.find((x) => x.id === id.archetype_id)) || pickArchetype(`${id.technique} ${id.concept}`);
+      seed = [id.technique || id.concept, target].filter(Boolean).join(" — ");
+      step(`Concept identifié : « ${id.concept} » → archétype ${a.id}`, 12);
+    } catch (e) {
+      a = pickArchetype(target);
+      step(`Identification image interrompue (${(e as Error).message}) — archétype par défaut ${a.id}`, 12);
+    }
+  } else {
+    a = pickArchetype(target);
+  }
   const pts = pointsFor(a);
-  const { q: built, auditLog } = await architectQuestion(a, target, pts, opts);
+  const { q: built, auditLog } = await architectQuestion(a, seed, pts, { ...opts, image, note });
   let q = built;
 
   // P4 — justesse + scope (vérif à l'aveugle existante ; 1 tentative car la difficulté est déjà calée)

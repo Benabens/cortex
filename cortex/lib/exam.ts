@@ -354,12 +354,13 @@ export async function generateTargetedExercise(
   const imageRel = norm.imageRel?.trim() || undefined;
   if (!target && !imageRel) throw new Error("Donne un sujet OU une image d'exercice.");
 
-  // V3 — cs-202 + sujet TEXTE (pas d'image) → pipeline ARCHITECTE multi-passes (difficulté + style
-  // prof : conception du piège → rédaction → critique adversariale + révision → vérif justesse).
-  // L'image→exo et les autres cours gardent la voie mono-passe ci-dessous (inchangée).
-  if (currentCourse() === DEFAULT_COURSE && target && !imageRel) {
+  // cs-202 → pipeline ARCHITECTE multi-passes (difficulté + style prof : conception du piège →
+  // rédaction → critique adversariale + révision → vérif justesse). Vaut pour le sujet TEXTE ET
+  // pour l'IMAGE → exo (la vision identifie le concept, l'architecte conçoit un exo NEUF du même
+  // type sur un setup différent). Les autres cours gardent la voie mono-passe ci-dessous.
+  if (currentCourse() === DEFAULT_COURSE && (target || imageRel)) {
     const { architectExercise } = await import("@/lib/architect");
-    const res = await architectExercise(target, { onStep: opts.onStep });
+    const res = await architectExercise(target, { onStep: opts.onStep, image: imageRel, note: norm.note });
     return { id: res.id, url: res.url, texError: res.texError };
   }
 

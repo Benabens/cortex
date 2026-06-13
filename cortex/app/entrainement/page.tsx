@@ -33,6 +33,24 @@ export default function EntrainementPage() {
   const [exoErrCmd, setExoErrCmd] = useState<string | null>(null);
   const [exoImg, setExoImg] = useState<File | null>(null);
   const [exoNote, setExoNote] = useState("");
+  const [exoPreview, setExoPreview] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  // attache une image (depuis picker / coller / glisser) + miniature d'aperçu
+  const attachExoImage = useCallback((file: File | null) => {
+    setExoPreview((prev) => { if (prev) URL.revokeObjectURL(prev); return file ? URL.createObjectURL(file) : null; });
+    setExoImg(file);
+  }, []);
+  const onExoPaste = useCallback((e: React.ClipboardEvent) => {
+    const item = Array.from(e.clipboardData?.items ?? []).find((i) => i.type.startsWith("image/"));
+    const file = item?.getAsFile();
+    if (file) { e.preventDefault(); attachExoImage(file); }
+  }, [attachExoImage]);
+  const onExoDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault(); setDragOver(false);
+    const file = Array.from(e.dataTransfer?.files ?? []).find((f) => f.type.startsWith("image/"));
+    if (file) attachExoImage(file);
+  }, [attachExoImage]);
 
   // ---- Exo Labs (NS13) : moule Q6 2025, contenu = le vrai code du lab ----
   const [labTopic, setLabTopic] = useState("");
@@ -160,7 +178,7 @@ export default function EntrainementPage() {
       }
       const d = await r.json();
       if (!r.ok) { setExoErr(d.error ?? "Échec"); setExoErrCmd(d.command ?? null); return; }
-      if (d.jobId) { setExoJob({ id: d.jobId, status: "queued", progress: 0, currentStep: "Démarrage…", resultPath: null, log: [] }); pollExo(d.jobId); setExoImg(null); setExoNote(""); }
+      if (d.jobId) { setExoJob({ id: d.jobId, status: "queued", progress: 0, currentStep: "Démarrage…", resultPath: null, log: [] }); pollExo(d.jobId); attachExoImage(null); setExoNote(""); }
     } catch (e: any) { setExoErr(String(e.message ?? e)); }
   }
 
@@ -215,10 +233,17 @@ export default function EntrainementPage() {
       </header>
 
       {/* ---------- Exercice ciblé (PDF format examen) ---------- */}
-      <section className="card card-pad mb-8">
+      <section
+        className="card card-pad mb-8"
+        onPaste={onExoPaste}
+        onDragOver={(e) => { e.preventDefault(); if (!dragOver) setDragOver(true); }}
+        onDragLeave={(e) => { e.preventDefault(); setDragOver(false); }}
+        onDrop={onExoDrop}
+        style={dragOver ? { borderColor: "var(--accent)", boxShadow: "var(--glow-accent)" } : undefined}
+      >
         <h2 className="text-[15px] font-semibold mb-1" style={{ color: "var(--ink)" }}>Exercice ciblé — format examen (PDF)</h2>
         <p className="text-[13px] mb-3" style={{ color: "var(--ink-2)" }}>
-          Tape un point faible précis <strong style={{ color: "var(--ink)" }}>ou colle une image d'exo</strong> (screenshot d'examen, de série, ou un exo que tu as raté) → UN exercice qualité examen du même type, <strong style={{ color: "var(--ink)" }}>sans page de garde</strong>, ancré sur les vrais finals. Généré en arrière-plan — tu peux recharger.
+          Tape un point faible précis, <strong style={{ color: "var(--ink)" }}>colle (Cmd/Ctrl+V) ou glisse une image d'exo</strong> ici → UN exercice NEUF du même type au niveau d'un vrai final (architecte : piège conçu + vérifié), <strong style={{ color: "var(--ink)" }}>sans page de garde</strong>.
         </p>
         {exoJob && EXO_ACTIVE.includes(exoJob.status) ? (
           <div>
@@ -233,20 +258,33 @@ export default function EntrainementPage() {
         ) : (
           <div>
             <div className="flex gap-2">
-              <input className="input" placeholder="ex. TCP Reno : cwnd après triple-dup-ACK · ou laisse vide si tu joins une image" value={exoTarget} onChange={(e) => setExoTarget(e.target.value)} style={{ fontSize: 14 }} />
-              <button className="btn btn-primary" onClick={() => genExo(exoTarget)}>✦ Exo</button>
+              <input className="input" placeholder="ex. TCP Reno : cwnd après triple-dup-ACK · ou colle/glisse une image" value={exoTarget} onChange={(e) => setExoTarget(e.target.value)} onPaste={onExoPaste} style={{ fontSize: 14 }} />
+              <button className="btn btn-primary" onClick={() => genExo(exoTarget)} disabled={!exoTarget.trim() && !exoImg}>✦ Exo</button>
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <label className="chip cursor-pointer">📎 image d'un exo
-                <input type="file" accept="image/*" className="hidden" onChange={(e) => setExoImg(e.target.files?.[0] ?? null)} />
+
+            {exoImg && exoPreview ? (
+              <div className="mt-3 inset flex items-start gap-3" style={{ padding: 10 }}>
+                <img src={exoPreview} alt="aperçu de l'exo collé" style={{ height: 72, width: "auto", borderRadius: 8, border: "1px solid var(--line)" }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="flex items-center gap-2">
+                    <span className="tag tag-amber">image jointe</span>
+                    <button className="btn btn-quiet btn-sm" onClick={() => attachExoImage(null)}>retirer</button>
+                  </div>
+                  <input className="input mt-2" style={{ fontSize: 13 }} placeholder="(optionnel) ce que tu n'as pas compris / pourquoi tu as raté" value={exoNote} onChange={(e) => setExoNote(e.target.value)} />
+                  <p className="mt-1.5 text-[12px]" style={{ color: "var(--accent-ink)" }}>→ exo NEUF du même concept, setup différent (pas un copier-coller), vérifié.</p>
+                </div>
+              </div>
+            ) : (
+              <label
+                className="mt-3 flex flex-col items-center justify-center cursor-pointer rise"
+                style={{ padding: "18px 16px", borderRadius: "var(--r-sm)", border: `1px dashed ${dragOver ? "var(--accent)" : "var(--line-strong)"}`, background: dragOver ? "var(--accent-wash)" : "var(--surface-inset)", transition: "all .15s" }}
+              >
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => attachExoImage(e.target.files?.[0] ?? null)} />
+                <span style={{ fontSize: 20, opacity: 0.7 }}>🖼️</span>
+                <span className="mt-1 text-[13px]" style={{ color: "var(--ink-2)" }}><strong style={{ color: "var(--ink)" }}>Colle</strong> (Cmd/Ctrl+V), <strong style={{ color: "var(--ink)" }}>glisse</strong> une image, ou clique pour choisir</span>
+                <span className="mt-0.5 text-[11.5px]" style={{ color: "var(--ink-3)" }}>screenshot d'un exo d'examen / de série / d'un exo raté</span>
               </label>
-              {exoImg && <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>{exoImg.name}</span>}
-              {exoImg && <button className="btn btn-quiet" onClick={() => setExoImg(null)}>retirer</button>}
-              {exoImg && (
-                <input className="input" style={{ fontSize: 13, flex: 1, minWidth: 180 }} placeholder="(optionnel) ce que tu n'as pas compris / pourquoi tu as raté" value={exoNote} onChange={(e) => setExoNote(e.target.value)} />
-              )}
-            </div>
-            {exoImg && <p className="mt-1 text-[12px]" style={{ color: "var(--accent-ink)" }}>→ exo neuf du même type que l'image, format examen, vérifié.</p>}
+            )}
           </div>
         )}
         {exoJob?.status === "done" && exoJob.resultPath && (
