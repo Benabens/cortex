@@ -9,6 +9,8 @@ type TopicView = {
   id: number;
   label: string;
   method: string | null;
+  exoType: string | null;
+  trap: string | null;
   category: string | null;
   archetype: string | null;
   examWeight: number;
@@ -297,6 +299,10 @@ export default function ProgrammePage() {
                       <span className="badge" style={{ background: "transparent", border: `1px solid ${STATUS[t.status].color}`, color: STATUS[t.status].color }}>{STATUS[t.status].label}</span>
                     </div>
                     {t.method && <div className="text-[12px] mt-0.5" style={{ color: "var(--ink-2)" }}>{t.method}</div>}
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      {t.exoType && <span className="tag tag-blue" title="format réel de l'exo à l'examen">📐 {t.exoType}</span>}
+                      {t.trap && <span className="tag tag-amber" title="piège typique de ce type">⚠ {t.trap.length > 64 ? t.trap.slice(0, 64) + "…" : t.trap}</span>}
+                    </div>
                     <div className="mt-1.5 flex items-center gap-3 text-[12px]" style={{ color: "var(--ink-3)" }}>
                       <span title="poids à l'examen">⚖ {t.examWeight}%{t.examCount ? ` · ${t.examCount}× en final` : t.source !== "final" ? ` · ${t.source}` : ""}</span>
                       <span title="tentatives">▷ {t.attempts ? `${t.attempts} exo${t.attempts > 1 ? "s" : ""}` : "jamais fait"}</span>
