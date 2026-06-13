@@ -327,7 +327,36 @@ export default function ProgrammePage() {
           </div>
         </section>
       )}
+
+      <Learned />
     </main>
+  );
+}
+
+/** V5 — récap « ce que Cortex a appris de tes retours » (mémoire de calibration). */
+function Learned() {
+  const [data, setData] = useState<{ total: number; byArchetype: { archetype: string | null; counts: Record<string, number>; lessons: string[]; notes: string[] }[] } | null>(null);
+  useEffect(() => { (async () => { try { setData(await (await fetch("/api/feedback")).json()); } catch {} })(); }, []);
+  if (!data || !data.total) return null;
+  return (
+    <section className="card card-pad" style={{ marginTop: 20 }}>
+      <div className="section-head"><span className="section-title">Ce que Cortex a appris de tes retours</span><span className="tag tag-blue">{data.total} retour{data.total > 1 ? "s" : ""}</span></div>
+      <div className="flex flex-col gap-2.5">
+        {data.byArchetype.map((a) => (
+          <div key={a.archetype} className="inset" style={{ padding: 12 }}>
+            <div className="flex items-center gap-2 mb-1">
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{a.archetype}</span>
+              <span className="text-[11.5px]" style={{ color: "var(--ink-3)" }}>
+                juste {a.counts.good ?? 0} · trop facile {a.counts.too_easy ?? 0} · pas le style {a.counts.not_prof_style ?? 0} · faux {a.counts.wrong ?? 0}
+              </span>
+            </div>
+            {a.lessons.map((l, i) => <div key={i} className="text-[12.5px]" style={{ color: "var(--ink-2)" }}>• {l}</div>)}
+            {a.notes.length > 0 && <div className="text-[12px] mt-1" style={{ color: "var(--accent-ink)" }}>Tes notes : {a.notes.map((n) => `« ${n} »`).join(" ; ")}</div>}
+          </div>
+        ))}
+      </div>
+      <p className="text-[12px] mt-3" style={{ color: "var(--ink-3)" }}>Ces leçons sont injectées dans la conception des prochains exos du même type — l'outil s'ajuste à mesure que tu donnes des retours.</p>
+    </section>
   );
 }
 
