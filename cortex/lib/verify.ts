@@ -75,7 +75,10 @@ async function verifyOne(q: ExamQuestion, opts?: VerifyOpts): Promise<VerifyResu
     JSON.stringify(ONE_SCHEMA, null, 2),
   ].join("\n");
   try {
-    const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 340_000 });
+    // 9 min : la re-résolution à l'aveugle d'un exo DENSE de l'architecte (6 sous-questions +
+    // comparaison au corrigé) frôlait les 340 s → timeout → « non vérifié » systématique. Mesuré :
+    // une re-résolution complète prend ~4–6 min ; on laisse de la marge.
+    const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 540_000 });
     const r = extractJson<VerifyResult>(text);
     return r && r.verdict ? r : null;
   } catch {
