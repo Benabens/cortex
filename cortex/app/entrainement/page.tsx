@@ -35,6 +35,16 @@ export default function EntrainementPage() {
   const [exoNote, setExoNote] = useState("");
   const [exoPreview, setExoPreview] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [exoFb, setExoFb] = useState(false);
+  const [exoFbNote, setExoFbNote] = useState("");
+  const sendExoFeedback = useCallback(async (verdict: string) => {
+    const m = (exoJob?.resultPath ?? "").match(/exam-(\d+)/);
+    const examId = m ? Number(m[1]) : undefined;
+    try {
+      await fetch("/api/feedback", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ examId, verdict, note: exoFbNote || undefined }) });
+      setExoFb(true);
+    } catch {}
+  }, [exoJob, exoFbNote]);
 
   // attache une image (depuis picker / coller / glisser) + miniature d'aperçu
   const attachExoImage = useCallback((file: File | null) => {
@@ -174,6 +184,7 @@ export default function EntrainementPage() {
     setExoErr(null);
     setExoErrCmd(null);
     setExoJob(null);
+    setExoFb(false); setExoFbNote("");
     try {
       let r: Response;
       if (exoImg) {
@@ -320,10 +331,28 @@ export default function EntrainementPage() {
           </div>
         )}
         {exoJob?.status === "done" && exoJob.resultPath && (
-          <div className="mt-3 flex items-center gap-2">
-            <span className="text-[13px]" style={{ color: "var(--green)" }}>Exercice prêt ✓</span>
-            <a className="btn btn-ghost" href={exoJob.resultPath} target="_blank" rel="noopener">ouvrir l'énoncé (PDF)</a>
-            <a className="btn btn-quiet" style={{ color: "var(--green)" }} href={exoJob.resultPath.replace(/(\.pdf)(\?|$)/, "-corrige$1$2")} target="_blank" rel="noopener">corrigé</a>
+          <div className="mt-3">
+            <div className="flex items-center gap-2">
+              <span className="text-[13px]" style={{ color: "var(--green)" }}>Exercice prêt ✓</span>
+              <a className="btn btn-ghost" href={exoJob.resultPath} target="_blank" rel="noopener">ouvrir l'énoncé (PDF)</a>
+              <a className="btn btn-quiet" style={{ color: "var(--green)" }} href={exoJob.resultPath.replace(/(\.pdf)(\?|$)/, "-corrige$1$2")} target="_blank" rel="noopener">corrigé</a>
+            </div>
+            {/* V5 — boucle d'auto-apprentissage : retour sur l'exo → mémoire de calibration */}
+            <div className="inset mt-3" style={{ padding: 12 }}>
+              {exoFb ? (
+                <div className="flex items-center gap-2 text-[13px]"><span className="tag tag-green">retour pris en compte ✓</span><span style={{ color: "var(--ink-3)" }}>Cortex en tiendra compte pour les prochains exos de ce type.</span></div>
+              ) : (
+                <>
+                  <div className="text-[13px] mb-2" style={{ color: "var(--ink)" }}>Cet exo est-il au niveau d'un vrai final ?</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {([["good", "✓ juste", "var(--green)"], ["too_easy", "trop facile", "var(--accent)"], ["not_prof_style", "pas le style de la prof", "var(--blue)"], ["wrong", "faux", "var(--red)"]] as const).map(([v, label, color]) => (
+                      <button key={v} className="chip" style={{ borderColor: color, color }} onClick={() => sendExoFeedback(v)}>{label}</button>
+                    ))}
+                  </div>
+                  <input className="input mt-2" style={{ fontSize: 13 }} placeholder="(optionnel) une note pour Cortex : « augmente le piège », « rapproche-toi de la voix de la prof »…" value={exoFbNote} onChange={(e) => setExoFbNote(e.target.value)} />
+                </>
+              )}
+            </div>
           </div>
         )}
         {exoJob?.status === "error" && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>Échec : {exoJob.error}</p>}

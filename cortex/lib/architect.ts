@@ -1,6 +1,7 @@
 import { extractJson, runClaudeCode } from "@/lib/claude-code";
 import { profile } from "@/lib/course-profile";
 import type { Archetype } from "@/lib/archetypes";
+import { calibrationBlock } from "@/lib/calibration";
 import { rubricFor, styleFor, trapMenuBlock } from "@/lib/difficulty";
 import {
   gatherTargetedContext,
@@ -178,6 +179,7 @@ async function designTrap(a: Archetype, target: string, refImage: string | null,
     ``,
     r ? `BARRE : ≥ ${r.subparts} sous-questions, la dure ≥ ${r.steps} étapes, bookkeeping = ${r.bookkeeping}, ${r.mustChain ? "au moins une sous-question enchaînée, " : ""}cas-limite obligatoire.` : ``,
     ...styleFor(a.category),
+    calibrationBlock(a.id) || null,
     ``,
     `NE RÉDIGE PAS encore la question. CONÇOIS-LA : choisis UN piège précis, le cas-limite qui le déclenche, la chaîne de raisonnement de l'étudiant fort, les NOMBRES NON RONDS, la grille de réponse, et la réponse erronée du pattern-matcher (ce qui discrimine). Plan des sous-questions en escalier.`,
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier.`,
@@ -253,6 +255,7 @@ async function adversarialAudit(a: Archetype, q: ExamQuestion, refImage: string 
     `(a) Joue l'étudiant PATTERN-MATCHER : il reconnaît le type et applique la recette HABITUELLE sans réfléchir au piège. Écris sa réponse, et dis si elle est CORRECTE. Si oui → la question est TROP FACILE.`,
     `(b) Joue l'étudiant FORT : résous VRAIMENT de zéro (calcule/trace/compte). Dis si même lui CALE (énoncé cassé/ambigu).`,
     r ? `Vérifie la RUBRIQUE : ≥ ${r.subparts} sous-questions ; la dure ≥ ${r.steps} étapes ; bookkeeping = ${r.bookkeeping} ; ${r.mustChain ? "≥1 sous-question enchaînée ; " : ""}piège nommé réellement testé ; nombres non ronds. Liste les points NON cochés.` : ``,
+    calibrationBlock(a.id) || null,
     `Si le pattern-matcher réussit OU le piège est absent → verdict « too_easy » + hardening CHIRURGICAL (quoi ajouter/salir/agrandir/enchaîner, sans tout réécrire). Si le fort cale → « broken » + comment simplifier au bon endroit. Sinon « good ».`,
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier.`,
     JSON.stringify(AUDIT_SCHEMA, null, 2),
@@ -396,7 +399,7 @@ export async function architectExercise(
   }
 
   step("Compilation du PDF (sans garde)…", 92);
-  const out = await persistExercise(q, report, "architect");
+  const out = await persistExercise(q, report, `architect:${a.id}`);
   if (out.texError) step(`⚠ LaTeX → repli HTML (${out.texError.slice(0, 140)})`, 97);
   step(`Terminé ✓ (${Math.round((Date.now() - t0) / 1000)}s · ${auditLog.length} passe(s) adversariale(s))`, 100);
   return { ...out, auditLog };
