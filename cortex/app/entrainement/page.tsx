@@ -46,11 +46,21 @@ export default function EntrainementPage() {
     const file = item?.getAsFile();
     if (file) { e.preventDefault(); attachExoImage(file); }
   }, [attachExoImage]);
+  const exoTaRef = useRef<HTMLTextAreaElement | null>(null);
+  const autoGrow = useCallback(() => {
+    const el = exoTaRef.current; if (!el) return;
+    el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, 320) + "px";
+  }, []);
+  const setExoTargetGrow = useCallback((v: string) => { setExoTarget(v); requestAnimationFrame(autoGrow); }, [autoGrow]);
   const onExoDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false);
-    const file = Array.from(e.dataTransfer?.files ?? []).find((f) => f.type.startsWith("image/"));
-    if (file) attachExoImage(file);
-  }, [attachExoImage]);
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    const img = files.find((f) => f.type.startsWith("image/"));
+    if (img) { attachExoImage(img); return; }
+    // .txt / fichier texte → lu côté client, injecté dans le champ
+    const txt = files.find((f) => f.type.startsWith("text/") || /\.(txt|md)$/i.test(f.name));
+    if (txt) txt.text().then((t) => setExoTargetGrow(t));
+  }, [attachExoImage, setExoTargetGrow]);
 
   // ---- Exo Labs (NS13) : moule Q6 2025, contenu = le vrai code du lab ----
   const [labTopic, setLabTopic] = useState("");
@@ -243,7 +253,7 @@ export default function EntrainementPage() {
       >
         <h2 className="text-[15px] font-semibold mb-1" style={{ color: "var(--ink)" }}>Exercice ciblé — format examen (PDF)</h2>
         <p className="text-[13px] mb-3" style={{ color: "var(--ink-2)" }}>
-          Tape un point faible précis, <strong style={{ color: "var(--ink)" }}>colle (Cmd/Ctrl+V) ou glisse une image d'exo</strong> ici → UN exercice NEUF du même type au niveau d'un vrai final (architecte : piège conçu + vérifié), <strong style={{ color: "var(--ink)" }}>sans page de garde</strong>.
+          Tape un point faible, <strong style={{ color: "var(--ink)" }}>colle un gros texte</strong> (la consigne complète d'un exo raté, ou un <strong style={{ color: "var(--ink)" }}>log de tes lacunes</strong>), <strong style={{ color: "var(--ink)" }}>glisse un <code style={{ fontSize: 12 }}>.txt</code> ou une image</strong> → un exo NEUF du même type, niveau vrai final (architecte). <strong style={{ color: "var(--ink)" }}>Sans page de garde</strong>.
         </p>
         {exoJob && EXO_ACTIVE.includes(exoJob.status) ? (
           <div>
@@ -257,10 +267,32 @@ export default function EntrainementPage() {
           </div>
         ) : (
           <div>
-            <div className="flex gap-2">
-              <input className="input" placeholder="ex. TCP Reno : cwnd après triple-dup-ACK · ou colle/glisse une image" value={exoTarget} onChange={(e) => setExoTarget(e.target.value)} onPaste={onExoPaste} style={{ fontSize: 14 }} />
+            <div className="flex gap-2 items-end">
+              <textarea
+                ref={exoTaRef}
+                className="textarea"
+                placeholder="ex. « TCP Reno : cwnd après triple-dup-ACK » · ou colle la consigne complète d'un exo raté · ou un log de lacunes (« j'ai pas compris X, raté Y, je confonds Z… ») · ou glisse un .txt / une image"
+                value={exoTarget}
+                onChange={(e) => setExoTargetGrow(e.target.value)}
+                onPaste={onExoPaste}
+                rows={1}
+                style={{ fontSize: 14, minHeight: 44, maxHeight: 320, lineHeight: 1.4 }}
+              />
               <button className="btn btn-primary" onClick={() => genExo(exoTarget)} disabled={!exoTarget.trim() && !exoImg}>✦ Exo</button>
             </div>
+            {exoTarget.trim().length > 160 && (
+              <p className="mt-1.5 text-[12px]" style={{ color: "var(--accent-ink)" }}>
+                Gros texte détecté → Cortex décidera : consigne d'exo (→ exo neuf du même type) ou log de lacunes (→ faiblesses + exo ciblé).
+              </p>
+            )}
+            {!exoImg && (
+              <div className="mt-2 flex items-center gap-2">
+                <label className="chip cursor-pointer">📄 joindre un .txt
+                  <input type="file" accept=".txt,.md,text/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) f.text().then((t) => setExoTargetGrow(t)); }} />
+                </label>
+                {exoTarget.trim() && <button className="btn btn-quiet btn-sm" onClick={() => setExoTargetGrow("")}>vider</button>}
+              </div>
+            )}
 
             {exoImg && exoPreview ? (
               <div className="mt-3 inset flex items-start gap-3" style={{ padding: 10 }}>
