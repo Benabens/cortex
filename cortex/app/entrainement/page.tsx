@@ -132,6 +132,8 @@ export default function EntrainementPage() {
       try {
         const d = await (await fetch("/api/jobs?type=exercise")).json();
         if (d.active && EXO_ACTIVE.includes(d.active.status)) { setExoJob(d.active); pollExo(d.active.id); }
+        // reprise : le dernier exo TERMINÉ reste affiché (lien PDF + retour) même après reload
+        else { const last = (d.recent ?? []).find((j: any) => j.type === "exercise" && j.status === "done" && j.resultPath); if (last) setExoJob(last); }
       } catch {}
       try {
         const d = await (await fetch("/api/jobs?type=lab-exercise")).json();
