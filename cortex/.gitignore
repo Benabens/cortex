@@ -49,7 +49,8 @@ data/algo/*.db
 data/ml/*.db
 data/algo/exams/
 data/ml/exams/
-data/uploads/   # uploads cs-202 (binaires éphémères : screenshots faiblesses, images d'exos) — régénérables
+# uploads cs-202 (binaires éphémères : screenshots faiblesses, images d'exos) — régénérables
+data/uploads/
 data/algo/uploads/
 data/ml/uploads/
 
