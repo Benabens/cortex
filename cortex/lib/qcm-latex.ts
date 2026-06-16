@@ -104,13 +104,13 @@ function renderQcmItem(q: QcmItem, n: number, points: number, withKey: boolean):
   ].filter(Boolean).join("\n");
 }
 
-function renderOpen(q: ExamQuestion, n: number, withSol: boolean): string {
+function renderOpen(q: ExamQuestion, n: number, withSol: boolean, defaultPts = 15): string {
   // les énoncés ouverts (architecte ML) sont déjà en LaTeX (corps) — on les insère tels quels,
   // précédés d'un en-tête. Si pas de \subq dedans, on ajoute un espace de réponse.
   const stmt = (q.statement_tex ?? "").trim();
   const hasSpace = /\\rulelines|\\diskgrid|\\statesim|\\packetgrid|\\forwardgrid/.test(stmt);
   return [
-    String.raw`\clearpage\needspace{4\baselineskip}{\large\textbf{Open question ${n} \quad-- ${esc(q.concept)} \hfill [${q.points ?? 15} points]}}\par\vspace{4pt}\hrule\vspace{8pt}`,
+    String.raw`\clearpage\needspace{4\baselineskip}{\large\textbf{Open question ${n} \quad-- ${esc(q.concept)} \hfill [${q.points ?? defaultPts} points]}}\par\vspace{4pt}\hrule\vspace{8pt}`,
     stmt,
     hasSpace ? "" : String.raw`\vspace{4pt}\rulelines{8}`,
     withSol ? String.raw`\par\medskip{\textbf{\color{epflred}Solution.}}\par\smallskip` + "\n" + (q.solution_tex ?? "") : "",
@@ -125,21 +125,30 @@ export function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSo
   const figPath = path.join(LATEX_DIR, "figures.tex");
   if (fs.existsSync(figPath)) preamble += "\n" + fs.readFileSync(figPath, "utf8");
 
-  const qcmPts = data.qcmPoints ?? 2;
-  const openPts = data.open.reduce((s, q) => s + (q.points ?? 15), 0);
-  const totalPts = data.items.length * qcmPts + openPts;
   const fmt = getFormatProfile();
   const dur = fmt?.duration_min ?? 180;
+  // Barème CALÉ sur le format détecté : chaque type (scq/mcq) vaut ses points_each réels
+  // (ex. CS-233 : scq 3 pts, mcq 4 pts), les ouvertes leurs ~17 pts. Repli 2/15 si non détecté.
+  const ptsOf = (t: "scq" | "mcq"): number => {
+    if (data.qcmPoints) return data.qcmPoints; // override explicite éventuel
+    const q = (fmt?.question_types ?? []).find((x) => x.type === t);
+    return q && q.points_each > 0 ? q.points_each : 2;
+  };
+  const openDefault = (fmt?.question_types ?? []).find((x) => x.type === "open")?.points_each || 15;
+  const itemPts = data.items.map((q) => ptsOf(q.type === "mcq" ? "mcq" : "scq"));
+  const qcmTotal = itemPts.reduce((s, p) => s + p, 0);
+  const openPts = data.open.reduce((s, q) => s + (q.points ?? openDefault), 0);
+  const totalPts = qcmTotal + openPts;
 
   const firstPart = [
-    String.raw`\par\noindent{\large\textbf{First part \quad-- Multiple-choice and single-choice questions \hfill [${data.items.length * qcmPts} points]}}\par\vspace{3pt}\hrule\vspace{8pt}`,
-    ...data.items.map((q, i) => renderQcmItem(q, i + 1, qcmPts, includeSolutions)),
+    String.raw`\par\noindent{\large\textbf{First part \quad-- Multiple-choice and single-choice questions \hfill [${qcmTotal} points]}}\par\vspace{3pt}\hrule\vspace{8pt}`,
+    ...data.items.map((q, i) => renderQcmItem(q, i + 1, itemPts[i], includeSolutions)),
   ].join("\n");
 
   const secondPart = data.open.length
     ? [
         String.raw`\clearpage\par\noindent{\large\textbf{Second part \quad-- Open questions \hfill [${openPts} points]}}\par\vspace{3pt}\hrule`,
-        ...data.open.map((q, i) => renderOpen(q, i + 1, includeSolutions)),
+        ...data.open.map((q, i) => renderOpen(q, i + 1, includeSolutions, openDefault)),
       ].join("\n")
     : "";
 
