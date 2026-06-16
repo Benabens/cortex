@@ -37,6 +37,36 @@ export default function EntrainementPage() {
   const [dragOver, setDragOver] = useState(false);
   const [exoFb, setExoFb] = useState(false);
   const [exoFbNote, setExoFbNote] = useState("");
+  // ---- V9 — composition ciblée (cours QCM : [N] QCM + [M] ouvert sur le sujet ciblé) ----
+  const [plan, setPlan] = useState<any>(null);
+  const [tQcmN, setTQcmN] = useState<number | "">(3);
+  const [tOpenN, setTOpenN] = useState<number | "">(1);
+  const [tJob, setTJob] = useState<any>(null);
+  const tPoll = useRef<any>(null);
+  const pollTQcm = useCallback((id: number) => {
+    clearInterval(tPoll.current);
+    tPoll.current = setInterval(async () => {
+      try {
+        const j = await (await fetch(`/api/jobs/${id}`)).json();
+        setTJob(j);
+        if (!EXO_ACTIVE.includes(j.status)) clearInterval(tPoll.current);
+      } catch {}
+    }, 2500);
+  }, []);
+  async function genTargetedQcm() {
+    setExoErr(null);
+    const focus = exoTarget.trim();
+    if (!focus) { setExoErr("Donne un sujet / point faible à cibler."); return; }
+    const count = tQcmN === "" ? undefined : Number(tQcmN);
+    const openCount = tOpenN === "" ? undefined : Number(tOpenN);
+    if ((count ?? 1) === 0 && (openCount ?? 1) === 0) { setExoErr("Choisis au moins 1 QCM ou 1 ouverte."); return; }
+    try {
+      const r = await fetch("/api/qcm/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ count, openCount, focus }) });
+      const d = await r.json();
+      if (!r.ok) { setExoErr(d.error ?? "Échec"); return; }
+      if (d.jobId) { setTJob({ id: d.jobId, status: "queued", progress: 0, currentStep: "Démarrage…", resultPath: null, resultId: null, log: [] }); pollTQcm(d.jobId); }
+    } catch (e: any) { setExoErr(String(e.message ?? e)); }
+  }
   const sendExoFeedback = useCallback(async (verdict: string) => {
     const m = (exoJob?.resultPath ?? "").match(/exam-(\d+)/);
     const examId = m ? Number(m[1]) : undefined;
@@ -129,6 +159,15 @@ export default function EntrainementPage() {
     load();
     loadLabSeries();
     (async () => {
+      // V9 — composition proposée (kind qcm → composeur ciblé ; sinon exo architecte historique)
+      try {
+        const { plan } = await (await fetch("/api/compose")).json();
+        setPlan(plan);
+        if (plan?.kind === "qcm") {
+          const d = await (await fetch("/api/jobs?type=qcm")).json();
+          if (d.active && EXO_ACTIVE.includes(d.active.status)) { setTJob(d.active); pollTQcm(d.active.id); }
+        }
+      } catch {}
       try {
         const d = await (await fetch("/api/jobs?type=exercise")).json();
         if (d.active && EXO_ACTIVE.includes(d.active.status)) { setExoJob(d.active); pollExo(d.active.id); }
@@ -140,8 +179,8 @@ export default function EntrainementPage() {
         if (d.active && EXO_ACTIVE.includes(d.active.status)) { setLabJob(d.active); pollLab(d.active.id); }
       } catch {}
     })();
-    return () => { clearInterval(exoPoll.current); clearInterval(labPoll.current); };
-  }, [load, loadLabSeries, pollExo, pollLab]);
+    return () => { clearInterval(exoPoll.current); clearInterval(labPoll.current); clearInterval(tPoll.current); };
+  }, [load, loadLabSeries, pollExo, pollLab, pollTQcm]);
 
   // Intégration faiblesse → drill : ?drill=<concept> pré-remplit et lance la question.
   useEffect(() => {
@@ -264,10 +303,58 @@ export default function EntrainementPage() {
         onDrop={onExoDrop}
         style={dragOver ? { borderColor: "var(--accent)", boxShadow: "var(--glow-accent)" } : undefined}
       >
-        <h2 className="text-[15px] font-semibold mb-1" style={{ color: "var(--ink)" }}>Exercice ciblé — format examen (PDF)</h2>
-        <p className="text-[13px] mb-3" style={{ color: "var(--ink-2)" }}>
-          Tape un point faible, <strong style={{ color: "var(--ink)" }}>colle un gros texte</strong> (la consigne complète d'un exo raté, ou un <strong style={{ color: "var(--ink)" }}>log de tes lacunes</strong>), <strong style={{ color: "var(--ink)" }}>glisse un <code style={{ fontSize: 12 }}>.txt</code> ou une image</strong> → un exo NEUF du même type, niveau vrai final (architecte). <strong style={{ color: "var(--ink)" }}>Sans page de garde</strong>.
-        </p>
+        <h2 className="text-[15px] font-semibold mb-1" style={{ color: "var(--ink)" }}>Exercice ciblé — composition au format de la matière</h2>
+        {plan?.kind === "qcm" ? (
+          <p className="text-[13px] mb-3" style={{ color: "var(--ink-2)" }}>
+            Tape un point faible / un thème → Cortex propose une <strong style={{ color: "var(--ink)" }}>composition</strong> au format du cours (QCM + ouvert), pré-remplie et éditable. Tu peux faire « 5 QCM sur K-means » ou « 1 exo ouvert détaillé » — c'est toi qui choisis.
+          </p>
+        ) : (
+          <p className="text-[13px] mb-3" style={{ color: "var(--ink-2)" }}>
+            Tape un point faible, <strong style={{ color: "var(--ink)" }}>colle un gros texte</strong> (la consigne complète d'un exo raté, ou un <strong style={{ color: "var(--ink)" }}>log de tes lacunes</strong>), <strong style={{ color: "var(--ink)" }}>glisse un <code style={{ fontSize: 12 }}>.txt</code> ou une image</strong> → un exo NEUF du même type, niveau vrai final (architecte). <strong style={{ color: "var(--ink)" }}>Sans page de garde</strong>.
+          </p>
+        )}
+
+        {/* V9 — cours QCM : composeur ciblé (sujet + [N] QCM + [M] ouvert), pré-rempli + éditable */}
+        {plan?.kind === "qcm" && (
+          <div className="inset mb-4" style={{ padding: 12 }}>
+            <input className="input mb-2" style={{ fontSize: 14 }} placeholder="thème / point faible à cibler : « K-means », « backprop », « PCA »…" value={exoTarget} onChange={(e) => setExoTarget(e.target.value)} />
+            <div className="flex flex-wrap items-end gap-4 mb-2">
+              <label className="flex flex-col gap-1 text-[12px]" style={{ color: "var(--ink-2)" }}>
+                <span>QCM (SCQ + MCQ)</span>
+                <input type="number" min={0} max={20} className="input" style={{ width: 90, fontSize: 14 }} value={tQcmN}
+                  onChange={(e) => setTQcmN(e.target.value === "" ? "" : Math.max(0, Math.min(20, Math.floor(Number(e.target.value)))))} />
+              </label>
+              <label className="flex flex-col gap-1 text-[12px]" style={{ color: "var(--ink-2)" }}>
+                <span>questions ouvertes</span>
+                <input type="number" min={0} max={5} className="input" style={{ width: 90, fontSize: 14 }} value={tOpenN}
+                  onChange={(e) => setTOpenN(e.target.value === "" ? "" : Math.max(0, Math.min(5, Math.floor(Number(e.target.value)))))} />
+              </label>
+            </div>
+            {tJob && EXO_ACTIVE.includes(tJob.status) ? (
+              <div>
+                <div className="progress"><div className="progress-bar" style={{ width: `${tJob.progress}%` }} /></div>
+                <div className="mt-2 text-[13px]" style={{ color: "var(--ink-2)" }}>{tJob.currentStep}</div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="btn btn-primary" onClick={genTargetedQcm} disabled={!exoTarget.trim()}>✦ Composer sur ce sujet</button>
+                {tJob?.status === "done" && (tJob.resultPath || tJob.resultId) && <>
+                  <a className="btn btn-ghost" href={tJob.resultPath ?? `/mock/${tJob.resultId}`}>ouvrir (site) →</a>
+                  {tJob.resultId && <a className="btn btn-quiet" style={{ color: "var(--blue)" }} href={`/exam/qcm-${tJob.resultId}.pdf?course=${plan?.course ?? "ml"}`} target="_blank" rel="noopener">PDF énoncé</a>}
+                  {tJob.resultId && <a className="btn btn-quiet" style={{ color: "var(--green)" }} href={`/exam/qcm-${tJob.resultId}-corrige.pdf?course=${plan?.course ?? "ml"}`} target="_blank" rel="noopener">PDF corrigé</a>}
+                </>}
+                <span className="text-[12px] w-full" style={{ color: "var(--ink-3)" }}>
+                  → {Number(tQcmN) || 0} QCM + {Number(tOpenN) || 0} ouverte(s) sur «&nbsp;{exoTarget.trim() || "…"}&nbsp;» · site + PDF · « 0 QCM + 1 ouvert » = un seul exo ouvert détaillé
+                </span>
+                {tJob?.status === "error" && <p className="text-[12px] w-full" style={{ color: "var(--red)" }}>Échec : {tJob.error}</p>}
+              </div>
+            )}
+          </div>
+        )}
+
+        {plan?.kind === "qcm" && (
+          <div className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--ink-3)" }}>ou : un seul exo ouvert (architecte) — image / consigne collée</div>
+        )}
         {exoJob && EXO_ACTIVE.includes(exoJob.status) ? (
           <div>
             <div className="progress">
