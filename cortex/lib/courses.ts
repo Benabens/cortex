@@ -117,7 +117,7 @@ export const COURSES: Record<string, CourseConfig> = {
       "Swiss Federal Institute of Technology -- Lausanne",
     ],
     faculty: "Faculté Informatique et Communications",
-    profs: [],
+    profs: ["Dr. Mathieu Salzmann"],
     profile: "ml",
     durationMin: 180,
     dbFile: "ml/ml.db",

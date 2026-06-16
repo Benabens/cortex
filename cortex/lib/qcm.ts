@@ -1,7 +1,7 @@
 import { currentCourse, sqlite } from "@/db/client";
 import { extractJson, runClaudeCode } from "@/lib/claude-code";
 import { courseRefImages } from "@/lib/course-vision";
-import type { StepCb } from "@/lib/exam";
+import type { ExamQuestion, StepCb } from "@/lib/exam";
 import { getFormatProfile } from "@/lib/format";
 
 /**
@@ -59,6 +59,9 @@ function ensureQcmSchema() {
     format_template TEXT, targeted_weakness_ids TEXT, html_path TEXT, status TEXT DEFAULT 'draft');`);
   const cols = (sqlite.prepare(`PRAGMA table_info(exams)`).all() as { name: string }[]).map((c) => c.name);
   if (!cols.includes("verify_summary")) sqlite.exec(`ALTER TABLE exams ADD COLUMN verify_summary TEXT`);
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS exam_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, exam_id INTEGER NOT NULL, concept TEXT,
+    statement_html TEXT, solution_html TEXT, source_inspiration TEXT, verified INTEGER, verify_issue TEXT);`);
   sqlite.exec(`CREATE TABLE IF NOT EXISTS qcm_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     exam_id INTEGER NOT NULL,
@@ -165,16 +168,18 @@ async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<QcmItem[]
   return items;
 }
 
-export type QcmExamResult = { id: number; count: number; verified: number };
+export type QcmExamResult = { id: number; count: number; verified: number; open: number; pdf?: string; texError?: string };
 
-/** Génère un examen QCM complet (N QCM, lots parallèles), vérifié, persisté. */
-export async function generateQcmExam(opts: { count?: number; onStep?: StepCb } = {}): Promise<QcmExamResult> {
+/** Génère un examen QCM complet (N QCM + M ouvertes), vérifié, persisté, rendu en PDF. */
+export async function generateQcmExam(opts: { count?: number; openCount?: number; onStep?: StepCb } = {}): Promise<QcmExamResult> {
   ensureQcmSchema();
   const step = opts.onStep ?? (() => {});
   const fmt = getFormatProfile();
-  const count = opts.count ?? Math.min(25, Math.max(8, fmt?.question_types?.find((t) => t.type === "scq" || t.type === "mcq")?.approx_count ?? 12));
+  const qcmShare = (fmt?.question_types ?? []).filter((t) => t.type === "scq" || t.type === "mcq").reduce((s, t) => s + (t.approx_count || 0), 0);
+  const count = opts.count ?? Math.min(20, Math.max(8, qcmShare || 12));
+  const openCount = opts.openCount ?? Math.min(3, Math.max(0, (fmt?.question_types ?? []).find((t) => t.type === "open")?.approx_count ?? 2));
   const topics = coverageTopics();
-  step(`Architecte QCM : ${count} QCM au format détecté…`, 10);
+  step(`Architecte : ${count} QCM + ${openCount} question(s) ouverte(s) au format détecté…`, 8);
 
   // lots de 6 QCM en parallèle borné (2 lots à la fois)
   const BATCH = 6;
@@ -195,34 +200,72 @@ export async function generateQcmExam(opts: { count?: number; onStep?: StepCb } 
     step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / count) * 50));
   }
 
-  // persiste l'exam + les QCM
+  // partie OUVERTE (V7) : chaque question via l'architecte (multi-passes + vérif), au niveau réel.
+  const openQs: ExamQuestion[] = [];
+  if (openCount > 0) {
+    const { architectQuestion } = await import("@/lib/architect");
+    const { profile } = require("@/lib/course-profile");
+    const archs = profile().archetypes as any[];
+    for (let i = 0; i < openCount; i++) {
+      const t = topics[(count + i) % topics.length];
+      const a = archs[i % archs.length];
+      step(`Question ouverte ${i + 1}/${openCount} (architecte) — ${t.label}…`, 82 + i);
+      try {
+        const r = await architectQuestion(a, `${t.label}${t.method ? ` — ${t.method}` : ""}`, 15, { maxRounds: 1, onStep: (m) => step(`Ouverte ${i + 1} · ${m}`, 82 + i) });
+        openQs.push({ ...r.q, points: 15 });
+      } catch (e) { step(`Question ouverte ${i + 1} ignorée : ${(e as Error).message.slice(0, 60)}`, 82 + i); }
+    }
+  }
+
+  // persiste l'exam + les QCM + les ouvertes
   const examId = sqlite.prepare(`INSERT INTO exams (format_template, status) VALUES ('qcm','ready')`).run().lastInsertRowid as number;
   const ins = sqlite.prepare(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified) VALUES (?,?,?,?,?,?,?,?,?,?)`);
+  const insOpen = sqlite.prepare(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration) VALUES (?,?,?,?,?)`);
   const tx = sqlite.transaction(() => {
     all.forEach((q, i) => ins.run(examId, i, q.topic, q.type, q.stem, JSON.stringify(q.options), JSON.stringify(q.correct), JSON.stringify(q.misconceptions), q.explanation, q.verified));
+    openQs.forEach((q) => insOpen.run(examId, q.concept, q.statement_tex, q.solution_tex, "qcm-open"));
   });
   tx();
   const verified = all.filter((q) => q.verified === 1).length;
-  sqlite.prepare(`UPDATE exams SET verify_summary = ? WHERE id = ?`).run(`QCM ${all.length} · vérifiés ${verified}`, examId);
-  step(`Examen QCM #${examId} prêt — ${all.length} QCM (${verified} vérifiés) ✓`, 100);
-  return { id: examId, count: all.length, verified };
+  sqlite.prepare(`UPDATE exams SET verify_summary = ? WHERE id = ?`).run(`QCM ${all.length} (${verified} vér.) + ${openQs.length} ouverte(s)`, examId);
+
+  // rendu PDF (énoncé + corrigé) au look d'un vrai final du cours
+  step("Rendu du PDF (look vrai final)…", 92);
+  let pdf: string | undefined, texError: string | undefined;
+  try {
+    const { buildQcmArtifact } = await import("@/lib/qcm-latex");
+    const dateLabel = (sqlite.prepare(`SELECT date('now') d`).get() as any).d;
+    const out = await buildQcmArtifact(examId, { items: all, open: openQs }, dateLabel);
+    pdf = out.file; texError = out.texError;
+    sqlite.prepare(`UPDATE exams SET html_path = ? WHERE id = ?`).run(out.file, examId);
+  } catch (e) { texError = (e as Error).message; }
+
+  step(`Examen QCM #${examId} prêt — ${all.length} QCM + ${openQs.length} ouverte(s) ✓`, 100);
+  return { id: examId, count: all.length, verified, open: openQs.length, pdf, texError };
 }
 
-export type QcmExamView = { id: number; createdAt: string; verifySummary: string | null; items: (Omit<QcmItem, "correct" | "misconceptions"> & { id: number; idx: number })[] };
+export type QcmOpenView = { id: number; concept: string; statement: string; solution: string };
+export type QcmExamView = { id: number; createdAt: string; verifySummary: string | null; pdf: string | null; items: (Omit<QcmItem, "correct" | "misconceptions"> & { id: number; idx: number })[]; open: QcmOpenView[] };
 
 /** Un examen QCM pour l'affichage (SANS les clés — l'auto-correction se fait via /api). */
 export function getQcmExam(examId: number, withKeys = false): QcmExamView | null {
   ensureQcmSchema();
-  const e = sqlite.prepare(`SELECT id, created_at, verify_summary FROM exams WHERE id = ? AND format_template = 'qcm'`).get(examId) as any;
+  const e = sqlite.prepare(`SELECT id, created_at, verify_summary, html_path FROM exams WHERE id = ? AND format_template = 'qcm'`).get(examId) as any;
   if (!e) return null;
   const rows = sqlite.prepare(`SELECT * FROM qcm_items WHERE exam_id = ? ORDER BY idx`).all(examId) as any[];
+  let open: QcmOpenView[] = [];
+  try {
+    open = (sqlite.prepare(`SELECT id, concept, statement_html, solution_html FROM exam_questions WHERE exam_id = ? AND source_inspiration = 'qcm-open' ORDER BY id`).all(examId) as any[])
+      .map((r) => ({ id: r.id, concept: r.concept, statement: r.statement_html, solution: withKeys ? r.solution_html : "" }));
+  } catch {}
   return {
-    id: e.id, createdAt: e.created_at, verifySummary: e.verify_summary,
+    id: e.id, createdAt: e.created_at, verifySummary: e.verify_summary, pdf: e.html_path ?? null,
     items: rows.map((r) => ({
       id: r.id, idx: r.idx, topic: r.topic, type: r.type, stem: r.stem,
       options: JSON.parse(r.options_json), explanation: withKeys ? r.explanation : "", verified: r.verified,
       ...(withKeys ? { correct: JSON.parse(r.correct_json), misconceptions: JSON.parse(r.misconceptions_json) } : {}),
     })) as any,
+    open,
   };
 }
 
