@@ -580,11 +580,17 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep
   } catch {
     slots = p.examSlots();
   }
-  const batches = [slots.slice(0, 3), slots.slice(3, 6)];
   const doVerify = opts.verify !== false;
   // PERFECT B1 — cs-202 : CHAQUE question de l'examen complet passe par l'ARCHITECTE
   // (concevoir le piège → rédiger → audit adversarial → réviser), en parallèle borné.
   const useArchitect = currentCourse() === DEFAULT_COURSE;
+  // V8 — RÉSILIENCE : on découpe TOUS les slots en lots (longueur réelle, pas plafonnée à 6).
+  // Lots plus petits pour les cours sans architecte (one-shot) → plus parallèles, plus robustes
+  // au timeout. cs-202 (architecte, 6 slots, BATCH=3) reste [3,3] — comportement INCHANGÉ.
+  const BATCH = useArchitect ? 3 : 2;
+  const chunk = <T,>(arr: T[], n: number): T[][] => { const o: T[][] = []; for (let i = 0; i < arr.length; i += n) o.push(arr.slice(i, i + n)); return o; };
+  const batches = chunk(slots, BATCH).filter((b) => b.length);
+  const nBatches = batches.length;
   const auditAll: Record<string, unknown> = {};
   let qDone = 0;
   const qTotal = slots.length;
@@ -625,11 +631,18 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep
     };
     await Promise.all([worker(), worker()]);
     if (failed.length) {
-      const fqs = await generateBatch(ctx, failed.map((k) => bslots[k]) as any);
-      failed.forEach((k, j) => { if (fqs[j]) out[k] = fqs[j]; });
+      // repli one-shot pour les slots dont l'architecte a échoué — lui-même résilient (jamais throw).
+      try {
+        const fqs = await generateBatch(ctx, failed.map((k) => bslots[k]) as any);
+        failed.forEach((k, j) => { if (fqs[j]) out[k] = fqs[j]; });
+      } catch (e) {
+        step(`Lot ${lotIdx + 1} · repli one-shot échoué (${(e as Error).message.slice(0, 80)}) → questions manquantes ignorées`, 0);
+      }
     }
     const qs = out.filter((q): q is ExamQuestion => !!q);
-    if (qs.length < bslots.length) throw new Error(`Lot ${lotIdx + 1} : ${qs.length}/${bslots.length} questions seulement (architecte + repli)`);
+    // V8 — RÉSILIENCE : on RENVOIE ce qu'on a (même partiel/vide). Un lot incomplet ne fait
+    // JAMAIS échouer le job — l'examen sort avec les questions réussies, l'écart est loggé.
+    if (qs.length < bslots.length) step(`Lot ${lotIdx + 1} : ${qs.length}/${bslots.length} questions (le reste a échoué et est ignoré)`, 0);
     return qs;
   }
 
@@ -641,54 +654,72 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep
    */
   const settled = await Promise.all(
     batches.map(async (bslots, i) => {
-      let qs: ExamQuestion[];
-      if (saved[i]?.length === bslots.length) {
-        step(`Lot ${i + 1}/2 repris du checkpoint`, 20);
-        qs = saved[i]!;
-        qDone += bslots.length;
-      } else if (useArchitect) {
-        step(`Lot ${i + 1}/2 — ARCHITECTE par question (piège → rédaction → audit adversarial)…`, 8 + i * 2);
-        qs = await architectBatch(bslots, i);
-        saved[i] = qs;
-        try { fs.mkdirSync(path.dirname(CKPT()), { recursive: true }); fs.writeFileSync(CKPT(), JSON.stringify({ at: Date.now(), batches: saved })); } catch {}
-        step(`Lot ${i + 1}/2 construit par l'architecte ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 40);
-      } else {
-        // cours sans architecte (pas de trap library) : voie one-shot historique
-        step(`Lot ${i + 1}/2 — génération de 3 exercices…`, 8 + i * 2);
-        let got: ExamQuestion[] | null = null;
-        for (let attempt = 1; attempt <= 2 && !got; attempt++) {
-          try {
-            const g = await generateBatch(ctx, bslots as any);
-            if (g.length < bslots.length) throw new Error(`incomplet (${g.length}/${bslots.length})`);
-            got = g;
-          } catch (e) {
-            if (attempt === 2) throw new Error(`Lot ${i + 1} échoué : ${(e as Error).message}`);
-            step(`Lot ${i + 1}/2 — réessai (${(e as Error).message})`, 8 + i * 2);
-          }
-        }
-        qs = got!;
-        saved[i] = qs;
-        try { fs.mkdirSync(path.dirname(CKPT()), { recursive: true }); fs.writeFileSync(CKPT(), JSON.stringify({ at: Date.now(), batches: saved })); } catch {}
-        step(`Lot ${i + 1}/2 généré ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 30);
-      }
-      if (!doVerify) return { questions: qs, report: null as VerifyReport | null };
-      step(`Lot ${i + 1}/2 — vérification à l'aveugle + durcissement…`, 45);
+      // V8 — un lot ne fait JAMAIS échouer le job : tout throw inattendu est rattrapé ici et
+      // le lot rend simplement 0 question (les autres lots continuent, l'examen sort partiel).
       try {
-        const v = await verifyAndHarden({ title: "", questions: qs }, regenerateExercise, 2, (m) => step(`Lot ${i + 1} · ${m}`, 0));
-        step(`Lot ${i + 1}/2 vérifié ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 70);
-        return { questions: v.spec.questions, report: v.report as VerifyReport | null };
+        let qs: ExamQuestion[];
+        if (saved[i]?.length === bslots.length) {
+          step(`Lot ${i + 1}/${nBatches} repris du checkpoint`, 20);
+          qs = saved[i]!;
+          qDone += bslots.length;
+        } else if (useArchitect) {
+          step(`Lot ${i + 1}/${nBatches} — ARCHITECTE par question (piège → rédaction → audit adversarial)…`, 8 + i * 2);
+          qs = await architectBatch(bslots, i);
+          saved[i] = qs;
+          try { fs.mkdirSync(path.dirname(CKPT()), { recursive: true }); fs.writeFileSync(CKPT(), JSON.stringify({ at: Date.now(), batches: saved })); } catch {}
+          step(`Lot ${i + 1}/${nBatches} construit par l'architecte ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 40);
+        } else {
+          // cours sans architecte : voie one-shot, RÉSILIENTE — réessai puis IGNORE le lot.
+          step(`Lot ${i + 1}/${nBatches} — génération de ${bslots.length} exercices…`, 8 + i * 2);
+          let got: ExamQuestion[] = [];
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+              const g = (await generateBatch(ctx, bslots as any)).filter(Boolean);
+              if (g.length) { got = g; break; }
+              throw new Error("lot vide");
+            } catch (e) {
+              step(`Lot ${i + 1}/${nBatches} — ${attempt < 2 ? "réessai" : "timeout/échec → lot ignoré"} (${(e as Error).message.slice(0, 80)})`, 8 + i * 2);
+            }
+          }
+          if (got.length < bslots.length) step(`Lot ${i + 1} : ${got.length}/${bslots.length} questions (le reste est ignoré)`, 0);
+          qs = got; // peut être partiel ou vide → le job CONTINUE
+          if (qs.length) {
+            saved[i] = qs;
+            try { fs.mkdirSync(path.dirname(CKPT()), { recursive: true }); fs.writeFileSync(CKPT(), JSON.stringify({ at: Date.now(), batches: saved })); } catch {}
+          }
+          step(`Lot ${i + 1}/${nBatches} généré ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 30);
+        }
+        if (!qs.length) return { questions: [], report: null as VerifyReport | null };
+        if (!doVerify) return { questions: qs, report: null as VerifyReport | null };
+        step(`Lot ${i + 1}/${nBatches} — vérification à l'aveugle + durcissement…`, 45);
+        try {
+          const v = await verifyAndHarden({ title: "", questions: qs }, regenerateExercise, 2, (m) => step(`Lot ${i + 1} · ${m}`, 0));
+          step(`Lot ${i + 1}/${nBatches} vérifié ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 70);
+          return { questions: v.spec.questions, report: v.report as VerifyReport | null };
+        } catch (e) {
+          step(`Lot ${i + 1} — vérif interrompue : ${(e as Error).message}`, 70);
+          return { questions: qs, report: null as VerifyReport | null };
+        }
       } catch (e) {
-        step(`Lot ${i + 1} — vérif interrompue : ${(e as Error).message}`, 70);
-        return { questions: qs, report: null as VerifyReport | null };
+        step(`Lot ${i + 1}/${nBatches} — échec complet, lot ignoré (${(e as Error).message.slice(0, 80)})`, 0);
+        return { questions: [] as ExamQuestion[], report: null as VerifyReport | null };
       }
     })
   );
 
   const c = getCourse(currentCourse());
+  const allQuestions = settled.flatMap((s) => s.questions);
+  // V8 — on n'échoue QUE si rien n'a abouti (tous les lots ont timeout/échoué). Sinon l'examen
+  // sort à sa longueur réelle (partielle si besoin) ; le checkpoint permet de relancer le reste.
+  if (!allQuestions.length)
+    throw new Error("Aucune question générée (tous les lots ont échoué/timeout). Relance : la génération reprend du checkpoint.");
+  const missing = qTotal - allQuestions.length;
+  if (missing > 0)
+    step(`⚠ Examen livré PARTIEL : ${allQuestions.length}/${qTotal} questions (${missing} ignorée(s) après timeout/échec) — relance pour compléter`, 90);
   const spec: ExamSpec = {
     title: `${c.examCode} ${c.examName} — ${c.examKind}`,
     duration_min: c.durationMin,
-    questions: settled.flatMap((s) => s.questions),
+    questions: allQuestions,
   };
   // fusion des rapports par lot (résultats ré-indexés sur l'ordre fusionné)
   let report: VerifyReport | undefined;
@@ -716,7 +747,9 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep
   if (Object.keys(auditAll).length) {
     try { fs.writeFileSync(path.join(examsDir(), `exam-${out.id}.audit.json`), JSON.stringify(auditAll, null, 2)); } catch {}
   }
-  try { fs.unlinkSync(CKPT()); } catch {} // run complet → checkpoint consommé
+  // run COMPLET → checkpoint consommé ; run PARTIEL → on GARDE le checkpoint (relance = reprend
+  // les lots réussis, ne rebrûle que ceux qui ont timeout).
+  if (missing <= 0) { try { fs.unlinkSync(CKPT()); } catch {} }
   if (out.texError) step(`⚠ Compilation LaTeX échouée → repli HTML lisible (${out.texError.slice(0, 180)})`, 97);
   step(`Terminé ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 100);
   return out;
