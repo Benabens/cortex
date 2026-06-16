@@ -19,6 +19,35 @@ const MIME: Record<string, string> = {
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
 };
 
+/**
+ * V8 — repli anti-404 : si le chemin stocké ne résout pas (vieille ingestion, préfixe périmé
+ * `lectures/` → `slides/`), on cherche le fichier par son BASENAME dans les dossiers du cours
+ * (refs/ d'abord, puis content/**). Jamais de cul-de-sac silencieux quand le fichier existe ailleurs.
+ * Walk borné : on saute les dossiers lourds/inutiles et on plafonne le nombre de fichiers scannés.
+ */
+const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "figref", "img", "images"]);
+function findByBasename(roots: string[], basename: string): string | null {
+  const target = basename.toLowerCase();
+  let scanned = 0;
+  for (const root of roots) {
+    if (!fs.existsSync(root)) continue;
+    const stack = [root];
+    while (stack.length) {
+      const dir = stack.pop()!;
+      let entries: fs.Dirent[];
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+      for (const e of entries) {
+        if (e.name.startsWith(".")) continue;
+        const abs = path.join(dir, e.name);
+        if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) stack.push(abs); continue; }
+        if (++scanned > 4000) return null; // garde-fou : ne walk jamais indéfiniment
+        if (e.name.toLowerCase() === target) return abs;
+      }
+    }
+  }
+  return null;
+}
+
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const course = sp.get("course");
@@ -28,10 +57,16 @@ export async function GET(req: NextRequest) {
   const cp = coursePaths(course);
   const base = p.startsWith("refs/") ? cp.refsDir : cp.contentRoot;
   const rel = p.startsWith("refs/") ? p.slice("refs/".length) : p;
-  const abs = path.resolve(base, rel);
   const allowed = [cp.refsDir, cp.contentRoot].map((d) => path.resolve(d) + path.sep);
-  if (!allowed.some((a) => abs.startsWith(a)) || !fs.existsSync(abs) || !fs.statSync(abs).isFile())
-    return new NextResponse("Not found", { status: 404 });
+  let abs = path.resolve(base, rel);
+  const ok = (a: string) => allowed.some((d) => a.startsWith(d)) && fs.existsSync(a) && fs.statSync(a).isFile();
+
+  if (!ok(abs)) {
+    // repli par basename : le fichier a peut-être bougé (slides/ vs lectures/) → on le retrouve.
+    const found = findByBasename([cp.refsDir, cp.contentRoot], path.basename(rel));
+    if (found && ok(found)) abs = found;
+    else return new NextResponse("Not found", { status: 404 });
+  }
 
   const ext = abs.split(".").pop()?.toLowerCase() ?? "";
   const buf = fs.readFileSync(abs);
