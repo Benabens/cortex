@@ -34,6 +34,29 @@ export default function ExamensPage() {
   const [mock, setMock] = useState<{ examId: number; endsAt: number } | null>(null);
   const [now, setNow] = useState(Date.now());
   const [finished, setFinished] = useState<number[]>([]);
+  // V6 — cours au format QCM (ex. ML/CS-233) : mock QCM interactif
+  const [format, setFormat] = useState<any>(null);
+  const [qcmJob, setQcmJob] = useState<Job | null>(null);
+  const qcmPoll = useRef<any>(null);
+  const pollQcm = useCallback((id: number) => {
+    clearInterval(qcmPoll.current);
+    qcmPoll.current = setInterval(async () => {
+      try {
+        const j: Job = await (await fetch(`/api/jobs/${id}`)).json();
+        setQcmJob(j);
+        if (!ACTIVE.includes(j.status)) clearInterval(qcmPoll.current);
+      } catch {}
+    }, 2500);
+  }, []);
+  async function genQcm() {
+    setErr(null);
+    try {
+      const r = await fetch("/api/qcm/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+      const d = await r.json();
+      if (!r.ok) { setErr(d.error ?? "Échec"); return; }
+      if (d.jobId) { setQcmJob({ id: d.jobId, type: "qcm", status: "queued", currentStep: "Démarrage…", progress: 0, resultPath: null, error: null, log: [] } as any); pollQcm(d.jobId); }
+    } catch (e: any) { setErr(String(e.message ?? e)); }
+  }
 
   const load = useCallback(async () => {
     const d = await (await fetch("/api/exams")).json();
@@ -66,13 +89,20 @@ export default function ExamensPage() {
         const d = await (await fetch("/api/jobs?type=exam")).json();
         if (d.active && ACTIVE.includes(d.active.status)) { setJob(d.active); openedRef.current = false; poll(d.active.id); }
       } catch {}
+      // V6 — format du cours + reprise d'un job QCM
+      try { const f = await (await fetch("/api/qcm/generate")).json(); setFormat(f.format); } catch {}
+      try {
+        const d = await (await fetch("/api/jobs?type=qcm")).json();
+        if (d.active && ACTIVE.includes(d.active.status)) { setQcmJob(d.active); pollQcm(d.active.id); }
+        else { const last = (d.recent ?? []).find((j: any) => j.type === "qcm" && j.status === "done" && j.resultPath); if (last) setQcmJob(last); }
+      } catch {}
     })();
     try {
       const m = JSON.parse(localStorage.getItem(MOCK_KEY) ?? "null");
       if (m?.endsAt > Date.now()) setMock(m);
     } catch {}
-    return () => clearInterval(pollRef.current);
-  }, [load, poll]);
+    return () => { clearInterval(pollRef.current); clearInterval(qcmPoll.current); };
+  }, [load, poll, pollQcm]);
 
   useEffect(() => {
     if (!mock) return;
@@ -127,6 +157,34 @@ export default function ExamensPage() {
         <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Un examen qui aurait pu tomber.</h1>
         <p className="sub mt-2">Final blanc complet au format EPFL — figures verrouillées, difficulté calibrée, vérifié exo par exo.</p>
       </header>
+
+      {format?.has_mcq && (
+        <section className="card card-pad mb-6 rise">
+          <div className="flex items-center gap-2 mb-1">
+            <h2 className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>Mock examen — format détecté</h2>
+            <span className="tag tag-blue">QCM + ouvert</span>
+          </div>
+          <p className="text-[13px] mb-1" style={{ color: "var(--ink-2)" }}>{format.format_summary}</p>
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {(format.question_types ?? []).map((t: any, i: number) => (
+              <span key={i} className="chip" style={{ cursor: "default" }}>{t.type.toUpperCase()} ×{t.approx_count} · {t.share_pct}%</span>
+            ))}
+          </div>
+          {qcmJob && ACTIVE.includes(qcmJob.status) ? (
+            <div>
+              <div className="progress"><div className="progress-bar" style={{ width: `${qcmJob.progress}%` }} /></div>
+              <div className="mt-2 text-[13px]" style={{ color: "var(--ink-2)" }}>{qcmJob.currentStep}</div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <button className="btn btn-primary" onClick={genQcm}>✦ Générer un mock QCM</button>
+              {qcmJob?.status === "done" && qcmJob.resultPath && <a className="btn btn-ghost" href={qcmJob.resultPath}>ouvrir le mock →</a>}
+              <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>interactif · auto-corrigé · distracteurs = idées fausses</span>
+            </div>
+          )}
+          {qcmJob?.status === "error" && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>Échec : {qcmJob.error}</p>}
+        </section>
+      )}
 
       {mock && (
         <div className="card card-pad mb-5 flex items-center justify-between" style={{ borderColor: "var(--accent)" }}>
