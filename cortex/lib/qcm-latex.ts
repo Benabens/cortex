@@ -80,8 +80,11 @@ function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts: numb
     String.raw`\vspace{6pt}\noindent{\Large\textbf{Student One}}\hfill SCIPER: \textbf{111111}`,
     String.raw`\vspace{0.4cm}\par\noindent{\large\textbf{Instructions}}\par\smallskip\small`,
     String.raw`\begin{enumerate}\setlength{\itemsep}{3pt}`,
-    `\\item This exam has \\textbf{${nQcm} multiple/single-choice questions}${nOpen ? ` and \\textbf{${nOpen} open questions}` : ""}, for a total of \\textbf{${totalPts} points}. You have ${durationMin} minutes.`,
-    `\\item ${convention} Tick the box(es) \\fbox{$\\checkmark$} you believe are correct.`,
+    (() => {
+      const parts = [nQcm ? `\\textbf{${nQcm} multiple/single-choice questions}` : "", nOpen ? `\\textbf{${nOpen} open questions}` : ""].filter(Boolean);
+      return `\\item This exam has ${parts.join(" and ")}, for a total of \\textbf{${totalPts} points}. You have ${durationMin} minutes.`;
+    })(),
+    nQcm ? `\\item ${convention} Tick the box(es) \\fbox{$\\checkmark$} you believe are correct.` : "",
     String.raw`\item A one-page two-sided cheat sheet is allowed. No electronic device is permitted.`,
     String.raw`\item Answer directly on this exam sheet, in the space provided.`,
     String.raw`\end{enumerate}\vspace{0.3cm}`,
@@ -140,16 +143,25 @@ export function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSo
   const openPts = data.open.reduce((s, q) => s + (q.points ?? openDefault), 0);
   const totalPts = qcmTotal + openPts;
 
-  const firstPart = [
-    String.raw`\par\noindent{\large\textbf{First part \quad-- Multiple-choice and single-choice questions \hfill [${qcmTotal} points]}}\par\vspace{3pt}\hrule\vspace{8pt}`,
-    ...data.items.map((q, i) => renderQcmItem(q, i + 1, itemPts[i], includeSolutions)),
-  ].join("\n");
-
-  const secondPart = data.open.length
+  // drill ciblé « 0 QCM + N ouvertes » : pas de partie QCM vide. Si les deux parties existent on
+  // garde « First/Second part » ; sinon on n'affiche que la partie présente.
+  const hasQcm = data.items.length > 0;
+  const hasOpen = data.open.length > 0;
+  const qcmLabel = hasOpen ? "First part \\quad-- Multiple-choice and single-choice questions" : "Multiple-choice and single-choice questions";
+  const openLabel = hasQcm ? "Second part \\quad-- Open questions" : "Open questions";
+  const firstPart = hasQcm
     ? [
-        String.raw`\clearpage\par\noindent{\large\textbf{Second part \quad-- Open questions \hfill [${openPts} points]}}\par\vspace{3pt}\hrule`,
-        ...data.open.map((q, i) => renderOpen(q, i + 1, includeSolutions, openDefault)),
+        String.raw`\par\noindent{\large\textbf{${qcmLabel} \hfill [${qcmTotal} points]}}\par\vspace{3pt}\hrule\vspace{8pt}`,
+        ...data.items.map((q, i) => renderQcmItem(q, i + 1, itemPts[i], includeSolutions)),
       ].join("\n")
+    : "";
+
+  const secondPart = hasOpen
+    ? [
+        hasQcm ? String.raw`\clearpage` : "",
+        String.raw`\par\noindent{\large\textbf{${openLabel} \hfill [${openPts} points]}}\par\vspace{3pt}\hrule`,
+        ...data.open.map((q, i) => renderOpen(q, i + 1, includeSolutions, openDefault)),
+      ].filter(Boolean).join("\n")
     : "";
 
   // header/footer course-aware (le preamble est hardcodé CS-202 → on l'override pour ce doc)

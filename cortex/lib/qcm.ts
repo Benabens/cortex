@@ -3,6 +3,7 @@ import { extractJson, runClaudeCode } from "@/lib/claude-code";
 import { courseRefImages } from "@/lib/course-vision";
 import type { ExamQuestion, StepCb } from "@/lib/exam";
 import { getFormatProfile } from "@/lib/format";
+import { calibrationBlock } from "@/lib/calibration";
 
 /**
  * V6 — ARCHITECTE QCM (générique). Génère des QCM de haut niveau au format détecté :
@@ -97,10 +98,16 @@ const ARCHITECT_QCM_RULES = [
 ];
 
 /** Génère un LOT de QCM (1 appel Max) couvrant des sujets donnés, au format du cours. */
-async function generateQcmBatch(topics: { label: string; method: string | null }[], n: number, step: StepCb): Promise<QcmItem[]> {
+async function generateQcmBatch(topics: { label: string; method: string | null }[], n: number, step: StepCb, focus?: string): Promise<QcmItem[]> {
   const fmt = getFormatProfile();
   const imgs = courseRefImages().slice(0, 4);
   const { profile } = require("@/lib/course-profile");
+  // V9 P3 — boucle FERMÉE : la mémoire de calibration des QCM (« trop facile / pas le style / faux »)
+  // est réinjectée à la CONCEPTION → durcit/réoriente réellement les QCM suivants.
+  const calib = calibrationBlock("qcm");
+  const coverage = focus
+    ? `Toutes ces ${n} questions portent sur le thème CIBLÉ : « ${focus} » — varie les SOUS-ANGLES / sous-notions de ce thème (pas ${n} fois la même question).`
+    : `Couvre ces sujets (un QCM par sujet si possible, dans l'ordre) : ${topics.slice(0, n).map((t, i) => `${i + 1}) ${t.label}${t.method ? ` [${t.method.slice(0, 60)}]` : ""}`).join(" · ")}`;
   const prompt = [
     profile().qaIntro?.() ?? "Tu es l'équipe enseignante du cours.",
     `Tu rédiges ${n} QCM INÉDITS de niveau examen pour ce cours, au FORMAT réel détecté.`,
@@ -108,11 +115,12 @@ async function generateQcmBatch(topics: { label: string; method: string | null }
     imgs.length ? `Pages d'examens réelles à imiter (outil Read) :\n${imgs.map((p) => `  - ${p}`).join("\n")}` : ``,
     ``,
     ...ARCHITECT_QCM_RULES,
+    calib || null,
     ``,
-    `Couvre ces sujets (un QCM par sujet si possible, dans l'ordre) : ${topics.slice(0, n).map((t, i) => `${i + 1}) ${t.label}${t.method ? ` [${t.method.slice(0, 60)}]` : ""}`).join(" · ")}`,
+    coverage,
     `Réponds UNIQUEMENT avec l'objet JSON { "items": [ … ] } (${n} QCM). Aucun fichier.`,
     JSON.stringify(QCM_BATCH_SCHEMA, null, 2),
-  ].filter(Boolean).join("\n");
+  ].filter((l) => l != null && l !== false && l !== "").join("\n");
   step(`Génération de ${n} QCM (architecte · distracteurs = idées fausses)…`, 30);
   const r = extractJson<{ items: QcmItem[] }>(await runClaudeCode({ prompt, model: "opus", timeoutMs: 480_000 }));
   return (r.items ?? []).map((q) => ({ ...q, verified: null as 0 | 1 | null }));
@@ -144,15 +152,19 @@ const VERIFY_SCHEMA = {
 async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<QcmItem[]> {
   const { profile } = require("@/lib/course-profile");
   const blind = items.map((q, i) => `Q${i}. [${q.type}] ${q.stem}\n${q.options.map((o, k) => `   (${k}) ${o}`).join("\n")}`).join("\n\n");
+  // V9 P3 — la mémoire de calibration des QCM est aussi réinjectée à la CRITIQUE : un « trop facile »
+  // passé rend la vérif plus sévère sur la trivialité/les indices qui trahissent.
+  const calib = calibrationBlock("qcm");
   const prompt = [
     `Tu es un correcteur rigoureux du cours. Pour CHAQUE QCM ci-dessous, RÉSOUS-LE toi-même de zéro (sans clé fournie) et donne la/les bonne(s) réponse(s) par INDEX.`,
     `Signale si : la question est ambiguë (2 réponses défendables), un distracteur est absurde, ou un indice trahit la bonne réponse (longueur, « toutes les réponses », grammaire).`,
+    calib ? `${calib}\nÀ la lumière de ces leçons, sois SÉVÈRE : signale aussi (issue) tout QCM trop trivial / au distracteur trop faible si l'étudiant a jugé ce type « trop facile ».` : null,
     ``,
     blind,
     ``,
     `Réponds UNIQUEMENT avec l'objet JSON conforme.`,
     JSON.stringify(VERIFY_SCHEMA, null, 2),
-  ].join("\n");
+  ].filter((l) => l != null).join("\n");
   step("Vérification à l'aveugle des QCM (résolution indépendante)…", 70);
   let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string }[] };
   try { res = extractJson(await runClaudeCode({ prompt, model: "opus", timeoutMs: 420_000 })); }
@@ -170,16 +182,22 @@ async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<QcmItem[]
 
 export type QcmExamResult = { id: number; count: number; verified: number; open: number; pdf?: string; texError?: string };
 
-/** Génère un examen QCM complet (N QCM + M ouvertes), vérifié, persisté, rendu en PDF. */
-export async function generateQcmExam(opts: { count?: number; openCount?: number; onStep?: StepCb } = {}): Promise<QcmExamResult> {
+/** Génère un examen QCM complet (N QCM + M ouvertes), vérifié, persisté, rendu en PDF.
+ *  `count`/`openCount` : la COMPOSITION choisie par Ben (composeur V9). `focus` : thème ciblé
+ *  optionnel (exercice ciblé V9 — toutes les questions portent dessus). */
+export async function generateQcmExam(opts: { count?: number; openCount?: number; focus?: string; onStep?: StepCb } = {}): Promise<QcmExamResult> {
   ensureQcmSchema();
   const step = opts.onStep ?? (() => {});
   const fmt = getFormatProfile();
+  const focus = (opts.focus ?? "").trim() || undefined;
   const qcmShare = (fmt?.question_types ?? []).filter((t) => t.type === "scq" || t.type === "mcq").reduce((s, t) => s + (t.approx_count || 0), 0);
-  const count = opts.count ?? Math.min(20, Math.max(8, qcmShare || 12));
-  const openCount = opts.openCount ?? Math.min(3, Math.max(0, (fmt?.question_types ?? []).find((t) => t.type === "open")?.approx_count ?? 2));
-  const topics = coverageTopics();
-  step(`Architecte : ${count} QCM + ${openCount} question(s) ouverte(s) au format détecté…`, 8);
+  // count peut être 0 (drill « 0 QCM + 1 ouvert ») → on respecte le choix explicite ; sinon défaut détecté.
+  const count = Math.max(0, opts.count ?? Math.min(20, Math.max(8, qcmShare || 12)));
+  const openCount = Math.max(0, opts.openCount ?? Math.min(3, Math.max(0, (fmt?.question_types ?? []).find((t) => t.type === "open")?.approx_count ?? 2)));
+  if (count === 0 && openCount === 0) throw new Error("Composition vide : choisis au moins 1 QCM ou 1 question ouverte.");
+  // focus ciblé → toutes les questions sur ce thème ; sinon couverture large du programme.
+  const topics = focus ? [{ label: focus, method: null as string | null }] : coverageTopics();
+  step(`Architecte : ${count} QCM + ${openCount} question(s) ouverte(s)${focus ? ` sur « ${focus} »` : " au format détecté"}…`, 8);
 
   // lots de 4 QCM en parallèle borné (2 lots à la fois). RÉSILIENT : un lot qui échoue (JSON
   // malformé du modèle sur du math) est réessayé une fois puis IGNORÉ — il ne plante pas le job.
@@ -193,7 +211,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const safeBatch = async (bt: { label: string; method: string | null }[]): Promise<QcmItem[]> => {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const items = await generateQcmBatch(bt, bt.length, step);
+        const items = await generateQcmBatch(bt, bt.length, step, focus);
         if (items.length) return await verifyQcmBatch(items, step);
       } catch (e) {
         step(`Lot QCM échoué (${(e as Error).message.slice(0, 50)})${attempt < 2 ? " — réessai" : " — ignoré"}`, 0);
@@ -205,9 +223,10 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   for (let b = 0; b < batches.length; b += 2) {
     const got = await Promise.all(batches.slice(b, b + 2).map(safeBatch));
     for (const g of got) all.push(...g);
-    step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / count) * 50));
+    step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
   }
-  if (!all.length) throw new Error("Aucun QCM généré (tous les lots ont échoué). Réessaie.");
+  // count>0 mais 0 QCM produit = tous les lots ont échoué → erreur claire (sauf drill 0 QCM + ouvertes).
+  if (count > 0 && !all.length) throw new Error("Aucun QCM généré (tous les lots ont échoué). Réessaie.");
 
   // partie OUVERTE (V7) : chaque question via l'architecte (multi-passes + vérif), au niveau réel.
   const openQs: ExamQuestion[] = [];
@@ -225,6 +244,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       } catch (e) { step(`Question ouverte ${i + 1} ignorée : ${(e as Error).message.slice(0, 60)}`, 82 + i); }
     }
   }
+
+  if (!all.length && !openQs.length) throw new Error("Rien n'a pu être généré (lots QCM et questions ouvertes échoués). Réessaie.");
 
   // persiste l'exam + les QCM + les ouvertes
   const examId = sqlite.prepare(`INSERT INTO exams (format_template, status) VALUES ('qcm','ready')`).run().lastInsertRowid as number;

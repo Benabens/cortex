@@ -97,15 +97,22 @@ async function main() {
     if (!claudeBinPath()) fail("Claude Code (binaire « claude ») introuvable.");
     try {
       const { generateQcmExam } = await import("../lib/qcm");
-      const count = job.target ? Number(JSON.parse(job.target).count) || undefined : undefined;
+      // V9 composeur : {count, openCount, focus} ; count/openCount peuvent valoir 0 (respectés).
+      let count: number | undefined, openCount: number | undefined, focus: string | undefined;
+      try {
+        const t = job.target ? JSON.parse(job.target) : {};
+        if (typeof t.count === "number") count = t.count;
+        if (typeof t.openCount === "number") openCount = t.openCount;
+        if (typeof t.focus === "string") focus = t.focus;
+      } catch {}
       const onStep = (s: string, p: number) => {
         const j = getJob(jobId);
         if (j?.status === "canceled") { logJob(jobId, "Annulé."); process.exit(0); }
         setJob(jobId, { currentStep: s, progress: p, status: p >= 100 ? "done" : "running" });
         logJob(jobId, s);
       };
-      const res = await generateQcmExam({ count, onStep });
-      setJob(jobId, { status: "done", progress: 100, resultId: res.id, resultPath: `/mock/${res.id}`, currentStep: `Mock QCM #${res.id} — ${res.count} QCM (${res.verified} vérifiés) ✓` });
+      const res = await generateQcmExam({ count, openCount, focus, onStep });
+      setJob(jobId, { status: "done", progress: 100, resultId: res.id, resultPath: `/mock/${res.id}`, currentStep: `Mock QCM #${res.id} — ${res.count} QCM + ${res.open} ouverte(s) (${res.verified} vérifiés) ✓` });
       logJob(jobId, `Mock QCM #${res.id} prêt → /mock/${res.id}`);
       process.exit(0);
     } catch (e) {
@@ -156,13 +163,17 @@ async function main() {
     logJob(jobId, s);
   };
 
+  // V9 composeur (CS-202) : count d'exercices optionnel dans le target du job 'exam'.
+  let examCount: number | undefined;
+  if (job.type === "exam" && job.target) { try { examCount = Number(JSON.parse(job.target).count) || undefined; } catch {} }
+
   try {
     const res =
       job.type === "exercise"
         ? await generateTargetedExercise(job.target ?? "", { onStep })
         : job.type === "lab-exercise"
           ? await generateLabExercise(job.target ?? "", { onStep })
-          : await generateExamViaClaudeCode({ onStep });
+          : await generateExamViaClaudeCode({ count: examCount, onStep });
     if (res.texError) {
       // le résultat existe (HTML lisible) mais le PDF a échoué → erreur LaTeX gardée pour debug
       setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, repli HTML lisible. Détail : ${res.texError.slice(0, 500)}` });

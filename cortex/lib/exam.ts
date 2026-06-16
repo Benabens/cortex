@@ -574,7 +574,7 @@ async function generateBatch(ctx: ReturnType<typeof gatherContext>, slots: Slot[
  */
 export type StepCb = (step: string, progress: number) => void;
 
-export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep?: StepCb } = {}): Promise<{ id: number; url: string; texError?: string }> {
+export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?: number; onStep?: StepCb } = {}): Promise<{ id: number; url: string; texError?: string }> {
   const t0 = Date.now();
   // progression MONOTONE : les lots/vérifs parallèles rapportent dans le désordre → max courant.
   const raw = opts.onStep ?? (() => {});
@@ -589,6 +589,14 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep
     slots = p.buildBlueprint();
   } catch {
     slots = p.examSlots();
+  }
+  // V9 composeur (CS-202 calcul/trace) : Ben peut choisir le NOMBRE d'exercices. Défaut (count absent)
+  // = longueur du blueprint → comportement HISTORIQUE inchangé (régression byte-identique). count>0
+  // tronque ou ré-instancie cycliquement les slots du blueprint pour atteindre la longueur demandée.
+  const want = opts.count && opts.count > 0 ? Math.min(12, Math.floor(opts.count)) : 0;
+  if (want && want !== slots.length) {
+    if (want < slots.length) slots = slots.slice(0, want);
+    else { const base = slots.slice(); while (slots.length < want) slots.push(base[slots.length % base.length]); }
   }
   const doVerify = opts.verify !== false;
   // PERFECT B1 — cs-202 : CHAQUE question de l'examen complet passe par l'ARCHITECTE

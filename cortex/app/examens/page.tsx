@@ -37,6 +37,12 @@ export default function ExamensPage() {
   const [finished, setFinished] = useState<number[]>([]);
   // V6 — cours au format QCM (ex. ML/CS-233) : mock QCM interactif
   const [format, setFormat] = useState<any>(null);
+  // V9 — COMPOSEUR : composition proposée (lue du format) + champs éditables.
+  const [plan, setPlan] = useState<any>(null);
+  const [qcmN, setQcmN] = useState<number | "">("");
+  const [openN, setOpenN] = useState<number | "">("");
+  const [focus, setFocus] = useState("");
+  const [exoN, setExoN] = useState<number | "">("");
   const [qcmJob, setQcmJob] = useState<Job | null>(null);
   const qcmPoll = useRef<any>(null);
   const pollQcm = useCallback((id: number) => {
@@ -51,8 +57,11 @@ export default function ExamensPage() {
   }, []);
   async function genQcm() {
     setErr(null);
+    const count = qcmN === "" ? undefined : Number(qcmN);
+    const openCount = openN === "" ? undefined : Number(openN);
+    if ((count ?? 1) === 0 && (openCount ?? 1) === 0) { setErr("Composition vide : choisis au moins 1 QCM ou 1 ouverte."); return; }
     try {
-      const r = await fetch("/api/qcm/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+      const r = await fetch("/api/qcm/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ count, openCount, focus: focus.trim() || undefined }) });
       const d = await r.json();
       if (!r.ok) { setErr(d.error ?? "Échec"); return; }
       if (d.jobId) { setQcmJob({ id: d.jobId, type: "qcm", status: "queued", currentStep: "Démarrage…", progress: 0, resultPath: null, error: null, log: [] } as any); pollQcm(d.jobId); }
@@ -131,6 +140,13 @@ export default function ExamensPage() {
       } catch {}
       // V6 — format du cours + reprise d'un job QCM
       try { const f = await (await fetch("/api/qcm/generate")).json(); setFormat(f.format); } catch {}
+      // V9 — composition proposée (pré-remplie depuis le format détecté du cours)
+      try {
+        const { plan } = await (await fetch("/api/compose")).json();
+        setPlan(plan);
+        if (plan?.kind === "qcm") { setQcmN(plan.qcm ?? 12); setOpenN(plan.open ?? 0); }
+        else if (plan?.kind === "exam") { setExoN(plan.exercises ?? 6); }
+      } catch {}
       try {
         const d = await (await fetch("/api/jobs?type=qcm")).json();
         if (d.active && ACTIVE.includes(d.active.status)) { setQcmJob(d.active); pollQcm(d.active.id); }
@@ -155,8 +171,9 @@ export default function ExamensPage() {
     setErrCmd(null);
     setNote(null);
     openedRef.current = false;
+    const count = exoN === "" ? undefined : Number(exoN); // V9 composeur CS-202 : nb d'exercices choisi
     try {
-      const r = await fetch("/api/exams/generate", { method: "POST" });
+      const r = await fetch("/api/exams/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ count }) });
       const d = await r.json();
       if (!r.ok) { setErr(d.error ?? "Échec"); setErrCmd(d.command ?? null); return; }
       if (d.jobId) { setJob({ id: d.jobId, type: "exam", status: "queued", currentStep: "Démarrage…", progress: 0, resultPath: null, error: null, log: [] }); poll(d.jobId); }
@@ -201,10 +218,10 @@ export default function ExamensPage() {
       {format?.has_mcq && (
         <section className="card card-pad mb-6 rise">
           <div className="flex items-center gap-2 mb-1">
-            <h2 className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>Mock examen — format détecté</h2>
+            <h2 className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>Composer un examen — format détecté</h2>
             <span className="tag tag-blue">QCM + ouvert</span>
           </div>
-          <p className="text-[13px] mb-1" style={{ color: "var(--ink-2)" }}>{format.format_summary}</p>
+          <p className="text-[13px] mb-1" style={{ color: "var(--ink-2)" }}>{plan?.summary ?? format.format_summary}</p>
           <div className="flex flex-wrap gap-1.5 mb-3">
             {(format.question_types ?? []).map((t: any, i: number) => (
               <span key={i} className="chip" style={{ cursor: "default" }}>{t.type.toUpperCase()} ×{t.approx_count} · {t.share_pct}%</span>
@@ -216,14 +233,32 @@ export default function ExamensPage() {
               <div className="mt-2 text-[13px]" style={{ color: "var(--ink-2)" }}>{qcmJob.currentStep}</div>
             </div>
           ) : (
-            <div className="flex flex-wrap items-center gap-2">
-              <button className="btn btn-primary" onClick={genQcm}>✦ Générer un mock QCM</button>
-              {qcmJob?.status === "done" && qcmJob.resultPath && <>
-                <a className="btn btn-ghost" href={qcmJob.resultPath}>ouvrir le mock (site) →</a>
-                {qcmJob.resultId && <a className="btn btn-quiet" style={{ color: "var(--blue)" }} href={`/exam/qcm-${qcmJob.resultId}.pdf?course=ml`} target="_blank" rel="noopener">PDF énoncé</a>}
-                {qcmJob.resultId && <a className="btn btn-quiet" style={{ color: "var(--green)" }} href={`/exam/qcm-${qcmJob.resultId}-corrige.pdf?course=ml`} target="_blank" rel="noopener">PDF corrigé</a>}
-              </>}
-              <span className="text-[12px] w-full" style={{ color: "var(--ink-3)" }}>site interactif + PDF au look d'un vrai final · auto-corrigé · distracteurs = idées fausses</span>
+            <div>
+              <div className="flex flex-wrap items-end gap-4 mb-2">
+                <label className="flex flex-col gap-1 text-[12px]" style={{ color: "var(--ink-2)" }}>
+                  <span>QCM (SCQ + MCQ)</span>
+                  <input type="number" min={0} max={40} className="input" style={{ width: 96, fontSize: 14 }} value={qcmN}
+                    onChange={(e) => setQcmN(e.target.value === "" ? "" : Math.max(0, Math.min(40, Math.floor(Number(e.target.value)))))} />
+                </label>
+                <label className="flex flex-col gap-1 text-[12px]" style={{ color: "var(--ink-2)" }}>
+                  <span>questions ouvertes</span>
+                  <input type="number" min={0} max={10} className="input" style={{ width: 96, fontSize: 14 }} value={openN}
+                    onChange={(e) => setOpenN(e.target.value === "" ? "" : Math.max(0, Math.min(10, Math.floor(Number(e.target.value)))))} />
+                </label>
+              </div>
+              <input className="input mb-2" style={{ fontSize: 13 }} placeholder="(optionnel) focus thématique / point faible : « K-means », « régularisation »…" value={focus} onChange={(e) => setFocus(e.target.value)} />
+              <p className="text-[12px] mb-2" style={{ color: "var(--accent-ink)" }}>
+                → j'assemble <strong>{Number(qcmN) || 0} QCM</strong> + <strong>{Number(openN) || 0} ouverte(s)</strong>{focus.trim() ? <> sur «&nbsp;{focus.trim()}&nbsp;»</> : null}, au look d'un vrai final (site + PDF énoncé/corrigé){plan?.durationMin ? ` · ~${plan.durationMin} min` : ""}.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="btn btn-primary" onClick={genQcm}>✦ Composer l'examen</button>
+                {qcmJob?.status === "done" && qcmJob.resultPath && <>
+                  <a className="btn btn-ghost" href={qcmJob.resultPath}>ouvrir (site) →</a>
+                  {qcmJob.resultId && <a className="btn btn-quiet" style={{ color: "var(--blue)" }} href={`/exam/qcm-${qcmJob.resultId}.pdf?course=${plan?.course ?? "ml"}`} target="_blank" rel="noopener">PDF énoncé</a>}
+                  {qcmJob.resultId && <a className="btn btn-quiet" style={{ color: "var(--green)" }} href={`/exam/qcm-${qcmJob.resultId}-corrige.pdf?course=${plan?.course ?? "ml"}`} target="_blank" rel="noopener">PDF corrigé</a>}
+                </>}
+              </div>
+              <span className="text-[12px] mt-1 block" style={{ color: "var(--ink-3)" }}>tu remplis juste les nombres (pré-remplis avec le format détecté) · architecte QCM + ouvert · auto-corrigé · les retours QCM re-calibrent la suite</span>
             </div>
           )}
           {qcmJob?.status === "error" && (
@@ -266,10 +301,22 @@ export default function ExamensPage() {
         </div>
       )}
 
-      <div className="card card-pad mb-7">
-        <p className="text-[14px] leading-relaxed" style={{ color: "var(--ink-2)" }}>
-          Examen inédit au format des vrais finals EPFL, vérifié exo par exo, généré via ton <strong style={{ color: "var(--ink)" }}>Max</strong>. La génération tourne <strong style={{ color: "var(--ink)" }}>en arrière-plan</strong> : tu peux recharger ou fermer l'onglet, elle continue.
-        </p>
+      <div className="card card-pad mb-7" style={plan?.kind === "qcm" ? { opacity: 0.92 } : undefined}>
+        {plan?.kind === "exam" ? (
+          <>
+            <h2 className="text-[15px] font-semibold mb-1" style={{ color: "var(--ink)" }}>Composer un examen — format détecté</h2>
+            <p className="text-[13px]" style={{ color: "var(--ink-2)" }}>{plan.summary}</p>
+            <p className="mt-1 text-[12px]" style={{ color: "var(--accent-ink)" }}>→ j'assemble <strong>{Number(exoN) || plan.exercises} exercice(s)</strong> calcul/trace au format des vrais finals EPFL, vérifiés exo par exo (site + PDF énoncé/corrigé).</p>
+          </>
+        ) : plan?.kind === "qcm" ? (
+          <p className="text-[13px] leading-relaxed" style={{ color: "var(--ink-2)" }}>
+            <strong style={{ color: "var(--ink)" }}>Secondaire</strong> — pour ce cours QCM, voici aussi un <strong style={{ color: "var(--ink)" }}>examen ouvert (calcul/trace)</strong>. La sortie principale est le composeur QCM ci-dessus.
+          </p>
+        ) : (
+          <p className="text-[14px] leading-relaxed" style={{ color: "var(--ink-2)" }}>
+            Examen inédit au format des vrais finals EPFL, vérifié exo par exo, généré via ton <strong style={{ color: "var(--ink)" }}>Max</strong>. La génération tourne <strong style={{ color: "var(--ink)" }}>en arrière-plan</strong> : tu peux recharger ou fermer l'onglet, elle continue.
+          </p>
+        )}
         {sched && <p className="mt-2.5 text-[13px]" style={{ color: "var(--ink-3)" }}>Répétition espacée : <strong style={{ color: "var(--accent-ink)" }}>{sched.due}</strong> concept(s) à revoir sur {sched.total}.</p>}
 
         {running ? (
@@ -289,8 +336,15 @@ export default function ExamensPage() {
             )}
           </div>
         ) : (
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button onClick={generate} className="btn btn-primary">✦ Générer un examen</button>
+          <div className="mt-4 flex flex-wrap items-end gap-3">
+            {plan?.kind === "exam" && (
+              <label className="flex flex-col gap-1 text-[12px]" style={{ color: "var(--ink-2)" }}>
+                <span>nombre d'exercices</span>
+                <input type="number" min={1} max={12} className="input" style={{ width: 96, fontSize: 14 }} value={exoN}
+                  onChange={(e) => setExoN(e.target.value === "" ? "" : Math.max(1, Math.min(12, Math.floor(Number(e.target.value)))))} />
+              </label>
+            )}
+            <button onClick={generate} className={plan?.kind === "qcm" ? "btn btn-ghost" : "btn btn-primary"}>{plan?.kind === "qcm" ? "examen ouvert (calcul)" : "✦ Composer l'examen"}</button>
             <button onClick={dryRun} disabled={dryBusy} className="btn btn-quiet">{dryBusy ? "test…" : "tester le rendu (dry-run)"}</button>
           </div>
         )}

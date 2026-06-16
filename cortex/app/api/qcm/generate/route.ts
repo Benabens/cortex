@@ -13,7 +13,7 @@ export function GET(req: NextRequest) {
   return NextResponse.json({ format: getFormatProfile() });
 }
 
-/** POST {count?} : génère un mock QCM (job arrière-plan). */
+/** POST {count?, openCount?, focus?} : compose+génère un examen QCM (job arrière-plan). */
 export async function POST(req: NextRequest) {
   const course = useCourse(req);
   const fmt = getFormatProfile();
@@ -22,8 +22,18 @@ export async function POST(req: NextRequest) {
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
   const issue = preflightGeneration();
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
-  const { count } = await req.json().catch(() => ({}));
-  const jobId = createJob("qcm", JSON.stringify({ count: count || undefined }));
+  // V9 composeur : count = N QCM, openCount = M ouvertes, focus = thème ciblé (exercice ciblé).
+  const body = await req.json().catch(() => ({} as any));
+  const num = (v: any) => (v === 0 || v === "0" ? 0 : Number(v) > 0 ? Math.min(40, Math.floor(Number(v))) : undefined);
+  const c = num(body.count);
+  const oc = num(body.openCount);
+  if (c === 0 && oc === 0) return NextResponse.json({ error: "Composition vide : choisis au moins 1 QCM ou 1 question ouverte." }, { status: 400 });
+  const target = JSON.stringify({
+    count: c,
+    openCount: oc,
+    focus: typeof body.focus === "string" && body.focus.trim() ? body.focus.trim().slice(0, 400) : undefined,
+  });
+  const jobId = createJob("qcm", target);
   try { startWorker(jobId, course); }
   catch (e: any) { return NextResponse.json({ error: `worker : ${e?.message ?? e}` }, { status: 500 }); }
   return NextResponse.json({ ok: true, jobId });

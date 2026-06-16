@@ -31,7 +31,10 @@ export async function POST(req: NextRequest) {
   const issue = preflightGeneration();
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
 
-  const jobId = createJob("exam");
+  // V9 composeur (CS-202) : count = nombre d'exercices choisi (optionnel ; défaut = blueprint).
+  const body = await req.json().catch(() => ({} as any));
+  const count = Number(body?.count) > 0 ? Math.min(12, Math.floor(Number(body.count))) : undefined;
+  const jobId = createJob("exam", count ? JSON.stringify({ count }) : undefined);
   try {
     startWorker(jobId, course);
   } catch (e: any) {
