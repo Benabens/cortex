@@ -104,10 +104,10 @@ export const COURSES: Record<string, CourseConfig> = {
   },
   ml: {
     id: "ml",
-    name: "Machine Learning",
+    name: "Introduction to Machine Learning",
     short: "ML",
-    examCode: "CS-433",
-    examName: "Machine Learning",
+    examCode: "CS-233",
+    examName: "Introduction to Machine Learning",
     examKind: "Final Exam",
     university: "EPFL",
     universityLines: [

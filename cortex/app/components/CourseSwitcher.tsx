@@ -12,7 +12,7 @@ const KEY = "cortex-course";
 const COURSES = [
   { id: "cs-202", short: "CS-202", name: "Computer Systems" },
   { id: "algo", short: "Algo", name: "Algorithms" },
-  { id: "ml", short: "ML", name: "Machine Learning" },
+  { id: "ml", short: "ML", name: "Introduction to Machine Learning (CS-233)" },
 ];
 
 function readCourse(): string {
