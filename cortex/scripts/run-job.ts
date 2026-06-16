@@ -71,6 +71,30 @@ async function main() {
     return;
   }
 
+  // V6 — examen QCM (cours générique au format QCM, ex. ML/CS-233).
+  if (job.type === "qcm") {
+    setJob(jobId, { status: "running", pid: process.pid, currentStep: "Architecte QCM…", progress: 4 });
+    logJob(jobId, `Worker démarré (PID ${process.pid})`);
+    if (!claudeBinPath()) fail("Claude Code (binaire « claude ») introuvable.");
+    try {
+      const { generateQcmExam } = await import("../lib/qcm");
+      const count = job.target ? Number(JSON.parse(job.target).count) || undefined : undefined;
+      const onStep = (s: string, p: number) => {
+        const j = getJob(jobId);
+        if (j?.status === "canceled") { logJob(jobId, "Annulé."); process.exit(0); }
+        setJob(jobId, { currentStep: s, progress: p, status: p >= 100 ? "done" : "running" });
+        logJob(jobId, s);
+      };
+      const res = await generateQcmExam({ count, onStep });
+      setJob(jobId, { status: "done", progress: 100, resultId: res.id, resultPath: `/mock/${res.id}`, currentStep: `Mock QCM #${res.id} — ${res.count} QCM (${res.verified} vérifiés) ✓` });
+      logJob(jobId, `Mock QCM #${res.id} prêt → /mock/${res.id}`);
+      process.exit(0);
+    } catch (e) {
+      fail((e as Error)?.message || String(e));
+    }
+    return;
+  }
+
   // PHASE 1 — analyse de blueprint (taxonomie typée + pondérée via Max + vision).
   if (job.type === "blueprint") {
     setJob(jobId, { status: "running", pid: process.pid, currentStep: "Analyse du programme…", progress: 4 });
