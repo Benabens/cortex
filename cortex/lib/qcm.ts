@@ -1,0 +1,233 @@
+import { currentCourse, sqlite } from "@/db/client";
+import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { courseRefImages } from "@/lib/course-vision";
+import type { StepCb } from "@/lib/exam";
+import { getFormatProfile } from "@/lib/format";
+
+/**
+ * V6 — ARCHITECTE QCM (générique). Génère des QCM de haut niveau au format détecté :
+ *  - chaque distracteur cible une IDÉE FAUSSE précise (pas du remplissage) ;
+ *  - exactement UNE bonne réponse (SCQ) ou le sous-ensemble correct (MCQ), VÉRIFIÉ À L'AVEUGLE ;
+ *  - ZÉRO indice qui trahit (option correcte ni plus longue ni plus détaillée, pas de « toutes les
+ *    réponses ci-dessus », cohérence grammaticale, pas de distracteur absurde) ;
+ *  - teste la COMPRÉHENSION, pas le par-cœur.
+ *
+ * Persisté dans `qcm_items` (par exam). La correction est instantanée (clé connue, Pilier E).
+ */
+
+export type QcmItem = {
+  topic: string;
+  type: "scq" | "mcq";
+  stem: string;
+  options: string[];
+  correct: number[]; // indices 0-based ; 1 pour scq, ≥1 pour mcq
+  misconceptions: string[]; // par option : l'idée fausse que le distracteur cible ("" pour la/les bonnes)
+  explanation: string;
+  verified: 0 | 1 | null;
+};
+
+const QCM_BATCH_SCHEMA = {
+  type: "object",
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          topic: { type: "string" },
+          type: { type: "string", description: "scq (une seule bonne réponse) | mcq (une ou plusieurs)" },
+          stem: { type: "string", description: "L'énoncé de la question (teste la compréhension, pas le par-cœur)." },
+          options: { type: "array", items: { type: "string" }, description: "4 à 5 options, longueurs COMPARABLES, pas d'« toutes les réponses ci-dessus »." },
+          correct: { type: "array", items: { type: "integer" }, description: "Indices 0-based de la/des bonne(s) réponse(s). Exactement 1 pour scq." },
+          misconceptions: { type: "array", items: { type: "string" }, description: "Pour CHAQUE option : l'idée fausse précise que ce distracteur punit (chaîne vide pour les bonnes réponses)." },
+          explanation: { type: "string", description: "Pourquoi la bonne réponse est correcte ET pourquoi chaque distracteur est faux." },
+        },
+        required: ["topic", "type", "stem", "options", "correct", "misconceptions", "explanation"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["items"],
+  additionalProperties: false,
+} as const;
+
+function ensureQcmSchema() {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS qcm_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    exam_id INTEGER NOT NULL,
+    idx INTEGER NOT NULL,
+    topic TEXT,
+    type TEXT,
+    stem TEXT,
+    options_json TEXT,
+    correct_json TEXT,
+    misconceptions_json TEXT,
+    explanation TEXT,
+    verified INTEGER
+  );`);
+}
+
+/** Sujets à couvrir : blueprint (topics pondérés) si dispo, sinon archétypes du cours. */
+function coverageTopics(): { label: string; method: string | null }[] {
+  try {
+    const rows = sqlite.prepare(`SELECT label, method FROM topics ORDER BY exam_weight DESC LIMIT 14`).all() as { label: string; method: string | null }[];
+    if (rows.length) return rows;
+  } catch {}
+  const { profile } = require("@/lib/course-profile");
+  return (profile().archetypes as any[]).map((a) => ({ label: a.concept, method: a.structure }));
+}
+
+const ARCHITECT_QCM_RULES = [
+  `RÈGLES D'ARCHITECTE QCM (impératives) :`,
+  `  - Chaque DISTRACTEUR cible une IDÉE FAUSSE réelle et précise (une mauvaise intuition courante), JAMAIS du remplissage ni de l'absurde.`,
+  `  - SCQ : EXACTEMENT une bonne réponse. MCQ : le sous-ensemble correct (≥1), selon la convention du format.`,
+  `  - AUCUN indice qui trahit : la bonne option n'est ni plus longue ni plus détaillée ; pas de « toutes les réponses ci-dessus » ; cohérence grammaticale stem↔options ; options de longueur comparable ; pas de négations piégeuses gratuites.`,
+  `  - Teste la COMPRÉHENSION / le raisonnement, pas la récitation d'une définition.`,
+  `  - Calibre la difficulté sur les VRAIS examens du cours (regarde les pages fournies).`,
+];
+
+/** Génère un LOT de QCM (1 appel Max) couvrant des sujets donnés, au format du cours. */
+async function generateQcmBatch(topics: { label: string; method: string | null }[], n: number, step: StepCb): Promise<QcmItem[]> {
+  const fmt = getFormatProfile();
+  const imgs = courseRefImages().slice(0, 4);
+  const { profile } = require("@/lib/course-profile");
+  const prompt = [
+    profile().qaIntro?.() ?? "Tu es l'équipe enseignante du cours.",
+    `Tu rédiges ${n} QCM INÉDITS de niveau examen pour ce cours, au FORMAT réel détecté.`,
+    fmt ? `Format du cours : ${fmt.format_summary} — convention SCQ/MCQ : ${fmt.scq_vs_mcq_convention}.` : ``,
+    imgs.length ? `Pages d'examens réelles à imiter (outil Read) :\n${imgs.map((p) => `  - ${p}`).join("\n")}` : ``,
+    ``,
+    ...ARCHITECT_QCM_RULES,
+    ``,
+    `Couvre ces sujets (un QCM par sujet si possible, dans l'ordre) : ${topics.slice(0, n).map((t, i) => `${i + 1}) ${t.label}${t.method ? ` [${t.method.slice(0, 60)}]` : ""}`).join(" · ")}`,
+    `Réponds UNIQUEMENT avec l'objet JSON { "items": [ … ] } (${n} QCM). Aucun fichier.`,
+    JSON.stringify(QCM_BATCH_SCHEMA, null, 2),
+  ].filter(Boolean).join("\n");
+  step(`Génération de ${n} QCM (architecte · distracteurs = idées fausses)…`, 30);
+  const r = extractJson<{ items: QcmItem[] }>(await runClaudeCode({ prompt, model: "opus", timeoutMs: 480_000 }));
+  return (r.items ?? []).map((q) => ({ ...q, verified: null as 0 | 1 | null }));
+}
+
+const VERIFY_SCHEMA = {
+  type: "object",
+  properties: {
+    results: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          index: { type: "integer" },
+          correct: { type: "array", items: { type: "integer" }, description: "La/les bonne(s) réponse(s) que TOI tu trouves, en résolvant indépendamment." },
+          ok: { type: "boolean", description: "true si ta réponse == la clé proposée ET qu'il n'y a pas d'ambiguïté/indice qui trahit." },
+          issue: { type: "string", description: "Court : ce qui cloche (clé fausse, 2 réponses défendables, indice qui trahit, distracteur absurde). Vide si ok." },
+        },
+        required: ["index", "correct", "ok"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["results"],
+  additionalProperties: false,
+} as const;
+
+/** Vérif à l'aveugle d'un lot de QCM : résous chaque QCM SANS la clé, confirme/corrige la clé. */
+async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<QcmItem[]> {
+  const { profile } = require("@/lib/course-profile");
+  const blind = items.map((q, i) => `Q${i}. [${q.type}] ${q.stem}\n${q.options.map((o, k) => `   (${k}) ${o}`).join("\n")}`).join("\n\n");
+  const prompt = [
+    `Tu es un correcteur rigoureux du cours. Pour CHAQUE QCM ci-dessous, RÉSOUS-LE toi-même de zéro (sans clé fournie) et donne la/les bonne(s) réponse(s) par INDEX.`,
+    `Signale si : la question est ambiguë (2 réponses défendables), un distracteur est absurde, ou un indice trahit la bonne réponse (longueur, « toutes les réponses », grammaire).`,
+    ``,
+    blind,
+    ``,
+    `Réponds UNIQUEMENT avec l'objet JSON conforme.`,
+    JSON.stringify(VERIFY_SCHEMA, null, 2),
+  ].join("\n");
+  step("Vérification à l'aveugle des QCM (résolution indépendante)…", 70);
+  let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string }[] };
+  try { res = extractJson(await runClaudeCode({ prompt, model: "opus", timeoutMs: 420_000 })); }
+  catch { return items; } // fallback honnête : non vérifiés
+  for (const r of res.results ?? []) {
+    const q = items[r.index];
+    if (!q) continue;
+    const keyMatch = JSON.stringify([...(q.correct ?? [])].sort()) === JSON.stringify([...(r.correct ?? [])].sort());
+    if (r.ok && keyMatch) q.verified = 1;
+    else if (r.correct?.length) { q.correct = r.correct; q.verified = 1; q.explanation = (q.explanation ? q.explanation + " " : "") + (r.issue ? `[clé corrigée à la vérif : ${r.issue}]` : "[clé alignée sur la résolution indépendante]"); }
+    else q.verified = 0;
+  }
+  return items;
+}
+
+export type QcmExamResult = { id: number; count: number; verified: number };
+
+/** Génère un examen QCM complet (N QCM, lots parallèles), vérifié, persisté. */
+export async function generateQcmExam(opts: { count?: number; onStep?: StepCb } = {}): Promise<QcmExamResult> {
+  ensureQcmSchema();
+  const step = opts.onStep ?? (() => {});
+  const fmt = getFormatProfile();
+  const count = opts.count ?? Math.min(25, Math.max(8, fmt?.question_types?.find((t) => t.type === "scq" || t.type === "mcq")?.approx_count ?? 12));
+  const topics = coverageTopics();
+  step(`Architecte QCM : ${count} QCM au format détecté…`, 10);
+
+  // lots de 6 QCM en parallèle borné (2 lots à la fois)
+  const BATCH = 6;
+  const batches: { label: string; method: string | null }[][] = [];
+  for (let i = 0; i < count; i += BATCH) {
+    const slice: { label: string; method: string | null }[] = [];
+    for (let k = 0; k < BATCH && i + k < count; k++) slice.push(topics[(i + k) % topics.length]);
+    batches.push(slice);
+  }
+  const all: QcmItem[] = [];
+  for (let b = 0; b < batches.length; b += 2) {
+    const pair = batches.slice(b, b + 2);
+    const got = await Promise.all(pair.map(async (bt) => {
+      const items = await generateQcmBatch(bt, bt.length, step);
+      return verifyQcmBatch(items, step);
+    }));
+    for (const g of got) all.push(...g);
+    step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / count) * 50));
+  }
+
+  // persiste l'exam + les QCM
+  const examId = sqlite.prepare(`INSERT INTO exams (format_template, status) VALUES ('qcm','ready')`).run().lastInsertRowid as number;
+  const ins = sqlite.prepare(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified) VALUES (?,?,?,?,?,?,?,?,?,?)`);
+  const tx = sqlite.transaction(() => {
+    all.forEach((q, i) => ins.run(examId, i, q.topic, q.type, q.stem, JSON.stringify(q.options), JSON.stringify(q.correct), JSON.stringify(q.misconceptions), q.explanation, q.verified));
+  });
+  tx();
+  const verified = all.filter((q) => q.verified === 1).length;
+  sqlite.prepare(`UPDATE exams SET verify_summary = ? WHERE id = ?`).run(`QCM ${all.length} · vérifiés ${verified}`, examId);
+  step(`Examen QCM #${examId} prêt — ${all.length} QCM (${verified} vérifiés) ✓`, 100);
+  return { id: examId, count: all.length, verified };
+}
+
+export type QcmExamView = { id: number; createdAt: string; verifySummary: string | null; items: (Omit<QcmItem, "correct" | "misconceptions"> & { id: number; idx: number })[] };
+
+/** Un examen QCM pour l'affichage (SANS les clés — l'auto-correction se fait via /api). */
+export function getQcmExam(examId: number, withKeys = false): QcmExamView | null {
+  ensureQcmSchema();
+  const e = sqlite.prepare(`SELECT id, created_at, verify_summary FROM exams WHERE id = ? AND format_template = 'qcm'`).get(examId) as any;
+  if (!e) return null;
+  const rows = sqlite.prepare(`SELECT * FROM qcm_items WHERE exam_id = ? ORDER BY idx`).all(examId) as any[];
+  return {
+    id: e.id, createdAt: e.created_at, verifySummary: e.verify_summary,
+    items: rows.map((r) => ({
+      id: r.id, idx: r.idx, topic: r.topic, type: r.type, stem: r.stem,
+      options: JSON.parse(r.options_json), explanation: withKeys ? r.explanation : "", verified: r.verified,
+      ...(withKeys ? { correct: JSON.parse(r.correct_json), misconceptions: JSON.parse(r.misconceptions_json) } : {}),
+    })) as any,
+  };
+}
+
+/** Corrige des réponses {idx: number[]} contre la clé connue → score + détail (Pilier E). */
+export function gradeQcm(examId: number, answers: Record<number, number[]>): { score: number; total: number; detail: { idx: number; correct: number[]; chosen: number[]; ok: boolean; explanation: string; misconceptions: string[] }[] } {
+  ensureQcmSchema();
+  const rows = sqlite.prepare(`SELECT idx, correct_json, explanation, misconceptions_json FROM qcm_items WHERE exam_id = ? ORDER BY idx`).all(examId) as any[];
+  const detail = rows.map((r) => {
+    const correct: number[] = JSON.parse(r.correct_json);
+    const chosen = (answers[r.idx] ?? []).slice().sort();
+    const ok = JSON.stringify(correct.slice().sort()) === JSON.stringify(chosen);
+    return { idx: r.idx, correct, chosen, ok, explanation: r.explanation, misconceptions: JSON.parse(r.misconceptions_json) };
+  });
+  return { score: detail.filter((d) => d.ok).length, total: rows.length, detail };
+}

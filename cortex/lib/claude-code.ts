@@ -66,7 +66,10 @@ export type RunOpts = {
 
 /** Lance `claude -p` et renvoie le texte final (champ `result` du JSON). */
 export function runClaudeCode(opts: RunOpts): Promise<string> {
-  const { prompt, model = "opus", addDirs = [], timeoutMs = 180_000 } = opts;
+  const { model = "opus", addDirs = [], timeoutMs = 180_000 } = opts;
+  // Le texte extrait des PDF (cours génériques) contient parfois des OCTETS NULS / contrôles que
+  // spawn refuse en argument (« must be a string without null bytes ») → on les retire du prompt.
+  const prompt = opts.prompt.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ");
   const args = [
     "-p", prompt,
     "--output-format", "json",
