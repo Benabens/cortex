@@ -52,6 +52,13 @@ const QCM_BATCH_SCHEMA = {
 } as const;
 
 function ensureQcmSchema() {
+  // l'examen QCM s'insère dans `exams` (partagée) ; garantir la colonne verify_summary (les DB de
+  // cours créées hors cs-202 ne l'ont pas — ensureExamCols n'a pas tourné).
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS exams (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT DEFAULT (datetime('now')),
+    format_template TEXT, targeted_weakness_ids TEXT, html_path TEXT, status TEXT DEFAULT 'draft');`);
+  const cols = (sqlite.prepare(`PRAGMA table_info(exams)`).all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes("verify_summary")) sqlite.exec(`ALTER TABLE exams ADD COLUMN verify_summary TEXT`);
   sqlite.exec(`CREATE TABLE IF NOT EXISTS qcm_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     exam_id INTEGER NOT NULL,
