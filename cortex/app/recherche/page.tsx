@@ -13,12 +13,15 @@ type Hit = {
   snippet: string;
 };
 
-/** PDF/code/markdown -> fichier brut ; HTML -> viewer Cortex (déplie + surligne). */
-function hitHref(h: Hit, q: string): string {
-  if (h.sourcePath.endsWith(".html")) {
-    return `/voir?src=${encodeURIComponent(h.sourcePath)}&item=${h.itemId}&q=${encodeURIComponent(q)}`;
+/** Clic→source. cs-202 : viewer (HTML) / /sites (brut) — INCHANGÉ. Autres cours : route
+ *  course-aware /csrc (PDF à la bonne page via #page=N, lu de l'anchor ; HTML brut). */
+function hitHref(h: Hit, q: string, course: string): string {
+  if (course === "cs-202") {
+    if (h.sourcePath.endsWith(".html")) return `/voir?src=${encodeURIComponent(h.sourcePath)}&item=${h.itemId}&q=${encodeURIComponent(q)}`;
+    return `/sites/${h.anchor}`;
   }
-  return `/sites/${h.anchor}`; // pdf (#page), .c/.h/.md/.tex : ouverts en brut
+  const frag = h.anchor.includes("#") ? "#" + h.anchor.split("#")[1] : "";
+  return `/csrc?course=${encodeURIComponent(course)}&p=${encodeURIComponent(h.sourcePath)}${frag}`;
 }
 type Group = { sourceType: string; label: string; hits: Hit[] };
 
@@ -54,10 +57,12 @@ export default function RecherchePage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [course, setCourse] = useState("cs-202");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
+    try { setCourse(localStorage.getItem("cortex-course") || "cs-202"); } catch {}
   }, []);
 
   useEffect(() => {
@@ -133,7 +138,7 @@ export default function RecherchePage() {
             <ul className="space-y-2.5">
               {g.hits.map((h) => (
                 <li key={h.itemId}>
-                  <a href={hitHref(h, q)} target="_blank" rel="noopener" className="card-link" style={{ padding: "14px 16px", borderRadius: "var(--r)" }}>
+                  <a href={hitHref(h, q, course)} target="_blank" rel="noopener" className="card-link" style={{ padding: "14px 16px", borderRadius: "var(--r)" }}>
                     <div className="flex items-baseline justify-between gap-3">
                       <span className="truncate text-[14px] font-semibold" style={{ color: "var(--ink)" }}>
                         {h.title || h.sourceTitle}
