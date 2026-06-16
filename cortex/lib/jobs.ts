@@ -92,15 +92,63 @@ function rowToJob(r: any): Job {
   };
 }
 
+/** Le process `pid` est-il encore vivant ? (signal 0 = test d'existence, ne tue rien). */
+function isPidAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (e: any) { return e?.code === "EPERM"; }
+}
+
+const ACTIVE_STATES = "('queued','running','verifying','compiling')";
+const ZOMBIE_MSG = "Worker interrompu (process arrêté) — la génération ne tournait plus. Relance.";
+
+/**
+ * V8 — ZÉRO JOB ZOMBIE : réconcilie les jobs « actifs » dont le worker n'est plus vivant.
+ * Un job est zombie si (a) son PID est enregistré mais le process est mort, ou (b) il est resté
+ * sans PID au-delà d'un délai franc (le worker n'a jamais démarré). On NE touche PAS aux jobs dont
+ * le PID est vivant, même s'ils n'ont pas loggé depuis un moment (un appel Claude de 10 min ne
+ * rapporte rien entre-temps → le PID vivant est le seul signal fiable). Appelé sur chaque lecture
+ * (heartbeat via le polling de l'UI) et au démarrage du serveur (instrumentation).
+ */
+export function reconcileStaleJobs(): number {
+  ensureJobsSchema();
+  const rows = sqlite
+    .prepare(`SELECT id, pid, created_at, updated_at FROM jobs WHERE status IN ${ACTIVE_STATES}`)
+    .all() as { id: number; pid: number | null; created_at: string; updated_at: string }[];
+  let fixed = 0;
+  for (const r of rows) {
+    let zombie = false;
+    if (r.pid) {
+      if (!isPidAlive(r.pid)) zombie = true; // worker mort
+    } else {
+      // sans PID : le worker n'a jamais démarré → zombie si plus vieux que 120 s (startWorker pose
+      // le PID synchronement ; 2 min sans PID = spawn échoué).
+      const ageMs = Date.now() - new Date((r.updated_at || r.created_at) + "Z").getTime();
+      if (Number.isFinite(ageMs) && ageMs > 120_000) zombie = true;
+    }
+    if (zombie) { setJob(r.id, { status: "error", error: ZOMBIE_MSG }); logJob(r.id, ZOMBIE_MSG); fixed++; }
+  }
+  return fixed;
+}
+
 export function getJob(id: number): Job | null {
   ensureJobsSchema();
+  reconcileStaleJobs();
   const r = sqlite.prepare(`SELECT * FROM jobs WHERE id = ?`).get(id);
   return r ? rowToJob(r) : null;
 }
 
 export function listJobs(limit = 10): Job[] {
   ensureJobsSchema();
+  reconcileStaleJobs();
   return (sqlite.prepare(`SELECT * FROM jobs ORDER BY id DESC LIMIT ?`).all(limit) as any[]).map(rowToJob);
+}
+
+/** Relance un job échoué/annulé : recrée un job de MÊME type+target et redémarre un worker. */
+export function retryJob(id: number, course?: string): Job | null {
+  const old = getJob(id);
+  if (!old) return null;
+  const newId = createJob(old.type, old.target ?? undefined);
+  startWorker(newId, course);
+  return getJob(newId);
 }
 
 /**
@@ -184,6 +232,7 @@ function cleanupPartial(job: Job) {
 /** Le job actif le plus récent (pour réafficher la progression au reload). */
 export function activeJob(type?: JobType): Job | null {
   ensureJobsSchema();
+  reconcileStaleJobs();
   const where = type ? `AND type = '${type}'` : "";
   const r = sqlite.prepare(`SELECT * FROM jobs WHERE status IN ('queued','running','verifying','compiling') ${where} ORDER BY id DESC LIMIT 1`).get();
   return r ? rowToJob(r) : null;

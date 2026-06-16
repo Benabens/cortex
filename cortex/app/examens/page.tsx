@@ -84,6 +84,20 @@ export default function ExamensPage() {
     } catch (e: any) { setErr(String(e.message ?? e)); }
   }
 
+  // V8 — relance d'un job zombie/échoué : recrée un job de même type et re-poll.
+  async function retry(j: Job | null, kind: "exam" | "qcm") {
+    if (!j) return;
+    setErr(null);
+    try {
+      const r = await fetch(`/api/jobs/${j.id}/retry`, { method: "POST" });
+      const d = await r.json();
+      if (!r.ok || !d.jobId) { setErr(d.error ?? "Relance impossible"); return; }
+      const fresh = { id: d.jobId, type: kind, status: "queued", currentStep: "Relance…", progress: 0, resultPath: null, error: null, log: [] } as any;
+      if (kind === "qcm") { setQcmJob(fresh); pollQcm(d.jobId); }
+      else { setJob(fresh); openedRef.current = false; poll(d.jobId); }
+    } catch (e: any) { setErr(String(e.message ?? e)); }
+  }
+
   const load = useCallback(async () => {
     const d = await (await fetch("/api/exams")).json();
     setExams(d.exams ?? []);
@@ -212,7 +226,12 @@ export default function ExamensPage() {
               <span className="text-[12px] w-full" style={{ color: "var(--ink-3)" }}>site interactif + PDF au look d'un vrai final · auto-corrigé · distracteurs = idées fausses</span>
             </div>
           )}
-          {qcmJob?.status === "error" && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>Échec : {qcmJob.error}</p>}
+          {qcmJob?.status === "error" && (
+            <p className="mt-2 text-[12px] flex items-center gap-2" style={{ color: "var(--red)" }}>
+              Échec : {qcmJob.error}
+              <button className="btn btn-quiet btn-sm" onClick={() => retry(qcmJob, "qcm")}>↻ réessayer</button>
+            </p>
+          )}
 
           {/* V7 — déposer des finals récents → re-détection du format, l'examen blanc se cale dessus */}
           <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--line)" }}>
@@ -275,7 +294,12 @@ export default function ExamensPage() {
             <button onClick={dryRun} disabled={dryBusy} className="btn btn-quiet">{dryBusy ? "test…" : "tester le rendu (dry-run)"}</button>
           </div>
         )}
-        {job?.status === "error" && <p className="mt-2.5 text-[12px]" style={{ color: "var(--red)" }}>Échec : {job.error}</p>}
+        {job?.status === "error" && (
+          <p className="mt-2.5 text-[12px] flex items-center gap-2" style={{ color: "var(--red)" }}>
+            Échec : {job.error}
+            <button className="btn btn-quiet btn-sm" onClick={() => retry(job, "exam")}>↻ réessayer</button>
+          </p>
+        )}
         {err && <p className="mt-2.5 text-[12px]" style={{ color: "var(--red)" }}>{err}<CmdHint cmd={errCmd} /></p>}
         {note && <p className="mt-2.5 text-[12px]" style={{ color: "var(--ink-3)" }}>{note}</p>}
       </div>
