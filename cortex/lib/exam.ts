@@ -546,10 +546,20 @@ export function buildBatchPrompt(ctx: ReturnType<typeof gatherContext>, slots: {
 const CKPT = () => path.join(examsDir(), ".gen-checkpoint.json");
 
 async function generateBatch(ctx: ReturnType<typeof gatherContext>, slots: Slot[]): Promise<ExamQuestion[]> {
+  // Crochet de TEST (inerte sauf si l'env est posé) : rend des questions déterministes sans appeler
+  // Max → permet de prouver la RÉSILIENCE du pipeline (P3) de façon reproductible et gratuite.
+  if (process.env.CORTEX_TEST_STUB_BATCH) {
+    return slots.map((s, i) => ({
+      category: s.category, concept: `Stub ${s.category} ${i + 1}`,
+      statement_tex: String.raw`\subq{1.1}{Question de test}{${s.points}} Énoncé déterministe (test résilience).`,
+      solution_tex: "Solution de test.", points: s.points,
+    }));
+  }
   const text = await runClaudeCode({
     prompt: buildBatchPrompt(ctx, slots as any),
     model: "opus",
-    timeoutMs: 600_000, // un lot de 3 << un appel de 6
+    // un lot de 3 << un appel de 6 ; surchargeable (P3 : « augmente le timeout par lot »).
+    timeoutMs: Number(process.env.CORTEX_BATCH_TIMEOUT_MS) || 600_000,
   });
   const r = extractJson<{ questions: ExamQuestion[] }>(text);
   const qs = Array.isArray(r.questions) ? r.questions : [];
@@ -657,6 +667,10 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; onStep
       // V8 — un lot ne fait JAMAIS échouer le job : tout throw inattendu est rattrapé ici et
       // le lot rend simplement 0 question (les autres lots continuent, l'examen sort partiel).
       try {
+        // Crochet de TEST (inerte sauf si l'env est posé) : force le timeout de certains lots
+        // (« CORTEX_TEST_FAIL_BATCHES=0,1 ») pour prouver que le job CONTINUE et livre du partiel.
+        if ((process.env.CORTEX_TEST_FAIL_BATCHES ?? "").split(",").filter(Boolean).includes(String(i)))
+          throw new Error("timeout simulé (test résilience V8)");
         let qs: ExamQuestion[];
         if (saved[i]?.length === bslots.length) {
           step(`Lot ${i + 1}/${nBatches} repris du checkpoint`, 20);
