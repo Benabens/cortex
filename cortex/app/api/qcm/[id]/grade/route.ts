@@ -1,4 +1,4 @@
-import { gradeQcm } from "@/lib/qcm";
+import { getQcmExam, gradeQcm } from "@/lib/qcm";
 import { recordFeedback } from "@/lib/calibration";
 import { useCourse } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
@@ -22,5 +22,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const verdict = res.score / res.total >= 0.85 ? "too_easy" : res.score / res.total <= 0.4 ? "wrong" : "good";
     recordFeedback({ examId: Number(id), archetype: "qcm", verdict, score: Math.round((res.score / res.total) * 10) });
   } catch {}
-  return NextResponse.json(res);
+  // révèle les corrigés des questions ouvertes (auto-évaluation après soumission)
+  const openSolutions = getQcmExam(Number(id), true)?.open ?? [];
+  return NextResponse.json({ ...res, openSolutions });
 }

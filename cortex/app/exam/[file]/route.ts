@@ -12,7 +12,7 @@ const MIME: Record<string, string> = {
 
 export async function GET(req: Request, { params }: { params: Promise<{ file: string }> }) {
   const { file } = await params;
-  if (!/^exam-\d+(-corrige)?\.(pdf|html)$/.test(file)) return new NextResponse("Bad name", { status: 400 });
+  if (!/^(exam|qcm)-\d+(-corrige)?\.(pdf|html)$/.test(file)) return new NextResponse("Bad name", { status: 400 });
   // dossier scopé au cours (cs-202 → data/exams ; autres → data/<id>/exams)
   const EXAM_DIR = coursePaths(new URL(req.url).searchParams.get("course")).examsDir;
   const abs = path.join(EXAM_DIR, file);

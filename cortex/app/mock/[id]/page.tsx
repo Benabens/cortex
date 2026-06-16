@@ -3,9 +3,10 @@
 import { use, useCallback, useEffect, useState } from "react";
 
 type Item = { id: number; idx: number; topic: string; type: "scq" | "mcq"; stem: string; options: string[]; verified: number | null };
-type Exam = { id: number; verifySummary: string | null; items: Item[] };
+type Open = { id: number; concept: string; statement: string; solution: string };
+type Exam = { id: number; verifySummary: string | null; pdf: string | null; items: Item[]; open: Open[] };
 type Detail = { idx: number; correct: number[]; chosen: number[]; ok: boolean; explanation: string; misconceptions: string[] };
-type Graded = { score: number; total: number; detail: Detail[] };
+type Graded = { score: number; total: number; detail: Detail[]; openSolutions: Open[] };
 
 const LETTER = "ABCDEFGH".split("");
 
@@ -46,9 +47,15 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
   return (
     <main className="page page-narrow">
       <header className="mb-6 rise">
-        <p className="eyebrow">Mock examen · QCM</p>
+        <p className="eyebrow">Mock examen · QCM {exam.open.length ? "+ ouvert" : ""}</p>
         <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Examen blanc #{exam.id}</h1>
-        <p className="sub mt-2">{exam.items.length} questions à choix · réponds, puis corrige-toi. SCQ = une seule case ; MCQ = une ou plusieurs.</p>
+        <p className="sub mt-2">{exam.items.length} questions à choix{exam.open.length ? ` + ${exam.open.length} ouverte(s)` : ""} · réponds, puis corrige-toi. SCQ = une seule case ; MCQ = une ou plusieurs.</p>
+        {exam.pdf && (
+          <div className="mt-3 flex gap-2">
+            <a className="btn btn-ghost btn-sm" href={`/exam/${exam.pdf}?course=ml`} target="_blank" rel="noopener">📄 PDF énoncé</a>
+            <a className="btn btn-quiet btn-sm" style={{ color: "var(--green)" }} href={`/exam/${exam.pdf.replace(/(\.pdf)$/, "-corrige$1")}?course=ml`} target="_blank" rel="noopener">PDF corrigé</a>
+          </div>
+        )}
       </header>
 
       {graded && (
@@ -96,6 +103,31 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
           );
         })}
       </div>
+
+      {exam.open.length > 0 && (
+        <div className="mt-7">
+          <div className="section-head"><span className="section-title">Partie ouverte — {exam.open.length} question(s) à rédiger</span></div>
+          <div className="flex flex-col gap-4">
+            {exam.open.map((o, i) => {
+              const sol = graded?.openSolutions.find((s) => s.id === o.id);
+              return (
+                <section key={o.id} className="card card-pad">
+                  <div className="text-[11.5px] uppercase tracking-wide mb-2" style={{ color: "var(--ink-3)" }}>Question ouverte {i + 1} · {o.concept}</div>
+                  <div className="prose-exam text-[13.5px]" style={{ color: "var(--ink)" }} dangerouslySetInnerHTML={{ __html: o.statement }} />
+                  {!graded ? (
+                    <textarea className="textarea mt-3" rows={4} placeholder="Ta réponse (auto-évaluée : le corrigé s'affiche après correction)…" style={{ fontSize: 13 }} />
+                  ) : sol?.solution ? (
+                    <details className="mt-3" open>
+                      <summary className="text-[12.5px] cursor-pointer" style={{ color: "var(--green-ink)" }}>corrigé</summary>
+                      <div className="prose-exam text-[13px] mt-2" style={{ color: "var(--ink-2)" }} dangerouslySetInnerHTML={{ __html: sol.solution }} />
+                    </details>
+                  ) : null}
+                </section>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {!graded ? (
         <div className="mt-6 flex items-center gap-3">

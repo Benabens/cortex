@@ -9,6 +9,7 @@ type Exam = {
 };
 type Job = {
   id: number; type: string; status: string; currentStep: string | null;
+  resultId?: number | null;
   progress: number; resultPath: string | null; error: string | null;
   log: { t: string; msg: string }[];
 };
@@ -176,10 +177,14 @@ export default function ExamensPage() {
               <div className="mt-2 text-[13px]" style={{ color: "var(--ink-2)" }}>{qcmJob.currentStep}</div>
             </div>
           ) : (
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
               <button className="btn btn-primary" onClick={genQcm}>✦ Générer un mock QCM</button>
-              {qcmJob?.status === "done" && qcmJob.resultPath && <a className="btn btn-ghost" href={qcmJob.resultPath}>ouvrir le mock →</a>}
-              <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>interactif · auto-corrigé · distracteurs = idées fausses</span>
+              {qcmJob?.status === "done" && qcmJob.resultPath && <>
+                <a className="btn btn-ghost" href={qcmJob.resultPath}>ouvrir le mock (site) →</a>
+                {qcmJob.resultId && <a className="btn btn-quiet" style={{ color: "var(--blue)" }} href={`/exam/qcm-${qcmJob.resultId}.pdf?course=ml`} target="_blank" rel="noopener">PDF énoncé</a>}
+                {qcmJob.resultId && <a className="btn btn-quiet" style={{ color: "var(--green)" }} href={`/exam/qcm-${qcmJob.resultId}-corrige.pdf?course=ml`} target="_blank" rel="noopener">PDF corrigé</a>}
+              </>}
+              <span className="text-[12px] w-full" style={{ color: "var(--ink-3)" }}>site interactif + PDF au look d'un vrai final · auto-corrigé · distracteurs = idées fausses</span>
             </div>
           )}
           {qcmJob?.status === "error" && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>Échec : {qcmJob.error}</p>}

@@ -181,24 +181,33 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const topics = coverageTopics();
   step(`Architecte : ${count} QCM + ${openCount} question(s) ouverte(s) au format détecté…`, 8);
 
-  // lots de 6 QCM en parallèle borné (2 lots à la fois)
-  const BATCH = 6;
+  // lots de 4 QCM en parallèle borné (2 lots à la fois). RÉSILIENT : un lot qui échoue (JSON
+  // malformé du modèle sur du math) est réessayé une fois puis IGNORÉ — il ne plante pas le job.
+  const BATCH = 4;
   const batches: { label: string; method: string | null }[][] = [];
   for (let i = 0; i < count; i += BATCH) {
     const slice: { label: string; method: string | null }[] = [];
     for (let k = 0; k < BATCH && i + k < count; k++) slice.push(topics[(i + k) % topics.length]);
     batches.push(slice);
   }
+  const safeBatch = async (bt: { label: string; method: string | null }[]): Promise<QcmItem[]> => {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const items = await generateQcmBatch(bt, bt.length, step);
+        if (items.length) return await verifyQcmBatch(items, step);
+      } catch (e) {
+        step(`Lot QCM échoué (${(e as Error).message.slice(0, 50)})${attempt < 2 ? " — réessai" : " — ignoré"}`, 0);
+      }
+    }
+    return [];
+  };
   const all: QcmItem[] = [];
   for (let b = 0; b < batches.length; b += 2) {
-    const pair = batches.slice(b, b + 2);
-    const got = await Promise.all(pair.map(async (bt) => {
-      const items = await generateQcmBatch(bt, bt.length, step);
-      return verifyQcmBatch(items, step);
-    }));
+    const got = await Promise.all(batches.slice(b, b + 2).map(safeBatch));
     for (const g of got) all.push(...g);
     step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / count) * 50));
   }
+  if (!all.length) throw new Error("Aucun QCM généré (tous les lots ont échoué). Réessaie.");
 
   // partie OUVERTE (V7) : chaque question via l'architecte (multi-passes + vérif), au niveau réel.
   const openQs: ExamQuestion[] = [];
@@ -255,8 +264,9 @@ export function getQcmExam(examId: number, withKeys = false): QcmExamView | null
   const rows = sqlite.prepare(`SELECT * FROM qcm_items WHERE exam_id = ? ORDER BY idx`).all(examId) as any[];
   let open: QcmOpenView[] = [];
   try {
+    const { texToHtml } = require("@/lib/exam-latex");
     open = (sqlite.prepare(`SELECT id, concept, statement_html, solution_html FROM exam_questions WHERE exam_id = ? AND source_inspiration = 'qcm-open' ORDER BY id`).all(examId) as any[])
-      .map((r) => ({ id: r.id, concept: r.concept, statement: r.statement_html, solution: withKeys ? r.solution_html : "" }));
+      .map((r) => ({ id: r.id, concept: r.concept, statement: texToHtml(r.statement_html ?? ""), solution: withKeys ? texToHtml(r.solution_html ?? "") : "" }));
   } catch {}
   return {
     id: e.id, createdAt: e.created_at, verifySummary: e.verify_summary, pdf: e.html_path ?? null,
