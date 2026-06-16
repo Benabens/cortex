@@ -71,6 +71,25 @@ async function main() {
     return;
   }
 
+  // V7 — (re)détection du format d'examen depuis les annales (après upload de finals).
+  if (job.type === "format") {
+    setJob(jobId, { status: "running", pid: process.pid, currentStep: "Détection du format…", progress: 4 });
+    if (!claudeBinPath()) fail("Claude Code introuvable.");
+    try {
+      const { detectFormat } = await import("../lib/format");
+      const onStep = (s: string, p: number) => {
+        const j = getJob(jobId);
+        if (j?.status === "canceled") { logJob(jobId, "Annulé."); process.exit(0); }
+        setJob(jobId, { currentStep: s, progress: p, status: p >= 100 ? "done" : "running" });
+        logJob(jobId, s);
+      };
+      const f = await detectFormat({ onStep });
+      setJob(jobId, { status: "done", progress: 100, currentStep: `Format détecté : ${(f.format_summary || "").slice(0, 60)} ✓` });
+      process.exit(0);
+    } catch (e) { fail((e as Error)?.message || String(e)); }
+    return;
+  }
+
   // V6 — examen QCM (cours générique au format QCM, ex. ML/CS-233).
   if (job.type === "qcm") {
     setJob(jobId, { status: "running", pid: process.pid, currentStep: "Architecte QCM…", progress: 4 });

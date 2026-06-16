@@ -58,6 +58,31 @@ export default function ExamensPage() {
       if (d.jobId) { setQcmJob({ id: d.jobId, type: "qcm", status: "queued", currentStep: "Démarrage…", progress: 0, resultPath: null, error: null, log: [] } as any); pollQcm(d.jobId); }
     } catch (e: any) { setErr(String(e.message ?? e)); }
   }
+  // V7 — upload de finals → re-détection du format
+  const [fmtJob, setFmtJob] = useState<Job | null>(null);
+  const fmtPoll = useRef<any>(null);
+  async function uploadFinals(files: FileList | null) {
+    if (!files || !files.length) return;
+    setErr(null);
+    const fd = new FormData();
+    Array.from(files).forEach((f) => fd.append("file", f));
+    try {
+      const r = await fetch("/api/refs/upload", { method: "POST", body: fd });
+      const d = await r.json();
+      if (!r.ok) { setErr(d.error ?? "Upload échoué"); return; }
+      if (d.formatJobId) {
+        setFmtJob({ id: d.formatJobId, type: "format", status: "running", currentStep: `${d.files.length} final(s) ajouté(s) — re-détection du format…`, progress: 10, resultPath: null, error: null, log: [] } as any);
+        clearInterval(fmtPoll.current);
+        fmtPoll.current = setInterval(async () => {
+          try {
+            const j: Job = await (await fetch(`/api/jobs/${d.formatJobId}`)).json();
+            setFmtJob(j);
+            if (!ACTIVE.includes(j.status)) { clearInterval(fmtPoll.current); try { const f = await (await fetch("/api/qcm/generate")).json(); setFormat(f.format); } catch {} }
+          } catch {}
+        }, 2500);
+      }
+    } catch (e: any) { setErr(String(e.message ?? e)); }
+  }
 
   const load = useCallback(async () => {
     const d = await (await fetch("/api/exams")).json();
@@ -102,7 +127,7 @@ export default function ExamensPage() {
       const m = JSON.parse(localStorage.getItem(MOCK_KEY) ?? "null");
       if (m?.endsAt > Date.now()) setMock(m);
     } catch {}
-    return () => { clearInterval(pollRef.current); clearInterval(qcmPoll.current); };
+    return () => { clearInterval(pollRef.current); clearInterval(qcmPoll.current); clearInterval(fmtPoll.current); };
   }, [load, poll, pollQcm]);
 
   useEffect(() => {
@@ -188,6 +213,26 @@ export default function ExamensPage() {
             </div>
           )}
           {qcmJob?.status === "error" && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>Échec : {qcmJob.error}</p>}
+
+          {/* V7 — déposer des finals récents → re-détection du format, l'examen blanc se cale dessus */}
+          <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--line)" }}>
+            {fmtJob && ACTIVE.includes(fmtJob.status) ? (
+              <div>
+                <div className="progress"><div className="progress-bar" style={{ width: `${fmtJob.progress}%` }} /></div>
+                <div className="mt-2 text-[13px]" style={{ color: "var(--ink-2)" }}>{fmtJob.currentStep}</div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="chip cursor-pointer">
+                  📄 Déposer des finals (PDF)
+                  <input type="file" accept=".pdf,.html,.htm,.txt,.md" multiple className="hidden" onChange={(e) => { uploadFinals(e.target.files); e.target.value = ""; }} />
+                </label>
+                <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>tes vrais annales/finals → le format se re-cale dessus (sans les copier)</span>
+              </div>
+            )}
+            {fmtJob?.status === "done" && <p className="mt-2 text-[12px]" style={{ color: "var(--green)" }}>Format re-détecté ✓ — {fmtJob.currentStep}</p>}
+            {fmtJob?.status === "error" && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>Re-détection échouée : {fmtJob.error}</p>}
+          </div>
         </section>
       )}
 
