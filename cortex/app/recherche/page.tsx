@@ -20,6 +20,13 @@ function hitHref(h: Hit, q: string, course: string): string {
 }
 type Group = { sourceType: string; label: string; hits: Hit[] };
 
+// V10 — suggestions de recherche COURSE-AWARE (plus de topics CS-202 affichés sur ML/Algo).
+const SUGGEST: Record<string, string[]> = {
+  "cs-202": ["memory image", "fork", "TCP slow start", "inode", "page fault", "longest prefix", "scheduling"],
+  ml: ["overfitting", "SVM", "K-means", "gradient descent", "backprop", "PCA", "régularisation"],
+  algo: ["Master Theorem", "Dijkstra", "dynamic programming", "BFS / DFS", "greedy", "SCC", "complexité"],
+};
+
 const ACCENT: Record<string, string> = {
   review: "var(--green)",
   course_pdf: "var(--blue)",
@@ -100,7 +107,7 @@ export default function RecherchePage() {
         ref={inputRef}
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="ex. memory image, fork, TCP, page fault…"
+        placeholder={`ex. ${(SUGGEST[course] ?? SUGGEST["cs-202"]).slice(0, 3).join(", ")}…`}
         className="input"
         style={{ fontSize: 16, padding: "13px 16px" }}
       />
@@ -113,7 +120,7 @@ export default function RecherchePage() {
         <div className="mt-6">
           <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink-3)", letterSpacing: "0.04em" }}>Essaie</p>
           <div className="flex flex-wrap gap-1.5">
-            {["memory image", "fork", "TCP slow start", "inode", "page fault", "longest prefix", "scheduling"].map((s) => (
+            {(SUGGEST[course] ?? SUGGEST["cs-202"]).map((s) => (
               <button key={s} className="chip" style={{ cursor: "pointer" }} onClick={() => { setQ(s); inputRef.current?.focus(); }}>
                 {s}
               </button>

@@ -190,6 +190,16 @@ export default function ProgrammePage() {
         </p>
       </header>
 
+      {/* V10 — skeleton de chargement : jamais de page blanche pendant le fetch */}
+      {loading && (
+        <div className="rise" aria-hidden>
+          <div className="card card-pad mb-6"><div className="grid gap-5" style={{ gridTemplateColumns: "1fr 1fr" }}><div className="skeleton" style={{ height: 52 }} /><div className="skeleton" style={{ height: 52 }} /></div></div>
+          <div className="card" style={{ padding: 8 }}>
+            {Array.from({ length: 6 }).map((_, i) => <div key={i} className="skeleton" style={{ height: 46, borderRadius: 10, margin: "6px 4px" }} />)}
+          </div>
+        </div>
+      )}
+
       {/* ---------- état vide : analyser le programme ---------- */}
       {empty && (
         <section className="card card-pad mb-8">
