@@ -71,6 +71,33 @@ async function main() {
     return;
   }
 
+  // V10 — ONBOARDING d'un cours DEPUIS L'UI : prepare = ingestion (contenu + annales) → détection
+  // du format → blueprint, en UN job avec progression (équivalent de `npm run prepare:course`).
+  if (job.type === "prepare") {
+    setJob(jobId, { status: "running", pid: process.pid, currentStep: "Ingestion (contenu + annales)…", progress: 4 });
+    try {
+      await runIngestJob(null); // purge + ré-indexe content + refs du cours courant
+      const refsN = (sqlite.prepare(`SELECT count(*) n FROM exam_refs`).get() as { n: number } | undefined)?.n ?? 0;
+      setJob(jobId, { currentStep: `Corpus ingéré (refs : ${refsN})`, progress: 34 });
+      if (COURSE === "cs-202") {
+        setJob(jobId, { status: "done", progress: 100, currentStep: `Cours prêt ✓ — refs ${refsN} (format/blueprint statiques)` });
+        process.exit(0);
+      }
+      if (!claudeBinPath()) {
+        setJob(jobId, { status: "done", progress: 100, currentStep: `Ingéré (refs ${refsN}). Claude/Max absent → format+blueprint à relancer une fois connecté.` });
+        process.exit(0);
+      }
+      const { detectFormat } = await import("../lib/format");
+      await detectFormat({ onStep: (s, p) => setJob(jobId, { currentStep: `Format : ${s}`, progress: 34 + Math.round(p * 0.33) }) });
+      setJob(jobId, { currentStep: "Format détecté — construction du blueprint…", progress: 68 });
+      const { analyzeBlueprint } = await import("../lib/program");
+      const r = await analyzeBlueprint({ onStep: (s, p) => setJob(jobId, { currentStep: `Blueprint : ${s}`, progress: 68 + Math.round(p * 0.3) }) });
+      setJob(jobId, { status: "done", progress: 100, currentStep: `Cours prêt ✓ — refs ${refsN}, format + ${r.count} types calés sur les annales` });
+      process.exit(0);
+    } catch (e) { fail((e as Error)?.message || String(e)); }
+    return;
+  }
+
   // V7 — (re)détection du format d'examen depuis les annales (après upload de finals).
   if (job.type === "format") {
     setJob(jobId, { status: "running", pid: process.pid, currentStep: "Détection du format…", progress: 4 });

@@ -10,7 +10,7 @@ import path from "node:path";
  * Le worker (scripts/run-job.ts) écrit ici après chaque étape → survit au reload.
  */
 export type JobStatus = "queued" | "running" | "verifying" | "compiling" | "done" | "error" | "canceled";
-export type JobType = "exam" | "exercise" | "ingest" | "blueprint" | "lab-exercise" | "qcm" | "format";
+export type JobType = "exam" | "exercise" | "ingest" | "blueprint" | "lab-exercise" | "qcm" | "format" | "prepare";
 export type Job = {
   id: number;
   type: JobType;

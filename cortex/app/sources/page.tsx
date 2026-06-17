@@ -34,6 +34,9 @@ export default function SourcesPage() {
   const [importJob, setImportJob] = useState<any>(null);
   const [importErr, setImportErr] = useState<string | null>(null);
   const importPoll = useRef<any>(null);
+  // V10 — onboarding/préparation depuis l'UI : ingest + format + blueprint en un job suivi.
+  const [prepJob, setPrepJob] = useState<any>(null);
+  const prepPoll = useRef<any>(null);
 
   const load = useCallback(async () => {
     const d = await (await fetch("/api/sources")).json();
@@ -51,6 +54,25 @@ export default function SourcesPage() {
       } catch {}
     }, 1500);
   }, [load]);
+  const pollPrep = useCallback((id: number) => {
+    clearInterval(prepPoll.current);
+    prepPoll.current = setInterval(async () => {
+      try {
+        const j = await (await fetch(`/api/jobs/${id}`)).json();
+        setPrepJob(j);
+        if (!INGEST_ACTIVE.includes(j.status)) { clearInterval(prepPoll.current); if (j.status === "done") load(); }
+      } catch {}
+    }, 1500);
+  }, [load]);
+  async function runPrepare() {
+    setPrepJob({ id: 0, status: "queued", progress: 0, currentStep: "Démarrage…" });
+    try {
+      const r = await fetch("/api/prepare", { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) { setPrepJob({ status: "error", error: d.error ?? "Échec" }); return; }
+      if (d.jobId) { setPrepJob({ id: d.jobId, status: "queued", progress: 0, currentStep: "Démarrage…" }); pollPrep(d.jobId); }
+    } catch (e: any) { setPrepJob({ status: "error", error: String(e.message ?? e) }); }
+  }
 
   useEffect(() => {
     load();
@@ -60,9 +82,13 @@ export default function SourcesPage() {
         const d = await (await fetch("/api/jobs?type=ingest")).json();
         if (d.active && INGEST_ACTIVE.includes(d.active.status)) { setImportJob(d.active); pollImport(d.active.id); }
       } catch {}
+      try {
+        const d = await (await fetch("/api/jobs?type=prepare")).json();
+        if (d.active && INGEST_ACTIVE.includes(d.active.status)) { setPrepJob(d.active); pollPrep(d.active.id); }
+      } catch {}
     })();
-    return () => clearInterval(importPoll.current);
-  }, [load, pollImport]);
+    return () => { clearInterval(importPoll.current); clearInterval(prepPoll.current); };
+  }, [load, pollImport, pollPrep]);
 
   async function startImport() {
     if (!importPath.trim()) return;
@@ -124,6 +150,35 @@ export default function SourcesPage() {
           types de questions, structure, analyse de code — en puisant le contenu dans tout ton corpus.
         </p>
       </header>
+
+      {/* V10 — Préparer/réindexer le cours DEPUIS L'UI (onboarding) : ingest + format + blueprint */}
+      <div className="card card-pad mb-5">
+        <div className="flex items-center gap-2 mb-1">
+          <h2 className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>⚙ Préparer ce cours</h2>
+          <span className="tag tag-amber">{course}</span>
+        </div>
+        <p className="text-[13px] mb-3" style={{ color: "var(--ink-2)" }}>
+          Reconstruit tout en une fois : <strong style={{ color: "var(--ink)" }}>indexe le contenu + les annales</strong>,
+          {course === "cs-202" ? " (format & blueprint statiques pour CS-202)" : <> détecte le <strong style={{ color: "var(--ink)" }}>format</strong> et bâtit le <strong style={{ color: "var(--ink)" }}>blueprint</strong></>} —
+          de quoi rendre le cours pleinement opérationnel sans la ligne de commande.
+        </p>
+        {prepJob && INGEST_ACTIVE.includes(prepJob.status) ? (
+          <div>
+            <div className="progress"><div className="progress-bar" style={{ width: `${prepJob.progress}%` }} /></div>
+            <div className="mt-2 text-[13px]" style={{ color: "var(--ink-2)" }}>{prepJob.currentStep}</div>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <button className="btn btn-primary" onClick={runPrepare}>✦ Préparer le cours</button>
+            {prepJob?.status === "done" && <span className="tag tag-green">prêt ✓ — {prepJob.currentStep}</span>}
+          </div>
+        )}
+        {prepJob?.status === "error" && (
+          <p className="mt-2 text-[12px] flex items-center gap-2" style={{ color: "var(--red)" }}>Échec : {prepJob.error}
+            <button className="btn btn-quiet btn-sm" onClick={runPrepare}>↻ réessayer</button>
+          </p>
+        )}
+      </div>
 
       {/* Import d'un DOSSIER entier (cours additionnels uniquement) */}
       {course !== "cs-202" && (
