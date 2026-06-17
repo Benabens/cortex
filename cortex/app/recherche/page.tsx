@@ -1,5 +1,6 @@
 "use client";
 
+import { sourceHref } from "@/lib/deeplink";
 import { useEffect, useRef, useState } from "react";
 
 type Hit = {
@@ -13,15 +14,9 @@ type Hit = {
   snippet: string;
 };
 
-/** Clic→source. cs-202 : viewer (HTML) / /sites (brut) — INCHANGÉ. Autres cours : route
- *  course-aware /csrc (PDF à la bonne page via #page=N, lu de l'anchor ; HTML brut). */
+/** Clic→source UNIFIÉ (lib/deeplink) : cs-202 → viewer/sites (inchangé) ; autres → /csrc. */
 function hitHref(h: Hit, q: string, course: string): string {
-  if (course === "cs-202") {
-    if (h.sourcePath.endsWith(".html")) return `/voir?src=${encodeURIComponent(h.sourcePath)}&item=${h.itemId}&q=${encodeURIComponent(q)}`;
-    return `/sites/${h.anchor}`;
-  }
-  const frag = h.anchor.includes("#") ? "#" + h.anchor.split("#")[1] : "";
-  return `/csrc?course=${encodeURIComponent(course)}&p=${encodeURIComponent(h.sourcePath)}${frag}`;
+  return sourceHref(course, h.sourcePath, h.anchor, { itemId: h.itemId, q });
 }
 type Group = { sourceType: string; label: string; hits: Hit[] };
 

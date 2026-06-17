@@ -1,4 +1,5 @@
-import { sqlite } from "@/db/client";
+import { currentCourse, sqlite } from "@/db/client";
+import { sourceHref } from "@/lib/deeplink";
 import { search } from "@/lib/search";
 
 // Colonnes ajoutées au fil de l'eau (idempotent, s'applique à la DB du cours courant) :
@@ -35,10 +36,9 @@ export type Weakness = {
   related: RelatedItem[];
 };
 
-/** Lien vers l'endroit exact : HTML -> viewer (déplie + surligne) ; pdf/code/md -> brut. */
+/** Lien clic→source UNIFIÉ (course-aware via lib/deeplink) : cs-202 → viewer/sites ; autres → /csrc. */
 function itemHref(anchor: string, sourcePath: string, itemId: number, q: string): string {
-  if (sourcePath.endsWith(".html")) return `/voir?src=${encodeURIComponent(sourcePath)}&item=${itemId}&q=${encodeURIComponent(q)}`;
-  return `/sites/${anchor}`;
+  return sourceHref(currentCourse(), sourcePath, anchor, { itemId, q });
 }
 
 /** Auto-link : retrouve les items du corpus les plus proches du texte de la faiblesse (matching lâche). */
