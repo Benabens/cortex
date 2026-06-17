@@ -45,10 +45,13 @@ export default function Home() {
     })();
   }, []);
 
+  // V10 — actions rapides COURSE-AWARE : « Exo Labs » (Q6 2025) est propre à CS-202 → caché ailleurs ;
+  // le composeur est la surface de génération principale, à son format détecté pour le cours.
+  const isCs202 = d?.course.id === "cs-202";
   const actions = [
-    { href: "/examens", icon: "✦", label: "Générer un examen", desc: "Final blanc complet", primary: true },
+    { href: "/examens", icon: "✦", label: "Composer un examen", desc: "Au format détecté du cours", primary: true },
     { href: "/entrainement", icon: "🎯", label: "Drill un point faible", desc: "Question + indices" },
-    { href: "/entrainement", icon: "🧪", label: "Exo Labs", desc: "Format Q6 2025" },
+    ...(isCs202 ? [{ href: "/entrainement", icon: "🧪", label: "Exo Labs", desc: "Format Q6 2025" }] : []),
     { href: "/programme", icon: "📊", label: "Couvrir le programme", desc: "Au bon moment" },
   ];
 
@@ -217,7 +220,7 @@ export default function Home() {
                 <div className="empty-ico">✦</div>
                 <div className="empty-title">Aucun examen encore</div>
                 <div className="empty-sub">Génère ton premier final blanc, ciblé sur tes faiblesses.</div>
-                <Link href="/examens" className="btn btn-primary" style={{ marginTop: 16 }}>Générer un examen</Link>
+                <Link href="/examens" className="btn btn-primary" style={{ marginTop: 16 }}>Composer un examen</Link>
               </div>
             )}
           </section>
