@@ -52,6 +52,7 @@ export default function ProgrammePage() {
 
   // ---- entraînement (un exo à la fois, attribué à un type) ----
   const [trainTopic, setTrainTopic] = useState<TopicView | null>(null);
+  const [trainQcm, setTrainQcm] = useState(false); // V10 — « M'entraîner » = QCM (cours QCM) vs exo ouvert (cs-202)
   const [exoJob, setExoJob] = useState<any>(null);
   const exoPoll = useRef<any>(null);
   const [exoErr, setExoErr] = useState<string | null>(null);
@@ -147,6 +148,7 @@ export default function ProgrammePage() {
       const r = await fetch("/api/program/train", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ topicId: topic.id }) });
       const d = await r.json();
       if (!r.ok) { setExoErr(d.error ?? "Échec"); setExoCmd(d.command ?? null); return; }
+      setTrainQcm(!!d.qcm);
       if (d.jobId) { setExoJob({ id: d.jobId, status: "queued", progress: 0, currentStep: "Démarrage…", resultPath: null }); pollExo(d.jobId, topic); }
     } catch (e: any) { setExoErr(String(e.message ?? e)); }
   }
@@ -250,12 +252,21 @@ export default function ProgrammePage() {
           ) : exoJob?.status === "done" && exoJob.resultPath && trainTopic ? (
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[13px]" style={{ color: "var(--green)" }}>Exercice prêt ✓</span>
-                <a className="btn btn-ghost" href={exoJob.resultPath} target="_blank" rel="noopener">ouvrir l'énoncé (PDF)</a>
-                <a className="btn btn-quiet" style={{ color: "var(--green)" }} href={exoJob.resultPath.replace(/(\.pdf)(\?|$)/, "-corrige$1$2")} target="_blank" rel="noopener">corrigé</a>
+                {trainQcm ? (
+                  <>
+                    <span className="text-[13px]" style={{ color: "var(--green)" }}>Lot QCM prêt ✓ (auto-corrigé)</span>
+                    <a className="btn btn-ghost" href={exoJob.resultPath} target="_blank" rel="noopener">ouvrir le mock QCM →</a>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-[13px]" style={{ color: "var(--green)" }}>Exercice prêt ✓</span>
+                    <a className="btn btn-ghost" href={exoJob.resultPath} target="_blank" rel="noopener">ouvrir l'énoncé (PDF)</a>
+                    <a className="btn btn-quiet" style={{ color: "var(--green)" }} href={exoJob.resultPath.replace(/(\.pdf)(\?|$)/, "-corrige$1$2")} target="_blank" rel="noopener">corrigé</a>
+                  </>
+                )}
               </div>
               <div className="mt-4">
-                <div className="text-[13px] mb-2" style={{ color: "var(--ink)" }}>Fais l'exo, corrige-toi, puis <strong>note ta maîtrise</strong> de 0 à 10 :</div>
+                <div className="text-[13px] mb-2" style={{ color: "var(--ink)" }}>{trainQcm ? <>Fais le mock (auto-corrigé), puis <strong>note ta maîtrise</strong> de 0 à 10 :</> : <>Fais l'exo, corrige-toi, puis <strong>note ta maîtrise</strong> de 0 à 10 :</>}</div>
                 <div className="flex flex-wrap gap-1.5">
                   {Array.from({ length: 11 }, (_, i) => i).map((v) => (
                     <button key={v} className="btn btn-quiet" onClick={() => score(trainTopic, v)}

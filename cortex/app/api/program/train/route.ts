@@ -1,3 +1,4 @@
+import { isQcmCourse } from "@/lib/format";
 import { activeJob, createJob, startWorker } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
 import { getTopic, topicTarget } from "@/lib/program";
@@ -8,9 +9,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * PHASE 3/4 — « M'entraîner sur ce type » : génère un exo NEUF du type choisi via le générateur
- * d'exo ciblé existant (job 'exercise' en arrière-plan, vérifié à l'aveugle, format examen).
- * Le `topicId` est embarqué dans la cible du job → l'UI sait à quel type attribuer le score.
+ * « M'entraîner sur ce type » — QCM-FIRST (V10) : pour un cours QCM-dominant (ML/CS-233, Algo/CS-250),
+ * on compose un petit lot QCM (+ 1 ouverte) sur CE type via le composeur (job 'qcm' → site /mock
+ * auto-corrigé). Pour CS-202 (calcul/trace), on garde l'exo architecte ouvert (job 'exercise').
+ * Le `topicId` est suivi côté UI (trainTopic) → le score de maîtrise s'attribue au bon type.
  */
 export async function POST(req: NextRequest) {
   const course = useCourse(req);
@@ -18,19 +20,23 @@ export async function POST(req: NextRequest) {
   const topic = getTopic(Number(topicId));
   if (!topic) return NextResponse.json({ error: "Type introuvable." }, { status: 404 });
 
-  // un exo en cours ? on le réutilise (un seul job 'exercise' actif à la fois).
-  const existing = activeJob("exercise");
-  if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true, topicId: topic.id });
+  const qcm = isQcmCourse();
+  const jobType = qcm ? "qcm" : "exercise";
+  // un job de ce type en cours ? on le réutilise (un seul actif à la fois).
+  const existing = activeJob(jobType);
+  if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true, topicId: topic.id, qcm });
 
   const issue = preflightGeneration();
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
 
-  const jobTarget = JSON.stringify({ target: topicTarget(topic), topicId: topic.id });
-  const jobId = createJob("exercise", jobTarget);
+  const jobTarget = qcm
+    ? JSON.stringify({ count: 4, openCount: 1, focus: topicTarget(topic) }) // QCM-first sur ce type
+    : JSON.stringify({ target: topicTarget(topic), topicId: topic.id });
+  const jobId = createJob(jobType, jobTarget);
   try {
     startWorker(jobId, course);
   } catch (e: any) {
     return NextResponse.json({ error: `Impossible de lancer le worker : ${e?.message ?? e}` }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, jobId, topicId: topic.id });
+  return NextResponse.json({ ok: true, jobId, topicId: topic.id, qcm });
 }
