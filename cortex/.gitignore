@@ -53,6 +53,9 @@ data/ml/exams/
 data/uploads/
 data/algo/uploads/
 data/ml/uploads/
+# images-étalon vision rendues depuis les PDF (V6 figref / V11 figref-full) — reconstructibles
+data/**/figref/
+data/**/figref-full/
 
 # vercel
 .vercel
