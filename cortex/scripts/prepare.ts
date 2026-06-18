@@ -77,17 +77,17 @@ async function main() {
     console.log(`   ⚠ format non détecté (${(e as Error).message.slice(0, 120)}) — réessaie depuis /examens.`);
   }
 
-  // (c) BLUEPRINT — taxonomie typée + pondérée, calée sur les annales. Non-fatale.
-  console.log(`\n━━ (c) Construction du blueprint (taxonomie + poids) ━━`);
+  // (c) BLUEPRINT EXHAUSTIF (V11) — index exo-par-exo des finals → partition agrégée. Non-fatale.
+  console.log(`\n━━ (c) Index exo-par-exo des finals + partition ━━`);
   try {
-    const { analyzeBlueprint } = await import("../lib/program");
-    const r = await analyzeBlueprint({ onStep });
-    console.log(`   ✓ blueprint : ${r.count} type(s) d'exercices identifiés.`);
+    const { rebuildBlueprintFromIndex } = await import("../lib/program");
+    const r = await rebuildBlueprintFromIndex({ onStep });
+    console.log(`   ✓ index : ${r.exercises} exo(s) sur ${r.exams} finals → ${r.types} type(s).`);
   } catch (e) {
-    console.log(`   ⚠ blueprint non construit (${(e as Error).message.slice(0, 120)}) — réessaie depuis /programme.`);
+    console.log(`   ⚠ index non construit (${(e as Error).message.slice(0, 120)}) — réessaie depuis /programme.`);
   }
 
-  console.log(`\n✓ prepare terminé pour ${COURSE} : refs ${refsN}, format + blueprint calés sur les annales.`);
+  console.log(`\n✓ prepare terminé pour ${COURSE} : refs ${refsN}, format + index exo-par-exo + partition.`);
 }
 
 main().catch((e) => {
