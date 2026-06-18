@@ -311,10 +311,10 @@ export async function aggregateTopicsFromIndex(opts: { onStep?: (m: string, p: n
         `═══ ARCHÉTYPES (rattache via "archetype", "" si aucun) ═══`,
         p0.archetypes.map((a) => `  - id="${a.id}" · ${a.concept}`).join("\n"),
         ``,
-        `Chaque label BRUT doit apparaître dans EXACTEMENT un type (members = labels bruts exacts). Réponds UNIQUEMENT avec { "types": [ … ] } :`,
+        `Vise 15 à 30 types canoniques (regroupement par GRANDE technique : Divide & Conquer, Greedy, Dynamic Programming, Graphes/plus courts chemins, Flots/coupes, Arbres couvrants, Tris/sélection, Structures de données, Hachage, Récurrences/asymptotique, NP/réductions, Preuves…). Chaque label BRUT doit apparaître dans EXACTEMENT un type (members = labels bruts exacts, copiés tels quels). Réponds UNIQUEMENT avec { "types": [ … ] } :`,
         JSON.stringify(CLUSTER_SCHEMA, null, 2),
       ].join("\n");
-      const parsed = extractJson<{ types?: RawCluster[] }>(await runClaudeCode({ prompt, model: "opus", timeoutMs: 240_000 }));
+      const parsed = extractJson<{ types?: RawCluster[] }>(await runClaudeCode({ prompt, model: "opus", timeoutMs: 600_000 }));
       clusters = (parsed?.types ?? []).filter((t) => t?.label && Array.isArray(t.members) && t.members.length);
     } catch (e) { step(`Clustering Max indisponible (${(e as Error).message.slice(0, 40)}) → repli par label`, 95); }
   }
@@ -362,7 +362,13 @@ export async function aggregateTopicsFromIndex(opts: { onStep?: (m: string, p: n
        exam_count=excluded.exam_count, source='final', description=excluded.description`
   );
   const setTid = sqlite.prepare(`UPDATE exam_exercises SET topic_id = ? WHERE topic = ?`);
+  const newLabels = new Set(aggs.map((a) => a.label));
   const tx = sqlite.transaction(() => {
+    // table rase des types DÉRIVÉS DE L'INDEX (source='final') qui ne sont plus dans la partition
+    // (évite les types périmés d'un run précédent). Les types séries/cours sont préservés ;
+    // la maîtrise des types supprimés cascade (sur cold-start il n'y en a pas).
+    for (const r of sqlite.prepare(`SELECT label FROM topics WHERE source='final'`).all() as { label: string }[])
+      if (!newLabels.has(r.label)) sqlite.prepare(`DELETE FROM topics WHERE label = ?`).run(r.label);
     for (const a of aggs) {
       up.run({
         label: a.label, method: a.method?.slice(0, 400) ?? null, exo_type: a.exo_type?.slice(0, 200) ?? null,
