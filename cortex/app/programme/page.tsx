@@ -44,6 +44,21 @@ export default function ProgrammePage() {
   const [ov, setOv] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // V11 — déplier un type → ses exos indexés (de l'index exo-par-exo des finals).
+  type Exo = { id: number; examTitle: string; examYear: number | null; examPage: number | null; statement: string | null; examHref: string | null; courseHref: string | null };
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [exos, setExos] = useState<Record<number, Exo[]>>({});
+  async function toggleExos(id: number) {
+    if (expanded === id) { setExpanded(null); return; }
+    setExpanded(id);
+    if (!exos[id]) {
+      try {
+        const d = await (await fetch(`/api/program/exercises?topic=${id}`)).json();
+        setExos((m) => ({ ...m, [id]: d.exercises ?? [] }));
+      } catch { setExos((m) => ({ ...m, [id]: [] })); }
+    }
+  }
+
   // ---- analyse de blueprint ----
   const [anaJob, setAnaJob] = useState<any>(null);
   const anaPoll = useRef<any>(null);
@@ -333,6 +348,30 @@ export default function ProgrammePage() {
                     <div className="progress mt-2" style={{ height: 4 }}>
                       <div className="progress-bar" style={{ width: `${Math.min(100, t.examWeight * 3)}%`, background: "var(--blue)" }} />
                     </div>
+                    {/* V11 — déplier : la liste de CHAQUE exo de ce type, avec lien PDF + lien cours */}
+                    {t.examCount > 0 && (
+                      <button className="btn btn-quiet btn-sm mt-1.5" style={{ color: "var(--blue)", padding: "2px 0" }} onClick={() => toggleExos(t.id)}>
+                        {expanded === t.id ? "▾ masquer les exos" : `▸ voir les ${t.examCount} exo${t.examCount > 1 ? "s" : ""} des finals`}
+                      </button>
+                    )}
+                    {expanded === t.id && (
+                      <div className="mt-2 space-y-1.5">
+                        {!exos[t.id] ? (
+                          <div className="skeleton" style={{ height: 40 }} />
+                        ) : exos[t.id].length === 0 ? (
+                          <div className="text-[12px]" style={{ color: "var(--ink-3)" }}>Aucun exo rattaché.</div>
+                        ) : exos[t.id].map((e) => (
+                          <div key={e.id} className="inset" style={{ padding: "8px 10px" }}>
+                            <div className="flex items-center gap-2 flex-wrap text-[12px]">
+                              <span className="tag tag-blue">{e.examTitle?.slice(0, 28)}{e.examYear ? ` ${e.examYear}` : ""}{e.examPage ? ` · p.${e.examPage}` : ""}</span>
+                              {e.examHref && <a className="btn btn-quiet btn-sm" style={{ color: "var(--accent-ink)" }} href={e.examHref} target="_blank" rel="noopener">ouvrir l'exo (PDF) →</a>}
+                              {e.courseHref && <a className="btn btn-quiet btn-sm" style={{ color: "var(--green)" }} href={e.courseHref} target="_blank" rel="noopener">voir dans le cours</a>}
+                            </div>
+                            {e.statement && <div className="text-[12px] mt-1" style={{ color: "var(--ink-2)" }}>{e.statement.length > 160 ? e.statement.slice(0, 160) + "…" : e.statement}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div style={{ textAlign: "right", minWidth: 96 }}>
                     <div className="text-[20px] font-semibold" style={{ color: masteryColor(t.mastery) }}>
