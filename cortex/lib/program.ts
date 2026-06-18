@@ -1,6 +1,7 @@
 import { sqlite } from "@/db/client";
 import { extractJson, runClaudeCode } from "@/lib/claude-code";
 import { profile } from "@/lib/course-profile";
+import { ensureIndexSchema, indexExamExercises } from "@/lib/exam-index";
 import { createWeakness, ensureSchema as ensureWeaknessSchema } from "@/lib/weaknesses";
 
 /**
@@ -246,6 +247,152 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
   tx();
   step("Taxonomie prête ✓", 100);
   return { count: cleaned.length, topics: programOverview().topics };
+}
+
+// ---------------- V11 — Agrégation de la partition DEPUIS l'index exo-par-exo ----------------
+
+// clé de regroupement : minuscule, sans accents (NFD), réduite à l'alphanumérique.
+const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, " ").trim();
+
+const CLUSTER_SCHEMA = {
+  type: "object",
+  properties: {
+    types: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          label: { type: "string", description: "Label canonique COURT (EN) du type d'exercice." },
+          method: { type: "string" },
+          category: { type: "string" },
+          archetype: { type: "string", description: "id d'archétype le plus proche, ou \"\"." },
+          members: { type: "array", items: { type: "string" }, description: "Les labels BRUTS (exactement tels que fournis) regroupés sous ce type." },
+        },
+        required: ["label", "members"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["types"],
+  additionalProperties: false,
+} as const;
+
+type RawCluster = { label: string; method?: string; category?: string; archetype?: string; members: string[] };
+
+/**
+ * V11 — reconstruit `topics` À PARTIR de l'index `exam_exercises` : regroupe les exos par type
+ * (clustering Max des labels bruts ; repli déterministe par label normalisé), `exam_count` = compte
+ * RÉEL des exos (doublons inclus → Strassen ×2), `exam_weight` = vraie proportion. Rattache chaque
+ * exo à son `topic_id`. La forme de `topics` reste identique (génération non touchée).
+ */
+export async function aggregateTopicsFromIndex(opts: { onStep?: (m: string, p: number) => void } = {}): Promise<{ count: number; exercises: number }> {
+  ensureProgramSchema();
+  ensureIndexSchema();
+  const step = opts.onStep ?? (() => {});
+  const exos = sqlite.prepare(`SELECT id, topic, method, exo_type, trap, archetype FROM exam_exercises`).all() as { id: number; topic: string; method: string | null; exo_type: string | null; trap: string | null; archetype: string | null }[];
+  if (!exos.length) throw new Error("Index vide : lance d'abord l'indexation exo-par-exo des finals.");
+
+  // labels bruts distincts + comptes
+  const rawCount = new Map<string, number>();
+  for (const e of exos) rawCount.set(e.topic, (rawCount.get(e.topic) ?? 0) + 1);
+  const rawLabels = [...rawCount.keys()];
+
+  // clustering Max (résilient → repli : chaque label distinct = un type)
+  step(`Agrégation : regroupement de ${rawLabels.length} libellés en types…`, 94);
+  let clusters: RawCluster[] = [];
+  if (rawLabels.length > 1) {
+    try {
+      const p0 = profile();
+      const prompt = [
+        p0.qaIntro?.() ?? "Tu es l'équipe enseignante du cours.",
+        `Voici les libellés BRUTS des exercices extraits des vrais finals (avec leur nombre d'occurrences). Regroupe les ÉQUIVALENTS sous un même TYPE canonique (ex. « Strassen / matrix multiplication » et « Strassen's algorithm » → un seul type « Divide & Conquer — Strassen »). Ne fusionne PAS des techniques différentes.`,
+        ...rawLabels.map((l) => `  - "${l}" (×${rawCount.get(l)})`),
+        ``,
+        `═══ ARCHÉTYPES (rattache via "archetype", "" si aucun) ═══`,
+        p0.archetypes.map((a) => `  - id="${a.id}" · ${a.concept}`).join("\n"),
+        ``,
+        `Chaque label BRUT doit apparaître dans EXACTEMENT un type (members = labels bruts exacts). Réponds UNIQUEMENT avec { "types": [ … ] } :`,
+        JSON.stringify(CLUSTER_SCHEMA, null, 2),
+      ].join("\n");
+      const parsed = extractJson<{ types?: RawCluster[] }>(await runClaudeCode({ prompt, model: "opus", timeoutMs: 240_000 }));
+      clusters = (parsed?.types ?? []).filter((t) => t?.label && Array.isArray(t.members) && t.members.length);
+    } catch (e) { step(`Clustering Max indisponible (${(e as Error).message.slice(0, 40)}) → repli par label`, 95); }
+  }
+
+  // map label brut → cluster ; les labels non couverts deviennent leur propre type (repli)
+  const labelToCluster = new Map<string, RawCluster>();
+  for (const c of clusters) for (const m of c.members) if (rawCount.has(m)) labelToCluster.set(m, c);
+  for (const l of rawLabels) if (!labelToCluster.has(l)) labelToCluster.set(l, { label: l, members: [l] });
+
+  // un représentant (méthode/format/piège/archétype les plus complets) par cluster
+  const repByLabel = new Map<string, { exo_type: string | null; trap: string | null; method: string | null; archetype: string | null }>();
+  for (const e of exos) {
+    const cur = repByLabel.get(e.topic);
+    if (!cur || ((e.exo_type ? 1 : 0) + (e.trap ? 1 : 0)) > ((cur.exo_type ? 1 : 0) + (cur.trap ? 1 : 0)))
+      repByLabel.set(e.topic, { exo_type: e.exo_type, trap: e.trap, method: e.method, archetype: e.archetype });
+  }
+
+  // agrège par type canonique
+  const knownArche = new Set(profile().archetypes.map((a) => a.id));
+  type Agg = { label: string; method: string | null; exo_type: string | null; trap: string | null; category: string | null; archetype: string | null; count: number; rawLabels: Set<string> };
+  const byKey = new Map<string, Agg>();
+  for (const l of rawLabels) {
+    const c = labelToCluster.get(l)!;
+    const key = norm(c.label) || norm(l);
+    const rep = repByLabel.get(l);
+    let a = byKey.get(key);
+    if (!a) { a = { label: c.label.slice(0, 160), method: c.method || rep?.method || null, exo_type: rep?.exo_type ?? null, trap: rep?.trap ?? null, category: c.category || null, archetype: (c.archetype && knownArche.has(c.archetype) ? c.archetype : rep?.archetype) || null, count: 0, rawLabels: new Set() }; byKey.set(key, a); }
+    a.count += rawCount.get(l) ?? 0;
+    a.rawLabels.add(l);
+    if (!a.exo_type && rep?.exo_type) a.exo_type = rep.exo_type;
+    if (!a.trap && rep?.trap) a.trap = rep.trap;
+  }
+
+  const aggs = [...byKey.values()];
+  const total = aggs.reduce((s, a) => s + a.count, 0) || 1;
+
+  // reconstruit `topics` (depuis l'index) — on remplace les types d'index, on PRÉSERVE la maîtrise
+  // (mastery est par topic_id ; on ré-UPSERT par label → l'id et donc la maîtrise restent si le label est stable).
+  step("Écriture de la partition (poids réels)…", 97);
+  const up = sqlite.prepare(
+    `INSERT INTO topics (label, method, exo_type, trap, category, archetype, exam_weight, exam_count, source, description)
+     VALUES (@label,@method,@exo_type,@trap,@category,@archetype,@exam_weight,@exam_count,'final',@description)
+     ON CONFLICT(label) DO UPDATE SET method=excluded.method, exo_type=excluded.exo_type, trap=excluded.trap,
+       category=excluded.category, archetype=excluded.archetype, exam_weight=excluded.exam_weight,
+       exam_count=excluded.exam_count, source='final', description=excluded.description`
+  );
+  const setTid = sqlite.prepare(`UPDATE exam_exercises SET topic_id = ? WHERE topic = ?`);
+  const tx = sqlite.transaction(() => {
+    for (const a of aggs) {
+      up.run({
+        label: a.label, method: a.method?.slice(0, 400) ?? null, exo_type: a.exo_type?.slice(0, 200) ?? null,
+        trap: a.trap?.slice(0, 400) ?? null, category: a.category?.slice(0, 80) ?? null, archetype: a.archetype,
+        exam_weight: Math.round((a.count / total) * 1000) / 10, exam_count: a.count,
+        description: `${a.count} occurrence(s) dans les vrais finals.`,
+      });
+      const row = sqlite.prepare(`SELECT id FROM topics WHERE label = ?`).get(a.label) as { id: number } | undefined;
+      if (row) for (const rl of a.rawLabels) setTid.run(row.id, rl);
+    }
+  });
+  tx();
+  step(`Partition : ${aggs.length} types sur ${exos.length} exos indexés ✓`, 100);
+  return { count: aggs.length, exercises: exos.length };
+}
+
+/**
+ * V11 — construit le blueprint EXHAUSTIF : index exo-par-exo des finals → agrégation en partition
+ * typée à vrais poids. Repli sur l'ancien résumé (analyzeBlueprint) si aucun final indexable.
+ */
+export async function rebuildBlueprintFromIndex(opts: { onStep?: (m: string, p: number) => void } = {}): Promise<{ exams: number; exercises: number; types: number }> {
+  const step = opts.onStep ?? (() => {});
+  const idx = await indexExamExercises({ onStep: (s, p) => step(s, Math.round(p * 0.85)) });
+  if (!idx.exercises) {
+    step("Aucun final indexable → repli sur l'analyse résumée…", 86);
+    const r = await analyzeBlueprint({ onStep: (s, p) => step(s, 86 + Math.round(p * 0.14)) });
+    return { exams: 0, exercises: 0, types: r.count };
+  }
+  const agg = await aggregateTopicsFromIndex({ onStep: (s, p) => step(s, 85 + Math.round(p * 0.15)) });
+  return { exams: idx.exams, exercises: idx.exercises, types: agg.count };
 }
 
 // ---------------- PHASE 2 — Vue « Couverture & Maîtrise » ----------------

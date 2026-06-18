@@ -89,10 +89,10 @@ async function main() {
       }
       const { detectFormat } = await import("../lib/format");
       await detectFormat({ onStep: (s, p) => setJob(jobId, { currentStep: `Format : ${s}`, progress: 34 + Math.round(p * 0.33) }) });
-      setJob(jobId, { currentStep: "Format détecté — construction du blueprint…", progress: 68 });
-      const { analyzeBlueprint } = await import("../lib/program");
-      const r = await analyzeBlueprint({ onStep: (s, p) => setJob(jobId, { currentStep: `Blueprint : ${s}`, progress: 68 + Math.round(p * 0.3) }) });
-      setJob(jobId, { status: "done", progress: 100, currentStep: `Cours prêt ✓ — refs ${refsN}, format + ${r.count} types calés sur les annales` });
+      setJob(jobId, { currentStep: "Format détecté — index exo-par-exo des finals…", progress: 50 });
+      const { rebuildBlueprintFromIndex } = await import("../lib/program");
+      const r = await rebuildBlueprintFromIndex({ onStep: (s, p) => setJob(jobId, { currentStep: `Blueprint : ${s}`, progress: 50 + Math.round(p * 0.48) }) });
+      setJob(jobId, { status: "done", progress: 100, currentStep: `Cours prêt ✓ — refs ${refsN}, ${r.exercises} exos indexés (${r.exams} finals) → ${r.types} types` });
       process.exit(0);
     } catch (e) { fail((e as Error)?.message || String(e)); }
     return;
@@ -162,9 +162,10 @@ async function main() {
         setJob(jobId, { currentStep: s, progress: p, status: p >= 100 ? "done" : "running" });
         logJob(jobId, s);
       };
-      const res = await analyzeBlueprint({ onStep });
-      setJob(jobId, { status: "done", progress: 100, resultId: res.count, currentStep: `Taxonomie : ${res.count} types ✓` });
-      logJob(jobId, `Blueprint prêt → ${res.count} types d'exercices identifiés.`);
+      const { rebuildBlueprintFromIndex } = await import("../lib/program");
+      const res = await rebuildBlueprintFromIndex({ onStep });
+      setJob(jobId, { status: "done", progress: 100, resultId: res.types, currentStep: `Index : ${res.exercises} exos (${res.exams} finals) → ${res.types} types ✓` });
+      logJob(jobId, `Blueprint exhaustif → ${res.exercises} exos indexés, ${res.types} types.`);
       process.exit(0);
     } catch (e) {
       fail((e as Error)?.message || String(e));
