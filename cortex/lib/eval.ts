@@ -18,7 +18,7 @@ import path from "node:path";
  */
 
 export type StepCb = (msg: string, pct: number) => void;
-export const PROMPT_VERSION = "evals-v1"; // bump quand le prompt du solveur/juge change
+export const PROMPT_VERSION = "evals-v2"; // v2 : juge robuste (extraction MCQ/séquences corrigée + arbitrage LLM short/mcq)
 
 export function ensureEvalSchema() {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS eval_items (
@@ -30,6 +30,17 @@ export function ensureEvalSchema() {
     answer_type TEXT NOT NULL,
     points REAL,
     topic TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );`);
+  // cache des résolutions du solveur (re-juger sans re-résoudre).
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS eval_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER NOT NULL,
+    solution TEXT,
+    final_answer TEXT,
+    verdict TEXT,
+    reason TEXT,
+    judged_by TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   );`);
   sqlite.exec(`CREATE TABLE IF NOT EXISTS eval_runs (
@@ -157,7 +168,10 @@ function goldItems(limit?: number): EvalItem[] {
 
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[^a-z0-9αβγθλ().+\-*/^ ]+/gi, " ").replace(/\s+/g, " ").trim();
 const numbersIn = (s: string) => (s.match(/-?\d+(?:[.,]\d+)?/g) ?? []).map((x) => parseFloat(x.replace(",", ".")));
-const lettersIn = (s: string) => Array.from(new Set((s.toUpperCase().match(/\b[A-E]\b/g) ?? []))).sort();
+// MCQ : seulement les lettres-CHOIX A-E EN MAJUSCULE et isolées (pas les variables math « a=9, b=3 »).
+const lettersIn = (s: string) => Array.from(new Set((s.match(/\b[A-E]\b/g) ?? []))).sort();
+// suite de nombres « 2, 4, 1, … » (réponses Prim/parcours) → comparaison de séquence normalisée.
+const numSeq = (s: string) => (s.match(/-?\d+/g) ?? []).join(",");
 /** Dernière « RÉPONSE : … » de la solution, sinon les ~200 derniers caractères. */
 function finalAnswer(sol: string): string {
   const m = [...sol.matchAll(/r[ée]ponse\s*[:=]\s*(.+)/gi)];
@@ -181,15 +195,21 @@ function judgeDeterministic(item: EvalItem, cortexAns: string): { verdict: Judge
     if (!lc.length) return { verdict: "uncertain", reason: "pas de lettre claire dans la réponse du solveur" };
     return JSON.stringify(lo) === JSON.stringify(lc) ? { verdict: "correct", reason: lo.join("") } : { verdict: "incorrect", reason: `attendu ${lo.join("")} · obtenu ${lc.join("")}` };
   }
-  // short : sous-ensemble de tokens de la réponse officielle présent dans la réponse du solveur
-  const offTokens = norm(off).split(" ").filter((w) => w.length >= 2);
+  // short : si la réponse officielle est une SUITE DE NOMBRES (Prim, parcours…), compare la séquence.
+  const seqO = numSeq(off);
+  if (seqO && (off.match(/\d/g) ?? []).length >= 3 && /^[\d,\s]+$/.test(off.replace(/[.\-]/g, ""))) {
+    const seqC = numSeq(cortexAns);
+    if (!seqC) return { verdict: "uncertain", reason: "pas de séquence dans la réponse du solveur" };
+    return seqO === seqC ? { verdict: "correct", reason: "séquence exacte" } : { verdict: "incorrect", reason: `attendu ${seqO} · obtenu ${seqC}` };
+  }
+  // sinon : recouvrement de tokens (mots ≥2 ET nombres). Recouvrement partiel → uncertain (pas faux).
+  const offTokens = norm(off).split(" ").filter((w) => w.length >= 2 || /^\d+$/.test(w));
   if (!offTokens.length) return { verdict: "uncertain", reason: "réponse officielle vide après normalisation" };
   const cn = norm(cortexAns);
   if (!cn) return { verdict: "uncertain", reason: "réponse du solveur vide" };
   const present = offTokens.filter((w) => cn.includes(w)).length / offTokens.length;
   if (present >= 0.8) return { verdict: "correct", reason: `tokens présents ${Math.round(present * 100)}%` };
-  if (present <= 0.2) return { verdict: "incorrect", reason: `tokens présents ${Math.round(present * 100)}%` };
-  return { verdict: "uncertain", reason: `recouvrement partiel ${Math.round(present * 100)}%` };
+  return { verdict: "uncertain", reason: `recouvrement ${Math.round(present * 100)}% → arbitrage` };
 }
 
 const JUDGE_SCHEMA = {
@@ -234,6 +254,7 @@ export async function runAccuracy(opts: { limit?: number; onStep?: StepCb } = {}
   const step = opts.onStep ?? (() => {});
   const items = goldItems(opts.limit);
   if (!items.length) throw new Error("Gold set vide : construis-le d'abord (buildGoldSet).");
+  const cache = sqlite.prepare(`INSERT INTO eval_attempts (item_id, solution, final_answer, verdict, reason, judged_by) VALUES (?,?,?,?,?,?)`);
   let done = 0;
   const details: Judged[] = new Array(items.length);
   let idx = 0;
@@ -241,15 +262,23 @@ export async function runAccuracy(opts: { limit?: number; onStep?: StepCb } = {}
     while (idx < items.length) {
       const i = idx++;
       const it = items[i];
-      let verdict: Judged["verdict"] = "uncertain", reason = "non résolu", cortex = "";
+      let verdict: Judged["verdict"] = "uncertain", reason = "non résolu", cortex = "", judgedBy = "—", sol = "";
       try {
-        const sol = await solveFromScratch(it.questionText);
+        sol = (await solveFromScratch(it.questionText)) ?? "";
         if (sol) {
           cortex = finalAnswer(sol);
-          const j = it.answerType === "open" ? await judgeOpen(it, sol) : judgeDeterministic(it, cortex);
-          verdict = j.verdict; reason = j.reason;
+          if (it.answerType === "numeric") {
+            // numérique : déterministe FIABLE, on lui fait confiance (correct/incorrect/uncertain).
+            const det = judgeDeterministic(it, cortex); verdict = det.verdict; reason = det.reason; judgedBy = "deterministic";
+          } else if (it.answerType === "mcq" || it.answerType === "short") {
+            // extraction bruitée (langue, lettres math, séquences) → « correct » net gardé ; sinon ARBITRAGE LLM.
+            const det = judgeDeterministic(it, cortex);
+            if (det.verdict === "correct") { verdict = "correct"; reason = det.reason; judgedBy = "deterministic"; }
+            else { const j = await judgeOpen(it, sol); verdict = j.verdict; reason = `${det.reason} → ${j.reason}`; judgedBy = "llm-arbitrage"; }
+          } else { const j = await judgeOpen(it, sol); verdict = j.verdict; reason = j.reason; judgedBy = "llm"; }
         }
       } catch (e) { reason = `item ignoré (${(e as Error).message.slice(0, 40)})`; }
+      try { cache.run(it.id, sol.slice(0, 8000), cortex.slice(0, 500), verdict, reason.slice(0, 300), judgedBy); } catch {}
       details[i] = { id: it.id, topic: it.topic, answerType: it.answerType, official: it.officialAnswer, cortex, verdict, reason };
       done++;
       step(`Justesse ${done}/${items.length} — ${it.topic ?? it.answerType} : ${verdict}`, Math.round((done / items.length) * 100));
