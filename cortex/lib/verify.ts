@@ -86,6 +86,32 @@ async function verifyOne(q: ExamQuestion, opts?: VerifyOpts): Promise<VerifyResu
   }
 }
 
+/**
+ * EVALS (additif, lecture seule) — SOLVEUR À L'AVEUGLE réutilisé : résout une question DE ZÉRO,
+ * sans corrigé, avec exactement la même posture que l'étape 1 de `verifyOne` (le composant qui
+ * garantit que les corrigés générés sont corrects). Ne change RIEN au comportement de génération.
+ * Retourne le texte de la solution (+ dernière ligne « RÉPONSE : … »), ou null si l'appel échoue.
+ */
+export async function solveFromScratch(questionText: string, opts?: VerifyOpts): Promise<string | null> {
+  const p = profile();
+  const c = getCourse(currentCourse());
+  const prompt = [
+    `Tu es un assistant (TA) rigoureux de ${c.examCode} ${c.examName}. RÉSOUS l'exercice d'examen ci-dessous DE ZÉRO, toi-même, rigoureusement (calcule, trace, compte, prouve, justifie). Ne devine pas : si un calcul est nécessaire, fais-le.`,
+    opts?.directives ?? p.directivesBlock(),
+    ``,
+    `ÉNONCÉ :`,
+    questionText,
+    ``,
+    `Écris ta solution complète. Puis, sur la TOUTE DERNIÈRE ligne, donne « RÉPONSE : <ta réponse finale, concise> » (le résultat numérique / le choix / la conclusion). N'écris aucun fichier.`,
+  ].join("\n");
+  try {
+    const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 540_000 });
+    return text?.trim() || null;
+  } catch {
+    return null; // fallback honnête : non résolu (jamais une fausse réponse)
+  }
+}
+
 async function mapPool<T, R>(items: T[], n: number, fn: (x: T, i: number) => Promise<R>): Promise<R[]> {
   const out = new Array<R>(items.length);
   let idx = 0;

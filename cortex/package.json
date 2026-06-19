@@ -9,6 +9,7 @@
     "lint": "eslint",
     "ingest": "tsx scripts/ingest.ts",
     "prepare:course": "tsx scripts/prepare.ts",
+    "eval": "tsx scripts/eval.ts",
     "exam:brief": "tsx scripts/exam-brief.ts",
     "exam:save": "tsx scripts/exam-save.ts",
     "weakness:brief": "tsx scripts/weakness-brief.ts",

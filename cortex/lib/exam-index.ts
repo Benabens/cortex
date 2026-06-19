@@ -63,7 +63,7 @@ function pdftoppm(): string | null {
 }
 
 /** Rend TOUTES les pages (jusqu'à maxPages) d'un PDF d'examen en PNG → {page, rel} (chemin rel au cwd). */
-function renderExamPages(course: string, refBasename: string, maxPages = 16): { page: number; rel: string }[] {
+export function renderExamPages(course: string, refBasename: string, maxPages = 16): { page: number; rel: string }[] {
   const bin = pdftoppm();
   if (!bin) return [];
   const refsDir = coursePaths(course).refsDir;
