@@ -118,7 +118,7 @@ export async function buildGoldSet(opts: { max?: number; onStep?: StepCb } = {})
   if (!refs.length) { step("Aucun corrigé (with solutions) ingéré — gold set vide.", 100); return { items: 0, exams: 0 }; }
   sqlite.exec(`DELETE FROM eval_items`);
   const ins = sqlite.prepare(`INSERT INTO eval_items (source_exam, exam_page, question_text, official_answer, answer_type, points, topic, options) VALUES (?,?,?,?,?,?,?,?)`);
-  const perExam = Math.max(3, Math.ceil(max / Math.min(refs.length, refs.length)));
+  const perExam = Math.max(4, Math.ceil(max / Math.min(refs.length, 8))); // ≤ ~8 examens visionnés (coût borné)
   let total = 0, examsUsed = 0;
   for (const ref of refs) {
     if (total >= max) break;
