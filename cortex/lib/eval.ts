@@ -18,7 +18,7 @@ import path from "node:path";
  */
 
 export type StepCb = (msg: string, pct: number) => void;
-export const PROMPT_VERSION = "evals-v2"; // v2 : juge robuste (extraction MCQ/séquences corrigée + arbitrage LLM short/mcq)
+export const PROMPT_VERSION = "evals-v3"; // v3 : QCM DÉTERMINISTE (options stockées, lettre vs lettre) ; LLM UNIQUEMENT pour l'ouvert
 
 export function ensureEvalSchema() {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS eval_items (
@@ -30,8 +30,12 @@ export function ensureEvalSchema() {
     answer_type TEXT NOT NULL,
     points REAL,
     topic TEXT,
+    options TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   );`);
+  // V2 — options des QCM (jugement déterministe lettre vs lettre), ajoutées au fil de l'eau.
+  if (!(sqlite.prepare(`PRAGMA table_info(eval_items)`).all() as { name: string }[]).some((c) => c.name === "options"))
+    sqlite.exec(`ALTER TABLE eval_items ADD COLUMN options TEXT`);
   // cache des résolutions du solveur (re-juger sans re-résoudre).
   sqlite.exec(`CREATE TABLE IF NOT EXISTS eval_attempts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,8 +74,9 @@ const GOLD_SCHEMA = {
         properties: {
           page: { type: "integer", description: "Page (1-based) de la question." },
           question_text: { type: "string", description: "Énoncé AUTO-SUFFISANT de la question (recopié/condensé fidèlement, avec les données chiffrées nécessaires)." },
-          official_answer: { type: "string", description: "La RÉPONSE OFFICIELLE exacte, telle que donnée dans le corrigé (le résultat final ; pas tout le raisonnement)." },
-          answer_type: { type: "string", description: "numeric (un nombre) | mcq (lettre(s) A-E) | short (expression/mot courts, ex. « O(n log n) », « yes ») | open (preuve/explication à juger)." },
+          official_answer: { type: "string", description: "La RÉPONSE OFFICIELLE exacte (pour un QCM : la/les LETTRE(S), ex. « C » ou « B, D »). Pas tout le raisonnement." },
+          answer_type: { type: "string", description: "numeric = UN nombre. mcq = QCM (lettre(s) A-E) — exige options. short = réponse CANONIQUE TRÈS COURTE (≤ 6 mots) comparable mot-à-mot : une valeur, une expression (« O(n log n) »), yes/no, un nom, une suite de nombres. open = TOUT le reste (méthode/algorithme à décrire, preuve, explication) → jugé sur le raisonnement. Dans le doute entre short et open, choisis open." },
+          options: { type: "string", description: "OBLIGATOIRE si answer_type=mcq : les options complètes, une par ligne, ex. « A) … \\nB) … \\nC) … ». Vide sinon." },
           points: { type: "number" },
           topic: { type: "string", description: "Sujet court (EN)." },
         },
@@ -84,7 +89,7 @@ const GOLD_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-type RawGold = { page?: number; question_text?: string; official_answer?: string; answer_type?: string; points?: number; topic?: string };
+type RawGold = { page?: number; question_text?: string; official_answer?: string; answer_type?: string; options?: string; points?: number; topic?: string };
 
 /** Sources « corrigées » du cours (fichiers …with solutions / answers / corrigé). */
 function solutionRefs(): { path: string; title: string; year: number | null }[] {
@@ -112,8 +117,8 @@ export async function buildGoldSet(opts: { max?: number; onStep?: StepCb } = {})
   const refs = solutionRefs();
   if (!refs.length) { step("Aucun corrigé (with solutions) ingéré — gold set vide.", 100); return { items: 0, exams: 0 }; }
   sqlite.exec(`DELETE FROM eval_items`);
-  const ins = sqlite.prepare(`INSERT INTO eval_items (source_exam, exam_page, question_text, official_answer, answer_type, points, topic) VALUES (?,?,?,?,?,?,?)`);
-  const perExam = Math.max(3, Math.ceil(max / Math.min(refs.length, 6)));
+  const ins = sqlite.prepare(`INSERT INTO eval_items (source_exam, exam_page, question_text, official_answer, answer_type, points, topic, options) VALUES (?,?,?,?,?,?,?,?)`);
+  const perExam = Math.max(3, Math.ceil(max / Math.min(refs.length, refs.length)));
   let total = 0, examsUsed = 0;
   for (const ref of refs) {
     if (total >= max) break;
@@ -125,6 +130,7 @@ export async function buildGoldSet(opts: { max?: number; onStep?: StepCb } = {})
       ...pages.map((pg) => `  - page ${pg.page} : ${pg.rel}`),
       ``,
       `Extrais jusqu'à ${perExam} paires (question, RÉPONSE OFFICIELLE) où la réponse est CLAIRE et VÉRIFIABLE (privilégie les questions à réponse numérique, à choix (A-E), ou à réponse courte type « O(n log n) », « yes/no », un invariant…). Évite les questions dont la « réponse » est une longue preuve, SAUF si tu peux résumer la conclusion attendue. Recopie/condense l'énoncé fidèlement avec ses données chiffrées (auto-suffisant), et donne la réponse officielle EXACTE du corrigé.`,
+      `IMPORTANT pour les QCM (answer_type=mcq) : recopie TOUTES les options dans le champ "options" (A) …, B) …, …) et mets la/les LETTRE(S) correcte(s) dans official_answer. Varie les types et les topics.`,
       ``,
       `Réponds UNIQUEMENT avec { "items": [ … ] } :`,
       JSON.stringify(GOLD_SCHEMA, null, 2),
@@ -143,9 +149,12 @@ export async function buildGoldSet(opts: { max?: number; onStep?: StepCb } = {})
       if (total >= max) break;
       const q = (g.question_text ?? "").trim();
       const a = (g.official_answer ?? "").trim();
-      const t = ["numeric", "short", "open", "mcq"].includes((g.answer_type ?? "").trim()) ? g.answer_type!.trim() : "open";
+      let t = ["numeric", "short", "open", "mcq"].includes((g.answer_type ?? "").trim()) ? g.answer_type!.trim() : "open";
+      const opts = (g.options ?? "").trim();
+      // un « mcq » sans options stockées ne peut pas être jugé en déterministe lettre → rétrograde en short.
+      if (t === "mcq" && opts.length < 4) t = /^[A-E](\s*,\s*[A-E])*$/i.test(a) ? "mcq" : "short";
       if (q.length < 12 || a.length < 1) continue;
-      ins.run(ref.title, Math.max(1, Math.round(Number(g.page) || 1)), q.slice(0, 2000), a.slice(0, 500), t, Number(g.points) > 0 ? Number(g.points) : null, (g.topic ?? "").slice(0, 120) || null);
+      ins.run(ref.title, Math.max(1, Math.round(Number(g.page) || 1)), q.slice(0, 2000), a.slice(0, 500), t, Number(g.points) > 0 ? Number(g.points) : null, (g.topic ?? "").slice(0, 120) || null, opts.slice(0, 1500) || null);
       total++; added++;
     }
     if (added) examsUsed++;
@@ -157,19 +166,39 @@ export async function buildGoldSet(opts: { max?: number; onStep?: StepCb } = {})
 
 // ─────────────────────── PHASE 2 — justesse du solveur ───────────────────────
 
-export type EvalItem = { id: number; sourceExam: string; examPage: number | null; questionText: string; officialAnswer: string; answerType: string; topic: string | null };
-export type Judged = { id: number; topic: string | null; answerType: string; official: string; cortex: string; verdict: "correct" | "incorrect" | "uncertain"; reason: string };
+export type EvalItem = { id: number; sourceExam: string; examPage: number | null; questionText: string; officialAnswer: string; answerType: string; topic: string | null; options: string | null };
+export type Judged = { id: number; topic: string | null; answerType: string; official: string; cortex: string; verdict: "correct" | "incorrect" | "uncertain"; reason: string; sourceExam?: string; examPage?: number | null };
 
 function goldItems(limit?: number): EvalItem[] {
   ensureEvalSchema();
-  const rows = sqlite.prepare(`SELECT id, source_exam sourceExam, exam_page examPage, question_text questionText, official_answer officialAnswer, answer_type answerType, topic FROM eval_items ORDER BY id${limit ? " LIMIT " + Math.max(1, Math.floor(limit)) : ""}`).all() as any[];
+  const rows = sqlite.prepare(`SELECT id, source_exam sourceExam, exam_page examPage, question_text questionText, official_answer officialAnswer, answer_type answerType, topic, options FROM eval_items ORDER BY id${limit ? " LIMIT " + Math.max(1, Math.floor(limit)) : ""}`).all() as any[];
   return rows.map((r) => ({ ...r }));
+}
+
+/** Énoncé augmenté passé au solveur : QCM → on lui DONNE les options et on exige une LETTRE. */
+function solvePrompt(it: EvalItem): string {
+  const parts = [it.questionText];
+  if (it.answerType === "mcq" && it.options) {
+    parts.push(`\nOPTIONS :\n${it.options}`);
+    parts.push(`\nC'est un QCM : donne UNIQUEMENT la/les LETTRE(S) de la/des bonne(s) réponse(s) sur la ligne « RÉPONSE : … ».`);
+  } else {
+    parts.push(`\n(Réponds dans la LANGUE de l'énoncé ; « RÉPONSE : » = ton résultat final concis.)`);
+  }
+  return parts.join("\n");
 }
 
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[^a-z0-9αβγθλ().+\-*/^ ]+/gi, " ").replace(/\s+/g, " ").trim();
 const numbersIn = (s: string) => (s.match(/-?\d+(?:[.,]\d+)?/g) ?? []).map((x) => parseFloat(x.replace(",", ".")));
 // MCQ : seulement les lettres-CHOIX A-E EN MAJUSCULE et isolées (pas les variables math « a=9, b=3 »).
 const lettersIn = (s: string) => Array.from(new Set((s.match(/\b[A-E]\b/g) ?? []))).sort();
+/** Lettre(s) de réponse en TÊTE de réponse (« C », « B, D ») — ignore les lettres dans l'explication. */
+function mcqLetters(s: string): string[] {
+  const head = s.trim().match(/^[\s(]*([A-E](?:\s*(?:[,&]|and|et|ou|or)\s*[A-E])*)/i);
+  if (head) return Array.from(new Set(head[1].toUpperCase().match(/[A-E]/g) ?? [])).sort();
+  // sinon : une seule lettre isolée dans toute la réponse (sinon ambigu → vide)
+  const all = Array.from(new Set(s.match(/\b[A-E]\b/g) ?? [])).sort();
+  return all.length === 1 ? all : [];
+}
 // suite de nombres « 2, 4, 1, … » (réponses Prim/parcours) → comparaison de séquence normalisée.
 const numSeq = (s: string) => (s.match(/-?\d+/g) ?? []).join(",");
 /** Dernière « RÉPONSE : … » de la solution, sinon les ~200 derniers caractères. */
@@ -190,7 +219,7 @@ function judgeDeterministic(item: EvalItem, cortexAns: string): { verdict: Judge
     return hit ? { verdict: "correct", reason: "nombres concordants" } : { verdict: "incorrect", reason: `attendu ${no.join(",")} · obtenu ${nc.join(",") || "—"}` };
   }
   if (item.answerType === "mcq") {
-    const lo = lettersIn(off), lc = lettersIn(cortexAns);
+    const lo = lettersIn(off), lc = mcqLetters(cortexAns);
     if (!lo.length) return { verdict: "uncertain", reason: "pas de lettre dans la réponse officielle" };
     if (!lc.length) return { verdict: "uncertain", reason: "pas de lettre claire dans la réponse du solveur" };
     return JSON.stringify(lo) === JSON.stringify(lc) ? { verdict: "correct", reason: lo.join("") } : { verdict: "incorrect", reason: `attendu ${lo.join("")} · obtenu ${lc.join("")}` };
@@ -264,22 +293,16 @@ export async function runAccuracy(opts: { limit?: number; onStep?: StepCb } = {}
       const it = items[i];
       let verdict: Judged["verdict"] = "uncertain", reason = "non résolu", cortex = "", judgedBy = "—", sol = "";
       try {
-        sol = (await solveFromScratch(it.questionText)) ?? "";
+        sol = (await solveFromScratch(solvePrompt(it))) ?? "";
         if (sol) {
           cortex = finalAnswer(sol);
-          if (it.answerType === "numeric") {
-            // numérique : déterministe FIABLE, on lui fait confiance (correct/incorrect/uncertain).
-            const det = judgeDeterministic(it, cortex); verdict = det.verdict; reason = det.reason; judgedBy = "deterministic";
-          } else if (it.answerType === "mcq" || it.answerType === "short") {
-            // extraction bruitée (langue, lettres math, séquences) → « correct » net gardé ; sinon ARBITRAGE LLM.
-            const det = judgeDeterministic(it, cortex);
-            if (det.verdict === "correct") { verdict = "correct"; reason = det.reason; judgedBy = "deterministic"; }
-            else { const j = await judgeOpen(it, sol); verdict = j.verdict; reason = `${det.reason} → ${j.reason}`; judgedBy = "llm-arbitrage"; }
-          } else { const j = await judgeOpen(it, sol); verdict = j.verdict; reason = j.reason; judgedBy = "llm"; }
+          // V3 — DÉTERMINISTE pour numeric/mcq/short (zéro complaisance LLM) ; LLM UNIQUEMENT pour l'ouvert.
+          if (it.answerType === "open") { const j = await judgeOpen(it, sol); verdict = j.verdict; reason = j.reason; judgedBy = "llm-open"; }
+          else { const det = judgeDeterministic(it, cortex); verdict = det.verdict; reason = det.reason; judgedBy = "deterministic"; }
         }
       } catch (e) { reason = `item ignoré (${(e as Error).message.slice(0, 40)})`; }
       try { cache.run(it.id, sol.slice(0, 8000), cortex.slice(0, 500), verdict, reason.slice(0, 300), judgedBy); } catch {}
-      details[i] = { id: it.id, topic: it.topic, answerType: it.answerType, official: it.officialAnswer, cortex, verdict, reason };
+      details[i] = { id: it.id, topic: it.topic, answerType: it.answerType, official: it.officialAnswer, cortex, verdict, reason, sourceExam: it.sourceExam, examPage: it.examPage };
       done++;
       step(`Justesse ${done}/${items.length} — ${it.topic ?? it.answerType} : ${verdict}`, Math.round((done / items.length) * 100));
     }
@@ -362,7 +385,7 @@ export function buildReport(acc: AccuracyResult, disc: { n: number; discriminati
   if (review.length) {
     lines.push(``);
     lines.push(`## À revoir à la main (incertains + faux) — ${review.length}`);
-    for (const d of review) lines.push(`- [${d.verdict}/${d.answerType}] ${d.topic ?? ""} : attendu « ${(d.official || "").slice(0, 80)} » · obtenu « ${(d.cortex || "—").slice(0, 80) }» — ${d.reason}`);
+    for (const d of review) lines.push(`- [${d.verdict}/${d.answerType}] ${d.topic ?? ""} (${d.sourceExam ?? "?"}${d.examPage ? ` p.${d.examPage}` : ""}) : attendu « ${(d.official || "").slice(0, 80)} » · obtenu « ${(d.cortex || "—").slice(0, 80) }» — ${d.reason}`);
   }
   return lines.join("\n");
 }
