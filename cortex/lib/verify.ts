@@ -2,6 +2,7 @@ import { currentCourse } from "@/db/client";
 import { extractJson, runClaudeCode } from "@/lib/claude-code";
 import { profile } from "@/lib/course-profile";
 import { getCourse } from "@/lib/courses";
+import { verifyDeterministic } from "@/lib/verify-deterministic";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
 
 export type VerifyResult = {
@@ -11,8 +12,16 @@ export type VerifyResult = {
   corrected_solution_tex?: string;
   violates_exclusion?: boolean;
   too_easy?: boolean;
+  /** V — méthode de vérif (additif) : « deterministic » si la réponse a été PROUVÉE (calcul/symbolique). */
+  method?: "deterministic" | "llm";
 };
-export type ResultRow = { index: number; verdict: string; issue?: string; verified: 1 | 0 | null };
+export type ResultRow = { index: number; verdict: string; issue?: string; verified: 1 | 0 | null; method?: string };
+
+/** Dernière égalité « = X » d'une solution (heuristique de réponse finale, pour la vérif déterministe). */
+function lastExpr(s: string): string {
+  const eqs = [...(s || "").matchAll(/=\s*([^=\n;]{1,64}?)\s*(?:[.;]|\\\\|$)/g)];
+  return eqs.length ? eqs[eqs.length - 1][1].trim() : "";
+}
 export type VerifyReport = {
   results: ResultRow[];
   ok: number;
@@ -80,7 +89,16 @@ async function verifyOne(q: ExamQuestion, opts?: VerifyOpts): Promise<VerifyResu
     // une re-résolution complète prend ~4–6 min ; on laisse de la marge.
     const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 540_000 });
     const r = extractJson<VerifyResult>(text);
-    return r && r.verdict ? r : null;
+    if (!r || !r.verdict) return null;
+    // ADDITIF — vérif DÉTERMINISTE de la réponse finale (re-solve à l'aveugle vs corrigé proposé) :
+    // si la réponse est PROUVÉE équivalente (calcul/symbolique), on l'étiquette « deterministic »
+    // (moat « prouvé »). Ne change NI le verdict NI le contenu (cs-202 byte-identique) — juste un label.
+    r.method = "llm";
+    try {
+      const a = lastExpr(r.my_solution ?? ""), b = lastExpr(q.solution_tex ?? "");
+      if (a && b) { const d = await verifyDeterministic(a, b, "numeric"); if (d.verified === true) r.method = "deterministic"; }
+    } catch { /* python/sympy absent → reste « llm » */ }
+    return r;
   } catch {
     return null; // fallback honnête : non vérifié (jamais "ok" par défaut)
   }
@@ -191,6 +209,7 @@ export async function verifyAndHarden(
     verdict: p.res?.verdict ?? "unverified",
     issue: p.res?.issue,
     verified: p.verified,
+    method: p.verified === null ? "unverified" : (p.res?.method ?? "llm"),
   }));
   const report: VerifyReport = {
     results,

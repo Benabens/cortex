@@ -270,6 +270,8 @@ function ensureExamCols() {
     (sqlite.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).some((r) => r.name === c);
   try { if (!has("exam_questions", "verified")) sqlite.exec(`ALTER TABLE exam_questions ADD COLUMN verified INTEGER`); } catch {}
   try { if (!has("exam_questions", "verify_issue")) sqlite.exec(`ALTER TABLE exam_questions ADD COLUMN verify_issue TEXT`); } catch {}
+  // V — méthode de vérif (additif) : « deterministic » (prouvé) | « llm » (relecture) | « unverified ».
+  try { if (!has("exam_questions", "verify_method")) sqlite.exec(`ALTER TABLE exam_questions ADD COLUMN verify_method TEXT`); } catch {}
   try { if (!has("exams", "verify_summary")) sqlite.exec(`ALTER TABLE exams ADD COLUMN verify_summary TEXT`); } catch {}
 }
 
@@ -284,13 +286,13 @@ export async function persistExam(spec: ExamSpec, report?: VerifyReport): Promis
     .run("final", JSON.stringify(weaknessIds), "ready").lastInsertRowid as number;
 
   const insQ = sqlite.prepare(
-    `INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration, verified, verify_issue)
-     VALUES (?,?,?,?,?,?,?)`
+    `INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration, verified, verify_issue, verify_method)
+     VALUES (?,?,?,?,?,?,?,?)`
   );
   spec.questions.forEach((q, i) => {
     const r = report?.results?.find((x) => x.index === i);
     const verified = r ? r.verified : null;
-    insQ.run(id, q.concept, q.statement_tex, q.solution_tex, q.source_inspiration ?? null, verified, r?.issue ?? null);
+    insQ.run(id, q.concept, q.statement_tex, q.solution_tex, q.source_inspiration ?? null, verified, r?.issue ?? null, r?.method ?? null);
   });
 
   const dateLabel = (sqlite.prepare(`SELECT date('now') d`).get() as any).d;
@@ -457,8 +459,8 @@ export async function persistExercise(q: ExamQuestion, report?: VerifyReport, so
   const id = sqlite.prepare(`INSERT INTO exams (format_template, status) VALUES ('exercise','ready')`).run().lastInsertRowid as number;
   const r = report?.results?.[0];
   sqlite
-    .prepare(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration, verified, verify_issue) VALUES (?,?,?,?,?,?,?)`)
-    .run(id, q.concept, q.statement_tex, q.solution_tex, sourceTag ?? null, r?.verified ?? null, r?.issue ?? null);
+    .prepare(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration, verified, verify_issue, verify_method) VALUES (?,?,?,?,?,?,?,?)`)
+    .run(id, q.concept, q.statement_tex, q.solution_tex, sourceTag ?? null, r?.verified ?? null, r?.issue ?? null, r?.method ?? null);
   const dateLabel = (sqlite.prepare(`SELECT date('now') d`).get() as any).d;
   const { file, texError } = await buildExerciseArtifact(q, id, dateLabel);
   sqlite.prepare(`UPDATE exams SET html_path = ? WHERE id = ?`).run(file, id);
