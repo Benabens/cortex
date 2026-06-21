@@ -42,9 +42,9 @@ function summary() {
   }
   const lines = [`# Eval — synthèse cross-cours — ${new Date().toISOString().slice(0, 16).replace("T", " ")}`, ``,
     `Même code, zéro branche par cours (preuve de généricité). Solveur à l'aveugle vs corrigés officiels.`, ``,
-    `| Cours | accuracy | incertain | discrimination | style | N (run) | gold | prompt |`,
+    `| Cours | accuracy | incertain | prouvé (det.) | discrimination | N (run) | gold | prompt |`,
     `|---|---|---|---|---|---|---|---|`];
-  for (const r of rows) lines.push(`| ${r.code} (${r.course}) | **${r.accuracy}%** | ${r.uncertain_rate}% | ${r.discrimination ?? "—"}% | ${r.style_score ?? "—"} | ${r.n_items} | ${r.gold} | ${r.prompt_version} |`);
+  for (const r of rows) lines.push(`| ${r.code} (${r.course}) | **${r.accuracy}%** | ${r.uncertain_rate}% | ${r.deterministic_rate ?? "—"}% | ${r.discrimination ?? "—"}% | ${r.n_items} | ${r.gold} | ${r.prompt_version} |`);
   lines.push(``, `## Porte de qualité`, `Toute nouvelle matière : déposer ses annales (dont des corrigés) → \`npm run prepare:course --course=<id>\` → \`npm run eval -- --course=<id>\` → un chiffre. Contrôle qualité automatique du produit publié, sans toucher au code.`);
   lines.push(``, `> Rapports détaillés (incertains + désaccords à spot-check) : \`evals/<course>-<date>.md\`.`);
   fs.mkdirSync(EVALS_DIR, { recursive: true });
@@ -86,8 +86,8 @@ async function main() {
   }
   const style = measureStyleHeuristic();
 
-  const notes = `${acc.correct}✓/${acc.incorrect}✗/${acc.uncertain}? sur ${acc.n} (gold ${nGold})`;
-  recordRun({ accuracy: acc.accuracy, uncertainRate: acc.uncertainRate, nItems: acc.n, discrimination: disc?.discrimination ?? null, styleScore: style.styleScore, notes });
+  const notes = `${acc.correct}✓/${acc.incorrect}✗/${acc.uncertain}? sur ${acc.n} (gold ${nGold}) · prouvé ${acc.deterministicRate}% [${Object.entries(acc.methods).map(([m, n]) => `${m}:${n}`).join(" ")}]`;
+  recordRun({ accuracy: acc.accuracy, uncertainRate: acc.uncertainRate, nItems: acc.n, discrimination: disc?.discrimination ?? null, styleScore: style.styleScore, deterministicRate: acc.deterministicRate, notes });
   fs.mkdirSync(EVALS_DIR, { recursive: true });
   const file = path.join(EVALS_DIR, `${course}-${new Date().toISOString().slice(0, 10)}.md`);
   fs.writeFileSync(file, buildReport(acc, disc, style));
@@ -95,6 +95,7 @@ async function main() {
   console.log(`\n════════ RÉSULTAT (${course}) ════════`);
   console.log(`  accuracy        : ${acc.accuracy}%  (${acc.correct} justes / ${acc.incorrect} faux sur ${acc.correct + acc.incorrect} tranchés)`);
   console.log(`  incertain       : ${acc.uncertainRate}%  (${acc.uncertain}/${acc.n})`);
+  console.log(`  prouvé (det.)   : ${acc.deterministicRate}%  [${Object.entries(acc.methods).map(([m, n]) => `${m}:${n}`).join(" ")}]`);
   if (disc) console.log(`  discrimination  : ${disc.discrimination}%  (${disc.n} exos)`);
   console.log(`  style/format    : ${style.styleScore}/100`);
   console.log(`  rapport         : ${path.relative(process.cwd(), file)}`);

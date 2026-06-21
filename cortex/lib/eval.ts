@@ -5,6 +5,7 @@ import { renderExamPages } from "@/lib/exam-index";
 import { getFormatProfile } from "@/lib/format";
 import { profile } from "@/lib/course-profile";
 import { solveFromScratch } from "@/lib/verify";
+import { verifyDeterministic, type DetMethod } from "@/lib/verify-deterministic";
 import path from "node:path";
 
 /**
@@ -18,7 +19,7 @@ import path from "node:path";
  */
 
 export type StepCb = (msg: string, pct: number) => void;
-export const PROMPT_VERSION = "evals-v3"; // v3 : QCM DÉTERMINISTE (options stockées, lettre vs lettre) ; LLM UNIQUEMENT pour l'ouvert
+export const PROMPT_VERSION = "evals-v4"; // v4 : vérif DÉTERMINISTE (sympy/structural/numeric/mcq) d'abord → LLM seulement si non prouvable et non-QCM
 
 export function ensureEvalSchema() {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS eval_items (
@@ -60,6 +61,8 @@ export function ensureEvalSchema() {
     style_score REAL,
     notes TEXT
   );`);
+  if (!(sqlite.prepare(`PRAGMA table_info(eval_runs)`).all() as { name: string }[]).some((c) => c.name === "deterministic_rate"))
+    sqlite.exec(`ALTER TABLE eval_runs ADD COLUMN deterministic_rate REAL`);
 }
 
 // ─────────────────────── PHASE 1 — jeu étalon (gold set) ───────────────────────
@@ -167,7 +170,7 @@ export async function buildGoldSet(opts: { max?: number; onStep?: StepCb } = {})
 // ─────────────────────── PHASE 2 — justesse du solveur ───────────────────────
 
 export type EvalItem = { id: number; sourceExam: string; examPage: number | null; questionText: string; officialAnswer: string; answerType: string; topic: string | null; options: string | null };
-export type Judged = { id: number; topic: string | null; answerType: string; official: string; cortex: string; verdict: "correct" | "incorrect" | "uncertain"; reason: string; sourceExam?: string; examPage?: number | null };
+export type Judged = { id: number; topic: string | null; answerType: string; official: string; cortex: string; verdict: "correct" | "incorrect" | "uncertain"; reason: string; method: string; sourceExam?: string; examPage?: number | null };
 
 function goldItems(limit?: number): EvalItem[] {
   ensureEvalSchema();
@@ -187,58 +190,11 @@ function solvePrompt(it: EvalItem): string {
   return parts.join("\n");
 }
 
-const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[^a-z0-9αβγθλ().+\-*/^ ]+/gi, " ").replace(/\s+/g, " ").trim();
-const numbersIn = (s: string) => (s.match(/-?\d+(?:[.,]\d+)?/g) ?? []).map((x) => parseFloat(x.replace(",", ".")));
-// MCQ : seulement les lettres-CHOIX A-E EN MAJUSCULE et isolées (pas les variables math « a=9, b=3 »).
-const lettersIn = (s: string) => Array.from(new Set((s.match(/\b[A-E]\b/g) ?? []))).sort();
-/** Lettre(s) de réponse en TÊTE de réponse (« C », « B, D ») — ignore les lettres dans l'explication. */
-function mcqLetters(s: string): string[] {
-  const head = s.trim().match(/^[\s(]*([A-E](?:\s*(?:[,&]|and|et|ou|or)\s*[A-E])*)/i);
-  if (head) return Array.from(new Set(head[1].toUpperCase().match(/[A-E]/g) ?? [])).sort();
-  // sinon : une seule lettre isolée dans toute la réponse (sinon ambigu → vide)
-  const all = Array.from(new Set(s.match(/\b[A-E]\b/g) ?? [])).sort();
-  return all.length === 1 ? all : [];
-}
-// suite de nombres « 2, 4, 1, … » (réponses Prim/parcours) → comparaison de séquence normalisée.
-const numSeq = (s: string) => (s.match(/-?\d+/g) ?? []).join(",");
 /** Dernière « RÉPONSE : … » de la solution, sinon les ~200 derniers caractères. */
 function finalAnswer(sol: string): string {
   const m = [...sol.matchAll(/r[ée]ponse\s*[:=]\s*(.+)/gi)];
   if (m.length) return m[m.length - 1][1].trim();
   return sol.slice(-220).trim();
-}
-
-/** Juge DÉTERMINISTE (numeric/mcq/short). Biais vers « uncertain » plutôt qu'un faux verdict. */
-function judgeDeterministic(item: EvalItem, cortexAns: string): { verdict: Judged["verdict"]; reason: string } {
-  const off = item.officialAnswer;
-  if (item.answerType === "numeric") {
-    const no = numbersIn(off), nc = numbersIn(cortexAns);
-    if (!no.length) return { verdict: "uncertain", reason: "réponse officielle non numérique" };
-    if (!nc.length) return { verdict: "uncertain", reason: "pas de nombre dans la réponse du solveur" };
-    const hit = no.every((x) => nc.some((y) => Math.abs(x - y) <= Math.max(1e-6, Math.abs(x) * 1e-3)));
-    return hit ? { verdict: "correct", reason: "nombres concordants" } : { verdict: "incorrect", reason: `attendu ${no.join(",")} · obtenu ${nc.join(",") || "—"}` };
-  }
-  if (item.answerType === "mcq") {
-    const lo = lettersIn(off), lc = mcqLetters(cortexAns);
-    if (!lo.length) return { verdict: "uncertain", reason: "pas de lettre dans la réponse officielle" };
-    if (!lc.length) return { verdict: "uncertain", reason: "pas de lettre claire dans la réponse du solveur" };
-    return JSON.stringify(lo) === JSON.stringify(lc) ? { verdict: "correct", reason: lo.join("") } : { verdict: "incorrect", reason: `attendu ${lo.join("")} · obtenu ${lc.join("")}` };
-  }
-  // short : si la réponse officielle est une SUITE DE NOMBRES (Prim, parcours…), compare la séquence.
-  const seqO = numSeq(off);
-  if (seqO && (off.match(/\d/g) ?? []).length >= 3 && /^[\d,\s]+$/.test(off.replace(/[.\-]/g, ""))) {
-    const seqC = numSeq(cortexAns);
-    if (!seqC) return { verdict: "uncertain", reason: "pas de séquence dans la réponse du solveur" };
-    return seqO === seqC ? { verdict: "correct", reason: "séquence exacte" } : { verdict: "incorrect", reason: `attendu ${seqO} · obtenu ${seqC}` };
-  }
-  // sinon : recouvrement de tokens (mots ≥2 ET nombres). Recouvrement partiel → uncertain (pas faux).
-  const offTokens = norm(off).split(" ").filter((w) => w.length >= 2 || /^\d+$/.test(w));
-  if (!offTokens.length) return { verdict: "uncertain", reason: "réponse officielle vide après normalisation" };
-  const cn = norm(cortexAns);
-  if (!cn) return { verdict: "uncertain", reason: "réponse du solveur vide" };
-  const present = offTokens.filter((w) => cn.includes(w)).length / offTokens.length;
-  if (present >= 0.8) return { verdict: "correct", reason: `tokens présents ${Math.round(present * 100)}%` };
-  return { verdict: "uncertain", reason: `recouvrement ${Math.round(present * 100)}% → arbitrage` };
 }
 
 const JUDGE_SCHEMA = {
@@ -275,7 +231,7 @@ async function judgeOpen(item: EvalItem, cortexFull: string): Promise<{ verdict:
   }
 }
 
-export type AccuracyResult = { n: number; correct: number; incorrect: number; uncertain: number; accuracy: number; uncertainRate: number; details: Judged[] };
+export type AccuracyResult = { n: number; correct: number; incorrect: number; uncertain: number; accuracy: number; uncertainRate: number; deterministicRate: number; methods: Record<string, number>; details: Judged[] };
 
 /** Résout chaque item à l'aveugle (vrai moteur) puis juge → accuracy + uncertain. Résilient (3 en //). */
 export async function runAccuracy(opts: { limit?: number; onStep?: StepCb } = {}): Promise<AccuracyResult> {
@@ -291,18 +247,28 @@ export async function runAccuracy(opts: { limit?: number; onStep?: StepCb } = {}
     while (idx < items.length) {
       const i = idx++;
       const it = items[i];
-      let verdict: Judged["verdict"] = "uncertain", reason = "non résolu", cortex = "", judgedBy = "—", sol = "";
+      let verdict: Judged["verdict"] = "uncertain", reason = "non résolu", cortex = "", judgedBy = "—", method: DetMethod | "llm" | "none" = "none", sol = "";
       try {
         sol = (await solveFromScratch(solvePrompt(it))) ?? "";
         if (sol) {
           cortex = finalAnswer(sol);
-          // V3 — DÉTERMINISTE pour numeric/mcq/short (zéro complaisance LLM) ; LLM UNIQUEMENT pour l'ouvert.
-          if (it.answerType === "open") { const j = await judgeOpen(it, sol); verdict = j.verdict; reason = j.reason; judgedBy = "llm-open"; }
-          else { const det = judgeDeterministic(it, cortex); verdict = det.verdict; reason = det.reason; judgedBy = "deterministic"; }
+          if (it.answerType === "open") {
+            const j = await judgeOpen(it, sol); verdict = j.verdict; reason = j.reason; judgedBy = "llm-open"; method = "llm";
+          } else {
+            // VÉRIF DÉTERMINISTE d'abord (numeric/mcq/symbolic/structural) — preuve sans LLM.
+            const det = await verifyDeterministic(cortex, it.officialAnswer, it.answerType, { options: it.options ?? undefined });
+            if (det.verified === true) { verdict = "correct"; reason = det.detail; judgedBy = `det:${det.method}`; method = det.method; }
+            else if (det.verified === false) { verdict = "incorrect"; reason = det.detail; judgedBy = `det:${det.method}`; method = det.method; }
+            else if (it.answerType === "mcq") { verdict = "uncertain"; reason = `non prouvé (${det.detail})`; judgedBy = "det-na-mcq"; method = "none"; }
+            else {
+              // numeric/short non prouvables en déterministe (réponse procédurale/mot) → LLM (jamais sur QCM).
+              const j = await judgeOpen(it, sol); verdict = j.verdict; reason = `${det.detail} → ${j.reason}`; judgedBy = "llm-fallback"; method = "llm";
+            }
+          }
         }
       } catch (e) { reason = `item ignoré (${(e as Error).message.slice(0, 40)})`; }
       try { cache.run(it.id, sol.slice(0, 8000), cortex.slice(0, 500), verdict, reason.slice(0, 300), judgedBy); } catch {}
-      details[i] = { id: it.id, topic: it.topic, answerType: it.answerType, official: it.officialAnswer, cortex, verdict, reason, sourceExam: it.sourceExam, examPage: it.examPage };
+      details[i] = { id: it.id, topic: it.topic, answerType: it.answerType, official: it.officialAnswer, cortex, verdict, reason, method, sourceExam: it.sourceExam, examPage: it.examPage };
       done++;
       step(`Justesse ${done}/${items.length} — ${it.topic ?? it.answerType} : ${verdict}`, Math.round((done / items.length) * 100));
     }
@@ -312,10 +278,16 @@ export async function runAccuracy(opts: { limit?: number; onStep?: StepCb } = {}
   const incorrect = details.filter((d) => d.verdict === "incorrect").length;
   const uncertain = details.filter((d) => d.verdict === "uncertain").length;
   const decided = correct + incorrect;
+  const methods: Record<string, number> = {};
+  for (const d of details) methods[d.method] = (methods[d.method] ?? 0) + 1;
+  const detMethods = ["mcq", "numeric", "symbolic", "structural"];
+  const detCount = details.filter((d) => detMethods.includes(d.method)).length;
   return {
     n: items.length, correct, incorrect, uncertain,
     accuracy: decided ? Math.round((correct / decided) * 1000) / 10 : 0,
     uncertainRate: items.length ? Math.round((uncertain / items.length) * 1000) / 10 : 0,
+    deterministicRate: items.length ? Math.round((detCount / items.length) * 1000) / 10 : 0,
+    methods,
     details,
   };
 }
@@ -356,11 +328,11 @@ export function measureStyleHeuristic(): { styleScore: number; note: string } {
 
 // ─────────────────────── PHASE 4 — run + rapport ───────────────────────
 
-export function recordRun(r: { accuracy: number; uncertainRate: number; nItems: number; discrimination: number | null; styleScore: number | null; notes: string }): number {
+export function recordRun(r: { accuracy: number; uncertainRate: number; nItems: number; discrimination: number | null; styleScore: number | null; deterministicRate?: number | null; notes: string }): number {
   ensureEvalSchema();
   return sqlite.prepare(
-    `INSERT INTO eval_runs (course, model, prompt_version, n_items, accuracy, uncertain_rate, discrimination, style_score, notes) VALUES (?,?,?,?,?,?,?,?,?)`
-  ).run(currentCourse(), "opus", PROMPT_VERSION, r.nItems, r.accuracy, r.uncertainRate, r.discrimination, r.styleScore, r.notes).lastInsertRowid as number;
+    `INSERT INTO eval_runs (course, model, prompt_version, n_items, accuracy, uncertain_rate, discrimination, style_score, deterministic_rate, notes) VALUES (?,?,?,?,?,?,?,?,?,?)`
+  ).run(currentCourse(), "opus", PROMPT_VERSION, r.nItems, r.accuracy, r.uncertainRate, r.discrimination, r.styleScore, r.deterministicRate ?? null, r.notes).lastInsertRowid as number;
 }
 
 export function buildReport(acc: AccuracyResult, disc: { n: number; discrimination: number } | null, style: { styleScore: number; note: string } | null): string {
@@ -373,13 +345,14 @@ export function buildReport(acc: AccuracyResult, disc: { n: number; discriminati
   lines.push(`## Justesse (métrique #1)`);
   lines.push(`- **accuracy = ${acc.accuracy}%** (sur ${acc.correct + acc.incorrect} items tranchés : ${acc.correct} justes / ${acc.incorrect} faux)`);
   lines.push(`- incertain = ${acc.uncertainRate}% (${acc.uncertain}/${acc.n}) — non comptés dans l'accuracy`);
+  lines.push(`- **prouvé en déterministe = ${acc.deterministicRate}%** des items (sans LLM) · méthodes : ${Object.entries(acc.methods).map(([m, n]) => `${m}×${n}`).join(", ")}`);
   if (disc) lines.push(`- discrimination = ${disc.discrimination}% (pattern-matcher échoue sur ${disc.n} exos générés)`);
   if (style) lines.push(`- style/format = ${style.styleScore}/100 (${style.note})`);
   lines.push(``);
   lines.push(`## Détail par item`);
   for (const d of acc.details) {
     const mark = d.verdict === "correct" ? "✓" : d.verdict === "incorrect" ? "✗" : "?";
-    lines.push(`- ${mark} [${d.answerType}] ${d.topic ?? ""} — attendu « ${(d.official || "").slice(0, 60)} » · obtenu « ${(d.cortex || "—").slice(0, 60)} » (${d.reason})`);
+    lines.push(`- ${mark} [${d.answerType}·${d.method}] ${d.topic ?? ""} — attendu « ${(d.official || "").slice(0, 56)} » · obtenu « ${(d.cortex || "—").slice(0, 56)} » (${d.reason})`);
   }
   const review = acc.details.filter((d) => d.verdict === "uncertain" || d.verdict === "incorrect");
   if (review.length) {
