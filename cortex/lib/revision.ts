@@ -226,3 +226,57 @@ export function bankQuestions(kind?: Kind): BankQuestion[] {
      FROM bank_questions ${where} ORDER BY (lecture_rank IS NULL), lecture_rank, topic, exam_year, exam_page`
   ).all() as any[]).map((r) => ({ ...r }));
 }
+
+// ─────────────────────── parcours généré (P3) — requêtes ───────────────────────
+
+export type PlanQuestion = { id: number; kind: Kind; topic: string; lectureRank: number | null; statement: string; options: string | null; correct: string | null; misconceptions: string | null; explanation: string | null; solution: string | null; verified: number | null; verifyMethod: string | null };
+
+export function planQuestions(): PlanQuestion[] {
+  ensureRevisionSchema();
+  return (sqlite.prepare(
+    `SELECT id, kind, topic, lecture_rank lectureRank, statement, options, correct, misconceptions, explanation, solution, verified, verify_method verifyMethod
+     FROM revision_plan ORDER BY (lecture_rank IS NULL), lecture_rank, topic, id`
+  ).all() as any[]).map((r) => ({ ...r }));
+}
+
+export function planStats(): { qcm: number; open: number; topics: number } {
+  ensureRevisionSchema();
+  const qcm = (sqlite.prepare(`SELECT count(*) n FROM revision_plan WHERE kind='qcm'`).get() as { n: number }).n;
+  const open = (sqlite.prepare(`SELECT count(*) n FROM revision_plan WHERE kind='open'`).get() as { n: number }).n;
+  const topics = (sqlite.prepare(`SELECT count(DISTINCT topic) n FROM revision_plan`).get() as { n: number }).n;
+  return { qcm, open, topics };
+}
+
+// ─────────────────────── P4bis — export/chargement JSON (committé, portable) ───────────────────────
+
+export type RevisionPayload = {
+  course: string; generatedAt: string;
+  bank: { stats: ReturnType<typeof bankStats>; qcm: BankQuestion[]; open: BankQuestion[] };
+  plan: { stats: ReturnType<typeof planStats>; questions: PlanQuestion[] };
+};
+
+export function revisionPayload(): RevisionPayload {
+  return {
+    course: currentCourse(), generatedAt: new Date().toISOString(),
+    bank: { stats: bankStats(), qcm: bankQuestions("qcm"), open: bankQuestions("open") },
+    plan: { stats: planStats(), questions: planQuestions() },
+  };
+}
+
+function jsonPath(course = currentCourse()): string {
+  return path.join(coursePaths(course).dbPath.replace(/[^/]+$/, ""), `revision-${course}.json`);
+}
+
+/** Écrit la banque + le parcours dans un JSON COMMITTÉ (source de vérité portable, DB gitignorée). */
+export function exportRevisionJson(): string {
+  const file = jsonPath();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(revisionPayload(), null, 2));
+  return file;
+}
+
+/** Charge le JSON committé (repli quand la DB du cours est vide chez l'utilisateur). */
+export function loadRevisionJson(course = currentCourse()): RevisionPayload | null {
+  try { const f = jsonPath(course); return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : null; } catch { return null; }
+}
+

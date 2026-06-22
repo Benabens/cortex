@@ -7,6 +7,7 @@ import CourseSwitcher from "./CourseSwitcher";
 const LINKS = [
   { href: "/recherche", label: "Recherche" },
   { href: "/programme", label: "Programme" },
+  { href: "/revision", label: "Révision" },
   { href: "/faiblesses", label: "Faiblesses" },
   { href: "/examens", label: "Examens" },
   { href: "/entrainement", label: "Entraînement" },
