@@ -244,12 +244,24 @@ export async function buildParcours(opts: { budgetQcm?: number; budgetOpen?: num
   if (!stats.byTopic.length) throw new Error("Banque vide : construis-la d'abord (indexBank).");
   const budgetQcm = opts.budgetQcm ?? 24, budgetOpen = opts.budgetOpen ?? 8;
   sqlite.exec(`DELETE FROM revision_plan`);
-  const rank = new Map<string, number | null>(stats.byTopic.map((t) => [t.topic, t.lectureRank]));
-  const totalQcm = stats.byTopic.reduce((s, t) => s + t.qcm, 0) || 1;
-  const totalOpen = stats.byTopic.reduce((s, t) => s + t.open, 0) || 1;
 
-  // cibles QCM par sujet : pondérées par la fréquence réelle, MIN 1 (→ couverture 100 %).
-  const qcmTarget = stats.byTopic.map((t) => ({ topic: t.topic, n: Math.max(1, Math.round((t.qcm / totalQcm) * budgetQcm)) }));
+  // « TOPIC DU PROGRAMME » = niveau LECTURE : on consolide les sous-variantes (k-NN / k-NN classif / …)
+  // par lecture_rank → ~14 sujets (le programme), représentant = le sous-sujet le plus présent. Évite
+  // d'exploser le budget (60 sous-variantes) tout en garantissant la couverture de CHAQUE lecture.
+  const byRank = new Map<number, { topic: string, repCount: number, qcm: number, open: number, rank: number }>();
+  for (const t of stats.byTopic) {
+    const r = t.lectureRank ?? 99;
+    const c = byRank.get(r);
+    if (!c) byRank.set(r, { topic: t.topic, repCount: t.qcm + t.open, qcm: t.qcm, open: t.open, rank: r });
+    else { c.qcm += t.qcm; c.open += t.open; if (t.qcm + t.open > c.repCount) { c.repCount = t.qcm + t.open; c.topic = t.topic; } }
+  }
+  const program = [...byRank.values()].sort((a, b) => a.rank - b.rank);
+  const rank = new Map<string, number | null>(program.map((t) => [t.topic, t.rank === 99 ? null : t.rank]));
+  const totalQcm = program.reduce((s, t) => s + t.qcm, 0) || 1;
+  const totalOpen = program.reduce((s, t) => s + t.open, 0) || 1;
+
+  // cibles QCM par sujet de programme : pondérées par la fréquence réelle, MIN 1 (→ couverture 100 %).
+  const qcmTarget = program.map((t) => ({ topic: t.topic, n: Math.max(1, Math.round((t.qcm / totalQcm) * budgetQcm)) }));
   // liste pondérée (chaque sujet répété n fois) → lots de 6 (1 QCM par entrée, pas de focus = couverture).
   const weighted: string[] = [];
   for (const t of qcmTarget) for (let k = 0; k < t.n; k++) weighted.push(t.topic);
@@ -275,8 +287,8 @@ export async function buildParcours(opts: { budgetQcm?: number; budgetOpen?: num
     } catch (e) { step(`Lot QCM ignoré (${(e as Error).message.slice(0, 40)})`, prog); }
   }
 
-  // OUVERTES : réparties sur les sujets les plus lourds (proportion open) + ceux vus en ouvert au final.
-  const openTarget = stats.byTopic
+  // OUVERTES : réparties sur les sujets de programme les plus lourds (proportion open au final).
+  const openTarget = program
     .map((t) => ({ topic: t.topic, w: (t.open / totalOpen) + (t.qcm / totalQcm) * 0.3 }))
     .sort((a, b) => b.w - a.w).slice(0, budgetOpen);
   const { architectQuestion } = await import("@/lib/architect");
@@ -294,8 +306,8 @@ export async function buildParcours(opts: { budgetQcm?: number; budgetOpen?: num
       no++;
     } catch (e) { step(`Ouverte ${tp} ignorée (${(e as Error).message.slice(0, 40)})`, 70); }
   }
-  step(`Parcours : ${nq} QCM + ${no} ouvertes sur ${stats.byTopic.length} sujets`, 100);
-  return { qcm: nq, open: no, topics: stats.byTopic.length };
+  step(`Parcours : ${nq} QCM + ${no} ouvertes couvrant ${program.length} sujets de programme`, 100);
+  return { qcm: nq, open: no, topics: program.length };
 }
 
 // ─────────────────────── parcours généré (P3) — requêtes ───────────────────────
