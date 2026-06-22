@@ -3,6 +3,7 @@ import { extractJson, runClaudeCode } from "@/lib/claude-code";
 import { coursePaths } from "@/lib/courses";
 import { sourceHref } from "@/lib/deeplink";
 import { renderExamPages } from "@/lib/exam-index";
+import { generateQcmBatch, verifyQcmBatch } from "@/lib/qcm";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -225,6 +226,76 @@ export function bankQuestions(kind?: Kind): BankQuestion[] {
     `SELECT id, kind, topic, subtopic, statement, official_answer officialAnswer, options, source_exam sourceExam, exam_year examYear, exam_page examPage, points, lecture_rank lectureRank, exam_href examHref
      FROM bank_questions ${where} ORDER BY (lecture_rank IS NULL), lecture_rank, topic, exam_year, exam_page`
   ).all() as any[]).map((r) => ({ ...r }));
+}
+
+// ─────────────────────── P3 — parcours généré (couverture 100 % à la bonne proportion) ───────────────────────
+
+const LETTERS = ["A", "B", "C", "D", "E", "F"];
+
+/**
+ * Génère un PARCOURS de questions NEUVES couvrant TOUT le programme (chaque sujet ≥ 1 QCM) à la
+ * proportion réelle des finals (sujet fréquent → plus de questions). Réutilise l'architecte QCM
+ * (distracteurs = idées fausses, vérif à l'aveugle) + l'architecte ouvert. Persiste dans revision_plan.
+ */
+export async function buildParcours(opts: { budgetQcm?: number; budgetOpen?: number; onStep?: StepCb } = {}): Promise<{ qcm: number; open: number; topics: number }> {
+  ensureRevisionSchema();
+  const step = opts.onStep ?? (() => {});
+  const stats = bankStats();
+  if (!stats.byTopic.length) throw new Error("Banque vide : construis-la d'abord (indexBank).");
+  const budgetQcm = opts.budgetQcm ?? 24, budgetOpen = opts.budgetOpen ?? 8;
+  sqlite.exec(`DELETE FROM revision_plan`);
+  const rank = new Map<string, number | null>(stats.byTopic.map((t) => [t.topic, t.lectureRank]));
+  const totalQcm = stats.byTopic.reduce((s, t) => s + t.qcm, 0) || 1;
+  const totalOpen = stats.byTopic.reduce((s, t) => s + t.open, 0) || 1;
+
+  // cibles QCM par sujet : pondérées par la fréquence réelle, MIN 1 (→ couverture 100 %).
+  const qcmTarget = stats.byTopic.map((t) => ({ topic: t.topic, n: Math.max(1, Math.round((t.qcm / totalQcm) * budgetQcm)) }));
+  // liste pondérée (chaque sujet répété n fois) → lots de 6 (1 QCM par entrée, pas de focus = couverture).
+  const weighted: string[] = [];
+  for (const t of qcmTarget) for (let k = 0; k < t.n; k++) weighted.push(t.topic);
+
+  const insQ = sqlite.prepare(`INSERT INTO revision_plan (kind, topic, lecture_rank, statement, options, correct, misconceptions, explanation, verified, verify_method) VALUES ('qcm',?,?,?,?,?,?,?,?,?)`);
+  let nq = 0;
+  const BATCH = 6;
+  for (let b = 0; b < weighted.length; b += BATCH) {
+    const chunk = weighted.slice(b, b + BATCH);
+    const prog = 5 + Math.round((b / weighted.length) * 55);
+    step(`Parcours QCM — lot ${Math.floor(b / BATCH) + 1} (${chunk.join(", ").slice(0, 50)}…)`, prog);
+    try {
+      const topicsArg = chunk.map((t) => ({ label: t, method: null }));
+      let items = await generateQcmBatch(topicsArg, chunk.length, () => {});
+      try { items = await verifyQcmBatch(items, () => {}); } catch {}
+      items.slice(0, chunk.length).forEach((it, j) => {
+        const tp = chunk[j] ?? it.topic;
+        const opts = (it.options ?? []).map((o, k) => `${LETTERS[k]}) ${o}`).join("\n");
+        const correct = (it.correct ?? []).map((c) => LETTERS[c] ?? "?").join(", ");
+        insQ.run(tp, rank.get(tp) ?? null, it.stem, opts, correct, JSON.stringify(it.misconceptions ?? []), it.explanation ?? null, it.verified ?? null, it.verified === 1 ? "qcm-blind-verify" : null);
+        nq++;
+      });
+    } catch (e) { step(`Lot QCM ignoré (${(e as Error).message.slice(0, 40)})`, prog); }
+  }
+
+  // OUVERTES : réparties sur les sujets les plus lourds (proportion open) + ceux vus en ouvert au final.
+  const openTarget = stats.byTopic
+    .map((t) => ({ topic: t.topic, w: (t.open / totalOpen) + (t.qcm / totalQcm) * 0.3 }))
+    .sort((a, b) => b.w - a.w).slice(0, budgetOpen);
+  const { architectQuestion } = await import("@/lib/architect");
+  const { profile } = await import("@/lib/course-profile");
+  const archs = profile().archetypes as any[];
+  const insO = sqlite.prepare(`INSERT INTO revision_plan (kind, topic, lecture_rank, statement, solution, verified, verify_method) VALUES ('open',?,?,?,?,?,?)`);
+  let no = 0;
+  for (let i = 0; i < openTarget.length; i++) {
+    const tp = openTarget[i].topic;
+    step(`Parcours ouvertes — ${tp} (${i + 1}/${openTarget.length})`, 62 + Math.round((i / Math.max(1, openTarget.length)) * 35));
+    try {
+      const a = archs[i % archs.length];
+      const r = await architectQuestion(a, tp, 15, { maxRounds: 1 });
+      insO.run(tp, rank.get(tp) ?? null, r.q.statement_tex, r.q.solution_tex, 1, "architect");
+      no++;
+    } catch (e) { step(`Ouverte ${tp} ignorée (${(e as Error).message.slice(0, 40)})`, 70); }
+  }
+  step(`Parcours : ${nq} QCM + ${no} ouvertes sur ${stats.byTopic.length} sujets`, 100);
+  return { qcm: nq, open: no, topics: stats.byTopic.length };
 }
 
 // ─────────────────────── parcours généré (P3) — requêtes ───────────────────────

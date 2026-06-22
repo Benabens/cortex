@@ -98,7 +98,7 @@ const ARCHITECT_QCM_RULES = [
 ];
 
 /** Génère un LOT de QCM (1 appel Max) couvrant des sujets donnés, au format du cours. */
-async function generateQcmBatch(topics: { label: string; method: string | null }[], n: number, step: StepCb, focus?: string): Promise<QcmItem[]> {
+export async function generateQcmBatch(topics: { label: string; method: string | null }[], n: number, step: StepCb, focus?: string): Promise<QcmItem[]> {
   const fmt = getFormatProfile();
   const imgs = courseRefImages().slice(0, 4);
   const { profile } = require("@/lib/course-profile");
@@ -149,7 +149,7 @@ const VERIFY_SCHEMA = {
 } as const;
 
 /** Vérif à l'aveugle d'un lot de QCM : résous chaque QCM SANS la clé, confirme/corrige la clé. */
-async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<QcmItem[]> {
+export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<QcmItem[]> {
   const { profile } = require("@/lib/course-profile");
   const blind = items.map((q, i) => `Q${i}. [${q.type}] ${q.stem}\n${q.options.map((o, k) => `   (${k}) ${o}`).join("\n")}`).join("\n\n");
   // V9 P3 — la mémoire de calibration des QCM est aussi réinjectée à la CRITIQUE : un « trop facile »

@@ -4,7 +4,7 @@
  */
 import { enterCourse } from "@/db/client";
 import { normalizeCourse } from "@/lib/courses";
-import { assignLectureRanks, bankStats, indexBank } from "@/lib/revision";
+import { assignLectureRanks, bankStats, buildParcours, exportRevisionJson, indexBank, planStats } from "@/lib/revision";
 
 function arg(name: string): string | undefined {
   const eq = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -29,6 +29,19 @@ async function main() {
     const s = bankStats();
     console.log(`\n  banque : ${s.qcm} QCM + ${s.open} ouvertes · ${s.byTopic.length} sujets`);
     for (const t of s.byTopic) console.log(`    L${t.lectureRank ?? "?"} · ${t.topic} : ${t.qcm} QCM, ${t.open} ouvertes`);
+  }
+
+  if (all || only("parcours")) {
+    console.log(`\n━━ P3 : parcours généré (couverture 100 % à la proportion réelle) ━━`);
+    const r = await buildParcours({ onStep: step });
+    console.log(`parcours : ${r.qcm} QCM + ${r.open} ouvertes sur ${r.topics} sujets`);
+  }
+
+  if (all || only("export") || only("parcours") || only("index")) {
+    const file = exportRevisionJson();
+    const ps = planStats(), bs = bankStats();
+    console.log(`\n✓ export JSON committé : ${file}`);
+    console.log(`  banque ${bs.qcm}+${bs.open} · parcours ${ps.qcm}+${ps.open} (${ps.topics} sujets)`);
   }
 }
 
