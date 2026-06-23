@@ -97,8 +97,11 @@ const ARCHITECT_QCM_RULES = [
   `  - Calibre la difficulté sur les VRAIS examens du cours (regarde les pages fournies).`,
 ];
 
-/** Génère un LOT de QCM (1 appel Max) couvrant des sujets donnés, au format du cours. */
-export async function generateQcmBatch(topics: { label: string; method: string | null }[], n: number, step: StepCb, focus?: string): Promise<QcmItem[]> {
+/** Génère un LOT de QCM (1 appel Max) couvrant des sujets donnés, au format du cours.
+ *  `guidance` (optionnel, additif) : consignes supplémentaires injectées dans le prompt — sert au
+ *  parcours de révision pour (a) bâtir des distracteurs sur les ERREURS RÉELLES de l'étudiant et
+ *  (b) lister les énoncés déjà couverts à NE PAS répéter. Absent → comportement identique à avant. */
+export async function generateQcmBatch(topics: { label: string; method: string | null }[], n: number, step: StepCb, focus?: string, guidance?: string): Promise<QcmItem[]> {
   const fmt = getFormatProfile();
   const imgs = courseRefImages().slice(0, 4);
   const { profile } = require("@/lib/course-profile");
@@ -118,6 +121,7 @@ export async function generateQcmBatch(topics: { label: string; method: string |
     calib || null,
     ``,
     coverage,
+    guidance ? `\n${guidance}` : null,
     `Réponds UNIQUEMENT avec l'objet JSON { "items": [ … ] } (${n} QCM). Aucun fichier.`,
     JSON.stringify(QCM_BATCH_SCHEMA, null, 2),
   ].filter((l) => l != null && l !== false && l !== "").join("\n");

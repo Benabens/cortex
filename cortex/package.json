@@ -17,7 +17,8 @@
     "db:checkpoint": "tsx scripts/db-checkpoint.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "revision": "tsx scripts/revision.ts"
+    "revision": "tsx scripts/revision.ts",
+    "revision:extend": "tsx scripts/revision-extend.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
