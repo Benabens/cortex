@@ -370,7 +370,7 @@ export const REVISION_THEMES: Theme[] = [
     weak: "Spectral clustering = non-supervisé, graphe de similarité → sépare le non-convexe (anneaux concentriques) là où K-means échoue. ≠ LDA (supervisée). GMM/EM = clusters mous (probabilités d'appartenance) vs K-means dur." },
   { label: "RNN & sequence models", rank: 13, target: 10, aliases: [],
     weak: "RNN = séquentiel : hₜ dépend de hₜ₋₁ → NON parallélisable (tout le reste l'est). Le « séquentiel dans le temps » (RNN) ≠ « parallèle dans la couche/batch » (MLP/CNN)." },
-  { label: "Self-attention & Transformers", rank: 13, target: 10, aliases: ["Attention", "Transformer"],
+  { label: "Self-attention & Transformers", rank: 13, target: 10, aliases: ["Attention", "Transformer", "Self-attention"],
     weak: "Self-attention = chaque token regarde tous les autres (parallélisable, contrairement au RNN). Transformer = encoder-decoder à attention (cross-attention) ≠ autoencodeur (x→z→x̂). MLP/CNN/RNN/Transformer = des TYPES de NN." },
 ];
 

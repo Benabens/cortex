@@ -60,7 +60,9 @@ async function main() {
       if (qcm + open === 0) return;
       const file = exportRevisionJson();
       console.log(`  → export ${path.basename(file)} (vague « ${theme} »)`);
-      if (!noGit) commitWave(theme, qcm, open);
+      // ne committer que si la vague a AJOUTÉ du contenu (évite les commits « +0 » au redémarrage,
+      // où seul l'horodatage du JSON changerait).
+      if (!noGit && qcm + open > 0) commitWave(theme, qcm, open);
     },
   });
 
