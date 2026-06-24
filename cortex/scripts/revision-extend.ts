@@ -54,6 +54,10 @@ async function main() {
     perTopic, openPerTopic, onlyRank,
     onStep: (m, p) => console.log(`  [${String(p).padStart(3)}%] ${m}`),
     onWave: (theme, qcm, open) => {
+      // n'exporter/committer que si la vague a AJOUTÉ du contenu. Évite, au redémarrage, de salir
+      // l'arbre de travail (l'horodatage seul changerait le JSON) sur les thèmes déjà complets.
+      // L'export lit toute la DB → un éventuel rattrapage est inclus à la 1ʳᵉ vraie vague.
+      if (qcm + open === 0) return;
       const file = exportRevisionJson();
       console.log(`  → export ${path.basename(file)} (vague « ${theme} »)`);
       if (!noGit) commitWave(theme, qcm, open);
