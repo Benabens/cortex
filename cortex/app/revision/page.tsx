@@ -24,13 +24,45 @@ export default function RevisionPage() {
   const [tab, setTab] = useState<"qcm" | "open" | "plan">("qcm");
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [reveal, setReveal] = useState<Record<number, boolean>>({});
+  const [done, setDone] = useState<Record<string, boolean>>({});
+  const [hideDone, setHideDone] = useState(false);
 
   useEffect(() => { (async () => { try { setD(await (await fetch("/api/revision")).json()); } catch {} setLoading(false); })(); }, []);
+
+  // progression locale : coche « fait » par question, persiste entre sessions (localStorage, par cours)
+  useEffect(() => {
+    if (!d?.course) return;
+    try {
+      const raw = localStorage.getItem(`cortex:revision:done:${d.course}`);
+      setDone(raw ? JSON.parse(raw) : {});
+      setHideDone(localStorage.getItem(`cortex:revision:hideDone:${d.course}`) === "1");
+    } catch {}
+  }, [d?.course]);
+  const toggleDone = (k: string) => setDone((prev) => {
+    const next: Record<string, boolean> = { ...prev, [k]: !prev[k] };
+    if (!next[k]) delete next[k];
+    try { localStorage.setItem(`cortex:revision:done:${d?.course}`, JSON.stringify(next)); } catch {}
+    return next;
+  });
+  const toggleHide = () => setHideDone((v) => {
+    const nv = !v;
+    try { localStorage.setItem(`cortex:revision:hideDone:${d?.course}`, nv ? "1" : "0"); } catch {}
+    return nv;
+  });
+  const resetDone = () => { setDone({}); try { localStorage.removeItem(`cortex:revision:done:${d?.course}`); } catch {} };
+  const doneBtn = (k: string) => (
+    <button type="button" onClick={() => toggleDone(k)} aria-pressed={!!done[k]} title={done[k] ? "fait — cliquer pour annuler" : "marquer comme fait"}
+      style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", borderRadius: "var(--r-sm)", padding: "3px 9px", fontSize: 12, lineHeight: 1.4, border: `1px solid ${done[k] ? "var(--green)" : "var(--line-strong)"}`, color: done[k] ? "var(--green-ink)" : "var(--ink-3)", background: done[k] ? "var(--green-wash)" : "transparent" }}>
+      <span style={{ width: 14, height: 14, borderRadius: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, border: `1.5px solid ${done[k] ? "var(--green)" : "var(--ink-3)"}`, color: "var(--green-ink)" }}>{done[k] ? "✓" : ""}</span>
+      {done[k] ? "fait" : "à faire"}
+    </button>
+  );
 
   const qcmGroups = useMemo(() => groupByTopic(d?.bank.qcm ?? []), [d]);
   const openGroups = useMemo(() => groupByTopic(d?.bank.open ?? []), [d]);
   const planGroups = useMemo(() => groupByTopic(d?.plan.questions ?? []), [d]);
   const totBank = (d?.bank.stats.qcm ?? 0) + (d?.bank.stats.open ?? 0);
+  const doneTotal = Object.values(done).filter(Boolean).length;
 
   return (
     <main className="page">
@@ -76,10 +108,20 @@ export default function RevisionPage() {
           </section>
 
           {/* onglets */}
-          <div className="segmented mb-4">
+          <div className="segmented mb-3">
             <button data-active={tab === "qcm"} onClick={() => setTab("qcm")}>Banque QCM ({d.bank.stats.qcm})</button>
             <button data-active={tab === "open"} onClick={() => setTab("open")}>Banque ouvertes ({d.bank.stats.open})</button>
             <button data-active={tab === "plan"} onClick={() => setTab("plan")}>Parcours généré ({(d.plan.stats.qcm) + (d.plan.stats.open)})</button>
+          </div>
+
+          <div className="flex items-center gap-3 mb-4 text-[12.5px] flex-wrap" style={{ color: "var(--ink-3)" }}>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
+              <input type="checkbox" checked={hideDone} onChange={toggleHide} style={{ accentColor: "var(--green)", width: 14, height: 14 }} />
+              Masquer les questions faites
+            </label>
+            <span style={{ color: "var(--ink-4)" }}>·</span>
+            <span><strong style={{ color: "var(--ink-2)" }}>{doneTotal}</strong> question{doneTotal > 1 ? "s" : ""} marquée{doneTotal > 1 ? "s" : ""} faite{doneTotal > 1 ? "s" : ""}</span>
+            {doneTotal > 0 && <button className="btn btn-quiet btn-sm" onClick={resetDone}>réinitialiser</button>}
           </div>
 
           {tab !== "plan" && (qcmGroups.length || openGroups.length) ? (
@@ -91,13 +133,17 @@ export default function RevisionPage() {
                     <button className="t-row w-full text-left" style={{ gridTemplateColumns: "auto 1fr auto", width: "100%" }} onClick={() => setOpen((o) => ({ ...o, [key]: !o[key] }))}>
                       <span className="tag" style={{ minWidth: 42, justifyContent: "center" }}>{lr(g.lectureRank)}</span>
                       <span className="font-medium" style={{ color: "var(--ink)" }}>{g.topic}</span>
-                      <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>{g.items.length} · {open[key] ? "▾" : "▸"}</span>
+                      <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>{g.items.filter((x) => done[`${tab}-${x.id}`]).length}/{g.items.length} faites · {open[key] ? "▾" : "▸"}</span>
                     </button>
                     {open[key] && (
                       <div className="px-4 pb-3 space-y-2">
-                        {g.items.map((q) => (
-                          <div key={q.id} className="inset" style={{ padding: 12 }}>
+                        {g.items.map((q) => {
+                          const dk = `${tab}-${q.id}`;
+                          if (hideDone && done[dk]) return null;
+                          return (
+                          <div key={q.id} className="inset" style={{ padding: 12, opacity: done[dk] ? 0.55 : 1, transition: "opacity .15s" }}>
                             <div className="flex items-center gap-2 flex-wrap text-[12px] mb-1">
+                              {doneBtn(dk)}
                               <span className="tag tag-blue">{q.sourceExam?.replace(/_/g, " ").slice(0, 28)}{q.examYear ? ` ${q.examYear}` : ""}{q.examPage ? ` · p.${q.examPage}` : ""}</span>
                               {q.examHref && <a className="btn btn-quiet btn-sm" style={{ color: "var(--accent-ink)" }} href={q.examHref} target="_blank" rel="noopener">ouvrir (PDF) →</a>}
                             </div>
@@ -109,7 +155,8 @@ export default function RevisionPage() {
                                 : <button className="btn btn-quiet btn-sm mt-1" style={{ color: "var(--green)" }} onClick={() => setReveal((r) => ({ ...r, [q.id]: true }))}>révéler la réponse</button>
                             )}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -129,13 +176,17 @@ export default function RevisionPage() {
                       <button className="t-row w-full text-left" style={{ gridTemplateColumns: "auto 1fr auto", width: "100%" }} onClick={() => setOpen((o) => ({ ...o, [key]: !o[key] }))}>
                         <span className="tag" style={{ minWidth: 42, justifyContent: "center" }}>{lr(g.lectureRank)}</span>
                         <span className="font-medium" style={{ color: "var(--ink)" }}>{g.topic}</span>
-                        <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>{g.items.filter((x) => x.kind === "qcm").length} QCM · {g.items.filter((x) => x.kind === "open").length} ouv. · {open[key] ? "▾" : "▸"}</span>
+                        <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>{g.items.filter((x) => done[`plan-${x.id}`]).length}/{g.items.length} faites · {g.items.filter((x) => x.kind === "qcm").length} QCM · {open[key] ? "▾" : "▸"}</span>
                       </button>
                       {open[key] && (
                         <div className="px-4 pb-3 space-y-2">
-                          {g.items.map((q) => (
-                            <div key={q.id} className="inset" style={{ padding: 12 }}>
-                              <div className="flex items-center gap-2 text-[12px] mb-1">
+                          {g.items.map((q) => {
+                            const dk = `plan-${q.id}`;
+                            if (hideDone && done[dk]) return null;
+                            return (
+                            <div key={q.id} className="inset" style={{ padding: 12, opacity: done[dk] ? 0.55 : 1, transition: "opacity .15s" }}>
+                              <div className="flex items-center gap-2 flex-wrap text-[12px] mb-1">
+                                {doneBtn(dk)}
                                 <span className={`tag ${q.kind === "qcm" ? "tag-blue" : "tag-amber"}`}>{q.kind === "qcm" ? "QCM" : "ouverte"}</span>
                                 {q.verifyMethod === "deterministic" && <span className="tag tag-green" title="réponse prouvée">✓ prouvé</span>}
                                 {q.verified === 1 && q.verifyMethod !== "deterministic" && <span className="tag" title="vérifié (relecture)">vérifié</span>}
@@ -146,7 +197,8 @@ export default function RevisionPage() {
                                 ? <div className="mt-1.5 text-[13px]" style={{ color: "var(--green-ink)" }}>{q.kind === "qcm" ? <><strong>Réponse :</strong> {q.correct} — {q.explanation}</> : <><strong>Corrigé :</strong> {q.solution}</>}</div>
                                 : <button className="btn btn-quiet btn-sm mt-1" style={{ color: "var(--green)" }} onClick={() => setReveal((r) => ({ ...r, [q.id]: true }))}>révéler</button>}
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
