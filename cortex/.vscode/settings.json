@@ -1,0 +1,14 @@
+{
+  "files.exclude": {
+    "**/.DS_Store": true,
+    ".next": true,
+    "node_modules": true,
+    "tsconfig.tsbuildinfo": true,
+    "next-env.d.ts": true
+  },
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.patterns": {
+    "package.json": "package-lock.json, tsconfig.json, eslint.config.mjs, postcss.config.mjs, drizzle.config.ts, next.config.ts, instrumentation.ts, skills-lock.json",
+    ".env.example": ".env.local"
+  }
+}
