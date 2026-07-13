@@ -210,6 +210,10 @@ async function ensureTenant(schema: string): Promise<TenantExec> {
     // PGlite : le SET search_path a pu précéder la création → re-force.
     if (isPglite()) _pgliteSchema = null;
     for (const stmt of allDdl("postgres")) await ex.exec(stmt);
+    // Recherche plein-texte : équivalent PG de fts_items (cf. lib/search.ts).
+    await ex.exec(
+      `CREATE INDEX IF NOT EXISTS items_search_idx ON items USING GIN (to_tsvector('simple', coalesce(text_norm, '')))`
+    );
     bootstrapped.add(schema);
   }
   return ex;

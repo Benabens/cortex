@@ -68,6 +68,10 @@ export const TABLES: TableSpec[] = [
       { name: "images", type: "text" },
       { name: "tags", type: "text" },
       { name: "anchor", type: "text" },
+      // Ombre normalisée (minuscules sans accents) du texte — UNIQUEMENT alimentée
+      // en mode postgres (recherche tsvector accent-insensible). SQLite : FTS5
+      // remove_diacritics fait ce travail → colonne jamais écrite (dialecte gaté).
+      { name: "text_norm", type: "text" },
     ],
   },
   {

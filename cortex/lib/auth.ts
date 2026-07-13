@@ -33,7 +33,13 @@ function toAdapterUser(r: UserRow): AdapterUser {
   };
 }
 
-/** Adapter minimal (JWT sessions → pas de méthodes session) sur le store portable. */
+async function getUserById(id: string): Promise<AdapterUser | null> {
+  const r = await authGet<UserRow>(`SELECT * FROM users WHERE id = ?`, id);
+  return r ? toAdapterUser(r) : null;
+}
+
+/** Adapter minimal (JWT sessions → pas de méthodes session) sur le store portable.
+ * ⚠ Auth.js DÉSTRUCTURE les méthodes (this perdu) → aucune méthode ne référence this. */
 function cortexAdapter(): Adapter {
   return {
     async createUser(user) {
@@ -43,12 +49,9 @@ function cortexAdapter(): Adapter {
         id, user.email ?? null, user.name ?? null, user.image ?? null,
         user.emailVerified ? user.emailVerified.toISOString() : null
       );
-      return (await this.getUser!(id))!;
+      return (await getUserById(id))!;
     },
-    async getUser(id) {
-      const r = await authGet<UserRow>(`SELECT * FROM users WHERE id = ?`, id);
-      return r ? toAdapterUser(r) : null;
-    },
+    getUser: getUserById,
     async getUserByEmail(email) {
       const r = await authGet<UserRow>(`SELECT * FROM users WHERE email = ?`, email);
       return r ? toAdapterUser(r) : null;
@@ -69,7 +72,7 @@ function cortexAdapter(): Adapter {
         user.email ?? existing.email, user.name ?? existing.name, user.image ?? existing.image,
         user.emailVerified ? user.emailVerified.toISOString() : existing.email_verified, user.id
       );
-      return (await this.getUser!(user.id))!;
+      return (await getUserById(user.id))!;
     },
     async linkAccount(account: AdapterAccount) {
       await authRun(

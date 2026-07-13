@@ -97,8 +97,11 @@ export const sqlite = new Proxy({} as Database.Database, {
   },
 });
 
-/** Table virtuelle FTS5 pour la recherche globale (créée à la main, hors Drizzle), sur la DB courante. */
+/** Table virtuelle FTS5 pour la recherche globale (SQLite uniquement — en mode
+ * postgres la recherche est un index GIN tsvector sur items.text_norm, cf.
+ * db/driver-postgres + lib/search). */
 export function ensureFts() {
+  if ((process.env.DB_DRIVER ?? "sqlite") !== "sqlite") return;
   sqlite.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS fts_items USING fts5(
       title, text, lecture_id UNINDEXED, item_id UNINDEXED, source_id UNINDEXED,

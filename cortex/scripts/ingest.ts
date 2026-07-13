@@ -12,6 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { extractText, getDocumentProxy } from "unpdf";
 import { currentCourse, enterCourse, ensureFts } from "../db/client";
+import { indexItemForSearch } from "../lib/search";
 import { q } from "../db/q";
 import { coursePaths, DEFAULT_COURSE } from "../lib/courses";
 import { importFolder } from "../lib/import-folder";
@@ -98,10 +99,7 @@ async function addSource(
       it.tags ? JSON.stringify(it.tags) : null,
       it.anchor
     );
-    await q.run(
-      `INSERT INTO fts_items (title, text, lecture_id, item_id, source_id) VALUES (?,?,?,?,?)`,
-      it.title ?? "", it.text, it.lectureId ?? "", String(itemId), String(sid)
-    );
+    await indexItemForSearch(itemId, sid, it.title ?? "", it.text, it.lectureId ?? "");
   }
   return items.length;
 }
@@ -465,7 +463,8 @@ async function main() {
   }
 
   console.log("Nettoyage des données dérivées (sources/items/fts)…");
-  await q.exec("DELETE FROM items; DELETE FROM sources; DELETE FROM fts_items;");
+  await q.exec("DELETE FROM items; DELETE FROM sources;");
+  if (q.dialect === "sqlite") await q.exec("DELETE FROM fts_items;");
 
   if (COURSE === DEFAULT_COURSE) {
     // ---- cs-202 : flux historique INCHANGÉ ----
@@ -498,7 +497,10 @@ async function main() {
   // Vocabulaire (pour la recherche tolérante aux fautes)
   console.log("• vocabulaire  :", await buildVocab(), "termes");
 
-  const counts = await q.get<any>("SELECT (SELECT count(*) FROM sources) s, (SELECT count(*) FROM items) i, (SELECT count(*) FROM fts_items) f");
+  const ftsCountSql = q.dialect === "postgres"
+    ? "(SELECT count(*) FROM items WHERE text_norm IS NOT NULL)"
+    : "(SELECT count(*) FROM fts_items)";
+  const counts = await q.get<any>(`SELECT (SELECT count(*) FROM sources) s, (SELECT count(*) FROM items) i, ${ftsCountSql} f`);
   console.log(`\n✓ Ingestion terminée : ${counts.s} sources, ${counts.i} items, ${counts.f} indexés (FTS).`);
 
   // Récap « ce qui a été compris » (la matière, les examens de réf, les conventions).

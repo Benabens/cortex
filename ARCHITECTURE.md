@@ -62,3 +62,59 @@ en place mais **optionnelle** (payante) ; elles renvoient un message clair si pa
 1. **Construction (en cours)** : Claude (moi) construit l'app. Continuité via STATE.md + git.
 2. **Exploitation** : routine planifiée nocturne où je lance `exam:brief`, je rédige,
    je `exam:save` → un examen frais le matin, sans coût API.
+
+## Refonte backend « produit » (branche `backend-overhaul`, juillet 2026)
+
+> Objectif : passer d'un super-outil solo à une fondation multi-utilisateurs, SANS changer le
+> comportement par défaut (dev €0, SQLite local, moteur Claude Code via Max). Tout est
+> config-driven : les défauts = comportement historique. Preuve d'invariance à chaque phase :
+> `scripts/regression-cs202.ts` byte-identique (`350d533f7b765a97` / `9a294bb25e9d919c`).
+
+### Moteur LLM — `lib/llm/` (Phase A)
+- Interface unique : `complete()` / `completeText()` / `completeVia(provider)` + `LlmError`
+  (codes TIMEOUT/UNAVAILABLE préservés → mêmes mappings HTTP).
+- 3 providers par `LLM_PROVIDER` : **claude-code** (défaut €0 : `claude -p` headless via Max,
+  clés API strippées de l'env enfant, vision par chemins + `--add-dir`) · **anthropic**
+  (SDK officiel, streaming) · **openai-compatible** (endpoint générique — NVIDIA NIM, vLLM…).
+- Robustesse : retries backoff+jitter (erreurs retryable seulement — les fallbacks métier des
+  call sites exigent le throw immédiat), timeout par appel, AbortSignal, limiteur de
+  concurrence global FIFO (`LLM_MAX_CONCURRENCY`).
+- 26 call sites migrés ; `lib/claude-code.ts` reste le pont bas niveau (inchangé).
+
+### Données — `db/` (Phase B)
+- **`db/tables.ts`** : SOURCE DE VÉRITÉ du schéma (20 tables, y c. les ex-« lazy ») → DDL
+  généré pour les deux dialectes. `db/schema.ts`/migrations Drizzle conservés en héritage
+  (Drizzle n'était PAS utilisé au runtime — tout le code est en SQL brut).
+- **`db/q.ts`** : façade de requêtes ASYNC unique (`q.all/get/run/insert/exec/tx`,
+  `ensureTable/ensureColumns`, `nowStr()/nowPlusDays()` — les ~200 sites SQL bruts ont été
+  convertis ; SQL portable : plus de `datetime('now')`, `OR REPLACE` → `ON CONFLICT`).
+- **Driver sqlite** (défaut) : better-sqlite3 par cours (ALS), cache de statements, mutex de
+  transaction par connexion — comportement historique.
+- **Driver postgres** (`DB_DRIVER=postgres` + `DATABASE_URL`) : postgres.js OU **PGlite**
+  (`pglite://…`, Postgres WASM in-process — tests/démo sans Docker). **Multi-tenant par
+  SCHÉMA** : `t_<user>_<cours>` via `search_path` — isolation STRUCTURELLE (aucun WHERE
+  user_id à oublier, SQL applicatif identique aux deux dialectes ; miroir du modèle
+  fichier-par-cours). Choix assumé vs colonnes user_id : isolation plus dure, zéro réécriture.
+- **Recherche** : FTS5 (sqlite) · tsvector GIN 'simple' sur ombre normalisée `items.text_norm`
+  (postgres) — même expansion floue du vocabulaire, divergence de ranking assumée (bm25 vs ts_rank).
+- **Migration** : `scripts/migrate-to-postgres.ts` (ids préservés, séquences resynchronisées,
+  sanitisation NUL/surrogates, idempotent, vérification des comptes par table).
+
+### Auth & tenancy (Phase B4)
+- **Auth.js v5 (NextAuth)**, OPT-IN par `AUTH_ENABLED=1` — sans elle, AUCUNE auth (mono-user
+  « owner », historique). Magic-link e-mail (lien loggé en console si aucun endpoint d'envoi
+  — dev €0) + Google OAuth optionnel. Sessions JWT ; store users/accounts/tokens séparé
+  (`data/auth.db` en sqlite, schéma `public` en PG).
+- **`proxy.ts`** (Next 16, ex-middleware) : garde toutes les routes, pose le header interne
+  `x-cortex-user` (strippé des requêtes entrantes — anti-usurpation) → `useCourse()` installe
+  le contexte AsyncLocalStorage {user, cours} → tenant DB.
+- Preuves : test d'isolation 2 users sur Postgres réel (PGlite) ; login magic-link E2E via curl.
+
+### Lancer le mode « prod-like »
+```
+docker compose up -d postgres            # (cortex/docker-compose.yml)
+# .env.local : DB_DRIVER=postgres · DATABASE_URL=postgres://cortex:cortex@localhost:5433/cortex
+#              AUTH_ENABLED=1 · AUTH_SECRET=…
+npx tsx scripts/migrate-to-postgres.ts   # importe les DB SQLite locales
+npm run dev
+```

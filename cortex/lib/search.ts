@@ -1,6 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
-import { boundedEdit, tokenize } from "@/lib/text";
+import { boundedEdit, normalize, tokenize } from "@/lib/text";
 
 export type SearchHit = {
   itemId: number;
@@ -121,13 +121,79 @@ const SEARCH_SQL = `
   LIMIT ?
 `;
 
+/**
+ * Équivalent Postgres : tsquery 'simple' sur items.text_norm (ombre normalisée,
+ * accent-insensible comme le tokenizer FTS5) + ts_rank pondéré par la récence.
+ * Divergence assumée : le classement ts_rank ≠ bm25 (mêmes features, scores
+ * différents) et ts_headline surligne moins bien les termes accentués (le
+ * snippet est pris sur le texte ORIGINAL pour rester lisible).
+ */
+function toPgTsQuery(terms: string[], mode: "and" | "or", v: Vocab): string {
+  const groups = terms.map((t) => {
+    const parts = [`${t}:*`];
+    if (!knownPrefixOrExact(t, v)) {
+      for (const c of fuzzyCandidates(t, v)) parts.push(c);
+    }
+    return parts.length > 1 ? `(${parts.join(" | ")})` : parts[0];
+  });
+  return groups.join(mode === "and" ? " & " : " | ");
+}
+
+const PG_SEARCH_SQL = `
+  SELECT i.id "itemId", s.id "sourceId", s.type "sourceType", s.title "sourceTitle", s.path "sourcePath",
+         i.lecture_id "lectureId", i.title title, i.anchor anchor,
+         ts_headline('simple', i.text, to_tsquery('simple', ?),
+                     'StartSel=«, StopSel=», MaxWords=12, MinWords=4, MaxFragments=2, FragmentDelimiter=" … "') snippet
+  FROM items i
+  JOIN sources s ON s.id = i.source_id
+  WHERE to_tsvector('simple', coalesce(i.text_norm, '')) @@ to_tsquery('simple', ?)
+  ORDER BY ts_rank(to_tsvector('simple', coalesce(i.text_norm, '')), to_tsquery('simple', ?)) * (0.5 + s.recency_weight) DESC
+  LIMIT ?
+`;
+
+/**
+ * Indexe un item pour la recherche — le pendant ÉCRITURE des deux moteurs :
+ * SQLite → ligne fts_items (tokenizer remove_diacritics) ;
+ * Postgres → ombre normalisée items.text_norm (index GIN tsvector 'simple').
+ */
+export async function indexItemForSearch(
+  itemId: number | string,
+  sourceId: number | string,
+  title: string | null,
+  text: string,
+  lectureId?: string | null
+): Promise<void> {
+  if (q.dialect === "postgres") {
+    await q.run(`UPDATE items SET text_norm = ? WHERE id = ?`, normalize(`${title ?? ""} ${text}`), Number(itemId));
+    return;
+  }
+  await q.run(
+    `INSERT INTO fts_items (title, text, lecture_id, item_id, source_id) VALUES (?,?,?,?,?)`,
+    title ?? "", text, lectureId ?? "", String(itemId), String(sourceId)
+  );
+}
+
+/** Désindexe tous les items d'une source (avant leur suppression). */
+export async function unindexSource(sourceId: number): Promise<void> {
+  if (q.dialect === "postgres") return; // text_norm part avec la ligne items
+  await q.run(`DELETE FROM fts_items WHERE source_id = ?`, sourceId);
+}
+
 export async function search(raw: string, limit = 60, mode: "and" | "or" = "and"): Promise<SearchGroup[]> {
-  const ftsQuery = await toFtsQuery(raw, mode);
-  if (!ftsQuery) return [];
   let rows: SearchHit[];
   try {
-    // exécuté à l'appel → lié à la connexion du cours courant (façade `q`)
-    rows = await q.all<SearchHit>(SEARCH_SQL, ftsQuery, limit);
+    if (q.dialect === "postgres") {
+      let terms = tokenize(raw, 2);
+      if (mode === "or") terms = terms.filter((t) => t.length >= 3 && !STOP.has(t));
+      if (!terms.length) return [];
+      const tsq = toPgTsQuery(terms, mode, await vocab());
+      rows = await q.all<SearchHit>(PG_SEARCH_SQL, tsq, tsq, tsq, limit);
+    } else {
+      const ftsQuery = await toFtsQuery(raw, mode);
+      if (!ftsQuery) return [];
+      // exécuté à l'appel → lié à la connexion du cours courant (façade `q`)
+      rows = await q.all<SearchHit>(SEARCH_SQL, ftsQuery, limit);
+    }
   } catch {
     return [];
   }

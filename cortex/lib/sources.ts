@@ -1,5 +1,6 @@
 import { ensureFts } from "@/db/client";
 import { q } from "@/db/q";
+import { indexItemForSearch, unindexSource } from "@/lib/search";
 import { refsDir } from "@/lib/paths";
 import * as cheerio from "cheerio";
 import fs from "node:fs";
@@ -50,7 +51,6 @@ export function inferExamMeta(filename: string): { kind: "final" | "midterm"; ye
 const INS_SOURCE_SQL = `INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`;
 const INS_ITEM_SQL = `INSERT INTO items (source_id, type, lecture_id, title, text, html, images, tags, anchor)
      VALUES (?,?,?,?,?,?,?,?,?)`;
-const INS_FTS_SQL = `INSERT INTO fts_items (title, text, lecture_id, item_id, source_id) VALUES (?,?,?,?,?)`;
 
 /** Lit un fichier de référence et en extrait un titre + des pages de texte. */
 async function parseRefFile(abs: string): Promise<{ title: string; pages: string[] }> {
@@ -87,7 +87,7 @@ export async function ingestRefFile(relPath: string): Promise<number> {
   // purge d'une éventuelle ingestion précédente du même chemin
   const old = await q.all<{ id: number }>(`SELECT id FROM sources WHERE path = ?`, relPath);
   for (const { id } of old) {
-    await q.run(`DELETE FROM fts_items WHERE source_id = ?`, id);
+    await unindexSource(id);
     await q.run(`DELETE FROM items WHERE source_id = ?`, id);
     await q.run(`DELETE FROM sources WHERE id = ?`, id);
   }
@@ -102,7 +102,7 @@ export async function ingestRefFile(relPath: string): Promise<number> {
       INS_ITEM_SQL,
       sid, "exercise", null, label, text, null, null, null, anchor
     );
-    await q.run(INS_FTS_SQL, label, text, "", String(itemId), String(sid));
+    await indexItemForSearch(itemId, sid, label, text);
   }
 
   // Tout fichier de data/refs/ EST un examen de référence (la sélection survit au ré-ingest).
@@ -230,7 +230,7 @@ export async function removeUploadedRef(srcPath: string): Promise<void> {
   // purge corpus
   const srcs = await q.all<{ id: number }>(`SELECT id FROM sources WHERE path = ?`, srcPath);
   for (const { id } of srcs) {
-    await q.run(`DELETE FROM fts_items WHERE source_id = ?`, id);
+    await unindexSource(id);
     await q.run(`DELETE FROM items WHERE source_id = ?`, id);
     await q.run(`DELETE FROM sources WHERE id = ?`, id);
   }
