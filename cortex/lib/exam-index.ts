@@ -1,4 +1,5 @@
-import { currentCourse, sqlite } from "@/db/client";
+import { currentCourse } from "@/db/client";
+import { q } from "@/db/q";
 import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import { coursePaths } from "@/lib/courses";
@@ -35,24 +36,8 @@ export type ExamExercise = {
   topicId: number | null;
 };
 
-export function ensureIndexSchema() {
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS exam_exercises (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    exam_title TEXT,
-    exam_year INTEGER,
-    exam_page INTEGER,
-    topic TEXT NOT NULL,
-    method TEXT,
-    exo_type TEXT,
-    trap TEXT,
-    archetype TEXT,
-    statement TEXT,
-    points REAL,
-    exam_href TEXT,
-    course_href TEXT,
-    topic_id INTEGER,
-    created_at TEXT DEFAULT (datetime('now'))
-  );`);
+export async function ensureIndexSchema(): Promise<void> {
+  await q.ensureTable("exam_exercises");
 }
 
 function pdftoppm(): string | null {
@@ -118,9 +103,9 @@ const EXO_SCHEMA = {
 type RawExo = { page?: number; topic?: string; method?: string; exo_type?: string; trap?: string; archetype?: string; statement?: string; points?: number };
 
 /** Construit le lien « passage de cours associé » : recherche scopée (topic+method) → meilleur hit de cours. */
-function courseHrefFor(course: string, topic: string, method: string | null): string | null {
+async function courseHrefFor(course: string, topic: string, method: string | null): Promise<string | null> {
   try {
-    const groups = search(`${topic} ${method ?? ""}`.trim(), 12, "or");
+    const groups = await search(`${topic} ${method ?? ""}`.trim(), 12, "or");
     const flat = groups.flatMap((g) => g.hits.map((h) => ({ ...h, sourceType: g.sourceType })));
     // priorité au matériel de COURS (slides/cours/review/site), pas aux finals eux-mêmes
     const PREF = ["course_pdf", "course", "cours", "review", "site", "serie", "cheatsheet"];
@@ -182,7 +167,7 @@ async function indexOneExam(course: string, src: { path: string; title: string; 
       statement: (e.statement ?? "").slice(0, 600) || null,
       points: Number(e.points) > 0 ? Number(e.points) : null,
       examHref: sourceHref(course, src.path, `${src.path}#page=${page}`),
-      courseHref: courseHrefFor(course, topic, method),
+      courseHref: await courseHrefFor(course, topic, method),
     });
   }
   step(`${src.title} : ${out.length} exo(s) extraits`, prog);
@@ -212,22 +197,27 @@ export type IndexResult = { exams: number; exercises: number };
 
 /** Indexe TOUS les finals/midterms du cours (un énoncé/an), exo par exo. Résilient. */
 export async function indexExamExercises(opts: { onStep?: (m: string, p: number) => void } = {}): Promise<IndexResult> {
-  ensureIndexSchema();
+  await ensureIndexSchema();
   const step = opts.onStep ?? (() => {});
   const course = currentCourse();
-  const all = sqlite.prepare(`SELECT path, title, year FROM sources WHERE type IN ('final','midterm') GROUP BY path ORDER BY (year IS NULL), year`).all() as { path: string; title: string; year: number | null }[];
+  const all = await q.all<{ path: string; title: string; year: number | null }>(`SELECT path, title, year FROM sources WHERE type IN ('final','midterm') GROUP BY path ORDER BY (year IS NULL), year`);
   const exams = pickEnonces(all);
   if (!exams.length) { step("Aucun final ingéré — index vide.", 100); return { exams: 0, exercises: 0 }; }
-  sqlite.exec(`DELETE FROM exam_exercises`); // index reconstruit à chaque passe
-  const ins = sqlite.prepare(`INSERT INTO exam_exercises (exam_title, exam_year, exam_page, topic, method, exo_type, trap, archetype, statement, points, exam_href, course_href) VALUES (@examTitle,@examYear,@examPage,@topic,@method,@exoType,@trap,@archetype,@statement,@points,@examHref,@courseHref)`);
+  await q.exec(`DELETE FROM exam_exercises`); // index reconstruit à chaque passe
   let total = 0;
   for (let i = 0; i < exams.length; i++) {
     const prog = 8 + Math.round((i / exams.length) * 82);
     step(`Indexation ${i + 1}/${exams.length} — ${exams[i].title}…`, prog);
     let rows: Omit<ExamExercise, "id" | "topicId">[] = [];
     try { rows = await indexOneExam(course, exams[i], step, prog); } catch (e) { step(`${exams[i].title} : ignoré (${(e as Error).message.slice(0, 50)})`, prog); }
-    const tx = sqlite.transaction(() => { for (const r of rows) ins.run(r); });
-    tx();
+    await q.tx(async () => {
+      for (const r of rows) {
+        await q.run(
+          `INSERT INTO exam_exercises (exam_title, exam_year, exam_page, topic, method, exo_type, trap, archetype, statement, points, exam_href, course_href) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+          r.examTitle, r.examYear, r.examPage, r.topic, r.method, r.exoType, r.trap, r.archetype, r.statement, r.points, r.examHref, r.courseHref,
+        );
+      }
+    });
     total += rows.length;
   }
   step(`Index : ${total} exos sur ${exams.length} examens`, 92);
@@ -236,18 +226,20 @@ export async function indexExamExercises(opts: { onStep?: (m: string, p: number)
 
 // ---------------- Requêtes sur l'index ----------------
 
-export function indexStats(): { exercises: number; exams: number } {
-  ensureIndexSchema();
-  const exercises = (sqlite.prepare(`SELECT count(*) n FROM exam_exercises`).get() as { n: number }).n;
-  const exams = (sqlite.prepare(`SELECT count(DISTINCT exam_title) n FROM exam_exercises`).get() as { n: number }).n;
+export async function indexStats(): Promise<{ exercises: number; exams: number }> {
+  await ensureIndexSchema();
+  const exercises = (await q.get<{ n: number }>(`SELECT count(*) n FROM exam_exercises`))!.n;
+  const exams = (await q.get<{ n: number }>(`SELECT count(DISTINCT exam_title) n FROM exam_exercises`))!.n;
   return { exercises, exams };
 }
 
 /** Les exos indexés rattachés à un type (par topic_id). */
-export function exercisesForTopic(topicId: number): ExamExercise[] {
-  ensureIndexSchema();
-  return (sqlite.prepare(
+export async function exercisesForTopic(topicId: number): Promise<ExamExercise[]> {
+  await ensureIndexSchema();
+  const rows = await q.all<any>(
     `SELECT id, exam_title examTitle, exam_year examYear, exam_page examPage, topic, method, exo_type exoType, trap, archetype, statement, points, exam_href examHref, course_href courseHref, topic_id topicId
-     FROM exam_exercises WHERE topic_id = ? ORDER BY (exam_year IS NULL), exam_year, exam_page`
-  ).all(topicId) as any[]).map((r) => ({ ...r }));
+     FROM exam_exercises WHERE topic_id = ? ORDER BY (exam_year IS NULL), exam_year, exam_page`,
+    topicId,
+  );
+  return rows.map((r) => ({ ...r }));
 }

@@ -1,4 +1,5 @@
-import { ensureFts, sqlite } from "@/db/client";
+import { ensureFts } from "@/db/client";
+import { q } from "@/db/q";
 import { refsDir } from "@/lib/paths";
 import * as cheerio from "cheerio";
 import fs from "node:fs";
@@ -20,15 +21,8 @@ import { extractText, getDocumentProxy } from "unpdf";
 /** Dossier des examens de référence du cours COURANT (cs-202 → data/refs ; autres → data/<id>/refs). */
 export const REFS_DIR = () => refsDir();
 
-export function ensureRefsSchema() {
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS exam_refs (
-    path TEXT PRIMARY KEY,
-    title TEXT,
-    year INTEGER,
-    kind TEXT,
-    uploaded INTEGER NOT NULL DEFAULT 0,
-    added_at TEXT DEFAULT (datetime('now'))
-  );`);
+export async function ensureRefsSchema(): Promise<void> {
+  await q.ensureTable("exam_refs");
 }
 
 const clean = (s: string) => s.replace(/\s+/g, " ").replace(/ /g, " ").trim();
@@ -51,15 +45,12 @@ export function inferExamMeta(filename: string): { kind: "final" | "midterm"; ye
   return { kind, year: m ? +m[1] : null };
 }
 
-// ---- insertion bas niveau (mêmes tables que l'ingestion), préparée sur la DB du cours courant ----
-const insStmts = () => ({
-  insSource: sqlite.prepare(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`),
-  insItem: sqlite.prepare(
-    `INSERT INTO items (source_id, type, lecture_id, title, text, html, images, tags, anchor)
-     VALUES (@sourceId,@type,@lectureId,@title,@text,@html,@images,@tags,@anchor)`
-  ),
-  insFts: sqlite.prepare(`INSERT INTO fts_items (title, text, lecture_id, item_id, source_id) VALUES (?,?,?,?,?)`),
-});
+// ---- insertion bas niveau (mêmes tables que l'ingestion) via la façade q,
+// qui met les statements en cache sur la DB du cours courant ----
+const INS_SOURCE_SQL = `INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`;
+const INS_ITEM_SQL = `INSERT INTO items (source_id, type, lecture_id, title, text, html, images, tags, anchor)
+     VALUES (?,?,?,?,?,?,?,?,?)`;
+const INS_FTS_SQL = `INSERT INTO fts_items (title, text, lecture_id, item_id, source_id) VALUES (?,?,?,?,?)`;
 
 /** Lit un fichier de référence et en extrait un titre + des pages de texte. */
 async function parseRefFile(abs: string): Promise<{ title: string; pages: string[] }> {
@@ -89,38 +80,39 @@ async function parseRefFile(abs: string): Promise<{ title: string; pages: string
  */
 export async function ingestRefFile(relPath: string): Promise<number> {
   ensureFts();
-  const { insSource, insItem, insFts } = insStmts();
   const filePath = path.join(REFS_DIR(), path.basename(relPath));
   const { kind, year } = inferExamMeta(path.basename(relPath));
   const { title, pages } = await parseRefFile(filePath);
 
   // purge d'une éventuelle ingestion précédente du même chemin
-  const old = sqlite.prepare(`SELECT id FROM sources WHERE path = ?`).all(relPath) as { id: number }[];
+  const old = await q.all<{ id: number }>(`SELECT id FROM sources WHERE path = ?`, relPath);
   for (const { id } of old) {
-    sqlite.prepare(`DELETE FROM fts_items WHERE source_id = ?`).run(id);
-    sqlite.prepare(`DELETE FROM items WHERE source_id = ?`).run(id);
-    sqlite.prepare(`DELETE FROM sources WHERE id = ?`).run(id);
+    await q.run(`DELETE FROM fts_items WHERE source_id = ?`, id);
+    await q.run(`DELETE FROM items WHERE source_id = ?`, id);
+    await q.run(`DELETE FROM sources WHERE id = ?`, id);
   }
 
-  const sid = insSource.run(kind, title, relPath, year, recencyWeight(year)).lastInsertRowid as number;
+  const sid = await q.insert(INS_SOURCE_SQL, kind, title, relPath, year, recencyWeight(year));
   const chunks = pages.length ? pages : [""];
-  chunks.forEach((text, i) => {
-    if (text.length < 3) return;
+  for (const [i, text] of chunks.entries()) {
+    if (text.length < 3) continue;
     const label = chunks.length > 1 ? `${title} — p.${i + 1}` : title;
     const anchor = chunks.length > 1 ? `${relPath}#page=${i + 1}` : relPath;
-    const itemId = insItem.run({
-      sourceId: sid, type: "exercise", lectureId: null, title: label,
-      text, html: null, images: null, tags: null, anchor,
-    }).lastInsertRowid as number;
-    insFts.run(label, text, "", String(itemId), String(sid));
-  });
+    const itemId = await q.insert(
+      INS_ITEM_SQL,
+      sid, "exercise", null, label, text, null, null, null, anchor
+    );
+    await q.run(INS_FTS_SQL, label, text, "", String(itemId), String(sid));
+  }
 
   // Tout fichier de data/refs/ EST un examen de référence (la sélection survit au ré-ingest).
-  ensureRefsSchema();
-  const wasUploaded = (sqlite.prepare(`SELECT uploaded FROM exam_refs WHERE path = ?`).get(relPath) as { uploaded: number } | undefined)?.uploaded ?? 1;
-  sqlite
-    .prepare(`INSERT OR REPLACE INTO exam_refs (path, title, year, kind, uploaded) VALUES (?,?,?,?,?)`)
-    .run(relPath, title, year, kind, wasUploaded);
+  await ensureRefsSchema();
+  const wasUploaded = (await q.get<{ uploaded: number }>(`SELECT uploaded FROM exam_refs WHERE path = ?`, relPath))?.uploaded ?? 1;
+  await q.run(
+    `INSERT INTO exam_refs (path, title, year, kind, uploaded) VALUES (?,?,?,?,?)
+     ON CONFLICT(path) DO UPDATE SET title = excluded.title, year = excluded.year, kind = excluded.kind, uploaded = excluded.uploaded`,
+    relPath, title, year, kind, wasUploaded
+  );
   return sid;
 }
 
@@ -139,9 +131,9 @@ export async function ingestAllRefs(): Promise<number> {
 
 // ---------------- Sélection « référence » ----------------
 
-export function referencePaths(): string[] {
-  ensureRefsSchema();
-  return (sqlite.prepare(`SELECT path FROM exam_refs`).all() as { path: string }[]).map((r) => r.path);
+export async function referencePaths(): Promise<string[]> {
+  await ensureRefsSchema();
+  return (await q.all<{ path: string }>(`SELECT path FROM exam_refs`)).map((r) => r.path);
 }
 
 export type ExamSource = {
@@ -155,20 +147,18 @@ export type ExamSource = {
 };
 
 /** Tous les examens (finals/midterms) du corpus + flag « référence ». */
-export function listExamSources(): ExamSource[] {
-  ensureRefsSchema();
-  const refRows = sqlite.prepare(`SELECT path, uploaded FROM exam_refs`).all() as { path: string; uploaded: number }[];
+export async function listExamSources(): Promise<ExamSource[]> {
+  await ensureRefsSchema();
+  const refRows = await q.all<{ path: string; uploaded: number }>(`SELECT path, uploaded FROM exam_refs`);
   const refSet = new Set(refRows.map((r) => r.path));
   const uploadedSet = new Set(refRows.filter((r) => r.uploaded).map((r) => r.path));
-  const rows = sqlite
-    .prepare(
-      `SELECT s.path, s.title, s.year, s.type kind,
-              (SELECT count(*) FROM items i WHERE i.source_id = s.id) items
-       FROM sources s WHERE s.type IN ('final','midterm')
-       GROUP BY s.path
-       ORDER BY (s.year IS NULL), s.year DESC, s.title`
-    )
-    .all() as Omit<ExamSource, "uploaded" | "isReference">[];
+  const rows = await q.all<Omit<ExamSource, "uploaded" | "isReference">>(
+    `SELECT s.path, s.title, s.year, s.type kind,
+            (SELECT count(*) FROM items i WHERE i.source_id = s.id) items
+     FROM sources s WHERE s.type IN ('final','midterm')
+     GROUP BY s.path
+     ORDER BY (s.year IS NULL), s.year DESC, s.title`
+  );
   return rows.map((r) => ({
     ...r,
     uploaded: uploadedSet.has(r.path),
@@ -177,28 +167,29 @@ export function listExamSources(): ExamSource[] {
 }
 
 /** Compte le corpus par type (pour situer l'utilisateur). */
-export function corpusSummary(): { type: string; sources: number; items: number }[] {
-  return sqlite
-    .prepare(
-      `SELECT s.type, count(DISTINCT s.id) sources, count(i.id) items
-       FROM sources s LEFT JOIN items i ON i.source_id = s.id
-       GROUP BY s.type ORDER BY items DESC`
-    )
-    .all() as any[];
+export async function corpusSummary(): Promise<{ type: string; sources: number; items: number }[]> {
+  return q.all<{ type: string; sources: number; items: number }>(
+    `SELECT s.type, count(DISTINCT s.id) sources, count(i.id) items
+     FROM sources s LEFT JOIN items i ON i.source_id = s.id
+     GROUP BY s.type ORDER BY items DESC`
+  );
 }
 
 /** Coche/décoche un examen du corpus comme référence de format. */
-export function toggleReference(srcPath: string, on: boolean) {
-  ensureRefsSchema();
+export async function toggleReference(srcPath: string, on: boolean): Promise<void> {
+  await ensureRefsSchema();
   if (on) {
-    const s = sqlite.prepare(`SELECT title, year, type FROM sources WHERE path = ?`).get(srcPath) as
-      | { title: string; year: number | null; type: string }
-      | undefined;
-    sqlite
-      .prepare(`INSERT OR REPLACE INTO exam_refs (path, title, year, kind, uploaded) VALUES (?,?,?,?,COALESCE((SELECT uploaded FROM exam_refs WHERE path=?),0))`)
-      .run(srcPath, s?.title ?? srcPath, s?.year ?? null, s?.type ?? "final", srcPath);
+    const s = await q.get<{ title: string; year: number | null; type: string }>(
+      `SELECT title, year, type FROM sources WHERE path = ?`,
+      srcPath
+    );
+    await q.run(
+      `INSERT INTO exam_refs (path, title, year, kind, uploaded) VALUES (?,?,?,?,COALESCE((SELECT uploaded FROM exam_refs WHERE path=?),0))
+       ON CONFLICT(path) DO UPDATE SET title = excluded.title, year = excluded.year, kind = excluded.kind, uploaded = excluded.uploaded`,
+      srcPath, s?.title ?? srcPath, s?.year ?? null, s?.type ?? "final", srcPath
+    );
   } else {
-    sqlite.prepare(`DELETE FROM exam_refs WHERE path = ?`).run(srcPath);
+    await q.run(`DELETE FROM exam_refs WHERE path = ?`, srcPath);
   }
 }
 
@@ -223,27 +214,27 @@ export async function addUploadedRef(buffer: Buffer, filename: string): Promise<
   const relPath = `refs/${name}`;
   await ingestRefFile(relPath);
   const { kind, year } = inferExamMeta(name);
-  sqlite
-    .prepare(`INSERT OR REPLACE INTO exam_refs (path, title, year, kind, uploaded) VALUES (?,?,?,?,1)`)
-    .run(relPath, name, year, kind);
+  await q.run(
+    `INSERT INTO exam_refs (path, title, year, kind, uploaded) VALUES (?,?,?,?,1)
+     ON CONFLICT(path) DO UPDATE SET title = excluded.title, year = excluded.year, kind = excluded.kind, uploaded = excluded.uploaded`,
+    relPath, name, year, kind
+  );
 
-  return listExamSources().find((e) => e.path === relPath)!;
+  return (await listExamSources()).find((e) => e.path === relPath)!;
 }
 
 /** Supprime un examen uploadé (fichier + source + sélection). */
-export function removeUploadedRef(srcPath: string) {
-  ensureRefsSchema();
-  const row = sqlite.prepare(`SELECT uploaded FROM exam_refs WHERE path = ?`).get(srcPath) as
-    | { uploaded: number }
-    | undefined;
+export async function removeUploadedRef(srcPath: string): Promise<void> {
+  await ensureRefsSchema();
+  const row = await q.get<{ uploaded: number }>(`SELECT uploaded FROM exam_refs WHERE path = ?`, srcPath);
   // purge corpus
-  const srcs = sqlite.prepare(`SELECT id FROM sources WHERE path = ?`).all(srcPath) as { id: number }[];
+  const srcs = await q.all<{ id: number }>(`SELECT id FROM sources WHERE path = ?`, srcPath);
   for (const { id } of srcs) {
-    sqlite.prepare(`DELETE FROM fts_items WHERE source_id = ?`).run(id);
-    sqlite.prepare(`DELETE FROM items WHERE source_id = ?`).run(id);
-    sqlite.prepare(`DELETE FROM sources WHERE id = ?`).run(id);
+    await q.run(`DELETE FROM fts_items WHERE source_id = ?`, id);
+    await q.run(`DELETE FROM items WHERE source_id = ?`, id);
+    await q.run(`DELETE FROM sources WHERE id = ?`, id);
   }
-  sqlite.prepare(`DELETE FROM exam_refs WHERE path = ?`).run(srcPath);
+  await q.run(`DELETE FROM exam_refs WHERE path = ?`, srcPath);
   if (row?.uploaded) {
     const abs = path.join(REFS_DIR(), path.basename(srcPath));
     if (fs.existsSync(abs)) fs.unlinkSync(abs);

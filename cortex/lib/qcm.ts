@@ -1,4 +1,4 @@
-import { currentCourse, sqlite } from "@/db/client";
+import { q, nowStr } from "@/db/q";
 import { completeText, extractJson } from "@/lib/llm";
 import { courseRefImages } from "@/lib/course-vision";
 import type { ExamQuestion, StepCb } from "@/lib/exam";
@@ -52,36 +52,19 @@ const QCM_BATCH_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-function ensureQcmSchema() {
+async function ensureQcmSchema(): Promise<void> {
   // l'examen QCM s'insère dans `exams` (partagée) ; garantir la colonne verify_summary (les DB de
-  // cours créées hors cs-202 ne l'ont pas — ensureExamCols n'a pas tourné).
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS exams (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT DEFAULT (datetime('now')),
-    format_template TEXT, targeted_weakness_ids TEXT, html_path TEXT, status TEXT DEFAULT 'draft');`);
-  const cols = (sqlite.prepare(`PRAGMA table_info(exams)`).all() as { name: string }[]).map((c) => c.name);
-  if (!cols.includes("verify_summary")) sqlite.exec(`ALTER TABLE exams ADD COLUMN verify_summary TEXT`);
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS exam_questions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, exam_id INTEGER NOT NULL, concept TEXT,
-    statement_html TEXT, solution_html TEXT, source_inspiration TEXT, verified INTEGER, verify_issue TEXT);`);
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS qcm_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    exam_id INTEGER NOT NULL,
-    idx INTEGER NOT NULL,
-    topic TEXT,
-    type TEXT,
-    stem TEXT,
-    options_json TEXT,
-    correct_json TEXT,
-    misconceptions_json TEXT,
-    explanation TEXT,
-    verified INTEGER
-  );`);
+  // cours créées hors cs-202 ne l'ont pas — ensureExamCols n'a pas tourné). DDL canonique : db/tables.ts.
+  await q.ensureTable("exams");
+  await q.ensureColumns("exams", ["verify_summary"]);
+  await q.ensureTable("exam_questions");
+  await q.ensureTable("qcm_items");
 }
 
 /** Sujets à couvrir : blueprint (topics pondérés) si dispo, sinon archétypes du cours. */
-function coverageTopics(): { label: string; method: string | null }[] {
+async function coverageTopics(): Promise<{ label: string; method: string | null }[]> {
   try {
-    const rows = sqlite.prepare(`SELECT label, method FROM topics ORDER BY exam_weight DESC LIMIT 14`).all() as { label: string; method: string | null }[];
+    const rows = await q.all<{ label: string; method: string | null }>(`SELECT label, method FROM topics ORDER BY exam_weight DESC LIMIT 14`);
     if (rows.length) return rows;
   } catch {}
   const { profile } = require("@/lib/course-profile");
@@ -102,12 +85,12 @@ const ARCHITECT_QCM_RULES = [
  *  parcours de révision pour (a) bâtir des distracteurs sur les ERREURS RÉELLES de l'étudiant et
  *  (b) lister les énoncés déjà couverts à NE PAS répéter. Absent → comportement identique à avant. */
 export async function generateQcmBatch(topics: { label: string; method: string | null }[], n: number, step: StepCb, focus?: string, guidance?: string): Promise<QcmItem[]> {
-  const fmt = getFormatProfile();
+  const fmt = await getFormatProfile();
   const imgs = courseRefImages().slice(0, 4);
   const { profile } = require("@/lib/course-profile");
   // V9 P3 — boucle FERMÉE : la mémoire de calibration des QCM (« trop facile / pas le style / faux »)
   // est réinjectée à la CONCEPTION → durcit/réoriente réellement les QCM suivants.
-  const calib = calibrationBlock("qcm");
+  const calib = await calibrationBlock("qcm");
   const coverage = focus
     ? `Toutes ces ${n} questions portent sur le thème CIBLÉ : « ${focus} » — varie les SOUS-ANGLES / sous-notions de ce thème (pas ${n} fois la même question).`
     : `Couvre ces sujets (un QCM par sujet si possible, dans l'ordre) : ${topics.slice(0, n).map((t, i) => `${i + 1}) ${t.label}${t.method ? ` [${t.method.slice(0, 60)}]` : ""}`).join(" · ")}`;
@@ -158,7 +141,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   const blind = items.map((q, i) => `Q${i}. [${q.type}] ${q.stem}\n${q.options.map((o, k) => `   (${k}) ${o}`).join("\n")}`).join("\n\n");
   // V9 P3 — la mémoire de calibration des QCM est aussi réinjectée à la CRITIQUE : un « trop facile »
   // passé rend la vérif plus sévère sur la trivialité/les indices qui trahissent.
-  const calib = calibrationBlock("qcm");
+  const calib = await calibrationBlock("qcm");
   const prompt = [
     `Tu es un correcteur rigoureux du cours. Pour CHAQUE QCM ci-dessous, RÉSOUS-LE toi-même de zéro (sans clé fournie) et donne la/les bonne(s) réponse(s) par INDEX.`,
     `Signale si : la question est ambiguë (2 réponses défendables), un distracteur est absurde, ou un indice trahit la bonne réponse (longueur, « toutes les réponses », grammaire).`,
@@ -190,9 +173,9 @@ export type QcmExamResult = { id: number; count: number; verified: number; open:
  *  `count`/`openCount` : la COMPOSITION choisie par Ben (composeur V9). `focus` : thème ciblé
  *  optionnel (exercice ciblé V9 — toutes les questions portent dessus). */
 export async function generateQcmExam(opts: { count?: number; openCount?: number; focus?: string; onStep?: StepCb } = {}): Promise<QcmExamResult> {
-  ensureQcmSchema();
+  await ensureQcmSchema();
   const step = opts.onStep ?? (() => {});
-  const fmt = getFormatProfile();
+  const fmt = await getFormatProfile();
   const focus = (opts.focus ?? "").trim() || undefined;
   const qcmShare = (fmt?.question_types ?? []).filter((t) => t.type === "scq" || t.type === "mcq").reduce((s, t) => s + (t.approx_count || 0), 0);
   // count peut être 0 (drill « 0 QCM + 1 ouvert ») → on respecte le choix explicite ; sinon défaut détecté.
@@ -200,7 +183,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const openCount = Math.max(0, opts.openCount ?? Math.min(3, Math.max(0, (fmt?.question_types ?? []).find((t) => t.type === "open")?.approx_count ?? 2)));
   if (count === 0 && openCount === 0) throw new Error("Composition vide : choisis au moins 1 QCM ou 1 question ouverte.");
   // focus ciblé → toutes les questions sur ce thème ; sinon couverture large du programme.
-  const topics = focus ? [{ label: focus, method: null as string | null }] : coverageTopics();
+  const topics = focus ? [{ label: focus, method: null as string | null }] : await coverageTopics();
   step(`Architecte : ${count} QCM + ${openCount} question(s) ouverte(s)${focus ? ` sur « ${focus} »` : " au format détecté"}…`, 8);
 
   // lots de 4 QCM en parallèle borné (2 lots à la fois). RÉSILIENT : un lot qui échoue (JSON
@@ -252,26 +235,28 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   if (!all.length && !openQs.length) throw new Error("Rien n'a pu être généré (lots QCM et questions ouvertes échoués). Réessaie.");
 
   // persiste l'exam + les QCM + les ouvertes
-  const examId = sqlite.prepare(`INSERT INTO exams (format_template, status) VALUES ('qcm','ready')`).run().lastInsertRowid as number;
-  const ins = sqlite.prepare(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified) VALUES (?,?,?,?,?,?,?,?,?,?)`);
-  const insOpen = sqlite.prepare(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration) VALUES (?,?,?,?,?)`);
-  const tx = sqlite.transaction(() => {
-    all.forEach((q, i) => ins.run(examId, i, q.topic, q.type, q.stem, JSON.stringify(q.options), JSON.stringify(q.correct), JSON.stringify(q.misconceptions), q.explanation, q.verified));
-    openQs.forEach((q) => insOpen.run(examId, q.concept, q.statement_tex, q.solution_tex, "qcm-open"));
+  const examId = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','ready')`);
+  await q.tx(async () => {
+    for (let i = 0; i < all.length; i++) {
+      const it = all[i];
+      await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified) VALUES (?,?,?,?,?,?,?,?,?,?)`, examId, i, it.topic, it.type, it.stem, JSON.stringify(it.options), JSON.stringify(it.correct), JSON.stringify(it.misconceptions), it.explanation, it.verified);
+    }
+    for (const oq of openQs) {
+      await q.run(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration) VALUES (?,?,?,?,?)`, examId, oq.concept, oq.statement_tex, oq.solution_tex, "qcm-open");
+    }
   });
-  tx();
-  const verified = all.filter((q) => q.verified === 1).length;
-  sqlite.prepare(`UPDATE exams SET verify_summary = ? WHERE id = ?`).run(`QCM ${all.length} (${verified} vér.) + ${openQs.length} ouverte(s)`, examId);
+  const verified = all.filter((it) => it.verified === 1).length;
+  await q.run(`UPDATE exams SET verify_summary = ? WHERE id = ?`, `QCM ${all.length} (${verified} vér.) + ${openQs.length} ouverte(s)`, examId);
 
   // rendu PDF (énoncé + corrigé) au look d'un vrai final du cours
   step("Rendu du PDF (look vrai final)…", 92);
   let pdf: string | undefined, texError: string | undefined;
   try {
     const { buildQcmArtifact } = await import("@/lib/qcm-latex");
-    const dateLabel = (sqlite.prepare(`SELECT date('now') d`).get() as any).d;
+    const dateLabel = nowStr().slice(0, 10);
     const out = await buildQcmArtifact(examId, { items: all, open: openQs }, dateLabel);
     pdf = out.file; texError = out.texError;
-    sqlite.prepare(`UPDATE exams SET html_path = ? WHERE id = ?`).run(out.file, examId);
+    await q.run(`UPDATE exams SET html_path = ? WHERE id = ?`, out.file, examId);
   } catch (e) { texError = (e as Error).message; }
 
   step(`Examen QCM #${examId} prêt — ${all.length} QCM + ${openQs.length} ouverte(s) ✓`, 100);
@@ -282,15 +267,15 @@ export type QcmOpenView = { id: number; concept: string; statement: string; solu
 export type QcmExamView = { id: number; createdAt: string; verifySummary: string | null; pdf: string | null; items: (Omit<QcmItem, "correct" | "misconceptions"> & { id: number; idx: number })[]; open: QcmOpenView[] };
 
 /** Un examen QCM pour l'affichage (SANS les clés — l'auto-correction se fait via /api). */
-export function getQcmExam(examId: number, withKeys = false): QcmExamView | null {
-  ensureQcmSchema();
-  const e = sqlite.prepare(`SELECT id, created_at, verify_summary, html_path FROM exams WHERE id = ? AND format_template = 'qcm'`).get(examId) as any;
+export async function getQcmExam(examId: number, withKeys = false): Promise<QcmExamView | null> {
+  await ensureQcmSchema();
+  const e = await q.get<any>(`SELECT id, created_at, verify_summary, html_path FROM exams WHERE id = ? AND format_template = 'qcm'`, examId);
   if (!e) return null;
-  const rows = sqlite.prepare(`SELECT * FROM qcm_items WHERE exam_id = ? ORDER BY idx`).all(examId) as any[];
+  const rows = await q.all<any>(`SELECT * FROM qcm_items WHERE exam_id = ? ORDER BY idx`, examId);
   let open: QcmOpenView[] = [];
   try {
     const { texToHtml } = require("@/lib/exam-latex");
-    open = (sqlite.prepare(`SELECT id, concept, statement_html, solution_html FROM exam_questions WHERE exam_id = ? AND source_inspiration = 'qcm-open' ORDER BY id`).all(examId) as any[])
+    open = (await q.all<any>(`SELECT id, concept, statement_html, solution_html FROM exam_questions WHERE exam_id = ? AND source_inspiration = 'qcm-open' ORDER BY id`, examId))
       .map((r) => ({ id: r.id, concept: r.concept, statement: texToHtml(r.statement_html ?? ""), solution: withKeys ? texToHtml(r.solution_html ?? "") : "" }));
   } catch {}
   return {
@@ -305,9 +290,9 @@ export function getQcmExam(examId: number, withKeys = false): QcmExamView | null
 }
 
 /** Corrige des réponses {idx: number[]} contre la clé connue → score + détail (Pilier E). */
-export function gradeQcm(examId: number, answers: Record<number, number[]>): { score: number; total: number; detail: { idx: number; correct: number[]; chosen: number[]; ok: boolean; explanation: string; misconceptions: string[] }[] } {
-  ensureQcmSchema();
-  const rows = sqlite.prepare(`SELECT idx, correct_json, explanation, misconceptions_json FROM qcm_items WHERE exam_id = ? ORDER BY idx`).all(examId) as any[];
+export async function gradeQcm(examId: number, answers: Record<number, number[]>): Promise<{ score: number; total: number; detail: { idx: number; correct: number[]; chosen: number[]; ok: boolean; explanation: string; misconceptions: string[] }[] }> {
+  await ensureQcmSchema();
+  const rows = await q.all<any>(`SELECT idx, correct_json, explanation, misconceptions_json FROM qcm_items WHERE exam_id = ? ORDER BY idx`, examId);
   const detail = rows.map((r) => {
     const correct: number[] = JSON.parse(r.correct_json);
     const chosen = (answers[r.idx] ?? []).slice().sort();

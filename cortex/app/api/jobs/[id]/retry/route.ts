@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const course = useCourse(req);
   const { id } = await params;
-  const job = retryJob(Number(id), course);
+  const job = await retryJob(Number(id), course);
   if (!job) return NextResponse.json({ error: "job introuvable" }, { status: 404 });
   return NextResponse.json({ ok: true, jobId: job.id, job });
 }

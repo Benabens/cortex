@@ -1,4 +1,4 @@
-import { sqlite } from "@/db/client";
+import { q } from "@/db/q";
 import { useCourse } from "@/lib/req";
 import { uploadsDir } from "@/lib/paths";
 import { LlmError, completeText, extractJson } from "@/lib/llm";
@@ -38,9 +38,10 @@ export async function POST(req: NextRequest) {
   const { id, model } = await req.json().catch(() => ({ id: null }));
   if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
 
-  const row = sqlite
-    .prepare("SELECT topic, description, screenshot_path FROM weaknesses WHERE id = ?")
-    .get(Number(id)) as { topic: string; description: string | null; screenshot_path: string | null } | undefined;
+  const row = await q.get<{ topic: string; description: string | null; screenshot_path: string | null }>(
+    "SELECT topic, description, screenshot_path FROM weaknesses WHERE id = ?",
+    Number(id)
+  );
   if (!row) return NextResponse.json({ error: "faiblesse introuvable" }, { status: 404 });
 
   // Chemin image relatif au cwd (l'outil Read de Claude Code lit dans le projet).
@@ -61,8 +62,8 @@ export async function POST(req: NextRequest) {
       throw new Error("Réponse IA incomplète.");
     }
     const description = `${parsed.explanation}\n\nConcepts clés : ${parsed.concepts.join(" · ")}`;
-    updateWeaknessAnalysis(Number(id), parsed.topic, description);
-    return NextResponse.json({ ok: true, weakness: getWeakness(Number(id)) });
+    await updateWeaknessAnalysis(Number(id), parsed.topic, description);
+    return NextResponse.json({ ok: true, weakness: await getWeakness(Number(id)) });
   } catch (e: unknown) {
     const err = e as LlmError;
     const status = err.code === "UNAVAILABLE" ? 503 : 502;

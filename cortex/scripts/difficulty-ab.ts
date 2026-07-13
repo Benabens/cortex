@@ -7,7 +7,8 @@
  *
  * Le JSON va dans data/refs/proof/<slug>.<mode>.json (committé → A/B reproductible).
  */
-import { enterCourse, sqlite } from "../db/client";
+import { enterCourse } from "../db/client";
+import { q } from "../db/q";
 import { architectExercise } from "../lib/architect";
 import { generateTargetedExercise } from "../lib/exam";
 import fs from "node:fs";
@@ -34,14 +35,12 @@ async function main() {
   } else {
     out = await generateTargetedExercise(target, { onStep: step });
   }
-  const q = sqlite
-    .prepare(`SELECT concept, statement_html statement_tex, solution_html solution_tex, verified, verify_issue FROM exam_questions WHERE exam_id = ?`)
-    .get(out.id) as any;
+  const row = await q.get<any>(`SELECT concept, statement_html statement_tex, solution_html solution_tex, verified, verify_issue FROM exam_questions WHERE exam_id = ?`, out.id);
   const dir = path.join(process.cwd(), "data", "refs", "proof");
   fs.mkdirSync(dir, { recursive: true });
-  const rec = { slug, mode, target, examId: out.id, url: out.url, seconds: Math.round((Date.now() - t0) / 1000), ...q, auditLog };
+  const rec = { slug, mode, target, examId: out.id, url: out.url, seconds: Math.round((Date.now() - t0) / 1000), ...row, auditLog };
   fs.writeFileSync(path.join(dir, `${slug}.${mode}.json`), JSON.stringify(rec, null, 2));
-  console.log(`[${mode}/${slug}] OK → exam #${out.id} (${rec.seconds}s) · verified=${q?.verified} · audits=${auditLog.length} · proof/${slug}.${mode}.json`);
+  console.log(`[${mode}/${slug}] OK → exam #${out.id} (${rec.seconds}s) · verified=${row?.verified} · audits=${auditLog.length} · proof/${slug}.${mode}.json`);
 }
 
 main().catch((e) => { console.error("ÉCHEC:", e); process.exit(1); });

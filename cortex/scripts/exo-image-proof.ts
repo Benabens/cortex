@@ -4,7 +4,8 @@
  *   npx tsx scripts/exo-image-proof.ts image <slug> "<image-path>" ["<note>"]
  * Dump : data/refs/proof/exo-<slug>.json (énoncé/corrigé + audit adversarial + examId).
  */
-import { enterCourse, sqlite } from "../db/client";
+import { enterCourse } from "../db/client";
+import { q } from "../db/q";
 import { architectExercise } from "../lib/architect";
 import fs from "node:fs";
 import path from "node:path";
@@ -22,15 +23,13 @@ async function main() {
   const r = kind === "image"
     ? await architectExercise("", { onStep: step, image: arg, note: note || undefined })
     : await architectExercise(arg, { onStep: step });
-  const q = sqlite
-    .prepare(`SELECT concept, statement_html statement_tex, solution_html solution_tex, verified, verify_issue FROM exam_questions WHERE exam_id = ?`)
-    .get(r.id) as any;
+  const row = await q.get<any>(`SELECT concept, statement_html statement_tex, solution_html solution_tex, verified, verify_issue FROM exam_questions WHERE exam_id = ?`, r.id);
   const dir = path.join(process.cwd(), "data", "refs", "proof");
   fs.mkdirSync(dir, { recursive: true });
-  const rec = { slug, kind, source: arg, note: note || null, examId: r.id, url: r.url, seconds: Math.round((Date.now() - t0) / 1000), ...q, auditLog: r.auditLog };
+  const rec = { slug, kind, source: arg, note: note || null, examId: r.id, url: r.url, seconds: Math.round((Date.now() - t0) / 1000), ...row, auditLog: r.auditLog };
   fs.writeFileSync(path.join(dir, `exo-${slug}.json`), JSON.stringify(rec, null, 2));
   const pm = (r.auditLog as any[]).map((a) => a.pattern_matcher_correct);
-  console.log(`[${kind}/${slug}] OK → exam #${r.id} (${rec.seconds}s) · verified=${q?.verified} · audits=${r.auditLog.length} · pm_correct=${JSON.stringify(pm)} · proof/exo-${slug}.json`);
+  console.log(`[${kind}/${slug}] OK → exam #${r.id} (${rec.seconds}s) · verified=${row?.verified} · audits=${r.auditLog.length} · pm_correct=${JSON.stringify(pm)} · proof/exo-${slug}.json`);
 }
 
 main().catch((e) => { console.error("ÉCHEC:", e); process.exit(1); });

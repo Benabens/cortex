@@ -14,7 +14,7 @@ export async function register() {
     const { reconcileStaleJobs } = await import("@/lib/jobs");
     let total = 0;
     for (const c of listCourses()) {
-      try { total += runWithCourse(c.id, () => reconcileStaleJobs()); } catch { /* DB du cours absente : rien à faire */ }
+      try { total += await runWithCourse(c.id, () => reconcileStaleJobs()); } catch { /* DB du cours absente : rien à faire */ }
     }
     if (total) console.log(`[instrumentation] ${total} job(s) zombie réconcilié(s) au démarrage.`);
   } catch (e) {

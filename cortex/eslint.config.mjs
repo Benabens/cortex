@@ -13,6 +13,15 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    // Les route handlers / scripts ne sont PAS du React : `useCourse(req)` (contexte
+    // cours+user, lib/req.ts) déclenche à tort react-hooks/rules-of-hooks depuis que
+    // les handlers sont async (façade DB async, Phase B backend-overhaul).
+    files: ["app/**/route.ts", "scripts/**", "lib/**", "db/**"],
+    rules: {
+      "react-hooks/rules-of-hooks": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

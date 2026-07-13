@@ -6,15 +6,15 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export function GET(req: NextRequest) {
+export async function GET(req: NextRequest) {
   useCourse(req);
-  return NextResponse.json({ exams: listExams(), schedule: scheduleStats() });
+  return NextResponse.json({ exams: await listExams(), schedule: await scheduleStats() });
 }
 
-export function DELETE(req: NextRequest) {
+export async function DELETE(req: NextRequest) {
   useCourse(req);
   const id = Number(req.nextUrl.searchParams.get("id"));
   if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
-  deleteExam(id);
+  await deleteExam(id);
   return NextResponse.json({ ok: true });
 }

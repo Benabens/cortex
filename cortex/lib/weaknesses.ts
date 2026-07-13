@@ -1,14 +1,12 @@
-import { currentCourse, sqlite } from "@/db/client";
+import { currentCourse } from "@/db/client";
+import { q } from "@/db/q";
 import { sourceHref } from "@/lib/deeplink";
 import { search } from "@/lib/search";
 
 // Colonnes ajoutées au fil de l'eau (idempotent, s'applique à la DB du cours courant) :
 // - `analyzed` (suivi IA), `source` (manual|conversation|image), `theme` (regroupement).
-export function ensureSchema() {
-  const cols = (sqlite.prepare(`PRAGMA table_info(weaknesses)`).all() as { name: string }[]).map((c) => c.name);
-  if (!cols.includes("analyzed")) sqlite.exec(`ALTER TABLE weaknesses ADD COLUMN analyzed INTEGER NOT NULL DEFAULT 0`);
-  if (!cols.includes("source")) sqlite.exec(`ALTER TABLE weaknesses ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`);
-  if (!cols.includes("theme")) sqlite.exec(`ALTER TABLE weaknesses ADD COLUMN theme TEXT`);
+export async function ensureSchema(): Promise<void> {
+  await q.ensureColumns("weaknesses", ["analyzed", "source", "theme"]);
 }
 
 export type RelatedItem = {
@@ -42,8 +40,8 @@ function itemHref(anchor: string, sourcePath: string, itemId: number, q: string)
 }
 
 /** Auto-link : retrouve les items du corpus les plus proches du texte de la faiblesse (matching lâche). */
-function autoLink(text: string, max = 8): number[] {
-  const groups = search(text, 40, "or");
+async function autoLink(text: string, max = 8): Promise<number[]> {
+  const groups = await search(text, 40, "or");
   const ids: number[] = [];
   // round-robin léger pour diversifier les types de source
   const queues = groups.map((g) => g.hits.slice());
@@ -69,7 +67,7 @@ const RESOLVE_ITEM_SQL = `
   WHERE i.id = ?
 `;
 
-function relatedFor(idsJson: string | null, q: string): RelatedItem[] {
+async function relatedFor(idsJson: string | null, query: string): Promise<RelatedItem[]> {
   if (!idsJson) return [];
   let ids: number[] = [];
   try {
@@ -77,10 +75,10 @@ function relatedFor(idsJson: string | null, q: string): RelatedItem[] {
   } catch {
     return [];
   }
-  const resolveItems = sqlite.prepare(RESOLVE_ITEM_SQL); // lié à la connexion du cours courant
   const out: RelatedItem[] = [];
   for (const id of ids) {
-    const r = resolveItems.get(id) as any;
+    // statement mis en cache par le driver, lié à la connexion du cours courant
+    const r = await q.get<any>(RESOLVE_ITEM_SQL, id);
     if (!r) continue;
     out.push({
       itemId: r.itemId,
@@ -88,13 +86,13 @@ function relatedFor(idsJson: string | null, q: string): RelatedItem[] {
       sourceType: r.sourceType,
       sourceTitle: r.sourceTitle,
       lectureId: r.lectureId,
-      href: itemHref(r.anchor, r.sourcePath, r.itemId, q),
+      href: itemHref(r.anchor, r.sourcePath, r.itemId, query),
     });
   }
   return out;
 }
 
-export function createWeakness(input: {
+export async function createWeakness(input: {
   topic: string;
   description?: string;
   severity?: number;
@@ -102,52 +100,51 @@ export function createWeakness(input: {
   source?: string; // 'manual' | 'conversation' | 'image'
   theme?: string | null;
   analyzed?: boolean;
-}): number {
-  ensureSchema();
-  const related = autoLink(`${input.topic} ${input.description ?? ""} ${input.theme ?? ""}`);
-  const id = sqlite
-    .prepare(
-      `INSERT INTO weaknesses (topic, description, screenshot_path, severity, related_item_ids, source, theme, analyzed)
-       VALUES (?,?,?,?,?,?,?,?)`
-    )
-    .run(
-      input.topic,
-      input.description ?? null,
-      input.screenshotPath ?? null,
-      input.severity ?? 2,
-      JSON.stringify(related),
-      input.source ?? "manual",
-      input.theme ?? null,
-      input.analyzed ? 1 : 0
-    ).lastInsertRowid as number;
+}): Promise<number> {
+  await ensureSchema();
+  const related = await autoLink(`${input.topic} ${input.description ?? ""} ${input.theme ?? ""}`);
+  const id = await q.insert(
+    `INSERT INTO weaknesses (topic, description, screenshot_path, severity, related_item_ids, source, theme, analyzed)
+       VALUES (?,?,?,?,?,?,?,?)`,
+    input.topic,
+    input.description ?? null,
+    input.screenshotPath ?? null,
+    input.severity ?? 2,
+    JSON.stringify(related),
+    input.source ?? "manual",
+    input.theme ?? null,
+    input.analyzed ? 1 : 0
+  );
   return id;
 }
 
-export function listWeaknesses(): Weakness[] {
-  ensureSchema();
-  const rows = sqlite
-    .prepare(`SELECT * FROM weaknesses ORDER BY datetime(logged_at) DESC, id DESC`)
-    .all() as any[];
-  return rows.map((r) => ({
-    id: r.id,
-    topic: r.topic,
-    description: r.description,
-    screenshotPath: r.screenshot_path,
-    screenshotUrl: r.screenshot_path ? `/uploads/${r.screenshot_path}` : null,
-    severity: r.severity,
-    analyzed: !!r.analyzed,
-    source: r.source ?? "manual",
-    theme: r.theme ?? null,
-    timesSeen: r.times_seen,
-    loggedAt: r.logged_at,
-    lastReviewedAt: r.last_reviewed_at,
-    related: relatedFor(r.related_item_ids, r.topic),
-  }));
+export async function listWeaknesses(): Promise<Weakness[]> {
+  await ensureSchema();
+  const rows = await q.all<any>(`SELECT * FROM weaknesses ORDER BY logged_at DESC, id DESC`);
+  const out: Weakness[] = [];
+  for (const r of rows) {
+    out.push({
+      id: r.id,
+      topic: r.topic,
+      description: r.description,
+      screenshotPath: r.screenshot_path,
+      screenshotUrl: r.screenshot_path ? `/uploads/${r.screenshot_path}` : null,
+      severity: r.severity,
+      analyzed: !!r.analyzed,
+      source: r.source ?? "manual",
+      theme: r.theme ?? null,
+      timesSeen: r.times_seen,
+      loggedAt: r.logged_at,
+      lastReviewedAt: r.last_reviewed_at,
+      related: await relatedFor(r.related_item_ids, r.topic),
+    });
+  }
+  return out;
 }
 
 /** Tableau de bord : faiblesses regroupées par thème (le « classement des incompréhensions »). */
-export function weaknessesByTheme(): { theme: string; count: number; avgSeverity: number; topics: string[] }[] {
-  const list = listWeaknesses();
+export async function weaknessesByTheme(): Promise<{ theme: string; count: number; avgSeverity: number; topics: string[] }[]> {
+  const list = await listWeaknesses();
   const map = new Map<string, Weakness[]>();
   for (const w of list) {
     const t = w.theme || "(non classé)";
@@ -163,32 +160,37 @@ export function weaknessesByTheme(): { theme: string; count: number; avgSeverity
     .sort((a, b) => b.count - a.count || b.avgSeverity - a.avgSeverity);
 }
 
-export function getWeakness(id: number): Weakness | null {
-  const list = listWeaknesses();
+export async function getWeakness(id: number): Promise<Weakness | null> {
+  const list = await listWeaknesses();
   return list.find((w) => w.id === id) ?? null;
 }
 
-export function deleteWeakness(id: number): string | null {
-  const row = sqlite.prepare(`SELECT screenshot_path FROM weaknesses WHERE id = ?`).get(id) as
-    | { screenshot_path: string | null }
-    | undefined;
-  sqlite.prepare(`DELETE FROM weaknesses WHERE id = ?`).run(id);
+export async function deleteWeakness(id: number): Promise<string | null> {
+  const row = await q.get<{ screenshot_path: string | null }>(
+    `SELECT screenshot_path FROM weaknesses WHERE id = ?`,
+    id
+  );
+  await q.run(`DELETE FROM weaknesses WHERE id = ?`, id);
   return row?.screenshot_path ?? null;
 }
 
 /** Met à jour l'analyse (topic/description), recalcule les liens, marque analysé. */
-export function updateWeaknessAnalysis(id: number, topic: string, description: string) {
-  ensureSchema();
-  const related = autoLink(`${topic} ${description}`);
-  sqlite
-    .prepare(`UPDATE weaknesses SET topic = ?, description = ?, related_item_ids = ?, analyzed = 1 WHERE id = ?`)
-    .run(topic, description, JSON.stringify(related), id);
+export async function updateWeaknessAnalysis(id: number, topic: string, description: string): Promise<void> {
+  await ensureSchema();
+  const related = await autoLink(`${topic} ${description}`);
+  await q.run(
+    `UPDATE weaknesses SET topic = ?, description = ?, related_item_ids = ?, analyzed = 1 WHERE id = ?`,
+    topic,
+    description,
+    JSON.stringify(related),
+    id
+  );
 }
 
 /** Faiblesses pas encore analysées par l'IA (pour le traitement par Claude Code). */
-export function listPending(): { id: number; topic: string; description: string | null; screenshotPath: string | null }[] {
-  ensureSchema();
-  return sqlite
-    .prepare(`SELECT id, topic, description, screenshot_path AS screenshotPath FROM weaknesses WHERE analyzed = 0 ORDER BY id`)
-    .all() as any[];
+export async function listPending(): Promise<{ id: number; topic: string; description: string | null; screenshotPath: string | null }[]> {
+  await ensureSchema();
+  return q.all<{ id: number; topic: string; description: string | null; screenshotPath: string | null }>(
+    `SELECT id, topic, description, screenshot_path AS screenshotPath FROM weaknesses WHERE analyzed = 0 ORDER BY id`
+  );
 }

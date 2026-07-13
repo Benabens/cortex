@@ -1,4 +1,5 @@
-import { currentCourse, sqlite } from "@/db/client";
+import { currentCourse } from "@/db/client";
+import { q } from "@/db/q";
 import { boundedEdit, tokenize } from "@/lib/text";
 
 export type SearchHit = {
@@ -34,13 +35,13 @@ const TYPE_ORDER = ["review", "final", "midterm", "serie", "exercise", "cheatshe
 // ----- Vocabulaire en cache PAR COURS (pour la correction de fautes) -----
 type Vocab = { sorted: string[]; set: Set<string>; df: Map<string, number> };
 const _vocabByCourse = new Map<string, Vocab>();
-function vocab(): Vocab {
+async function vocab(): Promise<Vocab> {
   const course = currentCourse();
   let v = _vocabByCourse.get(course);
   if (!v) {
     let rows: { term: string; df: number }[] = [];
     try {
-      rows = sqlite.prepare("SELECT term, df FROM vocab").all() as typeof rows;
+      rows = await q.all<{ term: string; df: number }>("SELECT term, df FROM vocab");
     } catch {
       rows = [];
     }
@@ -53,8 +54,7 @@ function vocab(): Vocab {
 }
 
 /** Existe-t-il un terme du vocabulaire égal à `t` ou commençant par `t` ? */
-function knownPrefixOrExact(t: string): boolean {
-  const v = vocab();
+function knownPrefixOrExact(t: string, v: Vocab): boolean {
   if (v.set.has(t)) return true;
   const a = v.sorted;
   let lo = 0, hi = a.length;
@@ -67,9 +67,8 @@ function knownPrefixOrExact(t: string): boolean {
 }
 
 /** Candidats proches d'un terme mal orthographié, classés (distance, fréquence). */
-function fuzzyCandidates(t: string, k = 4): string[] {
+function fuzzyCandidates(t: string, v: Vocab, k = 4): string[] {
   const max = t.length <= 4 ? 1 : 2;
-  const v = vocab();
   const out: { term: string; d: number; df: number }[] = [];
   for (const term of v.sorted) {
     if (Math.abs(term.length - t.length) > max) continue;
@@ -95,14 +94,15 @@ const STOP = new Set([
  * mode 'and' (défaut, recherche précise) : tous les termes requis.
  * mode 'or'  (lien de faiblesse)        : OU sur les termes significatifs (mots vides retirés).
  */
-function toFtsQuery(raw: string, mode: "and" | "or" = "and"): string | null {
+async function toFtsQuery(raw: string, mode: "and" | "or" = "and"): Promise<string | null> {
   let terms = tokenize(raw, 2);
   if (mode === "or") terms = terms.filter((t) => t.length >= 3 && !STOP.has(t));
   if (!terms.length) return null;
+  const v = await vocab();
   const groups = terms.map((t) => {
     const parts = [`"${t}"*`];
-    if (!knownPrefixOrExact(t)) {
-      for (const c of fuzzyCandidates(t)) parts.push(`"${c}"`);
+    if (!knownPrefixOrExact(t, v)) {
+      for (const c of fuzzyCandidates(t, v)) parts.push(`"${c}"`);
     }
     return parts.length > 1 ? `(${parts.join(" OR ")})` : parts[0];
   });
@@ -121,13 +121,13 @@ const SEARCH_SQL = `
   LIMIT ?
 `;
 
-export function search(raw: string, limit = 60, mode: "and" | "or" = "and"): SearchGroup[] {
-  const q = toFtsQuery(raw, mode);
-  if (!q) return [];
+export async function search(raw: string, limit = 60, mode: "and" | "or" = "and"): Promise<SearchGroup[]> {
+  const ftsQuery = await toFtsQuery(raw, mode);
+  if (!ftsQuery) return [];
   let rows: SearchHit[];
   try {
-    // préparé à l'appel → lié à la connexion du cours courant (proxy `sqlite`)
-    rows = sqlite.prepare(SEARCH_SQL).all(q, limit) as SearchHit[];
+    // exécuté à l'appel → lié à la connexion du cours courant (façade `q`)
+    rows = await q.all<SearchHit>(SEARCH_SQL, ftsQuery, limit);
   } catch {
     return [];
   }

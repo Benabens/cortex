@@ -5,11 +5,11 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export function GET(req: NextRequest) {
+export async function GET(req: NextRequest) {
   useCourse(req);
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
   if (q.length < 2) return NextResponse.json({ groups: [], total: 0 });
-  const groups = search(q);
+  const groups = await search(q);
   const total = groups.reduce((n, g) => n + g.hits.length, 0);
   return NextResponse.json({ groups, total });
 }

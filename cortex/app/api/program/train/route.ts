@@ -17,24 +17,24 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   const course = useCourse(req);
   const { topicId } = await req.json().catch(() => ({ topicId: 0 }));
-  const topic = getTopic(Number(topicId));
+  const topic = await getTopic(Number(topicId));
   if (!topic) return NextResponse.json({ error: "Type introuvable." }, { status: 404 });
 
-  const qcm = isQcmCourse();
+  const qcm = await isQcmCourse();
   const jobType = qcm ? "qcm" : "exercise";
   // un job de ce type en cours ? on le réutilise (un seul actif à la fois).
-  const existing = activeJob(jobType);
+  const existing = await activeJob(jobType);
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true, topicId: topic.id, qcm });
 
-  const issue = preflightGeneration();
+  const issue = await preflightGeneration();
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
 
   const jobTarget = qcm
     ? JSON.stringify({ count: 4, openCount: 1, focus: topicTarget(topic) }) // QCM-first sur ce type
     : JSON.stringify({ target: topicTarget(topic), topicId: topic.id });
-  const jobId = createJob(jobType, jobTarget);
+  const jobId = await createJob(jobType, jobTarget);
   try {
-    startWorker(jobId, course);
+    await startWorker(jobId, course);
   } catch (e: any) {
     return NextResponse.json({ error: `Impossible de lancer le worker : ${e?.message ?? e}` }, { status: 500 });
   }

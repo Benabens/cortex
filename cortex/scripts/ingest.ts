@@ -11,7 +11,8 @@ import * as cheerio from "cheerio";
 import fs from "node:fs";
 import path from "node:path";
 import { extractText, getDocumentProxy } from "unpdf";
-import { currentCourse, enterCourse, ensureFts, sqlite } from "../db/client";
+import { currentCourse, enterCourse, ensureFts } from "../db/client";
+import { q } from "../db/q";
 import { coursePaths, DEFAULT_COURSE } from "../lib/courses";
 import { importFolder } from "../lib/import-folder";
 import { ingestAllRefs } from "../lib/sources";
@@ -31,7 +32,7 @@ if (courseArg) process.env.CORTEX_COURSE = courseArg;
 enterCourse(courseArg);
 const COURSE = currentCourse();
 const CONTENT_ROOT = coursePaths(COURSE).contentRoot; // cs-202 → racine du repo ; autres → data/<id>/content
-// La table FTS doit exister AVANT les prepared statements top-level ci-dessous (DB neuve d'un
+// La table FTS doit exister AVANT toute insertion dans fts_items (DB neuve d'un
 // nouveau cours : le schéma de base ne crée pas fts_items). No-op pour cs-202 (déjà présente).
 ensureFts();
 
@@ -55,18 +56,7 @@ function recencyWeight(year?: number, type?: string): number {
   return 1.2;
 }
 
-// --- accès DB bas niveau (rapide, contrôle total) ---
-const insSource = sqlite.prepare(
-  `INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`
-);
-const insItem = sqlite.prepare(
-  `INSERT INTO items (source_id, type, lecture_id, title, text, html, images, tags, anchor)
-   VALUES (@sourceId,@type,@lectureId,@title,@text,@html,@images,@tags,@anchor)`
-);
-const insFts = sqlite.prepare(
-  `INSERT INTO fts_items (title, text, lecture_id, item_id, source_id) VALUES (?,?,?,?,?)`
-);
-
+// --- accès DB via la façade q (les statements sont mis en cache par le driver) ---
 type ItemRec = {
   type: string;
   lectureId: string | null;
@@ -78,34 +68,40 @@ type ItemRec = {
   anchor: string;
 };
 
-function addSource(
+async function addSource(
   type: string,
   title: string,
   relPath: string,
   year: number | null,
   items: ItemRec[]
-): number {
-  const sid = insSource.run(
+): Promise<number> {
+  const sid = await q.insert(
+    `INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`,
     type,
     title,
     relPath,
     year,
     recencyWeight(year ?? undefined, type)
-  ).lastInsertRowid as number;
+  );
   for (const it of items) {
     if (!it.text || it.text.length < 3) continue;
-    const itemId = insItem.run({
-      sourceId: sid,
-      type: it.type,
-      lectureId: it.lectureId,
-      title: it.title,
-      text: it.text,
-      html: it.html ?? null,
-      images: it.images ? JSON.stringify(it.images) : null,
-      tags: it.tags ? JSON.stringify(it.tags) : null,
-      anchor: it.anchor,
-    }).lastInsertRowid as number;
-    insFts.run(it.title ?? "", it.text, it.lectureId ?? "", String(itemId), String(sid));
+    const itemId = await q.insert(
+      `INSERT INTO items (source_id, type, lecture_id, title, text, html, images, tags, anchor)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+      sid,
+      it.type,
+      it.lectureId,
+      it.title,
+      it.text,
+      it.html ?? null,
+      it.images ? JSON.stringify(it.images) : null,
+      it.tags ? JSON.stringify(it.tags) : null,
+      it.anchor
+    );
+    await q.run(
+      `INSERT INTO fts_items (title, text, lecture_id, item_id, source_id) VALUES (?,?,?,?,?)`,
+      it.title ?? "", it.text, it.lectureId ?? "", String(itemId), String(sid)
+    );
   }
   return items.length;
 }
@@ -114,7 +110,7 @@ const read = (rel: string) => fs.readFileSync(path.join(CONTENT_ROOT, rel), "utf
 const exists = (rel: string) => fs.existsSync(path.join(CONTENT_ROOT, rel));
 
 // ---------- 1. reviews.html : cartes flip (active recall) ----------
-function ingestReviews(): number {
+async function ingestReviews(): Promise<number> {
   if (!exists("reviews.html")) return 0;
   const $ = cheerio.load(read("reviews.html"));
   const items: ItemRec[] = [];
@@ -138,11 +134,11 @@ function ingestReviews(): number {
         });
       });
   });
-  return addSource("review", "Reviews — lectures & labs", "reviews.html", null, items);
+  return await addSource("review", "Reviews — lectures & labs", "reviews.html", null, items);
 }
 
 // ---------- 2. index.html : définitions / méthodes / théorèmes ----------
-function ingestIndex(): number {
+async function ingestIndex(): Promise<number> {
   if (!exists("index.html")) return 0;
   const $ = cheerio.load(read("index.html"));
   const items: ItemRec[] = [];
@@ -163,7 +159,7 @@ function ingestIndex(): number {
         });
       });
   });
-  return addSource("review", "Index — cours réseau/OS", "index.html", null, items);
+  return await addSource("review", "Index — cours réseau/OS", "index.html", null, items);
 }
 
 // ---------- 3. exercices/*.html : un exo par fichier ----------
@@ -177,7 +173,7 @@ function inferExo(file: string): { type: string; year: number | null } {
   return { type: "exercise", year: null };
 }
 
-function ingestExercices(): number {
+async function ingestExercices(): Promise<number> {
   const dir = path.join(CONTENT_ROOT, "exercices");
   if (!fs.existsSync(dir)) return 0;
   let total = 0;
@@ -196,7 +192,7 @@ function ingestExercices(): number {
       if (!/^https?:/.test(src)) images.push(`exercices/${src.replace(/^\.?\//, "")}`);
     });
     const { type, year } = inferExo(file);
-    total += addSource(type, title, `exercices/${file}`, year, [
+    total += await addSource(type, title, `exercices/${file}`, year, [
       {
         type: "exercise",
         lectureId: null,
@@ -211,7 +207,7 @@ function ingestExercices(): number {
 }
 
 // ---------- 4. cheatsheets : une box par item ----------
-function ingestCheatsheets(): number {
+async function ingestCheatsheets(): Promise<number> {
   const files = [
     ["c_cheatsheet.html", "Cheat sheet C"],
     ["cheatsheet_v5_preview.html", "Cheat sheet v5"],
@@ -233,7 +229,7 @@ function ingestCheatsheets(): number {
       $("script, style").remove();
       items.push({ type: "cheat", lectureId: null, title: label, text: clean($("body").text()), anchor: file });
     }
-    total += addSource("cheatsheet", label, file, null, items);
+    total += await addSource("cheatsheet", label, file, null, items);
   }
   return total;
 }
@@ -267,7 +263,7 @@ function labId(rel: string): string | null {
 }
 
 // ---------- 5. labs/ : énoncés (html/md/tex) + CODE C (.c/.h) ----------
-function ingestLabs(): number {
+async function ingestLabs(): Promise<number> {
   let total = 0;
   for (const rel of listFiles("labs", [".html", ".md", ".c", ".h", ".tex"])) {
     const isCode = /\.(c|h)$/.test(rel);
@@ -278,7 +274,7 @@ function ingestLabs(): number {
       text = read(rel); // .md/.c/.h/.tex : contenu brut (le code reste lisible/cherchable)
     }
     const type = isCode ? "code" : "lab";
-    total += addSource(type, title, rel, null, [
+    total += await addSource(type, title, rel, null, [
       { type, lectureId: labId(rel), title, text, anchor: rel },
     ]);
   }
@@ -299,7 +295,7 @@ function depositedLabId(rel: string): string | null {
   return null;
 }
 
-function ingestDepositedLabs(): number {
+async function ingestDepositedLabs(): Promise<number> {
   const base = path.join(process.cwd(), DEPOSITED_LABS_REL);
   if (!fs.existsSync(base)) return 0;
   const files: string[] = [];
@@ -327,7 +323,7 @@ function ingestDepositedLabs(): number {
       text = fs.readFileSync(path.join(base, rel), "utf8");
     }
     const type = isCode ? "code" : "lab";
-    total += addSource(type, title, path.join(DEPOSITED_LABS_REL, rel), null, [
+    total += await addSource(type, title, path.join(DEPOSITED_LABS_REL, rel), null, [
       { type, lectureId: lab, title, text, anchor: path.join(DEPOSITED_LABS_REL, rel) },
     ]);
   }
@@ -335,10 +331,10 @@ function ingestDepositedLabs(): number {
 }
 
 // ---------- 6. notes/ : checklists, plan, attendus du staff ----------
-function ingestNotes(): number {
+async function ingestNotes(): Promise<number> {
   let total = 0;
   for (const rel of listFiles("notes", [".md"])) {
-    total += addSource("note", path.basename(rel, ".md"), rel, null, [
+    total += await addSource("note", path.basename(rel, ".md"), rel, null, [
       { type: "note", lectureId: null, title: path.basename(rel, ".md"), text: read(rel), anchor: rel },
     ]);
   }
@@ -346,7 +342,7 @@ function ingestNotes(): number {
 }
 
 // ---------- 7. autres HTML à la racine (finals d'énoncé, packets, lab walk…) ----------
-function ingestRootDocs(): number {
+async function ingestRootDocs(): Promise<number> {
   const handled = new Set([
     "reviews.html", "index.html", "c_cheatsheet.html", "cheatsheet_v5_preview.html", "c_errors_journal.html",
   ]);
@@ -356,7 +352,7 @@ function ingestRootDocs(): number {
     const { title, text } = htmlToText(f);
     const ym = f.match(/(\d{4})/);
     const type = /final/i.test(f) ? "final" : /midterm|mi.?term/i.test(f) ? "midterm" : "doc";
-    total += addSource(type, title, f, ym ? +ym[1] : null, [
+    total += await addSource(type, title, f, ym ? +ym[1] : null, [
       { type: "exercise", lectureId: labId(f), title, text, anchor: f },
     ]);
   }
@@ -383,19 +379,17 @@ async function ingestPdfs(): Promise<number> {
       text: clean(pageText),
       anchor: `${rel}#page=${i + 1}`,
     }));
-    total += addSource("course_pdf", title, rel, null, items);
+    total += await addSource("course_pdf", title, rel, null, items);
   }
   return total;
 }
 
 // ---------- Vocabulaire : termes distincts + fréquence documentaire ----------
-function buildVocab(): number {
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS vocab (term TEXT PRIMARY KEY, df INTEGER NOT NULL);
-    DELETE FROM vocab;
-  `);
+async function buildVocab(): Promise<number> {
+  await q.ensureTable("vocab");
+  await q.run("DELETE FROM vocab");
   const df = new Map<string, number>();
-  const rows = sqlite.prepare("SELECT text FROM items").all() as { text: string }[];
+  const rows = await q.all<{ text: string }>("SELECT text FROM items");
   for (const { text } of rows) {
     const seen = new Set<string>();
     for (const t of tokenize(text, 3)) {
@@ -404,11 +398,10 @@ function buildVocab(): number {
     }
     for (const t of seen) df.set(t, (df.get(t) ?? 0) + 1);
   }
-  const ins = sqlite.prepare("INSERT OR REPLACE INTO vocab (term, df) VALUES (?,?)");
-  const tx = sqlite.transaction(() => {
-    for (const [term, n] of df) ins.run(term, n);
+  await q.tx(async () => {
+    for (const [term, n] of df)
+      await q.run("INSERT INTO vocab (term, df) VALUES (?,?) ON CONFLICT(term) DO UPDATE SET df = excluded.df", term, n);
   });
-  tx();
   return df.size;
 }
 
@@ -442,13 +435,13 @@ async function ingestGenericContent(): Promise<void> {
         const { text } = await extractText(pdf, { mergePages: false });
         const pages = (Array.isArray(text) ? text : [text]).map(clean).filter((t) => t.length > 3);
         const title = path.basename(rel, ".pdf");
-        addSource(type, title, rel, year, pages.map((t, i) => ({ type, lectureId: null, title: `${title} — p.${i + 1}`, text: t, anchor: `${rel}#page=${i + 1}` })));
+        await addSource(type, title, rel, year, pages.map((t, i) => ({ type, lectureId: null, title: `${title} — p.${i + 1}`, text: t, anchor: `${rel}#page=${i + 1}` })));
       } else if (/\.html?$/.test(rel)) {
         const { title, text } = htmlToText(rel);
-        addSource(type, title, rel, year, [{ type, lectureId: null, title, text, anchor: rel }]);
+        await addSource(type, title, rel, year, [{ type, lectureId: null, title, text, anchor: rel }]);
       } else {
         const title = path.basename(rel);
-        addSource(type, title, rel, year, [{ type, lectureId: null, title, text: read(rel), anchor: rel }]);
+        await addSource(type, title, rel, year, [{ type, lectureId: null, title, text: read(rel), anchor: rel }]);
       }
       nSources++;
     } catch (e) {
@@ -472,21 +465,20 @@ async function main() {
   }
 
   console.log("Nettoyage des données dérivées (sources/items/fts)…");
-  sqlite.exec("DELETE FROM items; DELETE FROM sources; DELETE FROM fts_items;");
+  await q.exec("DELETE FROM items; DELETE FROM sources; DELETE FROM fts_items;");
 
   if (COURSE === DEFAULT_COURSE) {
     // ---- cs-202 : flux historique INCHANGÉ ----
-    const tx = sqlite.transaction(() => {
-      console.log("• reviews.html :", ingestReviews(), "cartes");
-      console.log("• index.html   :", ingestIndex(), "définitions/méthodes");
-      console.log("• exercices/   :", ingestExercices(), "exos");
-      console.log("• cheatsheets  :", ingestCheatsheets(), "boxes");
-      console.log("• labs/        :", ingestLabs(), "fichiers (énoncés + code C)");
-      console.log("• labs déposés :", ingestDepositedLabs(), "fichiers (code réel 2026 : grilledcheese + lab1/2/4/5)");
-      console.log("• notes/       :", ingestNotes(), "notes (dont attendus staff)");
-      console.log("• docs racine  :", ingestRootDocs(), "HTML (finals/énoncés)");
+    await q.tx(async () => {
+      console.log("• reviews.html :", await ingestReviews(), "cartes");
+      console.log("• index.html   :", await ingestIndex(), "définitions/méthodes");
+      console.log("• exercices/   :", await ingestExercices(), "exos");
+      console.log("• cheatsheets  :", await ingestCheatsheets(), "boxes");
+      console.log("• labs/        :", await ingestLabs(), "fichiers (énoncés + code C)");
+      console.log("• labs déposés :", await ingestDepositedLabs(), "fichiers (code réel 2026 : grilledcheese + lab1/2/4/5)");
+      console.log("• notes/       :", await ingestNotes(), "notes (dont attendus staff)");
+      console.log("• docs racine  :", await ingestRootDocs(), "HTML (finals/énoncés)");
     });
-    tx();
     console.log("• PDF cours    :", await ingestPdfs(), "pages");
   } else {
     // ---- autres cours : ingestion générique du dossier de contenu ----
@@ -504,16 +496,16 @@ async function main() {
   }
 
   // Vocabulaire (pour la recherche tolérante aux fautes)
-  console.log("• vocabulaire  :", buildVocab(), "termes");
+  console.log("• vocabulaire  :", await buildVocab(), "termes");
 
-  const counts = sqlite.prepare("SELECT (SELECT count(*) FROM sources) s, (SELECT count(*) FROM items) i, (SELECT count(*) FROM fts_items) f").get() as any;
+  const counts = await q.get<any>("SELECT (SELECT count(*) FROM sources) s, (SELECT count(*) FROM items) i, (SELECT count(*) FROM fts_items) f");
   console.log(`\n✓ Ingestion terminée : ${counts.s} sources, ${counts.i} items, ${counts.f} indexés (FTS).`);
 
   // Récap « ce qui a été compris » (la matière, les examens de réf, les conventions).
-  const byType = sqlite.prepare("SELECT type, count(*) n FROM sources GROUP BY type ORDER BY n DESC").all() as { type: string; n: number }[];
-  const refs = sqlite.prepare("SELECT count(*) n FROM exam_refs").get() as { n: number };
-  const notes = sqlite.prepare("SELECT count(*) n FROM sources WHERE type='note'").get() as { n: number };
-  const recent = sqlite.prepare("SELECT title, year FROM sources WHERE type IN ('final','midterm') AND year IS NOT NULL ORDER BY year DESC LIMIT 3").all() as { title: string; year: number }[];
+  const byType = await q.all<{ type: string; n: number }>("SELECT type, count(*) n FROM sources GROUP BY type ORDER BY n DESC");
+  const refs = (await q.get<{ n: number }>("SELECT count(*) n FROM exam_refs"))!;
+  const notes = (await q.get<{ n: number }>("SELECT count(*) n FROM sources WHERE type='note'"))!;
+  const recent = await q.all<{ title: string; year: number }>("SELECT title, year FROM sources WHERE type IN ('final','midterm') AND year IS NOT NULL ORDER BY year DESC LIMIT 3");
   console.log(`\n📊 Compris pour « ${COURSE} » :`);
   console.log(`   types : ${byType.map((t) => `${t.type}×${t.n}`).join(", ")}`);
   console.log(`   examens de référence (format) : ${refs.n}${recent.length ? " — récents : " + recent.map((r) => `${r.title} (${r.year})`).join(", ") : ""}`);

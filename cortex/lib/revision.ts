@@ -1,4 +1,5 @@
-import { currentCourse, sqlite } from "@/db/client";
+import { currentCourse } from "@/db/client";
+import { q } from "@/db/q";
 import { completeText, extractJson } from "@/lib/llm";
 import { coursePaths } from "@/lib/courses";
 import { sourceHref } from "@/lib/deeplink";
@@ -22,39 +23,10 @@ export type BankQuestion = {
   examPage: number | null; points: number | null; lectureRank: number | null; examHref: string | null;
 };
 
-export function ensureRevisionSchema() {
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS bank_questions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind TEXT NOT NULL,
-    topic TEXT NOT NULL,
-    subtopic TEXT,
-    statement TEXT NOT NULL,
-    official_answer TEXT,
-    options TEXT,
-    source_exam TEXT,
-    exam_year INTEGER,
-    exam_page INTEGER,
-    points REAL,
-    lecture_rank INTEGER,
-    exam_href TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-  );`);
+export async function ensureRevisionSchema(): Promise<void> {
+  await q.ensureTable("bank_questions");
   // parcours généré (questions NEUVES couvrant le programme) — réutilise qcm_items/exam_questions via examId.
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS revision_plan (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind TEXT NOT NULL,
-    topic TEXT NOT NULL,
-    lecture_rank INTEGER,
-    statement TEXT,
-    options TEXT,
-    correct TEXT,
-    misconceptions TEXT,
-    explanation TEXT,
-    solution TEXT,
-    verified INTEGER,
-    verify_method TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-  );`);
+  await q.ensureTable("revision_plan");
 }
 
 // ─────────────────────── P1 — index exhaustif question-par-question ───────────────────────
@@ -88,8 +60,8 @@ const Q_SCHEMA = {
 type RawQ = { page?: number; kind?: string; topic?: string; subtopic?: string; statement?: string; options?: string; official_answer?: string; points?: number };
 
 /** Corrigés du cours (fichiers …with solutions / solutions / answers), un par année. */
-function solutionRefs(): { path: string; title: string; year: number | null }[] {
-  const rows = sqlite.prepare(`SELECT path, title, year FROM sources WHERE type IN ('final','midterm') GROUP BY path`).all() as { path: string; title: string; year: number | null }[];
+async function solutionRefs(): Promise<{ path: string; title: string; year: number | null }[]> {
+  const rows = await q.all<{ path: string; title: string; year: number | null }>(`SELECT path, title, year FROM sources WHERE type IN ('final','midterm') GROUP BY path`);
   const isSol = (s: string) => /solution|answer|corrig/i.test(s);
   const byYear = new Map<string, { path: string; title: string; year: number | null }>();
   for (const r of rows) { if (!isSol(r.path) && !isSol(r.title)) continue; const k = String(r.year ?? r.path); if (!byYear.has(k)) byYear.set(k, r); }
@@ -100,13 +72,12 @@ type StepCb = (m: string, p: number) => void;
 
 /** Indexe LITTÉRALEMENT chaque question de chaque corrigé (qcm + open). Résilient, exhaustif. */
 export async function indexBank(opts: { onStep?: StepCb } = {}): Promise<{ exams: number; qcm: number; open: number }> {
-  ensureRevisionSchema();
+  await ensureRevisionSchema();
   const step = opts.onStep ?? (() => {});
   const course = currentCourse();
-  const refs = solutionRefs();
+  const refs = await solutionRefs();
   if (!refs.length) { step("Aucun corrigé ingéré.", 100); return { exams: 0, qcm: 0, open: 0 }; }
-  sqlite.exec(`DELETE FROM bank_questions`);
-  const ins = sqlite.prepare(`INSERT INTO bank_questions (kind, topic, subtopic, statement, official_answer, options, source_exam, exam_year, exam_page, points, exam_href) VALUES (@kind,@topic,@subtopic,@statement,@official,@options,@exam,@year,@page,@points,@href)`);
+  await q.exec(`DELETE FROM bank_questions`);
   let totQ = 0, totO = 0, examsUsed = 0;
   for (let i = 0; i < refs.length; i++) {
     const ref = refs[i];
@@ -136,23 +107,23 @@ export async function indexBank(opts: { onStep?: StepCb } = {}): Promise<{ exams
       } catch (e) { step(`${ref.title} : extraction ${attempt}/3 échouée (${(e as Error).message.slice(0, 40)})`, prog); }
     }
     let nq = 0, no = 0;
-    const tx = sqlite.transaction(() => {
-      for (const q of raw) {
-        const kind: Kind = (q.kind ?? "").toLowerCase().startsWith("q") ? "qcm" : "open";
-        const topic = (q.topic ?? "").trim(); const statement = (q.statement ?? "").trim();
+    await q.tx(async () => {
+      for (const rq of raw) {
+        const kind: Kind = (rq.kind ?? "").toLowerCase().startsWith("q") ? "qcm" : "open";
+        const topic = (rq.topic ?? "").trim(); const statement = (rq.statement ?? "").trim();
         if (!topic || statement.length < 8) continue;
-        const page = Math.max(1, Math.round(Number(q.page) || 1));
-        ins.run({
-          kind, topic: topic.slice(0, 120), subtopic: (q.subtopic ?? "").slice(0, 120) || null,
-          statement: statement.slice(0, 1200), official: (q.official_answer ?? "").slice(0, 400) || null,
-          options: kind === "qcm" ? (q.options ?? "").slice(0, 1500) || null : null,
-          exam: ref.title, year: ref.year, page, points: Number(q.points) > 0 ? Number(q.points) : null,
-          href: sourceHref(course, refForLink, `${refForLink}#page=${page}`),
-        });
+        const page = Math.max(1, Math.round(Number(rq.page) || 1));
+        await q.run(
+          `INSERT INTO bank_questions (kind, topic, subtopic, statement, official_answer, options, source_exam, exam_year, exam_page, points, exam_href) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+          kind, topic.slice(0, 120), (rq.subtopic ?? "").slice(0, 120) || null,
+          statement.slice(0, 1200), (rq.official_answer ?? "").slice(0, 400) || null,
+          kind === "qcm" ? (rq.options ?? "").slice(0, 1500) || null : null,
+          ref.title, ref.year, page, Number(rq.points) > 0 ? Number(rq.points) : null,
+          sourceHref(course, refForLink, `${refForLink}#page=${page}`),
+        );
         if (kind === "qcm") nq++; else no++;
       }
     });
-    tx();
     totQ += nq; totO += no; if (nq + no) examsUsed++;
     step(`${ref.title} : ${nq} QCM + ${no} ouvertes`, prog);
   }
@@ -164,10 +135,10 @@ export async function indexBank(opts: { onStep?: StepCb } = {}): Promise<{ exams
 
 /** Mappe chaque topic distinct de la banque à un lecture_rank (ordre chronologique du cours). */
 export async function assignLectureRanks(opts: { onStep?: StepCb } = {}): Promise<number> {
-  ensureRevisionSchema();
+  await ensureRevisionSchema();
   const step = opts.onStep ?? (() => {});
   const course = currentCourse();
-  const topics = (sqlite.prepare(`SELECT DISTINCT topic FROM bank_questions ORDER BY topic`).all() as { topic: string }[]).map((r) => r.topic);
+  const topics = (await q.all<{ topic: string }>(`SELECT DISTINCT topic FROM bank_questions ORDER BY topic`)).map((r) => r.topic);
   if (!topics.length) return 0;
   // Approche robuste : on demande à Max d'ORDONNER les topics selon le déroulé du cours (titres de
   const lectureTitles = listLectureTitles(course);
@@ -185,10 +156,8 @@ export async function assignLectureRanks(opts: { onStep?: StepCb } = {}): Promis
   try { ranks = extractJson<{ ranks?: { topic: string; lecture_rank?: number }[] }>(await completeText({ prompt, model: "opus", timeoutMs: 180_000 }))?.ranks ?? []; } catch {}
   const map = new Map<string, number>();
   for (const r of ranks) if (r.topic) map.set(r.topic.trim().toLowerCase(), Math.max(1, Math.round(Number(r.lecture_rank) || 99)));
-  const upd = sqlite.prepare(`UPDATE bank_questions SET lecture_rank = ? WHERE topic = ?`);
   let done = 0;
-  const tx = sqlite.transaction(() => { for (const t of topics) { const lr = map.get(t.trim().toLowerCase()) ?? 99; upd.run(lr, t); if (lr < 99) done++; } });
-  tx();
+  await q.tx(async () => { for (const t of topics) { const lr = map.get(t.trim().toLowerCase()) ?? 99; await q.run(`UPDATE bank_questions SET lecture_rank = ? WHERE topic = ?`, lr, t); if (lr < 99) done++; } });
   step(`lecture_rank assigné à ${done}/${topics.length} sujets`, 95);
   return done;
 }
@@ -208,24 +177,24 @@ function listLectureTitles(course: string): { rank: number; title: string }[] {
 
 // ─────────────────────── requêtes banque ───────────────────────
 
-export function bankStats(): { qcm: number; open: number; byTopic: { topic: string; lectureRank: number | null; qcm: number; open: number }[] } {
-  ensureRevisionSchema();
-  const qcm = (sqlite.prepare(`SELECT count(*) n FROM bank_questions WHERE kind='qcm'`).get() as { n: number }).n;
-  const open = (sqlite.prepare(`SELECT count(*) n FROM bank_questions WHERE kind='open'`).get() as { n: number }).n;
-  const byTopic = sqlite.prepare(
+export async function bankStats(): Promise<{ qcm: number; open: number; byTopic: { topic: string; lectureRank: number | null; qcm: number; open: number }[] }> {
+  await ensureRevisionSchema();
+  const qcm = ((await q.get<{ n: number }>(`SELECT count(*) n FROM bank_questions WHERE kind='qcm'`)) as { n: number }).n;
+  const open = ((await q.get<{ n: number }>(`SELECT count(*) n FROM bank_questions WHERE kind='open'`)) as { n: number }).n;
+  const byTopic = await q.all<any>(
     `SELECT topic, max(lecture_rank) lectureRank, sum(kind='qcm') qcm, sum(kind='open') open
      FROM bank_questions GROUP BY topic ORDER BY (lectureRank IS NULL), lectureRank, topic`
-  ).all() as any[];
+  ) as any[];
   return { qcm, open, byTopic: byTopic.map((r) => ({ ...r, lectureRank: r.lectureRank })) };
 }
 
-export function bankQuestions(kind?: Kind): BankQuestion[] {
-  ensureRevisionSchema();
+export async function bankQuestions(kind?: Kind): Promise<BankQuestion[]> {
+  await ensureRevisionSchema();
   const where = kind ? `WHERE kind = '${kind}'` : "";
-  return (sqlite.prepare(
+  return (await q.all<any>(
     `SELECT id, kind, topic, subtopic, statement, official_answer officialAnswer, options, source_exam sourceExam, exam_year examYear, exam_page examPage, points, lecture_rank lectureRank, exam_href examHref
      FROM bank_questions ${where} ORDER BY (lecture_rank IS NULL), lecture_rank, topic, exam_year, exam_page`
-  ).all() as any[]).map((r) => ({ ...r }));
+  ) as any[]).map((r) => ({ ...r }));
 }
 
 // ─────────────────────── P3 — parcours généré (couverture 100 % à la bonne proportion) ───────────────────────
@@ -238,12 +207,12 @@ const LETTERS = ["A", "B", "C", "D", "E", "F"];
  * (distracteurs = idées fausses, vérif à l'aveugle) + l'architecte ouvert. Persiste dans revision_plan.
  */
 export async function buildParcours(opts: { budgetQcm?: number; budgetOpen?: number; onStep?: StepCb } = {}): Promise<{ qcm: number; open: number; topics: number }> {
-  ensureRevisionSchema();
+  await ensureRevisionSchema();
   const step = opts.onStep ?? (() => {});
-  const stats = bankStats();
+  const stats = await bankStats();
   if (!stats.byTopic.length) throw new Error("Banque vide : construis-la d'abord (indexBank).");
   const budgetQcm = opts.budgetQcm ?? 24, budgetOpen = opts.budgetOpen ?? 8;
-  sqlite.exec(`DELETE FROM revision_plan`);
+  await q.exec(`DELETE FROM revision_plan`);
 
   // « TOPIC DU PROGRAMME » = niveau LECTURE : on consolide les sous-variantes (k-NN / k-NN classif / …)
   // par lecture_rank → ~14 sujets (le programme), représentant = le sous-sujet le plus présent. Évite
@@ -266,7 +235,6 @@ export async function buildParcours(opts: { budgetQcm?: number; budgetOpen?: num
   const weighted: string[] = [];
   for (const t of qcmTarget) for (let k = 0; k < t.n; k++) weighted.push(t.topic);
 
-  const insQ = sqlite.prepare(`INSERT INTO revision_plan (kind, topic, lecture_rank, statement, options, correct, misconceptions, explanation, verified, verify_method) VALUES ('qcm',?,?,?,?,?,?,?,?,?)`);
   let nq = 0;
   const BATCH = 6;
   for (let b = 0; b < weighted.length; b += BATCH) {
@@ -277,13 +245,15 @@ export async function buildParcours(opts: { budgetQcm?: number; budgetOpen?: num
       const topicsArg = chunk.map((t) => ({ label: t, method: null }));
       let items = await generateQcmBatch(topicsArg, chunk.length, () => {});
       try { items = await verifyQcmBatch(items, () => {}); } catch {}
-      items.slice(0, chunk.length).forEach((it, j) => {
+      const kept = items.slice(0, chunk.length);
+      for (let j = 0; j < kept.length; j++) {
+        const it = kept[j];
         const tp = chunk[j] ?? it.topic;
-        const opts = (it.options ?? []).map((o, k) => `${LETTERS[k]}) ${o}`).join("\n");
+        const optStr = (it.options ?? []).map((o, k) => `${LETTERS[k]}) ${o}`).join("\n");
         const correct = (it.correct ?? []).map((c) => LETTERS[c] ?? "?").join(", ");
-        insQ.run(tp, rank.get(tp) ?? null, it.stem, opts, correct, JSON.stringify(it.misconceptions ?? []), it.explanation ?? null, it.verified ?? null, it.verified === 1 ? "qcm-blind-verify" : null);
+        await q.run(`INSERT INTO revision_plan (kind, topic, lecture_rank, statement, options, correct, misconceptions, explanation, verified, verify_method) VALUES ('qcm',?,?,?,?,?,?,?,?,?)`, tp, rank.get(tp) ?? null, it.stem, optStr, correct, JSON.stringify(it.misconceptions ?? []), it.explanation ?? null, it.verified ?? null, it.verified === 1 ? "qcm-blind-verify" : null);
         nq++;
-      });
+      }
     } catch (e) { step(`Lot QCM ignoré (${(e as Error).message.slice(0, 40)})`, prog); }
   }
 
@@ -294,7 +264,6 @@ export async function buildParcours(opts: { budgetQcm?: number; budgetOpen?: num
   const { architectQuestion } = await import("@/lib/architect");
   const { profile } = await import("@/lib/course-profile");
   const archs = profile().archetypes as any[];
-  const insO = sqlite.prepare(`INSERT INTO revision_plan (kind, topic, lecture_rank, statement, solution, verified, verify_method) VALUES ('open',?,?,?,?,?,?)`);
   let no = 0;
   for (let i = 0; i < openTarget.length; i++) {
     const tp = openTarget[i].topic;
@@ -302,7 +271,7 @@ export async function buildParcours(opts: { budgetQcm?: number; budgetOpen?: num
     try {
       const a = archs[i % archs.length];
       const r = await architectQuestion(a, tp, 15, { maxRounds: 1 });
-      insO.run(tp, rank.get(tp) ?? null, r.q.statement_tex, r.q.solution_tex, 1, "architect");
+      await q.run(`INSERT INTO revision_plan (kind, topic, lecture_rank, statement, solution, verified, verify_method) VALUES ('open',?,?,?,?,?,?)`, tp, rank.get(tp) ?? null, r.q.statement_tex, r.q.solution_tex, 1, "architect");
       no++;
     } catch (e) { step(`Ouverte ${tp} ignorée (${(e as Error).message.slice(0, 40)})`, 70); }
   }
@@ -386,25 +355,22 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 function themeLabels(t: Theme): string[] { return [t.label, ...t.aliases]; }
 
 /** Tous les énoncés déjà couverts pertinents pour un thème (banque + parcours) → anti-doublon. */
-function coveredStemsForTheme(t: Theme): string[] {
+async function coveredStemsForTheme(t: Theme): Promise<string[]> {
   const labels = themeLabels(t).map((l) => l.toLowerCase());
   const ph = labels.map(() => "?").join(",");
-  const bank = sqlite.prepare(`SELECT statement FROM bank_questions WHERE lower(topic) IN (${ph})`).all(...labels) as { statement: string }[];
-  const plan = sqlite.prepare(`SELECT statement FROM revision_plan WHERE kind='qcm' AND lower(topic) IN (${ph})`).all(...labels) as { statement: string }[];
+  const bank = await q.all<{ statement: string }>(`SELECT statement FROM bank_questions WHERE lower(topic) IN (${ph})`, ...labels);
+  const plan = await q.all<{ statement: string }>(`SELECT statement FROM revision_plan WHERE kind='qcm' AND lower(topic) IN (${ph})`, ...labels);
   return [...bank, ...plan].map((r) => r.statement).filter(Boolean);
 }
 
 /** Re-tague les lignes parcours existantes dont le topic est un ALIAS → label canonique + rank du thème
  *  (fusion vers la taxonomie de programme ; aucun contenu supprimé, on ré-étiquette l'ordre). */
-function normalizeExistingTopics(): void {
-  const upd = sqlite.prepare(`UPDATE revision_plan SET topic = ?, lecture_rank = ? WHERE topic = ?`);
-  const tx = sqlite.transaction(() => {
-    for (const t of REVISION_THEMES) for (const a of t.aliases) if (a !== t.label) upd.run(t.label, t.rank, a);
+async function normalizeExistingTopics(): Promise<void> {
+  await q.tx(async () => {
+    for (const t of REVISION_THEMES) for (const a of t.aliases) if (a !== t.label) await q.run(`UPDATE revision_plan SET topic = ?, lecture_rank = ? WHERE topic = ?`, t.label, t.rank, a);
     // aligne aussi le rank des lignes déjà au label canonique
-    const updRank = sqlite.prepare(`UPDATE revision_plan SET lecture_rank = ? WHERE topic = ?`);
-    for (const t of REVISION_THEMES) updRank.run(t.rank, t.label);
+    for (const t of REVISION_THEMES) await q.run(`UPDATE revision_plan SET lecture_rank = ? WHERE topic = ?`, t.rank, t.label);
   });
-  tx();
 }
 
 const META_TRAPS = `Méta-pièges de l'étudiant à rejouer de temps en temps (style « vrai/faux à justifier ») : (1) la loss suit la TÂCHE, pas le mot « regression » ; (2) une affirmation enchaînée n'est vraie que si TOUTE la chaîne tient (pas seulement la 1ʳᵉ moitié) ; (3) « can be used » ≠ « best » → lis le verbe exact ; (4) ne pas REJETER une affirmation vraie sous prétexte que la justification n'est pas « le vrai facteur ».`;
@@ -419,11 +385,11 @@ function guidanceFor(t: Theme, covered: string[]): string {
 }
 
 /** Compte les QCM/ouvertes existants du parcours pour un thème (canonique + alias). */
-function planCountForTheme(t: Theme): { qcm: number; open: number } {
+async function planCountForTheme(t: Theme): Promise<{ qcm: number; open: number }> {
   const labels = themeLabels(t).map((l) => l.toLowerCase());
   const ph = labels.map(() => "?").join(",");
-  const qcm = (sqlite.prepare(`SELECT count(*) n FROM revision_plan WHERE kind='qcm' AND lower(topic) IN (${ph})`).get(...labels) as { n: number }).n;
-  const open = (sqlite.prepare(`SELECT count(*) n FROM revision_plan WHERE kind='open' AND lower(topic) IN (${ph})`).get(...labels) as { n: number }).n;
+  const qcm = ((await q.get<{ n: number }>(`SELECT count(*) n FROM revision_plan WHERE kind='qcm' AND lower(topic) IN (${ph})`, ...labels)) as { n: number }).n;
+  const open = ((await q.get<{ n: number }>(`SELECT count(*) n FROM revision_plan WHERE kind='open' AND lower(topic) IN (${ph})`, ...labels)) as { n: number }).n;
   return { qcm, open };
 }
 
@@ -437,17 +403,14 @@ export async function extendParcours(opts: {
   perTopic?: number; openPerTopic?: number; onlyRank?: number; onStep?: StepCb;
   onWave?: (theme: string, qcm: number, open: number) => void;
 } = {}): Promise<{ themes: number; qcmAdded: number; openAdded: number }> {
-  ensureRevisionSchema();
+  await ensureRevisionSchema();
   const step = opts.onStep ?? (() => {});
   const perTopic = opts.perTopic ?? 10;
   const openPerTopic = opts.openPerTopic ?? 4;
-  normalizeExistingTopics();
+  await normalizeExistingTopics();
   const { architectQuestion } = await import("@/lib/architect");
   const { profile } = await import("@/lib/course-profile");
   const archs = profile().archetypes as any[];
-
-  const insQ = sqlite.prepare(`INSERT INTO revision_plan (kind, topic, lecture_rank, statement, options, correct, misconceptions, explanation, verified, verify_method) VALUES ('qcm',?,?,?,?,?,?,?,?,?)`);
-  const insO = sqlite.prepare(`INSERT INTO revision_plan (kind, topic, lecture_rank, statement, solution, verified, verify_method) VALUES ('open',?,?,?,?,?,?)`);
 
   let qcmAdded = 0, openAdded = 0, themesDone = 0;
   const themes = REVISION_THEMES.filter((t) => opts.onlyRank == null || t.rank === opts.onlyRank);
@@ -456,13 +419,13 @@ export async function extendParcours(opts: {
     const t = themes[ti];
     const baseProg = Math.round((ti / themes.length) * 100);
     const target = Math.max(perTopic, t.target);
-    const have = planCountForTheme(t);
+    const have = await planCountForTheme(t);
     let need = Math.max(0, target - have.qcm);
     let needOpen = Math.max(0, openPerTopic - have.open);
     step(`▶ ${t.label} (L${t.rank}) — a ${have.qcm} QCM/${have.open} ouv., cible ${target}/${openPerTopic} → +${need} QCM /+${needOpen} ouv.`, baseProg);
 
     // énoncés déjà couverts (banque + parcours) → dédup + anti-répétition dans le prompt
-    const covered = coveredStemsForTheme(t);
+    const covered = await coveredStemsForTheme(t);
     const coveredSets = covered.map(tokens);
     let qThis = 0, oThis = 0, guard = 0;
 
@@ -481,7 +444,7 @@ export async function extendParcours(opts: {
           if (coveredSets.some((c) => jaccard(c, st) > 0.72)) continue; // quasi-doublon → skip
           const optStr = (it.options ?? []).map((o, k) => `${LETTERS[k]}) ${o}`).join("\n");
           const correct = (it.correct ?? []).map((c) => LETTERS[c] ?? "?").join(", ");
-          insQ.run(t.label, t.rank, it.stem, optStr, correct, JSON.stringify(it.misconceptions ?? []), it.explanation ?? null, it.verified ?? null, it.verified === 1 ? "qcm-blind-verify" : null);
+          await q.run(`INSERT INTO revision_plan (kind, topic, lecture_rank, statement, options, correct, misconceptions, explanation, verified, verify_method) VALUES ('qcm',?,?,?,?,?,?,?,?,?)`, t.label, t.rank, it.stem, optStr, correct, JSON.stringify(it.misconceptions ?? []), it.explanation ?? null, it.verified ?? null, it.verified === 1 ? "qcm-blind-verify" : null);
           covered.push(it.stem); coveredSets.push(st);
           inserted++; qThis++; qcmAdded++; need--;
           if (need <= 0) break;
@@ -499,7 +462,7 @@ export async function extendParcours(opts: {
         const r = await architectQuestion(a, focus, 15, { maxRounds: 1 });
         const st = tokens(r.q.statement_tex ?? "");
         if (coveredSets.some((c) => jaccard(c, st) > 0.72)) continue;
-        insO.run(t.label, t.rank, r.q.statement_tex, r.q.solution_tex, 1, "architect");
+        await q.run(`INSERT INTO revision_plan (kind, topic, lecture_rank, statement, solution, verified, verify_method) VALUES ('open',?,?,?,?,?,?)`, t.label, t.rank, r.q.statement_tex, r.q.solution_tex, 1, "architect");
         coveredSets.push(st); oThis++; openAdded++;
       } catch (e) { step(`  ${t.label} — ouverte ignorée (${(e as Error).message.slice(0, 40)})`, baseProg); }
     }
@@ -512,31 +475,33 @@ export async function extendParcours(opts: {
 }
 
 /** Compte par THÈME du programme (canonique + alias) — preuve de couverture/volume. */
-export function themeCoverage(): { label: string; rank: number; target: number; qcm: number; open: number; weak: boolean }[] {
-  ensureRevisionSchema();
-  return REVISION_THEMES.map((t) => {
-    const c = planCountForTheme(t);
-    return { label: t.label, rank: t.rank, target: Math.max(10, t.target), qcm: c.qcm, open: c.open, weak: !!t.weak };
-  });
+export async function themeCoverage(): Promise<{ label: string; rank: number; target: number; qcm: number; open: number; weak: boolean }[]> {
+  await ensureRevisionSchema();
+  const out: { label: string; rank: number; target: number; qcm: number; open: number; weak: boolean }[] = [];
+  for (const t of REVISION_THEMES) {
+    const c = await planCountForTheme(t);
+    out.push({ label: t.label, rank: t.rank, target: Math.max(10, t.target), qcm: c.qcm, open: c.open, weak: !!t.weak });
+  }
+  return out;
 }
 
 // ─────────────────────── parcours généré (P3) — requêtes ───────────────────────
 
 export type PlanQuestion = { id: number; kind: Kind; topic: string; lectureRank: number | null; statement: string; options: string | null; correct: string | null; misconceptions: string | null; explanation: string | null; solution: string | null; verified: number | null; verifyMethod: string | null };
 
-export function planQuestions(): PlanQuestion[] {
-  ensureRevisionSchema();
-  return (sqlite.prepare(
+export async function planQuestions(): Promise<PlanQuestion[]> {
+  await ensureRevisionSchema();
+  return (await q.all<any>(
     `SELECT id, kind, topic, lecture_rank lectureRank, statement, options, correct, misconceptions, explanation, solution, verified, verify_method verifyMethod
      FROM revision_plan ORDER BY (lecture_rank IS NULL), lecture_rank, topic, id`
-  ).all() as any[]).map((r) => ({ ...r }));
+  ) as any[]).map((r) => ({ ...r }));
 }
 
-export function planStats(): { qcm: number; open: number; topics: number } {
-  ensureRevisionSchema();
-  const qcm = (sqlite.prepare(`SELECT count(*) n FROM revision_plan WHERE kind='qcm'`).get() as { n: number }).n;
-  const open = (sqlite.prepare(`SELECT count(*) n FROM revision_plan WHERE kind='open'`).get() as { n: number }).n;
-  const topics = (sqlite.prepare(`SELECT count(DISTINCT topic) n FROM revision_plan`).get() as { n: number }).n;
+export async function planStats(): Promise<{ qcm: number; open: number; topics: number }> {
+  await ensureRevisionSchema();
+  const qcm = ((await q.get<{ n: number }>(`SELECT count(*) n FROM revision_plan WHERE kind='qcm'`)) as { n: number }).n;
+  const open = ((await q.get<{ n: number }>(`SELECT count(*) n FROM revision_plan WHERE kind='open'`)) as { n: number }).n;
+  const topics = ((await q.get<{ n: number }>(`SELECT count(DISTINCT topic) n FROM revision_plan`)) as { n: number }).n;
   return { qcm, open, topics };
 }
 
@@ -544,15 +509,15 @@ export function planStats(): { qcm: number; open: number; topics: number } {
 
 export type RevisionPayload = {
   course: string; generatedAt: string;
-  bank: { stats: ReturnType<typeof bankStats>; qcm: BankQuestion[]; open: BankQuestion[] };
-  plan: { stats: ReturnType<typeof planStats>; questions: PlanQuestion[] };
+  bank: { stats: Awaited<ReturnType<typeof bankStats>>; qcm: BankQuestion[]; open: BankQuestion[] };
+  plan: { stats: Awaited<ReturnType<typeof planStats>>; questions: PlanQuestion[] };
 };
 
-export function revisionPayload(): RevisionPayload {
+export async function revisionPayload(): Promise<RevisionPayload> {
   return {
     course: currentCourse(), generatedAt: new Date().toISOString(),
-    bank: { stats: bankStats(), qcm: bankQuestions("qcm"), open: bankQuestions("open") },
-    plan: { stats: planStats(), questions: planQuestions() },
+    bank: { stats: await bankStats(), qcm: await bankQuestions("qcm"), open: await bankQuestions("open") },
+    plan: { stats: await planStats(), questions: await planQuestions() },
   };
 }
 
@@ -561,10 +526,10 @@ function jsonPath(course = currentCourse()): string {
 }
 
 /** Écrit la banque + le parcours dans un JSON COMMITTÉ (source de vérité portable, DB gitignorée). */
-export function exportRevisionJson(): string {
+export async function exportRevisionJson(): Promise<string> {
   const file = jsonPath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(revisionPayload(), null, 2));
+  fs.writeFileSync(file, JSON.stringify(await revisionPayload(), null, 2));
   return file;
 }
 

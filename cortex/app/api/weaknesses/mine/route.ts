@@ -21,9 +21,9 @@ export async function POST(req: NextRequest) {
 
   try {
     const mined = await mineConversation(t);
-    if (!mined.length) return NextResponse.json({ created: 0, weaknesses: listWeaknesses(), note: "Aucune faiblesse claire détectée dans cette discussion." });
+    if (!mined.length) return NextResponse.json({ created: 0, weaknesses: await listWeaknesses(), note: "Aucune faiblesse claire détectée dans cette discussion." });
     for (const m of mined) {
-      createWeakness({
+      await createWeakness({
         topic: m.topic,
         description: `${m.concept}${m.excerpt ? `\n\n« ${m.excerpt} »` : ""}`,
         severity: m.severity,
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
         analyzed: true, // déjà structuré par l'IA
       });
     }
-    return NextResponse.json({ created: mined.length, mined, weaknesses: listWeaknesses() });
+    return NextResponse.json({ created: mined.length, mined, weaknesses: await listWeaknesses() });
   } catch (e) {
     if (e instanceof LlmError && e.code === "UNAVAILABLE") {
       return NextResponse.json({ error: "Claude Code (Max) non joignable — lance l'app sur ta machine connectée." }, { status: 503 });

@@ -1,4 +1,4 @@
-import { sqlite } from "@/db/client";
+import { q } from "@/db/q";
 import { llmUnavailableReason } from "@/lib/llm";
 import { texAvailable } from "@/lib/exam-latex";
 
@@ -9,12 +9,12 @@ export type PreflightIssue = { error: string; command?: string; status: number }
  * mieux vaut bloquer tout de suite avec un message clair que brûler 4-20 min
  * pour un rendu inutilisable. `command` = commande copiable affichée par l'UI.
  */
-export function preflightGeneration(): PreflightIssue | null {
+export async function preflightGeneration(): Promise<PreflightIssue | null> {
   const engineIssue = llmUnavailableReason();
   if (engineIssue) return { status: 503, error: engineIssue };
   let items = 0;
   try {
-    items = (sqlite.prepare(`SELECT count(*) n FROM items`).get() as { n: number }).n;
+    items = (await q.get<{ n: number }>(`SELECT count(*) n FROM items`))!.n;
   } catch {}
   if (!items)
     return {

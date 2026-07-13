@@ -8,9 +8,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** GET : la série Labs (un exo par lab, liens PDF énoncé+corrigé). */
-export function GET(req: NextRequest) {
+export async function GET(req: NextRequest) {
   useCourse(req);
-  return NextResponse.json({ series: labSeries() });
+  return NextResponse.json({ series: await labSeries() });
 }
 
 /**
@@ -26,17 +26,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Choisis un lab OU donne un sujet (ex. « direntv6 », « multi-threading »)." }, { status: 400 });
   }
 
-  const existing = activeJob("lab-exercise");
+  const existing = await activeJob("lab-exercise");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
 
   // pré-checks AVANT de lancer le worker : claude (Max) + corpus + moteur LaTeX
-  const issue = preflightGeneration();
+  const issue = await preflightGeneration();
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
 
   const resolved = resolveLab(labStr || topicStr);
-  const jobId = createJob("lab-exercise", JSON.stringify({ lab: resolved.id, topic: topicStr || undefined }));
+  const jobId = await createJob("lab-exercise", JSON.stringify({ lab: resolved.id, topic: topicStr || undefined }));
   try {
-    startWorker(jobId, course);
+    await startWorker(jobId, course);
   } catch (e: any) {
     return NextResponse.json({ error: `Impossible de lancer le worker : ${e?.message ?? e}` }, { status: 500 });
   }

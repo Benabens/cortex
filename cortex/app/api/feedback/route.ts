@@ -6,9 +6,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** GET : récap « ce que j'ai appris de tes retours » (cours courant). */
-export function GET(req: NextRequest) {
+export async function GET(req: NextRequest) {
   useCourse(req);
-  return NextResponse.json(calibrationSummary());
+  return NextResponse.json(await calibrationSummary());
 }
 
 /** POST {examId?, topic?, archetype?, verdict, note?, score?} : enregistre un retour. */
@@ -20,11 +20,11 @@ export async function POST(req: NextRequest) {
   let archetype = b.archetype ?? null;
   let topic = b.topic ?? null;
   if (b.examId && (!archetype || !topic)) {
-    const meta = resolveExamMeta(Number(b.examId));
+    const meta = await resolveExamMeta(Number(b.examId));
     archetype = archetype ?? meta.archetype;
     topic = topic ?? meta.topic;
   }
-  const id = recordFeedback({
+  const id = await recordFeedback({
     examId: b.examId ?? null,
     topic,
     archetype,

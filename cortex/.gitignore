@@ -79,3 +79,12 @@ data/exams/epfl-logo.*
 # figref auto-générés des cours additionnels (rendus depuis les PDF de réf, reconstructibles)
 data/algo/refs/figref/
 data/ml/refs/figref/
+
+# Store d'auth local (e-mails = données perso) — Phase B4 backend-overhaul
+/data/auth.db
+/data/auth.db-wal
+/data/auth.db-shm
+
+# artefacts FUSE (fichiers supprimés encore ouverts — incident disque)
+.fuse_hidden*
+**/.fuse_hidden*

@@ -8,4 +8,6 @@
  */
 import { buildBrief } from "../lib/exam";
 
-console.log(buildBrief());
+(async () => {
+  console.log(await buildBrief());
+})();

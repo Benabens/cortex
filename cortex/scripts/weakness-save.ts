@@ -18,5 +18,7 @@ const a = JSON.parse(fs.readFileSync(file, "utf8")) as {
   explanation: string;
 };
 const description = `${a.explanation}\n\nConcepts clés : ${(a.concepts ?? []).join(" · ")}`;
-updateWeaknessAnalysis(id, a.topic, description);
-console.log(`✓ Faiblesse #${id} mise à jour (${a.topic}).`);
+(async () => {
+  await updateWeaknessAnalysis(id, a.topic, description);
+  console.log(`✓ Faiblesse #${id} mise à jour (${a.topic}).`);
+})();

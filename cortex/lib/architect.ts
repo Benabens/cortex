@@ -168,6 +168,7 @@ async function designTrap(a: Archetype, target: string, refImage: string | null,
   const p = profile();
   const r = rubricFor(a.id);
   const imgBlock = derivedSourceBlock({ image, note, statement });
+  const calBlock = await calibrationBlock(a.id); // async — awaité AVANT le template (sinon "[object Promise]" dans le prompt)
   const prompt = [
     `Tu es l'équipe enseignante de CS-202 (EPFL) et tu CONÇOIS une question d'examen DURE, dans le style de la prof.`,
     refImage ? `ÉTUDIE D'ABORD la vraie page d'examen la plus dure de ce type : ${refImage} (outil Read) — observe sa densité, son piège, sa charge.` : ``,
@@ -179,7 +180,7 @@ async function designTrap(a: Archetype, target: string, refImage: string | null,
     ``,
     r ? `BARRE : ≥ ${r.subparts} sous-questions, la dure ≥ ${r.steps} étapes, bookkeeping = ${r.bookkeeping}, ${r.mustChain ? "au moins une sous-question enchaînée, " : ""}cas-limite obligatoire.` : ``,
     ...styleFor(a.category),
-    calibrationBlock(a.id) || null,
+    calBlock || null,
     ``,
     `NE RÉDIGE PAS encore la question. CONÇOIS-LA : choisis UN piège précis, le cas-limite qui le déclenche, la chaîne de raisonnement de l'étudiant fort, les NOMBRES NON RONDS, la grille de réponse, et la réponse erronée du pattern-matcher (ce qui discrimine). Plan des sous-questions en escalier.`,
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier.`,
@@ -242,6 +243,7 @@ function rubricBlockInline(archetypeId: string): string {
 async function adversarialAudit(a: Archetype, q: ExamQuestion, refImage: string | null, step: StepCb): Promise<Audit> {
   const p = profile();
   const r = rubricFor(a.id);
+  const calBlock = await calibrationBlock(a.id); // async — awaité AVANT le template (sinon "[object Promise]" dans le prompt)
   const prompt = [
     `Tu es un relecteur d'examen CS-202 (EPFL) IMPITOYABLE sur la DIFFICULTÉ. Tu joues DEUX étudiants sur la question ci-dessous.`,
     refImage ? `Réfère-toi à la vraie page de ce type : ${refImage} (outil Read) pour calibrer le niveau attendu.` : ``,
@@ -255,7 +257,7 @@ async function adversarialAudit(a: Archetype, q: ExamQuestion, refImage: string 
     `(a) Joue l'étudiant PATTERN-MATCHER : il reconnaît le type et applique la recette HABITUELLE sans réfléchir au piège. Écris sa réponse, et dis si elle est CORRECTE. Si oui → la question est TROP FACILE.`,
     `(b) Joue l'étudiant FORT : résous VRAIMENT de zéro (calcule/trace/compte). Dis si même lui CALE (énoncé cassé/ambigu).`,
     r ? `Vérifie la RUBRIQUE : ≥ ${r.subparts} sous-questions ; la dure ≥ ${r.steps} étapes ; bookkeeping = ${r.bookkeeping} ; ${r.mustChain ? "≥1 sous-question enchaînée ; " : ""}piège nommé réellement testé ; nombres non ronds. Liste les points NON cochés.` : ``,
-    calibrationBlock(a.id) || null,
+    calBlock || null,
     `Si le pattern-matcher réussit OU le piège est absent → verdict « too_easy » + hardening CHIRURGICAL (quoi ajouter/salir/agrandir/enchaîner, sans tout réécrire). Si le fort cale → « broken » + comment simplifier au bon endroit. Sinon « good ».`,
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier.`,
     JSON.stringify(AUDIT_SCHEMA, null, 2),

@@ -11,9 +11,9 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export function GET(req: NextRequest) {
+export async function GET(req: NextRequest) {
   useCourse(req);
-  return NextResponse.json({ exams: listExamSources(), corpus: corpusSummary() });
+  return NextResponse.json({ exams: await listExamSources(), corpus: await corpusSummary() });
 }
 
 /** Upload d'un examen de référence (multipart) OU bascule d'une référence (JSON). */
@@ -46,14 +46,14 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const { path: srcPath, reference } = body as { path?: string; reference?: boolean };
   if (!srcPath) return NextResponse.json({ error: "path manquant" }, { status: 400 });
-  toggleReference(srcPath, !!reference);
+  await toggleReference(srcPath, !!reference);
   return NextResponse.json({ ok: true });
 }
 
-export function DELETE(req: NextRequest) {
+export async function DELETE(req: NextRequest) {
   useCourse(req);
   const srcPath = req.nextUrl.searchParams.get("path");
   if (!srcPath) return NextResponse.json({ error: "path manquant" }, { status: 400 });
-  removeUploadedRef(srcPath);
+  await removeUploadedRef(srcPath);
   return NextResponse.json({ ok: true });
 }

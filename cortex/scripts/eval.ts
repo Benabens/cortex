@@ -9,7 +9,8 @@
  * - mesure discrimination (audit adversarial) + style (format), historise dans `eval_runs`,
  * - écrit data/refs/proof/evals/<course>-<date>.md (et summary-<date>.md en mode --summary).
  */
-import { enterCourse, runWithCourse, sqlite } from "@/db/client";
+import { enterCourse, runWithCourse } from "@/db/client";
+import { q } from "../db/q";
 import { listCourses, normalizeCourse } from "@/lib/courses";
 import { buildGoldSet, buildReport, ensureEvalSchema, measureDiscrimination, measureStyleHeuristic, PROMPT_VERSION, recordRun, runAccuracy } from "@/lib/eval";
 import fs from "node:fs";
@@ -26,15 +27,15 @@ function arg(name: string): string | undefined {
 const EVALS_DIR = path.join(process.cwd(), "data", "refs", "proof", "evals");
 
 /** Synthèse cross-cours : dernier `eval_runs` de chaque cours → tableau + porte de qualité. */
-function summary() {
-  ensureEvalSchema();
+async function summary() {
+  await ensureEvalSchema();
   const rows: any[] = [];
   for (const c of listCourses()) {
     try {
-      const r = runWithCourse(c.id, () => {
-        ensureEvalSchema();
-        const run = sqlite.prepare(`SELECT * FROM eval_runs ORDER BY id DESC LIMIT 1`).get() as any;
-        const gold = (sqlite.prepare(`SELECT count(*) n FROM eval_items`).get() as { n: number }).n;
+      const r = await runWithCourse(c.id, async () => {
+        await ensureEvalSchema();
+        const run = (await q.get<any>(`SELECT * FROM eval_runs ORDER BY id DESC LIMIT 1`)) as any;
+        const gold = ((await q.get<{ n: number }>(`SELECT count(*) n FROM eval_items`)) as { n: number }).n;
         return run ? { course: c.id, code: c.examCode, gold, ...run } : null;
       });
       if (r) rows.push(r);
@@ -55,11 +56,11 @@ function summary() {
 }
 
 async function main() {
-  if (arg("summary") !== undefined) { summary(); return; }
+  if (arg("summary") !== undefined) { await summary(); return; }
 
   const course = normalizeCourse(arg("course"));
   enterCourse(course);
-  ensureEvalSchema();
+  await ensureEvalSchema();
   const limit = arg("limit") ? Number(arg("limit")) : undefined;
   const goldMax = arg("gold") ? Number(arg("gold")) : 80;
   const forceBuild = arg("build") !== undefined;
@@ -68,7 +69,7 @@ async function main() {
 
   console.log(`▶ eval — cours « ${course} » (prompt-version ${PROMPT_VERSION})`);
 
-  let nGold = (sqlite.prepare(`SELECT count(*) n FROM eval_items`).get() as { n: number }).n;
+  let nGold = ((await q.get<{ n: number }>(`SELECT count(*) n FROM eval_items`)) as { n: number }).n;
   if (!nGold || forceBuild) {
     console.log(`\n━━ gold set (depuis les corrigés, vision · cible ${goldMax}) ━━`);
     nGold = (await buildGoldSet({ max: goldMax, onStep: step })).items;
@@ -84,10 +85,10 @@ async function main() {
     console.log(`\n━━ discrimination (audit adversarial sur ${discN} exos générés) ━━`);
     try { disc = await measureDiscrimination({ n: discN, onStep: step }); } catch (e) { console.log("discrimination ignorée :", (e as Error).message); }
   }
-  const style = measureStyleHeuristic();
+  const style = await measureStyleHeuristic();
 
   const notes = `${acc.correct}✓/${acc.incorrect}✗/${acc.uncertain}? sur ${acc.n} (gold ${nGold}) · prouvé ${acc.deterministicRate}% [${Object.entries(acc.methods).map(([m, n]) => `${m}:${n}`).join(" ")}]`;
-  recordRun({ accuracy: acc.accuracy, uncertainRate: acc.uncertainRate, nItems: acc.n, discrimination: disc?.discrimination ?? null, styleScore: style.styleScore, deterministicRate: acc.deterministicRate, notes });
+  await recordRun({ accuracy: acc.accuracy, uncertainRate: acc.uncertainRate, nItems: acc.n, discrimination: disc?.discrimination ?? null, styleScore: style.styleScore, deterministicRate: acc.deterministicRate, notes });
   fs.mkdirSync(EVALS_DIR, { recursive: true });
   const file = path.join(EVALS_DIR, `${course}-${new Date().toISOString().slice(0, 10)}.md`);
   fs.writeFileSync(file, buildReport(acc, disc, style));

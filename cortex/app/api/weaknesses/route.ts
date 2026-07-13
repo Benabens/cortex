@@ -17,9 +17,9 @@ const EXT: Record<string, string> = {
   "image/webp": "webp",
 };
 
-export function GET(req: NextRequest) {
+export async function GET(req: NextRequest) {
   useCourse(req);
-  return NextResponse.json({ weaknesses: listWeaknesses(), byTheme: weaknessesByTheme() });
+  return NextResponse.json({ weaknesses: await listWeaknesses(), byTheme: await weaknessesByTheme() });
 }
 
 export async function POST(req: NextRequest) {
@@ -48,15 +48,15 @@ export async function POST(req: NextRequest) {
     screenshotPath = name;
   }
 
-  const id = createWeakness({ topic, description, severity, screenshotPath });
+  const id = await createWeakness({ topic, description, severity, screenshotPath });
   return NextResponse.json({ id });
 }
 
-export function DELETE(req: NextRequest) {
+export async function DELETE(req: NextRequest) {
   useCourse(req);
   const id = Number(req.nextUrl.searchParams.get("id"));
   if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
-  const screenshot = deleteWeakness(id);
+  const screenshot = await deleteWeakness(id);
   if (screenshot) {
     const p = path.join(uploadsDir(), path.basename(screenshot));
     if (fs.existsSync(p)) fs.unlinkSync(p);

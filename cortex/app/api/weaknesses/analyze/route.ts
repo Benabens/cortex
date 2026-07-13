@@ -1,4 +1,4 @@
-import { sqlite } from "@/db/client";
+import { q } from "@/db/q";
 import { completeVia, type LlmImage } from "@/lib/llm";
 import { updateWeaknessAnalysis } from "@/lib/weaknesses";
 import { useCourse } from "@/lib/req";
@@ -42,9 +42,10 @@ export async function POST(req: NextRequest) {
   const { id } = await req.json().catch(() => ({ id: null }));
   if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
 
-  const w = sqlite
-    .prepare("SELECT topic, description, screenshot_path FROM weaknesses WHERE id = ?")
-    .get(Number(id)) as { topic: string; description: string | null; screenshot_path: string | null } | undefined;
+  const w = await q.get<{ topic: string; description: string | null; screenshot_path: string | null }>(
+    "SELECT topic, description, screenshot_path FROM weaknesses WHERE id = ?",
+    Number(id)
+  );
   if (!w) return NextResponse.json({ error: "faiblesse introuvable" }, { status: 404 });
 
   // Construit le message (texte + image éventuelle) — prompt inchangé, image AVANT le texte.
@@ -83,7 +84,7 @@ export async function POST(req: NextRequest) {
   }
 
   const description = `${parsed.explanation}\n\nConcepts clés : ${parsed.concepts.join(" · ")}`;
-  updateWeaknessAnalysis(Number(id), parsed.topic, description);
+  await updateWeaknessAnalysis(Number(id), parsed.topic, description);
 
   return NextResponse.json({ ok: true, topic: parsed.topic, concepts: parsed.concepts, explanation: parsed.explanation });
 }

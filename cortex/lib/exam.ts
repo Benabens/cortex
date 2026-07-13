@@ -369,7 +369,7 @@ export async function generateTargetedExercise(
       if (cls.kind === "weakness_log" && cls.weaknesses.length) {
         const { createWeakness } = await import("@/lib/weaknesses");
         for (const w of cls.weaknesses) {
-          try { createWeakness({ topic: w.topic, description: w.description, severity: w.severity, source: "log", analyzed: true }); } catch {}
+          try { await createWeakness({ topic: w.topic, description: w.description, severity: w.severity, source: "log", analyzed: true }); } catch {}
         }
         const top = [...cls.weaknesses].sort((a, b) => b.severity - a.severity)[0];
         stepFn(`${cls.weaknesses.length} faiblesse(s) extraite(s) — exo ciblé sur « ${top.topic} »`, 10);

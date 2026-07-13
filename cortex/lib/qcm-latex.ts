@@ -61,11 +61,11 @@ function footDate(dateLabel: string): string {
 }
 
 /** Page de garde course-aware (style CS-233 : lecturer, SCIPER, convention SCQ/MCQ détectée). */
-function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts: number, durationMin: number): string {
+async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts: number, durationMin: number): Promise<string> {
   const c = getCourse(currentCourse());
   const code = c.examCode.replace(/-/g, "--");
   const lecturer = c.profs[0] ?? "";
-  const fmt = getFormatProfile();
+  const fmt = await getFormatProfile();
   const convention = fmt?.scq_vs_mcq_convention
     ? esc(fmt.scq_vs_mcq_convention)
     : "There are single-choice questions (SCQ) where exactly one box is correct, and multiple-choice questions (MCQ) where one or more boxes are correct.";
@@ -123,12 +123,12 @@ function renderOpen(q: ExamQuestion, n: number, withSol: boolean, defaultPts = 1
 export type QcmExamData = { items: QcmItem[]; open: ExamQuestion[]; qcmPoints?: number };
 
 /** Source .tex complet de l'examen QCM (+ ouvert), corrigé optionnel. */
-export function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSolutions: boolean): string {
+export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSolutions: boolean): Promise<string> {
   let preamble = fs.readFileSync(path.join(LATEX_DIR, "preamble.tex"), "utf8");
   const figPath = path.join(LATEX_DIR, "figures.tex");
   if (fs.existsSync(figPath)) preamble += "\n" + fs.readFileSync(figPath, "utf8");
 
-  const fmt = getFormatProfile();
+  const fmt = await getFormatProfile();
   const dur = fmt?.duration_min ?? 180;
   // Barème CALÉ sur le format détecté : chaque type (scq/mcq) vaut ses points_each réels
   // (ex. CS-233 : scq 3 pts, mcq 4 pts), les ouvertes leurs ~17 pts. Repli 2/15 si non détecté.
@@ -179,7 +179,7 @@ export function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSo
     footOverride,
     String.raw`\newcommand{\FOOTDATE}{${footDate(dateLabel)}}`,
     String.raw`\begin{document}`,
-    qcmCover(dateLabel, data.items.length, data.open.length, totalPts, dur),
+    await qcmCover(dateLabel, data.items.length, data.open.length, totalPts, dur),
     firstPart,
     secondPart,
     String.raw`\end{document}`,
@@ -194,8 +194,8 @@ export async function buildQcmArtifact(examId: number, data: QcmExamData, dateLa
     const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
     if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
   }
-  fs.writeFileSync(path.join(examsDir(), `${base}.tex`), renderQcmExamTex(data, dateLabel, false));
-  fs.writeFileSync(path.join(examsDir(), `${base}-corrige.tex`), renderQcmExamTex(data, dateLabel, true));
+  fs.writeFileSync(path.join(examsDir(), `${base}.tex`), await renderQcmExamTex(data, dateLabel, false));
+  fs.writeFileSync(path.join(examsDir(), `${base}-corrige.tex`), await renderQcmExamTex(data, dateLabel, true));
   try {
     const pdf = await compileExamPdf(base);
     try { await compileExamPdf(`${base}-corrige`); } catch (e) { console.error(`[qcm] corrigé #${examId} non compilé :`, (e as Error).message); }

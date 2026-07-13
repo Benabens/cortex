@@ -35,6 +35,6 @@ export async function POST(req: NextRequest) {
 
   // relance la détection de format en arrière-plan (se cale sur les annales, dont les nouvelles)
   let formatJobId: number | undefined;
-  try { formatJobId = createJob("format", JSON.stringify({ reason: "upload", files: saved })); startWorker(formatJobId, course); } catch {}
+  try { formatJobId = await createJob("format", JSON.stringify({ reason: "upload", files: saved })); await startWorker(formatJobId, course); } catch {}
   return NextResponse.json({ ok: true, files: saved, formatJobId });
 }

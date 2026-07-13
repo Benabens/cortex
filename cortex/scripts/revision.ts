@@ -26,7 +26,7 @@ async function main() {
     const r = await indexBank({ onStep: step });
     console.log(`index : ${r.qcm} QCM + ${r.open} ouvertes sur ${r.exams} finals`);
     await assignLectureRanks({ onStep: step });
-    const s = bankStats();
+    const s = await bankStats();
     console.log(`\n  banque : ${s.qcm} QCM + ${s.open} ouvertes · ${s.byTopic.length} sujets`);
     for (const t of s.byTopic) console.log(`    L${t.lectureRank ?? "?"} · ${t.topic} : ${t.qcm} QCM, ${t.open} ouvertes`);
   }
@@ -38,8 +38,8 @@ async function main() {
   }
 
   if (all || only("export") || only("parcours") || only("index")) {
-    const file = exportRevisionJson();
-    const ps = planStats(), bs = bankStats();
+    const file = await exportRevisionJson();
+    const ps = await planStats(), bs = await bankStats();
     console.log(`\n✓ export JSON committé : ${file}`);
     console.log(`  banque ${bs.qcm}+${bs.open} · parcours ${ps.qcm}+${ps.open} (${ps.topics} sujets)`);
   }

@@ -45,18 +45,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Donne un sujet OU une image d'exercice." }, { status: 400 });
   }
 
-  const existing = activeJob("exercise");
+  const existing = await activeJob("exercise");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
 
   // pré-checks AVANT de lancer le worker : claude (Max) + corpus + moteur LaTeX
-  const issue = preflightGeneration();
+  const issue = await preflightGeneration();
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
 
   // target du job = texte simple (rétrocompat) OU JSON {target,imageRel,note} si image/note présentes
   const jobTarget = payload.imageRel || payload.note ? JSON.stringify(payload) : (payload.target ?? "");
-  const jobId = createJob("exercise", jobTarget);
+  const jobId = await createJob("exercise", jobTarget);
   try {
-    startWorker(jobId, course);
+    await startWorker(jobId, course);
   } catch (e: any) {
     return NextResponse.json({ error: `Impossible de lancer le worker : ${e?.message ?? e}` }, { status: 500 });
   }

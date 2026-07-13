@@ -1,0 +1,36 @@
+# « Prod-like » local (Phase B backend-overhaul) — OPTIONNEL.
+# Le mode dev par défaut n'a besoin de RIEN de tout ça (SQLite local, €0).
+#
+#   docker compose up -d postgres          # puis dans .env.local :
+#     DB_DRIVER=postgres
+#     DATABASE_URL=postgres://cortex:cortex@localhost:5433/cortex
+#
+#   docker compose up -d redis             # optionnel (cache LLM Phase E) :
+#     REDIS_URL=redis://localhost:6380
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: cortex
+      POSTGRES_PASSWORD: cortex
+      POSTGRES_DB: cortex
+    ports:
+      - "5433:5432"
+    volumes:
+      - cortex-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cortex"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    volumes:
+      - cortex-redis:/data
+
+volumes:
+  cortex-pg:
+  cortex-redis:
