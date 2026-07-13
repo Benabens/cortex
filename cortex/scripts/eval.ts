@@ -100,6 +100,19 @@ async function main() {
   if (disc) console.log(`  discrimination  : ${disc.discrimination}%  (${disc.n} exos)`);
   console.log(`  style/format    : ${style.styleScore}/100`);
   console.log(`  rapport         : ${path.relative(process.cwd(), file)}`);
+
+  // Phase D — SEUILS BLOQUANTS : l'éval devient un garde-fou chiffré, pas un
+  // simple rapport. Surcharge : --min-accuracy / --max-uncertain ou env.
+  const minAcc = Number(arg("min-accuracy") ?? process.env.EVAL_MIN_ACCURACY ?? 70);
+  const maxUnc = Number(arg("max-uncertain") ?? process.env.EVAL_MAX_UNCERTAIN ?? 50);
+  const fails: string[] = [];
+  if (acc.correct + acc.incorrect > 0 && acc.accuracy < minAcc) fails.push(`accuracy ${acc.accuracy}% < seuil ${minAcc}%`);
+  if (acc.uncertainRate > maxUnc) fails.push(`incertain ${acc.uncertainRate}% > seuil ${maxUnc}%`);
+  if (fails.length) {
+    console.error(`\n✗ SEUILS D'ÉVAL VIOLÉS : ${fails.join(" · ")}`);
+    process.exit(1);
+  }
+  console.log(`  seuils          : ✓ accuracy ≥ ${minAcc}% · incertain ≤ ${maxUnc}%`);
 }
 
 main().catch((e) => { console.error("Échec eval :", e); process.exit(1); });
