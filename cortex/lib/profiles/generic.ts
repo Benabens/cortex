@@ -1,4 +1,4 @@
-import { sqlite } from "@/db/client";
+import { q } from "@/db/q";
 import type { Archetype } from "@/lib/archetypes";
 import { genericRefImageFor, genericVisionBlock } from "@/lib/course-vision";
 import type { CourseProfile, Slot } from "@/lib/course-profile";
@@ -13,15 +13,13 @@ import { genericDirectivesBlock } from "@/lib/profiles/generic-directives";
  */
 
 /** Notes/study-guide du cours ingérées (toutes les notes de la DB du cours). */
-function genericStaffNotes(max: number): string {
+async function genericStaffNotes(max: number): Promise<string> {
   let rows: { text: string }[] = [];
   try {
-    rows = sqlite
-      .prepare(
-        `SELECT i.text FROM items i JOIN sources s ON s.id = i.source_id
-         WHERE s.type = 'note' ORDER BY s.recency_weight DESC, s.title`
-      )
-      .all() as { text: string }[];
+    rows = await q.all<{ text: string }>(
+      `SELECT i.text FROM items i JOIN sources s ON s.id = i.source_id
+       WHERE s.type = 'note' ORDER BY s.recency_weight DESC, s.title`
+    );
   } catch {}
   let out = rows.map((r) => r.text).join("\n\n");
   if (out.length > max) out = out.slice(0, max) + " […]";
@@ -49,12 +47,14 @@ export function makeGenericProfile(courseId: string, archetypes: Archetype[]): C
   const c = getCourse(courseId);
   const matiere = `${c.examCode} ${c.examName} (${c.university})`;
 
-  const slotsFromArchetypes = (): Slot[] => {
+  const slotsFromArchetypes = async (): Promise<Slot[]> => {
     // 6 slots (ou moins) : archétypes triés par poids × boost faiblesses (la boucle Phase 5),
     // points dégressifs ≈ 180 total.
     let hay = "";
     try {
-      hay = (sqlite.prepare(`SELECT topic, description FROM weaknesses ORDER BY severity DESC LIMIT 10`).all() as { topic: string; description: string | null }[])
+      hay = (await q.all<{ topic: string; description: string | null }>(
+        `SELECT topic, description FROM weaknesses ORDER BY severity DESC LIMIT 10`
+      ))
         .map((w) => `${w.topic} ${w.description ?? ""}`)
         .join(" ")
         .toLowerCase();

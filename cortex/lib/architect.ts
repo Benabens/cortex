@@ -153,7 +153,7 @@ function derivedSourceBlock(opts: { image?: string | null; note?: string | null;
   ].filter((l) => l != null).join("\n");
 }
 
-function contextBlock(ctx: ReturnType<typeof gatherTargetedContext>): string {
+function contextBlock(ctx: Awaited<ReturnType<typeof gatherTargetedContext>>): string {
   const block = (title: string, items: { src: string; text: string }[]) =>
     items.length ? [``, title, ...items.map((c) => `• (${c.src}) ${c.text}`)].join("\n") : "";
   return [
@@ -191,7 +191,7 @@ async function designTrap(a: Archetype, target: string, refImage: string | null,
 }
 
 /** P2 — rédiger l'énoncé multi-étapes au format EPFL, piège intégré, style prof. */
-async function writeFromDesign(a: Archetype, target: string, pts: number, design: DesignBrief, ctx: ReturnType<typeof gatherTargetedContext>, refImage: string | null, step: StepCb, image?: string | null, note?: string | null, statement?: string | null): Promise<ExamQuestion> {
+async function writeFromDesign(a: Archetype, target: string, pts: number, design: DesignBrief, ctx: Awaited<ReturnType<typeof gatherTargetedContext>>, refImage: string | null, step: StepCb, image?: string | null, note?: string | null, statement?: string | null): Promise<ExamQuestion> {
   const p = profile();
   const corpus = contextBlock(ctx);
   const imgBlock = derivedSourceBlock({ image, note, statement });
@@ -318,7 +318,7 @@ export async function architectQuestion(
   const { image, note, statement } = opts;
   const p = profile();
   const refImage = p.refImageFor(a.category, target || a.concept);
-  const ctx = gatherTargetedContext(target || a.concept);
+  const ctx = await gatherTargetedContext(target || a.concept);
 
   step(`P0 — étude : archétype « ${a.id} » (${a.category}), vraie page ${refImage ?? "—"}`, 12);
   // P1 — concevoir le piège (en s'appuyant sur l'image / la consigne si fournie)

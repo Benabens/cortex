@@ -17,7 +17,7 @@ export type CourseProfile = {
   /** Ancrage visuel (images-étalon). Vide si le cours n'en a pas. */
   visionBlock(): string;
   /** Texte des notes/study-guide ingérées (scope). */
-  staffNotesText(max: number): string;
+  staffNotesText(max: number): Promise<string>;
   /** Image de la page-étalon du même type qu'un exo (vision ciblée), ou null. */
   refImageFor(category?: string, concept?: string): string | null;
   /** Contrat LaTeX (macros disponibles, conventions, grilles). */
@@ -25,9 +25,9 @@ export type CourseProfile = {
   /** Archétypes de questions de la matière. */
   archetypes: Archetype[];
   /** Slots de repli (si le blueprint échoue). */
-  examSlots(): Slot[];
+  examSlots(): Promise<Slot[]>;
   /** Blueprint : 6 slots pondérés (faiblesses × poids). */
-  buildBlueprint(): Slot[];
+  buildBlueprint(): Promise<Slot[]>;
   /** Intro + structure du prompt complet (lignes). */
   promptIntroFull(): string[];
   /** Intro du prompt par lots (lignes). */

@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
  * compte à rebours d'examen, derniers examens, faiblesses, prochain type à travailler,
  * job en cours. 100 % lecture : ne touche à rien du moteur.
  */
-export function GET(req: NextRequest) {
+export async function GET(req: NextRequest) {
   useCourse(req);
   const id = currentCourse();
   const c = getCourse(id);
@@ -32,10 +32,10 @@ export function GET(req: NextRequest) {
   }
 
   // Examens récents + planning (répétition espacée)
-  let exams: ReturnType<typeof listExams> = [];
+  let exams: Awaited<ReturnType<typeof listExams>> = [];
   let schedule = { total: 0, due: 0 };
   try {
-    const r = listExams() as any;
+    const r = (await listExams()) as any;
     exams = Array.isArray(r) ? r : r.exams ?? [];
   } catch {}
   try {

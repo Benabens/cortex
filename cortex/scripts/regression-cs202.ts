@@ -32,8 +32,8 @@ const SPEC: any = {
   ],
 };
 
-runWithCourse("cs-202", () => {
-  const prompt = buildPrompt(FIXED) + "\n========\n" + buildBatchPrompt(FIXED, profile().examSlots());
+runWithCourse("cs-202", async () => {
+  const prompt = (await buildPrompt(FIXED)) + "\n========\n" + buildBatchPrompt(FIXED, await profile().examSlots());
   const tex = renderExamTex(SPEC, "2026-06-11", true);
   fs.writeFileSync(`${out}.prompt.txt`, prompt);
   fs.writeFileSync(`${out}.tex`, tex);

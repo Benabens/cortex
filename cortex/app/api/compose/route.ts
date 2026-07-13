@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** V9 — GET : la composition proposée (lue du format détecté du cours courant). */
-export function GET(req: NextRequest) {
+export async function GET(req: NextRequest) {
   useCourse(req);
-  return NextResponse.json({ plan: getComposition() });
+  return NextResponse.json({ plan: await getComposition() });
 }

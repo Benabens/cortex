@@ -27,12 +27,12 @@ export type CompositionPlan = {
 };
 
 /** Composition proposée pour le cours COURANT (lue du format détecté ; jamais de valeur en dur). */
-export function getComposition(): CompositionPlan {
+export async function getComposition(): Promise<CompositionPlan> {
   const course = currentCourse();
   const c = getCourse(course);
 
-  if (isQcmCourse()) {
-    const fmt = getFormatProfile()!;
+  if (await isQcmCourse()) {
+    const fmt = (await getFormatProfile())!;
     const types = fmt.question_types ?? [];
     const sum = (t: string) => types.filter((x) => x.type === t).reduce((s, x) => s + (x.approx_count || 0), 0);
     const scq = sum("scq");
@@ -54,7 +54,7 @@ export function getComposition(): CompositionPlan {
 
   // Cours calcul/trace (CS-202) : la compo = le blueprint (types pondérés des vrais finals).
   let slots: { category: string; points: number }[];
-  try { slots = profile().buildBlueprint(); } catch { slots = profile().examSlots(); }
+  try { slots = await profile().buildBlueprint(); } catch { slots = await profile().examSlots(); }
   const categories = Array.from(new Set(slots.map((s) => s.category)));
   const totalPoints = slots.reduce((s, x) => s + (x.points || 0), 0);
   return {

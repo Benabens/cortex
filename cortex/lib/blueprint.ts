@@ -1,4 +1,4 @@
-import { sqlite } from "@/db/client";
+import { q } from "@/db/q";
 import { ARCHETYPES, type Archetype } from "@/lib/archetypes";
 
 export type Slot = { category: string; points: number; brief: string; archetypeId: string };
@@ -15,12 +15,11 @@ function weaknessBoost(a: Archetype, weaknesses: string[]): number {
  * l'archétype selon poids study guide × faiblesses. Les archétypes Networking/OS
  * étant 2 par catégorie, le boost de faiblesse détermine l'ORDRE/le focus des briefs.
  */
-export function buildBlueprint(): Slot[] {
+export async function buildBlueprint(): Promise<Slot[]> {
   const weaknesses = (
-    sqlite.prepare(`SELECT topic, description FROM weaknesses ORDER BY severity DESC LIMIT 10`).all() as {
-      topic: string;
-      description: string | null;
-    }[]
+    await q.all<{ topic: string; description: string | null }>(
+      `SELECT topic, description FROM weaknesses ORDER BY severity DESC LIMIT 10`
+    )
   ).map((w) => `${w.topic} ${w.description ?? ""}`);
 
   const pick = (category: Archetype["category"]) =>

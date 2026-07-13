@@ -1,4 +1,4 @@
-import { sqlite } from "@/db/client";
+import { q } from "@/db/q";
 
 /**
  * Directives du staff CS-202 — contraintes DURES pour la génération d'examen.
@@ -77,14 +77,12 @@ export function directivesBlock(): string {
 }
 
 /** Texte brut des notes staff ingérées (study guide + hints) pour contexte additionnel. */
-export function staffNotesText(maxChars = 7000): string {
-  const rows = sqlite
-    .prepare(
-      `SELECT i.text FROM items i JOIN sources s ON s.id = i.source_id
-       WHERE s.type = 'note' AND (s.title LIKE 'STUDY_GUIDE%' OR s.title LIKE 'EXAM_HINTS%')
-       ORDER BY (s.title LIKE 'STUDY_GUIDE%') DESC, s.title`
-    )
-    .all() as { text: string }[];
+export async function staffNotesText(maxChars = 7000): Promise<string> {
+  const rows = await q.all<{ text: string }>(
+    `SELECT i.text FROM items i JOIN sources s ON s.id = i.source_id
+     WHERE s.type = 'note' AND (s.title LIKE 'STUDY_GUIDE%' OR s.title LIKE 'EXAM_HINTS%')
+     ORDER BY (s.title LIKE 'STUDY_GUIDE%') DESC, s.title`
+  );
   let out = rows.map((r) => r.text).join("\n\n");
   if (out.length > maxChars) out = out.slice(0, maxChars) + " […]";
   return out;
