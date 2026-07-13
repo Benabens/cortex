@@ -29,16 +29,16 @@ export function NextExerciseHero({
 
   return (
     <section
-      className="panel accent-field relative overflow-hidden rounded-xl p-1 rise-in"
-      style={{ animationDelay: "60ms", boxShadow: "var(--shadow-card), var(--shadow-glow-violet)" }}
+      className="panel accent-field relative overflow-hidden rounded-xl p-1"
+      style={{ boxShadow: "var(--shadow-card), var(--shadow-glow-violet)" }}
       aria-labelledby="next-title"
     >
-      {/* soft corner light */}
+      {/* lumière d'angle — LE seul accent lumineux de l'app (héro), volontairement bas */}
       <div
-        className="pointer-events-none absolute -right-24 -top-24 size-64 rounded-full opacity-60 blur-3xl"
+        className="pointer-events-none absolute -right-24 -top-24 size-64 rounded-full opacity-35 blur-3xl"
         style={{
           background:
-            "radial-gradient(circle, color-mix(in oklch, var(--color-violet) 42%, transparent), transparent 70%)",
+            "radial-gradient(circle, color-mix(in oklch, var(--color-violet) 38%, transparent), transparent 70%)",
         }}
         aria-hidden="true"
       />

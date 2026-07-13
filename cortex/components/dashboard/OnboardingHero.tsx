@@ -27,8 +27,8 @@ export function OnboardingHero({ courseName }: { courseName: string }) {
 
   return (
     <section
-      className="panel accent-field relative overflow-hidden rounded-xl rise-in"
-      style={{ animationDelay: "60ms" }}
+      className="panel accent-field relative overflow-hidden rounded-xl"
+
       aria-labelledby="onboarding-title"
     >
       <div className="relative p-5 sm:p-7">

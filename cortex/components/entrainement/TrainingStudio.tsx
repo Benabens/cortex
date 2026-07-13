@@ -189,7 +189,7 @@ export function TrainingStudio() {
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.15fr_1fr]">
       {/* ── Composeur ── */}
-      <Panel className="p-5 sm:p-6 rise-in">
+      <Panel className="p-5 sm:p-6">
         <div className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface-1/60 p-1">
           <ModeBtn active={mode === "drill"} onClick={() => setMode("drill")} Icon={Target}>
             Drill ciblé
@@ -311,7 +311,7 @@ export function TrainingStudio() {
       </Panel>
 
       {/* ── Résultat ── */}
-      <Panel className="flex flex-col p-5 sm:p-6 rise-in" style={{ animationDelay: "80ms" }}>
+      <Panel className="flex flex-col p-5 sm:p-6">
         {drill ? (
           <>
             <div className="flex items-center justify-between">

@@ -122,7 +122,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: Plan; onGenerated: (
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.55fr_1fr]">
       {/* Composer */}
-      <Panel className="p-5 sm:p-6 rise-in">
+      <Panel className="p-5 sm:p-6">
         <div className="flex items-center gap-2">
           <Wand2 className="size-4 text-violet-hi" strokeWidth={2.5} />
           <h2 className="text-[1.05rem] font-semibold text-ink-1">Compositeur d’examen</h2>
@@ -258,7 +258,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: Plan; onGenerated: (
 
       {/* Format détecté (réel) */}
       <div className="flex flex-col gap-5">
-        <Panel className="p-5 rise-in" style={{ animationDelay: "80ms" }}>
+        <Panel className="p-5">
           <div className="flex items-center gap-2">
             <ScrollText className="size-4 text-cyan-hi" strokeWidth={2.25} />
             <h2 className="text-[0.95rem] font-semibold text-ink-1">Format détecté</h2>

@@ -113,8 +113,8 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
 
   return (
     <section
-      className="panel accent-field relative overflow-hidden rounded-xl p-5 sm:p-6 rise-in"
-      style={{ boxShadow: "var(--shadow-card), var(--shadow-glow-violet)" }}
+      className="panel accent-field relative overflow-hidden rounded-xl p-5 sm:p-6"
+      
       aria-labelledby="inbox-title"
     >
       <div

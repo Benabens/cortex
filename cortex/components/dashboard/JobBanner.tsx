@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Loader2 } from "lucide-react";
 import { asText, useJob, JOB_ACTIVE, type Job } from "@/lib/ux/api";
 import { WeightBar } from "@/components/viz/WeightBar";
+import { CortexMark } from "@/components/shell/CortexMark";
 
 /**
  * Bannière « génération en cours » — poll GET /api/jobs/[id] jusqu'au statut
@@ -36,13 +36,13 @@ export function JobBanner({
 
   return (
     <section
-      className="panel flex flex-col gap-2.5 p-4 rise-in sm:p-5"
+      className="panel flex flex-col gap-2.5 p-4 sm:p-5"
       aria-live="polite"
       aria-label="Génération en cours"
     >
       <div className="flex items-center justify-between gap-3">
         <span className="inline-flex items-center gap-2.5 text-[0.9rem] font-medium text-ink-1">
-          <Loader2 className="size-4 animate-spin text-violet-hi" strokeWidth={2.25} aria-hidden="true" />
+          <CortexMark size={16} spinning />
           Génération en cours{label ? ` · ${label}` : ""}
         </span>
         <span className="font-data text-[0.82rem] font-semibold text-ink-2">

@@ -47,7 +47,7 @@ export function WaffleGrid({ total, filled, columns = 9, label, className }: Pro
                       )}%, var(--color-cyan))`,
                       boxShadow:
                         "0 0 0 1px color-mix(in oklch, var(--color-emerald) 30%, transparent), 0 2px 8px -2px color-mix(in oklch, var(--color-emerald) 45%, transparent)",
-                      animationDelay: `${i * 16}ms`,
+                      animationDelay: `${Math.min(i * 10, 280)}ms`,
                     }
                   : undefined
               }

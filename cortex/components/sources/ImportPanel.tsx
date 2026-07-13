@@ -132,7 +132,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   return (
     <div className="flex flex-col gap-5">
       {/* Dropzone — upload réel d'annales */}
-      <Panel className="p-5 rise-in" style={{ animationDelay: "60ms" }}>
+      <Panel className="p-5">
         <label
           onDragOver={(e) => {
             e.preventDefault();
@@ -163,7 +163,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
             className="grid size-12 place-items-center rounded-2xl text-white"
             style={{
               background: "linear-gradient(150deg, var(--color-violet), var(--color-cyan))",
-              boxShadow: "var(--shadow-glow-violet), inset 0 1px 0 rgba(255,255,255,0.28)",
+              boxShadow: "var(--shadow-card), inset 0 1px 0 rgba(255,255,255,0.28)",
             }}
           >
             <UploadCloud className="size-6" strokeWidth={2} />
@@ -185,7 +185,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
       </Panel>
 
       {/* Import dossier + préparation */}
-      <Panel className="p-5 rise-in" style={{ animationDelay: "120ms" }}>
+      <Panel className="p-5">
         <div className="flex items-center gap-2">
           <FolderInput className="size-4 text-cyan-hi" strokeWidth={2.25} />
           <h2 className="text-[0.95rem] font-semibold text-ink-1">Importer un dossier</h2>

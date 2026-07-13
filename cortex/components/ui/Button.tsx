@@ -13,10 +13,11 @@ const base =
 
 const variants: Record<Variant, string> = {
   primary:
-    "text-white font-semibold shadow-[var(--shadow-glow-violet)] " +
+    "text-white font-semibold shadow-[var(--shadow-card)] " +
     "bg-[linear-gradient(180deg,var(--color-violet-deep),color-mix(in_oklch,var(--color-violet-deep)_86%,black))] " +
-    "border border-[color-mix(in_oklch,var(--color-violet)_55%,transparent)] " +
-    "hover:brightness-115 hover:shadow-[0_18px_52px_-12px_color-mix(in_oklch,var(--color-violet)_72%,transparent)]",
+    "border border-[color-mix(in_oklch,var(--color-violet)_45%,transparent)] " +
+    "[box-shadow:var(--shadow-card),inset_0_1px_0_rgba(255,255,255,0.18)] " +
+    "hover:brightness-110 hover:shadow-[var(--shadow-pop)]",
   secondary:
     "text-ink-1 bg-surface-2 border border-line-strong edge-top " +
     "hover:bg-surface-3 hover:border-[color-mix(in_oklch,var(--color-violet)_35%,transparent)]",

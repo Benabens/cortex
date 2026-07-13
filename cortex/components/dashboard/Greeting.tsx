@@ -16,7 +16,7 @@ export function Greeting({
   analyzed: boolean;
 }) {
   return (
-    <div className="rise-in">
+    <div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8rem] text-ink-3">
         <span>{course.examCode}</span>
         <span className="text-ink-4">·</span>

@@ -11,7 +11,7 @@ export function PrioritySpotlight({ types, maxWeight }: { types: UiType[]; maxWe
   if (top.length === 0) return null;
 
   return (
-    <section aria-labelledby="spotlight-title" className="rise-in" style={{ animationDelay: "120ms" }}>
+    <section aria-labelledby="spotlight-title" >
       <div className="mb-3 flex items-center gap-2">
         <Flame className="size-4 text-warning" strokeWidth={2.25} />
         <h2 id="spotlight-title" className="text-[0.95rem] font-semibold text-ink-1">
@@ -31,7 +31,7 @@ export function PrioritySpotlight({ types, maxWeight }: { types: UiType[]; maxWe
               href="/entrainement"
               aria-label={`Priorité n°${i + 1} : ${cta} ${t.title}, ${stake} points à gagner`}
               className="panel accent-field group relative flex flex-col gap-3 rounded-xl p-5 transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-0.5 hover:border-[color-mix(in_oklch,var(--color-violet)_38%,transparent)] hover:shadow-[var(--shadow-pop)]"
-              style={i === 0 ? { boxShadow: "var(--shadow-card), var(--shadow-glow-violet)" } : undefined}
+              
             >
               <div className="flex items-start justify-between">
                 <span
@@ -60,7 +60,7 @@ export function PrioritySpotlight({ types, maxWeight }: { types: UiType[]; maxWe
                 masteryPct={t.masteryPct}
                 maxWeight={maxWeight}
                 height={10}
-                delay={160 + i * 90}
+                delay={100 + i * 50}
               />
 
               <div className="mt-auto flex items-center justify-between pt-1">

@@ -87,7 +87,7 @@ export default function ProgrammePage() {
       </PageHeader>
 
       {/* summary strip — chiffres réels de /api/program (stake dérivé, cf. MAPPING) */}
-      <Panel className="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-line p-0 md:grid-cols-4 rise-in" style={{ animationDelay: "60ms" }}>
+      <Panel className="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-line p-0 md:grid-cols-4">
         {stats.map((s) => (
           <div key={s.label} className="bg-surface-1 px-5 py-4">
             <div className="text-[0.68rem] font-medium uppercase tracking-wider text-ink-3">{s.label}</div>

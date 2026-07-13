@@ -55,7 +55,7 @@ export function MetricsCluster({
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {/* A — Maîtrise pondérée (radial gauge) */}
-      <div className="panel flex flex-col p-5 rise-in" style={{ animationDelay: "90ms" }}>
+      <div className="panel flex flex-col p-5">
         <CardHead Icon={Gauge} title="Maîtrise pondérée" />
         <div className="grid flex-1 place-items-center pt-2">
           <RadialGauge
@@ -73,7 +73,7 @@ export function MetricsCluster({
       </div>
 
       {/* B — Programme couvert (waffle grid) */}
-      <div className="panel flex flex-col p-5 rise-in" style={{ animationDelay: "120ms" }}>
+      <div className="panel flex flex-col p-5">
         <CardHead Icon={Grid3x3} title="Programme couvert" action={{ label: "Programme", href: "/programme" }} />
         <div className="mt-3 flex items-baseline gap-2">
           <span className="font-data text-[2.1rem] font-semibold leading-none text-ink-1">
@@ -90,7 +90,7 @@ export function MetricsCluster({
       </div>
 
       {/* C — Révisions dues (forgetting curve — la signature du produit) */}
-      <div className="panel flex flex-col p-5 rise-in" style={{ animationDelay: "150ms" }}>
+      <div className="panel flex flex-col p-5">
         <CardHead Icon={History} title="Révisions dues" action={{ label: "Réviser", href: "/entrainement" }} />
         <div className="mt-3 flex items-baseline gap-2">
           <span className="font-data text-[2.1rem] font-semibold leading-none text-cyan-hi">
@@ -111,7 +111,7 @@ export function MetricsCluster({
       </div>
 
       {/* D — Faiblesses suivies (sévérité réelle) */}
-      <div className="panel flex flex-col p-5 rise-in" style={{ animationDelay: "180ms" }}>
+      <div className="panel flex flex-col p-5">
         <CardHead Icon={Target} title="Faiblesses suivies" action={{ label: "Détail", href: "/faiblesses" }} />
         <div className="mt-3 flex items-baseline gap-2">
           <span className="font-data text-[2.1rem] font-semibold leading-none text-ink-1">

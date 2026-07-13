@@ -114,19 +114,20 @@ export function SearchExperience() {
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Spotlight bar */}
-      <div className="rise-in">
-        <div className="group relative flex items-center gap-3 rounded-xl border border-line-strong bg-surface-1/80 px-4 shadow-[var(--shadow-card)] transition-shadow focus-within:border-[color-mix(in_oklch,var(--color-violet)_55%,transparent)] focus-within:shadow-[var(--shadow-glow-violet)]">
-          <Search className="size-5 shrink-0 text-ink-3" strokeWidth={2} />
+      {/* Barre de recherche — sobre : bord 1 px, focus net, AUCUN halo (P0.1) */}
+      <div>
+        <div className="group relative flex items-center gap-3 rounded-xl border border-line-strong bg-surface-1/80 px-4 transition-[border-color,box-shadow] duration-150 focus-within:border-[color-mix(in_oklch,var(--color-violet)_60%,transparent)] focus-within:[box-shadow:inset_0_0_0_1px_color-mix(in_oklch,var(--color-violet)_45%,transparent)]">
+          <Search className="size-5 shrink-0 text-ink-3 transition-colors group-focus-within:text-ink-2" strokeWidth={2} />
           <input
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             type="text"
             role="searchbox"
+            data-focus-parent
             aria-label="Rechercher dans tout ton corpus"
             placeholder="Rechercher un cours, une série, un final…"
-            className="h-14 min-w-0 flex-1 truncate bg-transparent text-[1.05rem] text-ink-1 placeholder:text-ink-4 focus:outline-none"
+            className="h-13 min-w-0 flex-1 truncate bg-transparent text-[1rem] text-ink-1 placeholder:text-ink-4 focus:outline-none focus-visible:outline-none"
           />
           {query ? (
             <button
@@ -147,34 +148,49 @@ export function SearchExperience() {
             </span>
           )}
         </div>
+        {/* raccourcis, discrets sous la barre — l'écran se lit « prêt » */}
+        {!active && (
+          <p className="mt-2 px-1 text-[0.74rem] text-ink-4">
+            <Kbd className="mr-1">↑</Kbd>
+            <Kbd className="mr-1.5">↓</Kbd>
+            naviguer
+            <span className="mx-2 text-ink-4">·</span>
+            <Kbd className="mr-1.5">↵</Kbd>
+            ouvrir
+            <span className="mx-2 text-ink-4">·</span>
+            dès {MIN_CHARS} caractères, sur tout ton corpus
+          </p>
+        )}
       </div>
 
-      {/* Suggestions (requête vide / trop courte) */}
+      {/* État vide INTENTIONNEL (P0.3) : compact, utile — les suggestions SONT le contenu */}
       {!active && (
-        <div className="flex flex-wrap items-center gap-2 rise-in" style={{ animationDelay: "60ms" }}>
-          <span className="inline-flex items-center gap-1.5 text-[0.78rem] text-ink-3">
+        <section aria-label="Suggestions de recherche" className="flex flex-col gap-2.5">
+          <span className="inline-flex items-center gap-1.5 text-[0.72rem] font-medium uppercase tracking-wider text-ink-4">
             <Sparkles className="size-3.5 text-violet-hi" strokeWidth={2.25} />
-            Suggestions
+            Essaie
           </span>
-          {suggestions.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => {
-                setQuery(s);
-                inputRef.current?.focus();
-              }}
-              className="rounded-full border border-line bg-surface-2/50 px-3 py-1.5 text-[0.82rem] text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_38%,transparent)] hover:text-ink-1"
-            >
-              {s}
-            </button>
-          ))}
-        </div>
+          <div className="flex flex-wrap gap-2">
+            {suggestions.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => {
+                  setQuery(s);
+                  inputRef.current?.focus();
+                }}
+                className="inline-flex min-h-10 items-center rounded-full border border-line bg-surface-1/70 px-3.5 text-[0.85rem] text-ink-2 transition-colors duration-150 hover:border-[color-mix(in_oklch,var(--color-violet)_38%,transparent)] hover:bg-surface-2 hover:text-ink-1"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* Facettes (groupes réels renvoyés par le back) + compteur */}
       {active && data && data.groups.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rise-in">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="mr-1 inline-flex items-center gap-1.5 text-[0.72rem] font-medium uppercase tracking-wider text-ink-4">
               <SlidersHorizontal className="size-3.5" strokeWidth={2.25} />
@@ -208,19 +224,8 @@ export function SearchExperience() {
         </div>
       )}
 
-      {/* Résultats */}
-      {!active ? (
-        <div className="panel grid place-items-center rounded-xl px-6 py-14 text-center">
-          <Search className="size-7 text-ink-4" strokeWidth={1.75} />
-          <p className="mt-3 text-[0.95rem] font-medium text-ink-1">
-            Cherche dans tout ton corpus
-          </p>
-          <p className="mt-1 max-w-sm text-[0.85rem] text-ink-3">
-            Cours, séries, finals, cheat sheets — tape au moins {MIN_CHARS} caractères,
-            navigue avec ↑ ↓ et ouvre avec ↵.
-          </p>
-        </div>
-      ) : loading ? (
+      {/* Résultats — rien à afficher tant que la requête est trop courte (l'état vide vit au-dessus) */}
+      {!active ? null : loading ? (
         <div className="panel space-y-2 rounded-xl p-3" aria-busy="true" aria-label="Recherche en cours">
           {[0, 1, 2, 3, 4].map((i) => (
             <div key={i} className="flex items-center gap-3 px-2 py-1.5">

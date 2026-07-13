@@ -46,7 +46,7 @@ export function TypeRow({
           weightPct={t.weightPct}
           masteryPct={t.masteryPct}
           maxWeight={maxWeight}
-          delay={Math.min(index, 14) * 28}
+          delay={Math.min(index, 6) * 24}
         />
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.72rem] text-ink-3">
           <span className="whitespace-nowrap">

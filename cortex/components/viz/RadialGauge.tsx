@@ -97,6 +97,15 @@ export function RadialGauge({
           strokeWidth={thickness}
           strokeLinecap="round"
         />
+        {/* repère du zéro : l'aiguille « parquée » — un 0 % se lit comme un cadran
+            prêt à monter, jamais comme un anneau vide cassé */}
+        <circle
+          cx={polar(cx, cy, r, startAngle).x}
+          cy={polar(cx, cy, r, startAngle).y}
+          r={Math.max(2.5, thickness / 2 - 1.5)}
+          fill={from}
+          opacity={0.95}
+        />
         {/* soft glow underlay */}
         <path
           d={track}
