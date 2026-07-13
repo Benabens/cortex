@@ -1,5 +1,5 @@
 import { currentCourse } from "@/db/client";
-import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { completeText, extractJson } from "@/lib/llm";
 import { getCourse } from "@/lib/courses";
 
 /**
@@ -57,7 +57,7 @@ export async function mineConversation(text: string): Promise<MinedWeakness[]> {
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier, aucun outil, aucune prose.`,
     JSON.stringify(SCHEMA, null, 2),
   ].join("\n");
-  const out = await runClaudeCode({ prompt, model: "opus", timeoutMs: 220_000 });
+  const out = await completeText({ prompt, model: "opus", timeoutMs: 220_000 });
   const r = extractJson<{ weaknesses: MinedWeakness[] }>(out);
   const list = Array.isArray(r.weaknesses) ? r.weaknesses : [];
   return list

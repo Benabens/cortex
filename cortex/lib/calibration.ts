@@ -1,4 +1,5 @@
-import { currentCourse, sqlite } from "@/db/client";
+import { currentCourse } from "@/db/client";
+import { q } from "@/db/q";
 
 /**
  * V5 Phase 3 — AUTO-APPRENTISSAGE (affinage piloté par les retours, pas un entraînement de modèle).
@@ -14,39 +15,30 @@ import { currentCourse, sqlite } from "@/db/client";
 export type Verdict = "too_easy" | "good" | "not_prof_style" | "wrong";
 const VERDICTS: Verdict[] = ["too_easy", "good", "not_prof_style", "wrong"];
 
-export function ensureFeedbackSchema() {
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS feedback (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    exam_id INTEGER,
-    topic TEXT,
-    archetype TEXT,
-    verdict TEXT NOT NULL,
-    note TEXT,
-    score INTEGER,
-    created_at TEXT DEFAULT (datetime('now'))
-  );`);
+export async function ensureFeedbackSchema(): Promise<void> {
+  await q.ensureTable("feedback");
 }
 
-export function recordFeedback(input: { examId?: number | null; topic?: string | null; archetype?: string | null; verdict: string; note?: string | null; score?: number | null }): number {
-  ensureFeedbackSchema();
+export async function recordFeedback(input: { examId?: number | null; topic?: string | null; archetype?: string | null; verdict: string; note?: string | null; score?: number | null }): Promise<number> {
+  await ensureFeedbackSchema();
   const verdict = VERDICTS.includes(input.verdict as Verdict) ? input.verdict : "good";
-  return sqlite
-    .prepare(`INSERT INTO feedback (exam_id, topic, archetype, verdict, note, score) VALUES (?,?,?,?,?,?)`)
-    .run(input.examId ?? null, (input.topic ?? "").slice(0, 200) || null, input.archetype ?? null, verdict, (input.note ?? "").slice(0, 600) || null, input.score ?? null)
-    .lastInsertRowid as number;
+  return await q.insert(
+    `INSERT INTO feedback (exam_id, topic, archetype, verdict, note, score) VALUES (?,?,?,?,?,?)`,
+    input.examId ?? null, (input.topic ?? "").slice(0, 200) || null, input.archetype ?? null, verdict, (input.note ?? "").slice(0, 600) || null, input.score ?? null
+  );
 }
 
 export type CalibrationLesson = { archetype: string | null; counts: Record<Verdict, number>; total: number; lessons: string[]; notes: string[] };
 
 /** Agrège les retours du cours courant pour un archétype (et topic) → comptes + leçons + notes. */
-export function calibrationFor(archetype?: string | null, topic?: string | null): CalibrationLesson {
-  ensureFeedbackSchema();
+export async function calibrationFor(archetype?: string | null, topic?: string | null): Promise<CalibrationLesson> {
+  await ensureFeedbackSchema();
   const where: string[] = [];
   const args: any[] = [];
   if (archetype) { where.push("archetype = ?"); args.push(archetype); }
   if (topic) { where.push("topic = ?"); args.push(topic); }
-  const sql = `SELECT verdict, note FROM feedback ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY datetime(created_at) DESC LIMIT 40`;
-  const rows = sqlite.prepare(sql).all(...args) as { verdict: string; note: string | null }[];
+  const sql = `SELECT verdict, note FROM feedback ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY created_at DESC LIMIT 40`;
+  const rows = await q.all<{ verdict: string; note: string | null }>(sql, ...args);
   const counts: Record<Verdict, number> = { too_easy: 0, good: 0, not_prof_style: 0, wrong: 0 };
   const notes: string[] = [];
   for (const r of rows) {
@@ -68,8 +60,8 @@ export function calibrationFor(archetype?: string | null, topic?: string | null)
 }
 
 /** Bloc de prompt « mémoire de calibration » à injecter dans l'architecte (vide si aucun retour). */
-export function calibrationBlock(archetype?: string | null, topic?: string | null): string {
-  const c = calibrationFor(archetype, topic);
+export async function calibrationBlock(archetype?: string | null, topic?: string | null): Promise<string> {
+  const c = await calibrationFor(archetype, topic);
   if (!c.total) return "";
   return [
     `═══ MÉMOIRE DE CALIBRATION (leçons APPRISES des retours de l'étudiant — APPLIQUE-LES) ═══`,
@@ -80,9 +72,9 @@ export function calibrationBlock(archetype?: string | null, topic?: string | nul
 }
 
 /** Retrouve l'archétype + le concept d'un exo généré (tag source_inspiration « architect:<id> »). */
-export function resolveExamMeta(examId: number): { archetype: string | null; topic: string | null } {
+export async function resolveExamMeta(examId: number): Promise<{ archetype: string | null; topic: string | null }> {
   try {
-    const r = sqlite.prepare(`SELECT concept, source_inspiration FROM exam_questions WHERE exam_id = ? LIMIT 1`).get(examId) as { concept: string; source_inspiration: string | null } | undefined;
+    const r = await q.get<{ concept: string; source_inspiration: string | null }>(`SELECT concept, source_inspiration FROM exam_questions WHERE exam_id = ? LIMIT 1`, examId);
     if (!r) return { archetype: null, topic: null };
     const m = (r.source_inspiration ?? "").match(/^architect:(.+)$/);
     return { archetype: m ? m[1] : null, topic: r.concept ?? null };
@@ -92,9 +84,14 @@ export function resolveExamMeta(examId: number): { archetype: string | null; top
 }
 
 /** Récap « ce que j'ai appris de tes retours » (tous archétypes du cours courant). */
-export function calibrationSummary(): { course: string; total: number; byArchetype: CalibrationLesson[] } {
-  ensureFeedbackSchema();
-  const archs = (sqlite.prepare(`SELECT DISTINCT archetype FROM feedback WHERE archetype IS NOT NULL`).all() as { archetype: string }[]).map((r) => r.archetype);
-  const total = (sqlite.prepare(`SELECT count(*) n FROM feedback`).get() as { n: number }).n;
-  return { course: currentCourse(), total, byArchetype: archs.map((a) => calibrationFor(a)).filter((c) => c.total > 0) };
+export async function calibrationSummary(): Promise<{ course: string; total: number; byArchetype: CalibrationLesson[] }> {
+  await ensureFeedbackSchema();
+  const archs = (await q.all<{ archetype: string }>(`SELECT DISTINCT archetype FROM feedback WHERE archetype IS NOT NULL`)).map((r) => r.archetype);
+  const total = ((await q.get<{ n: number }>(`SELECT count(*) n FROM feedback`)) as { n: number }).n;
+  const byArchetype: CalibrationLesson[] = [];
+  for (const a of archs) {
+    const c = await calibrationFor(a);
+    if (c.total > 0) byArchetype.push(c);
+  }
+  return { course: currentCourse(), total, byArchetype };
 }

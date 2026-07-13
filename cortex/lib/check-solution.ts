@@ -1,5 +1,5 @@
 import { currentCourse } from "@/db/client";
-import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { completeText, extractJson } from "@/lib/llm";
 import { getCourse } from "@/lib/courses";
 
 export type CheckResult = {
@@ -34,6 +34,6 @@ export async function checkSolution(input: { statement: string; answer?: string;
     `4) correct_solution : la bonne solution, concise mais complète.`,
     `Réponds UNIQUEMENT avec un objet JSON {"verdict","feedback","correct_solution"}. Aucune prose autour, aucune balise markdown.`
   );
-  const text = await runClaudeCode({ prompt: lines.join("\n"), model: "opus", timeoutMs: 200_000 });
+  const text = await completeText({ prompt: lines.join("\n"), model: "opus", timeoutMs: 200_000 });
   return extractJson<CheckResult>(text);
 }

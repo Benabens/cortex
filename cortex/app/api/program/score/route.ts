@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
   if (!topicId || Number.isNaN(score) || score < 0 || score > 10)
     return NextResponse.json({ error: "Fournis topicId et un score 0-10." }, { status: 400 });
   try {
-    const res = recordScore(topicId, score, body.examId ? Number(body.examId) : undefined);
+    const res = await recordScore(topicId, score, body.examId ? Number(body.examId) : undefined);
     return NextResponse.json({ ok: true, ...res });
   } catch (e: any) {
     return NextResponse.json({ error: String(e?.message ?? e) }, { status: 400 });

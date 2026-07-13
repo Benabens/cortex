@@ -1,10 +1,9 @@
 import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
 import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs";
-import path from "node:path";
 import { courseDbPath, DEFAULT_COURSE, normalizeCourse } from "../lib/courses";
-import * as schema from "./schema";
+import path from "node:path";
+import { allDdl } from "./tables";
 
 /**
  * Client DB MULTI-COURS. Une connexion SQLite PAR COURS, ouverte à la demande.
@@ -43,28 +42,11 @@ export function enterCourse(courseId: string | null | undefined): string {
 }
 
 // ---- schéma de base pour les DB NEUVES (cours ≠ cs-202) ----
-// Lu depuis les migrations Drizzle, rendu idempotent (IF NOT EXISTS) → applicable sans risque.
+// Source de vérité : db/tables.ts (schéma COMPLET, y compris les ex-tables lazy).
 // cs-202 NE passe JAMAIS par là (sa DB est déjà migrée et committée).
-function baseSchemaSql(): string {
-  try {
-    const dir = path.join(process.cwd(), "db", "migrations");
-    const files = fs.readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
-    const raw = files.map((f) => fs.readFileSync(path.join(dir, f), "utf8")).join("\n");
-    return raw
-      .replace(/CREATE TABLE\s+`/g, "CREATE TABLE IF NOT EXISTS `")
-      .replace(/CREATE UNIQUE INDEX\s+`/g, "CREATE UNIQUE INDEX IF NOT EXISTS `")
-      .replace(/CREATE INDEX\s+`/g, "CREATE INDEX IF NOT EXISTS `");
-  } catch {
-    return "";
-  }
-}
-
 function applyBaseSchema(d: Database.Database) {
-  const sql = baseSchemaSql();
-  if (!sql) return;
-  for (const stmt of sql.split("--> statement-breakpoint")) {
-    const s = stmt.trim();
-    if (s) try { d.exec(s); } catch { /* déjà présent / FK paresseuse : on continue */ }
+  for (const stmt of allDdl("sqlite")) {
+    try { d.exec(stmt); } catch { /* déjà présent / FK paresseuse : on continue */ }
   }
 }
 
@@ -93,11 +75,7 @@ function conn(courseId: string): Database.Database {
   return c;
 }
 
-// cs-202 pré-ouverte = data/cortex.db (identique au singleton historique). drizzle reste lié à cs-202.
-const cs202 = conn(DEFAULT_COURSE);
-export const db = drizzle(cs202, { schema });
-
-/** Connexion brute du cours courant (rare ; préférer `sqlite`). */
+/** Connexion brute du cours courant (rare ; préférer la façade async `q` de db/q). */
 export function rawDb(): Database.Database {
   return conn(currentCourse());
 }
@@ -119,8 +97,11 @@ export const sqlite = new Proxy({} as Database.Database, {
   },
 });
 
-/** Table virtuelle FTS5 pour la recherche globale (créée à la main, hors Drizzle), sur la DB courante. */
+/** Table virtuelle FTS5 pour la recherche globale (SQLite uniquement — en mode
+ * postgres la recherche est un index GIN tsvector sur items.text_norm, cf.
+ * db/driver-postgres + lib/search). */
 export function ensureFts() {
+  if ((process.env.DB_DRIVER ?? "sqlite") !== "sqlite") return;
   sqlite.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS fts_items USING fts5(
       title, text, lecture_id UNINDEXED, item_id UNINDEXED, source_id UNINDEXED,

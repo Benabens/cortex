@@ -1,5 +1,5 @@
 import { currentCourse } from "@/db/client";
-import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import { getCourse } from "@/lib/courses";
 import { verifyDeterministic } from "@/lib/verify-deterministic";
@@ -87,7 +87,7 @@ async function verifyOne(q: ExamQuestion, opts?: VerifyOpts): Promise<VerifyResu
     // 9 min : la re-résolution à l'aveugle d'un exo DENSE de l'architecte (6 sous-questions +
     // comparaison au corrigé) frôlait les 340 s → timeout → « non vérifié » systématique. Mesuré :
     // une re-résolution complète prend ~4–6 min ; on laisse de la marge.
-    const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 540_000 });
+    const text = await completeText({ prompt, model: "opus", timeoutMs: 540_000 });
     const r = extractJson<VerifyResult>(text);
     if (!r || !r.verdict) return null;
     // ADDITIF — vérif DÉTERMINISTE de la réponse finale (re-solve à l'aveugle vs corrigé proposé) :
@@ -123,7 +123,7 @@ export async function solveFromScratch(questionText: string, opts?: VerifyOpts):
     `Écris ta solution complète. Puis, sur la TOUTE DERNIÈRE ligne, donne « RÉPONSE : <ta réponse finale, concise> » (le résultat numérique / le choix / la conclusion). N'écris aucun fichier.`,
   ].join("\n");
   try {
-    const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 540_000 });
+    const text = await completeText({ prompt, model: "opus", timeoutMs: 540_000 });
     return text?.trim() || null;
   } catch {
     return null; // fallback honnête : non résolu (jamais une fausse réponse)

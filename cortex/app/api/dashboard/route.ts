@@ -1,4 +1,5 @@
-import { currentCourse, sqlite } from "@/db/client";
+import { currentCourse } from "@/db/client";
+import { q } from "@/db/q";
 import { getCourse } from "@/lib/courses";
 import { listExams } from "@/lib/exam";
 import { activeJob } from "@/lib/jobs";
@@ -14,32 +15,32 @@ export const dynamic = "force-dynamic";
  * compte à rebours d'examen, derniers examens, faiblesses, prochain type à travailler,
  * job en cours. 100 % lecture : ne touche à rien du moteur.
  */
-export function GET(req: NextRequest) {
+export async function GET(req: NextRequest) {
   useCourse(req);
   const id = currentCourse();
   const c = getCourse(id);
 
   // Programme (peut être vide si le cours n'a pas été analysé)
-  let overview: ReturnType<typeof programOverview> | null = null;
-  let next: ReturnType<typeof nextTopic> = null;
-  let cover: ReturnType<typeof coverageNext> = null;
+  let overview: Awaited<ReturnType<typeof programOverview>> | null = null;
+  let next: Awaited<ReturnType<typeof nextTopic>> = null;
+  let cover: Awaited<ReturnType<typeof coverageNext>> = null;
   try {
-    overview = programOverview();
-    next = nextTopic();
-    cover = coverageNext();
+    overview = await programOverview();
+    next = await nextTopic();
+    cover = await coverageNext();
   } catch {
     /* pas de table topics → cours non analysé */
   }
 
   // Examens récents + planning (répétition espacée)
-  let exams: ReturnType<typeof listExams> = [];
+  let exams: Awaited<ReturnType<typeof listExams>> = [];
   let schedule = { total: 0, due: 0 };
   try {
-    const r = listExams() as any;
+    const r = (await listExams()) as any;
     exams = Array.isArray(r) ? r : r.exams ?? [];
   } catch {}
   try {
-    const s = require("@/lib/schedule").scheduleStats();
+    const s = await require("@/lib/schedule").scheduleStats();
     schedule = { total: s.total, due: s.due };
   } catch {}
 
@@ -47,10 +48,8 @@ export function GET(req: NextRequest) {
   let weaknessCount = 0;
   let topWeaknesses: { id: number; topic: string; severity: number }[] = [];
   try {
-    weaknessCount = (sqlite.prepare(`SELECT count(*) n FROM weaknesses`).get() as { n: number }).n;
-    topWeaknesses = sqlite
-      .prepare(`SELECT id, topic, severity FROM weaknesses ORDER BY severity DESC, datetime(logged_at) DESC LIMIT 3`)
-      .all() as any[];
+    weaknessCount = ((await q.get<{ n: number }>(`SELECT count(*) n FROM weaknesses`)) as { n: number }).n;
+    topWeaknesses = await q.all<any>(`SELECT id, topic, severity FROM weaknesses ORDER BY severity DESC, logged_at DESC LIMIT 3`);
   } catch {}
 
   // Compte à rebours d'examen
@@ -60,7 +59,7 @@ export function GET(req: NextRequest) {
     countdown = { date: c.examDate, days };
   }
 
-  const job = activeJob() ?? null;
+  const job = (await activeJob()) ?? null;
 
   return NextResponse.json({
     course: { id, name: c.name, short: c.short, examCode: c.examCode, examKind: c.examKind },

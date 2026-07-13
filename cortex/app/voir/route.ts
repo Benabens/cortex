@@ -1,4 +1,4 @@
-import { sqlite } from "@/db/client";
+import { q as db } from "@/db/q";
 import { tokenize } from "@/lib/text";
 import { useCourse } from "@/lib/req";
 import fs from "node:fs";
@@ -148,7 +148,7 @@ function injectedScript(targetTitle: string, terms: string[]): string {
 </script>`;
 }
 
-export function GET(req: NextRequest) {
+export async function GET(req: NextRequest) {
   useCourse(req);
   const sp = req.nextUrl.searchParams;
   const src = sp.get("src") ?? "";
@@ -163,9 +163,7 @@ export function GET(req: NextRequest) {
 
   let title = "";
   if (itemId) {
-    const row = sqlite.prepare("SELECT title FROM items WHERE id = ?").get(Number(itemId)) as
-      | { title: string | null }
-      | undefined;
+    const row = await db.get<{ title: string | null }>("SELECT title FROM items WHERE id = ?", Number(itemId));
     title = row?.title ?? "";
   }
   const terms = tokenize(q, 2);

@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "tsx --test tests/*.test.ts",
+    "regression": "tsx scripts/regression-cs202.ts",
     "ingest": "tsx scripts/ingest.ts",
     "prepare:course": "tsx scripts/prepare.ts",
     "eval": "tsx scripts/eval.ts",
@@ -26,11 +28,14 @@
     "cheerio": "^1.2.0",
     "drizzle-orm": "^0.45.2",
     "next": "16.2.7",
+    "next-auth": "^5.0.0-beta.31",
+    "postgres": "^3.4.9",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "unpdf": "^1.6.2"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.4",
     "@tailwindcss/postcss": "^4",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",

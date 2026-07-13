@@ -1,4 +1,4 @@
-import { sqlite } from "@/db/client";
+import { q } from "@/db/q";
 import { bankQuestions, bankStats, ensureRevisionSchema, loadRevisionJson, planQuestions, planStats } from "@/lib/revision";
 import { useCourse } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
@@ -11,15 +11,15 @@ export const dynamic = "force-dynamic";
  * cours si elle est peuplée, SINON le JSON committé `data/<course>/revision-<course>.json` (portable :
  * un simple `git pull` chez Ben affiche la page déjà remplie, sans rebuild).
  */
-export function GET(req: NextRequest) {
+export async function GET(req: NextRequest) {
   const course = useCourse(req);
-  ensureRevisionSchema();
-  const n = (sqlite.prepare(`SELECT count(*) n FROM bank_questions`).get() as { n: number }).n;
+  await ensureRevisionSchema();
+  const n = ((await q.get<{ n: number }>(`SELECT count(*) n FROM bank_questions`)) as { n: number }).n;
   if (n > 0) {
     return NextResponse.json({
       course, source: "db",
-      bank: { stats: bankStats(), qcm: bankQuestions("qcm"), open: bankQuestions("open") },
-      plan: { stats: planStats(), questions: planQuestions() },
+      bank: { stats: await bankStats(), qcm: await bankQuestions("qcm"), open: await bankQuestions("open") },
+      plan: { stats: await planStats(), questions: await planQuestions() },
     });
   }
   const json = loadRevisionJson(course);

@@ -16,8 +16,9 @@
  */
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { enterCourse, sqlite } from "../db/client";
-import { claudeBinPath } from "../lib/claude-code";
+import { enterCourse } from "../db/client";
+import { q } from "../db/q";
+import { llmAvailable } from "../lib/llm";
 import { DEFAULT_COURSE, normalizeCourse } from "../lib/courses";
 
 function argVal(name: string): string | undefined {
@@ -50,7 +51,7 @@ async function main() {
 
   // L'ingestion tournait dans un autre process → on (ré)ouvre la DB du cours dans CE process.
   enterCourse(COURSE);
-  const refsN = (sqlite.prepare(`SELECT count(*) n FROM exam_refs`).get() as { n: number } | undefined)?.n ?? 0;
+  const refsN = (await q.get<{ n: number }>(`SELECT count(*) n FROM exam_refs`))?.n ?? 0;
 
   // cs-202 garde son format calcul/trace + son blueprint statique (archétypes) → pas de détection IA.
   if (COURSE === DEFAULT_COURSE) {
@@ -58,7 +59,7 @@ async function main() {
     return;
   }
 
-  if (!claudeBinPath()) {
+  if (!llmAvailable()) {
     console.log(`\n⚠ Claude Code (binaire « claude ») introuvable → étapes (b) format et (c) blueprint SAUTÉES.`);
     console.log(`  L'ingestion a réussi (refs : ${refsN}). Lance « claude » une fois (connexion Max), puis :`);
     console.log(`  • détecte le format depuis /examens (ou re-lance « npm run prepare -- --course=${COURSE} »).`);

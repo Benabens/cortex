@@ -1,4 +1,4 @@
-import { activeJob, createJob, startWorker } from "@/lib/jobs";
+import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { useCourse } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -11,10 +11,10 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: NextRequest) {
   const course = useCourse(req);
-  const existing = activeJob("prepare");
+  const existing = await activeJob("prepare");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
-  const jobId = createJob("prepare");
-  try { startWorker(jobId, course); }
+  const { id: jobId } = await createJobExclusive("prepare");
+  try { await startWorker(jobId, course); }
   catch (e: any) { return NextResponse.json({ error: `worker : ${e?.message ?? e}` }, { status: 500 }); }
   return NextResponse.json({ ok: true, jobId });
 }

@@ -1,5 +1,5 @@
-import { sqlite } from "@/db/client";
-import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { q } from "@/db/q";
+import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import { persistExercise, type ExamQuestion, type StepCb } from "@/lib/exam";
 import { search } from "@/lib/search";
@@ -243,9 +243,9 @@ function labBlock(lab: LabDef, topic: string): string {
 }
 
 /** Petit contexte corpus (cartes review + notes du cours sur le sujet du lab). */
-function corpusBlock(lab: LabDef, topic: string): string {
+async function corpusBlock(lab: LabDef, topic: string): Promise<string> {
   try {
-    const groups = search(`${topic || lab.label} ${lab.topics.slice(0, 4).join(" ")}`, 12, "or");
+    const groups = await search(`${topic || lab.label} ${lab.topics.slice(0, 4).join(" ")}`, 12, "or");
     const picks: string[] = [];
     for (const g of groups) {
       if (!["review", "note"].includes(g.sourceType)) continue;
@@ -271,7 +271,7 @@ const LAB_EX_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-function buildLabPrompt(lab: LabDef, topic: string): string {
+async function buildLabPrompt(lab: LabDef, topic: string): Promise<string> {
   const p = profile();
   return [
     labsDirectivesBlock(),
@@ -286,7 +286,7 @@ function buildLabPrompt(lab: LabDef, topic: string): string {
     ``,
     labBlock(lab, topic),
     ``,
-    corpusBlock(lab, topic),
+    await corpusBlock(lab, topic),
     ``,
     p.latexContract(),
     ``,
@@ -326,7 +326,7 @@ async function regenerateLabExercise(lab: LabDef, topic: string, q: ExamQuestion
     `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points}. Aucun outil au-delà de Read, aucun fichier.`,
     JSON.stringify(LAB_EX_SCHEMA, null, 2),
   ].join("\n");
-  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 480_000 });
+  const text = await completeText({ prompt, model: "opus", timeoutMs: 480_000 });
   const r = extractJson<ExamQuestion>(text);
   return { ...r, category: "Labs", points: 15 };
 }
@@ -360,9 +360,9 @@ export async function generateLabExercise(
   const lab = resolveLab(norm.lab ?? topic);
   step(`Lab ciblé : ${lab.label}${topic ? ` (focus « ${topic} »)` : ""}`, 8);
 
-  const prompt = buildLabPrompt(lab, topic);
+  const prompt = await buildLabPrompt(lab, topic);
   step("Génération de l'exercice Labs — moule Q6 2025 + vrai code du lab (Claude · Max)…", 25);
-  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 600_000 });
+  const text = await completeText({ prompt, model: "opus", timeoutMs: 600_000 });
   let q = extractJson<ExamQuestion>(text);
   q.category = "Labs";
   q.points = 15;
@@ -398,19 +398,17 @@ export type LabSeriesEntry = {
 };
 
 /** La série figée : un exo par lab, avec liens PDF durables (UI /entrainement + preuve NS13). */
-export function labSeries(): LabSeriesEntry[] {
+export async function labSeries(): Promise<LabSeriesEntry[]> {
   // les exos Labs sont par construction dans la DB cs-202 → liens explicites ?course=cs-202
   const link = (file: string | null, suffix = "") =>
     file ? `/exam/${path.basename(file, ".pdf")}${suffix}${file.endsWith(".pdf") ? ".pdf" : ""}?course=cs-202` : null;
   try {
-    const rows = sqlite
-      .prepare(
-        `SELECT e.id, e.html_path file, q.concept, q.verified, q.source_inspiration tag
+    const rows = await q.all<{ id: number; file: string | null; concept: string; verified: number | null; tag: string }>(
+      `SELECT e.id, e.html_path file, q.concept, q.verified, q.source_inspiration tag
          FROM exams e JOIN exam_questions q ON q.exam_id = e.id
          WHERE q.source_inspiration LIKE 'labs:%' AND e.status = 'ready'
          ORDER BY e.id DESC`
-      )
-      .all() as { id: number; file: string | null; concept: string; verified: number | null; tag: string }[];
+    );
     return LABS.map((lab) => ({
       lab: { id: lab.id, label: lab.label },
       exams: rows

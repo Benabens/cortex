@@ -1,5 +1,5 @@
-import { sqlite } from "@/db/client";
-import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { q, nowStr, nowPlusDays } from "@/db/q";
+import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import { ensureIndexSchema, indexExamExercises } from "@/lib/exam-index";
 import { createWeakness, ensureSchema as ensureWeaknessSchema } from "@/lib/weaknesses";
@@ -55,35 +55,11 @@ export type TopicView = Topic & {
 
 export const MASTERY_THRESHOLD = 7; // « maîtrisé » à partir de 7/10
 
-export function ensureProgramSchema() {
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS topics (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    label TEXT NOT NULL UNIQUE,
-    method TEXT,
-    category TEXT,
-    archetype TEXT,
-    exam_weight REAL NOT NULL DEFAULT 0,
-    exam_count INTEGER NOT NULL DEFAULT 0,
-    source TEXT,
-    description TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-  );`);
+export async function ensureProgramSchema(): Promise<void> {
+  await q.ensureTable("topics");
   // V5 — blueprint approfondi : type d'exo (format réel) + piège type, ajoutés au fil de l'eau.
-  const cols = (sqlite.prepare(`PRAGMA table_info(topics)`).all() as { name: string }[]).map((c) => c.name);
-  if (!cols.includes("exo_type")) sqlite.exec(`ALTER TABLE topics ADD COLUMN exo_type TEXT`);
-  if (!cols.includes("trap")) sqlite.exec(`ALTER TABLE topics ADD COLUMN trap TEXT`);
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS mastery (
-    topic_id INTEGER PRIMARY KEY,
-    score REAL,
-    attempts INTEGER NOT NULL DEFAULT 0,
-    last_score INTEGER,
-    last_done_at TEXT,
-    due_at TEXT,
-    ease REAL NOT NULL DEFAULT 2.5,
-    interval_days INTEGER NOT NULL DEFAULT 0,
-    last_exam_id INTEGER,
-    FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE CASCADE
-  );`);
+  await q.ensureColumns("topics", ["exo_type", "trap"]);
+  await q.ensureTable("mastery");
 }
 
 // ---------------- PHASE 1 — Analyseur de blueprint ----------------
@@ -91,17 +67,16 @@ export function ensureProgramSchema() {
 const trunc = (s: string, n: number) => (s.length > n ? s.slice(0, n) + " […]" : s);
 
 /** Texte du corpus regroupé par usage pour l'analyse (past-exams = vérité terrain des poids). */
-function gatherForBlueprint() {
-  const byTypes = (types: string[], cap: number): string => {
+async function gatherForBlueprint() {
+  const byTypes = async (types: string[], cap: number): Promise<string> => {
     const ph = types.map(() => "?").join(",");
     let rows: { text: string; title: string }[] = [];
     try {
-      rows = sqlite
-        .prepare(
-          `SELECT i.text text, s.title title FROM items i JOIN sources s ON s.id = i.source_id
-           WHERE s.type IN (${ph}) ORDER BY s.recency_weight DESC, s.id`
-        )
-        .all(...types) as { text: string; title: string }[];
+      rows = await q.all<{ text: string; title: string }>(
+        `SELECT i.text text, s.title title FROM items i JOIN sources s ON s.id = i.source_id
+           WHERE s.type IN (${ph}) ORDER BY s.recency_weight DESC, s.id`,
+        ...types
+      );
     } catch {}
     let out = "";
     for (const r of rows) {
@@ -112,9 +87,9 @@ function gatherForBlueprint() {
     return out.trim();
   };
   return {
-    finals: byTypes(["final", "midterm"], 16000),
-    series: byTypes(["serie", "exercise"], 6000),
-    plan: byTypes(["note", "course_pdf", "course"], 4000),
+    finals: await byTypes(["final", "midterm"], 16000),
+    series: await byTypes(["serie", "exercise"], 6000),
+    plan: await byTypes(["note", "course_pdf", "course"], 4000),
   };
 }
 
@@ -162,10 +137,10 @@ export type AnalyzeResult = { count: number; topics: TopicView[] };
  * → la maîtrise déjà accumulée est préservée).
  */
 export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) => void } = {}): Promise<AnalyzeResult> {
-  ensureProgramSchema();
+  await ensureProgramSchema();
   const step = opts.onStep ?? (() => {});
   step("Lecture du corpus (finals + séries + plan du cours)…", 10);
-  const corpus = gatherForBlueprint();
+  const corpus = await gatherForBlueprint();
   if (!corpus.finals && !corpus.series && !corpus.plan)
     throw new Error("Corpus vide : ingère d'abord le cours (cours + séries + finals) avec « npm run ingest ».");
 
@@ -209,7 +184,7 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
   ].join("\n");
 
   step("Classification des exercices par type via Max (+ vision)…", 35);
-  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 360_000 });
+  const text = await completeText({ prompt, model: "opus", timeoutMs: 360_000 });
   const parsed = extractJson<{ topics?: RawTopic[] } | RawTopic[]>(text);
   const raw: RawTopic[] = Array.isArray(parsed) ? parsed : parsed?.topics ?? [];
   const cleaned = raw.filter((t) => t && t.label && t.label.trim());
@@ -218,35 +193,33 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
   step("Enregistrement de la taxonomie…", 80);
   // normalise les poids pour qu'ils somment ~100
   const sum = cleaned.reduce((s, t) => s + (Number(t.exam_weight) || 0), 0) || 1;
-  const up = sqlite.prepare(
-    `INSERT INTO topics (label, method, exo_type, trap, category, archetype, exam_weight, exam_count, source, description)
-     VALUES (@label,@method,@exo_type,@trap,@category,@archetype,@exam_weight,@exam_count,@source,@description)
+  const upSql = `INSERT INTO topics (label, method, exo_type, trap, category, archetype, exam_weight, exam_count, source, description)
+     VALUES (?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(label) DO UPDATE SET
        method=excluded.method, exo_type=excluded.exo_type, trap=excluded.trap,
        category=excluded.category, archetype=excluded.archetype,
        exam_weight=excluded.exam_weight, exam_count=excluded.exam_count,
-       source=excluded.source, description=excluded.description`
-  );
+       source=excluded.source, description=excluded.description`;
   const knownArche = new Set(p.archetypes.map((a) => a.id));
-  const tx = sqlite.transaction(() => {
+  await q.tx(async () => {
     for (const t of cleaned) {
-      up.run({
-        label: t.label.trim().slice(0, 160),
-        method: (t.method ?? "").slice(0, 400) || null,
-        exo_type: (t.exo_type ?? "").slice(0, 200) || null,
-        trap: (t.trap ?? "").slice(0, 400) || null,
-        category: (t.category ?? "").slice(0, 80) || null,
-        archetype: t.archetype && knownArche.has(t.archetype) ? t.archetype : null,
-        exam_weight: Math.round(((Number(t.exam_weight) || 0) / sum) * 1000) / 10,
-        exam_count: Math.max(0, Math.round(Number(t.exam_count) || 0)),
-        source: (t.source ?? "final").slice(0, 20),
-        description: (t.description ?? "").slice(0, 400) || null,
-      });
+      await q.run(
+        upSql,
+        t.label.trim().slice(0, 160),
+        (t.method ?? "").slice(0, 400) || null,
+        (t.exo_type ?? "").slice(0, 200) || null,
+        (t.trap ?? "").slice(0, 400) || null,
+        (t.category ?? "").slice(0, 80) || null,
+        t.archetype && knownArche.has(t.archetype) ? t.archetype : null,
+        Math.round(((Number(t.exam_weight) || 0) / sum) * 1000) / 10,
+        Math.max(0, Math.round(Number(t.exam_count) || 0)),
+        (t.source ?? "final").slice(0, 20),
+        (t.description ?? "").slice(0, 400) || null
+      );
     }
   });
-  tx();
   step("Taxonomie prête ✓", 100);
-  return { count: cleaned.length, topics: programOverview().topics };
+  return { count: cleaned.length, topics: (await programOverview()).topics };
 }
 
 // ---------------- V11 — Agrégation de la partition DEPUIS l'index exo-par-exo ----------------
@@ -286,10 +259,10 @@ type RawCluster = { label: string; method?: string; category?: string; archetype
  * exo à son `topic_id`. La forme de `topics` reste identique (génération non touchée).
  */
 export async function aggregateTopicsFromIndex(opts: { onStep?: (m: string, p: number) => void } = {}): Promise<{ count: number; exercises: number }> {
-  ensureProgramSchema();
-  ensureIndexSchema();
+  await ensureProgramSchema();
+  await ensureIndexSchema();
   const step = opts.onStep ?? (() => {});
-  const exos = sqlite.prepare(`SELECT id, topic, method, exo_type, trap, archetype FROM exam_exercises`).all() as { id: number; topic: string; method: string | null; exo_type: string | null; trap: string | null; archetype: string | null }[];
+  const exos = await q.all<{ id: number; topic: string; method: string | null; exo_type: string | null; trap: string | null; archetype: string | null }>(`SELECT id, topic, method, exo_type, trap, archetype FROM exam_exercises`);
   if (!exos.length) throw new Error("Index vide : lance d'abord l'indexation exo-par-exo des finals.");
 
   // labels bruts distincts + comptes
@@ -314,7 +287,7 @@ export async function aggregateTopicsFromIndex(opts: { onStep?: (m: string, p: n
         `Vise 15 à 30 types canoniques (regroupement par GRANDE technique : Divide & Conquer, Greedy, Dynamic Programming, Graphes/plus courts chemins, Flots/coupes, Arbres couvrants, Tris/sélection, Structures de données, Hachage, Récurrences/asymptotique, NP/réductions, Preuves…). Chaque label BRUT doit apparaître dans EXACTEMENT un type (members = labels bruts exacts, copiés tels quels). Réponds UNIQUEMENT avec { "types": [ … ] } :`,
         JSON.stringify(CLUSTER_SCHEMA, null, 2),
       ].join("\n");
-      const parsed = extractJson<{ types?: RawCluster[] }>(await runClaudeCode({ prompt, model: "opus", timeoutMs: 600_000 }));
+      const parsed = extractJson<{ types?: RawCluster[] }>(await completeText({ prompt, model: "opus", timeoutMs: 600_000 }));
       clusters = (parsed?.types ?? []).filter((t) => t?.label && Array.isArray(t.members) && t.members.length);
     } catch (e) { step(`Clustering Max indisponible (${(e as Error).message.slice(0, 40)}) → repli par label`, 95); }
   }
@@ -354,33 +327,30 @@ export async function aggregateTopicsFromIndex(opts: { onStep?: (m: string, p: n
   // reconstruit `topics` (depuis l'index) — on remplace les types d'index, on PRÉSERVE la maîtrise
   // (mastery est par topic_id ; on ré-UPSERT par label → l'id et donc la maîtrise restent si le label est stable).
   step("Écriture de la partition (poids réels)…", 97);
-  const up = sqlite.prepare(
-    `INSERT INTO topics (label, method, exo_type, trap, category, archetype, exam_weight, exam_count, source, description)
-     VALUES (@label,@method,@exo_type,@trap,@category,@archetype,@exam_weight,@exam_count,'final',@description)
+  const upSql = `INSERT INTO topics (label, method, exo_type, trap, category, archetype, exam_weight, exam_count, source, description)
+     VALUES (?,?,?,?,?,?,?,?,'final',?)
      ON CONFLICT(label) DO UPDATE SET method=excluded.method, exo_type=excluded.exo_type, trap=excluded.trap,
        category=excluded.category, archetype=excluded.archetype, exam_weight=excluded.exam_weight,
-       exam_count=excluded.exam_count, source='final', description=excluded.description`
-  );
-  const setTid = sqlite.prepare(`UPDATE exam_exercises SET topic_id = ? WHERE topic = ?`);
+       exam_count=excluded.exam_count, source='final', description=excluded.description`;
   const newLabels = new Set(aggs.map((a) => a.label));
-  const tx = sqlite.transaction(() => {
+  await q.tx(async () => {
     // table rase des types DÉRIVÉS DE L'INDEX (source='final') qui ne sont plus dans la partition
     // (évite les types périmés d'un run précédent). Les types séries/cours sont préservés ;
     // la maîtrise des types supprimés cascade (sur cold-start il n'y en a pas).
-    for (const r of sqlite.prepare(`SELECT label FROM topics WHERE source='final'`).all() as { label: string }[])
-      if (!newLabels.has(r.label)) sqlite.prepare(`DELETE FROM topics WHERE label = ?`).run(r.label);
+    for (const r of await q.all<{ label: string }>(`SELECT label FROM topics WHERE source='final'`))
+      if (!newLabels.has(r.label)) await q.run(`DELETE FROM topics WHERE label = ?`, r.label);
     for (const a of aggs) {
-      up.run({
-        label: a.label, method: a.method?.slice(0, 400) ?? null, exo_type: a.exo_type?.slice(0, 200) ?? null,
-        trap: a.trap?.slice(0, 400) ?? null, category: a.category?.slice(0, 80) ?? null, archetype: a.archetype,
-        exam_weight: Math.round((a.count / total) * 1000) / 10, exam_count: a.count,
-        description: `${a.count} occurrence(s) dans les vrais finals.`,
-      });
-      const row = sqlite.prepare(`SELECT id FROM topics WHERE label = ?`).get(a.label) as { id: number } | undefined;
-      if (row) for (const rl of a.rawLabels) setTid.run(row.id, rl);
+      await q.run(
+        upSql,
+        a.label, a.method?.slice(0, 400) ?? null, a.exo_type?.slice(0, 200) ?? null,
+        a.trap?.slice(0, 400) ?? null, a.category?.slice(0, 80) ?? null, a.archetype,
+        Math.round((a.count / total) * 1000) / 10, a.count,
+        `${a.count} occurrence(s) dans les vrais finals.`
+      );
+      const row = await q.get<{ id: number }>(`SELECT id FROM topics WHERE label = ?`, a.label);
+      if (row) for (const rl of a.rawLabels) await q.run(`UPDATE exam_exercises SET topic_id = ? WHERE topic = ?`, row.id, rl);
     }
   });
-  tx();
   step(`Partition : ${aggs.length} types sur ${exos.length} exos indexés ✓`, 100);
   return { count: aggs.length, exercises: exos.length };
 }
@@ -403,14 +373,12 @@ export async function rebuildBlueprintFromIndex(opts: { onStep?: (m: string, p: 
 
 // ---------------- PHASE 2 — Vue « Couverture & Maîtrise » ----------------
 
-function topicRows(): Topic[] {
+async function topicRows(): Promise<Topic[]> {
   return (
-    sqlite
-      .prepare(
-        `SELECT id, label, method, exo_type exoType, trap, category, archetype, exam_weight examWeight, exam_count examCount, source, description
+    await q.all<any>(
+      `SELECT id, label, method, exo_type exoType, trap, category, archetype, exam_weight examWeight, exam_count examCount, source, description
          FROM topics ORDER BY exam_weight DESC, exam_count DESC, label`
-      )
-      .all() as any[]
+    )
   ).map((r) => ({ ...r }));
 }
 
@@ -427,13 +395,13 @@ export type ProgramOverview = {
 };
 
 /** Tableau de bord : chaque type + maîtrise + couverture + statut révision, et stats globales pondérées. */
-export function programOverview(): ProgramOverview {
-  ensureProgramSchema();
-  const topics = topicRows();
+export async function programOverview(): Promise<ProgramOverview> {
+  await ensureProgramSchema();
+  const topics = await topicRows();
   const mast = new Map<number, MasteryRow & { lastExamId: number | null }>();
-  for (const m of sqlite
-    .prepare(`SELECT topic_id topicId, score, attempts, last_score lastScore, last_done_at lastDoneAt, due_at dueAt, ease, interval_days intervalDays, last_exam_id lastExamId FROM mastery`)
-    .all() as (MasteryRow & { lastExamId: number | null })[])
+  for (const m of await q.all<MasteryRow & { lastExamId: number | null }>(
+    `SELECT topic_id topicId, score, attempts, last_score lastScore, last_done_at lastDoneAt, due_at dueAt, ease, interval_days intervalDays, last_exam_id lastExamId FROM mastery`
+  ))
     mast.set(m.topicId, m);
 
   const now = Date.now();
@@ -470,11 +438,12 @@ export function programOverview(): ProgramOverview {
   return { topics: views, stats };
 }
 
-export function getTopic(id: number): Topic | null {
-  ensureProgramSchema();
-  const r = sqlite
-    .prepare(`SELECT id, label, method, exo_type exoType, trap, category, archetype, exam_weight examWeight, exam_count examCount, source, description FROM topics WHERE id = ?`)
-    .get(id) as any;
+export async function getTopic(id: number): Promise<Topic | null> {
+  await ensureProgramSchema();
+  const r = (await q.get<any>(
+    `SELECT id, label, method, exo_type exoType, trap, category, archetype, exam_weight examWeight, exam_count examCount, source, description FROM topics WHERE id = ?`,
+    id
+  )) as any;
   return r ?? null;
 }
 
@@ -484,8 +453,8 @@ export function getTopic(id: number): Topic | null {
  * Prochain type à travailler : priorise (poids examen × faible maîtrise × dû). Jamais-vu et
  * en-retard d'abord ; un type à jour (pas encore dû) est dépriorisé. Renvoie le type le plus rentable.
  */
-export function nextTopic(): TopicView | null {
-  const { topics } = programOverview();
+export async function nextTopic(): Promise<TopicView | null> {
+  const { topics } = await programOverview();
   if (!topics.length) return null;
   const now = Date.now();
   const score = (t: TopicView) => {
@@ -497,8 +466,8 @@ export function nextTopic(): TopicView | null {
 }
 
 /** PHASE 4 — parcours « couvrir tout le programme » : le type le plus LOURD encore sous le seuil. */
-export function coverageNext(threshold = MASTERY_THRESHOLD): TopicView | null {
-  const { topics } = programOverview();
+export async function coverageNext(threshold = MASTERY_THRESHOLD): Promise<TopicView | null> {
+  const { topics } = await programOverview();
   const now = Date.now();
   const remaining = topics.filter((t) => (t.mastery ?? 0) < threshold);
   if (!remaining.length) return null;
@@ -546,43 +515,44 @@ export type ScoreResult = { topic: TopicView; stats: ProgramOverview["stats"]; w
  * Enregistre un score 0-10 sur un type : met à jour la maîtrise LISSÉE et la répétition espacée.
  * Score ≤ 3 → crée/renforce une faiblesse (réutilise le système faiblesses → pilote aussi les examens).
  */
-export function recordScore(topicId: number, rawScore: number, lastExamId?: number): ScoreResult {
-  ensureProgramSchema();
-  const topic = getTopic(topicId);
+export async function recordScore(topicId: number, rawScore: number, lastExamId?: number): Promise<ScoreResult> {
+  await ensureProgramSchema();
+  const topic = await getTopic(topicId);
   if (!topic) throw new Error("Type introuvable.");
   const score = Math.max(0, Math.min(10, Math.round(rawScore)));
-  const prev = sqlite
-    .prepare(`SELECT score, attempts, ease, interval_days intervalDays FROM mastery WHERE topic_id = ?`)
-    .get(topicId) as { score: number | null; attempts: number; ease: number; intervalDays: number } | undefined;
+  const prev = await q.get<{ score: number | null; attempts: number; ease: number; intervalDays: number }>(
+    `SELECT score, attempts, ease, interval_days intervalDays FROM mastery WHERE topic_id = ?`,
+    topicId
+  );
 
   const smoothed = prev?.score == null ? score : Math.round((0.5 * prev.score + 0.5 * score) * 10) / 10;
   const { ease, interval } = sm2Step(prev ? { ease: prev.ease, intervalDays: prev.intervalDays, attempts: prev.attempts } : null, score);
   const attempts = (prev?.attempts ?? 0) + 1;
 
-  sqlite
-    .prepare(
-      `INSERT INTO mastery (topic_id, score, attempts, last_score, last_done_at, due_at, ease, interval_days, last_exam_id)
-       VALUES (?,?,?,?,datetime('now'),datetime('now', '+' || ? || ' days'),?,?,?)
+  await q.run(
+    `INSERT INTO mastery (topic_id, score, attempts, last_score, last_done_at, due_at, ease, interval_days, last_exam_id)
+       VALUES (?,?,?,?,?,?,?,?,?)
        ON CONFLICT(topic_id) DO UPDATE SET
          score=excluded.score, attempts=excluded.attempts, last_score=excluded.last_score,
          last_done_at=excluded.last_done_at, due_at=excluded.due_at, ease=excluded.ease,
          interval_days=excluded.interval_days,
-         last_exam_id=COALESCE(excluded.last_exam_id, mastery.last_exam_id)`
-    )
-    .run(topicId, smoothed, attempts, score, interval, ease, interval, lastExamId ?? null);
+         last_exam_id=COALESCE(excluded.last_exam_id, mastery.last_exam_id)`,
+    topicId, smoothed, attempts, score, nowStr(), nowPlusDays(interval), ease, interval, lastExamId ?? null
+  );
 
   // Score bas → renforce une faiblesse (réutilise le système faiblesses → pilote aussi les examens).
   // Jamais bloquant : une erreur ici ne doit pas faire échouer l'enregistrement du score.
   let weaknessId: number | undefined;
   if (score <= 3) {
     try {
-      ensureWeaknessSchema(); // garantit les colonnes source/theme (no-op si déjà là, ex. cs-202)
+      await ensureWeaknessSchema(); // garantit les colonnes source/theme (no-op si déjà là, ex. cs-202)
       // ne pas spammer : une seule faiblesse 'program' par type
-      const exists = sqlite
-        .prepare(`SELECT id FROM weaknesses WHERE source = 'program' AND topic = ? LIMIT 1`)
-        .get(topic.label) as { id: number } | undefined;
+      const exists = await q.get<{ id: number }>(
+        `SELECT id FROM weaknesses WHERE source = 'program' AND topic = ? LIMIT 1`,
+        topic.label
+      );
       if (!exists) {
-        weaknessId = createWeakness({
+        weaknessId = await createWeakness({
           topic: topic.label,
           description: `Score ${score}/10 en entraînement « Programme ». Méthode à retravailler : ${topic.method ?? topic.label}.`,
           severity: score <= 1 ? 3 : 2,
@@ -596,7 +566,7 @@ export function recordScore(topicId: number, rawScore: number, lastExamId?: numb
     }
   }
 
-  const ov = programOverview();
+  const ov = await programOverview();
   const view = ov.topics.find((t) => t.id === topicId)!;
   return { topic: view, stats: ov.stats, weaknessId };
 }

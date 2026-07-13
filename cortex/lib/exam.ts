@@ -1,13 +1,14 @@
-import { currentCourse, sqlite } from "@/db/client";
+import { currentCourse } from "@/db/client";
+import { nowStr, q } from "@/db/q";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
-import { anthropic, GEN_MODEL } from "@/lib/anthropic";
 import type { Archetype } from "@/lib/archetypes";
 import { profile, type Slot } from "@/lib/course-profile";
-import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { completeText, completeVia, extractJson } from "@/lib/llm";
 import { search } from "@/lib/search";
 import { difficultyBlockForExam } from "@/lib/difficulty";
 import { buildExamArtifact, buildExerciseArtifact } from "@/lib/exam-latex";
 import { dueConcepts, markTested } from "@/lib/schedule";
+import { loadJobCheckpoint, saveJobCheckpoint } from "@/lib/jobs";
 import { examsDir } from "@/lib/paths";
 import { referencePaths } from "@/lib/sources";
 import { verifyAndHarden, type VerifyReport } from "@/lib/verify";
@@ -39,16 +40,16 @@ function trunc(s: string, n: number) {
 }
 
 /** Échantillon diversifié d'items du corpus pour un ou plusieurs types de source. */
-function sampleByType(types: string[], perItem: number, maxItems: number): { src: string; text: string }[] {
+async function sampleByType(types: string[], perItem: number, maxItems: number): Promise<{ src: string; text: string }[]> {
   const ph = types.map(() => "?").join(",");
-  const rows = sqlite
-    .prepare(
-      `SELECT s.title src, i.text text
-       FROM items i JOIN sources s ON s.id = i.source_id
-       WHERE s.type IN (${ph}) AND length(i.text) > 120
-       ORDER BY s.recency_weight DESC, RANDOM() LIMIT ?`
-    )
-    .all(...types, maxItems * 4) as { src: string; text: string }[];
+  const rows = await q.all<{ src: string; text: string }>(
+    `SELECT s.title src, i.text text
+     FROM items i JOIN sources s ON s.id = i.source_id
+     WHERE s.type IN (${ph}) AND length(i.text) > 120
+     ORDER BY s.recency_weight DESC, RANDOM() LIMIT ?`,
+    ...types,
+    maxItems * 4
+  );
   const out: { src: string; text: string }[] = [];
   const perSrc = new Map<string, number>();
   for (const r of rows) {
@@ -61,46 +62,46 @@ function sampleByType(types: string[], perItem: number, maxItems: number): { src
   return out;
 }
 
-function gatherContext() {
+async function gatherContext() {
   const weaknesses = (
-    sqlite
-      .prepare(`SELECT topic, description FROM weaknesses ORDER BY severity DESC, datetime(logged_at) DESC LIMIT 6`)
-      .all() as { topic: string; description: string | null }[]
+    await q.all<{ topic: string; description: string | null }>(
+      `SELECT topic, description FROM weaknesses ORDER BY severity DESC, logged_at DESC LIMIT 6`
+    )
   ).map((w) => ({ topic: w.topic, note: trunc(w.description ?? "", 400) }));
 
-  const due = dueConcepts(8);
+  const due = await dueConcepts(8);
 
   // FORMAT = les vrais finals cochés en référence (priorité absolue). Sinon repli récents.
-  const refs = referencePaths();
+  const refs = await referencePaths();
   let styleRows: { src: string; text: string }[];
   if (refs.length) {
     const ph = refs.map(() => "?").join(",");
-    styleRows = sqlite
-      .prepare(
-        `SELECT s.title src, i.text text FROM items i JOIN sources s ON s.id = i.source_id
-         WHERE s.path IN (${ph}) AND length(i.text) > 120
-         ORDER BY s.year DESC, RANDOM() LIMIT 18`
-      )
-      .all(...refs) as { src: string; text: string }[];
+    styleRows = await q.all<{ src: string; text: string }>(
+      `SELECT s.title src, i.text text FROM items i JOIN sources s ON s.id = i.source_id
+       WHERE s.path IN (${ph}) AND length(i.text) > 120
+       ORDER BY s.year DESC, RANDOM() LIMIT 18`,
+      ...refs
+    );
   } else {
-    styleRows = sqlite
-      .prepare(
-        `SELECT s.title src, i.text text FROM items i JOIN sources s ON s.id = i.source_id
-         WHERE s.type IN ('final','midterm') ORDER BY s.year DESC, RANDOM() LIMIT 12`
-      )
-      .all() as { src: string; text: string }[];
+    styleRows = await q.all<{ src: string; text: string }>(
+      `SELECT s.title src, i.text text FROM items i JOIN sources s ON s.id = i.source_id
+       WHERE s.type IN ('final','midterm') ORDER BY s.year DESC, RANDOM() LIMIT 12`
+    );
   }
   const style = styleRows.slice(0, 12).map((r) => ({ src: r.src, excerpt: trunc(r.text, 1600) }));
 
   // CONTENU = tout le corpus, en priorité les séries d'exos + le reste (trimé pour la vitesse).
   // 'site' (sites HTML de révision des cours additionnels) est sans effet pour cs-202 (aucun item de ce type).
-  const exercises = sampleByType(["exercise", "serie", "site"], 550, 8);
-  const reviews = sampleByType(["review"], 320, 6);
-  const cheats = sampleByType(["cheatsheet"], 400, 3);
-  const course = sampleByType(["course_pdf"], 320, 4);
+  const exercises = await sampleByType(["exercise", "serie", "site"], 550, 8);
+  const reviews = await sampleByType(["review"], 320, 6);
+  const cheats = await sampleByType(["cheatsheet"], 400, 3);
+  const course = await sampleByType(["course_pdf"], 320, 4);
 
   return { weaknesses, due, style, exercises, reviews, cheats, course };
 }
+
+/** Contexte de génération (résolu) — utilisé par tous les prompt builders. */
+type Ctx = Awaited<ReturnType<typeof gatherContext>>;
 
 const EXAM_SCHEMA = {
   type: "object",
@@ -128,7 +129,7 @@ const EXAM_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-export function buildPrompt(ctx: ReturnType<typeof gatherContext>): string {
+export async function buildPrompt(ctx: Ctx): Promise<string> {
   const p = profile();
   const block = (title: string, items: { src: string; excerpt?: string; text?: string }[]) =>
     items.length ? [``, title, ...items.map((c) => `• (${c.src}) ${c.excerpt ?? c.text}`)] : [];
@@ -146,7 +147,7 @@ export function buildPrompt(ctx: ReturnType<typeof gatherContext>): string {
     ...ctx.style.map((s) => `### ${s.src}\n${s.excerpt}`),
     ``,
     `═══ SCOPE OFFICIEL (Study Guide + hints staff — ne génère QUE sur ces sujets) ═══`,
-    p.staffNotesText(5000),
+    await p.staffNotesText(5000),
     ...block(`═══ SÉRIES D'EXERCICES & EXOS (matière d'entraînement — inspire-toi des mécaniques) ═══`, ctx.exercises),
     ...block(`═══ REVIEWS DE LECTURES / CONCEPTS FLAGUÉS ═══`, ctx.reviews),
     ...block(`═══ CHEAT SHEETS ═══`, ctx.cheats),
@@ -161,21 +162,21 @@ export function buildPrompt(ctx: ReturnType<typeof gatherContext>): string {
   ].join("\n");
 }
 
-async function callClaude(ctx: ReturnType<typeof gatherContext>): Promise<ExamSpec> {
-  const stream = anthropic().messages.stream({
-    model: GEN_MODEL,
-    max_tokens: 16000,
-    thinking: { type: "adaptive" },
-    output_config: { format: { type: "json_schema", schema: EXAM_SCHEMA }, effort: "high" },
-    messages: [{ role: "user", content: buildPrompt(ctx) }],
-  } as any);
-  const msg: any = await stream.finalMessage();
-  const text = msg.content.find((b: any) => b.type === "text")?.text ?? "{}";
-  return JSON.parse(text) as ExamSpec;
+async function callClaude(ctx: Ctx): Promise<ExamSpec> {
+  // Voie « API payante » explicite (bouton in-app historique) → provider anthropic forcé.
+  // 'opus' → claude-opus-4-8 (mapping du provider, ex-GEN_MODEL) ; streaming interne.
+  const res = await completeVia("anthropic", {
+    prompt: await buildPrompt(ctx),
+    model: "opus",
+    maxTokens: 16000,
+    thinking: "adaptive",
+    json: { schema: EXAM_SCHEMA as unknown as object, effort: "high" },
+  });
+  return JSON.parse(res.text || "{}") as ExamSpec;
 }
 
 // Examen factice pour tester le pipeline LaTeX sans IA.
-function stubExam(_ctx: ReturnType<typeof gatherContext>): ExamSpec {
+function stubExam(_ctx: Ctx): ExamSpec {
   return {
     title: "CS-202 Computer Systems — Final Exam (dry-run)",
     duration_min: 180,
@@ -205,23 +206,18 @@ function stubExam(_ctx: ReturnType<typeof gatherContext>): ExamSpec {
 }
 
 // ---------- Persistance ----------
-export function listExams() {
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS exams (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT DEFAULT (datetime('now')),
-    format_template TEXT, targeted_weakness_ids TEXT, html_path TEXT, status TEXT DEFAULT 'draft');`);
+export async function listExams() {
+  await q.ensureTable("exams");
   let verifyCol = "NULL";
   try {
-    if ((sqlite.prepare(`PRAGMA table_info(exams)`).all() as { name: string }[]).some((c) => c.name === "verify_summary"))
-      verifyCol = "e.verify_summary";
+    if ((await q.columns("exams")).includes("verify_summary")) verifyCol = "e.verify_summary";
   } catch {}
-  const rows = sqlite
-    .prepare(
-      `SELECT e.id, e.created_at, e.status, e.html_path, ${verifyCol} verify_summary,
-              (SELECT count(*) FROM exam_questions q WHERE q.exam_id = e.id) nq
-       FROM exams e WHERE e.format_template IS NULL OR e.format_template != 'exercise'
-       ORDER BY datetime(e.created_at) DESC, e.id DESC`
-    )
-    .all() as any[];
+  const rows = await q.all<any>(
+    `SELECT e.id, e.created_at, e.status, e.html_path, ${verifyCol} verify_summary,
+            (SELECT count(*) FROM exam_questions q WHERE q.exam_id = e.id) nq
+     FROM exams e WHERE e.format_template IS NULL OR e.format_template != 'exercise'
+     ORDER BY e.created_at DESC, e.id DESC`
+  );
   return rows.map((r) => ({
     id: r.id,
     createdAt: r.created_at,
@@ -236,12 +232,10 @@ export function listExams() {
   }));
 }
 
-export function deleteExam(id: number) {
-  const row = sqlite.prepare(`SELECT html_path FROM exams WHERE id = ?`).get(id) as
-    | { html_path: string | null }
-    | undefined;
-  sqlite.prepare(`DELETE FROM exam_questions WHERE exam_id = ?`).run(id);
-  sqlite.prepare(`DELETE FROM exams WHERE id = ?`).run(id);
+export async function deleteExam(id: number) {
+  const row = await q.get<{ html_path: string | null }>(`SELECT html_path FROM exams WHERE id = ?`, id);
+  await q.run(`DELETE FROM exam_questions WHERE exam_id = ?`, id);
+  await q.run(`DELETE FROM exams WHERE id = ?`, id);
   if (row?.html_path) {
     const baseNoExt = path.basename(row.html_path).replace(/\.[^.]+$/, "");
     for (const b of [baseNoExt, `${baseNoExt}-corrige`]) {
@@ -254,10 +248,10 @@ export function deleteExam(id: number) {
 }
 
 /** Brief de génération destiné à Claude Code (moi) : tout le contexte + le format JSON attendu. */
-export function buildBrief(): string {
-  const ctx = gatherContext();
+export async function buildBrief(): Promise<string> {
+  const ctx = await gatherContext();
   return [
-    buildPrompt(ctx),
+    await buildPrompt(ctx),
     ``,
     `--- FORMAT DE SORTIE ATTENDU ---`,
     `Écris un JSON valide conforme exactement à ce schéma (clés en anglais, statement_tex/solution_tex en LaTeX) :`,
@@ -265,45 +259,47 @@ export function buildBrief(): string {
   ].join("\n");
 }
 
-function ensureExamCols() {
-  const has = (t: string, c: string) =>
-    (sqlite.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).some((r) => r.name === c);
-  try { if (!has("exam_questions", "verified")) sqlite.exec(`ALTER TABLE exam_questions ADD COLUMN verified INTEGER`); } catch {}
-  try { if (!has("exam_questions", "verify_issue")) sqlite.exec(`ALTER TABLE exam_questions ADD COLUMN verify_issue TEXT`); } catch {}
+async function ensureExamCols() {
   // V — méthode de vérif (additif) : « deterministic » (prouvé) | « llm » (relecture) | « unverified ».
-  try { if (!has("exam_questions", "verify_method")) sqlite.exec(`ALTER TABLE exam_questions ADD COLUMN verify_method TEXT`); } catch {}
-  try { if (!has("exams", "verify_summary")) sqlite.exec(`ALTER TABLE exams ADD COLUMN verify_summary TEXT`); } catch {}
+  try { await q.ensureColumns("exam_questions", ["verified", "verify_issue", "verify_method"]); } catch {}
+  try { await q.ensureColumns("exams", ["verify_summary"]); } catch {}
 }
 
 /** Enregistre un examen rédigé : DB + artefact (PDF LaTeX, sinon HTML lisible) + répétition espacée. */
 export async function persistExam(spec: ExamSpec, report?: VerifyReport): Promise<{ id: number; url: string; texError?: string }> {
   if (!spec?.questions?.length) throw new Error("ExamSpec vide ou invalide (aucune question).");
-  ensureExamCols();
+  await ensureExamCols();
 
-  const weaknessIds = (sqlite.prepare(`SELECT id FROM weaknesses`).all() as { id: number }[]).map((r) => r.id);
-  const id = sqlite
-    .prepare(`INSERT INTO exams (format_template, targeted_weakness_ids, status) VALUES (?,?,?)`)
-    .run("final", JSON.stringify(weaknessIds), "ready").lastInsertRowid as number;
-
-  const insQ = sqlite.prepare(
-    `INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration, verified, verify_issue, verify_method)
-     VALUES (?,?,?,?,?,?,?,?)`
+  const weaknessIds = (await q.all<{ id: number }>(`SELECT id FROM weaknesses`)).map((r) => r.id);
+  const id = await q.insert(
+    `INSERT INTO exams (format_template, targeted_weakness_ids, status) VALUES (?,?,?)`,
+    "final",
+    JSON.stringify(weaknessIds),
+    "ready"
   );
-  spec.questions.forEach((q, i) => {
+
+  for (const [i, question] of spec.questions.entries()) {
     const r = report?.results?.find((x) => x.index === i);
     const verified = r ? r.verified : null;
-    insQ.run(id, q.concept, q.statement_tex, q.solution_tex, q.source_inspiration ?? null, verified, r?.issue ?? null, r?.method ?? null);
-  });
-
-  const dateLabel = (sqlite.prepare(`SELECT date('now') d`).get() as any).d;
-  const { file, texError } = await buildExamArtifact(spec, id, dateLabel);
-  sqlite.prepare(`UPDATE exams SET html_path = ? WHERE id = ?`).run(file, id);
-  if (report) {
-    sqlite.prepare(`UPDATE exams SET verify_summary = ? WHERE id = ?`)
-      .run(`ok=${report.ok} corrigés=${report.fixed} durcis=${report.regenerated} retirés=${report.removed} non-vérifiés=${report.unverified}`, id);
+    await q.run(
+      `INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration, verified, verify_issue, verify_method)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      id, question.concept, question.statement_tex, question.solution_tex, question.source_inspiration ?? null, verified, r?.issue ?? null, r?.method ?? null
+    );
   }
 
-  markTested([...spec.questions.map((q) => q.concept), ...dueConcepts(6)]);
+  const dateLabel = nowStr().slice(0, 10);
+  const { file, texError } = await buildExamArtifact(spec, id, dateLabel);
+  await q.run(`UPDATE exams SET html_path = ? WHERE id = ?`, file, id);
+  if (report) {
+    await q.run(
+      `UPDATE exams SET verify_summary = ? WHERE id = ?`,
+      `ok=${report.ok} corrigés=${report.fixed} durcis=${report.regenerated} retirés=${report.removed} non-vérifiés=${report.unverified}`,
+      id
+    );
+  }
+
+  await markTested([...spec.questions.map((question) => question.concept), ...(await dueConcepts(6))]);
   return { id, url: `/exam/${file}${courseQ()}`, texError };
 }
 
@@ -322,12 +318,12 @@ export function pickArchetype(target: string): Archetype {
 }
 
 /** Ratisse le corpus pour un sujet ciblé — priorité ABSOLUE aux past-exams (Final/Midterm). */
-export function gatherTargetedContext(target: string) {
-  const groups = search(target, 40, "or");
+export async function gatherTargetedContext(target: string) {
+  const groups = await search(target, 40, "or");
   const byType: Record<string, { src: string; text: string }[]> = {};
   for (const g of groups)
     for (const h of g.hits) {
-      const row = sqlite.prepare("SELECT text FROM items WHERE id = ?").get(h.itemId) as { text: string } | undefined;
+      const row = await q.get<{ text: string }>("SELECT text FROM items WHERE id = ?", h.itemId);
       if (!row) continue;
       (byType[g.sourceType] ??= []).push({ src: h.sourceTitle, text: trunc(row.text, 500) });
     }
@@ -374,7 +370,7 @@ export async function generateTargetedExercise(
       if (cls.kind === "weakness_log" && cls.weaknesses.length) {
         const { createWeakness } = await import("@/lib/weaknesses");
         for (const w of cls.weaknesses) {
-          try { createWeakness({ topic: w.topic, description: w.description, severity: w.severity, source: "log", analyzed: true }); } catch {}
+          try { await createWeakness({ topic: w.topic, description: w.description, severity: w.severity, source: "log", analyzed: true }); } catch {}
         }
         const top = [...cls.weaknesses].sort((a, b) => b.severity - a.severity)[0];
         stepFn(`${cls.weaknesses.length} faiblesse(s) extraite(s) — exo ciblé sur « ${top.topic} »`, 10);
@@ -397,7 +393,7 @@ export async function generateTargetedExercise(
   step("Contexte ciblé assemblé (cours + séries + past-exams + staff)", 12);
   // mots-clés d'ancrage : le texte si fourni, sinon le nom du concept de la note
   const seed = target || (norm.note ?? "");
-  const ctx = gatherTargetedContext(seed);
+  const ctx = await gatherTargetedContext(seed);
   const a = pickArchetype(seed);
   const pts = a.id === "c-reading" ? 10 : a.id === "labs-reading" ? 15 : a.category === "Networking" ? 40 : 25;
   const block = (title: string, items: { src: string; text: string }[]) =>
@@ -436,7 +432,7 @@ export async function generateTargetedExercise(
   ].join("\n");
 
   step(imageRel ? "Lecture de l'image + génération (Claude · Max)…" : "Génération de l'exercice (Claude · Max)…", 30);
-  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 480_000 });
+  const text = await completeText({ prompt, model: "opus", timeoutMs: 480_000 });
   let q = extractJson<ExamQuestion>(text);
   step("Vérification à l'aveugle + durcissement…", 70);
   let report: VerifyReport | undefined;
@@ -454,24 +450,26 @@ export async function generateTargetedExercise(
   return out;
 }
 
-export async function persistExercise(q: ExamQuestion, report?: VerifyReport, sourceTag?: string): Promise<{ id: number; url: string; texError?: string }> {
-  ensureExamCols();
-  const id = sqlite.prepare(`INSERT INTO exams (format_template, status) VALUES ('exercise','ready')`).run().lastInsertRowid as number;
+export async function persistExercise(question: ExamQuestion, report?: VerifyReport, sourceTag?: string): Promise<{ id: number; url: string; texError?: string }> {
+  await ensureExamCols();
+  const id = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('exercise','ready')`);
   const r = report?.results?.[0];
-  sqlite
-    .prepare(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration, verified, verify_issue, verify_method) VALUES (?,?,?,?,?,?,?,?)`)
-    .run(id, q.concept, q.statement_tex, q.solution_tex, sourceTag ?? null, r?.verified ?? null, r?.issue ?? null, r?.method ?? null);
-  const dateLabel = (sqlite.prepare(`SELECT date('now') d`).get() as any).d;
-  const { file, texError } = await buildExerciseArtifact(q, id, dateLabel);
-  sqlite.prepare(`UPDATE exams SET html_path = ? WHERE id = ?`).run(file, id);
-  if (report) sqlite.prepare(`UPDATE exams SET verify_summary = ? WHERE id = ?`).run(`ok=${report.ok} corrigés=${report.fixed} durcis=${report.regenerated}`, id);
-  markTested([q.concept]);
+  await q.run(
+    `INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration, verified, verify_issue, verify_method) VALUES (?,?,?,?,?,?,?,?)`,
+    id, question.concept, question.statement_tex, question.solution_tex, sourceTag ?? null, r?.verified ?? null, r?.issue ?? null, r?.method ?? null
+  );
+  const dateLabel = nowStr().slice(0, 10);
+  const { file, texError } = await buildExerciseArtifact(question, id, dateLabel);
+  await q.run(`UPDATE exams SET html_path = ? WHERE id = ?`, file, id);
+  if (report) await q.run(`UPDATE exams SET verify_summary = ? WHERE id = ?`, `ok=${report.ok} corrigés=${report.fixed} durcis=${report.regenerated}`, id);
+  await markTested([question.concept]);
   return { id, url: `/exam/${file}${courseQ()}`, texError };
 }
 
 /** Voie API directe (optionnelle, payante). */
 export async function generateExam(opts: { dry?: boolean } = {}): Promise<{ id: number; url: string }> {
-  const spec = opts.dry ? stubExam(gatherContext()) : await callClaude(gatherContext());
+  const ctx = await gatherContext();
+  const spec = opts.dry ? stubExam(ctx) : await callClaude(ctx);
   return persistExam(spec);
 }
 
@@ -503,7 +501,7 @@ export async function regenerateExercise(q: ExamQuestion, diagnostic: string): P
     `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points}. statement_tex/solution_tex en LaTeX. Aucun fichier.`,
     JSON.stringify(ONE_EX_SCHEMA, null, 2),
   ].join("\n");
-  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 420_000 });
+  const text = await completeText({ prompt, model: "opus", timeoutMs: 420_000 });
   const r = extractJson<ExamQuestion>(text);
   return { ...r, category: q.category, points: q.points };
 }
@@ -517,7 +515,7 @@ const BATCH_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-export function buildBatchPrompt(ctx: ReturnType<typeof gatherContext>, slots: { category: string; points: number; brief: string }[]): string {
+export function buildBatchPrompt(ctx: Ctx, slots: { category: string; points: number; brief: string }[]): string {
   const p = profile();
   // V3 — calibrage de difficulté (cs-202) : menu de pièges réels + style prof + distribution.
   const diff = currentCourse() === DEFAULT_COURSE ? difficultyBlockForExam() : "";
@@ -547,7 +545,7 @@ export function buildBatchPrompt(ctx: ReturnType<typeof gatherContext>, slots: {
 
 const CKPT = () => path.join(examsDir(), ".gen-checkpoint.json");
 
-async function generateBatch(ctx: ReturnType<typeof gatherContext>, slots: Slot[]): Promise<ExamQuestion[]> {
+async function generateBatch(ctx: Ctx, slots: Slot[]): Promise<ExamQuestion[]> {
   // Crochet de TEST (inerte sauf si l'env est posé) : rend des questions déterministes sans appeler
   // Max → permet de prouver la RÉSILIENCE du pipeline (P3) de façon reproductible et gratuite.
   if (process.env.CORTEX_TEST_STUB_BATCH) {
@@ -557,7 +555,7 @@ async function generateBatch(ctx: ReturnType<typeof gatherContext>, slots: Slot[
       solution_tex: "Solution de test.", points: s.points,
     }));
   }
-  const text = await runClaudeCode({
+  const text = await completeText({
     prompt: buildBatchPrompt(ctx, slots as any),
     model: "opus",
     // un lot de 3 << un appel de 6 ; surchargeable (P3 : « augmente le timeout par lot »).
@@ -576,21 +574,21 @@ async function generateBatch(ctx: ReturnType<typeof gatherContext>, slots: Slot[
  */
 export type StepCb = (step: string, progress: number) => void;
 
-export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?: number; onStep?: StepCb } = {}): Promise<{ id: number; url: string; texError?: string }> {
+export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?: number; onStep?: StepCb; jobId?: number } = {}): Promise<{ id: number; url: string; texError?: string }> {
   const t0 = Date.now();
   // progression MONOTONE : les lots/vérifs parallèles rapportent dans le désordre → max courant.
   const raw = opts.onStep ?? (() => {});
   let prog = 0;
   const step: StepCb = (s, pr) => { prog = Math.max(prog, pr); raw(s, prog); };
   step("Contexte assemblé (corpus + directives + blueprint)", 5);
-  const ctx = gatherContext(); // construit UNE fois par job (cache de contexte)
+  const ctx = await gatherContext(); // construit UNE fois par job (cache de contexte)
   // Blueprint : slots pilotés par les archétypes du cours × poids × faiblesses (repli : slots du profil).
   const p = profile();
   let slots: Slot[];
   try {
-    slots = p.buildBlueprint();
+    slots = await p.buildBlueprint();
   } catch {
-    slots = p.examSlots();
+    slots = await p.examSlots();
   }
   // V9 composeur (CS-202 calcul/trace) : Ben peut choisir le NOMBRE d'exercices. Défaut (count absent)
   // = longueur du blueprint → comportement HISTORIQUE inchangé (régression byte-identique). count>0
@@ -600,7 +598,8 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
     if (want < slots.length) slots = slots.slice(0, want);
     else { const base = slots.slice(); while (slots.length < want) slots.push(base[slots.length % base.length]); }
   }
-  const doVerify = opts.verify !== false;
+  // (stub de test : vérifier des questions factices n'a aucun sens et appellerait le vrai Max)
+  const doVerify = opts.verify !== false && !process.env.CORTEX_TEST_STUB_BATCH;
   // PERFECT B1 — cs-202 : CHAQUE question de l'examen complet passe par l'ARCHITECTE
   // (concevoir le piège → rédiger → audit adversarial → réviser), en parallèle borné.
   const useArchitect = currentCourse() === DEFAULT_COURSE;
@@ -615,12 +614,32 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
   let qDone = 0;
   const qTotal = slots.length;
 
-  // checkpoint : lots déjà générés lors d'un run précédent interrompu
+  // checkpoint : lots déjà générés lors d'un run précédent interrompu.
+  // Phase C — quand le run appartient à un JOB (opts.jobId), la progression est persistée
+  // PAR LOT dans jobs.checkpoint_json (DB) : un worker tué et re-pompé reprend au lot
+  // suivant, sans doublon. Sans job (scripts/tests) : fichier disque historique.
+  const jobId = opts.jobId;
+  type Ckpt = { at: number; batches: (ExamQuestion[] | null)[] };
   let saved: (ExamQuestion[] | null)[] = [null, null];
-  try {
-    const j = JSON.parse(fs.readFileSync(CKPT(), "utf8"));
-    if (Array.isArray(j?.batches) && Date.now() - (j.at ?? 0) < 2 * 3600_000) saved = j.batches;
-  } catch {}
+  if (typeof jobId === "number") {
+    const j = await loadJobCheckpoint<Ckpt>(jobId);
+    if (j && Array.isArray(j.batches) && Date.now() - (j.at ?? 0) < 2 * 3600_000) saved = j.batches;
+  } else {
+    try {
+      const j = JSON.parse(fs.readFileSync(CKPT(), "utf8"));
+      if (Array.isArray(j?.batches) && Date.now() - (j.at ?? 0) < 2 * 3600_000) saved = j.batches;
+    } catch {}
+  }
+  const saveCkpt = async (batchIndex: number) => {
+    if (typeof jobId === "number") {
+      await saveJobCheckpoint(jobId, { at: Date.now(), batches: saved } satisfies Ckpt);
+    } else {
+      try { fs.mkdirSync(path.dirname(CKPT()), { recursive: true }); fs.writeFileSync(CKPT(), JSON.stringify({ at: Date.now(), batches: saved })); } catch {}
+    }
+    // Crochet de TEST (inerte sans l'env) : simule la MORT du worker juste après la
+    // persistance d'un lot → preuve déterministe de la reprise sans perte (Phase C).
+    if (process.env.CORTEX_TEST_DIE_AFTER_BATCH === String(batchIndex)) process.exit(9);
+  };
 
   /** Architecte par slot (pool de 2 dans le lot → ≤4 pipelines claude en parallèle au pic). */
   async function architectBatch(bslots: Slot[], lotIdx: number): Promise<ExamQuestion[]> {
@@ -690,7 +709,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
           step(`Lot ${i + 1}/${nBatches} — ARCHITECTE par question (piège → rédaction → audit adversarial)…`, 8 + i * 2);
           qs = await architectBatch(bslots, i);
           saved[i] = qs;
-          try { fs.mkdirSync(path.dirname(CKPT()), { recursive: true }); fs.writeFileSync(CKPT(), JSON.stringify({ at: Date.now(), batches: saved })); } catch {}
+          await saveCkpt(i);
           step(`Lot ${i + 1}/${nBatches} construit par l'architecte ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 40);
         } else {
           // cours sans architecte : voie one-shot, RÉSILIENTE — réessai puis IGNORE le lot.
@@ -709,7 +728,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
           qs = got; // peut être partiel ou vide → le job CONTINUE
           if (qs.length) {
             saved[i] = qs;
-            try { fs.mkdirSync(path.dirname(CKPT()), { recursive: true }); fs.writeFileSync(CKPT(), JSON.stringify({ at: Date.now(), batches: saved })); } catch {}
+            await saveCkpt(i);
           }
           step(`Lot ${i + 1}/${nBatches} généré ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 30);
         }
@@ -773,16 +792,19 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
   }
   // run COMPLET → checkpoint consommé ; run PARTIEL → on GARDE le checkpoint (relance = reprend
   // les lots réussis, ne rebrûle que ceux qui ont timeout).
-  if (missing <= 0) { try { fs.unlinkSync(CKPT()); } catch {} }
+  if (missing <= 0) {
+    try { fs.unlinkSync(CKPT()); } catch {}
+    if (typeof jobId === "number") await saveJobCheckpoint(jobId, null);
+  }
   if (out.texError) step(`⚠ Compilation LaTeX échouée → repli HTML lisible (${out.texError.slice(0, 180)})`, 97);
   step(`Terminé ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 100);
   return out;
 }
 
 /** Prompt pour Claude Code (headless) : le brief complet + sortie JSON stricte. */
-function buildClaudeCodePrompt(ctx: ReturnType<typeof gatherContext>): string {
+async function buildClaudeCodePrompt(ctx: Ctx): Promise<string> {
   return [
-    buildPrompt(ctx),
+    await buildPrompt(ctx),
     ``,
     `--- SORTIE ATTENDUE ---`,
     `Réponds UNIQUEMENT avec un objet JSON valide conforme EXACTEMENT à ce schéma (statement_tex/solution_tex = LaTeX compilable).`,

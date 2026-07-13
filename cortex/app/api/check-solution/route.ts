@@ -1,5 +1,5 @@
 import { checkSolution } from "@/lib/check-solution";
-import { ClaudeCodeError } from "@/lib/claude-code";
+import { LlmError } from "@/lib/llm";
 import { useCourse } from "@/lib/req";
 import { uploadsDir } from "@/lib/paths";
 import crypto from "node:crypto";
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
     const result = await checkSolution({ statement, answer, imageRel });
     return NextResponse.json({ ok: true, result });
   } catch (e: unknown) {
-    const err = e as ClaudeCodeError;
+    const err = e as LlmError;
     const status = err.code === "UNAVAILABLE" ? 503 : 502;
     return NextResponse.json({ error: err.message ?? String(e), code: err.code }, { status });
   }

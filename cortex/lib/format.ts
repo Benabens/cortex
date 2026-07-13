@@ -1,5 +1,6 @@
-import { currentCourse, sqlite } from "@/db/client";
-import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { currentCourse } from "@/db/client";
+import { q } from "@/db/q";
+import { completeText, extractJson } from "@/lib/llm";
 import { courseRefImages } from "@/lib/course-vision";
 
 /**
@@ -54,22 +55,16 @@ const FORMAT_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-function ensureFormatSchema() {
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS format_profile (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    json TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now'))
-  );`);
+async function ensureFormatSchema(): Promise<void> {
+  await q.ensureTable("format_profile");
 }
 
 /** Texte des examens de référence du cours (récents pondérés plus fort). */
-function gatherExamsText(cap = 18000): string {
-  const rows = sqlite
-    .prepare(
-      `SELECT s.title, s.year, i.text FROM items i JOIN sources s ON s.id = i.source_id
+async function gatherExamsText(cap = 18000): Promise<string> {
+  const rows = await q.all<{ title: string; year: number | null; text: string }>(
+    `SELECT s.title, s.year, i.text FROM items i JOIN sources s ON s.id = i.source_id
        WHERE s.type IN ('final','midterm') ORDER BY (s.year IS NULL), s.year DESC, s.id`
-    )
-    .all() as { title: string; year: number | null; text: string }[];
+  );
   let out = "";
   for (const r of rows) {
     const chunk = `\n— (${r.title}${r.year ? `, ${r.year}` : ""}) —\n${r.text}\n`;
@@ -81,10 +76,10 @@ function gatherExamsText(cap = 18000): string {
 
 /** Détecte le format d'examen du cours courant (Max + vision sur les annales) et le persiste. */
 export async function detectFormat(opts: { onStep?: (m: string, p: number) => void } = {}): Promise<FormatProfile> {
-  ensureFormatSchema();
+  await ensureFormatSchema();
   const step = opts.onStep ?? (() => {});
   step("Lecture des examens passés du cours…", 10);
-  const text = gatherExamsText();
+  const text = await gatherExamsText();
   if (!text) throw new Error("Aucun examen de référence ingéré pour ce cours — dépose des annales dans data/<cours>/refs/.");
   const imgs = courseRefImages().slice(0, 8);
   step("Détection du format (types · proportions · barème · SCQ/MCQ) via Max…", 40);
@@ -100,25 +95,25 @@ export async function detectFormat(opts: { onStep?: (m: string, p: number) => vo
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier écrit.`,
     JSON.stringify(FORMAT_SCHEMA, null, 2),
   ].filter(Boolean).join("\n");
-  const profile = extractJson<FormatProfile>(await runClaudeCode({ prompt, model: "opus", timeoutMs: 300_000 }));
+  const profile = extractJson<FormatProfile>(await completeText({ prompt, model: "opus", timeoutMs: 300_000 }));
   step("Enregistrement du profil de format…", 90);
-  sqlite.prepare(`DELETE FROM format_profile`).run();
-  sqlite.prepare(`INSERT INTO format_profile (json) VALUES (?)`).run(JSON.stringify(profile));
+  await q.run(`DELETE FROM format_profile`);
+  await q.run(`INSERT INTO format_profile (json) VALUES (?)`, JSON.stringify(profile));
   step("Format détecté ✓", 100);
   return profile;
 }
 
 /** Profil de format du cours courant (null si pas encore détecté). */
-export function getFormatProfile(): FormatProfile | null {
-  ensureFormatSchema();
-  const r = sqlite.prepare(`SELECT json FROM format_profile ORDER BY id DESC LIMIT 1`).get() as { json: string } | undefined;
+export async function getFormatProfile(): Promise<FormatProfile | null> {
+  await ensureFormatSchema();
+  const r = await q.get<{ json: string }>(`SELECT json FROM format_profile ORDER BY id DESC LIMIT 1`);
   if (!r) return null;
   try { return JSON.parse(r.json) as FormatProfile; } catch { return null; }
 }
 
 /** true si le cours s'examine principalement en QCM (→ générateur QCM). */
-export function isQcmCourse(): boolean {
+export async function isQcmCourse(): Promise<boolean> {
   if (currentCourse() === "cs-202") return false; // CS-202 garde son format calcul/trace
-  const p = getFormatProfile();
+  const p = await getFormatProfile();
   return !!p?.has_mcq;
 }

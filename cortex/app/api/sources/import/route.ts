@@ -1,5 +1,5 @@
 import { DEFAULT_COURSE } from "@/lib/courses";
-import { activeJob, createJob, startWorker } from "@/lib/jobs";
+import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { useCourse } from "@/lib/req";
 import fs from "node:fs";
 import { NextRequest, NextResponse } from "next/server";
@@ -24,12 +24,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Dossier introuvable sur la machine de l'app : ${d}` }, { status: 400 });
   }
 
-  const existing = activeJob("ingest");
+  const existing = await activeJob("ingest");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
 
-  const jobId = createJob("ingest", d);
+  const { id: jobId } = await createJobExclusive("ingest", d);
   try {
-    startWorker(jobId, course);
+    await startWorker(jobId, course);
   } catch (e: any) {
     return NextResponse.json({ error: `Impossible de lancer le worker : ${e?.message ?? e}` }, { status: 500 });
   }

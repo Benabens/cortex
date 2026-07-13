@@ -1,7 +1,7 @@
-import { ClaudeCodeError } from "@/lib/claude-code";
+import { LlmError } from "@/lib/llm";
 import { generateDrill } from "@/lib/drill";
 import { useCourse } from "@/lib/req";
-import { sqlite } from "@/db/client";
+import { q } from "@/db/q";
 import { dueConcepts } from "@/lib/schedule";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -9,12 +9,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 240;
 
-export function GET(req: NextRequest) {
+export async function GET(req: NextRequest) {
   useCourse(req);
-  const weaknesses = (sqlite.prepare(`SELECT topic FROM weaknesses ORDER BY severity DESC LIMIT 12`).all() as { topic: string }[])
+  const weaknesses = (await q.all<{ topic: string }>(`SELECT topic FROM weaknesses ORDER BY severity DESC LIMIT 12`))
     .map((w) => w.topic)
     .filter((t) => t && t !== "(à analyser)");
-  return NextResponse.json({ due: dueConcepts(15), weaknesses });
+  return NextResponse.json({ due: await dueConcepts(15), weaknesses });
 }
 
 export async function POST(req: NextRequest) {
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     const drill = await generateDrill(c);
     return NextResponse.json({ ok: true, drill });
   } catch (e: unknown) {
-    const err = e as ClaudeCodeError;
+    const err = e as LlmError;
     const status = err.code === "UNAVAILABLE" ? 503 : 502;
     return NextResponse.json({ error: err.message ?? String(e), code: err.code }, { status });
   }

@@ -1,4 +1,4 @@
-import { activeJob, createJob, startWorker } from "@/lib/jobs";
+import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { getFormatProfile } from "@/lib/format";
 import { preflightGeneration } from "@/lib/preflight";
 import { useCourse } from "@/lib/req";
@@ -8,19 +8,19 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** GET : le profil de format détecté (pour l'UI). */
-export function GET(req: NextRequest) {
+export async function GET(req: NextRequest) {
   useCourse(req);
-  return NextResponse.json({ format: getFormatProfile() });
+  return NextResponse.json({ format: await getFormatProfile() });
 }
 
 /** POST {count?, openCount?, focus?} : compose+génère un examen QCM (job arrière-plan). */
 export async function POST(req: NextRequest) {
   const course = useCourse(req);
-  const fmt = getFormatProfile();
+  const fmt = await getFormatProfile();
   if (!fmt?.has_mcq) return NextResponse.json({ error: "Format non détecté ou sans QCM pour ce cours. Lance la détection de format d'abord." }, { status: 400 });
-  const existing = activeJob("qcm");
+  const existing = await activeJob("qcm");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
-  const issue = preflightGeneration();
+  const issue = await preflightGeneration();
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
   // V9 composeur : count = N QCM, openCount = M ouvertes, focus = thème ciblé (exercice ciblé).
   const body = await req.json().catch(() => ({} as any));
@@ -33,8 +33,8 @@ export async function POST(req: NextRequest) {
     openCount: oc,
     focus: typeof body.focus === "string" && body.focus.trim() ? body.focus.trim().slice(0, 400) : undefined,
   });
-  const jobId = createJob("qcm", target);
-  try { startWorker(jobId, course); }
+  const { id: jobId } = await createJobExclusive("qcm", target);
+  try { await startWorker(jobId, course); }
   catch (e: any) { return NextResponse.json({ error: `worker : ${e?.message ?? e}` }, { status: 500 }); }
   return NextResponse.json({ ok: true, jobId });
 }

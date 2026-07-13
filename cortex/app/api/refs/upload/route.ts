@@ -1,5 +1,5 @@
 import { coursePaths } from "@/lib/courses";
-import { createJob, startWorker } from "@/lib/jobs";
+import { createJobExclusive, startWorker } from "@/lib/jobs";
 import { useCourse } from "@/lib/req";
 import { ingestRefFile } from "@/lib/sources";
 import fs from "node:fs";
@@ -35,6 +35,6 @@ export async function POST(req: NextRequest) {
 
   // relance la détection de format en arrière-plan (se cale sur les annales, dont les nouvelles)
   let formatJobId: number | undefined;
-  try { formatJobId = createJob("format", JSON.stringify({ reason: "upload", files: saved })); startWorker(formatJobId, course); } catch {}
+  try { const r = await createJobExclusive("format", JSON.stringify({ reason: "upload", files: saved })); formatJobId = r.id; if (!r.existing) await startWorker(formatJobId, course); } catch {}
   return NextResponse.json({ ok: true, files: saved, formatJobId });
 }

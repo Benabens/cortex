@@ -1,4 +1,4 @@
-import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { completeText, extractJson } from "@/lib/llm";
 
 /**
  * V5 — Détection du TYPE d'entrée texte de l'exo ciblé (au-delà de l'image).
@@ -69,7 +69,7 @@ export async function classifyTargetText(text: string): Promise<IntakeClass> {
     JSON.stringify(INTAKE_SCHEMA, null, 2),
   ].join("\n");
   try {
-    const r = extractJson<IntakeClass>(await runClaudeCode({ prompt, model: "opus", timeoutMs: 180_000 }));
+    const r = extractJson<IntakeClass>(await completeText({ prompt, model: "opus", timeoutMs: 180_000 }));
     if (!["subject", "statement", "weakness_log"].includes(r.kind)) r.kind = "subject";
     if (!Array.isArray(r.weaknesses)) r.weaknesses = [];
     if (!r.focus) r.focus = t.slice(0, 120);

@@ -1,5 +1,6 @@
-import { currentCourse, sqlite } from "@/db/client";
-import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { currentCourse } from "@/db/client";
+import { q } from "@/db/q";
+import { completeText, extractJson } from "@/lib/llm";
 import { getCourse } from "@/lib/courses";
 import { renderExamPages } from "@/lib/exam-index";
 import { getFormatProfile } from "@/lib/format";
@@ -21,48 +22,14 @@ import path from "node:path";
 export type StepCb = (msg: string, pct: number) => void;
 export const PROMPT_VERSION = "evals-v4"; // v4 : vérif DÉTERMINISTE (sympy/structural/numeric/mcq) d'abord → LLM seulement si non prouvable et non-QCM
 
-export function ensureEvalSchema() {
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS eval_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_exam TEXT,
-    exam_page INTEGER,
-    question_text TEXT NOT NULL,
-    official_answer TEXT NOT NULL,
-    answer_type TEXT NOT NULL,
-    points REAL,
-    topic TEXT,
-    options TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-  );`);
+export async function ensureEvalSchema(): Promise<void> {
+  await q.ensureTable("eval_items");
   // V2 — options des QCM (jugement déterministe lettre vs lettre), ajoutées au fil de l'eau.
-  if (!(sqlite.prepare(`PRAGMA table_info(eval_items)`).all() as { name: string }[]).some((c) => c.name === "options"))
-    sqlite.exec(`ALTER TABLE eval_items ADD COLUMN options TEXT`);
+  await q.ensureColumns("eval_items", ["options"]);
   // cache des résolutions du solveur (re-juger sans re-résoudre).
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS eval_attempts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    item_id INTEGER NOT NULL,
-    solution TEXT,
-    final_answer TEXT,
-    verdict TEXT,
-    reason TEXT,
-    judged_by TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-  );`);
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS eval_runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    course TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    model TEXT,
-    prompt_version TEXT,
-    n_items INTEGER,
-    accuracy REAL,
-    uncertain_rate REAL,
-    discrimination REAL,
-    style_score REAL,
-    notes TEXT
-  );`);
-  if (!(sqlite.prepare(`PRAGMA table_info(eval_runs)`).all() as { name: string }[]).some((c) => c.name === "deterministic_rate"))
-    sqlite.exec(`ALTER TABLE eval_runs ADD COLUMN deterministic_rate REAL`);
+  await q.ensureTable("eval_attempts");
+  await q.ensureTable("eval_runs");
+  await q.ensureColumns("eval_runs", ["deterministic_rate"]);
 }
 
 // ─────────────────────── PHASE 1 — jeu étalon (gold set) ───────────────────────
@@ -95,8 +62,8 @@ const GOLD_SCHEMA = {
 type RawGold = { page?: number; question_text?: string; official_answer?: string; answer_type?: string; options?: string; points?: number; topic?: string };
 
 /** Sources « corrigées » du cours (fichiers …with solutions / answers / corrigé). */
-function solutionRefs(): { path: string; title: string; year: number | null }[] {
-  const rows = sqlite.prepare(`SELECT path, title, year FROM sources WHERE type IN ('final','midterm') GROUP BY path`).all() as { path: string; title: string; year: number | null }[];
+async function solutionRefs(): Promise<{ path: string; title: string; year: number | null }[]> {
+  const rows = await q.all<{ path: string; title: string; year: number | null }>(`SELECT path, title, year FROM sources WHERE type IN ('final','midterm') GROUP BY path`);
   const isSol = (s: string) => /solution|answer|corrig|grading/i.test(s);
   // un corrigé par année (le plus complet), trié récents d'abord
   const byYear = new Map<string, { path: string; title: string; year: number | null }>();
@@ -113,14 +80,13 @@ function solutionRefs(): { path: string; title: string; year: number | null }[] 
  * corrigés (vision). Résilient : un examen illisible est ignoré.
  */
 export async function buildGoldSet(opts: { max?: number; onStep?: StepCb } = {}): Promise<{ items: number; exams: number }> {
-  ensureEvalSchema();
+  await ensureEvalSchema();
   const step = opts.onStep ?? (() => {});
   const max = opts.max ?? 30;
   const course = currentCourse();
-  const refs = solutionRefs();
+  const refs = await solutionRefs();
   if (!refs.length) { step("Aucun corrigé (with solutions) ingéré — gold set vide.", 100); return { items: 0, exams: 0 }; }
-  sqlite.exec(`DELETE FROM eval_items`);
-  const ins = sqlite.prepare(`INSERT INTO eval_items (source_exam, exam_page, question_text, official_answer, answer_type, points, topic, options) VALUES (?,?,?,?,?,?,?,?)`);
+  await q.exec(`DELETE FROM eval_items`);
   const perExam = Math.max(4, Math.ceil(max / Math.min(refs.length, 8))); // ≤ ~8 examens visionnés (coût borné)
   let total = 0, examsUsed = 0;
   for (const ref of refs) {
@@ -142,7 +108,7 @@ export async function buildGoldSet(opts: { max?: number; onStep?: StepCb } = {})
     let raw: RawGold[] = [];
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const parsed = extractJson<{ items?: RawGold[] }>(await runClaudeCode({ prompt, model: "opus", timeoutMs: 600_000, addDirs: dirs }));
+        const parsed = extractJson<{ items?: RawGold[] }>(await completeText({ prompt, model: "opus", timeoutMs: 600_000, addDirs: dirs }));
         raw = parsed?.items ?? [];
         if (raw.length) break;
       } catch (e) { step(`${ref.title} : extraction échouée${attempt < 2 ? " — réessai" : " — ignoré"} (${(e as Error).message.slice(0, 40)})`, 10); }
@@ -150,14 +116,14 @@ export async function buildGoldSet(opts: { max?: number; onStep?: StepCb } = {})
     let added = 0;
     for (const g of raw) {
       if (total >= max) break;
-      const q = (g.question_text ?? "").trim();
+      const qText = (g.question_text ?? "").trim(); // (renommé : `q` est la façade DB)
       const a = (g.official_answer ?? "").trim();
       let t = ["numeric", "short", "open", "mcq"].includes((g.answer_type ?? "").trim()) ? g.answer_type!.trim() : "open";
       const opts = (g.options ?? "").trim();
       // un « mcq » sans options stockées ne peut pas être jugé en déterministe lettre → rétrograde en short.
       if (t === "mcq" && opts.length < 4) t = /^[A-E](\s*,\s*[A-E])*$/i.test(a) ? "mcq" : "short";
-      if (q.length < 12 || a.length < 1) continue;
-      ins.run(ref.title, Math.max(1, Math.round(Number(g.page) || 1)), q.slice(0, 2000), a.slice(0, 500), t, Number(g.points) > 0 ? Number(g.points) : null, (g.topic ?? "").slice(0, 120) || null, opts.slice(0, 1500) || null);
+      if (qText.length < 12 || a.length < 1) continue;
+      await q.run(`INSERT INTO eval_items (source_exam, exam_page, question_text, official_answer, answer_type, points, topic, options) VALUES (?,?,?,?,?,?,?,?)`, ref.title, Math.max(1, Math.round(Number(g.page) || 1)), qText.slice(0, 2000), a.slice(0, 500), t, Number(g.points) > 0 ? Number(g.points) : null, (g.topic ?? "").slice(0, 120) || null, opts.slice(0, 1500) || null);
       total++; added++;
     }
     if (added) examsUsed++;
@@ -172,9 +138,9 @@ export async function buildGoldSet(opts: { max?: number; onStep?: StepCb } = {})
 export type EvalItem = { id: number; sourceExam: string; examPage: number | null; questionText: string; officialAnswer: string; answerType: string; topic: string | null; options: string | null };
 export type Judged = { id: number; topic: string | null; answerType: string; official: string; cortex: string; verdict: "correct" | "incorrect" | "uncertain"; reason: string; method: string; sourceExam?: string; examPage?: number | null };
 
-function goldItems(limit?: number): EvalItem[] {
-  ensureEvalSchema();
-  const rows = sqlite.prepare(`SELECT id, source_exam sourceExam, exam_page examPage, question_text questionText, official_answer officialAnswer, answer_type answerType, topic, options FROM eval_items ORDER BY id${limit ? " LIMIT " + Math.max(1, Math.floor(limit)) : ""}`).all() as any[];
+async function goldItems(limit?: number): Promise<EvalItem[]> {
+  await ensureEvalSchema();
+  const rows = await q.all<any>(`SELECT id, source_exam sourceExam, exam_page examPage, question_text questionText, official_answer officialAnswer, answer_type answerType, topic, options FROM eval_items ORDER BY id${limit ? " LIMIT " + Math.max(1, Math.floor(limit)) : ""}`);
   return rows.map((r) => ({ ...r }));
 }
 
@@ -223,7 +189,7 @@ async function judgeOpen(item: EvalItem, cortexFull: string): Promise<{ verdict:
     JSON.stringify(JUDGE_SCHEMA, null, 2),
   ].join("\n");
   try {
-    const r = extractJson<{ verdict: string; reason: string }>(await runClaudeCode({ prompt, model: "opus", timeoutMs: 240_000 }));
+    const r = extractJson<{ verdict: string; reason: string }>(await completeText({ prompt, model: "opus", timeoutMs: 240_000 }));
     const v = ["correct", "incorrect", "uncertain"].includes(r.verdict) ? (r.verdict as Judged["verdict"]) : "uncertain";
     return { verdict: v, reason: (r.reason ?? "").slice(0, 200) };
   } catch {
@@ -235,11 +201,10 @@ export type AccuracyResult = { n: number; correct: number; incorrect: number; un
 
 /** Résout chaque item à l'aveugle (vrai moteur) puis juge → accuracy + uncertain. Résilient (3 en //). */
 export async function runAccuracy(opts: { limit?: number; onStep?: StepCb } = {}): Promise<AccuracyResult> {
-  ensureEvalSchema();
+  await ensureEvalSchema();
   const step = opts.onStep ?? (() => {});
-  const items = goldItems(opts.limit);
+  const items = await goldItems(opts.limit);
   if (!items.length) throw new Error("Gold set vide : construis-le d'abord (buildGoldSet).");
-  const cache = sqlite.prepare(`INSERT INTO eval_attempts (item_id, solution, final_answer, verdict, reason, judged_by) VALUES (?,?,?,?,?,?)`);
   let done = 0;
   const details: Judged[] = new Array(items.length);
   let idx = 0;
@@ -267,7 +232,7 @@ export async function runAccuracy(opts: { limit?: number; onStep?: StepCb } = {}
           }
         }
       } catch (e) { reason = `item ignoré (${(e as Error).message.slice(0, 40)})`; }
-      try { cache.run(it.id, sol.slice(0, 8000), cortex.slice(0, 500), verdict, reason.slice(0, 300), judgedBy); } catch {}
+      try { await q.run(`INSERT INTO eval_attempts (item_id, solution, final_answer, verdict, reason, judged_by) VALUES (?,?,?,?,?,?)`, it.id, sol.slice(0, 8000), cortex.slice(0, 500), verdict, reason.slice(0, 300), judgedBy); } catch {}
       details[i] = { id: it.id, topic: it.topic, answerType: it.answerType, official: it.officialAnswer, cortex, verdict, reason, method, sourceExam: it.sourceExam, examPage: it.examPage };
       done++;
       step(`Justesse ${done}/${items.length} — ${it.topic ?? it.answerType} : ${verdict}`, Math.round((done / items.length) * 100));
@@ -316,8 +281,8 @@ export async function measureDiscrimination(opts: { n?: number; onStep?: StepCb 
 }
 
 /** Style/format : score simple de ressemblance d'un exo généré au format détecté (v1 : heuristique bornée). */
-export function measureStyleHeuristic(): { styleScore: number; note: string } {
-  const fmt = getFormatProfile();
+export async function measureStyleHeuristic(): Promise<{ styleScore: number; note: string }> {
+  const fmt = await getFormatProfile();
   if (!fmt) return { styleScore: 0, note: "pas de format_profile" };
   // v1 : on crédite la présence d'un format détecté riche (types + convention) — proxy honnête, borné.
   const hasTypes = (fmt.question_types ?? []).length >= 2;
@@ -328,11 +293,12 @@ export function measureStyleHeuristic(): { styleScore: number; note: string } {
 
 // ─────────────────────── PHASE 4 — run + rapport ───────────────────────
 
-export function recordRun(r: { accuracy: number; uncertainRate: number; nItems: number; discrimination: number | null; styleScore: number | null; deterministicRate?: number | null; notes: string }): number {
-  ensureEvalSchema();
-  return sqlite.prepare(
-    `INSERT INTO eval_runs (course, model, prompt_version, n_items, accuracy, uncertain_rate, discrimination, style_score, deterministic_rate, notes) VALUES (?,?,?,?,?,?,?,?,?,?)`
-  ).run(currentCourse(), "opus", PROMPT_VERSION, r.nItems, r.accuracy, r.uncertainRate, r.discrimination, r.styleScore, r.deterministicRate ?? null, r.notes).lastInsertRowid as number;
+export async function recordRun(r: { accuracy: number; uncertainRate: number; nItems: number; discrimination: number | null; styleScore: number | null; deterministicRate?: number | null; notes: string }): Promise<number> {
+  await ensureEvalSchema();
+  return q.insert(
+    `INSERT INTO eval_runs (course, model, prompt_version, n_items, accuracy, uncertain_rate, discrimination, style_score, deterministic_rate, notes) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    currentCourse(), "opus", PROMPT_VERSION, r.nItems, r.accuracy, r.uncertainRate, r.discrimination, r.styleScore, r.deterministicRate ?? null, r.notes
+  );
 }
 
 export function buildReport(acc: AccuracyResult, disc: { n: number; discrimination: number } | null, style: { styleScore: number; note: string } | null): string {

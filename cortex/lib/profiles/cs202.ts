@@ -53,7 +53,7 @@ export const cs202Profile: CourseProfile = {
   refImageFor,
   latexContract: () => LATEX_CONTRACT,
   archetypes: ARCHETYPES,
-  examSlots: () => EXAM_SLOTS,
+  examSlots: async () => EXAM_SLOTS,
   buildBlueprint,
   promptIntroFull: () => [
     `Tu es l'équipe enseignante de CS-202 Computer Systems à l'EPFL (Argyraki, Kashyap, Chappelier).`,

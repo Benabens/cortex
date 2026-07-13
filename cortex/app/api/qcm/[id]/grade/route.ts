@@ -15,14 +15,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params;
   const body = await req.json().catch(() => ({}));
   const answers: Record<number, number[]> = body?.answers ?? {};
-  const res = gradeQcm(Number(id), answers);
+  const res = await gradeQcm(Number(id), answers);
   if (!res.total) return NextResponse.json({ error: "Mock introuvable ou vide." }, { status: 404 });
   // boucle d'apprentissage : un score global bas/haut sur ce mock = signal de calibration léger.
   try {
     const verdict = res.score / res.total >= 0.85 ? "too_easy" : res.score / res.total <= 0.4 ? "wrong" : "good";
-    recordFeedback({ examId: Number(id), archetype: "qcm", verdict, score: Math.round((res.score / res.total) * 10) });
+    await recordFeedback({ examId: Number(id), archetype: "qcm", verdict, score: Math.round((res.score / res.total) * 10) });
   } catch {}
   // révèle les corrigés des questions ouvertes (auto-évaluation après soumission)
-  const openSolutions = getQcmExam(Number(id), true)?.open ?? [];
+  const openSolutions = (await getQcmExam(Number(id), true))?.open ?? [];
   return NextResponse.json({ ...res, openSolutions });
 }
