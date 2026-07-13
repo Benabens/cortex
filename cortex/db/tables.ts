@@ -345,6 +345,20 @@ export const TABLES: TableSpec[] = [
       { name: "df", type: "int", nn: true },
     ],
   },
+  {
+    // Cache LLM par hash de contenu (Phase E) — dédup des appels identiques.
+    name: "llm_cache",
+    cols: [
+      { name: "key", type: "text", pk: true },
+      { name: "provider", type: "text", nn: true },
+      { name: "model", type: "text", nn: true },
+      { name: "text", type: "text", nn: true },
+      { name: "input_tokens", type: "int" },
+      { name: "output_tokens", type: "int" },
+      { name: "hits", type: "int", nn: true, def: 0 },
+      { name: "created_at", type: "text", def: now },
+    ],
+  },
 ];
 
 export type Dialect = "sqlite" | "postgres";

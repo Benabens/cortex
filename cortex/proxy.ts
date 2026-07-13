@@ -16,7 +16,7 @@ import type { NextRequest } from "next/server";
 
 const AUTH_ON = process.env.AUTH_ENABLED === "1";
 
-const PUBLIC_PREFIXES = ["/api/auth", "/_next", "/favicon", "/sites"];
+const PUBLIC_PREFIXES = ["/api/auth", "/api/health", "/api/metrics", "/_next", "/favicon", "/sites"];
 
 function passThrough(req: NextRequest): NextResponse {
   const headers = new Headers(req.headers);

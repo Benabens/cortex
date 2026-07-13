@@ -1,5 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { q, nowStr } from "@/db/q";
+import { inc, observe } from "@/lib/metrics";
 import { examsDir } from "@/lib/paths";
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
@@ -98,6 +99,17 @@ export async function setJob(id: number, fields: Partial<{ status: JobStatus; cu
   sets.push(`updated_at = ?`);
   vals.push(nowStr());
   await q.run(`UPDATE jobs SET ${sets.join(", ")} WHERE id = ?`, ...vals, id);
+  // Métriques (Phase E) : durée d'un job à son état terminal.
+  if (fields.status && ["done", "error", "canceled"].includes(fields.status)) {
+    try {
+      const j = await q.get<{ type: string; created_at: string }>(`SELECT type, created_at FROM jobs WHERE id = ?`, id);
+      if (j) {
+        inc("cortex_jobs_total", { type: j.type, status: fields.status });
+        const ms = Date.now() - new Date(j.created_at + "Z").getTime();
+        if (Number.isFinite(ms) && ms >= 0) observe("cortex_job_duration_ms", ms, { type: j.type });
+      }
+    } catch { /* métrique best-effort */ }
+  }
 }
 
 export async function logJob(id: number, msg: string): Promise<void> {
