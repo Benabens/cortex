@@ -118,3 +118,28 @@ docker compose up -d postgres            # (cortex/docker-compose.yml)
 npx tsx scripts/migrate-to-postgres.ts   # importe les DB SQLite locales
 npm run dev
 ```
+
+### Jobs durables (Phase C)
+File de jobs par cours (table `jobs`) rendue durable sur les deux drivers (pg-boss écarté : notre
+table+UI existent, et il ne couvrirait pas le mode SQLite dev). Un worker interrompu (PID mort,
+sans-PID trop vieux, ou heartbeat gelé >15 min) est RE-MIS EN FILE tant que `attempts<max_attempts`
+avec son checkpoint (`jobs.checkpoint_json`, progression par lot) conservé ; la pompe
+(`pumpQueuedJobs`, au boot + 60 s + polling) relance un worker → reprise au lot suivant, sans
+doublon. `createJobExclusive` (transaction) supprime le TOCTOU du double-spawn. Heartbeat worker : 30 s.
+
+### Vérification, éval, CI, sandbox (Phase D)
+- Vérif déterministe (`lib/verify-deterministic.ts`) : mcq · numeric (dernier nombre, anti-faux-prouvé)
+  · boolean · structural · symbolic (sympy, sandboxé) · **exec** (code C/Python contre tests
+  stdin→stdout). `verified ∈ {true,false,not_applicable}`, jamais de faux « prouvé ».
+- **Sandbox** (`lib/sandbox-exec.ts`) : réseau coupé, écriture bornée, timeout+ulimit ; refus
+  d'exécuter sans isolation. Modèle de menace : `cortex/docs/SANDBOX.md`.
+- Éval déterministe-first avec seuils bloquants ; **CI** (`.ci/ci.yml` → `.github/workflows/`) :
+  tsc+build+lint(budget)+test+invariant CS-202 byte-identique. Rouge = merge bloqué.
+- `scripts/repair-cs202-db.ts` : réparation de la DB corrompue (recover+FTS+swap+backup).
+
+### Cache & observabilité (Phase E)
+- Cache LLM par hash de contenu (`llm_cache`, OPT-IN `CACHE_ENABLED`) : appel identique = pas de
+  rappel modèle. `lib/metrics.ts` : compteurs/histos + log JSON structuré.
+- `/api/health` (public) et `/api/metrics` (Prometheus/JSON, protégé `METRICS_TOKEN`).
+
+Voir `cortex/.env.example` pour toutes les variables (chacune a un défaut = comportement historique).
