@@ -62,11 +62,25 @@ export type RunOpts = {
   /** Dossiers supplémentaires que l'outil Read peut lire (au-delà du cwd). */
   addDirs?: string[];
   timeoutMs?: number;
+  /** Annulation coopérative (kill du sous-processus). */
+  signal?: AbortSignal;
+};
+
+export type RunResult = {
+  /** Texte final (champ `result` du JSON du CLI). */
+  text: string;
+  /** Tokens consommés si le CLI les rapporte (métriques/cache). */
+  usage?: { inputTokens?: number; outputTokens?: number };
 };
 
 /** Lance `claude -p` et renvoie le texte final (champ `result` du JSON). */
-export function runClaudeCode(opts: RunOpts): Promise<string> {
-  const { model = "opus", addDirs = [], timeoutMs = 180_000 } = opts;
+export async function runClaudeCode(opts: RunOpts): Promise<string> {
+  return (await runClaudeCodeRaw(opts)).text;
+}
+
+/** Comme runClaudeCode, mais renvoie aussi l'usage rapporté par le CLI. */
+export function runClaudeCodeRaw(opts: RunOpts): Promise<RunResult> {
+  const { model = "opus", addDirs = [], timeoutMs = 180_000, signal } = opts;
   // Le texte extrait des PDF (cours génériques) contient parfois des OCTETS NULS / contrôles que
   // spawn refuse en argument (« must be a string without null bytes ») → on les retire du prompt.
   const prompt = opts.prompt.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ");
@@ -83,7 +97,10 @@ export function runClaudeCode(opts: RunOpts): Promise<string> {
   delete env.ANTHROPIC_API_KEY;
   delete env.ANTHROPIC_AUTH_TOKEN;
 
-  return new Promise<string>((resolve, reject) => {
+  return new Promise<RunResult>((resolve, reject) => {
+    if (signal?.aborted) {
+      return reject(new ClaudeCodeError("Appel Claude Code annulé.", "ABORTED"));
+    }
     let child;
     try {
       child = spawn(resolveClaudeBin(), args, { env, cwd: process.cwd() });
@@ -97,37 +114,53 @@ export function runClaudeCode(opts: RunOpts): Promise<string> {
       child.kill("SIGKILL");
       reject(new ClaudeCodeError("Claude Code a mis trop de temps (timeout).", "TIMEOUT"));
     }, timeoutMs);
+    const onAbort = () => {
+      clearTimeout(timer);
+      child.kill("SIGKILL");
+      reject(new ClaudeCodeError("Appel Claude Code annulé.", "ABORTED"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const done = (fn: () => void) => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      fn();
+    };
 
     child.on("error", (e: any) => {
-      clearTimeout(timer);
       if (e?.code === "ENOENT") {
-        reject(new ClaudeCodeError(
+        done(() => reject(new ClaudeCodeError(
           "Claude Code (CLI `claude`) introuvable. Lance l'app sur ta machine où Claude Code est installé et connecté à ton Max.",
           "UNAVAILABLE"
-        ));
+        )));
       } else {
-        reject(new ClaudeCodeError(String(e?.message ?? e)));
+        done(() => reject(new ClaudeCodeError(String(e?.message ?? e))));
       }
     });
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
     child.on("close", (code) => {
-      clearTimeout(timer);
       if (code !== 0) {
         const hint = /api key|credit balance|authentication|oauth|login/i.test(stderr)
           ? " (vérifie que tu es connecté : lance `claude` une fois, puis réessaie)"
           : "";
-        return reject(new ClaudeCodeError((stderr.trim() || `claude a quitté (code ${code})`) + hint));
+        return done(() => reject(new ClaudeCodeError((stderr.trim() || `claude a quitté (code ${code})`) + hint)));
       }
       try {
         const j = JSON.parse(stdout);
-        if (j.is_error) return reject(new ClaudeCodeError(String(j.result ?? "Erreur Claude Code")));
-        resolve(String(j.result ?? ""));
+        if (j.is_error) return done(() => reject(new ClaudeCodeError(String(j.result ?? "Erreur Claude Code"))));
+        const usage = j.usage && typeof j.usage === "object"
+          ? { inputTokens: numberOrUndef(j.usage.input_tokens), outputTokens: numberOrUndef(j.usage.output_tokens) }
+          : undefined;
+        done(() => resolve({ text: String(j.result ?? ""), usage }));
       } catch {
-        reject(new ClaudeCodeError("Sortie de Claude Code illisible (JSON attendu)."));
+        done(() => reject(new ClaudeCodeError("Sortie de Claude Code illisible (JSON attendu).")));
       }
     });
   });
+}
+
+function numberOrUndef(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 
 /** Extrait un objet JSON du texte du modèle (retire prose/balises markdown/virgules traînantes). */

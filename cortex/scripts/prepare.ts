@@ -17,7 +17,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { enterCourse, sqlite } from "../db/client";
-import { claudeBinPath } from "../lib/claude-code";
+import { llmAvailable } from "../lib/llm";
 import { DEFAULT_COURSE, normalizeCourse } from "../lib/courses";
 
 function argVal(name: string): string | undefined {
@@ -58,7 +58,7 @@ async function main() {
     return;
   }
 
-  if (!claudeBinPath()) {
+  if (!llmAvailable()) {
     console.log(`\n⚠ Claude Code (binaire « claude ») introuvable → étapes (b) format et (c) blueprint SAUTÉES.`);
     console.log(`  L'ingestion a réussi (refs : ${refsN}). Lance « claude » une fois (connexion Max), puis :`);
     console.log(`  • détecte le format depuis /examens (ou re-lance « npm run prepare -- --course=${COURSE} »).`);

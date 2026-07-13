@@ -1,9 +1,8 @@
 import { currentCourse, sqlite } from "@/db/client";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
-import { anthropic, GEN_MODEL } from "@/lib/anthropic";
 import type { Archetype } from "@/lib/archetypes";
 import { profile, type Slot } from "@/lib/course-profile";
-import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { completeText, completeVia, extractJson } from "@/lib/llm";
 import { search } from "@/lib/search";
 import { difficultyBlockForExam } from "@/lib/difficulty";
 import { buildExamArtifact, buildExerciseArtifact } from "@/lib/exam-latex";
@@ -162,16 +161,16 @@ export function buildPrompt(ctx: ReturnType<typeof gatherContext>): string {
 }
 
 async function callClaude(ctx: ReturnType<typeof gatherContext>): Promise<ExamSpec> {
-  const stream = anthropic().messages.stream({
-    model: GEN_MODEL,
-    max_tokens: 16000,
-    thinking: { type: "adaptive" },
-    output_config: { format: { type: "json_schema", schema: EXAM_SCHEMA }, effort: "high" },
-    messages: [{ role: "user", content: buildPrompt(ctx) }],
-  } as any);
-  const msg: any = await stream.finalMessage();
-  const text = msg.content.find((b: any) => b.type === "text")?.text ?? "{}";
-  return JSON.parse(text) as ExamSpec;
+  // Voie « API payante » explicite (bouton in-app historique) → provider anthropic forcé.
+  // 'opus' → claude-opus-4-8 (mapping du provider, ex-GEN_MODEL) ; streaming interne.
+  const res = await completeVia("anthropic", {
+    prompt: buildPrompt(ctx),
+    model: "opus",
+    maxTokens: 16000,
+    thinking: "adaptive",
+    json: { schema: EXAM_SCHEMA as unknown as object, effort: "high" },
+  });
+  return JSON.parse(res.text || "{}") as ExamSpec;
 }
 
 // Examen factice pour tester le pipeline LaTeX sans IA.
@@ -436,7 +435,7 @@ export async function generateTargetedExercise(
   ].join("\n");
 
   step(imageRel ? "Lecture de l'image + génération (Claude · Max)…" : "Génération de l'exercice (Claude · Max)…", 30);
-  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 480_000 });
+  const text = await completeText({ prompt, model: "opus", timeoutMs: 480_000 });
   let q = extractJson<ExamQuestion>(text);
   step("Vérification à l'aveugle + durcissement…", 70);
   let report: VerifyReport | undefined;
@@ -503,7 +502,7 @@ export async function regenerateExercise(q: ExamQuestion, diagnostic: string): P
     `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points}. statement_tex/solution_tex en LaTeX. Aucun fichier.`,
     JSON.stringify(ONE_EX_SCHEMA, null, 2),
   ].join("\n");
-  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 420_000 });
+  const text = await completeText({ prompt, model: "opus", timeoutMs: 420_000 });
   const r = extractJson<ExamQuestion>(text);
   return { ...r, category: q.category, points: q.points };
 }
@@ -557,7 +556,7 @@ async function generateBatch(ctx: ReturnType<typeof gatherContext>, slots: Slot[
       solution_tex: "Solution de test.", points: s.points,
     }));
   }
-  const text = await runClaudeCode({
+  const text = await completeText({
     prompt: buildBatchPrompt(ctx, slots as any),
     model: "opus",
     // un lot de 3 << un appel de 6 ; surchargeable (P3 : « augmente le timeout par lot »).

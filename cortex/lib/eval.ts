@@ -1,5 +1,5 @@
 import { currentCourse, sqlite } from "@/db/client";
-import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { completeText, extractJson } from "@/lib/llm";
 import { getCourse } from "@/lib/courses";
 import { renderExamPages } from "@/lib/exam-index";
 import { getFormatProfile } from "@/lib/format";
@@ -142,7 +142,7 @@ export async function buildGoldSet(opts: { max?: number; onStep?: StepCb } = {})
     let raw: RawGold[] = [];
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const parsed = extractJson<{ items?: RawGold[] }>(await runClaudeCode({ prompt, model: "opus", timeoutMs: 600_000, addDirs: dirs }));
+        const parsed = extractJson<{ items?: RawGold[] }>(await completeText({ prompt, model: "opus", timeoutMs: 600_000, addDirs: dirs }));
         raw = parsed?.items ?? [];
         if (raw.length) break;
       } catch (e) { step(`${ref.title} : extraction échouée${attempt < 2 ? " — réessai" : " — ignoré"} (${(e as Error).message.slice(0, 40)})`, 10); }
@@ -223,7 +223,7 @@ async function judgeOpen(item: EvalItem, cortexFull: string): Promise<{ verdict:
     JSON.stringify(JUDGE_SCHEMA, null, 2),
   ].join("\n");
   try {
-    const r = extractJson<{ verdict: string; reason: string }>(await runClaudeCode({ prompt, model: "opus", timeoutMs: 240_000 }));
+    const r = extractJson<{ verdict: string; reason: string }>(await completeText({ prompt, model: "opus", timeoutMs: 240_000 }));
     const v = ["correct", "incorrect", "uncertain"].includes(r.verdict) ? (r.verdict as Judged["verdict"]) : "uncertain";
     return { verdict: v, reason: (r.reason ?? "").slice(0, 200) };
   } catch {

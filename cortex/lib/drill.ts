@@ -1,4 +1,4 @@
-import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 
 export type Drill = {
@@ -34,7 +34,7 @@ export async function generateDrill(concept: string): Promise<Drill> {
     `Réponds UNIQUEMENT avec l'objet JSON conforme au schéma. Aucun outil, aucun fichier.`,
     JSON.stringify(DRILL_SCHEMA, null, 2),
   ].join("\n");
-  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 220_000 });
+  const text = await completeText({ prompt, model: "opus", timeoutMs: 220_000 });
   const d = extractJson<Drill>(text);
   if (!Array.isArray(d.hints)) d.hints = [];
   d.hints = d.hints.slice(0, 5);

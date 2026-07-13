@@ -1,5 +1,5 @@
 import { sqlite } from "@/db/client";
-import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import { ensureIndexSchema, indexExamExercises } from "@/lib/exam-index";
 import { createWeakness, ensureSchema as ensureWeaknessSchema } from "@/lib/weaknesses";
@@ -209,7 +209,7 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
   ].join("\n");
 
   step("Classification des exercices par type via Max (+ vision)…", 35);
-  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 360_000 });
+  const text = await completeText({ prompt, model: "opus", timeoutMs: 360_000 });
   const parsed = extractJson<{ topics?: RawTopic[] } | RawTopic[]>(text);
   const raw: RawTopic[] = Array.isArray(parsed) ? parsed : parsed?.topics ?? [];
   const cleaned = raw.filter((t) => t && t.label && t.label.trim());
@@ -314,7 +314,7 @@ export async function aggregateTopicsFromIndex(opts: { onStep?: (m: string, p: n
         `Vise 15 à 30 types canoniques (regroupement par GRANDE technique : Divide & Conquer, Greedy, Dynamic Programming, Graphes/plus courts chemins, Flots/coupes, Arbres couvrants, Tris/sélection, Structures de données, Hachage, Récurrences/asymptotique, NP/réductions, Preuves…). Chaque label BRUT doit apparaître dans EXACTEMENT un type (members = labels bruts exacts, copiés tels quels). Réponds UNIQUEMENT avec { "types": [ … ] } :`,
         JSON.stringify(CLUSTER_SCHEMA, null, 2),
       ].join("\n");
-      const parsed = extractJson<{ types?: RawCluster[] }>(await runClaudeCode({ prompt, model: "opus", timeoutMs: 600_000 }));
+      const parsed = extractJson<{ types?: RawCluster[] }>(await completeText({ prompt, model: "opus", timeoutMs: 600_000 }));
       clusters = (parsed?.types ?? []).filter((t) => t?.label && Array.isArray(t.members) && t.members.length);
     } catch (e) { step(`Clustering Max indisponible (${(e as Error).message.slice(0, 40)}) → repli par label`, 95); }
   }

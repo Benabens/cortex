@@ -1,4 +1,4 @@
-import { ClaudeCodeError } from "@/lib/claude-code";
+import { LlmError } from "@/lib/llm";
 import { generateDrill } from "@/lib/drill";
 import { useCourse } from "@/lib/req";
 import { sqlite } from "@/db/client";
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     const drill = await generateDrill(c);
     return NextResponse.json({ ok: true, drill });
   } catch (e: unknown) {
-    const err = e as ClaudeCodeError;
+    const err = e as LlmError;
     const status = err.code === "UNAVAILABLE" ? 503 : 502;
     return NextResponse.json({ error: err.message ?? String(e), code: err.code }, { status });
   }

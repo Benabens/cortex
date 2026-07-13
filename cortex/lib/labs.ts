@@ -1,5 +1,5 @@
 import { sqlite } from "@/db/client";
-import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import { persistExercise, type ExamQuestion, type StepCb } from "@/lib/exam";
 import { search } from "@/lib/search";
@@ -326,7 +326,7 @@ async function regenerateLabExercise(lab: LabDef, topic: string, q: ExamQuestion
     `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points}. Aucun outil au-delà de Read, aucun fichier.`,
     JSON.stringify(LAB_EX_SCHEMA, null, 2),
   ].join("\n");
-  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 480_000 });
+  const text = await completeText({ prompt, model: "opus", timeoutMs: 480_000 });
   const r = extractJson<ExamQuestion>(text);
   return { ...r, category: "Labs", points: 15 };
 }
@@ -362,7 +362,7 @@ export async function generateLabExercise(
 
   const prompt = buildLabPrompt(lab, topic);
   step("Génération de l'exercice Labs — moule Q6 2025 + vrai code du lab (Claude · Max)…", 25);
-  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 600_000 });
+  const text = await completeText({ prompt, model: "opus", timeoutMs: 600_000 });
   let q = extractJson<ExamQuestion>(text);
   q.category = "Labs";
   q.points = 15;

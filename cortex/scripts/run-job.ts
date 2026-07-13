@@ -7,7 +7,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { enterCourse, sqlite } from "../db/client";
-import { claudeBinPath } from "../lib/claude-code";
+import { llmAvailable, llmUnavailableReason } from "../lib/llm";
 import { generateExamViaClaudeCode, generateTargetedExercise } from "../lib/exam";
 import { texAvailable } from "../lib/exam-latex";
 import { getJob, logJob, setJob } from "../lib/jobs";
@@ -83,7 +83,7 @@ async function main() {
         setJob(jobId, { status: "done", progress: 100, currentStep: `Cours prêt ✓ — refs ${refsN} (format/blueprint statiques)` });
         process.exit(0);
       }
-      if (!claudeBinPath()) {
+      if (!llmAvailable()) {
         setJob(jobId, { status: "done", progress: 100, currentStep: `Ingéré (refs ${refsN}). Claude/Max absent → format+blueprint à relancer une fois connecté.` });
         process.exit(0);
       }
@@ -101,7 +101,7 @@ async function main() {
   // V7 — (re)détection du format d'examen depuis les annales (après upload de finals).
   if (job.type === "format") {
     setJob(jobId, { status: "running", pid: process.pid, currentStep: "Détection du format…", progress: 4 });
-    if (!claudeBinPath()) fail("Claude Code introuvable.");
+    if (!llmAvailable()) fail(llmUnavailableReason()!);
     try {
       const { detectFormat } = await import("../lib/format");
       const onStep = (s: string, p: number) => {
@@ -121,7 +121,7 @@ async function main() {
   if (job.type === "qcm") {
     setJob(jobId, { status: "running", pid: process.pid, currentStep: "Architecte QCM…", progress: 4 });
     logJob(jobId, `Worker démarré (PID ${process.pid})`);
-    if (!claudeBinPath()) fail("Claude Code (binaire « claude ») introuvable.");
+    if (!llmAvailable()) fail(llmUnavailableReason()!);
     try {
       const { generateQcmExam } = await import("../lib/qcm");
       // V9 composeur : {count, openCount, focus} ; count/openCount peuvent valoir 0 (respectés).
@@ -152,7 +152,7 @@ async function main() {
   if (job.type === "blueprint") {
     setJob(jobId, { status: "running", pid: process.pid, currentStep: "Analyse du programme…", progress: 4 });
     logJob(jobId, `Worker démarré (PID ${process.pid})`);
-    if (!claudeBinPath()) fail("Claude Code (binaire « claude ») introuvable. Lance « claude » une fois pour te connecter à ton Max.");
+    if (!llmAvailable()) fail(llmUnavailableReason()!);
     const n = (sqlite.prepare("SELECT count(*) n FROM items").get() as { n: number } | undefined)?.n ?? 0;
     if (!n) fail("Corpus non ingéré. Lance « npm run ingest » d'abord.");
     try {
@@ -177,7 +177,7 @@ async function main() {
   logJob(jobId, `Worker démarré (PID ${process.pid})`);
 
   // ---- Pré-checks (Phase 4) : échec clair AVANT 20 min de travail ----
-  if (!claudeBinPath()) fail("Claude Code (binaire « claude ») introuvable. Installe-le et lance « claude » une fois pour te connecter à ton Max.");
+  if (!llmAvailable()) fail(llmUnavailableReason()!);
   const items = (sqlite.prepare("SELECT count(*) n FROM items").get() as { n: number } | undefined)?.n ?? 0;
   if (!items) fail("Corpus non ingéré. Lance « npm run ingest » d'abord.");
   if (!texAvailable()) logJob(jobId, "⚠ tectonic/pdflatex absent → repli HTML. Installe tectonic (brew install tectonic) pour le vrai PDF.");

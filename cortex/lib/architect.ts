@@ -1,4 +1,4 @@
-import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import type { Archetype } from "@/lib/archetypes";
 import { calibrationBlock } from "@/lib/calibration";
@@ -126,7 +126,7 @@ async function identifyFromImage(image: string, note: string | undefined, step: 
     `Réponds UNIQUEMENT avec l'objet JSON conforme.`,
     JSON.stringify(IMAGE_ID_SCHEMA, null, 2),
   ].filter((l) => l != null).join("\n");
-  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 220_000 });
+  const text = await completeText({ prompt, model: "opus", timeoutMs: 220_000 });
   const r = extractJson<ImageId>(text);
   if (!ARCHETYPE_IDS.includes(r.archetype_id as any)) r.archetype_id = "";
   return r;
@@ -186,7 +186,7 @@ async function designTrap(a: Archetype, target: string, refImage: string | null,
     JSON.stringify(DESIGN_SCHEMA, null, 2),
   ].filter((l) => l != null).join("\n");
   step("P1 — conception du piège (étude de la vraie page + design)…", 22);
-  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 300_000 });
+  const text = await completeText({ prompt, model: "opus", timeoutMs: 300_000 });
   return extractJson<DesignBrief>(text);
 }
 
@@ -224,7 +224,7 @@ async function writeFromDesign(a: Archetype, target: string, pts: number, design
     JSON.stringify(ONE_EX_SCHEMA, null, 2),
   ].filter((l) => l != null).join("\n");
   step("P2 — rédaction de l'énoncé multi-étapes (format EPFL + piège)…", 38);
-  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 480_000 });
+  const text = await completeText({ prompt, model: "opus", timeoutMs: 480_000 });
   const q = extractJson<ExamQuestion>(text);
   return { ...q, category: a.category, points: pts };
 }
@@ -260,7 +260,7 @@ async function adversarialAudit(a: Archetype, q: ExamQuestion, refImage: string 
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier.`,
     JSON.stringify(AUDIT_SCHEMA, null, 2),
   ].filter((l) => l != null).join("\n");
-  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 340_000 });
+  const text = await completeText({ prompt, model: "opus", timeoutMs: 340_000 });
   return extractJson<Audit>(text);
 }
 
@@ -293,7 +293,7 @@ async function reviseFromAudit(a: Archetype, q: ExamQuestion, audit: Audit, refI
     `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points} (version durcie/réparée). Le corrigé doit rester JUSTE. Aucun fichier.`,
     JSON.stringify(ONE_EX_SCHEMA, null, 2),
   ].filter((l) => l != null).join("\n");
-  const text = await runClaudeCode({ prompt, model: "opus", timeoutMs: 480_000 });
+  const text = await completeText({ prompt, model: "opus", timeoutMs: 480_000 });
   const r = extractJson<ExamQuestion>(text);
   return { ...r, category: a.category, points: q.points };
 }

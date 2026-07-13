@@ -1,7 +1,7 @@
 import { sqlite } from "@/db/client";
 import { useCourse } from "@/lib/req";
 import { uploadsDir } from "@/lib/paths";
-import { ClaudeCodeError, extractJson, runClaudeCode } from "@/lib/claude-code";
+import { LlmError, completeText, extractJson } from "@/lib/llm";
 import { getWeakness, updateWeaknessAnalysis } from "@/lib/weaknesses";
 import fs from "node:fs";
 import path from "node:path";
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const text = await runClaudeCode({
+    const text = await completeText({
       prompt: buildPrompt({ topic: row.topic, description: row.description, imageRel }),
       model: typeof model === "string" && model ? model : "opus",
       timeoutMs: 190_000,
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     updateWeaknessAnalysis(Number(id), parsed.topic, description);
     return NextResponse.json({ ok: true, weakness: getWeakness(Number(id)) });
   } catch (e: unknown) {
-    const err = e as ClaudeCodeError;
+    const err = e as LlmError;
     const status = err.code === "UNAVAILABLE" ? 503 : 502;
     return NextResponse.json({ error: err.message ?? String(e), code: err.code }, { status });
   }

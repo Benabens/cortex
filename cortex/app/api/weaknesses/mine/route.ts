@@ -1,4 +1,4 @@
-import { ClaudeCodeError } from "@/lib/claude-code";
+import { LlmError } from "@/lib/llm";
 import { mineConversation } from "@/lib/conversation-mining";
 import { useCourse } from "@/lib/req";
 import { createWeakness, listWeaknesses } from "@/lib/weaknesses";
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ created: mined.length, mined, weaknesses: listWeaknesses() });
   } catch (e) {
-    if (e instanceof ClaudeCodeError && e.code === "UNAVAILABLE") {
+    if (e instanceof LlmError && e.code === "UNAVAILABLE") {
       return NextResponse.json({ error: "Claude Code (Max) non joignable — lance l'app sur ta machine connectée." }, { status: 503 });
     }
     return NextResponse.json({ error: String((e as Error)?.message ?? e) }, { status: 500 });

@@ -1,5 +1,5 @@
 import { currentCourse, sqlite } from "@/db/client";
-import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { completeText, extractJson } from "@/lib/llm";
 import { courseRefImages } from "@/lib/course-vision";
 import type { ExamQuestion, StepCb } from "@/lib/exam";
 import { getFormatProfile } from "@/lib/format";
@@ -126,7 +126,7 @@ export async function generateQcmBatch(topics: { label: string; method: string |
     JSON.stringify(QCM_BATCH_SCHEMA, null, 2),
   ].filter((l) => l != null && l !== false && l !== "").join("\n");
   step(`Génération de ${n} QCM (architecte · distracteurs = idées fausses)…`, 30);
-  const r = extractJson<{ items: QcmItem[] }>(await runClaudeCode({ prompt, model: "opus", timeoutMs: 480_000 }));
+  const r = extractJson<{ items: QcmItem[] }>(await completeText({ prompt, model: "opus", timeoutMs: 480_000 }));
   return (r.items ?? []).map((q) => ({ ...q, verified: null as 0 | 1 | null }));
 }
 
@@ -171,7 +171,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   ].filter((l) => l != null).join("\n");
   step("Vérification à l'aveugle des QCM (résolution indépendante)…", 70);
   let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string }[] };
-  try { res = extractJson(await runClaudeCode({ prompt, model: "opus", timeoutMs: 420_000 })); }
+  try { res = extractJson(await completeText({ prompt, model: "opus", timeoutMs: 420_000 })); }
   catch { return items; } // fallback honnête : non vérifiés
   for (const r of res.results ?? []) {
     const q = items[r.index];

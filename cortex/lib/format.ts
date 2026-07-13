@@ -1,5 +1,5 @@
 import { currentCourse, sqlite } from "@/db/client";
-import { extractJson, runClaudeCode } from "@/lib/claude-code";
+import { completeText, extractJson } from "@/lib/llm";
 import { courseRefImages } from "@/lib/course-vision";
 
 /**
@@ -100,7 +100,7 @@ export async function detectFormat(opts: { onStep?: (m: string, p: number) => vo
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier écrit.`,
     JSON.stringify(FORMAT_SCHEMA, null, 2),
   ].filter(Boolean).join("\n");
-  const profile = extractJson<FormatProfile>(await runClaudeCode({ prompt, model: "opus", timeoutMs: 300_000 }));
+  const profile = extractJson<FormatProfile>(await completeText({ prompt, model: "opus", timeoutMs: 300_000 }));
   step("Enregistrement du profil de format…", 90);
   sqlite.prepare(`DELETE FROM format_profile`).run();
   sqlite.prepare(`INSERT INTO format_profile (json) VALUES (?)`).run(JSON.stringify(profile));
