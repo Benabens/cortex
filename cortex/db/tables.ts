@@ -275,6 +275,12 @@ export const TABLES: TableSpec[] = [
       { name: "pid", type: "int" },
       { name: "created_at", type: "text", def: now },
       { name: "updated_at", type: "text", def: now },
+      // Durabilité (Phase C) : reprise automatique bornée + progression par unité.
+      { name: "attempts", type: "int", nn: true, def: 0 },
+      { name: "max_attempts", type: "int", nn: true, def: 2 },
+      { name: "heartbeat_at", type: "text" },
+      { name: "checkpoint_json", type: "text" },
+      { name: "worker_id", type: "text" },
     ],
   },
   {

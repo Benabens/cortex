@@ -1,6 +1,6 @@
 import { generateExam } from "@/lib/exam";
 import { useCourse } from "@/lib/req";
-import { activeJob, createJob, startWorker } from "@/lib/jobs";
+import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
   // V9 composeur (CS-202) : count = nombre d'exercices choisi (optionnel ; défaut = blueprint).
   const body = await req.json().catch(() => ({} as any));
   const count = Number(body?.count) > 0 ? Math.min(12, Math.floor(Number(body.count))) : undefined;
-  const jobId = await createJob("exam", count ? JSON.stringify({ count }) : undefined);
+  const { id: jobId } = await createJobExclusive("exam", count ? JSON.stringify({ count }) : undefined);
   try {
     await startWorker(jobId, course);
   } catch (e: any) {

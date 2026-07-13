@@ -1,5 +1,5 @@
 import { DEFAULT_COURSE } from "@/lib/courses";
-import { activeJob, createJob, startWorker } from "@/lib/jobs";
+import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { useCourse } from "@/lib/req";
 import fs from "node:fs";
 import { NextRequest, NextResponse } from "next/server";
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
   const existing = await activeJob("ingest");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
 
-  const jobId = await createJob("ingest", d);
+  const { id: jobId } = await createJobExclusive("ingest", d);
   try {
     await startWorker(jobId, course);
   } catch (e: any) {

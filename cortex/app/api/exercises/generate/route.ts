@@ -1,4 +1,4 @@
-import { activeJob, createJob, startWorker } from "@/lib/jobs";
+import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { uploadsDir } from "@/lib/paths";
 import { preflightGeneration } from "@/lib/preflight";
 import { useCourse } from "@/lib/req";
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
 
   // target du job = texte simple (rétrocompat) OU JSON {target,imageRel,note} si image/note présentes
   const jobTarget = payload.imageRel || payload.note ? JSON.stringify(payload) : (payload.target ?? "");
-  const jobId = await createJob("exercise", jobTarget);
+  const { id: jobId } = await createJobExclusive("exercise", jobTarget);
   try {
     await startWorker(jobId, course);
   } catch (e: any) {

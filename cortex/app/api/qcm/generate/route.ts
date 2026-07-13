@@ -1,4 +1,4 @@
-import { activeJob, createJob, startWorker } from "@/lib/jobs";
+import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { getFormatProfile } from "@/lib/format";
 import { preflightGeneration } from "@/lib/preflight";
 import { useCourse } from "@/lib/req";
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
     openCount: oc,
     focus: typeof body.focus === "string" && body.focus.trim() ? body.focus.trim().slice(0, 400) : undefined,
   });
-  const jobId = await createJob("qcm", target);
+  const { id: jobId } = await createJobExclusive("qcm", target);
   try { await startWorker(jobId, course); }
   catch (e: any) { return NextResponse.json({ error: `worker : ${e?.message ?? e}` }, { status: 500 }); }
   return NextResponse.json({ ok: true, jobId });

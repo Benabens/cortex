@@ -2,42 +2,63 @@ import { enterCourse } from "@/db/client";
 import { q, nowStr } from "../db/q";
 import { ensureJobsSchema, reconcileStaleJobs, getJob } from "@/lib/jobs";
 
+/**
+ * P4 (V8) → Phase C : contrat de la réconciliation des jobs interrompus.
+ *  - Worker mort (PID mort / sans-PID vieux / heartbeat gelé) + budget restant → RE-MIS EN FILE
+ *    (attempts+1, checkpoint CONSERVÉ) — la pompe le relancera.
+ *  - Budget épuisé (attempts ≥ max_attempts) → 'error' (bouton réessayer).
+ *  - PID vivant (sans heartbeat gelé) / sans-PID récent → INTACTS.
+ */
 (async () => {
 enterCourse("algo"); // DB de test isolée (pas ml/cs-202)
 await ensureJobsSchema();
-// nettoie d'éventuels restes du test
 await q.exec("DELETE FROM jobs WHERE target LIKE 'ZTEST%'");
 
-// (1) job 'running' avec un PID MORT (999999 n'existe pas) → doit devenir 'error'
-const deadPid = await q.insert("INSERT INTO jobs (type,target,status,current_step,progress,pid) VALUES ('exam','ZTEST-deadpid','running','En file…',20,999999)");
-// (2) job 'queued' SANS pid mais VIEUX (>120s) → doit devenir 'error'
 const tenMinAgo = nowStr(-10 * 60_000);
-await q.run("INSERT INTO jobs (type,target,status,current_step,progress,pid,created_at,updated_at) VALUES ('qcm','ZTEST-nopid-old','queued','En file…',0,NULL,?,?)", tenMinAgo, tenMinAgo);
-const oldNoPid = (await q.get<{id:number}>("SELECT id FROM jobs WHERE target='ZTEST-nopid-old'")) as {id:number};
-// (3) job 'running' avec un PID VIVANT (le mien) → doit RESTER actif (pas touché)
-const myPid = process.pid;
-await q.run("INSERT INTO jobs (type,target,status,current_step,progress,pid) VALUES ('exam','ZTEST-alive','running','Appel Claude 10min…',45,?)", myPid);
-const alive = (await q.get<{id:number}>("SELECT id FROM jobs WHERE target='ZTEST-alive'")) as {id:number};
-// (4) job 'queued' SANS pid mais RÉCENT (<120s) → doit RESTER (worker en cours de spawn)
-await q.run("INSERT INTO jobs (type,target,status,current_step,progress,pid) VALUES ('exam','ZTEST-nopid-fresh','queued','Démarrage…',0,NULL)");
-const fresh = (await q.get<{id:number}>("SELECT id FROM jobs WHERE target='ZTEST-nopid-fresh'")) as {id:number};
+const twentyMinAgo = nowStr(-20 * 60_000);
 
-console.log("Avant réconciliation :");
-for (const t of ['ZTEST-deadpid','ZTEST-nopid-old','ZTEST-alive','ZTEST-nopid-fresh']) {
-  const j = (await q.get("SELECT target,status FROM jobs WHERE target=?", t)) as any;
-  console.log("  ",j.target,"=",j.status);
-}
+// (1) PID MORT, budget restant (0/2) + checkpoint → requeue attempts=1, checkpoint conservé
+const deadPid = await q.insert(
+  "INSERT INTO jobs (type,target,status,current_step,progress,pid,checkpoint_json) VALUES ('exam','ZTEST-deadpid','running','En file…',20,999999,'{\"batches\":[[1]]}')");
+// (2) PID MORT, budget ÉPUISÉ (2/2) → error
+const exhausted = await q.insert(
+  "INSERT INTO jobs (type,target,status,current_step,progress,pid,attempts,max_attempts) VALUES ('exam','ZTEST-exhausted','running','…',20,999999,2,2)");
+// (3) sans PID et VIEUX → requeue (budget restant)
+await q.run("INSERT INTO jobs (type,target,status,current_step,progress,pid,created_at,updated_at) VALUES ('qcm','ZTEST-nopid-old','queued','En file…',0,NULL,?,?)", tenMinAgo, tenMinAgo);
+const oldNoPid = (await q.get<{ id: number }>("SELECT id FROM jobs WHERE target='ZTEST-nopid-old'"))!;
+// (4) PID VIVANT (le mien), heartbeat frais → intact
+await q.run("INSERT INTO jobs (type,target,status,current_step,progress,pid,heartbeat_at) VALUES ('exam','ZTEST-alive','running','Appel Claude 10min…',45,?,?)", process.pid, nowStr());
+const alive = (await q.get<{ id: number }>("SELECT id FROM jobs WHERE target='ZTEST-alive'"))!;
+// (5) sans PID mais RÉCENT → intact (spawn en cours)
+await q.run("INSERT INTO jobs (type,target,status,current_step,progress,pid) VALUES ('exam','ZTEST-nopid-fresh','queued','Démarrage…',0,NULL)");
+const fresh = (await q.get<{ id: number }>("SELECT id FROM jobs WHERE target='ZTEST-nopid-fresh'"))!;
+// (6) PID VIVANT mais HEARTBEAT GELÉ (20 min) → worker suspendu/PID recyclé → requeue
+await q.run("INSERT INTO jobs (type,target,status,current_step,progress,pid,heartbeat_at) VALUES ('blueprint','ZTEST-stalled','running','Gelé…',30,?,?)", process.pid, twentyMinAgo);
+const stalled = (await q.get<{ id: number }>("SELECT id FROM jobs WHERE target='ZTEST-stalled'"))!;
+
 const n = await reconcileStaleJobs();
-console.log(`\nreconcileStaleJobs() a corrigé ${n} job(s).\n`);
-console.log("Après réconciliation :");
-const expect: Record<string,string> = {[deadPid]:"error",[oldNoPid.id]:"error",[alive.id]:"running",[fresh.id]:"queued"};
+console.log(`reconcileStaleJobs() a traité ${n} job(s).\n`);
+
+const expect: [string, number, string, number | null][] = [
+  ["ZTEST-deadpid", deadPid, "queued", 1],
+  ["ZTEST-exhausted", exhausted, "error", null],
+  ["ZTEST-nopid-old", oldNoPid.id, "queued", 1],
+  ["ZTEST-alive", alive.id, "running", null],
+  ["ZTEST-nopid-fresh", fresh.id, "queued", 0],
+  ["ZTEST-stalled", stalled.id, "queued", 1],
+];
 let allOk = true;
-for (const [tgt,id] of [["ZTEST-deadpid",deadPid],["ZTEST-nopid-old",oldNoPid.id],["ZTEST-alive",alive.id],["ZTEST-nopid-fresh",fresh.id]] as [string,number][]) {
-  const j = (await getJob(id))!; const want = expect[id]; const ok = j.status===want;
+for (const [tgt, id, wantStatus, wantAttempts] of expect) {
+  const j = (await getJob(id))!;
+  const row = (await q.get<{ attempts: number; checkpoint_json: string | null }>("SELECT attempts, checkpoint_json FROM jobs WHERE id = ?", id))!;
+  let ok = j.status === wantStatus && (wantAttempts === null || row.attempts === wantAttempts);
+  if (tgt === "ZTEST-deadpid" && !row.checkpoint_json) ok = false; // le checkpoint doit SURVIVRE au requeue
   allOk = allOk && ok;
-  console.log(`   ${ok?"✓":"✗"} ${tgt} → ${j.status} (attendu ${want})${j.error?` | "${j.error.slice(0,50)}"`:""}`);
+  console.log(`   ${ok ? "✓" : "✗"} ${tgt} → ${j.status} (attendu ${wantStatus})${wantAttempts !== null ? ` attempts=${row.attempts}/${wantAttempts}` : ""}${tgt === "ZTEST-deadpid" ? ` checkpoint=${row.checkpoint_json ? "conservé" : "PERDU"}` : ""}`);
 }
 await q.exec("DELETE FROM jobs WHERE target LIKE 'ZTEST%'");
-console.log(allOk ? "\n✅ P4 OK : zombies (PID mort / sans-PID vieux) → error ; vivants/récents intacts." : "\n❌ P4 ÉCHEC");
-process.exit(allOk?0:1);
+console.log(allOk
+  ? "\n✅ Phase C OK : interrompus → requeue borné avec checkpoint conservé ; budget épuisé → error ; vivants/récents intacts."
+  : "\n❌ Phase C ÉCHEC");
+process.exit(allOk ? 0 : 1);
 })();

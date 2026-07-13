@@ -1,5 +1,5 @@
 import { isQcmCourse } from "@/lib/format";
-import { activeJob, createJob, startWorker } from "@/lib/jobs";
+import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
 import { getTopic, topicTarget } from "@/lib/program";
 import { useCourse } from "@/lib/req";
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
   const jobTarget = qcm
     ? JSON.stringify({ count: 4, openCount: 1, focus: topicTarget(topic) }) // QCM-first sur ce type
     : JSON.stringify({ target: topicTarget(topic), topicId: topic.id });
-  const jobId = await createJob(jobType, jobTarget);
+  const { id: jobId } = await createJobExclusive(jobType, jobTarget);
   try {
     await startWorker(jobId, course);
   } catch (e: any) {

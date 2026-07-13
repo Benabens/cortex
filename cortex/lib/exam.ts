@@ -8,6 +8,7 @@ import { search } from "@/lib/search";
 import { difficultyBlockForExam } from "@/lib/difficulty";
 import { buildExamArtifact, buildExerciseArtifact } from "@/lib/exam-latex";
 import { dueConcepts, markTested } from "@/lib/schedule";
+import { loadJobCheckpoint, saveJobCheckpoint } from "@/lib/jobs";
 import { examsDir } from "@/lib/paths";
 import { referencePaths } from "@/lib/sources";
 import { verifyAndHarden, type VerifyReport } from "@/lib/verify";
@@ -573,7 +574,7 @@ async function generateBatch(ctx: Ctx, slots: Slot[]): Promise<ExamQuestion[]> {
  */
 export type StepCb = (step: string, progress: number) => void;
 
-export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?: number; onStep?: StepCb } = {}): Promise<{ id: number; url: string; texError?: string }> {
+export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?: number; onStep?: StepCb; jobId?: number } = {}): Promise<{ id: number; url: string; texError?: string }> {
   const t0 = Date.now();
   // progression MONOTONE : les lots/vérifs parallèles rapportent dans le désordre → max courant.
   const raw = opts.onStep ?? (() => {});
@@ -597,7 +598,8 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
     if (want < slots.length) slots = slots.slice(0, want);
     else { const base = slots.slice(); while (slots.length < want) slots.push(base[slots.length % base.length]); }
   }
-  const doVerify = opts.verify !== false;
+  // (stub de test : vérifier des questions factices n'a aucun sens et appellerait le vrai Max)
+  const doVerify = opts.verify !== false && !process.env.CORTEX_TEST_STUB_BATCH;
   // PERFECT B1 — cs-202 : CHAQUE question de l'examen complet passe par l'ARCHITECTE
   // (concevoir le piège → rédiger → audit adversarial → réviser), en parallèle borné.
   const useArchitect = currentCourse() === DEFAULT_COURSE;
@@ -612,12 +614,32 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
   let qDone = 0;
   const qTotal = slots.length;
 
-  // checkpoint : lots déjà générés lors d'un run précédent interrompu
+  // checkpoint : lots déjà générés lors d'un run précédent interrompu.
+  // Phase C — quand le run appartient à un JOB (opts.jobId), la progression est persistée
+  // PAR LOT dans jobs.checkpoint_json (DB) : un worker tué et re-pompé reprend au lot
+  // suivant, sans doublon. Sans job (scripts/tests) : fichier disque historique.
+  const jobId = opts.jobId;
+  type Ckpt = { at: number; batches: (ExamQuestion[] | null)[] };
   let saved: (ExamQuestion[] | null)[] = [null, null];
-  try {
-    const j = JSON.parse(fs.readFileSync(CKPT(), "utf8"));
-    if (Array.isArray(j?.batches) && Date.now() - (j.at ?? 0) < 2 * 3600_000) saved = j.batches;
-  } catch {}
+  if (typeof jobId === "number") {
+    const j = await loadJobCheckpoint<Ckpt>(jobId);
+    if (j && Array.isArray(j.batches) && Date.now() - (j.at ?? 0) < 2 * 3600_000) saved = j.batches;
+  } else {
+    try {
+      const j = JSON.parse(fs.readFileSync(CKPT(), "utf8"));
+      if (Array.isArray(j?.batches) && Date.now() - (j.at ?? 0) < 2 * 3600_000) saved = j.batches;
+    } catch {}
+  }
+  const saveCkpt = async (batchIndex: number) => {
+    if (typeof jobId === "number") {
+      await saveJobCheckpoint(jobId, { at: Date.now(), batches: saved } satisfies Ckpt);
+    } else {
+      try { fs.mkdirSync(path.dirname(CKPT()), { recursive: true }); fs.writeFileSync(CKPT(), JSON.stringify({ at: Date.now(), batches: saved })); } catch {}
+    }
+    // Crochet de TEST (inerte sans l'env) : simule la MORT du worker juste après la
+    // persistance d'un lot → preuve déterministe de la reprise sans perte (Phase C).
+    if (process.env.CORTEX_TEST_DIE_AFTER_BATCH === String(batchIndex)) process.exit(9);
+  };
 
   /** Architecte par slot (pool de 2 dans le lot → ≤4 pipelines claude en parallèle au pic). */
   async function architectBatch(bslots: Slot[], lotIdx: number): Promise<ExamQuestion[]> {
@@ -687,7 +709,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
           step(`Lot ${i + 1}/${nBatches} — ARCHITECTE par question (piège → rédaction → audit adversarial)…`, 8 + i * 2);
           qs = await architectBatch(bslots, i);
           saved[i] = qs;
-          try { fs.mkdirSync(path.dirname(CKPT()), { recursive: true }); fs.writeFileSync(CKPT(), JSON.stringify({ at: Date.now(), batches: saved })); } catch {}
+          await saveCkpt(i);
           step(`Lot ${i + 1}/${nBatches} construit par l'architecte ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 40);
         } else {
           // cours sans architecte : voie one-shot, RÉSILIENTE — réessai puis IGNORE le lot.
@@ -706,7 +728,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
           qs = got; // peut être partiel ou vide → le job CONTINUE
           if (qs.length) {
             saved[i] = qs;
-            try { fs.mkdirSync(path.dirname(CKPT()), { recursive: true }); fs.writeFileSync(CKPT(), JSON.stringify({ at: Date.now(), batches: saved })); } catch {}
+            await saveCkpt(i);
           }
           step(`Lot ${i + 1}/${nBatches} généré ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 30);
         }
@@ -770,7 +792,10 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
   }
   // run COMPLET → checkpoint consommé ; run PARTIEL → on GARDE le checkpoint (relance = reprend
   // les lots réussis, ne rebrûle que ceux qui ont timeout).
-  if (missing <= 0) { try { fs.unlinkSync(CKPT()); } catch {} }
+  if (missing <= 0) {
+    try { fs.unlinkSync(CKPT()); } catch {}
+    if (typeof jobId === "number") await saveJobCheckpoint(jobId, null);
+  }
   if (out.texError) step(`⚠ Compilation LaTeX échouée → repli HTML lisible (${out.texError.slice(0, 180)})`, 97);
   step(`Terminé ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 100);
   return out;

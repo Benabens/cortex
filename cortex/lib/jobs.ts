@@ -30,6 +30,8 @@ export type Job = {
 
 export async function ensureJobsSchema(): Promise<void> {
   await q.ensureTable("jobs");
+  // Colonnes de durabilité (Phase C) — rattrapage pour les DB existantes.
+  try { await q.ensureColumns("jobs", ["attempts", "max_attempts", "heartbeat_at", "checkpoint_json", "worker_id"]); } catch {}
 }
 // (pas d'appel top-level : la table jobs est créée à la demande dans la DB du cours courant)
 
@@ -39,6 +41,48 @@ export async function createJob(type: JobType, target?: string): Promise<number>
     `INSERT INTO jobs (type, target, status, current_step, progress) VALUES (?,?,'queued','En file…',0)`,
     type, target ?? null,
   );
+}
+
+/**
+ * Création EXCLUSIVE (anti double-exécution) : re-vérifie le job actif du même
+ * type DANS une transaction (le check `activeJob` des routes est un TOCTOU —
+ * deux POST concurrents pouvaient spawner 2 workers). Renvoie le job existant
+ * si un run du même type est déjà actif.
+ */
+export async function createJobExclusive(type: JobType, target?: string): Promise<{ id: number; existing: boolean }> {
+  await ensureJobsSchema();
+  return q.tx(async () => {
+    const active = await q.get<{ id: number }>(
+      `SELECT id FROM jobs WHERE status IN ${ACTIVE_STATES} AND type = ? ORDER BY id DESC LIMIT 1`,
+      type,
+    );
+    if (active) return { id: active.id, existing: true };
+    const id = await q.insert(
+      `INSERT INTO jobs (type, target, status, current_step, progress) VALUES (?,?,'queued','En file…',0)`,
+      type, target ?? null,
+    );
+    return { id, existing: false };
+  });
+}
+
+// ─────────────── Checkpointing durable (Phase C) ───────────────
+// Un job long persiste sa progression PAR UNITÉ (lot/thème/question) en DB :
+// après un crash/redémarrage, la reprise repart du dernier point, sans doublon.
+
+export async function saveJobCheckpoint(id: number, data: unknown): Promise<void> {
+  await q.run(`UPDATE jobs SET checkpoint_json = ?, updated_at = ? WHERE id = ?`,
+    data === null || data === undefined ? null : JSON.stringify(data), nowStr(), id);
+}
+
+export async function loadJobCheckpoint<T>(id: number): Promise<T | null> {
+  const r = await q.get<{ checkpoint_json: string | null }>(`SELECT checkpoint_json FROM jobs WHERE id = ?`, id);
+  if (!r?.checkpoint_json) return null;
+  try { return JSON.parse(r.checkpoint_json) as T; } catch { return null; }
+}
+
+/** Battement de cœur du worker (posé toutes les ~30 s, cf. scripts/run-job.ts). */
+export async function heartbeatJob(id: number): Promise<void> {
+  await q.run(`UPDATE jobs SET heartbeat_at = ?, worker_id = ? WHERE id = ?`, nowStr(), `${process.pid}`, id);
 }
 
 export async function setJob(id: number, fields: Partial<{ status: JobStatus; currentStep: string; progress: number; resultPath: string; resultId: number; error: string; pid: number }>): Promise<void> {
@@ -57,12 +101,17 @@ export async function setJob(id: number, fields: Partial<{ status: JobStatus; cu
 }
 
 export async function logJob(id: number, msg: string): Promise<void> {
-  const row = await q.get<{ log_json: string }>(`SELECT log_json FROM jobs WHERE id = ?`, id);
-  let arr: { t: string; msg: string }[] = [];
-  try { arr = JSON.parse(row?.log_json ?? "[]"); } catch {}
-  arr.push({ t: new Date().toISOString(), msg });
-  if (arr.length > 60) arr = arr.slice(-60);
-  await q.run(`UPDATE jobs SET log_json = ?, updated_at = ? WHERE id = ?`, JSON.stringify(arr), nowStr(), id);
+  // Transactionnel (Phase C) : les onStep sont émis sans await (fire-and-forget) —
+  // sans tx, deux logJob concurrents relisaient le même tableau et s'écrasaient
+  // mutuellement (entrées perdues, cf. race read-modify-write historique).
+  await q.tx(async () => {
+    const row = await q.get<{ log_json: string }>(`SELECT log_json FROM jobs WHERE id = ?`, id);
+    let arr: { t: string; msg: string }[] = [];
+    try { arr = JSON.parse(row?.log_json ?? "[]"); } catch {}
+    arr.push({ t: new Date().toISOString(), msg });
+    if (arr.length > 60) arr = arr.slice(-60);
+    await q.run(`UPDATE jobs SET log_json = ?, updated_at = ? WHERE id = ?`, JSON.stringify(arr), nowStr(), id);
+  });
 }
 
 /** Helper combiné : met à jour étape+progress et logue. */
@@ -88,34 +137,80 @@ function isPidAlive(pid: number): boolean {
 
 const ACTIVE_STATES = "('queued','running','verifying','compiling')";
 const ZOMBIE_MSG = "Worker interrompu (process arrêté) — la génération ne tournait plus. Relance.";
+/** Un worker vivant qui n'a plus de heartbeat depuis ce délai est considéré bloqué. */
+const STALL_MS = 15 * 60_000;
 
 /**
- * V8 — ZÉRO JOB ZOMBIE : réconcilie les jobs « actifs » dont le worker n'est plus vivant.
- * Un job est zombie si (a) son PID est enregistré mais le process est mort, ou (b) il est resté
- * sans PID au-delà d'un délai franc (le worker n'a jamais démarré). On NE touche PAS aux jobs dont
- * le PID est vivant, même s'ils n'ont pas loggé depuis un moment (un appel Claude de 10 min ne
- * rapporte rien entre-temps → le PID vivant est le seul signal fiable). Appelé sur chaque lecture
- * (heartbeat via le polling de l'UI) et au démarrage du serveur (instrumentation).
+ * V8→Phase C — ZÉRO JOB ZOMBIE, ZÉRO RUN PERDU : réconcilie les jobs « actifs » dont le worker
+ * n'est plus vivant. Un job est zombie si (a) son PID est enregistré mais le process est mort,
+ * (b) il est resté sans PID au-delà d'un délai franc (le worker n'a jamais démarré), ou
+ * (c) son PID est « vivant » mais son heartbeat (posé toutes les 30 s par le worker) date de
+ * plus de STALL_MS — worker suspendu, ou PID recyclé par l'OS.
+ *
+ * Phase C : un zombie n'est plus condamné — tant que attempts < max_attempts il est RE-MIS EN
+ * FILE (checkpoint conservé → la reprise repart du dernier lot, sans doublon) ; la pompe
+ * (pumpQueuedJobs, appelée par instrumentation + polling) relance alors un worker. Au-delà
+ * du budget de tentatives → 'error' (bouton réessayer).
  */
 export async function reconcileStaleJobs(): Promise<number> {
   await ensureJobsSchema();
-  const rows = await q.all<{ id: number; pid: number | null; created_at: string; updated_at: string }>(
-    `SELECT id, pid, created_at, updated_at FROM jobs WHERE status IN ${ACTIVE_STATES}`,
+  const rows = await q.all<{ id: number; pid: number | null; created_at: string; updated_at: string; heartbeat_at: string | null; attempts: number; max_attempts: number }>(
+    `SELECT id, pid, created_at, updated_at, heartbeat_at, attempts, max_attempts FROM jobs WHERE status IN ${ACTIVE_STATES}`,
   );
   let fixed = 0;
   for (const r of rows) {
     let zombie = false;
     if (r.pid) {
       if (!isPidAlive(r.pid)) zombie = true; // worker mort
+      else if (r.heartbeat_at) {
+        // PID « vivant » mais plus aucun battement : worker suspendu ou PID recyclé.
+        const hbAge = Date.now() - new Date(r.heartbeat_at + "Z").getTime();
+        if (Number.isFinite(hbAge) && hbAge > STALL_MS) zombie = true;
+      }
     } else {
       // sans PID : le worker n'a jamais démarré → zombie si plus vieux que 120 s (startWorker persiste
       // le PID immédiatement après le spawn ; 2 min sans PID = spawn échoué).
       const ageMs = Date.now() - new Date((r.updated_at || r.created_at) + "Z").getTime();
       if (Number.isFinite(ageMs) && ageMs > 120_000) zombie = true;
     }
-    if (zombie) { await setJob(r.id, { status: "error", error: ZOMBIE_MSG }); await logJob(r.id, ZOMBIE_MSG); fixed++; }
+    if (!zombie) continue;
+    fixed++;
+    const attempts = r.attempts ?? 0;
+    const maxAttempts = r.max_attempts ?? 2;
+    if (attempts < maxAttempts) {
+      const msg = `Worker interrompu — reprise automatique (tentative ${attempts + 1}/${maxAttempts}), progression conservée.`;
+      await q.run(
+        `UPDATE jobs SET status = 'queued', pid = NULL, heartbeat_at = NULL, attempts = ?, current_step = ?, updated_at = ? WHERE id = ?`,
+        attempts + 1, msg, nowStr(), r.id,
+      );
+      await logJob(r.id, msg);
+    } else {
+      await setJob(r.id, { status: "error", error: ZOMBIE_MSG });
+      await logJob(r.id, ZOMBIE_MSG);
+    }
   }
   return fixed;
+}
+
+/**
+ * POMPE DE REPRISE (Phase C) : relance un worker pour les jobs re-mis en file par la
+ * réconciliation (queued, sans PID, pas tout frais). Appelée au boot + périodiquement
+ * (instrumentation.ts) et par le polling des routes jobs — PAS par reconcileStaleJobs
+ * (les tests de réconciliation ne doivent pas spawner de vrais workers).
+ */
+export async function pumpQueuedJobs(): Promise<number> {
+  await ensureJobsSchema();
+  const rows = await q.all<{ id: number; updated_at: string; created_at: string }>(
+    `SELECT id, updated_at, created_at FROM jobs WHERE status = 'queued' AND pid IS NULL AND attempts > 0`,
+  );
+  let started = 0;
+  for (const r of rows) {
+    const ageMs = Date.now() - new Date((r.updated_at || r.created_at) + "Z").getTime();
+    if (!Number.isFinite(ageMs) || ageMs < 5_000) continue; // laisse le spawn initial se poser
+    await startWorker(r.id);
+    started++;
+  }
+  return started;
 }
 
 export async function getJob(id: number): Promise<Job | null> {
@@ -131,12 +226,13 @@ export async function listJobs(limit = 10): Promise<Job[]> {
   return (await q.all<any>(`SELECT * FROM jobs ORDER BY id DESC LIMIT ?`, limit)).map(rowToJob);
 }
 
-/** Relance un job échoué/annulé : recrée un job de MÊME type+target et redémarre un worker. */
+/** Relance un job échoué/annulé : recrée un job de MÊME type+target et redémarre un worker.
+ * Exclusif : si un job du même type est déjà actif, on le renvoie au lieu d'en empiler un 2ᵉ. */
 export async function retryJob(id: number, course?: string): Promise<Job | null> {
   const old = await getJob(id);
   if (!old) return null;
-  const newId = await createJob(old.type, old.target ?? undefined);
-  await startWorker(newId, course);
+  const { id: newId, existing } = await createJobExclusive(old.type, old.target ?? undefined);
+  if (!existing) await startWorker(newId, course);
   return await getJob(newId);
 }
 
@@ -202,6 +298,7 @@ async function cleanupPartial(job: Job): Promise<void> {
   if (job.type === "exam") {
     try { fs.unlinkSync(path.join(examsDir(), ".gen-checkpoint.json")); } catch {}
   }
+  try { await saveJobCheckpoint(job.id, null); } catch {}
   try {
     // un examen fini a toujours html_path ; NULL + créé après le début du job = artefact partiel de CE job
     const orphans = await q.all<{ id: number }>(

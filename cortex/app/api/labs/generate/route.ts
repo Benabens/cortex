@@ -1,4 +1,4 @@
-import { activeJob, createJob, startWorker } from "@/lib/jobs";
+import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { labSeries, resolveLab } from "@/lib/labs";
 import { preflightGeneration } from "@/lib/preflight";
 import { useCourse } from "@/lib/req";
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
 
   const resolved = resolveLab(labStr || topicStr);
-  const jobId = await createJob("lab-exercise", JSON.stringify({ lab: resolved.id, topic: topicStr || undefined }));
+  const { id: jobId } = await createJobExclusive("lab-exercise", JSON.stringify({ lab: resolved.id, topic: topicStr || undefined }));
   try {
     await startWorker(jobId, course);
   } catch (e: any) {

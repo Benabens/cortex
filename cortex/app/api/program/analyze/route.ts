@@ -1,4 +1,4 @@
-import { activeJob, createJob, startWorker } from "@/lib/jobs";
+import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
 import { useCourse } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   const issue = await preflightGeneration();
   if (issue && issue.status !== 412) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
 
-  const jobId = await createJob("blueprint");
+  const { id: jobId } = await createJobExclusive("blueprint");
   try {
     await startWorker(jobId, course);
   } catch (e: any) {

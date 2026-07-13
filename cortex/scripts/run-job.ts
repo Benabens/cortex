@@ -11,7 +11,7 @@ import { q } from "../db/q";
 import { llmAvailable, llmUnavailableReason } from "../lib/llm";
 import { generateExamViaClaudeCode, generateTargetedExercise } from "../lib/exam";
 import { texAvailable } from "../lib/exam-latex";
-import { getJob, logJob, setJob } from "../lib/jobs";
+import { getJob, heartbeatJob, logJob, setJob } from "../lib/jobs";
 import { generateLabExercise } from "../lib/labs";
 import { analyzeBlueprint } from "../lib/program";
 
@@ -19,6 +19,12 @@ const jobId = Number(process.argv[2]);
 const COURSE = process.argv[3];
 // Cours du job (argv[3] ; CORTEX_COURSE est aussi posé par startWorker) → ouvre la BONNE DB.
 enterCourse(COURSE);
+
+// Phase C — battement de cœur : signal de vie même pendant un appel Claude de 10 min
+// (le PID seul ne détecte ni worker suspendu ni PID recyclé). unref → ne retient pas le process.
+const hb = setInterval(() => { heartbeatJob(jobId).catch(() => {}); }, 30_000);
+hb.unref();
+heartbeatJob(jobId).catch(() => {});
 
 async function fail(msg: string): Promise<never> {
   try { await setJob(jobId, { status: "error", error: msg }); await logJob(jobId, "ERREUR : " + msg); } catch {}
@@ -202,7 +208,7 @@ async function main() {
         ? await generateTargetedExercise(job.target ?? "", { onStep })
         : job.type === "lab-exercise"
           ? await generateLabExercise(job.target ?? "", { onStep })
-          : await generateExamViaClaudeCode({ count: examCount, onStep });
+          : await generateExamViaClaudeCode({ count: examCount, onStep, jobId });
     if (res.texError) {
       // le résultat existe (HTML lisible) mais le PDF a échoué → erreur LaTeX gardée pour debug
       await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, repli HTML lisible. Détail : ${res.texError.slice(0, 500)}` });
