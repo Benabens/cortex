@@ -1,396 +1,174 @@
 "use client";
 
-import CmdHint from "@/app/components/CmdHint";
-import { useCallback, useEffect, useRef, useState } from "react";
-
-type Exam = {
-  id: number; createdAt: string; status: string; questionCount: number;
-  url: string | null; solutionsUrl: string | null; verifySummary: string | null;
-};
-type Job = {
-  id: number; type: string; status: string; currentStep: string | null;
-  resultId?: number | null;
-  progress: number; resultPath: string | null; error: string | null;
-  log: { t: string; msg: string }[];
-};
-
-const MOCK_KEY = "cortex-mock";
-const fmt = (ms: number) => {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  return `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-};
-const ACTIVE = ["queued", "running", "verifying", "compiling"];
+import { FileCheck2, ExternalLink, CheckCircle2, ClipboardList, WifiOff, RotateCw, Trash2, FileText } from "lucide-react";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Panel, SectionHeader } from "@/components/ui/primitives";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { ExamComposer } from "@/components/examens/ExamComposer";
+import { useApi, useCourse, asText } from "@/lib/ux/api";
+import { formatDay } from "@/lib/ux/types";
+import type { ComposeResp, ExamsResp } from "@/lib/ux/exams";
+import { useState } from "react";
 
 export default function ExamensPage() {
-  const [exams, setExams] = useState<Exam[]>([]);
-  const [sched, setSched] = useState<{ total: number; due: number } | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [errCmd, setErrCmd] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
-  const [job, setJob] = useState<Job | null>(null);
-  const [dryBusy, setDryBusy] = useState(false);
-  const pollRef = useRef<any>(null);
-  const openedRef = useRef(false);
-  // mock chrono
-  const [mock, setMock] = useState<{ examId: number; endsAt: number } | null>(null);
-  const [now, setNow] = useState(Date.now());
-  const [finished, setFinished] = useState<number[]>([]);
-  // V6 — cours au format QCM (ex. ML/CS-233) : mock QCM interactif
-  const [format, setFormat] = useState<any>(null);
-  // V9 — COMPOSEUR : composition proposée (lue du format) + champs éditables.
-  const [plan, setPlan] = useState<any>(null);
-  const [qcmN, setQcmN] = useState<number | "">("");
-  const [openN, setOpenN] = useState<number | "">("");
-  const [focus, setFocus] = useState("");
-  const [exoN, setExoN] = useState<number | "">("");
-  const [qcmJob, setQcmJob] = useState<Job | null>(null);
-  const qcmPoll = useRef<any>(null);
-  const pollQcm = useCallback((id: number) => {
-    clearInterval(qcmPoll.current);
-    qcmPoll.current = setInterval(async () => {
-      try {
-        const j: Job = await (await fetch(`/api/jobs/${id}`)).json();
-        setQcmJob(j);
-        if (!ACTIVE.includes(j.status)) clearInterval(qcmPoll.current);
-      } catch {}
-    }, 2500);
-  }, []);
-  async function genQcm() {
-    setErr(null);
-    const count = qcmN === "" ? undefined : Number(qcmN);
-    const openCount = openN === "" ? undefined : Number(openN);
-    if ((count ?? 1) === 0 && (openCount ?? 1) === 0) { setErr("Composition vide : choisis au moins 1 QCM ou 1 ouverte."); return; }
+  const compose = useApi<ComposeResp>("/api/compose");
+  const exams = useApi<ExamsResp>("/api/exams");
+  const { courseId } = useCourse();
+  const [deleting, setDeleting] = useState<number | null>(null);
+
+  const removeExam = async (id: number) => {
+    if (deleting) return;
+    if (!window.confirm(`Supprimer l’examen #${id} ? Le PDF généré sera perdu.`)) return;
+    setDeleting(id);
     try {
-      const r = await fetch("/api/qcm/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ count, openCount, focus: focus.trim() || undefined }) });
-      const d = await r.json();
-      if (!r.ok) { setErr(d.error ?? "Échec"); return; }
-      if (d.jobId) { setQcmJob({ id: d.jobId, type: "qcm", status: "queued", currentStep: "Démarrage…", progress: 0, resultPath: null, error: null, log: [] } as any); pollQcm(d.jobId); }
-    } catch (e: any) { setErr(String(e.message ?? e)); }
-  }
-  // V7 — upload de finals → re-détection du format
-  const [fmtJob, setFmtJob] = useState<Job | null>(null);
-  const fmtPoll = useRef<any>(null);
-  async function uploadFinals(files: FileList | null) {
-    if (!files || !files.length) return;
-    setErr(null);
-    const fd = new FormData();
-    Array.from(files).forEach((f) => fd.append("file", f));
-    try {
-      const r = await fetch("/api/refs/upload", { method: "POST", body: fd });
-      const d = await r.json();
-      if (!r.ok) { setErr(d.error ?? "Upload échoué"); return; }
-      if (d.formatJobId) {
-        setFmtJob({ id: d.formatJobId, type: "format", status: "running", currentStep: `${d.files.length} final(s) ajouté(s) — re-détection du format…`, progress: 10, resultPath: null, error: null, log: [] } as any);
-        clearInterval(fmtPoll.current);
-        fmtPoll.current = setInterval(async () => {
-          try {
-            const j: Job = await (await fetch(`/api/jobs/${d.formatJobId}`)).json();
-            setFmtJob(j);
-            if (!ACTIVE.includes(j.status)) { clearInterval(fmtPoll.current); try { const f = await (await fetch("/api/qcm/generate")).json(); setFormat(f.format); } catch {} }
-          } catch {}
-        }, 2500);
-      }
-    } catch (e: any) { setErr(String(e.message ?? e)); }
-  }
-
-  // V8 — relance d'un job zombie/échoué : recrée un job de même type et re-poll.
-  async function retry(j: Job | null, kind: "exam" | "qcm") {
-    if (!j) return;
-    setErr(null);
-    try {
-      const r = await fetch(`/api/jobs/${j.id}/retry`, { method: "POST" });
-      const d = await r.json();
-      if (!r.ok || !d.jobId) { setErr(d.error ?? "Relance impossible"); return; }
-      const fresh = { id: d.jobId, type: kind, status: "queued", currentStep: "Relance…", progress: 0, resultPath: null, error: null, log: [] } as any;
-      if (kind === "qcm") { setQcmJob(fresh); pollQcm(d.jobId); }
-      else { setJob(fresh); openedRef.current = false; poll(d.jobId); }
-    } catch (e: any) { setErr(String(e.message ?? e)); }
-  }
-
-  const load = useCallback(async () => {
-    const d = await (await fetch("/api/exams")).json();
-    setExams(d.exams ?? []);
-    setSched(d.schedule ?? null);
-  }, []);
-
-  const poll = useCallback((id: number) => {
-    clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      try {
-        const j: Job = await (await fetch(`/api/jobs/${id}`)).json();
-        setJob(j);
-        if (!ACTIVE.includes(j.status)) {
-          clearInterval(pollRef.current);
-          if (j.status === "done") {
-            await load();
-            if (j.resultPath && !openedRef.current) { openedRef.current = true; window.open(j.resultPath, "_blank"); }
-          }
-        }
-      } catch {}
-    }, 2000);
-  }, [load]);
-
-  useEffect(() => {
-    load();
-    // reprise au reload : job examen actif ?
-    (async () => {
-      try {
-        const d = await (await fetch("/api/jobs?type=exam")).json();
-        if (d.active && ACTIVE.includes(d.active.status)) { setJob(d.active); openedRef.current = false; poll(d.active.id); }
-      } catch {}
-      // V6 — format du cours + reprise d'un job QCM
-      try { const f = await (await fetch("/api/qcm/generate")).json(); setFormat(f.format); } catch {}
-      // V9 — composition proposée (pré-remplie depuis le format détecté du cours)
-      try {
-        const { plan } = await (await fetch("/api/compose")).json();
-        setPlan(plan);
-        if (plan?.kind === "qcm") { setQcmN(plan.qcm ?? 12); setOpenN(plan.open ?? 0); }
-        else if (plan?.kind === "exam") { setExoN(plan.exercises ?? 6); }
-      } catch {}
-      try {
-        const d = await (await fetch("/api/jobs?type=qcm")).json();
-        if (d.active && ACTIVE.includes(d.active.status)) { setQcmJob(d.active); pollQcm(d.active.id); }
-        else { const last = (d.recent ?? []).find((j: any) => j.type === "qcm" && j.status === "done" && j.resultPath); if (last) setQcmJob(last); }
-      } catch {}
-    })();
-    try {
-      const m = JSON.parse(localStorage.getItem(MOCK_KEY) ?? "null");
-      if (m?.endsAt > Date.now()) setMock(m);
-    } catch {}
-    return () => { clearInterval(pollRef.current); clearInterval(qcmPoll.current); clearInterval(fmtPoll.current); };
-  }, [load, poll, pollQcm]);
-
-  useEffect(() => {
-    if (!mock) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [mock]);
-
-  async function generate() {
-    setErr(null);
-    setErrCmd(null);
-    setNote(null);
-    openedRef.current = false;
-    const count = exoN === "" ? undefined : Number(exoN); // V9 composeur CS-202 : nb d'exercices choisi
-    try {
-      const r = await fetch("/api/exams/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ count }) });
-      const d = await r.json();
-      if (!r.ok) { setErr(d.error ?? "Échec"); setErrCmd(d.command ?? null); return; }
-      if (d.jobId) { setJob({ id: d.jobId, type: "exam", status: "queued", currentStep: "Démarrage…", progress: 0, resultPath: null, error: null, log: [] }); poll(d.jobId); }
-    } catch (e: any) { setErr(String(e.message ?? e)); }
-  }
-  async function dryRun() {
-    setDryBusy(true); setErr(null);
-    try {
-      const r = await fetch("/api/exams/generate?dry=1", { method: "POST" });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error ?? "Échec");
-      await load();
-      if (d.url) window.open(d.url, "_blank");
-    } catch (e: any) { setErr(String(e.message ?? e)); } finally { setDryBusy(false); }
-  }
-  async function cancel() {
-    if (!job) return;
-    clearInterval(pollRef.current);
-    try { await fetch(`/api/jobs/${job.id}/cancel`, { method: "POST" }); } catch {}
-    setJob(null);
-    setNote("Génération annulée — le worker a été arrêté.");
-  }
-  async function remove(id: number) { await fetch(`/api/exams?id=${id}`, { method: "DELETE" }); await load(); }
-
-  function startMock(e: Exam) {
-    const m = { examId: e.id, endsAt: Date.now() + 180 * 60_000 };
-    setMock(m); localStorage.setItem(MOCK_KEY, JSON.stringify(m));
-    if (e.url) window.open(e.url, "_blank");
-  }
-  function finishMock(examId: number) { setFinished((f) => [...f, examId]); setMock(null); localStorage.removeItem(MOCK_KEY); }
-
-  const running = job && ACTIVE.includes(job.status);
+      await fetch(`/api/exams?id=${id}&course=${encodeURIComponent(courseId)}`, { method: "DELETE" });
+      exams.refetch();
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   return (
-    <main className="page page-narrow">
-      <header className="mb-6 rise">
-        <p className="eyebrow">Examens générés</p>
-        <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Un examen qui aurait pu tomber.</h1>
-        <p className="sub mt-2">Final blanc complet au format EPFL — figures verrouillées, difficulté calibrée, vérifié exo par exo.</p>
-      </header>
+    <div className="flex flex-col gap-7">
+      <PageHeader
+        title="Examens"
+        description="Compose un examen blanc au format réel du final, puis lance-le. Un examen qui aurait pu tomber."
+      />
 
-      {format?.has_mcq && (
-        <section className="card card-pad mb-6 rise">
-          <div className="flex items-center gap-2 mb-1">
-            <h2 className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>Composer un examen — format détecté</h2>
-            <span className="tag tag-blue">QCM + ouvert</span>
-          </div>
-          <p className="text-[13px] mb-1" style={{ color: "var(--ink-2)" }}>{plan?.summary ?? format.format_summary}</p>
-          <div className="flex flex-wrap gap-1.5 mb-3">
-            {(format.question_types ?? []).map((t: any, i: number) => (
-              <span key={i} className="chip" style={{ cursor: "default" }}>{t.type.toUpperCase()} ×{t.approx_count} · {t.share_pct}%</span>
+      {/* Compositeur ← GET /api/compose (plan réel, forme variable selon le cours) */}
+      {compose.loading ? (
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.55fr_1fr]" aria-busy="true">
+          <div className="skeleton h-96 rounded-xl" />
+          <div className="skeleton h-72 rounded-xl" />
+        </div>
+      ) : compose.error || !compose.data?.plan ? (
+        <Panel className="flex flex-col items-center gap-3 rounded-xl px-6 py-12 text-center">
+          <FileText className="size-6 text-ink-3" strokeWidth={2} />
+          <p className="text-[0.95rem] font-medium text-ink-1">
+            {compose.error ? "Le format du cours ne répond pas" : "Format d’examen non détecté"}
+          </p>
+          <p className="max-w-sm text-[0.85rem] leading-relaxed text-ink-3">
+            {compose.error
+              ? "Impossible de lire le format détecté pour ce cours. Réessaie dans un instant."
+              : "Cortex n’a pas encore détecté le format du final pour ce cours. Importe les annales puis prépare le cours."}
+          </p>
+          {compose.error ? (
+            <Button variant="secondary" size="sm" onClick={compose.refetch}>
+              <RotateCw className="size-4" strokeWidth={2.25} aria-hidden="true" />
+              Réessayer
+            </Button>
+          ) : (
+            <Button variant="primary" size="sm" href="/sources">
+              Préparer le cours
+            </Button>
+          )}
+        </Panel>
+      ) : (
+        <ExamComposer plan={compose.data.plan} onGenerated={exams.refetch} />
+      )}
+
+      {/* Examens prêts ← GET /api/exams (réel ; 500 possible sur cs-202) */}
+      <section>
+        <SectionHeader title="Examens prêts" hint="Générés à ton format, prêts à passer — énoncé et corrigé PDF." />
+
+        {exams.loading ? (
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2" aria-busy="true">
+            {[0, 1].map((i) => (
+              <div key={i} className="skeleton h-24 rounded-lg" />
             ))}
           </div>
-          {qcmJob && ACTIVE.includes(qcmJob.status) ? (
-            <div>
-              <div className="progress"><div className="progress-bar" style={{ width: `${qcmJob.progress}%` }} /></div>
-              <div className="mt-2 text-[13px]" style={{ color: "var(--ink-2)" }}>{qcmJob.currentStep}</div>
-            </div>
-          ) : (
-            <div>
-              <div className="flex flex-wrap items-end gap-4 mb-2">
-                <label className="flex flex-col gap-1 text-[12px]" style={{ color: "var(--ink-2)" }}>
-                  <span>QCM (SCQ + MCQ)</span>
-                  <input type="number" min={0} max={40} className="input" style={{ width: 96, fontSize: 14 }} value={qcmN}
-                    onChange={(e) => setQcmN(e.target.value === "" ? "" : Math.max(0, Math.min(40, Math.floor(Number(e.target.value)))))} />
-                </label>
-                <label className="flex flex-col gap-1 text-[12px]" style={{ color: "var(--ink-2)" }}>
-                  <span>questions ouvertes</span>
-                  <input type="number" min={0} max={10} className="input" style={{ width: 96, fontSize: 14 }} value={openN}
-                    onChange={(e) => setOpenN(e.target.value === "" ? "" : Math.max(0, Math.min(10, Math.floor(Number(e.target.value)))))} />
-                </label>
-              </div>
-              <input className="input mb-2" style={{ fontSize: 13 }} placeholder="(optionnel) focus thématique / point faible : « K-means », « régularisation »…" value={focus} onChange={(e) => setFocus(e.target.value)} />
-              <p className="text-[12px] mb-2" style={{ color: "var(--accent-ink)" }}>
-                → j'assemble <strong>{Number(qcmN) || 0} QCM</strong> + <strong>{Number(openN) || 0} ouverte(s)</strong>{focus.trim() ? <> sur «&nbsp;{focus.trim()}&nbsp;»</> : null}, au look d'un vrai final (site + PDF énoncé/corrigé){plan?.durationMin ? ` · ~${plan.durationMin} min` : ""}.
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <button className="btn btn-primary" onClick={genQcm}>✦ Composer l'examen</button>
-                {qcmJob?.status === "done" && qcmJob.resultPath && <>
-                  <a className="btn btn-ghost" href={qcmJob.resultPath}>ouvrir (site) →</a>
-                  {qcmJob.resultId && <a className="btn btn-quiet" style={{ color: "var(--blue)" }} href={`/exam/qcm-${qcmJob.resultId}.pdf?course=${plan?.course ?? "ml"}`} target="_blank" rel="noopener">PDF énoncé</a>}
-                  {qcmJob.resultId && <a className="btn btn-quiet" style={{ color: "var(--green)" }} href={`/exam/qcm-${qcmJob.resultId}-corrige.pdf?course=${plan?.course ?? "ml"}`} target="_blank" rel="noopener">PDF corrigé</a>}
-                </>}
-              </div>
-              <span className="text-[12px] mt-1 block" style={{ color: "var(--ink-3)" }}>tu remplis juste les nombres (pré-remplis avec le format détecté) · architecte QCM + ouvert · auto-corrigé · les retours QCM re-calibrent la suite</span>
-            </div>
-          )}
-          {qcmJob?.status === "error" && (
-            <p className="mt-2 text-[12px] flex items-center gap-2" style={{ color: "var(--red)" }}>
-              Échec : {qcmJob.error}
-              <button className="btn btn-quiet btn-sm" onClick={() => retry(qcmJob, "qcm")}>↻ réessayer</button>
+        ) : exams.error ? (
+          <Panel className="flex flex-col items-center gap-3 rounded-xl px-6 py-10 text-center">
+            <WifiOff className="size-6 text-danger-hi" strokeWidth={2} />
+            <p className="text-[0.95rem] font-medium text-ink-1">Impossible de lister les examens</p>
+            <p className="max-w-sm text-[0.85rem] text-ink-3">
+              Le moteur renvoie une erreur pour ce cours. Réessaie, ou change de cours.
             </p>
-          )}
-
-          {/* V7 — déposer des finals récents → re-détection du format, l'examen blanc se cale dessus */}
-          <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--line)" }}>
-            {fmtJob && ACTIVE.includes(fmtJob.status) ? (
-              <div>
-                <div className="progress"><div className="progress-bar" style={{ width: `${fmtJob.progress}%` }} /></div>
-                <div className="mt-2 text-[13px]" style={{ color: "var(--ink-2)" }}>{fmtJob.currentStep}</div>
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="chip cursor-pointer">
-                  📄 Déposer des finals (PDF)
-                  <input type="file" accept=".pdf,.html,.htm,.txt,.md" multiple className="hidden" onChange={(e) => { uploadFinals(e.target.files); e.target.value = ""; }} />
-                </label>
-                <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>tes vrais annales/finals → le format se re-cale dessus (sans les copier)</span>
-              </div>
-            )}
-            {fmtJob?.status === "done" && <p className="mt-2 text-[12px]" style={{ color: "var(--green)" }}>Format re-détecté ✓ — {fmtJob.currentStep}</p>}
-            {fmtJob?.status === "error" && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>Re-détection échouée : {fmtJob.error}</p>}
-          </div>
-        </section>
-      )}
-
-      {mock && (
-        <div className="card card-pad mb-5 flex items-center justify-between" style={{ borderColor: "var(--accent)" }}>
-          <div>
-            <div className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: "var(--accent-ink)" }}>Mock en cours — Examen #{mock.examId}</div>
-            <div className="text-[26px] font-bold tabular-nums" style={{ color: mock.endsAt - now < 15 * 60_000 ? "var(--red)" : "var(--ink)" }}>{fmt(mock.endsAt - now)}</div>
-            {mock.endsAt - now <= 0 && <div className="text-[12px]" style={{ color: "var(--red)" }}>Temps écoulé !</div>}
-          </div>
-          <button className="btn btn-primary" onClick={() => finishMock(mock.examId)}>Terminer → corrigé</button>
-        </div>
-      )}
-
-      <div className="card card-pad mb-7" style={plan?.kind === "qcm" ? { opacity: 0.92 } : undefined}>
-        {plan?.kind === "exam" ? (
-          <>
-            <h2 className="text-[15px] font-semibold mb-1" style={{ color: "var(--ink)" }}>Composer un examen — format détecté</h2>
-            <p className="text-[13px]" style={{ color: "var(--ink-2)" }}>{plan.summary}</p>
-            <p className="mt-1 text-[12px]" style={{ color: "var(--accent-ink)" }}>→ j'assemble <strong>{Number(exoN) || plan.exercises} exercice(s)</strong> calcul/trace au format des vrais finals EPFL, vérifiés exo par exo (site + PDF énoncé/corrigé).</p>
-          </>
-        ) : plan?.kind === "qcm" ? (
-          <p className="text-[13px] leading-relaxed" style={{ color: "var(--ink-2)" }}>
-            <strong style={{ color: "var(--ink)" }}>Secondaire</strong> — pour ce cours QCM, voici aussi un <strong style={{ color: "var(--ink)" }}>examen ouvert (calcul/trace)</strong>. La sortie principale est le composeur QCM ci-dessus.
-          </p>
+            <Button variant="secondary" size="sm" onClick={exams.refetch}>
+              <RotateCw className="size-4" strokeWidth={2.25} aria-hidden="true" />
+              Réessayer
+            </Button>
+          </Panel>
+        ) : !exams.data || exams.data.exams.length === 0 ? (
+          <Panel className="flex flex-col items-center gap-3 rounded-xl px-6 py-12 text-center">
+            <span className="grid size-11 place-items-center rounded-lg border border-line bg-surface-2/60 text-ink-3">
+              <ClipboardList className="size-5" strokeWidth={2} />
+            </span>
+            <p className="text-[0.95rem] font-medium text-ink-1">Aucun examen généré</p>
+            <p className="max-w-sm text-[0.85rem] leading-relaxed text-ink-3">
+              Compose ton premier blanc ci-dessus : Cortex l’assemble au format du vrai final,
+              le vérifie exo par exo, et te sort l’énoncé + le corrigé en PDF.
+            </p>
+          </Panel>
         ) : (
-          <p className="text-[14px] leading-relaxed" style={{ color: "var(--ink-2)" }}>
-            Examen inédit au format des vrais finals EPFL, vérifié exo par exo, généré via ton <strong style={{ color: "var(--ink)" }}>Max</strong>. La génération tourne <strong style={{ color: "var(--ink)" }}>en arrière-plan</strong> : tu peux recharger ou fermer l'onglet, elle continue.
-          </p>
-        )}
-        {sched && <p className="mt-2.5 text-[13px]" style={{ color: "var(--ink-3)" }}>Répétition espacée : <strong style={{ color: "var(--accent-ink)" }}>{sched.due}</strong> concept(s) à revoir sur {sched.total}.</p>}
-
-        {running ? (
-          <div className="mt-4">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[13px] font-medium" style={{ color: "var(--ink)" }}>Génération en cours…</span>
-              <button className="btn btn-quiet" onClick={cancel}>annuler</button>
-            </div>
-            <div className="progress">
-              <div className="progress-bar" style={{ width: `${job!.progress}%` }} />
-            </div>
-            <div className="mt-2 text-[13px]" style={{ color: "var(--ink-2)" }}>{job!.currentStep}</div>
-            {job!.log.length > 0 && (
-              <div className="mt-2 rounded-lg p-2 text-[11px] leading-relaxed max-h-32 overflow-auto" style={{ background: "var(--surface-2)", color: "var(--ink-3)" }}>
-                {job!.log.slice(-8).map((l, i) => <div key={i}>{l.msg}</div>)}
-              </div>
-            )}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {exams.data.exams.map((e) => {
+              const ready = e.status === "ready";
+              const summary = asText(e.verifySummary);
+              const day = formatDay(e.createdAt);
+              return (
+                <Panel key={e.id} className="flex items-center gap-4 p-4">
+                  <span
+                    className="grid size-11 shrink-0 place-items-center rounded-lg border border-line"
+                    style={{
+                      background: "color-mix(in oklch, var(--color-violet) 12%, var(--color-surface-2))",
+                      color: "var(--color-violet-hi)",
+                    }}
+                  >
+                    <FileCheck2 className="size-5" strokeWidth={2} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="truncate text-[0.95rem] font-semibold text-ink-1">Examen #{e.id}</h3>
+                      <Badge tone={ready ? "success" : "neutral"} Icon={ready ? CheckCircle2 : undefined} size="xs">
+                        {ready ? "Prêt" : e.status}
+                      </Badge>
+                    </div>
+                    <p className="mt-0.5 truncate text-[0.8rem] text-ink-3">
+                      {summary ?? `${e.questionCount} question${e.questionCount > 1 ? "s" : ""}`}
+                      {day ? ` · ${day}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {e.url && (
+                      <a
+                        href={e.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex h-10 items-center gap-1 rounded-md border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_38%,transparent)] hover:text-ink-1"
+                      >
+                        Énoncé
+                        <ExternalLink className="size-3.5" aria-hidden="true" />
+                      </a>
+                    )}
+                    {e.solutionsUrl && (
+                      <a
+                        href={e.solutionsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex h-10 items-center gap-1 rounded-md border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-emerald)_38%,transparent)] hover:text-ink-1"
+                      >
+                        Corrigé
+                        <ExternalLink className="size-3.5" aria-hidden="true" />
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeExam(e.id)}
+                      disabled={deleting === e.id}
+                      aria-label={`Supprimer l’examen #${e.id}`}
+                      className="grid size-10 place-items-center rounded-md border border-transparent text-ink-4 transition-colors hover:border-[color-mix(in_oklch,var(--color-danger)_35%,transparent)] hover:text-danger-hi disabled:opacity-50"
+                    >
+                      <Trash2 className="size-4" strokeWidth={2} />
+                    </button>
+                  </div>
+                </Panel>
+              );
+            })}
           </div>
-        ) : (
-          <div className="mt-4 flex flex-wrap items-end gap-3">
-            {plan?.kind === "exam" && (
-              <label className="flex flex-col gap-1 text-[12px]" style={{ color: "var(--ink-2)" }}>
-                <span>nombre d'exercices</span>
-                <input type="number" min={1} max={12} className="input" style={{ width: 96, fontSize: 14 }} value={exoN}
-                  onChange={(e) => setExoN(e.target.value === "" ? "" : Math.max(1, Math.min(12, Math.floor(Number(e.target.value)))))} />
-              </label>
-            )}
-            <button onClick={generate} className={plan?.kind === "qcm" ? "btn btn-ghost" : "btn btn-primary"}>{plan?.kind === "qcm" ? "examen ouvert (calcul)" : "✦ Composer l'examen"}</button>
-            <button onClick={dryRun} disabled={dryBusy} className="btn btn-quiet">{dryBusy ? "test…" : "tester le rendu (dry-run)"}</button>
-          </div>
         )}
-        {job?.status === "error" && (
-          <p className="mt-2.5 text-[12px] flex items-center gap-2" style={{ color: "var(--red)" }}>
-            Échec : {job.error}
-            <button className="btn btn-quiet btn-sm" onClick={() => retry(job, "exam")}>↻ réessayer</button>
-          </p>
-        )}
-        {err && <p className="mt-2.5 text-[12px]" style={{ color: "var(--red)" }}>{err}<CmdHint cmd={errCmd} /></p>}
-        {note && <p className="mt-2.5 text-[12px]" style={{ color: "var(--ink-3)" }}>{note}</p>}
-      </div>
-
-      {exams.length > 0 && <div className="section-head"><span className="section-title">Tes examens</span></div>}
-      <div className="card rise" style={{ padding: 8 }}>
-        {exams.length === 0 ? (
-          <div className="empty">
-            <div className="empty-ico">✦</div>
-            <div className="empty-title">Aucun examen pour l'instant</div>
-            <div className="empty-sub">Génère ton premier final blanc — il apparaîtra ici.</div>
-          </div>
-        ) : exams.map((e) => {
-          const revealed = finished.includes(e.id) || !e.solutionsUrl;
-          return (
-            <div key={e.id} className="t-row" style={{ gridTemplateColumns: "auto 1fr auto" }}>
-              <span className="icon-tile icon-tile-sm" style={{ fontSize: 14 }}>📄</span>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-[14px] font-semibold" style={{ color: "var(--ink)" }}>Examen #{e.id}</span>
-                  {e.verifySummary && <span className="tag tag-green" title={e.verifySummary}>vérifié</span>}
-                </div>
-                <div className="text-[11.5px] mt-0.5" style={{ color: "var(--ink-3)" }}>{e.questionCount} questions · {e.createdAt}</div>
-              </div>
-              <div className="flex shrink-0 items-center gap-1.5">
-                {e.url && <>
-                  <button onClick={() => startMock(e)} className="btn btn-ghost btn-sm" disabled={!!mock}>▶ Mock 3 h</button>
-                  <a href={e.url} target="_blank" rel="noopener" className="btn btn-quiet btn-sm" style={{ color: "var(--blue)" }}>sujet</a>
-                </>}
-                {e.solutionsUrl && revealed && <a href={e.solutionsUrl} target="_blank" rel="noopener" className="btn btn-quiet btn-sm" style={{ color: "var(--green)" }}>corrigé</a>}
-                {e.solutionsUrl && !revealed && <span className="text-[11px] px-2" style={{ color: "var(--ink-3)" }}>corrigé caché</span>}
-                <button onClick={() => remove(e.id)} className="btn btn-quiet btn-sm" title="supprimer">✕</button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </main>
+      </section>
+    </div>
   );
 }

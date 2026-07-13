@@ -1,445 +1,128 @@
 "use client";
 
-import CmdHint from "@/app/components/CmdHint";
-import { useCallback, useEffect, useRef, useState } from "react";
-
-const ACTIVE = ["queued", "running", "verifying", "compiling"];
-
-type TopicView = {
-  id: number;
-  label: string;
-  method: string | null;
-  exoType: string | null;
-  trap: string | null;
-  category: string | null;
-  archetype: string | null;
-  examWeight: number;
-  examCount: number;
-  source: string | null;
-  description: string | null;
-  mastery: number | null;
-  attempts: number;
-  lastScore: number | null;
-  lastExamId: number | null;
-  dueAt: string | null;
-  status: "never" | "due" | "ok";
-};
-type Stats = { total: number; covered: number; mastered: number; due: number; coveragePct: number; masteryPct: number };
-type Overview = { topics: TopicView[]; stats: Stats; next: TopicView | null; coverNext: TopicView | null };
-
-const STATUS: Record<TopicView["status"], { label: string; color: string }> = {
-  never: { label: "jamais vu", color: "var(--ink-3)" },
-  due: { label: "à revoir", color: "var(--accent-ink)" },
-  ok: { label: "à jour", color: "var(--green)" },
-};
-
-function masteryColor(m: number | null): string {
-  if (m == null) return "var(--ink-3)";
-  if (m < 4) return "var(--red)";
-  if (m < 7) return "var(--accent-ink)";
-  return "var(--green)";
-}
+import { Route, WifiOff, RotateCw, FolderUp } from "lucide-react";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Button } from "@/components/ui/Button";
+import { Panel } from "@/components/ui/primitives";
+import { ReanalyzeButton } from "@/components/programme/ReanalyzeButton";
+import { PrioritySpotlight } from "@/components/programme/PrioritySpotlight";
+import { ProgramExplorer } from "@/components/programme/ProgramExplorer";
+import { useApi } from "@/lib/ux/api";
+import { buildSections, flatten, stakeSharePct, type ProgramResp } from "@/lib/ux/program";
 
 export default function ProgrammePage() {
-  const [ov, setOv] = useState<Overview | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data, loading, error, refetch } = useApi<ProgramResp>("/api/program");
 
-  // V11 — déplier un type → ses exos indexés (de l'index exo-par-exo des finals).
-  type Exo = { id: number; examTitle: string; examYear: number | null; examPage: number | null; statement: string | null; examHref: string | null; courseHref: string | null };
-  const [expanded, setExpanded] = useState<number | null>(null);
-  const [exos, setExos] = useState<Record<number, Exo[]>>({});
-  async function toggleExos(id: number) {
-    if (expanded === id) { setExpanded(null); return; }
-    setExpanded(id);
-    if (!exos[id]) {
-      try {
-        const d = await (await fetch(`/api/program/exercises?topic=${id}`)).json();
-        setExos((m) => ({ ...m, [id]: d.exercises ?? [] }));
-      } catch { setExos((m) => ({ ...m, [id]: [] })); }
-    }
-  }
+  if (loading) return <ProgrammeSkeleton />;
 
-  // ---- analyse de blueprint ----
-  const [anaJob, setAnaJob] = useState<any>(null);
-  const anaPoll = useRef<any>(null);
-  const [anaErr, setAnaErr] = useState<string | null>(null);
-  const [anaCmd, setAnaCmd] = useState<string | null>(null);
-
-  // ---- entraînement (un exo à la fois, attribué à un type) ----
-  const [trainTopic, setTrainTopic] = useState<TopicView | null>(null);
-  const [trainQcm, setTrainQcm] = useState(false); // V10 — « M'entraîner » = QCM (cours QCM) vs exo ouvert (cs-202)
-  const [exoJob, setExoJob] = useState<any>(null);
-  const exoPoll = useRef<any>(null);
-  const [exoErr, setExoErr] = useState<string | null>(null);
-  const [exoCmd, setExoCmd] = useState<string | null>(null);
-  const [scored, setScored] = useState<{ topic: TopicView; nextDue: string | null } | null>(null);
-
-  const loadOverview = useCallback(async () => {
-    try {
-      const d = await (await fetch("/api/program")).json();
-      setOv(d);
-      return d as Overview;
-    } catch {
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const topicById = useCallback((id?: number) => ov?.topics.find((t) => t.id === id) ?? null, [ov]);
-
-  const pollExo = useCallback((id: number, topic: TopicView | null) => {
-    clearInterval(exoPoll.current);
-    setScored(null);
-    exoPoll.current = setInterval(async () => {
-      try {
-        const j = await (await fetch(`/api/jobs/${id}`)).json();
-        setExoJob(j);
-        if (!ACTIVE.includes(j.status)) {
-          clearInterval(exoPoll.current);
-          if (topic) setTrainTopic(topic);
-        }
-      } catch {}
-    }, 2000);
-  }, []);
-
-  const pollAna = useCallback((id: number) => {
-    clearInterval(anaPoll.current);
-    anaPoll.current = setInterval(async () => {
-      try {
-        const j = await (await fetch(`/api/jobs/${id}`)).json();
-        setAnaJob(j);
-        if (!ACTIVE.includes(j.status)) {
-          clearInterval(anaPoll.current);
-          await loadOverview();
-        }
-      } catch {}
-    }, 2500);
-  }, [loadOverview]);
-
-  // montage : overview + reprise des jobs actifs (blueprint / exo)
-  useEffect(() => {
-    (async () => {
-      const d = await loadOverview();
-      try {
-        const a = await (await fetch("/api/program/analyze")).json();
-        if (a.active && ACTIVE.includes(a.active.status)) { setAnaJob(a.active); pollAna(a.active.id); }
-      } catch {}
-      try {
-        const e = await (await fetch("/api/jobs?type=exercise")).json();
-        const tidOf = (job: any) => { try { return JSON.parse(job?.target ?? "{}")?.topicId as number | undefined; } catch { return undefined; } };
-        if (e.active) {
-          const topic = (d?.topics ?? []).find((t) => t.id === tidOf(e.active)) ?? null;
-          setExoJob(e.active);
-          if (topic) setTrainTopic(topic);
-          if (ACTIVE.includes(e.active.status)) pollExo(e.active.id, topic);
-        } else {
-          // reprise au reload : dernier exo d'entraînement TERMINÉ mais pas encore noté → ré-affiche le panneau de score.
-          const last = (e.recent ?? []).find((j: any) => j.status === "done" && j.resultPath && tidOf(j));
-          if (last) {
-            const topic = (d?.topics ?? []).find((t) => t.id === tidOf(last)) ?? null;
-            if (topic && topic.lastExamId !== last.resultId) { setExoJob(last); setTrainTopic(topic); }
-          }
-        }
-      } catch {}
-    })();
-    return () => { clearInterval(exoPoll.current); clearInterval(anaPoll.current); };
-  }, [loadOverview, pollAna, pollExo]);
-
-  async function analyze() {
-    setAnaErr(null); setAnaCmd(null);
-    try {
-      const r = await fetch("/api/program/analyze", { method: "POST" });
-      const d = await r.json();
-      if (!r.ok) { setAnaErr(d.error ?? "Échec"); setAnaCmd(d.command ?? null); return; }
-      if (d.jobId) { setAnaJob({ id: d.jobId, status: "queued", progress: 0, currentStep: "Démarrage…" }); pollAna(d.jobId); }
-    } catch (e: any) { setAnaErr(String(e.message ?? e)); }
-  }
-
-  async function train(topic: TopicView) {
-    setExoErr(null); setExoCmd(null); setScored(null); setExoJob(null);
-    setTrainTopic(topic);
-    try {
-      const r = await fetch("/api/program/train", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ topicId: topic.id }) });
-      const d = await r.json();
-      if (!r.ok) { setExoErr(d.error ?? "Échec"); setExoCmd(d.command ?? null); return; }
-      setTrainQcm(!!d.qcm);
-      if (d.jobId) { setExoJob({ id: d.jobId, status: "queued", progress: 0, currentStep: "Démarrage…", resultPath: null }); pollExo(d.jobId, topic); }
-    } catch (e: any) { setExoErr(String(e.message ?? e)); }
-  }
-
-  async function cancelExo() {
-    if (!exoJob) return;
-    clearInterval(exoPoll.current);
-    try { await fetch(`/api/jobs/${exoJob.id}/cancel`, { method: "POST" }); } catch {}
-    setExoJob(null);
-  }
-
-  async function score(topic: TopicView, value: number) {
-    try {
-      const r = await fetch("/api/program/score", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ topicId: topic.id, score: value, examId: exoJob?.resultId }),
-      });
-      const d = await r.json();
-      if (!r.ok) { setExoErr(d.error ?? "Échec"); return; }
-      setScored({ topic: d.topic, nextDue: d.topic?.dueAt ?? null });
-      setExoJob(null);
-      setTrainTopic(null);
-      await loadOverview();
-    } catch (e: any) { setExoErr(String(e.message ?? e)); }
-  }
-
-  const analyzing = anaJob && ACTIVE.includes(anaJob.status);
-  const exoActive = exoJob && ACTIVE.includes(exoJob.status);
-  const stats = ov?.stats;
-  const empty = !loading && (ov?.topics.length ?? 0) === 0;
-
-  return (
-    <main className="page">
-      <header className="mb-6 rise">
-        <p className="eyebrow">Programme &amp; Maîtrise</p>
-        <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Couvre tout le programme — au bon moment.</h1>
-        <p className="text-[14px] mt-2" style={{ color: "var(--ink-2)", maxWidth: 680 }}>
-          Cortex lit les vrais finals et en déduit les <strong style={{ color: "var(--ink)" }}>types d'exos</strong> et leur <strong style={{ color: "var(--ink)" }}>poids</strong>. Tu t'entraînes, tu te notes 0-10, et la <strong style={{ color: "var(--ink)" }}>courbe de l'oubli</strong> te re-propose un exo NEUF sur tes faiblesses au bon moment.
-        </p>
-      </header>
-
-      {/* V10 — skeleton de chargement : jamais de page blanche pendant le fetch */}
-      {loading && (
-        <div className="rise" aria-hidden>
-          <div className="card card-pad mb-6"><div className="grid gap-5" style={{ gridTemplateColumns: "1fr 1fr" }}><div className="skeleton" style={{ height: 52 }} /><div className="skeleton" style={{ height: 52 }} /></div></div>
-          <div className="card" style={{ padding: 8 }}>
-            {Array.from({ length: 6 }).map((_, i) => <div key={i} className="skeleton" style={{ height: 46, borderRadius: 10, margin: "6px 4px" }} />)}
-          </div>
-        </div>
-      )}
-
-      {/* ---------- état vide : analyser le programme ---------- */}
-      {empty && (
-        <section className="card card-pad mb-8">
-          <h2 className="text-[15px] font-semibold mb-1" style={{ color: "var(--ink)" }}>Dresser la carte de la matière</h2>
-          <p className="text-[13px] mb-3" style={{ color: "var(--ink-2)" }}>
-            Une passe IA (ton Max) classe chaque exercice des vrais finals en un type/méthode et en compte la fréquence → une taxonomie typée &amp; pondérée. Ingère d'abord le cours (cours + séries + finals).
+  if (error || !data) {
+    return (
+      <Panel className="mx-auto mt-10 flex max-w-md flex-col items-center gap-4 p-8 text-center">
+        <span className="grid size-12 place-items-center rounded-full border border-line bg-surface-2/60 text-danger-hi">
+          <WifiOff className="size-5" strokeWidth={2} aria-hidden="true" />
+        </span>
+        <div>
+          <h1 className="text-[1.15rem] font-semibold">Impossible de charger le programme</h1>
+          <p className="mt-1.5 text-[0.88rem] leading-relaxed text-ink-3">
+            Le moteur ne répond pas pour ce cours. Réessaie, ou change de cours.
           </p>
-          {analyzing ? (
-            <Progress job={anaJob} />
-          ) : (
-            <button className="btn btn-primary" onClick={analyze}>✦ Analyser le programme</button>
-          )}
-          {anaErr && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>{anaErr}<CmdHint cmd={anaCmd} /></p>}
-        </section>
-      )}
+        </div>
+        <Button variant="secondary" onClick={refetch}>
+          <RotateCw className="size-4" strokeWidth={2.25} aria-hidden="true" />
+          Réessayer
+        </Button>
+      </Panel>
+    );
+  }
 
-      {/* ---------- barres de progression globales ---------- */}
-      {!empty && stats && (
-        <section className="card card-pad mb-6">
-          <div className="grid gap-5" style={{ gridTemplateColumns: "1fr 1fr" }}>
-            <Meter label="Couverture du programme" sub={`${stats.covered}/${stats.total} types abordés`} pct={stats.coveragePct} color="var(--blue)" />
-            <Meter label="Maîtrise (pondérée poids examen)" sub={`${stats.mastered}/${stats.total} types maîtrisés`} pct={stats.masteryPct} color="var(--green)" />
+  const sections = buildSections(data.topics);
+  const flat = flatten(sections);
+
+  // Rien d'exploitable (cours non analysé ou données corrompues) → état qui enseigne.
+  if (flat.length === 0) {
+    return (
+      <div className="flex flex-col gap-7">
+        <PageHeader
+          title="Programme"
+          description="Le syllabus du cours, déduit des annales et pondéré par ce qui tombe vraiment à l’examen."
+        />
+        <Panel className="flex flex-col items-center gap-4 p-10 text-center">
+          <span className="grid size-12 place-items-center rounded-full border border-line bg-surface-2/60 text-violet-hi">
+            <FolderUp className="size-5" strokeWidth={2} aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="text-[1.1rem] font-semibold">Aucun programme pour ce cours</h2>
+            <p className="mx-auto mt-1.5 max-w-sm text-[0.88rem] leading-relaxed text-ink-3">
+              Cortex n’a pas encore de syllabus exploitable ici. Importe les annales puis
+              lance la préparation : il en déduira les types d’exos et leur poids.
+            </p>
           </div>
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            {ov?.coverNext && !exoActive && (
-              <button className="btn btn-primary" onClick={() => train(ov.coverNext!)}>
-                ▸ Parcours : travailler « {ov.coverNext.label.slice(0, 36)} »
-              </button>
-            )}
-            {ov?.next && ov.next.id !== ov.coverNext?.id && !exoActive && (
-              <button className="btn btn-ghost" onClick={() => train(ov.next!)}>recommandé : {ov.next.label.slice(0, 32)}</button>
-            )}
-            {!analyzing ? (
-              <button className="btn btn-quiet" onClick={analyze}>↻ ré-analyser</button>
-            ) : (
-              <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>ré-analyse en cours…</span>
-            )}
-          </div>
-          {analyzing && <div className="mt-3"><Progress job={anaJob} /></div>}
-          {anaErr && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>{anaErr}<CmdHint cmd={anaCmd} /></p>}
-        </section>
-      )}
+          <Button variant="primary" href="/sources">
+            Préparer le cours
+          </Button>
+        </Panel>
+      </div>
+    );
+  }
 
-      {/* ---------- panneau d'entraînement actif ---------- */}
-      {(exoActive || (exoJob && trainTopic) || scored) && (
-        <section className="card card-pad mb-6" style={{ borderColor: "var(--accent)" }}>
-          {trainTopic && (
-            <div className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: "var(--accent-ink)" }}>
-              Entraînement · {trainTopic.label}
-            </div>
-          )}
-          {exoActive ? (
-            <div>
-              <Progress job={exoJob} />
-              <div className="mt-2 flex items-center justify-between gap-3">
-                <div className="text-[13px]" style={{ color: "var(--ink-2)" }}>{exoJob.currentStep}</div>
-                <button className="btn btn-quiet" onClick={cancelExo}>annuler</button>
-              </div>
-            </div>
-          ) : exoJob?.status === "done" && exoJob.resultPath && trainTopic ? (
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                {trainQcm ? (
-                  <>
-                    <span className="text-[13px]" style={{ color: "var(--green)" }}>Lot QCM prêt ✓ (auto-corrigé)</span>
-                    <a className="btn btn-ghost" href={exoJob.resultPath} target="_blank" rel="noopener">ouvrir le mock QCM →</a>
-                  </>
-                ) : (
-                  <>
-                    <span className="text-[13px]" style={{ color: "var(--green)" }}>Exercice prêt ✓</span>
-                    <a className="btn btn-ghost" href={exoJob.resultPath} target="_blank" rel="noopener">ouvrir l'énoncé (PDF)</a>
-                    <a className="btn btn-quiet" style={{ color: "var(--green)" }} href={exoJob.resultPath.replace(/(\.pdf)(\?|$)/, "-corrige$1$2")} target="_blank" rel="noopener">corrigé</a>
-                  </>
-                )}
-              </div>
-              <div className="mt-4">
-                <div className="text-[13px] mb-2" style={{ color: "var(--ink)" }}>{trainQcm ? <>Fais le mock (auto-corrigé), puis <strong>note ta maîtrise</strong> de 0 à 10 :</> : <>Fais l'exo, corrige-toi, puis <strong>note ta maîtrise</strong> de 0 à 10 :</>}</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {Array.from({ length: 11 }, (_, i) => i).map((v) => (
-                    <button key={v} className="btn btn-quiet" onClick={() => score(trainTopic, v)}
-                      style={{ minWidth: 38, justifyContent: "center", borderColor: "var(--line)", color: masteryColor(v) }}>
-                      {v}
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-2 text-[12px]" style={{ color: "var(--ink-3)" }}>0-3 → revient demain · 4-6 → revient vite · 7-10 → intervalle long (courbe de l'oubli).</p>
-              </div>
-            </div>
-          ) : exoJob?.status === "error" ? (
-            <p className="text-[12px]" style={{ color: "var(--red)" }}>Échec : {exoJob.error}</p>
-          ) : null}
-          {exoErr && <p className="mt-2 text-[12px]" style={{ color: "var(--red)" }}>{exoErr}<CmdHint cmd={exoCmd} /></p>}
-        </section>
-      )}
+  const stakeShare = stakeSharePct(flat);
+  const stats = [
+    { label: "Maîtrise pondérée", value: `${data.stats.masteryPct} %`, sub: `sur ${data.stats.total} types`, tone: "text-ink-1" },
+    { label: "Programme couvert", value: `${data.stats.covered}/${data.stats.total}`, sub: `${flat.filter((t) => t.status === "JAMAIS_VU").length} jamais vus`, tone: "text-ink-1" },
+    { label: "Examen en jeu", value: `${stakeShare} %`, sub: "encore à prendre", tone: "text-violet-hi" },
+    { label: "Types solides", value: `${data.stats.mastered}`, sub: "maîtrisés", tone: "text-emerald-hi" },
+  ];
 
-      {scored && (
-        <section className="card card-pad mb-6">
-          <div className="text-[13px]" style={{ color: "var(--ink)" }}>
-            Noté ✓ « <strong>{scored.topic.label}</strong> » — maîtrise désormais{" "}
-            <strong style={{ color: masteryColor(scored.topic.mastery) }}>{scored.topic.mastery ?? "—"}/10</strong>
-            {scored.nextDue && <> · à revoir le <strong>{new Date(scored.nextDue).toLocaleDateString()}</strong></>}.
-          </div>
-        </section>
-      )}
-
-      {/* ---------- table par type ---------- */}
-      {!empty && ov && (
-        <section className="card card-pad">
-          <h2 className="text-[15px] font-semibold mb-3" style={{ color: "var(--ink)" }}>Types d'exercices — par poids à l'examen</h2>
-          <div className="space-y-1">
-            {ov.topics.map((t) => (
-              <div key={t.id} className="rounded-lg px-3 py-2.5" style={{ border: "1px solid var(--line)", background: "var(--surface)" }}>
-                <div className="flex items-start gap-3">
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[14px] font-medium" style={{ color: "var(--ink)" }}>{t.label}</span>
-                      {t.category && <span className="badge" style={{ background: "transparent", border: "1px solid var(--line)", color: "var(--ink-3)" }}>{t.category}</span>}
-                      <span className="badge" style={{ background: "transparent", border: `1px solid ${STATUS[t.status].color}`, color: STATUS[t.status].color }}>{STATUS[t.status].label}</span>
-                    </div>
-                    {t.method && <div className="text-[12px] mt-0.5" style={{ color: "var(--ink-2)" }}>{t.method}</div>}
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                      {t.exoType && <span className="tag tag-blue" title="format réel de l'exo à l'examen">📐 {t.exoType}</span>}
-                      {t.trap && <span className="tag tag-amber" title="piège typique de ce type">⚠ {t.trap.length > 64 ? t.trap.slice(0, 64) + "…" : t.trap}</span>}
-                    </div>
-                    <div className="mt-1.5 flex items-center gap-3 text-[12px]" style={{ color: "var(--ink-3)" }}>
-                      <span title="poids à l'examen">⚖ {t.examWeight}%{t.examCount ? ` · ${t.examCount}× en final` : t.source !== "final" ? ` · ${t.source}` : ""}</span>
-                      <span title="tentatives">▷ {t.attempts ? `${t.attempts} exo${t.attempts > 1 ? "s" : ""}` : "jamais fait"}</span>
-                      {t.mastery != null && <span title="dernier score">dernier : {t.lastScore}/10</span>}
-                    </div>
-                    {/* barre de poids examen */}
-                    <div className="progress mt-2" style={{ height: 4 }}>
-                      <div className="progress-bar" style={{ width: `${Math.min(100, t.examWeight * 3)}%`, background: "var(--blue)" }} />
-                    </div>
-                    {/* V11 — déplier : la liste de CHAQUE exo de ce type, avec lien PDF + lien cours */}
-                    {t.examCount > 0 && (
-                      <button className="btn btn-quiet btn-sm mt-1.5" style={{ color: "var(--blue)", padding: "2px 0" }} onClick={() => toggleExos(t.id)}>
-                        {expanded === t.id ? "▾ masquer les exos" : `▸ voir les ${t.examCount} exo${t.examCount > 1 ? "s" : ""} des finals`}
-                      </button>
-                    )}
-                    {expanded === t.id && (
-                      <div className="mt-2 space-y-1.5">
-                        {!exos[t.id] ? (
-                          <div className="skeleton" style={{ height: 40 }} />
-                        ) : exos[t.id].length === 0 ? (
-                          <div className="text-[12px]" style={{ color: "var(--ink-3)" }}>Aucun exo rattaché.</div>
-                        ) : exos[t.id].map((e) => (
-                          <div key={e.id} className="inset" style={{ padding: "8px 10px" }}>
-                            <div className="flex items-center gap-2 flex-wrap text-[12px]">
-                              <span className="tag tag-blue">{e.examTitle?.slice(0, 28)}{e.examYear ? ` ${e.examYear}` : ""}{e.examPage ? ` · p.${e.examPage}` : ""}</span>
-                              {e.examHref && <a className="btn btn-quiet btn-sm" style={{ color: "var(--accent-ink)" }} href={e.examHref} target="_blank" rel="noopener">ouvrir l'exo (PDF) →</a>}
-                              {e.courseHref && <a className="btn btn-quiet btn-sm" style={{ color: "var(--green)" }} href={e.courseHref} target="_blank" rel="noopener">voir dans le cours</a>}
-                            </div>
-                            {e.statement && <div className="text-[12px] mt-1" style={{ color: "var(--ink-2)" }}>{e.statement.length > 160 ? e.statement.slice(0, 160) + "…" : e.statement}</div>}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ textAlign: "right", minWidth: 96 }}>
-                    <div className="text-[20px] font-semibold" style={{ color: masteryColor(t.mastery) }}>
-                      {t.mastery == null ? "—" : t.mastery}<span className="text-[12px]" style={{ color: "var(--ink-3)" }}>/10</span>
-                    </div>
-                    <button className="btn btn-ghost mt-1" style={{ fontSize: 12 }} disabled={exoActive} onClick={() => train(t)}>
-                      M'entraîner
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <Learned />
-    </main>
-  );
-}
-
-/** V5 — récap « ce que Cortex a appris de tes retours » (mémoire de calibration). */
-function Learned() {
-  const [data, setData] = useState<{ total: number; byArchetype: { archetype: string | null; counts: Record<string, number>; lessons: string[]; notes: string[] }[] } | null>(null);
-  useEffect(() => { (async () => { try { setData(await (await fetch("/api/feedback")).json()); } catch {} })(); }, []);
-  if (!data || !data.total) return null;
   return (
-    <section className="card card-pad" style={{ marginTop: 20 }}>
-      <div className="section-head"><span className="section-title">Ce que Cortex a appris de tes retours</span><span className="tag tag-blue">{data.total} retour{data.total > 1 ? "s" : ""}</span></div>
-      <div className="flex flex-col gap-2.5">
-        {data.byArchetype.map((a) => (
-          <div key={a.archetype} className="inset" style={{ padding: 12 }}>
-            <div className="flex items-center gap-2 mb-1">
-              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{a.archetype}</span>
-              <span className="text-[11.5px]" style={{ color: "var(--ink-3)" }}>
-                juste {a.counts.good ?? 0} · trop facile {a.counts.too_easy ?? 0} · pas le style {a.counts.not_prof_style ?? 0} · faux {a.counts.wrong ?? 0}
-              </span>
-            </div>
-            {a.lessons.map((l, i) => <div key={i} className="text-[12.5px]" style={{ color: "var(--ink-2)" }}>• {l}</div>)}
-            {a.notes.length > 0 && <div className="text-[12px] mt-1" style={{ color: "var(--accent-ink)" }}>Tes notes : {a.notes.map((n) => `« ${n} »`).join(" ; ")}</div>}
+    <div className="flex flex-col gap-7">
+      <PageHeader
+        title="Programme"
+        description="Le syllabus du cours, trié par ce qui rapporte le plus à l’examen. Chaque type est pondéré par les annales."
+      >
+        <Button variant="primary" href="/entrainement">
+          <Route className="size-4" strokeWidth={2.5} />
+          Lancer un parcours
+        </Button>
+        <ReanalyzeButton onDone={refetch} />
+      </PageHeader>
+
+      {/* summary strip — chiffres réels de /api/program (stake dérivé, cf. MAPPING) */}
+      <Panel className="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-line p-0 md:grid-cols-4">
+        {stats.map((s) => (
+          <div key={s.label} className="bg-surface-1 px-5 py-4">
+            <div className="text-[0.68rem] font-medium uppercase tracking-wider text-ink-3">{s.label}</div>
+            <div className={`mt-1.5 font-data text-[1.7rem] font-semibold leading-none ${s.tone}`}>{s.value}</div>
+            <div className="mt-1 text-[0.75rem] text-ink-3">{s.sub}</div>
           </div>
         ))}
-      </div>
-      <p className="text-[12px] mt-3" style={{ color: "var(--ink-3)" }}>Ces leçons sont injectées dans la conception des prochains exos du même type — l'outil s'ajuste à mesure que tu donnes des retours.</p>
-    </section>
-  );
-}
+      </Panel>
 
-function Meter({ label, sub, pct, color }: { label: string; sub: string; pct: number; color: string }) {
-  return (
-    <div>
-      <div className="flex items-baseline justify-between">
-        <span className="text-[13px] font-medium" style={{ color: "var(--ink)" }}>{label}</span>
-        <span className="text-[18px] font-semibold" style={{ color }}>{pct}%</span>
-      </div>
-      <div className="progress mt-1.5">
-        <div className="progress-bar" style={{ width: `${pct}%`, background: color }} />
-      </div>
-      <div className="text-[12px] mt-1" style={{ color: "var(--ink-3)" }}>{sub}</div>
+      <PrioritySpotlight types={flat} maxWeight={Math.max(...flat.map((t) => t.weightPct), 1)} />
+
+      <ProgramExplorer sections={sections} />
     </div>
   );
 }
 
-function Progress({ job }: { job: any }) {
+function ProgrammeSkeleton() {
   return (
-    <div>
-      <div className="progress"><div className="progress-bar" style={{ width: `${job?.progress ?? 0}%` }} /></div>
-      <div className="text-[13px] mt-2" style={{ color: "var(--ink-2)" }}>{job?.currentStep ?? "…"}</div>
+    <div className="flex flex-col gap-7" aria-busy="true" aria-label="Chargement du programme">
+      <div>
+        <div className="skeleton h-3.5 w-52" />
+        <div className="skeleton mt-3 h-9 w-64" />
+        <div className="skeleton mt-3 h-4 w-[28rem] max-w-full" />
+      </div>
+      <div className="skeleton h-24 rounded-xl" />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="skeleton h-48 rounded-xl" />
+        ))}
+      </div>
+      <div className="flex flex-col gap-4">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="skeleton h-56 rounded-lg" />
+        ))}
+      </div>
     </div>
   );
 }

@@ -1,20 +1,45 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { Space_Grotesk, Inter } from "next/font/google";
 import "./globals.css";
-import Nav from "./components/Nav";
+import "./legacy-compat.css";
+import { AppShell } from "@/components/shell/AppShell";
+
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-space-grotesk",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
+
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: "Cortex — Computer Systems",
-  description: "Second cerveau de révision : recherche, faiblesses, examens générés.",
+  title: "cortex — révise ce qui tombe vraiment",
+  description:
+    "Cortex — apprentissage par répétition espacée. Sais toujours quoi réviser ensuite.",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0c0d15",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="fr" className="h-full antialiased">
-      <body className="min-h-full flex flex-col">
-        <Nav />
-        <div className="flex-1">{children}</div>
+    <html
+      lang="fr"
+      className={`${spaceGrotesk.variable} ${inter.variable} h-full antialiased`}
+    >
+      <body className="min-h-full">
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );
