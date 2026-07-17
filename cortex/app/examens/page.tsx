@@ -38,7 +38,11 @@ export default function ExamensPage() {
 
       {/* Compositeur ← GET /api/compose (plan réel, forme variable selon le cours) */}
       {compose.loading ? (
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.55fr_1fr]" aria-busy="true">
+        <div
+          className="grid grid-cols-1 gap-5 lg:grid-cols-[1.55fr_1fr]"
+          aria-busy="true"
+          aria-label="Chargement des examens"
+        >
           <div className="skeleton h-96 rounded-xl" />
           <div className="skeleton h-72 rounded-xl" />
         </div>
@@ -73,7 +77,11 @@ export default function ExamensPage() {
         <SectionHeader title="Examens prêts" hint="Générés à ton format, prêts à passer — énoncé et corrigé PDF." />
 
         {exams.loading ? (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2" aria-busy="true">
+          <div
+            className="grid grid-cols-1 gap-3 md:grid-cols-2"
+            aria-busy="true"
+            aria-label="Chargement des examens prêts"
+          >
             {[0, 1].map((i) => (
               <div key={i} className="skeleton h-24 rounded-lg" />
             ))}

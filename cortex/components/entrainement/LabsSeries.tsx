@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { FlaskConical, Sparkles, ExternalLink, AlertTriangle } from "lucide-react";
+import { FlaskConical, Sparkles, ExternalLink, AlertTriangle, RotateCw } from "lucide-react";
 import { Panel, SectionHeader } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { WeightBar } from "@/components/viz/WeightBar";
@@ -72,7 +72,11 @@ export function LabsSeries() {
         hint="Les 8 % Labs du final : un exo neuf au moule Q6 2025, sur le vrai code de tes labs."
       />
       {loading ? (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2" aria-busy="true">
+        <div
+          className="grid grid-cols-1 gap-3 md:grid-cols-2"
+          aria-busy="true"
+          aria-label="Chargement de la série Labs"
+        >
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className="skeleton h-20 rounded-lg" />
           ))}
@@ -82,6 +86,7 @@ export function LabsSeries() {
           <AlertTriangle className="size-5 text-danger-hi" strokeWidth={2} />
           <p className="text-[0.9rem] text-ink-2">La série Labs ne répond pas.</p>
           <Button variant="secondary" size="sm" onClick={refetch}>
+            <RotateCw className="size-4" strokeWidth={2.25} aria-hidden="true" />
             Réessayer
           </Button>
         </Panel>

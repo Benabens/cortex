@@ -5,39 +5,47 @@ function greetingNow(): string {
   return h < 5 ? "Bonne nuit" : h < 12 ? "Bonjour" : h < 18 ? "Bon après-midi" : "Bonsoir";
 }
 
-/** En-tête contextuel — cours réel, salutation par heure, phrase honnête sur la couverture. */
+/**
+ * En-tête de l'Accueil : le cours réel, une salutation heure-aware (la touche humaine),
+ * et — seulement s'il existe et qu'il est à venir — un compte à rebours d'examen discret.
+ *
+ * Plus de phrase sur la couverture (« Tu couvres 0 % du programme ») : une métrique de
+ * jugement dès la 2e ligne, et le héro juste en dessous dit déjà quoi faire.
+ */
 export function Greeting({
   course,
-  coveragePct,
-  analyzed,
+  countdown,
 }: {
   course: DashCourse;
-  coveragePct: number;
-  analyzed: boolean;
+  countdown: { date: string; days: number } | null;
 }) {
+  const days = countdown?.days;
+  // Examen passé (days < 0) → on n'affiche rien : un « dans −31 jours » n'informe personne.
+  const exam =
+    days == null || days < 0
+      ? null
+      : days === 0
+        ? "Final aujourd’hui"
+        : days === 1
+          ? "Final demain"
+          : `Final dans ${days} jours`;
+
   return (
     <div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8rem] text-ink-3">
         <span>{course.examCode}</span>
         <span className="text-ink-4">·</span>
         <span>{course.name}</span>
-      </div>
-      <h1 className="mt-2 text-[1.9rem] font-semibold leading-tight sm:text-[2.15rem]">
-        {greetingNow()}.
-      </h1>
-      <p className="mt-2 max-w-xl text-[0.95rem] text-ink-2">
-        {!analyzed ? (
-          <>Prépare ce cours pour que Cortex sache quoi te faire réviser.</>
-        ) : coveragePct > 0 ? (
+        {exam && (
           <>
-            Tu couvres{" "}
-            <span className="font-data font-semibold text-ink-1">{coveragePct} %</span> du
-            programme. Ta priorité du jour t’attend juste en dessous.
+            <span className="text-ink-4">·</span>
+            <span>{exam}</span>
           </>
-        ) : (
-          <>Tout le programme reste à couvrir — ta priorité du jour t’attend juste en dessous.</>
         )}
-      </p>
+      </div>
+      {/* Une politesse, pas un titre : le plus gros caractère de l'écran doit être la notion
+          à travailler (le héro), pas « Bonsoir ». Reste le h1 sémantique de la page. */}
+      <h1 className="mt-1.5 text-[1.35rem] font-semibold leading-tight">{greetingNow()}.</h1>
     </div>
   );
 }

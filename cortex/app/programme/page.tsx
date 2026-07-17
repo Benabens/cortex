@@ -16,17 +16,13 @@ export default function ProgrammePage() {
 
   if (error || !data) {
     return (
-      <Panel className="mx-auto mt-10 flex max-w-md flex-col items-center gap-4 p-8 text-center">
-        <span className="grid size-12 place-items-center rounded-full border border-line bg-surface-2/60 text-danger-hi">
-          <WifiOff className="size-5" strokeWidth={2} aria-hidden="true" />
-        </span>
-        <div>
-          <h1 className="text-[1.15rem] font-semibold">Impossible de charger le programme</h1>
-          <p className="mt-1.5 text-[0.88rem] leading-relaxed text-ink-3">
-            Le moteur ne répond pas pour ce cours. Réessaie, ou change de cours.
-          </p>
-        </div>
-        <Button variant="secondary" onClick={refetch}>
+      <Panel className="flex flex-col items-center gap-3 rounded-xl px-6 py-12 text-center">
+        <WifiOff className="size-6 text-danger-hi" strokeWidth={2} aria-hidden="true" />
+        <p className="text-[0.95rem] font-medium text-ink-1">Impossible de charger le programme</p>
+        <p className="max-w-xs text-[0.85rem] leading-relaxed text-ink-3">
+          Le moteur ne répond pas pour ce cours. Réessaie, ou change de cours.
+        </p>
+        <Button variant="secondary" size="sm" onClick={refetch}>
           <RotateCw className="size-4" strokeWidth={2.25} aria-hidden="true" />
           Réessayer
         </Button>
@@ -44,17 +40,16 @@ export default function ProgrammePage() {
           title="Programme"
           description="Les notions qui tombent aux finals, extraites des annales."
         />
-        <Panel className="flex flex-col items-center gap-4 p-10 text-center">
-          <span className="grid size-12 place-items-center rounded-full border border-line bg-surface-2/60 text-violet-hi">
+        {/* Recette d'état vide commune (chip 11 · 0,95rem · corps 0,85rem), cf. Examens/Sources/Faiblesses. */}
+        <Panel className="flex flex-col items-center justify-center gap-3 rounded-xl px-6 py-16 text-center">
+          <span className="grid size-11 place-items-center rounded-lg border border-line bg-surface-2/60 text-ink-3">
             <FolderUp className="size-5" strokeWidth={2} aria-hidden="true" />
           </span>
-          <div>
-            <h2 className="text-[1.1rem] font-semibold">Aucune notion analysée pour ce cours</h2>
-            <p className="mx-auto mt-1.5 max-w-sm text-[0.88rem] leading-relaxed text-ink-3">
-              Importe les annales, puis lance « Ré-analyser les annales » : Cortex lit chaque final et
-              en extrait les notions qui tombent, avec les liens vers l’examen et le cours.
-            </p>
-          </div>
+          <p className="text-[0.95rem] font-medium text-ink-1">Aucune notion analysée pour ce cours</p>
+          <p className="max-w-sm text-[0.85rem] leading-relaxed text-ink-3">
+            Importe les annales, puis lance « Ré-analyser les annales » : Cortex lit chaque final et
+            en extrait les notions qui tombent, avec les liens vers l’examen et le cours.
+          </p>
           <Button variant="primary" href="/sources">
             Ajouter des annales
           </Button>

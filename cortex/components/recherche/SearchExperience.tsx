@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, X, CornerDownLeft, Sparkles, SlidersHorizontal, WifiOff } from "lucide-react";
+import { Search, X, CornerDownLeft, Sparkles, SlidersHorizontal, WifiOff, RotateCw } from "lucide-react";
 import { useApi, useCourse } from "@/lib/ux/api";
 import { SUGGEST, metaFor, hitHref, snippetParts, type SearchResp, type Hit } from "@/lib/ux/search";
 import { toneVar } from "@/lib/ux/labels";
@@ -230,6 +230,7 @@ export function SearchExperience() {
           <p className="text-[0.95rem] font-medium text-ink-1">La recherche ne répond pas</p>
           <p className="max-w-xs text-[0.85rem] text-ink-3">Réessaie dans un instant.</p>
           <Button variant="secondary" size="sm" onClick={refetch}>
+            <RotateCw className="size-4" strokeWidth={2.25} aria-hidden="true" />
             Réessayer
           </Button>
         </div>

@@ -15,8 +15,9 @@ export function ProgramExplorer({ types }: { types: UiType[] }) {
   const blocks = sectionBlocks(types);
   const flat = byPriority(types);
   const meta = typesMeta(types);
-  // honnêteté : si certaines notions n'ont pas de position de cours, le tri « par section » est approximatif.
-  const partialOrder = mode === "section" && meta.anyOrder && blocks.some((b) => !b.ordered);
+  // Aucune notion rattachée à un passage de cours → le tri « par section » ne peut pas être
+  // l'ordre du cours : on le dit une fois, et on ne floute pas chaque bloc d'un flag inutile.
+  const noOrderAtAll = mode === "section" && !meta.anyOrder;
 
   return (
     <div>
@@ -35,22 +36,32 @@ export function ProgramExplorer({ types }: { types: UiType[] }) {
         </div>
         <p className="text-[0.76rem] text-ink-4">
           <span className="font-data tabular text-ink-3">{meta.total}</span> notion{meta.total > 1 ? "s" : ""}
-          {mode === "section" ? " · ordre du cours" : " · les plus tombées d’abord"}
+          {mode === "section"
+            ? meta.anyOrder
+              ? " · ordre du cours"
+              : " · ordre indicatif"
+            : " · les plus tombées d’abord"}
         </p>
       </div>
 
       {mode === "section" ? (
         <div className="space-y-4">
-          {partialOrder && (
+          {noOrderAtAll && (
             <p className="text-[0.76rem] text-ink-4">
-              Ordre du cours approximatif — certaines notions ne sont pas encore rattachées à un passage précis.
+              Aucune notion n’est encore rattachée à un passage de cours — les sections sont listées
+              par ordre alphabétique.
             </p>
           )}
           {blocks.map((b, i) => (
             <Panel key={b.section ?? `__none-${i}`} className="overflow-hidden p-0">
               {b.section && (
-                <div className="border-b border-line bg-surface-2/30 px-4 py-3">
+                <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-b border-line bg-surface-2/30 px-4 py-3">
                   <h3 className="text-[0.95rem] font-semibold text-ink-1">{b.section}</h3>
+                  {/* Flag discret, posé exactement où il s'applique : cette section contient des
+                      notions sans passage de cours connu (reléguées en fin de bloc). */}
+                  {meta.anyOrder && b.approx && (
+                    <span className="text-[0.7rem] text-ink-4">ordre approximatif</span>
+                  )}
                 </div>
               )}
               <div className="p-1.5 sm:p-2">
