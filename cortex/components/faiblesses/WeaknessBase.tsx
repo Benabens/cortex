@@ -53,7 +53,7 @@ export function WeaknessBase({
     <section>
       <SectionHeader
         title="Base des faiblesses"
-        hint="Toutes tes lacunes suivies, les plus sévères d’abord."
+        hint="Regroupées par thème, dans l’ordre du programme — filtre par sévérité si besoin."
       />
 
       {weaknesses.length === 0 ? (
@@ -97,7 +97,13 @@ export function WeaknessBase({
             ) : (
               rows
                 .slice()
-                .sort((a, b) => b.severity - a.severity)
+                // ordre du programme, best-effort : regroupé par thème (les lacunes sans thème en
+                // fin — seul le minage de discussion renseigne `theme`), récent d'abord dans un thème.
+                .sort((a, b) => {
+                  const ta = a.theme ?? "￿", tb = b.theme ?? "￿";
+                  if (ta !== tb) return ta.localeCompare(tb);
+                  return (b.loggedAt ?? "").localeCompare(a.loggedAt ?? "");
+                })
                 .map((w, i) => {
                   const sev = SEVERITY[sevOf(w.severity)];
                   const chips = relatedChips(w.related);

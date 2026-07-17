@@ -1,52 +1,73 @@
 "use client";
 
 import { useState } from "react";
-import { LayoutList, ArrowDownWideNarrow } from "lucide-react";
+import { LayoutList, Flame } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
-import { WeightBar } from "@/components/viz/WeightBar";
 import { TypeRow } from "./TypeRow";
-import { byPriority, flatten, type SectionAgg } from "@/lib/ux/program";
+import { byPriority, sectionBlocks, typesMeta, type UiType } from "@/lib/ux/program";
 import { cn } from "@/lib/ux/cn";
 
 type Mode = "section" | "priority";
 
-/** Explorateur du syllabus réel : par section (catégorie) ou par priorité (points à gagner). */
-export function ProgramExplorer({ sections }: { sections: SectionAgg[] }) {
+/** Explorateur des notions réelles : par section (ordre du cours) ou par priorité (le plus tombé). */
+export function ProgramExplorer({ types }: { types: UiType[] }) {
   const [mode, setMode] = useState<Mode>("section");
-  const flat = flatten(sections);
-  const maxWeight = Math.max(...flat.map((t) => t.weightPct), 1);
-  const prioritized = byPriority(flat);
+  const blocks = sectionBlocks(types);
+  const flat = byPriority(types);
+  const meta = typesMeta(types);
+  // honnêteté : si certaines notions n'ont pas de position de cours, le tri « par section » est approximatif.
+  const partialOrder = mode === "section" && meta.anyOrder && blocks.some((b) => !b.ordered);
 
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div
           role="group"
-          aria-label="Trier le programme"
+          aria-label="Trier les notions"
           className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface-1/60 p-1"
         >
           <ToggleBtn active={mode === "section"} onClick={() => setMode("section")} Icon={LayoutList}>
             Par section
           </ToggleBtn>
-          <ToggleBtn active={mode === "priority"} onClick={() => setMode("priority")} Icon={ArrowDownWideNarrow}>
+          <ToggleBtn active={mode === "priority"} onClick={() => setMode("priority")} Icon={Flame}>
             Par priorité
           </ToggleBtn>
         </div>
-
-        <Legend />
+        <p className="text-[0.76rem] text-ink-4">
+          <span className="font-data tabular text-ink-3">{meta.total}</span> notion{meta.total > 1 ? "s" : ""}
+          {mode === "section" ? " · ordre du cours" : " · les plus tombées d’abord"}
+        </p>
       </div>
 
       {mode === "section" ? (
-        <div key="section" className="space-y-4">
-          {sections.map((sec, si) => (
-            <SectionGroup key={sec.n} sec={sec} maxWeight={maxWeight} indexBase={si * 2} />
+        <div className="space-y-4">
+          {partialOrder && (
+            <p className="text-[0.76rem] text-ink-4">
+              Ordre du cours approximatif — certaines notions ne sont pas encore rattachées à un passage précis.
+            </p>
+          )}
+          {blocks.map((b, i) => (
+            <Panel key={b.section ?? `__none-${i}`} className="overflow-hidden p-0">
+              {b.section && (
+                <div className="border-b border-line bg-surface-2/30 px-4 py-3">
+                  <h3 className="text-[0.95rem] font-semibold text-ink-1">{b.section}</h3>
+                </div>
+              )}
+              <div className="p-1.5 sm:p-2">
+                {b.types.map((t, j) => (
+                  <div key={t.key} className={cn(j > 0 && "border-t border-line")}>
+                    <TypeRow t={t} />
+                  </div>
+                ))}
+              </div>
+            </Panel>
           ))}
         </div>
       ) : (
-        <Panel key="priority" className="p-2 sm:p-3">
-          {prioritized.map((t, i) => (
+        <Panel className="p-1.5 sm:p-2">
+          {flat.map((t, i) => (
             <div key={t.key} className={cn(i > 0 && "border-t border-line")}>
-              <TypeRow t={t} maxWeight={maxWeight} index={i} />
+              <TypeRow t={t} />
             </div>
           ))}
         </Panel>
@@ -79,76 +100,5 @@ function ToggleBtn({
       <Icon className="size-4" strokeWidth={2} />
       {children}
     </button>
-  );
-}
-
-function Legend() {
-  return (
-    <div className="flex items-center gap-3 text-[0.72rem] text-ink-3">
-      <span className="inline-flex items-center gap-1.5">
-        <span
-          className="inline-block h-2 w-3 rounded-full"
-          style={{ background: "linear-gradient(90deg, var(--color-emerald), var(--color-cyan))" }}
-        />
-        maîtrisé
-      </span>
-      <span className="inline-flex items-center gap-1.5">
-        <span
-          className="inline-block h-2 w-3 rounded-full"
-          style={{ background: "color-mix(in oklch, var(--color-violet) 42%, var(--color-surface-3))" }}
-        />
-        à gagner
-      </span>
-      <span className="hidden text-ink-4 sm:inline">— longueur ∝ poids à l’examen</span>
-    </div>
-  );
-}
-
-function SectionGroup({
-  sec,
-  maxWeight,
-  indexBase,
-}: {
-  sec: SectionAgg;
-  maxWeight: number;
-  indexBase: number;
-}) {
-  return (
-    <Panel className="overflow-hidden p-0">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-surface-2/30 px-4 py-3.5">
-        <div className="flex items-center gap-3">
-          <span className="grid size-8 place-items-center rounded-lg border border-line bg-surface-2 font-data text-[0.85rem] font-semibold text-ink-2">
-            {sec.n}
-          </span>
-          <div>
-            <h3 className="text-[1rem] font-semibold text-ink-1">{sec.section}</h3>
-            <p className="text-[0.76rem] text-ink-3">
-              {sec.coveredCount}/{sec.types.length} types vus ·{" "}
-              <span className="font-data text-ink-2">≈ {sec.sharePct} %</span> de l’examen
-            </p>
-          </div>
-        </div>
-        <div className="w-40 shrink-0">
-          <div className="mb-1 flex items-center justify-between text-[0.72rem]">
-            <span className="text-ink-3">Maîtrise</span>
-            <span className="font-data font-semibold text-ink-2">{sec.masteryWeighted} %</span>
-          </div>
-          <WeightBar
-            pct={sec.masteryWeighted}
-            from="var(--color-emerald)"
-            to="var(--color-cyan)"
-            height={6}
-          />
-        </div>
-      </div>
-
-      <div className="p-2 sm:p-2.5">
-        {sec.types.map((t, i) => (
-          <div key={t.key} className={cn(i > 0 && "border-t border-line")}>
-            <TypeRow t={t} maxWeight={maxWeight} index={indexBase + i} />
-          </div>
-        ))}
-      </div>
-    </Panel>
   );
 }

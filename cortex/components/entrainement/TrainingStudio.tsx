@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Target,
-  DraftingCompass,
   Sparkles,
   FileText,
   CheckSquare,
@@ -14,6 +13,7 @@ import {
   CloudOff,
   AlertTriangle,
   Check,
+  X,
 } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
@@ -27,29 +27,27 @@ import {
 } from "@/lib/ux/training";
 import { cn } from "@/lib/ux/cn";
 
-type Mode = "drill" | "architecte";
-
 /**
- * Studio d'entraînement RÉEL :
- * — Drill : concept (dus / faiblesses / libre) → POST /api/drill (sync, Claude Max)
- *   → question au format examen + 5 indices progressifs + solution.
- * — Architecte : consigne et/ou image → POST /api/exercises/generate (JOB) → PDF.
- * — Retour difficulté → POST /api/feedback (vocabulaire réel du back).
+ * Studio d'entraînement RÉEL — UNE seule zone (REFONTE ALLÉGÉE, plus de mode Drill/Architecte).
+ * Tu donnes un concept, une consigne, une image, ou tu piques une puce (dus / faiblesses) →
+ * Cortex produit un exo AU FORMAT DU FINAL, avec les indices progressifs en OPTION sur le résultat.
+ *  - texte seul  → POST /api/drill (sync) : énoncé + 5 indices progressifs + solution ;
+ *  - avec image  → POST /api/exercises/generate (JOB) : énoncé/corrigé PDF (pipeline architecte).
+ * Retour difficulté → POST /api/feedback (recalibre la difficulté).
  */
 export function TrainingStudio() {
   const { courseId } = useCourse();
   const list = useApi<DrillListResp>("/api/drill");
 
-  const [mode, setMode] = useState<Mode>("drill");
-  const [concept, setConcept] = useState("");
+  const [input, setInput] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [image, setImage] = useState<File | null>(null);
+
   const [drill, setDrill] = useState<Drill | null>(null);
   const [drilling, setDrilling] = useState(false);
   const [shownHints, setShownHints] = useState(0);
   const [showSolution, setShowSolution] = useState(false);
 
-  const [target, setTarget] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [image, setImage] = useState<File | null>(null);
   const [jobId, setJobId] = useState<number | null>(null);
   const [launching, setLaunching] = useState(false);
   const job = useJob(jobId);
@@ -61,53 +59,42 @@ export function TrainingStudio() {
   const [fbSent, setFbSent] = useState<string | null>(null);
   const [fbBusy, setFbBusy] = useState(false);
 
-  // reset au changement de cours
+  const busy = drilling || jobRunning;
+
   useEffect(() => {
-    setDrill(null);
-    setJobId(null);
-    setError(null);
-    setFbSent(null);
-    setConcept("");
-    setShownHints(0);
-    setShowSolution(false);
+    setDrill(null); setJobId(null); setError(null); setFbSent(null);
+    setInput(""); setImage(null); setShownHints(0); setShowSolution(false);
   }, [courseId]);
 
-  // Deep-link ?drill=<concept> (utilisé par les boutons « Drill » des Faiblesses).
+  // Deep-link ?drill=<concept> (boutons « Drill » des Faiblesses).
   const autolaunched = useRef(false);
   useEffect(() => {
     if (autolaunched.current) return;
     const c = new URLSearchParams(window.location.search).get("drill");
     if (c && c.trim()) {
       autolaunched.current = true;
-      setMode("drill");
-      setConcept(c.trim());
+      setInput(c.trim());
       launchDrill(c.trim());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function launchDrill(c?: string) {
-    const chosen = (c ?? concept).trim();
-    if (!chosen || drilling) return;
-    setError(null);
-    setDrill(null);
-    setFbSent(null);
-    setShownHints(0);
-    setShowSolution(false);
+    const chosen = (c ?? input).trim();
+    if (!chosen || busy) return;
+    setError(null); setDrill(null); setJobId(null); setFbSent(null);
+    setShownHints(0); setShowSolution(false);
     setDrilling(true);
     try {
-      const d = await apiPost<{ ok: boolean; drill: Drill }>("/api/drill", courseId, {
-        concept: chosen,
-      });
+      const d = await apiPost<{ ok: boolean; drill: Drill }>("/api/drill", courseId, { concept: chosen });
       setDrill(d.drill);
     } catch (e) {
       const err = e as ApiError;
       setError({
         offline: err.status === 503,
-        message:
-          err.status === 503
-            ? "Claude Max n’est pas joignable. Lance Cortex sur ta machine connectée, puis réessaie."
-            : err.message || "La génération du drill a échoué. Réessaie.",
+        message: err.status === 503
+          ? "Claude Max n’est pas joignable. Lance Cortex sur ta machine connectée, puis réessaie."
+          : err.message || "La génération a échoué. Réessaie.",
       });
     } finally {
       setDrilling(false);
@@ -115,67 +102,52 @@ export function TrainingStudio() {
   }
 
   async function launchArchitect() {
-    if (jobRunning) return;
-    if (!target.trim() && !image) {
-      setError({ offline: false, message: "Donne un sujet ou une image d’exercice." });
-      return;
-    }
-    setError(null);
-    setFbSent(null);
-    setJobId(null);
+    if (busy) return;
+    setError(null); setDrill(null); setFbSent(null); setJobId(null);
     setLaunching(true);
     try {
-      let res: Response;
-      if (image) {
-        const fd = new FormData();
-        if (target.trim()) fd.append("target", target.trim());
-        fd.append("image", image);
-        res = await fetch(`/api/exercises/generate?course=${encodeURIComponent(courseId)}`, {
-          method: "POST",
-          body: fd,
-        });
-      } else {
-        res = await fetch(`/api/exercises/generate?course=${encodeURIComponent(courseId)}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ target: target.trim() }),
-        });
-      }
+      const fd = new FormData();
+      if (input.trim()) fd.append("target", input.trim());
+      if (image) fd.append("image", image);
+      const res = await fetch(`/api/exercises/generate?course=${encodeURIComponent(courseId)}`, { method: "POST", body: fd });
       const d = await res.json().catch(() => null);
-      if (!res.ok) {
-        const err: ApiError & { command?: string } = {
-          status: res.status,
-          message: d?.error ?? `Erreur ${res.status}`,
-        };
-        throw err;
-      }
+      if (!res.ok) throw { status: res.status, message: d?.error ?? `Erreur ${res.status}` } as ApiError;
       setJobId(d.jobId);
     } catch (e) {
       const err = e as ApiError;
       setError({
         offline: err.status === 503,
-        message:
-          err.status === 503
-            ? "Claude Max n’est pas joignable — impossible de générer pour l’instant."
-            : err.message || "Impossible de lancer la génération.",
+        message: err.status === 503
+          ? "Claude Max n’est pas joignable — impossible de générer pour l’instant."
+          : err.message || "Impossible de lancer la génération.",
       });
     } finally {
       setLaunching(false);
     }
   }
 
+  const submit = () => {
+    if (busy) return;
+    if (!input.trim() && !image) {
+      setError({ offline: false, message: "Donne un concept, une consigne, ou une image d’exercice." });
+      return;
+    }
+    // avec image → pipeline architecte (PDF) ; sinon → drill (énoncé + indices progressifs).
+    if (image) launchArchitect();
+    else launchDrill();
+  };
+
   async function sendFeedback(verdict: string) {
     if (fbBusy || fbSent) return;
     setFbBusy(true);
     try {
       await apiPost("/api/feedback", courseId, {
-        examId: jobDone ? job?.resultPath && (job as { resultId?: number }).resultId : undefined,
-        topic: drill?.concept ?? (target.trim() || undefined),
+        examId: jobDone ? (job as { resultId?: number }).resultId : undefined,
+        topic: drill?.concept ?? (input.trim() || undefined),
         verdict,
       });
       setFbSent(verdict);
     } catch {
-      /* le retour est best-effort : pas bloquant */
       setFbSent(verdict);
     } finally {
       setFbBusy(false);
@@ -188,106 +160,55 @@ export function TrainingStudio() {
 
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.15fr_1fr]">
-      {/* ── Composeur ── */}
+      {/* ── Zone unique d'entrée ── */}
       <Panel className="p-5 sm:p-6">
-        <div className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface-1/60 p-1">
-          <ModeBtn active={mode === "drill"} onClick={() => setMode("drill")} Icon={Target}>
-            Drill ciblé
-          </ModeBtn>
-          <ModeBtn active={mode === "architecte"} onClick={() => setMode("architecte")} Icon={DraftingCompass}>
-            Architecte
-          </ModeBtn>
+        <div className="flex items-center gap-2">
+          <Target className="size-4 text-violet-hi" strokeWidth={2.5} />
+          <h2 className="text-[1.05rem] font-semibold text-ink-1">Génère un exo à travailler</h2>
+        </div>
+        <p className="mt-1 text-[0.86rem] text-ink-2">
+          Un concept, une consigne, ou une image — Cortex produit un exo au format du final.
+        </p>
+
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          rows={3}
+          aria-label="Concept, consigne ou énoncé à travailler"
+          placeholder="Ex. « rétropropagation », « max-flow avec une coupe » — ou colle une consigne / un énoncé…"
+          className="mt-4 w-full resize-none rounded-lg border border-line-strong bg-surface-2/40 p-3.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] focus:outline-none focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-violet)_28%,transparent)]"
+        />
+
+        {/* image optionnelle (→ pipeline PDF) */}
+        <div className="mt-3">
+          {image ? (
+            <span className="inline-flex h-10 max-w-full items-center gap-2 rounded-md border border-[color-mix(in_oklch,var(--color-emerald)_40%,transparent)] bg-surface-2/50 px-3 text-[0.82rem] text-ink-1">
+              <ImagePlus className="size-4 shrink-0 text-emerald-hi" strokeWidth={2} />
+              <span className="truncate">{image.name}</span>
+              <button type="button" onClick={() => { setImage(null); if (fileRef.current) fileRef.current.value = ""; }} aria-label="Retirer l’image" className="grid size-5 shrink-0 place-items-center rounded text-ink-3 hover:text-ink-1">
+                <X className="size-3.5" strokeWidth={2.5} />
+              </button>
+            </span>
+          ) : (
+            <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-line-strong bg-surface-2/40 px-3 text-[0.82rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_40%,transparent)] hover:text-ink-1">
+              <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" onChange={(e) => setImage(e.target.files?.[0] ?? null)} />
+              <ImagePlus className="size-4" strokeWidth={2} />
+              Image d’énoncé (optionnelle)
+            </label>
+          )}
         </div>
 
-        {mode === "drill" ? (
-          <div className="mt-4 space-y-4">
-            <div>
-              <label htmlFor="drill-concept" className="mb-2 block text-[0.8rem] font-medium text-ink-2">
-                Concept à travailler
-              </label>
-              <input
-                id="drill-concept"
-                value={concept}
-                onChange={(e) => setConcept(e.target.value)}
-                placeholder="Ex. rétropropagation, max-flow, inode…"
-                className="w-full rounded-lg border border-line-strong bg-surface-2/40 px-3.5 py-2.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] focus:outline-none focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-violet)_28%,transparent)]"
-              />
-            </div>
-
-            {list.loading ? (
-              <div className="flex flex-wrap gap-2" aria-busy="true">
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="skeleton h-9 w-28 rounded-full" />
-                ))}
-              </div>
-            ) : list.error ? (
-              <p className="text-[0.8rem] text-ink-3">
-                Les suggestions ne répondent pas pour ce cours — entre un concept librement.
-              </p>
-            ) : (
-              <>
-                {dueChips.length > 0 && (
-                  <ChipGroup label="À réviser (dus)" chips={dueChips} onPick={(c) => setConcept(c)} selected={concept} />
-                )}
-                {weakChips.length > 0 && (
-                  <ChipGroup label="Tes faiblesses" chips={weakChips} onPick={(c) => setConcept(c)} selected={concept} />
-                )}
-                {dueChips.length === 0 && weakChips.length === 0 && (
-                  <p className="text-[0.8rem] text-ink-3">
-                    Rien de dû pour l’instant — entre un concept librement, Cortex fera le reste.
-                  </p>
-                )}
-              </>
-            )}
-          </div>
-        ) : (
+        {/* puces : dus / faiblesses réels */}
+        {!list.loading && !list.error && (dueChips.length > 0 || weakChips.length > 0) && (
           <div className="mt-4 space-y-3">
-            <textarea
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-              rows={3}
-              aria-label="Consigne pour générer un exercice"
-              placeholder="Décris l’exo à générer : thème précis, consigne, énoncé de référence…"
-              className="w-full resize-none rounded-lg border border-line-strong bg-surface-2/40 p-3.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] focus:outline-none focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-violet)_28%,transparent)]"
-            />
-            <label
-              className={cn(
-                "flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed px-4 py-5 text-center transition-colors",
-                image
-                  ? "border-[color-mix(in_oklch,var(--color-emerald)_45%,transparent)] bg-surface-2/50"
-                  : "border-line-strong bg-surface-2/30 hover:border-[color-mix(in_oklch,var(--color-violet)_45%,transparent)] hover:bg-surface-2/50"
-              )}
-            >
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp,image/gif"
-                className="sr-only"
-                onChange={(e) => setImage(e.target.files?.[0] ?? null)}
-              />
-              <ImagePlus className={cn("size-5", image ? "text-emerald-hi" : "text-ink-3")} strokeWidth={1.75} />
-              <span className="text-[0.82rem] text-ink-2">
-                {image ? image.name : "Image d’énoncé à imiter (optionnelle)"}
-              </span>
-            </label>
+            {dueChips.length > 0 && <ChipGroup label="À réviser (dus)" chips={dueChips} onPick={setInput} selected={input} />}
+            {weakChips.length > 0 && <ChipGroup label="Tes faiblesses" chips={weakChips} onPick={setInput} selected={input} />}
           </div>
         )}
 
-        <Button
-          variant="primary"
-          onClick={mode === "drill" ? () => launchDrill() : launchArchitect}
-          loading={mode === "drill" ? drilling : jobRunning}
-          disabled={mode === "drill" ? !concept.trim() : false}
-          className="mt-5 w-full"
-        >
-          {!(mode === "drill" ? drilling : jobRunning) && <Sparkles className="size-4" strokeWidth={2.5} />}
-          {mode === "drill"
-            ? drilling
-              ? "Génération du drill…"
-              : "Lancer le drill"
-            : jobRunning
-              ? "Génération de l’exercice…"
-              : "Générer l’exercice"}
+        <Button variant="primary" onClick={submit} loading={busy} className="mt-5 w-full">
+          {!busy && <Sparkles className="size-4" strokeWidth={2.5} />}
+          {busy ? "Génération…" : "Générer l’exercice"}
         </Button>
 
         {error && (
@@ -300,47 +221,31 @@ export function TrainingStudio() {
                 : "border-[color-mix(in_oklch,var(--color-danger)_38%,transparent)] bg-[color-mix(in_oklch,var(--color-danger)_8%,transparent)]"
             )}
           >
-            {error.offline ? (
-              <CloudOff className="mt-0.5 size-4 shrink-0 text-warning" strokeWidth={2} />
-            ) : (
-              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger-hi" strokeWidth={2} />
-            )}
+            {error.offline ? <CloudOff className="mt-0.5 size-4 shrink-0 text-warning" strokeWidth={2} /> : <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger-hi" strokeWidth={2} />}
             {error.message}
           </div>
         )}
       </Panel>
 
-      {/* ── Résultat ── */}
+      {/* ── Résultat unique ── */}
       <Panel className="flex flex-col p-5 sm:p-6">
         {drill ? (
           <>
             <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-[0.72rem] font-medium uppercase tracking-wider text-emerald-hi">
-                <span className="inline-block size-1.5 rounded-full bg-emerald" />
-                Drill prêt
+              <span className="inline-flex items-center gap-1.5 text-[0.72rem] font-medium text-emerald-hi">
+                <span className="inline-block size-1.5 rounded-full bg-emerald" /> Exo prêt
               </span>
               <span className="text-[0.76rem] text-ink-4">au format du final</span>
             </div>
             <h2 className="mt-3 text-[1.05rem] font-semibold text-ink-1">{drill.concept}</h2>
-            <div
-              className="prose-exam mt-3 text-[0.9rem] leading-relaxed text-ink-1"
-              dangerouslySetInnerHTML={{ __html: drill.statement_html }}
-            />
+            <div className="prose-exam mt-3 text-[0.9rem] leading-relaxed text-ink-1" dangerouslySetInnerHTML={{ __html: drill.statement_html }} />
 
             {drill.hints.length > 0 && (
               <div className="mt-4 space-y-2">
                 {drill.hints.slice(0, shownHints).map((h, i) => (
-                  <div
-                    key={i}
-                    className="rise-in flex items-start gap-2.5 rounded-lg border border-line bg-surface-2/40 p-3 text-[0.84rem] text-ink-2"
-                  >
+                  <div key={i} className="rise-in flex items-start gap-2.5 rounded-lg border border-line bg-surface-2/40 p-3 text-[0.84rem] text-ink-2">
                     <Lightbulb className="mt-0.5 size-4 shrink-0 text-warning" strokeWidth={2} />
-                    <span>
-                      <span className="mr-1.5 font-data text-[0.72rem] font-semibold text-ink-3">
-                        {i + 1}/{drill.hints.length}
-                      </span>
-                      {h}
-                    </span>
+                    <span><span className="mr-1.5 font-data text-[0.72rem] font-semibold text-ink-3">{i + 1}/{drill.hints.length}</span>{h}</span>
                   </div>
                 ))}
                 {shownHints < drill.hints.length && (
@@ -354,64 +259,34 @@ export function TrainingStudio() {
 
             <div className="mt-4 border-t border-line pt-4">
               {showSolution ? (
-                <div
-                  className="prose-exam text-[0.88rem] leading-relaxed text-ink-2"
-                  dangerouslySetInnerHTML={{ __html: drill.solution_html }}
-                />
+                <div className="prose-exam text-[0.88rem] leading-relaxed text-ink-2" dangerouslySetInnerHTML={{ __html: drill.solution_html }} />
               ) : (
                 <Button variant="secondary" size="sm" onClick={() => setShowSolution(true)}>
-                  <Eye className="size-3.5" strokeWidth={2.25} />
-                  Voir la solution
+                  <Eye className="size-3.5" strokeWidth={2.25} /> Voir la solution
                 </Button>
               )}
             </div>
-
             <FeedbackBar onSend={sendFeedback} sent={fbSent} busy={fbBusy} />
           </>
         ) : jobRunning && job ? (
           <div className="flex flex-1 flex-col justify-center gap-3" aria-live="polite">
-            <p className="text-[0.9rem] font-medium text-ink-1">
-              {job.status === "queued" ? "En file d’attente…" : "Génération de l’exercice…"}
-            </p>
+            <p className="text-[0.9rem] font-medium text-ink-1">{job.status === "queued" ? "En file d’attente…" : "Génération de l’exercice…"}</p>
             {asText(job.currentStep) && <p className="text-[0.82rem] text-ink-3">{asText(job.currentStep)}</p>}
             <WeightBar pct={job.status === "queued" ? 4 : job.progress} height={6} />
-            <p className="font-data text-[0.82rem] font-semibold text-ink-2">
-              {job.status === "queued" ? "" : `${job.progress} %`}
-            </p>
+            <p className="font-data text-[0.82rem] font-semibold text-ink-2">{job.status === "queued" ? "" : `${job.progress} %`}</p>
           </div>
         ) : jobDone ? (
           <>
-            <span className="inline-flex items-center gap-1.5 text-[0.72rem] font-medium uppercase tracking-wider text-emerald-hi">
-              <Check className="size-3.5" strokeWidth={2.5} />
-              Exercice prêt
+            <span className="inline-flex items-center gap-1.5 text-[0.72rem] font-medium text-emerald-hi">
+              <Check className="size-3.5" strokeWidth={2.5} /> Exercice prêt
             </span>
-            <h2 className="mt-3 text-[1.05rem] font-semibold text-ink-1">
-              {target.trim() || "Exercice sur mesure"}
-            </h2>
+            <h2 className="mt-3 text-[1.05rem] font-semibold text-ink-1">{input.trim() || "Exercice sur mesure"}</h2>
             <div className="mt-4 grid grid-cols-2 gap-3">
-              {resultLink ? (
-                <a
-                  href={resultLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 rounded-lg border border-line bg-surface-2/40 p-3 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_34%,transparent)]"
-                >
-                  <FileText className="size-5 text-cyan-hi" strokeWidth={2} />
-                  <span className="text-[0.82rem] font-medium text-ink-1">Énoncé PDF</span>
-                </a>
-              ) : (
-                <a
-                  href="/examens"
-                  className="flex items-center gap-3 rounded-lg border border-line bg-surface-2/40 p-3 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_34%,transparent)]"
-                >
-                  <FileText className="size-5 text-cyan-hi" strokeWidth={2} />
-                  <span className="text-[0.82rem] font-medium text-ink-1">Voir dans Examens</span>
-                </a>
-              )}
-              <a
-                href="/examens"
-                className="flex items-center gap-3 rounded-lg border border-line bg-surface-2/40 p-3 transition-colors hover:border-[color-mix(in_oklch,var(--color-emerald)_34%,transparent)]"
-              >
+              <a href={resultLink ?? "/examens"} target={resultLink ? "_blank" : undefined} rel="noopener noreferrer" className="flex items-center gap-3 rounded-lg border border-line bg-surface-2/40 p-3 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_34%,transparent)]">
+                <FileText className="size-5 text-cyan-hi" strokeWidth={2} />
+                <span className="text-[0.82rem] font-medium text-ink-1">{resultLink ? "Énoncé PDF" : "Voir dans Examens"}</span>
+              </a>
+              <a href="/examens" className="flex items-center gap-3 rounded-lg border border-line bg-surface-2/40 p-3 transition-colors hover:border-[color-mix(in_oklch,var(--color-emerald)_34%,transparent)]">
                 <CheckSquare className="size-5 text-emerald-hi" strokeWidth={2} />
                 <span className="text-[0.82rem] font-medium text-ink-1">Corrigé</span>
               </a>
@@ -422,9 +297,7 @@ export function TrainingStudio() {
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
             <AlertTriangle className="size-6 text-danger-hi" strokeWidth={2} />
             <p className="text-[0.9rem] font-medium text-ink-1">La génération a échoué</p>
-            <p className="max-w-xs text-[0.82rem] text-ink-3">
-              {asText(job?.error) ?? "Réessaie — si ça persiste, vérifie Claude Max et le moteur LaTeX."}
-            </p>
+            <p className="max-w-xs text-[0.82rem] text-ink-3">{asText(job?.error) ?? "Réessaie — si ça persiste, vérifie Claude Max et le moteur LaTeX."}</p>
           </div>
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 py-10 text-center">
@@ -433,8 +306,8 @@ export function TrainingStudio() {
             </span>
             <p className="text-[0.92rem] font-medium text-ink-1">Ton prochain exo apparaîtra ici</p>
             <p className="max-w-xs text-[0.82rem] leading-relaxed text-ink-3">
-              Choisis un concept à driller (question + indices progressifs) ou décris un exo
-              sur mesure — toujours au format du vrai final.
+              Donne un concept, une consigne ou une image — Cortex génère un exo au format du vrai final,
+              avec des indices progressifs à révéler si tu bloques.
             </p>
           </div>
         )}
@@ -443,15 +316,7 @@ export function TrainingStudio() {
   );
 }
 
-function FeedbackBar({
-  onSend,
-  sent,
-  busy,
-}: {
-  onSend: (verdict: string) => void;
-  sent: string | null;
-  busy: boolean;
-}) {
+function FeedbackBar({ onSend, sent, busy }: { onSend: (verdict: string) => void; sent: string | null; busy: boolean }) {
   return (
     <div className="mt-auto border-t border-line pt-4">
       <div className="mb-2.5 flex items-center gap-2 text-[0.82rem] text-ink-2">
@@ -477,29 +342,15 @@ function FeedbackBar({
           </button>
         ))}
       </div>
-      {sent && (
-        <p className="mt-2 text-[0.78rem] text-emerald-hi" aria-live="polite">
-          Merci — Cortex recalibre la difficulté des prochains exos.
-        </p>
-      )}
+      {sent && <p className="mt-2 text-[0.78rem] text-emerald-hi" aria-live="polite">Merci — Cortex recalibre la difficulté des prochains exos.</p>}
     </div>
   );
 }
 
-function ChipGroup({
-  label,
-  chips,
-  onPick,
-  selected,
-}: {
-  label: string;
-  chips: string[];
-  onPick: (c: string) => void;
-  selected: string;
-}) {
+function ChipGroup({ label, chips, onPick, selected }: { label: string; chips: string[]; onPick: (c: string) => void; selected: string }) {
   return (
     <div>
-      <div className="mb-2 text-[0.72rem] font-medium uppercase tracking-wider text-ink-4">{label}</div>
+      <div className="mb-2 text-[0.72rem] font-medium text-ink-4">{label}</div>
       <div className="flex flex-wrap gap-2">
         {chips.map((c) => (
           <button
@@ -519,32 +370,5 @@ function ChipGroup({
         ))}
       </div>
     </div>
-  );
-}
-
-function ModeBtn({
-  active,
-  onClick,
-  Icon,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  Icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "inline-flex h-9 items-center gap-2 rounded-md px-3.5 text-[0.85rem] font-medium transition-colors",
-        active ? "bg-surface-2 text-ink-1 ring-1 ring-line-strong" : "text-ink-3 hover:text-ink-1"
-      )}
-    >
-      <Icon className="size-4" strokeWidth={2} />
-      {children}
-    </button>
   );
 }

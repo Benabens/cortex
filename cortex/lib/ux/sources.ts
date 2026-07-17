@@ -4,7 +4,8 @@
  * corpus[] = agrégats par type {type, sources, items}.
  * POST /api/refs/upload (multipart file[]) → {ok, files, formatJobId} ·
  * POST /api/sources/import {path} → JOB (409 sur cs-202) · POST /api/prepare → JOB.
- * NB : aucune route pour (dé)cocher isReference / activer un fichier → lecture seule.
+ * Choix des annales de référence : POST /api/sources {path, reference} (toggleReference) ·
+ * DELETE /api/sources?path= (removeUploadedRef) — câblés en cases à cocher dans FileManager.
  */
 
 export type SourceExam = {

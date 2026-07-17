@@ -51,6 +51,15 @@ export type TopicView = Topic & {
   lastExamId: number | null; // dernier exo généré pour ce type (reprise du panneau de score au reload)
   dueAt: string | null;
   status: "never" | "due" | "ok"; // jamais vu / à revoir / à jour
+  // ── Allégée — enrichissement depuis l'index exo-par-exo (exam_exercises). Absent (null/0) tant
+  // qu'aucune Ré-analyse « index-based » n'a lié les exos au topic (topic_id). Aucune valeur inventée.
+  pointsSum?: number | null; // somme des VRAIS barèmes des exos du topic (null si aucun barème imprimé)
+  occurrences?: number; // nb d'exos indexés rattachés (≈ « tombé N fois », vérité terrain)
+  examHref?: string | null; // deep-link PDF du final à la bonne page (occurrence la plus récente)
+  examYear?: number | null; // année de cette occurrence représentative
+  examPage?: number | null; // page de cette occurrence représentative
+  courseHref?: string | null; // deep-link vers le passage de cours associé
+  courseOrder?: number | null; // clé d'ordre « où la notion est traitée » (dérivée de course_href)
 };
 
 export const MASTERY_THRESHOLD = 7; // « maîtrisé » à partir de 7/10
@@ -394,10 +403,88 @@ export type ProgramOverview = {
   };
 };
 
+// ---------------- Allégée — enrichissement par-topic (deep-links + ordre de cours + points réels) ----------------
+
+/**
+ * Dérive une CLÉ D'ORDRE DE COURS depuis un `course_href` (deep-link vers le passage de cours,
+ * = « là où la notion est traitée », pas la 1re mention : courseHrefFor vise le meilleur hit de
+ * matériel de cours). Signal principal = n° de lecture ; signal fin = page. Formats gérés :
+ *   - ML / algo : /csrc?course=…&p=slides%2Flecture_12.pdf#page=31  → lecture 12, page 31
+ *   - algo      : …p=…Lecture10withoutanim.pdf                      → lecture 10
+ *   - cs-202    : …CS202_Lectures_Part2…#page=N (offset) ou index.html#chapN
+ * Renvoie null si aucun signal (le topic finit en bas du tri « Par section »).
+ */
+export function courseOrderKey(courseHref: string | null | undefined): number | null {
+  if (!courseHref) return null;
+  const dec = (s: string) => { try { return decodeURIComponent(s); } catch { return s; } };
+  const mP = courseHref.match(/[?&](?:p|src)=([^&#]+)/);
+  const p = mP ? dec(mP[1]) : courseHref;
+  const page = Number(courseHref.match(/#page=(\d+)/)?.[1] ?? 0) || 0;
+  const mLec = p.match(/lect(?:ure)?[ _-]?0*(\d+)/i); // lecture_12 / Lecture10 / lecture 3
+  if (mLec) return Number(mLec[1]) * 100000 + page;
+  const mPart = p.match(/part[ _-]?0*(\d+)/i); // cs-202 : Part1 (L1-10) / Part2 (L11-18)
+  if (mPart) return (Number(mPart[1]) <= 1 ? 1 : 11) * 100000 + page;
+  const mChap = courseHref.match(/#(?:chap(?:ter)?[-_]?)?0*(\d+)/i); // index.html#chapN
+  if (mChap) return Number(mChap[1]) * 100000 + page;
+  return page > 0 ? 9_000_000 + page : null; // page seule = signal faible → en fin
+}
+
+type TopicExamAgg = {
+  pointsSum: number | null; occurrences: number;
+  examHref: string | null; examYear: number | null; examPage: number | null;
+  courseHref: string | null; courseOrder: number | null;
+};
+
+/** Agrège l'index `exam_exercises` par topic_id : vrais points, occurrences, deep-links représentatifs
+ *  (occurrence la plus récente pour l'examen ; 1er non-nul pour le cours), et clé d'ordre de cours (médiane). */
+async function topicExamAggregates(): Promise<Map<number, TopicExamAgg>> {
+  const out = new Map<number, TopicExamAgg>();
+  let rows: { topicId: number; examYear: number | null; examPage: number | null; points: number | null; examHref: string | null; courseHref: string | null }[] = [];
+  try {
+    await ensureIndexSchema();
+    rows = await q.all(`SELECT topic_id topicId, exam_year examYear, exam_page examPage, points, exam_href examHref, course_href courseHref FROM exam_exercises WHERE topic_id IS NOT NULL`);
+  } catch { return out; }
+  const byTopic = new Map<number, typeof rows>();
+  for (const r of rows) { if (!byTopic.has(r.topicId)) byTopic.set(r.topicId, []); byTopic.get(r.topicId)!.push(r); }
+  for (const [tid, exos] of byTopic) {
+    // Lien EXAMEN = occurrence la plus récente (année desc, puis page asc).
+    const rep = [...exos].sort((a, b) => (b.examYear ?? 0) - (a.examYear ?? 0) || (a.examPage ?? 0) - (b.examPage ?? 0))[0];
+    const pts = exos.reduce((s, e) => s + (Number(e.points) > 0 ? Number(e.points) : 0), 0);
+    // Lien COURS + ordre = la LECTURE MODALE (celle où le plus d'occurrences pointent = le passage
+    // où la notion est le plus souvent traitée), robuste au bruit de la recherche ; à l'intérieur,
+    // la page médiane. Le lien affiché et le tri « Par section » sont donc cohérents et stables.
+    const all = exos
+      .map((e) => ({ href: e.courseHref, key: courseOrderKey(e.courseHref) }))
+      .filter((x): x is { href: string | null; key: number } => x.key != null);
+    // si un signal de LECTURE existe (key < 9M), on ignore les liens « page seule » (fallback bruité).
+    const entries = all.some((e) => e.key < 9_000_000) ? all.filter((e) => e.key < 9_000_000) : all;
+    const lecOf = (k: number) => Math.floor(k / 100000);
+    const buckets = new Map<number, { href: string | null; key: number }[]>();
+    for (const e of entries) { const L = lecOf(e.key); if (!buckets.has(L)) buckets.set(L, []); buckets.get(L)!.push(e); }
+    // lecture modale : plus d'occurrences, puis la lecture la plus précoce
+    const mode = [...buckets.entries()].sort((a, b) => b[1].length - a[1].length || a[0] - b[0])[0];
+    let courseOrder: number | null = null, courseHref: string | null = null;
+    if (mode) {
+      const group = mode[1].sort((a, b) => a.key - b.key);
+      const medKey = group[Math.floor((group.length - 1) / 2)].key;
+      courseOrder = medKey;
+      courseHref = (group.find((e) => e.key === medKey) ?? group[0]).href;
+    }
+    out.set(tid, {
+      pointsSum: pts > 0 ? pts : null, occurrences: exos.length,
+      examHref: rep?.examHref ?? null, examYear: rep?.examYear ?? null, examPage: rep?.examPage ?? null,
+      courseHref: courseHref ?? exos.map((e) => e.courseHref).find((h) => h) ?? null,
+      courseOrder,
+    });
+  }
+  return out;
+}
+
 /** Tableau de bord : chaque type + maîtrise + couverture + statut révision, et stats globales pondérées. */
 export async function programOverview(): Promise<ProgramOverview> {
   await ensureProgramSchema();
   const topics = await topicRows();
+  const exAgg = await topicExamAggregates();
   const mast = new Map<number, MasteryRow & { lastExamId: number | null }>();
   for (const m of await q.all<MasteryRow & { lastExamId: number | null }>(
     `SELECT topic_id topicId, score, attempts, last_score lastScore, last_done_at lastDoneAt, due_at dueAt, ease, interval_days intervalDays, last_exam_id lastExamId FROM mastery`
@@ -412,6 +499,7 @@ export async function programOverview(): Promise<ProgramOverview> {
     const dueAt = m?.dueAt ?? null;
     const status: TopicView["status"] =
       attempts === 0 ? "never" : dueAt && new Date(dueAt).getTime() <= now ? "due" : "ok";
+    const ex = exAgg.get(t.id);
     return {
       ...t,
       mastery: score == null ? null : Math.round(score * 10) / 10,
@@ -421,6 +509,13 @@ export async function programOverview(): Promise<ProgramOverview> {
       lastExamId: m?.lastExamId ?? null,
       dueAt,
       status,
+      pointsSum: ex?.pointsSum ?? null,
+      occurrences: ex?.occurrences ?? 0,
+      examHref: ex?.examHref ?? null,
+      examYear: ex?.examYear ?? null,
+      examPage: ex?.examPage ?? null,
+      courseHref: ex?.courseHref ?? null,
+      courseOrder: ex?.courseOrder ?? null,
     };
   });
 

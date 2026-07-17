@@ -574,7 +574,7 @@ async function generateBatch(ctx: Ctx, slots: Slot[]): Promise<ExamQuestion[]> {
  */
 export type StepCb = (step: string, progress: number) => void;
 
-export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?: number; onStep?: StepCb; jobId?: number } = {}): Promise<{ id: number; url: string; texError?: string }> {
+export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?: number; focus?: string; onStep?: StepCb; jobId?: number } = {}): Promise<{ id: number; url: string; texError?: string }> {
   const t0 = Date.now();
   // progression MONOTONE : les lots/vérifs parallèles rapportent dans le désordre → max courant.
   const raw = opts.onStep ?? (() => {});
@@ -597,6 +597,19 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
   if (want && want !== slots.length) {
     if (want < slots.length) slots = slots.slice(0, want);
     else { const base = slots.slice(); while (slots.length < want) slots.push(base[slots.length % base.length]); }
+  }
+  // « Mets l'accent sur… » (focus GÉNÉRIQUE, allégée) — force 1-2 slots à porter sur le thème choisi
+  // SANS monopoliser (le reste du blueprint est préservé). Catégorie/barème gardés ; on remplace par
+  // un objet NEUF (les slots peuvent être partagés par référence) et on efface archetypeId pour que
+  // pickArchetype rechoisisse selon le thème.
+  const focus = (opts.focus ?? "").trim();
+  if (focus && slots.length) {
+    const nFocus = Math.min(2, slots.length);
+    for (let i = 0; i < nFocus; i++) {
+      const j = slots.length - 1 - i;
+      slots[j] = { ...(slots[j] as any), brief: focus, archetypeId: undefined };
+    }
+    step(`Accent demandé : « ${focus} » — ${nFocus} exercice(s) ciblé(s)`, 5);
   }
   // (stub de test : vérifier des questions factices n'a aucun sens et appellerait le vrai Max)
   const doVerify = opts.verify !== false && !process.env.CORTEX_TEST_STUB_BATCH;

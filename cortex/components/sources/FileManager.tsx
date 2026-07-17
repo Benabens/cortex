@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { FileText, FileCode2, Layers, BadgeCheck, UploadCloud } from "lucide-react";
+import { useEffect, useState } from "react";
+import { FileText, FileCode2, Layers, Check, Trash2, UploadCloud } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
-import { corpusLabel, extOf, type SourcesResp } from "@/lib/ux/sources";
+import { apiPost, useCourse } from "@/lib/ux/api";
+import { corpusLabel, extOf, type SourcesResp, type SourceExam } from "@/lib/ux/sources";
 import { cn } from "@/lib/ux/cn";
 
 const extTone: Record<string, string> = {
@@ -15,15 +16,52 @@ const extTone: Record<string, string> = {
 };
 
 /**
- * Corpus RÉEL du cours : agrégats par type (chips) + table des annales de référence.
- * Pas de toggle « actif » : le back n'expose pas cette commande — badges lecture seule.
+ * Corpus RÉEL du cours + choix des ANNALES DE RÉFÉRENCE (cases à cocher, câblées sur
+ * `toggleReference`) : POST /api/sources {path, reference} bascule ; DELETE /api/sources?path=
+ * supprime un fichier uploadé. Le format des blancs se cale sur les annales cochées.
  */
-export function FileManager({ data }: { data: SourcesResp }) {
+export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged: () => void }) {
+  const { courseId } = useCourse();
   const [kind, setKind] = useState<string | null>(null);
+  const [pending, setPending] = useState<Record<string, boolean>>({}); // path → isReference optimiste
+  const [busy, setBusy] = useState<Set<string>>(new Set());
+
+  // données fraîches (après refetch) → on efface les surcharges optimistes.
+  useEffect(() => setPending({}), [data]);
+
+  const isRef = (f: SourceExam) => pending[f.path] ?? f.isReference;
+  const setBusyFor = (path: string, on: boolean) =>
+    setBusy((s) => { const n = new Set(s); on ? n.add(path) : n.delete(path); return n; });
+
+  const toggleRef = async (f: SourceExam) => {
+    const next = !isRef(f);
+    setPending((p) => ({ ...p, [f.path]: next }));
+    setBusyFor(f.path, true);
+    try {
+      await apiPost("/api/sources", courseId, { path: f.path, reference: next });
+      onChanged();
+    } catch {
+      setPending((p) => ({ ...p, [f.path]: !next })); // rollback
+    } finally {
+      setBusyFor(f.path, false);
+    }
+  };
+
+  const remove = async (f: SourceExam) => {
+    if (!window.confirm(`Retirer « ${f.title} » du corpus ? (fichier uploadé)`)) return;
+    setBusyFor(f.path, true);
+    try {
+      await fetch(`/api/sources?path=${encodeURIComponent(f.path)}&course=${encodeURIComponent(courseId)}`, { method: "DELETE" });
+      onChanged();
+    } finally {
+      setBusyFor(f.path, false);
+    }
+  };
 
   const kinds = [...new Set(data.exams.map((e) => e.kind))];
   const files = kind ? data.exams.filter((e) => e.kind === kind) : data.exams;
   const totalItems = data.corpus.reduce((a, c) => a + c.items, 0);
+  const refCount = data.exams.filter((e) => isRef(e)).length;
 
   return (
     <Panel className="overflow-hidden p-0">
@@ -31,8 +69,7 @@ export function FileManager({ data }: { data: SourcesResp }) {
       <div className="border-b border-line px-4 py-3.5">
         <div className="flex items-center gap-2 text-[0.76rem] text-ink-3">
           <Layers className="size-3.5" strokeWidth={2} />
-          Corpus ingéré ·{" "}
-          <span className="font-data font-semibold text-ink-2">{totalItems}</span> extraits
+          Corpus ingéré · <span className="font-data font-semibold text-ink-2">{totalItems}</span> extraits
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           {data.corpus.map((c) => (
@@ -41,9 +78,7 @@ export function FileManager({ data }: { data: SourcesResp }) {
               className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-surface-1/60 px-2.5 text-[0.8rem] text-ink-2"
             >
               {corpusLabel(c.type)}
-              <span className="font-data text-[0.72rem] tabular text-ink-4">
-                {c.sources} src · {c.items}
-              </span>
+              <span className="font-data text-[0.72rem] tabular text-ink-4">{c.sources} src · {c.items}</span>
             </span>
           ))}
         </div>
@@ -66,20 +101,21 @@ export function FileManager({ data }: { data: SourcesResp }) {
       )}
 
       {/* table header (desktop) */}
-      <div className="hidden items-center gap-3 border-b border-line px-4 py-2 text-[0.68rem] font-medium uppercase tracking-wider text-ink-4 md:flex">
+      <div className="hidden items-center gap-3 border-b border-line px-4 py-2 text-[0.68rem] font-medium text-ink-4 md:flex">
         <span className="w-8" />
         <span className="flex-1">Annale</span>
-        <span className="w-14">Type</span>
         <span className="w-14 text-right">Extraits</span>
-        <span className="w-48 text-right">Statut</span>
+        <span className="w-44 text-right">Référence</span>
       </div>
 
-      {/* files (annales réelles) */}
+      {/* files (annales réelles) + cases à cocher « référence » */}
       <div className="p-1.5">
         {files.map((f, i) => {
           const ext = extOf(f.path);
           const Icon = ext === "HTML" || ext === "HTM" ? FileCode2 : FileText;
           const tone = extTone[ext] ?? "var(--color-ink-3)";
+          const checked = isRef(f);
+          const isBusy = busy.has(f.path);
           return (
             <div
               key={f.path}
@@ -99,45 +135,89 @@ export function FileManager({ data }: { data: SourcesResp }) {
                   {f.title}
                   {f.year ? <span className="ml-1.5 text-ink-3">· {f.year}</span> : null}
                 </div>
-                <div className="text-[0.72rem] text-ink-4 md:hidden">
-                  {ext} · {f.items} extraits
+                <div className="flex items-center gap-1.5 text-[0.72rem] text-ink-4">
+                  <span className="font-mono">{ext}</span>
+                  <span>· {f.items} extraits</span>
+                  {f.uploaded && (
+                    <span className="inline-flex items-center gap-1 text-cyan-hi">
+                      <UploadCloud className="size-3" strokeWidth={2.25} /> uploadé
+                    </span>
+                  )}
                 </div>
               </div>
-              <span className="hidden w-14 md:block">
-                <span
-                  className="inline-flex rounded-md px-1.5 py-0.5 font-mono text-[0.68rem] font-medium"
-                  style={{ color: tone, background: `color-mix(in oklch, ${tone} 12%, transparent)` }}
-                >
-                  {ext}
-                </span>
-              </span>
-              <span className="hidden w-14 text-right font-data text-[0.82rem] tabular text-ink-2 md:block">
+
+              {/* extraits (desktop) */}
+              <span className="hidden w-14 text-right font-data text-[0.82rem] tabular text-ink-3 md:block">
                 {f.items}
               </span>
-              <span className="flex w-48 flex-wrap items-center justify-end gap-1.5">
-                {f.isReference && (
-                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-medium text-violet-hi" style={{ background: "color-mix(in oklch, var(--color-violet) 14%, transparent)" }}>
-                    <BadgeCheck className="size-3" strokeWidth={2.25} />
-                    Référence
-                  </span>
-                )}
+
+              {/* case à cocher « référence » + suppression si uploadé */}
+              <div className="flex w-44 shrink-0 items-center justify-end gap-1.5">
+                <RefCheckbox checked={checked} busy={isBusy} onToggle={() => toggleRef(f)} label={f.title} />
                 {f.uploaded && (
-                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-medium text-cyan-hi" style={{ background: "color-mix(in oklch, var(--color-cyan) 12%, transparent)" }}>
-                    <UploadCloud className="size-3" strokeWidth={2.25} />
-                    Uploadé
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => remove(f)}
+                    disabled={isBusy}
+                    aria-label={`Retirer ${f.title}`}
+                    className="grid size-8 shrink-0 place-items-center rounded-md text-ink-4 transition-colors hover:bg-surface-2 hover:text-danger-hi focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2 disabled:opacity-40"
+                  >
+                    <Trash2 className="size-4" strokeWidth={2} />
+                  </button>
                 )}
-              </span>
+              </div>
             </div>
           );
         })}
       </div>
 
       <div className="flex items-center gap-2 border-t border-line px-4 py-2.5 text-[0.78rem] text-ink-3">
-        <span className="font-data font-semibold text-ink-1">{data.exams.filter((e) => e.isReference).length}</span>
-        annales de référence — le format des examens blancs se cale dessus
+        <span className="font-data font-semibold text-ink-1">{refCount}</span>
+        annale{refCount > 1 ? "s" : ""} de référence cochée{refCount > 1 ? "s" : ""} — le format des blancs se cale dessus
       </div>
     </Panel>
+  );
+}
+
+/** Case à cocher accessible « annale de référence ». */
+function RefCheckbox({
+  checked,
+  busy,
+  onToggle,
+  label,
+}: {
+  checked: boolean;
+  busy: boolean;
+  onToggle: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={`Utiliser « ${label} » comme annale de référence`}
+      disabled={busy}
+      onClick={onToggle}
+      className={cn(
+        "inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-[0.78rem] font-medium transition-colors",
+        "focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2 disabled:opacity-50",
+        checked
+          ? "border-[color-mix(in_oklch,var(--color-violet)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_16%,transparent)] text-violet-hi"
+          : "border-line bg-surface-2/40 text-ink-3 hover:text-ink-1"
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          "grid size-4 place-items-center rounded-[5px] border transition-colors",
+          checked ? "border-transparent bg-violet-deep text-white" : "border-line-strong bg-surface-1"
+        )}
+      >
+        {checked && <Check className="size-3" strokeWidth={3} />}
+      </span>
+      Référence
+    </button>
   );
 }
 

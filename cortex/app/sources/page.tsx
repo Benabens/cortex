@@ -46,7 +46,7 @@ export default function SourcesPage() {
             </p>
           </Panel>
         ) : (
-          <FileManager data={data} />
+          <FileManager data={data} onChanged={refetch} />
         )}
         <ImportPanel onChanged={refetch} />
       </div>

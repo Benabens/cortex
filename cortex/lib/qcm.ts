@@ -170,8 +170,8 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
 export type QcmExamResult = { id: number; count: number; verified: number; open: number; pdf?: string; texError?: string };
 
 /** Génère un examen QCM complet (N QCM + M ouvertes), vérifié, persisté, rendu en PDF.
- *  `count`/`openCount` : la COMPOSITION choisie par Ben (composeur V9). `focus` : thème ciblé
- *  optionnel (exercice ciblé V9 — toutes les questions portent dessus). */
+ *  `count`/`openCount` : la COMPOSITION choisie par Ben (composeur V9). `focus` : « Mets l'accent
+ *  sur… » (générique) — garantit ~2 QCM sur le thème sans monopoliser (count ≤ 2 → entièrement ciblé). */
 export async function generateQcmExam(opts: { count?: number; openCount?: number; focus?: string; onStep?: StepCb } = {}): Promise<QcmExamResult> {
   await ensureQcmSchema();
   const step = opts.onStep ?? (() => {});
@@ -182,9 +182,15 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const count = Math.max(0, opts.count ?? Math.min(20, Math.max(8, qcmShare || 12)));
   const openCount = Math.max(0, opts.openCount ?? Math.min(3, Math.max(0, (fmt?.question_types ?? []).find((t) => t.type === "open")?.approx_count ?? 2)));
   if (count === 0 && openCount === 0) throw new Error("Composition vide : choisis au moins 1 QCM ou 1 question ouverte.");
-  // focus ciblé → toutes les questions sur ce thème ; sinon couverture large du programme.
-  const topics = focus ? [{ label: focus, method: null as string | null }] : await coverageTopics();
-  step(`Architecte : ${count} QCM + ${openCount} question(s) ouverte(s)${focus ? ` sur « ${focus} »` : " au format détecté"}…`, 8);
+  // « Mets l'accent sur… » (focus GÉNÉRIQUE, allégée) : garantit ~2 QCM sur le thème choisi SANS
+  // monopoliser — le reste couvre le programme. Petit count (≤2) → entièrement ciblé (drill).
+  const cov = await coverageTopics();
+  const nFocus = focus ? Math.min(2, Math.max(1, count)) : 0;
+  const qcmTopics: { label: string; method: string | null }[] = [];
+  for (let i = 0; i < count; i++) {
+    qcmTopics.push(i < nFocus ? { label: focus!, method: null } : cov[(i - nFocus) % cov.length]);
+  }
+  step(`Architecte : ${count} QCM + ${openCount} question(s) ouverte(s)${focus ? ` (accent : « ${focus} »)` : " au format détecté"}…`, 8);
 
   // lots de 4 QCM en parallèle borné (2 lots à la fois). RÉSILIENT : un lot qui échoue (JSON
   // malformé du modèle sur du math) est réessayé une fois puis IGNORÉ — il ne plante pas le job.
@@ -192,13 +198,13 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const batches: { label: string; method: string | null }[][] = [];
   for (let i = 0; i < count; i += BATCH) {
     const slice: { label: string; method: string | null }[] = [];
-    for (let k = 0; k < BATCH && i + k < count; k++) slice.push(topics[(i + k) % topics.length]);
+    for (let k = 0; k < BATCH && i + k < count; k++) slice.push(qcmTopics[(i + k) % qcmTopics.length]);
     batches.push(slice);
   }
   const safeBatch = async (bt: { label: string; method: string | null }[]): Promise<QcmItem[]> => {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const items = await generateQcmBatch(bt, bt.length, step, focus);
+        const items = await generateQcmBatch(bt, bt.length, step);
         if (items.length) return await verifyQcmBatch(items, step);
       } catch (e) {
         step(`Lot QCM échoué (${(e as Error).message.slice(0, 50)})${attempt < 2 ? " — réessai" : " — ignoré"}`, 0);
@@ -222,7 +228,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const { profile } = require("@/lib/course-profile");
     const archs = profile().archetypes as any[];
     for (let i = 0; i < openCount; i++) {
-      const t = topics[(count + i) % topics.length];
+      const t = cov[(count + i) % cov.length]; // ouvertes = couverture programme (le focus reste sur les QCM)
       const a = archs[i % archs.length];
       step(`Question ouverte ${i + 1}/${openCount} (architecte) — ${t.label}…`, 82 + i);
       try {

@@ -34,11 +34,14 @@ export const STATUS: Record<
 /* ---- Weakness severity (GROS · MOYEN · LÉGER) ---- */
 export type Severity = "GROS" | "MOYEN" | "LÉGER";
 
+// REFONTE ALLÉGÉE : 3 niveaux SANS rouge dramatisant. GROS passe sur l'accent violet (identité,
+// « priorité haute » sans alarme) ; le sens reste porté par l'icône + la forme (SeverityMeter) + le
+// libellé → colorblind-safe. MOYEN (ambre) et LÉGER (cyan) inchangés.
 export const SEVERITY: Record<
   Severity,
   { label: string; tone: Tone; level: 1 | 2 | 3; Icon: LucideIcon }
 > = {
-  GROS: { label: "Sévère", tone: "danger", level: 3, Icon: ShieldAlert },
+  GROS: { label: "Sévère", tone: "violet", level: 3, Icon: ShieldAlert },
   MOYEN: { label: "Moyen", tone: "warning", level: 2, Icon: AlertTriangle },
   LÉGER: { label: "Léger", tone: "info", level: 1, Icon: Info },
 };

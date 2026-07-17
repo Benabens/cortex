@@ -12,7 +12,7 @@ export default function EntrainementPage() {
     <div className="flex flex-col gap-7">
       <PageHeader
         title="Entraînement"
-        description="Drille et fais-toi corriger : exo ciblé au format examen, indices progressifs, ou exo sur mesure."
+        description="Un exo au format du final à partir d’un concept, d’une consigne ou d’une image — avec des indices progressifs à révéler si tu bloques."
       />
       <TrainingStudio key={courseId} />
       {/* La série Labs est propre à CS-202 (moule Q6 2025 sur le code des labs). */}

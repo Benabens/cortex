@@ -148,19 +148,6 @@ export function SearchExperience() {
             </span>
           )}
         </div>
-        {/* raccourcis, discrets sous la barre — l'écran se lit « prêt » */}
-        {!active && (
-          <p className="mt-2 px-1 text-[0.74rem] text-ink-4">
-            <Kbd className="mr-1">↑</Kbd>
-            <Kbd className="mr-1.5">↓</Kbd>
-            naviguer
-            <span className="mx-2 text-ink-4">·</span>
-            <Kbd className="mr-1.5">↵</Kbd>
-            ouvrir
-            <span className="mx-2 text-ink-4">·</span>
-            dès {MIN_CHARS} caractères, sur tout ton corpus
-          </p>
-        )}
       </div>
 
       {/* État vide INTENTIONNEL (P0.3) : compact, utile — les suggestions SONT le contenu */}

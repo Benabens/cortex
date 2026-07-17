@@ -32,9 +32,12 @@ export async function POST(req: NextRequest) {
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
 
   // V9 composeur (CS-202) : count = nombre d'exercices choisi (optionnel ; défaut = blueprint).
+  // Allégée : focus = « Mets l'accent sur… » (générique, supporté PARTOUT) — 1-2 exos ciblés.
   const body = await req.json().catch(() => ({} as any));
   const count = Number(body?.count) > 0 ? Math.min(12, Math.floor(Number(body.count))) : undefined;
-  const { id: jobId } = await createJobExclusive("exam", count ? JSON.stringify({ count }) : undefined);
+  const focus = typeof body?.focus === "string" && body.focus.trim() ? body.focus.trim().slice(0, 400) : undefined;
+  const target = count || focus ? JSON.stringify({ count, focus }) : undefined;
+  const { id: jobId } = await createJobExclusive("exam", target);
   try {
     await startWorker(jobId, course);
   } catch (e: any) {

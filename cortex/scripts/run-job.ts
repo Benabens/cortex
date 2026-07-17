@@ -198,9 +198,15 @@ async function main() {
     await logJob(jobId, s);
   };
 
-  // V9 composeur (CS-202) : count d'exercices optionnel dans le target du job 'exam'.
-  let examCount: number | undefined;
-  if (job.type === "exam" && job.target) { try { examCount = Number(JSON.parse(job.target).count) || undefined; } catch {} }
+  // V9 composeur (CS-202) : count d'exercices + « Mets l'accent sur… » (focus) optionnels dans le target 'exam'.
+  let examCount: number | undefined, examFocus: string | undefined;
+  if (job.type === "exam" && job.target) {
+    try {
+      const t = JSON.parse(job.target);
+      examCount = Number(t.count) || undefined;
+      if (typeof t.focus === "string" && t.focus.trim()) examFocus = t.focus.trim();
+    } catch {}
+  }
 
   try {
     const res =
@@ -208,7 +214,7 @@ async function main() {
         ? await generateTargetedExercise(job.target ?? "", { onStep })
         : job.type === "lab-exercise"
           ? await generateLabExercise(job.target ?? "", { onStep })
-          : await generateExamViaClaudeCode({ count: examCount, onStep, jobId });
+          : await generateExamViaClaudeCode({ count: examCount, focus: examFocus, onStep, jobId });
     if (res.texError) {
       // le résultat existe (HTML lisible) mais le PDF a échoué → erreur LaTeX gardée pour debug
       await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, repli HTML lisible. Détail : ${res.texError.slice(0, 500)}` });
