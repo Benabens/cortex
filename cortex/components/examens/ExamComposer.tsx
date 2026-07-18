@@ -28,6 +28,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: Plan; onGenerated: (
   const [nOpen, setNOpen] = useState(isQcm ? q.open : 0);
   const [nExos, setNExos] = useState(!isQcm && "exercises" in plan ? plan.exercises : 6);
   const [focus, setFocus] = useState("");
+  const [focusOpen, setFocusOpen] = useState(false); // P-A : « Mets l'accent sur… » replié par défaut
   const [adjust, setAdjust] = useState(false);
 
   const [jobId, setJobId] = useState<number | null>(null);
@@ -48,6 +49,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: Plan; onGenerated: (
     setNOpen(isQcm ? q.open : 0);
     if (!isQcm && "exercises" in plan) setNExos(plan.exercises);
     setFocus("");
+    setFocusOpen(false);
     setAdjust(false);
     setJobId(null);
     setGenError(null);
@@ -110,22 +112,6 @@ export function ExamComposer({ plan, onGenerated }: { plan: Plan; onGenerated: (
           «&nbsp;Un examen qui aurait pu tomber.&nbsp;» La proposition par défaut est au format réel du final — prête à lancer.
         </p>
 
-        {/* champ FOCUS générique — « Mets l'accent sur… » */}
-        <div className="mt-5">
-          <label htmlFor="exam-focus" className="mb-1.5 flex items-center gap-2 text-[0.82rem] font-medium text-ink-1">
-            <Target className="size-3.5 text-violet-hi" strokeWidth={2.25} />
-            Mets l’accent sur… <span className="font-normal text-ink-4">(optionnel)</span>
-          </label>
-          <input
-            id="exam-focus"
-            value={focus}
-            onChange={(e) => setFocus(e.target.value)}
-            placeholder={isQcm ? "ex. régularisation, PCA, backprop…" : "ex. un thème précis à travailler"}
-            className="w-full rounded-lg border border-line-strong bg-surface-2/40 px-3.5 py-2.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] focus:outline-none focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-violet)_28%,transparent)]"
-          />
-          <p className="mt-1.5 text-[0.74rem] text-ink-4">1-2 exercices porteront dessus, sans monopoliser l’examen.</p>
-        </div>
-
         {/* composition : proposition compacte (défaut) + disclosure de réglage fin */}
         <div className="mt-5 rounded-lg border border-line bg-surface-2/40">
           <div className="flex items-center justify-between px-4 py-3">
@@ -160,6 +146,40 @@ export function ExamComposer({ plan, onGenerated }: { plan: Plan; onGenerated: (
               <button type="button" onClick={proposal} className="mt-4 text-[0.78rem] text-ink-3 underline-offset-2 transition-colors hover:text-violet-hi hover:underline">
                 Revenir à la proposition
               </button>
+            </div>
+          )}
+        </div>
+
+        {/* P-A — « Mets l'accent sur… » optionnel, REPLIÉ par défaut : par défaut on génère au format
+            détecté, aucun champ visible, aucune pression. Ouvert seulement si on VEUT cibler un thème. */}
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => setFocusOpen((o) => !o)}
+            aria-expanded={focusOpen}
+            aria-controls="exam-focus-panel"
+            className="flex w-full items-center justify-between gap-2 rounded-lg px-1 py-1.5 text-[0.8rem] text-ink-3 transition-colors hover:text-ink-1"
+          >
+            <span className="inline-flex min-w-0 items-center gap-2">
+              <Target className="size-3.5 shrink-0" strokeWidth={2.25} />
+              <span className="truncate">
+                Mets l’accent sur un thème
+                {!focusOpen && focus.trim() && <span className="ml-1 text-violet-hi">· {focus.trim()}</span>}
+              </span>
+            </span>
+            <ChevronDown className={cn("size-4 shrink-0 transition-transform", focusOpen && "rotate-180")} strokeWidth={2.25} />
+          </button>
+          {focusOpen && (
+            <div id="exam-focus-panel" className="mt-1.5">
+              <input
+                id="exam-focus"
+                value={focus}
+                onChange={(e) => setFocus(e.target.value)}
+                autoFocus
+                placeholder={isQcm ? "ex. régularisation, PCA, backprop…" : "ex. un thème précis à travailler"}
+                className="w-full rounded-lg border border-line-strong bg-surface-2/40 px-3.5 py-2.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] focus:outline-none focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-violet)_28%,transparent)]"
+              />
+              <p className="mt-1.5 text-[0.74rem] text-ink-4">1-2 exercices porteront dessus, sans monopoliser l’examen.</p>
             </div>
           )}
         </div>

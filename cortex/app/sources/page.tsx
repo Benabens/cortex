@@ -19,7 +19,9 @@ export default function SourcesPage() {
         description="Le corpus qui nourrit Cortex : tes annales, séries et slides. Importe, puis prépare le cours."
       />
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.55fr_1fr]">
-        {loading ? (
+        {/* Skeleton UNIQUEMENT au premier chargement : un refetch (ex. coche « Référence »)
+            garde la liste montée → plus de saut/remontage (fix jank). */}
+        {loading && !data ? (
           <div className="skeleton h-[28rem] rounded-lg" aria-busy="true" aria-label="Chargement du corpus" />
         ) : error ? (
           <Panel className="flex flex-col items-center justify-center gap-3 rounded-xl px-6 py-16 text-center">

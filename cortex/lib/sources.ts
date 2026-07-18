@@ -1,6 +1,7 @@
-import { ensureFts } from "@/db/client";
+import { ensureFts, currentCourse } from "@/db/client";
 import { q } from "@/db/q";
 import { indexItemForSearch, unindexSource } from "@/lib/search";
+import { sourceHref } from "@/lib/deeplink";
 import { refsDir } from "@/lib/paths";
 import * as cheerio from "cheerio";
 import fs from "node:fs";
@@ -163,6 +164,40 @@ export async function listExamSources(): Promise<ExamSource[]> {
     ...r,
     uploaded: uploadedSet.has(r.path),
     isReference: refSet.has(r.path),
+  }));
+}
+
+export type CorpusSource = {
+  type: string;
+  title: string;
+  path: string;
+  year: number | null;
+  items: number;
+  href: string | null; // deep-link « voir » (ouvre la source à sa 1re page/ancre)
+};
+
+/**
+ * Toutes les sources du corpus (tous types) avec un deep-link « voir » — pour rendre les facettes
+ * cliquables (filtrer + ouvrir un cours / une série / un exercice). Zéro lien mort : href dérivé de
+ * l'ancre RÉELLE du 1er item (ou du chemin) via la logique unifiée sourceHref.
+ */
+export async function listCorpusSources(): Promise<CorpusSource[]> {
+  const course = currentCourse();
+  const rows = await q.all<{ type: string; title: string; path: string; year: number | null; items: number; anchor: string | null }>(
+    `SELECT s.type, s.title, s.path, s.year,
+            (SELECT count(*) FROM items i WHERE i.source_id = s.id) items,
+            (SELECT i2.anchor FROM items i2 WHERE i2.source_id = s.id ORDER BY i2.id LIMIT 1) anchor
+       FROM sources s
+      GROUP BY s.path
+      ORDER BY s.type, (s.year IS NULL), s.year DESC, s.title`
+  );
+  return rows.map((r) => ({
+    type: r.type,
+    title: r.title,
+    path: r.path,
+    year: r.year,
+    items: r.items,
+    href: sourceHref(course, r.path, r.anchor ?? r.path),
   }));
 }
 

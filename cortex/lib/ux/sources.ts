@@ -20,7 +20,17 @@ export type SourceExam = {
 
 export type CorpusAgg = { type: string; sources: number; items: number };
 
-export type SourcesResp = { exams: SourceExam[]; corpus: CorpusAgg[] };
+/** Une source du corpus (tous types) avec deep-link « voir ». */
+export type CorpusSourceItem = {
+  type: string;
+  title: string;
+  path: string;
+  year: number | null;
+  items: number;
+  href: string | null;
+};
+
+export type SourcesResp = { exams: SourceExam[]; corpus: CorpusAgg[]; sources?: CorpusSourceItem[] };
 
 export const CORPUS_LABEL: Record<string, string> = {
   course_pdf: "Cours (PDF)",

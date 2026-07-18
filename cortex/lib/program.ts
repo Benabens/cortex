@@ -3,6 +3,7 @@ import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import { ensureIndexSchema, indexExamExercises } from "@/lib/exam-index";
 import { createWeakness, ensureSchema as ensureWeaknessSchema } from "@/lib/weaknesses";
+import { rebuildCoursePlan, getPlanChapters, ensurePlanSchema, type PlanChapter } from "@/lib/course-plan";
 
 /**
  * « Programme & Maîtrise » (NEXT STEP 12). PAR COURS, 100 % additif.
@@ -30,6 +31,19 @@ export type Topic = {
   examCount: number; // nb d'occurrences repérées dans les past-exams
   source: string | null; // 'final' | 'serie' | 'cours'
   description: string | null;
+  chapterId: number | null; // v2 — chapitre du plan de cours où la notion est traitée (null = non rattaché)
+};
+
+/** v2 — une occurrence RÉELLE d'une notion dans un final (pour l'accordéon : toutes visibles au dépli). */
+export type Occurrence = {
+  examId: number;
+  examTitle: string | null;
+  examYear: number | null;
+  examPage: number | null;
+  examHref: string | null;
+  courseHref: string | null;
+  points: number | null;
+  statement: string | null;
 };
 
 export type MasteryRow = {
@@ -60,6 +74,9 @@ export type TopicView = Topic & {
   examPage?: number | null; // page de cette occurrence représentative
   courseHref?: string | null; // deep-link vers le passage de cours associé
   courseOrder?: number | null; // clé d'ordre « où la notion est traitée » (dérivée de course_href)
+  // ── v2 — complétude accordéon : chapitre rattaché + TOUTES les occurrences (chaque final + page) ──
+  chapterId?: number | null; // chapitre du plan de cours (topics.plan_chapter_id)
+  occurrences_all?: Occurrence[]; // toutes les occurrences réelles (dépli d'une notion)
 };
 
 export const MASTERY_THRESHOLD = 7; // « maîtrisé » à partir de 7/10
@@ -360,39 +377,113 @@ export async function aggregateTopicsFromIndex(opts: { onStep?: (m: string, p: n
       if (row) for (const rl of a.rawLabels) await q.run(`UPDATE exam_exercises SET topic_id = ? WHERE topic = ?`, row.id, rl);
     }
   });
-  step(`Partition : ${aggs.length} types sur ${exos.length} exos indexés ✓`, 100);
-  return { count: aggs.length, exercises: exos.length };
+  // v2 — dé-doublonnage « à la source » : retire les notions EMPILÉES (analyses passées, FR/EN,
+  // séries/cours SANS exos) qui font DOUBLON d'une notion réellement tombée. Zéro perte de signal :
+  // on ne touche qu'aux notions jamais tombées (exam_count=0) subsumées par une notion tombée.
+  const removed = await dedupeStackedTopics();
+  step(`Partition : ${aggs.length} types sur ${exos.length} exos indexés${removed ? ` (+${removed} doublons empilés retirés)` : ""} ✓`, 100);
+  return { count: aggs.length - removed, exercises: exos.length };
+}
+
+/** Tokens signifiants d'un label (≥ 3 lettres, sans accents), pour comparer deux notions. */
+function labelTokens(label: string): Set<string> {
+  return new Set(norm(label).split(" ").filter((w) => w.length >= 3));
+}
+
+/**
+ * Retire les notions JAMAIS TOMBÉES (exam_count = 0, typiquement source série/cours issue d'analyses
+ * empilées) qui DOUBLONNENT une notion réellement tombée (recouvrement de tokens ≥ 50 % du plus petit).
+ * Conservateur : une notion série UNIQUE (aucun recouvrement fort avec une notion tombée) est gardée
+ * — c'est un vrai « au programme, pas encore tombé ». Renvoie le nombre de doublons supprimés.
+ */
+export async function dedupeStackedTopics(): Promise<number> {
+  await ensureProgramSchema();
+  const rows = await q.all<{ id: number; label: string; exam_count: number }>(`SELECT id, label, exam_count FROM topics`);
+  const fallen = rows.filter((r) => (r.exam_count ?? 0) > 0).map((r) => ({ ...r, toks: labelTokens(r.label) }));
+  if (!fallen.length) return 0;
+  let removed = 0;
+  for (const r of rows) {
+    if ((r.exam_count ?? 0) > 0) continue; // jamais toucher une notion tombée
+    const t = labelTokens(r.label);
+    if (!t.size) continue;
+    const dup = fallen.some((f) => {
+      if (f.id === r.id) return false;
+      let inter = 0;
+      for (const w of t) if (f.toks.has(w)) inter++;
+      const denom = Math.min(t.size, f.toks.size) || 1;
+      return inter / denom >= 0.5;
+    });
+    if (dup) { await q.run(`DELETE FROM topics WHERE id = ?`, r.id); removed++; }
+  }
+  return removed;
 }
 
 /**
  * V11 — construit le blueprint EXHAUSTIF : index exo-par-exo des finals → agrégation en partition
  * typée à vrais poids. Repli sur l'ancien résumé (analyzeBlueprint) si aucun final indexable.
  */
-export async function rebuildBlueprintFromIndex(opts: { onStep?: (m: string, p: number) => void } = {}): Promise<{ exams: number; exercises: number; types: number }> {
+export async function rebuildBlueprintFromIndex(opts: { onStep?: (m: string, p: number) => void } = {}): Promise<{ exams: number; exercises: number; types: number; chapters: number; mapped: number }> {
   const step = opts.onStep ?? (() => {});
-  const idx = await indexExamExercises({ onStep: (s, p) => step(s, Math.round(p * 0.85)) });
+  const idx = await indexExamExercises({ onStep: (s, p) => step(s, Math.round(p * 0.75)) });
+  let types: number;
   if (!idx.exercises) {
-    step("Aucun final indexable → repli sur l'analyse résumée…", 86);
-    const r = await analyzeBlueprint({ onStep: (s, p) => step(s, 86 + Math.round(p * 0.14)) });
-    return { exams: 0, exercises: 0, types: r.count };
+    step("Aucun final indexable → repli sur l'analyse résumée…", 76);
+    const r = await analyzeBlueprint({ onStep: (s, p) => step(s, 76 + Math.round(p * 0.09)) });
+    types = r.count;
+  } else {
+    const agg = await aggregateTopicsFromIndex({ onStep: (s, p) => step(s, 75 + Math.round(p * 0.10)) });
+    types = agg.count;
   }
-  const agg = await aggregateTopicsFromIndex({ onStep: (s, p) => step(s, 85 + Math.round(p * 0.15)) });
-  return { exams: idx.exams, exercises: idx.exercises, types: agg.count };
+  // v2 — plan de cours du prof + rattachement des notions (repli propre si non dérivable).
+  const plan = await rebuildCoursePlan({ onStep: (s, p) => step(`Plan de cours : ${s}`, 85 + Math.round(p * 0.15)) });
+  step(plan.plan.ok ? `Plan : ${plan.plan.chapters} chapitres, ${plan.map.mapped}/${plan.map.total} notions rattachées ✓` : `Plan de cours non dérivé (${plan.plan.reason ?? "structure insuffisante"}) — regroupement existant conservé.`, 100);
+  return { exams: idx.exams, exercises: idx.exercises, types, chapters: plan.plan.chapters, mapped: plan.map.mapped };
 }
 
 // ---------------- PHASE 2 — Vue « Couverture & Maîtrise » ----------------
 
 async function topicRows(): Promise<Topic[]> {
+  await ensurePlanSchema(); // garantit topics.plan_chapter_id (rattrapage DB existantes)
   return (
     await q.all<any>(
-      `SELECT id, label, method, exo_type exoType, trap, category, archetype, exam_weight examWeight, exam_count examCount, source, description
+      `SELECT id, label, method, exo_type exoType, trap, category, archetype, exam_weight examWeight, exam_count examCount, source, description, plan_chapter_id chapterId
          FROM topics ORDER BY exam_weight DESC, exam_count DESC, label`
     )
   ).map((r) => ({ ...r }));
 }
 
+/** v2 — TOUTES les occurrences réelles par topic_id (chaque final + page), pour l'accordéon. */
+async function occurrencesByTopic(): Promise<Map<number, Occurrence[]>> {
+  const out = new Map<number, Occurrence[]>();
+  let rows: (Occurrence & { topicId: number })[] = [];
+  try {
+    await ensureIndexSchema();
+    rows = await q.all(
+      `SELECT id examId, topic_id topicId, exam_title examTitle, exam_year examYear, exam_page examPage,
+              exam_href examHref, course_href courseHref, points, statement
+         FROM exam_exercises WHERE topic_id IS NOT NULL
+        ORDER BY (exam_year IS NULL), exam_year DESC, exam_page`
+    );
+  } catch { return out; }
+  for (const r of rows) {
+    const { topicId, ...occ } = r;
+    if (!out.has(topicId)) out.set(topicId, []);
+    out.get(topicId)!.push(occ);
+  }
+  return out;
+}
+
+/** v2 — chapitre du plan enrichi des compteurs (tête d'accordéon : nb notions / nb tombées). */
+export type PlanChapterView = PlanChapter & {
+  notionCount: number; // notions rattachées à ce chapitre
+  fallenCount: number; // parmi elles, combien sont déjà tombées (≥ 1 occurrence)
+  occurrenceCount: number; // total d'occurrences dans les finals sous ce chapitre
+};
+
 export type ProgramOverview = {
   topics: TopicView[];
+  chapters: PlanChapterView[]; // v2 — plan de cours du prof (vide si non dérivable pour ce cours)
+  planOk: boolean; // le plan a-t-il été dérivé pour ce cours ?
   stats: {
     total: number;
     covered: number; // ≥1 tentative
@@ -485,6 +576,7 @@ export async function programOverview(): Promise<ProgramOverview> {
   await ensureProgramSchema();
   const topics = await topicRows();
   const exAgg = await topicExamAggregates();
+  const occ = await occurrencesByTopic();
   const mast = new Map<number, MasteryRow & { lastExamId: number | null }>();
   for (const m of await q.all<MasteryRow & { lastExamId: number | null }>(
     `SELECT topic_id topicId, score, attempts, last_score lastScore, last_done_at lastDoneAt, due_at dueAt, ease, interval_days intervalDays, last_exam_id lastExamId FROM mastery`
@@ -516,6 +608,8 @@ export async function programOverview(): Promise<ProgramOverview> {
       examPage: ex?.examPage ?? null,
       courseHref: ex?.courseHref ?? null,
       courseOrder: ex?.courseOrder ?? null,
+      chapterId: t.chapterId ?? null,
+      occurrences_all: occ.get(t.id) ?? [],
     };
   });
 
@@ -530,13 +624,27 @@ export async function programOverview(): Promise<ProgramOverview> {
     coveragePct: Math.round((coveredW / totalW) * 100),
     masteryPct: Math.round((masteryW / totalW) * 100),
   };
-  return { topics: views, stats };
+
+  // v2 — plan de cours du prof + compteurs de tête de chapitre (dérivés des notions rattachées).
+  const chapters0 = await getPlanChapters();
+  const chapters: PlanChapterView[] = chapters0.map((c) => {
+    const inCh = views.filter((t) => t.chapterId === c.id);
+    return {
+      ...c,
+      notionCount: inCh.length,
+      fallenCount: inCh.filter((t) => (t.occurrences ?? 0) > 0 || t.examCount > 0).length,
+      occurrenceCount: inCh.reduce((s, t) => s + ((t.occurrences ?? 0) > 0 ? t.occurrences! : t.examCount), 0),
+    };
+  });
+
+  return { topics: views, chapters, planOk: chapters.length > 0, stats };
 }
 
 export async function getTopic(id: number): Promise<Topic | null> {
   await ensureProgramSchema();
+  await ensurePlanSchema();
   const r = (await q.get<any>(
-    `SELECT id, label, method, exo_type exoType, trap, category, archetype, exam_weight examWeight, exam_count examCount, source, description FROM topics WHERE id = ?`,
+    `SELECT id, label, method, exo_type exoType, trap, category, archetype, exam_weight examWeight, exam_count examCount, source, description, plan_chapter_id chapterId FROM topics WHERE id = ?`,
     id
   )) as any;
   return r ?? null;

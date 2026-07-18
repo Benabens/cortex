@@ -31,6 +31,8 @@ export default function ProgrammePage() {
   }
 
   const types = buildTypes(data.topics);
+  const chapters = data.chapters ?? [];
+  const planOk = !!data.planOk;
 
   // Rien d'exploitable (cours non analysé) → état qui enseigne.
   if (types.length === 0) {
@@ -62,12 +64,12 @@ export default function ProgrammePage() {
     <div className="flex flex-col gap-7">
       <PageHeader
         title="Programme"
-        description="Les notions qui tombent aux finals, extraites des annales. Trie-les par section du cours ou par ce qui tombe le plus souvent — chaque notion pointe vers le final et le passage de cours."
+        description="Le plan du cours du prof, chapitre par chapitre. Déplie un chapitre pour ses notions, puis une notion pour voir chaque final où elle est tombée et le passage de cours."
       >
         <ReanalyzeButton onDone={refetch} />
       </PageHeader>
 
-      <ProgramExplorer types={types} />
+      <ProgramExplorer types={types} chapters={chapters} planOk={planOk} />
     </div>
   );
 }

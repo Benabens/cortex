@@ -1,6 +1,7 @@
 import {
   addUploadedRef,
   corpusSummary,
+  listCorpusSources,
   listExamSources,
   removeUploadedRef,
   toggleReference,
@@ -13,7 +14,11 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   useCourse(req);
-  return NextResponse.json({ exams: await listExamSources(), corpus: await corpusSummary() });
+  return NextResponse.json({
+    exams: await listExamSources(),
+    corpus: await corpusSummary(),
+    sources: await listCorpusSources(),
+  });
 }
 
 /** Upload d'un examen de référence (multipart) OU bascule d'une référence (JSON). */

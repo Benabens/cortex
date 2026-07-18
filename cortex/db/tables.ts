@@ -243,6 +243,27 @@ export const TABLES: TableSpec[] = [
       // ALTER historiques (lib/program.ts:73-74)
       { name: "exo_type", type: "text" },
       { name: "trap", type: "text" },
+      // v2 « plan de cours » (lib/course-plan.ts) : chapitre du plan du prof où la notion
+      // est réellement traitée (classée sur la liste RÉELLE des lectures, jamais inventée).
+      // Plain int (pas de FK) : réécrit à chaque dérivation du plan ; null = non rattaché.
+      { name: "plan_chapter_id", type: "int" },
+    ],
+  },
+  {
+    // v2 — PLAN DE COURS dérivé du support du prof (les « Cours (PDF) » / slides), PAR COURS.
+    // Chaque chapitre = une unité du prof (une lecture), dans SON ordre, titre extrait du
+    // document réel (jamais fabriqué). Les notions examinées s'y rattachent (topics.plan_chapter_id).
+    // Reconstruit à chaque « Ré-analyser » ; vide/absent pour un cours sans structure exploitable.
+    name: "plan_chapters",
+    cols: [
+      { name: "id", type: "int", pk: true, ai: true },
+      { name: "seq", type: "int", nn: true, def: 0 }, // ordre dans le plan (0-based)
+      { name: "lecture_no", type: "int" }, // n° de lecture du prof (clé de rattachement), null si groupé
+      { name: "title", type: "text", nn: true }, // titre RÉEL du chapitre (ex. « Kernel Methods »)
+      { name: "subtitle", type: "text" }, // libellé court (ex. « Lecture 7 »)
+      { name: "summary", type: "text" }, // résumé léger de tête de chapitre (peut manquer)
+      { name: "source_href", type: "text" }, // deep-link vers le passage de cours (lecture)
+      { name: "created_at", type: "text", def: now },
     ],
   },
   {

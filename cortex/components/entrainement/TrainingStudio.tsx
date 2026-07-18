@@ -6,7 +6,6 @@ import {
   Sparkles,
   FileText,
   CheckSquare,
-  ImagePlus,
   Gauge,
   Lightbulb,
   Eye,
@@ -17,6 +16,7 @@ import {
 } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
+import { ImageTextArea } from "@/components/ui/ImageTextArea";
 import { WeightBar } from "@/components/viz/WeightBar";
 import { apiPost, useApi, useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@/lib/ux/api";
 import {
@@ -40,8 +40,8 @@ export function TrainingStudio() {
   const list = useApi<DrillListResp>("/api/drill");
 
   const [input, setInput] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
   const [image, setImage] = useState<File | null>(null);
+  const [prefillNote, setPrefillNote] = useState<string | null>(null); // concept pré-rempli depuis Faiblesses
 
   const [drill, setDrill] = useState<Drill | null>(null);
   const [drilling, setDrilling] = useState(false);
@@ -61,22 +61,25 @@ export function TrainingStudio() {
 
   const busy = drilling || jobRunning;
 
+  // Réinitialise l'ÉTAT RÉSULTAT au changement de cours. On ne touche PAS à input/image/prefillNote :
+  // le cours initial se résout de cs-202 → ml via un effet (courseId change au montage) ; effacer
+  // l'input ici écraserait le pré-remplissage ?prefill= (déposé au montage). Le × / l'édition suffisent.
   useEffect(() => {
-    setDrill(null); setJobId(null); setError(null); setFbSent(null);
-    setInput(""); setImage(null); setShownHints(0); setShowSolution(false);
+    setDrill(null); setJobId(null); setError(null); setFbSent(null); setShownHints(0); setShowSolution(false);
   }, [courseId]);
 
-  // Deep-link ?drill=<concept> (boutons « Drill » des Faiblesses).
-  const autolaunched = useRef(false);
+  // Deep-link ?prefill=<concept> (bouton « S'entraîner » des Faiblesses ; legacy ?drill= toléré).
+  // On PRÉ-REMPLIT la box (éditable, × pour vider) — SANS lancer : l'étudiant garde la main.
+  const prefilled = useRef(false);
   useEffect(() => {
-    if (autolaunched.current) return;
-    const c = new URLSearchParams(window.location.search).get("drill");
-    if (c && c.trim()) {
-      autolaunched.current = true;
-      setInput(c.trim());
-      launchDrill(c.trim());
+    if (prefilled.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const c = (params.get("prefill") ?? params.get("drill") ?? "").trim();
+    if (c) {
+      prefilled.current = true;
+      setInput(c);
+      setPrefillNote(c);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function launchDrill(c?: string) {
@@ -170,32 +173,36 @@ export function TrainingStudio() {
           Un concept, une consigne, ou une image — Cortex produit un exo au format du final.
         </p>
 
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          rows={3}
-          aria-label="Concept, consigne ou énoncé à travailler"
-          placeholder="Ex. « rétropropagation », « max-flow avec une coupe » — ou colle une consigne / un énoncé…"
-          className="mt-4 w-full resize-none rounded-lg border border-line-strong bg-surface-2/40 p-3.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] focus:outline-none focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-violet)_28%,transparent)]"
-        />
-
-        {/* image optionnelle (→ pipeline PDF) */}
-        <div className="mt-3">
-          {image ? (
-            <span className="inline-flex h-10 max-w-full items-center gap-2 rounded-md border border-[color-mix(in_oklch,var(--color-emerald)_40%,transparent)] bg-surface-2/50 px-3 text-[0.82rem] text-ink-1">
-              <ImagePlus className="size-4 shrink-0 text-emerald-hi" strokeWidth={2} />
-              <span className="truncate">{image.name}</span>
-              <button type="button" onClick={() => { setImage(null); if (fileRef.current) fileRef.current.value = ""; }} aria-label="Retirer l’image" className="grid size-5 shrink-0 place-items-center rounded text-ink-3 hover:text-ink-1">
-                <X className="size-3.5" strokeWidth={2.5} />
-              </button>
+        {/* pré-remplissage depuis Faiblesses : bandeau éditable + × pour vider */}
+        {prefillNote && input === prefillNote && (
+          <div className="mt-4 flex items-center justify-between gap-2 rounded-lg border border-[color-mix(in_oklch,var(--color-violet)_35%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_9%,transparent)] px-3 py-2 text-[0.78rem] text-ink-2">
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <Target className="size-3.5 shrink-0 text-violet-hi" strokeWidth={2.25} />
+              <span className="truncate">Pré-rempli depuis une faiblesse — modifie-le ou lance tel quel.</span>
             </span>
-          ) : (
-            <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-line-strong bg-surface-2/40 px-3 text-[0.82rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_40%,transparent)] hover:text-ink-1">
-              <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" onChange={(e) => setImage(e.target.files?.[0] ?? null)} />
-              <ImagePlus className="size-4" strokeWidth={2} />
-              Image d’énoncé (optionnelle)
-            </label>
-          )}
+            <button
+              type="button"
+              onClick={() => { setInput(""); setPrefillNote(null); }}
+              aria-label="Vider le pré-remplissage"
+              className="grid size-6 shrink-0 place-items-center rounded text-ink-3 transition-colors hover:text-ink-1 focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2"
+            >
+              <X className="size-3.5" strokeWidth={2.5} />
+            </button>
+          </div>
+        )}
+
+        {/* zone unique : texte + IMAGE INLINE (P-B) — colle ⌘V / glisse une image, continue à écrire */}
+        <div className="mt-3">
+          <ImageTextArea
+            value={input}
+            onChange={setInput}
+            image={image}
+            onImageChange={setImage}
+            rows={3}
+            ariaLabel="Concept, consigne ou énoncé à travailler (image collable)"
+            placeholder="Ex. « rétropropagation », « max-flow avec une coupe » — ou colle une consigne / un énoncé…"
+            onEnter={submit}
+          />
         </div>
 
         {/* puces : dus / faiblesses réels */}

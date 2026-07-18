@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Sparkles, ImagePlus, Check, CloudOff, AlertTriangle, X } from "lucide-react";
-import { SEVERITY, type Severity } from "@/lib/ux/labels";
+import { useState } from "react";
+import { Sparkles, Check, CloudOff, AlertTriangle } from "lucide-react";
+import { SEVERITY } from "@/lib/ux/labels";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ImageTextArea } from "@/components/ui/ImageTextArea";
 import { SeverityMeter } from "@/components/viz/SeverityMeter";
 import { apiPost, useCourse, type ApiError } from "@/lib/ux/api";
 import { sevOf, type MineResp, type MinedItem } from "@/lib/ux/weaknesses";
@@ -20,7 +21,6 @@ const MIN_MINE_CHARS = 40; // au-delà = « discussion » à miner (seuil back =
  */
 export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
   const { courseId } = useCourse();
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -45,7 +45,6 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
     }
     setText("");
     setFile(null);
-    if (fileRef.current) fileRef.current.value = "";
     setSavedMsg("Lacune ajoutée au suivi — Cortex l’analysera pour la relier au cours.");
     onAdded();
   };
@@ -62,7 +61,7 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
     reset();
     const t = text.trim();
     if (!file && !t) {
-      setError({ offline: false, message: "Colle une discussion, un énoncé, ou ajoute un screenshot / une note." });
+      setError({ offline: false, message: "Colle une discussion, un énoncé, une image, ou écris une note." });
       return;
     }
     setBusy(true);
@@ -97,37 +96,25 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
           <h2 id="inbox-title" className="text-[1.05rem] font-semibold text-ink-1">Ajoute une lacune</h2>
         </div>
         <p className="mt-1 text-[0.88rem] text-ink-2">
-          Colle une discussion, un énoncé raté, ou dépose un screenshot — Cortex détecte et suit tes lacunes.
+          Colle une discussion, un énoncé raté, ou une image — Cortex détecte et suit tes lacunes.
         </p>
 
-        {/* zone unique : texte (discussion / énoncé / note) */}
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={4}
-          aria-label="Discussion, énoncé, ou note sur la lacune"
-          placeholder="Colle une discussion (ChatGPT, Slack…), un énoncé, ou écris ce qui t’a piégé…"
-          className="mt-4 w-full resize-none rounded-lg border border-line-strong bg-surface-2/40 p-3.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] focus:outline-none focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-violet)_28%,transparent)]"
-        />
+        {/* zone unique : texte + IMAGE INLINE (P-B) — colle ⌘V / glisse une image, continue à écrire */}
+        <div className="mt-4">
+          <ImageTextArea
+            value={text}
+            onChange={setText}
+            image={file}
+            onImageChange={setFile}
+            rows={4}
+            ariaLabel="Discussion, énoncé, ou note sur la lacune (image collable)"
+            placeholder="Colle une discussion (ChatGPT, Slack…), un énoncé, ou écris ce qui t’a piégé…"
+            onEnter={submit}
+          />
+        </div>
 
-        {/* screenshot optionnel + sévérité + action */}
+        {/* sévérité + action */}
         <div className="mt-3 flex flex-wrap items-center gap-2.5">
-          {file ? (
-            <span className="inline-flex h-10 max-w-[15rem] items-center gap-2 rounded-md border border-[color-mix(in_oklch,var(--color-emerald)_40%,transparent)] bg-surface-2/50 px-3 text-[0.82rem] text-ink-1">
-              <ImagePlus className="size-4 shrink-0 text-emerald-hi" strokeWidth={2} />
-              <span className="truncate">{file.name}</span>
-              <button type="button" onClick={() => { setFile(null); if (fileRef.current) fileRef.current.value = ""; }} aria-label="Retirer le screenshot" className="grid size-5 shrink-0 place-items-center rounded text-ink-3 hover:text-ink-1">
-                <X className="size-3.5" strokeWidth={2.5} />
-              </button>
-            </span>
-          ) : (
-            <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-line-strong bg-surface-2/40 px-3 text-[0.82rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_40%,transparent)] hover:text-ink-1">
-              <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-              <ImagePlus className="size-4" strokeWidth={2} />
-              Screenshot
-            </label>
-          )}
-
           {/* sévérité (pour un ajout direct exo/note ; le minage la déduit) */}
           <div className="inline-flex items-center gap-1" role="group" aria-label="Sévérité (pour un ajout direct)">
             {[1, 2, 3].map((lv) => {
@@ -160,7 +147,7 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
         </div>
 
         <p className="mt-2 text-[0.74rem] text-ink-4">
-          Longue discussion → Cortex en extrait tes lacunes. Screenshot ou note courte → ajout direct (marche hors-ligne).
+          Longue discussion → Cortex en extrait tes lacunes. Image ou note courte → ajout direct (marche hors-ligne).
         </p>
 
         {savedMsg && (
