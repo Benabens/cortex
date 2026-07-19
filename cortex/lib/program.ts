@@ -4,6 +4,7 @@ import { profile } from "@/lib/course-profile";
 import { ensureIndexSchema, indexExamExercises } from "@/lib/exam-index";
 import { createWeakness, ensureSchema as ensureWeaknessSchema } from "@/lib/weaknesses";
 import { rebuildCoursePlan, getPlanChapters, ensurePlanSchema, type PlanChapter } from "@/lib/course-plan";
+import { detectExamDna } from "@/lib/exam-dna";
 
 /**
  * « Programme & Maîtrise » (NEXT STEP 12). PAR COURS, 100 % additif.
@@ -424,19 +425,26 @@ export async function dedupeStackedTopics(): Promise<number> {
  */
 export async function rebuildBlueprintFromIndex(opts: { onStep?: (m: string, p: number) => void } = {}): Promise<{ exams: number; exercises: number; types: number; chapters: number; mapped: number }> {
   const step = opts.onStep ?? (() => {});
-  const idx = await indexExamExercises({ onStep: (s, p) => step(s, Math.round(p * 0.75)) });
+  const idx = await indexExamExercises({ onStep: (s, p) => step(s, Math.round(p * 0.65)) });
   let types: number;
   if (!idx.exercises) {
-    step("Aucun final indexable → repli sur l'analyse résumée…", 76);
-    const r = await analyzeBlueprint({ onStep: (s, p) => step(s, 76 + Math.round(p * 0.09)) });
+    step("Aucun final indexable → repli sur l'analyse résumée…", 66);
+    const r = await analyzeBlueprint({ onStep: (s, p) => step(s, 66 + Math.round(p * 0.08)) });
     types = r.count;
   } else {
-    const agg = await aggregateTopicsFromIndex({ onStep: (s, p) => step(s, 75 + Math.round(p * 0.10)) });
+    const agg = await aggregateTopicsFromIndex({ onStep: (s, p) => step(s, 65 + Math.round(p * 0.09)) });
     types = agg.count;
   }
   // v2 — plan de cours du prof + rattachement des notions (repli propre si non dérivable).
-  const plan = await rebuildCoursePlan({ onStep: (s, p) => step(`Plan de cours : ${s}`, 85 + Math.round(p * 0.15)) });
-  step(plan.plan.ok ? `Plan : ${plan.plan.chapters} chapitres, ${plan.map.mapped}/${plan.map.total} notions rattachées ✓` : `Plan de cours non dérivé (${plan.plan.reason ?? "structure insuffisante"}) — regroupement existant conservé.`, 100);
+  const plan = await rebuildCoursePlan({ onStep: (s, p) => step(`Plan de cours : ${s}`, 74 + Math.round(p * 0.12)) });
+  step(plan.plan.ok ? `Plan : ${plan.plan.chapters} chapitres, ${plan.map.mapped}/${plan.map.total} notions rattachées ✓` : `Plan de cours non dérivé (${plan.plan.reason ?? "structure insuffisante"}) — regroupement existant conservé.`, 86);
+  // moteur-v2 (P0) — ADN d'examen (moules + figures + texture) détecté depuis les annales.
+  // Ré-entrant ; jamais bloquant : un échec laisse l'ADN partiel, repris au prochain run / npm run dna.
+  try {
+    await detectExamDna({ onStep: (s, p) => step(`ADN : ${s}`, 86 + Math.round(p * 0.14)) });
+  } catch (e) {
+    step(`ADN d'examen incomplet (${(e as Error).message.slice(0, 50)}) — relance « npm run dna »`, 100);
+  }
   return { exams: idx.exams, exercises: idx.exercises, types, chapters: plan.plan.chapters, mapped: plan.map.mapped };
 }
 

@@ -20,7 +20,8 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "revision": "tsx scripts/revision.ts",
-    "revision:extend": "tsx scripts/revision-extend.ts"
+    "revision:extend": "tsx scripts/revision-extend.ts",
+    "dna": "tsx scripts/exam-dna.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
