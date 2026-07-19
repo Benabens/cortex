@@ -9,7 +9,7 @@ import type { Archetype } from "@/lib/archetypes";
  * → le prompt cs-202 reste byte-identique. Les autres cours ont leur profil propre
  * (pas de \examtopo réseau ni d'inode OS forcés ; archétypes & figures de la matière).
  */
-export type Slot = { category: string; points: number; brief: string };
+export type Slot = { category: string; points: number; brief: string; mold?: string | null };
 
 export type CourseProfile = {
   /** Bloc de contraintes dures en tête du prompt. */

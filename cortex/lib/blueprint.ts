@@ -1,7 +1,7 @@
 import { q } from "@/db/q";
 import { ARCHETYPES, type Archetype } from "@/lib/archetypes";
 
-export type Slot = { category: string; points: number; brief: string; archetypeId: string };
+export type Slot = { category: string; points: number; brief: string; archetypeId: string; mold?: string | null };
 
 /** Pondération d'un archétype par les faiblesses de Ben (matching mots-clés). */
 function weaknessBoost(a: Archetype, weaknesses: string[]): number {

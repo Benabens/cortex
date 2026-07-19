@@ -4,6 +4,7 @@ import { genericRefImageFor, genericVisionBlock } from "@/lib/course-vision";
 import type { CourseProfile, Slot } from "@/lib/course-profile";
 import { getCourse } from "@/lib/courses";
 import { genericDirectivesBlock } from "@/lib/profiles/generic-directives";
+import { getExamDna, sampleMolds } from "@/lib/exam-dna";
 
 /**
  * Profil GÉNÉRIQUE pour un cours autre que cs-202 (algo, ml, …).
@@ -63,9 +64,16 @@ export function makeGenericProfile(courseId: string, archetypes: Archetype[]): C
     const sorted = [...archetypes].sort((a, b) => b.weight * boost(b) - a.weight * boost(a));
     const picks = sorted.slice(0, 6);
     const pts = [35, 35, 30, 30, 25, 25];
+    // moteur-v2 (P2) — MOULES échantillonnés proportionnellement à l'ADN détecté du cours
+    // (moules « ouverts » : un exam d'exercices n'a pas de statement_truefalse). Sans ADN → null.
+    const dna = await getExamDna().catch(() => null);
+    const molds = sampleMolds(dna, picks.length, {
+      only: ["proof_analysis", "derivation", "design", "applied_scenario", "formula_computation", "code_trace", "table_fill", "figure_reading"],
+    });
     return picks.map((a, i) => ({
       category: a.category,
       points: pts[i] ?? 20,
+      mold: molds[i] ?? null,
       brief: [
         `ARCHÉTYPE « ${a.id} » — ${a.concept}.`,
         `Construction : ${a.structure}`,

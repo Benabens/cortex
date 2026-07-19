@@ -12,22 +12,30 @@ import {
   type StepCb,
 } from "@/lib/exam";
 import { verifyAndHarden, type VerifyReport } from "@/lib/verify";
+import { getExamDna, fewShotForMold } from "@/lib/exam-dna";
+import { MOLD_DEFS, type MoldKind } from "@/lib/molds";
+import { renderFigure, figureSpecPromptBlock, injectFigureTex, type FigureSpec } from "@/lib/figure-gen";
+import { examsDir } from "@/lib/paths";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 
 /**
- * V3 — L'ARCHITECTE D'EXAMEN (pipeline multi-passes pour UN exercice ciblé, cs-202).
+ * V3 — L'ARCHITECTE D'EXAMEN (pipeline multi-passes pour UN exercice ciblé).
  *
- * Remplace la génération mono-passe par la boucle d'un concepteur d'examen humain :
- *   P0 Étudier (vraie page la plus dure + fiche difficulté + piège ciblé)
- *   P1 Concevoir le PIÈGE (décider l'idée fausse + le cas-limite AVANT de rédiger)
- *   P2 Rédiger (multi-étapes, format EPFL, style de la prof, piège intégré)
- *   P3 Critique ADVERSARIALE + RÉVISION (joue le pattern-matcher ET l'étudiant fort ; si le
- *      pattern-matcher réussit → trop facile, durcis ; si le fort cale → simplifie le bon endroit ;
- *      compare à la rubrique point par point ; révise chirurgicalement — boucle bornée)
- *   P4 Vérifier la JUSTESSE + scope (verifyAndHarden existant)
+ * moteur-v2 (P3) — 100 % GÉNÉRIQUE : la persona, les archétypes et le barème viennent du PROFIL
+ * DU COURS COURANT (détecté/configuré), plus AUCUNE mention de matière en dur dans ce chemin
+ * partagé (les questions ouvertes de tout cours passent ici). Le MOULE imposé (ADN détecté) et
+ * les few-shot RÉELS du moule resserrent l'imitation ; une figure (FIGURE SPEC) peut être exigée.
  *
- * Ce qu'on PRÉSERVE : format/figures verrouillées, scope (directives), justesse, fiabilité.
- * Ce qu'on AMÉLIORE : la difficulté et le style.
+ * Boucle : P0 Étudier (vraie page + fiche difficulté) → P1 Concevoir le PIÈGE → P2 Rédiger →
+ * P3 Critique ADVERSARIALE + RÉVISION (bornée) → P4 Vérifier la JUSTESSE (verifyAndHarden).
  */
+
+/** Persona dérivée du cours courant (jamais une matière en dur dans ce module partagé). */
+function persona(): string {
+  return profile().qaIntro?.() ?? "Tu es l'équipe enseignante du cours.";
+}
 
 // ───────── P1 : la fiche de conception (design brief) ─────────
 type DesignBrief = {
@@ -96,39 +104,51 @@ const AUDIT_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-function pointsFor(a: Archetype): number {
-  return a.id === "c-reading" ? 10 : a.id === "labs-reading" ? 15 : a.category === "Networking" ? 50 : 25;
+/** Barème d'un archétype : dérivé des SLOTS du PROFIL du cours (catégorie correspondante),
+ *  repli 25. (Reproduit le barème historique cs-202 via ses propres slots — zéro constante ici.) */
+async function pointsFor(a: Archetype): Promise<number> {
+  try {
+    const slots = await profile().examSlots();
+    const hit = slots.find((s) => s.category === a.category);
+    if (hit && hit.points > 0) return hit.points;
+  } catch {}
+  return 25;
 }
 
 // ───────── Image → exo : identification du concept par VISION (avant l'architecte) ─────────
-const ARCHETYPE_IDS = ["packet-trace", "tcp-reno", "inode-walk", "fork-sched", "c-reading", "labs-reading"] as const;
 type ImageId = { archetype_id: string; concept: string; technique: string; student_error: string };
-const IMAGE_ID_SCHEMA = {
-  type: "object",
-  properties: {
-    archetype_id: { type: "string", description: `L'archétype CS-202 le plus proche, EXACTEMENT l'un de : ${ARCHETYPE_IDS.join(" | ")}.` },
-    concept: { type: "string", description: "Le concept testé par l'exercice de l'image (court, ex. « TCP slow start + perte »)." },
-    technique: { type: "string", description: "La TECHNIQUE/MÉTHODE précise à maîtriser (ce que le nouvel exo doit retester sur un autre setup)." },
-    student_error: { type: "string", description: "Si une note d'erreur est fournie : l'erreur sous-jacente à punir ; sinon vide." },
-  },
-  required: ["archetype_id", "concept", "technique", "student_error"],
-  additionalProperties: false,
-} as const;
+
+/** Schéma d'identification construit sur les archétypes DU COURS COURANT (jamais une liste en dur). */
+function imageIdSchema(): object {
+  const ids = profile().archetypes.map((a) => a.id);
+  return {
+    type: "object",
+    properties: {
+      archetype_id: { type: "string", description: `L'archétype du cours le plus proche, EXACTEMENT l'un de : ${ids.join(" | ")}.` },
+      concept: { type: "string", description: "Le concept testé par l'exercice de l'image (court)." },
+      technique: { type: "string", description: "La TECHNIQUE/MÉTHODE précise à maîtriser (ce que le nouvel exo doit retester sur un autre setup)." },
+      student_error: { type: "string", description: "Si une note d'erreur est fournie : l'erreur sous-jacente à punir ; sinon vide." },
+    },
+    required: ["archetype_id", "concept", "technique", "student_error"],
+    additionalProperties: false,
+  } as const;
+}
 
 /** Lit l'image d'un exo (vision) et identifie l'archétype + le concept + la technique à retester. */
 async function identifyFromImage(image: string, note: string | undefined, step: StepCb): Promise<ImageId> {
   step("Lecture de l'image (vision) — identification du concept…", 8);
+  const ids = new Set(profile().archetypes.map((a) => a.id));
   const prompt = [
-    `Tu es l'équipe enseignante de CS-202 (EPFL). OUVRE et observe attentivement cette image : ${image} (outil Read).`,
+    `${persona()} OUVRE et observe attentivement cette image : ${image} (outil Read).`,
     `C'est un exercice (d'examen, de série, ou un exo que l'étudiant a raté).`,
     note ? `Note de l'étudiant (pourquoi il a buté) : « ${note} ».` : ``,
-    `Identifie le CONCEPT et la TECHNIQUE précise testés, et l'archétype CS-202 le plus proche.`,
+    `Identifie le CONCEPT et la TECHNIQUE précise testés, et l'archétype du cours le plus proche.`,
     `Réponds UNIQUEMENT avec l'objet JSON conforme.`,
-    JSON.stringify(IMAGE_ID_SCHEMA, null, 2),
+    JSON.stringify(imageIdSchema(), null, 2),
   ].filter((l) => l != null).join("\n");
   const text = await completeText({ prompt, model: "opus", timeoutMs: 220_000 });
   const r = extractJson<ImageId>(text);
-  if (!ARCHETYPE_IDS.includes(r.archetype_id as any)) r.archetype_id = "";
+  if (!ids.has(r.archetype_id)) r.archetype_id = "";
   return r;
 }
 
@@ -163,18 +183,19 @@ function contextBlock(ctx: Awaited<ReturnType<typeof gatherTargetedContext>>): s
   ].filter((l) => l != null).join("\n");
 }
 
-/** P0+P1 — étudier la vraie page la plus dure + concevoir le piège (avant de rédiger). */
-async function designTrap(a: Archetype, target: string, refImage: string | null, step: StepCb, image?: string | null, note?: string | null, statement?: string | null): Promise<DesignBrief> {
-  const p = profile();
+/** P0+P1 — étudier la vraie page la plus dure + concevoir le piège (avant de rédiger).
+ *  moteur-v2 (P3) — persona du cours + MOULE imposé (ADN) : le piège se conçoit DANS le moule. */
+async function designTrap(a: Archetype, target: string, refImage: string | null, step: StepCb, image?: string | null, note?: string | null, statement?: string | null, mold?: MoldKind | null): Promise<DesignBrief> {
   const r = rubricFor(a.id);
   const imgBlock = derivedSourceBlock({ image, note, statement });
   const calBlock = await calibrationBlock(a.id); // async — awaité AVANT le template (sinon "[object Promise]" dans le prompt)
   const prompt = [
-    `Tu es l'équipe enseignante de CS-202 (EPFL) et tu CONÇOIS une question d'examen DURE, dans le style de la prof.`,
+    `${persona()} Tu CONÇOIS une question d'examen DURE, dans le style des annales du cours.`,
     refImage ? `ÉTUDIE D'ABORD la vraie page d'examen la plus dure de ce type : ${refImage} (outil Read) — observe sa densité, son piège, sa charge.` : ``,
     imgBlock || null,
     ``,
     `Type : ${a.concept} (archétype « ${a.id} », catégorie ${a.category}). Sujet ciblé : « ${target} ».`,
+    mold ? `MOULE IMPOSÉ : ${mold} — ${MOLD_DEFS[mold]}. Conçois le piège DANS ce moule (le format de la question doit être celui du moule).` : ``,
     ``,
     trapMenuBlock(a.id),
     ``,
@@ -191,11 +212,18 @@ async function designTrap(a: Archetype, target: string, refImage: string | null,
   return extractJson<DesignBrief>(text);
 }
 
-/** P2 — rédiger l'énoncé multi-étapes au format EPFL, piège intégré, style prof. */
-async function writeFromDesign(a: Archetype, target: string, pts: number, design: DesignBrief, ctx: Awaited<ReturnType<typeof gatherTargetedContext>>, refImage: string | null, step: StepCb, image?: string | null, note?: string | null, statement?: string | null): Promise<ExamQuestion> {
+/** P2 — rédiger l'énoncé multi-étapes au format du cours, piège intégré, style des annales.
+ *  moteur-v2 (P3) — MOULE imposé + few-shot RÉELS du moule (imitation resserrée) + cadrage
+ *  appliqué ; (P1) une figure data/plot peut être émise (figure_spec) si l'ADN du cours en a. */
+async function writeFromDesign(a: Archetype, target: string, pts: number, design: DesignBrief, ctx: Awaited<ReturnType<typeof gatherTargetedContext>>, refImage: string | null, step: StepCb, image?: string | null, note?: string | null, statement?: string | null, mold?: MoldKind | null, withFigures?: boolean): Promise<ExamQuestion & { figure_spec?: FigureSpec }> {
   const p = profile();
   const corpus = contextBlock(ctx);
   const imgBlock = derivedSourceBlock({ image, note, statement });
+  // few-shot RÉELS du moule (annales de CE cours) — imite le style/l'ancrage, jamais copier.
+  const shots = mold ? await fewShotForMold(mold, 2) : [];
+  const schema = withFigures
+    ? { ...ONE_EX_SCHEMA, properties: { ...ONE_EX_SCHEMA.properties, figure_spec: { type: "object", description: "UNIQUEMENT si la question exige une figure data/plot : le FIGURE SPEC décrit dans le prompt (l'énoncé place %%FIGURE%% où va la figure)." } } }
+    : ONE_EX_SCHEMA;
   const prompt = [
     p.directivesBlock(),
     ``,
@@ -216,17 +244,21 @@ async function writeFromDesign(a: Archetype, target: string, pts: number, design
     `• Ce que le pattern-matcher répond (FAUX — la question doit l'y piéger) : ${design.discriminator}`,
     `• Sous-questions en escalier : ${design.subquestion_plan.map((s, i) => `${i + 1}) ${s}`).join(" ")}`,
     ``,
+    mold ? `MOULE IMPOSÉ : ${mold} — ${MOLD_DEFS[mold]}. ${mold === "statement_truefalse" ? "" : "ANCRE la question dans un scénario concret / un mini-calcul de l'idiome du cours — jamais une affirmation abstraite hors-sol."}` : ``,
+    shots.length ? `VRAIES questions de ce moule dans CE cours (imite le STYLE, ne copie JAMAIS) :\n${shots.map((s) => `  · ${s}`).join("\n")}` : ``,
+    mold === "figure_reading" && withFigures ? `${figureSpecPromptBlock()}\nPlace le marqueur %%FIGURE%% dans statement_tex à l'endroit de la figure.` : ``,
+    ``,
     rubricBlockInline(a.id),
     ``,
     p.latexContract(),
     ``,
     `Rédige l'énoncé COMPLET (statement_tex) avec ses sous-questions \\subq{N.M}{...}{pts} et ses grilles de réponse, et le corrigé COMPLET (solution_tex) résolu étape par étape (le piège y est explicité). Le piège doit être RÉELLEMENT testé : un étudiant qui pattern-matche se trompe.`,
-    `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points}. Aucun outil au-delà de Read, aucun fichier.`,
-    JSON.stringify(ONE_EX_SCHEMA, null, 2),
+    `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points${withFigures ? ", figure_spec?" : ""}}. Aucun outil au-delà de Read, aucun fichier.`,
+    JSON.stringify(schema, null, 2),
   ].filter((l) => l != null).join("\n");
-  step("P2 — rédaction de l'énoncé multi-étapes (format EPFL + piège)…", 38);
+  step("P2 — rédaction de l'énoncé multi-étapes (format du cours + piège)…", 38);
   const text = await completeText({ prompt, model: "opus", timeoutMs: 480_000 });
-  const q = extractJson<ExamQuestion>(text);
+  const q = extractJson<ExamQuestion & { figure_spec?: FigureSpec }>(text);
   return { ...q, category: a.category, points: pts };
 }
 
@@ -245,7 +277,7 @@ async function adversarialAudit(a: Archetype, q: ExamQuestion, refImage: string 
   const r = rubricFor(a.id);
   const calBlock = await calibrationBlock(a.id); // async — awaité AVANT le template (sinon "[object Promise]" dans le prompt)
   const prompt = [
-    `Tu es un relecteur d'examen CS-202 (EPFL) IMPITOYABLE sur la DIFFICULTÉ. Tu joues DEUX étudiants sur la question ci-dessous.`,
+    `${persona()} Tu es un RELECTEUR d'examen IMPITOYABLE sur la DIFFICULTÉ. Tu joues DEUX étudiants sur la question ci-dessous.`,
     refImage ? `Réfère-toi à la vraie page de ce type : ${refImage} (outil Read) pour calibrer le niveau attendu.` : ``,
     ``,
     `ÉNONCÉ (LaTeX) :`,
@@ -279,7 +311,7 @@ async function reviseFromAudit(a: Archetype, q: ExamQuestion, audit: Audit, refI
     p.directivesBlock(),
     ``,
     refImage ? `Vraie page de référence : ${refImage} (outil Read).` : ``,
-    `RÉVISE (ne réécris pas de zéro) la question CS-202 ci-dessous en gardant son squelette et son format, pour corriger ce diagnostic :`,
+    `RÉVISE (ne réécris pas de zéro) la question d'examen ci-dessous en gardant son squelette et son format, pour corriger ce diagnostic :`,
     diagnostic,
     ``,
     `ÉNONCÉ ACTUEL :`,
@@ -313,20 +345,23 @@ export async function architectQuestion(
   a: Archetype,
   target: string,
   pts: number,
-  opts: { onStep?: StepCb; maxRounds?: number; image?: string | null; note?: string | null; statement?: string | null } = {}
+  opts: { onStep?: StepCb; maxRounds?: number; image?: string | null; note?: string | null; statement?: string | null; mold?: MoldKind | null } = {}
 ): Promise<{ q: ExamQuestion; auditLog: Audit[] }> {
   const step = opts.onStep ?? (() => {});
   const maxRounds = opts.maxRounds ?? 2;
-  const { image, note, statement } = opts;
+  const { image, note, statement, mold } = opts;
   const p = profile();
   const refImage = p.refImageFor(a.category, target || a.concept);
   const ctx = await gatherTargetedContext(target || a.concept);
+  // figures : DATA-DRIVEN — activées seulement si l'ADN détecté du cours en contient.
+  const dna = await getExamDna().catch(() => null);
+  const withFigures = (dna?.figures.kinds.length ?? 0) > 0;
 
-  step(`P0 — étude : archétype « ${a.id} » (${a.category}), vraie page ${refImage ?? "—"}`, 12);
+  step(`P0 — étude : archétype « ${a.id} » (${a.category}), vraie page ${refImage ?? "—"}${mold ? ` · moule ${mold}` : ""}`, 12);
   // P1 — concevoir le piège (en s'appuyant sur l'image / la consigne si fournie)
-  const design = await designTrap(a, target, refImage, step, image, note, statement);
+  const design = await designTrap(a, target, refImage, step, image, note, statement, mold);
   // P2 — rédiger (avec le contexte corpus pour ancrer le contenu)
-  let q = await writeFromDesign(a, target, pts, design, ctx, refImage, step, image, note, statement);
+  let q = await writeFromDesign(a, target, pts, design, ctx, refImage, step, image, note, statement, mold, withFigures);
 
   // P3 — boucle adversariale + révision
   const auditLog: Audit[] = [];
@@ -353,6 +388,29 @@ export async function architectQuestion(
       step(`P3 — révision interrompue (${(e as Error).message})`, 70);
       break;
     }
+  }
+
+  // moteur-v2 (P1) — figure émise ? Rendu SANDBOX + injection \includegraphics dans l'énoncé.
+  // Échec de rendu → figure retirée (l'énoncé garde le marqueur nettoyé) — jamais un PDF cassé.
+  const spec = (q as ExamQuestion & { figure_spec?: FigureSpec }).figure_spec;
+  if (spec && typeof spec === "object") {
+    try {
+      const rf = await renderFigure({ ...spec, kind: "plot" });
+      if (rf.ok && rf.pngB64) {
+        const file = `fig-${crypto.randomUUID().slice(0, 8)}.png`;
+        fs.mkdirSync(examsDir(), { recursive: true });
+        fs.writeFileSync(path.join(examsDir(), file), Buffer.from(rf.pngB64, "base64"));
+        q = { ...q, statement_tex: injectFigureTex(q.statement_tex, file), figureFile: file, figureTruth: rf.truth ?? null };
+        step(`Figure rendue (sandbox) → ${file}`, 72);
+      } else {
+        q = { ...q, statement_tex: q.statement_tex.split("%%FIGURE%%").join("") };
+        step(`Figure NON rendue (${rf.reason ?? "échec"}) — question sans figure`, 72);
+      }
+    } catch (e) {
+      q = { ...q, statement_tex: q.statement_tex.split("%%FIGURE%%").join("") };
+      step(`Figure NON rendue (${(e as Error).message.slice(0, 50)}) — question sans figure`, 72);
+    }
+    delete (q as ExamQuestion & { figure_spec?: FigureSpec }).figure_spec;
   }
   return { q, auditLog };
 }
@@ -385,7 +443,7 @@ export async function architectExercise(
   } else {
     a = pickArchetype(statement ? `${target} ${statement}` : target);
   }
-  const pts = pointsFor(a);
+  const pts = await pointsFor(a);
   const { q: built, auditLog } = await architectQuestion(a, seed, pts, { ...opts, image, note, statement });
   let q = built;
 

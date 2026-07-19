@@ -25,12 +25,16 @@ function courseQ(): string {
 
 export type ExamQuestion = {
   concept: string;
-  category?: string; // 'Networking' | 'OS' | 'C' | 'Project'
+  category?: string; // catégorie du profil du cours
   statement_tex: string;
   solution_tex: string;
   source_inspiration?: string;
   difficulty?: number;
   points?: number;
+  // moteur-v2 — figure rendue (PNG dans examsDir, déjà injectée dans statement_tex) + valeurs
+  // vérité déclarées par la spec (base de la vérification déterministe P4). Additifs.
+  figureFile?: string | null;
+  figureTruth?: Record<string, number> | null;
 };
 export type ExamSpec = { title: string; questions: ExamQuestion[]; duration_min?: number };
 
@@ -515,7 +519,7 @@ const BATCH_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-export function buildBatchPrompt(ctx: Ctx, slots: { category: string; points: number; brief: string }[]): string {
+export function buildBatchPrompt(ctx: Ctx, slots: { category: string; points: number; brief: string; mold?: string | null }[]): string {
   const p = profile();
   // V3 — calibrage de difficulté (cs-202) : menu de pièges réels + style prof + distribution.
   const diff = currentCourse() === DEFAULT_COURSE ? difficultyBlockForExam() : "";
@@ -528,7 +532,9 @@ export function buildBatchPrompt(ctx: Ctx, slots: { category: string; points: nu
     ...p.promptIntroBatch(slots.length),
     ``,
     `═══ LES ${slots.length} EXERCICES À PRODUIRE (slots IMPOSÉS — respecte catégorie, barème, thème) ═══`,
-    ...slots.map((s, i) => `${i + 1}. [${s.category}, ${s.points} pts] ${s.brief}`),
+    // moteur-v2 (P2) — le MOULE du slot (ADN détecté) est imposé quand il existe ; un slot sans
+    // moule (ex. cs-202 historique) produit EXACTEMENT la ligne d'avant (byte-identique).
+    ...slots.map((s, i) => `${i + 1}. [${s.category}, ${s.points} pts]${s.mold ? ` [MOULE : ${s.mold}]` : ""} ${s.brief}`),
     ``,
     `═══ MATIÈRE (extraits du corpus, pour ancrer le contenu) ═══`,
     ...ctx.style.slice(0, 6).map((s) => `### ${s.src}\n${s.excerpt}`),
@@ -669,6 +675,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
         try {
           const r = await architectQuestion(a, a.concept, slot.points, {
             maxRounds: 1,
+            mold: (slot.mold as import("@/lib/molds").MoldKind | null) ?? null, // moteur-v2 (P2) — moule du slot (ADN)
             onStep: (m) => step(`Lot ${lotIdx + 1} · Q${k + 1} (${a.id}) · ${m}`, 10 + Math.round((qDone / qTotal) * 30)),
           });
           out[k] = { ...r.q, category: slot.category, points: slot.points };

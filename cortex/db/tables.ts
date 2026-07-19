@@ -374,6 +374,9 @@ export const TABLES: TableSpec[] = [
       { name: "misconceptions_json", type: "text" },
       { name: "explanation", type: "text" },
       { name: "verified", type: "int" },
+      // moteur-v2 — moule (ADN) + figure {spec, file, truth} (JSON), additifs.
+      { name: "mold", type: "text" },
+      { name: "figure_json", type: "text" },
     ],
   },
   {
