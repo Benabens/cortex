@@ -3,7 +3,9 @@ import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import { getCourse } from "@/lib/courses";
 import { verifyDeterministic } from "@/lib/verify-deterministic";
+import { examsDir } from "@/lib/paths";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
+import path from "node:path";
 
 export type VerifyResult = {
   verdict: "ok" | "wrong" | "ambiguous";
@@ -54,11 +56,14 @@ const ONE_SCHEMA = {
  */
 export type VerifyOpts = { directives?: string; step1?: string };
 
-/** Contrôle UN exercice : résolution à l'aveugle (avec la vraie page de réf) PUIS verdict. */
+/** Contrôle UN exercice : résolution à l'aveugle (avec la vraie page de réf) PUIS verdict.
+ *  moteur-v2 (P4) — une question à FIGURE est re-résolue DEPUIS la figure : le PNG rendu est
+ *  ouvert (vision) par le vérifieur ; s'il ne suffit pas à répondre, le verdict le dit. */
 async function verifyOne(q: ExamQuestion, opts?: VerifyOpts): Promise<VerifyResult | null> {
   const p = profile();
   const c = getCourse(currentCourse());
   const img = p.refImageFor(q.category, q.concept);
+  const figPath = q.figureFile ? path.join(path.relative(process.cwd(), examsDir()), q.figureFile) : null;
   const step1 = opts?.step1 ?? (img
     ? `ÉTAPE 1 — Ouvre la vraie page de référence du MÊME TYPE : ${img} (outil Read). Puis RÉSOUS L'EXERCICE CI-DESSOUS DE ZÉRO, toi-même, rigoureusement (calcule, trace, compte). Écris ta solution complète dans "my_solution". Ne te laisse PAS influencer par le corrigé proposé (tu le verras à l'étape 2).`
     : `ÉTAPE 1 — RÉSOUS L'EXERCICE CI-DESSOUS DE ZÉRO, toi-même, rigoureusement (calcule, trace, prouve). Écris ta solution complète dans "my_solution". Ne te laisse PAS influencer par le corrigé proposé (tu le verras à l'étape 2).`);
@@ -67,6 +72,7 @@ async function verifyOne(q: ExamQuestion, opts?: VerifyOpts): Promise<VerifyResu
     opts?.directives ?? p.directivesBlock(),
     ``,
     step1,
+    figPath ? `L'exercice s'appuie sur une FIGURE GÉNÉRÉE : OUVRE ${figPath} (outil Read) et résous DEPUIS la figure. Si la figure ne permet PAS de répondre (illisible, quantités absentes), verdict "ambiguous" avec issue="figure insuffisante".` : ``,
     ``,
     `ÉNONCÉ (LaTeX) :`,
     q.statement_tex,
@@ -87,7 +93,7 @@ async function verifyOne(q: ExamQuestion, opts?: VerifyOpts): Promise<VerifyResu
     // 9 min : la re-résolution à l'aveugle d'un exo DENSE de l'architecte (6 sous-questions +
     // comparaison au corrigé) frôlait les 340 s → timeout → « non vérifié » systématique. Mesuré :
     // une re-résolution complète prend ~4–6 min ; on laisse de la marge.
-    const text = await completeText({ prompt, model: "opus", timeoutMs: 540_000 });
+    const text = await completeText({ prompt, model: "opus", timeoutMs: 540_000, ...(figPath ? { addDirs: [examsDir()] } : {}) });
     const r = extractJson<VerifyResult>(text);
     if (!r || !r.verdict) return null;
     // ADDITIF — vérif DÉTERMINISTE de la réponse finale (re-solve à l'aveugle vs corrigé proposé) :
@@ -95,8 +101,15 @@ async function verifyOne(q: ExamQuestion, opts?: VerifyOpts): Promise<VerifyResu
     // (moat « prouvé »). Ne change NI le verdict NI le contenu (cs-202 byte-identique) — juste un label.
     r.method = "llm";
     try {
+      // moteur-v2 (P4) — question à figure avec vérité déclarée UNIQUE : preuve contre la vérité
+      // de la spec (calculée au rendu depuis les données mêmes de la figure).
+      if (q.figureTruth && Object.keys(q.figureTruth).length === 1) {
+        const d = await verifyDeterministic(lastExpr(r.my_solution ?? "") ?? "", "", "figure", { figureTruth: q.figureTruth });
+        if (d.verified === true) r.method = "deterministic";
+        else if (d.verified === false && r.verdict === "ok") { r.verdict = "wrong"; r.issue = `réponse ≠ vérité de la figure (${d.detail})`; }
+      }
       const a = lastExpr(r.my_solution ?? ""), b = lastExpr(q.solution_tex ?? "");
-      if (a && b) { const d = await verifyDeterministic(a, b, "numeric"); if (d.verified === true) r.method = "deterministic"; }
+      if (r.method === "llm" && a && b) { const d = await verifyDeterministic(a, b, "numeric"); if (d.verified === true) r.method = "deterministic"; }
     } catch { /* python/sympy absent → reste « llm » */ }
     return r;
   } catch {
