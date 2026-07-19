@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { currentCourse } from "@/db/client";
-import { getCourse } from "@/lib/courses";
+import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
 import { examsDir } from "@/lib/paths";
 
@@ -141,12 +141,31 @@ export function renderExamTex(spec: ExamSpec, dateLabel: string, includeSolution
 
   return [
     preamble,
+    courseHeaderOverride(),
     String.raw`\newcommand{\FOOTDATE}{${footDate(dateLabel)}}`,
     String.raw`\begin{document}`,
     coverTex(spec, qs, dateLabel),
     body,
     includeSolutions ? solutions : "",
     String.raw`\end{document}`,
+  ].filter(Boolean).join("\n");
+}
+
+/**
+ * moteur-v2 (P5) — en-tête/pied de page COURSE-AWARE : le preamble partagé porte le gabarit
+ * historique du cours par défaut ; pour tout AUTRE cours on l'override avec l'identité du cours
+ * (même mécanique que qcm-latex). Cours par défaut → chaîne vide → sortie BYTE-IDENTIQUE.
+ */
+function courseHeaderOverride(): string {
+  const id = currentCourse();
+  const c = getCourse(id);
+  if (id === DEFAULT_COURSE) return ""; // gabarit historique intact (hashé, byte-identique)
+  if (c.id !== id) return ""; // hors registre → gabarit par défaut
+  const code = c.examCode.replace(/-/g, "--");
+  const profsTex = c.profs.length ? c.profs.join(", ") : c.university;
+  return [
+    `\\fancyhead[R]{\\qrcode[height=1.25cm]{${c.examCode}-EXAM}}`,
+    `\\fancyfoot[C]{\\small\\textbf{${code}, ${c.examKind}}\\\\[-2pt]\\small ${profsTex}}`,
   ].join("\n");
 }
 
