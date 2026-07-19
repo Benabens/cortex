@@ -533,7 +533,7 @@ export function buildBatchPrompt(ctx: Ctx, slots: { category: string; points: nu
     ``,
     `═══ LES ${slots.length} EXERCICES À PRODUIRE (slots IMPOSÉS — respecte catégorie, barème, thème) ═══`,
     // moteur-v2 (P2) — le MOULE du slot (ADN détecté) est imposé quand il existe ; un slot sans
-    // moule (ex. cs-202 historique) produit EXACTEMENT la ligne d'avant (byte-identique).
+    // moule (ex. les slots historiques du cours par défaut) produit EXACTEMENT la ligne d'avant (byte-identique).
     ...slots.map((s, i) => `${i + 1}. [${s.category}, ${s.points} pts]${s.mold ? ` [MOULE : ${s.mold}]` : ""} ${s.brief}`),
     ``,
     `═══ MATIÈRE (extraits du corpus, pour ancrer le contenu) ═══`,

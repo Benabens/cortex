@@ -208,7 +208,7 @@ const FIG_SCAN_SCHEMA = {
         type: "object",
         properties: {
           page: { type: "integer", description: "Page (1-based) où la figure apparaît." },
-          kind: { type: "string", description: "Type de figure : libellé court GÉNÉRIQUE en anglais (ex. « scatter plot », « function curve », « graph diagram », « tree », « state machine », « table », « grid », « circuit »… librement précisé d'après ce que tu VOIS)." },
+          kind: { type: "string", description: "Type de figure : libellé court GÉNÉRIQUE en anglais (ex. « plot », « function curve », « diagram », « tree », « state machine », « table », « grid », « circuit »… librement précisé d'après ce que tu VOIS)." },
           shows: { type: "string", description: "Ce que la figure montre, en 1 phrase PARAMÉTRIQUE (les quantités/axes/éléments variables), pas le contenu littéral." },
         },
         required: ["page", "kind", "shows"],

@@ -105,7 +105,7 @@ const AUDIT_SCHEMA = {
 } as const;
 
 /** Barème d'un archétype : dérivé des SLOTS du PROFIL du cours (catégorie correspondante),
- *  repli 25. (Reproduit le barème historique cs-202 via ses propres slots — zéro constante ici.) */
+ *  repli 25. (Reproduit le barème historique du cours par défaut via ses propres slots — zéro constante ici.) */
 async function pointsFor(a: Archetype): Promise<number> {
   try {
     const slots = await profile().examSlots();

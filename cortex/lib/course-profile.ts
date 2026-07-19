@@ -59,7 +59,7 @@ const GENERIC_CACHE = new Map<string, CourseProfile>();
 /**
  * Profil d'un cours. moteur-v2 : un cours ENREGISTRÉ (lib/courses.ts) sans module de profil dédié
  * reçoit un PROFIL GÉNÉRIQUE à archétypes neutres (l'ADN détecté fait le reste) — il ne retombe
- * PLUS sur le profil cs-202 (défaut de généricité historique). Hors registre → cs-202 (historique).
+ * PLUS sur le profil du cours par défaut (défaut de généricité historique). Hors registre → défaut (historique).
  */
 export function getProfile(courseId?: string): CourseProfile {
   const id = courseId ?? "";
@@ -70,7 +70,7 @@ export function getProfile(courseId?: string): CourseProfile {
     if (!g) { g = makeGenericProfile(id, genericArchetypes()); GENERIC_CACHE.set(id, g); }
     return g;
   }
-  return cs202Profile;
+  return PROFILES[DEFAULT_COURSE];
 }
 
 /** Profil du cours courant. */
