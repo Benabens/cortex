@@ -209,7 +209,18 @@ async function designTrap(a: Archetype, target: string, refImage: string | null,
   ].filter((l) => l != null).join("\n");
   step("P1 — conception du piège (étude de la vraie page + design)…", 22);
   const text = await completeText({ prompt, model: "opus", timeoutMs: 300_000 });
-  return extractJson<DesignBrief>(text);
+  const d = extractJson<DesignBrief>(text);
+  // moteur-v2 — BLINDAGE : le modèle peut omettre un champ du schéma ; des défauts sûrs évitent
+  // un crash `undefined.join/.map` en P2 (constaté sur un run réel : 3 questions perdues).
+  return {
+    misconception: d?.misconception ?? "(non précisée)",
+    edge_case: d?.edge_case ?? "(non précisé)",
+    reasoning_chain: Array.isArray(d?.reasoning_chain) ? d.reasoning_chain : [],
+    bookkeeping: d?.bookkeeping ?? "(libre)",
+    discriminator: d?.discriminator ?? "(non précisé)",
+    awkward_numbers: d?.awkward_numbers ?? "(nombres non ronds au choix)",
+    subquestion_plan: Array.isArray(d?.subquestion_plan) ? d.subquestion_plan : [],
+  };
 }
 
 /** P2 — rédiger l'énoncé multi-étapes au format du cours, piège intégré, style des annales.
