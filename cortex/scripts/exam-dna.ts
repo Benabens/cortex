@@ -11,7 +11,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { enterCourse } from "../db/client";
 import { q } from "../db/q";
-import { detectExamDna, getExamDna, type ExamDna } from "../lib/exam-dna";
+import { detectExamDna, getExamDna, ensureDnaSchema, type ExamDna } from "../lib/exam-dna";
+import { indexExamExercises } from "../lib/exam-index";
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const flags = new Set(process.argv.slice(2).filter((a) => a.startsWith("--")));
@@ -97,6 +98,14 @@ async function main() {
     dna = await getExamDna();
     if (!dna) { console.error("Aucun ADN persisté pour ce cours — lance sans --print."); process.exit(1); }
   } else {
+    // Cours jamais indexé exo-par-exo (ex. onboarding) → indexation d'abord (vision, ré-entrant :
+    // uniquement si l'index est VIDE — on ne ré-indexe jamais un index existant ici).
+    await ensureDnaSchema();
+    const n = (await q.get<{ n: number }>(`SELECT count(*) n FROM exam_exercises`))?.n ?? 0;
+    if (n === 0) {
+      console.log("Index exo-par-exo vide → indexation des annales d'abord (vision)…");
+      await indexExamExercises({ onStep: (s, p) => console.log(`  [idx ${String(p).padStart(3)}%] ${s}`) });
+    }
     dna = await detectExamDna({ onStep: (s, p) => console.log(`  [${String(p).padStart(3)}%] ${s}`) });
   }
   printDna(dna);
