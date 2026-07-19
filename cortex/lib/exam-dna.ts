@@ -406,3 +406,82 @@ export async function detectExamDna(opts: { onStep?: Step } = {}): Promise<ExamD
   await scanFigures((s, p) => step(s, 45 + Math.round(p * 0.35)));
   return await aggregateDna((s, p) => step(s, 80 + Math.round(p * 0.2)));
 }
+
+// ---------------- P2 — échantillonnage par MOULE + couverture LARGE (purs, testés) ----------------
+
+/**
+ * Alloue n questions aux moules PROPORTIONNELLEMENT à la distribution détectée (plus fort reste),
+ * puis entrelace (round-robin pondéré) pour ne pas grouper tous les moules identiques.
+ * DÉTERMINISTE (aucun RNG) → testable, reproductible. dna nul/vide → [null, …] (comportement d'avant).
+ */
+export function sampleMolds(dna: ExamDna | null, n: number, opts: { only?: MoldKind[] } = {}): (MoldKind | null)[] {
+  if (n <= 0) return [];
+  const pool = (dna?.molds ?? []).filter((m) => m.count > 0 && (!opts.only || opts.only.includes(m.mold)));
+  if (!pool.length) return Array(n).fill(null);
+  const total = pool.reduce((s, m) => s + m.count, 0);
+  // plus fort reste (Hamilton) : quotas exacts → parts entières, restes décroissants.
+  const quotas = pool.map((m) => ({ mold: m.mold, exact: (m.count / total) * n }));
+  const alloc = quotas.map((qt) => ({ mold: qt.mold, k: Math.floor(qt.exact), rest: qt.exact - Math.floor(qt.exact) }));
+  let left = n - alloc.reduce((s, a) => s + a.k, 0);
+  for (const a of [...alloc].sort((x, y) => y.rest - x.rest || x.mold.localeCompare(y.mold))) {
+    if (left <= 0) break;
+    a.k++; left--;
+  }
+  // entrelacement : à chaque pas, le moule au plus grand « dû » (k_i / total_i restant) — stable.
+  const out: (MoldKind | null)[] = [];
+  const remaining = alloc.filter((a) => a.k > 0).map((a) => ({ ...a, used: 0 }));
+  for (let i = 0; i < n && remaining.length; i++) {
+    remaining.sort((x, y) => (y.k - y.used) / y.k - (x.k - x.used) / x.k || y.k - x.k || x.mold.localeCompare(y.mold));
+    const pick = remaining[0];
+    out.push(pick.mold);
+    pick.used++;
+    if (pick.used >= pick.k) remaining.splice(0, 1);
+  }
+  while (out.length < n) out.push(null);
+  return out;
+}
+
+/**
+ * Couverture LARGE : choisit n sujets dans une liste pondérée SANS tronquer la longue traîne.
+ * ~60 % des slots suivent la tête (ordre de poids), le reste échantillonne la traîne à pas
+ * régulier (stride déterministe) → les sujets rares apparaissent, proportion tête préservée.
+ * Corrige le « ORDER BY weight DESC LIMIT 14 » qui rendait la traîne invisible.
+ */
+export function pickCoverage<T>(items: T[], n: number): T[] {
+  if (n <= 0 || !items.length) return [];
+  if (items.length <= n) {
+    // assez de slots pour TOUT couvrir → chacun au moins une fois (cyclique au-delà).
+    return Array.from({ length: n }, (_, i) => items[i % items.length]);
+  }
+  const nHead = Math.max(1, Math.ceil(n * 0.6));
+  const head = items.slice(0, nHead);
+  const tail = items.slice(nHead);
+  const nTail = n - nHead;
+  const out = [...head];
+  if (nTail > 0 && tail.length) {
+    const stride = tail.length / nTail;
+    for (let i = 0; i < nTail; i++) out.push(tail[Math.min(tail.length - 1, Math.floor(i * stride))]);
+  }
+  return out.slice(0, n);
+}
+
+// ---------------- P3 — few-shot RÉELS par moule (imitation resserrée) ----------------
+
+/**
+ * De VRAIES questions de CE cours pour un moule donné (énoncés courts extraits des annales) —
+ * injectées en few-shot dans la génération : imiter le style réel, jamais copier.
+ */
+export async function fewShotForMold(mold: MoldKind | null, k = 2): Promise<string[]> {
+  if (!mold) return [];
+  try {
+    await ensureDnaSchema();
+    const rows = await q.all<{ statement: string | null; exam_year: number | null }>(
+      `SELECT statement, exam_year FROM exam_exercises
+        WHERE mold = ? AND statement IS NOT NULL ORDER BY (exam_year IS NULL), exam_year DESC, id LIMIT ?`,
+      mold, k
+    );
+    return rows
+      .filter((r) => (r.statement ?? "").trim().length > 20)
+      .map((r) => `(${r.exam_year ?? "annale"}) ${(r.statement ?? "").replace(/\s+/g, " ").slice(0, 260)}`);
+  } catch { return []; }
+}
