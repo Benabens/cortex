@@ -126,6 +126,28 @@ export const COURSES: Record<string, CourseConfig> = {
     uploadsRel: "ml/uploads",
     contentRel: "data/ml/content",
   },
+  // moteur-v2 (P5) — COURS FACTICE de preuve « zéro-code » : matière inventée, institution fictive,
+  // 2 annales PDF fabriquées (data/fictif/refs). AUCUN profil dédié, AUCUN archétype matière :
+  // le moteur doit dériver format/moules/figures/texture de ses seules annales. Config pure.
+  fictif: {
+    id: "fictif",
+    name: "Quantitative Oenology (cours factice de test)",
+    short: "QO-101",
+    examCode: "QO-101",
+    examName: "Quantitative Oenology",
+    examKind: "Final Exam",
+    university: "Institut Polytechnique Fictif de Testville",
+    universityLines: ["Institut Polytechnique Fictif de Testville"],
+    faculty: "Faculté Fictive des Sciences du Vin",
+    profs: [],
+    profile: "generic",
+    durationMin: 120,
+    dbFile: "fictif/fictif.db",
+    refsRel: "fictif/refs",
+    examsRel: "fictif/exams",
+    uploadsRel: "fictif/uploads",
+    contentRel: "data/fictif/content",
+  },
 };
 
 export const DEFAULT_COURSE = "cs-202";
