@@ -341,6 +341,23 @@ export const TABLES: TableSpec[] = [
       { name: "course_href", type: "text" },
       { name: "topic_id", type: "int" },
       { name: "created_at", type: "text", def: now },
+      // moteur-v2 (P0) — ADN d'examen : MOULE générique de la question (enum lib/exam-dna.ts,
+      // classé depuis les VRAIES annales du cours) + type de figure référencée par l'énoncé
+      // (libellé générique, null si aucune). Additif ; rattrapé en lazy sur les index existants.
+      { name: "mold", type: "text" },
+      { name: "figure_kind", type: "text" },
+    ],
+  },
+  {
+    // moteur-v2 (P0) — ADN D'EXAMEN détecté PAR COURS depuis ses annales (vision + classification) :
+    // distribution des MOULES de questions, types de FIGURES (fréquence + spec paramétrique),
+    // texture de difficulté. UNE ligne (DB du cours courant), blob JSON versionné, reconstruit par
+    // « npm run dna » / le job blueprint. AUCUN contenu par matière dans le code moteur.
+    name: "exam_dna",
+    cols: [
+      { name: "id", type: "int", pk: true, ai: true },
+      { name: "json", type: "text", nn: true },
+      { name: "created_at", type: "text", def: now },
     ],
   },
   {
@@ -357,6 +374,9 @@ export const TABLES: TableSpec[] = [
       { name: "misconceptions_json", type: "text" },
       { name: "explanation", type: "text" },
       { name: "verified", type: "int" },
+      // moteur-v2 — moule (ADN) + figure {spec, file, truth} (JSON), additifs.
+      { name: "mold", type: "text" },
+      { name: "figure_json", type: "text" },
     ],
   },
   {

@@ -25,12 +25,16 @@ function courseQ(): string {
 
 export type ExamQuestion = {
   concept: string;
-  category?: string; // 'Networking' | 'OS' | 'C' | 'Project'
+  category?: string; // catégorie du profil du cours
   statement_tex: string;
   solution_tex: string;
   source_inspiration?: string;
   difficulty?: number;
   points?: number;
+  // moteur-v2 — figure rendue (PNG dans examsDir, déjà injectée dans statement_tex) + valeurs
+  // vérité déclarées par la spec (base de la vérification déterministe P4). Additifs.
+  figureFile?: string | null;
+  figureTruth?: Record<string, number> | null;
 };
 export type ExamSpec = { title: string; questions: ExamQuestion[]; duration_min?: number };
 
@@ -352,42 +356,50 @@ export async function generateTargetedExercise(
   const imageRel = norm.imageRel?.trim() || undefined;
   if (!target && !imageRel) throw new Error("Donne un sujet OU une image d'exercice.");
 
-  // cs-202 → pipeline ARCHITECTE multi-passes (conception du piège → rédaction → critique
-  // adversariale + révision → vérif justesse). Entrées : IMAGE, ou TEXTE riche classé (V5) en
-  // sujet court / consigne complète d'exo / log de faiblesses. Autres cours : voie mono-passe.
-  if (currentCourse() === DEFAULT_COURSE && (target || imageRel)) {
-    const { architectExercise } = await import("@/lib/architect");
-    const stepFn = opts.onStep ?? (() => {});
-    if (imageRel) {
-      const res = await architectExercise(target, { onStep: opts.onStep, image: imageRel, note: norm.note });
-      return { id: res.id, url: res.url, texError: res.texError };
-    }
-    // Texte : détecter le type (V5). Court → sujet direct (pas d'appel). Riche → classification.
-    const { classifyTargetText, isRichText } = await import("@/lib/intake");
-    if (isRichText(target)) {
-      stepFn("Analyse de l'entrée (sujet · consigne · log de faiblesses)…", 6);
-      const cls = await classifyTargetText(target);
-      if (cls.kind === "weakness_log" && cls.weaknesses.length) {
-        const { createWeakness } = await import("@/lib/weaknesses");
-        for (const w of cls.weaknesses) {
-          try { await createWeakness({ topic: w.topic, description: w.description, severity: w.severity, source: "log", analyzed: true }); } catch {}
+  // moteur-v2 (P3) — le pipeline ARCHITECTE multi-passes (conception du piège → rédaction →
+  // critique adversariale + révision → vérif justesse) est désormais la voie de TOUT cours
+  // (persona/archétypes/barème dérivés du profil ; moules/figures de l'ADN détecté) — plus de
+  // routage par matière. Entrées : IMAGE, ou TEXTE riche classé (V5). La voie mono-passe
+  // ci-dessous reste le REPLI si l'architecte échoue.
+  if (target || imageRel) {
+    try {
+      const { architectExercise } = await import("@/lib/architect");
+      const stepFn = opts.onStep ?? (() => {});
+      if (imageRel) {
+        const res = await architectExercise(target, { onStep: opts.onStep, image: imageRel, note: norm.note });
+        return { id: res.id, url: res.url, texError: res.texError };
+      }
+      // Texte : détecter le type (V5). Court → sujet direct (pas d'appel). Riche → classification.
+      const { classifyTargetText, isRichText } = await import("@/lib/intake");
+      if (isRichText(target)) {
+        stepFn("Analyse de l'entrée (sujet · consigne · log de faiblesses)…", 6);
+        const cls = await classifyTargetText(target);
+        if (cls.kind === "weakness_log" && cls.weaknesses.length) {
+          const { createWeakness } = await import("@/lib/weaknesses");
+          for (const w of cls.weaknesses) {
+            try { await createWeakness({ topic: w.topic, description: w.description, severity: w.severity, source: "log", analyzed: true }); } catch {}
+          }
+          const top = [...cls.weaknesses].sort((a, b) => b.severity - a.severity)[0];
+          stepFn(`${cls.weaknesses.length} faiblesse(s) extraite(s) — exo ciblé sur « ${top.topic} »`, 10);
+          const res = await architectExercise(top.topic, { onStep: opts.onStep });
+          return { id: res.id, url: res.url, texError: res.texError };
         }
-        const top = [...cls.weaknesses].sort((a, b) => b.severity - a.severity)[0];
-        stepFn(`${cls.weaknesses.length} faiblesse(s) extraite(s) — exo ciblé sur « ${top.topic} »`, 10);
-        const res = await architectExercise(top.topic, { onStep: opts.onStep });
+        if (cls.kind === "statement") {
+          stepFn(`Consigne détectée → exo NEUF du même type (« ${cls.focus} »)`, 10);
+          const res = await architectExercise(cls.focus, { onStep: opts.onStep, statement: target });
+          return { id: res.id, url: res.url, texError: res.texError };
+        }
+        // subject riche : on cible le focus
+        const res = await architectExercise(cls.focus || target, { onStep: opts.onStep });
         return { id: res.id, url: res.url, texError: res.texError };
       }
-      if (cls.kind === "statement") {
-        stepFn(`Consigne détectée → exo NEUF du même type (« ${cls.focus} »)`, 10);
-        const res = await architectExercise(cls.focus, { onStep: opts.onStep, statement: target });
-        return { id: res.id, url: res.url, texError: res.texError };
-      }
-      // subject riche : on cible le focus
-      const res = await architectExercise(cls.focus || target, { onStep: opts.onStep });
+      const res = await architectExercise(target, { onStep: opts.onStep });
       return { id: res.id, url: res.url, texError: res.texError };
+    } catch (e) {
+      // repli mono-passe ci-dessous (résilience historique) — jamais un job planté pour un
+      // échec d'architecte ; le repli est plus simple mais aboutit toujours.
+      step(`Architecte indisponible (${(e as Error).message.slice(0, 60)}) → repli mono-passe`, 10);
     }
-    const res = await architectExercise(target, { onStep: opts.onStep });
-    return { id: res.id, url: res.url, texError: res.texError };
   }
 
   step("Contexte ciblé assemblé (cours + séries + past-exams + staff)", 12);
@@ -515,7 +527,7 @@ const BATCH_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-export function buildBatchPrompt(ctx: Ctx, slots: { category: string; points: number; brief: string }[]): string {
+export function buildBatchPrompt(ctx: Ctx, slots: { category: string; points: number; brief: string; mold?: string | null }[]): string {
   const p = profile();
   // V3 — calibrage de difficulté (cs-202) : menu de pièges réels + style prof + distribution.
   const diff = currentCourse() === DEFAULT_COURSE ? difficultyBlockForExam() : "";
@@ -528,7 +540,9 @@ export function buildBatchPrompt(ctx: Ctx, slots: { category: string; points: nu
     ...p.promptIntroBatch(slots.length),
     ``,
     `═══ LES ${slots.length} EXERCICES À PRODUIRE (slots IMPOSÉS — respecte catégorie, barème, thème) ═══`,
-    ...slots.map((s, i) => `${i + 1}. [${s.category}, ${s.points} pts] ${s.brief}`),
+    // moteur-v2 (P2) — le MOULE du slot (ADN détecté) est imposé quand il existe ; un slot sans
+    // moule (ex. les slots historiques du cours par défaut) produit EXACTEMENT la ligne d'avant (byte-identique).
+    ...slots.map((s, i) => `${i + 1}. [${s.category}, ${s.points} pts]${s.mold ? ` [MOULE : ${s.mold}]` : ""} ${s.brief}`),
     ``,
     `═══ MATIÈRE (extraits du corpus, pour ancrer le contenu) ═══`,
     ...ctx.style.slice(0, 6).map((s) => `### ${s.src}\n${s.excerpt}`),
@@ -669,6 +683,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
         try {
           const r = await architectQuestion(a, a.concept, slot.points, {
             maxRounds: 1,
+            mold: (slot.mold as import("@/lib/molds").MoldKind | null) ?? null, // moteur-v2 (P2) — moule du slot (ADN)
             onStep: (m) => step(`Lot ${lotIdx + 1} · Q${k + 1} (${a.id}) · ${m}`, 10 + Math.round((qDone / qTotal) * 30)),
           });
           out[k] = { ...r.q, category: slot.category, points: slot.points };

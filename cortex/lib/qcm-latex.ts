@@ -99,8 +99,13 @@ function renderQcmItem(q: QcmItem, n: number, points: number, withKey: boolean):
     const mis = withKey && !correct && q.misconceptions?.[k] ? ` \\hfill{\\footnotesize\\itshape\\color{gray} idée fausse : ${esc(q.misconceptions[k])}}` : "";
     return String.raw`\noindent${box}~\textbf{${LETTER[k]}.}~${esc(o)}${mis}\par\smallskip`;
   }).join("\n");
+  // moteur-v2 — figure rendue (PNG déjà dans examsDir, à côté du .tex compilé).
+  const fig = q.figureFile
+    ? String.raw`\begin{center}\includegraphics[width=0.52\linewidth]{${q.figureFile}}\end{center}`
+    : "";
   return [
     String.raw`\needspace{5\baselineskip}\par\medskip\noindent\textbf{Question ${n}.}\quad{\footnotesize[${tag}, ${points} pt${points > 1 ? "s" : ""}]}\quad\textbf{\textit{${esc(q.topic)}}}\par\smallskip`,
+    fig,
     `\\noindent ${esc(q.stem).replace(/^\((SCQ|MCQ)\)\s*/i, "")}\\par\\smallskip`,
     opts,
     withKey && q.explanation ? String.raw`\par{\footnotesize\color{epflred}\textbf{Solution :} ${esc(q.explanation)}}\par` : "",

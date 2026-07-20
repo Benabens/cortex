@@ -9,7 +9,7 @@ import type { Archetype } from "@/lib/archetypes";
  * → le prompt cs-202 reste byte-identique. Les autres cours ont leur profil propre
  * (pas de \examtopo réseau ni d'inode OS forcés ; archétypes & figures de la matière).
  */
-export type Slot = { category: string; points: number; brief: string };
+export type Slot = { category: string; points: number; brief: string; mold?: string | null };
 
 export type CourseProfile = {
   /** Bloc de contraintes dures en tête du prompt. */
@@ -44,6 +44,8 @@ export type CourseProfile = {
 import { cs202Profile } from "@/lib/profiles/cs202";
 import { algoProfile } from "@/lib/profiles/algo";
 import { mlProfile } from "@/lib/profiles/ml";
+import { makeGenericProfile, genericArchetypes } from "@/lib/profiles/generic";
+import { DEFAULT_COURSE, COURSES } from "@/lib/courses";
 
 const PROFILES: Record<string, CourseProfile> = {
   "cs-202": cs202Profile,
@@ -51,9 +53,24 @@ const PROFILES: Record<string, CourseProfile> = {
   ml: mlProfile,
 };
 
-/** Profil d'un cours (défaut cs-202). */
+// moteur-v2 (P5) — cache des profils génériques construits à la volée (onboarding zéro-code).
+const GENERIC_CACHE = new Map<string, CourseProfile>();
+
+/**
+ * Profil d'un cours. moteur-v2 : un cours ENREGISTRÉ (lib/courses.ts) sans module de profil dédié
+ * reçoit un PROFIL GÉNÉRIQUE à archétypes neutres (l'ADN détecté fait le reste) — il ne retombe
+ * PLUS sur le profil du cours par défaut (défaut de généricité historique). Hors registre → défaut (historique).
+ */
 export function getProfile(courseId?: string): CourseProfile {
-  return PROFILES[courseId ?? ""] ?? cs202Profile;
+  const id = courseId ?? "";
+  const hit = PROFILES[id];
+  if (hit) return hit;
+  if (id && id !== DEFAULT_COURSE && COURSES[id]) {
+    let g = GENERIC_CACHE.get(id);
+    if (!g) { g = makeGenericProfile(id, genericArchetypes()); GENERIC_CACHE.set(id, g); }
+    return g;
+  }
+  return PROFILES[DEFAULT_COURSE];
 }
 
 /** Profil du cours courant. */

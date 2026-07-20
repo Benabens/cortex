@@ -88,3 +88,10 @@ data/ml/refs/figref/
 # artefacts FUSE (fichiers supprimés encore ouverts — incident disque)
 .fuse_hidden*
 **/.fuse_hidden*
+
+# cours factice de preuve moteur-v2 (mêmes règles que algo/ml)
+data/fictif/*.db
+data/fictif/exams/
+data/fictif/uploads/
+data/fictif/refs/figref/
+data/fictif/refs/figref-full/

@@ -15,7 +15,7 @@ import { runSandboxed, sandboxAvailable, verifyCode, type CodeTest } from "@/lib
  * la voie symbolique renvoie proprement not_applicable.
  */
 
-export type DetMethod = "mcq" | "numeric" | "symbolic" | "structural" | "boolean" | "exec" | "none";
+export type DetMethod = "mcq" | "numeric" | "symbolic" | "structural" | "boolean" | "exec" | "figure" | "none";
 export type DetResult = { verified: true | false | "not_applicable"; method: DetMethod; detail: string };
 const NA = (method: DetMethod = "none", detail = ""): DetResult => ({ verified: "not_applicable", method, detail });
 
@@ -164,10 +164,14 @@ export async function verifyDeterministic(
   candidate: string,
   reference: string,
   answerType: string,
-  opts?: { options?: string; tests?: CodeTest[]; language?: "c" | "python" }
+  opts?: { options?: string; tests?: CodeTest[]; language?: "c" | "python"; figureTruth?: Record<string, number> }
 ): Promise<DetResult> {
   const cand = (candidate ?? "").trim(), ref = (reference ?? "").trim();
-  if (!cand || !ref) return NA();
+  if (!cand || !ref) {
+    // moteur-v2 (P4) — cas « figure » : la RÉFÉRENCE est la vérité de la figure (figureTruth),
+    // pas une chaîne — on tolère ref vide si figureTruth est fourni.
+    if (!(answerType === "figure" && cand && opts?.figureTruth)) return NA();
+  }
   if (answerType === "open") return NA("none", "type ouvert → LLM");
 
   // Phase D — type « code » : le candidat est un PROGRAMME, la preuve = exécution
@@ -176,6 +180,22 @@ export async function verifyDeterministic(
     const lang = opts?.language ?? (/#include|\bint\s+main\s*\(/.test(cand) ? "c" : "python");
     const r = await verifyCode(lang, cand, opts?.tests ?? []);
     return { verified: r.verified, method: "exec", detail: r.detail };
+  }
+
+  // moteur-v2 (P4) — type « figure » : la question se résout DEPUIS une figure générée par un
+  // FIGURE SPEC seedé ; la spec déclare des valeurs VÉRITÉ (truth), calculées au rendu depuis les
+  // données mêmes de la figure (déterministe). Preuve = la réponse candidate (dernier nombre)
+  // égale la vérité — UNE seule valeur de vérité exigée, sinon l'appariement est ambigu → NA.
+  // Jamais de faux « prouvé » : sans truth exploitable → not_applicable.
+  if (answerType === "figure") {
+    const truth = opts?.figureTruth ?? {};
+    const keys = Object.keys(truth);
+    if (!keys.length) return NA("figure", "aucune valeur vérité déclarée par la spec");
+    if (keys.length > 1) return NA("figure", `plusieurs valeurs vérité (${keys.join(",")}) — appariement ambigu`);
+    const expected = truth[keys[0]];
+    if (!Number.isFinite(expected)) return NA("figure", "vérité non numérique");
+    const n = verifyNumericPlain(cand, String(expected)); // last-number-wins (helper existant)
+    return { verified: n.verified, method: "figure", detail: `truth[${keys[0]}]=${expected} · ${n.detail}` };
   }
 
   if (answerType === "mcq") {

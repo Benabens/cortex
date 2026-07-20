@@ -4,6 +4,7 @@ import { genericRefImageFor, genericVisionBlock } from "@/lib/course-vision";
 import type { CourseProfile, Slot } from "@/lib/course-profile";
 import { getCourse } from "@/lib/courses";
 import { genericDirectivesBlock } from "@/lib/profiles/generic-directives";
+import { getExamDna, sampleMolds } from "@/lib/exam-dna";
 
 /**
  * Profil GÉNÉRIQUE pour un cours autre que cs-202 (algo, ml, …).
@@ -42,6 +43,28 @@ const GENERIC_LATEX_CONTRACT = [
   `RÈGLES DE COMPILATION : échappe \\% \\& \\# \\_ dans le texte ; équilibre accolades/environnements ; pas de markdown ; pas d'images externes ; LaTeX qui COMPILE du premier coup.`,
 ].join("\n");
 
+/**
+ * moteur-v2 (P5) — ARCHÉTYPES NEUTRES pour un cours SANS module d'archétypes dédié : le squelette
+ * minimal (un exercice d'examen creusé) — AUCUN contenu de matière. Tout le « caractère » du cours
+ * (moules, figures, texture, style) vient alors de l'ADN détecté depuis SES annales.
+ * = onboarding ZÉRO-CODE : ajouter un cours dans lib/courses.ts + déposer ses annales suffit.
+ */
+export function genericArchetypes(): Archetype[] {
+  return [
+    {
+      id: "exam-exercise",
+      category: "General",
+      concept: "exercice d'examen du cours (artefact concret creusé par sous-questions)",
+      structure: "UN artefact concret (problème, instance, jeu de données, programme, système) creusé par 4-6 sous-questions en escalier qui testent les interactions entre concepts.",
+      grid: "espace de réponse ligné (\\rulelines) ou tableau à remplir selon la charge",
+      figure: "si la question s'y prête : figure TikZ ou FIGURE SPEC (plot) dans l'idiome des annales du cours",
+      trap: "un cas-limite/une idée fausse RÉELLE du cours (dérivée des annales), ré-instanciée sur le setup",
+      weight: 1,
+      topics: [],
+    },
+  ];
+}
+
 /** Construit un profil générique à partir des archétypes d'un cours. */
 export function makeGenericProfile(courseId: string, archetypes: Archetype[]): CourseProfile {
   const c = getCourse(courseId);
@@ -63,9 +86,16 @@ export function makeGenericProfile(courseId: string, archetypes: Archetype[]): C
     const sorted = [...archetypes].sort((a, b) => b.weight * boost(b) - a.weight * boost(a));
     const picks = sorted.slice(0, 6);
     const pts = [35, 35, 30, 30, 25, 25];
+    // moteur-v2 (P2) — MOULES échantillonnés proportionnellement à l'ADN détecté du cours
+    // (moules « ouverts » : un exam d'exercices n'a pas de statement_truefalse). Sans ADN → null.
+    const dna = await getExamDna().catch(() => null);
+    const molds = sampleMolds(dna, picks.length, {
+      only: ["proof_analysis", "derivation", "design", "applied_scenario", "formula_computation", "code_trace", "table_fill", "figure_reading"],
+    });
     return picks.map((a, i) => ({
       category: a.category,
       points: pts[i] ?? 20,
+      mold: molds[i] ?? null,
       brief: [
         `ARCHÉTYPE « ${a.id} » — ${a.concept}.`,
         `Construction : ${a.structure}`,

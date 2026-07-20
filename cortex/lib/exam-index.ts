@@ -5,6 +5,7 @@ import { profile } from "@/lib/course-profile";
 import { coursePaths } from "@/lib/courses";
 import { sourceHref } from "@/lib/deeplink";
 import { search } from "@/lib/search";
+import { MOLD_KINDS, moldTaxonomyBlock, normalizeMold, normalizeFigureKind } from "@/lib/molds";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -34,10 +35,14 @@ export type ExamExercise = {
   examHref: string | null;
   courseHref: string | null;
   topicId: number | null;
+  // moteur-v2 (P0) — capturés À L'INDEXATION (vision) : moule générique + type de figure référencée.
+  mold: string | null;
+  figureKind: string | null;
 };
 
 export async function ensureIndexSchema(): Promise<void> {
   await q.ensureTable("exam_exercises");
+  await q.ensureColumns("exam_exercises", ["mold", "figure_kind"]);
 }
 
 function pdftoppm(): string | null {
@@ -90,6 +95,8 @@ const EXO_SCHEMA = {
           archetype: { type: "string", description: "L'id d'archétype le plus proche dans la liste fournie, ou \"\"." },
           statement: { type: "string", description: "Énoncé fidèle mais COURT (1-3 phrases) — de quoi reconnaître l'exo. Pas la solution." },
           points: { type: "number", description: "Barème de l'exo si indiqué, sinon 0." },
+          mold: { type: "string", description: `Le MOULE générique de la question, EXACTEMENT un de : ${MOLD_KINDS.join(" | ")} (le dominant si l'exo en mélange).` },
+          figure_kind: { type: ["string", "null"], description: "Si l'exo s'appuie sur une FIGURE visible (courbe, nuage, diagramme, graphe, arbre, automate, table, circuit…) : libellé court générique en anglais de cette figure. Sinon null." },
         },
         required: ["page", "topic", "method", "exo_type", "statement"],
         additionalProperties: false,
@@ -100,7 +107,7 @@ const EXO_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-type RawExo = { page?: number; topic?: string; method?: string; exo_type?: string; trap?: string; archetype?: string; statement?: string; points?: number };
+type RawExo = { page?: number; topic?: string; method?: string; exo_type?: string; trap?: string; archetype?: string; statement?: string; points?: number; mold?: string; figure_kind?: string | null };
 
 /** Construit le lien « passage de cours associé » : recherche scopée (topic+method) → meilleur hit de cours. */
 async function courseHrefFor(course: string, topic: string, method: string | null): Promise<string | null> {
@@ -128,7 +135,10 @@ async function indexOneExam(course: string, src: { path: string; title: string; 
     `Voici TOUTES les pages d'UN vrai examen : « ${src.title} »${src.year ? ` (${src.year})` : ""}. Ouvre-les (outil Read) et lis l'examen EN ENTIER.`,
     ...pages.map((pg) => `  - page ${pg.page} : ${pg.rel}`),
     ``,
-    `EXTRAIS CHAQUE exercice / problème / question (et sous-question si elle teste une technique distincte). N'en OUBLIE AUCUN. Pour chacun : la PAGE où il commence, un topic COURT (EN), la méthode, le format réel (exo_type), le piège, l'archétype le plus proche, un énoncé fidèle COURT, et le barème si indiqué.`,
+    `EXTRAIS CHAQUE exercice / problème / question (et sous-question si elle teste une technique distincte). N'en OUBLIE AUCUN. Pour chacun : la PAGE où il commence, un topic COURT (EN), la méthode, le format réel (exo_type), le piège, l'archétype le plus proche, un énoncé fidèle COURT, le barème si indiqué, le MOULE générique et le type de figure éventuel.`,
+    ``,
+    `═══ TAXONOMIE DES MOULES (champ "mold" — un par exo, le dominant) ═══`,
+    moldTaxonomyBlock(),
     ``,
     `═══ ARCHÉTYPES (rattache via "archetype", "" si aucun) ═══`,
     archetypeList,
@@ -168,26 +178,38 @@ async function indexOneExam(course: string, src: { path: string; title: string; 
       points: Number(e.points) > 0 ? Number(e.points) : null,
       examHref: sourceHref(course, src.path, `${src.path}#page=${page}`),
       courseHref: await courseHrefFor(course, topic, method),
+      mold: normalizeMold(e.mold),
+      figureKind: normalizeFigureKind(e.figure_kind),
     });
   }
   step(`${src.title} : ${out.length} exo(s) extraits`, prog);
   return out;
 }
 
-/** Garde un énoncé par année (évite de compter énoncé + corrigé → doublons faux). */
-function pickEnonces(rows: { path: string; title: string; year: number | null }[]): typeof rows {
+/** Garde UN énoncé par (type d'épreuve, année) — évite de compter énoncé + corrigé (doublons faux)
+ *  et ne mélange plus finals et midterms d'une même année dans un seul bucket.
+ *  Préfère une source SCANNABLE (PDF rendable en vision) à un extrait HTML : c'est générique
+ *  (aucune matière) et ça permet l'index/scan là où un site et un PDF coexistent pour la même épreuve.
+ *  Exporté (moteur-v2 P0) : réutilisé par le scan de figures de lib/exam-dna.ts. */
+export function pickEnonces(rows: { path: string; title: string; year: number | null }[]): typeof rows {
   const isSol = (s: string) => /solution|answer|grading|corrig|with\s+sol/i.test(s);
-  const byYear = new Map<number, typeof rows>();
+  const isPdf = (s: string) => /\.pdf$/i.test(s);
+  const kindOf = (r: { path: string; title: string }) =>
+    /midterm|mi[-_ ]?term/i.test(r.path + " " + r.title) ? "midterm" : "final";
+  // score : énoncé (pas corrigé) avant tout, puis scannable (PDF) avant HTML.
+  const score = (r: { path: string; title: string }) =>
+    (isSol(r.path) || isSol(r.title) ? 0 : 2) + (isPdf(r.path) ? 1 : 0);
+  const byKey = new Map<string, typeof rows>();
   const noYear: typeof rows = [];
   for (const r of rows) {
     if (r.year == null) { noYear.push(r); continue; }
-    if (!byYear.has(r.year)) byYear.set(r.year, []);
-    byYear.get(r.year)!.push(r);
+    const k = `${kindOf(r)}|${r.year}`;
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k)!.push(r);
   }
   const out: typeof rows = [];
-  for (const [, group] of byYear) {
-    const enonce = group.find((g) => !isSol(g.path) && !isSol(g.title));
-    out.push(enonce ?? group[0]); // sinon le corrigé (seul dispo, ex. AnswersToFinal2011)
+  for (const [, group] of byKey) {
+    out.push([...group].sort((a, b) => score(b) - score(a))[0]); // meilleur ; corrigé seul dispo = pris
   }
   out.push(...noYear);
   return out.sort((a, b) => (a.year ?? 0) - (b.year ?? 0));
@@ -213,8 +235,8 @@ export async function indexExamExercises(opts: { onStep?: (m: string, p: number)
     await q.tx(async () => {
       for (const r of rows) {
         await q.run(
-          `INSERT INTO exam_exercises (exam_title, exam_year, exam_page, topic, method, exo_type, trap, archetype, statement, points, exam_href, course_href) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-          r.examTitle, r.examYear, r.examPage, r.topic, r.method, r.exoType, r.trap, r.archetype, r.statement, r.points, r.examHref, r.courseHref,
+          `INSERT INTO exam_exercises (exam_title, exam_year, exam_page, topic, method, exo_type, trap, archetype, statement, points, exam_href, course_href, mold, figure_kind) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          r.examTitle, r.examYear, r.examPage, r.topic, r.method, r.exoType, r.trap, r.archetype, r.statement, r.points, r.examHref, r.courseHref, r.mold, r.figureKind,
         );
       }
     });
@@ -237,7 +259,7 @@ export async function indexStats(): Promise<{ exercises: number; exams: number }
 export async function exercisesForTopic(topicId: number): Promise<ExamExercise[]> {
   await ensureIndexSchema();
   const rows = await q.all<any>(
-    `SELECT id, exam_title examTitle, exam_year examYear, exam_page examPage, topic, method, exo_type exoType, trap, archetype, statement, points, exam_href examHref, course_href courseHref, topic_id topicId
+    `SELECT id, exam_title examTitle, exam_year examYear, exam_page examPage, topic, method, exo_type exoType, trap, archetype, statement, points, exam_href examHref, course_href courseHref, topic_id topicId, mold, figure_kind figureKind
      FROM exam_exercises WHERE topic_id = ? ORDER BY (exam_year IS NULL), exam_year, exam_page`,
     topicId,
   );

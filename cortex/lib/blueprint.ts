@@ -1,7 +1,8 @@
 import { q } from "@/db/q";
 import { ARCHETYPES, type Archetype } from "@/lib/archetypes";
+import { getExamDna, sampleMolds } from "@/lib/exam-dna";
 
-export type Slot = { category: string; points: number; brief: string; archetypeId: string };
+export type Slot = { category: string; points: number; brief: string; archetypeId: string; mold?: string | null };
 
 /** Pondération d'un archétype par les faiblesses de Ben (matching mots-clés). */
 function weaknessBoost(a: Archetype, weaknesses: string[]): number {
@@ -45,5 +46,12 @@ export async function buildBlueprint(): Promise<Slot[]> {
     ].join(" "),
   });
 
-  return [mk(net[0], 50), mk(net[1] ?? net[0], 50), mk(os[0], 25), mk(os[1] ?? os[0], 30), mk(c, 10), mk(labs, 15)];
+  const slots = [mk(net[0], 50), mk(net[1] ?? net[0], 50), mk(os[0], 25), mk(os[1] ?? os[0], 30), mk(c, 10), mk(labs, 15)];
+  // moteur-v2 (P2) — MOULES échantillonnés depuis l'ADN détecté (data-driven : sans ADN — ex. CI,
+  // DB fraîche — molds = null → prompts BYTE-IDENTIQUES à l'historique ; la régression le prouve).
+  const dna = await getExamDna().catch(() => null);
+  const molds = sampleMolds(dna, slots.length, {
+    only: ["proof_analysis", "derivation", "design", "applied_scenario", "formula_computation", "code_trace", "table_fill", "figure_reading"],
+  });
+  return slots.map((s, i) => ({ ...s, mold: molds[i] ?? null }));
 }
