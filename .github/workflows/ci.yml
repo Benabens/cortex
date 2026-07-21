@@ -115,7 +115,8 @@ jobs:
             set -e
             mkdir -p /tmp/smoke && cp latex/epfl-logo.png /tmp/smoke/ || true
             cat latex/preamble.tex latex/figures.tex > /tmp/smoke/doc.tex
-            printf "\n\\\\begin{document}\nSmoke test PDF.\n\\\\end{document}\n" >> /tmp/smoke/doc.tex
+            # \FOOTDATE est défini par renderExamTex au runtime → stub pour le shipout fancyhdr.
+            printf "\n\\\\newcommand{\\\\FOOTDATE}{Smoke}\n\\\\begin{document}\nSmoke test PDF.\n\\\\end{document}\n" >> /tmp/smoke/doc.tex
             cd /tmp/smoke && /usr/local/bin/tectonic --chatter minimal doc.tex
             test -s doc.pdf && echo "✓ PDF compilé ($(stat -c%s doc.pdf) octets)"
           '

@@ -86,14 +86,18 @@ RUN set -eux; \
     mkdir -p /tmp/tectonic-warm; \
     cp latex/epfl-logo.png /tmp/tectonic-warm/ 2>/dev/null || true; \
     cat latex/preamble.tex latex/figures.tex > /tmp/tectonic-warm/warm.tex; \
-    printf '\n\\begin{document}\nWarm-up.\n\\end{document}\n' >> /tmp/tectonic-warm/warm.tex; \
+    printf '\n\\newcommand{\\FOOTDATE}{Warm}\n\\begin{document}\nWarm-up.\n\\end{document}\n' >> /tmp/tectonic-warm/warm.tex; \
     (cd /tmp/tectonic-warm && /usr/local/bin/tectonic --chatter minimal warm.tex) \
       || echo "AVERTISSEMENT: warm-up tectonic incomplet (bundle téléchargé au 1er run)"; \
     rm -rf /tmp/tectonic-warm
 
+#   CORTEX_SEED_COURSES : cours seedés au boot depuis le contenu COMMITTÉ si le
+#   tenant est vide (prod-boot, sans LLM) — l'app n'est jamais vide. ml = le
+#   cours dont annales+séries+fiches sont dans git. Surchargeable ("" désactive).
 ENV CORTEX_TEX_BIN=/usr/local/bin/tectonic \
     NEXT_TELEMETRY_DISABLED=1 \
-    PORT=3000
+    PORT=3000 \
+    CORTEX_SEED_COURSES=ml
 
 EXPOSE 3000
 

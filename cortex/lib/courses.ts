@@ -166,7 +166,17 @@ export function listCourses(): CourseConfig[] {
   return Object.values(COURSES);
 }
 
-const DATA = path.join(process.cwd(), "data");
+// Racine des données mutables (DB sqlite, refs, exams, uploads). CORTEX_DATA_DIR
+// permet de la déplacer sur un volume persistant en prod (Railway) ; non posée
+// (dev, CI) → ./data, comportement historique inchangé.
+const DATA = process.env.CORTEX_DATA_DIR
+  ? path.resolve(process.env.CORTEX_DATA_DIR)
+  : path.join(process.cwd(), "data");
+
+/** Racine data effective (./data ou CORTEX_DATA_DIR) — partagée avec le store auth. */
+export function dataRoot(): string {
+  return DATA;
+}
 
 export type CoursePaths = {
   dbPath: string;

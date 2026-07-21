@@ -1,5 +1,5 @@
 import type { SqlParam } from "./q";
-import { databaseUrl, pglitePublicQuery } from "./driver-postgres";
+import { databaseUrl, pglitePublicQuery, pgSafeParams } from "./driver-postgres";
 
 /**
  * Accès Postgres du store d'auth : schéma `public`, HORS search_path tenant.
@@ -20,6 +20,6 @@ export async function authPgQuery(text: string, params: SqlParam[]): Promise<Rec
     const postgres = require("postgres") as typeof import("postgres");
     _pool = postgres(url, { max: 2, connection: { search_path: "public" }, onnotice: () => {} });
   }
-  const r = await _pool.unsafe(text, params as never[]);
+  const r = await _pool.unsafe(text, pgSafeParams(params) as never[]);
   return r as unknown as Record<string, unknown>[];
 }
