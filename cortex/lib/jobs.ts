@@ -1,4 +1,5 @@
 import { currentCourse } from "@/db/client";
+import { currentUser } from "@/db/context";
 import { q, nowStr } from "@/db/q";
 import { inc, observe } from "@/lib/metrics";
 import { examsDir } from "@/lib/paths";
@@ -260,7 +261,10 @@ export async function startWorker(jobId: number, course?: string): Promise<void>
   const bin = useLocal ? tsxLocal : "npx";
   const tail = ["scripts/run-job.ts", String(jobId), c];
   const args = useLocal ? tail : ["tsx", ...tail];
-  const env = { ...process.env, CORTEX_COURSE: c };
+  // CORTEX_USER : le worker détaché doit hériter du TENANT de l'appelant
+  // (contexte requête = user connecté ; pompe/sweep = user du tenant balayé),
+  // sinon en Postgres multi-user il écrirait dans le tenant « owner ».
+  const env = { ...process.env, CORTEX_COURSE: c, CORTEX_USER: currentUser() };
   const child = spawn(bin, args, { cwd, detached: true, stdio: "ignore", env });
   // PID persisté tout de suite (le worker le ré-écrit au démarrage) → annulable même pendant le démarrage
   if (child.pid) await setJob(jobId, { pid: child.pid });

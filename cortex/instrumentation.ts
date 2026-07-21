@@ -14,16 +14,36 @@ export async function register() {
   const g = globalThis as { __cortexJobsPump?: ReturnType<typeof setInterval> };
   try {
     const { runWithCourse } = await import("@/db/client");
+    const { runWithUser } = await import("@/db/context");
     const { listCourses } = await import("@/lib/courses");
     const { reconcileStaleJobs, pumpQueuedJobs } = await import("@/lib/jobs");
+    const { dbDriverName } = await import("@/db/q");
 
     const sweep = async (): Promise<{ fixed: number; resumed: number }> => {
       let fixed = 0;
       let resumed = 0;
-      for (const c of listCourses()) {
+      // Postgres multi-tenant : balaie les tenants CONNUS (registre public.tenants,
+      // alimenté par ensureTenant) — sinon les jobs interrompus des users non-owner
+      // ne seraient jamais repris après un redéploiement. SQLite : cours seuls
+      // (mono-user owner, comportement historique).
+      let tenants: Array<{ user_id: string; course: string }> = [];
+      if (dbDriverName() === "postgres") {
         try {
-          fixed += await runWithCourse(c.id, () => reconcileStaleJobs());
-          resumed += await runWithCourse(c.id, () => pumpQueuedJobs());
+          const { authAll } = await import("@/db/auth-store");
+          tenants = await authAll<{ user_id: string; course: string }>(
+            "SELECT user_id, course FROM tenants"
+          );
+        } catch { /* registre indisponible → balayage historique */ }
+      }
+      if (!tenants.length) tenants = listCourses().map((c) => ({ user_id: "", course: c.id }));
+      for (const t of tenants) {
+        const run = <T,>(fn: () => Promise<T>): Promise<T> =>
+          t.user_id
+            ? runWithUser(t.user_id, () => runWithCourse(t.course, fn))
+            : runWithCourse(t.course, fn);
+        try {
+          fixed += await run(() => reconcileStaleJobs());
+          resumed += await run(() => pumpQueuedJobs());
         } catch { /* DB du cours absente : rien à faire */ }
       }
       return { fixed, resumed };

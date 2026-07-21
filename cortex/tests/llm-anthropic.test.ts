@@ -59,6 +59,10 @@ after(async () => {
 });
 
 test("anthropic : stream + modèle par défaut + output_config + thinking + images avant texte", async () => {
+  // Déploiement v1 (RÈGLE D'OR coûts) : « opus » ne se résout vers Opus sur le
+  // provider API payant que si LLM_ALLOW_OPUS=1 — ce test vérifie le mapping
+  // historique SOUS ce flag ; le défaut économe (Sonnet) a son propre test.
+  process.env.LLM_ALLOW_OPUS = "1";
   const out = await anthropicProvider.complete({
     prompt: "Analyse.",
     model: "opus",
@@ -68,8 +72,9 @@ test("anthropic : stream + modèle par défaut + output_config + thinking + imag
     images: [{ mediaType: "image/png", base64: "QUJD" }],
     timeoutMs: 5_000,
   });
+  delete process.env.LLM_ALLOW_OPUS;
   assert.equal(out.text, '{"topic":"ok"}');
-  assert.equal(out.model, "claude-opus-4-8"); // GEN_MODEL historique préservé
+  assert.equal(out.model, "claude-opus-4-8"); // GEN_MODEL historique préservé (opt-in)
   assert.deepEqual(out.usage, { inputTokens: 21, outputTokens: 9 });
 
   assert.ok(captured);

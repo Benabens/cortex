@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, drill });
   } catch (e: unknown) {
     const err = e as LlmError;
-    const status = err.code === "UNAVAILABLE" ? 503 : 502;
+    const status = err.code === "UNAVAILABLE" || err.code === "SPEND_CAP" || err.code === "QUOTA" || err.code === "CREDITS" ? 503 : 502;
     return NextResponse.json({ error: err.message ?? String(e), code: err.code }, { status });
   }
 }

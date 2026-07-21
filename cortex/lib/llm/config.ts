@@ -53,7 +53,15 @@ const ANTHROPIC_DEFAULTS: Record<string, string> = {
 export function mapModel(model: LlmModel, provider: ProviderName): string {
   const envKey = MODEL_ENV[model];
   if (envKey && process.env[envKey]) return process.env[envKey]!;
-  if (provider === "anthropic" && ANTHROPIC_DEFAULTS[model]) return ANTHROPIC_DEFAULTS[model];
+  if (provider === "anthropic" && ANTHROPIC_DEFAULTS[model]) {
+    // RÈGLE D'OR coûts (déploiement v1) : sur le provider API PAYANT, l'alias
+    // logique « opus » ne se résout vers Opus (5×/25× plus cher que Sonnet en
+    // sortie) que si EXPLICITEMENT autorisé — LLM_ALLOW_OPUS=1 ou LLM_MODEL_OPUS
+    // posé. Sinon Sonnet. Le provider claude-code (dev €0 via Max) garde le
+    // passthrough historique : « opus » y reste opus.
+    if (model === "opus" && process.env.LLM_ALLOW_OPUS !== "1") return ANTHROPIC_DEFAULTS.sonnet;
+    return ANTHROPIC_DEFAULTS[model];
+  }
   return model;
 }
 
