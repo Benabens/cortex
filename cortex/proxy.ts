@@ -32,19 +32,28 @@ const DEMO_GET_PATHS = new Set([
 /** Rate-limit par IP (fenêtre fixe 60 s, in-process — conteneur unique).
  *  RATE_LIMIT_PER_MIN non posée → désactivé (dev). */
 const rlBuckets = new Map<string, { n: number; resetAt: number }>();
+/**
+ * Clé de comptage du rate-limit.
+ *
+ * Les en-têtes `x-forwarded-for` / `x-real-ip` sont écrits par le CLIENT et
+ * seulement complétés par le proxy : leur faire confiance sans savoir combien
+ * de proxys nous précèdent rend la limite inutile (il suffit de varier
+ * l'en-tête). On n'accepte donc XFF que derrière un proxy déclaré, en prenant
+ * le N-ième élément EN PARTANT DE LA FIN, où N = TRUST_PROXY (nombre de hops
+ * de confiance ; « 1 » = un proxy, cas Railway). Sans TRUST_PROXY : on ignore
+ * totalement les en-têtes et on compte par IP de connexion (`req.ip` quand
+ * disponible), quitte à regrouper — mieux vaut une limite grossière qu'une
+ * limite contournable d'un `curl -H`.
+ */
 function clientIp(req: NextRequest): string {
-  // X-Forwarded-For est écrit par le client ET complété par le proxy : le
-  // premier élément est donc FORGEABLE (un attaquant le change à chaque
-  // requête → compteur remis à zéro, et il peut recycler l'IP d'un tiers).
-  // Le proxy de la plateforme AJOUTE la vraie IP en DERNIER : on prend donc le
-  // dernier élément, et on n'accorde de confiance à XFF que si on est
-  // effectivement derrière un proxy (TRUST_PROXY=1, posé en prod).
-  const xff = req.headers.get("x-forwarded-for");
-  if (process.env.TRUST_PROXY === "1" && xff) {
-    const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
-    if (parts.length) return parts[parts.length - 1];
+  const hops = Number(process.env.TRUST_PROXY);
+  if (Number.isFinite(hops) && hops >= 1) {
+    const parts = (req.headers.get("x-forwarded-for") ?? "")
+      .split(",").map((s) => s.trim()).filter(Boolean);
+    // Le proxy le plus proche de nous ajoute en dernier : on remonte de `hops`.
+    if (parts.length) return parts[Math.max(0, parts.length - hops)];
   }
-  return req.headers.get("x-real-ip")?.trim() || "local";
+  return "direct";
 }
 
 function rateLimited(req: NextRequest): boolean {
@@ -93,10 +102,17 @@ async function guarded(req: NextRequest): Promise<NextResponse> {
   return NextResponse.next({ request: { headers } });
 }
 
+/** Chemins JAMAIS soumis au rate-limit : le healthcheck de la plateforme (le
+ *  limiter provoquerait une boucle de redémarrage), le webhook de paiement
+ *  (Stripe réessaie et le client ne serait pas crédité) et les assets Next. */
+const RL_EXEMPT = ["/api/health", "/api/billing/webhook", "/_next", "/favicon"];
+
 export default function proxy(req: NextRequest) {
   // Le rate-limit protège aussi une instance SANS auth (démo ouverte) : il est
-  // évalué avant la branche d'authentification.
-  if (rateLimited(req)) {
+  // évalué avant la branche d'authentification, mais jamais sur les chemins
+  // d'infrastructure ci-dessus.
+  const { pathname } = req.nextUrl;
+  if (!RL_EXEMPT.some((p) => pathname.startsWith(p)) && rateLimited(req)) {
     return NextResponse.json({ error: "Trop de requêtes — réessaie dans une minute." }, { status: 429 });
   }
   return AUTH_ON ? guarded(req) : passThrough(req);

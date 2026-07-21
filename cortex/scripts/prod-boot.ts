@@ -86,18 +86,11 @@ async function seedCourses(): Promise<void> {
       log(`seed : cours inconnu « ${rawCourse} » — ignoré`);
       continue;
     }
-    // Un seed est « acquis » seulement s'il a été MARQUÉ terminé : un boot tué
-    // au milieu de l'ingestion laisse des items partiels — se fier au simple
-    // « count > 0 » fossiliserait un corpus incomplet pour toujours.
+    // Deux sources de vérité INDÉPENDANTES : le marqueur vit sur le volume, le
+    // corpus dans la base. Ni l'une ni l'autre ne suffit — on décide en croisant
+    // les deux, et on ne RÉ-INGÈRE JAMAIS un tenant déjà peuplé (l'ingestion
+    // purge sources/items : sur une base vivante, ce serait destructeur).
     const doneMarker = path.join(dataRoot(), `.seed-done-${course}`);
-    if (fs.existsSync(doneMarker)) {
-      const n = await runWithUser(seedUser, () =>
-        runWithCourse(course, async () =>
-          Number((await q.get<{ n: number }>("SELECT count(*) n FROM items"))?.n ?? 0))
-      );
-      log(`seed ${course} : déjà fait (${n} items) — rien à faire`);
-      continue;
-    }
     const already = await runWithUser(seedUser, () =>
       runWithCourse(course, async () => {
         const row = await q.get<{ n: number }>("SELECT count(*) n FROM items");
@@ -105,11 +98,22 @@ async function seedCourses(): Promise<void> {
       })
     );
     if (already > 0) {
-      // Corpus présent mais jamais marqué : soit un seed antérieur à ce
-      // mécanisme, soit une ingestion interrompue. L'ingestion étant
-      // idempotente (elle purge et reconstruit), on la relance pour garantir
-      // un corpus COMPLET, puis on marque.
-      log(`seed ${course} : ${already} items présents mais non marqués terminés — ré-ingestion de sûreté`);
+      if (!fs.existsSync(doneMarker)) {
+        // Corpus présent sans marqueur : volume recréé, ou seed antérieur à ce
+        // mécanisme. On MARQUE sans toucher aux données (ne jamais purger une
+        // base vivante), en le signalant clairement.
+        fs.writeFileSync(doneMarker, `${nowStr()} (marqué a posteriori : corpus déjà présent)\n`);
+        log(`seed ${course} : ${already} items déjà en base, marqueur (re)posé — AUCUNE ré-ingestion`);
+      } else {
+        log(`seed ${course} : déjà fait (${already} items) — rien à faire`);
+      }
+      continue;
+    }
+    // Base VIDE. Si le marqueur existe quand même (base recréée/basculée), il
+    // ment : on le retire et on re-seed, sinon l'app resterait vide à jamais.
+    if (fs.existsSync(doneMarker)) {
+      log(`seed ${course} : marqueur présent mais base VIDE (base recréée ?) — re-seed`);
+      try { fs.unlinkSync(doneMarker); } catch { /* on re-seed de toute façon */ }
     }
     log(`seed ${course} : ingestion du contenu committé (user ${seedUser})…`);
     // PGlite (pglite://…) = Postgres in-process à stockage FICHIER mono-process :
@@ -126,7 +130,11 @@ async function seedCourses(): Promise<void> {
       env: { ...process.env, CORTEX_USER: seedUser, CORTEX_COURSE: course },
     });
     if (res.status !== 0) {
-      throw new Error(`seed ${course} : ingestion en échec (exit ${res.status})`);
+      // NE PAS faire échouer le boot : l'app doit démarrer (le reste du site
+      // fonctionne, le seed sera retenté au prochain démarrage). Un conteneur
+      // qui refuse de démarrer à cause du seed, c'est une panne totale.
+      log(`seed ${course} : ÉCHEC de l'ingestion (exit ${res.status}) — l'app démarre quand même, seed retenté au prochain boot`);
+      continue;
     }
     fs.writeFileSync(doneMarker, `${nowStr()}\n`); // seed COMPLET (cf. ci-dessus)
     // Enregistre le tenant de seed dans le registre global (utile avant tout accès HTTP).
@@ -139,8 +147,25 @@ async function seedCourses(): Promise<void> {
   }
 }
 
+/**
+ * L'isolation entre utilisateurs repose sur le schéma Postgres. En SQLite il
+ * n'existe qu'UNE base par cours : avec l'authentification activée, tous les
+ * comptes partageraient examens, faiblesses et file de jobs. On refuse cette
+ * combinaison au démarrage plutôt que de la découvrir en production.
+ */
+function assertIsolationSane(): void {
+  if (process.env.AUTH_ENABLED === "1" && dbDriverName() !== "postgres") {
+    throw new Error(
+      "Configuration dangereuse : AUTH_ENABLED=1 avec le driver sqlite. " +
+      "L'isolation entre utilisateurs exige DB_DRIVER=postgres + DATABASE_URL " +
+      "(en sqlite, tous les comptes partagent la même base de cours)."
+    );
+  }
+}
+
 async function main(): Promise<void> {
   log(`démarrage — DB_DRIVER=${dbDriverName()} · data=${dataRoot()} · seed=[${process.env.CORTEX_SEED_COURSES ?? ""}]`);
+  assertIsolationSane();
   initVolume();
   await migrateTenants();
   await seedCourses();

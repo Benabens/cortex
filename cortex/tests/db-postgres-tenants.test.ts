@@ -34,9 +34,24 @@ test("toDollarParams : ? → $n, en ignorant les chaînes et identifiants quoté
   assert.equal(toDollarParams("SELECT 'l''un ?' FROM t WHERE x = ?"), "SELECT 'l''un ?' FROM t WHERE x = $1");
 });
 
-test("tenantSchema : identifiants PG sûrs", () => {
-  assert.equal(runWithUser("alice", () => runWithCourse("cs-202", () => tenantSchema())), "t_alice_cs_202");
-  assert.equal(runWithUser("Bob-77@x", () => runWithCourse("ml", () => tenantSchema())), "t_bob_77_x_ml");
+test("tenantSchema : identifiants PG sûrs, lisibles et UNIQUES par utilisateur", () => {
+  const alice = runWithUser("alice", () => runWithCourse("cs-202", () => tenantSchema()));
+  const bob = runWithUser("Bob-77@x", () => runWithCourse("ml", () => tenantSchema()));
+  // Forme : t_<user>_<cours>, caractères sûrs, sous la limite PG de 63.
+  for (const s of [alice, bob]) {
+    assert.match(s, /^t_[a-z0-9_]+$/, `identifiant PG non sûr : ${s}`);
+    assert.ok(s.length < 63, `identifiant PG trop long : ${s}`);
+  }
+  assert.ok(alice.startsWith("t_alice_") && alice.endsWith("_cs_202"), alice);
+  assert.ok(bob.startsWith("t_bob_77_x_") && bob.endsWith("_ml"), bob);
+  // Deux comptes dont l'identifiant se TRONQUE au même préfixe doivent avoir
+  // des schémas distincts : sinon leurs données fusionnent (le suffixe est un
+  // condensé de l'identifiant complet, cf. db/context.ts userSlug).
+  const long1 = "utilisateur.tres.long.pour.tronquer@exemple.com";
+  const long2 = "utilisateur.tres.long.pour.tronquer@exemple.org";
+  const s1 = runWithUser(long1, () => runWithCourse("ml", () => tenantSchema()));
+  const s2 = runWithUser(long2, () => runWithCourse("ml", () => tenantSchema()));
+  assert.notEqual(s1, s2, "deux comptes distincts partagent le même schéma");
 });
 
 test("isolation : alice et bob ne voient QUE leurs données (même cours, même SQL)", async () => {

@@ -28,8 +28,12 @@ function quotaFor(bucket: QuotaBucket): number | null {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
 }
 
-/** Nombre d'événements du user pour AUJOURD'HUI dans un bucket. */
+/** Nombre d'événements du user pour AUJOURD'HUI dans un bucket.
+ *  Même garde que recordGeneration : sans garde-fou actif il n'y a rien à
+ *  compter, et une simple LECTURE créerait le store (fichier + DDL) — ce que
+ *  le dev €0 ne doit jamais faire. */
 export async function usedToday(bucket: QuotaBucket, userId = currentUser()): Promise<number> {
+  if (!quotaTrackingActive()) return 0;
   const day = nowStr().slice(0, 10);
   const r = await authGet<{ n: number }>(
     `SELECT count(*) n FROM gen_events WHERE user_id = ? AND bucket = ? AND day = ?`,

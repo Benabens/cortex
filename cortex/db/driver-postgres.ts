@@ -106,14 +106,16 @@ function poolFor(schema: string): PostgresSql {
       idle_timeout: 30,
     });
     pgPools.set(schema, pool);
-    // Éviction LRU (Map = ordre d'insertion) au-delà du plafond.
+    // Éviction LRU (Map = ordre d'insertion) au-delà du plafond. On NE retire
+    // PAS le schéma de `bootstrapped` : le DDL a bien été appliqué et il le
+    // reste — le rejouer à chaque va-et-vient rendrait un balayage périodique
+    // très coûteux. `end({timeout})` laisse les requêtes en vol se terminer.
     while (pgPools.size > maxPools()) {
       const oldest = pgPools.keys().next().value as string | undefined;
       if (!oldest || oldest === schema) break;
       const victim = pgPools.get(oldest);
       pgPools.delete(oldest);
-      bootstrapped.delete(oldest); // le DDL sera re-vérifié (IF NOT EXISTS) au retour
-      try { void victim?.end({ timeout: 5 }); } catch { /* fermeture best-effort */ }
+      try { void victim?.end({ timeout: 30 }); } catch { /* fermeture best-effort */ }
     }
   } else {
     // Rafraîchit la position LRU.
@@ -270,8 +272,28 @@ async function hydrateFromSeedTenant(ex: TenantExec, schema: string): Promise<vo
   );
   if (!seedThere.rows.length) return; // pas de seed pour ce cours
   for (const t of SEED_CONTENT_TABLES) {
-    try { await ex.exec(`INSERT INTO "${schema}".${t} SELECT * FROM "${seedSchema}".${t}`); }
-    catch { /* table absente/incompatible → contenu partiel plutôt que crash */ }
+    try {
+      // Copie par NOMS DE COLONNES (jamais `SELECT *` : un ordre de colonnes
+      // qui diverge entre les deux schémas — après l'ajout d'une colonne au
+      // milieu de la spec — décalerait silencieusement les données).
+      const cols = await ex.query(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_schema = $1 AND table_name = $2
+           AND column_name IN (SELECT column_name FROM information_schema.columns
+                               WHERE table_schema = $3 AND table_name = $2)
+         ORDER BY ordinal_position`,
+        [seedSchema, t, schema],
+      );
+      const names = cols.rows.map((r) => `"${(r as { column_name: string }).column_name}"`);
+      if (!names.length) continue;
+      const list = names.join(", ");
+      await ex.exec(`INSERT INTO "${schema}".${t} (${list}) SELECT ${list} FROM "${seedSchema}".${t}`);
+    } catch (e) {
+      // Contenu partiel plutôt que crash — mais on TRACE (un échec silencieux
+      // donnerait un tenant à moitié hydraté sans aucun diagnostic).
+      // eslint-disable-next-line no-console
+      console.warn(`[tenant] hydratation ${t} → ${schema} échouée :`, (e as Error)?.message?.slice(0, 200));
+    }
   }
   // Les ids copiés sont explicites → resynchronise les séquences identity.
   for (const t of SEED_CONTENT_TABLES) {

@@ -319,13 +319,27 @@ export async function refundJobCredits(job: Pick<Job, "id" | "type">): Promise<v
   } catch { /* best-effort : jamais bloquant */ }
 }
 
+/**
+ * Seuil d'avancement au-delà duquel une ANNULATION n'est plus remboursée : le
+ * travail a réellement été facturé par le fournisseur (appels LLM déjà émis),
+ * et un remboursement inconditionnel offrirait des générations illimitées
+ * (générer à 95 %, annuler, recommencer). Un ÉCHEC reste toujours remboursé —
+ * l'utilisateur n'y peut rien et n'obtient aucun livrable.
+ */
+const CANCEL_REFUND_MAX_PROGRESS = 10;
+
 export async function cancelJob(id: number): Promise<Job | null> {
   const job = await getJob(id);
   if (!job) return null;
   if (["done", "error", "canceled"].includes(job.status)) return job;
   await setJob(id, { status: "canceled", currentStep: "Annulé" });
-  // Annulation = aucun livrable → les crédits sont rendus (cohérent avec l'échec).
-  await refundJobCredits(job);
+  // Annulation AVANT tout travail facturé → crédits rendus. Au-delà, le
+  // fournisseur a déjà été payé : pas de remboursement (cf. constante).
+  if (job.progress <= CANCEL_REFUND_MAX_PROGRESS) {
+    await refundJobCredits(job);
+  } else {
+    await logJob(id, `Annulé à ${job.progress}% — la génération était déjà lancée, les crédits ne sont pas rendus.`);
+  }
   if (job.pid) {
     const pgid = pgidOf(job.pid);
     const target = pgid ? -pgid : job.pid; // repli : au moins le worker lui-même

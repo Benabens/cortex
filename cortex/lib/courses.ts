@@ -204,14 +204,16 @@ function multiUser(): boolean {
   return process.env.AUTH_ENABLED === "1" || (process.env.DB_DRIVER ?? "sqlite") === "postgres";
 }
 
-/** Sous-dossier d'artefacts du user courant ("" en mono-user historique). */
+/** Sous-dossier d'artefacts du user courant ("" en mono-user historique).
+ *  La normalisation est EXACTEMENT celle du schéma Postgres (`userSlug`) :
+ *  deux comptes qui partagent un schéma DB doivent partager le même dossier,
+ *  sinon la garde d'ownership (qui interroge la DB) autoriserait un fichier
+ *  rangé ailleurs. Une divergence ici rouvrirait la fuite inter-comptes. */
 function userScope(): string {
   if (!multiUser()) return "";
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { currentUser } = require("../db/context") as typeof import("../db/context");
-  const raw = currentUser();
-  const safe = raw.toLowerCase().replace(/[^a-z0-9._-]/g, "_").slice(0, 64);
-  return path.join("u", safe || "owner");
+  const { currentUser, userSlug } = require("../db/context") as typeof import("../db/context");
+  return path.join("u", userSlug(currentUser()) || "owner");
 }
 
 /** Chemins ABSOLUS d'un cours. cs-202 mono-user = exactement les chemins historiques. */

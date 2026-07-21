@@ -104,3 +104,82 @@ test("artefacts isolés par utilisateur en multi-user ; chemins historiques inta
   assert.equal(a.dbPath, b.dbPath);
   delete process.env.AUTH_ENABLED;
 });
+
+// ─── 2ᵉ vague : failles trouvées par la vérification adversariale des correctifs ───
+
+test("dev €0 : usedToday NE crée PAS le store (chemin /api/billing sans aucune env)", async () => {
+  const probe = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-dev0-"));
+  const saved = process.env.CORTEX_DATA_DIR;
+  process.env.CORTEX_DATA_DIR = probe;
+  for (const k of ["BILLING_ENABLED", "DAILY_GEN_QUOTA", "DAILY_ASSIST_QUOTA"]) delete process.env[k];
+  try {
+    // C'est exactement ce que fait GET /api/billing, inconditionnellement.
+    assert.equal(await guards.usedToday("gen"), 0);
+    assert.equal(await guards.usedToday("assist"), 0);
+    const créés = fs.readdirSync(probe);
+    assert.deepEqual(créés, [], `le dev €0 a créé ${JSON.stringify(créés)}`);
+  } finally {
+    process.env.CORTEX_DATA_DIR = saved;
+  }
+});
+
+test("annulation : remboursée AVANT travail, PAS après (sinon générations gratuites illimitées)", async () => {
+  process.env.BILLING_ENABLED = "1";
+  process.env.SIGNUP_FREE_CREDITS = "10";
+  const jobs = await import("../lib/jobs");
+  const { runWithCourse } = await import("../db/client");
+
+  // Le contexte {user, cours} doit être le MÊME au débit et au remboursement :
+  // la ref en dépend (c'est précisément ce que verrouille ce test).
+  await ctx.runWithUser("dave", () => runWithCourse("ml", async () => {
+    const solde0 = await credits.getBalance("dave"); // 10
+    // (a) annulation immédiate (job en file, 0 % fait) → remboursé
+    const refA = credits.jobRef("dave", "ml", 100);
+    await credits.debitGeneration("exam", refA);
+    assert.equal(await credits.getBalance("dave"), solde0 - 2);
+    await jobs.refundJobCredits({ id: 100, type: "exam" });
+    assert.equal(await credits.getBalance("dave"), solde0);
+
+    // (b) le remboursement rend le montant DÉBITÉ même si le tarif a changé
+    const refB = credits.jobRef("dave", "ml", 101);
+    await credits.debitGeneration("exam", refB);            // -2 au tarif courant
+    process.env.CREDITS_COST_JSON = '{"exam":9}';           // hausse de tarif
+    await credits.refundGeneration("exam", refB, "dave");
+    assert.equal(await credits.getBalance("dave"), solde0, "le remboursement doit rendre 2, pas 9");
+    delete process.env.CREDITS_COST_JSON;
+  }));
+  delete process.env.SIGNUP_FREE_CREDITS;
+});
+
+test("assistance : coût 0 mais solde épuisé → 402 (pas d'appels LLM gratuits à l'infini)", async () => {
+  process.env.BILLING_ENABLED = "1";
+  process.env.SIGNUP_FREE_CREDITS = "0";
+  await ctx.runWithUser("erin", async () => {
+    assert.equal(await credits.getBalance("erin"), 0);
+    const gate = await credits.creditsGate("assist");
+    assert.ok(gate && gate.status === 402, "un solde à 0 doit couper l'assistance");
+  });
+  // avec du solde, l'assistance passe et ne débite rien
+  process.env.SIGNUP_FREE_CREDITS = "3";
+  await ctx.runWithUser("frank", async () => {
+    assert.equal(await credits.creditsGate("assist"), null);
+    assert.equal(await credits.getBalance("frank"), 3);
+  });
+  delete process.env.SIGNUP_FREE_CREDITS;
+});
+
+test("identifiants : deux comptes qui tronquent pareil ont des schémas ET des dossiers DISTINCTS", () => {
+  const a = "benjamin.abensur@ecole-polytechnique.example.com";
+  const b = "benjamin.abensur@ecole-polytechnique.example.org";
+  assert.notEqual(ctx.userSlug(a), ctx.userSlug(b));
+  assert.notEqual(ctx.tenantSchema(a, "cs-202"), ctx.tenantSchema(b, "cs-202"));
+  assert.ok(ctx.tenantSchema(a, "cs-202").length < 63, "identifiant Postgres trop long");
+
+  process.env.AUTH_ENABLED = "1";
+  const dirA = ctx.runWithUser(a, () => courses.coursePaths("ml").examsDir);
+  const dirB = ctx.runWithUser(b, () => courses.coursePaths("ml").examsDir);
+  assert.notEqual(dirA, dirB);
+  // La normalisation disque et la normalisation base doivent CONCORDER.
+  assert.ok(dirA.includes(ctx.userSlug(a)), "le dossier doit utiliser le même slug que le schéma");
+  delete process.env.AUTH_ENABLED;
+});

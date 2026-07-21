@@ -23,7 +23,11 @@ export async function POST(req: NextRequest) {
   // (DAILY_ASSIST_QUOTA, no-op sans env), compté à la tentative.
   {
     const { generationGate, recordGeneration } = await import("@/lib/billing/guards");
-    const gate = await generationGate("assist");
+    const { creditsGate } = await import("@/lib/billing/credits");
+    // Quota d'assistance ET solde : ces appels coûtent de l'argent au même
+    // titre qu'une génération (sans ça, un solde à 0 pouvait encore consommer
+    // l'API en boucle via drill/check-solution/analyse).
+    const gate = (await generationGate("assist")) ?? (await creditsGate("assist"));
     if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
     await recordGeneration("assist", "drill");
   }

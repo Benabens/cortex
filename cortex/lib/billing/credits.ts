@@ -37,6 +37,10 @@ const DEFAULT_COSTS: Record<string, number> = {
   blueprint: 1,
   format: 1,
   prepare: 2,
+  // Appels LLM courts et interactifs (drill, vérification de solution, analyse
+  // de faiblesse) : facturés 0 crédit — leur garde-fou est le quota quotidien
+  // d'assistance. Le gate exige quand même un solde NON NÉGATIF (cf. creditsGate).
+  assist: 0,
 };
 
 export function creditCost(kind: string): number {
@@ -109,6 +113,15 @@ export async function creditsGate(kind?: string): Promise<{ status: number; erro
   if (!billingEnabled()) return null;
   const cost = kind ? creditCost(kind) : 1;
   const balance = await getBalance();
+  // Un coût nul (assistance) exige tout de même un solde positif : sinon un
+  // compte à sec — ou passé en négatif par une rafale concurrente — continuerait
+  // d'appeler le modèle indéfiniment.
+  if (cost === 0) {
+    return balance > 0 ? null : {
+      status: 402,
+      error: "Solde épuisé : recharge tes crédits pour continuer à utiliser l'assistance.",
+    };
+  }
   if (balance < cost) {
     return {
       status: 402,
@@ -130,16 +143,23 @@ export async function debitGeneration(kind: string, ref: string): Promise<void> 
   }
 }
 
-/** Rembourse une génération en ÉCHEC (idempotent : ref refund:<ref>). */
+/**
+ * Rembourse une génération qui n'a rien produit (idempotent : ref refund:<ref>).
+ * Rend EXACTEMENT ce qui a été débité — pas un coût recalculé : un changement
+ * de tarif (CREDITS_COST_JSON) entre le débit et le remboursement rendrait
+ * sinon plus (ou moins) que ce qui a été prélevé. Le user crédité est celui de
+ * la transaction d'origine, pas le contexte courant.
+ */
 export async function refundGeneration(kind: string, ref: string, userId = currentUser()): Promise<void> {
   if (!billingEnabled()) return;
-  const cost = creditCost(kind);
-  if (cost <= 0) return;
   try {
-    // Ne rembourse que si le débit a bien eu lieu.
-    const debited = await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, ref);
-    if (!debited) return;
-    await addTransaction(userId, cost, `remboursement ${kind} (échec)`, `refund:${ref}`);
+    const debited = await authGet<{ delta: number; user_id: string }>(
+      `SELECT delta, user_id FROM credit_transactions WHERE ref = ?`, ref,
+    );
+    if (!debited) return;               // jamais débité → rien à rendre
+    const amount = -Number(debited.delta); // le débit est négatif
+    if (!(amount > 0)) return;
+    await addTransaction(debited.user_id || userId, amount, `remboursement ${kind}`, `refund:${ref}`);
   } catch (e) {
     log("warn", "credits.refund_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
   }

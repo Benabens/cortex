@@ -227,6 +227,20 @@ Le domaine : Settings → **Networking** → **Generate Domain** (type
 
 ## Limites connues (v1, assumées)
 
+- **`AUTH_ENABLED=1` exige `DB_DRIVER=postgres`** : en SQLite il n'y a qu'une
+  base par cours, donc aucune isolation entre comptes. Le démarrage refuse
+  désormais cette combinaison — c'est voulu.
+- **Solde légèrement négatif possible** sous rafale : le contrôle du solde et
+  le débit ne sont pas dans la même transaction. Plusieurs générations lancées
+  à la même seconde peuvent toutes passer. Le plafond `SPEND_CAP_USD` reste le
+  filet ; à durcir (verrou par utilisateur) si l'usage le justifie.
+- **Coût forfaitaire par type** : un QCM de 40 questions coûte le même crédit
+  qu'un QCM de 4. Si tu ouvres largement, plafonne les tailles demandées ou
+  indexe le coût sur le volume.
+- **Annulation** : les crédits ne sont rendus que si la génération n'avait pas
+  réellement démarré (au-delà, le fournisseur a déjà été payé). Un échec, lui,
+  est toujours remboursé.
+
 - **1 replica obligatoire** (file de jobs PID-based mono-conteneur).
 - **Bibliothèque d'annales partagée par cours** : les PDF déposés dans
   Sources (`data/<cours>/refs/`) sont visibles par tous les utilisateurs de ce
