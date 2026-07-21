@@ -97,6 +97,12 @@ test("kill-switch : sous le plafond → passe ; plafond atteint → LlmError SPE
   // le dev €0 n'est JAMAIS coupé
   await billing.assertSpendCap("claude-code");
 
+  // SPEND_CAP_USD=0 = kill-switch d'URGENCE : tout appel payant coupé
+  process.env.SPEND_CAP_USD = "0";
+  billing.resetSpendCache();
+  await assert.rejects(() => billing.assertSpendCap("anthropic"), (e: Error & { code?: string }) => e.code === "SPEND_CAP");
+  await billing.assertSpendCap("claude-code"); // dev €0 toujours intact
+
   // sans plafond → no-op
   delete process.env.SPEND_CAP_USD;
   billing.resetSpendCache();

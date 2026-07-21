@@ -85,9 +85,10 @@ export function resetSpendCache(): void {
 
 export function spendCapUsd(): number | null {
   const raw = process.env.SPEND_CAP_USD;
-  if (!raw) return null;
+  if (!raw && raw !== "0") return null;
   const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  // 0 est VALIDE : kill-switch d'urgence total (toute génération payante coupée).
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 /**
