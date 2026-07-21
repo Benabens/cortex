@@ -1,20 +1,16 @@
-# ⚠ ACTIVATION (une fois) : ce fichier est stagé ici parce que le token de la
-# session n'a pas le scope `workflow` (GitHub refuse de pousser sous
-# .github/workflows/). Pour l'activer, depuis la racine du repo :
-#     mkdir -p .github/workflows && git mv cortex/.ci/ci.yml .github/workflows/ci.yml
-#     git commit -m "ci: activer le workflow" && git push
-# (le working-directory de la CI est `cortex`, chemins déjà réglés en conséquence).
-#
 # CI bloquante (Phase D backend-overhaul) — rouge = merge bloqué.
 # Garanties : typecheck, build, lint (budget anti-régression), tests unitaires
 # (drivers sqlite/pglite, LLM hermétique, sandbox, vérif déterministe),
 # et l'INVARIANT CS-202 : la régression prompt/tex doit rester BYTE-IDENTIQUE
 # aux hashes canoniques après réparation de la DB + ingestion sur un clone frais.
+# Job `docker` (deploiement-v1) : build de l'image app+worker + smoke test
+# /api/health + tectonic/matplotlib — c'est la PREUVE de la Phase 1 du
+# déploiement (aucun runtime Docker sur la machine de dev).
 name: ci
 
 on:
   push:
-    branches: [backend-overhaul, main]
+    branches: [backend-overhaul, main, deploiement-v1]
   pull_request:
 
 concurrency:
@@ -75,3 +71,51 @@ jobs:
           grep -q '350d533f7b765a97' /tmp/reg.out || { echo '::error::prompt sha ≠ canonique'; exit 1; }
           grep -q '9a294bb25e9d919c' /tmp/reg.out || { echo '::error::tex sha ≠ canonique'; exit 1; }
           echo "✓ régression cs-202 byte-identique"
+
+  # Preuve Phase 1 déploiement : l'image du conteneur unique (app + worker +
+  # tectonic + python/matplotlib + sqlite3) se construit et sert /api/health.
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build de l'image (contexte = racine du repo)
+        run: docker build -t cortex-app .
+
+      - name: Smoke test — démarrage + /api/health
+        run: |
+          docker run -d --name cortex -p 3000:3000 cortex-app
+          ok=""
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:3000/api/health >/dev/null 2>&1; then ok=1; break; fi
+            sleep 2
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::/api/health injoignable après 180 s"
+            docker logs cortex 2>&1 | tail -60
+            exit 1
+          fi
+          echo "✓ /api/health répond :"
+          curl -fsS http://localhost:3000/api/health
+
+      - name: Outillage dans l'image — tectonic, matplotlib/numpy, sqlite3, pdftoppm, ps, tsx
+        run: |
+          docker exec cortex /usr/local/bin/tectonic --version
+          docker exec cortex python3 -c "import matplotlib, numpy; print('matplotlib', matplotlib.__version__, '/ numpy', numpy.__version__)"
+          docker exec cortex sqlite3 --version
+          docker exec cortex pdftoppm -v 2>&1 | head -1
+          docker exec cortex ps --version | head -1
+          docker exec cortex node_modules/.bin/tsx --version
+          echo "✓ outillage complet"
+
+      - name: Compilation LaTeX réelle dans le conteneur (préambule EPFL)
+        run: |
+          docker exec cortex bash -c '
+            set -e
+            mkdir -p /tmp/smoke && cp latex/epfl-logo.png /tmp/smoke/ || true
+            cat latex/preamble.tex latex/figures.tex > /tmp/smoke/doc.tex
+            printf "\n\\\\begin{document}\nSmoke test PDF.\n\\\\end{document}\n" >> /tmp/smoke/doc.tex
+            cd /tmp/smoke && /usr/local/bin/tectonic --chatter minimal doc.tex
+            test -s doc.pdf && echo "✓ PDF compilé ($(stat -c%s doc.pdf) octets)"
+          '
