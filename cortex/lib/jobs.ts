@@ -53,7 +53,7 @@ export async function createJob(type: JobType, target?: string): Promise<number>
  */
 export async function createJobExclusive(type: JobType, target?: string): Promise<{ id: number; existing: boolean }> {
   await ensureJobsSchema();
-  return q.tx(async () => {
+  const res = await q.tx(async () => {
     const active = await q.get<{ id: number }>(
       `SELECT id FROM jobs WHERE status IN ${ACTIVE_STATES} AND type = ? ORDER BY id DESC LIMIT 1`,
       type,
@@ -65,6 +65,17 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
     );
     return { id, existing: false };
   });
+  // Déploiement v1 — POINT UNIQUE de la comptabilité de génération (toutes les
+  // routes de génération passent ici) : quota quotidien + débit de crédits,
+  // idempotent par job (ref job:<cours>:<id>). `ingest` ne coûte rien (pas de LLM).
+  // No-op sans DAILY_GEN_QUOTA/BILLING_ENABLED (dev €0 intact).
+  if (!res.existing && type !== "ingest") {
+    const { recordGeneration } = await import("@/lib/billing/guards");
+    const { debitGeneration } = await import("@/lib/billing/credits");
+    await recordGeneration("gen", type);
+    await debitGeneration(type, `job:${currentCourse()}:${res.id}`);
+  }
+  return res;
 }
 
 // ─────────────── Checkpointing durable (Phase C) ───────────────

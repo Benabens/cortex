@@ -28,6 +28,14 @@ heartbeatJob(jobId).catch(() => {});
 
 async function fail(msg: string): Promise<never> {
   try { await setJob(jobId, { status: "error", error: msg }); await logJob(jobId, "ERREUR : " + msg); } catch {}
+  // Déploiement v1 : un job en ÉCHEC est REMBOURSÉ (idempotent — ref refund:job:…,
+  // et seulement si le débit a eu lieu). No-op sans BILLING_ENABLED.
+  try {
+    const { refundGeneration } = await import("../lib/billing/credits");
+    const { currentCourse } = await import("../db/client");
+    const j = await getJob(jobId);
+    if (j && j.type !== "ingest") await refundGeneration(j.type, `job:${currentCourse()}:${jobId}`);
+  } catch {}
   process.exit(1);
 }
 
