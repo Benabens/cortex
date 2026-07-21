@@ -15,6 +15,14 @@ export const maxDuration = 240;
  */
 export async function POST(req: NextRequest) {
   useCourse(req);
+  // Déploiement v1 : appel LLM INLINE → quota d'assistance par user/jour
+  // (DAILY_ASSIST_QUOTA, no-op sans env), compté à la tentative.
+  {
+    const { generationGate, recordGeneration } = await import("@/lib/billing/guards");
+    const gate = await generationGate("assist");
+    if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
+    await recordGeneration("assist", "weakness-mine");
+  }
   const { text } = await req.json().catch(() => ({ text: "" }));
   const t = String(text ?? "").trim();
   if (t.length < 40) return NextResponse.json({ error: "Colle une discussion (au moins quelques échanges)." }, { status: 400 });

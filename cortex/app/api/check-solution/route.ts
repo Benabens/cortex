@@ -15,6 +15,14 @@ const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "
 
 export async function POST(req: NextRequest) {
   useCourse(req);
+  // Déploiement v1 : appel LLM INLINE → quota d'assistance par user/jour
+  // (DAILY_ASSIST_QUOTA, no-op sans env), compté à la tentative.
+  {
+    const { generationGate, recordGeneration } = await import("@/lib/billing/guards");
+    const gate = await generationGate("assist");
+    if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
+    await recordGeneration("assist", "check-solution");
+  }
   const ct = req.headers.get("content-type") ?? "";
   let statement = "";
   let answer = "";

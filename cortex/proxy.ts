@@ -16,7 +16,32 @@ import type { NextRequest } from "next/server";
 
 const AUTH_ON = process.env.AUTH_ENABLED === "1";
 
-const PUBLIC_PREFIXES = ["/api/auth", "/api/health", "/api/metrics", "/_next", "/favicon", "/sites"];
+const PUBLIC_PREFIXES = ["/api/auth", "/api/health", "/api/metrics", "/api/billing/webhook", "/_next", "/favicon", "/sites"];
+
+/**
+ * DÉMO PUBLIQUE (PUBLIC_DEMO=1, optionnel) : ces pages/API restent lisibles
+ * SANS session en GET — un visiteur voit le contenu seedé (tenant « owner »,
+ * hydraté par prod-boot) sans pouvoir rien générer ni modifier.
+ */
+const DEMO_GET_PATHS = new Set(["/", "/revision", "/projet", "/api/revision", "/api/projet"]);
+
+/** Rate-limit par IP (fenêtre fixe 60 s, in-process — conteneur unique).
+ *  RATE_LIMIT_PER_MIN non posée → désactivé (dev). */
+const rlBuckets = new Map<string, { n: number; resetAt: number }>();
+function rateLimited(req: NextRequest): boolean {
+  const cap = Number(process.env.RATE_LIMIT_PER_MIN);
+  if (!Number.isFinite(cap) || cap <= 0) return false;
+  const ip = (req.headers.get("x-forwarded-for") ?? "local").split(",")[0].trim();
+  const now = Date.now();
+  const b = rlBuckets.get(ip);
+  if (!b || now >= b.resetAt) {
+    if (rlBuckets.size > 10_000) rlBuckets.clear(); // borne mémoire
+    rlBuckets.set(ip, { n: 1, resetAt: now + 60_000 });
+    return false;
+  }
+  b.n++;
+  return b.n > cap;
+}
 
 function passThrough(req: NextRequest): NextResponse {
   const headers = new Headers(req.headers);
@@ -26,7 +51,13 @@ function passThrough(req: NextRequest): NextResponse {
 
 async function guarded(req: NextRequest): Promise<NextResponse> {
   const { pathname } = req.nextUrl;
+  if (rateLimited(req)) {
+    return NextResponse.json({ error: "Trop de requêtes — réessaie dans une minute." }, { status: 429 });
+  }
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return passThrough(req);
+  if (process.env.PUBLIC_DEMO === "1" && req.method === "GET" && DEMO_GET_PATHS.has(pathname)) {
+    return passThrough(req); // lecture seule du tenant seedé « owner »
+  }
 
   // Import dynamique : la stack NextAuth n'est chargée QUE si l'auth est active.
   const { auth } = await import("@/lib/auth");
@@ -51,6 +82,8 @@ export default function proxy(req: NextRequest) {
 }
 
 export const config = {
-  // Tout sauf les assets statiques (ils n'ont pas de contexte utilisateur).
-  matcher: ["/((?!_next/static|_next/image|.*\\.(?:png|jpg|jpeg|gif|svg|ico|css|js|map)$).*)"],
+  // Tout sauf le statique de Next. ⚠ Ne PAS ré-exclure les extensions image :
+  // /uploads/*.png (screenshots d'étudiants = données perso) contournait la
+  // garde d'auth via l'ancienne exclusion .png/.jpg du matcher.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
