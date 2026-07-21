@@ -28,7 +28,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Signature invalide." }, { status: 400 });
   }
 
-  if (event.type === "checkout.session.completed") {
+  // `checkout.session.completed` arrive dès la fin du tunnel — pour un moyen de
+  // paiement DIFFÉRÉ il porte encore `payment_status: "unpaid"`, et c'est
+  // `async_payment_succeeded` qui confirme l'encaissement. Sans ce second
+  // événement, le client paierait sans jamais être crédité.
+  if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
     const session = event.data.object as Stripe.Checkout.Session;
     if (session.payment_status === "paid" || session.payment_status === "no_payment_required") {
       const userId = session.metadata?.cortexUserId;

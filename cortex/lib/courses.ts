@@ -186,14 +186,43 @@ export type CoursePaths = {
   contentRoot: string;
 };
 
-/** Chemins ABSOLUS d'un cours. cs-202 = exactement les chemins historiques. */
+/**
+ * ISOLATION DISQUE PAR UTILISATEUR (déploiement v1).
+ *
+ * Les ids d'examens sont SÉQUENTIELS PAR TENANT (chaque schéma Postgres a sa
+ * propre séquence) : sans préfixe utilisateur, le premier examen de chaque user
+ * s'appellerait `exam-1.pdf` dans le MÊME dossier — le second écraserait le
+ * premier, et la garde d'ownership (« ai-je un examen n°1 ? ») laisserait
+ * passer les deux. On isole donc les artefacts PRODUITS ou PERSONNELS
+ * (exams/, uploads/) dans `data/u/<user>/…` dès que le mode multi-utilisateur
+ * est actif.
+ *
+ * Restent PARTAGÉS (voulu) : le corpus du cours, sa base et sa bibliothèque
+ * d'annales (`refs/`) — c'est le matériel du cours, commun à ses étudiants.
+ */
+function multiUser(): boolean {
+  return process.env.AUTH_ENABLED === "1" || (process.env.DB_DRIVER ?? "sqlite") === "postgres";
+}
+
+/** Sous-dossier d'artefacts du user courant ("" en mono-user historique). */
+function userScope(): string {
+  if (!multiUser()) return "";
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { currentUser } = require("../db/context") as typeof import("../db/context");
+  const raw = currentUser();
+  const safe = raw.toLowerCase().replace(/[^a-z0-9._-]/g, "_").slice(0, 64);
+  return path.join("u", safe || "owner");
+}
+
+/** Chemins ABSOLUS d'un cours. cs-202 mono-user = exactement les chemins historiques. */
 export function coursePaths(id?: string | null): CoursePaths {
   const c = getCourse(id);
+  const scope = userScope();
   return {
     dbPath: path.join(DATA, c.dbFile),
     refsDir: path.join(DATA, c.refsRel),
-    examsDir: path.join(DATA, c.examsRel),
-    uploadsDir: path.join(DATA, c.uploadsRel),
+    examsDir: path.join(DATA, scope, c.examsRel),
+    uploadsDir: path.join(DATA, scope, c.uploadsRel),
     contentRoot: path.resolve(process.cwd(), c.contentRel),
   };
 }

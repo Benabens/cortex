@@ -86,6 +86,15 @@ function postgresLib(): typeof import("postgres") {
 const pgPools = new Map<string, PostgresSql>();
 const bootstrapped = new Set<string>();
 
+/** Nombre max de pools tenant gardés vivants (1 pool = jusqu'à PG_POOL_MAX
+ *  connexions). Au-delà, le plus anciennement utilisé est fermé : sans cette
+ *  borne, un balayage périodique de N tenants ouvrirait N pools et épuiserait
+ *  `max_connections` du Postgres managé. */
+function maxPools(): number {
+  const n = Number(process.env.PG_MAX_TENANT_POOLS);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 8;
+}
+
 function poolFor(schema: string): PostgresSql {
   let pool = pgPools.get(schema);
   if (!pool) {
@@ -94,7 +103,21 @@ function poolFor(schema: string): PostgresSql {
       max: Math.max(1, Number(process.env.PG_POOL_MAX) || 3),
       connection: { search_path: `"${schema}"` },
       onnotice: () => {},
+      idle_timeout: 30,
     });
+    pgPools.set(schema, pool);
+    // Éviction LRU (Map = ordre d'insertion) au-delà du plafond.
+    while (pgPools.size > maxPools()) {
+      const oldest = pgPools.keys().next().value as string | undefined;
+      if (!oldest || oldest === schema) break;
+      const victim = pgPools.get(oldest);
+      pgPools.delete(oldest);
+      bootstrapped.delete(oldest); // le DDL sera re-vérifié (IF NOT EXISTS) au retour
+      try { void victim?.end({ timeout: 5 }); } catch { /* fermeture best-effort */ }
+    }
+  } else {
+    // Rafraîchit la position LRU.
+    pgPools.delete(schema);
     pgPools.set(schema, pool);
   }
   return pool;
@@ -221,6 +244,45 @@ function rawExec(schema: string): TenantExec {
   return isPglite() ? pgliteExec(schema) : postgresJsExec(schema);
 }
 
+/**
+ * HYDRATATION des nouveaux tenants (déploiement v1, opt-in SEED_NEW_TENANTS=1) :
+ * un user fraîchement inscrit reçoit une COPIE SQL du contenu de COURS du
+ * tenant de seed (owner, hydraté par prod-boot) — sources/items/vocab/annales/
+ * programme/banque de révision/ADN — jamais les données PERSONNELLES
+ * (faiblesses, planning, examens générés, jobs). Sans quoi un nouveau compte
+ * a un tenant vide et ne peut rien générer. Idempotent (cible non vide → no-op).
+ */
+const SEED_CONTENT_TABLES = [
+  "sources", "items", "vocab", "exam_refs", "topics", "plan_chapters",
+  "bank_questions", "revision_plan", "format_profile", "exam_dna", "exam_exercises",
+];
+
+async function hydrateFromSeedTenant(ex: TenantExec, schema: string): Promise<void> {
+  if (process.env.SEED_NEW_TENANTS !== "1") return;
+  const seedUser = process.env.CORTEX_SEED_USER || "owner";
+  if (currentUser() === seedUser) return;
+  const seedSchema = tenantSchema(seedUser, currentCourse());
+  if (seedSchema === schema) return;
+  const target = await ex.query(`SELECT count(*) n FROM items`, []);
+  if (Number((target.rows[0] as { n?: number | string })?.n ?? 0) > 0) return; // déjà peuplé
+  const seedThere = await ex.query(
+    `SELECT 1 FROM information_schema.schemata WHERE schema_name = $1`, [seedSchema],
+  );
+  if (!seedThere.rows.length) return; // pas de seed pour ce cours
+  for (const t of SEED_CONTENT_TABLES) {
+    try { await ex.exec(`INSERT INTO "${schema}".${t} SELECT * FROM "${seedSchema}".${t}`); }
+    catch { /* table absente/incompatible → contenu partiel plutôt que crash */ }
+  }
+  // Les ids copiés sont explicites → resynchronise les séquences identity.
+  for (const t of SEED_CONTENT_TABLES) {
+    try {
+      await ex.exec(
+        `SELECT setval(pg_get_serial_sequence('"${schema}".${t}', 'id'), (SELECT coalesce(max(id), 1) FROM "${schema}".${t}))`
+      );
+    } catch { /* pas de colonne id auto */ }
+  }
+}
+
 /** CREATE SCHEMA + schéma applicatif complet, une fois par tenant et par process. */
 async function ensureTenant(schema: string): Promise<TenantExec> {
   const ex = rawExec(schema);
@@ -251,6 +313,7 @@ async function ensureTenant(schema: string): Promise<TenantExec> {
     } catch {
       // registre indisponible (ex. course/context hors chaîne) — le tenant reste fonctionnel
     }
+    try { await hydrateFromSeedTenant(ex, schema); } catch { /* best-effort */ }
     bootstrapped.add(schema);
   }
   return ex;

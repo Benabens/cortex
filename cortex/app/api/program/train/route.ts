@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   const existing = await activeJob(jobType);
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true, topicId: topic.id, qcm });
 
-  const issue = await preflightGeneration();
+  const issue = await preflightGeneration(jobType);
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
 
   const jobTarget = qcm

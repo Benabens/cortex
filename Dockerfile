@@ -94,10 +94,27 @@ RUN set -eux; \
 #   CORTEX_SEED_COURSES : cours seedés au boot depuis le contenu COMMITTÉ si le
 #   tenant est vide (prod-boot, sans LLM) — l'app n'est jamais vide. ml = le
 #   cours dont annales+séries+fiches sont dans git. Surchargeable ("" désactive).
+#   SEED_NEW_TENANTS : un nouvel utilisateur reçoit une copie SQL du contenu de
+#   cours du tenant de seed (sinon tenant vide = rien à générer).
 ENV CORTEX_TEX_BIN=/usr/local/bin/tectonic \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
-    CORTEX_SEED_COURSES=ml
+    CORTEX_SEED_COURSES=ml \
+    SEED_NEW_TENANTS=1
+
+# Vérification de la SANDBOX à la construction : sans isolation, le moteur
+# REFUSE d'exécuter du code (règle « aucune isolation → aucune exécution ») et
+# les examens perdent leurs figures matplotlib et la vérification de code. Un
+# `unshare -rn` peut être bloqué par la politique seccomp de l'hôte : on le
+# teste ici pour que l'écart soit visible au build, pas découvert en prod.
+# (Non bloquant : l'image reste utilisable, /api/health signale « sandbox ».)
+RUN if unshare -rn true 2>/dev/null; then \
+      echo "✓ sandbox : unshare -rn opérationnel"; \
+    else \
+      echo "⚠ AVERTISSEMENT : unshare -rn indisponible au BUILD (normal chez certains builders)."; \
+      echo "  Vérifie /api/health (champ sandbox) après le déploiement : si false,"; \
+      echo "  les figures matplotlib et la vérif de code seront désactivées."; \
+    fi
 
 EXPOSE 3000
 

@@ -136,6 +136,16 @@ async function sendMagicLink({ identifier, url }: { identifier: string; url: str
     if (!res.ok) throw new Error(`Envoi du magic-link échoué (HTTP ${res.status})`);
     return;
   }
+  // Aucun transport configuré. Un magic-link est un JETON DE CONNEXION : on ne
+  // l'écrit en clair QUE hors production (dev €0 : c'est ainsi qu'on se
+  // connecte sans SMTP). En production, l'écrire dans les logs du conteneur
+  // équivaudrait à publier des sessions → on échoue bruyamment.
+  if (process.env.NODE_ENV === "production" && process.env.CORTEX_ALLOW_LOGGED_MAGIC_LINK !== "1") {
+    throw new Error(
+      "Aucun envoi d'e-mail configuré (RESEND_API_KEY ou AUTH_EMAIL_ENDPOINT). " +
+      "Le magic-link ne sera PAS écrit dans les logs en production."
+    );
+  }
   console.log(`\n🔐 [auth] Magic-link pour ${identifier} :\n   ${url}\n`);
 }
 

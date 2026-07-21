@@ -67,13 +67,13 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
   });
   // Déploiement v1 — POINT UNIQUE de la comptabilité de génération (toutes les
   // routes de génération passent ici) : quota quotidien + débit de crédits,
-  // idempotent par job (ref job:<cours>:<id>). `ingest` ne coûte rien (pas de LLM).
+  // idempotent par job (ref jobRef = user+cours+id). `ingest` ne coûte rien.
   // No-op sans DAILY_GEN_QUOTA/BILLING_ENABLED (dev €0 intact).
   if (!res.existing && type !== "ingest") {
     const { recordGeneration } = await import("@/lib/billing/guards");
-    const { debitGeneration } = await import("@/lib/billing/credits");
+    const { debitGeneration, jobRef } = await import("@/lib/billing/credits");
     await recordGeneration("gen", type);
-    await debitGeneration(type, `job:${currentCourse()}:${res.id}`);
+    await debitGeneration(type, jobRef(currentUser(), currentCourse(), res.id));
   }
   return res;
 }
@@ -178,8 +178,8 @@ const STALL_MS = 15 * 60_000;
  */
 export async function reconcileStaleJobs(): Promise<number> {
   await ensureJobsSchema();
-  const rows = await q.all<{ id: number; pid: number | null; created_at: string; updated_at: string; heartbeat_at: string | null; attempts: number; max_attempts: number }>(
-    `SELECT id, pid, created_at, updated_at, heartbeat_at, attempts, max_attempts FROM jobs WHERE status IN ${ACTIVE_STATES}`,
+  const rows = await q.all<{ id: number; type: string; pid: number | null; created_at: string; updated_at: string; heartbeat_at: string | null; attempts: number; max_attempts: number }>(
+    `SELECT id, type, pid, created_at, updated_at, heartbeat_at, attempts, max_attempts FROM jobs WHERE status IN ${ACTIVE_STATES}`,
   );
   let fixed = 0;
   for (const r of rows) {
@@ -211,6 +211,9 @@ export async function reconcileStaleJobs(): Promise<number> {
     } else {
       await setJob(r.id, { status: "error", error: ZOMBIE_MSG });
       await logJob(r.id, ZOMBIE_MSG);
+      // Échec définitif hors du worker (celui-ci est mort sans passer par
+      // fail()) → c'est ICI qu'il faut rendre les crédits.
+      await refundJobCredits({ id: r.id, type: r.type as JobType });
     }
   }
   return fixed;
@@ -303,11 +306,26 @@ function pgidOf(pid: number): number | null {
  * On tue le GROUPE de processus du worker détaché → emporte aussi ses enfants
  * (`claude`, tectonic/pdflatex). Pas de génération zombie.
  */
+/**
+ * Rend les crédits d'un job qui ne produira RIEN (échec définitif, zombie
+ * épuisé, annulation). Idempotent et seulement-si-débité (cf. credits.ts) :
+ * l'appeler deux fois ne rend pas deux fois. No-op sans facturation.
+ */
+export async function refundJobCredits(job: Pick<Job, "id" | "type">): Promise<void> {
+  if (job.type === "ingest") return;
+  try {
+    const { refundGeneration, jobRef } = await import("@/lib/billing/credits");
+    await refundGeneration(job.type, jobRef(currentUser(), currentCourse(), job.id));
+  } catch { /* best-effort : jamais bloquant */ }
+}
+
 export async function cancelJob(id: number): Promise<Job | null> {
   const job = await getJob(id);
   if (!job) return null;
   if (["done", "error", "canceled"].includes(job.status)) return job;
   await setJob(id, { status: "canceled", currentStep: "Annulé" });
+  // Annulation = aucun livrable → les crédits sont rendus (cohérent avec l'échec).
+  await refundJobCredits(job);
   if (job.pid) {
     const pgid = pgidOf(job.pid);
     const target = pgid ? -pgid : job.pid; // repli : au moins le worker lui-même

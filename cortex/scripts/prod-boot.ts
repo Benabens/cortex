@@ -86,6 +86,18 @@ async function seedCourses(): Promise<void> {
       log(`seed : cours inconnu « ${rawCourse} » — ignoré`);
       continue;
     }
+    // Un seed est « acquis » seulement s'il a été MARQUÉ terminé : un boot tué
+    // au milieu de l'ingestion laisse des items partiels — se fier au simple
+    // « count > 0 » fossiliserait un corpus incomplet pour toujours.
+    const doneMarker = path.join(dataRoot(), `.seed-done-${course}`);
+    if (fs.existsSync(doneMarker)) {
+      const n = await runWithUser(seedUser, () =>
+        runWithCourse(course, async () =>
+          Number((await q.get<{ n: number }>("SELECT count(*) n FROM items"))?.n ?? 0))
+      );
+      log(`seed ${course} : déjà fait (${n} items) — rien à faire`);
+      continue;
+    }
     const already = await runWithUser(seedUser, () =>
       runWithCourse(course, async () => {
         const row = await q.get<{ n: number }>("SELECT count(*) n FROM items");
@@ -93,8 +105,11 @@ async function seedCourses(): Promise<void> {
       })
     );
     if (already > 0) {
-      log(`seed ${course} : déjà peuplé (${already} items) — rien à faire`);
-      continue;
+      // Corpus présent mais jamais marqué : soit un seed antérieur à ce
+      // mécanisme, soit une ingestion interrompue. L'ingestion étant
+      // idempotente (elle purge et reconstruit), on la relance pour garantir
+      // un corpus COMPLET, puis on marque.
+      log(`seed ${course} : ${already} items présents mais non marqués terminés — ré-ingestion de sûreté`);
     }
     log(`seed ${course} : ingestion du contenu committé (user ${seedUser})…`);
     // PGlite (pglite://…) = Postgres in-process à stockage FICHIER mono-process :
@@ -113,6 +128,7 @@ async function seedCourses(): Promise<void> {
     if (res.status !== 0) {
       throw new Error(`seed ${course} : ingestion en échec (exit ${res.status})`);
     }
+    fs.writeFileSync(doneMarker, `${nowStr()}\n`); // seed COMPLET (cf. ci-dessus)
     // Enregistre le tenant de seed dans le registre global (utile avant tout accès HTTP).
     await authRun(
       `INSERT INTO tenants (user_id, course, schema_name, last_seen) VALUES (?, ?, ?, ?)

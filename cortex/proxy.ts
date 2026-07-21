@@ -23,15 +23,34 @@ const PUBLIC_PREFIXES = ["/api/auth", "/api/health", "/api/metrics", "/api/billi
  * SANS session en GET — un visiteur voit le contenu seedé (tenant « owner »,
  * hydraté par prod-boot) sans pouvoir rien générer ni modifier.
  */
-const DEMO_GET_PATHS = new Set(["/", "/revision", "/projet", "/api/revision", "/api/projet"]);
+const DEMO_GET_PATHS = new Set([
+  "/", "/revision", "/projet",
+  // …et les API que ces pages appellent : sans elles la vitrine s'affiche en erreur.
+  "/api/revision", "/api/projet", "/api/dashboard", "/api/program",
+]);
 
 /** Rate-limit par IP (fenêtre fixe 60 s, in-process — conteneur unique).
  *  RATE_LIMIT_PER_MIN non posée → désactivé (dev). */
 const rlBuckets = new Map<string, { n: number; resetAt: number }>();
+function clientIp(req: NextRequest): string {
+  // X-Forwarded-For est écrit par le client ET complété par le proxy : le
+  // premier élément est donc FORGEABLE (un attaquant le change à chaque
+  // requête → compteur remis à zéro, et il peut recycler l'IP d'un tiers).
+  // Le proxy de la plateforme AJOUTE la vraie IP en DERNIER : on prend donc le
+  // dernier élément, et on n'accorde de confiance à XFF que si on est
+  // effectivement derrière un proxy (TRUST_PROXY=1, posé en prod).
+  const xff = req.headers.get("x-forwarded-for");
+  if (process.env.TRUST_PROXY === "1" && xff) {
+    const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1];
+  }
+  return req.headers.get("x-real-ip")?.trim() || "local";
+}
+
 function rateLimited(req: NextRequest): boolean {
   const cap = Number(process.env.RATE_LIMIT_PER_MIN);
   if (!Number.isFinite(cap) || cap <= 0) return false;
-  const ip = (req.headers.get("x-forwarded-for") ?? "local").split(",")[0].trim();
+  const ip = clientIp(req);
   const now = Date.now();
   const b = rlBuckets.get(ip);
   if (!b || now >= b.resetAt) {
@@ -51,9 +70,6 @@ function passThrough(req: NextRequest): NextResponse {
 
 async function guarded(req: NextRequest): Promise<NextResponse> {
   const { pathname } = req.nextUrl;
-  if (rateLimited(req)) {
-    return NextResponse.json({ error: "Trop de requêtes — réessaie dans une minute." }, { status: 429 });
-  }
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return passThrough(req);
   if (process.env.PUBLIC_DEMO === "1" && req.method === "GET" && DEMO_GET_PATHS.has(pathname)) {
     return passThrough(req); // lecture seule du tenant seedé « owner »
@@ -78,6 +94,11 @@ async function guarded(req: NextRequest): Promise<NextResponse> {
 }
 
 export default function proxy(req: NextRequest) {
+  // Le rate-limit protège aussi une instance SANS auth (démo ouverte) : il est
+  // évalué avant la branche d'authentification.
+  if (rateLimited(req)) {
+    return NextResponse.json({ error: "Trop de requêtes — réessaie dans une minute." }, { status: 429 });
+  }
   return AUTH_ON ? guarded(req) : passThrough(req);
 }
 

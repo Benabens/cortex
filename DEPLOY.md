@@ -44,7 +44,10 @@ n'est jamais vide.
    de jobs est mono-conteneur par design — PID + heartbeat locaux).
 4. Settings du service → **Region** : Europe (Amsterdam) — proche EPFL.
 5. Le premier build part tout seul (~5-8 min : image + warm-up tectonic).
-   Il échouera au démarrage tant que les variables (étape 4) manquent — normal.
+   ⚠ **Ne laisse pas le service tourner sans les variables de l'étape 4** : il
+   démarre très bien, mais SANS auth, SANS quota et SANS plafond de dépense —
+   c'est-à-dire ouvert à tous. Enchaîne directement sur les étapes 2-4 avant de
+   partager l'URL.
 
 ## 2. Railway — Postgres
 
@@ -87,6 +90,7 @@ SPEND_CAP_USD=25
 DAILY_GEN_QUOTA=3
 DAILY_ASSIST_QUOTA=20
 RATE_LIMIT_PER_MIN=120
+TRUST_PROXY=1
 
 # — lancement fermé + vitrine publique —
 INVITE_ONLY=1
@@ -150,7 +154,9 @@ Le domaine : Settings → **Networking** → **Generate Domain** (type
    dans la variable correspondante.
 4. **Développeurs → Webhooks → Ajouter une destination** :
    - URL : `https://⟨ton-domaine⟩/api/billing/webhook`
-   - Événement : **`checkout.session.completed`** (celui-là suffit)
+   - Événements : **`checkout.session.completed`** ET
+     **`checkout.session.async_payment_succeeded`** (le second confirme les
+     moyens de paiement différés — sans lui, un client paie sans être crédité)
    - Copie le **secret de signature** `whsec_…` dans `STRIPE_WEBHOOK_SECRET`.
 5. Test de paiement : carte `4242 4242 4242 4242`, n'importe quelle date
    future/CVC. Le webhook crédite le solde (idempotent — un retry Stripe ne
@@ -189,7 +195,10 @@ Le domaine : Settings → **Networking** → **Generate Domain** (type
    `[prod-boot] volume initialisé` → `migrations` → `seed ml : OK` (2-3 min la
    première fois) → `next start`.
 2. Checklist post-déploiement, depuis l'URL publique :
-   - [ ] `/api/health` → `{"status":"ok"…}` ;
+   - [ ] `/api/health` → `{"status":"ok"…}` — et regarde `checks.sandbox` :
+         s'il est `false`, les figures matplotlib et la vérification de code
+         seront désactivées (les examens restent produits, sans figures
+         générées) ;
    - [ ] `/` en navigation privée → la vitrine s'affiche (PUBLIC_DEMO) ;
    - [ ] `/revision?course=ml` sans login → parcours de révision visible ;
    - [ ] **Se connecter** avec TON e-mail (invité) → magic-link reçu → session ;
@@ -219,10 +228,11 @@ Le domaine : Settings → **Networking** → **Generate Domain** (type
 ## Limites connues (v1, assumées)
 
 - **1 replica obligatoire** (file de jobs PID-based mono-conteneur).
-- Les fichiers d'artefacts sont nommés par id de tenant-DB : deux users qui
-  génèrent **le même id** sur **le même cours** partageraient un chemin disque
-  (improbable en invite-only ; l'ownership DB empêche déjà de LIRE l'examen
-  d'un autre). À durcir si ouverture large.
+- **Bibliothèque d'annales partagée par cours** : les PDF déposés dans
+  Sources (`data/<cours>/refs/`) sont visibles par tous les utilisateurs de ce
+  cours — c'est voulu (le matériel d'un cours est commun), mais ne dépose pas
+  là un document que tu ne veux pas partager. Les examens générés et les
+  screenshots, eux, sont isolés par utilisateur (`data/u/<user>/…`).
 - La **sandbox** (figures matplotlib, vérif de code) requiert les user
   namespaces ; si le runtime Railway les refuse, les items à figures sont
   écartés proprement (jamais de PDF cassé) — vérifier `/api/health` (champ

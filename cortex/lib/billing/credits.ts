@@ -50,6 +50,18 @@ export function creditCost(kind: string): number {
   return DEFAULT_COSTS[kind] ?? 1;
 }
 
+/**
+ * Référence d'un job pour le débit/remboursement. DOIT inclure l'UTILISATEUR :
+ * en Postgres, chaque tenant a sa propre séquence d'ids de jobs — deux users
+ * ont tous les deux un job #1 sur le même cours. Une ref sans user ferait
+ * (a) sauter le débit du 2ᵉ user (ref déjà vue = idempotence détournée) et
+ * (b) rembourser le mauvais compte. Source UNIQUE, utilisée par
+ * createJobExclusive, le remboursement d'échec et l'annulation.
+ */
+export function jobRef(userId: string, course: string, jobId: number): string {
+  return `job:${userId}:${course}:${jobId}`;
+}
+
 /** Écrit une transaction idempotente (ref UNIQUE). true = écrite, false = déjà vue. */
 export async function addTransaction(
   userId: string, delta: number, reason: string, ref?: string,

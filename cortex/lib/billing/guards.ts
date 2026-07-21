@@ -58,8 +58,20 @@ export async function generationGate(bucket: QuotaBucket): Promise<GateIssue | n
   return null;
 }
 
+/** Un compteur n'a de sens QUE si un garde-fou l'utilise (quota posé, ou
+ *  facturation active). Sinon : ne rien écrire — le dev €0 ne doit créer
+ *  AUCUN fichier/table de plus qu'avant (invariant n°1). */
+function quotaTrackingActive(): boolean {
+  return (
+    quotaFor("gen") !== null ||
+    quotaFor("assist") !== null ||
+    process.env.BILLING_ENABLED === "1"
+  );
+}
+
 /** Comptabilise une génération/assistance (best-effort, jamais bloquant). */
 export async function recordGeneration(bucket: QuotaBucket, kind: string): Promise<void> {
+  if (!quotaTrackingActive()) return;
   try {
     const t = nowStr();
     await authRun(

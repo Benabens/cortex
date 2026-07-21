@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
   if (!fmt?.has_mcq) return NextResponse.json({ error: "Format non détecté ou sans QCM pour ce cours. Lance la détection de format d'abord." }, { status: 400 });
   const existing = await activeJob("qcm");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
-  const issue = await preflightGeneration();
+  const issue = await preflightGeneration("qcm");
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
   // V9 composeur : count = N QCM, openCount = M ouvertes, focus = thème ciblé (exercice ciblé).
   const body = await req.json().catch(() => ({} as any));

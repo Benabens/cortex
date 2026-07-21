@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
 
   // pré-checks AVANT de lancer le worker : claude (Max) + corpus + moteur LaTeX
-  const issue = await preflightGeneration();
+  const issue = await preflightGeneration("lab-exercise");
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
 
   const resolved = resolveLab(labStr || topicStr);

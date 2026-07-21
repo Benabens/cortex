@@ -31,10 +31,9 @@ async function fail(msg: string): Promise<never> {
   // Déploiement v1 : un job en ÉCHEC est REMBOURSÉ (idempotent — ref refund:job:…,
   // et seulement si le débit a eu lieu). No-op sans BILLING_ENABLED.
   try {
-    const { refundGeneration } = await import("../lib/billing/credits");
-    const { currentCourse } = await import("../db/client");
+    const { refundJobCredits } = await import("../lib/jobs");
     const j = await getJob(jobId);
-    if (j && j.type !== "ingest") await refundGeneration(j.type, `job:${currentCourse()}:${jobId}`);
+    if (j) await refundJobCredits(j);
   } catch {}
   process.exit(1);
 }
