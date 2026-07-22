@@ -19,6 +19,18 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   useCourse(req);
+  // Déploiement v1 : appel LLM INLINE → quota d'assistance par user/jour
+  // (DAILY_ASSIST_QUOTA, no-op sans env), compté à la tentative.
+  {
+    const { generationGate, recordGeneration } = await import("@/lib/billing/guards");
+    const { creditsGate } = await import("@/lib/billing/credits");
+    // Quota d'assistance ET solde : ces appels coûtent de l'argent au même
+    // titre qu'une génération (sans ça, un solde à 0 pouvait encore consommer
+    // l'API en boucle via drill/check-solution/analyse).
+    const gate = (await generationGate("assist")) ?? (await creditsGate("assist"));
+    if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
+    await recordGeneration("assist", "drill");
+  }
   const { concept } = await req.json().catch(() => ({ concept: "" }));
   const c = String(concept ?? "").trim();
   if (!c) return NextResponse.json({ error: "concept manquant" }, { status: 400 });
@@ -27,7 +39,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, drill });
   } catch (e: unknown) {
     const err = e as LlmError;
-    const status = err.code === "UNAVAILABLE" ? 503 : 502;
+    const status = err.code === "UNAVAILABLE" || err.code === "SPEND_CAP" || err.code === "QUOTA" || err.code === "CREDITS" ? 503 : 502;
     return NextResponse.json({ error: err.message ?? String(e), code: err.code }, { status });
   }
 }

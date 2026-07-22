@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
 
   // mêmes pré-checks que la génération : claude (Max) + corpus ingéré (le moteur LaTeX n'est pas requis ici).
-  const issue = await preflightGeneration();
+  const issue = await preflightGeneration("blueprint");
   if (issue && issue.status !== 412) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
 
   const { id: jobId } = await createJobExclusive("blueprint");

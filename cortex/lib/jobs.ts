@@ -1,4 +1,5 @@
 import { currentCourse } from "@/db/client";
+import { currentUser } from "@/db/context";
 import { q, nowStr } from "@/db/q";
 import { inc, observe } from "@/lib/metrics";
 import { examsDir } from "@/lib/paths";
@@ -52,7 +53,7 @@ export async function createJob(type: JobType, target?: string): Promise<number>
  */
 export async function createJobExclusive(type: JobType, target?: string): Promise<{ id: number; existing: boolean }> {
   await ensureJobsSchema();
-  return q.tx(async () => {
+  const res = await q.tx(async () => {
     const active = await q.get<{ id: number }>(
       `SELECT id FROM jobs WHERE status IN ${ACTIVE_STATES} AND type = ? ORDER BY id DESC LIMIT 1`,
       type,
@@ -64,6 +65,17 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
     );
     return { id, existing: false };
   });
+  // Déploiement v1 — POINT UNIQUE de la comptabilité de génération (toutes les
+  // routes de génération passent ici) : quota quotidien + débit de crédits,
+  // idempotent par job (ref jobRef = user+cours+id). `ingest` ne coûte rien.
+  // No-op sans DAILY_GEN_QUOTA/BILLING_ENABLED (dev €0 intact).
+  if (!res.existing && type !== "ingest") {
+    const { recordGeneration } = await import("@/lib/billing/guards");
+    const { debitGeneration, jobRef } = await import("@/lib/billing/credits");
+    await recordGeneration("gen", type);
+    await debitGeneration(type, jobRef(currentUser(), currentCourse(), res.id));
+  }
+  return res;
 }
 
 // ─────────────── Checkpointing durable (Phase C) ───────────────
@@ -166,8 +178,8 @@ const STALL_MS = 15 * 60_000;
  */
 export async function reconcileStaleJobs(): Promise<number> {
   await ensureJobsSchema();
-  const rows = await q.all<{ id: number; pid: number | null; created_at: string; updated_at: string; heartbeat_at: string | null; attempts: number; max_attempts: number }>(
-    `SELECT id, pid, created_at, updated_at, heartbeat_at, attempts, max_attempts FROM jobs WHERE status IN ${ACTIVE_STATES}`,
+  const rows = await q.all<{ id: number; type: string; pid: number | null; created_at: string; updated_at: string; heartbeat_at: string | null; attempts: number; max_attempts: number }>(
+    `SELECT id, type, pid, created_at, updated_at, heartbeat_at, attempts, max_attempts FROM jobs WHERE status IN ${ACTIVE_STATES}`,
   );
   let fixed = 0;
   for (const r of rows) {
@@ -199,6 +211,9 @@ export async function reconcileStaleJobs(): Promise<number> {
     } else {
       await setJob(r.id, { status: "error", error: ZOMBIE_MSG });
       await logJob(r.id, ZOMBIE_MSG);
+      // Échec définitif hors du worker (celui-ci est mort sans passer par
+      // fail()) → c'est ICI qu'il faut rendre les crédits.
+      await refundJobCredits({ id: r.id, type: r.type as JobType });
     }
   }
   return fixed;
@@ -260,7 +275,10 @@ export async function startWorker(jobId: number, course?: string): Promise<void>
   const bin = useLocal ? tsxLocal : "npx";
   const tail = ["scripts/run-job.ts", String(jobId), c];
   const args = useLocal ? tail : ["tsx", ...tail];
-  const env = { ...process.env, CORTEX_COURSE: c };
+  // CORTEX_USER : le worker détaché doit hériter du TENANT de l'appelant
+  // (contexte requête = user connecté ; pompe/sweep = user du tenant balayé),
+  // sinon en Postgres multi-user il écrirait dans le tenant « owner ».
+  const env = { ...process.env, CORTEX_COURSE: c, CORTEX_USER: currentUser() };
   const child = spawn(bin, args, { cwd, detached: true, stdio: "ignore", env });
   // PID persisté tout de suite (le worker le ré-écrit au démarrage) → annulable même pendant le démarrage
   if (child.pid) await setJob(jobId, { pid: child.pid });
@@ -288,11 +306,40 @@ function pgidOf(pid: number): number | null {
  * On tue le GROUPE de processus du worker détaché → emporte aussi ses enfants
  * (`claude`, tectonic/pdflatex). Pas de génération zombie.
  */
+/**
+ * Rend les crédits d'un job qui ne produira RIEN (échec définitif, zombie
+ * épuisé, annulation). Idempotent et seulement-si-débité (cf. credits.ts) :
+ * l'appeler deux fois ne rend pas deux fois. No-op sans facturation.
+ */
+export async function refundJobCredits(job: Pick<Job, "id" | "type">): Promise<void> {
+  if (job.type === "ingest") return;
+  try {
+    const { refundGeneration, jobRef } = await import("@/lib/billing/credits");
+    await refundGeneration(job.type, jobRef(currentUser(), currentCourse(), job.id));
+  } catch { /* best-effort : jamais bloquant */ }
+}
+
+/**
+ * Seuil d'avancement au-delà duquel une ANNULATION n'est plus remboursée : le
+ * travail a réellement été facturé par le fournisseur (appels LLM déjà émis),
+ * et un remboursement inconditionnel offrirait des générations illimitées
+ * (générer à 95 %, annuler, recommencer). Un ÉCHEC reste toujours remboursé —
+ * l'utilisateur n'y peut rien et n'obtient aucun livrable.
+ */
+const CANCEL_REFUND_MAX_PROGRESS = 10;
+
 export async function cancelJob(id: number): Promise<Job | null> {
   const job = await getJob(id);
   if (!job) return null;
   if (["done", "error", "canceled"].includes(job.status)) return job;
   await setJob(id, { status: "canceled", currentStep: "Annulé" });
+  // Annulation AVANT tout travail facturé → crédits rendus. Au-delà, le
+  // fournisseur a déjà été payé : pas de remboursement (cf. constante).
+  if (job.progress <= CANCEL_REFUND_MAX_PROGRESS) {
+    await refundJobCredits(job);
+  } else {
+    await logJob(id, `Annulé à ${job.progress}% — la génération était déjà lancée, les crédits ne sont pas rendus.`);
+  }
   if (job.pid) {
     const pgid = pgidOf(job.pid);
     const target = pgid ? -pgid : job.pid; // repli : au moins le worker lui-même

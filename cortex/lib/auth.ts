@@ -104,8 +104,24 @@ function cortexAdapter(): Adapter {
   };
 }
 
-/** Envoi du magic-link : endpoint HTTP configurable, sinon LOG console (dev €0). */
+/** Envoi du magic-link : Resend natif (RESEND_API_KEY), sinon endpoint HTTP
+ *  générique (AUTH_EMAIL_ENDPOINT), sinon LOG console (dev €0). */
 async function sendMagicLink({ identifier, url }: { identifier: string; url: string }) {
+  const resendKey = process.env.RESEND_API_KEY;
+  if (resendKey) {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${resendKey}` },
+      body: JSON.stringify({
+        from: process.env.AUTH_EMAIL_FROM ?? "Cortex <onboarding@resend.dev>",
+        to: [identifier],
+        subject: "Connexion à Cortex",
+        html: `<p>Clique pour te connecter à Cortex :</p><p><a href="${url}">Se connecter</a></p><p style="color:#888">Si tu n'es pas à l'origine de cette demande, ignore ce message.</p>`,
+      }),
+    });
+    if (!res.ok) throw new Error(`Envoi Resend échoué (HTTP ${res.status}) : ${(await res.text()).slice(0, 300)}`);
+    return;
+  }
   const endpoint = process.env.AUTH_EMAIL_ENDPOINT;
   if (endpoint) {
     // Endpoint générique (Resend, worker maison…) : POST {to, url}.
@@ -119,6 +135,16 @@ async function sendMagicLink({ identifier, url }: { identifier: string; url: str
     });
     if (!res.ok) throw new Error(`Envoi du magic-link échoué (HTTP ${res.status})`);
     return;
+  }
+  // Aucun transport configuré. Un magic-link est un JETON DE CONNEXION : on ne
+  // l'écrit en clair QUE hors production (dev €0 : c'est ainsi qu'on se
+  // connecte sans SMTP). En production, l'écrire dans les logs du conteneur
+  // équivaudrait à publier des sessions → on échoue bruyamment.
+  if (process.env.NODE_ENV === "production" && process.env.CORTEX_ALLOW_LOGGED_MAGIC_LINK !== "1") {
+    throw new Error(
+      "Aucun envoi d'e-mail configuré (RESEND_API_KEY ou AUTH_EMAIL_ENDPOINT). " +
+      "Le magic-link ne sera PAS écrit dans les logs en production."
+    );
   }
   console.log(`\n🔐 [auth] Magic-link pour ${identifier} :\n   ${url}\n`);
 }
@@ -142,6 +168,24 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       : []),
   ],
   callbacks: {
+    /**
+     * INVITE-ONLY (lancement fermé) : INVITE_ONLY=1 → seuls les e-mails de
+     * l'allowlist INVITE_EMAILS (séparés par des virgules ; une entrée
+     * commençant par « @ » autorise tout le domaine, ex. @epfl.ch) peuvent se
+     * connecter/s'inscrire. Magic-link : le callback est appelé dès la DEMANDE
+     * de lien → un non-invité ne reçoit même pas d'e-mail.
+     */
+    signIn({ user, profile }) {
+      if (process.env.INVITE_ONLY !== "1") return true;
+      const addr = (user?.email ?? (profile?.email as string) ?? "").trim().toLowerCase();
+      if (!addr) return false;
+      const allow = (process.env.INVITE_EMAILS ?? "")
+        .toLowerCase()
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      return allow.some((a) => (a.startsWith("@") ? addr.endsWith(a) : a === addr));
+    },
     jwt({ token, user }) {
       if (user?.id) token.uid = user.id;
       return token;

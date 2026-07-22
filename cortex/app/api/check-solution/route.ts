@@ -15,6 +15,18 @@ const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "
 
 export async function POST(req: NextRequest) {
   useCourse(req);
+  // Déploiement v1 : appel LLM INLINE → quota d'assistance par user/jour
+  // (DAILY_ASSIST_QUOTA, no-op sans env), compté à la tentative.
+  {
+    const { generationGate, recordGeneration } = await import("@/lib/billing/guards");
+    const { creditsGate } = await import("@/lib/billing/credits");
+    // Quota d'assistance ET solde : ces appels coûtent de l'argent au même
+    // titre qu'une génération (sans ça, un solde à 0 pouvait encore consommer
+    // l'API en boucle via drill/check-solution/analyse).
+    const gate = (await generationGate("assist")) ?? (await creditsGate("assist"));
+    if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
+    await recordGeneration("assist", "check-solution");
+  }
   const ct = req.headers.get("content-type") ?? "";
   let statement = "";
   let answer = "";
@@ -31,7 +43,8 @@ export async function POST(req: NextRequest) {
       fs.mkdirSync(uploadsDir(), { recursive: true });
       const name = `${crypto.randomUUID()}.${ext}`;
       fs.writeFileSync(path.join(uploadsDir(), name), Buffer.from(await file.arrayBuffer()));
-      imageRel = `data/uploads/${name}`;
+      // chemin RÉEL (scopé par utilisateur en multi-user), relatif au cwd
+      imageRel = path.relative(process.cwd(), path.join(uploadsDir(), name));
     }
   } else {
     const body = await req.json().catch(() => ({}));
@@ -47,7 +60,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, result });
   } catch (e: unknown) {
     const err = e as LlmError;
-    const status = err.code === "UNAVAILABLE" ? 503 : 502;
+    const status = err.code === "UNAVAILABLE" || err.code === "SPEND_CAP" || err.code === "QUOTA" || err.code === "CREDITS" ? 503 : 502;
     return NextResponse.json({ error: err.message ?? String(e), code: err.code }, { status });
   }
 }

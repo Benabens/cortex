@@ -1,0 +1,41 @@
+# Contexte de build = racine du repo. On exclut tout ce qui est local/dérivé :
+# le build Railway/CI part d'un clone git propre, mais un build local sur la
+# machine de Ben ne doit pas embarquer les données non commitées.
+.git
+.github
+.claude
+.agents
+.playwright-mcp
+design
+node_modules
+**/node_modules
+cortex/.next
+cortex/tsconfig.tsbuildinfo
+
+# Secrets — jamais dans une image.
+cortex/.env*
+!cortex/.env.example
+
+# Données locales non commitées (le committé — refs, content, cortex.db — reste).
+cortex/data/backup-corrupt-*
+cortex/data/**/*.db-wal
+cortex/data/**/*.db-shm
+cortex/data/algo/*.db
+cortex/data/ml/*.db
+cortex/data/fictif/*.db
+cortex/data/auth.db
+cortex/data/pg
+cortex/data/uploads
+cortex/data/*/uploads
+cortex/data/exams/*.pdf
+cortex/data/exams/*.tex
+cortex/data/exams/*.log
+cortex/data/exams/*.aux
+cortex/data/exams/img
+cortex/data/*/exams
+cortex/data/**/figref-full
+cortex/data/refs/img
+cortex/data/**/.gen-checkpoint.json
+
+# Artefact macOS local (segment invalide pour le router Next).
+cortex/app/api/auth/[.. 2.nextauth]

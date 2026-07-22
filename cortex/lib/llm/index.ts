@@ -1,3 +1,4 @@
+import { assertSpendCap, recordUsage } from "@/lib/billing/usage";
 import { inc, log, observe } from "@/lib/metrics";
 import { cacheGet, cacheKey, cachePut, cacheable } from "./cache";
 import { defaultProviderName, maxRetries, retryBaseMs, type ProviderName } from "./config";
@@ -60,6 +61,10 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
     inc("cortex_llm_cache_total", { ...labels, result: "miss" });
   }
 
+  // KILL-SWITCH plafond de dépense (providers payants seulement ; un hit cache
+  // au-dessus reste servi gratuitement même plafond atteint).
+  await assertSpendCap(provider.name);
+
   const retries = maxRetries(provider.name as ProviderName);
   const t0 = Date.now();
   try {
@@ -77,6 +82,14 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
     if (res.usage?.inputTokens) inc("cortex_llm_input_tokens_total", labels, res.usage.inputTokens);
     if (res.usage?.outputTokens) inc("cortex_llm_output_tokens_total", labels, res.usage.outputTokens);
     log("info", "llm.call", { ...labels, ms, in: res.usage?.inputTokens, out: res.usage?.outputTokens });
+    // Comptage de coût GLOBAL (table llm_usage, attribué au user/cours courant).
+    // Pas sur le chemin cache-hit (retour anticipé plus haut) → jamais de double compte.
+    await recordUsage({
+      provider: res.provider ?? provider.name,
+      model: res.model ?? model,
+      tokensIn: res.usage?.inputTokens,
+      tokensOut: res.usage?.outputTokens,
+    });
     if (key) await cachePut(key, res);
     return res;
   } catch (e) {

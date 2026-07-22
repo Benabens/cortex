@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { tenantSchema } from "./context";
+import { currentUser, tenantSchema } from "./context";
+import { currentCourse } from "./client";
 import { registerDriver, type QueryDriver, type RunResult, type SqlParam } from "./q";
 import { allDdl } from "./tables";
 
@@ -85,6 +86,15 @@ function postgresLib(): typeof import("postgres") {
 const pgPools = new Map<string, PostgresSql>();
 const bootstrapped = new Set<string>();
 
+/** Nombre max de pools tenant gardés vivants (1 pool = jusqu'à PG_POOL_MAX
+ *  connexions). Au-delà, le plus anciennement utilisé est fermé : sans cette
+ *  borne, un balayage périodique de N tenants ouvrirait N pools et épuiserait
+ *  `max_connections` du Postgres managé. */
+function maxPools(): number {
+  const n = Number(process.env.PG_MAX_TENANT_POOLS);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 8;
+}
+
 function poolFor(schema: string): PostgresSql {
   let pool = pgPools.get(schema);
   if (!pool) {
@@ -93,17 +103,51 @@ function poolFor(schema: string): PostgresSql {
       max: Math.max(1, Number(process.env.PG_POOL_MAX) || 3),
       connection: { search_path: `"${schema}"` },
       onnotice: () => {},
+      idle_timeout: 30,
     });
+    pgPools.set(schema, pool);
+    // Éviction LRU (Map = ordre d'insertion) au-delà du plafond. On NE retire
+    // PAS le schéma de `bootstrapped` : le DDL a bien été appliqué et il le
+    // reste — le rejouer à chaque va-et-vient rendrait un balayage périodique
+    // très coûteux. `end({timeout})` laisse les requêtes en vol se terminer.
+    while (pgPools.size > maxPools()) {
+      const oldest = pgPools.keys().next().value as string | undefined;
+      if (!oldest || oldest === schema) break;
+      const victim = pgPools.get(oldest);
+      pgPools.delete(oldest);
+      try { void victim?.end({ timeout: 30 }); } catch { /* fermeture best-effort */ }
+    }
+  } else {
+    // Rafraîchit la position LRU.
+    pgPools.delete(schema);
     pgPools.set(schema, pool);
   }
   return pool;
+}
+
+/**
+ * Postgres REJETTE les octets NUL (\u0000) et les surrogates UTF-16 isolés dans
+ * les text (« invalid byte sequence for encoding UTF8 ») — sqlite les tolère,
+ * et les textes extraits de PDF en contiennent. Assainissement au niveau du
+ * driver : TOUT chemin d'écriture est couvert (ingest, jobs, uploads…), même
+ * recette que scripts/migrate-to-postgres.ts (perte limitée aux octets invalides).
+ */
+export function pgSafeParams<T>(params: T[]): T[] {
+  let changed = false;
+  const out = params.map((v) => {
+    if (typeof v !== "string") return v;
+    const clean = (v.includes("\u0000") ? v.replaceAll("\u0000", "") : v).toWellFormed();
+    if (clean !== v) changed = true;
+    return clean as unknown as T;
+  });
+  return changed ? out : params;
 }
 
 function postgresJsExec(schema: string): TenantExec {
   const pool = poolFor(schema);
   const wrap = (sql: PostgresSql): TenantExec => ({
     async query(text, params) {
-      const r = await sql.unsafe(text, params as never[]);
+      const r = await sql.unsafe(text, pgSafeParams(params) as never[]);
       return { rows: r as unknown as PgRows, count: r.count ?? (Array.isArray(r) ? r.length : 0) };
     },
     async exec(text) {
@@ -157,7 +201,7 @@ function pgliteExec(schema: string): TenantExec {
       return pgliteSerial(async () => {
         const db = await pgliteInstance();
         await setPath(db);
-        const r = await db.query(text, params as unknown[]);
+        const r = await db.query(text, pgSafeParams(params) as unknown[]);
         return { rows: r.rows, count: r.affectedRows ?? r.rows.length };
       });
     },
@@ -175,7 +219,7 @@ function pgliteExec(schema: string): TenantExec {
         return db.transaction(async (tx) => {
           const txExec: TenantExec = {
             async query(text, params) {
-              const r = await tx.query(text, params as unknown[]);
+              const r = await tx.query(text, pgSafeParams(params) as unknown[]);
               return { rows: r.rows, count: r.affectedRows ?? r.rows.length };
             },
             async exec(text) {
@@ -202,6 +246,65 @@ function rawExec(schema: string): TenantExec {
   return isPglite() ? pgliteExec(schema) : postgresJsExec(schema);
 }
 
+/**
+ * HYDRATATION des nouveaux tenants (déploiement v1, opt-in SEED_NEW_TENANTS=1) :
+ * un user fraîchement inscrit reçoit une COPIE SQL du contenu de COURS du
+ * tenant de seed (owner, hydraté par prod-boot) — sources/items/vocab/annales/
+ * programme/banque de révision/ADN — jamais les données PERSONNELLES
+ * (faiblesses, planning, examens générés, jobs). Sans quoi un nouveau compte
+ * a un tenant vide et ne peut rien générer. Idempotent (cible non vide → no-op).
+ */
+const SEED_CONTENT_TABLES = [
+  "sources", "items", "vocab", "exam_refs", "topics", "plan_chapters",
+  "bank_questions", "revision_plan", "format_profile", "exam_dna", "exam_exercises",
+];
+
+async function hydrateFromSeedTenant(ex: TenantExec, schema: string): Promise<void> {
+  if (process.env.SEED_NEW_TENANTS !== "1") return;
+  const seedUser = process.env.CORTEX_SEED_USER || "owner";
+  if (currentUser() === seedUser) return;
+  const seedSchema = tenantSchema(seedUser, currentCourse());
+  if (seedSchema === schema) return;
+  const target = await ex.query(`SELECT count(*) n FROM items`, []);
+  if (Number((target.rows[0] as { n?: number | string })?.n ?? 0) > 0) return; // déjà peuplé
+  const seedThere = await ex.query(
+    `SELECT 1 FROM information_schema.schemata WHERE schema_name = $1`, [seedSchema],
+  );
+  if (!seedThere.rows.length) return; // pas de seed pour ce cours
+  for (const t of SEED_CONTENT_TABLES) {
+    try {
+      // Copie par NOMS DE COLONNES (jamais `SELECT *` : un ordre de colonnes
+      // qui diverge entre les deux schémas — après l'ajout d'une colonne au
+      // milieu de la spec — décalerait silencieusement les données).
+      const cols = await ex.query(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_schema = $1 AND table_name = $2
+           AND column_name IN (SELECT column_name FROM information_schema.columns
+                               WHERE table_schema = $3 AND table_name = $2)
+         ORDER BY ordinal_position`,
+        [seedSchema, t, schema],
+      );
+      const names = cols.rows.map((r) => `"${(r as { column_name: string }).column_name}"`);
+      if (!names.length) continue;
+      const list = names.join(", ");
+      await ex.exec(`INSERT INTO "${schema}".${t} (${list}) SELECT ${list} FROM "${seedSchema}".${t}`);
+    } catch (e) {
+      // Contenu partiel plutôt que crash — mais on TRACE (un échec silencieux
+      // donnerait un tenant à moitié hydraté sans aucun diagnostic).
+      // eslint-disable-next-line no-console
+      console.warn(`[tenant] hydratation ${t} → ${schema} échouée :`, (e as Error)?.message?.slice(0, 200));
+    }
+  }
+  // Les ids copiés sont explicites → resynchronise les séquences identity.
+  for (const t of SEED_CONTENT_TABLES) {
+    try {
+      await ex.exec(
+        `SELECT setval(pg_get_serial_sequence('"${schema}".${t}', 'id'), (SELECT coalesce(max(id), 1) FROM "${schema}".${t}))`
+      );
+    } catch { /* pas de colonne id auto */ }
+  }
+}
+
 /** CREATE SCHEMA + schéma applicatif complet, une fois par tenant et par process. */
 async function ensureTenant(schema: string): Promise<TenantExec> {
   const ex = rawExec(schema);
@@ -214,6 +317,25 @@ async function ensureTenant(schema: string): Promise<TenantExec> {
     await ex.exec(
       `CREATE INDEX IF NOT EXISTS items_search_idx ON items USING GIN (to_tsvector('simple', coalesce(text_norm, '')))`
     );
+    // Registre GLOBAL des tenants (schéma public) : permet au boot de prod de
+    // re-migrer/réconcilier tous les tenants connus (le nom de schéma seul ne
+    // suffit pas — pgIdent tronque user/cours). Best-effort : jamais bloquant.
+    try {
+      await ex.exec(
+        `CREATE TABLE IF NOT EXISTS public.tenants (
+          user_id text NOT NULL, course text NOT NULL,
+          schema_name text NOT NULL, last_seen text NOT NULL,
+          PRIMARY KEY (user_id, course))`
+      );
+      await ex.query(
+        `INSERT INTO public.tenants (user_id, course, schema_name, last_seen) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (user_id, course) DO UPDATE SET schema_name = EXCLUDED.schema_name, last_seen = EXCLUDED.last_seen`,
+        [currentUser(), currentCourse(), schema, new Date().toISOString().slice(0, 19).replace("T", " ")]
+      );
+    } catch {
+      // registre indisponible (ex. course/context hors chaîne) — le tenant reste fonctionnel
+    }
+    try { await hydrateFromSeedTenant(ex, schema); } catch { /* best-effort */ }
     bootstrapped.add(schema);
   }
   return ex;
@@ -292,7 +414,7 @@ export async function pglitePublicQuery(text: string, params: SqlParam[]): Promi
     const db = await pgliteInstance();
     await db.exec(`SET search_path TO public`);
     _pgliteSchema = null; // le prochain appel tenant re-forcera son schéma
-    const r = await db.query(text, params as unknown[]);
+    const r = await db.query(text, pgSafeParams(params) as unknown[]);
     return r.rows;
   });
 }

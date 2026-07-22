@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
 
   // pré-checks AVANT de lancer le worker : claude (Max) + corpus + moteur LaTeX
-  const issue = await preflightGeneration();
+  const issue = await preflightGeneration("exam");
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
 
   // V9 composeur (CS-202) : count = nombre d'exercices choisi (optionnel ; défaut = blueprint).

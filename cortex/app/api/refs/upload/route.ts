@@ -33,8 +33,18 @@ export async function POST(req: NextRequest) {
   }
   if (!saved.length) return NextResponse.json({ error: "Aucun fichier exploitable (PDF/HTML/txt)." }, { status: 400 });
 
-  // relance la détection de format en arrière-plan (se cale sur les annales, dont les nouvelles)
+  // relance la détection de format en arrière-plan (se cale sur les annales, dont les nouvelles).
+  // Déploiement v1 : ce job fait de la vision LLM → quota + crédits ; si le gate
+  // refuse, l'UPLOAD reste acquis (contenu), seul le job de format est différé.
   let formatJobId: number | undefined;
-  try { const r = await createJobExclusive("format", JSON.stringify({ reason: "upload", files: saved })); formatJobId = r.id; if (!r.existing) await startWorker(formatJobId, course); } catch {}
-  return NextResponse.json({ ok: true, files: saved, formatJobId });
+  let formatSkipped: string | undefined;
+  const { generationGate } = await import("@/lib/billing/guards");
+  const { creditsGate } = await import("@/lib/billing/credits");
+  const gate = (await generationGate("gen")) ?? (await creditsGate("format"));
+  if (gate) {
+    formatSkipped = gate.error;
+  } else {
+    try { const r = await createJobExclusive("format", JSON.stringify({ reason: "upload", files: saved })); formatJobId = r.id; if (!r.existing) await startWorker(formatJobId, course); } catch {}
+  }
+  return NextResponse.json({ ok: true, files: saved, formatJobId, formatSkipped });
 }
