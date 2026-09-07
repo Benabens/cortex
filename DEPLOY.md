@@ -94,7 +94,7 @@ TRUST_PROXY=1
 
 # — lancement fermé + vitrine publique —
 INVITE_ONLY=1
-INVITE_EMAILS=abensur.benjamin@gmail.com
+INVITE_EMAILS=toi@exemple.com
 PUBLIC_DEMO=1
 
 # — crédits Stripe (mode TEST, étape 7) —
@@ -224,6 +224,68 @@ Le domaine : Settings → **Networking** → **Generate Domain** (type
 - **Métriques** : `https://⟨domaine⟩/api/metrics?token=⟨METRICS_TOKEN⟩`
   (Prometheus/JSON). Logs : onglet **Observability** de Railway.
 - **Quota trop lâche/serré** : ajuste `DAILY_GEN_QUOTA` (et les prix Stripe).
+
+## 10. Sauvegardes et restauration
+
+Deux choses à sauvegarder, **indépendantes** : la **base** (comptes, crédits
+**déjà payés**, faiblesses, planning, examens, banque de questions) et le
+**volume** `CORTEX_DATA_DIR` (PDF d'annales, uploads, bases SQLite en dev).
+Perdre l'un ou l'autre = perte irréversible.
+
+### Lancer une sauvegarde
+
+```bash
+cd cortex
+npm run backup                       # → ./backups/cortex-backup-<horodatage>/
+BACKUP_DIR=/mnt/backups npm run backup
+npm run backup -- --label=avant-migration
+```
+
+Chaque exécution crée un dossier horodaté distinct (jamais d'écrasement)
+contenant :
+- `data.tar.gz` — archive complète du volume `CORTEX_DATA_DIR` (WAL SQLite
+  **inclus** : on capture l'état exact, contrairement à git) ;
+- `postgres.dump` — dump `pg_dump -Fc` de **tous** les schémas tenant
+  (`t_<user>_<cours>`) + `public`, **uniquement** si `DATABASE_URL=postgres://…`
+  (nécessite `pg_dump` sur l'hôte — présent sur une image avec `libpq`) ;
+- `manifest.json` — horodatage, driver, empreintes SHA-256, versions d'outils.
+  **Aucun secret** n'y figure (jamais `DATABASE_URL`).
+
+En dev (SQLite, aucune `DATABASE_URL`), la base vit **dans** le volume : elle
+est déjà capturée par `data.tar.gz`.
+
+### Restaurer
+
+```bash
+npm run restore -- ./backups/cortex-backup-<horodatage> --yes
+npm run restore -- <dossier> --yes --force   # écrase une cible NON vide
+```
+
+Garde-fous (opération destructrice) : refus **sans `--yes`** ; refus si le
+volume **ou** la base Postgres cible n'est **pas vide** (sauf `--force`) ;
+vérification des empreintes SHA-256 avant toute écriture. La restauration
+Postgres utilise `pg_restore --clean --if-exists`.
+
+> **Preuve** : le cycle dump → wipe → restore est vérifié automatiquement par
+> `tests/backup-restore.test.ts` (round-trip des fichiers **et** d'un jeu de
+> données d'un vrai moteur Postgres via PGlite, + les garde-fous). Le chemin
+> `pg_dump`/`pg_restore` réseau (Postgres managé) n'est pas exerçable hors d'un
+> hôte doté de `libpq` — à valider une fois sur Railway (voir ci-dessous).
+
+### Où et à quelle fréquence
+
+- **Railway Postgres** : le plus simple est d'activer les **snapshots
+  automatiques** du service Postgres dans Railway (quotidiens). `npm run backup`
+  reste utile pour un export **hors Railway** (à télécharger avant une
+  migration risquée). Pour l'exécuter contre la base managée :
+  `DATABASE_URL=<url Railway> BACKUP_DIR=~/cortex-backups npm run backup`
+  depuis une machine avec `pg_dump` (`brew install libpq`).
+- **Volume `/data`** : Railway ne snapshotte pas les volumes → lancer
+  `npm run backup` (ou une tâche planifiée) et **stocker l'archive ailleurs**
+  (S3, disque local). Fréquence conseillée : **quotidienne** tant qu'il y a des
+  paiements, avant chaque migration de schéma, et avant tout `restore --force`.
+- **Tester une restauration** de temps en temps sur une base jetable — une
+  sauvegarde jamais restaurée n'est pas une sauvegarde.
 
 ## Limites connues (v1, assumées)
 
