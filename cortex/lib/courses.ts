@@ -162,6 +162,18 @@ export function normalizeCourse(id?: string | null): string {
   return id && COURSES[id] ? id : DEFAULT_COURSE;
 }
 
+/**
+ * Libellé du cours pour les PROMPTS LLM — dérivé du cours ACTIF, jamais codé en
+ * dur. Ex. « Computer Systems (CS-202, EPFL) », « Quantitative Oenology (QO-101,
+ * Institut Polytechnique Fictif de Testville) ». Un cours hors EPFL ne fait donc
+ * plus dire au modèle qu'il s'agit de CS-202/EPFL.
+ */
+export function courseLabel(id?: string | null): string {
+  const c = getCourse(id);
+  const meta = [c.examCode, c.university].filter(Boolean).join(", ");
+  return meta ? `${c.examName} (${meta})` : c.examName;
+}
+
 export function listCourses(): CourseConfig[] {
   return Object.values(COURSES);
 }

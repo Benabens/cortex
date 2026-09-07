@@ -87,9 +87,13 @@ function coverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string): string
     ? c.profs.slice(0, -1).join(", ") + (c.profs.length > 1 ? " \\& " : "") + c.profs[c.profs.length - 1]
     : "";
   const facultyLine = [`\\textbf{${c.faculty}}`, `${examCodeTex} ${c.examName}`, profsTex].filter(Boolean).join("\\\\ ");
+  // Logo institutionnel : réservé à EPFL. Un cours hors EPFL ne doit produire
+  // AUCUNE marque EPFL (audit produit v1). cs-202 (university="EPFL") reste
+  // byte-identique : la garde émet exactement `\epfllogo[30]` comme avant.
+  const logoTex = c.university === "EPFL" ? String.raw`\epfllogo[30]` : "";
   return [
     String.raw`\thispagestyle{empty}`,
-    String.raw`\noindent\begin{minipage}[t]{0.30\textwidth}\vspace{0pt}\epfllogo[30]\end{minipage}\hfill`,
+    `\\noindent\\begin{minipage}[t]{0.30\\textwidth}\\vspace{0pt}${logoTex}\\end{minipage}\\hfill`,
     String.raw`\begin{minipage}[t]{0.64\textwidth}\vspace{2pt}\raggedleft\footnotesize\scshape`,
     `${uniLines}\\end{minipage}`,
     String.raw`\vspace{2pt}\noindent\rule{\textwidth}{1pt}`,

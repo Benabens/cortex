@@ -2,6 +2,8 @@ import { q } from "@/db/q";
 import { completeVia, type LlmImage } from "@/lib/llm";
 import { updateWeaknessAnalysis } from "@/lib/weaknesses";
 import { useCourse } from "@/lib/req";
+import { currentCourse } from "@/db/client";
+import { courseLabel } from "@/lib/courses";
 import { uploadsDir } from "@/lib/paths";
 import fs from "node:fs";
 import path from "node:path";
@@ -60,9 +62,10 @@ export async function POST(req: NextRequest) {
   );
   if (!w) return NextResponse.json({ error: "faiblesse introuvable" }, { status: 404 });
 
-  // Construit le message (texte + image éventuelle) — prompt inchangé, image AVANT le texte.
+  // Construit le message (texte + image éventuelle) — le cours est dérivé du
+  // cours ACTIF (useCourse ci-dessus), jamais codé en dur.
   const prompt =
-    `Je suis étudiant en Computer Systems (CS202, EPFL). Voici un exercice/une question sur lequel j'ai eu une faiblesse de compréhension.\n` +
+    `Je suis étudiant en ${courseLabel(currentCourse())}. Voici un exercice/une question sur lequel j'ai eu une faiblesse de compréhension.\n` +
     `Sujet noté : « ${w.topic} »\n` +
     (w.description ? `Ma note : « ${w.description} »\n` : "") +
     `\nAnalyse ma faiblesse de compréhension : identifie le sujet précis, les concepts du cours que je maîtrise mal, ` +

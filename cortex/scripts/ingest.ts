@@ -279,9 +279,9 @@ async function ingestLabs(): Promise<number> {
   return total;
 }
 
-// ---------- 5b. data/cs-202/labs/ : le VRAI code des labs 2026 déposé par Ben (NS13) ----------
-// Repo « grilledcheese » (provided/ + done/ = solutions de Ben) + dossiers lab1_entrainement,
-// lab5, lab5_upload. Indexé par lab → le générateur d'exos Labs connaît chaque lab ligne par ligne.
+// ---------- 5b. data/cs-202/labs/ : le code de labs déposé par l'utilisateur ----------
+// provided/ + done/ (solutions) + dossiers lab1_entrainement, lab5, lab5_upload.
+// Indexé par lab → le générateur d'exos Labs connaît chaque lab ligne par ligne.
 const DEPOSITED_LABS_REL = path.join("data", "cs-202", "labs"); // relatif au cwd (cortex/), PAS à CONTENT_ROOT
 
 /** lab id d'un fichier déposé : motif labN n'importe où, sinon warmup grilledcheese → lab1. */

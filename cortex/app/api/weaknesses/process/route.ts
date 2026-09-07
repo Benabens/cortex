@@ -1,5 +1,7 @@
 import { q } from "@/db/q";
 import { useCourse } from "@/lib/req";
+import { currentCourse } from "@/db/client";
+import { courseLabel } from "@/lib/courses";
 import { uploadsDir } from "@/lib/paths";
 import { LlmError, completeText, extractJson } from "@/lib/llm";
 import { getWeakness, updateWeaknessAnalysis } from "@/lib/weaknesses";
@@ -15,7 +17,7 @@ type Analysis = { topic: string; concepts: string[]; explanation: string };
 
 function buildPrompt(w: { topic: string; description: string | null; imageRel: string | null }): string {
   const lines: string[] = [
-    `Tu aides un étudiant en Computer Systems (CS-202, EPFL) à structurer une faiblesse de révision.`,
+    `Tu aides un étudiant en ${courseLabel(currentCourse())} à structurer une faiblesse de révision.`,
   ];
   if (w.imageRel) {
     lines.push(
