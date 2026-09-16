@@ -259,7 +259,7 @@ export async function indexStats(): Promise<{ exercises: number; exams: number }
 export async function exercisesForTopic(topicId: number): Promise<ExamExercise[]> {
   await ensureIndexSchema();
   const rows = await q.all<any>(
-    `SELECT id, exam_title examTitle, exam_year examYear, exam_page examPage, topic, method, exo_type exoType, trap, archetype, statement, points, exam_href examHref, course_href courseHref, topic_id topicId, mold, figure_kind figureKind
+    `SELECT id, exam_title AS "examTitle", exam_year AS "examYear", exam_page AS "examPage", topic, method, exo_type AS "exoType", trap, archetype, statement, points, exam_href AS "examHref", course_href AS "courseHref", topic_id AS "topicId", mold, figure_kind AS "figureKind"
      FROM exam_exercises WHERE topic_id = ? ORDER BY (exam_year IS NULL), exam_year, exam_page`,
     topicId,
   );

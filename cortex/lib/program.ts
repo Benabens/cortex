@@ -454,7 +454,7 @@ async function topicRows(): Promise<Topic[]> {
   await ensurePlanSchema(); // garantit topics.plan_chapter_id (rattrapage DB existantes)
   return (
     await q.all<any>(
-      `SELECT id, label, method, exo_type exoType, trap, category, archetype, exam_weight examWeight, exam_count examCount, source, description, plan_chapter_id chapterId
+      `SELECT id, label, method, exo_type AS "exoType", trap, category, archetype, exam_weight AS "examWeight", exam_count AS "examCount", source, description, plan_chapter_id AS "chapterId"
          FROM topics ORDER BY exam_weight DESC, exam_count DESC, label`
     )
   ).map((r) => ({ ...r }));
@@ -467,8 +467,8 @@ async function occurrencesByTopic(): Promise<Map<number, Occurrence[]>> {
   try {
     await ensureIndexSchema();
     rows = await q.all(
-      `SELECT id examId, topic_id topicId, exam_title examTitle, exam_year examYear, exam_page examPage,
-              exam_href examHref, course_href courseHref, points, statement
+      `SELECT id AS "examId", topic_id AS "topicId", exam_title AS "examTitle", exam_year AS "examYear", exam_page AS "examPage",
+              exam_href AS "examHref", course_href AS "courseHref", points, statement
          FROM exam_exercises WHERE topic_id IS NOT NULL
         ORDER BY (exam_year IS NULL), exam_year DESC, exam_page`
     );
@@ -541,7 +541,7 @@ async function topicExamAggregates(): Promise<Map<number, TopicExamAgg>> {
   let rows: { topicId: number; examYear: number | null; examPage: number | null; points: number | null; examHref: string | null; courseHref: string | null }[] = [];
   try {
     await ensureIndexSchema();
-    rows = await q.all(`SELECT topic_id topicId, exam_year examYear, exam_page examPage, points, exam_href examHref, course_href courseHref FROM exam_exercises WHERE topic_id IS NOT NULL`);
+    rows = await q.all(`SELECT topic_id AS "topicId", exam_year AS "examYear", exam_page AS "examPage", points, exam_href AS "examHref", course_href AS "courseHref" FROM exam_exercises WHERE topic_id IS NOT NULL`);
   } catch { return out; }
   const byTopic = new Map<number, typeof rows>();
   for (const r of rows) { if (!byTopic.has(r.topicId)) byTopic.set(r.topicId, []); byTopic.get(r.topicId)!.push(r); }
@@ -587,7 +587,7 @@ export async function programOverview(): Promise<ProgramOverview> {
   const occ = await occurrencesByTopic();
   const mast = new Map<number, MasteryRow & { lastExamId: number | null }>();
   for (const m of await q.all<MasteryRow & { lastExamId: number | null }>(
-    `SELECT topic_id topicId, score, attempts, last_score lastScore, last_done_at lastDoneAt, due_at dueAt, ease, interval_days intervalDays, last_exam_id lastExamId FROM mastery`
+    `SELECT topic_id AS "topicId", score, attempts, last_score AS "lastScore", last_done_at AS "lastDoneAt", due_at AS "dueAt", ease, interval_days AS "intervalDays", last_exam_id AS "lastExamId" FROM mastery`
   ))
     mast.set(m.topicId, m);
 
@@ -652,7 +652,7 @@ export async function getTopic(id: number): Promise<Topic | null> {
   await ensureProgramSchema();
   await ensurePlanSchema();
   const r = (await q.get<any>(
-    `SELECT id, label, method, exo_type exoType, trap, category, archetype, exam_weight examWeight, exam_count examCount, source, description, plan_chapter_id chapterId FROM topics WHERE id = ?`,
+    `SELECT id, label, method, exo_type AS "exoType", trap, category, archetype, exam_weight AS "examWeight", exam_count AS "examCount", source, description, plan_chapter_id AS "chapterId" FROM topics WHERE id = ?`,
     id
   )) as any;
   return r ?? null;
@@ -732,7 +732,7 @@ export async function recordScore(topicId: number, rawScore: number, lastExamId?
   if (!topic) throw new Error("Type introuvable.");
   const score = Math.max(0, Math.min(10, Math.round(rawScore)));
   const prev = await q.get<{ score: number | null; attempts: number; ease: number; intervalDays: number }>(
-    `SELECT score, attempts, ease, interval_days intervalDays FROM mastery WHERE topic_id = ?`,
+    `SELECT score, attempts, ease, interval_days AS "intervalDays" FROM mastery WHERE topic_id = ?`,
     topicId
   );
 

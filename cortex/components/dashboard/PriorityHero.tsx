@@ -75,7 +75,8 @@ export function PriorityHero({
 }
 
 /** Décimales à la française : 9.4 → « 9,4 ». */
-const fr = (n: number) => n.toLocaleString("fr-FR", { maximumFractionDigits: 1 });
+const fr = (n: number | null | undefined) =>
+  Number.isFinite(n as number) ? (n as number).toLocaleString("fr-FR", { maximumFractionDigits: 1 }) : "—";
 
 /**
  * Le « pourquoi », court et honnête : uniquement des faits que le back fournit.
@@ -90,7 +91,9 @@ function why(weightPct: number, mastery: number | null): string {
         : `ta maîtrise est à ${fr(mastery)}/10`;
 
   // Poids absent/nul (analyse sans barème) → on ne l'invente pas, on n'en parle pas.
-  if (weightPct <= 0) {
+  // Poids absent (champ manquant côté back) → on se rabat sur la phrase sans chiffre
+  // plutôt que de faire planter tout l'écran sur un toLocaleString d'undefined.
+  if (!Number.isFinite(weightPct) || weightPct <= 0) {
     return `${effort[0].toUpperCase()}${effort.slice(1)} — c’est là que ton temps rapporte le plus aujourd’hui.`;
   }
   return `Elle pèse ${fr(weightPct)} % de l’examen et ${effort} — c’est là que ton temps rapporte le plus aujourd’hui.`;
