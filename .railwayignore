@@ -1,0 +1,17 @@
+# Upload `railway up` : sources + contenu des sites de revision uniquement.
+# Exclu : le derive (node_modules, .next, tsbuildinfo), le local (.git, data/),
+# et ce que .dockerignore ecarte deja du contexte de build (design/, .claude...).
+.git
+.github
+.claude
+.agents
+.playwright-mcp
+**/node_modules
+**/.next
+**/.turbo
+cortex/data
+cortex/integration
+cortex/.claude
+cortex/.playwright-mcp
+cortex/tsconfig.tsbuildinfo
+design
