@@ -49,7 +49,7 @@ npm run backup    # sauvegarde base + volume
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — comment le système est construit, et pourquoi.
 - **[DEPLOY.md](DEPLOY.md)** — déploiement, sauvegardes, règles de production.
-- **[CLAUDE.md](CLAUDE.md)** — conventions et invariants, pour contribuer (humain ou agent).
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — conventions, invariants et checks à passer avant toute contribution.
 
 ## Contenu de cours
 

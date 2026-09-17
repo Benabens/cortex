@@ -21,3 +21,9 @@ CORTEX_REVISION_PROJET.md
 /CORTEX_*.md
 /HELLO-COWORK.md
 /skills-lock.json
+
+# Docs de process internes
+cortex/CLAUDE.md
+cortex/NIGHTLY.md
+cortex/AGENTS.md
+/CLAUDE.md
