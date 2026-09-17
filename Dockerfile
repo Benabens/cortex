@@ -64,18 +64,13 @@ RUN set -eux; \
       | tar -xz -C /usr/local/bin tectonic; \
     /usr/local/bin/tectonic --version
 
-# Sites de révision statiques (lecture seule) au-dessus de cortex/ — servis
-# par /sites (symlinks de public/sites) et /voir (CONTENT_ROOT = parent).
+# Aucun contenu de cours n'est embarqué : annales, slides et supports
+# appartiennent à leur université et ne sont pas dans ce dépôt. Ce que
+# l'utilisateur importe via l'app vit sur le volume persistant
+# (CORTEX_DATA_DIR), pas dans l'image.
 WORKDIR /app
-COPY reviews.html index.html c_cheatsheet.html cheatsheet_v5_preview.html \
-     c_errors_journal.html exam_packets_R1_table.html final2020_enonce.html \
-     lab4_inode_walk.html ./
-COPY exercices/ ./exercices/
-COPY cours/ ./cours/
-COPY labs/ ./labs/
-COPY notes/ ./notes/
 
-# L'app : .next + node_modules (prod + tsx) + sources TS + latex/ + data/ committée.
+# L'app : .next + node_modules (prod + tsx) + sources TS + latex/.
 COPY --from=build /app/cortex /app/cortex
 WORKDIR /app/cortex
 
@@ -91,16 +86,16 @@ RUN set -eux; \
       || echo "AVERTISSEMENT: warm-up tectonic incomplet (bundle téléchargé au 1er run)"; \
     rm -rf /tmp/tectonic-warm
 
-#   CORTEX_SEED_COURSES : cours seedés au boot depuis le contenu COMMITTÉ si le
-#   tenant est vide (prod-boot, sans LLM) — l'app n'est jamais vide. ml = le
-#   cours dont annales+séries+fiches sont dans git. Surchargeable ("" désactive).
-#   SEED_NEW_TENANTS : un nouvel utilisateur reçoit une copie SQL du contenu de
-#   cours du tenant de seed (sinon tenant vide = rien à générer).
+#   CORTEX_SEED_COURSES : vide — aucun contenu de cours n'est committé, chaque
+#   utilisateur importe ses propres annales depuis l'app.
+#   SEED_NEW_TENANTS : 0 — un nouvel utilisateur démarre sur un espace VIDE et
+#   crée sa matière (à 1, il recevrait une copie du contenu d'un autre tenant,
+#   ce qui n'a de sens qu'avec un cours de démonstration dédié).
 ENV CORTEX_TEX_BIN=/usr/local/bin/tectonic \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
-    CORTEX_SEED_COURSES=ml \
-    SEED_NEW_TENANTS=1
+    CORTEX_SEED_COURSES= \
+    SEED_NEW_TENANTS=0
 
 # Vérification de la SANDBOX à la construction : sans isolation, le moteur
 # REFUSE d'exécuter du code (règle « aucune isolation → aucune exécution ») et

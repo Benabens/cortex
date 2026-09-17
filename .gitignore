@@ -6,3 +6,18 @@
 # Notes de projet personnelles (contiennent des données perso : SCIPER, noms) —
 # retirées du dépôt en Produit v1, conservées en local, jamais recommitées.
 CORTEX_REVISION_PROJET.md
+
+# Contenu de cours local (droits de l universite) — hors depot
+/cours/
+/exercices/
+/labs/
+/notes/
+/design/
+/*.html
+
+# Briefs et tooling internes — hors depot public
+/.agents/
+/.claude/
+/CORTEX_*.md
+/HELLO-COWORK.md
+/skills-lock.json

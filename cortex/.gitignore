@@ -103,3 +103,6 @@ data/fictif/exams/
 data/fictif/uploads/
 data/fictif/refs/figref/
 data/fictif/refs/figref-full/
+
+# Contenu et bases locales — jamais dans le depot
+data/

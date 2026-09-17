@@ -1,145 +1,91 @@
-# Cortex — Architecture
+# Architecture
 
-> Le « second cerveau » de révision pour **Computer Systems (CS202)**.
-> App locale, mono-utilisateur (Ben), avec clé API Claude. Tourne en local, données 100% locales.
+Comment Cortex est construit, et les raisons derrière les choix qui ne sont pas évidents.
 
-## Principe directeur
+---
 
-Les sites HTML statiques existants (reviews.html, exercices/, cheatsheets…) sont **sacrés** : on n'y touche pas, on ne les réécrit pas. Cortex est le **cerveau autour** : il les **indexe**, retient les **faiblesses**, et **génère des examens** inédits. Esthétique fidèle : thème sombre, mêmes design tokens.
+## Vue d'ensemble
 
-Anti-théâtre de productivité : aucune feature « jolie pour rien ». Chaque écran sert l'un de : rappel actif, répétition espacée, reconnaissance de patterns, suivi des erreurs, recherche/lookup, amorçage pré-examen.
-
-## Stack technique
-
-- **Next.js 15** (App Router, TypeScript, Turbopack) — UI + API routes.
-- **Tailwind v4** mappé sur les design tokens existants (gold `#C58A4F`, bleu `#6FA8D6`, vert `#4FB89B`, bg `#1F1E1D`).
-- **SQLite** (better-sqlite3) + **Drizzle ORM** — persistance locale typée, migrations.
-- **SQLite FTS5** — index full-text → la recherche globale cross-sites.
-- **@anthropic-ai/sdk** — génération d'examens + analyse des faiblesses.
-- **PDF** : pdf parsing pour ingérer les 2 PDF du cours.
-- Clé API : `.env.local` (gitignoré). Jamais commitée.
-
-## Modèle de données (tables)
-
-- **sources** — chaque artefact ingéré (PDF cours, série, midterm, final, review de lecture, lab, cheatsheet). Champs : `type`, `year`, `recency_weight` (2024/25 ≫ 2014), `path`, `title`.
-- **items** — unités atomiques extraites (une carte, un exo, une définition). Champs : `source_id`, `type`, `lecture_id`, `text`, `html`, `images[]`, `tags[]`.
-- **fts_items** — table virtuelle FTS5 sur `items.text` + texte brut des pages → recherche globale.
-- **weaknesses** — `topic`, `description` (analyse Claude), `screenshot_path`, `severity`, `logged_at`, `related_item_ids`, `times_seen`, `last_reviewed`.
-- **schedule** — état de répétition espacée par concept : `concept`, `last_tested_at`, `interval_days`, `next_due_at`, `ease`.
-- **exams** — examens générés : `created_at`, `format_template`, `targeted_weakness_ids`, `html_path`, `status`.
-- **exam_questions** — `exam_id`, `concept`, `statement_html`, `solution_html`, `source_inspiration`, `weakness_id`.
-
-## Fonctionnalités (pages)
-
-1. **/** — Hub : liens vers les sites statiques existants + accès aux outils du cerveau.
-2. **/recherche** — Ctrl-F universel : full-text sur TOUT le contenu, résultats groupés par source, deep-links.
-3. **/faiblesses** — Intake (note + screenshot PNG), liste, analyse Claude (« explique ma faiblesse »), liens vers items concernés.
-4. **/examens** — Génération (Claude API : corpus + faiblesses + schedule → exam inédit au format prof), consultation, marquage fait.
-5. **/sources** — Gérer les sources, uploader PDFs, régler les poids de récence, réindexer.
-
-## Jobs
-
-- `npm run ingest` — (ré)indexe tout le contenu (HTML + PDF) → DB + FTS.
-- `npm run nightly` — avance la répétition espacée + génère un examen ciblant les concepts dus → écrit un `.html` au format des sites exos.
-
-## Moteur IA : Claude Code (via abonnement Max), PAS l'API payante
-
-Décision (Ben) : pour éviter tout coût API (l'API est facturée séparément du Max),
-**le moteur de génération/analyse = Claude Code (moi)**, pas un appel API in-app.
-
-Workflow « moi = moteur » (zéro coût, via Max) :
-- `npm run exam:brief` → imprime le contexte (faiblesses + concepts dus + style anciens
-  examens + matière) + le schéma JSON. Je lis, je rédige l'examen, j'écris un `.json`.
-- `npm run exam:save -- <fichier.json>` → `persistExam()` : DB + HTML + répétition espacée.
-- `npm run weakness:brief -- <id>` → contexte + chemin du screenshot (je le lis comme image).
-- `npm run weakness:save -- <id> <fichier.json>` → met à jour la faiblesse + recalcule les liens.
-
-La voie API directe (`/api/exams/generate`, `/api/weaknesses/analyze`, Opus 4.8) reste
-en place mais **optionnelle** (payante) ; elles renvoient un message clair si pas de clé.
-
-## Deux régimes
-
-1. **Construction (en cours)** : Claude (moi) construit l'app. Continuité via STATE.md + git.
-2. **Exploitation** : routine planifiée nocturne où je lance `exam:brief`, je rédige,
-   je `exam:save` → un examen frais le matin, sans coût API.
-
-## Refonte backend « produit » (branche `backend-overhaul`, juillet 2026)
-
-> Objectif : passer d'un super-outil solo à une fondation multi-utilisateurs, SANS changer le
-> comportement par défaut (dev €0, SQLite local, moteur Claude Code via Max). Tout est
-> config-driven : les défauts = comportement historique. Preuve d'invariance à chaque phase :
-> `scripts/regression-cs202.ts` byte-identique (`350d533f7b765a97` / `9a294bb25e9d919c`).
-
-### Moteur LLM — `lib/llm/` (Phase A)
-- Interface unique : `complete()` / `completeText()` / `completeVia(provider)` + `LlmError`
-  (codes TIMEOUT/UNAVAILABLE préservés → mêmes mappings HTTP).
-- 3 providers par `LLM_PROVIDER` : **claude-code** (défaut €0 : `claude -p` headless via Max,
-  clés API strippées de l'env enfant, vision par chemins + `--add-dir`) · **anthropic**
-  (SDK officiel, streaming) · **openai-compatible** (endpoint générique — NVIDIA NIM, vLLM…).
-- Robustesse : retries backoff+jitter (erreurs retryable seulement — les fallbacks métier des
-  call sites exigent le throw immédiat), timeout par appel, AbortSignal, limiteur de
-  concurrence global FIFO (`LLM_MAX_CONCURRENCY`).
-- 26 call sites migrés ; `lib/claude-code.ts` reste le pont bas niveau (inchangé).
-
-### Données — `db/` (Phase B)
-- **`db/tables.ts`** : SOURCE DE VÉRITÉ du schéma (20 tables, y c. les ex-« lazy ») → DDL
-  généré pour les deux dialectes. `db/schema.ts`/migrations Drizzle conservés en héritage
-  (Drizzle n'était PAS utilisé au runtime — tout le code est en SQL brut).
-- **`db/q.ts`** : façade de requêtes ASYNC unique (`q.all/get/run/insert/exec/tx`,
-  `ensureTable/ensureColumns`, `nowStr()/nowPlusDays()` — les ~200 sites SQL bruts ont été
-  convertis ; SQL portable : plus de `datetime('now')`, `OR REPLACE` → `ON CONFLICT`).
-- **Driver sqlite** (défaut) : better-sqlite3 par cours (ALS), cache de statements, mutex de
-  transaction par connexion — comportement historique.
-- **Driver postgres** (`DB_DRIVER=postgres` + `DATABASE_URL`) : postgres.js OU **PGlite**
-  (`pglite://…`, Postgres WASM in-process — tests/démo sans Docker). **Multi-tenant par
-  SCHÉMA** : `t_<user>_<cours>` via `search_path` — isolation STRUCTURELLE (aucun WHERE
-  user_id à oublier, SQL applicatif identique aux deux dialectes ; miroir du modèle
-  fichier-par-cours). Choix assumé vs colonnes user_id : isolation plus dure, zéro réécriture.
-- **Recherche** : FTS5 (sqlite) · tsvector GIN 'simple' sur ombre normalisée `items.text_norm`
-  (postgres) — même expansion floue du vocabulaire, divergence de ranking assumée (bm25 vs ts_rank).
-- **Migration** : `scripts/migrate-to-postgres.ts` (ids préservés, séquences resynchronisées,
-  sanitisation NUL/surrogates, idempotent, vérification des comptes par table).
-
-### Auth & tenancy (Phase B4)
-- **Auth.js v5 (NextAuth)**, OPT-IN par `AUTH_ENABLED=1` — sans elle, AUCUNE auth (mono-user
-  « owner », historique). Magic-link e-mail (lien loggé en console si aucun endpoint d'envoi
-  — dev €0) + Google OAuth optionnel. Sessions JWT ; store users/accounts/tokens séparé
-  (`data/auth.db` en sqlite, schéma `public` en PG).
-- **`proxy.ts`** (Next 16, ex-middleware) : garde toutes les routes, pose le header interne
-  `x-cortex-user` (strippé des requêtes entrantes — anti-usurpation) → `useCourse()` installe
-  le contexte AsyncLocalStorage {user, cours} → tenant DB.
-- Preuves : test d'isolation 2 users sur Postgres réel (PGlite) ; login magic-link E2E via curl.
-
-### Lancer le mode « prod-like »
 ```
-docker compose up -d postgres            # (cortex/docker-compose.yml)
-# .env.local : DB_DRIVER=postgres · DATABASE_URL=postgres://cortex:cortex@localhost:5433/cortex
-#              AUTH_ENABLED=1 · AUTH_SECRET=…
-npx tsx scripts/migrate-to-postgres.ts   # importe les DB SQLite locales
-npm run dev
+┌─────────────────────────────────────────────────────────────┐
+│  UN conteneur = app Next.js + worker de jobs                │
+│                                                              │
+│   Next.js (App Router)                                       │
+│     ├── pages : accueil, programme, faiblesses, examens,     │
+│     │           entraînement, sources, recherche             │
+│     └── routes API (/api/*)                                  │
+│                                                              │
+│   instrumentation.ts  ──►  pompe la file de jobs au boot     │
+│     └── chaque job = process enfant `tsx scripts/run-job.ts` │
+│                                                              │
+│   lib/  = le moteur (génération, vérification, facturation)  │
+└─────────────────────────────────────────────────────────────┘
+        │                    │                     │
+   PostgreSQL          Volume persistant      Fournisseur LLM
+   (1 schéma par        (PDF générés,          (Anthropic / OpenAI-
+    user × cours)        imports)               compatible / CLI)
 ```
 
-### Jobs durables (Phase C)
-File de jobs par cours (table `jobs`) rendue durable sur les deux drivers (pg-boss écarté : notre
-table+UI existent, et il ne couvrirait pas le mode SQLite dev). Un worker interrompu (PID mort,
-sans-PID trop vieux, ou heartbeat gelé >15 min) est RE-MIS EN FILE tant que `attempts<max_attempts`
-avec son checkpoint (`jobs.checkpoint_json`, progression par lot) conservé ; la pompe
-(`pumpQueuedJobs`, au boot + 60 s + polling) relance un worker → reprise au lot suivant, sans
-doublon. `createJobExclusive` (transaction) supprime le TOCTOU du double-spawn. Heartbeat worker : 30 s.
+Le worker **n'est pas** un service séparé. `instrumentation.ts` démarre avec `next start`, réconcilie les jobs interrompus et consomme la file ; chaque génération est un process enfant. Conséquence assumée : **un seul replica**. La file est locale au conteneur (PID + heartbeat) — scaler horizontalement la casserait.
 
-### Vérification, éval, CI, sandbox (Phase D)
-- Vérif déterministe (`lib/verify-deterministic.ts`) : mcq · numeric (dernier nombre, anti-faux-prouvé)
-  · boolean · structural · symbolic (sympy, sandboxé) · **exec** (code C/Python contre tests
-  stdin→stdout). `verified ∈ {true,false,not_applicable}`, jamais de faux « prouvé ».
-- **Sandbox** (`lib/sandbox-exec.ts`) : réseau coupé, écriture bornée, timeout+ulimit ; refus
-  d'exécuter sans isolation. Modèle de menace : `cortex/docs/SANDBOX.md`.
-- Éval déterministe-first avec seuils bloquants ; **CI** (`.ci/ci.yml` → `.github/workflows/`) :
-  tsc+build+lint(budget)+test+invariant CS-202 byte-identique. Rouge = merge bloqué.
-- `scripts/repair-cs202-db.ts` : réparation de la DB corrompue (recover+FTS+swap+backup).
+---
 
-### Cache & observabilité (Phase E)
-- Cache LLM par hash de contenu (`llm_cache`, OPT-IN `CACHE_ENABLED`) : appel identique = pas de
-  rappel modèle. `lib/metrics.ts` : compteurs/histos + log JSON structuré.
-- `/api/health` (public) et `/api/metrics` (Prometheus/JSON, protégé `METRICS_TOKEN`).
+## Le pipeline de génération
 
-Voir `cortex/.env.example` pour toutes les variables (chacune a un défaut = comportement historique).
+Générer un examen crédible demande plus qu'un appel à un modèle. Le chemin :
+
+1. **Ingestion** (`scripts/ingest.ts`) — parse les documents importés, découpe en items, construit l'index plein texte et un vocabulaire pour la tolérance aux fautes.
+2. **ADN d'examen** (`lib/exam-dna.ts`) — déduit des annales le format réel du cours : moules d'exercices, genres de figures, répartition du barème. Rien n'est codé en dur par matière.
+3. **Profil de cours** (`lib/course-profile.ts`) — assemble les directives de génération. Un profil curaté peut exister pour un cours donné (`lib/profiles/`) ; sinon `lib/profiles/generic.ts` dérive tout de l'ADN. **Le chemin générique est le chemin par défaut**, pas un repli dégradé.
+4. **Composition** (`lib/blueprint.ts`, `lib/composer.ts`) — choisit les exercices, leur poids, leur difficulté.
+5. **Rédaction multi-passes** (`lib/architect.ts`) — étude du corpus → conception du piège → rédaction → audit adverse → vérification. Chaque passe a un rôle distinct ; c'est ce qui sépare un sujet crédible d'un QCM générique.
+6. **Vérification** (`lib/verify-*.ts`) — voir ci-dessous.
+7. **Rendu** (`lib/exam-latex.ts` + `latex/`) — LaTeX → PDF via tectonic, figures via matplotlib ou TikZ.
+
+## Vérification déterministe
+
+Le principe : **une réponse n'est validée que si elle est prouvée**.
+
+- **Code** — compilé et exécuté dans un bac à sable : espace de noms isolé (`unshare`), réseau coupé, écriture hors du répertoire de travail refusée, timeout. Sans isolation disponible, le moteur **refuse d'exécuter** plutôt que d'exécuter à nu.
+- **Numérique** — comparaison à tolérance relative ; c'est le *dernier* nombre de la réponse qui fait foi (évite les faux positifs sur les calculs intermédiaires).
+- **Symbolique** — sympy, en sandbox.
+- **Figures** — la valeur lue doit correspondre à une vérité unique ; 0 ou plusieurs vérités ⇒ non concluant.
+
+En cas d'ambiguïté, le verdict est `not_applicable`. **Un faux « prouvé » est considéré comme un bug grave** — plusieurs tests existent uniquement pour l'empêcher.
+
+## Données et isolation
+
+`db/context.ts` calcule un nom de schéma `t_<utilisateur>_<cours>` (préfixe normalisé + hash tronqué, pour qu'aucune troncature ne fasse collisionner deux comptes). Le driver PostgreSQL pose `search_path` **au niveau de la connexion** : les tables des autres tenants ne sont pas accessibles, même via une requête oubliant un filtre. Les identifiants sont assainis avant interpolation.
+
+Les fichiers suivent la même logique (`data/u/<user>/<cours>/…`), et le téléchargement d'un examen vérifie l'appartenance **en base**, pas seulement le chemin — sinon l'énumération d'identifiants suffirait.
+
+En développement, sans configuration, tout tourne sur SQLite en mono-utilisateur. Un garde-fou interdit explicitement d'activer l'authentification sur SQLite.
+
+## Coût et facturation
+
+Tous les appels au modèle passent par `lib/llm/index.ts` — **point d'entrée unique**, sans chemin de contournement. Il impose :
+
+- un **plafond de dépense global** (`SPEND_CAP_USD`) qui coupe les appels payants quand il est atteint ;
+- l'**enregistrement du coût réel** de chaque appel (`llm_usage`) ;
+- des **quotas quotidiens** par utilisateur, appliqués en amont des générations.
+
+La facturation est un modèle de **crédits prépayés** : solde = somme des deltas dans `credit_transactions`, idempotence garantie par contrainte d'unicité. Les webhooks de paiement sont vérifiés par signature et idempotents par identifiant d'événement ; les remboursements re-créditent exactement ce qui avait été débité, pas le tarif courant.
+
+## Tests et CI
+
+Les tests couvrent le moteur (moules, ADN, vérification déterministe, sandbox), la couche LLM (limiteur, retries, cache, fournisseurs), les drivers de base, l'isolation multi-tenant et la facturation — y compris des cas adverses : rejeu de webhook, signature falsifiée, collision d'identifiants entre tenants.
+
+La CI ajoute deux garanties que le poste de développement ne peut pas donner :
+
+1. **Invariant de non-régression** — un cours de référence doit produire un prompt et un `.tex` byte-identiques aux empreintes canoniques, après réparation de la base et ré-ingestion sur un clone neuf.
+2. **Build de l'image + test de fumée réel** — l'image complète est construite, l'application démarrée, `/api/health` interrogé, et **une compilation LaTeX réellement exécutée** dans le conteneur.
+
+## Choix structurants
+
+| Choix | Raison |
+|---|---|
+| Un seul conteneur app + worker | Une génération dure des minutes : incompatible avec des fonctions serverless à timeout court. |
+| Sources TypeScript embarquées (pas de build `standalone`) | Les jobs sont des process enfants `tsx` ; ils ont besoin des sources. |
+| Un schéma par tenant plutôt qu'une colonne `user_id` | L'isolation devient structurelle et ne dépend pas de la rigueur de chaque requête. |
+| Vérification par exécution plutôt que par relecture | Un modèle qui relit sa propre réponse valide ses propres erreurs. |
+| Invariant byte-identique en CI | Le seul moyen de détecter qu'un « petit refactor » a silencieusement changé la qualité des sujets générés. |
