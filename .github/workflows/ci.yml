@@ -64,7 +64,22 @@ jobs:
       - name: Tests unitaires (drivers, LLM hermétique, sandbox, vérif déterministe, isolation multi-tenant)
         run: npm test
 
+      # Cet invariant a besoin du corpus du cours de référence, qui n'est PAS
+      # dans ce dépôt (les supports de cours appartiennent à leur université).
+      # Il s'exécute donc uniquement là où le corpus est présent — typiquement
+      # le dépôt privé de travail. Ailleurs, il se saute en le disant.
+      - name: Corpus de référence présent ?
+        id: corpus
+        run: |
+          if [ -d data/cs-202/content ] || [ -d ../cours ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Corpus de référence absent — invariant cs-202 non exécuté (attendu hors dépôt de travail)."
+          fi
+
       - name: Invariant CS-202 — réparation DB + ingestion + régression byte-identique
+        if: steps.corpus.outputs.present == 'true'
         run: |
           npx tsx scripts/repair-cs202-db.ts --ci
           npx tsx scripts/regression-cs202.ts /tmp/ci-reg | tee /tmp/reg.out
