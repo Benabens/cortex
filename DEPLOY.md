@@ -323,3 +323,46 @@ Postgres utilise `pg_restore --clean --if-exists`.
 Sans variable posée, l'app reste l'outil historique : SQLite dans `data/`,
 moteur = ton abonnement Claude Max (`claude -p`), zéro coût, zéro auth —
 `cd cortex && npm install && npm run dev`.
+
+---
+
+## 11. Topologie du dépôt et règles de production
+
+> Assaini le 18/09/2026. À respecter pour que la prod reste lisible.
+
+### Une seule branche
+`main` est la **seule branche permanente**, locale comme distante. C'est elle, et
+elle seule, qui déploie.
+
+- Toute branche de travail est **éphémère** : créée depuis `main`, fusionnée par
+  **PR avec CI verte**, puis **supprimée** (locale + distante).
+- Jamais de push direct sur `main` pour du code (les correctifs de docs restent
+  tolérés).
+- Un seul worktree : `Projects/cortex-app`. Ne pas en recréer — c'est ce qui avait
+  produit 8 dossiers et 14 branches fantômes.
+
+### Historique archivé
+Les 14 anciennes branches sont conservées en **tags `archive/*`** poussés sur
+GitHub (29 tags : `archive/<nom>` depuis origin, `archive/local-<nom>` pour les
+commits qui n'avaient jamais été poussés — certaines branches locales avaient
+jusqu'à +220 commits absents d'origin).
+
+Restaurer une ancienne branche :
+```bash
+git checkout -b <nom> archive/local-<nom>   # ou archive/<nom>
+```
+Les bases SQLite et `.env.local` des anciens worktrees sont sauvegardés dans
+`Projects/_cortex-archive-data/` (hors git).
+
+### Railway
+- **Branche connectée à production : `main`** (elle pointait par erreur sur
+  `produit-v1`, une branche supprimée → plus aucun déploiement).
+- **Auto-deploy** activé sur push GitHub.
+- **« Wait for CI » activé** : Railway ne déploie que si la CI GitHub est verte.
+  Conséquence : une CI rouge sur `main` bloque le déploiement — c'est voulu.
+
+### Données personnelles
+Le dépôt est **privé**. La page `/projet` qui exposait des SCIPER a été supprimée
+(PR #4). Les numéros subsistent dans l'**historique git** : acceptable tant que le
+dépôt reste privé ; un scrub d'historique (réécriture de `main`) sera nécessaire
+avant toute ouverture du dépôt.
