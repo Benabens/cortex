@@ -57,6 +57,10 @@ data/ml/uploads/
 data/**/figref/
 data/**/figref-full/
 
+# sauvegardes (scripts/backup.ts) — archives horodatées, jamais dans git
+/backups/
+backups/
+
 # vercel
 .vercel
 
@@ -79,6 +83,10 @@ data/exams/epfl-logo.*
 # figref auto-générés des cours additionnels (rendus depuis les PDF de réf, reconstructibles)
 data/algo/refs/figref/
 data/ml/refs/figref/
+
+# Révision projet perso (contient des SCIPER = données perso) — retiré du dépôt
+# en Produit v1 (la page /projet et sa route sont supprimées), gardé en local.
+data/ml/project-revision.json
 
 # Store d'auth local (e-mails = données perso) — Phase B4 backend-overhaul
 /data/auth.db

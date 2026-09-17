@@ -192,7 +192,7 @@ export async function bankQuestions(kind?: Kind): Promise<BankQuestion[]> {
   await ensureRevisionSchema();
   const where = kind ? `WHERE kind = '${kind}'` : "";
   return (await q.all<any>(
-    `SELECT id, kind, topic, subtopic, statement, official_answer officialAnswer, options, source_exam sourceExam, exam_year examYear, exam_page examPage, points, lecture_rank lectureRank, exam_href examHref
+    `SELECT id, kind, topic, subtopic, statement, official_answer AS "officialAnswer", options, source_exam AS "sourceExam", exam_year AS "examYear", exam_page AS "examPage", points, lecture_rank AS "lectureRank", exam_href AS "examHref"
      FROM bank_questions ${where} ORDER BY (lecture_rank IS NULL), lecture_rank, topic, exam_year, exam_page`
   ) as any[]).map((r) => ({ ...r }));
 }
@@ -492,7 +492,7 @@ export type PlanQuestion = { id: number; kind: Kind; topic: string; lectureRank:
 export async function planQuestions(): Promise<PlanQuestion[]> {
   await ensureRevisionSchema();
   return (await q.all<any>(
-    `SELECT id, kind, topic, lecture_rank lectureRank, statement, options, correct, misconceptions, explanation, solution, verified, verify_method verifyMethod
+    `SELECT id, kind, topic, lecture_rank AS "lectureRank", statement, options, correct, misconceptions, explanation, solution, verified, verify_method AS "verifyMethod"
      FROM revision_plan ORDER BY (lecture_rank IS NULL), lecture_rank, topic, id`
   ) as any[]).map((r) => ({ ...r }));
 }

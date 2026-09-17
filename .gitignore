@@ -2,3 +2,7 @@
 
 # artefacts Playwright MCP (screenshots de session)
 .playwright-mcp/
+
+# Notes de projet personnelles (contiennent des données perso : SCIPER, noms) —
+# retirées du dépôt en Produit v1, conservées en local, jamais recommitées.
+CORTEX_REVISION_PROJET.md

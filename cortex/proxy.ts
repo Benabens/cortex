@@ -24,9 +24,9 @@ const PUBLIC_PREFIXES = ["/api/auth", "/api/health", "/api/metrics", "/api/billi
  * hydraté par prod-boot) sans pouvoir rien générer ni modifier.
  */
 const DEMO_GET_PATHS = new Set([
-  "/", "/revision", "/projet",
+  "/", "/revision",
   // …et les API que ces pages appellent : sans elles la vitrine s'affiche en erreur.
-  "/api/revision", "/api/projet", "/api/dashboard", "/api/program",
+  "/api/revision", "/api/dashboard", "/api/program",
 ]);
 
 /** Rate-limit par IP (fenêtre fixe 60 s, in-process — conteneur unique).

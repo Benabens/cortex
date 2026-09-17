@@ -169,8 +169,8 @@ test("assistance : coût 0 mais solde épuisé → 402 (pas d'appels LLM gratuit
 });
 
 test("identifiants : deux comptes qui tronquent pareil ont des schémas ET des dossiers DISTINCTS", () => {
-  const a = "benjamin.abensur@ecole-polytechnique.example.com";
-  const b = "benjamin.abensur@ecole-polytechnique.example.org";
+  const a = "etudiant.exemple@grande-ecole-polytechnique.example.com";
+  const b = "etudiant.exemple@grande-ecole-polytechnique.example.org";
   assert.notEqual(ctx.userSlug(a), ctx.userSlug(b));
   assert.notEqual(ctx.tenantSchema(a, "cs-202"), ctx.tenantSchema(b, "cs-202"));
   assert.ok(ctx.tenantSchema(a, "cs-202").length < 63, "identifiant Postgres trop long");

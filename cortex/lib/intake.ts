@@ -1,4 +1,6 @@
 import { completeText, extractJson } from "@/lib/llm";
+import { currentCourse } from "@/db/client";
+import { courseLabel } from "@/lib/courses";
 
 /**
  * V5 — Détection du TYPE d'entrée texte de l'exo ciblé (au-delà de l'image).
@@ -21,7 +23,7 @@ const INTAKE_SCHEMA = {
   type: "object",
   properties: {
     kind: { type: "string", description: "« subject » (thème court) | « statement » (la consigne complète d'UN exercice) | « weakness_log » (un dump de lacunes/incompréhensions de l'étudiant)." },
-    focus: { type: "string", description: "Le sujet/la technique CS-202 à cibler, court (ex. « TCP slow start + perte », « inode walk frontière directe→indirecte »)." },
+    focus: { type: "string", description: "Le sujet/la technique DU COURS à cibler, court (ex. un point clé précis mal maîtrisé)." },
     weaknesses: {
       type: "array",
       description: "UNIQUEMENT si kind=weakness_log : la liste des points faibles distincts extraits du dump.",
@@ -52,14 +54,14 @@ export async function classifyTargetText(text: string): Promise<IntakeClass> {
   const t = (text ?? "").trim();
   if (!isRichText(t)) return { kind: "subject", focus: t, weaknesses: [] };
   const prompt = [
-    `Tu es l'assistant d'étude CS-202 (EPFL). Classe le TEXTE D'ENTRÉE ci-dessous, qu'un étudiant colle pour générer un exercice ciblé.`,
+    `Tu es l'assistant d'étude de ${courseLabel(currentCourse())}. Classe le TEXTE D'ENTRÉE ci-dessous, qu'un étudiant colle pour générer un exercice ciblé.`,
     ``,
     `Décide son TYPE :`,
     `  - « subject » : un thème/sujet court (même s'il fait quelques mots).`,
     `  - « statement » : c'est la CONSIGNE / l'ÉNONCÉ COMPLET d'UN exercice (souvent avec sous-questions, chiffres, « calculez », un schéma décrit). On en fera un exo NEUF du même type.`,
     `  - « weakness_log » : un DUMP de lacunes/incompréhensions (« j'ai pas compris…, j'ai raté…, je confonds… », plusieurs points, ton de journal). On en extraira les faiblesses.`,
     ``,
-    `Donne aussi « focus » = le sujet/la technique CS-202 à cibler en priorité (court).`,
+    `Donne aussi « focus » = le sujet/la technique DU COURS à cibler en priorité (court).`,
     `Si « weakness_log » : remplis « weaknesses » avec chaque point faible distinct (topic court + description 1 phrase + gravité 1-3). Sinon « weaknesses » = [].`,
     ``,
     `═══ TEXTE D'ENTRÉE ═══`,

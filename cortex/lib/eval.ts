@@ -140,7 +140,7 @@ export type Judged = { id: number; topic: string | null; answerType: string; off
 
 async function goldItems(limit?: number): Promise<EvalItem[]> {
   await ensureEvalSchema();
-  const rows = await q.all<any>(`SELECT id, source_exam sourceExam, exam_page examPage, question_text questionText, official_answer officialAnswer, answer_type answerType, topic, options FROM eval_items ORDER BY id${limit ? " LIMIT " + Math.max(1, Math.floor(limit)) : ""}`);
+  const rows = await q.all<any>(`SELECT id, source_exam AS "sourceExam", exam_page AS "examPage", question_text AS "questionText", official_answer AS "officialAnswer", answer_type AS "answerType", topic, options FROM eval_items ORDER BY id${limit ? " LIMIT " + Math.max(1, Math.floor(limit)) : ""}`);
   return rows.map((r) => ({ ...r }));
 }
 

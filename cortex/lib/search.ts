@@ -110,8 +110,8 @@ async function toFtsQuery(raw: string, mode: "and" | "or" = "and"): Promise<stri
 }
 
 const SEARCH_SQL = `
-  SELECT i.id itemId, s.id sourceId, s.type sourceType, s.title sourceTitle, s.path sourcePath,
-         i.lecture_id lectureId, i.title title, i.anchor anchor,
+  SELECT i.id AS "itemId", s.id AS "sourceId", s.type AS "sourceType", s.title AS "sourceTitle", s.path AS "sourcePath",
+         i.lecture_id AS "lectureId", i.title title, i.anchor anchor,
          snippet(fts_items, 1, '«', '»', ' … ', 12) snippet
   FROM fts_items f
   JOIN items i   ON i.id = f.item_id

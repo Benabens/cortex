@@ -61,8 +61,8 @@ async function autoLink(text: string, max = 8): Promise<number[]> {
 }
 
 const RESOLVE_ITEM_SQL = `
-  SELECT i.id itemId, i.title, i.anchor, i.lecture_id lectureId,
-         s.type sourceType, s.title sourceTitle, s.path sourcePath
+  SELECT i.id AS "itemId", i.title, i.anchor, i.lecture_id AS "lectureId",
+         s.type AS "sourceType", s.title AS "sourceTitle", s.path AS "sourcePath"
   FROM items i JOIN sources s ON s.id = i.source_id
   WHERE i.id = ?
 `;
@@ -191,6 +191,6 @@ export async function updateWeaknessAnalysis(id: number, topic: string, descript
 export async function listPending(): Promise<{ id: number; topic: string; description: string | null; screenshotPath: string | null }[]> {
   await ensureSchema();
   return q.all<{ id: number; topic: string; description: string | null; screenshotPath: string | null }>(
-    `SELECT id, topic, description, screenshot_path AS screenshotPath FROM weaknesses WHERE analyzed = 0 ORDER BY id`
+    `SELECT id, topic, description, screenshot_path AS "screenshotPath" FROM weaknesses WHERE analyzed = 0 ORDER BY id`
   );
 }
