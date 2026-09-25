@@ -1,7 +1,7 @@
 import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { uploadsDir } from "@/lib/paths";
 import { preflightGeneration } from "@/lib/preflight";
-import { useCourse } from "@/lib/req";
+import { requireCourse } from "@/lib/req";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -17,7 +17,8 @@ const IMG_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg
  * Accepte soit JSON {target}, soit multipart {target?, note?, image?} (image → exo).
  */
 export async function POST(req: NextRequest) {
-  const course = useCourse(req);
+  const { course, denied } = requireCourse(req);
+  if (denied) return denied;
   const ct = req.headers.get("content-type") ?? "";
 
   let payload: { target?: string; imageRel?: string; note?: string } = {};

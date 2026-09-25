@@ -1,6 +1,6 @@
 import { getQcmExam, gradeQcm } from "@/lib/qcm";
 import { recordFeedback } from "@/lib/calibration";
-import { useCourse } from "@/lib/req";
+import { useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -11,7 +11,8 @@ export const dynamic = "force-dynamic";
  * distracteur choisi). Le résultat nourrit la boucle de feedback de calibration.
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  useCourse(req);
+  const denied = useCourseOr404(req);
+  if (denied) return denied;
   const { id } = await params;
   const body = await req.json().catch(() => ({}));
   const answers: Record<number, number[]> = body?.answers ?? {};

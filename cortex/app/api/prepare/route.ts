@@ -1,5 +1,5 @@
 import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
-import { useCourse } from "@/lib/req";
+import { requireCourse } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -10,7 +10,8 @@ export const dynamic = "force-dynamic";
  * (ingestion contenu+annales → détection du format → blueprint), avec progression suivie par l'UI.
  */
 export async function POST(req: NextRequest) {
-  const course = useCourse(req);
+  const { course, denied } = requireCourse(req);
+  if (denied) return denied;
   const existing = await activeJob("prepare");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
   // La préparation d'un cours fait de la VISION LLM sur les

@@ -1,5 +1,5 @@
 import { recordScore } from "@/lib/program";
-import { useCourse } from "@/lib/req";
+import { useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -10,7 +10,8 @@ export const dynamic = "force-dynamic";
  * (courbe de l'oubli). Score ≤ 3 → renforce une faiblesse. Renvoie le type + les stats à jour.
  */
 export async function POST(req: NextRequest) {
-  useCourse(req);
+  const denied = useCourseOr404(req);
+  if (denied) return denied;
   const body = await req.json().catch(() => ({}));
   const topicId = Number(body.topicId);
   const score = Number(body.score);

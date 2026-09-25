@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useCourse } from "@/lib/ux/api";
 
 type BQ = { id: number; topic: string; lectureRank: number | null; statement: string; options: string | null; officialAnswer: string | null; sourceExam: string; examYear: number | null; examPage: number | null; examHref: string | null };
 type PQ = { id: number; kind: "qcm" | "open"; topic: string; lectureRank: number | null; statement: string; options: string | null; correct: string | null; explanation: string | null; solution: string | null; verified: number | null; verifyMethod: string | null };
@@ -19,15 +20,23 @@ function groupByTopic<T extends { topic: string; lectureRank: number | null }>(a
 }
 
 export default function RevisionPage() {
+  const { courseId, ready } = useCourse();
   const [d, setD] = useState<Data | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [fetching, setFetching] = useState(true);
+  // Compte sans cours : rien à charger, la page affiche l'état vide.
+  const loading = !ready || (!!courseId && fetching);
   const [tab, setTab] = useState<"qcm" | "open" | "plan">("qcm");
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [reveal, setReveal] = useState<Record<number, boolean>>({});
   const [done, setDone] = useState<Record<string, boolean>>({});
   const [hideDone, setHideDone] = useState(false);
 
-  useEffect(() => { (async () => { try { setD(await (await fetch("/api/revision")).json()); } catch {} setLoading(false); })(); }, []);
+  // Le cours est explicite : sans lui, l'API retombait sur cs-202, que seul son propriétaire peut lire.
+  useEffect(() => {
+    if (!ready) return;
+    if (!courseId) return;
+    (async () => { try { setD(await (await fetch(`/api/revision?course=${encodeURIComponent(courseId)}`)).json()); } catch {} setFetching(false); })();
+  }, [ready, courseId]);
 
   // progression locale : coche « fait » par question, persiste entre sessions (localStorage, par cours)
   useEffect(() => {

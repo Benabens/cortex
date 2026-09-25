@@ -2,7 +2,7 @@ import { isQcmCourse } from "@/lib/format";
 import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
 import { getTopic, topicTarget } from "@/lib/program";
-import { useCourse } from "@/lib/req";
+import { requireCourse } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -15,7 +15,8 @@ export const dynamic = "force-dynamic";
  * Le `topicId` est suivi côté UI (trainTopic) → le score de maîtrise s'attribue au bon type.
  */
 export async function POST(req: NextRequest) {
-  const course = useCourse(req);
+  const { course, denied } = requireCourse(req);
+  if (denied) return denied;
   const { topicId } = await req.json().catch(() => ({ topicId: 0 }));
   const topic = await getTopic(Number(topicId));
   if (!topic) return NextResponse.json({ error: "Type introuvable." }, { status: 404 });

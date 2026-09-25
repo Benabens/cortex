@@ -1,6 +1,6 @@
 import { q as db } from "@/db/q";
 import { tokenize } from "@/lib/text";
-import { useCourse } from "@/lib/req";
+import { useCourseOr404 } from "@/lib/req";
 import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
@@ -149,7 +149,8 @@ function injectedScript(targetTitle: string, terms: string[]): string {
 }
 
 export async function GET(req: NextRequest) {
-  useCourse(req);
+  const denied = useCourseOr404(req);
+  if (denied) return denied;
   const sp = req.nextUrl.searchParams;
   const src = sp.get("src") ?? "";
   const q = sp.get("q") ?? "";

@@ -1,7 +1,7 @@
 import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { getFormatProfile } from "@/lib/format";
 import { preflightGeneration } from "@/lib/preflight";
-import { useCourse } from "@/lib/req";
+import { requireCourse, useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -9,13 +9,15 @@ export const dynamic = "force-dynamic";
 
 /** GET : le profil de format détecté (pour l'UI). */
 export async function GET(req: NextRequest) {
-  useCourse(req);
+  const denied = useCourseOr404(req);
+  if (denied) return denied;
   return NextResponse.json({ format: await getFormatProfile() });
 }
 
 /** POST {count?, openCount?, focus?} : compose+génère un examen QCM (job arrière-plan). */
 export async function POST(req: NextRequest) {
-  const course = useCourse(req);
+  const { course, denied } = requireCourse(req);
+  if (denied) return denied;
   const fmt = await getFormatProfile();
   if (!fmt?.has_mcq) return NextResponse.json({ error: "Format non détecté ou sans QCM pour ce cours. Lance la détection de format d'abord." }, { status: 400 });
   const existing = await activeJob("qcm");

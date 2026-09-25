@@ -1,7 +1,7 @@
 import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { labSeries, resolveLab } from "@/lib/labs";
 import { preflightGeneration } from "@/lib/preflight";
-import { useCourse } from "@/lib/req";
+import { requireCourse, useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -9,7 +9,8 @@ export const dynamic = "force-dynamic";
 
 /** GET : la série Labs (un exo par lab, liens PDF énoncé+corrigé). */
 export async function GET(req: NextRequest) {
-  useCourse(req);
+  const denied = useCourseOr404(req);
+  if (denied) return denied;
   return NextResponse.json({ series: await labSeries() });
 }
 
@@ -18,7 +19,8 @@ export async function GET(req: NextRequest) {
  * POST {lab?: "lab1"|"lab2"|"lab4"|"lab5", topic?: string} → job 'lab-exercise' en arrière-plan.
  */
 export async function POST(req: NextRequest) {
-  const course = useCourse(req);
+  const { course, denied } = requireCourse(req);
+  if (denied) return denied;
   const { lab, topic } = await req.json().catch(() => ({ lab: "", topic: "" }));
   const labStr = String(lab ?? "").trim();
   const topicStr = String(topic ?? "").trim();

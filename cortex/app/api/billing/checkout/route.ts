@@ -1,6 +1,5 @@
 import { billingEnabled } from "@/lib/billing/credits";
-import { currentUser } from "@/db/context";
-import { useCourse } from "@/lib/req";
+import { currentUser, enterUser } from "@/db/context";
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 
@@ -14,7 +13,7 @@ export const dynamic = "force-dynamic";
  * confirmé (idempotent par id d'événement) — jamais ici.
  */
 export async function POST(req: NextRequest) {
-  useCourse(req);
+  enterUser(req.headers.get("x-cortex-user"));
   if (!billingEnabled()) {
     return NextResponse.json({ error: "Facturation désactivée (BILLING_ENABLED)." }, { status: 501 });
   }
