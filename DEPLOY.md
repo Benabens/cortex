@@ -81,8 +81,12 @@ LLM_MAX_CONCURRENCY=2
 AUTH_ENABLED=1
 AUTH_SECRET=⟨sortie de : openssl rand -base64 32⟩
 AUTH_URL=https://⟨ton-domaine-railway⟩
-RESEND_API_KEY=⟨re_… (étape 6)⟩
-AUTH_EMAIL_FROM=Cortex <onboarding@resend.dev>
+GOOGLE_CLIENT_ID=⟨… (console Google Cloud)⟩
+GOOGLE_CLIENT_SECRET=⟨…⟩
+# Lien magique par e-mail : OPTIONNEL, désactivé par défaut (étape 6 si voulu)
+# AUTH_EMAIL_ENABLED=1
+# RESEND_API_KEY=⟨re_… (étape 6)⟩
+# AUTH_EMAIL_FROM=Cortex <onboarding@resend.dev>
 
 # — garde-fous de coût (OBLIGATOIRES) —
 SPEND_CAP_USD=25
@@ -128,7 +132,11 @@ Le domaine : Settings → **Networking** → **Generate Domain** (type
    demande. N'active `LLM_ALLOW_OPUS=1` qu'en connaissance de cause (~2×
    l'entrée, ~1,7× la sortie de Sonnet).
 
-## 6. Resend — l'e-mail de connexion
+## 6. Resend — l'e-mail de connexion (optionnel)
+
+Le lien magique est **désactivé par défaut** (Google seul) : c'est une seconde
+voie d'inscription et n'importe qui peut déclencher des envois. Pour l'activer,
+pose `AUTH_EMAIL_ENABLED=1` puis :
 
 1. resend.com → **API Keys** → **Create** → copie `re_…` dans
    `RESEND_API_KEY`.
@@ -315,8 +323,12 @@ Postgres utilise `pg_restore --clean --if-exists`.
   sandbox) au premier déploiement.
 - Génération d'un examen complet : **10-20 min** (multi-passes + vérification)
   — c'est le prix de la qualité ; l'UI suit le job en direct.
-- Magic-link sans `RESEND_API_KEY` : le lien part dans les **logs** du
-  conteneur — OK pour un test, pas pour du public.
+- Magic-link (`AUTH_EMAIL_ENABLED=1`) sans `RESEND_API_KEY` : en production la
+  demande de lien **échoue** plutôt que d'écrire un jeton de session dans les
+  logs ; hors production le lien est loggé en console (dev).
+- Le conteneur **refuse de démarrer** si `AUTH_ENABLED≠1` alors que
+  `NODE_ENV=production` (posé par l'image) ou `BILLING_ENABLED=1` : impossible
+  d'ouvrir une instance où chaque visiteur serait « owner ».
 
 ## Dev local : rien ne change
 
