@@ -1,6 +1,6 @@
 import { generateExam } from "@/lib/exam";
 import { requireCourse } from "@/lib/req";
-import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
+import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -38,7 +38,13 @@ export async function POST(req: NextRequest) {
   const count = Number(body?.count) > 0 ? Math.min(12, Math.floor(Number(body.count))) : undefined;
   const focus = typeof body?.focus === "string" && body.focus.trim() ? body.focus.trim().slice(0, 400) : undefined;
   const target = count || focus ? JSON.stringify({ count, focus }) : undefined;
-  const { id: jobId } = await createJobExclusive("exam", target);
+  let jobId: number;
+  try {
+    ({ id: jobId } = await createJobExclusive("exam", target));
+  } catch (e) {
+    if (e instanceof ReservationRefused) return NextResponse.json({ error: e.message }, { status: e.status });
+    throw e;
+  }
   try {
     await startWorker(jobId, course);
   } catch (e: any) {

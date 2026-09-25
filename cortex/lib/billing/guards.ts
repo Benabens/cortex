@@ -39,7 +39,7 @@ export type QuotaBucket = "gen" | "assist";
 
 const QUOTA_DEFAULT: Record<QuotaBucket, number> = { gen: 10, assist: 40 };
 
-function quotaFor(bucket: QuotaBucket): number | null {
+export function quotaFor(bucket: QuotaBucket): number | null {
   const name = bucket === "gen" ? "DAILY_GEN_QUOTA" : "DAILY_ASSIST_QUOTA";
   return intLimit(name, QUOTA_DEFAULT[bucket]);
 }
@@ -47,7 +47,7 @@ function quotaFor(bucket: QuotaBucket): number | null {
 /** Limite de DÉBIT par utilisateur et par minute — arrête une boucle scriptée
  *  bien avant le quota quotidien. Défaut 20/min : aucun humain ne déclenche 20
  *  générations en une minute ; le quota quotidien reste la borne de coût. */
-function ratePerUserPerMin(): number | null {
+export function ratePerUserPerMin(): number | null {
   return intLimit("RATE_LIMIT_PER_USER_MIN", 20);
 }
 
@@ -110,7 +110,7 @@ export async function generationGate(bucket: QuotaBucket): Promise<GateIssue | n
 /** Un compteur n'a de sens QUE si un garde-fou l'utilise (quota posé, ou
  *  facturation active). Sinon : ne rien écrire — le dev €0 ne doit créer
  *  AUCUN fichier/table de plus qu'avant (invariant n°1). */
-function quotaTrackingActive(): boolean {
+export function quotaTrackingActive(): boolean {
   return (
     guardsActive() ||
     quotaFor("gen") !== null ||

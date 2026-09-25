@@ -208,18 +208,6 @@ export function insufficient(balanceCenti: number, costCenti: number): { status:
   return null;
 }
 
-/** Débite une génération (idempotent par job). Best-effort : loggé si échec. */
-export async function debitGeneration(kind: string, ref: string): Promise<void> {
-  if (!billingEnabled()) return;
-  const cost = creditCost(kind);
-  if (cost <= 0) return;
-  try {
-    await addTransaction(currentUser(), -cost, `génération ${kind}`, ref);
-  } catch (e) {
-    log("warn", "credits.debit_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
-  }
-}
-
 /**
  * Rembourse une génération qui n'a rien produit (idempotent : ref refund:<ref>).
  * Rend EXACTEMENT ce qui a été débité — pas un coût recalculé : un changement

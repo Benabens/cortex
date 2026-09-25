@@ -1,5 +1,5 @@
 import { coursePaths } from "@/lib/courses";
-import { createJobExclusive, startWorker } from "@/lib/jobs";
+import { createJobExclusive, ReservationRefused, startWorker } from "@/lib/jobs";
 import { requireCourse } from "@/lib/req";
 import { rejectOversizedBody, UPLOAD_LIMITS } from "@/lib/upload-limit";
 import { ingestRefFile } from "@/lib/sources";
@@ -48,7 +48,14 @@ export async function POST(req: NextRequest) {
   if (gate) {
     formatSkipped = gate.error;
   } else {
-    try { const r = await createJobExclusive("format", JSON.stringify({ reason: "upload", files: saved })); formatJobId = r.id; if (!r.existing) await startWorker(formatJobId, course); } catch {}
+    try {
+      const r = await createJobExclusive("format", JSON.stringify({ reason: "upload", files: saved }));
+      formatJobId = r.id;
+      if (!r.existing) await startWorker(formatJobId, course);
+    } catch (e) {
+      if (e instanceof ReservationRefused) formatSkipped = e.message; // l'upload reste acquis
+      else throw e;
+    }
   }
   return NextResponse.json({ ok: true, files: saved, formatJobId, formatSkipped });
 }

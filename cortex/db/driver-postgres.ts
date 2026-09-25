@@ -408,6 +408,22 @@ registerDriver(postgresDriver);
 
 export { postgresDriver };
 
+/**
+ * Transaction PGlite sur le schéma `public` (store d'auth). Sérialisée avec le
+ * reste de la file : rien ne peut s'intercaler entre ses requêtes — c'est ce
+ * qui rend la réservation de crédits atomique aussi sur ce backend.
+ */
+export async function pglitePublicTransaction<T>(
+  fn: (query: (text: string, params: SqlParam[]) => Promise<PgRows>) => Promise<T>,
+): Promise<T> {
+  return pgliteSerial(async () => {
+    const db = await pgliteInstance();
+    await db.exec(`SET search_path TO public`);
+    _pgliteSchema = null;
+    return db.transaction(async (tx) => fn(async (text, params) => (await tx.query(text, pgSafeParams(params) as unknown[])).rows));
+  });
+}
+
 /** Requête PGlite sur le schéma `public` (store d'auth) — sérialisée avec le reste. */
 export async function pglitePublicQuery(text: string, params: SqlParam[]): Promise<PgRows> {
   return pgliteSerial(async () => {

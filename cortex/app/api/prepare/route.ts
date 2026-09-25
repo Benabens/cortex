@@ -1,4 +1,4 @@
-import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
+import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { requireCourse } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -22,7 +22,13 @@ export async function POST(req: NextRequest) {
     const gate = (await generationGate("gen")) ?? (await creditsGate("prepare"));
     if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
   }
-  const { id: jobId } = await createJobExclusive("prepare");
+  let jobId: number;
+  try {
+    ({ id: jobId } = await createJobExclusive("prepare"));
+  } catch (e) {
+    if (e instanceof ReservationRefused) return NextResponse.json({ error: e.message }, { status: e.status });
+    throw e;
+  }
   try { await startWorker(jobId, course); }
   catch (e: any) { return NextResponse.json({ error: `worker : ${e?.message ?? e}` }, { status: 500 }); }
   return NextResponse.json({ ok: true, jobId });

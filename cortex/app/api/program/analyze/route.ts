@@ -1,4 +1,4 @@
-import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
+import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
 import { requireCourse, useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
@@ -24,7 +24,13 @@ export async function POST(req: NextRequest) {
   const issue = await preflightGeneration("blueprint");
   if (issue && issue.status !== 412) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
 
-  const { id: jobId } = await createJobExclusive("blueprint");
+  let jobId: number;
+  try {
+    ({ id: jobId } = await createJobExclusive("blueprint"));
+  } catch (e) {
+    if (e instanceof ReservationRefused) return NextResponse.json({ error: e.message }, { status: e.status });
+    throw e;
+  }
   try {
     await startWorker(jobId, course);
   } catch (e: any) {
