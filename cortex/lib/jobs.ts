@@ -110,10 +110,12 @@ export class ReservationRefused extends Error {
  * Coût en centièmes d'un job, PROPORTIONNEL à sa taille quand la route en
  * expose une (composeur) : un prix fixe pour une taille libre permettait de
  * demander 40 QCM ou 12 exercices pour le prix d'un mock standard.
- *  - qcm : 1 unité = 20 questions à choix (une ouverte compte double) ;
+ *  - qcm : 1 unité = le mock standard (20 QCM + 3 ouvertes, une ouverte
+ *    comptant double → 26 équivalents) ; au-delà, une unité par tranche ;
  *  - exam : 8 exercices inclus, puis 1 crédit par tranche de 4.
- * Défauts (sans target) = tarif de base ; CREDITS_COST_JSON reste la base.
+ * Sans target (défauts du moteur) = tarif de base ; CREDITS_COST_JSON reste la base.
  */
+const QCM_UNIT_EQUIV = 20 + 2 * 3;
 export function costForJob(type: JobType, target?: string | null): number {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { creditCost, CENTI } = require("@/lib/billing/credits") as typeof import("@/lib/billing/credits");
@@ -122,8 +124,8 @@ export function costForJob(type: JobType, target?: string | null): number {
   try { t = target ? JSON.parse(target) : {}; } catch { /* target texte simple */ }
   if (type === "qcm") {
     const count = typeof t.count === "number" ? t.count : 20;
-    const open = typeof t.openCount === "number" ? t.openCount : 2;
-    const units = Math.max(1, Math.ceil((count + 2 * open) / 20));
+    const open = typeof t.openCount === "number" ? t.openCount : 3;
+    const units = Math.max(1, Math.ceil((count + 2 * open) / QCM_UNIT_EQUIV));
     return base * units;
   }
   if (type === "exam") {
