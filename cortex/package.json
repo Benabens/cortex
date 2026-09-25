@@ -19,7 +19,8 @@
     "db:push": "drizzle-kit push",
     "revision": "tsx scripts/revision.ts",
     "revision:extend": "tsx scripts/revision-extend.ts",
-    "dna": "tsx scripts/exam-dna.ts"
+    "dna": "tsx scripts/exam-dna.ts",
+    "cost:report": "tsx scripts/cost-report.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
