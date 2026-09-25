@@ -229,7 +229,7 @@ pose `AUTH_EMAIL_ENABLED=1` puis :
   même plafond atteint ; le reste du site marche toujours).
 - **Kill-switch immédiat** : Variables → `SPEND_CAP_USD=0` → Redeploy
   (~1 min). Toute génération payante est coupée avec un message propre.
-- **Métriques** : `https://⟨domaine⟩/api/metrics?token=⟨METRICS_TOKEN⟩`
+- **Métriques** : `curl -H 'Authorization: Bearer ⟨METRICS_TOKEN⟩' https://⟨domaine⟩/api/metrics` (le jeton n'est plus accepté en `?token=`)
   (Prometheus/JSON). Logs : onglet **Observability** de Railway.
 - **Quota trop lâche/serré** : ajuste `DAILY_GEN_QUOTA` (et les prix Stripe).
 
