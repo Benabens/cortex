@@ -2,6 +2,7 @@ import { currentCourse } from "@/db/client";
 import { getCourse } from "@/lib/courses";
 import type { ExamQuestion } from "@/lib/exam";
 import { compileExamPdf } from "@/lib/exam-latex";
+import { assertTexSafe } from "@/lib/tex-guard";
 import { getFormatProfile } from "@/lib/format";
 import { examsDir } from "@/lib/paths";
 import type { QcmItem } from "@/lib/qcm";
@@ -199,8 +200,13 @@ export async function buildQcmArtifact(examId: number, data: QcmExamData, dateLa
     const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
     if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
   }
-  fs.writeFileSync(path.join(examsDir(), `${base}.tex`), await renderQcmExamTex(data, dateLabel, false));
-  fs.writeFileSync(path.join(examsDir(), `${base}-corrige.tex`), await renderQcmExamTex(data, dateLabel, true));
+  // Garde AVANT toute écriture (cf. lib/tex-guard).
+  const texEnonce = await renderQcmExamTex(data, dateLabel, false);
+  const texCorrige = await renderQcmExamTex(data, dateLabel, true);
+  assertTexSafe(texEnonce);
+  assertTexSafe(texCorrige);
+  fs.writeFileSync(path.join(examsDir(), `${base}.tex`), texEnonce);
+  fs.writeFileSync(path.join(examsDir(), `${base}-corrige.tex`), texCorrige);
   try {
     const pdf = await compileExamPdf(base);
     try { await compileExamPdf(`${base}-corrige`); } catch (e) { console.error(`[qcm] corrigé #${examId} non compilé :`, (e as Error).message); }
