@@ -19,6 +19,7 @@ let credits: typeof import("../lib/billing/credits");
 let guards: typeof import("../lib/billing/guards");
 let courses: typeof import("../lib/courses");
 let ctx: typeof import("../db/context");
+let reserve: typeof import("../lib/billing/reserve");
 
 before(async () => {
   for (const k of ["BILLING_ENABLED", "DAILY_GEN_QUOTA", "DAILY_ASSIST_QUOTA", "AUTH_ENABLED", "DB_DRIVER"]) delete process.env[k];
@@ -26,6 +27,7 @@ before(async () => {
   guards = await import("../lib/billing/guards");
   courses = await import("../lib/courses");
   ctx = await import("../db/context");
+  reserve = await import("../lib/billing/reserve");
 });
 
 after(() => {
@@ -55,8 +57,8 @@ test("ref de débit scopée par user : deux tenants avec le même id de job sont
   const refB = credits.jobRef("bob", "ml", 1);
   assert.notEqual(refA, refB, "la ref doit distinguer les utilisateurs");
 
-  await ctx.runWithUser("alice", () => credits.debitGeneration("exam", refA));
-  await ctx.runWithUser("bob", () => credits.debitGeneration("exam", refB));
+  await ctx.runWithUser("alice", () => reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: refA }));
+  await ctx.runWithUser("bob", () => reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: refB }));
   assert.equal(await credits.getBalance("alice"), 3); // 5 - 2
   assert.equal(await credits.getBalance("bob"), 3);   // 5 - 2, PAS sauté
 
@@ -135,14 +137,14 @@ test("annulation : remboursée AVANT travail, PAS après (sinon générations gr
     const solde0 = await credits.getBalance("dave"); // 10
     // (a) annulation immédiate (job en file, 0 % fait) → remboursé
     const refA = credits.jobRef("dave", "ml", 100);
-    await credits.debitGeneration("exam", refA);
+    await reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: refA });
     assert.equal(await credits.getBalance("dave"), solde0 - 2);
     await jobs.refundJobCredits({ id: 100, type: "exam" });
     assert.equal(await credits.getBalance("dave"), solde0);
 
     // (b) le remboursement rend le montant DÉBITÉ même si le tarif a changé
     const refB = credits.jobRef("dave", "ml", 101);
-    await credits.debitGeneration("exam", refB);            // -2 au tarif courant
+    await reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: refB }); // -2 au tarif courant
     process.env.CREDITS_COST_JSON = '{"exam":9}';           // hausse de tarif
     await credits.refundGeneration("exam", refB, "dave");
     assert.equal(await credits.getBalance("dave"), solde0, "le remboursement doit rendre 2, pas 9");

@@ -24,6 +24,7 @@ process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_local";
 let credits: typeof import("../lib/billing/credits");
 let guards: typeof import("../lib/billing/guards");
 let webhookPOST: typeof import("../app/api/billing/webhook/route").POST;
+let reserve: typeof import("../lib/billing/reserve");
 
 before(async () => {
   delete process.env.DAILY_GEN_QUOTA;
@@ -31,6 +32,7 @@ before(async () => {
   credits = await import("../lib/billing/credits");
   guards = await import("../lib/billing/guards");
   ({ POST: webhookPOST } = await import("../app/api/billing/webhook/route"));
+  reserve = await import("../lib/billing/reserve");
 });
 
 after(() => {
@@ -44,9 +46,11 @@ test("palier gratuit : crédité UNE fois (idempotent), solde = somme des transa
 });
 
 test("débit / remboursement : idempotents, remboursement seulement si débit", async () => {
-  await credits.debitGeneration("exam", "job:ml:1"); // exam = 2 crédits
+  const r1 = await reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:ml:1" }); // exam = 2 crédits
+  assert.equal(r1.ok, true);
   assert.equal(await credits.getBalance("owner"), 0);
-  await credits.debitGeneration("exam", "job:ml:1"); // rejoué → no-op (ref unique)
+  const r2 = await reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:ml:1" }); // rejoué → même ref, pas de second débit
+  assert.equal(r2.ok, true);
   assert.equal(await credits.getBalance("owner"), 0);
 
   await credits.refundGeneration("exam", "job:ml:1", "owner");
@@ -60,7 +64,7 @@ test("débit / remboursement : idempotents, remboursement seulement si débit", 
 
 test("creditsGate : passe avec solde, 402 clair sans solde ; billing off → no-op", async () => {
   assert.equal(await credits.creditsGate("qcm"), null); // solde 2 ≥ 1
-  await credits.debitGeneration("exam", "job:ml:2"); // → 0
+  assert.equal((await reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:ml:2" })).ok, true); // → 0
   const gate = await credits.creditsGate("exam");
   assert.ok(gate && gate.status === 402 && /Solde insuffisant/.test(gate.error));
 

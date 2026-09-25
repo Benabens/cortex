@@ -1,4 +1,4 @@
-import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
+import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { labSeries, resolveLab } from "@/lib/labs";
 import { preflightGeneration } from "@/lib/preflight";
 import { requireCourse, useCourseOr404 } from "@/lib/req";
@@ -36,7 +36,13 @@ export async function POST(req: NextRequest) {
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
 
   const resolved = resolveLab(labStr || topicStr);
-  const { id: jobId } = await createJobExclusive("lab-exercise", JSON.stringify({ lab: resolved.id, topic: topicStr || undefined }));
+  let jobId: number;
+  try {
+    ({ id: jobId } = await createJobExclusive("lab-exercise", JSON.stringify({ lab: resolved.id, topic: topicStr || undefined })));
+  } catch (e) {
+    if (e instanceof ReservationRefused) return NextResponse.json({ error: e.message }, { status: e.status });
+    throw e;
+  }
   try {
     await startWorker(jobId, course);
   } catch (e: any) {

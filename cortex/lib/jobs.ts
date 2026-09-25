@@ -65,17 +65,72 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
     );
     return { id, existing: false };
   });
-  // POINT UNIQUE de la comptabilité de génération (toutes les
-  // routes de génération passent ici) : quota quotidien + débit de crédits,
-  // idempotent par job (ref jobRef = user+cours+id). `ingest` ne coûte rien.
-  // No-op sans DAILY_GEN_QUOTA/BILLING_ENABLED (dev €0 intact).
+  // POINT UNIQUE de la comptabilité de génération (toutes les routes de
+  // génération passent ici) : UNE réservation atomique — rafale, quota du jour,
+  // places en cours, solde — débitée AVANT que le job n'existe pour le moteur.
+  // Refus → le job porte le motif (statut error) et la route reçoit une
+  // ReservationRefused : aucun worker n'est lancé, rien n'est débité.
+  // `ingest` ne coûte rien. No-op sans garde-fou actif (dev €0 intact).
   if (!res.existing && type !== "ingest") {
-    const { recordGeneration } = await import("@/lib/billing/guards");
-    const { debitGeneration, jobRef } = await import("@/lib/billing/credits");
-    await recordGeneration("gen", type);
-    await debitGeneration(type, jobRef(currentUser(), currentCourse(), res.id));
+    const { reserveGeneration } = await import("@/lib/billing/reserve");
+    const { jobRef } = await import("@/lib/billing/credits");
+    const user = currentUser();
+    const course = currentCourse();
+    let r: Awaited<ReturnType<typeof reserveGeneration>>;
+    try {
+      r = await reserveGeneration({
+        bucket: "gen", kind: type, costCenti: costForJob(type, target),
+        ref: jobRef(user, course, res.id), jobSlot: { course, jobId: res.id },
+      });
+    } catch (e) {
+      // Erreur technique du store (pas un refus) : pas de génération gratuite sur erreur DB.
+      const msg = e instanceof Error ? e.message.slice(0, 200) : String(e);
+      await setJob(res.id, { status: "error", error: `Réservation impossible : ${msg}` });
+      throw new ReservationRefused(503, "Facturation indisponible — réessaie dans un instant.");
+    }
+    if (!r.ok) {
+      await setJob(res.id, { status: "error", error: r.error });
+      throw new ReservationRefused(r.status, r.error);
+    }
   }
   return res;
+}
+
+/** Refus de réservation (solde, quota, places) — la route le rend tel quel (402/429). */
+export class ReservationRefused extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ReservationRefused";
+    this.status = status;
+  }
+}
+
+/**
+ * Coût en centièmes d'un job, PROPORTIONNEL à sa taille quand la route en
+ * expose une (composeur) : un prix fixe pour une taille libre permettait de
+ * demander 40 QCM ou 12 exercices pour le prix d'un mock standard.
+ *  - qcm : 1 unité = 20 questions à choix (une ouverte compte double) ;
+ *  - exam : 8 exercices inclus, puis 1 crédit par tranche de 4.
+ * Défauts (sans target) = tarif de base ; CREDITS_COST_JSON reste la base.
+ */
+export function costForJob(type: JobType, target?: string | null): number {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { creditCost, CENTI } = require("@/lib/billing/credits") as typeof import("@/lib/billing/credits");
+  const base = creditCost(type);
+  let t: Record<string, unknown> = {};
+  try { t = target ? JSON.parse(target) : {}; } catch { /* target texte simple */ }
+  if (type === "qcm") {
+    const count = typeof t.count === "number" ? t.count : 20;
+    const open = typeof t.openCount === "number" ? t.openCount : 2;
+    const units = Math.max(1, Math.ceil((count + 2 * open) / 20));
+    return base * units;
+  }
+  if (type === "exam") {
+    const count = typeof t.count === "number" ? t.count : 0;
+    return count > 8 ? base + CENTI * Math.ceil((count - 8) / 4) : base;
+  }
+  return base;
 }
 
 // ─────────────── Checkpointing durable ───────────────
@@ -111,6 +166,13 @@ export async function setJob(id: number, fields: Partial<{ status: JobStatus; cu
   sets.push(`updated_at = ?`);
   vals.push(nowStr());
   await q.run(`UPDATE jobs SET ${sets.join(", ")} WHERE id = ?`, ...vals, id);
+  // État terminal : la place « génération en cours » du compte est libérée.
+  if (fields.status && ["done", "error", "canceled"].includes(fields.status)) {
+    try {
+      const { releaseJobSlot } = await import("@/lib/billing/reserve");
+      await releaseJobSlot(currentUser(), currentCourse(), id);
+    } catch { /* best-effort */ }
+  }
   // Métriques : durée d'un job à son état terminal.
   if (fields.status && ["done", "error", "canceled"].includes(fields.status)) {
     try {
@@ -270,6 +332,10 @@ export async function retryJob(id: number, course?: string): Promise<Job | null>
 export async function startWorker(jobId: number, course?: string): Promise<void> {
   const cwd = process.cwd();
   const c = course ?? currentCourse();
+  // Un job refusé par la réservation (statut error) ou déjà terminé ne démarre
+  // JAMAIS : pas de génération gratuite parce qu'une route aurait oublié le refus.
+  const state = await q.get<{ status: string }>(`SELECT status FROM jobs WHERE id = ?`, jobId);
+  if (!state || state.status !== "queued") return;
   const tsxLocal = path.join(cwd, "node_modules", ".bin", "tsx");
   const useLocal = fs.existsSync(tsxLocal);
   const bin = useLocal ? tsxLocal : "npx";

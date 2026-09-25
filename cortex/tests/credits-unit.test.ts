@@ -55,13 +55,14 @@ test("nouvelles écritures en centièmes : palier gratuit, coûts, débit, rembo
   delete process.env.CREDITS_COST_JSON;
 
   const { runWithUser } = await import("../db/context");
-  await runWithUser("bob", () => credits.debitGeneration("qcm", "job:bob:ml:1"));
+  const { reserveGeneration } = await import("../lib/billing/reserve");
+  await runWithUser("bob", () => reserveGeneration({ bucket: "gen", kind: "qcm", ref: "job:bob:ml:1" }));
   assert.equal(await credits.getBalanceCenti("bob"), 100);
   assert.equal(await credits.getBalance("bob"), 1);
   await runWithUser("bob", () => credits.refundGeneration("qcm", "job:bob:ml:1"));
   assert.equal(await credits.getBalanceCenti("bob"), 200);
   // Les gates raisonnent en centièmes : 1,9 crédit ne suffit pas pour un examen à 2.
-  await runWithUser("bob", () => credits.debitGeneration("assist", "assist:bob:1"));
+  await runWithUser("bob", () => reserveGeneration({ bucket: "assist", kind: "assist", ref: "assist:bob:1" }));
   assert.equal(await credits.getBalance("bob"), 1.9);
   const gate = await runWithUser("bob", () => credits.creditsGate("exam"));
   assert.ok(gate && gate.status === 402 && /1,9/.test(gate.error), gate?.error);

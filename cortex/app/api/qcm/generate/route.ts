@@ -1,4 +1,4 @@
-import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
+import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { getFormatProfile } from "@/lib/format";
 import { preflightGeneration } from "@/lib/preflight";
 import { requireCourse, useCourseOr404 } from "@/lib/req";
@@ -35,7 +35,13 @@ export async function POST(req: NextRequest) {
     openCount: oc,
     focus: typeof body.focus === "string" && body.focus.trim() ? body.focus.trim().slice(0, 400) : undefined,
   });
-  const { id: jobId } = await createJobExclusive("qcm", target);
+  let jobId: number;
+  try {
+    ({ id: jobId } = await createJobExclusive("qcm", target));
+  } catch (e) {
+    if (e instanceof ReservationRefused) return NextResponse.json({ error: e.message }, { status: e.status });
+    throw e;
+  }
   try { await startWorker(jobId, course); }
   catch (e: any) { return NextResponse.json({ error: `worker : ${e?.message ?? e}` }, { status: 500 }); }
   return NextResponse.json({ ok: true, jobId });

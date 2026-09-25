@@ -1,5 +1,5 @@
 import { isQcmCourse } from "@/lib/format";
-import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
+import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
 import { getTopic, topicTarget } from "@/lib/program";
 import { requireCourse } from "@/lib/req";
@@ -33,7 +33,13 @@ export async function POST(req: NextRequest) {
   const jobTarget = qcm
     ? JSON.stringify({ count: 4, openCount: 1, focus: topicTarget(topic) }) // QCM-first sur ce type
     : JSON.stringify({ target: topicTarget(topic), topicId: topic.id });
-  const { id: jobId } = await createJobExclusive(jobType, jobTarget);
+  let jobId: number;
+  try {
+    ({ id: jobId } = await createJobExclusive(jobType, jobTarget));
+  } catch (e) {
+    if (e instanceof ReservationRefused) return NextResponse.json({ error: e.message }, { status: e.status });
+    throw e;
+  }
   try {
     await startWorker(jobId, course);
   } catch (e: any) {

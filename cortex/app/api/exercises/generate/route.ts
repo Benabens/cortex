@@ -1,4 +1,4 @@
-import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
+import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { uploadsDir } from "@/lib/paths";
 import { preflightGeneration } from "@/lib/preflight";
 import { requireCourse } from "@/lib/req";
@@ -58,7 +58,13 @@ export async function POST(req: NextRequest) {
 
   // target du job = texte simple (rétrocompat) OU JSON {target,imageRel,note} si image/note présentes
   const jobTarget = payload.imageRel || payload.note ? JSON.stringify(payload) : (payload.target ?? "");
-  const { id: jobId } = await createJobExclusive("exercise", jobTarget);
+  let jobId: number;
+  try {
+    ({ id: jobId } = await createJobExclusive("exercise", jobTarget));
+  } catch (e) {
+    if (e instanceof ReservationRefused) return NextResponse.json({ error: e.message }, { status: e.status });
+    throw e;
+  }
   try {
     await startWorker(jobId, course);
   } catch (e: any) {

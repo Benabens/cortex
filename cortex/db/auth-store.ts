@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { dbDriverName, type SqlParam } from "./q";
 import { toDollarParams } from "./driver-postgres";
+import type { AuthPgQuery } from "./driver-postgres-auth";
 import { dataRoot } from "../lib/courses";
 
 /**
@@ -115,6 +116,13 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS active_jobs (
+      user_id TEXT NOT NULL,
+      course TEXT NOT NULL,
+      job_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, course, job_id)
+    )`,
   ],
   postgres: [
     `CREATE TABLE IF NOT EXISTS public.users (
@@ -215,6 +223,13 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       key text PRIMARY KEY,
       value text NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS public.active_jobs (
+      user_id text NOT NULL,
+      course text NOT NULL,
+      job_id integer NOT NULL,
+      created_at text NOT NULL,
+      PRIMARY KEY (user_id, course, job_id)
+    )`,
   ],
 };
 
@@ -314,4 +329,64 @@ export async function authRun(sql: string, ...params: SqlParam[]): Promise<void>
   }
   const ex = await pgExec();
   await ex.query(toDollarParams(sql), params);
+}
+
+// ---------------- transaction ----------------
+
+/** Exécuteur lié à UNE transaction du store (mêmes placeholders `?`). */
+export type AuthTx = {
+  all<T = Record<string, unknown>>(sql: string, ...params: SqlParam[]): Promise<T[]>;
+  get<T = Record<string, unknown>>(sql: string, ...params: SqlParam[]): Promise<T | undefined>;
+  run(sql: string, ...params: SqlParam[]): Promise<void>;
+};
+
+let _sqliteTxChain: Promise<unknown> = Promise.resolve();
+
+/**
+ * TRANSACTION du store global — pour les décisions lire-puis-écrire qui
+ * doivent être atomiques (réservation de crédits/quotas).
+ *
+ *  - Postgres : transaction native (connexion dédiée) ; l'appelant pose un
+ *    `pg_advisory_xact_lock` par utilisateur pour sérialiser ses réservations.
+ *  - sqlite : BEGIN IMMEDIATE (verrou d'écriture inter-process) + file
+ *    in-process — better-sqlite3 est synchrone sur une connexion unique, donc
+ *    les instructions de `fn` ne s'entrelacent pas entre elles ; les écritures
+ *    d'autres tâches asynchrones du même process qui tomberaient entre deux
+ *    `await` seraient validées avec la transaction, ce qui est sans danger tant
+ *    que `fn` ne provoque pas de ROLLBACK pour un refus métier (il RENVOIE le
+ *    refus, il ne le lève pas).
+ */
+export async function authTx<T>(fn: (tx: AuthTx) => Promise<T>): Promise<T> {
+  if (dbDriverName() === "sqlite") {
+    const db = sqliteAuth();
+    const tx: AuthTx = {
+      async all<T2>(sql: string, ...params: SqlParam[]) { return db.prepare(sql).all(...params) as T2[]; },
+      async get<T2>(sql: string, ...params: SqlParam[]) { return db.prepare(sql).get(...params) as T2 | undefined; },
+      async run(sql: string, ...params: SqlParam[]) { db.prepare(sql).run(...params); },
+    };
+    const run = async () => {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const out = await fn(tx);
+        db.exec("COMMIT");
+        return out;
+      } catch (e) {
+        try { db.exec("ROLLBACK"); } catch { /* déjà rollback */ }
+        throw e;
+      }
+    };
+    const next = _sqliteTxChain.then(run, run);
+    _sqliteTxChain = next.then(() => undefined, () => undefined);
+    return next;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { authPgTx } = require("./driver-postgres-auth") as typeof import("./driver-postgres-auth");
+  return authPgTx(async (query: AuthPgQuery) => {
+    const tx: AuthTx = {
+      async all<T2>(sql: string, ...params: SqlParam[]) { return (await query(toDollarParams(sql), params)) as T2[]; },
+      async get<T2>(sql: string, ...params: SqlParam[]) { return ((await query(toDollarParams(sql), params)) as T2[])[0]; },
+      async run(sql: string, ...params: SqlParam[]) { await query(toDollarParams(sql), params); },
+    };
+    return fn(tx);
+  });
 }
