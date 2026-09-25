@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import { useCourse } from "@/lib/ux/api";
+import { SafeHtml } from "@/components/ui/SafeHtml";
 
 type Item = { id: number; idx: number; topic: string; type: "scq" | "mcq"; stem: string; options: string[]; verified: number | null };
 type Open = { id: number; concept: string; statement: string; solution: string };
@@ -119,13 +120,13 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
               return (
                 <section key={o.id} className="card card-pad">
                   <div className="text-[11.5px] uppercase tracking-wide mb-2" style={{ color: "var(--ink-3)" }}>Question ouverte {i + 1} · {o.concept}</div>
-                  <div className="prose-exam text-[13.5px]" style={{ color: "var(--ink)" }} dangerouslySetInnerHTML={{ __html: o.statement }} />
+                  <SafeHtml className="prose-exam text-[13.5px]" style={{ color: "var(--ink)" }} html={o.statement} />
                   {!graded ? (
                     <textarea className="textarea mt-3" rows={4} placeholder="Ta réponse (auto-évaluée : le corrigé s'affiche après correction)…" style={{ fontSize: 13 }} />
                   ) : sol?.solution ? (
                     <details className="mt-3" open>
                       <summary className="text-[12.5px] cursor-pointer" style={{ color: "var(--green-ink)" }}>corrigé</summary>
-                      <div className="prose-exam text-[13px] mt-2" style={{ color: "var(--ink-2)" }} dangerouslySetInnerHTML={{ __html: sol.solution }} />
+                      <SafeHtml className="prose-exam text-[13px] mt-2" style={{ color: "var(--ink-2)" }} html={sol.solution} />
                     </details>
                   ) : null}
                 </section>
