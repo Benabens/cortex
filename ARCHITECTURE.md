@@ -69,7 +69,15 @@ Tous les appels au modèle passent par `lib/llm/index.ts` — **point d'entrée 
 - l'**enregistrement du coût réel** de chaque appel (`llm_usage`) ;
 - des **quotas quotidiens** par utilisateur, appliqués en amont des générations.
 
-La facturation est un modèle de **crédits prépayés** : solde = somme des deltas dans `credit_transactions`, idempotence garantie par contrainte d'unicité. Les webhooks de paiement sont vérifiés par signature et idempotents par identifiant d'événement ; les remboursements re-créditent exactement ce qui avait été débité, pas le tarif courant.
+La facturation est un modèle de **crédits prépayés**. Vocabulaire, tel qu'il est employé dans le code :
+
+- **Ledger** (`credit_transactions`) : journal ajout-seul ; le **solde** d'un compte est la somme de ses deltas, il n'existe aucune table de solde à désynchroniser. L'unité du ledger est le **centième de crédit** (1 crédit = 100) : l'assistance se facture en fraction de crédit. Une base antérieure est convertie une fois, atomiquement, au premier accès.
+- **Écriture idempotente** : chaque ligne porte une **référence** unique (`signup:<compte>`, `job:<compte>:<cours>:<id>`, `assist:<compte>:<uuid>`, `stripe:cs:<session>`, `refund:<réf>`…). Rejouer une opération ne crée jamais de doublon.
+- **Réservation** : décision unique et atomique, prise **avant** tout travail, qui vérifie dans une même transaction du store global le débit par minute, le quota du jour, le nombre de générations en cours et le solde, puis enregistre le tout. Une réservation refusée signifie que le job n'existe pas pour le moteur (jamais démarré) ; une réservation acceptée est un **débit** définitif.
+- **Achat** : crédit provenant d'un paiement Stripe confirmé, identifié par la session de paiement.
+- **Remboursement** : ligne positive qui rend exactement ce qu'un débit avait prélevé (pas le tarif courant), une seule fois, et seulement si le travail n'a rien coûté au fournisseur (`llm_usage` rattaché au job à zéro).
+- **Reprise** (reversal) : ligne négative qui retire les crédits d'un achat remboursé ou contesté chez Stripe ; le solde peut devenir négatif, ce qui bloque toute génération jusqu'au prochain achat.
+- **Assistance** : appel au modèle sans job (drill, correction, analyses) ; facturé une fraction de crédit, jamais remboursé.
 
 ## Tests et CI
 

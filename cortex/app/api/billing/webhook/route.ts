@@ -1,4 +1,4 @@
-import { addTransaction } from "@/lib/billing/credits";
+import { addTransaction, toCenti } from "@/lib/billing/credits";
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
       const credits = Number(session.metadata?.credits ?? 0);
       if (userId && credits > 0) {
         const credited = await addTransaction(
-          userId, credits, `achat pack ${session.metadata?.pack ?? "?"}`, event.id,
+          userId, toCenti(credits), `achat pack ${session.metadata?.pack ?? "?"}`, event.id,
         );
         return NextResponse.json({ ok: true, credited });
       }
