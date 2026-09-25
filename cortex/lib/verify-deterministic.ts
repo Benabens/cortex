@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { runSandboxed, sandboxAvailable, verifyCode, type CodeTest } from "@/lib/sandbox-exec";
@@ -11,8 +10,8 @@ import { runSandboxed, sandboxAvailable, verifyCode, type CodeTest } from "@/lib
  *   - symbolic   : sympy (sous-process) — expressions, ordres de grandeur (Θ(n²) vs n^{log_3 9})
  *   - structural : séquences (Prim), ensembles (coupes/SCC — égalité stricte → prouvé ; sinon non concluant)
  * Renvoie `verified ∈ {true, false, "not_applicable"}`. JAMAIS de faux « prouvé » : le doute → not_applicable.
- * Sert la génération (corrigés prouvés) ET l'eval (juge sans complaisance). Si sympy/python absent →
- * la voie symbolique renvoie proprement not_applicable.
+ * Sert la génération (corrigés prouvés) ET l'eval (juge sans complaisance). Si sympy/python absent,
+ * OU si aucune sandbox n'est disponible → la voie symbolique renvoie proprement not_applicable.
  */
 
 export type DetMethod = "mcq" | "numeric" | "symbolic" | "structural" | "boolean" | "exec" | "figure" | "none";
@@ -114,32 +113,21 @@ function pyBin(): string { return process.env.CORTEX_PYTHON || "python3"; }
 function scriptPath(): string { return path.join(process.cwd(), "scripts", "sympy_check.py"); }
 async function runPy(input: object): Promise<any | null> {
   if (!fs.existsSync(scriptPath())) return null;
-  // DURCI : les expressions viennent d'une sortie de modèle et sympy
-  // parse via eval() interne → exécution DANS la sandbox (réseau coupé, écriture
-  // bornée) dès qu'elle est disponible. Repli legacy (execFile direct, timeout
-  // seul) uniquement si aucune isolation n'existe sur la machine — entrée
-  // semi-fiable interne, jamais du code utilisateur (celui-ci passe par
-  // verifyCode qui REFUSE de tourner sans sandbox).
-  if (sandboxAvailable()) {
-    const r = await runSandboxed({
-      cmd: pyBin(),
-      args: ["sympy_check.py"],
-      files: { "sympy_check.py": fs.readFileSync(scriptPath(), "utf8") },
-      stdin: JSON.stringify(input),
-      timeoutMs: 12_000,
-    });
-    if (!r.ok && !r.stdout) return null;
-    try { return JSON.parse(r.stdout.trim().split("\n").pop() || "{}"); } catch { return null; }
-  }
-  return new Promise((resolve) => {
-    let done = false;
-    const child = execFile(pyBin(), [scriptPath()], { timeout: 12_000 }, (err, stdout) => {
-      if (done) return; done = true;
-      if (err && !stdout) return resolve(null);
-      try { resolve(JSON.parse(String(stdout).trim().split("\n").pop() || "{}")); } catch { resolve(null); }
-    });
-    try { child.stdin?.end(JSON.stringify(input)); } catch { /* ignore */ }
+  // Les expressions viennent d'une sortie de modèle (elle-même influençable par
+  // les documents uploadés) et sympy les parse via eval() → exécution UNIQUEMENT
+  // dans la sandbox (réseau coupé, écriture bornée). Sans isolation, on
+  // n'exécute RIEN : la voie symbolique répond not_applicable (invariant n°3 —
+  // aucun chemin d'exécution nue, quelle que soit la provenance de l'entrée).
+  if (!sandboxAvailable()) return null;
+  const r = await runSandboxed({
+    cmd: pyBin(),
+    args: ["sympy_check.py"],
+    files: { "sympy_check.py": fs.readFileSync(scriptPath(), "utf8") },
+    stdin: JSON.stringify(input),
+    timeoutMs: 12_000,
   });
+  if (!r.ok && !r.stdout) return null;
+  try { return JSON.parse(r.stdout.trim().split("\n").pop() || "{}"); } catch { return null; }
 }
 export async function sympyAvailable(): Promise<boolean> {
   if (_sympyOK !== null) return _sympyOK;

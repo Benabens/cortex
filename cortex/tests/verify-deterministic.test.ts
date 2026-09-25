@@ -68,3 +68,36 @@ test("dispatch : open → LLM ; short booléen prioritaire ; code sans tests →
   const c = await verifyDeterministic("print(1)", "réf", "code", { tests: [] });
   assert.equal(c.verified, "not_applicable");
 });
+
+test("B1 — sans sandbox, la voie symbolique n'exécute JAMAIS python (pas de repli nu)", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-b1-"));
+  const marker = path.join(dir, "python-a-tourne");
+  // Faux « python » : laisse une trace s'il est lancé, et répond comme un sympy complaisant.
+  const fakePy = path.join(dir, "python3");
+  fs.writeFileSync(fakePy, `#!/bin/sh\ntouch "${marker}"\necho '{"equal":true,"reason":"faux"}'\n`, { mode: 0o755 });
+  const saved = { sbx: process.env.CORTEX_SANDBOX, py: process.env.CORTEX_PYTHON };
+  process.env.CORTEX_SANDBOX = "none";
+  process.env.CORTEX_PYTHON = fakePy;
+  try {
+    // Caches module-level (backend sandbox, disponibilité sympy) → import frais.
+    delete require.cache[require.resolve("../lib/sandbox-exec")];
+    delete require.cache[require.resolve("../lib/verify-deterministic")];
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fresh = require("../lib/verify-deterministic") as typeof import("../lib/verify-deterministic");
+    assert.equal(await fresh.sympyAvailable(), false, "sympy annoncé disponible sans sandbox");
+    const r = await fresh.verifySymbolic("n+1", "1+n");
+    assert.equal(r.verified, "not_applicable");
+    const d = await fresh.verifyDeterministic("C(n,2)", "n(n-1)/2", "numeric");
+    assert.equal(d.verified, "not_applicable");
+    assert.equal(fs.existsSync(marker), false, "python a été exécuté HORS sandbox");
+  } finally {
+    if (saved.sbx === undefined) delete process.env.CORTEX_SANDBOX; else process.env.CORTEX_SANDBOX = saved.sbx;
+    if (saved.py === undefined) delete process.env.CORTEX_PYTHON; else process.env.CORTEX_PYTHON = saved.py;
+    delete require.cache[require.resolve("../lib/sandbox-exec")];
+    delete require.cache[require.resolve("../lib/verify-deterministic")];
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
