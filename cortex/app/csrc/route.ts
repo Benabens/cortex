@@ -1,4 +1,5 @@
 import { coursePaths } from "@/lib/courses";
+import { servedFileHeaders } from "@/lib/security-headers";
 import { useCourseOr404 } from "@/lib/req";
 import fs from "node:fs";
 import path from "node:path";
@@ -76,10 +77,9 @@ export async function GET(req: NextRequest) {
   const ext = abs.split(".").pop()?.toLowerCase() ?? "";
   const buf = fs.readFileSync(abs);
   return new NextResponse(new Uint8Array(buf), {
-    headers: {
-      "content-type": MIME[ext] ?? "application/octet-stream",
+    headers: servedFileHeaders(MIME[ext] ?? "application/octet-stream", {
       "content-disposition": "inline",
       "cache-control": "private, max-age=3600",
-    },
+    }),
   });
 }
