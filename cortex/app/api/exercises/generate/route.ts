@@ -2,6 +2,7 @@ import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { uploadsDir } from "@/lib/paths";
 import { preflightGeneration } from "@/lib/preflight";
 import { requireCourse } from "@/lib/req";
+import { rejectOversizedBody, UPLOAD_LIMITS } from "@/lib/upload-limit";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -23,6 +24,8 @@ export async function POST(req: NextRequest) {
 
   let payload: { target?: string; imageRel?: string; note?: string } = {};
   if (ct.includes("multipart/form-data")) {
+    const tooBig = rejectOversizedBody(req, UPLOAD_LIMITS.image);
+    if (tooBig) return tooBig;
     const form = await req.formData();
     const target = String(form.get("target") ?? "").trim();
     const note = String(form.get("note") ?? "").trim();

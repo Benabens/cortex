@@ -1,6 +1,7 @@
 import { checkSolution } from "@/lib/check-solution";
 import { LlmError } from "@/lib/llm";
 import { useCourseOr404 } from "@/lib/req";
+import { rejectOversizedBody, UPLOAD_LIMITS } from "@/lib/upload-limit";
 import { logLoopRoute } from "@/lib/req-log";
 import { uploadsDir } from "@/lib/paths";
 import crypto from "node:crypto";
@@ -44,6 +45,8 @@ async function handlePOST(req: NextRequest) {
   let imageRel: string | null = null;
 
   if (ct.includes("multipart/form-data")) {
+    const tooBig = rejectOversizedBody(req, UPLOAD_LIMITS.image);
+    if (tooBig) return tooBig;
     const form = await req.formData();
     statement = String(form.get("statement") ?? "").trim();
     answer = String(form.get("answer") ?? "").trim();
