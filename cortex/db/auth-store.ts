@@ -123,6 +123,14 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       created_at TEXT NOT NULL,
       PRIMARY KEY (user_id, course, job_id)
     )`,
+    `CREATE TABLE IF NOT EXISTS stripe_purchases (
+      session_id TEXT PRIMARY KEY,
+      payment_intent TEXT,
+      user_id TEXT NOT NULL,
+      credits_centi INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS stripe_purchases_pi_idx ON stripe_purchases (payment_intent)`,
   ],
   postgres: [
     `CREATE TABLE IF NOT EXISTS public.users (
@@ -230,6 +238,14 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       created_at text NOT NULL,
       PRIMARY KEY (user_id, course, job_id)
     )`,
+    `CREATE TABLE IF NOT EXISTS public.stripe_purchases (
+      session_id text PRIMARY KEY,
+      payment_intent text,
+      user_id text NOT NULL,
+      credits_centi integer NOT NULL,
+      created_at text NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS stripe_purchases_pi_idx ON public.stripe_purchases (payment_intent)`,
   ],
 };
 

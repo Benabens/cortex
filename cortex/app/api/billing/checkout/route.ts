@@ -28,15 +28,31 @@ export async function POST(req: NextRequest) {
   const credits = Number(process.env[`CREDITS_PACK_${p.toUpperCase()}`] ?? { small: 1, medium: 5, large: 12 }[p as "small" | "medium" | "large"] ?? 0);
   if (!credits) return NextResponse.json({ error: `Nombre de crédits non configuré pour « ${p} ».` }, { status: 400 });
 
-  const origin = req.headers.get("origin") ?? process.env.AUTH_URL ?? new URL(req.url).origin;
+  // Les URLs de retour viennent de la configuration, jamais de l'en-tête Origin
+  // (contrôlé par le client : il renverrait l'acheteur vers un site tiers).
+  if (!siteOrigin()) return NextResponse.json({ error: "AUTH_URL manquante : impossible de construire les URLs de retour." }, { status: 500 });
   const stripe = new Stripe(key);
-  const session = await stripe.checkout.sessions.create({
+  const session = await stripe.checkout.sessions.create(checkoutParams({ pack: p, price, credits, userId: currentUser() }));
+  return NextResponse.json({ url: session.url });
+}
+
+/** Origine canonique du site (AUTH_URL sans barre finale), ou null. */
+function siteOrigin(): string | null {
+  const raw = process.env.AUTH_URL?.trim();
+  if (!raw) return null;
+  try { return new URL(raw).origin; } catch { return null; }
+}
+
+/** Paramètres de la session Checkout — exposés pour être testés sans réseau. */
+export function checkoutParams(o: { pack: string; price: string; credits: number; userId: string }): Stripe.Checkout.SessionCreateParams & { metadata: Record<string, string> } {
+  const origin = siteOrigin();
+  if (!origin) throw new Error("AUTH_URL manquante");
+  return {
     mode: "payment",
-    line_items: [{ price, quantity: 1 }],
+    line_items: [{ price: o.price, quantity: 1 }],
     success_url: `${origin}/?achat=ok`,
     cancel_url: `${origin}/?achat=annule`,
     // Le webhook lit CES métadonnées pour créditer le bon user — source de vérité.
-    metadata: { cortexUserId: currentUser(), credits: String(credits), pack: p },
-  });
-  return NextResponse.json({ url: session.url });
+    metadata: { cortexUserId: o.userId, credits: String(o.credits), pack: o.pack },
+  };
 }

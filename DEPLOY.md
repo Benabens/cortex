@@ -161,8 +161,11 @@ pose `AUTH_EMAIL_ENABLED=1` puis :
    dans la variable correspondante.
 4. **Développeurs → Webhooks → Ajouter une destination** :
    - URL : `https://⟨ton-domaine⟩/api/billing/webhook`
-   - Événements : **`checkout.session.completed`** ET
-     **`checkout.session.async_payment_succeeded`** (le second confirme les
+   - Événements : **`checkout.session.completed`**,
+     **`checkout.session.async_payment_succeeded`**, **`charge.refunded`** et
+     **`charge.dispute.created`** (les deux derniers reprennent les crédits d'un
+     achat remboursé ou contesté — le solde peut passer négatif et bloque toute
+     génération ; le second des deux premiers confirme les
      moyens de paiement différés — sans lui, un client paie sans être crédité)
    - Copie le **secret de signature** `whsec_…` dans `STRIPE_WEBHOOK_SECRET`.
 5. Test de paiement : carte `4242 4242 4242 4242`, n'importe quelle date
