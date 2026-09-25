@@ -7,6 +7,7 @@ import {
   toggleReference,
 } from "@/lib/sources";
 import { useCourseOr404 } from "@/lib/req";
+import { rejectOversizedBody, UPLOAD_LIMITS } from "@/lib/upload-limit";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -29,6 +30,8 @@ export async function POST(req: NextRequest) {
   const ct = req.headers.get("content-type") ?? "";
 
   if (ct.includes("multipart/form-data")) {
+    const tooBig = rejectOversizedBody(req, UPLOAD_LIMITS.source);
+    if (tooBig) return tooBig;
     const form = await req.formData();
     const file = form.get("file");
     if (!(file instanceof File) || file.size === 0) {
