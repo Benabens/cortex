@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Search, Menu, CalendarClock } from "lucide-react";
+import { Search, Menu, CalendarClock, UserRound } from "lucide-react";
 import { Wordmark } from "./Logo";
 import { Kbd } from "@/components/ui/primitives";
 import { useApi } from "@/lib/ux/api";
@@ -64,6 +64,14 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
             className="grid size-11 place-items-center rounded-lg border border-line bg-surface-2/50 text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink-1 sm:hidden"
           >
             <Search className="size-[1.15rem]" strokeWidth={2} />
+          </Link>
+
+          <Link
+            href="/compte"
+            aria-label="Mon compte"
+            className="grid size-11 place-items-center rounded-lg border border-line bg-surface-2/50 text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink-1"
+          >
+            <UserRound className="size-[1.15rem]" strokeWidth={2} />
           </Link>
 
           <button
