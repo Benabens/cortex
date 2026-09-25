@@ -149,21 +149,40 @@ async function sendMagicLink({ identifier, url }: { identifier: string; url: str
   console.log(`\n🔐 [auth] Magic-link pour ${identifier} :\n   ${url}\n`);
 }
 
+/** Le magic-link n'est proposé QUE si un service d'envoi est configuré
+ *  (RESEND_API_KEY ou AUTH_EMAIL_ENDPOINT). En prod sans transport, un bouton
+ *  « Magic link » serait mort — on ne l'expose donc pas. */
+export function emailLoginConfigured(): boolean {
+  return !!(process.env.RESEND_API_KEY || process.env.AUTH_EMAIL_ENDPOINT);
+}
+
+/** Google OAuth disponible ? (clés posées). */
+export function googleLoginConfigured(): boolean {
+  return !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: cortexAdapter(),
   session: { strategy: "jwt" },
   trustHost: true,
+  // Pages sur mesure (DA sombre de la landing) au lieu des pages NextAuth par défaut.
+  pages: { signIn: "/login", error: "/login" },
   providers: [
-    {
-      id: "email",
-      type: "email",
-      name: "Magic link (e-mail)",
-      from: process.env.AUTH_EMAIL_FROM ?? "cortex@localhost",
-      maxAge: 24 * 3600,
-      options: {},
-      sendVerificationRequest: ({ identifier, url }) => sendMagicLink({ identifier, url }),
-    },
-    ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+    ...(emailLoginConfigured()
+      ? [
+          {
+            id: "email",
+            type: "email" as const,
+            name: "Magic link (e-mail)",
+            from: process.env.AUTH_EMAIL_FROM ?? "cortex@localhost",
+            maxAge: 24 * 3600,
+            options: {},
+            sendVerificationRequest: ({ identifier, url }: { identifier: string; url: string }) =>
+              sendMagicLink({ identifier, url }),
+          },
+        ]
+      : []),
+    ...(googleLoginConfigured()
       ? [Google({ clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET })]
       : []),
   ],

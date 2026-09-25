@@ -16,7 +16,7 @@ import type { NextRequest } from "next/server";
 
 const AUTH_ON = process.env.AUTH_ENABLED === "1";
 
-const PUBLIC_PREFIXES = ["/api/auth", "/api/health", "/api/metrics", "/api/billing/webhook", "/_next", "/favicon", "/sites"];
+const PUBLIC_PREFIXES = ["/api/auth", "/login", "/api/health", "/api/metrics", "/api/billing/webhook", "/_next", "/favicon", "/sites"];
 
 /**
  * DÉMO PUBLIQUE (PUBLIC_DEMO=1, optionnel) : ces pages/API restent lisibles
@@ -105,7 +105,7 @@ async function guarded(req: NextRequest): Promise<NextResponse> {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
     }
-    const signin = new URL("/api/auth/signin", req.url);
+    const signin = new URL("/login", req.url);
     signin.searchParams.set("callbackUrl", req.nextUrl.pathname + req.nextUrl.search);
     return NextResponse.redirect(signin);
   }

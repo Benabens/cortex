@@ -28,9 +28,20 @@ function Body({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Routes servies SANS la coquille de l'app (barre latérale, topbar, contexte
+ *  cours) : elles s'adressent à un visiteur non connecté et portent leur propre
+ *  mise en page plein écran (DA sombre de la landing). */
+const BARE_ROUTES = ["/login"];
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const router = useRouter();
+  const shellPathname = usePathname();
+
+  // Page d'authentification : aucune coquille, aucun fetch /api/courses (401 hors session).
+  if (shellPathname && BARE_ROUTES.some((p) => shellPathname === p || shellPathname.startsWith(p + "/"))) {
+    return <>{children}</>;
+  }
 
   // ⌘K / Ctrl+K → search
   useEffect(() => {
