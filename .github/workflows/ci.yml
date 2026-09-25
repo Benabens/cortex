@@ -96,9 +96,29 @@ jobs:
       - name: Build de l'image (contexte = racine du repo)
         run: docker build -t cortex-app .
 
+      # L'image pose NODE_ENV=production : sans AUTH_ENABLED=1, prod-boot doit
+      # REFUSER de démarrer (chaque visiteur serait « owner »). On le vérifie
+      # ici, sur l'image réelle, avant le smoke test.
+      - name: Garde de démarrage — l'image refuse de servir sans authentification
+        run: |
+          set +e
+          out=$(docker run --rm --name cortex-noauth cortex-app 2>&1)
+          code=$?
+          set -e
+          echo "$out" | tail -5
+          if [ "$code" -eq 0 ]; then
+            echo "::error::le conteneur a démarré sans AUTH_ENABLED=1"
+            exit 1
+          fi
+          echo "$out" | grep -q "AUTH_ENABLED" || { echo "::error::refus sans le message attendu"; exit 1; }
+          echo "✓ démarrage refusé sans auth (code $code)"
+
+      # Smoke test en mode DÉVELOPPEMENT explicite (NODE_ENV vidé : SQLite,
+      # sans auth, aucun service externe) — c'est le seul mode qui tourne sans
+      # Postgres ni secrets dans la CI. `next start` reste en production.
       - name: Smoke test — démarrage + /api/health
         run: |
-          docker run -d --name cortex -p 3000:3000 cortex-app
+          docker run -d --name cortex -p 3000:3000 -e NODE_ENV= cortex-app
           ok=""
           for i in $(seq 1 90); do
             if curl -fsS http://localhost:3000/api/health >/dev/null 2>&1; then ok=1; break; fi
