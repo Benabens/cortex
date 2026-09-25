@@ -91,7 +91,11 @@ RUN set -eux; \
 #   SEED_NEW_TENANTS : 0 — un nouvel utilisateur démarre sur un espace VIDE et
 #   crée sa matière (à 1, il recevrait une copie du contenu d'un autre tenant,
 #   ce qui n'a de sens qu'avec un cours de démonstration dédié).
-ENV CORTEX_TEX_BIN=/usr/local/bin/tectonic \
+#   NODE_ENV=production : `next start` le pose pour lui-même, mais prod-boot et
+#   les workers tsx tournent hors de Next ; explicite, il active leurs gardes de
+#   production (refus de démarrer sans auth, magic-link jamais loggé).
+ENV NODE_ENV=production \
+    CORTEX_TEX_BIN=/usr/local/bin/tectonic \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
     CORTEX_SEED_COURSES= \
