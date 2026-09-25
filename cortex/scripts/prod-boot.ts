@@ -25,6 +25,7 @@ import { runWithUser } from "../db/context";
 import { authAll, authRun } from "../db/auth-store";
 import { dbDriverName, nowStr, q } from "../db/q";
 import { TABLES } from "../db/tables";
+import { assertAuthRequired } from "../lib/boot-guards";
 import { dataRoot, ensureCoursesLoaded, normalizeCourse } from "../lib/courses";
 
 const log = (msg: string) => console.log(`[prod-boot] ${msg}`);
@@ -184,6 +185,9 @@ async function migrateCourses(): Promise<void> {
 
 async function main(): Promise<void> {
   log(`démarrage — DB_DRIVER=${dbDriverName()} · data=${dataRoot()} · seed=[${process.env.CORTEX_SEED_COURSES ?? ""}]`);
+  // Une mise en ligne (NODE_ENV=production) ou une instance qui encaisse
+  // (BILLING_ENABLED=1) sans AUTH_ENABLED=1 servirait tout le monde comme « owner ».
+  assertAuthRequired();
   assertIsolationSane();
   initVolume();
   await migrateCourses();
