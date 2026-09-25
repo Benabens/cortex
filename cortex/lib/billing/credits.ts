@@ -1,6 +1,6 @@
 import { currentUser } from "@/db/context";
-import { authAll, authGet, authRun } from "@/db/auth-store";
-import { nowStr } from "@/db/q";
+import { authAll, authGet, authRun, authSqlite } from "@/db/auth-store";
+import { dbDriverName, nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 
 /**
@@ -9,8 +9,18 @@ import { log } from "@/lib/metrics";
  * Source de vérité UNIQUE : la table globale `credit_transactions` (store auth)
  * — le solde d'un user = SUM(delta). Pas de table de solde séparée à
  * désynchroniser. Idempotence STRUCTURELLE : chaque opération porte un `ref`
- * UNIQUE (id d'événement Stripe, `signup:<user>`, `job:<cours>:<id>`…) —
+ * UNIQUE (`stripe:cs:<session>`, `signup:<user>`, `job:<user>:<cours>:<id>`…) —
  * rejouer l'opération (double webhook, retry) ne crée jamais de doublon.
+ *
+ * UNITÉ : `delta` est en CENTIÈMES DE CRÉDIT (1 crédit = 100). L'assistance
+ * (drill, correction, analyses) coûte une fraction de crédit : sans unité
+ * fine, elle était gratuite et un compte à 2 crédits offerts pouvait appeler
+ * le modèle 40 fois par jour indéfiniment. Les bases antérieures (deltas en
+ * crédits entiers) sont converties ×100 UNE fois, atomiquement, au premier
+ * accès (`ensureLedgerUnit`, marqueur `app_meta.credits_unit = centi`) : les
+ * soldes affichés ne bougent pas. Tout ce qui sort de ce module vers
+ * l'interface ou Stripe est en crédits (`fromCenti`) ; tout ce qui entre dans
+ * le ledger est en centièmes.
  *
  * BILLING_ENABLED=1 : active le débit/le gate. Non posé → tout est no-op
  * (dev €0 et staging sans Stripe : comportement historique intact).
@@ -23,12 +33,25 @@ export function billingEnabled(): boolean {
   return process.env.BILLING_ENABLED === "1";
 }
 
-function envInt(name: string, def: number): number {
+function envNum(name: string, def: number): number {
   const n = Number(process.env[name]);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : def;
+  return Number.isFinite(n) && n >= 0 ? n : def;
 }
 
-/** Coût en crédits par type de génération (jobs). Surcharge : CREDITS_COST_JSON. */
+/** 1 crédit = 100 centièmes (unité du ledger). */
+export const CENTI = 100;
+export function toCenti(credits: number): number {
+  return Math.max(0, Math.round(credits * CENTI));
+}
+export function fromCenti(centi: number): number {
+  return Math.round(centi) / CENTI;
+}
+/** Affichage : « 2 », « 1,9 », « 0,1 » crédit(s). */
+export function fmtCredits(centi: number): string {
+  return fromCenti(centi).toFixed(2).replace(/\.?0+$/, "").replace(".", ",");
+}
+
+/** Coût EN CRÉDITS par type de génération. Surcharge : CREDITS_COST_JSON (décimales acceptées). */
 const DEFAULT_COSTS: Record<string, number> = {
   exam: 2,
   qcm: 1,
@@ -38,20 +61,61 @@ const DEFAULT_COSTS: Record<string, number> = {
   format: 1,
   prepare: 2,
   // Appels LLM courts et interactifs (drill, vérification de solution, analyse
-  // de faiblesse) : facturés 0 crédit — leur garde-fou est le quota quotidien
-  // d'assistance. Le gate exige quand même un solde NON NÉGATIF (cf. creditsGate).
-  assist: 0,
+  // de faiblesse) : un dixième de crédit. Gratuits, ils offraient ~40 appels
+  // payants par jour et par compte, indéfiniment (audit B5).
+  assist: 0.1,
 };
 
+/** Coût en CENTIÈMES de crédit d'un type de génération. */
 export function creditCost(kind: string): number {
   try {
     const raw = process.env.CREDITS_COST_JSON;
     if (raw) {
       const map = JSON.parse(raw) as Record<string, number>;
-      if (typeof map[kind] === "number") return Math.max(0, Math.floor(map[kind]));
+      if (typeof map[kind] === "number") return toCenti(map[kind]);
     }
   } catch { /* JSON invalide → défauts */ }
-  return DEFAULT_COSTS[kind] ?? 1;
+  return toCenti(DEFAULT_COSTS[kind] ?? 1);
+}
+
+// ─────────────────────────── unité du ledger ───────────────────────────
+
+const UNIT_KEY = "credits_unit";
+let _unitChecked = false;
+
+/**
+ * Convertit UNE fois un ledger hérité (crédits entiers) en centièmes.
+ * Atomique et idempotent : le marqueur et la conversion sont posés ensemble
+ * (transaction sqlite ; instruction unique avec CTE en Postgres) — deux
+ * processus qui démarrent en même temps ne convertissent pas deux fois.
+ * Une base NEUVE reçoit le marqueur sans rien convertir.
+ */
+export async function ensureLedgerUnit(): Promise<void> {
+  if (_unitChecked) return;
+  if (dbDriverName() === "sqlite") {
+    const db = authSqlite();
+    if (!db) return;
+    db.transaction(() => {
+      const done = db.prepare(`SELECT value FROM app_meta WHERE key = ?`).get(UNIT_KEY);
+      if (done) return;
+      db.prepare(`UPDATE credit_transactions SET delta = delta * ${CENTI}`).run();
+      db.prepare(`INSERT INTO app_meta (key, value) VALUES (?, ?)`).run(UNIT_KEY, "centi");
+    })();
+  } else {
+    // Le marqueur ne s'insère qu'une fois (clé primaire) ; la conversion ne
+    // s'exécute que si CE processus l'a inséré.
+    await authRun(
+      `WITH m AS (INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING RETURNING key)
+       UPDATE credit_transactions SET delta = delta * ${CENTI} WHERE EXISTS (SELECT 1 FROM m)`,
+      UNIT_KEY, "centi",
+    );
+  }
+  _unitChecked = true;
+}
+
+/** (tests) force une nouvelle vérification de l'unité. */
+export function resetLedgerUnitCheck(): void {
+  _unitChecked = false;
 }
 
 /**
@@ -66,10 +130,12 @@ export function jobRef(userId: string, course: string, jobId: number): string {
   return `job:${userId}:${course}:${jobId}`;
 }
 
-/** Écrit une transaction idempotente (ref UNIQUE). true = écrite, false = déjà vue. */
+/** Écrit une transaction idempotente (ref UNIQUE), `deltaCenti` en centièmes. true = écrite, false = déjà vue. */
 export async function addTransaction(
-  userId: string, delta: number, reason: string, ref?: string,
+  userId: string, deltaCenti: number, reason: string, ref?: string,
 ): Promise<boolean> {
+  await ensureLedgerUnit();
+  const delta = Math.round(deltaCenti);
   if (ref) {
     const seen = await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, ref);
     if (seen) return false;
@@ -91,12 +157,14 @@ export async function addTransaction(
 const signupSeen = new Set<string>();
 export async function ensureSignupCredits(userId: string): Promise<void> {
   if (!billingEnabled() || signupSeen.has(userId)) return;
-  const free = envInt("SIGNUP_FREE_CREDITS", 2);
+  const free = toCenti(envNum("SIGNUP_FREE_CREDITS", 2));
   if (free > 0) await addTransaction(userId, free, "signup", `signup:${userId}`);
   signupSeen.add(userId);
 }
 
-export async function getBalance(userId = currentUser()): Promise<number> {
+/** Solde en CENTIÈMES (unité interne des gates et du débit). */
+export async function getBalanceCenti(userId = currentUser()): Promise<number> {
+  await ensureLedgerUnit();
   await ensureSignupCredits(userId);
   const r = await authGet<{ total: number | null }>(
     `SELECT coalesce(sum(delta), 0) total FROM credit_transactions WHERE user_id = ?`, userId,
@@ -104,28 +172,37 @@ export async function getBalance(userId = currentUser()): Promise<number> {
   return Number(r?.total ?? 0);
 }
 
+/** Solde en CRÉDITS (affichage, API). */
+export async function getBalance(userId = currentUser()): Promise<number> {
+  return fromCenti(await getBalanceCenti(userId));
+}
+
 /**
  * Gate de solde AVANT une génération par job : null = passe, sinon
  * {status: 402, error claire}. `kind` inconnu au moment du preflight → on
  * exige le coût MINIMUM d'une génération (1 crédit).
  */
-export async function creditsGate(kind?: string): Promise<{ status: number; error: string } | null> {
+export async function creditsGate(kind?: string, costCenti?: number): Promise<{ status: number; error: string } | null> {
   if (!billingEnabled()) return null;
-  const cost = kind ? creditCost(kind) : 1;
-  const balance = await getBalance();
-  // Un coût nul (assistance) exige tout de même un solde positif : sinon un
-  // compte à sec — ou passé en négatif par une rafale concurrente — continuerait
-  // d'appeler le modèle indéfiniment.
-  if (cost === 0) {
-    return balance > 0 ? null : {
+  const cost = costCenti ?? (kind ? creditCost(kind) : CENTI);
+  const balance = await getBalanceCenti();
+  return insufficient(balance, cost);
+}
+
+/** Verdict de solde (partagé avec la réservation atomique) : null = passe. */
+export function insufficient(balanceCenti: number, costCenti: number): { status: number; error: string } | null {
+  // Un coût nul exige tout de même un solde positif : sinon un compte à sec —
+  // ou passé en négatif par un remboursement Stripe — continuerait d'appeler le modèle.
+  if (costCenti === 0) {
+    return balanceCenti > 0 ? null : {
       status: 402,
       error: "Solde épuisé : recharge tes crédits pour continuer à utiliser l'assistance.",
     };
   }
-  if (balance < cost) {
+  if (balanceCenti < costCenti) {
     return {
       status: 402,
-      error: `Solde insuffisant : ${balance} crédit(s), génération à ${cost}. Recharge tes crédits pour continuer.`,
+      error: `Solde insuffisant : ${fmtCredits(balanceCenti)} crédit(s), génération à ${fmtCredits(costCenti)}. Recharge tes crédits pour continuer.`,
     };
   }
   return null;
