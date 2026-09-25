@@ -21,10 +21,12 @@ function groupByTopic<T extends { topic: string; lectureRank: number | null }>(a
 
 export default function RevisionPage() {
   const { courseId, ready } = useCourse();
-  const [d, setD] = useState<Data | null>(null);
+  const [loaded, setLoaded] = useState<Data | null>(null);
   const [fetching, setFetching] = useState(true);
-  // Compte sans cours : rien à charger, la page affiche l'état vide.
-  const loading = !ready || (!!courseId && fetching);
+  // Au changement de cours, les données de l'ancien ne sont pas montrées le temps
+  // du rechargement ; compte sans cours : rien à charger, état vide.
+  const d = loaded && (!loaded.course || loaded.course === courseId) ? loaded : null;
+  const loading = !ready || (!!courseId && (fetching || !d));
   const [tab, setTab] = useState<"qcm" | "open" | "plan">("qcm");
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [reveal, setReveal] = useState<Record<number, boolean>>({});
@@ -35,7 +37,15 @@ export default function RevisionPage() {
   useEffect(() => {
     if (!ready) return;
     if (!courseId) return;
-    (async () => { try { setD(await (await fetch(`/api/revision?course=${encodeURIComponent(courseId)}`)).json()); } catch {} setFetching(false); })();
+    let cancelled = false;
+    (async () => {
+      try {
+        const next = (await (await fetch(`/api/revision?course=${encodeURIComponent(courseId)}`)).json()) as Data;
+        if (!cancelled) setLoaded(next);
+      } catch {}
+      if (!cancelled) setFetching(false);
+    })();
+    return () => { cancelled = true; };
   }, [ready, courseId]);
 
   // progression locale : coche « fait » par question, persiste entre sessions (localStorage, par cours)

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { enterCourse } from "@/db/client";
-import { currentUser, enterUser } from "@/db/context";
+import { enterUser } from "@/db/context";
 import { courseExists, DEFAULT_COURSE, ownsCourse } from "@/lib/courses";
 
 /**
  * Cours demandé par la requête : query `?course=` puis header `x-cortex-course`,
  * sinon le cours par défaut. L'identifiant est rendu TEL QUEL — un cours inconnu
- * n'est plus remplacé par cs-202 (cf. `courseDenied` pour la garde d'accès).
+ * n'est plus remplacé par cs-202 (la garde d'accès est dans `useCourse`).
  */
 export function courseOf(req: Request): string {
   let id: string | null = null;
@@ -15,6 +15,15 @@ export function courseOf(req: Request): string {
   } catch {}
   if (!id) id = req.headers?.get?.("x-cortex-course") ?? null;
   return id || DEFAULT_COURSE;
+}
+
+/**
+ * Installe l'UTILISATEUR de la requête sans cours — pour les routes qui n'en
+ * dépendent pas (facturation, catalogue des cours). Le header x-cortex-user est
+ * posé par proxy.ts uniquement ; sans auth → « owner ».
+ */
+export function useUser(req: Request): string {
+  return enterUser(req.headers?.get?.("x-cortex-user") ?? null);
 }
 
 /** Cours inexistant OU appartenant à un autre compte — rendu 404 (jamais 403 :
@@ -52,22 +61,10 @@ export class CourseAccessError extends Error {
  * gèrent l'exception eux-mêmes.
  */
 export function useCourse(req: Request): string {
-  const user = enterUser(req.headers?.get?.("x-cortex-user") ?? null);
+  const user = useUser(req);
   const course = courseOf(req);
   if (!courseExists(course) || !ownsCourse(user, course)) throw new CourseAccessError(course);
   return enterCourse(course);
-}
-
-/**
- * GARDE D'ACCÈS AU COURS — même règle que `useCourse`, sous forme de message
- * (utilisable après `enterUser`). Renvoie un message d'erreur, ou null si
- * l'accès est légitime. Les deux refus (inexistant / à quelqu'un d'autre) sont
- * volontairement indiscernables.
- */
-export function courseDenied(courseId: string): string | null {
-  if (!courseExists(courseId)) return `Cours inconnu : « ${courseId} ».`;
-  if (!ownsCourse(currentUser(), courseId)) return `Cours inconnu : « ${courseId} ».`;
-  return null;
 }
 
 function deniedResponse(e: CourseAccessError): NextResponse {
