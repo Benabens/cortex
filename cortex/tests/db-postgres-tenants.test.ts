@@ -125,3 +125,28 @@ test("ensureColumns : no-op quand la colonne existe, ADD sinon (information_sche
     })
   );
 });
+
+test("tenantSchema : les noms des schémas EXISTANTS en prod ne changent pas", () => {
+  // Valeurs relevées sur la base de production : tout changement ici
+  // orphelinerait les données des tenants (les schémas ne sont pas renommés).
+  assert.equal(runWithUser("owner", () => runWithCourse("cs-202", () => tenantSchema())), "t_owner_4c102969_cs_202");
+  assert.equal(runWithUser("owner", () => runWithCourse("ml", () => tenantSchema())), "t_owner_4c102969_ml");
+  assert.equal(runWithUser("owner", () => runWithCourse("algo", () => tenantSchema())), "t_owner_4c102969_algo");
+  // Compte Google (UUID) : préfixe tronqué + condensé, cours court intact.
+  const uuid = "11f5d6de-a50f-4cb1-8d7e-6b2f0c9a1e33";
+  const s = runWithUser(uuid, () => runWithCourse("cs-202", () => tenantSchema()));
+  assert.match(s, /^t_u11f5d6de_a50f_4cb1_[0-9a-f]{8}_cs_202$/, s);
+  assert.equal(s, "t_u11f5d6de_a50f_4cb1_6a9b4745_cs_202");
+});
+
+test("tenantSchema : deux cours LONGS d'un même compte ne partagent pas de schéma", () => {
+  const c1 = "analyse-des-systemes-lineaires-partie-1";
+  const c2 = "analyse-des-systemes-lineaires-partie-2";
+  const s1 = runWithUser("alice", () => runWithCourse(c1, () => tenantSchema()));
+  const s2 = runWithUser("alice", () => runWithCourse(c2, () => tenantSchema()));
+  assert.notEqual(s1, s2, `collision de tenant : ${s1}`);
+  for (const s of [s1, s2]) {
+    assert.match(s, /^t_[a-z0-9_]+$/, s);
+    assert.ok(s.length < 63, s);
+  }
+});

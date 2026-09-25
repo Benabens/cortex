@@ -63,5 +63,23 @@ export function userSlug(userId: string): string {
 export function tenantSchema(userId?: string, courseId?: string): string {
   // userSlug (tronqué + condensé) garantit qu'une troncature ne fusionne pas
   // deux comptes distincts — la même fonction nomme leurs dossiers d'artefacts.
-  return `t_${userSlug(userId ?? currentUser())}_${pgIdent(courseId ?? currentCourse())}`;
+  return `t_${userSlug(userId ?? currentUser())}_${courseIdent(courseId ?? currentCourse())}`;
+}
+
+/**
+ * Partie « cours » du schéma. Un identifiant court (cs-202, ml, algo, et tout
+ * cours dont la forme PG tient en 28 caractères) est rendu TEL QUEL : les
+ * schémas existants en production gardent leur nom. Au-delà, deux cours d'un
+ * même compte se tronquaient au même préfixe (« analyse-des-systemes-… ») et
+ * partageaient un schéma : on suffixe alors un condensé de l'identifiant
+ * complet, comme pour l'utilisateur.
+ */
+export function courseIdent(courseId: string): string {
+  const full = courseId.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  const safe = /^[0-9]/.test(full) ? "u" + full : full;
+  if (safe.length <= 28) return safe;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const crypto = require("node:crypto") as typeof import("node:crypto");
+  const h = crypto.createHash("sha256").update(courseId).digest("hex").slice(0, 8);
+  return `${safe.slice(0, 19)}_${h}`;
 }
