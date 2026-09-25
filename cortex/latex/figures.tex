@@ -1,0 +1,186 @@
+% ============================================================================
+% Bibliothèque de figures CS-202 — calquée sur les vraies figures EPFL
+% (cf. data/refs/figref/*.png). Concaténée au préambule par lib/exam-latex.ts.
+% La génération PARAMÈTRE ces macros au lieu d'inventer la géométrie.
+% ============================================================================
+\usetikzlibrary{shapes.symbols,decorations.pathreplacing}
+\definecolor{costpink}{HTML}{E0218A}
+\definecolor{rategreen}{HTML}{1A9850}
+
+% coûts de liens (rose) / débits (vert) / interfaces (orange) — comme la Figure 1
+\newcommand{\cost}[1]{{\color{costpink}\footnotesize #1}}
+\newcommand{\rate}[1]{{\color{rategreen}\footnotesize #1}}
+\tikzset{
+  cloudnode/.style={cloud, draw, cloud puffs=12, cloud puff arc=120, minimum width=2.6cm, minimum height=1.5cm, align=center, font=\small},
+  netlink/.style={thick},
+}
+\newcommand{\figcaption}[1]{\begin{center}\small #1\end{center}}
+
+% ---- Diagramme TCP en échelle (scaffold), calqué sur la Figure 2 du Final 2024 ----
+% \tcpladder{serveur}{client}{rwnd init}{cwnd init}{ssthresh init}{hauteur cm}
+\newcommand{\tcpladder}[6]{%
+\begin{center}
+\renewcommand{\arraystretch}{1.25}\footnotesize
+\begin{tabular}{|>{\centering\arraybackslash}p{1.9cm}|>{\centering\arraybackslash}p{1.9cm}|>{\centering\arraybackslash}p{1.5cm}|>{\centering\arraybackslash}p{2.4cm}|}
+\hline
+\ensuremath{#2}'s receiver window & \ensuremath{#1}'s congestion window & \ensuremath{#1}'s ssthresh & state of congestion control for \ensuremath{#1}\\\hline
+#3 & #4 & #5 & \\\hline
+\end{tabular}\\[3pt]
+\begin{tikzpicture}[font=\footnotesize,>=Latex,yscale=1]
+  \coordinate (s) at (0,0); \coordinate (c) at (5.2,0);
+  \node[above,font=\small\bfseries] at (s) {\ensuremath{#1} (server)};
+  \node[above,font=\small\bfseries] at (c) {\ensuremath{#2} (client)};
+  \node[left=1.2cm of s,font=\scriptsize] {Sequence number};
+  \node[right=1.2cm of c,font=\scriptsize] {Acknowledgement number};
+  \draw[very thick] (s)--(0,-#6); \draw[very thick] (c)--(5.2,-#6);
+  \draw[->] (5.2,-0.5)--(0,-1.1) node[midway,sloped,above,font=\scriptsize]{SYN};
+  \draw[->] (0,-1.3)--(5.2,-1.9) node[midway,sloped,above,font=\scriptsize]{SYN ACK};
+  \draw[->] (5.2,-2.1)--(0,-2.7) node[midway,sloped,above,font=\scriptsize]{HTTP GET};
+  \draw[densely dashed] (-2,-3.1)--(7.4,-3.1) node[right,font=\scriptsize]{fill below this line};
+\end{tikzpicture}
+\end{center}
+\figcaption{Figure: TCP diagram (time flows downward).}}
+
+% ============================================================================
+% GRILLES DE RÉPONSE pré-dessinées (calquées sur les vrais examens : le générateur
+% en émet une APRÈS chaque sous-question selon le type, au lieu d'un blanc).
+% Lignes émises par boucle \loop (sûre en tabular).
+% ============================================================================
+\newcounter{grx}
+\newcommand{\ansintro}[1]{\par\smallskip\noindent{\footnotesize\itshape #1}\par\smallskip}
+% émetteurs de lignes récursifs (sûrs en tabular)
+\newcommand\Rnum[2]{\ifnum#1>0 \stepcounter{grx}\arabic{grx}#2\tabularnewline\hline\expandafter\Rnum\expandafter{\the\numexpr#1-1\relax}{#2}\fi}
+\newcommand\Rblank[2]{\ifnum#1>0 #2\tabularnewline\hline\expandafter\Rblank\expandafter{\the\numexpr#1-1\relax}{#2}\fi}
+% lignes numérotées : #1 = nb, #2 = cellules après le numéro (ex. " & & & ")
+\newcommand{\nrowsnum}[2]{\setcounter{grx}{0}\Rnum{#1}{#2}}
+% lignes vierges : #2 = toutes les cellules (ex. " & & ")
+\newcommand{\nrowsblank}[2]{\Rblank{#1}{#2}}
+
+% packet-trace (Table 1 du Final 2024)
+\newcommand{\packetgrid}[1]{%
+\ansintro{Fill in the table below (one row per packet seen, in order):}%
+\renewcommand{\arraystretch}{1.5}\scriptsize\noindent
+\begin{tabularx}{\linewidth}{|c|c|c|c|c|c|c|c|X|}\hline
+\# & Src MAC & Dst MAC & Src IP & Dst IP & Transp. & Src port & Dst port & Application \& purpose\tabularnewline\hline
+\nrowsnum{#1}{ & & & & & & & & }%
+\end{tabularx}\par\medskip}
+
+% simulation d'états / scheduling
+\newcommand{\statesim}[1]{%
+\ansintro{Fill in the simulation table below (one row per time unit):}%
+\renewcommand{\arraystretch}{1.5}\footnotesize\noindent
+\begin{tabularx}{\linewidth}{|c|X|X|X|}\hline
+Time & Running & Ready & Blocked\tabularnewline\hline
+\nrowsnum{#1}{ & & & }%
+\end{tabularx}\par\medskip}
+
+% accès disque / inode
+\newcommand{\diskgrid}[1]{%
+\ansintro{List the disk block accesses, in order:}%
+\renewcommand{\arraystretch}{1.5}\footnotesize\noindent
+\begin{tabularx}{\linewidth}{|c|X|c|c|}\hline
+Step & Operation (syscall / what triggers it) & Block \# & Type (inode/index/data, R/W)\tabularnewline\hline
+\nrowsnum{#1}{ & & & }%
+\end{tabularx}\par\medskip}
+
+% forwarding table
+\newcommand{\forwardgrid}[1]{%
+\ansintro{Fill in the forwarding decisions below:}%
+\renewcommand{\arraystretch}{1.5}\footnotesize\noindent
+\begin{tabularx}{\linewidth}{|c|c|X|}\hline
+Destination IP & Out interface & Justification\tabularnewline\hline
+\nrowsblank{#1}{ & & }%
+\end{tabularx}\par\medskip}
+
+% lignes lignées pour une question ouverte
+\newcommand\Rline[1]{\ifnum#1>0 \noindent\rule{\linewidth}{0.2pt}\par\vspace{6.5mm}\expandafter\Rline\expandafter{\the\numexpr#1-1\relax}\fi}
+\newcommand{\rulelines}[1]{\par\smallskip\Rline{#1}}
+
+% ============================================================================
+% TOPOLOGIE CANONIQUE 2-AS (verrouille la forme « Figure 1 » du vrai Final 2024).
+% Le générateur l'inclut via \examtopo et base la question réseau sur SES valeurs fixes.
+% ============================================================================
+\newcommand{\examtopo}{%
+\begin{center}\begin{tikzpicture}[font=\footnotesize,>=Latex,node distance=9mm,every node/.append style={align=center}]
+% --- AS1 ---
+\node[host](A){$A_1\ldots A_{100}$};
+\node[sw,right=10mm of A](S1){SW1};
+\node[rtr,right=10mm of S1](R1){$R_1$};
+\node[srv,below=12mm of R1](B){$B_1\ldots B_{10}$\\[-2pt]\scriptsize $B_1$=DNS};
+\node[rtr,above right=7mm and 12mm of R1](R2){$R_2$};
+% --- AS2 ---
+\node[rtr,right=30mm of R2](R3){$R_3$};
+\node[rtr,below=14mm of R3](R4){$R_4$};
+\node[sw,right=10mm of R4](S3){SW2};
+\node[host,right=10mm of S3](C){$C_1\ldots C_{100}$};
+\node[srv,below=12mm of R4](D){$D_1\ldots D_{10}$\\[-2pt]\scriptsize $D_1$=d1.epfl.ch};
+% --- Internet ---
+\node[cloudnode,above=11mm of R3](NET){Rest of the\\Internet};
+% --- liens : coûts (rose) + débits (vert) + interfaces (orange) ---
+\draw[netlink](A)--(S1);
+\draw[netlink](S1)--(R1) node[iface,pos=0.78]{e};
+\draw[netlink](R1)--(B) node[iface,pos=0.8]{g};
+\draw[netlink](R1)--(R2) node[midway,sloped,above,inner sep=1pt]{\cost{5}\,\rate{1G}} node[iface,pos=0.2]{f} node[iface,pos=0.85]{h};
+\draw[netlink](R2)--(R3) node[midway,above,inner sep=1pt]{\cost{10}\,\rate{100M}} node[iface,pos=0.12]{i} node[iface,pos=0.88]{j};
+\draw[netlink](R3)--(NET) node[iface,pos=0.2]{p};
+\draw[netlink](R3)--(R4) node[midway,left,inner sep=1pt]{\cost{1}\,\rate{1G}} node[iface,pos=0.2]{k} node[iface,pos=0.8]{l};
+\draw[netlink](R4)--(S3) node[iface,pos=0.22]{m};
+\draw[netlink](S3)--(C);
+\draw[netlink](R4)--(D) node[iface,pos=0.8]{q};
+% --- cadres AS (pointillés) ---
+\begin{scope}[on background layer]
+\node[draw,dashed,rounded corners=3pt,fit=(A)(S1)(R1)(R2)(B),inner sep=5mm,label={[font=\bfseries\small]above:AS1}]{};
+\node[draw,dashed,rounded corners=3pt,fit=(R3)(R4)(S3)(C)(D),inner sep=5mm,label={[font=\bfseries\small]above:AS2}]{};
+\end{scope}
+\end{tikzpicture}\end{center}
+\figcaption{Figure 1: Network topology. Link costs are in pink, link rates in green; the small orange boxes are named router interfaces.}}
+
+% ============================================================================
+% FIGURES OS/FS VERROUILLÉES (style EPFL sobre). Le générateur les PARAMÈTRE.
+% ============================================================================
+% \examinode{<taille fichier en blocs, 1..N affichés>}{<nb direct ptrs>} :
+% inode v6-style : zone métadonnées + addr[0..7], direct → data, indirect → index → data.
+\newcommand{\examinode}{%
+\begin{center}\begin{tikzpicture}[font=\scriptsize,>=Latex,node distance=3.5mm]
+\node[draw,minimum width=2.5cm,minimum height=4mm](meta){metadata (size, \ldots)};
+\node[draw,below=0mm of meta,minimum width=2.5cm,minimum height=4mm](a0){addr[0] $\rightarrow$ direct};
+\node[draw,below=0mm of a0,minimum width=2.5cm,minimum height=4mm](a1){addr[1] $\rightarrow$ direct};
+\node[draw,below=0mm of a1,minimum width=2.5cm,minimum height=4mm](dots){\vdots};
+\node[draw,below=0mm of dots,minimum width=2.5cm,minimum height=4mm](a6){addr[6] $\rightarrow$ single ind.};
+\node[draw,below=0mm of a6,minimum width=2.5cm,minimum height=4mm](a7){addr[7] $\rightarrow$ double ind.};
+\node[blk,right=14mm of a0](d0){data};
+\node[blk,right=14mm of a1](d1){data};
+\node[draw,right=14mm of a6,minimum width=1.4cm,minimum height=4mm](idx){index blk};
+\node[blk,right=6mm of idx](d2){data};
+\node[draw,right=14mm of a7,minimum width=1.4cm,minimum height=4mm](idx2){index blk};
+\node[draw,right=6mm of idx2,minimum width=1.4cm,minimum height=4mm](idx3){index blk};
+\node[blk,right=6mm of idx3](d3){data};
+\draw[->](a0.east)--(d0.west); \draw[->](a1.east)--(d1.west);
+\draw[->](a6.east)--(idx.west); \draw[->](idx.east)--(d2.west);
+\draw[->](a7.east)--(idx2.west); \draw[->](idx2.east)--(idx3.west); \draw[->](idx3.east)--(d3.west);
+\node[above=1mm of meta,font=\small\bfseries]{inode};
+\end{tikzpicture}\end{center}
+\figcaption{Figure: v6-style inode with direct, single-indirect and double-indirect pointers.}}
+
+% \examproctree : arbre fork/exec. Usage :
+% \begin{examproctree} \node[pnode](p0){\texttt{./a.out}\\x=3}; \node[pnode,below left=of p0](p1){...};
+% \draw[forkarrow](p0)--(p1); \draw[execarrow](p1)--(p2); \end{examproctree}
+\tikzset{
+  pnode/.style={draw,rounded corners=2pt,inner sep=3pt,font=\scriptsize\ttfamily,align=center},
+  forkarrow/.style={->,>=Latex,thick},
+  execarrow/.style={->,>=Latex,thick,densely dashed},
+}
+\newenvironment{examproctree}{\begin{center}\begin{tikzpicture}[node distance=9mm and 11mm,font=\scriptsize]}{\end{tikzpicture}\\[2pt]{\scriptsize solid arrow = \texttt{fork()} \quad dashed arrow = \texttt{exec()}}\end{center}}
+
+% \examstates : diagramme d'états processus (Running/Ready/Blocked + transitions standard).
+\newcommand{\examstates}{%
+\begin{center}\begin{tikzpicture}[font=\scriptsize,>=Latex,node distance=16mm]
+\node[state](RUN){Running};
+\node[state,right=22mm of RUN](RDY){Ready};
+\node[state,below right=10mm and 4mm of RUN](BLK){Blocked};
+\draw[->,thick] (RUN.10) -- (RDY.170) node[midway,above]{descheduled / timer};
+\draw[->,thick] (RDY.190) -- (RUN.350) node[midway,below]{scheduled};
+\draw[->,thick] (RUN.290) -- (BLK.150) node[midway,left]{I/O request};
+\draw[->,thick] (BLK.30) -- (RDY.250) node[midway,right]{I/O done};
+\end{tikzpicture}\end{center}
+\figcaption{Figure: process state diagram.}}

@@ -1,0 +1,57 @@
+import { q } from "@/db/q";
+import { ARCHETYPES, type Archetype } from "@/lib/archetypes";
+import { getExamDna, sampleMolds } from "@/lib/exam-dna";
+
+export type Slot = { category: string; points: number; brief: string; archetypeId: string; mold?: string | null };
+
+/** Pondération d'un archétype par les faiblesses de l'étudiant (matching mots-clés). */
+function weaknessBoost(a: Archetype, weaknesses: string[]): number {
+  const hay = weaknesses.join(" ").toLowerCase();
+  return a.topics.some((t) => hay.includes(t)) ? 1.5 : 1;
+}
+
+/**
+ * Blueprint de couverture : fixe les 6 slots {catégorie, points, archétype} de la
+ * structure Final 2025 (Networking×2 / OS×2 / C / Labs ≈ 180 pts), en choisissant
+ * l'archétype selon poids study guide × faiblesses. Les archétypes Networking/OS
+ * étant 2 par catégorie, le boost de faiblesse détermine l'ORDRE/le focus des briefs.
+ */
+export async function buildBlueprint(): Promise<Slot[]> {
+  const weaknesses = (
+    await q.all<{ topic: string; description: string | null }>(
+      `SELECT topic, description FROM weaknesses ORDER BY severity DESC LIMIT 10`
+    )
+  ).map((w) => `${w.topic} ${w.description ?? ""}`);
+
+  const pick = (category: Archetype["category"]) =>
+    ARCHETYPES.filter((a) => a.category === category).sort(
+      (x, y) => y.weight * weaknessBoost(y, weaknesses) - x.weight * weaknessBoost(x, weaknesses)
+    );
+
+  const net = pick("Networking");
+  const os = pick("OS");
+  const c = pick("C")[0];
+  const labs = pick("Labs")[0];
+
+  const mk = (a: Archetype, points: number): Slot => ({
+    category: a.category,
+    points,
+    archetypeId: a.id,
+    brief: [
+      `ARCHÉTYPE « ${a.id} » — ${a.concept}.`,
+      `Construction : ${a.structure}`,
+      `Grilles de réponse : ${a.grid}.`,
+      `Figure : ${a.figure}.`,
+      `PIÈGE à inclure (ré-instancié sur TON setup, pas recopié) : ${a.trap}.`,
+    ].join(" "),
+  });
+
+  const slots = [mk(net[0], 50), mk(net[1] ?? net[0], 50), mk(os[0], 25), mk(os[1] ?? os[0], 30), mk(c, 10), mk(labs, 15)];
+  // MOULES échantillonnés depuis l'ADN détecté (data-driven : sans ADN — ex. CI,
+  // DB fraîche — molds = null → prompts BYTE-IDENTIQUES à l'historique ; la régression le prouve).
+  const dna = await getExamDna().catch(() => null);
+  const molds = sampleMolds(dna, slots.length, {
+    only: ["proof_analysis", "derivation", "design", "applied_scenario", "formula_computation", "code_trace", "table_fill", "figure_reading"],
+  });
+  return slots.map((s, i) => ({ ...s, mold: molds[i] ?? null }));
+}

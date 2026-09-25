@@ -1,0 +1,135 @@
+# CI bloquante — rouge = merge bloqué.
+# Job `ci` : typecheck, build, lint (budget anti-régression), tests unitaires
+# (drivers sqlite/pglite, LLM hermétique, sandbox, vérification déterministe),
+# et l'invariant de non-régression : prompt et .tex d'un cours de référence
+# doivent rester BYTE-IDENTIQUES aux empreintes canoniques.
+# Job `docker` : build de l'image app+worker, smoke test /api/health et
+# compilation LaTeX réelle dans le conteneur.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: cortex
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cortex/package-lock.json
+
+      - name: Outillage (sqlite3 CLI, sympy, userns pour la sandbox)
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q sqlite3
+          python3 -m pip install --quiet sympy || pip install --quiet sympy
+          # Ubuntu 23.10+ restreint les user namespaces non privilégiés (requis par unshare -rn)
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      - name: Dépendances
+        run: npm ci
+
+      - name: Typecheck (tsc --noEmit)
+        run: npx tsc --noEmit
+
+      - name: Build (next build)
+        run: npm run build
+
+      - name: Lint (budget anti-régression)
+        run: |
+          npm run lint > /tmp/lint.out 2>&1 || true
+          errors=$(grep -oE '\([0-9]+ errors' /tmp/lint.out | grep -oE '[0-9]+' || echo 0)
+          budget=$(cat .ci/lint-budget)
+          echo "eslint: $errors erreurs (budget: $budget)"
+          tail -5 /tmp/lint.out
+          if [ "$errors" -gt "$budget" ]; then
+            echo "::error::Budget lint dépassé ($errors > $budget) — corrige ou justifie une hausse de .ci/lint-budget"
+            exit 1
+          fi
+
+      - name: Tests unitaires (drivers, LLM hermétique, sandbox, vérif déterministe, isolation multi-tenant)
+        run: npm test
+
+      # Cet invariant a besoin du corpus du cours de référence, qui n'est pas
+      # versionné (les supports de cours appartiennent à leur établissement).
+      # Il s'exécute là où le corpus est disponible, et se saute sinon.
+      - name: Corpus de référence présent ?
+        id: corpus
+        run: |
+          if [ -d data/cs-202/content ] || [ -d ../cours ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Corpus de référence absent — invariant de non-régression non exécuté."
+          fi
+
+      - name: Invariant CS-202 — réparation DB + ingestion + régression byte-identique
+        if: steps.corpus.outputs.present == 'true'
+        run: |
+          npx tsx scripts/repair-cs202-db.ts --ci
+          npx tsx scripts/regression-cs202.ts /tmp/ci-reg | tee /tmp/reg.out
+          grep -q '350d533f7b765a97' /tmp/reg.out || { echo '::error::prompt sha ≠ canonique'; exit 1; }
+          grep -q '9a294bb25e9d919c' /tmp/reg.out || { echo '::error::tex sha ≠ canonique'; exit 1; }
+          echo "✓ régression cs-202 byte-identique"
+
+  # L'image du conteneur unique (app + worker + tectonic + python/matplotlib +
+  # sqlite3) se construit, démarre et sert /api/health.
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build de l'image (contexte = racine du repo)
+        run: docker build -t cortex-app .
+
+      - name: Smoke test — démarrage + /api/health
+        run: |
+          docker run -d --name cortex -p 3000:3000 cortex-app
+          ok=""
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:3000/api/health >/dev/null 2>&1; then ok=1; break; fi
+            sleep 2
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::/api/health injoignable après 180 s"
+            docker logs cortex 2>&1 | tail -60
+            exit 1
+          fi
+          echo "✓ /api/health répond :"
+          curl -fsS http://localhost:3000/api/health
+
+      - name: Outillage dans l'image — tectonic, matplotlib/numpy, sqlite3, pdftoppm, ps, tsx
+        run: |
+          docker exec cortex /usr/local/bin/tectonic --version
+          docker exec cortex python3 -c "import matplotlib, numpy; print('matplotlib', matplotlib.__version__, '/ numpy', numpy.__version__)"
+          docker exec cortex sqlite3 --version
+          docker exec cortex pdftoppm -v 2>&1 | head -1
+          docker exec cortex ps --version | head -1
+          docker exec cortex node_modules/.bin/tsx --version
+          echo "✓ outillage complet"
+
+      - name: Compilation LaTeX réelle dans le conteneur (préambule EPFL)
+        run: |
+          docker exec cortex bash -c '
+            set -e
+            mkdir -p /tmp/smoke && cp latex/epfl-logo.png /tmp/smoke/ || true
+            cat latex/preamble.tex latex/figures.tex > /tmp/smoke/doc.tex
+            # \FOOTDATE est défini par renderExamTex au runtime → stub pour le shipout fancyhdr.
+            printf "\n\\\\newcommand{\\\\FOOTDATE}{Smoke}\n\\\\begin{document}\nSmoke test PDF.\n\\\\end{document}\n" >> /tmp/smoke/doc.tex
+            cd /tmp/smoke && /usr/local/bin/tectonic --chatter minimal doc.tex
+            test -s doc.pdf && echo "✓ PDF compilé ($(stat -c%s doc.pdf) octets)"
+          '

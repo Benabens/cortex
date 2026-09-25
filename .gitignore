@@ -1,0 +1,10 @@
+.DS_Store
+
+# Documents de cours conservés localement — jamais versionnés
+# (ils appartiennent à leur établissement, voir CONTRIBUTING.md).
+/cours/
+/exercices/
+/labs/
+/notes/
+/design/
+/*.html

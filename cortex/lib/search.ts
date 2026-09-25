@@ -1,0 +1,212 @@
+import { currentCourse } from "@/db/client";
+import { q } from "@/db/q";
+import { boundedEdit, normalize, tokenize } from "@/lib/text";
+
+export type SearchHit = {
+  itemId: number;
+  sourceId: number;
+  sourceType: string;
+  sourceTitle: string;
+  sourcePath: string;
+  lectureId: string | null;
+  title: string | null;
+  anchor: string;
+  snippet: string;
+};
+
+export type SearchGroup = {
+  sourceType: string;
+  label: string;
+  hits: SearchHit[];
+};
+
+const TYPE_LABELS: Record<string, string> = {
+  review: "Reviews de cours / labs",
+  course_pdf: "Cours (slides PDF)",
+  final: "Finals",
+  midterm: "Midterms",
+  serie: "Séries d'exercices",
+  exercise: "Exercices",
+  cheatsheet: "Cheat sheets",
+};
+
+const TYPE_ORDER = ["review", "final", "midterm", "serie", "exercise", "cheatsheet", "course_pdf"];
+
+// ----- Vocabulaire en cache PAR COURS (pour la correction de fautes) -----
+type Vocab = { sorted: string[]; set: Set<string>; df: Map<string, number> };
+const _vocabByCourse = new Map<string, Vocab>();
+async function vocab(): Promise<Vocab> {
+  const course = currentCourse();
+  let v = _vocabByCourse.get(course);
+  if (!v) {
+    let rows: { term: string; df: number }[] = [];
+    try {
+      rows = await q.all<{ term: string; df: number }>("SELECT term, df FROM vocab");
+    } catch {
+      rows = [];
+    }
+    const sorted = rows.map((r) => r.term).sort();
+    const df = new Map(rows.map((r) => [r.term, r.df]));
+    v = { sorted, set: new Set(sorted), df };
+    _vocabByCourse.set(course, v);
+  }
+  return v;
+}
+
+/** Existe-t-il un terme du vocabulaire égal à `t` ou commençant par `t` ? */
+function knownPrefixOrExact(t: string, v: Vocab): boolean {
+  if (v.set.has(t)) return true;
+  const a = v.sorted;
+  let lo = 0, hi = a.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (a[mid] < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < a.length && a[lo].startsWith(t);
+}
+
+/** Candidats proches d'un terme mal orthographié, classés (distance, fréquence). */
+function fuzzyCandidates(t: string, v: Vocab, k = 4): string[] {
+  const max = t.length <= 4 ? 1 : 2;
+  const out: { term: string; d: number; df: number }[] = [];
+  for (const term of v.sorted) {
+    if (Math.abs(term.length - t.length) > max) continue;
+    if (term[0] !== t[0] && term[1] !== t[1]) continue; // prefiltre rapide
+    const d = boundedEdit(t, term, max);
+    if (d <= max && term !== t) out.push({ term, d, df: v.df.get(term) ?? 0 });
+  }
+  out.sort((a, b) => a.d - b.d || b.df - a.df);
+  return out.slice(0, k).map((o) => o.term);
+}
+
+// Mots vides FR/EN à ignorer pour le matching « lâche » (lien de faiblesse).
+const STOP = new Set([
+  "le", "la", "les", "un", "une", "des", "de", "du", "et", "ou", "que", "qui", "quoi",
+  "je", "tu", "il", "on", "ce", "ça", "se", "sa", "son", "ses", "mon", "ma", "mes",
+  "au", "aux", "en", "dans", "sur", "pour", "par", "avec", "sans", "est", "sont", "pas",
+  "ne", "plus", "moins", "comme", "quand", "ou", "ai", "the", "and", "for", "with", "you",
+  "confonds", "comprends", "compris", "sais", "fait", "faire",
+]);
+
+/**
+ * Saisie libre -> requête FTS5.
+ * mode 'and' (défaut, recherche précise) : tous les termes requis.
+ * mode 'or'  (lien de faiblesse)        : OU sur les termes significatifs (mots vides retirés).
+ */
+async function toFtsQuery(raw: string, mode: "and" | "or" = "and"): Promise<string | null> {
+  let terms = tokenize(raw, 2);
+  if (mode === "or") terms = terms.filter((t) => t.length >= 3 && !STOP.has(t));
+  if (!terms.length) return null;
+  const v = await vocab();
+  const groups = terms.map((t) => {
+    const parts = [`"${t}"*`];
+    if (!knownPrefixOrExact(t, v)) {
+      for (const c of fuzzyCandidates(t, v)) parts.push(`"${c}"`);
+    }
+    return parts.length > 1 ? `(${parts.join(" OR ")})` : parts[0];
+  });
+  return groups.join(mode === "and" ? " AND " : " OR ");
+}
+
+const SEARCH_SQL = `
+  SELECT i.id AS "itemId", s.id AS "sourceId", s.type AS "sourceType", s.title AS "sourceTitle", s.path AS "sourcePath",
+         i.lecture_id AS "lectureId", i.title title, i.anchor anchor,
+         snippet(fts_items, 1, '«', '»', ' … ', 12) snippet
+  FROM fts_items f
+  JOIN items i   ON i.id = f.item_id
+  JOIN sources s ON s.id = i.source_id
+  WHERE fts_items MATCH ?
+  ORDER BY bm25(fts_items) * (1.0 / (0.5 + s.recency_weight)), rank
+  LIMIT ?
+`;
+
+/**
+ * Équivalent Postgres : tsquery 'simple' sur items.text_norm (ombre normalisée,
+ * accent-insensible comme le tokenizer FTS5) + ts_rank pondéré par la récence.
+ * Divergence assumée : le classement ts_rank ≠ bm25 (mêmes features, scores
+ * différents) et ts_headline surligne moins bien les termes accentués (le
+ * snippet est pris sur le texte ORIGINAL pour rester lisible).
+ */
+function toPgTsQuery(terms: string[], mode: "and" | "or", v: Vocab): string {
+  const groups = terms.map((t) => {
+    const parts = [`${t}:*`];
+    if (!knownPrefixOrExact(t, v)) {
+      for (const c of fuzzyCandidates(t, v)) parts.push(c);
+    }
+    return parts.length > 1 ? `(${parts.join(" | ")})` : parts[0];
+  });
+  return groups.join(mode === "and" ? " & " : " | ");
+}
+
+const PG_SEARCH_SQL = `
+  SELECT i.id "itemId", s.id "sourceId", s.type "sourceType", s.title "sourceTitle", s.path "sourcePath",
+         i.lecture_id "lectureId", i.title title, i.anchor anchor,
+         ts_headline('simple', i.text, to_tsquery('simple', ?),
+                     'StartSel=«, StopSel=», MaxWords=12, MinWords=4, MaxFragments=2, FragmentDelimiter=" … "') snippet
+  FROM items i
+  JOIN sources s ON s.id = i.source_id
+  WHERE to_tsvector('simple', coalesce(i.text_norm, '')) @@ to_tsquery('simple', ?)
+  ORDER BY ts_rank(to_tsvector('simple', coalesce(i.text_norm, '')), to_tsquery('simple', ?)) * (0.5 + s.recency_weight) DESC
+  LIMIT ?
+`;
+
+/**
+ * Indexe un item pour la recherche — le pendant ÉCRITURE des deux moteurs :
+ * SQLite → ligne fts_items (tokenizer remove_diacritics) ;
+ * Postgres → ombre normalisée items.text_norm (index GIN tsvector 'simple').
+ */
+export async function indexItemForSearch(
+  itemId: number | string,
+  sourceId: number | string,
+  title: string | null,
+  text: string,
+  lectureId?: string | null
+): Promise<void> {
+  if (q.dialect === "postgres") {
+    await q.run(`UPDATE items SET text_norm = ? WHERE id = ?`, normalize(`${title ?? ""} ${text}`), Number(itemId));
+    return;
+  }
+  await q.run(
+    `INSERT INTO fts_items (title, text, lecture_id, item_id, source_id) VALUES (?,?,?,?,?)`,
+    title ?? "", text, lectureId ?? "", String(itemId), String(sourceId)
+  );
+}
+
+/** Désindexe tous les items d'une source (avant leur suppression). */
+export async function unindexSource(sourceId: number): Promise<void> {
+  if (q.dialect === "postgres") return; // text_norm part avec la ligne items
+  await q.run(`DELETE FROM fts_items WHERE source_id = ?`, sourceId);
+}
+
+export async function search(raw: string, limit = 60, mode: "and" | "or" = "and"): Promise<SearchGroup[]> {
+  let rows: SearchHit[];
+  try {
+    if (q.dialect === "postgres") {
+      let terms = tokenize(raw, 2);
+      if (mode === "or") terms = terms.filter((t) => t.length >= 3 && !STOP.has(t));
+      if (!terms.length) return [];
+      const tsq = toPgTsQuery(terms, mode, await vocab());
+      rows = await q.all<SearchHit>(PG_SEARCH_SQL, tsq, tsq, tsq, limit);
+    } else {
+      const ftsQuery = await toFtsQuery(raw, mode);
+      if (!ftsQuery) return [];
+      // exécuté à l'appel → lié à la connexion du cours courant (façade `q`)
+      rows = await q.all<SearchHit>(SEARCH_SQL, ftsQuery, limit);
+    }
+  } catch {
+    return [];
+  }
+  const byType = new Map<string, SearchHit[]>();
+  for (const r of rows) {
+    if (!byType.has(r.sourceType)) byType.set(r.sourceType, []);
+    byType.get(r.sourceType)!.push(r);
+  }
+  return [...byType.entries()]
+    .sort((a, b) => TYPE_ORDER.indexOf(a[0]) - TYPE_ORDER.indexOf(b[0]))
+    .map(([sourceType, hits]) => ({
+      sourceType,
+      label: TYPE_LABELS[sourceType] ?? sourceType,
+      hits,
+    }));
+}

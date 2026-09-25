@@ -1,0 +1,17 @@
+# Contexte de build = racine du dépôt. On exclut tout ce qui est local ou dérivé :
+# un build local ne doit embarquer ni données ni secrets.
+.git
+.github
+design
+node_modules
+**/node_modules
+cortex/.next
+cortex/tsconfig.tsbuildinfo
+
+# Secrets — jamais dans une image.
+cortex/.env*
+!cortex/.env.example
+
+# Données locales (bases, documents importés, examens générés) : elles vivent
+# sur le volume persistant, jamais dans l'image.
+cortex/data

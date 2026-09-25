@@ -1,0 +1,9 @@
+# Envoi via `railway up` : les sources uniquement.
+.git
+.github
+**/node_modules
+**/.next
+**/.turbo
+cortex/data
+cortex/tsconfig.tsbuildinfo
+design
