@@ -373,15 +373,40 @@ function pgidOf(pid: number): number | null {
  * (`claude`, tectonic/pdflatex). Pas de génération zombie.
  */
 /**
+ * Coût LLM réel d'un job (USD) : somme des lignes `llm_usage` rattachées au
+ * même compte, même cours et même id — les ids de jobs sont séquentiels PAR
+ * tenant, le triplet est indispensable.
+ */
+export async function jobLlmCostUsd(userId: string, course: string, jobId: number): Promise<number> {
+  const { authGet } = await import("@/db/auth-store");
+  const r = await authGet<{ total: number | string | null }>(
+    `SELECT coalesce(sum(cost_usd), 0) total FROM llm_usage WHERE user_id = ? AND course = ? AND job_id = ?`,
+    userId, course, String(jobId),
+  );
+  return Number(r?.total ?? 0);
+}
+
+/**
  * Rend les crédits d'un job qui ne produira RIEN (échec définitif, zombie
- * épuisé, annulation). Idempotent et seulement-si-débité (cf. credits.ts) :
- * l'appeler deux fois ne rend pas deux fois. No-op sans facturation.
+ * épuisé, annulation) — SEULEMENT si le job n'a rien coûté au fournisseur
+ * (coût LLM réel nul). Un échec provoqué après des appels payants (document
+ * piégé qui fait planter le parsing, annulation tardive) n'est plus une
+ * génération gratuite. Idempotent et seulement-si-débité (cf. credits.ts).
+ * No-op sans facturation.
  */
 export async function refundJobCredits(job: Pick<Job, "id" | "type">): Promise<void> {
   if (job.type === "ingest") return;
   try {
-    const { refundGeneration, jobRef } = await import("@/lib/billing/credits");
-    await refundGeneration(job.type, jobRef(currentUser(), currentCourse(), job.id));
+    const { billingEnabled, refundGeneration, jobRef } = await import("@/lib/billing/credits");
+    if (!billingEnabled()) return;
+    const user = currentUser();
+    const course = currentCourse();
+    const spent = await jobLlmCostUsd(user, course, job.id);
+    if (spent > 0) {
+      await logJob(job.id, `Crédits conservés : le job a déjà coûté ${spent.toFixed(3)} $ d'appels au modèle.`).catch(() => {});
+      return;
+    }
+    await refundGeneration(job.type, jobRef(user, course, job.id));
   } catch { /* best-effort : jamais bloquant */ }
 }
 
@@ -389,8 +414,9 @@ export async function refundJobCredits(job: Pick<Job, "id" | "type">): Promise<v
  * Seuil d'avancement au-delà duquel une ANNULATION n'est plus remboursée : le
  * travail a réellement été facturé par le fournisseur (appels LLM déjà émis),
  * et un remboursement inconditionnel offrirait des générations illimitées
- * (générer à 95 %, annuler, recommencer). Un ÉCHEC reste toujours remboursé —
- * l'utilisateur n'y peut rien et n'obtient aucun livrable.
+ * (générer à 95 %, annuler, recommencer). Filet supplémentaire : quel que soit
+ * l'avancement, refundJobCredits ne rend rien si le job a déjà coûté au
+ * fournisseur (échec compris).
  */
 const CANCEL_REFUND_MAX_PROGRESS = 10;
 
