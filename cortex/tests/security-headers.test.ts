@@ -13,9 +13,16 @@ async function allHeaders(): Promise<Record<string, string>> {
   const cfg = mod.default;
   assert.equal(typeof cfg.headers, "function", "next.config doit déclarer headers()");
   const rules = await cfg.headers!();
-  const global = rules.find((r) => r.source === "/(.*)" || r.source === "/:path*");
+  const { GLOBAL_HEADERS_SOURCE } = await import("../lib/security-headers");
+  const global = rules.find((r) => r.source === GLOBAL_HEADERS_SOURCE);
   assert.ok(global, `aucune règle globale : ${rules.map((r) => r.source).join(", ")}`);
   return Object.fromEntries(global!.headers.map((h) => [h.key.toLowerCase(), h.value]));
+}
+
+/** Simule le matcher path-to-regexp de Next sur la source de la règle globale. */
+function globalRuleMatches(source: string, pathname: string): boolean {
+  const inner = source.slice("/(".length, -")".length); // "(?!a|b).*"
+  return new RegExp(`^/${inner}$`).test(pathname);
 }
 
 test("CSP : frame-ancestors, object-src, base-uri, scripts et connexions bornés à l'origine", async () => {
@@ -37,6 +44,23 @@ test("CSP : frame-ancestors, object-src, base-uri, scripts et connexions bornés
   assert.match(d["img-src"] ?? "", /data:/);
   assert.match(d["style-src"] ?? "", /'unsafe-inline'/); // Tailwind / next-font / HTML d'examen
   assert.match(d["form-action"] ?? "", /accounts\.google\.com/); // redirection OAuth après POST
+});
+
+test("la règle globale couvre pages/API/assets mais PAS les routes de fichiers (qui posent leurs en-têtes)", async () => {
+  const { GLOBAL_HEADERS_SOURCE, servedFileHeaders, CSP_BASE } = await import("../lib/security-headers");
+  for (const p of ["/", "/api/health", "/api/jobs", "/_next/static/x.js", "/entrainement", "/examens", "/mock/3"]) {
+    assert.ok(globalRuleMatches(GLOBAL_HEADERS_SOURCE, p), `${p} devrait être couvert`);
+  }
+  for (const p of ["/refs/final.pdf", "/csrc", "/exam/exam-1.pdf", "/uploads/x.png"]) {
+    assert.ok(!globalRuleMatches(GLOBAL_HEADERS_SOURCE, p), `${p} ne doit pas être écrasé par la règle globale`);
+  }
+  // …et ces routes reçoivent le même jeu, sandbox en plus pour le HTML.
+  const pdf = servedFileHeaders("application/pdf");
+  assert.equal(pdf["content-security-policy"], CSP_BASE);
+  assert.equal(pdf["x-content-type-options"], "nosniff");
+  const html = servedFileHeaders("text/html");
+  assert.match(html["content-security-policy"], /^sandbox;/);
+  assert.equal(html["x-frame-options"], "DENY");
 });
 
 test("X-Content-Type-Options, Referrer-Policy, X-Frame-Options, Permissions-Policy", async () => {

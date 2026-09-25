@@ -1,4 +1,5 @@
 import { coursePaths } from "@/lib/courses";
+import { servedFileHeaders } from "@/lib/security-headers";
 import { authEnabled } from "@/lib/auth";
 import { useCourseOr404 } from "@/lib/req";
 import { q } from "@/db/q";
@@ -36,9 +37,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ file
   const ext = file.split(".").pop()!.toLowerCase();
   const buf = fs.readFileSync(abs);
   return new NextResponse(new Uint8Array(buf), {
-    headers: {
-      "content-type": MIME[ext] ?? "application/octet-stream",
-      "content-disposition": `inline; filename="${file}"`,
-    },
+    headers: servedFileHeaders(MIME[ext] ?? "application/octet-stream", { "content-disposition": `inline; filename="${file}"` }),
   });
 }
