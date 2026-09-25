@@ -1,7 +1,7 @@
 import { coursePaths, getCourse } from "@/lib/courses";
 import { classifyFile } from "@/lib/import-folder";
 import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
-import { useCourse, courseDenied } from "@/lib/req";
+import { requireCourse } from "@/lib/req";
 import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
@@ -46,9 +46,8 @@ function safeRelPath(raw: string): string | null {
 }
 
 export async function POST(req: NextRequest) {
-  const course = useCourse(req);
-  const denied = courseDenied(course);
-  if (denied) return NextResponse.json({ error: denied }, { status: 404 });
+  const { course, denied } = requireCourse(req);
+  if (denied) return denied;
 
   const cfg = getCourse(course);
   // Un cours HISTORIQUE lit son contenu à la racine du dépôt, en lecture seule :

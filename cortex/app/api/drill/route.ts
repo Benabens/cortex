@@ -1,6 +1,6 @@
 import { LlmError } from "@/lib/llm";
 import { generateDrill } from "@/lib/drill";
-import { useCourse } from "@/lib/req";
+import { useCourseOr404 } from "@/lib/req";
 import { logLoopRoute } from "@/lib/req-log";
 import { q } from "@/db/q";
 import { dueConcepts } from "@/lib/schedule";
@@ -11,7 +11,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 240;
 
 export async function GET(req: NextRequest) {
-  useCourse(req);
+  const denied = useCourseOr404(req);
+  if (denied) return denied;
   const weaknesses = (await q.all<{ topic: string }>(`SELECT topic FROM weaknesses ORDER BY severity DESC LIMIT 12`))
     .map((w) => w.topic)
     .filter((t) => t && t !== "(à analyser)");
@@ -20,7 +21,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const t0 = Date.now();
-  useCourse(req);
+  const denied = useCourseOr404(req);
+  if (denied) return denied;
   try {
     // Appel LLM INLINE → quota d'assistance par user/jour
     // (DAILY_ASSIST_QUOTA) + limite de débit par minute, compté à la tentative.

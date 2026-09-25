@@ -1,5 +1,5 @@
 import { generateExam } from "@/lib/exam";
-import { useCourse } from "@/lib/req";
+import { requireCourse } from "@/lib/req";
 import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
 import { NextRequest, NextResponse } from "next/server";
@@ -13,7 +13,8 @@ export const dynamic = "force-dynamic";
  * à la requête / au reload. L'UI poll /api/jobs/:id. (dry-run = stub local synchrone.)
  */
 export async function POST(req: NextRequest) {
-  const course = useCourse(req);
+  const { course, denied } = requireCourse(req);
+  if (denied) return denied;
   const dry = req.nextUrl.searchParams.get("dry") === "1";
   if (dry) {
     try {

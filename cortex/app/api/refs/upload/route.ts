@@ -1,6 +1,6 @@
 import { coursePaths } from "@/lib/courses";
 import { createJobExclusive, startWorker } from "@/lib/jobs";
-import { useCourse } from "@/lib/req";
+import { requireCourse } from "@/lib/req";
 import { ingestRefFile } from "@/lib/sources";
 import fs from "node:fs";
 import path from "node:path";
@@ -15,7 +15,8 @@ export const dynamic = "force-dynamic";
  * sur ces finals. PDF/HTML/txt acceptés.
  */
 export async function POST(req: NextRequest) {
-  const course = useCourse(req);
+  const { course, denied } = requireCourse(req);
+  if (denied) return denied;
   const form = await req.formData().catch(() => null);
   if (!form) return NextResponse.json({ error: "multipart attendu." }, { status: 400 });
   const files = form.getAll("file").filter((f): f is File => f instanceof File && f.size > 0);

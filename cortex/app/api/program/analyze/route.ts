@@ -1,6 +1,6 @@
 import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
-import { useCourse } from "@/lib/req";
+import { requireCourse, useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -8,13 +8,15 @@ export const dynamic = "force-dynamic";
 
 /** Job actif d'analyse de blueprint (reprise au reload). */
 export async function GET(req: NextRequest) {
-  useCourse(req);
+  const denied = useCourseOr404(req);
+  if (denied) return denied;
   return NextResponse.json({ active: await activeJob("blueprint") });
 }
 
 /** Lance l'analyse du programme (taxonomie typée + pondérée) en arrière-plan. */
 export async function POST(req: NextRequest) {
-  const course = useCourse(req);
+  const { course, denied } = requireCourse(req);
+  if (denied) return denied;
   const existing = await activeJob("blueprint");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
 

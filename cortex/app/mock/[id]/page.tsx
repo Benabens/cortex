@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useCallback, useEffect, useState } from "react";
+import { useCourse } from "@/lib/ux/api";
 
 type Item = { id: number; idx: number; topic: string; type: "scq" | "mcq"; stem: string; options: string[]; verified: number | null };
 type Open = { id: number; concept: string; statement: string; solution: string };
@@ -12,15 +13,20 @@ const LETTER = "ABCDEFGH".split("");
 
 export default function MockPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const { courseId, ready } = useCourse();
+  const qs = `?course=${encodeURIComponent(courseId ?? "")}`;
   const [exam, setExam] = useState<Exam | null>(null);
   const [answers, setAnswers] = useState<Record<number, number[]>>({});
   const [graded, setGraded] = useState<Graded | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => { (async () => {
-    try { const d = await (await fetch(`/api/qcm/${id}`)).json(); if (d.error) setErr(d.error); else setExam(d); } catch { setErr("Chargement impossible."); }
-  })(); }, [id]);
+  useEffect(() => {
+    if (!ready || !courseId) return;
+    (async () => {
+      try { const d = await (await fetch(`/api/qcm/${id}${qs}`)).json(); if (d.error) setErr(d.error); else setExam(d); } catch { setErr("Chargement impossible."); }
+    })();
+  }, [id, ready, courseId, qs]);
 
   const toggle = useCallback((it: Item, k: number) => {
     if (graded) return;
@@ -34,7 +40,7 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
   async function submit() {
     setBusy(true); setErr(null);
     try {
-      const d = await (await fetch(`/api/qcm/${id}/grade`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ answers }) })).json();
+      const d = await (await fetch(`/api/qcm/${id}/grade${qs}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ answers }) })).json();
       if (d.error) setErr(d.error); else { setGraded(d); window.scrollTo({ top: 0, behavior: "smooth" }); }
     } catch { setErr("Correction impossible."); } finally { setBusy(false); }
   }
@@ -52,8 +58,8 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
         <p className="sub mt-2">{exam.items.length} questions à choix{exam.open.length ? ` + ${exam.open.length} ouverte(s)` : ""} · réponds, puis corrige-toi. SCQ = une seule case ; MCQ = une ou plusieurs.</p>
         {exam.pdf && (
           <div className="mt-3 flex gap-2">
-            <a className="btn btn-ghost btn-sm" href={`/exam/${exam.pdf}?course=ml`} target="_blank" rel="noopener">📄 PDF énoncé</a>
-            <a className="btn btn-quiet btn-sm" style={{ color: "var(--green)" }} href={`/exam/${exam.pdf.replace(/(\.pdf)$/, "-corrige$1")}?course=ml`} target="_blank" rel="noopener">PDF corrigé</a>
+            <a className="btn btn-ghost btn-sm" href={`/exam/${exam.pdf}${qs}`} target="_blank" rel="noopener">📄 PDF énoncé</a>
+            <a className="btn btn-quiet btn-sm" style={{ color: "var(--green)" }} href={`/exam/${exam.pdf.replace(/(\.pdf)$/, "-corrige$1")}${qs}`} target="_blank" rel="noopener">PDF corrigé</a>
           </div>
         )}
       </header>

@@ -1,5 +1,5 @@
 import { q } from "@/db/q";
-import { useCourse } from "@/lib/req";
+import { useCourseOr404 } from "@/lib/req";
 import { logLoopRoute } from "@/lib/req-log";
 import { currentCourse } from "@/db/client";
 import { courseLabel } from "@/lib/courses";
@@ -46,7 +46,8 @@ export async function POST(req: NextRequest) {
 }
 
 async function handlePOST(req: NextRequest) {
-  useCourse(req);
+  const denied = useCourseOr404(req);
+  if (denied) return denied;
   // Appel LLM INLINE → quota d'assistance par user/jour
   // (DAILY_ASSIST_QUOTA, no-op sans env), compté à la tentative.
   {
