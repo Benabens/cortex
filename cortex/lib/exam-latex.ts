@@ -1,7 +1,8 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { assertTexSafe } from "@/lib/tex-guard";
 import { currentCourse } from "@/db/client";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
@@ -216,6 +217,29 @@ export function texAvailable(): boolean {
   return false;
 }
 
+/** Le binaire tectonic supporte-t-il `--untrusted` ? (sondé une fois par binaire) */
+const _untrusted = new Map<string, boolean>();
+export function tectonicSupportsUntrusted(bin: string): boolean {
+  const known = _untrusted.get(bin);
+  if (known !== undefined) return known;
+  let ok = false;
+  try {
+    const r = spawnSync(bin, ["--help"], { encoding: "utf8", timeout: 10_000 });
+    ok = /--untrusted/.test(`${r.stdout ?? ""}${r.stderr ?? ""}`);
+  } catch { ok = false; }
+  _untrusted.set(bin, ok);
+  return ok;
+}
+
+/**
+ * Arguments de tectonic. `--untrusted` désactive les fonctions connues comme
+ * dangereuses (shell-escape) — le source a déjà passé lib/tex-guard, ceci est
+ * la seconde barrière. Sans support (vieille version), on compile sans.
+ */
+export function tectonicArgs(tex: string, opts: { untrustedSupported: boolean }): string[] {
+  return [...(opts.untrustedSupported ? ["--untrusted"] : []), "--chatter", "minimal", "--keep-logs", tex];
+}
+
 export async function compileExamPdf(base: string): Promise<string> {
   const tex = `${base}.tex`;
   const pdf = `${base}.pdf`;
@@ -224,7 +248,7 @@ export async function compileExamPdf(base: string): Promise<string> {
   for (const { bin, kind } of texCandidates()) {
     try {
       if (kind === "tectonic") {
-        const r = await spawnP(bin, ["--chatter", "minimal", "--keep-logs", tex], examsDir(), 240_000);
+        const r = await spawnP(bin, tectonicArgs(tex, { untrustedSupported: tectonicSupportsUntrusted(bin) }), examsDir(), 240_000);
         if (r.code === 0 && fs.existsSync(pdfAbs)) return pdf;
         lastErr = tailLog(base) || r.err || `tectonic code ${r.code}`;
       } else {
@@ -426,8 +450,14 @@ export async function buildExerciseArtifact(q: ExamQuestion, id: number, dateLab
     const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
     if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
   }
-  fs.writeFileSync(path.join(examsDir(), `${base}.tex`), renderExerciseLatex(q, dateLabel, false));
-  fs.writeFileSync(path.join(examsDir(), `${base}-corrige.tex`), renderExerciseLatex(q, dateLabel, true));
+  // Garde AVANT toute écriture : un source piégé (\input d'un fichier du
+  // conteneur…) n'est ni écrit ni compilé — l'exercice échoue.
+  const texEnonce = renderExerciseLatex(q, dateLabel, false);
+  const texCorrige = renderExerciseLatex(q, dateLabel, true);
+  assertTexSafe(texEnonce);
+  assertTexSafe(texCorrige);
+  fs.writeFileSync(path.join(examsDir(), `${base}.tex`), texEnonce);
+  fs.writeFileSync(path.join(examsDir(), `${base}-corrige.tex`), texCorrige);
   try {
     const pdf = await compileExamPdf(base);
     try { await compileExamPdf(`${base}-corrige`); } catch (e) { console.error(`[exo] corrigé #${id} non compilé :`, (e as Error).message); }
@@ -451,8 +481,14 @@ export async function buildExamArtifact(spec: ExamSpec, id: number, dateLabel: s
     if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
   }
   // 1) examen seul (corrigé caché — mode mock) ; 2) version corrigée
-  fs.writeFileSync(path.join(examsDir(), `${base}.tex`), renderExamTex(spec, dateLabel, false));
-  fs.writeFileSync(path.join(examsDir(), `${base}-corrige.tex`), renderExamTex(spec, dateLabel, true));
+  // Garde AVANT toute écriture (cf. lib/tex-guard) : le rendu lui-même est
+  // inchangé — le garde lit, il ne réécrit pas.
+  const texEnonce = renderExamTex(spec, dateLabel, false);
+  const texCorrige = renderExamTex(spec, dateLabel, true);
+  assertTexSafe(texEnonce);
+  assertTexSafe(texCorrige);
+  fs.writeFileSync(path.join(examsDir(), `${base}.tex`), texEnonce);
+  fs.writeFileSync(path.join(examsDir(), `${base}-corrige.tex`), texCorrige);
   try {
     const pdf = await compileExamPdf(base);
     try { await compileExamPdf(`${base}-corrige`); } catch (e) {
