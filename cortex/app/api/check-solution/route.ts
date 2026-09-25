@@ -27,6 +27,11 @@ export async function POST(req: NextRequest) {
 async function handlePOST(req: NextRequest) {
   const denied = useCourseOr404(req);
   if (denied) return denied;
+  // Borne de taille AVANT le quota : un envoi trop gros ne doit pas débiter l'assistance.
+  if ((req.headers.get("content-type") ?? "").includes("multipart/form-data")) {
+    const tooBig = rejectOversizedBody(req, UPLOAD_LIMITS.image);
+    if (tooBig) return tooBig;
+  }
   // Appel LLM INLINE → quota d'assistance par user/jour
   // (DAILY_ASSIST_QUOTA, no-op sans env), compté à la tentative.
   {
@@ -45,8 +50,6 @@ async function handlePOST(req: NextRequest) {
   let imageRel: string | null = null;
 
   if (ct.includes("multipart/form-data")) {
-    const tooBig = rejectOversizedBody(req, UPLOAD_LIMITS.image);
-    if (tooBig) return tooBig;
     const form = await req.formData();
     statement = String(form.get("statement") ?? "").trim();
     answer = String(form.get("answer") ?? "").trim();
