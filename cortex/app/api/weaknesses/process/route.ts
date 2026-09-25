@@ -51,14 +51,11 @@ async function handlePOST(req: NextRequest) {
   // Appel LLM INLINE → quota d'assistance par user/jour
   // (DAILY_ASSIST_QUOTA, no-op sans env), compté à la tentative.
   {
-    const { generationGate, recordGeneration } = await import("@/lib/billing/guards");
-    const { creditsGate } = await import("@/lib/billing/credits");
-    // Quota d'assistance ET solde : ces appels coûtent de l'argent au même
-    // titre qu'une génération (sans ça, un solde à 0 pouvait encore consommer
-    // l'API en boucle via drill/check-solution/analyse).
-    const gate = (await generationGate("assist")) ?? (await creditsGate("assist"));
+    const { assistGate } = await import("@/lib/billing/reserve");
+    // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE avant
+    // l'appel au modèle : 0,1 crédit — l'assistance n'est plus gratuite.
+    const gate = await assistGate("weakness-process");
     if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
-    await recordGeneration("assist", "weakness-process");
   }
   const { id, model } = await req.json().catch(() => ({ id: null }));
   if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
