@@ -149,6 +149,8 @@ function injectedScript(targetTitle: string, terms: string[]): string {
 }
 
 export async function GET(req: NextRequest) {
+  // Viewer du poste de dev (lit des .html hors de l'app) : n'existe pas en production.
+  if (process.env.NODE_ENV === "production") return new NextResponse("Not found", { status: 404 });
   const denied = useCourseOr404(req);
   if (denied) return denied;
   const sp = req.nextUrl.searchParams;

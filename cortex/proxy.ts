@@ -16,7 +16,19 @@ import type { NextRequest } from "next/server";
 
 const AUTH_ON = process.env.AUTH_ENABLED === "1";
 
-const PUBLIC_PREFIXES = ["/api/auth", "/login", "/api/health", "/api/metrics", "/api/billing/webhook", "/_next", "/favicon", "/sites"];
+const PUBLIC_PREFIXES = ["/api/auth", "/login", "/api/health", "/api/metrics", "/api/billing/webhook", "/_next", "/favicon"];
+
+/**
+ * CHEMINS HÉRITÉS DU MONO-USER, absents en production : `/voir` lit des .html
+ * hors de l'app et `/sites` (public/sites → symlinks vers le poste de dev)
+ * exposait des fiches perso sans session. Ni l'un ni l'autre n'a de contenu
+ * dans une image de prod ; ils répondent 404 avant toute autre logique. En dev
+ * ils restent disponibles, mais soumis à l'authentification comme le reste.
+ */
+function legacyPathBlocked(pathname: string): boolean {
+  if (process.env.NODE_ENV !== "production") return false;
+  return pathname === "/voir" || pathname === "/sites" || pathname.startsWith("/sites/");
+}
 
 /**
  * DÉMO PUBLIQUE (PUBLIC_DEMO=1, optionnel) : ces pages/API restent lisibles
@@ -125,6 +137,7 @@ export default function proxy(req: NextRequest) {
   // évalué avant la branche d'authentification, mais jamais sur les chemins
   // d'infrastructure ci-dessus.
   const { pathname } = req.nextUrl;
+  if (legacyPathBlocked(pathname)) return new NextResponse("Not found", { status: 404 });
   if (!RL_EXEMPT.some((p) => pathname.startsWith(p)) && rateLimited(req)) {
     return NextResponse.json({ error: "Trop de requêtes — réessaie dans une minute." }, { status: 429 });
   }
