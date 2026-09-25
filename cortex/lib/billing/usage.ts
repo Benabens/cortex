@@ -130,12 +130,14 @@ export function resetSpendCache(): void {
   _spendCache = null;
 }
 
+/**
+ * Plafond de dépense GLOBAL (USD). FAIL-CLOSED : dans un déploiement gardé
+ * (auth ou facturation), 50 $ par défaut si la variable est oubliée — un
+ * plafond global absent transformait un oubli de config en dépense sans borne.
+ * `unlimited` lève explicitement ; `0` reste le kill-switch d'urgence total.
+ */
 export function spendCapUsd(): number | null {
-  const raw = process.env.SPEND_CAP_USD;
-  if (!raw && raw !== "0") return null; // plafond GLOBAL : pas de défaut (opt-in explicite)
-  const n = Number(raw);
-  // 0 est VALIDE : kill-switch d'urgence total (toute génération payante coupée).
-  return Number.isFinite(n) && n >= 0 ? n : null;
+  return floatLimit("SPEND_CAP_USD", 50);
 }
 
 /**
