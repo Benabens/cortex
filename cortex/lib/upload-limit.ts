@@ -28,10 +28,11 @@ export function rejectOversizedBody(req: Request, maxBytes: number): NextRespons
   if (raw == null || raw === "") {
     return NextResponse.json({ error: "Content-Length requis pour un envoi de fichier." }, { status: 411 });
   }
-  const declared = Number(raw);
-  if (!Number.isFinite(declared) || declared < 0) {
+  // Entier décimal strict : Number() accepterait « 1e3 », « 0x10 » ou des espaces.
+  if (!/^\d{1,15}$/.test(raw.trim())) {
     return NextResponse.json({ error: "Content-Length invalide." }, { status: 400 });
   }
+  const declared = Number(raw.trim());
   if (declared > maxBytes) {
     return NextResponse.json(
       { error: `Envoi trop volumineux (${Math.round(declared / 1e6)} Mo, maximum ${Math.round(maxBytes / 1e6)} Mo).` },
