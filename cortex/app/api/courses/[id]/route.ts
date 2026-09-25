@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enterUser } from "@/db/context";
 import { deleteCourseRow, updateCourseRow, type CoursePatch } from "@/db/courses-store";
 import { InvalidCourseError, parseTeachers } from "@/lib/course-create";
 import { ensureCoursesLoaded, listCoursesOf, ownsCourse, reloadCourses } from "@/lib/courses";
 import { toDto } from "@/lib/course-dto";
+import { useUser } from "@/lib/req";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  */
 
 async function guard(req: NextRequest, id: string): Promise<{ user: string } | NextResponse> {
-  const u = enterUser(req.headers?.get?.("x-cortex-user") ?? null);
+  const u = useUser(req);
   await ensureCoursesLoaded();
   if (!ownsCourse(u, id)) return NextResponse.json({ error: "Cours introuvable." }, { status: 404 });
   return { user: u };

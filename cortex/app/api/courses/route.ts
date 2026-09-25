@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enterUser } from "@/db/context";
 import { insertCourse } from "@/db/courses-store";
 import { buildCourseRow, InvalidCourseError } from "@/lib/course-create";
 import { ensureCoursesLoaded, listCoursesOf, reloadCourses } from "@/lib/courses";
 import { toDto } from "@/lib/course-dto";
+import { useUser } from "@/lib/req";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 
 /** Installe l'utilisateur de la requête et garantit un cache de cours à jour. */
 async function user(req: NextRequest): Promise<string> {
-  const u = enterUser(req.headers?.get?.("x-cortex-user") ?? null);
+  const u = useUser(req);
   await ensureCoursesLoaded();
   return u;
 }

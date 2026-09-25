@@ -129,7 +129,10 @@ test("B2 — un compte B obtient 404 sur CHAQUE route avec le cours de A", async
   const failures: string[] = [];
   for (const rc of ROUTES) {
     const res = await call(rc, B, courseA);
-    if (res.status !== 404) failures.push(`${rc.name} → ${res.status}`);
+    const body = await res.text();
+    // Le statut seul ne suffit pas (« job introuvable » est aussi un 404) : c'est
+    // le message de la garde qui prouve que la route n'a pas travaillé.
+    if (res.status !== 404 || !body.includes("Cours inconnu")) failures.push(`${rc.name} → ${res.status} ${body.slice(0, 60)}`);
   }
   assert.deepEqual(failures, [], `routes qui laissent passer B :\n  ${failures.join("\n  ")}`);
 });

@@ -23,7 +23,8 @@ const ALLOWED_TAGS = [
   "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption",
 ];
 
-const ALLOWED_ATTR = ["colspan", "rowspan", "lang", "dir"];
+// `class` : le rendu des questions ouvertes (texToHtml) pose pre.code, div.fig, span.pts.
+const ALLOWED_ATTR = ["class", "colspan", "rowspan", "lang", "dir"];
 
 export function sanitizeHtml(html: string): string {
   if (typeof html !== "string" || !html) return "";

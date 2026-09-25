@@ -1,6 +1,6 @@
-import { enterUser } from "@/db/context";
 import { billingEnabled, creditCost, getBalance, listTransactions } from "@/lib/billing/credits";
 import { usedToday } from "@/lib/billing/guards";
+import { useUser } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 /** Solde de crédits + quotas du jour + packs disponibles (UI compte). */
 export async function GET(req: NextRequest) {
-  enterUser(req.headers.get("x-cortex-user"));
+  useUser(req);
   const packs = (["small", "medium", "large"] as const)
     .filter((p) => process.env[`STRIPE_PRICE_${p.toUpperCase()}`])
     .map((p) => ({
