@@ -17,6 +17,7 @@ import {
 import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { ImageTextArea } from "@/components/ui/ImageTextArea";
+import { SafeHtml } from "@/components/ui/SafeHtml";
 import { WeightBar } from "@/components/viz/WeightBar";
 import { apiPost, useApi, useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@/lib/ux/api";
 import {
@@ -245,7 +246,7 @@ export function TrainingStudio() {
               <span className="text-[0.76rem] text-ink-4">au format du final</span>
             </div>
             <h2 className="mt-3 text-[1.05rem] font-semibold text-ink-1">{drill.concept}</h2>
-            <div className="prose-exam mt-3 text-[0.9rem] leading-relaxed text-ink-1" dangerouslySetInnerHTML={{ __html: drill.statement_html }} />
+            <SafeHtml className="prose-exam mt-3 text-[0.9rem] leading-relaxed text-ink-1" html={drill.statement_html} />
 
             {drill.hints.length > 0 && (
               <div className="mt-4 space-y-2">
@@ -266,7 +267,7 @@ export function TrainingStudio() {
 
             <div className="mt-4 border-t border-line pt-4">
               {showSolution ? (
-                <div className="prose-exam text-[0.88rem] leading-relaxed text-ink-2" dangerouslySetInnerHTML={{ __html: drill.solution_html }} />
+                <SafeHtml className="prose-exam text-[0.88rem] leading-relaxed text-ink-2" html={drill.solution_html} />
               ) : (
                 <Button variant="secondary" size="sm" onClick={() => setShowSolution(true)}>
                   <Eye className="size-3.5" strokeWidth={2.25} /> Voir la solution
