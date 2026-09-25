@@ -2,7 +2,7 @@ import { assertSpendCap, recordUsage } from "@/lib/billing/usage";
 import { callerSite, currentJob } from "@/lib/billing/usage-context";
 import { inc, log, observe } from "@/lib/metrics";
 import { cacheGet, cacheKey, cachePut, cacheable } from "./cache";
-import { defaultProviderName, maxRetries, retryBaseMs, type ProviderName } from "./config";
+import { defaultProviderName, mapModel, maxRetries, retryBaseMs, type ProviderName } from "./config";
 import { globalLimiter } from "./limiter";
 import { anthropicProvider } from "./providers/anthropic-api";
 import { claudeCodeProvider } from "./providers/claude-code";
@@ -73,6 +73,27 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
   const retries = maxRetries(provider.name as ProviderName);
   const t0 = Date.now();
   let attempt = 0; // dernière (= réussie) tentative, pour l'attribution llm_usage
+  // Tentative PERDUE après envoi (timeout, annulation en vol) : le fournisseur a
+  // très probablement facturé l'entrée et une sortie partielle, sans nous rendre
+  // de compteur. On la compte avec une ESTIMATION haute (entrée ≈ taille du
+  // prompt, sortie = max_tokens demandé) pour que le plafond ne sous-estime
+  // jamais la dépense. Les refus avant traitement (429, 5xx, auth) ne sont pas
+  // facturés et ne sont pas comptés.
+  const onAttemptError = async (a: number, e: unknown) => {
+    const code = e instanceof LlmError ? e.code : undefined;
+    if (code !== "TIMEOUT" && code !== "ABORTED") return;
+    await recordUsage({
+      provider: provider.name,
+      model: mapModel(model, provider.name as ProviderName),
+      tokensIn: Math.ceil((req.prompt.length + (req.system?.length ?? 0)) / 4),
+      tokensOut: req.maxTokens ?? 16_000,
+      latencyMs: Date.now() - t0,
+      callSite: job ? `${job.type}:${callSite ?? "?"}` : callSite,
+      jobId: job?.id ?? null,
+      attempt: a,
+      estimated: true,
+    });
+  };
   try {
     const res = await globalLimiter().run(() =>
       withRetry((a) => { attempt = a; return provider.complete(req); }, {
@@ -80,6 +101,7 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
         baseMs: retryBaseMs(),
         signal: req.signal,
         label: `${provider.name}/${model}`,
+        onAttemptError,
       })
     );
     const ms = Date.now() - t0;

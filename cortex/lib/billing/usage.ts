@@ -84,6 +84,8 @@ export async function recordUsage(u: {
   callSite?: string | null;
   jobId?: string | null;
   attempt?: number;
+  /** Appel échoué après envoi : tokens ESTIMÉS (le fournisseur a facturé, pas de compteur retourné). */
+  estimated?: boolean;
 }): Promise<void> {
   const paid = isPaidProvider(u.provider);
   // Un appel PAYANT coûte de l'argent réel → toujours loggé (même en dev, si
@@ -104,7 +106,7 @@ export async function recordUsage(u: {
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       currentUser(), currentCourse(), u.provider, u.model,
       u.tokensIn ?? null, u.tokensOut ?? null, u.cacheRead ?? null, u.cacheWrite ?? null,
-      cost, rate.inPerM, rate.outPerM, paid ? 0 : 1,
+      cost, rate.inPerM, rate.outPerM, paid && !u.estimated ? 0 : 1,
       u.jobId ?? null, u.callSite ?? null, u.attempt ?? null, u.latencyMs ?? null, nowStr(),
     );
     _spendCache = null; // la dépense a bougé → invalide le cache du kill-switch
