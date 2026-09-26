@@ -5,6 +5,7 @@ import { currentCourse } from "@/db/client";
 import { courseLabel } from "@/lib/courses";
 import { uploadsDir } from "@/lib/paths";
 import { LlmError, completeText, extractJson } from "@/lib/llm";
+import { isLlmModel } from "@/lib/llm/config";
 import { getWeakness, updateWeaknessAnalysis } from "@/lib/weaknesses";
 import fs from "node:fs";
 import path from "node:path";
@@ -51,6 +52,12 @@ async function handlePOST(req: NextRequest) {
   if (denied) return denied;
   const { id, model } = await readJson(req, ({ id: null }));
   if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
+  // Le client ne choisit qu'un ALIAS de la liste blanche (le serveur décide de
+  // l'id réel et de son prix) ; un id complet contournerait LLM_ALLOW_OPUS.
+  if (model !== undefined && model !== null && model !== "" && !isLlmModel(model)) {
+    return NextResponse.json({ error: "Modèle inconnu : choisis opus, sonnet ou haiku." }, { status: 400 });
+  }
+  const chosenModel = isLlmModel(model) ? model : "opus";
 
   const row = await q.get<{ topic: string; description: string | null; screenshot_path: string | null }>(
     "SELECT topic, description, screenshot_path FROM weaknesses WHERE id = ?",
@@ -72,7 +79,7 @@ async function handlePOST(req: NextRequest) {
     if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
     const text = await completeText({
       prompt: buildPrompt({ topic: row.topic, description: row.description, imageRel }),
-      model: typeof model === "string" && model ? model : "opus",
+      model: chosenModel,
       timeoutMs: 190_000,
     });
     const parsed = extractJson<Analysis>(text);
