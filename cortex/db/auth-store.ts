@@ -405,6 +405,7 @@ function sqliteAuth(): Database.Database {
         if (c.name === "unit") _sqliteAuth.exec(UNIT_BACKFILL_SQL);
       }
     }
+    ensureCreditRefUniqueSqlite(_sqliteAuth);
   }
   return _sqliteAuth;
 }
@@ -443,8 +444,47 @@ async function pgExec(): Promise<{
       if (c.name === "unit") await authPgQuery(UNIT_BACKFILL_SQL.replace(/credit_transactions|app_meta/g, (t) => `public.${t}`), []);
     }
     _pgReady = true;
+    await ensureCreditRefUnique();
   }
   return { query: authPgQuery };
+}
+
+/**
+ * IDEMPOTENCE DU LEDGER : `credit_transactions.ref` doit être UNIQUE (l'index
+ * est ce qui tranche une course entre deux webhooks ou deux reprises). Les
+ * bases neuves l'ont par la DDL ; une base créée par une DDL plus ancienne le
+ * reçoit ici — seulement si aucun doublon n'existe déjà (sinon on le signale :
+ * un index impossible à poser vaut mieux qu'un index qui casse le démarrage).
+ */
+const DUP_SQL = `SELECT ref FROM credit_transactions WHERE ref IS NOT NULL GROUP BY ref HAVING count(*) > 1 LIMIT 5`;
+function ensureCreditRefUniqueSqlite(db: Database.Database): "present" | "created" | "duplicates" {
+  const list = db.prepare(`PRAGMA index_list(credit_transactions)`).all() as Array<{ name: string; unique: number }>;
+  for (const i of list) {
+    if (!i.unique) continue;
+    const cols = db.prepare(`PRAGMA index_info("${i.name}")`).all() as Array<{ name: string }>;
+    if (cols.length === 1 && cols[0].name === "ref") return "present";
+  }
+  const dups = db.prepare(DUP_SQL).all() as Array<{ ref: string }>;
+  if (dups.length) {
+    console.error(`[auth-store] credit_transactions.ref non unique : doublons ${dups.map((d) => d.ref).join(", ")} — index UNIQUE non posé, à dédoublonner`);
+    return "duplicates";
+  }
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS credit_tx_ref_uidx ON credit_transactions (ref)`);
+  return "created";
+}
+export async function ensureCreditRefUnique(): Promise<"present" | "created" | "duplicates"> {
+  if (dbDriverName() === "sqlite") return ensureCreditRefUniqueSqlite(sqliteAuth());
+  const idx = await authAll<{ indexdef: string }>(
+    `SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'credit_transactions'`,
+  );
+  if (idx.some((i) => /UNIQUE/i.test(i.indexdef) && /\(ref\)/.test(i.indexdef))) return "present";
+  const dups = await authAll<{ ref: string }>(DUP_SQL);
+  if (dups.length) {
+    console.error(`[auth-store] credit_transactions.ref non unique : doublons ${dups.map((d) => d.ref).join(", ")} — index UNIQUE non posé, à dédoublonner`);
+    return "duplicates";
+  }
+  await authRun(`CREATE UNIQUE INDEX IF NOT EXISTS credit_tx_ref_uidx ON public.credit_transactions (ref)`);
+  return "created";
 }
 
 // ---------------- API unifiée ----------------

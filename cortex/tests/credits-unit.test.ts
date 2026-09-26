@@ -86,3 +86,12 @@ test("2b-7 (sqlite) : conversion annulée par une transaction englobante → lec
   assert.deepEqual([Number(r2!.delta), r2!.unit], [400, "centi"]);
   assert.equal(await credits.getBalanceCenti("dave"), 550);
 });
+
+test("4b-6 (sqlite) : credit_transactions.ref est UNIQUE (index), migration idempotente", async () => {
+  const { authSqlite, ensureCreditRefUnique } = await import("../db/auth-store");
+  const db = authSqlite()!;
+  const list = db.prepare(`PRAGMA index_list(credit_transactions)`).all() as Array<{ name: string; unique: number }>;
+  const uniqueOnRef = list.filter((i) => i.unique).some((i) => (db.prepare(`PRAGMA index_info("${i.name}")`).all() as Array<{ name: string }>).some((c) => c.name === "ref"));
+  assert.equal(uniqueOnRef, true);
+  assert.equal(await ensureCreditRefUnique(), "present");
+});

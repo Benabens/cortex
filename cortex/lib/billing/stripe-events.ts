@@ -1,6 +1,6 @@
 import type Stripe from "stripe";
 import { authGet, authRun, authTx } from "@/db/auth-store";
-import { nowStr } from "@/db/q";
+import { dbDriverName, nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import {
   DELTA_CENTI, addTransaction, ensureLedgerUnit, getSubscription, grantSubscriptionMonth, linkSubscription, resolveUserByCustomer,
@@ -291,21 +291,35 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string,
     // Remboursement PARTIEL → prorata du montant, arrondi au crédit SUPÉRIEUR,
     // cumulatif (Stripe renvoie amount_refunded cumulé à chaque remboursement) :
     // on reprend la différence avec ce qui l'a déjà été pour ce paiement.
+    // Lecture du déjà-repris + écriture dans UNE transaction, sous verrou du
+    // paiement (Postgres) / BEGIN IMMEDIATE (sqlite) : remboursement et litige
+    // simultanés ne reprennent qu'une fois ; le ref UNIQUE tranche le reste.
     const full = Number(purchase.credits_centi);
     let target = full;
     if (ctx.amountCents && ctx.totalCents && ctx.amountCents < ctx.totalCents) {
       target = Math.min(full, Math.ceil((full / 100) * (ctx.amountCents / ctx.totalCents)) * 100);
     }
-    const done = await authGet<{ total: number | string | null }>(
-      `SELECT coalesce(sum(-(${DELTA_CENTI})), 0) total FROM credit_transactions WHERE user_id = ? AND ref LIKE ?`,
-      purchase.user_id, `${ref}%`,
-    );
-    const already = Number(done?.total ?? 0);
-    const take = target - already;
-    if (take <= 0) return { ok: true, action: "reversal-duplicate", reversed: false };
-    const stepRef = already === 0 && take === full ? ref : `${ref}:${target}`;
-    const reversed = await addTransaction(purchase.user_id, -take, target < full ? `${why} (partiel : ${ctx.amountCents}/${ctx.totalCents} centimes)` : why, stepRef);
-    return { ok: true, action: "pack-reversed", reversed };
+    await ensureLedgerUnit();
+    const reversed = await authTx(async (tx) => {
+      if (dbDriverName() === "postgres") await tx.run(`SELECT pg_advisory_xact_lock(hashtext(?))`, `reversal:${paymentIntent}`);
+      const done = await tx.get<{ total: number | string | null }>(
+        `SELECT coalesce(sum(-(${DELTA_CENTI})), 0) total FROM credit_transactions WHERE user_id = ? AND ref LIKE ?`,
+        purchase.user_id, `${ref}%`,
+      );
+      const already = Number(done?.total ?? 0);
+      const take = target - already;
+      if (take <= 0) return false;
+      const stepRef = already === 0 && take === full ? ref : `${ref}:${target}`;
+      await tx.run(
+        `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, created_at) VALUES (?,?,?,?,'centi',?)`,
+        purchase.user_id, -take, target < full ? `${why} (partiel : ${ctx.amountCents}/${ctx.totalCents} centimes)` : why, stepRef, nowStr(),
+      );
+      return true;
+    }).catch((e) => {
+      if (/unique|constraint/i.test(String(e))) return false; // course perdue sur le ref : l'autre a repris
+      throw e;
+    });
+    return { ok: true, action: reversed ? "pack-reversed" : "reversal-duplicate", reversed };
   }
   if (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, ref)) {
     return { ok: true, action: "reversal-duplicate", reversed: false };

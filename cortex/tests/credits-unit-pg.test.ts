@@ -51,3 +51,11 @@ test("2b-7 : une ligne écrite par l'ANCIEN code après la migration (unit NULL,
   assert.equal(await credits.getBalanceCenti("carol"), 530);
   assert.deepEqual((await credits.listTransactions("carol")).map((t) => Number(t.delta)), [30, 200, 300], "historique en centièmes (palier gratuit écrit à la première lecture)");
 });
+
+test("4b-6 : credit_transactions.ref est UNIQUE en Postgres (index), garanti par la migration", async () => {
+  const { authAll } = await import("../db/auth-store");
+  const idx = await authAll<{ indexdef: string }>(`SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'credit_transactions'`);
+  assert.ok(idx.some((i) => /UNIQUE/i.test(i.indexdef) && /\(ref\)/.test(i.indexdef)), idx.map((i) => i.indexdef).join("\n"));
+  const { ensureCreditRefUnique } = await import("../db/auth-store");
+  assert.equal(await ensureCreditRefUnique(), "present");
+});
