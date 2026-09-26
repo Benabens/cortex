@@ -40,3 +40,19 @@ test("avec `ps` : le groupe réel est visé", async () => {
   await sleep(300);
   assert.equal(alive(pid), false);
 });
+
+test("revue : un PID recyclé par un autre programme n'est pas tué (commande attendue absente)", async () => {
+  const child = spawn("sleep", ["60"], { detached: true, stdio: "ignore" });
+  child.unref();
+  const pid = child.pid!;
+  await sleep(200);
+  try {
+    const target = killProcessGroup(pid, { expectCommand: /run-job/ });
+    assert.equal(target, 0, "rien n'est tué quand la commande ne correspond pas");
+    await sleep(200);
+    assert.equal(alive(pid), true);
+    assert.notEqual(killProcessGroup(pid, { expectCommand: /sleep/ }), 0, "la commande attendue présente → tué");
+    await sleep(300);
+    assert.equal(alive(pid), false);
+  } finally { try { process.kill(-pid, "SIGKILL"); } catch { /* déjà mort */ } }
+});
