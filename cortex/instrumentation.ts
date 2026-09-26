@@ -80,6 +80,9 @@ export async function register() {
   try {
     const { startBackupScheduler } = await import("@/lib/backup-schedule");
     startBackupScheduler();
+    // pg_dump plus ancien que le serveur = sauvegarde impossible : le dire maintenant, pas à 3 h.
+    const { warnIfPgDumpTooOld } = await import("@/lib/pg-dump-version");
+    void warnIfPgDumpTooOld().catch(() => {});
   } catch (e) {
     console.error("[instrumentation] planificateur de sauvegardes non démarré :", (e as Error)?.message);
   }
