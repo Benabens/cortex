@@ -1,5 +1,5 @@
 /**
- * SAUVEGARDE — dump Postgres (si DATABASE_URL=postgres://…) + archive du volume
+ * SAUVEGARDE — dump Postgres (si DATABASE_URL=postgres(ql)://…) + archive du volume
  * CORTEX_DATA_DIR, dans un dossier horodaté (BACKUP_DIR, défaut ./backups), et
  * en option envoi HORS SITE vers un stockage S3-compatible (BACKUP_S3_*).
  *
@@ -63,6 +63,10 @@ async function main(): Promise<void> {
     const store = s3Store(cfg);
     const { folder, keys } = await pushBackup(store, cfg, dir);
     console.log(`✓ Envoyée hors site : ${keys.length} objet(s) sous ${cfg.prefix}${folder}/ (bucket ${cfg.bucket})`);
+    // Compte rendu lu par le planificateur : sans lui (ou sans dump quand la base
+    // est Postgres), le jour n'est pas considéré fait et sera relancé.
+    const { recordBackupResult, backupDayKey } = await import("../lib/backup-schedule");
+    await recordBackupResult(backupDayKey(new Date()), { postgres: !!manifest.postgres, folder });
     if (hasFlag("--prune")) {
       const deleted = await pruneBackups(store, cfg);
       console.log(deleted.length ? `✓ Rétention ${cfg.keepDays} j : ${deleted.length} dossier(s) supprimé(s)` : `  Rétention ${cfg.keepDays} j : rien à supprimer`);

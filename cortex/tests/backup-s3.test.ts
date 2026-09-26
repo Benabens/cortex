@@ -183,28 +183,31 @@ test("vérification : empreintes + tar ; pg_restore -l exigé pour un dump ; alt
 });
 
 test("planification : un seul déclenchement par jour UTC (deux instances), pas avant l'heure, relance après échec", async () => {
-  const { dailyBackupTick } = await import("../lib/backup-schedule");
+  const { dailyBackupTick, recordBackupResult, backupDayKey } = await import("../lib/backup-schedule");
   const env = { ...ENV_OK, BACKUP_HOUR_UTC: "3" };
   let runs = 0;
-  const run = async () => { runs++; return 0; };
+  let today = "";
+  // Le script de sauvegarde rend compte (jour, dossier, dump) : sans compte rendu, un run n'est pas « fait ».
+  const run = async () => { runs++; await recordBackupResult(today, { postgres: true, folder: `cortex-backup-${runs}` }); return 0; };
+  const tick = (iso: string, o: { env?: typeof env | Record<string, never>; run?: () => Promise<number> } = {}) => {
+    today = backupDayKey(new Date(iso));
+    return dailyBackupTick({ now: new Date(iso), env: o.env ?? env, run: o.run ?? run, expectDump: true });
+  };
 
-  assert.equal(await dailyBackupTick({ now: new Date("2026-09-26T02:59:00Z"), env, run }), "skipped:too-early");
-  assert.equal(await dailyBackupTick({ now: new Date("2026-09-26T03:00:00Z"), env: {}, run }), "skipped:not-configured");
+  assert.equal(await tick("2026-09-26T02:59:00Z"), "skipped:too-early");
+  assert.equal(await tick("2026-09-26T03:00:00Z", { env: {} }), "skipped:not-configured");
   assert.equal(runs, 0);
 
   // Deux instances au même instant : une seule gagne le marqueur.
-  const both = await Promise.all([
-    dailyBackupTick({ now: new Date("2026-09-26T03:00:00Z"), env, run }),
-    dailyBackupTick({ now: new Date("2026-09-26T03:00:00Z"), env, run }),
-  ]);
+  const both = await Promise.all([tick("2026-09-26T03:00:00Z"), tick("2026-09-26T03:00:00Z")]);
   assert.deepEqual(both.sort(), ["ok", "skipped:done"]);
   assert.equal(runs, 1);
-  assert.equal(await dailyBackupTick({ now: new Date("2026-09-26T23:00:00Z"), env, run }), "skipped:done");
+  assert.equal(await tick("2026-09-26T23:00:00Z"), "skipped:done");
   assert.equal(runs, 1);
 
   // Lendemain : échec → le marqueur est rendu, le tick suivant réessaie.
-  assert.equal(await dailyBackupTick({ now: new Date("2026-09-27T03:10:00Z"), env, run: async () => 1 }), "failed");
-  assert.equal(await dailyBackupTick({ now: new Date("2026-09-27T04:10:00Z"), env, run }), "ok");
+  assert.equal(await tick("2026-09-27T03:10:00Z", { run: async () => 1 }), "failed");
+  assert.equal(await tick("2026-09-27T04:10:00Z"), "ok");
   assert.equal(runs, 2);
 });
 

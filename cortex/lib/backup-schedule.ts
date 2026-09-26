@@ -10,11 +10,35 @@
  */
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { authAll, authRun } from "@/db/auth-store";
+import { authAll, authGet, authRun } from "@/db/auth-store";
 import { backupS3Config, type Env } from "./backup-s3";
 
 const KEY = "backup:daily";
+/** Compte rendu de la dernière sauvegarde réussie : {day, folder, postgres}. */
+const RESULT_KEY = "backup:daily_result";
 export const BACKUP_TICK_MS = 30 * 60_000;
+
+export type BackupResult = { day: string; folder: string; postgres: boolean; at?: string };
+
+/** Écrit par le script de sauvegarde après un envoi réussi (lu par le planificateur). */
+export async function recordBackupResult(day: string, r: { postgres: boolean; folder: string }): Promise<void> {
+  const value = JSON.stringify({ day, folder: r.folder, postgres: r.postgres, at: new Date().toISOString() } satisfies BackupResult);
+  await authRun(
+    `INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+    RESULT_KEY, value,
+  );
+}
+export async function lastBackupResult(): Promise<BackupResult | null> {
+  const row = await authGet<{ value: string }>(`SELECT value FROM app_meta WHERE key = ?`, RESULT_KEY);
+  if (!row) return null;
+  try { return JSON.parse(row.value) as BackupResult; } catch { return null; }
+}
+
+/** La base courante exige-t-elle un dump ? (Postgres réseau — pas PGlite, pas sqlite.) */
+export function dumpExpected(env: Env = process.env): boolean {
+  const url = env.DATABASE_URL ?? "";
+  return (env.DB_DRIVER ?? "sqlite") === "postgres" && /^postgres(ql)?:\/\//i.test(url);
+}
 
 export function backupDayKey(now: Date): string {
   return now.toISOString().slice(0, 10);
@@ -38,19 +62,44 @@ export async function claimDailyBackup(dayKey: string): Promise<boolean> {
 
 /** Rend le jour après un échec (le prochain tick pourra réessayer). */
 export async function releaseDailyBackup(dayKey: string): Promise<void> {
-  await authRun(`UPDATE app_meta SET value = ? WHERE key = ? AND value = ?`, `${dayKey}:failed`, KEY, dayKey);
+  await authRun(`UPDATE app_meta SET value = ? WHERE key = ? AND value LIKE ?`, `${dayKey}:failed`, KEY, `${dayKey}%`);
+}
+
+/**
+ * Le jour est marqué « fait » mais rien ne le PROUVE : pas de compte rendu pour
+ * ce jour, ou compte rendu sans dump alors que la base est Postgres (cas de la
+ * première sauvegarde de prod). UNE instance reprend la main : l'UPDATE
+ * conditionnel ne réussit que pour elle.
+ */
+async function reclaimUnproven(dayKey: string, expectDump: boolean): Promise<boolean> {
+  const r = await lastBackupResult();
+  const proven = !!r && r.day === dayKey && (!expectDump || r.postgres);
+  if (proven) return false;
+  const rows = await authAll<{ key: string }>(
+    `UPDATE app_meta SET value = ? WHERE key = ? AND value = ? RETURNING key`, `${dayKey}:redo`, KEY, dayKey,
+  );
+  return rows.length === 1;
 }
 
 export type TickOutcome = "skipped:not-configured" | "skipped:too-early" | "skipped:done" | "ok" | "failed";
 
-export async function dailyBackupTick(opts: { now?: Date; env?: Env; run: () => Promise<number>; log?: (m: string) => void }): Promise<TickOutcome> {
+export async function dailyBackupTick(opts: {
+  now?: Date; env?: Env; run: () => Promise<number>; log?: (m: string) => void;
+  /** la base exige un dump (défaut : DB_DRIVER=postgres avec une URL postgres(ql)://) */
+  expectDump?: boolean;
+}): Promise<TickOutcome> {
   const now = opts.now ?? new Date();
   const env = opts.env ?? process.env;
   const log = opts.log ?? console.log;
+  const expectDump = opts.expectDump ?? dumpExpected(env);
   if (!backupS3Config(env)) return "skipped:not-configured";
   if (now.getUTCHours() < backupHourUtc(env)) return "skipped:too-early";
   const day = backupDayKey(now);
-  if (!(await claimDailyBackup(day))) return "skipped:done";
+  if (!(await claimDailyBackup(day))) {
+    // Marqué fait : vérifier que c'est PROUVÉ (compte rendu du jour, avec dump si requis).
+    if (!(await reclaimUnproven(day, expectDump))) return "skipped:done";
+    log(`[backup] sauvegarde du ${day} marquée faite mais sans preuve${expectDump ? " (dump Postgres attendu)" : ""} : relance`);
+  }
   log(`[backup] sauvegarde quotidienne du ${day} : démarrage`);
   let code: number;
   try {
@@ -60,8 +109,15 @@ export async function dailyBackupTick(opts: { now?: Date; env?: Env; run: () => 
     code = -1;
   }
   if (code === 0) {
-    log(`[backup] sauvegarde quotidienne du ${day} : OK`);
-    return "ok";
+    const r = await lastBackupResult();
+    if (r && r.day === day && (!expectDump || r.postgres)) {
+      // Après une relance (« :redo »), le marqueur revient à l'état « fait » du jour.
+      await authRun(`UPDATE app_meta SET value = ? WHERE key = ? AND value LIKE ?`, day, KEY, `${day}%`);
+      log(`[backup] sauvegarde quotidienne du ${day} : OK (${r.folder}${r.postgres ? ", dump Postgres" : ""})`);
+      return "ok";
+    }
+    log(`[backup] sauvegarde quotidienne du ${day} : terminée SANS preuve${expectDump ? " (aucun dump Postgres)" : " (aucun compte rendu)"} — considérée en ÉCHEC`);
+    code = -2;
   }
   await releaseDailyBackup(day);
   log(`[backup] sauvegarde quotidienne du ${day} : ÉCHEC (code ${code}) — nouvel essai au prochain tick`);
