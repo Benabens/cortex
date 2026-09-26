@@ -5,7 +5,7 @@
  *  1. LE VOLUME `CORTEX_DATA_DIR` (dataRoot()) — bases SQLite, uploads, refs,
  *     exams, contenu. Archivé en `data.tar.gz` (via l'outil système `tar`).
  *  2. LA BASE selon `DATABASE_URL` :
- *     - `postgres://…` → `pg_dump -Fc` (dump logique cohérent, TOUS les schémas
+ *     - `postgres://…` ou `postgresql://…` → `pg_dump -Fc` (dump logique cohérent, TOUS les schémas
  *       tenant `t_<user>_<cours>` inclus + le schéma `public`) → `postgres.dump`.
  *     - `pglite://<dir>` → Postgres WASM à stockage FICHIER : le dossier est
  *       archivé (s'il est HORS du volume ; dedans, il est déjà dans data.tar.gz).
@@ -32,7 +32,7 @@ export type BackupManifest = {
   version: 1;
   createdAt: string; // ISO
   dbDriver: string; // sqlite | postgres
-  /** dump pg_dump si DATABASE_URL=postgres://… ; sinon null. */
+  /** dump pg_dump si DATABASE_URL=postgres(ql)://… ; sinon null. */
   postgres: PgDumpEntry | null;
   /** dossier PGlite archivé séparément (uniquement s'il est HORS du volume). */
   pglite: PgDumpEntry | null;
@@ -83,6 +83,11 @@ function stamp(d: Date): string {
     `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}` +
     `-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
   );
+}
+
+/** URL d'une base Postgres servie par le réseau : `postgres://` ou `postgresql://` (Railway fournit la seconde). */
+export function isPostgresUrl(url: string | null | undefined): boolean {
+  return !!url && /^postgres(ql)?:\/\//i.test(url);
 }
 
 export function sha256File(file: string): string {
@@ -183,10 +188,10 @@ export async function createBackup(opts: CreateBackupOptions): Promise<CreateBac
   let pglite: PgDumpEntry | null = null;
   const url = opts.databaseUrl;
 
-  if (url && url.startsWith("postgres://")) {
+  if (url && isPostgresUrl(url)) {
     if (!hasTool("pg_dump")) {
       throw new Error(
-        "DATABASE_URL=postgres://… mais `pg_dump` est introuvable. " +
+        "DATABASE_URL=postgres(ql)://… mais `pg_dump` est introuvable. " +
           "Installe les outils client PostgreSQL (libpq) sur l'hôte du backup."
       );
     }
@@ -221,6 +226,19 @@ export async function createBackup(opts: CreateBackupOptions): Promise<CreateBac
         sha256: sha256File(pgliteArchive),
       };
     }
+  }
+
+  // ── 2 bis) une base Postgres SANS dump n'est pas une sauvegarde ───────────
+  // (première sauvegarde de prod : DATABASE_URL=postgresql://… non reconnue →
+  // archive du volume seule, manifeste « OK », crédits payés non sauvegardés).
+  // Un pilote postgres exige un dump réseau ou un dossier PGlite archivé ;
+  // sinon on échoue AVANT d'écrire le manifeste : pas de faux succès.
+  const pgliteInVolume = !!url && !!pgliteDir(url) && isInside(dataDir, pgliteDir(url)!);
+  if (opts.dbDriver === "postgres" && !postgres && !pglite && !pgliteInVolume) {
+    throw new Error(
+      `Base Postgres (DB_DRIVER=postgres) mais aucun dump produit : DATABASE_URL ${url ? `« ${url.replace(/\/\/.*@/, "//…@").slice(0, 40)}… »` : "absente"} ` +
+        "n'est ni postgres(ql):// ni pglite://. Sauvegarde REFUSÉE (le volume seul ne contient pas les comptes ni les crédits)."
+    );
   }
 
   // ── 3) manifeste ────────────────────────────────────────────────────────
@@ -318,7 +336,7 @@ export async function restoreBackup(opts: RestoreBackupOptions): Promise<void> {
           `Vide-le d'abord, ou relance avec --force pour écraser.`
       );
     }
-    if (opts.databaseUrl?.startsWith("postgres://") && postgresNonEmpty(opts.databaseUrl)) {
+    if (isPostgresUrl(opts.databaseUrl) && postgresNonEmpty(opts.databaseUrl!)) {
       throw new Error(
         "La base Postgres cible n'est pas vide (schémas applicatifs présents). " +
           "Utilise une base vide, ou relance avec --force."
@@ -341,7 +359,7 @@ export async function restoreBackup(opts: RestoreBackupOptions): Promise<void> {
   }
 
   // ── 3) Postgres ────────────────────────────────────────────────────────────
-  if (m.postgres && opts.databaseUrl?.startsWith("postgres://")) {
+  if (m.postgres && opts.databaseUrl && isPostgresUrl(opts.databaseUrl)) {
     if (!hasTool("pg_restore")) {
       throw new Error("`pg_restore` introuvable — installe les outils client PostgreSQL (libpq).");
     }
