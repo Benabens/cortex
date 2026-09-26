@@ -20,12 +20,16 @@ export const FIELD_LIMITS = {
   note: 2000,
   /** weaknesses/mine : texte collé (notes, énoncé raté) */
   text: 8000,
+  /** weaknesses (création) : sujet et note — repris tels quels par weaknesses/process (prix fixe) */
+  topic: 300,
+  description: 8000,
 } as const;
 
 export type LimitedField = keyof typeof FIELD_LIMITS;
 
 const LABELS: Record<LimitedField, string> = {
   concept: "Le concept", statement: "L’énoncé", answer: "La réponse", target: "La cible", note: "La note", text: "Le texte",
+  topic: "Le sujet", description: "La note",
 };
 
 /** Réponse 413 si `value` dépasse le plafond du champ, sinon null. */
