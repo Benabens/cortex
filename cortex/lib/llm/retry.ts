@@ -16,8 +16,6 @@ export type RetryOpts = {
   signal?: AbortSignal;
   /** Étiquette pour le log d'échec (nom du provider / du site d'appel). */
   label?: string;
-  /** Appelé pour CHAQUE tentative échouée (retryée ou non) — comptage de coût des appels perdus. */
-  onAttemptError?: (attempt: number, err: unknown) => void | Promise<void>;
 };
 
 export function isRetryable(e: unknown): boolean {
@@ -50,7 +48,7 @@ export function backoffDelayMs(attempt: number, baseMs: number, maxMs: number, r
 }
 
 export async function withRetry<T>(fn: (attempt: number) => Promise<T>, opts: RetryOpts): Promise<T> {
-  const { retries, baseMs = 500, maxMs = 15_000, signal, label = "llm", onAttemptError } = opts;
+  const { retries, baseMs = 500, maxMs = 15_000, signal, label = "llm" } = opts;
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (signal?.aborted) throw abortError();
@@ -58,7 +56,6 @@ export async function withRetry<T>(fn: (attempt: number) => Promise<T>, opts: Re
       return await fn(attempt);
     } catch (e) {
       lastErr = e;
-      if (onAttemptError) { try { await onAttemptError(attempt, e); } catch { /* jamais bloquant */ } }
       const canRetry = attempt < retries && isRetryable(e);
       if (!canRetry) break;
       const delay = backoffDelayMs(attempt, baseMs, maxMs);

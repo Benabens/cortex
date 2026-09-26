@@ -1,6 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { currentUser } from "@/db/context";
-import { authAll, authRun } from "@/db/auth-store";
+import { authAll, authInsert, authRun } from "@/db/auth-store";
 import { nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import { LlmError } from "@/lib/llm/types";
@@ -112,6 +112,79 @@ export async function recordUsage(u: {
     _spendCache = null; // la dépense a bougé → invalide le cache du kill-switch
   } catch (e) {
     log("warn", "usage.record_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
+  }
+}
+
+export type UsageEstimate = {
+  provider: string;
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+  callSite?: string | null;
+  jobId?: string | null;
+  attempt?: number;
+};
+
+/**
+ * COMPTAGE EN VOL. Un appel payant est écrit DÈS SON DÉPART comme ligne
+ * estimée (entrée ≈ taille du prompt, sortie = max_tokens), puis finalisée en
+ * place au retour (`closeUsage`) ou retirée si le fournisseur n'a rien traité
+ * (`discardUsage`, refus 4xx/5xx avant exécution). Un worker tué en plein
+ * appel — annulation, crash — laisse donc une trace de coût : le remboursement
+ * conditionné au coût réel ne se contourne pas en annulant pendant le premier
+ * appel, et le plafond voit les appels en cours. Renvoie null quand rien
+ * n'est compté (provider gratuit hors suivi, store indisponible).
+ */
+export async function openUsage(u: UsageEstimate): Promise<number | null> {
+  const paid = isPaidProvider(u.provider);
+  if (!paid && !usageTrackingActive()) return null;
+  try {
+    const rate = paid ? rateFor(u.model) : { inPerM: 0, outPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0 };
+    const cost = paid ? estimateCostUsd(u.model, u.tokensIn, u.tokensOut) : 0;
+    const id = await authInsert(
+      `INSERT INTO llm_usage
+         (user_id, course, provider, model, tokens_in, tokens_out, cost_usd, rate_in_per_m, rate_out_per_m, estimated, job_id, call_site, attempt, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      currentUser(), currentCourse(), u.provider, u.model, u.tokensIn, u.tokensOut,
+      cost, rate.inPerM, rate.outPerM, 1, u.jobId ?? null, u.callSite ?? null, u.attempt ?? null, nowStr(),
+    );
+    _spendCache = null;
+    return id || null;
+  } catch (e) {
+    log("warn", "usage.open_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
+    return null;
+  }
+}
+
+/** Finalise la ligne provisoire avec les compteurs réels (provider payant → estimated=0). */
+export async function closeUsage(id: number | null, u: {
+  provider: string; model: string; tokensIn?: number; tokensOut?: number; cacheRead?: number; cacheWrite?: number; latencyMs?: number;
+}): Promise<void> {
+  if (id === null) return;
+  const paid = isPaidProvider(u.provider);
+  try {
+    const rate = paid ? rateFor(u.model) : { inPerM: 0, outPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0 };
+    const cost = paid ? estimateCostUsd(u.model, u.tokensIn, u.tokensOut, u.cacheRead, u.cacheWrite) : 0;
+    await authRun(
+      `UPDATE llm_usage SET provider = ?, model = ?, tokens_in = ?, tokens_out = ?, cache_read = ?, cache_write = ?,
+         cost_usd = ?, rate_in_per_m = ?, rate_out_per_m = ?, estimated = ?, latency_ms = ? WHERE id = ?`,
+      u.provider, u.model, u.tokensIn ?? null, u.tokensOut ?? null, u.cacheRead ?? null, u.cacheWrite ?? null,
+      cost, rate.inPerM, rate.outPerM, paid ? 0 : 1, u.latencyMs ?? null, id,
+    );
+    _spendCache = null;
+  } catch (e) {
+    log("warn", "usage.close_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
+  }
+}
+
+/** Retire la ligne provisoire : le fournisseur a refusé avant de traiter (rien facturé). */
+export async function discardUsage(id: number | null): Promise<void> {
+  if (id === null) return;
+  try {
+    await authRun(`DELETE FROM llm_usage WHERE id = ? AND estimated = 1`, id);
+    _spendCache = null;
+  } catch (e) {
+    log("warn", "usage.discard_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
   }
 }
 
