@@ -86,19 +86,20 @@ async function handlePOST(req: NextRequest) {
     // ('opus' → claude-opus-4-8, ex-GEN_MODEL).
     // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
     // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, non remboursé.
-    const gate = await (await import("@/lib/billing/reserve")).assistGate("weakness-analyze");
-    if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
-    const res = await completeVia("anthropic", {
+    const { assistCall } = await import("@/lib/billing/reserve");
+    const res = await assistCall("weakness-analyze", () => completeVia("anthropic", {
       prompt,
       images,
       model: "opus",
       maxTokens: 2000,
       json: { schema: SCHEMA as unknown as object },
-    });
+    }));
     parsed = JSON.parse(res.text || "{}");
   } catch (e: any) {
+    const { AssistRefused } = await import("@/lib/billing/reserve");
+    if (e instanceof AssistRefused) return NextResponse.json({ error: e.message }, { status: e.status });
     const msg = String(e?.message ?? e);
-    const status = msg.includes("ANTHROPIC_API_KEY") ? 400 : 502;
+    const status = e?.code === "UNAVAILABLE" || e?.code === "SPEND_CAP" ? 503 : msg.includes("ANTHROPIC_API_KEY") ? 400 : 502;
     return NextResponse.json({ error: msg }, { status });
   }
 

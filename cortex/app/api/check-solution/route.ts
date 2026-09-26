@@ -66,11 +66,12 @@ async function handlePOST(req: NextRequest) {
   try {
     // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
     // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, non remboursé.
-    const gate = await (await import("@/lib/billing/reserve")).assistGate("check-solution");
-    if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
-    const result = await checkSolution({ statement, answer, imageRel });
+    const { assistCall } = await import("@/lib/billing/reserve");
+    const result = await assistCall("check-solution", () => checkSolution({ statement, answer, imageRel }));
     return NextResponse.json({ ok: true, result });
   } catch (e: unknown) {
+    const { AssistRefused } = await import("@/lib/billing/reserve");
+    if (e instanceof AssistRefused) return NextResponse.json({ error: e.message }, { status: e.status });
     const err = e as LlmError;
     const status = err.code === "UNAVAILABLE" || err.code === "SPEND_CAP" || err.code === "QUOTA" || err.code === "CREDITS" ? 503 : 502;
     return NextResponse.json({ error: err.message ?? String(e), code: err.code }, { status });

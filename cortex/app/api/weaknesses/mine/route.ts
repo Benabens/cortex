@@ -37,9 +37,8 @@ async function handlePOST(req: NextRequest) {
   try {
     // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
     // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, non remboursé.
-    const gate = await (await import("@/lib/billing/reserve")).assistGate("weakness-mine");
-    if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
-    const mined = await mineConversation(t);
+    const { assistCall } = await import("@/lib/billing/reserve");
+    const mined = await assistCall("weakness-mine", () => mineConversation(t));
     if (!mined.length) return NextResponse.json({ created: 0, weaknesses: await listWeaknesses(), note: "Aucune faiblesse claire détectée dans cette discussion." });
     for (const m of mined) {
       await createWeakness({
@@ -53,6 +52,8 @@ async function handlePOST(req: NextRequest) {
     }
     return NextResponse.json({ created: mined.length, mined, weaknesses: await listWeaknesses() });
   } catch (e) {
+    const { AssistRefused } = await import("@/lib/billing/reserve");
+    if (e instanceof AssistRefused) return NextResponse.json({ error: e.message }, { status: e.status });
     if (e instanceof LlmError && e.code === "UNAVAILABLE") {
       return NextResponse.json({ error: "Le moteur LLM est injoignable — réessaie plus tard." }, { status: 503 });
     }
