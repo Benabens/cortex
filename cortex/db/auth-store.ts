@@ -119,9 +119,9 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
     `CREATE TABLE IF NOT EXISTS active_jobs (
       user_id TEXT NOT NULL,
       course TEXT NOT NULL,
-      job_id INTEGER NOT NULL,
+      job_ref TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      PRIMARY KEY (user_id, course, job_id)
+      PRIMARY KEY (user_id, job_ref)
     )`,
     `CREATE TABLE IF NOT EXISTS stripe_purchases (
       session_id TEXT PRIMARY KEY,
@@ -234,9 +234,9 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
     `CREATE TABLE IF NOT EXISTS public.active_jobs (
       user_id text NOT NULL,
       course text NOT NULL,
-      job_id integer NOT NULL,
+      job_ref text NOT NULL,
       created_at text NOT NULL,
-      PRIMARY KEY (user_id, course, job_id)
+      PRIMARY KEY (user_id, job_ref)
     )`,
     `CREATE TABLE IF NOT EXISTS public.stripe_purchases (
       session_id text PRIMARY KEY,
@@ -341,6 +341,7 @@ export async function authGet<T = Record<string, unknown>>(sql: string, ...param
 /** INSERT avec récupération de l'id (lastInsertRowid / RETURNING id). */
 export async function authInsert(sql: string, ...params: SqlParam[]): Promise<number> {
   if (dbDriverName() === "sqlite") {
+    await sqliteTxIdle();
     return Number(sqliteAuth().prepare(sql).run(...params).lastInsertRowid);
   }
   const ex = await pgExec();
@@ -351,6 +352,7 @@ export async function authInsert(sql: string, ...params: SqlParam[]): Promise<nu
 
 export async function authRun(sql: string, ...params: SqlParam[]): Promise<void> {
   if (dbDriverName() === "sqlite") {
+    await sqliteTxIdle();
     sqliteAuth().prepare(sql).run(...params);
     return;
   }
@@ -368,6 +370,11 @@ export type AuthTx = {
 };
 
 let _sqliteTxChain: Promise<unknown> = Promise.resolve();
+/** Transaction sqlite en cours (connexion unique) : les écritures extérieures attendent sa fin. */
+let _sqliteTxOpen: Promise<void> | null = null;
+async function sqliteTxIdle(): Promise<void> {
+  while (_sqliteTxOpen) await _sqliteTxOpen;
+}
 
 /**
  * TRANSACTION du store global — pour les décisions lire-puis-écrire qui
@@ -376,12 +383,10 @@ let _sqliteTxChain: Promise<unknown> = Promise.resolve();
  *  - Postgres : transaction native (connexion dédiée) ; l'appelant pose un
  *    `pg_advisory_xact_lock` par utilisateur pour sérialiser ses réservations.
  *  - sqlite : BEGIN IMMEDIATE (verrou d'écriture inter-process) + file
- *    in-process — better-sqlite3 est synchrone sur une connexion unique, donc
- *    les instructions de `fn` ne s'entrelacent pas entre elles ; les écritures
- *    d'autres tâches asynchrones du même process qui tomberaient entre deux
- *    `await` seraient validées avec la transaction, ce qui est sans danger tant
- *    que `fn` ne provoque pas de ROLLBACK pour un refus métier (il RENVOIE le
- *    refus, il ne le lève pas).
+ *    in-process, et les écritures des autres tâches du process (authRun,
+ *    authInsert) attendent la fin de la transaction — sur une connexion
+ *    unique, elles tomberaient sinon dedans et seraient annulées par un
+ *    ROLLBACK. `fn` RENVOIE un refus métier, il ne le lève pas.
  */
 export async function authTx<T>(fn: (tx: AuthTx) => Promise<T>): Promise<T> {
   if (dbDriverName() === "sqlite") {
@@ -392,6 +397,12 @@ export async function authTx<T>(fn: (tx: AuthTx) => Promise<T>): Promise<T> {
       async run(sql: string, ...params: SqlParam[]) { db.prepare(sql).run(...params); },
     };
     const run = async () => {
+      // Pendant la transaction, authRun/authInsert d'autres tâches ATTENDENT :
+      // sur une connexion unique, une écriture étrangère glissée entre deux
+      // await tomberait dans la transaction et serait annulée par un ROLLBACK
+      // (crédit Stripe acquitté, ligne llm_usage…).
+      let release!: () => void;
+      _sqliteTxOpen = new Promise<void>((r) => { release = r; });
       db.exec("BEGIN IMMEDIATE");
       try {
         const out = await fn(tx);
@@ -400,6 +411,9 @@ export async function authTx<T>(fn: (tx: AuthTx) => Promise<T>): Promise<T> {
       } catch (e) {
         try { db.exec("ROLLBACK"); } catch { /* déjà rollback */ }
         throw e;
+      } finally {
+        _sqliteTxOpen = null;
+        release();
       }
     };
     const next = _sqliteTxChain.then(run, run);

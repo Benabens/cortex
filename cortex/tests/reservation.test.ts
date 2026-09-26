@@ -86,17 +86,15 @@ test("I5 — au plus MAX_ACTIVE_JOBS générations en cours par compte, tous cou
     const results = await Promise.all(
       courses.map((c, i) =>
         runWithUser(user, () => runWithCourse(c, () =>
-          reserveGeneration({ bucket: "gen", kind: "exam", ref: `job:${user}:${c}:${i + 1}`, jobSlot: { course: c, jobId: i + 1 } })
+          reserveGeneration({ bucket: "gen", kind: "exam", ref: `job:${user}:${c}:${i + 1}`, jobSlot: true })
         ))
       )
     );
     assert.equal(results.filter((r) => r.ok).length, 2, JSON.stringify(results));
-    // Un job terminé libère sa place.
-    await releaseJobSlot(user, "ml", 1);
-    await releaseJobSlot(user, "algo", 2);
-    await releaseJobSlot(user, "cs-202", 3);
+    // Un job terminé libère sa place (identifiée par la référence de réservation).
+    for (const r of results) if (r.ok) await releaseJobSlot(user, r.ref);
     const again = await runWithUser(user, () => runWithCourse("ml", () =>
-      reserveGeneration({ bucket: "gen", kind: "exam", ref: `job:${user}:ml:9`, jobSlot: { course: "ml", jobId: 9 } })
+      reserveGeneration({ bucket: "gen", kind: "exam", ref: `job:${user}:ml:9`, jobSlot: true })
     ));
     assert.equal(again.ok, true);
   } finally {
@@ -105,25 +103,24 @@ test("I5 — au plus MAX_ACTIVE_JOBS générations en cours par compte, tous cou
   }
 });
 
-test("I8 bis — réservation refusée : le job est marqué en erreur et startWorker ne lance RIEN", async () => {
+test("I8 bis — réservation refusée : aucun job n'est créé, rien ne peut démarrer, rien n'est débité", async () => {
   const jobs = await import("../lib/jobs");
   const credits = await import("../lib/billing/credits");
   const user = "usr_fauche";
   await runWithUser(user, () => runWithCourse("algo", async () => {
+    await jobs.ensureJobsSchema();
     // Vide le solde offert.
     await credits.addTransaction(user, -200, "test", `test:${user}:vide`);
+    const before = Number((await q.get<{ n: number }>(`SELECT count(*) n FROM jobs`))?.n ?? 0);
     await assert.rejects(
       () => jobs.createJobExclusive("exam"),
       (e: Error & { status?: number }) => e instanceof jobs.ReservationRefused && e.status === 402,
     );
-    const row = await q.get<{ id: number; status: string; pid: number | null }>(`SELECT id, status, pid FROM jobs ORDER BY id DESC LIMIT 1`);
-    assert.ok(row, "le job doit exister pour porter le motif du refus");
-    assert.equal(row!.status, "error");
-    await jobs.startWorker(row!.id, "algo");
-    const after = await q.get<{ pid: number | null; status: string }>(`SELECT pid, status FROM jobs WHERE id = ?`, row!.id);
-    assert.equal(after!.pid, null, "un worker a été lancé pour un job refusé");
-    assert.equal(after!.status, "error");
+    const after = Number((await q.get<{ n: number }>(`SELECT count(*) n FROM jobs`))?.n ?? 0);
+    assert.equal(after, before, "un refus ne doit laisser aucun job");
     assert.equal(await credits.getBalanceCenti(user), 0, "rien débité");
+    // Un job dont le démarrage n'est pas revendicable (inexistant) ne lance rien.
+    assert.equal(await jobs.claimJobStart(999_999), false);
   }));
 });
 

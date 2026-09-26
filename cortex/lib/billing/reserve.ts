@@ -41,8 +41,8 @@ export type ReserveOpts = {
   ref: string;
   /** Coût en centièmes ; défaut : creditCost(kind). */
   costCenti?: number;
-  /** Place « génération en cours » à réserver (jobs seulement). */
-  jobSlot?: { course: string; jobId: number };
+  /** Réserver aussi une place « génération en cours » (jobs seulement), identifiée par `ref`. */
+  jobSlot?: boolean;
   userId?: string;
   course?: string;
 };
@@ -138,19 +138,19 @@ export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
     }
     if (o.jobSlot && slotCap !== null) {
       await tx.run(
-        `INSERT INTO active_jobs (user_id, course, job_id, created_at) VALUES (?,?,?,?) ON CONFLICT (user_id, course, job_id) DO NOTHING`,
-        userId, o.jobSlot.course, o.jobSlot.jobId, t,
+        `INSERT INTO active_jobs (user_id, course, job_ref, created_at) VALUES (?,?,?,?) ON CONFLICT (user_id, job_ref) DO NOTHING`,
+        userId, course, o.ref, t,
       );
     }
     return { ok: true, ref: o.ref, costCenti: billing ? cost : 0 };
   });
 }
 
-/** Libère la place « en cours » d'un job arrivé à un état terminal (best-effort). */
-export async function releaseJobSlot(userId: string, course: string, jobId: number): Promise<void> {
+/** Libère la place « en cours » d'une réservation (job terminal, ou réservation rendue). Best-effort. */
+export async function releaseJobSlot(userId: string, ref: string): Promise<void> {
   if (maxActiveJobs() === null) return;
   try {
-    await authRun(`DELETE FROM active_jobs WHERE user_id = ? AND course = ? AND job_id = ?`, userId, course, jobId);
+    await authRun(`DELETE FROM active_jobs WHERE user_id = ? AND job_ref = ?`, userId, ref);
   } catch (e) {
     log("warn", "jobs.slot_release_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
   }

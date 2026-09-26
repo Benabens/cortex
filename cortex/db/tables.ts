@@ -302,6 +302,8 @@ export const TABLES: TableSpec[] = [
       { name: "heartbeat_at", type: "text" },
       { name: "checkpoint_json", type: "text" },
       { name: "worker_id", type: "text" },
+      // Référence du débit de crédits réservé AVANT l'insertion (cf. lib/jobs createJobExclusive).
+      { name: "credit_ref", type: "text" },
     ],
   },
   {
