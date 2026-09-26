@@ -6,6 +6,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { readFormData, withBodyLimit } from "@/lib/upload-limit";
+import { checkStorage, declaredBytes } from "@/lib/storage-quota";
+import { currentUser } from "@/db/context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,6 +51,9 @@ function safeRelPath(raw: string): string | null {
 export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const { course, denied } = requireCourse(req);
   if (denied) return denied;
+  // Quota de stockage du compte + espace libre du volume, AVANT de lire l'envoi.
+  const storage = await checkStorage(currentUser(), declaredBytes(req));
+  if (storage) return NextResponse.json({ error: storage.error }, { status: storage.status });
 
   const cfg = getCourse(course);
   // Un cours HISTORIQUE lit son contenu à la racine du dépôt, en lecture seule :

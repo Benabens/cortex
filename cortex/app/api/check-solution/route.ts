@@ -8,6 +8,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
+import { checkStorage, declaredBytes } from "@/lib/storage-quota";
+import { currentUser } from "@/db/context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,6 +35,9 @@ async function handlePOST(req: NextRequest) {
   let imageRel: string | null = null;
 
   if (ct.includes("multipart/form-data")) {
+    // Quota de stockage du compte + espace libre du volume, AVANT de lire l'envoi.
+    const storage = await checkStorage(currentUser(), declaredBytes(req));
+    if (storage) return NextResponse.json({ error: storage.error }, { status: storage.status });
     const form = await readFormData(req, UPLOAD_LIMITS.image);
     statement = String(form.get("statement") ?? "").trim();
     answer = String(form.get("answer") ?? "").trim();
