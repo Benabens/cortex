@@ -440,6 +440,13 @@ export async function closePostgres(): Promise<void> {
   for (const pool of pgPools.values()) await pool.end({ timeout: 2 });
   pgPools.clear();
   bootstrapped.clear();
+  // Le pool du store d'auth (schéma public) vit dans driver-postgres-auth : sans
+  // sa fermeture, un processus de test ne rend jamais la main.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { closeAuthPool } = require("./driver-postgres-auth") as typeof import("./driver-postgres-auth");
+    await closeAuthPool();
+  } catch { /* module non chargé */ }
   if (_pglite && "close" in _pglite) await (_pglite as unknown as { close(): Promise<void> }).close();
   _pglite = null;
   _pgliteSchema = null;
