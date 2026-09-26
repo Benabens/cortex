@@ -475,8 +475,9 @@ export async function cancelJob(id: number): Promise<Job | null> {
     await logJob(id, `Annulé à ${job.progress}% — la génération était déjà lancée, les crédits ne sont pas rendus.`);
   }
   if (job.pid) {
-    // Tout l'arbre (tsx re-spawne le script) : groupe via ps, sinon -pid (worker détaché).
-    killProcessGroup(job.pid);
+    // Tout l'arbre (tsx re-spawne le script) : groupe via ps, sinon -pid (worker
+    // détaché). Jamais un PID recyclé par un autre programme (commande vérifiée).
+    killProcessGroup(job.pid, { expectCommand: /run-job|tsx|node/ });
   }
   await cleanupPartial(job);
   await logJob(id, "Annulé par l'utilisateur — worker tué, artefacts partiels nettoyés.");
