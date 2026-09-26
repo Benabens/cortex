@@ -35,7 +35,7 @@ export function databaseUrl(): string {
   const url = process.env.DATABASE_URL;
   if (!url) {
     throw new Error(
-      "DB_DRIVER=postgres exige DATABASE_URL (postgres://… ou pglite://<dossier>|pglite://memory)."
+      "DB_DRIVER=postgres exige DATABASE_URL (postgres://… / postgresql://… ou pglite://<dossier>|pglite://memory)."
     );
   }
   return url;

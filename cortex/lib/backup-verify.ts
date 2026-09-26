@@ -52,6 +52,9 @@ export async function verifyBackup(dir: string, opts: { log?: (m: string) => voi
   let pgToc: number | null = null;
   const pgSchemas: string[] = [];
   let pgTables = 0;
+  if (manifest.dbDriver === "postgres" && !manifest.postgres && !manifest.pglite) {
+    throw new Error("Sauvegarde sans dump Postgres alors que la base est Postgres : le volume seul ne contient ni les comptes ni les crédits — sauvegarde inutilisable.");
+  }
   if (manifest.postgres) {
     log("[backup:verify] pg_restore -l (table des matières du dump)…");
     const r = exec("pg_restore", ["-l", path.join(backupPath, manifest.postgres.file)]);

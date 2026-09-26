@@ -309,6 +309,8 @@ contenant :
   **inclus** : on capture l'état exact, contrairement à git) ;
 - `postgres.dump` — dump `pg_dump -Fc` de **tous** les schémas tenant
   (`t_<user>_<cours>`) + `public`, **uniquement** si `DATABASE_URL=postgres://…`
+  ou `postgresql://…` (forme fournie par Railway) — avec `DB_DRIVER=postgres`,
+  une sauvegarde sans dump est **refusée** (aucun manifeste)
   (nécessite `pg_dump` sur l'hôte — présent sur une image avec `libpq`) ;
 - `manifest.json` — horodatage, driver, empreintes SHA-256, versions d'outils.
   **Aucun secret** n'y figure (jamais `DATABASE_URL`).
