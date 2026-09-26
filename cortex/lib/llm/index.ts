@@ -25,6 +25,9 @@ import { LlmError, type CompleteRequest, type CompleteResult, type LlmProvider }
  * explicitement « API payante » historiques (bouton analyse API, generateExam API).
  */
 
+/** Erreurs où le fournisseur n'a rien traité (donc rien facturé) : la ligne provisoire est retirée. */
+const DISCARD_CODES = new Set(["RATE_LIMIT", "OVERLOADED", "AUTH", "UNSUPPORTED", "UNAVAILABLE", "SPEND_CAP", "UPSTREAM", "NETWORK"]);
+
 const REGISTRY: Record<ProviderName, LlmProvider> = {
   "claude-code": claudeCodeProvider,
   anthropic: anthropicProvider,
@@ -98,8 +101,11 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
           });
           return r;
         } catch (e) {
+          // Retirée seulement sur un refus IDENTIFIÉ avant traitement ; toute
+          // autre erreur (timeout, annulation, coupure en cours de flux, réponse
+          // tronquée, inconnue) garde l'estimation : mieux vaut surcompter.
           const code = e instanceof LlmError ? e.code : undefined;
-          if (code !== "TIMEOUT" && code !== "ABORTED") await discardUsage(pending);
+          if (code && DISCARD_CODES.has(code)) await discardUsage(pending);
           throw e;
         }
       }, {
