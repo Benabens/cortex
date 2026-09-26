@@ -325,14 +325,14 @@ export function insufficient(balanceCenti: number, costCenti: number, subCenti =
   if (costCenti === 0) {
     return balanceCenti > 0 ? null : {
       status: 402,
-      error: "Solde épuisé : recharge tes crédits (page Abonnement & crédits) pour continuer à utiliser l'assistance.",
+      error: "Solde épuisé. Recharge tes crédits dans Mon compte → Abonnement & crédits pour continuer à utiliser l'assistance.",
     };
   }
   if (balanceCenti < costCenti) {
     const dont = subCenti > 0 ? ` (dont ${fmtCredits(subCenti)} d'abonnement ce mois-ci)` : "";
     return {
       status: 402,
-      error: `Solde insuffisant : ${fmtCredits(balanceCenti)} crédit(s)${dont}, génération à ${fmtCredits(costCenti)}. Recharge tes crédits sur la page Abonnement & crédits.`,
+      error: `Solde insuffisant : ${fmtCredits(balanceCenti)} crédit(s)${dont}, génération à ${fmtCredits(costCenti)}. Recharge tes crédits dans Mon compte → Abonnement & crédits.`,
     };
   }
   return null;

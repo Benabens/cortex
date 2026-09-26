@@ -1,5 +1,6 @@
 import { Geist } from "next/font/google";
 import { emailLoginConfigured, googleLoginConfigured } from "@/lib/auth";
+import { legalLinks } from "@/lib/legal";
 import { LoginCard } from "./LoginCard";
 
 // Geist (police de la landing), scopée à cette page pour ne pas alourdir le reste.
@@ -29,6 +30,7 @@ export default async function LoginPage({
         callbackUrl={callbackUrl}
         google={googleLoginConfigured()}
         email={emailLoginConfigured()}
+        legal={legalLinks()}
       />
     </div>
   );

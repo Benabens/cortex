@@ -1,4 +1,5 @@
 import { auth, authEnabled } from "@/lib/auth";
+import { BillingPanel } from "./BillingPanel";
 import { DeleteAccount } from "./DeleteAccount";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ export default async function ComptePage() {
     <div className="flex flex-col gap-7">
       <div>
         <h1 className="text-[1.9rem] font-semibold leading-tight sm:text-[2.15rem]">Mon compte</h1>
-        <p className="mt-2 max-w-2xl text-[0.95rem] text-ink-2">Gère ton compte et tes données.</p>
+        <p className="mt-2 max-w-2xl text-[0.95rem] text-ink-2">Ton abonnement, tes crédits et tes données.</p>
       </div>
 
       {email && (
@@ -26,6 +27,8 @@ export default async function ComptePage() {
           <div className="mt-1 text-[0.95rem] font-medium text-ink-1">{email}</div>
         </div>
       )}
+
+      <BillingPanel />
 
       {enabled ? (
         <DeleteAccount />

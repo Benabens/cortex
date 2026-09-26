@@ -1,7 +1,10 @@
 import { billingEnabled, creditCost, fromCenti, getSubscription, listTransactions, purchasedBalanceCenti, subscriptionCreditsCenti, subscriptionLive } from "@/lib/billing/credits";
 import { usedToday } from "@/lib/billing/guards";
 import { listOffers } from "@/lib/billing/offers";
+import { legalLinks, purchasesAllowed, termsVersion } from "@/lib/legal";
 import { useUser } from "@/lib/req";
+import { authGet } from "@/db/auth-store";
+import { currentUser } from "@/db/context";
 import { nowStr } from "@/db/q";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -30,9 +33,15 @@ export async function GET(req: NextRequest) {
   const subCenti = on ? await subscriptionCreditsCenti() : 0;
   const purchasedCenti = on ? await purchasedBalanceCenti() : 0;
   const live = subscriptionLive(sub);
+  const accepted = await authGet<{ accepted_at: string }>(
+    `SELECT accepted_at FROM terms_acceptances WHERE user_id = ? AND version = ?`, currentUser(), termsVersion(),
+  );
   return NextResponse.json({
     billing: on,
     stripeConfigured,
+    purchase: purchasesAllowed(),
+    legal: legalLinks(),
+    terms: { version: termsVersion(), accepted: !!accepted, acceptedAt: accepted?.accepted_at ?? null },
     balance: on ? fromCenti(purchasedCenti + subCenti) : null,
     purchased: on ? fromCenti(purchasedCenti) : null,
     subscription: on && sub

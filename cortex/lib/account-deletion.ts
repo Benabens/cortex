@@ -20,7 +20,7 @@ import { log } from "@/lib/metrics";
  *    moyen de se connecter ;
  *  - `courses` possédés, `tenants` (registre), `gen_events`, `credit_transactions`,
  *    `active_jobs` (réservations en cours), `stripe_purchases` (achats),
- *    `subscriptions` et `stripe_invoices` (abonnement Pro) ;
+ *    `subscriptions` et `stripe_invoices` (abonnement Pro), `terms_acceptances` ;
  *  - chaque schéma tenant `t_<user>_<cours>` (Postgres, DROP … CASCADE) — donc
  *    sources, items, examens, faiblesses, planning, jobs, banque… d'un coup ;
  *  - tous les fichiers du volume sous `data/u/<slug>/` (données des cours créés +
@@ -154,6 +154,7 @@ export async function deleteAccount(userId: string): Promise<DeletionResult> {
     // propriétaire depuis le tableau de bord (le portail n'est plus accessible sans compte).
     await authRun(`DELETE FROM subscriptions WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM stripe_invoices WHERE user_id = ?`, userId);
+    await authRun(`DELETE FROM terms_acceptances WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM courses WHERE owner_user_id = ?`, userId);
     await authRun(`DELETE FROM tenants WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM users WHERE id = ?`, userId);
