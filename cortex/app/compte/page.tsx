@@ -1,6 +1,7 @@
 import { auth, authEnabled } from "@/lib/auth";
 import { BillingPanel } from "./BillingPanel";
 import { DeleteAccount } from "./DeleteAccount";
+import { ExportData } from "./ExportData";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,10 @@ export default async function ComptePage() {
       <BillingPanel />
 
       {enabled ? (
-        <DeleteAccount />
+        <>
+          <ExportData />
+          <DeleteAccount />
+        </>
       ) : (
         <p className="text-[0.9rem] text-ink-3">
           La gestion du compte est disponible une fois l’authentification activée
