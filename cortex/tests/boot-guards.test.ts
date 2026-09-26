@@ -32,3 +32,21 @@ test("I8 — le script prod-boot appelle bien la garde", async () => {
   const src = fs.readFileSync(new URL("../scripts/prod-boot.ts", import.meta.url), "utf8");
   assert.match(src, /assertAuthRequired\(/);
 });
+
+test("2b-9 — provider claude-code refusé sur une instance multi-utilisateurs, hébergée ou facturée, sauf CORTEX_OWNER_ONLY=1", async () => {
+  const { assertLlmProviderAllowed } = await import("../lib/boot-guards");
+  // claude-code est le provider PAR DÉFAUT quand LLM_PROVIDER est absent.
+  assert.throws(() => assertLlmProviderAllowed({ AUTH_ENABLED: "1" }), /claude-code/);
+  assert.throws(() => assertLlmProviderAllowed({ LLM_PROVIDER: "claude-code", BILLING_ENABLED: "1" }), /claude-code/);
+  assert.throws(() => assertLlmProviderAllowed({ LLM_PROVIDER: "claude-code", RAILWAY_PROJECT_ID: "p" }), /claude-code/);
+  assert.throws(() => assertLlmProviderAllowed({ LLM_PROVIDER: "claude-code", CORTEX_HOSTED: "1" }), /claude-code/);
+  assert.doesNotThrow(() => assertLlmProviderAllowed({ LLM_PROVIDER: "claude-code", AUTH_ENABLED: "1", CORTEX_OWNER_ONLY: "1" }));
+  assert.doesNotThrow(() => assertLlmProviderAllowed({ LLM_PROVIDER: "anthropic", AUTH_ENABLED: "1", BILLING_ENABLED: "1" }));
+  assert.doesNotThrow(() => assertLlmProviderAllowed({}), "dev mono-poste : rien de gardé");
+});
+
+test("2b-9 — prod-boot et instrumentation appellent la garde du provider", async () => {
+  const fs = await import("node:fs");
+  assert.match(fs.readFileSync("scripts/prod-boot.ts", "utf8"), /assertLlmProviderAllowed\(/);
+  assert.match(fs.readFileSync("instrumentation.ts", "utf8"), /assertLlmProviderAllowed\(/);
+});
