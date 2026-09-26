@@ -32,9 +32,13 @@ const BANNED = [
   "inputfrom", "subinputfrom", "subfile", "externaldocument", "bibliography", "addbibresource",
   "graphicspath", "DTLloaddb", "csvreader", "pdffiledump", "pdfobj", "pdfximage", "pdfmdfivesum",
   "directlua", "latelua", "ShellEscape", "DelayedShellEscape", "special", "jobname", "input@path",
-  // fabrication de séquences de contrôle / changement de régime
-  "csname", "catcode", "lowercase", "uppercase", "scantokens", "makeatletter", "expandafter",
-  "usepackage", "RequirePackage", "documentclass", "def", "edef", "gdef", "xdef", "let", "futurelet",
+  // fabrication de séquences de contrôle / changement de régime. (\def, \let,
+  // \newcommand, \expandafter, \uppercase/\lowercase restent permis : sans
+  // \csname ni \catcode ils ne peuvent pas forger un nom interdit — \lowercase
+  // n'agit que sur les caractères, pas sur les noms de macros — et un corrigé
+  // les emploie couramment.)
+  "csname", "catcode", "scantokens", "makeatletter",
+  "usepackage", "RequirePackage", "documentclass",
   "batchmode", "nonstopmode", "scrollmode", "errorstopmode",
 ];
 const BANNED_RE = new RegExp(String.raw`\\@*(?:${BANNED.join("|")})(?![A-Za-z@])`, "g");
