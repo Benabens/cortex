@@ -1,3 +1,4 @@
+import { isGuardedDeployment } from "@/lib/boot-guards";
 import { currentCourse } from "@/db/client";
 import { currentUser } from "@/db/context";
 import { authAll, authInsert, authRun } from "@/db/auth-store";
@@ -33,10 +34,18 @@ const PRICING: Array<{ prefix: string; inPerM: number; outPerM: number; cacheRea
   { prefix: "claude-sonnet", inPerM: 2, outPerM: 10, cacheReadPerM: 0.2, cacheWritePerM: 2.5 },
   { prefix: "claude-haiku", inPerM: 1, outPerM: 5, cacheReadPerM: 0.1, cacheWritePerM: 1.25 },
 ];
-const FALLBACK_RATE = { inPerM: 5, outPerM: 25, cacheReadPerM: 0.5, cacheWritePerM: 6.25 }; // inconnu → tarif opus
+// Inconnu → le tarif LE PLUS CHER de la grille (jamais sous-compté), signalé une fois par modèle.
+const FALLBACK_RATE = PRICING.reduce((a, b) => (b.outPerM > a.outPerM ? b : a));
+const unknownRateWarned = new Set<string>();
 
 export function rateFor(model: string): { inPerM: number; outPerM: number; cacheReadPerM: number; cacheWritePerM: number } {
-  return PRICING.find((p) => model.startsWith(p.prefix)) ?? FALLBACK_RATE;
+  const hit = PRICING.find((p) => model.startsWith(p.prefix));
+  if (hit) return hit;
+  if (!unknownRateWarned.has(model)) {
+    unknownRateWarned.add(model);
+    log("warn", "usage.unknown_model_rate", { model, appliedPrefix: FALLBACK_RATE.prefix, pricingDate: PRICING_DATE });
+  }
+  return FALLBACK_RATE;
 }
 
 /** Coût USD d'un appel, cache compris. Entrées « pleines » facturées au tarif
@@ -151,7 +160,15 @@ export async function openUsage(u: UsageEstimate): Promise<number | null> {
     _spendCache = null;
     return id || null;
   } catch (e) {
-    log("warn", "usage.open_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
+    const message = e instanceof Error ? e.message.slice(0, 200) : String(e);
+    // FAIL-CLOSED en déploiement gardé : sans trace écrite AVANT l'envoi, la
+    // dépense échapperait au plafond et au compte de l'utilisateur → l'appel
+    // payant ne part pas (503 côté route). En dev, on laisse passer.
+    if (paid && isGuardedDeployment()) {
+      log("error", "usage.open_failed_closed", { message });
+      throw new LlmError("Comptage des coûts indisponible : appel au modèle refusé. Réessaie dans un instant.", "UNAVAILABLE");
+    }
+    log("warn", "usage.open_failed", { message });
     return null;
   }
 }

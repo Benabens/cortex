@@ -1,3 +1,4 @@
+import { LlmError } from "./types";
 import type { LlmModel } from "./types";
 
 /**
@@ -50,7 +51,19 @@ const ANTHROPIC_DEFAULTS: Record<string, string> = {
  *  - openai-compatible : passthrough (mapper via env, cf. .env.example).
  * Un id complet (non logique) passe toujours tel quel.
  */
+/** Alias logiques acceptés — la SEULE chose qu'un appelant (ou un client) peut choisir. */
+export const LLM_MODELS = ["opus", "sonnet", "haiku"] as const;
+export function isLlmModel(v: unknown): v is LlmModel {
+  return typeof v === "string" && (LLM_MODELS as readonly string[]).includes(v);
+}
+
 export function mapModel(model: LlmModel, provider: ProviderName): string {
+  // Un id complet n'est JAMAIS accepté sur un fournisseur PAYANT : il
+  // contournerait la règle LLM_ALLOW_OPUS (et le tarif connu). Seul le CLI
+  // local (dev, €0) garde son passthrough historique.
+  if (provider !== "claude-code" && !isLlmModel(model)) {
+    throw new LlmError(`Modèle « ${String(model)} » refusé : seuls les alias opus, sonnet et haiku sont acceptés sur un fournisseur payant.`, "UNSUPPORTED");
+  }
   const envKey = MODEL_ENV[model];
   if (envKey && process.env[envKey]) return process.env[envKey]!;
   if (provider === "anthropic" && ANTHROPIC_DEFAULTS[model]) {
