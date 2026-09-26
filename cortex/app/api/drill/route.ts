@@ -25,19 +25,14 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const denied = useCourseOr404(req);
   if (denied) return denied;
   try {
-    // Appel LLM INLINE → quota d'assistance par user/jour
-    // (DAILY_ASSIST_QUOTA) + limite de débit par minute, compté à la tentative.
-    {
-      const { assistGate } = await import("@/lib/billing/reserve");
-      // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE avant
-      // l'appel au modèle : 0,1 crédit — l'assistance n'est plus gratuite.
-      const gate = await assistGate("drill");
-      if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
-    }
     const { concept } = await readJson(req, ({ concept: "" }));
     const c = String(concept ?? "").trim();
     if (!c) return NextResponse.json({ error: "concept manquant" }, { status: 400 });
     try {
+      // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
+      // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, non remboursé.
+      const gate = await (await import("@/lib/billing/reserve")).assistGate("drill");
+      if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
       const drill = await generateDrill(c);
       return NextResponse.json({ ok: true, drill });
     } catch (e: unknown) {

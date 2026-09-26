@@ -27,15 +27,6 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
 async function handlePOST(req: NextRequest) {
   const denied = useCourseOr404(req);
   if (denied) return denied;
-  // Appel LLM INLINE → quota d'assistance par user/jour
-  // (DAILY_ASSIST_QUOTA, no-op sans env), compté à la tentative.
-  {
-    const { assistGate } = await import("@/lib/billing/reserve");
-    // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE avant
-    // l'appel au modèle : 0,1 crédit — l'assistance n'est plus gratuite.
-    const gate = await assistGate("check-solution");
-    if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
-  }
   const ct = req.headers.get("content-type") ?? "";
   let statement = "";
   let answer = "";
@@ -65,6 +56,10 @@ async function handlePOST(req: NextRequest) {
   if (!answer && !imageRel) return NextResponse.json({ error: "Donne ta réponse (texte ou photo)." }, { status: 400 });
 
   try {
+    // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
+    // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, non remboursé.
+    const gate = await (await import("@/lib/billing/reserve")).assistGate("check-solution");
+    if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
     const result = await checkSolution({ statement, answer, imageRel });
     return NextResponse.json({ ok: true, result });
   } catch (e: unknown) {

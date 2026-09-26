@@ -162,6 +162,10 @@ export async function releaseJobSlot(userId: string, course: string, jobId: numb
  * null = passe ; sinon {status, error} à renvoyer tel quel.
  */
 export async function assistGate(kind: string): Promise<GateIssue | null> {
+  // Moteur indisponible : refus AVANT toute réservation — un débit non
+  // remboursable ne doit jamais précéder un appel qui ne partira pas.
+  const { llmAvailable, llmUnavailableReason } = await import("@/lib/llm");
+  if (!llmAvailable()) return { status: 503, error: llmUnavailableReason() ?? "Moteur LLM indisponible." };
   // `kind` (drill, check-solution…) est le libellé du compteur ; le tarif est celui d'« assist ».
   const r = await reserveGeneration({
     bucket: "assist", kind, costCenti: creditCost("assist"),
