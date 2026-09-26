@@ -3,7 +3,7 @@ import { authGet, authRun, authTx } from "@/db/auth-store";
 import { nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import {
-  addTransaction, ensureLedgerUnit, getSubscription, grantSubscriptionMonth, linkSubscription, resolveUserByCustomer,
+  DELTA_CENTI, addTransaction, ensureLedgerUnit, getSubscription, grantSubscriptionMonth, linkSubscription, resolveUserByCustomer,
   setSubscriptionStatus, subscriptionCreditsCenti, subscriptionMonthlyCreditsCenti, toCenti,
 } from "./credits";
 
@@ -129,6 +129,7 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
       const charge = event.data.object as Stripe.Charge;
       res = await reverseByPaymentIntent(idOf(charge.payment_intent), "remboursement Stripe", {
         amountCents: Number(charge.amount_refunded ?? charge.amount ?? 0) || null,
+        totalCents: Number(charge.amount ?? 0) || null,
         metadata: charge.metadata ?? null, customerId: idOf(charge.customer),
         email: charge.billing_details?.email ?? charge.receipt_email ?? null, lookup: opts.lookup,
       });
@@ -263,7 +264,10 @@ async function onSubscriptionDeleted(sub: Stripe.Subscription): Promise<HandleRe
 }
 
 type ReversalContext = {
+  /** montant repris (remboursé cumulé, ou montant du litige), en centimes */
   amountCents?: number | null;
+  /** montant total de la charge, en centimes (remboursement partiel → prorata) */
+  totalCents?: number | null;
   metadata?: Record<string, string> | null;
   customerId?: string | null;
   email?: string | null;
@@ -280,15 +284,31 @@ async function userByEmail(email: string | null | undefined): Promise<string | n
 async function reverseByPaymentIntent(paymentIntent: string | null, why: string, ctx: ReversalContext = {}): Promise<HandleResult> {
   if (!paymentIntent) return { ok: true, action: "reversal", reversed: false, error: "payment_intent absent" };
   const ref = `stripe:reversal:${paymentIntent}`;
-  if (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, ref)) {
-    return { ok: true, action: "reversal-duplicate", reversed: false };
-  }
   const purchase = await authGet<{ user_id: string; credits_centi: number }>(
     `SELECT user_id, credits_centi FROM stripe_purchases WHERE payment_intent = ?`, paymentIntent,
   );
   if (purchase) {
-    const reversed = await addTransaction(purchase.user_id, -Number(purchase.credits_centi), why, ref);
+    // Remboursement PARTIEL → prorata du montant, arrondi au crédit SUPÉRIEUR,
+    // cumulatif (Stripe renvoie amount_refunded cumulé à chaque remboursement) :
+    // on reprend la différence avec ce qui l'a déjà été pour ce paiement.
+    const full = Number(purchase.credits_centi);
+    let target = full;
+    if (ctx.amountCents && ctx.totalCents && ctx.amountCents < ctx.totalCents) {
+      target = Math.min(full, Math.ceil((full / 100) * (ctx.amountCents / ctx.totalCents)) * 100);
+    }
+    const done = await authGet<{ total: number | string | null }>(
+      `SELECT coalesce(sum(-(${DELTA_CENTI})), 0) total FROM credit_transactions WHERE user_id = ? AND ref LIKE ?`,
+      purchase.user_id, `${ref}%`,
+    );
+    const already = Number(done?.total ?? 0);
+    const take = target - already;
+    if (take <= 0) return { ok: true, action: "reversal-duplicate", reversed: false };
+    const stepRef = already === 0 && take === full ? ref : `${ref}:${target}`;
+    const reversed = await addTransaction(purchase.user_id, -take, target < full ? `${why} (partiel : ${ctx.amountCents}/${ctx.totalCents} centimes)` : why, stepRef);
     return { ok: true, action: "pack-reversed", reversed };
+  }
+  if (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, ref)) {
+    return { ok: true, action: "reversal-duplicate", reversed: false };
   }
   const invoice = await authGet<{ user_id: string; granted_centi: number }>(
     `SELECT user_id, granted_centi FROM stripe_invoices WHERE payment_intent = ?`, paymentIntent,
