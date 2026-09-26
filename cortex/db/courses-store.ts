@@ -1,5 +1,5 @@
 import { FAKE_COURSE_ID, LEGACY_COURSES, legacyCoursesFor, type LegacyCourse } from "../lib/courses-legacy";
-import { authAll, authRun, authSqlite } from "./auth-store";
+import { authAll, authRun, authSqlite, authGet } from "./auth-store";
 import { dbDriverName, nowStr } from "./q";
 import { OWNER_USER } from "./context";
 
@@ -302,7 +302,19 @@ export async function removeEmptyFakeCourse(): Promise<{ removed: boolean; reaso
   if (!fake) return { removed: false, reason: "absent" };
   const { runWithUser } = await import("./context");
   const { runWithCourse } = await import("./client");
-  const { q } = await import("./q");
+  const { q, dbDriverName } = await import("./q");
+  // Postgres : ouvrir le cours (runWithCourse) AMORCE son schéma tenant. Un
+  // cours jamais ouvert n'a pas de ligne `tenants` → rien à compter, rien à
+  // créer : on supprime directement. Sinon on compte, puis on retire aussi le
+  // schéma et la ligne tenant pour ne rien laisser d'orphelin.
+  const pg = dbDriverName() === "postgres";
+  const tenant = pg
+    ? await authGet<{ schema_name: string }>(`SELECT schema_name FROM tenants WHERE user_id = ? AND course = ?`, fake.owner_user_id, FAKE_COURSE_ID)
+    : undefined;
+  if (pg && !tenant) {
+    await authRun(`DELETE FROM courses WHERE id = ?`, FAKE_COURSE_ID);
+    return { removed: true, reason: "jamais ouvert" };
+  }
   let items = 0;
   try {
     items = await runWithUser(fake.owner_user_id, () => runWithCourse(FAKE_COURSE_ID, async () => {
@@ -312,5 +324,9 @@ export async function removeEmptyFakeCourse(): Promise<{ removed: boolean; reaso
   } catch { items = 0; /* base absente = vide */ }
   if (items > 0) return { removed: false, reason: `${items} item(s) ingéré(s) : conservé` };
   await authRun(`DELETE FROM courses WHERE id = ?`, FAKE_COURSE_ID);
+  if (tenant) {
+    await authRun(`DROP SCHEMA IF EXISTS "${tenant.schema_name}" CASCADE`);
+    await authRun(`DELETE FROM tenants WHERE user_id = ? AND course = ?`, fake.owner_user_id, FAKE_COURSE_ID);
+  }
   return { removed: true };
 }
