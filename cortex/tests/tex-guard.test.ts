@@ -84,6 +84,9 @@ test("ce qui est légitime passe : figures relatives, macros du cours, maths", a
     String.raw`\subq{1.1}{X}{10} Soit $R_1$ le routeur. \packetgrid{12} \textbf{readable} \emph{file} inputs`,
     String.raw`\begin{tabular}{|c|c|}\hline a & b \\ \hline\end{tabular} \examq{1}{Inodes}{25}`,
     String.raw`\verb|input.txt| et \texttt{fichier d'entrée}`,
+    // Macros locales qu'un corrigé emploie couramment : sans \csname ni \catcode, elles ne fabriquent rien.
+    String.raw`\def\R{\mathbb{R}} \let\eps\varepsilon \newcommand{\norm}[1]{\lVert #1 \rVert} $\norm{x} \in \R$`,
+    String.raw`\expandafter\textbf\expandafter{\eps} \uppercase{abc} \lowercase{DEF}`,
   ];
   for (const c of ok) assert.deepEqual(findTexHazards(c), [], `faux positif : ${c}`);
 });
