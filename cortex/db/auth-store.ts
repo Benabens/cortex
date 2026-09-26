@@ -138,6 +138,12 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       amount_cents INTEGER,
       created_at TEXT NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS course_deletions (
+      user_id TEXT NOT NULL,
+      course TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, course)
+    )`,
     `CREATE TABLE IF NOT EXISTS subscriptions (
       user_id TEXT PRIMARY KEY,
       customer_id TEXT,
@@ -293,6 +299,12 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       why text NOT NULL,
       amount_cents integer,
       created_at text NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS public.course_deletions (
+      user_id text NOT NULL,
+      course text NOT NULL,
+      started_at text NOT NULL,
+      PRIMARY KEY (user_id, course)
     )`,
     `CREATE TABLE IF NOT EXISTS public.subscriptions (
       user_id text PRIMARY KEY,

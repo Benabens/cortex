@@ -76,6 +76,18 @@ async function runIngestJob(target: string | null): Promise<void> {
 
 async function main() {
   if (!jobId) { console.error("usage: run-job <jobId> <course>"); process.exit(1); }
+  // AVANT toute requête sur le tenant (getJob l'amorcerait) : le cours doit
+  // exister, appartenir à CORTEX_USER et ne pas être en cours de suppression —
+  // sinon un worker en retard recréerait un schéma vide pour un cours effacé.
+  {
+    const { ownsCourse } = await import("../lib/courses");
+    const { isCourseDeleting } = await import("../lib/course-deletion");
+    const { currentUser } = await import("../db/context");
+    if (!ownsCourse(currentUser(), COURSE) || (await isCourseDeleting(currentUser(), COURSE))) {
+      console.error(`cours « ${COURSE} » supprimé, en suppression ou inaccessible pour ${currentUser()} : job ${jobId} abandonné`);
+      process.exit(1);
+    }
+  }
   const job = await getJob(jobId);
   if (!job) { console.error("job introuvable: " + jobId); process.exit(1); }
   if (job.status === "canceled") process.exit(0);
