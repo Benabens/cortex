@@ -335,10 +335,13 @@ Postgres utilise `pg_restore --clean --if-exists`.
   cours — c'est voulu (le matériel d'un cours est commun), mais ne dépose pas
   là un document que tu ne veux pas partager. Les examens générés et les
   screenshots, eux, sont isolés par utilisateur (`data/u/<user>/…`).
-- La **sandbox** (figures matplotlib, vérif de code) requiert les user
-  namespaces ; si le runtime Railway les refuse, les items à figures sont
-  écartés proprement (jamais de PDF cassé) — vérifier `/api/health` (champ
-  sandbox) au premier déploiement.
+- **Isolation (décision)** : le runtime Railway refuse `unshare`, donc aucun
+  bac à sable noyau n'est disponible → **toute exécution de code est
+  désactivée** en production (vérification de programmes, sympy, figures
+  matplotlib) et ces voies répondent `not_applicable` ; les items à figures
+  sont écartés proprement (jamais de PDF cassé). `/api/health` l'affiche
+  (`checks.sandbox: false`, `verification.mode: "disabled"`). Rouvrir
+  l'exécution demande un exécuteur séparé (conteneur dédié, gVisor, e2b).
 - Génération d'un examen complet : **10-20 min** (multi-passes + vérification)
   — c'est le prix de la qualité ; l'UI suit le job en direct.
 - Magic-link (`AUTH_EMAIL_ENABLED=1`) sans `RESEND_API_KEY` : en production la
