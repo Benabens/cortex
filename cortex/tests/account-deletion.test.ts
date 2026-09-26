@@ -63,6 +63,8 @@ async function seedUser(id: string, email: string, course: string) {
   // Tables de facturation/réservation ajoutées par le durcissement : elles portent aussi l'identité.
   await authRun(`INSERT INTO active_jobs (user_id, course, job_ref, created_at) VALUES (?,?,?,?)`, id, course, `job:${id}:${course}:x`, "2026-01-01 00:00:00");
   await authRun(`INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, created_at) VALUES (?,?,?,?,?)`, `cs_${id}`, `pi_${id}`, id, 1000, "2026-01-01 00:00:00");
+  await authRun(`INSERT INTO subscriptions (user_id, customer_id, subscription_id, status, plan, monthly_credits, remaining, period_end, month_anchor, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`, id, `cus_${id}`, `sub_${id}`, "active", "cortex_pro_monthly", 2000, 1500, "2099-01-01 00:00:00", "2026-01", "2026-01-01 00:00:00");
+  await authRun(`INSERT INTO stripe_invoices (invoice_id, subscription_id, customer_id, payment_intent, user_id, granted_centi, period_end, created_at) VALUES (?,?,?,?,?,?,?,?)`, `in_${id}`, `sub_${id}`, `cus_${id}`, `pi_in_${id}`, id, 2000, "2099-01-01 00:00:00", "2026-01-01 00:00:00");
   // tenant peuplé (crée le schéma t_<slug>_<course> + une donnée)
   await runWithUser(id, () => runWithCourse(course, () => q.run(`INSERT INTO weaknesses (topic, severity) VALUES (?, ?)`, `secret-de-${id}`, 3)));
   // fichiers de l'utilisateur : data/u/<slug>/...
@@ -101,6 +103,8 @@ test("supprimer A efface TOUT le sien (lignes, schéma, fichiers) et ne touche R
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM tenants WHERE user_id = ?`, "alice"))!.n, 0);
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM active_jobs WHERE user_id = ?`, "alice"))!.n, 0, "places de jobs effacées");
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM stripe_purchases WHERE user_id = ?`, "alice"))!.n, 0, "achats Stripe détachés du compte");
+  assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM subscriptions WHERE user_id = ?`, "alice"))!.n, 0, "abonnement effacé");
+  assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM stripe_invoices WHERE user_id = ?`, "alice"))!.n, 0, "factures d'abonnement détachées");
   assert.equal(await schemaExists("alice", "ml"), false, "le schéma tenant d'alice est droppé");
   assert.equal(fs.existsSync(path.join(tmp, "u", slugA)), false, "les fichiers d'alice sont effacés");
   // llm_usage : anonymisé (ligne gardée, plus reliée à alice)
@@ -114,6 +118,8 @@ test("supprimer A efface TOUT le sien (lignes, schéma, fichiers) et ne touche R
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM llm_usage WHERE user_id = ?`, "bob"))!.n, 1);
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM active_jobs WHERE user_id = ?`, "bob"))!.n, 1);
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM stripe_purchases WHERE user_id = ?`, "bob"))!.n, 1);
+  assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM subscriptions WHERE user_id = ?`, "bob"))!.n, 1);
+  assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM stripe_invoices WHERE user_id = ?`, "bob"))!.n, 1);
   assert.ok(await schemaExists("bob", "ml"), "le schéma tenant de bob est intact");
   const bobRows = await runWithUser("bob", () => runWithCourse("ml", () => q.all<{ topic: string }>(`SELECT topic FROM weaknesses`)));
   assert.deepEqual(bobRows.map((r) => r.topic), ["secret-de-bob"], "les données tenant de bob sont intactes");
