@@ -23,13 +23,20 @@ process.env.CORTEX_TRACK_USAGE = "1";
 delete process.env.SPEND_CAP_USD;
 
 let server: http.Server;
-let mode: "hang" | "ok" | "error" = "ok";
+let mode: "hang" | "ok" | "error" | "cut" = "ok";
 const pending: http.ServerResponse[] = [];
 
 before(async () => {
   server = http.createServer((req, res) => {
     if (mode === "hang") { pending.push(res); return; }
     if (mode === "error") { res.statusCode = 500; res.end("boom"); return; }
+    if (mode === "cut") {
+      res.writeHead(200, { "content-type": "application/json", "transfer-encoding": "chunked" });
+      res.flushHeaders();
+      res.write("{\"choices\":[");
+      setTimeout(() => res.destroy(), 30); // le fournisseur a commencé à répondre puis coupe
+      return;
+    }
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 11, completion_tokens: 3 } }));
   });
@@ -83,4 +90,13 @@ test("timeout : la ligne provisoire reste (le fournisseur a facturé)", async ()
   const all = await rows();
   assert.equal(all.length, 2);
   assert.deepEqual([Number(all[1].estimated), Number(all[1].tokens_out)], [1, 32]);
+});
+
+test("coupure APRÈS envoi (réponse tronquée) : la ligne reste — le fournisseur a très probablement facturé", async () => {
+  const { complete } = await import("../lib/llm");
+  mode = "cut";
+  await assert.rejects(() => complete({ prompt: "v", model: "opus", timeoutMs: 5_000, maxTokens: 48 }));
+  const all = await rows();
+  assert.equal(all.length, 3, JSON.stringify(all));
+  assert.deepEqual([Number(all[2].estimated), Number(all[2].tokens_out)], [1, 48]);
 });

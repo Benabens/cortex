@@ -91,14 +91,15 @@ export const openaiCompatibleProvider: LlmProvider = {
       if (timeoutCtl?.signal.aborted) {
         throw new LlmError(`Le endpoint LLM a mis trop de temps (timeout ${timeoutMs} ms).`, "TIMEOUT", true);
       }
-      // Erreur réseau (DNS, connexion refusée…) → retryable.
-      throw new LlmError(`Endpoint LLM injoignable (${e instanceof Error ? e.message : e})`, undefined, true);
+      // Erreur réseau AVANT envoi (DNS, connexion refusée…) → retryable, rien facturé.
+      throw new LlmError(`Endpoint LLM injoignable (${e instanceof Error ? e.message : e})`, "NETWORK", true);
     }
     clearTimeout(timer);
 
     if (!res.ok) {
       const detail = (await res.text().catch(() => "")).slice(0, 500);
-      const code = res.status === 401 || res.status === 403 ? "AUTH" : res.status === 429 ? "RATE_LIMIT" : undefined;
+      // UPSTREAM : le endpoint a refusé avant de traiter (4xx/5xx) — rien facturé.
+      const code = res.status === 401 || res.status === 403 ? "AUTH" : res.status === 429 ? "RATE_LIMIT" : "UPSTREAM";
       throw new LlmError(
         `Endpoint LLM : HTTP ${res.status}${detail ? ` — ${detail}` : ""}`,
         code,

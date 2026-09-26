@@ -32,7 +32,7 @@ function toLlmError(e: unknown): LlmError {
   if (status === 401 || status === 403) return new LlmError(msg, "AUTH");
   if (status === 429) return new LlmError(msg, "RATE_LIMIT", true);
   if (status === 529) return new LlmError(msg, "OVERLOADED", true);
-  if (retryableStatus(status)) return new LlmError(msg, undefined, true);
+  if (retryableStatus(status)) return new LlmError(msg, "UPSTREAM", true); // 5xx : refus avant traitement
   if (/timeout|timed out/i.test(msg)) return new LlmError(msg, "TIMEOUT", true);
   return new LlmError(msg);
 }
