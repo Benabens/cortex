@@ -95,6 +95,14 @@ test("les primitives dangereuses sont rejetées, une par une", async () => {
     String.raw`\pgfimage[width=2cm]{fig.png}`,
     String.raw`\pgfdeclareimage[width=2cm]{x}{/etc/passwd}`,
     String.raw`\IfFileExists{/etc/passwd}{oui}{non}`,
+    // Revue : primitives pdfTeX reprises par XeTeX — lecture (hexadécimale) et oracles sur un fichier arbitraire.
+    String.raw`\filedump length 40 {/app/cortex/.env}`,
+    String.raw`\filedump offset 0 length 8 {../outside/secret.txt}`,
+    String.raw`\filesize{/etc/passwd}`,
+    String.raw`\filemoddate{/etc/passwd}`,
+    String.raw`\mdfivesum file {/etc/passwd}`,
+    String.raw`\pdffilesize{/etc/passwd}`,
+    String.raw`\shellescape`,
   ];
   for (const c of cases) {
     const body = `\\begin{document}\nTexte ${c} texte\n\\end{document}`;

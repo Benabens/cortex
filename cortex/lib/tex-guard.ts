@@ -35,6 +35,9 @@ const BANNED = [
   "inputfrom", "subinputfrom", "subfile", "externaldocument", "bibliography", "addbibresource",
   "graphicspath", "DTLloaddb", "csvreader", "pdffiledump", "pdfobj", "pdfximage", "pdfmdfivesum",
   "directlua", "latelua", "ShellEscape", "DelayedShellEscape", "special", "jobname", "input@path",
+  // primitives pdfTeX reprises par XeTeX (vérifié sous tectonic 0.16.9 --untrusted :
+  // \filedump rend n'importe quel fichier en hexadécimal dans le PDF) et oracles.
+  "filedump", "filesize", "filemoddate", "mdfivesum", "pdffilesize", "pdffilemoddate", "shellescape", "pdfshellescape",
   // fabrication de séquences de contrôle / changement de régime. (\def, \let,
   // \newcommand, \expandafter, \uppercase/\lowercase restent permis : sans
   // \csname ni \catcode ils ne peuvent pas forger un nom interdit — \lowercase

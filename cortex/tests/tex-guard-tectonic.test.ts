@@ -49,7 +49,10 @@ async function compileRaw(body: string, preamble = ""): Promise<Compiled> {
   const logPath = path.join(dir, `${name}.log`);
   const log = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8") : "";
   const all = `${r.stdout ?? ""}${r.stderr ?? ""}${log}`;
-  return { status: r.status, leaked: all.includes(TOKEN) || /witness\.png/.test(all), pdf: fs.existsSync(path.join(dir, `${name}.pdf`)), log };
+  // \filedump rend le fichier en HEXADÉCIMAL : on cherche aussi le jeton encodé.
+  const hex = Buffer.from(TOKEN).toString("hex").toUpperCase();
+  const leaked = all.includes(TOKEN) || all.toUpperCase().includes(hex) || /witness\.png/.test(all);
+  return { status: r.status, leaked, pdf: fs.existsSync(path.join(dir, `${name}.pdf`)), log };
 }
 
 /** Le pipeline de production : garde, PUIS compilation. */
@@ -75,6 +78,9 @@ const VECTORS: Array<{ label: string; body: string; preamble?: string }> = [
   { label: "\\includegraphics\\p", body: `\\def\\p{{${abs("witness.png")}}}\\includegraphics\\p`, preamble: "\\usepackage{graphicx}" },
   { label: "\\pgfimage", body: `\\pgfimage{${abs("witness.png")}}`, preamble: "\\usepackage{pgf}" },
   { label: "\\XeTeXpicfile", body: `\\XeTeXpicfile "${abs("witness.png")}"` },
+  // \filedump exige une longueur ≤ taille du fichier (sinon « read failed », rien de lu).
+  { label: "\\filedump (hexadécimal)", body: `\\message{^^J\\filedump length ${TOKEN.length + 1} {${abs("secret.txt")}}^^J}` },
+  { label: "\\filedump relatif", body: `\\message{^^J\\filedump length ${TOKEN.length + 1} {${rel("secret.txt")}}^^J}` },
 ];
 
 test("le témoin fonctionne : un \\input LÉGITIME dans le dossier fait apparaître le jeton", { skip: !HAS_TECTONIC && "tectonic absent" }, async () => {
