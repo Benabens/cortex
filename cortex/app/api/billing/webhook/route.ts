@@ -27,8 +27,9 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (!sig) return NextResponse.json({ error: "Signature absente." }, { status: 400 });
 
   let event: Stripe.Event;
+  const stripe = new Stripe(key);
   try {
-    event = new Stripe(key).webhooks.constructEvent(payload, sig, secret);
+    event = stripe.webhooks.constructEvent(payload, sig, secret);
   } catch {
     return NextResponse.json({ error: "Signature invalide." }, { status: 400 });
   }
@@ -37,7 +38,18 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   }
 
   try {
-    const res = await handleStripeEvent(event);
+    const res = await handleStripeEvent(event, {
+      // Achat absent de stripe_purchases (antérieur à l'enregistrement) : Stripe sait quelle session porte ce paiement.
+      lookup: {
+        async sessionByPaymentIntent(pi) {
+          const r = await stripe.checkout.sessions.list({ payment_intent: pi, limit: 1 });
+          const s = r.data[0];
+          if (!s) return null;
+          const credits = Number(s.metadata?.credits ?? 0);
+          return { id: s.id, userId: s.metadata?.cortexUserId ?? null, credits: credits > 0 ? credits : null };
+        },
+      },
+    });
     // 200 = accusé (traité, doublon, ou échec PERMANENT type métadonnées
     // manquantes). Les échecs RETRYABLES lèvent → 500 → Stripe réessaie.
     return NextResponse.json(res, { status: 200 });

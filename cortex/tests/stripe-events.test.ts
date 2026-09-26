@@ -173,3 +173,86 @@ test("remboursement d'une facture déjà en partie consommée : le reste est rep
   await handleStripeEvent(ev("evt_ref_sp2", "charge.refunded", { id: "ch_sp", object: "charge", payment_intent: "pi_in_sp", amount: 1490, amount_refunded: 1490 }));
   assert.equal(await credits.getBalance("spent"), -15);
 });
+
+// ── Lot 2b-3/4/6 : achats inconnus, atomicité, ordre des événements ──────────
+
+test("2b-6 : session gratuite (no_payment_required / montant 0) → AUCUN crédit", async () => {
+  const free = ev("evt_free_1", "checkout.session.completed", { id: "cs_free_1", mode: "payment", payment_status: "no_payment_required", amount_total: 0, payment_intent: null, metadata: { cortexUserId: "free", plan: "credits_10", credits: "10" } });
+  const r = await handleStripeEvent(free);
+  assert.equal(r.credited, false);
+  assert.equal(await credits.getBalance("free"), 0);
+  const zero = ev("evt_free_2", "checkout.session.completed", { id: "cs_free_2", mode: "payment", payment_status: "paid", amount_total: 0, payment_intent: "pi_free_2", metadata: { cortexUserId: "free", plan: "credits_10", credits: "10" } });
+  assert.equal((await handleStripeEvent(zero)).credited, false);
+  assert.equal(await credits.getBalance("free"), 0);
+});
+
+test("2b-6 : remboursement reçu AVANT l'achat → reprise mémorisée puis appliquée quand l'achat arrive (solde net 0)", async () => {
+  const { authGet } = await import("../db/auth-store");
+  const early = await handleStripeEvent(ev("evt_early_refund", "charge.refunded", { payment_intent: "pi_cs_early", amount: 900, amount_refunded: 900 }));
+  assert.equal(early.ok, true);
+  assert.equal(early.action, "reversal-orphaned");
+  assert.ok(await authGet(`SELECT payment_intent FROM stripe_orphan_reversals WHERE payment_intent = ?`, "pi_cs_early"), "reprise mémorisée");
+  const r = await handleStripeEvent(checkoutPack("evt_late_purchase", "erin", "cs_early", "pi_cs_early"));
+  assert.equal(r.credited, true);
+  assert.equal(r.reversed, true);
+  assert.equal(await credits.getBalance("erin"), 0, "crédité puis repris : net 0");
+  assert.equal(await authGet(`SELECT payment_intent FROM stripe_orphan_reversals WHERE payment_intent = ?`, "pi_cs_early"), undefined);
+  // Le même remboursement rejoué ne reprend pas deux fois.
+  assert.equal((await handleStripeEvent(ev("evt_early_refund_bis", "charge.refunded", { payment_intent: "pi_cs_early", amount: 900, amount_refunded: 900 }))).reversed, false);
+  assert.equal(await credits.getBalance("erin"), 0);
+});
+
+test("2b-3 : achat absent de stripe_purchases → retrouvé par l'API Stripe (session ↔ payment_intent), repris et enregistré", async () => {
+  const { authGet } = await import("../db/auth-store");
+  await credits.addTransaction("frank", 1000, "achat crédité par l'ancien code", "evt_old_style_frank");
+  const asked: string[] = [];
+  const lookup = { sessionByPaymentIntent: async (pi: string) => { asked.push(pi); return pi === "pi_frank_old" ? { id: "cs_frank_old", userId: "frank", credits: 10 } : null; } };
+  const r = await handleStripeEvent(ev("evt_refund_frank", "charge.refunded", { payment_intent: "pi_frank_old", amount: 900, amount_refunded: 900 }), { lookup });
+  assert.deepEqual(asked, ["pi_frank_old"]);
+  assert.equal(r.action, "pack-reversed");
+  assert.equal(await credits.getBalance("frank"), 0);
+  assert.ok(await authGet(`SELECT session_id FROM stripe_purchases WHERE payment_intent = ?`, "pi_frank_old"), "achat désormais connu");
+});
+
+test("2b-3 : sinon, métadonnées de la charge (payment_intent_data) + montant → crédits repris au prix du pack", async () => {
+  await credits.addTransaction("gina", 1000, "achat crédité par l'ancien code", "evt_old_style_gina");
+  const r = await handleStripeEvent(ev("evt_refund_gina", "charge.refunded", { payment_intent: "pi_gina", amount: 900, amount_refunded: 450, metadata: { cortexUserId: "gina", plan: "credits_10", credits: "10" } }));
+  assert.equal(r.action, "pack-reversed-by-amount");
+  assert.equal(await credits.getBalance("gina"), 5, "450 centimes remboursés = 5 crédits (9 € les 10)");
+});
+
+test("2b-3 : client Stripe connu (abonné) sans achat retrouvé → montant converti en crédits", async () => {
+  await handleStripeEvent(checkoutSub("evt_sub_h", "hugo", "cus_hugo", "sub_hugo"));
+  await credits.addTransaction("hugo", 1000, "achat crédité par l'ancien code", "evt_old_style_hugo");
+  const r = await handleStripeEvent(ev("evt_refund_hugo", "charge.refunded", { payment_intent: "pi_hugo_pack", customer: "cus_hugo", amount: 900, amount_refunded: 900 }));
+  assert.equal(r.action, "pack-reversed-by-amount");
+  assert.equal(await credits.getBalance("hugo"), 0);
+});
+
+test("2b-3 : rien d'exploitable → jamais silencieux : mémorisé, signalé en erreur, résultat explicite", async () => {
+  const { authGet } = await import("../db/auth-store");
+  const errors: string[] = [];
+  const orig = console.error;
+  console.error = (...a: unknown[]) => { errors.push(a.map(String).join(" ")); };
+  try {
+    const r = await handleStripeEvent(ev("evt_refund_ghost", "charge.refunded", { payment_intent: "pi_ghost", amount: 900, amount_refunded: 900 }));
+    assert.equal(r.action, "reversal-orphaned");
+    assert.match(r.error ?? "", /inconnu/);
+    assert.ok(errors.some((l) => /reversal_unresolved/.test(l) && /pi_ghost/.test(l)), `journal d'erreur attendu, reçu : ${errors.join(" | ")}`);
+  } finally { console.error = orig; }
+  assert.ok(await authGet(`SELECT payment_intent FROM stripe_orphan_reversals WHERE payment_intent = ?`, "pi_ghost"));
+});
+
+test("2b-4 : l'enregistrement de l'achat échoue → rien n'est crédité, l'événement lève (Stripe rejoue), puis passe", async () => {
+  const { authRun } = await import("../db/auth-store");
+  await authRun(`ALTER TABLE stripe_purchases RENAME TO stripe_purchases_off`);
+  try {
+    await assert.rejects(handleStripeEvent(checkoutPack("evt_atomic_1", "ivan", "cs_ivan", "pi_ivan")));
+  } finally {
+    await authRun(`ALTER TABLE stripe_purchases_off RENAME TO stripe_purchases`);
+  }
+  assert.equal(await credits.getBalance("ivan"), 0, "crédit et enregistrement vont ensemble ou pas du tout");
+  const r = await handleStripeEvent(checkoutPack("evt_atomic_1", "ivan", "cs_ivan", "pi_ivan"));
+  assert.equal(r.credited, true);
+  assert.equal(await credits.getBalance("ivan"), 10);
+});
