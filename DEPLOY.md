@@ -108,10 +108,27 @@ STRIPE_WEBHOOK_SECRET=⟨whsec_…⟩
 # Prix référencés par lookup_key dans Stripe (étape 7) — rien d'autre à poser.
 SUBSCRIPTION_MONTHLY_CREDITS=20
 
+# — pages légales (OBLIGATOIRES pour vendre : sans les 4, l'achat est désactivé) —
+LEGAL_TERMS_URL=https://⟨landing⟩/cgv
+LEGAL_PRIVACY_URL=https://⟨landing⟩/confidentialite
+LEGAL_REFUND_URL=https://⟨landing⟩/remboursement
+LEGAL_NOTICE_URL=https://⟨landing⟩/mentions-legales
+# Version des CGV tracée à l'acceptation (change-la à chaque révision des CGV).
+LEGAL_TERMS_VERSION=2026-09
+
+# — stockage : quota par compte (Mo) sur le volume, + refus sous 10 % d'espace libre —
+STORAGE_QUOTA_MB=200
+
 # — observabilité —
 METRICS_TOKEN=⟨openssl rand -hex 16⟩
 LOG_LEVEL=info
 ```
+
+> Variables **implicites** : Railway pose `RAILWAY_ENVIRONMENT`/`RAILWAY_PROJECT_ID`,
+> ce qui active la garde « hébergé ⇒ `AUTH_ENABLED=1` obligatoire » au boot
+> (`CORTEX_HOSTED=1` force la même garde ailleurs). `PG_AUTH_POOL_MAX` (défaut 4)
+> = connexions dédiées aux réservations de crédits ; monte-le si tu passes à
+> plusieurs replicas ou si `MAX_ACTIVE_JOBS` grandit.
 
 Le domaine : Settings → **Networking** → **Generate Domain** (type
 `cortex-app-production.up.railway.app`) → reporte-le dans `AUTH_URL`.
@@ -300,18 +317,17 @@ Postgres utilise `pg_restore --clean --if-exists`.
 
 ### Où et à quelle fréquence
 
-- **Railway Postgres** : le plus simple est d'activer les **snapshots
-  automatiques** du service Postgres dans Railway (quotidiens). `npm run backup`
-  reste utile pour un export **hors Railway** (à télécharger avant une
-  migration risquée). Pour l'exécuter contre la base managée :
-  `DATABASE_URL=<url Railway> BACKUP_DIR=~/cortex-backups npm run backup`
-  depuis une machine avec `pg_dump` (`brew install libpq`).
-- **Volume `/data`** : Railway ne snapshotte pas les volumes → lancer
-  `npm run backup` (ou une tâche planifiée) et **stocker l'archive ailleurs**
-  (S3, disque local). Fréquence conseillée : **quotidienne** tant qu'il y a des
-  paiements, avant chaque migration de schéma, et avant tout `restore --force`.
-- **Tester une restauration** de temps en temps sur une base jetable — une
-  sauvegarde jamais restaurée n'est pas une sauvegarde.
+- **Automatique** : la sauvegarde quotidienne ci-dessus, dès qu'il y a des
+  paiements. Active en plus les **snapshots** du service Postgres dans Railway
+  (bretelles).
+- **Manuel** : avant chaque migration de schéma et avant tout `restore --force`
+  (`npm run backup -- --push --label=avant-migration`).
+- **Tester une restauration** de temps en temps sur une base jetable
+  (`npm run backup:verify -- --latest` chaque semaine ne remplace pas un vrai
+  `restore`) — une sauvegarde jamais restaurée n'est pas une sauvegarde.
+- `tests/backup-s3.test.ts` prouve envoi/rétention/planification sur un faux
+  magasin S3 et, avec `CORTEX_TEST_PG_URL` + `pg_dump`, le cycle réel
+  `pg_dump` → `pg_restore -l`.
 
 ## Limites connues
 
