@@ -84,3 +84,18 @@ test("weaknesses/mine : texte trop long → 413", async () => {
   const r = await POST(json("/api/weaknesses/mine", { text: "m".repeat(FIELD_LIMITS.text + 1) }));
   assert.equal(r.status, 413);
 });
+
+test("weaknesses (création) : sujet ou note trop longs → 413 — sinon process les enverrait au modèle à prix fixe", async () => {
+  const { POST } = await import("../app/api/weaknesses/route");
+  const { FIELD_LIMITS } = await import("../lib/field-limits");
+  const form = new FormData();
+  form.set("topic", "sujet");
+  form.set("description", "d".repeat(FIELD_LIMITS.description + 1));
+  const encoded = new Response(form);
+  const buf = Buffer.from(await encoded.arrayBuffer());
+  const r = await POST(new NextRequest("http://cortex.test/api/weaknesses?course=cs-202", {
+    method: "POST", body: buf, headers: { "content-type": encoded.headers.get("content-type")!, "content-length": String(buf.length) },
+  }));
+  assert.equal(r.status, 413);
+  assert.ok(FIELD_LIMITS.topic <= 500 && FIELD_LIMITS.description <= 8000);
+});

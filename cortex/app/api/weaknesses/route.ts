@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { checkStorage, declaredBytes } from "@/lib/storage-quota";
+import { fieldTooLong } from "@/lib/field-limits";
 import { currentUser } from "@/db/context";
 
 export const runtime = "nodejs";
@@ -36,6 +37,9 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   let topic = String(form.get("topic") ?? "").trim();
   const description = String(form.get("description") ?? "").trim();
   const severity = Number(form.get("severity") ?? 2);
+  // Ces champs repartent tels quels vers le modèle (weaknesses/process, prix fixe) : plafonnés ici.
+  const tooLong = fieldTooLong("topic", topic) ?? fieldTooLong("description", description);
+  if (tooLong) return tooLong;
 
   let screenshotPath: string | null = null;
   const file = form.get("screenshot");
