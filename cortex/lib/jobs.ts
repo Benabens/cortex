@@ -67,6 +67,9 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
   // remboursement. `ingest` ne coûte rien. No-op sans garde-fou actif (dev €0).
   const user = currentUser();
   const course = currentCourse();
+  // Cours en cours de suppression : rien ne démarre (le worker recréerait un schéma vide).
+  const { isCourseDeleting } = await import("@/lib/course-deletion");
+  if (await isCourseDeleting(user, course)) throw new ReservationRefused(409, "Ce cours est en cours de suppression : aucune génération possible.");
   let ref: string | null = null;
   if (type !== "ingest") {
     const { reserveGeneration } = await import("@/lib/billing/reserve");
@@ -131,10 +134,19 @@ export async function claimJobStart(jobId: number): Promise<boolean> {
  * Renvoie true si le worker peut continuer.
  */
 export async function assertJobCourseOwned(jobId: number, course: string): Promise<boolean> {
-  const { ensureCoursesLoaded, ownsCourse } = await import("@/lib/courses");
+  const { ensureCoursesLoaded, ownsCourse, courseExists } = await import("@/lib/courses");
+  const { isCourseDeleting } = await import("@/lib/course-deletion");
   await ensureCoursesLoaded();
-  if (ownsCourse(currentUser(), course)) return true;
+  const user = currentUser();
+  if (ownsCourse(user, course) && !(await isCourseDeleting(user, course))) return true;
   const msg = `Cours « ${course} » inaccessible pour ce compte (supprimé ou transféré) — génération annulée.`;
+  // Cours SUPPRIMÉ (ou en suppression) : n'écrire nulle part — toute requête
+  // sur le tenant recréerait un schéma vide. Transféré à un autre compte : on
+  // marque le job en erreur dans le tenant qui existe encore.
+  if (!courseExists(course) || (await isCourseDeleting(user, course))) {
+    console.error(`[jobs] ${msg}`);
+    return false;
+  }
   try {
     await setJob(jobId, { status: "error", error: msg });
     await logJob(jobId, msg);
