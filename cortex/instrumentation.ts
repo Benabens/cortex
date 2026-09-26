@@ -15,8 +15,9 @@ export async function register() {
   // Docker) chez l'hébergeur ou avec facturation, sans AUTH_ENABLED=1, ne sert
   // personne — chaque visiteur serait « owner ». (`next start` force
   // NODE_ENV=production même en local : on ne s'appuie pas sur lui ici.)
-  const { assertAuthRequiredHosted } = await import("@/lib/boot-guards");
+  const { assertAuthRequiredHosted, assertLlmProviderAllowed } = await import("@/lib/boot-guards");
   assertAuthRequiredHosted();
+  assertLlmProviderAllowed();
   const g = globalThis as { __cortexJobsPump?: ReturnType<typeof setInterval> };
   try {
     const { runWithCourse } = await import("@/db/client");

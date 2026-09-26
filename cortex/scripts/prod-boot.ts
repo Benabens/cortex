@@ -25,7 +25,7 @@ import { runWithUser } from "../db/context";
 import { authAll, authRun } from "../db/auth-store";
 import { dbDriverName, nowStr, q } from "../db/q";
 import { TABLES } from "../db/tables";
-import { assertAuthRequired } from "../lib/boot-guards";
+import { assertAuthRequired, assertLlmProviderAllowed } from "../lib/boot-guards";
 import { dataRoot, ensureCoursesLoaded, normalizeCourse } from "../lib/courses";
 
 const log = (msg: string) => console.log(`[prod-boot] ${msg}`);
@@ -191,6 +191,7 @@ async function main(): Promise<void> {
   // Une mise en ligne (NODE_ENV=production) ou une instance qui encaisse
   // (BILLING_ENABLED=1) sans AUTH_ENABLED=1 servirait tout le monde comme « owner ».
   assertAuthRequired();
+  assertLlmProviderAllowed();
   assertIsolationSane();
   initVolume();
   await migrateCourses();
