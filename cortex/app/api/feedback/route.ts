@@ -1,6 +1,7 @@
 import { calibrationSummary, recordFeedback, resolveExamMeta } from "@/lib/calibration";
 import { useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
+import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,10 +14,10 @@ export async function GET(req: NextRequest) {
 }
 
 /** POST {examId?, topic?, archetype?, verdict, note?, score?} : enregistre un retour. */
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const denied = useCourseOr404(req);
   if (denied) return denied;
-  const b = await req.json().catch(() => ({}));
+  const b = await readJson(req, ({}));
   if (!b?.verdict) return NextResponse.json({ error: "verdict requis (too_easy|good|not_prof_style|wrong)." }, { status: 400 });
   // archétype/topic non fournis → les résoudre depuis l'exo généré (tag architect:<id>).
   let archetype = b.archetype ?? null;
@@ -36,3 +37,4 @@ export async function POST(req: NextRequest) {
   });
   return NextResponse.json({ ok: true, id, archetype, topic });
 }
+)

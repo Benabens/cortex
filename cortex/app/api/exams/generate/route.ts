@@ -3,6 +3,7 @@ import { requireCourse } from "@/lib/req";
 import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
 import { NextRequest, NextResponse } from "next/server";
+import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,7 +13,7 @@ export const dynamic = "force-dynamic";
  * Le worker détaché (scripts/run-job.ts) fait le travail (lots + vérif + compile) et survit
  * à la requête / au reload. L'UI poll /api/jobs/:id. (dry-run = stub local synchrone.)
  */
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const { course, denied } = requireCourse(req);
   if (denied) return denied;
   const dry = req.nextUrl.searchParams.get("dry") === "1";
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
 
   // composeur (CS-202) : count = nombre d'exercices choisi (optionnel ; défaut = blueprint).
   // Focus = « Mets l'accent sur… » (générique, supporté PARTOUT) — 1-2 exos ciblés.
-  const body = await req.json().catch(() => ({} as any));
+  const body = await readJson(req, ({} as any));
   const count = Number(body?.count) > 0 ? Math.min(12, Math.floor(Number(body.count))) : undefined;
   const focus = typeof body?.focus === "string" && body.focus.trim() ? body.focus.trim().slice(0, 400) : undefined;
   const target = count || focus ? JSON.stringify({ count, focus }) : undefined;
@@ -51,4 +52,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Impossible de lancer le worker : ${e?.message ?? e}` }, { status: 500 });
   }
   return NextResponse.json({ ok: true, jobId });
-}
+})

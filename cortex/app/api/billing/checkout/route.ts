@@ -3,6 +3,7 @@ import { currentUser } from "@/db/context";
 import { useUser } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
+import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic";
  * Le webhook (app/api/billing/webhook) créditera le solde APRÈS paiement
  * confirmé (idempotent par id d'événement) — jamais ici.
  */
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   useUser(req);
   if (!billingEnabled()) {
     return NextResponse.json({ error: "Facturation désactivée (BILLING_ENABLED)." }, { status: 501 });
@@ -21,7 +22,7 @@ export async function POST(req: NextRequest) {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) return NextResponse.json({ error: "STRIPE_SECRET_KEY manquante." }, { status: 501 });
 
-  const { pack } = (await req.json().catch(() => ({}))) as { pack?: string };
+  const { pack } = (await readJson(req, ({}))) as { pack?: string };
   const p = String(pack ?? "").toLowerCase();
   const price = process.env[`STRIPE_PRICE_${p.toUpperCase()}`];
   if (!price) return NextResponse.json({ error: `Pack inconnu ou non configuré : « ${p} ».` }, { status: 400 });
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
   const stripe = new Stripe(key);
   const session = await stripe.checkout.sessions.create(checkoutParams({ pack: p, price, credits, userId: currentUser() }));
   return NextResponse.json({ url: session.url });
-}
+})
 
 /** Origine canonique du site (AUTH_URL sans barre finale), ou null. */
 function siteOrigin(): string | null {

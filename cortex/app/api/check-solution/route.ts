@@ -1,7 +1,7 @@
 import { checkSolution } from "@/lib/check-solution";
 import { LlmError } from "@/lib/llm";
 import { useCourseOr404 } from "@/lib/req";
-import { rejectOversizedBody, UPLOAD_LIMITS } from "@/lib/upload-limit";
+import { UPLOAD_LIMITS, readFormData, readJson, withBodyLimit } from "@/lib/upload-limit";
 import { logLoopRoute } from "@/lib/req-log";
 import { uploadsDir } from "@/lib/paths";
 import crypto from "node:crypto";
@@ -15,23 +15,18 @@ export const maxDuration = 220;
 
 const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
 
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const t0 = Date.now();
   try {
     return await handlePOST(req);
   } finally {
     logLoopRoute(req, "check-solution", t0);
   }
-}
+})
 
 async function handlePOST(req: NextRequest) {
   const denied = useCourseOr404(req);
   if (denied) return denied;
-  // Borne de taille AVANT le quota : un envoi trop gros ne doit pas débiter l'assistance.
-  if ((req.headers.get("content-type") ?? "").includes("multipart/form-data")) {
-    const tooBig = rejectOversizedBody(req, UPLOAD_LIMITS.image);
-    if (tooBig) return tooBig;
-  }
   // Appel LLM INLINE → quota d'assistance par user/jour
   // (DAILY_ASSIST_QUOTA, no-op sans env), compté à la tentative.
   {
@@ -47,7 +42,7 @@ async function handlePOST(req: NextRequest) {
   let imageRel: string | null = null;
 
   if (ct.includes("multipart/form-data")) {
-    const form = await req.formData();
+    const form = await readFormData(req, UPLOAD_LIMITS.image);
     statement = String(form.get("statement") ?? "").trim();
     answer = String(form.get("answer") ?? "").trim();
     const file = form.get("image");
@@ -61,7 +56,7 @@ async function handlePOST(req: NextRequest) {
       imageRel = path.relative(process.cwd(), path.join(uploadsDir(), name));
     }
   } else {
-    const body = await req.json().catch(() => ({}));
+    const body = await readJson(req, ({}));
     statement = String(body.statement ?? "").trim();
     answer = String(body.answer ?? "").trim();
   }

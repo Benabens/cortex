@@ -1,6 +1,6 @@
 import { createWeakness, deleteWeakness, listWeaknesses, weaknessesByTheme } from "@/lib/weaknesses";
 import { useCourseOr404 } from "@/lib/req";
-import { rejectOversizedBody, UPLOAD_LIMITS } from "@/lib/upload-limit";
+import { UPLOAD_LIMITS, readFormData, withBodyLimit } from "@/lib/upload-limit";
 import { uploadsDir } from "@/lib/paths";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -24,12 +24,10 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ weaknesses: await listWeaknesses(), byTheme: await weaknessesByTheme() });
 }
 
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const denied = useCourseOr404(req);
   if (denied) return denied;
-  const tooBig = rejectOversizedBody(req, UPLOAD_LIMITS.image);
-  if (tooBig) return tooBig;
-  const form = await req.formData();
+  const form = await readFormData(req, UPLOAD_LIMITS.image);
   let topic = String(form.get("topic") ?? "").trim();
   const description = String(form.get("description") ?? "").trim();
   const severity = Number(form.get("severity") ?? 2);
@@ -55,7 +53,7 @@ export async function POST(req: NextRequest) {
 
   const id = await createWeakness({ topic, description, severity, screenshotPath });
   return NextResponse.json({ id });
-}
+})
 
 export async function DELETE(req: NextRequest) {
   const denied = useCourseOr404(req);

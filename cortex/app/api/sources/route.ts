@@ -7,7 +7,7 @@ import {
   toggleReference,
 } from "@/lib/sources";
 import { useCourseOr404 } from "@/lib/req";
-import { rejectOversizedBody, UPLOAD_LIMITS } from "@/lib/upload-limit";
+import { UPLOAD_LIMITS, readFormData, readJson, withBodyLimit } from "@/lib/upload-limit";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -24,15 +24,13 @@ export async function GET(req: NextRequest) {
 }
 
 /** Upload d'un examen de référence (multipart) OU bascule d'une référence (JSON). */
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const denied = useCourseOr404(req);
   if (denied) return denied;
   const ct = req.headers.get("content-type") ?? "";
 
   if (ct.includes("multipart/form-data")) {
-    const tooBig = rejectOversizedBody(req, UPLOAD_LIMITS.source);
-    if (tooBig) return tooBig;
-    const form = await req.formData();
+    const form = await readFormData(req, UPLOAD_LIMITS.source);
     const file = form.get("file");
     if (!(file instanceof File) || file.size === 0) {
       return NextResponse.json({ error: "Aucun fichier." }, { status: 400 });
@@ -53,12 +51,12 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const body = await req.json().catch(() => ({}));
+  const body = await readJson(req, ({}));
   const { path: srcPath, reference } = body as { path?: string; reference?: boolean };
   if (!srcPath) return NextResponse.json({ error: "path manquant" }, { status: 400 });
   await toggleReference(srcPath, !!reference);
   return NextResponse.json({ ok: true });
-}
+})
 
 export async function DELETE(req: NextRequest) {
   const denied = useCourseOr404(req);

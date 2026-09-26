@@ -4,6 +4,7 @@ import { nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
+import { readText, withBodyLimit } from "@/lib/upload-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,12 +66,12 @@ async function reversePurchase(paymentIntent: string | null, why: string): Promi
   return NextResponse.json({ ok: true, reversed });
 }
 
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   const key = process.env.STRIPE_SECRET_KEY;
   if (!secret || !key) return NextResponse.json({ error: "Stripe non configuré." }, { status: 501 });
 
-  const payload = await req.text(); // corps BRUT — indispensable à la vérification
+  const payload = await readText(req); // corps BRUT — indispensable à la vérification
   const sig = req.headers.get("stripe-signature");
   if (!sig) return NextResponse.json({ error: "Signature absente." }, { status: 400 });
 
@@ -108,3 +109,4 @@ export async function POST(req: NextRequest) {
   // Autres événements : accusé de réception sans action.
   return NextResponse.json({ ok: true, ignored: event.type });
 }
+)

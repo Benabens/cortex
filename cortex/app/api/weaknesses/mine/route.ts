@@ -4,6 +4,7 @@ import { useCourseOr404 } from "@/lib/req";
 import { logLoopRoute } from "@/lib/req-log";
 import { createWeakness, listWeaknesses } from "@/lib/weaknesses";
 import { NextRequest, NextResponse } from "next/server";
+import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,14 +15,14 @@ export const maxDuration = 240;
  * Analyse la conversation (via le fournisseur LLM configuré), crée des faiblesses structurées (source='conversation',
  * thème, gravité, extrait), auto-liées au corpus du cours. Renvoie les faiblesses créées + la liste.
  */
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const t0 = Date.now();
   try {
     return await handlePOST(req);
   } finally {
     logLoopRoute(req, "weakness-mine", t0);
   }
-}
+})
 
 async function handlePOST(req: NextRequest) {
   const denied = useCourseOr404(req);
@@ -35,7 +36,7 @@ async function handlePOST(req: NextRequest) {
     const gate = await assistGate("weakness-mine");
     if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
   }
-  const { text } = await req.json().catch(() => ({ text: "" }));
+  const { text } = await readJson(req, ({ text: "" }));
   const t = String(text ?? "").trim();
   if (t.length < 40) return NextResponse.json({ error: "Colle une discussion (au moins quelques échanges)." }, { status: 400 });
 

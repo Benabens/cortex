@@ -5,6 +5,7 @@ import { logLoopRoute } from "@/lib/req-log";
 import { q } from "@/db/q";
 import { dueConcepts } from "@/lib/schedule";
 import { NextRequest, NextResponse } from "next/server";
+import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +20,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ due: await dueConcepts(15), weaknesses });
 }
 
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const t0 = Date.now();
   const denied = useCourseOr404(req);
   if (denied) return denied;
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
       const gate = await assistGate("drill");
       if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
     }
-    const { concept } = await req.json().catch(() => ({ concept: "" }));
+    const { concept } = await readJson(req, ({ concept: "" }));
     const c = String(concept ?? "").trim();
     if (!c) return NextResponse.json({ error: "concept manquant" }, { status: 400 });
     try {
@@ -47,4 +48,4 @@ export async function POST(req: NextRequest) {
   } finally {
     logLoopRoute(req, "drill", t0);
   }
-}
+})
