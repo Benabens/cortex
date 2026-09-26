@@ -1,3 +1,4 @@
+import { authBodyLimit } from "@/lib/auth-body-limit";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -138,6 +139,9 @@ export default function proxy(req: NextRequest) {
   // d'infrastructure ci-dessus.
   const { pathname } = req.nextUrl;
   if (legacyPathBlocked(pathname)) return new NextResponse("Not found", { status: 404 });
+  // /api/auth/* est public et lu par NextAuth sans borne : on refuse ici un corps trop grand.
+  const authBody = authBodyLimit({ method: req.method, pathname, headers: req.headers });
+  if (authBody) return NextResponse.json({ error: authBody.error }, { status: authBody.status });
   if (!RL_EXEMPT.some((p) => pathname.startsWith(p)) && rateLimited(req)) {
     return NextResponse.json({ error: "Trop de requêtes — réessaie dans une minute." }, { status: 429 });
   }
