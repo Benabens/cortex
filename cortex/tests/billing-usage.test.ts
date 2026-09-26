@@ -52,15 +52,15 @@ test("mapping économe : opus → Sonnet par défaut sur anthropic ; Opus si LLM
   assert.equal(mapModel("haiku", "anthropic"), "claude-haiku-4-5-20251001");
 });
 
-test("estimateCostUsd : tarifs par préfixe, inconnu → tarif conservateur (opus)", () => {
+test("estimateCostUsd : tarifs par préfixe, inconnu → tarif le plus cher de la grille", () => {
   // sonnet 5 : 2 $/MTok in + 10 $/MTok out (tarif public corrigé 09/2026)
   assert.ok(Math.abs(billing.estimateCostUsd("claude-sonnet-5", 1_000_000, 1_000_000) - 12) < 1e-9);
   // opus : 5 + 25
   assert.ok(Math.abs(billing.estimateCostUsd("claude-opus-4-8", 1_000_000, 1_000_000) - 30) < 1e-9);
   // haiku : 1 + 5
   assert.ok(Math.abs(billing.estimateCostUsd("claude-haiku-4-5-20251001", 1_000_000, 1_000_000) - 6) < 1e-9);
-  // inconnu → surestimation volontaire (tarif opus)
-  assert.ok(Math.abs(billing.estimateCostUsd("mystere-9000", 1_000_000, 0) - 5) < 1e-9);
+  // inconnu → surestimation volontaire : le tarif le PLUS CHER de la grille (fable/mythos : 10 $/MTok in)
+  assert.ok(Math.abs(billing.estimateCostUsd("mystere-9000", 1_000_000, 0) - 10) < 1e-9);
   // tokens absents → 0, jamais NaN
   assert.equal(billing.estimateCostUsd("claude-sonnet-5"), 0);
 });
