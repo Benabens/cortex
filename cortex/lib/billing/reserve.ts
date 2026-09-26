@@ -4,7 +4,7 @@ import { currentUser } from "@/db/context";
 import { authRun, authTx, type AuthTx } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
-import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, insufficient } from "./credits";
+import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, insufficient, subscriptionLive, type SubRow } from "./credits";
 import { intLimit } from "./env";
 import { quotaFor, quotaTrackingActive, ratePerUserPerMin, type GateIssue, type QuotaBucket } from "./guards";
 
@@ -117,16 +117,35 @@ export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
     if (billing) {
       const seen = await tx.get<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, o.ref);
       if (!seen) {
+        // DEUX POCHES, sous le verrou utilisateur : abonnement du mois (recharge
+        // paresseuse comprise) d'abord, puis crédits achetés — décidés et écrits
+        // dans la même transaction, aucune course entre les deux.
+        const sub = await tx.get<SubRow>(`SELECT * FROM subscriptions WHERE user_id = ?`, userId);
+        let subAvail = 0;
+        if (subscriptionLive(sub, t)) {
+          const month = t.slice(0, 7);
+          if (sub!.status !== "canceled" && sub!.month_anchor !== month) {
+            await tx.run(`UPDATE subscriptions SET remaining = monthly_credits, month_anchor = ?, updated_at = ? WHERE user_id = ?`, month, t, userId);
+            subAvail = Number(sub!.monthly_credits) || 0;
+          } else {
+            subAvail = Math.max(0, Number(sub!.remaining) || 0);
+          }
+        }
         const bal = await tx.get<{ total: number | null }>(
           `SELECT coalesce(sum(delta), 0) total FROM credit_transactions WHERE user_id = ?`, userId,
         );
-        const refusal = insufficient(Number(bal?.total ?? 0), cost);
+        const purchased = Number(bal?.total ?? 0);
+        const refusal = insufficient(purchased + subAvail, cost, subAvail);
         if (refusal) return { ok: false, ...refusal };
         if (cost > 0) {
+          const usedSub = Math.min(cost, subAvail);
           await tx.run(
-            `INSERT INTO credit_transactions (user_id, delta, reason, ref, created_at) VALUES (?,?,?,?,?)`,
-            userId, -cost, `génération ${o.kind}`, o.ref, t,
+            `INSERT INTO credit_transactions (user_id, delta, reason, ref, sub_amount, created_at) VALUES (?,?,?,?,?,?)`,
+            userId, -(cost - usedSub), `génération ${o.kind}`, o.ref, usedSub, t,
           );
+          if (usedSub > 0) {
+            await tx.run(`UPDATE subscriptions SET remaining = remaining - ?, updated_at = ? WHERE user_id = ?`, usedSub, t, userId);
+          }
         }
       }
     }

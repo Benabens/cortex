@@ -105,12 +105,8 @@ BILLING_ENABLED=1
 SIGNUP_FREE_CREDITS=2
 STRIPE_SECRET_KEY=⟨sk_test_…⟩
 STRIPE_WEBHOOK_SECRET=⟨whsec_…⟩
-STRIPE_PRICE_SMALL=⟨price_…⟩
-STRIPE_PRICE_MEDIUM=⟨price_…⟩
-STRIPE_PRICE_LARGE=⟨price_…⟩
-CREDITS_PACK_SMALL=1
-CREDITS_PACK_MEDIUM=5
-CREDITS_PACK_LARGE=12
+# Prix référencés par lookup_key dans Stripe (étape 7) — rien d'autre à poser.
+SUBSCRIPTION_MONTHLY_CREDITS=20
 
 # — observabilité —
 METRICS_TOKEN=⟨openssl rand -hex 16⟩
@@ -151,22 +147,28 @@ pose `AUTH_EMAIL_ENABLED=1` puis :
    à droite).
 2. **Développeurs → Clés API** → copie la **clé secrète** `sk_test_…` dans
    `STRIPE_SECRET_KEY`.
-3. **Catalogue de produits → + Ajouter un produit**, 3 fois :
-   | Produit | Prix (suggestion, cf. §Tarification) | Env |
+3. **Catalogue de produits → + Ajouter un produit**, 3 prix avec leur
+   **lookup_key** (Prix → « Clé de recherche ») — c'est la clé, pas l'id, que
+   l'app référence :
+   | Produit / prix | Suggestion | lookup_key |
    |---|---|---|
-   | Cortex — 1 crédit | 3.00 CHF, paiement unique | `STRIPE_PRICE_SMALL` |
-   | Cortex — 5 crédits | 12.00 CHF, paiement unique | `STRIPE_PRICE_MEDIUM` |
-   | Cortex — 12 crédits | 25.00 CHF, paiement unique | `STRIPE_PRICE_LARGE` |
-   Après création, ouvre chaque produit → copie l'**ID du prix** (`price_…`)
-   dans la variable correspondante.
+   | Cortex Pro — mensuel (récurrent) | 14,90 €/mois | `cortex_pro_monthly` |
+   | Cortex Pro — annuel (récurrent) | 119 €/an | `cortex_pro_yearly` |
+   | Pack de 10 crédits (paiement unique) | 9 € | `cortex_credits_10` |
+   Pro = 20 crédits par mois, non reportables (`SUBSCRIPTION_MONTHLY_CREDITS`),
+   consommés avant les crédits achetés ; le pack est permanent. Active aussi le
+   **portail client** (Paramètres → Facturation → Portail client) pour la
+   résiliation en fin de période.
 4. **Développeurs → Webhooks → Ajouter une destination** :
    - URL : `https://⟨ton-domaine⟩/api/billing/webhook`
    - Événements : **`checkout.session.completed`**,
-     **`checkout.session.async_payment_succeeded`**, **`charge.refunded`** et
-     **`charge.dispute.created`** (les deux derniers reprennent les crédits d'un
-     achat remboursé ou contesté — le solde peut passer négatif et bloque toute
-     génération ; le second des deux premiers confirme les
-     moyens de paiement différés — sans lui, un client paie sans être crédité)
+     **`checkout.session.async_payment_succeeded`** (confirme les moyens de
+     paiement différés), **`invoice.paid`** (attribue les 20 crédits du mois,
+     idempotent par facture), **`customer.subscription.updated`**,
+     **`customer.subscription.deleted`** (fin : crédits du mois à 0),
+     **`charge.refunded`** et **`charge.dispute.created`** (reprennent les
+     crédits d'un pack ou d'une facture remboursés ou contestés — ce qui a déjà
+     été consommé passe en dette : solde négatif, toute génération bloquée)
    - Copie le **secret de signature** `whsec_…` dans `STRIPE_WEBHOOK_SECRET`.
 5. Test de paiement : carte `4242 4242 4242 4242`, n'importe quelle date
    future/CVC. Le webhook crédite le solde (idempotent — un retry Stripe ne
