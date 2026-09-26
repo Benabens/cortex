@@ -71,12 +71,16 @@ export async function register() {
       }).catch(() => {});
     }, 60_000);
     g.__cortexJobsPump.unref?.();
-
-    // Sauvegarde quotidienne hors site (BACKUP_S3_*) : marqueur en base, une
-    // seule instance par jour même pendant un redéploiement chevauchant.
+  } catch (e) {
+    console.error("[instrumentation] réconciliation des jobs ignorée :", (e as Error)?.message);
+  }
+  // Sauvegarde quotidienne hors site (BACKUP_S3_*) : marqueur en base, une
+  // seule instance par jour même pendant un redéploiement chevauchant.
+  // Indépendante de la réconciliation : un échec amont ne la prive pas de démarrer.
+  try {
     const { startBackupScheduler } = await import("@/lib/backup-schedule");
     startBackupScheduler();
   } catch (e) {
-    console.error("[instrumentation] réconciliation des jobs ignorée :", (e as Error)?.message);
+    console.error("[instrumentation] planificateur de sauvegardes non démarré :", (e as Error)?.message);
   }
 }

@@ -44,8 +44,15 @@ after(async () => {
 function fakeStore(clock: { now: Date }) {
   const objects = new Map<string, { body: Buffer; at: Date }>();
   const puts: string[] = [];
+  const bodies: string[] = [];
   const store: BackupStore = {
-    async put(key, body) { objects.set(key, { body: Buffer.from(body), at: new Date(clock.now) }); puts.push(key); },
+    async put(key, body) {
+      // Un dossier de sauvegarde peut peser des Go : le magasin reçoit un fichier (chemin + taille), jamais un tampon entier.
+      bodies.push(Buffer.isBuffer(body) ? "buffer" : "file");
+      const bytes = Buffer.isBuffer(body) ? Buffer.from(body) : fs.readFileSync(body.path);
+      if (!Buffer.isBuffer(body)) assert.equal(bytes.length, body.size, "taille annoncée = taille réelle");
+      objects.set(key, { body: bytes, at: new Date(clock.now) }); puts.push(key);
+    },
     async list(prefix) {
       const out: S3Object[] = [];
       for (const [key, v] of objects) if (key.startsWith(prefix)) out.push({ key, lastModified: v.at, size: v.body.length });
@@ -54,7 +61,7 @@ function fakeStore(clock: { now: Date }) {
     async remove(keys) { for (const k of keys) objects.delete(k); },
     async get(key) { const v = objects.get(key); if (!v) throw new Error(`NoSuchKey: ${key}`); return v.body; },
   };
-  return { store, objects, puts };
+  return { store, objects, puts, bodies };
 }
 
 const ENV_OK = {
@@ -89,10 +96,11 @@ test("configuration : absente → null ; partielle → erreur listant les variab
 
 test("envoi : fichiers sous <prefix>/<dossier>/, octets identiques, manifest en dernier", async () => {
   const clock = { now: new Date("2026-09-26T03:00:00Z") };
-  const { store, objects, puts } = fakeStore(clock);
+  const { store, objects, puts, bodies } = fakeStore(clock);
   const cfg = backupS3Config(ENV_OK)!;
   const { dir } = await makeLocalBackup(clock.now);
   const res = await pushBackup(store, cfg, dir, { log: () => {} });
+  assert.ok(bodies.length > 0 && bodies.every((b) => b === "file"), "envoi en flux (chemin + taille), jamais tout le fichier en mémoire");
   assert.equal(res.folder, path.basename(dir));
   const expected = ["data.tar.gz", "manifest.json"].map((f) => `cortex/${res.folder}/${f}`).sort();
   assert.deepEqual([...objects.keys()].sort(), expected);
