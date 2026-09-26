@@ -12,7 +12,7 @@ import { q } from "../db/q";
 import { llmAvailable, llmUnavailableReason } from "../lib/llm";
 import { generateExamViaClaudeCode, generateTargetedExercise } from "../lib/exam";
 import { texAvailable } from "../lib/exam-latex";
-import { getJob, heartbeatJob, logJob, setJob } from "../lib/jobs";
+import { assertJobCourseOwned, getJob, heartbeatJob, logJob, setJob } from "../lib/jobs";
 import { setCurrentJob } from "../lib/billing/usage-context";
 import { generateLabExercise } from "../lib/labs";
 import { analyzeBlueprint } from "../lib/program";
@@ -81,6 +81,9 @@ async function main() {
   if (job.status === "canceled") process.exit(0);
   // Attribution des appels LLM de ce job (colonnes job_id/call_site de llm_usage).
   setCurrentJob(jobId, job.type);
+  // Le cours doit encore appartenir à l'utilisateur du job (CORTEX_USER) : sinon
+  // erreur sans remboursement, et rien n'est généré (cf. lib/jobs).
+  if (!(await assertJobCourseOwned(jobId, COURSE))) process.exit(1);
 
   if (job.type === "ingest") {
     try {

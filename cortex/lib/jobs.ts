@@ -96,6 +96,25 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
   return res;
 }
 
+/**
+ * DÉFENSE EN PROFONDEUR CÔTÉ WORKER : le cours reçu en argument doit encore
+ * appartenir à l'utilisateur du job (cours supprimé ou transféré entre la
+ * réservation et l'exécution). Sinon le job passe en erreur SANS remboursement
+ * (la réservation était légitime au moment du paiement) et rien n'est généré.
+ * Renvoie true si le worker peut continuer.
+ */
+export async function assertJobCourseOwned(jobId: number, course: string): Promise<boolean> {
+  const { ensureCoursesLoaded, ownsCourse } = await import("@/lib/courses");
+  await ensureCoursesLoaded();
+  if (ownsCourse(currentUser(), course)) return true;
+  const msg = `Cours « ${course} » inaccessible pour ce compte (supprimé ou transféré) — génération annulée.`;
+  try {
+    await setJob(jobId, { status: "error", error: msg });
+    await logJob(jobId, msg);
+  } catch { /* la base du cours peut avoir disparu avec lui */ }
+  return false;
+}
+
 /** Refus de réservation (solde, quota, places) — la route le rend tel quel (402/429). */
 export class ReservationRefused extends Error {
   readonly status: number;
