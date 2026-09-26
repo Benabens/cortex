@@ -100,3 +100,19 @@ test("coupure APRÈS envoi (réponse tronquée) : la ligne reste — le fourniss
   assert.equal(all.length, 3, JSON.stringify(all));
   assert.deepEqual([Number(all[2].estimated), Number(all[2].tokens_out)], [1, 48]);
 });
+
+test("les lignes portent le triplet (compte, cours, job) que lit le remboursement", async () => {
+  const { complete } = await import("../lib/llm");
+  const { setCurrentJob, clearCurrentJob } = await import("../lib/billing/usage-context");
+  const { runWithUser } = await import("../db/context");
+  const { runWithCourse } = await import("../db/client");
+  const { jobLlmCostUsd } = await import("../lib/jobs");
+  mode = "ok";
+  setCurrentJob(4242, "exam");
+  try {
+    await runWithUser("usr_triplet", () => runWithCourse("ml", () => complete({ prompt: "t", model: "opus", timeoutMs: 5_000 })));
+  } finally { clearCurrentJob(); }
+  assert.ok((await jobLlmCostUsd("usr_triplet", "ml", 4242)) > 0, "le coût du job doit être retrouvé par (compte, cours, id)");
+  assert.equal(await jobLlmCostUsd("usr_triplet", "algo", 4242), 0);
+  assert.equal(await jobLlmCostUsd("autre", "ml", 4242), 0);
+});
