@@ -61,6 +61,10 @@ Les fichiers suivent la même logique (`data/u/<user>/<cours>/…`), et le tél�
 
 En développement, sans configuration, tout tourne sur SQLite en mono-utilisateur. Un garde-fou interdit explicitement d'activer l'authentification sur SQLite.
 
+## Isolation de l'exécution : décision
+
+Le moteur n'exécute du code que dans un bac à sable noyau (Seatbelt sur macOS, espaces de noms `unshare -rn` sur Linux). Sur Railway, l'hôte refuse `unshare` : **aucune isolation n'est disponible en production**, donc toute exécution est **désactivée** — vérification de programmes (C/Python), équivalences symboliques via sympy, figures matplotlib. Le verdict de ces voies est `not_applicable`, jamais un faux « prouvé » ; les items qui exigent une figure sont écartés proprement. `/api/health` l'expose (`checks.sandbox`, `verification.mode`) et l'interface n'affiche la mention « prouvé » que pour les réponses effectivement vérifiées. Rouvrir l'exécution en production suppose un exécuteur séparé (conteneur dédié, gVisor, service type e2b) : décision reportée, assumée dans la documentation de déploiement.
+
 ## Coût et facturation
 
 Tous les appels au modèle passent par `lib/llm/index.ts` — **point d'entrée unique**, sans chemin de contournement. Il impose :

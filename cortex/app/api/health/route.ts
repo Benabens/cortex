@@ -38,6 +38,17 @@ export async function GET() {
       sandbox: sandboxAvailable(),
       latex: texAvailable(),
     },
+    // Décision d'isolation : sans bac à sable noyau (cas de Railway, où unshare est
+    // refusé), AUCUN code n'est exécuté — ni sympy, ni figures matplotlib, ni
+    // programmes candidats — et la vérification par exécution répond
+    // not_applicable (jamais un faux « prouvé »). Cf. ARCHITECTURE.md § Isolation.
+    verification: {
+      byExecution: sandboxAvailable(),
+      mode: sandboxAvailable() ? "sandboxed" : "disabled",
+      note: sandboxAvailable()
+        ? "exécution de code isolée (seatbelt / namespaces)"
+        : "aucune isolation noyau disponible : exécution de code désactivée, verdict not_applicable",
+    },
     uptimeSec: Math.round(process.uptime()),
   };
   return NextResponse.json(body, { status: db ? 200 : 503 });
