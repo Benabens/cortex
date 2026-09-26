@@ -1,30 +1,66 @@
-import { billingEnabled, creditCost, fromCenti, getBalance, listTransactions } from "@/lib/billing/credits";
+import { billingEnabled, creditCost, fromCenti, getSubscription, listTransactions, purchasedBalanceCenti, subscriptionCreditsCenti, subscriptionLive } from "@/lib/billing/credits";
 import { usedToday } from "@/lib/billing/guards";
+import { listOffers } from "@/lib/billing/offers";
 import { useUser } from "@/lib/req";
+import { nowStr } from "@/db/q";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Solde de crédits + quotas du jour + packs disponibles (UI compte). */
+/** Premier jour du mois suivant (UTC) — date de la prochaine recharge des crédits d'abonnement. */
+function nextMonthStart(now = nowStr()): string {
+  const y = Number(now.slice(0, 4));
+  const m = Number(now.slice(5, 7));
+  const d = new Date(Date.UTC(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 1));
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Solde et abonnement pour la page « Abonnement & crédits » : les deux poches
+ * (achetés / abonnement du mois), la date de recharge, l'historique et les
+ * offres avec leur prix Stripe. Tout est exprimé en CRÉDITS (le ledger compte
+ * en centièmes). Sans facturation : structure identique, valeurs nulles.
+ */
 export async function GET(req: NextRequest) {
   useUser(req);
-  const packs = (["small", "medium", "large"] as const)
-    .filter((p) => process.env[`STRIPE_PRICE_${p.toUpperCase()}`])
-    .map((p) => ({
-      pack: p,
-      credits: Number(process.env[`CREDITS_PACK_${p.toUpperCase()}`] ?? { small: 1, medium: 5, large: 12 }[p]),
-    }));
+  const on = billingEnabled();
+  const stripeConfigured = !!(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET);
+  const sub = on ? await getSubscription() : undefined;
+  const subCenti = on ? await subscriptionCreditsCenti() : 0;
+  const purchasedCenti = on ? await purchasedBalanceCenti() : 0;
+  const live = subscriptionLive(sub);
   return NextResponse.json({
-    billing: billingEnabled(),
-    balance: billingEnabled() ? await getBalance() : null,
+    billing: on,
+    stripeConfigured,
+    balance: on ? fromCenti(purchasedCenti + subCenti) : null,
+    purchased: on ? fromCenti(purchasedCenti) : null,
+    subscription: on && sub
+      ? {
+          status: sub.status,
+          live,
+          plan: sub.plan,
+          creditsThisMonth: fromCenti(subCenti),
+          monthlyCredits: fromCenti(Number(sub.monthly_credits)),
+          periodEnd: sub.period_end,
+          // Recharge au 1er du mois suivant tant que la période court (et hors résiliation) ; sinon plus de recharge.
+          nextRechargeAt: live && sub.status !== "canceled" && nextMonthStart() + " 00:00:00" < (sub.period_end ?? "") ? nextMonthStart() : null,
+          manageable: !!sub.customer_id,
+        }
+      : null,
     costs: { exam: fromCenti(creditCost("exam")), qcm: fromCenti(creditCost("qcm")), exercise: fromCenti(creditCost("exercise")), assist: fromCenti(creditCost("assist")) },
     usedToday: { gen: await usedToday("gen"), assist: await usedToday("assist") },
     quotas: {
       gen: process.env.DAILY_GEN_QUOTA ? Number(process.env.DAILY_GEN_QUOTA) : null,
       assist: process.env.DAILY_ASSIST_QUOTA ? Number(process.env.DAILY_ASSIST_QUOTA) : null,
     },
-    transactions: billingEnabled() ? (await listTransactions()).map((t) => ({ ...t, delta: fromCenti(Number(t.delta)) })) : [],
-    packs,
+    transactions: on
+      ? (await listTransactions()).map((t) => ({
+          ...t,
+          delta: fromCenti(Number(t.delta)),
+          subAmount: fromCenti(Number((t as { sub_amount?: number }).sub_amount ?? 0)),
+        }))
+      : [],
+    offers: on ? await listOffers() : [],
   });
 }

@@ -1,18 +1,20 @@
 import { billingEnabled } from "@/lib/billing/credits";
+import { isPlanKey, PLANS, type PlanKey } from "@/lib/billing/stripe-events";
+import { authGet } from "@/db/auth-store";
 import { currentUser } from "@/db/context";
 import { useUser } from "@/lib/req";
+import { readJson, withBodyLimit } from "@/lib/upload-limit";
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Achat d'un pack de crédits — Stripe Checkout (mode test d'abord : clés
- * sk_test_/prix test ; la bascule live = remplacer les clés, zéro code).
- * Le webhook (app/api/billing/webhook) créditera le solde APRÈS paiement
- * confirmé (idempotent par id d'événement) — jamais ici.
+ * Checkout Stripe — abonnement Pro (mensuel/annuel) ou pack de 10 crédits.
+ * Prix référencés par LOOKUP_KEY (jamais d'ID en dur → bascule test/live sans
+ * code). Le webhook attribue APRÈS paiement confirmé — jamais ici.
+ * Les URLs de retour viennent d'AUTH_URL, jamais de l'en-tête Origin.
  */
 export const POST = withBodyLimit(async function POST(req: NextRequest) {
   useUser(req);
@@ -21,23 +23,25 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   }
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) return NextResponse.json({ error: "STRIPE_SECRET_KEY manquante." }, { status: 501 });
-
-  const { pack } = (await readJson(req, ({}))) as { pack?: string };
-  const p = String(pack ?? "").toLowerCase();
-  const price = process.env[`STRIPE_PRICE_${p.toUpperCase()}`];
-  if (!price) return NextResponse.json({ error: `Pack inconnu ou non configuré : « ${p} ».` }, { status: 400 });
-  const credits = Number(process.env[`CREDITS_PACK_${p.toUpperCase()}`] ?? { small: 1, medium: 5, large: 12 }[p as "small" | "medium" | "large"] ?? 0);
-  if (!credits) return NextResponse.json({ error: `Nombre de crédits non configuré pour « ${p} ».` }, { status: 400 });
-
-  // Les URLs de retour viennent de la configuration, jamais de l'en-tête Origin
-  // (contrôlé par le client : il renverrait l'acheteur vers un site tiers).
   if (!siteOrigin()) return NextResponse.json({ error: "AUTH_URL manquante : impossible de construire les URLs de retour." }, { status: 500 });
-  const stripe = new Stripe(key);
-  const session = await stripe.checkout.sessions.create(checkoutParams({ pack: p, price, credits, userId: currentUser() }));
-  return NextResponse.json({ url: session.url });
-})
 
-/** Origine canonique du site (AUTH_URL sans barre finale), ou null. */
+  const { plan } = (await readJson(req, {})) as { plan?: unknown };
+  if (!isPlanKey(plan)) return NextResponse.json({ error: `Offre inconnue : « ${String(plan ?? "")} ».` }, { status: 400 });
+  const spec = PLANS[plan];
+
+  const stripe = new Stripe(key);
+  const prices = await stripe.prices.list({ lookup_keys: [spec.lookupKey], active: true, limit: 1 });
+  const price = prices.data[0];
+  if (!price) {
+    return NextResponse.json({ error: `Prix introuvable pour « ${spec.lookupKey} » (crée-le dans Stripe).` }, { status: 400 });
+  }
+  const userId = currentUser();
+  const email = (await authGet<{ email: string | null }>(`SELECT email FROM users WHERE id = ?`, userId).catch(() => undefined))?.email ?? null;
+  const session = await stripe.checkout.sessions.create(checkoutParams({ plan, priceId: price.id, userId, email }));
+  return NextResponse.json({ url: session.url });
+});
+
+/** Origine canonique du site (AUTH_URL), ou null. */
 function siteOrigin(): string | null {
   const raw = process.env.AUTH_URL?.trim();
   if (!raw) return null;
@@ -45,15 +49,23 @@ function siteOrigin(): string | null {
 }
 
 /** Paramètres de la session Checkout — exposés pour être testés sans réseau. */
-export function checkoutParams(o: { pack: string; price: string; credits: number; userId: string }): Stripe.Checkout.SessionCreateParams & { metadata: Record<string, string> } {
+export function checkoutParams(o: { plan: PlanKey; priceId: string; userId: string; email?: string | null }): Stripe.Checkout.SessionCreateParams & { metadata: Record<string, string> } {
   const origin = siteOrigin();
   if (!origin) throw new Error("AUTH_URL manquante");
+  const spec = PLANS[o.plan];
+  const metadata: Record<string, string> = { cortexUserId: o.userId, plan: o.plan, ...(spec.credits ? { credits: String(spec.credits) } : {}) };
   return {
-    mode: "payment",
-    line_items: [{ price: o.price, quantity: 1 }],
-    success_url: `${origin}/?achat=ok`,
-    cancel_url: `${origin}/?achat=annule`,
-    // Le webhook lit CES métadonnées pour créditer le bon user — source de vérité.
-    metadata: { cortexUserId: o.userId, credits: String(o.credits), pack: o.pack },
+    mode: spec.mode,
+    line_items: [{ price: o.priceId, quantity: 1 }],
+    success_url: `${origin}/compte?achat=ok`,
+    cancel_url: `${origin}/compte?achat=annule`,
+    ...(o.email ? { customer_email: o.email } : {}),
+    // Le webhook lit CES métadonnées pour attribuer au bon compte (source de vérité).
+    metadata,
+    ...(spec.mode === "payment"
+      // Pack : facture émise (obligation légale), client Stripe créé pour rattacher remboursements et litiges.
+      ? { invoice_creation: { enabled: true }, customer_creation: "always" as const }
+      // Abonnement : métadonnées aussi sur l'abonnement → une facture arrivée avant le checkout retrouve l'utilisateur.
+      : { subscription_data: { metadata } }),
   };
 }

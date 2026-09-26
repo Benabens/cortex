@@ -85,6 +85,7 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       delta INTEGER NOT NULL,
       reason TEXT NOT NULL,
       ref TEXT UNIQUE,
+      sub_amount INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS credit_tx_user_idx ON credit_transactions (user_id)`,
@@ -131,6 +132,34 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       created_at TEXT NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS stripe_purchases_pi_idx ON stripe_purchases (payment_intent)`,
+    `CREATE TABLE IF NOT EXISTS subscriptions (
+      user_id TEXT PRIMARY KEY,
+      customer_id TEXT,
+      subscription_id TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      plan TEXT,
+      monthly_credits INTEGER NOT NULL DEFAULT 2000,
+      remaining INTEGER NOT NULL DEFAULT 0,
+      period_end TEXT,
+      month_anchor TEXT,
+      updated_at TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS subscriptions_customer_idx ON subscriptions (customer_id)`,
+    `CREATE TABLE IF NOT EXISTS stripe_invoices (
+      invoice_id TEXT PRIMARY KEY,
+      subscription_id TEXT,
+      customer_id TEXT,
+      payment_intent TEXT,
+      user_id TEXT NOT NULL,
+      granted_centi INTEGER NOT NULL,
+      period_end TEXT,
+      created_at TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS stripe_invoices_pi_idx ON stripe_invoices (payment_intent)`,
+    `CREATE TABLE IF NOT EXISTS processed_events (
+      event_id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL
+    )`,
   ],
   postgres: [
     `CREATE TABLE IF NOT EXISTS public.users (
@@ -194,6 +223,7 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       delta integer NOT NULL,
       reason text NOT NULL,
       ref text UNIQUE,
+      sub_amount integer NOT NULL DEFAULT 0,
       created_at text NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS credit_tx_user_idx ON public.credit_transactions (user_id)`,
@@ -246,6 +276,34 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       created_at text NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS stripe_purchases_pi_idx ON public.stripe_purchases (payment_intent)`,
+    `CREATE TABLE IF NOT EXISTS public.subscriptions (
+      user_id text PRIMARY KEY,
+      customer_id text,
+      subscription_id text,
+      status text NOT NULL DEFAULT 'active',
+      plan text,
+      monthly_credits integer NOT NULL DEFAULT 2000,
+      remaining integer NOT NULL DEFAULT 0,
+      period_end text,
+      month_anchor text,
+      updated_at text NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS subscriptions_customer_idx ON public.subscriptions (customer_id)`,
+    `CREATE TABLE IF NOT EXISTS public.stripe_invoices (
+      invoice_id text PRIMARY KEY,
+      subscription_id text,
+      customer_id text,
+      payment_intent text,
+      user_id text NOT NULL,
+      granted_centi integer NOT NULL,
+      period_end text,
+      created_at text NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS stripe_invoices_pi_idx ON public.stripe_invoices (payment_intent)`,
+    `CREATE TABLE IF NOT EXISTS public.processed_events (
+      event_id text PRIMARY KEY,
+      created_at text NOT NULL
+    )`,
   ],
 };
 
@@ -265,6 +323,12 @@ const LLM_USAGE_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "call_site", sqlite: "TEXT", pg: "text" },
   { name: "attempt", sqlite: "INTEGER", pg: "integer" },
   { name: "latency_ms", sqlite: "INTEGER", pg: "integer" },
+];
+
+/** Colonnes ajoutées à `credit_transactions` : part d'un débit financée par
+ *  l'abonnement (centièmes), pour rendre chaque part dans sa poche. */
+const CREDIT_TX_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
+  { name: "sub_amount", sqlite: "INTEGER NOT NULL DEFAULT 0", pg: "integer NOT NULL DEFAULT 0" },
 ];
 
 // ---------------- backend sqlite (fichier dédié) ----------------
@@ -289,6 +353,12 @@ function sqliteAuth(): Database.Database {
     );
     for (const c of LLM_USAGE_ADDED) {
       if (!have.has(c.name)) _sqliteAuth.exec(`ALTER TABLE llm_usage ADD COLUMN ${c.name} ${c.sqlite}`);
+    }
+    const haveTx = new Set(
+      (_sqliteAuth.prepare("PRAGMA table_info(credit_transactions)").all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    for (const c of CREDIT_TX_ADDED) {
+      if (!haveTx.has(c.name)) _sqliteAuth.exec(`ALTER TABLE credit_transactions ADD COLUMN ${c.name} ${c.sqlite}`);
     }
   }
   return _sqliteAuth;
@@ -318,6 +388,9 @@ async function pgExec(): Promise<{
     // Migration additive des bases existantes (Postgres : ADD COLUMN IF NOT EXISTS).
     for (const c of LLM_USAGE_ADDED) {
       await authPgQuery(`ALTER TABLE public.llm_usage ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
+    }
+    for (const c of CREDIT_TX_ADDED) {
+      await authPgQuery(`ALTER TABLE public.credit_transactions ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
     }
     _pgReady = true;
   }

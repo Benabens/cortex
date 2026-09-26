@@ -104,23 +104,27 @@ test("livemode incohérent avec la clé (événement live, clé de test) → 400
   assert.equal(await credits.getBalance("dave"), 0);
 });
 
-test("checkout : URLs de retour depuis AUTH_URL, jamais depuis Origin ; sans AUTH_URL → 500", async () => {
+test("checkout : URLs de retour depuis AUTH_URL, jamais depuis Origin ; sans AUTH_URL → 500 ; facture et client pour un pack", async () => {
   const mod = await import("../app/api/billing/checkout/route");
-  process.env.STRIPE_PRICE_SMALL = "price_test_small";
-  process.env.CREDITS_PACK_SMALL = "1";
   delete process.env.AUTH_URL;
   const res = await mod.POST(new NextRequest("http://cortex.test/api/billing/checkout", {
-    method: "POST", headers: { "content-type": "application/json", origin: "https://evil.example" }, body: JSON.stringify({ pack: "small" }),
+    method: "POST", headers: { "content-type": "application/json", origin: "https://evil.example" }, body: JSON.stringify({ plan: "credits_10" }),
   }));
   assert.equal(res.status, 500, await res.text());
   process.env.AUTH_URL = "https://cortex.example.ch/";
-  const params = mod.checkoutParams({ pack: "small", price: "price_test_small", credits: 1, userId: "alice" });
-  assert.equal(params.success_url, "https://cortex.example.ch/?achat=ok");
-  assert.equal(params.cancel_url, "https://cortex.example.ch/?achat=annule");
-  assert.equal(params.metadata.cortexUserId, "alice");
+  const pack = mod.checkoutParams({ plan: "credits_10", priceId: "price_test_pack", userId: "alice", email: "alice@example.com" });
+  assert.equal(pack.mode, "payment");
+  assert.equal(pack.success_url, "https://cortex.example.ch/compte?achat=ok");
+  assert.equal(pack.cancel_url, "https://cortex.example.ch/compte?achat=annule");
+  assert.deepEqual(pack.metadata, { cortexUserId: "alice", plan: "credits_10", credits: "10" });
+  assert.equal(pack.customer_email, "alice@example.com");
+  assert.equal(pack.invoice_creation?.enabled, true);
+  assert.equal(pack.customer_creation, "always");
+  const sub = mod.checkoutParams({ plan: "pro_yearly", priceId: "price_test_y", userId: "alice" });
+  assert.equal(sub.mode, "subscription");
+  assert.deepEqual(sub.subscription_data?.metadata, { cortexUserId: "alice", plan: "pro_yearly" });
   assert.ok(!fs.readFileSync(path.join(__dirname, "..", "app", "api", "billing", "checkout", "route.ts"), "utf8").includes('headers.get("origin")'));
 });
-
 test("clé restreinte rk_live_ : un événement live est accepté (livemode cohérent)", async () => {
   process.env.STRIPE_SECRET_KEY = "rk_live_fake_restricted_key";
   try {
