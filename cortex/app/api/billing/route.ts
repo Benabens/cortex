@@ -1,7 +1,7 @@
 import { billingEnabled, creditCost, fromCenti, getSubscription, listTransactions, purchasedBalanceCenti, subscriptionCreditsCenti, subscriptionLive } from "@/lib/billing/credits";
 import { usedToday } from "@/lib/billing/guards";
 import { listOffers } from "@/lib/billing/offers";
-import { legalLinks, purchasesAllowed, termsVersion } from "@/lib/legal";
+import { legalLinks, purchasesAllowed, stripeConfigured as stripeReady, termsVersion } from "@/lib/legal";
 import { useUser } from "@/lib/req";
 import { authGet } from "@/db/auth-store";
 import { currentUser } from "@/db/context";
@@ -28,7 +28,7 @@ function nextMonthStart(now = nowStr()): string {
 export async function GET(req: NextRequest) {
   useUser(req);
   const on = billingEnabled();
-  const stripeConfigured = !!(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET);
+  const stripeConfigured = stripeReady();
   const sub = on ? await getSubscription() : undefined;
   const subCenti = on ? await subscriptionCreditsCenti() : 0;
   const purchasedCenti = on ? await purchasedBalanceCenti() : 0;

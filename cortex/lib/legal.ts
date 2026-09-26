@@ -46,6 +46,9 @@ export function stripeConfigured(env: Partial<NodeJS.ProcessEnv> = process.env):
 export function purchasesAllowed(env: Partial<NodeJS.ProcessEnv> = process.env): { enabled: boolean; reason: string | null } {
   if (!billingEnabled()) return { enabled: false, reason: "La facturation n'est pas activée sur cette instance." };
   if (!stripeConfigured(env)) return { enabled: false, reason: "Les achats ne sont pas encore ouverts : configuration du paiement incomplète." };
+  // NODE_ENV=production est voulu ici (et non isGuardedDeployment) : `next start`
+  // le force toujours, donc TOUTE instance servie sans les documents ferme la
+  // vente ; seul `next dev` (poste de dev) peut tester un paiement sans liens.
   if (env.NODE_ENV === "production" && !legalReady(env)) {
     return { enabled: false, reason: "Les achats sont suspendus : les documents légaux (CGV, confidentialité, remboursement, mentions) ne sont pas publiés." };
   }
