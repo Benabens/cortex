@@ -263,7 +263,7 @@ async function hydrateFromSeedTenant(ex: TenantExec, schema: string): Promise<vo
   if (process.env.SEED_NEW_TENANTS !== "1") return;
   const seedUser = process.env.CORTEX_SEED_USER || "owner";
   if (currentUser() === seedUser) return;
-  const seedSchema = tenantSchema(seedUser, currentCourse());
+  const seedSchema = await resolveTenantSchema(seedUser, currentCourse());
   if (seedSchema === schema) return;
   const target = await ex.query(`SELECT count(*) n FROM items`, []);
   if (Number((target.rows[0] as { n?: number | string })?.n ?? 0) > 0) return; // déjà peuplé
@@ -305,6 +305,37 @@ async function hydrateFromSeedTenant(ex: TenantExec, schema: string): Promise<vo
   }
 }
 
+/**
+ * NOM DE SCHÉMA d'un tenant : celui ENREGISTRÉ dans public.tenants fait foi et
+ * n'est jamais réécrit — la règle de nommage (tenantSchema) ne s'applique
+ * qu'aux tenants nouveaux. Sans cela, un changement de règle (identifiants
+ * longs désormais suffixés) créerait un schéma vide à côté des données.
+ */
+const schemaByTenant = new Map<string, string>();
+export async function resolveTenantSchema(userId: string, courseId: string): Promise<string> {
+  const key = `${userId}\u0000${courseId}`;
+  const cached = schemaByTenant.get(key);
+  if (cached) return cached;
+  let name = tenantSchema(userId, courseId);
+  try {
+    const r = await rawExec("public").query(
+      `SELECT schema_name FROM public.tenants WHERE user_id = $1 AND course = $2`, [userId, courseId],
+    );
+    const registered = (r.rows[0] as { schema_name?: string } | undefined)?.schema_name;
+    if (registered) name = String(registered);
+  } catch { /* registre absent (base neuve) : première création */ }
+  schemaByTenant.set(key, name);
+  return name;
+}
+
+/** Oublie un tenant (schéma supprimé) : le prochain accès repart du registre. */
+export function forgetTenant(userId: string, courseId: string): void {
+  const key = `${userId}\u0000${courseId}`;
+  const name = schemaByTenant.get(key);
+  schemaByTenant.delete(key);
+  if (name) bootstrapped.delete(name);
+}
+
 /** CREATE SCHEMA + schéma applicatif complet, une fois par tenant et par process. */
 async function ensureTenant(schema: string): Promise<TenantExec> {
   const ex = rawExec(schema);
@@ -329,7 +360,7 @@ async function ensureTenant(schema: string): Promise<TenantExec> {
       );
       await ex.query(
         `INSERT INTO public.tenants (user_id, course, schema_name, last_seen) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (user_id, course) DO UPDATE SET schema_name = EXCLUDED.schema_name, last_seen = EXCLUDED.last_seen`,
+         ON CONFLICT (user_id, course) DO UPDATE SET last_seen = EXCLUDED.last_seen`,
         [currentUser(), currentCourse(), schema, new Date().toISOString().slice(0, 19).replace("T", " ")]
       );
     } catch {
@@ -347,7 +378,7 @@ const txCtx = new AsyncLocalStorage<TenantExec>();
 async function executor(): Promise<TenantExec> {
   const tx = txCtx.getStore();
   if (tx) return tx;
-  return ensureTenant(tenantSchema());
+  return ensureTenant(await resolveTenantSchema(currentUser(), currentCourse()));
 }
 
 const postgresDriver: QueryDriver = {
@@ -393,7 +424,7 @@ const postgresDriver: QueryDriver = {
     const ex = await executor();
     const r = await ex.query(
       `SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2`,
-      [tenantSchema(), table]
+      [await resolveTenantSchema(currentUser(), currentCourse()), table]
     );
     return r.rows.map((row) => String((row as { column_name: string }).column_name));
   },
