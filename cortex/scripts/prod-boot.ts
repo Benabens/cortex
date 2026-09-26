@@ -176,9 +176,16 @@ function assertIsolationSane(): void {
 async function migrateCourses(): Promise<void> {
   const { migrateLegacyCourses, removeEmptyFakeCourse } = await import("../db/courses-store");
   const r = await migrateLegacyCourses();
-  // Le cours factice de démonstration n'a rien à faire en production : retiré s'il est vide.
-  const fake = await removeEmptyFakeCourse();
-  if (fake.removed) log("cours factice « fictif » retiré (vide)");
+  // Le cours factice de démonstration n'a rien à faire en production : retiré
+  // s'il est vide. Jamais bloquant : l'entrypoint est en set -e, une purge
+  // ratée ne doit pas empêcher le service de démarrer.
+  try {
+    const fake = await removeEmptyFakeCourse();
+    if (fake.removed) log("cours factice « fictif » retiré (vide)");
+    else if (fake.reason && fake.reason !== "absent") log(`cours factice « fictif » conservé : ${fake.reason}`);
+  } catch (e) {
+    log(`cours factice : purge ignorée (${(e as Error).message})`);
+  }
   log(
     `cours en base : ${r.created.length} créé(s)${r.created.length ? ` [${r.created.join(", ")}]` : ""}` +
     ` · ${r.kept.length} déjà présent(s)${r.skipped.length ? ` · ${r.skipped.length} ignoré(s) (aucune donnée) [${r.skipped.join(", ")}]` : ""}`

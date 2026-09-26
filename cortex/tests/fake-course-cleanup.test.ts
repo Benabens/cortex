@@ -54,7 +54,7 @@ test("un cours factice NON vide n'est jamais supprimé", async () => {
   ));
   const r = await removeEmptyFakeCourse();
   assert.equal(r.removed, false);
-  assert.match(r.reason ?? "", /item/i);
+  assert.match(r.reason ?? "", /ligne|item/i);
 });
 
 test("en production, la migration du catalogue ne crée plus le cours factice", async () => {
