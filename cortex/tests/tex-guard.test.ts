@@ -69,6 +69,16 @@ test("les primitives dangereuses sont rejetées, une par une", async () => {
     String.raw`\graphicspath{{/}}`,
     String.raw`\import{/etc/}{passwd}`,
     String.raw`\CatchFileDef{\x}{/etc/passwd}{}`,
+    // Vecteurs vérifiés sous tectonic --untrusted : une liste de noms ne suffit pas.
+    String.raw`\begin{@@input}/etc/passwd\end{@@input}`,
+    String.raw`\ExplSyntaxOn \file_input:n{/etc/passwd} \ExplSyntaxOff`,
+    String.raw`\ExplSyntaxOn \ior_open:Nn \g_tmpa_ior {/etc/passwd} \ExplSyntaxOff`,
+    String.raw`\XeTeXpdffile "/data/u/autre/exams/exam-1.pdf" page 1`,
+    String.raw`\XeTeXpicfile "/etc/x.png"`,
+    String.raw`\begin{filecontents}{piege.tex}x\end{filecontents}`,
+    String.raw`\begin{filecontents*}{piege.tex}x\end{filecontents*}`,
+    String.raw`\begin{csname}input\end{csname}`,
+    String.raw`\begin{environnementinconnu}x\end{environnementinconnu}`,
   ];
   for (const c of cases) {
     const body = `\\begin{document}\nTexte ${c} texte\n\\end{document}`;
@@ -87,6 +97,11 @@ test("ce qui est légitime passe : figures relatives, macros du cours, maths", a
     // Macros locales qu'un corrigé emploie couramment : sans \csname ni \catcode, elles ne fabriquent rien.
     String.raw`\def\R{\mathbb{R}} \let\eps\varepsilon \newcommand{\norm}[1]{\lVert #1 \rVert} $\norm{x} \in \R$`,
     String.raw`\expandafter\textbf\expandafter{\eps} \uppercase{abc} \lowercase{DEF}`,
+    // Environnements courants d'un énoncé/corrigé.
+    String.raw`\begin{enumerate}\item a \begin{itemize}\item b\end{itemize}\end{enumerate} \begin{align*} x &= 1 \\ y &= 2 \end{align*}`,
+    String.raw`\begin{tabular}{|l|c|}\hline a & b \\ \hline\end{tabular} \begin{center}\begin{minipage}{0.5\textwidth}x\end{minipage}\end{center}`,
+    String.raw`$\begin{pmatrix} 1 & 0 \\ 0 & 1 \end{pmatrix}$ \begin{cases} 1 & x>0 \\ 0 & \text{sinon} \end{cases} \begin{verbatim}int main(){}\end{verbatim}`,
+    String.raw`\begin{lstlisting}[language=C]\nprintf("x");\n\end{lstlisting} \begin{tikzpicture}\draw (0,0)--(1,1);\end{tikzpicture} \begin{figure}[h]\centering x\end{figure}`,
   ];
   for (const c of ok) assert.deepEqual(findTexHazards(c), [], `faux positif : ${c}`);
 });
