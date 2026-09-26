@@ -256,3 +256,11 @@ test("2b-4 : l'enregistrement de l'achat échoue → rien n'est crédité, l'év
   assert.equal(r.credited, true);
   assert.equal(await credits.getBalance("ivan"), 10);
 });
+
+test("revue : reprise orpheline PARTIELLE (4,50 € avant l'achat) → 5 crédits repris, pas 10", async () => {
+  const early = await handleStripeEvent(ev("evt_early_partial", "charge.refunded", { payment_intent: "pi_cs_partial", amount: 900, amount_refunded: 450 }));
+  assert.equal(early.action, "reversal-orphaned");
+  const r = await handleStripeEvent(checkoutPack("evt_late_partial", "jade", "cs_partial", "pi_cs_partial"));
+  assert.equal(r.reversed, true);
+  assert.equal(await credits.getBalance("jade"), 5, "10 crédités, 5 repris (450 centimes au prix du pack)");
+});
