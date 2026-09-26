@@ -43,3 +43,32 @@ export function assertAuthRequiredHosted(env: Partial<NodeJS.ProcessEnv> = proce
     "Pose AUTH_ENABLED=1 (avec AUTH_SECRET, DB_DRIVER=postgres)."
   );
 }
+
+/**
+ * DÉPLOIEMENT GARDÉ = instance qui sert d'autres gens que son propriétaire ou
+ * qui encaisse : AUTH_ENABLED=1, BILLING_ENABLED=1, hébergeur (Railway) ou
+ * CORTEX_HOSTED=1. Les gardes « fail-closed » ne s'appliquent que là.
+ */
+export function isGuardedDeployment(env: Partial<NodeJS.ProcessEnv> = process.env): boolean {
+  return env.AUTH_ENABLED === "1" || env.BILLING_ENABLED === "1" ||
+    Boolean(env.RAILWAY_ENVIRONMENT || env.RAILWAY_PROJECT_ID) || env.CORTEX_HOSTED === "1";
+}
+
+/**
+ * Le provider `claude-code` (CLI local, défaut quand LLM_PROVIDER est absent)
+ * facture 0 (session personnelle du propriétaire) et donne au modèle un outil
+ * Read sur le dépôt : sur une instance multi-utilisateurs, hébergée ou
+ * facturée, chaque visiteur consommerait l'abonnement du propriétaire et
+ * pourrait faire lire n'importe quel fichier. Refus au boot, sauf
+ * CORTEX_OWNER_ONLY=1 (instance que son propriétaire est seul à utiliser).
+ */
+export function assertLlmProviderAllowed(env: Partial<NodeJS.ProcessEnv> = process.env): void {
+  const provider = env.LLM_PROVIDER || "claude-code";
+  if (provider !== "claude-code") return;
+  if (!isGuardedDeployment(env) || env.CORTEX_OWNER_ONLY === "1") return;
+  throw new Error(
+    "Configuration dangereuse : LLM_PROVIDER=claude-code (CLI local, coût 0, outil Read sur le dépôt) sur une instance " +
+    "multi-utilisateurs, hébergée ou facturée. Pose LLM_PROVIDER=anthropic (ou openai-compatible) avec LLM_API_KEY — " +
+    "ou CORTEX_OWNER_ONLY=1 si tu es vraiment le seul utilisateur de cette instance."
+  );
+}
