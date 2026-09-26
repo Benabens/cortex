@@ -122,3 +122,14 @@ export const LEGACY_COURSES: LegacyCourse[] = [
     contentRel: "data/fictif/content",
   },
 ];
+
+/** Identifiant du cours FACTICE de démonstration (preuve zéro-code) — dev et tests seulement. */
+export const FAKE_COURSE_ID = "fictif";
+
+/**
+ * Catalogue à migrer selon l'environnement : en production, le cours factice
+ * n'est jamais créé (il apparaissait chez le propriétaire de l'instance).
+ */
+export function legacyCoursesFor(env: Partial<NodeJS.ProcessEnv> = process.env): LegacyCourse[] {
+  return env.NODE_ENV === "production" ? LEGACY_COURSES.filter((c) => c.id !== FAKE_COURSE_ID) : LEGACY_COURSES;
+}
