@@ -120,3 +120,14 @@ test("checkout : URLs de retour depuis AUTH_URL, jamais depuis Origin ; sans AUT
   assert.equal(params.metadata.cortexUserId, "alice");
   assert.ok(!fs.readFileSync(path.join(__dirname, "..", "app", "api", "billing", "checkout", "route.ts"), "utf8").includes('headers.get("origin")'));
 });
+
+test("clé restreinte rk_live_ : un événement live est accepté (livemode cohérent)", async () => {
+  process.env.STRIPE_SECRET_KEY = "rk_live_fake_restricted_key";
+  try {
+    const payload = JSON.stringify({ object: "event", livemode: true, ...purchase("evt_rk", "cs_rk", "pi_rk", "erin") });
+    const sig = stripe.webhooks.generateTestHeaderString({ payload, secret: "whsec_test_local" });
+    const r = await POST(new NextRequest("http://localhost/api/billing/webhook", { method: "POST", body: payload, headers: { "stripe-signature": sig } }));
+    assert.equal(r.status, 200, await r.text());
+    assert.equal(await credits.getBalance("erin"), 5);
+  } finally { process.env.STRIPE_SECRET_KEY = "sk_test_fake_key_local_only"; }
+});
