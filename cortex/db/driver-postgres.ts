@@ -312,18 +312,35 @@ async function hydrateFromSeedTenant(ex: TenantExec, schema: string): Promise<vo
  * longs désormais suffixés) créerait un schéma vide à côté des données.
  */
 const schemaByTenant = new Map<string, string>();
+type RegistryLookup = (userId: string, courseId: string) => Promise<string | null>;
+const defaultRegistryLookup: RegistryLookup = async (userId, courseId) => {
+  const r = await rawExec("public").query(
+    `SELECT schema_name FROM public.tenants WHERE user_id = $1 AND course = $2`, [userId, courseId],
+  );
+  const registered = (r.rows[0] as { schema_name?: string } | undefined)?.schema_name;
+  return registered ? String(registered) : null;
+};
+let registryLookup: RegistryLookup = defaultRegistryLookup;
+/** (tests) remplace la lecture du registre pour simuler une panne. */
+export function setTenantRegistryLookupForTests(fn: RegistryLookup | null): void {
+  registryLookup = fn ?? defaultRegistryLookup;
+  schemaByTenant.clear();
+}
 export async function resolveTenantSchema(userId: string, courseId: string): Promise<string> {
   const key = `${userId}\u0000${courseId}`;
   const cached = schemaByTenant.get(key);
   if (cached) return cached;
   let name = tenantSchema(userId, courseId);
   try {
-    const r = await rawExec("public").query(
-      `SELECT schema_name FROM public.tenants WHERE user_id = $1 AND course = $2`, [userId, courseId],
-    );
-    const registered = (r.rows[0] as { schema_name?: string } | undefined)?.schema_name;
-    if (registered) name = String(registered);
-  } catch { /* registre absent (base neuve) : première création */ }
+    const registered = await registryLookup(userId, courseId);
+    if (registered) name = registered;
+  } catch (e) {
+    // Seule la table ABSENTE (42P01 : base neuve, avant la première DDL) vaut
+    // « aucun nom enregistré ». Toute autre panne (pool, timeout, réseau) fait
+    // échouer la requête : on ne crée jamais un schéma vide à côté des données,
+    // et rien n'est mis en cache — le prochain accès relira le registre.
+    if ((e as { code?: string } | null)?.code !== "42P01") throw e;
+  }
   schemaByTenant.set(key, name);
   return name;
 }
