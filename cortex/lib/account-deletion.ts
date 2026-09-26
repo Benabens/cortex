@@ -18,7 +18,8 @@ import { log } from "@/lib/metrics";
  * Ce qui est EFFACÉ :
  *  - `users`, `accounts` (OAuth), `verification_tokens` (par e-mail) → plus aucun
  *    moyen de se connecter ;
- *  - `courses` possédés, `tenants` (registre), `gen_events`, `credit_transactions` ;
+ *  - `courses` possédés, `tenants` (registre), `gen_events`, `credit_transactions`,
+ *    `active_jobs` (réservations en cours), `stripe_purchases` (achats) ;
  *  - chaque schéma tenant `t_<user>_<cours>` (Postgres, DROP … CASCADE) — donc
  *    sources, items, examens, faiblesses, planning, jobs, banque… d'un coup ;
  *  - tous les fichiers du volume sous `data/u/<slug>/` (données des cours créés +
@@ -143,6 +144,11 @@ export async function deleteAccount(userId: string): Promise<DeletionResult> {
     if (user.email) await authRun(`DELETE FROM verification_tokens WHERE lower(identifier) = lower(?)`, user.email);
     await authRun(`DELETE FROM gen_events WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM credit_transactions WHERE user_id = ?`, userId);
+    // Réservations en cours et achats Stripe : portent l'identité, effacés aussi.
+    // (Un remboursement Stripe postérieur ne trouvera plus d'achat à reprendre :
+    // le compte n'existe plus, il n'y a plus de solde à reprendre.)
+    await authRun(`DELETE FROM active_jobs WHERE user_id = ?`, userId);
+    await authRun(`DELETE FROM stripe_purchases WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM courses WHERE owner_user_id = ?`, userId);
     await authRun(`DELETE FROM tenants WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM users WHERE id = ?`, userId);
