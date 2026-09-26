@@ -264,3 +264,19 @@ test("revue : reprise orpheline PARTIELLE (4,50 € avant l'achat) → 5 crédit
   assert.equal(r.reversed, true);
   assert.equal(await credits.getBalance("jade"), 5, "10 crédités, 5 repris (450 centimes au prix du pack)");
 });
+
+test("lot 4-6 : remboursement PARTIEL d'un pack connu → prorata arrondi au crédit supérieur, cumulatif, puis litige sans double reprise", async () => {
+  await handleStripeEvent(checkoutPack("evt_kim_buy", "kim", "cs_kim", "pi_kim"));
+  assert.equal(await credits.getBalance("kim"), 10);
+  await handleStripeEvent(ev("evt_kim_r1", "charge.refunded", { payment_intent: "pi_kim", amount: 900, amount_refunded: 300 }));
+  assert.equal(await credits.getBalance("kim"), 6, "300/900 × 10 = 3,33 → 4 crédits repris");
+  await handleStripeEvent(ev("evt_kim_r2", "charge.refunded", { payment_intent: "pi_kim", amount: 900, amount_refunded: 450 }));
+  assert.equal(await credits.getBalance("kim"), 5, "cumul 450/900 → 5 repris au total, donc 1 de plus");
+  const again = await handleStripeEvent(ev("evt_kim_r2bis", "charge.refunded", { payment_intent: "pi_kim", amount: 900, amount_refunded: 450 }));
+  assert.equal(again.reversed, false, "même cumul rejoué → rien");
+  await handleStripeEvent(ev("evt_kim_r3", "charge.refunded", { payment_intent: "pi_kim", amount: 900, amount_refunded: 900 }));
+  assert.equal(await credits.getBalance("kim"), 0);
+  const dispute = await handleStripeEvent(ev("evt_kim_d", "charge.dispute.created", { payment_intent: "pi_kim", amount: 900 }));
+  assert.equal(dispute.reversed, false);
+  assert.equal(await credits.getBalance("kim"), 0);
+});
