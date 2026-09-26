@@ -18,7 +18,10 @@ export async function authPgQuery(text: string, params: SqlParam[]): Promise<Rec
   if (!_pool) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const postgres = require("postgres") as typeof import("postgres");
-    _pool = postgres(url, { max: 2, connection: { search_path: "public" }, onnotice: () => {} });
+    // Une connexion par réservation en cours (transaction dédiée) : le pool doit
+    // en offrir assez pour des réservations vraiment concurrentes (PG_AUTH_POOL_MAX, défaut 4).
+    const max = Math.max(1, Number(process.env.PG_AUTH_POOL_MAX) || 4);
+    _pool = postgres(url, { max, connection: { search_path: "public" }, onnotice: () => {} });
   }
   const r = await _pool.unsafe(text, pgSafeParams(params) as never[]);
   return r as unknown as Record<string, unknown>[];
@@ -39,4 +42,9 @@ export async function authPgTx<T>(fn: (query: AuthPgQuery) => Promise<T>): Promi
   return _pool!.begin(async (sql) => fn(async (text, params) =>
     (await sql.unsafe(text, pgSafeParams(params) as never[])) as unknown as Record<string, unknown>[]
   )) as Promise<T>;
+}
+
+/** Ferme le pool du store d'auth (tests, arrêt propre). */
+export async function closeAuthPool(): Promise<void> {
+  if (_pool) { await _pool.end({ timeout: 2 }); _pool = null; }
 }
