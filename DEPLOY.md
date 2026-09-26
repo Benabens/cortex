@@ -197,6 +197,15 @@ pose `AUTH_EMAIL_ENABLED=1` puis :
      crédits d'un pack ou d'une facture remboursés ou contestés — ce qui a déjà
      été consommé passe en dette : solde négatif, toute génération bloquée)
    - Copie le **secret de signature** `whsec_…` dans `STRIPE_WEBHOOK_SECRET`.
+   - Garanties : crédit du pack et enregistrement de l'achat dans **une**
+     transaction (échec → 500, Stripe rejoue, rien de crédité à moitié) ; une
+     session **gratuite** (`no_payment_required`, montant 0) ne crédite jamais ;
+     un remboursement dont l'achat est **inconnu** en base remonte à la session
+     Checkout via l'API Stripe, puis aux métadonnées de la charge, puis au
+     client/e-mail avec le montant converti en crédits (`CREDIT_PRICE_CENTS`,
+     défaut 90) ; sinon il est **mémorisé** (`stripe_orphan_reversals`), journalisé
+     en `error` (`stripe.reversal_unresolved`) et appliqué dès que l'achat
+     arrive. Surveille ce journal : c'est le seul cas à contrôler à la main.
 5. Test de paiement : carte `4242 4242 4242 4242`, n'importe quelle date
    future/CVC. Le webhook crédite le solde (idempotent — un retry Stripe ne
    crédite jamais deux fois, c'est testé).
