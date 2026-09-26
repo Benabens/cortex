@@ -4,6 +4,7 @@ import { q, nowStr } from "@/db/q";
 import { inc, observe } from "@/lib/metrics";
 import { examsDir } from "@/lib/paths";
 import { execFileSync, spawn } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -33,7 +34,7 @@ export type Job = {
 export async function ensureJobsSchema(): Promise<void> {
   await q.ensureTable("jobs");
   // Colonnes de durabilité — rattrapage pour les DB existantes.
-  try { await q.ensureColumns("jobs", ["attempts", "max_attempts", "heartbeat_at", "checkpoint_json", "worker_id"]); } catch {}
+  try { await q.ensureColumns("jobs", ["attempts", "max_attempts", "heartbeat_at", "checkpoint_json", "worker_id", "credit_ref"]); } catch {}
 }
 // (pas d'appel top-level : la table jobs est créée à la demande dans la DB du cours courant)
 
@@ -53,47 +54,72 @@ export async function createJob(type: JobType, target?: string): Promise<number>
  */
 export async function createJobExclusive(type: JobType, target?: string): Promise<{ id: number; existing: boolean }> {
   await ensureJobsSchema();
-  const res = await q.tx(async () => {
-    const active = await q.get<{ id: number }>(
-      `SELECT id FROM jobs WHERE status IN ${ACTIVE_STATES} AND type = ? ORDER BY id DESC LIMIT 1`,
-      type,
-    );
-    if (active) return { id: active.id, existing: true };
-    const id = await q.insert(
-      `INSERT INTO jobs (type, target, status, current_step, progress) VALUES (?,?,'queued','En file…',0)`,
-      type, target ?? null,
-    );
-    return { id, existing: false };
-  });
-  // POINT UNIQUE de la comptabilité de génération (toutes les routes de
-  // génération passent ici) : UNE réservation atomique — rafale, quota du jour,
-  // places en cours, solde — débitée AVANT que le job n'existe pour le moteur.
-  // Refus → le job porte le motif (statut error) et la route reçoit une
-  // ReservationRefused : aucun worker n'est lancé, rien n'est débité.
-  // `ingest` ne coûte rien. No-op sans garde-fou actif (dev €0 intact).
-  if (!res.existing && type !== "ingest") {
+  const activeSql = `SELECT id FROM jobs WHERE status IN ${ACTIVE_STATES} AND type = ? ORDER BY id DESC LIMIT 1`;
+  const already = await q.get<{ id: number }>(activeSql, type);
+  if (already) return { id: already.id, existing: true };
+
+  // POINT UNIQUE de la comptabilité de génération : UNE réservation atomique —
+  // rafale, quota du jour, places en cours, solde — AVANT que le job n'existe.
+  // Un refus ne laisse aucune ligne : rien à démarrer, rien qu'un second POST
+  // puisse prendre pour un job « existant » et lancer sans débit. La référence
+  // du débit est générée ici et portée par le job (colonne credit_ref) pour le
+  // remboursement. `ingest` ne coûte rien. No-op sans garde-fou actif (dev €0).
+  const user = currentUser();
+  const course = currentCourse();
+  let ref: string | null = null;
+  if (type !== "ingest") {
     const { reserveGeneration } = await import("@/lib/billing/reserve");
-    const { jobRef } = await import("@/lib/billing/credits");
-    const user = currentUser();
-    const course = currentCourse();
+    ref = `job:${user}:${course}:${crypto.randomUUID()}`;
     let r: Awaited<ReturnType<typeof reserveGeneration>>;
     try {
-      r = await reserveGeneration({
-        bucket: "gen", kind: type, costCenti: costForJob(type, target),
-        ref: jobRef(user, course, res.id), jobSlot: { course, jobId: res.id },
-      });
+      r = await reserveGeneration({ bucket: "gen", kind: type, costCenti: costForJob(type, target), ref, jobSlot: true });
     } catch (e) {
       // Erreur technique du store (pas un refus) : pas de génération gratuite sur erreur DB.
       const msg = e instanceof Error ? e.message.slice(0, 200) : String(e);
-      await setJob(res.id, { status: "error", error: `Réservation impossible : ${msg}` });
-      throw new ReservationRefused(503, "Facturation indisponible — réessaie dans un instant.");
+      throw new ReservationRefused(503, `Facturation indisponible — réessaie dans un instant. (${msg})`);
     }
-    if (!r.ok) {
-      await setJob(res.id, { status: "error", error: r.error });
-      throw new ReservationRefused(r.status, r.error);
-    }
+    if (!r.ok) throw new ReservationRefused(r.status, r.error);
   }
+
+  // Insertion EXCLUSIVE : le job actif du même type est re-vérifié DANS la
+  // transaction (deux POST concurrents pouvaient spawner 2 workers). Si un
+  // autre job a été créé pendant la réservation, celle-ci est rendue.
+  const res = await q.tx(async () => {
+    const active = await q.get<{ id: number }>(activeSql, type);
+    if (active) return { id: active.id, existing: true };
+    const id = await q.insert(
+      `INSERT INTO jobs (type, target, status, current_step, progress, credit_ref) VALUES (?,?,'queued','En file…',0,?)`,
+      type, target ?? null, ref,
+    );
+    return { id, existing: false };
+  });
+  if (res.existing && ref) await releaseReservation(type, ref, user);
   return res;
+}
+
+/** Rend une réservation qui n'a finalement servi à rien (course perdue à l'insertion). */
+async function releaseReservation(type: JobType, ref: string, user: string): Promise<void> {
+  try {
+    const { refundGeneration } = await import("@/lib/billing/credits");
+    const { releaseJobSlot } = await import("@/lib/billing/reserve");
+    await refundGeneration(type, ref, user);
+    await releaseJobSlot(user, ref);
+  } catch { /* best-effort */ }
+}
+
+/**
+ * REVENDIQUE le démarrage d'un job : un seul appelant obtient `true` (UPDATE
+ * conditionnel). Sans cela, deux startWorker concurrents sur un même job en
+ * file — deux POST qui reçoivent le même « existing », la pompe et une route —
+ * lançaient deux workers : double coût pour un seul paiement. Le worker pose
+ * ensuite son PID réel dans worker_id ; une remise en file le remet à NULL.
+ */
+export async function claimJobStart(jobId: number): Promise<boolean> {
+  const r = await q.run(
+    `UPDATE jobs SET worker_id = 'spawn', updated_at = ? WHERE id = ? AND status = 'queued' AND (worker_id IS NULL OR worker_id = '')`,
+    nowStr(), jobId,
+  );
+  return r.changes === 1;
 }
 
 /**
@@ -190,8 +216,11 @@ export async function setJob(id: number, fields: Partial<{ status: JobStatus; cu
   // État terminal : la place « génération en cours » du compte est libérée.
   if (fields.status && ["done", "error", "canceled"].includes(fields.status)) {
     try {
-      const { releaseJobSlot } = await import("@/lib/billing/reserve");
-      await releaseJobSlot(currentUser(), currentCourse(), id);
+      const row = await q.get<{ credit_ref: string | null }>(`SELECT credit_ref FROM jobs WHERE id = ?`, id);
+      if (row?.credit_ref) {
+        const { releaseJobSlot } = await import("@/lib/billing/reserve");
+        await releaseJobSlot(currentUser(), row.credit_ref);
+      }
     } catch { /* best-effort */ }
   }
   // Métriques : durée d'un job à son état terminal.
@@ -292,7 +321,7 @@ export async function reconcileStaleJobs(): Promise<number> {
     if (attempts < maxAttempts && !neverStarted) {
       const msg = `Worker interrompu — reprise automatique (tentative ${attempts + 1}/${maxAttempts}), progression conservée.`;
       await q.run(
-        `UPDATE jobs SET status = 'queued', pid = NULL, heartbeat_at = NULL, attempts = ?, current_step = ?, updated_at = ? WHERE id = ?`,
+        `UPDATE jobs SET status = 'queued', pid = NULL, heartbeat_at = NULL, worker_id = NULL, attempts = ?, current_step = ?, updated_at = ? WHERE id = ?`,
         attempts + 1, msg, nowStr(), r.id,
       );
       await logJob(r.id, msg);
@@ -358,10 +387,9 @@ export async function retryJob(id: number, course?: string): Promise<Job | null>
 export async function startWorker(jobId: number, course?: string): Promise<void> {
   const cwd = process.cwd();
   const c = course ?? currentCourse();
-  // Un job refusé par la réservation (statut error) ou déjà terminé ne démarre
-  // JAMAIS : pas de génération gratuite parce qu'une route aurait oublié le refus.
-  const state = await q.get<{ status: string }>(`SELECT status FROM jobs WHERE id = ?`, jobId);
-  if (!state || state.status !== "queued") return;
+  // Un seul démarrage par job en file (cf. claimJobStart) : ni un job terminé,
+  // ni un job déjà pris par un autre appelant ne lance de worker.
+  if (!(await claimJobStart(jobId))) return;
   const tsxLocal = path.join(cwd, "node_modules", ".bin", "tsx");
   const useLocal = fs.existsSync(tsxLocal);
   const bin = useLocal ? tsxLocal : "npx";
@@ -393,11 +421,6 @@ function pgidOf(pid: number): number | null {
   }
 }
 
-/**
- * Annule un job : statut `canceled`, puis TUE le worker pour de vrai.
- * On tue le GROUPE de processus du worker détaché → emporte aussi ses enfants
- * (`claude`, tectonic/pdflatex). Pas de génération zombie.
- */
 /**
  * Coût LLM réel d'un job (USD) : somme des lignes `llm_usage` rattachées au
  * même compte, même cours et même id — les ids de jobs sont séquentiels PAR
@@ -432,7 +455,10 @@ export async function refundJobCredits(job: Pick<Job, "id" | "type">): Promise<v
       await logJob(job.id, `Crédits conservés : le job a déjà coûté ${spent.toFixed(3)} $ d'appels au modèle.`).catch(() => {});
       return;
     }
-    await refundGeneration(job.type, jobRef(user, course, job.id));
+    // Référence portée par le job (réservation avant insertion) ; repli sur
+    // l'ancienne forme pour les jobs créés avant cette colonne.
+    const row = await q.get<{ credit_ref: string | null }>(`SELECT credit_ref FROM jobs WHERE id = ?`, job.id);
+    await refundGeneration(job.type, row?.credit_ref ?? jobRef(user, course, job.id));
   } catch { /* best-effort : jamais bloquant */ }
 }
 
@@ -446,6 +472,11 @@ export async function refundJobCredits(job: Pick<Job, "id" | "type">): Promise<v
  */
 const CANCEL_REFUND_MAX_PROGRESS = 10;
 
+/**
+ * Annule un job : statut `canceled`, puis TUE le worker pour de vrai.
+ * On tue le GROUPE de processus du worker détaché → emporte aussi ses enfants
+ * (`claude`, tectonic/pdflatex). Pas de génération zombie.
+ */
 export async function cancelJob(id: number): Promise<Job | null> {
   const job = await getJob(id);
   if (!job) return null;
