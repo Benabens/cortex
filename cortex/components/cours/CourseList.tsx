@@ -153,13 +153,13 @@ export function CourseList() {
           {confirming === c.id && (
             <div className="mt-3 rounded-lg border border-line bg-surface-2/40 p-3">
               <p className="text-[0.82rem] leading-relaxed text-ink-2">
-                Retirer <strong className="text-ink-1">{c.name}</strong> de ta liste ? Ses données
-                (corpus, annales, examens générés, faiblesses) ne sont <strong>pas</strong> effacées —
-                elles restent en place et un cours recréé sous le même identifiant les retrouverait.
+                Supprimer <strong className="text-ink-1">{c.name}</strong> ? Ses données
+                (corpus importé, annales, examens générés, faiblesses) sont <strong>effacées définitivement</strong>.
+                Exporte-les d’abord depuis Mon compte si tu veux les garder.
               </p>
               <Button size="sm" variant="secondary" className="mt-3" loading={busy} onClick={() => remove(c.id)}>
                 <Trash2 className="size-3.5" strokeWidth={2.25} />
-                Retirer le cours
+                Supprimer le cours et ses données
               </Button>
             </div>
           )}
