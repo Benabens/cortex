@@ -350,8 +350,14 @@ supprimé**). Un marqueur en base (`app_meta.backup:daily`) garantit **une seule
 exécution par jour** même avec deux instances pendant un redéploiement ; un
 échec rend le marqueur et le tick suivant (30 min) réessaie. Une configuration
 partielle est refusée au boot avec la liste des variables manquantes
-(sauvegardes désactivées, l'app démarre). L'image embarque `postgresql-client-17`
-(PGDG) : `pg_dump` doit être **au moins** de la version du serveur.
+(sauvegardes désactivées, l'app démarre). L'image embarque le client PostgreSQL
+**18** (dépôt PGDG, `ARG PG_CLIENT_MAJOR=18` dans le Dockerfile) : `pg_dump`
+**refuse** un serveur plus récent que lui (« server version mismatch »), donc
+la version majeure du client doit être **≥ celle du Postgres managé** (Railway :
+18 aujourd'hui). Si Railway passe en 19 : `--build-arg PG_CLIENT_MAJOR=19` ou
+change le défaut. Le serveur le vérifie **au démarrage** et journalise un
+`[backup] AVERTISSEMENT — pg_dump N est plus ancien que le serveur M` : à lire
+après chaque déploiement, avant d'attendre la sauvegarde de 3 h.
 
 Disposition distante : `<BACKUP_S3_PREFIX>/cortex-backup-<horodatage>/{data.tar.gz,
 postgres.dump,manifest.json}` — `manifest.json` est envoyé **en dernier** : un

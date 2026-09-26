@@ -51,10 +51,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 poppler-utils procps util-linux gcc libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Outils client PostgreSQL 17 (pg_dump / pg_restore / psql) pour les sauvegardes
-# quotidiennes (lib/backup) : la version de pg_dump doit être ≥ celle du serveur
-# managé, or Debian n'embarque que la 15 → dépôt officiel PGDG, pinné.
-ARG PG_CLIENT_MAJOR=17
+# Outils client PostgreSQL (pg_dump / pg_restore / psql) pour les sauvegardes
+# quotidiennes (lib/backup). pg_dump REFUSE un serveur plus récent que lui
+# (« server version mismatch ») : PG_CLIENT_MAJOR doit être ≥ la version
+# majeure du Postgres managé (Railway : 18). Debian n'embarque que la 15 →
+# dépôt officiel PGDG. Surcharge : docker build --build-arg PG_CLIENT_MAJOR=19.
+ARG PG_CLIENT_MAJOR=18
 RUN set -eux; \
     install -d /usr/share/postgresql-common/pgdg; \
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc; \
