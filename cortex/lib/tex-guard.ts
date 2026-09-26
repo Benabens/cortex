@@ -40,7 +40,11 @@ const BANNED = [
   // \csname ni \catcode ils ne peuvent pas forger un nom interdit — \lowercase
   // n'agit que sur les caractères, pas sur les noms de macros — et un corrigé
   // les emploie couramment.)
-  "csname", "catcode", "scantokens", "makeatletter",
+  // fabrication indirecte : \UseName{@@input} / \ExpandArgs{c} / \@nameuse forgent
+  // une séquence de contrôle à partir d'une chaîne, exactement comme \csname.
+  "csname", "catcode", "scantokens", "makeatletter", "UseName", "ExpandArgs", "nameuse", "ifundefined", "IfFileExists",
+  // images hors \includegraphics (chemin non contrôlable ici) : bannies.
+  "pgfimage", "pgfdeclareimage",
   "usepackage", "RequirePackage", "documentclass",
   "batchmode", "nonstopmode", "scrollmode", "errorstopmode",
 ];
@@ -50,6 +54,8 @@ const EXPL3_RE = /\\[A-Za-z@]+[_:][A-Za-z_:@]*/g;
 /** Primitives XeTeX (tectonic = XeTeX) : \XeTeXpicfile, \XeTeXpdffile, encodages, glyphes… */
 const XETEX_RE = /\\XeTeX[A-Za-z]*/g;
 const ENV_RE = /\\(?:begin|end)\s*\{([^}]*)\}/g;
+/** \begin / \end SANS accolade (`\begin\x`) : le nom vient d'une macro, invérifiable → refus. */
+const ENV_NO_BRACE_RE = /\\(?:begin|end)(?![A-Za-z@])(?!\s*\{)/g;
 
 /**
  * ENVIRONNEMENTS en LISTE BLANCHE : `\begin{X}` exécute `\csname X\endcsname`
@@ -82,7 +88,17 @@ function allowedEnvs(): Set<string> {
   for (const block of trustedBlocks()) for (const m of block.matchAll(PREAMBLE_ENV_DEF_RE)) set.add(m[1].trim());
   return (_preambleEnvs = set);
 }
-const GRAPHICS_RE = /\\includegraphics\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}/g;
+const GRAPHICS_RE = /\\includegraphics\*?\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}/g;
+/** Têtes \includegraphics : l'argument doit être une accolade littérale (`\includegraphics\p` = chemin invérifiable → refus). */
+const GRAPHICS_HEAD_RE = /\\includegraphics\*?(?![A-Za-z@])/g;
+function graphicsWithoutBrace(body: string): string[] {
+  const out: string[] = [];
+  for (const m of body.matchAll(GRAPHICS_HEAD_RE)) {
+    const rest = body.slice(m.index! + m[0].length).replace(/^\s*(?:\[[^\]]*\])?\s*/, "");
+    if (!rest.startsWith("{")) out.push(`${m[0]} sans accolade`);
+  }
+  return out;
+}
 const SAFE_GRAPHICS_PATH = /^[A-Za-z0-9_][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_][A-Za-z0-9._-]*)*$/;
 
 export class TexHazardError extends Error {
@@ -121,10 +137,12 @@ export function findTexHazards(tex: string): string[] {
     const name = m[1].trim();
     if (!envs.has(name)) found.push(`\\begin{${name}}`);
   }
+  for (const m of body.matchAll(ENV_NO_BRACE_RE)) found.push(`${m[0].trim()} sans accolade`);
   for (const m of body.matchAll(GRAPHICS_RE)) {
     const p = m[1].trim().replace(/^"|"$/g, "");
     if (!SAFE_GRAPHICS_PATH.test(p) || p.split("/").includes("..")) found.push(`\\includegraphics{${p}}`);
   }
+  found.push(...graphicsWithoutBrace(body));
   return Array.from(new Set(found));
 }
 

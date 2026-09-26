@@ -79,6 +79,22 @@ test("les primitives dangereuses sont rejetées, une par une", async () => {
     String.raw`\begin{filecontents*}{piege.tex}x\end{filecontents*}`,
     String.raw`\begin{csname}input\end{csname}`,
     String.raw`\begin{environnementinconnu}x\end{environnementinconnu}`,
+    // Lot 2b-5 : contournements de la forme des motifs (vérifiés sous tectonic --untrusted,
+    // qui LIT les fichiers hors dossier : le garde est la seule barrière).
+    String.raw`\UseName{@@input}{/etc/passwd}`,
+    String.raw`\ExpandArgs{c}\use{@@input}{/etc/passwd}`,
+    String.raw`\@nameuse{@@input}{/etc/passwd}`,
+    String.raw`\def\x{@@input}\begin\x{/etc/passwd}`,
+    String.raw`\def\x{document}\end\x`,
+    String.raw`\begin \x`,
+    String.raw`\includegraphics*{/etc/passwd}`,
+    String.raw`\includegraphics*[width=2cm]{../../secret.png}`,
+    String.raw`\def\p{{/etc/passwd}}\includegraphics\p`,
+    String.raw`\includegraphics [width=2cm] \p`,
+    String.raw`\pgfimage{/etc/passwd}`,
+    String.raw`\pgfimage[width=2cm]{fig.png}`,
+    String.raw`\pgfdeclareimage[width=2cm]{x}{/etc/passwd}`,
+    String.raw`\IfFileExists{/etc/passwd}{oui}{non}`,
   ];
   for (const c of cases) {
     const body = `\\begin{document}\nTexte ${c} texte\n\\end{document}`;
