@@ -88,7 +88,7 @@ test("aucune route d'assistance ne garde l'ancien gate sans débit", () => {
   const routes = ["drill", "check-solution", "weaknesses/mine", "weaknesses/analyze", "weaknesses/process"];
   for (const r of routes) {
     const src = fs.readFileSync(path.join(__dirname, "..", "app", "api", r, "route.ts"), "utf8");
-    assert.ok(src.includes("assistGate("), `${r} : pas de réservation d'assistance`);
+    assert.ok(/assist(?:Gate|Call)\(/.test(src), `${r} : pas de réservation d'assistance`);
     assert.ok(!src.includes('recordGeneration("assist"'), `${r} : ancien comptage sans débit encore présent`);
   }
 });

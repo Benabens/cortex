@@ -34,11 +34,12 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     try {
       // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
       // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, non remboursé.
-      const gate = await (await import("@/lib/billing/reserve")).assistGate("drill");
-      if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
-      const drill = await generateDrill(c);
+      const { assistCall } = await import("@/lib/billing/reserve");
+      const drill = await assistCall("drill", () => generateDrill(c));
       return NextResponse.json({ ok: true, drill });
     } catch (e: unknown) {
+      const { AssistRefused } = await import("@/lib/billing/reserve");
+      if (e instanceof AssistRefused) return NextResponse.json({ error: e.message }, { status: e.status });
       const err = e as LlmError;
       const status = err.code === "UNAVAILABLE" || err.code === "SPEND_CAP" || err.code === "QUOTA" || err.code === "CREDITS" ? 503 : 502;
       return NextResponse.json({ error: err.message ?? String(e), code: err.code }, { status });

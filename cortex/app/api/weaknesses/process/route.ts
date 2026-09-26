@@ -75,13 +75,12 @@ async function handlePOST(req: NextRequest) {
   try {
     // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
     // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, non remboursé.
-    const gate = await (await import("@/lib/billing/reserve")).assistGate("weakness-process");
-    if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
-    const text = await completeText({
+    const { assistCall } = await import("@/lib/billing/reserve");
+    const text = await assistCall("weakness-process", () => completeText({
       prompt: buildPrompt({ topic: row.topic, description: row.description, imageRel }),
       model: chosenModel,
       timeoutMs: 190_000,
-    });
+    }));
     const parsed = extractJson<Analysis>(text);
     if (!parsed?.topic || !Array.isArray(parsed.concepts)) {
       throw new Error("Réponse IA incomplète.");
@@ -90,6 +89,8 @@ async function handlePOST(req: NextRequest) {
     await updateWeaknessAnalysis(Number(id), parsed.topic, description);
     return NextResponse.json({ ok: true, weakness: await getWeakness(Number(id)) });
   } catch (e: unknown) {
+    const { AssistRefused } = await import("@/lib/billing/reserve");
+    if (e instanceof AssistRefused) return NextResponse.json({ error: e.message }, { status: e.status });
     const err = e as LlmError;
     const status = err.code === "UNAVAILABLE" || err.code === "SPEND_CAP" || err.code === "QUOTA" || err.code === "CREDITS" ? 503 : 502;
     return NextResponse.json({ error: err.message ?? String(e), code: err.code }, { status });

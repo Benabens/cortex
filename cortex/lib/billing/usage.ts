@@ -261,7 +261,22 @@ export async function spentTodayByUser(userId = currentUser()): Promise<number> 
  */
 export async function assertSpendCap(provider: string): Promise<void> {
   if (!isPaidProvider(provider)) return;
+  try {
+    await assertSpendCapUnchecked();
+  } catch (e) {
+    if (e instanceof LlmError) throw e;
+    // Base injoignable : un plafond INVÉRIFIABLE vaut plafond atteint en
+    // déploiement gardé (l'appel payant ne part pas) ; en dev, on laisse passer.
+    const message = e instanceof Error ? e.message.slice(0, 200) : String(e);
+    if (isGuardedDeployment()) {
+      log("error", "spend_cap.check_failed_closed", { message });
+      throw new LlmError("Plafond de dépense invérifiable (base indisponible) : appel au modèle refusé. Réessaie dans un instant.", "UNAVAILABLE");
+    }
+    log("warn", "spend_cap.check_failed", { message });
+  }
+}
 
+async function assertSpendCapUnchecked(): Promise<void> {
   const globalCap = spendCapUsd();
   if (globalCap !== null) {
     const spent = await totalSpendUsd();

@@ -181,15 +181,52 @@ export async function releaseJobSlot(userId: string, ref: string): Promise<void>
  * null = passe ; sinon {status, error} à renvoyer tel quel.
  */
 export async function assistGate(kind: string): Promise<GateIssue | null> {
+  const r = await assistReserve(kind);
+  return "issue" in r ? r.issue : null;
+}
+
+/** Comme assistGate, mais rend la référence de la réservation quand elle passe (pour un remboursement ciblé). */
+export async function assistReserve(kind: string): Promise<{ issue: GateIssue } | { ref: string }> {
   // Moteur indisponible : refus AVANT toute réservation — un débit non
   // remboursable ne doit jamais précéder un appel qui ne partira pas.
   const { llmAvailable, llmUnavailableReason } = await import("@/lib/llm");
-  if (!llmAvailable()) return { status: 503, error: llmUnavailableReason() ?? "Moteur LLM indisponible." };
+  if (!llmAvailable()) return { issue: { status: 503, error: llmUnavailableReason() ?? "Moteur LLM indisponible." } };
   // `kind` (drill, check-solution…) est le libellé du compteur ; le tarif est celui d'« assist ».
-  const r = await reserveGeneration({
-    bucket: "assist", kind, costCenti: creditCost("assist"),
-    ref: `assist:${currentUser()}:${crypto.randomUUID()}`,
-  });
-  if (r.ok) return null;
-  return { status: r.status, error: r.error };
+  const ref = `assist:${currentUser()}:${crypto.randomUUID()}`;
+  const r = await reserveGeneration({ bucket: "assist", kind, costCenti: creditCost("assist"), ref });
+  if (r.ok) return { ref };
+  return { issue: { status: r.status, error: r.error } };
+}
+
+/** Refus d'un appel d'assistance par la réservation (rafale, quota, solde, moteur absent). */
+export class AssistRefused extends Error {
+  constructor(readonly status: number, message: string) { super(message); this.name = "AssistRefused"; }
+}
+
+/**
+ * Codes d'erreur émis par NOS gardes AVANT que quoi que ce soit ne parte chez le
+ * fournisseur (comptage en vol fail-closed, plafond de dépense) : la réservation
+ * est rendue. Un échec du fournisseur lui-même (429, 5xx, réseau) reste débité,
+ * comme décidé au lot 2 : l'appel est parti.
+ */
+const OWN_GATE_CODES = new Set(["UNAVAILABLE", "SPEND_CAP"]);
+
+/**
+ * Réserve 0,1 crédit, exécute l'appel, et REMBOURSE si l'appel a été refusé par
+ * nos propres gardes avant d'être envoyé. Lève AssistRefused si la réservation
+ * elle-même est refusée ; laisse remonter les autres erreurs telles quelles.
+ */
+export async function assistCall<T>(kind: string, fn: () => Promise<T>): Promise<T> {
+  const r = await assistReserve(kind);
+  if ("issue" in r) throw new AssistRefused(r.issue.status, r.issue.error);
+  try {
+    return await fn();
+  } catch (e) {
+    const code = (e as { code?: string } | null)?.code;
+    if (code && OWN_GATE_CODES.has(code)) {
+      const { refundGeneration } = await import("./credits");
+      await refundGeneration(`assist ${kind}`, r.ref);
+    }
+    throw e;
+  }
 }
