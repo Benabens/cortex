@@ -2,6 +2,7 @@ import { checkSolution } from "@/lib/check-solution";
 import { LlmError } from "@/lib/llm";
 import { useCourseOr404 } from "@/lib/req";
 import { UPLOAD_LIMITS, readFormData, readJson, withBodyLimit } from "@/lib/upload-limit";
+import { fieldTooLong } from "@/lib/field-limits";
 import { logLoopRoute } from "@/lib/req-log";
 import { uploadsDir } from "@/lib/paths";
 import crypto from "node:crypto";
@@ -58,6 +59,8 @@ async function handlePOST(req: NextRequest) {
   }
 
   if (!statement) return NextResponse.json({ error: "Énoncé manquant." }, { status: 400 });
+  const tooLong = fieldTooLong("statement", statement) ?? fieldTooLong("answer", answer);
+  if (tooLong) return tooLong;
   if (!answer && !imageRel) return NextResponse.json({ error: "Donne ta réponse (texte ou photo)." }, { status: 400 });
 
   try {

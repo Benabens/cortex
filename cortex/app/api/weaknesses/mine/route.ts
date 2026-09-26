@@ -5,6 +5,7 @@ import { logLoopRoute } from "@/lib/req-log";
 import { createWeakness, listWeaknesses } from "@/lib/weaknesses";
 import { NextRequest, NextResponse } from "next/server";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
+import { fieldTooLong } from "@/lib/field-limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,6 +31,8 @@ async function handlePOST(req: NextRequest) {
   const { text } = await readJson(req, ({ text: "" }));
   const t = String(text ?? "").trim();
   if (t.length < 40) return NextResponse.json({ error: "Colle une discussion (au moins quelques échanges)." }, { status: 400 });
+  const tooLong = fieldTooLong("text", t);
+  if (tooLong) return tooLong;
 
   try {
     // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant

@@ -6,6 +6,7 @@ import { q } from "@/db/q";
 import { dueConcepts } from "@/lib/schedule";
 import { NextRequest, NextResponse } from "next/server";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
+import { fieldTooLong } from "@/lib/field-limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,6 +29,8 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     const { concept } = await readJson(req, ({ concept: "" }));
     const c = String(concept ?? "").trim();
     if (!c) return NextResponse.json({ error: "concept manquant" }, { status: 400 });
+    const tooLong = fieldTooLong("concept", c);
+    if (tooLong) return tooLong;
     try {
       // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
       // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, non remboursé.

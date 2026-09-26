@@ -3,6 +3,7 @@ import { uploadsDir } from "@/lib/paths";
 import { preflightGeneration } from "@/lib/preflight";
 import { requireCourse } from "@/lib/req";
 import { UPLOAD_LIMITS, readFormData, readJson, withBodyLimit } from "@/lib/upload-limit";
+import { fieldTooLong } from "@/lib/field-limits";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -48,6 +49,8 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     payload = { target: String(target ?? "").trim() || undefined };
   }
 
+  const tooLong = fieldTooLong("target", payload.target ?? "") ?? fieldTooLong("note", payload.note ?? "");
+  if (tooLong) return tooLong;
   if (!payload.target && !payload.imageRel) {
     return NextResponse.json({ error: "Donne un sujet OU une image d'exercice." }, { status: 400 });
   }
