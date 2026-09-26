@@ -27,3 +27,27 @@ test("postgres : conversion ×100 en une instruction, idempotente, soldes affich
   assert.equal(await credits.getBalance("alice"), 5);
   assert.equal(await credits.getBalanceCenti("bob"), 200);
 });
+
+test("2b-7 : une ligne écrite par l'ANCIEN code après la migration (unit NULL, crédits entiers) est lue en centièmes, puis convertie une seule fois", async () => {
+  const { authRun, authAll, authGet } = await import("../db/auth-store");
+  const credits = await import("../lib/billing/credits");
+  // Marqueur déjà posé (test précédent) et drapeau mémoire levé : c'est le
+  // déploiement glissant — l'ancienne instance écrit encore en crédits entiers.
+  await authRun(`INSERT INTO credit_transactions (user_id, delta, reason, ref, created_at) VALUES (?,?,?,?,?)`, "carol", 3, "achat ancien code", "old:1", "2026-09-03 10:00:00");
+  assert.equal(await credits.getBalanceCenti("carol"), 300 + 200, "lecture : NULL = crédits entiers ×100 (+ palier gratuit)");
+  // Deux instances redémarrent en même temps : conversion par ligne, une seule fois.
+  credits.resetLedgerUnitCheck();
+  await Promise.all([credits.ensureLedgerUnit(), credits.ensureLedgerUnit()]);
+  const rows = await authAll<{ delta: number; unit: string | null }>(`SELECT delta, unit FROM credit_transactions WHERE ref = ?`, "old:1");
+  assert.deepEqual(rows.map((r) => [Number(r.delta), r.unit]), [[300, "centi"]]);
+  assert.equal(await credits.getBalanceCenti("carol"), 500);
+  // Les lignes déjà converties par la migration initiale portent l'unité.
+  const alice = await authAll<{ unit: string | null }>(`SELECT unit FROM credit_transactions WHERE user_id = ?`, "alice");
+  assert.ok(alice.length >= 3 && alice.every((r) => r.unit === "centi"));
+  // Nouvelles écritures : unité explicite ; historique lu en centièmes.
+  await credits.addTransaction("carol", 30, "test", "new:1");
+  const row = await authGet<{ delta: number; unit: string }>(`SELECT delta, unit FROM credit_transactions WHERE ref = ?`, "new:1");
+  assert.deepEqual([Number(row!.delta), row!.unit], [30, "centi"]);
+  assert.equal(await credits.getBalanceCenti("carol"), 530);
+  assert.deepEqual((await credits.listTransactions("carol")).map((t) => Number(t.delta)), [30, 200, 300], "historique en centièmes (palier gratuit écrit à la première lecture)");
+});

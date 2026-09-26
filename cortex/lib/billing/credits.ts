@@ -84,11 +84,24 @@ const UNIT_KEY = "credits_unit";
 let _unitChecked = false;
 
 /**
- * Convertit UNE fois un ledger hérité (crédits entiers) en centièmes.
- * Atomique et idempotent : le marqueur et la conversion sont posés ensemble
- * (transaction sqlite ; instruction unique avec CTE en Postgres) — deux
- * processus qui démarrent en même temps ne convertissent pas deux fois.
- * Une base NEUVE reçoit le marqueur sans rien convertir.
+ * `delta` NORMALISÉ en centièmes, quelle que soit l'unité d'écriture de la
+ * ligne : 'centi' (ce code) ou NULL (crédits entiers : ancien code pendant un
+ * déploiement glissant, base héritée). Toute lecture du ledger passe par là —
+ * le solde ne dépend jamais de l'avancement de la conversion.
+ */
+export const DELTA_CENTI = `CASE WHEN unit = 'centi' THEN delta ELSE delta * ${CENTI} END`;
+
+/**
+ * Convertit en centièmes les lignes encore en crédits entiers (`unit IS NULL`).
+ * PAR LIGNE et idempotent : deux instances qui démarrent ensemble ne
+ * convertissent jamais deux fois la même ligne (chaque UPDATE ne touche que
+ * les lignes sans unité et pose l'unité dans le même ordre SQL) ; une ligne
+ * écrite par l'ancien code APRÈS la migration est rattrapée au passage
+ * suivant — et lue juste entre-temps grâce à DELTA_CENTI. Le marqueur
+ * `app_meta.credits_unit` reste posé pour information ; `_unitChecked` n'est
+ * qu'une économie de requêtes : aucune lecture n'en dépend, donc une
+ * conversion annulée par une transaction englobante (sqlite : SAVEPOINT) est
+ * sans conséquence.
  */
 export async function ensureLedgerUnit(): Promise<void> {
   if (_unitChecked) return;
@@ -96,19 +109,12 @@ export async function ensureLedgerUnit(): Promise<void> {
     const db = authSqlite();
     if (!db) return;
     db.transaction(() => {
-      const done = db.prepare(`SELECT value FROM app_meta WHERE key = ?`).get(UNIT_KEY);
-      if (done) return;
-      db.prepare(`UPDATE credit_transactions SET delta = delta * ${CENTI}`).run();
-      db.prepare(`INSERT INTO app_meta (key, value) VALUES (?, ?)`).run(UNIT_KEY, "centi");
+      db.prepare(`UPDATE credit_transactions SET delta = delta * ${CENTI}, unit = 'centi' WHERE unit IS NULL`).run();
+      db.prepare(`INSERT OR IGNORE INTO app_meta (key, value) VALUES (?, ?)`).run(UNIT_KEY, "centi");
     })();
   } else {
-    // Le marqueur ne s'insère qu'une fois (clé primaire) ; la conversion ne
-    // s'exécute que si CE processus l'a inséré.
-    await authRun(
-      `WITH m AS (INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING RETURNING key)
-       UPDATE credit_transactions SET delta = delta * ${CENTI} WHERE EXISTS (SELECT 1 FROM m)`,
-      UNIT_KEY, "centi",
-    );
+    await authRun(`UPDATE credit_transactions SET delta = delta * ${CENTI}, unit = 'centi' WHERE unit IS NULL`);
+    await authRun(`INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING`, UNIT_KEY, "centi");
   }
   _unitChecked = true;
 }
@@ -142,7 +148,7 @@ export async function addTransaction(
   }
   try {
     await authRun(
-      `INSERT INTO credit_transactions (user_id, delta, reason, ref, created_at) VALUES (?,?,?,?,?)`,
+      `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, created_at) VALUES (?,?,?,?,'centi',?)`,
       userId, delta, reason, ref ?? null, nowStr(),
     );
     return true;
@@ -167,7 +173,7 @@ export async function purchasedBalanceCenti(userId = currentUser()): Promise<num
   await ensureLedgerUnit();
   await ensureSignupCredits(userId);
   const r = await authGet<{ total: number | null }>(
-    `SELECT coalesce(sum(delta), 0) total FROM credit_transactions WHERE user_id = ?`, userId,
+    `SELECT coalesce(sum(${DELTA_CENTI}), 0) total FROM credit_transactions WHERE user_id = ?`, userId,
   );
   return Number(r?.total ?? 0);
 }
@@ -351,7 +357,7 @@ export async function refundGeneration(kind: string, ref: string, userId = curre
   try {
     if (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, `refund:${ref}`)) return;
     const debited = await authGet<{ delta: number; user_id: string; sub_amount: number | null; created_at: string }>(
-      `SELECT delta, user_id, sub_amount, created_at FROM credit_transactions WHERE ref = ?`, ref,
+      `SELECT ${DELTA_CENTI} AS delta, user_id, sub_amount, created_at FROM credit_transactions WHERE ref = ?`, ref,
     );
     if (!debited) return;               // jamais débité → rien à rendre
     const u = debited.user_id || userId;
@@ -374,7 +380,7 @@ export async function refundGeneration(kind: string, ref: string, userId = curre
 /** Historique (API /api/billing). */
 export async function listTransactions(userId = currentUser(), limit = 50) {
   return authAll<{ delta: number; reason: string; ref: string | null; sub_amount: number; created_at: string }>(
-    `SELECT delta, reason, ref, sub_amount, created_at FROM credit_transactions WHERE user_id = ? ORDER BY id DESC LIMIT ?`,
+    `SELECT ${DELTA_CENTI} AS delta, reason, ref, sub_amount, created_at FROM credit_transactions WHERE user_id = ? ORDER BY id DESC LIMIT ?`,
     userId, limit,
   );
 }

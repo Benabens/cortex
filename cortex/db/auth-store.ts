@@ -341,7 +341,13 @@ const LLM_USAGE_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
  *  l'abonnement (centièmes), pour rendre chaque part dans sa poche. */
 const CREDIT_TX_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "sub_amount", sqlite: "INTEGER NOT NULL DEFAULT 0", pg: "integer NOT NULL DEFAULT 0" },
+  // Unité de `delta` PAR LIGNE : 'centi' (écrit par ce code), NULL = crédits
+  // entiers (ancien code — déploiement glissant, base héritée). Les lectures
+  // normalisent (lib/billing/credits DELTA_CENTI) : aucune ne dépend d'un drapeau.
+  { name: "unit", sqlite: "TEXT", pg: "text" },
 ];
+/** Base déjà convertie ×100 (marqueur posé) AVANT l'arrivée de la colonne `unit` : ses lignes sont en centièmes. */
+const UNIT_BACKFILL_SQL = `UPDATE credit_transactions SET unit = 'centi' WHERE unit IS NULL AND EXISTS (SELECT 1 FROM app_meta WHERE key = 'credits_unit')`;
 
 // ---------------- backend sqlite (fichier dédié) ----------------
 
@@ -370,7 +376,10 @@ function sqliteAuth(): Database.Database {
       (_sqliteAuth.prepare("PRAGMA table_info(credit_transactions)").all() as Array<{ name: string }>).map((c) => c.name),
     );
     for (const c of CREDIT_TX_ADDED) {
-      if (!haveTx.has(c.name)) _sqliteAuth.exec(`ALTER TABLE credit_transactions ADD COLUMN ${c.name} ${c.sqlite}`);
+      if (!haveTx.has(c.name)) {
+        _sqliteAuth.exec(`ALTER TABLE credit_transactions ADD COLUMN ${c.name} ${c.sqlite}`);
+        if (c.name === "unit") _sqliteAuth.exec(UNIT_BACKFILL_SQL);
+      }
     }
   }
   return _sqliteAuth;
@@ -401,8 +410,13 @@ async function pgExec(): Promise<{
     for (const c of LLM_USAGE_ADDED) {
       await authPgQuery(`ALTER TABLE public.llm_usage ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
     }
+    const txCols = new Set((await authPgQuery(
+      `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'credit_transactions'`, [],
+    )).map((r) => String(r.column_name)));
     for (const c of CREDIT_TX_ADDED) {
+      if (txCols.has(c.name)) continue;
       await authPgQuery(`ALTER TABLE public.credit_transactions ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
+      if (c.name === "unit") await authPgQuery(UNIT_BACKFILL_SQL.replace(/credit_transactions|app_meta/g, (t) => `public.${t}`), []);
     }
     _pgReady = true;
   }
