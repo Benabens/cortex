@@ -179,6 +179,10 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
   const subLive = !!sub?.live;
   const canBuy = data.purchase.enabled && data.terms.accepted;
   const legalOk = !!(data.legal.terms && data.legal.refund);
+  // La case suit la décision de l'API (purchase.enabled) : en production sans
+  // documents publiés l'achat est fermé côté serveur ; hors production
+  // (staging), on peut accepter et acheter en test même sans liens.
+  const canAccept = data.purchase.enabled;
 
   return (
     <section className="flex flex-col gap-4" aria-labelledby="billing-title">
@@ -301,7 +305,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
               <input
                 type="checkbox"
                 className="mt-0.5 size-4 accent-[var(--color-violet)]"
-                disabled={busy === "terms" || !legalOk}
+                disabled={busy === "terms" || !canAccept}
                 onChange={(e) => { if (e.target.checked) onAcceptTerms(); }}
                 aria-describedby="terms-help"
               />
@@ -311,7 +315,9 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
                 {" "}et la{" "}
                 {data.legal.refund ? <a className="underline underline-offset-2 hover:text-ink-1" href={data.legal.refund} target="_blank" rel="noreferrer">politique de remboursement</a> : "politique de remboursement"}
                 {" "}(version {data.terms.version}). Obligatoire avant le premier achat.
-                {!legalOk && <span className="block text-ink-4">Les documents ne sont pas encore publiés : l’acceptation sera possible dès qu’ils le seront.</span>}
+                {!legalOk && (canAccept
+                  ? <span className="block text-ink-4">Documents légaux non publiés : instance de test, l’acceptation vaut pour cet environnement seulement.</span>
+                  : <span className="block text-ink-4">Les documents ne sont pas encore publiés : l’acceptation sera possible dès qu’ils le seront.</span>)}
               </span>
             </label>
           )}

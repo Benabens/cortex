@@ -97,3 +97,14 @@ test("retour de Stripe : confirmation ou annulation en clair", async () => {
   assert.match(await render(base(), { retour: "ok" }), /Paiement confirmé/);
   assert.match(await render(base(), { retour: "annule" }), /Rien n’a été débité/);
 });
+
+test("revue : hors production sans liens légaux mais achats ouverts (staging), la case CGV reste cochable", async () => {
+  const html = await render(base({
+    legal: { terms: null, privacy: null, refund: null, notice: null },
+    terms: { version: "2026-09", accepted: false, acceptedAt: null },
+  }));
+  const checkbox = /<input[^>]*type="checkbox"[^>]*>/.exec(html)?.[0] ?? "";
+  assert.ok(checkbox, "case présente");
+  assert.ok(!/\sdisabled(?:=""|(?=[\s>]))/.test(checkbox), "la case ne doit pas être désactivée quand l'API autorise l'achat");
+  assert.match(html, /non publiés|non configurés/i);
+});
