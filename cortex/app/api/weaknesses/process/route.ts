@@ -49,15 +49,6 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
 async function handlePOST(req: NextRequest) {
   const denied = useCourseOr404(req);
   if (denied) return denied;
-  // Appel LLM INLINE → quota d'assistance par user/jour
-  // (DAILY_ASSIST_QUOTA, no-op sans env), compté à la tentative.
-  {
-    const { assistGate } = await import("@/lib/billing/reserve");
-    // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE avant
-    // l'appel au modèle : 0,1 crédit — l'assistance n'est plus gratuite.
-    const gate = await assistGate("weakness-process");
-    if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
-  }
   const { id, model } = await readJson(req, ({ id: null }));
   if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
 
@@ -75,6 +66,10 @@ async function handlePOST(req: NextRequest) {
   }
 
   try {
+    // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
+    // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, non remboursé.
+    const gate = await (await import("@/lib/billing/reserve")).assistGate("weakness-process");
+    if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
     const text = await completeText({
       prompt: buildPrompt({ topic: row.topic, description: row.description, imageRel }),
       model: typeof model === "string" && model ? model : "opus",

@@ -27,20 +27,15 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
 async function handlePOST(req: NextRequest) {
   const denied = useCourseOr404(req);
   if (denied) return denied;
-  // Appel LLM INLINE → quota d'assistance par user/jour
-  // (DAILY_ASSIST_QUOTA, no-op sans env), compté à la tentative.
-  {
-    const { assistGate } = await import("@/lib/billing/reserve");
-    // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE avant
-    // l'appel au modèle : 0,1 crédit — l'assistance n'est plus gratuite.
-    const gate = await assistGate("weakness-mine");
-    if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
-  }
   const { text } = await readJson(req, ({ text: "" }));
   const t = String(text ?? "").trim();
   if (t.length < 40) return NextResponse.json({ error: "Colle une discussion (au moins quelques échanges)." }, { status: 400 });
 
   try {
+    // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
+    // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, non remboursé.
+    const gate = await (await import("@/lib/billing/reserve")).assistGate("weakness-mine");
+    if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
     const mined = await mineConversation(t);
     if (!mined.length) return NextResponse.json({ created: 0, weaknesses: await listWeaknesses(), note: "Aucune faiblesse claire détectée dans cette discussion." });
     for (const m of mined) {
