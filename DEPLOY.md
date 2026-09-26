@@ -178,7 +178,20 @@ pose `AUTH_EMAIL_ENABLED=1` puis :
 ### Tarification — le prix d'un crédit doit couvrir le coût API
 
 - Coûts par génération (crédits) : **examen = 2**, préparation de cours = 2,
-  QCM/exercice/labs/format = 1. (Surcharge : `CREDITS_COST_JSON`.)
+  QCM/exercice/labs/format = 1, **assistance = 0,1** (drill, correction,
+  analyses — débitée avant chaque appel, jamais remboursée). Le prix suit la
+  taille : mock QCM standard (20 + 3 ouvertes) = 1 unité, +1 par tranche ;
+  examen : 8 exercices inclus puis +1 crédit par 4. (Surcharge :
+  `CREDITS_COST_JSON`, décimales acceptées.)
+- **Mesure avant de fixer les prix** : `npm run cost:report` (dans le
+  conteneur ou avec `DATABASE_URL`) sort le coût réel moyen/max par type de
+  job et par appel d'assistance depuis `llm_usage`, face au prix en crédits
+  (`CREDIT_PRICE_CHF`, `CHF_PER_USD`).
+- Garde-fous : une génération n'existe qu'après une **réservation atomique**
+  (solde, quota du jour, rafale, `MAX_ACTIVE_JOBS` = 2 générations
+  simultanées par compte) ; un job échoué n'est remboursé que s'il n'a rien
+  coûté au fournisseur ; un achat remboursé ou contesté est repris (solde
+  négatif → tout est bloqué).
 - Estimation Sonnet (tarifs 07/2026 : 3 $/MTok entrée, 15 $/MTok sortie) : un
   examen complet multi-passes ≈ 200-400k tokens entrée + 60-120k sortie ≈
   **1,2 à 3,0 $** → un examen (2 crédits) vendu 6 CHF au pack le plus petit
