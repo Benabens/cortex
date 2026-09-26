@@ -139,6 +139,8 @@ jobs:
           docker exec cortex sqlite3 --version
           docker exec cortex pdftoppm -v 2>&1 | head -1
           docker exec cortex ps --version | head -1
+          docker exec cortex pg_dump --version
+          docker exec cortex pg_restore --version
           docker exec cortex node_modules/.bin/tsx --version
           echo "✓ outillage complet"
 
