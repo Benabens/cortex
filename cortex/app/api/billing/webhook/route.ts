@@ -29,7 +29,7 @@ export const dynamic = "force-dynamic";
  */
 
 function livemodeMatchesKey(event: Stripe.Event, key: string): boolean {
-  return Boolean(event.livemode) === key.startsWith("sk_live_");
+  return Boolean(event.livemode) === /^(sk|rk)_live_/.test(key); // clés secrètes et restreintes
 }
 
 async function creditPurchase(session: Stripe.Checkout.Session, eventId: string): Promise<NextResponse> {
