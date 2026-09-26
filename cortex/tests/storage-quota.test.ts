@@ -75,3 +75,15 @@ test("routes d'envoi : refs/upload refuse en 413 quand le quota est atteint, san
   assert.ok(!fs.existsSync(path.join(tmp, "ml", "refs", "gros.pdf")), "rien n'a été écrit");
   setStatfsForTests(null);
 });
+
+test("revue : les six routes d'envoi passent par checkStorage AVANT de lire le corps", async () => {
+  const fs = await import("node:fs");
+  const routes = ["refs/upload", "sources", "sources/import", "weaknesses", "exercises/generate", "check-solution"];
+  for (const r of routes) {
+    const src = fs.readFileSync(`app/api/${r}/route.ts`, "utf8");
+    const guard = src.indexOf("checkStorage(");
+    const read = Math.min(...["readFormData(", "readJson("].map((k) => src.indexOf(k)).filter((i) => i >= 0));
+    assert.ok(guard > 0, `${r} : checkStorage absent`);
+    assert.ok(guard < read, `${r} : checkStorage doit précéder la lecture du corps`);
+  }
+});

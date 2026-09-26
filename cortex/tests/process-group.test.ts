@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawn, execFileSync } from "node:child_process";
-import { killProcessGroup } from "../lib/process-group";
+import { killProcessGroup, pgidOf } from "../lib/process-group";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -34,6 +34,7 @@ test("avec `ps` : le groupe réel est visé", async () => {
   child.unref();
   const pid = child.pid!;
   await sleep(200);
+  assert.equal(pgidOf(pid), pid, "ps voit bien le processus détaché comme leader de son groupe");
   const target = killProcessGroup(pid);
   assert.equal(target, -pid);
   await sleep(300);
