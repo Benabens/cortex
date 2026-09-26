@@ -22,8 +22,11 @@ import path from "node:path";
 
 export type S3Object = { key: string; lastModified: Date; size: number };
 
+/** Corps d'un envoi : un fichier (chemin + taille, envoyé en flux) ou un petit tampon. */
+export type PutBody = Buffer | { path: string; size: number };
+
 export interface BackupStore {
-  put(key: string, body: Buffer, contentType?: string): Promise<void>;
+  put(key: string, body: PutBody, contentType?: string): Promise<void>;
   list(prefix: string): Promise<S3Object[]>;
   remove(keys: string[]): Promise<void>;
   get(key: string): Promise<Buffer>;
@@ -86,7 +89,10 @@ export function s3Store(cfg: BackupS3Config): BackupStore {
   });
   return {
     async put(key, body, contentType) {
-      await client.send(new s3.PutObjectCommand({ Bucket: cfg.bucket, Key: key, Body: body, ContentType: contentType, ContentLength: body.length }));
+      // Flux : une archive de volume de plusieurs Go ne passe jamais en mémoire.
+      const Body = Buffer.isBuffer(body) ? body : fs.createReadStream(body.path);
+      const ContentLength = Buffer.isBuffer(body) ? body.length : body.size;
+      await client.send(new s3.PutObjectCommand({ Bucket: cfg.bucket, Key: key, Body, ContentType: contentType, ContentLength }));
     },
     async list(prefix) {
       const out: S3Object[] = [];
@@ -134,9 +140,10 @@ export async function pushBackup(store: BackupStore, cfg: BackupS3Config, dir: s
   const keys: string[] = [];
   for (const f of files) {
     const key = `${cfg.prefix}${folder}/${f}`;
-    const body = fs.readFileSync(path.join(dir, f));
-    log(`[backup:s3] → ${key} (${(body.length / 1024).toFixed(0)} Kio)`);
-    await store.put(key, body, contentTypeFor(f));
+    const file = path.join(dir, f);
+    const size = fs.statSync(file).size;
+    log(`[backup:s3] → ${key} (${(size / 1024).toFixed(0)} Kio)`);
+    await store.put(key, { path: file, size }, contentTypeFor(f));
     keys.push(key);
   }
   return { folder, keys };
