@@ -1,4 +1,4 @@
-import { assertSpendCap, recordUsage } from "@/lib/billing/usage";
+import { assertSpendCap, closeUsage, discardUsage, openUsage } from "@/lib/billing/usage";
 import { callerSite, currentJob } from "@/lib/billing/usage-context";
 import { inc, log, observe } from "@/lib/metrics";
 import { cacheGet, cacheKey, cachePut, cacheable } from "./cache";
@@ -72,36 +72,41 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
 
   const retries = maxRetries(provider.name as ProviderName);
   const t0 = Date.now();
-  let attempt = 0; // dernière (= réussie) tentative, pour l'attribution llm_usage
-  // Tentative PERDUE après envoi (timeout, annulation en vol) : le fournisseur a
-  // très probablement facturé l'entrée et une sortie partielle, sans nous rendre
-  // de compteur. On la compte avec une ESTIMATION haute (entrée ≈ taille du
-  // prompt, sortie = max_tokens demandé) pour que le plafond ne sous-estime
-  // jamais la dépense. Les refus avant traitement (429, 5xx, auth) ne sont pas
-  // facturés et ne sont pas comptés.
-  const onAttemptError = async (a: number, e: unknown) => {
-    const code = e instanceof LlmError ? e.code : undefined;
-    if (code !== "TIMEOUT" && code !== "ABORTED") return;
-    await recordUsage({
-      provider: provider.name,
-      model: mapModel(model, provider.name as ProviderName),
-      tokensIn: Math.ceil((req.prompt.length + (req.system?.length ?? 0)) / 4),
-      tokensOut: req.maxTokens ?? 16_000,
-      latencyMs: Date.now() - t0,
-      callSite: job ? `${job.type}:${callSite ?? "?"}` : callSite,
-      jobId: job?.id ?? null,
-      attempt: a,
-      estimated: true,
-    });
-  };
+  const siteLabel = job ? `${job.type}:${callSite ?? "?"}` : callSite;
+  // COMPTAGE EN VOL (cf. lib/billing/usage openUsage) : chaque tentative est
+  // écrite comme ligne estimée AVANT l'envoi, finalisée avec les compteurs
+  // réels au retour, gardée telle quelle si le fournisseur a facturé sans
+  // répondre (timeout, annulation en vol), retirée s'il a refusé avant de
+  // traiter (429, 5xx, auth). Un worker tué en plein appel laisse une trace.
+  const tokensInEstimate = Math.ceil((req.prompt.length + (req.system?.length ?? 0)) / 4);
+  const modelId = mapModel(model, provider.name as ProviderName);
   try {
     const res = await globalLimiter().run(() =>
-      withRetry((a) => { attempt = a; return provider.complete(req); }, {
+      withRetry(async (a) => {
+        const pending = await openUsage({
+          provider: provider.name, model: modelId,
+          tokensIn: tokensInEstimate, tokensOut: req.maxTokens ?? 16_000,
+          callSite: siteLabel, jobId: job?.id ?? null, attempt: a,
+        });
+        try {
+          const r = await provider.complete(req);
+          await closeUsage(pending, {
+            provider: r.provider ?? provider.name, model: r.model ?? modelId,
+            tokensIn: r.usage?.inputTokens, tokensOut: r.usage?.outputTokens,
+            cacheRead: r.usage?.cacheReadTokens, cacheWrite: r.usage?.cacheWriteTokens,
+            latencyMs: Date.now() - t0,
+          });
+          return r;
+        } catch (e) {
+          const code = e instanceof LlmError ? e.code : undefined;
+          if (code !== "TIMEOUT" && code !== "ABORTED") await discardUsage(pending);
+          throw e;
+        }
+      }, {
         retries,
         baseMs: retryBaseMs(),
         signal: req.signal,
         label: `${provider.name}/${model}`,
-        onAttemptError,
       })
     );
     const ms = Date.now() - t0;
@@ -110,20 +115,6 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
     if (res.usage?.inputTokens) inc("cortex_llm_input_tokens_total", labels, res.usage.inputTokens);
     if (res.usage?.outputTokens) inc("cortex_llm_output_tokens_total", labels, res.usage.outputTokens);
     log("info", "llm.call", { ...labels, ms, in: res.usage?.inputTokens, out: res.usage?.outputTokens });
-    // Comptage de coût GLOBAL (table llm_usage, attribué au user/cours courant).
-    // Pas sur le chemin cache-hit (retour anticipé plus haut) → jamais de double compte.
-    await recordUsage({
-      provider: res.provider ?? provider.name,
-      model: res.model ?? model,
-      tokensIn: res.usage?.inputTokens,
-      tokensOut: res.usage?.outputTokens,
-      cacheRead: res.usage?.cacheReadTokens,
-      cacheWrite: res.usage?.cacheWriteTokens,
-      latencyMs: ms,
-      callSite: job ? `${job.type}:${callSite ?? "?"}` : callSite,
-      jobId: job?.id ?? null,
-      attempt,
-    });
     if (key) await cachePut(key, res);
     return res;
   } catch (e) {

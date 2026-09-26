@@ -338,6 +338,17 @@ export async function authGet<T = Record<string, unknown>>(sql: string, ...param
   return (await authAll<T>(sql, ...params))[0];
 }
 
+/** INSERT avec récupération de l'id (lastInsertRowid / RETURNING id). */
+export async function authInsert(sql: string, ...params: SqlParam[]): Promise<number> {
+  if (dbDriverName() === "sqlite") {
+    return Number(sqliteAuth().prepare(sql).run(...params).lastInsertRowid);
+  }
+  const ex = await pgExec();
+  const withReturning = /returning\s/i.test(sql) ? sql : `${sql.replace(/;\s*$/, "")} RETURNING id`;
+  const rows = await ex.query(toDollarParams(withReturning), params);
+  return Number((rows[0] as { id?: number | string })?.id ?? 0);
+}
+
 export async function authRun(sql: string, ...params: SqlParam[]): Promise<void> {
   if (dbDriverName() === "sqlite") {
     sqliteAuth().prepare(sql).run(...params);
