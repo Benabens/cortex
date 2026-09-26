@@ -196,15 +196,19 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string): Promise<
       s.id, pi, userId, centi, nowStr(),
     );
     return true;
-  }).catch((e) => {
-    if (/unique|constraint/i.test(String(e))) return false; // course sur le ref : l'autre a crédité
+  }).catch(async (e) => {
+    // Course sur le ref UNIQUE : l'autre instance a crédité — vérifié, pas supposé.
+    if (/unique|constraint/i.test(String(e)) && (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, ref))) return false;
     throw e;
   });
   // Un remboursement/litige arrivé AVANT l'achat attendait ce moment.
   if (credited && pi) {
-    const orphan = await authGet<{ why: string }>(`SELECT why FROM stripe_orphan_reversals WHERE payment_intent = ?`, pi);
+    const orphan = await authGet<{ why: string; amount_cents: number | null }>(`SELECT why, amount_cents FROM stripe_orphan_reversals WHERE payment_intent = ?`, pi);
     if (orphan) {
-      const reversed = await addTransaction(userId, -centi, `${orphan.why} (reçu avant l'achat)`, `stripe:reversal:${pi}`);
+      // Remboursement partiel mémorisé : au prorata du montant, jamais plus que l'achat.
+      const amount = Number(orphan.amount_cents ?? 0);
+      const take = amount > 0 ? Math.min(centi, creditsCentiForAmount(amount)) : centi;
+      const reversed = await addTransaction(userId, -take, `${orphan.why} (reçu avant l'achat)`, `stripe:reversal:${pi}`);
       await authRun(`DELETE FROM stripe_orphan_reversals WHERE payment_intent = ?`, pi);
       log("info", "stripe.orphan_reversal_applied", { paymentIntent: pi, user: userId });
       return { ok: true, action: "pack-credited-then-reversed", credited, reversed };
