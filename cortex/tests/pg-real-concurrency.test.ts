@@ -134,3 +134,20 @@ test("jobs : 8 createJobExclusive parallèles avec de quoi payer UN examen → u
   const wins = await inCourse(user, "cs-202", () => Promise.all(Array.from({ length: N }, () => jobs.claimJobStart(id))));
   assert.equal(wins.filter(Boolean).length, 1);
 });
+
+test("reprise Stripe : remboursement ET litige simultanés sur le même paiement → une seule reprise", { skip }, async () => {
+  const { handleStripeEvent } = await import("../lib/billing/stripe-events");
+  const credits = await import("../lib/billing/credits");
+  const user = "pg_refund_race";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ev = (id: string, type: string, object: unknown): any => ({ id, type, data: { object } });
+  await handleStripeEvent(ev("evt_race_buy", "checkout.session.completed", { id: "cs_race", mode: "payment", payment_status: "paid", amount_total: 900, payment_intent: "pi_race", metadata: { cortexUserId: user, plan: "credits_10", credits: "10" } }));
+  assert.equal(await credits.getBalanceCenti(user), 1200);
+  const results = await Promise.all(Array.from({ length: N }, (_, i) =>
+    handleStripeEvent(i % 2 === 0
+      ? ev(`evt_race_r${i}`, "charge.refunded", { payment_intent: "pi_race", amount: 900, amount_refunded: 900 })
+      : ev(`evt_race_d${i}`, "charge.dispute.created", { payment_intent: "pi_race", amount: 900 })),
+  ));
+  assert.equal(results.filter((r) => r.reversed).length, 1, JSON.stringify(results.map((r) => r.action)));
+  assert.equal(await credits.getBalanceCenti(user), 200, "10 repris une seule fois");
+});
