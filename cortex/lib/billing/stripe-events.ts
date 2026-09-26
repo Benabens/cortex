@@ -1,9 +1,9 @@
 import type Stripe from "stripe";
-import { authGet, authRun } from "@/db/auth-store";
+import { authGet, authRun, authTx } from "@/db/auth-store";
 import { nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import {
-  addTransaction, getSubscription, grantSubscriptionMonth, linkSubscription, resolveUserByCustomer,
+  addTransaction, ensureLedgerUnit, getSubscription, grantSubscriptionMonth, linkSubscription, resolveUserByCustomer,
   setSubscriptionStatus, subscriptionCreditsCenti, subscriptionMonthlyCreditsCenti, toCenti,
 } from "./credits";
 
@@ -31,7 +31,33 @@ import {
  * été consommé passe en dette dans le ledger — le compte est bloqué jusqu'au
  * prochain achat. Une seule reprise par payment_intent (refund puis litige
  * sur le même achat ne reprennent pas deux fois). Unités : centièmes.
+ *
+ * PAIEMENT INCONNU EN BASE (achat antérieur à `stripe_purchases`, ou événements
+ * dans le désordre) : on remonte, dans l'ordre, à la session Checkout via l'API
+ * Stripe (`lookup`), aux métadonnées de la charge (payment_intent_data), au
+ * client/e-mail + montant converti en crédits au prix du pack. Sinon la reprise
+ * est MÉMORISÉE (`stripe_orphan_reversals`), signalée en erreur, et appliquée
+ * dès que l'achat correspondant arrive. Jamais silencieux.
+ *
+ * ATOMICITÉ : crédit du pack et enregistrement de l'achat vont dans la même
+ * transaction — un échec lève (500 → rejeu Stripe), rien n'est crédité à moitié.
  */
+
+/** Prix d'un crédit en centimes pour convertir un montant remboursé (pack : 9 € les 10). CREDIT_PRICE_CENTS pour l'ajuster. */
+export function creditPriceCents(): number {
+  const n = Number(process.env.CREDIT_PRICE_CENTS);
+  return Number.isFinite(n) && n > 0 ? n : 90;
+}
+/** Montant (centimes) → centièmes de crédit, arrondi. */
+export function creditsCentiForAmount(amountCents: number): number {
+  return Math.round((amountCents / creditPriceCents()) * 100);
+}
+
+/** Accès Stripe injecté par la route (testable sans réseau). */
+export type StripeLookup = {
+  sessionByPaymentIntent(paymentIntent: string): Promise<{ id: string; userId: string | null; credits: number | null } | null>;
+};
+export type HandleOptions = { lookup?: StripeLookup };
 
 export type PlanKey = "pro_monthly" | "pro_yearly" | "credits_10";
 export type PlanSpec = { lookupKey: string; mode: "subscription" | "payment"; credits?: number; label: string };
@@ -81,7 +107,7 @@ export type HandleResult = {
 };
 
 /** Traite un événement Stripe DÉJÀ vérifié. Idempotent. Lève pour un échec RETRYABLE (la route répond 500). */
-export async function handleStripeEvent(event: Stripe.Event): Promise<HandleResult> {
+export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions = {}): Promise<HandleResult> {
   if (await isProcessed(event.id)) return { ok: true, action: "duplicate", duplicate: true, credited: false, reversed: false };
 
   let res: HandleResult;
@@ -101,12 +127,21 @@ export async function handleStripeEvent(event: Stripe.Event): Promise<HandleResu
       break;
     case "charge.refunded": {
       const charge = event.data.object as Stripe.Charge;
-      res = await reverseByPaymentIntent(idOf(charge.payment_intent), "remboursement Stripe");
+      res = await reverseByPaymentIntent(idOf(charge.payment_intent), "remboursement Stripe", {
+        amountCents: Number(charge.amount_refunded ?? charge.amount ?? 0) || null,
+        metadata: charge.metadata ?? null, customerId: idOf(charge.customer),
+        email: charge.billing_details?.email ?? charge.receipt_email ?? null, lookup: opts.lookup,
+      });
       break;
     }
     case "charge.dispute.created": {
       const dispute = event.data.object as Stripe.Dispute;
-      res = await reverseByPaymentIntent(idOf(dispute.payment_intent), "litige Stripe");
+      const charge = typeof dispute.charge === "object" && dispute.charge ? (dispute.charge as Stripe.Charge) : null;
+      res = await reverseByPaymentIntent(idOf(dispute.payment_intent), "litige Stripe", {
+        amountCents: Number(dispute.amount ?? 0) || null,
+        metadata: charge?.metadata ?? null, customerId: idOf(charge?.customer),
+        email: charge?.billing_details?.email ?? null, lookup: opts.lookup,
+      });
       break;
     }
     default:
@@ -128,8 +163,14 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string): Promise<
     return { ok: true, action: "subscription-linked" };
   }
 
-  // Pack : crédité seulement si réellement payé (moyen différé → async_payment_succeeded).
-  if (s.payment_status !== "paid" && s.payment_status !== "no_payment_required") {
+  // Pack : crédité seulement si de l'argent a RÉELLEMENT été encaissé — moyen
+  // différé → async_payment_succeeded ; session gratuite (no_payment_required,
+  // coupon 100 %, montant 0) → jamais de crédit.
+  const amount = s.amount_total == null ? null : Number(s.amount_total);
+  if (s.payment_status !== "paid" || (amount !== null && !(amount > 0))) {
+    if (s.payment_status === "no_payment_required" || amount === 0) {
+      log("warn", "stripe.free_session_ignored", { session: s.id, status: s.payment_status, amount });
+    }
     return { ok: true, action: "pack-unpaid", credited: false };
   }
   const credits = Number(s.metadata?.credits ?? 0);
@@ -139,13 +180,35 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string): Promise<
   if (legacy) return { ok: true, action: "pack-credited", credited: false };
   const ref = `stripe:cs:${s.id}`;
   const centi = toCenti(credits);
-  const credited = await addTransaction(userId, centi, `achat ${plan ?? "pack"}`, ref);
-  if (credited) {
-    await authRun(
+  const pi = idOf(s.payment_intent);
+  await ensureLedgerUnit();
+  // Crédit + enregistrement de l'achat dans UNE transaction : un échec lève
+  // (rien de crédité, 500 → Stripe rejoue) ; le ref UNIQUE tranche une course.
+  const credited = await authTx(async (tx) => {
+    if (await tx.get<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, ref)) return false;
+    await tx.run(
+      `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, created_at) VALUES (?,?,?,?,'centi',?)`,
+      userId, centi, `achat ${plan ?? "pack"}`, ref, nowStr(),
+    );
+    await tx.run(
       `INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, created_at) VALUES (?,?,?,?,?)
        ON CONFLICT (session_id) DO NOTHING`,
-      s.id, idOf(s.payment_intent), userId, centi, nowStr(),
-    ).catch((e) => log("warn", "stripe.purchase_record_failed", { message: String(e).slice(0, 200) }));
+      s.id, pi, userId, centi, nowStr(),
+    );
+    return true;
+  }).catch((e) => {
+    if (/unique|constraint/i.test(String(e))) return false; // course sur le ref : l'autre a crédité
+    throw e;
+  });
+  // Un remboursement/litige arrivé AVANT l'achat attendait ce moment.
+  if (credited && pi) {
+    const orphan = await authGet<{ why: string }>(`SELECT why FROM stripe_orphan_reversals WHERE payment_intent = ?`, pi);
+    if (orphan) {
+      const reversed = await addTransaction(userId, -centi, `${orphan.why} (reçu avant l'achat)`, `stripe:reversal:${pi}`);
+      await authRun(`DELETE FROM stripe_orphan_reversals WHERE payment_intent = ?`, pi);
+      log("info", "stripe.orphan_reversal_applied", { paymentIntent: pi, user: userId });
+      return { ok: true, action: "pack-credited-then-reversed", credited, reversed };
+    }
   }
   return { ok: true, action: "pack-credited", credited };
 }
@@ -195,8 +258,22 @@ async function onSubscriptionDeleted(sub: Stripe.Subscription): Promise<HandleRe
   return { ok: true, action: "subscription-deleted" };
 }
 
+type ReversalContext = {
+  amountCents?: number | null;
+  metadata?: Record<string, string> | null;
+  customerId?: string | null;
+  email?: string | null;
+  lookup?: StripeLookup;
+};
+
+async function userByEmail(email: string | null | undefined): Promise<string | null> {
+  if (!email) return null;
+  const r = await authGet<{ id: string }>(`SELECT id FROM users WHERE lower(email) = lower(?)`, email.trim());
+  return r?.id ?? null;
+}
+
 /** Reprise des crédits d'un paiement remboursé/contesté — pack OU facture d'abonnement, une seule fois. */
-async function reverseByPaymentIntent(paymentIntent: string | null, why: string): Promise<HandleResult> {
+async function reverseByPaymentIntent(paymentIntent: string | null, why: string, ctx: ReversalContext = {}): Promise<HandleResult> {
   if (!paymentIntent) return { ok: true, action: "reversal", reversed: false, error: "payment_intent absent" };
   const ref = `stripe:reversal:${paymentIntent}`;
   if (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, ref)) {
@@ -224,6 +301,40 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string)
     const reversed = await addTransaction(invoice.user_id, -(granted - take), `${why} (abonnement)`, ref);
     return { ok: true, action: "invoice-reversed", reversed };
   }
-  log("warn", "stripe.reversal_unknown_payment", { paymentIntent, why });
-  return { ok: true, action: "reversal", reversed: false, error: "paiement inconnu" };
+  // 3) Achat antérieur à `stripe_purchases` : Stripe sait quelle session porte ce paiement.
+  if (ctx.lookup) {
+    let session: Awaited<ReturnType<StripeLookup["sessionByPaymentIntent"]>> = null;
+    try { session = await ctx.lookup.sessionByPaymentIntent(paymentIntent); }
+    catch (e) { throw new Error(`Stripe injoignable pour retrouver la session de ${paymentIntent} — retry (${String(e).slice(0, 120)})`); }
+    if (session?.userId && session.credits) {
+      const centi = toCenti(session.credits);
+      await authRun(
+        `INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, created_at) VALUES (?,?,?,?,?) ON CONFLICT (session_id) DO NOTHING`,
+        session.id, paymentIntent, session.userId, centi, nowStr(),
+      );
+      const reversed = await addTransaction(session.userId, -centi, `${why} (achat retrouvé via Stripe)`, ref);
+      return { ok: true, action: "pack-reversed", reversed };
+    }
+  }
+  // 4) Métadonnées portées par la charge (payment_intent_data) ; 5) client / e-mail connu. Montant → crédits au prix du pack.
+  const metaUser = ctx.metadata?.cortexUserId ?? null;
+  const metaCredits = Number(ctx.metadata?.credits ?? 0);
+  const userId = metaUser
+    ?? (ctx.customerId ? await resolveUserByCustomer(ctx.customerId) : null)
+    ?? (await userByEmail(ctx.email));
+  if (userId && ctx.amountCents && ctx.amountCents > 0) {
+    // Remboursement partiel : au prorata du montant ; sinon, crédits des métadonnées si le montant couvre tout.
+    const centi = creditsCentiForAmount(ctx.amountCents);
+    const capped = metaCredits > 0 ? Math.min(centi, toCenti(metaCredits)) : centi;
+    const reversed = await addTransaction(userId, -capped, `${why} (${ctx.amountCents} centimes → crédits)`, ref);
+    log("warn", "stripe.reversal_by_amount", { paymentIntent, user: userId, amountCents: ctx.amountCents, centi: capped });
+    return { ok: true, action: "pack-reversed-by-amount", reversed };
+  }
+  // 6) Rien d'exploitable : on MÉMORISE (appliqué si l'achat arrive ensuite) et on le dit fort.
+  await authRun(
+    `INSERT INTO stripe_orphan_reversals (payment_intent, why, amount_cents, created_at) VALUES (?,?,?,?) ON CONFLICT (payment_intent) DO NOTHING`,
+    paymentIntent, why, ctx.amountCents ?? null, nowStr(),
+  );
+  log("error", "stripe.reversal_unresolved", { paymentIntent, why, amountCents: ctx.amountCents ?? null, customer: ctx.customerId ?? null });
+  return { ok: true, action: "reversal-orphaned", reversed: false, error: `paiement inconnu (${paymentIntent}) : reprise mémorisée, à contrôler dans Stripe` };
 }

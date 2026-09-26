@@ -74,7 +74,8 @@ export function checkoutParams(o: { plan: PlanKey; priceId: string; userId: stri
     metadata,
     ...(spec.mode === "payment"
       // Pack : facture émise (obligation légale), client Stripe créé pour rattacher remboursements et litiges.
-      ? { invoice_creation: { enabled: true }, customer_creation: "always" as const }
+      // …et métadonnées sur le PaymentIntent : la charge d'un remboursement les porte, même si l'achat est inconnu en base.
+      ? { invoice_creation: { enabled: true }, customer_creation: "always" as const, payment_intent_data: { metadata } }
       // Abonnement : métadonnées aussi sur l'abonnement → une facture arrivée avant le checkout retrouve l'utilisateur.
       : { subscription_data: { metadata } }),
   };

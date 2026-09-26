@@ -132,6 +132,12 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       created_at TEXT NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS stripe_purchases_pi_idx ON stripe_purchases (payment_intent)`,
+    `CREATE TABLE IF NOT EXISTS stripe_orphan_reversals (
+      payment_intent TEXT PRIMARY KEY,
+      why TEXT NOT NULL,
+      amount_cents INTEGER,
+      created_at TEXT NOT NULL
+    )`,
     `CREATE TABLE IF NOT EXISTS subscriptions (
       user_id TEXT PRIMARY KEY,
       customer_id TEXT,
@@ -282,6 +288,12 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       created_at text NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS stripe_purchases_pi_idx ON public.stripe_purchases (payment_intent)`,
+    `CREATE TABLE IF NOT EXISTS public.stripe_orphan_reversals (
+      payment_intent text PRIMARY KEY,
+      why text NOT NULL,
+      amount_cents integer,
+      created_at text NOT NULL
+    )`,
     `CREATE TABLE IF NOT EXISTS public.subscriptions (
       user_id text PRIMARY KEY,
       customer_id text,
