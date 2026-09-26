@@ -284,7 +284,12 @@ export async function reconcileStaleJobs(): Promise<number> {
     fixed++;
     const attempts = r.attempts ?? 0;
     const maxAttempts = r.max_attempts ?? 2;
-    if (attempts < maxAttempts) {
+    // Jamais démarré (aucun PID, aucune tentative) : on ne le remet PAS en file —
+    // la pompe lancerait un worker sans garantie que la réservation de crédits a
+    // eu lieu (spawn échoué, ou réservation impossible dont la mise en erreur a
+    // elle-même échoué). Erreur, remboursé si rien n'a coûté ; l'utilisateur relance.
+    const neverStarted = !r.pid && attempts === 0;
+    if (attempts < maxAttempts && !neverStarted) {
       const msg = `Worker interrompu — reprise automatique (tentative ${attempts + 1}/${maxAttempts}), progression conservée.`;
       await q.run(
         `UPDATE jobs SET status = 'queued', pid = NULL, heartbeat_at = NULL, attempts = ?, current_step = ?, updated_at = ? WHERE id = ?`,
