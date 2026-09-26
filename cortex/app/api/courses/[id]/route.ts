@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteCourseRow, updateCourseRow, type CoursePatch } from "@/db/courses-store";
+import { updateCourseRow, type CoursePatch } from "@/db/courses-store";
 import { InvalidCourseError, parseTeachers } from "@/lib/course-create";
 import { ensureCoursesLoaded, listCoursesOf, ownsCourse, reloadCourses } from "@/lib/courses";
 import { toDto } from "@/lib/course-dto";
@@ -83,19 +83,16 @@ export const PATCH = withBodyLimit(async function PATCH(req: NextRequest, { para
 })
 
 /**
- * RETRAIT — on supprime la FICHE du cours, pas ses données.
- *
- * Le corpus, les examens générés et les faiblesses vivent dans le tenant
- * `t_<user>_<cours>` et sur le volume : les effacer ici serait irréversible et
- * n'a pas été demandé. Le cours disparaît de l'interface ; ses données restent
- * en place et un cours recréé avec le même identifiant les retrouverait.
+ * SUPPRESSION — la fiche ET les données du cours (schéma tenant, fichiers,
+ * registre), après confirmation côté interface. Les cours historiques du
+ * propriétaire (corpus partagé, cours de référence) sont refusés en 409.
  */
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const g = await guard(req, id);
   if (g instanceof NextResponse) return g;
-  const n = await deleteCourseRow(id, g.user);
-  if (!n) return NextResponse.json({ error: "Cours introuvable." }, { status: 404 });
-  await reloadCourses();
-  return NextResponse.json({ ok: true, id, dataKept: true });
+  const { deleteCourseWithData } = await import("@/lib/course-deletion");
+  const r = await deleteCourseWithData(g.user, id);
+  if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
+  return NextResponse.json({ ok: true, id, dataDeleted: true, residues: r.residues.length });
 }

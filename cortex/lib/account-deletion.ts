@@ -72,7 +72,7 @@ export async function isOwnerAccount(userId: string): Promise<boolean> {
 
 /** Annule les jobs actifs de l'utilisateur (tue les workers) avant de dropper —
  *  sinon un worker en vol pourrait réécrire un fichier après l'effacement. */
-async function cancelUserJobs(userId: string, courses: string[], errors: string[]): Promise<void> {
+export async function cancelUserJobs(userId: string, courses: string[], errors: string[]): Promise<void> {
   const { cancelJob } = await import("@/lib/jobs");
   for (const course of courses) {
     try {
