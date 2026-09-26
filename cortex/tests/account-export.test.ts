@@ -104,3 +104,44 @@ test("GET /api/account/export : 401 sans session ; 200 tar.gz en flux avec expor
   assert.equal(r413.status, 413);
   delete process.env.EXPORT_MAX_MB;
 });
+
+test("4b-3 : un lien symbolique sous data/u/<slug>/ n'est pas suivi ; l'export ne crée ni schéma ni tenant ; le temporaire est nettoyé ; limite globale", async () => {
+  const { GET } = await import("../app/api/account/export/route");
+  const { userSlug } = await import("../db/context");
+  const { authGet, authAll } = await import("../db/auth-store");
+  const { reloadCourses } = await import("../lib/courses");
+  const outside = path.join(os.tmpdir(), `hors-dossier-${process.pid}.txt`);
+  fs.writeFileSync(outside, "HORS-DOSSIER-SECRET-TOKEN");
+  fs.symlinkSync(outside, path.join(tmp, "u", userSlug("alice"), "reseaux", "refs", "lien.txt"));
+  fs.symlinkSync(path.dirname(outside), path.join(tmp, "u", userSlug("alice"), "reseaux", "lien-dossier"));
+  await ownedCourse("jamais-ouvert", "alice", "Jamais ouvert"); await reloadCourses();
+  try {
+    const r = await GET(new NextRequest("http://cortex.test/api/account/export", { headers: { "x-cortex-user": "alice" } }));
+    assert.equal(r.status, 200, await r.clone().text());
+    const buf = Buffer.from(await r.arrayBuffer());
+    const archive = path.join(tmp, "alice2.tar.gz");
+    fs.writeFileSync(archive, buf);
+    const list = execFileSync("tar", ["-tzf", archive], { encoding: "utf8" });
+    assert.ok(!/lien\.txt|lien-dossier/.test(list), `liens symboliques présents : ${list}`);
+    const extracted = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-export-x-"));
+    execFileSync("tar", ["-xzf", archive, "-C", extracted]);
+    let hits = "";
+    try { hits = execFileSync("grep", ["-rl", "HORS-DOSSIER-SECRET-TOKEN", extracted], { encoding: "utf8" }).trim(); } catch { hits = ""; }
+    assert.equal(hits, "", "le contenu du fichier hors dossier a fui");
+    fs.rmSync(extracted, { recursive: true, force: true });
+    assert.match(list, /fichiers\/reseaux\/refs\/alice-annale\.pdf/, "les vrais fichiers sont bien là");
+    // Aucun effet de bord : pas de tenant ni de schéma pour le cours jamais ouvert.
+    assert.equal(await authGet(`SELECT 1 FROM tenants WHERE user_id = ? AND course = ?`, "alice", "jamais-ouvert"), undefined);
+    const { tenantSchema } = await import("../db/context");
+    assert.deepEqual(await authAll(`SELECT 1 FROM information_schema.schemata WHERE schema_name = ?`, tenantSchema("alice", "jamais-ouvert")), []);
+    await new Promise((res) => setTimeout(res, 300));
+    const tmpRoot = path.join(tmp, ".export-tmp");
+    assert.ok(!fs.existsSync(tmpRoot) || fs.readdirSync(tmpRoot).length === 0, "temporaire nettoyé");
+    process.env.EXPORT_MAX_CONCURRENT = "0";
+    const r429 = await GET(new NextRequest("http://cortex.test/api/account/export", { headers: { "x-cortex-user": "alice" } }));
+    assert.equal(r429.status, 429);
+  } finally {
+    delete process.env.EXPORT_MAX_CONCURRENT;
+    fs.rmSync(outside, { force: true });
+  }
+});

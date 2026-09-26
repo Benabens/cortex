@@ -10,12 +10,19 @@
  *   export/cours/<id>/<table>.json — chaque table du tenant, écrite par pages
  *   fichiers/              — data/u/<slug>/ (annales importées, artefacts)
  *
- * Bornes : refus au-delà de EXPORT_MAX_MB (défaut 2048) mesurés sur les
- * fichiers du compte ; un seul export à la fois par compte ; jamais une table
- * entière en mémoire (pages de 500 lignes) ; le tar sort en flux.
+ * Bornes : refus au-delà de EXPORT_MAX_MB (défaut 2048), mesurés sur les
+ * fichiers du compte ET sur tout ce qui est écrit dans le dossier temporaire ;
+ * un export à la fois par compte, EXPORT_MAX_CONCURRENT (2) au total ; jamais
+ * une table entière en mémoire (pages de 500 lignes) ; le tar sort en flux.
+ *
+ * SÛRETÉ : les fichiers du compte sont reliés par LIENS DURS (même volume :
+ * le temporaire vit sous CORTEX_DATA_DIR/.export-tmp) ; tout lien symbolique
+ * rencontré sous data/u/<slug>/ est IGNORÉ (jamais suivi : `tar` tourne sans
+ * -h) ; l'export ne passe JAMAIS par ensureTenant — il ne lit que les schémas
+ * déjà enregistrés dans public.tenants, en lecture seule : aucun schéma ni
+ * ligne de registre n'est créé. Le temporaire est nettoyé dans tous les cas.
  */
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
@@ -23,9 +30,8 @@ import { authAll, authGet } from "@/db/auth-store";
 import { runWithCourse } from "@/db/client";
 import { runWithUser, userSlug } from "@/db/context";
 import { dbDriverName, q } from "@/db/q";
-import { TABLES } from "@/db/tables";
 import { DELTA_CENTI } from "@/lib/billing/credits";
-import { dataRoot, ensureCoursesLoaded, listCoursesOf } from "@/lib/courses";
+import { courseDbPath, dataRoot, ensureCoursesLoaded, listCoursesOf } from "@/lib/courses";
 import { log } from "@/lib/metrics";
 import { userStorageBytes } from "@/lib/storage-quota";
 
@@ -40,42 +46,99 @@ export function exportMaxBytes(): number {
   const mb = Number(process.env.EXPORT_MAX_MB);
   return (Number.isFinite(mb) && mb >= 0 ? mb : 2048) * 1024 * 1024;
 }
+export function exportMaxConcurrent(): number {
+  const n = Number(process.env.EXPORT_MAX_CONCURRENT);
+  return Number.isInteger(n) && n >= 0 ? n : 2;
+}
 
-async function writeJsonPaged(file: string, fetchPage: (offset: number) => Promise<unknown[]>): Promise<number> {
+/** Compteur d'octets écrits dans le temporaire : dépassement → ExportTooLarge. */
+class Budget {
+  used = 0;
+  constructor(readonly max: number) {}
+  add(n: number): void {
+    this.used += n;
+    if (this.used > this.max) {
+      throw new ExportTooLarge(`L'export dépasse la limite (${(this.max / 1024 / 1024).toFixed(0)} Mo). Supprime des annales ou des fichiers importés, puis réessaie.`);
+    }
+  }
+}
+
+async function writeJsonPaged(file: string, budget: Budget, fetchPage: (offset: number) => Promise<unknown[]>): Promise<number> {
   const fd = fs.openSync(file, "w");
   let n = 0;
   try {
-    fs.writeSync(fd, "[");
+    budget.add(fs.writeSync(fd, "["));
     for (let offset = 0; ; offset += PAGE) {
       const rows = await fetchPage(offset);
       for (const row of rows) {
-        fs.writeSync(fd, (n ? ",\n" : "\n") + JSON.stringify(row));
+        budget.add(fs.writeSync(fd, (n ? ",\n" : "\n") + JSON.stringify(row)));
         n++;
       }
       if (rows.length < PAGE) break;
     }
-    fs.writeSync(fd, "\n]\n");
+    budget.add(fs.writeSync(fd, "\n]\n"));
   } finally { fs.closeSync(fd); }
   return n;
 }
 
-/** Cours dont ce compte a des données : ses fiches, plus ses tenants enregistrés (Postgres). */
-async function coursesOf(userId: string): Promise<string[]> {
+const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Tenants à exporter, en LECTURE SEULE et sans rien amorcer :
+ *  - Postgres : uniquement les schémas déjà enregistrés dans public.tenants,
+ *    lus directement (`"schema"."table"`), jamais via runWithCourse/ensureTenant ;
+ *  - sqlite (dev) : les cours possédés dont la base existe déjà sur le disque.
+ */
+type TenantReader = { course: string; tables: () => Promise<string[]>; page: (table: string, offset: number) => Promise<unknown[]> };
+async function tenantReaders(userId: string): Promise<TenantReader[]> {
   await ensureCoursesLoaded();
-  const ids = new Set(listCoursesOf(userId).map((c) => c.id));
   if (dbDriverName() === "postgres") {
-    for (const t of await authAll<{ course: string }>(`SELECT course FROM tenants WHERE user_id = ?`, userId)) ids.add(t.course);
+    const rows = await authAll<{ course: string; schema_name: string }>(`SELECT course, schema_name FROM tenants WHERE user_id = ? ORDER BY course`, userId);
+    return rows.filter((r) => IDENT.test(r.schema_name)).map((r) => ({
+      course: r.course,
+      tables: async () => (await authAll<{ table_name: string }>(
+        `SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND table_type = 'BASE TABLE' ORDER BY table_name`, r.schema_name,
+      )).map((t) => t.table_name).filter((t) => IDENT.test(t) && !SKIP_TABLES.has(t)),
+      page: (table, offset) => authAll(`SELECT * FROM "${r.schema_name}"."${table}" LIMIT ? OFFSET ?`, PAGE, offset),
+    }));
   }
-  return [...ids].sort();
+  return listCoursesOf(userId).filter((c) => fs.existsSync(courseDbPath(c.id))).map((c) => ({
+    course: c.id,
+    tables: () => runWithUser(userId, () => runWithCourse(c.id, async () =>
+      (await q.all<{ name: string }>(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`))
+        .map((t) => t.name).filter((t) => IDENT.test(t) && !SKIP_TABLES.has(t)))),
+    page: (table, offset) => runWithUser(userId, () => runWithCourse(c.id, () => q.all(`SELECT * FROM "${table}" LIMIT ? OFFSET ?`, PAGE, offset))),
+  }));
 }
 
-/** Écrit l'export dans `dir` (export/ + lien fichiers/). Renvoie les cours exportés. */
-export async function writeAccountExport(userId: string, dir: string): Promise<{ courses: string[]; files: string[] }> {
+/**
+ * Copie « fichiers/ » par liens durs (même volume), en IGNORANT tout lien
+ * symbolique (fichier ou dossier) : rien hors de data/u/<slug>/ ne peut entrer
+ * dans l'archive. Repli copie si le lien dur est impossible.
+ */
+function linkTree(src: string, dest: string, budget: Budget, skipped: string[]): void {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const e of fs.readdirSync(src, { withFileTypes: true })) {
+    const from = path.join(src, e.name);
+    const to = path.join(dest, e.name);
+    if (e.isSymbolicLink()) { skipped.push(from); continue; }
+    if (e.isDirectory()) { linkTree(from, to, budget, skipped); continue; }
+    if (!e.isFile()) continue;
+    const size = fs.lstatSync(from).size;
+    budget.add(size);
+    try { fs.linkSync(from, to); } catch { fs.copyFileSync(from, to); }
+  }
+}
+
+/** Écrit l'export dans `dir` (export/ + fichiers/). Renvoie les cours exportés. */
+export async function writeAccountExport(userId: string, dir: string, budget: Budget = new Budget(exportMaxBytes())): Promise<{ courses: string[]; files: string[] }> {
   const out = path.join(dir, "export");
   fs.mkdirSync(out, { recursive: true });
   const files: string[] = [];
   const write = (name: string, data: unknown) => {
-    fs.writeFileSync(path.join(out, name), JSON.stringify(data, null, 2) + "\n");
+    const text = JSON.stringify(data, null, 2) + "\n";
+    budget.add(Buffer.byteLength(text));
+    fs.writeFileSync(path.join(out, name), text);
     files.push(`export/${name}`);
   };
 
@@ -97,32 +160,32 @@ export async function writeAccountExport(userId: string, dir: string): Promise<{
   ).catch(() => undefined);
   write("credits.json", { unit: "centi (1 crédit = 100)", transactions, purchases, invoices, usage: { calls: Number(usage?.calls ?? 0), costUsd: Number(usage?.cost_usd ?? 0) } });
 
-  const courseIds = await coursesOf(userId);
-  for (const course of courseIds) {
-    const cdir = path.join(out, "cours", course);
+  const readers = await tenantReaders(userId);
+  const courseIds = readers.map((r) => r.course);
+  for (const r of readers) {
+    const cdir = path.join(out, "cours", r.course);
     fs.mkdirSync(cdir, { recursive: true });
-    for (const spec of TABLES) {
-      if (SKIP_TABLES.has(spec.name)) continue;
-      const file = path.join(cdir, `${spec.name}.json`);
+    for (const table of await r.tables()) {
+      const file = path.join(cdir, `${table}.json`);
       try {
-        await runWithUser(userId, () => runWithCourse(course, () =>
-          writeJsonPaged(file, (offset) => q.all(`SELECT * FROM ${spec.name} LIMIT ? OFFSET ?`, PAGE, offset)),
-        ));
-        files.push(`export/cours/${course}/${spec.name}.json`);
+        await writeJsonPaged(file, budget, (offset) => r.page(table, offset));
+        files.push(`export/cours/${r.course}/${table}.json`);
       } catch (e) {
-        // Table absente de ce tenant (ancienne base) : on le dit plutôt que d'échouer.
+        if (e instanceof ExportTooLarge) throw e;
         fs.rmSync(file, { force: true });
-        log("warn", "export.table_skipped", { course, table: spec.name, message: e instanceof Error ? e.message.slice(0, 120) : String(e) });
+        log("warn", "export.table_skipped", { course: r.course, table, message: e instanceof Error ? e.message.slice(0, 120) : String(e) });
       }
     }
   }
 
   const userDir = path.join(dataRoot(), "u", userSlug(userId));
-  if (fs.existsSync(userDir)) {
-    fs.symlinkSync(userDir, path.join(dir, "fichiers"), "dir");
+  const skipped: string[] = [];
+  if (fs.existsSync(userDir) && !fs.lstatSync(userDir).isSymbolicLink()) {
+    linkTree(userDir, path.join(dir, "fichiers"), budget, skipped);
     files.push("fichiers/");
   }
-  write("manifest.json", { createdAt: new Date().toISOString(), userId, courses: courseIds, files });
+  if (skipped.length) log("warn", "export.symlinks_skipped", { user: userId, count: skipped.length });
+  write("manifest.json", { createdAt: new Date().toISOString(), userId, courses: courseIds, files, symlinksIgnored: skipped.length, bytes: budget.used });
   return { courses: courseIds, files };
 }
 
@@ -131,21 +194,31 @@ const inFlight = new Set<string>();
 /** Prépare l'archive et renvoie un flux web (la route le passe tel quel à la réponse). */
 export async function streamAccountExport(userId: string): Promise<{ body: ReadableStream<Uint8Array>; filename: string }> {
   if (inFlight.has(userId)) throw new ExportBusy("Un export est déjà en cours pour ce compte : attends qu'il se termine.");
+  if (inFlight.size >= exportMaxConcurrent()) throw new ExportBusy("Trop d'exports en cours sur le serveur : réessaie dans quelques minutes.");
   const bytes = await userStorageBytes(userId);
   const max = exportMaxBytes();
   if (bytes > max) {
     throw new ExportTooLarge(`Tes fichiers pèsent ${(bytes / 1024 / 1024).toFixed(0)} Mo, au-delà de la limite d'export (${(max / 1024 / 1024).toFixed(0)} Mo). Supprime des annales ou des fichiers importés, puis réessaie.`);
   }
   inFlight.add(userId);
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-export-"));
-  const cleanup = () => { inFlight.delete(userId); fs.rmSync(tmp, { recursive: true, force: true }); };
+  // Temporaire SUR LE VOLUME (liens durs possibles), hors data/u/ (jamais compté ni exporté).
+  const tmpRoot = path.join(dataRoot(), ".export-tmp");
+  fs.mkdirSync(tmpRoot, { recursive: true });
+  const tmp = fs.mkdtempSync(path.join(tmpRoot, "x-"));
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    inFlight.delete(userId);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  };
   try {
-    await writeAccountExport(userId, tmp);
+    await writeAccountExport(userId, tmp, new Budget(max));
   } catch (e) {
     cleanup();
     throw e;
   }
-  const child = spawn("tar", ["-czhf", "-", "-C", tmp, "."], { stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn("tar", ["-czf", "-", "-C", tmp, "."], { stdio: ["ignore", "pipe", "pipe"] });
   let stderr = "";
   child.stderr.on("data", (d) => { stderr += String(d).slice(0, 500); });
   child.on("close", (code) => {
