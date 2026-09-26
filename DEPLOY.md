@@ -119,6 +119,16 @@ LEGAL_TERMS_VERSION=2026-09
 # — stockage : quota par compte (Mo) sur le volume, + refus sous 10 % d'espace libre —
 STORAGE_QUOTA_MB=200
 
+# — sauvegardes quotidiennes hors site (S3-compatible : R2, B2, MinIO…) —
+BACKUP_S3_ENDPOINT=https://⟨account⟩.r2.cloudflarestorage.com
+BACKUP_S3_BUCKET=cortex-backups
+BACKUP_S3_ACCESS_KEY_ID=⟨…⟩
+BACKUP_S3_SECRET_ACCESS_KEY=⟨…⟩
+# BACKUP_S3_REGION=auto        # défaut auto (R2) ; eu-central-003 (B2), etc.
+# BACKUP_S3_PREFIX=cortex      # dossier racine dans le bucket
+# BACKUP_KEEP_DAYS=14          # rétention ; le dernier complet est toujours gardé
+# BACKUP_HOUR_UTC=3            # heure (UTC) à partir de laquelle le jour est sauvegardé
+
 # — observabilité —
 METRICS_TOKEN=⟨openssl rand -hex 16⟩
 LOG_LEVEL=info
@@ -314,6 +324,46 @@ Postgres utilise `pg_restore --clean --if-exists`.
 > données d'un vrai moteur Postgres via PGlite, + les garde-fous). Le chemin
 > `pg_dump`/`pg_restore` réseau (Postgres managé) n'est pas exerçable hors d'un
 > hôte doté de `libpq` — à valider une fois sur Railway (voir ci-dessous).
+
+### Sauvegarde quotidienne hors site (automatique)
+
+Railway ne snapshotte **pas** les volumes et ses snapshots Postgres restent
+chez Railway. Dès que les quatre variables `BACKUP_S3_ENDPOINT`,
+`BACKUP_S3_BUCKET`, `BACKUP_S3_ACCESS_KEY_ID`, `BACKUP_S3_SECRET_ACCESS_KEY`
+sont posées, **le serveur lui-même** lance chaque jour (à partir de
+`BACKUP_HOUR_UTC`, défaut 3 h UTC) `npm run backup -- --push --prune --no-local` :
+dump `pg_dump` + archive du volume → bucket S3-compatible (Cloudflare R2 :
+10 Go gratuits, sans frais de sortie ; Backblaze B2 ; MinIO…), puis rétention
+`BACKUP_KEEP_DAYS` (défaut 14 ; **le dernier dossier complet n'est jamais
+supprimé**). Un marqueur en base (`app_meta.backup:daily`) garantit **une seule
+exécution par jour** même avec deux instances pendant un redéploiement ; un
+échec rend le marqueur et le tick suivant (30 min) réessaie. Une configuration
+partielle est refusée au boot avec la liste des variables manquantes
+(sauvegardes désactivées, l'app démarre). L'image embarque `postgresql-client-17`
+(PGDG) : `pg_dump` doit être **au moins** de la version du serveur.
+
+Disposition distante : `<BACKUP_S3_PREFIX>/cortex-backup-<horodatage>/{data.tar.gz,
+postgres.dump,manifest.json}` — `manifest.json` est envoyé **en dernier** : un
+dossier sans manifeste est incomplet (envoi coupé) et sera purgé.
+
+```bash
+npm run backup -- --push                  # envoi manuel (depuis un poste avec pg_dump)
+npm run backup:verify -- --list           # ce que contient le bucket
+npm run backup:verify -- --latest         # rapatrie la dernière et la vérifie
+```
+
+### Vérifier une sauvegarde
+
+```bash
+npm run backup:verify -- ./backups/cortex-backup-<horodatage>
+npm run backup:verify -- --latest                 # la plus récente du bucket
+npm run backup:verify -- --remote=<dossier>       # une sauvegarde distante précise
+```
+
+Contrôles : empreintes SHA-256, listage de `data.tar.gz`, et `pg_restore -l`
+sur `postgres.dump` (la table des matières doit se lire et contenir au moins
+une table — un dump tronqué échoue **ici**, pas le jour de la restauration).
+Rien n'est restauré. Code de sortie ≠ 0 = sauvegarde inutilisable.
 
 ### Où et à quelle fréquence
 

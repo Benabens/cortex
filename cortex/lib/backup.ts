@@ -252,7 +252,7 @@ export async function createBackup(opts: CreateBackupOptions): Promise<CreateBac
   return { dir: outDir, manifest };
 }
 
-function readManifest(backupPath: string): BackupManifest {
+export function readManifest(backupPath: string): BackupManifest {
   const mf = path.join(backupPath, "manifest.json");
   if (!fs.existsSync(mf)) {
     throw new Error(`Manifeste introuvable : ${mf} (le chemin est-il un dossier de backup ?)`);
@@ -261,7 +261,7 @@ function readManifest(backupPath: string): BackupManifest {
 }
 
 /** Vérifie les empreintes du backup avant de restaurer (détecte une archive corrompue). */
-function verifyChecksums(backupPath: string, m: BackupManifest): void {
+export function verifyChecksums(backupPath: string, m: BackupManifest): void {
   const check = (rel: string, want: string) => {
     const p = path.join(backupPath, rel);
     const got = sha256File(p);
