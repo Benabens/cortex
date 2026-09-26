@@ -36,6 +36,11 @@ export function assertAuthRequiredHosted(env: Partial<NodeJS.ProcessEnv> = proce
   const reasons: string[] = [];
   if (env.BILLING_ENABLED === "1") reasons.push("BILLING_ENABLED=1");
   if (env.RAILWAY_ENVIRONMENT || env.RAILWAY_PROJECT_ID || env.CORTEX_HOSTED === "1") reasons.push("instance hébergée (Railway / CORTEX_HOSTED=1)");
+  // `next start` direct sur un VPS : NODE_ENV=production ne prouve rien seul
+  // (Next le force), mais associé à une VRAIE base Postgres (pas PGlite, pas
+  // sqlite) c'est une mise en ligne, pas un poste de dev ni le smoke test CI.
+  const realPg = env.DB_DRIVER === "postgres" && !!env.DATABASE_URL && !env.DATABASE_URL.startsWith("pglite://");
+  if (env.NODE_ENV === "production" && realPg) reasons.push("NODE_ENV=production avec une base Postgres");
   if (!reasons.length) return;
   throw new Error(
     `Configuration dangereuse : ${reasons.join(" et ")} sans AUTH_ENABLED=1. ` +
