@@ -15,6 +15,9 @@ import path from "node:path";
  *  - une primitive de lecture/écriture de fichier ou d'exécution ;
  *  - un moyen de fabriquer une telle primitive sans l'écrire (\csname,
  *    \catcode, \lowercase, \scantokens, notation ^^, \makeatletter…) ;
+ *  - un environnement hors liste blanche (\begin{X} = \csname X\endcsname :
+ *    \begin{@@input} lit un fichier sans écrire \input), un nom expl3
+ *    (\file_input:n), une primitive XeTeX (\XeTeXpdffile) ;
  *  - \includegraphics vers un chemin absolu, remontant ou exotique.
  * Le compilateur tourne en plus avec `--untrusted` quand il le supporte
  * (cf. exam-latex). Défense en profondeur : le garde est la barrière, pas
@@ -42,6 +45,43 @@ const BANNED = [
   "batchmode", "nonstopmode", "scrollmode", "errorstopmode",
 ];
 const BANNED_RE = new RegExp(String.raw`\\@*(?:${BANNED.join("|")})(?![A-Za-z@])`, "g");
+/** Noms expl3 (`\file_input:n`, `\ior_open:Nn`…) : lettres + `_`/`:` — jamais dans un énoncé. */
+const EXPL3_RE = /\\[A-Za-z@]+[_:][A-Za-z_:@]*/g;
+/** Primitives XeTeX (tectonic = XeTeX) : \XeTeXpicfile, \XeTeXpdffile, encodages, glyphes… */
+const XETEX_RE = /\\XeTeX[A-Za-z]*/g;
+const ENV_RE = /\\(?:begin|end)\s*\{([^}]*)\}/g;
+
+/**
+ * ENVIRONNEMENTS en LISTE BLANCHE : `\begin{X}` exécute `\csname X\endcsname`
+ * — donc `\begin{@@input}` lit un fichier sans qu'aucun `\input` n'apparaisse,
+ * et une liste noire de noms ne peut pas fermer cette porte. Ne passent que
+ * les environnements usuels d'un énoncé/corrigé et ceux que le préambule du
+ * dépôt définit lui-même.
+ */
+const ENV_ALLOWED = new Set([
+  "document", "enumerate", "enumerate*", "itemize", "itemize*", "description", "list", "trivlist",
+  "center", "flushleft", "flushright", "quote", "quotation", "verse", "samepage", "sloppypar", "comment",
+  "verbatim", "verbatim*", "lstlisting", "alltt", "minipage", "tabbing", "picture",
+  "tabular", "tabular*", "tabularx", "longtable", "xltabular", "array", "table", "table*", "figure", "figure*",
+  "wrapfigure", "subfigure", "adjustbox",
+  "math", "displaymath", "equation", "equation*", "align", "align*", "aligned", "alignat", "alignat*",
+  "gather", "gather*", "gathered", "multline", "multline*", "split", "subequations", "flalign", "flalign*",
+  "eqnarray", "eqnarray*", "cases", "cases*", "dcases", "dcases*", "rcases", "matrix", "pmatrix", "bmatrix",
+  "Bmatrix", "vmatrix", "Vmatrix", "smallmatrix",
+  "tikzpicture", "scope", "multicols", "framed", "mdframed", "tcolorbox",
+  "theorem", "lemma", "proposition", "corollary", "definition", "example", "remark", "proof",
+  "algorithm", "algorithmic", "abstract",
+  "tiny", "scriptsize", "footnotesize", "small", "normalsize", "large", "Large", "LARGE", "huge", "Huge",
+  "em", "bfseries", "itshape", "ttfamily", "spacing",
+]);
+const PREAMBLE_ENV_DEF_RE = /\\(?:newenvironment|renewenvironment|NewDocumentEnvironment|RenewDocumentEnvironment|newtcolorbox|lstnewenvironment|NewEnviron|newtheorem)\*?\s*\{([^}]*)\}/g;
+let _preambleEnvs: Set<string> | null = null;
+function allowedEnvs(): Set<string> {
+  if (_preambleEnvs) return _preambleEnvs;
+  const set = new Set(ENV_ALLOWED);
+  for (const block of trustedBlocks()) for (const m of block.matchAll(PREAMBLE_ENV_DEF_RE)) set.add(m[1].trim());
+  return (_preambleEnvs = set);
+}
 const GRAPHICS_RE = /\\includegraphics\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}/g;
 const SAFE_GRAPHICS_PATH = /^[A-Za-z0-9_][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_][A-Za-z0-9._-]*)*$/;
 
@@ -72,7 +112,15 @@ export function findTexHazards(tex: string): string[] {
   for (const block of trustedBlocks()) body = body.split(block).join("");
   const found: string[] = [];
   for (const m of body.matchAll(BANNED_RE)) found.push(m[0]);
+  for (const m of body.matchAll(EXPL3_RE)) found.push(m[0]);
+  for (const m of body.matchAll(XETEX_RE)) found.push(m[0]);
+  if (/\\ExplSyntaxOn/.test(body)) found.push("\\ExplSyntaxOn");
   if (/\^\^/.test(body)) found.push("^^");
+  const envs = allowedEnvs();
+  for (const m of body.matchAll(ENV_RE)) {
+    const name = m[1].trim();
+    if (!envs.has(name)) found.push(`\\begin{${name}}`);
+  }
   for (const m of body.matchAll(GRAPHICS_RE)) {
     const p = m[1].trim().replace(/^"|"$/g, "");
     if (!SAFE_GRAPHICS_PATH.test(p) || p.split("/").includes("..")) found.push(`\\includegraphics{${p}}`);
