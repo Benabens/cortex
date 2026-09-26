@@ -56,6 +56,11 @@ jobs:
           sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo $VERSION_CODENAME)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -q && sudo apt-get install -y -q postgresql-client-18
+          # Le pg_dump du PATH est le wrapper Ubuntu (client 16 préinstallé) : on met
+          # les binaires 18 en tête du PATH pour CE shell et pour toutes les étapes suivantes.
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+          export PATH="/usr/lib/postgresql/18/bin:$PATH"
+          echo "pg_dump utilisé : $(command -v pg_dump) — $(pg_dump --version)"
           pg_dump --version | grep -E ' 18\.'
           python3 -m pip install --quiet sympy || pip install --quiet sympy
           # Ubuntu 23.10+ restreint les user namespaces non privilégiés (requis par unshare -rn)
