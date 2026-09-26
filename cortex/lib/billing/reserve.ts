@@ -4,7 +4,7 @@ import { currentUser } from "@/db/context";
 import { authRun, authTx, type AuthTx } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
-import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, insufficient, subscriptionLive, type SubRow } from "./credits";
+import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, insufficient, subscriptionLive, type SubRow, DELTA_CENTI } from "./credits";
 import { intLimit } from "./env";
 import { quotaFor, quotaTrackingActive, ratePerUserPerMin, type GateIssue, type QuotaBucket } from "./guards";
 
@@ -132,7 +132,7 @@ export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
           }
         }
         const bal = await tx.get<{ total: number | null }>(
-          `SELECT coalesce(sum(delta), 0) total FROM credit_transactions WHERE user_id = ?`, userId,
+          `SELECT coalesce(sum(${DELTA_CENTI}), 0) total FROM credit_transactions WHERE user_id = ?`, userId,
         );
         const purchased = Number(bal?.total ?? 0);
         const refusal = insufficient(purchased + subAvail, cost, subAvail);
@@ -140,7 +140,7 @@ export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
         if (cost > 0) {
           const usedSub = Math.min(cost, subAvail);
           await tx.run(
-            `INSERT INTO credit_transactions (user_id, delta, reason, ref, sub_amount, created_at) VALUES (?,?,?,?,?,?)`,
+            `INSERT INTO credit_transactions (user_id, delta, reason, ref, sub_amount, unit, created_at) VALUES (?,?,?,?,?,'centi',?)`,
             userId, -(cost - usedSub), `génération ${o.kind}`, o.ref, usedSub, t,
           );
           if (usedSub > 0) {

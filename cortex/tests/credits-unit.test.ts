@@ -67,3 +67,22 @@ test("nouvelles écritures en centièmes : palier gratuit, coûts, débit, rembo
   const gate = await runWithUser("bob", () => credits.creditsGate("exam"));
   assert.ok(gate && gate.status === 402 && /1,9/.test(gate.error), gate?.error);
 });
+
+test("2b-7 (sqlite) : conversion annulée par une transaction englobante → lectures toujours justes, conversion reprise ensuite", async () => {
+  const { authRun, authGet, authTx } = await import("../db/auth-store");
+  const credits = await import("../lib/billing/credits");
+  await authRun(`INSERT INTO credit_transactions (user_id, delta, reason, ref, created_at) VALUES (?,?,?,?,?)`, "dave", 4, "achat ancien code", "old:dave", "2026-09-03 10:00:00");
+  credits.resetLedgerUnitCheck();
+  // BEGIN IMMEDIATE englobant : ensureLedgerUnit y devient un SAVEPOINT, annulé avec le reste.
+  await assert.rejects(authTx(async () => { await credits.ensureLedgerUnit(); throw new Error("boom"); }), /boom/);
+  const r1 = await authGet<{ delta: number; unit: string | null }>(`SELECT delta, unit FROM credit_transactions WHERE ref = ?`, "old:dave");
+  assert.deepEqual([Number(r1!.delta), r1!.unit], [4, null], "la conversion a bien été annulée avec la transaction");
+  assert.equal(await credits.getBalanceCenti("dave"), 400 + 200, "lecture juste malgré la ligne non convertie");
+  await credits.addTransaction("dave", -50, "génération", "gen:dave");
+  assert.equal(await credits.getBalanceCenti("dave"), 550);
+  credits.resetLedgerUnitCheck();
+  await credits.ensureLedgerUnit();
+  const r2 = await authGet<{ delta: number; unit: string | null }>(`SELECT delta, unit FROM credit_transactions WHERE ref = ?`, "old:dave");
+  assert.deepEqual([Number(r2!.delta), r2!.unit], [400, "centi"]);
+  assert.equal(await credits.getBalanceCenti("dave"), 550);
+});
