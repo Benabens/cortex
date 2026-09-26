@@ -296,37 +296,61 @@ export function syncCapable(): boolean {
  * migration du catalogue historique. Idempotent ; ne touche à rien d'autre ;
  * un cours factice qui contient des données est laissé en place.
  */
-export async function removeEmptyFakeCourse(): Promise<{ removed: boolean; reason?: string }> {
+export async function removeEmptyFakeCourse(opts: { countRows?: () => Promise<number> } = {}): Promise<{ removed: boolean; reason?: string }> {
   const rows = await readCourses();
   const fake = rows.find((r) => r.id === FAKE_COURSE_ID);
   if (!fake) return { removed: false, reason: "absent" };
-  const { runWithUser } = await import("./context");
-  const { runWithCourse } = await import("./client");
-  const { q, dbDriverName } = await import("./q");
-  // Postgres : ouvrir le cours (runWithCourse) AMORCE son schéma tenant. Un
-  // cours jamais ouvert n'a pas de ligne `tenants` → rien à compter, rien à
-  // créer : on supprime directement. Sinon on compte, puis on retire aussi le
-  // schéma et la ligne tenant pour ne rien laisser d'orphelin.
+  const { dbDriverName } = await import("./q");
   const pg = dbDriverName() === "postgres";
+  // Postgres : ouvrir le cours (runWithCourse) AMORCE son schéma tenant ; on
+  // compte donc DIRECTEMENT dans le schéma enregistré, toutes tables confondues.
+  // Un cours jamais ouvert (pas de ligne tenants) n'a rien à compter.
   const tenant = pg
     ? await authGet<{ schema_name: string }>(`SELECT schema_name FROM tenants WHERE user_id = ? AND course = ?`, fake.owner_user_id, FAKE_COURSE_ID)
     : undefined;
-  if (pg && !tenant) {
-    await authRun(`DELETE FROM courses WHERE id = ?`, FAKE_COURSE_ID);
-    return { removed: true, reason: "jamais ouvert" };
-  }
-  let items = 0;
-  try {
-    items = await runWithUser(fake.owner_user_id, () => runWithCourse(FAKE_COURSE_ID, async () => {
-      const r = await q.get<{ n: number }>(`SELECT count(*) n FROM items`);
-      return Number(r?.n ?? 0);
+  const countRows = opts.countRows ?? (async (): Promise<number> => {
+    if (pg) {
+      if (!tenant) return 0;
+      const tables = await authAll<{ table_name: string }>(
+        `SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND table_type = 'BASE TABLE'`, tenant.schema_name,
+      );
+      let total = 0;
+      for (const t of tables) {
+        const r = await authGet<{ n: number | string }>(`SELECT count(*) n FROM "${tenant.schema_name}"."${t.table_name}"`);
+        total += Number(r?.n ?? 0);
+      }
+      return total;
+    }
+    // sqlite : la base du cours est un fichier ; absent = vide, sinon toutes ses tables.
+    const fs = await import("node:fs");
+    const { courseDbPath } = await import("../lib/courses");
+    if (!fs.existsSync(courseDbPath(FAKE_COURSE_ID))) return 0;
+    const { runWithUser } = await import("./context");
+    const { runWithCourse } = await import("./client");
+    const { q } = await import("./q");
+    return runWithUser(fake.owner_user_id, () => runWithCourse(FAKE_COURSE_ID, async () => {
+      const tables = await q.all<{ name: string }>(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`);
+      let total = 0;
+      for (const t of tables) total += Number((await q.get<{ n: number }>(`SELECT count(*) n FROM "${t.name}"`))?.n ?? 0);
+      return total;
     }));
-  } catch { items = 0; /* base absente = vide */ }
-  if (items > 0) return { removed: false, reason: `${items} item(s) ingéré(s) : conservé` };
+  });
+  let items: number;
+  try {
+    items = await countRows();
+  } catch (e) {
+    // Dans le doute, on NE supprime RIEN : une purge ratée se rejoue au boot suivant.
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn(`[courses] cours factice : comptage impossible (${message}) — conservé`);
+    return { removed: false, reason: `erreur de comptage : ${message}` };
+  }
+  if (items > 0) return { removed: false, reason: `${items} ligne(s) présente(s) : conservé` };
   await authRun(`DELETE FROM courses WHERE id = ?`, FAKE_COURSE_ID);
   if (tenant) {
     await authRun(`DROP SCHEMA IF EXISTS "${tenant.schema_name}" CASCADE`);
     await authRun(`DELETE FROM tenants WHERE user_id = ? AND course = ?`, fake.owner_user_id, FAKE_COURSE_ID);
+    const { forgetTenant } = await import("./driver-postgres");
+    forgetTenant(fake.owner_user_id, FAKE_COURSE_ID);
   }
-  return { removed: true };
+  return { removed: true, reason: tenant ? undefined : "jamais ouvert" };
 }

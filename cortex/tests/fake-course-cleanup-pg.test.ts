@@ -62,3 +62,46 @@ test("cours factice ouvert mais vide : supprimé, schéma tenant et ligne tenant
   assert.deepEqual(await schemas(), []);
   assert.deepEqual(await tenantRows(), []);
 });
+
+async function insertFake() {
+  const { insertCourse } = await import("../db/courses-store");
+  const { LEGACY_COURSES } = await import("../lib/courses-legacy");
+  const { reloadCourses } = await import("../lib/courses");
+  const f = LEGACY_COURSES.find((c) => c.id === "fictif")!;
+  await insertCourse({
+    id: f.id, owner_user_id: "owner", name: f.name, short: f.short, code: f.examCode, exam_name: f.examName, exam_kind: f.examKind,
+    university: f.university, university_lines: JSON.stringify(f.universityLines), faculty: f.faculty, teachers: "[]", language: "fr",
+    profile_id: null, duration_min: f.durationMin, exam_date: null, db_file: f.dbFile, refs_rel: f.refsRel, exams_rel: f.examsRel,
+    uploads_rel: f.uploadsRel, content_rel: f.contentRel, created_at: "2026-01-01 00:00:00",
+  });
+  await reloadCourses();
+}
+
+test("lot 4-2 : 0 item mais 1 source → conservé ; erreur de comptage → conservé ; vraiment vide → supprimé", async () => {
+  const { removeEmptyFakeCourse } = await import("../db/courses-store");
+  const { runWithUser } = await import("../db/context");
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { courseExists, reloadCourses } = await import("../lib/courses");
+  await insertFake();
+  await runWithUser("owner", () => runWithCourse("fictif", () => q.run(`INSERT INTO sources (type, title, path) VALUES (?,?,?)`, "pdf", "poly", "refs/poly.pdf")));
+  const r1 = await removeEmptyFakeCourse();
+  assert.equal(r1.removed, false, `une source sans item compte : ${r1.reason}`);
+  const r2 = await removeEmptyFakeCourse({ countRows: async () => { throw new Error("boom"); } });
+  assert.equal(r2.removed, false);
+  assert.match(r2.reason ?? "", /erreur|boom/i);
+  await reloadCourses();
+  assert.equal(courseExists("fictif"), true);
+  await runWithUser("owner", () => runWithCourse("fictif", () => q.run(`DELETE FROM sources`)));
+  assert.equal((await removeEmptyFakeCourse()).removed, true);
+  assert.deepEqual(await schemas(), []);
+});
+
+test("lot 4-2 : prod-boot ne peut pas échouer à cause de la purge", async () => {
+  const fs = await import("node:fs");
+  const src = fs.readFileSync("scripts/prod-boot.ts", "utf8");
+  const i = src.indexOf("removeEmptyFakeCourse(");
+  assert.ok(i > 0);
+  const before = src.slice(Math.max(0, i - 400), i);
+  assert.match(before, /try\s*\{/, "l'appel doit être dans un try/catch (entrypoint en set -e)");
+});
