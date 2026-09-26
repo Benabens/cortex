@@ -23,6 +23,21 @@ jobs:
     defaults:
       run:
         working-directory: cortex
+    # Vrai Postgres pour les tests gardés par CORTEX_TEST_PG_URL (réservation
+    # concurrente sur connexions parallèles, pg_dump → pg_restore -l). Version 16
+    # = celle des outils client préinstallés sur le runner (pg_dump doit être ≥ serveur).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: cortextest
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - uses: actions/checkout@v4
 
@@ -60,8 +75,12 @@ jobs:
             exit 1
           fi
 
-      - name: Tests unitaires (drivers, LLM hermétique, sandbox, vérif déterministe, isolation multi-tenant)
-        run: npm test
+      - name: Tests unitaires (drivers, LLM hermétique, sandbox, vérif déterministe, isolation multi-tenant, vrai Postgres)
+        env:
+          CORTEX_TEST_PG_URL: postgres://postgres@localhost:5432/cortextest
+        run: |
+          pg_dump --version
+          npm test
 
       # Cet invariant a besoin du corpus du cours de référence, qui n'est pas
       # versionné (les supports de cours appartiennent à leur établissement).
