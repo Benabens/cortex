@@ -7,6 +7,8 @@ import { Topbar } from "./Topbar";
 import { MobileNav } from "./MobileNav";
 import { CourseProvider, useCourse } from "@/lib/ux/api";
 import { FirstRunHero } from "@/components/dashboard/FirstRunHero";
+import { LegalLine } from "@/app/compte/BillingPanel";
+import type { LegalLinks } from "@/lib/legal";
 
 /**
  * PREMIER LANCEMENT — un compte sans aucun cours n'a rien à voir sur les sept
@@ -33,7 +35,7 @@ function Body({ children }: { children: React.ReactNode }) {
  *  mise en page plein écran (DA sombre de la landing). */
 const BARE_ROUTES = ["/login"];
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({ children, legal }: { children: React.ReactNode; legal?: LegalLinks }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const router = useRouter();
   const shellPathname = usePathname();
@@ -64,9 +66,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <div className="relative z-10 lg:pl-rail">
           <Topbar onOpenMenu={() => setMenuOpen(true)} />
-          <main className="mx-auto w-full max-w-[1240px] px-4 pb-24 pt-6 sm:px-6 lg:px-8 lg:pt-8">
+          <main className="mx-auto w-full max-w-[1240px] px-4 pb-16 pt-6 sm:px-6 lg:px-8 lg:pt-8">
             <Body>{children}</Body>
           </main>
+          {legal && (
+            <footer className="mx-auto w-full max-w-[1240px] px-4 pb-8 sm:px-6 lg:px-8">
+              <LegalLine legal={legal} />
+            </footer>
+          )}
         </div>
       </div>
     </CourseProvider>

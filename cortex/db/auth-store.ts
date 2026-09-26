@@ -160,6 +160,12 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       event_id TEXT PRIMARY KEY,
       created_at TEXT NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS terms_acceptances (
+      user_id TEXT NOT NULL,
+      version TEXT NOT NULL,
+      accepted_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, version)
+    )`,
   ],
   postgres: [
     `CREATE TABLE IF NOT EXISTS public.users (
@@ -303,6 +309,12 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
     `CREATE TABLE IF NOT EXISTS public.processed_events (
       event_id text PRIMARY KEY,
       created_at text NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS public.terms_acceptances (
+      user_id text NOT NULL,
+      version text NOT NULL,
+      accepted_at text NOT NULL,
+      PRIMARY KEY (user_id, version)
     )`,
   ],
 };

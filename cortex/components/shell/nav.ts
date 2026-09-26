@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Dumbbell,
   Folder,
+  UserRound,
   type LucideIcon,
 } from "lucide-react";
 
@@ -30,6 +31,7 @@ export const NAV: NavItem[] = [
   { href: "/examens", label: "Examens", Icon: ClipboardList },
   { href: "/entrainement", label: "Entraînement", Icon: Dumbbell },
   { href: "/sources", label: "Sources", Icon: Folder },
+  { href: "/compte", label: "Compte", Icon: UserRound },
 ];
 
 export function isActive(pathname: string, href: string) {

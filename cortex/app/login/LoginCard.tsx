@@ -39,12 +39,17 @@ export function LoginCard({
   callbackUrl,
   google,
   email,
+  legal,
 }: {
   error: string | null;
   callbackUrl: string;
   google: boolean;
   email: boolean;
+  /** Liens légaux (LEGAL_*_URL) ; repli sur la landing s'ils ne sont pas posés. */
+  legal?: { terms: string | null; privacy: string | null; refund?: string | null; notice?: string | null };
 }) {
+  const termsHref = legal?.terms ?? `${LANDING}/terms`;
+  const privacyHref = legal?.privacy ?? `${LANDING}/privacy`;
   const [busy, setBusy] = useState<null | "google" | "email">(null);
   const [addr, setAddr] = useState("");
 
@@ -137,11 +142,11 @@ export function LoginCard({
 
         <p className="mt-8 text-center text-[0.75rem] leading-relaxed" style={{ color: "#6f6c7d" }}>
           En continuant, tu acceptes nos{" "}
-          <a href={`${LANDING}/terms`} className="underline underline-offset-2" style={{ color: "#a5a2b3" }}>
+          <a href={termsHref} className="underline underline-offset-2" style={{ color: "#a5a2b3" }}>
             conditions
           </a>{" "}
           et notre{" "}
-          <a href={`${LANDING}/privacy`} className="underline underline-offset-2" style={{ color: "#a5a2b3" }}>
+          <a href={privacyHref} className="underline underline-offset-2" style={{ color: "#a5a2b3" }}>
             politique de confidentialité
           </a>
           .
