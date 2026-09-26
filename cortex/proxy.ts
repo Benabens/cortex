@@ -1,4 +1,5 @@
 import { authBodyLimit } from "@/lib/auth-body-limit";
+import { demoReadable } from "@/lib/demo-paths";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -31,16 +32,6 @@ function legacyPathBlocked(pathname: string): boolean {
   return pathname === "/voir" || pathname === "/sites" || pathname.startsWith("/sites/");
 }
 
-/**
- * DÉMO PUBLIQUE (PUBLIC_DEMO=1, optionnel) : ces pages/API restent lisibles
- * SANS session en GET — un visiteur voit le contenu seedé (tenant « owner »,
- * hydraté par prod-boot) sans pouvoir rien générer ni modifier.
- */
-const DEMO_GET_PATHS = new Set([
-  "/", "/revision",
-  // …et les API que ces pages appellent : sans elles la vitrine s'affiche en erreur.
-  "/api/revision", "/api/dashboard", "/api/program",
-]);
 
 /** Rate-limit par IP (fenêtre fixe 60 s, in-process — conteneur unique).
  *  RATE_LIMIT_PER_MIN non posée → désactivé (dev). */
@@ -106,14 +97,16 @@ function passThrough(req: NextRequest): NextResponse {
 async function guarded(req: NextRequest): Promise<NextResponse> {
   const { pathname } = req.nextUrl;
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return passThrough(req);
-  if (process.env.PUBLIC_DEMO === "1" && req.method === "GET" && DEMO_GET_PATHS.has(pathname)) {
-    return passThrough(req); // lecture seule du tenant seedé « owner »
-  }
 
   // Import dynamique : la stack NextAuth n'est chargée QUE si l'auth est active.
   const { auth } = await import("@/lib/auth");
   const session = await auth();
   const userId = session?.user?.id;
+  // Démo publique (lib/demo-paths) : SEULEMENT pour un visiteur anonyme — un
+  // compte connecté voit ses propres données, jamais le tenant « owner ».
+  if (demoReadable(pathname, req.method) && !userId) {
+    return passThrough(req); // lecture seule du tenant seedé « owner »
+  }
   if (!userId) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
