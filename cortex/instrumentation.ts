@@ -11,6 +11,11 @@
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return; // pas en edge runtime
+  // Même garde que prod-boot : un `next start` direct (hors entrypoint Docker)
+  // en production ou avec facturation, sans AUTH_ENABLED=1, ne démarre pas —
+  // chaque visiteur serait « owner ». Lève → Next refuse de servir.
+  const { assertAuthRequired } = await import("@/lib/boot-guards");
+  assertAuthRequired();
   const g = globalThis as { __cortexJobsPump?: ReturnType<typeof setInterval> };
   try {
     const { runWithCourse } = await import("@/db/client");
