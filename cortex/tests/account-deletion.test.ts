@@ -60,6 +60,9 @@ async function seedUser(id: string, email: string, course: string) {
   await authRun(`INSERT INTO gen_events (user_id, bucket, kind, course, day, created_at) VALUES (?,?,?,?,?,?)`, id, "gen", "exam", course, "2026-01-01", "2026-01-01 00:00:00");
   await authRun(`INSERT INTO credit_transactions (user_id, delta, reason, ref, created_at) VALUES (?,?,?,?,?)`, id, 10, "signup", `signup:${id}`, "2026-01-01 00:00:00");
   await authRun(`INSERT INTO llm_usage (user_id, course, provider, model, tokens_in, tokens_out, cost_usd, created_at) VALUES (?,?,?,?,?,?,?,?)`, id, course, "anthropic", "claude-sonnet-5", 1000, 500, 0.7, "2026-01-01 00:00:00");
+  // Tables de facturation/réservation ajoutées par le durcissement : elles portent aussi l'identité.
+  await authRun(`INSERT INTO active_jobs (user_id, course, job_ref, created_at) VALUES (?,?,?,?)`, id, course, `job:${id}:${course}:x`, "2026-01-01 00:00:00");
+  await authRun(`INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, created_at) VALUES (?,?,?,?,?)`, `cs_${id}`, `pi_${id}`, id, 1000, "2026-01-01 00:00:00");
   // tenant peuplé (crée le schéma t_<slug>_<course> + une donnée)
   await runWithUser(id, () => runWithCourse(course, () => q.run(`INSERT INTO weaknesses (topic, severity) VALUES (?, ?)`, `secret-de-${id}`, 3)));
   // fichiers de l'utilisateur : data/u/<slug>/...
@@ -96,6 +99,8 @@ test("supprimer A efface TOUT le sien (lignes, schéma, fichiers) et ne touche R
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM gen_events WHERE user_id = ?`, "alice"))!.n, 0);
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM credit_transactions WHERE user_id = ?`, "alice"))!.n, 0);
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM tenants WHERE user_id = ?`, "alice"))!.n, 0);
+  assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM active_jobs WHERE user_id = ?`, "alice"))!.n, 0, "places de jobs effacées");
+  assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM stripe_purchases WHERE user_id = ?`, "alice"))!.n, 0, "achats Stripe détachés du compte");
   assert.equal(await schemaExists("alice", "ml"), false, "le schéma tenant d'alice est droppé");
   assert.equal(fs.existsSync(path.join(tmp, "u", slugA)), false, "les fichiers d'alice sont effacés");
   // llm_usage : anonymisé (ligne gardée, plus reliée à alice)
@@ -107,6 +112,8 @@ test("supprimer A efface TOUT le sien (lignes, schéma, fichiers) et ne touche R
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM courses WHERE owner_user_id = ?`, "bob"))!.n, 1);
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM credit_transactions WHERE user_id = ?`, "bob"))!.n, 1);
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM llm_usage WHERE user_id = ?`, "bob"))!.n, 1);
+  assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM active_jobs WHERE user_id = ?`, "bob"))!.n, 1);
+  assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM stripe_purchases WHERE user_id = ?`, "bob"))!.n, 1);
   assert.ok(await schemaExists("bob", "ml"), "le schéma tenant de bob est intact");
   const bobRows = await runWithUser("bob", () => runWithCourse("ml", () => q.all<{ topic: string }>(`SELECT topic FROM weaknesses`)));
   assert.deepEqual(bobRows.map((r) => r.topic), ["secret-de-bob"], "les données tenant de bob sont intactes");
@@ -161,6 +168,15 @@ test("route : refuse sans session (401) et ne supprime QUE le compte de la sessi
   assert.equal(rOk.status, 200, "carol supprime son propre compte");
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM users WHERE id = ?`, "carol"))!.n, 0, "carol supprimée");
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM users WHERE id = ?`, "dave"))!.n, 1, "dave (ciblé dans le corps) est INTACT");
+
+  // Corps démesuré (Content-Length menteur) → 413 par la garde commune, rien supprimé.
+  const huge = new NextRequest("http://localhost/api/account/delete", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-cortex-user": "dave", origin: "http://localhost", "content-length": "5" },
+    body: JSON.stringify({ confirm: "SUPPRIMER", pad: "x".repeat(2 * 1024 * 1024) }),
+  });
+  assert.equal((await POST(huge)).status, 413, "corps > 1 Mio → 413");
+  assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM users WHERE id = ?`, "dave"))!.n, 1, "dave intact après le 413");
 
   // Confirmation manquante → 400 (pas de suppression en un clic).
   const r400 = await POST(mk({ "x-cortex-user": "dave", origin: "http://localhost" }, {}));

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { useCourse } from "@/lib/req";
+import { useUser } from "@/lib/req";
+import { readJson, withBodyLimit } from "@/lib/upload-limit";
 import { currentUser } from "@/db/context";
 import { authEnabled } from "@/lib/auth";
 import { deleteAccount, isOwnerAccount } from "@/lib/account-deletion";
@@ -25,7 +26,7 @@ const CONFIRM_WORD = "SUPPRIMER";
  *  - confirmation forte : le corps doit contenir le mot exact ;
  *  - le compte propriétaire de l'instance ne peut pas s'auto-supprimer.
  */
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (!authEnabled()) {
     return NextResponse.json({ error: "La suppression de compte requiert l'authentification." }, { status: 403 });
   }
@@ -48,10 +49,12 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  useCourse(req); // installe le contexte user/cours (currentUser = x-cortex-user)
+  // Aucun cours en jeu : on n'installe QUE l'utilisateur (useCourse exigerait un
+  // cours possédé et répondrait 404 à un compte sans matière).
+  useUser(req);
   const userId = currentUser();
 
-  const body = (await req.json().catch(() => ({}))) as { confirm?: unknown };
+  const body = (await readJson(req, {})) as { confirm?: unknown };
   if (String(body?.confirm ?? "") !== CONFIRM_WORD) {
     return NextResponse.json(
       { error: `Confirmation manquante : tape « ${CONFIRM_WORD} » pour confirmer.` },
@@ -76,4 +79,4 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   }
-}
+});
