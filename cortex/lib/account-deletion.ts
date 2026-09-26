@@ -19,7 +19,8 @@ import { log } from "@/lib/metrics";
  *  - `users`, `accounts` (OAuth), `verification_tokens` (par e-mail) → plus aucun
  *    moyen de se connecter ;
  *  - `courses` possédés, `tenants` (registre), `gen_events`, `credit_transactions`,
- *    `active_jobs` (réservations en cours), `stripe_purchases` (achats) ;
+ *    `active_jobs` (réservations en cours), `stripe_purchases` (achats),
+ *    `subscriptions` et `stripe_invoices` (abonnement Pro) ;
  *  - chaque schéma tenant `t_<user>_<cours>` (Postgres, DROP … CASCADE) — donc
  *    sources, items, examens, faiblesses, planning, jobs, banque… d'un coup ;
  *  - tous les fichiers du volume sous `data/u/<slug>/` (données des cours créés +
@@ -149,6 +150,10 @@ export async function deleteAccount(userId: string): Promise<DeletionResult> {
     // le compte n'existe plus, il n'y a plus de solde à reprendre.)
     await authRun(`DELETE FROM active_jobs WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM stripe_purchases WHERE user_id = ?`, userId);
+    // Abonnement et factures : l'abonnement Stripe lui-même est résilié par le
+    // propriétaire depuis le tableau de bord (le portail n'est plus accessible sans compte).
+    await authRun(`DELETE FROM subscriptions WHERE user_id = ?`, userId);
+    await authRun(`DELETE FROM stripe_invoices WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM courses WHERE owner_user_id = ?`, userId);
     await authRun(`DELETE FROM tenants WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM users WHERE id = ?`, userId);
