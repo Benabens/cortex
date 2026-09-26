@@ -252,7 +252,11 @@ async function onInvoicePaid(inv: Stripe.Invoice): Promise<HandleResult> {
 
 async function onSubscriptionUpdated(sub: Stripe.Subscription): Promise<HandleResult> {
   // cancel_at_period_end : l'abonnement reste ACTIF jusqu'à la fin de période ; le vrai arrêt vient de .deleted.
-  const periodEnd = unixToStr((sub as { current_period_end?: number }).current_period_end);
+  // SDK Stripe Basil+/Dahlia : `current_period_end` a quitté la subscription pour
+  // vivre sur chaque item → on lit l'item (fallback sur l'ancien champ pour des
+  // charges antérieures). invoice.paid reste la source faisant foi de period_end.
+  const item = sub.items?.data?.[0] as { current_period_end?: number } | undefined;
+  const periodEnd = unixToStr(item?.current_period_end ?? (sub as { current_period_end?: number }).current_period_end);
   await setSubscriptionStatus({ subscriptionId: sub.id, customerId: idOf(sub.customer), status: sub.status, periodEnd });
   return { ok: true, action: "subscription-updated" };
 }

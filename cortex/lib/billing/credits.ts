@@ -223,6 +223,21 @@ export function subscriptionLive(s: SubRow | undefined, now = nowStr()): boolean
 }
 
 /**
+ * La recharge calendaire PARESSEUSE ne s'applique QU'aux abonnements dont la
+ * facture NE tombe PAS chaque mois — c.-à-d. l'ANNUEL. Pour le mensuel,
+ * invoice.paid recharge déjà `remaining` à chaque période payée ; une recharge
+ * calendaire EN PLUS donnerait ~2× les crédits d'un mois payé dès que la
+ * facturation ne tombe pas le 1er (fuite d'argent). Le plan est reconnu sous
+ * ses deux formes stockées : la clé d'offre (`pro_yearly`, métadonnées checkout)
+ * ou le lookup_key (`cortex_pro_yearly`, ligne de facture). Plan absent/inconnu
+ * → conservateur : pas de recharge paresseuse (invoice.paid reste l'octroi).
+ */
+export function lazyMonthlyRechargeApplies(s: SubRow | undefined): boolean {
+  const plan = s?.plan ?? null;
+  return plan === "pro_yearly" || plan === "cortex_pro_yearly";
+}
+
+/**
  * Crédits d'abonnement utilisables maintenant (centièmes), avec recharge
  * PARESSEUSE au changement de mois calendaire (persistée). Résilié
  * (`status = canceled`, via subscription.deleted) : plus de recharge.
@@ -232,7 +247,9 @@ export async function subscriptionCreditsCenti(userId = currentUser()): Promise<
   if (!subscriptionLive(s)) return 0;
   if (s!.status === "canceled") return Math.max(0, Number(s!.remaining) || 0);
   const month = nowStr().slice(0, 7);
-  if (s!.month_anchor !== month) {
+  // Recharge calendaire réservée à l'annuel : le mensuel est rechargé par
+  // invoice.paid à chaque période (sinon double crédit — voir lazyMonthlyRechargeApplies).
+  if (lazyMonthlyRechargeApplies(s) && s!.month_anchor !== month) {
     await authRun(
       `UPDATE subscriptions SET remaining = monthly_credits, month_anchor = ?, updated_at = ? WHERE user_id = ?`,
       month, nowStr(), userId,

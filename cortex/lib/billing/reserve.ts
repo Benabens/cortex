@@ -4,7 +4,7 @@ import { currentUser } from "@/db/context";
 import { authRun, authTx, type AuthTx } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
-import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, insufficient, subscriptionLive, type SubRow, DELTA_CENTI } from "./credits";
+import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, insufficient, lazyMonthlyRechargeApplies, subscriptionLive, type SubRow, DELTA_CENTI } from "./credits";
 import { intLimit } from "./env";
 import { quotaFor, quotaTrackingActive, ratePerUserPerMin, type GateIssue, type QuotaBucket } from "./guards";
 
@@ -124,7 +124,9 @@ export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
         let subAvail = 0;
         if (subscriptionLive(sub, t)) {
           const month = t.slice(0, 7);
-          if (sub!.status !== "canceled" && sub!.month_anchor !== month) {
+          // Recharge calendaire réservée à l'annuel (le mensuel est rechargé par
+          // invoice.paid à chaque période — sinon ~2× les crédits d'un mois payé).
+          if (sub!.status !== "canceled" && lazyMonthlyRechargeApplies(sub) && sub!.month_anchor !== month) {
             await tx.run(`UPDATE subscriptions SET remaining = monthly_credits, month_anchor = ?, updated_at = ? WHERE user_id = ?`, month, t, userId);
             subAvail = Number(sub!.monthly_credits) || 0;
           } else {
