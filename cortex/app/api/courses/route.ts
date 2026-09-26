@@ -4,6 +4,7 @@ import { buildCourseRow, InvalidCourseError } from "@/lib/course-create";
 import { ensureCoursesLoaded, listCoursesOf, reloadCourses } from "@/lib/courses";
 import { toDto } from "@/lib/course-dto";
 import { useUser } from "@/lib/req";
+import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,9 +31,9 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ courses });
 }
 
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const u = await user(req);
-  const body = await req.json().catch(() => null);
+  const body = await readJson(req, null);
   if (!body || typeof body !== "object") {
     return NextResponse.json({ error: "Corps JSON attendu." }, { status: 400 });
   }
@@ -50,3 +51,4 @@ export async function POST(req: NextRequest) {
   const created = listCoursesOf(u).find((c) => c.id === row.id);
   return NextResponse.json({ course: created ? toDto(created) : null }, { status: 201 });
 }
+)

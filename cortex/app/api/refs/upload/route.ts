@@ -1,7 +1,7 @@
 import { coursePaths } from "@/lib/courses";
 import { createJobExclusive, ReservationRefused, startWorker } from "@/lib/jobs";
 import { requireCourse } from "@/lib/req";
-import { rejectOversizedBody, UPLOAD_LIMITS } from "@/lib/upload-limit";
+import { UPLOAD_LIMITS, readFormData, withBodyLimit } from "@/lib/upload-limit";
 import { ingestRefFile } from "@/lib/sources";
 import fs from "node:fs";
 import path from "node:path";
@@ -15,12 +15,10 @@ export const dynamic = "force-dynamic";
  * (corpus + exam_refs), puis on relance la DÉTECTION DE FORMAT (job) → l'examen blanc se cale
  * sur ces finals. PDF/HTML/txt acceptés.
  */
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const { course, denied } = requireCourse(req);
   if (denied) return denied;
-  const tooBig = rejectOversizedBody(req, UPLOAD_LIMITS.refs);
-  if (tooBig) return tooBig;
-  const form = await req.formData().catch(() => null);
+  const form = await readFormData(req, UPLOAD_LIMITS.refs);
   if (!form) return NextResponse.json({ error: "multipart attendu." }, { status: 400 });
   const files = form.getAll("file").filter((f): f is File => f instanceof File && f.size > 0);
   if (!files.length) return NextResponse.json({ error: "Aucun fichier." }, { status: 400 });
@@ -58,4 +56,4 @@ export async function POST(req: NextRequest) {
     }
   }
   return NextResponse.json({ ok: true, files: saved, formatJobId, formatSkipped });
-}
+})

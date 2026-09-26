@@ -9,6 +9,7 @@ import { uploadsDir } from "@/lib/paths";
 import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
+import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,14 +41,14 @@ const SCHEMA = {
   additionalProperties: false,
 } as const;
 
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const t0 = Date.now();
   try {
     return await handlePOST(req);
   } finally {
     logLoopRoute(req, "weakness-analyze", t0);
   }
-}
+})
 
 async function handlePOST(req: NextRequest) {
   const denied = useCourseOr404(req);
@@ -61,7 +62,7 @@ async function handlePOST(req: NextRequest) {
     const gate = await assistGate("weakness-analyze");
     if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
   }
-  const { id } = await req.json().catch(() => ({ id: null }));
+  const { id } = await readJson(req, ({ id: null }));
   if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
 
   const w = await q.get<{ topic: string; description: string | null; screenshot_path: string | null }>(

@@ -5,6 +5,7 @@ import { requireCourse } from "@/lib/req";
 import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
+import { readFormData, withBodyLimit } from "@/lib/upload-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,7 +46,7 @@ function safeRelPath(raw: string): string | null {
   return parts.join("/");
 }
 
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const { course, denied } = requireCourse(req);
   if (denied) return denied;
 
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const form = await req.formData().catch(() => null);
+  const form = await readFormData(req, MAX_TOTAL_BYTES);
   if (!form) return NextResponse.json({ error: "Envoi multipart attendu." }, { status: 400 });
   const files = form.getAll("file").filter((f): f is File => f instanceof File && f.size > 0);
   if (!files.length) return NextResponse.json({ error: "Aucun fichier." }, { status: 400 });
@@ -123,3 +124,4 @@ export async function POST(req: NextRequest) {
   }
   return NextResponse.json({ ok: true, jobId, files: saved.length, skipped: skipped.length });
 }
+)

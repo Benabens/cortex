@@ -2,7 +2,7 @@ import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "
 import { uploadsDir } from "@/lib/paths";
 import { preflightGeneration } from "@/lib/preflight";
 import { requireCourse } from "@/lib/req";
-import { rejectOversizedBody, UPLOAD_LIMITS } from "@/lib/upload-limit";
+import { UPLOAD_LIMITS, readFormData, readJson, withBodyLimit } from "@/lib/upload-limit";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -17,16 +17,14 @@ const IMG_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg
  * Exercice ciblé : crée un job 'exercise' en arrière-plan, retourne {jobId} tout de suite.
  * Accepte soit JSON {target}, soit multipart {target?, note?, image?} (image → exo).
  */
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const { course, denied } = requireCourse(req);
   if (denied) return denied;
   const ct = req.headers.get("content-type") ?? "";
 
   let payload: { target?: string; imageRel?: string; note?: string } = {};
   if (ct.includes("multipart/form-data")) {
-    const tooBig = rejectOversizedBody(req, UPLOAD_LIMITS.image);
-    if (tooBig) return tooBig;
-    const form = await req.formData();
+    const form = await readFormData(req, UPLOAD_LIMITS.image);
     const target = String(form.get("target") ?? "").trim();
     const note = String(form.get("note") ?? "").trim();
     const file = form.get("image");
@@ -41,7 +39,7 @@ export async function POST(req: NextRequest) {
     }
     payload = { target: target || undefined, note: note || undefined, imageRel };
   } else {
-    const { target } = await req.json().catch(() => ({ target: "" }));
+    const { target } = await readJson(req, ({ target: "" }));
     payload = { target: String(target ?? "").trim() || undefined };
   }
 
@@ -71,4 +69,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Impossible de lancer le worker : ${e?.message ?? e}` }, { status: 500 });
   }
   return NextResponse.json({ ok: true, jobId });
-}
+})

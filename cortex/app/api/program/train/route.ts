@@ -4,6 +4,7 @@ import { preflightGeneration } from "@/lib/preflight";
 import { getTopic, topicTarget } from "@/lib/program";
 import { requireCourse } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
+import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,10 +15,10 @@ export const dynamic = "force-dynamic";
  * auto-corrigé). Pour CS-202 (calcul/trace), on garde l'exo architecte ouvert (job 'exercise').
  * Le `topicId` est suivi côté UI (trainTopic) → le score de maîtrise s'attribue au bon type.
  */
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const { course, denied } = requireCourse(req);
   if (denied) return denied;
-  const { topicId } = await req.json().catch(() => ({ topicId: 0 }));
+  const { topicId } = await readJson(req, ({ topicId: 0 }));
   const topic = await getTopic(Number(topicId));
   if (!topic) return NextResponse.json({ error: "Type introuvable." }, { status: 404 });
 
@@ -46,4 +47,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Impossible de lancer le worker : ${e?.message ?? e}` }, { status: 500 });
   }
   return NextResponse.json({ ok: true, jobId, topicId: topic.id, qcm });
-}
+})

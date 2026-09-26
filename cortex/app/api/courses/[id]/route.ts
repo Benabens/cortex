@@ -4,6 +4,7 @@ import { InvalidCourseError, parseTeachers } from "@/lib/course-create";
 import { ensureCoursesLoaded, listCoursesOf, ownsCourse, reloadCourses } from "@/lib/courses";
 import { toDto } from "@/lib/course-dto";
 import { useUser } from "@/lib/req";
+import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,11 +61,11 @@ function patchOf(body: Record<string, unknown>): CoursePatch {
   return patch;
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const PATCH = withBodyLimit(async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const g = await guard(req, id);
   if (g instanceof NextResponse) return g;
-  const body = await req.json().catch(() => null);
+  const body = await readJson(req, null);
   if (!body || typeof body !== "object") return NextResponse.json({ error: "Corps JSON attendu." }, { status: 400 });
   let patch: CoursePatch;
   try {
@@ -79,7 +80,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   await reloadCourses();
   const updated = listCoursesOf(g.user).find((c) => c.id === id);
   return NextResponse.json({ course: updated ? toDto(updated) : null });
-}
+})
 
 /**
  * RETRAIT — on supprime la FICHE du cours, pas ses données.

@@ -3,6 +3,7 @@ import { labSeries, resolveLab } from "@/lib/labs";
 import { preflightGeneration } from "@/lib/preflight";
 import { requireCourse, useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
+import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,10 +19,10 @@ export async function GET(req: NextRequest) {
  * Exo « Labs » à la demande (moule Q6 2025, contenu = le vrai code du lab).
  * POST {lab?: "lab1"|"lab2"|"lab4"|"lab5", topic?: string} → job 'lab-exercise' en arrière-plan.
  */
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const { course, denied } = requireCourse(req);
   if (denied) return denied;
-  const { lab, topic } = await req.json().catch(() => ({ lab: "", topic: "" }));
+  const { lab, topic } = await readJson(req, ({ lab: "", topic: "" }));
   const labStr = String(lab ?? "").trim();
   const topicStr = String(topic ?? "").trim();
   if (!labStr && !topicStr) {
@@ -49,4 +50,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Impossible de lancer le worker : ${e?.message ?? e}` }, { status: 500 });
   }
   return NextResponse.json({ ok: true, jobId, lab: resolved.id, labLabel: resolved.label });
-}
+})

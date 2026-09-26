@@ -9,6 +9,7 @@ import { getWeakness, updateWeaknessAnalysis } from "@/lib/weaknesses";
 import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
+import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,14 +37,14 @@ function buildPrompt(w: { topic: string; description: string | null; imageRel: s
   return lines.join("\n");
 }
 
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const t0 = Date.now();
   try {
     return await handlePOST(req);
   } finally {
     logLoopRoute(req, "weakness-process", t0);
   }
-}
+})
 
 async function handlePOST(req: NextRequest) {
   const denied = useCourseOr404(req);
@@ -57,7 +58,7 @@ async function handlePOST(req: NextRequest) {
     const gate = await assistGate("weakness-process");
     if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
   }
-  const { id, model } = await req.json().catch(() => ({ id: null }));
+  const { id, model } = await readJson(req, ({ id: null }));
   if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
 
   const row = await q.get<{ topic: string; description: string | null; screenshot_path: string | null }>(

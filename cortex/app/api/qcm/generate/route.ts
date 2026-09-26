@@ -3,6 +3,7 @@ import { getFormatProfile } from "@/lib/format";
 import { preflightGeneration } from "@/lib/preflight";
 import { requireCourse, useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
+import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ export async function GET(req: NextRequest) {
 }
 
 /** POST {count?, openCount?, focus?} : compose+génère un examen QCM (job arrière-plan). */
-export async function POST(req: NextRequest) {
+export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const { course, denied } = requireCourse(req);
   if (denied) return denied;
   const fmt = await getFormatProfile();
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
   const issue = await preflightGeneration("qcm");
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
   // composeur : count = N QCM, openCount = M ouvertes, focus = thème ciblé (exercice ciblé).
-  const body = await req.json().catch(() => ({} as any));
+  const body = await readJson(req, ({} as any));
   const num = (v: any) => (v === 0 || v === "0" ? 0 : Number(v) > 0 ? Math.min(40, Math.floor(Number(v))) : undefined);
   const c = num(body.count);
   const oc = num(body.openCount);
@@ -45,4 +46,4 @@ export async function POST(req: NextRequest) {
   try { await startWorker(jobId, course); }
   catch (e: any) { return NextResponse.json({ error: `worker : ${e?.message ?? e}` }, { status: 500 }); }
   return NextResponse.json({ ok: true, jobId });
-}
+})
