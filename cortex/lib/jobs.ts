@@ -3,7 +3,8 @@ import { currentUser } from "@/db/context";
 import { q, nowStr } from "@/db/q";
 import { inc, observe } from "@/lib/metrics";
 import { examsDir } from "@/lib/paths";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
+import { killProcessGroup } from "@/lib/process-group";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -405,22 +406,6 @@ export async function startWorker(jobId: number, course?: string): Promise<void>
   child.unref();
 }
 
-
-/**
- * Groupe de processus réel d'un PID (via ps, portable macOS/Linux).
- * Indispensable : `tsx` est un wrapper qui re-spawne le script → le PID enregistré par le
- * worker (process.pid) n'est PAS le leader du groupe ; seul kill(-pgid) emporte tout le monde.
- */
-function pgidOf(pid: number): number | null {
-  try {
-    const out = execFileSync("ps", ["-o", "pgid=", "-p", String(pid)]).toString().trim();
-    const n = Number(out);
-    return Number.isFinite(n) && n > 0 ? n : null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Coût LLM réel d'un job (USD) : somme des lignes `llm_usage` rattachées au
  * même compte, même cours et même id — les ids de jobs sont séquentiels PAR
@@ -490,11 +475,8 @@ export async function cancelJob(id: number): Promise<Job | null> {
     await logJob(id, `Annulé à ${job.progress}% — la génération était déjà lancée, les crédits ne sont pas rendus.`);
   }
   if (job.pid) {
-    const pgid = pgidOf(job.pid);
-    const target = pgid ? -pgid : job.pid; // repli : au moins le worker lui-même
-    try { process.kill(target, "SIGTERM"); } catch {}
-    const t = setTimeout(() => { try { process.kill(target, "SIGKILL"); } catch {} }, 3_000);
-    (t as any).unref?.();
+    // Tout l'arbre (tsx re-spawne le script) : groupe via ps, sinon -pid (worker détaché).
+    killProcessGroup(job.pid);
   }
   await cleanupPartial(job);
   await logJob(id, "Annulé par l'utilisateur — worker tué, artefacts partiels nettoyés.");
