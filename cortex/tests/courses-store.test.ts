@@ -13,6 +13,8 @@ import { after, before, test } from "node:test";
  *     planning, examens). C'est le critère bloquant du lot.
  */
 
+// Le cours factice n'est migré qu'hors production : le shell de dev peut exporter NODE_ENV=production.
+(process.env as Record<string, string | undefined>).NODE_ENV = "development";
 process.env.DB_DRIVER = "postgres";
 process.env.DATABASE_URL = "pglite://memory";
 process.env.CORTEX_OWNER_EMAIL = "proprietaire@exemple.test";

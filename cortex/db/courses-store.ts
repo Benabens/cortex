@@ -1,4 +1,4 @@
-import { LEGACY_COURSES, type LegacyCourse } from "../lib/courses-legacy";
+import { FAKE_COURSE_ID, LEGACY_COURSES, legacyCoursesFor, type LegacyCourse } from "../lib/courses-legacy";
 import { authAll, authRun, authSqlite } from "./auth-store";
 import { dbDriverName, nowStr } from "./q";
 import { OWNER_USER } from "./context";
@@ -244,7 +244,7 @@ export async function migrateLegacyCourses(): Promise<MigrationReport> {
   const existing = new Set((await readCourses()).map((r) => r.id));
   const report: MigrationReport = { created: [], kept: [], skipped: [] };
   const at = nowStr();
-  for (const c of LEGACY_COURSES) {
+  for (const c of legacyCoursesFor()) {
     if (existing.has(c.id)) { report.kept.push(c.id); continue; }
     await insertCourseIfAbsent(legacyRow(c, await resolveOwner(c.id), at));
     report.created.push(c.id);
@@ -273,8 +273,8 @@ export function migrateLegacyCoursesSync(): MigrationReport {
   const at = nowStr();
   const stmt = db.prepare(`${insertSql()} ON CONFLICT (id) DO NOTHING`);
   const mark = db.prepare(`INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING`);
-  const rows = LEGACY_COURSES.filter((c) => !existing.has(c.id));
-  report.kept = LEGACY_COURSES.filter((c) => existing.has(c.id)).map((c) => c.id);
+  const rows = legacyCoursesFor().filter((c) => !existing.has(c.id));
+  report.kept = legacyCoursesFor().filter((c) => existing.has(c.id)).map((c) => c.id);
   // Transaction : inserts + marqueur d'un seul bloc, sinon deux process qui
   // amorcent la base en parallèle laisseraient une migration à moitié faite.
   db.transaction(() => {
@@ -288,4 +288,29 @@ export function migrateLegacyCoursesSync(): MigrationReport {
 /** Le dialecte courant permet-il la voie synchrone ? */
 export function syncCapable(): boolean {
   return dbDriverName() === "sqlite";
+}
+
+/**
+ * Retire le cours FACTICE (« Quantitative Oenology ») s'il est VIDE — aucun
+ * item ingéré chez son propriétaire. Il avait été créé en production par la
+ * migration du catalogue historique. Idempotent ; ne touche à rien d'autre ;
+ * un cours factice qui contient des données est laissé en place.
+ */
+export async function removeEmptyFakeCourse(): Promise<{ removed: boolean; reason?: string }> {
+  const rows = await readCourses();
+  const fake = rows.find((r) => r.id === FAKE_COURSE_ID);
+  if (!fake) return { removed: false, reason: "absent" };
+  const { runWithUser } = await import("./context");
+  const { runWithCourse } = await import("./client");
+  const { q } = await import("./q");
+  let items = 0;
+  try {
+    items = await runWithUser(fake.owner_user_id, () => runWithCourse(FAKE_COURSE_ID, async () => {
+      const r = await q.get<{ n: number }>(`SELECT count(*) n FROM items`);
+      return Number(r?.n ?? 0);
+    }));
+  } catch { items = 0; /* base absente = vide */ }
+  if (items > 0) return { removed: false, reason: `${items} item(s) ingéré(s) : conservé` };
+  await authRun(`DELETE FROM courses WHERE id = ?`, FAKE_COURSE_ID);
+  return { removed: true };
 }

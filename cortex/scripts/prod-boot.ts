@@ -174,8 +174,11 @@ function assertIsolationSane(): void {
  * qui possède déjà le tenant du cours (cf. db/courses-store).
  */
 async function migrateCourses(): Promise<void> {
-  const { migrateLegacyCourses } = await import("../db/courses-store");
+  const { migrateLegacyCourses, removeEmptyFakeCourse } = await import("../db/courses-store");
   const r = await migrateLegacyCourses();
+  // Le cours factice de démonstration n'a rien à faire en production : retiré s'il est vide.
+  const fake = await removeEmptyFakeCourse();
+  if (fake.removed) log("cours factice « fictif » retiré (vide)");
   log(
     `cours en base : ${r.created.length} créé(s)${r.created.length ? ` [${r.created.join(", ")}]` : ""}` +
     ` · ${r.kept.length} déjà présent(s)${r.skipped.length ? ` · ${r.skipped.length} ignoré(s) (aucune donnée) [${r.skipped.join(", ")}]` : ""}`
