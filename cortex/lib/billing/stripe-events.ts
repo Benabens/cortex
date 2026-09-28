@@ -64,6 +64,10 @@ export function creditsCentiForAmount(amountCents: number): number {
 /** Accès Stripe injecté par la route (testable sans réseau). */
 export type StripeLookup = {
   sessionByPaymentIntent(paymentIntent: string): Promise<{ id: string; userId: string | null; credits: number | null } | null>;
+  /** Format récent : la facture ne porte plus le prix, seulement son id → lookup_key via le cache des prix. */
+  lookupKeyOfPrice?(priceId: string): Promise<string | null>;
+  /** Format récent : la charge ne porte plus `invoice` → facture retrouvée par payment_intent (InvoicePayments). */
+  invoiceByPaymentIntent?(paymentIntent: string): Promise<{ invoiceId: string } | null>;
 };
 export type HandleOptions = { lookup?: StripeLookup };
 
@@ -99,6 +103,58 @@ function invoicePeriodEnd(inv: Stripe.Invoice): string | null {
   return unixToStr(line?.period?.end) ?? unixToStr((inv as { period_end?: number }).period_end);
 }
 
+// ─────── lecture BI-FORMAT des factures (ancien format ET famille « basil » 2025+) ───────
+type AnyInvoice = Stripe.Invoice & {
+  subscription?: unknown; payment_intent?: unknown;
+  subscription_details?: { metadata?: Record<string, string> };
+  parent?: { subscription_details?: { subscription?: unknown; metadata?: Record<string, string> } | null } | null;
+  payments?: { data?: Array<{ payment?: { type?: string; payment_intent?: unknown } }> };
+};
+type AnyLine = {
+  price?: { id?: string; lookup_key?: string | null } | string | null;
+  pricing?: { price_details?: { price?: string } | null } | null;
+  parent?: { subscription_item_details?: { subscription?: unknown } | null } | null;
+  metadata?: Record<string, string>;
+};
+const linesOf = (lines: unknown): AnyLine[] => (lines as { data?: AnyLine[] } | null | undefined)?.data ?? [];
+/** Abonnement d'une facture : `subscription` (ancien) | parent.subscription_details | parent de la ligne (récent). */
+function invoiceSubscriptionId(inv: AnyInvoice): string | null {
+  return idOf(inv.subscription)
+    ?? idOf(inv.parent?.subscription_details?.subscription)
+    ?? idOf(linesOf(inv.lines)[0]?.parent?.subscription_item_details?.subscription);
+}
+/** Métadonnées de l'abonnement portées par la facture (subscription_data.metadata du checkout), ancien ou récent. */
+function invoiceSubMeta(inv: AnyInvoice): Record<string, string> | undefined {
+  return inv.subscription_details?.metadata ?? inv.parent?.subscription_details?.metadata ?? linesOf(inv.lines)[0]?.metadata;
+}
+/** PaymentIntent d'une facture : `payment_intent` (ancien) | payments.data[].payment.payment_intent (récent). */
+function invoicePaymentIntent(inv: AnyInvoice): string | null {
+  return idOf(inv.payment_intent)
+    ?? idOf(inv.payments?.data?.find((p) => p.payment?.type === "payment_intent" || p.payment?.payment_intent)?.payment?.payment_intent);
+}
+/** Ids de prix des lignes (récent : pricing.price_details.price ; ancien : price.id ou price en chaîne). */
+function priceIdsOf(lines: unknown): string[] {
+  return linesOf(lines).map((l) => (typeof l.price === "string" ? l.price : l.price?.id) ?? l.pricing?.price_details?.price ?? "").filter(Boolean);
+}
+/**
+ * lookup_keys des lignes : portés par la ligne (ancien format), sinon résolus
+ * depuis l'id du prix par le cache des prix Cortex (récent), sinon déduits de
+ * metadata.plan (nos métadonnées d'abonnement). Sans réseau en test.
+ */
+async function resolveLookupKeys(lines: unknown, metas: Meta[], lookup?: StripeLookup): Promise<string[]> {
+  const keys = new Set(lookupKeysOf(lines));
+  if (!keys.size && lookup?.lookupKeyOfPrice) {
+    for (const id of priceIdsOf(lines)) {
+      const k = await lookup.lookupKeyOfPrice(id).catch(() => null);
+      if (k) keys.add(k);
+    }
+  }
+  if (!keys.size) {
+    for (const m of metas) if (isPlanKey(m?.plan)) keys.add(PLANS[m!.plan as PlanKey].lookupKey);
+  }
+  return [...keys];
+}
+
 async function isProcessed(eventId: string): Promise<boolean> {
   return !!(await authGet<{ event_id: string }>(`SELECT event_id FROM processed_events WHERE event_id = ?`, eventId));
 }
@@ -127,11 +183,8 @@ function metaCortex(...metas: Meta[]): boolean {
   return metas.some((m) => m?.app?.toLowerCase() === "cortex" || !!m?.cortexUserId || isPlanKey(m?.plan));
 }
 function lookupKeysOf(lines: unknown): string[] {
-  const data = (lines as { data?: Array<{ price?: { lookup_key?: string | null } | null }> } | null | undefined)?.data ?? [];
-  return data.map((l) => l?.price?.lookup_key ?? "").filter(Boolean);
-}
-function hasCortexPrice(lines: unknown): boolean {
-  return lookupKeysOf(lines).some((k) => CORTEX_LOOKUP_KEYS.has(k));
+  const data = (lines as { data?: Array<{ price?: { lookup_key?: string | null } | string | null }> } | null | undefined)?.data ?? [];
+  return data.map((l) => (typeof l?.price === "object" && l.price ? l.price.lookup_key ?? "" : "")).filter(Boolean);
 }
 const FOREIGN: HandleResult = { ok: true, action: "ignored:foreign", credited: false, reversed: false };
 function foreign(kind: string, id: string | null | undefined, why: string): HandleResult {
@@ -150,13 +203,13 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
       res = await onCheckout(event.data.object as Stripe.Checkout.Session, event.id);
       break;
     case "invoice.paid":
-      res = await onInvoicePaid(event.data.object as Stripe.Invoice);
+      res = await onInvoicePaid(event.data.object as Stripe.Invoice, opts.lookup);
       break;
     case "customer.subscription.updated":
-      res = await onSubscriptionUpdated(event.data.object as Stripe.Subscription);
+      res = await onSubscriptionUpdated(event.data.object as Stripe.Subscription, opts.lookup);
       break;
     case "customer.subscription.deleted":
-      res = await onSubscriptionDeleted(event.data.object as Stripe.Subscription);
+      res = await onSubscriptionDeleted(event.data.object as Stripe.Subscription, opts.lookup);
       break;
     case "charge.refunded": {
       const charge = event.data.object as Stripe.Charge;
@@ -255,41 +308,40 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string): Promise<
   return { ok: true, action: "pack-credited", credited };
 }
 
-async function onInvoicePaid(inv: Stripe.Invoice): Promise<HandleResult> {
-  const subId = idOf((inv as { subscription?: unknown }).subscription);
+async function onInvoicePaid(invoice: Stripe.Invoice, lookup?: StripeLookup): Promise<HandleResult> {
+  const inv = invoice as AnyInvoice;
+  const subId = invoiceSubscriptionId(inv);
   if (!subId) return { ok: true, action: "invoice-non-subscription" };
-  const subMeta = (inv as { subscription_details?: { metadata?: Record<string, string> } }).subscription_details?.metadata;
+  const subMeta = invoiceSubMeta(inv);
   const invCustomer = idOf(inv.customer);
   if (metaForeign(inv.metadata as Meta, subMeta)) return foreign("invoice", inv.id, `app=${(inv.metadata as Meta)?.app ?? subMeta?.app}`);
-  if (!hasCortexPrice(inv.lines) && !metaCortex(inv.metadata as Meta, subMeta)) {
+  const keys = await resolveLookupKeys(inv.lines, [inv.metadata as Meta, subMeta], lookup);
+  const cortexPrice = keys.some((k) => CORTEX_LOOKUP_KEYS.has(k));
+  if (!cortexPrice && !metaCortex(inv.metadata as Meta, subMeta)) {
     // Ni prix Cortex ni métadonnée Cortex : seul un client/abonnement DÉJÀ lié chez nous rattache la facture.
     const linked = (invCustomer && (await resolveUserByCustomer(invCustomer)))
       || (await authGet<{ user_id: string }>(`SELECT user_id FROM subscriptions WHERE subscription_id = ?`, subId))?.user_id;
-    if (!linked) return foreign("invoice", inv.id, `lookup_key ${lookupKeysOf(inv.lines).join(",") || "?"} inconnu, client non lié`);
+    if (!linked) return foreign("invoice", inv.id, `prix ${(keys.length ? keys : priceIdsOf(inv.lines)).join(",") || "?"} inconnu, client non lié`);
   }
   // Idempotence par FACTURE : une facture n'attribue qu'un mois, quel que soit l'événement qui la porte.
   if (inv.id && (await authGet<{ invoice_id: string }>(`SELECT invoice_id FROM stripe_invoices WHERE invoice_id = ?`, inv.id))) {
     return { ok: true, action: "invoice-duplicate", duplicate: true };
   }
-  const customerId = idOf(inv.customer);
+  const customerId = invCustomer;
   let userId = customerId ? await resolveUserByCustomer(customerId) : null;
-  if (!userId) {
-    userId =
-      (inv as { subscription_details?: { metadata?: Record<string, string> } }).subscription_details?.metadata?.cortexUserId ??
-      (inv.metadata?.cortexUserId as string | undefined) ?? null;
-  }
+  if (!userId) userId = subMeta?.cortexUserId ?? (inv.metadata?.cortexUserId as string | undefined) ?? null;
   // Introuvable → on LÈVE (500) pour que Stripe réessaie : le checkout qui lie
   // client → utilisateur peut arriver après la facture.
   if (!userId) throw new Error(`invoice.paid : utilisateur introuvable (customer ${customerId ?? "?"}) — retry`);
   const periodEnd = invoicePeriodEnd(inv);
   if (!periodEnd) throw new Error(`invoice.paid : période introuvable (sub ${subId}) — retry`);
-  const plan = (inv.lines?.data?.[0] as { price?: { lookup_key?: string } } | undefined)?.price?.lookup_key ?? null;
+  const plan = keys.find((k) => CORTEX_LOOKUP_KEYS.has(k)) ?? keys[0] ?? null;
   await grantSubscriptionMonth({ userId, customerId, subscriptionId: subId, plan, periodEnd });
   if (inv.id) {
     await authRun(
       `INSERT INTO stripe_invoices (invoice_id, subscription_id, customer_id, payment_intent, user_id, granted_centi, period_end, created_at)
        VALUES (?,?,?,?,?,?,?,?) ON CONFLICT (invoice_id) DO NOTHING`,
-      inv.id, subId, customerId, idOf((inv as { payment_intent?: unknown }).payment_intent), userId,
+      inv.id, subId, customerId, invoicePaymentIntent(inv), userId,
       subscriptionMonthlyCreditsCenti(), periodEnd, nowStr(),
     );
   }
@@ -297,17 +349,19 @@ async function onInvoicePaid(inv: Stripe.Invoice): Promise<HandleResult> {
 }
 
 /** Abonnement Stripe à Cortex ? prix Cortex, métadonnée Cortex, ou déjà lié chez nous. */
-async function subscriptionIsCortex(sub: Stripe.Subscription): Promise<false | string> {
+async function subscriptionIsCortex(sub: Stripe.Subscription, lookup?: StripeLookup): Promise<false | string> {
   if (metaForeign(sub.metadata as Meta)) return `app=${(sub.metadata as Meta)?.app}`;
-  if (hasCortexPrice(sub.items) || metaCortex(sub.metadata as Meta)) return false;
+  if (metaCortex(sub.metadata as Meta)) return false;
+  const keys = await resolveLookupKeys(sub.items, [], lookup);
+  if (keys.some((k) => CORTEX_LOOKUP_KEYS.has(k))) return false;
   const customerId = idOf(sub.customer);
   const linked = (customerId && (await resolveUserByCustomer(customerId)))
     || (await authGet<{ user_id: string }>(`SELECT user_id FROM subscriptions WHERE subscription_id = ?`, sub.id))?.user_id;
-  return linked ? false : `lookup_key ${lookupKeysOf(sub.items).join(",") || "?"} inconnu, client non lié`;
+  return linked ? false : `prix ${(keys.length ? keys : priceIdsOf(sub.items)).join(",") || "?"} inconnu, client non lié`;
 }
 
-async function onSubscriptionUpdated(sub: Stripe.Subscription): Promise<HandleResult> {
-  const why = await subscriptionIsCortex(sub);
+async function onSubscriptionUpdated(sub: Stripe.Subscription, lookup?: StripeLookup): Promise<HandleResult> {
+  const why = await subscriptionIsCortex(sub, lookup);
   if (why) return foreign("subscription", sub.id, why);
   // cancel_at_period_end : l'abonnement reste ACTIF jusqu'à la fin de période ; le vrai arrêt vient de .deleted.
   const periodEnd = unixToStr((sub as { current_period_end?: number }).current_period_end);
@@ -315,8 +369,8 @@ async function onSubscriptionUpdated(sub: Stripe.Subscription): Promise<HandleRe
   return { ok: true, action: "subscription-updated" };
 }
 
-async function onSubscriptionDeleted(sub: Stripe.Subscription): Promise<HandleResult> {
-  const why = await subscriptionIsCortex(sub);
+async function onSubscriptionDeleted(sub: Stripe.Subscription, lookup?: StripeLookup): Promise<HandleResult> {
+  const why = await subscriptionIsCortex(sub, lookup);
   if (why) return foreign("subscription", sub.id, why);
   await setSubscriptionStatus({ subscriptionId: sub.id, customerId: idOf(sub.customer), status: "canceled", clearRemaining: true });
   log("info", "billing.subscription_deleted", { subscription: sub.id });
@@ -384,9 +438,22 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string,
   if (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, ref)) {
     return { ok: true, action: "reversal-duplicate", reversed: false };
   }
-  const invoice = await authGet<{ user_id: string; granted_centi: number }>(
+  let invoice = await authGet<{ user_id: string; granted_centi: number }>(
     `SELECT user_id, granted_centi FROM stripe_invoices WHERE payment_intent = ?`, paymentIntent,
   );
+  if (!invoice && ctx.lookup?.invoiceByPaymentIntent) {
+    // Format récent : la charge ne porte plus `invoice` et la facture n'avait pas
+    // forcément de payment_intent à l'arrivée → Stripe sait quelle facture ce paiement règle.
+    let found: { invoiceId: string } | null = null;
+    try { found = await ctx.lookup.invoiceByPaymentIntent(paymentIntent); }
+    catch (e) { throw new Error(`Stripe injoignable pour retrouver la facture de ${paymentIntent} — retry (${String(e).slice(0, 120)})`); }
+    if (found) {
+      invoice = await authGet<{ user_id: string; granted_centi: number }>(
+        `SELECT user_id, granted_centi FROM stripe_invoices WHERE invoice_id = ?`, found.invoiceId,
+      );
+      if (invoice) await authRun(`UPDATE stripe_invoices SET payment_intent = coalesce(payment_intent, ?) WHERE invoice_id = ?`, paymentIntent, found.invoiceId);
+    }
+  }
   if (invoice) {
     // Ce qui reste du mois est retiré de l'abonnement ; ce qui a déjà été
     // consommé devient une dette dans le ledger (solde négatif → tout est bloqué).

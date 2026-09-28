@@ -1,0 +1,67 @@
+{
+  "id": "in_test_basil_1",
+  "object": "invoice",
+  "amount_paid": 1490,
+  "billing_reason": "subscription_create",
+  "collection_method": "charge_automatically",
+  "currency": "eur",
+  "customer": "cus_test_basil_1",
+  "lines": {
+    "object": "list",
+    "data": [
+      {
+        "id": "il_test_basil_1",
+        "object": "line_item",
+        "amount": 1490,
+        "currency": "eur",
+        "metadata": {
+          "app": "cortex",
+          "cortexUserId": "basil-user",
+          "plan": "pro_monthly"
+        },
+        "parent": {
+          "subscription_item_details": {
+            "proration": false,
+            "subscription": "sub_test_basil_1",
+            "subscription_item": "si_test_basil_1"
+          },
+          "type": "subscription_item_details"
+        },
+        "period": {
+          "end": 1793211922,
+          "start": 1790619922
+        },
+        "pricing": {
+          "price_details": {
+            "price": "price_test_pro_monthly",
+            "product": "cortex_pro"
+          },
+          "type": "price_details",
+          "unit_amount_decimal": "1490"
+        },
+        "quantity": 1
+      }
+    ],
+    "has_more": false
+  },
+  "livemode": false,
+  "metadata": {},
+  "parent": {
+    "quote_details": null,
+    "subscription_details": {
+      "metadata": {
+        "app": "cortex",
+        "cortexUserId": "basil-user",
+        "plan": "pro_monthly"
+      },
+      "subscription": "sub_test_basil_1"
+    },
+    "type": "subscription_details"
+  },
+  "period_end": 1790619922,
+  "period_start": 1790619922,
+  "status": "paid",
+  "status_transitions": {
+    "paid_at": 1790619922
+  }
+}

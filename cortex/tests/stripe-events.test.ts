@@ -347,3 +347,82 @@ test("charge Kairo remboursée (metadata app=kairo, client inconnu) → ignorée
   const d = await handleStripeEvent(ev("evt_kairo_dispute", "charge.dispute.created", { payment_intent: "pi_kairo_1", amount: 1500, charge: { metadata: { app: "kairo" } } }));
   assert.equal(d.action, "ignored:foreign");
 });
+
+// ── Format d'API Stripe récent (famille « basil » et suivantes) ──────────────
+// invoice.subscription, invoice.payment_intent, line.price et charge.invoice
+// n'existent plus : abonnement dans parent.subscription_details, prix dans
+// lines.data[].pricing.price_details.price (un id), paiements dans invoice.payments.
+
+const basilInvoice = (over: Record<string, unknown> = {}) => {
+  const base = JSON.parse(fs.readFileSync(new URL("./fixtures/stripe-invoice-basil.json", import.meta.url), "utf8"));
+  return { ...base, ...over };
+};
+const priceLookup = { lookupKeyOfPrice: async (id: string) => (id === "price_test_pro_monthly" ? "cortex_pro_monthly" : null) };
+
+test("nouveau format : facture réelle (fixture) → +20 crédits, abonnement lié, idempotent sous un autre event.id", async () => {
+  const { authGet } = await import("../db/auth-store");
+  const r = await handleStripeEvent(ev("evt_basil_1", "invoice.paid", basilInvoice()), { lookup: { sessionByPaymentIntent: async () => null, ...priceLookup } });
+  assert.equal(r.action, "subscription-granted", JSON.stringify(r));
+  assert.equal(await credits.getBalance("basil-user"), 20);
+  const sub = await authGet<{ subscription_id: string; customer_id: string; plan: string; status: string }>(`SELECT subscription_id, customer_id, plan, status FROM subscriptions WHERE user_id = ?`, "basil-user");
+  assert.equal(sub?.subscription_id, "sub_test_basil_1");
+  assert.equal(sub?.customer_id, "cus_test_basil_1");
+  assert.equal(sub?.plan, "cortex_pro_monthly", "plan résolu depuis l'id de prix (ou metadata.plan)");
+  const inv = await authGet<{ subscription_id: string; period_end: string }>(`SELECT subscription_id, period_end FROM stripe_invoices WHERE invoice_id = ?`, "in_test_basil_1");
+  assert.equal(inv?.subscription_id, "sub_test_basil_1");
+  assert.match(inv?.period_end ?? "", /^2026-10-2\d/);
+  const again = await handleStripeEvent(ev("evt_basil_1bis", "invoice.paid", basilInvoice()));
+  assert.equal(again.action, "invoice-duplicate");
+  assert.equal(await credits.getBalance("basil-user"), 20);
+});
+
+test("nouveau format sans résolution de prix : metadata.plan suffit ; sans aucun repère Cortex → étranger", async () => {
+  const inv = basilInvoice({ id: "in_test_basil_2", customer: "cus_test_basil_2", parent: { type: "subscription_details", subscription_details: { subscription: "sub_test_basil_2", metadata: { app: "cortex", cortexUserId: "basil-user-2", plan: "pro_yearly" } } } });
+  inv.lines = { object: "list", data: [{ ...inv.lines.data[0], id: "il_2", metadata: {}, parent: { type: "subscription_item_details", subscription_item_details: { subscription: "sub_test_basil_2", subscription_item: "si_2" } } }] };
+  const r = await handleStripeEvent(ev("evt_basil_2", "invoice.paid", inv));
+  assert.equal(r.action, "subscription-granted");
+  assert.equal(await credits.getBalance("basil-user-2"), 20);
+  const foreign = basilInvoice({ id: "in_other_app", customer: "cus_other_app", parent: { type: "subscription_details", subscription_details: { subscription: "sub_other_app", metadata: {} } } });
+  foreign.lines = { object: "list", data: [{ ...foreign.lines.data[0], id: "il_o", metadata: {}, pricing: { type: "price_details", price_details: { price: "price_other_app", product: "other" } }, parent: { type: "subscription_item_details", subscription_item_details: { subscription: "sub_other_app", subscription_item: "si_o" } } }] };
+  assert.equal((await handleStripeEvent(ev("evt_other_app", "invoice.paid", foreign), { lookup: { sessionByPaymentIntent: async () => null, ...priceLookup } })).action, "ignored:foreign");
+});
+
+test("nouveau format : remboursement d'une facture d'abonnement — la charge n'a plus d'invoice, on retrouve la facture par payment_intent via Stripe", async () => {
+  const asked: string[] = [];
+  const lookup = {
+    sessionByPaymentIntent: async () => null,
+    invoiceByPaymentIntent: async (pi: string) => { asked.push(pi); return pi === "pi_basil_1" ? { invoiceId: "in_test_basil_1" } : null; },
+  };
+  const r = await handleStripeEvent(ev("evt_basil_refund", "charge.refunded", { payment_intent: "pi_basil_1", amount: 1490, amount_refunded: 1490, customer: "cus_test_basil_1", metadata: {} }), { lookup });
+  assert.deepEqual(asked, ["pi_basil_1"]);
+  assert.equal(r.action, "invoice-reversed");
+  assert.equal(await credits.getBalance("basil-user"), 0, "les 20 du mois sont repris");
+  // Le litige sur le même paiement ne reprend pas deux fois (idempotence par payment_intent).
+  const d = await handleStripeEvent(ev("evt_basil_dispute", "charge.dispute.created", { payment_intent: "pi_basil_1", amount: 1490, charge: "ch_basil_1" }), { lookup });
+  assert.equal(d.reversed, false);
+  assert.equal(await credits.getBalance("basil-user"), 0);
+});
+
+test("nouveau format : subscription.updated / deleted avec prix en id (metadata app=cortex) → traités", async () => {
+  const { authGet } = await import("../db/auth-store");
+  const items = { data: [{ price: "price_test_pro_monthly" }] };
+  const up = await handleStripeEvent(ev("evt_basil_sub_up", "customer.subscription.updated", { id: "sub_test_basil_1", customer: "cus_test_basil_1", status: "past_due", metadata: { app: "cortex", cortexUserId: "basil-user", plan: "pro_monthly" }, items }));
+  assert.equal(up.action, "subscription-updated");
+  assert.equal((await authGet<{ status: string }>(`SELECT status FROM subscriptions WHERE user_id = ?`, "basil-user"))?.status, "past_due");
+  const del = await handleStripeEvent(ev("evt_basil_sub_del", "customer.subscription.deleted", { id: "sub_test_basil_1", customer: "cus_test_basil_1", status: "canceled", metadata: {}, items }), { lookup: { sessionByPaymentIntent: async () => null, ...priceLookup } });
+  assert.equal(del.action, "subscription-deleted", "prix résolu par id → Cortex");
+});
+
+test("le SDK Stripe est épinglé sur une version d'API explicite, partout", async () => {
+  const fs = await import("node:fs");
+  const client = fs.readFileSync("lib/billing/stripe-client.ts", "utf8");
+  const m = client.match(/STRIPE_API_VERSION = "(\d{4}-\d{2}-\d{2}[.a-z-]*)"/);
+  assert.ok(m, "constante STRIPE_API_VERSION attendue");
+  const sdk = fs.readFileSync("node_modules/stripe/esm/apiVersion.js", "utf8");
+  assert.ok(sdk.includes(`'${m![1]}'`), `la version épinglée (${m![1]}) doit être celle que le SDK installé type`);
+  for (const f of ["app/api/billing/webhook/route.ts", "app/api/billing/portal/route.ts", "app/api/billing/checkout/route.ts", "lib/billing/offers.ts"]) {
+    const src = fs.readFileSync(f, "utf8");
+    assert.ok(!/new Stripe\(/.test(src), `${f} : instancie Stripe sans la version épinglée`);
+    assert.match(src, /stripeClient\(/, `${f} : doit passer par stripeClient()`);
+  }
+});

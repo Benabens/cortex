@@ -18,7 +18,7 @@ export type Offer = {
   price: { amount: number; currency: string } | null;
 };
 
-type PriceInfo = { amount: number; currency: string; interval: "month" | "year" | null };
+type PriceInfo = { id: string; amount: number; currency: string; interval: "month" | "year" | null };
 let _cache: { at: number; prices: Record<string, PriceInfo> } | null = null;
 const CACHE_MS = 10 * 60_000;
 
@@ -36,7 +36,7 @@ export async function stripePrices(): Promise<Record<string, PriceInfo>> {
     for (const p of list.data) {
       if (!p.lookup_key || typeof p.unit_amount !== "number") continue;
       const interval = p.recurring?.interval === "year" ? "year" : p.recurring?.interval === "month" ? "month" : null;
-      prices[p.lookup_key] = { amount: p.unit_amount / 100, currency: p.currency.toUpperCase(), interval };
+      prices[p.lookup_key] = { id: p.id, amount: p.unit_amount / 100, currency: p.currency.toUpperCase(), interval };
     }
     _cache = { at: Date.now(), prices };
     return prices;
@@ -60,4 +60,17 @@ export async function listOffers(): Promise<Offer[]> {
       price: p ? { amount: p.amount, currency: p.currency } : null,
     };
   });
+}
+
+/**
+ * lookup_key d'un PRIX Stripe par son id — le format d'API récent ne transmet
+ * plus que l'id du prix dans les factures (`pricing.price_details.price`).
+ * Cache des prix Cortex (rafraîchi si l'id est inconnu et le cache âgé).
+ */
+export async function lookupKeyOfPriceId(priceId: string): Promise<string | null> {
+  const find = (prices: Record<string, PriceInfo>) => Object.entries(prices).find(([, p]) => p.id === priceId)?.[0] ?? null;
+  const hit = find(await stripePrices());
+  if (hit) return hit;
+  if (_cache && Date.now() - _cache.at > 60_000) { _cache = null; return find(await stripePrices()); }
+  return null;
 }
