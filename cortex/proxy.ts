@@ -24,7 +24,9 @@ const PUBLIC_PREFIXES = ["/api/auth", "/login", "/api/health", "/api/metrics", "
  *  l'onglet et l'écran d'accueil. Égalité stricte : un préfixe « /icon » ouvrirait
  *  tout futur chemin qui commence ainsi. Les PNG du manifest sont sous
  *  public/brand/ ; l'image de partage est sous /login (déjà public). */
-const PUBLIC_FILES = new Set(["/icon.svg", "/apple-icon.png", "/manifest.webmanifest"]);
+// /robots.txt doit être lisible SANS session : redirigé vers /login, il n'atteindrait
+// jamais les moteurs et l'app resterait crawlable (cf. app/robots.ts, lib/seo).
+const PUBLIC_FILES = new Set(["/icon.svg", "/apple-icon.png", "/manifest.webmanifest", "/robots.txt"]);
 
 /**
  * CHEMINS HÉRITÉS DU MONO-USER, absents en production : `/voir` lit des .html
