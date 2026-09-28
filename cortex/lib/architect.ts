@@ -19,6 +19,7 @@ import { examsDir } from "@/lib/paths";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
 
 /**
  * L'ARCHITECTE D'EXAMEN (pipeline multi-passes pour UN exercice ciblé).
@@ -174,13 +175,15 @@ function derivedSourceBlock(opts: { image?: string | null; note?: string | null;
 }
 
 function contextBlock(ctx: Awaited<ReturnType<typeof gatherTargetedContext>>): string {
+  // Corpus importé = donnée encadrée (cf. lib/prompt-safety), consigne en tête.
   const block = (title: string, items: { src: string; text: string }[]) =>
-    items.length ? [``, title, ...items.map((c) => `• (${c.src}) ${c.text}`)].join("\n") : "";
-  return [
-    block(`═══ PAST-EXAMS DU MÊME TYPE (le format/difficulté de la prof — PRIORITÉ) ═══`, ctx.pastexams),
-    block(`═══ SÉRIES + CORRIGÉS ═══`, ctx.exercises),
-    block(`═══ COURS ═══`, ctx.course),
-  ].filter((l) => l != null).join("\n");
+    items.length ? `\n${dataBlock(title, items)}` : "";
+  const blocks = [
+    block(`PAST-EXAMS DU MÊME TYPE (le format/difficulté de la prof — PRIORITÉ)`, ctx.pastexams),
+    block(`SÉRIES + CORRIGÉS`, ctx.exercises),
+    block(`COURS`, ctx.course),
+  ].filter(Boolean);
+  return blocks.length ? [DATA_RULE, ...blocks].join("\n") : "";
 }
 
 /** P0+P1 — étudier la vraie page la plus dure + concevoir le piège (avant de rédiger).

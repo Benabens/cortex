@@ -2,6 +2,7 @@ import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
 import { completeText, extractJson } from "@/lib/llm";
 import { courseRefImages } from "@/lib/course-vision";
+import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
 
 /**
  * DÉTECTION DE FORMAT (générique, par matière). Le moteur ne hardcode RIEN : il LIT le
@@ -87,8 +88,9 @@ export async function detectFormat(opts: { onStep?: (m: string, p: number) => vo
     `Tu analyses le FORMAT des examens de ce cours pour pouvoir en générer de NOUVEAUX au même format. Ne hardcode rien : DÉDUIS tout des énoncés réels ci-dessous.`,
     imgs.length ? `Pages d'examens réelles (outil Read — observe la mise en page, les blocs de QCM, le barème) :\n${imgs.map((p) => `  - ${p}`).join("\n")}` : ``,
     ``,
-    `═══ TEXTE DES EXAMENS PASSÉS (vérité terrain) ═══`,
-    text,
+    DATA_RULE,
+    ``,
+    dataBlock(`TEXTE DES EXAMENS PASSÉS (vérité terrain)`, [{ src: "annales", text }]),
     ``,
     `═══ TA TÂCHE ═══`,
     `Décris le format d'UN examen type : structure (sections), TYPES de questions (scq = QCM à UNE seule réponse / mcq = QCM à PLUSIEURS réponses possibles / open / calc / proof), leur NOMBRE et leur PART en % des points, le BARÈME, la DURÉE, le total de points, et surtout la CONVENTION écrite qui distingue « exactement une bonne réponse » de « une ou plusieurs » (cite la formulation réelle). has_mcq=true s'il y a un bloc de QCM. Ajoute l'emphase par thème si visible.`,
