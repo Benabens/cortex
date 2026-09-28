@@ -15,6 +15,8 @@ export const FIELD_LIMITS = {
   /** check-solution : énoncé et réponse de l'étudiant */
   statement: 8000,
   answer: 8000,
+  /** « Mets l'accent sur… » : exams/qcm/labs — quelques mots, pas un document */
+  focus: 400,
   /** exercises/generate : cible et note libre */
   target: 2000,
   note: 2000,
@@ -29,6 +31,7 @@ export type LimitedField = keyof typeof FIELD_LIMITS;
 
 const LABELS: Record<LimitedField, string> = {
   concept: "Le concept", statement: "L’énoncé", answer: "La réponse", target: "La cible", note: "La note", text: "Le texte",
+  focus: "Le sujet à travailler",
   topic: "Le sujet", description: "La note",
 };
 
