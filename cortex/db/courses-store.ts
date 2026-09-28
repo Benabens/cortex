@@ -351,6 +351,8 @@ export async function removeEmptyFakeCourse(opts: { countRows?: () => Promise<nu
     await authRun(`DELETE FROM tenants WHERE user_id = ? AND course = ?`, fake.owner_user_id, FAKE_COURSE_ID);
     const { forgetTenant } = await import("./driver-postgres");
     forgetTenant(fake.owner_user_id, FAKE_COURSE_ID);
+    const { forgetSchemaMemo } = await import("./q");
+    forgetSchemaMemo(fake.owner_user_id, FAKE_COURSE_ID);
   }
   return { removed: true, reason: tenant ? undefined : "jamais ouvert" };
 }
