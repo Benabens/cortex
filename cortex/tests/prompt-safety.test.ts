@@ -155,3 +155,24 @@ test("mémoire de calibration : les notes libres ne peuvent pas contrefaire une 
     }),
   );
 });
+
+test("plafond de prompt : la garde qui remplace l'empreinte figée", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { runWithUser } = await import("../db/context");
+  const { buildPrompt, buildBatchPrompt, PROMPT_MAX_CHARS } = await import("../lib/exam");
+  const { DATA_RULE } = await import("../lib/prompt-safety");
+  // L'empreinte figée du prompt ne pouvait plus servir de garde (elle change à
+  // chaque évolution légitime des consignes). Deux propriétés la remplacent, et
+  // ce sont celles qui coûtent cher si elles cassent : le prompt ne doit pas
+  // enfler (facture par génération) et la consigne anti-injection doit y rester.
+  const ctx = { weaknesses: [], due: ["fork"], style: [], exercises: [], reviews: [], cheats: [], course: [] };
+  const [full, batch] = await runWithUser("owner", () =>
+    runWithCourse("cs-202", async () => {
+      const { profile } = await import("../lib/course-profile");
+      return [await buildPrompt(ctx as never), buildBatchPrompt(ctx as never, await profile().examSlots())];
+    }),
+  );
+  assert.ok(PROMPT_MAX_CHARS >= 40_000 && PROMPT_MAX_CHARS <= 80_000, "un plafond utile : large mais pas infini");
+  assert.ok(full.length + batch.length < PROMPT_MAX_CHARS, `prompt de référence ${full.length + batch.length} > plafond ${PROMPT_MAX_CHARS}`);
+  assert.ok(full.includes(DATA_RULE) && batch.includes(DATA_RULE), "les deux prompts portent la consigne de données");
+});
