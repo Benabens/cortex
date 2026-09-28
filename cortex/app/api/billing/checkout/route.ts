@@ -1,7 +1,7 @@
 import { billingEnabled } from "@/lib/billing/credits";
 import { isPlanKey, PLANS, type PlanKey } from "@/lib/billing/stripe-events";
 import { authGet } from "@/db/auth-store";
-import { purchasesAllowed, termsVersion } from "@/lib/legal";
+import { purchasesAllowed, termsState } from "@/lib/legal";
 import { currentUser } from "@/db/context";
 import { useUser } from "@/lib/req";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
@@ -28,11 +28,16 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   // On n'encaisse pas sans documents légaux publiés ni sans CGV acceptées (version courante).
   const gate = purchasesAllowed();
   if (!gate.enabled) return NextResponse.json({ error: gate.reason }, { status: 503 });
-  const accepted = await authGet<{ accepted_at: string }>(
-    `SELECT accepted_at FROM terms_acceptances WHERE user_id = ? AND version = ?`, currentUser(), termsVersion(),
-  );
-  if (!accepted) {
+  const terms = await termsState(currentUser());
+  if (!terms.accepted) {
     return NextResponse.json({ error: "Accepte d'abord les conditions générales de vente (version courante) pour acheter." }, { status: 403 });
+  }
+  // L221-28 13° : sans accord exprès à l'exécution immédiate recueilli AVANT le paiement, pas de paiement.
+  if (!terms.withdrawalAccepted) {
+    return NextResponse.json(
+      { error: "Avant de payer, confirme la demande d’accès immédiat au service et la perte du droit de rétractation dès l’utilisation de tes crédits (page Abonnement & crédits)." },
+      { status: 400 },
+    );
   }
 
   const { plan } = (await readJson(req, {})) as { plan?: unknown };

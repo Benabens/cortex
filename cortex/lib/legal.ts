@@ -54,3 +54,33 @@ export function purchasesAllowed(env: Partial<NodeJS.ProcessEnv> = process.env):
   }
   return { enabled: true, reason: null };
 }
+
+export type TermsState = {
+  version: string;
+  accepted: boolean;
+  acceptedAt: string | null;
+  /** Accord exprès à l'exécution immédiate + reconnaissance de la perte du droit de rétractation (L221-28 13° C. conso). */
+  withdrawalAccepted: boolean;
+  withdrawalAcceptedAt: string | null;
+};
+
+/** État d'acceptation de la version COURANTE des CGV pour un utilisateur. */
+export async function termsState(userId: string, env: Partial<NodeJS.ProcessEnv> = process.env): Promise<TermsState> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { authGet } = require("@/db/auth-store") as typeof import("@/db/auth-store");
+  const version = termsVersion(env);
+  const row = await authGet<{ accepted_at: string; withdrawal_waiver_at: string | null }>(
+    `SELECT accepted_at, withdrawal_waiver_at FROM terms_acceptances WHERE user_id = ? AND version = ?`, userId, version,
+  );
+  return {
+    version,
+    accepted: !!row,
+    acceptedAt: row?.accepted_at ?? null,
+    withdrawalAccepted: !!row?.withdrawal_waiver_at,
+    withdrawalAcceptedAt: row?.withdrawal_waiver_at ?? null,
+  };
+}
+
+/** Libellé de la renonciation, identique à l'écran et dans les traces. */
+export const WITHDRAWAL_WAIVER_TEXT =
+  "Je demande l’accès immédiat au service et reconnais perdre mon droit de rétractation dès l’utilisation de mes crédits.";

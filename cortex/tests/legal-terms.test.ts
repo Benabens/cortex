@@ -68,16 +68,47 @@ test("acceptation des CGV : tracée (utilisateur, version, date), exposée par /
   assert.deepEqual(Object.keys(before_.legal).sort(), ["notice", "privacy", "refund", "terms"]);
   const bad = await terms.POST(post("http://cortex.test/api/billing/terms", { version: "2020-01" }));
   assert.equal(bad.status, 400, "une autre version que la courante n'est pas une acceptation");
-  const ok = await terms.POST(post("http://cortex.test/api/billing/terms", { version: "2026-09" }));
+  // Rétractation (L221-28 13°) : l'accord exprès à l'exécution immédiate est OBLIGATOIRE avec les CGV.
+  const noWaiver = await terms.POST(post("http://cortex.test/api/billing/terms", { version: "2026-09" }));
+  const noWaiverText = await noWaiver.text();
+  assert.equal(noWaiver.status, 400, noWaiverText);
+  assert.match(noWaiverText, /rétractation/i);
+  const ok = await terms.POST(post("http://cortex.test/api/billing/terms", { version: "2026-09", withdrawal: true }));
   assert.equal(ok.status, 200, await ok.text());
   const after_ = await (await billing.GET(post("http://cortex.test/api/billing", {}) as never)).json();
   assert.equal(after_.terms.accepted, true);
   assert.match(after_.terms.acceptedAt, /^\d{4}-\d{2}-\d{2}/);
+  assert.equal(after_.terms.withdrawalAccepted, true);
+  assert.match(after_.terms.withdrawalAcceptedAt, /^\d{4}-\d{2}-\d{2}/);
   const { authGet } = await import("../db/auth-store");
-  const row = await authGet<{ version: string }>(`SELECT version FROM terms_acceptances WHERE user_id = ?`, "alice");
+  const row = await authGet<{ version: string; withdrawal_waiver_at: string | null }>(`SELECT version, withdrawal_waiver_at FROM terms_acceptances WHERE user_id = ?`, "alice");
   assert.equal(row?.version, "2026-09");
-  // Rejouer l'acceptation ne crée pas de doublon.
-  assert.equal((await terms.POST(post("http://cortex.test/api/billing/terms", { version: "2026-09" }))).status, 200);
+  assert.match(row?.withdrawal_waiver_at ?? "", /^\d{4}-\d{2}-\d{2}/, "renonciation tracée avec sa date");
+  // Rejouer l'acceptation ne crée pas de doublon et ne réécrit pas les dates.
+  assert.equal((await terms.POST(post("http://cortex.test/api/billing/terms", { version: "2026-09", withdrawal: true }))).status, 200);
+  const again = await authGet<{ withdrawal_waiver_at: string | null; n: number }>(`SELECT withdrawal_waiver_at, (SELECT count(*) FROM terms_acceptances WHERE user_id = 'alice') n FROM terms_acceptances WHERE user_id = ?`, "alice");
+  assert.equal(Number(again?.n), 1);
+  assert.equal(again?.withdrawal_waiver_at, row?.withdrawal_waiver_at);
+});
+
+test("compte ayant accepté les CGV AVANT la case de rétractation : checkout 400 tant qu'elle manque, puis OK après", async () => {
+  setLegal();
+  const { authRun, authGet } = await import("../db/auth-store");
+  const { nowStr } = await import("../db/q");
+  await authRun(`INSERT INTO terms_acceptances (user_id, version, accepted_at) VALUES (?,?,?)`, "carl", "2026-09", nowStr());
+  const { POST } = await import("../app/api/billing/checkout/route");
+  const r400 = await POST(post("http://cortex.test/api/billing/checkout", { plan: "credits_10" }, "carl"));
+  const r400Text = await r400.text();
+  assert.equal(r400.status, 400, r400Text);
+  assert.match(r400Text, /rétractation/i);
+  const terms = await import("../app/api/billing/terms/route");
+  assert.equal((await terms.POST(post("http://cortex.test/api/billing/terms", { version: "2026-09", withdrawal: true }, "carl"))).status, 200);
+  const row = await authGet<{ accepted_at: string; withdrawal_waiver_at: string | null }>(`SELECT accepted_at, withdrawal_waiver_at FROM terms_acceptances WHERE user_id = ?`, "carl");
+  assert.ok(row?.withdrawal_waiver_at, "la renonciation s'ajoute à la ligne existante");
+  // La garde légale est levée : l'état exposé le confirme (le checkout appellerait ensuite Stripe — hors de ce test hermétique).
+  const { termsState } = await import("../lib/legal");
+  const st = await termsState("carl");
+  assert.equal(st.accepted && st.withdrawalAccepted, true);
 });
 
 test("checkout : sans acceptation des CGV → 403 avant tout appel Stripe ; achat fermé en prod sans liens → 503", async () => {
