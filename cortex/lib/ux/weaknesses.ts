@@ -38,6 +38,8 @@ export type MineResp = {
   mined?: MinedItem[];
   weaknesses: Weakness[];
   note?: string;
+  /** PDF sans texte lisible (scan) : gardé tel quel dans le suivi, sans analyse. */
+  stored?: boolean;
 };
 
 export function sevOf(level: number): Severity {
@@ -54,7 +56,9 @@ export function sourceLabel(source: string): string {
     case "manual":
       return "Ajout manuel";
     case "screenshot":
-      return "Screenshot";
+      return "Capture";
+    case "pdf":
+      return "PDF";
     default:
       return source;
   }

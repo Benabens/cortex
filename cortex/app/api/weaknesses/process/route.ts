@@ -24,7 +24,7 @@ function buildPrompt(w: { topic: string; description: string | null; imageRel: s
   ];
   if (w.imageRel) {
     lines.push(
-      `Lis l'image située à ${w.imageRel} avec l'outil Read. C'est soit un exercice d'examen qu'il a raté, soit un slide de cours qu'il ne maîtrise pas — déduis lequel.`
+      `Lis le fichier (image ou PDF) situé à ${w.imageRel} avec l'outil Read. C'est soit un exercice d'examen qu'il a raté, soit un slide de cours qu'il ne maîtrise pas — déduis lequel.`
     );
   }
   const note = [w.topic && w.topic !== "(à analyser)" ? w.topic : "", w.description ?? ""].filter(Boolean).join(" — ");

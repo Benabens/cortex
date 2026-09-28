@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { FileText, FileCode2, Layers, Check, Trash2, UploadCloud, ArrowUpRight } from "lucide-react";
+import { FileText, FileCode2, Layers, Check, Trash2, ArrowUpRight } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
 import { apiPost, useCourse } from "@/lib/ux/api";
 import { corpusLabel, extOf, type SourcesResp, type SourceExam } from "@/lib/ux/sources";
@@ -60,7 +60,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
   };
 
   const remove = async (f: SourceExam) => {
-    if (!window.confirm(`Retirer « ${f.title} » du corpus ? (fichier uploadé)`)) return;
+    if (!window.confirm(`Retirer « ${f.title} » du corpus ? (fichier ajouté depuis l'app)`)) return;
     setBusyFor(f.path, true);
     try {
       await fetch(`/api/sources?path=${encodeURIComponent(f.path)}&course=${encodeURIComponent(courseId)}`, { method: "DELETE" });
@@ -75,7 +75,8 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
     .filter((c) => !ANNALE_TYPES.has(c.type))
     .sort((a, b) => (FACET_ORDER.indexOf(a.type) + 1 || 99) - (FACET_ORDER.indexOf(b.type) + 1 || 99));
   const annaleCount = data.exams.length;
-  const totalItems = data.corpus.reduce((a, c) => a + c.items, 0);
+  // Compteur global en FICHIERS (« extraits » ne parlait pas aux étudiants : série 3).
+  const totalFiles = data.corpus.reduce((a, c) => a + c.sources, 0);
   const refCount = data.exams.filter((e) => isRef(e)).length;
 
   const browseRows = facet ? (data.sources ?? []).filter((s) => s.type === facet) : [];
@@ -86,7 +87,9 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
       <div className="border-b border-line px-4 py-3.5">
         <div className="flex items-center gap-2 text-[0.76rem] text-ink-3">
           <Layers className="size-3.5" strokeWidth={2} />
-          Corpus ingéré · <span className="font-data font-semibold text-ink-2">{totalItems}</span> extraits
+          <span>
+            <span className="font-data font-semibold text-ink-2">{totalFiles}</span> fichier{totalFiles > 1 ? "s" : ""} dans le corpus
+          </span>
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           <FacetChip label="Annales" count={annaleCount} active={facet === null} onClick={() => setFacet(null)} />
@@ -108,7 +111,6 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
           <div className="hidden items-center gap-3 border-b border-line px-4 py-2 text-[0.68rem] font-medium text-ink-4 md:flex">
             <span className="w-8" />
             <span className="flex-1">Annale</span>
-            <span className="w-14 text-right">Extraits</span>
             <span className="w-52 text-right">Ouvrir · Référence</span>
           </div>
 
@@ -129,16 +131,10 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
                       {f.title}
                       {f.year ? <span className="ml-1.5 text-ink-3">· {f.year}</span> : null}
                     </div>
-                    <div className="flex items-center gap-1.5 text-[0.72rem] text-ink-4">
+                    <div className="text-[0.72rem] text-ink-4">
                       <span className="font-mono">{ext}</span>
-                      <span>· {f.items} extraits</span>
-                      {f.uploaded && (
-                        <span className="inline-flex items-center gap-1 text-cyan-hi"><UploadCloud className="size-3" strokeWidth={2.25} /> uploadé</span>
-                      )}
                     </div>
                   </div>
-
-                  <span className="hidden w-14 text-right font-data text-[0.82rem] tabular text-ink-3 md:block">{f.items}</span>
 
                   {/* Ouvrir (voir) + Référence + emplacement RÉSERVÉ pour la poubelle → aucun décalage.
                       Sur mobile, le bloc passe sous le titre au lieu de l'écraser. */}
@@ -189,9 +185,8 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
                       {s.title}
                       {s.year ? <span className="ml-1.5 text-ink-3">· {s.year}</span> : null}
                     </div>
-                    <div className="flex items-center gap-1.5 text-[0.72rem] text-ink-4">
+                    <div className="text-[0.72rem] text-ink-4">
                       <span className="font-mono">{ext}</span>
-                      <span>· {s.items} extraits</span>
                     </div>
                   </div>
                   {s.href && <SeeLink href={s.href} label={s.title} />}

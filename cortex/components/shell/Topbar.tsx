@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Search, Menu, CalendarClock, UserRound } from "lucide-react";
 import { Wordmark } from "./Logo";
-import { Kbd } from "@/components/ui/primitives";
+
 import { useApi } from "@/lib/ux/api";
 
 type DashCountdown = { countdown: { date: string; days: number } | null };
@@ -36,10 +36,6 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           <Search className="size-4 shrink-0" strokeWidth={2} />
           <span className="flex-1 truncate text-[0.85rem]">
             Rechercher un cours, une série, un final…
-          </span>
-          <span className="flex items-center gap-1">
-            <Kbd>⌘</Kbd>
-            <Kbd>K</Kbd>
           </span>
         </Link>
 

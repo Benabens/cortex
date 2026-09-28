@@ -97,16 +97,4 @@ export function Toggle({
   );
 }
 
-export function Kbd({ children, className }: { children: React.ReactNode; className?: string }) {
-  return (
-    <kbd
-      className={cn(
-        "inline-flex h-5 min-w-5 items-center justify-center rounded-[5px] border border-line-strong bg-white/[0.04] px-1.5",
-        "font-mono text-[0.7rem] font-medium text-ink-3",
-        className
-      )}
-    >
-      {children}
-    </kbd>
-  );
-}
+

@@ -2,24 +2,16 @@ import { createWeakness, deleteWeakness, listWeaknesses, weaknessesByTheme } fro
 import { useCourseOr404 } from "@/lib/req";
 import { UPLOAD_LIMITS, readFormData, withBodyLimit } from "@/lib/upload-limit";
 import { uploadsDir } from "@/lib/paths";
-import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { checkStorage, declaredBytes } from "@/lib/storage-quota";
-import { fieldTooLong } from "@/lib/field-limits";
+import { FIELD_LIMITS, fieldTooLong } from "@/lib/field-limits";
 import { currentUser } from "@/db/context";
+import { ATTACHMENT_FORMATS_LABEL, ATTACHMENT_MAX_BYTES, pdfText, saveAttachment, sniffAttachment } from "@/lib/weakness-files";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const EXT: Record<string, string> = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
-  "image/jpg": "jpg",
-  "image/gif": "gif",
-  "image/webp": "webp",
-};
 
 export async function GET(req: NextRequest) {
   const denied = useCourseOr404(req);
@@ -42,25 +34,32 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (tooLong) return tooLong;
 
   let screenshotPath: string | null = null;
-  const file = form.get("screenshot");
-  const hasFile = file && file instanceof File && file.size > 0;
-  // Sujet optionnel : l'IA le déduira. Il faut au moins un screenshot OU une note.
-  if (!topic && !description && !hasFile) {
-    return NextResponse.json({ error: "Mets au moins un screenshot ou une note." }, { status: 400 });
+  let source = "manual";
+  let note = description;
+  // Pièce jointe : « file » (zone de dépôt unique), « screenshot » (ancien champ, toujours accepté).
+  const raw = form.get("file") ?? form.get("screenshot");
+  const file = raw instanceof File && raw.size > 0 ? raw : null;
+  // Sujet optionnel : l'IA le déduira. Il faut au moins une pièce jointe OU une note.
+  if (!topic && !description && !file) {
+    return NextResponse.json({ error: "Colle un texte, une capture ou ajoute un fichier." }, { status: 400 });
   }
   if (!topic) topic = "(à analyser)";
-  if (file && file instanceof File && file.size > 0) {
-    const ext = EXT[file.type] ?? "png";
-    if (file.size > 12 * 1024 * 1024)
-      return NextResponse.json({ error: "Image trop lourde (max 12 Mo)." }, { status: 400 });
-    fs.mkdirSync(uploadsDir(), { recursive: true });
-    const name = `${crypto.randomUUID()}.${ext}`;
-    const buf = Buffer.from(await file.arrayBuffer());
-    fs.writeFileSync(path.join(uploadsDir(), name), buf);
-    screenshotPath = name;
+  if (file) {
+    if (file.size > ATTACHMENT_MAX_BYTES)
+      return NextResponse.json({ error: "Fichier trop lourd (12 Mo au maximum)." }, { status: 413 });
+    const buf = new Uint8Array(await file.arrayBuffer());
+    const kind = sniffAttachment(buf);
+    if (!kind) return NextResponse.json({ error: `Format non pris en charge : ${ATTACHMENT_FORMATS_LABEL}.` }, { status: 415 });
+    screenshotPath = saveAttachment(buf, kind);
+    source = kind === "pdf" ? "pdf" : "screenshot";
+    // PDF : son texte rejoint la note (lisible dans la liste, relié au corpus, repris par l'analyse).
+    if (kind === "pdf") {
+      const text = await pdfText(buf, FIELD_LIMITS.description);
+      note = [description, text].filter(Boolean).join("\n\n").slice(0, FIELD_LIMITS.description);
+    }
   }
 
-  const id = await createWeakness({ topic, description, severity, screenshotPath });
+  const id = await createWeakness({ topic, description: note, severity, screenshotPath, source });
   return NextResponse.json({ id });
 })
 

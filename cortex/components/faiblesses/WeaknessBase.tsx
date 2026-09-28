@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowUpRight, Trash2, ImageIcon, Target, ListTree, LayoutList } from "lucide-react";
+import { ArrowUpRight, Trash2, ImageIcon, FileText, Target, ListTree, LayoutList } from "lucide-react";
 import { SEVERITY, type Severity } from "@/lib/ux/labels";
 import { Badge } from "@/components/ui/Badge";
 import { SeverityMeter } from "@/components/viz/SeverityMeter";
@@ -71,10 +71,7 @@ export function WeaknessBase({
 
   return (
     <section>
-      <SectionHeader
-        title="Base des faiblesses"
-        hint="Filtre par sévérité, ou groupe par chapitre du cours : chaque lacune se travaille en un clic."
-      />
+      <SectionHeader title="Base des faiblesses" />
 
       {weaknesses.length === 0 ? (
         <div className="panel flex flex-col items-center gap-3 rounded-xl px-6 py-14 text-center">
@@ -196,9 +193,12 @@ function WeaknessRow({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h4 className="text-[0.95rem] font-medium text-ink-1">{w.topic}</h4>
-            <Badge tone={w.analyzed ? "success" : "warning"} size="xs">
-              {w.analyzed ? "Analysée" : "À analyser"}
-            </Badge>
+            {/* Pastille « Analysée » retirée (série 3) : seule l'exception reste signalée. */}
+            {!w.analyzed && (
+              <Badge tone="warning" size="xs">
+                À analyser
+              </Badge>
+            )}
           </div>
           {w.description && (
             <p className="mt-0.5 line-clamp-2 max-w-2xl text-[0.8rem] text-ink-3">{w.description}</p>
@@ -216,8 +216,12 @@ function WeaknessRow({
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 text-ink-3 underline-offset-2 hover:text-violet-hi hover:underline"
                 >
-                  <ImageIcon className="size-3" strokeWidth={2} />
-                  image
+                  {/\.pdf$/i.test(w.screenshotUrl) ? (
+                    <FileText className="size-3" strokeWidth={2} />
+                  ) : (
+                    <ImageIcon className="size-3" strokeWidth={2} />
+                  )}
+                  {/\.pdf$/i.test(w.screenshotUrl) ? "PDF" : "image"}
                 </a>
               </>
             )}

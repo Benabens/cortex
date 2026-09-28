@@ -13,6 +13,7 @@ const MIME: Record<string, string> = {
   jpeg: "image/jpeg",
   gif: "image/gif",
   webp: "image/webp",
+  pdf: "application/pdf",
 };
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ file: string }> }) {
