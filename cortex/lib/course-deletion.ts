@@ -100,6 +100,8 @@ export async function deleteCourseWithData(userId: string, courseId: string, opt
       await authRun(`DELETE FROM tenants WHERE user_id = ? AND course = ?`, userId, courseId);
       const { forgetTenant } = await import("@/db/driver-postgres");
       forgetTenant(userId, courseId);
+      const { forgetSchemaMemo } = await import("@/db/q");
+      forgetSchemaMemo(userId, courseId);
     } catch (e) {
       residues.push(`schéma ${tenant.schema_name} : ${e instanceof Error ? e.message : String(e)}`);
     }

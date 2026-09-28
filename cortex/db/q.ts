@@ -78,34 +78,74 @@ export function nowPlusDays(days: number): string {
   return nowStr(days * 86_400_000);
 }
 
+/**
+ * COMPTEUR DE REQUÊTES (tests et mesures de budget) : le nombre d'aller-retours
+ * SQL d'un chemin de lecture est une propriété qu'on veut pouvoir affirmer —
+ * cf. tests/query-budget.test.ts. Coût en production : une incrémentation.
+ */
+let _queries = 0;
+export function queryCountForTests(): number { return _queries; }
+export function resetQueryCountForTests(): void { _queries = 0; }
+
+/**
+ * MÉMO DU SCHÉMA, par tenant et par process. `ensureTable`/`ensureColumns`
+ * rejouaient la DDL et une lecture du catalogue à CHAQUE appel de fonction de
+ * bibliothèque : des dizaines d'aller-retours par requête HTTP, alors que le
+ * schéma du tenant est créé une fois pour toutes (ensureTenant côté Postgres,
+ * amorçage du fichier côté sqlite). La clé est l'identité du tenant — pas le nom
+ * de schéma, qui peut différer (registre) — et elle est purgée quand un cours
+ * est supprimé (`forgetSchemaMemo`).
+ */
+const _ensured = new Set<string>();
+function tenantKey(): string {
+  // require paresseux : même raison que pour les drivers (aucun cycle statique).
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { currentUser } = require("./context") as typeof import("./context");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { currentCourse } = require("./client") as typeof import("./client");
+  return `${dbDriverName()}|${currentUser()}|${currentCourse()}`;
+}
+/** Oublie le schéma mémoïsé d'un tenant (cours supprimé, base recréée). */
+export function forgetSchemaMemo(userId?: string, courseId?: string): void {
+  if (!userId || !courseId) { _ensured.clear(); return; }
+  const prefix = `${dbDriverName()}|${userId}|${courseId}|`;
+  for (const k of [..._ensured]) if (k.startsWith(prefix)) _ensured.delete(k);
+}
+
 export const q = {
   get dialect(): Dialect {
     return driver().dialect;
   },
 
   all<T = Record<string, unknown>>(sql: string, ...params: SqlParam[]): Promise<T[]> {
+    _queries++;
     return driver().all<T>(sql, params);
   },
 
   get<T = Record<string, unknown>>(sql: string, ...params: SqlParam[]): Promise<T | undefined> {
+    _queries++;
     return driver().get<T>(sql, params);
   },
 
   run(sql: string, ...params: SqlParam[]): Promise<RunResult> {
+    _queries++;
     return driver().run(sql, params);
   },
 
   /** INSERT → id auto-généré (remplace .run(...).lastInsertRowid). */
   insert(sql: string, ...params: SqlParam[]): Promise<number> {
+    _queries++;
     return driver().insert(sql, params);
   },
 
   exec(sql: string): Promise<void> {
+    _queries++;
     return driver().exec(sql);
   },
 
   /** Colonnes existantes d'une table (lecture seule — ne mute jamais le schéma). */
   columns(table: string): Promise<string[]> {
+    _queries++;
     return driver().columns(table);
   },
 
@@ -113,9 +153,14 @@ export const q = {
     return driver().tx(fn);
   },
 
-  /** CREATE TABLE IF NOT EXISTS + index — remplace les ensures lazy historiques. */
+  /** CREATE TABLE IF NOT EXISTS + index — remplace les ensures lazy historiques.
+   *  Mémoïsé par tenant et par process (la DDL est idempotente, la rejouer à
+   *  chaque requête ne coûte que des aller-retours). */
   async ensureTable(name: string): Promise<void> {
-    for (const stmt of ddl(name, driver().dialect)) await driver().exec(stmt);
+    const key = `${tenantKey()}|t:${name}`;
+    if (_ensured.has(key)) return;
+    for (const stmt of ddl(name, driver().dialect)) await this.exec(stmt);
+    _ensured.add(key);
   },
 
   /**
@@ -123,8 +168,10 @@ export const q = {
    * Les colonnes demandées doivent exister dans db/tables.ts (source de vérité).
    */
   async ensureColumns(table: string, colNames: string[]): Promise<void> {
+    const key = `${tenantKey()}|c:${table}:${[...colNames].sort().join(",")}`;
+    if (_ensured.has(key)) return;
     const d = driver();
-    const existing = new Set(await d.columns(table));
+    const existing = new Set(await this.columns(table));
     const spec = getTable(table);
     for (const name of colNames) {
       if (existing.has(name)) continue;
@@ -135,5 +182,6 @@ export const q = {
       const def = col.def !== undefined && col.def !== "NOW" ? ` DEFAULT ${col.def}` : "";
       await d.addColumn(table, `${name} ${type}${nn}${def}`);
     }
+    _ensured.add(key);
   },
 };
