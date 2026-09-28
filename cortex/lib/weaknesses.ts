@@ -60,25 +60,42 @@ async function autoLink(text: string, max = 8): Promise<number[]> {
   return ids;
 }
 
-const RESOLVE_ITEM_SQL = `
-  SELECT i.id AS "itemId", i.title, i.anchor, i.lecture_id AS "lectureId",
-         s.type AS "sourceType", s.title AS "sourceTitle", s.path AS "sourcePath"
-  FROM items i JOIN sources s ON s.id = i.source_id
-  WHERE i.id = ?
-`;
-
-async function relatedFor(idsJson: string | null, query: string): Promise<RelatedItem[]> {
+function parseIds(idsJson: string | null): number[] {
   if (!idsJson) return [];
-  let ids: number[] = [];
   try {
-    ids = JSON.parse(idsJson);
+    const v = JSON.parse(idsJson);
+    return Array.isArray(v) ? v.filter((n) => Number.isInteger(n)) : [];
   } catch {
     return [];
   }
+}
+
+type ResolvedItem = { itemId: number; title: string | null; anchor: string; lectureId: string | null; sourceType: string; sourceTitle: string; sourcePath: string };
+
+/**
+ * Résout EN UNE REQUÊTE les items liés de plusieurs faiblesses. Avant, chaque
+ * faiblesse résolvait ses items un par un : douze faiblesses de cinq items
+ * coûtaient soixante aller-retours, et cela croissait avec le corpus.
+ */
+async function resolveItems(ids: number[]): Promise<Map<number, ResolvedItem>> {
+  const uniq = [...new Set(ids)];
+  if (!uniq.length) return new Map();
+  const holes = uniq.map(() => "?").join(",");
+  const rows = await q.all<ResolvedItem>(
+    `SELECT i.id AS "itemId", i.title, i.anchor, i.lecture_id AS "lectureId",
+            s.type AS "sourceType", s.title AS "sourceTitle", s.path AS "sourcePath"
+       FROM items i JOIN sources s ON s.id = i.source_id
+      WHERE i.id IN (${holes})`,
+    ...uniq,
+  );
+  return new Map(rows.map((r) => [Number(r.itemId), r]));
+}
+
+/** Items liés d'UNE faiblesse, dans l'ordre enregistré, depuis la résolution groupée. */
+function relatedFrom(idsJson: string | null, query: string, resolved: Map<number, ResolvedItem>): RelatedItem[] {
   const out: RelatedItem[] = [];
-  for (const id of ids) {
-    // statement mis en cache par le driver, lié à la connexion du cours courant
-    const r = await q.get<any>(RESOLVE_ITEM_SQL, id);
+  for (const id of parseIds(idsJson)) {
+    const r = resolved.get(id);
     if (!r) continue;
     out.push({
       itemId: r.itemId,
@@ -118,28 +135,43 @@ export async function createWeakness(input: {
   return id;
 }
 
-export async function listWeaknesses(): Promise<Weakness[]> {
+/** Défaut de pagination : une réponse d'API ne doit pas croître sans fin. */
+export const WEAKNESS_PAGE = 200;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toWeakness(r: any, resolved: Map<number, ResolvedItem>): Weakness {
+  return {
+    id: r.id,
+    topic: r.topic,
+    description: r.description,
+    screenshotPath: r.screenshot_path,
+    screenshotUrl: r.screenshot_path ? `/uploads/${r.screenshot_path}` : null,
+    severity: r.severity,
+    analyzed: !!r.analyzed,
+    source: r.source ?? "manual",
+    theme: r.theme ?? null,
+    timesSeen: r.times_seen,
+    loggedAt: r.logged_at,
+    lastReviewedAt: r.last_reviewed_at,
+    related: relatedFrom(r.related_item_ids, r.topic, resolved),
+  };
+}
+
+/**
+ * Faiblesses les plus récentes, BORNÉES (défaut WEAKNESS_PAGE), avec leurs items
+ * liés résolus en une seule requête groupée — deux requêtes au total, quel que
+ * soit le nombre de faiblesses et d'items.
+ */
+export async function listWeaknesses(opts: { limit?: number; offset?: number } = {}): Promise<Weakness[]> {
   await ensureSchema();
-  const rows = await q.all<any>(`SELECT * FROM weaknesses ORDER BY logged_at DESC, id DESC`);
-  const out: Weakness[] = [];
-  for (const r of rows) {
-    out.push({
-      id: r.id,
-      topic: r.topic,
-      description: r.description,
-      screenshotPath: r.screenshot_path,
-      screenshotUrl: r.screenshot_path ? `/uploads/${r.screenshot_path}` : null,
-      severity: r.severity,
-      analyzed: !!r.analyzed,
-      source: r.source ?? "manual",
-      theme: r.theme ?? null,
-      timesSeen: r.times_seen,
-      loggedAt: r.logged_at,
-      lastReviewedAt: r.last_reviewed_at,
-      related: await relatedFor(r.related_item_ids, r.topic),
-    });
-  }
-  return out;
+  const limit = Math.max(1, Math.min(1000, Math.floor(opts.limit ?? WEAKNESS_PAGE)));
+  const offset = Math.max(0, Math.floor(opts.offset ?? 0));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows = await q.all<any>(
+    `SELECT * FROM weaknesses ORDER BY logged_at DESC, id DESC LIMIT ? OFFSET ?`, limit, offset,
+  );
+  const resolved = await resolveItems(rows.flatMap((r) => parseIds(r.related_item_ids)));
+  return rows.map((r) => toWeakness(r, resolved));
 }
 
 /** Tableau de bord : faiblesses regroupées par thème (le « classement des incompréhensions »). */
@@ -161,8 +193,13 @@ export async function weaknessesByTheme(): Promise<{ theme: string; count: numbe
 }
 
 export async function getWeakness(id: number): Promise<Weakness | null> {
-  const list = await listWeaknesses();
-  return list.find((w) => w.id === id) ?? null;
+  await ensureSchema();
+  // Lecture DIRECTE : passer par la liste paginée manquerait une faiblesse
+  // au-delà de la borne, et chargeait tout le reste pour rien.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const r = await q.get<any>(`SELECT * FROM weaknesses WHERE id = ?`, id);
+  if (!r) return null;
+  return toWeakness(r, await resolveItems(parseIds(r.related_item_ids)));
 }
 
 export async function deleteWeakness(id: number): Promise<string | null> {
