@@ -3,6 +3,8 @@ import { generationGate } from "@/lib/billing/guards";
 import { creditsGate } from "@/lib/billing/credits";
 import { llmUnavailableReason } from "@/lib/llm";
 import { texAvailable } from "@/lib/exam-latex";
+import { checkStorage } from "@/lib/storage-quota";
+import { currentUser } from "@/db/context";
 
 export type PreflightIssue = { error: string; command?: string; status: number };
 
@@ -10,7 +12,7 @@ export type PreflightIssue = { error: string; command?: string; status: number }
  * Pré-checks AVANT de lancer un worker de génération (examen ou exercice) :
  * mieux vaut bloquer tout de suite avec un message clair que brûler 4-20 min
  * pour un rendu inutilisable. `command` = commande copiable affichée par l'UI.
- * Quota/user (DAILY_GEN_QUOTA) et solde de crédits vérifiés
+ * Quota/user (DAILY_GEN_QUOTA), solde de crédits et PLACE DISQUE vérifiés
  * ICI (point commun des routes de génération par jobs) — no-op sans env.
  */
 export async function preflightGeneration(kind?: string): Promise<PreflightIssue | null> {
@@ -20,6 +22,12 @@ export async function preflightGeneration(kind?: string): Promise<PreflightIssue
   // on n'exigerait que le minimum (1) et le solde partirait en négatif.
   const creditsIssue = await creditsGate(kind);
   if (creditsIssue) return creditsIssue;
+  // PLACE DISQUE : une génération produit des artefacts (PDF d'examen, figures)
+  // qui comptent dans le quota du compte comme les fichiers importés — et un
+  // volume presque plein casse aussi bien la compilation que l'ingestion. Vérifié
+  // avant le corpus : sans place, le conseil « lance l'ingestion » serait faux.
+  const storageIssue = await checkStorage(currentUser(), 0);
+  if (storageIssue) return storageIssue;
   const engineIssue = llmUnavailableReason();
   if (engineIssue) return { status: 503, error: engineIssue };
   let items = 0;

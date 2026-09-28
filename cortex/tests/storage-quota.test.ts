@@ -87,3 +87,35 @@ test("revue : les six routes d'envoi passent par checkStorage AVANT de lire le c
     assert.ok(guard < read, `${r} : checkStorage doit précéder la lecture du corps`);
   }
 });
+
+test("génération : le quota s'applique aussi aux artefacts produits (examens, figures), refus AVANT de lancer le job", async () => {
+  const { userSlug } = await import("../db/context");
+  const { preflightGeneration } = await import("../lib/preflight");
+  const { runWithUser } = await import("../db/context");
+  const { runWithCourse } = await import("../db/client");
+  const dir = path.join(tmp, "u", userSlug("owner"), "cs-202", "exams");
+  fs.mkdirSync(dir, { recursive: true });
+  // Le compte est DÉJÀ au-dessus du quota (1 Mo) avec ses propres artefacts.
+  fs.writeFileSync(path.join(dir, "exam-1.pdf"), Buffer.alloc(2 * MiB));
+  const issue = await runWithUser("owner", () => runWithCourse("cs-202", () => preflightGeneration("exam")));
+  assert.equal(issue?.status, 413, JSON.stringify(issue));
+  assert.match(issue!.error, /[Qq]uota/);
+  assert.match(issue!.error, /Supprime|libère/i, "le message doit dire quoi faire");
+  // Sous le quota : le refus de stockage disparaît (d'autres vérifications peuvent rester).
+  fs.rmSync(path.join(dir, "exam-1.pdf"));
+  const after_ = await runWithUser("owner", () => runWithCourse("cs-202", () => preflightGeneration("exam")));
+  assert.notEqual(after_?.status, 413, JSON.stringify(after_));
+});
+
+test("génération : volume presque plein → refus, même sous le quota du compte", async () => {
+  const { setStatfsForTests } = await import("../lib/storage-quota");
+  const { preflightGeneration } = await import("../lib/preflight");
+  const { runWithUser } = await import("../db/context");
+  const { runWithCourse } = await import("../db/client");
+  setStatfsForTests(() => ({ free: 5 * 1024 * MiB, total: 100 * 1024 * MiB })); // 5 % libre
+  try {
+    const issue = await runWithUser("owner", () => runWithCourse("cs-202", () => preflightGeneration("exam")));
+    assert.equal(issue?.status, 413, JSON.stringify(issue));
+    assert.match(issue!.error, /espace/i);
+  } finally { setStatfsForTests(null); }
+});
