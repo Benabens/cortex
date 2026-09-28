@@ -12,6 +12,7 @@ import {
   type MoldKind,
 } from "@/lib/molds";
 import path from "node:path";
+import { listExamSourceRows } from "@/lib/sources";
 
 /**
  * « ADN D'EXAMEN » détecté PAR COURS, depuis SES annales. 100 % générique :
@@ -227,9 +228,7 @@ export async function scanFigures(step: Step = () => {}): Promise<ExamDna> {
   await ensureDnaSchema();
   const course = currentCourse();
   const dna = (await getExamDna()) ?? emptyDna(course);
-  const all = await q.all<{ path: string; title: string; year: number | null }>(
-    `SELECT path, title, year FROM sources WHERE type IN ('final','midterm') GROUP BY path ORDER BY (year IS NULL), year`
-  );
+  const all = await listExamSourceRows();
   const exams = pickEnonces(all);
   if (!exams.length) { step("Figures : aucune annale — scan vide.", 100); return dna; }
   const p = profile();

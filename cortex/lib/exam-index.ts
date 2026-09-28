@@ -9,6 +9,7 @@ import { MOLD_KINDS, moldTaxonomyBlock, normalizeMold, normalizeFigureKind } fro
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { listExamSourceRows } from "@/lib/sources";
 
 /**
  * INDEX EXHAUSTIF exo-par-exo des finals (remplace le résumé tronqué à 16 k).
@@ -222,7 +223,7 @@ export async function indexExamExercises(opts: { onStep?: (m: string, p: number)
   await ensureIndexSchema();
   const step = opts.onStep ?? (() => {});
   const course = currentCourse();
-  const all = await q.all<{ path: string; title: string; year: number | null }>(`SELECT path, title, year FROM sources WHERE type IN ('final','midterm') GROUP BY path ORDER BY (year IS NULL), year`);
+  const all = await listExamSourceRows();
   const exams = pickEnonces(all);
   if (!exams.length) { step("Aucun final ingéré — index vide.", 100); return { exams: 0, exercises: 0 }; }
   await q.exec(`DELETE FROM exam_exercises`); // index reconstruit à chaque passe

@@ -7,6 +7,7 @@ import { renderExamPages } from "@/lib/exam-index";
 import { generateQcmBatch, verifyQcmBatch } from "@/lib/qcm";
 import fs from "node:fs";
 import path from "node:path";
+import { listExamSourceRows } from "@/lib/sources";
 
 /**
  * RÉVISION (générique, additif) — banque EXHAUSTIVE de toutes les vraies questions des finals
@@ -61,7 +62,7 @@ type RawQ = { page?: number; kind?: string; topic?: string; subtopic?: string; s
 
 /** Corrigés du cours (fichiers …with solutions / solutions / answers), un par année. */
 async function solutionRefs(): Promise<{ path: string; title: string; year: number | null }[]> {
-  const rows = await q.all<{ path: string; title: string; year: number | null }>(`SELECT path, title, year FROM sources WHERE type IN ('final','midterm') GROUP BY path`);
+  const rows = await listExamSourceRows();
   const isSol = (s: string) => /solution|answer|corrig/i.test(s);
   const byYear = new Map<string, { path: string; title: string; year: number | null }>();
   for (const r of rows) { if (!isSol(r.path) && !isSol(r.title)) continue; const k = String(r.year ?? r.path); if (!byYear.has(k)) byYear.set(k, r); }
@@ -182,8 +183,9 @@ export async function bankStats(): Promise<{ qcm: number; open: number; byTopic:
   const qcm = ((await q.get<{ n: number }>(`SELECT count(*) n FROM bank_questions WHERE kind='qcm'`)) as { n: number }).n;
   const open = ((await q.get<{ n: number }>(`SELECT count(*) n FROM bank_questions WHERE kind='open'`)) as { n: number }).n;
   const byTopic = await q.all<any>(
-    `SELECT topic, max(lecture_rank) lectureRank, sum(kind='qcm') qcm, sum(kind='open') open
-     FROM bank_questions GROUP BY topic ORDER BY (lectureRank IS NULL), lectureRank, topic`
+    `SELECT topic, max(lecture_rank) AS "lectureRank",
+            sum(CASE WHEN kind = 'qcm' THEN 1 ELSE 0 END) qcm, sum(CASE WHEN kind = 'open' THEN 1 ELSE 0 END) open
+     FROM bank_questions GROUP BY topic ORDER BY (max(lecture_rank) IS NULL), max(lecture_rank), topic`
   ) as any[];
   return { qcm, open, byTopic: byTopic.map((r) => ({ ...r, lectureRank: r.lectureRank })) };
 }

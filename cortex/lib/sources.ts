@@ -147,6 +147,22 @@ export type ExamSource = {
   isReference: boolean;
 };
 
+/**
+ * Une ligne par CHEMIN d'examen (une ré-ingestion peut dupliquer la source) :
+ * la plus ancienne ligne fait foi. Portable sqlite/Postgres — un `GROUP BY path`
+ * nu avec des colonnes non agrégées est accepté par sqlite et refusé par
+ * Postgres (« must appear in the GROUP BY clause »).
+ */
+export const EXAM_SOURCE_DEDUP = `id IN (SELECT min(id) FROM sources WHERE type IN ('final','midterm') GROUP BY path)`;
+
+/** Examens (finals/midterms) dédoublonnés par chemin, triés par année croissante (sans année en dernier). */
+export async function listExamSourceRows(): Promise<{ path: string; title: string; year: number | null }[]> {
+  return q.all<{ path: string; title: string; year: number | null }>(
+    `SELECT path, title, year FROM sources WHERE type IN ('final','midterm') AND ${EXAM_SOURCE_DEDUP}
+     ORDER BY (year IS NULL), year, title`,
+  );
+}
+
 /** Tous les examens (finals/midterms) du corpus + flag « référence ». */
 export async function listExamSources(): Promise<ExamSource[]> {
   await ensureRefsSchema();
@@ -156,8 +172,7 @@ export async function listExamSources(): Promise<ExamSource[]> {
   const rows = await q.all<Omit<ExamSource, "uploaded" | "isReference">>(
     `SELECT s.path, s.title, s.year, s.type kind,
             (SELECT count(*) FROM items i WHERE i.source_id = s.id) items
-     FROM sources s WHERE s.type IN ('final','midterm')
-     GROUP BY s.path
+     FROM sources s WHERE s.type IN ('final','midterm') AND s.${EXAM_SOURCE_DEDUP}
      ORDER BY (s.year IS NULL), s.year DESC, s.title`
   );
   return rows.map((r) => ({
@@ -188,7 +203,7 @@ export async function listCorpusSources(): Promise<CorpusSource[]> {
             (SELECT count(*) FROM items i WHERE i.source_id = s.id) items,
             (SELECT i2.anchor FROM items i2 WHERE i2.source_id = s.id ORDER BY i2.id LIMIT 1) anchor
        FROM sources s
-      GROUP BY s.path
+      WHERE s.id IN (SELECT min(id) FROM sources GROUP BY path)
       ORDER BY s.type, (s.year IS NULL), s.year DESC, s.title`
   );
   return rows.map((r) => ({
