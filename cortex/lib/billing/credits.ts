@@ -1,3 +1,4 @@
+import { rechargeDue } from "./subscription-windows";
 import { currentUser } from "@/db/context";
 import { authAll, authGet, authRun, authSqlite } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
@@ -191,16 +192,21 @@ export async function getBalance(userId = currentUser()): Promise<number> {
 // ─────────────────────────── abonnement Pro ───────────────────────────
 /**
  * DEUX POCHES : les crédits ACHETÉS (ledger, permanents) et les crédits
- * d'ABONNEMENT (`subscriptions.remaining`, remis à `monthly_credits` chaque MOIS
- * CALENDAIRE tant que la période court — l'annuel reçoit ainsi 20/mois, jamais
- * 240 d'un coup — et jamais reportés). Un débit consomme l'abonnement d'abord
+ * d'ABONNEMENT (`subscriptions.remaining`) : le MENSUEL les reçoit d'une
+ * facture payée, pour sa période de facturation ; l'ANNUEL les reçoit par
+ * fenêtres mensuelles ancrées sur le début de sa période (recharge paresseuse
+ * par fenêtre, cf. lib/billing/subscription-windows), jamais reportés. Après
+ * reprise d'une facture (remboursement, litige) l'abonnement est SUSPENDU
+ * jusqu'à la prochaine facture payée. Un débit consomme l'abonnement d'abord
  * (sinon il expirerait inutilisé), DANS la transaction de réservation
  * (lib/billing/reserve : `spendInTx`). Tout est en centièmes.
  */
 export type SubRow = {
   user_id: string; customer_id: string | null; subscription_id: string | null;
   status: string; plan: string | null; monthly_credits: number; remaining: number;
-  period_end: string | null; month_anchor: string | null; updated_at: string;
+  period_end: string | null; month_anchor: string | null;
+  period_start: string | null; window_anchor: string | null; suspended: number | boolean | null;
+  updated_at: string;
 };
 
 /** Crédits Pro accordés chaque mois, en centièmes (SUBSCRIPTION_MONTHLY_CREDITS, en crédits, défaut 20). */
@@ -217,25 +223,25 @@ export async function resolveUserByCustomer(customerId: string): Promise<string 
   return r?.user_id ?? null;
 }
 
-/** L'abonnement fournit-il des crédits en ce moment ? (période en cours, non résilié). */
+/** L'abonnement fournit-il des crédits en ce moment ? (période en cours, non suspendu). */
 export function subscriptionLive(s: SubRow | undefined, now = nowStr()): boolean {
-  return !!s && !!s.period_end && now < s.period_end;
+  return !!s && !!s.period_end && now < s.period_end && !s.suspended;
 }
 
 /**
- * Crédits d'abonnement utilisables maintenant (centièmes), avec recharge
- * PARESSEUSE au changement de mois calendaire (persistée). Résilié
- * (`status = canceled`, via subscription.deleted) : plus de recharge.
+ * Crédits d'abonnement utilisables maintenant (centièmes). Annuel : recharge
+ * PARESSEUSE à l'ouverture d'une nouvelle fenêtre mensuelle (persistée : une
+ * seule fois par fenêtre). Mensuel : jamais — seule une facture payée crédite.
  */
 export async function subscriptionCreditsCenti(userId = currentUser()): Promise<number> {
   const s = await getSubscription(userId);
   if (!subscriptionLive(s)) return 0;
-  if (s!.status === "canceled") return Math.max(0, Number(s!.remaining) || 0);
-  const month = nowStr().slice(0, 7);
-  if (s!.month_anchor !== month) {
+  const now = nowStr();
+  const win = rechargeDue(s!, now);
+  if (win) {
     await authRun(
-      `UPDATE subscriptions SET remaining = monthly_credits, month_anchor = ?, updated_at = ? WHERE user_id = ?`,
-      month, nowStr(), userId,
+      `UPDATE subscriptions SET remaining = monthly_credits, window_anchor = ?, month_anchor = ?, updated_at = ? WHERE user_id = ? AND coalesce(window_anchor, '') < ?`,
+      win, win.slice(0, 7), now, userId, win,
     );
     return Number(s!.monthly_credits) || 0;
   }
@@ -248,29 +254,38 @@ export async function subscriptionCredits(userId = currentUser()): Promise<numbe
 }
 
 /**
- * Attribution mensuelle (invoice.paid) : `remaining` REMIS à `monthly_credits`
- * (reliquat perdu), période étendue. Upsert par utilisateur.
+ * Attribution par FACTURE PAYÉE (invoice.paid) : `remaining` REMIS à
+ * `monthly_credits` (reliquat perdu), période [periodStart, periodEnd), première
+ * fenêtre ouverte à periodStart, suspension levée. Upsert par utilisateur.
  */
 export async function grantSubscriptionMonth(p: {
-  userId: string; customerId?: string | null; subscriptionId?: string | null; plan?: string | null; periodEnd: string;
+  userId: string; customerId?: string | null; subscriptionId?: string | null; plan?: string | null;
+  periodEnd: string; periodStart?: string | null;
 }): Promise<void> {
   const credits = subscriptionMonthlyCreditsCenti();
   const now = nowStr();
-  const month = now.slice(0, 7);
+  const start = p.periodStart ?? now;
+  const month = start.slice(0, 7);
   if (await getSubscription(p.userId)) {
     await authRun(
       `UPDATE subscriptions SET customer_id = coalesce(?, customer_id), subscription_id = coalesce(?, subscription_id),
-        status = 'active', plan = coalesce(?, plan), monthly_credits = ?, remaining = ?, period_end = ?, month_anchor = ?, updated_at = ?
+        status = 'active', plan = coalesce(?, plan), monthly_credits = ?, remaining = ?, period_start = ?, period_end = ?,
+        window_anchor = ?, month_anchor = ?, suspended = 0, updated_at = ?
        WHERE user_id = ?`,
-      p.customerId ?? null, p.subscriptionId ?? null, p.plan ?? null, credits, credits, p.periodEnd, month, now, p.userId,
+      p.customerId ?? null, p.subscriptionId ?? null, p.plan ?? null, credits, credits, start, p.periodEnd, start, month, now, p.userId,
     );
   } else {
     await authRun(
-      `INSERT INTO subscriptions (user_id, customer_id, subscription_id, status, plan, monthly_credits, remaining, period_end, month_anchor, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      p.userId, p.customerId ?? null, p.subscriptionId ?? null, "active", p.plan ?? null, credits, credits, p.periodEnd, month, now,
+      `INSERT INTO subscriptions (user_id, customer_id, subscription_id, status, plan, monthly_credits, remaining, period_start, period_end, window_anchor, month_anchor, suspended, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?)`,
+      p.userId, p.customerId ?? null, p.subscriptionId ?? null, "active", p.plan ?? null, credits, credits, start, p.periodEnd, start, month, now,
     );
   }
+}
+
+/** Reprise d'une facture d'abonnement (remboursement, litige) : SUSPENDU jusqu'à la prochaine facture payée. */
+export async function suspendSubscription(userId: string): Promise<void> {
+  await authRun(`UPDATE subscriptions SET remaining = 0, suspended = 1, updated_at = ? WHERE user_id = ?`, nowStr(), userId);
 }
 
 /** Lie client Stripe → utilisateur (checkout abonnement) SANS attribuer : c'est invoice.paid qui attribue. */
@@ -296,7 +311,7 @@ export async function linkSubscription(p: {
 /** État d'un abonnement (updated/deleted). `clearRemaining` (fin) remet le mois à 0. */
 export async function setSubscriptionStatus(p: {
   userId?: string | null; customerId?: string | null; subscriptionId?: string | null;
-  status: string; periodEnd?: string | null; clearRemaining?: boolean;
+  status: string; periodEnd?: string | null; periodStart?: string | null; clearRemaining?: boolean;
 }): Promise<string | null> {
   let userId = p.userId ?? null;
   if (!userId && p.customerId) userId = await resolveUserByCustomer(p.customerId);
@@ -306,8 +321,8 @@ export async function setSubscriptionStatus(p: {
   }
   if (!userId) return null;
   await authRun(
-    `UPDATE subscriptions SET status = ?, period_end = coalesce(?, period_end), ${p.clearRemaining ? "remaining = 0, " : ""}updated_at = ? WHERE user_id = ?`,
-    p.status, p.periodEnd ?? null, nowStr(), userId,
+    `UPDATE subscriptions SET status = ?, period_end = coalesce(?, period_end), period_start = coalesce(?, period_start), ${p.clearRemaining ? "remaining = 0, " : ""}updated_at = ? WHERE user_id = ?`,
+    p.status, p.periodEnd ?? null, p.periodStart ?? null, nowStr(), userId,
   );
   return userId;
 }
@@ -348,9 +363,9 @@ export function insufficient(balanceCenti: number, costCenti: number, subCenti =
  * Rembourse une génération qui n'a rien produit (idempotent : ref refund:<ref>),
  * CHAQUE PART DANS SA POCHE : la part achetée revient au ledger (exactement ce
  * qui a été prélevé, pas le tarif courant) ; la part d'abonnement revient à
- * `remaining` SEULEMENT si le mois du débit est encore le mois courant et que
- * la période court — après un changement de mois elle est perdue comme le
- * reliquat (jamais reportée). Le user crédité est celui du débit d'origine.
+ * `remaining` SEULEMENT si le débit date de la FENÊTRE en cours et que la
+ * période court — une fois la fenêtre passée elle est perdue comme le reliquat
+ * (jamais reportée). Le user crédité est celui du débit d'origine.
  */
 export async function refundGeneration(kind: string, ref: string, userId = currentUser()): Promise<void> {
   if (!billingEnabled()) return;
@@ -365,8 +380,9 @@ export async function refundGeneration(kind: string, ref: string, userId = curre
     const subBack = Math.max(0, Number(debited.sub_amount ?? 0));
     if (subBack > 0) {
       const s = await getSubscription(u);
-      const sameMonth = String(debited.created_at).slice(0, 7) === nowStr().slice(0, 7);
-      if (subscriptionLive(s) && sameMonth && s!.month_anchor === nowStr().slice(0, 7)) {
+      const windowStart = s ? (s.window_anchor ?? s.period_start ?? (s.month_anchor ? `${s.month_anchor}-01 00:00:00` : null)) : null;
+      const sameWindow = !!windowStart && String(debited.created_at) >= windowStart && !rechargeDue(s!, nowStr());
+      if (subscriptionLive(s) && sameWindow) {
         await authRun(`UPDATE subscriptions SET remaining = remaining + ?, updated_at = ? WHERE user_id = ?`, subBack, nowStr(), u);
       }
     }

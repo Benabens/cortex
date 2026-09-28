@@ -154,6 +154,9 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       remaining INTEGER NOT NULL DEFAULT 0,
       period_end TEXT,
       month_anchor TEXT,
+      period_start TEXT,
+      window_anchor TEXT,
+      suspended INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS subscriptions_customer_idx ON subscriptions (customer_id)`,
@@ -317,6 +320,9 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       remaining integer NOT NULL DEFAULT 0,
       period_end text,
       month_anchor text,
+      period_start text,
+      window_anchor text,
+      suspended integer NOT NULL DEFAULT 0,
       updated_at text NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS subscriptions_customer_idx ON public.subscriptions (customer_id)`,
@@ -370,6 +376,13 @@ const LLM_USAGE_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
 const TERMS_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "withdrawal_waiver_at", sqlite: "TEXT", pg: "text" },
 ];
+/** Colonnes ajoutées à `subscriptions` : fenêtres ancrées sur la période de
+ *  facturation (lib/billing/subscription-windows) et suspension après reprise. */
+const SUBS_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
+  { name: "period_start", sqlite: "TEXT", pg: "text" },
+  { name: "window_anchor", sqlite: "TEXT", pg: "text" },
+  { name: "suspended", sqlite: "INTEGER NOT NULL DEFAULT 0", pg: "integer NOT NULL DEFAULT 0" },
+];
 const CREDIT_TX_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "sub_amount", sqlite: "INTEGER NOT NULL DEFAULT 0", pg: "integer NOT NULL DEFAULT 0" },
   // Unité de `delta` PAR LIGNE : 'centi' (écrit par ce code), NULL = crédits
@@ -419,6 +432,12 @@ function sqliteAuth(): Database.Database {
     for (const c of TERMS_ADDED) {
       if (!haveTerms.has(c.name)) _sqliteAuth.exec(`ALTER TABLE terms_acceptances ADD COLUMN ${c.name} ${c.sqlite}`);
     }
+    const haveSubs = new Set(
+      (_sqliteAuth.prepare("PRAGMA table_info(subscriptions)").all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    for (const c of SUBS_ADDED) {
+      if (!haveSubs.has(c.name)) _sqliteAuth.exec(`ALTER TABLE subscriptions ADD COLUMN ${c.name} ${c.sqlite}`);
+    }
   }
   return _sqliteAuth;
 }
@@ -458,6 +477,9 @@ async function pgExec(): Promise<{
     }
     for (const c of TERMS_ADDED) {
       await authPgQuery(`ALTER TABLE public.terms_acceptances ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
+    }
+    for (const c of SUBS_ADDED) {
+      await authPgQuery(`ALTER TABLE public.subscriptions ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
     }
     _pgReady = true;
     await ensureCreditRefUnique();

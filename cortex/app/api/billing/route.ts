@@ -1,3 +1,4 @@
+import { nextRechargeDate } from "@/lib/billing/subscription-windows";
 import { billingEnabled, creditCost, fromCenti, getSubscription, listTransactions, purchasedBalanceCenti, subscriptionCreditsCenti, subscriptionLive } from "@/lib/billing/credits";
 import { usedToday } from "@/lib/billing/guards";
 import { listOffers } from "@/lib/billing/offers";
@@ -11,12 +12,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** Premier jour du mois suivant (UTC) — date de la prochaine recharge des crédits d'abonnement. */
-function nextMonthStart(now = nowStr()): string {
-  const y = Number(now.slice(0, 4));
-  const m = Number(now.slice(5, 7));
-  const d = new Date(Date.UTC(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 1));
-  return d.toISOString().slice(0, 10);
-}
 
 /**
  * Solde et abonnement pour la page « Abonnement & crédits » : les deux poches
@@ -50,7 +45,7 @@ export async function GET(req: NextRequest) {
           monthlyCredits: fromCenti(Number(sub.monthly_credits)),
           periodEnd: sub.period_end,
           // Recharge au 1er du mois suivant tant que la période court (et hors résiliation) ; sinon plus de recharge.
-          nextRechargeAt: live && sub.status !== "canceled" && nextMonthStart() + " 00:00:00" < (sub.period_end ?? "") ? nextMonthStart() : null,
+          nextRechargeAt: live ? nextRechargeDate(sub, nowStr()) : null,
           manageable: !!sub.customer_id,
         }
       : null,
