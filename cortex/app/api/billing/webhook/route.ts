@@ -49,6 +49,18 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
           const credits = Number(s.metadata?.credits ?? 0);
           return { id: s.id, userId: s.metadata?.cortexUserId ?? null, credits: credits > 0 ? credits : null };
         },
+        // Format récent : la facture ne porte que l'id du prix → lookup_key via le cache des prix Cortex.
+        async lookupKeyOfPrice(priceId) {
+          const { lookupKeyOfPriceId } = await import("@/lib/billing/offers");
+          return lookupKeyOfPriceId(priceId);
+        },
+        // Format récent : la charge ne porte plus `invoice` → InvoicePayments par payment_intent.
+        async invoiceByPaymentIntent(pi) {
+          const r = await stripe.invoicePayments.list({ payment: { type: "payment_intent", payment_intent: pi }, limit: 1 });
+          const inv = r.data[0]?.invoice;
+          const id = typeof inv === "string" ? inv : inv?.id;
+          return id ? { invoiceId: id } : null;
+        },
       },
     });
     // 200 = accusé (traité, doublon, ou échec PERMANENT type métadonnées
