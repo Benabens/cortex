@@ -129,3 +129,32 @@ test("useJob s'appuie sur le sondeur partagé (plus de fetch par composant)", as
   assert.match(useJob, /watchJob\(/, "le crochet s'abonne au sondeur partagé");
   assert.ok(!/fetch\(/.test(useJob), "aucun fetch propre au composant");
 });
+
+test("job introuvable (404) : le sondage s'arrête au lieu de boucler toutes les 4 s", async () => {
+  const { watchJob, resetJobWatch, configureJobWatch } = await import("../lib/ux/job-watch");
+  resetJobWatch();
+  h = harness();
+  const erreur = Object.assign(new Error("Erreur 404"), { status: 404 });
+  configureJobWatch({ ...h.deps, fetchJob: async () => { throw erreur; } });
+  // Un onglet laissé ouvert sur un job supprimé (ou d'un autre compte) rejouait
+  // l'appel indéfiniment : 15 requêtes/minute par onglet, pour rien.
+  watchJob(7, "cs-202", () => {});
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.pending(), 0, "aucun tour reprogrammé après un 404");
+});
+
+test("réseau durablement en panne : le sondage renonce après quelques essais", async () => {
+  const { watchJob, resetJobWatch, configureJobWatch, JOB_MAX_FAILURES } = await import("../lib/ux/job-watch");
+  resetJobWatch();
+  h = harness();
+  let essais = 0;
+  configureJobWatch({ ...h.deps, fetchJob: async () => { essais++; throw new Error("réseau"); } });
+  watchJob(8, "cs-202", () => {});
+  for (let i = 0; i < JOB_MAX_FAILURES + 3; i++) {
+    await new Promise((r) => setImmediate(r));
+    h.tick();
+  }
+  await new Promise((r) => setImmediate(r));
+  assert.equal(essais, JOB_MAX_FAILURES, `${essais} essais au lieu de ${JOB_MAX_FAILURES}`);
+  assert.equal(h.pending(), 0, "plus aucun tour en attente");
+});
