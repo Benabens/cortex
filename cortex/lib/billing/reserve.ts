@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { rechargeDue } from "./subscription-windows";
 import { currentCourse } from "@/db/client";
 import { currentUser } from "@/db/context";
 import { authRun, authTx, type AuthTx } from "@/db/auth-store";
@@ -117,15 +118,15 @@ export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
     if (billing) {
       const seen = await tx.get<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, o.ref);
       if (!seen) {
-        // DEUX POCHES, sous le verrou utilisateur : abonnement du mois (recharge
-        // paresseuse comprise) d'abord, puis crédits achetés — décidés et écrits
-        // dans la même transaction, aucune course entre les deux.
+        // DEUX POCHES, sous le verrou utilisateur : abonnement (recharge de
+        // fenêtre comprise, annuel seulement) d'abord, puis crédits achetés —
+        // décidés et écrits dans la même transaction, aucune course entre les deux.
         const sub = await tx.get<SubRow>(`SELECT * FROM subscriptions WHERE user_id = ?`, userId);
         let subAvail = 0;
         if (subscriptionLive(sub, t)) {
-          const month = t.slice(0, 7);
-          if (sub!.status !== "canceled" && sub!.month_anchor !== month) {
-            await tx.run(`UPDATE subscriptions SET remaining = monthly_credits, month_anchor = ?, updated_at = ? WHERE user_id = ?`, month, t, userId);
+          const win = rechargeDue(sub!, t);
+          if (win) {
+            await tx.run(`UPDATE subscriptions SET remaining = monthly_credits, window_anchor = ?, month_anchor = ?, updated_at = ? WHERE user_id = ?`, win, win.slice(0, 7), t, userId);
             subAvail = Number(sub!.monthly_credits) || 0;
           } else {
             subAvail = Math.max(0, Number(sub!.remaining) || 0);

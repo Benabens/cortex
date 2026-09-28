@@ -25,7 +25,6 @@ import { runWithCourse } from "../db/client";
 import { runWithUser } from "../db/context";
 
 const inMl = <T,>(user: string, fn: () => Promise<T>) => runWithUser(user, () => runWithCourse("ml", fn));
-const monthNow = () => new Date().toISOString().slice(0, 7);
 const future = (days: number) => new Date(Date.now() + days * 86400_000).toISOString().slice(0, 19).replace("T", " ");
 
 before(async () => {
@@ -103,18 +102,25 @@ test("remboursement dans la poche d'origine : même mois → l'abonnement récup
   assert.equal(await credits.subscriptionCreditsCenti("pro"), 200);
 });
 
-test("recharge paresseuse au changement de mois, DANS la réservation (annuel : 20/mois sans nouvelle facture)", async () => {
+test("recharge de FENÊTRE dans la réservation (annuel : 20 par fenêtre mensuelle ancrée sur la période, sans nouvelle facture)", async () => {
   const credits = await import("../lib/billing/credits");
   const { reserveGeneration } = await import("../lib/billing/reserve");
   const { authRun } = await import("../db/auth-store");
-  await credits.grantSubscriptionMonth({ userId: "yearly", customerId: "cus_y", subscriptionId: "sub_y", plan: "cortex_pro_yearly", periodEnd: future(365) });
-  await authRun(`UPDATE subscriptions SET remaining = 300, month_anchor = ? WHERE user_id = ?`, "2000-01", "yearly");
+  // Période ouverte il y a 40 jours : la fenêtre en cours a commencé il y a 10 jours et n'a pas encore été ouverte.
+  const start = future(-40);
+  await credits.grantSubscriptionMonth({ userId: "yearly", customerId: "cus_y", subscriptionId: "sub_y", plan: "cortex_pro_yearly", periodStart: start, periodEnd: future(325) });
+  await authRun(`UPDATE subscriptions SET remaining = 300, window_anchor = ?, month_anchor = ? WHERE user_id = ?`, start, start.slice(0, 7), "yearly");
   const r = await inMl("yearly", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:yearly:ml:a" }));
   assert.equal(r.ok, true);
   assert.equal(await credits.subscriptionCreditsCenti("yearly"), 1800, "20 rechargés puis 2 consommés (le reliquat de 3 est perdu)");
   const { authGet } = await import("../db/auth-store");
-  const s = await authGet<{ month_anchor: string }>(`SELECT month_anchor FROM subscriptions WHERE user_id = ?`, "yearly");
-  assert.equal(s?.month_anchor, monthNow());
+  const { addMonthsClamped } = await import("../lib/billing/subscription-windows");
+  const s = await authGet<{ window_anchor: string }>(`SELECT window_anchor FROM subscriptions WHERE user_id = ?`, "yearly");
+  assert.equal(s?.window_anchor, addMonthsClamped(start, 1), "fenêtre 2 ouverte, une seule fois");
+  // MENSUEL : jamais de recharge paresseuse, même avec une ancre ancienne.
+  await credits.grantSubscriptionMonth({ userId: "monthly", customerId: "cus_m", subscriptionId: "sub_m", plan: "cortex_pro_monthly", periodStart: future(-20), periodEnd: future(10) });
+  await authRun(`UPDATE subscriptions SET remaining = 300, month_anchor = ? WHERE user_id = ?`, "2000-01", "monthly");
+  assert.equal(await credits.subscriptionCreditsCenti("monthly"), 300, "un mensuel ne se recharge que par facture");
 });
 
 test("période terminée ou résiliée : plus de crédits d'abonnement, les achetés restent", async () => {

@@ -4,7 +4,7 @@ import { dbDriverName, nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import {
   DELTA_CENTI, addTransaction, ensureLedgerUnit, getSubscription, grantSubscriptionMonth, linkSubscription, resolveUserByCustomer,
-  setSubscriptionStatus, subscriptionCreditsCenti, subscriptionMonthlyCreditsCenti, toCenti,
+  setSubscriptionStatus, subscriptionCreditsCenti, subscriptionMonthlyCreditsCenti, suspendSubscription, toCenti,
 } from "./credits";
 
 /**
@@ -101,6 +101,10 @@ function unixToStr(unix: number | null | undefined): string | null {
 function invoicePeriodEnd(inv: Stripe.Invoice): string | null {
   const line = inv.lines?.data?.[0] as { period?: { end?: number } } | undefined;
   return unixToStr(line?.period?.end) ?? unixToStr((inv as { period_end?: number }).period_end);
+}
+function invoicePeriodStart(inv: Stripe.Invoice): string | null {
+  const line = inv.lines?.data?.[0] as { period?: { start?: number } } | undefined;
+  return unixToStr(line?.period?.start) ?? unixToStr((inv as { period_start?: number }).period_start);
 }
 
 // ─────── lecture BI-FORMAT des factures (ancien format ET famille « basil » 2025+) ───────
@@ -336,7 +340,7 @@ async function onInvoicePaid(invoice: Stripe.Invoice, lookup?: StripeLookup): Pr
   const periodEnd = invoicePeriodEnd(inv);
   if (!periodEnd) throw new Error(`invoice.paid : période introuvable (sub ${subId}) — retry`);
   const plan = keys.find((k) => CORTEX_LOOKUP_KEYS.has(k)) ?? keys[0] ?? null;
-  await grantSubscriptionMonth({ userId, customerId, subscriptionId: subId, plan, periodEnd });
+  await grantSubscriptionMonth({ userId, customerId, subscriptionId: subId, plan, periodEnd, periodStart: invoicePeriodStart(inv) });
   if (inv.id) {
     await authRun(
       `INSERT INTO stripe_invoices (invoice_id, subscription_id, customer_id, payment_intent, user_id, granted_centi, period_end, created_at)
@@ -364,8 +368,10 @@ async function onSubscriptionUpdated(sub: Stripe.Subscription, lookup?: StripeLo
   const why = await subscriptionIsCortex(sub, lookup);
   if (why) return foreign("subscription", sub.id, why);
   // cancel_at_period_end : l'abonnement reste ACTIF jusqu'à la fin de période ; le vrai arrêt vient de .deleted.
-  const periodEnd = unixToStr((sub as { current_period_end?: number }).current_period_end);
-  await setSubscriptionStatus({ subscriptionId: sub.id, customerId: idOf(sub.customer), status: sub.status, periodEnd });
+  const item0 = (sub.items as { data?: Array<{ current_period_end?: number; current_period_start?: number }> } | undefined)?.data?.[0];
+  const periodEnd = unixToStr((sub as { current_period_end?: number }).current_period_end ?? item0?.current_period_end);
+  const periodStart = unixToStr((sub as { current_period_start?: number }).current_period_start ?? item0?.current_period_start);
+  await setSubscriptionStatus({ subscriptionId: sub.id, customerId: idOf(sub.customer), status: sub.status, periodEnd, periodStart });
   return { ok: true, action: "subscription-updated" };
 }
 
@@ -457,12 +463,11 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string,
   if (invoice) {
     // Ce qui reste du mois est retiré de l'abonnement ; ce qui a déjà été
     // consommé devient une dette dans le ledger (solde négatif → tout est bloqué).
+    // …et l'abonnement est SUSPENDU (plus de fenêtre, plus de crédit) jusqu'à la prochaine facture payée.
     const remaining = await subscriptionCreditsCenti(invoice.user_id);
     const granted = Number(invoice.granted_centi);
     const take = Math.min(remaining, granted);
-    if (take > 0 && (await getSubscription(invoice.user_id))) {
-      await authRun(`UPDATE subscriptions SET remaining = remaining - ?, updated_at = ? WHERE user_id = ?`, take, nowStr(), invoice.user_id);
-    }
+    if (await getSubscription(invoice.user_id)) await suspendSubscription(invoice.user_id);
     const reversed = await addTransaction(invoice.user_id, -(granted - take), `${why} (abonnement)`, ref);
     return { ok: true, action: "invoice-reversed", reversed };
   }

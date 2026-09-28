@@ -104,20 +104,24 @@ test("débit sub-first : l'abonnement est consommé avant les crédits achetés"
   assert.equal(await credits.getBalance("pro"), 7, "reste 7 achetés (22-15)");
 });
 
-test("annuel : 20 crédits/mois se renouvellent chaque MOIS (recharge paresseuse), sans nouvelle facture", async () => {
+test("annuel : 20 crédits par FENÊTRE mensuelle ancrée sur la période, sans nouvelle facture", async () => {
   const { authRun } = await import("../db/auth-store");
   await handleStripeEvent(checkoutSub("evt_co_y", "yearly", "cus_y", "sub_y"));
   // une seule facture annuelle, période 1 an
   await handleStripeEvent(ev("evt_inv_y", "invoice.paid", {
     customer: "cus_y", subscription: "sub_y",
-    lines: { data: [{ period: { end: futureUnix(365) }, price: { lookup_key: "cortex_pro_yearly" } }] },
+    lines: { data: [{ period: { start: futureUnix(0), end: futureUnix(365) }, price: { lookup_key: "cortex_pro_yearly" } }] },
   }));
   assert.equal(await credits.subscriptionCredits("yearly"), 20);
   await spend("yearly", 1200, "job:yearly:1"); // reste 8
   assert.equal(await credits.subscriptionCredits("yearly"), 8);
-  // passage au mois suivant simulé (month_anchor dans le passé), période encore valide
+  // Un mois calendaire qui tourne ne suffit pas : c'est la fenêtre ancrée sur la période qui compte.
   await authRun(`UPDATE subscriptions SET month_anchor = ? WHERE user_id = ?`, "2000-01", "yearly");
-  assert.equal(await credits.subscriptionCredits("yearly"), 20, "nouveau mois → recharge à 20 sans nouvelle facture");
+  assert.equal(await credits.subscriptionCredits("yearly"), 8, "pas de recharge au mois calendaire");
+  // Période commencée il y a 35 jours : la 2e fenêtre est ouverte → 20.
+  const ago = new Date(Date.now() - 35 * 86400_000).toISOString().slice(0, 19).replace("T", " ");
+  await authRun(`UPDATE subscriptions SET period_start = ?, window_anchor = ? WHERE user_id = ?`, ago, ago, "yearly");
+  assert.equal(await credits.subscriptionCredits("yearly"), 20, "nouvelle fenêtre → recharge à 20 sans nouvelle facture");
 });
 
 test("résiliation (subscription.deleted) → crédits du mois à 0, plus d'attribution", async () => {
