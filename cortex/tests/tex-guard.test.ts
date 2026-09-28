@@ -25,7 +25,10 @@ const SPEC = {
     { category: "OS", concept: "Inodes", points: 25, statement_tex: "\\subq{3.1}{Y}{8} Body.\\diskgrid{8}", solution_tex: "Sol B." },
   ],
 };
-const CANONICAL_TEX_SHA = "9a294bb25e9d919c"; // .github/workflows/ci.yml — invariant de non-régression
+// Invariant de non-régression du RENDU, épinglé aussi dans .github/workflows/ci.yml.
+// L'empreinte du PROMPT n'est volontairement pas épinglée : elle change dès qu'on
+// améliore la formulation (cf. lib/prompt-safety) et dépend du corpus présent.
+const CANONICAL_TEX_SHA = "9a294bb25e9d919c";
 const sha = (s: string) => crypto.createHash("sha256").update(s).digest("hex").slice(0, 16);
 
 before(async () => {
