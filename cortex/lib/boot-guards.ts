@@ -77,3 +77,18 @@ export function assertLlmProviderAllowed(env: Partial<NodeJS.ProcessEnv> = proce
     "ou CORTEX_OWNER_ONLY=1 si tu es vraiment le seul utilisateur de cette instance."
   );
 }
+
+/**
+ * OUTILS DE DÉVELOPPEMENT exposés par une route (ici la génération « dry-run » :
+ * un examen factice écrit en base et compilé, sans appel au modèle). Ils
+ * contournent par nature la réservation de crédits, le quota et les places : ils
+ * n'ont donc rien à faire sur une instance gardée, où n'importe quel compte
+ * invité pourrait boucler dessus (audit de pré-lancement, bloquant n° 1).
+ * Autorisés hors déploiement gardé (poste de dev) ou, sur une instance assumée
+ * mono-utilisateur (CORTEX_OWNER_ONLY=1), pour son propriétaire seul.
+ */
+export function dryRunAllowed(env: Partial<NodeJS.ProcessEnv> = process.env, userId = ""): boolean {
+  if (!isGuardedDeployment(env)) return true;
+  if (env.CORTEX_OWNER_ONLY !== "1") return false;
+  return userId === (env.CORTEX_OWNER_USER_ID?.trim() || "owner");
+}
