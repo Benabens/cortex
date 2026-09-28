@@ -107,14 +107,23 @@ jobs:
             echo "::notice::Corpus de référence absent — invariant de non-régression non exécuté."
           fi
 
-      - name: Invariant CS-202 — réparation DB + ingestion + régression byte-identique
+      # L'invariant qui compte est le RENDU : le .tex de cs-202 doit rester
+      # byte-identique (son empreinte est aussi épinglée dans
+      # cortex/tests/tex-guard.test.ts). L'empreinte du PROMPT, elle, est
+      # AFFICHÉE et non plus bloquante : elle change légitimement dès qu'on
+      # améliore la formulation (ex. encadrement du corpus importé en donnée,
+      # 29/09/2026 : adc67ab67e85d3cb → 3dc37a8ecee1b422 sur le corpus de
+      # référence local, .tex inchangé), et sa valeur dépend du corpus présent —
+      # elle ne peut donc pas servir de garde ici. Pour comparer deux versions,
+      # lancer ce script sur chacune avec le MÊME corpus et diffuser les
+      # fichiers .prompt.txt produits.
+      - name: Invariant CS-202 — réparation DB + ingestion + rendu byte-identique
         if: steps.corpus.outputs.present == 'true'
         run: |
           npx tsx scripts/repair-cs202-db.ts --ci
           npx tsx scripts/regression-cs202.ts /tmp/ci-reg | tee /tmp/reg.out
-          grep -q '350d533f7b765a97' /tmp/reg.out || { echo '::error::prompt sha ≠ canonique'; exit 1; }
           grep -q '9a294bb25e9d919c' /tmp/reg.out || { echo '::error::tex sha ≠ canonique'; exit 1; }
-          echo "✓ régression cs-202 byte-identique"
+          echo "✓ rendu cs-202 byte-identique (empreinte du prompt ci-dessus, informative)"
 
   # L'image du conteneur unique (app + worker + tectonic + python/matplotlib +
   # sqlite3) se construit, démarre et sert /api/health.
