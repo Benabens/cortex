@@ -1,4 +1,4 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, type ExecFileSyncOptions } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -53,12 +53,15 @@ type Backend = { kind: "seatbelt" | "unshare"; wrap: (shellCmd: string, cwd: str
 
 let _backend: Backend | null | undefined;
 
+/** Sonde : stderr CAPTURÉ (sinon « unshare: Permission denied » sort en error à chaque boot). */
+const PROBE: ExecFileSyncOptions = { timeout: 5_000, stdio: ["ignore", "pipe", "pipe"] };
+
 function detectBackend(): Backend | null {
   if (_backend !== undefined) return _backend;
   if (process.env.CORTEX_SANDBOX === "none") return (_backend = null);
   try {
     if (process.platform === "darwin") {
-      execFileSync("/usr/bin/sandbox-exec", ["-p", "(version 1)(allow default)", "/usr/bin/true"], { timeout: 5_000 });
+      execFileSync("/usr/bin/sandbox-exec", ["-p", "(version 1)(allow default)", "/usr/bin/true"], PROBE);
       _backend = {
         kind: "seatbelt",
         wrap: (shellCmd, cwd) => ({
@@ -74,13 +77,18 @@ function detectBackend(): Backend | null {
       return _backend;
     }
     // Linux : namespace réseau vide, non privilégié
-    execFileSync("unshare", ["-rn", "true"], { timeout: 5_000 });
+    execFileSync("unshare", ["-rn", "true"], PROBE);
     _backend = {
       kind: "unshare",
       wrap: (shellCmd) => ({ bin: "unshare", args: ["-rn", "/bin/sh", "-c", shellCmd] }),
     };
     return _backend;
-  } catch {
+  } catch (e) {
+    // Attendu chez l'hébergeur (unshare refusé) : décision documentée (ARCHITECTURE.md
+    // § Isolation), UNE ligne info avec la cause, jamais un niveau error.
+    const err = e as { stderr?: Buffer | string; message?: string; code?: string };
+    const cause = (err.stderr ? String(err.stderr) : err.code ?? err.message ?? "").trim().split("\n")[0].slice(0, 160);
+    console.log(`[sandbox] sandbox indisponible : exécution de code désactivée (vérification par exécution → not_applicable)${cause ? ` — ${cause}` : ""}`);
     _backend = null;
     return null;
   }
