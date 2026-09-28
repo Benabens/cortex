@@ -6,6 +6,7 @@ import { createWeakness, ensureSchema as ensureWeaknessSchema } from "@/lib/weak
 import { rebuildCoursePlan, getPlanChapters, ensurePlanSchema, type PlanChapter } from "@/lib/course-plan";
 import { detectExamDna } from "@/lib/exam-dna";
 import { courseOrderKey } from "@/lib/course-order";
+import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
 
 export { courseOrderKey };
 
@@ -190,14 +191,17 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
     ``,
     vision ? vision : ``,
     vision ? `` : ``,
-    `═══ EXERCICES DES VRAIS FINALS / MIDTERMS (vérité terrain pour les POIDS) ═══`,
-    corpus.finals || "(aucun final ingéré — déduis alors les types du plan + des séries, poids estimés)",
+    DATA_RULE,
     ``,
-    `═══ SÉRIES D'EXERCICES (types au programme, même s'ils ne sont pas encore tombés) ═══`,
-    corpus.series || "(aucune série)",
+    dataBlock(`EXERCICES DES VRAIS FINALS / MIDTERMS (vérité terrain pour les POIDS)`, [
+      { src: "annales", text: corpus.finals || "(aucun final ingéré — déduis alors les types du plan + des séries, poids estimés)" },
+    ]),
     ``,
-    `═══ PLAN / SCOPE DU COURS (notes du staff) ═══`,
-    corpus.plan || "(aucun plan)",
+    dataBlock(`SÉRIES D'EXERCICES (types au programme, même s'ils ne sont pas encore tombés)`, [
+      { src: "séries", text: corpus.series || "(aucune série)" },
+    ]),
+    ``,
+    dataBlock(`PLAN / SCOPE DU COURS (notes du staff)`, [{ src: "plan", text: corpus.plan || "(aucun plan)" }]),
     ``,
     `═══ TYPES QUE LE GÉNÉRATEUR SAIT PRODUIRE (rattache chaque type à l'un d'eux via "archetype", ou "" si aucun) ═══`,
     archetypeList,

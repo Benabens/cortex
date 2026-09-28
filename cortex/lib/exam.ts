@@ -14,6 +14,7 @@ import { referencePaths } from "@/lib/sources";
 import { verifyAndHarden, type VerifyReport } from "@/lib/verify";
 import fs from "node:fs";
 import path from "node:path";
+import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
 
 const EXAM_DIR = () => examsDir();
 
@@ -135,8 +136,9 @@ const EXAM_SCHEMA = {
 
 export async function buildPrompt(ctx: Ctx): Promise<string> {
   const p = profile();
+  // Corpus importé = DONNÉE encadrée, jamais consigne (cf. lib/prompt-safety).
   const block = (title: string, items: { src: string; excerpt?: string; text?: string }[]) =>
-    items.length ? [``, title, ...items.map((c) => `• (${c.src}) ${c.excerpt ?? c.text}`)] : [];
+    items.length ? [``, dataBlock(title, items)] : [];
   // calibrage de difficulté (cs-202) : la prof punit une idée fausse précise par exo.
   const diff = currentCourse() === DEFAULT_COURSE ? difficultyBlockForExam() : "";
   return [
@@ -147,15 +149,17 @@ export async function buildPrompt(ctx: Ctx): Promise<string> {
     ...(diff ? [diff, ``] : []),
     ...p.promptIntroFull(),
     ``,
-    `═══ LES VRAIS FINALS À IMITER (forme, types, ton, niveau, MISE EN PAGE) ═══`,
-    ...ctx.style.map((s) => `### ${s.src}\n${s.excerpt}`),
+    DATA_RULE,
     ``,
-    `═══ SCOPE OFFICIEL (Study Guide + hints staff — ne génère QUE sur ces sujets) ═══`,
-    await p.staffNotesText(5000),
-    ...block(`═══ SÉRIES D'EXERCICES & EXOS (matière d'entraînement — inspire-toi des mécaniques) ═══`, ctx.exercises),
-    ...block(`═══ REVIEWS DE LECTURES / CONCEPTS FLAGUÉS ═══`, ctx.reviews),
-    ...block(`═══ CHEAT SHEETS ═══`, ctx.cheats),
-    ...block(`═══ COURS (slides) ═══`, ctx.course),
+    dataBlock(`LES VRAIS FINALS À IMITER (forme, types, ton, niveau, MISE EN PAGE)`, ctx.style),
+    ``,
+    dataBlock(`SCOPE OFFICIEL (Study Guide + hints staff — ne génère QUE sur ces sujets)`, [
+      { src: "staff-notes", text: await p.staffNotesText(5000) },
+    ]),
+    ...block(`SÉRIES D'EXERCICES & EXOS (matière d'entraînement — inspire-toi des mécaniques)`, ctx.exercises),
+    ...block(`REVIEWS DE LECTURES / CONCEPTS FLAGUÉS`, ctx.reviews),
+    ...block(`CHEAT SHEETS`, ctx.cheats),
+    ...block(`COURS (slides)`, ctx.course),
     ``,
     `(léger, optionnel) Points faibles à éventuellement viser : ${ctx.weaknesses.length ? ctx.weaknesses.map((w) => w.topic).join(" · ") : "(aucun — couvre largement le programme)"}.`,
     `Concepts à ne pas oublier (révision espacée) : ${ctx.due.join(" · ") || "(aucun)"}.`,
@@ -544,9 +548,12 @@ export function buildBatchPrompt(ctx: Ctx, slots: { category: string; points: nu
     // moule (ex. les slots historiques du cours par défaut) produit EXACTEMENT la ligne d'avant (byte-identique).
     ...slots.map((s, i) => `${i + 1}. [${s.category}, ${s.points} pts]${s.mold ? ` [MOULE : ${s.mold}]` : ""} ${s.brief}`),
     ``,
-    `═══ MATIÈRE (extraits du corpus, pour ancrer le contenu) ═══`,
-    ...ctx.style.slice(0, 6).map((s) => `### ${s.src}\n${s.excerpt}`),
-    ...ctx.exercises.slice(0, 5).map((c) => `• (${c.src}) ${c.text}`),
+    DATA_RULE,
+    ``,
+    dataBlock(`MATIÈRE (extraits du corpus, pour ancrer le contenu)`, [
+      ...ctx.style.slice(0, 6),
+      ...ctx.exercises.slice(0, 5),
+    ]),
     ``,
     `Concepts à couvrir si naturel : ${ctx.due.slice(0, 5).join(" · ")}${ctx.weaknesses.length ? " · faiblesses: " + ctx.weaknesses.map((w) => w.topic).join(" · ") : ""}`,
     ``,
