@@ -4,6 +4,8 @@ import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "
 import { preflightGeneration } from "@/lib/preflight";
 import { NextRequest, NextResponse } from "next/server";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
+import { dryRunAllowed } from "@/lib/boot-guards";
+import { currentUser } from "@/db/context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +18,12 @@ export const dynamic = "force-dynamic";
 export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const { course, denied } = requireCourse(req);
   if (denied) return denied;
+  // Outil de développement : refusé en déploiement gardé (cf. lib/boot-guards
+  // dryRunAllowed) — il écrirait un examen et lancerait tectonic sans débit.
   const dry = req.nextUrl.searchParams.get("dry") === "1";
+  if (dry && !dryRunAllowed(process.env, currentUser())) {
+    return NextResponse.json({ error: "Route inconnue." }, { status: 404 });
+  }
   if (dry) {
     try {
       const res = await generateExam({ dry: true });
