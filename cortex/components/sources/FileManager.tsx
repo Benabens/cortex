@@ -120,7 +120,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
               const isBusy = busy.has(f.path);
               const href = hrefByPath.get(f.path) ?? null;
               return (
-                <div key={f.path} className={cn("flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-surface-2/40", i > 0 && "border-t border-line")}>
+                <div key={f.path} className={cn("flex flex-wrap items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-surface-2/40", i > 0 && "border-t border-line")}>
                   <span className="grid size-8 shrink-0 place-items-center rounded-md border border-line bg-surface-2/60" style={{ color: tone }}>
                     <Icon className="size-4" strokeWidth={2} />
                   </span>
@@ -140,8 +140,9 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
 
                   <span className="hidden w-14 text-right font-data text-[0.82rem] tabular text-ink-3 md:block">{f.items}</span>
 
-                  {/* Ouvrir (voir) + Référence + emplacement RÉSERVÉ pour la poubelle → aucun décalage */}
-                  <div className="flex w-52 shrink-0 items-center justify-end gap-1.5">
+                  {/* Ouvrir (voir) + Référence + emplacement RÉSERVÉ pour la poubelle → aucun décalage.
+                      Sur mobile, le bloc passe sous le titre au lieu de l'écraser. */}
+                  <div className="flex w-full shrink-0 items-center justify-end gap-1.5 sm:w-52">
                     {href && <SeeLink href={href} label={f.title} />}
                     <RefCheckbox checked={isRef(f)} busy={isBusy} onToggle={() => toggleRef(f)} label={f.title} />
                     {f.uploaded ? (
