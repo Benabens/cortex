@@ -289,6 +289,15 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
                     {isSub ? `${nf.format(o.credits)} crédits par mois, non reportables` : `${nf.format(o.credits)} crédits, sans date d’expiration`}
                     {isSub && subLive && <span> · tu as déjà un abonnement</span>}
                   </div>
+                  {/* Conditions de reconduction, à côté du bouton et AVANT tout achat :
+                      elles ne vivaient que dans le bloc « Gérer mon abonnement », invisible
+                      pour un compte neuf (audit de pré-lancement). */}
+                  {isSub && (
+                    <div className="mt-0.5 text-[0.78rem] text-ink-4">
+                      Renouvellement automatique chaque {o.interval === "year" ? "année" : "mois"} · résiliable à tout moment
+                      depuis Mon compte, effet en fin de période.
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-4">
                   <span className={cn("text-[0.9rem] tabular-nums", o.price ? "text-ink-1" : "text-ink-4")}>{price(o.price, o.interval)}</span>
