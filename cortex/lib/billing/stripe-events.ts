@@ -41,6 +41,14 @@ import {
  *
  * ATOMICITÉ : crédit du pack et enregistrement de l'achat vont dans la même
  * transaction — un échec lève (500 → rejeu Stripe), rien n'est crédité à moitié.
+ *
+ * COMPTE STRIPE PARTAGÉ (autres applications : prix `kairo_*`, metadata app=kairo…) :
+ * n'est traité que ce qui est À CORTEX — prix dont le lookup_key est un plan
+ * Cortex, metadata app=cortex ou cortexUserId, plan Cortex, ou client/abonnement
+ * déjà lié chez nous. Tout le reste répond 200 « ignored:foreign » : ni crédit,
+ * ni reprise mémorisée, ni retry (un 500 ferait rejouer Stripe pendant des jours
+ * puis désactiver l'endpoint). Le retry 500 reste réservé à un événement Cortex
+ * dont l'utilisateur n'est pas encore lié.
  */
 
 /** Prix d'un crédit en centimes pour convertir un montant remboursé (pack : 9 € les 10). CREDIT_PRICE_CENTS pour l'ajuster. */
@@ -106,6 +114,31 @@ export type HandleResult = {
   ok: boolean; action: string; duplicate?: boolean; credited?: boolean; reversed?: boolean; error?: string;
 };
 
+// ─────────────────── appartenance d'un événement à Cortex ───────────────────
+const CORTEX_LOOKUP_KEYS = new Set(Object.values(PLANS).map((p) => p.lookupKey));
+type Meta = Record<string, string> | null | undefined;
+
+/** metadata.app posée et différente de cortex → autre application, sans discussion. */
+function metaForeign(...metas: Meta[]): boolean {
+  return metas.some((m) => typeof m?.app === "string" && m.app.toLowerCase() !== "cortex");
+}
+/** metadata qui désigne Cortex : app=cortex, cortexUserId, ou plan Cortex. */
+function metaCortex(...metas: Meta[]): boolean {
+  return metas.some((m) => m?.app?.toLowerCase() === "cortex" || !!m?.cortexUserId || isPlanKey(m?.plan));
+}
+function lookupKeysOf(lines: unknown): string[] {
+  const data = (lines as { data?: Array<{ price?: { lookup_key?: string | null } | null }> } | null | undefined)?.data ?? [];
+  return data.map((l) => l?.price?.lookup_key ?? "").filter(Boolean);
+}
+function hasCortexPrice(lines: unknown): boolean {
+  return lookupKeysOf(lines).some((k) => CORTEX_LOOKUP_KEYS.has(k));
+}
+const FOREIGN: HandleResult = { ok: true, action: "ignored:foreign", credited: false, reversed: false };
+function foreign(kind: string, id: string | null | undefined, why: string): HandleResult {
+  log("info", "stripe.foreign_event_ignored", { kind, id: id ?? null, why });
+  return FOREIGN;
+}
+
 /** Traite un événement Stripe DÉJÀ vérifié. Idempotent. Lève pour un échec RETRYABLE (la route répond 500). */
 export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions = {}): Promise<HandleResult> {
   if (await isProcessed(event.id)) return { ok: true, action: "duplicate", duplicate: true, credited: false, reversed: false };
@@ -156,6 +189,10 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
 async function onCheckout(s: Stripe.Checkout.Session, eventId: string): Promise<HandleResult> {
   const userId = s.metadata?.cortexUserId ?? null;
   const plan = s.metadata?.plan ?? null;
+  // À Cortex seulement : plan Cortex ou cortexUserId (et jamais une autre app déclarée).
+  if (metaForeign(s.metadata) || !(isPlanKey(plan) || userId)) {
+    return foreign("checkout.session", s.id, metaForeign(s.metadata) ? `app=${s.metadata?.app}` : "ni plan Cortex ni cortexUserId");
+  }
 
   if (s.mode === "subscription") {
     if (!userId) return { ok: false, action: "checkout-sub", error: "cortexUserId manquant" };
@@ -221,6 +258,15 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string): Promise<
 async function onInvoicePaid(inv: Stripe.Invoice): Promise<HandleResult> {
   const subId = idOf((inv as { subscription?: unknown }).subscription);
   if (!subId) return { ok: true, action: "invoice-non-subscription" };
+  const subMeta = (inv as { subscription_details?: { metadata?: Record<string, string> } }).subscription_details?.metadata;
+  const invCustomer = idOf(inv.customer);
+  if (metaForeign(inv.metadata as Meta, subMeta)) return foreign("invoice", inv.id, `app=${(inv.metadata as Meta)?.app ?? subMeta?.app}`);
+  if (!hasCortexPrice(inv.lines) && !metaCortex(inv.metadata as Meta, subMeta)) {
+    // Ni prix Cortex ni métadonnée Cortex : seul un client/abonnement DÉJÀ lié chez nous rattache la facture.
+    const linked = (invCustomer && (await resolveUserByCustomer(invCustomer)))
+      || (await authGet<{ user_id: string }>(`SELECT user_id FROM subscriptions WHERE subscription_id = ?`, subId))?.user_id;
+    if (!linked) return foreign("invoice", inv.id, `lookup_key ${lookupKeysOf(inv.lines).join(",") || "?"} inconnu, client non lié`);
+  }
   // Idempotence par FACTURE : une facture n'attribue qu'un mois, quel que soit l'événement qui la porte.
   if (inv.id && (await authGet<{ invoice_id: string }>(`SELECT invoice_id FROM stripe_invoices WHERE invoice_id = ?`, inv.id))) {
     return { ok: true, action: "invoice-duplicate", duplicate: true };
@@ -250,7 +296,19 @@ async function onInvoicePaid(inv: Stripe.Invoice): Promise<HandleResult> {
   return { ok: true, action: "subscription-granted" };
 }
 
+/** Abonnement Stripe à Cortex ? prix Cortex, métadonnée Cortex, ou déjà lié chez nous. */
+async function subscriptionIsCortex(sub: Stripe.Subscription): Promise<false | string> {
+  if (metaForeign(sub.metadata as Meta)) return `app=${(sub.metadata as Meta)?.app}`;
+  if (hasCortexPrice(sub.items) || metaCortex(sub.metadata as Meta)) return false;
+  const customerId = idOf(sub.customer);
+  const linked = (customerId && (await resolveUserByCustomer(customerId)))
+    || (await authGet<{ user_id: string }>(`SELECT user_id FROM subscriptions WHERE subscription_id = ?`, sub.id))?.user_id;
+  return linked ? false : `lookup_key ${lookupKeysOf(sub.items).join(",") || "?"} inconnu, client non lié`;
+}
+
 async function onSubscriptionUpdated(sub: Stripe.Subscription): Promise<HandleResult> {
+  const why = await subscriptionIsCortex(sub);
+  if (why) return foreign("subscription", sub.id, why);
   // cancel_at_period_end : l'abonnement reste ACTIF jusqu'à la fin de période ; le vrai arrêt vient de .deleted.
   const periodEnd = unixToStr((sub as { current_period_end?: number }).current_period_end);
   await setSubscriptionStatus({ subscriptionId: sub.id, customerId: idOf(sub.customer), status: sub.status, periodEnd });
@@ -258,6 +316,8 @@ async function onSubscriptionUpdated(sub: Stripe.Subscription): Promise<HandleRe
 }
 
 async function onSubscriptionDeleted(sub: Stripe.Subscription): Promise<HandleResult> {
+  const why = await subscriptionIsCortex(sub);
+  if (why) return foreign("subscription", sub.id, why);
   await setSubscriptionStatus({ subscriptionId: sub.id, customerId: idOf(sub.customer), status: "canceled", clearRemaining: true });
   log("info", "billing.subscription_deleted", { subscription: sub.id });
   return { ok: true, action: "subscription-deleted" };
@@ -339,6 +399,9 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string,
     const reversed = await addTransaction(invoice.user_id, -(granted - take), `${why} (abonnement)`, ref);
     return { ok: true, action: "invoice-reversed", reversed };
   }
+  // Compte partagé : au-delà des correspondances EXACTES ci-dessus (achat, facture
+  // connus chez nous), une charge d'une autre application n'est pas à nous.
+  if (metaForeign(ctx.metadata)) return foreign("charge", paymentIntent, `app=${ctx.metadata?.app}`);
   // 3) Achat antérieur à `stripe_purchases` : Stripe sait quelle session porte ce paiement.
   if (ctx.lookup) {
     let session: Awaited<ReturnType<StripeLookup["sessionByPaymentIntent"]>> = null;
@@ -368,7 +431,10 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string,
     log("warn", "stripe.reversal_by_amount", { paymentIntent, user: userId, amountCents: ctx.amountCents, centi: capped });
     return { ok: true, action: "pack-reversed-by-amount", reversed };
   }
-  // 6) Rien d'exploitable : on MÉMORISE (appliqué si l'achat arrive ensuite) et on le dit fort.
+  // 6) Rien d'exploitable. Charge SANS aucune métadonnée Cortex → autre application
+  // (ou paiement hors de notre boutique) : ignorée, sans trace. Charge Cortex → on
+  // MÉMORISE (appliquée si l'achat arrive ensuite) et on le dit fort.
+  if (!metaCortex(ctx.metadata)) return foreign("charge", paymentIntent, "aucune métadonnée Cortex, paiement inconnu");
   await authRun(
     `INSERT INTO stripe_orphan_reversals (payment_intent, why, amount_cents, created_at) VALUES (?,?,?,?) ON CONFLICT (payment_intent) DO NOTHING`,
     paymentIntent, why, ctx.amountCents ?? null, nowStr(),

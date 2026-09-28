@@ -116,7 +116,7 @@ test("checkout : URLs de retour depuis AUTH_URL, jamais depuis Origin ; sans AUT
   assert.equal(pack.mode, "payment");
   assert.equal(pack.success_url, "https://cortex.example.ch/compte?achat=ok");
   assert.equal(pack.cancel_url, "https://cortex.example.ch/compte?achat=annule");
-  assert.deepEqual(pack.metadata, { cortexUserId: "alice", plan: "credits_10", credits: "10" });
+  assert.deepEqual(pack.metadata, { app: "cortex", cortexUserId: "alice", plan: "credits_10", credits: "10" });
   assert.equal(pack.customer_email, "alice@example.com");
   assert.equal(pack.invoice_creation?.enabled, true);
   assert.equal(pack.customer_creation, "always");
@@ -124,7 +124,7 @@ test("checkout : URLs de retour depuis AUTH_URL, jamais depuis Origin ; sans AUT
   assert.deepEqual(pack.payment_intent_data?.metadata, pack.metadata);
   const sub = mod.checkoutParams({ plan: "pro_yearly", priceId: "price_test_y", userId: "alice" });
   assert.equal(sub.mode, "subscription");
-  assert.deepEqual(sub.subscription_data?.metadata, { cortexUserId: "alice", plan: "pro_yearly" });
+  assert.deepEqual(sub.subscription_data?.metadata, { app: "cortex", cortexUserId: "alice", plan: "pro_yearly" });
   assert.ok(!fs.readFileSync(path.join(__dirname, "..", "app", "api", "billing", "checkout", "route.ts"), "utf8").includes('headers.get("origin")'));
 });
 test("clé restreinte rk_live_ : un événement live est accepté (livemode cohérent)", async () => {
