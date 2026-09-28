@@ -73,7 +73,7 @@ export function WeaknessBase({
     <section>
       <SectionHeader
         title="Base des faiblesses"
-        hint="Filtre par sévérité, ou groupe par chapitre du cours — chaque lacune se travaille en un clic."
+        hint="Filtre par sévérité, ou groupe par chapitre du cours : chaque lacune se travaille en un clic."
       />
 
       {weaknesses.length === 0 ? (
@@ -120,7 +120,7 @@ export function WeaknessBase({
           {rows.length === 0 ? (
             <div className="panel rounded-xl p-1.5">
               <p className="px-4 py-8 text-center text-[0.85rem] text-ink-3">
-                Aucune lacune {FILTERS.find((f) => f.key === filter)?.label.toLowerCase()} — retire le filtre pour tout voir.
+                Aucune lacune {FILTERS.find((f) => f.key === filter)?.label.toLowerCase()} : retire le filtre pour tout voir.
               </p>
             </div>
           ) : grouped ? (

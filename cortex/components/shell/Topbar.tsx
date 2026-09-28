@@ -22,7 +22,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
         <Link
           href="/"
           className="mr-1 flex items-center lg:hidden"
-          aria-label="Cortex — accueil"
+          aria-label="Cortex : accueil"
         >
           <Wordmark markSize={26} />
         </Link>
@@ -31,7 +31,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
         <Link
           href="/recherche"
           className="group hidden h-10 max-w-[420px] flex-1 items-center gap-2.5 rounded-lg border border-line bg-surface-2/50 px-3 text-ink-3 transition-colors hover:border-line-strong hover:bg-surface-2 sm:flex"
-          aria-label="Rechercher — ouvrir la recherche"
+          aria-label="Ouvrir la recherche"
         >
           <Search className="size-4 shrink-0" strokeWidth={2} />
           <span className="flex-1 truncate text-[0.85rem]">

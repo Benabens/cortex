@@ -1,6 +1,7 @@
 "use client"; // Les error boundaries doivent être des Client Components (Next App Router).
 
 import { useEffect } from "react";
+import { Wordmark } from "@/components/shell/Logo";
 
 /**
  * Erreur de segment (route sous le layout racine). Thème DARK cohérent avec
@@ -44,8 +45,8 @@ export default function Error({
           boxShadow: "0 8px 26px -6px rgba(0,0,0,0.6)",
         }}
       >
-        <div style={{ fontSize: 13, letterSpacing: "0.14em", textTransform: "uppercase", color: "#8b7bff", fontWeight: 600 }}>
-          cortex.
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          <Wordmark markSize={24} textSize="1.15rem" />
         </div>
         <h1 style={{ fontSize: 22, fontWeight: 700, margin: "14px 0 8px" }}>Une erreur est survenue</h1>
         <p style={{ fontSize: 14, lineHeight: 1.55, color: "#c9c7d6", margin: 0 }}>
@@ -64,12 +65,12 @@ export default function Error({
               appearance: "none",
               cursor: "pointer",
               border: "1px solid transparent",
-              borderRadius: 999,
+              borderRadius: 12,
               padding: "10px 20px",
               fontSize: 14,
               fontWeight: 600,
-              color: "#fff",
-              background: "linear-gradient(180deg, #6f5cf0, #5a48d6)",
+              color: "#111214",
+              background: "#ececee",
             }}
           >
             Réessayer
@@ -79,7 +80,7 @@ export default function Error({
             style={{
               display: "inline-flex",
               alignItems: "center",
-              borderRadius: 999,
+              borderRadius: 12,
               padding: "10px 20px",
               fontSize: 14,
               fontWeight: 550,

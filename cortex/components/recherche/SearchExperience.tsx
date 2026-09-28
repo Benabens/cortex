@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, X, CornerDownLeft, Sparkles, SlidersHorizontal, WifiOff, RotateCw } from "lucide-react";
+import { Search, X, CornerDownLeft, WifiOff, RotateCw } from "lucide-react";
 import { useApi, useCourse } from "@/lib/ux/api";
 import { SUGGEST, metaFor, hitHref, snippetParts, type SearchResp, type Hit } from "@/lib/ux/search";
 import { toneVar } from "@/lib/ux/labels";
@@ -150,13 +150,10 @@ export function SearchExperience() {
         </div>
       </div>
 
-      {/* État vide INTENTIONNEL (P0.3) : compact, utile — les suggestions SONT le contenu */}
+      {/* État vide INTENTIONNEL (P0.3) : compact, utile — les suggestions SONT le contenu.
+          Sans intitulé en capitales : des chips sous une barre de recherche se lisent seules. */}
       {!active && (
         <section aria-label="Suggestions de recherche" className="flex flex-col gap-2.5">
-          <span className="inline-flex items-center gap-1.5 text-[0.72rem] font-medium uppercase tracking-wider text-ink-4">
-            <Sparkles className="size-3.5 text-violet-hi" strokeWidth={2.25} />
-            Essaie
-          </span>
           <div className="flex flex-wrap gap-2">
             {suggestions.map((s) => (
               <button
@@ -178,11 +175,7 @@ export function SearchExperience() {
       {/* Facettes (groupes réels renvoyés par le back) + compteur */}
       {active && data && data.groups.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="mr-1 inline-flex items-center gap-1.5 text-[0.72rem] font-medium uppercase tracking-wider text-ink-4">
-              <SlidersHorizontal className="size-3.5" strokeWidth={2.25} />
-              Type
-            </span>
+          <div role="group" aria-label="Filtrer par type de source" className="flex flex-wrap items-center gap-2">
             <TypeChip
               label="Tous"
               count={data.total}
@@ -257,9 +250,10 @@ export function SearchExperience() {
             let idx = -1;
             return groups.map((g) => (
               <div key={g.sourceType}>
-                <div className="flex items-center gap-2 px-3 pb-1 pt-3 text-[0.7rem] font-medium uppercase tracking-wider text-ink-4">
+                {/* Titre de groupe (liste groupée, façon Linear) : casse normale, petit, gris. */}
+                <div className="flex items-center gap-2 px-3 pb-1 pt-3 text-[0.76rem] font-medium text-ink-3">
                   {g.label}
-                  <span className="font-data normal-case text-ink-4">{g.hits.length}</span>
+                  <span className="font-data text-ink-4">{g.hits.length}</span>
                 </div>
                 {g.hits.map((h) => {
                   idx += 1;

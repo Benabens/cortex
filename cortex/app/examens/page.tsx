@@ -74,7 +74,7 @@ export default function ExamensPage() {
 
       {/* Examens prêts ← GET /api/exams (réel ; 500 possible sur cs-202) */}
       <section>
-        <SectionHeader title="Examens prêts" hint="Générés à ton format, prêts à passer — énoncé et corrigé PDF." />
+        <SectionHeader title="Examens prêts" hint="Générés à ton format, prêts à passer : énoncé et corrigé PDF." />
 
         {exams.loading ? (
           <div
@@ -116,7 +116,7 @@ export default function ExamensPage() {
               const summary = asText(e.verifySummary);
               const day = formatDay(e.createdAt);
               return (
-                <Panel key={e.id} className="flex items-center gap-4 p-4">
+                <Panel key={e.id} className="flex flex-wrap items-center gap-4 p-4">
                   <span
                     className="grid size-11 shrink-0 place-items-center rounded-lg border border-line"
                     style={{
@@ -138,7 +138,8 @@ export default function ExamensPage() {
                       {day ? ` · ${day}` : ""}
                     </p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1.5">
+                  {/* Sur mobile, les actions passent sous le titre (sinon elles le recouvrent). */}
+                  <div className="flex w-full shrink-0 items-center gap-1.5 sm:w-auto">
                     {e.url && (
                       <a
                         href={e.url}

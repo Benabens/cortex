@@ -39,9 +39,10 @@
   --color-line-soft: rgba(255, 255, 255, 0.05);
   --color-line-strong: rgba(255, 255, 255, 0.14);
 
-  /* — Typography — */
-  --font-display: var(--font-space-grotesk), "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
-  --font-sans: var(--font-inter), "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* — Typography (décision 2026-09-28) : interface en police système, Funnel Display
+       réservée aux titres (h1/h2/h3, titres de cartes) et au wordmark. — */
+  --font-display: var(--font-funnel-display), "Funnel Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "SFMono-Regular", "Menlo", monospace;
 
   /* — Radius (cards cap at 20) — */
@@ -55,10 +56,8 @@
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 14px -6px rgba(0, 0, 0, 0.5);
   --shadow-pop: 0 8px 26px -6px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.4);
   --shadow-hero: 0 24px 60px -18px rgba(0, 0, 0, 0.72), 0 6px 16px rgba(0, 0, 0, 0.45);
-  /* Lumière d'accent : UNE seule, réservée au héro (large, basse, jamais un contour).
-     POLISH 2026 : plus aucun glow sur nav / inputs / boutons / chips. */
-  --shadow-glow-violet: 0 24px 70px -30px color-mix(in oklch, var(--color-violet) 38%, transparent);
-  --shadow-glow-cyan: 0 24px 70px -32px color-mix(in oklch, var(--color-cyan) 30%, transparent);
+  /* Anti-slop 2026-09 : plus aucune lueur colorée (halo, aura, box-shadow teintée).
+     Les blocs mis en avant reçoivent une lumière neutre du haut (.top-light). */
 
   /* — Motion — */
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
@@ -83,21 +82,25 @@ body {
   background: var(--color-bg);
   color: var(--color-ink-2);
   font-family: var(--font-sans);
-  font-feature-settings: "cv05" 1, "ss01" 1;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-h1, h2, h3, h4 {
+/* Titres : Funnel Display. h4 et en dessous restent en police système (labels de liste). */
+h1, h2, h3 {
   font-family: var(--font-display);
   color: var(--color-ink-1);
   letter-spacing: -0.02em;
   text-wrap: balance;
 }
+h4 {
+  color: var(--color-ink-1);
+  text-wrap: balance;
+}
 
-/* Numeric / data numerals — signature Space Grotesk with tabular figures */
+/* Numeric / data numerals : police système avec chiffres tabulaires (pas de display sur les données) */
 .font-data {
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-feature-settings: "tnum" 1, "lnum" 1;
   font-variant-numeric: tabular-nums lining-nums;
 }
@@ -177,32 +180,12 @@ h1, h2, h3, h4 {
   box-shadow: 0 0 0 1px var(--color-line);
 }
 
-/* Grain-free premium radial accent field (behind hero content) */
-@utility accent-field {
-  background:
-    radial-gradient(120% 140% at 8% 0%, color-mix(in oklch, var(--color-violet) 22%, transparent) 0%, transparent 46%),
-    radial-gradient(110% 120% at 100% 8%, color-mix(in oklch, var(--color-cyan) 12%, transparent) 0%, transparent 44%);
-}
-
-/* — Signature aurora backdrop (very low opacity, drifts slowly) — */
-.aurora {
-  position: fixed;
-  inset: -20% -10% auto -10%;
-  height: 70vh;
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0.55;
-  background:
-    radial-gradient(38% 52% at 22% 18%, color-mix(in oklch, var(--color-violet) 40%, transparent) 0%, transparent 70%),
-    radial-gradient(34% 46% at 78% 8%, color-mix(in oklch, var(--color-cyan) 26%, transparent) 0%, transparent 72%),
-    radial-gradient(30% 44% at 58% 30%, color-mix(in oklch, var(--color-emerald) 16%, transparent) 0%, transparent 74%);
-  filter: blur(46px);
-  animation: aurora-drift 26s var(--ease-out-quint) infinite alternate;
-}
-
-@keyframes aurora-drift {
-  0%   { transform: translate3d(-2%, -1%, 0) scale(1); }
-  100% { transform: translate3d(3%, 2%, 0) scale(1.08); }
+/* Lumière neutre du haut (façon Linear) : remplace les halos colorés sur les blocs mis en
+   avant. Un léger dégradé blanc en haut du bloc + un filet clair, aucune couleur.
+   Classe non « layerisée » : elle gagne sur la box-shadow de .panel. */
+.top-light {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 45%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09), var(--shadow-card);
 }
 
 /* — Entrance motion — */
@@ -335,5 +318,4 @@ h1, h2, h3, h4 {
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
-  .aurora { animation: none; }
 }

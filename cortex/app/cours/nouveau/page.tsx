@@ -1,7 +1,7 @@
 import { PageHeader } from "@/components/ui/PageHeader";
 import { CourseForm } from "@/components/cours/CourseForm";
 
-export const metadata = { title: "Créer un cours — cortex" };
+export const metadata = { title: "Créer un cours · cortex" };
 
 export default function NouveauCoursPage() {
   return (

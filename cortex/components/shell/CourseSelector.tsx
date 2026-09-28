@@ -82,7 +82,7 @@ export function CourseSelector({ className }: { className?: string }) {
       >
         {courses.map((c) => (
           <option key={c.id} value={c.id}>
-            {c.short} — {c.name}
+            {c.short} · {c.name}
           </option>
         ))}
         <option value={ADD}>+ Ajouter un cours…</option>

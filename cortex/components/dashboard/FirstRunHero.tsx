@@ -1,4 +1,4 @@
-import { BookPlus, ArrowRight, FolderUp, ScanSearch, FileSearch } from "lucide-react";
+import { BookPlus, ArrowRight, FolderUp, ScanSearch } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 
 /**
@@ -27,14 +27,9 @@ export function FirstRunHero() {
   ];
 
   return (
-    <section className="panel accent-field relative overflow-hidden rounded-xl" aria-labelledby="firstrun-title">
+    <section className="panel top-light relative overflow-hidden rounded-xl" aria-labelledby="firstrun-title">
       <div className="relative p-5 sm:p-7">
-        <span className="inline-flex items-center gap-1.5 text-[0.75rem] font-semibold uppercase tracking-wide text-violet-hi">
-          <FileSearch className="size-3.5" strokeWidth={2.5} />
-          Bienvenue
-        </span>
-
-        <h2 id="firstrun-title" className="mt-3 max-w-xl text-[1.75rem] font-semibold leading-[1.1] sm:text-[2.15rem]">
+        <h2 id="firstrun-title" className="max-w-xl text-[1.75rem] font-semibold leading-[1.1] sm:text-[2.15rem]">
           Commence par créer ta première matière.
         </h2>
         <p className="mt-3 max-w-xl text-[0.95rem] leading-relaxed text-ink-2">

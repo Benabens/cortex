@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Wordmark } from "@/components/shell/Logo";
 
 /**
  * 404 — page introuvable. Thème DARK cohérent (la page 404 Next par défaut est
@@ -29,8 +30,8 @@ export default function NotFound() {
           boxShadow: "0 8px 26px -6px rgba(0,0,0,0.6)",
         }}
       >
-        <div style={{ fontSize: 13, letterSpacing: "0.14em", textTransform: "uppercase", color: "#8b7bff", fontWeight: 600 }}>
-          cortex.
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          <Wordmark markSize={24} textSize="1.15rem" />
         </div>
         <h1 style={{ fontSize: 44, fontWeight: 700, margin: "12px 0 4px", lineHeight: 1 }}>404</h1>
         <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px" }}>Page introuvable</h2>
@@ -44,13 +45,13 @@ export default function NotFound() {
             style={{
               display: "inline-flex",
               alignItems: "center",
-              borderRadius: 999,
+              borderRadius: 12,
               padding: "10px 20px",
               fontSize: 14,
               fontWeight: 600,
-              color: "#fff",
+              color: "#111214",
               textDecoration: "none",
-              background: "linear-gradient(180deg, #6f5cf0, #5a48d6)",
+              background: "#ececee",
             }}
           >
             Retour à l&apos;accueil

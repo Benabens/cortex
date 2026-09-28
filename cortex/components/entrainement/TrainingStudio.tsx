@@ -97,7 +97,7 @@ export function TrainingStudio() {
       setError({
         offline: err.status === 503,
         message: err.status === 503
-          ? "Le moteur LLM est injoignable — réessaie plus tard."
+          ? "Le moteur LLM est injoignable : réessaie plus tard."
           : err.message || "La génération a échoué. Réessaie.",
       });
     } finally {
@@ -122,7 +122,7 @@ export function TrainingStudio() {
       setError({
         offline: err.status === 503,
         message: err.status === 503
-          ? "Le moteur LLM est injoignable — impossible de générer pour l’instant."
+          ? "Le moteur LLM est injoignable : impossible de générer pour l’instant."
           : err.message || "Impossible de lancer la génération.",
       });
     } finally {
@@ -171,7 +171,7 @@ export function TrainingStudio() {
           <h2 className="text-[1.05rem] font-semibold text-ink-1">Génère un exo à travailler</h2>
         </div>
         <p className="mt-1 text-[0.86rem] text-ink-2">
-          Un concept, une consigne, ou une image — Cortex produit un exo au format du final.
+          Un concept, une consigne, ou une image : Cortex produit un exo au format du final.
         </p>
 
         {/* pré-remplissage depuis Faiblesses : bandeau éditable + × pour vider */}
@@ -179,7 +179,7 @@ export function TrainingStudio() {
           <div className="mt-4 flex items-center justify-between gap-2 rounded-lg border border-[color-mix(in_oklch,var(--color-violet)_35%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_9%,transparent)] px-3 py-2 text-[0.78rem] text-ink-2">
             <span className="inline-flex min-w-0 items-center gap-1.5">
               <Target className="size-3.5 shrink-0 text-violet-hi" strokeWidth={2.25} />
-              <span className="truncate">Pré-rempli depuis une faiblesse — modifie-le ou lance tel quel.</span>
+              <span className="truncate">Pré-rempli depuis une faiblesse : modifie-le ou lance tel quel.</span>
             </span>
             <button
               type="button"
@@ -201,7 +201,7 @@ export function TrainingStudio() {
             onImageChange={setImage}
             rows={3}
             ariaLabel="Concept, consigne ou énoncé à travailler (image collable)"
-            placeholder="Ex. « rétropropagation », « max-flow avec une coupe » — ou colle une consigne / un énoncé…"
+            placeholder="Ex. « rétropropagation », « max-flow avec une coupe », ou colle une consigne / un énoncé…"
             onEnter={submit}
           />
         </div>
@@ -305,7 +305,7 @@ export function TrainingStudio() {
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
             <AlertTriangle className="size-6 text-danger-hi" strokeWidth={2} />
             <p className="text-[0.9rem] font-medium text-ink-1">La génération a échoué</p>
-            <p className="max-w-xs text-[0.82rem] text-ink-3">{asText(job?.error) ?? "Réessaie — si ça persiste, vérifie le moteur LLM et le moteur LaTeX."}</p>
+            <p className="max-w-xs text-[0.82rem] text-ink-3">{asText(job?.error) ?? "Réessaie. Si ça persiste, vérifie le moteur LLM et le moteur LaTeX."}</p>
           </div>
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 py-10 text-center">
@@ -314,7 +314,7 @@ export function TrainingStudio() {
             </span>
             <p className="text-[0.92rem] font-medium text-ink-1">Ton prochain exo apparaîtra ici</p>
             <p className="max-w-xs text-[0.82rem] leading-relaxed text-ink-3">
-              Donne un concept, une consigne ou une image — Cortex génère un exo au format du vrai final,
+              Donne un concept, une consigne ou une image : Cortex génère un exo au format du vrai final,
               avec des indices progressifs à révéler si tu bloques.
             </p>
           </div>
@@ -350,7 +350,7 @@ function FeedbackBar({ onSend, sent, busy }: { onSend: (verdict: string) => void
           </button>
         ))}
       </div>
-      {sent && <p className="mt-2 text-[0.78rem] text-emerald-hi" aria-live="polite">Merci — Cortex recalibre la difficulté des prochains exos.</p>}
+      {sent && <p className="mt-2 text-[0.78rem] text-emerald-hi" aria-live="polite">Merci : Cortex recalibre la difficulté des prochains exos.</p>}
     </div>
   );
 }

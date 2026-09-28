@@ -6,7 +6,7 @@ export default function RecherchePage() {
     <div className="flex flex-col gap-7">
       <PageHeader
         title="Recherche"
-        description="Tout ton corpus — cours, séries, finals, cheat sheets, code — en un clin d’œil."
+        description="Tout ton corpus en un clin d’œil : cours, séries, finals, cheat sheets, code."
       />
       <SearchExperience />
     </div>

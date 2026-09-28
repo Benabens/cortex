@@ -92,7 +92,7 @@ function FallbackSections({ types }: { types: UiType[] }) {
   return (
     <div className="space-y-2.5">
       <p className="text-[0.76rem] text-ink-4">
-        Le plan de cours du prof n’a pas pu être dérivé pour ce cours — les notions sont regroupées par
+        Le plan de cours du prof n’a pas pu être dérivé pour ce cours : les notions sont regroupées par
         thème, dans l’ordre indicatif du cours.
       </p>
       {blocks.map((b, i) => (

@@ -54,8 +54,7 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
   return (
     <main className="page page-narrow">
       <header className="mb-6 rise">
-        <p className="eyebrow">Mock examen · QCM {exam.open.length ? "+ ouvert" : ""}</p>
-        <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Examen blanc #{exam.id}</h1>
+        <h1 className="h1" style={{ fontSize: 28 }}>Examen blanc #{exam.id}</h1>
         <p className="sub mt-2">{exam.items.length} questions à choix{exam.open.length ? ` + ${exam.open.length} ouverte(s)` : ""} · réponds, puis corrige-toi. SCQ = une seule case ; MCQ = une ou plusieurs.</p>
         {exam.pdf && (
           <div className="mt-3 flex gap-2">
@@ -84,7 +83,7 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
           return (
             <section key={it.id} className="card card-pad" style={det ? { borderColor: det.ok ? "var(--green)" : "var(--red)" } : undefined}>
               <div className="flex items-center justify-between gap-2 mb-2">
-                <span className="text-[11.5px] uppercase tracking-wide" style={{ color: "var(--ink-3)" }}>Q{it.idx + 1} · {it.topic} · <span style={{ color: it.type === "mcq" ? "var(--blue-ink)" : "var(--accent-ink)" }}>{it.type.toUpperCase()}</span></span>
+                <span className="text-[12.5px]" style={{ color: "var(--ink-3)" }}>Q{it.idx + 1} · {it.topic} · <span style={{ color: it.type === "mcq" ? "var(--blue-ink)" : "var(--accent-ink)" }}>{it.type.toUpperCase()}</span></span>
                 {det && <span className={`tag ${det.ok ? "tag-green" : "tag-red"}`}>{det.ok ? "juste ✓" : "faux"}</span>}
               </div>
               <div className="text-[14.5px] mb-3" style={{ color: "var(--ink)", whiteSpace: "pre-wrap" }}>{it.stem}</div>
@@ -113,13 +112,13 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
 
       {exam.open.length > 0 && (
         <div className="mt-7">
-          <div className="section-head"><span className="section-title">Partie ouverte — {exam.open.length} question(s) à rédiger</span></div>
+          <div className="section-head"><span className="section-title">Partie ouverte : {exam.open.length} question(s) à rédiger</span></div>
           <div className="flex flex-col gap-4">
             {exam.open.map((o, i) => {
               const sol = graded?.openSolutions.find((s) => s.id === o.id);
               return (
                 <section key={o.id} className="card card-pad">
-                  <div className="text-[11.5px] uppercase tracking-wide mb-2" style={{ color: "var(--ink-3)" }}>Question ouverte {i + 1} · {o.concept}</div>
+                  <div className="text-[12.5px] mb-2" style={{ color: "var(--ink-3)" }}>Question ouverte {i + 1} · {o.concept}</div>
                   <SafeHtml className="prose-exam text-[13.5px]" style={{ color: "var(--ink)" }} html={o.statement} />
                   {!graded ? (
                     <textarea className="textarea mt-3" rows={4} placeholder="Ta réponse (auto-évaluée : le corrigé s'affiche après correction)…" style={{ fontSize: 13 }} />

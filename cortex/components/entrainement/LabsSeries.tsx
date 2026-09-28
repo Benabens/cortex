@@ -56,7 +56,7 @@ export function LabsSeries() {
       const err = e as ApiError;
       setGenError(
         err.status === 503
-          ? "Le moteur LLM est injoignable — impossible de générer un exo Labs pour l’instant."
+          ? "Le moteur LLM est injoignable : impossible de générer un exo Labs pour l’instant."
           : err.message || "Impossible de lancer la génération."
       );
       setActiveLab(null);
@@ -134,7 +134,7 @@ export function LabsSeries() {
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 text-[0.82rem] font-medium text-emerald-hi hover:underline"
                   >
-                    Exo prêt — ouvrir le PDF
+                    Exo prêt : ouvrir le PDF
                     <ExternalLink className="size-3.5" aria-hidden="true" />
                   </a>
                 )}

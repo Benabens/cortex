@@ -44,7 +44,6 @@ export function OpportunityBar({
           style={{
             width: `${fill}%`,
             background: "linear-gradient(90deg, var(--color-emerald), var(--color-cyan))",
-            boxShadow: fill > 0 ? "0 0 12px -2px var(--color-emerald)" : "none",
           }}
         />
       </div>

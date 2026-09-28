@@ -143,8 +143,8 @@ export function DeleteAccount() {
                 disabled={!canDelete}
                 className="inline-flex h-11 items-center justify-center rounded-md border px-4 text-sm font-semibold text-white transition-[background,opacity] duration-150 disabled:cursor-not-allowed disabled:opacity-50"
                 style={{
-                  background: "linear-gradient(180deg, var(--color-danger), color-mix(in oklch, var(--color-danger) 84%, black))",
-                  borderColor: "color-mix(in oklch, var(--color-danger) 55%, transparent)",
+                  background: "var(--color-danger)",
+                  borderColor: "transparent",
                 }}
               >
                 {state === "deleting" ? "Suppression…" : "Supprimer définitivement"}
