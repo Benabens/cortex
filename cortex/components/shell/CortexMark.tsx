@@ -4,7 +4,7 @@ import { cn } from "@/lib/ux/cn";
  * CortexMark « Dissolution v2 » : logo définitif, validé le 28/09/2026.
  * Un anneau ouvert en « C » ; l'ouverture (haut-droite) se prolonge en points
  * décroissants, dont le premier, violet, est le nœud actif.
- * Masters hors dépôt : ~/Projects/brand-logos/cortex/favori/01r-v2-*.svg.
+ * Masters (hors dépôt, poste de Ben) : ~/Projects/brand-logos/cortex/favori/.
  *
  * - Encre = text-ink-1 (via `currentColor`) ; seul le nœud est violet. #7a5cff
  *   est une décision de marque, volontairement distincte du token --color-violet.
@@ -15,6 +15,7 @@ import { cn } from "@/lib/ux/cn";
  *   viewBox : la rotation reste concentrique.
  */
 
+/** Violet du nœud, repris par le point final du wordmark (lockup v2). */
 export const MARK_NODE = "#7a5cff";
 
 type Dot = { cx: number; cy: number; r: number };
@@ -39,7 +40,7 @@ const SMALL: Geometry = {
   dots: [{ cx: 13.555, cy: 7.113, r: 1.25 }],
 };
 
-const SMALL_MAX = 24;
+const SMALL_MAX_PX = 24;
 
 export function CortexMark({
   size = 28,
@@ -52,12 +53,12 @@ export function CortexMark({
   className?: string;
   title?: string;
 }) {
-  const g = size <= SMALL_MAX ? SMALL : FULL;
+  const geometry = size <= SMALL_MAX_PX ? SMALL : FULL;
   return (
     <svg
       width={size}
       height={size}
-      viewBox={g.viewBox}
+      viewBox={geometry.viewBox}
       fill="currentColor"
       className={cn("shrink-0 text-ink-1", spinning && "mark-spin", className)}
       role={title ? "img" : undefined}
@@ -65,9 +66,9 @@ export function CortexMark({
       aria-hidden={title ? undefined : true}
       focusable="false"
     >
-      <path d={g.ring} />
-      <circle cx={g.node.cx} cy={g.node.cy} r={g.node.r} fill={MARK_NODE} />
-      {g.dots.map((d, i) => (
+      <path d={geometry.ring} />
+      <circle cx={geometry.node.cx} cy={geometry.node.cy} r={geometry.node.r} fill={MARK_NODE} />
+      {geometry.dots.map((d, i) => (
         <circle key={i} cx={d.cx} cy={d.cy} r={d.r} />
       ))}
     </svg>
