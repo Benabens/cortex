@@ -87,8 +87,12 @@ export function assertLlmProviderAllowed(env: Partial<NodeJS.ProcessEnv> = proce
  * Autorisés hors déploiement gardé (poste de dev) ou, sur une instance assumée
  * mono-utilisateur (CORTEX_OWNER_ONLY=1), pour son propriétaire seul.
  */
-export function dryRunAllowed(env: Partial<NodeJS.ProcessEnv> = process.env, userId = ""): boolean {
+export async function dryRunAllowed(env: Partial<NodeJS.ProcessEnv> = process.env, userId = ""): Promise<boolean> {
   if (!isGuardedDeployment(env)) return true;
   if (env.CORTEX_OWNER_ONLY !== "1") return false;
-  return userId === (env.CORTEX_OWNER_USER_ID?.trim() || "owner");
+  // Même notion de propriétaire que partout ailleurs (identifiant explicite,
+  // sinon e-mail, sinon le compte mono-utilisateur de dev) : deux définitions
+  // concurrentes finissaient par refuser l'outil au propriétaire lui-même.
+  const { isOwnerAccount } = await import("@/lib/account-deletion");
+  return await isOwnerAccount(userId, env);
 }
