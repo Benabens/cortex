@@ -3,6 +3,7 @@ import { requireCourse } from "@/lib/req";
 import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
 import { NextRequest, NextResponse } from "next/server";
+import { fieldTooLong } from "@/lib/field-limits";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
 import { dryRunAllowed } from "@/lib/boot-guards";
 import { currentUser } from "@/db/context";
@@ -33,19 +34,24 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     }
   }
 
+  // composeur (CS-202) : count = nombre d'exercices choisi (optionnel ; défaut = blueprint).
+  // Focus = « Mets l'accent sur… » (générique, supporté PARTOUT) — 1-2 exos ciblés.
+  // Validé AVANT tout travail : un sujet trop long est refusé, jamais tronqué en
+  // silence — sinon l'étudiant paie une génération à l'intention amputée.
+  const body = await readJson(req, ({} as any));
+  const count = Number(body?.count) > 0 ? Math.min(12, Math.floor(Number(body.count))) : undefined;
+  const focusRaw = typeof body?.focus === "string" ? body.focus.trim() : "";
+  const tooLong = fieldTooLong("focus", focusRaw);
+  if (tooLong) return tooLong;
+  const focus = focusRaw || undefined;
+  const target = count || focus ? JSON.stringify({ count, focus }) : undefined;
+
   const existing = await activeJob("exam");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
 
   // pré-checks AVANT de lancer le worker : fournisseur LLM + corpus + moteur LaTeX
   const issue = await preflightGeneration("exam");
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
-
-  // composeur (CS-202) : count = nombre d'exercices choisi (optionnel ; défaut = blueprint).
-  // Focus = « Mets l'accent sur… » (générique, supporté PARTOUT) — 1-2 exos ciblés.
-  const body = await readJson(req, ({} as any));
-  const count = Number(body?.count) > 0 ? Math.min(12, Math.floor(Number(body.count))) : undefined;
-  const focus = typeof body?.focus === "string" && body.focus.trim() ? body.focus.trim().slice(0, 400) : undefined;
-  const target = count || focus ? JSON.stringify({ count, focus }) : undefined;
   let jobId: number;
   try {
     ({ id: jobId } = await createJobExclusive("exam", target));

@@ -125,3 +125,37 @@ test("feedback : verdict dans l'énumération, note et sujet bornés — ces lig
   const ok = await POST(json("/api/feedback", { verdict: "good", note: "piège bien vu" }));
   assert.equal(ok.status, 200, await ok.clone().text());
 });
+
+test("exams et qcm : un « focus » trop long est refusé, pas tronqué en silence", async () => {
+  const { FIELD_LIMITS } = await import("../lib/field-limits");
+  // labs/generate répondait 413 là où exams et qcm coupaient à 400 caractères
+  // sans le dire : l'étudiant payait une génération dont l'intention était
+  // amputée. Même champ, même règle, et le refus tombe avant toute réservation.
+  const trop = "f".repeat(FIELD_LIMITS.focus + 1);
+  for (const [route, mod] of [
+    ["/api/exams/generate", "../app/api/exams/generate/route"],
+    ["/api/qcm/generate", "../app/api/qcm/generate/route"],
+  ] as const) {
+    const { POST } = await import(mod);
+    const r = await POST(json(route, { focus: trop }));
+    assert.equal(r.status, 413, `${route} : ${await r.clone().text()}`);
+  }
+});
+
+test("feedback : la note est bornée à ce qui est réellement conservé", async () => {
+  const { FIELD_LIMITS } = await import("../lib/field-limits");
+  const { POST } = await import("../app/api/feedback/route");
+  const { calibrationFor } = await import("../lib/calibration");
+  const { runWithUser } = await import("../db/context");
+  const { runWithCourse } = await import("../db/client");
+  // La route acceptait 2 000 caractères, l'enregistrement en gardait 600 : le
+  // reste disparaissait avec une réponse 200. Une borne, annoncée.
+  assert.ok(FIELD_LIMITS.feedbackNote <= 600, "une remarque de calibration reste courte : elle est réinjectée dans les prompts");
+  const trop = await POST(json("/api/feedback", { verdict: "good", note: "n".repeat(FIELD_LIMITS.feedbackNote + 1) }));
+  assert.equal(trop.status, 413, await trop.clone().text());
+  const juste = "n".repeat(FIELD_LIMITS.feedbackNote);
+  const ok = await POST(json("/api/feedback", { verdict: "not_prof_style", topic: "bornes", note: juste }));
+  assert.equal(ok.status, 200, await ok.clone().text());
+  const c = await runWithUser("owner", () => runWithCourse("cs-202", () => calibrationFor(null, "bornes")));
+  assert.ok(c.notes.includes(juste), "la note acceptée est conservée en entier");
+});
