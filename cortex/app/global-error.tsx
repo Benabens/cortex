@@ -33,7 +33,7 @@ export default function GlobalError({
             padding: "48px 24px",
             background: "#0c0d15",
             color: "#f4f2fb",
-            fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif",
+            fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif",
           }}
         >
           <div
@@ -47,8 +47,21 @@ export default function GlobalError({
               boxShadow: "0 8px 26px -6px rgba(0,0,0,0.6)",
             }}
           >
-            <div style={{ fontSize: 13, letterSpacing: "0.14em", textTransform: "uppercase", color: "#8b7bff", fontWeight: 600 }}>
-              cortex.
+            {/* Wordmark inline (aucun CSS global ici) : Funnel Display si déjà en cache, sinon police système. */}
+            <div
+              style={{
+                fontFamily: "'Funnel Display', -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+                fontSize: 18,
+                fontWeight: 700,
+                letterSpacing: "-0.04em",
+                lineHeight: 1,
+              }}
+            >
+              cortex
+              <span
+                aria-hidden="true"
+                style={{ display: "inline-block", width: "0.17em", height: "0.17em", marginLeft: "0.035em", borderRadius: "50%", background: "#7a5cff" }}
+              />
             </div>
             <h1 style={{ fontSize: 22, fontWeight: 700, margin: "14px 0 8px" }}>Erreur critique</h1>
             <p style={{ fontSize: 14, lineHeight: 1.55, color: "#c9c7d6", margin: 0 }}>
@@ -67,12 +80,12 @@ export default function GlobalError({
                   appearance: "none",
                   cursor: "pointer",
                   border: "1px solid transparent",
-                  borderRadius: 999,
+                  borderRadius: 12,
                   padding: "10px 20px",
                   fontSize: 14,
                   fontWeight: 600,
-                  color: "#fff",
-                  background: "linear-gradient(180deg, #6f5cf0, #5a48d6)",
+                  color: "#111214",
+                  background: "#ececee",
                 }}
               >
                 Recharger

@@ -148,7 +148,7 @@ export function CourseForm() {
         {done && !error && (
           <p className="inline-flex items-center gap-1.5 text-[0.8rem] text-emerald-hi" aria-live="polite">
             <Check className="size-4" strokeWidth={2.5} />
-            Cours créé — direction l’import des annales.
+            Cours créé : direction l’import des annales.
           </p>
         )}
 

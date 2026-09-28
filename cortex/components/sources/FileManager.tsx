@@ -165,7 +165,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
 
           <div className="flex items-center gap-2 border-t border-line px-4 py-2.5 text-[0.78rem] text-ink-3">
             <span className="font-data font-semibold text-ink-1">{refCount}</span>
-            annale{refCount > 1 ? "s" : ""} de référence cochée{refCount > 1 ? "s" : ""} — le format des blancs se cale dessus
+            annale{refCount > 1 ? "s" : ""} de référence cochée{refCount > 1 ? "s" : ""} : le format des blancs se cale dessus
           </div>
         </>
       ) : (

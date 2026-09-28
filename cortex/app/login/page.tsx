@@ -1,11 +1,8 @@
-import { Geist } from "next/font/google";
 import { emailLoginConfigured, googleLoginConfigured } from "@/lib/auth";
 import { legalLinks } from "@/lib/legal";
 import { LoginCard } from "./LoginCard";
 
-// Geist (police de la landing), scopée à cette page pour ne pas alourdir le reste.
-const geist = Geist({ subsets: ["latin"], variable: "--font-geist", display: "swap" });
-
+// Police système + Funnel Display pour le titre, comme le reste de l'app (Geist retirée : liste interdite anti-slop).
 export const dynamic = "force-dynamic";
 
 /**
@@ -24,14 +21,12 @@ export default async function LoginPage({
   const callbackUrl = pick(sp.callbackUrl) ?? "/";
 
   return (
-    <div className={geist.variable} style={{ fontFamily: "var(--font-geist), system-ui, sans-serif" }}>
-      <LoginCard
-        error={error}
-        callbackUrl={callbackUrl}
-        google={googleLoginConfigured()}
-        email={emailLoginConfigured()}
-        legal={legalLinks()}
-      />
-    </div>
+    <LoginCard
+      error={error}
+      callbackUrl={callbackUrl}
+      google={googleLoginConfigured()}
+      email={emailLoginConfigured()}
+      legal={legalLinks()}
+    />
   );
 }

@@ -6,6 +6,7 @@ type Props = {
   from?: string;
   to?: string;
   height?: number;
+  /** Conservé pour compatibilité : plus aucune lueur colorée (anti-slop 2026-09). */
   glow?: boolean;
   className?: string;
   delay?: number;
@@ -17,7 +18,6 @@ export function WeightBar({
   from = "var(--color-violet)",
   to = "var(--color-cyan)",
   height = 8,
-  glow = false,
   className,
   delay = 0,
 }: Props) {
@@ -32,9 +32,7 @@ export function WeightBar({
         style={{
           width: `${clamped}%`,
           background: `linear-gradient(90deg, ${from}, ${to})`,
-          boxShadow: glow
-            ? `0 0 14px -2px ${to}, inset 0 1px 0 rgba(255,255,255,0.25)`
-            : "inset 0 1px 0 rgba(255,255,255,0.2)",
+          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.2)",
           animationDelay: `${delay}ms`,
         }}
       />
