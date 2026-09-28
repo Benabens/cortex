@@ -28,7 +28,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (!VERDICTS.includes(String(b?.verdict))) {
     return NextResponse.json({ error: `verdict requis (${VERDICTS.join("|")}).` }, { status: 400 });
   }
-  const tooLong = fieldTooLong("note", String(b.note ?? ""))
+  const tooLong = fieldTooLong("feedbackNote", String(b.note ?? ""))
     ?? fieldTooLong("topic", String(b.topic ?? ""))
     ?? fieldTooLong("topic", String(b.archetype ?? ""));
   if (tooLong) return tooLong;
