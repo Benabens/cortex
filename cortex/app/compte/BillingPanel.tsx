@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { watchPageRestore } from "@/lib/ux/bfcache";
 import { ExternalLink, RotateCw, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -105,6 +106,15 @@ export function BillingPanel() {
       setError((e as Error).message);
     }
   }, []);
+
+  // Retour depuis Stripe par « précédent » : la page est restaurée depuis le cache
+  // avec son état, donc avec le verrou de redirection encore posé. On le lève et on
+  // relit le solde, l'achat ayant pu aboutir (cf. lib/ux/bfcache).
+  useEffect(() => watchPageRestore(() => {
+    setBusy(null);
+    setRetour(retourFromLocation());
+    void load();
+  }), [load]);
 
   const acceptTerms = async () => {
     if (!data) return;

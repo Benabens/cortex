@@ -71,3 +71,33 @@ test("pendant un départ vers Stripe, TOUTES les offres sont désactivées", asy
   assert.equal(offers.length, 3, "les trois offres sont rendues");
   assert.equal(offers.filter(isDisabled).length, 3, "aucune ne doit rester cliquable");
 });
+
+// ── Retour arrière depuis Stripe : les boutons ne doivent pas rester bloqués ──
+test("restauration depuis le cache de navigation : le verrou de redirection est levé", async () => {
+  const { watchPageRestore } = await import("../lib/ux/bfcache");
+  const handlers: Array<(e: { persisted: boolean }) => void> = [];
+  const cible = {
+    addEventListener: (_t: string, h: EventListener) => handlers.push(h as never),
+    removeEventListener: (_t: string, h: EventListener) => {
+      const i = handlers.indexOf(h as never);
+      if (i >= 0) handlers.splice(i, 1);
+    },
+  };
+  let restaurations = 0;
+  const off = watchPageRestore(() => { restaurations++; }, cible as never);
+  // Premier affichage de la page (pas une restauration) : rien à lever.
+  handlers.forEach((h) => h({ persisted: false }));
+  assert.equal(restaurations, 0);
+  // Retour arrière depuis Stripe : la page revient du cache, l'état React avec.
+  handlers.forEach((h) => h({ persisted: true }));
+  assert.equal(restaurations, 1, "la restauration doit être signalée");
+  off();
+  handlers.forEach((h) => h({ persisted: true }));
+  assert.equal(restaurations, 1, "plus rien après désabonnement");
+});
+
+test("le panneau de facturation lève son verrou au retour arrière (vente perdue sinon)", async () => {
+  const fs = await import("node:fs");
+  const src = fs.readFileSync("app/compte/BillingPanel.tsx", "utf8");
+  assert.match(src, /watchPageRestore\(/, "aucune levée du verrou après un retour depuis Stripe");
+});
