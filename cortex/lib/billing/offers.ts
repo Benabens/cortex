@@ -28,8 +28,8 @@ export async function stripePrices(): Promise<Record<string, PriceInfo>> {
   if (!key) return {};
   if (_cache && Date.now() - _cache.at < CACHE_MS) return _cache.prices;
   try {
-    const { default: Stripe } = await import("stripe");
-    const stripe = new Stripe(key);
+    const { stripeClient } = await import("./stripe-client");
+    const stripe = stripeClient(key);
     const keys = Object.values(PLANS).map((p) => p.lookupKey);
     const list = await stripe.prices.list({ lookup_keys: keys, active: true, limit: 10 });
     const prices: Record<string, PriceInfo> = {};
