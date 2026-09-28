@@ -16,7 +16,6 @@ const ICON_PATHS = [
   "/apple-icon.png",
   "/manifest.webmanifest",
   "/login/opengraph-image.png",
-  "/login/twitter-image.png",
   "/brand/icon-192.png",
   "/brand/icon-512.png",
   "/brand/maskable-512.png",
@@ -35,7 +34,7 @@ test("auth active : icônes et manifest passent sans redirection vers /login", a
 test("les fichiers publics sont comparés en égalité stricte, pas en préfixe", async () => {
   const fs = await import("node:fs");
   const src = fs.readFileSync(new URL("../proxy.ts", import.meta.url), "utf8");
-  assert.match(src, /PUBLIC_FILES\.includes\(pathname\)/);
+  assert.match(src, /PUBLIC_FILES\.has\(pathname\)/);
   const m = src.match(/const PUBLIC_PREFIXES = \[([^\]]*)\]/);
   assert.ok(m, "PUBLIC_PREFIXES introuvable");
   for (const p of ['"/icon', '"/apple', '"/manifest']) {

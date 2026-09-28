@@ -24,7 +24,7 @@ const PUBLIC_PREFIXES = ["/api/auth", "/login", "/api/health", "/api/metrics", "
  *  l'onglet et l'écran d'accueil. Égalité stricte : un préfixe « /icon » ouvrirait
  *  tout futur chemin qui commence ainsi. Les PNG du manifest sont sous
  *  public/brand/ ; l'image de partage est sous /login (déjà public). */
-const PUBLIC_FILES = ["/icon.svg", "/apple-icon.png", "/manifest.webmanifest"];
+const PUBLIC_FILES = new Set(["/icon.svg", "/apple-icon.png", "/manifest.webmanifest"]);
 
 /**
  * CHEMINS HÉRITÉS DU MONO-USER, absents en production : `/voir` lit des .html
@@ -102,7 +102,7 @@ function passThrough(req: NextRequest): NextResponse {
 
 async function guarded(req: NextRequest): Promise<NextResponse> {
   const { pathname } = req.nextUrl;
-  if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p)) || PUBLIC_FILES.includes(pathname)) return passThrough(req);
+  if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p)) || PUBLIC_FILES.has(pathname)) return passThrough(req);
 
   // Import dynamique : la stack NextAuth n'est chargée QUE si l'auth est active.
   const { auth } = await import("@/lib/auth");
