@@ -4,6 +4,7 @@ import "./globals.css";
 import "./legacy-compat.css";
 import { AppShell } from "@/components/shell/AppShell";
 import { legalLinks } from "@/lib/legal";
+import { NOINDEX } from "@/lib/seo";
 
 // Typo (décision 2026-09-28) : Funnel Display pour les titres et le wordmark ;
 // l'interface est en police système (aucune autre police chargée).
@@ -15,6 +16,8 @@ const funnelDisplay = Funnel_Display({
 });
 
 export const metadata: Metadata = {
+  // Surface privée : aucune page authentifiée ne doit être indexée (cf. lib/seo).
+  ...NOINDEX,
   title: "cortex · révise ce qui tombe vraiment",
   description:
     "Cortex : apprentissage par répétition espacée. Sais toujours quoi réviser ensuite.",
