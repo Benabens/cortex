@@ -122,6 +122,7 @@ export function BillingPanel() {
   };
 
   const go = async (path: string, body: unknown, key: string) => {
+    if (busy) return; // un seul départ vers Stripe à la fois (pas de double session)
     setBusy(key);
     setActionError(null);
     try {
@@ -277,7 +278,9 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
         <ul className="mt-3 divide-y divide-line">
           {data.offers.map((o) => {
             const isSub = o.kind === "subscription";
-            const disabled = !canBuy || (isSub && subLive);
+            // `busy` couvre TOUTES les offres : pendant une redirection vers Stripe,
+            // aucune autre ne doit pouvoir ouvrir une seconde session de paiement.
+            const disabled = !canBuy || !!busy || (isSub && subLive);
             return (
               <li key={o.plan} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-3.5">
                 <div className="min-w-0">
