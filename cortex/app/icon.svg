@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <style>.ink{fill:#141518}@media (prefers-color-scheme:dark){.ink{fill:#ececee}}</style>
+  <path class="ink" d="M14.708 10A7 7 0 1 1 8 1L8 3.75A4.25 4.25 0 1 0 11.750 10Z"/>
+  <circle fill="#7a5cff" cx="11.0" cy="3.242" r="1.75"/>
+  <circle class="ink" cx="13.555" cy="7.113" r="1.25"/>
+</svg>
