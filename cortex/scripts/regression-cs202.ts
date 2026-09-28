@@ -11,9 +11,10 @@
  */
 import { runWithCourse } from "../db/client";
 import { ensureCoursesLoaded } from "../lib/courses";
-import { buildBatchPrompt, buildPrompt } from "../lib/exam";
+import { PROMPT_MAX_CHARS, buildBatchPrompt, buildPrompt } from "../lib/exam";
 import { renderExamTex } from "../lib/exam-latex";
 import { profile } from "../lib/course-profile";
+import { DATA_RULE } from "../lib/prompt-safety";
 import crypto from "node:crypto";
 import fs from "node:fs";
 
@@ -41,4 +42,15 @@ ensureCoursesLoaded().then(() => runWithCourse("cs-202", async () => {
   const sha = (s: string) => crypto.createHash("sha256").update(s).digest("hex").slice(0, 16);
   console.log(`prompt sha: ${sha(prompt)}  (${prompt.length} chars)`);
   console.log(`tex    sha: ${sha(tex)}  (${tex.length} chars)`);
+  // Gardes du prompt. Son empreinte ne peut pas en être une (elle dépend de l'ADN
+  // détecté, donc du corpus présent) : on vérifie les deux propriétés qui coûtent
+  // cher si elles cassent — l'enflure, qui se paie à chaque génération, et la
+  // disparition de la consigne anti-injection du corpus importé.
+  const echecs: string[] = [];
+  if (prompt.length > PROMPT_MAX_CHARS) echecs.push(`prompt ${prompt.length} > plafond ${PROMPT_MAX_CHARS} chars`);
+  if (!prompt.includes(DATA_RULE)) echecs.push("la consigne « donnée de cours » a disparu du prompt");
+  if (echecs.length) {
+    for (const e of echecs) console.error(`ERREUR : ${e}`);
+    process.exit(1);
+  }
 }));

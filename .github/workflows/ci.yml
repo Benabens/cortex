@@ -1,8 +1,9 @@
 # CI bloquante — rouge = merge bloqué.
 # Job `ci` : typecheck, build, lint (budget anti-régression), tests unitaires
 # (drivers sqlite/pglite, LLM hermétique, sandbox, vérification déterministe),
-# et l'invariant de non-régression : prompt et .tex d'un cours de référence
-# doivent rester BYTE-IDENTIQUES aux empreintes canoniques.
+# et l'invariant de non-régression : le .tex d'un cours de référence doit rester
+# BYTE-IDENTIQUE à l'empreinte canonique, et son prompt sous le plafond de
+# caractères, consigne anti-injection incluse.
 # Job `docker` : build de l'image app+worker, smoke test /api/health et
 # compilation LaTeX réelle dans le conteneur.
 name: ci
@@ -116,14 +117,18 @@ jobs:
       # référence local, .tex inchangé), et sa valeur dépend du corpus présent —
       # elle ne peut donc pas servir de garde ici. Pour comparer deux versions,
       # lancer ce script sur chacune avec le MÊME corpus et diffuser les
-      # fichiers .prompt.txt produits.
+      # fichiers .prompt.txt produits. À la place, le script applique deux gardes
+      # non ambiguës : plafond de caractères et présence de la consigne
+      # anti-injection (il sort en échec si l'une casse).
       - name: Invariant CS-202 — réparation DB + ingestion + rendu byte-identique
         if: steps.corpus.outputs.present == 'true'
         run: |
+          # pipefail : sans lui, `| tee` renverrait 0 et masquerait les gardes du script.
+          set -o pipefail
           npx tsx scripts/repair-cs202-db.ts --ci
           npx tsx scripts/regression-cs202.ts /tmp/ci-reg | tee /tmp/reg.out
           grep -q '9a294bb25e9d919c' /tmp/reg.out || { echo '::error::tex sha ≠ canonique'; exit 1; }
-          echo "✓ rendu cs-202 byte-identique (empreinte du prompt ci-dessus, informative)"
+          echo "✓ rendu cs-202 byte-identique ; prompt sous plafond et consigne de données présente"
 
   # L'image du conteneur unique (app + worker + tectonic + python/matplotlib +
   # sqlite3) se construit, démarre et sert /api/health.
