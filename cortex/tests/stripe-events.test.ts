@@ -188,7 +188,7 @@ test("2b-6 : session gratuite (no_payment_required / montant 0) → AUCUN crédi
 
 test("2b-6 : remboursement reçu AVANT l'achat → reprise mémorisée puis appliquée quand l'achat arrive (solde net 0)", async () => {
   const { authGet } = await import("../db/auth-store");
-  const early = await handleStripeEvent(ev("evt_early_refund", "charge.refunded", { payment_intent: "pi_cs_early", amount: 900, amount_refunded: 900 }));
+  const early = await handleStripeEvent(ev("evt_early_refund", "charge.refunded", { payment_intent: "pi_cs_early", amount: 900, amount_refunded: 900, metadata: { app: "cortex" } }));
   assert.equal(early.ok, true);
   assert.equal(early.action, "reversal-orphaned");
   assert.ok(await authGet(`SELECT payment_intent FROM stripe_orphan_reversals WHERE payment_intent = ?`, "pi_cs_early"), "reprise mémorisée");
@@ -198,7 +198,7 @@ test("2b-6 : remboursement reçu AVANT l'achat → reprise mémorisée puis appl
   assert.equal(await credits.getBalance("erin"), 0, "crédité puis repris : net 0");
   assert.equal(await authGet(`SELECT payment_intent FROM stripe_orphan_reversals WHERE payment_intent = ?`, "pi_cs_early"), undefined);
   // Le même remboursement rejoué ne reprend pas deux fois.
-  assert.equal((await handleStripeEvent(ev("evt_early_refund_bis", "charge.refunded", { payment_intent: "pi_cs_early", amount: 900, amount_refunded: 900 }))).reversed, false);
+  assert.equal((await handleStripeEvent(ev("evt_early_refund_bis", "charge.refunded", { payment_intent: "pi_cs_early", amount: 900, amount_refunded: 900, metadata: { app: "cortex" } }))).reversed, false);
   assert.equal(await credits.getBalance("erin"), 0);
 });
 
@@ -229,18 +229,22 @@ test("2b-3 : client Stripe connu (abonné) sans achat retrouvé → montant conv
   assert.equal(await credits.getBalance("hugo"), 0);
 });
 
-test("2b-3 : rien d'exploitable → jamais silencieux : mémorisé, signalé en erreur, résultat explicite", async () => {
+test("2b-3 : charge Cortex sans rien d'exploitable → mémorisée et signalée ; charge SANS métadonnée Cortex → ignorée, sans trace", async () => {
   const { authGet } = await import("../db/auth-store");
   const errors: string[] = [];
   const orig = console.error;
   console.error = (...a: unknown[]) => { errors.push(a.map(String).join(" ")); };
   try {
-    const r = await handleStripeEvent(ev("evt_refund_ghost", "charge.refunded", { payment_intent: "pi_ghost", amount: 900, amount_refunded: 900 }));
+    const r = await handleStripeEvent(ev("evt_refund_ghost", "charge.refunded", { payment_intent: "pi_ghost", amount: 900, amount_refunded: 900, metadata: { app: "cortex" } }));
     assert.equal(r.action, "reversal-orphaned");
     assert.match(r.error ?? "", /inconnu/);
     assert.ok(errors.some((l) => /reversal_unresolved/.test(l) && /pi_ghost/.test(l)), `journal d'erreur attendu, reçu : ${errors.join(" | ")}`);
   } finally { console.error = orig; }
   assert.ok(await authGet(`SELECT payment_intent FROM stripe_orphan_reversals WHERE payment_intent = ?`, "pi_ghost"));
+  // Compte Stripe PARTAGÉ : une charge d'une autre app (ou sans aucune métadonnée Cortex) n'est pas à nous.
+  const foreign = await handleStripeEvent(ev("evt_refund_foreign", "charge.refunded", { payment_intent: "pi_autre_app", amount: 900, amount_refunded: 900 }));
+  assert.equal(foreign.action, "ignored:foreign");
+  assert.equal(await authGet(`SELECT payment_intent FROM stripe_orphan_reversals WHERE payment_intent = ?`, "pi_autre_app"), undefined, "rien de mémorisé");
 });
 
 test("2b-4 : l'enregistrement de l'achat échoue → rien n'est crédité, l'événement lève (Stripe rejoue), puis passe", async () => {
@@ -258,7 +262,7 @@ test("2b-4 : l'enregistrement de l'achat échoue → rien n'est crédité, l'év
 });
 
 test("revue : reprise orpheline PARTIELLE (4,50 € avant l'achat) → 5 crédits repris, pas 10", async () => {
-  const early = await handleStripeEvent(ev("evt_early_partial", "charge.refunded", { payment_intent: "pi_cs_partial", amount: 900, amount_refunded: 450 }));
+  const early = await handleStripeEvent(ev("evt_early_partial", "charge.refunded", { payment_intent: "pi_cs_partial", amount: 900, amount_refunded: 450, metadata: { app: "cortex" } }));
   assert.equal(early.action, "reversal-orphaned");
   const r = await handleStripeEvent(checkoutPack("evt_late_partial", "jade", "cs_partial", "pi_cs_partial"));
   assert.equal(r.reversed, true);
@@ -279,4 +283,67 @@ test("lot 4-6 : remboursement PARTIEL d'un pack connu → prorata arrondi au cr�
   const dispute = await handleStripeEvent(ev("evt_kim_d", "charge.dispute.created", { payment_intent: "pi_kim", amount: 900 }));
   assert.equal(dispute.reversed, false);
   assert.equal(await credits.getBalance("kim"), 0);
+});
+
+// ── Compte Stripe partagé avec une autre application (Kairo) ─────────────────
+
+test("facture d'abonnement Kairo (lookup_key kairo_*, metadata app=kairo) → ignorée, aucun crédit, pas de retry", async () => {
+  const { authGet } = await import("../db/auth-store");
+  const inv = ev("evt_kairo_inv", "invoice.paid", {
+    id: "in_kairo_1", customer: "cus_kairo_1", subscription: "sub_kairo_1", metadata: { app: "kairo" },
+    lines: { data: [{ period: { end: futureUnix(30) }, price: { lookup_key: "kairo_pro_monthly" } }] },
+  });
+  const r = await handleStripeEvent(inv);
+  assert.equal(r.ok, true);
+  assert.equal(r.action, "ignored:foreign");
+  assert.equal(await authGet(`SELECT invoice_id FROM stripe_invoices WHERE invoice_id = ?`, "in_kairo_1"), undefined);
+  assert.equal(await authGet(`SELECT user_id FROM subscriptions WHERE customer_id = ?`, "cus_kairo_1"), undefined);
+  // Même sans metadata.app : un lookup_key étranger et un client inconnu suffisent à l'ignorer.
+  const r2 = await handleStripeEvent(ev("evt_kairo_inv2", "invoice.paid", {
+    id: "in_kairo_2", customer: "cus_kairo_2", subscription: "sub_kairo_2",
+    lines: { data: [{ period: { end: futureUnix(30) }, price: { lookup_key: "kairo_pro_yearly" } }] },
+  }));
+  assert.equal(r2.action, "ignored:foreign");
+  // subscription.updated / deleted Kairo : ignorés aussi.
+  const up = await handleStripeEvent(ev("evt_kairo_sub_up", "customer.subscription.updated", { id: "sub_kairo_1", customer: "cus_kairo_1", status: "active", metadata: { app: "kairo" }, items: { data: [{ price: { lookup_key: "kairo_pro_monthly" } }] } }));
+  assert.equal(up.action, "ignored:foreign");
+  const del = await handleStripeEvent(ev("evt_kairo_sub_del", "customer.subscription.deleted", { id: "sub_kairo_1", customer: "cus_kairo_1", status: "canceled", items: { data: [{ price: { lookup_key: "kairo_pro_monthly" } }] } }));
+  assert.equal(del.action, "ignored:foreign");
+});
+
+test("facture Cortex : inchangée — utilisateur non encore lié → retry (500), lié → +20", async () => {
+  const cortexInv = (id: string, invId: string, customer: string) => ev(id, "invoice.paid", {
+    id: invId, customer, subscription: `sub_${customer}`,
+    lines: { data: [{ period: { end: futureUnix(30) }, price: { lookup_key: "cortex_pro_monthly" } }] },
+  });
+  await assert.rejects(handleStripeEvent(cortexInv("evt_ctx_inv_early", "in_ctx_early", "cus_ctx_nolink")), /retry/);
+  await handleStripeEvent(checkoutSub("evt_ctx_link", "lea", "cus_lea", "sub_cus_lea"));
+  const r = await handleStripeEvent(cortexInv("evt_ctx_inv", "in_ctx_1", "cus_lea"));
+  assert.equal(r.action, "subscription-granted");
+  assert.equal(await credits.getBalance("lea"), 20);
+});
+
+test("session Checkout Kairo (metadata.plan étranger, app=kairo, pas de cortexUserId) → ignorée, aucun crédit", async () => {
+  const s = ev("evt_kairo_cs", "checkout.session.completed", {
+    id: "cs_kairo_1", mode: "payment", payment_status: "paid", amount_total: 1500, payment_intent: "pi_kairo_1",
+    metadata: { app: "kairo", plan: "kairo_pack", userId: "u_kairo", credits: "10" },
+  });
+  const r = await handleStripeEvent(s);
+  assert.equal(r.action, "ignored:foreign");
+  const { authAll } = await import("../db/auth-store");
+  const rows = await authAll(`SELECT * FROM credit_transactions WHERE reason LIKE '%kairo%' OR user_id = 'u_kairo'`);
+  assert.deepEqual(rows, []);
+  const sub = await handleStripeEvent(ev("evt_kairo_cs_sub", "checkout.session.completed", { id: "cs_kairo_2", mode: "subscription", customer: "cus_kairo_9", subscription: "sub_kairo_9", metadata: { app: "kairo", plan: "kairo_pro_monthly" } }));
+  assert.equal(sub.action, "ignored:foreign");
+  assert.equal((await authAll(`SELECT user_id FROM subscriptions WHERE customer_id = 'cus_kairo_9'`)).length, 0);
+});
+
+test("charge Kairo remboursée (metadata app=kairo, client inconnu) → ignorée, ni reprise ni mémorisation", async () => {
+  const { authGet } = await import("../db/auth-store");
+  const r = await handleStripeEvent(ev("evt_kairo_refund", "charge.refunded", { payment_intent: "pi_kairo_1", amount: 1500, amount_refunded: 1500, customer: "cus_kairo_1", metadata: { app: "kairo", userId: "u_kairo" } }));
+  assert.equal(r.action, "ignored:foreign");
+  assert.equal(r.reversed, false);
+  assert.equal(await authGet(`SELECT payment_intent FROM stripe_orphan_reversals WHERE payment_intent = ?`, "pi_kairo_1"), undefined);
+  const d = await handleStripeEvent(ev("evt_kairo_dispute", "charge.dispute.created", { payment_intent: "pi_kairo_1", amount: 1500, charge: { metadata: { app: "kairo" } } }));
+  assert.equal(d.action, "ignored:foreign");
 });

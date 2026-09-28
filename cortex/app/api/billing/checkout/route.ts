@@ -68,7 +68,8 @@ export function checkoutParams(o: { plan: PlanKey; priceId: string; userId: stri
   const origin = siteOrigin();
   if (!origin) throw new Error("AUTH_URL manquante");
   const spec = PLANS[o.plan];
-  const metadata: Record<string, string> = { cortexUserId: o.userId, plan: o.plan, ...(spec.credits ? { credits: String(spec.credits) } : {}) };
+  // `app` : le compte Stripe peut être PARTAGÉ avec d'autres applications — le webhook ne traite que ce qui porte Cortex.
+  const metadata: Record<string, string> = { app: "cortex", cortexUserId: o.userId, plan: o.plan, ...(spec.credits ? { credits: String(spec.credits) } : {}) };
   return {
     mode: spec.mode,
     line_items: [{ price: o.priceId, quantity: 1 }],
