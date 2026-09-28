@@ -59,10 +59,10 @@ function msg(e: unknown): string {
 
 /** L'utilisateur est-il le PROPRIÉTAIRE de l'instance ? (précédence identique à
  *  db/courses-store resolveOwner). Le propriétaire ne peut pas s'auto-supprimer. */
-export async function isOwnerAccount(userId: string): Promise<boolean> {
-  const explicitId = process.env.CORTEX_OWNER_USER_ID?.trim();
+export async function isOwnerAccount(userId: string, env: Partial<NodeJS.ProcessEnv> = process.env): Promise<boolean> {
+  const explicitId = env.CORTEX_OWNER_USER_ID?.trim();
   if (explicitId) return userId === explicitId;
-  const email = process.env.CORTEX_OWNER_EMAIL?.trim();
+  const email = env.CORTEX_OWNER_EMAIL?.trim();
   if (email) {
     const u = await authGet<{ email: string | null }>(`SELECT email FROM users WHERE id = ?`, userId).catch(() => undefined);
     return !!u?.email && u.email.toLowerCase() === email.toLowerCase();

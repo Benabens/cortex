@@ -21,7 +21,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   // Outil de développement : refusé en déploiement gardé (cf. lib/boot-guards
   // dryRunAllowed) — il écrirait un examen et lancerait tectonic sans débit.
   const dry = req.nextUrl.searchParams.get("dry") === "1";
-  if (dry && !dryRunAllowed(process.env, currentUser())) {
+  if (dry && !(await dryRunAllowed(process.env, currentUser()))) {
     return NextResponse.json({ error: "Route inconnue." }, { status: 404 });
   }
   if (dry) {
