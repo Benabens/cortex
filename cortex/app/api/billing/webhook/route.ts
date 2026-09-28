@@ -2,6 +2,7 @@ import { handleStripeEvent } from "@/lib/billing/stripe-events";
 import { readText, withBodyLimit } from "@/lib/upload-limit";
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
+import { stripeClient } from "@/lib/billing/stripe-client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +28,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (!sig) return NextResponse.json({ error: "Signature absente." }, { status: 400 });
 
   let event: Stripe.Event;
-  const stripe = new Stripe(key);
+  const stripe = stripeClient(key);
   try {
     event = stripe.webhooks.constructEvent(payload, sig, secret);
   } catch {

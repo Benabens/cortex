@@ -1,7 +1,7 @@
 import { billingEnabled, getSubscription } from "@/lib/billing/credits";
 import { useUser } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
-import Stripe from "stripe";
+import { stripeClient } from "@/lib/billing/stripe-client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
 
   const sub = await getSubscription();
   if (!sub?.customer_id) return NextResponse.json({ error: "Aucun abonnement à gérer." }, { status: 400 });
-  const stripe = new Stripe(key);
+  const stripe = stripeClient(key);
   const session = await stripe.billingPortal.sessions.create({ customer: sub.customer_id, return_url: `${origin}/compte` });
   return NextResponse.json({ url: session.url });
 }

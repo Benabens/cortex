@@ -197,6 +197,14 @@ pose `AUTH_EMAIL_ENABLED=1` puis :
      crédits d'un pack ou d'une facture remboursés ou contestés — ce qui a déjà
      été consommé passe en dette : solde négatif, toute génération bloquée)
    - Copie le **secret de signature** `whsec_…` dans `STRIPE_WEBHOOK_SECRET`.
+   - **Version d'API** : le SDK est épinglé (`lib/billing/stripe-client.ts`,
+     `STRIPE_API_VERSION`, celle que `stripe@22` type) pour les appels sortants ;
+     les événements ENTRANTS arrivent au format de la version choisie à la
+     création de l'endpoint (ou de la version par défaut du compte) — le
+     webhook lit les deux familles (ancien format et « basil » 2025+ où
+     `invoice.subscription`, `invoice.payment_intent`, `line.price` et
+     `charge.invoice` n'existent plus). Une montée du SDK doit mettre à jour la
+     constante ; un test le vérifie.
    - Garanties : crédit du pack et enregistrement de l'achat dans **une**
      transaction (échec → 500, Stripe rejoue, rien de crédité à moitié) ; une
      session **gratuite** (`no_payment_required`, montant 0) ne crédite jamais ;

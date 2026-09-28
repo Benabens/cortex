@@ -7,6 +7,7 @@ import { useUser } from "@/lib/req";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
+import { stripeClient } from "@/lib/billing/stripe-client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,7 +45,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (!isPlanKey(plan)) return NextResponse.json({ error: `Offre inconnue : « ${String(plan ?? "")} ».` }, { status: 400 });
   const spec = PLANS[plan];
 
-  const stripe = new Stripe(key);
+  const stripe = stripeClient(key);
   const prices = await stripe.prices.list({ lookup_keys: [spec.lookupKey], active: true, limit: 1 });
   const price = prices.data[0];
   if (!price) {
