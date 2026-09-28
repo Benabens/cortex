@@ -132,3 +132,30 @@ test("la suppression de compte efface l'acceptation des CGV", async () => {
   await deleteAccount("alice");
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM terms_acceptances WHERE user_id = ?`, "alice"))?.n, 0);
 });
+
+test("un compte déjà abonné ne peut pas ouvrir un second abonnement (refus serveur, avant tout appel Stripe)", async () => {
+  setLegal();
+  const { POST } = await import("../app/api/billing/checkout/route");
+  const credits = await import("../lib/billing/credits");
+  const terms = await import("../app/api/billing/terms/route");
+  // Compte en règle (CGV + renonciation) et abonnement Pro en cours.
+  assert.equal((await terms.POST(post("http://cortex.test/api/billing/terms", { version: "2026-09", withdrawal: true }, "nina"))).status, 200);
+  await credits.grantSubscriptionMonth({
+    userId: "nina", customerId: "cus_nina", subscriptionId: "sub_nina", plan: "cortex_pro_monthly",
+    periodStart: new Date(Date.now() - 86400_000).toISOString().slice(0, 19).replace("T", " "),
+    periodEnd: new Date(Date.now() + 29 * 86400_000).toISOString().slice(0, 19).replace("T", " "),
+  });
+  for (const plan of ["pro_monthly", "pro_yearly"]) {
+    const r = await POST(post("http://cortex.test/api/billing/checkout", { plan }, "nina"));
+    const body = await r.text();
+    assert.equal(r.status, 409, `${plan} → ${r.status} ${body}`);
+    assert.match(body, /abonnement/i);
+  }
+  // Le pack de crédits reste achetable pendant un abonnement (il s'y ajoute) : la
+  // garde ne s'y applique pas, la route va jusqu'à Stripe — qui refuse la clé
+  // factice de ce test. C'est la preuve qu'on a passé la garde.
+  await assert.rejects(
+    POST(post("http://cortex.test/api/billing/checkout", { plan: "credits_10" }, "nina")),
+    /Invalid API Key/,
+  );
+});
