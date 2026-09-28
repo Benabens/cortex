@@ -18,6 +18,9 @@ export async function register() {
   const { assertAuthRequiredHosted, assertLlmProviderAllowed } = await import("@/lib/boot-guards");
   assertAuthRequiredHosted();
   assertLlmProviderAllowed();
+  // Suivi d'erreurs optionnel (SENTRY_DSN) : sans la variable, rien n'est chargé.
+  const { initErrorTracking } = await import("@/lib/observability");
+  await initErrorTracking({ service: "web" });
   const g = globalThis as { __cortexJobsPump?: ReturnType<typeof setInterval> };
   try {
     const { runWithCourse } = await import("@/db/client");

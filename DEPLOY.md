@@ -295,6 +295,29 @@ pose `AUTH_EMAIL_ENABLED=1` puis :
   (Prometheus/JSON). Logs : onglet **Observability** de Railway.
 - **Quota trop lâche/serré** : ajuste `DAILY_GEN_QUOTA` (et les prix Stripe).
 
+### Suivi d'erreurs (optionnel, recommandé avant l'ouverture)
+
+Les journaux Railway sont purgés au bout de 7 jours et le healthcheck redémarre
+le conteneur sans prévenir personne : un plantage de nuit passe inaperçu. Pose
+`SENTRY_DSN` (offre gratuite suffisante) et les erreurs du serveur **et des
+workers** remontent, avec alerte. Sans la variable, **rien ne change** : le SDK
+n'est même pas chargé.
+
+Ce qui part : type et message d'erreur, pile, service (`web` / `worker`), URL
+**sans paramètres**. Ce qui ne part **jamais** : e-mail, identifiant de compte,
+en-têtes, cookies, corps de requête, prompt, énoncé — l'événement est nettoyé
+avant envoi (`cortex/lib/observability.ts`, testé). Le SDK est `@sentry/node`,
+pas celui de Next : aucun rapport depuis le navigateur, donc aucune session
+d'étudiant instrumentée.
+
+```env
+SENTRY_DSN=https://…@oNNN.ingest.sentry.io/NNN
+SENTRY_ENVIRONMENT=production
+```
+
+Complément indispensable : un **moniteur externe** (Better Stack, UptimeRobot…)
+sur `/api/health` — Sentry voit les erreurs, pas un conteneur qui ne répond plus.
+
 ## 10. Sauvegardes et restauration
 
 Deux choses à sauvegarder, **indépendantes** : la **base** (comptes, crédits
