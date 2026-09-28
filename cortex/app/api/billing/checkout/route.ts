@@ -1,4 +1,4 @@
-import { billingEnabled } from "@/lib/billing/credits";
+import { billingEnabled, getSubscription, subscriptionLive } from "@/lib/billing/credits";
 import { isPlanKey, PLANS, type PlanKey } from "@/lib/billing/stripe-events";
 import { authGet } from "@/db/auth-store";
 import { purchasesAllowed, termsState } from "@/lib/legal";
@@ -45,13 +45,27 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (!isPlanKey(plan)) return NextResponse.json({ error: `Offre inconnue : « ${String(plan ?? "")} ».` }, { status: 400 });
   const spec = PLANS[plan];
 
+  // UN SEUL abonnement par compte, vérifié ICI : la table `subscriptions` a le
+  // compte pour clé primaire, donc un second abonnement écraserait la ligne du
+  // premier — qui continuerait de facturer sans que l'app le sache. Le bouton
+  // désactivé côté écran ne suffit pas (deux onglets, un POST direct).
+  const userId = currentUser();
+  if (spec.mode === "subscription") {
+    const sub = await getSubscription(userId);
+    if (subscriptionLive(sub) && sub!.status !== "canceled") {
+      return NextResponse.json(
+        { error: "Tu as déjà un abonnement en cours. Gère-le depuis Mon compte (changer d'offre, résilier) plutôt que d'en ouvrir un second." },
+        { status: 409 },
+      );
+    }
+  }
+
   const stripe = stripeClient(key);
   const prices = await stripe.prices.list({ lookup_keys: [spec.lookupKey], active: true, limit: 1 });
   const price = prices.data[0];
   if (!price) {
     return NextResponse.json({ error: `Prix introuvable pour « ${spec.lookupKey} » (crée-le dans Stripe).` }, { status: 400 });
   }
-  const userId = currentUser();
   const email = (await authGet<{ email: string | null }>(`SELECT email FROM users WHERE id = ?`, userId).catch(() => undefined))?.email ?? null;
   const session = await stripe.checkout.sessions.create(checkoutParams({ plan, priceId: price.id, userId, email }));
   return NextResponse.json({ url: session.url });
