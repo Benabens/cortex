@@ -1,6 +1,6 @@
 import { coursePaths } from "@/lib/courses";
 import { servedFileHeaders } from "@/lib/security-headers";
-import { useCourseOr404 } from "@/lib/req";
+import { requireCourse } from "@/lib/req";
 import fs from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
@@ -19,11 +19,15 @@ export async function GET(req: Request, { params }: { params: Promise<{ file: st
   // Garde d'APPARTENANCE : les annales d'un cours créé depuis l'interface vivent
   // sous le dossier de son propriétaire. Sans ce contrôle, `?course=<cours d'un
   // autre>` suffirait à les télécharger.
-  const denied = useCourseOr404(req);
+  const { course, denied } = requireCourse(req);
   if (denied) return denied;
   const { file } = await params;
   if (!/^[a-zA-Z0-9._-]+$/.test(file)) return new NextResponse("Bad name", { status: 400 });
-  const REFS_DIR = coursePaths(new URL(req.url).searchParams.get("course")).refsDir;
+  // Cours VALIDÉ par la garde, pas le paramètre d'URL relu séparément :
+  // `courseOf` accepte aussi l'en-tête x-cortex-course, et relire `?course=`
+  // faisait retomber le chemin sur le cours par défaut — dont les annales sont
+  // partagées (audit de pré-lancement).
+  const REFS_DIR = coursePaths(course).refsDir;
   const abs = path.join(REFS_DIR, file);
   if (!abs.startsWith(REFS_DIR + path.sep) || !fs.existsSync(abs))
     return new NextResponse("Not found", { status: 404 });
