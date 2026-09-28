@@ -21,6 +21,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { watchJob } from "./job-watch";
+import type { Job } from "./job-status";
 
 /* ---------------------------------------------------------------- courses */
 
@@ -281,49 +283,24 @@ export function asText(v: unknown): string | null {
 
 /* -------------------------------------------------------------------- jobs */
 
-export type Job = {
-  id: number;
-  type: string | null;
-  status: string;
-  progress: number;
-  currentStep: string | null;
-  resultPath: string | null;
-  error?: string | null;
-};
+export type { Job } from "./job-status";
+export { JOB_ACTIVE } from "./job-status";
 
-export const JOB_ACTIVE = ["queued", "running", "verifying", "compiling"];
-
-/** Poll GET /api/jobs/[id] tant que le job est actif (1,8 s d'intervalle). */
+/**
+ * État d'un job, via le sondeur PARTAGÉ (lib/ux/job-watch) : un seul appel par
+ * tour et par job, quel que soit le nombre de composants montés, en pause quand
+ * l'onglet est caché. Avant, chaque composant sondait pour lui-même.
+ */
 export function useJob(jobId: number | null): Job | null {
   const { courseId } = useCourse();
-  const [job, setJob] = useState<Job | null>(null);
+  // L'état porte l'id qu'il décrit : changer de job rend `null` sans écrire
+  // d'état dans l'effet (pas de rendu en cascade).
+  const [state, setState] = useState<{ id: number | null; job: Job | null }>({ id: null, job: null });
 
   useEffect(() => {
-    if (jobId == null) {
-      setJob(null);
-      return;
-    }
-    let stop = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const poll = async () => {
-      try {
-        const res = await fetch(withCourse(`/api/jobs/${jobId}`, courseId));
-        if (res.ok) {
-          const d = (await res.json()) as { job?: Job } & Job;
-          const j = (d.job ?? d) as Job;
-          if (!stop) setJob(j);
-          if (!stop && JOB_ACTIVE.includes(j.status)) timer = setTimeout(poll, 1800);
-          return;
-        }
-      } catch {}
-      if (!stop) timer = setTimeout(poll, 4000); // erreur réseau transitoire → on réessaie
-    };
-    poll();
-    return () => {
-      stop = true;
-      if (timer) clearTimeout(timer);
-    };
+    if (jobId == null || !courseId) return;
+    return watchJob(jobId, courseId, (job) => setState({ id: jobId, job }));
   }, [jobId, courseId]);
 
-  return job;
+  return state.id === jobId ? state.job : null;
 }
