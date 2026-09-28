@@ -107,15 +107,26 @@ test("génération : le quota s'applique aussi aux artefacts produits (examens, 
   assert.notEqual(after_?.status, 413, JSON.stringify(after_));
 });
 
-test("génération : volume presque plein → refus, même sous le quota du compte", async () => {
-  const { setStatfsForTests } = await import("../lib/storage-quota");
+
+test("volume rempli par l'usage payé : une génération reste possible tant qu'il reste la place d'un artefact", async () => {
+  const { checkStorage, setStatfsForTests, GENERATION_MIN_FREE_BYTES } = await import("../lib/storage-quota");
   const { preflightGeneration } = await import("../lib/preflight");
   const { runWithUser } = await import("../db/context");
   const { runWithCourse } = await import("../db/client");
-  setStatfsForTests(() => ({ free: 5 * 1024 * MiB, total: 100 * 1024 * MiB })); // 5 % libre
+  const total = 5 * 1024 * MiB; // volume de 5 Go, comme en production
+  // 6 % libre (300 Mo) : sous les 10 % exigés d'un ENVOI, mais largement de quoi
+  // écrire un PDF d'examen — un compte à jour ne doit pas être bloqué.
+  setStatfsForTests(() => ({ free: 0.06 * total, total }));
   try {
-    const issue = await runWithUser("owner", () => runWithCourse("cs-202", () => preflightGeneration("exam")));
-    assert.equal(issue?.status, 413, JSON.stringify(issue));
-    assert.match(issue!.error, /espace/i);
+    const upload = await checkStorage("owner", 5 * MiB);
+    assert.equal(upload?.status, 413, "un envoi reste refusé sous 10 % (on protège le volume)");
+    const gen = await runWithUser("owner", () => runWithCourse("cs-202", () => preflightGeneration("exam")));
+    assert.notEqual(gen?.status, 413, `une génération doit passer : ${JSON.stringify(gen)}`);
+    // Volume réellement à sec : la génération est refusée aussi.
+    setStatfsForTests(() => ({ free: GENERATION_MIN_FREE_BYTES / 2, total }));
+    const dry = await runWithUser("owner", () => runWithCourse("cs-202", () => preflightGeneration("exam")));
+    assert.equal(dry?.status, 413, JSON.stringify(dry));
+    assert.match(dry!.error, /espace/i);
   } finally { setStatfsForTests(null); }
+  assert.ok(GENERATION_MIN_FREE_BYTES >= 32 * MiB && GENERATION_MIN_FREE_BYTES <= 256 * MiB, "marge de l'ordre de quelques artefacts");
 });
