@@ -1,5 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
+import { sanitizeCorpus } from "@/lib/prompt-safety";
 
 /**
  * AUTO-APPRENTISSAGE (affinage piloté par les retours, pas un entraînement de modèle).
@@ -67,7 +68,10 @@ export async function calibrationBlock(archetype?: string | null, topic?: string
     `═══ MÉMOIRE DE CALIBRATION (leçons APPRISES des retours de l'étudiant — APPLIQUE-LES) ═══`,
     `Retours passés sur ce type (${c.total}) : trop_facile=${c.counts.too_easy} · juste=${c.counts.good} · pas_le_style=${c.counts.not_prof_style} · faux=${c.counts.wrong}.`,
     ...c.lessons.map((l) => `  • ${l}`),
-    ...(c.notes.length ? [`  Notes libres de l'étudiant à respecter : ${c.notes.map((n) => `« ${n} »`).join(" ; ")}`] : []),
+    // Les notes SONT des consignes à appliquer (c'est le principe de la mémoire de
+    // calibration), mais elles ne doivent pas pouvoir contrefaire une balise de
+    // données : sinon une note suffirait à faire passer le corpus pour des ordres.
+    ...(c.notes.length ? [`  Notes libres de l'étudiant à respecter : ${c.notes.map((n) => `« ${sanitizeCorpus(n)} »`).join(" ; ")}`] : []),
   ].join("\n");
 }
 

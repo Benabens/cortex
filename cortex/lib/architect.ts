@@ -19,7 +19,7 @@ import { examsDir } from "@/lib/paths";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
+import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 
 /**
  * L'ARCHITECTE D'EXAMEN (pipeline multi-passes pour UN exercice ciblé).
@@ -155,15 +155,21 @@ async function identifyFromImage(image: string, note: string | undefined, step: 
 
 /** Bloc « dérivé d'une source » (image OU consigne d'exo collée) : même concept, setup ENTIÈREMENT
  *  différent, JAMAIS un copier-coller. */
-function derivedSourceBlock(opts: { image?: string | null; note?: string | null; statement?: string | null }): string {
-  const { image, note, statement } = opts;
+export function derivedSourceBlock(opts: { image?: string | null; note?: string | null; statement?: string | null }): string {
+  const { image, statement } = opts;
   if (!image && !statement) return "";
+  // La note est du texte libre voisin de blocs de données : assainie pour qu'elle
+  // ne puisse pas contrefaire une balise et redevenir « consigne ».
+  const note = opts.note ? sanitizeCorpus(opts.note) : opts.note;
   const head = image
     ? [`═══ DÉRIVÉ D'UNE IMAGE D'EXERCICE (point de départ) ═══`,
        `L'étudiant est parti de l'exercice montré dans : ${image} (outil Read — observe-le).`]
+    // Une consigne collée est presque toujours recopiée d'un document : c'est du
+    // contenu importé, donc une DONNÉE encadrée — pas une consigne à exécuter.
     : [`═══ DÉRIVÉ D'UNE CONSIGNE D'EXERCICE COLLÉE (point de départ) ═══`,
        `L'étudiant a collé l'énoncé COMPLET d'un exercice qu'il veut retravailler :`,
-       `--- début de la consigne ---`, (statement ?? "").slice(0, 3500), `--- fin de la consigne ---`];
+       DATA_RULE,
+       dataBlock(`CONSIGNE COLLÉE PAR L'ÉTUDIANT`, [{ src: "consigne collée", text: (statement ?? "").slice(0, 3500) }])];
   return [
     ...head,
     note ? `Il a buté ici : « ${note} ». Ta question doit faire travailler PRÉCISÉMENT cette difficulté.` : ``,

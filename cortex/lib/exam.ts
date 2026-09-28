@@ -14,7 +14,7 @@ import { referencePaths } from "@/lib/sources";
 import { verifyAndHarden, type VerifyReport } from "@/lib/verify";
 import fs from "node:fs";
 import path from "node:path";
-import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
+import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 
 const EXAM_DIR = () => examsDir();
 
@@ -348,6 +348,64 @@ export async function gatherTargetedContext(target: string) {
 
 export type ExerciseInput = { target?: string; imageRel?: string; note?: string };
 
+/**
+ * Prompt de l'exercice ciblé (voie mono-passe : repli de l'architecte, et voie
+ * directe quand l'architecte est indisponible). Extrait de la génération pour
+ * être vérifiable : c'est un prompt qui embarque le corpus de l'étudiant, donc
+ * l'encadrement de lib/prompt-safety doit s'y appliquer comme sur l'examen
+ * complet — l'oublier ici rouvrait exactement le trou qu'il ferme ailleurs.
+ */
+export function buildTargetedPrompt(
+  ctx: Awaited<ReturnType<typeof gatherTargetedContext>>,
+  opts: { target?: string; note?: string; imageRel?: string } = {},
+): string {
+  const target = (opts.target ?? "").trim();
+  const note = opts.note ? sanitizeCorpus(opts.note) : undefined;
+  const imageRel = opts.imageRel;
+  const seed = target || (opts.note ?? "");
+  const a = pickArchetype(seed);
+  const pts = a.id === "c-reading" ? 10 : a.id === "labs-reading" ? 15 : a.category === "Networking" ? 40 : 25;
+  const block = (title: string, items: { src: string; text: string }[]) => {
+    const b = dataBlock(title, items);
+    return b ? [``, b] : [];
+  };
+  const p = profile();
+  // image → exo : si une image est fournie, le modèle l'ouvre, comprend le concept/type
+  // (et l'erreur de l'étudiant si une note est jointe), puis génère un NOUVEL exo du même type.
+  const imageLead = imageRel
+    ? [
+        `═══ IMAGE D'EXERCICE FOURNIE — POINT DE DÉPART ═══`,
+        `Ouvre et observe attentivement l'image : ${imageRel} (outil Read). C'est un exercice (d'examen, de série, ou un exo que l'étudiant a raté).`,
+        note ? `Note de l'étudiant (ce qu'il n'a pas compris / pourquoi il a buté) : « ${note} »` : ``,
+        `Identifie le CONCEPT et le TYPE de raisonnement testés${note ? " ET l'erreur sous-jacente" : ""}. Puis génère un NOUVEL exercice qui teste LE MÊME concept / la même technique, sur un SETUP DIFFÉRENT (autres nombres, autre instance, nombres NON RONDS), dans le FORMAT des examens du cours. NE recopie PAS l'image — produis du neuf du même niveau.`,
+        target ? `Sujet additionnel précisé par l'étudiant : « ${sanitizeCorpus(target)} ».` : ``,
+        ``,
+      ].filter((x) => x !== ``).concat(``)
+    : [];
+  // Ancrage vision : cs-202 l'a déjà dans exerciseLead (refImage) → on n'ajoute le bloc QUE pour
+  // les cours additionnels ou quand une image est fournie → cs-202 sans image inchangé.
+  const visionLead = currentCourse() !== DEFAULT_COURSE || imageRel ? [p.visionBlock(), ``] : [];
+  const corpus = [
+    ...block(`PAST-EXAMS DU MÊME TYPE (PRIORITÉ ABSOLUE — le format de la prof)`, ctx.pastexams),
+    ...block(`SÉRIES D'EXERCICES + CORRIGÉS`, ctx.exercises),
+    ...block(`COURS`, ctx.course),
+    ...block(`REVIEWS / CHEAT SHEETS`, [...ctx.reviews, ...ctx.cheats]),
+  ];
+  return [
+    p.directivesBlock(),
+    ``,
+    ...visionLead,
+    ...imageLead,
+    ...p.exerciseLead(target || a.concept, a, pts, imageRel ?? ctx.refImage),
+    ...(corpus.length ? [``, DATA_RULE, ...corpus] : []),
+    ``,
+    p.latexContract(),
+    ``,
+    `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points}. Aucun outil au-delà de Read, aucun fichier.`,
+    JSON.stringify(ONE_EX_SCHEMA, null, 2),
+  ].join("\n");
+}
+
 export async function generateTargetedExercise(
   input: string | ExerciseInput,
   opts: { onStep?: StepCb } = {}
@@ -410,42 +468,7 @@ export async function generateTargetedExercise(
   // mots-clés d'ancrage : le texte si fourni, sinon le nom du concept de la note
   const seed = target || (norm.note ?? "");
   const ctx = await gatherTargetedContext(seed);
-  const a = pickArchetype(seed);
-  const pts = a.id === "c-reading" ? 10 : a.id === "labs-reading" ? 15 : a.category === "Networking" ? 40 : 25;
-  const block = (title: string, items: { src: string; text: string }[]) =>
-    items.length ? [``, title, ...items.map((c) => `• (${c.src}) ${c.text}`)] : [];
-  const p = profile();
-  // image → exo : si une image est fournie, le modèle l'ouvre, comprend le concept/type
-  // (et l'erreur de l'étudiant si une note est jointe), puis génère un NOUVEL exo du même type.
-  const imageLead = imageRel
-    ? [
-        `═══ IMAGE D'EXERCICE FOURNIE — POINT DE DÉPART ═══`,
-        `Ouvre et observe attentivement l'image : ${imageRel} (outil Read). C'est un exercice (d'examen, de série, ou un exo que l'étudiant a raté).`,
-        norm.note ? `Note de l'étudiant (ce qu'il n'a pas compris / pourquoi il a buté) : « ${norm.note} »` : ``,
-        `Identifie le CONCEPT et le TYPE de raisonnement testés${norm.note ? " ET l'erreur sous-jacente" : ""}. Puis génère un NOUVEL exercice qui teste LE MÊME concept / la même technique, sur un SETUP DIFFÉRENT (autres nombres, autre instance, nombres NON RONDS), dans le FORMAT des examens du cours. NE recopie PAS l'image — produis du neuf du même niveau.`,
-        target ? `Sujet additionnel précisé par l'étudiant : « ${target} ».` : ``,
-        ``,
-      ].filter((x) => x !== ``).concat(``)
-    : [];
-  // Ancrage vision : cs-202 l'a déjà dans exerciseLead (refImage) → on n'ajoute le bloc QUE pour
-  // les cours additionnels ou quand une image est fournie → cs-202 sans image inchangé.
-  const visionLead = currentCourse() !== DEFAULT_COURSE || imageRel ? [p.visionBlock(), ``] : [];
-  const prompt = [
-    p.directivesBlock(),
-    ``,
-    ...visionLead,
-    ...imageLead,
-    ...p.exerciseLead(target || a.concept, a, pts, imageRel ?? ctx.refImage),
-    ...block(`═══ PAST-EXAMS DU MÊME TYPE (PRIORITÉ ABSOLUE — le format de la prof) ═══`, ctx.pastexams),
-    ...block(`═══ SÉRIES D'EXERCICES + CORRIGÉS ═══`, ctx.exercises),
-    ...block(`═══ COURS ═══`, ctx.course),
-    ...block(`═══ REVIEWS / CHEAT SHEETS ═══`, [...ctx.reviews, ...ctx.cheats]),
-    ``,
-    p.latexContract(),
-    ``,
-    `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points}. Aucun outil au-delà de Read, aucun fichier.`,
-    JSON.stringify(ONE_EX_SCHEMA, null, 2),
-  ].join("\n");
+  const prompt = buildTargetedPrompt(ctx, { target, note: norm.note, imageRel });
 
   step(imageRel ? "Lecture de l'image + génération (LLM)…" : "Génération de l'exercice (LLM)…", 30);
   const text = await completeText({ prompt, model: "opus", timeoutMs: 480_000 });
