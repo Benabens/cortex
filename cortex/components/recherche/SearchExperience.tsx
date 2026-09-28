@@ -5,7 +5,7 @@ import { Search, X, CornerDownLeft, WifiOff, RotateCw } from "lucide-react";
 import { useApi, useCourse } from "@/lib/ux/api";
 import { SUGGEST, metaFor, hitHref, snippetParts, type SearchResp, type Hit } from "@/lib/ux/search";
 import { toneVar } from "@/lib/ux/labels";
-import { Kbd } from "@/components/ui/primitives";
+
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/ux/cn";
 
@@ -72,7 +72,7 @@ export function SearchExperience() {
     setActiveType(null);
   }, [debounced, courseId]);
 
-  // clavier : focus (⌘K / "/"), naviguer (↑↓), ouvrir (↵), effacer (Échap)
+  // clavier : focus (⌘K / "/", raccourcis fonctionnels mais plus affichés), naviguer (↑↓), ouvrir (↵), effacer (Échap)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = document.activeElement === inputRef.current;
@@ -129,7 +129,7 @@ export function SearchExperience() {
             placeholder="Rechercher un cours, une série, un final…"
             className="h-13 min-w-0 flex-1 truncate bg-transparent text-[1rem] text-ink-1 placeholder:text-ink-4 focus:outline-none focus-visible:outline-none"
           />
-          {query ? (
+          {query && (
             <button
               type="button"
               onClick={() => {
@@ -141,11 +141,6 @@ export function SearchExperience() {
             >
               <X className="size-4" />
             </button>
-          ) : (
-            <span className="hidden items-center gap-1 sm:flex">
-              <Kbd>⌘</Kbd>
-              <Kbd>K</Kbd>
-            </span>
           )}
         </div>
       </div>

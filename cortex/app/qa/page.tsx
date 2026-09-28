@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { Panel, SectionHeader, Toggle, Kbd } from "@/components/ui/primitives";
+import { Panel, SectionHeader, Toggle } from "@/components/ui/primitives";
 import { RadialGauge } from "@/components/viz/RadialGauge";
 import { WaffleGrid } from "@/components/viz/WaffleGrid";
 import { WeightBar } from "@/components/viz/WeightBar";
@@ -196,7 +196,7 @@ export default function QAPage() {
       </QA>
 
       {/* CHIPS / KBD / ROWS */}
-      <QA title="Chips · Kbd · Rangées (default / hover simulé / focus)">
+      <QA title="Chips · Rangées (default / hover simulé / focus)">
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" aria-pressed="true" className="inline-flex h-9 items-center gap-2 rounded-full border border-[color-mix(in_oklch,var(--color-violet)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_14%,transparent)] px-3 text-[0.82rem] font-medium text-ink-1">
             Chip actif <span className="font-data text-[0.72rem] tabular text-ink-4">12</span>
@@ -207,7 +207,7 @@ export default function QAPage() {
           <button type="button" className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-surface-1/60 px-2.5 text-[0.8rem] font-medium text-ink-2">
             <Folder className="size-3.5" /> Dossier <span className="font-data text-[0.72rem] tabular text-ink-4">6</span>
           </button>
-          <span className="flex items-center gap-1"><Kbd>⌘</Kbd><Kbd>K</Kbd></span>
+
         </div>
         <div className="mt-4 overflow-hidden rounded-lg border border-line">
           <div className="flex items-center gap-3 px-3 py-2.5">
