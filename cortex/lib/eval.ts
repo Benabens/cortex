@@ -8,6 +8,7 @@ import { profile } from "@/lib/course-profile";
 import { solveFromScratch } from "@/lib/verify";
 import { verifyDeterministic, type DetMethod } from "@/lib/verify-deterministic";
 import path from "node:path";
+import { listExamSourceRows } from "@/lib/sources";
 
 /**
  * HARNAIS D'ÉVALUATION (interne, lecture seule). Mesure un CHIFFRE reproductible de la JUSTESSE du
@@ -63,7 +64,7 @@ type RawGold = { page?: number; question_text?: string; official_answer?: string
 
 /** Sources « corrigées » du cours (fichiers …with solutions / answers / corrigé). */
 async function solutionRefs(): Promise<{ path: string; title: string; year: number | null }[]> {
-  const rows = await q.all<{ path: string; title: string; year: number | null }>(`SELECT path, title, year FROM sources WHERE type IN ('final','midterm') GROUP BY path`);
+  const rows = await listExamSourceRows();
   const isSol = (s: string) => /solution|answer|corrig|grading/i.test(s);
   // un corrigé par année (le plus complet), trié récents d'abord
   const byYear = new Map<string, { path: string; title: string; year: number | null }>();
