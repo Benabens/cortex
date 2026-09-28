@@ -1,6 +1,6 @@
 import { coursePaths } from "@/lib/courses";
 import { servedFileHeaders } from "@/lib/security-headers";
-import { useCourseOr404 } from "@/lib/req";
+import { requireCourse } from "@/lib/req";
 import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
@@ -53,13 +53,13 @@ function findByBasename(roots: string[], basename: string): string | null {
 export async function GET(req: NextRequest) {
   // Garde d'APPARTENANCE : ce service lit dans refs/ et content/ du cours, qui
   // sont rangés sous le propriétaire pour un cours créé depuis l'interface.
-  const denied = useCourseOr404(req);
+  const { course, denied } = requireCourse(req);
   if (denied) return denied;
   const sp = req.nextUrl.searchParams;
-  const course = sp.get("course");
   const p = (sp.get("p") ?? "").replace(/^\/+/, "").split("#")[0]; // jamais de fragment côté serveur
   if (!p || p.includes("..")) return new NextResponse("Bad path", { status: 400 });
 
+  // Cours VALIDÉ par la garde, jamais le paramètre d'URL relu à part.
   const cp = coursePaths(course);
   const base = p.startsWith("refs/") ? cp.refsDir : cp.contentRoot;
   const rel = p.startsWith("refs/") ? p.slice("refs/".length) : p;

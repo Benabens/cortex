@@ -1,7 +1,7 @@
 import { coursePaths } from "@/lib/courses";
 import { servedFileHeaders } from "@/lib/security-headers";
 import { authEnabled } from "@/lib/auth";
-import { useCourseOr404 } from "@/lib/req";
+import { requireCourse } from "@/lib/req";
 import { q } from "@/db/q";
 import fs from "node:fs";
 import path from "node:path";
@@ -16,7 +16,7 @@ const MIME: Record<string, string> = {
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ file: string }> }) {
   // contexte {user, cours} → tenant DB, + garde d'accès au cours (ownership ci-dessous)
-  const denied = useCourseOr404(req);
+  const { course, denied } = requireCourse(req);
   if (denied) return denied;
   const { file } = await params;
   if (!/^(exam|qcm)-\d+(-corrige)?\.(pdf|html)$/.test(file)) return new NextResponse("Bad name", { status: 400 });
@@ -30,7 +30,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ file
     if (!owned) return new NextResponse("Not found", { status: 404 });
   }
   // dossier scopé au cours (cs-202 → data/exams ; autres → data/<id>/exams)
-  const EXAM_DIR = coursePaths(new URL(req.url).searchParams.get("course")).examsDir;
+  // Cours VALIDÉ par la garde, jamais le paramètre d'URL relu à part.
+  const EXAM_DIR = coursePaths(course).examsDir;
   const abs = path.join(EXAM_DIR, file);
   if (!abs.startsWith(EXAM_DIR + path.sep) || !fs.existsSync(abs))
     return new NextResponse("Not found", { status: 404 });
