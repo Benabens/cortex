@@ -4,6 +4,7 @@ import { preflightGeneration } from "@/lib/preflight";
 import { requireCourse, useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
+import { fieldTooLong } from "@/lib/field-limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,6 +26,10 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const { lab, topic } = await readJson(req, ({ lab: "", topic: "" }));
   const labStr = String(lab ?? "").trim();
   const topicStr = String(topic ?? "").trim();
+  // Ce sujet part dans le prompt pour UNE réservation : borné comme le « focus »
+  // des routes sœurs, sinon 1 crédit achète des centaines de milliers de tokens.
+  const tooLong = fieldTooLong("focus", topicStr);
+  if (tooLong) return tooLong;
   if (!labStr && !topicStr) {
     return NextResponse.json({ error: "Choisis un lab OU donne un sujet (ex. « direntv6 », « multi-threading »)." }, { status: 400 });
   }
