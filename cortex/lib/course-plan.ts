@@ -3,6 +3,7 @@ import { q } from "@/db/q";
 import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import { sourceHref } from "@/lib/deeplink";
+import { lectureOfCourseHref } from "@/lib/course-order";
 
 /**
  * PLAN DE COURS DU PROF (le cœur de l'analyse Programme).
@@ -39,7 +40,13 @@ export async function ensurePlanSchema(): Promise<void> {
 
 // ---------------- Lecture des slides du prof ----------------
 
-type LectureDoc = { sourceId: number; path: string; lectureId: string | null; fileNo: number | null; text: string };
+type LectureDoc = {
+  sourceId: number; path: string; lectureId: string | null; fileNo: number | null;
+  /** Texte de la page de garde seule (1er item) : c'est là que le prof titre la lecture. */
+  garde: string;
+  /** Pages 1-3 jointes (contexte du LLM et contrôle de fidélité). */
+  text: string;
+};
 
 /** normalise pour comparaison faithfulness : minuscules, sans accents, alphanumérique. */
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
@@ -65,8 +72,9 @@ async function gatherLectures(): Promise<LectureDoc[]> {
     );
     const text = rows.map((r) => r.text).join(" ").replace(/\s+/g, " ").trim().slice(0, 700);
     if (!text) continue;
+    const garde = (rows[0]?.text ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
     const lectureId = rows.find((r) => r.lecture_id)?.lecture_id ?? null;
-    out.push({ sourceId: s.id, path: s.path, lectureId, fileNo: fileLectureNo(s.path, lectureId), text });
+    out.push({ sourceId: s.id, path: s.path, lectureId, fileNo: fileLectureNo(s.path, lectureId), garde, text });
   }
   return out;
 }
@@ -97,6 +105,16 @@ function deterministicTitle(text: string, fileNo: number | null): { no: number |
       .trim();
   }
   return { no, title: title && title.length >= 2 ? title.slice(0, 120) : null };
+}
+
+/**
+ * Titre déterministe d'une lecture : d'abord sur la PAGE DE GARDE SEULE, puis sur les pages
+ * jointes en secours. Lire les pages jointes d'emblée faisait déborder le titre sur la page 2
+ * (ML : « Introduction 1 General organization: People • Lecturer… » au lieu de « Introduction »).
+ */
+export function seedLectureTitle(garde: string, joined: string, fileNo: number | null): { no: number | null; title: string | null } {
+  const first = deterministicTitle(garde, fileNo);
+  return first.title ? first : deterministicTitle(joined, fileNo);
 }
 
 /** Le titre proposé est-il ancré dans le texte de la slide ? (≥ 60 % de ses mots signifiants présents). */
@@ -152,7 +170,7 @@ export async function deriveCoursePlan(opts: { onStep?: (m: string, p: number) =
   // Seed déterministe (fidèle par construction) — sert de repli item par item.
   const seed = new Map<number, { no: number | null; title: string | null; text: string; path: string }>();
   for (const l of lectures) {
-    const d = deterministicTitle(l.text, l.fileNo);
+    const d = seedLectureTitle(l.garde, l.text, l.fileNo);
     seed.set(l.sourceId, { ...d, text: l.text, path: l.path });
   }
 
@@ -242,6 +260,33 @@ const MAP_SCHEMA = {
 export type MapNotionsResult = { ok: boolean; mapped: number; total: number; reason?: string };
 
 /**
+ * Repli DÉTERMINISTE du rattachement : chaque notion va au chapitre de la LECTURE MODALE de ses
+ * exos indexés (lue dans leur `course_href`, le passage de cours associé ; à égalité, la plus
+ * précoce). Une notion sans exo indexé, ou dont la lecture n'est pas dans le plan, reste non
+ * rattachée : rien n'est deviné. Pur, testable sans base.
+ */
+export function mapTopicsByIndexedLectures(
+  exos: { topicId: number; courseHref: string | null }[],
+  chapterByLecture: Map<number, number>
+): Map<number, number> {
+  const counts = new Map<number, Map<number, number>>(); // topicId → (lecture → nb)
+  for (const e of exos) {
+    const lec = lectureOfCourseHref(e.courseHref);
+    if (lec == null) continue;
+    if (!counts.has(e.topicId)) counts.set(e.topicId, new Map());
+    const m = counts.get(e.topicId)!;
+    m.set(lec, (m.get(lec) ?? 0) + 1);
+  }
+  const out = new Map<number, number>();
+  for (const [topicId, byLec] of counts) {
+    const [lec] = [...byLec.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0];
+    const ch = chapterByLecture.get(lec);
+    if (ch != null) out.set(topicId, ch);
+  }
+  return out;
+}
+
+/**
  * Rattache chaque notion (topics) au chapitre du plan qui la traite, par classification CONTRAINTE
  * à la liste réelle des lectures (jamais une taxonomie inventée, jamais un n° hors liste). Persiste
  * topics.plan_chapter_id. Les notions non classables restent null (« Non rattaché »).
@@ -283,7 +328,21 @@ export async function mapNotionsToChapters(opts: { onStep?: (m: string, p: numbe
     );
     mapping = parsed?.mapping ?? [];
   } catch (e) {
-    return { ok: false, mapped: 0, total: topics.length, reason: `Classification indisponible (${(e as Error).message.slice(0, 60)}).` };
+    // Repli déterministe : la lecture des exos indexés (course_href). Sans signal, on ne touche à rien.
+    let exos: { topicId: number; courseHref: string | null }[] = [];
+    try {
+      exos = await q.all(`SELECT topic_id AS "topicId", course_href AS "courseHref" FROM exam_exercises WHERE topic_id IS NOT NULL`);
+    } catch { /* index absent */ }
+    const byIndex = mapTopicsByIndexedLectures(exos, byNo);
+    if (!byIndex.size) {
+      return { ok: false, mapped: 0, total: topics.length, reason: `Classification indisponible (${(e as Error).message.slice(0, 60)}).` };
+    }
+    step("Classification indisponible → rattachement par la lecture des exos indexés…", 60);
+    mapping = topics.map((t) => {
+      const ch = byIndex.get(t.id);
+      const lec = ch != null ? chapters.find((c) => c.id === ch)?.lecture_no ?? null : null;
+      return { id: t.id, lecture_no: lec };
+    });
   }
 
   const topicIds = new Set(topics.map((t) => t.id));

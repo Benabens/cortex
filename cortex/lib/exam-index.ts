@@ -110,8 +110,9 @@ const EXO_SCHEMA = {
 
 type RawExo = { page?: number; topic?: string; method?: string; exo_type?: string; trap?: string; archetype?: string; statement?: string; points?: number; mold?: string; figure_kind?: string | null };
 
-/** Construit le lien « passage de cours associé » : recherche scopée (topic+method) → meilleur hit de cours. */
-async function courseHrefFor(course: string, topic: string, method: string | null): Promise<string | null> {
+/** Construit le lien « passage de cours associé » : recherche scopée (topic+method) → meilleur hit de cours.
+ *  Exporté : réutilisé par scripts/index-from-bank.ts (même lien que l'indexation en vision). */
+export async function courseHrefFor(course: string, topic: string, method: string | null): Promise<string | null> {
   try {
     const groups = await search(`${topic} ${method ?? ""}`.trim(), 12, "or");
     const flat = groups.flatMap((g) => g.hits.map((h) => ({ ...h, sourceType: g.sourceType })));
