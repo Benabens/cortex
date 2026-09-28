@@ -59,16 +59,40 @@ export async function userStorageBytes(userId: string): Promise<number> {
 export type StorageRefusal = { status: 413; error: string };
 
 /**
+ * Marge absolue exigée pour une GÉNÉRATION (quelques artefacts : PDF d'examen,
+ * corrigé, figures). La règle des 10 % convient à un ENVOI — on refuse d'ajouter
+ * un gros fichier sur un volume qui se remplit — mais l'appliquer à la
+ * génération bloquerait tout le monde, y compris un compte qui vient de payer,
+ * dès que le volume est rempli par l'usage normal (5 Go / 200 Mo par compte =
+ * une vingtaine de comptes suffisent). Ici : refuser seulement quand il n'y a
+ * vraiment plus de place pour écrire.
+ */
+export const GENERATION_MIN_FREE_BYTES = 64 * 1024 * 1024;
+
+/**
  * Peut-on accepter `incomingBytes` de plus pour cet utilisateur ? null = oui ;
  * sinon un refus 413 avec la raison (quota du compte, ou volume presque plein).
  */
-export async function checkStorage(userId: string, incomingBytes: number): Promise<StorageRefusal | null> {
+export async function checkStorage(
+  userId: string,
+  incomingBytes: number,
+  opts: { minFreeBytes?: number; what?: string } = {},
+): Promise<StorageRefusal | null> {
   const root = dataRoot();
   const disk = diskSpace(fs.existsSync(root) ? root : path.dirname(root));
   if (disk && disk.total > 0) {
     const freeAfter = disk.free - Math.max(0, incomingBytes);
-    if (freeAfter / disk.total < MIN_FREE_RATIO) {
-      return { status: 413, error: "Espace disque insuffisant sur le serveur pour accepter ce fichier. Réessaie plus tard ; l'équipe est prévenue." };
+    // Envoi : 10 % du volume (on protège la marge). Génération : une marge
+    // ABSOLUE (cf. GENERATION_MIN_FREE_BYTES) — sinon un volume rempli par
+    // l'usage payé priverait tous les comptes de génération.
+    const tooFull = opts.minFreeBytes != null
+      ? freeAfter < opts.minFreeBytes
+      : freeAfter / disk.total < MIN_FREE_RATIO;
+    if (tooFull) {
+      return {
+        status: 413,
+        error: `Espace disque insuffisant sur le serveur pour ${opts.what ?? "accepter ce fichier"}. Réessaie plus tard ; l'équipe est prévenue.`,
+      };
     }
   }
   const quota = storageQuotaBytes();
