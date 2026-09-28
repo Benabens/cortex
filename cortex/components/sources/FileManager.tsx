@@ -6,6 +6,7 @@ import { Panel } from "@/components/ui/primitives";
 import { apiPost, useCourse } from "@/lib/ux/api";
 import { corpusLabel, extOf, type SourcesResp, type SourceExam } from "@/lib/ux/sources";
 import { cn } from "@/lib/ux/cn";
+import { apiDelete } from "@/lib/ux/write";
 
 const extTone: Record<string, string> = {
   PDF: "var(--color-danger)",
@@ -30,6 +31,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
   const [facet, setFacet] = useState<string | null>(null); // null = Annales (défaut)
   const [pending, setPending] = useState<Record<string, boolean>>({}); // path → isReference optimiste
   const [busy, setBusy] = useState<Set<string>>(new Set());
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   // données fraîches (après un vrai refetch, ex. upload/suppression) → on efface les surcharges.
   useEffect(() => setPending({}), [data]);
@@ -62,9 +64,12 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
   const remove = async (f: SourceExam) => {
     if (!window.confirm(`Retirer « ${f.title} » du corpus ? (fichier ajouté depuis l'app)`)) return;
     setBusyFor(f.path, true);
+    setRemoveError(null);
     try {
-      await fetch(`/api/sources?path=${encodeURIComponent(f.path)}&course=${encodeURIComponent(courseId)}`, { method: "DELETE" });
+      await apiDelete(`/api/sources?path=${encodeURIComponent(f.path)}&course=${encodeURIComponent(courseId)}`);
       onChanged();
+    } catch (e) {
+      setRemoveError((e as Error).message);
     } finally {
       setBusyFor(f.path, false);
     }
@@ -83,6 +88,11 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
 
   return (
     <Panel className="overflow-hidden p-0">
+      {removeError && (
+        <p role="alert" className="border-b border-line px-4 py-2.5 text-[0.82rem] text-danger-hi">
+          Retrait impossible : {removeError}
+        </p>
+      )}
       {/* résumé + FACETTES cliquables */}
       <div className="border-b border-line px-4 py-3.5">
         <div className="flex items-center gap-2 text-[0.76rem] text-ink-3">

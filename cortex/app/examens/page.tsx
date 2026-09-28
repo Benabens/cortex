@@ -10,20 +10,25 @@ import { useApi, useCourse, asText } from "@/lib/ux/api";
 import { formatDay } from "@/lib/ux/types";
 import type { ComposeResp, ExamsResp } from "@/lib/ux/exams";
 import { useState } from "react";
+import { apiDelete } from "@/lib/ux/write";
 
 export default function ExamensPage() {
   const compose = useApi<ComposeResp>("/api/compose");
   const exams = useApi<ExamsResp>("/api/exams");
   const { courseId } = useCourse();
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const removeExam = async (id: number) => {
     if (deleting) return;
     if (!window.confirm(`Supprimer l’examen #${id} ? Le PDF généré sera perdu.`)) return;
     setDeleting(id);
+    setDeleteError(null);
     try {
-      await fetch(`/api/exams?id=${id}&course=${encodeURIComponent(courseId)}`, { method: "DELETE" });
+      await apiDelete(`/api/exams?id=${id}&course=${encodeURIComponent(courseId)}`);
       exams.refetch();
+    } catch (e) {
+      setDeleteError((e as Error).message);
     } finally {
       setDeleting(null);
     }
@@ -35,6 +40,12 @@ export default function ExamensPage() {
         title="Examens"
         description="Compose un examen blanc au format réel du final, puis lance-le. Un examen qui aurait pu tomber."
       />
+
+      {deleteError && (
+        <p role="alert" className="text-[0.85rem] text-danger-hi">
+          Suppression impossible : {deleteError}
+        </p>
+      )}
 
       {/* Compositeur ← GET /api/compose (plan réel, forme variable selon le cours) */}
       {compose.loading ? (
