@@ -1,4 +1,5 @@
 import { ddl, getTable, type Dialect } from "./tables";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 /**
  * FAÇADE DE REQUÊTES UNIQUE — remplace l'accès
@@ -97,6 +98,12 @@ export function resetQueryCountForTests(): void { _queries = 0; }
  * est supprimé (`forgetSchemaMemo`).
  */
 const _ensured = new Set<string>();
+/**
+ * Vrai dans la chaîne async d'une transaction. Une DDL jouée dans une
+ * transaction qui échoue est ANNULÉE avec elle : la mémoriser ferait croire à la
+ * table pour tout le reste du process, et chaque lecture suivante échouerait.
+ */
+const _inTx = new AsyncLocalStorage<true>();
 function tenantKey(): string {
   // require paresseux : même raison que pour les drivers (aucun cycle statique).
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -150,7 +157,7 @@ export const q = {
   },
 
   tx<T>(fn: () => Promise<T>): Promise<T> {
-    return driver().tx(fn);
+    return _inTx.run(true, () => driver().tx(fn));
   },
 
   /** CREATE TABLE IF NOT EXISTS + index — remplace les ensures lazy historiques.
@@ -160,7 +167,7 @@ export const q = {
     const key = `${tenantKey()}|t:${name}`;
     if (_ensured.has(key)) return;
     for (const stmt of ddl(name, driver().dialect)) await this.exec(stmt);
-    _ensured.add(key);
+    if (!_inTx.getStore()) _ensured.add(key);
   },
 
   /**
@@ -182,6 +189,6 @@ export const q = {
       const def = col.def !== undefined && col.def !== "NOW" ? ` DEFAULT ${col.def}` : "";
       await d.addColumn(table, `${name} ${type}${nn}${def}`);
     }
-    _ensured.add(key);
+    if (!_inTx.getStore()) _ensured.add(key);
   },
 };

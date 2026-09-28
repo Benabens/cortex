@@ -95,3 +95,22 @@ test("accueil : le nombre de requêtes pour /api/dashboard reste raisonnable", a
   console.log(`[budget] /api/dashboard : ${used} requêtes SQL (hors premier appel)`);
   assert.ok(used <= 40, `l'accueil doit tenir sous 40 requêtes (mesuré : ${used})`);
 });
+
+test("mémo du schéma : une DDL annulée avec sa transaction n'est pas mémorisée", async () => {
+  const { q, queryCountForTests, resetQueryCountForTests } = await import("../db/q");
+  // La DDL mémoïsée dans une transaction qui échoue est ANNULÉE avec elle : garder
+  // la mémo ferait croire à la table pour tout le reste du process, et chaque
+  // lecture suivante échouerait sur « relation inexistante ».
+  await inCourse(async () => {
+    await assert.rejects(
+      q.tx(async () => {
+        await q.ensureTable("feedback");
+        throw new Error("échec après la DDL");
+      }),
+      /échec après la DDL/,
+    );
+    resetQueryCountForTests();
+    await q.ensureTable("feedback");
+  });
+  assert.ok(queryCountForTests() > 0, "la DDL doit être rejouée après l'annulation");
+});
