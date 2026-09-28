@@ -134,6 +134,18 @@ const EXAM_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+/**
+ * Plafond du prompt de génération (prompt complet + prompt de lot, en
+ * caractères). Il REMPLACE l'empreinte figée du prompt comme garde : une
+ * empreinte change à chaque évolution légitime des consignes, donc elle finissait
+ * par être mise à jour sans être lue. Ce qui coûte cher, c'est l'enflure — un
+ * corpus recopié en entier dans le prompt se paie à chaque génération. Le
+ * prompt de référence pèse ~35 000 caractères : la marge absorbe l'ADN détecté
+ * d'un cours, pas un ordre de grandeur. Vérifié par tests/prompt-safety.test.ts
+ * (hermétique) et par scripts/regression-cs202.ts (corpus réel, en CI).
+ */
+export const PROMPT_MAX_CHARS = 50_000;
+
 export async function buildPrompt(ctx: Ctx): Promise<string> {
   const p = profile();
   // Corpus importé = DONNÉE encadrée, jamais consigne (cf. lib/prompt-safety).

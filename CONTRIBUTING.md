@@ -8,7 +8,7 @@ Contexte technique : [ARCHITECTURE.md](ARCHITECTURE.md). Déploiement : [DEPLOY.
 
 ## Invariants
 
-1. **Non-régression du moteur.** Un cours de référence doit produire un prompt et un `.tex` **byte-identiques** aux empreintes canoniques. Si un changement les fait dériver, la qualité des sujets générés a changé : la dérive doit être comprise et justifiée avant de mettre à jour les empreintes.
+1. **Non-régression du moteur.** Un cours de référence doit produire un `.tex` **byte-identique** à l'empreinte canonique : c'est le rendu, donc ce que l'étudiant reçoit. Sa dérive doit être comprise et justifiée avant de mettre à jour l'empreinte. Le prompt, lui, n'a pas d'empreinte figée — elle dépend de l'ADN détecté du cours, donc du corpus présent, et une empreinte qu'on met à jour à chaque évolution des consignes n'est plus une garde. Il est tenu par deux propriétés vérifiées en CI : il reste sous `PROMPT_MAX_CHARS` (l'enflure se paie à chaque génération) et il porte la consigne « donnée de cours » (cf. `lib/prompt-safety.ts`).
 
 2. **Jamais de faux « prouvé ».** La vérification déterministe répond `not_applicable` en cas de doute plutôt que de valider. Un faux positif est un bug grave — plusieurs tests existent uniquement pour l'empêcher.
 
