@@ -123,3 +123,19 @@ test("revue : hors production sans liens légaux mais achats ouverts (staging), 
   assert.ok(!/\sdisabled(?:=""|(?=[\s>]))/.test(checkbox), "la case ne doit pas être désactivée quand l'API autorise l'achat");
   assert.match(html, /non publiés|non configurés/i);
 });
+
+test("conditions de renouvellement affichées à côté des offres d'abonnement, AVANT tout achat", async () => {
+  // Compte neuf : aucune souscription, donc l'ancien bloc « Gérer mon abonnement » (qui portait
+  // seule l'information) n'est pas rendu. L'information doit être là quand même.
+  const html = await render(base({ subscription: null }));
+  assert.match(html, /Renouvellement automatique chaque mois/);
+  assert.match(html, /Renouvellement automatique chaque année/);
+  assert.match(html, /[Rr]ésiliable à tout moment/);
+  assert.match(html, /effet en fin de période/);
+  assert.match(html, /Mon compte/);
+  // Le pack n'est pas un abonnement : aucune mention de renouvellement sur sa ligne.
+  const packRow = /<li[^>]*>(?:(?!<\/li>)[\s\S])*Pack de 10 crédits(?:(?!<\/li>)[\s\S])*<\/li>/.exec(html)?.[0] ?? "";
+  assert.ok(packRow, "la ligne du pack est rendue");
+  assert.ok(!/[Rr]enouvellement/.test(packRow), "un pack ne se renouvelle pas");
+  assert.match(packRow, /sans date d’expiration/);
+});
