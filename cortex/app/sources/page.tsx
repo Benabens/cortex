@@ -28,7 +28,7 @@ export default function SourcesPage() {
             <WifiOff className="size-6 text-danger-hi" strokeWidth={2} />
             <p className="text-[0.95rem] font-medium text-ink-1">Le corpus ne répond pas</p>
             <p className="max-w-sm text-[0.85rem] leading-relaxed text-ink-3">
-              Impossible de lister les sources de ce cours. Réessaie — si ça persiste,
+              Impossible de lister les sources de ce cours. Réessaie : si ça persiste,
               le cours n’a peut-être pas encore de corpus ingéré.
             </p>
             <Button variant="secondary" size="sm" onClick={refetch}>

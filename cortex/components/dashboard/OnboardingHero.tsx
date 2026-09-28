@@ -1,4 +1,4 @@
-import { FolderUp, ArrowRight, ScanSearch, CalendarClock, FileSearch } from "lucide-react";
+import { FolderUp, ArrowRight, ScanSearch, CalendarClock } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 
 /**
@@ -27,17 +27,11 @@ export function OnboardingHero({ courseName }: { courseName: string }) {
 
   return (
     <section
-      className="panel accent-field relative overflow-hidden rounded-xl"
-
+      className="panel top-light relative overflow-hidden rounded-xl"
       aria-labelledby="onboarding-title"
     >
       <div className="relative p-5 sm:p-7">
-        <span className="inline-flex items-center gap-1.5 text-[0.75rem] font-semibold uppercase tracking-wide text-violet-hi">
-          <FileSearch className="size-3.5" strokeWidth={2.5} />
-          Cours non préparé
-        </span>
-
-        <h2 id="onboarding-title" className="mt-3 max-w-xl text-[1.75rem] font-semibold leading-[1.1] sm:text-[2.15rem]">
+        <h2 id="onboarding-title" className="max-w-xl text-[1.75rem] font-semibold leading-[1.1] sm:text-[2.15rem]">
           Prépare {courseName} pour savoir quoi réviser.
         </h2>
         <p className="mt-3 max-w-xl text-[0.95rem] leading-relaxed text-ink-2">

@@ -60,7 +60,6 @@ export function AppShell({ children, legal }: { children: React.ReactNode; legal
   return (
     <CourseProvider>
       <div className="relative min-h-dvh overflow-x-clip">
-        <div className="aurora" aria-hidden="true" />
         <Sidebar />
         <MobileNav open={menuOpen} onClose={() => setMenuOpen(false)} />
 

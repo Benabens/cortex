@@ -56,18 +56,18 @@ export default function QAPage() {
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <h1 className="text-[1.9rem] font-semibold leading-tight">QA — composants & états</h1>
+        <h1 className="text-[1.9rem] font-semibold leading-tight">QA : composants & états</h1>
         <p className="mt-1 text-[0.9rem] text-ink-2">
           Chaque primitive, chaque état, plusieurs valeurs. Page d’audit, hors nav.
         </p>
       </div>
 
       {/* BUTTONS */}
-      <QA title="Button — variants × tailles × états">
+      <QA title="Button : variants × tailles × états">
         <div className="space-y-4">
           {(["primary", "secondary", "ghost", "subtle"] as const).map((v) => (
             <div key={v} className="flex flex-wrap items-center gap-3">
-              <span className="w-20 shrink-0 text-[0.72rem] uppercase tracking-wider text-ink-4">{v}</span>
+              <span className="w-20 shrink-0 text-[0.72rem] text-ink-4">{v}</span>
               <Button variant={v} size="sm">Petit</Button>
               <Button variant={v} size="md">Moyen</Button>
               <Button variant={v} size="lg">Grand</Button>
@@ -76,7 +76,7 @@ export default function QAPage() {
             </div>
           ))}
           <div className="flex flex-wrap items-center gap-3">
-            <span className="w-20 shrink-0 text-[0.72rem] uppercase tracking-wider text-ink-4">icônes</span>
+            <span className="w-20 shrink-0 text-[0.72rem] text-ink-4">icônes</span>
             <Button variant="primary"><Play className="size-4" fill="currentColor" />Lancer</Button>
             <Button variant="secondary"><Sparkles className="size-4" />Générer</Button>
           </div>
@@ -84,7 +84,7 @@ export default function QAPage() {
       </QA>
 
       {/* TOGGLES + CHECKBOX */}
-      <QA title="Switch / Toggle & Checkbox — off · on · focus · disabled">
+      <QA title="Switch / Toggle & Checkbox : off · on · focus · disabled">
         <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
           <div className="flex items-center gap-2"><Toggle checked={t1} onChange={setT1} label="Off" /><Label>off</Label></div>
           <div className="flex items-center gap-2"><Toggle checked={t2} onChange={setT2} label="On" /><Label>on</Label></div>
@@ -119,7 +119,7 @@ export default function QAPage() {
       </QA>
 
       {/* BADGES */}
-      <QA title="Badge — tous les tons × tailles × emphase">
+      <QA title="Badge : tous les tons × tailles × emphase">
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone="neutral" Icon={CircleDashed}>Neutral</Badge>
           <Badge tone="violet" Icon={Repeat2}>Violet</Badge>
@@ -136,7 +136,7 @@ export default function QAPage() {
       </QA>
 
       {/* INPUTS */}
-      <QA title="Inputs — vide · rempli · focus · erreur (hauteur ≥ 44px)">
+      <QA title="Inputs : vide · rempli · focus · erreur (hauteur ≥ 44px)">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="space-y-1.5">
             <Label>vide (placeholder)</Label>
@@ -157,7 +157,7 @@ export default function QAPage() {
             <Label>erreur</Label>
             <input type="text" defaultValue="???" aria-invalid="true" aria-describedby="qa-err" aria-label="Démo erreur"
               className="h-11 w-full rounded-lg border bg-surface-2/40 px-3.5 text-[0.9rem] text-ink-1 border-[color-mix(in_oklch,var(--color-danger)_55%,transparent)] ring-2 ring-[color-mix(in_oklch,var(--color-danger)_25%,transparent)] focus:outline-none" />
-            <p id="qa-err" className="text-[0.78rem] text-danger-hi">Thème introuvable — essaie « SVM » ou « MLP ».</p>
+            <p id="qa-err" className="text-[0.78rem] text-danger-hi">Thème introuvable : essaie « SVM » ou « MLP ».</p>
           </div>
         </div>
         <div className="mt-4 space-y-1.5">
@@ -247,7 +247,7 @@ export default function QAPage() {
       </QA>
 
       {/* DATA-VIZ */}
-      <QA title="Data-viz — RadialGauge · WaffleGrid (0 % · 50 % · 100 %)">
+      <QA title="Data-viz : RadialGauge · WaffleGrid (0 % · 50 % · 100 %)">
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
           {[0, 47, 100].map((v) => (
             <div key={v} className="grid place-items-center rounded-lg border border-line p-4">
@@ -265,7 +265,7 @@ export default function QAPage() {
         </div>
       </QA>
 
-      <QA title="Data-viz — WeightBar · OpportunityBar · SeverityMeter · Sparkline · ForgettingCurve">
+      <QA title="Data-viz : WeightBar · OpportunityBar · SeverityMeter · Sparkline · ForgettingCurve">
         <div className="space-y-3">
           {[0, 50, 100].map((v) => (
             <div key={v} className="flex items-center gap-3">

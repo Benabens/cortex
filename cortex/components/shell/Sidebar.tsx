@@ -35,10 +35,8 @@ export function Sidebar() {
         </Link>
       </div>
 
-      <div className="mt-4 flex-1 overflow-y-auto px-3">
-        <p className="px-3 pb-2 text-[0.68rem] font-medium uppercase tracking-wider text-ink-4">
-          Espace de travail
-        </p>
+      {/* Plus d'intitulé « Espace de travail » : la position de la nav suffit (anti-slop 2026-09). */}
+      <div className="mt-5 flex-1 overflow-y-auto px-3">
         <NavList />
       </div>
     </aside>

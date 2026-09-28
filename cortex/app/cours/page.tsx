@@ -2,7 +2,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { CourseList } from "@/components/cours/CourseList";
 import { Button } from "@/components/ui/Button";
 
-export const metadata = { title: "Mes cours — cortex" };
+export const metadata = { title: "Mes cours · cortex" };
 
 export default function CoursPage() {
   return (

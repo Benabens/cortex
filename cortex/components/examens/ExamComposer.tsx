@@ -66,7 +66,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: Plan; onGenerated: (
     if (job.status === "error" || job.status === "failed") {
       setGenError({ message: asText(job.error) ?? "La génération a échoué. Réessaie." });
     } else {
-      setDoneMsg("Examen généré — il apparaît dans « Examens prêts » ci-dessous.");
+      setDoneMsg("Examen généré : il apparaît dans « Examens prêts » ci-dessous.");
       onGenerated();
     }
   }, [job, onGenerated]);
@@ -93,7 +93,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: Plan; onGenerated: (
     } catch (e) {
       const err = e as ApiError & { command?: string };
       setGenError({
-        message: err.status === 503 ? `Le moteur LLM est injoignable — ${err.message}` : err.message || "Impossible de lancer la génération.",
+        message: err.status === 503 ? `Le moteur LLM est injoignable : ${err.message}` : err.message || "Impossible de lancer la génération.",
       });
     } finally {
       setLaunching(false);
@@ -109,7 +109,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: Plan; onGenerated: (
           <h2 className="text-[1.05rem] font-semibold text-ink-1">Compositeur d’examen</h2>
         </div>
         <p className="mt-1 text-[0.88rem] text-ink-2">
-          «&nbsp;Un examen qui aurait pu tomber.&nbsp;» La proposition par défaut est au format réel du final — prête à lancer.
+          «&nbsp;Un examen qui aurait pu tomber.&nbsp;» La proposition par défaut est au format réel du final : prête à lancer.
         </p>
 
         {/* composition : proposition compacte (défaut) + disclosure de réglage fin */}
