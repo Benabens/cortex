@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { INDEXABLE } from "@/lib/seo";
 
 /**
  * Métadonnées de partage. /login est la seule page que voient un visiteur anonyme
@@ -25,6 +26,8 @@ function publicOrigin(): URL | undefined {
 }
 
 export const metadata: Metadata = {
+  // Seule page publique de l'app : elle reste indexable (cf. lib/seo).
+  ...INDEXABLE,
   metadataBase: publicOrigin(),
   openGraph: {
     type: "website",
