@@ -1,16 +1,16 @@
 /**
  * RÉGRESSION — deux défauts d'argent de la recharge d'abonnement Stripe
  * (septembre 2026), exprimés dans la règle en vigueur : fenêtres ancrées sur
- * la période de facturation (lib/billing/subscription-windows), jamais sur le
+ * la période de facturation (lib/billing/subscription-windows), et non sur le
  * mois civil.
  *  (a) Un abonné MENSUEL était rechargé à 20 au changement de mois calendaire
  *      EN PLUS de invoice.paid (qui recharge déjà chaque période) → jusqu'à ~40
  *      crédits pour un seul mois payé si la facturation ne tombe pas le 1er.
  *      L'ANNUEL garde ses 20 par mois sans nouvelle facture ; une ligne HÉRITÉE
  *      (écrite avant les fenêtres : `month_anchor` seul) les reçoit au mois
- *      civil comme avant, puis par fenêtre dès sa prochaine facture payée.
- *      Un plan INCONNU est classé par la durée de sa période (annuel au-delà
- *      de 45 jours).
+ *      civil comme avant, puis par fenêtre dès que le début de sa période est
+ *      connu. Un plan INCONNU est classé par la durée de sa période (annuel
+ *      au-delà de 45 jours).
  *  (b) customer.subscription.updated : la période se lit dans les DEUX formats
  *      d'API, sur la subscription (ancien) ou sur ses ITEMS (format récent,
  *      famille « basil » : `current_period_*` a quitté la subscription pour
@@ -138,15 +138,18 @@ test("(a) plan INCONNU, période d'un an : traité en annuel, 20 par fenêtre an
   });
 });
 
-test("(a) plan INCONNU, période d'un mois : traité en mensuel, aucune recharge paresseuse", async () => {
+test("(a) plan INCONNU, période de 40 jours : traité en mensuel, aucune recharge paresseuse", async () => {
   const credits = await import("../lib/billing/credits");
   const { reserveGeneration } = await import("../lib/billing/reserve");
   await withClock("2026-05-10T09:00:00Z", async (at) => {
-    await credits.grantSubscriptionMonth({ userId: "noplan-m", customerId: "cus_noplan-m", subscriptionId: "sub_noplan-m", plan: null, periodStart: "2026-05-10 09:00:00", periodEnd: "2026-06-10 09:00:00" });
+    // 40 jours : sous le seuil de 45, mais assez long pour qu'une fenêtre s'ouvre le 10/06 si le plan était pris pour un annuel
+    await credits.grantSubscriptionMonth({ userId: "noplan-m", customerId: "cus_noplan-m", subscriptionId: "sub_noplan-m", plan: null, periodStart: "2026-05-10 09:00:00", periodEnd: "2026-06-19 09:00:00" });
     assert.equal((await inMl("noplan-m", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:noplan-m:ml:1" }))).ok, true);
     at("2026-06-01T00:00:00Z");
     assert.equal(await credits.subscriptionCreditsCenti("noplan-m"), 1800, "pas de recharge au 1er");
     at("2026-06-10T09:00:00Z");
+    assert.equal(await credits.subscriptionCreditsCenti("noplan-m"), 1800, "un mois après le début : pas de fenêtre pour un mensuel");
+    at("2026-06-19T09:00:00Z");
     assert.equal(await credits.subscriptionCreditsCenti("noplan-m"), 0, "période échue : seule une facture payée recrédite");
   });
 });
@@ -163,7 +166,7 @@ test("(a) MENSUEL via la réservation : pas de recharge au changement de mois", 
 
 // ─────────────── (b) période lue sur les items (récent) ou la subscription (ancien) ───────────────
 
-test("(b) subscription.updated : period_end lue sur items.data[] (SDK Basil+)", async () => {
+test("(b) subscription.updated, format récent : period_end lue sur items.data[]", async () => {
   const credits = await import("../lib/billing/credits");
   const { handleStripeEvent } = await import("../lib/billing/stripe-events");
   await credits.grantSubscriptionMonth({ userId: "u", customerId: "cus_u", subscriptionId: "sub_u", plan: "cortex_pro_monthly", periodEnd: future(10) });
