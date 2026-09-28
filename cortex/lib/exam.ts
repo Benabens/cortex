@@ -151,6 +151,16 @@ export async function buildPrompt(ctx: Ctx): Promise<string> {
   // Corpus importé = DONNÉE encadrée, jamais consigne (cf. lib/prompt-safety).
   const block = (title: string, items: { src: string; excerpt?: string; text?: string }[]) =>
     items.length ? [``, dataBlock(title, items)] : [];
+  /**
+   * Certains titres de blocs portent une CONTRAINTE, pas seulement une étiquette.
+   * Un bloc sans données ne s'affiche pas : sans ce repli, un cours neuf (pas de
+   * notes du staff, pas d'annales ingérées) générerait sans contrainte de scope
+   * ni de forme. Le prompt est inchangé dès que les données existent.
+   */
+  const blockOrRule = (title: string, rule: string, items: { src: string; excerpt?: string; text?: string }[]) => {
+    const b = dataBlock(title, items);
+    return b ? [b] : [rule];
+  };
   // calibrage de difficulté (cs-202) : la prof punit une idée fausse précise par exo.
   const diff = currentCourse() === DEFAULT_COURSE ? difficultyBlockForExam() : "";
   return [
@@ -163,11 +173,17 @@ export async function buildPrompt(ctx: Ctx): Promise<string> {
     ``,
     DATA_RULE,
     ``,
-    dataBlock(`LES VRAIS FINALS À IMITER (forme, types, ton, niveau, MISE EN PAGE)`, ctx.style),
+    ...blockOrRule(
+      `LES VRAIS FINALS À IMITER (forme, types, ton, niveau, MISE EN PAGE)`,
+      `Aucune annale n'est disponible : IMITE malgré tout la forme d'un vrai final du cours (types de questions, ton, niveau, mise en page).`,
+      ctx.style,
+    ),
     ``,
-    dataBlock(`SCOPE OFFICIEL (Study Guide + hints staff — ne génère QUE sur ces sujets)`, [
-      { src: "staff-notes", text: await p.staffNotesText(5000) },
-    ]),
+    ...blockOrRule(
+      `SCOPE OFFICIEL (Study Guide + hints staff — ne génère QUE sur ces sujets)`,
+      `Aucune note du staff n'est disponible : ne génère QUE sur les sujets du programme officiel du cours, rien d'inventé hors scope.`,
+      [{ src: "staff-notes", text: await p.staffNotesText(5000) }],
+    ),
     ...block(`SÉRIES D'EXERCICES & EXOS (matière d'entraînement — inspire-toi des mécaniques)`, ctx.exercises),
     ...block(`REVIEWS DE LECTURES / CONCEPTS FLAGUÉS`, ctx.reviews),
     ...block(`CHEAT SHEETS`, ctx.cheats),
