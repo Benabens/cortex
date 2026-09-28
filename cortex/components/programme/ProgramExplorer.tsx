@@ -26,6 +26,11 @@ export function ProgramExplorer({
   planOk: boolean;
 }) {
   const [mode, setMode] = useState<Mode>("section");
+  // Lien profond ?chapitre=<n° de lecture> : ouvre ce chapitre. Lu à l'initialisation : ce composant
+  // n'est rendu que côté client, une fois les données chargées (aucun écart d'hydratation).
+  const [focusLecture] = useState<number | null>(() =>
+    typeof window === "undefined" ? null : Number(new URLSearchParams(window.location.search).get("chapitre")) || null
+  );
   const meta = typesMeta(types);
   const plan = buildPlan(types, chapters);
   const flat = byPriority(types);
@@ -66,7 +71,7 @@ export function ProgramExplorer({
         hasPlan ? (
           <div className="space-y-2.5">
             {plan.map((c) => (
-              <ChapterAccordion key={c.id ?? "orphan"} c={c} />
+              <ChapterAccordion key={c.id ?? "orphan"} c={c} defaultOpen={focusLecture != null && c.lectureNo === focusLecture} />
             ))}
           </div>
         ) : (

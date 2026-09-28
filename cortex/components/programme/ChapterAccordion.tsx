@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronRight, BookOpen } from "lucide-react";
 import { cn } from "@/lib/ux/cn";
 import { NotionRow } from "./NotionRow";
@@ -16,9 +16,14 @@ export function ChapterAccordion({ c, defaultOpen = false }: { c: PlanChapterUi;
   const [open, setOpen] = useState(defaultOpen);
   const panelId = `chapter-${c.id ?? "orphan"}`;
   const n = c.notions.length;
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Ouvert par lien profond (?chapitre=) : amené à l'écran.
+  useEffect(() => {
+    if (defaultOpen) rootRef.current?.scrollIntoView({ block: "start" });
+  }, [defaultOpen]);
 
   return (
-    <div className="panel overflow-hidden p-0">
+    <div ref={rootRef} className="panel scroll-mt-24 overflow-hidden p-0">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

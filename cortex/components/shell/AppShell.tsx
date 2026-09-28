@@ -45,7 +45,7 @@ export function AppShell({ children, legal }: { children: React.ReactNode; legal
     return <>{children}</>;
   }
 
-  // ⌘K / Ctrl+K → search
+  // ⌘K / Ctrl+K → recherche (raccourci conservé, plus affiché nulle part : décision du 28/09)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
