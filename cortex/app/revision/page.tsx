@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useCourse } from "@/lib/ux/api";
+import { useApi, useCourse } from "@/lib/ux/api";
+import { LoadError } from "@/components/ui/LoadError";
 
 type BQ = { id: number; topic: string; lectureRank: number | null; statement: string; options: string | null; officialAnswer: string | null; sourceExam: string; examYear: number | null; examPage: number | null; examHref: string | null };
 type PQ = { id: number; kind: "qcm" | "open"; topic: string; lectureRank: number | null; statement: string; options: string | null; correct: string | null; explanation: string | null; solution: string | null; verified: number | null; verifyMethod: string | null };
@@ -21,32 +22,19 @@ function groupByTopic<T extends { topic: string; lectureRank: number | null }>(a
 
 export default function RevisionPage() {
   const { courseId, ready } = useCourse();
-  const [loaded, setLoaded] = useState<Data | null>(null);
-  const [fetching, setFetching] = useState(true);
+  // Données via le crochet commun : il expose l'ERREUR et une reprise — avant,
+  // un catch muet laissait l'écran en squelette pour toujours.
+  const { data: loaded, loading: fetching, error, refetch } = useApi<Data>("/api/revision");
   // Au changement de cours, les données de l'ancien ne sont pas montrées le temps
   // du rechargement ; compte sans cours : rien à charger, état vide.
   const d = loaded && (!loaded.course || loaded.course === courseId) ? loaded : null;
-  const loading = !ready || (!!courseId && (fetching || !d));
+  const loading = !ready || (!!courseId && (fetching || (!d && !error)));
   const [tab, setTab] = useState<"qcm" | "open" | "plan">("qcm");
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [reveal, setReveal] = useState<Record<number, boolean>>({});
   const [done, setDone] = useState<Record<string, boolean>>({});
   const [hideDone, setHideDone] = useState(false);
 
-  // Le cours est explicite : sans lui, l'API retombait sur cs-202, que seul son propriétaire peut lire.
-  useEffect(() => {
-    if (!ready) return;
-    if (!courseId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const next = (await (await fetch(`/api/revision?course=${encodeURIComponent(courseId)}`)).json()) as Data;
-        if (!cancelled) setLoaded(next);
-      } catch {}
-      if (!cancelled) setFetching(false);
-    })();
-    return () => { cancelled = true; };
-  }, [ready, courseId]);
 
   // progression locale : coche « fait » par question, persiste entre sessions (localStorage, par cours)
   useEffect(() => {
@@ -90,9 +78,17 @@ export default function RevisionPage() {
         <p className="sub mt-2">La banque exhaustive de chaque QCM et chaque ouverte des annales, triée par sujet dans l'ordre du cours, et un parcours généré couvrant 100 % du programme à la bonne proportion. Déjà prêt, rien à relancer.</p>
       </header>
 
+      {!loading && error && (
+        <LoadError
+          title="Impossible de charger la révision"
+          hint="Le moteur ne répond pas pour ce cours. Réessaie, ou change de cours."
+          onRetry={refetch}
+        />
+      )}
+
       {loading && <div className="card card-pad rise"><div className="skeleton" style={{ height: 120 }} /></div>}
 
-      {!loading && totBank === 0 && (d?.plan.stats.qcm ?? 0) === 0 && (
+      {!loading && !error && totBank === 0 && (d?.plan.stats.qcm ?? 0) === 0 && (
         <div className="card card-pad empty">
           <div className="empty-ico">📚</div>
           <div className="empty-title">Banque pas encore construite</div>
