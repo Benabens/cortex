@@ -65,3 +65,43 @@ test("scrubEvent : garde l'erreur, retire e-mail, identité, en-têtes, cookies 
   assert.equal(event.extra, undefined, "aucun prompt, aucun énoncé");
   assert.deepEqual(event.breadcrumbs, [], "aucune miette d'URL avec paramètres");
 });
+
+test("scrubEvent : le message d'une compilation LaTeX ratée ne sort ni chemin d'étudiant ni énoncé", async () => {
+  const { scrubEvent } = await import("../lib/observability");
+  // Message réel produit par lib/exam-latex.ts : jusqu'à 800 caractères de
+  // journal tectonic, qui cite le chemin du corpus ET le texte de l'énoncé.
+  const msg =
+    "Échec compilation LaTeX. ! Undefined control sequence. | " +
+    "l.42 \\subq{Soit un réseau de Petri modélisant le protocole vu au lab 4 de Martin} | " +
+    "! I can't find file `/srv/data/u/martin-dupont/cs-202/refs/annales-2024.tex'.";
+  const event = scrubEvent({
+    message: msg,
+    exception: { values: [{ type: "Error", value: msg }] },
+  } as never) as { message?: string; exception: { values: Array<{ value: string }> } };
+  const sortie = JSON.stringify(event);
+  assert.ok(!sortie.includes("martin-dupont"), "aucun identifiant d'étudiant, même dans un chemin");
+  assert.ok(!sortie.includes("réseau de Petri"), "aucun énoncé");
+  assert.ok(!sortie.includes("annales-2024"), "aucun nom de document de cours");
+  assert.match(event.exception.values[0].value, /Échec compilation LaTeX/, "la nature de la panne reste lisible");
+  assert.match(String(event.message), /Échec compilation LaTeX/);
+});
+
+test("avec SENTRY_DSN : traces et spans passent par le même nettoyage que les erreurs", async () => {
+  const { initErrorTracking } = await import("../lib/observability");
+  process.env.SENTRY_DSN = "https://exemple@o0.ingest.sentry.io/1";
+  process.env.SENTRY_TRACES_SAMPLE_RATE = "1";
+  let options: Record<string, unknown> | null = null;
+  await initErrorTracking({ load: async () => ({ init: (o: Record<string, unknown>) => { options = o; } }) });
+  const o = options as unknown as Record<string, (e: unknown) => unknown>;
+  assert.equal(typeof o.beforeSendTransaction, "function", "une transaction porte l'URL complète et les données de requête");
+  assert.equal(typeof o.beforeSendSpan, "function");
+  const tx = o.beforeSendTransaction({
+    transaction: "POST /api/exams/generate",
+    request: { url: "https://cortex.app/api/exams/generate?course=cs-202", data: { focus: "les inodes" } },
+    user: { email: "etudiant@epfl.ch" },
+  }) as { request: Record<string, unknown>; user?: unknown };
+  assert.equal(tx.user, undefined);
+  assert.equal(tx.request.data, undefined);
+  assert.equal(tx.request.url, "https://cortex.app/api/exams/generate");
+  delete process.env.SENTRY_TRACES_SAMPLE_RATE;
+});
