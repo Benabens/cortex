@@ -176,3 +176,17 @@ test("plafond de prompt : la garde qui remplace l'empreinte figée", async () =>
   assert.ok(full.length + batch.length < PROMPT_MAX_CHARS, `prompt de référence ${full.length + batch.length} > plafond ${PROMPT_MAX_CHARS}`);
   assert.ok(full.includes(DATA_RULE) && batch.includes(DATA_RULE), "les deux prompts portent la consigne de données");
 });
+
+test("corpus absent : la contrainte reste, seules les données disparaissent", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { runWithUser } = await import("../db/context");
+  const { buildPrompt } = await import("../lib/exam");
+  // Encadrer le corpus a fait des titres de blocs le seul porteur de deux
+  // contraintes (« ne génère QUE sur ces sujets », « imite la forme des vrais
+  // finals »). Or un bloc sans données ne s'affiche pas : pour un cours neuf,
+  // sans notes du staff ni annales ingérées, les contraintes disparaissaient.
+  const vide = { weaknesses: [], due: [], style: [], exercises: [], reviews: [], cheats: [], course: [] };
+  const prompt = await runWithUser("owner", () => runWithCourse("cs-202", () => buildPrompt(vide as never)));
+  assert.match(prompt, /ne génère QUE/, "la contrainte de scope survit à l'absence de notes du staff");
+  assert.match(prompt, /IMITER|imite/, "la contrainte de forme survit à l'absence d'annales");
+});
