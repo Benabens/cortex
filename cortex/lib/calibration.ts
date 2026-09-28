@@ -1,5 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
+import { FIELD_LIMITS } from "@/lib/field-limits";
 import { sanitizeCorpus } from "@/lib/prompt-safety";
 
 /**
@@ -25,7 +26,7 @@ export async function recordFeedback(input: { examId?: number | null; topic?: st
   const verdict = VERDICTS.includes(input.verdict as Verdict) ? input.verdict : "good";
   return await q.insert(
     `INSERT INTO feedback (exam_id, topic, archetype, verdict, note, score) VALUES (?,?,?,?,?,?)`,
-    input.examId ?? null, (input.topic ?? "").slice(0, 200) || null, input.archetype ?? null, verdict, (input.note ?? "").slice(0, 600) || null, input.score ?? null
+    input.examId ?? null, (input.topic ?? "").slice(0, 200) || null, input.archetype ?? null, verdict, (input.note ?? "").slice(0, FIELD_LIMITS.feedbackNote) || null, input.score ?? null
   );
 }
 

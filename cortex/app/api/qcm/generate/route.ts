@@ -3,6 +3,7 @@ import { getFormatProfile } from "@/lib/format";
 import { preflightGeneration } from "@/lib/preflight";
 import { requireCourse, useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
+import { fieldTooLong } from "@/lib/field-limits";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
 export const runtime = "nodejs";
@@ -19,23 +20,26 @@ export async function GET(req: NextRequest) {
 export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const { course, denied } = requireCourse(req);
   if (denied) return denied;
-  const fmt = await getFormatProfile();
-  if (!fmt?.has_mcq) return NextResponse.json({ error: "Format non détecté ou sans QCM pour ce cours. Lance la détection de format d'abord." }, { status: 400 });
-  const existing = await activeJob("qcm");
-  if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
-  const issue = await preflightGeneration("qcm");
-  if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
   // composeur : count = N QCM, openCount = M ouvertes, focus = thème ciblé (exercice ciblé).
+  // Bornes de champ d'abord — elles ne coûtent rien : un sujet trop long est
+  // refusé, jamais tronqué en silence (l'étudiant paierait une intention amputée).
   const body = await readJson(req, ({} as any));
   const num = (v: any) => (v === 0 || v === "0" ? 0 : Number(v) > 0 ? Math.min(40, Math.floor(Number(v))) : undefined);
   const c = num(body.count);
   const oc = num(body.openCount);
   if (c === 0 && oc === 0) return NextResponse.json({ error: "Composition vide : choisis au moins 1 QCM ou 1 question ouverte." }, { status: 400 });
-  const target = JSON.stringify({
-    count: c,
-    openCount: oc,
-    focus: typeof body.focus === "string" && body.focus.trim() ? body.focus.trim().slice(0, 400) : undefined,
-  });
+  const focusRaw = typeof body.focus === "string" ? body.focus.trim() : "";
+  const tooLong = fieldTooLong("focus", focusRaw);
+  if (tooLong) return tooLong;
+  const target = JSON.stringify({ count: c, openCount: oc, focus: focusRaw || undefined });
+
+  const fmt = await getFormatProfile();
+  if (!fmt?.has_mcq) return NextResponse.json({ error: "Format non détecté ou sans QCM pour ce cours. Lance la détection de format d'abord." }, { status: 400 });
+
+  const existing = await activeJob("qcm");
+  if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
+  const issue = await preflightGeneration("qcm");
+  if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
   let jobId: number;
   try {
     ({ id: jobId } = await createJobExclusive("qcm", target));

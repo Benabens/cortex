@@ -20,6 +20,13 @@ export const FIELD_LIMITS = {
   /** exercises/generate : cible et note libre */
   target: 2000,
   note: 2000,
+  /**
+   * feedback : remarque de calibration. Plus courte que `note` — elle est
+   * CONSERVÉE et réinjectée dans les prompts suivants (six notes par archétype),
+   * et c'est exactement ce que l'enregistrement garde : la route acceptait 2 000
+   * caractères dont 1 400 disparaissaient avec une réponse 200.
+   */
+  feedbackNote: 600,
   /** weaknesses/mine : texte collé (notes, énoncé raté) */
   text: 8000,
   /** weaknesses (création) : sujet et note — repris tels quels par weaknesses/process (prix fixe) */
@@ -31,7 +38,7 @@ export type LimitedField = keyof typeof FIELD_LIMITS;
 
 const LABELS: Record<LimitedField, string> = {
   concept: "Le concept", statement: "L’énoncé", answer: "La réponse", target: "La cible", note: "La note", text: "Le texte",
-  focus: "Le sujet à travailler",
+  focus: "Le sujet à travailler", feedbackNote: "La remarque",
   topic: "Le sujet", description: "La note",
 };
 
