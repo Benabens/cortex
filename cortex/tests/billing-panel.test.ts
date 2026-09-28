@@ -16,7 +16,7 @@ const base = (over: Partial<Props["data"]> = {}): Props["data"] => ({
   billing: true,
   purchase: { enabled: true, reason: null },
   legal: { terms: "https://x/cgv", privacy: "https://x/priv", refund: "https://x/remb", notice: "https://x/mentions" },
-  terms: { version: "2026-09", accepted: true, acceptedAt: "2026-09-26 10:00:00" },
+  terms: { version: "2026-09", accepted: true, acceptedAt: "2026-09-26 10:00:00", withdrawalAccepted: true, withdrawalAcceptedAt: "2026-09-26 10:00:00" },
   balance: 12,
   purchased: 12,
   subscription: null,
@@ -80,11 +80,24 @@ test("solde négatif après reprise Stripe : avertissement explicite", async () 
   assert.match(html, /-4 crédits|−4 crédits/);
 });
 
-test("CGV non acceptées : case obligatoire, achats désactivés", async () => {
-  const html = await render(base({ terms: { version: "2026-09", accepted: false, acceptedAt: null } }));
-  assert.match(html, /type="checkbox"/);
+test("CGV non acceptées : DEUX cases obligatoires (CGV + rétractation), bouton de confirmation, achats désactivés", async () => {
+  const html = await render(base({ terms: { version: "2026-09", accepted: false, acceptedAt: null, withdrawalAccepted: false, withdrawalAcceptedAt: null } }));
+  assert.equal((html.match(/type="checkbox"/g) ?? []).length, 2, "case CGV + case rétractation");
+  assert.match(html, /Je demande l’accès immédiat au service et reconnais perdre mon droit de rétractation dès l’utilisation de mes crédits\./);
+  assert.match(html, /href="https:\/\/x\/remb"[^>]*>[^<]*[Pp]olitique de remboursement/);
   assert.match(html, /Obligatoire avant le premier achat/);
-  assert.equal(buttons(html).filter(isDisabled).length, 3, "les trois offres sont désactivées");
+  // Les offres restent désactivées ; le bouton de confirmation existe (désactivé tant que les cases ne sont pas cochées).
+  const offerButtons = buttons(html).filter((b) => !/Confirmer/.test(b));
+  assert.equal(offerButtons.filter(isDisabled).length, 3, "les trois offres sont désactivées");
+  assert.ok(buttons(html).some((b) => /Confirmer/.test(b)), "bouton de confirmation présent");
+});
+
+test("CGV acceptées avant l'arrivée de la case de rétractation : seule la seconde case est demandée", async () => {
+  const html = await render(base({ terms: { version: "2026-09", accepted: true, acceptedAt: "2026-09-01 10:00:00", withdrawalAccepted: false, withdrawalAcceptedAt: null } }));
+  assert.equal((html.match(/type="checkbox"/g) ?? []).length, 1);
+  assert.match(html, /droit de rétractation/);
+  assert.match(html, /acceptées le/);
+  assert.equal(buttons(html).filter((b) => !/Confirmer/.test(b)).filter(isDisabled).length, 3, "achats désactivés tant que la renonciation manque");
 });
 
 test("achats fermés : la raison est affichée, tout est désactivé", async () => {
@@ -101,7 +114,7 @@ test("retour de Stripe : confirmation ou annulation en clair", async () => {
 test("revue : hors production sans liens légaux mais achats ouverts (staging), la case CGV reste cochable", async () => {
   const html = await render(base({
     legal: { terms: null, privacy: null, refund: null, notice: null },
-    terms: { version: "2026-09", accepted: false, acceptedAt: null },
+    terms: { version: "2026-09", accepted: false, acceptedAt: null, withdrawalAccepted: false, withdrawalAcceptedAt: null },
   }));
   const checkbox = /<input[^>]*type="checkbox"[^>]*>/.exec(html)?.[0] ?? "";
   assert.ok(checkbox, "case présente");

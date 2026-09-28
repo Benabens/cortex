@@ -143,7 +143,7 @@ export async function writeAccountExport(userId: string, dir: string, budget: Bu
   };
 
   const user = await authGet<Record<string, unknown>>(`SELECT id, email, name, image, email_verified FROM users WHERE id = ?`, userId);
-  const terms = await authAll(`SELECT version, accepted_at FROM terms_acceptances WHERE user_id = ? ORDER BY accepted_at`, userId).catch(() => []);
+  const terms = await authAll(`SELECT version, accepted_at, withdrawal_waiver_at FROM terms_acceptances WHERE user_id = ? ORDER BY accepted_at`, userId).catch(() => []);
   const subscription = await authGet(`SELECT status, plan, monthly_credits, remaining, period_end, month_anchor, updated_at FROM subscriptions WHERE user_id = ?`, userId).catch(() => undefined);
   write("profil.json", { user: user ?? { id: userId }, terms, subscription: subscription ?? null });
 

@@ -176,6 +176,7 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       user_id TEXT NOT NULL,
       version TEXT NOT NULL,
       accepted_at TEXT NOT NULL,
+      withdrawal_waiver_at TEXT,
       PRIMARY KEY (user_id, version)
     )`,
   ],
@@ -338,6 +339,7 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       user_id text NOT NULL,
       version text NOT NULL,
       accepted_at text NOT NULL,
+      withdrawal_waiver_at text,
       PRIMARY KEY (user_id, version)
     )`,
   ],
@@ -363,6 +365,11 @@ const LLM_USAGE_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
 
 /** Colonnes ajoutées à `credit_transactions` : part d'un débit financée par
  *  l'abonnement (centièmes), pour rendre chaque part dans sa poche. */
+/** Colonne ajoutée à `terms_acceptances` : date de l'accord exprès à l'exécution
+ *  immédiate + reconnaissance de la perte du droit de rétractation (L221-28 13°). */
+const TERMS_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
+  { name: "withdrawal_waiver_at", sqlite: "TEXT", pg: "text" },
+];
 const CREDIT_TX_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "sub_amount", sqlite: "INTEGER NOT NULL DEFAULT 0", pg: "integer NOT NULL DEFAULT 0" },
   // Unité de `delta` PAR LIGNE : 'centi' (écrit par ce code), NULL = crédits
@@ -406,6 +413,12 @@ function sqliteAuth(): Database.Database {
       }
     }
     ensureCreditRefUniqueSqlite(_sqliteAuth);
+    const haveTerms = new Set(
+      (_sqliteAuth.prepare("PRAGMA table_info(terms_acceptances)").all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    for (const c of TERMS_ADDED) {
+      if (!haveTerms.has(c.name)) _sqliteAuth.exec(`ALTER TABLE terms_acceptances ADD COLUMN ${c.name} ${c.sqlite}`);
+    }
   }
   return _sqliteAuth;
 }
@@ -442,6 +455,9 @@ async function pgExec(): Promise<{
       if (txCols.has(c.name)) continue;
       await authPgQuery(`ALTER TABLE public.credit_transactions ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
       if (c.name === "unit") await authPgQuery(UNIT_BACKFILL_SQL.replace(/credit_transactions|app_meta/g, (t) => `public.${t}`), []);
+    }
+    for (const c of TERMS_ADDED) {
+      await authPgQuery(`ALTER TABLE public.terms_acceptances ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
     }
     _pgReady = true;
     await ensureCreditRefUnique();

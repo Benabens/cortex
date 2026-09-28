@@ -29,7 +29,11 @@ type Billing = {
   billing: boolean;
   purchase: { enabled: boolean; reason: string | null };
   legal: { terms: string | null; privacy: string | null; refund: string | null; notice: string | null };
-  terms: { version: string; accepted: boolean; acceptedAt: string | null };
+  terms: {
+    version: string; accepted: boolean; acceptedAt: string | null;
+    /** accord exprès à l'exécution immédiate + perte du droit de rétractation (L221-28 13°) */
+    withdrawalAccepted: boolean; withdrawalAcceptedAt: string | null;
+  };
   balance: number | null;
   purchased: number | null;
   subscription: {
@@ -102,7 +106,7 @@ export function BillingPanel() {
     setBusy("terms");
     setActionError(null);
     try {
-      const res = await fetch("/api/billing/terms", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: data.terms.version }) });
+      const res = await fetch("/api/billing/terms", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: data.terms.version, withdrawal: true }) });
       if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `Erreur ${res.status}`);
       await load();
     } catch (e) {
@@ -177,7 +181,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
 
   const sub = data.subscription;
   const subLive = !!sub?.live;
-  const canBuy = data.purchase.enabled && data.terms.accepted;
+  const canBuy = data.purchase.enabled && data.terms.accepted && data.terms.withdrawalAccepted;
   const legalOk = !!(data.legal.terms && data.legal.refund);
   // La case suit la décision de l'API (purchase.enabled) : en production sans
   // documents publiés l'achat est fermé côté serveur ; hors production
@@ -295,31 +299,15 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
           })}
         </ul>
         <div className="border-t border-line px-5 py-4 text-[0.82rem]">
-          {data.terms.accepted ? (
+          {data.terms.accepted && data.terms.withdrawalAccepted ? (
             <p className="text-ink-3">
-              Conditions générales de vente acceptées le {dateFr(data.terms.acceptedAt)} (version {data.terms.version}).
-              {data.legal.terms && <> <a className="underline underline-offset-2 hover:text-ink-1" href={data.legal.terms} target="_blank" rel="noreferrer">Les relire</a>.</>}
+              Conditions générales de vente acceptées le {dateFr(data.terms.acceptedAt)} (version {data.terms.version}),
+              accès immédiat au service demandé le {dateFr(data.terms.withdrawalAcceptedAt)}.
+              {data.legal.terms && <> <a className="underline underline-offset-2 hover:text-ink-1" href={data.legal.terms} target="_blank" rel="noreferrer">Relire les CGV</a>.</>}
+              {data.legal.refund && <> <a className="underline underline-offset-2 hover:text-ink-1" href={data.legal.refund} target="_blank" rel="noreferrer">Politique de remboursement</a>.</>}
             </p>
           ) : (
-            <label className="flex items-start gap-3 text-ink-2">
-              <input
-                type="checkbox"
-                className="mt-0.5 size-4 accent-[var(--color-violet)]"
-                disabled={busy === "terms" || !canAccept}
-                onChange={(e) => { if (e.target.checked) onAcceptTerms(); }}
-                aria-describedby="terms-help"
-              />
-              <span id="terms-help">
-                J’ai lu et j’accepte les{" "}
-                {data.legal.terms ? <a className="underline underline-offset-2 hover:text-ink-1" href={data.legal.terms} target="_blank" rel="noreferrer">conditions générales de vente</a> : "conditions générales de vente"}
-                {" "}et la{" "}
-                {data.legal.refund ? <a className="underline underline-offset-2 hover:text-ink-1" href={data.legal.refund} target="_blank" rel="noreferrer">politique de remboursement</a> : "politique de remboursement"}
-                {" "}(version {data.terms.version}). Obligatoire avant le premier achat.
-                {!legalOk && (canAccept
-                  ? <span className="block text-ink-4">Documents légaux non publiés : instance de test, l’acceptation vaut pour cet environnement seulement.</span>
-                  : <span className="block text-ink-4">Les documents ne sont pas encore publiés : l’acceptation sera possible dès qu’ils le seront.</span>)}
-              </span>
-            </label>
+            <TermsConsent data={data} busy={busy} canAccept={canAccept} legalOk={legalOk} onAcceptTerms={onAcceptTerms} />
           )}
           {actionError && <p role="alert" className="mt-2 text-danger-hi">{actionError}</p>}
         </div>
@@ -360,6 +348,77 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
 
       <LegalLine legal={data.legal} />
     </section>
+  );
+}
+
+/**
+ * CONSENTEMENTS AVANT LE PREMIER PAIEMENT — deux cases, une confirmation :
+ *  1. CGV + politique de remboursement (version courante) ;
+ *  2. demande d'accès immédiat au service et reconnaissance de la perte du droit
+ *     de rétractation dès l'utilisation des crédits (art. L221-28 13° C. conso) —
+ *     sans elle, le droit de 14 jours ne s'éteint pas et le paiement est refusé.
+ * Un compte ayant accepté les CGV avant l'arrivée de la seconde case ne voit
+ * que celle-ci. Rien n'est envoyé tant que les cases requises ne sont pas cochées.
+ */
+function TermsConsent({ data, busy, canAccept, legalOk, onAcceptTerms }: {
+  data: Billing; busy: string | null; canAccept: boolean; legalOk: boolean; onAcceptTerms: () => void;
+}) {
+  const [terms, setTerms] = useState(data.terms.accepted);
+  const [withdrawal, setWithdrawal] = useState(false);
+  const ready = terms && withdrawal;
+  const link = (href: string | null, label: string) =>
+    href ? <a className="underline underline-offset-2 hover:text-ink-1" href={href} target="_blank" rel="noreferrer">{label}</a> : label;
+  return (
+    <div className="flex flex-col gap-3 text-ink-2">
+      {data.terms.accepted ? (
+        <p className="text-ink-3">
+          Conditions générales de vente acceptées le {dateFr(data.terms.acceptedAt)} (version {data.terms.version}).
+          {" "}Une confirmation supplémentaire est désormais requise avant tout paiement.
+        </p>
+      ) : (
+        <label className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4 accent-[var(--color-violet)]"
+            disabled={busy === "terms" || !canAccept}
+            checked={terms}
+            onChange={(e) => setTerms(e.target.checked)}
+            aria-describedby="terms-help"
+          />
+          <span id="terms-help">
+            J’ai lu et j’accepte les {link(data.legal.terms, "conditions générales de vente")} et la{" "}
+            {link(data.legal.refund, "politique de remboursement")} (version {data.terms.version}).
+          </span>
+        </label>
+      )}
+      <label className="flex items-start gap-3">
+        <input
+          type="checkbox"
+          className="mt-0.5 size-4 accent-[var(--color-violet)]"
+          disabled={busy === "terms" || !canAccept}
+          checked={withdrawal}
+          onChange={(e) => setWithdrawal(e.target.checked)}
+          aria-describedby="withdrawal-help"
+        />
+        <span id="withdrawal-help">
+          Je demande l’accès immédiat au service et reconnais perdre mon droit de rétractation dès l’utilisation de mes crédits.
+          <span className="block text-ink-4">
+            Tant qu’aucun crédit n’est utilisé, tu disposes de 14 jours pour te rétracter — voir la {link(data.legal.refund, "politique de remboursement")}.
+          </span>
+        </span>
+      </label>
+      <p className="text-ink-4">
+        Obligatoire avant le premier achat.
+        {!legalOk && (canAccept
+          ? " Documents légaux non publiés : instance de test, l’acceptation vaut pour cet environnement seulement."
+          : " Les documents ne sont pas encore publiés : l’acceptation sera possible dès qu’ils le seront.")}
+      </p>
+      <div>
+        <Button size="sm" variant="primary" aria-label="Confirmer mes consentements" disabled={!ready || !canAccept} loading={busy === "terms"} onClick={onAcceptTerms}>
+          Confirmer
+        </Button>
+      </div>
+    </div>
   );
 }
 
