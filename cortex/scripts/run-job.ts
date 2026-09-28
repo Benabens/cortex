@@ -30,6 +30,12 @@ heartbeatJob(jobId).catch(() => {});
 
 async function fail(msg: string): Promise<never> {
   try { await setJob(jobId, { status: "error", error: msg }); await logJob(jobId, "ERREUR : " + msg); } catch {}
+  // Suivi d'erreurs optionnel : un job qui échoue de nuit doit être visible.
+  // Étiquettes techniques seulement — le message de job peut citer un cours.
+  try {
+    const { captureError } = await import("../lib/observability");
+    captureError(new Error(msg), { service: "worker", job: String(jobId) });
+  } catch {}
   // Un job en ÉCHEC est REMBOURSÉ (idempotent — ref refund:job:…,
   // et seulement si le débit a eu lieu). No-op sans BILLING_ENABLED.
   try {
@@ -260,4 +266,11 @@ async function main() {
 }
 
 // Les cours vivent en base : le worker est un AUTRE process, son cache est vide.
+(async () => {
+  // Suivi d'erreurs optionnel (SENTRY_DSN) : le worker est un process séparé,
+  // il doit s'y abonner lui-même. Sans la variable, rien n'est chargé.
+  const { initErrorTracking } = await import("../lib/observability");
+  await initErrorTracking({ service: "worker" }).catch(() => {});
+})();
+
 ensureCoursesLoaded().then(main).catch((e) => fail((e as Error)?.message || String(e)));
