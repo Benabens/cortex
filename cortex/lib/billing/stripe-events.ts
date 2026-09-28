@@ -368,6 +368,10 @@ async function onSubscriptionUpdated(sub: Stripe.Subscription, lookup?: StripeLo
   const why = await subscriptionIsCortex(sub, lookup);
   if (why) return foreign("subscription", sub.id, why);
   // cancel_at_period_end : l'abonnement reste ACTIF jusqu'à la fin de période ; le vrai arrêt vient de .deleted.
+  // Période lue dans les DEUX formats d'API : sur la subscription (ancien), sinon
+  // sur son premier item (famille « basil » 2025+, où `current_period_*` a quitté
+  // la subscription : sans ce repli la valeur est undefined et la mise à jour de
+  // période ne s'applique pas).
   const item0 = (sub.items as { data?: Array<{ current_period_end?: number; current_period_start?: number }> } | undefined)?.data?.[0];
   const periodEnd = unixToStr((sub as { current_period_end?: number }).current_period_end ?? item0?.current_period_end);
   const periodStart = unixToStr((sub as { current_period_start?: number }).current_period_start ?? item0?.current_period_start);
