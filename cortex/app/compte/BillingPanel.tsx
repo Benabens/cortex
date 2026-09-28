@@ -45,10 +45,15 @@ type Billing = {
   offers: Offer[];
 };
 
-const nf = new Intl.NumberFormat("fr-CH", { maximumFractionDigits: 2 });
+const nf = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 });
 const credits = (n: number) => `${nf.format(n)} crédit${Math.abs(n) >= 2 ? "s" : ""}`;
+/** Montant en français : « 14,90 € », « 119 € » (pas de décimales inutiles), « 9 € ». */
+export const money = (amount: number, currency: string) => {
+  const cents = Math.round(amount * 100) % 100 !== 0;
+  return new Intl.NumberFormat("fr-FR", { style: "currency", currency, minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: 2 }).format(amount);
+};
 const price = (p: Offer["price"], interval: Offer["interval"]) =>
-  p ? `${new Intl.NumberFormat("fr-CH", { style: "currency", currency: p.currency }).format(p.amount)}${interval === "month" ? " / mois" : interval === "year" ? " / an" : ""}` : "prix indisponible";
+  p ? `${money(p.amount, p.currency)}${interval === "month" ? " / mois" : interval === "year" ? " / an" : ""}` : "prix indisponible";
 const dateFr = (iso: string | null) => {
   if (!iso) return "";
   const d = new Date(iso.replace(" ", "T") + (iso.length <= 10 ? "T00:00:00Z" : "Z"));

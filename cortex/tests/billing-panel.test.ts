@@ -51,9 +51,11 @@ test("compte sans abonnement, CGV acceptées : solde, offres avec prix, boutons 
   assert.match(html, /Solde disponible/);
   assert.match(html, /12 crédits/);
   assert.match(html, /Aucun abonnement/);
-  assert.match(html, /14\.90|14,90/);
-  assert.match(html, /119/);
-  assert.match(html, /9\.00|9,00|9 €|9 €/);
+  // fr-FR : virgule décimale, pas de décimales inutiles, espace insécable avant €.
+  assert.match(html, /14,90\u00a0€ \/ mois/);
+  assert.ok(!/14\.90|119[.,]00|(?<![0-9])9[.,]00/.test(html), "aucun format anglo-saxon ni décimales inutiles");
+  assert.match(html, /119\u00a0€ \/ an/);
+  assert.match(html, /(?<![0-9,])9\u00a0€/);
   assert.equal(buttons(html).filter(isDisabled).length, 0, "aucun bouton d'achat désactivé");
   assert.match(html, /acceptées le 26 septembre 2026/);
   assert.match(html, /achat credits_10/);
