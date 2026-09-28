@@ -2,6 +2,7 @@ import { q } from "@/db/q";
 import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import { persistExercise, type ExamQuestion, type StepCb } from "@/lib/exam";
+import { DATA_RULE, dataBlock, type CorpusItem } from "@/lib/prompt-safety";
 import { search } from "@/lib/search";
 import { verifyAndHarden, type VerifyReport } from "@/lib/verify";
 import fs from "node:fs";
@@ -242,19 +243,24 @@ function labBlock(lab: LabDef, topic: string): string {
   ].filter(Boolean).join("\n");
 }
 
-/** Petit contexte corpus (cartes review + notes du cours sur le sujet du lab). */
-async function corpusBlock(lab: LabDef, topic: string): Promise<string> {
+/**
+ * Petit contexte corpus (cartes review + notes du cours sur le sujet du lab).
+ * Renvoie les EXTRAITS, pas un bloc déjà formaté : l'encadrement « donnée de
+ * cours » est posé par le constructeur du prompt, seul endroit qui sait où il
+ * se trouve dans les consignes.
+ */
+async function fetchLabCorpus(lab: LabDef, topic: string): Promise<CorpusItem[]> {
   try {
     const groups = await search(`${topic || lab.label} ${lab.topics.slice(0, 4).join(" ")}`, 12, "or");
-    const picks: string[] = [];
+    const picks: CorpusItem[] = [];
     for (const g of groups) {
       if (!["review", "note"].includes(g.sourceType)) continue;
-      for (const h of g.hits.slice(0, 2)) picks.push(`• (${h.sourceTitle}) ${h.snippet ?? h.title ?? ""}`.slice(0, 300));
+      for (const h of g.hits.slice(0, 2)) picks.push({ src: h.sourceTitle, text: (h.snippet ?? h.title ?? "").slice(0, 300) });
       if (picks.length >= 4) break;
     }
-    return picks.length ? [`═══ REPÈRES DU COURS (cartes/notes de l'étudiant) ═══`, ...picks].join("\n") : "";
+    return picks;
   } catch {
-    return "";
+    return [];
   }
 }
 
@@ -271,8 +277,18 @@ const LAB_EX_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-async function buildLabPrompt(lab: LabDef, topic: string): Promise<string> {
+/**
+ * `fetchCorpus` est injectable : le prompt embarque le corpus de l'étudiant,
+ * donc son encadrement se vérifie sans base de données.
+ */
+export async function buildLabPrompt(
+  lab: LabDef,
+  topic: string,
+  fetchCorpus: (lab: LabDef, topic: string) => Promise<CorpusItem[]> = fetchLabCorpus,
+): Promise<string> {
   const p = profile();
+  const items = await fetchCorpus(lab, topic);
+  const corpus = dataBlock(`REPÈRES DU COURS (cartes/notes de l'étudiant)`, items);
   return [
     labsDirectivesBlock(),
     ``,
@@ -286,8 +302,7 @@ async function buildLabPrompt(lab: LabDef, topic: string): Promise<string> {
     ``,
     labBlock(lab, topic),
     ``,
-    await corpusBlock(lab, topic),
-    ``,
+    ...(corpus ? [DATA_RULE, corpus, ``] : []),
     p.latexContract(),
     ``,
     `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points}. Aucun outil au-delà de Read, aucun fichier.`,
