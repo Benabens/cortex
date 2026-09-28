@@ -100,12 +100,18 @@ export async function deleteCourseWithData(userId: string, courseId: string, opt
       await authRun(`DELETE FROM tenants WHERE user_id = ? AND course = ?`, userId, courseId);
       const { forgetTenant } = await import("@/db/driver-postgres");
       forgetTenant(userId, courseId);
-      const { forgetSchemaMemo } = await import("@/db/q");
-      forgetSchemaMemo(userId, courseId);
     } catch (e) {
       residues.push(`schéma ${tenant.schema_name} : ${e instanceof Error ? e.message : String(e)}`);
     }
   }
+  // Purges de process, quel que soit le stockage : le mémo du schéma ne doit pas
+  // faire croire à des tables dans une base recréée, et la connexion sqlite doit
+  // être fermée AVANT l'effacement du fichier (un descripteur ouvert garde
+  // l'inode : le cours recréé lisait encore l'ancienne base).
+  const { forgetSchemaMemo } = await import("@/db/q");
+  forgetSchemaMemo(userId, courseId);
+  const { forgetCourseConnection } = await import("@/db/client");
+  forgetCourseConnection(courseId);
   // Cours créé depuis l'interface : tout vit sous data/u/<slug>/<cours>/ (base sqlite comprise).
   const root = path.join(dataRoot(), "u", userSlug(userId), courseId);
   try {
