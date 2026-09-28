@@ -79,6 +79,20 @@ function conn(courseId: string): Database.Database {
   return c;
 }
 
+/**
+ * Ferme et oublie la connexion d'un cours. Indispensable avant de supprimer ses
+ * fichiers : une connexion sqlite ouverte survit à l'effacement du fichier (le
+ * descripteur garde l'inode), donc le cours recréé dans le même process
+ * continuait à lire et écrire l'ancienne base — les données du cours supprimé
+ * réapparaissaient, et l'espace disque n'était jamais rendu.
+ */
+export function forgetCourseConnection(courseId: string): void {
+  const c = connections.get(courseId);
+  if (!c) return;
+  connections.delete(courseId);
+  try { c.close(); } catch { /* déjà fermée : rien à faire */ }
+}
+
 /** Connexion brute du cours courant (rare ; préférer la façade async `q` de db/q). */
 export function rawDb(): Database.Database {
   return conn(currentCourse());
