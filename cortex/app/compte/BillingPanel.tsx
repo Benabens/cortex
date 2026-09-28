@@ -204,7 +204,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
 
       {retour === "ok" && (
         <p role="status" className="rounded-lg border border-[color-mix(in_oklch,var(--color-success)_35%,transparent)] bg-[color-mix(in_oklch,var(--color-success)_8%,transparent)] px-4 py-3 text-[0.85rem] text-ink-1">
-          Paiement confirmé. Tes crédits apparaissent dès que Stripe nous l’a notifié — quelques secondes en général. Actualise si besoin.
+          Paiement confirmé. Tes crédits apparaissent dès que Stripe nous l’a notifié : quelques secondes en général. Actualise si besoin.
         </p>
       )}
       {retour === "annule" && (
@@ -218,7 +218,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
         <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 px-5 py-4">
           <div>
             <div className="text-[0.8rem] text-ink-3">Solde disponible</div>
-            <div className="mt-0.5 font-display text-[1.6rem] font-semibold leading-none text-ink-1">{credits(data.balance ?? 0)}</div>
+            <div className="mt-0.5 font-data text-[1.6rem] font-semibold leading-none text-ink-1">{credits(data.balance ?? 0)}</div>
           </div>
           {(data.balance ?? 0) < 0 && (
             <Badge tone="danger" emphasis>Solde négatif : un paiement a été repris. Recharge pour continuer.</Badge>
@@ -228,7 +228,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
           <div>
             <dt className="flex items-center gap-2 text-ink-3">
               Abonnement
-              {sub && subLive && <Badge tone={sub.status === "canceled" ? "warning" : "success"} size="xs">{sub.status === "canceled" ? "résilié — actif jusqu’à la fin de période" : "actif"}</Badge>}
+              {sub && subLive && <Badge tone={sub.status === "canceled" ? "warning" : "success"} size="xs">{sub.status === "canceled" ? "résilié : actif jusqu’à la fin de période" : "actif"}</Badge>}
             </dt>
             <dd className="mt-0.5 text-ink-1">
               {sub && subLive ? (
@@ -403,7 +403,7 @@ function TermsConsent({ data, busy, canAccept, legalOk, onAcceptTerms }: {
         <span id="withdrawal-help">
           Je demande l’accès immédiat au service et reconnais perdre mon droit de rétractation dès l’utilisation de mes crédits.
           <span className="block text-ink-4">
-            Tant qu’aucun crédit n’est utilisé, tu disposes de 14 jours pour te rétracter — voir la {link(data.legal.refund, "politique de remboursement")}.
+            Tant qu’aucun crédit n’est utilisé, tu disposes de 14 jours pour te rétracter : voir la {link(data.legal.refund, "politique de remboursement")}.
           </span>
         </span>
       </label>

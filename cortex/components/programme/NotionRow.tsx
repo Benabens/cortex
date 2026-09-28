@@ -58,9 +58,8 @@ export function NotionRow({ t }: { t: UiType }) {
         <div id={panelId} className="rise-in pb-3 pl-10 pr-3">
           {t.occurrences.length > 0 && (
             <div>
-              <p className="mb-1.5 text-[0.72rem] font-medium uppercase tracking-wide text-ink-4">
-                {t.occurrences.length > 1 ? `Toutes les occurrences (${t.occurrences.length})` : "Occurrence"}
-              </p>
+              {/* Pas d'intitulé en capitales : les chips (final + page) se lisent seules,
+                  le compte est déjà dans « Tombé N fois ». */}
               <div className="flex flex-wrap gap-1.5">
                 {t.occurrences.map((o) =>
                   o.examHref ? (

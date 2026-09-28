@@ -45,7 +45,7 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
     }
     setText("");
     setFile(null);
-    setSavedMsg("Lacune ajoutée au suivi — Cortex l’analysera pour la relier au cours.");
+    setSavedMsg("Lacune ajoutée au suivi : Cortex l’analysera pour la relier au cours.");
     onAdded();
   };
 
@@ -75,7 +75,7 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
         offline: err.status === 503,
         message:
           err.status === 503
-            ? "Le moteur LLM est injoignable — réessaie plus tard, ton texte reste dans le champ."
+            ? "Le moteur LLM est injoignable : réessaie plus tard, ton texte reste dans le champ."
             : err.message || "L’ajout a échoué. Réessaie.",
       });
     } finally {
@@ -84,19 +84,14 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
   };
 
   return (
-    <section className="panel accent-field relative overflow-hidden rounded-xl p-5 sm:p-6" aria-labelledby="inbox-title">
-      <div
-        className="pointer-events-none absolute -right-24 -top-24 size-56 rounded-full opacity-50 blur-3xl"
-        style={{ background: "radial-gradient(circle, color-mix(in oklch, var(--color-violet) 40%, transparent), transparent 70%)" }}
-        aria-hidden="true"
-      />
+    <section className="panel top-light relative overflow-hidden rounded-xl p-5 sm:p-6" aria-labelledby="inbox-title">
       <div className="relative">
         <div className="flex items-center gap-2">
           <Sparkles className="size-4 text-violet-hi" strokeWidth={2.5} />
           <h2 id="inbox-title" className="text-[1.05rem] font-semibold text-ink-1">Ajoute une lacune</h2>
         </div>
         <p className="mt-1 text-[0.88rem] text-ink-2">
-          Colle une discussion, un énoncé raté, ou une image — Cortex détecte et suit tes lacunes.
+          Colle une discussion, un énoncé raté, ou une image : Cortex détecte et suit tes lacunes.
         </p>
 
         {/* zone unique : texte + IMAGE INLINE (P-B) — colle ⌘V / glisse une image, continue à écrire */}

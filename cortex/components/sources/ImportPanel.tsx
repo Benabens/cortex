@@ -51,9 +51,9 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
     } else {
       setUploadedMsg(
         jobKind === "prepare"
-          ? "Cours préparé — types d’exos et poids mis à jour."
+          ? "Cours préparé : types d’exos et poids mis à jour."
           : jobKind === "ingest"
-            ? "Dossier ingéré — le corpus est à jour."
+            ? "Dossier ingéré : le corpus est à jour."
             : "Format re-détecté sur tes annales."
       );
       onChanged();
@@ -118,7 +118,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
       const d = await res.json().catch(() => null);
       if (!res.ok) throw { status: res.status, message: d?.error ?? `Erreur ${res.status}` } as ApiError;
       setUploadedMsg(
-        `${d.files} fichier${d.files > 1 ? "s" : ""} déposé${d.files > 1 ? "s" : ""}${d.skipped ? ` (${d.skipped} ignoré${d.skipped > 1 ? "s" : ""})` : ""} — indexation…`
+        `${d.files} fichier${d.files > 1 ? "s" : ""} déposé${d.files > 1 ? "s" : ""}${d.skipped ? ` (${d.skipped} ignoré${d.skipped > 1 ? "s" : ""})` : ""} : indexation…`
       );
       startJob(d.jobId, "ingest");
     } catch (e) {

@@ -70,7 +70,7 @@ export default function RevisionPage() {
   });
   const resetDone = () => { setDone({}); try { localStorage.removeItem(`cortex:revision:done:${d?.course}`); } catch {} };
   const doneBtn = (k: string) => (
-    <button type="button" onClick={() => toggleDone(k)} aria-pressed={!!done[k]} title={done[k] ? "fait — cliquer pour annuler" : "marquer comme fait"}
+    <button type="button" onClick={() => toggleDone(k)} aria-pressed={!!done[k]} title={done[k] ? "fait : cliquer pour annuler" : "marquer comme fait"}
       style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", borderRadius: "var(--r-sm)", padding: "3px 9px", fontSize: 12, lineHeight: 1.4, border: `1px solid ${done[k] ? "var(--green)" : "var(--line-strong)"}`, color: done[k] ? "var(--green-ink)" : "var(--ink-3)", background: done[k] ? "var(--green-wash)" : "transparent" }}>
       <span style={{ width: 14, height: 14, borderRadius: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, border: `1.5px solid ${done[k] ? "var(--green)" : "var(--ink-3)"}`, color: "var(--green-ink)" }}>{done[k] ? "✓" : ""}</span>
       {done[k] ? "fait" : "à faire"}
@@ -86,9 +86,8 @@ export default function RevisionPage() {
   return (
     <main className="page">
       <header className="mb-6 rise">
-        <p className="eyebrow">Révision · {d?.course?.toUpperCase() ?? "ML"}</p>
-        <h1 className="h1 mt-2" style={{ fontSize: 28 }}>Toutes les vraies questions des finals + un parcours qui couvre tout.</h1>
-        <p className="sub mt-2">La banque exhaustive de chaque QCM et chaque ouverte des annales — triée par sujet, dans l'ordre du cours — et un parcours généré couvrant 100 % du programme à la bonne proportion. Déjà prêt, rien à relancer.</p>
+        <h1 className="h1" style={{ fontSize: 28 }}>Toutes les vraies questions des finals + un parcours qui couvre tout.</h1>
+        <p className="sub mt-2">La banque exhaustive de chaque QCM et chaque ouverte des annales, triée par sujet dans l'ordre du cours, et un parcours généré couvrant 100 % du programme à la bonne proportion. Déjà prêt, rien à relancer.</p>
       </header>
 
       {loading && <div className="card card-pad rise"><div className="skeleton" style={{ height: 120 }} /></div>}
@@ -106,7 +105,7 @@ export default function RevisionPage() {
           {/* récap proportions par sujet (ordre du cours) */}
           <section className="card card-pad mb-5 rise">
             <div className="flex items-center gap-2 mb-2">
-              <h2 className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>Couverture des finals — par sujet (ordre du cours)</h2>
+              <h2 className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>Couverture des finals par sujet (ordre du cours)</h2>
               <span className="tag tag-blue">{d.bank.stats.qcm} QCM · {d.bank.stats.open} ouvertes</span>
               {d.source === "json" && <span className="tag" title="chargé depuis le fichier committé">pré-construit ✓</span>}
             </div>
@@ -213,7 +212,7 @@ export default function RevisionPage() {
                               <div className="text-[13.5px]" style={{ color: "var(--ink)" }}>{q.statement}</div>
                               {q.options && <pre className="mt-1 text-[12.5px]" style={{ color: "var(--ink-2)", whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{q.options}</pre>}
                               {reveal[q.id]
-                                ? <div className="mt-1.5 text-[13px]" style={{ color: "var(--green-ink)" }}>{q.kind === "qcm" ? <><strong>Réponse :</strong> {q.correct} — {q.explanation}</> : <><strong>Corrigé :</strong> {q.solution}</>}</div>
+                                ? <div className="mt-1.5 text-[13px]" style={{ color: "var(--green-ink)" }}>{q.kind === "qcm" ? <><strong>Réponse :</strong> {q.correct}. {q.explanation}</> : <><strong>Corrigé :</strong> {q.solution}</>}</div>
                                 : <button className="btn btn-quiet btn-sm mt-1" style={{ color: "var(--green)" }} onClick={() => setReveal((r) => ({ ...r, [q.id]: true }))}>révéler</button>}
                             </div>
                             );

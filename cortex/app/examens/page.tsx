@@ -74,7 +74,7 @@ export default function ExamensPage() {
 
       {/* Examens prêts ← GET /api/exams (réel ; 500 possible sur cs-202) */}
       <section>
-        <SectionHeader title="Examens prêts" hint="Générés à ton format, prêts à passer — énoncé et corrigé PDF." />
+        <SectionHeader title="Examens prêts" hint="Générés à ton format, prêts à passer : énoncé et corrigé PDF." />
 
         {exams.loading ? (
           <div

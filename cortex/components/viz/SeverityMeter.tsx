@@ -21,7 +21,6 @@ export function SeverityMeter({ level, tone, className }: Props) {
             style={{
               height: 8 + i * 5,
               background: on ? color : "var(--color-surface-3)",
-              boxShadow: on ? `0 0 8px -2px ${color}` : "none",
             }}
           />
         );

@@ -80,13 +80,6 @@ export function RadialGauge({
             <stop offset="0%" stopColor={from} />
             <stop offset="100%" stopColor={to} />
           </linearGradient>
-          <filter id={`glow-${id}`} x="-40%" y="-40%" width="180%" height="180%">
-            <feGaussianBlur stdDeviation="5" result="b" />
-            <feMerge>
-              <feMergeNode in="b" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
         </defs>
 
         {/* track */}
@@ -106,21 +99,7 @@ export function RadialGauge({
           fill={from}
           opacity={0.95}
         />
-        {/* soft glow underlay */}
-        <path
-          d={track}
-          fill="none"
-          stroke={`url(#grad-${id})`}
-          strokeWidth={thickness}
-          strokeLinecap="round"
-          pathLength={1}
-          strokeDasharray={1}
-          strokeDashoffset={offset}
-          filter={`url(#glow-${id})`}
-          opacity={0.5}
-          style={{ transition: reduced ? "none" : "stroke-dashoffset 1.15s var(--ease-out-quint)" }}
-        />
-        {/* crisp value arc */}
+        {/* value arc (plus de lueur floue en sous-couche : anti-slop 2026-09) */}
         <path
           d={track}
           fill="none"

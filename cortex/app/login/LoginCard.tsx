@@ -89,8 +89,8 @@ export function LoginCard({
                 setBusy("google");
                 void signIn("google", { callbackUrl });
               }}
-              className="inline-flex h-12 w-full items-center justify-center gap-3 rounded-lg border text-[0.92rem] font-medium transition-[background,opacity] duration-150 disabled:opacity-60"
-              style={{ background: "#ffffff", color: "#1f1f24", borderColor: "rgba(255,255,255,0.14)" }}
+              className="inline-flex h-12 w-full items-center justify-center gap-3 rounded-lg text-[0.92rem] font-semibold transition-[background,opacity] duration-150 hover:bg-white disabled:opacity-60"
+              style={{ background: "#ececee", color: "#111214" }}
             >
               <GoogleGlyph />
               {busy === "google" ? "Redirection…" : "Continuer avec Google"}
@@ -122,11 +122,12 @@ export function LoginCard({
                 className="h-12 w-full rounded-lg border px-3.5 text-[0.9rem] outline-none"
                 style={{ background: "#141419", color: "#f4f2fb", borderColor: "rgba(255,255,255,0.14)" }}
               />
+              {/* Chemin secondaire : surface neutre bordée (le bouton clair reste Google, l'action principale). */}
               <button
                 type="submit"
                 disabled={busy !== null}
-                className="inline-flex h-12 w-full items-center justify-center rounded-lg text-[0.92rem] font-semibold text-white transition-[filter,opacity] duration-150 hover:brightness-110 disabled:opacity-60"
-                style={{ background: "#8b7bff" }}
+                className="inline-flex h-12 w-full items-center justify-center rounded-lg border text-[0.92rem] font-medium transition-[background,opacity] duration-150 disabled:opacity-60"
+                style={{ background: "#141419", color: "#f4f2fb", borderColor: "rgba(255,255,255,0.14)" }}
               >
                 {busy === "email" ? "Envoi…" : "Recevoir un lien de connexion"}
               </button>
