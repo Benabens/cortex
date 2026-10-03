@@ -1,13 +1,13 @@
 import { billingEnabled, getSubscription, subscriptionLive } from "@/lib/billing/credits";
-import { isPlanKey, PLANS, type PlanKey } from "@/lib/billing/stripe-events";
+import { isPlanKey, PLANS } from "@/lib/billing/stripe-events";
 import { authGet } from "@/db/auth-store";
 import { purchasesAllowed, termsState } from "@/lib/legal";
 import { currentUser } from "@/db/context";
 import { useUser } from "@/lib/req";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
 import { NextRequest, NextResponse } from "next/server";
-import Stripe from "stripe";
 import { stripeClient } from "@/lib/billing/stripe-client";
+import { checkoutParams, siteOrigin } from "@/lib/billing/checkout-params";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,34 +70,3 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const session = await stripe.checkout.sessions.create(checkoutParams({ plan, priceId: price.id, userId, email }));
   return NextResponse.json({ url: session.url });
 });
-
-/** Origine canonique du site (AUTH_URL), ou null. */
-function siteOrigin(): string | null {
-  const raw = process.env.AUTH_URL?.trim();
-  if (!raw) return null;
-  try { return new URL(raw).origin; } catch { return null; }
-}
-
-/** Paramètres de la session Checkout — exposés pour être testés sans réseau. */
-export function checkoutParams(o: { plan: PlanKey; priceId: string; userId: string; email?: string | null }): Stripe.Checkout.SessionCreateParams & { metadata: Record<string, string> } {
-  const origin = siteOrigin();
-  if (!origin) throw new Error("AUTH_URL manquante");
-  const spec = PLANS[o.plan];
-  // `app` : le compte Stripe peut être PARTAGÉ avec d'autres applications — le webhook ne traite que ce qui porte Cortex.
-  const metadata: Record<string, string> = { app: "cortex", cortexUserId: o.userId, plan: o.plan, ...(spec.credits ? { credits: String(spec.credits) } : {}) };
-  return {
-    mode: spec.mode,
-    line_items: [{ price: o.priceId, quantity: 1 }],
-    success_url: `${origin}/compte?achat=ok`,
-    cancel_url: `${origin}/compte?achat=annule`,
-    ...(o.email ? { customer_email: o.email } : {}),
-    // Le webhook lit CES métadonnées pour attribuer au bon compte (source de vérité).
-    metadata,
-    ...(spec.mode === "payment"
-      // Pack : facture émise (obligation légale), client Stripe créé pour rattacher remboursements et litiges.
-      // …et métadonnées sur le PaymentIntent : la charge d'un remboursement les porte, même si l'achat est inconnu en base.
-      ? { invoice_creation: { enabled: true }, customer_creation: "always" as const, payment_intent_data: { metadata } }
-      // Abonnement : métadonnées aussi sur l'abonnement → une facture arrivée avant le checkout retrouve l'utilisateur.
-      : { subscription_data: { metadata } }),
-  };
-}
