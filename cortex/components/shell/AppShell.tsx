@@ -13,14 +13,16 @@ import type { LegalLinks } from "@/lib/legal";
 /**
  * PREMIER LANCEMENT — un compte sans aucun cours n'a rien à voir sur les sept
  * écrans (tous scopés à un cours). Plutôt que sept états vides différents, la
- * coquille substitue ici l'invitation à créer sa matière. Seule la page de
- * création reste accessible, sinon on ne pourrait jamais en sortir.
+ * coquille substitue ici l'invitation à créer sa matière. La gestion des cours
+ * et du compte reste accessible : elle ne nécessite pas de matière existante.
  */
 function Body({ children }: { children: React.ReactNode }) {
   const { empty } = useCourse();
   const pathname = usePathname();
-  const isCreate = pathname?.startsWith("/cours");
-  if (empty && !isCreate) {
+  const independentOfCourse = ["/cours", "/compte"].some(
+    (route) => pathname === route || pathname?.startsWith(route + "/")
+  );
+  if (empty && !independentOfCourse) {
     return (
       <div className="w-full max-w-[46rem]">
         <FirstRunHero />
@@ -40,13 +42,13 @@ export function AppShell({ children, legal }: { children: React.ReactNode; legal
   const router = useRouter();
   const shellPathname = usePathname();
 
-  // Page d'authentification : aucune coquille, aucun fetch /api/courses (401 hors session).
-  if (shellPathname && BARE_ROUTES.some((p) => shellPathname === p || shellPathname.startsWith(p + "/"))) {
-    return <>{children}</>;
-  }
+  const bare = !!shellPathname && BARE_ROUTES.some(
+    (p) => shellPathname === p || shellPathname.startsWith(p + "/")
+  );
 
   // ⌘K / Ctrl+K → recherche (raccourci conservé, plus affiché nulle part : décision du 28/09)
   useEffect(() => {
+    if (bare) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -55,7 +57,11 @@ export function AppShell({ children, legal }: { children: React.ReactNode; legal
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [router]);
+  }, [router, bare]);
+
+  // Les hooks précèdent ce retour pour conserver leur ordre lors des navigations.
+  // Hors session, la page de connexion ne charge pas /api/courses.
+  if (bare) return <>{children}</>;
 
   return (
     <CourseProvider>
