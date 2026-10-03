@@ -112,7 +112,8 @@ test("checkout : URLs de retour depuis AUTH_URL, jamais depuis Origin ; sans AUT
   }));
   assert.equal(res.status, 500, await res.text());
   process.env.AUTH_URL = "https://cortex.example.ch/";
-  const pack = mod.checkoutParams({ plan: "credits_10", priceId: "price_test_pack", userId: "alice", email: "alice@example.com" });
+  const { checkoutParams } = await import("../lib/billing/checkout-params");
+  const pack = checkoutParams({ plan: "credits_10", priceId: "price_test_pack", userId: "alice", email: "alice@example.com" });
   assert.equal(pack.mode, "payment");
   assert.equal(pack.success_url, "https://cortex.example.ch/compte?achat=ok");
   assert.equal(pack.cancel_url, "https://cortex.example.ch/compte?achat=annule");
@@ -122,7 +123,7 @@ test("checkout : URLs de retour depuis AUTH_URL, jamais depuis Origin ; sans AUT
   assert.equal(pack.customer_creation, "always");
   // 2b-3 : les métadonnées voyagent aussi sur le PaymentIntent → la charge d'un remboursement les porte.
   assert.deepEqual(pack.payment_intent_data?.metadata, pack.metadata);
-  const sub = mod.checkoutParams({ plan: "pro_yearly", priceId: "price_test_y", userId: "alice" });
+  const sub = checkoutParams({ plan: "pro_yearly", priceId: "price_test_y", userId: "alice" });
   assert.equal(sub.mode, "subscription");
   assert.deepEqual(sub.subscription_data?.metadata, { app: "cortex", cortexUserId: "alice", plan: "pro_yearly" });
   assert.ok(!fs.readFileSync(path.join(__dirname, "..", "app", "api", "billing", "checkout", "route.ts"), "utf8").includes('headers.get("origin")'));
