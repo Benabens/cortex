@@ -78,15 +78,8 @@ jobs:
 
       - name: Lint (budget anti-régression)
         run: |
-          npm run lint > /tmp/lint.out 2>&1 || true
-          errors=$(grep -oE '\([0-9]+ errors' /tmp/lint.out | grep -oE '[0-9]+' || echo 0)
-          budget=$(cat .ci/lint-budget)
-          echo "eslint: $errors erreurs (budget: $budget)"
-          tail -5 /tmp/lint.out
-          if [ "$errors" -gt "$budget" ]; then
-            echo "::error::Budget lint dépassé ($errors > $budget) — corrige ou justifie une hausse de .ci/lint-budget"
-            exit 1
-          fi
+          node --test .ci/check-lint.test.mjs
+          node .ci/check-lint.mjs
 
       - name: Tests unitaires (drivers, LLM hermétique, sandbox, vérif déterministe, isolation multi-tenant, vrai Postgres)
         env:
