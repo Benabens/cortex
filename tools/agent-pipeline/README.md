@@ -113,3 +113,14 @@ donnée utilisateur. Arrêter le serveur après vérification.
 Ce banc vérifie les composants et le cycle React, pas l'authentification réelle,
 le déploiement ni un lecteur d'écran. Ses styles simplifiés ne valent pas audit
 visuel de l'application complète.
+
+### Régression : données lors d’un changement de cours
+
+Le banc navigateur importe le vrai hook `useApi` et remplace seulement le réseau.
+Dans « Données du cours », livrer A puis choisir B : le rendu B doit immédiatement
+être vide et en chargement. Livrer B, recharger, choisir A, puis livrer la réponse B
+en retard : aucun rendu A ne doit contenir les données B. Faire échouer A, couper
+puis réactiver les données : l’erreur doit disparaître et le chargement reprendre.
+Livrer A termine le chargement. L’historique visible conserve chaque état rendu,
+y compris celui précédant les effets React. Aucun service ni cours réel n’est appelé.
+Le rechargement explicite masque aussi les données précédentes pendant la requête.
