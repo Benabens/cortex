@@ -1,0 +1,29 @@
+[
+  {
+    "id": "QW-OPEN-001",
+    "provider": "qwen",
+    "url": "https://chat.qwen.ai/",
+    "goal": "Conserver la réponse ouverte dans un textarea contrôlé après correction, avec label accessible et corrigé SafeHtml. Réinitialiser par clé cours/examen/question. Garder la saisie après une erreur réseau, sans modifier le score QCM ni transmettre les réponses ouvertes au serveur.",
+    "files": ["cortex/app/mock/[id]/page.tsx", "cortex/components/exam/OpenResponse.tsx"]
+  },
+  {
+    "id": "DS-JOB-001",
+    "provider": "deepseek",
+    "url": "https://chat.deepseek.com/",
+    "goal": "Lier l'état useJob à courseId ET jobId. Ne jamais exposer A/job1 après le passage à B/job1. Rendre null sans cours ou sans job. Ignorer les rappels après désinscription. Pas de setState synchrone dans l'effet ni nouvelle dépendance.",
+    "files": ["cortex/lib/ux/api.tsx"]
+  },
+  {
+    "id": "GK-DIALOG-001",
+    "provider": "grok",
+    "url": "https://grok.com/",
+    "goal": "Contenir le focus du dialogue de suppression sur Tab/ShiftTab et focusin, puis restituer au déclencheur seulement à la fermeture. Escape/overlay ferment seulement en idle. Repli sur le dialogue si tous les contrôles sont désactivés. Ne modifier ni SUPPRIMER ni la requête de suppression. Tester avec données simulées sans suppression réelle.",
+    "files": ["cortex/app/compte/DeleteAccount.tsx"]
+  },
+  {
+    "id": "AG-PIPELINE-001",
+    "provider": "agy",
+    "goal": "Revue statique du coordinateur : détecter les revues ou contrôles périmés, chemins hors périmètre et défauts de reprise après panne. Proposer des tests discriminants sans outils, paiement ni nouvelle dépendance.",
+    "files": [".gitignore", ".github/workflows/ci.yml", "tools/agent-pipeline/tasks.json", "tools/agent-pipeline/core.mjs", "tools/agent-pipeline/cli.mjs", "tools/agent-pipeline/core.test.mjs", "tools/agent-pipeline/README.md", "tools/agent-pipeline/browser-fixture.tsx", "tools/agent-pipeline/browser-check.mjs"]
+  }
+]

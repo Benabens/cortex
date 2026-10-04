@@ -17,6 +17,8 @@ export function DeleteAccount() {
   const [state, setState] = useState<"idle" | "deleting" | "done">("idle");
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const triggerWrapRef = useRef<HTMLDivElement>(null);
 
   const canDelete = typed.trim() === CONFIRM_WORD && state === "idle";
 
@@ -33,12 +35,51 @@ export function DeleteAccount() {
 
   useEffect(() => {
     if (!open) return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const getFocusables = () => Array.from(dialog.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+    )).filter((el) => el.tabIndex >= 0 && el.getClientRects().length > 0);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && state !== "deleting") setOpen(false);
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (state === "idle") setOpen(false);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const focusables = getFocusables();
+      const active = document.activeElement;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      // Un contrôle désactivé, ou le dialogue lui-même, n'est pas une étape
+      // du cycle Tab. Aucun contrôle actif pendant la suppression : repli.
+      if (!first || !focusables.includes(active as HTMLElement) || active === (e.shiftKey ? first : last)) {
+        e.preventDefault();
+        (e.shiftKey ? last ?? dialog : first ?? dialog).focus();
+      }
+    };
+    const onFocusIn = (e: FocusEvent) => {
+      if (e.target instanceof Node && !dialog.contains(e.target)) (getFocusables()[0] ?? dialog).focus();
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    document.addEventListener("focusin", onFocusIn);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onFocusIn);
+    };
   }, [open, state]);
+
+  useEffect(() => {
+    if (!open || state === "idle") return;
+    dialogRef.current?.focus();
+  }, [open, state]);
+
+  useEffect(() => {
+    if (!open) return;
+    const trigger = triggerWrapRef.current?.querySelector("button");
+    // Ne restituer qu'à la fermeture, jamais lors d'un changement d'état.
+    return () => { if (trigger?.isConnected) trigger.focus(); };
+  }, [open]);
 
   async function confirmDelete() {
     if (!canDelete) return;
@@ -73,7 +114,7 @@ export function DeleteAccount() {
         examens générés, faiblesses, planning, fichiers et crédits. Cette action est
         irréversible.
       </p>
-      <div className="mt-4">
+      <div ref={triggerWrapRef} className="mt-4">
         <Button variant="secondary" onClick={() => setOpen(true)}>
           Supprimer mon compte
         </Button>
@@ -83,11 +124,13 @@ export function DeleteAccount() {
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
           onMouseDown={(e) => {
-            if (e.target === e.currentTarget && state !== "deleting") setOpen(false);
+            if (e.target === e.currentTarget && state === "idle") setOpen(false);
           }}
         >
           <div
+            ref={dialogRef}
             role="dialog"
+            tabIndex={-1}
             aria-modal="true"
             aria-labelledby="del-title"
             className="w-full max-w-md rounded-xl border border-line-strong bg-surface-1 p-6 shadow-[var(--shadow-pop)]"

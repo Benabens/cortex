@@ -293,14 +293,26 @@ export { JOB_ACTIVE } from "./job-status";
  */
 export function useJob(jobId: number | null): Job | null {
   const { courseId } = useCourse();
-  // L'état porte l'id qu'il décrit : changer de job rend `null` sans écrire
-  // d'état dans l'effet (pas de rendu en cascade).
-  const [state, setState] = useState<{ id: number | null; job: Job | null }>({ id: null, job: null });
+  // Un id de job peut exister dans plusieurs cours. Comparer la paire dès le
+  // rendu empêche d'exposer le cours précédent avant l'exécution de l'effet.
+  const [state, setState] = useState<{
+    courseId: string | null;
+    id: number | null;
+    job: Job | null;
+  }>({ courseId: null, id: null, job: null });
 
   useEffect(() => {
     if (jobId == null || !courseId) return;
-    return watchJob(jobId, courseId, (job) => setState({ id: jobId, job }));
+    let cancelled = false;
+    const unsubscribe = watchJob(jobId, courseId, (job) => {
+      if (!cancelled) setState({ courseId, id: jobId, job });
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, [jobId, courseId]);
 
-  return state.id === jobId ? state.job : null;
+  if (jobId == null || !courseId) return null;
+  return state.courseId === courseId && state.id === jobId ? state.job : null;
 }

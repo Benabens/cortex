@@ -8,3 +8,6 @@
 /notes/
 /design/
 /*.html
+
+# Prompts, conversations et preuves du pipeline : restent locaux.
+/.agent-runs/
