@@ -3,6 +3,7 @@
 import { use, useCallback, useEffect, useState } from "react";
 import { useCourse } from "@/lib/ux/api";
 import { SafeHtml } from "@/components/ui/SafeHtml";
+import { OpenResponse } from "@/components/exam/OpenResponse";
 
 type Item = { id: number; idx: number; topic: string; type: "scq" | "mcq"; stem: string; options: string[]; verified: number | null };
 type Open = { id: number; concept: string; statement: string; solution: string };
@@ -48,7 +49,7 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
 
   const detailFor = (idx: number) => graded?.detail.find((d) => d.idx === idx);
 
-  if (err) return <main className="page page-narrow"><div className="card card-pad" style={{ color: "var(--red)" }}>{err}</div></main>;
+  if (err && !exam) return <main className="page page-narrow"><div role="alert" className="card card-pad" style={{ color: "var(--red)" }}>{err}</div></main>;
   if (!exam) return <main className="page page-narrow"><div className="skeleton" style={{ height: 200 }} /></main>;
 
   return (
@@ -63,6 +64,8 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
           </div>
         )}
       </header>
+
+      {err && <div role="alert" className="card card-pad mb-4" style={{ color: "var(--red)" }}>{err}</div>}
 
       {graded && (
         <div className="card card-pad mb-6 rise" style={{ borderColor: "var(--accent-line)", boxShadow: "var(--shadow-accent)" }}>
@@ -120,14 +123,12 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
                 <section key={o.id} className="card card-pad">
                   <div className="text-[12.5px] mb-2" style={{ color: "var(--ink-3)" }}>Question ouverte {i + 1} · {o.concept}</div>
                   <SafeHtml className="prose-exam text-[13.5px]" style={{ color: "var(--ink)" }} html={o.statement} />
-                  {!graded ? (
-                    <textarea className="textarea mt-3" rows={4} placeholder="Ta réponse (auto-évaluée : le corrigé s'affiche après correction)…" style={{ fontSize: 13 }} />
-                  ) : sol?.solution ? (
-                    <details className="mt-3" open>
-                      <summary className="text-[12.5px] cursor-pointer" style={{ color: "var(--green-ink)" }}>corrigé</summary>
-                      <SafeHtml className="prose-exam text-[13px] mt-2" style={{ color: "var(--ink-2)" }} html={sol.solution} />
-                    </details>
-                  ) : null}
+                  <OpenResponse
+                    key={`${courseId}:${id}:${o.id}`}
+                    questionId={o.id}
+                    graded={!!graded}
+                    solution={sol?.solution ?? null}
+                  />
                 </section>
               );
             })}
