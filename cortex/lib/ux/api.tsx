@@ -205,47 +205,46 @@ export function useApi<T>(path: string | null): ApiState<T> {
   // Sans cours (compte neuf), aucune route de données n'a de sens : on n'appelle
   // rien plutôt que d'aller chercher un tenant vide et d'afficher une erreur.
   const url = path && ready && courseId ? withCourse(path, courseId) : null;
-  const [data, setData] = useState<T | null>(null);
-  // loading reste vrai tant qu'un chemin est demandé mais que le cours n'est pas résolu
-  const [loading, setLoading] = useState<boolean>(!!path);
-  const [error, setError] = useState<ApiError | null>(null);
   const [tick, setTick] = useState(0);
-  const live = useRef(true);
-  useEffect(() => {
-    live.current = true;
-    return () => {
-      live.current = false;
-    };
-  }, []);
+  const request = useMemo(() => ({ url, tick }), [url, tick]);
+  const [state, setState] = useState<{
+    request: typeof request;
+    data: T | null;
+    error: ApiError | null;
+    loading: boolean;
+  } | null>(null);
 
   useEffect(() => {
-    if (!url) {
-      if (ready) setLoading(false);
-      return;
-    }
+    if (!url) return;
     let cancelled = false;
-    setLoading(true);
-    setError(null);
+    setState({
+      request,
+      data: null,
+      error: null,
+      loading: true,
+    });
     fetchJson<T>(url, tick > 0)
-      .then((d) => {
-        if (!cancelled && live.current) setData(d);
+      .then((data) => {
+        if (!cancelled) setState({ request, data, error: null, loading: false });
       })
       .catch((e: ApiError) => {
-        if (!cancelled && live.current) {
-          setData(null);
-          setError(e?.message ? e : { status: null, message: "Connexion impossible" });
-        }
-      })
-      .finally(() => {
-        if (!cancelled && live.current) setLoading(false);
+        if (!cancelled) setState({
+          request, data: null, loading: false,
+          error: e?.message ? e : { status: null, message: "Connexion impossible" },
+        });
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [url, tick, ready]);
+    return () => { cancelled = true; };
+  }, [url, tick, request]);
 
   const refetch = useCallback(() => setTick((t) => t + 1), []);
-  return { data, loading, error, refetch };
+  // Masque l'ancien cours dès le rendu, avant l'exécution des effets.
+  const current = url && state?.request === request ? state : null;
+  return {
+    data: current?.data ?? null,
+    loading: !!path && (!ready || (!!url && (!current || current.loading))),
+    error: current?.error ?? null,
+    refetch,
+  };
 }
 
 /** POST JSON vers une route /api/* pour le cours courant. Jette ApiError. */
@@ -293,14 +292,26 @@ export { JOB_ACTIVE } from "./job-status";
  */
 export function useJob(jobId: number | null): Job | null {
   const { courseId } = useCourse();
-  // L'état porte l'id qu'il décrit : changer de job rend `null` sans écrire
-  // d'état dans l'effet (pas de rendu en cascade).
-  const [state, setState] = useState<{ id: number | null; job: Job | null }>({ id: null, job: null });
+  // Un id de job peut exister dans plusieurs cours. Comparer la paire dès le
+  // rendu empêche d'exposer le cours précédent avant l'exécution de l'effet.
+  const [state, setState] = useState<{
+    courseId: string | null;
+    id: number | null;
+    job: Job | null;
+  }>({ courseId: null, id: null, job: null });
 
   useEffect(() => {
     if (jobId == null || !courseId) return;
-    return watchJob(jobId, courseId, (job) => setState({ id: jobId, job }));
+    let cancelled = false;
+    const unsubscribe = watchJob(jobId, courseId, (job) => {
+      if (!cancelled) setState({ courseId, id: jobId, job });
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, [jobId, courseId]);
 
-  return state.id === jobId ? state.job : null;
+  if (jobId == null || !courseId) return null;
+  return state.courseId === courseId && state.id === jobId ? state.job : null;
 }
