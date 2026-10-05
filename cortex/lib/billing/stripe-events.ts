@@ -200,20 +200,22 @@ function foreign(kind: string, id: string | null | undefined, why: string): Hand
 export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions = {}): Promise<HandleResult> {
   if (await isProcessed(event.id)) return { ok: true, action: "duplicate", duplicate: true, credited: false, reversed: false };
 
+  // Date de l'événement CHEZ STRIPE : elle ordonne les changements de statut (cf. credits : ordre des événements).
+  const at = unixToStr(event.created);
   let res: HandleResult;
   switch (event.type) {
     case "checkout.session.completed":
     case "checkout.session.async_payment_succeeded":
-      res = await onCheckout(event.data.object as Stripe.Checkout.Session, event.id);
+      res = await onCheckout(event.data.object as Stripe.Checkout.Session, event.id, at);
       break;
     case "invoice.paid":
-      res = await onInvoicePaid(event.data.object as Stripe.Invoice, opts.lookup);
+      res = await onInvoicePaid(event.data.object as Stripe.Invoice, opts.lookup, at);
       break;
     case "customer.subscription.updated":
-      res = await onSubscriptionUpdated(event.data.object as Stripe.Subscription, opts.lookup);
+      res = await onSubscriptionUpdated(event.data.object as Stripe.Subscription, opts.lookup, at);
       break;
     case "customer.subscription.deleted":
-      res = await onSubscriptionDeleted(event.data.object as Stripe.Subscription, opts.lookup);
+      res = await onSubscriptionDeleted(event.data.object as Stripe.Subscription, opts.lookup, at);
       break;
     case "charge.refunded": {
       const charge = event.data.object as Stripe.Charge;
@@ -243,7 +245,7 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
   return res;
 }
 
-async function onCheckout(s: Stripe.Checkout.Session, eventId: string): Promise<HandleResult> {
+async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: string | null): Promise<HandleResult> {
   const userId = s.metadata?.cortexUserId ?? null;
   const plan = s.metadata?.plan ?? null;
   // À Cortex seulement : plan Cortex ou cortexUserId (et jamais une autre app déclarée).
@@ -254,7 +256,7 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string): Promise<
   if (s.mode === "subscription") {
     if (!userId) return { ok: false, action: "checkout-sub", error: "cortexUserId manquant" };
     // Pas de crédit ici : c'est invoice.paid qui attribue. On lie client → utilisateur.
-    await linkSubscription({ userId, customerId: idOf(s.customer), subscriptionId: idOf(s.subscription), plan });
+    await linkSubscription({ userId, customerId: idOf(s.customer), subscriptionId: idOf(s.subscription), plan, at });
     return { ok: true, action: "subscription-linked" };
   }
 
@@ -312,7 +314,7 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string): Promise<
   return { ok: true, action: "pack-credited", credited };
 }
 
-async function onInvoicePaid(invoice: Stripe.Invoice, lookup?: StripeLookup): Promise<HandleResult> {
+async function onInvoicePaid(invoice: Stripe.Invoice, lookup: StripeLookup | undefined, at: string | null): Promise<HandleResult> {
   const inv = invoice as AnyInvoice;
   const subId = invoiceSubscriptionId(inv);
   if (!subId) return { ok: true, action: "invoice-non-subscription" };
@@ -340,7 +342,7 @@ async function onInvoicePaid(invoice: Stripe.Invoice, lookup?: StripeLookup): Pr
   const periodEnd = invoicePeriodEnd(inv);
   if (!periodEnd) throw new Error(`invoice.paid : période introuvable (sub ${subId}) — retry`);
   const plan = keys.find((k) => CORTEX_LOOKUP_KEYS.has(k)) ?? keys[0] ?? null;
-  await grantSubscriptionMonth({ userId, customerId, subscriptionId: subId, plan, periodEnd, periodStart: invoicePeriodStart(inv) });
+  await grantSubscriptionMonth({ userId, customerId, subscriptionId: subId, plan, periodEnd, periodStart: invoicePeriodStart(inv), at });
   if (inv.id) {
     await authRun(
       `INSERT INTO stripe_invoices (invoice_id, subscription_id, customer_id, payment_intent, user_id, granted_centi, period_end, created_at)
@@ -364,25 +366,24 @@ async function subscriptionIsCortex(sub: Stripe.Subscription, lookup?: StripeLoo
   return linked ? false : `prix ${(keys.length ? keys : priceIdsOf(sub.items)).join(",") || "?"} inconnu, client non lié`;
 }
 
-async function onSubscriptionUpdated(sub: Stripe.Subscription, lookup?: StripeLookup): Promise<HandleResult> {
+async function onSubscriptionUpdated(sub: Stripe.Subscription, lookup: StripeLookup | undefined, at: string | null): Promise<HandleResult> {
   const why = await subscriptionIsCortex(sub, lookup);
   if (why) return foreign("subscription", sub.id, why);
-  // cancel_at_period_end : l'abonnement reste ACTIF jusqu'à la fin de période ; le vrai arrêt vient de .deleted.
-  // Période lue dans les DEUX formats d'API : sur la subscription (ancien), sinon
-  // sur son premier item (famille « basil » 2025+, où `current_period_*` a quitté
-  // la subscription : sans ce repli la valeur est undefined et la mise à jour de
-  // période ne s'applique pas).
-  const item0 = (sub.items as { data?: Array<{ current_period_end?: number; current_period_start?: number }> } | undefined)?.data?.[0];
-  const periodEnd = unixToStr((sub as { current_period_end?: number }).current_period_end ?? item0?.current_period_end);
-  const periodStart = unixToStr((sub as { current_period_start?: number }).current_period_start ?? item0?.current_period_start);
-  await setSubscriptionStatus({ subscriptionId: sub.id, customerId: idOf(sub.customer), status: sub.status, periodEnd, periodStart });
+  // Seul le STATUT est repris. La période que porte l'événement est celle que
+  // Stripe ANNONCE : au renouvellement il l'avance une heure avant de tenter le
+  // paiement, et la laisse avancée si le paiement échoue. La période qui donne
+  // des crédits est la période PAYÉE, écrite par invoice.paid et par lui seul.
+  // Résiliation programmée : l'abonnement reste en règle jusqu'à la fin de la
+  // période payée (le vrai arrêt vient de .deleted) ; on la retient pour l'écran.
+  const canceling = !!sub.cancel_at_period_end || (typeof sub.cancel_at === "number" && sub.cancel_at > 0);
+  await setSubscriptionStatus({ subscriptionId: sub.id, customerId: idOf(sub.customer), status: sub.status, at, cancelAtPeriodEnd: canceling });
   return { ok: true, action: "subscription-updated" };
 }
 
-async function onSubscriptionDeleted(sub: Stripe.Subscription, lookup?: StripeLookup): Promise<HandleResult> {
+async function onSubscriptionDeleted(sub: Stripe.Subscription, lookup: StripeLookup | undefined, at: string | null): Promise<HandleResult> {
   const why = await subscriptionIsCortex(sub, lookup);
   if (why) return foreign("subscription", sub.id, why);
-  await setSubscriptionStatus({ subscriptionId: sub.id, customerId: idOf(sub.customer), status: "canceled", clearRemaining: true });
+  await setSubscriptionStatus({ subscriptionId: sub.id, customerId: idOf(sub.customer), status: "canceled", at, cancelAtPeriodEnd: false, clearRemaining: true });
   log("info", "billing.subscription_deleted", { subscription: sub.id });
   return { ok: true, action: "subscription-deleted" };
 }
