@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { signOut } from "next-auth/react";
 import { Button } from "@/components/ui/Button";
 
@@ -120,7 +121,10 @@ export function DeleteAccount() {
         </Button>
       </div>
 
-      {open && (
+      {/* Rendu dans <body> : sous la page, l'enveloppe de transition (.page-enter) garde une
+          transformation, et un ancêtre transformé devient le repère des éléments `fixed` —
+          le dialogue se centrait sur la page entière et son titre sortait de l'écran. */}
+      {open && createPortal(
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
           onMouseDown={(e) => {
@@ -133,7 +137,7 @@ export function DeleteAccount() {
             tabIndex={-1}
             aria-modal="true"
             aria-labelledby="del-title"
-            className="w-full max-w-md rounded-xl border border-line-strong bg-surface-1 p-6 shadow-[var(--shadow-pop)]"
+            className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-xl border border-line-strong bg-surface-1 p-6 shadow-[var(--shadow-pop)]"
           >
             <h3 id="del-title" className="text-[1.05rem] font-semibold text-ink-1">
               Supprimer votre compte ?
@@ -184,17 +188,16 @@ export function DeleteAccount() {
                 type="button"
                 onClick={confirmDelete}
                 disabled={!canDelete}
-                className="inline-flex h-11 items-center justify-center rounded-md border px-4 text-sm font-semibold text-white transition-[background,opacity] duration-150 disabled:cursor-not-allowed disabled:opacity-50"
-                style={{
-                  background: "var(--color-danger)",
-                  borderColor: "transparent",
-                }}
+                // Texte sombre sur le rouge : 5,9:1 (blanc : 3,2:1, sous le seuil AA de 4,5:1).
+                // Couleurs en classes : un `style` inline l'emporterait sur le survol.
+                className="inline-flex h-11 items-center justify-center rounded-md border border-transparent bg-danger px-4 text-sm font-semibold text-[#111214] transition-[background-color,opacity] duration-150 enabled:hover:bg-danger-hi disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {state === "deleting" ? "Suppression…" : "Supprimer définitivement"}
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </section>
   );

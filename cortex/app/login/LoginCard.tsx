@@ -89,8 +89,8 @@ export function LoginCard({
                 setBusy("google");
                 void signIn("google", { callbackUrl });
               }}
-              className="inline-flex h-12 w-full items-center justify-center gap-3 rounded-lg text-[0.92rem] font-semibold transition-[background,opacity] duration-150 hover:bg-white disabled:opacity-60"
-              style={{ background: "#ececee", color: "#111214" }}
+              // Couleurs en classes : un `style` inline l'emporterait sur le survol.
+              className="inline-flex h-12 w-full items-center justify-center gap-3 rounded-lg bg-[#ececee] text-[0.92rem] font-semibold text-[#111214] transition-[background-color,opacity] duration-150 enabled:hover:bg-white enabled:active:bg-[#dedee2] disabled:cursor-not-allowed disabled:opacity-60"
             >
               <GoogleGlyph />
               {busy === "google" ? "Redirection…" : "Continuer avec Google"}
