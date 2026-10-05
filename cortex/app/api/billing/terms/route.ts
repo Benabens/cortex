@@ -21,22 +21,15 @@ export const dynamic = "force-dynamic";
  */
 export const POST = withBodyLimit(async function POST(req: NextRequest) {
   useUser(req);
-  const body = (await readJson(req, {})) as { version?: unknown; withdrawal?: unknown };
+  const body = (await readJson(req, {})) as { version?: unknown };
   const version = String(body.version ?? "").trim();
   if (!version || version !== termsVersion()) {
     return NextResponse.json({ error: `Version des conditions inattendue (courante : ${termsVersion()}).` }, { status: 400 });
   }
-  if (body.withdrawal !== true) {
-    return NextResponse.json(
-      { error: "Coche aussi la demande d’accès immédiat au service (renonciation au droit de rétractation dès l’utilisation des crédits) : elle est obligatoire avant tout paiement." },
-      { status: 400 },
-    );
-  }
   const t = nowStr();
   await authRun(
-    `INSERT INTO terms_acceptances (user_id, version, accepted_at, withdrawal_waiver_at) VALUES (?,?,?,?)
-     ON CONFLICT (user_id, version) DO UPDATE SET withdrawal_waiver_at = coalesce(terms_acceptances.withdrawal_waiver_at, excluded.withdrawal_waiver_at)`,
-    currentUser(), version, t, t,
+    `INSERT INTO terms_acceptances (user_id, version, accepted_at) VALUES (?,?,?) ON CONFLICT (user_id, version) DO NOTHING`,
+    currentUser(), version, t,
   );
   return NextResponse.json({ ok: true, version });
 });

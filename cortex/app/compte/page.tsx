@@ -1,5 +1,6 @@
 import { auth, authEnabled } from "@/lib/auth";
 import { BillingPanel } from "./BillingPanel";
+import { WithdrawalForm } from "./WithdrawalForm";
 import { DeleteAccount } from "./DeleteAccount";
 import { ExportData } from "./ExportData";
 
@@ -30,6 +31,7 @@ export default async function ComptePage() {
       )}
 
       <BillingPanel />
+      <WithdrawalForm />
 
       {enabled ? (
         <>

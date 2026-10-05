@@ -47,6 +47,9 @@ before(async () => {
   await runWithUser("alice", () => runWithCourse("reseaux", () => q.run(`INSERT INTO weaknesses (topic, severity) VALUES (?, ?)`, "sous-réseaux alice", 3)));
   await runWithUser("bob", () => runWithCourse("bobcours", () => q.run(`INSERT INTO weaknesses (topic, severity) VALUES (?, ?)`, "bob-secret-topic", 3)));
   await credits.addTransaction("alice", 1000, "achat", "test:alice");
+  await authRun(`INSERT INTO terms_acceptances (user_id, version, accepted_at) VALUES (?,?,?)`, "alice", "2026-10", "2026-10-01 10:00:00");
+  await authRun(`INSERT INTO purchase_consents (stripe_session_id, user_id, purchase_type, terms_version, consented_at) VALUES (?,?,?,?,?)`, "cs_export", "alice", "pack", "2026-10", "2026-10-01 10:01:00");
+  await authRun(`INSERT INTO withdrawal_requests (id, user_id, email, purchase_type, purchase_id, requested_at, status) VALUES (?,?,?,?,?,?,?)`, "wr_export", "alice", "alice@example.com", "pack", "cs_export", "2026-10-02 10:00:00", "reçue");
   await credits.addTransaction("bob", 500, "achat", "test:bob");
   for (const [u, c] of [["alice", "reseaux"], ["bob", "bobcours"]]) {
     const dir = path.join(tmp, "u", userSlug(u), c, "refs");
@@ -68,6 +71,8 @@ test("writeAccountExport : profil, cours, crédits, tables du tenant en JSON —
   assert.deepEqual(r.courses, ["reseaux"]);
   const profil = JSON.parse(fs.readFileSync(path.join(out, "export", "profil.json"), "utf8"));
   assert.equal(profil.user.email, "alice@example.com");
+  assert.equal(profil.consents[0].purchase_type, "pack");
+  assert.equal(profil.withdrawals[0].status, "reçue");
   const cours = JSON.parse(fs.readFileSync(path.join(out, "export", "cours.json"), "utf8"));
   assert.deepEqual(cours.map((c: { id: string }) => c.id), ["reseaux"]);
   const credits = JSON.parse(fs.readFileSync(path.join(out, "export", "credits.json"), "utf8"));
