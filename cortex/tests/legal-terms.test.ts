@@ -16,7 +16,8 @@ import { NextRequest } from "next/server";
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-legal-"));
 process.env.CORTEX_DATA_DIR = tmp;
 process.env.BILLING_ENABLED = "1";
-process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+// Clé d'allure LIVE : en production ouverte au public, une clé de test ferme la vente (tests/purchases-test-mode).
+process.env.STRIPE_SECRET_KEY = "sk_live_fake";
 process.env.STRIPE_WEBHOOK_SECRET = "whsec_fake";
 process.env.AUTH_URL = "https://cortex.example.ch";
 process.env.LEGAL_TERMS_VERSION = "2026-09";
