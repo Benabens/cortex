@@ -37,6 +37,10 @@ export function inGoodStanding(status: string | null | undefined): boolean {
 }
 /** Statuts Stripe d'un abonnement TERMINÉ : plus rien ne sera facturé. */
 const ENDED = new Set(["canceled", "incomplete_expired"]);
+/** Stripe tient-il encore cet abonnement pour vivant ? (en règle OU en attente de paiement : il facture ou relance.) */
+export function stillBilling(status: string | null | undefined): boolean {
+  return !!status && !ENDED.has(status);
+}
 
 /**
  * État d'un abonnement vu de l'app — la lecture UNIQUE dont dépendent les
