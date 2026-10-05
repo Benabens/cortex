@@ -68,22 +68,15 @@ test("acceptation des CGV : tracée (utilisateur, version, date), exposée par /
   assert.deepEqual(Object.keys(before_.legal).sort(), ["notice", "privacy", "refund", "terms"]);
   const bad = await terms.POST(post("http://cortex.test/api/billing/terms", { version: "2020-01" }));
   assert.equal(bad.status, 400, "une autre version que la courante n'est pas une acceptation");
-  // Rétractation (L221-28 13°) : l'accord exprès à l'exécution immédiate est OBLIGATOIRE avec les CGV.
-  const noWaiver = await terms.POST(post("http://cortex.test/api/billing/terms", { version: "2026-09" }));
-  const noWaiverText = await noWaiver.text();
-  assert.equal(noWaiver.status, 400, noWaiverText);
-  assert.match(noWaiverText, /rétractation/i);
-  const ok = await terms.POST(post("http://cortex.test/api/billing/terms", { version: "2026-09", withdrawal: true }));
+  const ok = await terms.POST(post("http://cortex.test/api/billing/terms", { version: "2026-09" }));
   assert.equal(ok.status, 200, await ok.text());
   const after_ = await (await billing.GET(post("http://cortex.test/api/billing", {}) as never)).json();
   assert.equal(after_.terms.accepted, true);
   assert.match(after_.terms.acceptedAt, /^\d{4}-\d{2}-\d{2}/);
-  assert.equal(after_.terms.withdrawalAccepted, true);
-  assert.match(after_.terms.withdrawalAcceptedAt, /^\d{4}-\d{2}-\d{2}/);
   const { authGet } = await import("../db/auth-store");
   const row = await authGet<{ version: string; withdrawal_waiver_at: string | null }>(`SELECT version, withdrawal_waiver_at FROM terms_acceptances WHERE user_id = ?`, "alice");
   assert.equal(row?.version, "2026-09");
-  assert.match(row?.withdrawal_waiver_at ?? "", /^\d{4}-\d{2}-\d{2}/, "renonciation tracée avec sa date");
+  assert.equal(row?.withdrawal_waiver_at, null, "les CGV ne valent pas renonciation générale");
   // Rejouer l'acceptation ne crée pas de doublon et ne réécrit pas les dates.
   assert.equal((await terms.POST(post("http://cortex.test/api/billing/terms", { version: "2026-09", withdrawal: true }))).status, 200);
   const again = await authGet<{ withdrawal_waiver_at: string | null; n: number }>(`SELECT withdrawal_waiver_at, (SELECT count(*) FROM terms_acceptances WHERE user_id = 'alice') n FROM terms_acceptances WHERE user_id = ?`, "alice");
@@ -91,7 +84,7 @@ test("acceptation des CGV : tracée (utilisateur, version, date), exposée par /
   assert.equal(again?.withdrawal_waiver_at, row?.withdrawal_waiver_at);
 });
 
-test("compte ayant accepté les CGV AVANT la case de rétractation : checkout 400 tant qu'elle manque, puis OK après", async () => {
+test("checkout exige le consentement correspondant à l'achat", async () => {
   setLegal();
   const { authRun, authGet } = await import("../db/auth-store");
   const { nowStr } = await import("../db/q");
@@ -101,14 +94,7 @@ test("compte ayant accepté les CGV AVANT la case de rétractation : checkout 40
   const r400Text = await r400.text();
   assert.equal(r400.status, 400, r400Text);
   assert.match(r400Text, /rétractation/i);
-  const terms = await import("../app/api/billing/terms/route");
-  assert.equal((await terms.POST(post("http://cortex.test/api/billing/terms", { version: "2026-09", withdrawal: true }, "carl"))).status, 200);
-  const row = await authGet<{ accepted_at: string; withdrawal_waiver_at: string | null }>(`SELECT accepted_at, withdrawal_waiver_at FROM terms_acceptances WHERE user_id = ?`, "carl");
-  assert.ok(row?.withdrawal_waiver_at, "la renonciation s'ajoute à la ligne existante");
-  // La garde légale est levée : l'état exposé le confirme (le checkout appellerait ensuite Stripe — hors de ce test hermétique).
-  const { termsState } = await import("../lib/legal");
-  const st = await termsState("carl");
-  assert.equal(st.accepted && st.withdrawalAccepted, true);
+  await assert.rejects(POST(post("http://cortex.test/api/billing/checkout", { plan: "credits_10", consent: true }, "carl")), /Invalid API Key/);
 });
 
 test("checkout : sans acceptation des CGV → 403 avant tout appel Stripe ; achat fermé en prod sans liens → 503", async () => {
@@ -125,12 +111,14 @@ test("checkout : sans acceptation des CGV → 403 avant tout appel Stripe ; acha
   delete env.NODE_ENV;
 });
 
-test("la suppression de compte efface l'acceptation des CGV", async () => {
+test("la suppression pseudonymise et conserve l'acceptation des CGV pendant cinq ans", async () => {
   const { authRun, authGet } = await import("../db/auth-store");
   await authRun(`INSERT INTO users (id, email, name) VALUES (?,?,?)`, "alice", "alice@example.com", "alice");
   const { deleteAccount } = await import("../lib/account-deletion");
   await deleteAccount("alice");
-  assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM terms_acceptances WHERE user_id = ?`, "alice"))?.n, 0);
+  const kept = await authGet<{ user_id: string; retained_until: string }>(`SELECT user_id, retained_until FROM terms_acceptances WHERE version = ?`, "2026-09");
+  assert.notEqual(kept?.user_id, "alice");
+  assert.ok(new Date(kept!.retained_until).getTime() > Date.now() + 4.9 * 365 * 86400_000);
 });
 
 test("un compte déjà abonné ne peut pas ouvrir un second abonnement (refus serveur, avant tout appel Stripe)", async () => {
@@ -146,7 +134,7 @@ test("un compte déjà abonné ne peut pas ouvrir un second abonnement (refus se
     periodEnd: new Date(Date.now() + 29 * 86400_000).toISOString().slice(0, 19).replace("T", " "),
   });
   for (const plan of ["pro_monthly", "pro_yearly"]) {
-    const r = await POST(post("http://cortex.test/api/billing/checkout", { plan }, "nina"));
+    const r = await POST(post("http://cortex.test/api/billing/checkout", { plan, consent: true }, "nina"));
     const body = await r.text();
     assert.equal(r.status, 409, `${plan} → ${r.status} ${body}`);
     assert.match(body, /abonnement/i);
@@ -155,7 +143,7 @@ test("un compte déjà abonné ne peut pas ouvrir un second abonnement (refus se
   // garde ne s'y applique pas, la route va jusqu'à Stripe — qui refuse la clé
   // factice de ce test. C'est la preuve qu'on a passé la garde.
   await assert.rejects(
-    POST(post("http://cortex.test/api/billing/checkout", { plan: "credits_10" }, "nina")),
+    POST(post("http://cortex.test/api/billing/checkout", { plan: "credits_10", consent: true }, "nina")),
     /Invalid API Key/,
   );
 });
