@@ -42,6 +42,11 @@ export function stripeConfigured(env: Partial<NodeJS.ProcessEnv> = process.env):
   return !!(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET);
 }
 
+/** Clé Stripe LIVE (secrète ou restreinte) ? Toute autre clé accepte les cartes de test. */
+export function stripeLiveKey(env: Partial<NodeJS.ProcessEnv> = process.env): boolean {
+  return /^(sk|rk)_live_/.test(env.STRIPE_SECRET_KEY ?? "");
+}
+
 /** L'achat est-il ouvert ? Sinon, la raison à afficher (jamais un bouton mort sans explication). */
 export function purchasesAllowed(env: Partial<NodeJS.ProcessEnv> = process.env): { enabled: boolean; reason: string | null } {
   if (!billingEnabled()) return { enabled: false, reason: "La facturation n'est pas activée sur cette instance." };
@@ -51,6 +56,12 @@ export function purchasesAllowed(env: Partial<NodeJS.ProcessEnv> = process.env):
   // vente ; seul `next dev` (poste de dev) peut tester un paiement sans liens.
   if (env.NODE_ENV === "production" && !legalReady(env)) {
     return { enabled: false, reason: "Les achats sont suspendus : les documents légaux (CGV, confidentialité, remboursement, mentions) ne sont pas publiés." };
+  }
+  // Une clé de TEST accepte les cartes de test : en production ouverte à tous,
+  // chacun s'offrirait de vrais crédits. La vente publique attend la clé live ;
+  // la clé de test reste utilisable en lancement fermé (INVITE_ONLY=1) et hors production.
+  if (env.NODE_ENV === "production" && !stripeLiveKey(env) && env.INVITE_ONLY !== "1") {
+    return { enabled: false, reason: "Les achats ouvrent bientôt : le paiement n'est pas encore activé." };
   }
   return { enabled: true, reason: null };
 }
