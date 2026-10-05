@@ -47,10 +47,11 @@ const noSecondSubscription = (html: string) => {
   assert.ok(subs.every(isDisabled), "aucun second abonnement proposé");
 };
 
-test("renouvellement en cours d'encaissement : l'écran le dit, sans alarmer ni proposer de se réabonner", async () => {
+test("paiement en cours de confirmation (premier achat ou renouvellement) : l'écran le dit, sans alarmer ni proposer de se réabonner", async () => {
   const html = await render(sub({ standing: "renewing", live: false, creditsThisMonth: 0, nextRechargeAt: null }));
-  assert.match(html, /renouvellement en cours/);
+  assert.match(html, /paiement en cours/);
   assert.match(html, /dès que le paiement est confirmé/);
+  assert.match(html, /jusqu’à une heure lors d’un renouvellement/);
   assert.ok(!/Aucun abonnement/.test(html));
   noSecondSubscription(html);
 });

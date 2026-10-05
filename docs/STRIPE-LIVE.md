@@ -268,8 +268,8 @@ achat : à traiter à la main.
   l'état de l'abonnement.
 - **Une heure sans crédits d'abonnement à chaque renouvellement.** Stripe
   crée la facture de renouvellement en brouillon et ne l'encaisse qu'environ une
-  heure plus tard. Pendant ce délai l'app affiche « renouvellement en cours » ;
-  les 20 crédits arrivent avec le paiement.
+  heure plus tard. Pendant ce délai l'app affiche « paiement en cours » ; les
+  20 crédits arrivent avec le paiement.
 - **Paiement en échec** : l'app affiche « paiement en échec » et renvoie vers le
   portail. L'abonné ne peut pas ouvrir un second abonnement tant que le premier
   n'est pas réglé ou annulé.

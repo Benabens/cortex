@@ -6,6 +6,7 @@ import { ExternalLink, RotateCw, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Panel } from "@/components/ui/primitives";
+import type { Standing } from "@/lib/billing/subscription-windows";
 import { cn } from "@/lib/ux/cn";
 
 /**
@@ -42,9 +43,9 @@ type Billing = {
   subscription: {
     status: string; live: boolean; plan: string | null; creditsThisMonth: number; monthlyCredits: number;
     periodEnd: string | null; nextRechargeAt: string | null; manageable: boolean;
-    /** État lu par le serveur (lib/billing/subscription-windows) ; absent d'une réponse d'avant ce champ. */
-    standing?: "none" | "live" | "renewing" | "unpaid" | "suspended";
-    cancelsAtPeriodEnd?: boolean;
+    /** État lu par le serveur : en règle, paiement en cours, impayé, suspendu, terminé. */
+    standing: Standing;
+    cancelsAtPeriodEnd: boolean;
   } | null;
   costs: { exam: number; qcm: number; exercise: number; assist: number };
   transactions: Tx[];
@@ -202,7 +203,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
   }
 
   const sub = data.subscription;
-  const standing = sub?.standing ?? (sub?.live ? "live" : "none");
+  const standing: Standing = sub?.standing ?? "none";
   const subLive = standing === "live";
   // Tant que Stripe tient l'abonnement pour vivant (même impayé), on n'en propose pas un second.
   const hasSub = standing !== "none";
@@ -255,7 +256,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
             <dt className="flex items-center gap-2 text-ink-3">
               Abonnement
               {standing === "live" && <Badge tone={canceling ? "warning" : "success"} size="xs">{canceling ? "résiliation programmée" : "actif"}</Badge>}
-              {standing === "renewing" && <Badge tone="neutral" size="xs">renouvellement en cours</Badge>}
+              {standing === "renewing" && <Badge tone="neutral" size="xs">paiement en cours</Badge>}
               {standing === "unpaid" && <Badge tone="danger" size="xs">paiement en échec</Badge>}
               {standing === "suspended" && <Badge tone="warning" size="xs">suspendu</Badge>}
             </dt>
@@ -270,7 +271,10 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
                 </>
               )}
               {standing === "renewing" && (
-                <span className="text-ink-2">Tes crédits du mois arrivent dès que le paiement est confirmé, en général sous une heure.</span>
+                <span className="text-ink-2">
+                  Tes crédits du mois arrivent dès que le paiement est confirmé : quelques secondes après un achat,
+                  jusqu’à une heure lors d’un renouvellement.
+                </span>
               )}
               {standing === "unpaid" && (
                 <span className="text-ink-2">
