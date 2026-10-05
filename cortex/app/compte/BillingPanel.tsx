@@ -40,6 +40,9 @@ type Billing = {
   subscription: {
     status: string; live: boolean; plan: string | null; creditsThisMonth: number; monthlyCredits: number;
     periodEnd: string | null; nextRechargeAt: string | null; manageable: boolean;
+    /** État lu par le serveur (lib/billing/subscription-windows) ; absent d'une réponse d'avant ce champ. */
+    standing?: "none" | "live" | "renewing" | "unpaid" | "suspended";
+    cancelsAtPeriodEnd?: boolean;
   } | null;
   costs: { exam: number; qcm: number; exercise: number; assist: number };
   transactions: Tx[];
@@ -196,7 +199,11 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
   }
 
   const sub = data.subscription;
-  const subLive = !!sub?.live;
+  const standing = sub?.standing ?? (sub?.live ? "live" : "none");
+  const subLive = standing === "live";
+  // Tant que Stripe tient l'abonnement pour vivant (même impayé), on n'en propose pas un second.
+  const hasSub = standing !== "none";
+  const canceling = subLive && !!sub?.cancelsAtPeriodEnd;
   const canBuy = data.purchase.enabled && data.terms.accepted && data.terms.withdrawalAccepted;
   const legalOk = !!(data.legal.terms && data.legal.refund);
   // La case suit la décision de l'API (purchase.enabled) : en production sans
@@ -244,19 +251,34 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
           <div>
             <dt className="flex items-center gap-2 text-ink-3">
               Abonnement
-              {sub && subLive && <Badge tone={sub.status === "canceled" ? "warning" : "success"} size="xs">{sub.status === "canceled" ? "résilié : actif jusqu’à la fin de période" : "actif"}</Badge>}
+              {standing === "live" && <Badge tone={canceling ? "warning" : "success"} size="xs">{canceling ? "résiliation programmée" : "actif"}</Badge>}
+              {standing === "renewing" && <Badge tone="neutral" size="xs">renouvellement en cours</Badge>}
+              {standing === "unpaid" && <Badge tone="danger" size="xs">paiement en échec</Badge>}
+              {standing === "suspended" && <Badge tone="warning" size="xs">suspendu</Badge>}
             </dt>
             <dd className="mt-0.5 text-ink-1">
-              {sub && subLive ? (
+              {sub && subLive && (
                 <>
                   <span className="font-medium">{nf.format(sub.creditsThisMonth)} / {nf.format(sub.monthlyCredits)}</span> crédits ce mois-ci
                   {sub.nextRechargeAt && <span className="text-ink-3"> · recharge le {dateFr(sub.nextRechargeAt)}</span>}
-                  {!sub.nextRechargeAt && sub.periodEnd && <span className="text-ink-3"> · jusqu’au {dateFr(sub.periodEnd)}</span>}
+                  {canceling && sub.periodEnd && <span className="text-ink-3"> · se termine le {dateFr(sub.periodEnd)}</span>}
+                  {!canceling && !sub.nextRechargeAt && sub.periodEnd && <span className="text-ink-3"> · jusqu’au {dateFr(sub.periodEnd)}</span>}
                   <div className="mt-0.5 text-[0.78rem] text-ink-4">Non reportables : ce qui n’est pas utilisé dans le mois est perdu. Consommés avant tes crédits achetés.</div>
                 </>
-              ) : (
-                <span className="text-ink-3">Aucun abonnement.</span>
               )}
+              {standing === "renewing" && (
+                <span className="text-ink-2">Tes crédits du mois arrivent dès que le paiement est confirmé, en général sous une heure.</span>
+              )}
+              {standing === "unpaid" && (
+                <span className="text-ink-2">
+                  Le dernier paiement n’est pas passé : pas de crédits d’abonnement tant qu’il n’est pas réglé.
+                  Mets à jour ton moyen de paiement depuis « Gérer mon abonnement ». Tes crédits achetés restent utilisables.
+                </span>
+              )}
+              {standing === "suspended" && (
+                <span className="text-ink-2">Un paiement a été remboursé ou contesté : l’abonnement reprend à la prochaine facture payée.</span>
+              )}
+              {standing === "none" && <span className="text-ink-3">Aucun abonnement.</span>}
             </dd>
           </div>
           <div>
@@ -290,14 +312,14 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
             const isSub = o.kind === "subscription";
             // `busy` couvre TOUTES les offres : pendant une redirection vers Stripe,
             // aucune autre ne doit pouvoir ouvrir une seconde session de paiement.
-            const disabled = !canBuy || !!busy || (isSub && subLive);
+            const disabled = !canBuy || !!busy || (isSub && hasSub);
             return (
               <li key={o.plan} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-3.5">
                 <div className="min-w-0">
                   <div className="text-[0.9rem] font-medium text-ink-1">{o.label}</div>
                   <div className="text-[0.8rem] text-ink-3">
                     {isSub ? `${nf.format(o.credits)} crédits par mois, non reportables` : `${nf.format(o.credits)} crédits, sans date d’expiration`}
-                    {isSub && subLive && <span> · tu as déjà un abonnement</span>}
+                    {isSub && hasSub && <span> · tu as déjà un abonnement</span>}
                   </div>
                   {/* Conditions de reconduction, à côté du bouton et AVANT tout achat :
                       elles ne vivaient que dans le bloc « Gérer mon abonnement », invisible
