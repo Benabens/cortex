@@ -19,7 +19,8 @@ async function sendReceipt(to: string | null, requestedAt: string, purchaseId: s
   const key = process.env.RESEND_API_KEY;
   if (!key) { log("info", "withdrawal.email_skipped", { purchaseId, reason: "RESEND_API_KEY absente" }); return; }
   const text = `Nous accusons réception de votre demande de rétractation du ${requestedAt} pour l’achat ${purchaseId}. Elle sera traitée manuellement dans Stripe.`;
-  const recipients = [...new Set([to, "abensur.benjamin@gmail.com"].filter((recipient): recipient is string => !!recipient))];
+  const publisher = process.env.PUBLISHER_EMAIL?.trim() || null;
+  const recipients = [...new Set([to, publisher].filter((recipient): recipient is string => !!recipient))];
   for (const recipient of recipients) {
     try {
       const res = await fetch("https://api.resend.com/emails", { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ from: process.env.AUTH_EMAIL_FROM ?? "Cortex <onboarding@resend.dev>", to: recipient, subject: "Demande de rétractation reçue", text }) });
