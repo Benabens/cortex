@@ -121,7 +121,7 @@ export function BillingPanel() {
     setBusy("terms");
     setActionError(null);
     try {
-      const res = await fetch("/api/billing/terms", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: data.terms.version, withdrawal: true }) });
+      const res = await fetch("/api/billing/terms", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: data.terms.version }) });
       if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `Erreur ${res.status}`);
       await load();
     } catch (e) {
@@ -165,7 +165,7 @@ export function BillingPanel() {
       retour={retour}
       onRefresh={() => { void load(); }}
       onAcceptTerms={() => { void acceptTerms(); }}
-      onCheckout={(plan) => { void go("/api/billing/checkout", { plan }, plan); }}
+      onCheckout={(plan) => { void go("/api/billing/checkout", { plan, consent: true }, plan); }}
       onPortal={() => { void go("/api/billing/portal", {}, "portal"); }}
     />
   );
@@ -184,6 +184,7 @@ export type BillingViewProps = {
 
 /** Rendu PUR de l'écran à partir des données — testé état par état sans navigateur. */
 export function BillingView({ data, busy, actionError, retour, onRefresh, onAcceptTerms, onCheckout, onPortal }: BillingViewProps) {
+  const [consents, setConsents] = useState<Record<string, boolean>>({});
   if (!data.billing) {
     return (
       <Panel className="p-5">
@@ -197,7 +198,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
 
   const sub = data.subscription;
   const subLive = !!sub?.live;
-  const canBuy = data.purchase.enabled && data.terms.accepted && data.terms.withdrawalAccepted;
+  const canBuy = data.purchase.enabled && data.terms.accepted;
   const legalOk = !!(data.legal.terms && data.legal.refund);
   // La case suit la décision de l'API (purchase.enabled) : en production sans
   // documents publiés l'achat est fermé côté serveur ; hors production
@@ -290,7 +291,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
             const isSub = o.kind === "subscription";
             // `busy` couvre TOUTES les offres : pendant une redirection vers Stripe,
             // aucune autre ne doit pouvoir ouvrir une seconde session de paiement.
-            const disabled = !canBuy || !!busy || (isSub && subLive);
+            const disabled = !canBuy || !consents[o.plan] || !!busy || (isSub && subLive);
             return (
               <li key={o.plan} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-3.5">
                 <div className="min-w-0">
@@ -308,6 +309,14 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
                       depuis Mon compte, effet en fin de période.
                     </div>
                   )}
+                  <label className="mt-2 flex max-w-xl items-start gap-2 text-[0.78rem] leading-relaxed text-ink-3">
+                    <input type="checkbox" className="mt-0.5 size-4 accent-[var(--color-violet)]" checked={!!consents[o.plan]}
+                      disabled={!data.purchase.enabled || !!busy || (isSub && subLive)}
+                      onChange={(e) => setConsents((current) => ({ ...current, [o.plan]: e.target.checked }))} />
+                    <span>{isSub
+                      ? "Je demande que mon abonnement commence immédiatement. Si je me rétracte sous 14 jours, le montant proportionnel au service déjà fourni restera dû."
+                      : "Je demande l’accès immédiat à mes crédits et reconnais perdre mon droit de rétractation dès leur première utilisation."}</span>
+                  </label>
                 </div>
                 <div className="flex items-center gap-4">
                   <span className={cn("text-[0.9rem] tabular-nums", o.price ? "text-ink-1" : "text-ink-4")}>{price(o.price, o.interval)}</span>
@@ -326,10 +335,9 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
           })}
         </ul>
         <div className="border-t border-line px-5 py-4 text-[0.82rem]">
-          {data.terms.accepted && data.terms.withdrawalAccepted ? (
+          {data.terms.accepted ? (
             <p className="text-ink-3">
               Conditions générales de vente acceptées le {dateFr(data.terms.acceptedAt)} (version {data.terms.version}),
-              accès immédiat au service demandé le {dateFr(data.terms.withdrawalAcceptedAt)}.
               {data.legal.terms && <> <a className="underline underline-offset-2 hover:text-ink-1" href={data.legal.terms} target="_blank" rel="noreferrer">Relire les CGV</a>.</>}
               {data.legal.refund && <> <a className="underline underline-offset-2 hover:text-ink-1" href={data.legal.refund} target="_blank" rel="noreferrer">Politique de remboursement</a>.</>}
             </p>
@@ -391,8 +399,7 @@ function TermsConsent({ data, busy, canAccept, legalOk, onAcceptTerms }: {
   data: Billing; busy: string | null; canAccept: boolean; legalOk: boolean; onAcceptTerms: () => void;
 }) {
   const [terms, setTerms] = useState(data.terms.accepted);
-  const [withdrawal, setWithdrawal] = useState(false);
-  const ready = terms && withdrawal;
+  const ready = terms;
   const link = (href: string | null, label: string) =>
     href ? <a className="underline underline-offset-2 hover:text-ink-1" href={href} target="_blank" rel="noreferrer">{label}</a> : label;
   return (
@@ -418,24 +425,8 @@ function TermsConsent({ data, busy, canAccept, legalOk, onAcceptTerms }: {
           </span>
         </label>
       )}
-      <label className="flex items-start gap-3">
-        <input
-          type="checkbox"
-          className="mt-0.5 size-4 accent-[var(--color-violet)]"
-          disabled={busy === "terms" || !canAccept}
-          checked={withdrawal}
-          onChange={(e) => setWithdrawal(e.target.checked)}
-          aria-describedby="withdrawal-help"
-        />
-        <span id="withdrawal-help">
-          Je demande l’accès immédiat au service et reconnais perdre mon droit de rétractation dès l’utilisation de mes crédits.
-          <span className="block text-ink-4">
-            Tant qu’aucun crédit n’est utilisé, tu disposes de 14 jours pour te rétracter : voir la {link(data.legal.refund, "politique de remboursement")}.
-          </span>
-        </span>
-      </label>
       <p className="text-ink-4">
-        Obligatoire avant le premier achat.
+        Les consentements propres à chaque achat seront demandés à côté de l’offre choisie.
         {!legalOk && (canAccept
           ? " Documents légaux non publiés : instance de test, l’acceptation vaut pour cet environnement seulement."
           : " Les documents ne sont pas encore publiés : l’acceptation sera possible dès qu’ils le seront.")}
