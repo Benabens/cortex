@@ -10,6 +10,7 @@ import { readJson, withBodyLimit } from "@/lib/upload-limit";
 import { NextRequest, NextResponse } from "next/server";
 import { stripeClient } from "@/lib/billing/stripe-client";
 import { checkoutParams, siteOrigin } from "@/lib/billing/checkout-params";
+import { consentForPlan, recordPurchaseConsent } from "@/lib/consumer-law";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,16 +36,14 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (!terms.accepted) {
     return NextResponse.json({ error: "Accepte d'abord les conditions générales de vente (version courante) pour acheter." }, { status: 403 });
   }
-  // L221-28 13° : sans accord exprès à l'exécution immédiate recueilli AVANT le paiement, pas de paiement.
-  if (!terms.withdrawalAccepted) {
-    return NextResponse.json(
-      { error: "Avant de payer, confirme la demande d’accès immédiat au service et la perte du droit de rétractation dès l’utilisation de tes crédits (page Abonnement & crédits)." },
-      { status: 400 },
-    );
-  }
-
-  const { plan } = (await readJson(req, {})) as { plan?: unknown };
+  const { plan, consent } = (await readJson(req, {})) as { plan?: unknown; consent?: unknown };
   if (!isPlanKey(plan)) return NextResponse.json({ error: `Offre inconnue : « ${String(plan ?? "")} ».` }, { status: 400 });
+  if (consent !== true) {
+    const kind = consentForPlan(plan).type;
+    return NextResponse.json({ error: kind === "pack"
+      ? "Confirme l’accès immédiat aux crédits et la perte du droit de rétractation dès leur première utilisation."
+      : "Confirme le démarrage immédiat de l’abonnement et le paiement proportionnel du service fourni en cas de rétractation." }, { status: 400 });
+  }
   const spec = PLANS[plan];
 
   // UN SEUL abonnement par compte, vérifié ICI : la table `subscriptions` a le
@@ -67,5 +66,11 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   }
   const email = (await authGet<{ email: string | null }>(`SELECT email FROM users WHERE id = ?`, userId).catch(() => undefined))?.email ?? null;
   const session = await stripe.checkout.sessions.create(checkoutParams({ plan, priceId: price.id, userId, email }));
+  try {
+    await recordPurchaseConsent({ userId, plan, termsVersion: terms.version, stripeSessionId: session.id });
+  } catch (error) {
+    await stripe.checkout.sessions.expire(session.id).catch(() => undefined);
+    throw error;
+  }
   return NextResponse.json({ url: session.url });
 });

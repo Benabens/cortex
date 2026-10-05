@@ -60,7 +60,7 @@ export function legalReady(env: Partial<NodeJS.ProcessEnv> = process.env): boole
 
 /** Version courante des CGV (chaîne libre : date de publication). */
 export function termsVersion(env: Partial<NodeJS.ProcessEnv> = process.env): string {
-  return env.LEGAL_TERMS_VERSION?.trim() || "2026-09";
+  return env.LEGAL_TERMS_VERSION?.trim() || "2026-10";
 }
 
 export function stripeConfigured(env: Partial<NodeJS.ProcessEnv> = process.env): boolean {

@@ -46,7 +46,7 @@ test("facturation coupée : un message, aucune offre", async () => {
   assert.ok(!/S’abonner/.test(html));
 });
 
-test("compte sans abonnement, CGV acceptées : solde, offres avec prix, boutons actifs, historique", async () => {
+test("compte sans abonnement, CGV acceptées : consentement par offre avant activation, prix et historique", async () => {
   const html = await render(base());
   assert.match(html, /Solde disponible/);
   assert.match(html, /12 crédits/);
@@ -56,7 +56,9 @@ test("compte sans abonnement, CGV acceptées : solde, offres avec prix, boutons 
   assert.ok(!/14\.90|119[.,]00|(?<![0-9])9[.,]00/.test(html), "aucun format anglo-saxon ni décimales inutiles");
   assert.match(html, /119\u00a0€ \/ an/);
   assert.match(html, /(?<![0-9,])9\u00a0€/);
-  assert.equal(buttons(html).filter(isDisabled).length, 0, "aucun bouton d'achat désactivé");
+  assert.equal(buttons(html).filter(isDisabled).length, 3, "chaque achat attend son consentement propre");
+  assert.match(html, /perdre mon droit de rétractation dès leur première utilisation/);
+  assert.match(html, /montant proportionnel au service déjà fourni restera dû/);
   assert.match(html, /acceptées le 26 septembre 2026/);
   assert.match(html, /achat credits_10/);
   assert.match(html, /génération exam/);
@@ -73,7 +75,7 @@ test("abonnement actif : reste / plafond, date de recharge, bouton Gérer, abonn
   assert.match(html, /Gérer mon abonnement/);
   assert.match(html, /tu as déjà un abonnement/);
   const disabledSub = buttons(html).filter(isDisabled);
-  assert.equal(disabledSub.length, 2, "les deux offres d'abonnement sont désactivées, le pack reste achetable");
+  assert.equal(disabledSub.length, 3, "les offres attendent leur consentement et les abonnements restent indisponibles");
 });
 
 test("solde négatif après reprise Stripe : avertissement explicite", async () => {
@@ -82,24 +84,23 @@ test("solde négatif après reprise Stripe : avertissement explicite", async () 
   assert.match(html, /-4 crédits|−4 crédits/);
 });
 
-test("CGV non acceptées : DEUX cases obligatoires (CGV + rétractation), bouton de confirmation, achats désactivés", async () => {
+test("CGV non acceptées : une case CGV et trois consentements propres aux offres", async () => {
   const html = await render(base({ terms: { version: "2026-09", accepted: false, acceptedAt: null, withdrawalAccepted: false, withdrawalAcceptedAt: null } }));
-  assert.equal((html.match(/type="checkbox"/g) ?? []).length, 2, "case CGV + case rétractation");
-  assert.match(html, /Je demande l’accès immédiat au service et reconnais perdre mon droit de rétractation dès l’utilisation de mes crédits\./);
+  assert.equal((html.match(/type="checkbox"/g) ?? []).length, 4, "case CGV + consentement de chaque offre");
   assert.match(html, /href="https:\/\/x\/remb"[^>]*>[^<]*[Pp]olitique de remboursement/);
-  assert.match(html, /Obligatoire avant le premier achat/);
+  assert.match(html, /consentements propres à chaque achat/);
   // Les offres restent désactivées ; le bouton de confirmation existe (désactivé tant que les cases ne sont pas cochées).
   const offerButtons = buttons(html).filter((b) => !/Confirmer/.test(b));
   assert.equal(offerButtons.filter(isDisabled).length, 3, "les trois offres sont désactivées");
   assert.ok(buttons(html).some((b) => /Confirmer/.test(b)), "bouton de confirmation présent");
 });
 
-test("CGV acceptées avant l'arrivée de la case de rétractation : seule la seconde case est demandée", async () => {
+test("CGV acceptées : seuls les consentements propres aux trois offres sont demandés", async () => {
   const html = await render(base({ terms: { version: "2026-09", accepted: true, acceptedAt: "2026-09-01 10:00:00", withdrawalAccepted: false, withdrawalAcceptedAt: null } }));
-  assert.equal((html.match(/type="checkbox"/g) ?? []).length, 1);
+  assert.equal((html.match(/type="checkbox"/g) ?? []).length, 3);
   assert.match(html, /droit de rétractation/);
   assert.match(html, /acceptées le/);
-  assert.equal(buttons(html).filter((b) => !/Confirmer/.test(b)).filter(isDisabled).length, 3, "achats désactivés tant que la renonciation manque");
+  assert.equal(buttons(html).filter((b) => !/Confirmer/.test(b)).filter(isDisabled).length, 3, "achats désactivés tant que leur consentement manque");
 });
 
 test("achats fermés : la raison est affichée, tout est désactivé", async () => {

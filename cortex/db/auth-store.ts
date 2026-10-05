@@ -182,7 +182,26 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       version TEXT NOT NULL,
       accepted_at TEXT NOT NULL,
       withdrawal_waiver_at TEXT,
+      retained_until TEXT,
       PRIMARY KEY (user_id, version)
+    )`,
+    `CREATE TABLE IF NOT EXISTS purchase_consents (
+      stripe_session_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      purchase_type TEXT NOT NULL,
+      terms_version TEXT NOT NULL,
+      consented_at TEXT NOT NULL,
+      retained_until TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS withdrawal_requests (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      email TEXT,
+      purchase_type TEXT NOT NULL,
+      purchase_id TEXT NOT NULL,
+      requested_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'reçue',
+      retained_until TEXT
     )`,
   ],
   postgres: [
@@ -350,7 +369,26 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       version text NOT NULL,
       accepted_at text NOT NULL,
       withdrawal_waiver_at text,
+      retained_until text,
       PRIMARY KEY (user_id, version)
+    )`,
+    `CREATE TABLE IF NOT EXISTS public.purchase_consents (
+      stripe_session_id text PRIMARY KEY,
+      user_id text NOT NULL,
+      purchase_type text NOT NULL,
+      terms_version text NOT NULL,
+      consented_at text NOT NULL,
+      retained_until text
+    )`,
+    `CREATE TABLE IF NOT EXISTS public.withdrawal_requests (
+      id text PRIMARY KEY,
+      user_id text NOT NULL,
+      email text,
+      purchase_type text NOT NULL,
+      purchase_id text NOT NULL,
+      requested_at text NOT NULL,
+      status text NOT NULL DEFAULT 'reçue',
+      retained_until text
     )`,
   ],
 };
@@ -379,6 +417,7 @@ const LLM_USAGE_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
  *  immédiate + reconnaissance de la perte du droit de rétractation (L221-28 13°). */
 const TERMS_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "withdrawal_waiver_at", sqlite: "TEXT", pg: "text" },
+  { name: "retained_until", sqlite: "TEXT", pg: "text" },
 ];
 /** Colonnes ajoutées à `subscriptions` : fenêtres ancrées sur la période de
  *  facturation (lib/billing/subscription-windows) et suspension après reprise. */
