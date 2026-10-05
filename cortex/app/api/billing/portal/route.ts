@@ -2,6 +2,7 @@ import { billingEnabled, getSubscription } from "@/lib/billing/credits";
 import { useUser } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 import { stripeClient } from "@/lib/billing/stripe-client";
+import { publicOrigin } from "@/lib/public-url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,9 +17,7 @@ export async function POST(req: NextRequest) {
   if (!billingEnabled()) return NextResponse.json({ error: "Facturation désactivée (BILLING_ENABLED)." }, { status: 501 });
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) return NextResponse.json({ error: "STRIPE_SECRET_KEY manquante." }, { status: 501 });
-  const raw = process.env.AUTH_URL?.trim();
-  let origin: string | null = null;
-  try { origin = raw ? new URL(raw).origin : null; } catch { origin = null; }
+  const origin = publicOrigin();
   if (!origin) return NextResponse.json({ error: "AUTH_URL manquante." }, { status: 500 });
 
   const sub = await getSubscription();

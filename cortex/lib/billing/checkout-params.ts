@@ -1,11 +1,10 @@
 import type Stripe from "stripe";
 import { PLANS, type PlanKey } from "./stripe-events";
+import { publicOrigin } from "@/lib/public-url";
 
 /** Origine canonique du site (AUTH_URL), ou null. */
 export function siteOrigin(): string | null {
-  const raw = process.env.AUTH_URL?.trim();
-  if (!raw) return null;
-  try { return new URL(raw).origin; } catch { return null; }
+  return publicOrigin();
 }
 
 /** Paramètres de la session Checkout, testables sans réseau hors du module de route Next.js. */
