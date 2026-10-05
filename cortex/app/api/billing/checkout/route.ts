@@ -67,6 +67,11 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   }
   const email = (await authGet<{ email: string | null }>(`SELECT email FROM users WHERE id = ?`, userId).catch(() => undefined))?.email ?? null;
   const session = await stripe.checkout.sessions.create(checkoutParams({ plan, priceId: price.id, userId, email }));
-  await recordPurchaseConsent({ userId, plan, termsVersion: terms.version, stripeSessionId: session.id });
+  try {
+    await recordPurchaseConsent({ userId, plan, termsVersion: terms.version, stripeSessionId: session.id });
+  } catch (error) {
+    await stripe.checkout.sessions.expire(session.id).catch(() => undefined);
+    throw error;
+  }
   return NextResponse.json({ url: session.url });
 });

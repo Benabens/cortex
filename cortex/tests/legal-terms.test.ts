@@ -86,7 +86,7 @@ test("acceptation des CGV : tracée (utilisateur, version, date), exposée par /
 
 test("checkout exige le consentement correspondant à l'achat", async () => {
   setLegal();
-  const { authRun, authGet } = await import("../db/auth-store");
+  const { authRun } = await import("../db/auth-store");
   const { nowStr } = await import("../db/q");
   await authRun(`INSERT INTO terms_acceptances (user_id, version, accepted_at) VALUES (?,?,?)`, "carl", "2026-09", nowStr());
   const { POST } = await import("../app/api/billing/checkout/route");

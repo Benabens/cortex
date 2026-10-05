@@ -11,7 +11,10 @@ export function WithdrawalForm() {
   const [confirming, setConfirming] = useState(false);
   const [receipt, setReceipt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { void fetch("/api/account/withdrawal").then((r) => r.json()).then((d) => setPurchases(d.purchases ?? [])); }, []);
+  useEffect(() => { void fetch("/api/account/withdrawal").then(async (r) => {
+    if (!r.ok) throw new Error(`Erreur ${r.status}`);
+    return r.json();
+  }).then((d) => setPurchases(d.purchases ?? [])).catch(() => setError("Impossible de charger tes achats. Réessaie dans un instant.")); }, []);
   const chosen = purchases.find((p) => `${p.type}:${p.id}` === selected);
   const submit = async () => {
     if (!chosen) return;
@@ -20,7 +23,7 @@ export function WithdrawalForm() {
     if (!res.ok) { setError(data.error ?? "La demande n’a pas pu être envoyée."); return; }
     setReceipt(data.requestedAt);
   };
-  if (!purchases.length && !receipt) return null;
+  if (!purchases.length && !receipt && !error) return null;
   return (
     <section className="rounded-lg border border-line bg-surface-2/40 p-5" aria-labelledby="withdrawal-title">
       <h2 id="withdrawal-title" className="text-[1.05rem] font-semibold text-ink-1">Me rétracter d’un achat</h2>
