@@ -1,11 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createHmac } from "node:crypto";
 import { authAll, authGet, authRun } from "@/db/auth-store";
 import { dbDriverName } from "@/db/q";
 import { OWNER_USER, userSlug, runWithUser } from "@/db/context";
 import { runWithCourse } from "@/db/client";
 import { dataRoot } from "@/lib/courses";
 import { log } from "@/lib/metrics";
+import { stripeClient } from "@/lib/billing/stripe-client";
 
 /**
  * SUPPRESSION DE COMPTE (RGPD — « Supprimer mon compte »).
@@ -44,6 +46,11 @@ import { log } from "@/lib/metrics";
 
 const TOMBSTONE = "__deleted__";
 const JOB_ACTIVE = ["queued", "running", "verifying", "compiling"];
+
+function legalTombstone(userId: string): string {
+  const secret = process.env.AUTH_SECRET || "cortex-deletion-tombstone";
+  return `deleted_${createHmac("sha256", secret).update(userId).digest("hex")}`;
+}
 
 export type DeletionResult = {
   deleted: boolean;
@@ -96,12 +103,29 @@ export async function cancelUserJobs(userId: string, courses: string[], errors: 
   }
 }
 
-export async function deleteAccount(userId: string): Promise<DeletionResult> {
+type DeletionDeps = { cancelSubscription?: (subscriptionId: string) => Promise<unknown> };
+
+export async function deleteAccount(userId: string, deps: DeletionDeps = {}): Promise<DeletionResult> {
   const errors: string[] = [];
   const empty: DeletionResult = { deleted: false, schemasDropped: 0, filesDeleted: false, llmUsageAnonymized: 0, errors };
 
   const user = await authGet<{ id: string; email: string | null }>(`SELECT id, email FROM users WHERE id = ?`, userId);
   if (!user) return empty; // déjà supprimé → idempotent
+
+  // Aucun effacement ne commence tant que l'abonnement actif n'est pas annulé
+  // chez Stripe. En cas d'échec, le compte et toutes ses données restent intacts.
+  const subscription = await authGet<{ subscription_id: string | null; status: string }>(
+    `SELECT subscription_id, status FROM subscriptions WHERE user_id = ?`, userId,
+  );
+  if (subscription?.subscription_id && ["active", "trialing"].includes(subscription.status)) {
+    const cancel = deps.cancelSubscription ?? (async (id: string) => {
+      const key = process.env.STRIPE_SECRET_KEY;
+      if (!key) throw new Error("STRIPE_SECRET_KEY manquante");
+      return stripeClient(key).subscriptions.cancel(id);
+    });
+    try { await cancel(subscription.subscription_id); }
+    catch (e) { throw new Error(`Suppression refusée : impossible de résilier l’abonnement Stripe (${msg(e)}). Rien n’a été effacé.`); }
+  }
 
   // 1. Schémas tenant de l'utilisateur (registre = source de vérité).
   const tenants = await authAll<{ schema_name: string; course: string }>(
@@ -154,7 +178,11 @@ export async function deleteAccount(userId: string): Promise<DeletionResult> {
     // propriétaire depuis le tableau de bord (le portail n'est plus accessible sans compte).
     await authRun(`DELETE FROM subscriptions WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM stripe_invoices WHERE user_id = ?`, userId);
-    await authRun(`DELETE FROM terms_acceptances WHERE user_id = ?`, userId);
+    const legalId = legalTombstone(userId);
+    const retainedUntil = new Date(Date.now() + 5 * 365.25 * 86400_000).toISOString().slice(0, 19).replace("T", " ");
+    await authRun(`UPDATE terms_acceptances SET user_id = ?, retained_until = ? WHERE user_id = ?`, legalId, retainedUntil, userId);
+    await authRun(`UPDATE purchase_consents SET user_id = ?, retained_until = ? WHERE user_id = ?`, legalId, retainedUntil, userId);
+    await authRun(`UPDATE withdrawal_requests SET user_id = ?, email = NULL, retained_until = ? WHERE user_id = ?`, legalId, retainedUntil, userId);
     await authRun(`DELETE FROM courses WHERE owner_user_id = ?`, userId);
     await authRun(`DELETE FROM tenants WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM users WHERE id = ?`, userId);

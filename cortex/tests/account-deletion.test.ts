@@ -65,6 +65,9 @@ async function seedUser(id: string, email: string, course: string) {
   await authRun(`INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, created_at) VALUES (?,?,?,?,?)`, `cs_${id}`, `pi_${id}`, id, 1000, "2026-01-01 00:00:00");
   await authRun(`INSERT INTO subscriptions (user_id, customer_id, subscription_id, status, plan, monthly_credits, remaining, period_end, month_anchor, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`, id, `cus_${id}`, `sub_${id}`, "active", "cortex_pro_monthly", 2000, 1500, "2099-01-01 00:00:00", "2026-01", "2026-01-01 00:00:00");
   await authRun(`INSERT INTO stripe_invoices (invoice_id, subscription_id, customer_id, payment_intent, user_id, granted_centi, period_end, created_at) VALUES (?,?,?,?,?,?,?,?)`, `in_${id}`, `sub_${id}`, `cus_${id}`, `pi_in_${id}`, id, 2000, "2099-01-01 00:00:00", "2026-01-01 00:00:00");
+  await authRun(`INSERT INTO terms_acceptances (user_id, version, accepted_at) VALUES (?,?,?)`, id, "2026-10", "2026-01-01 00:00:00");
+  await authRun(`INSERT INTO purchase_consents (stripe_session_id, user_id, purchase_type, terms_version, consented_at) VALUES (?,?,?,?,?)`, `cs_consent_${id}`, id, "pack", "2026-10", "2026-01-01 00:00:00");
+  await authRun(`INSERT INTO withdrawal_requests (id, user_id, email, purchase_type, purchase_id, requested_at, status) VALUES (?,?,?,?,?,?,?)`, `wr_${id}`, id, email, "pack", `cs_${id}`, "2026-01-02 00:00:00", "reçue");
   // tenant peuplé (crée le schéma t_<slug>_<course> + une donnée)
   await runWithUser(id, () => runWithCourse(course, () => q.run(`INSERT INTO weaknesses (topic, severity) VALUES (?, ?)`, `secret-de-${id}`, 3)));
   // fichiers de l'utilisateur : data/u/<slug>/...
@@ -90,7 +93,7 @@ test("supprimer A efface TOUT le sien (lignes, schéma, fichiers) et ne touche R
   assert.ok(await schemaExists("alice", "ml"), "sanity : schéma d'alice créé");
   assert.ok(fs.existsSync(path.join(tmp, "u", slugA)), "sanity : dossier d'alice créé");
 
-  const res = await deleteAccount("alice");
+  const res = await deleteAccount("alice", { cancelSubscription: async () => ({}) });
   assert.equal(res.deleted, true);
   assert.ok(res.schemasDropped >= 1, "au moins le schéma ml d'alice est droppé");
 
@@ -105,6 +108,11 @@ test("supprimer A efface TOUT le sien (lignes, schéma, fichiers) et ne touche R
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM stripe_purchases WHERE user_id = ?`, "alice"))!.n, 0, "achats Stripe détachés du compte");
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM subscriptions WHERE user_id = ?`, "alice"))!.n, 0, "abonnement effacé");
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM stripe_invoices WHERE user_id = ?`, "alice"))!.n, 0, "factures d'abonnement détachées");
+  assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM terms_acceptances WHERE user_id = ?`, "alice"))!.n, 0, "preuve CGV pseudonymisée");
+  const proof = await authGet<{ user_id: string; email: string | null; retained_until: string }>(`SELECT user_id, email, retained_until FROM withdrawal_requests WHERE id = ?`, "wr_alice");
+  assert.notEqual(proof?.user_id, "alice");
+  assert.equal(proof?.email, null);
+  assert.ok(proof?.retained_until);
   assert.equal(await schemaExists("alice", "ml"), false, "le schéma tenant d'alice est droppé");
   assert.equal(fs.existsSync(path.join(tmp, "u", slugA)), false, "les fichiers d'alice sont effacés");
   // llm_usage : anonymisé (ligne gardée, plus reliée à alice)
@@ -145,6 +153,12 @@ test("idempotent : un 2ᵉ appel ne jette pas et ne fait rien", async () => {
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM users WHERE id = ?`, "bob"))!.n, 1);
 });
 
+test("un échec Stripe refuse la suppression avant tout effacement", async () => {
+  await assert.rejects(deleteAccount("bob", { cancelSubscription: async () => { throw new Error("Stripe indisponible"); } }), /Rien n’a été effacé/);
+  assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM users WHERE id = ?`, "bob"))!.n, 1);
+  assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM courses WHERE owner_user_id = ?`, "bob"))!.n, 1);
+});
+
 test("refus de supprimer le propriétaire (CORTEX_OWNER_EMAIL)", async () => {
   await seedUser("chief", "owner@cortex.app", "ml");
   process.env.CORTEX_OWNER_EMAIL = "owner@cortex.app";
@@ -170,6 +184,7 @@ test("route : refuse sans session (401) et ne supprime QUE le compte de la sessi
   // seul le compte de la SESSION est supprimé.
   await seedUser("carol", "carol@example.com", "ml");
   await seedUser("dave", "dave@example.com", "ml");
+  await authRun(`UPDATE subscriptions SET status = 'canceled' WHERE user_id = ?`, "carol");
   const rOk = await POST(mk({ "x-cortex-user": "carol", origin: "http://localhost" }, { confirm: "SUPPRIMER", userId: "dave" }));
   assert.equal(rOk.status, 200, "carol supprime son propre compte");
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM users WHERE id = ?`, "carol"))!.n, 0, "carol supprimée");
