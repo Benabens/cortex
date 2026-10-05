@@ -9,7 +9,8 @@ import { useUser } from "@/lib/req";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
 import { NextRequest, NextResponse } from "next/server";
 import { stripeClient } from "@/lib/billing/stripe-client";
-import { checkoutParams, siteOrigin } from "@/lib/billing/checkout-params";
+import { checkoutParams } from "@/lib/billing/checkout-params";
+import { publicOrigin } from "@/lib/public-url";
 import { consentForPlan, recordPurchaseConsent } from "@/lib/consumer-law";
 
 export const runtime = "nodejs";
@@ -28,7 +29,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   }
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) return NextResponse.json({ error: "STRIPE_SECRET_KEY manquante." }, { status: 501 });
-  if (!siteOrigin()) return NextResponse.json({ error: "AUTH_URL manquante : impossible de construire les URLs de retour." }, { status: 500 });
+  if (!publicOrigin()) return NextResponse.json({ error: "AUTH_URL manquante : impossible de construire les URLs de retour." }, { status: 500 });
   // On n'encaisse pas sans documents légaux publiés ni sans CGV acceptées (version courante).
   const gate = purchasesAllowed();
   if (!gate.enabled) return NextResponse.json({ error: gate.reason }, { status: 503 });

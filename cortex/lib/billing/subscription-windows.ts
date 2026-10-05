@@ -64,7 +64,11 @@ export function standingOf(
   if (!sub || ENDED.has(sub.status)) return "none";
   if (!inGoodStanding(sub.status)) return "unpaid";
   if (sub.period_end && now < sub.period_end) return sub.suspended ? "suspended" : "live";
-  const since = sub.period_end ?? sub.status_at ?? sub.updated_at ?? null;
+  // Repère du délai : le plus RÉCENT de la fin de période payée et du dernier
+  // statut reçu. Un réabonnement garde la période de l'ancien abonnement jusqu'à
+  // sa première facture : seule, elle le ferait passer pour terminé depuis des mois.
+  const marks = [sub.period_end, sub.status_at].filter((m): m is string => !!m);
+  const since = marks.length ? marks.reduce((a, b) => (a > b ? a : b)) : sub.updated_at ?? null;
   return since && parse(now).getTime() - parse(since).getTime() < RENEWAL_GRACE_MS ? "renewing" : "none";
 }
 
@@ -77,7 +81,7 @@ export function secondSubscriptionRefusal(standing: Standing): string | null {
   switch (standing) {
     case "none": return null;
     case "live": return "Tu as déjà un abonnement en cours. Gère-le depuis Mon compte (moyen de paiement, résiliation) plutôt que d'en ouvrir un second.";
-    case "renewing": return "Ton abonnement est en cours de renouvellement : tes crédits arrivent dès que le paiement est confirmé, en général sous une heure. Inutile d'en ouvrir un second.";
+    case "renewing": return "Le paiement de ton abonnement est en cours de confirmation : tes crédits arrivent dès qu'il est validé, jusqu'à une heure lors d'un renouvellement. Inutile d'en ouvrir un second.";
     case "unpaid": return "Le dernier paiement de ton abonnement n'est pas passé. Mets à jour ton moyen de paiement depuis « Gérer mon abonnement » plutôt que d'en ouvrir un second.";
     case "suspended": return "Ton abonnement est suspendu après un remboursement ou une contestation de paiement. Gère-le depuis « Gérer mon abonnement » plutôt que d'en ouvrir un second.";
   }
@@ -139,8 +143,7 @@ export function anchorOf(sub: WindowedSub): string | null {
  * (window_anchor) ne l'est pas deux fois.
  */
 export function rechargeDue(sub: WindowedSub, now: string): string | null {
-  if (!sub.period_end || now >= sub.period_end) return null;
-  if (sub.suspended || !inGoodStanding(sub.status)) return null;
+  if (!sub.period_end || standingOf(sub, now) !== "live") return null;
   if (!isYearly(sub)) return null;
   const anchor = anchorOf(sub);
   if (!anchor || anchor > now) return null;
@@ -156,7 +159,7 @@ export function rechargeDue(sub: WindowedSub, now: string): string | null {
  * pas de prochaine facture, seules les fenêtres de la période payée restent.
  */
 export function nextRechargeDate(sub: WindowedSub, now: string): string | null {
-  if (!sub.period_end || now >= sub.period_end || sub.suspended || !inGoodStanding(sub.status)) return null;
+  if (!sub.period_end || standingOf(sub, now) !== "live") return null;
   const nextInvoice = sub.cancel_at_period_end ? null : sub.period_end;
   if (!isYearly(sub)) return nextInvoice?.slice(0, 10) ?? null;
   const anchor = anchorOf(sub);

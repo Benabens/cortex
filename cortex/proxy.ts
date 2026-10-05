@@ -143,6 +143,8 @@ export default function proxy(req: NextRequest) {
   if (legacyPathBlocked(pathname)) return new NextResponse("Not found", { status: 404 });
   // Ancien domaine (REDIRECT_FROM_HOSTS) → URL publique, avant toute autre logique :
   // une connexion commencée sur l'ancien hôte échouerait (cf. lib/public-url).
+  // L'hôte est lu dans des en-têtes que le client peut forger, sans conséquence :
+  // la cible est toujours AUTH_URL, il ne peut que se renvoyer lui-même dessus.
   const moved = legacyHostRedirect({
     host: req.headers.get("x-forwarded-host") ?? req.headers.get("host"),
     pathname, search: req.nextUrl.search,

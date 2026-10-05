@@ -57,6 +57,10 @@ test("standingOf : en règle mais période payée échue → renewing pendant tr
   const linked = sub({ period_start: null, period_end: null, window_anchor: null, month_anchor: null, status_at: "2026-10-28 10:59:50" });
   assert.equal(standingOf(linked, NOW), "renewing", "activation en cours");
   assert.equal(standingOf({ ...linked, status_at: null, updated_at: "2026-10-01 10:00:00" }, NOW), "none");
+  // Réabonnement : la ligne garde la période de l'ANCIEN abonnement, résilié il y a des mois, jusqu'à la première facture.
+  const resubscribed = sub({ period_start: "2026-03-01 10:00:00", period_end: "2026-04-01 10:00:00", status_at: "2026-10-28 10:59:50" });
+  assert.equal(standingOf(resubscribed, NOW), "renewing", "l'ancienne période ne fait pas passer un abonnement tout juste repris pour terminé");
+  assert.equal(standingOf({ ...resubscribed, status_at: "2026-04-01 10:00:00" }, NOW), "none", "sans événement récent : terminé");
 });
 
 test("second abonnement : refusé tant que Stripe tient le premier pour vivant, avec la marche à suivre", () => {
