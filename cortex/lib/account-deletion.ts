@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createHmac } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { authAll, authGet, authRun } from "@/db/auth-store";
 import { dbDriverName } from "@/db/q";
 import { OWNER_USER, userSlug, runWithUser } from "@/db/context";
@@ -45,11 +45,8 @@ import { stripeClient } from "@/lib/billing/stripe-client";
  */
 
 const TOMBSTONE = "__deleted__";
-const JOB_ACTIVE = ["queued", "running", "verifying", "compiling"];
-
-function legalTombstone(userId: string): string {
-  const secret = process.env.AUTH_SECRET || "cortex-deletion-tombstone";
-  return `deleted_${createHmac("sha256", secret).update(userId).digest("hex")}`;
+function legalTombstone(): string {
+  return `deleted_${randomUUID()}`;
 }
 
 export type DeletionResult = {
@@ -178,7 +175,7 @@ export async function deleteAccount(userId: string, deps: DeletionDeps = {}): Pr
     // propriétaire depuis le tableau de bord (le portail n'est plus accessible sans compte).
     await authRun(`DELETE FROM subscriptions WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM stripe_invoices WHERE user_id = ?`, userId);
-    const legalId = legalTombstone(userId);
+    const legalId = legalTombstone();
     const retainedUntil = new Date(Date.now() + 5 * 365.25 * 86400_000).toISOString().slice(0, 19).replace("T", " ");
     await authRun(`UPDATE terms_acceptances SET user_id = ?, retained_until = ? WHERE user_id = ?`, legalId, retainedUntil, userId);
     await authRun(`UPDATE purchase_consents SET user_id = ?, retained_until = ? WHERE user_id = ?`, legalId, retainedUntil, userId);
