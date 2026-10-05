@@ -144,8 +144,10 @@ export async function writeAccountExport(userId: string, dir: string, budget: Bu
 
   const user = await authGet<Record<string, unknown>>(`SELECT id, email, name, image, email_verified FROM users WHERE id = ?`, userId);
   const terms = await authAll(`SELECT version, accepted_at, withdrawal_waiver_at FROM terms_acceptances WHERE user_id = ? ORDER BY accepted_at`, userId).catch(() => []);
+  const consents = await authAll(`SELECT stripe_session_id, purchase_type, terms_version, consented_at FROM purchase_consents WHERE user_id = ? ORDER BY consented_at`, userId).catch(() => []);
+  const withdrawals = await authAll(`SELECT id, purchase_type, purchase_id, requested_at, status FROM withdrawal_requests WHERE user_id = ? ORDER BY requested_at`, userId).catch(() => []);
   const subscription = await authGet(`SELECT status, plan, monthly_credits, remaining, period_end, month_anchor, updated_at FROM subscriptions WHERE user_id = ?`, userId).catch(() => undefined);
-  write("profil.json", { user: user ?? { id: userId }, terms, subscription: subscription ?? null });
+  write("profil.json", { user: user ?? { id: userId }, terms, consents, withdrawals, subscription: subscription ?? null });
 
   const courses = await authAll(`SELECT * FROM courses WHERE owner_user_id = ? ORDER BY created_at`, userId);
   write("cours.json", courses);
