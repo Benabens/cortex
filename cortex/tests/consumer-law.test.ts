@@ -3,6 +3,7 @@ import { after, before, test } from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { NextRequest } from "next/server";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-conso-"));
 process.env.CORTEX_DATA_DIR = tmp;
@@ -53,4 +54,38 @@ test("une session d’abonnement abandonnée n’est pas éligible, un abonnemen
   assert.deepEqual(await eligibleWithdrawals("subscriber", now), [{
     id: "sub_paid", type: "subscription", purchasedAt: "2026-10-05 10:00:00", label: "Abonnement Pro",
   }]);
+});
+
+test("la notification éditeur utilise PUBLISHER_EMAIL et est omise sans configuration", async () => {
+  const { authRun } = await import("../db/auth-store");
+  const { POST } = await import("../app/api/account/withdrawal/route");
+  const sent: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_input, init) => {
+    sent.push(String(JSON.parse(String(init?.body)).to));
+    return new Response("{}", { status: 200 });
+  };
+  process.env.RESEND_API_KEY = "re_test";
+  process.env.PUBLISHER_EMAIL = "éditeur@example.com";
+  try {
+    await authRun(`INSERT INTO users (id, email) VALUES (?,?)`, "notify", "client@example.com");
+    await authRun(`INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, created_at) VALUES (?,?,?,?,?)`, "cs_notify", "pi_notify", "notify", 1000, new Date().toISOString());
+    const request = (user: string, purchaseId: string) => new NextRequest("http://localhost/api/account/withdrawal", {
+      method: "POST", headers: { "content-type": "application/json", "x-cortex-user": user },
+      body: JSON.stringify({ type: "pack", purchaseId, confirm: true }),
+    });
+    assert.equal((await POST(request("notify", "cs_notify"))).status, 201);
+    assert.deepEqual(sent, ["client@example.com", "éditeur@example.com"]);
+
+    sent.length = 0;
+    delete process.env.PUBLISHER_EMAIL;
+    await authRun(`INSERT INTO users (id, email) VALUES (?,?)`, "notify-no-publisher", "client2@example.com");
+    await authRun(`INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, created_at) VALUES (?,?,?,?,?)`, "cs_notify_2", "pi_notify_2", "notify-no-publisher", 1000, new Date().toISOString());
+    assert.equal((await POST(request("notify-no-publisher", "cs_notify_2"))).status, 201);
+    assert.deepEqual(sent, ["client2@example.com"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.RESEND_API_KEY;
+    delete process.env.PUBLISHER_EMAIL;
+  }
 });
