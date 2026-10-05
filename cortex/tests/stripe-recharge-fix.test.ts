@@ -11,10 +11,12 @@
  *      civil comme avant, puis par fenêtre dès que le début de sa période est
  *      connu. Un plan INCONNU est classé par la durée de sa période (annuel
  *      au-delà de 45 jours).
- *  (b) customer.subscription.updated : la période se lit dans les DEUX formats
- *      d'API, sur la subscription (ancien) ou sur ses ITEMS (format récent,
- *      famille « basil » : `current_period_*` a quitté la subscription pour
- *      vivre sur `items.data[]`).
+ *  (b) customer.subscription.updated porte la période que Stripe ANNONCE, sur
+ *      la subscription (ancien format d'API) ou sur ses ITEMS (format récent,
+ *      famille « basil »). Dans les deux formats elle n'est PAS recopiée : la
+ *      période qui donne des crédits est celle d'une facture payée (invoice.paid).
+ *      Recopiée, elle offrait le mois à un renouvellement impayé — scénarios
+ *      complets dans tests/subscription-unpaid.test.ts.
  * Seams : credits.subscriptionCreditsCenti, credits.getSubscription,
  * reserve.reserveGeneration, handleStripeEvent. Store Postgres/PGlite en
  * mémoire ; unités en centièmes.
@@ -36,7 +38,6 @@ import { runWithUser } from "../db/context";
 
 const inMl = <T,>(user: string, fn: () => Promise<T>) => runWithUser(user, () => runWithCourse("ml", fn));
 const future = (days: number) => new Date(Date.now() + days * 86400_000).toISOString().slice(0, 19).replace("T", " ");
-const futureUnix = (days: number) => Math.floor((Date.now() + days * 86400_000) / 1000);
 const unix = (iso: string) => Math.floor(new Date(iso).getTime() / 1000);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ev = (id: string, type: string, object: unknown): any => ({ id, type, data: { object } });
@@ -164,25 +165,9 @@ test("(a) MENSUEL via la réservation : pas de recharge au changement de mois", 
   assert.equal(await credits.subscriptionCreditsCenti("m"), 300, "5 − 2 = 3, aucune recharge à 20 dans la réservation");
 });
 
-// ─────────────── (b) période lue sur les items (récent) ou la subscription (ancien) ───────────────
+// ─────────────── (b) la période annoncée par subscription.updated n'est jamais recopiée ───────────────
 
-test("(b) subscription.updated, format récent : period_end lue sur items.data[]", async () => {
-  const credits = await import("../lib/billing/credits");
-  const { handleStripeEvent } = await import("../lib/billing/stripe-events");
-  await credits.grantSubscriptionMonth({ userId: "u", customerId: "cus_u", subscriptionId: "sub_u", plan: "cortex_pro_monthly", periodEnd: future(10) });
-  const prev = (await credits.getSubscription("u"))?.period_end; // seam public
-  const newEndUnix = futureUnix(40);
-  await handleStripeEvent(ev("evt_subup_1", "customer.subscription.updated", {
-    id: "sub_u", customer: "cus_u", status: "active",
-    items: { data: [{ current_period_end: newEndUnix }] }, // Basil+ : plus de current_period_end au niveau subscription
-  }));
-  const now = (await credits.getSubscription("u"))?.period_end;
-  const expected = new Date(newEndUnix * 1000).toISOString().slice(0, 19).replace("T", " ");
-  assert.notEqual(now, prev, "la fin de période doit être mise à jour depuis les items");
-  assert.equal(now, expected);
-});
-
-test("(b) subscription.updated, format récent : le DÉBUT de période vient des items lui aussi (il ancre les fenêtres de l'annuel)", async () => {
+test("(b) subscription.updated, format récent (période sur items.data[]) : la période payée ne bouge pas", async () => {
   const credits = await import("../lib/billing/credits");
   const { handleStripeEvent } = await import("../lib/billing/stripe-events");
   await credits.grantSubscriptionMonth({ userId: "ustart", customerId: "cus_ustart", subscriptionId: "sub_ustart", plan: "cortex_pro_yearly", periodStart: "2026-01-31 10:00:00", periodEnd: "2027-01-31 10:00:00" });
@@ -190,11 +175,11 @@ test("(b) subscription.updated, format récent : le DÉBUT de période vient des
     items: { data: [{ current_period_start: unix("2027-01-31T10:00:00Z"), current_period_end: unix("2028-01-31T10:00:00Z") }] }, // l'item seul porte la période
   }));
   const s = await credits.getSubscription("ustart");
-  assert.equal(s?.period_start, "2027-01-31 10:00:00");
-  assert.equal(s?.period_end, "2028-01-31 10:00:00");
+  assert.equal(s?.period_start, "2026-01-31 10:00:00", "le début de la période payée ancre toujours les fenêtres");
+  assert.equal(s?.period_end, "2027-01-31 10:00:00", "la fin reste celle de la facture payée");
 });
 
-test("(b) subscription.updated, ancien format : période lue sur la subscription", async () => {
+test("(b) subscription.updated, ancien format (période sur la subscription) : la période payée ne bouge pas", async () => {
   const credits = await import("../lib/billing/credits");
   const { handleStripeEvent } = await import("../lib/billing/stripe-events");
   await credits.grantSubscriptionMonth({ userId: "uold", customerId: "cus_uold", subscriptionId: "sub_uold", plan: "cortex_pro_monthly", periodStart: "2026-09-28 10:00:00", periodEnd: "2026-10-28 10:00:00" });
@@ -203,8 +188,8 @@ test("(b) subscription.updated, ancien format : période lue sur la subscription
     items: { data: [{ price: { lookup_key: "cortex_pro_monthly" } }] }, // l'item ne porte que le prix
   }));
   const s = await credits.getSubscription("uold");
-  assert.equal(s?.period_start, "2026-10-28 10:00:00");
-  assert.equal(s?.period_end, "2026-11-28 10:00:00");
+  assert.equal(s?.period_start, "2026-09-28 10:00:00");
+  assert.equal(s?.period_end, "2026-10-28 10:00:00");
 });
 
 test("(b) subscription.updated sans période : le statut suit, la période connue est conservée", async () => {
