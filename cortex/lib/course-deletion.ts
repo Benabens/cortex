@@ -16,6 +16,7 @@ import { authAll, authGet, authRun } from "@/db/auth-store";
 import { userSlug } from "@/db/context";
 import { dbDriverName, nowStr } from "@/db/q";
 import { cancelUserJobs, isOwnerAccount } from "@/lib/account-deletion";
+import { contactEmail } from "@/lib/contact";
 import { LEGACY_COURSES } from "@/lib/courses-legacy";
 import { dataRoot, ensureCoursesLoaded, listCoursesOf, reloadCourses } from "@/lib/courses";
 import { deleteCourseRow } from "@/db/courses-store";
@@ -76,7 +77,7 @@ export async function deleteCourseWithData(userId: string, courseId: string, opt
       log("error", "course.delete_shared_schema", { user: userId, course: courseId, schema: tenant.schema_name, sharers });
       return {
         ok: false, status: 409,
-        error: "Les données de ce cours sont partagées avec un autre cours (schéma commun) : suppression refusée, contacte le support.",
+        error: `Les données de ce cours sont partagées avec un autre cours (schéma commun) : suppression refusée. Écris à ${contactEmail()} pour la demander.`,
       };
     }
   }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/db/context";
 import { authEnabled } from "@/lib/auth";
 import { ExportBusy, ExportTooLarge, streamAccountExport } from "@/lib/account-export";
+import { contactEmail } from "@/lib/contact";
 import { log } from "@/lib/metrics";
 import { useUser } from "@/lib/req";
 
@@ -34,6 +35,6 @@ export async function GET(req: NextRequest) {
   } catch (e) {
     if (e instanceof ExportTooLarge || e instanceof ExportBusy) return NextResponse.json({ error: e.message }, { status: e.status });
     log("error", "account.export_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
-    return NextResponse.json({ error: "L'export a échoué. Réessaie ; si le problème persiste, contacte le support." }, { status: 500 });
+    return NextResponse.json({ error: `L'export a échoué. Réessaie ; si le problème persiste, écris à ${contactEmail()}.` }, { status: 500 });
   }
 }
