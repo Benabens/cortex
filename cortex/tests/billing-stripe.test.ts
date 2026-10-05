@@ -120,6 +120,7 @@ test("checkout : URLs de retour depuis AUTH_URL, jamais depuis Origin ; sans AUT
   assert.deepEqual(pack.metadata, { app: "cortex", cortexUserId: "alice", plan: "credits_10", credits: "10" });
   assert.equal(pack.customer_email, "alice@example.com");
   assert.equal(pack.invoice_creation?.enabled, true);
+  assert.equal(pack.payment_intent_data?.statement_descriptor_suffix, "CORTEX");
   assert.equal(pack.customer_creation, "always");
   // 2b-3 : les métadonnées voyagent aussi sur le PaymentIntent → la charge d'un remboursement les porte.
   assert.deepEqual(pack.payment_intent_data?.metadata, pack.metadata);
