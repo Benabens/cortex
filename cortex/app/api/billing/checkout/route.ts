@@ -1,6 +1,8 @@
-import { billingEnabled, getSubscription, subscriptionLive } from "@/lib/billing/credits";
+import { billingEnabled, getSubscription } from "@/lib/billing/credits";
 import { isPlanKey, PLANS } from "@/lib/billing/stripe-events";
+import { secondSubscriptionRefusal, standingOf } from "@/lib/billing/subscription-windows";
 import { authGet } from "@/db/auth-store";
+import { nowStr } from "@/db/q";
 import { purchasesAllowed, termsState } from "@/lib/legal";
 import { currentUser } from "@/db/context";
 import { useUser } from "@/lib/req";
@@ -48,16 +50,13 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   // UN SEUL abonnement par compte, vérifié ICI : la table `subscriptions` a le
   // compte pour clé primaire, donc un second abonnement écraserait la ligne du
   // premier — qui continuerait de facturer sans que l'app le sache. Le bouton
-  // désactivé côté écran ne suffit pas (deux onglets, un POST direct).
+  // désactivé côté écran ne suffit pas (deux onglets, un POST direct). La garde
+  // suit l'état de l'abonnement chez Stripe, pas la présence de crédits : en
+  // retard de paiement ou en cours de renouvellement, il facture toujours.
   const userId = currentUser();
   if (spec.mode === "subscription") {
-    const sub = await getSubscription(userId);
-    if (subscriptionLive(sub) && sub!.status !== "canceled") {
-      return NextResponse.json(
-        { error: "Tu as déjà un abonnement en cours. Gère-le depuis Mon compte (changer d'offre, résilier) plutôt que d'en ouvrir un second." },
-        { status: 409 },
-      );
-    }
+    const refusal = secondSubscriptionRefusal(standingOf(await getSubscription(userId), nowStr()));
+    if (refusal) return NextResponse.json({ error: refusal }, { status: 409 });
   }
 
   const stripe = stripeClient(key);
