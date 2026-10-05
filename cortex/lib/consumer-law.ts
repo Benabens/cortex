@@ -27,8 +27,14 @@ export async function eligibleWithdrawals(userId: string, now = new Date()): Pro
     `SELECT session_id id, created_at purchased_at FROM stripe_purchases WHERE user_id = ? AND created_at >= ? ORDER BY created_at DESC`, userId, since,
   );
   const subscriptions = await authAll<{ id: string; purchased_at: string }>(
-    `SELECT stripe_session_id id, consented_at purchased_at FROM purchase_consents
-     WHERE user_id = ? AND purchase_type = 'subscription' AND consented_at >= ? ORDER BY consented_at DESC`, userId, since,
+    `SELECT s.subscription_id id, min(pc.consented_at) purchased_at
+     FROM purchase_consents pc
+     JOIN subscriptions s ON s.user_id = pc.user_id
+     WHERE pc.user_id = ? AND pc.purchase_type = 'subscription' AND pc.consented_at >= ?
+       AND s.status IN ('active','trialing') AND coalesce(s.period_start, s.updated_at) >= ?
+       AND s.subscription_id IS NOT NULL
+     GROUP BY s.subscription_id
+     ORDER BY min(pc.consented_at) DESC`, userId, since, since,
   );
   return [
     ...packs.map((p) => ({ id: p.id, type: "pack" as const, purchasedAt: p.purchased_at, label: "Pack de 10 crédits" })),

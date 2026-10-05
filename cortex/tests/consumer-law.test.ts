@@ -36,3 +36,21 @@ test("une demande de rétractation est reçue, datée et idempotente", async () 
   assert.match(first.requestedAt, /^\d{4}-\d{2}-\d{2}/);
   assert.equal(second.id, first.id);
 });
+
+test("une session d’abonnement abandonnée n’est pas éligible, un abonnement payé l’est une seule fois", async () => {
+  const { authRun } = await import("../db/auth-store");
+  const { eligibleWithdrawals } = await import("../lib/consumer-law");
+  const now = new Date("2026-10-06T12:00:00Z");
+  await authRun(`INSERT INTO users (id, email) VALUES (?,?)`, "subscriber", "subscriber@example.com");
+  await authRun(`INSERT INTO purchase_consents (stripe_session_id, user_id, purchase_type, terms_version, consented_at) VALUES (?,?,?,?,?)`,
+    "cs_abandoned", "subscriber", "subscription", "2026-10", "2026-10-05 10:00:00");
+  assert.deepEqual(await eligibleWithdrawals("subscriber", now), [], "la session abandonnée n’est pas un achat");
+
+  await authRun(`INSERT INTO subscriptions (user_id, customer_id, subscription_id, status, plan, period_start, updated_at) VALUES (?,?,?,?,?,?,?)`,
+    "subscriber", "cus_paid", "sub_paid", "active", "cortex_pro_monthly", "2026-10-05 10:05:00", "2026-10-05 10:05:00");
+  await authRun(`INSERT INTO purchase_consents (stripe_session_id, user_id, purchase_type, terms_version, consented_at) VALUES (?,?,?,?,?)`,
+    "cs_duplicate", "subscriber", "subscription", "2026-10", "2026-10-05 10:01:00");
+  assert.deepEqual(await eligibleWithdrawals("subscriber", now), [{
+    id: "sub_paid", type: "subscription", purchasedAt: "2026-10-05 10:00:00", label: "Abonnement Pro",
+  }]);
+});
