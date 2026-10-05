@@ -73,9 +73,10 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     const res = await deleteAccount(userId);
     return NextResponse.json({ ok: true, residues: res.errors.length });
   } catch (e) {
-    log("error", "account.delete_route_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
+    const message = e instanceof Error ? e.message : String(e);
+    log("error", "account.delete_route_failed", { message: message.slice(0, 200) });
     return NextResponse.json(
-      { error: "La suppression a échoué. Réessaie ; si le problème persiste, contacte le support." },
+      { error: message.startsWith("Suppression refusée :") ? message : "La suppression a échoué. Réessaie ; si le problème persiste, contacte le support." },
       { status: 500 },
     );
   }
