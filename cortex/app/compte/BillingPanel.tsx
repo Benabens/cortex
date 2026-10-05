@@ -30,6 +30,8 @@ type Billing = {
   billing: boolean;
   purchase: { enabled: boolean; reason: string | null };
   legal: { terms: string | null; privacy: string | null; refund: string | null; notice: string | null };
+  /** Adresse de contact (lib/contact). */
+  contact?: string;
   terms: {
     version: string; accepted: boolean; acceptedAt: string | null;
     /** accord exprès à l'exécution immédiate + perte du droit de rétractation (L221-28 13°) */
@@ -395,7 +397,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
         )}
       </Panel>
 
-      <LegalLine legal={data.legal} />
+      <LegalLine legal={data.legal} contact={data.contact} />
     </section>
   );
 }
@@ -471,7 +473,7 @@ function TermsConsent({ data, busy, canAccept, legalOk, onAcceptTerms }: {
   );
 }
 
-export function LegalLine({ legal, className }: { legal: Billing["legal"]; className?: string }) {
+export function LegalLine({ legal, contact, className }: { legal: Billing["legal"]; contact?: string; className?: string }) {
   const items: Array<[string, string | null]> = [
     ["Conditions générales de vente", legal.terms],
     ["Confidentialité", legal.privacy],
@@ -479,12 +481,13 @@ export function LegalLine({ legal, className }: { legal: Billing["legal"]; class
     ["Mentions légales", legal.notice],
   ];
   const present = items.filter(([, href]) => href);
-  if (!present.length) return null;
+  if (!present.length && !contact) return null;
   return (
     <p className={cn("flex flex-wrap gap-x-4 gap-y-1 text-[0.75rem] text-ink-4", className)}>
       {present.map(([label, href]) => (
         <a key={label} href={href!} target="_blank" rel="noreferrer" className="underline-offset-2 hover:text-ink-2 hover:underline">{label}</a>
       ))}
+      {contact && <a href={`mailto:${contact}`} className="underline-offset-2 hover:text-ink-2 hover:underline">Contact : {contact}</a>}
     </p>
   );
 }

@@ -2,6 +2,7 @@ import { nextRechargeDate, standingOf } from "@/lib/billing/subscription-windows
 import { billingEnabled, creditCost, fromCenti, getSubscription, listTransactions, purchasedBalanceCenti, subscriptionCreditsCenti } from "@/lib/billing/credits";
 import { usedToday } from "@/lib/billing/guards";
 import { listOffers } from "@/lib/billing/offers";
+import { contactEmail } from "@/lib/contact";
 import { legalLinks, purchasesAllowed, stripeConfigured as stripeReady, termsState } from "@/lib/legal";
 import { useUser } from "@/lib/req";
 import { currentUser } from "@/db/context";
@@ -34,6 +35,7 @@ export async function GET(req: NextRequest) {
     stripeConfigured,
     purchase: purchasesAllowed(),
     legal: legalLinks(),
+    contact: contactEmail(),
     terms,
     balance: on ? fromCenti(purchasedCenti + subCenti) : null,
     purchased: on ? fromCenti(purchasedCenti) : null,

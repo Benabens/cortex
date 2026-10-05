@@ -4,9 +4,6 @@ import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { Wordmark } from "@/components/shell/Logo";
 
-/** Landing (privacy / terms). Surchargeable via NEXT_PUBLIC_LANDING_URL. */
-const LANDING = process.env.NEXT_PUBLIC_LANDING_URL ?? "https://cortex-landing-seven.vercel.app";
-
 /** Messages clairs par code d'erreur NextAuth (cause + quoi faire). */
 function errorMessage(code: string): string {
   switch (code) {
@@ -40,16 +37,23 @@ export function LoginCard({
   google,
   email,
   legal,
+  landing,
+  contact,
 }: {
   error: string | null;
   callbackUrl: string;
   google: boolean;
   email: boolean;
-  /** Liens légaux (LEGAL_*_URL) ; repli sur la landing s'ils ne sont pas posés. */
+  /** Liens légaux (LEGAL_*_URL ou vitrine déclarée) ; repli sur `landing` s'ils ne sont pas posés. */
   legal?: { terms: string | null; privacy: string | null; refund?: string | null; notice?: string | null };
+  /** Origine de la vitrine, lue côté serveur à la requête (pas de variable figée au build). */
+  landing: string;
+  /** Adresse de contact (lib/contact). */
+  contact: string;
 }) {
-  const termsHref = legal?.terms ?? `${LANDING}/terms`;
-  const privacyHref = legal?.privacy ?? `${LANDING}/privacy`;
+  const termsHref = legal?.terms ?? `${landing}/terms`;
+  const privacyHref = legal?.privacy ?? `${landing}/privacy`;
+  const noticeHref = legal?.notice ?? `${landing}/mentions-legales`;
   const [busy, setBusy] = useState<null | "google" | "email">(null);
   const [addr, setAddr] = useState("");
 
@@ -151,6 +155,14 @@ export function LoginCard({
             politique de confidentialité
           </a>
           .
+        </p>
+        <p className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-1 text-center text-[0.75rem]">
+          <a href={noticeHref} className="underline underline-offset-2" style={{ color: "#a5a2b3" }}>
+            Mentions légales
+          </a>
+          <a href={`mailto:${contact}`} className="underline underline-offset-2" style={{ color: "#a5a2b3" }}>
+            Contact
+          </a>
         </p>
       </div>
     </main>

@@ -3,6 +3,7 @@ import { Funnel_Display } from "next/font/google";
 import "./globals.css";
 import "./legacy-compat.css";
 import { AppShell } from "@/components/shell/AppShell";
+import { contactEmail } from "@/lib/contact";
 import { legalLinks } from "@/lib/legal";
 import { NOINDEX } from "@/lib/seo";
 
@@ -38,7 +39,7 @@ export default function RootLayout({
       className={`${funnelDisplay.variable} h-full antialiased`}
     >
       <body className="min-h-full">
-        <AppShell legal={legalLinks()}>{children}</AppShell>
+        <AppShell legal={legalLinks()} contact={contactEmail()}>{children}</AppShell>
       </body>
     </html>
   );
