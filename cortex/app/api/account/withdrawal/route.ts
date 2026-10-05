@@ -21,7 +21,7 @@ async function sendReceipt(to: string, requestedAt: string, purchaseId: string):
   const text = `Nous accusons réception de votre demande de rétractation du ${requestedAt} pour l’achat ${purchaseId}. Elle sera traitée manuellement dans Stripe.`;
   const recipients = [...new Set([to, "abensur.benjamin@gmail.com"])];
   for (const recipient of recipients) {
-    const res = await fetch("https://api.resend.com/emails", { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ from: process.env.RESEND_FROM ?? "Cortex <onboarding@resend.dev>", to: recipient, subject: "Demande de rétractation reçue", text }) });
+    const res = await fetch("https://api.resend.com/emails", { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ from: process.env.AUTH_EMAIL_FROM ?? "Cortex <onboarding@resend.dev>", to: recipient, subject: "Demande de rétractation reçue", text }) });
     if (!res.ok) log("warn", "withdrawal.email_failed", { recipient, status: res.status });
   }
 }
