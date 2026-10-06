@@ -608,6 +608,10 @@ de contact actuelle.
 
 ### Bascule, dans l'ordre
 
+`bash scripts/golive-ben.sh` déroule ces étapes en guidant (pages ouvertes,
+valeurs dans le presse-papiers, variables Railway posées et vérifiées). Ce
+qu'il fait, et dans quel ordre :
+
 1. **DNS** : crée les enregistrements, attends que Railway et Vercel affichent
    le domaine comme vérifié. `https://app.cortexexam.com/api/health` doit
    répondre `ok` — l'ancienne adresse marche toujours, rien n'est cassé.
