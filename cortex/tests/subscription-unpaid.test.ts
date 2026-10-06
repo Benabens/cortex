@@ -226,3 +226,81 @@ test("crédits achetés et crédits offerts : acquis, quel que soit l'état de l
     assert.equal(await credits.purchasedBalanceCenti("packs"), 1000);
   });
 });
+
+// ─────────────── reprise d'une facture pendant que l'abonnement n'est pas en règle ───────────────
+
+/** Remboursement intégral du paiement d'une facture d'abonnement (le pi_ est celui de invoicePaid). */
+const refunded = (id: string, user: string, at: string) =>
+  ev(`evt_refund_${id}`, "charge.refunded", at, { payment_intent: `pi_${id}`, amount: 1490, amount_refunded: 1490, customer: `cus_${user}` });
+
+test("facture remboursée pendant un impayé : seuls les crédits réellement consommés deviennent une dette, les crédits achetés restent", async () => {
+  const credits = await import("../lib/billing/credits");
+  const { reserveGeneration } = await import("../lib/billing/reserve");
+  const { handleStripeEvent } = await import("../lib/billing/stripe-events");
+  await withClock("2026-09-28T10:00:00Z", async (at) => {
+    // « rien » : rien consommé du mois ; « six » : 6 crédits consommés (3 examens). Tous deux ont 10 crédits achetés.
+    for (const [user, exams] of [["rf-rien", 0], ["rf-six", 3]] as const) {
+      at("2026-09-28T10:00:00Z");
+      await handleStripeEvent(invoicePaid(`${user}_1`, user, "cortex_pro_monthly", "2026-09-28T10:00:00Z", "2026-10-28T10:00:00Z"));
+      await credits.addTransaction(user, 1000, "achat credits_10", `stripe:cs:cs_${user}`);
+      for (let i = 0; i < exams; i++) {
+        assert.equal((await inMl(user, () => reserveGeneration({ bucket: "gen", kind: "exam", ref: `job:${user}:ml:${i}` }))).ok, true);
+      }
+      // Échéance, le renouvellement échoue ; puis le mois PAYÉ (le précédent) est remboursé.
+      at("2026-10-28T11:05:00Z");
+      await handleStripeEvent(subUpdated(`${user}_pastdue`, user, "past_due", "2026-10-28T11:05:00Z", { start: "2026-10-28T10:00:00Z", end: "2026-11-28T10:00:00Z" }));
+      await handleStripeEvent(refunded(`${user}_1`, user, "2026-10-29T09:00:00Z"));
+      const consumed = exams * 200;
+      assert.equal(await credits.purchasedBalanceCenti(user), 1000 - consumed, `${user} : dette = ${consumed} centièmes consommés, pas les 2000 du mois`);
+      assert.equal(await credits.subscriptionCreditsCenti(user), 0);
+    }
+  });
+});
+
+// ─────────────── la période payée se lit sur la bonne ligne, et ne recule jamais ───────────────
+
+test("facture à plusieurs lignes (prorata d'un changement d'offre en tête) : la période est celle de la ligne d'abonnement, pas du prorata", async () => {
+  const credits = await import("../lib/billing/credits");
+  const { handleStripeEvent } = await import("../lib/billing/stripe-events");
+  await withClock("2026-10-10T10:00:00Z", async () => {
+    await handleStripeEvent(invoicePaid("ml1", "multiline", "cortex_pro_monthly", "2026-09-28T10:00:00Z", "2026-10-28T10:00:00Z"));
+    // Passage mensuel → annuel le 10/10 : crédit du temps non utilisé (prorata, période résiduelle de l'ancienne offre) PUIS la nouvelle offre.
+    await handleStripeEvent(ev("evt_ml2", "invoice.paid", "2026-10-10T10:00:00Z", {
+      id: "in_ml2", customer: "cus_multiline", subscription: "sub_multiline", payment_intent: "pi_ml2",
+      subscription_details: { metadata: { app: "cortex", cortexUserId: "multiline" } },
+      lines: { data: [
+        { proration: true, amount: -894, period: { start: unix("2026-10-10T10:00:00Z"), end: unix("2026-10-28T10:00:00Z") }, price: { lookup_key: "cortex_pro_monthly" } },
+        { proration: false, amount: 11900, period: { start: unix("2026-10-10T10:00:00Z"), end: unix("2027-10-10T10:00:00Z") }, price: { lookup_key: "cortex_pro_yearly" } },
+      ] },
+    }));
+    const s = await credits.getSubscription("multiline");
+    assert.equal(s?.period_end, "2027-10-10 10:00:00", "fin de la période de la nouvelle offre");
+    assert.equal(s?.plan, "cortex_pro_yearly");
+    // Format récent : le prorata est signalé sous parent.subscription_item_details.
+    await handleStripeEvent(ev("evt_ml3", "invoice.paid", "2026-10-10T10:00:00Z", {
+      id: "in_ml3", customer: "cus_multiline2", parent: { subscription_details: { subscription: "sub_multiline2", metadata: { app: "cortex", cortexUserId: "multiline2" } } },
+      lines: { data: [
+        { parent: { subscription_item_details: { proration: true, subscription: "sub_multiline2" } }, period: { start: unix("2026-10-10T10:00:00Z"), end: unix("2026-10-28T10:00:00Z") }, price: { lookup_key: "cortex_pro_monthly" } },
+        { parent: { subscription_item_details: { proration: false, subscription: "sub_multiline2" } }, period: { start: unix("2026-10-10T10:00:00Z"), end: unix("2027-10-10T10:00:00Z") }, price: { lookup_key: "cortex_pro_yearly" } },
+      ] },
+    }));
+    assert.equal((await credits.getSubscription("multiline2"))?.period_end, "2027-10-10 10:00:00");
+  });
+});
+
+test("facture ANCIENNE payée après une plus récente : la période payée ne recule pas, l'abonné garde son mois en cours", async () => {
+  const credits = await import("../lib/billing/credits");
+  const { reserveGeneration } = await import("../lib/billing/reserve");
+  const { handleStripeEvent } = await import("../lib/billing/stripe-events");
+  const { authGet } = await import("../db/auth-store");
+  await withClock("2026-11-28T12:00:00Z", async () => {
+    // Octobre est resté impayé, novembre aussi ; la carte est corrigée le 28/11 : Stripe encaisse les deux factures, la plus récente d'abord.
+    await handleStripeEvent(invoicePaid("old3", "catchup", "cortex_pro_monthly", "2026-11-28T10:00:00Z", "2026-12-28T10:00:00Z", "2026-11-28T12:00:00Z"));
+    assert.equal((await inMl("catchup", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:catchup:ml:1" }))).ok, true);
+    await handleStripeEvent(invoicePaid("old2", "catchup", "cortex_pro_monthly", "2026-10-28T10:00:00Z", "2026-11-28T10:00:00Z", "2026-11-28T12:00:05Z"));
+    const s = await credits.getSubscription("catchup");
+    assert.equal(s?.period_end, "2026-12-28 10:00:00", "la période reste celle de la facture la plus récente");
+    assert.equal(await credits.subscriptionCreditsCenti("catchup"), 1800, "ni remise à 20, ni perte du mois en cours");
+    assert.ok(await authGet(`SELECT invoice_id FROM stripe_invoices WHERE invoice_id = ?`, "in_old2"), "la facture ancienne reste enregistrée (reprise possible en cas de remboursement)");
+  });
+});
