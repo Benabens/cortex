@@ -23,7 +23,10 @@ Son étape 3 fait les §§ 3 à 7 de ce document : elle demande les clés en sai
 masquée, retrouve ou crée les produits, les trois prix, la configuration de
 portail de Cortex et le webhook, désactive l'ancien webhook, puis pose
 `STRIPE_WEBHOOK_SECRET` et `STRIPE_SECRET_KEY` dans Railway (les valeurs passent
-par l'entrée standard de la CLI). Relancée, elle ne recrée rien. Restent à la
+par l'entrée standard de la CLI). Avant toute écriture, elle vérifie que la clé
+destinée à l'app a bien accès aux ressources du § 6 : une clé limitée à la mise
+en place, réutilisée par mégarde, est refusée au lieu de casser l'achat en
+production. Relancée, elle ne recrée rien. Restent à la
 main : les réglages du compte (§ 2), l'effacement des abonnements de test (§ 8,
 le script met le SQL dans le presse-papiers) et le test réel (§ 10).
 

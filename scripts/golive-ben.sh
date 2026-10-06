@@ -15,8 +15,9 @@
 # ce qui est déjà en place est reconnu et laissé tel quel.
 #
 # SECRETS : les clés Stripe sont saisies masquées (rien ne s'affiche), ne sont
-# jamais écrites sur disque, ni affichées, ni passées en argument d'une commande.
-# Elles vont à Stripe et à Railway, et nulle part ailleurs.
+# jamais écrites sur disque, ni affichées, ni passées en argument ou en variable
+# d'environnement d'une commande : elles voyagent par l'entrée standard. Elles
+# vont à Stripe et à Railway, et nulle part ailleurs.
 #
 # Détail de ce que fait chaque étape : DEPLOY.md § 12-13 et docs/STRIPE-LIVE.md.
 set -euo pipefail
@@ -240,18 +241,21 @@ if should_run 3; then
       if [[ -n "$SETUP_KEY" ]]; then
         info "Clé de l'app : limitée, écriture sur Checkout Sessions, Customer portal et Subscriptions ; lecture sur Prices et Invoices."
         while :; do
-          ask_secret RUNTIME_KEY "Colle la clé de l'app (rk_live_… ; vide = réutiliser la précédente)"
+          ask_secret RUNTIME_KEY "Colle la clé de l'app (rk_live_… ; vide = réutiliser la précédente, si elle a aussi ces droits)"
           [[ -z "$RUNTIME_KEY" || "$RUNTIME_KEY" =~ ^(rk|sk)_live_ ]] && break
           ko "Ce n'est pas une clé live."
         done
+        # La dernière clé copiée ne reste pas dans le presse-papiers.
+        if [[ "$DRY" -eq 0 ]]; then printf '' | pbcopy; info "Presse-papiers vidé."; fi
       fi
       PREVIOUS_DEPLOY="$(latest_deploy)"; PREVIOUS_DEPLOY="${PREVIOUS_DEPLOY%% *}"
       RUNNER_ARGS=(--site "$APP_URL" --landing "$LANDING_URL" --legacy-host "$OLD_HOST"
         --railway-project "$RW_PROJECT" --railway-service "$RW_SERVICE" --railway-environment "$RW_ENV")
       [[ "$DRY" -eq 1 ]] && RUNNER_ARGS+=(--dry-run)
       [[ "$ROTATE" -eq 1 ]] && RUNNER_ARGS+=(--rotate-webhook)
-      # Les clés passent par l'environnement de ce seul processus, jamais par ses arguments.
-      if (cd "$ROOT/cortex" && STRIPE_SETUP_KEY="$SETUP_KEY" STRIPE_RUNTIME_KEY="$RUNTIME_KEY" node_modules/.bin/tsx scripts/stripe-live-setup.ts "${RUNNER_ARGS[@]}"); then
+      # Les clés passent par l'entrée standard du lanceur (printf est interne au shell) :
+      # ni argument, ni variable d'environnement.
+      if printf '%s\n%s\n' "$SETUP_KEY" "$RUNTIME_KEY" | (cd "$ROOT/cortex" && node_modules/.bin/tsx scripts/stripe-live-setup.ts --keys-stdin "${RUNNER_ARGS[@]}"); then
         SETUP_KEY=""; RUNTIME_KEY=""
         if [[ "$DRY" -eq 0 ]]; then
           wait_until "Attente du redéploiement avec les clés live" new_deploy_done || warn "Redéploiement non confirmé après 15 minutes : regarde Railway."

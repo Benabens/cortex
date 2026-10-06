@@ -1,17 +1,19 @@
 /**
  * STRIPE POUR CORTEX — produits, prix, portail client, webhook, puis clés dans
  * Railway. Lancé par scripts/golive-ben.sh (racine du dépôt), qui demande les
- * clés en saisie masquée et les passe par l'environnement de CE processus
- * seulement : STRIPE_SETUP_KEY (écrit dans Stripe) et STRIPE_RUNTIME_KEY (celle
- * que l'app utilisera ; vide = la même). Rien n'est écrit sur disque, aucun
- * secret n'est affiché, et la CLI Railway reçoit chaque valeur sur son entrée
- * standard, jamais en argument.
+ * clés en saisie masquée et les lui passe sur l'ENTRÉE STANDARD (--keys-stdin :
+ * première ligne = clé de mise en place, qui écrit dans Stripe ; seconde ligne =
+ * clé de l'app, vide = la même). Ni argument ni variable d'environnement : rien
+ * de ce que ce processus lance, ni le lanceur tsx lui-même, ne les voit. Rien
+ * n'est écrit sur disque, aucun secret n'est affiché, et la CLI Railway reçoit
+ * chaque valeur sur son entrée standard.
  *
  * Usage (par le script guidé) :
  *   tsx scripts/stripe-live-setup.ts --site https://app.cortexexam.com --landing https://cortexexam.com \
  *     --legacy-host ancien-hote.up.railway.app --railway-project <id> --railway-service <nom> --railway-environment production
  *
  * Options :
+ *   --keys-stdin       lire les deux clés sur l'entrée standard (sinon STRIPE_SETUP_KEY / STRIPE_RUNTIME_KEY)
  *   --dry-run          lectures seules (sans clé : décrit seulement ce qui serait fait)
  *   --test             sur la sandbox (clés *_test_), sans toucher à Railway
  *   --rotate-webhook   supprime et recrée le webhook : seule façon d'obtenir un nouveau secret
@@ -22,9 +24,10 @@
  * docs/STRIPE-LIVE.md.
  */
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import Stripe from "stripe";
 import { STRIPE_API_VERSION } from "../lib/billing/stripe-client";
-import { OFFERS, setupStripe } from "../lib/billing/stripe-setup";
+import { OFFERS, missingRuntimeAccess, setupStripe } from "../lib/billing/stripe-setup";
 
 const args = process.argv.slice(2);
 const flag = (name: string) => args.includes(name);
@@ -48,9 +51,12 @@ const landing = (value("--landing") ?? "").replace(/\/+$/, "");
 const legacyHosts = values("--legacy-host");
 const railway = { project: value("--railway-project"), service: value("--railway-service"), environment: value("--railway-environment") };
 
-// Les clés ne restent que dans ce processus : rien de ce qu'il lance n'en hérite.
-const setupKey = process.env.STRIPE_SETUP_KEY ?? "";
-let runtimeKey = process.env.STRIPE_RUNTIME_KEY ?? "";
+// Les clés arrivent par l'entrée standard et ne vivent que dans la mémoire de ce
+// processus. (Repli par l'environnement pour un lancement à la main : effacé
+// aussitôt, mais le lanceur tsx l'a alors vu passer.)
+const piped = flag("--keys-stdin") ? fs.readFileSync(0, "utf8").split("\n").map((l) => l.trim()) : [];
+const setupKey = piped[0] ?? process.env.STRIPE_SETUP_KEY ?? "";
+let runtimeKey = piped[1] ?? process.env.STRIPE_RUNTIME_KEY ?? "";
 delete process.env.STRIPE_SETUP_KEY;
 delete process.env.STRIPE_RUNTIME_KEY;
 
@@ -61,7 +67,7 @@ if (!noRailway && !(railway.project && railway.service && railway.environment)) 
 }
 
 if (!setupKey) {
-  if (!dryRun) die("Aucune clé de mise en place (STRIPE_SETUP_KEY).");
+  if (!dryRun) die("Aucune clé de mise en place.");
   // Essai à blanc sans clé : aucune lecture possible, on décrit seulement.
   console.log(`▶ Stripe ${mode.toUpperCase()} — essai à blanc SANS clé : rien n'est lu ni écrit. Avec une clé, le script retrouverait ou créerait :`);
   console.log("   · produits « Cortex Pro » et « Cortex : pack de 10 crédits »");
@@ -92,6 +98,16 @@ function railwayPut(name: string, secret: string, deploy: boolean): boolean {
 async function main(): Promise<void> {
   const stripe = new Stripe(setupKey, { apiVersion: STRIPE_API_VERSION });
   console.log(`▶ Stripe ${mode.toUpperCase()}${dryRun ? " — essai à blanc, aucune écriture" : ""} · app ${site} · API ${STRIPE_API_VERSION}`);
+
+  // La clé de l'app est vérifiée AVANT toute écriture : posée en production sans
+  // les droits de l'app (une clé limitée à la mise en place, par exemple), elle casserait l'achat.
+  if (!test && !flag("--no-railway")) {
+    const lacking = await missingRuntimeAccess(reused ? stripe : new Stripe(runtimeKey, { apiVersion: STRIPE_API_VERSION }));
+    if (lacking.length) {
+      die(`La clé de l'app${reused ? " (la clé de mise en place, réutilisée)" : ""} n'a pas accès à : ${lacking.join(", ")}. Donne-lui ces droits dans Stripe, ou saisis une clé de l'app qui les a. Rien n'a été écrit.`);
+    }
+    console.log("   ✓ clé de l'app — accès vérifiés (Checkout Sessions, Prices, Customer portal, Subscriptions, Invoices)");
+  }
 
   const report = await setupStripe(stripe, { site, landing, legacyHosts, dryRun, rotateWebhook: flag("--rotate-webhook"), apiVersion: STRIPE_API_VERSION });
   for (const step of report.steps) console.log(`   ${step.action === "attention" ? "⚠" : "✓"} ${step.what} — ${step.action} : ${step.detail}`);

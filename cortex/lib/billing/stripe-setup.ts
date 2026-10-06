@@ -249,6 +249,34 @@ export async function setupStripe(s: Stripe, o: SetupOptions): Promise<SetupRepo
   return { steps, webhookSecret };
 }
 
+/**
+ * Ce qu'il manque à une clé pour servir de clé de L'APP : une lecture par
+ * ressource que l'app appelle (aucune écriture). Une clé limitée à la mise en
+ * place n'ouvre ni le paiement ni les abonnements : posée en production, elle
+ * casserait l'achat. Le droit d'ÉCRITURE ne se vérifie pas sans écrire : seule
+ * l'absence totale d'accès est détectée ici.
+ */
+export async function missingRuntimeAccess(s: Stripe): Promise<string[]> {
+  const probes: Array<[string, () => Promise<unknown>]> = [
+    ["Checkout Sessions", () => s.checkout.sessions.list({ limit: 1 })],
+    ["Prices", () => s.prices.list({ limit: 1 })],
+    ["Customer portal", () => s.billingPortal.configurations.list({ limit: 1 })],
+    ["Subscriptions", () => s.subscriptions.list({ limit: 1 })],
+    ["Invoices", () => s.invoices.list({ limit: 1 })],
+  ];
+  const missing: string[] = [];
+  for (const [resource, probe] of probes) {
+    try {
+      await probe();
+    } catch (err) {
+      const e = err as { type?: string; statusCode?: number };
+      if (e?.type !== "StripePermissionError" && e?.statusCode !== 403) throw err;
+      missing.push(resource);
+    }
+  }
+  return missing;
+}
+
 /** Configuration de portail de Cortex, ou null (Stripe prend alors celle par défaut du compte). */
 export async function findPortalConfiguration(s: Stripe): Promise<string | null> {
   const list = await s.billingPortal.configurations.list({ active: true, limit: 100 });
