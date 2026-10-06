@@ -53,6 +53,15 @@ export function legalLinks(env: Partial<NodeJS.ProcessEnv> = process.env): Legal
   };
 }
 
+/** Chemin, sur la vitrine, de la traduction anglaise des conditions : elle renvoie aux trois autres documents en anglais. */
+export const LANDING_ENGLISH_PATH = "/terms-en";
+
+/** Lien vers la version anglaise des documents, connu seulement quand la vitrine est déclarée. */
+export function legalEnglishUrl(env: Partial<NodeJS.ProcessEnv> = process.env): string | null {
+  const landing = landingOrigin(env);
+  return landing ? `${landing}${LANDING_ENGLISH_PATH}` : null;
+}
+
 export function legalReady(env: Partial<NodeJS.ProcessEnv> = process.env): boolean {
   const l = legalLinks(env);
   return !!(l.terms && l.privacy && l.refund && l.notice);

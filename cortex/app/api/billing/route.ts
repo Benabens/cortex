@@ -3,7 +3,7 @@ import { billingEnabled, creditCost, fromCenti, getSubscription, listTransaction
 import { usedToday } from "@/lib/billing/guards";
 import { listOffers } from "@/lib/billing/offers";
 import { contactEmail } from "@/lib/contact";
-import { legalLinks, purchasesAllowed, stripeConfigured as stripeReady, termsState } from "@/lib/legal";
+import { legalEnglishUrl, legalLinks, purchasesAllowed, stripeConfigured as stripeReady, termsState } from "@/lib/legal";
 import { useUser } from "@/lib/req";
 import { currentUser } from "@/db/context";
 import { nowStr } from "@/db/q";
@@ -35,6 +35,7 @@ export async function GET(req: NextRequest) {
     stripeConfigured,
     purchase: purchasesAllowed(),
     legal: legalLinks(),
+    legalEnglish: legalEnglishUrl(),
     contact: contactEmail(),
     terms,
     balance: on ? fromCenti(purchasedCenti + subCenti) : null,

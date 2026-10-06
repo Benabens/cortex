@@ -31,6 +31,8 @@ type Billing = {
   billing: boolean;
   purchase: { enabled: boolean; reason: string | null };
   legal: { terms: string | null; privacy: string | null; refund: string | null; notice: string | null };
+  /** Version anglaise des documents (vitrine), si elle est connue. */
+  legalEnglish?: string | null;
   /** Adresse de contact (lib/contact). */
   contact?: string;
   terms: {
@@ -409,7 +411,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
         )}
       </Panel>
 
-      <LegalLine legal={data.legal} contact={data.contact} />
+      <LegalLine legal={data.legal} english={data.legalEnglish} contact={data.contact} />
     </section>
   );
 }
@@ -468,7 +470,7 @@ function TermsConsent({ data, busy, canAccept, legalOk, onAcceptTerms }: {
   );
 }
 
-export function LegalLine({ legal, contact, className }: { legal: Billing["legal"]; contact?: string; className?: string }) {
+export function LegalLine({ legal, english, contact, className }: { legal: Billing["legal"]; english?: string | null; contact?: string; className?: string }) {
   const items: Array<[string, string | null]> = [
     ["Conditions générales de vente", legal.terms],
     ["Confidentialité", legal.privacy],
@@ -482,6 +484,9 @@ export function LegalLine({ legal, contact, className }: { legal: Billing["legal
       {present.map(([label, href]) => (
         <a key={label} href={href!} target="_blank" rel="noreferrer" className="underline-offset-2 hover:text-ink-2 hover:underline">{label}</a>
       ))}
+      {present.length > 0 && english && (
+        <a href={english} hrefLang="en" lang="en" target="_blank" rel="noreferrer" className="underline-offset-2 hover:text-ink-2 hover:underline">English version</a>
+      )}
       {contact && <a href={`mailto:${contact}`} className="underline-offset-2 hover:text-ink-2 hover:underline">Contact : {contact}</a>}
     </p>
   );

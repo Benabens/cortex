@@ -38,6 +38,7 @@ export function LoginCard({
   email,
   legal,
   landing,
+  english,
   contact,
 }: {
   error: string | null;
@@ -48,6 +49,8 @@ export function LoginCard({
   legal?: { terms: string | null; privacy: string | null; refund?: string | null; notice?: string | null };
   /** Origine de la vitrine, lue côté serveur à la requête (pas de variable figée au build). */
   landing: string;
+  /** Version anglaise des documents légaux, sur la vitrine. */
+  english: string;
   /** Adresse de contact (lib/contact). */
   contact: string;
 }) {
@@ -162,6 +165,9 @@ export function LoginCard({
           </a>
           <a href={`mailto:${contact}`} className="underline underline-offset-2" style={{ color: "#a5a2b3" }}>
             Contact
+          </a>
+          <a href={english} hrefLang="en" lang="en" className="underline underline-offset-2" style={{ color: "#a5a2b3" }}>
+            English version
           </a>
         </p>
       </div>
