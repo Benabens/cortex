@@ -1,8 +1,9 @@
-import { nextRechargeDate } from "@/lib/billing/subscription-windows";
-import { billingEnabled, creditCost, fromCenti, getSubscription, listTransactions, purchasedBalanceCenti, subscriptionCreditsCenti, subscriptionLive } from "@/lib/billing/credits";
+import { nextRechargeDate, standingOf } from "@/lib/billing/subscription-windows";
+import { billingEnabled, creditCost, fromCenti, getSubscription, listTransactions, purchasedBalanceCenti, subscriptionCreditsCenti } from "@/lib/billing/credits";
 import { usedToday } from "@/lib/billing/guards";
 import { listOffers } from "@/lib/billing/offers";
-import { legalLinks, purchasesAllowed, stripeConfigured as stripeReady, termsState } from "@/lib/legal";
+import { contactEmail } from "@/lib/contact";
+import { legalEnglishUrl, legalLinks, purchasesAllowed, stripeConfigured as stripeReady, termsState } from "@/lib/legal";
 import { useUser } from "@/lib/req";
 import { currentUser } from "@/db/context";
 import { nowStr } from "@/db/q";
@@ -11,11 +12,10 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Premier jour du mois suivant (UTC) — date de la prochaine recharge des crédits d'abonnement. */
-
 /**
  * Solde et abonnement pour la page « Abonnement & crédits » : les deux poches
- * (achetés / abonnement du mois), la date de recharge, l'historique et les
+ * (achetés / abonnement du mois), l'état de l'abonnement (en règle, en cours de
+ * renouvellement, impayé, suspendu), la date de recharge, l'historique et les
  * offres avec leur prix Stripe. Tout est exprimé en CRÉDITS (le ledger compte
  * en centièmes). Sans facturation : structure identique, valeurs nulles.
  */
@@ -26,26 +26,32 @@ export async function GET(req: NextRequest) {
   const sub = on ? await getSubscription() : undefined;
   const subCenti = on ? await subscriptionCreditsCenti() : 0;
   const purchasedCenti = on ? await purchasedBalanceCenti() : 0;
-  const live = subscriptionLive(sub);
+  const now = nowStr();
+  const standing = standingOf(sub, now);
+  const live = standing === "live";
   const terms = await termsState(currentUser());
   return NextResponse.json({
     billing: on,
     stripeConfigured,
     purchase: purchasesAllowed(),
     legal: legalLinks(),
+    legalEnglish: legalEnglishUrl(),
+    contact: contactEmail(),
     terms,
     balance: on ? fromCenti(purchasedCenti + subCenti) : null,
     purchased: on ? fromCenti(purchasedCenti) : null,
     subscription: on && sub
       ? {
           status: sub.status,
+          standing,
           live,
           plan: sub.plan,
           creditsThisMonth: fromCenti(subCenti),
           monthlyCredits: fromCenti(Number(sub.monthly_credits)),
           periodEnd: sub.period_end,
-          // Recharge au 1er du mois suivant tant que la période court (et hors résiliation) ; sinon plus de recharge.
-          nextRechargeAt: live ? nextRechargeDate(sub, nowStr()) : null,
+          cancelsAtPeriodEnd: !!Number(sub.cancel_at_period_end ?? 0),
+          // Prochaine fenêtre (annuel) ou prochaine facture (mensuel) ; aucune si l'abonnement s'arrête ou n'est pas en règle.
+          nextRechargeAt: live ? nextRechargeDate(sub, now) : null,
           manageable: !!sub.customer_id,
         }
       : null,

@@ -1,16 +1,10 @@
 import type Stripe from "stripe";
 import { PLANS, type PlanKey } from "./stripe-events";
-
-/** Origine canonique du site (AUTH_URL), ou null. */
-export function siteOrigin(): string | null {
-  const raw = process.env.AUTH_URL?.trim();
-  if (!raw) return null;
-  try { return new URL(raw).origin; } catch { return null; }
-}
+import { publicOrigin } from "@/lib/public-url";
 
 /** Paramètres de la session Checkout, testables sans réseau hors du module de route Next.js. */
 export function checkoutParams(o: { plan: PlanKey; priceId: string; userId: string; email?: string | null }): Stripe.Checkout.SessionCreateParams & { metadata: Record<string, string> } {
-  const origin = siteOrigin();
+  const origin = publicOrigin();
   if (!origin) throw new Error("AUTH_URL manquante");
   const spec = PLANS[o.plan];
   // `app` : le compte Stripe peut être PARTAGÉ avec d'autres applications — le webhook ne traite que ce qui porte Cortex.

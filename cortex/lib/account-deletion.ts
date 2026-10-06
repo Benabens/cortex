@@ -8,6 +8,7 @@ import { runWithCourse } from "@/db/client";
 import { dataRoot } from "@/lib/courses";
 import { log } from "@/lib/metrics";
 import { stripeClient } from "@/lib/billing/stripe-client";
+import { stillBilling } from "@/lib/billing/subscription-windows";
 
 /**
  * SUPPRESSION DE COMPTE (RGPD — « Supprimer mon compte »).
@@ -109,19 +110,28 @@ export async function deleteAccount(userId: string, deps: DeletionDeps = {}): Pr
   const user = await authGet<{ id: string; email: string | null }>(`SELECT id, email FROM users WHERE id = ?`, userId);
   if (!user) return empty; // déjà supprimé → idempotent
 
-  // Aucun effacement ne commence tant que l'abonnement actif n'est pas annulé
-  // chez Stripe. En cas d'échec, le compte et toutes ses données restent intacts.
+  // Aucun effacement ne commence tant que l'abonnement n'est pas annulé chez
+  // Stripe. En cas d'échec, le compte et toutes ses données restent intacts.
+  // « Vivant » et pas seulement « en règle » : en retard de paiement, Stripe
+  // relance la carte pendant des semaines et débiterait un compte disparu.
   const subscription = await authGet<{ subscription_id: string | null; status: string }>(
     `SELECT subscription_id, status FROM subscriptions WHERE user_id = ?`, userId,
   );
-  if (subscription?.subscription_id && ["active", "trialing"].includes(subscription.status)) {
+  if (subscription?.subscription_id && stillBilling(subscription.status)) {
     const cancel = deps.cancelSubscription ?? (async (id: string) => {
       const key = process.env.STRIPE_SECRET_KEY;
       if (!key) throw new Error("STRIPE_SECRET_KEY manquante");
       return stripeClient(key).subscriptions.cancel(id);
     });
     try { await cancel(subscription.subscription_id); }
-    catch (e) { throw new Error(`Suppression refusée : impossible de résilier l’abonnement Stripe (${msg(e)}). Rien n’a été effacé.`); }
+    catch (e) {
+      // Abonnement inconnu de Stripe (déjà résilié, ou créé avec d'autres clés) :
+      // il n'y a rien à résilier, et le droit à l'effacement ne doit pas en dépendre.
+      if ((e as { code?: string } | null)?.code !== "resource_missing") {
+        throw new Error(`Suppression refusée : impossible de résilier l’abonnement Stripe (${msg(e)}). Rien n’a été effacé.`);
+      }
+      log("warn", "account.delete_subscription_unknown", { subscription: subscription.subscription_id });
+    }
   }
 
   // 1. Schémas tenant de l'utilisateur (registre = source de vérité).

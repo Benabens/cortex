@@ -1,4 +1,4 @@
-import { rechargeDue } from "./subscription-windows";
+import { rechargeDue, standingOf } from "./subscription-windows";
 import { currentUser } from "@/db/context";
 import { authAll, authGet, authRun, authSqlite } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
@@ -200,14 +200,36 @@ export async function getBalance(userId = currentUser()): Promise<number> {
  * jusqu'à la prochaine facture payée. Un débit consomme l'abonnement d'abord
  * (sinon il expirerait inutilisé), DANS la transaction de réservation
  * (lib/billing/reserve : `spendInTx`). Tout est en centièmes.
+ *
+ * PAS DE PAIEMENT, PAS DE CRÉDITS D'ABONNEMENT. La période (`period_start`,
+ * `period_end`) est celle de la dernière facture PAYÉE : un renouvellement que
+ * Stripe annonce sans l'avoir encaissé n'ouvre rien, et un abonnement qui n'est
+ * plus en règle (retard de paiement, impayé) ne donne aucun crédit. Les mois
+ * non payés ne sont pas rattrapés : la facture suivante remet le mois à 20.
+ * La poche achetée, elle, ne dépend jamais de l'état de l'abonnement.
  */
 export type SubRow = {
   user_id: string; customer_id: string | null; subscription_id: string | null;
   status: string; plan: string | null; monthly_credits: number; remaining: number;
   period_end: string | null; month_anchor: string | null;
   period_start: string | null; window_anchor: string | null; suspended: number | boolean | null;
+  status_at: string | null; cancel_at_period_end: number | boolean | null;
   updated_at: string;
 };
+
+/**
+ * ORDRE DES ÉVÉNEMENTS. Stripe ne garantit pas l'ordre de livraison et rejoue
+ * pendant trois jours un événement dont la livraison a échoué. Le statut d'une
+ * ligne suit donc l'événement le plus RÉCENT (sa date de création chez Stripe,
+ * gardée dans `status_at`), pas le dernier arrivé : un « past_due » rejoué
+ * après le paiement ne rétrograde pas l'abonné qui a payé.
+ */
+const NEWER = `(status_at IS NULL OR status_at <= ?)`;
+/** Remise en règle par un événement daté (facture payée, checkout) — sans effet s'il est plus ancien que le statut connu. */
+const ACTIVATE_IF_NEWER = `status = CASE WHEN ${NEWER} THEN 'active' ELSE status END,
+        cancel_at_period_end = CASE WHEN ${NEWER} THEN 0 ELSE cancel_at_period_end END,
+        status_at = CASE WHEN ${NEWER} THEN ? ELSE status_at END`;
+const activateParams = (at: string) => [at, at, at, at];
 
 /** Crédits Pro accordés chaque mois, en centièmes (SUBSCRIPTION_MONTHLY_CREDITS, en crédits, défaut 20). */
 export function subscriptionMonthlyCreditsCenti(): number {
@@ -223,9 +245,9 @@ export async function resolveUserByCustomer(customerId: string): Promise<string 
   return r?.user_id ?? null;
 }
 
-/** L'abonnement fournit-il des crédits en ce moment ? (période en cours, non suspendu). */
+/** L'abonnement fournit-il des crédits en ce moment ? (période PAYÉE en cours, en règle, non suspendu). */
 export function subscriptionLive(s: SubRow | undefined, now = nowStr()): boolean {
-  return !!s && !!s.period_end && now < s.period_end && !s.suspended;
+  return standingOf(s, now) === "live";
 }
 
 /**
@@ -254,33 +276,43 @@ export async function subscriptionCredits(userId = currentUser()): Promise<numbe
 }
 
 /**
- * Attribution par FACTURE PAYÉE (invoice.paid) : `remaining` REMIS à
- * `monthly_credits` (reliquat perdu), période [periodStart, periodEnd), première
- * fenêtre ouverte à periodStart, suspension levée. Upsert par utilisateur.
+ * Attribution par FACTURE PAYÉE (invoice.paid) — la SEULE écriture de la
+ * période payée : `remaining` REMIS à `monthly_credits` (reliquat perdu, jamais
+ * additionné), période [periodStart, periodEnd), première fenêtre ouverte à
+ * periodStart, suspension levée. `at` : date de l'événement chez Stripe.
+ * Upsert par utilisateur. Renvoie false, sans rien écrire, si la facture
+ * couvre une période antérieure à celle déjà payée.
  */
 export async function grantSubscriptionMonth(p: {
   userId: string; customerId?: string | null; subscriptionId?: string | null; plan?: string | null;
-  periodEnd: string; periodStart?: string | null;
-}): Promise<void> {
+  periodEnd: string; periodStart?: string | null; at?: string | null;
+}): Promise<boolean> {
   const credits = subscriptionMonthlyCreditsCenti();
   const now = nowStr();
+  const at = p.at ?? now;
   const start = p.periodStart ?? now;
   const month = start.slice(0, 7);
-  if (await getSubscription(p.userId)) {
+  const existing = await getSubscription(p.userId);
+  // La période payée ne RECULE jamais : une facture plus ancienne réglée après
+  // une plus récente (rattrapage d'impayés, événements livrés dans le désordre)
+  // remettrait l'abonné sur un mois déjà écoulé, donc à 0 alors qu'il vient de payer.
+  if (existing?.period_start && start < existing.period_start) return false;
+  if (existing) {
     await authRun(
       `UPDATE subscriptions SET customer_id = coalesce(?, customer_id), subscription_id = coalesce(?, subscription_id),
-        status = 'active', plan = coalesce(?, plan), monthly_credits = ?, remaining = ?, period_start = ?, period_end = ?,
+        ${ACTIVATE_IF_NEWER}, plan = coalesce(?, plan), monthly_credits = ?, remaining = ?, period_start = ?, period_end = ?,
         window_anchor = ?, month_anchor = ?, suspended = 0, updated_at = ?
-       WHERE user_id = ?`,
-      p.customerId ?? null, p.subscriptionId ?? null, p.plan ?? null, credits, credits, start, p.periodEnd, start, month, now, p.userId,
+       WHERE user_id = ? AND (period_start IS NULL OR period_start <= ?)`,
+      p.customerId ?? null, p.subscriptionId ?? null, ...activateParams(at), p.plan ?? null, credits, credits, start, p.periodEnd, start, month, now, p.userId, start,
     );
   } else {
     await authRun(
-      `INSERT INTO subscriptions (user_id, customer_id, subscription_id, status, plan, monthly_credits, remaining, period_start, period_end, window_anchor, month_anchor, suspended, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?)`,
-      p.userId, p.customerId ?? null, p.subscriptionId ?? null, "active", p.plan ?? null, credits, credits, start, p.periodEnd, start, month, now,
+      `INSERT INTO subscriptions (user_id, customer_id, subscription_id, status, status_at, plan, monthly_credits, remaining, period_start, period_end, window_anchor, month_anchor, suspended, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,?)`,
+      p.userId, p.customerId ?? null, p.subscriptionId ?? null, "active", at, p.plan ?? null, credits, credits, start, p.periodEnd, start, month, now,
     );
   }
+  return true;
 }
 
 /** Reprise d'une facture d'abonnement (remboursement, litige) : SUSPENDU jusqu'à la prochaine facture payée. */
@@ -290,28 +322,33 @@ export async function suspendSubscription(userId: string): Promise<void> {
 
 /** Lie client Stripe → utilisateur (checkout abonnement) SANS attribuer : c'est invoice.paid qui attribue. */
 export async function linkSubscription(p: {
-  userId: string; customerId?: string | null; subscriptionId?: string | null; plan?: string | null; periodEnd?: string | null;
+  userId: string; customerId?: string | null; subscriptionId?: string | null; plan?: string | null; at?: string | null;
 }): Promise<void> {
   const now = nowStr();
+  const at = p.at ?? now;
   if (await getSubscription(p.userId)) {
     await authRun(
       `UPDATE subscriptions SET customer_id = coalesce(?, customer_id), subscription_id = coalesce(?, subscription_id),
-        status = 'active', plan = coalesce(?, plan), period_end = coalesce(?, period_end), updated_at = ? WHERE user_id = ?`,
-      p.customerId ?? null, p.subscriptionId ?? null, p.plan ?? null, p.periodEnd ?? null, now, p.userId,
+        ${ACTIVATE_IF_NEWER}, plan = coalesce(?, plan), updated_at = ? WHERE user_id = ?`,
+      p.customerId ?? null, p.subscriptionId ?? null, ...activateParams(at), p.plan ?? null, now, p.userId,
     );
   } else {
     await authRun(
-      `INSERT INTO subscriptions (user_id, customer_id, subscription_id, status, plan, monthly_credits, remaining, period_end, updated_at)
+      `INSERT INTO subscriptions (user_id, customer_id, subscription_id, status, status_at, plan, monthly_credits, remaining, updated_at)
        VALUES (?,?,?,?,?,?,?,?,?)`,
-      p.userId, p.customerId ?? null, p.subscriptionId ?? null, "active", p.plan ?? null, subscriptionMonthlyCreditsCenti(), 0, p.periodEnd ?? null, now,
+      p.userId, p.customerId ?? null, p.subscriptionId ?? null, "active", at, p.plan ?? null, subscriptionMonthlyCreditsCenti(), 0, now,
     );
   }
 }
 
-/** État d'un abonnement (updated/deleted). `clearRemaining` (fin) remet le mois à 0. */
+/**
+ * Statut d'un abonnement (updated/deleted), daté par son événement (`at`) : un
+ * événement plus ancien que le statut connu est ignoré EN ENTIER. Ne touche
+ * jamais la période payée. `clearRemaining` (fin) remet le mois à 0.
+ */
 export async function setSubscriptionStatus(p: {
   userId?: string | null; customerId?: string | null; subscriptionId?: string | null;
-  status: string; periodEnd?: string | null; periodStart?: string | null; clearRemaining?: boolean;
+  status: string; at?: string | null; cancelAtPeriodEnd?: boolean; clearRemaining?: boolean;
 }): Promise<string | null> {
   let userId = p.userId ?? null;
   if (!userId && p.customerId) userId = await resolveUserByCustomer(p.customerId);
@@ -320,9 +357,12 @@ export async function setSubscriptionStatus(p: {
     userId = r?.user_id ?? null;
   }
   if (!userId) return null;
+  const now = nowStr();
+  const at = p.at ?? now;
   await authRun(
-    `UPDATE subscriptions SET status = ?, period_end = coalesce(?, period_end), period_start = coalesce(?, period_start), ${p.clearRemaining ? "remaining = 0, " : ""}updated_at = ? WHERE user_id = ?`,
-    p.status, p.periodEnd ?? null, p.periodStart ?? null, nowStr(), userId,
+    `UPDATE subscriptions SET status = ?, status_at = ?, cancel_at_period_end = coalesce(?, cancel_at_period_end), ${p.clearRemaining ? "remaining = 0, " : ""}updated_at = ?
+     WHERE user_id = ? AND ${NEWER}`,
+    p.status, at, p.cancelAtPeriodEnd === undefined ? null : Number(p.cancelAtPeriodEnd), now, userId, at,
   );
   return userId;
 }

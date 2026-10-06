@@ -3,7 +3,8 @@
 > Durée : ~45-60 min la première fois. Coût fixe : ~5 $/mois
 > (Railway Hobby) + le coût API Anthropic (plafonné par `SPEND_CAP_USD`).
 > **Tout Stripe se fait d'abord en MODE TEST** (cartes factices) — la bascule
-> live ne demande que le remplacement de 3 valeurs d'env.
+> live ne demande que le remplacement de 2 valeurs d'env
+> ([docs/STRIPE-LIVE.md](docs/STRIPE-LIVE.md)).
 
 ## Ce qu'on déploie
 
@@ -18,7 +19,8 @@ importe ses propres documents.
 **Garde-fous actifs en prod** : modèle **Sonnet** par défaut
 (Opus refusé sans `LLM_ALLOW_OPUS=1`), coût de chaque appel loggé (table
 `llm_usage`), **plafond global `SPEND_CAP_USD`** (kill-switch), génération
-**derrière login** + **quota/jour** + **crédits payants**, invite-only.
+**derrière login** + **quota/jour** + **crédits payants**. Les inscriptions sont
+ouvertes à tous, sauf lancement fermé (`INVITE_ONLY=1`, § 12).
 
 ---
 
@@ -95,10 +97,11 @@ DAILY_ASSIST_QUOTA=20
 RATE_LIMIT_PER_MIN=120
 TRUST_PROXY=1
 
-# — lancement fermé + vitrine publique —
-INVITE_ONLY=1
-INVITE_EMAILS=toi@exemple.com
-PUBLIC_DEMO=1
+# — lancement FERMÉ (optionnel ; sans ces lignes, tout compte Google s'inscrit : § 12) —
+# INVITE_ONLY=1
+# INVITE_EMAILS=toi@exemple.com
+# Ne PAS poser PUBLIC_DEMO en production : un visiteur anonyme y lirait les
+# données du compte propriétaire.
 
 # — crédits Stripe (mode TEST, étape 7) —
 BILLING_ENABLED=1
@@ -108,13 +111,17 @@ STRIPE_WEBHOOK_SECRET=⟨whsec_…⟩
 # Prix référencés par lookup_key dans Stripe (étape 7) — rien d'autre à poser.
 SUBSCRIPTION_MONTHLY_CREDITS=20
 
-# — pages légales (OBLIGATOIRES pour vendre : sans les 4, l'achat est désactivé) —
-LEGAL_TERMS_URL=https://⟨landing⟩/cgv
-LEGAL_PRIVACY_URL=https://⟨landing⟩/confidentialite
-LEGAL_REFUND_URL=https://⟨landing⟩/remboursement
-LEGAL_NOTICE_URL=https://⟨landing⟩/mentions-legales
+# — pages légales (OBLIGATOIRES pour vendre : sans elles, l'achat est désactivé) —
+# Déclarer la vitrine lie ses quatre pages françaises (/terms, /privacy,
+# /remboursement, /mentions-legales) et leur version anglaise (/terms-en).
+# Un LEGAL_TERMS_URL / _PRIVACY_ / _REFUND_ / _NOTICE_URL explicite prime.
+LANDING_URL=https://⟨landing⟩
 # Version des CGV tracée à l'acceptation (change-la à chaque révision des CGV).
-LEGAL_TERMS_VERSION=2026-09
+LEGAL_TERMS_VERSION=2026-10
+# Adresse de contact affichée dans l'app (défaut : celle de l'éditeur).
+# CONTACT_EMAIL=support@⟨ton-domaine⟩
+# Adresse qui reçoit les demandes de rétractation.
+PUBLISHER_EMAIL=⟨ton adresse⟩
 
 # — stockage : quota par compte (Mo) sur le volume, + refus sous 10 % d'espace libre —
 STORAGE_QUOTA_MB=200
@@ -142,7 +149,7 @@ LOG_LEVEL=info
 
 Le domaine : Settings → **Networking** → **Generate Domain** (type
 `cortex-app-production.up.railway.app`) → reporte-le dans `AUTH_URL`.
-(Domaine custom plus tard : même écran, ajoute un CNAME.)
+Pour un nom de domaine à toi : § 13.
 
 ## 5. Anthropic — la clé API
 
@@ -190,8 +197,11 @@ pose `AUTH_EMAIL_ENABLED=1` puis :
    - URL : `https://⟨ton-domaine⟩/api/billing/webhook`
    - Événements : **`checkout.session.completed`**,
      **`checkout.session.async_payment_succeeded`** (confirme les moyens de
-     paiement différés), **`invoice.paid`** (attribue les 20 crédits du mois,
-     idempotent par facture), **`customer.subscription.updated`**,
+     paiement différés), **`invoice.paid`** (ouvre la période payée et remet le
+     mois à 20 crédits, idempotent par facture),
+     **`customer.subscription.updated`** (statut seulement : en règle, retard
+     de paiement, résiliation programmée — la période qu'il annonce n'est pas
+     reprise, seule une facture payée en ouvre une),
      **`customer.subscription.deleted`** (fin : crédits du mois à 0),
      **`charge.refunded`** et **`charge.dispute.created`** (reprennent les
      crédits d'un pack ou d'une facture remboursés ou contestés — ce qui a déjà
@@ -217,9 +227,11 @@ pose `AUTH_EMAIL_ENABLED=1` puis :
 5. Test de paiement : carte `4242 4242 4242 4242`, n'importe quelle date
    future/CVC. Le webhook crédite le solde (idempotent — un retry Stripe ne
    crédite jamais deux fois, c'est testé).
-6. **Bascule LIVE plus tard** : interrupteur Live → recrée les 3 produits et
-   le webhook en mode live → remplace `sk_test_→sk_live_`, les 3 `price_…` et
-   le `whsec_…`. **Aucun changement de code.**
+6. **Bascule LIVE plus tard** : [docs/STRIPE-LIVE.md](docs/STRIPE-LIVE.md)
+   (produits et prix exacts, webhook, portail, pied de facture, variables,
+   nettoyage des données de test, test réel avec remboursement). **Aucun
+   changement de code**, deux variables à remplacer. Tant que la clé est une
+   clé de test et que l'instance est ouverte au public, la vente reste fermée.
 
 ### Tarification — le prix d'un crédit doit couvrir le coût API
 
@@ -268,9 +280,10 @@ pose `AUTH_EMAIL_ENABLED=1` puis :
          s'il est `false`, les figures matplotlib et la vérification de code
          seront désactivées (les examens restent produits, sans figures
          générées) ;
-   - [ ] `/` en navigation privée → la vitrine s'affiche (PUBLIC_DEMO) ;
-   - [ ] **Se connecter** avec TON e-mail (invité) → magic-link reçu → session ;
-   - [ ] un e-mail NON invité → « accès refusé » (invite-only) ;
+   - [ ] `/` en navigation privée → redirection vers `/login` ;
+   - [ ] **Se connecter** avec ton compte Google → session ;
+   - [ ] en lancement fermé (`INVITE_ONLY=1`) seulement : un compte NON invité
+         → « accès refusé » ;
    - [ ] premier lancement → écran vide → **créer un cours** → importer une
          annale → la préparation s'exécute ;
    - [ ] Examens → **Générer** → le job tourne (10-20 min) → PDF
@@ -478,5 +491,156 @@ moteur = CLI `claude` locale (`claude -p`), sans authentification —
 - `main` est la seule branche permanente, et la seule qui déploie.
 - Les branches de travail partent de `main`, sont fusionnées par pull request
   avec CI verte, puis supprimées.
-- Railway est connecté à `main` avec **auto-deploy** et **« Wait for CI »** : un
-  commit n'est déployé que si la CI GitHub est verte.
+- Railway est connecté à `main` avec **auto-deploy**. **« Wait for CI » doit
+  être activé** (service → Settings → Source) : un déploiement attend alors la
+  fin des workflows GitHub Actions du commit, et un workflow en échec le fait
+  sauter. Sans ce réglage, tout push sur `main` part en production pendant que
+  la CI tourne encore. À vérifier après chaque reconnexion du dépôt : un
+  déploiement en attente s'affiche `WAITING` tant que la CI n'a pas fini.
+- La CI (`.github/workflows/ci.yml`) joue sur chaque pull request et sur
+  `main` : typecheck, build, lint, tests (avec un vrai Postgres), puis build de
+  l'image, garde de démarrage, test de fumée et compilation LaTeX réelle.
+
+---
+
+## 12. Ouvrir les inscriptions au public
+
+Le lancement fermé tient à une variable. Pour ouvrir :
+
+| Variable Railway | Avant | Après |
+|---|---|---|
+| `INVITE_ONLY` | `1` | **supprimée** (ou `0`) |
+| `INVITE_EMAILS` | la liste des invités | sans effet, peut rester |
+
+Tout compte Google peut alors s'inscrire : il reçoit `SIGNUP_FREE_CREDITS`
+crédits (2), de quoi préparer son premier cours, et il est soumis aux quotas
+quotidiens (`DAILY_GEN_QUOTA`, `DAILY_ASSIST_QUOTA`).
+
+À vérifier **avant** de retirer la variable :
+
+- [ ] `TRUST_PROXY=1` : sans elle, la limite de requêtes est commune à tous
+      les visiteurs et quelques sessions suffisent à mettre tout le monde en 429.
+- [ ] `PUBLIC_DEMO` absente.
+- [ ] `SPEND_CAP_USD` relevé au-dessus de la dépense déjà faite. Ce plafond
+      est **cumulé depuis la création de l'instance**, pas quotidien : atteint,
+      il coupe la génération pour tout le monde jusqu'à ce qu'on le relève.
+      Dépense actuelle : `SELECT round(sum(cost_usd)::numeric, 2) FROM llm_usage;`
+      (`SPEND_CAP_PER_USER_USD`, lui, est bien par compte et par jour.)
+- [ ] Un plafond de dépense dur côté Anthropic.
+- [ ] Console Google Cloud → écran de consentement OAuth : état **« En
+      production »**. En « Test », seuls les comptes de test passent, et un
+      inconnu voit « accès bloqué » chez Google, avant même d'arriver sur l'app.
+- [ ] `LANDING_URL` (ou les quatre `LEGAL_*_URL`) posée : les liens légaux
+      apparaissent en pied de page et sur l'écran de connexion.
+
+**Paiements.** Avec une clé Stripe de **test**, une instance ouverte au public
+ferme la vente d'elle-même (une carte de test donnerait de vrais crédits) : la
+page « Abonnement & crédits » affiche « Les achats ouvrent bientôt ». Laisse
+`BILLING_ENABLED=1` : c'est lui qui fait payer les générations en crédits. La
+vente ouvre en collant la clé live ([docs/STRIPE-LIVE.md](docs/STRIPE-LIVE.md)).
+
+À vérifier **après** : un compte Google jamais vu se connecte, arrive sur
+l'écran de premier lancement, crée un cours, et « Mon compte » affiche un solde
+de 2 crédits.
+
+## 13. Nom de domaine
+
+Tout ce qui dépend de l'adresse publique se lit dans `AUTH_URL` : redirections
+OAuth, retours de paiement, portail Stripe, image de partage. La politique de
+sécurité (CSP) et les cookies de session ne nomment aucun domaine. Changer de
+domaine, c'est donc : des enregistrements DNS, une variable indispensable
+(`AUTH_URL`), deux de confort (`LANDING_URL` si la vitrine déménage aussi,
+`REDIRECT_FROM_HOSTS` pour renvoyer l'ancienne adresse), et trois réglages chez
+des tiers.
+
+Répartition conseillée pour `cortexexam.com` :
+
+| Hôte | Sert | Hébergeur |
+|---|---|---|
+| `cortexexam.com` et `www.cortexexam.com` | la vitrine | Vercel |
+| `app.cortexexam.com` | l'app | Railway |
+
+L'app sur un sous-domaine évite la question du CNAME à la racine, que tous les
+DNS n'acceptent pas. (L'app à la racine reste possible si le DNS propose un
+enregistrement ALIAS ou l'aplatissement de CNAME.)
+
+### Enregistrements DNS
+
+Les valeurs exactes sont **affichées par chaque service** quand tu y ajoutes le
+domaine : copie-les telles quelles. Dans le champ « hôte », saisis seulement la
+partie avant `cortexexam.com`.
+
+**App (Railway)** : service `cortex-app` → Settings → Networking → **+ Custom
+Domain** → `app.cortexexam.com`. Railway donne **deux** enregistrements, tous
+deux obligatoires (sans le TXT, le domaine répond 404) :
+
+| Type | Hôte | Valeur |
+|---|---|---|
+| CNAME | `app` | celle affichée par Railway (`….up.railway.app`) |
+| TXT | celui affiché par Railway | la valeur de vérification affichée par Railway |
+
+Le certificat TLS est émis automatiquement, en général dans l'heure.
+
+**Vitrine (Vercel)** : projet `cortex-landing` → Settings → Domains → ajouter
+`cortexexam.com` et `www.cortexexam.com`. Vercel affiche :
+
+| Type | Hôte | Valeur |
+|---|---|---|
+| A | `@` | l'adresse IP affichée par Vercel |
+| CNAME | `www` | la cible affichée par Vercel |
+
+**E-mail (Resend)**, seulement si l'app envoie du courrier (accusés de
+rétractation, lien magique) : Resend → Domains → Add Domain. Un sous-domaine
+d'envoi est conseillé, par exemple `mail.cortexexam.com` ; les hôtes ci-dessous
+s'écrivent alors `send.mail`, `resend._domainkey.mail` et `_dmarc.mail`.
+
+| Type | Hôte | Valeur | Priorité |
+|---|---|---|---|
+| MX | `send` | `feedback-smtp.⟨région⟩.amazonses.com` (affichée par Resend) | 10 |
+| TXT | `send` | `v=spf1 include:amazonses.com ~all` | |
+| TXT | `resend._domainkey` | la clé DKIM affichée par Resend (`p=…`) | |
+| TXT | `_dmarc` | `v=DMARC1; p=none; rua=mailto:⟨ton adresse⟩;` | |
+
+Une fois le domaine vérifié chez Resend : `AUTH_EMAIL_FROM=Cortex <no-reply@mail.cortexexam.com>`.
+Recevoir du courrier sur `support@cortexexam.com` demande un service de
+messagerie ou de redirection en plus : tant qu'il n'existe pas, garde l'adresse
+de contact actuelle.
+
+### Bascule, dans l'ordre
+
+1. **DNS** : crée les enregistrements, attends que Railway et Vercel affichent
+   le domaine comme vérifié. `https://app.cortexexam.com/api/health` doit
+   répondre `ok` — l'ancienne adresse marche toujours, rien n'est cassé.
+2. **Google Cloud** → Identifiants → client OAuth de l'app : **ajoute** sans
+   retirer l'ancien
+   - Origine JavaScript autorisée : `https://app.cortexexam.com`
+   - URI de redirection autorisée : `https://app.cortexexam.com/api/auth/callback/google`
+
+   Puis écran de consentement : domaine autorisé `cortexexam.com`, page
+   d'accueil `https://cortexexam.com`, confidentialité
+   `https://cortexexam.com/privacy`, conditions `https://cortexexam.com/terms`.
+3. **Railway**, les trois variables ensemble :
+
+   | Variable | Valeur |
+   |---|---|
+   | `AUTH_URL` | `https://app.cortexexam.com` |
+   | `LANDING_URL` | `https://cortexexam.com` |
+   | `REDIRECT_FROM_HOSTS` | l'ancien hôte, par ex. `cortex-app-production-6a65.up.railway.app` |
+
+   `REDIRECT_FROM_HOSTS` renvoie l'ancienne adresse vers la nouvelle. Sans
+   elle, une connexion commencée sur l'ancienne adresse échoue : ses cookies
+   d'état OAuth n'appartiennent pas au domaine que Google rappelle. Le
+   healthcheck et le webhook Stripe ne sont jamais redirigés.
+4. **Stripe** → Développeurs → Webhooks → l'endpoint → modifier l'URL :
+   `https://app.cortexexam.com/api/billing/webhook` (le secret de signature ne
+   change pas). Informations publiques : site `https://cortexexam.com`.
+5. **Vitrine** : ses liens « ouvrir l'app » pointent sur l'ancienne adresse ;
+   remplace-les par `https://app.cortexexam.com` et redéploie (dépôt
+   `cortex-landing`). En attendant, l'étape 3 les redirige.
+6. **Vérifier** : `https://app.cortexexam.com/login` répond 200 ; l'ancienne
+   adresse renvoie vers la nouvelle ; une connexion Google aboutit ; « Gérer
+   mon abonnement » et un retour de paiement reviennent sur le nouveau domaine.
+
+Les sessions ouvertes sur l'ancienne adresse ne suivent pas : chacun se
+reconnecte une fois. Garde l'ancienne URI de redirection Google et le domaine
+Railway quelques semaines, puis retire-les.

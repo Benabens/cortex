@@ -1,5 +1,6 @@
 import { authBodyLimit } from "@/lib/auth-body-limit";
 import { demoReadable } from "@/lib/demo-paths";
+import { legacyHostRedirect } from "@/lib/public-url";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -140,6 +141,15 @@ export default function proxy(req: NextRequest) {
   // d'infrastructure ci-dessus.
   const { pathname } = req.nextUrl;
   if (legacyPathBlocked(pathname)) return new NextResponse("Not found", { status: 404 });
+  // Ancien domaine (REDIRECT_FROM_HOSTS) → URL publique, avant toute autre logique :
+  // une connexion commencée sur l'ancien hôte échouerait (cf. lib/public-url).
+  // L'hôte est lu dans des en-têtes que le client peut forger, sans conséquence :
+  // la cible est toujours AUTH_URL, il ne peut que se renvoyer lui-même dessus.
+  const moved = legacyHostRedirect({
+    host: req.headers.get("x-forwarded-host") ?? req.headers.get("host"),
+    pathname, search: req.nextUrl.search,
+  });
+  if (moved) return NextResponse.redirect(moved, 308);
   // /api/auth/* est public et lu par NextAuth sans borne : on refuse ici un corps trop grand.
   const authBody = authBodyLimit({ method: req.method, pathname, headers: req.headers });
   if (authBody) return NextResponse.json({ error: authBody.error }, { status: authBody.status });

@@ -37,7 +37,9 @@ function Body({ children }: { children: React.ReactNode }) {
  *  mise en page plein écran (DA sombre de la landing). */
 const BARE_ROUTES = ["/login"];
 
-export function AppShell({ children, legal }: { children: React.ReactNode; legal?: LegalLinks }) {
+export function AppShell({ children, legal, legalEnglish, contact }: {
+  children: React.ReactNode; legal?: LegalLinks; legalEnglish?: string | null; contact?: string;
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const router = useRouter();
   const shellPathname = usePathname();
@@ -76,7 +78,7 @@ export function AppShell({ children, legal }: { children: React.ReactNode; legal
           </main>
           {legal && (
             <footer className="mx-auto w-full max-w-[1240px] px-4 pb-8 sm:px-6 lg:px-8">
-              <LegalLine legal={legal} />
+              <LegalLine legal={legal} english={legalEnglish} contact={contact} />
             </footer>
           )}
         </div>

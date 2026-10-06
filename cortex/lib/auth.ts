@@ -3,6 +3,7 @@ import type { Adapter, AdapterAccount, AdapterUser, VerificationToken } from "ne
 import crypto from "node:crypto";
 import { authGet, authRun } from "@/db/auth-store";
 import { authProviders } from "@/lib/auth-providers";
+import { inviteAllows } from "@/lib/invite";
 
 /**
  * AUTH — Auth.js v5 (NextAuth), OPT-IN par AUTH_ENABLED=1.
@@ -116,22 +117,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: authProviders(),
   callbacks: {
     /**
-     * INVITE-ONLY (lancement fermé) : INVITE_ONLY=1 → seuls les e-mails de
-     * l'allowlist INVITE_EMAILS (séparés par des virgules ; une entrée
-     * commençant par « @ » autorise tout le domaine, ex. @epfl.ch) peuvent se
-     * connecter/s'inscrire. Magic-link : le callback est appelé dès la DEMANDE
-     * de lien → un non-invité ne reçoit même pas d'e-mail.
+     * Inscriptions ouvertes à tous, sauf lancement fermé (INVITE_ONLY=1 : seules
+     * les adresses d'INVITE_EMAILS passent — cf. lib/invite). Magic-link : le
+     * callback est appelé dès la DEMANDE de lien → un non-invité ne reçoit même
+     * pas d'e-mail.
      */
     signIn({ user, profile }) {
-      if (process.env.INVITE_ONLY !== "1") return true;
-      const addr = (user?.email ?? (profile?.email as string) ?? "").trim().toLowerCase();
-      if (!addr) return false;
-      const allow = (process.env.INVITE_EMAILS ?? "")
-        .toLowerCase()
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      return allow.some((a) => (a.startsWith("@") ? addr.endsWith(a) : a === addr));
+      return inviteAllows(user?.email ?? (profile?.email as string | undefined));
     },
     jwt({ token, user }) {
       if (user?.id) token.uid = user.id;

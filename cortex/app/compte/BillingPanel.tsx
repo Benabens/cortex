@@ -6,6 +6,7 @@ import { ExternalLink, RotateCw, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Panel } from "@/components/ui/primitives";
+import type { Standing } from "@/lib/billing/subscription-windows";
 import { cn } from "@/lib/ux/cn";
 
 /**
@@ -30,6 +31,10 @@ type Billing = {
   billing: boolean;
   purchase: { enabled: boolean; reason: string | null };
   legal: { terms: string | null; privacy: string | null; refund: string | null; notice: string | null };
+  /** Version anglaise des documents (vitrine), si elle est connue. */
+  legalEnglish?: string | null;
+  /** Adresse de contact (lib/contact). */
+  contact?: string;
   terms: {
     version: string; accepted: boolean; acceptedAt: string | null;
     /** accord exprès à l'exécution immédiate + perte du droit de rétractation (L221-28 13°) */
@@ -40,6 +45,9 @@ type Billing = {
   subscription: {
     status: string; live: boolean; plan: string | null; creditsThisMonth: number; monthlyCredits: number;
     periodEnd: string | null; nextRechargeAt: string | null; manageable: boolean;
+    /** État lu par le serveur : en règle, paiement en cours, impayé, suspendu, terminé. */
+    standing: Standing;
+    cancelsAtPeriodEnd: boolean;
   } | null;
   costs: { exam: number; qcm: number; exercise: number; assist: number };
   transactions: Tx[];
@@ -197,7 +205,11 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
   }
 
   const sub = data.subscription;
-  const subLive = !!sub?.live;
+  const standing: Standing = sub?.standing ?? "none";
+  const subLive = standing === "live";
+  // Tant que Stripe tient l'abonnement pour vivant (même impayé), on n'en propose pas un second.
+  const hasSub = standing !== "none";
+  const canceling = subLive && !!sub?.cancelsAtPeriodEnd;
   const canBuy = data.purchase.enabled && data.terms.accepted;
   const legalOk = !!(data.legal.terms && data.legal.refund);
   // La case suit la décision de l'API (purchase.enabled) : en production sans
@@ -245,19 +257,37 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
           <div>
             <dt className="flex items-center gap-2 text-ink-3">
               Abonnement
-              {sub && subLive && <Badge tone={sub.status === "canceled" ? "warning" : "success"} size="xs">{sub.status === "canceled" ? "résilié : actif jusqu’à la fin de période" : "actif"}</Badge>}
+              {standing === "live" && <Badge tone={canceling ? "warning" : "success"} size="xs">{canceling ? "résiliation programmée" : "actif"}</Badge>}
+              {standing === "renewing" && <Badge tone="neutral" size="xs">paiement en cours</Badge>}
+              {standing === "unpaid" && <Badge tone="danger" size="xs">paiement en échec</Badge>}
+              {standing === "suspended" && <Badge tone="warning" size="xs">suspendu</Badge>}
             </dt>
             <dd className="mt-0.5 text-ink-1">
-              {sub && subLive ? (
+              {sub && subLive && (
                 <>
                   <span className="font-medium">{nf.format(sub.creditsThisMonth)} / {nf.format(sub.monthlyCredits)}</span> crédits ce mois-ci
                   {sub.nextRechargeAt && <span className="text-ink-3"> · recharge le {dateFr(sub.nextRechargeAt)}</span>}
-                  {!sub.nextRechargeAt && sub.periodEnd && <span className="text-ink-3"> · jusqu’au {dateFr(sub.periodEnd)}</span>}
+                  {canceling && sub.periodEnd && <span className="text-ink-3"> · se termine le {dateFr(sub.periodEnd)}</span>}
+                  {!canceling && !sub.nextRechargeAt && sub.periodEnd && <span className="text-ink-3"> · jusqu’au {dateFr(sub.periodEnd)}</span>}
                   <div className="mt-0.5 text-[0.78rem] text-ink-4">Non reportables : ce qui n’est pas utilisé dans le mois est perdu. Consommés avant tes crédits achetés.</div>
                 </>
-              ) : (
-                <span className="text-ink-3">Aucun abonnement.</span>
               )}
+              {standing === "renewing" && (
+                <span className="text-ink-2">
+                  Tes crédits du mois arrivent dès que le paiement est confirmé : quelques secondes après un achat,
+                  jusqu’à une heure lors d’un renouvellement.
+                </span>
+              )}
+              {standing === "unpaid" && (
+                <span className="text-ink-2">
+                  Le dernier paiement n’est pas passé : pas de crédits d’abonnement tant qu’il n’est pas réglé.
+                  Mets à jour ton moyen de paiement depuis « Gérer mon abonnement ». Tes crédits achetés restent utilisables.
+                </span>
+              )}
+              {standing === "suspended" && (
+                <span className="text-ink-2">Un paiement a été remboursé ou contesté : l’abonnement reprend à la prochaine facture payée.</span>
+              )}
+              {standing === "none" && <span className="text-ink-3">Aucun abonnement.</span>}
             </dd>
           </div>
           <div>
@@ -291,14 +321,14 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
             const isSub = o.kind === "subscription";
             // `busy` couvre TOUTES les offres : pendant une redirection vers Stripe,
             // aucune autre ne doit pouvoir ouvrir une seconde session de paiement.
-            const disabled = !canBuy || !consents[o.plan] || !!busy || (isSub && subLive);
+            const disabled = !canBuy || !consents[o.plan] || !!busy || (isSub && hasSub);
             return (
               <li key={o.plan} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-3.5">
                 <div className="min-w-0">
                   <div className="text-[0.9rem] font-medium text-ink-1">{o.label}</div>
                   <div className="text-[0.8rem] text-ink-3">
                     {isSub ? `${nf.format(o.credits)} crédits par mois, non reportables` : `${nf.format(o.credits)} crédits, sans date d’expiration`}
-                    {isSub && subLive && <span> · tu as déjà un abonnement</span>}
+                    {isSub && hasSub && <span> · tu as déjà un abonnement</span>}
                   </div>
                   {/* Conditions de reconduction, à côté du bouton et AVANT tout achat :
                       elles ne vivaient que dans le bloc « Gérer mon abonnement », invisible
@@ -311,7 +341,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
                   )}
                   <label className="mt-2 flex max-w-xl items-start gap-2 text-[0.78rem] leading-relaxed text-ink-3">
                     <input type="checkbox" className="mt-0.5 size-4 accent-[var(--color-violet)]" checked={!!consents[o.plan]}
-                      disabled={!data.purchase.enabled || !!busy || (isSub && subLive)}
+                      disabled={!data.purchase.enabled || !!busy || (isSub && hasSub)}
                       onChange={(e) => setConsents((current) => ({ ...current, [o.plan]: e.target.checked }))} />
                     <span>{isSub
                       ? "Je demande que mon abonnement commence immédiatement. Si je me rétracte sous 14 jours, le montant proportionnel au service déjà fourni restera dû."
@@ -381,7 +411,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
         )}
       </Panel>
 
-      <LegalLine legal={data.legal} />
+      <LegalLine legal={data.legal} english={data.legalEnglish} contact={data.contact} />
     </section>
   );
 }
@@ -440,7 +470,7 @@ function TermsConsent({ data, busy, canAccept, legalOk, onAcceptTerms }: {
   );
 }
 
-export function LegalLine({ legal, className }: { legal: Billing["legal"]; className?: string }) {
+export function LegalLine({ legal, english, contact, className }: { legal: Billing["legal"]; english?: string | null; contact?: string; className?: string }) {
   const items: Array<[string, string | null]> = [
     ["Conditions générales de vente", legal.terms],
     ["Confidentialité", legal.privacy],
@@ -448,12 +478,16 @@ export function LegalLine({ legal, className }: { legal: Billing["legal"]; class
     ["Mentions légales", legal.notice],
   ];
   const present = items.filter(([, href]) => href);
-  if (!present.length) return null;
+  if (!present.length && !contact) return null;
   return (
     <p className={cn("flex flex-wrap gap-x-4 gap-y-1 text-[0.75rem] text-ink-4", className)}>
       {present.map(([label, href]) => (
         <a key={label} href={href!} target="_blank" rel="noreferrer" className="underline-offset-2 hover:text-ink-2 hover:underline">{label}</a>
       ))}
+      {present.length > 0 && english && (
+        <a href={english} hrefLang="en" lang="en" target="_blank" rel="noreferrer" className="underline-offset-2 hover:text-ink-2 hover:underline">English version</a>
+      )}
+      {contact && <a href={`mailto:${contact}`} className="underline-offset-2 hover:text-ink-2 hover:underline">Contact : {contact}</a>}
     </p>
   );
 }

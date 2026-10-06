@@ -1,5 +1,6 @@
 import { emailLoginConfigured, googleLoginConfigured } from "@/lib/auth";
-import { legalLinks } from "@/lib/legal";
+import { contactEmail } from "@/lib/contact";
+import { DEFAULT_LANDING_URL, LANDING_ENGLISH_PATH, landingOrigin, legalLinks } from "@/lib/legal";
 import { LoginCard } from "./LoginCard";
 
 // Police système + Funnel Display pour le titre, comme le reste de l'app (Geist retirée : liste interdite anti-slop).
@@ -27,6 +28,9 @@ export default async function LoginPage({
       google={googleLoginConfigured()}
       email={emailLoginConfigured()}
       legal={legalLinks()}
+      landing={landingOrigin() ?? DEFAULT_LANDING_URL}
+      english={`${landingOrigin() ?? DEFAULT_LANDING_URL}${LANDING_ENGLISH_PATH}`}
+      contact={contactEmail()}
     />
   );
 }

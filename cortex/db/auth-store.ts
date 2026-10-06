@@ -157,6 +157,8 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       period_start TEXT,
       window_anchor TEXT,
       suspended INTEGER NOT NULL DEFAULT 0,
+      status_at TEXT,
+      cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS subscriptions_customer_idx ON subscriptions (customer_id)`,
@@ -342,6 +344,8 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       period_start text,
       window_anchor text,
       suspended integer NOT NULL DEFAULT 0,
+      status_at text,
+      cancel_at_period_end integer NOT NULL DEFAULT 0,
       updated_at text NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS subscriptions_customer_idx ON public.subscriptions (customer_id)`,
@@ -421,6 +425,10 @@ const SUBS_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "period_start", sqlite: "TEXT", pg: "text" },
   { name: "window_anchor", sqlite: "TEXT", pg: "text" },
   { name: "suspended", sqlite: "INTEGER NOT NULL DEFAULT 0", pg: "integer NOT NULL DEFAULT 0" },
+  // Date (chez Stripe) de l'événement qui a posé le statut : un événement plus
+  // ancien, livré en retard, ne l'écrase pas. Et résiliation programmée en fin de période.
+  { name: "status_at", sqlite: "TEXT", pg: "text" },
+  { name: "cancel_at_period_end", sqlite: "INTEGER NOT NULL DEFAULT 0", pg: "integer NOT NULL DEFAULT 0" },
 ];
 const CREDIT_TX_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "sub_amount", sqlite: "INTEGER NOT NULL DEFAULT 0", pg: "integer NOT NULL DEFAULT 0" },

@@ -8,6 +8,12 @@
  * dernier jour des mois plus courts), une recharge par fenêtre, jamais après
  * period_end. (L'ancienne recharge au mois CALENDAIRE cumulait avec la
  * facture : ≈ 40 crédits par mois payé, et un mois remboursé se rechargeait.)
+ *
+ * PÉRIODE PAYÉE : `period_start` / `period_end` sont la période de la dernière
+ * facture PAYÉE (invoice.paid), jamais celle que Stripe annonce au
+ * renouvellement. EN RÈGLE : seul un abonnement `active` ou `trialing` donne
+ * des crédits ; en retard de paiement, impayé, en pause ou résilié, il n'en
+ * donne aucun, même dans une période payée.
  */
 export type WindowedSub = {
   plan: string | null;
@@ -17,9 +23,69 @@ export type WindowedSub = {
   window_anchor: string | null;
   status: string;
   suspended?: number | boolean | null;
+  status_at?: string | null;
+  updated_at?: string | null;
+  cancel_at_period_end?: number | boolean | null;
 };
 
 const DAY_MS = 86_400_000;
+
+/** Statuts Stripe d'un abonnement EN RÈGLE : les seuls sous lesquels il donne des crédits. */
+const GOOD_STANDING = new Set(["active", "trialing"]);
+export function inGoodStanding(status: string | null | undefined): boolean {
+  return GOOD_STANDING.has(status ?? "");
+}
+/** Statuts Stripe d'un abonnement TERMINÉ : plus rien ne sera facturé. */
+const ENDED = new Set(["canceled", "incomplete_expired"]);
+/** Stripe tient-il encore cet abonnement pour vivant ? (en règle OU en attente de paiement : il facture ou relance.) */
+export function stillBilling(status: string | null | undefined): boolean {
+  return !!status && !ENDED.has(status);
+}
+
+/**
+ * État d'un abonnement vu de l'app — la lecture UNIQUE dont dépendent les
+ * crédits (live seul en donne), l'écran et la garde d'achat :
+ *  - live      : période payée en cours, en règle ;
+ *  - renewing  : en règle, mais la période payée est échue (ou pas encore
+ *                ouverte) : Stripe encaisse — une heure environ au renouvellement ;
+ *  - unpaid    : Stripe n'a pas pu encaisser (past_due, unpaid, incomplete, paused) ;
+ *  - suspended : facture remboursée ou contestée, jusqu'à la prochaine facture payée ;
+ *  - none      : pas d'abonnement, ou terminé.
+ */
+export type Standing = "none" | "live" | "renewing" | "unpaid" | "suspended";
+
+/** Sans facture payée dans ce délai après l'échéance, un abonnement encore « en règle » est tenu pour terminé (événement de fin perdu). */
+const RENEWAL_GRACE_MS = 3 * DAY_MS;
+
+export function standingOf(
+  sub: Pick<WindowedSub, "status" | "period_end" | "suspended" | "status_at" | "updated_at"> | null | undefined,
+  now: string,
+): Standing {
+  if (!sub || ENDED.has(sub.status)) return "none";
+  if (!inGoodStanding(sub.status)) return "unpaid";
+  if (sub.period_end && now < sub.period_end) return sub.suspended ? "suspended" : "live";
+  // Repère du délai : le plus RÉCENT de la fin de période payée et du dernier
+  // statut reçu. Un réabonnement garde la période de l'ancien abonnement jusqu'à
+  // sa première facture : seule, elle le ferait passer pour terminé depuis des mois.
+  const marks = [sub.period_end, sub.status_at].filter((m): m is string => !!m);
+  const since = marks.length ? marks.reduce((a, b) => (a > b ? a : b)) : sub.updated_at ?? null;
+  return since && parse(now).getTime() - parse(since).getTime() < RENEWAL_GRACE_MS ? "renewing" : "none";
+}
+
+/**
+ * Refus d'un SECOND abonnement, ou null. Tant que Stripe tient le premier pour
+ * vivant il continue de facturer : en ouvrir un autre ferait payer deux fois
+ * (et la ligne `subscriptions`, une par compte, ne suivrait que le dernier).
+ */
+export function secondSubscriptionRefusal(standing: Standing): string | null {
+  switch (standing) {
+    case "none": return null;
+    case "live": return "Tu as déjà un abonnement en cours. Gère-le depuis Mon compte (moyen de paiement, résiliation) plutôt que d'en ouvrir un second.";
+    case "renewing": return "Le paiement de ton abonnement est en cours de confirmation : tes crédits arrivent dès qu'il est validé, jusqu'à une heure lors d'un renouvellement. Inutile d'en ouvrir un second.";
+    case "unpaid": return "Le dernier paiement de ton abonnement n'est pas passé. Mets à jour ton moyen de paiement depuis « Gérer mon abonnement » plutôt que d'en ouvrir un second.";
+    case "suspended": return "Ton abonnement est suspendu après un remboursement ou une contestation de paiement. Gère-le depuis « Gérer mon abonnement » plutôt que d'en ouvrir un second.";
+  }
+}
 
 function parse(s: string): Date { return new Date(s.replace(" ", "T") + "Z"); }
 function fmt(d: Date): string { return d.toISOString().slice(0, 19).replace("T", " "); }
@@ -72,12 +138,12 @@ export function anchorOf(sub: WindowedSub): string | null {
 
 /**
  * Une recharge est-elle due maintenant ? Renvoie le début de la fenêtre à
- * ouvrir, ou null. Jamais pour un mensuel, un suspendu, un résilié, ni après
- * period_end ; une fenêtre déjà ouverte (window_anchor) ne l'est pas deux fois.
+ * ouvrir, ou null. Jamais pour un mensuel, un suspendu, un abonnement qui
+ * n'est pas en règle, ni après period_end ; une fenêtre déjà ouverte
+ * (window_anchor) ne l'est pas deux fois.
  */
 export function rechargeDue(sub: WindowedSub, now: string): string | null {
-  if (!sub.period_end || now >= sub.period_end) return null;
-  if (sub.suspended || sub.status === "canceled") return null;
+  if (!sub.period_end || standingOf(sub, now) !== "live") return null;
   if (!isYearly(sub)) return null;
   const anchor = anchorOf(sub);
   if (!anchor || anchor > now) return null;
@@ -87,12 +153,17 @@ export function rechargeDue(sub: WindowedSub, now: string): string | null {
   return win;
 }
 
-/** Date (YYYY-MM-DD) de la prochaine recharge affichable : prochaine fenêtre (annuel) ou prochaine facture (mensuel). */
+/**
+ * Date (YYYY-MM-DD) de la prochaine recharge affichable : prochaine fenêtre
+ * (annuel) ou prochaine facture (mensuel). Résiliation programmée : il n'y aura
+ * pas de prochaine facture, seules les fenêtres de la période payée restent.
+ */
 export function nextRechargeDate(sub: WindowedSub, now: string): string | null {
-  if (!sub.period_end || now >= sub.period_end || sub.suspended || sub.status === "canceled") return null;
-  if (!isYearly(sub)) return sub.period_end.slice(0, 10);
+  if (!sub.period_end || standingOf(sub, now) !== "live") return null;
+  const nextInvoice = sub.cancel_at_period_end ? null : sub.period_end;
+  if (!isYearly(sub)) return nextInvoice?.slice(0, 10) ?? null;
   const anchor = anchorOf(sub);
   if (!anchor) return null;
   const next = nextWindowStart(anchor, now, sub.period_end);
-  return (next ?? sub.period_end).slice(0, 10);
+  return (next ?? nextInvoice)?.slice(0, 10) ?? null;
 }
