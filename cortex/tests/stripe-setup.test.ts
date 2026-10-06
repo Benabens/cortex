@@ -186,3 +186,26 @@ test("les événements écoutés sont exactement ceux que le webhook traite", ()
     "customer.subscription.deleted", "customer.subscription.updated", "invoice.paid",
   ]);
 });
+
+test("clé de l'app : ses droits sont vérifiés (lectures seules) avant d'être posée en production", async () => {
+  const { missingRuntimeAccess } = await import("../lib/billing/stripe-setup");
+  const { client } = fakeStripe();
+  const forbidden = () => Promise.reject(Object.assign(new Error("The provided key does not have the required permissions"), { type: "StripePermissionError", statusCode: 403 }));
+  const allowed = async () => ({ data: [] });
+  const withAccess = (over: Record<string, unknown>) => ({
+    ...client,
+    checkout: { sessions: { list: allowed } },
+    subscriptions: { list: allowed },
+    invoices: { list: allowed },
+    ...over,
+  }) as unknown as Stripe;
+
+  assert.deepEqual(await missingRuntimeAccess(withAccess({})), [], "clé complète : rien ne manque");
+  // Clé de MISE EN PLACE réutilisée comme clé de l'app : elle n'ouvre ni le paiement ni les abonnements.
+  assert.deepEqual(
+    await missingRuntimeAccess(withAccess({ checkout: { sessions: { list: forbidden } }, subscriptions: { list: forbidden } })),
+    ["Checkout Sessions", "Subscriptions"],
+  );
+  // Une panne n'est pas un droit manquant : elle remonte telle quelle.
+  await assert.rejects(missingRuntimeAccess(withAccess({ invoices: { list: () => Promise.reject(new Error("réseau coupé")) } })), /réseau coupé/);
+});
