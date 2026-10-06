@@ -129,6 +129,7 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       payment_intent TEXT,
       user_id TEXT NOT NULL,
       credits_centi INTEGER NOT NULL,
+      livemode INTEGER,
       created_at TEXT NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS stripe_purchases_pi_idx ON stripe_purchases (payment_intent)`,
@@ -316,6 +317,7 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       payment_intent text,
       user_id text NOT NULL,
       credits_centi integer NOT NULL,
+      livemode integer,
       created_at text NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS stripe_purchases_pi_idx ON public.stripe_purchases (payment_intent)`,
@@ -437,6 +439,9 @@ const CREDIT_TX_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   // normalisent (lib/billing/credits DELTA_CENTI) : aucune ne dépend d'un drapeau.
   { name: "unit", sqlite: "TEXT", pg: "text" },
 ];
+const STRIPE_PURCHASE_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
+  { name: "livemode", sqlite: "INTEGER", pg: "integer" },
+];
 /** Base déjà convertie ×100 (marqueur posé) AVANT l'arrivée de la colonne `unit` : ses lignes sont en centièmes. */
 const UNIT_BACKFILL_SQL = `UPDATE credit_transactions SET unit = 'centi' WHERE unit IS NULL AND EXISTS (SELECT 1 FROM app_meta WHERE key = 'credits_unit')`;
 
@@ -471,6 +476,12 @@ function sqliteAuth(): Database.Database {
         _sqliteAuth.exec(`ALTER TABLE credit_transactions ADD COLUMN ${c.name} ${c.sqlite}`);
         if (c.name === "unit") _sqliteAuth.exec(UNIT_BACKFILL_SQL);
       }
+    }
+    const havePurchases = new Set(
+      (_sqliteAuth.prepare("PRAGMA table_info(stripe_purchases)").all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    for (const c of STRIPE_PURCHASE_ADDED) {
+      if (!havePurchases.has(c.name)) _sqliteAuth.exec(`ALTER TABLE stripe_purchases ADD COLUMN ${c.name} ${c.sqlite}`);
     }
     ensureCreditRefUniqueSqlite(_sqliteAuth);
     const haveTerms = new Set(
@@ -521,6 +532,9 @@ async function pgExec(): Promise<{
       if (txCols.has(c.name)) continue;
       await authPgQuery(`ALTER TABLE public.credit_transactions ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
       if (c.name === "unit") await authPgQuery(UNIT_BACKFILL_SQL.replace(/credit_transactions|app_meta/g, (t) => `public.${t}`), []);
+    }
+    for (const c of STRIPE_PURCHASE_ADDED) {
+      await authPgQuery(`ALTER TABLE public.stripe_purchases ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
     }
     for (const c of TERMS_ADDED) {
       await authPgQuery(`ALTER TABLE public.terms_acceptances ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
