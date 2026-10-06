@@ -164,7 +164,8 @@ if should_run 1; then
   if go "Ouvrir la console Google et y coller l'origine, l'URI et le domaine"; then
     CLIENT_ID="$(oauth_location "$APP_URL" | sed -n 's/.*[?&]client_id=\([^&]*\).*/\1/p')"
     PROJECT_NUMBER="${CLIENT_ID%%-*}"
-    if [[ -n "$CLIENT_ID" && "$PROJECT_NUMBER" =~ ^[0-9]+$ ]]; then
+    # L'identifiant vient d'une réponse HTTP : on n'en fait une adresse que s'il a la forme attendue.
+    if [[ "$CLIENT_ID" =~ ^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$ ]]; then
       GOOGLE_QUERY="?project=$PROJECT_NUMBER"
       browse "https://console.cloud.google.com/auth/clients/$CLIENT_ID$GOOGLE_QUERY"
     else
