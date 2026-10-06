@@ -24,7 +24,15 @@ export type EligiblePurchase = { id: string; type: PurchaseType; purchasedAt: st
 export async function eligibleWithdrawals(userId: string, now = new Date()): Promise<EligiblePurchase[]> {
   const since = new Date(now.getTime() - 14 * 86400_000).toISOString().slice(0, 19).replace("T", " ");
   const packs = await authAll<{ id: string; purchased_at: string }>(
-    `SELECT session_id id, created_at purchased_at FROM stripe_purchases WHERE user_id = ? AND created_at >= ? ORDER BY created_at DESC`, userId, since,
+    `SELECT sp.session_id id, sp.created_at purchased_at
+     FROM stripe_purchases sp
+     WHERE sp.user_id = ? AND sp.created_at >= ? AND coalesce(sp.livemode, 1) = 1
+       AND NOT EXISTS (
+         SELECT 1 FROM credit_transactions ct
+         WHERE ct.ref = 'stripe:reversal:' || sp.payment_intent
+            OR ct.ref LIKE 'stripe:reversal:' || sp.payment_intent || ':%'
+       )
+     ORDER BY sp.created_at DESC`, userId, since,
   );
   const subscriptions = await authAll<{ id: string; purchased_at: string }>(
     `SELECT s.subscription_id id, min(pc.consented_at) purchased_at

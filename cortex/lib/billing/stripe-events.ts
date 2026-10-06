@@ -239,7 +239,7 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
   switch (event.type) {
     case "checkout.session.completed":
     case "checkout.session.async_payment_succeeded":
-      res = await onCheckout(event.data.object as Stripe.Checkout.Session, event.id, at);
+      res = await onCheckout(event.data.object as Stripe.Checkout.Session, event.id, at, event.livemode);
       break;
     case "invoice.paid":
       res = await onInvoicePaid(event.data.object as Stripe.Invoice, opts.lookup, at);
@@ -256,7 +256,7 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
         amountCents: Number(charge.amount_refunded ?? charge.amount ?? 0) || null,
         totalCents: Number(charge.amount ?? 0) || null,
         metadata: charge.metadata ?? null, customerId: idOf(charge.customer),
-        email: charge.billing_details?.email ?? charge.receipt_email ?? null, lookup: opts.lookup,
+        email: charge.billing_details?.email ?? charge.receipt_email ?? null, lookup: opts.lookup, livemode: event.livemode,
       });
       break;
     }
@@ -266,7 +266,7 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
       res = await reverseByPaymentIntent(idOf(dispute.payment_intent), "litige Stripe", {
         amountCents: Number(dispute.amount ?? 0) || null,
         metadata: charge?.metadata ?? null, customerId: idOf(charge?.customer),
-        email: charge?.billing_details?.email ?? null, lookup: opts.lookup,
+        email: charge?.billing_details?.email ?? null, lookup: opts.lookup, livemode: event.livemode,
       });
       break;
     }
@@ -278,7 +278,7 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
   return res;
 }
 
-async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: string | null): Promise<HandleResult> {
+async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: string | null, livemode: boolean): Promise<HandleResult> {
   const userId = s.metadata?.cortexUserId ?? null;
   const plan = s.metadata?.plan ?? null;
   // À Cortex seulement : plan Cortex ou cortexUserId (et jamais une autre app déclarée).
@@ -321,9 +321,9 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: strin
       userId, centi, `achat ${plan ?? "pack"}`, ref, nowStr(),
     );
     await tx.run(
-      `INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, created_at) VALUES (?,?,?,?,?)
+      `INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, livemode, created_at) VALUES (?,?,?,?,?,?)
        ON CONFLICT (session_id) DO NOTHING`,
-      s.id, pi, userId, centi, nowStr(),
+      s.id, pi, userId, centi, livemode ? 1 : 0, nowStr(),
     );
     return true;
   }).catch(async (e) => {
@@ -432,6 +432,7 @@ type ReversalContext = {
   customerId?: string | null;
   email?: string | null;
   lookup?: StripeLookup;
+  livemode?: boolean;
 };
 
 async function userByEmail(email: string | null | undefined): Promise<string | null> {
@@ -527,8 +528,8 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string,
     if (session?.userId && session.credits) {
       const centi = toCenti(session.credits);
       await authRun(
-        `INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, created_at) VALUES (?,?,?,?,?) ON CONFLICT (session_id) DO NOTHING`,
-        session.id, paymentIntent, session.userId, centi, nowStr(),
+        `INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, livemode, created_at) VALUES (?,?,?,?,?,?) ON CONFLICT (session_id) DO NOTHING`,
+        session.id, paymentIntent, session.userId, centi, ctx.livemode ? 1 : 0, nowStr(),
       );
       const reversed = await addTransaction(session.userId, -centi, `${why} (achat retrouvé via Stripe)`, ref);
       return { ok: true, action: "pack-reversed", reversed };

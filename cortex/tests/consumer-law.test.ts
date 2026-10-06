@@ -56,6 +56,42 @@ test("une session d’abonnement abandonnée n’est pas éligible, un abonnemen
   }]);
 });
 
+test("seul un pack live payé et non repris est éligible à la rétractation", async () => {
+  const { authRun } = await import("../db/auth-store");
+  const { eligibleWithdrawals } = await import("../lib/consumer-law");
+  const now = new Date("2026-10-06T12:00:00Z");
+  const purchasedAt = "2026-10-05 10:00:00";
+
+  await authRun(
+    `INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, livemode, created_at) VALUES (?,?,?,?,?,?)`,
+    "cs_refunded", "pi_refunded", "pack-buyer", 1000, 1, purchasedAt,
+  );
+  await authRun(
+    `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, created_at) VALUES (?,?,?,?,?,?)`,
+    "pack-buyer", -1000, "remboursement Stripe", "stripe:reversal:pi_refunded", "centi", purchasedAt,
+  );
+  await authRun(
+    `INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, livemode, created_at) VALUES (?,?,?,?,?,?)`,
+    "cs_test", "pi_test", "pack-buyer", 1000, 0, purchasedAt,
+  );
+  await authRun(
+    `INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, livemode, created_at) VALUES (?,?,?,?,?,?)`,
+    "cs_disputed", "pi_disputed", "pack-buyer", 1000, 1, purchasedAt,
+  );
+  await authRun(
+    `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, created_at) VALUES (?,?,?,?,?,?)`,
+    "pack-buyer", -400, "litige Stripe", "stripe:reversal:pi_disputed:400", "centi", purchasedAt,
+  );
+  await authRun(
+    `INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, livemode, created_at) VALUES (?,?,?,?,?,?)`,
+    "cs_live", "pi_live", "pack-buyer", 1000, 1, purchasedAt,
+  );
+
+  assert.deepEqual(await eligibleWithdrawals("pack-buyer", now), [{
+    id: "cs_live", type: "pack", purchasedAt, label: "Pack de 10 crédits",
+  }]);
+});
+
 test("la notification éditeur utilise PUBLISHER_EMAIL et est omise sans configuration", async () => {
   const { authRun } = await import("../db/auth-store");
   const { POST } = await import("../app/api/account/withdrawal/route");
