@@ -11,6 +11,32 @@ haut à droite). Les objets du mode test ne sont pas copiés : il faut les recr�
 > Aucune clé ne s'écrit dans le dépôt, dans une issue ou dans un message. Elles
 > se collent dans Railway → service `cortex-app` → Variables, et nulle part ailleurs.
 
+## Le faire avec le script guidé
+
+```bash
+bash scripts/golive-ben.sh            # tout le parcours, étape par étape
+bash scripts/golive-ben.sh --dry-run  # essai à blanc : n'ouvre rien, n'écrit rien
+bash scripts/golive-ben.sh --etape=3  # reprendre à Stripe
+```
+
+Son étape 3 fait les §§ 3 à 7 de ce document : elle demande les clés en saisie
+masquée, retrouve ou crée les produits, les trois prix, la configuration de
+portail de Cortex et le webhook, désactive l'ancien webhook, puis pose
+`STRIPE_WEBHOOK_SECRET` et `STRIPE_SECRET_KEY` dans Railway (les valeurs passent
+par l'entrée standard de la CLI). Avant toute écriture, elle vérifie que la clé
+destinée à l'app a bien accès aux ressources du § 6 : une clé limitée à la mise
+en place, réutilisée par mégarde, est refusée au lieu de casser l'achat en
+production. Relancée, elle ne recrée rien. Restent à la
+main : les réglages du compte (§ 2), l'effacement des abonnements de test (§ 8,
+le script met le SQL dans le presse-papiers) et le test réel (§ 10).
+
+Le portail : le script crée une configuration **propre à Cortex** (étiquetée
+`app=cortex`) et l'app l'utilise quand elle existe, sinon celle par défaut du
+compte. Les réglages du § 5 décrivent ce qu'elle contient.
+
+Le secret d'un webhook n'est lisible qu'à sa création. Si l'endpoint existe
+déjà et que Railway n'a pas son secret : `--rotate-webhook` le recrée.
+
 ---
 
 ## 1. Avant de commencer
