@@ -280,24 +280,30 @@ export async function subscriptionCredits(userId = currentUser()): Promise<numbe
  * période payée : `remaining` REMIS à `monthly_credits` (reliquat perdu, jamais
  * additionné), période [periodStart, periodEnd), première fenêtre ouverte à
  * periodStart, suspension levée. `at` : date de l'événement chez Stripe.
- * Upsert par utilisateur.
+ * Upsert par utilisateur. Renvoie false, sans rien écrire, si la facture
+ * couvre une période antérieure à celle déjà payée.
  */
 export async function grantSubscriptionMonth(p: {
   userId: string; customerId?: string | null; subscriptionId?: string | null; plan?: string | null;
   periodEnd: string; periodStart?: string | null; at?: string | null;
-}): Promise<void> {
+}): Promise<boolean> {
   const credits = subscriptionMonthlyCreditsCenti();
   const now = nowStr();
   const at = p.at ?? now;
   const start = p.periodStart ?? now;
   const month = start.slice(0, 7);
-  if (await getSubscription(p.userId)) {
+  const existing = await getSubscription(p.userId);
+  // La période payée ne RECULE jamais : une facture plus ancienne réglée après
+  // une plus récente (rattrapage d'impayés, événements livrés dans le désordre)
+  // remettrait l'abonné sur un mois déjà écoulé, donc à 0 alors qu'il vient de payer.
+  if (existing?.period_start && start < existing.period_start) return false;
+  if (existing) {
     await authRun(
       `UPDATE subscriptions SET customer_id = coalesce(?, customer_id), subscription_id = coalesce(?, subscription_id),
         ${ACTIVATE_IF_NEWER}, plan = coalesce(?, plan), monthly_credits = ?, remaining = ?, period_start = ?, period_end = ?,
         window_anchor = ?, month_anchor = ?, suspended = 0, updated_at = ?
-       WHERE user_id = ?`,
-      p.customerId ?? null, p.subscriptionId ?? null, ...activateParams(at), p.plan ?? null, credits, credits, start, p.periodEnd, start, month, now, p.userId,
+       WHERE user_id = ? AND (period_start IS NULL OR period_start <= ?)`,
+      p.customerId ?? null, p.subscriptionId ?? null, ...activateParams(at), p.plan ?? null, credits, credits, start, p.periodEnd, start, month, now, p.userId, start,
     );
   } else {
     await authRun(
@@ -306,6 +312,7 @@ export async function grantSubscriptionMonth(p: {
       p.userId, p.customerId ?? null, p.subscriptionId ?? null, "active", at, p.plan ?? null, credits, credits, start, p.periodEnd, start, month, now,
     );
   }
+  return true;
 }
 
 /** Reprise d'une facture d'abonnement (remboursement, litige) : SUSPENDU jusqu'à la prochaine facture payée. */
