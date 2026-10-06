@@ -2,6 +2,7 @@ import { billingEnabled, getSubscription } from "@/lib/billing/credits";
 import { useUser } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 import { stripeClient } from "@/lib/billing/stripe-client";
+import { findPortalConfiguration } from "@/lib/billing/stripe-setup";
 import { publicOrigin } from "@/lib/public-url";
 
 export const runtime = "nodejs";
@@ -23,6 +24,12 @@ export async function POST(req: NextRequest) {
   const sub = await getSubscription();
   if (!sub?.customer_id) return NextResponse.json({ error: "Aucun abonnement à gérer." }, { status: 400 });
   const stripe = stripeClient(key);
-  const session = await stripe.billingPortal.sessions.create({ customer: sub.customer_id, return_url: `${origin}/compte` });
+  // La configuration de portail PROPRE à Cortex si elle existe (compte Stripe
+  // partagé : celle par défaut du compte n'est pas forcément la nôtre, et peut
+  // ne pas exister en live). Introuvable ou illisible : celle du compte.
+  const configuration = await findPortalConfiguration(stripe).catch(() => null);
+  const session = await stripe.billingPortal.sessions.create({
+    customer: sub.customer_id, return_url: `${origin}/compte`, ...(configuration ? { configuration } : {}),
+  });
   return NextResponse.json({ url: session.url });
 }

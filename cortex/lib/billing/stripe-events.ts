@@ -80,6 +80,22 @@ export const PLANS: Record<PlanKey, PlanSpec> = {
   credits_10: { lookupKey: "cortex_credits_10", mode: "payment", credits: 10, label: "Pack de 10 crédits" },
 };
 
+/**
+ * Les événements que `handleStripeEvent` traite : c'est la liste à cocher sur
+ * l'endpoint webhook, ni plus ni moins (lib/billing/stripe-setup la pose). Ne pas
+ * y ajouter invoice.created : sans réponse de l'endpoint, Stripe retarde la
+ * finalisation de toutes les factures.
+ */
+export const HANDLED_EVENTS = [
+  "checkout.session.completed",
+  "checkout.session.async_payment_succeeded",
+  "invoice.paid",
+  "customer.subscription.updated",
+  "customer.subscription.deleted",
+  "charge.refunded",
+  "charge.dispute.created",
+] as const;
+
 export function isPlanKey(v: unknown): v is PlanKey {
   return typeof v === "string" && v in PLANS;
 }
