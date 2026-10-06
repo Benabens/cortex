@@ -4,11 +4,13 @@ import { billingEnabled } from "./billing/credits";
  * DOCUMENTS LÉGAUX ET OUVERTURE DES ACHATS.
  *
  * Les textes (CGV, confidentialité, remboursement, mentions légales) vivent sur
- * le site vitrine ; l'app ne connaît que leurs URLs (LEGAL_*_URL). On
- * n'encaisse pas sans CGV : en production avec la facturation active, s'il
- * manque un des quatre liens, l'achat reste fermé (bouton désactivé, checkout
- * refusé). L'acceptation des CGV est tracée par utilisateur avec la version
- * du texte (LEGAL_TERMS_VERSION) : changer la version redemande l'acceptation.
+ * le site vitrine, en français (version qui fait foi ; chaque page renvoie à sa
+ * traduction anglaise). L'app ne connaît que leurs URLs : déclarer la vitrine
+ * (LANDING_URL) suffit, un LEGAL_*_URL explicite prime. On n'encaisse pas sans
+ * CGV : en production avec la facturation active, s'il manque un des quatre
+ * liens, l'achat reste fermé (bouton désactivé, checkout refusé). L'acceptation
+ * des CGV est tracée par utilisateur avec la version du texte
+ * (LEGAL_TERMS_VERSION) : changer la version redemande l'acceptation.
  */
 
 export type LegalLinks = { terms: string | null; privacy: string | null; refund: string | null; notice: string | null };
@@ -19,13 +21,45 @@ function urlOrNull(v: string | undefined): string | null {
   try { return new URL(raw).toString(); } catch { return null; }
 }
 
+/** Origine de la vitrine si elle est DÉCLARÉE (LANDING_URL, http ou https), sinon null. */
+export function landingOrigin(env: Partial<NodeJS.ProcessEnv> = process.env): string | null {
+  const raw = env.LANDING_URL?.trim();
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    return u.protocol === "https:" || u.protocol === "http:" ? u.origin : null;
+  } catch { return null; }
+}
+
+/** Vitrine vers laquelle l'écran de connexion renvoie quand aucune n'est déclarée (affichage seul : n'ouvre jamais la vente). */
+export const DEFAULT_LANDING_URL = "https://cortex-landing-seven.vercel.app";
+
+/** Chemins des documents sur la vitrine (pages françaises). */
+const LANDING_PATHS: Record<keyof LegalLinks, string> = {
+  terms: "/terms", privacy: "/privacy", refund: "/remboursement", notice: "/mentions-legales",
+};
+
 export function legalLinks(env: Partial<NodeJS.ProcessEnv> = process.env): LegalLinks {
+  // Jamais de vitrine supposée : sans LANDING_URL ni lien explicite, le document
+  // n'est pas réputé publié et la vente reste fermée (purchasesAllowed).
+  const landing = landingOrigin(env);
+  const link = (explicit: string | undefined, doc: keyof LegalLinks) =>
+    urlOrNull(explicit) ?? (landing ? `${landing}${LANDING_PATHS[doc]}` : null);
   return {
-    terms: urlOrNull(env.LEGAL_TERMS_URL),
-    privacy: urlOrNull(env.LEGAL_PRIVACY_URL),
-    refund: urlOrNull(env.LEGAL_REFUND_URL),
-    notice: urlOrNull(env.LEGAL_NOTICE_URL),
+    terms: link(env.LEGAL_TERMS_URL, "terms"),
+    privacy: link(env.LEGAL_PRIVACY_URL, "privacy"),
+    refund: link(env.LEGAL_REFUND_URL, "refund"),
+    notice: link(env.LEGAL_NOTICE_URL, "notice"),
   };
+}
+
+/** Chemin, sur la vitrine, de la traduction anglaise des conditions : elle renvoie aux trois autres documents en anglais. */
+export const LANDING_ENGLISH_PATH = "/terms-en";
+
+/** Lien vers la version anglaise des documents, connu seulement quand la vitrine est déclarée. */
+export function legalEnglishUrl(env: Partial<NodeJS.ProcessEnv> = process.env): string | null {
+  const landing = landingOrigin(env);
+  return landing ? `${landing}${LANDING_ENGLISH_PATH}` : null;
 }
 
 export function legalReady(env: Partial<NodeJS.ProcessEnv> = process.env): boolean {
@@ -42,6 +76,11 @@ export function stripeConfigured(env: Partial<NodeJS.ProcessEnv> = process.env):
   return !!(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET);
 }
 
+/** Clé Stripe LIVE (secrète ou restreinte) ? Toute autre clé accepte les cartes de test. */
+export function stripeLiveKey(env: Partial<NodeJS.ProcessEnv> = process.env): boolean {
+  return /^(sk|rk)_live_/.test(env.STRIPE_SECRET_KEY ?? "");
+}
+
 /** L'achat est-il ouvert ? Sinon, la raison à afficher (jamais un bouton mort sans explication). */
 export function purchasesAllowed(env: Partial<NodeJS.ProcessEnv> = process.env): { enabled: boolean; reason: string | null } {
   if (!billingEnabled()) return { enabled: false, reason: "La facturation n'est pas activée sur cette instance." };
@@ -51,6 +90,12 @@ export function purchasesAllowed(env: Partial<NodeJS.ProcessEnv> = process.env):
   // vente ; seul `next dev` (poste de dev) peut tester un paiement sans liens.
   if (env.NODE_ENV === "production" && !legalReady(env)) {
     return { enabled: false, reason: "Les achats sont suspendus : les documents légaux (CGV, confidentialité, remboursement, mentions) ne sont pas publiés." };
+  }
+  // Une clé de TEST accepte les cartes de test : en production ouverte à tous,
+  // chacun s'offrirait de vrais crédits. La vente publique attend la clé live ;
+  // la clé de test reste utilisable en lancement fermé (INVITE_ONLY=1) et hors production.
+  if (env.NODE_ENV === "production" && !stripeLiveKey(env) && env.INVITE_ONLY !== "1") {
+    return { enabled: false, reason: "Les achats ouvrent bientôt : le paiement n'est pas encore activé." };
   }
   return { enabled: true, reason: null };
 }

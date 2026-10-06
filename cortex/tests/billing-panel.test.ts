@@ -68,7 +68,7 @@ test("compte sans abonnement, CGV acceptées : consentement par offre avant acti
 test("abonnement actif : reste / plafond, date de recharge, bouton Gérer, abonnements non re-souscriptibles", async () => {
   const html = await render(base({
     balance: 27, purchased: 10,
-    subscription: { status: "active", live: true, plan: "cortex_pro_monthly", creditsThisMonth: 17, monthlyCredits: 20, periodEnd: "2026-10-26 10:00:00", nextRechargeAt: "2026-10-01", manageable: true },
+    subscription: { status: "active", standing: "live", live: true, plan: "cortex_pro_monthly", creditsThisMonth: 17, monthlyCredits: 20, periodEnd: "2026-10-26 10:00:00", nextRechargeAt: "2026-10-01", cancelsAtPeriodEnd: false, manageable: true },
   }));
   assert.match(html, /17 \/ 20/);
   assert.match(html, /recharge le 1 octobre 2026/);

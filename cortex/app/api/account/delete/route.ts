@@ -4,6 +4,7 @@ import { readJson, withBodyLimit } from "@/lib/upload-limit";
 import { currentUser } from "@/db/context";
 import { authEnabled } from "@/lib/auth";
 import { deleteAccount, isOwnerAccount } from "@/lib/account-deletion";
+import { contactEmail } from "@/lib/contact";
 import { log } from "@/lib/metrics";
 
 export const runtime = "nodejs";
@@ -76,7 +77,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     const message = e instanceof Error ? e.message : String(e);
     log("error", "account.delete_route_failed", { message: message.slice(0, 200) });
     return NextResponse.json(
-      { error: message.startsWith("Suppression refusée :") ? message : "La suppression a échoué. Réessaie ; si le problème persiste, contacte le support." },
+      { error: message.startsWith("Suppression refusée :") ? message : `La suppression a échoué. Réessaie ; si le problème persiste, écris à ${contactEmail()}.` },
       { status: 500 },
     );
   }

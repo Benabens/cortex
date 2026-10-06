@@ -3,7 +3,8 @@ import { Funnel_Display } from "next/font/google";
 import "./globals.css";
 import "./legacy-compat.css";
 import { AppShell } from "@/components/shell/AppShell";
-import { legalLinks } from "@/lib/legal";
+import { contactEmail } from "@/lib/contact";
+import { legalEnglishUrl, legalLinks } from "@/lib/legal";
 import { NOINDEX } from "@/lib/seo";
 
 // Typo (décision 2026-09-28) : Funnel Display pour les titres et le wordmark ;
@@ -38,7 +39,7 @@ export default function RootLayout({
       className={`${funnelDisplay.variable} h-full antialiased`}
     >
       <body className="min-h-full">
-        <AppShell legal={legalLinks()}>{children}</AppShell>
+        <AppShell legal={legalLinks()} legalEnglish={legalEnglishUrl()} contact={contactEmail()}>{children}</AppShell>
       </body>
     </html>
   );

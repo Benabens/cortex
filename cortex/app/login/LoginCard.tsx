@@ -4,9 +4,6 @@ import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { Wordmark } from "@/components/shell/Logo";
 
-/** Landing (privacy / terms). Surchargeable via NEXT_PUBLIC_LANDING_URL. */
-const LANDING = process.env.NEXT_PUBLIC_LANDING_URL ?? "https://cortex-landing-seven.vercel.app";
-
 /** Messages clairs par code d'erreur NextAuth (cause + quoi faire). */
 function errorMessage(code: string): string {
   switch (code) {
@@ -40,16 +37,26 @@ export function LoginCard({
   google,
   email,
   legal,
+  landing,
+  english,
+  contact,
 }: {
   error: string | null;
   callbackUrl: string;
   google: boolean;
   email: boolean;
-  /** Liens légaux (LEGAL_*_URL) ; repli sur la landing s'ils ne sont pas posés. */
+  /** Liens légaux (LEGAL_*_URL ou vitrine déclarée) ; repli sur `landing` s'ils ne sont pas posés. */
   legal?: { terms: string | null; privacy: string | null; refund?: string | null; notice?: string | null };
+  /** Origine de la vitrine, lue côté serveur à la requête (pas de variable figée au build). */
+  landing: string;
+  /** Version anglaise des documents légaux, sur la vitrine. */
+  english: string;
+  /** Adresse de contact (lib/contact). */
+  contact: string;
 }) {
-  const termsHref = legal?.terms ?? `${LANDING}/terms`;
-  const privacyHref = legal?.privacy ?? `${LANDING}/privacy`;
+  const termsHref = legal?.terms ?? `${landing}/terms`;
+  const privacyHref = legal?.privacy ?? `${landing}/privacy`;
+  const noticeHref = legal?.notice ?? `${landing}/mentions-legales`;
   const [busy, setBusy] = useState<null | "google" | "email">(null);
   const [addr, setAddr] = useState("");
 
@@ -89,8 +96,8 @@ export function LoginCard({
                 setBusy("google");
                 void signIn("google", { callbackUrl });
               }}
-              className="inline-flex h-12 w-full items-center justify-center gap-3 rounded-lg text-[0.92rem] font-semibold transition-[background,opacity] duration-150 hover:bg-white disabled:opacity-60"
-              style={{ background: "#ececee", color: "#111214" }}
+              // Couleurs en classes : un `style` inline l'emporterait sur le survol.
+              className="inline-flex h-12 w-full items-center justify-center gap-3 rounded-lg bg-[#ececee] text-[0.92rem] font-semibold text-[#111214] transition-[background-color,opacity] duration-150 enabled:hover:bg-white enabled:active:bg-[#dedee2] disabled:cursor-not-allowed disabled:opacity-60"
             >
               <GoogleGlyph />
               {busy === "google" ? "Redirection…" : "Continuer avec Google"}
@@ -151,6 +158,17 @@ export function LoginCard({
             politique de confidentialité
           </a>
           .
+        </p>
+        <p className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-1 text-center text-[0.75rem]">
+          <a href={noticeHref} className="underline underline-offset-2" style={{ color: "#a5a2b3" }}>
+            Mentions légales
+          </a>
+          <a href={`mailto:${contact}`} className="underline underline-offset-2" style={{ color: "#a5a2b3" }}>
+            Contact
+          </a>
+          <a href={english} hrefLang="en" lang="en" className="underline underline-offset-2" style={{ color: "#a5a2b3" }}>
+            English version
+          </a>
         </p>
       </div>
     </main>

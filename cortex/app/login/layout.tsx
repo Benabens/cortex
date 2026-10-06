@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { publicOrigin } from "@/lib/public-url";
 import { INDEXABLE } from "@/lib/seo";
 
 /**
@@ -15,20 +16,15 @@ const SHARE_DESCRIPTION =
   "Cortex lit tes annales et tes slides, repère ce qui revient, et t’entraîne dessus avant le jour J.";
 
 /** URL publique ; une valeur absente ou mal formée ne doit pas casser /login. */
-function publicOrigin(): URL | undefined {
-  const raw = process.env.AUTH_URL?.trim();
-  if (!raw) return undefined;
-  try {
-    return new URL(raw);
-  } catch {
-    return undefined;
-  }
+function metadataBase(): URL | undefined {
+  const origin = publicOrigin();
+  return origin ? new URL(origin) : undefined;
 }
 
 export const metadata: Metadata = {
   // Seule page publique de l'app : elle reste indexable (cf. lib/seo).
   ...INDEXABLE,
-  metadataBase: publicOrigin(),
+  metadataBase: metadataBase(),
   openGraph: {
     type: "website",
     siteName: "Cortex",
