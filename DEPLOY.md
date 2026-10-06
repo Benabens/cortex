@@ -521,8 +521,12 @@ quotidiens (`DAILY_GEN_QUOTA`, `DAILY_ASSIST_QUOTA`).
 - [ ] `TRUST_PROXY=1` : sans elle, la limite de requêtes est commune à tous
       les visiteurs et quelques sessions suffisent à mettre tout le monde en 429.
 - [ ] `PUBLIC_DEMO` absente.
-- [ ] `SPEND_CAP_USD` et `SPEND_CAP_PER_USER_USD` posées, et un plafond de
-      dépense dur côté Anthropic.
+- [ ] `SPEND_CAP_USD` relevé au-dessus de la dépense déjà faite. Ce plafond
+      est **cumulé depuis la création de l'instance**, pas quotidien : atteint,
+      il coupe la génération pour tout le monde jusqu'à ce qu'on le relève.
+      Dépense actuelle : `SELECT round(sum(cost_usd)::numeric, 2) FROM llm_usage;`
+      (`SPEND_CAP_PER_USER_USD`, lui, est bien par compte et par jour.)
+- [ ] Un plafond de dépense dur côté Anthropic.
 - [ ] Console Google Cloud → écran de consentement OAuth : état **« En
       production »**. En « Test », seuls les comptes de test passent, et un
       inconnu voit « accès bloqué » chez Google, avant même d'arriver sur l'app.
