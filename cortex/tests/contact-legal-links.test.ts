@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { contactEmail } from "../lib/contact";
-import { landingOrigin, legalLinks, legalReady } from "../lib/legal";
+import { landingOrigin, legalEnglishUrl, legalLinks, legalReady } from "../lib/legal";
 
 test("adresse de contact : celle de l'éditeur par défaut, CONTACT_EMAIL la remplace si elle est valide", () => {
   assert.equal(contactEmail({}), "abensur.benjamin@gmail.com");
@@ -29,6 +29,12 @@ test("vitrine déclarée : les quatre documents français sont liés à leurs ch
     notice: "https://cortexexam.com/mentions-legales",
   });
   assert.equal(legalReady(env), true);
+});
+
+test("version anglaise : un lien vers la traduction des conditions, d'où partent les trois autres ; aucun sans vitrine déclarée", () => {
+  assert.equal(legalEnglishUrl({ LANDING_URL: "https://cortexexam.com" }), "https://cortexexam.com/terms-en");
+  assert.equal(legalEnglishUrl({}), null);
+  assert.equal(legalEnglishUrl({ LEGAL_TERMS_URL: "https://autre.example/cgv" }), null, "un document hébergé ailleurs n'a pas de traduction connue");
 });
 
 test("un LEGAL_*_URL explicite prime sur la vitrine", () => {

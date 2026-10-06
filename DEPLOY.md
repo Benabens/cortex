@@ -113,7 +113,7 @@ SUBSCRIPTION_MONTHLY_CREDITS=20
 
 # — pages légales (OBLIGATOIRES pour vendre : sans elles, l'achat est désactivé) —
 # Déclarer la vitrine lie ses quatre pages françaises (/terms, /privacy,
-# /remboursement, /mentions-legales), qui renvoient à leur traduction anglaise.
+# /remboursement, /mentions-legales) et leur version anglaise (/terms-en).
 # Un LEGAL_TERMS_URL / _PRIVACY_ / _REFUND_ / _NOTICE_URL explicite prime.
 LANDING_URL=https://⟨landing⟩
 # Version des CGV tracée à l'acceptation (change-la à chaque révision des CGV).
@@ -548,8 +548,10 @@ de 2 crédits.
 Tout ce qui dépend de l'adresse publique se lit dans `AUTH_URL` : redirections
 OAuth, retours de paiement, portail Stripe, image de partage. La politique de
 sécurité (CSP) et les cookies de session ne nomment aucun domaine. Changer de
-domaine, c'est donc : des enregistrements DNS, trois variables, et trois
-réglages chez des tiers.
+domaine, c'est donc : des enregistrements DNS, une variable indispensable
+(`AUTH_URL`), deux de confort (`LANDING_URL` si la vitrine déménage aussi,
+`REDIRECT_FROM_HOSTS` pour renvoyer l'ancienne adresse), et trois réglages chez
+des tiers.
 
 Répartition conseillée pour `cortexexam.com` :
 

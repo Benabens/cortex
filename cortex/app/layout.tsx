@@ -4,7 +4,7 @@ import "./globals.css";
 import "./legacy-compat.css";
 import { AppShell } from "@/components/shell/AppShell";
 import { contactEmail } from "@/lib/contact";
-import { legalLinks } from "@/lib/legal";
+import { legalEnglishUrl, legalLinks } from "@/lib/legal";
 import { NOINDEX } from "@/lib/seo";
 
 // Typo (décision 2026-09-28) : Funnel Display pour les titres et le wordmark ;
@@ -39,7 +39,7 @@ export default function RootLayout({
       className={`${funnelDisplay.variable} h-full antialiased`}
     >
       <body className="min-h-full">
-        <AppShell legal={legalLinks()} contact={contactEmail()}>{children}</AppShell>
+        <AppShell legal={legalLinks()} legalEnglish={legalEnglishUrl()} contact={contactEmail()}>{children}</AppShell>
       </body>
     </html>
   );
