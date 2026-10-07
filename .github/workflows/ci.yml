@@ -81,6 +81,11 @@ jobs:
           node --test .ci/check-lint.test.mjs
           node .ci/check-lint.mjs
 
+      # Le script guidé Resend manipule des clés et la zone DNS : son banc d'essai
+      # le déroule avec de faux curl, railway, open et pbcopy. Rien de réel n'est appelé.
+      - name: Script Resend (banc d'essai)
+        run: bash ../scripts/resend-ben.test.sh
+
       - name: Tests unitaires (drivers, LLM hermétique, sandbox, vérif déterministe, isolation multi-tenant, vrai Postgres)
         env:
           CORTEX_TEST_PG_URL: postgres://postgres@localhost:5432/cortextest
