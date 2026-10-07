@@ -23,11 +23,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-export FAKE_SETUP="re_SETUPleurre_0123456789abcdefABCDEF"
-export FAKE_SEND="re_SENDleurre_zyxwvutsrq9876543210"
-export FAKE_SS_KEY="ssk_LEURRE-cle.0123456789"
+# Leurres NON exportés : la fausse API les lit dans un fichier, et l'environnement
+# des commandes que le script lance doit rester sans aucune clé (vérifié plus bas).
+FAKE_SETUP="re_SETUPleurre_0123456789abcdefABCDEF"
+FAKE_SEND="re_SENDleurre_zyxwvutsrq9876543210"
+FAKE_SS_KEY="ssk_LEURRE-cle.0123456789"
 # Guillemet et antislash : ce sont eux qui mettent à l'épreuve l'échappement vers curl.
-export FAKE_SS_SECRET='ssLeurre"avec\antislash+et/barre=='
+FAKE_SS_SECRET='ssLeurre"avec\antislash+et/barre=='
+printf '%s\n%s\n%s\n%s\n' "$FAKE_SETUP" "$FAKE_SEND" "$FAKE_SS_KEY" "$FAKE_SS_SECRET" > "$TMP/leurres"
 
 PASS=0
 FAIL=0
@@ -55,10 +58,10 @@ state_is() { [[ "$(state "$1")" == "$2" ]]; }
 # Aucune des clés leurres dans ce que le script montre, passe en argument, ouvre ou copie.
 no_leak() {
   local f s
-  for f in out curl.argv railway.argv open.log pbcopy.log go.log wait.log; do
+  for f in out curl.argv railway.argv open.log pbcopy.log go.log wait.log env.dump; do
     [[ -f "$S/$f" ]] || continue
     for s in "$FAKE_SETUP" "$FAKE_SEND" "$FAKE_SS_KEY" "$FAKE_SS_SECRET"; do
-      if grep -qF -- "$s" "$S/$f"; then echo "fuite dans $f"; return 1; fi
+      if grep -qF -- "${s:0:12}" "$S/$f"; then echo "fuite dans $f"; return 1; fi
     done
   done
 }
@@ -80,7 +83,9 @@ EOF
 # standard), y répond comme Resend ou Spaceship, et note tout pour les vérifications.
 cat > "$TMP/fake-api.js" <<'EOF'
 const fs = require("fs");
-const S = process.env.S, E = process.env;
+const S = process.env.S;
+const [FAKE_SETUP, FAKE_SEND, FAKE_SS_KEY, FAKE_SS_SECRET] = fs.readFileSync(process.env.LEURRES, "utf8").split("\n");
+const E = Object.assign({}, process.env, { FAKE_SETUP, FAKE_SEND, FAKE_SS_KEY, FAKE_SS_SECRET });
 const req = { method: "GET", url: "", headers: {}, data: "" };
 for (const line of fs.readFileSync(0, "utf8").split("\n")) {
   if (!line) continue;
@@ -113,11 +118,20 @@ if (u.origin === "https://api.resend.com") {
   const auth = req.headers.authorization || "";
   const isSetup = auth === "Bearer " + E.FAKE_SETUP, isSend = auth === "Bearer " + E.FAKE_SEND;
   if (E.RESEND_DOWN) reply(503, { statusCode: 503, name: "service_unavailable", message: "Service unavailable" });
+  // Trop d appels : une fois, puis ça passe.
+  if (E.RESEND_429_ONCE && !st.limited) { st.limited = true; reply(429, { statusCode: 429, name: "rate_limit_exceeded", message: "Too many requests" }); }
+  // Une API qui recopierait la clé reçue dans son message d erreur, à cheval sur la coupe à 200 caractères.
+  if (E.RESEND_ECHO_KEY) reply(403, { statusCode: 403, name: "validation_error", message: "x".repeat(187) + auth.slice(7) });
   if (!isSetup && !isSend) reply(403, { statusCode: 403, name: "validation_error", message: "API key is invalid" });
   if (isSend && !(req.method === "POST" && p === "/emails")) reply(401, { statusCode: 401, name: "restricted_api_key", message: "This API key is restricted to only send emails" });
   const view = (d, full) => Object.assign(
     { object: "domain", id: d.id, name: d.name, status: d.status, region: d.region, created_at: "2026-10-08 00:00:00+00" },
-    full ? { records: E.RESEND_NO_RECORDS ? [] : records.map((r) => Object.assign({}, r, { status: d.status })) } : {});
+    full ? { records: E.RESEND_NO_RECORDS ? [] : records.concat(E.RESEND_ODD_RECORDS ? [
+      { record: "?", name: "", type: "TXT", value: "v=spf1 -all" },
+      { record: "?", name: "cortexexam.com", type: "MX", value: "mx.exemple.test", priority: 1 },
+      { record: "?", name: "www2", type: "CNAME", value: "ailleurs.exemple.test" },
+      { record: "?", name: "send\u009b31m", type: "TXT", value: "x" },
+    ] : []).map((r) => Object.assign({}, r, { status: d.status })) } : {});
   if (req.method === "GET" && p === "/domains") reply(200, { object: "list", has_more: false, data: st.domain ? [view(st.domain)] : [] });
   if (req.method === "POST" && p === "/domains") {
     if (st.domain) reply(403, { statusCode: 403, name: "validation_error", message: "The domain has been registered already." });
@@ -152,6 +166,10 @@ if (u.origin === "https://spaceship.dev") {
   if (p !== "/api/v1/dns/records/cortexexam.com") reply(404, { detail: "Not found" });
   if (req.method === "GET") {
     if (u.searchParams.get("take") !== "500" || u.searchParams.get("skip") !== "0") reply(400, { detail: "take et skip attendus" });
+    // Relecture inanalysable après l ajout, ou en retard d une lecture sur l ajout.
+    if (E.SS_REREAD_BROKEN && st.puts.length) reply(200, { items: [st.zone[0], null], total: 2 });
+    if (E.SS_LAG && st.puts.length && !st.lagged) { st.lagged = true; reply(200, { items: st.zone.slice(0, 4), total: 4 }); }
+    if (E.SS_NO_TOTAL) reply(200, { items: st.zone });
     reply(200, { items: st.zone, total: st.zone.length + Number(E.SS_EXTRA_TOTAL || 0) });
   }
   if (req.method === "PUT") {
@@ -202,16 +220,19 @@ run() {
   local name="$1"
   shift
   S="$TMP/$name"
-  mkdir -p "$S/home"
+  mkdir -p "$S/home" "$S/tmpdir"
   init_state
   [[ -f "$S/answers.SETUP_KEY" ]] || printf '%s\n' "$FAKE_SETUP" > "$S/answers.SETUP_KEY"
   [[ -f "$S/answers.SS_KEY" ]] || printf '%s\n' "$FAKE_SS_KEY" > "$S/answers.SS_KEY"
   [[ -f "$S/answers.SS_SECRET" ]] || printf '%s\n' "$FAKE_SS_SECRET" > "$S/answers.SS_SECRET"
   (
-    export S RECORDS="$TMP/records.json" HOME="$S/home"
+    export S RECORDS="$TMP/records.json" LEURRES="$TMP/leurres" HOME="$S/home" TMPDIR="$S/tmpdir"
+    # Un shell appelant qui aurait exporté des variables du même nom que celles du script.
+    export SETUP_KEY=parasite SEND_KEY=parasite SS_KEY=parasite SS_SECRET=parasite HTTP_BODY=parasite DOMAIN_JSON=parasite
     # shellcheck source=/dev/null
     source "$SCRIPT"
     curl() {
+      env >> "$S/env.dump"
       printf '%s\n' "$*" >> "$S/curl.argv"
       case " $* " in
         *" -K - "*) node "$TMP/fake-api.js" ;;
@@ -219,6 +240,7 @@ run() {
       esac
     }
     railway() {
+      env >> "$S/env.dump"
       printf '%s\n' "$*" >> "$S/railway.argv"
       case "${1:-} ${2:-}" in
         "whoami "*) return "${RAILWAY_WHOAMI_RC:-0}" ;;
@@ -227,7 +249,7 @@ run() {
           return "${RAILWAY_FROM_RC:-0}" ;;
         "deployment list")
           if [[ -f "$S/redeployed" ]]; then printf '[{"id":"dep-2","status":"SUCCESS"}]'; else printf '[{"id":"dep-1","status":"SUCCESS"}]'; fi ;;
-        "deployment redeploy") : > "$S/redeployed" ;;
+        "deployment redeploy") [[ -n "${RAILWAY_REDEPLOY_RC:-}" ]] && return "$RAILWAY_REDEPLOY_RC"; : > "$S/redeployed" ;;
       esac
     }
     open() { printf '%s\n' "$*" >> "$S/open.log"; }
@@ -258,8 +280,9 @@ run() {
 
 # ───────────────────────────── Vérifications statiques ─────────────────────────────
 
-echo "Statique"
-t "syntaxe valide pour le bash de macOS (3.2)" bash -n "$SCRIPT"
+# Le banc tourne sous le bash qui le lance : /bin/bash (3.2) sur macOS, bash 5 en CI.
+echo "Statique (bash ${BASH_VERSION})"
+t "syntaxe valide" bash -n "$SCRIPT"
 # Un « here-string » passe par un fichier temporaire : une clé s'y retrouverait sur disque.
 t "aucun here-string (<<<)" bash -c "! grep -n '<<<' '$SCRIPT'"
 t "aucune trace d'exécution activée" bash -c "! grep -nE 'set -[a-z]*x|set -o xtrace' '$SCRIPT'"
@@ -289,7 +312,11 @@ node -e '
 SERVER_PID=$!
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [[ -s "$S/port" ]] && break; /bin/sleep 0.2 2>/dev/null || command sleep 1; done
 TRICKY='{"a":"guillemet \" antislash \\ accent é é","b":"p=MIG+/==","c":["x y"]}'
+# Un ~/.curlrc qui tracerait tout sur disque : le script doit l'ignorer (curl -q).
+mkdir -p "$S/home"
+printf 'trace-ascii = "%s"\n' "$S/home/trace.txt" > "$S/home/.curlrc"
 (
+  export HOME="$S/home"
   # shellcheck source=/dev/null
   source "$SCRIPT"
   http_call PUT "http://127.0.0.1:$(cat "$S/port")/chemin?take=500&skip=0" "$TRICKY" "X-API-Secret: $FAKE_SS_SECRET" "Authorization: Bearer $FAKE_SETUP"
@@ -309,6 +336,7 @@ t "en-tête secret reçu à l'identique (guillemet, antislash)" test "$(seen 's.
 t "en-tête Authorization reçu" test "$(seen 's.headers.authorization')" = "Bearer $FAKE_SETUP"
 t "type de contenu JSON" test "$(seen 's.headers["content-type"]')" = "application/json"
 t "serveur injoignable → code 000, sans arrêt du script" test "$(cat "$S/code-ferme" 2>/dev/null)" = "000"
+t "~/.curlrc ignoré : aucune trace sur disque" test ! -e "$S/home/trace.txt"
 
 # ───────────────────────────── Scénarios ─────────────────────────────
 
@@ -336,7 +364,9 @@ t "suppression de la clé de mise en place proposée" out_has "La clé « cortex
 t "presse-papiers vidé après les saisies" test "$(grep -c '^$' "$S/pbcopy.log")" -ge 2
 t "six étapes au récapitulatif" test "$(grep -c '^   ✓ [1-6] ' "$S/out")" = "6"
 t "aucune clé à l'écran, en argument, ouverte ni copiée" no_leak
-t "rien d'écrit dans le dossier personnel" test -z "$(ls -A "$S/home")"
+t "rien d'écrit dans le dossier personnel ni dans le dossier temporaire" test -z "$(ls -A "$S/home" "$S/tmpdir" | grep -v ':$')"
+t "aucune variable du script dans l'environnement des commandes lancées" bash -c "! grep -E '^(SETUP_KEY|SEND_KEY|SS_KEY|SS_SECRET|HTTP_BODY|DOMAIN_JSON)=' '$S/env.dump'"
+t "les deux clés saisies sont rappelées au récapitulatif" bash -c "grep -q '« cortex-dns » (Spaceship' '$S/out' && grep -q '« cortex-setup » (Resend, Full access) : maintenant' '$S/out'"
 
 echo "2. Second passage : tout est déjà en place"
 DOMAIN_STATUS=verified ZONE_HAS_RESEND=1 KEY_EXISTS=1 GO_SKIP="Continuer (l'ancienne" run second
@@ -385,6 +415,10 @@ echo "5 bis. La remise en place échoue : la marche à suivre à la main"
 SS_PUT_DROPS=toujours GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run perte-definitive
 t "l'échec est dit" out_has "Ils n'ont pas pu être remis par l'API"
 t "la page DNS s'ouvre pour le remettre" log_has open.log "advanced-dns-application"
+t "la zone est relue après la remise à la main, et la perte reste dite" out_has "La zone relue n'a toujours pas tous ses enregistrements d'origine"
+t "aucun « ✓ » sur la zone" out_lacks "les autres n'ont pas bougé"
+t "le récapitulatif dit la zone à vérifier, pas l'étape faite" bash -c "grep -q 'ZONE À VÉRIFIER' '$S/out' && ! grep -q '✓ 3 DNS' '$S/out'"
+t "c'est la première ligne du récapitulatif" out_has "✗ À FAIRE D'ABORD : vérifier la zone DNS de cortexexam.com"
 
 echo "6. Spaceship refuse l'ajout : repli à la main, zone intacte"
 SS_PUT_REFUSED=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run refus
@@ -414,8 +448,10 @@ t "l'échec est dit" out_has "Resend déclare la vérification en échec"
 echo "10. Railway refuse la clé"
 DOMAIN_STATUS=verified ZONE_HAS_RESEND=1 RAILWAY_KEY_RC=1 run railway-refus --etape=5
 t "le refus est dit, avec la marche à suivre" out_has "Railway a refusé RESEND_API_KEY"
-t "AUTH_EMAIL_FROM n'est pas posée" log_lacks railway.argv "AUTH_EMAIL_FROM"
+t "l'état de Railway est dit" out_has "L'adresse d'expédition est déjà posée sur Railway, sans effet tant que la clé manque."
 t "pas de redéploiement" log_lacks railway.argv "deployment redeploy"
+t "la clé de mise en place n'est pas dite inutile : la relance en a besoin" out_lacks "ne sert plus"
+t "le récapitulatif dit de la garder jusqu'à l'étape 5" out_has "garde-la tant que l'étape 5 n'est pas passée"
 t "le test part quand même, avec la clé de mise en place" state_is 'st.emails.length+" "+st.emails[0].key' "1 setup"
 t "aucune clé nulle part" no_leak
 
@@ -475,6 +511,63 @@ RESEND_NO_RECORDS=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|En
 t "aucun ajout par l'API" req_is PUT /dns/records 0
 t "ce n'est pas présenté comme « rien à ajouter »" out_lacks "Rien à ajouter"
 t "le défaut est dit" out_has "illisibles"
+
+echo "17. Railway refuse l'adresse d'expédition : rien n'est créé chez Resend"
+DOMAIN_STATUS=verified ZONE_HAS_RESEND=1 RAILWAY_FROM_RC=1 run adresse-refusee --etape=5
+t "le refus est dit, et que rien n'a été créé" out_has "Rien n'a été créé ni posé"
+t "aucune clé d'envoi créée" req_is POST /api-keys 0
+t "RESEND_API_KEY n'est pas posée" log_lacks railway.argv "RESEND_API_KEY"
+t "pas de redéploiement" log_lacks railway.argv "deployment redeploy"
+
+echo "18. Le redéploiement ne part pas : l'état des variables est dit"
+DOMAIN_STATUS=verified ZONE_HAS_RESEND=1 RAILWAY_REDEPLOY_RC=1 run redeploiement --etape=5
+t "les deux variables sont dites posées, pas appliquées" out_has "Les deux variables sont posées : elles s'appliqueront au prochain déploiement"
+t "l'étape 5 n'est pas comptée comme faite" out_lacks "✓ 5 Clé d'envoi"
+t "le test part avec la clé d'envoi" state_is 'st.emails.length+" "+st.emails[0].key' "1 send"
+t "la clé de mise en place n'est pas dite inutile" out_lacks "ne sert plus"
+t "aucune clé nulle part" no_leak
+
+echo "19. L'app ne répond pas après le redéploiement"
+DOMAIN_STATUS=verified ZONE_HAS_RESEND=1 HEALTH_DOWN=1 run sante --etape=5
+t "c'est dit" out_has "/api/health ne répond pas ok"
+
+echo "20. Relecture inanalysable après l'ajout : jamais prise pour « tout va bien »"
+SS_REREAD_BROKEN=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run relecture
+t "un seul ajout envoyé" req_is PUT /dns/records 1
+t "aucun « ✓ » sur la zone" out_lacks "les autres n'ont pas bougé"
+t "la zone est dite à vérifier" bash -c "grep -q 'ZONE À VÉRIFIER' '$S/out' && ! grep -q '✓ 3 DNS' '$S/out'"
+
+echo "21. Spaceship ne dit pas combien d'enregistrements compte la zone : pas d'écriture"
+SS_NO_TOTAL=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run sans-total
+t "aucun ajout par l'API" req_is PUT /dns/records 0
+t "la raison est dite" out_has "zone ou total illisible"
+
+echo "22. Resend renvoie des enregistrements hors de ses noms d'envoi : jamais posés d'office"
+RESEND_ODD_RECORDS=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run inattendus
+t "l'ajout ne contient que send et resend._domainkey" state_is 'st.puts.length+" "+st.puts[0].items.map((i)=>i.type+" "+i.name).join(",")' "1 MX send,TXT send,TXT resend._domainkey"
+t "rien à la racine, aucun CNAME de plus" state_is 'st.zone.filter((r)=>r.name==="@"||r.type==="CNAME").length' 3
+t "ils sont signalés" out_has "4 enregistrement(s) que Resend ne demande pas d'habitude"
+t "aucun caractère de contrôle C1 à l'écran" node -e 'process.exit(/[\u0080-\u009f]/.test(require("fs").readFileSync(process.argv[1],"utf8"))?1:0)' "$S/out"
+t "les enregistrements d'origine n'ont pas bougé" zone_intact
+
+echo "23. Une API recopie la clé dans son message d'erreur : elle reste masquée, même à cheval sur la coupe"
+S="$TMP/echo"; mkdir -p "$S"
+printf '%s\n' "$FAKE_SETUP" > "$S/answers.SETUP_KEY"
+RESEND_ECHO_KEY=1 run echo
+t "le refus est affiché" out_has "Resend refuse cette clé (HTTP 403"
+t "ni la clé ni son début n'apparaissent" no_leak
+
+echo "24. Resend limite les appels : une seconde tentative, puis la suite"
+RESEND_429_ONCE=1 GO_SKIP="Poser les enregistrements|Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run limite
+t "une attente de deux secondes" grep -qx 2 "$S/sleep.log"
+t "la clé est acceptée" out_has "Clé acceptée par Resend"
+
+echo "25. La relecture précède la prise en compte de l'ajout : on relit avant de conclure"
+SS_LAG=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run retard
+t "un seul ajout envoyé" req_is PUT /dns/records 1
+t "une seconde relecture, cinq secondes plus tard" grep -qx 5 "$S/sleep.log"
+t "l'ajout est constaté" out_has "Enregistrements de Resend ajoutés ; les autres n'ont pas bougé."
+t "zone complète" state_is 'st.zone.length' 7
 
 echo
 if [[ "$FAIL" -eq 0 ]]; then echo "Banc d'essai : $PASS vérifications réussies."; else echo "Banc d'essai : $FAIL échec(s) sur $((PASS + FAIL))."; exit 1; fi
