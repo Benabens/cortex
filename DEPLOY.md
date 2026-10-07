@@ -310,13 +310,16 @@ pose `AUTH_EMAIL_ENABLED=1` puis :
   1er du mois suivant, ou jusqu'à ce qu'on le relève.
 - **Alertes de dépense** : un e-mail part à `CORTEX_OWNER_EMAIL` (à défaut
   `PUBLISHER_EMAIL`) quand la dépense du mois franchit **80 %** du plafond,
-  puis un second à **100 %**. Une seule fois par seuil et par mois, même avec
-  plusieurs instances (marqueur `spend_alert:…` dans `app_meta`) ; relever le
-  plafond en cours de mois réarme les deux seuils sur la nouvelle valeur.
+  puis un second à **100 %** (franchis d'un coup : seul celui du plafond
+  atteint part). Une seule fois par seuil et par mois, même avec plusieurs
+  instances (marqueur `spend_alert:…` dans `app_meta`) ; relever le plafond en
+  cours de mois réarme les deux seuils sur la nouvelle valeur.
   L'envoi passe par Resend : sans `RESEND_API_KEY` (ou sans destinataire),
-  rien ne part et un avertissement `spend_alert.not_sent` est écrit dans les
-  logs, une fois par heure tant que le seuil reste franchi. Pas d'alerte sans
-  plafond (`unlimited`) ni sur le kill-switch `0`.
+  rien ne part. Le serveur l'écrit à son démarrage (`spend_alert.disabled`),
+  puis à chaque seuil franchi (`spend_alert.not_sent`, au plus une fois par
+  heure et par process ; la sortie des workers de jobs n'est pas conservée,
+  seuls les avertissements du serveur web se lisent dans Railway). Pas
+  d'alerte sans plafond (`unlimited`) ni sur le kill-switch `0`.
 - **Kill-switch immédiat** : Variables → `SPEND_CAP_USD=0` → Redeploy
   (~1 min). Toute génération payante est coupée avec un message propre.
 - **Métriques** : `curl -H 'Authorization: Bearer ⟨METRICS_TOKEN⟩' https://⟨domaine⟩/api/metrics` (le jeton n'est plus accepté en `?token=`)
