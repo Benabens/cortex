@@ -1,7 +1,7 @@
 # DEPLOY.md — Mettre Cortex en ligne (Railway), clic par clic
 
 > Durée : ~45-60 min la première fois. Coût fixe : ~5 $/mois
-> (Railway Hobby) + le coût API Anthropic (plafonné par `SPEND_CAP_USD`).
+> (Railway Hobby) + le coût API Anthropic (plafonné chaque mois par `SPEND_CAP_USD`).
 > **Tout Stripe se fait d'abord en MODE TEST** (cartes factices) — la bascule
 > live ne demande que le remplacement de 2 valeurs d'env
 > ([docs/STRIPE-LIVE.md](docs/STRIPE-LIVE.md)).
@@ -18,7 +18,8 @@ importe ses propres documents.
 
 **Garde-fous actifs en prod** : modèle **Sonnet** par défaut
 (Opus refusé sans `LLM_ALLOW_OPUS=1`), coût de chaque appel loggé (table
-`llm_usage`), **plafond global `SPEND_CAP_USD`** (kill-switch), génération
+`llm_usage`), **plafond global mensuel `SPEND_CAP_USD`** (kill-switch, e-mail
+d'alerte à 80 % et à 100 %), génération
 **derrière login** + **quota/jour** + **crédits payants**. Les inscriptions sont
 ouvertes à tous, sauf lancement fermé (`INVITE_ONLY=1`, § 12).
 
@@ -91,6 +92,7 @@ GOOGLE_CLIENT_SECRET=⟨…⟩
 # AUTH_EMAIL_FROM=Cortex <onboarding@resend.dev>
 
 # — garde-fous de coût (OBLIGATOIRES) —
+# Plafond global du MOIS calendaire (UTC), remis à zéro le 1er.
 SPEND_CAP_USD=25
 DAILY_GEN_QUOTA=3
 DAILY_ASSIST_QUOTA=20
@@ -120,7 +122,8 @@ LANDING_URL=https://⟨landing⟩
 LEGAL_TERMS_VERSION=2026-10
 # Adresse de contact affichée dans l'app (défaut : celle de l'éditeur).
 # CONTACT_EMAIL=support@⟨ton-domaine⟩
-# Adresse qui reçoit les demandes de rétractation.
+# Adresse qui reçoit les demandes de rétractation (et les alertes de dépense,
+# à défaut de CORTEX_OWNER_EMAIL).
 PUBLISHER_EMAIL=⟨ton adresse⟩
 
 # — stockage : quota par compte (Mo) sur le volume, + refus sous 10 % d'espace libre —
@@ -262,8 +265,9 @@ pose `AUTH_EMAIL_ENABLED=1` puis :
   SELECT model, count(*) appels, round(sum(cost_usd)::numeric, 2) total_usd
   FROM llm_usage WHERE created_at > to_char(now() - interval '7 days', 'YYYY-MM-DD')
   GROUP BY model ORDER BY total_usd DESC;
-  -- dépense globale (celle que compare SPEND_CAP_USD)
-  SELECT round(sum(cost_usd)::numeric, 2) FROM llm_usage;
+  -- dépense globale du mois en cours, UTC (celle que compare SPEND_CAP_USD)
+  SELECT round(sum(cost_usd)::numeric, 2) FROM llm_usage
+  WHERE substr(created_at, 1, 7) = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM');
   -- dépense par user
   SELECT user_id, round(sum(cost_usd)::numeric, 2) usd FROM llm_usage GROUP BY user_id ORDER BY usd DESC;
   ```
@@ -294,14 +298,28 @@ pose `AUTH_EMAIL_ENABLED=1` puis :
    - [ ] requête SQL `llm_usage` → l'appel de la génération est loggé avec son
          coût ;
    - [ ] pose `SPEND_CAP_USD=0.01` → Redeploy → générer → refus 503 « Plafond
-         de dépense atteint » → remets la vraie valeur. (Le kill-switch
+         de dépense global du mois atteint » → remets la vraie valeur. (Le kill-switch
          d'urgence, c'est `SPEND_CAP_USD=0`.)
 
 ## 9. Surveiller / réagir
 
 - **Dépense** : requêtes SQL ci-dessus, à regarder les premiers jours ;
   `SPEND_CAP_USD` est le filet ultime (les hits de cache LLM restent servis
-  même plafond atteint ; le reste du site marche toujours).
+  même plafond atteint ; le reste du site marche toujours). Il porte sur le
+  **mois calendaire en cours (UTC)** : atteint, il coupe la génération jusqu'au
+  1er du mois suivant, ou jusqu'à ce qu'on le relève.
+- **Alertes de dépense** : un e-mail part à `CORTEX_OWNER_EMAIL` (à défaut
+  `PUBLISHER_EMAIL`) quand la dépense du mois franchit **80 %** du plafond,
+  puis un second à **100 %** (franchis d'un coup : seul celui du plafond
+  atteint part). Une seule fois par seuil et par mois, même avec plusieurs
+  instances (marqueur `spend_alert:…` dans `app_meta`) ; relever le plafond en
+  cours de mois réarme les deux seuils sur la nouvelle valeur.
+  L'envoi passe par Resend : sans `RESEND_API_KEY` (ou sans destinataire),
+  rien ne part. Le serveur l'écrit à son démarrage (`spend_alert.disabled`),
+  puis à chaque seuil franchi (`spend_alert.not_sent`, au plus une fois par
+  heure et par process ; la sortie des workers de jobs n'est pas conservée,
+  seuls les avertissements du serveur web se lisent dans Railway). Pas
+  d'alerte sans plafond (`unlimited`) ni sur le kill-switch `0`.
 - **Kill-switch immédiat** : Variables → `SPEND_CAP_USD=0` → Redeploy
   (~1 min). Toute génération payante est coupée avec un message propre.
 - **Métriques** : `curl -H 'Authorization: Bearer ⟨METRICS_TOKEN⟩' https://⟨domaine⟩/api/metrics` (le jeton n'est plus accepté en `?token=`)
@@ -521,11 +539,13 @@ quotidiens (`DAILY_GEN_QUOTA`, `DAILY_ASSIST_QUOTA`).
 - [ ] `TRUST_PROXY=1` : sans elle, la limite de requêtes est commune à tous
       les visiteurs et quelques sessions suffisent à mettre tout le monde en 429.
 - [ ] `PUBLIC_DEMO` absente.
-- [ ] `SPEND_CAP_USD` relevé au-dessus de la dépense déjà faite. Ce plafond
-      est **cumulé depuis la création de l'instance**, pas quotidien : atteint,
-      il coupe la génération pour tout le monde jusqu'à ce qu'on le relève.
-      Dépense actuelle : `SELECT round(sum(cost_usd)::numeric, 2) FROM llm_usage;`
-      (`SPEND_CAP_PER_USER_USD`, lui, est bien par compte et par jour.)
+- [ ] `SPEND_CAP_USD` au-dessus de la dépense déjà faite ce mois-ci. Ce plafond
+      porte sur le **mois calendaire en cours (UTC)** et repart de zéro le 1er :
+      atteint, il coupe la génération pour tout le monde jusqu'au mois suivant,
+      ou jusqu'à ce qu'on le relève. Dépense du mois : requête du § 7.
+      (`SPEND_CAP_PER_USER_USD`, lui, est par compte et par jour.)
+- [ ] `RESEND_API_KEY` posée, et `CORTEX_OWNER_EMAIL` ou `PUBLISHER_EMAIL` :
+      sans elles, les alertes de dépense à 80 % et 100 % ne partent pas.
 - [ ] Un plafond de dépense dur côté Anthropic.
 - [ ] Console Google Cloud → écran de consentement OAuth : état **« En
       production »**. En « Test », seuls les comptes de test passent, et un

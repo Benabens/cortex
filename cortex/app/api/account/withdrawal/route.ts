@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authGet } from "@/db/auth-store";
 import { currentUser } from "@/db/context";
 import { createWithdrawalRequest, eligibleWithdrawals, type PurchaseType } from "@/lib/consumer-law";
+import { sendEmail } from "@/lib/email";
 import { log } from "@/lib/metrics";
 import { useUser } from "@/lib/req";
 import { stripeClient } from "@/lib/billing/stripe-client";
@@ -16,18 +17,13 @@ export async function GET(req: NextRequest) {
 }
 
 async function sendReceipt(to: string | null, requestedAt: string, purchaseId: string): Promise<void> {
-  const key = process.env.RESEND_API_KEY;
-  if (!key) { log("info", "withdrawal.email_skipped", { purchaseId, reason: "RESEND_API_KEY absente" }); return; }
+  if (!process.env.RESEND_API_KEY) { log("info", "withdrawal.email_skipped", { purchaseId, reason: "RESEND_API_KEY absente" }); return; }
   const text = `Nous accusons réception de votre demande de rétractation du ${requestedAt} pour l’achat ${purchaseId}. Elle sera traitée manuellement dans Stripe.`;
   const publisher = process.env.PUBLISHER_EMAIL?.trim() || null;
   const recipients = [...new Set([to, publisher].filter((recipient): recipient is string => !!recipient))];
   for (const recipient of recipients) {
-    try {
-      const res = await fetch("https://api.resend.com/emails", { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ from: process.env.AUTH_EMAIL_FROM ?? "Cortex <onboarding@resend.dev>", to: recipient, subject: "Demande de rétractation reçue", text }) });
-      if (!res.ok) log("warn", "withdrawal.email_failed", { recipient, status: res.status });
-    } catch (error) {
-      log("warn", "withdrawal.email_failed", { recipient, message: error instanceof Error ? error.message.slice(0, 160) : String(error) });
-    }
+    const sent = await sendEmail({ to: recipient, subject: "Demande de rétractation reçue", text });
+    if (!sent.ok) log("warn", "withdrawal.email_failed", { recipient, reason: sent.reason });
   }
 }
 
