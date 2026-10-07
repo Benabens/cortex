@@ -449,8 +449,8 @@ test("premier essai encore en cours chez Resend (409) : pas tenu pour envoyé, r
   await usage.assertSpendCap("anthropic");
   assert.equal(keys.length, 1);
 
+  // Le même process reprend sa propre réclamation au bout d'un quart d'heure, pas d'une heure.
   t.mock.timers.setTime(Date.UTC(2028, 6, 10, 12, 16, 0));
-  freshProcess();
   await usage.assertSpendCap("anthropic");
   assert.equal(keys.length, 2, "le 409 « en cours » n'a pas clos le seuil");
 

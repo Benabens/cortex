@@ -127,7 +127,8 @@ export async function alertSpendThresholds(spent: number, cap: number, month: st
     const outcome = await send(`${key}:${claimed.chain}`, pct, spent, cap, month);
     if (!outcome.ok) {
       // Seul le détenteur du jeton rend le seuil : un process repris entre-temps n'efface pas le travail d'un autre.
-      if (!outcome.uncertain) await authRun(`DELETE FROM app_meta WHERE key = ? AND value = ?`, key, claimed.token);
+      if (outcome.uncertain) notBefore.set(key, Date.now() + STALE_CLAIM_MS);
+      else await authRun(`DELETE FROM app_meta WHERE key = ? AND value = ?`, key, claimed.token);
       const next = outcome.uncertain ? "reprise dans un quart d'heure, sans doublon possible" : "nouvelle tentative dans une heure";
       log("warn", "spend_alert.not_sent", { ...context, reason: outcome.reason, message: `Alerte de dépense non envoyée (${outcome.reason}) : ${next}.` });
       return;
