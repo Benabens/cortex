@@ -333,19 +333,26 @@ test("une alerte impossible à enregistrer ne refuse pas l'appel", async (t) => 
   assert.ok(warnings.some((w) => w.includes("spend_alert.failed")), warnings.join("\n"));
 });
 
-test("les deux seuils franchis d'un coup : un seul e-mail, celui du plafond atteint", async (t) => {
+test("les deux seuils franchis d'un coup : un seul e-mail, celui du plafond atteint, et le 80 % reste acquis", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2028, 0, 10, 12, 0, 0) });
   const sent = fakeResend(t);
   alertsConfigured();
 
-  await spend(11);
+  // 7 $ dépensés, puis deux appels en vol estimés à 1,50 $ et 2,50 $ : 11 $, plafond dépassé d'un coup.
+  const call = { provider: "anthropic", model: "claude-sonnet-5" };
+  await spend(7);
+  await usage.openUsage({ ...call, tokensIn: 750_000, tokensOut: 0 });
+  const second = await usage.openUsage({ ...call, tokensIn: 1_250_000, tokensOut: 0 });
   await assert.rejects(() => usage.assertSpendCap("anthropic"), isSpendCap);
   assert.deepEqual(sent.map((m) => m.subject), ["Cortex : plafond de dépense IA du mois atteint, génération coupée"]);
 
-  // Le seuil de 80 % est acquis : ni ce process ni un autre ne le signalera après coup.
-  await assert.rejects(() => usage.assertSpendCap("anthropic"), isSpendCap);
+  // Le second appel est refusé par le fournisseur : le total retombe à 85 %. Le seuil de
+  // 80 % a été couvert par l'e-mail du plafond : ni ce process ni un autre ne le signale après coup.
+  await usage.discardUsage(second);
+  await usage.assertSpendCap("anthropic");
   freshProcess();
-  await assert.rejects(() => usage.assertSpendCap("anthropic"), isSpendCap);
+  await usage.assertSpendCap("anthropic");
+  assert.equal(await usage.monthSpendUsd(), 8.5);
   assert.equal(sent.length, 1);
 });
 
@@ -390,7 +397,7 @@ test("à minuit le 1er, la somme lue et le mois annoncé sont ceux du même mois
   assert.ok(sent[1].text.includes("2028-04") && sent[1].text.includes("9.00 $"), sent[1].text);
 });
 
-test("réponse de Resend perdue : le nouvel essai porte la même clé d'idempotence et ne double pas l'e-mail", async (t) => {
+test("réponse de Resend perdue : la reprise porte la même clé d'idempotence, et Resend qui la reconnaît vaut envoi fait", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2028, 4, 10, 12, 0, 0) });
   t.mock.method(console, "error", () => {});
   alertsConfigured();
@@ -404,20 +411,116 @@ test("réponse de Resend perdue : le nouvel essai porte la même clé d'idempote
   await spend(9);
   await usage.assertSpendCap("anthropic"); // envoi sans réponse : l'appel passe quand même
   assert.equal(keys.length, 1);
+  assert.ok(keys[0].startsWith("spend_alert:2028-05:80:10:"), keys[0]);
 
-  // Une heure plus tard, Resend reconnaît la clé : l'e-mail était parti, on s'arrête là.
+  // On ne sait pas si l'e-mail est parti : le seuil n'est pas rendu, personne ne renvoie tout de suite.
+  freshProcess();
+  await usage.assertSpendCap("anthropic");
+  assert.equal(keys.length, 1);
+
+  // Un quart d'heure plus tard, un autre process reprend sous la MÊME clé. Resend la reconnaît
+  // (contenu différent : le total a bougé) : le premier essai avait été accepté, on s'arrête là.
   answer = () => new Response(JSON.stringify({ statusCode: 409, name: "invalid_idempotent_request" }), { status: 409 });
-  t.mock.timers.setTime(Date.UTC(2028, 4, 10, 13, 0, 1));
+  t.mock.timers.setTime(Date.UTC(2028, 4, 10, 12, 16, 0));
   await spend(0.5);
+  freshProcess();
   await usage.assertSpendCap("anthropic");
   assert.equal(keys.length, 2);
-  assert.equal(keys[0], keys[1]);
-  assert.ok(keys[0].includes("2028-05") && keys[0].includes("80"), keys[0]);
+  assert.equal(keys[1], keys[0]);
 
   t.mock.timers.setTime(Date.UTC(2028, 4, 10, 15, 0, 0));
   freshProcess();
   await usage.assertSpendCap("anthropic");
   assert.equal(keys.length, 2, "seuil tenu pour signalé");
+});
+
+test("premier essai encore en cours chez Resend (409) : pas tenu pour envoyé, repris plus tard sous la même clé", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2028, 6, 10, 12, 0, 0) });
+  t.mock.method(console, "error", () => {});
+  alertsConfigured();
+  const keys: string[] = [];
+  let status = 409;
+  t.mock.method(globalThis, "fetch", async (_input: unknown, init?: RequestInit) => {
+    keys.push(new Headers(init?.headers).get("idempotency-key") ?? "");
+    return new Response(JSON.stringify(status === 409 ? { statusCode: 409, name: "concurrent_idempotent_requests" } : { id: "x" }), { status });
+  });
+
+  await spend(9);
+  await usage.assertSpendCap("anthropic");
+  assert.equal(keys.length, 1);
+
+  t.mock.timers.setTime(Date.UTC(2028, 6, 10, 12, 16, 0));
+  freshProcess();
+  await usage.assertSpendCap("anthropic");
+  assert.equal(keys.length, 2, "le 409 « en cours » n'a pas clos le seuil");
+
+  // La clé suit la réclamation de reprise en reprise, jusqu'à ce que Resend réponde.
+  status = 200;
+  t.mock.timers.setTime(Date.UTC(2028, 6, 10, 12, 32, 0));
+  freshProcess();
+  await usage.assertSpendCap("anthropic");
+  assert.equal(keys.length, 3);
+  assert.deepEqual(keys, [keys[0], keys[0], keys[0]]);
+
+  freshProcess();
+  await usage.assertSpendCap("anthropic");
+  assert.equal(keys.length, 3);
+});
+
+test("refus net de Resend : rien n'est parti, l'essai suivant prend une clé d'idempotence neuve", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2028, 7, 10, 12, 0, 0) });
+  t.mock.method(console, "error", () => {});
+  alertsConfigured();
+  const keys: string[] = [];
+  let status = 403;
+  t.mock.method(globalThis, "fetch", async (_input: unknown, init?: RequestInit) => {
+    keys.push(new Headers(init?.headers).get("idempotency-key") ?? "");
+    return new Response("{}", { status });
+  });
+
+  await spend(9);
+  await usage.assertSpendCap("anthropic");
+  status = 200;
+  freshProcess();
+  await usage.assertSpendCap("anthropic");
+  assert.equal(keys.length, 2);
+  // Une clé qui a servi à un essai refusé peut rester retenue par Resend : on n'y revient pas.
+  assert.notEqual(keys[1], keys[0]);
+  assert.ok(keys[1].startsWith("spend_alert:2028-08:80:10:"), keys[1]);
+});
+
+test("le plafond réclamé par un autre process ne couvre pas le 80 % tant que son e-mail n'est pas parti", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2028, 8, 10, 12, 0, 0) });
+  t.mock.method(console, "error", () => {});
+  alertsConfigured();
+  const subjects: string[] = [];
+  let release!: (r: Response) => void;
+  const held = new Promise<Response>((r) => { release = r; });
+  t.mock.method(globalThis, "fetch", async (_input: unknown, init?: RequestInit) => {
+    subjects.push((JSON.parse(String(init?.body)) as { subject: string }).subject);
+    return subjects.length === 1 ? held : new Response("{}", { status: 200 });
+  });
+
+  // 8,50 $ fermes et un appel en vol estimé à 2,50 $ : 110 % d'un coup.
+  const call = { provider: "anthropic", model: "claude-sonnet-5" };
+  await spend(8.5);
+  const inflight = await usage.openUsage({ ...call, tokensIn: 1_250_000, tokensOut: 0 });
+  const first = assert.rejects(() => usage.assertSpendCap("anthropic"), isSpendCap); // réclame le 100 %, envoi en cours
+  while (subjects.length === 0) await new Promise((r) => setImmediate(r));
+
+  freshProcess(); // un autre process voit le 100 % pris : il ne doit pas en déduire que le 80 % est signalé
+  await assert.rejects(() => usage.assertSpendCap("anthropic"), isSpendCap);
+
+  // L'envoi du premier est refusé, puis l'appel en vol aussi : le total retombe à 85 %.
+  release(new Response("{}", { status: 500 }));
+  await first;
+  await usage.discardUsage(inflight);
+  freshProcess();
+  await usage.assertSpendCap("anthropic");
+  assert.deepEqual(subjects, [
+    "Cortex : plafond de dépense IA du mois atteint, génération coupée",
+    "Cortex : 80 % du plafond de dépense IA du mois",
+  ]);
 });
 
 test("un process tué entre la réclamation du seuil et l'envoi : un autre reprend l'alerte un quart d'heure plus tard", async (t) => {
