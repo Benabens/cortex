@@ -43,7 +43,9 @@ RW_ENV="production"
 
 # Un shell appelant qui exporterait une variable de ce nom la ferait hériter, avec sa valeur
 # du moment, par chaque commande lancée : on repart de variables neuves, non exportées.
+# Les noms des variables locales qui portent une clé aussi : « local » garde l'attribut d'export d'un homonyme.
 unset SETUP_KEY SEND_KEY SS_KEY SS_SECRET HTTP_CODE HTTP_BODY DOMAIN_ID DOMAIN_JSON DOMAIN_STATUS SS_BEFORE SS_AFTER
+unset key token val h out body secret msg ref
 DRY=0
 FROM=1
 DONE=()
@@ -65,6 +67,9 @@ ASKED_SETUP=0
 ASKED_DNS=0
 KEY_DEPLOYED=0
 ZONE_UNSURE=0
+# Enregistrements hors des noms habituels de Resend : posés par l'API seulement après accord ; ceux laissés à la main.
+DNS_ALLOW_UNUSUAL=0
+DNS_LEFT=0
 
 usage() { sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 forget_secrets() { SETUP_KEY=""; SEND_KEY=""; SS_KEY=""; SS_SECRET=""; HTTP_BODY=""; }
@@ -131,6 +136,10 @@ json_get() { node -e "$JS_GET" "$1" 2>/dev/null || true; }
 # Dans une liste Resend {data:[…]}, les éléments dont `name` vaut $1 : « id statut région » par ligne.
 JS_NAMED='let s="";process.stdin.on("data",(c)=>(s+=c)).on("end",()=>{try{for(const x of JSON.parse(s).data||[])if(x&&x.name===process.argv[1])console.log([x.id,x.status||"-",x.region||"-"].join(" "))}catch{}})'
 named_in_list() { node -e "$JS_NAMED" "$1" 2>/dev/null || true; }
+
+# Vrai si l'entrée standard est un seul objet JSON (rien avant, rien après).
+JS_IS_OBJECT='let s="";process.stdin.on("data",(c)=>(s+=c)).on("end",()=>{try{const v=JSON.parse(s);process.exit(v&&typeof v==="object"&&!Array.isArray(v)?0:1)}catch{process.exit(1)}})'
+is_json_object() { node -e "$JS_IS_OBJECT" 2>/dev/null; }
 
 # Valeur entre guillemets d'un fichier de configuration curl : seuls \ et " s'échappent.
 cfg_quote() {
@@ -231,6 +240,7 @@ find_domain() {
 load_domain() {
   resend GET "/domains/$DOMAIN_ID"
   http_ok || { ko "Domaine illisible ($(http_error))."; return 1; }
+  printf '%s' "$HTTP_BODY" | is_json_object || { DOMAIN_JSON=""; ko "Réponse de Resend inattendue pour le domaine."; return 1; }
   DOMAIN_JSON="$HTTP_BODY"
   DOMAIN_STATUS="$(printf '%s' "$DOMAIN_JSON" | json_get status)"
   [[ "$DOMAIN_STATUS" =~ ^[a-z_]{1,40}$ ]] || DOMAIN_STATUS="inconnu"
@@ -246,28 +256,33 @@ need_domain() {
 
 # ───────────────────────────── DNS ─────────────────────────────
 
-# Compare les enregistrements voulus par Resend à la zone lue chez Spaceship.
-# Entrée standard : trois documents JSON séparés par 0x1e (réponse Resend du domaine,
-# zone avant, zone après ; vide = absent). Arguments : le mode, puis le domaine.
+# Compare les enregistrements voulus par Resend à une zone lue chez Spaceship.
+# Entrée standard : exactement trois documents JSON séparés par 0x1e (réponse Resend du
+# domaine, zone de référence, zone relue ; vide = absent). Arguments : le mode, le domaine,
+# puis « 1 » si les enregistrements inhabituels ont été acceptés.
 #   check  « ok » si tout est lisible et que Resend demande au moins un enregistrement
 #   show   une ligne lisible par enregistrement voulu, avec son état
 #   todo   « type␟hôte␟valeur␟priorité␟état » par enregistrement voulu (␟ = 0x1f)
 #   body   le corps du PUT Spaceship pour ceux qui manquent (rien s'il n'y en a pas)
-#   lost   les enregistrements de la zone avant qui manquent dans la zone après
+#   lost   les enregistrements de la zone de référence qui manquent dans la zone relue
 #   restore le corps du PUT Spaceship qui remet ces enregistrements perdus
-# États : present (identique, déjà là), missing (à ajouter), conflict (le même nom
-# porte déjà autre chose du même type, ou un CNAME : on n'y touche pas), unexpected
-# (nom hors de ce que Resend demande pour l'envoi : jamais posé d'office).
+# États : present (identique, déjà là) ; missing (à ajouter) ; conflict (le nom porte déjà
+# autre chose du même type, ou un CNAME, ou n'importe quoi si c'est un CNAME qu'on veut :
+# on n'y touche pas) ; unusual (hors de « send » et « *._domainkey » en MX ou TXT, un CNAME
+# par exemple : posé par l'API seulement après accord) ; refused (racine, nom ou valeur
+# vide ou mal formé : jamais posé par l'API).
 # Tout document illisible, toute zone mal formée : sortie en erreur (code 3), sans rien écrire.
 JS_PLAN='
 let s = ""; process.stdin.on("data", (c) => (s += c)).on("end", () => {
-  const mode = process.argv[1], domain = String(process.argv[2] || "").toLowerCase();
+  const mode = process.argv[1], domain = String(process.argv[2] || "").toLowerCase(), allow = process.argv[3] === "1";
   const fail = () => process.exit(3);
-  const [records, before, after] = s.split("\u001e").map((d) => { if (!d.trim()) return null; try { return JSON.parse(d); } catch { return fail(); } });
+  const parts = s.split("\u001e");
+  if (parts.length !== 3) fail();
+  const [records, before, after] = parts.map((d) => { if (!d.trim()) return null; try { return JSON.parse(d); } catch { return fail(); } });
   const host = (n) => { n = String(n).trim().toLowerCase().replace(/\.$/, ""); if (n === domain || n === "@") return "@"; return n.endsWith("." + domain) ? n.slice(0, -domain.length - 1) : n; };
   const unquote = (v) => { v = String(v == null ? "" : v).trim(); return v.length >= 2 && v.startsWith("\"") && v.endsWith("\"") ? v.slice(1, -1) : v; };
   const fqdn = (v) => String(v == null ? "" : v).trim().toLowerCase().replace(/\.$/, "");
-  const clean = (v) => String(v).replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, " ");
+  const clean = (v) => String(v).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, " ");
   const data = (r) => r.type === "TXT" ? unquote(r.value) : r.type === "MX" ? fqdn(r.exchange) + " " + Number(r.preference) : r.type === "CNAME" ? fqdn(r.cname) : r.type === "A" || r.type === "AAAA" ? fqdn(r.address) : JSON.stringify(Object.keys(r).filter((k) => !["type", "name", "ttl", "group"].includes(k)).sort().map((k) => [k, r[k]]));
   const key = (r) => [r.type, host(r.name), data(r)].join(" ");
   const zone = (z) => {
@@ -297,28 +312,35 @@ let s = ""; process.stdin.on("data", (c) => (s += c)).on("end", () => {
   }).filter((w) => ["MX", "TXT", "CNAME"].includes(w.type));
   if (mode === "check") { if (wanted.length) console.log("ok"); return; }
   const value = (w) => w.type === "MX" ? w.exchange : w.type === "CNAME" ? w.cname : w.value;
-  // Pour envoyer, Resend demande « send » (MX et SPF) et « resend._domainkey » (DKIM), rien à la racine.
-  const expected = (w) => !!value(w) && w.type !== "CNAME" && /^[a-z0-9_]([a-z0-9._-]*[a-z0-9])?$/.test(w.name) && (w.name === "send" || w.name.endsWith("._domainkey"));
+  const label_ = /^[a-z0-9_]([a-z0-9._-]*[a-z0-9])?$/;
+  // Posable par l API : un sous-domaine bien formé (jamais la racine) et une valeur bien formée.
+  const valid = (w) => label_.test(w.name) && !!value(w) && !/[\u0000-\u001f\u007f-\u009f]/.test(value(w)) && (w.type === "TXT" || (label_.test(value(w)) && value(w).includes(".")));
+  // Ce que Resend demande d habitude pour envoyer : « send » (MX et SPF) et « *._domainkey » (DKIM), en MX ou TXT.
+  const usual = (w) => w.type !== "CNAME" && (w.name === "send" || w.name.endsWith("._domainkey"));
   const state = (w) => {
-    if (!expected(w)) return "unexpected";
+    if (!valid(w)) return "refused";
+    if (!usual(w) && !allow) return "unusual";
     if (!existing) return "missing";
     if (existing.some((r) => key(r) === key(w))) return "present";
     const same = existing.filter((r) => host(r.name) === w.name);
-    if (same.some((r) => r.type === "CNAME" || r.type === w.type)) return "conflict";
+    if (w.type === "CNAME" ? same.length : same.some((r) => r.type === "CNAME" || r.type === w.type)) return "conflict";
     return "missing";
   };
-  const label = { present: "déjà en place", missing: "à ajouter", conflict: "CONFLIT : ce nom porte déjà autre chose", unexpected: "INATTENDU : pas un nom d envoi Resend, à vérifier" };
+  const label = { present: "déjà en place", missing: "à ajouter", conflict: "CONFLIT : ce nom porte déjà autre chose", unusual: "INHABITUEL : à confirmer", refused: "REFUSÉ : racine, nom ou valeur mal formé" };
   const short = (v) => (v.length > 56 ? v.slice(0, 53) + "…" : v);
-  if (mode === "show") for (const w of wanted) { const st = state(w); console.log(clean(`${w.type.padEnd(5)} ${(w.name || "(sans nom)").padEnd(22)} ${short(value(w))}${w.type === "MX" ? ` (priorité ${w.preference})` : ""}${existing || st === "unexpected" ? `  → ${label[st]}` : ""}`)); }
+  if (mode === "show") for (const w of wanted) { const st = state(w); console.log(clean(`${w.type.padEnd(5)} ${(w.name || "(sans nom)").padEnd(22)} ${short(value(w))}${w.type === "MX" ? ` (priorité ${w.preference})` : ""}${existing || st === "unusual" || st === "refused" ? `  → ${label[st]}` : ""}`)); }
   if (mode === "todo") for (const w of wanted) console.log([w.type, w.name || "(sans nom)", value(w) || "(vide)", w.type === "MX" ? w.preference : "-", state(w)].map(clean).join("\u001f"));
   if (mode === "body") { const add = wanted.filter((w) => state(w) === "missing"); if (add.length) process.stdout.write(JSON.stringify({ force: false, items: add })); }
 });'
-dns_plan() { # $1 = mode
-  printf '%s\x1e%s\x1e%s' "$DOMAIN_JSON" "$SS_BEFORE" "$SS_AFTER" | node -e "$JS_PLAN" "$1" "$DOMAIN"
+dns_plan() { # $1 = mode, $2 = zone de référence (défaut : SS_BEFORE)
+  local ref="${2-$SS_BEFORE}"
+  printf '%s\x1e%s\x1e%s' "$DOMAIN_JSON" "$ref" "$SS_AFTER" | node -e "$JS_PLAN" "$1" "$DOMAIN" "$DNS_ALLOW_UNUSUAL"
 }
-count_state() { dns_plan todo | awk -F $'\x1f' -v want="$1" '$5 == want { n++ } END { print n + 0 }'; }
+count_state() { # $1 = état, $2 = zone de référence (défaut : SS_BEFORE)
+  dns_plan todo "${2-$SS_BEFORE}" | awk -F $'\x1f' -v want="$1" '$5 == want { n++ } END { print n + 0 }'
+}
 # Sans plan lisible, un compte vide passerait pour « rien à faire » : on vérifie avant de s'y fier.
-plan_ok() { [[ "$(dns_plan check 2>/dev/null || true)" == "ok" ]]; }
+plan_ok() { [[ "$(dns_plan check "${1-$SS_BEFORE}" 2>/dev/null || true)" == "ok" ]]; }
 
 # Zone complète lue chez Spaceship dans la variable nommée. Échoue si la zone ne tient pas en une page :
 # sans tout voir, on ne peut pas garantir qu'on n'écrase rien.
@@ -334,57 +356,69 @@ read_zone() { # $1 = variable
 }
 
 # Après un ajout accepté : relit la zone, remet ce qui aurait disparu, puis constate que les
-# enregistrements voulus y sont. Vrai seulement si tout est CONSTATÉ ; une relecture ou une
-# analyse impossible n'est jamais prise pour « tout va bien ».
+# enregistrements voulus y sont. Vrai seulement si, sur UNE MÊME relecture, rien ne manque par
+# rapport à la zone d'origine (SS_BEFORE, gardée jusqu'au bout) et tous les ajouts sont là.
+# Une relecture ou une analyse impossible n'est jamais prise pour « tout va bien ».
 zone_settled() {
   local lost missing tries=0
-  if ! read_zone SS_AFTER || ! lost="$(dns_plan lost)"; then
-    warn "Ajout accepté par Spaceship, mais la zone n'a pas pu être relue : vérifie à l'œil (la page s'ouvre)."
-    browse "$SPACESHIP_DNS_PAGE"
-    wait_enter "Vérifie les enregistrements « send » et « resend._domainkey », et que les anciens sont toujours là."
-    return 1
-  fi
-  if [[ -n "$lost" ]]; then
-    # Ce script n'envoie que des ajouts : si la zone a perdu quelque chose, on le remet tout de suite.
-    ko "Des enregistrements présents avant l'ajout ne sont plus dans la zone :"
-    printf '%s\n' "$lost" | sed 's/^/       /'
-    spaceship PUT "/dns/records/$DOMAIN" "$(dns_plan restore || true)"
-    if http_ok && read_zone SS_AFTER && lost="$(dns_plan lost)" && [[ -z "$lost" ]]; then
-      ok "Remis en place par l'API, à l'identique."
-    else
-      ko "Ils n'ont pas pu être remis par l'API : remets-les à la main tout de suite (la page s'ouvre)."
-      browse "$SPACESHIP_DNS_PAGE"
-      wait_enter "Remets les enregistrements listés ci-dessus."
-      if ! read_zone SS_AFTER || ! lost="$(dns_plan lost)" || [[ -n "$lost" ]]; then
-        ko "La zone relue n'a toujours pas tous ses enregistrements d'origine."
-        return 1
-      fi
-      ok "Zone relue : les enregistrements d'origine sont revenus."
-    fi
-  fi
-  # La zone relue devient la référence. Une relecture peut précéder la prise en compte de l'ajout : deux autres essais.
-  SS_BEFORE="$SS_AFTER"; SS_AFTER=""
   while :; do
-    if ! plan_ok || ! missing="$(count_state missing)"; then ko "Zone relue illisible."; return 1; fi
-    [[ "$missing" -eq 0 ]] && return 0
+    if ! read_zone SS_AFTER || ! lost="$(dns_plan lost)"; then
+      warn "Ajout accepté par Spaceship, mais la zone n'a pas pu être relue : vérifie à l'œil (la page s'ouvre)."
+      browse "$SPACESHIP_DNS_PAGE"
+      wait_enter "Vérifie que les enregistrements de Resend y sont, et que les anciens sont toujours là."
+      return 1
+    fi
+    if [[ -n "$lost" ]]; then
+      # Ce script n'envoie que des ajouts : si la zone a perdu quelque chose, on le remet tout de suite.
+      ko "Des enregistrements présents avant l'ajout ne sont plus dans la zone :"
+      printf '%s\n' "$lost" | sed 's/^/       /'
+      spaceship PUT "/dns/records/$DOMAIN" "$(dns_plan restore || true)"
+      if http_ok && read_zone SS_AFTER && lost="$(dns_plan lost)" && [[ -z "$lost" ]]; then
+        ok "Remis en place par l'API, à l'identique."
+      else
+        ko "Ils n'ont pas pu être remis par l'API : remets-les à la main tout de suite (la page s'ouvre)."
+        browse "$SPACESHIP_DNS_PAGE"
+        wait_enter "Remets les enregistrements listés ci-dessus."
+        if ! read_zone SS_AFTER || ! lost="$(dns_plan lost)" || [[ -n "$lost" ]]; then
+          ko "La zone relue n'a toujours pas tous ses enregistrements d'origine."
+          return 1
+        fi
+        ok "Zone relue : les enregistrements d'origine sont revenus."
+      fi
+    fi
+    # Sur cette même zone relue, rien ne manque de l'origine : reste à y trouver les ajouts.
+    if ! plan_ok "$SS_AFTER" || ! missing="$(count_state missing "$SS_AFTER")"; then ko "Zone relue illisible."; return 1; fi
+    if [[ "$missing" -eq 0 ]]; then SS_BEFORE="$SS_AFTER"; SS_AFTER=""; return 0; fi
+    # Une relecture peut précéder la prise en compte de l'ajout : deux autres essais, perte recherchée à chacun.
     tries=$((tries + 1))
     if [[ "$tries" -ge 3 ]]; then ko "$missing enregistrement(s) toujours absent(s) de la zone relue."; return 1; fi
     sleep 5
-    read_zone SS_BEFORE || return 1
   done
 }
 
 # Pose par l'API Spaceship les enregistrements qui manquent, et seulement eux.
-# Renvoie 0 si tout est en place et constaté ; 1 si l'API n'a rien écrit (repli à la main) ;
-# 2 si un ajout est parti mais que l'état de la zone n'a pas pu être confirmé.
+# Renvoie 0 si la zone est constatée (DNS_LEFT = ce qui reste à la main) ; 1 si l'API n'a rien
+# écrit (repli à la main) ; 2 si un ajout est parti mais que l'état de la zone n'est pas confirmé.
 dns_auto() {
-  local body missing conflicts unexpected
+  local body missing conflicts unusual refused
+  DNS_ALLOW_UNUSUAL=0
+  DNS_LEFT=0
   read_zone SS_BEFORE || return 1
   plan_ok || { ko "Enregistrements de Resend ou zone Spaceship illisibles."; return 1; }
   dns_plan show | sed 's/^/     /'
-  if ! conflicts="$(count_state conflict)" || ! unexpected="$(count_state unexpected)" || ! missing="$(count_state missing)"; then
+  if ! unusual="$(count_state unusual)"; then ko "Comparaison avec la zone impossible."; return 1; fi
+  if [[ "$unusual" -gt 0 ]]; then
+    warn "$unusual enregistrement(s) hors des noms habituels de Resend (« send » et « *._domainkey », en MX ou TXT)."
+    info "Resend peut en demander d'autres, des CNAME par exemple : compare avec l'onglet Records de https://resend.com/domains."
+    if go "Ils correspondent à ce que Resend affiche : les poser aussi par l'API"; then
+      DNS_ALLOW_UNUSUAL=1
+      dns_plan show | sed 's/^/     /'
+    fi
+  fi
+  if ! conflicts="$(count_state conflict)" || ! unusual="$(count_state unusual)" || ! refused="$(count_state refused)" || ! missing="$(count_state missing)"; then
     ko "Comparaison avec la zone impossible."; return 1
   fi
+  DNS_LEFT=$((conflicts + unusual + refused))
   if [[ "$missing" -gt 0 ]]; then
     body="$(dns_plan body)" || { ko "Comparaison avec la zone impossible."; return 1; }
     [[ -n "$body" ]] || { ko "Comparaison avec la zone impossible."; return 1; }
@@ -397,35 +431,35 @@ dns_auto() {
       return 1
     fi
     zone_settled || return 2
-    ok "Enregistrements de Resend ajoutés ; les autres n'ont pas bougé."
-  else
-    ok "Rien à ajouter."
+    ok "Enregistrements ajoutés ; les autres n'ont pas bougé."
+  elif [[ "$DNS_LEFT" -eq 0 ]]; then
+    ok "Rien à ajouter : tout est déjà en place."
   fi
-  if [[ "$conflicts" -gt 0 ]]; then
-    warn "$conflicts enregistrement(s) en conflit, laissé(s) tel(s) quel(s) : à trancher à la main (la page s'ouvre)."
-    dns_manual conflict || true
-  fi
-  if [[ "$unexpected" -gt 0 ]]; then
-    warn "$unexpected enregistrement(s) que Resend ne demande pas d'habitude : non posé(s) par l'API."
-    dns_manual unexpected || true
+  if [[ "$DNS_LEFT" -gt 0 ]]; then
+    warn "$DNS_LEFT enregistrement(s) non posé(s) par l'API (conflit, inhabituel sans accord, ou refusé) : à la main."
+    dns_manual "conflict unusual refused" || true
   fi
   return 0
 }
 
-# Repli : chaque enregistrement à poser à la main, hôte puis valeur dans le presse-papiers.
-dns_manual() { # $1 = état à traiter (missing par défaut)
-  local want="${1:-missing}" type host value prio state n=0 total
+# À la main : chaque enregistrement, hôte puis valeur dans le presse-papiers.
+# $1 = états à traiter, séparés par des espaces (défaut : missing). Renvoie 2 s'il n'y a rien à poser.
+dns_manual() {
+  local states="${1:-missing}" type host value prio state st n=0 total=0
   plan_ok || { ko "Enregistrements de Resend illisibles : relance avec --etape=2."; return 1; }
-  total="$(count_state "$want")"
-  [[ "$total" -gt 0 ]] || { ok "Aucun enregistrement à poser à la main."; return 0; }
+  for st in $states; do total=$((total + $(count_state "$st"))); done
+  [[ "$total" -gt 0 ]] || return 2
   browse "$SPACESHIP_DNS_PAGE"
   info "Dans Spaceship : Advanced DNS → $DOMAIN → « Add record ». Ne modifie aucun enregistrement existant."
-  [[ "$want" == "conflict" ]] && info "Conflit : un enregistrement du même type existe déjà sous ce nom. Ne le remplace que s'il vient d'un ancien essai Resend."
-  [[ "$want" == "unexpected" ]] && info "Inattendu : compare avec https://resend.com/domains avant de poser quoi que ce soit, et ne touche pas à la racine du domaine sans raison."
   while IFS=$'\x1f' read -r type host value prio state <&3; do
-    [[ "$state" == "$want" ]] || continue
+    [[ " $states " == *" $state "* ]] || continue
     n=$((n + 1))
     info "Enregistrement $n/$total : type $type$([[ "$prio" != "-" ]] && echo ", priorité $prio"), TTL 60 min."
+    case "$state" in
+      conflict) warn "Conflit : ce nom porte déjà autre chose. Ne le remplace que s'il vient d'un ancien essai Resend." ;;
+      unusual) info "Inhabituel : vérifie qu'il figure tel quel dans l'onglet Records de https://resend.com/domains." ;;
+      refused) warn "À la racine du domaine, ou mal formé : ne le pose que si Resend l'affiche tel quel, et ne remplace rien." ;;
+    esac
     clip "$host"
     wait_enter "Choisis le type $type et colle l'hôte (Host)."
     clip "$value"
@@ -538,7 +572,8 @@ step_dns() {
       rc=0; dns_auto || rc=$?
       SS_KEY=""; SS_SECRET=""
       if [[ "$rc" -eq 0 ]]; then
-        DONE+=("3 DNS chez Spaceship : enregistrements de Resend en place")
+        if [[ "$DNS_LEFT" -eq 0 ]]; then DONE+=("3 DNS chez Spaceship : enregistrements de Resend en place")
+        else DONE+=("3 DNS chez Spaceship : posés par l'API, sauf $DNS_LEFT laissé(s) à la main"); fi
         return 0
       fi
       if [[ "$rc" -eq 2 ]]; then
@@ -555,8 +590,13 @@ step_dns() {
     SS_KEY=""; SS_SECRET=""
   fi
   # Repli. La zone déjà lue est gardée (ce qui est en place n'est pas reproposé) ; sans elle, tout est proposé.
+  # À la main, tout ce que Resend demande défile, inhabituel compris : c'est Ben qui pose.
   plan_ok || SS_BEFORE=""
-  if dns_manual missing; then DONE+=("3 DNS chez Spaceship : enregistrements posés à la main"); else SKIPPED+=("3 DNS (enregistrements illisibles)"); fi
+  DNS_ALLOW_UNUSUAL=0
+  rc=0; dns_manual "missing conflict unusual refused" || rc=$?
+  if [[ "$rc" -eq 0 ]]; then DONE+=("3 DNS chez Spaceship : enregistrements posés à la main")
+  elif [[ "$rc" -eq 2 ]]; then ok "Tout est déjà dans la zone."; DONE+=("3 DNS chez Spaceship : déjà en place")
+  else SKIPPED+=("3 DNS (enregistrements illisibles)"); fi
 }
 
 step_verify() {

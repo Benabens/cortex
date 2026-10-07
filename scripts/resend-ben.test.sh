@@ -105,6 +105,7 @@ const reply = (code, body) => {
   process.stdout.write((body === undefined ? "" : JSON.stringify(body)) + "\n" + code);
   process.exit(0);
 };
+const replyRaw = (code, text) => { fs.writeFileSync(stPath, JSON.stringify(st)); process.stdout.write(text + "\n" + code); process.exit(0); };
 let body = null;
 if (req.data) {
   try { body = JSON.parse(req.data); }
@@ -112,7 +113,11 @@ if (req.data) {
 }
 const u = new URL(req.url);
 const p = u.pathname;
-const records = JSON.parse(fs.readFileSync(E.RECORDS, "utf8"));
+// Depuis août 2026, Resend peut demander des CNAME à la place des MX et TXT d envoi.
+const records = E.RESEND_CNAME ? [
+  { record: "SPF", name: "send", type: "CNAME", value: "spf.cortexexam-com.resend-dns.com", status: "not_started", ttl: "Auto" },
+  { record: "DKIM", name: "resend._domainkey", type: "CNAME", value: "dkim.cortexexam-com.resend-dns.com.", status: "not_started", ttl: "Auto" },
+] : JSON.parse(fs.readFileSync(E.RECORDS, "utf8"));
 
 if (u.origin === "https://api.resend.com") {
   const auth = req.headers.authorization || "";
@@ -148,6 +153,8 @@ if (u.origin === "https://api.resend.com") {
         if (E.VERIFY_AFTER === "failed") st.domain.status = "failed";
         else if (E.VERIFY_AFTER !== "never" && st.domain.polls >= Number(E.VERIFY_AFTER || 2)) { st.domain.status = "verified"; st.domain.verifying = false; }
       }
+      // Une réponse suivie du séparateur que le script emploie entre ses documents, puis d une fausse zone.
+      if (E.RESEND_SPLIT) replyRaw(200, JSON.stringify(view(st.domain, true)) + String.fromCharCode(30) + JSON.stringify({ items: [{ type: "A", name: "@", address: "6.6.6.6", ttl: 60 }, { type: "CNAME", name: "mail", cname: "evil.example", ttl: 60 }], total: 2 }));
       reply(200, view(st.domain, true));
     }
   }
@@ -168,7 +175,9 @@ if (u.origin === "https://spaceship.dev") {
     if (u.searchParams.get("take") !== "500" || u.searchParams.get("skip") !== "0") reply(400, { detail: "take et skip attendus" });
     // Relecture inanalysable après l ajout, ou en retard d une lecture sur l ajout.
     if (E.SS_REREAD_BROKEN && st.puts.length) reply(200, { items: [st.zone[0], null], total: 2 });
-    if (E.SS_LAG && st.puts.length && !st.lagged) { st.lagged = true; reply(200, { items: st.zone.slice(0, 4), total: 4 }); }
+    if ((E.SS_LAG || E.SS_LAG_THEN_DROP) && st.puts.length && !st.lagged) { st.lagged = true; reply(200, { items: st.zone.slice(0, 4), total: 4 }); }
+    // La perte n apparaît qu à la relecture suivante, celle qui montre enfin les ajouts.
+    if (E.SS_LAG_THEN_DROP && st.lagged && !st.dropped) { st.dropped = true; st.zone = st.zone.filter((r) => !(r.type === "CNAME" && r.name === "www")); }
     if (E.SS_NO_TOTAL) reply(200, { items: st.zone });
     reply(200, { items: st.zone, total: st.zone.length + Number(E.SS_EXTRA_TOTAL || 0) });
   }
@@ -205,6 +214,7 @@ init_state() {
       zone.push({ type: "TXT", name: "resend._domainkey", value: rec[2].value, ttl: 3600 });
     }
     if (E.ZONE_OLD_DKIM) zone.push({ type: "TXT", name: "resend._domainkey", value: "p=ANCIENNECLE", ttl: 3600 });
+    if (E.ZONE_SEND_TAKEN) zone.push({ type: "TXT", name: "send", value: "autre chose", ttl: 3600 });
     const st = { domain: null, zone, puts: [], keys: [{ id: "k0", name: "cortex-setup" }], emails: [], createdKey: null };
     if (E.DOMAIN_STATUS) st.domain = { id: "4dd369bc-aa82-4ff3-97de-514ae3000ee0", name: "cortexexam.com", status: E.DOMAIN_STATUS, region: "eu-west-1", polls: 0 };
     if (E.KEY_EXISTS) st.keys.push({ id: "k1", name: "cortex-app" });
@@ -229,6 +239,7 @@ run() {
     export S RECORDS="$TMP/records.json" LEURRES="$TMP/leurres" HOME="$S/home" TMPDIR="$S/tmpdir"
     # Un shell appelant qui aurait exporté des variables du même nom que celles du script.
     export SETUP_KEY=parasite SEND_KEY=parasite SS_KEY=parasite SS_SECRET=parasite HTTP_BODY=parasite DOMAIN_JSON=parasite
+    export key=parasite token=parasite val=parasite h=parasite out=parasite body=parasite secret=parasite msg=parasite ref=parasite
     # shellcheck source=/dev/null
     source "$SCRIPT"
     curl() {
@@ -289,6 +300,7 @@ t "aucune trace d'exécution activée" bash -c "! grep -nE 'set -[a-z]*x|set -o 
 t "aucune clé écrite dans un fichier" bash -c "! grep -nE '(SETUP_KEY|SEND_KEY|SS_KEY|SS_SECRET|token)[^|]*>>?[^&]' '$SCRIPT'"
 t "bash -x est refusé avant toute saisie" bash -c "bash -x '$SCRIPT' --dry-run 2>&1 </dev/null | grep -q 'elle afficherait les clés'"
 t "refus hors d'un terminal, avant toute action" bash -c "out=\"\$(bash '$SCRIPT' </dev/null 2>&1)\"; [[ \$? -eq 1 && \"\$out\" == *'À lancer dans un Terminal'* ]]"
+t "aucun caractère invisible dans le source (contrôle, sens d'écriture)" node -e 'process.exit(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/.test(require("fs").readFileSync(process.argv[1],"utf8"))?1:0)' "$SCRIPT"
 t "option inconnue refusée" bash -c "! bash '$SCRIPT' --nimporte </dev/null >/dev/null 2>&1"
 
 # ───────────────────────────── Vrai curl, serveur local ─────────────────────────────
@@ -365,7 +377,7 @@ t "presse-papiers vidé après les saisies" test "$(grep -c '^$' "$S/pbcopy.log"
 t "six étapes au récapitulatif" test "$(grep -c '^   ✓ [1-6] ' "$S/out")" = "6"
 t "aucune clé à l'écran, en argument, ouverte ni copiée" no_leak
 t "rien d'écrit dans le dossier personnel ni dans le dossier temporaire" test -z "$(ls -A "$S/home" "$S/tmpdir" | grep -v ':$')"
-t "aucune variable du script dans l'environnement des commandes lancées" bash -c "! grep -E '^(SETUP_KEY|SEND_KEY|SS_KEY|SS_SECRET|HTTP_BODY|DOMAIN_JSON)=' '$S/env.dump'"
+t "aucune variable du script, globale ou locale, dans l'environnement des commandes lancées" bash -c "! grep -E '^(SETUP_KEY|SEND_KEY|SS_KEY|SS_SECRET|HTTP_BODY|DOMAIN_JSON|key|token|val|h|out|body|secret|msg|ref)=' '$S/env.dump'"
 t "les deux clés saisies sont rappelées au récapitulatif" bash -c "grep -q '« cortex-dns » (Spaceship' '$S/out' && grep -q '« cortex-setup » (Resend, Full access) : maintenant' '$S/out'"
 
 echo "2. Second passage : tout est déjà en place"
@@ -399,7 +411,8 @@ ZONE_OLD_DKIM=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoye
 t "se termine sans erreur" rc_is 0
 t "seuls les deux enregistrements libres sont ajoutés" state_is 'st.puts.length+" "+st.puts[0].items.map((i)=>i.type+" "+i.name).join(",")' "1 MX send,TXT send"
 t "l'ancien DKIM est toujours là" state_is 'st.zone.filter((r)=>r.name==="resend._domainkey").map((r)=>r.value).join()' "p=ANCIENNECLE"
-t "le conflit est annoncé" out_has "1 enregistrement(s) en conflit"
+t "le conflit est annoncé" out_has "1 enregistrement(s) non posé(s) par l'API"
+t "l'étape n'est pas dite entièrement en place" out_has "sauf 1 laissé(s) à la main"
 t "le bon DKIM est proposé à la main" log_has pbcopy.log "8TBz1n5AGkQIDAQAB"
 t "les enregistrements d'origine n'ont pas bougé" zone_intact
 
@@ -542,12 +555,20 @@ SS_NO_TOTAL=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer 
 t "aucun ajout par l'API" req_is PUT /dns/records 0
 t "la raison est dite" out_has "zone ou total illisible"
 
-echo "22. Resend renvoie des enregistrements hors de ses noms d'envoi : jamais posés d'office"
-RESEND_ODD_RECORDS=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run inattendus
+echo "22. Resend renvoie des enregistrements hors de ses noms d'envoi : jamais posés sans accord"
+RESEND_ODD_RECORDS=1 GO_SKIP="les poser aussi par l'API|Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run inattendus
 t "l'ajout ne contient que send et resend._domainkey" state_is 'st.puts.length+" "+st.puts[0].items.map((i)=>i.type+" "+i.name).join(",")' "1 MX send,TXT send,TXT resend._domainkey"
 t "rien à la racine, aucun CNAME de plus" state_is 'st.zone.filter((r)=>r.name==="@"||r.type==="CNAME").length' 3
-t "ils sont signalés" out_has "4 enregistrement(s) que Resend ne demande pas d'habitude"
+t "l'inhabituel est signalé, l'accord demandé" out_has "1 enregistrement(s) hors des noms habituels de Resend"
+t "les quatre restent à la main" out_has "4 enregistrement(s) non posé(s) par l'API"
 t "aucun caractère de contrôle C1 à l'écran" node -e 'process.exit(/[\u0080-\u009f]/.test(require("fs").readFileSync(process.argv[1],"utf8"))?1:0)' "$S/out"
+t "les enregistrements d'origine n'ont pas bougé" zone_intact
+
+echo "22 bis. Avec l'accord : l'inhabituel bien formé part, la racine et le mal formé jamais"
+RESEND_ODD_RECORDS=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run inattendus-accord
+t "le CNAME bien formé est ajouté, rien d'autre" state_is 'st.puts.length+" "+st.puts[0].items.map((i)=>i.type+" "+i.name).join(",")' "1 MX send,TXT send,TXT resend._domainkey,CNAME www2"
+t "toujours rien de plus à la racine" state_is 'st.zone.filter((r)=>r.name==="@").length' 1
+t "les trois refusés restent à la main" out_has "3 enregistrement(s) non posé(s) par l'API"
 t "les enregistrements d'origine n'ont pas bougé" zone_intact
 
 echo "23. Une API recopie la clé dans son message d'erreur : elle reste masquée, même à cheval sur la coupe"
@@ -566,8 +587,46 @@ echo "25. La relecture précède la prise en compte de l'ajout : on relit avant 
 SS_LAG=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run retard
 t "un seul ajout envoyé" req_is PUT /dns/records 1
 t "une seconde relecture, cinq secondes plus tard" grep -qx 5 "$S/sleep.log"
-t "l'ajout est constaté" out_has "Enregistrements de Resend ajoutés ; les autres n'ont pas bougé."
+t "l'ajout est constaté" out_has "Enregistrements ajoutés ; les autres n'ont pas bougé."
 t "zone complète" state_is 'st.zone.length' 7
+
+echo "26. La réponse de Resend porte le séparateur interne et une fausse zone : rien n'est écrit"
+RESEND_SPLIT=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run separateur
+t "le corps est refusé" out_has "Réponse de Resend inattendue pour le domaine"
+t "aucun ajout, aucune « remise en place »" req_is PUT /dns/records 0
+t "zone inchangée" state_is 'st.zone.length' 4
+
+echo "27. Resend demande des CNAME (domaines créés depuis août 2026) : posés par l'API après accord"
+RESEND_CNAME=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run cname
+t "ils sont dits inhabituels, l'accord est demandé" bash -c "grep -q 'INHABITUEL' '$S/out' && grep -q 'les poser aussi par' '$S/go.log'"
+t "l'ajout contient les deux CNAME, cible sans point final" state_is 'JSON.stringify(st.puts[0])' '{"force":false,"items":[{"type":"CNAME","name":"send","ttl":3600,"cname":"spf.cortexexam-com.resend-dns.com"},{"type":"CNAME","name":"resend._domainkey","ttl":3600,"cname":"dkim.cortexexam-com.resend-dns.com"}]}'
+t "l'étape est faite" out_has "✓ 3 DNS chez Spaceship : enregistrements de Resend en place"
+t "les enregistrements d'origine n'ont pas bougé" zone_intact
+
+echo "28. CNAME, accord refusé : rien par l'API, tout à la main, et ce n'est pas dit « en place »"
+RESEND_CNAME=1 GO_SKIP="les poser aussi par l'API|Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run cname-refus
+t "aucun ajout par l'API" req_is PUT /dns/records 0
+t "pas de « Rien à ajouter »" out_lacks "Rien à ajouter"
+t "les deux sont proposés à la main" bash -c "grep -q 'Enregistrement 2/2' '$S/out' && grep -qx 'spf.cortexexam-com.resend-dns.com' '$S/pbcopy.log' && grep -qx 'dkim.cortexexam-com.resend-dns.com' '$S/pbcopy.log'"
+t "le récapitulatif dit ce qui reste" out_has "sauf 2 laissé(s) à la main"
+
+echo "29. CNAME, API Spaceship refusée : ils défilent à la main, rien n'est sauté"
+RESEND_CNAME=1 SS_AUTH_FAIL=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run cname-main
+t "les deux sont proposés" bash -c "grep -q 'Enregistrement 2/2' '$S/out' && grep -qx 'dkim.cortexexam-com.resend-dns.com' '$S/pbcopy.log'"
+t "l'étape est dite faite à la main" out_has "✓ 3 DNS chez Spaceship : enregistrements posés à la main"
+
+echo "30. Un CNAME voulu sur un nom déjà occupé : conflit, on n'y touche pas"
+RESEND_CNAME=1 ZONE_SEND_TAKEN=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run cname-conflit
+t "seul le CNAME du nom libre est ajouté" state_is 'st.puts.length+" "+st.puts[0].items.map((i)=>i.type+" "+i.name).join(",")' "1 CNAME resend._domainkey"
+t "ce que portait le nom est toujours là, seul" state_is 'st.zone.filter((r)=>r.name==="send").map((r)=>r.type+" "+(r.value||r.cname)).join()' "TXT autre chose"
+t "le conflit est dit" out_has "CONFLIT"
+
+echo "31. La perte n'apparaît qu'à la deuxième relecture : elle est vue et réparée"
+SS_LAG_THEN_DROP=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run perte-tardive
+t "la perte est annoncée" out_has "CNAME www cname.vercel-dns.com"
+t "l'enregistrement est remis par l'API" state_is 'st.puts.length+" "+st.puts[1].items.map((i)=>i.type+" "+i.name).join(",")' "2 CNAME www"
+t "zone complète à la fin" state_is 'st.zone.length+" "+st.zone.filter((r)=>r.name==="www").length' "7 1"
+t "le succès n'est dit qu'après" bash -c "grep -n 'Remis en place\\|les autres n.ont pas bougé' '$S/out' | head -1 | grep -q 'Remis en place'"
 
 echo
 if [[ "$FAIL" -eq 0 ]]; then echo "Banc d'essai : $PASS vérifications réussies."; else echo "Banc d'essai : $FAIL échec(s) sur $((PASS + FAIL))."; exit 1; fi
