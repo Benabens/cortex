@@ -5,8 +5,10 @@
  *
  * `idempotencyKey` : Resend retient la clé 24 h et n'envoie qu'une fois. Un
  * nouvel essai sous la même clé reçoit la réponse d'origine, ou un 409 :
- * « contenu différent » veut dire que le premier essai avait été accepté, donc
- * que l'e-mail est parti ; « premier essai encore en cours » ne dit rien.
+ * « contenu différent » est pris pour un premier essai accepté, donc un
+ * e-mail parti (leur doc ne dit pas si un essai refusé retient sa clé : ne
+ * réutiliser une clé qu'après une issue inconnue, jamais après un refus vu) ;
+ * « premier essai encore en cours » ne dit rien.
  *
  * `uncertain` : on ne sait pas si l'e-mail est parti (pas de réponse, délai
  * dépassé, premier essai en cours). Sans ce drapeau, un échec est un refus
