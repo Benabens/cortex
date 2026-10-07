@@ -65,13 +65,13 @@ test("le plafond global ne compte que le mois UTC en cours : atteint le 31, rouv
   await usage.assertSpendCap("anthropic");
 });
 
-type Mail = { from: string; to: string; subject: string; text: string };
+type Mail = { from: string; to: string; subject: string; text: string; idempotencyKey?: string };
 /** Remplace `fetch` : collecte les e-mails remis à Resend, répond `status`. */
 function fakeResend(t: import("node:test").TestContext, status = 200): Mail[] {
   const sent: Mail[] = [];
   t.mock.method(globalThis, "fetch", async (input: unknown, init?: RequestInit) => {
     assert.equal(String(input), "https://api.resend.com/emails");
-    sent.push(JSON.parse(String(init?.body)) as Mail);
+    sent.push({ ...(JSON.parse(String(init?.body)) as Mail), idempotencyKey: new Headers(init?.headers).get("idempotency-key") ?? undefined });
     return new Response("{}", { status });
   });
   return sent;
@@ -252,15 +252,15 @@ test("relever le plafond en cours de mois réarme les alertes sur la nouvelle va
 
   await spend(10);
   await assert.rejects(() => usage.assertSpendCap("anthropic"), isSpendCap);
-  assert.equal(sent.length, 2);
+  assert.equal(sent.length, 1);
 
   process.env.SPEND_CAP_USD = "20";
   await usage.assertSpendCap("anthropic"); // 50 % du nouveau plafond
-  assert.equal(sent.length, 2);
+  assert.equal(sent.length, 1);
   await spend(7);
   await usage.assertSpendCap("anthropic");
-  assert.equal(sent.length, 3);
-  assert.ok(sent[2].text.includes("SPEND_CAP_USD = 20 $"), sent[2].text);
+  assert.equal(sent.length, 2);
+  assert.ok(sent[1].text.includes("SPEND_CAP_USD = 20 $"), sent[1].text);
 });
 
 test("fail-closed inchangé : défaut de 50 $, « unlimited », kill-switch « 0 », base injoignable", async (t) => {
@@ -289,14 +289,14 @@ test("fail-closed inchangé : défaut de 50 $, « unlimited », kill-switch « 0
   await spend(11);
   freshProcess();
   await assert.rejects(() => usage.assertSpendCap("anthropic"), (e: Error) => isSpendCap(e) && e.message.includes("SPEND_CAP_USD=50 $"));
-  assert.equal(sent.length, 2);
+  assert.equal(sent.length, 1);
 
   // Levée explicite : plus de plafond, donc plus de seuil.
   process.env.SPEND_CAP_USD = "unlimited";
   await spend(100);
   freshProcess();
   await usage.assertSpendCap("anthropic");
-  assert.equal(sent.length, 2);
+  assert.equal(sent.length, 1);
 
   // Dépense illisible : refus sur une instance gardée, passage en dev.
   process.env.SPEND_CAP_USD = "1000";
@@ -331,4 +331,134 @@ test("une alerte impossible à enregistrer ne refuse pas l'appel", async (t) => 
   }
   assert.equal(sent.length, 0);
   assert.ok(warnings.some((w) => w.includes("spend_alert.failed")), warnings.join("\n"));
+});
+
+test("les deux seuils franchis d'un coup : un seul e-mail, celui du plafond atteint", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2028, 0, 10, 12, 0, 0) });
+  const sent = fakeResend(t);
+  alertsConfigured();
+
+  await spend(11);
+  await assert.rejects(() => usage.assertSpendCap("anthropic"), isSpendCap);
+  assert.deepEqual(sent.map((m) => m.subject), ["Cortex : plafond de dépense IA du mois atteint, génération coupée"]);
+
+  // Le seuil de 80 % est acquis : ni ce process ni un autre ne le signalera après coup.
+  await assert.rejects(() => usage.assertSpendCap("anthropic"), isSpendCap);
+  freshProcess();
+  await assert.rejects(() => usage.assertSpendCap("anthropic"), isSpendCap);
+  assert.equal(sent.length, 1);
+});
+
+test("un autre process dépasse le plafond juste après la fin d'un appel : l'appel suivant est refusé", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2028, 1, 10, 12, 0, 0) });
+  fakeResend(t);
+  alertsConfigured();
+
+  const call = { provider: "anthropic", model: "claude-sonnet-5" };
+  const pending = await usage.openUsage({ ...call, tokensIn: 0, tokensOut: 0 });
+  await usage.closeUsage(pending, { ...call, tokensIn: 500_000 }); // 1 $
+  // Dépense d'un worker de job, écrite sans passer par ce process.
+  await authRun(
+    "INSERT INTO llm_usage (user_id, course, provider, model, cost_usd, created_at) VALUES (?,?,?,?,?,?)",
+    "autre", "cs-202", "anthropic", "claude-sonnet-5", 20, "2028-02-10 12:00:01",
+  );
+  t.mock.timers.setTime(Date.UTC(2028, 1, 10, 12, 0, 5));
+  await assert.rejects(() => usage.assertSpendCap("anthropic"), isSpendCap);
+});
+
+test("à minuit le 1er, la somme lue et le mois annoncé sont ceux du même mois", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2028, 2, 31, 23, 59, 59) });
+  const sent = fakeResend(t);
+  alertsConfigured();
+  await spend(12);
+
+  // La somme de mars est demandée à 23:59:59 ; quand elle revient, on est en avril.
+  const refused = assert.rejects(
+    () => usage.assertSpendCap("anthropic"),
+    (e: Error) => isSpendCap(e) && e.message.includes("pour 2028-03"),
+  );
+  t.mock.timers.setTime(Date.UTC(2028, 3, 1, 0, 0, 0));
+  await refused;
+  assert.equal(sent.length, 1);
+  assert.ok(sent[0].text.includes("2028-03"), sent[0].text);
+
+  // Avril n'a rien perdu : ses seuils seront signalés quand ils seront franchis.
+  await usage.assertSpendCap("anthropic");
+  await spend(9);
+  await usage.assertSpendCap("anthropic");
+  assert.equal(sent.length, 2);
+  assert.ok(sent[1].text.includes("2028-04") && sent[1].text.includes("9.00 $"), sent[1].text);
+});
+
+test("réponse de Resend perdue : le nouvel essai porte la même clé d'idempotence et ne double pas l'e-mail", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2028, 4, 10, 12, 0, 0) });
+  t.mock.method(console, "error", () => {});
+  alertsConfigured();
+  const keys: string[] = [];
+  let answer: () => Response = () => { throw new DOMException("The operation was aborted due to timeout", "TimeoutError"); };
+  t.mock.method(globalThis, "fetch", async (_input: unknown, init?: RequestInit) => {
+    keys.push(new Headers(init?.headers).get("idempotency-key") ?? "");
+    return answer();
+  });
+
+  await spend(9);
+  await usage.assertSpendCap("anthropic"); // envoi sans réponse : l'appel passe quand même
+  assert.equal(keys.length, 1);
+
+  // Une heure plus tard, Resend reconnaît la clé : l'e-mail était parti, on s'arrête là.
+  answer = () => new Response(JSON.stringify({ statusCode: 409, name: "invalid_idempotent_request" }), { status: 409 });
+  t.mock.timers.setTime(Date.UTC(2028, 4, 10, 13, 0, 1));
+  await spend(0.5);
+  await usage.assertSpendCap("anthropic");
+  assert.equal(keys.length, 2);
+  assert.equal(keys[0], keys[1]);
+  assert.ok(keys[0].includes("2028-05") && keys[0].includes("80"), keys[0]);
+
+  t.mock.timers.setTime(Date.UTC(2028, 4, 10, 15, 0, 0));
+  freshProcess();
+  await usage.assertSpendCap("anthropic");
+  assert.equal(keys.length, 2, "seuil tenu pour signalé");
+});
+
+test("un process tué entre la réclamation du seuil et l'envoi : un autre reprend l'alerte un quart d'heure plus tard", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2028, 5, 10, 12, 0, 0) });
+  alertsConfigured();
+  let sends = 0;
+  // Le premier envoi ne revient jamais : c'est le process tué en plein envoi.
+  t.mock.method(globalThis, "fetch", async () => (++sends === 1 ? new Promise<Response>(() => {}) : new Response("{}", { status: 200 })));
+
+  await spend(9);
+  void usage.assertSpendCap("anthropic");
+  while (sends === 0) await new Promise((r) => setImmediate(r));
+
+  freshProcess();
+  t.mock.timers.setTime(Date.UTC(2028, 5, 10, 12, 5, 0));
+  await usage.assertSpendCap("anthropic");
+  assert.equal(sends, 1, "cinq minutes : la réclamation est peut-être encore en cours");
+
+  freshProcess();
+  t.mock.timers.setTime(Date.UTC(2028, 5, 10, 12, 16, 0));
+  await usage.assertSpendCap("anthropic");
+  assert.equal(sends, 2);
+
+  freshProcess();
+  await usage.assertSpendCap("anthropic");
+  assert.equal(sends, 2);
+});
+
+test("au démarrage, un plafond dont les alertes ne peuvent pas partir est signalé dans les logs", async (t) => {
+  const warnings: string[] = [];
+  t.mock.method(console, "error", (line: string) => { warnings.push(String(line)); });
+  process.env.SPEND_CAP_USD = "50";
+  process.env.CORTEX_OWNER_EMAIL = "ben@exemple.test";
+  usage.warnIfSpendAlertsBlocked();
+  assert.equal(warnings.length, 1);
+  assert.ok(warnings[0].includes("spend_alert.disabled") && warnings[0].includes("RESEND_API_KEY absente"), warnings[0]);
+
+  process.env.RESEND_API_KEY = "re_test";
+  usage.warnIfSpendAlertsBlocked();
+  process.env.SPEND_CAP_USD = "unlimited";
+  delete process.env.RESEND_API_KEY;
+  usage.warnIfSpendAlertsBlocked();
+  assert.equal(warnings.length, 1, "alertes prêtes, ou pas de plafond : rien à signaler");
 });

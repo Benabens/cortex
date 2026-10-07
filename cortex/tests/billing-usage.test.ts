@@ -26,6 +26,8 @@ before(async () => {
   delete process.env.LLM_ALLOW_OPUS;
   delete process.env.LLM_MODEL_OPUS;
   delete process.env.SPEND_CAP_USD;
+  // Ces tests franchissent le plafond : sans clé Resend, aucune alerte ne peut partir pour de vrai.
+  delete process.env.RESEND_API_KEY;
   ({ mapModel } = await import("../lib/llm/config"));
   billing = await import("../lib/billing/usage");
   ({ authAll } = await import("../db/auth-store"));

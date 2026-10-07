@@ -6,7 +6,7 @@ import { nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import { LlmError } from "@/lib/llm/types";
 import { guardsActive, floatLimit } from "./env";
-import { alertSpendThresholds, resetSpendAlerts } from "./spend-alerts";
+import { alertSpendThresholds, resetSpendAlerts, spendAlertBlocker } from "./spend-alerts";
 
 /**
  * COMPTAGE DE COÛT + KILL-SWITCH.
@@ -214,18 +214,30 @@ export function spendMonth(): string {
   return nowStr().slice(0, 7);
 }
 
-/** Dépense globale du mois en cours (USD), lue en DB (cache in-process 30 s).
- *  Le cache porte son mois : au passage du 1er, il ne sert pas le total de la veille. */
-let _spendCache: { at: number; month: string; total: number } | null = null;
-export async function monthSpendUsd(): Promise<number> {
+/** Une dépense et le mois qu'elle couvre voyagent ensemble : à minuit le 1er,
+ *  une somme demandée la veille ne doit pas être annoncée comme celle du mois neuf. */
+type MonthSpend = { month: string; total: number };
+
+/** Dépense globale du mois en cours (USD), lue en DB, sans cache. */
+async function readMonthSpend(): Promise<MonthSpend> {
   const month = spendMonth();
-  if (_spendCache && _spendCache.month === month && Date.now() - _spendCache.at < 30_000) return _spendCache.total;
   const rows = await authAll<{ total: number | string | null }>(
     `SELECT coalesce(sum(cost_usd), 0) AS total FROM llm_usage WHERE substr(created_at, 1, 7) = ?`, month,
   );
-  const total = Number(rows[0]?.total ?? 0);
-  _spendCache = { at: Date.now(), month, total };
-  return total;
+  return { month, total: Number(rows[0]?.total ?? 0) };
+}
+
+/** La même, avec un cache in-process de 30 s. Le cache porte son mois : au
+ *  passage du 1er, il ne sert pas le total de la veille. */
+let _spendCache: ({ at: number } & MonthSpend) | null = null;
+async function cachedMonthSpend(): Promise<MonthSpend> {
+  if (_spendCache && _spendCache.month === spendMonth() && Date.now() - _spendCache.at < 30_000) return _spendCache;
+  const fresh = await readMonthSpend();
+  _spendCache = { at: Date.now(), ...fresh };
+  return fresh;
+}
+export async function monthSpendUsd(): Promise<number> {
+  return (await cachedMonthSpend()).total;
 }
 
 /** (tests) vide le cache du plafond et la mémoire des alertes : l'état d'un process neuf. */
@@ -240,14 +252,29 @@ export function resetSpendCache(): void {
  * Sans plafond (dev, « unlimited ») il n'y a pas de seuil ; `0` est un
  * kill-switch posé à la main, pas un franchissement.
  */
-async function alertOnSpend(spent?: number): Promise<void> {
+async function alertOnSpend(known?: MonthSpend): Promise<void> {
   try {
     const cap = spendCapUsd();
     if (cap === null || cap <= 0) return;
-    await alertSpendThresholds(spent ?? (await monthSpendUsd()), cap, spendMonth());
+    // Lecture SANS cache : le total relu ici, en fin d'appel, ne doit pas servir
+    // de réponse au plafond pendant 30 s alors qu'un autre process dépense.
+    const spend = known ?? (await readMonthSpend());
+    await alertSpendThresholds(spend.total, cap, spend.month);
   } catch (e) {
     log("warn", "spend_alert.failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
   }
+}
+
+/**
+ * Au démarrage du serveur : un plafond actif dont les alertes ne peuvent pas
+ * partir se dit une fois, là où les logs sont lus (la sortie des workers de
+ * jobs n'est pas conservée).
+ */
+export function warnIfSpendAlertsBlocked(): void {
+  const cap = spendCapUsd();
+  if (cap === null || cap <= 0) return;
+  const reason = spendAlertBlocker();
+  if (reason) log("warn", "spend_alert.disabled", { cap, reason, message: `Alertes de dépense à 80 % et 100 % inactives (${reason}).` });
 }
 
 /**
@@ -308,11 +335,12 @@ export async function assertSpendCap(provider: string): Promise<void> {
 async function assertSpendCapUnchecked(): Promise<void> {
   const globalCap = spendCapUsd();
   if (globalCap !== null) {
-    const spent = await monthSpendUsd();
-    await alertOnSpend(spent);
+    const spend = await cachedMonthSpend();
+    const spent = spend.total;
+    await alertOnSpend(spend);
     if (spent >= globalCap) {
       throw new LlmError(
-        `Plafond de dépense global du mois atteint (${spent.toFixed(2)} $ ≥ SPEND_CAP_USD=${globalCap} $ pour ${spendMonth()}) — génération coupée. ` +
+        `Plafond de dépense global du mois atteint (${spent.toFixed(2)} $ ≥ SPEND_CAP_USD=${globalCap} $ pour ${spend.month}) — génération coupée. ` +
         `Le reste du site fonctionne ; elle rouvre le 1er du mois prochain (UTC), ou dès que SPEND_CAP_USD est relevé.`,
         "SPEND_CAP",
         false,
