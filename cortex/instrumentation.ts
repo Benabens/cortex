@@ -21,6 +21,10 @@ export async function register() {
   // Suivi d'erreurs optionnel (SENTRY_DSN) : sans la variable, rien n'est chargé.
   const { initErrorTracking } = await import("@/lib/observability");
   await initErrorTracking({ service: "web" });
+  try {
+    const { warnIfSpendAlertsBlocked } = await import("@/lib/billing/usage");
+    warnIfSpendAlertsBlocked();
+  } catch { /* un avertissement ne doit jamais empêcher le serveur de démarrer */ }
   const g = globalThis as { __cortexJobsPump?: ReturnType<typeof setInterval> };
   try {
     const { runWithCourse } = await import("@/db/client");
