@@ -6,6 +6,7 @@ import { nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import { LlmError } from "@/lib/llm/types";
 import { guardsActive, floatLimit } from "./env";
+import { alertSpendThresholds, resetSpendAlerts } from "./spend-alerts";
 
 /**
  * COMPTAGE DE COÛT + KILL-SWITCH.
@@ -15,10 +16,11 @@ import { guardsActive, floatLimit } from "./env";
  * sqlite, schéma public en Postgres — cross-tenant, survit aux redémarrages)
  * avec son coût estimé (tokens × tarif du modèle).
  *
- * SPEND_CAP_USD : plafond de dépense GLOBAL. Atteint → tout nouvel appel
- * payant est refusé par une LlmError code "SPEND_CAP" (message clair, jamais
- * un 502 générique) ; le provider claude-code (dev €0 via le CLI local) n'est JAMAIS
- * bloqué ni compté (comportement historique intact).
+ * SPEND_CAP_USD : plafond de dépense GLOBAL du MOIS CALENDAIRE en cours (UTC),
+ * remis à zéro le 1er. Atteint → tout nouvel appel payant est refusé par une
+ * LlmError code "SPEND_CAP" (message clair, jamais un 502 générique) ; le
+ * provider claude-code (dev €0 via le CLI local) n'est JAMAIS bloqué ni compté
+ * (comportement historique intact).
  */
 
 /** Tarifs USD par MTok {in, out, lecture cache, écriture cache} — préfixe d'id
@@ -192,6 +194,8 @@ export async function closeUsage(id: number | null, u: {
   } catch (e) {
     log("warn", "usage.close_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
   }
+  // La dépense vient de bouger : c'est ici qu'un seuil se franchit.
+  if (paid) await alertOnSpend();
 }
 
 /** Retire la ligne provisoire : le fournisseur a refusé avant de traiter (rien facturé). */
@@ -205,28 +209,53 @@ export async function discardUsage(id: number | null): Promise<void> {
   }
 }
 
-/** Dépense cumulée globale (USD), lue en DB (cache in-process 30 s). */
-let _spendCache: { at: number; total: number } | null = null;
-export async function totalSpendUsd(): Promise<number> {
-  if (_spendCache && Date.now() - _spendCache.at < 30_000) return _spendCache.total;
+/** Mois calendaire UTC en cours, « AAAA-MM » (`created_at` est écrit en UTC par nowStr). */
+export function spendMonth(): string {
+  return nowStr().slice(0, 7);
+}
+
+/** Dépense globale du mois en cours (USD), lue en DB (cache in-process 30 s).
+ *  Le cache porte son mois : au passage du 1er, il ne sert pas le total de la veille. */
+let _spendCache: { at: number; month: string; total: number } | null = null;
+export async function monthSpendUsd(): Promise<number> {
+  const month = spendMonth();
+  if (_spendCache && _spendCache.month === month && Date.now() - _spendCache.at < 30_000) return _spendCache.total;
   const rows = await authAll<{ total: number | string | null }>(
-    `SELECT coalesce(sum(cost_usd), 0) AS total FROM llm_usage`
+    `SELECT coalesce(sum(cost_usd), 0) AS total FROM llm_usage WHERE substr(created_at, 1, 7) = ?`, month,
   );
   const total = Number(rows[0]?.total ?? 0);
-  _spendCache = { at: Date.now(), total };
+  _spendCache = { at: Date.now(), month, total };
   return total;
 }
 
-/** (tests) vide le cache du plafond. */
+/** (tests) vide le cache du plafond et la mémoire des alertes : l'état d'un process neuf. */
 export function resetSpendCache(): void {
   _spendCache = null;
+  resetSpendAlerts();
 }
 
 /**
- * Plafond de dépense GLOBAL (USD). FAIL-CLOSED : dans un déploiement gardé
- * (auth ou facturation), 50 $ par défaut si la variable est oubliée — un
- * plafond global absent transformait un oubli de config en dépense sans borne.
- * `unlimited` lève explicitement ; `0` reste le kill-switch d'urgence total.
+ * Alertes de seuil sur la dépense du mois (lib/billing/spend-alerts). Ne lève
+ * JAMAIS : une alerte ratée ne doit ni refuser ni casser un appel au modèle.
+ * Sans plafond (dev, « unlimited ») il n'y a pas de seuil ; `0` est un
+ * kill-switch posé à la main, pas un franchissement.
+ */
+async function alertOnSpend(spent?: number): Promise<void> {
+  try {
+    const cap = spendCapUsd();
+    if (cap === null || cap <= 0) return;
+    await alertSpendThresholds(spent ?? (await monthSpendUsd()), cap, spendMonth());
+  } catch (e) {
+    log("warn", "spend_alert.failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
+  }
+}
+
+/**
+ * Plafond de dépense GLOBAL par mois calendaire (USD). FAIL-CLOSED : dans un
+ * déploiement gardé (auth ou facturation), 50 $ par défaut si la variable est
+ * oubliée — un plafond global absent transformait un oubli de config en dépense
+ * sans borne. `unlimited` lève explicitement ; `0` reste le kill-switch
+ * d'urgence total.
  */
 export function spendCapUsd(): number | null {
   return floatLimit("SPEND_CAP_USD", 50);
@@ -255,8 +284,8 @@ export async function spentTodayByUser(userId = currentUser()): Promise<number> 
 }
 
 /**
- * KILL-SWITCH : refuse l'appel payant si le plafond GLOBAL ou le plafond
- * PAR UTILISATEUR/JOUR est atteint. Ne concerne que les providers payants
+ * KILL-SWITCH : refuse l'appel payant si le plafond GLOBAL du mois ou le
+ * plafond PAR UTILISATEUR/JOUR est atteint. Ne concerne que les providers payants
  * (claude-code = €0, jamais bloqué). Message clair (code SPEND_CAP), jamais 502.
  */
 export async function assertSpendCap(provider: string): Promise<void> {
@@ -279,11 +308,12 @@ export async function assertSpendCap(provider: string): Promise<void> {
 async function assertSpendCapUnchecked(): Promise<void> {
   const globalCap = spendCapUsd();
   if (globalCap !== null) {
-    const spent = await totalSpendUsd();
+    const spent = await monthSpendUsd();
+    await alertOnSpend(spent);
     if (spent >= globalCap) {
       throw new LlmError(
-        `Plafond de dépense global atteint (${spent.toFixed(2)} $ ≥ SPEND_CAP_USD=${globalCap} $) — génération coupée. ` +
-        `Le reste du site fonctionne ; augmente SPEND_CAP_USD pour ré-ouvrir.`,
+        `Plafond de dépense global du mois atteint (${spent.toFixed(2)} $ ≥ SPEND_CAP_USD=${globalCap} $ pour ${spendMonth()}) — génération coupée. ` +
+        `Le reste du site fonctionne ; elle rouvre le 1er du mois prochain (UTC), ou dès que SPEND_CAP_USD est relevé.`,
         "SPEND_CAP",
         false,
       );

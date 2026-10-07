@@ -3,7 +3,7 @@
  *  - mapping économe : « opus » → Sonnet sur le provider anthropic sauf opt-in ;
  *  - estimation de coût par modèle (tarifs publics corrigés 09/2026, Sonnet 2/10) ;
  *  - recordUsage n'écrit pas pour claude-code (dev €0) et écrit pour anthropic ;
- *  - kill-switch SPEND_CAP_USD : coupe au plafond (code SPEND_CAP), jamais claude-code.
+ *  - kill-switch SPEND_CAP_USD : coupe au plafond du mois (code SPEND_CAP), jamais claude-code.
  *
  * Le store auth (llm_usage) est relogé dans un dossier jetable via CORTEX_DATA_DIR.
  */
@@ -109,8 +109,8 @@ test("kill-switch : sous le plafond → passe ; plafond atteint → LlmError SPE
   await billing.assertSpendCap("anthropic");
 });
 
-test("totalSpendUsd : somme lue en DB (source de vérité cross-process)", async () => {
+test("monthSpendUsd : somme du mois lue en DB (source de vérité cross-process)", async () => {
   billing.resetSpendCache();
-  const total = await billing.totalSpendUsd();
+  const total = await billing.monthSpendUsd();
   assert.ok(Math.abs(total - 1.4) < 1e-9);
 });
