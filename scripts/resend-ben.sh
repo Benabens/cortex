@@ -41,6 +41,9 @@ RW_PROJECT="d32e7d48-251b-437d-9f7a-b7a71ea58e5c"
 RW_SERVICE="cortex-app"
 RW_ENV="production"
 
+# Un shell appelant qui exporterait une variable de ce nom la ferait hériter, avec sa valeur
+# du moment, par chaque commande lancée : on repart de variables neuves, non exportées.
+unset SETUP_KEY SEND_KEY SS_KEY SS_SECRET HTTP_CODE HTTP_BODY DOMAIN_ID DOMAIN_JSON DOMAIN_STATUS SS_BEFORE SS_AFTER
 DRY=0
 FROM=1
 DONE=()
@@ -55,6 +58,13 @@ DOMAIN_STATUS=""
 HTTP_CODE=""
 HTTP_BODY=""
 PREVIOUS_DEPLOY=""
+SS_BEFORE=""
+SS_AFTER=""
+# Pour le récapitulatif : clés saisies (à supprimer ensuite), clé d'envoi partie en production.
+ASKED_SETUP=0
+ASKED_DNS=0
+KEY_DEPLOYED=0
+ZONE_UNSURE=0
 
 usage() { sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 forget_secrets() { SETUP_KEY=""; SEND_KEY=""; SS_KEY=""; SS_SECRET=""; HTTP_BODY=""; }
@@ -81,18 +91,18 @@ wait_enter() {
 }
 clip() {
   if [[ "$DRY" -eq 1 ]]; then info "(copierait dans le presse-papiers : $1)"; return 0; fi
-  printf '%s' "$1" | pbcopy
-  info "Dans le presse-papiers : $1"
+  if printf '%s' "$1" | pbcopy 2>/dev/null; then info "Dans le presse-papiers : $1"
+  else warn "Presse-papiers indisponible. À copier à la main : $1"; fi
 }
 # La dernière clé copiée depuis une console ne reste pas dans le presse-papiers.
 clear_clipboard() {
   [[ "$DRY" -eq 1 ]] && return 0
-  printf '' | pbcopy
-  info "Presse-papiers vidé."
+  if printf '' | pbcopy 2>/dev/null; then info "Presse-papiers vidé."
+  else warn "Presse-papiers non vidé : vide-le à la main."; fi
 }
 browse() {
   if [[ "$DRY" -eq 1 ]]; then info "(ouvrirait : $1)"; return 0; fi
-  open "$1"
+  open "$1" 2>/dev/null || warn "Page non ouverte, à ouvrir à la main : $1"
 }
 # Saisie masquée : rien ne s'affiche, rien ne va dans l'historique.
 ask_secret() { # $1 = variable, $2 = invite
@@ -113,8 +123,9 @@ require_terminal() {
 # ───────────────────────────── HTTP et JSON ─────────────────────────────
 
 # Lit du JSON sur l'entrée standard et écrit la valeur au bout du chemin « a.b.c »
-# (rien si elle manque ou si ce n'est pas un scalaire).
-JS_GET='let s="";process.stdin.on("data",(c)=>(s+=c)).on("end",()=>{try{let v=JSON.parse(s);for(const k of process.argv[1].split("."))v=v==null?v:v[k];if(v!=null&&typeof v!=="object")process.stdout.write(String(v))}catch{}})'
+# (rien si elle manque ou si ce n'est pas un scalaire). Texte venu du réseau : il sort sans
+# caractère de contrôle ni marque de sens d'écriture, donc sans prise sur le terminal.
+JS_GET='let s="";process.stdin.on("data",(c)=>(s+=c)).on("end",()=>{try{let v=JSON.parse(s);for(const k of process.argv[1].split("."))v=v==null?v:v[k];if(v!=null&&typeof v!=="object")process.stdout.write(String(v).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g," "))}catch{}})'
 json_get() { node -e "$JS_GET" "$1" 2>/dev/null || true; }
 
 # Dans une liste Resend {data:[…]}, les éléments dont `name` vaut $1 : « id statut région » par ligne.
@@ -130,7 +141,8 @@ cfg_quote() {
 }
 # Appel HTTP. L'adresse, les en-têtes (donc les clés) et le corps sont remis à curl
 # comme un fichier de configuration lu sur son entrée standard : rien de secret
-# dans ses arguments, donc rien dans « ps ». Résultat : HTTP_CODE et HTTP_BODY.
+# dans ses arguments, donc rien dans « ps ». « -q » en premier : un ~/.curlrc
+# (trace sur disque, suivi des redirections) ne s'applique pas. Résultat : HTTP_CODE et HTTP_BODY.
 http_call() { # $1 = méthode, $2 = adresse, $3 = corps JSON ou vide, puis les en-têtes
   local method="$1" url="$2" body="$3" out h
   shift 3
@@ -143,7 +155,7 @@ http_call() { # $1 = méthode, $2 = adresse, $3 = corps JSON ou vide, puis les e
         printf 'header = "Content-Type: application/json"\n'
         printf 'data = "%s"\n' "$(cfg_quote "$body")"
       fi
-    } | curl -sS -m 30 -o - -w '\n%{http_code}' -K - 2>/dev/null
+    } | curl -q -sS -m 30 -o - -w '\n%{http_code}' -K - 2>/dev/null
   )" || out=$'\n000'
   HTTP_CODE="${out##*$'\n'}"
   HTTP_BODY="${out%$'\n'*}"
@@ -156,12 +168,12 @@ http_error() {
   local msg secret
   msg="$(printf '%s' "$HTTP_BODY" | json_get message)"
   [[ -n "$msg" ]] || msg="$(printf '%s' "$HTTP_BODY" | json_get detail)"
-  # Texte venu du réseau : sans caractère de contrôle, il ne peut pas piloter le terminal.
   msg="${msg//[[:cntrl:]]/ }"
-  msg="${msg:0:200}"
+  # Masquer AVANT de couper : une clé à cheval sur la coupe laisserait son début en clair.
   for secret in "$SETUP_KEY" "$SEND_KEY" "$SS_KEY" "$SS_SECRET"; do
     [[ -n "$secret" ]] && msg="${msg//"$secret"/•••}"
   done
+  msg="${msg:0:200}"
   if [[ "$HTTP_CODE" == "000" ]]; then printf 'pas de réponse (réseau ?)'
   else printf 'HTTP %s%s' "$HTTP_CODE" "${msg:+ : $msg}"; fi
 }
@@ -186,11 +198,14 @@ need_setup_key() {
   while :; do
     ask_secret SETUP_KEY "Colle la clé « $SETUP_KEY_NAME » (re_… ; vide = passer)"
     if [[ -z "$SETUP_KEY" ]]; then return 1; fi
+    # Ce qui vient d'être collé ne reste pas dans le presse-papiers, que la clé soit acceptée ou non.
+    clear_clipboard
     if [[ ! "$SETUP_KEY" =~ ^re_[A-Za-z0-9_-]+$ ]]; then
       SETUP_KEY=""; ko "Ce n'est pas une clé Resend (elle commence par re_)."; continue
     fi
+    ASKED_SETUP=1
     resend GET "/domains?limit=100"
-    if http_ok; then clear_clipboard; ok "Clé acceptée par Resend."; return 0; fi
+    if http_ok; then ok "Clé acceptée par Resend."; return 0; fi
     if [[ "$HTTP_CODE" == "401" || "$HTTP_CODE" == "403" ]]; then
       ko "Resend refuse cette clé ($(http_error)). Il faut une clé « Full access », pas « Sending access »."
     else
@@ -232,61 +247,74 @@ need_domain() {
 # ───────────────────────────── DNS ─────────────────────────────
 
 # Compare les enregistrements voulus par Resend à la zone lue chez Spaceship.
-# Entrée : {domain, records, existing, after}. Sortie selon le mode ($1) :
-#   check  « ok » si l'entrée est lisible et que Resend demande au moins un enregistrement
+# Entrée standard : trois documents JSON séparés par 0x1e (réponse Resend du domaine,
+# zone avant, zone après ; vide = absent). Arguments : le mode, puis le domaine.
+#   check  « ok » si tout est lisible et que Resend demande au moins un enregistrement
 #   show   une ligne lisible par enregistrement voulu, avec son état
 #   todo   « type␟hôte␟valeur␟priorité␟état » par enregistrement voulu (␟ = 0x1f)
 #   body   le corps du PUT Spaceship pour ceux qui manquent (rien s'il n'y en a pas)
-#   lost   les enregistrements présents avant (existing) et absents après (after)
+#   lost   les enregistrements de la zone avant qui manquent dans la zone après
 #   restore le corps du PUT Spaceship qui remet ces enregistrements perdus
-# États : present (identique, déjà là), missing (à ajouter), conflict (le même
-# nom porte déjà autre chose du même type, ou un CNAME : on n'y touche pas).
+# États : present (identique, déjà là), missing (à ajouter), conflict (le même nom
+# porte déjà autre chose du même type, ou un CNAME : on n'y touche pas), unexpected
+# (nom hors de ce que Resend demande pour l'envoi : jamais posé d'office).
+# Tout document illisible, toute zone mal formée : sortie en erreur (code 3), sans rien écrire.
 JS_PLAN='
 let s = ""; process.stdin.on("data", (c) => (s += c)).on("end", () => {
-  const mode = process.argv[1];
-  let input; try { input = JSON.parse(s); } catch { process.exit(3); }
-  const domain = String(input.domain).toLowerCase();
-  const host = (n) => { n = String(n == null ? "" : n).toLowerCase().replace(/\.$/, ""); if (n === domain || n === "" || n === "@") return "@"; return n.endsWith("." + domain) ? n.slice(0, -domain.length - 1) : n; };
+  const mode = process.argv[1], domain = String(process.argv[2] || "").toLowerCase();
+  const fail = () => process.exit(3);
+  const [records, before, after] = s.split("\u001e").map((d) => { if (!d.trim()) return null; try { return JSON.parse(d); } catch { return fail(); } });
+  const host = (n) => { n = String(n).trim().toLowerCase().replace(/\.$/, ""); if (n === domain || n === "@") return "@"; return n.endsWith("." + domain) ? n.slice(0, -domain.length - 1) : n; };
   const unquote = (v) => { v = String(v == null ? "" : v).trim(); return v.length >= 2 && v.startsWith("\"") && v.endsWith("\"") ? v.slice(1, -1) : v; };
-  const fqdn = (v) => String(v == null ? "" : v).toLowerCase().replace(/\.$/, "");
-  const clean = (v) => String(v).replace(/[\u0000-\u001f\u007f]/g, " ");
+  const fqdn = (v) => String(v == null ? "" : v).trim().toLowerCase().replace(/\.$/, "");
+  const clean = (v) => String(v).replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, " ");
   const data = (r) => r.type === "TXT" ? unquote(r.value) : r.type === "MX" ? fqdn(r.exchange) + " " + Number(r.preference) : r.type === "CNAME" ? fqdn(r.cname) : r.type === "A" || r.type === "AAAA" ? fqdn(r.address) : JSON.stringify(Object.keys(r).filter((k) => !["type", "name", "ttl", "group"].includes(k)).sort().map((k) => [k, r[k]]));
-  const key = (r) => [String(r.type).toUpperCase(), host(r.name), data(r)].join(" ");
-  const items = (list) => (list && Array.isArray(list.items) ? list.items : []).map((r) => Object.assign({}, r, { type: String(r.type).toUpperCase() }));
-  const existing = items(input.existing);
+  const key = (r) => [r.type, host(r.name), data(r)].join(" ");
+  const zone = (z) => {
+    if (z == null) return null;
+    if (typeof z !== "object" || !Array.isArray(z.items)) fail();
+    return z.items.map((r) => { if (!r || typeof r !== "object" || typeof r.type !== "string" || typeof r.name !== "string" || !r.name.trim()) fail(); return Object.assign({}, r, { type: r.type.toUpperCase() }); });
+  };
+  const existing = zone(before);
   if (mode === "lost" || mode === "restore") {
-    const after = new Set(items(input.after).map(key));
-    const lost = existing.filter((r) => !after.has(key(r)));
+    const now = zone(after);
+    if (!existing || !now) fail();
+    const seen = new Set(now.map(key));
+    const lost = existing.filter((r) => !seen.has(key(r)));
     if (mode === "lost") for (const r of lost) console.log(clean(key(r)));
     else if (lost.length) process.stdout.write(JSON.stringify({ force: false, items: lost.map((r) => { const { group, ...rest } = r; return rest; }) }));
     return;
   }
-  const wanted = ((input.records && input.records.records) || []).map((r) => {
-    const type = String(r.type).toUpperCase();
-    const w = { type, name: host(r.name), ttl: 3600 };
-    if (type === "MX") { w.exchange = fqdn(r.value); w.preference = Number.isFinite(Number(r.priority)) ? Number(r.priority) : 10; }
+  if (!records || typeof records !== "object" || !Array.isArray(records.records)) fail();
+  const wanted = records.records.map((r) => {
+    if (!r || typeof r !== "object") fail();
+    const type = String(r.type || "").toUpperCase();
+    const w = { type, name: String(r.name == null ? "" : r.name).trim() ? host(r.name) : "", ttl: 3600 };
+    if (type === "MX") { w.exchange = fqdn(r.value); w.preference = Number.isInteger(Number(r.priority)) && Number(r.priority) >= 0 && Number(r.priority) <= 65535 ? Number(r.priority) : 10; }
     else if (type === "CNAME") w.cname = fqdn(r.value);
     else w.value = unquote(r.value);
     return w;
-  }).filter((w) => ["MX", "TXT", "CNAME"].includes(w.type) && w.name && (w.exchange || w.cname || w.value));
+  }).filter((w) => ["MX", "TXT", "CNAME"].includes(w.type));
   if (mode === "check") { if (wanted.length) console.log("ok"); return; }
+  const value = (w) => w.type === "MX" ? w.exchange : w.type === "CNAME" ? w.cname : w.value;
+  // Pour envoyer, Resend demande « send » (MX et SPF) et « resend._domainkey » (DKIM), rien à la racine.
+  const expected = (w) => !!value(w) && w.type !== "CNAME" && /^[a-z0-9_]([a-z0-9._-]*[a-z0-9])?$/.test(w.name) && (w.name === "send" || w.name.endsWith("._domainkey"));
   const state = (w) => {
+    if (!expected(w)) return "unexpected";
+    if (!existing) return "missing";
     if (existing.some((r) => key(r) === key(w))) return "present";
     const same = existing.filter((r) => host(r.name) === w.name);
-    if (same.some((r) => r.type === "CNAME") || (w.type === "CNAME" && same.length) || same.some((r) => r.type === w.type)) return "conflict";
+    if (same.some((r) => r.type === "CNAME" || r.type === w.type)) return "conflict";
     return "missing";
   };
-  const label = { present: "déjà en place", missing: "à ajouter", conflict: "CONFLIT : ce nom porte déjà autre chose" };
-  const value = (w) => w.type === "MX" ? w.exchange : w.type === "CNAME" ? w.cname : w.value;
+  const label = { present: "déjà en place", missing: "à ajouter", conflict: "CONFLIT : ce nom porte déjà autre chose", unexpected: "INATTENDU : pas un nom d envoi Resend, à vérifier" };
   const short = (v) => (v.length > 56 ? v.slice(0, 53) + "…" : v);
-  if (mode === "show") for (const w of wanted) console.log(clean(`${w.type.padEnd(5)} ${w.name.padEnd(22)} ${short(value(w))}${w.type === "MX" ? ` (priorité ${w.preference})` : ""}${input.existing ? `  → ${label[state(w)]}` : ""}`));
-  if (mode === "todo") for (const w of wanted) console.log([w.type, w.name, value(w), w.type === "MX" ? w.preference : "-", input.existing ? state(w) : "missing"].map(clean).join("\u001f"));
+  if (mode === "show") for (const w of wanted) { const st = state(w); console.log(clean(`${w.type.padEnd(5)} ${(w.name || "(sans nom)").padEnd(22)} ${short(value(w))}${w.type === "MX" ? ` (priorité ${w.preference})` : ""}${existing || st === "unexpected" ? `  → ${label[st]}` : ""}`)); }
+  if (mode === "todo") for (const w of wanted) console.log([w.type, w.name || "(sans nom)", value(w) || "(vide)", w.type === "MX" ? w.preference : "-", state(w)].map(clean).join("\u001f"));
   if (mode === "body") { const add = wanted.filter((w) => state(w) === "missing"); if (add.length) process.stdout.write(JSON.stringify({ force: false, items: add })); }
 });'
-SS_BEFORE=""
-SS_AFTER=""
 dns_plan() { # $1 = mode
-  printf '{"domain":"%s","records":%s,"existing":%s,"after":%s}' "$DOMAIN" "${DOMAIN_JSON:-null}" "${SS_BEFORE:-null}" "${SS_AFTER:-null}" | node -e "$JS_PLAN" "$1"
+  printf '%s\x1e%s\x1e%s' "$DOMAIN_JSON" "$SS_BEFORE" "$SS_AFTER" | node -e "$JS_PLAN" "$1" "$DOMAIN"
 }
 count_state() { dns_plan todo | awk -F $'\x1f' -v want="$1" '$5 == want { n++ } END { print n + 0 }'; }
 # Sans plan lisible, un compte vide passerait pour « rien à faire » : on vérifie avant de s'y fier.
@@ -300,56 +328,86 @@ read_zone() { # $1 = variable
   http_ok || { ko "Spaceship ne donne pas la zone ($(http_error))."; return 1; }
   total="$(printf '%s' "$HTTP_BODY" | json_get total)"
   got="$(printf '%s' "$HTTP_BODY" | node -e 'let s="";process.stdin.on("data",(c)=>(s+=c)).on("end",()=>{try{const i=JSON.parse(s).items;console.log(Array.isArray(i)?i.length:"")}catch{console.log("")}})')"
-  [[ "$got" =~ ^[0-9]+$ ]] || { ko "Réponse de Spaceship inattendue."; return 1; }
-  if [[ "$total" =~ ^[0-9]+$ && "$total" -gt "$got" ]]; then ko "La zone a plus d'enregistrements ($total) que la page lue ($got)."; return 1; fi
+  [[ "$got" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] || { ko "Réponse de Spaceship inattendue (zone ou total illisible)."; return 1; }
+  if [[ "$total" -gt "$got" ]]; then ko "La zone a plus d'enregistrements ($total) que la page lue ($got)."; return 1; fi
   printf -v "$1" '%s' "$HTTP_BODY"
 }
 
+# Après un ajout accepté : relit la zone, remet ce qui aurait disparu, puis constate que les
+# enregistrements voulus y sont. Vrai seulement si tout est CONSTATÉ ; une relecture ou une
+# analyse impossible n'est jamais prise pour « tout va bien ».
+zone_settled() {
+  local lost missing tries=0
+  if ! read_zone SS_AFTER || ! lost="$(dns_plan lost)"; then
+    warn "Ajout accepté par Spaceship, mais la zone n'a pas pu être relue : vérifie à l'œil (la page s'ouvre)."
+    browse "$SPACESHIP_DNS_PAGE"
+    wait_enter "Vérifie les enregistrements « send » et « resend._domainkey », et que les anciens sont toujours là."
+    return 1
+  fi
+  if [[ -n "$lost" ]]; then
+    # Ce script n'envoie que des ajouts : si la zone a perdu quelque chose, on le remet tout de suite.
+    ko "Des enregistrements présents avant l'ajout ne sont plus dans la zone :"
+    printf '%s\n' "$lost" | sed 's/^/       /'
+    spaceship PUT "/dns/records/$DOMAIN" "$(dns_plan restore || true)"
+    if http_ok && read_zone SS_AFTER && lost="$(dns_plan lost)" && [[ -z "$lost" ]]; then
+      ok "Remis en place par l'API, à l'identique."
+    else
+      ko "Ils n'ont pas pu être remis par l'API : remets-les à la main tout de suite (la page s'ouvre)."
+      browse "$SPACESHIP_DNS_PAGE"
+      wait_enter "Remets les enregistrements listés ci-dessus."
+      if ! read_zone SS_AFTER || ! lost="$(dns_plan lost)" || [[ -n "$lost" ]]; then
+        ko "La zone relue n'a toujours pas tous ses enregistrements d'origine."
+        return 1
+      fi
+      ok "Zone relue : les enregistrements d'origine sont revenus."
+    fi
+  fi
+  # La zone relue devient la référence. Une relecture peut précéder la prise en compte de l'ajout : deux autres essais.
+  SS_BEFORE="$SS_AFTER"; SS_AFTER=""
+  while :; do
+    if ! plan_ok || ! missing="$(count_state missing)"; then ko "Zone relue illisible."; return 1; fi
+    [[ "$missing" -eq 0 ]] && return 0
+    tries=$((tries + 1))
+    if [[ "$tries" -ge 3 ]]; then ko "$missing enregistrement(s) toujours absent(s) de la zone relue."; return 1; fi
+    sleep 5
+    read_zone SS_BEFORE || return 1
+  done
+}
+
 # Pose par l'API Spaceship les enregistrements qui manquent, et seulement eux.
-# Renvoie 0 si tous sont en place, 1 si l'API n'a pas pu servir (repli manuel).
+# Renvoie 0 si tout est en place et constaté ; 1 si l'API n'a rien écrit (repli à la main) ;
+# 2 si un ajout est parti mais que l'état de la zone n'a pas pu être confirmé.
 dns_auto() {
-  local body lost missing conflicts
+  local body missing conflicts unexpected
   read_zone SS_BEFORE || return 1
   plan_ok || { ko "Enregistrements de Resend ou zone Spaceship illisibles."; return 1; }
   dns_plan show | sed 's/^/     /'
-  conflicts="$(count_state conflict)"
-  missing="$(count_state missing)"
+  if ! conflicts="$(count_state conflict)" || ! unexpected="$(count_state unexpected)" || ! missing="$(count_state missing)"; then
+    ko "Comparaison avec la zone impossible."; return 1
+  fi
   if [[ "$missing" -gt 0 ]]; then
-    body="$(dns_plan body)"
+    body="$(dns_plan body)" || { ko "Comparaison avec la zone impossible."; return 1; }
+    [[ -n "$body" ]] || { ko "Comparaison avec la zone impossible."; return 1; }
     # « force: false » : Spaceship garde son contrôle de conflits. On n'envoie que les ajouts.
     spaceship PUT "/dns/records/$DOMAIN" "$body"
-    http_ok || { ko "Spaceship refuse l'ajout ($(http_error))."; return 1; }
-    if ! read_zone SS_AFTER; then
-      warn "Ajout accepté par Spaceship, mais la zone n'a pas pu être relue : vérifie à l'œil que tout y est (la page s'ouvre)."
-      browse "$SPACESHIP_DNS_PAGE"
-      wait_enter "Vérifie les enregistrements « send » et « resend._domainkey », et que les anciens sont toujours là."
-      return 0
+    if ! http_ok; then
+      ko "Spaceship refuse l'ajout ($(http_error))."
+      # Sans réponse, l'ajout est peut-être passé : la zone relue dira ce qui reste à poser à la main.
+      read_zone SS_BEFORE >/dev/null 2>&1 || true
+      return 1
     fi
-    lost="$(dns_plan lost)"
-    if [[ -n "$lost" ]]; then
-      # Ce script n'envoie que des ajouts : si la zone a perdu quelque chose, on le remet tout de suite.
-      ko "Des enregistrements présents avant l'ajout ne sont plus dans la zone :"
-      printf '%s\n' "$lost" | sed 's/^/       /'
-      spaceship PUT "/dns/records/$DOMAIN" "$(dns_plan restore)"
-      if http_ok && read_zone SS_AFTER && [[ -z "$(dns_plan lost)" ]]; then
-        ok "Remis en place par l'API, à l'identique."
-      else
-        ko "Ils n'ont pas pu être remis par l'API : remets-les à la main tout de suite (la page s'ouvre)."
-        browse "$SPACESHIP_DNS_PAGE"
-        wait_enter "Remets les enregistrements listés ci-dessus."
-      fi
-    fi
-    SS_BEFORE="$SS_AFTER"; SS_AFTER=""
-    missing="$(count_state missing)"
-    [[ "$missing" -eq 0 ]] || { ko "$missing enregistrement(s) toujours absent(s) après l'ajout."; return 1; }
+    zone_settled || return 2
     ok "Enregistrements de Resend ajoutés ; les autres n'ont pas bougé."
   else
     ok "Rien à ajouter."
   fi
   if [[ "$conflicts" -gt 0 ]]; then
     warn "$conflicts enregistrement(s) en conflit, laissé(s) tel(s) quel(s) : à trancher à la main (la page s'ouvre)."
-    dns_manual conflict
-    return 0
+    dns_manual conflict || true
+  fi
+  if [[ "$unexpected" -gt 0 ]]; then
+    warn "$unexpected enregistrement(s) que Resend ne demande pas d'habitude : non posé(s) par l'API."
+    dns_manual unexpected || true
   fi
   return 0
 }
@@ -363,6 +421,7 @@ dns_manual() { # $1 = état à traiter (missing par défaut)
   browse "$SPACESHIP_DNS_PAGE"
   info "Dans Spaceship : Advanced DNS → $DOMAIN → « Add record ». Ne modifie aucun enregistrement existant."
   [[ "$want" == "conflict" ]] && info "Conflit : un enregistrement du même type existe déjà sous ce nom. Ne le remplace que s'il vient d'un ancien essai Resend."
+  [[ "$want" == "unexpected" ]] && info "Inattendu : compare avec https://resend.com/domains avant de poser quoi que ce soit, et ne touche pas à la racine du domaine sans raison."
   while IFS=$'\x1f' read -r type host value prio state <&3; do
     [[ "$state" == "$want" ]] || continue
     n=$((n + 1))
@@ -402,7 +461,7 @@ wait_until() {
 # sous pipefail quand grep s'arrête avant la fin de l'envoi.
 health_ok() {
   local body
-  body="$(curl -sS -m 20 "$APP_URL/api/health" 2>/dev/null || true)"
+  body="$(curl -q -sS -m 20 "$APP_URL/api/health" 2>/dev/null || true)"
   [[ "$body" == *'"status":"ok"'* ]]
 }
 
@@ -453,6 +512,7 @@ step_domain() {
 }
 
 step_dns() {
+  local rc=0
   title "3/6 Spaceship : enregistrements DNS de Resend"
   if [[ "$DRY" -eq 1 ]]; then
     if go "Poser les enregistrements de Resend dans la zone $DOMAIN"; then
@@ -474,10 +534,18 @@ step_dns() {
     [[ -n "$SS_KEY" ]] && ask_secret SS_SECRET "Colle le secret d'API Spaceship (API secret)"
     clear_clipboard
     if valid_secret "$SS_KEY" && valid_secret "$SS_SECRET"; then
-      if dns_auto; then
-        SS_KEY=""; SS_SECRET=""
+      ASKED_DNS=1
+      rc=0; dns_auto || rc=$?
+      SS_KEY=""; SS_SECRET=""
+      if [[ "$rc" -eq 0 ]]; then
         DONE+=("3 DNS chez Spaceship : enregistrements de Resend en place")
-        info "La clé « $DNS_KEY_NAME » ne sert plus : tu peux la supprimer dans l'API Manager de Spaceship."
+        return 0
+      fi
+      if [[ "$rc" -eq 2 ]]; then
+        ZONE_UNSURE=1
+        ko "Un ajout est parti, mais l'état de la zone n'est pas confirmé : regarde-la dans Spaceship avant de continuer."
+        info "Ensuite relance avec --etape=3 : ce qui est déjà en place sera reconnu."
+        SKIPPED+=("3 DNS : ZONE À VÉRIFIER dans Spaceship (ajout envoyé, état non confirmé)")
         return 0
       fi
       warn "L'API Spaceship n'a pas suffi : on continue à la main."
@@ -486,8 +554,8 @@ step_dns() {
     fi
     SS_KEY=""; SS_SECRET=""
   fi
-  # Repli : sans lecture de la zone, tous les enregistrements sont proposés.
-  SS_BEFORE=""
+  # Repli. La zone déjà lue est gardée (ce qui est en place n'est pas reproposé) ; sans elle, tout est proposé.
+  plan_ok || SS_BEFORE=""
   if dns_manual missing; then DONE+=("3 DNS chez Spaceship : enregistrements posés à la main"); else SKIPPED+=("3 DNS (enregistrements illisibles)"); fi
 }
 
@@ -546,8 +614,16 @@ step_key() {
     warn "$others clé(s) « $SEND_KEY_NAME » existe(nt) déjà chez Resend : une nouvelle va la remplacer sur Railway."
     go "Continuer (l'ancienne sera à supprimer à la fin)" || { SKIPPED+=("5 Clé d'envoi (déjà en place)"); return 0; }
   fi
+  PREVIOUS_DEPLOY="$(latest_deploy)"; PREVIOUS_DEPLOY="${PREVIOUS_DEPLOY%% *}"
+  # L'adresse d'abord : si Railway refuse, rien n'a encore été créé chez Resend. Les deux
+  # variables sont posées sans déployer, puis un seul redéploiement les applique ensemble.
+  if ! railway variable set "AUTH_EMAIL_FROM=$FROM_ADDR" -p "$RW_PROJECT" -e "$RW_ENV" -s "$RW_SERVICE" --skip-deploys >/dev/null 2>&1; then
+    ko "Railway a refusé AUTH_EMAIL_FROM (railway login ?). Rien n'a été créé ni posé : relance avec --etape=5."
+    SKIPPED+=("5 Clé d'envoi (Railway)"); return 0
+  fi
+  ok "AUTH_EMAIL_FROM = $FROM_ADDR (posée, pas encore déployée)"
   resend POST "/api-keys" "{\"name\":\"$SEND_KEY_NAME\",\"permission\":\"sending_access\",\"domain_id\":\"$DOMAIN_ID\"}"
-  http_ok || { ko "Resend refuse de créer la clé d'envoi ($(http_error)). Relance avec --etape=5."; SKIPPED+=("5 Clé d'envoi (échec)"); return 0; }
+  http_ok || { ko "Resend refuse de créer la clé d'envoi ($(http_error)). L'adresse est posée sur Railway, sans effet tant que la clé manque : relance avec --etape=5."; SKIPPED+=("5 Clé d'envoi (échec)"); return 0; }
   token="$(printf '%s' "$HTTP_BODY" | json_get token)"
   HTTP_BODY=""
   if [[ ! "$token" =~ ^re_[A-Za-z0-9_-]+$ ]]; then
@@ -555,31 +631,27 @@ step_key() {
     SKIPPED+=("5 Clé d'envoi (échec)"); return 0
   fi
   SEND_KEY="$token"; token=""
-  PREVIOUS_DEPLOY="$(latest_deploy)"; PREVIOUS_DEPLOY="${PREVIOUS_DEPLOY%% *}"
   # La clé arrive à la CLI par son entrée standard (printf est interne au shell) : ni argument,
-  # ni variable d'environnement. Les deux variables sont posées sans déployer, puis un seul redéploiement.
+  # ni variable d'environnement.
   if ! printf '%s' "$SEND_KEY" | railway variable set RESEND_API_KEY --stdin -p "$RW_PROJECT" -e "$RW_ENV" -s "$RW_SERVICE" --skip-deploys >/dev/null 2>&1; then
     SEND_KEY=""
-    ko "Railway a refusé RESEND_API_KEY (railway login ?). La clé créée est perdue : supprime « $SEND_KEY_NAME » sur resend.com/api-keys, puis relance avec --etape=5."
+    ko "Railway a refusé RESEND_API_KEY. La clé créée est perdue : supprime « $SEND_KEY_NAME » sur resend.com/api-keys, puis relance avec --etape=5."
+    info "L'adresse d'expédition est déjà posée sur Railway, sans effet tant que la clé manque."
     SKIPPED+=("5 Clé d'envoi (Railway)"); return 0
   fi
   ok "RESEND_API_KEY posée sur Railway (jamais affichée)."
-  if ! railway variable set "AUTH_EMAIL_FROM=$FROM_ADDR" -p "$RW_PROJECT" -e "$RW_ENV" -s "$RW_SERVICE" --skip-deploys >/dev/null 2>&1; then
-    ko "Railway a refusé AUTH_EMAIL_FROM. Relance avec --etape=5."
-    SKIPPED+=("5 Adresse d'expédition (Railway)"); return 0
-  fi
-  ok "AUTH_EMAIL_FROM = $FROM_ADDR"
   if ! railway deployment redeploy -p "$RW_PROJECT" -e "$RW_ENV" -s "$RW_SERVICE" -y >/dev/null 2>&1; then
-    ko "Le redéploiement n'a pas pu être lancé : lance-le depuis Railway (les deux variables sont déjà posées)."
-    SKIPPED+=("5 Redéploiement"); return 0
+    ko "Le redéploiement n'a pas pu être lancé. Les deux variables sont posées : elles s'appliqueront au prochain déploiement, ou lance-le depuis Railway."
+    SKIPPED+=("5 Redéploiement (variables posées, pas encore appliquées)"); return 0
   fi
+  KEY_DEPLOYED=1
   if wait_until "Attente du redéploiement" new_deploy_done 90; then ok "Redéployé."; else warn "Redéploiement non confirmé après 15 minutes : regarde Railway."; fi
   if health_ok; then ok "$APP_URL/api/health : ok"; else ko "$APP_URL/api/health ne répond pas ok."; fi
   DONE+=("5 Clé d'envoi et adresse d'expédition sur Railway")
 }
 
 step_test() {
-  local key="" id
+  local key="" id line
   title "6/6 E-mail de test et récapitulatif"
   if go "Envoyer un e-mail de test à $TEST_TO depuis $FROM_ADDR"; then
     if [[ "$DRY" -eq 1 ]]; then
@@ -599,8 +671,10 @@ step_test() {
           ok "E-mail de test accepté par Resend${id:+ (id $id)}."
           wait_enter "Vérifie qu'il est arrivé sur $TEST_TO (regarde aussi les indésirables)."
           DONE+=("6 E-mail de test envoyé à $TEST_TO")
-          browse "https://resend.com/api-keys"
-          info "La clé « $SETUP_KEY_NAME » ne sert plus : supprime-la (et toute ancienne clé « $SEND_KEY_NAME » en double)."
+          if [[ "$KEY_DEPLOYED" -eq 1 ]]; then
+            browse "https://resend.com/api-keys"
+            info "La clé « $SETUP_KEY_NAME » ne sert plus : supprime-la (et toute ancienne clé « $SEND_KEY_NAME » en double)."
+          fi
         else
           ko "Resend refuse l'envoi ($(http_error))."
           SKIPPED+=("6 E-mail de test (échec)")
@@ -611,12 +685,20 @@ step_test() {
     SKIPPED+=("6 E-mail de test")
   fi
   title "Récapitulatif"
+  if [[ "$ZONE_UNSURE" -eq 1 ]]; then ko "À FAIRE D'ABORD : vérifier la zone DNS de $DOMAIN dans Spaceship (un ajout est parti, son effet n'est pas confirmé)."; fi
   if [[ "${#DONE[@]}" -gt 0 ]]; then
     for line in "${DONE[@]}"; do
       if [[ "$DRY" -eq 1 ]]; then info "· déroulé à blanc : $line"; else ok "$line"; fi
     done
   fi
   if [[ "${#SKIPPED[@]}" -gt 0 ]]; then for line in "${SKIPPED[@]}"; do info "· passé : $line"; done; fi
+  # Les clés saisies donnent des droits larges : on rappelle de les supprimer, que tout ait réussi ou non.
+  if [[ "$ASKED_SETUP" -eq 1 || "$ASKED_DNS" -eq 1 ]]; then
+    echo "   Clés à supprimer :"
+    if [[ "$ASKED_DNS" -eq 1 ]]; then info "· « $DNS_KEY_NAME » (Spaceship, écriture DNS) : dès que les DNS sont posés, dans l'API Manager."; fi
+    if [[ "$ASKED_SETUP" -eq 1 && "$KEY_DEPLOYED" -eq 1 ]]; then info "· « $SETUP_KEY_NAME » (Resend, Full access) : maintenant, sur resend.com/api-keys."; fi
+    if [[ "$ASKED_SETUP" -eq 1 && "$KEY_DEPLOYED" -eq 0 ]]; then info "· « $SETUP_KEY_NAME » (Resend, Full access) : garde-la tant que l'étape 5 n'est pas passée, supprime-la ensuite."; fi
+  fi
   echo "   Production :"
   if health_ok; then ok "/api/health : ok"; else ko "/api/health ne répond pas ok"; fi
   [[ "$DRY" -eq 1 ]] && echo "Essai à blanc terminé : rien n'a été ouvert, copié ni écrit."
@@ -638,7 +720,7 @@ main() {
   require_terminal
   trap forget_secrets EXIT
 
-  echo "E-mails de Cortex par Resend — $DOMAIN$([[ "$DRY" -eq 1 ]] && echo '  (ESSAI À BLANC : rien n'\''est ouvert, copié ni écrit)')"
+  echo "E-mails de Cortex par Resend : $DOMAIN$([[ "$DRY" -eq 1 ]] && echo '  (ESSAI À BLANC : rien n'\''est ouvert, copié ni écrit)')"
   if ! command -v node >/dev/null 2>&1; then echo "✗ node est introuvable." >&2; exit 1; fi
   if ! command -v railway >/dev/null 2>&1 || ! railway whoami >/dev/null 2>&1; then
     if [[ "$DRY" -eq 1 ]]; then warn "CLI Railway absente ou non connectée (railway login) : l'étape 5 en aura besoin."
