@@ -4,14 +4,18 @@
  * réseau) revient comme un résultat, et l'appelant décide quoi en faire.
  *
  * `idempotencyKey` : Resend retient la clé 24 h et n'envoie qu'une fois. Un
- * nouvel essai sous la même clé reçoit soit la réponse d'origine, soit un 409
- * (contenu différent, ou premier essai encore en cours) : dans les deux cas
- * l'e-mail est parti, et c'est un succès.
+ * nouvel essai sous la même clé reçoit la réponse d'origine, ou un 409 :
+ * « contenu différent » veut dire que le premier essai avait été accepté, donc
+ * que l'e-mail est parti ; « premier essai encore en cours » ne dit rien.
+ *
+ * `uncertain` : on ne sait pas si l'e-mail est parti (pas de réponse, délai
+ * dépassé, premier essai en cours). Sans ce drapeau, un échec est un refus
+ * net : rien n'est parti.
  *
  * Le lien magique de connexion garde son propre envoi (lib/auth-providers) :
  * lui doit échouer bruyamment, et il a un second transport (AUTH_EMAIL_ENDPOINT).
  */
-export type EmailOutcome = { ok: true } | { ok: false; reason: string };
+export type EmailOutcome = { ok: true } | { ok: false; reason: string; uncertain?: true };
 
 export async function sendEmail(mail: { to: string; subject: string; text: string; idempotencyKey?: string }): Promise<EmailOutcome> {
   const key = process.env.RESEND_API_KEY;
@@ -27,9 +31,14 @@ export async function sendEmail(mail: { to: string; subject: string; text: strin
       // Une panne de Resend ne doit pas retenir l'appelant (une génération, une demande de rétractation).
       signal: AbortSignal.timeout(10_000),
     });
-    if (res.ok || (res.status === 409 && mail.idempotencyKey)) return { ok: true };
+    if (res.ok) return { ok: true };
+    if (res.status === 409 && mail.idempotencyKey) {
+      const name: unknown = await res.json().then((b) => (b as { name?: unknown } | null)?.name, () => undefined);
+      if (name === "invalid_idempotent_request") return { ok: true };
+      return { ok: false, reason: "Resend a répondu HTTP 409 (premier essai encore en cours)", uncertain: true };
+    }
     return { ok: false, reason: `Resend a répondu HTTP ${res.status}` };
   } catch (e) {
-    return { ok: false, reason: e instanceof Error ? e.message.slice(0, 160) : String(e) };
+    return { ok: false, reason: e instanceof Error ? e.message.slice(0, 160) : String(e), uncertain: true };
   }
 }
