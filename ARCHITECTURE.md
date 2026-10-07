@@ -69,7 +69,7 @@ Le moteur n'exécute du code que dans un bac à sable noyau (Seatbelt sur macOS,
 
 Tous les appels au modèle passent par `lib/llm/index.ts` — **point d'entrée unique**, sans chemin de contournement. Il impose :
 
-- un **plafond de dépense global** (`SPEND_CAP_USD`) qui coupe les appels payants quand il est atteint ;
+- un **plafond de dépense global par mois calendaire** (`SPEND_CAP_USD`, UTC, remis à zéro le 1er) qui coupe les appels payants quand il est atteint, avec un e-mail d'alerte au propriétaire à 80 % puis à 100 % ;
 - l'**enregistrement du coût réel** de chaque appel (`llm_usage`) ;
 - des **quotas quotidiens** par utilisateur, appliqués en amont des générations.
 
