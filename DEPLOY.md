@@ -175,6 +175,26 @@ pose `AUTH_EMAIL_ENABLED=1` puis :
    pose les 2-3 enregistrements DNS affichés → puis
    `AUTH_EMAIL_FROM=Cortex <cortex@ton-domaine.ch>`.
 
+Resend sert aussi, sans `AUTH_EMAIL_ENABLED`, aux e-mails que l'app envoie
+d'elle-même (accusé de rétractation). Pour l'instance `cortexexam.com`, le
+vrai domaine se pose en une commande guidée, où il ne reste qu'à coller des
+clés :
+
+```bash
+bash scripts/resend-ben.sh            # tout le parcours, étape par étape
+bash scripts/resend-ben.sh --dry-run  # essai à blanc : n'ouvre rien, ne demande aucune clé, n'écrit rien
+bash scripts/resend-ben.sh --etape=4  # reprendre à la vérification du domaine
+```
+
+Elle crée (ou réutilise) le domaine chez Resend en `eu-west-1`, ajoute ses
+enregistrements à la zone chez Spaceship par l'API sans toucher aux
+enregistrements existants (à défaut : un par un, presse-papiers), attend la
+vérification, crée une clé « Sending access » limitée au domaine, la pose sur
+Railway comme `RESEND_API_KEY` avec
+`AUTH_EMAIL_FROM=Cortex <noreply@cortexexam.com>`, redéploie une fois et envoie
+un e-mail de test. Aucune clé n'est affichée, écrite sur disque ni passée en
+argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
+
 ## 7. Stripe — packs de crédits (MODE TEST)
 
 1. stripe.com → crée le compte → reste en **mode Test** (interrupteur en haut
