@@ -135,6 +135,7 @@ if (u.origin === "https://api.resend.com") {
       { record: "?", name: "", type: "TXT", value: "v=spf1 -all" },
       { record: "?", name: "cortexexam.com", type: "MX", value: "mx.exemple.test", priority: 1 },
       { record: "?", name: "www2", type: "CNAME", value: "ailleurs.exemple.test" },
+      { record: "?", name: "links", type: "CAA", value: "0 issue letsencrypt.org" },
       { record: "?", name: "send\u009b31m", type: "TXT", value: "x" },
     ] : []).map((r) => Object.assign({}, r, { status: d.status })) } : {});
   if (req.method === "GET" && p === "/domains") reply(200, { object: "list", has_more: false, data: st.domain ? [view(st.domain)] : [] });
@@ -185,7 +186,7 @@ if (u.origin === "https://spaceship.dev") {
     if (E.SS_PUT_REFUSED) reply(422, { detail: "Conflict with existing records" });
     if (!body || body.force !== false || !Array.isArray(body.items) || !body.items.length) reply(400, { detail: "force:false et items attendus" });
     st.puts.push(body);
-    for (const it of body.items) st.zone.push(Object.assign({ group: { type: "custom" } }, it));
+    for (const it of body.items) st.zone.push(Object.assign({ group: { type: "custom" } }, it, E.SS_ALTERS && it.type === "TXT" && it.name === "send" ? { value: "v=spf1 include:amazonses.com -all" } : {}));
     // Une zone qui perd un enregistrement à l'écriture : à chaque fois, ou seulement la première.
     if (E.SS_PUT_DROPS === "toujours" || (E.SS_PUT_DROPS === "une-fois" && st.puts.length === 1)) st.zone = st.zone.filter((r) => !(r.type === "CNAME" && r.name === "www"));
     reply(204);
@@ -215,6 +216,10 @@ init_state() {
     }
     if (E.ZONE_OLD_DKIM) zone.push({ type: "TXT", name: "resend._domainkey", value: "p=ANCIENNECLE", ttl: 3600 });
     if (E.ZONE_SEND_TAKEN) zone.push({ type: "TXT", name: "send", value: "autre chose", ttl: 3600 });
+    if (E.ZONE_HAS_CNAME) {
+      zone.push({ type: "CNAME", name: "send", cname: "spf.cortexexam-com.resend-dns.com", ttl: 3600 });
+      zone.push({ type: "CNAME", name: "resend._domainkey", cname: "dkim.cortexexam-com.resend-dns.com", ttl: 3600 });
+    }
     const st = { domain: null, zone, puts: [], keys: [{ id: "k0", name: "cortex-setup" }], emails: [], createdKey: null };
     if (E.DOMAIN_STATUS) st.domain = { id: "4dd369bc-aa82-4ff3-97de-514ae3000ee0", name: "cortexexam.com", status: E.DOMAIN_STATUS, region: "eu-west-1", polls: 0 };
     if (E.KEY_EXISTS) st.keys.push({ id: "k1", name: "cortex-app" });
@@ -274,6 +279,7 @@ run() {
         for p in ${GO_SKIP:-}; do [[ "$1" == *"$p"* ]] && return 1; done
         return 0
       }
+      confirm_oui() { go "$1"; }
       wait_enter() { echo "$1" >> "$S/wait.log"; }
       ask_secret() {
         local file="$S/answers.$1" val=""
@@ -560,7 +566,7 @@ RESEND_ODD_RECORDS=1 GO_SKIP="les poser aussi par l'API|Demander la vérificatio
 t "l'ajout ne contient que send et resend._domainkey" state_is 'st.puts.length+" "+st.puts[0].items.map((i)=>i.type+" "+i.name).join(",")' "1 MX send,TXT send,TXT resend._domainkey"
 t "rien à la racine, aucun CNAME de plus" state_is 'st.zone.filter((r)=>r.name==="@"||r.type==="CNAME").length' 3
 t "l'inhabituel est signalé, l'accord demandé" out_has "1 enregistrement(s) hors des noms habituels de Resend"
-t "les quatre restent à la main" out_has "4 enregistrement(s) non posé(s) par l'API"
+t "les cinq restent à la main, type non géré compris" bash -c "grep -q \"5 enregistrement(s) non posé(s) par l'API\" '$S/out' && grep -q 'Enregistrement 5/5' '$S/out' && grep -q 'type CAA' '$S/out'"
 t "aucun caractère de contrôle C1 à l'écran" node -e 'process.exit(/[\u0080-\u009f]/.test(require("fs").readFileSync(process.argv[1],"utf8"))?1:0)' "$S/out"
 t "les enregistrements d'origine n'ont pas bougé" zone_intact
 
@@ -568,7 +574,7 @@ echo "22 bis. Avec l'accord : l'inhabituel bien formé part, la racine et le mal
 RESEND_ODD_RECORDS=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run inattendus-accord
 t "le CNAME bien formé est ajouté, rien d'autre" state_is 'st.puts.length+" "+st.puts[0].items.map((i)=>i.type+" "+i.name).join(",")' "1 MX send,TXT send,TXT resend._domainkey,CNAME www2"
 t "toujours rien de plus à la racine" state_is 'st.zone.filter((r)=>r.name==="@").length' 1
-t "les trois refusés restent à la main" out_has "3 enregistrement(s) non posé(s) par l'API"
+t "les quatre refusés restent à la main" out_has "4 enregistrement(s) non posé(s) par l'API"
 t "les enregistrements d'origine n'ont pas bougé" zone_intact
 
 echo "23. Une API recopie la clé dans son message d'erreur : elle reste masquée, même à cheval sur la coupe"
@@ -627,6 +633,54 @@ t "la perte est annoncée" out_has "CNAME www cname.vercel-dns.com"
 t "l'enregistrement est remis par l'API" state_is 'st.puts.length+" "+st.puts[1].items.map((i)=>i.type+" "+i.name).join(",")' "2 CNAME www"
 t "zone complète à la fin" state_is 'st.zone.length+" "+st.zone.filter((r)=>r.name==="www").length' "7 1"
 t "le succès n'est dit qu'après" bash -c "grep -n 'Remis en place\\|les autres n.ont pas bougé' '$S/out' | head -1 | grep -q 'Remis en place'"
+
+echo "32. L'accord pour l'inhabituel, avec les vraies invites : Entrée ne vaut pas accord"
+S="$TMP/accord-entree"; mkdir -p "$S"
+# Étape 3, clé masquée, API Spaceship, clé et secret, Entrée à la question d'accord (= non),
+# quatre Entrée (hôte et valeur de deux enregistrements à la main), puis « s » aux étapes 4, 5 et 6.
+REAL_PROMPTS=1
+DOMAIN_STATUS=not_started RESEND_CNAME=1 run accord-entree --etape=3 < <(printf '\n%s\n\n%s\n%s\n\n\n\n\n\ns\ns\ns\n' "$FAKE_SETUP" "$FAKE_SS_KEY" "$FAKE_SS_SECRET")
+t "se termine sans erreur" rc_is 0
+t "la question est posée" out_has "tape « oui » pour accepter"
+t "aucun ajout par l'API" req_is PUT /dns/records 0
+t "les deux CNAME défilent à la main" out_has "Enregistrement 2/2"
+t "aucune clé nulle part" no_leak
+
+echo "32 bis. « oui » tapé : l'accord est donné"
+S="$TMP/accord-oui"; mkdir -p "$S"
+DOMAIN_STATUS=not_started RESEND_CNAME=1 run accord-oui --etape=3 < <(printf '\n%s\n\n%s\n%s\noui\ns\ns\ns\n' "$FAKE_SETUP" "$FAKE_SS_KEY" "$FAKE_SS_SECRET")
+REAL_PROMPTS=0
+t "se termine sans erreur" rc_is 0
+t "les deux CNAME partent par l'API" state_is 'st.puts.length+" "+st.puts[0].items.map((i)=>i.type+" "+i.name).join(",")' "1 CNAME send,CNAME resend._domainkey"
+t "aucune clé nulle part" no_leak
+
+echo "33. Relance avec les CNAME déjà posés : reconnus, aucune question, rien à faire"
+DOMAIN_STATUS=verified RESEND_CNAME=1 ZONE_HAS_CNAME=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run cname-relance
+t "aucun accord redemandé" bash -c "! grep -q 'les poser aussi par' '$S/go.log'"
+t "aucun ajout" req_is PUT /dns/records 0
+t "tout est dit en place" bash -c "grep -q 'Rien à ajouter : tout est déjà en place' '$S/out' && grep -q '✓ 3 DNS chez Spaceship : enregistrements de Resend en place' '$S/out'"
+
+echo "34. La zone relue porte une autre valeur que celle envoyée : pas un succès"
+SS_ALTERS=1 GO_SKIP="Demander la vérification|Créer la clé d'envoi|Envoyer un e-mail" run valeur-changee
+t "c'est dit" out_has "1 enregistrement(s) relu(s) avec une autre valeur que celle envoyée"
+t "aucun « ✓ » sur la zone" out_lacks "les autres n'ont pas bougé"
+t "la zone est dite à vérifier" out_has "ZONE À VÉRIFIER"
+
+echo "35. Analyse du plan, appelée directement : quatre documents au lieu de trois sont refusés"
+S="$TMP/plan-direct"; mkdir -p "$S"
+(
+  # shellcheck source=/dev/null
+  source "$SCRIPT"
+  DOMAIN_JSON="{\"records\":$(cat "$TMP/records.json")}"
+  SS_BEFORE='{"items":[],"total":0}'
+  plan_ok && echo "trois documents : lisible" > "$S/trois"
+  SS_BEFORE=$'{"items":[],"total":0}\x1e{"items":[{"type":"A","name":"@","address":"6.6.6.6","ttl":60}],"total":1}'
+  plan_ok || echo "quatre documents : refusé" > "$S/quatre"
+  dns_plan body > "$S/corps" 2>/dev/null || echo "$?" > "$S/code"
+) > "$S/out" 2>&1
+t "trois documents : le plan est lisible" test -s "$S/trois"
+t "quatre documents : le plan est refusé" test -s "$S/quatre"
+t "aucun corps de PUT n'en sort, code d'erreur 3" bash -c "[[ ! -s '$S/corps' && \"\$(cat '$S/code')\" == 3 ]]"
 
 echo
 if [[ "$FAIL" -eq 0 ]]; then echo "Banc d'essai : $PASS vérifications réussies."; else echo "Banc d'essai : $FAIL échec(s) sur $((PASS + FAIL))."; exit 1; fi
