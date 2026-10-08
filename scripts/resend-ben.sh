@@ -88,6 +88,16 @@ go() {
   [[ -t 0 ]] || echo
   case "$answer" in s|S) return 1 ;; *) return 0 ;; esac
 }
+# Accord explicite, pour ce qui écrit hors des sentiers battus : seul « oui » tapé vaut accord.
+# Ni Entrée, ni une touche tapée d'avance pendant une attente (vidée ici), ni une fin de saisie.
+confirm_oui() {
+  local answer="" junk=""
+  if [[ -t 0 ]]; then while read -rs -t 1 -n 10000 junk; do :; done; fi
+  printf '→ %s  [tape « oui » pour accepter, Entrée = non] ' "$1"
+  read -r answer || answer=""
+  [[ -t 0 ]] || echo
+  case "$answer" in oui|Oui|OUI) return 0 ;; *) return 1 ;; esac
+}
 wait_enter() {
   local ignored=""
   printf '   %s  [Entrée quand c'\''est fait] ' "$1"
@@ -269,8 +279,8 @@ need_domain() {
 # États : present (identique, déjà là) ; missing (à ajouter) ; conflict (le nom porte déjà
 # autre chose du même type, ou un CNAME, ou n'importe quoi si c'est un CNAME qu'on veut :
 # on n'y touche pas) ; unusual (hors de « send » et « *._domainkey » en MX ou TXT, un CNAME
-# par exemple : posé par l'API seulement après accord) ; refused (racine, nom ou valeur
-# vide ou mal formé : jamais posé par l'API).
+# par exemple : posé par l'API seulement après accord) ; refused (racine, autre type, nom
+# ou valeur vide ou mal formé : jamais posé par l'API).
 # Tout document illisible, toute zone mal formée : sortie en erreur (code 3), sans rien écrire.
 JS_PLAN='
 let s = ""; process.stdin.on("data", (c) => (s += c)).on("end", () => {
@@ -309,24 +319,24 @@ let s = ""; process.stdin.on("data", (c) => (s += c)).on("end", () => {
     else if (type === "CNAME") w.cname = fqdn(r.value);
     else w.value = unquote(r.value);
     return w;
-  }).filter((w) => ["MX", "TXT", "CNAME"].includes(w.type));
+  });
   if (mode === "check") { if (wanted.length) console.log("ok"); return; }
   const value = (w) => w.type === "MX" ? w.exchange : w.type === "CNAME" ? w.cname : w.value;
   const label_ = /^[a-z0-9_]([a-z0-9._-]*[a-z0-9])?$/;
-  // Posable par l API : un sous-domaine bien formé (jamais la racine) et une valeur bien formée.
-  const valid = (w) => label_.test(w.name) && !!value(w) && !/[\u0000-\u001f\u007f-\u009f]/.test(value(w)) && (w.type === "TXT" || (label_.test(value(w)) && value(w).includes(".")));
+  // Posable par l API : MX, TXT ou CNAME, sur un sous-domaine bien formé (jamais la racine), valeur bien formée.
+  const valid = (w) => ["MX", "TXT", "CNAME"].includes(w.type) && label_.test(w.name) && !!value(w) && !/[\u0000-\u001f\u007f-\u009f]/.test(value(w)) && (w.type === "TXT" || (label_.test(value(w)) && value(w).includes(".")));
   // Ce que Resend demande d habitude pour envoyer : « send » (MX et SPF) et « *._domainkey » (DKIM), en MX ou TXT.
   const usual = (w) => w.type !== "CNAME" && (w.name === "send" || w.name.endsWith("._domainkey"));
   const state = (w) => {
     if (!valid(w)) return "refused";
+    if (existing && existing.some((r) => key(r) === key(w))) return "present";
     if (!usual(w) && !allow) return "unusual";
     if (!existing) return "missing";
-    if (existing.some((r) => key(r) === key(w))) return "present";
     const same = existing.filter((r) => host(r.name) === w.name);
     if (w.type === "CNAME" ? same.length : same.some((r) => r.type === "CNAME" || r.type === w.type)) return "conflict";
     return "missing";
   };
-  const label = { present: "déjà en place", missing: "à ajouter", conflict: "CONFLIT : ce nom porte déjà autre chose", unusual: "INHABITUEL : à confirmer", refused: "REFUSÉ : racine, nom ou valeur mal formé" };
+  const label = { present: "déjà en place", missing: "à ajouter", conflict: "CONFLIT : ce nom porte déjà autre chose", unusual: "INHABITUEL : à confirmer", refused: "REFUSÉ : racine, type non géré, nom ou valeur mal formé" };
   const short = (v) => (v.length > 56 ? v.slice(0, 53) + "…" : v);
   if (mode === "show") for (const w of wanted) { const st = state(w); console.log(clean(`${w.type.padEnd(5)} ${(w.name || "(sans nom)").padEnd(22)} ${short(value(w))}${w.type === "MX" ? ` (priorité ${w.preference})` : ""}${existing || st === "unusual" || st === "refused" ? `  → ${label[st]}` : ""}`)); }
   if (mode === "todo") for (const w of wanted) console.log([w.type, w.name || "(sans nom)", value(w) || "(vide)", w.type === "MX" ? w.preference : "-", state(w)].map(clean).join("\u001f"));
@@ -359,8 +369,8 @@ read_zone() { # $1 = variable
 # enregistrements voulus y sont. Vrai seulement si, sur UNE MÊME relecture, rien ne manque par
 # rapport à la zone d'origine (SS_BEFORE, gardée jusqu'au bout) et tous les ajouts sont là.
 # Une relecture ou une analyse impossible n'est jamais prise pour « tout va bien ».
-zone_settled() {
-  local lost missing tries=0
+zone_settled() { # $1 = nombre d'enregistrements voulus qui doivent se lire à l'identique dans la zone
+  local expected="$1" lost missing present tries=0
   while :; do
     if ! read_zone SS_AFTER || ! lost="$(dns_plan lost)"; then
       warn "Ajout accepté par Spaceship, mais la zone n'a pas pu être relue : vérifie à l'œil (la page s'ouvre)."
@@ -387,11 +397,16 @@ zone_settled() {
       fi
     fi
     # Sur cette même zone relue, rien ne manque de l'origine : reste à y trouver les ajouts.
-    if ! plan_ok "$SS_AFTER" || ! missing="$(count_state missing "$SS_AFTER")"; then ko "Zone relue illisible."; return 1; fi
-    if [[ "$missing" -eq 0 ]]; then SS_BEFORE="$SS_AFTER"; SS_AFTER=""; return 0; fi
+    if ! plan_ok "$SS_AFTER" || ! missing="$(count_state missing "$SS_AFTER")" || ! present="$(count_state present "$SS_AFTER")"; then ko "Zone relue illisible."; return 1; fi
+    # « Plus rien de manquant » ne suffit pas : une valeur relue différente de celle envoyée n'est pas un succès.
+    if [[ "$missing" -eq 0 && "$present" -ge "$expected" ]]; then SS_BEFORE="$SS_AFTER"; SS_AFTER=""; return 0; fi
     # Une relecture peut précéder la prise en compte de l'ajout : deux autres essais, perte recherchée à chacun.
     tries=$((tries + 1))
-    if [[ "$tries" -ge 3 ]]; then ko "$missing enregistrement(s) toujours absent(s) de la zone relue."; return 1; fi
+    if [[ "$tries" -ge 3 ]]; then
+      if [[ "$missing" -gt 0 ]]; then ko "$missing enregistrement(s) toujours absent(s) de la zone relue."
+      else ko "$((expected - present)) enregistrement(s) relu(s) avec une autre valeur que celle envoyée."; fi
+      return 1
+    fi
     sleep 5
   done
 }
@@ -400,7 +415,7 @@ zone_settled() {
 # Renvoie 0 si la zone est constatée (DNS_LEFT = ce qui reste à la main) ; 1 si l'API n'a rien
 # écrit (repli à la main) ; 2 si un ajout est parti mais que l'état de la zone n'est pas confirmé.
 dns_auto() {
-  local body missing conflicts unusual refused
+  local body missing conflicts unusual refused present
   DNS_ALLOW_UNUSUAL=0
   DNS_LEFT=0
   read_zone SS_BEFORE || return 1
@@ -410,12 +425,14 @@ dns_auto() {
   if [[ "$unusual" -gt 0 ]]; then
     warn "$unusual enregistrement(s) hors des noms habituels de Resend (« send » et « *._domainkey », en MX ou TXT)."
     info "Resend peut en demander d'autres, des CNAME par exemple : compare avec l'onglet Records de https://resend.com/domains."
-    if go "Ils correspondent à ce que Resend affiche : les poser aussi par l'API"; then
+    if confirm_oui "Ils correspondent à ce que Resend affiche : les poser aussi par l'API"; then
       DNS_ALLOW_UNUSUAL=1
       dns_plan show | sed 's/^/     /'
+    else
+      info "Non posés par l'API : ils seront proposés à la main."
     fi
   fi
-  if ! conflicts="$(count_state conflict)" || ! unusual="$(count_state unusual)" || ! refused="$(count_state refused)" || ! missing="$(count_state missing)"; then
+  if ! conflicts="$(count_state conflict)" || ! unusual="$(count_state unusual)" || ! refused="$(count_state refused)" || ! missing="$(count_state missing)" || ! present="$(count_state present)"; then
     ko "Comparaison avec la zone impossible."; return 1
   fi
   DNS_LEFT=$((conflicts + unusual + refused))
@@ -430,7 +447,7 @@ dns_auto() {
       read_zone SS_BEFORE >/dev/null 2>&1 || true
       return 1
     fi
-    zone_settled || return 2
+    zone_settled "$((present + missing))" || return 2
     ok "Enregistrements ajoutés ; les autres n'ont pas bougé."
   elif [[ "$DNS_LEFT" -eq 0 ]]; then
     ok "Rien à ajouter : tout est déjà en place."
