@@ -24,24 +24,26 @@ jobs:
     defaults:
       run:
         working-directory: cortex
-    # Vrai Postgres pour les tests gardés par CORTEX_TEST_PG_URL (réservation
-    # concurrente sur connexions parallèles, pg_dump → pg_restore -l). Même
-    # version majeure que la prod (18) ; le client 18 est installé depuis PGDG
-    # ci-dessous (pg_dump doit être ≥ serveur).
-    services:
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_HOST_AUTH_METHOD: trust
-          POSTGRES_DB: cortextest
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
     steps:
       - uses: actions/checkout@v4
+
+      # Vrai Postgres pour les tests gardés par CORTEX_TEST_PG_URL (réservation
+      # concurrente sur connexions parallèles, pg_dump → pg_restore -l). Même
+      # version majeure que la prod (18) ; le client 18 est installé depuis PGDG
+      # ci-dessous (pg_dump doit être ≥ serveur).
+      # Démarré ici plutôt qu'en `services:` : un service ne sait tirer son image
+      # que d'un seul registre, et aucun ne répond toujours (.ci/pull-official.sh).
+      - name: Postgres 18 (base des tests)
+        run: |
+          bash .ci/pull-official.sh postgres:18
+          docker run -d --name postgres -p 5432:5432 \
+            -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=cortextest postgres:18
+          # En TCP : pendant son initialisation, le serveur ne répond que sur son socket local.
+          for i in $(seq 1 30); do
+            docker exec postgres pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec postgres pg_isready -h 127.0.0.1 -U postgres
 
       - uses: actions/setup-node@v4
         with:
@@ -135,6 +137,12 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+
+      # L'image de base est tirée de la première source qui répond, sous le nom
+      # que lit le Dockerfile (cortex/.ci/pull-official.sh). Le Dockerfile ne
+      # change pas : l'hébergeur construit l'image de production de son côté.
+      - name: Image de base (première source qui répond)
+        run: bash cortex/.ci/pull-official.sh node:22-slim
 
       - name: Build de l'image (contexte = racine du repo)
         run: docker build -t cortex-app .
