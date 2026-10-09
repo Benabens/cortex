@@ -125,8 +125,8 @@ LANDING_URL=https://⟨landing⟩
 LEGAL_TERMS_VERSION=2026-10
 # Adresse de contact affichée dans l'app (défaut : celle de l'éditeur).
 # CONTACT_EMAIL=support@⟨ton-domaine⟩
-# Adresse qui reçoit les demandes de rétractation (et les alertes de dépense,
-# à défaut de CORTEX_OWNER_EMAIL).
+# Adresse qui reçoit les demandes de rétractation (et, à défaut de
+# CORTEX_OWNER_EMAIL, les alertes de dépense et celles du rappel de reconduction).
 PUBLISHER_EMAIL=⟨ton adresse⟩
 
 # — stockage : quota par compte (Mo) sur le volume, + refus sous 10 % d'espace libre —
@@ -347,9 +347,28 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
   consommation) : avec la facturation, le serveur écrit chaque jour, à partir de
   7 h UTC, aux abonnés annuels dont l'échéance arrive dans 60 jours. Un e-mail
   par abonnement et par période (marqueur `renewal_reminder:…` dans
-  `app_meta`), via Resend. À surveiller dans les logs : `renewal_reminder.missed`
-  et `renewal_reminder.disabled` ne doivent jamais apparaître. Détail :
-  `docs/STRIPE-LIVE.md` § 12.
+  `app_meta`), via Resend. `renewal_reminder.missed` et
+  `renewal_reminder.disabled` ne doivent jamais apparaître dans les logs.
+  Détail : `docs/STRIPE-LIVE.md` § 12.
+- **Alertes du rappel de reconduction** : quand le rappel échoue, un e-mail part
+  à la même adresse que les alertes de dépense (`CORTEX_OWNER_EMAIL`, à défaut
+  `PUBLISHER_EMAIL`). Trois cas : rappel **hors délai**
+  (`renewal_reminder.missed`), rappel **en échec** que réessayer ne réparera pas
+  (`renewal_reminder.not_sent` en erreur : clé Stripe, refus 4xx de Resend,
+  compte sans adresse), rappels **désactivés** au démarrage
+  (`renewal_reminder.disabled`). Au plus un e-mail par cas et par jour, même
+  avec plusieurs instances (clé `renewal_alert:…` dans `app_meta`) ; il nomme
+  chaque abonné concerné (adresse, compte, abonnement), sa date de reconduction,
+  et dit quoi faire. Un échec qui dure, ou des rappels désactivés, sont
+  rappelés chaque jour ; un rappel hors délai est dit une fois, et retenté à
+  chaque passage tant que l'e-mail n'est pas parti (deux fois au pire, si un
+  envoi resté sans réponse la veille avait en fait été accepté). Aucune
+  variable à ajouter. Sans destinataire ou sans `RESEND_API_KEY`, aucune alerte
+  ne part : le serveur l'écrit à son démarrage (`renewal_alert.disabled`). Sans
+  `RESEND_API_KEY`, les rappels eux-mêmes sont désactivés
+  (`renewal_reminder.disabled`). **Limite** : l'alerte passe par Resend. Si
+  c'est Resend qui refuse (clé révoquée, domaine non vérifié), elle ne part
+  pas, et il ne reste que `renewal_alert.not_sent` dans les logs.
 - **Kill-switch immédiat** : Variables → `SPEND_CAP_USD=0` → Redeploy
   (~1 min). Toute génération payante est coupée avec un message propre.
 - **Métriques** : `curl -H 'Authorization: Bearer ⟨METRICS_TOKEN⟩' https://⟨domaine⟩/api/metrics` (le jeton n'est plus accepté en `?token=`)
@@ -363,6 +382,16 @@ le conteneur sans prévenir personne : un plantage de nuit passe inaperçu. Pose
 `SENTRY_DSN` (offre gratuite suffisante) et les erreurs du serveur **et des
 workers** remontent, avec alerte. Sans la variable, **rien ne change** : le SDK
 n'est même pas chargé.
+
+Sans Sentry, deux choses arrivent quand même par e-mail : les alertes de
+dépense et celles du rappel de reconduction (ci-dessus). Tout le reste (un
+plantage, une génération en erreur) ne se lit que dans les logs.
+
+À savoir avant de compter sur Sentry pour le rappel de reconduction : ses
+échecs (`renewal_reminder.missed`, `.not_sent`, `.disabled`) sont des lignes de
+journal, écrites sans passer par `captureError`. Poser `SENTRY_DSN` ne les
+ferait pas remonter ; aujourd'hui seul un job en erreur est signalé ainsi
+(`cortex/scripts/run-job.ts`).
 
 Ce qui part : type et message d'erreur, pile, service (`web` / `worker`), URL
 **sans paramètres**. Ce qui ne part **jamais** : e-mail, identifiant de compte,
@@ -575,7 +604,10 @@ quotidiens (`DAILY_GEN_QUOTA`, `DAILY_ASSIST_QUOTA`).
       ou jusqu'à ce qu'on le relève. Dépense du mois : requête du § 7.
       (`SPEND_CAP_PER_USER_USD`, lui, est par compte et par jour.)
 - [ ] `RESEND_API_KEY` posée, et `CORTEX_OWNER_EMAIL` ou `PUBLISHER_EMAIL` :
-      sans elles, les alertes de dépense à 80 % et 100 % ne partent pas.
+      sans elles, ni les alertes de dépense à 80 % et 100 %, ni celles du rappel
+      de reconduction ne partent. Au démarrage, les logs ne doivent montrer ni
+      `spend_alert.disabled`, ni `renewal_alert.disabled`, ni
+      `renewal_reminder.disabled`.
 - [ ] Un plafond de dépense dur côté Anthropic.
 - [ ] Console Google Cloud → écran de consentement OAuth : état **« En
       production »**. En « Test », seuls les comptes de test passent, et un

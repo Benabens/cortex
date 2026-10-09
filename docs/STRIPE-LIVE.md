@@ -209,7 +209,7 @@ elles sont déjà justes :
 | `LEGAL_TERMS_VERSION` | la version des CGV publiées |
 | `SIGNUP_FREE_CREDITS` | `2` |
 | `SUBSCRIPTION_MONTHLY_CREDITS` | `20` (ou absente) |
-| `PUBLISHER_EMAIL` | l'adresse qui reçoit les demandes de rétractation |
+| `PUBLISHER_EMAIL` | l'adresse qui reçoit les demandes de rétractation et, à défaut de `CORTEX_OWNER_EMAIL`, les alertes (dépense, rappel de reconduction : § 12) |
 
 Tant que la clé est une clé de test et que l'instance est ouverte au public,
 la page « Abonnement & crédits » affiche « Les achats ouvrent bientôt » et le
@@ -365,6 +365,56 @@ abonnements.
 | `renewal_reminder.skipped` | candidat en base que Stripe ne reconduira pas à cette date |
 | `renewal_reminder.missed` | **erreur** : délai légal dépassé sans e-mail confirmé, pour un abonnement que Stripe reconduira. Rien n'est envoyé hors délai ; cet abonné pourra résilier sans frais après la reconduction. Avec `unconfirmed: true`, un essai est resté sans réponse de Resend : l'e-mail est peut-être parti à temps, à vérifier dans le journal de Resend. Cas connu sans aucun envoi : résiliation programmée puis annulée à moins d'un mois de l'échéance |
 | `renewal_reminder.disabled` | **erreur au démarrage** : il manque une variable, aucun rappel ne part |
+| `renewal_alert.sent` | e-mail d'alerte parti au propriétaire (`kind` : `missed` hors délai, `refused` en échec, `reminders_off` rappels désactivés) |
+| `renewal_alert.not_sent` | **avertissement** : l'alerte n'a pas pu partir (raison jointe) ; elle est retentée au passage ou au tick suivant |
+| `renewal_alert.disabled` | **avertissement au démarrage** : aucune adresse d'alerte ou pas de `RESEND_API_KEY`, les échecs du rappel ne se liront que dans les logs |
+
+**Alerte par e-mail.** Personne ne lit les logs tous les jours, et un rappel
+manqué coûte un droit de résiliation sans frais. Trois de ces événements
+t'écrivent donc, à l'adresse des alertes de dépense (`CORTEX_OWNER_EMAIL`, à
+défaut `PUBLISHER_EMAIL`), sans variable à ajouter
+(`cortex/lib/billing/renewal-alerts.ts`) :
+
+| Alerte | Déclenchée par | Ce que dit l'e-mail |
+|---|---|---|
+| Rappel **hors délai** | `renewal_reminder.missed` | l'abonné (adresse, compte, abonnement), sa date de reconduction, si un essai est resté sans réponse de Resend ; ce qu'il peut exiger après la reconduction ; vérifier le journal de Resend, le prévenir, rembourser s'il résilie |
+| Rappel **en échec** | `renewal_reminder.not_sent` en **erreur** | l'abonné, sa date de reconduction, la cause, et le correctif selon la cause (droits de la clé Stripe, mode de la clé, adresse du compte, clé ou domaine Resend) |
+| Rappels **désactivés** | `renewal_reminder.disabled` | toutes les variables qui manquent ; les poser sur Railway et redéployer |
+
+- **Au plus un e-mail par alerte et par jour (UTC)**, même avec plusieurs
+  instances ou des redéploiements : la clé `renewal_alert:<alerte>:<jour>` est
+  réclamée dans `app_meta`, comme un seuil de dépense. Plusieurs abonnés le même
+  jour : un seul e-mail, qui les nomme tous. Une seule exception, voulue : si
+  l'envoi d'une alerte « hors délai » est resté sans réponse de Resend et qu'un
+  **autre** abonné passe hors délai le même jour, un second e-mail part plutôt
+  que de taire cet abonné.
+- **Un échec qui dure** est constaté à chaque passage quotidien : tu es rappelé
+  chaque jour jusqu'à ce que la cause soit corrigée, ou que le rappel passe hors
+  délai.
+- **Des rappels désactivés** sont signalés au démarrage, puis une fois par jour
+  tant que la variable manque (le serveur y revient toutes les 30 minutes : si
+  Resend était en panne au démarrage, l'e-mail part au tick suivant).
+- **Un rappel hors délai** n'est constaté qu'une fois. Il est noté dans
+  `app_meta` (`renewal_alert_pending:<abonnement>:<échéance>`, sans donnée
+  personnelle) et la ligne n'est retirée qu'une fois l'e-mail parti : si Resend
+  est en panne ce jour-là, l'alerte part au passage suivant, le lendemain en
+  général. Au pire un doublon : si Resend avait accepté un envoi resté sans
+  réponse, l'e-mail repart le lendemain. Reste un cas hors
+  de portée : la base qui refuse cette note à l'instant même où elle vient
+  d'accepter le marqueur « hors délai ». Seul le journal porte alors le constat.
+- **Les pannes passagères n'alertent pas** : Stripe injoignable, 5xx ou 429 de
+  Resend, envoi resté sans réponse. Elles se réparent au passage suivant.
+- **Limite à connaître** : l'alerte passe par Resend. Si le rappel échoue parce
+  que Resend refuse tout (clé révoquée, domaine de l'expéditeur non vérifié),
+  l'alerte est refusée elle aussi, et il ne reste que `renewal_alert.not_sent`
+  dans les logs. Rien d'autre ne couvre ce cas aujourd'hui : poser `SENTRY_DSN`
+  ne suffirait pas, ces événements sont des lignes de journal que rien n'envoie
+  à Sentry (`DEPLOY.md` § 9). D'où un réflexe : après tout changement de clé ou
+  de domaine chez Resend, lire les logs du démarrage et du passage de 7 h UTC.
+- **Non couverts** : `renewal_reminder.failed` (exception inattendue sur un
+  abonnement) et `renewal_reminder.sweep_failed` (passage entier en panne, base
+  injoignable) restent dans les logs seulement. L'abonnement est réessayé le
+  lendemain, le passage au tick suivant.
 
 Limite connue : l'app ne connaît que la période **payée** (écrite par
 `invoice.paid`). Une échéance déplacée à la main dans Stripe, sans facture,
