@@ -25,9 +25,10 @@
  *  - refus net de Resend : rien n'est parti, le marqueur est rendu, nouvel essai
  *    au passage du lendemain ;
  *  - issue inconnue (pas de réponse de Resend, process tué en plein envoi) :
- *    la réclamation reste ; tant qu'il en reste une, chaque tick (30 min)
- *    refait un passage, qui la reprend sous la MÊME clé d'idempotence Resend.
- *    Resend retient la clé 24 h : reprise le jour même, le doublon est écarté.
+ *    la réclamation reste. Chaque tick (30 min) repasse alors sur CET abonnement
+ *    seulement, et la reprend sous la MÊME clé d'idempotence Resend. Resend
+ *    retient la clé 24 h : reprise le jour même, le doublon est écarté ; passé
+ *    24 h, la reprise n'apporte plus rien et revient au passage quotidien.
  *
  * TÂCHE QUOTIDIENNE lancée par le serveur lui-même (instrumentation.ts), comme
  * la sauvegarde : le jour UTC est réclamé dans `app_meta`, une seule instance
@@ -36,7 +37,7 @@
 import type Stripe from "stripe";
 import { randomUUID } from "node:crypto";
 import { authAll, authGet, authRun } from "@/db/auth-store";
-import { claimOnce, isSent, releaseClaim, SENT, settleClaim } from "@/lib/claim-once";
+import { claimOnce, isSent, releaseClaim, SENT, settleClaim, STALE_CLAIM_MS } from "@/lib/claim-once";
 import { contactEmail } from "@/lib/contact";
 import { sendEmail } from "@/lib/email";
 import { legalLinks } from "@/lib/legal";
@@ -248,8 +249,12 @@ export type ReminderReport = {
 type Row = ReminderSub & { user_id: string; email: string | null };
 type Lookup = (subscriptionId: string) => Promise<RenewalFacts | null>;
 
-/** Un passage : envoie les rappels dus. Ne lève que si la base ou la configuration manquent. */
-export async function sendRenewalReminders(opts: { now?: Date; lookup?: Lookup } = {}): Promise<ReminderReport> {
+/**
+ * Un passage : envoie les rappels dus. `only` le restreint à quelques
+ * abonnements (reprise d'un envoi interrompu, sans rejouer les autres). Ne lève
+ * que si la base ou la configuration manquent.
+ */
+export async function sendRenewalReminders(opts: { now?: Date; lookup?: Lookup; only?: ReadonlySet<string> } = {}): Promise<ReminderReport> {
   const now = fmt(opts.now ?? new Date());
   const origin = publicOrigin();
   if (!origin) throw new Error("AUTH_URL absente : impossible d'écrire le lien vers la page Compte");
@@ -260,6 +265,7 @@ export async function sendRenewalReminders(opts: { now?: Date; lookup?: Lookup }
   );
   const report: ReminderReport = { sent: 0, failed: 0, pending: 0, skipped: 0 };
   for (const row of rows) {
+    if (opts.only && !opts.only.has(row.subscription_id!)) continue;
     try {
       await remindOne(row, now, `${origin}/compte`, opts.lookup ?? stripeRenewalFacts, report);
     } catch (e) {
@@ -337,23 +343,34 @@ async function remindOne(row: Row, now: string, accountUrl: string, lookup: Look
   } else {
     await releaseClaim(key, claimed.token);
     // Un 4xx (clé, expéditeur, destinataire refusé) se répétera demain à l'identique : il faut le voir.
-    retryTomorrow(outcome.reason, outcome.status && outcome.status < 500 ? "error" : "warn");
+    // Sauf 429 : une limite de débit passe toute seule.
+    const lasting = !!outcome.status && outcome.status < 500 && outcome.status !== 429;
+    retryTomorrow(outcome.reason, lasting ? "error" : "warn");
   }
 }
 
 /**
- * Délai légal dépassé sans qu'aucun rappel soit parti, pour un abonnement que
+ * Délai légal dépassé sans qu'aucun rappel soit CONFIRMÉ, pour un abonnement que
  * Stripe reconduira bien : on le dit fort, une seule fois, et on n'envoie rien
  * hors délai. Écriture puis relecture, comme une réclamation (lib/claim-once).
+ * Une réclamation restée sans suite (Resend n'a jamais répondu) est close ici :
+ * l'e-mail est peut-être parti, mais rien ne le prouve.
  */
 async function flagMissed(subscription: string, user: string, periodEnd: string): Promise<void> {
   const key = markerKey(subscription, periodEnd);
   const mine = `${MISSED} ${new Date().toISOString()} ${randomUUID()}`;
   await authRun(`INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING`, key, mine);
-  if ((await readMarker(key)) !== mine) return;
+  let held = await readMarker(key);
+  let unconfirmed = false;
+  if (held && held !== mine && !closed(held) && Date.now() - Date.parse(held.split(" ")[0]) > STALE_CLAIM_MS) {
+    await authRun(`UPDATE app_meta SET value = ? WHERE key = ? AND value = ?`, mine, key, held);
+    held = await readMarker(key);
+    unconfirmed = true;
+  }
+  if (held !== mine) return;
   log("error", "renewal_reminder.missed", {
-    subscription, user, periodEnd,
-    message: "Rappel de reconduction (art. L215-1) hors délai et jamais envoyé : après la reconduction, ce client peut résilier sans frais à tout moment et être remboursé de la période restante.",
+    subscription, user, periodEnd, unconfirmed,
+    message: `Rappel de reconduction (art. L215-1) hors délai et ${unconfirmed ? "jamais confirmé (un essai est resté sans réponse de Resend)" : "jamais envoyé"} : après la reconduction, ce client peut résilier sans frais à tout moment et être remboursé de la période restante.`,
   });
 }
 
@@ -389,22 +406,27 @@ async function reopenDay(day: string): Promise<void> {
   await authRun(`UPDATE app_meta SET value = ? WHERE key = ? AND value = ?`, `${day}:retry`, DAY_KEY, day);
 }
 /**
- * Reste-t-il une réclamation jamais conclue ? (issue inconnue chez Resend,
- * process tué entre l'envoi et son marquage.) Elle doit être reprise le jour
- * même : demain, Resend aurait oublié sa clé d'idempotence.
+ * Abonnements dont une réclamation attend sa reprise : jamais conclue (issue
+ * inconnue chez Resend, process tué entre l'envoi et son marquage), et de moins
+ * de 24 h. Le jeton commence par sa date : passé 24 h, Resend a oublié la clé
+ * d'idempotence, reprendre plus tôt que le passage quotidien n'écarterait plus
+ * rien. Une réclamation dont l'abonnement n'est plus candidat (résilié depuis)
+ * cesse donc d'elle-même de provoquer des reprises.
  */
-async function unsettledReminder(): Promise<boolean> {
-  const row = await authGet<{ key: string }>(
-    `SELECT key FROM app_meta WHERE key LIKE ? AND value NOT LIKE ? AND value NOT LIKE ? LIMIT 1`,
-    "renewal_reminder:%", `${SENT}%`, `${MISSED}%`,
+async function unsettledSubscriptions(now: Date): Promise<string[]> {
+  const rows = await authAll<{ key: string }>(
+    `SELECT key FROM app_meta WHERE key LIKE ? AND value NOT LIKE ? AND value NOT LIKE ? AND value > ?`,
+    "renewal_reminder:%", `${SENT}%`, `${MISSED}%`, new Date(now.getTime() - DAY_MS).toISOString(),
   );
-  return !!row;
+  return rows.map((r) => r.key.split(":")[1]).filter(Boolean);
 }
 
 export type ReminderTick = "skipped:billing-off" | "skipped:not-configured" | "skipped:too-early" | "skipped:done" | "ok" | "retry" | "failed";
 
 export async function renewalReminderTick(opts: {
-  now?: Date; env?: Partial<NodeJS.ProcessEnv>; run?: (now: Date) => Promise<ReminderReport>;
+  now?: Date; env?: Partial<NodeJS.ProcessEnv>;
+  /** Le passage ; `only` : la reprise ne porte que sur ces abonnements. */
+  run?: (now: Date, only?: ReadonlySet<string>) => Promise<ReminderReport>;
 } = {}): Promise<ReminderTick> {
   const now = opts.now ?? new Date();
   const env = opts.env ?? process.env;
@@ -412,18 +434,24 @@ export async function renewalReminderTick(opts: {
   if (renewalRemindersBlocker(env)) return "skipped:not-configured";
   if (now.getUTCHours() < REMINDER_HOUR_UTC) return "skipped:too-early";
   const day = now.toISOString().slice(0, 10);
-  // Le passage du jour est fait : on n'y revient que pour une réclamation restée
-  // sans suite (chaque abonnement garde sa propre réclamation, donc pas de doublon).
-  if (!(await claimDay(day)) && !(await unsettledReminder())) return "skipped:done";
+  const fresh = await claimDay(day);
+  let only: ReadonlySet<string> | undefined;
+  if (!fresh) {
+    // Le passage du jour est fait : on n'y revient que pour les envois restés sans
+    // suite, et pour eux seuls. Un refus net, lui, attend bien demain.
+    const pending = await unsettledSubscriptions(now);
+    if (!pending.length) return "skipped:done";
+    only = new Set(pending);
+  }
   let report: ReminderReport;
   try {
-    report = await (opts.run ?? ((at) => sendRenewalReminders({ now: at })))(now);
+    report = await (opts.run ?? ((at, subset) => sendRenewalReminders({ now: at, only: subset })))(now, only);
   } catch (e) {
-    await reopenDay(day);
+    if (fresh) await reopenDay(day);
     log("error", "renewal_reminder.sweep_failed", { day, message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
     return "failed";
   }
-  log("info", "renewal_reminder.sweep", { day, ...report });
+  log("info", "renewal_reminder.sweep", { day, ...report, ...(only ? { resumed: only.size } : {}) });
   return report.pending === 0 ? "ok" : "retry";
 }
 
