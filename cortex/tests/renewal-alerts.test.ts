@@ -297,6 +297,29 @@ test("envoi d'alerte resté sans réponse, puis un second rappel hors délai le 
   assert.equal(delivered.length, 2, "seule exception à « un par jour » : taire le second abonné serait pire");
 });
 
+test("alerte « en échec » restée sans réponse, puis une liste différente le même jour : pas de second e-mail, le refus qui dure revient demain", async (t) => {
+  const { delivered, state } = idempotentResend(t);
+  logs(t);
+  await subscriber("muet", "2027-11-10 12:00:00");
+  await authRun(`UPDATE users SET email = NULL WHERE id = ?`, "muet");
+  mock.timers.enable({ apis: ["Date"], now: at("2027-09-17 07:00:00").getTime() });
+  try {
+    await sendRenewalReminders({ lookup: stripe }); // accepté par Resend, réponse perdue
+    state.silent = false;
+    await subscriber("sourd", "2027-11-12 12:00:00");
+    await authRun(`UPDATE users SET email = NULL WHERE id = ?`, "sourd");
+    mock.timers.setTime(at("2027-09-17 07:30:00").getTime());
+    await sendRenewalReminders({ lookup: stripe });
+    assert.equal(delivered.length, 1, "un par jour : Resend tient la reprise pour le premier envoi");
+    mock.timers.setTime(at("2027-09-18 07:00:00").getTime());
+    await sendRenewalReminders({ lookup: stripe });
+  } finally {
+    mock.timers.reset();
+  }
+  assert.equal(delivered.length, 2);
+  assert.match(delivered[1].text, /abonnement sub_sourd/, "le second abonné est nommé le lendemain");
+});
+
 test("rappels désactivés au démarrage : un e-mail au propriétaire, qui nomme toutes les variables manquantes et dit quoi faire", async (t) => {
   const { toOwner } = resend(t);
   logs(t);
@@ -345,6 +368,26 @@ test("rappels désactivés, Resend en panne au démarrage : l'alerte repart au t
   assert.deepEqual(toOwner().map((m) => m.subject), ["Cortex : rappels de reconduction désactivés", "Cortex : rappels de reconduction désactivés"]);
 });
 
+test("rappels désactivés et aucune adresse d'alerte : le journal le dit une fois au démarrage, sans essais répétés", async (t) => {
+  const { mails } = resend(t);
+  const events = logs(t);
+  delete process.env.STRIPE_SECRET_KEY;
+  delete process.env.CORTEX_OWNER_EMAIL;
+  mock.timers.enable({ apis: ["Date", "setInterval"], now: at("2027-08-08 09:00:00").getTime() });
+  try {
+    assert.equal(startRenewalReminderScheduler(), null);
+    mock.timers.tick(3 * REMINDER_TICK_MS);
+    await new Promise((r) => setTimeout(r, 30));
+  } finally {
+    stopScheduler();
+    mock.timers.reset();
+    process.env.STRIPE_SECRET_KEY = "sk_test_jamais_appelee";
+    process.env.CORTEX_OWNER_EMAIL = OWNER;
+  }
+  assert.deepEqual(events.filter((e) => e.evt.startsWith("renewal_")).map((e) => e.evt).sort(), ["renewal_alert.disabled", "renewal_reminder.disabled"]);
+  assert.equal(mails.length, 0);
+});
+
 test("démarrage sans adresse d'alerte : le journal prévient que les échecs du rappel ne seront signalés à personne", async (t) => {
   const { mails } = resend(t);
   const events = logs(t);
@@ -369,7 +412,7 @@ test("une ligne en attente illisible ne retient pas l'alerte des autres abonnés
   await sendRenewalReminders({ now: at("2027-09-17 07:00:00"), lookup: stripe });
   assert.equal(toOwner().length, 1);
   assert.match(toOwner()[0].text, /abonnement sub_oublie\) : reconduction le 7 octobre 2027/);
-  assert.match(toOwner()[0].text, /adresse inconnue \(compte inconnu, abonnement sub_fantome\) : reconduction le une date illisible/);
+  assert.match(toOwner()[0].text, /adresse inconnue \(compte inconnu, abonnement sub_fantome\) : date de reconduction illisible\./);
 });
 
 test("la base refuse tout ce que l'alerte écrit : le rappel du client part quand même, et rien ne lève, ni au passage ni au démarrage", async (t) => {

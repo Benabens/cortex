@@ -367,7 +367,7 @@ abonnements.
 | `renewal_reminder.disabled` | **erreur au démarrage** : il manque une variable, aucun rappel ne part |
 | `renewal_alert.sent` | e-mail d'alerte parti au propriétaire (`kind` : `missed` hors délai, `refused` en échec, `reminders_off` rappels désactivés) |
 | `renewal_alert.not_sent` | **avertissement** : l'alerte n'a pas pu partir (raison jointe) ; elle est retentée au passage ou au tick suivant |
-| `renewal_alert.disabled` | **avertissement au démarrage** : aucune adresse d'alerte, les échecs du rappel ne se liront que dans les logs |
+| `renewal_alert.disabled` | **avertissement au démarrage** : aucune adresse d'alerte ou pas de `RESEND_API_KEY`, les échecs du rappel ne se liront que dans les logs |
 
 **Alerte par e-mail.** Personne ne lit les logs tous les jours, et un rappel
 manqué coûte un droit de résiliation sans frais. Trois de ces événements
@@ -397,7 +397,9 @@ défaut `PUBLISHER_EMAIL`), sans variable à ajouter
 - **Un rappel hors délai** n'est constaté qu'une fois. Il est noté dans
   `app_meta` (`renewal_alert_pending:<abonnement>:<échéance>`, sans donnée
   personnelle) et la ligne n'est retirée qu'une fois l'e-mail parti : si Resend
-  est en panne ce jour-là, l'alerte part au passage suivant. Reste un cas hors
+  est en panne ce jour-là, l'alerte part au passage suivant, le lendemain en
+  général. Au pire un doublon : si Resend avait accepté un envoi resté sans
+  réponse, l'e-mail repart le lendemain. Reste un cas hors
   de portée : la base qui refuse cette note à l'instant même où elle vient
   d'accepter le marqueur « hors délai ». Seul le journal porte alors le constat.
 - **Les pannes passagères n'alertent pas** : Stripe injoignable, 5xx ou 429 de

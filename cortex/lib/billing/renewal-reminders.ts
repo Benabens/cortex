@@ -481,13 +481,16 @@ export async function renewalReminderTick(opts: {
  * au propriétaire.
  */
 export function startRenewalReminderScheduler(): NodeJS.Timeout | null {
-  if (process.env.BILLING_ENABLED !== "1") return null;
   const g = globalThis as { __cortexRenewalTimer?: NodeJS.Timeout };
   if (g.__cortexRenewalTimer) clearInterval(g.__cortexRenewalTimer);
+  if (process.env.BILLING_ENABLED !== "1") return null;
+  const mute = warnIfReminderAlertsBlocked();
   const blockers = renewalRemindersBlockers();
   if (blockers.length) {
     const reason = blockers.join(", ");
     log("error", "renewal_reminder.disabled", { reason, message: `Rappels de reconduction de l'abonnement annuel (art. L215-1) NON envoyés : ${reason}.` });
+    // Rien à qui l'écrire : le journal vient de le dire, et la configuration ne changera pas avant un redémarrage.
+    if (mute) return null;
     // Le propriétaire en est prévenu par e-mail, sans attendre (l'alerte ne retient pas le démarrage
     // et ne lève jamais), puis à chaque tick : un e-mail par jour tant que la variable manque, et un
     // nouvel essai si Resend était en panne au démarrage.
@@ -497,7 +500,6 @@ export function startRenewalReminderScheduler(): NodeJS.Timeout | null {
     g.__cortexRenewalTimer.unref?.();
     return null;
   }
-  warnIfReminderAlertsBlocked();
   const tick = () => renewalReminderTick().catch((e) => log("error", "renewal_reminder.sweep_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) }));
   // Premier passage différé : laisser la base et les jobs démarrer.
   setTimeout(tick, 90_000).unref?.();

@@ -46,11 +46,11 @@ export type RefusedReminder = {
 type Mail = { subject: string; text: string };
 
 const PARIS_DATE = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" });
-/** Le jour de la reconduction, tel que le lit l'abonné (heure de Paris). */
-function renewalDay(periodEnd: string): string {
+/** « reconduction le 7 octobre 2027 » : le jour que lit l'abonné (heure de Paris). */
+function renewsOn(periodEnd: string): string {
   const date = new Date(periodEnd.replace(" ", "T") + "Z");
   // Une échéance illisible ne doit pas retenir l'alerte de tous les autres abonnés.
-  return Number.isNaN(date.getTime()) ? "une date illisible" : PARIS_DATE.format(date);
+  return Number.isNaN(date.getTime()) ? "date de reconduction illisible" : `reconduction le ${PARIS_DATE.format(date)}`;
 }
 const subscribers = (n: number) => `${n} abonné${n > 1 ? "s" : ""}`;
 const who = (p: { subscription: string; user: string | null; email: string | null }) => `${p.email ?? "adresse inconnue"} (compte ${p.user ?? "inconnu"}, abonnement ${p.subscription})`;
@@ -62,7 +62,7 @@ function refusedMail(refused: RefusedReminder[]): Mail {
     subject: `Cortex : rappel de reconduction en échec (${subscribers(refused.length)})`,
     text: [
       `Le rappel de reconduction de l'abonnement annuel (art. L215-1 du Code de la consommation) n'a pas pu partir aujourd'hui pour ${subscribers(refused.length)}, et réessayer ne suffira pas : il faut corriger la cause.`,
-      refused.map((p) => `- ${who(p)} : reconduction le ${renewalDay(p.periodEnd)}. Cause : ${p.reason.replace(/\.$/, "")}.`).join("\n"),
+      refused.map((p) => `- ${who(p)} : ${renewsOn(p.periodEnd)}. Cause : ${p.reason.replace(/\.$/, "")}.`).join("\n"),
       "L'app réessaie chaque jour. Le rappel doit partir au plus tard un mois avant la veille de la reconduction : ensuite il est hors délai, et l'abonné peut résilier sans frais après la reconduction.",
       [
         "À faire, selon la cause :",
@@ -81,7 +81,9 @@ function refusedMail(refused: RefusedReminder[]): Mail {
  * Un rappel hors délai n'est constaté qu'UNE fois (renewal-reminders, flagMissed) :
  * si l'alerte ne part pas ce jour-là (Resend en panne, alerte du jour déjà partie),
  * rien ne la rejouerait. Le constat est donc noté dans `app_meta`, et la ligne
- * n'est retirée qu'une fois l'e-mail parti : chaque passage suivant réessaie.
+ * n'est retirée qu'une fois l'e-mail parti : chaque passage suivant réessaie,
+ * le lendemain en général. Au pire un doublon : si Resend avait accepté un envoi
+ * resté sans réponse, la clé du lendemain n'est plus la même et l'e-mail repart.
  * Sans donnée personnelle : identifiant d'abonnement et échéance, comme le
  * marqueur du rappel ; l'adresse est relue en base au moment d'écrire.
  *
@@ -126,7 +128,7 @@ function missedMail(missed: MissedReminder[]): Mail {
     subject: `Cortex : rappel de reconduction hors délai (${subscribers(missed.length)})`,
     text: [
       `Le rappel de reconduction de l'abonnement annuel (art. L215-1 du Code de la consommation) n'est pas parti à temps pour ${subscribers(missed.length)}. Le délai légal est dépassé : l'app n'enverra plus rien pour cette période.`,
-      missed.map((m) => `- ${who(m)} : reconduction le ${renewalDay(m.periodEnd)}. ${m.unconfirmed ? "Un essai est resté sans réponse de Resend : l'e-mail est peut-être parti à temps." : "Aucun e-mail n'est parti."}`).join("\n"),
+      missed.map((m) => `- ${who(m)} : ${renewsOn(m.periodEnd)}. ${m.unconfirmed ? "Un essai est resté sans réponse de Resend : l'e-mail est peut-être parti à temps." : "Aucun e-mail n'est parti."}`).join("\n"),
       "Conséquence : après la reconduction, l'abonné peut résilier sans frais à tout moment et se faire rembourser la période restante.",
       ["À faire :", ...steps.map((step, i) => `${i + 1}. ${step}`)].join("\n"),
       DETAIL,
@@ -223,8 +225,12 @@ export async function alertRemindersDisabled(reason: string): Promise<void> {
   });
 }
 
-/** Démarrage du serveur : si rien ne peut être écrit au propriétaire, le dire maintenant, pas le jour où un rappel échoue. */
-export function warnIfReminderAlertsBlocked(): void {
+/**
+ * Démarrage du serveur : si rien ne peut être écrit au propriétaire, le dire
+ * maintenant, pas le jour où un rappel échoue. Rend vrai dans ce cas.
+ */
+export function warnIfReminderAlertsBlocked(): boolean {
   const reason = ownerAlertBlocker();
   if (reason) log("warn", "renewal_alert.disabled", { reason, message: `Les échecs du rappel de reconduction ne seront signalés par e-mail à personne (${reason}) : ils ne se liront que dans les logs.` });
+  return !!reason;
 }

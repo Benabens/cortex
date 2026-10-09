@@ -361,14 +361,14 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
   chaque abonné concerné (adresse, compte, abonnement), sa date de reconduction,
   et dit quoi faire. Un échec qui dure, ou des rappels désactivés, sont
   rappelés chaque jour ; un rappel hors délai est dit une fois, et retenté à
-  chaque passage tant que l'e-mail n'est pas parti. Aucune variable à ajouter.
-  Sans destinataire, rien ne part : le serveur l'écrit à son démarrage
-  (`renewal_alert.disabled`). Sans `RESEND_API_KEY`, ce sont les rappels
-  eux-mêmes qui sont désactivés, et l'alerte ne peut pas partir non plus
-  (`renewal_reminder.disabled`, puis `renewal_alert.not_sent`). **Limite** :
-  l'alerte passe par Resend. Si c'est Resend qui refuse (clé révoquée, domaine
-  non vérifié), elle ne part pas, et il ne reste que `renewal_alert.not_sent`
-  dans les logs.
+  chaque passage tant que l'e-mail n'est pas parti (deux fois au pire, si un
+  envoi resté sans réponse la veille avait en fait été accepté). Aucune
+  variable à ajouter. Sans destinataire ou sans `RESEND_API_KEY`, aucune alerte
+  ne part : le serveur l'écrit à son démarrage (`renewal_alert.disabled`). Sans
+  `RESEND_API_KEY`, les rappels eux-mêmes sont désactivés
+  (`renewal_reminder.disabled`). **Limite** : l'alerte passe par Resend. Si
+  c'est Resend qui refuse (clé révoquée, domaine non vérifié), elle ne part
+  pas, et il ne reste que `renewal_alert.not_sent` dans les logs.
 - **Kill-switch immédiat** : Variables → `SPEND_CAP_USD=0` → Redeploy
   (~1 min). Toute génération payante est coupée avec un message propre.
 - **Métriques** : `curl -H 'Authorization: Bearer ⟨METRICS_TOKEN⟩' https://⟨domaine⟩/api/metrics` (le jeton n'est plus accepté en `?token=`)
