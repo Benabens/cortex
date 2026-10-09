@@ -50,6 +50,10 @@ type Billing = {
     cancelsAtPeriodEnd: boolean;
   } | null;
   costs: { exam: number; qcm: number; exercise: number; assist: number };
+  /** Limites quotidiennes appliquées au compte (null : levée). */
+  quotas?: { gen: number | null; assist: number | null };
+  /** Espace de stockage du compte, en Mo (null : pas de plafond). */
+  storageQuotaMb?: number | null;
   transactions: Tx[];
   offers: Offer[];
 };
@@ -68,6 +72,19 @@ const dateFr = (iso: string | null) => {
   const d = new Date(iso.replace(" ", "T") + (iso.length <= 10 ? "T00:00:00Z" : "Z"));
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("fr-CH", { day: "numeric", month: "long", year: "numeric" });
 };
+
+/**
+ * Les bornes d'usage du compte, dites à côté de l'offre Pro : « autant de cours
+ * que tu veux » parle du NOMBRE de cours (aucun plafond), pas des générations
+ * (crédits, limites par jour) ni des fichiers (stockage). Seules les limites
+ * que le serveur applique sont citées.
+ */
+function accountLimits(quotas: Billing["quotas"], storageMb: Billing["storageQuotaMb"]): string | null {
+  const count = (n: number | null | undefined, unit: string) => (n == null ? null : `${nf.format(n)} ${unit}${n >= 2 ? "s" : ""}`);
+  const daily = [count(quotas?.gen, "génération"), count(quotas?.assist, "aide")].filter(Boolean).join(" et ");
+  const parts = [daily ? `${daily} par jour` : null, storageMb == null ? null : `${nf.format(storageMb)} Mo de fichiers`].filter(Boolean);
+  return parts.length ? `Limites par compte : ${parts.join(", ")}.` : null;
+}
 
 /** Chargement : pur, sans état — testable et réutilisable par le bouton « actualiser ». */
 async function fetchBilling(): Promise<Billing> {
@@ -216,6 +233,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
   // documents publiés l'achat est fermé côté serveur ; hors production
   // (staging), on peut accepter et acheter en test même sans liens.
   const canAccept = data.purchase.enabled;
+  const limits = accountLimits(data.quotas, data.storageQuotaMb);
 
   return (
     <section className="flex flex-col gap-4" aria-labelledby="billing-title">
@@ -327,12 +345,18 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
                 <div className="min-w-0">
                   <div className="text-[0.9rem] font-medium text-ink-1">{o.label}</div>
                   <div className="text-[0.8rem] text-ink-3">
-                    {isSub ? `${nf.format(o.credits)} crédits par mois, non reportables` : `${nf.format(o.credits)} crédits, sans date d’expiration`}
+                    {isSub ? `Autant de cours que tu veux · ${nf.format(o.credits)} crédits par mois, non reportables` : `${nf.format(o.credits)} crédits, sans date d’expiration`}
                     {isSub && hasSub && <span> · tu as déjà un abonnement</span>}
                   </div>
                   {/* Conditions de reconduction, à côté du bouton et AVANT tout achat :
                       elles ne vivaient que dans le bloc « Gérer mon abonnement », invisible
                       pour un compte neuf (audit de pré-lancement). */}
+                  {/* La précision qui borne « autant de cours que tu veux », au même endroit. */}
+                  {isSub && (
+                    <div className="mt-0.5 text-[0.78rem] text-ink-4">
+                      Chaque génération utilise des crédits.{limits ? ` ${limits}` : ""}
+                    </div>
+                  )}
                   {isSub && (
                     <div className="mt-0.5 text-[0.78rem] text-ink-4">
                       Renouvellement automatique chaque {o.interval === "year" ? "année" : "mois"} · résiliable à tout moment

@@ -65,6 +65,22 @@ test("compte sans abonnement, CGV acceptées : consentement par offre avant acti
   assert.match(html, /Mentions légales/);
 });
 
+test("offre Pro : « Autant de cours que tu veux », avec à côté le coût en crédits et les limites du compte", async () => {
+  const html = await render(base({ quotas: { gen: 3, assist: 20 }, storageQuotaMb: 200 }));
+  // Les deux offres Pro (mensuelle, annuelle) la portent ; le pack, non.
+  assert.equal((html.match(/Autant de cours que tu veux · 20 crédits par mois, non reportables/g) ?? []).length, 2);
+  assert.equal((html.match(/Chaque génération utilise des crédits\. Limites par compte : 3 générations et 20 aides par jour, 200 Mo de fichiers\./g) ?? []).length, 2);
+  assert.match(html, /10 crédits, sans date d’expiration/);
+  assert.ok(!/illimit/i.test(html), "aucune promesse d'illimité");
+  // Limites levées ou inconnues : l'écran n'invente aucun chiffre.
+  const open = await render(base({ quotas: { gen: null, assist: null }, storageQuotaMb: null }));
+  assert.match(open, /Chaque génération utilise des crédits\./);
+  assert.ok(!/Limites par compte/.test(open));
+  assert.ok(!/Limites par compte/.test(await render(base())), "réponse d'API sans limites");
+  const partial = await render(base({ quotas: { gen: 1, assist: null }, storageQuotaMb: null }));
+  assert.match(partial, /Limites par compte : 1 génération par jour\./);
+});
+
 test("abonnement actif : reste / plafond, date de recharge, bouton Gérer, abonnements non re-souscriptibles", async () => {
   const html = await render(base({
     balance: 27, purchased: 10,

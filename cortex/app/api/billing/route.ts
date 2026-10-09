@@ -1,9 +1,10 @@
 import { nextRechargeDate, standingOf } from "@/lib/billing/subscription-windows";
 import { billingEnabled, creditCost, fromCenti, getSubscription, listTransactions, purchasedBalanceCenti, subscriptionCreditsCenti } from "@/lib/billing/credits";
-import { usedToday } from "@/lib/billing/guards";
+import { quotaFor, usedToday } from "@/lib/billing/guards";
 import { listOffers } from "@/lib/billing/offers";
 import { contactEmail } from "@/lib/contact";
 import { legalEnglishUrl, legalLinks, purchasesAllowed, stripeConfigured as stripeReady, termsState } from "@/lib/legal";
+import { MiB, storageQuotaBytes } from "@/lib/storage-quota";
 import { useUser } from "@/lib/req";
 import { currentUser } from "@/db/context";
 import { nowStr } from "@/db/q";
@@ -19,6 +20,11 @@ export const dynamic = "force-dynamic";
  * offres avec leur prix Stripe. Tout est exprimé en CRÉDITS (le ledger compte
  * en centièmes). Sans facturation : structure identique, valeurs nulles.
  */
+function storageQuotaMb(): number | null {
+  const bytes = storageQuotaBytes();
+  return bytes === null ? null : bytes / MiB;
+}
+
 export async function GET(req: NextRequest) {
   useUser(req);
   const on = billingEnabled();
@@ -57,10 +63,10 @@ export async function GET(req: NextRequest) {
       : null,
     costs: { exam: fromCenti(creditCost("exam")), qcm: fromCenti(creditCost("qcm")), exercise: fromCenti(creditCost("exercise")), assist: fromCenti(creditCost("assist")) },
     usedToday: { gen: await usedToday("gen"), assist: await usedToday("assist") },
-    quotas: {
-      gen: process.env.DAILY_GEN_QUOTA ? Number(process.env.DAILY_GEN_QUOTA) : null,
-      assist: process.env.DAILY_ASSIST_QUOTA ? Number(process.env.DAILY_ASSIST_QUOTA) : null,
-    },
+    // Limites EFFECTIVES du compte (valeur posée, sinon défaut du déploiement
+    // gardé ; null = levée) : l'écran les affiche à côté de l'offre Pro.
+    quotas: { gen: quotaFor("gen"), assist: quotaFor("assist") },
+    storageQuotaMb: storageQuotaMb(),
     transactions: on
       ? (await listTransactions()).map((t) => ({
           ...t,
