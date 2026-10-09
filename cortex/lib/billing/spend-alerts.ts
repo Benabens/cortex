@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { authGet, authRun } from "@/db/auth-store";
+import { authRun } from "@/db/auth-store";
+import { claimOnce, releaseClaim, SENT, settleClaim, STALE_CLAIM_MS } from "@/lib/claim-once";
 import { sendEmail, type EmailOutcome } from "@/lib/email";
 import { log } from "@/lib/metrics";
 
@@ -11,7 +11,7 @@ import { log } from "@/lib/metrics";
  * UNE fois par seuil, par mois et par valeur du plafond, même avec plusieurs
  * instances (serveur, workers de jobs, redéploiement chevauchant) : le seuil
  * est RÉCLAMÉ dans `app_meta`, dont la clé primaire ne laisse passer qu'un
- * process. Le plafond fait partie de la clé : le relever en cours de mois
+ * process (lib/claim-once). Le plafond fait partie de la clé : le relever en cours de mois
  * réarme les alertes sur la nouvelle valeur.
  *
  * Reprises, au prochain appel payant (il n'y a pas de minuterie) :
@@ -23,8 +23,6 @@ import { log } from "@/lib/metrics";
  */
 const THRESHOLDS = [100, 80] as const;
 const RETRY_MS = 60 * 60_000;
-const STALE_CLAIM_MS = 15 * 60_000;
-const SENT = "sent";
 
 /** Seuils que ce process sait signalés : plus aucune requête pour eux. */
 const settled = new Set<string>();
@@ -46,36 +44,6 @@ export function spendAlertBlocker(env: NodeJS.ProcessEnv = process.env): string 
   if (!env.RESEND_API_KEY) return "RESEND_API_KEY absente";
   if (!recipient(env)) return "aucun destinataire : pose CORTEX_OWNER_EMAIL ou PUBLISHER_EMAIL";
   return null;
-}
-
-type Claim = { state: "won"; token: string; chain: string } | { state: "sent" } | { state: "busy" };
-
-/**
- * Réclame le seuil : « won » pour UN seul process ; « sent » s'il est déjà
- * signalé, « busy » si un autre process s'en occupe. Écriture puis relecture
- * d'un jeton propre à cet essai, plutôt qu'un RETURNING : `authRun` attend la
- * fin d'une transaction sqlite en cours, dont un ROLLBACK emporterait la ligne.
- *
- * Jeton : « date chaîne essai ». La chaîne nomme une suite d'essais dont on ne
- * sait pas si l'un a abouti : elle passe à qui reprend une réclamation restée
- * sans suite, et sert de clé d'idempotence. Un refus net clôt la chaîne.
- */
-async function claim(key: string): Promise<Claim> {
-  const read = async () => (await authGet<{ value: string }>(`SELECT value FROM app_meta WHERE key = ?`, key))?.value;
-  const mint = (chain: string) => `${new Date().toISOString()} ${chain} ${randomUUID()}`;
-  const chain = randomUUID();
-  const token = mint(chain);
-  await authRun(`INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING`, key, token);
-  const held = await read();
-  if (held === token) return { state: "won", token, chain };
-  if (held === SENT) return { state: "sent" };
-  if (held === undefined) return { state: "busy" };
-  // Réclamé ailleurs et jamais conclu : passé un quart d'heure, son process est mort.
-  const [since, heldChain] = held.split(" ");
-  if (!heldChain || !(Date.now() - Date.parse(since) > STALE_CLAIM_MS)) return { state: "busy" };
-  const takeover = mint(heldChain);
-  await authRun(`UPDATE app_meta SET value = ? WHERE key = ? AND value = ?`, takeover, key, held);
-  return (await read()) === takeover ? { state: "won", token: takeover, chain: heldChain } : { state: "busy" };
 }
 
 function send(idempotencyKey: string, pct: number, spent: number, cap: number, month: string): Promise<EmailOutcome> {
@@ -116,7 +84,7 @@ export async function alertSpendThresholds(spent: number, cap: number, month: st
       log("warn", "spend_alert.not_sent", { ...context, reason: blocker, message: `Alerte de dépense non envoyée (${blocker}) : nouvelle tentative dans une heure.` });
       return;
     }
-    const claimed = await claim(key);
+    const claimed = await claimOnce(key);
     if (claimed.state === "busy") {
       // Un autre process s'en occupe : on y revient dans un quart d'heure, au cas où il serait mort.
       // Tant que son e-mail n'est pas parti, il ne couvre aucun seuil plus bas.
@@ -128,12 +96,12 @@ export async function alertSpendThresholds(spent: number, cap: number, month: st
     if (!outcome.ok) {
       // Seul le détenteur du jeton rend le seuil : un process repris entre-temps n'efface pas le travail d'un autre.
       if (outcome.uncertain) notBefore.set(key, Date.now() + STALE_CLAIM_MS);
-      else await authRun(`DELETE FROM app_meta WHERE key = ? AND value = ?`, key, claimed.token);
+      else await releaseClaim(key, claimed.token);
       const next = outcome.uncertain ? "reprise dans un quart d'heure, sans doublon possible" : "nouvelle tentative dans une heure";
       log("warn", "spend_alert.not_sent", { ...context, reason: outcome.reason, message: `Alerte de dépense non envoyée (${outcome.reason}) : ${next}.` });
       return;
     }
-    await authRun(`UPDATE app_meta SET value = ? WHERE key = ? AND value = ?`, SENT, key, claimed.token);
+    await settleClaim(key, claimed.token);
     settled.add(key);
     log("info", "spend_alert.sent", context);
     covered = true;
