@@ -334,9 +334,10 @@ C'est l'app qui l'envoie (`cortex/lib/billing/renewal-reminders.ts`) :
   pas d'e-mail. Stripe injoignable, refus de Resend, compte sans adresse :
   nouvel essai le lendemain (il reste un mois de marge).
 - **Envoi interrompu** (Resend ne répond pas, serveur redémarré en plein envoi) :
-  repris au tick suivant, 30 minutes plus tard, sous la même clé d'idempotence.
-  Resend retient cette clé 24 heures : au-delà (serveur arrêté plus d'un jour à
-  ce moment précis), un doublon reste possible.
+  repris au tick suivant, 30 minutes plus tard, pour cet abonnement seulement et
+  sous la même clé d'idempotence. Resend retient cette clé 24 heures : au-delà
+  (serveur arrêté plus d'un jour à ce moment précis), la reprise revient au
+  passage quotidien et un doublon reste possible.
 
 Rien à régler dans le tableau de bord Stripe ni dans Railway : la tâche démarre
 avec `BILLING_ENABLED=1` dès que `RESEND_API_KEY`, `AUTH_EMAIL_FROM`,
