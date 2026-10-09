@@ -138,12 +138,18 @@ test("checkout : aucun moyen de paiement figé par le code, c'est le tableau de 
   for (const plan of plans) {
     const params = checkoutParams({ plan, priceId: "price_test", userId: "alice", email: "alice@example.com" });
     assert.equal("payment_method_types" in params, false, `${plan} : une liste figée (['card']) retirerait Link`);
+    // Les deux autres façons de retirer Link à la session : une configuration épinglée, ou le portefeuille masqué.
+    assert.equal("payment_method_configuration" in params, false, plan);
+    assert.equal("wallet_options" in params, false, plan);
     // Ce dont dépendent le webhook et la facturation ne bouge pas.
     assert.equal(params.metadata.app, "cortex");
     assert.equal(params.metadata.cortexUserId, "alice");
     assert.equal(params.metadata.plan, plan);
     assert.deepEqual(params.line_items, [{ price: "price_test", quantity: 1 }]);
   }
+  // La route envoie ces paramètres tels quels : rien n'y est ajouté après coup.
+  const route = fs.readFileSync(path.join(__dirname, "..", "app", "api", "billing", "checkout", "route.ts"), "utf8");
+  assert.ok(route.includes("stripe.checkout.sessions.create(checkoutParams({ plan, priceId: price.id, userId, email }))"));
 });
 test("clé restreinte rk_live_ : un événement live est accepté (livemode cohérent)", async () => {
   process.env.STRIPE_SECRET_KEY = "rk_live_fake_restricted_key";

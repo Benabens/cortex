@@ -81,7 +81,8 @@ sur « Activé » dans cette page, **en mode live** (le mode test a sa propre
 liste, où il l'est par défaut). Rien d'autre à faire : Link confirme le
 paiement tout de suite, comme une carte, et passe par les mêmes événements
 (webhook, factures, remboursements, portail client). La page est commune à
-toutes les applications du compte Stripe.
+toutes les applications du compte Stripe : un moyen activé pour une autre
+application (un prélèvement SEPA, par exemple) est aussitôt proposé dans Cortex.
 
 **Paramètres → Facturation → Factures**
 
