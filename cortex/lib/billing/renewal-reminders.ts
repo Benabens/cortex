@@ -30,6 +30,10 @@
  *    retient la clé 24 h : reprise le jour même, le doublon est écarté ; passé
  *    24 h, la reprise n'apporte plus rien et revient au passage quotidien.
  *
+ * ÉCHECS : un rappel hors délai, un refus qui ne passera pas tout seul ou des
+ * rappels désactivés sont écrits au propriétaire (./renewal-alerts), en plus du
+ * journal.
+ *
  * TÂCHE QUOTIDIENNE lancée par le serveur lui-même (instrumentation.ts), comme
  * la sauvegarde : le jour UTC est réclamé dans `app_meta`, une seule instance
  * fait le passage. Active seulement avec la facturation (BILLING_ENABLED=1).
@@ -43,6 +47,7 @@ import { sendEmail } from "@/lib/email";
 import { legalLinks } from "@/lib/legal";
 import { log } from "@/lib/metrics";
 import { publicOrigin } from "@/lib/public-url";
+import { alertReminderProblems, alertRemindersDisabled, noteMissedReminder, warnIfReminderAlertsBlocked, type RefusedReminder } from "./renewal-alerts";
 import { isYearly, stillBilling } from "./subscription-windows";
 
 const DAY_MS = 86_400_000;
@@ -255,7 +260,8 @@ type Lookup = (subscriptionId: string) => Promise<RenewalFacts | null>;
  * que si la base ou la configuration manquent.
  */
 export async function sendRenewalReminders(opts: { now?: Date; lookup?: Lookup; only?: ReadonlySet<string> } = {}): Promise<ReminderReport> {
-  const now = fmt(opts.now ?? new Date());
+  const date = opts.now ?? new Date();
+  const now = fmt(date);
   const origin = publicOrigin();
   if (!origin) throw new Error("AUTH_URL absente : impossible d'écrire le lien vers la page Compte");
   const rows = await authAll<Row>(
@@ -264,20 +270,23 @@ export async function sendRenewalReminders(opts: { now?: Date; lookup?: Lookup; 
       WHERE s.subscription_id IS NOT NULL AND s.period_end IS NOT NULL`,
   );
   const report: ReminderReport = { sent: 0, failed: 0, pending: 0, skipped: 0 };
+  const refused: RefusedReminder[] = [];
   for (const row of rows) {
     if (opts.only && !opts.only.has(row.subscription_id!)) continue;
     try {
-      await remindOne(row, now, `${origin}/compte`, opts.lookup ?? stripeRenewalFacts, report);
+      await remindOne(row, now, `${origin}/compte`, opts.lookup ?? stripeRenewalFacts, report, refused);
     } catch (e) {
       // Un abonnement en panne ne prive pas les autres de leur rappel.
       report.failed++;
       log("error", "renewal_reminder.failed", { subscription: row.subscription_id, user: row.user_id, message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
     }
   }
+  // Refus persistants et rappels hors délai : le propriétaire en est prévenu par e-mail (./renewal-alerts).
+  await alertReminderProblems(refused, date);
   return report;
 }
 
-async function remindOne(row: Row, now: string, accountUrl: string, lookup: Lookup, report: ReminderReport): Promise<void> {
+async function remindOne(row: Row, now: string, accountUrl: string, lookup: Lookup, report: ReminderReport, refused: RefusedReminder[]): Promise<void> {
   const subscription = row.subscription_id!;
   const verdict = reminderVerdict(row, now);
   if (verdict !== "due" && verdict !== "too-late") return;
@@ -288,6 +297,7 @@ async function remindOne(row: Row, now: string, accountUrl: string, lookup: Look
   const retryTomorrow = (reason: string, level: "warn" | "error" = "warn") => {
     report.failed++;
     log(level, "renewal_reminder.not_sent", { ...context, reason, message: `Rappel de reconduction non envoyé (${reason}) : nouvelle tentative demain.` });
+    if (level === "error") refused.push({ subscription, user: row.user_id, email: row.email, periodEnd: String(context.periodEnd), reason });
   };
 
   let facts: RenewalFacts | null;
@@ -372,6 +382,8 @@ async function flagMissed(subscription: string, user: string, periodEnd: string)
     subscription, user, periodEnd, unconfirmed,
     message: `Rappel de reconduction (art. L215-1) hors délai et ${unconfirmed ? "jamais confirmé (un essai est resté sans réponse de Resend)" : "jamais envoyé"} : après la reconduction, ce client peut résilier sans frais à tout moment et être remboursé de la période restante.`,
   });
+  // Constaté une seule fois : noté pour que l'alerte parte même si Resend est en panne aujourd'hui.
+  await noteMissedReminder(subscription, periodEnd, unconfirmed);
 }
 
 // ─────────────────────────── la tâche quotidienne ───────────────────────────
@@ -463,8 +475,11 @@ export function startRenewalReminderScheduler(): NodeJS.Timeout | null {
   const blocker = renewalRemindersBlocker();
   if (blocker) {
     log("error", "renewal_reminder.disabled", { reason: blocker, message: `Rappels de reconduction de l'abonnement annuel (art. L215-1) NON envoyés : ${blocker}.` });
+    // Sans attendre : l'alerte ne retient pas le démarrage du serveur, et ne lève jamais.
+    void alertRemindersDisabled(blocker);
     return null;
   }
+  warnIfReminderAlertsBlocked();
   const g = globalThis as { __cortexRenewalTimer?: NodeJS.Timeout };
   if (g.__cortexRenewalTimer) clearInterval(g.__cortexRenewalTimer);
   const tick = () => renewalReminderTick().catch((e) => log("error", "renewal_reminder.sweep_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) }));
