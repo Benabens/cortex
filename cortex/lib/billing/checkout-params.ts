@@ -12,8 +12,8 @@ export function checkoutParams(o: { plan: PlanKey; priceId: string; userId: stri
   return {
     mode: spec.mode,
     // Pas de `payment_method_types` : les moyens proposés (carte, Apple Pay, Google Pay,
-    // Link) sont ceux activés dans le tableau de bord Stripe. Les lister ici figerait la
-    // liste et retirerait Link (docs/STRIPE-LIVE.md § 2).
+    // Link) sont ceux activés dans le tableau de bord Stripe. Une liste écrite ici
+    // prendrait sa place : ['card'] retirerait Link (docs/STRIPE-LIVE.md § 2).
     line_items: [{ price: o.priceId, quantity: 1 }],
     success_url: `${origin}/compte?achat=ok`,
     cancel_url: `${origin}/compte?achat=annule`,
