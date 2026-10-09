@@ -133,7 +133,7 @@ RUN if unshare -rn true 2>/dev/null; then \
 
 EXPOSE 3000
 
-# Railway utilise healthcheckPath (railway.json) ; ce HEALTHCHECK sert au
+# Railway utilise le healthcheck réglé sur le service (/api/health) ; ce HEALTHCHECK sert au
 # docker run local / CI.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=8 \
   CMD curl -fsS "http://localhost:${PORT}/api/health" || exit 1

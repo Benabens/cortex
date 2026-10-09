@@ -41,10 +41,13 @@ ouvertes à tous, sauf lancement fermé (`INVITE_ONLY=1`, § 12).
 1. railway.com → **Login with GitHub**.
 2. **New Project** → **Deploy from GitHub repo** → autorise Railway sur le
    dépôt → branche `main`.
-3. Railway lit `railway.json` à la racine → builder **DOCKERFILE**,
-   healthcheck `/api/health`, **1 replica** (⚠ ne JAMAIS augmenter : la file
-   de jobs est mono-conteneur par design — PID + heartbeat locaux).
-4. Settings du service → **Region** : la plus proche de tes utilisateurs.
+3. Settings du service : builder **Dockerfile** (`Dockerfile` à la racine),
+   healthcheck `/api/health` (timeout 300 s), redémarrage « On failure »
+   (10 essais), **1 replica** (⚠ ne JAMAIS augmenter : la file de jobs est
+   mono-conteneur par design — PID + heartbeat locaux). Ces réglages vivent
+   dans Railway : le dépôt n'a plus de `railway.json` (format abandonné par
+   Railway au 01/12/2026).
+4. Settings du service → **Region** : la plus proche de tes utilisateurs (prod : EU West, Amsterdam).
 5. Le premier build part tout seul (~5-8 min : image + warm-up tectonic).
    ⚠ **Ne laisse pas le service tourner sans les variables de l'étape 4** : il
    démarre très bien, mais SANS auth, SANS quota et SANS plafond de dépense —
