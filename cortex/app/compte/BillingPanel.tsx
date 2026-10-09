@@ -49,7 +49,15 @@ type Billing = {
     standing: Standing;
     cancelsAtPeriodEnd: boolean;
   } | null;
-  costs: { exam: number; qcm: number; exercise: number; assist: number };
+  costs: {
+    exam: number; qcm: number; exercise: number; assist: number;
+    /** Préparation d'un cours, et détection du format à chaque ajout d'annales. */
+    prepare?: number; format?: number;
+  };
+  /** Limites quotidiennes appliquées au compte (null : levée). */
+  quotas?: { gen: number | null; assist: number | null };
+  /** Espace de stockage du compte, en Mo (null : pas de plafond). */
+  storageQuotaMb?: number | null;
   transactions: Tx[];
   offers: Offer[];
 };
@@ -68,6 +76,27 @@ const dateFr = (iso: string | null) => {
   const d = new Date(iso.replace(" ", "T") + (iso.length <= 10 ? "T00:00:00Z" : "Z"));
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("fr-CH", { day: "numeric", month: "long", year: "numeric" });
 };
+
+/**
+ * Ce qui borne l'usage, dit au-dessus des offres. « Autant de cours que tu
+ * veux » parle du NOMBRE de cours, qui n'a pas de plafond : un cours coûte des
+ * crédits (sa préparation, puis chaque ajout d'annales), ses générations aussi,
+ * et le compte a des limites par jour et un espace de stockage. Seules les
+ * limites citées ici sont nommées : la phrase ne se donne pas pour une liste complète.
+ */
+function usageNote(data: Billing): string {
+  const { prepare, format } = data.costs;
+  const cost = prepare != null && format != null
+    ? `Préparer un cours coûte ${credits(prepare)}, chaque ajout d’annales ${credits(format)}, et chaque génération utilise des crédits.`
+    : "Préparer un cours, y ajouter des annales et chaque génération utilisent des crédits.";
+  const count = (n: number | null | undefined, unit: string) => (n == null ? null : `${nf.format(n)} ${unit}${n >= 2 ? "s" : ""}`);
+  const daily = [count(data.quotas?.gen, "génération"), count(data.quotas?.assist, "aide")].filter(Boolean).join(" et ");
+  return [
+    cost,
+    daily ? `Par jour et par compte : ${daily}.` : null,
+    data.storageQuotaMb == null ? null : `Stockage : ${nf.format(data.storageQuotaMb)} Mo de fichiers.`,
+  ].filter(Boolean).join(" ");
+}
 
 /** Chargement : pur, sans état — testable et réutilisable par le bouton « actualiser ». */
 async function fetchBilling(): Promise<Billing> {
@@ -312,6 +341,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
       <Panel className="p-0">
         <div className="px-5 pt-4">
           <h3 className="text-[0.9rem] font-semibold text-ink-1">Recharger</h3>
+          <p className="mt-1 max-w-3xl text-[0.8rem] leading-relaxed text-ink-3">{usageNote(data)}</p>
           {!data.purchase.enabled && (
             <p role="status" className="mt-1.5 text-[0.85rem] text-warning">{data.purchase.reason}</p>
           )}
@@ -327,7 +357,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
                 <div className="min-w-0">
                   <div className="text-[0.9rem] font-medium text-ink-1">{o.label}</div>
                   <div className="text-[0.8rem] text-ink-3">
-                    {isSub ? `${nf.format(o.credits)} crédits par mois, non reportables` : `${nf.format(o.credits)} crédits, sans date d’expiration`}
+                    {isSub ? `Autant de cours que tu veux · ${nf.format(o.credits)} crédits par mois, non reportables` : `${nf.format(o.credits)} crédits, sans date d’expiration`}
                     {isSub && hasSub && <span> · tu as déjà un abonnement</span>}
                   </div>
                   {/* Conditions de reconduction, à côté du bouton et AVANT tout achat :
