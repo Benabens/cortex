@@ -23,7 +23,7 @@ before(() => {
   Object.assign(process.env, ENV);
 });
 after(() => {
-  for (const k of [...Object.keys(ENV), "CORTEX_DATA_DIR", "CORTEX_OWNER_EMAIL"]) delete process.env[k];
+  for (const k of [...Object.keys(ENV), "CORTEX_DATA_DIR"]) delete process.env[k];
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -66,6 +66,7 @@ test("sqlite : rappel hors délai et refus persistant signalés au propriétaire
   for (const table of ["subscriptions", "users"]) await authRun(`DELETE FROM ${table}`);
   await authRun(`DELETE FROM app_meta WHERE key LIKE 'renewal%'`);
   process.env.CORTEX_OWNER_EMAIL = "ben@exemple.test";
+  t.after(() => { delete process.env.CORTEX_OWNER_EMAIL; });
   const subjects: string[] = [];
   const recipients = new Set<string>();
   t.mock.method(globalThis, "fetch", async (_url: unknown, init?: RequestInit) => {

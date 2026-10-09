@@ -359,13 +359,16 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
   (`renewal_reminder.disabled`). Au plus un e-mail par cas et par jour, même
   avec plusieurs instances (clé `renewal_alert:…` dans `app_meta`) ; il nomme
   chaque abonné concerné (adresse, compte, abonnement), sa date de reconduction,
-  et dit quoi faire. Un échec qui dure est rappelé chaque jour ; un rappel hors
-  délai est dit une fois, et retenté à chaque passage tant que l'e-mail n'est
-  pas parti. Aucune variable à ajouter. Sans `RESEND_API_KEY` ou sans
-  destinataire, rien ne part : le serveur l'écrit à son démarrage
-  (`renewal_alert.disabled`). **Limite** : l'alerte passe par Resend. Si c'est
-  Resend qui refuse (clé révoquée, domaine non vérifié), elle ne part pas non
-  plus, et il ne reste que `renewal_alert.not_sent` dans les logs.
+  et dit quoi faire. Un échec qui dure, ou des rappels désactivés, sont
+  rappelés chaque jour ; un rappel hors délai est dit une fois, et retenté à
+  chaque passage tant que l'e-mail n'est pas parti. Aucune variable à ajouter.
+  Sans destinataire, rien ne part : le serveur l'écrit à son démarrage
+  (`renewal_alert.disabled`). Sans `RESEND_API_KEY`, ce sont les rappels
+  eux-mêmes qui sont désactivés, et l'alerte ne peut pas partir non plus
+  (`renewal_reminder.disabled`, puis `renewal_alert.not_sent`). **Limite** :
+  l'alerte passe par Resend. Si c'est Resend qui refuse (clé révoquée, domaine
+  non vérifié), elle ne part pas, et il ne reste que `renewal_alert.not_sent`
+  dans les logs.
 - **Kill-switch immédiat** : Variables → `SPEND_CAP_USD=0` → Redeploy
   (~1 min). Toute génération payante est coupée avec un message propre.
 - **Métriques** : `curl -H 'Authorization: Bearer ⟨METRICS_TOKEN⟩' https://⟨domaine⟩/api/metrics` (le jeton n'est plus accepté en `?token=`)
@@ -383,6 +386,12 @@ n'est même pas chargé.
 Sans Sentry, deux choses arrivent quand même par e-mail : les alertes de
 dépense et celles du rappel de reconduction (ci-dessus). Tout le reste (un
 plantage, une génération en erreur) ne se lit que dans les logs.
+
+À savoir avant de compter sur Sentry pour le rappel de reconduction : ses
+échecs (`renewal_reminder.missed`, `.not_sent`, `.disabled`) sont des lignes de
+journal, écrites sans passer par `captureError`. Poser `SENTRY_DSN` ne les
+ferait pas remonter ; aujourd'hui seul un job en erreur est signalé ainsi
+(`cortex/scripts/run-job.ts`).
 
 Ce qui part : type et message d'erreur, pile, service (`web` / `worker`), URL
 **sans paramètres**. Ce qui ne part **jamais** : e-mail, identifiant de compte,
@@ -597,7 +606,8 @@ quotidiens (`DAILY_GEN_QUOTA`, `DAILY_ASSIST_QUOTA`).
 - [ ] `RESEND_API_KEY` posée, et `CORTEX_OWNER_EMAIL` ou `PUBLISHER_EMAIL` :
       sans elles, ni les alertes de dépense à 80 % et 100 %, ni celles du rappel
       de reconduction ne partent. Au démarrage, les logs ne doivent montrer ni
-      `spend_alert.disabled` ni `renewal_alert.disabled`.
+      `spend_alert.disabled`, ni `renewal_alert.disabled`, ni
+      `renewal_reminder.disabled`.
 - [ ] Un plafond de dépense dur côté Anthropic.
 - [ ] Console Google Cloud → écran de consentement OAuth : état **« En
       production »**. En « Test », seuls les comptes de test passent, et un

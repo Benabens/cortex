@@ -393,14 +393,20 @@ export const REMINDER_TICK_MS = 30 * 60_000;
 /** Heure (UTC) à partir de laquelle le passage du jour a lieu : le matin à Paris, pas en pleine nuit. */
 export const REMINDER_HOUR_UTC = 7;
 
-/** Ce qui empêche d'envoyer les rappels avec la configuration courante, ou null. */
+/** Tout ce qui empêche d'envoyer les rappels avec la configuration courante. */
+function renewalRemindersBlockers(env: Partial<NodeJS.ProcessEnv> = process.env): string[] {
+  return [
+    !env.RESEND_API_KEY && "RESEND_API_KEY absente",
+    // Sans expéditeur, lib/email retombe sur l'adresse d'essai de Resend, qui n'écrit pas aux clients.
+    !env.AUTH_EMAIL_FROM?.trim() && "AUTH_EMAIL_FROM absente",
+    !env.STRIPE_SECRET_KEY && "STRIPE_SECRET_KEY absente",
+    !publicOrigin(env) && "AUTH_URL absente",
+  ].filter((missing): missing is string => !!missing);
+}
+
+/** Ce qui empêche d'envoyer les rappels avec la configuration courante (la première cause), ou null. */
 export function renewalRemindersBlocker(env: Partial<NodeJS.ProcessEnv> = process.env): string | null {
-  if (!env.RESEND_API_KEY) return "RESEND_API_KEY absente";
-  // Sans expéditeur, lib/email retombe sur l'adresse d'essai de Resend, qui n'écrit pas aux clients.
-  if (!env.AUTH_EMAIL_FROM?.trim()) return "AUTH_EMAIL_FROM absente";
-  if (!env.STRIPE_SECRET_KEY) return "STRIPE_SECRET_KEY absente";
-  if (!publicOrigin(env)) return "AUTH_URL absente";
-  return null;
+  return renewalRemindersBlockers(env)[0] ?? null;
 }
 
 /** Réclame le jour : vrai pour UNE seule instance (même UPSERT conditionnel que la sauvegarde quotidienne). */
@@ -469,19 +475,29 @@ export async function renewalReminderTick(opts: {
   return report.pending === 0 ? "ok" : "retry";
 }
 
-/** Démarre la tâche (une minuterie par process, hot-reload safe). null sans facturation ou si l'envoi est impossible. */
+/**
+ * Démarre la tâche (une minuterie par process, hot-reload safe). null sans
+ * facturation ou si l'envoi est impossible : il ne tourne alors que l'alerte
+ * au propriétaire.
+ */
 export function startRenewalReminderScheduler(): NodeJS.Timeout | null {
   if (process.env.BILLING_ENABLED !== "1") return null;
-  const blocker = renewalRemindersBlocker();
-  if (blocker) {
-    log("error", "renewal_reminder.disabled", { reason: blocker, message: `Rappels de reconduction de l'abonnement annuel (art. L215-1) NON envoyés : ${blocker}.` });
-    // Sans attendre : l'alerte ne retient pas le démarrage du serveur, et ne lève jamais.
-    void alertRemindersDisabled(blocker);
+  const g = globalThis as { __cortexRenewalTimer?: NodeJS.Timeout };
+  if (g.__cortexRenewalTimer) clearInterval(g.__cortexRenewalTimer);
+  const blockers = renewalRemindersBlockers();
+  if (blockers.length) {
+    const reason = blockers.join(", ");
+    log("error", "renewal_reminder.disabled", { reason, message: `Rappels de reconduction de l'abonnement annuel (art. L215-1) NON envoyés : ${reason}.` });
+    // Le propriétaire en est prévenu par e-mail, sans attendre (l'alerte ne retient pas le démarrage
+    // et ne lève jamais), puis à chaque tick : un e-mail par jour tant que la variable manque, et un
+    // nouvel essai si Resend était en panne au démarrage.
+    const alert = () => void alertRemindersDisabled(reason);
+    alert();
+    g.__cortexRenewalTimer = setInterval(alert, REMINDER_TICK_MS);
+    g.__cortexRenewalTimer.unref?.();
     return null;
   }
   warnIfReminderAlertsBlocked();
-  const g = globalThis as { __cortexRenewalTimer?: NodeJS.Timeout };
-  if (g.__cortexRenewalTimer) clearInterval(g.__cortexRenewalTimer);
   const tick = () => renewalReminderTick().catch((e) => log("error", "renewal_reminder.sweep_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) }));
   // Premier passage différé : laisser la base et les jobs démarrer.
   setTimeout(tick, 90_000).unref?.();

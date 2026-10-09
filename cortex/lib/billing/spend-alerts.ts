@@ -2,6 +2,7 @@ import { authRun } from "@/db/auth-store";
 import { claimOnce, releaseClaim, SENT, settleClaim, STALE_CLAIM_MS } from "@/lib/claim-once";
 import { sendEmail, type EmailOutcome } from "@/lib/email";
 import { log } from "@/lib/metrics";
+import { ownerAlertBlocker, ownerAlertRecipient } from "./owner-alert";
 
 /**
  * ALERTES DE DÉPENSE : un e-mail au propriétaire quand la dépense du mois
@@ -35,20 +36,8 @@ export function resetSpendAlerts(): void {
   notBefore.clear();
 }
 
-/** Adresse d'alerte du propriétaire : sert aussi à l'alerte du rappel de reconduction (./renewal-alerts). */
-export function ownerAlertRecipient(env: NodeJS.ProcessEnv): string | null {
-  return env.CORTEX_OWNER_EMAIL?.trim() || env.PUBLISHER_EMAIL?.trim() || null;
-}
-
-/** Ce qui empêche d'écrire au propriétaire (alerte de dépense, alerte du rappel de reconduction) avec la configuration courante, ou null. */
-export function ownerAlertBlocker(env: NodeJS.ProcessEnv = process.env): string | null {
-  if (!env.RESEND_API_KEY) return "RESEND_API_KEY absente";
-  if (!ownerAlertRecipient(env)) return "aucun destinataire : pose CORTEX_OWNER_EMAIL ou PUBLISHER_EMAIL";
-  return null;
-}
-
 function send(idempotencyKey: string, pct: number, spent: number, cap: number, month: string): Promise<EmailOutcome> {
-  const to = ownerAlertRecipient(process.env)!;
+  const to = ownerAlertRecipient()!;
   const figures = `Dépense IA de Cortex pour ${month} : ${spent.toFixed(2)} $, soit ${Math.floor((spent / cap) * 100)} % du plafond mensuel (SPEND_CAP_USD = ${cap} $).`;
   const reopen = "Pour relever le plafond : Railway, service cortex-app, Variables, SPEND_CAP_USD.";
   return pct >= 100

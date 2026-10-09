@@ -3,8 +3,8 @@
  * (lib/billing/renewal-reminders). Un rappel manqué donne à l'abonné le droit
  * de résilier sans frais après la reconduction : il faut que quelqu'un le voie,
  * et les logs Railway ne préviennent personne. Même mécanisme que les alertes
- * de dépense (./spend-alerts) : un e-mail Resend à l'adresse d'alerte, sous une
- * clé réclamée dans `app_meta`.
+ * de dépense (./spend-alerts) : un e-mail Resend à l'adresse d'alerte
+ * (./owner-alert), sous une clé réclamée dans `app_meta`.
  *
  * TROIS ALERTES, chacune au plus UNE fois par jour (UTC), même avec plusieurs
  * instances ou plusieurs passages :
@@ -12,13 +12,16 @@
  *    e-mail confirmé ;
  *  - en échec (`renewal_reminder.not_sent` en erreur) : le rappel n'est pas
  *    parti et réessayer demain ne suffira pas ;
- *  - désactivés (`renewal_reminder.disabled`) : il manque une variable, aucun
- *    rappel ne part.
+ *  - rappels désactivés (`renewal_reminder.disabled`) : il manque une
+ *    variable, aucun rappel ne part.
  * Plusieurs abonnés le même jour : un seul e-mail, qui les nomme tous.
  *
  * Un échec qui dure est constaté à chaque passage, donc signalé de nouveau le
  * lendemain. Un rappel hors délai, lui, n'est constaté qu'une fois : il est
- * noté dans `app_meta` jusqu'à ce que son e-mail soit parti (plus bas).
+ * noté dans `app_meta` jusqu'à ce que son e-mail soit parti (plus bas). C'est
+ * la seule exception à « un par jour » : si un envoi est resté sans réponse et
+ * qu'un AUTRE abonné passe hors délai le même jour, un second e-mail part
+ * plutôt que de taire cet abonné.
  *
  * LIMITE : l'alerte passe par Resend. Si c'est Resend qui refuse (clé révoquée,
  * domaine non vérifié), elle ne part pas non plus, et il ne reste que le
@@ -30,7 +33,7 @@ import { authAll, authGet, authRun } from "@/db/auth-store";
 import { claimOnce, releaseClaim, settleClaim } from "@/lib/claim-once";
 import { sendEmail } from "@/lib/email";
 import { log } from "@/lib/metrics";
-import { ownerAlertBlocker, ownerAlertRecipient } from "./spend-alerts";
+import { ownerAlertBlocker, ownerAlertRecipient } from "./owner-alert";
 
 /** Un rappel que l'app n'a pas pu envoyer, et que réessayer demain ne suffira pas à faire partir. */
 export type RefusedReminder = {
@@ -40,15 +43,21 @@ export type RefusedReminder = {
   reason: string;
 };
 
+type Mail = { subject: string; text: string };
+
 const PARIS_DATE = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" });
 /** Le jour de la reconduction, tel que le lit l'abonné (heure de Paris). */
-const renewalDay = (periodEnd: string) => PARIS_DATE.format(new Date(periodEnd.replace(" ", "T") + "Z"));
+function renewalDay(periodEnd: string): string {
+  const date = new Date(periodEnd.replace(" ", "T") + "Z");
+  // Une échéance illisible ne doit pas retenir l'alerte de tous les autres abonnés.
+  return Number.isNaN(date.getTime()) ? "une date illisible" : PARIS_DATE.format(date);
+}
 const subscribers = (n: number) => `${n} abonné${n > 1 ? "s" : ""}`;
 const who = (p: { subscription: string; user: string | null; email: string | null }) => `${p.email ?? "adresse inconnue"} (compte ${p.user ?? "inconnu"}, abonnement ${p.subscription})`;
 
 const DETAIL = "Détail : docs/STRIPE-LIVE.md, § 12.";
 
-function refusedMail(refused: RefusedReminder[]): { subject: string; text: string } {
+function refusedMail(refused: RefusedReminder[]): Mail {
   return {
     subject: `Cortex : rappel de reconduction en échec (${subscribers(refused.length)})`,
     text: [
@@ -57,11 +66,9 @@ function refusedMail(refused: RefusedReminder[]): { subject: string; text: strin
       "L'app réessaie chaque jour. Le rappel doit partir au plus tard un mois avant la veille de la reconduction : ensuite il est hors délai, et l'abonné peut résilier sans frais après la reconduction.",
       [
         "À faire, selon la cause :",
-        "- « Stripe refuse la lecture de l'abonnement » : la clé STRIPE_SECRET_KEY n'a pas le droit de lire les abonnements (Stripe, Développeurs, Clés API).",
-        "- « abonnement inconnu de Stripe » : la clé en place n'est pas celle du mode (test ou live) de cet abonnement.",
-        "- « montant de l'abonnement illisible » : le prix de cet abonnement n'a pas de montant fixe chez Stripe.",
-        "- « compte sans adresse e-mail » : renseigne l'adresse du compte, ou préviens l'abonné toi-même.",
-        "- « Resend a répondu HTTP 4… » : clé RESEND_API_KEY, domaine de l'expéditeur (AUTH_EMAIL_FROM) ou adresse du destinataire refusés (resend.com, Emails et Domains).",
+        "- Stripe (lecture refusée, abonnement inconnu, montant illisible) : vérifie STRIPE_SECRET_KEY. Elle doit avoir le droit de lire les abonnements, et être celle du mode (test ou live) de cet abonnement (Stripe, Développeurs, Clés API).",
+        "- Compte sans adresse : renseigne l'adresse du compte, ou préviens l'abonné toi-même.",
+        "- Refus de Resend (HTTP 4xx) : clé RESEND_API_KEY, domaine de l'expéditeur (AUTH_EMAIL_FROM) ou adresse du destinataire refusés (resend.com, Emails et Domains).",
       ].join("\n"),
       DETAIL,
     ].join("\n\n"),
@@ -75,9 +82,12 @@ function refusedMail(refused: RefusedReminder[]): { subject: string; text: strin
  * si l'alerte ne part pas ce jour-là (Resend en panne, alerte du jour déjà partie),
  * rien ne la rejouerait. Le constat est donc noté dans `app_meta`, et la ligne
  * n'est retirée qu'une fois l'e-mail parti : chaque passage suivant réessaie.
- * Au pire un doublon, si Resend avait accepté un envoi resté sans réponse la
- * veille. Sans donnée personnelle : identifiant d'abonnement et échéance, comme
- * le marqueur du rappel ; l'adresse est relue en base au moment d'écrire.
+ * Sans donnée personnelle : identifiant d'abonnement et échéance, comme le
+ * marqueur du rappel ; l'adresse est relue en base au moment d'écrire.
+ *
+ * Ce qui reste hors de portée : si la base refuse CETTE écriture juste après
+ * avoir accepté le marqueur « hors délai », le constat n'est noté nulle part
+ * et seul le journal le porte (même fenêtre qu'un process tué à cet instant).
  */
 const PENDING = "renewal_alert_pending:";
 const UNCONFIRMED = "unconfirmed";
@@ -105,7 +115,7 @@ async function pendingMissed(): Promise<MissedReminder[]> {
   return missed;
 }
 
-function missedMail(missed: MissedReminder[]): { subject: string; text: string } {
+function missedMail(missed: MissedReminder[]): Mail {
   const steps = [
     // Seulement si un essai est resté sans réponse : sinon il n'y a rien à chercher chez Resend.
     ...(missed.some((m) => m.unconfirmed) ? ["Cherche l'adresse de l'abonné dans le journal de Resend (resend.com, Emails), pour un essai resté sans réponse. Si l'e-mail y figure, il est parti à temps et il n'y a rien d'autre à faire."] : []),
@@ -139,15 +149,22 @@ async function contained(alert: () => Promise<void>): Promise<void> {
   }
 }
 
-type Kind = "missed" | "not_sent" | "disabled";
+/** Ce que l'alerte signale : rappel hors délai, rappel refusé, rappels désactivés. */
+type Kind = "missed" | "refused" | "reminders_off";
 
 /**
  * Envoie l'alerte de ce type pour ce jour (UTC), si elle n'est pas déjà partie :
  * la clé est RÉCLAMÉE dans `app_meta` (lib/claim-once), comme un seuil de
  * dépense. Rend vrai si l'e-mail est parti pendant cet appel.
+ *
+ * `batch` nomme ce que l'e-mail contient, quand la reprise d'un envoi resté
+ * sans réponse peut en contenir davantage : il entre dans la clé d'idempotence
+ * Resend. Même lot, même clé : le doublon est écarté. Lot différent : l'e-mail
+ * part, au lieu d'être pris pour le premier (409, que lib/email tient pour un
+ * envoi accepté).
  */
-async function sendOnce(kind: Kind, day: string, mail: { subject: string; text: string }, count?: number): Promise<boolean> {
-  const context = { kind, day, ...(count ? { subscribers: count } : {}) };
+async function sendOnce(kind: Kind, day: string, mail: Mail, opts: { subscribers?: number; batch?: string } = {}): Promise<boolean> {
+  const context = { kind, day, ...(opts.subscribers ? { subscribers: opts.subscribers } : {}) };
   const blocker = ownerAlertBlocker();
   if (blocker) {
     log("warn", "renewal_alert.not_sent", { ...context, reason: blocker, message: `Alerte du rappel de reconduction non envoyée (${blocker}).` });
@@ -157,16 +174,12 @@ async function sendOnce(kind: Kind, day: string, mail: { subject: string; text: 
   const claimed = await claimOnce(key);
   // Déjà signalé aujourd'hui, ou une autre instance s'en occupe.
   if (claimed.state !== "won") return false;
-  // Le contenu fait partie de la clé d'idempotence : la reprise d'un envoi resté sans réponse peut
-  // nommer un abonné de plus. Sous la clé du premier essai, Resend répondrait « déjà envoyé » (409)
-  // et cet abonné ne serait jamais signalé ; à contenu identique, la clé est la même et le doublon écarté.
-  const content = createHash("sha256").update(mail.text).digest("hex").slice(0, 16);
-  const outcome = await sendEmail({ to: ownerAlertRecipient(process.env)!, ...mail, idempotencyKey: `${key}:${claimed.chain}:${content}` });
+  const outcome = await sendEmail({ to: ownerAlertRecipient()!, ...mail, idempotencyKey: [key, claimed.chain, ...(opts.batch ? [opts.batch] : [])].join(":") });
   if (!outcome.ok) {
-    // Refus net : la clé est rendue, le prochain passage réessaiera. Issue inconnue : la réclamation
-    // reste, et sa reprise (un quart d'heure plus tard) repart de la même chaîne.
+    // Refus net : la clé est rendue, le prochain essai repart de zéro. Issue inconnue : la réclamation
+    // reste, et sa reprise (un quart d'heure plus tard au plus tôt) repart de la même chaîne.
     if (!outcome.uncertain) await releaseClaim(key, claimed.token);
-    log("warn", "renewal_alert.not_sent", { ...context, reason: outcome.reason, message: `Alerte du rappel de reconduction non envoyée (${outcome.reason}) : nouvel essai au prochain passage.` });
+    log("warn", "renewal_alert.not_sent", { ...context, reason: outcome.reason, message: `Alerte du rappel de reconduction non envoyée (${outcome.reason}) : elle sera retentée.` });
     return false;
   }
   await settleClaim(key, claimed.token);
@@ -182,26 +195,28 @@ export async function alertReminderProblems(refused: RefusedReminder[], now: Dat
   const day = now.toISOString().slice(0, 10);
   await contained(async () => {
     const missed = await pendingMissed();
-    if (missed.length && (await sendOnce("missed", day, missedMail(missed), missed.length))) {
+    if (!missed.length) return;
+    const batch = createHash("sha256").update(missed.map((m) => m.key).join("\n")).digest("hex").slice(0, 16);
+    if (await sendOnce("missed", day, missedMail(missed), { subscribers: missed.length, batch })) {
       for (const m of missed) await authRun(`DELETE FROM app_meta WHERE key = ?`, m.key);
     }
   });
   await contained(async () => {
-    if (refused.length) await sendOnce("not_sent", day, refusedMail(refused), refused.length);
+    if (refused.length) await sendOnce("refused", day, refusedMail(refused), { subscribers: refused.length });
   });
 }
 
 /**
- * Démarrage du serveur : les rappels sont désactivés (il manque une variable).
- * Un e-mail par jour au plus, même si chaque redéploiement relance le serveur.
+ * Les rappels sont désactivés (il manque une variable). Un e-mail par jour au
+ * plus, que le serveur redémarre dix fois ou qu'il rappelle l'alerte à chaque tick.
  */
-export async function alertRemindersDisabled(reason: string, now: Date = new Date()): Promise<void> {
+export async function alertRemindersDisabled(reason: string): Promise<void> {
   await contained(async () => {
-    await sendOnce("disabled", now.toISOString().slice(0, 10), {
+    await sendOnce("reminders_off", new Date().toISOString().slice(0, 10), {
       subject: "Cortex : rappels de reconduction désactivés",
       text: [
         `Les rappels de reconduction de l'abonnement annuel (art. L215-1 du Code de la consommation) sont désactivés : ${reason}. Tant que rien ne change, aucun rappel ne part, et un abonné annuel qui ne reçoit pas le sien à temps peut résilier sans frais après la reconduction.`,
-        "À faire : Railway, service cortex-app, Variables : pose la variable qui manque, puis redéploie. Au démarrage, les logs doivent dire « [renewal] rappels de reconduction de l'abonnement annuel actifs ».",
+        "À faire : Railway, service cortex-app, Variables : pose ce qui manque, puis redéploie. Au démarrage, les logs doivent dire « [renewal] rappels de reconduction de l'abonnement annuel actifs ». Tant que ce n'est pas fait, cet e-mail revient chaque jour.",
         DETAIL,
       ].join("\n\n"),
     });

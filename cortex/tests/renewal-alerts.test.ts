@@ -32,7 +32,7 @@ const ENV_KEYS = ["DB_DRIVER", "DATABASE_URL", "BILLING_ENABLED", "RESEND_API_KE
 import { authRun } from "../db/auth-store";
 import { grantSubscriptionMonth } from "../lib/billing/credits";
 import { alertRemindersDisabled } from "../lib/billing/renewal-alerts";
-import { sendRenewalReminders, startRenewalReminderScheduler, type RenewalFacts } from "../lib/billing/renewal-reminders";
+import { REMINDER_TICK_MS, sendRenewalReminders, startRenewalReminderScheduler, type RenewalFacts } from "../lib/billing/renewal-reminders";
 
 const OWNER = "ben@exemple.test";
 const at = (iso: string) => new Date(iso.replace(" ", "T") + "Z");
@@ -71,6 +71,12 @@ function logs(t: TestContext) {
   return events;
 }
 
+/** Arrête la minuterie que le planificateur garde par process. */
+function stopScheduler(): void {
+  const g = globalThis as { __cortexRenewalTimer?: NodeJS.Timeout };
+  if (g.__cortexRenewalTimer) clearInterval(g.__cortexRenewalTimer);
+}
+
 /** Attend qu'une tâche lancée sans être attendue (l'alerte du démarrage) ait abouti. */
 async function until(done: () => boolean): Promise<void> {
   for (let i = 0; i < 400 && !done(); i++) await new Promise((r) => setTimeout(r, 5));
@@ -101,8 +107,8 @@ test("refus persistant (compte sans adresse) : un e-mail au propriétaire, avec 
   assert.match(mail.text, /abonnement sub_lea/, "abonnement");
   assert.match(mail.text, /compte lea/, "identifiant interne du compte");
   assert.match(mail.text, /reconduction le 7 octobre 2027/, "date de reconduction");
-  assert.match(mail.text, /compte sans adresse e-mail/, "cause");
-  assert.match(mail.text, /À faire/, "quoi faire");
+  assert.match(mail.text, /^- adresse inconnue \(compte lea, abonnement sub_lea\) : reconduction le 7 octobre 2027\. Cause : compte sans adresse e-mail\.$/m, "la ligne de l'abonné porte sa cause");
+  assert.match(mail.text, /À faire, selon la cause :\n- Stripe/, "quoi faire");
 });
 
 test("au plus un e-mail par type d'erreur et par jour : ni au passage suivant, ni par une autre instance ; le lendemain, si la cause dure, un nouveau", async (t) => {
@@ -232,27 +238,53 @@ test("aucune adresse d'alerte configurée : rien n'est envoyé, le journal le di
   assert.equal(toOwner().length, 1);
 });
 
-test("envoi d'alerte resté sans réponse, puis un second rappel hors délai le même jour : la reprise n'est pas prise pour un doublon, le second abonné est signalé", async (t) => {
-  // Resend tel qu'il se comporte : il accepte le premier essai mais sa réponse se perd ; sous la même
-  // clé d'idempotence, un contenu identique n'est pas renvoyé, un contenu différent est refusé (409).
+/**
+ * Resend tel qu'il se comporte sous une clé d'idempotence : un contenu déjà accepté n'est pas
+ * renvoyé, un contenu différent sous la même clé est refusé (409). Tant que `silent`, il accepte
+ * mais sa réponse se perd.
+ */
+function idempotentResend(t: TestContext) {
   const accepted = new Map<string, string>();
   const delivered: Mail[] = [];
-  let silent = true;
+  const state = { silent: true };
   t.mock.method(globalThis, "fetch", async (_url: unknown, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as Mail;
     const key = (init?.headers as Record<string, string>)["idempotency-key"];
     const first = accepted.get(key);
     if (first !== undefined && first !== body.text) return new Response(JSON.stringify({ name: "invalid_idempotent_request" }), { status: 409 });
     if (first === undefined) { accepted.set(key, body.text); delivered.push(body); }
-    if (silent) throw new Error("socket hang up");
+    if (state.silent) throw new Error("socket hang up");
     return new Response("{}", { status: 200 });
   });
+  return { delivered, state };
+}
+
+test("envoi d'alerte resté sans réponse : la reprise passe sous la même clé d'idempotence, Resend écarte le doublon", async (t) => {
+  const { delivered, state } = idempotentResend(t);
+  logs(t);
+  await subscriber("oublie");
+  mock.timers.enable({ apis: ["Date"], now: at("2027-09-17 07:00:00").getTime() });
+  try {
+    await sendRenewalReminders({ lookup: stripe }); // accepté par Resend, réponse perdue
+    state.silent = false;
+    mock.timers.setTime(at("2027-09-17 07:30:00").getTime());
+    await sendRenewalReminders({ lookup: stripe }); // reprise du même constat
+    mock.timers.setTime(at("2027-09-18 07:00:00").getTime());
+    await sendRenewalReminders({ lookup: stripe });
+  } finally {
+    mock.timers.reset();
+  }
+  assert.equal(delivered.length, 1);
+});
+
+test("envoi d'alerte resté sans réponse, puis un second rappel hors délai le même jour : le second abonné est signalé, quitte à écrire deux fois", async (t) => {
+  const { delivered, state } = idempotentResend(t);
   logs(t);
   await subscriber("premier");
   mock.timers.enable({ apis: ["Date"], now: at("2027-09-17 07:00:00").getTime() });
   try {
     await sendRenewalReminders({ lookup: stripe });
-    silent = false;
+    state.silent = false;
     await subscriber("second");
     mock.timers.setTime(at("2027-09-17 07:30:00").getTime());
     await sendRenewalReminders({ lookup: stripe });
@@ -262,27 +294,55 @@ test("envoi d'alerte resté sans réponse, puis un second rappel hors délai le 
     mock.timers.reset();
   }
   assert.ok(delivered.some((m) => /abonnement sub_second/.test(m.text)), "le second abonné figure dans un e-mail réellement parti");
+  assert.equal(delivered.length, 2, "seule exception à « un par jour » : taire le second abonné serait pire");
 });
 
-test("rappels désactivés au démarrage (variable manquante) : un e-mail au propriétaire, qui nomme la variable et dit quoi faire", async (t) => {
+test("rappels désactivés au démarrage : un e-mail au propriétaire, qui nomme toutes les variables manquantes et dit quoi faire", async (t) => {
   const { toOwner } = resend(t);
   logs(t);
   delete process.env.STRIPE_SECRET_KEY;
+  delete process.env.AUTH_URL;
   try {
     assert.equal(startRenewalReminderScheduler(), null);
     await until(() => toOwner().length === 1);
     // Chaque redéploiement redémarre le serveur : un seul e-mail par jour.
-    await alertRemindersDisabled("STRIPE_SECRET_KEY absente");
-    await alertRemindersDisabled("STRIPE_SECRET_KEY absente");
+    assert.equal(startRenewalReminderScheduler(), null);
+    await alertRemindersDisabled("STRIPE_SECRET_KEY absente, AUTH_URL absente");
   } finally {
+    stopScheduler();
     process.env.STRIPE_SECRET_KEY = "sk_test_jamais_appelee";
+    process.env.AUTH_URL = "https://app.cortexexam.com";
   }
   assert.equal(toOwner().length, 1);
   const [mail] = toOwner();
   assert.equal(mail.subject, "Cortex : rappels de reconduction désactivés");
-  assert.match(mail.text, /STRIPE_SECRET_KEY absente/, "la variable qui manque");
+  assert.match(mail.text, /STRIPE_SECRET_KEY absente, AUTH_URL absente/, "tout ce qui manque, pas seulement la première variable");
   assert.match(mail.text, /aucun rappel ne part/, "conséquence");
   assert.match(mail.text, /À faire/, "quoi faire");
+});
+
+test("rappels désactivés, Resend en panne au démarrage : l'alerte repart au tick suivant, puis une fois par jour tant que la variable manque", async (t) => {
+  let up = false;
+  const { toOwner } = resend(t, () => new Response("{}", { status: up ? 200 : 503 }));
+  const events = logs(t);
+  delete process.env.STRIPE_SECRET_KEY;
+  mock.timers.enable({ apis: ["Date", "setInterval"], now: at("2027-08-08 09:00:00").getTime() });
+  try {
+    assert.equal(startRenewalReminderScheduler(), null);
+    await until(() => events.some((e) => e.evt === "renewal_alert.not_sent"));
+    assert.equal(toOwner().length, 0);
+    up = true;
+    mock.timers.tick(REMINDER_TICK_MS);
+    await until(() => toOwner().length === 1);
+    mock.timers.tick(REMINDER_TICK_MS);
+    mock.timers.tick(24 * 3_600_000);
+    await until(() => toOwner().length === 2);
+  } finally {
+    stopScheduler();
+    mock.timers.reset();
+    process.env.STRIPE_SECRET_KEY = "sk_test_jamais_appelee";
+  }
+  assert.deepEqual(toOwner().map((m) => m.subject), ["Cortex : rappels de reconduction désactivés", "Cortex : rappels de reconduction désactivés"]);
 });
 
 test("démarrage sans adresse d'alerte : le journal prévient que les échecs du rappel ne seront signalés à personne", async (t) => {
@@ -301,14 +361,37 @@ test("démarrage sans adresse d'alerte : le journal prévient que les échecs du
   assert.equal(mails.length, 0);
 });
 
-test("une panne de l'alerte elle-même (sa table en défaut) ne fait jamais échouer le passage du rappel", async (t) => {
-  resend(t);
+test("une ligne en attente illisible ne retient pas l'alerte des autres abonnés", async (t) => {
+  const { toOwner } = resend(t);
+  logs(t);
+  await subscriber("oublie");
+  await authRun(`INSERT INTO app_meta (key, value) VALUES (?, ?)`, "renewal_alert_pending:sub_fantome", "unsent");
+  await sendRenewalReminders({ now: at("2027-09-17 07:00:00"), lookup: stripe });
+  assert.equal(toOwner().length, 1);
+  assert.match(toOwner()[0].text, /abonnement sub_oublie\) : reconduction le 7 octobre 2027/);
+  assert.match(toOwner()[0].text, /adresse inconnue \(compte inconnu, abonnement sub_fantome\) : reconduction le une date illisible/);
+});
+
+test("la base refuse tout ce que l'alerte écrit : le rappel du client part quand même, et rien ne lève, ni au passage ni au démarrage", async (t) => {
+  const { mails } = resend(t);
   const events = logs(t);
-  await authRun(`ALTER TABLE app_meta RENAME TO app_meta_en_panne`);
+  await subscriber("lea", "2027-11-10 12:00:00"); // dans la fenêtre : son rappel doit partir
+  await subscriber("muet", "2027-11-12 12:00:00"); // refus persistant
+  await authRun(`UPDATE users SET email = NULL WHERE id = ?`, "muet");
+  await subscriber("oublie"); // hors délai
+  // Un constat de la veille attend encore son e-mail.
+  await authRun(`INSERT INTO app_meta (key, value) VALUES (?, ?)`, "renewal_alert_pending:sub_ancien:2027-10-01T12:00:00", "unsent");
+  // Seules les lignes de l'alerte sont refusées : le rappel garde ses marqueurs.
+  await authRun(`CREATE FUNCTION alerte_en_panne() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN IF NEW.key LIKE 'renewal_alert%' THEN RAISE EXCEPTION 'alerte en panne'; END IF; RETURN NEW; END $f$`);
+  await authRun(`CREATE TRIGGER alerte_en_panne BEFORE INSERT ON app_meta FOR EACH ROW EXECUTE FUNCTION alerte_en_panne()`);
   try {
-    assert.deepEqual(await sendRenewalReminders({ now: at(J60), lookup: stripe }), { sent: 0, failed: 0, pending: 0, skipped: 0 });
+    assert.deepEqual(await sendRenewalReminders({ now: at("2027-09-17 07:00:00"), lookup: stripe }), { sent: 1, failed: 1, pending: 0, skipped: 0 });
+    await alertRemindersDisabled("STRIPE_SECRET_KEY absente");
   } finally {
-    await authRun(`ALTER TABLE app_meta_en_panne RENAME TO app_meta`);
+    await authRun(`DROP TRIGGER alerte_en_panne ON app_meta`);
+    await authRun(`DROP FUNCTION alerte_en_panne()`);
   }
-  assert.ok(events.some((e) => e.evt === "renewal_alert.not_sent" && e.level === "warn"), JSON.stringify(events));
+  assert.deepEqual(mails.map((m) => m.to), ["lea@exemple.test"], "le rappel du client est parti, aucune alerte n'a pu l'être");
+  const failures = events.filter((e) => e.evt === "renewal_alert.not_sent" && /alerte en panne/.test(e.reason ?? ""));
+  assert.equal(failures.length, 4, "la note du hors délai, l'alerte « hors délai », l'alerte « en échec » et celle du démarrage : chacune contenue et journalisée");
 });
