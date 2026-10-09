@@ -407,11 +407,13 @@ async function reopenDay(day: string): Promise<void> {
 }
 /**
  * Abonnements dont une réclamation attend sa reprise : jamais conclue (issue
- * inconnue chez Resend, process tué entre l'envoi et son marquage), et de moins
- * de 24 h. Le jeton commence par sa date : passé 24 h, Resend a oublié la clé
- * d'idempotence, reprendre plus tôt que le passage quotidien n'écarterait plus
- * rien. Une réclamation dont l'abonnement n'est plus candidat (résilié depuis)
- * cesse donc d'elle-même de provoquer des reprises.
+ * inconnue chez Resend, process tué entre l'envoi et son marquage), et dont le
+ * DERNIER essai a moins de 24 h. Le jeton commence par la date de cet essai,
+ * réécrite à chaque reprise : tant que Resend reste muet, la reprise continue
+ * donc toutes les 30 minutes. Une réclamation que plus personne ne reprend
+ * (abonnement résilié depuis, donc plus candidat) cesse d'elle-même de
+ * provoquer des passages au bout de 24 h : le temps que Resend garde la clé
+ * d'idempotence, au-delà duquel le passage quotidien suffit.
  */
 async function unsettledSubscriptions(now: Date): Promise<string[]> {
   const rows = await authAll<{ key: string }>(
