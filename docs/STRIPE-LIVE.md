@@ -316,11 +316,14 @@ C'est l'app qui l'envoie (`cortex/lib/billing/renewal-reminders.ts`) :
 
 - **À qui** : chaque abonnement annuel que Stripe reconduira (ni terminé, ni
   résilié en fin de période). Le mensuel n'est pas concerné.
-- **Quand** : au premier passage à partir de **60 jours** avant l'échéance, et
-  tant qu'il reste plus de 30 jours et plus d'un mois calendaire. Un passage par
-  jour, à partir de 7 h UTC, fait par une seule instance.
+- **Quand** : au premier passage à partir de **60 jours** avant l'échéance, tant
+  qu'il reste plus de 30 jours et que le jour d'envoi précède d'au moins un mois
+  calendaire la date limite annoncée (échéance le 7 octobre : date limite le 6,
+  dernier envoi le 6 septembre). Un passage par jour, à partir de 7 h UTC, fait
+  par une seule instance.
 - **Quoi** : date d'échéance, montant de l'abonnement (lu chez Stripe : un
-  abonné resté à un ancien tarif reçoit son vrai montant), reconduction tacite,
+  abonné resté à un ancien tarif reçoit son vrai montant ; si une remise est
+  posée sur l'abonnement, le montant est annoncé « au plus »), reconduction tacite,
   date limite pour s'y opposer (la veille de l'échéance, heure de Paris), marche
   à suivre (page Compte → « Gérer mon abonnement »), effet en fin de période,
   mention de l'article L215-1. En français, avec un résumé en anglais.
@@ -330,10 +333,15 @@ C'est l'app qui l'envoie (`cortex/lib/billing/renewal-reminders.ts`) :
 - **Avant d'écrire**, l'abonnement est relu chez Stripe. Résilié entre-temps :
   pas d'e-mail. Stripe injoignable, refus de Resend, compte sans adresse :
   nouvel essai le lendemain (il reste un mois de marge).
+- **Envoi interrompu** (Resend ne répond pas, serveur redémarré en plein envoi) :
+  repris au tick suivant, 30 minutes plus tard, sous la même clé d'idempotence.
+  Resend retient cette clé 24 heures : au-delà (serveur arrêté plus d'un jour à
+  ce moment précis), un doublon reste possible.
 
 Rien à régler dans le tableau de bord Stripe ni dans Railway : la tâche démarre
-avec `BILLING_ENABLED=1` dès que `RESEND_API_KEY`, `STRIPE_SECRET_KEY` et
-`AUTH_URL` sont posées, et la clé restreinte lit déjà les abonnements.
+avec `BILLING_ENABLED=1` dès que `RESEND_API_KEY`, `AUTH_EMAIL_FROM`,
+`STRIPE_SECRET_KEY` et `AUTH_URL` sont posées, et la clé restreinte lit déjà les
+abonnements.
 
 **Journal** (Railway → Observability) :
 
@@ -341,9 +349,9 @@ avec `BILLING_ENABLED=1` dès que `RESEND_API_KEY`, `STRIPE_SECRET_KEY` et
 |---|---|
 | `renewal_reminder.sweep` | passage du jour : `sent`, `failed`, `pending`, `skipped` |
 | `renewal_reminder.sent` | e-mail parti (abonnement, échéance, jours restants) |
-| `renewal_reminder.not_sent` | pas parti, avec la raison ; nouvel essai prévu |
+| `renewal_reminder.not_sent` | pas parti, avec la raison ; nouvel essai prévu. En **erreur** quand réessayer ne suffira pas : clé Stripe sans droit ou d'un autre mode, refus 4xx de Resend (clé, expéditeur), compte sans adresse |
 | `renewal_reminder.skipped` | candidat en base que Stripe ne reconduira pas à cette date |
-| `renewal_reminder.missed` | **erreur** : délai légal dépassé sans e-mail. Rien n'est envoyé hors délai ; cet abonné pourra résilier sans frais après la reconduction |
+| `renewal_reminder.missed` | **erreur** : délai légal dépassé sans e-mail, pour un abonnement que Stripe reconduira. Rien n'est envoyé hors délai ; cet abonné pourra résilier sans frais après la reconduction. Cas connu : résiliation programmée puis annulée à moins d'un mois de l'échéance |
 | `renewal_reminder.disabled` | **erreur au démarrage** : il manque une variable, aucun rappel ne part |
 
 Limite connue : l'app ne connaît que la période **payée** (écrite par

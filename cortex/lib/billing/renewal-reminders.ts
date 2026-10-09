@@ -10,9 +10,11 @@
  * QUI : les abonnements ANNUELS que Stripe reconduira (ni terminés, ni résiliés
  * en fin de période). Le mensuel n'est pas visé : sa période est plus courte
  * que le préavis.
- * QUAND : à partir de 60 jours avant la fin de la période PAYÉE, et tant qu'il
- * reste plus de 30 jours ET plus d'un mois calendaire. Trop tard, rien n'est
- * envoyé (il serait hors délai) : une erreur est journalisée, une seule fois.
+ * QUAND : à partir de 60 jours avant la fin de la période PAYÉE, tant qu'il
+ * reste plus de 30 jours avant l'échéance ET que le jour d'envoi précède d'au
+ * moins un mois calendaire la date limite ANNONCÉE dans l'e-mail (la veille de
+ * l'échéance). Trop tard, rien n'est envoyé (il serait hors délai) : une
+ * erreur est journalisée, une seule fois.
  * D'OÙ : la table `subscriptions` (écrite par le webhook) désigne les candidats ;
  * au moment d'écrire, l'abonnement est RELU chez Stripe, qui fait foi pour ce
  * que l'e-mail annonce (reconduction encore prévue, date, montant de CET
@@ -22,15 +24,17 @@
  * marqueur réclamé dans `app_meta` (lib/claim-once), qui garde la date d'envoi.
  *  - refus net de Resend : rien n'est parti, le marqueur est rendu, nouvel essai
  *    au passage du lendemain ;
- *  - issue inconnue (pas de réponse) : la réclamation reste et le jour est
- *    rouvert ; le passage suivant (30 min) la reprend sous la MÊME clé
- *    d'idempotence Resend, retenue 24 h, qui écarte le doublon.
+ *  - issue inconnue (pas de réponse de Resend, process tué en plein envoi) :
+ *    la réclamation reste ; tant qu'il en reste une, chaque tick (30 min)
+ *    refait un passage, qui la reprend sous la MÊME clé d'idempotence Resend.
+ *    Resend retient la clé 24 h : reprise le jour même, le doublon est écarté.
  *
  * TÂCHE QUOTIDIENNE lancée par le serveur lui-même (instrumentation.ts), comme
  * la sauvegarde : le jour UTC est réclamé dans `app_meta`, une seule instance
  * fait le passage. Active seulement avec la facturation (BILLING_ENABLED=1).
  */
 import type Stripe from "stripe";
+import { randomUUID } from "node:crypto";
 import { authAll, authGet, authRun } from "@/db/auth-store";
 import { claimOnce, isSent, releaseClaim, SENT, settleClaim } from "@/lib/claim-once";
 import { contactEmail } from "@/lib/contact";
@@ -38,16 +42,48 @@ import { sendEmail } from "@/lib/email";
 import { legalLinks } from "@/lib/legal";
 import { log } from "@/lib/metrics";
 import { publicOrigin } from "@/lib/public-url";
-import { addMonthsClamped, isYearly, stillBilling } from "./subscription-windows";
+import { isYearly, stillBilling } from "./subscription-windows";
 
 const DAY_MS = 86_400_000;
 /** Envoi visé : 60 jours avant l'échéance (la loi autorise de 3 mois à 1 mois avant). */
 export const REMIND_FROM_DAYS = 60;
-/** En deçà, l'e-mail serait hors délai : il doit rester PLUS de 30 jours (et plus d'un mois calendaire). */
+/** En deçà, l'e-mail serait hors délai : il doit rester PLUS de 30 jours avant l'échéance. */
 export const REMIND_UNTIL_DAYS = 30;
 
 const parse = (s: string) => new Date(s.replace(" ", "T") + "Z");
 const fmt = (d: Date) => d.toISOString().slice(0, 19).replace("T", " ");
+
+// ─────────────────── les dates que lit le client (heure de Paris) ───────────────────
+
+type Day = { y: number; m: number; d: number };
+const PARIS_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" });
+/** Jour civil à Paris d'un instant UTC. */
+function parisDay(at: Date): Day {
+  const [y, m, d] = PARIS_DAY.format(at).split("-").map(Number);
+  return { y, m, d };
+}
+/** Jour civil construit par arithmétique de calendrier (un jour 0 ou un mois 0 reculent d'un cran). */
+function day(y: number, m: number, d: number): Day {
+  const date = new Date(Date.UTC(y, m - 1, d, 12));
+  return { y: date.getUTCFullYear(), m: date.getUTCMonth() + 1, d: date.getUTCDate() };
+}
+const rank = (x: Day) => x.y * 10_000 + x.m * 100 + x.d;
+
+/**
+ * Le jour de la reconduction, et la DATE LIMITE pour la refuser : la veille.
+ * Résilier ce jour-là arrive toujours avant le prélèvement, quelle que soit
+ * l'heure de la reconduction. C'est la date de l'encadré, et celle dont la
+ * fenêtre d'envoi compte son mois.
+ */
+function renewalDays(periodEnd: string): { due: Day; last: Day } {
+  const due = parisDay(parse(periodEnd));
+  return { due, last: day(due.y, due.m, due.d - 1) };
+}
+/** Un mois calendaire avant un jour : même quantième du mois précédent, ramené à son dernier jour (30 mars → 28 février). */
+function monthBefore(x: Day): Day {
+  const lastOfPrevious = day(x.y, x.m, 0);
+  return x.d < lastOfPrevious.d ? day(x.y, x.m - 1, x.d) : lastOfPrevious;
+}
 
 // ─────────────────────────── à qui, et quand ───────────────────────────
 
@@ -65,10 +101,11 @@ export function reminderVerdict(sub: ReminderSub, now: string): ReminderVerdict 
   if (!isYearly(sub)) return "not-yearly";
   const end = parse(sub.period_end).getTime();
   if (now < fmt(new Date(end - REMIND_FROM_DAYS * DAY_MS))) return "too-early";
-  // « Un mois » se compte en mois calendaire : 28 à 31 jours selon l'échéance. On tient les deux bornes.
-  const byDays = fmt(new Date(end - REMIND_UNTIL_DAYS * DAY_MS));
-  const byMonth = addMonthsClamped(sub.period_end, -1);
-  return now < (byDays < byMonth ? byDays : byMonth) ? "due" : "too-late";
+  // Deux bornes, tenues ensemble : plus de 30 jours avant l'échéance, et un envoi
+  // au plus tard un mois calendaire (28 à 31 jours) avant la date limite annoncée.
+  const inDays = now < fmt(new Date(end - REMIND_UNTIL_DAYS * DAY_MS));
+  const inMonth = rank(parisDay(parse(now))) <= rank(monthBefore(renewalDays(sub.period_end).last));
+  return inDays && inMonth ? "due" : "too-late";
 }
 
 // ─────────────────────────── ce que dit Stripe ───────────────────────────
@@ -82,6 +119,8 @@ export type RenewalFacts = {
   /** Prix d'une période de CET abonnement (pas le tarif public du jour), ou null s'il n'est pas lisible. */
   amount: number | null;
   currency: string | null;
+  /** Une remise est posée sur l'abonnement : le prélèvement peut être inférieur au prix. */
+  discounted: boolean;
 };
 
 /** Lecture d'un abonnement Stripe, format récent (période sur l'item) ou ancien (sur l'abonnement). */
@@ -90,7 +129,9 @@ export function renewalFactsOf(sub: Stripe.Subscription): RenewalFacts {
   const end = item?.current_period_end ?? (sub as { current_period_end?: number }).current_period_end;
   const canceling = !!sub.cancel_at_period_end || (typeof sub.cancel_at === "number" && sub.cancel_at > 0);
   const price = item?.price;
+  const discounts = (sub as { discounts?: unknown[] | null; discount?: unknown }).discounts;
   return {
+    discounted: (Array.isArray(discounts) && discounts.length > 0) || !!(sub as { discount?: unknown }).discount,
     renews: stillBilling(sub.status) && !canceling,
     yearly: price?.recurring?.interval === "year",
     periodEnd: typeof end === "number" && end > 0 ? fmt(new Date(end * 1000)) : null,
@@ -114,15 +155,8 @@ export async function stripeRenewalFacts(subscriptionId: string): Promise<Renewa
 
 // ─────────────────────────── l'e-mail ───────────────────────────
 
-const PARIS = "Europe/Paris";
-type Day = { y: number; m: number; d: number };
-/** Jour civil à Paris d'un instant UTC : c'est la date que lit le client. */
-function parisDay(at: Date): Day {
-  const [y, m, d] = new Intl.DateTimeFormat("en-CA", { timeZone: PARIS, year: "numeric", month: "2-digit", day: "2-digit" }).format(at).split("-").map(Number);
-  return { y, m, d };
-}
-const longDate = (day: Day, locale: string) =>
-  new Intl.DateTimeFormat(locale, { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(day.y, day.m - 1, day.d, 12)));
+const longDate = (x: Day, locale: string) =>
+  new Intl.DateTimeFormat(locale, { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(x.y, x.m - 1, x.d, 12)));
 const money = (amount: number, currency: string, locale: string) =>
   new Intl.NumberFormat(locale, { style: "currency", currency, minimumFractionDigits: Number.isInteger(amount) ? 0 : 2, maximumFractionDigits: 2 }).format(amount);
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -131,27 +165,28 @@ export type ReminderMail = { subject: string; text: string; html: string };
 
 /**
  * L'e-mail dédié de l'art. L215-1 : échéance, montant, reconduction tacite,
- * moyen de s'y opposer, et la DATE LIMITE dans un encadré apparent. Cette date
- * est la veille de l'échéance (heure de Paris) : résilier ce jour-là arrive
- * toujours avant le prélèvement, quelle que soit l'heure de la reconduction.
- * En français (langue du contrat ; l'app ne connaît pas celle du client),
+ * moyen de s'y opposer, et la DATE LIMITE dans un encadré apparent (la veille
+ * de l'échéance, heure de Paris : `renewalDays`). En français (langue du contrat ; l'app ne connaît pas celle du client),
  * suivi d'un résumé en anglais.
  */
 export function renewalReminderEmail(o: {
   /** Fin de la période payée : date de reconduction (« YYYY-MM-DD HH:MM:SS » UTC). */
   renewsAt: string; amount: number; currency: string;
+  /** Une remise s'applique : le montant annoncé est un maximum, pas une promesse. */
+  discounted?: boolean;
   /** Page Compte de l'app : c'est là qu'on ouvre le portail Stripe. */
   accountUrl: string; contact: string; termsUrl?: string | null;
 }): ReminderMail {
-  const due = parisDay(parse(o.renewsAt));
-  const last = parisDay(new Date(Date.UTC(due.y, due.m - 1, due.d - 1, 12)));
+  const { due, last } = renewalDays(o.renewsAt);
   const fr = { due: longDate(due, "fr-FR"), last: longDate(last, "fr-FR"), price: money(o.amount, o.currency, "fr-FR") };
   const en = { due: longDate(due, "en-GB"), last: longDate(last, "en-GB"), price: money(o.amount, o.currency, "en-GB") };
   const cgv = o.termsUrl ? ` : ${o.termsUrl}` : "";
 
   const subject = `Cortex Pro : votre abonnement annuel se renouvelle le ${fr.due}`;
   const intro = `Votre abonnement annuel Cortex Pro arrive à échéance le ${fr.due}.`;
-  const tacit = `Il s'agit d'un contrat à reconduction tacite : sans action de votre part, il sera renouvelé automatiquement ce jour-là pour une nouvelle année, et ${fr.price} seront prélevés sur votre moyen de paiement.`;
+  const tacit = `Il s'agit d'un contrat à reconduction tacite : sans action de votre part, il sera renouvelé automatiquement ce jour-là pour une nouvelle année, et ${o.discounted
+    ? `${fr.price} au plus seront prélevés sur votre moyen de paiement (une remise s'applique à votre abonnement : le montant exact figurera sur votre facture).`
+    : `${fr.price} seront prélevés sur votre moyen de paiement.`}`;
   const boxLabel = "Date limite pour refuser la reconduction";
   const how = `Vous pouvez vous opposer à ce renouvellement, sans frais et sans avoir à vous justifier, jusqu'au ${fr.last} inclus :`;
   const step1 = "Ouvrez votre page Compte";
@@ -160,7 +195,7 @@ export function renewalReminderEmail(o: {
   const byMail = `Vous pouvez aussi nous écrire à ${o.contact} : nous enregistrerons votre résiliation.`;
   const keep = "Si vous souhaitez continuer, vous n'avez rien à faire.";
   const why = `Pourquoi ce message ? L'article L215-1 du Code de la consommation nous demande de vous informer, au plus tôt trois mois et au plus tard un mois avant cette date limite, que vous pouvez ne pas reconduire un contrat conclu avec une clause de reconduction tacite. Les conditions de reconduction figurent à l'article 7 de nos conditions générales de vente`;
-  const english = `In English: your annual Cortex Pro subscription renews automatically on ${en.due} for ${en.price}. To opt out, cancel by ${en.last} from your Account page (“Gérer mon abonnement”, then cancel the subscription), or write to ${o.contact}. Cancelling takes effect at the end of the period you have already paid for.`;
+  const english = `In English: your annual Cortex Pro subscription renews automatically on ${en.due} for ${o.discounted ? `up to ${en.price} (a discount applies)` : en.price}. To opt out, cancel by ${en.last} from your Account page (“Gérer mon abonnement”, then cancel the subscription), or write to ${o.contact}. Cancelling takes effect at the end of the period you have already paid for.`;
 
   const rule = "+" + "-".repeat(62) + "+";
   const text = [
@@ -202,9 +237,9 @@ const closed = (marker: string | undefined) => isSent(marker) || !!marker?.start
 export type ReminderReport = {
   /** e-mails partis pendant ce passage */
   sent: number;
-  /** à refaire demain : refus de Resend, Stripe injoignable, compte sans adresse, montant illisible */
+  /** à refaire demain : refus de Resend, Stripe injoignable ou qui ne connaît pas l'abonnement, compte sans adresse, montant illisible */
   failed: number;
-  /** issue inconnue ou envoi en cours ailleurs : à reprendre au passage suivant, le jour même */
+  /** issue inconnue ou envoi en cours ailleurs : repris au tick suivant, le jour même */
   pending: number;
   /** candidats en base que Stripe ne reconduira pas à la date prévue */
   skipped: number;
@@ -239,8 +274,8 @@ export async function sendRenewalReminders(opts: { now?: Date; lookup?: Lookup }
 async function remindOne(row: Row, now: string, accountUrl: string, lookup: Lookup, report: ReminderReport): Promise<void> {
   const subscription = row.subscription_id!;
   const verdict = reminderVerdict(row, now);
-  if (verdict === "too-late") return flagMissed(row, now);
-  if (verdict !== "due") return;
+  if (verdict !== "due" && verdict !== "too-late") return;
+  if (now >= row.period_end!) return; // période payée échue : plus rien à annoncer
   if (closed(await readMarker(markerKey(subscription, row.period_end!)))) return;
 
   const context: Record<string, unknown> = { subscription, user: row.user_id, periodEnd: row.period_end };
@@ -257,23 +292,28 @@ async function remindOne(row: Row, now: string, accountUrl: string, lookup: Look
     const denied = (e as { type?: string }).type === "StripePermissionError";
     return retryTomorrow(`${denied ? "Stripe refuse la lecture de l'abonnement" : "Stripe injoignable"} : ${e instanceof Error ? e.message.slice(0, 160) : String(e)}`, denied ? "error" : "warn");
   }
+  // Vivant en base, inconnu de Stripe : la clé n'est pas celle du mode de cet abonnement, ou la base a dérivé.
+  if (!facts) return retryTomorrow("abonnement inconnu de Stripe avec la clé en place", "error");
   // La base désigne un candidat, Stripe dit ce qui arrivera : un événement perdu
   // (résiliation, changement d'échéance) ne doit pas faire annoncer une reconduction fausse.
-  if (!facts || !facts.renews || !facts.yearly) {
+  if (!facts.renews || !facts.yearly) {
     report.skipped++;
-    log("info", "renewal_reminder.skipped", { ...context, reason: !facts ? "abonnement inconnu de Stripe" : !facts.renews ? "Stripe ne le reconduira pas (terminé ou résiliation programmée)" : "abonnement non annuel chez Stripe" });
+    log("info", "renewal_reminder.skipped", { ...context, reason: facts.renews ? "abonnement non annuel chez Stripe" : "Stripe ne le reconduira pas (terminé ou résiliation programmée)" });
     return;
   }
   const periodEnd = facts.periodEnd ?? row.period_end!;
+  let timing: ReminderVerdict = verdict;
   if (periodEnd !== row.period_end) {
     context.periodEnd = periodEnd;
     context.periodEndInDb = row.period_end;
-    if (reminderVerdict({ ...row, period_end: periodEnd }, now) !== "due") {
-      report.skipped++;
-      log("warn", "renewal_reminder.skipped", { ...context, reason: "échéance différente chez Stripe : hors fenêtre d'envoi à cette date" });
-      return;
-    }
     if (closed(await readMarker(markerKey(subscription, periodEnd)))) return;
+    timing = reminderVerdict({ ...row, period_end: periodEnd }, now);
+  }
+  if (timing === "too-late") return flagMissed(subscription, row.user_id, periodEnd);
+  if (timing !== "due") {
+    report.skipped++;
+    log("warn", "renewal_reminder.skipped", { ...context, reason: "échéance différente chez Stripe : pas encore dans la fenêtre d'envoi" });
+    return;
   }
   if (facts.amount === null || !facts.currency) return retryTomorrow("montant de l'abonnement illisible chez Stripe", "error");
   if (!row.email) return retryTomorrow("compte sans adresse e-mail", "error");
@@ -283,7 +323,7 @@ async function remindOne(row: Row, now: string, accountUrl: string, lookup: Look
   if (claimed.state === "sent") return;
   if (claimed.state === "busy") { report.pending++; return; }
   const mail = renewalReminderEmail({
-    renewsAt: periodEnd, amount: facts.amount, currency: facts.currency,
+    renewsAt: periodEnd, amount: facts.amount, currency: facts.currency, discounted: facts.discounted,
     accountUrl, contact: contactEmail(), termsUrl: legalLinks().terms,
   });
   const outcome = await sendEmail({ to: row.email, ...mail, idempotencyKey: `${key}:${claimed.chain}` });
@@ -293,23 +333,26 @@ async function remindOne(row: Row, now: string, accountUrl: string, lookup: Look
     log("info", "renewal_reminder.sent", { ...context, daysLeft: Math.floor((parse(periodEnd).getTime() - parse(now).getTime()) / DAY_MS) });
   } else if (outcome.uncertain) {
     report.pending++;
-    log("warn", "renewal_reminder.not_sent", { ...context, reason: outcome.reason, message: `Rappel de reconduction : issue inconnue (${outcome.reason}). Reprise au prochain passage, sans doublon possible.` });
+    log("warn", "renewal_reminder.not_sent", { ...context, reason: outcome.reason, message: `Rappel de reconduction : issue inconnue (${outcome.reason}). Reprise au prochain tick, sous la même clé d'idempotence.` });
   } else {
     await releaseClaim(key, claimed.token);
-    retryTomorrow(outcome.reason);
+    // Un 4xx (clé, expéditeur, destinataire refusé) se répétera demain à l'identique : il faut le voir.
+    retryTomorrow(outcome.reason, outcome.status && outcome.status < 500 ? "error" : "warn");
   }
 }
 
-/** Délai légal dépassé sans qu'aucun rappel soit parti : on le dit fort, une seule fois, et on n'envoie rien hors délai. */
-async function flagMissed(row: Row, now: string): Promise<void> {
-  if (now >= row.period_end!) return; // période échue : plus rien à annoncer
-  const created = await authAll<{ key: string }>(
-    `INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING RETURNING key`,
-    markerKey(row.subscription_id!, row.period_end!), `${MISSED} ${new Date().toISOString()}`,
-  );
-  if (!created.length) return;
+/**
+ * Délai légal dépassé sans qu'aucun rappel soit parti, pour un abonnement que
+ * Stripe reconduira bien : on le dit fort, une seule fois, et on n'envoie rien
+ * hors délai. Écriture puis relecture, comme une réclamation (lib/claim-once).
+ */
+async function flagMissed(subscription: string, user: string, periodEnd: string): Promise<void> {
+  const key = markerKey(subscription, periodEnd);
+  const mine = `${MISSED} ${new Date().toISOString()} ${randomUUID()}`;
+  await authRun(`INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING`, key, mine);
+  if ((await readMarker(key)) !== mine) return;
   log("error", "renewal_reminder.missed", {
-    subscription: row.subscription_id, user: row.user_id, periodEnd: row.period_end,
+    subscription, user, periodEnd,
     message: "Rappel de reconduction (art. L215-1) hors délai et jamais envoyé : après la reconduction, ce client peut résilier sans frais à tout moment et être remboursé de la période restante.",
   });
 }
@@ -324,6 +367,8 @@ export const REMINDER_HOUR_UTC = 7;
 /** Ce qui empêche d'envoyer les rappels avec la configuration courante, ou null. */
 export function renewalRemindersBlocker(env: Partial<NodeJS.ProcessEnv> = process.env): string | null {
   if (!env.RESEND_API_KEY) return "RESEND_API_KEY absente";
+  // Sans expéditeur, lib/email retombe sur l'adresse d'essai de Resend, qui n'écrit pas aux clients.
+  if (!env.AUTH_EMAIL_FROM?.trim()) return "AUTH_EMAIL_FROM absente";
   if (!env.STRIPE_SECRET_KEY) return "STRIPE_SECRET_KEY absente";
   if (!publicOrigin(env)) return "AUTH_URL absente";
   return null;
@@ -339,9 +384,21 @@ async function claimDay(day: string): Promise<boolean> {
   );
   return rows.length === 1;
 }
-/** Rouvre le jour : le prochain tick refera un passage. */
+/** Rouvre le jour après une panne du passage : le prochain tick le refera. */
 async function reopenDay(day: string): Promise<void> {
   await authRun(`UPDATE app_meta SET value = ? WHERE key = ? AND value = ?`, `${day}:retry`, DAY_KEY, day);
+}
+/**
+ * Reste-t-il une réclamation jamais conclue ? (issue inconnue chez Resend,
+ * process tué entre l'envoi et son marquage.) Elle doit être reprise le jour
+ * même : demain, Resend aurait oublié sa clé d'idempotence.
+ */
+async function unsettledReminder(): Promise<boolean> {
+  const row = await authGet<{ key: string }>(
+    `SELECT key FROM app_meta WHERE key LIKE ? AND value NOT LIKE ? AND value NOT LIKE ? LIMIT 1`,
+    "renewal_reminder:%", `${SENT}%`, `${MISSED}%`,
+  );
+  return !!row;
 }
 
 export type ReminderTick = "skipped:billing-off" | "skipped:not-configured" | "skipped:too-early" | "skipped:done" | "ok" | "retry" | "failed";
@@ -355,7 +412,9 @@ export async function renewalReminderTick(opts: {
   if (renewalRemindersBlocker(env)) return "skipped:not-configured";
   if (now.getUTCHours() < REMINDER_HOUR_UTC) return "skipped:too-early";
   const day = now.toISOString().slice(0, 10);
-  if (!(await claimDay(day))) return "skipped:done";
+  // Le passage du jour est fait : on n'y revient que pour une réclamation restée
+  // sans suite (chaque abonnement garde sa propre réclamation, donc pas de doublon).
+  if (!(await claimDay(day)) && !(await unsettledReminder())) return "skipped:done";
   let report: ReminderReport;
   try {
     report = await (opts.run ?? ((at) => sendRenewalReminders({ now: at })))(now);
@@ -365,10 +424,7 @@ export async function renewalReminderTick(opts: {
     return "failed";
   }
   log("info", "renewal_reminder.sweep", { day, ...report });
-  if (report.pending === 0) return "ok";
-  // Une issue inconnue se reprend le jour même : demain, la clé d'idempotence de Resend aurait expiré.
-  await reopenDay(day);
-  return "retry";
+  return report.pending === 0 ? "ok" : "retry";
 }
 
 /** Démarre la tâche (une minuterie par process, hot-reload safe). null sans facturation ou si l'envoi est impossible. */

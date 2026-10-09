@@ -7,7 +7,8 @@
  *    autre instance ; la période d'après en reçoit un nouveau.
  *  - Résilié, mensuel, trop tôt : rien.
  *  - Refus de Resend ou Stripe injoignable : nouvel essai au passage du
- *    lendemain. Issue inconnue : reprise sous la même clé d'idempotence.
+ *    lendemain. Issue inconnue ou process tué en plein envoi : reprise le jour
+ *    même, sous la même clé d'idempotence.
  *  - Stripe fait foi pour ce que l'e-mail annonce.
  * Seams : sendRenewalReminders (passage), renewalReminderTick (tâche du jour),
  * renewalReminderEmail, renewalFactsOf. Base Postgres/PGlite en mémoire, Resend
@@ -24,7 +25,8 @@ process.env.STRIPE_SECRET_KEY = "sk_test_jamais_appelee";
 process.env.AUTH_URL = "https://app.cortexexam.com";
 process.env.LANDING_URL = "https://cortexexam.com";
 process.env.CONTACT_EMAIL = "contact@cortexexam.com";
-const ENV_KEYS = ["DB_DRIVER", "DATABASE_URL", "BILLING_ENABLED", "RESEND_API_KEY", "STRIPE_SECRET_KEY", "AUTH_URL", "LANDING_URL", "CONTACT_EMAIL"];
+process.env.AUTH_EMAIL_FROM = "Cortex <noreply@cortexexam.com>";
+const ENV_KEYS = ["DB_DRIVER", "DATABASE_URL", "BILLING_ENABLED", "RESEND_API_KEY", "STRIPE_SECRET_KEY", "AUTH_URL", "LANDING_URL", "CONTACT_EMAIL", "AUTH_EMAIL_FROM"];
 
 import { authGet, authRun } from "../db/auth-store";
 import { grantSubscriptionMonth, setSubscriptionStatus } from "../lib/billing/credits";
@@ -60,7 +62,7 @@ const stripeSays = (over: Partial<RenewalFacts> = {}) => {
   const calls: string[] = [];
   const lookup = async (id: string): Promise<RenewalFacts | null> => {
     calls.push(id);
-    return { renews: true, yearly: true, periodEnd: null, amount: 119, currency: "EUR", ...over };
+    return { renews: true, yearly: true, periodEnd: null, amount: 119, currency: "EUR", discounted: false, ...over };
   };
   return { lookup, calls };
 };
@@ -74,7 +76,7 @@ const marker = async (user: string, end = END) =>
 
 /** Journal structuré capté (niveau, événement). */
 function logs(t: TestContext) {
-  const events: Array<{ level: string; evt: string }> = [];
+  const events: Array<{ level: string; evt: string; reason?: string }> = [];
   const keep = (line: unknown) => { try { events.push(JSON.parse(String(line))); } catch { /* ligne libre */ } };
   t.mock.method(console, "error", keep);
   t.mock.method(console, "log", keep);
@@ -187,17 +189,42 @@ test("rattrapage : un annuel déjà dans la fenêtre reçoit son e-mail au premi
   assert.equal(missed[0].level, "error");
 });
 
+test("dernier jour : le 6 septembre l'e-mail part, le 7 il serait à moins d'un mois de la date limite qu'il annonce", async (t) => {
+  const { mails } = resend(t);
+  const events = logs(t);
+  await subscriber("veille");
+  await subscriber("lendemain");
+  await authRun(`UPDATE subscriptions SET subscription_id = NULL WHERE user_id = ?`, "lendemain");
+  assert.equal((await sendRenewalReminders({ now: at("2027-09-06 07:00:00"), lookup: stripeSays().lookup })).sent, 1);
+  assert.match(mails[0].text, /DATE LIMITE POUR REFUSER LA RECONDUCTION : 6 octobre 2027/);
+  await authRun(`UPDATE subscriptions SET subscription_id = ? WHERE user_id = ?`, "sub_lendemain", "lendemain");
+  assert.deepEqual(await sendRenewalReminders({ now: at("2027-09-07 07:00:00"), lookup: stripeSays().lookup }), { sent: 0, failed: 0, pending: 0, skipped: 0 });
+  assert.equal(mails.length, 1, "30 jours et 5 heures avant l'échéance, mais 29 jours avant la date limite : hors délai");
+  assert.equal(events.filter((e) => e.evt === "renewal_reminder.missed").length, 1);
+});
+
 test("refus de Resend : rien n'est marqué, l'e-mail part au passage du lendemain", async (t) => {
   let up = false;
   const { mails, attempts } = resend(t, () => new Response("{}", { status: up ? 200 : 500 }));
+  const events = logs(t);
   const stripe = stripeSays();
   await subscriber("lea");
   assert.deepEqual(await sendRenewalReminders({ now: at(J60), lookup: stripe.lookup }), { sent: 0, failed: 1, pending: 0, skipped: 0 });
   assert.equal(await marker("lea"), undefined, "marqueur rendu : aucun envoi n'est tenu pour fait");
+  assert.deepEqual(events.filter((e) => e.evt === "renewal_reminder.not_sent").map((e) => e.level), ["warn"], "panne de Resend (5xx) : passagère");
   up = true;
   assert.deepEqual(await sendRenewalReminders({ now: at("2027-08-09 07:00:00"), lookup: stripe.lookup }), { sent: 1, failed: 0, pending: 0, skipped: 0 });
   assert.equal(mails.length, 1);
   assert.notEqual(attempts[1], attempts[0], "après un refus vu, la clé d'idempotence n'est pas réutilisée");
+});
+
+test("refus de Resend sur la configuration (403 : clé, expéditeur) : une erreur, pas un simple avertissement répété un mois", async (t) => {
+  resend(t, () => new Response("{}", { status: 403 }));
+  const events = logs(t);
+  await subscriber("lea");
+  assert.deepEqual(await sendRenewalReminders({ now: at(J60), lookup: stripeSays().lookup }), { sent: 0, failed: 1, pending: 0, skipped: 0 });
+  assert.deepEqual(events.filter((e) => e.evt === "renewal_reminder.not_sent").map((e) => e.level), ["error"]);
+  assert.equal(await marker("lea"), undefined);
 });
 
 test("issue inconnue (Resend ne répond pas) : reprise un quart d'heure plus tard sous la MÊME clé d'idempotence", async (t) => {
@@ -232,7 +259,10 @@ test("Stripe fait foi : pas d'e-mail si la reconduction n'est plus prévue, ni t
   await subscriber("lea");
   // Résiliation faite chez Stripe, événement jamais reçu par l'app.
   assert.deepEqual(await sendRenewalReminders({ now: at(J60), lookup: stripeSays({ renews: false }).lookup }), { sent: 0, failed: 0, pending: 0, skipped: 1 });
-  assert.deepEqual(await sendRenewalReminders({ now: at(J60), lookup: async () => null }), { sent: 0, failed: 0, pending: 0, skipped: 1 }, "abonnement inconnu de Stripe");
+  // Vivant en base, inconnu de Stripe (clé d'un autre mode) : une erreur à traiter, pas un silence.
+  const events = logs(t);
+  assert.deepEqual(await sendRenewalReminders({ now: at(J60), lookup: async () => null }), { sent: 0, failed: 1, pending: 0, skipped: 0 });
+  assert.ok(events.some((e) => e.evt === "renewal_reminder.not_sent" && e.level === "error" && /inconnu de Stripe/.test(e.reason ?? "")));
   assert.deepEqual(await sendRenewalReminders({ now: at(J60), lookup: stripeSays({ yearly: false }).lookup }), { sent: 0, failed: 0, pending: 0, skipped: 1 });
   assert.deepEqual(
     await sendRenewalReminders({ now: at(J60), lookup: async () => { throw new Error("ETIMEDOUT"); } }),
@@ -247,6 +277,7 @@ test("Stripe fait foi : pas d'e-mail si la reconduction n'est plus prévue, ni t
 
 test("Stripe fait foi : le montant est celui de l'abonnement, la date celle de Stripe", async (t) => {
   const { mails } = resend(t);
+  const events = logs(t);
   await subscriber("ancien");
   // Abonné resté à un ancien tarif.
   await sendRenewalReminders({ now: at(J60), lookup: stripeSays({ amount: 99 }).lookup });
@@ -268,6 +299,21 @@ test("Stripe fait foi : le montant est celui de l'abonnement, la date celle de S
   assert.match(mails[1].text, /DATE LIMITE POUR REFUSER LA RECONDUCTION : 30 septembre 2027/);
   assert.deepEqual(await sendRenewalReminders({ now: at("2027-08-11 07:00:00"), lookup: sooner.lookup }), { sent: 0, failed: 0, pending: 0, skipped: 0 });
   assert.equal(mails.length, 2);
+
+  // Passé le délai compté sur la date de la BASE : pas de fausse alerte, ni pour celui
+  // qui a reçu son e-mail sous la date de Stripe, ni pour celui que Stripe ne reconduira pas.
+  await subscriber("parti");
+  const late = at("2027-09-20 07:00:00");
+  assert.deepEqual(await sendRenewalReminders({ now: late, lookup: async (id) => (await (id === "sub_parti" ? stripeSays({ renews: false }) : sooner).lookup(id)) }), { sent: 0, failed: 0, pending: 0, skipped: 1 });
+  assert.equal(events.filter((e) => e.evt === "renewal_reminder.missed").length, 0);
+  assert.equal(mails.length, 2);
+});
+
+test("remise posée sur l'abonnement : le montant annoncé est un maximum, pas une promesse", () => {
+  const mail = renewalReminderEmail({ renewsAt: END, amount: 119, currency: "EUR", discounted: true, accountUrl: "https://app.cortexexam.com/compte", contact: "contact@cortexexam.com" });
+  assert.match(mail.text, /119\s€ au plus seront prélevés sur votre moyen de paiement \(une remise s'applique à votre abonnement : le montant exact figurera sur votre facture\)/);
+  assert.match(mail.text, /for up to €119 \(a discount applies\)/);
+  assert.match(mail.html, /119\s€ au plus seront prélevés/);
 });
 
 test("compte sans adresse e-mail : rien ne part, c'est une erreur à traiter", async (t) => {
@@ -302,8 +348,11 @@ test("lecture d'un abonnement Stripe : période sur l'item (format récent) ou s
   const facts = (sub: unknown) => renewalFactsOf(sub as any);
   assert.deepEqual(
     facts({ status: "active", cancel_at_period_end: false, cancel_at: null, items: { data: [{ quantity: 1, price, current_period_end: unix(END) }] } }),
-    { renews: true, yearly: true, periodEnd: END, amount: 119, currency: "EUR" },
+    { renews: true, yearly: true, periodEnd: END, amount: 119, currency: "EUR", discounted: false },
   );
+  assert.equal(facts({ status: "active", discounts: ["di_1"], items: { data: [{ price }] } }).discounted, true, "remise (format récent)");
+  assert.equal(facts({ status: "active", discount: { id: "di_1" }, items: { data: [{ price }] } }).discounted, true, "remise (ancien format)");
+  assert.equal(facts({ status: "active", discounts: [], items: { data: [{ price }] } }).discounted, false);
   assert.equal(facts({ status: "active", current_period_end: unix(END), items: { data: [{ price }] } }).periodEnd, END, "ancien format");
   assert.equal(facts({ status: "active", cancel_at_period_end: true, items: { data: [{ price }] } }).renews, false);
   assert.equal(facts({ status: "active", cancel_at: unix(END), items: { data: [{ price }] } }).renews, false, "résiliation à date");
@@ -332,33 +381,77 @@ test("tâche du jour : un seul passage par jour UTC, même avec deux instances ;
   assert.equal(runs, 2);
 });
 
-test("tâche du jour : un refus attend demain, une issue inconnue ou une panne se reprend au tick suivant", async () => {
-  const reports: Array<ReminderReport | Error> = [
-    { ...quiet, failed: 1 },                 // refus de Resend : demain
-    { ...quiet, pending: 1 }, { ...quiet, sent: 1 }, // issue inconnue, puis reprise
-    new Error("base injoignable"), quiet,    // panne, puis reprise
-  ];
+test("tâche du jour : un refus attend demain, une panne du passage se reprend au tick suivant", async () => {
+  const reports: Array<ReminderReport | Error> = [{ ...quiet, failed: 1 }, new Error("base injoignable"), quiet];
   let runs = 0;
   const run = async () => { const r = reports[runs++]; if (r instanceof Error) throw r; return r; };
   assert.equal(await renewalReminderTick({ now: at("2027-08-08 07:00:00"), run }), "ok");
-  assert.equal(await renewalReminderTick({ now: at("2027-08-08 07:30:00"), run }), "skipped:done", "échec net : pas de nouvel essai le jour même");
-  assert.equal(await renewalReminderTick({ now: at("2027-08-09 07:00:00"), run }), "retry");
+  assert.equal(await renewalReminderTick({ now: at("2027-08-08 07:30:00"), run }), "skipped:done", "refus net : pas de nouvel essai le jour même");
+  assert.equal(await renewalReminderTick({ now: at("2027-08-09 07:00:00"), run }), "failed");
   assert.equal(await renewalReminderTick({ now: at("2027-08-09 07:30:00"), run }), "ok");
   assert.equal(await renewalReminderTick({ now: at("2027-08-09 08:00:00"), run }), "skipped:done");
-  assert.equal(await renewalReminderTick({ now: at("2027-08-10 07:00:00"), run }), "failed");
-  assert.equal(await renewalReminderTick({ now: at("2027-08-10 07:30:00"), run }), "ok");
-  assert.equal(runs, 5);
+  assert.equal(runs, 3);
+});
+
+test("tâche du jour : une issue inconnue est reprise au tick suivant, le jour même, sous la même clé", async (t) => {
+  let answer: "silence" | "ok" = "silence";
+  const { mails, attempts } = resend(t, () => {
+    if (answer === "silence") throw new Error("socket hang up");
+    return new Response("{}", { status: 200 });
+  });
+  const stripe = stripeSays();
+  const run = (now: Date) => sendRenewalReminders({ now, lookup: stripe.lookup });
+  await subscriber("lea");
+  mock.timers.enable({ apis: ["Date"], now: at("2027-08-09 07:00:10").getTime() });
+  try {
+    assert.equal(await renewalReminderTick({ run }), "retry");
+    answer = "ok";
+    mock.timers.setTime(at("2027-08-09 07:10:00").getTime());
+    assert.equal(await renewalReminderTick({ run }), "retry", "réclamation trop récente pour être celle d'un process mort : on attend");
+    assert.equal(attempts.length, 1);
+    mock.timers.setTime(at("2027-08-09 07:40:00").getTime());
+    assert.equal(await renewalReminderTick({ run }), "ok");
+    mock.timers.setTime(at("2027-08-09 08:10:00").getTime());
+    assert.equal(await renewalReminderTick({ run }), "skipped:done");
+  } finally {
+    mock.timers.reset();
+  }
+  assert.equal(mails.length, 1);
+  assert.equal(attempts[1], attempts[0]);
+});
+
+test("tâche du jour : process tué entre l'envoi et son marquage, la réclamation laissée est reprise le jour même, pas le lendemain", async (t) => {
+  const { mails } = resend(t);
+  const stripe = stripeSays();
+  const run = (now: Date) => sendRenewalReminders({ now, lookup: stripe.lookup });
+  await subscriber("zoe");
+  mock.timers.enable({ apis: ["Date"], now: at("2027-08-09 07:00:10").getTime() });
+  try {
+    // Ce que laisse un process mort en plein envoi : le jour réclamé, et une réclamation jamais conclue.
+    assert.equal(await renewalReminderTick({ run: async () => quiet }), "ok");
+    await authRun(`INSERT INTO app_meta (key, value) VALUES (?, ?)`, "renewal_reminder:sub_zoe:2027-10-07T12:00:00", `${new Date().toISOString()} chaine-zoe essai-1`);
+    mock.timers.setTime(at("2027-08-09 07:40:00").getTime());
+    assert.equal(await renewalReminderTick({ run }), "ok", "le jour est fait, mais une réclamation attend : nouveau passage");
+    assert.equal(mails.length, 1);
+    assert.equal(mails[0].key, "renewal_reminder:sub_zoe:2027-10-07T12:00:00:chaine-zoe", "même clé que l'essai interrompu : Resend écarte le doublon s'il était parti");
+    assert.match((await marker("zoe")) ?? "", /^sent /);
+    mock.timers.setTime(at("2027-08-09 08:10:00").getTime());
+    assert.equal(await renewalReminderTick({ run }), "skipped:done");
+  } finally {
+    mock.timers.reset();
+  }
+  assert.equal(mails.length, 1);
 });
 
 test("tâche du jour : inactive sans facturation, et sans de quoi envoyer", async () => {
   let runs = 0;
   const run = async () => { runs++; return quiet; };
   const now = at("2027-08-11 08:00:00");
-  const env = { BILLING_ENABLED: "1", RESEND_API_KEY: "re_x", STRIPE_SECRET_KEY: "sk_x", AUTH_URL: "https://app.cortexexam.com" };
+  const env = { BILLING_ENABLED: "1", RESEND_API_KEY: "re_x", AUTH_EMAIL_FROM: "Cortex <noreply@cortexexam.com>", STRIPE_SECRET_KEY: "sk_x", AUTH_URL: "https://app.cortexexam.com" };
   assert.equal(await renewalReminderTick({ now, run, env: { ...env, BILLING_ENABLED: undefined } }), "skipped:billing-off");
-  assert.equal(await renewalReminderTick({ now, run, env: { ...env, RESEND_API_KEY: undefined } }), "skipped:not-configured");
-  assert.equal(await renewalReminderTick({ now, run, env: { ...env, STRIPE_SECRET_KEY: undefined } }), "skipped:not-configured");
-  assert.equal(await renewalReminderTick({ now, run, env: { ...env, AUTH_URL: undefined } }), "skipped:not-configured");
+  for (const missing of ["RESEND_API_KEY", "AUTH_EMAIL_FROM", "STRIPE_SECRET_KEY", "AUTH_URL"]) {
+    assert.equal(await renewalReminderTick({ now, run, env: { ...env, [missing]: undefined } }), "skipped:not-configured", missing);
+  }
   assert.equal(runs, 0);
   // Sans `run` injecté, la tâche fait le vrai passage (ici : aucun abonné, donc aucun appel externe).
   assert.equal(await renewalReminderTick({ now, env }), "ok");
