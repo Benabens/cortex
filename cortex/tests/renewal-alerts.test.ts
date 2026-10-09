@@ -151,9 +151,30 @@ test("rappel hors délai : un e-mail au propriétaire, avec l'abonné, la date d
   assert.equal(mail.subject, "Cortex : rappel de reconduction hors délai (1 abonné)");
   assert.match(mail.text, /oublie@exemple\.test \(compte oublie, abonnement sub_oublie\) : reconduction le 7 octobre 2027\. Aucun e-mail n'est parti\./);
   assert.match(mail.text, /résilier sans frais/, "conséquence");
-  assert.match(mail.text, /À faire/, "quoi faire");
+  assert.match(mail.text, /À faire :\n1\. Tu peux prévenir l'abonné toi-même/, "quoi faire");
+  assert.doesNotMatch(mail.text, /journal de Resend/, "aucun essai n'est resté sans réponse : rien à y chercher");
   for (const later of ["2027-09-17 07:30:00", "2027-09-18 07:00:00", "2027-09-19 07:00:00"]) await sendRenewalReminders({ now: at(later), lookup: stripe });
   assert.equal(toOwner().length, 1, "constaté une fois, signalé une fois");
+});
+
+test("rappel hors délai après un essai resté sans réponse : l'e-mail dit que le rappel est peut-être parti, et où le vérifier", async (t) => {
+  const { toOwner } = resend(t, (to) => {
+    if (to !== OWNER) throw new Error("socket hang up");
+    return new Response("{}", { status: 200 });
+  });
+  logs(t);
+  await subscriber("lea");
+  mock.timers.enable({ apis: ["Date"], now: at("2027-09-06 07:00:00").getTime() });
+  try {
+    await sendRenewalReminders({ lookup: stripe }); // dernier jour de la fenêtre : Resend ne répond pas
+    mock.timers.setTime(at("2027-09-07 07:00:00").getTime());
+    await sendRenewalReminders({ lookup: stripe }); // fenêtre fermée
+  } finally {
+    mock.timers.reset();
+  }
+  assert.equal(toOwner().length, 1);
+  assert.match(toOwner()[0].text, /abonnement sub_lea\) : reconduction le 7 octobre 2027\. Un essai est resté sans réponse de Resend : l'e-mail est peut-être parti à temps\./);
+  assert.match(toOwner()[0].text, /À faire :\n1\. Cherche l'adresse de l'abonné dans le journal de Resend/);
 });
 
 test("Resend indisponible : le passage du rappel se termine comme d'habitude ; le rappel hors délai reste à signaler et part au passage suivant, une seule fois", async (t) => {
