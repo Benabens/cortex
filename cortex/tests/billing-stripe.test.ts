@@ -129,6 +129,22 @@ test("checkout : URLs de retour depuis AUTH_URL, jamais depuis Origin ; sans AUT
   assert.deepEqual(sub.subscription_data?.metadata, { app: "cortex", cortexUserId: "alice", plan: "pro_yearly" });
   assert.ok(!fs.readFileSync(path.join(__dirname, "..", "app", "api", "billing", "checkout", "route.ts"), "utf8").includes('headers.get("origin")'));
 });
+test("checkout : aucun moyen de paiement figé par le code, c'est le tableau de bord Stripe qui décide (Link compris)", async () => {
+  process.env.AUTH_URL = "https://cortex.example.ch/";
+  const { checkoutParams } = await import("../lib/billing/checkout-params");
+  const { PLANS } = await import("../lib/billing/stripe-events");
+  const plans = Object.keys(PLANS) as Array<keyof typeof PLANS>;
+  assert.deepEqual([...plans].sort(), ["credits_10", "pro_monthly", "pro_yearly"]);
+  for (const plan of plans) {
+    const params = checkoutParams({ plan, priceId: "price_test", userId: "alice", email: "alice@example.com" });
+    assert.equal("payment_method_types" in params, false, `${plan} : une liste figée (['card']) retirerait Link`);
+    // Ce dont dépendent le webhook et la facturation ne bouge pas.
+    assert.equal(params.metadata.app, "cortex");
+    assert.equal(params.metadata.cortexUserId, "alice");
+    assert.equal(params.metadata.plan, plan);
+    assert.deepEqual(params.line_items, [{ price: "price_test", quantity: 1 }]);
+  }
+});
 test("clé restreinte rk_live_ : un événement live est accepté (livemode cohérent)", async () => {
   process.env.STRIPE_SECRET_KEY = "rk_live_fake_restricted_key";
   try {

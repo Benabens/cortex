@@ -73,6 +73,16 @@ SEPA, virement) pour l'instant : l'abonnement y est « actif » plusieurs jours
 avant que l'argent n'arrive, et les crédits n'étant donnés qu'à la facture
 payée, l'abonné attendrait sans comprendre.
 
+Cette page est la **seule** liste des moyens proposés au paiement : le code
+n'en fixe aucun à la création de la session Checkout (ni pour l'abonnement
+mensuel ou annuel, ni pour le pack), Stripe affiche donc ceux qui sont activés
+ici et compatibles avec l'achat. Pour que **Link** soit proposé, il doit être
+sur « Activé » dans cette page, **en mode live** (le mode test a sa propre
+liste, où il l'est par défaut). Rien d'autre à faire : Link confirme le
+paiement tout de suite, comme une carte, et passe par les mêmes événements
+(webhook, factures, remboursements, portail client). La page est commune à
+toutes les applications du compte Stripe.
+
 **Paramètres → Facturation → Factures**
 
 | Réglage | Valeur |
