@@ -28,9 +28,14 @@ jobs:
     # concurrente sur connexions parallèles, pg_dump → pg_restore -l). Même
     # version majeure que la prod (18) ; le client 18 est installé depuis PGDG
     # ci-dessous (pg_dump doit être ≥ serveur).
+    # L'image vient du miroir AWS des images officielles Docker, pas de Docker
+    # Hub : le pull anonyme y est plafonné par adresse IP, et les runners GitHub
+    # partagent les leurs. Le 9 octobre 2026, « toomanyrequests » a mis les deux
+    # jobs en échec en dix secondes pendant plus d'une demi-heure, relances
+    # comprises : une CI rouge sur main, c'est le déploiement bloqué.
     services:
       postgres:
-        image: postgres:18
+        image: public.ecr.aws/docker/library/postgres:18
         env:
           POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_DB: cortextest
@@ -135,6 +140,14 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+
+      # Même raison que pour le service postgres du job `ci` : l'image de base
+      # vient du miroir, sous le nom que lit le Dockerfile. Le Dockerfile ne
+      # change pas : l'hébergeur construit l'image de production de son côté.
+      - name: Image de base depuis le miroir (hors quota Docker Hub)
+        run: |
+          docker pull public.ecr.aws/docker/library/node:22-slim
+          docker tag public.ecr.aws/docker/library/node:22-slim node:22-slim
 
       - name: Build de l'image (contexte = racine du repo)
         run: docker build -t cortex-app .
