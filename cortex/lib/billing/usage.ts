@@ -6,7 +6,8 @@ import { nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import { LlmError } from "@/lib/llm/types";
 import { guardsActive, floatLimit } from "./env";
-import { alertSpendThresholds, resetSpendAlerts, ownerAlertBlocker } from "./spend-alerts";
+import { ownerAlertBlocker } from "./owner-alert";
+import { alertSpendThresholds, resetSpendAlerts } from "./spend-alerts";
 
 /**
  * COMPTAGE DE COÛT + KILL-SWITCH.
