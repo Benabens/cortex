@@ -352,7 +352,7 @@ abonnements.
 | `renewal_reminder.sent` | e-mail parti (abonnement, échéance, jours restants) |
 | `renewal_reminder.not_sent` | pas parti, avec la raison ; nouvel essai prévu. En **erreur** quand réessayer ne suffira pas : clé Stripe sans droit ou d'un autre mode, refus 4xx de Resend (clé, expéditeur), compte sans adresse |
 | `renewal_reminder.skipped` | candidat en base que Stripe ne reconduira pas à cette date |
-| `renewal_reminder.missed` | **erreur** : délai légal dépassé sans e-mail, pour un abonnement que Stripe reconduira. Rien n'est envoyé hors délai ; cet abonné pourra résilier sans frais après la reconduction. Cas connu : résiliation programmée puis annulée à moins d'un mois de l'échéance |
+| `renewal_reminder.missed` | **erreur** : délai légal dépassé sans e-mail confirmé, pour un abonnement que Stripe reconduira. Rien n'est envoyé hors délai ; cet abonné pourra résilier sans frais après la reconduction. Avec `unconfirmed: true`, un essai est resté sans réponse de Resend : l'e-mail est peut-être parti à temps, à vérifier dans le journal de Resend. Cas connu sans aucun envoi : résiliation programmée puis annulée à moins d'un mois de l'échéance |
 | `renewal_reminder.disabled` | **erreur au démarrage** : il manque une variable, aucun rappel ne part |
 
 Limite connue : l'app ne connaît que la période **payée** (écrite par
