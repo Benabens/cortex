@@ -25,6 +25,7 @@
  * journal (`renewal_alert.not_sent`). Rien ici ne lève : une alerte en panne ne
  * doit jamais coûter un rappel.
  */
+import { createHash } from "node:crypto";
 import { authAll, authGet, authRun } from "@/db/auth-store";
 import { claimOnce, releaseClaim, settleClaim } from "@/lib/claim-once";
 import { sendEmail } from "@/lib/email";
@@ -155,10 +156,14 @@ async function sendOnce(kind: Kind, day: string, mail: { subject: string; text: 
   const claimed = await claimOnce(key);
   // Déjà signalé aujourd'hui, ou une autre instance s'en occupe.
   if (claimed.state !== "won") return false;
-  const outcome = await sendEmail({ to: ownerAlertRecipient(process.env)!, ...mail, idempotencyKey: `${key}:${claimed.chain}` });
+  // Le contenu fait partie de la clé d'idempotence : la reprise d'un envoi resté sans réponse peut
+  // nommer un abonné de plus. Sous la clé du premier essai, Resend répondrait « déjà envoyé » (409)
+  // et cet abonné ne serait jamais signalé ; à contenu identique, la clé est la même et le doublon écarté.
+  const content = createHash("sha256").update(mail.text).digest("hex").slice(0, 16);
+  const outcome = await sendEmail({ to: ownerAlertRecipient(process.env)!, ...mail, idempotencyKey: `${key}:${claimed.chain}:${content}` });
   if (!outcome.ok) {
     // Refus net : la clé est rendue, le prochain passage réessaiera. Issue inconnue : la réclamation
-    // reste, et sa reprise (un quart d'heure plus tard) passe sous la même clé d'idempotence Resend.
+    // reste, et sa reprise (un quart d'heure plus tard) repart de la même chaîne.
     if (!outcome.uncertain) await releaseClaim(key, claimed.token);
     log("warn", "renewal_alert.not_sent", { ...context, reason: outcome.reason, message: `Alerte du rappel de reconduction non envoyée (${outcome.reason}) : nouvel essai au prochain passage.` });
     return false;

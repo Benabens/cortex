@@ -14,7 +14,7 @@
  * Base Postgres/PGlite en mémoire, Resend simulé sur fetch, état Stripe injecté.
  */
 import assert from "node:assert/strict";
-import { after, beforeEach, test, type TestContext } from "node:test";
+import { after, beforeEach, mock, test, type TestContext } from "node:test";
 
 process.env.DB_DRIVER = "postgres";
 process.env.DATABASE_URL = "pglite://memory";
@@ -211,15 +211,36 @@ test("aucune adresse d'alerte configurée : rien n'est envoyé, le journal le di
   assert.equal(toOwner().length, 1);
 });
 
-test("une panne de l'alerte elle-même ne fait jamais échouer le passage du rappel", async (t) => {
-  const { mails } = resend(t);
-  const events = logs(t);
-  await subscriber("lea");
-  // Un constat dont l'échéance est illisible : la mise en forme de sa date lève.
-  await authRun(`INSERT INTO app_meta (key, value) VALUES (?, ?)`, "renewal_alert_pending:sub_illisible", "unsent");
-  assert.deepEqual(await sendRenewalReminders({ now: at(J60), lookup: stripe }), { sent: 1, failed: 0, pending: 0, skipped: 0 });
-  assert.deepEqual(mails.map((m) => m.to), ["lea@exemple.test"], "le rappel du client est parti");
-  assert.ok(events.some((e) => e.evt === "renewal_alert.not_sent" && e.level === "warn"), JSON.stringify(events));
+test("envoi d'alerte resté sans réponse, puis un second rappel hors délai le même jour : la reprise n'est pas prise pour un doublon, le second abonné est signalé", async (t) => {
+  // Resend tel qu'il se comporte : il accepte le premier essai mais sa réponse se perd ; sous la même
+  // clé d'idempotence, un contenu identique n'est pas renvoyé, un contenu différent est refusé (409).
+  const accepted = new Map<string, string>();
+  const delivered: Mail[] = [];
+  let silent = true;
+  t.mock.method(globalThis, "fetch", async (_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as Mail;
+    const key = (init?.headers as Record<string, string>)["idempotency-key"];
+    const first = accepted.get(key);
+    if (first !== undefined && first !== body.text) return new Response(JSON.stringify({ name: "invalid_idempotent_request" }), { status: 409 });
+    if (first === undefined) { accepted.set(key, body.text); delivered.push(body); }
+    if (silent) throw new Error("socket hang up");
+    return new Response("{}", { status: 200 });
+  });
+  logs(t);
+  await subscriber("premier");
+  mock.timers.enable({ apis: ["Date"], now: at("2027-09-17 07:00:00").getTime() });
+  try {
+    await sendRenewalReminders({ lookup: stripe });
+    silent = false;
+    await subscriber("second");
+    mock.timers.setTime(at("2027-09-17 07:30:00").getTime());
+    await sendRenewalReminders({ lookup: stripe });
+    mock.timers.setTime(at("2027-09-18 07:00:00").getTime());
+    await sendRenewalReminders({ lookup: stripe });
+  } finally {
+    mock.timers.reset();
+  }
+  assert.ok(delivered.some((m) => /abonnement sub_second/.test(m.text)), "le second abonné figure dans un e-mail réellement parti");
 });
 
 test("rappels désactivés au démarrage (variable manquante) : un e-mail au propriétaire, qui nomme la variable et dit quoi faire", async (t) => {
@@ -257,4 +278,16 @@ test("démarrage sans adresse d'alerte : le journal prévient que les échecs du
   assert.ok(timer, "les rappels eux-mêmes restent actifs");
   assert.ok(events.some((e) => e.evt === "renewal_alert.disabled" && e.level === "warn" && /CORTEX_OWNER_EMAIL ou PUBLISHER_EMAIL/.test(e.reason ?? "")), JSON.stringify(events));
   assert.equal(mails.length, 0);
+});
+
+test("une panne de l'alerte elle-même (sa table en défaut) ne fait jamais échouer le passage du rappel", async (t) => {
+  resend(t);
+  const events = logs(t);
+  await authRun(`ALTER TABLE app_meta RENAME TO app_meta_en_panne`);
+  try {
+    assert.deepEqual(await sendRenewalReminders({ now: at(J60), lookup: stripe }), { sent: 0, failed: 0, pending: 0, skipped: 0 });
+  } finally {
+    await authRun(`ALTER TABLE app_meta_en_panne RENAME TO app_meta`);
+  }
+  assert.ok(events.some((e) => e.evt === "renewal_alert.not_sent" && e.level === "warn"), JSON.stringify(events));
 });
