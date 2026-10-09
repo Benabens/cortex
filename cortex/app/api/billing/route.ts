@@ -13,6 +13,11 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function storageQuotaMb(): number | null {
+  const bytes = storageQuotaBytes();
+  return bytes === null ? null : bytes / MiB;
+}
+
 /**
  * Solde et abonnement pour la page « Abonnement & crédits » : les deux poches
  * (achetés / abonnement du mois), l'état de l'abonnement (en règle, en cours de
@@ -20,11 +25,6 @@ export const dynamic = "force-dynamic";
  * offres avec leur prix Stripe. Tout est exprimé en CRÉDITS (le ledger compte
  * en centièmes). Sans facturation : structure identique, valeurs nulles.
  */
-function storageQuotaMb(): number | null {
-  const bytes = storageQuotaBytes();
-  return bytes === null ? null : bytes / MiB;
-}
-
 export async function GET(req: NextRequest) {
   useUser(req);
   const on = billingEnabled();
@@ -61,10 +61,14 @@ export async function GET(req: NextRequest) {
           manageable: !!sub.customer_id,
         }
       : null,
-    costs: { exam: fromCenti(creditCost("exam")), qcm: fromCenti(creditCost("qcm")), exercise: fromCenti(creditCost("exercise")), assist: fromCenti(creditCost("assist")) },
+    costs: {
+      exam: fromCenti(creditCost("exam")), qcm: fromCenti(creditCost("qcm")), exercise: fromCenti(creditCost("exercise")), assist: fromCenti(creditCost("assist")),
+      // Ce que coûte un COURS : sa préparation, puis la détection du format à chaque ajout d'annales.
+      prepare: fromCenti(creditCost("prepare")), format: fromCenti(creditCost("format")),
+    },
     usedToday: { gen: await usedToday("gen"), assist: await usedToday("assist") },
     // Limites EFFECTIVES du compte (valeur posée, sinon défaut du déploiement
-    // gardé ; null = levée) : l'écran les affiche à côté de l'offre Pro.
+    // gardé ; null = levée) : l'écran les affiche au-dessus des offres.
     quotas: { gen: quotaFor("gen"), assist: quotaFor("assist") },
     storageQuotaMb: storageQuotaMb(),
     transactions: on

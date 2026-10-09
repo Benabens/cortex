@@ -49,7 +49,11 @@ type Billing = {
     standing: Standing;
     cancelsAtPeriodEnd: boolean;
   } | null;
-  costs: { exam: number; qcm: number; exercise: number; assist: number };
+  costs: {
+    exam: number; qcm: number; exercise: number; assist: number;
+    /** Préparation d'un cours, et détection du format à chaque ajout d'annales. */
+    prepare?: number; format?: number;
+  };
   /** Limites quotidiennes appliquées au compte (null : levée). */
   quotas?: { gen: number | null; assist: number | null };
   /** Espace de stockage du compte, en Mo (null : pas de plafond). */
@@ -74,16 +78,24 @@ const dateFr = (iso: string | null) => {
 };
 
 /**
- * Les bornes d'usage du compte, dites à côté de l'offre Pro : « autant de cours
- * que tu veux » parle du NOMBRE de cours (aucun plafond), pas des générations
- * (crédits, limites par jour) ni des fichiers (stockage). Seules les limites
- * que le serveur applique sont citées.
+ * Ce qui borne l'usage, dit au-dessus des offres. « Autant de cours que tu
+ * veux » parle du NOMBRE de cours, qui n'a pas de plafond : un cours coûte des
+ * crédits (sa préparation, puis chaque ajout d'annales), ses générations aussi,
+ * et le compte a des limites par jour et un espace de stockage. Seules les
+ * limites citées ici sont nommées : la phrase ne se donne pas pour une liste complète.
  */
-function accountLimits(quotas: Billing["quotas"], storageMb: Billing["storageQuotaMb"]): string | null {
+function usageNote(data: Billing): string {
+  const { prepare, format } = data.costs;
+  const cost = prepare != null && format != null
+    ? `Préparer un cours coûte ${credits(prepare)}, chaque ajout d’annales ${credits(format)}, et chaque génération utilise des crédits.`
+    : "Préparer un cours, y ajouter des annales et chaque génération utilisent des crédits.";
   const count = (n: number | null | undefined, unit: string) => (n == null ? null : `${nf.format(n)} ${unit}${n >= 2 ? "s" : ""}`);
-  const daily = [count(quotas?.gen, "génération"), count(quotas?.assist, "aide")].filter(Boolean).join(" et ");
-  const parts = [daily ? `${daily} par jour` : null, storageMb == null ? null : `${nf.format(storageMb)} Mo de fichiers`].filter(Boolean);
-  return parts.length ? `Limites par compte : ${parts.join(", ")}.` : null;
+  const daily = [count(data.quotas?.gen, "génération"), count(data.quotas?.assist, "aide")].filter(Boolean).join(" et ");
+  return [
+    cost,
+    daily ? `Par jour et par compte : ${daily}.` : null,
+    data.storageQuotaMb == null ? null : `Stockage : ${nf.format(data.storageQuotaMb)} Mo de fichiers.`,
+  ].filter(Boolean).join(" ");
 }
 
 /** Chargement : pur, sans état — testable et réutilisable par le bouton « actualiser ». */
@@ -233,7 +245,6 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
   // documents publiés l'achat est fermé côté serveur ; hors production
   // (staging), on peut accepter et acheter en test même sans liens.
   const canAccept = data.purchase.enabled;
-  const limits = accountLimits(data.quotas, data.storageQuotaMb);
 
   return (
     <section className="flex flex-col gap-4" aria-labelledby="billing-title">
@@ -330,6 +341,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
       <Panel className="p-0">
         <div className="px-5 pt-4">
           <h3 className="text-[0.9rem] font-semibold text-ink-1">Recharger</h3>
+          <p className="mt-1 max-w-3xl text-[0.8rem] leading-relaxed text-ink-3">{usageNote(data)}</p>
           {!data.purchase.enabled && (
             <p role="status" className="mt-1.5 text-[0.85rem] text-warning">{data.purchase.reason}</p>
           )}
@@ -351,12 +363,6 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
                   {/* Conditions de reconduction, à côté du bouton et AVANT tout achat :
                       elles ne vivaient que dans le bloc « Gérer mon abonnement », invisible
                       pour un compte neuf (audit de pré-lancement). */}
-                  {/* La précision qui borne « autant de cours que tu veux », au même endroit. */}
-                  {isSub && (
-                    <div className="mt-0.5 text-[0.78rem] text-ink-4">
-                      Chaque génération utilise des crédits.{limits ? ` ${limits}` : ""}
-                    </div>
-                  )}
                   {isSub && (
                     <div className="mt-0.5 text-[0.78rem] text-ink-4">
                       Renouvellement automatique chaque {o.interval === "year" ? "année" : "mois"} · résiliable à tout moment

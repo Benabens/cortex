@@ -65,20 +65,32 @@ test("compte sans abonnement, CGV acceptées : consentement par offre avant acti
   assert.match(html, /Mentions légales/);
 });
 
-test("offre Pro : « Autant de cours que tu veux », avec à côté le coût en crédits et les limites du compte", async () => {
-  const html = await render(base({ quotas: { gen: 3, assist: 20 }, storageQuotaMb: 200 }));
+test("offre Pro : « Autant de cours que tu veux », avec au-dessus ce que coûte un cours et ce qui borne l'usage", async () => {
+  const costs = { exam: 2, qcm: 1, exercise: 1, assist: 0.1, prepare: 2, format: 1 };
+  const html = await render(base({ costs, quotas: { gen: 3, assist: 20 }, storageQuotaMb: 200 }));
   // Les deux offres Pro (mensuelle, annuelle) la portent ; le pack, non.
   assert.equal((html.match(/Autant de cours que tu veux · 20 crédits par mois, non reportables/g) ?? []).length, 2);
-  assert.equal((html.match(/Chaque génération utilise des crédits\. Limites par compte : 3 générations et 20 aides par jour, 200 Mo de fichiers\./g) ?? []).length, 2);
   assert.match(html, /10 crédits, sans date d’expiration/);
+  // Une fois, sous « Recharger », avant la première offre : un cours n'est pas gratuit, et l'usage a des bornes.
+  const note = "Préparer un cours coûte 2 crédits, chaque ajout d’annales 1 crédit, et chaque génération utilise des crédits. Par jour et par compte : 3 générations et 20 aides. Stockage : 200 Mo de fichiers.";
+  assert.equal(html.split(note).length - 1, 1);
+  assert.ok(html.indexOf("Recharger") < html.indexOf(note) && html.indexOf(note) < html.indexOf("Autant de cours que tu veux"));
   assert.ok(!/illimit/i.test(html), "aucune promesse d'illimité");
+  assert.ok(!/Limites par compte/.test(html), "la phrase ne se donne pas pour la liste complète des limites");
   // Limites levées ou inconnues : l'écran n'invente aucun chiffre.
-  const open = await render(base({ quotas: { gen: null, assist: null }, storageQuotaMb: null }));
-  assert.match(open, /Chaque génération utilise des crédits\./);
-  assert.ok(!/Limites par compte/.test(open));
-  assert.ok(!/Limites par compte/.test(await render(base())), "réponse d'API sans limites");
-  const partial = await render(base({ quotas: { gen: 1, assist: null }, storageQuotaMb: null }));
-  assert.match(partial, /Limites par compte : 1 génération par jour\./);
+  const open = await render(base({ costs, quotas: { gen: null, assist: null }, storageQuotaMb: null }));
+  assert.match(open, /chaque génération utilise des crédits\.<\/p>/);
+  assert.ok(!/Par jour et par compte|Stockage :/.test(open));
+  const partial = await render(base({ costs, quotas: { gen: 1, assist: null }, storageQuotaMb: null }));
+  assert.match(partial, /Par jour et par compte : 1 génération\.<\/p>/);
+  // Tout coupé (kill-switch « 0 ») : les zéros sont dits tels quels.
+  const cut = await render(base({ costs, quotas: { gen: 0, assist: 0 }, storageQuotaMb: 0 }));
+  assert.match(cut, /Par jour et par compte : 0 génération et 0 aide\. Stockage : 0 Mo de fichiers\./);
+  // Tarifs réglés autrement (CREDITS_COST_JSON) : ce sont eux qui s'affichent.
+  assert.match(await render(base({ costs: { ...costs, prepare: 3, format: 0.5 } })), /Préparer un cours coûte 3 crédits, chaque ajout d’annales 0,5 crédit,/);
+  // Réponse d'un serveur plus ancien (déploiement en cours) : la phrase reste vraie, sans chiffre.
+  const old = await render(base());
+  assert.match(old, /Préparer un cours, y ajouter des annales et chaque génération utilisent des crédits\.<\/p>/);
 });
 
 test("abonnement actif : reste / plafond, date de recharge, bouton Gérer, abonnements non re-souscriptibles", async () => {
