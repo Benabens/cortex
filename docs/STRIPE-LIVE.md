@@ -87,7 +87,7 @@ payée, l'abonné attendrait sans comprendre.
 |---|---|
 | E-mails de paiement réussi (reçus) | activés |
 | E-mails de remboursement | activés |
-| E-mails de renouvellement à venir | activés, délai de **30 jours** : les CGV promettent une information avant chaque reconduction, et pour l'annuel elle doit partir au plus tard un mois avant l'échéance |
+| E-mails de renouvellement à venir | activés, délai de **30 jours** : un second rappel, de courtoisie. L'information légale de l'annuel (art. L215-1) est envoyée par l'app, plus tôt et avec les mentions requises : § 12 |
 | E-mails d'échec de paiement, lien de mise à jour de la carte | activés, lien vers le portail client |
 | Relances intelligentes (Smart Retries) | activées |
 | Si toutes les relances échouent | **annuler l'abonnement** |
@@ -172,7 +172,7 @@ que la clé secrète : elle ne peut faire que ce dont l'app a besoin.
 | Prices | lecture | afficher les prix, résoudre les `lookup_key` |
 | Customer portal | écriture | ouvrir le portail |
 | Invoices | lecture | retrouver la facture d'un paiement remboursé |
-| Subscriptions | écriture | programmer la résiliation (rétractation), résilier à la suppression du compte |
+| Subscriptions | écriture | programmer la résiliation (rétractation), résilier à la suppression du compte, relire l'abonnement avant le rappel de reconduction (§ 12) |
 
 Tout le reste : aucun. S'il manque un droit, Stripe répond 403 en nommant la
 permission : ajoute-la à la clé. Une clé secrète `sk_live_…` fonctionne aussi.
@@ -302,7 +302,57 @@ achat : à traiter à la main.
 - **Remboursement ou litige sur une facture** : abonnement suspendu jusqu'à la
   prochaine facture payée ; ce qui a été consommé passe en dette.
 
-## 12. Revenir en arrière
+## 12. Rappel de reconduction de l'abonnement annuel
+
+L'abonnement annuel se reconduit tacitement. L'article L215-1 du Code de la
+consommation (CGV, article 7) impose d'écrire à l'abonné, par un e-mail dédié,
+**au plus tôt trois mois et au plus tard un mois** avant la date limite de
+non-reconduction, avec cette date dans un encadré. Sans cet e-mail, l'abonné
+peut résilier sans frais à tout moment après la reconduction et se faire
+rembourser la période restante. L'e-mail « renouvellement à venir » de Stripe
+ne suffit pas : il part à 30 jours, sans les mentions.
+
+C'est l'app qui l'envoie (`cortex/lib/billing/renewal-reminders.ts`) :
+
+- **À qui** : chaque abonnement annuel que Stripe reconduira (ni terminé, ni
+  résilié en fin de période). Le mensuel n'est pas concerné.
+- **Quand** : au premier passage à partir de **60 jours** avant l'échéance, et
+  tant qu'il reste plus de 30 jours et plus d'un mois calendaire. Un passage par
+  jour, à partir de 7 h UTC, fait par une seule instance.
+- **Quoi** : date d'échéance, montant de l'abonnement (lu chez Stripe : un
+  abonné resté à un ancien tarif reçoit son vrai montant), reconduction tacite,
+  date limite pour s'y opposer (la veille de l'échéance, heure de Paris), marche
+  à suivre (page Compte → « Gérer mon abonnement »), effet en fin de période,
+  mention de l'article L215-1. En français, avec un résumé en anglais.
+- **Une seule fois** par abonnement et par période : marqueur
+  `renewal_reminder:<abonnement>:<échéance>` dans `app_meta`, valeur
+  `sent <date d'envoi>`. C'est la preuve de l'envoi, avec le journal Resend.
+- **Avant d'écrire**, l'abonnement est relu chez Stripe. Résilié entre-temps :
+  pas d'e-mail. Stripe injoignable, refus de Resend, compte sans adresse :
+  nouvel essai le lendemain (il reste un mois de marge).
+
+Rien à régler dans le tableau de bord Stripe ni dans Railway : la tâche démarre
+avec `BILLING_ENABLED=1` dès que `RESEND_API_KEY`, `STRIPE_SECRET_KEY` et
+`AUTH_URL` sont posées, et la clé restreinte lit déjà les abonnements.
+
+**Journal** (Railway → Observability) :
+
+| Événement | Sens |
+|---|---|
+| `renewal_reminder.sweep` | passage du jour : `sent`, `failed`, `pending`, `skipped` |
+| `renewal_reminder.sent` | e-mail parti (abonnement, échéance, jours restants) |
+| `renewal_reminder.not_sent` | pas parti, avec la raison ; nouvel essai prévu |
+| `renewal_reminder.skipped` | candidat en base que Stripe ne reconduira pas à cette date |
+| `renewal_reminder.missed` | **erreur** : délai légal dépassé sans e-mail. Rien n'est envoyé hors délai ; cet abonné pourra résilier sans frais après la reconduction |
+| `renewal_reminder.disabled` | **erreur au démarrage** : il manque une variable, aucun rappel ne part |
+
+Limite connue : l'app ne connaît que la période **payée** (écrite par
+`invoice.paid`). Une échéance déplacée à la main dans Stripe, sans facture,
+n'est pas suivie : le rappel n'annonce jamais une date que Stripe dément, mais
+il peut alors ne pas partir (`renewal_reminder.skipped`, raison « échéance
+différente chez Stripe »).
+
+## 13. Revenir en arrière
 
 Remettre les deux valeurs de test dans Railway referme la vente publique
 (clé de test + instance ouverte) sans toucher aux crédits déjà achetés. Les

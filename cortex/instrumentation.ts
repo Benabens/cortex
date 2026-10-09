@@ -93,4 +93,12 @@ export async function register() {
   } catch (e) {
     console.error("[instrumentation] planificateur de sauvegardes non démarré :", (e as Error)?.message);
   }
+  // Rappel de reconduction de l'abonnement annuel (art. L215-1 C. conso) : un
+  // passage par jour, une seule instance, actif avec la facturation.
+  try {
+    const { startRenewalReminderScheduler } = await import("@/lib/billing/renewal-reminders");
+    startRenewalReminderScheduler();
+  } catch (e) {
+    console.error("[instrumentation] rappels de reconduction non démarrés :", (e as Error)?.message);
+  }
 }

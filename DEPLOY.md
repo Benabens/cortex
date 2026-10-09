@@ -343,6 +343,13 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
   heure et par process ; la sortie des workers de jobs n'est pas conservée,
   seuls les avertissements du serveur web se lisent dans Railway). Pas
   d'alerte sans plafond (`unlimited`) ni sur le kill-switch `0`.
+- **Rappel de reconduction de l'abonnement annuel** (art. L215-1 du Code de la
+  consommation) : avec la facturation, le serveur écrit chaque jour, à partir de
+  7 h UTC, aux abonnés annuels dont l'échéance arrive dans 60 jours. Un e-mail
+  par abonnement et par période (marqueur `renewal_reminder:…` dans
+  `app_meta`), via Resend. À surveiller dans les logs : `renewal_reminder.missed`
+  et `renewal_reminder.disabled` ne doivent jamais apparaître. Détail :
+  `docs/STRIPE-LIVE.md` § 12.
 - **Kill-switch immédiat** : Variables → `SPEND_CAP_USD=0` → Redeploy
   (~1 min). Toute génération payante est coupée avec un message propre.
 - **Métriques** : `curl -H 'Authorization: Bearer ⟨METRICS_TOKEN⟩' https://⟨domaine⟩/api/metrics` (le jeton n'est plus accepté en `?token=`)
