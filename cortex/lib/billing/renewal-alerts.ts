@@ -106,18 +106,19 @@ async function pendingMissed(): Promise<MissedReminder[]> {
 }
 
 function missedMail(missed: MissedReminder[]): { subject: string; text: string } {
+  const steps = [
+    // Seulement si un essai est resté sans réponse : sinon il n'y a rien à chercher chez Resend.
+    ...(missed.some((m) => m.unconfirmed) ? ["Cherche l'adresse de l'abonné dans le journal de Resend (resend.com, Emails), pour un essai resté sans réponse. Si l'e-mail y figure, il est parti à temps et il n'y a rien d'autre à faire."] : []),
+    "Tu peux prévenir l'abonné toi-même : cela ne rattrape pas le délai légal, mais il sait que son abonnement se reconduit. S'il résilie après la reconduction, rembourse-lui la période restante.",
+    "Cherche la cause dans les logs Railway : événements renewal_reminder.not_sent des jours précédents.",
+  ];
   return {
     subject: `Cortex : rappel de reconduction hors délai (${subscribers(missed.length)})`,
     text: [
       `Le rappel de reconduction de l'abonnement annuel (art. L215-1 du Code de la consommation) n'est pas parti à temps pour ${subscribers(missed.length)}. Le délai légal est dépassé : l'app n'enverra plus rien pour cette période.`,
       missed.map((m) => `- ${who(m)} : reconduction le ${renewalDay(m.periodEnd)}. ${m.unconfirmed ? "Un essai est resté sans réponse de Resend : l'e-mail est peut-être parti à temps." : "Aucun e-mail n'est parti."}`).join("\n"),
       "Conséquence : après la reconduction, l'abonné peut résilier sans frais à tout moment et se faire rembourser la période restante.",
-      [
-        "À faire :",
-        "1. Essai resté sans réponse : cherche l'adresse de l'abonné dans le journal de Resend (resend.com, Emails). Si l'e-mail y figure, il est parti à temps et il n'y a rien d'autre à faire.",
-        "2. Sinon, tu peux prévenir l'abonné toi-même : cela ne rattrape pas le délai légal, mais il sait que son abonnement se reconduit. S'il résilie après la reconduction, rembourse-lui la période restante.",
-        "3. Cherche la cause dans les logs Railway : événements renewal_reminder.not_sent des jours précédents.",
-      ].join("\n"),
+      ["À faire :", ...steps.map((step, i) => `${i + 1}. ${step}`)].join("\n"),
       DETAIL,
     ].join("\n\n"),
   };
