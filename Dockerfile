@@ -18,8 +18,19 @@
 # (vérif des exos C).
 # ═══════════════════════════════════════════════════════════════════════════
 
+# ── Image de base : Node 22 (Debian slim), la même pour les trois étapes ──
+# Tirée du miroir AWS des images officielles Docker, pas de Docker Hub : le
+# 9 octobre 2026, Docker Hub a refusé les pulls pendant une heure (429, puis
+# 504) et deux builds de production ont échoué sur cette ligne.
+# Épinglée par son condensé, identique sur Docker Hub : c'est bit pour bit
+# l'image officielle `node:22-slim`, et un tag déplacé sur le miroir ne change
+# pas ce qui est construit. Contrepartie : la base ne se met plus à jour toute
+# seule. Pour la monter (cortex/.ci/node-image-digest.sh) ou revenir à Docker
+# Hub, voir DEPLOY.md § 1.
+ARG NODE_IMAGE=public.ecr.aws/docker/library/node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
+
 # ── Étape 1 : dépendances (npm ci complet, devDeps incluses pour le build) ──
-FROM node:22-slim AS deps
+FROM ${NODE_IMAGE} AS deps
 # Outils de compilation au cas où better-sqlite3 n'a pas de prebuild pour la
 # plateforme (sinon npm les ignore).
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -32,7 +43,7 @@ ENV NODE_ENV=
 RUN npm ci
 
 # ── Étape 2 : build Next + élagage des devDeps ──────────────────────────────
-FROM node:22-slim AS build
+FROM ${NODE_IMAGE} AS build
 WORKDIR /app/cortex
 COPY --from=deps /app/cortex/node_modules ./node_modules
 COPY cortex/ ./
@@ -43,7 +54,7 @@ RUN npm run build \
     && npm prune --omit=dev
 
 # ── Étape 3 : runtime ───────────────────────────────────────────────────────
-FROM node:22-slim AS runtime
+FROM ${NODE_IMAGE} AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash curl ca-certificates gnupg \
