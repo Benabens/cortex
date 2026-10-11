@@ -33,17 +33,26 @@ jobs:
       # ci-dessous (pg_dump doit être ≥ serveur).
       # Démarré ici plutôt qu'en `services:` : un service ne sait tirer son image
       # que d'un seul registre, et aucun ne répond toujours (.ci/pull-official.sh).
-      - name: Postgres 18 (base des tests)
+      - name: Postgres 18 pour les tests
+        env:
+          PG_IMAGE: postgres:18
         run: |
-          bash .ci/pull-official.sh postgres:18
+          bash .ci/pull-official.sh "$PG_IMAGE"
           docker run -d --name postgres -p 5432:5432 \
-            -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=cortextest postgres:18
+            -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=cortextest "$PG_IMAGE"
           # En TCP : pendant son initialisation, le serveur ne répond que sur son socket local.
+          ready=""
           for i in $(seq 1 30); do
-            docker exec postgres pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1 && break
+            if docker exec postgres pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then ready=1; break; fi
             sleep 2
           done
-          docker exec postgres pg_isready -h 127.0.0.1 -U postgres
+          if [ -z "$ready" ]; then
+            echo "::error::Postgres ne répond pas après 60 s"
+            docker logs postgres 2>&1 | tail -40
+            exit 1
+          fi
+          # Quelle que soit la source de l'image, c'est bien un serveur 18 qui tourne.
+          docker exec postgres postgres --version | grep -E ' 18\.'
 
       - uses: actions/setup-node@v4
         with:
@@ -54,7 +63,7 @@ jobs:
       - name: Outillage (sqlite3 CLI, sympy, userns pour la sandbox)
         run: |
           sudo apt-get update -q && sudo apt-get install -y -q sqlite3
-          # Client PostgreSQL 18 (PGDG) : pg_dump doit être ≥ la version du service postgres:18.
+          # Client PostgreSQL 18 (PGDG) : pg_dump doit être ≥ la version du serveur Postgres 18 démarré plus haut.
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo $VERSION_CODENAME)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list

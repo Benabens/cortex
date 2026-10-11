@@ -15,10 +15,11 @@ for source in public.ecr.aws/docker/library mirror.gcr.io/library docker.io/libr
   for attempt in 1 2 3; do
     if docker pull --quiet "$source/$image" >/dev/null; then
       docker tag "$source/$image" "$image"
-      echo "✓ $image tirée depuis $source"
+      # Le condensé reste au journal : c'est lui qui dit quelle image la CI a validée.
+      echo "✓ $image tirée depuis $source ($(docker image inspect --format '{{index .RepoDigests 0}}' "$source/$image"))"
       exit 0
     fi
-    sleep $((attempt * 5))
+    if [ "$attempt" -lt 3 ]; then sleep $((attempt * 5)); fi
   done
   echo "… $source ne sert pas $image pour l'instant"
 done
