@@ -5,7 +5,7 @@
 # nomme sa base dans le Dockerfile.
 #
 # Pourquoi trois sources : le 9 octobre 2026, Docker Hub a refusé les pulls des
-# runners GitHub pendant plus d'une demi-heure (« toomanyrequests », puis 504
+# runners GitHub pendant une heure (« toomanyrequests », puis 504
 # sur son service d'authentification), et le miroir AWS a répondu « Rate
 # exceeded » à son tour. Aucune source seule ne tient ; une CI rouge sur main,
 # c'est le déploiement bloqué.

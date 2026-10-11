@@ -52,13 +52,16 @@ ouvertes à tous, sauf lancement fermé (`INVITE_ONLY=1`, § 12).
    Docker Hub, dont une panne a fait échouer deux builds le 9 octobre 2026.
    Elle est épinglée par son condensé, le même que sur Docker Hub : c'est
    l'image officielle, à l'octet près. Contrepartie : elle ne se met plus à
-   jour seule. Pour la monter, lis le condensé courant (page du tag sur
-   hub.docker.com, « Index digest », ou `docker buildx imagetools inspect
-   node:22-slim`), vérifie que le miroir sert le même, remplace-le dans
-   `ARG NODE_IMAGE` : la CI reconstruit l'image avant le merge. Si le miroir ne
-   répond plus un jour de déploiement : variable de service
-   `NODE_IMAGE=node:22-slim` (Railway la passe au build parce que le Dockerfile
-   la déclare par `ARG`), redéploie, puis retire-la.
+   jour seule (Node et paquets Debian figés), et rien ne le rappelle. Pour la
+   monter : `bash cortex/.ci/node-image-digest.sh` lit le condensé du jour sur
+   Docker Hub et sur le miroir, sans Docker, et écrit la ligne `ARG NODE_IMAGE`
+   à recopier dans le Dockerfile ; la CI reconstruit l'image avant le merge.
+   Si le miroir ne répond plus, le job `docker` de la CI est rouge lui aussi et
+   rien ne se déploie : la voie sûre est un commit qui remet
+   `node:22-slim` (annuler le commit qui a introduit `NODE_IMAGE`). Voie plus
+   courte, **jamais essayée** : une variable de service
+   `NODE_IMAGE=node:22-slim`, que Railway dit passer au build pour toute
+   variable déclarée par un `ARG`.
 4. Settings du service → **Region** : la plus proche de tes utilisateurs (prod : EU West, Amsterdam).
 5. Le premier build part tout seul (~5-8 min : image + warm-up tectonic).
    ⚠ **Ne laisse pas le service tourner sans les variables de l'étape 4** : il
