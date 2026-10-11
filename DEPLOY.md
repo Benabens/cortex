@@ -47,6 +47,21 @@ ouvertes à tous, sauf lancement fermé (`INVITE_ONLY=1`, § 12).
    mono-conteneur par design — PID + heartbeat locaux). Ces réglages vivent
    dans Railway : le dépôt n'a plus de `railway.json` (format abandonné par
    Railway au 01/12/2026).
+   **Image de base** : le Dockerfile part de `node:22-slim` tirée du miroir AWS
+   des images officielles Docker (`public.ecr.aws/docker/library`) et non de
+   Docker Hub, dont une panne a fait échouer deux builds le 9 octobre 2026.
+   Elle est épinglée par son condensé, le même que sur Docker Hub : c'est
+   l'image officielle, à l'octet près. Contrepartie : elle ne se met plus à
+   jour seule (Node et paquets Debian figés), et rien ne le rappelle. Pour la
+   monter : `bash cortex/.ci/node-image-digest.sh` lit le condensé du jour sur
+   Docker Hub et sur le miroir, sans Docker, et écrit la ligne `ARG NODE_IMAGE`
+   à recopier dans le Dockerfile ; la CI reconstruit l'image avant le merge.
+   Si le miroir ne répond plus, le job `docker` de la CI est rouge lui aussi et
+   rien ne se déploie : la voie sûre est un commit qui remet
+   `node:22-slim` (annuler le commit qui a introduit `NODE_IMAGE`). Voie plus
+   courte, **jamais essayée** : une variable de service
+   `NODE_IMAGE=node:22-slim`, que Railway dit passer au build pour toute
+   variable déclarée par un `ARG`.
 4. Settings du service → **Region** : la plus proche de tes utilisateurs (prod : EU West, Amsterdam).
 5. Le premier build part tout seul (~5-8 min : image + warm-up tectonic).
    ⚠ **Ne laisse pas le service tourner sans les variables de l'étape 4** : il
