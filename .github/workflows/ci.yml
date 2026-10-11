@@ -24,24 +24,35 @@ jobs:
     defaults:
       run:
         working-directory: cortex
-    # Vrai Postgres pour les tests gardés par CORTEX_TEST_PG_URL (réservation
-    # concurrente sur connexions parallèles, pg_dump → pg_restore -l). Même
-    # version majeure que la prod (18) ; le client 18 est installé depuis PGDG
-    # ci-dessous (pg_dump doit être ≥ serveur).
-    services:
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_HOST_AUTH_METHOD: trust
-          POSTGRES_DB: cortextest
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
     steps:
       - uses: actions/checkout@v4
+
+      # Vrai Postgres pour les tests gardés par CORTEX_TEST_PG_URL (réservation
+      # concurrente sur connexions parallèles, pg_dump → pg_restore -l). Même
+      # version majeure que la prod (18) ; le client 18 est installé depuis PGDG
+      # ci-dessous (pg_dump doit être ≥ serveur).
+      # Démarré ici plutôt qu'en `services:` : un service ne sait tirer son image
+      # que d'un seul registre, et aucun ne répond toujours (.ci/pull-official.sh).
+      - name: Postgres 18 pour les tests
+        env:
+          PG_IMAGE: postgres:18
+        run: |
+          bash .ci/pull-official.sh "$PG_IMAGE"
+          docker run -d --name postgres -p 5432:5432 \
+            -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=cortextest "$PG_IMAGE"
+          # En TCP : pendant son initialisation, le serveur ne répond que sur son socket local.
+          ready=""
+          for i in $(seq 1 30); do
+            if docker exec postgres pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then ready=1; break; fi
+            sleep 2
+          done
+          if [ -z "$ready" ]; then
+            echo "::error::Postgres ne répond pas après 60 s"
+            docker logs postgres 2>&1 | tail -40
+            exit 1
+          fi
+          # Quelle que soit la source de l'image, c'est bien un serveur 18 qui tourne.
+          docker exec postgres postgres --version | grep -E ' 18\.'
 
       - uses: actions/setup-node@v4
         with:
@@ -52,7 +63,7 @@ jobs:
       - name: Outillage (sqlite3 CLI, sympy, userns pour la sandbox)
         run: |
           sudo apt-get update -q && sudo apt-get install -y -q sqlite3
-          # Client PostgreSQL 18 (PGDG) : pg_dump doit être ≥ la version du service postgres:18.
+          # Client PostgreSQL 18 (PGDG) : pg_dump doit être ≥ la version du serveur Postgres 18 démarré plus haut.
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo $VERSION_CODENAME)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
@@ -135,6 +146,12 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+
+      # L'image de base est tirée de la première source qui répond, sous le nom
+      # que lit le Dockerfile (cortex/.ci/pull-official.sh). Le Dockerfile ne
+      # change pas : l'hébergeur construit l'image de production de son côté.
+      - name: Image de base (première source qui répond)
+        run: bash cortex/.ci/pull-official.sh node:22-slim
 
       - name: Build de l'image (contexte = racine du repo)
         run: docker build -t cortex-app .

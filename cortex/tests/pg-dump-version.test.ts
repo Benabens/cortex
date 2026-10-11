@@ -48,7 +48,9 @@ test("image et CI : client PostgreSQL 18 par défaut, configurable par ARG", () 
   assert.match(docker, /ARG PG_CLIENT_MAJOR=18/);
   assert.match(docker, /postgresql-client-\$\{PG_CLIENT_MAJOR\}/);
   const ci = fs.readFileSync("../.github/workflows/ci.yml", "utf8");
-  assert.match(ci, /image: postgres:18/);
+  // La CI tire l'image de la première source qui répond (.ci/pull-official.sh) : le registre varie, la version majeure non.
+  assert.match(ci, /PG_IMAGE: postgres:18\b/);
+  assert.match(ci, /postgres --version \| grep -E ['"]? ?18\\?\./, "la CI vérifie que le serveur démarré est bien un 18");
   assert.match(ci, /pg_dump --version \| grep -E ['"]? ?18\\?\./, "la CI vérifie la version 18 de pg_dump dans l'image");
   const deploy = fs.readFileSync("../DEPLOY.md", "utf8");
   assert.match(deploy, /PG_CLIENT_MAJOR/);
