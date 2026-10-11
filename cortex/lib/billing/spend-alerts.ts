@@ -2,6 +2,7 @@ import { authRun } from "@/db/auth-store";
 import { claimOnce, releaseClaim, SENT, settleClaim, STALE_CLAIM_MS } from "@/lib/claim-once";
 import { sendEmail, type EmailOutcome } from "@/lib/email";
 import { log } from "@/lib/metrics";
+import { ownerAlertBlocker, ownerAlertRecipient } from "./owner-alert";
 
 /**
  * ALERTES DE DÉPENSE : un e-mail au propriétaire quand la dépense du mois
@@ -35,19 +36,8 @@ export function resetSpendAlerts(): void {
   notBefore.clear();
 }
 
-function recipient(env: NodeJS.ProcessEnv): string | null {
-  return env.CORTEX_OWNER_EMAIL?.trim() || env.PUBLISHER_EMAIL?.trim() || null;
-}
-
-/** Ce qui empêche d'envoyer une alerte avec la configuration courante, ou null. */
-export function spendAlertBlocker(env: NodeJS.ProcessEnv = process.env): string | null {
-  if (!env.RESEND_API_KEY) return "RESEND_API_KEY absente";
-  if (!recipient(env)) return "aucun destinataire : pose CORTEX_OWNER_EMAIL ou PUBLISHER_EMAIL";
-  return null;
-}
-
 function send(idempotencyKey: string, pct: number, spent: number, cap: number, month: string): Promise<EmailOutcome> {
-  const to = recipient(process.env)!;
+  const to = ownerAlertRecipient()!;
   const figures = `Dépense IA de Cortex pour ${month} : ${spent.toFixed(2)} $, soit ${Math.floor((spent / cap) * 100)} % du plafond mensuel (SPEND_CAP_USD = ${cap} $).`;
   const reopen = "Pour relever le plafond : Railway, service cortex-app, Variables, SPEND_CAP_USD.";
   return pct >= 100
@@ -79,7 +69,7 @@ export async function alertSpendThresholds(spent: number, cap: number, month: st
     if ((notBefore.get(key) ?? 0) > Date.now()) return;
     notBefore.set(key, Date.now() + RETRY_MS);
     const context = { month, threshold: pct, spent: Number(spent.toFixed(2)), cap };
-    const blocker = spendAlertBlocker();
+    const blocker = ownerAlertBlocker();
     if (blocker) {
       log("warn", "spend_alert.not_sent", { ...context, reason: blocker, message: `Alerte de dépense non envoyée (${blocker}) : nouvelle tentative dans une heure.` });
       return;

@@ -6,7 +6,8 @@ import { nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import { LlmError } from "@/lib/llm/types";
 import { guardsActive, floatLimit } from "./env";
-import { alertSpendThresholds, resetSpendAlerts, spendAlertBlocker } from "./spend-alerts";
+import { ownerAlertBlocker } from "./owner-alert";
+import { alertSpendThresholds, resetSpendAlerts } from "./spend-alerts";
 
 /**
  * COMPTAGE DE COÛT + KILL-SWITCH.
@@ -273,7 +274,7 @@ async function alertOnSpend(known?: MonthSpend): Promise<void> {
 export function warnIfSpendAlertsBlocked(): void {
   const cap = spendCapUsd();
   if (cap === null || cap <= 0) return;
-  const reason = spendAlertBlocker();
+  const reason = ownerAlertBlocker();
   if (reason) log("warn", "spend_alert.disabled", { cap, reason, message: `Alertes de dépense à 80 % et 100 % inactives (${reason}).` });
 }
 
