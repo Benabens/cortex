@@ -1,6 +1,6 @@
 /**
  * ENVOI D'E-MAIL de notification (Resend) : accusé de rétractation, alertes de
- * dépense, rappel de reconduction de l'abonnement annuel. Ne lève jamais : un envoi impossible (clé absente, refus, panne
+ * dépense, rappel de reconduction de l'abonnement annuel et alerte de ses échecs. Ne lève jamais : un envoi impossible (clé absente, refus, panne
  * réseau) revient comme un résultat, et l'appelant décide quoi en faire.
  *
  * `idempotencyKey` : Resend retient la clé 24 h et n'envoie qu'une fois. Un

@@ -5,8 +5,9 @@ import { authGet, authRun } from "@/db/auth-store";
  * ENVOI UNIQUE entre plusieurs process (serveur, workers de jobs, redéploiement
  * chevauchant) : avant d'envoyer, un process RÉCLAME une clé dans `app_meta`,
  * dont la clé primaire ne laisse passer que lui. Sert aux alertes de dépense
- * (lib/billing/spend-alerts) et au rappel de reconduction de l'abonnement annuel
- * (lib/billing/renewal-reminders).
+ * (lib/billing/spend-alerts), au rappel de reconduction de l'abonnement annuel
+ * (lib/billing/renewal-reminders) et à l'alerte de ses échecs
+ * (lib/billing/renewal-alerts).
  *
  * Valeur de la ligne : un jeton « date chaîne essai » tant que l'envoi est en
  * cours, puis « sent » (suivi ou non de la date d'envoi) une fois parti. La

@@ -27,6 +27,9 @@ process.env.LANDING_URL = "https://cortexexam.com";
 process.env.CONTACT_EMAIL = "contact@cortexexam.com";
 process.env.AUTH_EMAIL_FROM = "Cortex <noreply@cortexexam.com>";
 const ENV_KEYS = ["DB_DRIVER", "DATABASE_URL", "BILLING_ENABLED", "RESEND_API_KEY", "STRIPE_SECRET_KEY", "AUTH_URL", "LANDING_URL", "CONTACT_EMAIL", "AUTH_EMAIL_FROM"];
+// Sans adresse d'alerte : les e-mails comptés ici sont ceux des clients. L'alerte au propriétaire a son fichier (renewal-alerts.test.ts).
+delete process.env.CORTEX_OWNER_EMAIL;
+delete process.env.PUBLISHER_EMAIL;
 
 import { authGet, authRun } from "../db/auth-store";
 import { grantSubscriptionMonth, setSubscriptionStatus } from "../lib/billing/credits";
@@ -86,7 +89,7 @@ function logs(t: TestContext) {
 beforeEach(async () => {
   await authRun(`DELETE FROM subscriptions`);
   await authRun(`DELETE FROM users`);
-  await authRun(`DELETE FROM app_meta WHERE key LIKE 'renewal_reminder%'`);
+  await authRun(`DELETE FROM app_meta WHERE key LIKE 'renewal%'`);
 });
 after(async () => {
   const { closePostgres } = await import("../db/driver-postgres");
