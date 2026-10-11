@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Tire une image officielle Docker (« postgres:18 », « node:22-slim ») depuis la
-# première source qui répond, et la nomme comme sur Docker Hub : le reste de la
-# CI, et le Dockerfile, n'ont rien à savoir du registre.
+# Tire une image officielle Docker (« postgres:18 ») depuis la première source
+# qui répond, et la nomme comme sur Docker Hub : le reste de la CI n'a rien à
+# savoir du registre. Sert au Postgres des tests ; l'image de production, elle,
+# nomme sa base dans le Dockerfile.
 #
 # Pourquoi trois sources : le 9 octobre 2026, Docker Hub a refusé les pulls des
 # runners GitHub pendant plus d'une demi-heure (« toomanyrequests », puis 504

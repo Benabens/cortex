@@ -147,12 +147,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # L'image de base est tirée de la première source qui répond, sous le nom
-      # que lit le Dockerfile (cortex/.ci/pull-official.sh). Le Dockerfile ne
-      # change pas : l'hébergeur construit l'image de production de son côté.
-      - name: Image de base (première source qui répond)
-        run: bash cortex/.ci/pull-official.sh node:22-slim
-
+      # Aucune image de base préparée ici : le Dockerfile nomme la sienne (miroir
+      # et condensé), et la CI doit construire exactement ce que l'hébergeur
+      # construira. Un miroir qui ne répond plus se voit donc ici, avant le merge.
       - name: Build de l'image (contexte = racine du repo)
         run: docker build -t cortex-app .
 
