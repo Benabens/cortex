@@ -25,8 +25,8 @@
 # Épinglée par son condensé, identique sur Docker Hub : c'est bit pour bit
 # l'image officielle `node:22-slim`, et un tag déplacé sur le miroir ne change
 # pas ce qui est construit. Contrepartie : la base ne se met plus à jour toute
-# seule. Pour la monter, ou pour revenir à Docker Hub sans commit (variable de
-# service NODE_IMAGE), voir DEPLOY.md § 1.
+# seule. Pour la monter (cortex/.ci/node-image-digest.sh) ou revenir à Docker
+# Hub, voir DEPLOY.md § 1.
 ARG NODE_IMAGE=public.ecr.aws/docker/library/node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
 
 # ── Étape 1 : dépendances (npm ci complet, devDeps incluses pour le build) ──
