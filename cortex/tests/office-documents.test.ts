@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after } from "node:test";
+import { NextRequest } from "next/server";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-docx-"));
 process.env.CORTEX_DATA_DIR = tmp;
@@ -21,6 +22,30 @@ async function docx(text: string, extraUncompressedBytes = 0): Promise<Buffer> {
   zip.file("word/document.xml", `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:body></w:document>`);
   if (extraUncompressedBytes) zip.file("word/media/piege.bin", "0".repeat(extraUncompressedBytes));
   return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+}
+
+let importCourse: string | null = null;
+async function importRequest(file: File): Promise<Response> {
+  if (!importCourse) {
+    const { buildCourseRow } = await import("../lib/course-create");
+    const { insertCourse } = await import("../db/courses-store");
+    const { ensureCoursesLoaded, reloadCourses } = await import("../lib/courses");
+    await ensureCoursesLoaded();
+    const row = buildCourseRow({ name: "Import Word", code: "DOCX-101" }, "owner");
+    await insertCourse(row);
+    await reloadCourses();
+    importCourse = row.id;
+  }
+  const form = new FormData();
+  form.append("file", file);
+  form.append("relpath", file.name);
+  const { POST } = await import("../app/api/sources/import/route");
+  const url = `http://cortex.test/api/sources/import?course=${importCourse}`;
+  const encoded = new Request(url, { method: "POST", body: form });
+  const body = Buffer.from(await encoded.arrayBuffer());
+  const headers = new Headers(encoded.headers);
+  headers.set("content-length", String(body.length));
+  return POST(new NextRequest(url, { method: "POST", headers, body }));
 }
 
 test("un DOCX valide produit le texte destiné à la source", async () => {
@@ -55,6 +80,12 @@ test("un DOCX corrompu est refusé avec une erreur client explicite", async () =
     extractOfficeText(Buffer.from("ceci n'est pas une archive"), ".docx"),
     (error: unknown) => error instanceof OfficeDocumentError && error.status === 422 && /corrompu/i.test(error.message),
   );
+});
+
+test("la route d'import répond en 4xx pour un DOCX corrompu", async () => {
+  const response = await importRequest(new File(["archive cassée"], "cours.docx"));
+  assert.equal(response.status, 422);
+  assert.match((await response.json()).error, /corrompu|illisible/i);
 });
 
 test("un DOCX à taille décompressée excessive est refusé avant extraction", async () => {

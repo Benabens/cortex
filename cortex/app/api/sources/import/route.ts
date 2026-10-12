@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { readFormData, withBodyLimit } from "@/lib/upload-limit";
 import { checkStorage, declaredBytes } from "@/lib/storage-quota";
 import { currentUser } from "@/db/context";
-import { extractOfficeText, OfficeDocumentError } from "@/lib/office-documents";
+import { extractOfficeText, OfficeDocumentError, type OfficeExtension } from "@/lib/office-documents";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -96,7 +96,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     if ((ext !== ".docx" && ext !== ".pptx") || f.size > MAX_FILE_BYTES) continue;
     const buffer = Buffer.from(await f.arrayBuffer());
     try {
-      await extractOfficeText(buffer, ext);
+      await extractOfficeText(buffer, ext as OfficeExtension);
       officeBuffers.set(f, buffer);
     } catch (error) {
       if (error instanceof OfficeDocumentError) {

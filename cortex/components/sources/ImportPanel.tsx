@@ -10,7 +10,9 @@ import { cn } from "@/lib/ux/cn";
 
 const ACCEPT = ".pdf,.html,.htm,.txt,.md";
 /** Un dossier de cours contient plus que des annales : slides, séries, images, notes. */
-const ACCEPT_FOLDER = /\.(pdf|html?|txt|md|tex|c|h|png|jpe?g|webp|pptx|docx)$/i;
+const FOLDER_EXTENSIONS = ["pdf", "html", "htm", "txt", "md", "tex", "c", "h", "png", "jpg", "jpeg", "webp", "pptx", "docx"];
+const ACCEPT_FOLDER = new RegExp(`\\.(${FOLDER_EXTENSIONS.join("|")})$`, "i");
+const ACCEPT_FOLDER_ATTRIBUTE = FOLDER_EXTENSIONS.map((ext) => `.${ext}`).join(",");
 
 /**
  * Import UNIFIÉ — tout part du NAVIGATEUR, plus jamais d'un chemin sur le serveur :
@@ -200,7 +202,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           ref={folderRef}
           type="file"
           multiple
-          accept=".pdf,.html,.htm,.txt,.md,.tex,.c,.h,.png,.jpg,.jpeg,.webp,.pptx,.docx"
+          accept={ACCEPT_FOLDER_ATTRIBUTE}
           // Sélection d'un dossier entier : attribut non standard mais supporté par
           // tous les navigateurs de bureau ; React exige la casse DOM exacte.
           {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
