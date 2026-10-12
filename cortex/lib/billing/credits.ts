@@ -169,7 +169,7 @@ export async function ensureSignupCredits(userId: string): Promise<void> {
   signupSeen.add(userId);
 }
 
-/** Poche ACHETÉE (packs, palier gratuit, reprises) en centièmes : la somme du ledger. */
+/** Poche ACHETÉE (packs, promotion d'inscription éventuelle, reprises) en centièmes : somme du ledger. */
 export async function purchasedBalanceCenti(userId = currentUser()): Promise<number> {
   await ensureLedgerUnit();
   await ensureSignupCredits(userId);
