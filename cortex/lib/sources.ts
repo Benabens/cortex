@@ -7,6 +7,7 @@ import * as cheerio from "cheerio";
 import fs from "node:fs";
 import path from "node:path";
 import { extractText, getDocumentProxy } from "unpdf";
+import { extractOfficeText } from "@/lib/office-documents";
 
 /**
  * Examens de référence : le « format » à imiter pour la génération.
@@ -70,6 +71,9 @@ async function parseRefFile(abs: string): Promise<{ title: string; pages: string
     const title = clean($("title").first().text()) || clean($("h1, h2").first().text()) || base;
     return { title, pages: [clean($("body").text())] };
   }
+  if (ext === ".docx" || ext === ".pptx") {
+    return { title: base.replace(/\.[^.]+$/, ""), pages: [await extractOfficeText(fs.readFileSync(abs), ext)] };
+  }
   // .txt / .md / autres : texte brut
   return { title: base.replace(/\.[^.]+$/, ""), pages: [clean(fs.readFileSync(abs, "utf8"))] };
 }
@@ -124,7 +128,7 @@ export async function ingestAllRefs(): Promise<number> {
   // uniquement des FICHIERS d'examen (ignore les sous-dossiers figref/ img/ et les fichiers cachés)
   const files = fs
     .readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isFile() && !e.name.startsWith(".") && /\.(pdf|html?|txt|md)$/i.test(e.name))
+    .filter((e) => e.isFile() && !e.name.startsWith(".") && /\.(pdf|html?|txt|md|pptx|docx)$/i.test(e.name))
     .map((e) => e.name);
   for (const f of files) await ingestRefFile(`refs/${f}`);
   return files.length;
