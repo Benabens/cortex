@@ -22,8 +22,12 @@ function checkArchive(buffer: Buffer, maxUncompressedBytes: number): Promise<voi
         return;
       }
       let total = 0;
+      let streamed = 0;
       let entries = 0;
+      let settled = false;
       const fail = (error: OfficeDocumentError) => {
+        if (settled) return;
+        settled = true;
         zip.close();
         reject(error);
       };
@@ -35,9 +39,32 @@ function checkArchive(buffer: Buffer, maxUncompressedBytes: number): Promise<voi
           fail(new OfficeDocumentError(`Document Office trop volumineux une fois décompressé (maximum ${Math.round(maxUncompressedBytes / 1024 / 1024)} Mo).`, 413));
           return;
         }
-        zip.readEntry();
+        if (/\/$/.test(entry.fileName)) {
+          zip.readEntry();
+          return;
+        }
+        zip.openReadStream(entry, (streamError, stream) => {
+          if (streamError || !stream) {
+            fail(new OfficeDocumentError("Document Office corrompu ou illisible.", 422));
+            return;
+          }
+          stream.on("data", (chunk: Buffer) => {
+            streamed += chunk.length;
+            if (streamed > maxUncompressedBytes) {
+              stream.destroy();
+              fail(new OfficeDocumentError(`Document Office trop volumineux une fois décompressé (maximum ${Math.round(maxUncompressedBytes / 1024 / 1024)} Mo).`, 413));
+            }
+          });
+          stream.on("error", () => fail(new OfficeDocumentError("Document Office corrompu ou illisible.", 422)));
+          stream.on("end", () => { if (!settled) zip.readEntry(); });
+          stream.resume();
+        });
       });
-      zip.on("end", resolve);
+      zip.on("end", () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      });
       zip.readEntry();
     });
   });
