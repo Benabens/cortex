@@ -412,7 +412,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
       <Panel className="p-0">
         <h3 className="px-5 pt-4 text-[0.9rem] font-semibold text-ink-1">Historique</h3>
         {data.transactions.length === 0 ? (
-          <p className="px-5 pb-4 pt-1.5 text-[0.85rem] text-ink-3">Aucun mouvement pour l’instant. Tes crédits offerts apparaîtront ici dès ta première génération.</p>
+          <p className="px-5 pb-4 pt-1.5 text-[0.85rem] text-ink-3">Aucun mouvement pour l’instant. Choisis un abonnement ou un pack ci-dessus pour obtenir des crédits.</p>
         ) : (
           <div className="mt-2 overflow-x-auto">
             <table className="w-full text-[0.82rem]">

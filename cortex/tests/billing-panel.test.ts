@@ -65,6 +65,12 @@ test("compte sans abonnement, CGV acceptées : consentement par offre avant acti
   assert.match(html, /Mentions légales/);
 });
 
+test("compte sans mouvement : indique comment acheter sans promettre de crédits offerts", async () => {
+  const html = await render(base({ balance: 0, purchased: 0, transactions: [] }));
+  assert.match(html, /Choisis un abonnement ou un pack/);
+  assert.ok(!/crédits? offerts?/i.test(html));
+});
+
 test("offre Pro : « Autant de cours que tu veux », avec au-dessus ce que coûte un cours et ce qui borne l'usage", async () => {
   const costs = { exam: 2, qcm: 1, exercise: 1, assist: 0.1, prepare: 2, format: 1 };
   const html = await render(base({ costs, quotas: { gen: 3, assist: 20 }, storageQuotaMb: 200 }));
