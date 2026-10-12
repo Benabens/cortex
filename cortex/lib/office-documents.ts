@@ -6,6 +6,7 @@ import JSZip from "jszip";
 
 export const MAX_OFFICE_UNCOMPRESSED_BYTES = 100 * 1024 * 1024;
 const MAX_OFFICE_ENTRIES = 10_000;
+export type OfficeExtension = ".docx" | ".pptx";
 
 export class OfficeDocumentError extends Error {
   constructor(message: string, public readonly status: 413 | 422) {
@@ -88,7 +89,7 @@ async function extractPptx(buffer: Buffer): Promise<string> {
 /** Extrait uniquement le texte Office ; les images embarquées sont volontairement ignorées. */
 export async function extractOfficeText(
   buffer: Buffer,
-  extension: string,
+  extension: OfficeExtension,
   options: { maxUncompressedBytes?: number } = {},
 ): Promise<string> {
   const ext = extension.toLowerCase();
@@ -97,9 +98,7 @@ export async function extractOfficeText(
     await checkArchive(buffer, max);
     const text = ext === ".docx"
       ? (await mammoth.extractRawText({ buffer })).value
-      : ext === ".pptx"
-        ? await extractPptx(buffer)
-        : "";
+      : await extractPptx(buffer);
     const clean = text.replace(/\s+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
     if (!clean) throw new OfficeDocumentError("Document Office vide ou sans texte exploitable.", 422);
     return clean;

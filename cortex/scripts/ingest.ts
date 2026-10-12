@@ -18,7 +18,7 @@ import { coursePaths, DEFAULT_COURSE, ensureCoursesLoaded } from "../lib/courses
 import { importFolder } from "../lib/import-folder";
 import { ingestAllRefs } from "../lib/sources";
 import { tokenize } from "../lib/text";
-import { extractOfficeText } from "../lib/office-documents";
+import { extractOfficeText, type OfficeExtension } from "../lib/office-documents";
 
 // Args : `npm run ingest -- --course=algo --from "<dossier>"` (défaut cs-202, pas d'import).
 function argVal(name: string): string | undefined {
@@ -437,7 +437,7 @@ async function ingestGenericContent(): Promise<void> {
         await addSource(type, title, rel, year, pages.map((t, i) => ({ type, lectureId: null, title: `${title} — p.${i + 1}`, text: t, anchor: `${rel}#page=${i + 1}` })));
       } else if (/\.(pptx|docx)$/i.test(rel)) {
         const title = path.basename(rel, path.extname(rel));
-        const text = await extractOfficeText(fs.readFileSync(path.join(CONTENT_ROOT, rel)), path.extname(rel));
+        const text = await extractOfficeText(fs.readFileSync(path.join(CONTENT_ROOT, rel)), path.extname(rel) as OfficeExtension);
         await addSource(type, title, rel, year, [{ type, lectureId: null, title, text, anchor: rel }]);
       } else if (/\.html?$/.test(rel)) {
         const { title, text } = htmlToText(rel);
