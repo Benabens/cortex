@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { readFormData, withBodyLimit } from "@/lib/upload-limit";
 import { checkStorage, declaredBytes } from "@/lib/storage-quota";
 import { currentUser } from "@/db/context";
+import { extractOfficeText, OfficeDocumentError, type OfficeExtension } from "@/lib/office-documents";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,7 +29,7 @@ export const dynamic = "force-dynamic";
  */
 
 /** Extensions acceptées — mêmes que le classifieur ; rien d'exécutable. */
-const ALLOWED = new Set([".pdf", ".html", ".htm", ".md", ".txt", ".tex", ".c", ".h", ".png", ".jpg", ".jpeg", ".webp", ".pptx"]);
+const ALLOWED = new Set([".pdf", ".html", ".htm", ".md", ".txt", ".tex", ".c", ".h", ".png", ".jpg", ".jpeg", ".webp", ".pptx", ".docx"]);
 
 const MAX_FILES = 100;
 const MAX_FILE_BYTES = 30 * 1024 * 1024;
@@ -87,6 +88,24 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   // c'est eux qui portent l'information « ce PDF est dans annales/ », donc la classification.
   const rels = form.getAll("relpath").map((v) => String(v));
 
+  // Les archives Office sont contrôlées avant toute écriture : une archive
+  // corrompue ou démesurée ne laisse donc pas un import partiel sur le volume.
+  const officeBuffers = new Map<File, Buffer>();
+  for (const f of files) {
+    const ext = path.extname(f.name).toLowerCase();
+    if ((ext !== ".docx" && ext !== ".pptx") || f.size > MAX_FILE_BYTES) continue;
+    const buffer = Buffer.from(await f.arrayBuffer());
+    try {
+      await extractOfficeText(buffer, ext as OfficeExtension);
+      officeBuffers.set(f, buffer);
+    } catch (error) {
+      if (error instanceof OfficeDocumentError) {
+        return NextResponse.json({ error: `${f.name} : ${error.message}` }, { status: error.status });
+      }
+      return NextResponse.json({ error: `${f.name} : document Office illisible.` }, { status: 422 });
+    }
+  }
+
   const { refsDir, contentRoot } = coursePaths(course);
   const saved: { name: string; bucket: string }[] = [];
   const skipped: string[] = [];
@@ -105,14 +124,14 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     // Ceinture et bretelles : le chemin écrit DOIT rester sous la destination.
     if (!abs.startsWith(path.resolve(destDir) + path.sep)) { skipped.push(f.name); continue; }
     fs.mkdirSync(destDir, { recursive: true });
-    fs.writeFileSync(abs, Buffer.from(await f.arrayBuffer()));
+    fs.writeFileSync(abs, officeBuffers.get(f) ?? Buffer.from(await f.arrayBuffer()));
     total += f.size;
     saved.push({ name, bucket });
   }
 
   if (!saved.length) {
     return NextResponse.json(
-      { error: "Aucun fichier exploitable (PDF, HTML, TXT, MD, TEX, images, PPTX)." },
+      { error: "Aucun fichier exploitable (PDF, HTML, TXT, MD, TEX, images, PPTX, DOCX)." },
       { status: 400 },
     );
   }

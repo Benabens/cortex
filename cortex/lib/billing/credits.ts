@@ -26,8 +26,8 @@ import { log } from "@/lib/metrics";
  * BILLING_ENABLED=1 : active le débit/le gate. Non posé → tout est no-op
  * (dev €0 et staging sans Stripe : comportement historique intact).
  *
- * Palier gratuit : SIGNUP_FREE_CREDITS (défaut 2) offerts UNE fois par user
- * (ref signup:<user>), crédités paresseusement au premier passage billing.
+ * Crédit promotionnel optionnel : SIGNUP_FREE_CREDITS (défaut 0), attribué
+ * UNE fois par user (ref signup:<user>) au premier passage billing.
  */
 
 export function billingEnabled(): boolean {
@@ -160,16 +160,16 @@ export async function addTransaction(
   }
 }
 
-/** Palier gratuit à l'inscription — crédité UNE fois (idempotent par ref). */
+/** Crédit d'inscription optionnel — crédité UNE fois (idempotent par ref). */
 const signupSeen = new Set<string>();
 export async function ensureSignupCredits(userId: string): Promise<void> {
   if (!billingEnabled() || signupSeen.has(userId)) return;
-  const free = toCenti(envNum("SIGNUP_FREE_CREDITS", 2));
+  const free = toCenti(envNum("SIGNUP_FREE_CREDITS", 0));
   if (free > 0) await addTransaction(userId, free, "signup", `signup:${userId}`);
   signupSeen.add(userId);
 }
 
-/** Poche ACHETÉE (packs, palier gratuit, reprises) en centièmes : la somme du ledger. */
+/** Poche ACHETÉE (packs, promotion d'inscription éventuelle, reprises) en centièmes : somme du ledger. */
 export async function purchasedBalanceCenti(userId = currentUser()): Promise<number> {
   await ensureLedgerUnit();
   await ensureSignupCredits(userId);
