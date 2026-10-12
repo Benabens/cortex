@@ -18,6 +18,7 @@ import { coursePaths, DEFAULT_COURSE, ensureCoursesLoaded } from "../lib/courses
 import { importFolder } from "../lib/import-folder";
 import { ingestAllRefs } from "../lib/sources";
 import { tokenize } from "../lib/text";
+import { extractOfficeText, type OfficeExtension } from "../lib/office-documents";
 
 // Args : `npm run ingest -- --course=algo --from "<dossier>"` (défaut cs-202, pas d'import).
 function argVal(name: string): string | undefined {
@@ -412,7 +413,7 @@ function inferGenericType(rel: string): { type: string; year: number | null } {
   if (/\/notes?\/|study.?guide|hints|scope|checklist|\bplan\b/.test(f)) return { type: "note", year: null };
   if (/s[ée]rie|exercise|\bexo\b|tutorial|homework|pset|problem.?set|\/series?\//.test(f)) return { type: "serie", year: null };
   if (/cheat|formula|recap|summary/.test(f)) return { type: "cheatsheet", year: null };
-  if (/lecture|cours|slides|chapter/.test(f)) return { type: "course_pdf", year: null };
+  if (/lecture|cours|slides|chapter/.test(f) || /\.(pptx|docx)$/.test(f)) return { type: "course_pdf", year: null };
   if (/\.(md|txt)$/.test(f)) return { type: "note", year: null };
   return { type: "exercise", year: null };
 }
@@ -423,7 +424,7 @@ async function ingestGenericContent(): Promise<void> {
     return;
   }
   let nSources = 0;
-  const files = listFiles(".", [".html", ".htm", ".md", ".txt", ".tex", ".c", ".h", ".pdf"]);
+  const files = listFiles(".", [".html", ".htm", ".md", ".txt", ".tex", ".c", ".h", ".pdf", ".pptx", ".docx"]);
   for (const rel of files) {
     const { type, year } = inferGenericType(rel);
     try {
@@ -434,6 +435,10 @@ async function ingestGenericContent(): Promise<void> {
         const pages = (Array.isArray(text) ? text : [text]).map(clean).filter((t) => t.length > 3);
         const title = path.basename(rel, ".pdf");
         await addSource(type, title, rel, year, pages.map((t, i) => ({ type, lectureId: null, title: `${title} — p.${i + 1}`, text: t, anchor: `${rel}#page=${i + 1}` })));
+      } else if (/\.(pptx|docx)$/i.test(rel)) {
+        const title = path.basename(rel, path.extname(rel));
+        const text = await extractOfficeText(fs.readFileSync(path.join(CONTENT_ROOT, rel)), path.extname(rel) as OfficeExtension);
+        await addSource(type, title, rel, year, [{ type, lectureId: null, title, text, anchor: rel }]);
       } else if (/\.html?$/.test(rel)) {
         const { title, text } = htmlToText(rel);
         await addSource(type, title, rel, year, [{ type, lectureId: null, title, text, anchor: rel }]);

@@ -26,7 +26,7 @@ export type ImportManifest = {
   skipped: number;
 };
 
-const EXTS = new Set([".pdf", ".html", ".htm", ".md", ".txt", ".tex", ".c", ".h", ".png", ".jpg", ".jpeg", ".webp", ".pptx"]);
+const EXTS = new Set([".pdf", ".html", ".htm", ".md", ".txt", ".tex", ".c", ".h", ".png", ".jpg", ".jpeg", ".webp", ".pptx", ".docx"]);
 const SKIP_DIRS = new Set([".git", "node_modules", ".next", "data", "__pycache__", ".obsidian", ".vscode"]);
 
 /** Classe un fichier : bucket de destination + type d'ingestion + année éventuelle. */
@@ -44,7 +44,7 @@ export function classifyFile(rel: string): { bucket: "refs" | "lectures" | "seri
   if (/\.(png|jpe?g|webp)$/.test(f)) return { bucket: "images", type: "image", year };
   if (/\/notes?\/|study.?guide|hints|scope|conventions?|checklist|\bplan\b|syllabus|formula|cheat/.test(f)) return { bucket: "notes", type: "note", year: null };
   if (/s[ée]rie|exercise|\bexo\b|tutorial|homework|pset|problem.?set|\btd\b|\btp\b|solution|corrig/.test(f)) return { bucket: "series", type: "serie", year: null };
-  if (/lecture|cours|slides?|chapter|chapitre|\bweek\b|\bcm\b|handout/.test(f) || ext === ".pptx") return { bucket: "lectures", type: "course_pdf", year: null };
+  if (/lecture|cours|slides?|chapter|chapitre|\bweek\b|\bcm\b|handout/.test(f) || ext === ".pptx" || ext === ".docx") return { bucket: "lectures", type: "course_pdf", year: null };
   if (ext === ".html" || ext === ".htm") return { bucket: "sites", type: "site", year: null };
   if (ext === ".md" || ext === ".txt") return { bucket: "notes", type: "note", year: null };
   return { bucket: "misc", type: "exercise", year: null };
