@@ -147,10 +147,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
 
   return (
     <Panel className="flex flex-col gap-5 p-5">
-      <div className="flex items-center gap-2">
-        <FolderInput className="size-4 text-violet-hi" strokeWidth={2.25} />
-        <h2 className="text-[0.95rem] font-semibold text-ink-1">Importer</h2>
-      </div>
+      <h2 className="text-[0.95rem] font-semibold text-ink-1">Importer</h2>
 
       {/* Dropzone fichiers — glisser un examen / cours / PDF */}
       <label
