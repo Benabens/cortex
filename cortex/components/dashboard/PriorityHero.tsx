@@ -1,85 +1,44 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { chapterLine, reason, themeHref, trainHref, type NotionFacts } from "@/lib/ux/next-up";
 
 /**
- * Héro « ta priorité du jour » — LE centre de gravité de l'Accueil, et presque tout l'écran.
- *
- * 100 % nourri par `dashboard.next` (label, category, examWeight, mastery). Rien n'est dérivé :
- * l'ancienne barre « Priorité — Élevée » était un score FABRIQUÉ (examWeight×4 + 24 si jamais vu)
- * rendu comme une mesure ; le « pourquoi » est désormais une phrase qui ne dit que des faits réels.
+ * « À travailler maintenant » : LA réponse de l'Accueil, posée à même la page (pas de carte).
+ * Le nom de la notion est le plus gros caractère de l'écran ; la phrase en dessous ne dit que
+ * des faits fournis par `dashboard.next` (cf. lib/ux/next-up). Pas de durée sur le bouton :
+ * l'app n'a aucune estimation par notion, et on n'en invente pas.
  */
-export function PriorityHero({
-  title,
-  theme,
-  weightPct,
-  mastery,
-}: {
-  title: string;
-  theme: string | null;
-  weightPct: number;
-  /** 0–10 côté back ; null = jamais travaillée. */
-  mastery: number | null;
-}) {
+export function PriorityHero({ title, facts }: { title: string; facts: NotionFacts }) {
+  const why = reason(facts);
+  const chapter = chapterLine(facts.chapter);
   return (
-    <section
-      className="panel top-light relative overflow-hidden rounded-xl"
-      aria-labelledby="priority-title"
-    >
-      <div className="relative p-6 sm:p-8">
-        {/* Le plus gros caractère de l'écran : c'est LA réponse à « par où je commence ? ».
-            Pas d'intitulé en capitales au-dessus : le titre et sa position suffisent. */}
-        <h2
-          id="priority-title"
-          className="text-[1.75rem] font-semibold leading-[1.1] sm:text-[2.15rem]"
+    <section aria-labelledby="priority-title">
+      <p className="text-[0.8125rem] text-ink-3">À travailler maintenant</p>
+      <h1
+        id="priority-title"
+        className="mt-2.5 break-words text-[2.5rem] font-semibold leading-[1.04] sm:text-[3.25rem] lg:text-[4rem] lg:leading-[1.02]"
+      >
+        {title}
+      </h1>
+      <p className="mt-3.5 max-w-[38.75rem] text-[1rem] leading-[1.55] text-ink-2 [text-wrap:pretty]">
+        {why.lead}
+        {why.strong && <strong className="font-semibold text-ink-1">{why.strong}</strong>}
+        {why.rest}
+        {chapter && <> {chapter}</>}
+      </p>
+      <div className="mt-[1.375rem] flex flex-wrap items-center gap-x-4 gap-y-1">
+        <Button variant="primary" href={trainHref(title)}>
+          M’entraîner
+          <ArrowRight className="size-4" strokeWidth={2.5} aria-hidden="true" />
+        </Button>
+        <Link
+          href={themeHref(facts.chapter)}
+          className="inline-flex min-h-11 items-center rounded-sm text-[0.875rem] text-ink-1 underline decoration-white/15 decoration-1 underline-offset-[5px] transition-colors hover:decoration-white/60"
         >
-          {title}
-        </h2>
-
-        {theme && <p className="mt-2 text-[0.9rem] text-ink-3">{theme}</p>}
-
-        <p className="mt-4 max-w-[46ch] text-[0.95rem] leading-relaxed text-ink-2">
-          {why(weightPct, mastery)}
-        </p>
-
-        <div className="mt-7 flex flex-wrap items-center gap-x-5 gap-y-3">
-          <Button variant="primary" size="lg" href="/entrainement">
-            M’entraîner
-            <ArrowRight className="size-4" strokeWidth={2.5} aria-hidden="true" />
-          </Button>
-          <Link
-            href="/programme"
-            className="inline-flex min-h-11 items-center rounded-md px-1 text-[0.88rem] font-medium text-ink-2 underline-offset-4 transition-colors hover:text-ink-1 hover:underline"
-          >
-            Voir le thème
-          </Link>
-        </div>
+          Voir le thème
+        </Link>
       </div>
     </section>
   );
-}
-
-/** Décimales à la française : 9.4 → « 9,4 ». */
-const fr = (n: number | null | undefined) =>
-  Number.isFinite(n as number) ? (n as number).toLocaleString("fr-FR", { maximumFractionDigits: 1 }) : "—";
-
-/**
- * Le « pourquoi », court et honnête : uniquement des faits que le back fournit.
- * Jamais de jugement — on décrit l'écart, on ne note pas la personne.
- */
-function why(weightPct: number, mastery: number | null): string {
-  const effort =
-    mastery === null
-      ? "tu ne l’as jamais travaillée"
-      : mastery < 5
-        ? `tu l’as peu travaillée (${fr(mastery)}/10)`
-        : `ta maîtrise est à ${fr(mastery)}/10`;
-
-  // Poids absent/nul (analyse sans barème) → on ne l'invente pas, on n'en parle pas.
-  // Poids absent (champ manquant côté back) → on se rabat sur la phrase sans chiffre
-  // plutôt que de faire planter tout l'écran sur un toLocaleString d'undefined.
-  if (!Number.isFinite(weightPct) || weightPct <= 0) {
-    return `${effort[0].toUpperCase()}${effort.slice(1)} : c’est là que ton temps rapporte le plus aujourd’hui.`;
-  }
-  return `Elle pèse ${fr(weightPct)} % de l’examen et ${effort} : c’est là que ton temps rapporte le plus aujourd’hui.`;
 }

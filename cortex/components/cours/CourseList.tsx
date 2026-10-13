@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Pencil, Trash2, X, Check, AlertTriangle, BookPlus } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
@@ -10,15 +11,26 @@ const field =
   "w-full rounded-lg border border-line-strong bg-surface-2/40 px-3 py-2 text-[0.85rem] text-ink-1 " +
   "placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] focus:outline-none";
 
+/** "2027-01-18" → « 18 janvier 2027 ». */
+const longDay = (iso: string) =>
+  new Date(`${iso}T00:00:00`).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+
 /**
- * MES COURS — renommer et retirer. Le retrait ne supprime QUE la fiche : le
+ * MES COURS — renommer, dater le final, retirer. Le retrait ne supprime QUE la fiche : le
  * corpus, les examens générés et les faiblesses restent dans le tenant et sur
  * le volume. On le dit explicitement plutôt que de laisser croire à un effacement.
+ *
+ * `?date=<id du cours>` (lien « ajoute la date » de l'Accueil) ouvre la fiche de ce cours sur le
+ * champ de la date du final ; une fois enregistrée, on revient à l'Accueil.
  */
 export function CourseList() {
   const { courses, courseId, refresh } = useCourse();
   const [editing, setEditing] = useState<string | null>(null);
-  const [draft, setDraft] = useState({ name: "", code: "", university: "" });
+  const [draft, setDraft] = useState({ name: "", code: "", university: "", examDate: "" });
+  const router = useRouter();
+  // Cours dont on vient dater le final depuis l'Accueil (lu une fois, quand la liste est là).
+  const datingFromHome = useRef<string | null>(null);
+  const dateField = useRef<HTMLInputElement>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,22 +39,47 @@ export function CourseList() {
     setError(null);
     setConfirming(null);
     setEditing(c.id);
-    setDraft({ name: c.name, code: c.code, university: c.university });
+    setDraft({ name: c.name, code: c.code, university: c.university, examDate: c.examDate ?? "" });
   };
+
+  useEffect(() => {
+    if (datingFromHome.current || !courses.length) return;
+    const wanted = new URLSearchParams(window.location.search).get("date");
+    const target = wanted ? courses.find((c) => c.id === wanted) : undefined;
+    if (!target) return;
+    datingFromHome.current = target.id;
+    // Ouverture demandée par l'URL, lue après le montage : la lire pendant le rendu ferait
+    // diverger le HTML du serveur et celui du navigateur.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEditing(target.id);
+    setDraft({ name: target.name, code: target.code, university: target.university, examDate: target.examDate ?? "" });
+    requestAnimationFrame(() => dateField.current?.focus());
+  }, [courses]);
 
   const save = async (id: string) => {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/courses/${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
-      });
-      const d = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
+      // On n'envoie que ce qui a changé : toucher au code réécrit aussi le nom court du cours
+      // côté back, ce qu'on ne veut pas provoquer en ajoutant seulement une date.
+      const before = courses.find((c) => c.id === id);
+      const changes: Partial<typeof draft> = {};
+      if (draft.name !== before?.name) changes.name = draft.name;
+      if (draft.code !== before?.code) changes.code = draft.code;
+      if (draft.university !== before?.university) changes.university = draft.university;
+      if (draft.examDate !== (before?.examDate ?? "")) changes.examDate = draft.examDate;
+      if (Object.keys(changes).length) {
+        const res = await fetch(`/api/courses/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(changes),
+        });
+        const d = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
+        await refresh(courseId);
+      }
       setEditing(null);
-      await refresh(courseId);
+      if (datingFromHome.current === id) router.push("/");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -113,6 +150,19 @@ export function CourseList() {
                   className={field}
                 />
               </div>
+              <label className="flex flex-col gap-1.5 sm:max-w-[calc(50%-0.375rem)]">
+                <span className="text-[0.8rem] font-medium text-ink-2">Date du final</span>
+                <input
+                  ref={dateField}
+                  type="date"
+                  value={draft.examDate}
+                  onChange={(e) => setDraft((d) => ({ ...d, examDate: e.target.value }))}
+                  className={field}
+                />
+                <span className="text-[0.76rem] leading-relaxed text-ink-3">
+                  Elle sert au compte à rebours de l’Accueil. Laisse vide si tu ne la connais pas encore.
+                </span>
+              </label>
               <div className="flex gap-2">
                 <Button size="sm" variant="primary" loading={busy} onClick={() => save(c.id)}>
                   <Check className="size-4" strokeWidth={2.5} />
@@ -128,7 +178,8 @@ export function CourseList() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[0.9rem] font-semibold text-ink-1">{c.name}</p>
                 <p className="mt-0.5 truncate text-[0.78rem] text-ink-3">
-                  {[c.code, c.university].filter(Boolean).join(" · ") || "Sans code ni établissement"}
+                  {[c.code, c.university, c.examDate ? `final le ${longDay(c.examDate)}` : null].filter(Boolean).join(" · ") ||
+                    "Sans code ni établissement"}
                   <span className="text-ink-4"> · {c.id}</span>
                 </p>
               </div>
