@@ -155,9 +155,15 @@ export function Segmented<V extends string>({
     last.current = next;
   }, []);
 
-  useLayoutEffect(() => place(true), [place, value]);
+  // À chaque rendu : animé quand c'est le choix qui a changé, instantané quand ce sont les
+  // options elles-mêmes (ordre, libellés). Sans changement de position, `place` ne fait rien.
+  const lastValue = useRef(value);
+  useLayoutEffect(() => {
+    place(lastValue.current !== value);
+    lastValue.current = value;
+  });
 
-  // Libellés, compteurs ou largeur disponible qui changent : l'indicateur suit, sans animation.
+  // Compteurs, police chargée ou largeur disponible qui changent hors rendu : l'indicateur suit.
   useEffect(() => {
     const box = root.current;
     if (!box || typeof ResizeObserver === "undefined") return;
