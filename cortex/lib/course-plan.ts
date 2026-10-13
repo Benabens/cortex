@@ -286,19 +286,53 @@ export function mapTopicsByIndexedLectures(
   return out;
 }
 
+/** Une notion à classer : `id` sert seulement à relier la réponse du modèle à la notion. */
+export type NotionToClassify = { id: number; label: string; method: string | null; category: string | null };
+
+/**
+ * Demande au modèle la lecture qui traite chaque notion, dans la liste réelle des lectures. LÈVE si
+ * le modèle est indisponible ; l'appelant choisit entre le repli déterministe et l'arrêt.
+ */
+export async function classifyNotionsByLecture(
+  chapters: { lecture_no: number | null; title: string }[],
+  notions: NotionToClassify[]
+): Promise<{ id: number; lecture_no: number | null }[]> {
+  const p = profile();
+  const prompt = [
+    p.qaIntro?.() ?? "Tu es l'équipe enseignante du cours.",
+    `Voici le PLAN DU COURS (chapitres du prof, dans l'ordre) puis les NOTIONS qui tombent aux finals. Pour CHAQUE notion, indique le numéro de la lecture qui la TRAITE substantiellement (là où un étudiant l'apprend), en te limitant STRICTEMENT à la liste de lectures ci-dessous. Si aucune lecture ne traite vraiment la notion, réponds null. N'invente jamais un numéro absent de la liste.`,
+    ``,
+    `═══ PLAN DU COURS (lecture_no · titre) ═══`,
+    ...chapters.map((c) => `  - ${c.lecture_no ?? "?"} · ${c.title}`),
+    ``,
+    `═══ NOTIONS À RATTACHER (id · notion · méthode · thème) ═══`,
+    ...notions.map((t) => `  - ${t.id} · ${t.label}${t.method ? ` — ${t.method}` : ""}${t.category ? ` [${t.category}]` : ""}`),
+    ``,
+    `Réponds UNIQUEMENT avec { "mapping": [ { "id", "lecture_no" }, … ] } couvrant TOUTES les notions.`,
+    JSON.stringify(MAP_SCHEMA, null, 2),
+  ].join("\n");
+  const parsed = extractJson<{ mapping?: { id: number; lecture_no: number | null }[] }>(
+    await completeText({ prompt, model: "opus", timeoutMs: 600_000 })
+  );
+  return parsed?.mapping ?? [];
+}
+
 /**
  * Rattache chaque notion (topics) au chapitre du plan qui la traite, par classification CONTRAINTE
  * à la liste réelle des lectures (jamais une taxonomie inventée, jamais un n° hors liste). Persiste
  * topics.plan_chapter_id. Les notions non classables restent null (« Non rattaché »).
+ *
+ * `lectureByLabel` impose un rattachement déjà calculé (label de notion → n° de lecture), sans appel
+ * modèle ; une notion absente de cette table garde son chapitre actuel.
  */
-export async function mapNotionsToChapters(opts: { onStep?: (m: string, p: number) => void } = {}): Promise<MapNotionsResult> {
+export async function mapNotionsToChapters(opts: { onStep?: (m: string, p: number) => void; lectureByLabel?: Map<string, number | null> } = {}): Promise<MapNotionsResult> {
   await ensurePlanSchema();
   const step = opts.onStep ?? (() => {});
   const chapters = await q.all<{ id: number; lecture_no: number | null; title: string }>(
     `SELECT id, lecture_no, title FROM plan_chapters ORDER BY seq`
   );
-  const topics = await q.all<{ id: number; label: string; method: string | null; category: string | null; description: string | null }>(
-    `SELECT id, label, method, category, description FROM topics ORDER BY id`
+  const topics = await q.all<{ id: number; label: string; method: string | null; category: string | null; description: string | null; plan_chapter_id: number | null }>(
+    `SELECT id, label, method, category, description, plan_chapter_id FROM topics ORDER BY id`
   );
   if (!chapters.length) return { ok: false, mapped: 0, total: topics.length, reason: "Aucun plan de cours dérivé — rattachement impossible." };
   if (!topics.length) return { ok: true, mapped: 0, total: 0 };
@@ -308,41 +342,33 @@ export async function mapNotionsToChapters(opts: { onStep?: (m: string, p: numbe
 
   step(`Rattachement de ${topics.length} notions au plan (${chapters.length} chapitres)…`, 40);
   let mapping: { id: number; lecture_no: number | null }[] = [];
-  try {
-    const p = profile();
-    const prompt = [
-      p.qaIntro?.() ?? "Tu es l'équipe enseignante du cours.",
-      `Voici le PLAN DU COURS (chapitres du prof, dans l'ordre) puis les NOTIONS qui tombent aux finals. Pour CHAQUE notion, indique le numéro de la lecture qui la TRAITE substantiellement (là où un étudiant l'apprend), en te limitant STRICTEMENT à la liste de lectures ci-dessous. Si aucune lecture ne traite vraiment la notion, réponds null. N'invente jamais un numéro absent de la liste.`,
-      ``,
-      `═══ PLAN DU COURS (lecture_no · titre) ═══`,
-      ...chapters.map((c) => `  - ${c.lecture_no ?? "?"} · ${c.title}`),
-      ``,
-      `═══ NOTIONS À RATTACHER (id · notion · méthode · thème) ═══`,
-      ...topics.map((t) => `  - ${t.id} · ${t.label}${t.method ? ` — ${t.method}` : ""}${t.category ? ` [${t.category}]` : ""}`),
-      ``,
-      `Réponds UNIQUEMENT avec { "mapping": [ { "id", "lecture_no" }, … ] } couvrant TOUTES les notions.`,
-      JSON.stringify(MAP_SCHEMA, null, 2),
-    ].join("\n");
-    const parsed = extractJson<{ mapping?: { id: number; lecture_no: number | null }[] }>(
-      await completeText({ prompt, model: "opus", timeoutMs: 600_000 })
-    );
-    mapping = parsed?.mapping ?? [];
-  } catch (e) {
-    // Repli déterministe : la lecture des exos indexés (course_href). Sans signal, on ne touche à rien.
-    let exos: { topicId: number; courseHref: string | null }[] = [];
+  if (opts.lectureByLabel) {
+    const given = opts.lectureByLabel;
+    const lectureOfChapter = new Map(chapters.map((c) => [c.id, c.lecture_no]));
+    mapping = topics.map((t) => ({
+      id: t.id,
+      lecture_no: given.has(t.label) ? given.get(t.label) ?? null : (t.plan_chapter_id != null ? lectureOfChapter.get(t.plan_chapter_id) ?? null : null),
+    }));
+  } else {
     try {
-      exos = await q.all(`SELECT topic_id AS "topicId", course_href AS "courseHref" FROM exam_exercises WHERE topic_id IS NOT NULL`);
-    } catch { /* index absent */ }
-    const byIndex = mapTopicsByIndexedLectures(exos, byNo);
-    if (!byIndex.size) {
-      return { ok: false, mapped: 0, total: topics.length, reason: `Classification indisponible (${(e as Error).message.slice(0, 60)}).` };
+      mapping = await classifyNotionsByLecture(chapters, topics);
+    } catch (e) {
+      // Repli déterministe : la lecture des exos indexés (course_href). Sans signal, on ne touche à rien.
+      let exos: { topicId: number; courseHref: string | null }[] = [];
+      try {
+        exos = await q.all(`SELECT topic_id AS "topicId", course_href AS "courseHref" FROM exam_exercises WHERE topic_id IS NOT NULL`);
+      } catch { /* index absent */ }
+      const byIndex = mapTopicsByIndexedLectures(exos, byNo);
+      if (!byIndex.size) {
+        return { ok: false, mapped: 0, total: topics.length, reason: `Classification indisponible (${(e as Error).message.slice(0, 60)}).` };
+      }
+      step("Classification indisponible → rattachement par la lecture des exos indexés…", 60);
+      mapping = topics.map((t) => {
+        const ch = byIndex.get(t.id);
+        const lec = ch != null ? chapters.find((c) => c.id === ch)?.lecture_no ?? null : null;
+        return { id: t.id, lecture_no: lec };
+      });
     }
-    step("Classification indisponible → rattachement par la lecture des exos indexés…", 60);
-    mapping = topics.map((t) => {
-      const ch = byIndex.get(t.id);
-      const lec = ch != null ? chapters.find((c) => c.id === ch)?.lecture_no ?? null : null;
-      return { id: t.id, lecture_no: lec };
-    });
   }
 
   const topicIds = new Set(topics.map((t) => t.id));

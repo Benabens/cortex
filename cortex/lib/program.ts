@@ -284,50 +284,51 @@ const CLUSTER_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-type RawCluster = { label: string; method?: string; category?: string; archetype?: string; members: string[] };
+/** Un type canonique et les libellés BRUTS de l'index qu'il regroupe. */
+export type TopicCluster = { label: string; method?: string; category?: string; archetype?: string; members: string[] };
+
+/** Un exo de l'index, réduit à ce que la partition lit. */
+export type IndexedExo = { topic: string; method: string | null; exo_type: string | null; trap: string | null; archetype: string | null };
+
+/** Un type de la partition : ce qui sera écrit dans `topics`, et les libellés bruts qu'il couvre. */
+export type PartitionType = { label: string; method: string | null; exo_type: string | null; trap: string | null; category: string | null; archetype: string | null; count: number; rawLabels: Set<string> };
 
 /**
- * Reconstruit `topics` À PARTIR de l'index `exam_exercises` : regroupe les exos par type
- * (clustering LLM des labels bruts ; repli déterministe par label normalisé), `exam_count` = compte
- * RÉEL des exos (doublons inclus → Strassen ×2), `exam_weight` = vraie proportion. Rattache chaque
- * exo à son `topic_id`. La forme de `topics` reste identique (génération non touchée).
+ * Demande au modèle de regrouper les libellés bruts de l'index en types canoniques. LÈVE si le
+ * modèle est indisponible ; renvoie une liste vide s'il ne propose aucun type exploitable. Le choix
+ * entre le repli par libellé (`aggregateTopicsFromIndex`) et l'arrêt (regroupement demandé
+ * explicitement, où un repli silencieux remettrait un type par libellé) revient à l'appelant.
  */
-export async function aggregateTopicsFromIndex(opts: { onStep?: (m: string, p: number) => void } = {}): Promise<{ count: number; exercises: number }> {
-  await ensureProgramSchema();
-  await ensureIndexSchema();
-  const step = opts.onStep ?? (() => {});
-  const exos = await q.all<{ id: number; topic: string; method: string | null; exo_type: string | null; trap: string | null; archetype: string | null }>(`SELECT id, topic, method, exo_type, trap, archetype FROM exam_exercises`);
-  if (!exos.length) throw new Error("Index vide : lance d'abord l'indexation exo-par-exo des finals.");
+export async function clusterIndexLabels(rawCount: Map<string, number>): Promise<TopicCluster[]> {
+  const rawLabels = [...rawCount.keys()];
+  const p0 = profile();
+  const prompt = [
+    p0.qaIntro?.() ?? "Tu es l'équipe enseignante du cours.",
+    `Voici les libellés BRUTS des exercices extraits des vrais finals (avec leur nombre d'occurrences). Regroupe les ÉQUIVALENTS sous un même TYPE canonique (ex. « Strassen / matrix multiplication » et « Strassen's algorithm » → un seul type « Divide & Conquer — Strassen »). Ne fusionne PAS des techniques différentes.`,
+    ...rawLabels.map((l) => `  - "${l}" (×${rawCount.get(l)})`),
+    ``,
+    `═══ ARCHÉTYPES (rattache via "archetype", "" si aucun) ═══`,
+    p0.archetypes.map((a) => `  - id="${a.id}" · ${a.concept}`).join("\n"),
+    ``,
+    `Vise 15 à 30 types canoniques (regroupement par GRANDE technique : Divide & Conquer, Greedy, Dynamic Programming, Graphes/plus courts chemins, Flots/coupes, Arbres couvrants, Tris/sélection, Structures de données, Hachage, Récurrences/asymptotique, NP/réductions, Preuves…). Chaque label BRUT doit apparaître dans EXACTEMENT un type (members = labels bruts exacts, copiés tels quels). Réponds UNIQUEMENT avec { "types": [ … ] } :`,
+    JSON.stringify(CLUSTER_SCHEMA, null, 2),
+  ].join("\n");
+  const parsed = extractJson<{ types?: TopicCluster[] }>(await completeText({ prompt, model: "opus", timeoutMs: 600_000 }));
+  return (parsed?.types ?? []).filter((t) => t?.label && Array.isArray(t.members) && t.members.length);
+}
 
-  // labels bruts distincts + comptes
+/**
+ * Partition de l'index pour un regroupement donné : `count` = compte RÉEL des exos de chaque type.
+ * Un libellé brut qu'aucun type ne couvre devient son propre type ; deux types de même label
+ * normalisé n'en font qu'un. Pur (aucune base, aucun modèle).
+ */
+export function partitionIndex(exos: IndexedExo[], clusters: TopicCluster[], knownArche: Set<string>): PartitionType[] {
   const rawCount = new Map<string, number>();
   for (const e of exos) rawCount.set(e.topic, (rawCount.get(e.topic) ?? 0) + 1);
   const rawLabels = [...rawCount.keys()];
 
-  // clustering LLM (résilient → repli : chaque label distinct = un type)
-  step(`Agrégation : regroupement de ${rawLabels.length} libellés en types…`, 94);
-  let clusters: RawCluster[] = [];
-  if (rawLabels.length > 1) {
-    try {
-      const p0 = profile();
-      const prompt = [
-        p0.qaIntro?.() ?? "Tu es l'équipe enseignante du cours.",
-        `Voici les libellés BRUTS des exercices extraits des vrais finals (avec leur nombre d'occurrences). Regroupe les ÉQUIVALENTS sous un même TYPE canonique (ex. « Strassen / matrix multiplication » et « Strassen's algorithm » → un seul type « Divide & Conquer — Strassen »). Ne fusionne PAS des techniques différentes.`,
-        ...rawLabels.map((l) => `  - "${l}" (×${rawCount.get(l)})`),
-        ``,
-        `═══ ARCHÉTYPES (rattache via "archetype", "" si aucun) ═══`,
-        p0.archetypes.map((a) => `  - id="${a.id}" · ${a.concept}`).join("\n"),
-        ``,
-        `Vise 15 à 30 types canoniques (regroupement par GRANDE technique : Divide & Conquer, Greedy, Dynamic Programming, Graphes/plus courts chemins, Flots/coupes, Arbres couvrants, Tris/sélection, Structures de données, Hachage, Récurrences/asymptotique, NP/réductions, Preuves…). Chaque label BRUT doit apparaître dans EXACTEMENT un type (members = labels bruts exacts, copiés tels quels). Réponds UNIQUEMENT avec { "types": [ … ] } :`,
-        JSON.stringify(CLUSTER_SCHEMA, null, 2),
-      ].join("\n");
-      const parsed = extractJson<{ types?: RawCluster[] }>(await completeText({ prompt, model: "opus", timeoutMs: 600_000 }));
-      clusters = (parsed?.types ?? []).filter((t) => t?.label && Array.isArray(t.members) && t.members.length);
-    } catch (e) { step(`Clustering LLM indisponible (${(e as Error).message.slice(0, 40)}) → repli par label`, 95); }
-  }
-
   // map label brut → cluster ; les labels non couverts deviennent leur propre type (repli)
-  const labelToCluster = new Map<string, RawCluster>();
+  const labelToCluster = new Map<string, TopicCluster>();
   for (const c of clusters) for (const m of c.members) if (rawCount.has(m)) labelToCluster.set(m, c);
   for (const l of rawLabels) if (!labelToCluster.has(l)) labelToCluster.set(l, { label: l, members: [l] });
 
@@ -340,9 +341,7 @@ export async function aggregateTopicsFromIndex(opts: { onStep?: (m: string, p: n
   }
 
   // agrège par type canonique
-  const knownArche = new Set(profile().archetypes.map((a) => a.id));
-  type Agg = { label: string; method: string | null; exo_type: string | null; trap: string | null; category: string | null; archetype: string | null; count: number; rawLabels: Set<string> };
-  const byKey = new Map<string, Agg>();
+  const byKey = new Map<string, PartitionType>();
   for (const l of rawLabels) {
     const c = labelToCluster.get(l)!;
     const key = norm(c.label) || norm(l);
@@ -354,8 +353,53 @@ export async function aggregateTopicsFromIndex(opts: { onStep?: (m: string, p: n
     if (!a.exo_type && rep?.exo_type) a.exo_type = rep.exo_type;
     if (!a.trap && rep?.trap) a.trap = rep.trap;
   }
+  return [...byKey.values()];
+}
 
-  const aggs = [...byKey.values()];
+export type AggregateResult = {
+  count: number;
+  exercises: number;
+  /** Faux quand la partition est le repli « un type par libellé » (modèle indisponible ou muet). */
+  clustered: boolean;
+  /** La partition calculée, telle qu'écrite dans `topics` (avant retrait des doublons empilés). */
+  types: PartitionType[];
+};
+
+/**
+ * Reconstruit `topics` À PARTIR de l'index `exam_exercises` : regroupe les exos par type
+ * (clustering LLM des labels bruts ; repli déterministe par label normalisé), `exam_count` = compte
+ * RÉEL des exos (doublons inclus → Strassen ×2), `exam_weight` = vraie proportion. Rattache chaque
+ * exo à son `topic_id`. La forme de `topics` reste identique (génération non touchée).
+ *
+ * `clusters` impose un regroupement déjà calculé (aucun appel modèle) ; `dryRun` calcule la
+ * partition sans rien écrire, ni table ni ligne.
+ */
+export async function aggregateTopicsFromIndex(opts: { onStep?: (m: string, p: number) => void; clusters?: TopicCluster[]; dryRun?: boolean } = {}): Promise<AggregateResult> {
+  if (!opts.dryRun) {
+    await ensureProgramSchema();
+    await ensureIndexSchema();
+  }
+  const step = opts.onStep ?? (() => {});
+  const exos = await q.all<{ id: number; topic: string; method: string | null; exo_type: string | null; trap: string | null; archetype: string | null }>(`SELECT id, topic, method, exo_type, trap, archetype FROM exam_exercises`);
+  if (!exos.length) throw new Error("Index vide : lance d'abord l'indexation exo-par-exo des finals.");
+
+  // labels bruts distincts + comptes
+  const rawCount = new Map<string, number>();
+  for (const e of exos) rawCount.set(e.topic, (rawCount.get(e.topic) ?? 0) + 1);
+  const rawLabels = [...rawCount.keys()];
+
+  // clustering LLM (résilient → repli : chaque label distinct = un type)
+  step(`Agrégation : regroupement de ${rawLabels.length} libellés en types…`, 94);
+  let clusters: TopicCluster[] = opts.clusters ?? [];
+  if (!opts.clusters && rawLabels.length > 1) {
+    try {
+      clusters = await clusterIndexLabels(rawCount);
+    } catch (e) { step(`Clustering LLM indisponible (${(e as Error).message.slice(0, 40)}) → repli par label`, 95); }
+  }
+
+  const aggs = partitionIndex(exos, clusters, new Set(profile().archetypes.map((a) => a.id)));
+  const clustered = clusters.length > 0;
+  if (opts.dryRun) return { count: aggs.length, exercises: exos.length, clustered, types: aggs };
   const total = aggs.reduce((s, a) => s + a.count, 0) || 1;
 
   // reconstruit `topics` (depuis l'index) — on remplace les types d'index, on PRÉSERVE la maîtrise
@@ -390,7 +434,7 @@ export async function aggregateTopicsFromIndex(opts: { onStep?: (m: string, p: n
   // on ne touche qu'aux notions jamais tombées (exam_count=0) subsumées par une notion tombée.
   const removed = await dedupeStackedTopics();
   step(`Partition : ${aggs.length} types sur ${exos.length} exos indexés${removed ? ` (+${removed} doublons empilés retirés)` : ""} ✓`, 100);
-  return { count: aggs.length - removed, exercises: exos.length };
+  return { count: aggs.length - removed, exercises: exos.length, clustered, types: aggs };
 }
 
 /** Tokens signifiants d'un label (≥ 3 lettres, sans accents), pour comparer deux notions. */
