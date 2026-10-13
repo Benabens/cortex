@@ -6,6 +6,7 @@ import { SEVERITY, type Severity } from "@/lib/ux/labels";
 import { Badge } from "@/components/ui/Badge";
 import { SeverityMeter } from "@/components/viz/SeverityMeter";
 import { SectionHeader } from "@/components/ui/primitives";
+import { Segmented, type SegmentedOption } from "@/components/ui/Segmented";
 import { useCourse } from "@/lib/ux/api";
 import { sevOf, sourceLabel, relatedChips, type Weakness } from "@/lib/ux/weaknesses";
 import { formatDay } from "@/lib/ux/types";
@@ -16,6 +17,11 @@ const FILTERS: { key: Severity | "ALL"; label: string }[] = [
   { key: "GROS", label: "Sévères" },
   { key: "MOYEN", label: "Moyennes" },
   { key: "LÉGER", label: "Légères" },
+];
+
+const GROUPINGS: SegmentedOption<"list" | "chapter">[] = [
+  { value: "list", label: "Liste", Icon: LayoutList },
+  { value: "chapter", label: "Par chapitre", Icon: ListTree },
 ];
 
 const NO_THEME = "￿"; // clé de tri pour « sans chapitre » (en fin)
@@ -87,31 +93,22 @@ export function WeaknessBase({
       ) : (
         <>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              {FILTERS.map((f) => (
-                <button
-                  key={f.key}
-                  type="button"
-                  onClick={() => setFilter(f.key)}
-                  aria-pressed={filter === f.key}
-                  className={cn(
-                    "inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-[0.82rem] font-medium transition-colors",
-                    filter === f.key
-                      ? "border-[color-mix(in_oklch,var(--color-violet)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_14%,transparent)] text-ink-1"
-                      : "border-line bg-surface-1/60 text-ink-2 hover:bg-surface-2 hover:text-ink-1"
-                  )}
-                >
-                  {f.label}
-                  <span className="font-data text-[0.72rem] tabular text-ink-4">{count(f.key)}</span>
-                </button>
-              ))}
-            </div>
+            <Segmented
+              variant="pills"
+              label="Filtrer par sévérité"
+              options={FILTERS.map((f) => ({ value: f.key, label: f.label, count: count(f.key) }))}
+              value={filter}
+              onChange={setFilter}
+            />
 
             {/* P-C — grouper par chapitre du plan (thème), en plus du filtre sévérité */}
-            <div role="group" aria-label="Organiser la base" className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface-1/60 p-1">
-              <GroupBtn active={!grouped} onClick={() => setGrouped(false)} Icon={LayoutList}>Liste</GroupBtn>
-              <GroupBtn active={grouped} onClick={() => setGrouped(true)} Icon={ListTree}>Par chapitre</GroupBtn>
-            </div>
+            <Segmented
+              size="sm"
+              label="Organiser la base"
+              options={GROUPINGS}
+              value={grouped ? "chapter" : "list"}
+              onChange={(v) => setGrouped(v === "chapter")}
+            />
           </div>
 
           {rows.length === 0 ? (
@@ -146,23 +143,6 @@ export function WeaknessBase({
         </>
       )}
     </section>
-  );
-}
-
-function GroupBtn({ active, onClick, Icon, children }: { active: boolean; onClick: () => void; Icon: React.ComponentType<{ className?: string; strokeWidth?: number }>; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[0.78rem] font-medium transition-colors",
-        active ? "bg-surface-2 text-ink-1 ring-1 ring-line-strong" : "text-ink-3 hover:text-ink-1"
-      )}
-    >
-      <Icon className="size-3.5" strokeWidth={2} />
-      {children}
-    </button>
   );
 }
 
