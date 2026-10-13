@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useApi, useCourse } from "@/lib/ux/api";
 import { LoadError } from "@/components/ui/LoadError";
+import { Segmented } from "@/components/ui/Segmented";
 
 type BQ = { id: number; topic: string; lectureRank: number | null; statement: string; options: string | null; officialAnswer: string | null; sourceExam: string; examYear: number | null; examPage: number | null; examHref: string | null };
 type PQ = { id: number; kind: "qcm" | "open"; topic: string; lectureRank: number | null; statement: string; options: string | null; correct: string | null; explanation: string | null; solution: string | null; verified: number | null; verifyMethod: string | null };
@@ -122,11 +123,18 @@ export default function RevisionPage() {
           </section>
 
           {/* onglets */}
-          <div className="segmented mb-3">
-            <button data-active={tab === "qcm"} onClick={() => setTab("qcm")}>Banque QCM ({d.bank.stats.qcm})</button>
-            <button data-active={tab === "open"} onClick={() => setTab("open")}>Banque ouvertes ({d.bank.stats.open})</button>
-            <button data-active={tab === "plan"} onClick={() => setTab("plan")}>Parcours généré ({(d.plan.stats.qcm) + (d.plan.stats.open)})</button>
-          </div>
+          <Segmented
+            size="sm"
+            className="mb-3"
+            label="Contenu affiché"
+            options={[
+              { value: "qcm", label: "Banque QCM", count: d.bank.stats.qcm },
+              { value: "open", label: "Banque ouvertes", count: d.bank.stats.open },
+              { value: "plan", label: "Parcours généré", count: d.plan.stats.qcm + d.plan.stats.open },
+            ]}
+            value={tab}
+            onChange={setTab}
+          />
 
           <div className="flex items-center gap-3 mb-4 text-[12.5px] flex-wrap" style={{ color: "var(--ink-3)" }}>
             <label style={{ display: "inline-flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
