@@ -4,6 +4,7 @@ import { getCourse } from "@/lib/courses";
 import { listExams } from "@/lib/exam";
 import { activeJob } from "@/lib/jobs";
 import { coverageNext, nextTopic, programOverview } from "@/lib/program";
+import { toNextUp, upNext } from "@/lib/next-up";
 import { useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -12,8 +13,8 @@ export const dynamic = "force-dynamic";
 
 /**
  * Dashboard d'accueil — agrégat course-aware : maîtrise/couverture, révisions dues,
- * compte à rebours d'examen, derniers examens, faiblesses, prochain type à travailler,
- * job en cours. 100 % lecture : ne touche à rien du moteur.
+ * compte à rebours d'examen, derniers examens, faiblesses, prochain type à travailler et les
+ * trois suivants, job en cours. 100 % lecture : ne touche à rien du moteur.
  */
 export async function GET(req: NextRequest) {
   const denied = useCourseOr404(req);
@@ -66,7 +67,9 @@ export async function GET(req: NextRequest) {
     course: { id, name: c.name, short: c.short, examCode: c.examCode, examKind: c.examKind },
     analyzed: !!(overview && overview.stats.total > 0),
     stats: overview?.stats ?? { total: 0, covered: 0, mastered: 0, due: 0, coveragePct: 0, masteryPct: 0 },
-    next: next ? { id: next.id, label: next.label, category: next.category, examWeight: next.examWeight, status: next.status, mastery: next.mastery } : null,
+    // La notion du haut de l'Accueil, puis les trois suivantes par priorité (lib/next-up).
+    next: next && overview ? toNextUp(next, overview.chapters) : null,
+    upNext: overview ? upNext(overview, next?.id ?? null) : [],
     cover: cover ? { id: cover.id, label: cover.label, examWeight: cover.examWeight } : null,
     schedule,
     exams: exams.slice(0, 4),
