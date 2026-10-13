@@ -22,7 +22,9 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { Panel, SectionHeader, Toggle } from "@/components/ui/primitives";
+import { Panel, SectionHeader } from "@/components/ui/primitives";
+import { Toggle } from "@/components/ui/Toggle";
+import { Segmented } from "@/components/ui/Segmented";
 import { RadialGauge } from "@/components/viz/RadialGauge";
 import { WaffleGrid } from "@/components/viz/WaffleGrid";
 import { WeightBar } from "@/components/viz/WeightBar";
@@ -52,6 +54,10 @@ export default function QAPage() {
   const [c1, setC1] = useState(false);
   const [c2, setC2] = useState(true);
   const [sl, setSl] = useState(50);
+  const [seg, setSeg] = useState("section");
+  const [segSm, setSegSm] = useState("list");
+  const [pill, setPill] = useState("all");
+  const [chip, setChip] = useState("annales");
 
   return (
     <div className="flex flex-col gap-5">
@@ -80,6 +86,55 @@ export default function QAPage() {
             <Button variant="primary"><Play className="size-4" fill="currentColor" />Lancer</Button>
             <Button variant="secondary"><Sparkles className="size-4" />Générer</Button>
           </div>
+        </div>
+      </QA>
+
+      {/* SEGMENTED — le seul contrôle « une option parmi N » : glisse, s'étire, rebondit, se comprime à l'appui */}
+      <QA title="Segmented : rail (md · sm) · pastilles · puces">
+        <div className="flex flex-col items-start gap-4">
+          <Segmented
+            label="Démo rail"
+            options={[
+              { value: "section", label: "Par section", Icon: Folder },
+              { value: "priority", label: "Par priorité", Icon: Sparkles },
+            ]}
+            value={seg}
+            onChange={setSeg}
+          />
+          <Segmented
+            size="sm"
+            label="Démo rail compact"
+            options={[
+              { value: "list", label: "Liste" },
+              { value: "chapter", label: "Par chapitre" },
+              { value: "date", label: "Par date d’ajout" },
+            ]}
+            value={segSm}
+            onChange={setSegSm}
+          />
+          <Segmented
+            variant="pills"
+            label="Démo pastilles"
+            options={[
+              { value: "all", label: "Toutes", count: 12 },
+              { value: "high", label: "Sévères", count: 4 },
+              { value: "mid", label: "Moyennes", count: 6 },
+              { value: "low", label: "Légères", count: 2 },
+            ]}
+            value={pill}
+            onChange={setPill}
+          />
+          <Segmented
+            variant="chips"
+            label="Démo puces"
+            options={[
+              { value: "annales", label: "Annales", count: 9 },
+              { value: "cours", label: "Cours (PDF)", count: 14 },
+              { value: "series", label: "Séries", count: 6 },
+            ]}
+            value={chip}
+            onChange={setChip}
+          />
         </div>
       </QA>
 

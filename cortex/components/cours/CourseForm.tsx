@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, BookPlus, Check } from "lucide-react";
+import { AlertTriangle, Check } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { useCourse } from "@/lib/ux/api";
@@ -70,10 +70,7 @@ export function CourseForm() {
   return (
     <Panel className="max-w-[40rem] p-5 sm:p-6">
       <form onSubmit={submit} className="flex flex-col gap-4">
-        <div className="flex items-center gap-2">
-          <BookPlus className="size-4 text-violet-hi" strokeWidth={2.25} />
-          <h2 className="text-[0.95rem] font-semibold text-ink-1">La matière</h2>
-        </div>
+        <h2 className="text-[0.95rem] font-semibold text-ink-1">La matière</h2>
 
         <label className="flex flex-col gap-1.5">
           <span className="text-[0.82rem] font-medium text-ink-2">

@@ -1,6 +1,6 @@
 "use client";
 
-import { FileCheck2, ExternalLink, CheckCircle2, ClipboardList, WifiOff, RotateCw, Trash2, FileText } from "lucide-react";
+import { ExternalLink, CheckCircle2, ClipboardList, WifiOff, RotateCw, Trash2, FileText } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, SectionHeader } from "@/components/ui/primitives";
 import { Badge } from "@/components/ui/Badge";
@@ -128,15 +128,6 @@ export default function ExamensPage() {
               const day = formatDay(e.createdAt);
               return (
                 <Panel key={e.id} className="flex flex-wrap items-center gap-4 p-4">
-                  <span
-                    className="grid size-11 shrink-0 place-items-center rounded-lg border border-line"
-                    style={{
-                      background: "color-mix(in oklch, var(--color-violet) 12%, var(--color-surface-2))",
-                      color: "var(--color-violet-hi)",
-                    }}
-                  >
-                    <FileCheck2 className="size-5" strokeWidth={2} />
-                  </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <h3 className="truncate text-[0.95rem] font-semibold text-ink-1">Examen #{e.id}</h3>

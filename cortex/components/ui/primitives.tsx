@@ -8,7 +8,7 @@ export function Panel({
   interactive = false,
   children,
   ...rest
-}: React.HTMLAttributes<HTMLDivElement> & { interactive?: boolean }) {
+}: React.ComponentProps<"div"> & { interactive?: boolean }) {
   return (
     <div
       className={cn(
@@ -53,48 +53,3 @@ export function SectionHeader({
     </div>
   );
 }
-
-export function Toggle({
-  checked,
-  onChange,
-  label,
-  disabled = false,
-  autoFocus = false,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
-  disabled?: boolean;
-  autoFocus?: boolean;
-}) {
-  // Track 44×24, knob 20 with an explicit 2px inset on every side:
-  // off → left 2px..22px, on → translate-x-5 (20px) → 22px..42px. Always contained.
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      autoFocus={autoFocus}
-      onClick={() => onChange(!checked)}
-      className={cn(
-        "relative h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2",
-        checked
-          ? "bg-violet-deep shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]"
-          : "bg-surface-3 shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)]",
-        disabled && "cursor-not-allowed opacity-45"
-      )}
-    >
-      <span
-        aria-hidden="true"
-        className={cn(
-          "absolute left-0.5 top-0.5 size-5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.5)] transition-transform duration-150",
-          checked ? "translate-x-5" : "translate-x-0"
-        )}
-      />
-    </button>
-  );
-}
-
-

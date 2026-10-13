@@ -1,14 +1,21 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { Sparkles, Check, CloudOff, AlertTriangle, FileText, Paperclip, X } from "lucide-react";
+import { Check, CloudOff, AlertTriangle, FileText, Paperclip, X } from "lucide-react";
 import { SEVERITY } from "@/lib/ux/labels";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { Segmented, type SegmentedOption } from "@/components/ui/Segmented";
 import { SeverityMeter } from "@/components/viz/SeverityMeter";
 import { apiPost, useCourse, type ApiError } from "@/lib/ux/api";
 import { sevOf, type MineResp, type MinedItem } from "@/lib/ux/weaknesses";
 import { cn } from "@/lib/ux/cn";
+
+/** Les trois niveaux de sévérité (1 à 3), dans l'ordre du back. */
+const SEVERITY_LEVELS: SegmentedOption<string>[] = [1, 2, 3].map((lv) => ({
+  value: String(lv),
+  label: SEVERITY[sevOf(lv)].label,
+}));
 
 const MIN_MINE_CHARS = 40; // au-delà = « discussion » à miner (seuil back = mine/route.ts)
 const MAX_FILE_BYTES = 12 * 1024 * 1024; // même plafond que le back (lib/weakness-files)
@@ -145,12 +152,9 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
 
   return (
     <section className="panel top-light relative overflow-hidden rounded-xl p-5 sm:p-6" aria-labelledby="inbox-title">
-      <div className="flex items-center gap-2">
-        <Sparkles className="size-4 text-violet-hi" strokeWidth={2.5} aria-hidden="true" />
-        <h2 id="inbox-title" className="text-[1.05rem] font-semibold text-ink-1">
-          <label htmlFor={inputId}>Ajoute ce qui t’a piégé</label>
-        </h2>
-      </div>
+      <h2 id="inbox-title" className="text-[1.05rem] font-semibold text-ink-1">
+        <label htmlFor={inputId}>Ajoute ce qui t’a piégé</label>
+      </h2>
 
       {/* Zone de dépôt unique : texte, capture collée, PDF ou image glissés. */}
       <div
@@ -239,38 +243,13 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
 
       {/* sévérité discrète (texte seul) + action */}
       <div className="mt-3 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
-        <fieldset className="flex items-center text-[0.8rem]">
-          <legend className="sr-only">Sévérité</legend>
-          {[1, 2, 3].map((lv, i) => {
-            const meta = SEVERITY[sevOf(lv)];
-            return (
-              <span key={lv} className="inline-flex items-center">
-                {i > 0 && <span className="px-0.5 text-ink-4" aria-hidden="true">·</span>}
-                <input
-                  type="radio"
-                  name={`${inputId}-sev`}
-                  id={`${inputId}-sev-${lv}`}
-                  value={lv}
-                  checked={sev === lv}
-                  onChange={() => setSev(lv)}
-                  className="peer sr-only"
-                />
-                <label
-                  htmlFor={`${inputId}-sev-${lv}`}
-                  className={cn(
-                    "inline-flex min-h-11 cursor-pointer items-center rounded px-1.5 transition-colors",
-                    "peer-focus-visible:outline-2 peer-focus-visible:outline-violet peer-focus-visible:outline-offset-1",
-                    sev === lv
-                      ? "font-medium text-ink-1 underline decoration-violet decoration-2 underline-offset-[5px]"
-                      : "text-ink-3 hover:text-ink-1"
-                  )}
-                >
-                  {meta.label}
-                </label>
-              </span>
-            );
-          })}
-        </fieldset>
+        <Segmented
+          variant="line"
+          label="Sévérité"
+          options={SEVERITY_LEVELS}
+          value={String(sev)}
+          onChange={(v) => setSev(Number(v))}
+        />
 
         <Button variant="primary" onClick={submit} loading={busy}>
           {busy ? "Ajout…" : "Ajouter"}

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FileText, FileCode2, Layers, Check, Trash2, ArrowUpRight } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
+import { Segmented } from "@/components/ui/Segmented";
 import { apiPost, useCourse } from "@/lib/ux/api";
 import { corpusLabel, extOf, type SourcesResp, type SourceExam } from "@/lib/ux/sources";
 import { cn } from "@/lib/ux/cn";
@@ -17,6 +18,8 @@ const extTone: Record<string, string> = {
 };
 
 const ANNALE_TYPES = new Set(["final", "midterm"]);
+/** Valeur de la facette par défaut (les annales regroupent plusieurs types de source). */
+const ANNALES = "__annales__";
 // ordre d'affichage préféré des facettes non-annales
 const FACET_ORDER = ["course_pdf", "lecture", "serie", "exercise", "cheatsheet", "review", "note", "code", "lab", "doc"];
 
@@ -101,18 +104,17 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
             <span className="font-data font-semibold text-ink-2">{totalFiles}</span> fichier{totalFiles > 1 ? "s" : ""} dans le corpus
           </span>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <FacetChip label="Annales" count={annaleCount} active={facet === null} onClick={() => setFacet(null)} />
-          {nonAnnaleTypes.map((c) => (
-            <FacetChip
-              key={c.type}
-              label={corpusLabel(c.type)}
-              count={c.sources}
-              active={facet === c.type}
-              onClick={() => setFacet(facet === c.type ? null : c.type)}
-            />
-          ))}
-        </div>
+        <Segmented
+          variant="chips"
+          className="mt-3"
+          label="Type de fichiers"
+          options={[
+            { value: ANNALES, label: "Annales", count: annaleCount },
+            ...nonAnnaleTypes.map((c) => ({ value: c.type, label: corpusLabel(c.type), count: c.sources })),
+          ]}
+          value={facet ?? ANNALES}
+          onChange={(v) => setFacet(v === ANNALES ? null : v)}
+        />
       </div>
 
       {facet === null ? (
@@ -251,25 +253,6 @@ function RefCheckbox({ checked, busy, onToggle, label }: { checked: boolean; bus
         {checked && <Check className="size-3" strokeWidth={3} />}
       </span>
       Référence
-    </button>
-  );
-}
-
-function FacetChip({ label, count, active, onClick }: { label: string; count: number; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "inline-flex h-9 items-center gap-2 rounded-md border px-2.5 text-[0.8rem] font-medium transition-colors",
-        active
-          ? "border-[color-mix(in_oklch,var(--color-violet)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_14%,transparent)] text-ink-1"
-          : "border-line bg-surface-1/60 text-ink-2 hover:bg-surface-2 hover:text-ink-1"
-      )}
-    >
-      {label}
-      <span className="font-data text-[0.72rem] tabular text-ink-4">{count}</span>
     </button>
   );
 }

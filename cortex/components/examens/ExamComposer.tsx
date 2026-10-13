@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Play, Wand2, ScrollText, Check, AlertTriangle, Clock3, SlidersHorizontal, Target, ChevronDown } from "lucide-react";
+import { Play, Check, AlertTriangle, Clock3, SlidersHorizontal, Target, ChevronDown } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { WeightBar } from "@/components/viz/WeightBar";
@@ -104,13 +104,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: Plan; onGenerated: (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.55fr_1fr]">
       {/* Composer */}
       <Panel className="p-5 sm:p-6">
-        <div className="flex items-center gap-2">
-          <Wand2 className="size-4 text-violet-hi" strokeWidth={2.5} />
-          <h2 className="text-[1.05rem] font-semibold text-ink-1">Compositeur d’examen</h2>
-        </div>
-        <p className="mt-1 text-[0.88rem] text-ink-2">
-          «&nbsp;Un examen qui aurait pu tomber.&nbsp;» La proposition par défaut est au format réel du final : prête à lancer.
-        </p>
+        <h2 className="text-[1.05rem] font-semibold text-ink-1">Compositeur d’examen</h2>
 
         {/* composition : proposition compacte (défaut) + disclosure de réglage fin */}
         <div className="mt-5 rounded-lg border border-line bg-surface-2/40">
@@ -221,12 +215,9 @@ export function ExamComposer({ plan, onGenerated }: { plan: Plan; onGenerated: (
       {/* Format détecté (réel) */}
       <div className="flex flex-col gap-5">
         <Panel className="p-5">
-          <div className="flex items-center gap-2">
-            <ScrollText className="size-4 text-cyan-hi" strokeWidth={2.25} />
-            <h2 className="text-[0.95rem] font-semibold text-ink-1">Format détecté</h2>
-          </div>
+          <h2 className="text-[0.95rem] font-semibold text-ink-1">Format détecté</h2>
           <span className="mt-2 inline-flex rounded-full border border-line bg-surface-2/50 px-2.5 py-1 text-[0.72rem] font-medium text-cyan-hi">
-            {isQcm ? "QCM + OUVERT" : "EXERCICES OUVERTS"}
+            {isQcm ? "QCM et questions ouvertes" : "Exercices ouverts"}
           </span>
           <p className="mt-3 text-[0.85rem] leading-relaxed text-ink-2">{plan.summary}</p>
 
