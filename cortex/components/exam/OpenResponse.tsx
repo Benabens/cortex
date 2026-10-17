@@ -2,14 +2,7 @@
 
 import { useId, useState } from "react";
 import { SafeHtml } from "@/components/ui/SafeHtml";
-
-type CheckResult = {
-  verdict: "correct" | "partial" | "wrong";
-  feedback: string;
-  correct_solution: string;
-  criteria: { label: string; points: number; achieved: boolean; justification: string }[];
-  score: { earned: number; total: number };
-};
+import type { CheckResult } from "@/lib/check-solution";
 
 export function OpenResponse({ questionId, statement, courseId, graded, solution }: {
   questionId: number;
@@ -57,10 +50,14 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
         placeholder="Ta réponse (auto-évaluée : le corrigé s’affiche après correction)…"
         style={{ fontSize: 13 }}
         value={answer}
-        onChange={(e) => setAnswer(e.target.value)}
+        onChange={(e) => {
+          setAnswer(e.target.value);
+          setCheck(null);
+          setError(null);
+        }}
         readOnly={graded}
       />
-      {!graded && (
+      {(
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <button type="button" className="btn btn-quiet btn-sm" onClick={verifyAnswer} disabled={!answer.trim() || checking}>
             {checking ? "Vérification…" : "Vérifier ma réponse"}

@@ -4,12 +4,12 @@ import { use, useCallback, useEffect, useState, type CSSProperties } from "react
 import { useCourse } from "@/lib/ux/api";
 import { SafeHtml } from "@/components/ui/SafeHtml";
 import { OpenResponse } from "@/components/exam/OpenResponse";
+import type { QcmGradeDetail } from "@/lib/qcm";
 
 type Item = { id: number; idx: number; topic: string; type: "scq" | "mcq"; stem: string; options: string[]; verified: number | null };
 type Open = { id: number; concept: string; statement: string; solution: string };
 type Exam = { id: number; verifySummary: string | null; pdf: string | null; items: Item[]; open: Open[] };
-type Detail = { idx: number; correct: number[]; chosen: number[]; ok: boolean; points: number; explanation: string; misconceptions: string[] };
-type Graded = { score: number; total: number; detail: Detail[]; openSolutions: Open[] };
+type Graded = { score: number; total: number; detail: QcmGradeDetail[]; openSolutions: Open[] };
 
 const LETTER = "ABCDEFGH".split("");
 const formatPoints = (value: number) => new Intl.NumberFormat("fr-CH", { maximumFractionDigits: 2 }).format(value);
