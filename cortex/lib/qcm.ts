@@ -8,6 +8,7 @@ import { getExamDna, sampleMolds, pickCoverage, fewShotForMold, type ExamDna } f
 import { MOLD_DEFS, normalizeMold, type MoldKind } from "@/lib/molds";
 import { renderFigure, figureSpecPromptBlock, type FigureSpec } from "@/lib/figure-gen";
 import { examsDir } from "@/lib/paths";
+import type { Archetype } from "@/lib/archetypes";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -86,8 +87,10 @@ async function coverageTopics(): Promise<{ label: string; method: string | null 
     const rows = await q.all<{ label: string; method: string | null }>(`SELECT label, method FROM topics ORDER BY exam_weight DESC, exam_count DESC, label`);
     if (rows.length) return rows;
   } catch {}
-  const { profile } = require("@/lib/course-profile");
-  return (profile().archetypes as any[]).map((a) => ({ label: a.concept, method: a.structure }));
+  // Import paresseux : course-profile charge les profils qui dépendent du moteur d'examen.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { profile } = require("@/lib/course-profile") as typeof import("@/lib/course-profile");
+  return profile().archetypes.map((a) => ({ label: a.concept, method: a.structure }));
 }
 
 const ARCHITECT_QCM_RULES = [
@@ -115,7 +118,8 @@ export async function generateQcmBatch(
 ): Promise<QcmItem[]> {
   const fmt = await getFormatProfile();
   const imgs = courseRefImages().slice(0, 4);
-  const { profile } = require("@/lib/course-profile");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { profile } = require("@/lib/course-profile") as typeof import("@/lib/course-profile");
   // boucle FERMÉE : la mémoire de calibration des QCM (« trop facile / pas le style / faux »)
   // est réinjectée à la CONCEPTION → durcit/réoriente réellement les QCM suivants.
   const calib = await calibrationBlock("qcm");
@@ -157,7 +161,7 @@ export async function generateQcmBatch(
     guidance ? `\n${guidance}` : null,
     `Réponds UNIQUEMENT avec l'objet JSON { "items": [ … ] } (${n} QCM). Aucun fichier.`,
     JSON.stringify(QCM_BATCH_SCHEMA, null, 2),
-  ].filter((l) => l != null && l !== false && l !== "").join("\n");
+  ].filter((l) => l != null && l !== "").join("\n");
   step(`Génération de ${n} QCM (architecte · moules + idées fausses)…`, 30);
   const r = extractJson<{ items: (QcmItem & { figure_spec?: FigureSpec })[] }>(await completeText({ prompt, model: "opus", timeoutMs: 480_000 }));
   const items: QcmItem[] = [];
@@ -223,7 +227,6 @@ const VERIFY_SCHEMA = {
  *  Les questions à FIGURE sont re-résolues DEPUIS la figure (vision : le solveur
  *  ouvre le PNG rendu) ; sans quoi une question de lecture de figure serait jugée au hasard. */
 export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<QcmItem[]> {
-  const { profile } = require("@/lib/course-profile");
   const blind = items.map((q, i) =>
     `Q${i}. [${q.type}]${q.figureFile ? ` [FIGURE : ouvre ${path.join(path.relative(process.cwd(), examsDir()), q.figureFile)} avec l'outil Read]` : ""} ${q.stem}\n${q.options.map((o, k) => `   (${k}) ${o}`).join("\n")}`
   ).join("\n\n");
@@ -325,8 +328,9 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const openQs: ExamQuestion[] = [];
   if (openCount > 0) {
     const { architectQuestion } = await import("@/lib/architect");
-    const { profile } = require("@/lib/course-profile");
-    const archs = profile().archetypes as any[];
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { profile } = require("@/lib/course-profile") as typeof import("@/lib/course-profile");
+    const archs: Archetype[] = profile().archetypes;
     const openMolds = sampleMolds(dna, openCount, {
       only: ["proof_analysis", "derivation", "design", "applied_scenario", "formula_computation", "code_trace", "table_fill", "figure_reading"],
     });
@@ -386,17 +390,25 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
 
 export type QcmOpenView = { id: number; concept: string; statement: string; solution: string };
 export type QcmExamView = { id: number; createdAt: string; verifySummary: string | null; pdf: string | null; items: (Omit<QcmItem, "correct" | "misconceptions"> & { id: number; idx: number })[]; open: QcmOpenView[] };
+type QcmExamRow = { id: number; created_at: string; verify_summary: string | null; html_path: string | null };
+type QcmItemRow = {
+  id: number; idx: number; topic: string; type: "scq" | "mcq"; stem: string;
+  options_json: string; correct_json: string; misconceptions_json: string; explanation: string;
+  verified: 0 | 1 | null; mold: MoldKind | null; figure_json: string | null;
+};
+type QcmOpenRow = { id: number; concept: string; statement_html: string | null; solution_html: string | null };
 
 /** Un examen QCM pour l'affichage (SANS les clés — l'auto-correction se fait via /api). */
 export async function getQcmExam(examId: number, withKeys = false): Promise<QcmExamView | null> {
   await ensureQcmSchema();
-  const e = await q.get<any>(`SELECT id, created_at, verify_summary, html_path FROM exams WHERE id = ? AND format_template = 'qcm'`, examId);
+  const e = await q.get<QcmExamRow>(`SELECT id, created_at, verify_summary, html_path FROM exams WHERE id = ? AND format_template = 'qcm'`, examId);
   if (!e) return null;
-  const rows = await q.all<any>(`SELECT * FROM qcm_items WHERE exam_id = ? ORDER BY idx`, examId);
+  const rows = await q.all<QcmItemRow>(`SELECT * FROM qcm_items WHERE exam_id = ? ORDER BY idx`, examId);
   let open: QcmOpenView[] = [];
   try {
-    const { texToHtml } = require("@/lib/exam-latex");
-    open = (await q.all<any>(`SELECT id, concept, statement_html, solution_html FROM exam_questions WHERE exam_id = ? AND source_inspiration = 'qcm-open' ORDER BY id`, examId))
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { texToHtml } = require("@/lib/exam-latex") as typeof import("@/lib/exam-latex");
+    open = (await q.all<QcmOpenRow>(`SELECT id, concept, statement_html, solution_html FROM exam_questions WHERE exam_id = ? AND source_inspiration = 'qcm-open' ORDER BY id`, examId))
       .map((r) => ({ id: r.id, concept: r.concept, statement: texToHtml(r.statement_html ?? ""), solution: withKeys ? texToHtml(r.solution_html ?? "") : "" }));
   } catch {}
   return {
@@ -410,20 +422,52 @@ export async function getQcmExam(examId: number, withKeys = false): Promise<QcmE
         mold: r.mold ?? null, figureFile: figure,
         ...(withKeys ? { correct: JSON.parse(r.correct_json), misconceptions: JSON.parse(r.misconceptions_json) } : {}),
       };
-    }) as any,
+    }) as QcmExamView["items"],
     open,
   };
 }
 
+/** Note une réponse QCM sur 1. Un choix unique reste binaire ; un choix multiple pénalise les erreurs. */
+export function scoreQcmAnswer(correctAnswer: number[], chosenAnswer: number[], optionCount: number): number {
+  const correct = new Set(correctAnswer.filter((value) => Number.isInteger(value) && value >= 0 && value < optionCount));
+  const chosen = new Set(chosenAnswer.filter((value) => Number.isInteger(value) && value >= 0 && value < optionCount));
+  if (correct.size === 1) return chosen.size === 1 && chosen.has([...correct][0]) ? 1 : 0;
+  if (correct.size === 0 || chosen.size === 0) return 0;
+  const correctChosen = [...chosen].filter((value) => correct.has(value)).length;
+  const wrongChosen = chosen.size - correctChosen;
+  const wrongOptions = optionCount - correct.size;
+  return Math.max(0, (correctChosen / correct.size) - (wrongOptions > 0 ? wrongChosen / wrongOptions : 0));
+}
+
+export type QcmGradeDetail = {
+  idx: number;
+  correct: number[];
+  chosen: number[];
+  ok: boolean;
+  points: number;
+  explanation: string;
+  misconceptions: string[];
+};
+
+type QcmGradeRow = {
+  idx: number;
+  options_json: string;
+  correct_json: string;
+  explanation: string;
+  misconceptions_json: string;
+};
+
 /** Corrige des réponses {idx: number[]} contre la clé connue → score + détail. */
-export async function gradeQcm(examId: number, answers: Record<number, number[]>): Promise<{ score: number; total: number; detail: { idx: number; correct: number[]; chosen: number[]; ok: boolean; explanation: string; misconceptions: string[] }[] }> {
+export async function gradeQcm(examId: number, answers: Record<number, number[]>): Promise<{ score: number; total: number; detail: QcmGradeDetail[] }> {
   await ensureQcmSchema();
-  const rows = await q.all<any>(`SELECT idx, correct_json, explanation, misconceptions_json FROM qcm_items WHERE exam_id = ? ORDER BY idx`, examId);
+  const rows = await q.all<QcmGradeRow>(`SELECT idx, options_json, correct_json, explanation, misconceptions_json FROM qcm_items WHERE exam_id = ? ORDER BY idx`, examId);
   const detail = rows.map((r) => {
     const correct: number[] = JSON.parse(r.correct_json);
-    const chosen = (answers[r.idx] ?? []).slice().sort();
+    const optionCount = (JSON.parse(r.options_json) as unknown[]).length;
+    const chosen = [...new Set((answers[r.idx] ?? []).filter((value) => Number.isInteger(value) && value >= 0 && value < optionCount))].sort((a, b) => a - b);
     const ok = JSON.stringify(correct.slice().sort()) === JSON.stringify(chosen);
-    return { idx: r.idx, correct, chosen, ok, explanation: r.explanation, misconceptions: JSON.parse(r.misconceptions_json) };
+    const points = scoreQcmAnswer(correct, chosen, optionCount);
+    return { idx: r.idx, correct, chosen, ok, points, explanation: r.explanation, misconceptions: JSON.parse(r.misconceptions_json) };
   });
-  return { score: detail.filter((d) => d.ok).length, total: rows.length, detail };
+  return { score: detail.reduce((sum, item) => sum + item.points, 0), total: rows.length, detail };
 }
