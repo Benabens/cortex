@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useState, type CSSProperties } from "react";
 import { useCourse } from "@/lib/ux/api";
 import { SafeHtml } from "@/components/ui/SafeHtml";
 import { OpenResponse } from "@/components/exam/OpenResponse";
@@ -8,10 +8,11 @@ import { OpenResponse } from "@/components/exam/OpenResponse";
 type Item = { id: number; idx: number; topic: string; type: "scq" | "mcq"; stem: string; options: string[]; verified: number | null };
 type Open = { id: number; concept: string; statement: string; solution: string };
 type Exam = { id: number; verifySummary: string | null; pdf: string | null; items: Item[]; open: Open[] };
-type Detail = { idx: number; correct: number[]; chosen: number[]; ok: boolean; explanation: string; misconceptions: string[] };
+type Detail = { idx: number; correct: number[]; chosen: number[]; ok: boolean; points: number; explanation: string; misconceptions: string[] };
 type Graded = { score: number; total: number; detail: Detail[]; openSolutions: Open[] };
 
 const LETTER = "ABCDEFGH".split("");
+const formatPoints = (value: number) => new Intl.NumberFormat("fr-CH", { maximumFractionDigits: 2 }).format(value);
 
 export default function MockPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -70,10 +71,10 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
       {graded && (
         <div className="card card-pad mb-6 rise" style={{ borderColor: "var(--accent-line)", boxShadow: "var(--shadow-accent)" }}>
           <div className="flex items-center gap-4">
-            <div className="ring" style={{ ["--val" as any]: Math.round((graded.score / graded.total) * 100), ["--c" as any]: "var(--accent)" }}><span>{Math.round((graded.score / graded.total) * 100)}%</span></div>
+            <div className="ring" style={{ "--val": Math.round((graded.score / graded.total) * 100), "--c": "var(--accent)" } as CSSProperties}><span>{Math.round((graded.score / graded.total) * 100)}%</span></div>
             <div>
-              <div className="stat-value">{graded.score} / {graded.total}</div>
-              <div className="stat-label">QCM corrects · la correction détaille chaque idée fausse ci-dessous</div>
+              <div className="stat-value">{formatPoints(graded.score)} / {graded.total}</div>
+              <div className="stat-label">Points obtenus · la correction détaille chaque idée fausse ci-dessous</div>
             </div>
           </div>
         </div>
@@ -87,9 +88,10 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
             <section key={it.id} className="card card-pad" style={det ? { borderColor: det.ok ? "var(--green)" : "var(--red)" } : undefined}>
               <div className="flex items-center justify-between gap-2 mb-2">
                 <span className="text-[12.5px]" style={{ color: "var(--ink-3)" }}>Q{it.idx + 1} · {it.topic} · <span style={{ color: it.type === "mcq" ? "var(--blue-ink)" : "var(--accent-ink)" }}>{it.type.toUpperCase()}</span></span>
-                {det && <span className={`tag ${det.ok ? "tag-green" : "tag-red"}`}>{det.ok ? "juste ✓" : "faux"}</span>}
+                {det && <span className={`tag ${det.ok ? "tag-green" : det.points > 0 ? "tag-amber" : "tag-red"}`}>{formatPoints(det.points)} / 1{det.ok ? " ✓" : ""}</span>}
               </div>
               <div className="text-[14.5px] mb-3" style={{ color: "var(--ink)", whiteSpace: "pre-wrap" }}>{it.stem}</div>
+              {it.type === "mcq" && !graded && <p className="mb-3 text-[12px]" style={{ color: "var(--ink-3)" }}>Plusieurs réponses possibles. Chaque mauvaise case retire des points, sans score négatif.</p>}
               <div className="flex flex-col gap-1.5">
                 {it.options.map((o, k) => {
                   const picked = chosen.includes(k);
