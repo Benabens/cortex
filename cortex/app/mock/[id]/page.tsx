@@ -128,6 +128,8 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
                   <OpenResponse
                     key={`${courseId}:${id}:${o.id}`}
                     questionId={o.id}
+                    statement={o.statement}
+                    courseId={courseId ?? ""}
                     graded={!!graded}
                     solution={sol?.solution ?? null}
                   />
