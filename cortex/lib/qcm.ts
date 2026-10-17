@@ -415,15 +415,47 @@ export async function getQcmExam(examId: number, withKeys = false): Promise<QcmE
   };
 }
 
+/** Note une réponse QCM sur 1. Un choix unique reste binaire ; un choix multiple pénalise les erreurs. */
+export function scoreQcmAnswer(correctAnswer: number[], chosenAnswer: number[], optionCount: number): number {
+  const correct = new Set(correctAnswer.filter((value) => Number.isInteger(value) && value >= 0 && value < optionCount));
+  const chosen = new Set(chosenAnswer.filter((value) => Number.isInteger(value) && value >= 0 && value < optionCount));
+  if (correct.size === 1) return chosen.size === 1 && chosen.has([...correct][0]) ? 1 : 0;
+  if (correct.size === 0 || chosen.size === 0) return 0;
+  const correctChosen = [...chosen].filter((value) => correct.has(value)).length;
+  const wrongChosen = chosen.size - correctChosen;
+  const wrongOptions = optionCount - correct.size;
+  return Math.max(0, (correctChosen / correct.size) - (wrongOptions > 0 ? wrongChosen / wrongOptions : 0));
+}
+
+export type QcmGradeDetail = {
+  idx: number;
+  correct: number[];
+  chosen: number[];
+  ok: boolean;
+  points: number;
+  explanation: string;
+  misconceptions: string[];
+};
+
+type QcmGradeRow = {
+  idx: number;
+  options_json: string;
+  correct_json: string;
+  explanation: string;
+  misconceptions_json: string;
+};
+
 /** Corrige des réponses {idx: number[]} contre la clé connue → score + détail. */
-export async function gradeQcm(examId: number, answers: Record<number, number[]>): Promise<{ score: number; total: number; detail: { idx: number; correct: number[]; chosen: number[]; ok: boolean; explanation: string; misconceptions: string[] }[] }> {
+export async function gradeQcm(examId: number, answers: Record<number, number[]>): Promise<{ score: number; total: number; detail: QcmGradeDetail[] }> {
   await ensureQcmSchema();
-  const rows = await q.all<any>(`SELECT idx, correct_json, explanation, misconceptions_json FROM qcm_items WHERE exam_id = ? ORDER BY idx`, examId);
+  const rows = await q.all<QcmGradeRow>(`SELECT idx, options_json, correct_json, explanation, misconceptions_json FROM qcm_items WHERE exam_id = ? ORDER BY idx`, examId);
   const detail = rows.map((r) => {
     const correct: number[] = JSON.parse(r.correct_json);
-    const chosen = (answers[r.idx] ?? []).slice().sort();
+    const optionCount = (JSON.parse(r.options_json) as unknown[]).length;
+    const chosen = [...new Set((answers[r.idx] ?? []).filter((value) => Number.isInteger(value) && value >= 0 && value < optionCount))].sort((a, b) => a - b);
     const ok = JSON.stringify(correct.slice().sort()) === JSON.stringify(chosen);
-    return { idx: r.idx, correct, chosen, ok, explanation: r.explanation, misconceptions: JSON.parse(r.misconceptions_json) };
+    const points = scoreQcmAnswer(correct, chosen, optionCount);
+    return { idx: r.idx, correct, chosen, ok, points, explanation: r.explanation, misconceptions: JSON.parse(r.misconceptions_json) };
   });
-  return { score: detail.filter((d) => d.ok).length, total: rows.length, detail };
+  return { score: detail.reduce((sum, item) => sum + item.points, 0), total: rows.length, detail };
 }
