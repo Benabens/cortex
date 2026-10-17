@@ -1,3 +1,4 @@
+import { useId } from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { cn } from "@/lib/ux/cn";
@@ -54,47 +55,58 @@ export function SectionHeader({
   );
 }
 
+/**
+ * Interrupteur (même mécanique que Kairo, 17/10) : un vrai `<input type="checkbox" role="switch">` dans un
+ * `<label>` ; le dessin et le mouvement sont dans app/globals.css (« Interrupteur »). La pastille glisse
+ * (translateX) et s'étire en largeur du côté où elle va (ses deux bords sont animés séparément), rebondit
+ * d'un pixel et s'élargit dès l'appui ; relâcher hors de l'étiquette annule. Mouvement réduit : bascule nette.
+ * `label` nomme l'interrupteur : visible avec `labelVisible`, sinon pour les lecteurs d'écran seulement.
+ * Espace est natif, Entrée bascule aussi.
+ */
 export function Toggle({
   checked,
   onChange,
   label,
   disabled = false,
   autoFocus = false,
+  labelVisible = false,
+  hint,
+  className,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label: string;
   disabled?: boolean;
   autoFocus?: boolean;
+  labelVisible?: boolean;
+  hint?: string;
+  className?: string;
 }) {
-  // Track 44×24, knob 20 with an explicit 2px inset on every side:
-  // off → left 2px..22px, on → translate-x-5 (20px) → 22px..42px. Always contained.
+  const id = useId();
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      autoFocus={autoFocus}
-      onClick={() => onChange(!checked)}
-      className={cn(
-        "relative h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2",
-        checked
-          ? "bg-violet-deep shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]"
-          : "bg-surface-3 shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)]",
-        disabled && "cursor-not-allowed opacity-45"
-      )}
-    >
-      <span
-        aria-hidden="true"
-        className={cn(
-          "absolute left-0.5 top-0.5 size-5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.5)] transition-transform duration-150",
-          checked ? "translate-x-5" : "translate-x-0"
-        )}
+    <label className={cn("switch", className)} htmlFor={id} data-disabled={disabled ? "" : undefined}>
+      <input
+        id={id}
+        type="checkbox"
+        role="switch"
+        checked={checked}
+        disabled={disabled}
+        autoFocus={autoFocus}
+        onChange={(e) => onChange(e.target.checked)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.currentTarget.click();
+          }
+        }}
       />
-    </button>
+      <span className="sw-track" aria-hidden="true">
+        <span className="sw-thumb" />
+      </span>
+      <span className={labelVisible ? "sw-text" : "sr-only"}>
+        {label}
+        {labelVisible && hint ? <small>{hint}</small> : null}
+      </span>
+    </label>
   );
 }
-
-
