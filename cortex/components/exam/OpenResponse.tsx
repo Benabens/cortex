@@ -60,7 +60,7 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
       {(
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <button type="button" className="btn btn-quiet btn-sm" onClick={verifyAnswer} disabled={!answer.trim() || checking}>
-            {checking ? "Vérification…" : "Vérifier ma réponse"}
+            {checking ? "Vérification…" : "Vérifier ma réponse · 0,1 crédit"}
           </button>
           <span className="text-[11.5px]" style={{ color: "var(--ink-3)" }}>Correction détaillée par critères</span>
         </div>
