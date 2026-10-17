@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useApi, useCourse } from "@/lib/ux/api";
 import { LoadError } from "@/components/ui/LoadError";
+import { Toggle } from "@/components/ui/primitives";
 
 type BQ = { id: number; topic: string; lectureRank: number | null; statement: string; options: string | null; officialAnswer: string | null; sourceExam: string; examYear: number | null; examPage: number | null; examHref: string | null };
 type PQ = { id: number; kind: "qcm" | "open"; topic: string; lectureRank: number | null; statement: string; options: string | null; correct: string | null; explanation: string | null; solution: string | null; verified: number | null; verifyMethod: string | null };
@@ -129,10 +130,7 @@ export default function RevisionPage() {
           </div>
 
           <div className="flex items-center gap-3 mb-4 text-[12.5px] flex-wrap" style={{ color: "var(--ink-3)" }}>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
-              <input type="checkbox" checked={hideDone} onChange={toggleHide} style={{ accentColor: "var(--green)", width: 14, height: 14 }} />
-              Masquer les questions faites
-            </label>
+            <Toggle checked={hideDone} onChange={toggleHide} label="Masquer les questions faites" labelVisible />
             <span style={{ color: "var(--ink-4)" }}>·</span>
             <span><strong style={{ color: "var(--ink-2)" }}>{doneTotal}</strong> question{doneTotal > 1 ? "s" : ""} marquée{doneTotal > 1 ? "s" : ""} faite{doneTotal > 1 ? "s" : ""}</span>
             {doneTotal > 0 && <button className="btn btn-quiet btn-sm" onClick={resetDone}>réinitialiser</button>}
