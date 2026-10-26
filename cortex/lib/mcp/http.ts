@@ -4,6 +4,7 @@ import {
 } from "@modelcontextprotocol/server";
 import { log } from "@/lib/metrics";
 import { SCOPE_READ, SUPPORTED_SCOPES, issuerFor, resourceFor } from "@/lib/oauth/config";
+import { allowedOriginHosts, corsHeaders } from "@/lib/oauth/cors";
 import { touchGrant, verifyAccessToken } from "@/lib/oauth/server";
 import { buildServer } from "./server";
 
@@ -22,25 +23,17 @@ import { buildServer } from "./server";
 
 const MAX_BODY_BYTES = 256 * 1024;
 
-const CORS = {
-  "access-control-allow-origin": "*",
+const CORS_EXTRA = {
   "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
   "access-control-allow-headers": "authorization, content-type, accept, mcp-protocol-version, mcp-method, mcp-name, mcp-session-id, last-event-id",
   "access-control-expose-headers": "www-authenticate, mcp-protocol-version",
   "access-control-max-age": "600",
 };
 
-function withCors(res: Response): Response {
+function withCors(req: Request, issuer: string, res: Response): Response {
   const headers = new Headers(res.headers);
-  for (const [k, v] of Object.entries(CORS)) headers.set(k, v);
+  for (const [k, v] of Object.entries(corsHeaders(req, issuer, CORS_EXTRA))) headers.set(k, v);
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
-}
-
-/** Hôtes de navigateur admis : l'app, Claude, le poste local (inspecteur MCP), et MCP_ALLOWED_ORIGINS. */
-function allowedOriginHosts(issuer: string): string[] {
-  const extra = (process.env.MCP_ALLOWED_ORIGINS ?? "").split(",").map((o) => o.trim()).filter(Boolean)
-    .map((o) => { try { return new URL(o).hostname; } catch { return o; } });
-  return [new URL(issuer).hostname, "claude.ai", "claude.com", "localhost", "127.0.0.1", "[::1]", ...extra];
 }
 
 /** Débit par compte et par minute (fenêtre fixe). MCP_RATE_LIMIT_PER_MIN, défaut 120 ; « unlimited » lève. */
@@ -83,10 +76,10 @@ function handler(): McpHttpHandler {
 export async function handleMcp(req: Request): Promise<Response> {
   const issuer = issuerFor(req);
   if (!issuer) return new Response(JSON.stringify({ error: "not_found" }), { status: 404, headers: { "content-type": "application/json" } });
-  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(req, issuer, CORS_EXTRA) });
 
   const badOrigin = originValidationResponse(req, allowedOriginHosts(issuer));
-  if (badOrigin) return withCors(badOrigin);
+  if (badOrigin) return withCors(req, issuer, badOrigin);
 
   const resource = resourceFor(issuer);
   const resourceMetadataUrl = `${issuer}/.well-known/oauth-protected-resource/mcp`;
@@ -109,16 +102,16 @@ export async function handleMcp(req: Request): Promise<Response> {
     });
   } catch (e) {
     // 401 : le client doit (re)lancer OAuth — on lui indique TOUTES les portées, pour une seule connexion.
-    return withCors(bearerAuthChallengeResponse(e, { requiredScopes: [...SUPPORTED_SCOPES], resourceMetadataUrl }));
+    return withCors(req, issuer, bearerAuthChallengeResponse(e, { requiredScopes: [...SUPPORTED_SCOPES], resourceMetadataUrl }));
   }
 
   const { userId, grantId } = authInfo.extra as { userId: string; grantId: string };
   if (overRate(userId)) {
-    return withCors(Response.json(
+    return withCors(req, issuer, Response.json(
       { jsonrpc: "2.0", id: null, error: { code: -32000, message: "Trop de requêtes MCP pour ce compte — réessaie dans une minute." } },
       { status: 429, headers: { "retry-after": "60" } },
     ));
   }
   void touchGrant(grantId).catch(() => {});
-  return withCors(await handler().fetch(req, { authInfo }));
+  return withCors(req, issuer, await handler().fetch(req, { authInfo }));
 }
