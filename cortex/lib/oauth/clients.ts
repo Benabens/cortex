@@ -269,6 +269,7 @@ export function parseCimdDocument(clientId: string, body: string): OAuthClient {
   try { m = JSON.parse(body); } catch { throw new ClientRegistrationError("invalid_client_metadata", "document de métadonnées illisible"); }
   if (!m || typeof m !== "object" || Array.isArray(m)) throw new ClientRegistrationError("invalid_client_metadata", "document de métadonnées illisible");
   if (m.client_id !== clientId) throw new ClientRegistrationError("invalid_client_metadata", "client_id du document différent de son adresse");
+  if (!str(m.client_name, MAX_NAME_LENGTH)) throw new ClientRegistrationError("invalid_client_metadata", "client_name manquant dans le document");
   const redirectUris = parseRedirectUris(m.redirect_uris);
   assertGrantAndResponseTypes(m);
   const method = m.token_endpoint_auth_method ?? "none";

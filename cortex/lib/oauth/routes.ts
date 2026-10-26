@@ -184,7 +184,7 @@ export async function consentDecisionEndpoint(req: Request, userId: string): Pro
 export type ConsentView =
   | { kind: "redirect"; url: string }
   | { kind: "error"; message: string }
-  | { kind: "consent"; ticket: string; clientName: string | null; clientHost: string; verifiedDomain: boolean; scopes: string[] };
+  | { kind: "consent"; ticket: string; clientName: string | null; clientHost: string; redirectHost: string; verifiedDomain: boolean; scopes: string[] };
 
 /**
  * GET /oauth/authorize (page de consentement) : valide la demande pour le compte
@@ -203,8 +203,10 @@ export async function prepareConsent(req: Request, params: URLSearchParams, user
     kind: "consent",
     ticket,
     clientName: c.name,
-    clientHost: new URL(v.request.redirectUri).host,
-    // CIMD : l'identité du client est un domaine qu'il contrôle (son client_id) ; DCR : un nom déclaré.
+    // CIMD : l'identité du client est le domaine qui sert son document (son client_id) ;
+    // DCR : seul l'hôte de l'URL de retour est vérifiable, le nom est déclaré.
+    clientHost: c.kind === "cimd" ? new URL(c.clientId).host : new URL(v.request.redirectUri).host,
+    redirectHost: new URL(v.request.redirectUri).host,
     verifiedDomain: c.kind === "cimd",
     scopes: v.request.scopes,
   };

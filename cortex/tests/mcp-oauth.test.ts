@@ -317,6 +317,10 @@ test("CIMD : le document est lu à l'adresse du client_id et doit s'y désigner 
   const lying = async () => ({ body: JSON.stringify({ ...doc, client_id: clientId }), maxAgeS: null });
   const ko = await validateAuthorizeRequest(authorizeParams(liar, pkce().challenge, { redirect_uri: "https://client.example/callback" }), ISSUER, RESOURCE, lying);
   assert.equal(ko.ok, false, "un document qui désigne un autre client_id est refusé");
+  const anonymous = "https://anonyme.example/meta.json";
+  const noName = async () => ({ body: JSON.stringify({ client_id: anonymous, redirect_uris: ["https://anonyme.example/cb"] }), maxAgeS: null });
+  const ko2 = await validateAuthorizeRequest(authorizeParams(anonymous, pkce().challenge, { redirect_uri: "https://anonyme.example/cb" }), ISSUER, RESOURCE, noName);
+  assert.equal(ko2.ok, false, "client_name est obligatoire dans un document CIMD");
 });
 
 test("CIMD : seules les adresses publiques peuvent être lues (pas de SSRF vers le réseau interne)", async () => {
@@ -325,4 +329,20 @@ test("CIMD : seules les adresses publiques peuvent être lues (pas de SSRF vers 
     assert.equal(isPublicAddress(ip), false, ip);
   }
   for (const ip of ["104.18.1.1", "2606:4700::1111"]) assert.equal(isPublicAddress(ip), true, ip);
+});
+
+test("route Applications connectées : GET liste celles du compte, DELETE d'une autre → 404, de la sienne → révoquée", async () => {
+  const { GET, DELETE } = await import("../app/api/account/connected-apps/route");
+  const { NextRequest } = await import("next/server");
+  const c = await connect(BOB);
+  const grantId = (await principal(c.access_token))!.grantId;
+  const as = (user: string, method = "GET", query = "") =>
+    new NextRequest(`${ISSUER}/api/account/connected-apps${query}`, { method, headers: { "x-cortex-user": user } });
+  const listed = await (await GET(as(BOB))).json();
+  assert.ok(listed.apps.some((a: { id: string }) => a.id === grantId));
+  assert.ok(!(await (await GET(as(ALICE))).json()).apps.some((a: { id: string }) => a.id === grantId));
+  assert.equal((await DELETE(as(ALICE, "DELETE", `?id=${grantId}`))).status, 404);
+  assert.ok(await principal(c.access_token), "la tentative d'Alice n'a rien révoqué");
+  assert.equal((await DELETE(as(BOB, "DELETE", `?id=${grantId}`))).status, 200);
+  assert.equal(await principal(c.access_token), null);
 });
