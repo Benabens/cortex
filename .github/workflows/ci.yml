@@ -156,7 +156,7 @@ jobs:
       # aussi la construction une fois. Une vraie panne du miroir reste rouge.
       - name: Image de base (reprises si le miroir limite)
         run: |
-          img=$(sed -n 's/^ARG NODE_IMAGE=//p' Dockerfile | head -1)
+          img=$(grep -m1 -oE 'public\.ecr\.aws/[^[:space:]]+' Dockerfile)
           for i in 1 2 3 4 5; do
             docker pull "$img" && exit 0
             echo "::warning::tirage de $img refusé (essai $i), nouvel essai dans $((i * 30)) s"
