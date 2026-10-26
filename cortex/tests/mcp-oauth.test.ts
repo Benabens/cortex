@@ -159,6 +159,19 @@ test("code rejoué : refusé, et les jetons déjà émis par ce code sont révoq
   assert.equal(await principal(c.access_token), null);
 });
 
+test("code rejoué : seuls les jetons de CE code tombent, pas ceux d'un autre appareil du même compte", async () => {
+  const client = await register();
+  const a = pkce();
+  const codeA = await consent(ALICE, client.client_id, a.challenge);
+  const tA = await token({ grant_type: "authorization_code", code: codeA, code_verifier: a.verifier, client_id: client.client_id });
+  const b = pkce();
+  const codeB = await consent(ALICE, client.client_id, b.challenge);
+  const tB = await token({ grant_type: "authorization_code", code: codeB, code_verifier: b.verifier, client_id: client.client_id });
+  await token({ grant_type: "authorization_code", code: codeA, code_verifier: a.verifier, client_id: client.client_id });
+  assert.equal(await principal(tA.body.access_token), null);
+  assert.ok(await principal(tB.body.access_token), "l'autre appareil garde son accès");
+});
+
 test("demande sans PKCE ou en méthode plain : erreur renvoyée au client, aucun ticket", async () => {
   const { prepareConsent } = await import("../lib/oauth/routes");
   const client = await register();
@@ -238,17 +251,57 @@ test("refus : access_denied renvoyé au client avec son state", async () => {
   assert.equal(location.searchParams.get("state"), "etat-123");
 });
 
-test("refresh tournant : nouveau couple de jetons ; l'ancien refresh rejoué coupe toute l'autorisation", async () => {
+test("refresh tournant : nouveau couple de jetons ; l'ancien refresh rejoué (hors tolérance) coupe sa lignée", async () => {
+  process.env.OAUTH_REFRESH_GRACE_S = "0";
+  try {
+    const c = await connect(ALICE);
+    const r1 = await token({ grant_type: "refresh_token", refresh_token: c.refresh_token, client_id: c.clientId });
+    assert.equal(r1.status, 200);
+    assert.notEqual(r1.body.refresh_token, c.refresh_token);
+    assert.equal((await principal(r1.body.access_token))?.userId, ALICE);
+    const stolen = await token({ grant_type: "refresh_token", refresh_token: c.refresh_token, client_id: c.clientId });
+    assert.equal(stolen.body.error, "invalid_grant");
+    assert.equal(await principal(r1.body.access_token), null, "la réutilisation d'un refresh révoque les jetons en cours");
+    const later = await token({ grant_type: "refresh_token", refresh_token: r1.body.refresh_token, client_id: c.clientId });
+    assert.equal(later.body.error, "invalid_grant");
+  } finally {
+    delete process.env.OAUTH_REFRESH_GRACE_S;
+  }
+});
+
+test("réessai réseau : le même refresh présenté deux fois dans la tolérance est servi, rien n'est révoqué", async () => {
   const c = await connect(ALICE);
   const r1 = await token({ grant_type: "refresh_token", refresh_token: c.refresh_token, client_id: c.clientId });
-  assert.equal(r1.status, 200);
-  assert.notEqual(r1.body.refresh_token, c.refresh_token);
-  assert.equal((await principal(r1.body.access_token))?.userId, ALICE);
-  const stolen = await token({ grant_type: "refresh_token", refresh_token: c.refresh_token, client_id: c.clientId });
-  assert.equal(stolen.body.error, "invalid_grant");
-  assert.equal(await principal(r1.body.access_token), null, "la réutilisation d'un refresh révoque les jetons en cours");
-  const after = await token({ grant_type: "refresh_token", refresh_token: r1.body.refresh_token, client_id: c.clientId });
-  assert.equal(after.body.error, "invalid_grant");
+  const r2 = await token({ grant_type: "refresh_token", refresh_token: c.refresh_token, client_id: c.clientId });
+  assert.equal(r2.status, 200, JSON.stringify(r2.body));
+  assert.ok(await principal(r1.body.access_token));
+  assert.ok(await principal(r2.body.access_token));
+});
+
+test("portée retirée à la reconnexion : les jetons déjà émis perdent cortex.generate", async () => {
+  const client = await register();
+  const a = pkce();
+  const t1 = await token({ grant_type: "authorization_code", code: await consent(BOB, client.client_id, a.challenge), code_verifier: a.verifier, client_id: client.client_id });
+  assert.deepEqual((await principal(t1.body.access_token))?.scopes, ["cortex.read", "cortex.generate"]);
+  const b = pkce();
+  await consent(BOB, client.client_id, b.challenge, { generate: false });
+  assert.deepEqual((await principal(t1.body.access_token))?.scopes, ["cortex.read"], "le jeton d'avant suit l'autorisation réduite");
+  const r = await token({ grant_type: "refresh_token", refresh_token: t1.body.refresh_token, client_id: client.client_id });
+  assert.equal(r.body.scope, "cortex.read");
+});
+
+test("un client qui ne demande que « générer » reçoit aussi la lecture (sans elle, rien ne marcherait)", async () => {
+  const { grantableScopes } = await import("../lib/oauth/server");
+  assert.deepEqual(grantableScopes("cortex.generate"), ["cortex.read", "cortex.generate"]);
+  assert.deepEqual(grantableScopes("cortex.read"), ["cortex.read"]);
+  assert.deepEqual(grantableScopes("inconnu"), ["cortex.read", "cortex.generate"]);
+});
+
+test("en-tête Basic malformé au point de jeton : 401 invalid_client, jamais 500", async () => {
+  const { tokenEndpoint } = await import("../lib/oauth/routes");
+  const res = await tokenEndpoint(formPost("/oauth/token", { grant_type: "refresh_token", refresh_token: "x" }, { authorization: `Basic ${Buffer.from("%E0%A4%A:x").toString("base64")}` }));
+  assert.equal(res.status, 401);
+  assert.equal((await res.json()).error, "invalid_client");
 });
 
 test("refresh présenté par un autre client : refusé", async () => {
@@ -284,14 +337,20 @@ test("applications connectées : chacun ne voit et ne révoque que les siennes",
   assert.ok(!(await listConnectedApps(BOB)).some((a) => a.id === grantId));
 });
 
-test("client confidentiel (DCR avec secret) : le secret est exigé au point de jeton", async () => {
-  const client = await register([CALLBACK], { token_endpoint_auth_method: "client_secret_post" });
-  assert.match(client.client_secret ?? "", /^cx_cs_/);
+test("client qui demande un secret (DCR) : enregistré comme client public PKCE, aucun secret émis", async () => {
+  const { registerEndpoint } = await import("../lib/oauth/routes");
+  const res = await registerEndpoint(new Request(`${ISSUER}/oauth/register`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ client_name: "Avec secret", redirect_uris: [CALLBACK], token_endpoint_auth_method: "client_secret_post" }),
+  }));
+  const body = await res.json();
+  assert.equal(res.status, 201);
+  assert.equal(body.token_endpoint_auth_method, "none");
+  assert.equal(body.client_secret, undefined);
   const { verifier, challenge } = pkce();
-  const code = await consent(ALICE, client.client_id, challenge);
-  const noSecret = await token({ grant_type: "authorization_code", code, code_verifier: verifier, client_id: client.client_id });
-  assert.equal(noSecret.status, 401);
-  assert.equal(noSecret.body.error, "invalid_client");
+  const code = await consent(ALICE, body.client_id, challenge);
+  const t = await token({ grant_type: "authorization_code", code, code_verifier: verifier, client_id: body.client_id });
+  assert.equal(t.status, 200);
 });
 
 test("enregistrement : URL de retour non https refusée, flux implicite refusé", async () => {

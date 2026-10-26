@@ -57,8 +57,9 @@ export function authorizationServerMetadata(req: Request): NextResponse {
     response_modes_supported: ["query"],
     grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
-    token_endpoint_auth_methods_supported: ["none", "client_secret_post", "client_secret_basic"],
-    revocation_endpoint_auth_methods_supported: ["none", "client_secret_post", "client_secret_basic"],
+    // Clients publics seulement (PKCE) — c'est aussi ce qui fait choisir CIMD à Claude.
+    token_endpoint_auth_methods_supported: ["none"],
+    revocation_endpoint_auth_methods_supported: ["none"],
     scopes_supported: [...SUPPORTED_SCOPES],
     client_id_metadata_document_supported: true,
     authorization_response_iss_parameter_supported: true,
@@ -87,18 +88,17 @@ export async function registerEndpoint(req: Request): Promise<NextResponse> {
     throw e;
   }
   try {
-    const { client, secret, issuedAt } = await registerClient(meta);
-    log("info", "oauth.client_registered", { kind: "dcr", method: client.authMethod });
+    const { client, issuedAt } = await registerClient(meta);
+    log("info", "oauth.client_registered", { kind: "dcr" });
     return json(req, {
       client_id: client.clientId,
       client_id_issued_at: issuedAt,
-      ...(secret ? { client_secret: secret, client_secret_expires_at: 0 } : {}),
       client_name: client.name ?? undefined,
       client_uri: client.uri ?? undefined,
       redirect_uris: client.redirectUris,
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
-      token_endpoint_auth_method: client.authMethod,
+      token_endpoint_auth_method: "none",
     }, 201);
   } catch (e) {
     if (e instanceof ClientRegistrationError) return json(req, { error: e.code, error_description: e.message }, 400);

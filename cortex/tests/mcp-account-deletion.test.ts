@@ -46,7 +46,7 @@ async function connect(user: string): Promise<string> {
   const ticket = await createConsentTicket(user, v.request);
   // Un second ticket resté en attente doit lui aussi disparaître.
   await createConsentTicket(user, v.request);
-  const code = new URL(await decideConsent(user, ticket, true, ISSUER)).searchParams.get("code")!;
+  const code = new URL(await decideConsent(user, ticket, true, ISSUER, true)).searchParams.get("code")!;
   const t = await exchangeToken(new URLSearchParams({ grant_type: "authorization_code", code, code_verifier: verifier, client_id: client.clientId }), null, RESOURCE);
   const { issueQuote } = await import("../lib/mcp/quotes");
   const { verifyAccessToken } = await import("../lib/oauth/server");

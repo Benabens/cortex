@@ -205,16 +205,15 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       retained_until TEXT
     )`,
     // ── OAuth 2.1 du serveur MCP (lib/oauth) : AUCUN secret en clair, seulement des
-    // empreintes SHA-256 (jetons, codes, tickets de consentement, secrets clients).
+    // empreintes SHA-256 (jetons, codes, tickets de consentement). Clients publics
+    // seulement (PKCE) : aucun secret client n'existe. `family` = lignée d'un code
+    // (empreinte du code) : un code ou un refresh rejoué ne coupe que sa lignée.
     `CREATE TABLE IF NOT EXISTS oauth_clients (
       client_id TEXT PRIMARY KEY,
       kind TEXT NOT NULL,
       client_name TEXT,
       client_uri TEXT,
-      logo_uri TEXT,
       redirect_uris TEXT NOT NULL,
-      token_endpoint_auth_method TEXT NOT NULL,
-      client_secret_hash TEXT,
       created_at TEXT NOT NULL,
       refresh_after TEXT
     )`,
@@ -260,6 +259,7 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
     `CREATE TABLE IF NOT EXISTS oauth_tokens (
       token_hash TEXT PRIMARY KEY,
       kind TEXT NOT NULL,
+      family TEXT NOT NULL,
       grant_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       client_id TEXT NOT NULL,
@@ -271,6 +271,7 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       rotated_at TEXT
     )`,
     `CREATE INDEX IF NOT EXISTS oauth_tokens_grant_idx ON oauth_tokens (grant_id)`,
+    `CREATE INDEX IF NOT EXISTS oauth_tokens_family_idx ON oauth_tokens (family)`,
     `CREATE TABLE IF NOT EXISTS mcp_quotes (
       token_hash TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -471,16 +472,15 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       retained_until text
     )`,
     // ── OAuth 2.1 du serveur MCP (lib/oauth) : AUCUN secret en clair, seulement des
-    // empreintes SHA-256 (jetons, codes, tickets de consentement, secrets clients).
+    // empreintes SHA-256 (jetons, codes, tickets de consentement). Clients publics
+    // seulement (PKCE) : aucun secret client n'existe. `family` = lignée d'un code
+    // (empreinte du code) : un code ou un refresh rejoué ne coupe que sa lignée.
     `CREATE TABLE IF NOT EXISTS public.oauth_clients (
       client_id text PRIMARY KEY,
       kind text NOT NULL,
       client_name text,
       client_uri text,
-      logo_uri text,
       redirect_uris text NOT NULL,
-      token_endpoint_auth_method text NOT NULL,
-      client_secret_hash text,
       created_at text NOT NULL,
       refresh_after text
     )`,
@@ -526,6 +526,7 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
     `CREATE TABLE IF NOT EXISTS public.oauth_tokens (
       token_hash text PRIMARY KEY,
       kind text NOT NULL,
+      family text NOT NULL,
       grant_id text NOT NULL,
       user_id text NOT NULL,
       client_id text NOT NULL,
@@ -537,6 +538,7 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       rotated_at text
     )`,
     `CREATE INDEX IF NOT EXISTS oauth_tokens_grant_idx ON public.oauth_tokens (grant_id)`,
+    `CREATE INDEX IF NOT EXISTS oauth_tokens_family_idx ON public.oauth_tokens (family)`,
     `CREATE TABLE IF NOT EXISTS public.mcp_quotes (
       token_hash text PRIMARY KEY,
       user_id text NOT NULL,
