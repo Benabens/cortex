@@ -1,6 +1,6 @@
 import * as z from "zod/v4";
 import { rankTopics, toNextUp, upNext } from "@/lib/next-up";
-import { nextTopic, programOverview, type ProgramOverview } from "@/lib/program";
+import { programOverview, type ProgramOverview } from "@/lib/program";
 import { scheduleStats } from "@/lib/schedule";
 import { clip, daysUntil } from "../content";
 import { courseArg, courseRef, courseRefOf } from "../schemas";
@@ -64,14 +64,12 @@ export default defineTool({
   async run({ course }, ctx) {
     return ctx.inCourse(course, async (c) => {
       let ov: ProgramOverview = { topics: [], chapters: [], planOk: false, stats: { total: 0, covered: 0, mastered: 0, due: 0, coveragePct: 0, masteryPct: 0 } };
-      let next: Awaited<ReturnType<typeof nextTopic>> = null;
-      try {
-        ov = await programOverview();
-        next = await nextTopic();
-      } catch { /* cours pas encore analysé : programme vide */ }
+      try { ov = await programOverview(); } catch { /* cours pas encore analysé : programme vide */ }
       let sched = { total: 0, due: 0 };
       try { sched = await scheduleStats(); } catch { /* pas de planning */ }
+      // rankTopics applique la règle de nextTopic() (lib/next-up) sans recalculer tout le programme.
       const ranked = rankTopics(ov.topics);
+      const next = ranked[0] ?? null;
       const nu = next ? toNextUp(next, ov.chapters) : null;
       const byId = new Map(ov.topics.map((t) => [t.id, t]));
       return {

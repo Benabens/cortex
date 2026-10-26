@@ -19,7 +19,8 @@ export const metadata: Metadata = { ...NOINDEX, title: "Connecter une applicatio
  * ticket opaque lié au compte connecté. Même direction artistique que /login.
  */
 
-const C = { bg: "#0b0b0f", ink: "#f4f2fb", muted: "#a5a2b3", faint: "#6f6c7d", line: "rgba(255,255,255,0.10)", surface: "#141419" };
+// faint : #8a8798 (5,2:1 sur la surface) — le #6f6c7d de /login reste sous 4,5:1 pour du petit texte.
+const C = { bg: "#0b0b0f", ink: "#f4f2fb", muted: "#a5a2b3", faint: "#8a8798", line: "rgba(255,255,255,0.10)", surface: "#141419" };
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (

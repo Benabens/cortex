@@ -292,6 +292,30 @@ test("search_course_materials : trouve dans les sources du compte, une balise co
   await client.close();
 });
 
+test("get_study_plan : cours non analysé dit l'être ; analysé, la notion prioritaire est la plus lourde jamais travaillée", async () => {
+  const { access } = await tokenFor(CAROL);
+  const { client } = await connect(access);
+  const empty = await call(client, "get_study_plan");
+  assert.equal((empty.structuredContent as { analyzed: boolean }).analyzed, false);
+  assert.match(text(empty), /pas encore été analysé/);
+  const { runWithCourse } = await import("../db/client");
+  const { runWithUser } = await import("../db/context");
+  const { q } = await import("../db/q");
+  const { ensureProgramSchema } = await import("../lib/program");
+  await runWithUser(CAROL, () => runWithCourse(courses[CAROL], async () => {
+    await ensureProgramSchema();
+    await q.run(`INSERT INTO topics (label, exam_weight, exam_count) VALUES (?,?,?)`, "Intégrales impropres", 30, 4);
+    await q.run(`INSERT INTO topics (label, exam_weight, exam_count) VALUES (?,?,?)`, "Suites", 10, 2);
+  }));
+  const plan = await call(client, "get_study_plan");
+  const sc = plan.structuredContent as { analyzed: boolean; next_topic: { label: string }; topics: Array<{ label: string }>; stats: { topics: number } };
+  assert.equal(sc.analyzed, true);
+  assert.equal(sc.stats.topics, 2);
+  assert.equal(sc.next_topic.label, "Intégrales impropres");
+  assert.deepEqual(sc.topics.map((t) => t.label), ["Intégrales impropres", "Suites"]);
+  await client.close();
+});
+
 test("get_account_status : solde, coûts et quotas du compte", async () => {
   const { access } = await tokenFor(CAROL);
   const { client } = await connect(access);
