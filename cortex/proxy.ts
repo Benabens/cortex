@@ -30,6 +30,30 @@ const PUBLIC_PREFIXES = ["/api/auth", "/login", "/api/health", "/api/metrics", "
 const PUBLIC_FILES = new Set(["/icon.svg", "/apple-icon.png", "/manifest.webmanifest", "/robots.txt"]);
 
 /**
+ * CONNECTEUR MCP (docs/MCP.md) : un client MCP n'a pas de cookie de session. Le
+ * point /mcp vérifie lui-même son jeton Bearer (401 + WWW-Authenticate, que la
+ * découverte OAuth exige — une redirection vers /login la casserait) ; les
+ * métadonnées et les points OAuth machine-à-machine sont publics par nature.
+ * L'écran de consentement /oauth/authorize, lui, reste DERRIÈRE la session :
+ * c'est là que la personne se connecte avec son compte Cortex. Égalité stricte,
+ * jamais de préfixe (« /mcp-… » ou « /oauth/… » futurs restent gardés).
+ */
+const MCP_PUBLIC = new Set([
+  "/mcp",
+  "/.well-known/oauth-protected-resource",
+  "/.well-known/oauth-protected-resource/mcp",
+  "/.well-known/oauth-authorization-server",
+  "/oauth/register",
+  "/oauth/token",
+  "/oauth/revoke",
+]);
+
+/** Chemin servi SANS session (les handlers font leur propre contrôle, s'il y en a un). */
+export function publicPath(pathname: string): boolean {
+  return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p)) || PUBLIC_FILES.has(pathname) || MCP_PUBLIC.has(pathname);
+}
+
+/**
  * CHEMINS HÉRITÉS DU MONO-USER, absents en production : `/voir` lit des .html
  * hors de l'app et `/sites` (public/sites → symlinks vers le poste de dev)
  * exposait des fiches perso sans session. Ni l'un ni l'autre n'a de contenu
@@ -82,10 +106,25 @@ function proxyRateCap(): number | null {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : (guarded ? 240 : null);
 }
 
+/**
+ * Seau du rate-limit : l'IP, sauf sur /mcp avec un jeton Bearer, compté PAR
+ * JETON — claude.ai appelle depuis quelques adresses de sortie partagées par
+ * tous ses utilisateurs ; compter par IP freinerait tous les comptes ensemble.
+ * Seule la fin du jeton sert de clé (inutilisable seule) ; un jeton forgé reçoit
+ * de toute façon un 401 au point MCP, et le débit par compte y est limité.
+ */
+function rateKey(req: NextRequest): string {
+  if (req.nextUrl.pathname === "/mcp") {
+    const m = req.headers.get("authorization")?.match(/^Bearer\s+(\S{24,})$/i);
+    if (m) return `bearer:${m[1].slice(-24)}`;
+  }
+  return clientIp(req);
+}
+
 function rateLimited(req: NextRequest): boolean {
   const cap = proxyRateCap();
   if (cap === null) return false;
-  const ip = clientIp(req);
+  const ip = rateKey(req);
   const now = Date.now();
   const b = rlBuckets.get(ip);
   if (!b || now >= b.resetAt) {
@@ -105,7 +144,7 @@ function passThrough(req: NextRequest): NextResponse {
 
 async function guarded(req: NextRequest): Promise<NextResponse> {
   const { pathname } = req.nextUrl;
-  if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p)) || PUBLIC_FILES.has(pathname)) return passThrough(req);
+  if (publicPath(pathname)) return passThrough(req);
 
   // Import dynamique : la stack NextAuth n'est chargée QUE si l'auth est active.
   const { auth } = await import("@/lib/auth");
