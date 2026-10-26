@@ -1,0 +1,59 @@
+import { ReservationRefused, activeJob, costForJob, createJobExclusive, startWorker, type JobType } from "@/lib/jobs";
+import { preflightGeneration } from "@/lib/preflight";
+
+/**
+ * LANCEMENT D'UNE GÉNÉRATION PAR JOB, pour l'utilisateur et le cours COURANTS
+ * (contexte installé par l'appelant : route via lib/req, MCP via runWithUser /
+ * runWithCourse). Source unique de la séquence que suivaient les routes :
+ *
+ *   1. un job actif du même type est RÉUTILISÉ (un seul à la fois, rien n'est débité) ;
+ *   2. pré-checks (quota du jour, solde, disque, moteur, corpus, LaTeX) ;
+ *   3. réservation atomique + insertion exclusive (lib/jobs createJobExclusive) ;
+ *   4. démarrage du worker détaché.
+ *
+ * Un refus est une VALEUR (statut HTTP + message pour l'utilisateur), jamais une
+ * exception : la route le rend tel quel, le serveur MCP le traduit en erreur d'outil.
+ */
+export type StartedJob = { ok: true; jobId: number; existing: boolean };
+export type StartRefused = { ok: false; status: number; error: string; command?: string };
+
+export async function startGenerationJob(type: JobType, target?: string): Promise<StartedJob | StartRefused> {
+  const existing = await activeJob(type);
+  if (existing) return { ok: true, jobId: existing.id, existing: true };
+
+  const issue = await preflightGeneration(type);
+  if (issue) return { ok: false, status: issue.status, error: issue.error, command: issue.command };
+
+  let created: { id: number; existing: boolean };
+  try {
+    created = await createJobExclusive(type, target);
+  } catch (e) {
+    if (e instanceof ReservationRefused) return { ok: false, status: e.status, error: e.message };
+    throw e;
+  }
+  try {
+    await startWorker(created.id, undefined);
+  } catch (e) {
+    return { ok: false, status: 500, error: `Impossible de lancer le worker : ${(e as Error)?.message ?? e}` };
+  }
+  return { ok: true, jobId: created.id, existing: created.existing };
+}
+
+/** Nombre d'exercices demandé pour un examen : entier 1-12, sinon défaut du moteur (blueprint). */
+export function examCount(raw: unknown): number | undefined {
+  const n = Number(raw);
+  return n > 0 ? Math.min(12, Math.floor(n)) : undefined;
+}
+
+/**
+ * Cible d'un examen telle que le worker la lit (et que costForJob la tarife) :
+ * absente quand rien n'est demandé — les défauts du moteur, au tarif de base.
+ */
+export function examTarget(count?: number, focus?: string): string | undefined {
+  return count || focus ? JSON.stringify({ count, focus }) : undefined;
+}
+
+/** Coût en centièmes de crédit d'un examen pour cette cible (proportionnel au nombre d'exercices). */
+export function examCostCenti(target?: string): number {
+  return costForJob("exam", target);
+}
