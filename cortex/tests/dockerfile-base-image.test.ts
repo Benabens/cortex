@@ -47,8 +47,11 @@ test("la garde voit les détours : image dans un COPY --from, un montage, un fro
   }
 });
 
-test("CI : l'image est construite avec la base du Dockerfile, celle que l'hébergeur construira", () => {
+test("CI : l'image est construite avec la base du Dockerfile (même condensé), celle que l'hébergeur construira", () => {
   const ci = fs.readFileSync("../.github/workflows/ci.yml", "utf8");
-  assert.doesNotMatch(ci, /NODE_IMAGE/, "aucune base de rechange passée au build de la CI");
+  // Un second miroir est permis quand le premier limite, mais seulement avec le condensé lu dans le Dockerfile.
+  assert.doesNotMatch(ci, /sha256:[0-9a-f]{64}/, "aucun condensé recopié dans la CI");
+  for (const m of ci.matchAll(/NODE_IMAGE=([^\s"]+)/g)) assert.equal(m[1], "$IMAGE", `base passée au build : ${m[1]}`);
+  assert.match(ci, /\*"@\$DIGEST"\)/, "le build vérifie que l'image porte le condensé du Dockerfile");
   assert.doesNotMatch(ci, /pull-official\.sh node/, "aucune image renommée sur laquelle le Dockerfile ne s'appuie plus");
 });
