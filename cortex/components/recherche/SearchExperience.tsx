@@ -7,9 +7,12 @@ import { SUGGEST, metaFor, hitHref, snippetParts, type SearchResp, type Hit } fr
 import { toneVar } from "@/lib/ux/labels";
 
 import { Button } from "@/components/ui/Button";
+import { Segmented } from "@/components/ui/Segmented";
 import { cn } from "@/lib/ux/cn";
 
 const MIN_CHARS = 2;
+/** Valeur de l'option « Tous » (aucun type de source ne peut s'appeler ainsi). */
+const ALL_TYPES = "__tous__";
 
 /** Segment « … » du snippet FTS → <mark>. */
 function Snippet({ text }: { text: string }) {
@@ -170,28 +173,19 @@ export function SearchExperience() {
       {/* Facettes (groupes réels renvoyés par le back) + compteur */}
       {active && data && data.groups.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div role="group" aria-label="Filtrer par type de source" className="flex flex-wrap items-center gap-2">
-            <TypeChip
-              label="Tous"
-              count={data.total}
-              active={activeType === null}
-              onClick={() => setActiveType(null)}
-            />
-            {data.groups.map((g) => {
-              const meta = metaFor(g.sourceType);
-              return (
-                <TypeChip
-                  key={g.sourceType}
-                  label={g.label}
-                  count={g.hits.length}
-                  tone={toneVar[meta.tone]}
-                  Icon={meta.Icon}
-                  active={activeType === g.sourceType}
-                  onClick={() => setActiveType(activeType === g.sourceType ? null : g.sourceType)}
-                />
-              );
-            })}
-          </div>
+          <Segmented
+            variant="pills"
+            label="Filtrer par type de source"
+            options={[
+              { value: ALL_TYPES, label: "Tous", count: data.total },
+              ...data.groups.map((g) => {
+                const meta = metaFor(g.sourceType);
+                return { value: g.sourceType, label: g.label, count: g.hits.length, tone: toneVar[meta.tone], Icon: meta.Icon };
+              }),
+            ]}
+            value={activeType ?? ALL_TYPES}
+            onChange={(v) => setActiveType(v === ALL_TYPES ? null : v)}
+          />
           <span className="text-[0.8rem] text-ink-3" aria-live="polite">
             <span className="font-data font-semibold text-ink-1">{shownCount}</span> résultat
             {shownCount > 1 ? "s" : ""} pour «&nbsp;{debounced}&nbsp;»
@@ -301,39 +295,5 @@ export function SearchExperience() {
         </div>
       )}
     </div>
-  );
-}
-
-function TypeChip({
-  label,
-  count,
-  active,
-  onClick,
-  tone,
-  Icon,
-}: {
-  label: string;
-  count: number;
-  active: boolean;
-  onClick: () => void;
-  tone?: string;
-  Icon?: React.ComponentType<{ className?: string; strokeWidth?: number }>;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "inline-flex h-9 items-center gap-2 rounded-full border px-3 text-[0.82rem] font-medium transition-colors",
-        active
-          ? "border-[color-mix(in_oklch,var(--color-violet)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_14%,transparent)] text-ink-1"
-          : "border-line bg-surface-1/60 text-ink-2 hover:bg-surface-2 hover:text-ink-1"
-      )}
-    >
-      {Icon && <Icon className="size-3.5" strokeWidth={2.25} />}
-      <span style={active && tone ? { color: tone } : undefined}>{label}</span>
-      <span className="font-data text-[0.72rem] tabular text-ink-4">{count}</span>
-    </button>
   );
 }

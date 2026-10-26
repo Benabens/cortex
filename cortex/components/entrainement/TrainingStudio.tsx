@@ -159,6 +159,19 @@ export function TrainingStudio() {
   }
 
   const resultLink = jobDone ? examLinkFromResultPath(job?.resultPath ?? null, courseId) : null;
+  // Demande partie, premier retour pas encore arrivé (exo direct, ou job pas encore créé).
+  const waiting = drilling || (jobRunning && !job);
+  // Le panneau de résultat n'existe que s'il a quelque chose à montrer : pas de grand cadre vide
+  // « ton exo apparaîtra ici » à côté du formulaire.
+  const hasResult = !!drill || busy || jobDone || jobFailed;
+
+  // Sur mobile le résultat arrive sous le formulaire, hors de l'écran : on l'y amène.
+  const resultRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!hasResult) return;
+    const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    resultRef.current?.scrollIntoView({ block: "nearest", behavior: calm ? "auto" : "smooth" });
+  }, [hasResult]);
   const dueChips = list.data?.due ?? [];
   const weakChips = list.data?.weaknesses ?? [];
 
@@ -166,20 +179,14 @@ export function TrainingStudio() {
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.15fr_1fr]">
       {/* ── Zone unique d'entrée ── */}
       <Panel className="p-5 sm:p-6">
-        <div className="flex items-center gap-2">
-          <Target className="size-4 text-violet-hi" strokeWidth={2.5} />
-          <h2 className="text-[1.05rem] font-semibold text-ink-1">Génère un exo à travailler</h2>
-        </div>
-        <p className="mt-1 text-[0.86rem] text-ink-2">
-          Un concept, une consigne, ou une image : Cortex produit un exo au format du final.
-        </p>
+        <h2 className="text-[1.05rem] font-semibold text-ink-1">Génère un exo à travailler</h2>
 
         {/* pré-remplissage depuis Faiblesses : bandeau éditable + × pour vider */}
         {prefillNote && input === prefillNote && (
           <div className="mt-4 flex items-center justify-between gap-2 rounded-lg border border-[color-mix(in_oklch,var(--color-violet)_35%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_9%,transparent)] px-3 py-2 text-[0.78rem] text-ink-2">
             <span className="inline-flex min-w-0 items-center gap-1.5">
               <Target className="size-3.5 shrink-0 text-violet-hi" strokeWidth={2.25} />
-              <span className="truncate">Pré-rempli depuis une faiblesse : modifie-le ou lance tel quel.</span>
+              <span className="truncate">Pré-rempli : modifie-le ou lance tel quel.</span>
             </span>
             <button
               type="button"
@@ -235,8 +242,9 @@ export function TrainingStudio() {
         )}
       </Panel>
 
-      {/* ── Résultat unique ── */}
-      <Panel className="flex flex-col p-5 sm:p-6">
+      {/* ── Résultat unique : absent tant qu'aucun exo n'a été demandé ── */}
+      {hasResult && (
+      <Panel ref={resultRef} className="flex scroll-mt-20 flex-col p-5 sm:p-6">
         {drill ? (
           <>
             <div className="flex items-center justify-between">
@@ -276,6 +284,13 @@ export function TrainingStudio() {
             </div>
             <FeedbackBar onSend={sendFeedback} sent={fbSent} busy={fbBusy} />
           </>
+        ) : waiting ? (
+          <div className="flex flex-1 flex-col justify-center gap-3" aria-live="polite">
+            <p className="text-[0.9rem] font-medium text-ink-1">Génération de l’exercice…</p>
+            <div className="skeleton h-4 w-11/12" />
+            <div className="skeleton h-4 w-4/5" />
+            <div className="skeleton h-4 w-2/3" />
+          </div>
         ) : jobRunning && job ? (
           <div className="flex flex-1 flex-col justify-center gap-3" aria-live="polite">
             <p className="text-[0.9rem] font-medium text-ink-1">{job.status === "queued" ? "En file d’attente…" : "Génération de l’exercice…"}</p>
@@ -307,19 +322,9 @@ export function TrainingStudio() {
             <p className="text-[0.9rem] font-medium text-ink-1">La génération a échoué</p>
             <p className="max-w-xs text-[0.82rem] text-ink-3">{asText(job?.error) ?? "Réessaie. Si ça persiste, vérifie le moteur LLM et le moteur LaTeX."}</p>
           </div>
-        ) : (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 py-10 text-center">
-            <span className="grid size-11 place-items-center rounded-lg border border-line bg-surface-2/60 text-ink-3">
-              <Target className="size-5" strokeWidth={2} />
-            </span>
-            <p className="text-[0.92rem] font-medium text-ink-1">Ton prochain exo apparaîtra ici</p>
-            <p className="max-w-xs text-[0.82rem] leading-relaxed text-ink-3">
-              Donne un concept, une consigne ou une image : Cortex génère un exo au format du vrai final,
-              avec des indices progressifs à révéler si tu bloques.
-            </p>
-          </div>
-        )}
+        ) : null}
       </Panel>
+      )}
     </div>
   );
 }
