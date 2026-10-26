@@ -1,7 +1,7 @@
 import * as z from "zod/v4";
 import type { CourseConfig } from "@/lib/courses";
 import { courseLabel } from "./courses";
-import type { QuoteView } from "./tool";
+import type { DeclinedView, QuoteView } from "./tool";
 
 /** Pièces de schéma partagées par les outils (entrées et sorties). */
 
@@ -26,6 +26,21 @@ export const quoteSchema = z.object({
   expires_in_seconds: z.number(),
   how_to_confirm: z.string(),
 });
+
+export const declinedSchema = z.object({
+  action: z.enum(["decline", "cancel"]).describe("decline = the user refused; cancel = the confirmation was dismissed or could not be shown by this client."),
+  cost_credits: z.number().nullable(),
+  summary: z.string(),
+});
+
+/** Voix du serveur : uniquement le coût et la nature du refus (l'objet de l'action reste dans les données). */
+export function declinedSummary(d: DeclinedView): string {
+  const cost = d.cost_credits === null ? "" : ` (coût annoncé : ${String(d.cost_credits).replace(".", ",")} crédit(s))`;
+  return d.action === "decline"
+    ? `La personne a refusé la dépense${cost} : rien n'a été débité, rien n'a été généré.`
+    : `La confirmation${cost} n'a pas abouti : fermée sans réponse, ou impossible à afficher dans ce client (session non interactive). ` +
+      "Rien n'a été débité. Une action payante doit être confirmée par la personne dans une session interactive.";
+}
 
 /** Statut commun d'un outil de génération. */
 export const generationStatus = z.enum(["confirmation_required", "declined", "done", "started", "already_running"]);

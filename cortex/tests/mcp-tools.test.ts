@@ -146,7 +146,7 @@ async function route(req: Request): Promise<Response> {
 
 type Mode = "legacy" | "modern";
 
-async function connect(token: string, opts: { mode?: Mode; elicit?: "accept" | "decline" | null } = {}) {
+async function connect(token: string, opts: { mode?: Mode; elicit?: "accept" | "decline" | "cancel" | null } = {}) {
   const mode = opts.mode ?? "legacy";
   const client = new Client(
     { name: "cortex-test", version: "1.0.0" },
@@ -159,7 +159,7 @@ async function connect(token: string, opts: { mode?: Mode; elicit?: "accept" | "
   if (opts.elicit) {
     client.setRequestHandler("elicitation/create", async (request) => {
       asked.push(String((request.params as { message?: string }).message ?? ""));
-      return opts.elicit === "accept" ? { action: "accept", content: { confirm: true } } : { action: "decline" };
+      return opts.elicit === "accept" ? { action: "accept", content: { confirm: true } } : { action: opts.elicit as "decline" | "cancel" };
     });
   }
   const transport = new StreamableHTTPClientTransport(new URL(MCP_URL), {
@@ -446,9 +446,28 @@ test("client 2026-07-28 : refus dans le client → rien n'est débité, rien n'e
   const before = await balance(ALICE);
   const calls = llmCalls;
   const r = await call(client, "generate_drill", { concept: "rang" });
-  assert.equal((r.structuredContent as { status: string }).status, "declined");
+  const sc = r.structuredContent as { status: string; declined: { action: string; cost_credits: number }; confirmation: unknown };
+  assert.equal(sc.status, "declined");
+  assert.equal(sc.declined.action, "decline");
+  assert.equal(sc.declined.cost_credits, 0.1, "le refus rappelle le coût annoncé");
+  assert.equal(sc.confirmation, null, "aucun jeton après un refus");
+  assert.match(text(r), /refusé/);
   assert.equal(await balance(ALICE), before);
   assert.equal(llmCalls, calls);
+  await client.close();
+});
+
+test("client 2026-07-28 : confirmation fermée ou impossible à afficher (session non interactive) → rien, et aucun jeton de repli", async () => {
+  const { access } = await tokenFor(ALICE);
+  const { client } = await connect(access, { mode: "modern", elicit: "cancel" });
+  const before = await balance(ALICE);
+  const r = await call(client, "generate_drill", { concept: "rang" });
+  const sc = r.structuredContent as { status: string; declined: { action: string }; confirmation: unknown };
+  assert.equal(sc.status, "declined");
+  assert.equal(sc.declined.action, "cancel");
+  assert.equal(sc.confirmation, null, "une confirmation fermée ne se transforme pas en devis à jeton");
+  assert.match(text(r), /session interactive/);
+  assert.equal(await balance(ALICE), before);
   await client.close();
 });
 

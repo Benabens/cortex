@@ -5,7 +5,7 @@ import { examCostCenti, examCount, examTarget, startGenerationJob } from "@/lib/
 import { activeJob } from "@/lib/jobs";
 import { clip } from "../content";
 import { courseLabel } from "../courses";
-import { confirmationTokenArg, courseArg, courseRef, courseRefOf, generationStatus, quoteSchema, quoteSummary } from "../schemas";
+import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, generationStatus, quoteSchema, quoteSummary } from "../schemas";
 import { ToolError, codeForStatus, defineTool } from "../tool";
 
 const output = z.object({
@@ -14,6 +14,7 @@ const output = z.object({
   focus: z.string().nullable().describe("The emphasis sent to the generator (chapter and/or free focus)."),
   exercise_count: z.number().nullable().describe("null = the number of exercises of the course's real exams."),
   confirmation: quoteSchema.nullable(),
+  declined: declinedSchema.nullable().describe("When status is declined: why, and the cost that was announced."),
   job: z.object({
     job_id: z.number(),
     estimated_minutes: z.string(),
@@ -63,7 +64,7 @@ export default defineTool({
         throw new ToolError("invalid_input", `Le sujet demandé dépasse ${FIELD_LIMITS.focus} caractères : raccourcis « focus ».`);
       }
       const count = examCount(args.exercise_count) ?? null;
-      const base = { course: courseRefOf(c), focus, exercise_count: count, confirmation: null, job: null };
+      const base = { course: courseRefOf(c), focus, exercise_count: count, confirmation: null, declined: null, job: null };
       const track = (jobId: number) => ({ job_id: jobId, estimated_minutes: "10-20", track_with: `get_job_status with job_id=${jobId}` });
 
       // Un examen déjà en cours est réutilisé, comme dans l'app : rien à confirmer, rien de débité.
@@ -82,7 +83,7 @@ export default defineTool({
       );
       if (decision.kind === "input_required") return decision.result;
       if (decision.kind === "quote") return { ...base, status: "confirmation_required" as const, confirmation: decision.quote };
-      if (decision.kind === "declined") return { ...base, status: "declined" as const };
+      if (decision.kind === "declined") return { ...base, status: "declined" as const, declined: decision.declined };
 
       const started = await startGenerationJob("exam", target);
       // Les refus des pré-checks et de la réservation ne débitent rien ; un worker qui ne démarre pas (500), si : le job reste en file.
@@ -92,7 +93,7 @@ export default defineTool({
   },
   summarize: (o) => {
     if (o.status === "confirmation_required" && o.confirmation) return quoteSummary(o.confirmation);
-    if (o.status === "declined") return "Génération refusée par la personne : rien n'a été débité.";
+    if (o.status === "declined" && o.declined) return declinedSummary(o.declined);
     if (o.job) return `${o.status === "started" ? "Examen blanc lancé" : "Un examen blanc est déjà en cours"} (job ${o.job.job_id}, 10-20 min) : suis-le avec get_job_status.`;
     return "Examen blanc.";
   },

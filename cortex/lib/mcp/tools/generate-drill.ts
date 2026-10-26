@@ -7,7 +7,7 @@ import { dueConcepts } from "@/lib/schedule";
 import { runAssist } from "../assist";
 import { clip, htmlToText } from "../content";
 import { courseLabel } from "../courses";
-import { confirmationTokenArg, courseArg, courseRef, courseRefOf, generationStatus, quoteSchema, quoteSummary } from "../schemas";
+import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, generationStatus, quoteSchema, quoteSummary } from "../schemas";
 import { ToolError, defineTool } from "../tool";
 
 const output = z.object({
@@ -15,6 +15,7 @@ const output = z.object({
   course: courseRef,
   concept: z.string(),
   confirmation: quoteSchema.nullable().describe("When status is confirmation_required: the exact cost and the token to confirm with."),
+  declined: declinedSchema.nullable().describe("When status is declined: why, and the cost that was announced."),
   drill: z.object({
     statement: z.string(),
     hints: z.array(z.string()).describe("Five hints, from vague to almost the solution: reveal them one at a time."),
@@ -52,7 +53,7 @@ export default defineTool({
     return ctx.inCourse(args.course, async (c) => {
       const concept = args.concept?.trim() || (await defaultConcept());
       if (!concept) throw new ToolError("invalid_input", "Aucun point faible ni concept à revoir sur ce cours : précise le concept à travailler (concept).");
-      const base = { course: courseRefOf(c), concept: clip(concept, FIELD_LIMITS.concept), confirmation: null, drill: null };
+      const base = { course: courseRefOf(c), concept: clip(concept, FIELD_LIMITS.concept), confirmation: null, declined: null, drill: null };
       const decision = await ctx.confirm(
         { bucket: "assist", costCenti: creditCost("assist"), summary: `Générer une question d'entraînement (5 indices + corrigé) sur « ${clip(concept, 80)} » — ${courseLabel(c)}.` },
         { course: c.id, concept },
@@ -60,7 +61,7 @@ export default defineTool({
       );
       if (decision.kind === "input_required") return decision.result;
       if (decision.kind === "quote") return { ...base, status: "confirmation_required" as const, confirmation: decision.quote };
-      if (decision.kind === "declined") return { ...base, status: "declined" as const };
+      if (decision.kind === "declined") return { ...base, status: "declined" as const, declined: decision.declined };
       await ctx.progress("Rédaction de la question…");
       const d = await runAssist("drill", () => generateDrill(concept));
       return {
@@ -76,7 +77,7 @@ export default defineTool({
   },
   summarize: (o) => {
     if (o.status === "confirmation_required" && o.confirmation) return quoteSummary(o.confirmation);
-    if (o.status === "declined") return "Génération refusée par la personne : rien n'a été débité.";
+    if (o.status === "declined" && o.declined) return declinedSummary(o.declined);
     return "Question d'entraînement prête : propose les indices un par un avant de montrer le corrigé.";
   },
 });

@@ -95,14 +95,18 @@ export async function confirmCost(
   const envelope = p.mcpReq.envelope as Record<string, unknown> | undefined;
   const clientCaps = envelope?.[CLIENT_CAPABILITIES_META_KEY] as { elicitation?: unknown } | undefined;
   if (p.era === "modern" && clientCaps?.elicitation) {
+    const declined = (action: "decline" | "cancel"): Confirmation => ({
+      kind: "declined",
+      declined: { action, cost_credits: billing ? fromCenti(costCenti) : null, summary: cost.summary },
+    });
     const answer = inputResponse(p.mcpReq.inputResponses, "confirm");
-    if (answer.kind === "elicit" && answer.action !== "accept") return { kind: "declined" };
+    if (answer.kind === "elicit" && answer.action !== "accept") return declined(answer.action === "cancel" ? "cancel" : "decline");
     const accepted = acceptedContent(p.mcpReq.inputResponses, "confirm", confirmSchema);
     const state = p.mcpReq.requestState<StatePayload>();
     const h = argsHash(args);
     const bound = state && state.u === binding.userId && state.g === binding.grantId && state.t === p.tool && state.h === h && state.c === costCenti;
     if (accepted?.confirm === true && bound) return { kind: "confirmed" };
-    if (accepted && accepted.confirm !== true) return { kind: "declined" };
+    if (accepted && accepted.confirm !== true) return declined("decline");
     return {
       kind: "input_required",
       result: inputRequired({
