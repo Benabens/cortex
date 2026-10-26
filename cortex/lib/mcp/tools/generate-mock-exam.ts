@@ -41,7 +41,8 @@ export default defineTool({
   kind: "generate",
   input: z.object({
     course: courseArg,
-    chapter: z.string().min(1).max(160).optional().describe("Chapter of the course plan to emphasise: its number (\"3\") or title. See get_study_plan for the chapters."),
+    chapter: z.union([z.number().int().positive(), z.string().min(1).max(160)]).optional()
+      .describe("Chapter of the course plan to emphasise: its number (3) or title. See get_study_plan for the chapters."),
     focus: z.string().min(1).max(FIELD_LIMITS.focus).optional().describe("Free emphasis, e.g. \"eigenvalues and diagonalisation\"."),
     exercise_count: z.number().int().min(1).max(12).optional().describe("Number of exercises (default: as in the real exams)."),
     confirmation_token: confirmationTokenArg,
@@ -50,9 +51,10 @@ export default defineTool({
   async run(args, ctx) {
     return ctx.inCourse(args.course, async (c) => {
       let chapterFocus: string | null = null;
-      if (args.chapter) {
-        const ch = findChapter(await getPlanChapters().catch(() => []), args.chapter);
-        if (!ch) throw new ToolError("not_found", `Chapitre « ${clip(args.chapter, 60)} » introuvable dans le plan de ce cours : get_study_plan liste les chapitres disponibles.`);
+      if (args.chapter !== undefined) {
+        const ref = String(args.chapter);
+        const ch = findChapter(await getPlanChapters().catch(() => []), ref);
+        if (!ch) throw new ToolError("not_found", `Chapitre « ${clip(ref, 60)} » introuvable dans le plan de ce cours : get_study_plan liste les chapitres disponibles.`);
         chapterFocus = clip(`Chapitre ${ch.lectureNo ?? ch.seq} : ${ch.title}${ch.subtitle ? ` (${ch.subtitle})` : ""}`, 220);
       }
       const focus = [chapterFocus, args.focus?.trim()].filter(Boolean).join(" — ") || null;
