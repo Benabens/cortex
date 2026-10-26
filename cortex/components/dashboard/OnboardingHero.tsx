@@ -31,9 +31,10 @@ export function OnboardingHero({ courseName }: { courseName: string }) {
       aria-labelledby="onboarding-title"
     >
       <div className="relative p-5 sm:p-7">
-        <h2 id="onboarding-title" className="max-w-xl text-[1.75rem] font-semibold leading-[1.1] sm:text-[2.15rem]">
+        {/* Titre de la page dans cet état (l'Accueil n'a pas d'autre h1). */}
+        <h1 id="onboarding-title" className="max-w-xl text-[1.75rem] font-semibold leading-[1.1] sm:text-[2.15rem]">
           Prépare {courseName} pour savoir quoi réviser.
-        </h2>
+        </h1>
         <p className="mt-3 max-w-xl text-[0.95rem] leading-relaxed text-ink-2">
           Cortex n’a pas encore analysé ce cours. Donne-lui les annales : il en déduit
           les types d’exercices, leur poids à l’examen, et te dit toujours quoi travailler ensuite.

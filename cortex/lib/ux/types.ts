@@ -30,9 +30,14 @@ export type DashNext = {
   id: number;
   label: MaybeText;
   category: MaybeText;
+  /** Part des questions des finals qui portent sur la notion, en %. */
   examWeight: number;
-  status: string;
+  status: string; // "never" | "due" | "ok"
   mastery: number | null; // 0–10
+  /** « Tombé N fois » aux finals. */
+  count: number;
+  /** Chapitre du plan du prof (null = non rattachée, ou plan non dérivé pour ce cours). */
+  chapter: { lectureNo: number | null; title: MaybeText } | null;
 };
 
 export type DashExam = {
@@ -61,6 +66,8 @@ export type Dash = {
   analyzed: boolean;
   stats: DashStats;
   next: DashNext | null;
+  /** Les notions suivantes par priorité (trois au plus), sans celle de `next`. */
+  upNext: DashNext[];
   cover: { id: number; label: MaybeText; examWeight: number } | null;
   schedule: { total: number; due: number };
   exams: DashExam[];

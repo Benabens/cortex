@@ -308,6 +308,153 @@ h4 {
   outline-offset: 3px;
 }
 
+/* ============================================================================
+   Interrupteurs — components/ui/Segmented.tsx et components/ui/Toggle.tsx
+   ========================================================================== */
+
+/* Les deux ressorts des interrupteurs, sous la forme `<durée> <courbe>`. Les courbes `linear()`
+   sont la sortie de lib/ux/spring.ts (SPRING_LEAD, SPRING_TRAIL) : ne pas les retoucher à la
+   main, tests/spring.test.ts compare les deux. Les cubiques servent de repli aux navigateurs
+   sans `linear()` (Safari < 17.2) : même durée, rebond approché. */
+:root {
+  --spring-lead: 189ms cubic-bezier(0.22, 1, 0.36, 1);
+  --spring-trail: 281ms cubic-bezier(0.34, 1.32, 0.64, 1);
+  --press: 110ms var(--ease-out-quint);
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --spring-lead: 189ms linear(0, 0.029, 0.099, 0.189, 0.286, 0.382, 0.472, 0.553, 0.626, 0.688, 0.742, 0.788, 0.826, 0.858, 0.885, 0.907, 0.925, 0.939, 0.951, 0.961, 0.969, 0.975, 0.98, 0.984, 0.987, 0.99, 0.992, 0.994, 1);
+    --spring-trail: 281ms linear(0, 0.03, 0.107, 0.21, 0.326, 0.444, 0.556, 0.659, 0.748, 0.824, 0.886, 0.935, 0.972, 0.999, 1.018, 1.03, 1.036, 1.038, 1.038, 1.035, 1.031, 1.027, 1.022, 1.018, 1.014, 1.01, 1.007, 1.005, 1);
+  }
+}
+
+/* — Contrôle segmenté. L'indicateur (.seg-thumb) vit entre le fond des options et leurs
+     libellés : les boutons ne créent pas de contexte d'empilement, seul le libellé remonte. — */
+.seg {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+}
+.seg-opt {
+  display: inline-flex;
+  align-items: center;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.seg-label {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  transition: scale var(--spring-trail);
+}
+.seg-opt[data-pressed] .seg-label {
+  scale: 0.96;
+  transition: scale var(--press);
+}
+/* Deux bords, deux vitesses : celui qui mène arrive vite, celui qui suit est tenu par le
+   ressort. L'écart entre les deux étire l'indicateur ; le ressort le ramène avec un rebond. */
+.seg-thumb {
+  position: absolute;
+  z-index: 1;
+  left: calc(var(--seg-l, 0px) - var(--seg-reach-l, 0px));
+  right: calc(var(--seg-r, 0px) - var(--seg-reach-r, 0px));
+  top: var(--seg-t, 0px);
+  bottom: var(--seg-b, 0px);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    left var(--spring-trail),
+    right var(--spring-lead),
+    top var(--spring-lead),
+    bottom var(--spring-lead),
+    scale var(--spring-trail);
+}
+.seg[data-dir="left"] .seg-thumb {
+  transition:
+    left var(--spring-lead),
+    right var(--spring-trail),
+    top var(--spring-lead),
+    bottom var(--spring-lead),
+    scale var(--spring-trail);
+}
+.seg[data-placed] .seg-thumb {
+  opacity: 1;
+}
+/* À l'appui, tenu jusqu'au relâché : l'indicateur se tasse sous le doigt, ou se tend de
+   quelques pixels vers l'option visée. */
+.seg[data-press] .seg-thumb {
+  transition: left var(--press), right var(--press), scale var(--press);
+}
+.seg[data-press="active"] .seg-thumb {
+  scale: 0.97;
+}
+.seg[data-press="left"] .seg-thumb {
+  --seg-reach-l: 5px;
+}
+.seg[data-press="right"] .seg-thumb {
+  --seg-reach-r: 5px;
+}
+/* Variante « texte seul » : l'indicateur est un trait sous le libellé, en retrait du
+   remplissage du bouton (6 px) pour ne souligner que le mot. */
+.seg-thumb-line {
+  top: auto;
+  bottom: calc(var(--seg-b, 0px) + 10px);
+  height: 2px;
+  margin-inline: 6px;
+  border-radius: 1px;
+  background: var(--color-violet);
+}
+/* Sans JavaScript (ou avant la première mesure), l'option choisie porte elle-même son fond. */
+.seg:not([data-placed]) .seg-opt[aria-checked="true"] {
+  background: var(--color-surface-2);
+}
+/* Au doigt, la zone de frappe monte à 44 px sans changer la taille visible. */
+@media (pointer: coarse) {
+  .seg-opt {
+    position: relative;
+  }
+  .seg-opt::after {
+    content: "";
+    position: absolute;
+    inset: -6px 0;
+  }
+  .switch::after {
+    content: "";
+    position: absolute;
+    inset: -10px 0;
+  }
+}
+
+/* — Interrupteur binaire : le même mouvement, sur 20 px. — */
+.switch {
+  position: relative;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  right: 22px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  transition: left var(--spring-lead), right var(--spring-trail), scale var(--spring-trail);
+}
+.switch[aria-checked="true"] .switch-knob {
+  left: 22px;
+  right: 2px;
+  transition: left var(--spring-trail), right var(--spring-lead), scale var(--spring-trail);
+}
+.switch[data-pressed] .switch-knob {
+  scale: 0.88;
+  transition: scale var(--press);
+}
+
 /* — Reduced motion: render complete, no drift / count-up / shimmer chase — */
 @media (prefers-reduced-motion: reduce) {
   *,

@@ -3,12 +3,18 @@
 import { useState } from "react";
 import { ListTree, Flame } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
+import { Segmented, type SegmentedOption } from "@/components/ui/Segmented";
 import { ChapterAccordion } from "./ChapterAccordion";
 import { NotionRow } from "./NotionRow";
 import { buildPlan, byPriority, sectionBlocks, typesMeta, type UiType, type ProgramChapter } from "@/lib/ux/program";
 import { cn } from "@/lib/ux/cn";
 
 type Mode = "section" | "priority";
+
+const MODES: SegmentedOption<Mode>[] = [
+  { value: "section", label: "Par section", Icon: ListTree },
+  { value: "priority", label: "Par priorité", Icon: Flame },
+];
 
 /**
  * Explorateur des notions, RUN v2. « Par section » = le PLAN DE COURS DU PROF en accordéon
@@ -39,18 +45,7 @@ export function ProgramExplorer({
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div
-          role="group"
-          aria-label="Organiser les notions"
-          className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface-1/60 p-1"
-        >
-          <ToggleBtn active={mode === "section"} onClick={() => setMode("section")} Icon={ListTree}>
-            Par section
-          </ToggleBtn>
-          <ToggleBtn active={mode === "priority"} onClick={() => setMode("priority")} Icon={Flame}>
-            Par priorité
-          </ToggleBtn>
-        </div>
+        <Segmented label="Organiser les notions" options={MODES} value={mode} onChange={setMode} />
         <p className="text-[0.76rem] text-ink-4">
           {mode === "section" && hasPlan ? (
             <>
@@ -118,32 +113,5 @@ function FallbackSections({ types }: { types: UiType[] }) {
         </Panel>
       ))}
     </div>
-  );
-}
-
-function ToggleBtn({
-  active,
-  onClick,
-  Icon,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  Icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "inline-flex h-10 items-center gap-2 rounded-md px-3 text-[0.82rem] font-medium transition-colors",
-        active ? "bg-surface-2 text-ink-1 ring-1 ring-line-strong" : "text-ink-3 hover:text-ink-1"
-      )}
-    >
-      <Icon className="size-4" strokeWidth={2} />
-      {children}
-    </button>
   );
 }
