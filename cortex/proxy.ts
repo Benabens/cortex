@@ -106,25 +106,10 @@ function proxyRateCap(): number | null {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : (guarded ? 240 : null);
 }
 
-/**
- * Seau du rate-limit : l'IP, sauf sur /mcp avec un jeton Bearer, compté PAR
- * JETON — claude.ai appelle depuis quelques adresses de sortie partagées par
- * tous ses utilisateurs ; compter par IP freinerait tous les comptes ensemble.
- * Seule la fin du jeton sert de clé (inutilisable seule) ; un jeton forgé reçoit
- * de toute façon un 401 au point MCP, et le débit par compte y est limité.
- */
-function rateKey(req: NextRequest): string {
-  if (req.nextUrl.pathname === "/mcp") {
-    const m = req.headers.get("authorization")?.match(/^Bearer\s+(\S{24,})$/i);
-    if (m) return `bearer:${m[1].slice(-24)}`;
-  }
-  return clientIp(req);
-}
-
 function rateLimited(req: NextRequest): boolean {
   const cap = proxyRateCap();
   if (cap === null) return false;
-  const ip = rateKey(req);
+  const ip = clientIp(req);
   const now = Date.now();
   const b = rlBuckets.get(ip);
   if (!b || now >= b.resetAt) {
