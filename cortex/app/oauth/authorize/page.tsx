@@ -71,18 +71,26 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
 
       <dl className="mt-6 rounded-lg px-4 py-3 text-[0.85rem] leading-relaxed" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <div className="flex justify-between gap-4">
-          <dt style={{ color: C.muted }}>{view.verifiedDomain ? "Domaine vérifié" : "Retour vers"}</dt>
-          <dd className="font-medium">{view.clientHost}</dd>
+          <dt style={{ color: C.muted }}>{view.verifiedDomain ? "Domaine vérifié" : "Nom déclaré par l’application"}</dt>
+          <dd className="text-right font-medium">{view.verifiedDomain ? view.clientHost : name}</dd>
         </div>
-        {!view.verifiedDomain && (
-          <p className="mt-1 text-[0.78rem]" style={{ color: C.faint }}>
-            Le nom « {name} » est déclaré par l’application elle-même. N’accepte que si tu viens de l’ajouter.
+        <div className="mt-2 flex justify-between gap-4 border-t pt-2" style={{ borderColor: C.line }}>
+          <dt style={{ color: C.muted }}>Retour vers</dt>
+          <dd className="text-right font-medium">{view.localRedirect ? `cet ordinateur (${view.redirectHost})` : view.redirectHost}</dd>
+        </div>
+        {view.localRedirect ? (
+          <p className="mt-2 text-[0.78rem]" style={{ color: "#f0c987" }}>
+            La connexion revient vers un programme de cet ordinateur. N’accepte que si tu viens de la lancer toi-même (par exemple depuis Claude Code).
+          </p>
+        ) : !view.verifiedDomain && (
+          <p className="mt-2 text-[0.78rem]" style={{ color: C.faint }}>
+            Le nom « {name} » n’est pas vérifié. N’accepte que si tu viens d’ajouter cette application.
           </p>
         )}
         {email && (
           <div className="mt-2 flex justify-between gap-4 border-t pt-2" style={{ borderColor: C.line }}>
             <dt style={{ color: C.muted }}>Compte</dt>
-            <dd className="font-medium">{email}</dd>
+            <dd className="text-right font-medium">{email}</dd>
           </div>
         )}
       </dl>
