@@ -150,8 +150,58 @@ jobs:
       # Aucune image de base préparée ici : le Dockerfile nomme la sienne (miroir
       # et condensé), et la CI doit construire exactement ce que l'hébergeur
       # construira. Un miroir qui ne répond plus se voit donc ici, avant le merge.
+      # Le miroir public d'AWS (base du Dockerfile) limite les tirages anonymes
+      # des runners GitHub : 429 les 17 et 26/10, parfois pendant plus d'un
+      # quart d'heure, alors que l'hébergeur, lui, tire sans souci. La base est
+      # épinglée par son CONDENSÉ : la même image, bit pour bit, est aussi
+      # servie par le miroir Docker Hub de Google (mirror.gcr.io). La CI essaie
+      # le miroir AWS, puis ce second miroir avec le MÊME condensé (lu dans le
+      # Dockerfile, jamais recopié ici), et garde l'image en cache.
+      - name: Image de base — condensé du Dockerfile
+        id: base
+        run: |
+          ref=$(grep -m1 -oE 'public\.ecr\.aws/[^[:space:]]+' Dockerfile)
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "digest=${ref##*@}" >> "$GITHUB_OUTPUT"
+
+      - name: Image de base — cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/base-image.tar
+          key: base-image-${{ steps.base.outputs.digest }}
+
+      - name: Image de base — chargement ou tirage
+        id: pull
+        env:
+          REF: ${{ steps.base.outputs.ref }}
+          DIGEST: ${{ steps.base.outputs.digest }}
+        run: |
+          alt="mirror.gcr.io/library/node@$DIGEST"
+          if [ -f /tmp/base-image.tar ] && docker load -i /tmp/base-image.tar; then
+            src=$(docker image ls --digests --format '{{.Repository}}@{{.Digest}}' | grep -m1 "@$DIGEST" || true)
+            [ -n "$src" ] && { echo "image=$src" >> "$GITHUB_OUTPUT"; exit 0; }
+          fi
+          for i in 1 2 3; do
+            for img in "$REF" "$alt"; do
+              if docker pull "$img"; then
+                docker save "$img" -o /tmp/base-image.tar
+                echo "image=$img" >> "$GITHUB_OUTPUT"; exit 0
+              fi
+            done
+            echo "::warning::les deux miroirs refusent (essai $i), nouvel essai dans $((i * 30)) s"
+            sleep $((i * 30))
+          done
+          echo "::error::image de base introuvable sur les deux miroirs"
+          exit 1
+
+      # Même condensé que le Dockerfile, seul le miroir peut différer.
       - name: Build de l'image (contexte = racine du repo)
-        run: docker build -t cortex-app .
+        env:
+          IMAGE: ${{ steps.pull.outputs.image }}
+          DIGEST: ${{ steps.base.outputs.digest }}
+        run: |
+          case "$IMAGE" in *"@$DIGEST") ;; *) echo "::error::condensé inattendu : $IMAGE"; exit 1;; esac
+          docker build --build-arg "NODE_IMAGE=$IMAGE" -t cortex-app .
 
       # L'image pose NODE_ENV=production : sans AUTH_ENABLED=1, prod-boot doit
       # REFUSER de démarrer (chaque visiteur serait « owner »). On le vérifie
