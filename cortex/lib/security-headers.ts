@@ -37,6 +37,20 @@ export const CSP_BASE = [
   "frame-ancestors 'none'",
 ].join("; ");
 
+/**
+ * Écran de consentement du connecteur MCP (/oauth/authorize) : après
+ * « Autoriser », la décision redirige (303) vers l'URL de retour du client —
+ * https://claude.ai/…, ou http://localhost:<port>/callback pour Claude Code.
+ * Chrome appliquant form-action aux redirections, la CSP de base bloquerait
+ * le retour. Seule cette page élargit form-action ; l'URL de retour, elle, est
+ * vérifiée côté serveur (égalité exacte avec une URL enregistrée du client).
+ */
+export const CONSENT_PATH = "/oauth/authorize";
+export const CSP_CONSENT = CSP_BASE.replace(
+  /form-action [^;]+/,
+  "form-action 'self' https: http://localhost:* http://127.0.0.1:*",
+);
+
 /** Bac à sable d'un document HTML importé : aucun script, aucun formulaire, origine opaque. */
 export const CSP_SANDBOXED_HTML = "sandbox; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
