@@ -787,10 +787,12 @@ application : Mon compte → Applications connectées → Révoquer.
   public, créées au démarrage comme les autres tables globales) ; un jeton
   d'accès vit 1 h, le refresh 30 jours et tourne à chaque usage.
 - claude.ai appelle depuis des adresses de sortie partagées par tous ses
-  utilisateurs : le rate-limit de bordure compte `/mcp` par jeton. Les points
-  `/oauth/token` et `/oauth/register` restent comptés par IP (240/min par
-  défaut) : à surveiller si beaucoup de comptes se connectent en même temps
-  depuis claude.ai.
+  utilisateurs (`160.79.104.0/21`) : le rate-limit de bordure (par IP,
+  `RATE_LIMIT_PER_MIN`, 240/min par défaut) compte donc tous les comptes
+  claude.ai ensemble sur `/mcp` et `/oauth/*`. Sans importance avec quelques
+  comptes ; si l'usage grandit et que des 429 apparaissent, relever
+  `RATE_LIMIT_PER_MIN`. La limite par compte (`MCP_RATE_LIMIT_PER_MIN`), elle,
+  reste individuelle.
 - La confirmation par élicitation n'existe que pour les clients 2026-07-28
   (Claude Code) ; claude.ai reçoit un devis puis confirme avec un jeton à
   usage unique (docs/MCP.md § 3).
