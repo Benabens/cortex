@@ -6,7 +6,7 @@ import { runAssist } from "../assist";
 import { clip } from "../content";
 import { courseLabel } from "../courses";
 import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, generationStatus, quoteSchema, quoteSummary } from "../schemas";
-import { defineTool } from "../tool";
+import { defineTool, pendingResult } from "../tool";
 
 const output = z.object({
   status: generationStatus,
@@ -50,9 +50,8 @@ export default defineTool({
         { course: c.id, statement, answer },
         args.confirmation_token,
       );
-      if (decision.kind === "input_required") return decision.result;
-      if (decision.kind === "quote") return { ...base, status: "confirmation_required" as const, confirmation: decision.quote };
-      if (decision.kind === "declined") return { ...base, status: "declined" as const, declined: decision.declined };
+      const pending = pendingResult(decision, base);
+      if (pending) return pending;
       await ctx.progress("Correction en cours…");
       const r = await runAssist("check-solution", () => checkSolution({ statement, answer, imageRel: null }));
       return {

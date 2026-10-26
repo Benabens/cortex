@@ -9,7 +9,7 @@ import { generationGate, quotaFor, usedToday } from "@/lib/billing/guards";
 import { llmUnavailableReason } from "@/lib/llm";
 import type { Principal } from "@/lib/oauth/server";
 import { QUOTE_TTL_S, argsHash, issueQuote, redeemQuote } from "./quotes";
-import { ToolError, codeForStatus, type Confirmation, type Cost } from "./tool";
+import { QUOTA_LABEL, ToolError, codeForStatus, type Confirmation, type Cost, type Era } from "./tool";
 
 /**
  * CONFIRMATION D'UN COÛT, avant toute dépense. Ordre fixe :
@@ -26,7 +26,12 @@ import { ToolError, codeForStatus, type Confirmation, type Cost } from "./tool";
  * (lib/billing/reserve) : une confirmation n'est jamais un passe-droit.
  */
 
-type StatePayload = { u: string; g: string; t: string; h: string; c: number };
+/**
+ * Contenu signé du requestState. `n` = jeton d'un devis en base, émis avec la
+ * question : la confirmation est consommée comme un devis, une seule fois — sans
+ * lui, la même réponse rejouée pendant 10 min aurait débité à chaque fois.
+ */
+type StatePayload = { u: string; g: string; t: string; h: string; c: number; n: string };
 
 /**
  * Clé HMAC du requestState : dérivée d'AUTH_SECRET (déjà posée en prod, partagée
@@ -66,7 +71,7 @@ function costPhrase(costCenti: number, billing: boolean): string {
 }
 
 export async function confirmCost(
-  p: { principal: Principal; era: "legacy" | "modern"; mcpReq: ServerContext["mcpReq"]; tool: string },
+  p: { principal: Principal; era: Era; mcpReq: ServerContext["mcpReq"]; tool: string },
   cost: Cost,
   args: Record<string, unknown>,
   token: string | undefined,
@@ -87,7 +92,7 @@ export async function confirmCost(
   const used = await usedToday(cost.bucket);
   const limit = quotaFor(cost.bucket);
   const balance = billing ? await getBalanceCenti() : null;
-  const quotaText = limit === null ? "quota du jour non limité" : `${bucketLabel(cost.bucket) === "generations" ? "générations" : "assistances"} aujourd'hui : ${used}/${limit}`;
+  const quotaText = limit === null ? "quota du jour non limité" : `${QUOTA_LABEL[bucketLabel(cost.bucket)]} aujourd'hui : ${used}/${limit}`;
   const message = `${cost.summary} Coût : ${costPhrase(costCenti, billing)}` +
     (balance !== null ? ` (solde ${fmtCredits(balance)} → ${fmtCredits(balance - costCenti)})` : "") + `, ${quotaText}. Confirmer ?`;
 
@@ -105,13 +110,16 @@ export async function confirmCost(
     const state = p.mcpReq.requestState<StatePayload>();
     const h = argsHash(args);
     const bound = state && state.u === binding.userId && state.g === binding.grantId && state.t === p.tool && state.h === h && state.c === costCenti;
-    if (accepted?.confirm === true && bound) return { kind: "confirmed" };
+    if (accepted?.confirm === true && bound) {
+      if ((await redeemQuote(state.n, binding)) === "ok") return { kind: "confirmed" };
+      throw new ToolError("confirmation_invalid", "Cette confirmation a déjà servi ou a expiré : rien n'a été débité. Relance la demande pour une nouvelle confirmation.");
+    }
     if (accepted && accepted.confirm !== true) return declined("decline");
     return {
       kind: "input_required",
       result: inputRequired({
         inputRequests: { confirm: inputRequired.elicit({ message, requestedSchema: confirmSchema }) },
-        requestState: await requestStateCodec().mint({ u: binding.userId, g: binding.grantId, t: p.tool, h, c: costCenti }),
+        requestState: await requestStateCodec().mint({ u: binding.userId, g: binding.grantId, t: p.tool, h, c: costCenti, n: await issueQuote(binding) }),
       }),
     };
   }

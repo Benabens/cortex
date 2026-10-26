@@ -1,10 +1,12 @@
-import { ReservationRefused, activeJob, costForJob, createJobExclusive, startWorker, type JobType } from "@/lib/jobs";
+import { ReservationRefused, activeJob, createJobExclusive, startWorker, type JobType } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
 
 /**
  * LANCEMENT D'UNE GÉNÉRATION PAR JOB, pour l'utilisateur et le cours COURANTS
  * (contexte installé par l'appelant : route via lib/req, MCP via runWithUser /
- * runWithCourse). Source unique de la séquence que suivaient les routes :
+ * runWithCourse). Séquence partagée par POST /api/exams/generate et le serveur
+ * MCP (les autres routes de génération — qcm, exercices, labs — gardent encore
+ * leur propre copie, à rapatrier ici au besoin) :
  *
  *   1. un job actif du même type est RÉUTILISÉ (un seul à la fois, rien n'est débité) ;
  *   2. pré-checks (quota du jour, solde, disque, moteur, corpus, LaTeX) ;
@@ -51,9 +53,4 @@ export function examCount(raw: unknown): number | undefined {
  */
 export function examTarget(count?: number, focus?: string): string | undefined {
   return count || focus ? JSON.stringify({ count, focus }) : undefined;
-}
-
-/** Coût en centièmes de crédit d'un examen pour cette cible (proportionnel au nombre d'exercices). */
-export function examCostCenti(target?: string): number {
-  return costForJob("exam", target);
 }

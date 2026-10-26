@@ -10,6 +10,9 @@ import type { Principal } from "@/lib/oauth/server";
  * serveur valide contre `output` avant de l'envoyer (lib/mcp/server.ts).
  */
 
+/** Ère du protocole d'une requête : 2025 (« initialize ») ou 2026-07-28 (enveloppe par requête). */
+export type Era = "legacy" | "modern";
+
 /** Lecture (portée cortex.read, gratuite) ou génération (portée cortex.generate, coût confirmé). */
 export type ToolKind = "read" | "generate";
 
@@ -88,8 +91,7 @@ export type QuoteView = {
 export type ToolCtx = {
   /** Compte au nom duquel tout s'exécute (issu du jeton, jamais d'un argument). */
   principal: Principal;
-  /** Ère du protocole de la requête (2025 = « legacy », 2026-07-28 = « modern »). */
-  era: "legacy" | "modern";
+  era: Era;
   /** URL publique de l'app (liens « ouvrir dans Cortex »). */
   appOrigin: string;
   signal: AbortSignal;
@@ -127,6 +129,25 @@ export type ToolDef<I extends z.ZodObject = z.ZodObject, O extends z.ZodObject =
   /** Résumé lisible (français) placé avant le bloc de données. */
   summarize(out: z.infer<O>): string;
 };
+
+/** Libellé français d'un compteur du jour (devis, refus). */
+export const QUOTA_LABEL: Record<QuoteView["daily_quota"]["kind"], string> = { generations: "générations", assistance: "assistances" };
+
+/**
+ * Issue d'une confirmation qui N'AUTORISE PAS encore la dépense : la question au
+ * client (élicitation), le devis ou le refus, mis en forme pour la sortie de
+ * l'outil. null = confirmée, l'outil continue.
+ */
+export function pendingResult<B extends object>(decision: Confirmation, base: B):
+  | InputRequiredResult
+  | (B & { status: "confirmation_required"; confirmation: QuoteView })
+  | (B & { status: "declined"; declined: DeclinedView })
+  | null {
+  if (decision.kind === "input_required") return decision.result;
+  if (decision.kind === "quote") return { ...base, status: "confirmation_required", confirmation: decision.quote };
+  if (decision.kind === "declined") return { ...base, status: "declined", declined: decision.declined };
+  return null;
+}
 
 export function defineTool<I extends z.ZodObject, O extends z.ZodObject>(def: ToolDef<I, O>): ToolDef<I, O> {
   return def;

@@ -1,12 +1,14 @@
 import * as z from "zod/v4";
 import { getPlanChapters, type PlanChapter } from "@/lib/course-plan";
 import { FIELD_LIMITS } from "@/lib/field-limits";
-import { examCostCenti, examCount, examTarget, startGenerationJob } from "@/lib/generation";
-import { activeJob } from "@/lib/jobs";
+import { examCount, examTarget, startGenerationJob } from "@/lib/generation";
+import { activeJob, costForJob } from "@/lib/jobs";
+import { log } from "@/lib/metrics";
+import { redactMessage } from "@/lib/observability";
 import { clip } from "../content";
 import { courseLabel } from "../courses";
 import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, generationStatus, quoteSchema, quoteSummary } from "../schemas";
-import { ToolError, codeForStatus, defineTool } from "../tool";
+import { ToolError, codeForStatus, defineTool, pendingResult } from "../tool";
 
 const output = z.object({
   status: generationStatus,
@@ -75,19 +77,26 @@ export default defineTool({
       const decision = await ctx.confirm(
         {
           bucket: "gen",
-          costCenti: examCostCenti(target),
+          costCenti: costForJob("exam", target),
           summary: `Générer un examen blanc${count ? ` de ${count} exercices` : " au format des annales"}${focus ? " avec l'accent demandé" : ""} — ${courseLabel(c)} (10-20 min).`,
         },
         { course: c.id, focus, count },
         args.confirmation_token,
       );
-      if (decision.kind === "input_required") return decision.result;
-      if (decision.kind === "quote") return { ...base, status: "confirmation_required" as const, confirmation: decision.quote };
-      if (decision.kind === "declined") return { ...base, status: "declined" as const, declined: decision.declined };
+      const pending = pendingResult(decision, base);
+      if (pending) return pending;
 
       const started = await startGenerationJob("exam", target);
-      // Les refus des pré-checks et de la réservation ne débitent rien ; un worker qui ne démarre pas (500), si : le job reste en file.
-      if (!started.ok) throw new ToolError(codeForStatus(started.status), started.status === 500 ? started.error : `${started.error} Rien n'a été débité.`);
+      // Les refus des pré-checks et de la réservation ne débitent rien. Un worker qui ne démarre
+      // pas (500) arrive APRÈS la réservation : le job reste en file (relancé par la pompe) ; son
+      // message technique reste au journal, pas chez le client.
+      if (!started.ok) {
+        if (started.status === 500) {
+          log("error", "mcp.worker_start_failed", { message: redactMessage(started.error) });
+          throw new ToolError("internal", "Le lancement de la génération a échoué côté serveur. Elle a peut-être été mise en file : vérifie avec get_job_status (sans job_id) avant de relancer.");
+        }
+        throw new ToolError(codeForStatus(started.status), `${started.error} Rien n'a été débité.`);
+      }
       return { ...base, status: started.existing ? "already_running" as const : "started" as const, job: track(started.jobId) };
     });
   },
