@@ -745,3 +745,52 @@ qu'il fait, et dans quel ordre :
 Les sessions ouvertes sur l'ancienne adresse ne suivent pas : chacun se
 reconnecte une fois. Garde l'ancienne URI de redirection Google et le domaine
 Railway quelques semaines, puis retire-les.
+
+## 14. Connecteur MCP (Claude ↔ compte Cortex)
+
+Chaque compte Cortex peut brancher Claude (claude.ai « Connecteurs
+personnalisés », Claude Desktop, Claude Code) sur ses propres données avec
+l'URL `https://app.cortexexam.com/mcp` : connexion avec le compte Cortex
+habituel, écran de consentement, c'est tout. Conception, outils, coûts et
+modèle de menace : [cortex/docs/MCP.md](cortex/docs/MCP.md).
+
+**Mise en service** — `bash scripts/mcp-ben.sh` déroule tout (variable, vérifs,
+claude.ai, Claude Code). À la main :
+
+1. Railway → service `cortex-app` → variable `MCP_ENABLED=1` (avec `AUTH_URL`
+   déjà posée : c'est l'émetteur OAuth et l'adresse publique de `/mcp`).
+   Railway redéploie.
+2. Vérifier :
+   - `https://app.cortexexam.com/.well-known/oauth-protected-resource/mcp` → JSON
+     avec `"resource": "https://app.cortexexam.com/mcp"` ;
+   - `POST /mcp` sans jeton → `401` avec un en-tête `WWW-Authenticate: Bearer resource_metadata=…`.
+3. claude.ai → Paramètres → Connecteurs → Ajouter un connecteur personnalisé →
+   URL `https://app.cortexexam.com/mcp` → Se connecter → Autoriser.
+4. Claude Code : `claude mcp add --transport http cortex https://app.cortexexam.com/mcp`,
+   puis `/mcp` → Authenticate.
+
+Rien à faire dans Google Cloud ni dans Stripe : le connecteur réutilise la
+connexion Google de l'app, et toute dépense passe par la même réservation de
+crédits que l'interface.
+
+**Réglages** (facultatifs) : `MCP_RATE_LIMIT_PER_MIN` (débit par compte sur
+`/mcp`, défaut 120), `MCP_ALLOWED_ORIGINS` (origines de navigateur admises en
+plus de l'app, claude.ai, claude.com et localhost).
+
+**Couper** : supprimer `MCP_ENABLED` puis redéployer — `/mcp` et les points
+OAuth répondent 404, tous les clients perdent l'accès. Pour une seule
+application : Mon compte → Applications connectées → Révoquer.
+
+**À savoir**
+
+- Les jetons sont opaques et stockés hachés (tables `oauth_*` du schéma
+  public, créées au démarrage comme les autres tables globales) ; un jeton
+  d'accès vit 1 h, le refresh 30 jours et tourne à chaque usage.
+- claude.ai appelle depuis des adresses de sortie partagées par tous ses
+  utilisateurs : le rate-limit de bordure compte `/mcp` par jeton. Les points
+  `/oauth/token` et `/oauth/register` restent comptés par IP (240/min par
+  défaut) : à surveiller si beaucoup de comptes se connectent en même temps
+  depuis claude.ai.
+- La confirmation par élicitation n'existe que pour les clients 2026-07-28
+  (Claude Code) ; claude.ai reçoit un devis puis confirme avec un jeton à
+  usage unique (docs/MCP.md § 3).
