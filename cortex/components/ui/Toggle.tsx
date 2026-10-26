@@ -1,13 +1,12 @@
 "use client";
 
+import { useId } from "react";
 import { cn } from "@/lib/ux/cn";
-import { usePress } from "@/lib/ux/press";
 
 /**
- * Interrupteur binaire (oui / non). Même mouvement que `Segmented`, à l'échelle du bouton :
- * le curseur glisse, s'étire en chemin, rebondit à l'arrivée, et se comprime tant qu'on appuie.
- * Rail 44 × 24, curseur de 20 px tenu à 2 px des bords : les positions sont dans globals.css
- * (`.switch`, `.switch-knob`), pilotées par `aria-checked`.
+ * Interrupteur binaire : un vrai checkbox, dont les deux bords de la pastille sont animés
+ * séparément. Le bord avant part le premier, le bord arrière le rejoint avec un léger rebond.
+ * Entrée complète le comportement clavier natif (Espace) ; le mouvement réduit est géré en CSS.
  */
 export function Toggle({
   checked,
@@ -15,34 +14,44 @@ export function Toggle({
   label,
   disabled = false,
   autoFocus = false,
+  labelVisible = false,
+  hint,
+  className,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label: string;
   disabled?: boolean;
   autoFocus?: boolean;
+  labelVisible?: boolean;
+  hint?: string;
+  className?: string;
 }) {
-  const { pressed, bind } = usePress();
+  const id = useId();
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      autoFocus={autoFocus}
-      data-pressed={pressed && !disabled ? "" : undefined}
-      onClick={() => onChange(!checked)}
-      {...bind(true)}
-      className={cn(
-        "switch h-6 w-11 shrink-0 rounded-full transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2",
-        checked
-          ? "bg-violet-deep shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]"
-          : "bg-surface-3 shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)]",
-        disabled && "cursor-not-allowed opacity-45"
-      )}
-    >
-      <span aria-hidden="true" className="switch-knob" />
-    </button>
+    <label className={cn("switch", className)} htmlFor={id} data-disabled={disabled ? "" : undefined}>
+      <input
+        id={id}
+        type="checkbox"
+        role="switch"
+        checked={checked}
+        disabled={disabled}
+        autoFocus={autoFocus}
+        onChange={(event) => onChange(event.target.checked)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.currentTarget.click();
+          }
+        }}
+      />
+      <span className="switch-track" aria-hidden="true">
+        <span className="switch-thumb" />
+      </span>
+      <span className={labelVisible ? "switch-text" : "sr-only"}>
+        {label}
+        {labelVisible && hint ? <small>{hint}</small> : null}
+      </span>
+    </label>
   );
 }
