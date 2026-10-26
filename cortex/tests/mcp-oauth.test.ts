@@ -428,3 +428,19 @@ test("écran d'erreur du consentement : aucun texte venu de l'URL n'est affiché
   const expired = await prepareConsent(get("/oauth/authorize"), new URLSearchParams({ error: "expired" }), ALICE);
   if (expired.kind === "error") assert.match(expired.message, /expirée/);
 });
+
+test("consentement d'un client CIMD qui revient sur localhost : domaine du client ET retour local signalés", async () => {
+  const { findClient } = await import("../lib/oauth/clients");
+  const { prepareConsent } = await import("../lib/oauth/routes");
+  const clientId = "https://claude.ai/oauth/claude-code-client-metadata";
+  const doc = { client_id: clientId, client_name: "Claude Code", redirect_uris: ["http://localhost/callback", "http://127.0.0.1/callback"], token_endpoint_auth_method: "none" };
+  await findClient(clientId, async () => ({ body: JSON.stringify(doc), maxAgeS: 3600 })); // met le document en cache
+  const view = await prepareConsent(get("/oauth/authorize"), authorizeParams(clientId, pkce().challenge, { redirect_uri: "http://localhost:51999/callback" }), ALICE);
+  assert.equal(view.kind, "consent");
+  if (view.kind !== "consent") return;
+  assert.equal(view.clientHost, "claude.ai");
+  assert.equal(view.redirectHost, "localhost:51999");
+  assert.equal(view.localRedirect, true, "un retour sur l'ordinateur doit être signalé : n'importe quel programme local peut s'y placer");
+  const web = await prepareConsent(get("/oauth/authorize"), authorizeParams((await register()).client_id, pkce().challenge), ALICE);
+  if (web.kind === "consent") assert.equal(web.localRedirect, true, CALLBACK);
+});

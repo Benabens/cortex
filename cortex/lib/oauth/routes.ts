@@ -199,7 +199,10 @@ const CONSENT_ERRORS: Record<string, string> = {
 export type ConsentView =
   | { kind: "redirect"; url: string }
   | { kind: "error"; message: string }
-  | { kind: "consent"; ticket: string; clientName: string | null; clientHost: string; redirectHost: string; verifiedDomain: boolean; scopes: string[] };
+  | {
+      kind: "consent"; ticket: string; clientName: string | null; clientHost: string; redirectHost: string;
+      verifiedDomain: boolean; localRedirect: boolean; scopes: string[];
+    };
 
 /**
  * GET /oauth/authorize (page de consentement) : valide la demande pour le compte
@@ -223,6 +226,9 @@ export async function prepareConsent(req: Request, params: URLSearchParams, user
     clientHost: c.kind === "cimd" ? new URL(c.clientId).host : new URL(v.request.redirectUri).host,
     redirectHost: new URL(v.request.redirectUri).host,
     verifiedDomain: c.kind === "cimd",
+    // Retour sur l'ordinateur (Claude Code…) : n'importe quel programme local peut écouter
+    // ce port en se réclamant d'un client connu — la spec demande d'avertir.
+    localRedirect: ["localhost", "127.0.0.1", "[::1]"].includes(new URL(v.request.redirectUri).hostname),
     scopes: v.request.scopes,
   };
 }
