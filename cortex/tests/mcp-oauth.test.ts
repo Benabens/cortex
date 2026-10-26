@@ -346,3 +346,26 @@ test("route Applications connectées : GET liste celles du compte, DELETE d'une 
   assert.equal((await DELETE(as(BOB, "DELETE", `?id=${grantId}`))).status, 200);
   assert.equal(await principal(c.access_token), null);
 });
+
+test("CORS : seules les origines admises (app, Claude, poste local) sont reflétées, jamais « * »", async () => {
+  const { authorizationServerMetadata, tokenEndpoint } = await import("../lib/oauth/routes");
+  const withOrigin = (origin: string) => new Request(`${ISSUER}/.well-known/oauth-authorization-server`, { headers: { origin } });
+  for (const origin of ["https://claude.ai", "http://localhost:6274", ISSUER]) {
+    const res = authorizationServerMetadata(withOrigin(origin));
+    assert.equal(res.headers.get("access-control-allow-origin"), origin, origin);
+    assert.match(res.headers.get("vary") ?? "", /Origin/i);
+  }
+  const evil = authorizationServerMetadata(withOrigin("https://evil.example"));
+  assert.equal(evil.headers.get("access-control-allow-origin"), null);
+  const t = await tokenEndpoint(formPost("/oauth/token", { grant_type: "refresh_token", refresh_token: "x", client_id: "y" }, { origin: "https://evil.example" }));
+  assert.notEqual(t.headers.get("access-control-allow-origin"), "*");
+});
+
+test("écran d'erreur du consentement : aucun texte venu de l'URL n'est affiché tel quel", async () => {
+  const { prepareConsent } = await import("../lib/oauth/routes");
+  const forged = await prepareConsent(get("/oauth/authorize"), new URLSearchParams({ error: "Ton compte est piraté, appelle le 0800 000 000" }), ALICE);
+  assert.equal(forged.kind, "error");
+  if (forged.kind === "error") assert.ok(!forged.message.includes("0800"), forged.message);
+  const expired = await prepareConsent(get("/oauth/authorize"), new URLSearchParams({ error: "expired" }), ALICE);
+  if (expired.kind === "error") assert.match(expired.message, /expirée/);
+});

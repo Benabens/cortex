@@ -3,39 +3,42 @@ import { log } from "@/lib/metrics";
 import { PayloadTooLarge, readJson, readText } from "@/lib/upload-limit";
 import { ClientRegistrationError, registerClient } from "./clients";
 import { SUPPORTED_SCOPES, issuerFor, resourceFor } from "./config";
+import { corsHeaders } from "./cors";
 import { OAuthError, createConsentTicket, decideConsent, exchangeToken, revokeToken, validateAuthorizeRequest } from "./server";
 
 /**
  * POINTS HTTP PUBLICS du serveur d'autorisation (montés par app/.well-known/* et
  * app/oauth/*). Lus par des clients MCP, parfois depuis un navigateur (inspecteur
- * MCP) : CORS ouvert — sans danger ici, aucun cookie n'y est lu, tout passe par
- * le corps de la requête ou un jeton Bearer. Réponses jamais mises en cache.
+ * MCP) : CORS réservé aux origines admises (lib/oauth/cors) — aucun cookie n'y
+ * est lu, tout passe par le corps de la requête. Réponses jamais mises en cache.
  */
 
 const OAUTH_BODY_MAX = 16 * 1024;
 
-const CORS = {
-  "access-control-allow-origin": "*",
+const CORS_EXTRA = {
   "access-control-allow-methods": "GET, POST, OPTIONS",
   "access-control-allow-headers": "authorization, content-type, mcp-protocol-version",
   "access-control-max-age": "600",
 };
 
-function json(body: unknown, status = 200): NextResponse {
-  return NextResponse.json(body, { status, headers: { ...CORS, "cache-control": "no-store", pragma: "no-cache" } });
+function json(req: Request, body: unknown, status = 200): NextResponse {
+  return NextResponse.json(body, {
+    status,
+    headers: { ...corsHeaders(req, issuerFor(req), CORS_EXTRA), "cache-control": "no-store", pragma: "no-cache" },
+  });
 }
 
-function notFound(): NextResponse {
-  return json({ error: "not_found" }, 404);
+function notFound(req: Request): NextResponse {
+  return json(req, { error: "not_found" }, 404);
 }
 
 /** Pré-vol CORS des points OAuth. */
-export function oauthPreflight(): NextResponse {
-  return new NextResponse(null, { status: 204, headers: CORS });
+export function oauthPreflight(req: Request): NextResponse {
+  return new NextResponse(null, { status: 204, headers: corsHeaders(req, issuerFor(req), CORS_EXTRA) });
 }
 
-function oauthError(e: OAuthError): NextResponse {
-  const res = json({ error: e.code, error_description: e.description }, e.status);
+function oauthError(req: Request, e: OAuthError): NextResponse {
+  const res = json(req, { error: e.code, error_description: e.description }, e.status);
   if (e.status === 401) res.headers.set("www-authenticate", `Basic realm="cortex"`);
   return res;
 }
@@ -43,8 +46,8 @@ function oauthError(e: OAuthError): NextResponse {
 /** RFC 8414 — métadonnées du serveur d'autorisation. */
 export function authorizationServerMetadata(req: Request): NextResponse {
   const issuer = issuerFor(req);
-  if (!issuer) return notFound();
-  return json({
+  if (!issuer) return notFound(req);
+  return json(req, {
     issuer,
     authorization_endpoint: `${issuer}/oauth/authorize`,
     token_endpoint: `${issuer}/oauth/token`,
@@ -65,8 +68,8 @@ export function authorizationServerMetadata(req: Request): NextResponse {
 /** RFC 9728 — métadonnées de la ressource protégée (le point MCP). */
 export function protectedResourceMetadata(req: Request): NextResponse {
   const issuer = issuerFor(req);
-  if (!issuer) return notFound();
-  return json({
+  if (!issuer) return notFound(req);
+  return json(req, {
     resource: resourceFor(issuer),
     authorization_servers: [issuer],
     scopes_supported: [...SUPPORTED_SCOPES],
@@ -77,16 +80,16 @@ export function protectedResourceMetadata(req: Request): NextResponse {
 
 /** RFC 7591 — enregistrement dynamique d'un client. */
 export async function registerEndpoint(req: Request): Promise<NextResponse> {
-  if (!issuerFor(req)) return notFound();
+  if (!issuerFor(req)) return notFound(req);
   let meta: unknown;
   try { meta = await readJson(req, null, OAUTH_BODY_MAX); } catch (e) {
-    if (e instanceof PayloadTooLarge) return json({ error: "invalid_client_metadata", error_description: "Corps trop volumineux." }, 413);
+    if (e instanceof PayloadTooLarge) return json(req, { error: "invalid_client_metadata", error_description: "Corps trop volumineux." }, 413);
     throw e;
   }
   try {
     const { client, secret, issuedAt } = await registerClient(meta);
     log("info", "oauth.client_registered", { kind: "dcr", method: client.authMethod });
-    return json({
+    return json(req, {
       client_id: client.clientId,
       client_id_issued_at: issuedAt,
       ...(secret ? { client_secret: secret, client_secret_expires_at: 0 } : {}),
@@ -98,7 +101,7 @@ export async function registerEndpoint(req: Request): Promise<NextResponse> {
       token_endpoint_auth_method: client.authMethod,
     }, 201);
   } catch (e) {
-    if (e instanceof ClientRegistrationError) return json({ error: e.code, error_description: e.message }, 400);
+    if (e instanceof ClientRegistrationError) return json(req, { error: e.code, error_description: e.message }, 400);
     throw e;
   }
 }
@@ -106,10 +109,10 @@ export async function registerEndpoint(req: Request): Promise<NextResponse> {
 async function readForm(req: Request): Promise<URLSearchParams | NextResponse> {
   const type = req.headers.get("content-type") ?? "";
   if (!type.toLowerCase().startsWith("application/x-www-form-urlencoded")) {
-    return json({ error: "invalid_request", error_description: "Corps application/x-www-form-urlencoded attendu." }, 400);
+    return json(req, { error: "invalid_request", error_description: "Corps application/x-www-form-urlencoded attendu." }, 400);
   }
   try { return new URLSearchParams(await readText(req, OAUTH_BODY_MAX)); } catch (e) {
-    if (e instanceof PayloadTooLarge) return json({ error: "invalid_request", error_description: "Corps trop volumineux." }, 413);
+    if (e instanceof PayloadTooLarge) return json(req, { error: "invalid_request", error_description: "Corps trop volumineux." }, 413);
     throw e;
   }
 }
@@ -117,16 +120,16 @@ async function readForm(req: Request): Promise<URLSearchParams | NextResponse> {
 /** POST /oauth/token. */
 export async function tokenEndpoint(req: Request): Promise<NextResponse> {
   const issuer = issuerFor(req);
-  if (!issuer) return notFound();
+  if (!issuer) return notFound(req);
   const form = await readForm(req);
   if (form instanceof NextResponse) return form;
   try {
     const tokens = await exchangeToken(form, req.headers.get("authorization"), resourceFor(issuer));
-    return json(tokens);
+    return json(req, tokens);
   } catch (e) {
     if (e instanceof OAuthError) {
       log("info", "oauth.token_refused", { grant: form.get("grant_type") ?? "", code: e.code });
-      return oauthError(e);
+      return oauthError(req, e);
     }
     throw e;
   }
@@ -134,14 +137,14 @@ export async function tokenEndpoint(req: Request): Promise<NextResponse> {
 
 /** POST /oauth/revoke (RFC 7009) : 200 même pour un jeton inconnu. */
 export async function revokeEndpoint(req: Request): Promise<NextResponse> {
-  if (!issuerFor(req)) return notFound();
+  if (!issuerFor(req)) return notFound(req);
   const form = await readForm(req);
   if (form instanceof NextResponse) return form;
   try {
     await revokeToken(form, req.headers.get("authorization"));
-    return new NextResponse(null, { status: 200, headers: { ...CORS, "cache-control": "no-store" } });
+    return new NextResponse(null, { status: 200, headers: { ...corsHeaders(req, issuerFor(req), CORS_EXTRA), "cache-control": "no-store" } });
   } catch (e) {
-    if (e instanceof OAuthError) return oauthError(e);
+    if (e instanceof OAuthError) return oauthError(req, e);
     throw e;
   }
 }
@@ -155,7 +158,7 @@ export async function revokeEndpoint(req: Request): Promise<NextResponse> {
  */
 export async function consentDecisionEndpoint(req: Request, userId: string): Promise<NextResponse> {
   const issuer = issuerFor(req);
-  if (!issuer) return notFound();
+  if (!issuer) return notFound(req);
   const origin = req.headers.get("origin");
   if (origin !== null && origin !== issuer && origin !== new URL(req.url).origin) {
     return NextResponse.json({ error: "Origine refusée." }, { status: 403 });
@@ -173,13 +176,25 @@ export async function consentDecisionEndpoint(req: Request, userId: string): Pro
     return NextResponse.redirect(target, 303);
   } catch (e) {
     if (e instanceof OAuthError) {
+      // Un CODE, jamais le texte : la page n'affiche que des messages qu'elle connaît.
       const back = new URL("/oauth/authorize", issuer);
-      back.searchParams.set("error", e.description);
+      back.searchParams.set("error", e.code === "invalid_client" ? "unknown_client" : "expired");
       return NextResponse.redirect(back, 303);
     }
     throw e;
   }
 }
+
+/**
+ * Messages de l'écran d'erreur, par code. Le texte n'est jamais lu dans l'URL :
+ * un lien forgé pourrait sinon faire afficher n'importe quelle phrase sous le
+ * logo de Cortex (hameçonnage).
+ */
+const CONSENT_ERRORS: Record<string, string> = {
+  expired: "Demande de connexion expirée ou déjà traitée : recommence depuis ton application.",
+  unknown_client: "Application inconnue : recommence depuis ton application.",
+  failed: "La connexion a échoué : recommence depuis ton application.",
+};
 
 export type ConsentView =
   | { kind: "redirect"; url: string }
@@ -194,7 +209,7 @@ export async function prepareConsent(req: Request, params: URLSearchParams, user
   const issuer = issuerFor(req);
   if (!issuer) return { kind: "error", message: "La connexion d'applications n'est pas activée sur cette instance de Cortex." };
   const shown = params.get("error");
-  if (shown && !params.get("client_id")) return { kind: "error", message: shown.slice(0, 300) };
+  if (shown && !params.get("client_id")) return { kind: "error", message: CONSENT_ERRORS[shown] ?? CONSENT_ERRORS.failed };
   const v = await validateAuthorizeRequest(params, issuer, resourceFor(issuer));
   if (!v.ok) return "redirect" in v ? { kind: "redirect", url: v.redirect } : { kind: "error", message: v.display };
   const ticket = await createConsentTicket(userId, v.request);
