@@ -49,10 +49,21 @@ export type AuthorizeRequest = {
  */
 export type AuthorizeFailure = { ok: false; display: string } | { ok: false; redirect: string };
 
-/** Portées demandées → portées servies. Inconnues ignorées ; aucune portée connue = toutes. */
+/**
+ * Portées demandées → portées servies. Inconnues ignorées ; aucune portée connue
+ * = toutes. La lecture est toujours incluse : sans elle, aucun outil ne répond
+ * (et l'écran de consentement la promet de toute façon).
+ */
 export function grantableScopes(raw: string | null): string[] {
   const asked = (raw ?? "").split(/\s+/).filter((s) => (SUPPORTED_SCOPES as readonly string[]).includes(s));
-  return asked.length ? [...new Set(asked)] : [...SUPPORTED_SCOPES];
+  if (!asked.length) return [...SUPPORTED_SCOPES];
+  return SUPPORTED_SCOPES.filter((s) => s === SCOPE_READ || asked.includes(s));
+}
+
+/** Intersection de deux listes de portées séparées par des espaces, dans l'ordre de la première. */
+function intersectScopes(a: string, b: string): string {
+  const allowed = new Set(b.split(" ").filter(Boolean));
+  return a.split(" ").filter((s) => s && allowed.has(s)).join(" ");
 }
 
 function errorRedirect(redirectUri: string, issuer: string, state: string | null, code: string, description: string): string {
@@ -124,7 +135,7 @@ type RequestRow = { user_id: string; client_id: string; redirect_uri: string; co
  * `withGenerate` = la case « générer » est restée cochée (sinon lecture seule).
  */
 export async function decideConsent(
-  userId: string, ticket: string, approve: boolean, issuer: string, withGenerate = true,
+  userId: string, ticket: string, approve: boolean, issuer: string, withGenerate: boolean,
 ): Promise<string> {
   const now = nowStr();
   const row = await authTx((tx) => tx.get<RequestRow>(
@@ -183,38 +194,39 @@ export type TokenResponse = {
 };
 
 /**
- * Authentifie le client au point de jeton : public (PKCE seul) ou secret
- * (client_secret_basic / client_secret_post), selon ce qu'il a enregistré.
+ * Identifie le client au point de jeton. Clients PUBLICS seulement (PKCE fait
+ * foi) : le client_id vient du formulaire, ou d'un en-tête Basic que certains
+ * clients envoient quand même (secret vide ou ignoré). Un en-tête illisible est
+ * un refus d'authentification (401), jamais une erreur serveur.
  */
-async function authenticateClient(form: URLSearchParams, authorization: string | null, fetcher?: MetadataFetcher): Promise<OAuthClient> {
+async function identifyClient(form: URLSearchParams, authorization: string | null, fetcher?: MetadataFetcher): Promise<OAuthClient> {
   let clientId = form.get("client_id");
-  let secret = form.get("client_secret");
   const basic = authorization?.match(/^Basic\s+(.+)$/i);
   if (basic) {
-    const [id, sec] = Buffer.from(basic[1], "base64").toString("utf8").split(":");
-    clientId = decodeURIComponent(id ?? "");
-    secret = decodeURIComponent(sec ?? "");
+    const decoded = Buffer.from(basic[1], "base64").toString("utf8");
+    const colon = decoded.indexOf(":");
+    try {
+      clientId = decodeURIComponent(colon >= 0 ? decoded.slice(0, colon) : decoded);
+    } catch {
+      throw new OAuthError("invalid_client", "En-tête d'authentification illisible.", 401);
+    }
   }
   const client = clientId ? await findClient(clientId, fetcher) : null;
   if (!client) throw new OAuthError("invalid_client", "Client inconnu.", 401);
-  if (client.authMethod !== "none") {
-    if (!secret || !client.secretHash || !safeEqual(digest(secret), client.secretHash)) {
-      throw new OAuthError("invalid_client", "Authentification du client refusée.", 401);
-    }
-  }
   return client;
 }
 
-async function issueTokens(g: { grantId: string; userId: string; clientId: string; scope: string; resource: string }): Promise<TokenResponse> {
+/** `family` = lignée (empreinte du code d'origine) : un rejeu ne révoque qu'elle, pas les autres appareils du compte. */
+async function issueTokens(g: { grantId: string; family: string; userId: string; clientId: string; scope: string; resource: string }): Promise<TokenResponse> {
   const access = newSecret("at");
   const refresh = newSecret("rt");
   const now = nowStr();
   await authRun(`DELETE FROM oauth_tokens WHERE expires_at < ?`, nowStr(-86400_000));
   for (const [token, kind, ttl] of [[access, "access", ACCESS_TOKEN_TTL_S], [refresh, "refresh", REFRESH_TOKEN_TTL_S]] as const) {
     await authRun(
-      `INSERT INTO oauth_tokens (token_hash, kind, grant_id, user_id, client_id, scope, resource, created_at, expires_at)
-       VALUES (?,?,?,?,?,?,?,?,?)`,
-      digest(token), kind, g.grantId, g.userId, g.clientId, g.scope, g.resource, now, iso(ttl),
+      `INSERT INTO oauth_tokens (token_hash, kind, family, grant_id, user_id, client_id, scope, resource, created_at, expires_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      digest(token), kind, g.family, g.grantId, g.userId, g.clientId, g.scope, g.resource, now, iso(ttl),
     );
   }
   await authRun(`UPDATE oauth_grants SET last_used_at = ? WHERE id = ?`, now, g.grantId);
@@ -231,7 +243,7 @@ export async function exchangeToken(
   if (grantType !== "authorization_code" && grantType !== "refresh_token") {
     throw new OAuthError("unsupported_grant_type", "Seuls authorization_code et refresh_token sont servis.");
   }
-  const client = await authenticateClient(form, authorization, fetcher);
+  const client = await identifyClient(form, authorization, fetcher);
   const rawResource = form.get("resource");
   if (rawResource !== null && canonicalResource(rawResource) !== canonicalResource(mcpResource)) {
     throw new OAuthError("invalid_target", "Ressource inconnue.");
@@ -251,9 +263,10 @@ async function redeemCode(form: URLSearchParams, client: OAuthClient): Promise<T
     now, digest(code), now,
   ));
   if (!row) {
-    // Code rejoué : l'autorisation qu'il avait ouverte est révoquée (RFC 9700 §4.5.3).
-    const replay = await authGet<{ grant_id: string }>(`SELECT grant_id FROM oauth_codes WHERE code_hash = ? AND used_at IS NOT NULL`, digest(code));
-    if (replay) await revokeGrantTokens(replay.grant_id);
+    // Code rejoué : les jetons émis à partir de CE code sont révoqués (RFC 6749 §4.1.2),
+    // pas ceux des autres appareils du même compte (même autorisation, autre lignée).
+    const replay = await authGet<{ code_hash: string }>(`SELECT code_hash FROM oauth_codes WHERE code_hash = ? AND used_at IS NOT NULL`, digest(code));
+    if (replay) await revokeFamily(replay.code_hash);
     throw new OAuthError("invalid_grant", "Code d'autorisation invalide, expiré ou déjà utilisé.");
   }
   if (row.client_id !== client.clientId) throw new OAuthError("invalid_grant", "Ce code n'a pas été émis pour ce client.");
@@ -264,42 +277,63 @@ async function redeemCode(form: URLSearchParams, client: OAuthClient): Promise<T
   }
   const grant = await authGet<{ revoked_at: string | null }>(`SELECT revoked_at FROM oauth_grants WHERE id = ?`, row.grant_id);
   if (!grant || grant.revoked_at) throw new OAuthError("invalid_grant", "Autorisation révoquée.");
-  return issueTokens({ grantId: row.grant_id, userId: row.user_id, clientId: row.client_id, scope: row.scope, resource: row.resource });
+  return issueTokens({ grantId: row.grant_id, family: digest(code), userId: row.user_id, clientId: row.client_id, scope: row.scope, resource: row.resource });
 }
 
-type TokenRow = { grant_id: string; user_id: string; client_id: string; scope: string; resource: string; kind: string; revoked_at: string | null; rotated_at: string | null; expires_at: string };
+type TokenRow = { grant_id: string; family: string; user_id: string; client_id: string; scope: string; resource: string; kind: string; revoked_at: string | null; rotated_at: string | null; expires_at: string };
+
+/**
+ * Tolérance de rejeu d'un refresh (secondes, OAUTH_REFRESH_GRACE_S, défaut 30) :
+ * un client qui renvoie son refresh après une coupure réseau — il n'a jamais
+ * reçu la réponse — est servi au lieu d'être pris pour un voleur. Au-delà, un
+ * refresh déjà tourné présenté à nouveau révoque sa lignée.
+ */
+function refreshGraceS(): number {
+  const n = Number(process.env.OAUTH_REFRESH_GRACE_S);
+  return Number.isFinite(n) && n >= 0 ? Math.min(n, 300) : 30;
+}
 
 async function rotateRefresh(form: URLSearchParams, client: OAuthClient): Promise<TokenResponse> {
   const token = form.get("refresh_token") ?? "";
   const now = nowStr();
   const hash = digest(token);
+  const graceStart = nowStr(-refreshGraceS() * 1000);
   const row = await authTx((tx) => tx.get<TokenRow>(
-    `UPDATE oauth_tokens SET rotated_at = ? WHERE token_hash = ? AND kind = 'refresh' AND rotated_at IS NULL AND revoked_at IS NULL AND expires_at > ?
-     RETURNING grant_id, user_id, client_id, scope, resource, kind, revoked_at, rotated_at, expires_at`,
-    now, hash, now,
+    `UPDATE oauth_tokens SET rotated_at = COALESCE(rotated_at, ?)
+      WHERE token_hash = ? AND kind = 'refresh' AND revoked_at IS NULL AND expires_at > ?
+        AND (rotated_at IS NULL OR rotated_at > ?)
+     RETURNING grant_id, family, user_id, client_id, scope, resource, kind, revoked_at, rotated_at, expires_at`,
+    now, hash, now, graceStart,
   ));
   if (!row) {
     const seen = await authGet<TokenRow>(`SELECT * FROM oauth_tokens WHERE token_hash = ? AND kind = 'refresh'`, hash);
-    // Refresh déjà tourné présenté à nouveau : quelqu'un d'autre le détient — on coupe tout.
-    if (seen?.rotated_at) await revokeGrantTokens(seen.grant_id);
+    // Refresh déjà tourné présenté hors tolérance : quelqu'un d'autre le détient — on coupe sa lignée.
+    if (seen?.rotated_at) await revokeFamily(seen.family);
     throw new OAuthError("invalid_grant", "Jeton de rafraîchissement invalide, expiré ou déjà utilisé.");
   }
   if (row.client_id !== client.clientId) throw new OAuthError("invalid_grant", "Ce jeton n'a pas été émis pour ce client.");
   const grant = await authGet<{ revoked_at: string | null; scope: string }>(`SELECT revoked_at, scope FROM oauth_grants WHERE id = ?`, row.grant_id);
   if (!grant || grant.revoked_at) throw new OAuthError("invalid_grant", "Autorisation révoquée.");
-  // Une portée demandée au rafraîchissement ne peut que RESTREINDRE celle de l'autorisation.
+  // L'autorisation fait foi : une portée retirée à la reconnexion (case « générer »
+  // décochée) l'est aussi pour les jetons déjà émis. Une portée demandée ici ne
+  // peut que RESTREINDRE encore.
+  let scope = intersectScopes(row.scope, grant.scope);
   const asked = form.get("scope");
-  let scope = row.scope;
   if (asked) {
-    const allowed = new Set(row.scope.split(" "));
+    const allowed = new Set(scope.split(" "));
     const wanted = asked.split(/\s+/).filter(Boolean);
     if (wanted.some((s) => !allowed.has(s))) throw new OAuthError("invalid_scope", "Portée plus large que l'autorisation d'origine.");
     scope = wanted.join(" ");
   }
-  return issueTokens({ grantId: row.grant_id, userId: row.user_id, clientId: row.client_id, scope, resource: row.resource });
+  return issueTokens({ grantId: row.grant_id, family: row.family, userId: row.user_id, clientId: row.client_id, scope, resource: row.resource });
 }
 
 // ─────────────────────────── révocation ───────────────────────────
+
+/** Révoque une lignée de jetons (issus d'un même code, rotations comprises). */
+async function revokeFamily(family: string): Promise<void> {
+  await authRun(`UPDATE oauth_tokens SET revoked_at = ? WHERE family = ? AND revoked_at IS NULL`, nowStr(), family);
+}
 
 async function revokeGrantTokens(grantId: string): Promise<void> {
   const now = nowStr();
@@ -308,18 +342,18 @@ async function revokeGrantTokens(grantId: string): Promise<void> {
 }
 
 /**
- * POST /oauth/revoke (RFC 7009). Révoquer un refresh coupe toute l'autorisation ;
- * un jeton d'accès, seulement lui. Jeton inconnu : succès silencieux (la RFC
- * l'impose, et cela n'apprend rien à qui sonde).
+ * POST /oauth/revoke (RFC 7009). Révoquer un refresh coupe sa lignée (le client
+ * se déconnecte) ; un jeton d'accès, seulement lui. Jeton inconnu : succès
+ * silencieux (la RFC l'impose, et cela n'apprend rien à qui sonde).
  */
 export async function revokeToken(form: URLSearchParams, authorization: string | null, fetcher?: MetadataFetcher): Promise<void> {
-  const client = await authenticateClient(form, authorization, fetcher);
+  const client = await identifyClient(form, authorization, fetcher);
   const hash = digest(form.get("token") ?? "");
-  const row = await authGet<{ kind: string; grant_id: string; client_id: string }>(
-    `SELECT kind, grant_id, client_id FROM oauth_tokens WHERE token_hash = ?`, hash,
+  const row = await authGet<{ kind: string; family: string; client_id: string }>(
+    `SELECT kind, family, client_id FROM oauth_tokens WHERE token_hash = ?`, hash,
   );
   if (!row || row.client_id !== client.clientId) return;
-  if (row.kind === "refresh") await revokeGrantTokens(row.grant_id);
+  if (row.kind === "refresh") await revokeFamily(row.family);
   else await authRun(`UPDATE oauth_tokens SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL`, nowStr(), hash);
 }
 
@@ -342,8 +376,9 @@ export type Principal = {
 export async function verifyAccessToken(token: string, mcpResource: string): Promise<Principal | null> {
   if (!token.startsWith("cx_at_")) return null;
   const now = nowStr();
-  const row = await authGet<TokenRow & { grant_revoked: string | null }>(
-    `SELECT t.grant_id, t.user_id, t.client_id, t.scope, t.resource, t.kind, t.revoked_at, t.rotated_at, t.expires_at, g.revoked_at AS grant_revoked
+  const row = await authGet<TokenRow & { grant_revoked: string | null; grant_scope: string }>(
+    `SELECT t.grant_id, t.family, t.user_id, t.client_id, t.scope, t.resource, t.kind, t.revoked_at, t.rotated_at, t.expires_at,
+            g.revoked_at AS grant_revoked, g.scope AS grant_scope
        FROM oauth_tokens t JOIN oauth_grants g ON g.id = t.grant_id
       WHERE t.token_hash = ? AND t.kind = 'access'`,
     digest(token),
@@ -351,7 +386,8 @@ export async function verifyAccessToken(token: string, mcpResource: string): Pro
   if (!row || row.revoked_at || row.grant_revoked || row.expires_at <= now) return null;
   if (canonicalResource(row.resource) !== canonicalResource(mcpResource)) return null;
   return {
-    userId: row.user_id, clientId: row.client_id, grantId: row.grant_id, scopes: row.scope.split(" ").filter(Boolean),
+    // Portées du jeton bornées par celles de l'autorisation en vigueur (réduite à une reconnexion).
+    userId: row.user_id, clientId: row.client_id, grantId: row.grant_id, scopes: intersectScopes(row.scope, row.grant_scope).split(" ").filter(Boolean),
     expiresAt: Math.floor(Date.parse(row.expires_at.replace(" ", "T") + "Z") / 1000),
   };
 }

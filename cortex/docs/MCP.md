@@ -171,10 +171,16 @@ Règles :
   (pas de redirecteur ouvert). Les autres erreurs repartent au client avec `state` et `iss`.
 - **Ressource** : absente = `/mcp` de l'instance ; toute autre valeur → `invalid_target`. Le jeton est
   lié à la ressource ; `/mcp` refuse un jeton émis pour une autre (pas de « token passthrough »).
-- **Codes** : 60 s, usage unique, consommés avant vérification ; un code rejoué révoque l'autorisation
-  qu'il avait ouverte.
-- **Refresh tournant** : chaque usage émet un nouveau couple ; présenter un refresh déjà tourné = vol
-  présumé → toute l'autorisation est révoquée. Une portée demandée au refresh ne peut que restreindre.
+- **Codes** : 60 s, usage unique, consommés avant vérification ; un code rejoué révoque les jetons émis
+  à partir de **ce** code (sa lignée), pas ceux des autres appareils du même compte.
+- **Refresh tournant** : chaque usage émet un nouveau couple. Le même refresh représenté dans les 30 s
+  (réessai après coupure réseau, `OAUTH_REFRESH_GRACE_S`) est servi ; au-delà, c'est un vol présumé →
+  sa lignée est révoquée. Une portée demandée au refresh ne peut que restreindre.
+- **Portées** : celles d'un jeton sont toujours bornées par l'autorisation **en vigueur** — décocher
+  « Générer » en reconnectant l'application retire aussi la génération aux jetons déjà émis. La lecture
+  est toujours accordée (sans elle aucun outil ne répond).
+- **Clients publics seulement** (PKCE) : aucun secret client n'est émis ; une demande DCR de secret est
+  enregistrée en client public (`token_endpoint_auth_method: "none"`, RFC 7591 §3.2.1).
 - **Consentement** : affiché à chaque connexion (aucune approbation automatique), avec le domaine
   vérifié pour un client CIMD (hôte du `client_id`) ou l'hôte de l'URL de retour pour un client DCR
   (nom déclaré, non vérifié). Case « Générer (coûte des crédits) » décochable : le jeton ne porte alors
@@ -186,15 +192,15 @@ Règles :
   (IP privées, bouclage, lien local, CGNAT, ULA refusées), aucune redirection suivie, 5 s, 5 Ko, cache
   5 min-24 h ; le document doit se désigner lui-même (`client_id` = son URL), déclarer `client_name` et
   des `redirect_uris` valides, et être un client public (`none`).
-- **DCR** : ouvert (spec), client public par défaut ; secret seulement si demandé (empreinte seule
-  gardée). Un client jamais autorisé au bout de 7 jours est supprimé.
+- **DCR** : ouvert (spec), toujours en client public. Un client jamais autorisé au bout de 7 jours est
+  supprimé.
 
 ## 5. Modèle de menace
 
 | Menace | Parade |
 |---|---|
 | Accès aux données d'un autre compte | Le compte vient **du jeton** (jamais d'un argument) ; chaque appel s'exécute sous `runWithUser(compte)` ; le cours passe par `ownsCourse` (cours d'un autre = « introuvable », comme les routes) avant toute requête au tenant ; schéma Postgres par (compte, cours). Testé : `tests/mcp-tools.test.ts`. |
-| Jeton volé | Accès 1 h ; refresh tournant avec détection de réutilisation ; révocation depuis le compte ou RFC 7009 ; empreintes seules en base ; jamais journalisés (préfixes `cx_at_`/`cx_rt_` reconnaissables). |
+| Jeton volé | Accès 1 h ; refresh tournant avec détection de réutilisation (révocation de la lignée) ; révocation depuis le compte (toute l'application) ou RFC 7009 (la lignée) ; empreintes seules en base ; jamais journalisés (préfixes `cx_at_`/`cx_rt_` reconnaissables). |
 | Phishing de consentement (client DCR qui se fait appeler « Claude ») | Domaine affiché (vérifié pour CIMD, URL de retour pour DCR), mention « nom déclaré par l'application » ; URL de retour exacte ; consentement à chaque connexion. |
 | CSRF sur la décision | Cookie de session SameSite=Lax, `Origin` = l'app, ticket opaque lié au compte, usage unique. |
 | Code d'autorisation intercepté | PKCE S256 obligatoire ; code 60 s, usage unique, lié au client et à l'URL de retour. |

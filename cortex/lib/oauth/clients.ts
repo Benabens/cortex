@@ -3,7 +3,7 @@ import https from "node:https";
 import net from "node:net";
 import { authGet, authRun } from "@/db/auth-store";
 import { nowStr } from "@/db/q";
-import { digest, newId, newSecret } from "./secrets";
+import { newId } from "./secrets";
 
 /**
  * CLIENTS OAUTH du connecteur MCP. Deux façons d'en être un :
@@ -20,16 +20,17 @@ import { digest, newId, newSecret } from "./secrets";
  * le port d'une adresse de bouclage, RFC 8252 §7.3).
  */
 
-export type AuthMethod = "none" | "client_secret_post" | "client_secret_basic";
-
+/**
+ * Client OAuth PUBLIC (PKCE) — les seuls servis : Claude, comme tous les clients
+ * MCP connus, n'a pas de secret (spec MCP : DCR et CIMD = clients publics). Ne
+ * pas émettre de secret, c'est une surface d'attaque en moins.
+ */
 export type OAuthClient = {
   clientId: string;
   kind: "dcr" | "cimd";
   name: string | null;
   uri: string | null;
   redirectUris: string[];
-  authMethod: AuthMethod;
-  secretHash: string | null;
 };
 
 export class ClientRegistrationError extends Error {
@@ -83,7 +84,7 @@ function str(v: unknown, max: number): string | null {
   return typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null;
 }
 
-/** URL https facultative (client_uri, logo_uri) : ignorée si invalide plutôt que refusée. */
+/** URL https facultative (client_uri) : ignorée si invalide plutôt que refusée. */
 function httpsUrl(v: unknown): string | null {
   const s = str(v, MAX_URI_LENGTH);
   if (!s) return null;
@@ -118,12 +119,13 @@ function assertGrantAndResponseTypes(meta: Record<string, unknown>): void {
 
 // ───────────────────────────── DCR (RFC 7591) ─────────────────────────────
 
-export type RegisteredClient = { client: OAuthClient; secret: string | null; issuedAt: number };
+export type RegisteredClient = { client: OAuthClient; issuedAt: number };
 
 /**
- * Enregistrement dynamique. Méthode d'authentification par défaut : « none »
- * (client public + PKCE), le cas de tous les clients MCP connus ; un client qui
- * demande un secret le reçoit, et seule son empreinte est gardée.
+ * Enregistrement dynamique, toujours en client PUBLIC : une demande de secret
+ * (client_secret_post/basic) est ramenée à « none » — RFC 7591 §3.2.1 laisse le
+ * serveur remplacer une valeur de métadonnée, et le client suit ce qu'on lui
+ * renvoie. PKCE fait le travail qu'aurait fait le secret.
  */
 export async function registerClient(meta: unknown): Promise<RegisteredClient> {
   if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
@@ -132,28 +134,19 @@ export async function registerClient(meta: unknown): Promise<RegisteredClient> {
   const m = meta as Record<string, unknown>;
   const redirectUris = parseRedirectUris(m.redirect_uris);
   assertGrantAndResponseTypes(m);
-  const method = m.token_endpoint_auth_method ?? "none";
-  if (method !== "none" && method !== "client_secret_post" && method !== "client_secret_basic") {
-    throw new ClientRegistrationError("invalid_client_metadata", "token_endpoint_auth_method : none, client_secret_post ou client_secret_basic.");
-  }
-  const secret = method === "none" ? null : newSecret("cs");
   const client: OAuthClient = {
     clientId: newId("cx_client"),
     kind: "dcr",
     name: str(m.client_name, MAX_NAME_LENGTH),
     uri: httpsUrl(m.client_uri),
     redirectUris,
-    authMethod: method,
-    secretHash: secret ? digest(secret) : null,
   };
-  const now = nowStr();
   await purgeUnusedDcrClients();
   await authRun(
-    `INSERT INTO oauth_clients (client_id, kind, client_name, client_uri, logo_uri, redirect_uris, token_endpoint_auth_method, client_secret_hash, created_at, refresh_after)
-     VALUES (?,?,?,?,?,?,?,?,?,NULL)`,
-    client.clientId, "dcr", client.name, client.uri, httpsUrl(m.logo_uri), JSON.stringify(redirectUris), method, client.secretHash, now,
+    `INSERT INTO oauth_clients (client_id, kind, client_name, client_uri, redirect_uris, created_at, refresh_after) VALUES (?,?,?,?,?,?,NULL)`,
+    client.clientId, "dcr", client.name, client.uri, JSON.stringify(redirectUris), nowStr(),
   );
-  return { client, secret, issuedAt: Math.floor(Date.now() / 1000) };
+  return { client, issuedAt: Math.floor(Date.now() / 1000) };
 }
 
 /**
@@ -275,22 +268,17 @@ export function parseCimdDocument(clientId: string, body: string): OAuthClient {
   const method = m.token_endpoint_auth_method ?? "none";
   // Un document public ne peut pas porter de secret partagé ; private_key_jwt n'est pas servi.
   if (method !== "none") throw new ClientRegistrationError("invalid_client_metadata", "seuls les clients publics (token_endpoint_auth_method « none ») sont acceptés en CIMD");
-  return {
-    clientId, kind: "cimd", name: str(m.client_name, MAX_NAME_LENGTH), uri: httpsUrl(m.client_uri),
-    redirectUris, authMethod: "none", secretHash: null,
-  };
+  return { clientId, kind: "cimd", name: str(m.client_name, MAX_NAME_LENGTH), uri: httpsUrl(m.client_uri), redirectUris };
 }
 
 type ClientRow = {
-  client_id: string; kind: string; client_name: string | null; client_uri: string | null;
-  redirect_uris: string; token_endpoint_auth_method: string; client_secret_hash: string | null; refresh_after: string | null;
+  client_id: string; kind: string; client_name: string | null; client_uri: string | null; redirect_uris: string; refresh_after: string | null;
 };
 
 function rowToClient(r: ClientRow): OAuthClient {
   return {
     clientId: r.client_id, kind: r.kind === "cimd" ? "cimd" : "dcr", name: r.client_name, uri: r.client_uri,
-    redirectUris: JSON.parse(r.redirect_uris) as string[], authMethod: r.token_endpoint_auth_method as AuthMethod,
-    secretHash: r.client_secret_hash,
+    redirectUris: JSON.parse(r.redirect_uris) as string[],
   };
 }
 
@@ -318,8 +306,8 @@ export async function findClient(clientId: string, fetcher: MetadataFetcher = fe
     );
   } else {
     await authRun(
-      `INSERT INTO oauth_clients (client_id, kind, client_name, client_uri, logo_uri, redirect_uris, token_endpoint_auth_method, client_secret_hash, created_at, refresh_after)
-       VALUES (?,?,?,?,NULL,?,'none',NULL,?,?) ON CONFLICT (client_id) DO NOTHING`,
+      `INSERT INTO oauth_clients (client_id, kind, client_name, client_uri, redirect_uris, created_at, refresh_after)
+       VALUES (?,?,?,?,?,?,?) ON CONFLICT (client_id) DO NOTHING`,
       clientId, "cimd", client.name, client.uri, uris, nowStr(), refreshAfter,
     );
   }
