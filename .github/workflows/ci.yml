@@ -151,18 +151,33 @@ jobs:
       # et condensé), et la CI doit construire exactement ce que l'hébergeur
       # construira. Un miroir qui ne répond plus se voit donc ici, avant le merge.
       # Le miroir public d'AWS limite les tirages anonymes des runners GitHub
-      # (429 Too Many Requests, vu les 17 et 26/10) : on tire l'image de base
-      # avec quelques reprises espacées avant de construire, puis on reprend
-      # aussi la construction une fois. Une vraie panne du miroir reste rouge.
-      - name: Image de base (reprises si le miroir limite)
+      # (429 Too Many Requests, vus les 17 et 26/10, parfois pendant des
+      # dizaines de minutes). L'image de base est épinglée par son condensé :
+      # une fois tirée, on la garde dans le cache des Actions (clé = condensé)
+      # et les jobs suivants la rechargent sans toucher au miroir. C'est bit
+      # pour bit la même image que celle que l'hébergeur construit.
+      - name: Image de base — condensé du Dockerfile
+        id: base
+        run: echo "ref=$(grep -m1 -oE 'public\.ecr\.aws/[^[:space:]]+' Dockerfile)" >> "$GITHUB_OUTPUT"
+
+      - name: Image de base — cache
+        id: base-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/base-image.tar
+          key: base-image-${{ hashFiles('Dockerfile') }}-${{ steps.base.outputs.ref }}
+
+      - name: Image de base — chargement ou tirage (reprises si le miroir limite)
+        env:
+          IMG: ${{ steps.base.outputs.ref }}
         run: |
-          img=$(grep -m1 -oE 'public\.ecr\.aws/[^[:space:]]+' Dockerfile)
-          for i in 1 2 3 4 5; do
-            docker pull "$img" && exit 0
-            echo "::warning::tirage de $img refusé (essai $i), nouvel essai dans $((i * 30)) s"
-            sleep $((i * 30))
+          if [ -f /tmp/base-image.tar ]; then docker load -i /tmp/base-image.tar && exit 0; fi
+          for i in 1 2 3 4 5 6; do
+            if docker pull "$IMG"; then docker save "$IMG" -o /tmp/base-image.tar; exit 0; fi
+            echo "::warning::tirage refusé (essai $i), nouvel essai dans $((i * 45)) s"
+            sleep $((i * 45))
           done
-          echo "::error::image de base introuvable après 5 essais"
+          echo "::error::image de base introuvable après 6 essais"
           exit 1
 
       - name: Build de l'image (contexte = racine du repo)
