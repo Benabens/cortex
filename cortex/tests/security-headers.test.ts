@@ -70,3 +70,19 @@ test("X-Content-Type-Options, Referrer-Policy, X-Frame-Options, Permissions-Poli
   assert.equal(h["x-frame-options"], "DENY");
   assert.ok(h["permissions-policy"], "Permissions-Policy absente");
 });
+
+test("écran de consentement OAuth : form-action admet le retour vers le client MCP (https, bouclage), rien d'autre ne change", async () => {
+  const mod = await import("../next.config");
+  const rules = await mod.default.headers!();
+  const { CONSENT_PATH, CSP_BASE } = await import("../lib/security-headers");
+  const consent = rules.find((r) => r.source === CONSENT_PATH);
+  assert.ok(consent, "aucune règle pour l'écran de consentement");
+  // Next applique les règles dans l'ordre : la dernière gagne pour un même en-tête.
+  assert.ok(rules.indexOf(consent!) > 0, "la règle du consentement doit suivre la règle globale");
+  const csp = consent!.headers.find((h) => h.key.toLowerCase() === "content-security-policy")!.value;
+  const formAction = csp.split(";").map((s) => s.trim()).find((s) => s.startsWith("form-action"))!;
+  // Après « Autoriser », la décision redirige (303) vers https://claude.ai/... ou http://localhost:<port>/callback.
+  for (const src of ["'self'", "https:", "http://localhost:*", "http://127.0.0.1:*"]) assert.ok(formAction.split(/\s+/).includes(src), `${src} absent : ${formAction}`);
+  assert.equal(csp.replace(formAction, ""), CSP_BASE.replace(/form-action [^;]+/, ""), "seul form-action diffère de la CSP de base");
+  assert.equal(consent!.headers.length, 1, "la règle du consentement ne remplace que la CSP");
+});
