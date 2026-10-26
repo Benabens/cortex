@@ -419,6 +419,9 @@ test("examen blanc : un chapitre inconnu du plan est refusé avant tout devis", 
   const r = await call(client, "generate_mock_exam", { chapter: "3" });
   assert.equal(r.isError, true);
   assert.equal(errorCode(r), "not_found");
+  // « chapitre 3 » arrive souvent en nombre : accepté, puis cherché dans le plan comme le texte.
+  const n = await call(client, "generate_mock_exam", { chapter: 3 });
+  assert.equal(errorCode(n), "not_found", text(n));
   await client.close();
 });
 
