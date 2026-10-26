@@ -150,8 +150,23 @@ jobs:
       # Aucune image de base préparée ici : le Dockerfile nomme la sienne (miroir
       # et condensé), et la CI doit construire exactement ce que l'hébergeur
       # construira. Un miroir qui ne répond plus se voit donc ici, avant le merge.
+      # Le miroir public d'AWS limite les tirages anonymes des runners GitHub
+      # (429 Too Many Requests, vu les 17 et 26/10) : on tire l'image de base
+      # avec quelques reprises espacées avant de construire, puis on reprend
+      # aussi la construction une fois. Une vraie panne du miroir reste rouge.
+      - name: Image de base (reprises si le miroir limite)
+        run: |
+          img=$(sed -n 's/^ARG NODE_IMAGE=//p' Dockerfile | head -1)
+          for i in 1 2 3 4 5; do
+            docker pull "$img" && exit 0
+            echo "::warning::tirage de $img refusé (essai $i), nouvel essai dans $((i * 30)) s"
+            sleep $((i * 30))
+          done
+          echo "::error::image de base introuvable après 5 essais"
+          exit 1
+
       - name: Build de l'image (contexte = racine du repo)
-        run: docker build -t cortex-app .
+        run: docker build -t cortex-app . || { echo "::warning::build en échec, nouvel essai dans 60 s"; sleep 60; docker build -t cortex-app .; }
 
       # L'image pose NODE_ENV=production : sans AUTH_ENABLED=1, prod-boot doit
       # REFUSER de démarrer (chaque visiteur serait « owner »). On le vérifie
