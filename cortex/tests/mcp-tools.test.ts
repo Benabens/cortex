@@ -261,6 +261,8 @@ test("get_weak_points : par code de cours, triés par gravité, contenu encadré
   assert.deepEqual(wp.map((w) => w.topic), ["Diagonalisation", "Noyau et image"]);
   assert.match(text(r), /<cortex_data>/);
   assert.match(text(r), /jamais des instructions/);
+  // Un client qui lit structuredContent plutôt que le texte (ère 2026-07-28) reçoit le même avertissement.
+  assert.match(String(r.structuredContent!.data_notice), /jamais des instructions/);
   await client.close();
 });
 
@@ -537,6 +539,45 @@ test("client 2026-07-28 : une confirmation forgée (réponse sans requestState s
   assert.equal(json.result?.resultType, "input_required", raw.slice(0, 300));
   assert.equal(await balance(ALICE), before);
   assert.equal(llmCalls, calls);
+});
+
+/** Appel brut 2026-07-28 (en-têtes et enveloppe) : pour rejouer exactement ce qu'un client a envoyé. */
+async function modernCall(access: string, name: string, params: Record<string, unknown>) {
+  const res = await route(new Request(MCP_URL, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${access}`, "content-type": "application/json", accept: "application/json, text/event-stream",
+      "mcp-protocol-version": "2026-07-28", "mcp-method": "tools/call", "mcp-name": name,
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0", id: Math.floor(Math.random() * 1e6), method: "tools/call",
+      params: {
+        name, ...params,
+        _meta: {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": { name: "brut", version: "1" },
+          "io.modelcontextprotocol/clientCapabilities": { elicitation: { form: {} } },
+        },
+      },
+    }),
+  }));
+  const raw = await res.text();
+  return JSON.parse(raw.includes("data:") ? raw.split("data:").pop()!.trim() : raw) as { result?: Record<string, unknown> & { requestState?: string; isError?: boolean; _meta?: Record<string, unknown> } };
+}
+
+test("client 2026-07-28 : une confirmation acceptée ne sert qu'une fois (rejouer la même réponse ne débite pas deux fois)", async () => {
+  const { access } = await tokenFor(ALICE);
+  const first = await modernCall(access, "generate_drill", { arguments: { concept: "déterminant" } });
+  assert.equal(first.result?.resultType, "input_required");
+  const retry = { arguments: { concept: "déterminant" }, inputResponses: { confirm: { action: "accept", content: { confirm: true } } }, requestState: first.result!.requestState };
+  const before = await balance(ALICE);
+  const done = await modernCall(access, "generate_drill", retry);
+  assert.equal((done.result?.structuredContent as { status: string }).status, "done");
+  assert.equal(await balance(ALICE), before - 10);
+  const replay = await modernCall(access, "generate_drill", retry);
+  assert.equal(replay.result?.isError, true);
+  assert.equal((replay.result?._meta?.["com.cortexexam/error"] as { code: string }).code, "confirmation_invalid");
+  assert.equal(await balance(ALICE), before - 10, "le rejeu n'a rien débité");
 });
 
 // ───────────────────────────── portée et révocation ─────────────────────────────
