@@ -89,8 +89,8 @@ touche au paiement.
 
 | Outil | Entrée | Sortie |
 |---|---|---|
-| `list_courses` | — | cours du compte : id, nom, code, établissement, date d'examen, jours restants, analysé ou non, taille du corpus |
-| `get_study_plan` | `course?` | maîtrise et couverture pondérées, notions à revoir, chapitres du plan, notion prioritaire + 3 suivantes, notions (40 max, par priorité), compte à rebours |
+| `list_courses` | — | cours du compte : id, code, nom, établissement, langue, date d'examen, jours restants, lien vers l'app |
+| `get_study_plan` | `course?` | maîtrise et couverture pondérées, notions à revoir, répétition espacée, chapitres du plan, notion prioritaire + 3 suivantes, notions (40 max, par priorité), compte à rebours |
 | `get_weak_points` | `course?`, `limit?` (≤ 50) | points faibles par gravité (sujet, thème, description bornée), regroupement par thème, concepts dus en répétition espacée |
 | `get_results` | `course?`, `limit?` (≤ 30) | examens blancs générés (date, statut, nb de questions, vérification), scores de maîtrise par notion, retours notés |
 | `search_course_materials` | `course?`, `query` (2-200 car.), `limit?` (≤ 30) | passages des sources du cours (titre, type, extrait borné) |
@@ -106,12 +106,17 @@ touche au paiement.
 | `check_answer` | `course?`, `statement` (≤ 8000), `answer` (≤ 8000), `confirmation_token?` | `assist` = 0,1 crédit ; 1 assistance du quota du jour | verdict, barème critère par critère, score, retour, solution |
 
 Les coûts viennent des mêmes fonctions que l'app (`creditCost`, `costForJob`, `CREDITS_COST_JSON`) :
-changer un tarif change le devis MCP.
+changer un tarif change le devis MCP. Un examen déjà en cours est réutilisé sans devis ni débit, comme
+dans l'app. Les pré-checks propres à l'examen (corpus ingéré, moteur LaTeX, place disque) s'exécutent à la
+confirmation, dans `startGenerationJob` : un refus à ce stade ne débite rien.
 
 ### Confirmation d'un coût
 
 Toute action qui coûte des crédits ou une unité de quota **annonce d'abord le coût exact** (crédits,
-solde avant/après, quota du jour utilisé/plafond) et attend une confirmation explicite :
+solde avant/après, quota du jour utilisé/plafond) et attend une confirmation explicite. Avant même le
+devis, les gardes lecture seule de l'app (`generationGate` : rafale + quota du jour ; `creditsGate` :
+solde ; moteur disponible) refusent ce qui serait refusé de toute façon — on ne fait pas confirmer
+une dépense impossible.
 
 1. **Client qui gère l'élicitation (ère 2026-07-28, ex. Claude Code)** : l'outil répond
    `input_required` avec un formulaire « Confirmer — N crédits ». Le client le montre à la personne et
