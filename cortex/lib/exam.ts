@@ -899,3 +899,34 @@ async function buildClaudeCodePrompt(ctx: Ctx): Promise<string> {
   ].join("\n");
 }
 
+/**
+ * Questions d'un examen terminé, avec un état de vérification HONNÊTE
+ * (invariant n° 2) : « proven » seulement si la réponse a été vérifiée par
+ * une voie déterministe (exécution, comparaison numérique, sympy) ;
+ * `verified = 1` posé après une simple relecture par le modèle — ou après
+ * qu'il a corrigé son propre corrigé — n'est PAS une preuve.
+ */
+export type ExamQuestionView = {
+  concept: string;
+  statementHtml: string;
+  solutionHtml: string | null;
+  verification: "proven" | "reviewed_by_model" | "not_verified";
+};
+
+export async function examQuestions(examId: number, limit: number): Promise<ExamQuestionView[]> {
+  await q.ensureTable("exam_questions");
+  let methodCol = "NULL";
+  try {
+    if ((await q.columns("exam_questions")).includes("verify_method")) methodCol = "verify_method";
+  } catch {}
+  const rows = await q.all<{ concept: string; statement_html: string; solution_html: string | null; verified: number | null; method: string | null }>(
+    `SELECT concept, statement_html, solution_html, verified, ${methodCol} method FROM exam_questions WHERE exam_id = ? ORDER BY id LIMIT ?`,
+    examId, limit,
+  );
+  return rows.map((r) => ({
+    concept: r.concept,
+    statementHtml: r.statement_html,
+    solutionHtml: r.solution_html,
+    verification: Number(r.verified) !== 1 ? "not_verified" : r.method === "deterministic" ? "proven" : "reviewed_by_model",
+  }));
+}

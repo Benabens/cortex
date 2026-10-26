@@ -204,7 +204,8 @@ Règles :
 | Flood / boucle d'agent | Limite par IP du proxy (clé = jeton pour `/mcp`, pour ne pas mettre tous les comptes claude.ai dans le même seau) ; limite par compte au point MCP ; quotas et rafale de la réservation ; corps ≤ 256 Kio. |
 | Sorties géantes | Listes bornées par outil, textes tronqués, plafond global ~40 000 caractères par résultat (sous les limites de claude.ai et de Claude Code). |
 | Fuite par les journaux | Journal : outil, empreinte tronquée du compte, durée, code d'erreur. Jamais d'argument, de contenu de cours, de jeton ni d'e-mail. Les erreurs inattendues donnent un message générique au client. |
-| DNS rebinding / origine | `Origin` présente et hors liste (`AUTH_URL`, claude.ai, claude.com, bouclage, `MCP_ALLOWED_ORIGINS`) → 403 ; requêtes sans `Origin` (serveur à serveur) acceptées. |
+| DNS rebinding / origine | `Origin` présente et hors liste (`AUTH_URL`, claude.ai, claude.com, bouclage, `MCP_ALLOWED_ORIGINS`) → 403 ; requêtes sans `Origin` (serveur à serveur) acceptées. La même liste borne le CORS (origine reflétée, jamais `*`) des points OAuth et de `/mcp` (`lib/oauth/cors.ts`). |
+| Texte forgé sur le domaine Cortex | L'écran d'erreur du consentement n'affiche que des messages connus, choisis par code ; aucun texte lu dans l'URL. |
 | Émetteur falsifié par l'en-tête Host | En déploiement gardé l'émetteur vient d'`AUTH_URL` ; sans elle, MCP indisponible. |
 
 ## 6. Tests (coutures convenues)

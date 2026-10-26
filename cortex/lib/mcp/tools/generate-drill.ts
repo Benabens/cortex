@@ -1,9 +1,9 @@
 import * as z from "zod/v4";
-import { q } from "@/db/q";
 import { creditCost } from "@/lib/billing/credits";
 import { generateDrill } from "@/lib/drill";
 import { FIELD_LIMITS } from "@/lib/field-limits";
 import { dueConcepts } from "@/lib/schedule";
+import { topWeaknessTopic } from "@/lib/weaknesses";
 import { runAssist } from "../assist";
 import { clip, htmlToText } from "../content";
 import { courseLabel } from "../courses";
@@ -26,10 +26,8 @@ const output = z.object({
 /** Concept par défaut : le point faible le plus grave, sinon le concept le plus en retard en répétition espacée. */
 async function defaultConcept(): Promise<string | null> {
   try {
-    const w = await q.get<{ topic: string }>(
-      `SELECT topic FROM weaknesses WHERE topic IS NOT NULL AND topic != '(à analyser)' ORDER BY severity DESC, logged_at DESC LIMIT 1`,
-    );
-    if (w?.topic) return w.topic;
+    const top = await topWeaknessTopic();
+    if (top) return top;
   } catch { /* pas encore de table des faiblesses */ }
   try { return (await dueConcepts(1))[0] ?? null; } catch { return null; }
 }

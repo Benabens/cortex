@@ -100,3 +100,15 @@ export async function calibrationSummary(): Promise<{ course: string; total: num
   }
   return { course: currentCourse(), total, byArchetype };
 }
+
+/** Derniers retours notés de la personne sur ce cours (le plus récent d'abord). */
+export async function recentFeedback(limit: number): Promise<Array<{ examId: number | null; topic: string | null; verdict: string; score: number | null; createdAt: string | null }>> {
+  await ensureFeedbackSchema();
+  const rows = await q.all<{ exam_id: number | null; topic: string | null; verdict: string; score: number | null; created_at: string | null }>(
+    `SELECT exam_id, topic, verdict, score, created_at FROM feedback ORDER BY created_at DESC, id DESC LIMIT ?`, limit,
+  );
+  return rows.map((f) => ({
+    examId: f.exam_id === null ? null : Number(f.exam_id), topic: f.topic, verdict: String(f.verdict),
+    score: f.score === null || f.score === undefined ? null : Number(f.score), createdAt: f.created_at,
+  }));
+}

@@ -311,6 +311,36 @@ test("get_job_status : un job inconnu est introuvable", async () => {
   await client.close();
 });
 
+test("get_job_status : un examen terminé ne dit « prouvé » que pour une vérification déterministe (invariant n° 2)", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { runWithUser } = await import("../db/context");
+  const { q } = await import("../db/q");
+  const { createJob, setJob } = await import("../lib/jobs");
+  const jobId = await runWithUser(ALICE, () => runWithCourse(courses[ALICE], async () => {
+    await q.ensureTable("exams");
+    await q.ensureTable("exam_questions");
+    await q.ensureColumns("exam_questions", ["verified", "verify_issue", "verify_method"]);
+    const examId = await q.insert(`INSERT INTO exams (status, html_path) VALUES ('done', 'exam-1.pdf')`);
+    for (const [concept, verified, method] of [["Valeurs propres", 1, "deterministic"], ["Rang", 1, "llm"], ["Noyau", 0, "llm"]] as const) {
+      await q.run(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, verified, verify_method) VALUES (?,?,?,?,?,?)`,
+        examId, concept, `<p>Énoncé ${concept}</p>`, `<p>Corrigé ${concept}</p>`, verified, method);
+    }
+    const id = await createJob("exam");
+    await setJob(id, { status: "done", progress: 100, resultId: examId, resultPath: "/exam/exam-1.pdf" });
+    return id;
+  }));
+  const { access } = await tokenFor(ALICE);
+  const { client } = await connect(access);
+  const r = await call(client, "get_job_status", { job_id: jobId });
+  assert.equal(r.isError, undefined, text(r));
+  const qs = (r.structuredContent as { exam: { questions: Array<{ concept: string; verification: string; solution: string | null }> } }).exam.questions;
+  assert.deepEqual(qs.map((x) => x.verification), ["proven", "reviewed_by_model", "not_verified"]);
+  assert.equal(qs[0].solution, null, "pas de corrigé sans include_solutions");
+  const withSol = await call(client, "get_job_status", { job_id: jobId, include_solutions: true });
+  assert.equal((withSol.structuredContent as { exam: { questions: Array<{ solution: string }> } }).exam.questions[0].solution, "Corrigé Valeurs propres");
+  await client.close();
+});
+
 // ───────────────────────────── coûts : devis et confirmation ─────────────────────────────
 
 test("client 2025 : devis exact SANS débit ni appel au modèle, puis confirmation par le jeton → drill, 0,1 crédit", async () => {
