@@ -122,7 +122,11 @@ une dépense impossible.
    `input_required` avec un formulaire « Confirmer — N crédits ». Le client le montre à la personne et
    relance l'appel avec la réponse. Un `requestState` signé HMAC (10 min) lie la confirmation au compte,
    à l'outil, aux arguments et au coût annoncé : un état falsifié, expiré ou porté sur d'autres arguments
-   est refusé.
+   est refusé. Si la personne refuse (`decline`) ou si la confirmation est fermée ou ne peut pas être
+   affichée (`cancel` — c'est ce que répond Claude Code en mode non interactif `-p`, vérifié avec la
+   2.1.283), l'outil rend `status: "declined"` avec le coût annoncé et **aucun jeton de repli** : une
+   confirmation ratée ne devient jamais un devis que le modèle pourrait confirmer seul. Conséquence
+   assumée : une session sans humain ne peut rien dépenser.
 2. **Sinon (ère 2025, ex. claude.ai)** : un serveur sans état ne peut pas pousser de requête au client.
    Premier appel = **devis** sans aucun effet, avec un `confirmation_token` (usage unique, 10 min, haché
    en base, lié au compte, à l'autorisation OAuth, à l'outil, aux arguments et au coût). Second appel avec

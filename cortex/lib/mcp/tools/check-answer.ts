@@ -5,13 +5,14 @@ import { FIELD_LIMITS } from "@/lib/field-limits";
 import { runAssist } from "../assist";
 import { clip } from "../content";
 import { courseLabel } from "../courses";
-import { confirmationTokenArg, courseArg, courseRef, courseRefOf, generationStatus, quoteSchema, quoteSummary } from "../schemas";
+import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, generationStatus, quoteSchema, quoteSummary } from "../schemas";
 import { defineTool } from "../tool";
 
 const output = z.object({
   status: generationStatus,
   course: courseRef,
   confirmation: quoteSchema.nullable(),
+  declined: declinedSchema.nullable().describe("When status is declined: why, and the cost that was announced."),
   result: z.object({
     verdict: z.enum(["correct", "partial", "wrong"]),
     score: z.object({ earned: z.number(), total: z.number() }),
@@ -41,7 +42,7 @@ export default defineTool({
   output,
   async run(args, ctx) {
     return ctx.inCourse(args.course, async (c) => {
-      const base = { course: courseRefOf(c), confirmation: null, result: null };
+      const base = { course: courseRefOf(c), confirmation: null, declined: null, result: null };
       const statement = args.statement.trim();
       const answer = args.answer.trim();
       const decision = await ctx.confirm(
@@ -51,7 +52,7 @@ export default defineTool({
       );
       if (decision.kind === "input_required") return decision.result;
       if (decision.kind === "quote") return { ...base, status: "confirmation_required" as const, confirmation: decision.quote };
-      if (decision.kind === "declined") return { ...base, status: "declined" as const };
+      if (decision.kind === "declined") return { ...base, status: "declined" as const, declined: decision.declined };
       await ctx.progress("Correction en cours…");
       const r = await runAssist("check-solution", () => checkSolution({ statement, answer, imageRel: null }));
       return {
@@ -69,7 +70,7 @@ export default defineTool({
   },
   summarize: (o) => {
     if (o.status === "confirmation_required" && o.confirmation) return quoteSummary(o.confirmation);
-    if (o.status === "declined") return "Correction refusée par la personne : rien n'a été débité.";
+    if (o.status === "declined" && o.declined) return declinedSummary(o.declined);
     return o.result ? `Correction : ${o.result.verdict}, ${o.result.score.earned}/${o.result.score.total}.` : "Correction terminée.";
   },
 });

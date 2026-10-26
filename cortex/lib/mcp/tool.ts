@@ -61,9 +61,17 @@ export type Cost = {
 /** Issue d'une demande de confirmation. */
 export type Confirmation =
   | { kind: "confirmed" }
-  | { kind: "declined" }
+  | { kind: "declined"; declined: DeclinedView }
   | { kind: "quote"; quote: QuoteView }
   | { kind: "input_required"; result: InputRequiredResult };
+
+/**
+ * Confirmation par élicitation qui n'a pas abouti : refusée par la personne
+ * (« decline ») ou fermée / impossible à afficher (« cancel », ex. session non
+ * interactive). Jamais de jeton de repli : une confirmation ratée ne se
+ * transforme pas en devis que le modèle pourrait confirmer seul.
+ */
+export type DeclinedView = { action: "decline" | "cancel"; cost_credits: number | null; summary: string };
 
 /** Devis rendu au client qui ne gère pas l'élicitation (second appel avec le jeton). */
 export type QuoteView = {
