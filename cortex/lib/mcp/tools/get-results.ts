@@ -1,5 +1,5 @@
 import * as z from "zod/v4";
-import { q } from "@/db/q";
+import { recentFeedback } from "@/lib/calibration";
 import { listExams } from "@/lib/exam";
 import { programOverview } from "@/lib/program";
 import { clip } from "../content";
@@ -13,7 +13,7 @@ const output = z.object({
     created_at: z.string().nullable(),
     status: z.string(),
     questions: z.number(),
-    verification: z.string().nullable().describe("How many answers were proven by deterministic verification."),
+    verification_summary: z.string().nullable().describe("The generator's own verification counts (ok / fixed / removed). Not a proof: use get_job_status for per-question proof status."),
     pdf_link: z.string().nullable(),
     solutions_link: z.string().nullable(),
   })),
@@ -56,11 +56,8 @@ export default defineTool({
       try { exams = await listExams(); } catch { /* aucun examen encore */ }
       let topics: Awaited<ReturnType<typeof programOverview>>["topics"] = [];
       try { topics = (await programOverview()).topics; } catch { /* cours pas encore analysé */ }
-      let feedback: Array<{ exam_id: number | null; topic: string | null; verdict: string; score: number | null; created_at: string | null }> = [];
-      try {
-        await q.ensureTable("feedback");
-        feedback = await q.all(`SELECT exam_id, topic, verdict, score, created_at FROM feedback ORDER BY created_at DESC, id DESC LIMIT ?`, n);
-      } catch { /* pas de retour noté */ }
+      let feedback: Awaited<ReturnType<typeof recentFeedback>> = [];
+      try { feedback = await recentFeedback(n); } catch { /* pas de retour noté */ }
       return {
         course: courseRefOf(c),
         mock_exams: exams.slice(0, n).map((e) => ({
@@ -68,7 +65,7 @@ export default defineTool({
           created_at: e.createdAt ?? null,
           status: String(e.status),
           questions: Number(e.questionCount ?? 0),
-          verification: e.verifySummary ? clip(String(e.verifySummary), 300) : null,
+          verification_summary: e.verifySummary ? clip(String(e.verifySummary), 300) : null,
           pdf_link: abs(e.url),
           solutions_link: abs(e.solutionsUrl),
         })),
@@ -81,11 +78,7 @@ export default defineTool({
             last_done_at: t.lastDoneAt, next_review_at: t.dueAt,
           })),
         graded_feedback: feedback.map((f) => ({
-          exam_id: f.exam_id === null ? null : Number(f.exam_id),
-          topic: f.topic ? clip(f.topic, 200) : null,
-          verdict: String(f.verdict),
-          score: f.score === null || f.score === undefined ? null : Number(f.score),
-          created_at: f.created_at,
+          exam_id: f.examId, topic: f.topic ? clip(f.topic, 200) : null, verdict: f.verdict, score: f.score, created_at: f.createdAt,
         })),
         app_link: `${ctx.appOrigin}/examens?course=${encodeURIComponent(c.id)}`,
       };

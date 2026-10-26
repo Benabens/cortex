@@ -1,5 +1,5 @@
 import * as z from "zod/v4";
-import { q } from "@/db/q";
+import { examQuestions } from "@/lib/exam";
 import { activeJob, getJob, listJobs, type Job } from "@/lib/jobs";
 import { redactMessage } from "@/lib/observability";
 import { clip, htmlToText } from "../content";
@@ -28,7 +28,8 @@ const output = z.object({
       concept: z.string(),
       statement: z.string(),
       solution: z.string().nullable(),
-      verified: z.boolean().nullable().describe("true = answer proven by deterministic verification."),
+      verification: z.enum(["proven", "reviewed_by_model", "not_verified"])
+        .describe("proven = answer checked by deterministic execution/comparison; reviewed_by_model = only re-read by a model (NOT a proof); not_verified."),
     })),
     truncated: z.boolean(),
   }).nullable().describe("Present when a mock-exam job is done."),
@@ -79,18 +80,15 @@ export default defineTool({
       if (!job) throw new ToolError("not_found", `Aucune génération n° ${job_id} dans ce cours.`);
       let exam: z.infer<typeof output>["exam"] = null;
       if (job.type === "exam" && job.status === "done" && job.resultId) {
-        const rows = await q.all<{ concept: string; statement_html: string; solution_html: string | null; verified: number | null }>(
-          `SELECT concept, statement_html, solution_html, verified FROM exam_questions WHERE exam_id = ? ORDER BY id LIMIT ?`,
-          job.resultId, MAX_QUESTIONS + 1,
-        );
+        const rows = await examQuestions(job.resultId, MAX_QUESTIONS + 1);
         exam = {
           exam_id: job.resultId,
           questions: rows.slice(0, MAX_QUESTIONS).map((r, i) => ({
             number: i + 1,
             concept: clip(r.concept, 200),
-            statement: clip(htmlToText(r.statement_html), 3000),
-            solution: include_solutions ? clip(htmlToText(r.solution_html), 3000) || null : null,
-            verified: r.verified === null || r.verified === undefined ? null : Number(r.verified) === 1,
+            statement: clip(htmlToText(r.statementHtml), 3000),
+            solution: include_solutions ? clip(htmlToText(r.solutionHtml), 3000) || null : null,
+            verification: r.verification,
           })),
           truncated: rows.length > MAX_QUESTIONS,
         };
