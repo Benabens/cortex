@@ -1,5 +1,9 @@
+import { currentCourse } from "@/db/client";
 import { q, nowStr } from "@/db/q";
 import { completeText, extractJson } from "@/lib/llm";
+import { examLanguageFor, readStoredProfile, resolveExamFormat } from "@/lib/exam-format";
+import { languageName } from "@/lib/profiles/generic-directives";
+import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
 import { courseRefImages } from "@/lib/course-vision";
 import type { ExamQuestion, StepCb } from "@/lib/exam";
 import { getFormatProfile } from "@/lib/format";
@@ -39,6 +43,12 @@ export type QcmItem = {
   figureSpec?: FigureSpec | null;
   figureFile?: string | null;
   figureTruth?: Record<string, number> | null;
+  /** Fait du cours que la question teste (conception), non persisté. */
+  sourceFact?: string | null;
+  /** Verdict du juge à l'aveugle : pouvoir discriminant (1-5), réussite avec les seuls noms des notions. */
+  discrimination?: number | null;
+  nameOnly?: boolean | null;
+  judgeIssue?: string | null;
 };
 
 const QCM_BATCH_SCHEMA = {
@@ -52,9 +62,10 @@ const QCM_BATCH_SCHEMA = {
           topic: { type: "string" },
           type: { type: "string", description: "scq (une seule bonne réponse) | mcq (une ou plusieurs)" },
           stem: { type: "string", description: "L'énoncé de la question (teste la compréhension, pas le par-cœur)." },
-          options: { type: "array", items: { type: "string" }, description: "4 à 5 options, longueurs COMPARABLES, pas d'« toutes les réponses ci-dessus »." },
+          options: { type: "array", items: { type: "string" }, description: "4 à 5 options : des PROPOSITIONS COMPLÈTES de longueurs COMPARABLES, pas d'« toutes les réponses ci-dessus »." },
           correct: { type: "array", items: { type: "integer" }, description: "Indices 0-based de la/des bonne(s) réponse(s). Exactement 1 pour scq." },
-          misconceptions: { type: "array", items: { type: "string" }, description: "Pour CHAQUE option : l'idée fausse précise que ce distracteur punit (chaîne vide pour les bonnes réponses)." },
+          misconceptions: { type: "array", items: { type: "string" }, description: "Pour CHAQUE option : « [procédé] idée fausse précise » que ce distracteur punit (procédé de la taxonomie) ; chaîne vide pour les bonnes réponses." },
+          source_fact: { type: "string", description: "Le fait PRÉCIS du cours que la question teste (étude et chiffre, condition d'une définition, mécanisme), tel qu'il apparaît dans les extraits." },
           explanation: { type: "string", description: "Pourquoi la bonne réponse est correcte ET pourquoi chaque distracteur est faux." },
           mold: { type: "string", description: "Recopie le MOULE imposé pour cette question (voir la consigne par question)." },
           figure_spec: { type: "object", description: "UNIQUEMENT si la question exige une figure data/plot (moule figure_reading) : le FIGURE SPEC JSON décrit dans le prompt. Sinon omets ce champ." },
@@ -87,11 +98,149 @@ async function coverageTopics(): Promise<{ label: string; method: string | null 
     const rows = await q.all<{ label: string; method: string | null }>(`SELECT label, method FROM topics ORDER BY exam_weight DESC, exam_count DESC, label`);
     if (rows.length) return rows;
   } catch {}
+  // Pas encore de notions analysées : les titres des supports du cours, plutôt que des archétypes
+  // génériques qui ne parlent d'aucune notion (cas d'un cours sans annale fraîchement préparé).
+  try {
+    const titles = await q.all<{ title: string }>(
+      `SELECT DISTINCT s.title FROM sources s WHERE s.type NOT IN ('final','midterm','sample_questions','exam_info') ORDER BY s.recency_weight DESC, s.id`,
+    );
+    if (titles.length) return titles.map((t) => ({ label: t.title, method: null }));
+  } catch {}
   // Import paresseux : course-profile charge les profils qui dépendent du moteur d'examen.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { profile } = require("@/lib/course-profile") as typeof import("@/lib/course-profile");
   return profile().archetypes.map((a) => ({ label: a.concept, method: a.structure }));
 }
+
+/**
+ * TAXONOMIE DES DISTRACTEURS — ce qui sépare un QCM d'examen d'un QCM de remplissage
+ * (cas HUM-285 : options d'un mot, mauvaises réponses évidentes). Chaque distracteur
+ * porte son procédé entre crochets dans « misconceptions ».
+ */
+const DISTRACTOR_TAXONOMY = [
+  `TAXONOMIE DES DISTRACTEURS — chaque mauvaise option est construite par UN de ces procédés (écris-le entre crochets en tête de son "misconceptions", ex. « [inversion] … ») :`,
+  `  · [inversion] le résultat ou le sens d'un effet est inversé (augmente ↔ diminue, plus ↔ moins, cause ↔ conséquence) ;`,
+  `  · [mauvaise condition] la bonne notion, mais une condition de sa définition change ou manque (même mesure, une seule condition diffère) ;`,
+  `  · [mauvaise attribution] le bon chiffre ou le bon résultat attribué à la mauvaise étude, au mauvais auteur, pays, année ou acteur ;`,
+  `  · [sur-généralisation] un résultat vrai sous conditions présenté comme universel (« toujours », « dans tous les cas », « suffit à ») ;`,
+  `  · [quasi-synonyme] une notion voisine du cours, confondue avec la bonne (même famille, autre définition) ;`,
+  `  · [calcul] (matières quantitatives) l'erreur de calcul ou de méthode typique — jamais une valeur au hasard.`,
+];
+
+const OPTION_RULES = [
+  `  - OPTIONS = PROPOSITIONS COMPLÈTES : chaque option est une phrase autonome qui affirme quelque chose de vérifiable — jamais un mot isolé ni un simple nom de notion ; longueurs comparables (±30 %), même structure grammaticale ; toutes plausibles pour un étudiant qui n'a retenu que les noms des notions.`,
+  `  - TIGES INDÉPENDANTES : chaque question se comprend seule, sans scénario partagé avec une autre question, et ne donne pas la réponse d'une autre.`,
+  `  - ANCRAGE : chaque question teste un FAIT PRÉCIS des extraits du cours fournis (résultat d'étude avec auteurs et chiffres, condition d'une définition, mécanisme) ; recopie ce fait dans "source_fact". Rien hors des extraits et du programme.`,
+];
+
+const NO_CLASSIFICATION =
+  `  - INTERDIT : les questions « classe ce cas dans la notion X » / « quel concept illustre cette situation ? » dont les options sont des noms de notions — elles se réussissent sans comprendre. Teste plutôt les CONDITIONS qui font qu'un cas relève ou non d'une notion (même mesure, une condition change).`;
+
+/** Types de sources jamais pris comme « faits du cours » à tester (annales : on n'en recopie pas les questions). */
+const NOT_COURSE_FACTS = new Set(["final", "midterm", "sample_questions", "exam_info"]);
+
+/** Fenêtre d'un texte autour du premier mot de la requête qu'il contient. */
+function windowAround(text: string, query: string, cap: number): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= cap) return t;
+  const words = query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4);
+  const lower = t.toLowerCase();
+  const at = words.map((w) => lower.indexOf(w)).filter((i) => i >= 0).sort((a, b) => a - b)[0] ?? 0;
+  const start = Math.max(0, Math.min(at - Math.floor(cap / 3), t.length - cap));
+  return t.slice(start, start + cap);
+}
+
+/** Extraits du cours sur les sujets d'un lot (recherche plein texte), pour ancrer chaque question sur un fait précis. */
+export async function coursePassages(topics: string[], perTopic = 2, cap = 900): Promise<{ src: string; text: string }[]> {
+  const { search } = await import("@/lib/search");
+  const out: { src: string; text: string }[] = [];
+  const seen = new Set<number>();
+  for (const topic of topics) {
+    let groups: Awaited<ReturnType<typeof search>> = [];
+    try { groups = await search(topic, 16, "or"); } catch { continue; }
+    let k = 0;
+    for (const h of groups.flatMap((g) => g.hits)) {
+      if (k >= perTopic) break;
+      if (NOT_COURSE_FACTS.has(h.sourceType) || seen.has(h.itemId)) continue;
+      seen.add(h.itemId);
+      const row = await q.get<{ text: string }>(`SELECT text FROM items WHERE id = ?`, h.itemId);
+      if (!row?.text) continue;
+      out.push({ src: h.sourceTitle, text: windowAround(row.text, topic, cap) });
+      k++;
+    }
+  }
+  return out;
+}
+
+/** Questions d'exemple officielles (sans annale) : citées par la détection du format, et sources « exemples ». */
+export async function officialExamples(max = 3, cap = 700): Promise<{ src: string; text: string }[]> {
+  const out: { src: string; text: string }[] = [];
+  const stored = await readStoredProfile();
+  for (const e of stored?.examples ?? []) out.push({ src: "exemple officiel", text: e.slice(0, cap) });
+  try {
+    const rows = await q.all<{ src: string; text: string }>(
+      `SELECT s.title src, i.text text FROM items i JOIN sources s ON s.id = i.source_id WHERE s.type = 'sample_questions' ORDER BY s.id, i.id LIMIT ?`, max,
+    );
+    for (const r of rows) out.push({ src: r.src, text: r.text.slice(0, cap) });
+  } catch {}
+  return out.slice(0, max);
+}
+
+/** true si la bonne option se repère à sa longueur (nettement plus longue que les distracteurs). */
+export function qcmLengthCue(options: string[], correct: number[]): boolean {
+  if (correct.length !== 1 || options.length < 3) return false;
+  const len = (s: string) => s.trim().length;
+  const right = len(options[correct[0]] ?? "");
+  const others = options.filter((_, i) => i !== correct[0]).map(len).sort((a, b) => a - b);
+  const median = others[Math.floor(others.length / 2)];
+  return right > 1.5 * median && right - median > 25;
+}
+
+/** Générateur pseudo-aléatoire déterministe (mulberry32). */
+function rng(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Mélange les options d'un QCM (graine déterministe) en gardant la clé et les idées
+ * fausses alignées : un modèle place volontiers la bonne réponse en B ou C.
+ */
+export function shuffleQcmOptions<T extends { options: string[]; correct: number[]; misconceptions: string[] }>(it: T, seed: number): T {
+  const order = it.options.map((_, i) => i);
+  const r = rng(seed);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(r() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  const where = new Map(order.map((from, to) => [from, to]));
+  return {
+    ...it,
+    options: order.map((from) => it.options[from]),
+    misconceptions: order.map((from) => it.misconceptions?.[from] ?? ""),
+    correct: it.correct.map((k) => where.get(k) ?? k).sort((a, b) => a - b),
+  };
+}
+
+const seedOf = (s: string) => [...s].reduce((h, ch) => (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0, 7);
+
+/** Pourquoi un QCM vérifié est trop faible pour être gardé tel quel, ou null. */
+function weaknessOf(it: QcmItem): string | null {
+  const issue = it.judgeIssue ? ` (${it.judgeIssue})` : "";
+  if (it.nameOnly) return `réussie avec les seuls noms des notions ou par élimination${issue}`;
+  if (typeof it.discrimination === "number" && it.discrimination <= 2) return `pouvoir discriminant faible (${it.discrimination}/5)${issue}`;
+  if (qcmLengthCue(it.options, it.correct)) return "la bonne option se repère à sa longueur";
+  return null;
+}
+
+/** Étiquette d'un sujet imposé par le focus de l'étudiant : un thème, pas une forme. */
+const FOCUS_METHOD = "accent thématique demandé par l'étudiant : un thème, ignore toute indication de forme ou de nombre";
 
 const ARCHITECT_QCM_RULES = [
   `RÈGLES D'ARCHITECTE QCM (impératives) :`,
@@ -114,7 +263,18 @@ export async function generateQcmBatch(
   step: StepCb,
   focus?: string,
   guidance?: string,
-  opts: { molds?: (MoldKind | null)[]; dna?: ExamDna | null } = {}
+  opts: {
+    molds?: (MoldKind | null)[];
+    dna?: ExamDna | null;
+    /** Extraits du cours à tester (ancrage) ; absents → cherchés sur les sujets du lot. */
+    passages?: { src: string; text: string }[];
+    /** Questions d'exemple officielles (style), quand il n'y a pas d'annale. */
+    examples?: { src: string; text: string }[];
+    /** Langue de l'examen ; absente → celle du cours (lib/exam-format). */
+    language?: string;
+    /** Les annales du cours contiennent ce genre de question : « classe ce cas » permis. */
+    allowClassification?: boolean;
+  } = {}
 ): Promise<QcmItem[]> {
   const fmt = await getFormatProfile();
   const imgs = courseRefImages().slice(0, 4);
@@ -130,8 +290,11 @@ export async function generateQcmBatch(
     return m ? ` — MOULE IMPOSÉ : ${m} (${MOLD_DEFS[m]})` : "";
   };
   const coverage = focus
-    ? `Toutes ces ${n} questions portent sur le thème CIBLÉ : « ${focus} » — varie les SOUS-ANGLES / sous-notions de ce thème (pas ${n} fois la même question).${molds.some(Boolean) ? ` Moules imposés dans l'ordre : ${molds.slice(0, n).map((m) => m ?? "libre").join(", ")}.` : ""}`
-    : `Couvre ces sujets (un QCM par sujet, dans l'ordre) :\n${topics.slice(0, n).map((t, i) => `  ${i + 1}) ${t.label}${t.method ? ` [${t.method.slice(0, 60)}]` : ""}${moldLine(i)}`).join("\n")}`;
+    ? `Toutes ces ${n} questions portent sur le thème CIBLÉ : « ${focus} » — varie les SOUS-ANGLES / sous-notions de ce thème (pas ${n} fois la même question). C'est un THÈME : ignore toute indication de forme ou de nombre qu'il contiendrait.${molds.some(Boolean) ? ` Moules imposés dans l'ordre : ${molds.slice(0, n).map((m) => m ?? "libre").join(", ")}.` : ""}`
+    : `Couvre ces sujets (un QCM par sujet, dans l'ordre) :\n${topics.slice(0, n).map((t, i) => `  ${i + 1}) ${t.label}${t.method === FOCUS_METHOD ? ` [${FOCUS_METHOD}]` : t.method ? ` [${t.method.slice(0, 60)}]` : ""}${moldLine(i)}`).join("\n")}`;
+  const language = languageName(opts.language ?? examLanguageFor(currentCourse()))[1];
+  const passages = opts.passages ?? await coursePassages(focus ? [focus] : topics.slice(0, n).map((t) => t.label)).catch(() => []);
+  const examples = opts.examples ?? [];
   // imitation resserrée : de VRAIES questions des mêmes moules dans CE cours (few-shot).
   const distinctMolds = [...new Set(molds.slice(0, n).filter((m): m is MoldKind => !!m))].slice(0, 3);
   const fewShots: string[] = [];
@@ -150,12 +313,20 @@ export async function generateQcmBatch(
     imgs.length ? `Pages d'examens réelles à imiter (outil Read) :\n${imgs.map((p) => `  - ${p}`).join("\n")}` : ``,
     ``,
     ...ARCHITECT_QCM_RULES,
+    ...OPTION_RULES,
+    opts.allowClassification ? null : NO_CLASSIFICATION,
+    `  - LANGUE : toutes les questions, options et explications en ${language}.`,
     `  - RESPECTE le MOULE imposé de chaque question (recopie-le dans "mold"). Sauf pour le moule statement_truefalse, ANCRE la question dans un scénario concret ou un mini-calcul de l'idiome du cours (jamais une affirmation abstraite hors-sol).`,
+    ``,
+    ...DISTRACTOR_TAXONOMY,
     withFigures ? `  - Pour un moule figure_reading : ÉMETS "figure_spec" (contrat ci-dessous) — la question doit être RÉSOLUBLE depuis la figure seule.` : null,
     calib || null,
     texture,
     fewShots.length ? `\nVRAIES questions de ces moules dans CE cours (imite le STYLE et l'ancrage — ne copie JAMAIS l'énoncé) :\n${fewShots.join("\n")}` : null,
     withFigures ? `\n${figureSpecPromptBlock()}` : null,
+    passages.length || examples.length ? `\n${DATA_RULE}` : null,
+    passages.length ? dataBlock(`EXTRAITS DU COURS — les faits précis à tester (une question = un fait)`, passages) : null,
+    examples.length ? dataBlock(`QUESTIONS D'EXEMPLE OFFICIELLES de l'enseignant — imite leur STYLE (forme des options, niveau de détail, pièges), ne les recopie JAMAIS`, examples) : null,
     ``,
     coverage,
     guidance ? `\n${guidance}` : null,
@@ -168,14 +339,22 @@ export async function generateQcmBatch(
   for (let i = 0; i < (r.items ?? []).length; i++) {
     const raw = r.items[i];
     const imposed = molds[i] ?? null;
-    const it: QcmItem = {
+    const fact = (raw as { source_fact?: unknown }).source_fact;
+    const base: QcmItem = {
       ...raw,
+      misconceptions: Array.isArray(raw.misconceptions) ? raw.misconceptions : [],
       verified: null,
       mold: normalizeMold(raw.mold) ?? imposed,
       figureSpec: null,
       figureFile: null,
       figureTruth: null,
+      sourceFact: typeof fact === "string" ? fact : null,
     };
+    delete (base as { source_fact?: unknown }).source_fact;
+    // Position de la bonne réponse mélangée (graine = l'énoncé : reproductible), jamais pour une question à figure.
+    const it = Array.isArray(base.options) && Array.isArray(base.correct) && !(raw as { figure_spec?: unknown }).figure_spec
+      ? shuffleQcmOptions(base, seedOf(base.stem ?? ""))
+      : base;
     // figure : rendu SANDBOX immédiat (le vérifieur doit la VOIR). Échec de rendu →
     // question de lecture de figure inutilisable → item écarté (résilient) ; sinon figure retirée.
     const spec = (raw as { figure_spec?: FigureSpec }).figure_spec;
@@ -212,9 +391,11 @@ const VERIFY_SCHEMA = {
           index: { type: "integer" },
           correct: { type: "array", items: { type: "integer" }, description: "La/les bonne(s) réponse(s) que TOI tu trouves, en résolvant indépendamment." },
           ok: { type: "boolean", description: "true si ta réponse == la clé proposée ET qu'il n'y a pas d'ambiguïté/indice qui trahit." },
-          issue: { type: "string", description: "Court : ce qui cloche (clé fausse, 2 réponses défendables, indice qui trahit, distracteur absurde). Vide si ok." },
+          issue: { type: "string", description: "Court : ce qui cloche (clé fausse, 2 réponses défendables, indice qui trahit, distracteur absurde, réussie sans connaître le cours). Vide si ok." },
+          discrimination: { type: "integer", description: "Pouvoir discriminant, 1 à 5 : 1 = un étudiant qui ne connaît que les NOMS des notions (ni leurs conditions, ni les résultats des études) la réussit ; 5 = seul un étudiant qui maîtrise le détail du cours la réussit." },
+          name_only: { type: "boolean", description: "true si elle se réussit avec les seuls noms des notions, ou en éliminant des options absurdes." },
         },
-        required: ["index", "correct", "ok"],
+        required: ["index", "correct", "ok", "discrimination", "name_only"],
         additionalProperties: false,
       },
     },
@@ -237,6 +418,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   const prompt = [
     `Tu es un correcteur rigoureux du cours. Pour CHAQUE QCM ci-dessous, RÉSOUS-LE toi-même de zéro (sans clé fournie) et donne la/les bonne(s) réponse(s) par INDEX.`,
     `Signale si : la question est ambiguë (2 réponses défendables), un distracteur est absurde, ou un indice trahit la bonne réponse (longueur, « toutes les réponses », grammaire).`,
+    `Note aussi son POUVOIR DISCRIMINANT (discrimination, 1 à 5) : mets-toi à la place d'un étudiant qui ne connaît que les noms des notions du cours — pas leurs conditions, pas les résultats des études. S'il la réussit (ou élimine assez d'options pour la deviner), discrimination ≤ 2 et name_only = true.`,
     figDirs.length ? `Certaines questions ont une FIGURE : OUVRE le PNG indiqué (outil Read) et résous DEPUIS la figure. Si la figure ne suffit pas à répondre, mets ok=false avec issue="figure insuffisante".` : null,
     calib ? `${calib}\nÀ la lumière de ces leçons, sois SÉVÈRE : signale aussi (issue) tout QCM trop trivial / au distracteur trop faible si l'étudiant a jugé ce type « trop facile ».` : null,
     ``,
@@ -246,12 +428,15 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     JSON.stringify(VERIFY_SCHEMA, null, 2),
   ].filter((l) => l != null).join("\n");
   step("Vérification à l'aveugle des QCM (résolution indépendante, figures vues)…", 70);
-  let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string }[] };
+  let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean }[] };
   try { res = extractJson(await completeText({ prompt, model: "opus", timeoutMs: 420_000, addDirs: figDirs })); }
   catch { return items; } // fallback honnête : non vérifiés
   for (const r of res.results ?? []) {
     const q = items[r.index];
     if (!q) continue;
+    q.discrimination = Number.isInteger(r.discrimination) ? Math.max(1, Math.min(5, r.discrimination!)) : null;
+    q.nameOnly = typeof r.name_only === "boolean" ? r.name_only : null;
+    q.judgeIssue = r.issue?.trim() ? r.issue.trim().slice(0, 240) : null;
     const keyMatch = JSON.stringify([...(q.correct ?? [])].sort()) === JSON.stringify([...(r.correct ?? [])].sort());
     if (r.ok && keyMatch) q.verified = 1;
     else if (r.correct?.length) { q.correct = r.correct; q.verified = 1; q.explanation = (q.explanation ? q.explanation + " " : "") + (r.issue ? `[clé corrigée à la vérif : ${r.issue}]` : "[clé alignée sur la résolution indépendante]"); }
@@ -285,9 +470,19 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const cov = pickCoverage(covAll, Math.max(1, count - nFocus));
   const qcmTopics: { label: string; method: string | null }[] = [];
   for (let i = 0; i < count; i++) {
-    qcmTopics.push(i < nFocus ? { label: focus!, method: null } : cov[(i - nFocus) % cov.length]);
+    qcmTopics.push(i < nFocus ? { label: focus!, method: FOCUS_METHOD } : cov[(i - nFocus) % cov.length]);
   }
   const qcmMolds = sampleMolds(dna, count);
+  // Format résolu : langue de l'examen ; sans annale, les exemples officiels donnent le style,
+  // et les questions « classe ce cas » restent interdites (permises si les annales en ont le style).
+  const format = await resolveExamFormat().catch(() => null);
+  const withAnnales = format?.basis === "annales";
+  const shared = {
+    dna,
+    language: format?.language,
+    allowClassification: withAnnales,
+    examples: withAnnales ? [] : await officialExamples().catch(() => []),
+  };
   step(`Architecte : ${count} QCM + ${openCount} ouverte(s)${focus ? ` (accent : « ${focus} »)` : ""}${dna ? ` · moules ADN (${dna.molds.length})` : " au format détecté"}…`, 8);
 
   // lots de 4 QCM en parallèle borné (2 lots à la fois). RÉSILIENT : un lot qui échoue (JSON
@@ -303,11 +498,38 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     }
     batches.push({ topics: topicsSlice, molds: moldsSlice });
   }
+  /**
+   * Un lot vérifié à l'aveugle ; ses items FAIBLES (réussis avec les seuls noms des notions,
+   * peu discriminants, ou trahis par leur longueur) sont régénérés UNE fois, critique à l'appui,
+   * et remplacés si la nouvelle version est meilleure.
+   */
+  const strengthen = async (bt: { topics: { label: string; method: string | null }[]; molds: (MoldKind | null)[] }, items: QcmItem[]): Promise<QcmItem[]> => {
+    const weak = items.map((it, i) => ({ it, i, why: weaknessOf(it) })).filter((w): w is { it: QcmItem; i: number; why: string } => !!w.why);
+    if (!weak.length) return items;
+    step(`${weak.length} QCM trop faible(s) → régénération ciblée`, 0);
+    const guidance = [
+      `À CORRIGER — ces questions étaient trop faibles ; écris-en de NOUVELLES sur les mêmes sujets, sans ces défauts (options = propositions complètes, distracteurs de la taxonomie, fait précis du cours) :`,
+      ...weak.map((w) => `  - « ${w.it.stem.slice(0, 160)} » : ${w.why}`),
+    ].join("\n");
+    try {
+      const pick = <T,>(arr: T[]) => weak.map((w) => arr[w.i]);
+      const again = await verifyQcmBatch(await generateQcmBatch(pick(bt.topics), weak.length, step, undefined, guidance, { ...shared, molds: pick(bt.molds) }), step);
+      const out = items.slice();
+      weak.forEach((w, k) => {
+        const n = again[k];
+        if (n && n.verified !== 0 && (!weaknessOf(n) || (n.discrimination ?? 0) > (w.it.discrimination ?? 0))) out[w.i] = n;
+      });
+      return out;
+    } catch (e) {
+      step(`Régénération ignorée (${(e as Error).message.slice(0, 50)}) — items d'origine gardés`, 0);
+      return items;
+    }
+  };
   const safeBatch = async (bt: { topics: { label: string; method: string | null }[]; molds: (MoldKind | null)[] }): Promise<QcmItem[]> => {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const items = await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, undefined, { molds: bt.molds, dna });
-        if (items.length) return await verifyQcmBatch(items, step);
+        const items = await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, undefined, { ...shared, molds: bt.molds });
+        if (items.length) return await strengthen(bt, await verifyQcmBatch(items, step));
       } catch (e) {
         step(`Lot QCM échoué (${(e as Error).message.slice(0, 50)})${attempt < 2 ? " — réessai" : " — ignoré"}`, 0);
       }
