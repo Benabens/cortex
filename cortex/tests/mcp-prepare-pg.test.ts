@@ -30,12 +30,12 @@ const ENABLED = !!BASE_URL && /test/i.test(baseDb);
 const skip = ENABLED ? false : "CORTEX_TEST_PG_URL absente (ou base sans « test » dans son nom)";
 const DB = `cortextest_prepare_${process.pid}`;
 const DB_URL = (() => { try { const u = new URL(BASE_URL); u.pathname = `/${DB}`; return u.toString(); } catch { return ""; } })();
-const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-prepare-pg-"));
+const DATA_DIR = ENABLED ? fs.mkdtempSync(path.join(os.tmpdir(), "cortex-prepare-pg-")) : "";
 
 const ENV: Record<string, string> = {
   CORTEX_DATA_DIR: DATA_DIR, DB_DRIVER: "postgres", DATABASE_URL: DB_URL, MCP_ENABLED: "1", AUTH_URL: "https://cortex.test",
   BILLING_ENABLED: "1", SIGNUP_FREE_CREDITS: "5", DAILY_GEN_QUOTA: "unlimited", DAILY_ASSIST_QUOTA: "unlimited",
-  RATE_LIMIT_PER_USER_MIN: "unlimited", MAX_ACTIVE_JOBS: "unlimited", MCP_RATE_LIMIT_PER_MIN: "unlimited",
+  RATE_LIMIT_PER_USER_MIN: "unlimited", MAX_ACTIVE_JOBS: "unlimited", MCP_RATE_LIMIT_PER_MIN: "unlimited", AUTH_SECRET: "x".repeat(40),
   // Le moteur doit être « disponible » pour le devis ; le faux fournisseur répond 500,
   // donc le worker échoue APRÈS l'ingestion, à la détection du format.
   LLM_PROVIDER: "openai-compatible", LLM_API_KEY: "test", LLM_MODEL_OPUS: "claude-sonnet-5", LLM_MAX_RETRIES: "0",
@@ -110,7 +110,15 @@ type ToolResult = { isError?: boolean; content?: Array<{ text?: string }>; struc
 const text = (r: ToolResult) => (r.content ?? []).map((c) => c.text ?? "").join("\n");
 
 test("create_course → add_course_source → prepare_course confirmé : le worker ingère le cours (Postgres réel)", { skip, timeout: 180_000 }, async () => {
-  const client = new Client({ name: "cortex-test", version: "1.0.0" }, { capabilities: {} });
+  // Client 2026-07-28 avec élicitation, comme la session qui a vu le bug : la confirmation
+  // passe par le dialogue (accepté ici), sans jeton de devis.
+  const dialogs: string[] = [];
+  const client = new Client({ name: "cortex-test", version: "1.0.0" },
+    { capabilities: { elicitation: { form: {} } }, versionNegotiation: { mode: { pin: "2026-07-28" } } } as ConstructorParameters<typeof Client>[1]);
+  client.setRequestHandler("elicitation/create", async (r) => {
+    dialogs.push(String((r.params as { message?: string }).message ?? ""));
+    return { action: "accept", content: { confirm: true } };
+  });
   const token = await accessToken(USER);
   await client.connect(new StreamableHTTPClientTransport(new URL(MCP_URL), {
     fetch: (url, init) => route(new Request(url, init)), authProvider: { token: async () => token },
@@ -128,11 +136,9 @@ test("create_course → add_course_source → prepare_course confirmé : le work
     assert.equal(r.isError, undefined, text(r));
   }
 
-  const quote = await call("prepare_course", { course });
-  const token2 = (quote.structuredContent as { confirmation?: { confirmation_token: string } }).confirmation?.confirmation_token;
-  assert.ok(token2, text(quote));
-  const started = await call("prepare_course", { course, confirmation_token: token2 });
+  const started = await call("prepare_course", { course });
   assert.equal((started.structuredContent as { status: string }).status, "started", text(started));
+  assert.equal(dialogs.length, 1, "la préparation a été confirmée dans le dialogue");
   const jobId = (started.structuredContent as { job: { job_id: number } }).job.job_id;
 
   type Job = { status: string; progress_pct: number; step: string | null; error: string | null };
@@ -143,7 +149,7 @@ test("create_course → add_course_source → prepare_course confirmé : le work
     await new Promise((r) => setTimeout(r, 1000));
   }
   assert.ok(job && (job.status === "done" || job.status === "error"), `job non terminé : ${JSON.stringify(job)}`);
-  assert.doesNotMatch(job.error ?? "", /Cache des cours/, "l'ingestion ne doit plus échouer sur le cache des cours");
+  // Avant le correctif : erreur à 5 % (« Ingestion… »), ou job bloqué à 95 % (« Récap… »).
   assert.ok(job.progress_pct >= 34, `ingestion non terminée : ${JSON.stringify(job)}`);
   assert.match(text(await call("search_course_materials", { course, query: "Zorglubienne" })), /Zorglubienne/);
   await client.close();

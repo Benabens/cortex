@@ -13,7 +13,7 @@ import path from "node:path";
 import { extractText, getDocumentProxy } from "unpdf";
 import { currentCourse, enterCourse, ensureFts } from "../db/client";
 import { indexItemForSearch } from "../lib/search";
-import { q } from "../db/q";
+import { dbDriverName, q } from "../db/q";
 import { coursePaths, DEFAULT_COURSE, ensureCoursesLoaded } from "../lib/courses";
 import { importFolder } from "../lib/import-folder";
 import { ingestAllRefs } from "../lib/sources";
@@ -525,12 +525,20 @@ async function main() {
 ensureCoursesLoaded()
   .then(main)
   .then(async () => {
-    // Postgres : les pools gardent le processus en vie (celui du store d'auth n'expire
-    // jamais), alors que le worker attend la FIN de ce processus pour passer à la suite.
-    if ((process.env.DB_DRIVER ?? "sqlite") === "postgres") {
-      const { closePostgres } = await import("../db/driver-postgres");
-      await closePostgres();
+    // Le worker attend la FIN de ce processus pour passer à la suite. En Postgres, les
+    // pools le gardent en vie (celui du store d'auth n'expire jamais) : on les ferme. Un
+    // échec de fermeture ne change rien au résultat de l'ingestion, déjà écrite.
+    if (dbDriverName() === "postgres") {
+      try {
+        const { closePostgres } = await import("../db/driver-postgres");
+        await closePostgres();
+      } catch (e) {
+        console.error("Fermeture des connexions :", (e as Error)?.message ?? e);
+      }
     }
+    // Filet : si une autre ressource retenait encore le processus, il sort quand même
+    // (sinon le job resterait « en cours » à vie). `unref` : ne retarde pas une sortie normale.
+    setTimeout(() => process.exit(0), 10_000).unref();
   })
   .catch((e) => {
     console.error("Échec ingestion :", e);
