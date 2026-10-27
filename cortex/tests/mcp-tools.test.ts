@@ -195,7 +195,7 @@ test("sans jeton : 401 et WWW-Authenticate qui désigne les métadonnées de la 
   const challenge = res.headers.get("www-authenticate") ?? "";
   assert.match(challenge, /^Bearer /);
   assert.match(challenge, /resource_metadata="https:\/\/cortex\.test\/\.well-known\/oauth-protected-resource\/mcp"/);
-  assert.match(challenge, /scope="cortex\.read cortex\.generate"/);
+  assert.match(challenge, /scope="cortex\.read cortex\.generate cortex\.admin"/);
 });
 
 test("jeton inconnu : 401", async () => {

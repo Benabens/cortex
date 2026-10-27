@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { Wordmark } from "@/components/shell/Logo";
 import { OWNER_USER } from "@/db/context";
 import { auth, authEnabled } from "@/lib/auth";
-import { SCOPE_GENERATE } from "@/lib/oauth/config";
+import { SCOPE_ADMIN, SCOPE_GENERATE } from "@/lib/oauth/config";
 import { prepareConsent } from "@/lib/oauth/routes";
 import { NOINDEX } from "@/lib/seo";
 
@@ -63,6 +63,8 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
   const email = authEnabled() ? (await auth())?.user?.email ?? null : null;
   const name = view.clientName ?? view.clientHost;
   const canGenerate = view.scopes.includes(SCOPE_GENERATE);
+  // Proposée au seul propriétaire de l'instance (lib/oauth/server scopesOfferedTo).
+  const canAdmin = view.scopes.includes(SCOPE_ADMIN);
 
   return (
     <Shell>
@@ -116,10 +118,21 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
                 </label>
               </li>
             )}
+            {canAdmin && (
+              <li className="rounded-lg px-4 py-3" style={{ border: `1px solid ${C.line}` }}>
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input type="checkbox" name="admin" defaultChecked className="mt-1 size-4 accent-[#ececee]" />
+                  <span>
+                    <span className="font-medium">Administrer</span>
+                    <span style={{ color: C.muted }}> tes cours : en créer, leur ajouter des supports (adresse web ou texte) et lancer leur préparation. Réservé à ton compte de propriétaire.</span>
+                  </span>
+                </label>
+              </li>
+            )}
           </ul>
           <p className="mt-3 text-[0.8rem] leading-relaxed" style={{ color: C.faint }}>
-            Jamais : modifier ou supprimer tes cours, ni toucher à tes paiements. Tu peux couper cet accès à tout moment dans
-            Mon compte → Applications connectées.
+            {canAdmin ? "Jamais : supprimer tes cours, ni toucher à tes paiements." : "Jamais : modifier ou supprimer tes cours, ni toucher à tes paiements."}
+            {" "}Tu peux couper cet accès à tout moment dans Mon compte → Applications connectées.
           </p>
         </fieldset>
 

@@ -1,3 +1,5 @@
+import { creditsGate } from "@/lib/billing/credits";
+import { generationGate } from "@/lib/billing/guards";
 import { ReservationRefused, activeJob, createJobExclusive, startWorker, type JobType } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
 
@@ -29,6 +31,34 @@ export async function startGenerationJob(type: JobType, target?: string): Promis
   let created: { id: number; existing: boolean };
   try {
     created = await createJobExclusive(type, target);
+  } catch (e) {
+    if (e instanceof ReservationRefused) return { ok: false, status: e.status, error: e.message };
+    throw e;
+  }
+  try {
+    await startWorker(created.id, undefined);
+  } catch (e) {
+    return { ok: false, status: 500, error: `Impossible de lancer le worker : ${(e as Error)?.message ?? e}` };
+  }
+  return { ok: true, jobId: created.id, existing: created.existing };
+}
+
+/**
+ * PRÉPARATION D'UN COURS (job « prepare » : ingestion du contenu et des annales →
+ * détection du format → plan), partagée par POST /api/prepare et l'outil MCP
+ * prepare_course. Même séquence qu'une génération, sans les pré-checks de corpus
+ * et de LaTeX (c'est elle qui construit le corpus) : quota du jour et solde, puis
+ * la réservation atomique.
+ */
+export async function startPrepareJob(): Promise<StartedJob | StartRefused> {
+  const existing = await activeJob("prepare");
+  if (existing) return { ok: true, jobId: existing.id, existing: true };
+  // La préparation fait de la vision LLM sur les annales (coûteux) → quota + crédits comme toute génération.
+  const gate = (await generationGate("gen")) ?? (await creditsGate("prepare"));
+  if (gate) return { ok: false, status: gate.status, error: gate.error };
+  let created: { id: number; existing: boolean };
+  try {
+    created = await createJobExclusive("prepare");
   } catch (e) {
     if (e instanceof ReservationRefused) return { ok: false, status: e.status, error: e.message };
     throw e;

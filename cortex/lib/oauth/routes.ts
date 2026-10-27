@@ -4,7 +4,7 @@ import { PayloadTooLarge, readJson, readText } from "@/lib/upload-limit";
 import { ClientRegistrationError, registerClient } from "./clients";
 import { SUPPORTED_SCOPES, issuerFor, resourceFor } from "./config";
 import { corsHeaders } from "./cors";
-import { OAuthError, createConsentTicket, decideConsent, exchangeToken, revokeToken, validateAuthorizeRequest } from "./server";
+import { OAuthError, createConsentTicket, decideConsent, exchangeToken, revokeToken, scopesOfferedTo, validateAuthorizeRequest } from "./server";
 
 /**
  * POINTS HTTP PUBLICS du serveur d'autorisation (montés par app/.well-known/* et
@@ -171,7 +171,7 @@ export async function consentDecisionEndpoint(req: Request, userId: string): Pro
   const ticket = form.get("ticket") ?? "";
   const approve = form.get("decision") === "approve";
   try {
-    const target = await decideConsent(userId, ticket, approve, issuer, form.get("generate") === "on");
+    const target = await decideConsent(userId, ticket, approve, issuer, form.get("generate") === "on", form.get("admin") === "on");
     log("info", "oauth.consent", { approved: approve });
     return NextResponse.redirect(target, 303);
   } catch (e) {
@@ -215,8 +215,9 @@ export async function prepareConsent(req: Request, params: URLSearchParams, user
   if (shown && !params.get("client_id")) return { kind: "error", message: CONSENT_ERRORS[shown] ?? CONSENT_ERRORS.failed };
   const v = await validateAuthorizeRequest(params, issuer, resourceFor(issuer));
   if (!v.ok) return "redirect" in v ? { kind: "redirect", url: v.redirect } : { kind: "error", message: v.display };
-  const ticket = await createConsentTicket(userId, v.request);
-  const c = v.request.client;
+  const request = { ...v.request, scopes: await scopesOfferedTo(userId, v.request.scopes) };
+  const ticket = await createConsentTicket(userId, request);
+  const c = request.client;
   return {
     kind: "consent",
     ticket,
@@ -229,6 +230,6 @@ export async function prepareConsent(req: Request, params: URLSearchParams, user
     // Retour sur l'ordinateur (Claude Code…) : n'importe quel programme local peut écouter
     // ce port en se réclamant d'un client connu — la spec demande d'avertir.
     localRedirect: ["localhost", "127.0.0.1", "[::1]"].includes(new URL(v.request.redirectUri).hostname),
-    scopes: v.request.scopes,
+    scopes: request.scopes,
   };
 }
