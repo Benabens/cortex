@@ -59,7 +59,7 @@ export function ConnectedApps() {
         Les assistants que tu as branchés sur ton compte (par exemple Claude, avec l’adresse <code className="text-ink-1">/mcp</code>).
         Révoquer coupe leur accès immédiatement.
       </p>
-      {error && <p role="alert" className="mt-3 text-[0.85rem] text-[#f7b6ae]">{error}</p>}
+      {error && <p role="alert" className="mt-3 text-[0.85rem] text-[var(--error-ink)]">{error}</p>}
       {apps && apps.length === 0 && <p className="mt-3 text-[0.88rem] text-ink-3">Aucune application connectée.</p>}
       {apps && apps.length > 0 && (
         <ul className="mt-4 flex flex-col divide-y divide-line rounded-md border border-line">

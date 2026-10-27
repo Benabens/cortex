@@ -30,7 +30,7 @@ export function UpNext({ topics }: { topics: DashNext[] }) {
           <li key={t.id} className="border-t border-line">
             <Link
               href={trainHref(label)}
-              className="group -mx-3 flex flex-col gap-x-4 gap-y-1 rounded-md px-3 py-[0.8125rem] transition-colors duration-150 hover:bg-white/[0.035] sm:flex-row sm:items-baseline"
+              className="group -mx-3 flex flex-col gap-x-4 gap-y-1 rounded-md px-3 py-[0.8125rem] transition-colors duration-150 hover:bg-wash sm:flex-row sm:items-baseline"
             >
               <span className="min-w-0 flex-1 text-[0.97rem] text-ink-1">{label}</span>
               {/* « L11 · tombé 9 fois » se lit mal à voix haute : version en toutes lettres à côté. */}

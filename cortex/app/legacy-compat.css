@@ -45,7 +45,7 @@
   --shadow-md: var(--shadow-pop);
   --shadow-lg: var(--shadow-hero);
   --shadow-accent: var(--shadow-card);
-  --hairline-top: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --hairline-top: inset 0 1px 0 var(--edge-hl);
 }
 
 /* — Conteneur de page (les vieilles pages n'ont plus la top-nav : le shell les enveloppe) — */
@@ -70,8 +70,8 @@
 .btn:disabled { opacity: 0.45; cursor: default; }
 .btn-sm { font-size: 13px; padding: 6px 12px; }
 .btn-lg { font-size: 15px; padding: 11px 20px; }
-.btn-primary { background: #ececee; color: #111214; font-weight: 600; }
-.btn-primary:hover:not(:disabled) { background: #ffffff; }
+.btn-primary { background: var(--color-primary); color: var(--color-on-primary); font-weight: 600; }
+.btn-primary:hover:not(:disabled) { background: var(--color-primary-hover); }
 .btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--line-strong); box-shadow: var(--hairline-top); }
 .btn-ghost:hover:not(:disabled) { background: var(--surface-hover); }
 .btn-quiet { background: transparent; color: var(--ink-3); padding: 6px 10px; }
@@ -111,6 +111,7 @@
 .empty .empty-sub { margin-top: 4px; color: var(--ink-3); font-size: 13.5px; }
 
 .progress { height: 8px; border-radius: 999px; overflow: hidden; background: var(--surface-inset); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4); }
+:root[data-theme="light"] .progress { box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08); }
 .progress > .progress-bar { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--color-violet), var(--color-cyan)); transition: width 0.5s var(--ease-out-quint); }
 .spinner { display: inline-block; width: 15px; height: 15px; border: 2px solid var(--line-strong); border-top-color: var(--accent); border-radius: 999px; animation: legacy-spin 0.7s linear infinite; vertical-align: -2px; }
 @keyframes legacy-spin { 100% { transform: rotate(360deg); } }

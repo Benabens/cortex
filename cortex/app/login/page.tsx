@@ -7,7 +7,8 @@ import { LoginCard } from "./LoginCard";
 export const dynamic = "force-dynamic";
 
 /**
- * Page de connexion — DA sombre de la landing (fond #0b0b0f), un seul chemin
+ * Page de connexion — DA de la landing (fond #0b0b0f en sombre ; suit le thème clair
+ * via les jetons --bare-* de globals.css), un seul chemin
  * « Continuer avec Google ». Sert AUSSI de page d'erreur (NextAuth y renvoie via
  * ?error=CODE) : plus jamais la page NextAuth par défaut hors DA.
  */

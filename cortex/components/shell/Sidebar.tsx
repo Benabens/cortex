@@ -11,10 +11,8 @@ export function Sidebar() {
   return (
     <aside
       className="fixed inset-y-0 left-0 z-30 hidden w-rail flex-col border-r border-line lg:flex"
-      style={{
-        background:
-          "linear-gradient(180deg, color-mix(in oklch, var(--color-surface-1) 60%, var(--color-bg)), var(--color-bg))",
-      }}
+      // Dégradé surface → fond en sombre, blanc plein en clair (--rail-bg, globals.css).
+      style={{ background: "var(--rail-bg)" }}
     >
       <div className="flex h-16 items-center px-5">
         <Link
