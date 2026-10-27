@@ -676,10 +676,19 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
   // pickArchetype rechoisisse selon le thème.
   const focus = (opts.focus ?? "").trim();
   if (focus && slots.length) {
-    const nFocus = Math.min(2, slots.length);
+    // CS-202 (architecte) : le slot ciblé prend le thème pour brief, l'architecte rechoisit l'archétype.
+    // Ailleurs, le focus est un ACCENT THÉMATIQUE : il remplace le thème du slot, jamais sa construction
+    // (un focus « QCM de 20 questions » ne transforme pas un exercice en 20 sous-questions), et il ne
+    // prend jamais tout l'examen dès qu'il y a plus de deux sujets.
+    const architect = currentCourse() === DEFAULT_COURSE;
+    const nFocus = architect ? Math.min(2, slots.length) : slots.length <= 2 ? 1 : 2;
+    const accent = `THÈME : « ${focus} » (accent demandé par l'étudiant : un thème, jamais une forme ni un nombre de questions).`;
     for (let i = 0; i < nFocus; i++) {
       const j = slots.length - 1 - i;
-      slots[j] = { ...(slots[j] as any), brief: focus, archetypeId: undefined };
+      const brief = architect
+        ? focus
+        : /THÈME : « [^»]*»[^.]*\./.test(slots[j].brief) ? slots[j].brief.replace(/THÈME : « [^»]*»[^.]*\./, accent) : `${slots[j].brief} ${accent}`;
+      slots[j] = { ...(slots[j] as any), brief, archetypeId: undefined };
     }
     step(`Accent demandé : « ${focus} » — ${nFocus} exercice(s) ciblé(s)`, 5);
   }
