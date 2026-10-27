@@ -1,7 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { currentUser, tenantSchema } from "./context";
 import { currentCourse } from "./client";
-import { PG_TYPES } from "./pg-types";
 import { registerDriver, type QueryDriver, type RunResult, type SqlParam } from "./q";
 import { allDdl } from "./tables";
 
@@ -72,6 +71,20 @@ export function toDollarParams(sql: string): string {
 }
 
 // ─────────────────────────── backend postgres.js ───────────────────────────
+
+/**
+ * TYPES POSTGRES LUS COMME EN SQLITE. `postgres.js` rend un bigint (int8 : tout
+ * `count(*)`, un `sum(...)::bigint`) en CHAÎNE, pour ne rien perdre au-delà de 2^53 ;
+ * SQLite et PGlite (les tests) rendent un nombre. Le code, écrit pour SQLite, compare
+ * et additionne ces valeurs : en prod, « 0 » passait pour vrai (`if (!items)`), et un
+ * outil MCP renvoyait des chaînes là où son schéma attend des nombres (27/10/2026).
+ * Les seuls bigint sont des agrégats et les identifiants de trois tables d'auth
+ * (llm_usage, gen_events, credit_transactions), que authInsert convertissait déjà :
+ * tous très loin de 2^53.
+ */
+export const PG_TYPES = {
+  bigint: { to: 20, from: [20], serialize: (x: unknown) => String(x), parse: (x: string) => Number(x) },
+};
 
 type PostgresSql = import("postgres").Sql;
 

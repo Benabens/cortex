@@ -157,11 +157,25 @@ test("create_course → add_course_source → prepare_course confirmé : le work
   // sur tous les cours) : cours préparé, cours vide sans date d'examen, cours avec date.
   const bare = await call("create_course", { name: "Cours vide", code: "EMPTY-1" });
   const dated = await call("create_course", { name: "Cours daté", code: "DATED-1", exam_date: "2027-01-20" });
-  for (const id of [course, (bare.structuredContent as { course: { id: string } }).course.id, (dated.structuredContent as { course: { id: string } }).course.id]) {
+  const datedId = (dated.structuredContent as { course: { id: string } }).course.id;
+  // Une fiche de révision dans le cours daté : la répétition espacée a alors des concepts (comptages non nuls).
+  const { runWithCourse } = await import("../db/client");
+  const { runWithUser } = await import("../db/context");
+  const { q } = await import("../db/q");
+  await runWithUser(USER, () => runWithCourse(datedId, async () => {
+    const sid = await q.insert(`INSERT INTO sources (type, title, path, recency_weight) VALUES (?,?,?,?)`, "note", "Fiches", "/fiches.md", 1);
+    await q.insert(`INSERT INTO items (source_id, type, title, text, anchor) VALUES (?,?,?,?,?)`, sid, "card", "Théorème de Rolle", "Énoncé et hypothèses.", "#1");
+  }));
+  const expected: Record<string, [number, number] | null> = {
+    [course]: null, [(bare.structuredContent as { course: { id: string } }).course.id]: [0, 0], [datedId]: [1, 1],
+  };
+  for (const [id, counts] of Object.entries(expected)) {
     const plan = await call("get_study_plan", { course: id });
     assert.equal(plan.isError, undefined, `${id} : ${text(plan)}`);
-    const sr = (plan.structuredContent as { spaced_repetition: { concepts: unknown; due: unknown } }).spaced_repetition;
-    assert.deepEqual([typeof sr.concepts, typeof sr.due], ["number", "number"], id);
+    const out = plan.structuredContent as { spaced_repetition: { concepts: unknown; due: unknown }; exam: { days_left: unknown } };
+    assert.deepEqual([typeof out.spaced_repetition.concepts, typeof out.spaced_repetition.due], ["number", "number"], id);
+    if (counts) assert.deepEqual([out.spaced_repetition.concepts, out.spaced_repetition.due], counts, id);
+    if (id === datedId) assert.equal(typeof out.exam.days_left, "number");
   }
   await client.close();
 });
@@ -171,9 +185,14 @@ test("Postgres : un comptage (bigint) se lit comme un nombre, comme en SQLite et
   const { runWithUser } = await import("../db/context");
   const { q } = await import("../db/q");
   const { authGet } = await import("../db/auth-store");
-  const { listCoursesOf } = await import("../lib/courses");
-  const course = listCoursesOf(USER)[0].id;
-  const r = await runWithUser(USER, () => runWithCourse(course, () => q.get<{ n: unknown; m: unknown }>(`SELECT count(*) n, sum(1)::bigint m FROM jobs`)));
+  const { insertCourse } = await import("../db/courses-store");
+  const { buildCourseRow } = await import("../lib/course-create");
+  const { reloadCourses } = await import("../lib/courses");
+  const row = buildCourseRow({ name: "Comptages", code: "COUNT-1" }, USER);
+  await insertCourse(row);
+  await reloadCourses();
+  const course = row.id;
+  const r = await runWithUser(USER, () => runWithCourse(course, () => q.get<{ n: unknown; m: unknown }>(`SELECT count(*) n, 42::bigint m FROM jobs`)));
   assert.deepEqual([typeof r?.n, typeof r?.m], ["number", "number"]);
   // Un zéro doit être FAUX (« 0 » en chaîne passait pour vrai : `if (!items)` dans lib/preflight).
   const zero = await runWithUser(USER, () => runWithCourse(course, () => q.get<{ n: unknown }>(`SELECT count(*) n FROM jobs WHERE 1 = 0`)));
