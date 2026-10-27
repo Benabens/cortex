@@ -405,10 +405,12 @@ test("CIMD : le vrai document de claude.ai (grant_types avec jwt-bearer en plus)
 
 test("CIMD : seules les adresses publiques peuvent être lues (pas de SSRF vers le réseau interne)", async () => {
   const { isPublicAddress } = await import("../lib/oauth/clients");
-  for (const ip of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "::1", "fd00::1", "fe80::1", "::ffff:10.0.0.1", "0.0.0.0"]) {
+  for (const ip of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "::1", "fd00::1", "fe80::1", "::ffff:10.0.0.1", "0.0.0.0",
+    // IPv4 embarquée sous ses formes IPv6, telles que le parseur d'URL les réécrit (hexadécimal) :
+    "::ffff:7f00:1", "::7f00:1", "64:ff9b::7f00:1", "64:ff9b::a9fe:a9fe", "2002:7f00:1::", "2002:a00:1::1", "fec0::1"]) {
     assert.equal(isPublicAddress(ip), false, ip);
   }
-  for (const ip of ["104.18.1.1", "2606:4700::1111"]) assert.equal(isPublicAddress(ip), true, ip);
+  for (const ip of ["104.18.1.1", "2606:4700::1111", "::ffff:808:808", "64:ff9b::808:808", "2002:808:808::1"]) assert.equal(isPublicAddress(ip), true, ip);
 });
 
 test("route Applications connectées : GET liste celles du compte, DELETE d'une autre → 404, de la sienne → révoquée", async () => {

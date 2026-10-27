@@ -258,10 +258,13 @@ test("add_course_source, SSRF : adresse locale, privée, de métadonnées cloud,
   const before = await filesOf(courseId);
   for (const url of [
     "https://127.0.0.1/final-2024.pdf", "https://[::1]/final.pdf", "https://169.254.169.254/latest/meta-data/", "https://10.0.0.5/cours.pdf",
-    "https://[::ffff:127.0.0.1]/x.pdf", "https://localhost/x.pdf", "http://example.com/x.pdf", "https://user:pw@example.com/x.pdf",
+    "https://[::ffff:127.0.0.1]/x.pdf", "https://[::127.0.0.1]/x.pdf", "https://[64:ff9b::127.0.0.1]/x.pdf", "https://[2002:7f00:1::]/x.pdf",
+    "https://0x7f.1/x.pdf", "https://localhost/x.pdf", "http://example.com/x.pdf", "https://user:pw@example.com/x.pdf",
   ]) {
     const r = await call(ownerAdmin, "add_course_source", { course: "MATH-232", url });
     assert.equal(errorCode(r), "invalid_input", `${url} : ${text(r)}`);
+    // Refusée par le contrôle d'adresse, pas par un hasard du réseau (rien n'écoute en local, une connexion échouerait aussi).
+    assert.match(text(r), /Adresse refusée/, url);
   }
   assert.deepEqual(await filesOf(courseId), before);
 });
@@ -269,7 +272,7 @@ test("add_course_source, SSRF : adresse locale, privée, de métadonnées cloud,
 test("lecture durcie : une IP littérale non publique est refusée AVANT toute connexion (le contrôle DNS ne la voit pas)", async () => {
   const { readPublicHttps } = await import("../lib/public-https");
   const opts = { maxBytes: 1024, timeoutMs: 2000, accept: "*/*", userAgent: "test" };
-  for (const url of ["https://127.0.0.1:9/x", "https://[::1]:9/x", "https://169.254.169.254/x"]) {
+  for (const url of ["https://127.0.0.1:9/x", "https://[::1]:9/x", "https://169.254.169.254/x", "https://[::ffff:127.0.0.1]:9/x", "https://[64:ff9b::7f00:1]:9/x"]) {
     await assert.rejects(readPublicHttps(url, opts), (e: { reason?: string }) => e.reason === "blocked", url);
   }
 });
