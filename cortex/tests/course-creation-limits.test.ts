@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, test } from "node:test";
+import { NextRequest } from "next/server";
 
 process.env.DB_DRIVER = "postgres";
 process.env.DATABASE_URL = "pglite://memory";
@@ -12,6 +13,8 @@ import {
   insertCourse,
   type CourseRow,
 } from "../db/courses-store";
+import type { ToolCtx } from "../lib/mcp/tool";
+import { ToolError } from "../lib/mcp/tool";
 
 const USER = "usr_limite";
 const OWNER = "usr_proprietaire";
@@ -133,6 +136,35 @@ test("refuse plus de créations que le débit horaire même après suppression",
     assert.ok(error instanceof CourseCreationLimitError);
     assert.equal(error.status, 409);
     assert.match(error.message, /2 cours par heure/);
+    return true;
+  });
+});
+
+test("l'API renvoie le refus en 409 avec le message affichable par le formulaire", async () => {
+  process.env.MAX_COURSES_PER_USER = "0";
+  const { POST } = await import("../app/api/courses/route");
+  const request = new NextRequest("http://cortex.test/api/courses", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-cortex-user": USER },
+    body: JSON.stringify({ name: "Cours refusé" }),
+  });
+
+  const response = await POST(request);
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), {
+    error: "Tu as atteint la limite de 0 cours. Supprime un cours pour en créer un nouveau.",
+  });
+});
+
+test("l'outil MCP transforme le refus commun en conflit lisible", async () => {
+  process.env.MAX_COURSES_PER_USER = "0";
+  const tool = (await import("../lib/mcp/tools/create-course")).default;
+  const ctx = { principal: { userId: USER } } as unknown as ToolCtx;
+
+  await assert.rejects(tool.run({ name: "Cours MCP" }, ctx), (error: unknown) => {
+    assert.ok(error instanceof ToolError);
+    assert.equal(error.code, "conflict");
+    assert.equal(error.message, "Tu as atteint la limite de 0 cours. Supprime un cours pour en créer un nouveau.");
     return true;
   });
 });
