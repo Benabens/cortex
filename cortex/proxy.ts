@@ -30,6 +30,30 @@ const PUBLIC_PREFIXES = ["/api/auth", "/login", "/api/health", "/api/metrics", "
 const PUBLIC_FILES = new Set(["/icon.svg", "/apple-icon.png", "/manifest.webmanifest", "/robots.txt"]);
 
 /**
+ * CONNECTEUR MCP (docs/MCP.md) : un client MCP n'a pas de cookie de session. Le
+ * point /mcp vérifie lui-même son jeton Bearer (401 + WWW-Authenticate, que la
+ * découverte OAuth exige — une redirection vers /login la casserait) ; les
+ * métadonnées et les points OAuth machine-à-machine sont publics par nature.
+ * L'écran de consentement /oauth/authorize, lui, reste DERRIÈRE la session :
+ * c'est là que la personne se connecte avec son compte Cortex. Égalité stricte,
+ * jamais de préfixe (« /mcp-… » ou « /oauth/… » futurs restent gardés).
+ */
+const MCP_PUBLIC = new Set([
+  "/mcp",
+  "/.well-known/oauth-protected-resource",
+  "/.well-known/oauth-protected-resource/mcp",
+  "/.well-known/oauth-authorization-server",
+  "/oauth/register",
+  "/oauth/token",
+  "/oauth/revoke",
+]);
+
+/** Chemin servi SANS session (les handlers font leur propre contrôle, s'il y en a un). */
+export function publicPath(pathname: string): boolean {
+  return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p)) || PUBLIC_FILES.has(pathname) || MCP_PUBLIC.has(pathname);
+}
+
+/**
  * CHEMINS HÉRITÉS DU MONO-USER, absents en production : `/voir` lit des .html
  * hors de l'app et `/sites` (public/sites → symlinks vers le poste de dev)
  * exposait des fiches perso sans session. Ni l'un ni l'autre n'a de contenu
@@ -105,7 +129,7 @@ function passThrough(req: NextRequest): NextResponse {
 
 async function guarded(req: NextRequest): Promise<NextResponse> {
   const { pathname } = req.nextUrl;
-  if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p)) || PUBLIC_FILES.has(pathname)) return passThrough(req);
+  if (publicPath(pathname)) return passThrough(req);
 
   // Import dynamique : la stack NextAuth n'est chargée QUE si l'auth est active.
   const { auth } = await import("@/lib/auth");

@@ -84,6 +84,10 @@ La facturation est un modèle de **crédits prépayés**. Vocabulaire, tel qu'il
 - **Reprise** (reversal) : ligne négative qui retire les crédits d'un achat remboursé ou contesté chez Stripe ; le solde peut devenir négatif, ce qui bloque toute génération jusqu'au prochain achat.
 - **Assistance** : appel au modèle sans job (drill, correction, analyses) ; facturé une fraction de crédit, jamais remboursé.
 
+## Connecteur MCP
+
+`/mcp` expose le compte de la personne connectée à Claude (claude.ai, Desktop, Claude Code) — lecture et générations confirmées — dans le **même conteneur**, opt-in par `MCP_ENABLED=1`. Cortex y est **son propre serveur OAuth 2.1** (`lib/oauth/` : métadonnées RFC 9728/8414, clients CIMD et DCR, consentement derrière la session Auth.js, code + PKCE S256, jetons opaques hachés liés à la ressource, refresh tournant, révocation). Le serveur MCP (`lib/mcp/`, SDK officiel v2, sans état) sert les ères 2026-07-28 et 2025 ; chaque outil s'exécute sous `runWithUser(compte du jeton)` et appelle les fonctions de `lib/` que les routes appellent déjà — mêmes contrôles d'accès, quotas, réservation et plafond. Tout coût est annoncé puis confirmé (élicitation ou devis à usage unique). Détail et modèle de menace : `cortex/docs/MCP.md`.
+
 ## Tests et CI
 
 Les tests couvrent le moteur (moules, ADN, vérification déterministe, sandbox), la couche LLM (limiteur, retries, cache, fournisseurs), les drivers de base, l'isolation multi-tenant et la facturation — y compris des cas adverses : rejeu de webhook, signature falsifiée, collision d'identifiants entre tenants.

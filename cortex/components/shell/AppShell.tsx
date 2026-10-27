@@ -35,7 +35,8 @@ function Body({ children }: { children: React.ReactNode }) {
 /** Routes servies SANS la coquille de l'app (barre latérale, topbar, contexte
  *  cours) : elles s'adressent à un visiteur non connecté et portent leur propre
  *  mise en page plein écran (DA sombre de la landing). */
-const BARE_ROUTES = ["/login"];
+// /oauth : écran de consentement du connecteur MCP, même mise en page plein écran que /login.
+const BARE_ROUTES = ["/login", "/oauth"];
 
 export function AppShell({ children, legal, legalEnglish, contact }: {
   children: React.ReactNode; legal?: LegalLinks; legalEnglish?: string | null; contact?: string;
