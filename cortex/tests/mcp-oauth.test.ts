@@ -382,6 +382,26 @@ test("CIMD : le document est lu à l'adresse du client_id et doit s'y désigner 
   assert.equal(ko2.ok, false, "client_name est obligatoire dans un document CIMD");
 });
 
+test("CIMD : le vrai document de claude.ai (grant_types avec jwt-bearer en plus) est accepté", async () => {
+  const { validateAuthorizeRequest } = await import("../lib/oauth/server");
+  // Relevé tel quel sur https://claude.ai/oauth/mcp-oauth-client-metadata le 27/10/2026 : il déclare un type
+  // de grant que Cortex ne sert pas ; le refuser bloquait la connexion de claude.ai (« Application inconnue »).
+  const clientId = "https://claude.ai/oauth/mcp-oauth-client-metadata";
+  const doc = {
+    client_id: clientId, client_name: "Claude", client_uri: "https://claude.ai",
+    redirect_uris: ["https://claude.ai/api/mcp/auth_callback"],
+    grant_types: ["authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:jwt-bearer"],
+    response_types: ["code"], token_endpoint_auth_method: "none",
+  };
+  const fetcher = async () => ({ body: JSON.stringify(doc), maxAgeS: 300 });
+  const ok = await validateAuthorizeRequest(authorizeParams(clientId, pkce().challenge, { redirect_uri: "https://claude.ai/api/mcp/auth_callback" }), ISSUER, RESOURCE, fetcher);
+  assert.equal(ok.ok, true, "claude.ai doit pouvoir se connecter");
+  const noCode = "https://sanscode.example/meta.json";
+  const noCodeDoc = async () => ({ body: JSON.stringify({ ...doc, client_id: noCode, redirect_uris: ["https://sanscode.example/cb"], grant_types: ["refresh_token"] }), maxAgeS: null });
+  const ko = await validateAuthorizeRequest(authorizeParams(noCode, pkce().challenge, { redirect_uri: "https://sanscode.example/cb" }), ISSUER, RESOURCE, noCodeDoc);
+  assert.equal(ko.ok, false, "un client qui ne déclare pas authorization_code reste refusé");
+});
+
 test("CIMD : seules les adresses publiques peuvent être lues (pas de SSRF vers le réseau interne)", async () => {
   const { isPublicAddress } = await import("../lib/oauth/clients");
   for (const ip of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "::1", "fd00::1", "fe80::1", "::ffff:10.0.0.1", "0.0.0.0"]) {
