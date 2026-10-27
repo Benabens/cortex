@@ -22,25 +22,10 @@ export type StartedJob = { ok: true; jobId: number; existing: boolean };
 export type StartRefused = { ok: false; status: number; error: string; command?: string };
 
 export async function startGenerationJob(type: JobType, target?: string): Promise<StartedJob | StartRefused> {
-  const existing = await activeJob(type);
-  if (existing) return { ok: true, jobId: existing.id, existing: true };
-
-  const issue = await preflightGeneration(type);
-  if (issue) return { ok: false, status: issue.status, error: issue.error, command: issue.command };
-
-  let created: { id: number; existing: boolean };
-  try {
-    created = await createJobExclusive(type, target);
-  } catch (e) {
-    if (e instanceof ReservationRefused) return { ok: false, status: e.status, error: e.message };
-    throw e;
-  }
-  try {
-    await startWorker(created.id, undefined);
-  } catch (e) {
-    return { ok: false, status: 500, error: `Impossible de lancer le worker : ${(e as Error)?.message ?? e}` };
-  }
-  return { ok: true, jobId: created.id, existing: created.existing };
+  return startJob(type, target, async () => {
+    const issue = await preflightGeneration(type);
+    return issue && { ok: false, status: issue.status, error: issue.error, command: issue.command };
+  });
 }
 
 /**
@@ -51,14 +36,24 @@ export async function startGenerationJob(type: JobType, target?: string): Promis
  * la réservation atomique.
  */
 export async function startPrepareJob(): Promise<StartedJob | StartRefused> {
-  const existing = await activeJob("prepare");
+  return startJob("prepare", undefined, async () => {
+    // La préparation fait de la vision LLM sur les annales (coûteux) → quota + crédits comme toute génération.
+    const gate = (await generationGate("gen")) ?? (await creditsGate("prepare"));
+    return gate && { ok: false, status: gate.status, error: gate.error };
+  });
+}
+
+/** Séquence commune : job actif réutilisé → pré-checks propres au type → réservation + insertion → worker. */
+async function startJob(type: JobType, target: string | undefined, precheck: () => Promise<StartRefused | null>): Promise<StartedJob | StartRefused> {
+  const existing = await activeJob(type);
   if (existing) return { ok: true, jobId: existing.id, existing: true };
-  // La préparation fait de la vision LLM sur les annales (coûteux) → quota + crédits comme toute génération.
-  const gate = (await generationGate("gen")) ?? (await creditsGate("prepare"));
-  if (gate) return { ok: false, status: gate.status, error: gate.error };
+
+  const refused = await precheck();
+  if (refused) return refused;
+
   let created: { id: number; existing: boolean };
   try {
-    created = await createJobExclusive("prepare");
+    created = await createJobExclusive(type, target);
   } catch (e) {
     if (e instanceof ReservationRefused) return { ok: false, status: e.status, error: e.message };
     throw e;
