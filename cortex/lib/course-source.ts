@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { currentUser } from "@/db/context";
+import { intLimit } from "@/lib/billing/env";
 import { coursePaths, getCourse } from "@/lib/courses";
 import { classifyFile } from "@/lib/import-folder";
 import { PublicFetchError, readPublicHttps, type PublicFetcher } from "@/lib/public-https";
@@ -15,6 +16,10 @@ import { checkStorage } from "@/lib/storage-quota";
  * (lib/public-https : https seulement, adresses publiques seulement, sans
  * redirection). Le fichier est seulement rangé : la préparation du cours
  * (job « prepare ») l'ingère avec le reste.
+ *
+ * Ce que l'import de l'app n'a pas à faire, parce qu'ici c'est le SERVEUR qui
+ * télécharge : le quota de stockage est vérifié AVANT la lecture, et le nombre
+ * de lectures d'URL est borné par compte et par heure (SOURCE_FETCH_PER_HOUR).
  */
 
 export const SOURCE_CATEGORIES = ["past_exam", "lecture", "exercises", "notes"] as const;
@@ -95,9 +100,32 @@ export async function addTextSource(courseId: string, a: { text: string; title?:
   return store(courseId, fileName(a.title ?? "notes", null, ".md"), a.category, data, "text/markdown");
 }
 
+/** Lectures d'URL par compte sur l'heure glissante (conteneur unique, cf. ARCHITECTURE : en mémoire suffit). */
+const fetches = new Map<string, number[]>();
+
+/** Compte une lecture si le plafond horaire le permet. Défaut 30 en déploiement gardé ; « unlimited » lève. */
+function takeFetchSlot(userId: string): boolean {
+  const cap = intLimit("SOURCE_FETCH_PER_HOUR", 30);
+  if (cap === null) return true;
+  const now = Date.now();
+  const recent = (fetches.get(userId) ?? []).filter((t) => now - t < 3600_000);
+  const ok = recent.length < cap;
+  if (ok) recent.push(now);
+  if (fetches.size > 10_000) fetches.clear();
+  fetches.set(userId, recent);
+  return ok;
+}
+
 export async function addUrlSource(
   courseId: string, a: { url: string; title?: string; category?: SourceCategory }, fetcher: PublicFetcher = readPublicHttps,
 ): Promise<SavedSource> {
+  const userId = currentUser();
+  if (!takeFetchSlot(userId)) {
+    throw new SourceError(429, "Trop d'adresses lues pour ce compte cette heure-ci : réessaie plus tard, ou colle le texte du document.");
+  }
+  // Compte déjà plein : refuser avant de télécharger quoi que ce soit.
+  const full = await checkStorage(userId, 1);
+  if (full) throw new SourceError(full.status, full.error);
   let res;
   try {
     res = await fetcher(a.url, { maxBytes: SOURCE_MAX_BYTES, timeoutMs: FETCH_TIMEOUT_MS, accept: ACCEPT, userAgent: "Cortex-Sources/1.0" });
