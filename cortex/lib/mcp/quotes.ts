@@ -47,11 +47,24 @@ export type RedeemOutcome = "ok" | "invalid" | "cost_changed";
  * redemander un devis (la personne a confirmé un autre prix).
  */
 export async function redeemQuote(token: string, b: QuoteBinding): Promise<RedeemOutcome> {
+  return redeemQuoteRef(digest(token), b);
+}
+
+/**
+ * Référence d'un devis = l'empreinte de son jeton. C'est elle, jamais le jeton, que
+ * porte le requestState de l'élicitation : le codec du SDK signe sans chiffrer, et
+ * un jeton lisible par le client lui permettrait de confirmer par confirmation_token
+ * sans répondre au dialogue (même après l'avoir refusé).
+ */
+export const quoteRef = digest;
+
+/** Comme redeemQuote, à partir de la référence (empreinte) du devis. */
+export async function redeemQuoteRef(ref: string, b: QuoteBinding): Promise<RedeemOutcome> {
   const now = nowStr();
   const row = await authTx((tx) => tx.get<{ cost_centi: number }>(
     `UPDATE mcp_quotes SET used_at = ? WHERE token_hash = ? AND user_id = ? AND grant_id = ? AND tool = ? AND args_hash = ?
        AND used_at IS NULL AND expires_at > ? RETURNING cost_centi`,
-    now, digest(token), b.userId, b.grantId, b.tool, argsHash(b.args), now,
+    now, ref, b.userId, b.grantId, b.tool, argsHash(b.args), now,
   ));
   if (!row) return "invalid";
   return Number(row.cost_centi) === b.costCenti ? "ok" : "cost_changed";

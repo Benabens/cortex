@@ -468,3 +468,184 @@ test("lecture durcie : une IP littérale non publique est refusée AVANT toute c
   }
   await alice.close();
 });
+
+// ───────────────────── confirmations en parallèle et expirées ─────────────────────
+
+/** Client 2026-07-28 qui gère l'élicitation : chaque dialogue est compté, la réponse est fixée. */
+async function mcpModern(token: string, dialogs: string[], answer: "accept" | "decline"): Promise<Client> {
+  const client = new Client({ name: "cortex-test", version: "1.0.0" },
+    { capabilities: { elicitation: { form: {} } }, versionNegotiation: { mode: { pin: "2026-07-28" } } } as ConstructorParameters<typeof Client>[1]);
+  client.setRequestHandler("elicitation/create", async (r) => {
+    dialogs.push(String((r.params as { message?: string }).message ?? ""));
+    return answer === "accept" ? { action: "accept", content: { confirm: true } } : { action: "decline" };
+  });
+  await client.connect(new StreamableHTTPClientTransport(new URL(MCP_URL), {
+    fetch: (url, init) => route(new Request(url, init)), authProvider: { token: async () => token },
+  }));
+  return client;
+}
+
+/** Nouveau cours d'Alice (sans job) et solde remis à `centi`. */
+async function freshCourse(client: Client, code: string, centi: number): Promise<string> {
+  const credits = await import("../lib/billing/credits");
+  const r = await call(client, "create_course", { name: `Cours ${code}`, code });
+  assert.equal(r.isError, undefined, text(r));
+  await credits.addTransaction(ALICE, centi - (await credits.getBalanceCenti(ALICE)), "test", `test:reset:${code}`);
+  return (r.structuredContent as { course: { id: string } }).course.id;
+}
+
+/**
+ * Le quota du jour (1) et la place de génération (1) sont déjà pris plus haut dans ce
+ * fichier : levés le temps d'un test, qui porte sur la confirmation, pas sur ces limites.
+ */
+function liftLimits(t: { after: (fn: () => void) => void }): void {
+  process.env.DAILY_GEN_QUOTA = "unlimited";
+  process.env.MAX_ACTIVE_JOBS = "unlimited";
+  t.after(() => { process.env.DAILY_GEN_QUOTA = "1"; process.env.MAX_ACTIVE_JOBS = "1"; });
+}
+
+const prepareJobs = async (courseId: string) => {
+  const { runWithCourse } = await import("../db/client");
+  const { runWithUser } = await import("../db/context");
+  const { q } = await import("../db/q");
+  return runWithUser(ALICE, () => runWithCourse(courseId, async () =>
+    Number((await q.get<{ n: number }>(`SELECT count(*) n FROM jobs WHERE type = 'prepare'`).catch(() => ({ n: 0 })))?.n ?? 0)));
+};
+
+test("parallèle, client 2026-07-28 : deux prepare_course confirmés → un dialogue par appel, UN job, UN débit ; refusés → rien", async (t) => {
+  liftLimits(t);
+  const credits = await import("../lib/billing/credits");
+  const { access } = await connectAs(ALICE, { generate: true, write: true });
+  const dialogs: string[] = [];
+  const yes = await mcpModern(access, dialogs, "accept");
+  const course = await freshCourse(yes, "PAR-101", 1000);
+  const [a, b] = await Promise.all([call(yes, "prepare_course", { course }), call(yes, "prepare_course", { course })]);
+  const statuses = [a, b].map((r) => (r.structuredContent as { status: string }).status).sort();
+  assert.deepEqual(statuses, ["already_running", "started"], [text(a), text(b)].join(" | "));
+  assert.equal(dialogs.length, 2, "chaque appel a demandé sa confirmation");
+  assert.equal(await credits.getBalanceCenti(ALICE), 800, "2 crédits, une seule fois");
+  assert.equal(await prepareJobs(course), 1);
+  await yes.close();
+
+  const no: string[] = [];
+  const refuse = await mcpModern(access, no, "decline");
+  const other = await freshCourse(refuse, "PAR-102", 1000);
+  const both = await Promise.all([call(refuse, "prepare_course", { course: other }), call(refuse, "prepare_course", { course: other })]);
+  assert.deepEqual(both.map((r) => (r.structuredContent as { status: string }).status), ["declined", "declined"]);
+  assert.equal(no.length, 2);
+  assert.equal(await credits.getBalanceCenti(ALICE), 1000);
+  assert.equal(await prepareJobs(other), 0, "aucun job sans confirmation");
+  await refuse.close();
+});
+
+test("parallèle, client 2025 (devis) : deux devis sans débit ; les deux jetons confirmés en parallèle → UN job, UN débit", async (t) => {
+  liftLimits(t);
+  const credits = await import("../lib/billing/credits");
+  const client = await mcp((await connectAs(ALICE, { generate: true, write: true })).access);
+  const course = await freshCourse(client, "PAR-201", 1000);
+  const quotes = await Promise.all([call(client, "prepare_course", { course }), call(client, "prepare_course", { course })]);
+  const tokens = quotes.map((r) => (r.structuredContent as { status: string; confirmation: { confirmation_token: string } }));
+  assert.deepEqual(tokens.map((t) => t.status), ["confirmation_required", "confirmation_required"]);
+  assert.equal(await prepareJobs(course), 0, "un devis ne lance rien");
+  assert.equal(await credits.getBalanceCenti(ALICE), 1000);
+  const runs = await Promise.all(tokens.map((t) => call(client, "prepare_course", { course, confirmation_token: t.confirmation.confirmation_token })));
+  assert.deepEqual(runs.map((r) => (r.structuredContent as { status: string }).status).sort(), ["already_running", "started"]);
+  assert.equal(await credits.getBalanceCenti(ALICE), 800);
+  assert.equal(await prepareJobs(course), 1);
+  await client.close();
+});
+
+test("propriétaire : même à 0 crédit, prepare_course demande sa confirmation avant de lancer quoi que ce soit", async () => {
+  const dialogs: string[] = [];
+  const owner = await mcpModern((await connectAs(OWNER, { generate: true, write: true })).access, dialogs, "decline");
+  assert.equal((await call(owner, "create_course", { name: "Philosophie", code: "HUM-300" })).isError, undefined);
+  const r = await call(owner, "prepare_course", { course: "HUM-300" });
+  assert.equal((r.structuredContent as { status: string }).status, "declined", text(r));
+  assert.equal(dialogs.length, 1);
+  assert.match(dialogs[0], /sans crédit \(compte propriétaire\)/);
+  await owner.close();
+});
+
+/** Appel brut en ère 2026-07-28 (pour rejouer une réponse et un requestState à la main). */
+async function modernRaw(token: string, params: Record<string, unknown>) {
+  const res = await route(new Request(MCP_URL, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`, "content-type": "application/json", accept: "application/json, text/event-stream",
+      "mcp-protocol-version": "2026-07-28", "mcp-method": "tools/call", "mcp-name": String(params.name),
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0", id: 1, method: "tools/call",
+      params: {
+        ...params,
+        _meta: {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": { name: "raw", version: "1" },
+          "io.modelcontextprotocol/clientCapabilities": { elicitation: { form: {} } },
+        },
+      },
+    }),
+  }));
+  const raw = await res.text();
+  return JSON.parse(raw.includes("data:") ? raw.split("data:").pop()!.trim() : raw) as {
+    result?: { resultType?: string; requestState?: string; inputRequests?: Record<string, unknown> }; error?: { message: string };
+  };
+}
+
+test("confirmation expirée (10 min) ou falsifiée : rien n'est lancé ni débité, une nouvelle confirmation est demandée avec la raison", async (t) => {
+  liftLimits(t);
+  const credits = await import("../lib/billing/credits");
+  const { access } = await connectAs(ALICE, { generate: true, write: true });
+  const client = await mcp(access);
+  const course = await freshCourse(client, "EXP-100", 1000);
+  await client.close();
+  const first = await modernRaw(access, { name: "prepare_course", arguments: { course } });
+  assert.equal(first.result?.resultType, "input_required", JSON.stringify(first).slice(0, 300));
+  const key = Object.keys(first.result!.inputRequests!)[0];
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() + 11 * 60_000 });
+  let late;
+  try {
+    late = await modernRaw(access, {
+      name: "prepare_course", arguments: { course },
+      requestState: first.result!.requestState, inputResponses: { [key]: { action: "accept", content: { confirm: true } } },
+    });
+  } finally {
+    t.mock.timers.reset();
+  }
+  assert.equal(late.error, undefined, `pas d'erreur opaque : ${JSON.stringify(late).slice(0, 300)}`);
+  assert.equal(late.result?.resultType, "input_required");
+  assert.match(JSON.stringify(late.result?.inputRequests), /expir/);
+  // Signature falsifiée : même traitement, une nouvelle demande et rien de lancé.
+  const st = first.result!.requestState!;
+  const forged = await modernRaw(access, {
+    name: "prepare_course", arguments: { course },
+    requestState: `${st.slice(0, -2)}${st.endsWith("AA") ? "BB" : "AA"}`, inputResponses: { [key]: { action: "accept", content: { confirm: true } } },
+  });
+  assert.equal(forged.result?.resultType, "input_required", JSON.stringify(forged).slice(0, 300));
+  assert.equal(await credits.getBalanceCenti(ALICE), 1000);
+  assert.equal(await prepareJobs(course), 0);
+});
+
+test("le requestState ne contient rien qui serve de confirmation_token : refusé, y compris après un refus du dialogue", async (t) => {
+  liftLimits(t);
+  const credits = await import("../lib/billing/credits");
+  const { access } = await connectAs(ALICE, { generate: true, write: true });
+  const client = await mcp(access);
+  const course = await freshCourse(client, "ADV-100", 1000);
+  const first = await modernRaw(access, { name: "prepare_course", arguments: { course } });
+  const st = first.result!.requestState!;
+  // Le codec du SDK signe sans chiffrer : tout client peut lire le contenu de l'état.
+  const payload = JSON.parse(Buffer.from(st.slice(3, st.lastIndexOf(".")), "base64url").toString("utf8")).p as Record<string, unknown>;
+  const key = Object.keys(first.result!.inputRequests!)[0];
+  const refused = await modernRaw(access, {
+    name: "prepare_course", arguments: { course }, requestState: st, inputResponses: { [key]: { action: "decline" } },
+  });
+  assert.match(JSON.stringify(refused.result), /declined/);
+  for (const value of Object.values(payload).filter((v): v is string => typeof v === "string" && v.length >= 10)) {
+    const r = await call(client, "prepare_course", { course, confirmation_token: value });
+    assert.equal(errorCode(r), "confirmation_invalid", `${value.slice(0, 12)}… : ${text(r)}`);
+  }
+  assert.equal(await credits.getBalanceCenti(ALICE), 1000);
+  assert.equal(await prepareJobs(course), 0);
+  await client.close();
+});
