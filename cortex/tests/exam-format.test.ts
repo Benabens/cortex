@@ -36,7 +36,7 @@ after(() => {
 });
 
 function fmt(over: Partial<ExamFormat>): ExamFormat {
-  return { basis: "declared", kind: "qcm", questionCount: null, openCount: null, durationMin: null, language: "fr", summary: "", evidence: [], ...over };
+  return { basis: "declared", kind: "qcm", questionCount: null, openCount: null, durationMin: null, language: "fr", discipline: "stem", summary: "", evidence: [], ...over };
 }
 
 // ───────────────────────────── aiguillage (pur) ─────────────────────────────

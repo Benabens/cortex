@@ -42,6 +42,9 @@ export class InvalidFormatError extends Error {
   }
 }
 
+/** STEM (problèmes, calcul) ou sciences humaines et sociales (notions, études, argumentation). */
+export type Discipline = "stem" | "humanities";
+
 /** D'où vient ce qu'on sait du format, du plus sûr au moins sûr. */
 export type FormatBasis = "annales" | "declared" | "sample_questions" | "course_info" | "unknown";
 
@@ -56,6 +59,8 @@ export type ExamFormat = {
   durationMin: number | null;
   /** Langue de l'examen (code ISO court). */
   language: string;
+  /** Famille de matière : décide des archétypes des questions ouvertes (lib/profiles/generic). */
+  discipline: Discipline;
   /** Une phrase lisible : ce qu'on sait et d'où. */
   summary: string;
   /** Citations des sources quand le format a été déduit hors annales. */
@@ -180,6 +185,41 @@ export function detectLanguage(text: string): Language | null {
   return best[0];
 }
 
+// ───────────────────────────── discipline ─────────────────────────────
+
+/** Préfixes de code de cours sans ambiguïté (EPFL et usages courants). */
+const HUMANITIES_CODE = /^(HUM|SHS|MGT|DH|AR|LAW|PHIL|HIST|SOC|POL|LIT)\b/i;
+const STEM_CODE = /^(MATH|PHYS|CS|COM|EE|ME|CH|CHEM|BIO|BIOENG|MSE|CIVIL|ENV|MICRO|NX|STAT|FIN)\b/i;
+/** Symboles et motifs de calcul : leur densité sépare un polycopié de maths d'un cours de SHS. */
+const MATH_TOKEN = /[=^∑∫√≤≥≈∂∇λσμπθ±×÷]|\d(?:[.,]\d+)?\s*[-+*/]\s*\(?\d|\\(?:frac|sum|int|sqrt|alpha|beta|lambda|sigma|mathbb)\b/g;
+const MATH_PER_1000 = 4;
+
+/**
+ * Famille de matière d'un cours : le code tranche quand il est clair, sinon la
+ * densité de notation mathématique de son corpus. Sans rien pour trancher :
+ * STEM, le comportement historique du moteur.
+ */
+export function inferDiscipline(c: { code?: string | null; sample?: string | null }): Discipline {
+  const code = (c.code ?? "").trim();
+  if (HUMANITIES_CODE.test(code)) return "humanities";
+  if (STEM_CODE.test(code)) return "stem";
+  const text = c.sample ?? "";
+  if (text.length < 300) return "stem";
+  const density = (text.match(MATH_TOKEN)?.length ?? 0) / (text.length / 1000);
+  return density >= MATH_PER_1000 ? "stem" : "humanities";
+}
+
+async function corpusSample(cap = 30_000): Promise<string> {
+  try {
+    const rows = await q.all<{ text: string }>(
+      `SELECT i.text FROM items i JOIN sources s ON s.id = i.source_id WHERE s.type NOT IN ('final','midterm') ORDER BY s.recency_weight DESC, s.id, i.id LIMIT 200`,
+    );
+    return rows.map((r) => r.text).join("\n").slice(0, cap);
+  } catch {
+    return "";
+  }
+}
+
 // ───────────────────────────── résolution ─────────────────────────────
 
 /** Le format détecté stocké en base, avec ce que la détection hors annales y ajoute (lib/format). */
@@ -220,10 +260,10 @@ async function annales(cap = 8000): Promise<{ count: number; text: string }> {
 }
 
 /** Format lu dans des annales : mêmes défauts que le générateur QCM historique. */
-function fromAnnalesProfile(p: FormatProfile, language: string): ExamFormat {
+function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Discipline): ExamFormat {
   const types = p.question_types ?? [];
   const qcmShare = types.filter((t) => t.type === "scq" || t.type === "mcq").reduce((s, t) => s + (t.approx_count || 0), 0);
-  const base = { basis: "annales" as const, durationMin: p.duration_min || null, language, summary: p.format_summary || "", evidence: [] };
+  const base = { basis: "annales" as const, durationMin: p.duration_min || null, language, discipline, summary: p.format_summary || "", evidence: [] };
   if (!p.has_mcq) return { ...base, kind: "exercises", questionCount: null, openCount: null };
   const questionCount = Math.min(20, Math.max(8, qcmShare || 12));
   const openCount = Math.min(3, Math.max(0, types.find((t) => t.type === "open")?.approx_count ?? 2));
@@ -260,28 +300,29 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
   const hasAnnales = past.count > 0;
   const language = declared?.language || (past.text ? detectLanguage(past.text) : null) || course.language || "fr";
   const stored = await readStoredProfile();
+  const discipline = inferDiscipline({ code: course.examCode, sample: await corpusSample() });
   const basisOf = (p: StoredProfile) => p.basis ?? "annales";
 
   let format: ExamFormat;
   if (courseId === DEFAULT_COURSE) {
     // Format historique figé (calcul / trace / figures) : jamais re-détecté.
-    format = make({ basis: "annales", kind: "exercises", questionCount: null, openCount: null, durationMin: course.durationMin, language, evidence: [] });
+    format = make({ basis: "annales", kind: "exercises", questionCount: null, openCount: null, durationMin: course.durationMin, language, discipline: "stem", evidence: [] });
   } else if (hasAnnales && stored && basisOf(stored) === "annales") {
-    format = fromAnnalesProfile(stored, language);
+    format = fromAnnalesProfile(stored, language, discipline);
   } else if (declared) {
     format = make({
       basis: "declared", kind: declared.kind, questionCount: declared.questionCount, openCount: null,
-      durationMin: declared.durationMin, language, evidence: [],
+      durationMin: declared.durationMin, language, discipline, evidence: [],
     });
   } else if (hasAnnales) {
-    format = make({ basis: "annales", kind: "exercises", questionCount: null, openCount: null, durationMin: null, language, evidence: [] });
+    format = make({ basis: "annales", kind: "exercises", questionCount: null, openCount: null, durationMin: null, language, discipline, evidence: [] });
   } else if (stored && (basisOf(stored) === "sample_questions" || basisOf(stored) === "course_info") && stored.exam_kind) {
     format = make({
       basis: basisOf(stored), kind: stored.exam_kind, questionCount: stored.question_count ?? null, openCount: stored.open_count ?? null,
-      durationMin: stored.duration_min || null, language, evidence: stored.evidence ?? [],
+      durationMin: stored.duration_min || null, language, discipline, evidence: stored.evidence ?? [],
     });
   } else {
-    format = make({ basis: "unknown", kind: null, questionCount: null, openCount: null, durationMin: null, language, evidence: [] }, "Format inconnu");
+    format = make({ basis: "unknown", kind: null, questionCount: null, openCount: null, durationMin: null, language, discipline, evidence: [] }, "Format inconnu");
   }
   memo = { course: courseId, format };
   return format;
@@ -294,9 +335,18 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
  * la langue déclarée, sinon celle du cours.
  */
 export function examLanguageFor(courseId: string): string {
-  if (memo?.course === courseId) return memo.format.language;
+  return formatContextFor(courseId).language;
+}
+
+/**
+ * Ce que les profils génériques lisent du format, en SYNCHRONE : la dernière
+ * résolution du cours dans ce process, sinon la déclaration, la langue et le
+ * code du cours (discipline sans échantillon de corpus).
+ */
+export function formatContextFor(courseId: string): { kind: ExamKind | null; language: string; discipline: Discipline } {
+  if (memo?.course === courseId) return { kind: memo.format.kind, language: memo.format.language, discipline: memo.format.discipline };
   const c = getCourse(courseId);
-  return c.examFormat?.language || c.language || "fr";
+  return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || "fr", discipline: inferDiscipline({ code: c.examCode }) };
 }
 
 /** true si l'examen blanc du cours courant part au générateur QCM (QCM ou mixte). */
