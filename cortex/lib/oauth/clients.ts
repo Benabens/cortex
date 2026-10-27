@@ -105,11 +105,16 @@ function parseRedirectUris(v: unknown): string[] {
   });
 }
 
-/** Les deux seuls flux servis : code d'autorisation (+ refresh). */
+/**
+ * Les deux seuls flux servis : code d'autorisation (+ refresh). Le client doit déclarer
+ * authorization_code ; les autres types qu'il déclare sont ignorés, pas refusés — le
+ * document CIMD de claude.ai déclare aussi jwt-bearer. Le point /oauth/token, lui, ne
+ * sert jamais que authorization_code et refresh_token (unsupported_grant_type sinon).
+ */
 function assertGrantAndResponseTypes(meta: Record<string, unknown>): void {
   const grants = meta.grant_types ?? ["authorization_code"];
-  if (!Array.isArray(grants) || !grants.includes("authorization_code") || grants.some((g) => g !== "authorization_code" && g !== "refresh_token")) {
-    throw new ClientRegistrationError("invalid_client_metadata", "grant_types : seuls authorization_code et refresh_token sont servis.");
+  if (!Array.isArray(grants) || !grants.includes("authorization_code")) {
+    throw new ClientRegistrationError("invalid_client_metadata", "grant_types : authorization_code est obligatoire.");
   }
   const responses = meta.response_types ?? ["code"];
   if (!Array.isArray(responses) || responses.some((r) => r !== "code")) {
