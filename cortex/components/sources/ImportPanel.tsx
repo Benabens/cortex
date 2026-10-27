@@ -170,8 +170,8 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           onChange={(e) => e.target.files && upload(e.target.files)}
         />
         <span
-          className="grid size-11 place-items-center rounded-2xl text-white"
-          style={{ background: "linear-gradient(150deg, var(--color-violet), var(--color-cyan))", boxShadow: "var(--shadow-card), inset 0 1px 0 rgba(255,255,255,0.28)" }}
+          className="grid size-11 place-items-center rounded-2xl"
+          style={{ background: "var(--tile-bg)", color: "var(--tile-ink)", boxShadow: "var(--shadow-card), var(--tile-edge)" }}
         >
           <UploadCloud className="size-5" strokeWidth={2} />
         </span>

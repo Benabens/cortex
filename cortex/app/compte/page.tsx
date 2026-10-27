@@ -4,12 +4,13 @@ import { WithdrawalForm } from "./WithdrawalForm";
 import { DeleteAccount } from "./DeleteAccount";
 import { ExportData } from "./ExportData";
 import { ConnectedApps } from "./ConnectedApps";
+import { AppearanceSetting } from "./AppearanceSetting";
 import { mcpEnabled } from "@/lib/oauth/config";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Mon compte — infos du compte + zone de danger (suppression). Server component :
+ * Mon compte — infos du compte, apparence (thème) + zone de danger (suppression). Server component :
  * lit la session pour afficher l'e-mail. La suppression n'a de sens qu'avec
  * l'authentification activée (sinon : mono-utilisateur local, aucun compte).
  */
@@ -31,6 +32,8 @@ export default async function ComptePage() {
           <div className="mt-1 text-[0.95rem] font-medium text-ink-1">{email}</div>
         </div>
       )}
+
+      <AppearanceSetting />
 
       <BillingPanel />
       <WithdrawalForm />
