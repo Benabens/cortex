@@ -625,3 +625,27 @@ test("confirmation expirée (10 min) ou falsifiée : rien n'est lancé ni débit
   assert.equal(await credits.getBalanceCenti(ALICE), 1000);
   assert.equal(await prepareJobs(course), 0);
 });
+
+test("le requestState ne contient rien qui serve de confirmation_token : refusé, y compris après un refus du dialogue", async (t) => {
+  liftLimits(t);
+  const credits = await import("../lib/billing/credits");
+  const { access } = await connectAs(ALICE, { generate: true, write: true });
+  const client = await mcp(access);
+  const course = await freshCourse(client, "ADV-100", 1000);
+  const first = await modernRaw(access, { name: "prepare_course", arguments: { course } });
+  const st = first.result!.requestState!;
+  // Le codec du SDK signe sans chiffrer : tout client peut lire le contenu de l'état.
+  const payload = JSON.parse(Buffer.from(st.slice(3, st.lastIndexOf(".")), "base64url").toString("utf8")).p as Record<string, unknown>;
+  const key = Object.keys(first.result!.inputRequests!)[0];
+  const refused = await modernRaw(access, {
+    name: "prepare_course", arguments: { course }, requestState: st, inputResponses: { [key]: { action: "decline" } },
+  });
+  assert.match(JSON.stringify(refused.result), /declined/);
+  for (const value of Object.values(payload).filter((v): v is string => typeof v === "string" && v.length >= 10)) {
+    const r = await call(client, "prepare_course", { course, confirmation_token: value });
+    assert.equal(errorCode(r), "confirmation_invalid", `${value.slice(0, 12)}… : ${text(r)}`);
+  }
+  assert.equal(await credits.getBalanceCenti(ALICE), 1000);
+  assert.equal(await prepareJobs(course), 0);
+  await client.close();
+});
