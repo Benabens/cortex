@@ -283,7 +283,13 @@ function make(f: Omit<ExamFormat, "summary">, summary?: string): ExamFormat {
   return { ...f, summary: summary || describe(f) };
 }
 
-let memo: { course: string; format: ExamFormat } | null = null;
+/**
+ * Dernier format résolu, PAR COURS, dans ce process. L'identifiant d'un cours est unique
+ * et appartient à un seul compte : rien ne passe d'un compte à l'autre. Borné : le
+ * serveur Next vit longtemps et sert beaucoup de cours.
+ */
+const memo = new Map<string, ExamFormat>();
+const MEMO_MAX = 500;
 
 /**
  * Ce qu'on sait du format d'examen du cours COURANT, et d'où on le sait.
@@ -324,7 +330,9 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
   } else {
     format = make({ basis: "unknown", kind: null, questionCount: null, openCount: null, durationMin: null, language, discipline, evidence: [] }, "Format inconnu");
   }
-  memo = { course: courseId, format };
+  memo.delete(courseId);
+  memo.set(courseId, format);
+  if (memo.size > MEMO_MAX) memo.delete(memo.keys().next().value!);
   return format;
 }
 
@@ -344,7 +352,8 @@ export function examLanguageFor(courseId: string): string {
  * code du cours (discipline sans échantillon de corpus).
  */
 export function formatContextFor(courseId: string): { kind: ExamKind | null; language: string; discipline: Discipline } {
-  if (memo?.course === courseId) return { kind: memo.format.kind, language: memo.format.language, discipline: memo.format.discipline };
+  const known = memo.get(courseId);
+  if (known) return { kind: known.kind, language: known.language, discipline: known.discipline };
   const c = getCourse(courseId);
   return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || "fr", discipline: inferDiscipline({ code: c.examCode }) };
 }
