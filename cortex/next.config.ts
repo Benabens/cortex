@@ -1,5 +1,5 @@
 import type { NextConfig } from "next";
-import { GLOBAL_HEADERS_SOURCE, SECURITY_HEADERS } from "./lib/security-headers";
+import { CONSENT_PATH, CSP_CONSENT, GLOBAL_HEADERS_SOURCE, SECURITY_HEADERS } from "./lib/security-headers";
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
@@ -13,7 +13,11 @@ const nextConfig: NextConfig = {
   // En-têtes de sécurité sur toutes les réponses SAUF les routes de fichiers,
   // qui posent les leurs (bac à sable du HTML importé) — cf. lib/security-headers.
   async headers() {
-    return [{ source: GLOBAL_HEADERS_SOURCE, headers: SECURITY_HEADERS }];
+    return [
+      { source: GLOBAL_HEADERS_SOURCE, headers: SECURITY_HEADERS },
+      // Après la règle globale : pour un même en-tête, la dernière règle gagne.
+      { source: CONSENT_PATH, headers: [{ key: "Content-Security-Policy", value: CSP_CONSENT }] },
+    ];
   },
 };
 

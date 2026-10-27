@@ -3,6 +3,8 @@ import { BillingPanel } from "./BillingPanel";
 import { WithdrawalForm } from "./WithdrawalForm";
 import { DeleteAccount } from "./DeleteAccount";
 import { ExportData } from "./ExportData";
+import { ConnectedApps } from "./ConnectedApps";
+import { mcpEnabled } from "@/lib/oauth/config";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +34,8 @@ export default async function ComptePage() {
 
       <BillingPanel />
       <WithdrawalForm />
+
+      {mcpEnabled() && <ConnectedApps />}
 
       {enabled ? (
         <>

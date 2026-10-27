@@ -204,6 +204,85 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       status TEXT NOT NULL DEFAULT 'reçue',
       retained_until TEXT
     )`,
+    // ── OAuth 2.1 du serveur MCP (lib/oauth) : AUCUN secret en clair, seulement des
+    // empreintes SHA-256 (jetons, codes, tickets de consentement). Clients publics
+    // seulement (PKCE) : aucun secret client n'existe. `family` = lignée d'un code
+    // (empreinte du code) : un code ou un refresh rejoué ne coupe que sa lignée.
+    `CREATE TABLE IF NOT EXISTS oauth_clients (
+      client_id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      client_name TEXT,
+      client_uri TEXT,
+      redirect_uris TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      refresh_after TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS oauth_requests (
+      id_hash TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      redirect_uri TEXT NOT NULL,
+      code_challenge TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      resource TEXT NOT NULL,
+      state TEXT,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      consumed_at TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS oauth_grants (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      client_name TEXT,
+      client_host TEXT,
+      scope TEXT NOT NULL,
+      resource TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      last_used_at TEXT,
+      revoked_at TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS oauth_grants_user_idx ON oauth_grants (user_id)`,
+    `CREATE TABLE IF NOT EXISTS oauth_codes (
+      code_hash TEXT PRIMARY KEY,
+      grant_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      redirect_uri TEXT NOT NULL,
+      code_challenge TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      resource TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS oauth_tokens (
+      token_hash TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      family TEXT NOT NULL,
+      grant_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      resource TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      revoked_at TEXT,
+      rotated_at TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS oauth_tokens_grant_idx ON oauth_tokens (grant_id)`,
+    `CREATE INDEX IF NOT EXISTS oauth_tokens_family_idx ON oauth_tokens (family)`,
+    `CREATE TABLE IF NOT EXISTS mcp_quotes (
+      token_hash TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      grant_id TEXT NOT NULL,
+      tool TEXT NOT NULL,
+      args_hash TEXT NOT NULL,
+      cost_centi INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT
+    )`,
   ],
   postgres: [
     `CREATE TABLE IF NOT EXISTS public.users (
@@ -391,6 +470,85 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       requested_at text NOT NULL,
       status text NOT NULL DEFAULT 'reçue',
       retained_until text
+    )`,
+    // ── OAuth 2.1 du serveur MCP (lib/oauth) : AUCUN secret en clair, seulement des
+    // empreintes SHA-256 (jetons, codes, tickets de consentement). Clients publics
+    // seulement (PKCE) : aucun secret client n'existe. `family` = lignée d'un code
+    // (empreinte du code) : un code ou un refresh rejoué ne coupe que sa lignée.
+    `CREATE TABLE IF NOT EXISTS public.oauth_clients (
+      client_id text PRIMARY KEY,
+      kind text NOT NULL,
+      client_name text,
+      client_uri text,
+      redirect_uris text NOT NULL,
+      created_at text NOT NULL,
+      refresh_after text
+    )`,
+    `CREATE TABLE IF NOT EXISTS public.oauth_requests (
+      id_hash text PRIMARY KEY,
+      user_id text NOT NULL,
+      client_id text NOT NULL,
+      redirect_uri text NOT NULL,
+      code_challenge text NOT NULL,
+      scope text NOT NULL,
+      resource text NOT NULL,
+      state text,
+      created_at text NOT NULL,
+      expires_at text NOT NULL,
+      consumed_at text
+    )`,
+    `CREATE TABLE IF NOT EXISTS public.oauth_grants (
+      id text PRIMARY KEY,
+      user_id text NOT NULL,
+      client_id text NOT NULL,
+      client_name text,
+      client_host text,
+      scope text NOT NULL,
+      resource text NOT NULL,
+      created_at text NOT NULL,
+      last_used_at text,
+      revoked_at text
+    )`,
+    `CREATE INDEX IF NOT EXISTS oauth_grants_user_idx ON public.oauth_grants (user_id)`,
+    `CREATE TABLE IF NOT EXISTS public.oauth_codes (
+      code_hash text PRIMARY KEY,
+      grant_id text NOT NULL,
+      user_id text NOT NULL,
+      client_id text NOT NULL,
+      redirect_uri text NOT NULL,
+      code_challenge text NOT NULL,
+      scope text NOT NULL,
+      resource text NOT NULL,
+      created_at text NOT NULL,
+      expires_at text NOT NULL,
+      used_at text
+    )`,
+    `CREATE TABLE IF NOT EXISTS public.oauth_tokens (
+      token_hash text PRIMARY KEY,
+      kind text NOT NULL,
+      family text NOT NULL,
+      grant_id text NOT NULL,
+      user_id text NOT NULL,
+      client_id text NOT NULL,
+      scope text NOT NULL,
+      resource text NOT NULL,
+      created_at text NOT NULL,
+      expires_at text NOT NULL,
+      revoked_at text,
+      rotated_at text
+    )`,
+    `CREATE INDEX IF NOT EXISTS oauth_tokens_grant_idx ON public.oauth_tokens (grant_id)`,
+    `CREATE INDEX IF NOT EXISTS oauth_tokens_family_idx ON public.oauth_tokens (family)`,
+    `CREATE TABLE IF NOT EXISTS public.mcp_quotes (
+      token_hash text PRIMARY KEY,
+      user_id text NOT NULL,
+      grant_id text NOT NULL,
+      tool text NOT NULL,
+      args_hash text NOT NULL,
+      cost_centi integer NOT NULL,
+      created_at text NOT NULL,
+      expires_at text NOT NULL,
+      used_at text
     )`,
   ],
 };

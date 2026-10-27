@@ -231,3 +231,12 @@ export async function listPending(): Promise<{ id: number; topic: string; descri
     `SELECT id, topic, description, screenshot_path AS "screenshotPath" FROM weaknesses WHERE analyzed = 0 ORDER BY id`
   );
 }
+
+/** Sujet du point faible le plus grave (puis le plus récent), hors captures encore à analyser ; null s'il n'y en a pas. */
+export async function topWeaknessTopic(): Promise<string | null> {
+  await ensureSchema();
+  const w = await q.get<{ topic: string }>(
+    `SELECT topic FROM weaknesses WHERE topic IS NOT NULL AND topic != '(à analyser)' ORDER BY severity DESC, logged_at DESC LIMIT 1`,
+  );
+  return w?.topic ?? null;
+}

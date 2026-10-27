@@ -190,6 +190,11 @@ export async function deleteAccount(userId: string, deps: DeletionDeps = {}): Pr
     await authRun(`UPDATE terms_acceptances SET user_id = ?, retained_until = ? WHERE user_id = ?`, legalId, retainedUntil, userId);
     await authRun(`UPDATE purchase_consents SET user_id = ?, retained_until = ? WHERE user_id = ?`, legalId, retainedUntil, userId);
     await authRun(`UPDATE withdrawal_requests SET user_id = ?, email = NULL, retained_until = ? WHERE user_id = ?`, legalId, retainedUntil, userId);
+    // Connecteur MCP : applications connectées, jetons, codes, tickets de consentement, devis.
+    // Effacer les jetons rend aussitôt inutilisable tout accès encore détenu par un client.
+    for (const table of ["oauth_tokens", "oauth_codes", "oauth_requests", "oauth_grants", "mcp_quotes"]) {
+      await authRun(`DELETE FROM ${table} WHERE user_id = ?`, userId);
+    }
     await authRun(`DELETE FROM courses WHERE owner_user_id = ?`, userId);
     await authRun(`DELETE FROM tenants WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM users WHERE id = ?`, userId);
