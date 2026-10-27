@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { insertCourse } from "@/db/courses-store";
+import { CourseCreationLimitError, insertCourse } from "@/db/courses-store";
 import { buildCourseRow, InvalidCourseError } from "@/lib/course-create";
 import { ensureCoursesLoaded, listCoursesOf, reloadCourses } from "@/lib/courses";
 import { toDto } from "@/lib/course-dto";
@@ -44,7 +44,14 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     if (e instanceof InvalidCourseError) return NextResponse.json({ error: e.message }, { status: 400 });
     throw e;
   }
-  await insertCourse(row);
+  try {
+    await insertCourse(row);
+  } catch (e) {
+    if (e instanceof CourseCreationLimitError) {
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    }
+    throw e;
+  }
   // Le cache est la source de lecture du moteur : il doit voir le cours neuf
   // AVANT que l'interface ne bascule dessus.
   await reloadCourses();
