@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { authRun, authTx } from "@/db/auth-store";
+import { authGet, authRun, authTx } from "@/db/auth-store";
 import { nowStr } from "@/db/q";
 import { digest, newSecret } from "@/lib/oauth/secrets";
 
@@ -68,4 +68,33 @@ export async function redeemQuoteRef(ref: string, b: QuoteBinding): Promise<Rede
   ));
   if (!row) return "invalid";
   return Number(row.cost_centi) === b.costCenti ? "ok" : "cost_changed";
+}
+
+/**
+ * Une demande de confirmation pour EXACTEMENT cette action (compte, autorisation, outil,
+ * arguments) attend-elle sans réponse depuis plus de `olderThanS` secondes ? Sert au
+ * repli : un client qui a reçu le dialogue sans l'afficher rappelle l'outil, et reçoit
+ * cette fois le devis à jeton au lieu d'un nouveau dialogue.
+ */
+export async function hasUnansweredQuote(b: QuoteBinding, olderThanS: number): Promise<boolean> {
+  const now = nowStr();
+  const row = await authGet<{ n: number }>(
+    `SELECT count(*) n FROM mcp_quotes WHERE user_id = ? AND grant_id = ? AND tool = ? AND args_hash = ?
+       AND used_at IS NULL AND expires_at > ? AND created_at < ?`,
+    b.userId, b.grantId, b.tool, argsHash(b.args), now, nowStr(-olderThanS * 1000),
+  );
+  return Number(row?.n ?? 0) > 0;
+}
+
+/**
+ * Brûle TOUS les devis encore ouverts pour exactement cette action : un refus dans le
+ * dialogue est définitif. Sans cela, une demande plus ancienne restée sans réponse
+ * déclenchait, au rappel suivant, le repli sur un devis à jeton malgré le refus.
+ */
+export async function burnOpenQuotes(b: QuoteBinding): Promise<void> {
+  const now = nowStr();
+  await authRun(
+    `UPDATE mcp_quotes SET used_at = ? WHERE user_id = ? AND grant_id = ? AND tool = ? AND args_hash = ? AND used_at IS NULL`,
+    now, b.userId, b.grantId, b.tool, argsHash(b.args),
+  );
 }

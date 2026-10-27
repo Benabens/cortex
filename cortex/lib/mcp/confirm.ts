@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import {
-  CLIENT_CAPABILITIES_META_KEY, acceptedContent, createRequestStateCodec, inputRequired, inputResponse,
+  CLIENT_CAPABILITIES_META_KEY, CLIENT_INFO_META_KEY, acceptedContent, createRequestStateCodec, inputRequired, inputResponse,
   type RequestStateCodec, type ServerContext,
 } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
@@ -10,7 +10,7 @@ import { isOwner } from "@/lib/billing/owner";
 import { llmUnavailableReason } from "@/lib/llm";
 import { log } from "@/lib/metrics";
 import type { Principal } from "@/lib/oauth/server";
-import { QUOTE_TTL_S, argsHash, issueQuote, quoteRef, redeemQuote, redeemQuoteRef } from "./quotes";
+import { QUOTE_TTL_S, argsHash, burnOpenQuotes, hasUnansweredQuote, issueQuote, quoteRef, redeemQuote, redeemQuoteRef } from "./quotes";
 import { QUOTA_LABEL, ToolError, codeForStatus, type Confirmation, type Cost, type Era } from "./tool";
 
 /**
@@ -18,11 +18,17 @@ import { QUOTA_LABEL, ToolError, codeForStatus, type Confirmation, type Cost, ty
  *
  *  1. pré-vérification lecture seule avec les gardes de l'app (rafale + quota
  *     du jour, solde, moteur) : on ne fait pas confirmer ce qui sera refusé ;
- *  2. jeton de devis présenté → consommé s'il correspond exactement ;
- *  3. client 2026-07-28 qui déclare l'élicitation → `input_required` : la
- *     personne confirme dans son client, qui relance l'appel ; un `requestState`
- *     signé lie la réponse au compte, à l'outil, aux arguments et au coût ;
- *  4. sinon → devis à jeton unique (second appel).
+ *  2. compte du propriétaire (rien ne lui est facturé) → rien à confirmer ;
+ *  3. jeton de devis présenté → consommé s'il correspond exactement ;
+ *  4. client qui AFFICHE l'élicitation (MCP_ELICITATION_CLIENTS, défaut Claude
+ *     Code) en ère 2026-07-28 → `input_required` : la personne confirme dans son
+ *     client, qui relance l'appel ; un `requestState` signé lie la réponse au
+ *     compte, à l'outil, aux arguments et au coût. Si une demande pour la même
+ *     action est restée plus de 30 s sans réponse, repli sur le devis ;
+ *  5. sinon — le cas par défaut : claude.ai, Claude Desktop et Cowork annoncent
+ *     l'élicitation sans l'afficher, l'appel pendait jusqu'à expirer (27/10/2026)
+ *     → devis à jeton unique : Claude demande l'accord dans la conversation, puis
+ *     rappelle l'outil avec le jeton.
  *
  * La dépense elle-même reste décidée par la réservation atomique de l'app
  * (lib/billing/reserve) : une confirmation n'est jamais un passe-droit.
@@ -93,6 +99,25 @@ async function precheck(cost: Cost): Promise<void> {
   if (engine) throw new ToolError("unavailable", engine);
 }
 
+/** Nom du client tel qu'il se présente (ère 2026-07-28 : enveloppe de la requête), ou null. */
+export function clientNameOf(envelope: unknown): string | null {
+  const name = (envelope as Record<string, { name?: unknown } | undefined> | undefined)?.[CLIENT_INFO_META_KEY]?.name;
+  return typeof name === "string" && name.trim() ? name.trim().slice(0, 40) : null;
+}
+
+/**
+ * Clients qui affichent vraiment l'élicitation : noms clientInfo séparés par des
+ * virgules dans MCP_ELICITATION_CLIENTS (défaut « claude-code » ; vide = personne).
+ */
+function showsElicitation(clientName: string | null): boolean {
+  if (!clientName) return false;
+  const allowed = (process.env.MCP_ELICITATION_CLIENTS ?? "claude-code").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+  return allowed.includes(clientName.toLowerCase());
+}
+
+/** Au-delà, une demande restée sans réponse cède la place au devis à jeton. */
+const ELICITATION_FALLBACK_S = 30;
+
 function costPhrase(costCenti: number, billing: boolean, owner: boolean): string {
   if (!billing) return "sans crédit (facturation désactivée sur cette instance)";
   if (owner) return "sans crédit (compte propriétaire)";
@@ -110,6 +135,9 @@ export async function confirmCost(
   // Compte du propriétaire : rien n'est débité ni compté (lib/billing/owner) — le devis le dit.
   const owner = await isOwner(p.principal.userId);
   const costCenti = billing && !owner ? cost.costCenti : 0;
+  // Compte du propriétaire : rien ne lui est facturé, rien à confirmer — l'action part directement
+  // (décision de Ben). Facturation désactivée ne suffit pas : l'action consomme quand même du quota.
+  if (owner) return { kind: "confirmed" };
   const binding = { userId: p.principal.userId, grantId: p.principal.grantId, tool: p.tool, args, costCenti };
 
   if (token) {
@@ -130,7 +158,11 @@ export async function confirmCost(
   // Capacités déclarées PAR REQUÊTE (ère 2026-07-28). Le type d'enveloppe du SDK est vide : lecture explicite.
   const envelope = p.mcpReq.envelope as Record<string, unknown> | undefined;
   const clientCaps = envelope?.[CLIENT_CAPABILITIES_META_KEY] as { elicitation?: unknown } | undefined;
-  if (p.era === "modern" && clientCaps?.elicitation) {
+  const clientName = clientNameOf(envelope);
+  const answer = inputResponse(p.mcpReq.inputResponses, "confirm");
+  const elicit = p.era === "modern" && !!clientCaps?.elicitation && showsElicitation(clientName)
+    && (answer.kind !== "missing" || !(await hasUnansweredQuote(binding, ELICITATION_FALLBACK_S)));
+  if (elicit) {
     const declined = (action: "decline" | "cancel"): Confirmation => ({
       kind: "declined",
       declined: { action, cost_credits: billing ? fromCenti(costCenti) : null, summary: cost.summary },
@@ -140,10 +172,9 @@ export async function confirmCost(
     const state = raw && !("stale" in raw) ? raw : undefined;
     const h = argsHash(args);
     const bound = state && state.u === binding.userId && state.g === binding.grantId && state.t === p.tool && state.h === h && state.c === costCenti;
-    const answer = inputResponse(p.mcpReq.inputResponses, "confirm");
     if (answer.kind === "elicit" && answer.action !== "accept") {
-      // Un refus BRÛLE le devis de la question : il ne peut plus servir, par aucun chemin.
-      if (bound) await redeemQuoteRef(state.n, binding);
+      // Un refus BRÛLE tous les devis ouverts de cette action : ils ne peuvent plus servir, par aucun chemin.
+      if (bound) await burnOpenQuotes(binding);
       return declined(answer.action === "cancel" ? "cancel" : "decline");
     }
     const accepted = acceptedContent(p.mcpReq.inputResponses, "confirm", confirmSchema);
@@ -152,7 +183,7 @@ export async function confirmCost(
       throw new ToolError("confirmation_invalid", "Cette confirmation a déjà servi ou a expiré : rien n'a été débité. Relance la demande pour une nouvelle confirmation.");
     }
     if (accepted && accepted.confirm !== true) {
-      if (bound) await redeemQuoteRef(state.n, binding);
+      if (bound) await burnOpenQuotes(binding);
       return declined("decline");
     }
     return {

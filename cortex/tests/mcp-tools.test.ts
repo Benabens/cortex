@@ -148,8 +148,9 @@ type Mode = "legacy" | "modern";
 
 async function connect(token: string, opts: { mode?: Mode; elicit?: "accept" | "decline" | "cancel" | null } = {}) {
   const mode = opts.mode ?? "legacy";
+  // Seul Claude Code affiche l'élicitation (MCP_ELICITATION_CLIENTS) : les clients qui la gèrent se présentent comme lui.
   const client = new Client(
-    { name: "cortex-test", version: "1.0.0" },
+    { name: opts.elicit ? "claude-code" : "cortex-test", version: "1.0.0" },
     {
       capabilities: opts.elicit ? { elicitation: { form: {} } } : {},
       ...(mode === "modern" ? { versionNegotiation: { mode: { pin: "2026-07-28" } } } : {}),
@@ -552,7 +553,7 @@ test("client 2026-07-28 : une confirmation forgée (réponse sans requestState s
         inputResponses: { confirm: { action: "accept", content: { confirm: true } } },
         _meta: {
           "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-          "io.modelcontextprotocol/clientInfo": { name: "forge", version: "1" },
+          "io.modelcontextprotocol/clientInfo": { name: "claude-code", version: "1" },
           "io.modelcontextprotocol/clientCapabilities": { elicitation: { form: {} } },
         },
       },
@@ -579,7 +580,7 @@ async function modernCall(access: string, name: string, params: Record<string, u
         name, ...params,
         _meta: {
           "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-          "io.modelcontextprotocol/clientInfo": { name: "brut", version: "1" },
+          "io.modelcontextprotocol/clientInfo": { name: "claude-code", version: "1" },
           "io.modelcontextprotocol/clientCapabilities": { elicitation: { form: {} } },
         },
       },
