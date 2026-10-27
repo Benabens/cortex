@@ -6,6 +6,7 @@ import { nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import { LlmError } from "@/lib/llm/types";
 import { guardsActive, floatLimit } from "./env";
+import { isOwner } from "./owner";
 import { ownerAlertBlocker } from "./owner-alert";
 import { alertSpendThresholds, resetSpendAlerts } from "./spend-alerts";
 
@@ -349,8 +350,10 @@ async function assertSpendCapUnchecked(): Promise<void> {
     }
   }
 
+  // Le plafond PAR COMPTE protège les autres comptes d'un abuseur : il n'arrête pas le
+  // propriétaire (lib/billing/owner) ; le plafond global ci-dessus, si.
   const perUserCap = spendCapPerUserUsd();
-  if (perUserCap !== null) {
+  if (perUserCap !== null && !(await isOwner())) {
     const spentUser = await spentTodayByUser();
     if (spentUser >= perUserCap) {
       throw new LlmError(
