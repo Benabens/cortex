@@ -4,10 +4,9 @@ import { useEffect } from "react";
 import { Wordmark } from "@/components/shell/Logo";
 
 /**
- * Erreur de segment (route sous le layout racine). Thème DARK cohérent avec
- * l'app — sans quoi la page d'erreur Next par défaut s'affiche en thème CLAIR
- * et casse l'identité dark-only. Styles inline : robuste même si le CSS global
- * n'est pas chargé au moment du crash.
+ * Erreur de segment (route sous le layout racine), aux jetons de l'app : sombre
+ * ou clair selon le thème choisi. Styles inline avec replis littéraux du sombre :
+ * robuste même si le CSS global n'est pas chargé au moment du crash.
  */
 export default function Error({
   error,
@@ -31,30 +30,30 @@ export default function Error({
         justifyContent: "center",
         textAlign: "center",
         padding: "48px 24px",
-        color: "#f4f2fb",
+        color: "var(--color-ink-1, #f4f2fb)",
       }}
     >
       <div
         style={{
           maxWidth: 460,
           width: "100%",
-          background: "rgba(255,255,255,0.03)",
-          border: "1px solid rgba(255,255,255,0.09)",
+          background: "var(--color-surface-1, rgba(255,255,255,0.03))",
+          border: "1px solid var(--color-line, rgba(255,255,255,0.09))",
           borderRadius: 16,
           padding: "32px 28px",
-          boxShadow: "0 8px 26px -6px rgba(0,0,0,0.6)",
+          boxShadow: "var(--shadow-pop, 0 8px 26px -6px rgba(0,0,0,0.6))",
         }}
       >
         <div style={{ display: "flex", justifyContent: "center" }}>
           <Wordmark markSize={24} textSize="1.15rem" />
         </div>
         <h1 style={{ fontSize: 22, fontWeight: 700, margin: "14px 0 8px" }}>Une erreur est survenue</h1>
-        <p style={{ fontSize: 14, lineHeight: 1.55, color: "#c9c7d6", margin: 0 }}>
+        <p style={{ fontSize: 14, lineHeight: 1.55, color: "var(--color-ink-2, #c9c7d6)", margin: 0 }}>
           Quelque chose s&apos;est mal passé de notre côté. Tu peux réessayer ; si
           ça persiste, reviens à l&apos;accueil et relance ton action.
         </p>
         {error?.digest && (
-          <p style={{ fontSize: 12, color: "#79768a", marginTop: 12, fontFamily: "ui-monospace, monospace" }}>
+          <p style={{ fontSize: 12, color: "var(--color-ink-3, #79768a)", marginTop: 12, fontFamily: "ui-monospace, monospace" }}>
             réf. {error.digest}
           </p>
         )}
@@ -69,8 +68,8 @@ export default function Error({
               padding: "10px 20px",
               fontSize: 14,
               fontWeight: 600,
-              color: "#111214",
-              background: "#ececee",
+              color: "var(--color-on-primary, #111214)",
+              background: "var(--color-primary, #ececee)",
             }}
           >
             Réessayer
@@ -84,8 +83,8 @@ export default function Error({
               padding: "10px 20px",
               fontSize: 14,
               fontWeight: 550,
-              color: "#c9c7d6",
-              border: "1px solid rgba(255,255,255,0.14)",
+              color: "var(--color-ink-2, #c9c7d6)",
+              border: "1px solid var(--color-line-strong, rgba(255,255,255,0.14))",
               textDecoration: "none",
             }}
           >

@@ -27,7 +27,7 @@ export function MobileNav({ open, onClose }: { open: boolean; onClose: () => voi
       {/* scrim */}
       <div
         onClick={onClose}
-        className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-200 ${
+        className={`absolute inset-0 bg-scrim backdrop-blur-sm transition-opacity duration-200 ${
           open ? "opacity-100" : "opacity-0"
         }`}
       />
@@ -36,7 +36,7 @@ export function MobileNav({ open, onClose }: { open: boolean; onClose: () => voi
         role="dialog"
         aria-modal="true"
         aria-label="Menu de navigation"
-        className={`absolute inset-y-0 left-0 flex w-[min(84vw,320px)] flex-col border-r border-line bg-bg shadow-[var(--shadow-hero)] transition-transform duration-300 ${
+        className={`absolute inset-y-0 left-0 flex w-[min(84vw,320px)] flex-col border-r border-line bg-[var(--drawer-bg)] shadow-[var(--shadow-hero)] transition-transform duration-300 ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
         style={{ transitionTimingFunction: "var(--ease-out-quint)" }}

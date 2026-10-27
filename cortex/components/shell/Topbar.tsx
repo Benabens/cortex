@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Search, Menu, CalendarClock, UserRound } from "lucide-react";
 import { Wordmark } from "./Logo";
+import { ThemeToggle } from "./ThemeToggle";
 
 import { useApi } from "@/lib/ux/api";
 
@@ -61,6 +62,8 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           >
             <Search className="size-[1.15rem]" strokeWidth={2} />
           </Link>
+
+          <ThemeToggle />
 
           <Link
             href="/compte"

@@ -62,7 +62,7 @@ export function LoginCard({
 
   return (
     <main
-      style={{ background: "#0b0b0f", color: "#f4f2fb" }}
+      style={{ background: "var(--bare-bg)", color: "var(--bare-ink)" }}
       className="flex min-h-dvh flex-col items-center justify-center px-4 py-10"
     >
       <div className="w-full max-w-[22rem]">
@@ -73,7 +73,7 @@ export function LoginCard({
         <h1 className="mt-8 text-center text-[1.35rem] font-semibold tracking-tight">
           Connexion à Cortex
         </h1>
-        <p className="mt-2 text-center text-[0.88rem] leading-relaxed" style={{ color: "#a5a2b3" }}>
+        <p className="mt-2 text-center text-[0.88rem] leading-relaxed" style={{ color: "var(--bare-muted)" }}>
           Révise ce qui tombe vraiment.
         </p>
 
@@ -81,7 +81,7 @@ export function LoginCard({
           <div
             role="alert"
             className="mt-6 rounded-lg px-4 py-3 text-[0.83rem] leading-relaxed"
-            style={{ background: "rgba(234,67,53,0.10)", border: "1px solid rgba(234,67,53,0.35)", color: "#f7b6ae" }}
+            style={{ background: "var(--bare-error-bg)", border: "1px solid var(--bare-error-line)", color: "var(--error-ink)" }}
           >
             {errorMessage(error)}
           </div>
@@ -96,8 +96,9 @@ export function LoginCard({
                 setBusy("google");
                 void signIn("google", { callbackUrl });
               }}
-              // Couleurs en classes : un `style` inline l'emporterait sur le survol.
-              className="inline-flex h-12 w-full items-center justify-center gap-3 rounded-lg bg-[#ececee] text-[0.92rem] font-semibold text-[#111214] transition-[background-color,opacity] duration-150 enabled:hover:bg-white enabled:active:bg-[#dedee2] disabled:cursor-not-allowed disabled:opacity-60"
+              // Couleurs en classes : un `style` inline l'emporterait sur le survol. En clair, le
+              // bouton reste blanc bordé : le « G » multicolore ne se pose pas sur un aplat bleu.
+              className="inline-flex h-12 w-full items-center justify-center gap-3 rounded-lg border border-[var(--bare-cta-line)] bg-[var(--bare-cta)] text-[0.92rem] font-semibold text-[var(--bare-cta-ink)] transition-[background-color,opacity] duration-150 enabled:hover:bg-[var(--bare-cta-hover)] enabled:active:bg-[var(--bare-cta-active)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               <GoogleGlyph />
               {busy === "google" ? "Redirection…" : "Continuer avec Google"}
@@ -114,10 +115,10 @@ export function LoginCard({
               }}
               className="flex flex-col gap-2"
             >
-              <div className="my-1 flex items-center gap-3 text-[0.72rem]" style={{ color: "#6f6c7d" }}>
-                <span className="h-px flex-1" style={{ background: "rgba(255,255,255,0.10)" }} />
+              <div className="my-1 flex items-center gap-3 text-[0.72rem]" style={{ color: "var(--bare-faint)" }}>
+                <span className="h-px flex-1" style={{ background: "var(--bare-line)" }} />
                 ou
-                <span className="h-px flex-1" style={{ background: "rgba(255,255,255,0.10)" }} />
+                <span className="h-px flex-1" style={{ background: "var(--bare-line)" }} />
               </div>
               <input
                 type="email"
@@ -127,14 +128,14 @@ export function LoginCard({
                 onChange={(e) => setAddr(e.target.value)}
                 placeholder="ton@email.com"
                 className="h-12 w-full rounded-lg border px-3.5 text-[0.9rem] outline-none"
-                style={{ background: "#141419", color: "#f4f2fb", borderColor: "rgba(255,255,255,0.14)" }}
+                style={{ background: "var(--bare-surface)", color: "var(--bare-ink)", borderColor: "var(--bare-field-line)" }}
               />
               {/* Chemin secondaire : surface neutre bordée (le bouton clair reste Google, l'action principale). */}
               <button
                 type="submit"
                 disabled={busy !== null}
                 className="inline-flex h-12 w-full items-center justify-center rounded-lg border text-[0.92rem] font-medium transition-[background,opacity] duration-150 disabled:opacity-60"
-                style={{ background: "#141419", color: "#f4f2fb", borderColor: "rgba(255,255,255,0.14)" }}
+                style={{ background: "var(--bare-surface)", color: "var(--bare-ink)", borderColor: "var(--bare-field-line)" }}
               >
                 {busy === "email" ? "Envoi…" : "Recevoir un lien de connexion"}
               </button>
@@ -142,31 +143,31 @@ export function LoginCard({
           )}
 
           {!google && !email && (
-            <p className="text-center text-[0.83rem]" style={{ color: "#a5a2b3" }}>
+            <p className="text-center text-[0.83rem]" style={{ color: "var(--bare-muted)" }}>
               Aucune méthode de connexion n’est configurée. Réessaie plus tard.
             </p>
           )}
         </div>
 
-        <p className="mt-8 text-center text-[0.75rem] leading-relaxed" style={{ color: "#6f6c7d" }}>
+        <p className="mt-8 text-center text-[0.75rem] leading-relaxed" style={{ color: "var(--bare-faint)" }}>
           En continuant, tu acceptes nos{" "}
-          <a href={termsHref} className="underline underline-offset-2" style={{ color: "#a5a2b3" }}>
+          <a href={termsHref} className="underline underline-offset-2" style={{ color: "var(--bare-muted)" }}>
             conditions
           </a>{" "}
           et notre{" "}
-          <a href={privacyHref} className="underline underline-offset-2" style={{ color: "#a5a2b3" }}>
+          <a href={privacyHref} className="underline underline-offset-2" style={{ color: "var(--bare-muted)" }}>
             politique de confidentialité
           </a>
           .
         </p>
         <p className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-1 text-center text-[0.75rem]">
-          <a href={noticeHref} className="underline underline-offset-2" style={{ color: "#a5a2b3" }}>
+          <a href={noticeHref} className="underline underline-offset-2" style={{ color: "var(--bare-muted)" }}>
             Mentions légales
           </a>
-          <a href={`mailto:${contact}`} className="underline underline-offset-2" style={{ color: "#a5a2b3" }}>
+          <a href={`mailto:${contact}`} className="underline underline-offset-2" style={{ color: "var(--bare-muted)" }}>
             Contact
           </a>
-          <a href={english} hrefLang="en" lang="en" className="underline underline-offset-2" style={{ color: "#a5a2b3" }}>
+          <a href={english} hrefLang="en" lang="en" className="underline underline-offset-2" style={{ color: "var(--bare-muted)" }}>
             English version
           </a>
         </p>

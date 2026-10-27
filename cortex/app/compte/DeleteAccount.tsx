@@ -126,7 +126,7 @@ export function DeleteAccount() {
           le dialogue se centrait sur la page entière et son titre sortait de l'écran. */}
       {open && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget && state === "idle") setOpen(false);
           }}
@@ -190,7 +190,7 @@ export function DeleteAccount() {
                 disabled={!canDelete}
                 // Texte sombre sur le rouge : 5,9:1 (blanc : 3,2:1, sous le seuil AA de 4,5:1).
                 // Couleurs en classes : un `style` inline l'emporterait sur le survol.
-                className="inline-flex h-11 items-center justify-center rounded-md border border-transparent bg-danger px-4 text-sm font-semibold text-[#111214] transition-[background-color,opacity] duration-150 enabled:hover:bg-danger-hi disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-11 items-center justify-center rounded-md border border-transparent bg-danger px-4 text-sm font-semibold text-on-danger transition-[background-color,opacity] duration-150 enabled:hover:bg-danger-hi disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {state === "deleting" ? "Suppression…" : "Supprimer définitivement"}
               </button>

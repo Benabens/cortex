@@ -19,8 +19,16 @@ export const metadata: Metadata = { ...NOINDEX, title: "Connecter une applicatio
  * ticket opaque lié au compte connecté. Même direction artistique que /login.
  */
 
-// faint : #8a8798 (5,2:1 sur la surface) — le #6f6c7d de /login reste sous 4,5:1 pour du petit texte.
-const C = { bg: "#0b0b0f", ink: "#f4f2fb", muted: "#a5a2b3", faint: "#8a8798", line: "rgba(255,255,255,0.10)", surface: "#141419" };
+// Jetons --bare-* de globals.css : la DA sombre de /login, et son équivalent en thème clair.
+// faint : #8a8798 en sombre (5,2:1 sur la surface), #5f6b7e en clair (5,4:1).
+const C = {
+  bg: "var(--bare-bg)",
+  ink: "var(--bare-ink)",
+  muted: "var(--bare-muted)",
+  faint: "var(--bare-faint)",
+  line: "var(--bare-line)",
+  surface: "var(--bare-surface)",
+};
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
@@ -50,7 +58,7 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
       <Shell>
         <h1 className="mt-8 text-center text-[1.25rem] font-semibold tracking-tight">Connexion impossible</h1>
         <p role="alert" className="mt-5 rounded-lg px-4 py-3 text-[0.88rem] leading-relaxed"
-          style={{ background: "rgba(234,67,53,0.10)", border: "1px solid rgba(234,67,53,0.35)", color: "#f7b6ae" }}>
+          style={{ background: "var(--bare-error-bg)", border: "1px solid var(--bare-error-line)", color: "var(--error-ink)" }}>
           {view.message}
         </p>
         <p className="mt-6 text-center text-[0.85rem]" style={{ color: C.muted }}>
@@ -81,7 +89,7 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
           <dd className="text-right font-medium">{view.localRedirect ? `cet ordinateur (${view.redirectHost})` : view.redirectHost}</dd>
         </div>
         {view.localRedirect ? (
-          <p className="mt-2 text-[0.78rem]" style={{ color: "#f0c987" }}>
+          <p className="mt-2 text-[0.78rem]" style={{ color: "var(--warn-ink)" }}>
             La connexion revient vers un programme de cet ordinateur. N’accepte que si tu viens de la lancer toi-même (par exemple depuis Claude Code).
           </p>
         ) : !view.verifiedDomain && (
@@ -109,7 +117,7 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
             {canGenerate && (
               <li className="rounded-lg px-4 py-3" style={{ border: `1px solid ${C.line}` }}>
                 <label className="flex cursor-pointer items-start gap-3">
-                  <input type="checkbox" name="generate" defaultChecked className="mt-1 size-4 accent-[#ececee]" />
+                  <input type="checkbox" name="generate" defaultChecked className="mt-1 size-4 accent-primary" />
                   <span>
                     <span className="font-medium">Générer</span>
                     <span style={{ color: C.muted }}> des examens blancs, des questions d’entraînement et des corrections. Ces actions coûtent des crédits : chacune t’annonce son coût et attend ton accord.</span>
@@ -120,7 +128,7 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
             {canWrite && (
               <li className="rounded-lg px-4 py-3" style={{ border: `1px solid ${C.line}` }}>
                 <label className="flex cursor-pointer items-start gap-3">
-                  <input type="checkbox" name="write" defaultChecked className="mt-1 size-4 accent-[#ececee]" />
+                  <input type="checkbox" name="write" defaultChecked className="mt-1 size-4 accent-primary" />
                   <span>
                     <span className="font-medium">Ajouter des cours et des supports</span>
                     <span style={{ color: C.muted }}> : créer un cours et y ranger un document (adresse web ou texte), gratuitement. Le préparer coûte des crédits : il faut aussi « Générer », et son coût t’est annoncé avant ton accord.</span>
@@ -137,12 +145,12 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
 
         <div className="mt-6 flex flex-col gap-3">
           <button type="submit" name="decision" value="approve"
-            className="inline-flex h-12 w-full items-center justify-center rounded-lg bg-[#ececee] text-[0.92rem] font-semibold text-[#111214] transition-colors duration-150 hover:bg-white active:bg-[#dedee2]">
+            className="inline-flex h-12 w-full items-center justify-center rounded-lg bg-primary text-[0.92rem] font-semibold text-on-primary transition-colors duration-150 hover:bg-primary-hover active:bg-primary-active">
             Autoriser
           </button>
           <button type="submit" name="decision" value="deny"
             // Couleurs en classes : un `style` inline l'emporterait sur le survol.
-            className="inline-flex h-12 w-full items-center justify-center rounded-lg border border-white/15 bg-[#141419] text-[0.92rem] font-medium text-[#f4f2fb] transition-colors duration-150 hover:bg-[#1b1b22]">
+            className="inline-flex h-12 w-full items-center justify-center rounded-lg border border-[var(--bare-field-line)] bg-[var(--bare-surface)] text-[0.92rem] font-medium text-[var(--bare-ink)] transition-colors duration-150 hover:bg-[var(--bare-surface-hover)]">
             Refuser
           </button>
         </div>
