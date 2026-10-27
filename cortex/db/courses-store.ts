@@ -1,5 +1,5 @@
 import { FAKE_COURSE_ID, LEGACY_COURSES, legacyCoursesFor, type LegacyCourse } from "../lib/courses-legacy";
-import { authAll, authRun, authSqlite, authGet } from "./auth-store";
+import { authAll, authRun, authSqlite, authGet, authTx, type AuthTx } from "./auth-store";
 import { dbDriverName, nowStr } from "./q";
 import { OWNER_USER } from "./context";
 
@@ -45,6 +45,15 @@ export type CourseRow = {
   created_at: string;
 };
 
+export class CourseCreationLimitError extends Error {
+  readonly status = 409;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "CourseCreationLimitError";
+  }
+}
+
 const COLUMNS = [
   "id", "owner_user_id", "name", "short", "code", "exam_name", "exam_kind",
   "university", "university_lines", "faculty", "teachers", "language",
@@ -80,8 +89,68 @@ function insertParams(r: CourseRow): (string | number | null)[] {
   return COLUMNS.map((c) => r[c] ?? null);
 }
 
+const UNLIMITED = /^(off|unlimited)$/i;
+
+function creationLimit(name: string, fallback: number): number | null {
+  const raw = process.env[name]?.trim();
+  if (raw && UNLIMITED.test(raw)) return null;
+  const parsed = raw === undefined || raw === "" ? fallback : Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+async function isOwner(tx: AuthTx, userId: string): Promise<boolean> {
+  const explicit = process.env.CORTEX_OWNER_USER_ID?.trim();
+  if (explicit && explicit === userId) return true;
+  const email = process.env.CORTEX_OWNER_EMAIL?.trim();
+  if (!email) return false;
+  const owner = await tx.get<{ id: string }>(`SELECT id FROM users WHERE lower(email) = lower(?)`, email);
+  return owner?.id === userId;
+}
+
+/**
+ * Point d'insertion unique des cours créés par un compte. Le verrou par compte,
+ * les deux vérifications et les deux écritures partagent la même transaction :
+ * deux requêtes simultanées ne peuvent donc jamais gagner la dernière place.
+ */
 export async function insertCourse(row: CourseRow): Promise<void> {
-  await authRun(insertSql(), ...insertParams(row));
+  await authTx(async (tx) => {
+    if (dbDriverName() === "postgres") {
+      await tx.run(`SELECT pg_advisory_xact_lock(hashtext(?))`, `course-creation:${row.owner_user_id}`);
+    }
+
+    if (!(await isOwner(tx, row.owner_user_id))) {
+      const maxCourses = creationLimit("MAX_COURSES_PER_USER", 20);
+      if (maxCourses !== null) {
+        const current = await tx.get<{ n: number }>(
+          `SELECT count(*) n FROM courses WHERE owner_user_id = ?`, row.owner_user_id,
+        );
+        if (Number(current?.n ?? 0) >= maxCourses) {
+          throw new CourseCreationLimitError(
+            `Tu as atteint la limite de ${maxCourses} cours. Supprime un cours pour en créer un nouveau.`,
+          );
+        }
+      }
+
+      const hourly = creationLimit("MAX_COURSES_CREATED_PER_HOUR", 10);
+      if (hourly !== null) {
+        const recent = await tx.get<{ n: number }>(
+          `SELECT count(*) n FROM course_creation_events WHERE user_id = ? AND created_at >= ?`,
+          row.owner_user_id, nowStr(-3_600_000),
+        );
+        if (Number(recent?.n ?? 0) >= hourly) {
+          throw new CourseCreationLimitError(
+            `Tu as atteint la limite de ${hourly} cours par heure. Réessaie plus tard.`,
+          );
+        }
+      }
+    }
+
+    await tx.run(insertSql(), ...insertParams(row));
+    await tx.run(
+      `INSERT INTO course_creation_events (course_id, user_id, created_at) VALUES (?, ?, ?)`,
+      row.id, row.owner_user_id, nowStr(),
+    );
+  });
 }
 
 /**

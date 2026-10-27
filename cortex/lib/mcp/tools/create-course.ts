@@ -1,5 +1,5 @@
 import * as z from "zod/v4";
-import { insertCourse } from "@/db/courses-store";
+import { CourseCreationLimitError, insertCourse } from "@/db/courses-store";
 import { InvalidCourseError, buildCourseRow } from "@/lib/course-create";
 import { ensureCoursesLoaded, listCoursesOf, reloadCourses } from "@/lib/courses";
 import { courseLabel } from "../courses";
@@ -43,7 +43,12 @@ export default defineTool({
       if (e instanceof InvalidCourseError) throw new ToolError("invalid_input", e.message);
       throw e;
     }
-    await insertCourse(row);
+    try {
+      await insertCourse(row);
+    } catch (e) {
+      if (e instanceof CourseCreationLimitError) throw new ToolError("conflict", e.message);
+      throw e;
+    }
     // Le cache est la source de lecture du moteur et de list_courses : il doit voir le cours neuf.
     await reloadCourses();
     const created = listCoursesOf(userId).find((c) => c.id === row.id);
