@@ -8,6 +8,7 @@ import { billingEnabled, creditsGate, fmtCredits, fromCenti, getBalanceCenti } f
 import { dailyLimit, generationGate, usedToday } from "@/lib/billing/guards";
 import { isOwner } from "@/lib/billing/owner";
 import { llmUnavailableReason } from "@/lib/llm";
+import { log } from "@/lib/metrics";
 import type { Principal } from "@/lib/oauth/server";
 import { QUOTE_TTL_S, argsHash, issueQuote, redeemQuote } from "./quotes";
 import { QUOTA_LABEL, ToolError, codeForStatus, type Confirmation, type Cost, type Era } from "./tool";
@@ -48,6 +49,29 @@ let _codec: RequestStateCodec<StatePayload> | null = null;
 export function requestStateCodec(): RequestStateCodec<StatePayload> {
   if (!_codec) _codec = createRequestStateCodec<StatePayload>({ key: stateKey(), ttlSeconds: QUOTE_TTL_S });
   return _codec;
+}
+
+/** Marque d'un requestState refusé (expiré, signature fausse, malformé). */
+const STALE = { stale: true } as const;
+type Stale = typeof STALE;
+
+/**
+ * Vérification du requestState, branchée sur le SDK. Un état expiré ou invalide n'est
+ * PAS une erreur de protocole : le SDK la rendrait opaque (« Invalid or expired
+ * requestState ») et l'appel serait perdu — c'est ce qui arrive quand la personne met
+ * plus de 10 min à répondre. L'appel continue sans état valide, donc SANS confirmation :
+ * l'outil redemande l'accord en disant pourquoi. Rien ne part sans un état signé, lié
+ * au compte, à l'outil, aux arguments et au coût, et consommé une seule fois.
+ */
+export async function verifyRequestState(
+  state: string, ctx: Parameters<RequestStateCodec<StatePayload>["verify"]>[1],
+): Promise<StatePayload | Stale> {
+  try {
+    return await requestStateCodec().verify(state, ctx);
+  } catch (e) {
+    log("info", "mcp.request_state_rejected", { reason: e instanceof Error ? e.message.slice(0, 40) : "unknown" });
+    return STALE;
+  }
 }
 
 const confirmSchema = z.object({ confirm: z.boolean().meta({ title: "Confirmer" }) });
@@ -111,7 +135,9 @@ export async function confirmCost(
     const answer = inputResponse(p.mcpReq.inputResponses, "confirm");
     if (answer.kind === "elicit" && answer.action !== "accept") return declined(answer.action === "cancel" ? "cancel" : "decline");
     const accepted = acceptedContent(p.mcpReq.inputResponses, "confirm", confirmSchema);
-    const state = p.mcpReq.requestState<StatePayload>();
+    const raw = p.mcpReq.requestState<StatePayload | Stale>();
+    const stale = !!raw && "stale" in raw;
+    const state = raw && !("stale" in raw) ? raw : undefined;
     const h = argsHash(args);
     const bound = state && state.u === binding.userId && state.g === binding.grantId && state.t === p.tool && state.h === h && state.c === costCenti;
     if (accepted?.confirm === true && bound) {
@@ -122,7 +148,12 @@ export async function confirmCost(
     return {
       kind: "input_required",
       result: inputRequired({
-        inputRequests: { confirm: inputRequired.elicit({ message, requestedSchema: confirmSchema }) },
+        inputRequests: {
+          confirm: inputRequired.elicit({
+            message: stale ? `La confirmation précédente a expiré ou n'est plus valable : rien n'a été lancé ni débité. ${message}` : message,
+            requestedSchema: confirmSchema,
+          }),
+        },
         requestState: await requestStateCodec().mint({ u: binding.userId, g: binding.grantId, t: p.tool, h, c: costCenti, n: await issueQuote(binding) }),
       }),
     };
