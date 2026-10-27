@@ -240,6 +240,18 @@ test("sans cortex.write : create_course, add_course_source et prepare_course ré
   assert.equal(listCoursesOf(ALICE).length, before);
 });
 
+test("cortex.write sans cortex.generate : création et ajout permis, la préparation (qui dépense) répond 403 et réclame generate", async () => {
+  const { access } = await connectAs(ALICE, { write: true });
+  const client = await mcp(access);
+  const r = await call(client, "create_course", { name: "Physique générale", code: "PHYS-101" });
+  assert.equal(r.isError, undefined, text(r));
+  await client.close();
+  const res = await rawCall(access, "prepare_course", { course: "PHYS-101" });
+  assert.equal(res.status, 403);
+  assert.match(res.headers.get("www-authenticate") ?? "", /error="insufficient_scope"/);
+  assert.match(res.headers.get("www-authenticate") ?? "", /cortex\.generate/);
+});
+
 let alice: Client;
 let courseId = "";
 
@@ -266,6 +278,20 @@ test("add_course_source, texte collé : rangé selon la catégorie, jamais écra
   assert.equal((again.structuredContent as { source: { file: string } }).source.file, "Formulaire-2.md");
   assert.deepEqual(await filesOf(courseId), ["content/notes/Formulaire-2.md", "content/notes/Formulaire.md", "refs/Final_2025.md"]);
   assert.equal(errorCode(await call(alice, "add_course_source", { course: "MATH-232", text: "x", url: "https://example.com/a.pdf" })), "invalid_input");
+});
+
+test("le cours d'un autre compte est introuvable pour add_course_source et prepare_course, rien n'y est écrit", async () => {
+  const { insertCourse } = await import("../db/courses-store");
+  const { buildCourseRow } = await import("../lib/course-create");
+  const { reloadCourses } = await import("../lib/courses");
+  const row = buildCourseRow({ name: "Cours de Ben", code: "BEN-999" }, OWNER);
+  await insertCourse(row);
+  await reloadCourses();
+  for (const ref of ["BEN-999", row.id, "Cours de Ben"]) {
+    assert.equal(errorCode(await call(alice, "add_course_source", { course: ref, text: "intrusion" })), "not_found", ref);
+    assert.equal(errorCode(await call(alice, "prepare_course", { course: ref })), "not_found", ref);
+  }
+  assert.deepEqual(await filesOf(row.id), []);
 });
 
 test("add_course_source, SSRF : adresse locale, privée, de métadonnées cloud, IPv4 dans une IPv6, http ou à identifiants → refusée, rien d'écrit", async () => {
@@ -301,8 +327,21 @@ test("prepare_course, compte normal : refusé sans crédit dès le devis ; avec 
   const job = (started.structuredContent as { status: string; job: { job_id: number } });
   assert.equal(job.status, "started");
   assert.equal(await credits.getBalanceCenti(ALICE), 300);
-  const replay = await call(alice, "prepare_course", { course: "MATH-232", confirmation_token: sc.confirmation.confirmation_token });
-  assert.equal((replay.structuredContent as { status: string } | undefined)?.status, "already_running", "le job en cours est réutilisé, rien de débité");
+  const again = await call(alice, "prepare_course", { course: "MATH-232", confirmation_token: sc.confirmation.confirmation_token });
+  assert.equal((again.structuredContent as { status: string } | undefined)?.status, "already_running", "le job en cours est réutilisé, rien de débité");
+  assert.equal(await credits.getBalanceCenti(ALICE), 300);
+  // Job terminé : le même jeton ne relance pas une préparation (il a déjà servi).
+  const { setJob } = await import("../lib/jobs");
+  const { runWithCourse } = await import("../db/client");
+  const { runWithUser } = await import("../db/context");
+  await runWithUser(ALICE, () => runWithCourse(courseId, () => setJob(job.job.job_id, { status: "error", error: "test" })));
+  process.env.DAILY_GEN_QUOTA = "unlimited"; // le quota du jour (1) refuserait avant même de lire le jeton
+  try {
+    const replay = await call(alice, "prepare_course", { course: "MATH-232", confirmation_token: sc.confirmation.confirmation_token });
+    assert.equal(errorCode(replay), "confirmation_invalid", text(replay));
+  } finally {
+    process.env.DAILY_GEN_QUOTA = "1";
+  }
   assert.equal(await credits.getBalanceCenti(ALICE), 300);
   const status = await call(alice, "get_job_status", { course: "MATH-232", job_id: job.job.job_id });
   assert.equal((status.structuredContent as { job: { type: string } }).job.type, "prepare");
@@ -358,10 +397,15 @@ test("quota de stockage atteint : refusé AVANT de télécharger (le serveur ne 
   process.env.STORAGE_QUOTA_MB = "0";
   try {
     const n = { n: 0 };
-    await assert.rejects(addAsAlice("https://example.com/cours.pdf", n), { status: 413 });
+    process.env.SOURCE_FETCH_PER_HOUR = "1";
+    for (let i = 0; i < 3; i++) {
+      // 413 à chaque fois, jamais 429 : un refus pour stockage plein ne consomme pas de lecture.
+      await assert.rejects(addAsAlice(`https://example.com/cours-${i}.pdf`, n), { status: 413 });
+    }
     assert.equal(n.n, 0, "aucune lecture");
   } finally {
     delete process.env.STORAGE_QUOTA_MB;
+    delete process.env.SOURCE_FETCH_PER_HOUR;
     setStatfsForTests(null);
   }
 });
@@ -378,6 +422,15 @@ test("débit des lectures d'URL borné par compte (SOURCE_FETCH_PER_HOUR), propr
     }
     assert.deepEqual(statuses, [200, 200, 429, 429]);
     assert.equal(n.n, 2, "les refus ne lisent rien");
+    // Un compte qui n'a encore rien lu n'est pas touché par les lectures du premier.
+    const { insertCourse } = await import("../db/courses-store");
+    const { buildCourseRow } = await import("../lib/course-create");
+    const { reloadCourses } = await import("../lib/courses");
+    const carol = buildCourseRow({ name: "Chimie", code: "CH-101" }, "usr_carol_write");
+    await insertCourse(carol);
+    await reloadCourses();
+    await addAs("usr_carol_write", carol.id, "https://example.com/chimie.pdf", n);
+    assert.equal(n.n, 3);
     assert.equal((await call(alice, "add_course_source", { course: "MATH-232", text: "Notes du cours 3.", title: "Cours 3" })).isError, undefined, "le texte collé ne compte pas");
   } finally {
     delete process.env.SOURCE_FETCH_PER_HOUR;

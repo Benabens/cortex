@@ -123,7 +123,7 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
                   <input type="checkbox" name="write" defaultChecked className="mt-1 size-4 accent-[#ececee]" />
                   <span>
                     <span className="font-medium">Ajouter des cours et des supports</span>
-                    <span style={{ color: C.muted }}> : créer un cours, y ranger un document (adresse web ou texte) et le préparer. La préparation coûte des crédits : son coût t’est annoncé et attend ton accord.</span>
+                    <span style={{ color: C.muted }}> : créer un cours et y ranger un document (adresse web ou texte), gratuitement. Le préparer coûte des crédits : il faut aussi « Générer », et son coût t’est annoncé avant ton accord.</span>
                   </span>
                 </label>
               </li>

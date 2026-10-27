@@ -210,9 +210,10 @@ Règles :
 - **Consentement** : affiché à chaque connexion (aucune approbation automatique), avec le domaine
   vérifié pour un client CIMD (hôte du `client_id`) ou l'hôte de l'URL de retour pour un client DCR
   (nom déclaré, non vérifié). Case « Générer (coûte des crédits) » décochable : le jeton ne porte alors
-  que `cortex.read`, et un outil de génération répond `403 insufficient_scope` (le client relance une
-  connexion pour la portée manquante). Case « Ajouter des cours et des supports » (`cortex.write`),
-  décochable de la même façon : non cochée, les outils d'ajout répondent `403 insufficient_scope`.
+  pas `cortex.generate`, et un outil qui dépense des crédits répond `403 insufficient_scope` (le client
+  relance une connexion pour la portée manquante). Case « Ajouter des cours et des supports »
+  (`cortex.write`), décochable de la même façon : non cochée, les outils d'ajout répondent `403
+  insufficient_scope`. `prepare_course` exige les deux (il ajoute et il dépense) ; l'écran le dit.
 - **Autorisations** : une par (compte, client), listées dans *Mon compte → Applications connectées* ;
   « Révoquer » coupe immédiatement tous ses jetons.
 - **CIMD** : document lu en HTTPS uniquement par la lecture durcie commune (`lib/public-https.ts`) :
