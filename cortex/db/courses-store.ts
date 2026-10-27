@@ -43,6 +43,8 @@ export type CourseRow = {
   uploads_rel: string | null;
   content_rel: string | null;
   created_at: string;
+  /** Format d'examen déclaré (JSON, cf. lib/exam-format DeclaredFormat) ; NULL = rien de déclaré. */
+  exam_format?: string | null;
 };
 
 export class CourseCreationLimitError extends Error {
@@ -58,7 +60,7 @@ const COLUMNS = [
   "id", "owner_user_id", "name", "short", "code", "exam_name", "exam_kind",
   "university", "university_lines", "faculty", "teachers", "language",
   "profile_id", "duration_min", "exam_date", "db_file", "refs_rel",
-  "exams_rel", "uploads_rel", "content_rel", "created_at",
+  "exams_rel", "uploads_rel", "content_rel", "created_at", "exam_format",
 ] as const;
 
 const SELECT_ALL = `SELECT ${COLUMNS.join(", ")} FROM courses ORDER BY created_at, id`;
@@ -165,7 +167,7 @@ async function insertCourseIfAbsent(row: CourseRow): Promise<void> {
 
 /** Champs modifiables depuis l'interface (le slug et le propriétaire, eux, ne bougent pas). */
 export type CoursePatch = Partial<
-  Pick<CourseRow, "name" | "short" | "code" | "exam_name" | "university" | "university_lines" | "teachers" | "language" | "exam_date" | "duration_min">
+  Pick<CourseRow, "name" | "short" | "code" | "exam_name" | "university" | "university_lines" | "teachers" | "language" | "exam_date" | "duration_min" | "exam_format">
 >;
 
 export async function updateCourseRow(id: string, ownerUserId: string, patch: CoursePatch): Promise<number> {

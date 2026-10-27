@@ -1,6 +1,7 @@
 import { listCourses } from "@/lib/courses";
 import type { CourseRow } from "@/db/courses-store";
 import { nowStr } from "@/db/q";
+import { InvalidFormatError, LANGUAGES, parseDeclaredFormat, type DeclaredFormat } from "@/lib/exam-format";
 
 /**
  * CRÉATION D'UN COURS depuis l'interface — validation des champs et fabrication
@@ -15,11 +16,25 @@ export type CourseInput = {
   language?: unknown;
   examDate?: unknown;
   durationMin?: unknown;
+  /** Format d'examen déclaré (facultatif) : seule source de format d'un cours sans annale. */
+  examFormat?: unknown;
 };
 
 export class InvalidCourseError extends Error {}
 
-const LANGS = new Set(["fr", "en", "de", "it", "es", "pt", "nl"]);
+const LANGS = new Set<string>(LANGUAGES);
+
+/** Format déclaré validé, sérialisé pour la colonne `exam_format` (null = rien de déclaré). */
+export function declaredFormatColumn(input: unknown): string | null {
+  let f: DeclaredFormat | null;
+  try {
+    f = parseDeclaredFormat(input);
+  } catch (e) {
+    if (e instanceof InvalidFormatError) throw new InvalidCourseError(e.message);
+    throw e;
+  }
+  return f ? JSON.stringify(f) : null;
+}
 
 /** Identifiants réservés : ils serviraient de segment d'URL ou de dossier. */
 const RESERVED = new Set(["new", "nouveau", "api", "admin", "cours", "u", "data", "refs", "exams", "uploads"]);
@@ -139,5 +154,6 @@ export function buildCourseRow(input: CourseInput, ownerUserId: string): CourseR
     uploads_rel: null,
     content_rel: null,
     created_at: nowStr(),
+    exam_format: declaredFormatColumn(input.examFormat),
   };
 }
