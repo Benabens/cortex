@@ -159,6 +159,12 @@ export type ExamSource = {
  */
 export const EXAM_SOURCE_DEDUP = `id IN (SELECT min(id) FROM sources WHERE type IN ('final','midterm') GROUP BY path)`;
 
+/** Nombre d'annales (finals, partiels) ingérées dans le cours courant ; 0 pour un cours neuf. */
+export async function pastExamCount(): Promise<number> {
+  await q.ensureTable("sources");
+  return Number((await q.get<{ n: number }>(`SELECT count(*) n FROM sources WHERE type IN ('final','midterm') AND ${EXAM_SOURCE_DEDUP}`))?.n ?? 0);
+}
+
 /** Examens (finals/midterms) dédoublonnés par chemin, triés par année croissante (sans année en dernier). */
 export async function listExamSourceRows(): Promise<{ path: string; title: string; year: number | null }[]> {
   return q.all<{ path: string; title: string; year: number | null }>(

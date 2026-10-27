@@ -102,7 +102,7 @@ préparation) ; aucun outil ne supprime un cours ou un document, ni ne touche au
 
 | Outil | Entrée | Coût | Sortie |
 |---|---|---|---|
-| `generate_mock_exam` | `course?`, `chapter?` (numéro ou titre du plan), `focus?` (≤ 400), `exercise_count?` (1-12), `confirmation_token?` | `exam` = 2 crédits, +1 par tranche de 4 exercices au-delà de 8 (`costForJob`) ; 1 génération du quota du jour (`DAILY_GEN_QUOTA`) | `job_id` → suivre avec `get_job_status` (10-20 min) |
+| `generate_mock_exam` | `course?`, `chapter?` (numéro ou titre du plan), `focus?` (≤ 400), `format?` (`written` / `mcq`), `exercise_count?` (écrit 1-12, QCM 1-40), `confirmation_token?` | `exam` = 2 crédits, +1 par tranche de 4 exercices au-delà de 8 ; QCM au tarif de `qcm` (`costForJob`) ; 1 génération du quota du jour (`DAILY_GEN_QUOTA`) | `job_id` → suivre avec `get_job_status` (10-20 min ; un QCM terminé y rend ses questions et options). Avec des annales, leur format fait la règle (une demande de QCM n'est pas appliquée, `note` le dit). **Sans annales** : la demande est suivie, avec QCM si `format` vaut `mcq` ou si la demande libre en réclame (négations et titres de chapitre ignorés, nombre lu dans le texte) ; défauts 6 exercices ou 20 QCM ; `note` le dit (`lib/generation.ts` `planMockExam`) |
 | `generate_drill` | `course?`, `concept?` (≤ 500 ; défaut : le point faible le plus grave), `confirmation_token?` | `assist` = 0,1 crédit ; 1 assistance du quota du jour (`DAILY_ASSIST_QUOTA`) | une question type examen, 5 indices progressifs, corrigé |
 | `check_answer` | `course?`, `statement` (≤ 8000), `answer` (≤ 8000), `confirmation_token?` | `assist` = 0,1 crédit ; 1 assistance du quota du jour | verdict, barème critère par critère, score, retour, solution |
 
@@ -144,22 +144,30 @@ devis, les gardes lecture seule de l'app (`generationGate` : rafale + quota du j
 solde ; moteur disponible) refusent ce qui serait refusé de toute façon — on ne fait pas confirmer
 une dépense impossible.
 
-1. **Client qui gère l'élicitation (ère 2026-07-28, ex. Claude Code)** : l'outil répond
-   `input_required` avec un formulaire « Confirmer — N crédits ». Le client le montre à la personne et
-   relance l'appel avec la réponse. Un `requestState` signé HMAC (10 min) lie la confirmation au compte,
-   à l'outil, aux arguments et au coût annoncé : un état falsifié, expiré ou porté sur d'autres arguments
-   est refusé. Si la personne refuse (`decline`) ou si la confirmation est fermée ou ne peut pas être
-   affichée (`cancel` — c'est ce que répond Claude Code en mode non interactif `-p`, vérifié avec la
-   2.1.283), l'outil rend `status: "declined"` avec le coût annoncé et **aucun jeton de repli** : une
-   confirmation ratée ne devient jamais un devis que le modèle pourrait confirmer seul. Conséquence
-   assumée : une session sans humain ne peut rien dépenser.
-2. **Sinon (ère 2025, ex. claude.ai)** : un serveur sans état ne peut pas pousser de requête au client.
-   Premier appel = **devis** sans aucun effet, avec un `confirmation_token` (usage unique, 10 min, haché
-   en base, lié au compte, à l'autorisation OAuth, à l'outil, aux arguments et au coût). Second appel avec
-   ce jeton = exécution. Les descriptions d'outils imposent au modèle de montrer le devis et d'obtenir
-   l'accord de la personne avant le second appel.
+1. **Compte du propriétaire** : rien ne lui est facturé, rien à confirmer, l'action part directement
+   (décision de Ben, 27/10/2026). Une instance sans facturation ne suffit pas : l'action consomme
+   quand même du quota, un compte ordinaire confirme.
+2. **Par défaut : devis en deux temps.** Premier appel = **devis** sans aucun effet, avec un
+   `confirmation_token` (usage unique, 10 min, haché en base, lié au compte, à l'autorisation OAuth, à
+   l'outil, aux arguments et au coût). Claude montre le coût dans la conversation, attend l'accord
+   explicite, puis rappelle l'outil avec ce jeton = exécution. Les instructions du serveur et les
+   descriptions d'outils l'imposent. C'est le flux de claude.ai, Claude Desktop et Cowork : ils
+   **annoncent** l'élicitation sans l'afficher, et un dialogue y laissait l'appel pendre jusqu'à
+   expirer (230 s, 27/10/2026).
+3. **Élicitation, seulement pour les clients qui l'affichent** : ère 2026-07-28, capacité déclarée, et
+   nom `clientInfo` dans `MCP_ELICITATION_CLIENTS` (défaut `claude-code` ; vide = personne). L'outil
+   répond `input_required` avec un formulaire « Confirmer — N crédits » ; le client le montre et relance
+   l'appel avec la réponse. Le `requestState` signé (10 min) porte la **référence** du devis (son
+   empreinte, jamais le jeton, car le codec signe sans chiffrer). Un état expiré ou falsifié fait
+   redemander, un refus brûle **tous** les devis ouverts de cette action. **Repli** : si une demande pour
+   la même action est restée plus de 30 s sans réponse, l'appel suivant reçoit le devis à jeton au lieu
+   d'un nouveau dialogue. Le serveur, sans état, ne peut pas interrompre un dialogue déjà envoyé : un
+   client qui ne l'affiche pas garde le premier appel en suspens jusqu'à son propre délai, et les
+   instructions du serveur disent alors au modèle de rappeler l'outil.
+   Si la personne refuse (`decline`) ou ferme la confirmation (`cancel`), l'outil rend
+   `status: "declined"` sans jeton de repli.
 
-Dans les deux cas la dépense passe ensuite par la **réservation atomique** de l'app
+Dans tous les cas la dépense passe ensuite par la **réservation atomique** de l'app
 (`reserveGeneration` : rafale par minute, quota du jour, places en cours, solde, plafond global
 `SPEND_CAP_USD` au niveau `lib/llm`) : un devis confirmé n'est pas un passe-droit, il peut encore être
 refusé (402 solde, 429 quota) et rien n'est alors débité.
@@ -238,7 +246,7 @@ Règles :
 | Code d'autorisation intercepté | PKCE S256 obligatoire ; code 60 s, usage unique, lié au client et à l'URL de retour. |
 | SSRF via un `client_id` CIMD ou `add_course_source` | Une seule porte, `lib/public-https.ts` : HTTPS seulement, sans identifiants dans l'URL, IP littérale vérifiée avant connexion, IP résolues vérifiées à la connexion (pas de fenêtre de rebinding), pas de redirection, taille et durée totale bornées. Testé : `tests/mcp-write.test.ts`. |
 | Serveur utilisé comme relais de téléchargement | `add_course_source` est un GET sortant vers une URL choisie par le modèle, pour tout compte `cortex.write`. Bornes : https public seulement, 30 Mo et 30 s par lecture, `SOURCE_FETCH_PER_HOUR` par compte, quota de stockage vérifié avant la lecture, limite par compte du point MCP. Un contenu piégé pourrait faire porter des données dans l'adresse (exfiltration de ce que le modèle sait) : appels visibles dans le client, portée décochable, révocation dans Mon compte. |
-| Dépense non voulue (crédits) | Portée `cortex.generate` séparée et décochable ; coût exact annoncé ; confirmation par élicitation (humain) ou devis à jeton unique lié aux arguments ; puis réservation atomique de l'app (solde, quota, rafale, places, plafond mensuel global). |
+| Dépense non voulue (crédits) | Portée `cortex.generate` séparée et décochable ; coût exact annoncé ; devis à jeton unique lié aux arguments (accord demandé dans la conversation), ou élicitation pour les clients qui l'affichent ; puis réservation atomique de l'app (solde, quota, rafale, places, plafond mensuel global). Coût nul (propriétaire) : lancement direct, borné par les plafonds de dépense. |
 | Injection de prompt par le contenu des cours | Sorties encadrées comme **données** (`<cortex_data>…</cortex_data>`, `<` échappé en `<` dans le JSON pour qu'aucun contenu ne ferme le bloc) ; consigne serveur (`instructions`) ; aucun outil de suppression ni de paiement ; les outils d'écriture n'ajoutent que du contenu aux cours **du compte du jeton** (gratuit, borné par le stockage), et tout ce qui coûte (génération, préparation) reste soumis à confirmation. |
 | Flood / boucle d'agent | Limite par IP du proxy, `/mcp` compris (un jeton, même inventé, n'ouvre pas de compteur à part : sinon la limite se contournait) ; limite par compte au point MCP, après vérification du jeton ; quotas et rafale de la réservation ; corps ≤ 256 Kio. Derrière claude.ai, tous les comptes partagent les adresses de sortie d'Anthropic : à surveiller si l'usage grandit (DEPLOY.md § 14). |
 | Sorties géantes | Listes bornées par outil, textes tronqués, plafond global ~40 000 caractères par résultat (sous les limites de claude.ai et de Claude Code). |
