@@ -115,6 +115,8 @@ SPEND_CAP_USD=25
 DAILY_GEN_QUOTA=3
 DAILY_ASSIST_QUOTA=20
 RATE_LIMIT_PER_MIN=120
+MAX_COURSES_PER_USER=20
+MAX_COURSES_CREATED_PER_HOUR=10
 TRUST_PROXY=1
 
 # — lancement FERMÉ (optionnel ; sans ces lignes, tout compte Google s'inscrit : § 12) —
@@ -167,6 +169,11 @@ LOG_LEVEL=info
 > (`CORTEX_HOSTED=1` force la même garde ailleurs). `PG_AUTH_POOL_MAX` (défaut 4)
 > = connexions dédiées aux réservations de crédits ; monte-le si tu passes à
 > plusieurs replicas ou si `MAX_ACTIVE_JOBS` grandit.
+>
+> `MAX_COURSES_PER_USER` borne les cours présents d'un compte (défaut 20) et
+> `MAX_COURSES_CREATED_PER_HOUR` borne leur création (défaut 10/h, suppressions
+> comprises). Le compte `CORTEX_OWNER_EMAIL`/`CORTEX_OWNER_USER_ID` est exempté.
+> `off` ou `unlimited` désactive explicitement la limite correspondante.
 
 Le domaine : Settings → **Networking** → **Generate Domain** (type
 `cortex-app-production.up.railway.app`) → reporte-le dans `AUTH_URL`.
