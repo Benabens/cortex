@@ -1,6 +1,5 @@
-import { PG_TYPES } from "./pg-types";
 import type { SqlParam } from "./q";
-import { databaseUrl, pglitePublicQuery, pglitePublicTransaction, pgSafeParams } from "./driver-postgres";
+import { PG_TYPES, databaseUrl, pglitePublicQuery, pglitePublicTransaction, pgSafeParams } from "./driver-postgres";
 
 /**
  * Accès Postgres du store d'auth : schéma `public`, HORS search_path tenant.
