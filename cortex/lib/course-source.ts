@@ -103,16 +103,21 @@ export async function addTextSource(courseId: string, a: { text: string; title?:
 /** Lectures d'URL par compte sur l'heure glissante (conteneur unique, cf. ARCHITECTURE : en mémoire suffit). */
 const fetches = new Map<string, number[]>();
 
+const HOUR_MS = 3600_000;
+
 /** Compte une lecture si le plafond horaire le permet. Défaut 30 en déploiement gardé ; « unlimited » lève. */
 function takeFetchSlot(userId: string): boolean {
   const cap = intLimit("SOURCE_FETCH_PER_HOUR", 30);
   if (cap === null) return true;
   const now = Date.now();
-  const recent = (fetches.get(userId) ?? []).filter((t) => now - t < 3600_000);
+  const recent = (fetches.get(userId) ?? []).filter((t) => now - t < HOUR_MS);
   const ok = recent.length < cap;
   if (ok) recent.push(now);
-  if (fetches.size > 10_000) fetches.clear();
   fetches.set(userId, recent);
+  // Mémoire bornée : on oublie d'abord les comptes sans lecture dans l'heure (jamais les compteurs actifs).
+  if (fetches.size > 10_000) {
+    for (const [k, v] of fetches) if (!v.some((t) => now - t < HOUR_MS)) fetches.delete(k);
+  }
   return ok;
 }
 
@@ -120,12 +125,12 @@ export async function addUrlSource(
   courseId: string, a: { url: string; title?: string; category?: SourceCategory }, fetcher: PublicFetcher = readPublicHttps,
 ): Promise<SavedSource> {
   const userId = currentUser();
+  // Compte déjà plein : refuser avant de télécharger quoi que ce soit (et sans consommer de lecture).
+  const full = await checkStorage(userId, 1);
+  if (full) throw new SourceError(full.status, full.error);
   if (!takeFetchSlot(userId)) {
     throw new SourceError(429, "Trop d'adresses lues pour ce compte cette heure-ci : réessaie plus tard, ou colle le texte du document.");
   }
-  // Compte déjà plein : refuser avant de télécharger quoi que ce soit.
-  const full = await checkStorage(userId, 1);
-  if (full) throw new SourceError(full.status, full.error);
   let res;
   try {
     res = await fetcher(a.url, { maxBytes: SOURCE_MAX_BYTES, timeoutMs: FETCH_TIMEOUT_MS, accept: ACCEPT, userAgent: "Cortex-Sources/1.0" });
