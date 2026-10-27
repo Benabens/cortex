@@ -213,6 +213,8 @@ export async function heartbeatJob(id: number): Promise<void> {
   await q.run(`UPDATE jobs SET heartbeat_at = ?, worker_id = ? WHERE id = ?`, nowStr(), `${process.pid}`, id);
 }
 
+const TERMINAL_STATES: readonly JobStatus[] = ["done", "error", "canceled"];
+
 export async function setJob(id: number, fields: Partial<{ status: JobStatus; currentStep: string; progress: number; resultPath: string; resultId: number; error: string; pid: number }>): Promise<void> {
   const map: Record<string, string> = { status: "status", currentStep: "current_step", progress: "progress", resultPath: "result_path", resultId: "result_id", error: "error", pid: "pid" };
   const sets: string[] = [];
@@ -225,9 +227,15 @@ export async function setJob(id: number, fields: Partial<{ status: JobStatus; cu
   if (!sets.length) return;
   sets.push(`updated_at = ?`);
   vals.push(nowStr());
-  await q.run(`UPDATE jobs SET ${sets.join(", ")} WHERE id = ?`, ...vals, id);
+  // Un job TERMINÉ ne se rouvre pas : les étapes des générations ne sont pas toujours
+  // attendues (onStep appelé sans await), et une progression arrivée en retard écrasait
+  // « done, 100 % » (préparation affichée finie à 98 %, 27/10/2026). Seul un nouvel état
+  // terminal peut s'écrire sur un job terminé.
+  const finishing = !!fields.status && TERMINAL_STATES.includes(fields.status);
+  const stillOpen = finishing ? "" : ` AND status NOT IN (${TERMINAL_STATES.map((st) => `'${st}'`).join(", ")})`;
+  await q.run(`UPDATE jobs SET ${sets.join(", ")} WHERE id = ?${stillOpen}`, ...vals, id);
   // État terminal : la place « génération en cours » du compte est libérée.
-  if (fields.status && ["done", "error", "canceled"].includes(fields.status)) {
+  if (finishing) {
     try {
       const row = await q.get<{ credit_ref: string | null }>(`SELECT credit_ref FROM jobs WHERE id = ?`, id);
       if (row?.credit_ref) {
