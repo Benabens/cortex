@@ -13,7 +13,7 @@ import path from "node:path";
 import { extractText, getDocumentProxy } from "unpdf";
 import { currentCourse, enterCourse, ensureFts } from "../db/client";
 import { indexItemForSearch } from "../lib/search";
-import { q } from "../db/q";
+import { dbDriverName, q } from "../db/q";
 import { coursePaths, DEFAULT_COURSE, ensureCoursesLoaded } from "../lib/courses";
 import { importFolder } from "../lib/import-folder";
 import { ingestAllRefs } from "../lib/sources";
@@ -33,10 +33,10 @@ const fromDir = argVal("from");
 if (courseArg) process.env.CORTEX_COURSE = courseArg;
 enterCourse(courseArg);
 const COURSE = currentCourse();
-const CONTENT_ROOT = coursePaths(COURSE).contentRoot; // cs-202 → racine du repo ; autres → data/<id>/content
-// La table FTS doit exister AVANT toute insertion dans fts_items (DB neuve d'un
-// nouveau cours : le schéma de base ne crée pas fts_items). No-op pour cs-202 (déjà présente).
-ensureFts();
+// cs-202 → racine du repo ; autres → data/<id>/content. Résolu dans main(), APRÈS
+// ensureCoursesLoaded() : en Postgres le cache des cours ne s'amorce pas tout seul,
+// et le lire au chargement du module faisait échouer toute ingestion (27/10/2026).
+let CONTENT_ROOT = "";
 
 const clean = (s: string) =>
   s.replace(/\s+/g, " ").replace(/ /g, " ").trim();
@@ -455,6 +455,9 @@ async function ingestGenericContent(): Promise<void> {
 }
 
 async function main() {
+  CONTENT_ROOT = coursePaths(COURSE).contentRoot;
+  // La table FTS doit exister AVANT toute insertion dans fts_items (DB neuve d'un
+  // nouveau cours : le schéma de base ne crée pas fts_items). No-op pour cs-202 (déjà présente).
   ensureFts();
   console.log(`Cours : ${COURSE}`);
 
@@ -519,7 +522,25 @@ async function main() {
   console.log(`   conventions/attendus (notes)  : ${notes.n}`);
 }
 
-ensureCoursesLoaded().then(main).catch((e) => {
-  console.error("Échec ingestion :", e);
-  process.exit(1);
-});
+ensureCoursesLoaded()
+  .then(main)
+  .then(async () => {
+    // Le worker attend la FIN de ce processus pour passer à la suite. En Postgres, les
+    // pools le gardent en vie (celui du store d'auth n'expire jamais) : on les ferme. Un
+    // échec de fermeture ne change rien au résultat de l'ingestion, déjà écrite.
+    if (dbDriverName() === "postgres") {
+      try {
+        const { closePostgres } = await import("../db/driver-postgres");
+        await closePostgres();
+      } catch (e) {
+        console.error("Fermeture des connexions :", (e as Error)?.message ?? e);
+      }
+    }
+    // Filet : si une autre ressource retenait encore le processus, il sort quand même
+    // (sinon le job resterait « en cours » à vie). `unref` : ne retarde pas une sortie normale.
+    setTimeout(() => process.exit(0), 10_000).unref();
+  })
+  .catch((e) => {
+    console.error("Échec ingestion :", e);
+    process.exit(1);
+  });
