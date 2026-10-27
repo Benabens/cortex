@@ -33,7 +33,8 @@ export default defineTool({
   }),
   output,
   async run(args, ctx) {
-    if (!args.url === !args.text) throw new ToolError("invalid_input", "Donne soit « url », soit « text » (exactement l'un des deux).");
+    const given = [args.url, args.text].filter((v) => v !== undefined).length;
+    if (given !== 1) throw new ToolError("invalid_input", "Donne soit « url », soit « text » (exactement l'un des deux).");
     return ctx.inCourse(args.course, async (c) => {
       let saved;
       try {
