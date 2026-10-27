@@ -38,8 +38,8 @@ export default defineTool({
   description:
     "Generate ONE exam-style practice question on a concept, with five progressive hints and a worked solution, in the style of the course's real exams. " +
     "Without a concept it targets the student's most serious weak point. Costs credits (0.1 by default) and one daily assistance: " +
-    "the first call returns the exact cost and a confirmation_token without spending anything (or asks the user directly if the client supports it); " +
-    "call again with the same arguments plus confirmation_token ONLY after the user explicitly approved. Takes up to a few minutes.",
+    "the first call returns the exact cost and a confirmation_token without spending anything; " +
+    "ask the user in the conversation and call again with the same arguments plus confirmation_token ONLY after they explicitly approved (nothing to confirm when nothing is charged). Takes up to a few minutes.",
   kind: "generate",
   input: z.object({
     course: courseArg,

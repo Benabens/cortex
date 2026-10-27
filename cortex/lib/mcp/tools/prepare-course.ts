@@ -21,8 +21,8 @@ export default defineTool({
   description:
     "Build a course from its materials, like \"Prepare\" in the app: ingests every material, learns the exam format from the past exams, " +
     "then builds the course plan. Costs credits (2 by default) and one daily generation, like in the app. The first call returns the exact cost and a " +
-    "confirmation_token without spending anything (or asks the user directly if the client supports it); call again with the same arguments plus " +
-    "confirmation_token ONLY after the user explicitly approved. Then runs in the background for several minutes: track it with get_job_status. " +
+    "confirmation_token without spending anything; ask the user in the conversation and call again with the same arguments plus " +
+    "confirmation_token ONLY after they explicitly approved (nothing to confirm when nothing is charged). Then runs in the background for several minutes: track it with get_job_status. " +
     "Run it again after adding materials to an already prepared course.",
   kind: "write",
   spends: true,
