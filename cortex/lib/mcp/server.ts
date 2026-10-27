@@ -8,7 +8,7 @@ import { log } from "@/lib/metrics";
 import { captureError, redactMessage } from "@/lib/observability";
 import { SCOPE_GENERATE, SCOPE_READ, SCOPE_WRITE } from "@/lib/oauth/config";
 import type { Principal } from "@/lib/oauth/server";
-import { confirmCost, requestStateCodec } from "./confirm";
+import { confirmCost, verifyRequestState } from "./confirm";
 import * as z from "zod/v4";
 import { DATA_NOTICE, MAX_RESULT_CHARS, renderData } from "./content";
 import { inCourseOf } from "./courses";
@@ -146,7 +146,7 @@ function register(server: McpServer, tool: ToolDef, era: Era, appOrigin: string)
 export function buildServer(opts: { era: Era; appOrigin: string }): McpServer {
   const server = new McpServer(
     { name: "cortex", title: "Cortex", version: SERVER_VERSION, websiteUrl: opts.appOrigin },
-    { instructions: SERVER_INSTRUCTIONS, requestState: { verify: requestStateCodec().verify } },
+    { instructions: SERVER_INSTRUCTIONS, requestState: { verify: verifyRequestState } },
   );
   for (const tool of TOOLS) register(server, tool, opts.era, opts.appOrigin);
   return server;
