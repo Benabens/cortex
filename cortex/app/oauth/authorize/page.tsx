@@ -121,7 +121,8 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
             {canAdmin && (
               <li className="rounded-lg px-4 py-3" style={{ border: `1px solid ${C.line}` }}>
                 <label className="flex cursor-pointer items-start gap-3">
-                  <input type="checkbox" name="admin" defaultChecked className="mt-1 size-4 accent-[#ececee]" />
+                  {/* Décochée par défaut : accorder l'écriture doit être un geste, pas un oubli sur un écran d'hameçonnage. */}
+                  <input type="checkbox" name="admin" className="mt-1 size-4 accent-[#ececee]" />
                   <span>
                     <span className="font-medium">Administrer</span>
                     <span style={{ color: C.muted }}> tes cours : en créer, leur ajouter des supports (adresse web ou texte) et lancer leur préparation. Réservé à ton compte de propriétaire.</span>

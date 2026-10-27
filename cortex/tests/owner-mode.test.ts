@@ -1,8 +1,8 @@
 /**
  * MODE PROPRIÉTAIRE — le compte de CORTEX_OWNER_EMAIL n'est jamais arrêté par
  * les crédits, les quotas du jour ni le plafond de générations simultanées :
- * rien n'est débité ni compté contre lui. Le plafond GLOBAL de dépense
- * (SPEND_CAP_USD) reste actif, et les autres comptes ne voient aucun changement.
+ * rien n'est débité ni compté contre lui. Les plafonds de DÉPENSE (par compte et
+ * global) restent actifs, et les autres comptes ne voient aucun changement.
  * Postgres réel (PGlite), facturation active, limites serrées.
  */
 import assert from "node:assert/strict";
@@ -88,7 +88,9 @@ test("pré-contrôles des routes et du MCP : le propriétaire passe sans solde n
   assert.equal((await as("usr_broke_mode", () => creditsGate("exam")))?.status, 402);
 });
 
-test("dépense : le plafond PAR COMPTE n'arrête pas le propriétaire, le plafond GLOBAL du mois l'arrête comme tout le monde ; les coûts restent enregistrés", async () => {
+test("dépense : les plafonds de dépense, par compte et global, arrêtent le propriétaire comme tout le monde ; ses coûts restent enregistrés", async () => {
+  // Une boucle d'agent ou un jeton volé sur le compte du propriétaire ne doit pas épuiser
+  // le plafond global du mois, qui couperait la génération de TOUS les comptes.
   const usage = await import("../lib/billing/usage");
   const { authGet } = await import("../db/auth-store");
   process.env.SPEND_CAP_PER_USER_USD = "1";
@@ -96,15 +98,16 @@ test("dépense : le plafond PAR COMPTE n'arrête pas le propriétaire, le plafon
   const isSpendCap = (e: unknown) => (e as { code?: string }).code === "SPEND_CAP";
   try {
     usage.resetSpendCache();
+    await as(OWNER, () => usage.assertSpendCap("anthropic"));
     // 2 $ dépensés aujourd'hui par chacun : au-dessus du plafond par compte (1 $).
     for (const user of [OWNER, OTHER]) {
       await as(user, () => usage.recordUsage({ provider: "anthropic", model: "claude-sonnet-5", tokensIn: 2 * 500_000 }));
     }
     const logged = await authGet<{ n: number }>(`SELECT count(*) n FROM llm_usage WHERE user_id = ?`, OWNER);
     assert.equal(Number(logged?.n), 1, "le coût du propriétaire est enregistré comme d'habitude");
-    await as(OWNER, () => usage.assertSpendCap("anthropic"));
-    await assert.rejects(() => as(OTHER, () => usage.assertSpendCap("anthropic")), isSpendCap);
+    for (const user of [OWNER, OTHER]) await assert.rejects(() => as(user, () => usage.assertSpendCap("anthropic")), isSpendCap, user);
 
+    process.env.SPEND_CAP_PER_USER_USD = "unlimited";
     process.env.SPEND_CAP_USD = "3"; // 4 $ dépensés ce mois-ci au total
     usage.resetSpendCache();
     await assert.rejects(() => as(OWNER, () => usage.assertSpendCap("anthropic")), isSpendCap);
@@ -128,4 +131,15 @@ test("opt-in : sans CORTEX_OWNER_EMAIL ni CORTEX_OWNER_USER_ID, personne n'est e
   } finally {
     process.env.CORTEX_OWNER_EMAIL = "Ben@Example.com";
   }
+});
+
+test("Mon compte (/api/billing) : aucune limite du jour affichée au propriétaire, celles de l'autre compte inchangées", async () => {
+  const { NextRequest } = await import("next/server");
+  const billing = await import("../app/api/billing/route");
+  const quotasOf = async (user: string) => {
+    const res = await billing.GET(new NextRequest("http://cortex.test/api/billing", { headers: { "x-cortex-user": user } }) as never);
+    return ((await res.json()) as { quotas: unknown }).quotas;
+  };
+  assert.deepEqual(await quotasOf(OWNER), { gen: null, assist: null });
+  assert.deepEqual(await quotasOf(OTHER), { gen: 1, assist: 1 });
 });
