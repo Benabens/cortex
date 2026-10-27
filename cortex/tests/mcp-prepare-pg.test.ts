@@ -110,10 +110,10 @@ type ToolResult = { isError?: boolean; content?: Array<{ text?: string }>; struc
 const text = (r: ToolResult) => (r.content ?? []).map((c) => c.text ?? "").join("\n");
 
 test("create_course → add_course_source → prepare_course confirmé : le worker ingère le cours (Postgres réel)", { skip, timeout: 180_000 }, async () => {
-  // Client 2026-07-28 avec élicitation, comme la session qui a vu le bug : la confirmation
-  // passe par le dialogue (accepté ici), sans jeton de devis.
+  // Client 2026-07-28 qui affiche l'élicitation (Claude Code) : la confirmation passe par
+  // le dialogue (accepté ici), sans jeton de devis.
   const dialogs: string[] = [];
-  const client = new Client({ name: "cortex-test", version: "1.0.0" },
+  const client = new Client({ name: "claude-code", version: "1.0.0" },
     { capabilities: { elicitation: { form: {} } }, versionNegotiation: { mode: { pin: "2026-07-28" } } } as ConstructorParameters<typeof Client>[1]);
   client.setRequestHandler("elicitation/create", async (r) => {
     dialogs.push(String((r.params as { message?: string }).message ?? ""));

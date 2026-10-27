@@ -39,7 +39,7 @@ export default defineTool({
     "Generate a full mock exam (PDF in Cortex) that follows the format of the course's real past exams, optionally emphasising a chapter of the course plan " +
     "(e.g. chapter \"3\") or a free focus: 1-2 exercises target the emphasis, the rest keeps the real exam's balance. " +
     "Costs credits (2 by default, +1 per 4 exercises beyond 8) and one daily generation. The first call returns the exact cost and a confirmation_token " +
-    "without spending anything (or asks the user directly if the client supports it); call again with the same arguments plus confirmation_token ONLY after the user explicitly approved. " +
+    "without spending anything; ask the user in the conversation and call again with the same arguments plus confirmation_token ONLY after they explicitly approved (nothing to confirm when nothing is charged). " +
     "Generation then runs in the background for 10-20 minutes: track it with get_job_status.",
   kind: "generate",
   input: z.object({

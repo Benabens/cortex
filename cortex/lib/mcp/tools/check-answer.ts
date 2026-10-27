@@ -31,7 +31,7 @@ export default defineTool({
     "Grade the student's answer to an exam question like the course's examiner would: verdict, rubric criterion by criterion, score, feedback and a correct solution. " +
     "Use it when the student wants feedback on an answer they wrote (paste the exact question and their answer). " +
     "Costs credits (0.1 by default) and one daily assistance: the first call returns the exact cost and a confirmation_token without spending anything " +
-    "(or asks the user directly if the client supports it); call again with the same arguments plus confirmation_token ONLY after the user explicitly approved.",
+    "; ask the user in the conversation and call again with the same arguments plus confirmation_token ONLY after they explicitly approved (nothing to confirm when nothing is charged).",
   kind: "generate",
   input: z.object({
     course: courseArg,

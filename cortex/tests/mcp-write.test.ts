@@ -347,15 +347,12 @@ test("prepare_course, compte normal : refusé sans crédit dès le devis ; avec 
   assert.equal((status.structuredContent as { job: { type: string } }).job.type, "prepare");
 });
 
-test("propriétaire : prepare_course annoncé à 0 crédit sans quota, lancé sans débit ni décompte", async () => {
+test("propriétaire : prepare_course lancé directement (coût nul : ni devis ni dialogue), sans débit ni décompte", async () => {
   const credits = await import("../lib/billing/credits");
   const { authGet } = await import("../db/auth-store");
   const owner = await mcp((await connectAs(OWNER, { generate: true, write: true })).access);
   assert.equal((await call(owner, "create_course", { name: "Analyse III", code: "MATH-203" })).isError, undefined);
-  const quote = await call(owner, "prepare_course", { course: "MATH-203" });
-  const c = (quote.structuredContent as { confirmation: { cost_credits: number; daily_quota: { limit: number | null }; confirmation_token: string } }).confirmation;
-  assert.deepEqual([c.cost_credits, c.daily_quota.limit], [0, null], text(quote));
-  const started = await call(owner, "prepare_course", { course: "MATH-203", confirmation_token: c.confirmation_token });
+  const started = await call(owner, "prepare_course", { course: "MATH-203" });
   assert.equal((started.structuredContent as { status: string }).status, "started", text(started));
   assert.equal(await credits.getBalanceCenti(OWNER), 0);
   const counted = await authGet<{ n: number }>(`SELECT count(*) n FROM gen_events WHERE user_id = ?`, OWNER);
@@ -437,17 +434,13 @@ test("débit des lectures d'URL borné par compte (SOURCE_FETCH_PER_HOUR), propr
   }
 });
 
-test("génération par le MCP : le devis du propriétaire annonce 0 crédit sans quota, rien n'est débité ni compté ; get_account_status le dit", async () => {
+test("génération par le MCP : le propriétaire génère directement (rien à confirmer), rien n'est débité ni compté ; get_account_status le dit", async () => {
   const credits = await import("../lib/billing/credits");
   const { authGet } = await import("../db/auth-store");
   const owner = await mcp((await connectAs(OWNER, { generate: true })).access);
   for (let i = 0; i < 2; i++) { // au-delà du quota d'assistance du jour (1), sans aucun crédit
-    const quote = await call(owner, "generate_drill", { course: "MATH-203", concept: `intégrales ${i}` });
-    assert.equal(quote.isError, undefined, text(quote));
-    const c = (quote.structuredContent as { confirmation: { cost_credits: number; daily_quota: { limit: number | null }; confirmation_token: string } }).confirmation;
-    assert.deepEqual([c.cost_credits, c.daily_quota.limit], [0, null]);
-    const done = await call(owner, "generate_drill", { course: "MATH-203", concept: `intégrales ${i}`, confirmation_token: c.confirmation_token });
-    assert.equal(done.isError, undefined, text(done));
+    const done = await call(owner, "generate_drill", { course: "MATH-203", concept: `intégrales ${i}` });
+    assert.equal((done.structuredContent as { status: string }).status, "done", text(done));
   }
   assert.equal(await credits.getBalanceCenti(OWNER), 0);
   const counted = await authGet<{ n: number }>(`SELECT count(*) n FROM gen_events WHERE user_id = ?`, OWNER);
@@ -471,9 +464,9 @@ test("lecture durcie : une IP littérale non publique est refusée AVANT toute c
 
 // ───────────────────── confirmations en parallèle et expirées ─────────────────────
 
-/** Client 2026-07-28 qui gère l'élicitation : chaque dialogue est compté, la réponse est fixée. */
+/** Client 2026-07-28 qui affiche l'élicitation (Claude Code) : chaque dialogue est compté, la réponse est fixée. */
 async function mcpModern(token: string, dialogs: string[], answer: "accept" | "decline"): Promise<Client> {
-  const client = new Client({ name: "cortex-test", version: "1.0.0" },
+  const client = new Client({ name: "claude-code", version: "1.0.0" },
     { capabilities: { elicitation: { form: {} } }, versionNegotiation: { mode: { pin: "2026-07-28" } } } as ConstructorParameters<typeof Client>[1]);
   client.setRequestHandler("elicitation/create", async (r) => {
     dialogs.push(String((r.params as { message?: string }).message ?? ""));
@@ -555,14 +548,13 @@ test("parallèle, client 2025 (devis) : deux devis sans débit ; les deux jetons
   await client.close();
 });
 
-test("propriétaire : même à 0 crédit, prepare_course demande sa confirmation avant de lancer quoi que ce soit", async () => {
+test("propriétaire, même avec un client qui affiche l'élicitation : coût nul → lancé sans dialogue (décision de Ben, 27/10)", async () => {
   const dialogs: string[] = [];
   const owner = await mcpModern((await connectAs(OWNER, { generate: true, write: true })).access, dialogs, "decline");
   assert.equal((await call(owner, "create_course", { name: "Philosophie", code: "HUM-300" })).isError, undefined);
   const r = await call(owner, "prepare_course", { course: "HUM-300" });
-  assert.equal((r.structuredContent as { status: string }).status, "declined", text(r));
-  assert.equal(dialogs.length, 1);
-  assert.match(dialogs[0], /sans crédit \(compte propriétaire\)/);
+  assert.equal((r.structuredContent as { status: string }).status, "started", text(r));
+  assert.equal(dialogs.length, 0);
   await owner.close();
 });
 
@@ -580,7 +572,7 @@ async function modernRaw(token: string, params: Record<string, unknown>) {
         ...params,
         _meta: {
           "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-          "io.modelcontextprotocol/clientInfo": { name: "raw", version: "1" },
+          "io.modelcontextprotocol/clientInfo": { name: "claude-code", version: "1" },
           "io.modelcontextprotocol/clientCapabilities": { elicitation: { form: {} } },
         },
       },
