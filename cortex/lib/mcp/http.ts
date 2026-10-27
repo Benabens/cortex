@@ -62,9 +62,7 @@ let _handler: McpHttpHandler | null = null;
 function handler(): McpHttpHandler {
   if (!_handler) {
     _handler = createMcpHandler(
-      ({ era, authInfo }) => buildServer({
-        era, appOrigin: String((authInfo?.extra as { appOrigin?: string } | undefined)?.appOrigin ?? ""), scopes: authInfo?.scopes ?? [],
-      }),
+      ({ era, authInfo }) => buildServer({ era, appOrigin: String((authInfo?.extra as { appOrigin?: string } | undefined)?.appOrigin ?? "") }),
       {
         responseMode: "auto",
         maxRequestBodySize: MAX_BODY_BYTES,

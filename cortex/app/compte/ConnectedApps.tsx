@@ -5,9 +5,9 @@ import { Button } from "@/components/ui/Button";
 
 type App = { id: string; name: string | null; host: string | null; scopes: string[]; connectedAt: string; lastUsedAt: string | null };
 
-/** Ce que l'application peut faire, en clair (portées cortex.read / .generate / .admin). */
+/** Ce que l'application peut faire, en clair (portées cortex.read / .generate / .write). */
 function accessLabel(scopes: string[]): string {
-  const extra = [scopes.includes("cortex.generate") && "génération", scopes.includes("cortex.admin") && "administration"].filter(Boolean);
+  const extra = [scopes.includes("cortex.generate") && "génération", scopes.includes("cortex.write") && "ajout de cours"].filter(Boolean);
   if (!extra.length) return "Lecture seule";
   return `Lecture${extra.length === 2 ? ", " : " et "}${extra.join(" et ")}`;
 }

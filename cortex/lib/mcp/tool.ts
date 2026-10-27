@@ -15,9 +15,9 @@ export type Era = "legacy" | "modern";
 
 /**
  * Lecture (portée cortex.read, gratuite), génération (portée cortex.generate, coût
- * confirmé) ou administration des cours (portée cortex.admin, propriétaire seulement).
+ * confirmé) ou ajout de cours et de supports (portée cortex.write).
  */
-export type ToolKind = "read" | "generate" | "admin";
+export type ToolKind = "read" | "generate" | "write";
 
 /** Codes d'erreur d'outil, lisibles par le modèle dans `_meta["com.cortexexam/error"]`. */
 export type ToolErrorCode =
@@ -29,7 +29,6 @@ export type ToolErrorCode =
   | "confirmation_invalid"
   | "unavailable"
   | "too_large"
-  | "forbidden"
   | "internal";
 
 /**
@@ -124,6 +123,8 @@ export type ToolDef<I extends z.ZodObject = z.ZodObject, O extends z.ZodObject =
   kind: ToolKind;
   /** Va chercher des données hors de Cortex (annotation openWorldHint) — ex. une URL fournie. */
   openWorld?: boolean;
+  /** Outil d'écriture qui dépense des crédits (préparation d'un cours) : exige aussi la portée cortex.generate. */
+  spends?: boolean;
   input: I;
   output: O;
   /**

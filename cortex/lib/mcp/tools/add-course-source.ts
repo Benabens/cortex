@@ -19,10 +19,10 @@ export default defineTool({
   name: "add_course_source",
   title: "Add a course material",
   description:
-    "Owner only. Add one material to a course, either from a public https URL (PDF, web page or plain text, 30 MB max; redirects are not followed, " +
+    "Add one material to a course (free; counts toward the account's storage quota), either from a public https URL (PDF, web page or plain text, 30 MB max; redirects are not followed, " +
     "pass the final URL) or from pasted text. category tells Cortex what it is: past_exam (an exam from a previous year, used to learn the exam format), " +
     "lecture, exercises or notes; when omitted it is guessed from the file name. The file is only stored: call prepare_course once all materials are added.",
-  kind: "admin",
+  kind: "write",
   openWorld: true,
   input: z.object({
     course: courseArg,
