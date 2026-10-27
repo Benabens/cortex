@@ -110,6 +110,13 @@ test("format demandé pour CET examen : QCM au nombre voulu et au tarif du QCM ;
   assert.match(sc.note ?? "", /annales/);
   const tooMany = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "HUM-285", format: "written", exercise_count: 20 } })) as ToolResult;
   assert.equal(errorCode(tooMany), "invalid_input");
+  // « written » sur un cours au format inconnu : devis d'un écrit, et la demande voyage dans la cible du job
+  // (sans elle, le lancement relirait le format du cours, inconnu, et refuserait après confirmation).
+  const written = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "HUM-285", format: "written", exercise_count: 3 } })) as ToolResult;
+  assert.equal(written.isError, undefined, text(written));
+  const w = written.structuredContent as { format: string; exercise_count: number; confirmation: { cost_credits: number } };
+  assert.deepEqual([w.format, w.exercise_count], ["written", 3]);
+  assert.equal(w.confirmation.cost_credits, fromCenti(costForJob("exam", JSON.stringify({ count: 3, kind: "exercises" }))));
   await c.close();
 });
 

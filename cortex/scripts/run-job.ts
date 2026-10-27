@@ -100,15 +100,16 @@ async function main() {
   if (job.status === "canceled") process.exit(0);
   // Attribution des appels LLM de ce job (colonnes job_id/call_site de llm_usage).
   setCurrentJob(jobId, job.type);
+  // Le cours doit encore appartenir à l'utilisateur du job (CORTEX_USER) : sinon
+  // erreur sans remboursement, et rien n'est généré (cf. lib/jobs).
+  if (!(await assertJobCourseOwned(jobId, COURSE))) process.exit(1);
+
   // Format d'examen résolu une fois pour le process : les consignes des profils
   // génériques (langue, style des sujets) le lisent de façon synchrone (lib/exam-format).
   if (job.type !== "ingest") {
     const { resolveExamFormat } = await import("../lib/exam-format");
     await resolveExamFormat().catch(() => null);
   }
-  // Le cours doit encore appartenir à l'utilisateur du job (CORTEX_USER) : sinon
-  // erreur sans remboursement, et rien n'est généré (cf. lib/jobs).
-  if (!(await assertJobCourseOwned(jobId, COURSE))) process.exit(1);
 
   if (job.type === "ingest") {
     try {
@@ -253,6 +254,8 @@ async function main() {
       if (typeof t.focus === "string" && t.focus.trim()) examFocus = t.focus.trim();
     } catch {}
   }
+  const { targetKind } = await import("../lib/exam-format");
+  const examKind = job.type === "exam" ? targetKind(job.target) : null;
 
   try {
     const res =
@@ -261,7 +264,7 @@ async function main() {
         : job.type === "lab-exercise"
           ? await generateLabExercise(job.target ?? "", { onStep })
           // Examen blanc : le format du cours choisit le générateur (QCM, exercices, essai…), cf. lib/mock-exam.
-          : await generateMockExam({ count: examCount, focus: examFocus, onStep, jobId });
+          : await generateMockExam({ count: examCount, focus: examFocus, kind: examKind, onStep, jobId });
     if (res.texError) {
       // le résultat existe (HTML lisible) mais le PDF a échoué → erreur LaTeX gardée pour debug
       await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, repli HTML lisible. Détail : ${res.texError.slice(0, 500)}` });

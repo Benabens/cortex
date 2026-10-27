@@ -292,6 +292,3 @@ export async function getFormatProfile(): Promise<FormatProfile | null> {
   if (!r) return null;
   try { return JSON.parse(r.json) as FormatProfile; } catch { return null; }
 }
-
-/** true si l'examen blanc du cours courant part au générateur QCM — cf. lib/exam-format. */
-export { isQcmCourse } from "@/lib/exam-format";

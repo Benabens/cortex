@@ -17,6 +17,7 @@
 import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
+import { sanitizeCorpus } from "@/lib/prompt-safety";
 import type { FormatProfile } from "@/lib/format";
 
 export const EXAM_KINDS = ["qcm", "exercises", "mixed", "essay", "oral"] as const;
@@ -78,9 +79,12 @@ export type MockExamPlan =
   | { generator: "none"; reason: string };
 
 const QCM_DEFAULT = 20;
-const QCM_MAX = 40;
+export const QCM_MAX = 40;
 const MIXED_OPEN_DEFAULT = 2;
-const EXERCISES_MAX = 12;
+export const EXERCISES_MAX = 12;
+
+/** Types de sources qui parlent de l'EXAMEN (annales, exemples officiels, consignes), pas de la matière. */
+export const EXAM_SOURCE_TYPES = ["final", "midterm", "sample_questions", "exam_info"] as const;
 
 /** Ce qu'il faut déclarer quand rien ne dit la forme de l'épreuve. */
 export const FORMAT_UNKNOWN_MESSAGE =
@@ -207,6 +211,23 @@ export function inferDiscipline(c: { code?: string | null; sample?: string | nul
   if (text.length < 300) return "stem";
   const density = (text.match(MATH_TOKEN)?.length ?? 0) / (text.length / 1000);
   return density >= MATH_PER_1000 ? "stem" : "humanities";
+}
+
+/**
+ * Titres des supports de cours (hors annales, exemples, consignes), à défaut de notions
+ * analysées. Un titre vient d'un nom de fichier ou d'une balise <title> : assaini et
+ * borné avant d'entrer dans un prompt (il n'est pas encadré comme donnée).
+ */
+export async function courseMaterialTitles(): Promise<string[]> {
+  try {
+    const rows = await q.all<{ title: string }>(
+      `SELECT DISTINCT s.title FROM sources s WHERE s.type NOT IN (${EXAM_SOURCE_TYPES.map(() => "?").join(",")}) ORDER BY s.recency_weight DESC, s.id`,
+      ...EXAM_SOURCE_TYPES,
+    );
+    return rows.map((r) => sanitizeCorpus(r.title).replace(/\s+/g, " ").trim().slice(0, 120)).filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 async function corpusSample(cap = 30_000): Promise<string> {
@@ -356,6 +377,27 @@ export function formatContextFor(courseId: string): { kind: ExamKind | null; lan
   if (known) return { kind: known.kind, language: known.language, discipline: known.discipline };
   const c = getCourse(courseId);
   return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || "fr", discipline: inferDiscipline({ code: c.examCode }) };
+}
+
+/**
+ * Format demandé explicitement pour UN examen (connecteur : `format`). Il vaut
+ * déclaration, sauf face à des annales : leur format fait la règle. Appliqué à
+ * l'identique au devis, au lancement et dans le worker (la demande voyage dans la
+ * cible du job, `kind`).
+ */
+export function requestedFormat(format: ExamFormat, kind: ExamKind | null | undefined): ExamFormat {
+  if (!kind || format.basis === "annales") return format;
+  return { ...format, basis: "declared", kind, questionCount: null, openCount: null, summary: `${KIND_LABEL[kind]} (demandé pour cet examen, en ${format.language})` };
+}
+
+/** Le `kind` d'une cible de job d'examen (JSON), s'il en porte un valide. */
+export function targetKind(target: string | null | undefined): ExamKind | null {
+  try {
+    const k = target ? (JSON.parse(target) as { kind?: unknown }).kind : null;
+    return typeof k === "string" && (EXAM_KINDS as readonly string[]).includes(k) ? (k as ExamKind) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** true si l'examen blanc du cours courant part au générateur QCM (QCM ou mixte). */

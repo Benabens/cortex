@@ -1,7 +1,7 @@
 import * as z from "zod/v4";
 import { getPlanChapters, type PlanChapter } from "@/lib/course-plan";
 import { FIELD_LIMITS } from "@/lib/field-limits";
-import { planMockExam, resolveExamFormat, type ExamFormat } from "@/lib/exam-format";
+import { EXERCISES_MAX as WRITTEN_MAX, QCM_MAX as MCQ_MAX, planMockExam, requestedFormat, resolveExamFormat } from "@/lib/exam-format";
 import { examTarget, startGenerationJob } from "@/lib/generation";
 import { activeJob, costForJob } from "@/lib/jobs";
 import { log } from "@/lib/metrics";
@@ -27,9 +27,6 @@ const output = z.object({
     track_with: z.string(),
   }).nullable(),
 });
-
-const WRITTEN_MAX = 12;
-const MCQ_MAX = 40;
 
 /** Chapitre du plan désigné par son numéro (ordre ou n° de cours) ou par son titre. */
 function findChapter(chapters: PlanChapter[], ref: string): PlanChapter | undefined {
@@ -81,10 +78,10 @@ export default defineTool({
       // Format du cours (annales > déclaré > exemples officiels > infos de cours), jamais déduit du focus.
       // Un format demandé pour CET examen vaut déclaration, sauf face à des annales (l'app ne contourne pas leur format).
       const course = await resolveExamFormat();
-      const requested = args.format && course.basis !== "annales";
-      const format: ExamFormat = requested
-        ? { ...course, basis: "declared", kind: args.format === "mcq" ? "qcm" : "exercises", questionCount: null, openCount: null, summary: `${args.format === "mcq" ? "QCM" : "exercices"} (demandé pour cet examen, en ${course.language})` }
-        : course;
+      const asked = args.format === "mcq" ? "qcm" as const : args.format === "written" ? "exercises" as const : null;
+      const format = requestedFormat(course, asked);
+      // Le worker et le pré-check relisent la demande dans la cible du job (sinon ils reviendraient au format du cours).
+      const askedKind = format.basis !== "annales" && asked ? asked : undefined;
       const plan = planMockExam(format, { count: args.exercise_count, focus });
       if (plan.generator === "none") {
         throw new ToolError("format_required", `${plan.reason} Demande-le à la personne, puis enregistre-le avec set_exam_format (kind, question_count, duration_min, language), ou passe format pour cet examen seulement.`);
@@ -97,7 +94,7 @@ export default defineTool({
       const count = qcm ? plan.qcmCount : plan.exerciseCount;
       const target = qcm
         ? JSON.stringify({ count: plan.qcmCount, openCount: plan.openCount, focus: focus ?? undefined })
-        : examTarget(plan.exerciseCount ?? undefined, focus ?? undefined);
+        : examTarget(plan.exerciseCount ?? undefined, focus ?? undefined, askedKind);
       const note = course.basis === "annales"
         ? (args.format === "mcq" && !qcm ? "Ce cours a des annales : l'examen suit leur format, la demande de QCM n'est pas appliquée." : null)
         : `Ce cours n'a pas d'annales : format ${format.summary}.`;

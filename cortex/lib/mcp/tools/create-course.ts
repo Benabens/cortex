@@ -3,10 +3,10 @@ import { CourseCreationLimitError, insertCourse } from "@/db/courses-store";
 import { InvalidCourseError, buildCourseRow } from "@/lib/course-create";
 import { ensureCoursesLoaded, listCoursesOf, reloadCourses } from "@/lib/courses";
 import { courseLabel } from "../courses";
+import { LANGUAGES } from "@/lib/exam-format";
 import { courseRef, courseRefOf, examFormatInput } from "../schemas";
 import { ToolError, defineTool } from "../tool";
 
-const LANGUAGES = ["fr", "en", "de", "it", "es", "pt", "nl"] as const;
 
 const output = z.object({
   status: z.enum(["created"]),

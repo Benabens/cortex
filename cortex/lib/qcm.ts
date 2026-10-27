@@ -1,9 +1,9 @@
 import { currentCourse } from "@/db/client";
 import { q, nowStr } from "@/db/q";
 import { completeText, extractJson } from "@/lib/llm";
-import { examLanguageFor, readStoredProfile, resolveExamFormat } from "@/lib/exam-format";
+import { EXAM_SOURCE_TYPES, courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFormat } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
-import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
+import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { courseRefImages } from "@/lib/course-vision";
 import type { ExamQuestion, StepCb } from "@/lib/exam";
 import { getFormatProfile } from "@/lib/format";
@@ -100,12 +100,8 @@ async function coverageTopics(): Promise<{ label: string; method: string | null 
   } catch {}
   // Pas encore de notions analysées : les titres des supports du cours, plutôt que des archétypes
   // génériques qui ne parlent d'aucune notion (cas d'un cours sans annale fraîchement préparé).
-  try {
-    const titles = await q.all<{ title: string }>(
-      `SELECT DISTINCT s.title FROM sources s WHERE s.type NOT IN ('final','midterm','sample_questions','exam_info') ORDER BY s.recency_weight DESC, s.id`,
-    );
-    if (titles.length) return titles.map((t) => ({ label: t.title, method: null }));
-  } catch {}
+  const titles = await courseMaterialTitles();
+  if (titles.length) return titles.map((label) => ({ label, method: null }));
   // Import paresseux : course-profile charge les profils qui dépendent du moteur d'examen.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { profile } = require("@/lib/course-profile") as typeof import("@/lib/course-profile");
@@ -130,14 +126,22 @@ const DISTRACTOR_TAXONOMY = [
 const OPTION_RULES = [
   `  - OPTIONS = PROPOSITIONS COMPLÈTES : chaque option est une phrase autonome qui affirme quelque chose de vérifiable — jamais un mot isolé ni un simple nom de notion ; longueurs comparables (±30 %), même structure grammaticale ; toutes plausibles pour un étudiant qui n'a retenu que les noms des notions.`,
   `  - TIGES INDÉPENDANTES : chaque question se comprend seule, sans scénario partagé avec une autre question, et ne donne pas la réponse d'une autre.`,
+  `  - EXPLICATION : désigne les options par leur CONTENU, jamais par leur lettre ou leur numéro (l'ordre des options est mélangé après coup).`,
   `  - ANCRAGE : chaque question teste un FAIT PRÉCIS des extraits du cours fournis (résultat d'étude avec auteurs et chiffres, condition d'une définition, mécanisme) ; recopie ce fait dans "source_fact". Rien hors des extraits et du programme.`,
 ];
 
 const NO_CLASSIFICATION =
   `  - INTERDIT : les questions « classe ce cas dans la notion X » / « quel concept illustre cette situation ? » dont les options sont des noms de notions — elles se réussissent sans comprendre. Teste plutôt les CONDITIONS qui font qu'un cas relève ou non d'une notion (même mesure, une condition change).`;
 
+/** Avec annales : ce style de question n'est permis que si les vrais examens l'emploient. */
+const CLASSIFICATION_IF_ANNALES =
+  `  - Les questions « classe ce cas dans la notion X » (options = noms de notions) ne sont permises QUE si les vraies questions des annales du cours en contiennent ; sinon, teste les CONDITIONS qui font qu'un cas relève ou non d'une notion.`;
+
+/** Une explication qui cite une option par sa lettre deviendrait fausse après le mélange des options. */
+const LETTER_REF = /\b(?:option|réponse|choix|answer|choice|proposition)\s*\(?[A-H1-5]\)?(?![\p{L}])|\([A-H]\)|(?:^|\s)[A-H]\)\s/iu;
+
 /** Types de sources jamais pris comme « faits du cours » à tester (annales : on n'en recopie pas les questions). */
-const NOT_COURSE_FACTS = new Set(["final", "midterm", "sample_questions", "exam_info"]);
+const NOT_COURSE_FACTS = new Set<string>(EXAM_SOURCE_TYPES);
 
 /** Fenêtre d'un texte autour du premier mot de la requête qu'il contient. */
 function windowAround(text: string, query: string, cap: number): string {
@@ -314,9 +318,13 @@ export async function generateQcmBatch(
     ``,
     ...ARCHITECT_QCM_RULES,
     ...OPTION_RULES,
-    opts.allowClassification ? null : NO_CLASSIFICATION,
+    opts.allowClassification ? CLASSIFICATION_IF_ANNALES : NO_CLASSIFICATION,
     `  - LANGUE : toutes les questions, options et explications en ${language}.`,
-    `  - RESPECTE le MOULE imposé de chaque question (recopie-le dans "mold"). Sauf pour le moule statement_truefalse, ANCRE la question dans un scénario concret ou un mini-calcul de l'idiome du cours (jamais une affirmation abstraite hors-sol).`,
+    // Avec des moules (ADN des annales) : la consigne historique. Sans : un scénario n'est
+    // qu'un moyen de tester un fait ou une condition, jamais un cas à étiqueter (HUM-285).
+    molds.some(Boolean)
+      ? `  - RESPECTE le MOULE imposé de chaque question (recopie-le dans "mold"). Sauf pour le moule statement_truefalse, ANCRE la question dans un scénario concret ou un mini-calcul de l'idiome du cours (jamais une affirmation abstraite hors-sol).`
+      : `  - ANCRE chaque question sur un fait précis du cours ; un scénario n'a sa place que s'il met à l'épreuve une condition ou un résultat précis — jamais un cas à étiqueter.`,
     ``,
     ...DISTRACTOR_TAXONOMY,
     withFigures ? `  - Pour un moule figure_reading : ÉMETS "figure_spec" (contrat ci-dessous) — la question doit être RÉSOLUBLE depuis la figure seule.` : null,
@@ -352,7 +360,7 @@ export async function generateQcmBatch(
     };
     delete (base as { source_fact?: unknown }).source_fact;
     // Position de la bonne réponse mélangée (graine = l'énoncé : reproductible), jamais pour une question à figure.
-    const it = Array.isArray(base.options) && Array.isArray(base.correct) && !(raw as { figure_spec?: unknown }).figure_spec
+    const it = Array.isArray(base.options) && Array.isArray(base.correct) && !(raw as { figure_spec?: unknown }).figure_spec && !LETTER_REF.test(base.explanation ?? "")
       ? shuffleQcmOptions(base, seedOf(base.stem ?? ""))
       : base;
     // figure : rendu SANDBOX immédiat (le vérifieur doit la VOIR). Échec de rendu →
@@ -509,15 +517,18 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     step(`${weak.length} QCM trop faible(s) → régénération ciblée`, 0);
     const guidance = [
       `À CORRIGER — ces questions étaient trop faibles ; écris-en de NOUVELLES sur les mêmes sujets, sans ces défauts (options = propositions complètes, distracteurs de la taxonomie, fait précis du cours) :`,
-      ...weak.map((w) => `  - « ${w.it.stem.slice(0, 160)} » : ${w.why}`),
+      ...weak.map((w) => `  - « ${sanitizeCorpus(w.it.stem).slice(0, 160)} » : ${sanitizeCorpus(w.why)}`),
     ].join("\n");
     try {
       const pick = <T,>(arr: T[]) => weak.map((w) => arr[w.i]);
       const again = await verifyQcmBatch(await generateQcmBatch(pick(bt.topics), weak.length, step, undefined, guidance, { ...shared, molds: pick(bt.molds) }), step);
+      // Un item écarté à la conception décalerait l'appariement : on ne remplace qu'un lot complet,
+      // et seulement par une version VÉRIFIÉE (une vérification en échec rend des items non vérifiés).
+      if (again.length !== weak.length) return items;
       const out = items.slice();
       weak.forEach((w, k) => {
         const n = again[k];
-        if (n && n.verified !== 0 && (!weaknessOf(n) || (n.discrimination ?? 0) > (w.it.discrimination ?? 0))) out[w.i] = n;
+        if (n.verified === 1 && (!weaknessOf(n) || (n.discrimination ?? 0) > (w.it.discrimination ?? 0))) out[w.i] = n;
       });
       return out;
     } catch (e) {

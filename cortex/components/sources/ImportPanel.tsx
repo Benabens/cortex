@@ -100,7 +100,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
         const res = await fetch(`/api/sources/add?course=${encodeURIComponent(courseId)}&category=${dropKind}`, { method: "POST", body: fd });
         const d = await res.json().catch(() => null);
         if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
-        setUploadedMsg(`${d.files} fichier${d.files > 1 ? "s" : ""} déposé${d.files > 1 ? "s" : ""} : indexation… Relance « Préparer le cours » pour relire le format.`);
+        setUploadedMsg(`${d.files} fichier${d.files > 1 ? "s" : ""} déposé${d.files > 1 ? "s" : ""}${d.skipped?.length ? ` (${d.skipped.length} refusé${d.skipped.length > 1 ? "s" : ""} : ${d.skipped[0]})` : ""} : indexation… Relance « Préparer le cours » pour relire le format.`);
         startJob(d.jobId, "ingest");
         return;
       }

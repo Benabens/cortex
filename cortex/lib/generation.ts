@@ -2,7 +2,7 @@ import { creditsGate } from "@/lib/billing/credits";
 import { generationGate } from "@/lib/billing/guards";
 import { ReservationRefused, activeJob, createJobExclusive, startWorker, type JobType } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
-import { planMockExam, resolveExamFormat } from "@/lib/exam-format";
+import { planMockExam, requestedFormat, resolveExamFormat, targetKind, type ExamKind } from "@/lib/exam-format";
 
 /**
  * LANCEMENT D'UNE GÉNÉRATION PAR JOB, pour l'utilisateur et le cours COURANTS
@@ -27,7 +27,7 @@ export async function startGenerationJob(type: JobType, target?: string): Promis
     // Un examen blanc suit le format du cours ; inconnu, il n'est jamais inventé (lib/exam-format).
     // Vérifié en premier : c'est gratuit, et c'est ce que l'étudiant doit corriger.
     if (type === "exam") {
-      const plan = planMockExam(await resolveExamFormat(), {});
+      const plan = planMockExam(requestedFormat(await resolveExamFormat(), targetKind(target)), {});
       if (plan.generator === "none") return { ok: false, status: 409, error: plan.reason };
     }
     const issue = await preflightGeneration(type);
@@ -82,7 +82,8 @@ export function examCount(raw: unknown): number | undefined {
 /**
  * Cible d'un examen telle que le worker la lit (et que costForJob la tarife) :
  * absente quand rien n'est demandé — les défauts du moteur, au tarif de base.
+ * `kind` : format demandé pour CET examen (lib/exam-format requestedFormat).
  */
-export function examTarget(count?: number, focus?: string): string | undefined {
-  return count || focus ? JSON.stringify({ count, focus }) : undefined;
+export function examTarget(count?: number, focus?: string, kind?: ExamKind): string | undefined {
+  return count || focus || kind ? JSON.stringify({ count, focus, kind }) : undefined;
 }

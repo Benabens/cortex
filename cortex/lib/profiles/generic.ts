@@ -3,7 +3,7 @@ import type { Archetype } from "@/lib/archetypes";
 import { genericRefImageFor, genericVisionBlock } from "@/lib/course-vision";
 import type { CourseProfile, Slot } from "@/lib/course-profile";
 import { getCourse } from "@/lib/courses";
-import { formatContextFor } from "@/lib/exam-format";
+import { courseMaterialTitles, formatContextFor } from "@/lib/exam-format";
 import { genericDirectivesBlock, languageName, type GenericStyle } from "@/lib/profiles/generic-directives";
 import { getExamDna, pickCoverage, sampleMolds } from "@/lib/exam-dna";
 
@@ -157,13 +157,7 @@ async function coverageLabels(n: number): Promise<string[]> {
   try {
     labels = (await q.all<{ label: string }>(`SELECT label FROM topics ORDER BY exam_weight DESC, exam_count DESC, label`)).map((r) => r.label);
   } catch {}
-  if (!labels.length) {
-    try {
-      labels = (await q.all<{ title: string }>(
-        `SELECT DISTINCT s.title FROM sources s WHERE s.type NOT IN ('final','midterm','sample_questions','exam_info') ORDER BY s.recency_weight DESC, s.id`,
-      )).map((r) => r.title);
-    } catch {}
-  }
+  if (!labels.length) labels = await courseMaterialTitles();
   return pickCoverage(labels, n);
 }
 
