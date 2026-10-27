@@ -6,7 +6,7 @@ import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { WeightBar } from "@/components/viz/WeightBar";
 import { apiPost, useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@/lib/ux/api";
-import type { Plan, PlanQcm } from "@/lib/ux/exams";
+import type { PlanExam, PlanQcm } from "@/lib/ux/exams";
 import { cn } from "@/lib/ux/cn";
 
 const V = "var(--color-violet)";
@@ -19,10 +19,11 @@ const C = "var(--color-cyan)";
  *  - qcm  : POST /api/qcm/generate  {count, openCount, focus} (JOB)
  *  - exam : POST /api/exams/generate {count, focus} (JOB)
  */
-export function ExamComposer({ plan, onGenerated }: { plan: Plan; onGenerated: () => void }) {
+export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; onGenerated: () => void }) {
   const { courseId } = useCourse();
   const isQcm = plan.kind === "qcm";
   const q = plan as PlanQcm;
+  const unit = plan.kind === "exam" ? plan.unit ?? "exercice" : "exercice";
 
   const [nQcm, setNQcm] = useState(isQcm ? q.qcm : 0);
   const [nOpen, setNOpen] = useState(isQcm ? q.open : 0);
@@ -114,7 +115,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: Plan; onGenerated: (
               {isQcm ? (
                 <>{nQcm} <span className="text-[0.78rem] font-normal text-ink-3">QCM ·</span> {nOpen} <span className="text-[0.78rem] font-normal text-ink-3">ouverte{nOpen > 1 ? "s" : ""}</span></>
               ) : (
-                <>{nExos} <span className="text-[0.78rem] font-normal text-ink-3">exercice{nExos > 1 ? "s" : ""}</span></>
+                <>{nExos} <span className="text-[0.78rem] font-normal text-ink-3">{unit}{nExos > 1 ? "s" : ""}</span></>
               )}
             </span>
           </div>
@@ -135,7 +136,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: Plan; onGenerated: (
                   <SliderRow label="Questions ouvertes" hint={`proposé : ${q.open}`} color={C} value={nOpen} max={12} onChange={setNOpen} />
                 </div>
               ) : (
-                <SliderRow label="Exercices" hint={`proposé : ${"exercises" in plan ? plan.exercises : 6}`} color={V} value={nExos} min={1} max={12} onChange={setNExos} />
+                <SliderRow label={`${unit[0].toUpperCase()}${unit.slice(1)}s`} hint={`proposé : ${"exercises" in plan ? plan.exercises : 6}`} color={V} value={nExos} min={1} max={12} onChange={setNExos} />
               )}
               <button type="button" onClick={proposal} className="mt-4 text-[0.78rem] text-ink-3 underline-offset-2 transition-colors hover:text-violet-hi hover:underline">
                 Revenir à la proposition
@@ -173,7 +174,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: Plan; onGenerated: (
                 placeholder={isQcm ? "ex. régularisation, PCA, backprop…" : "ex. un thème précis à travailler"}
                 className="w-full rounded-lg border border-line-strong bg-surface-2/40 px-3.5 py-2.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] focus:outline-none focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-violet)_28%,transparent)]"
               />
-              <p className="mt-1.5 text-[0.74rem] text-ink-4">1-2 exercices porteront dessus, sans monopoliser l’examen.</p>
+              <p className="mt-1.5 text-[0.74rem] text-ink-4">Un thème, pas un format : 1-2 questions porteront dessus, sans monopoliser l’examen.</p>
             </div>
           )}
         </div>

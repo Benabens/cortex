@@ -27,9 +27,22 @@ export type PlanExam = {
   totalPoints: number;
   exercises: number;
   categories: string[];
+  unit?: PlanUnit;
 };
 
-export type Plan = PlanQcm | PlanExam;
+/** Ce qu'on compte : « exercice » (problèmes), « sujet » (essai), « question » (oral). */
+export type PlanUnit = "exercice" | "sujet" | "question";
+
+/** Format d'examen inconnu : rien à composer, `summary` dit quoi déclarer. */
+export type PlanUnknown = {
+  course: string;
+  kind: "unknown";
+  summary: string;
+  durationMin: number;
+  totalPoints: null;
+};
+
+export type Plan = PlanQcm | PlanExam | PlanUnknown;
 export type ComposeResp = { plan: Plan | null };
 
 export type ExamRow = {
