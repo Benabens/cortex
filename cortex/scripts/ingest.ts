@@ -33,10 +33,10 @@ const fromDir = argVal("from");
 if (courseArg) process.env.CORTEX_COURSE = courseArg;
 enterCourse(courseArg);
 const COURSE = currentCourse();
-const CONTENT_ROOT = coursePaths(COURSE).contentRoot; // cs-202 → racine du repo ; autres → data/<id>/content
-// La table FTS doit exister AVANT toute insertion dans fts_items (DB neuve d'un
-// nouveau cours : le schéma de base ne crée pas fts_items). No-op pour cs-202 (déjà présente).
-ensureFts();
+// cs-202 → racine du repo ; autres → data/<id>/content. Résolu dans main(), APRÈS
+// ensureCoursesLoaded() : en Postgres le cache des cours ne s'amorce pas tout seul,
+// et le lire au chargement du module faisait échouer toute ingestion (27/10/2026).
+let CONTENT_ROOT = "";
 
 const clean = (s: string) =>
   s.replace(/\s+/g, " ").replace(/ /g, " ").trim();
@@ -455,6 +455,9 @@ async function ingestGenericContent(): Promise<void> {
 }
 
 async function main() {
+  CONTENT_ROOT = coursePaths(COURSE).contentRoot;
+  // La table FTS doit exister AVANT toute insertion dans fts_items (DB neuve d'un
+  // nouveau cours : le schéma de base ne crée pas fts_items). No-op pour cs-202 (déjà présente).
   ensureFts();
   console.log(`Cours : ${COURSE}`);
 
@@ -519,7 +522,17 @@ async function main() {
   console.log(`   conventions/attendus (notes)  : ${notes.n}`);
 }
 
-ensureCoursesLoaded().then(main).catch((e) => {
-  console.error("Échec ingestion :", e);
-  process.exit(1);
-});
+ensureCoursesLoaded()
+  .then(main)
+  .then(async () => {
+    // Postgres : les pools gardent le processus en vie (celui du store d'auth n'expire
+    // jamais), alors que le worker attend la FIN de ce processus pour passer à la suite.
+    if ((process.env.DB_DRIVER ?? "sqlite") === "postgres") {
+      const { closePostgres } = await import("../db/driver-postgres");
+      await closePostgres();
+    }
+  })
+  .catch((e) => {
+    console.error("Échec ingestion :", e);
+    process.exit(1);
+  });
