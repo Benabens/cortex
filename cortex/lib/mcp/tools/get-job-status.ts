@@ -1,6 +1,7 @@
 import * as z from "zod/v4";
 import { examQuestions } from "@/lib/exam";
 import { activeJob, getJob, listJobs, type Job } from "@/lib/jobs";
+import { getQcmExam } from "@/lib/qcm";
 import { redactMessage } from "@/lib/observability";
 import { clip, htmlToText } from "../content";
 import { courseArg, courseRef, courseRefOf } from "../schemas";
@@ -32,12 +33,38 @@ const output = z.object({
         .describe("proven = answer checked by deterministic execution/comparison; reviewed_by_model = only re-read by a model (NOT a proof); not_verified."),
     })),
     truncated: z.boolean(),
-  }).nullable().describe("Present when a mock-exam job is done."),
+  }).nullable().describe("Present when a mock-exam job (written or multiple-choice) is done."),
   active: jobOut.nullable().describe("Without job_id: the generation currently running, if any."),
   recent: z.array(jobOut).describe("Without job_id: the latest generations."),
 });
 
 const MAX_QUESTIONS = 12;
+/** Un examen QCM compte jusqu'à 40 questions, plus courtes qu'un exercice. */
+const MAX_QCM = 40;
+const LETTERS = "ABCDEFGHIJ";
+
+type ExamOut = NonNullable<z.infer<typeof output>["exam"]>;
+
+/** Examen QCM terminé : énoncé + options lettrées ; réponses et explication seulement sur demande. */
+async function qcmView(examId: number, withSolutions: boolean): Promise<ExamOut | null> {
+  const exam = await getQcmExam(examId, withSolutions);
+  if (!exam) return null;
+  const items = exam.items as (typeof exam.items[number] & { correct?: number[] })[];
+  return {
+    exam_id: examId,
+    questions: items.slice(0, MAX_QCM).map((it, i) => ({
+      number: i + 1,
+      concept: clip(it.topic, 200),
+      statement: clip(`${it.stem}\n${(it.options as string[]).map((o, k) => `${LETTERS[k] ?? k + 1}) ${o}`).join("\n")}`, 1500),
+      solution: withSolutions
+        ? clip(`Réponse${(it.correct ?? []).length > 1 ? "s" : ""} : ${(it.correct ?? []).map((k) => LETTERS[k] ?? String(k + 1)).join(", ")}. ${it.explanation ?? ""}`.trim(), 1500)
+        : null,
+      // Vérifié = relu par un modèle, jamais une preuve (invariant n° 2).
+      verification: it.verified ? "reviewed_by_model" as const : "not_verified" as const,
+    })),
+    truncated: items.length > MAX_QCM,
+  };
+}
 
 function jobView(j: Job, appOrigin: string, courseId: string): z.infer<typeof jobOut> {
   const path = j.resultPath;
@@ -60,7 +87,7 @@ export default defineTool({
   title: "Track a generation",
   description:
     "Track a long-running generation started with generate_mock_exam (typically 10-20 minutes): status, progress and current step. " +
-    "When the mock exam is done, returns its questions (and the solutions if include_solutions is true) plus a link to the PDF in Cortex. " +
+    "When the mock exam (written or multiple-choice) is done, returns its questions (and the solutions if include_solutions is true) plus a link to it in Cortex. " +
     "Without job_id, returns the generation currently running and the latest ones. Poll at most every 30-60 seconds. Read-only and free.",
   kind: "read",
   input: z.object({
@@ -79,7 +106,9 @@ export default defineTool({
       const job = await getJob(job_id);
       if (!job) throw new ToolError("not_found", `Aucune génération n° ${job_id} dans ce cours.`);
       let exam: z.infer<typeof output>["exam"] = null;
-      if (job.type === "exam" && job.status === "done" && job.resultId) {
+      if (job.type === "qcm" && job.status === "done" && job.resultId) {
+        exam = await qcmView(job.resultId, !!include_solutions);
+      } else if (job.type === "exam" && job.status === "done" && job.resultId) {
         const rows = await examQuestions(job.resultId, MAX_QUESTIONS + 1);
         exam = {
           exam_id: job.resultId,

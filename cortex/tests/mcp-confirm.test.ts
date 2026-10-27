@@ -241,3 +241,46 @@ test("parallèle, flux par défaut : deux appels → deux devis, rien de lancé 
   assert.equal(await balance(ALICE), before - 10);
   await c.close();
 });
+
+test("un refus dans le dialogue invalide TOUTES les demandes ouvertes pour cette action : pas de jeton de repli ensuite", async (t) => {
+  await topUp(ALICE, 100, "t:alice:5");
+  const token = await tokenFor(ALICE);
+  const args = { name: "generate_drill", arguments: { course: "ALI-1", concept: "intégrales impropres" } };
+  const first = await modernRaw(token, "claude-code", args); // demande A
+  const second = await modernRaw(token, "claude-code", args); // demande B, moins de 30 s après
+  assert.deepEqual([first.result?.resultType, second.result?.resultType], ["input_required", "input_required"]);
+  const state = (second.result as { requestState?: string }).requestState!;
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() + 31_000 });
+  try {
+    const refused = await modernRaw(token, "claude-code", { ...args, requestState: state, inputResponses: { confirm: { action: "decline" } } });
+    assert.match(JSON.stringify(refused.result), /declined/);
+    // A est restée sans réponse plus de 30 s : sans la règle, l'appel suivant rendrait un jeton malgré le refus.
+    const after = await modernRaw(token, "claude-code", args);
+    assert.equal(after.result?.resultType, "input_required", JSON.stringify(after).slice(0, 300));
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+test("client hors liste qui forge une réponse « accept » : reçoit un devis, rien ne part", async () => {
+  await topUp(ALICE, 100, "t:alice:6");
+  const before = await balance(ALICE);
+  const r = await modernRaw(await tokenFor(ALICE), "claude-ai", {
+    name: "generate_drill", arguments: { course: "ALI-1", concept: "séries de Fourier" },
+    inputResponses: { confirm: { action: "accept", content: { confirm: true } } },
+  });
+  assert.equal((r.result?.structuredContent as { status?: string } | undefined)?.status, "confirmation_required", JSON.stringify(r).slice(0, 300));
+  assert.equal(await balance(ALICE), before);
+});
+
+test("facturation désactivée : un compte ordinaire confirme quand même (seul le propriétaire lance directement)", async () => {
+  process.env.BILLING_ENABLED = "0";
+  try {
+    const c = await modernClient("claude-ai", await tokenFor(ALICE), "never", []);
+    const r = await call(c, "generate_drill", { course: "ALI-1", concept: "nombres complexes" });
+    assert.equal(status(r), "confirmation_required", text(r));
+    await c.close();
+  } finally {
+    process.env.BILLING_ENABLED = "1";
+  }
+});

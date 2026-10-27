@@ -59,8 +59,8 @@ after(async () => {
 // ───────────────────────────── décision ─────────────────────────────
 
 test("sans annales : le focus « ~20 QCM » donne 20 QCM (générateur QCM), et la réponse le dit", async () => {
-  const { planMockExam } = await import("../lib/mcp/tools/generate-mock-exam");
-  const p = planMockExam({ focus: "~20 QCM sur la révolution scientifique", hasPastExams: false });
+  const { planMockExam } = await import("../lib/generation");
+  const p = planMockExam({ request: "~20 QCM sur la révolution scientifique", focus: "~20 QCM sur la révolution scientifique", hasPastExams: false });
   assert.ok(!("error" in p));
   assert.deepEqual([p.format, p.jobType, p.count], ["mcq", "qcm", 20]);
   assert.deepEqual(JSON.parse(p.target!), { count: 20, openCount: 0, focus: "~20 QCM sur la révolution scientifique" });
@@ -69,10 +69,10 @@ test("sans annales : le focus « ~20 QCM » donne 20 QCM (générateur QCM), et 
 });
 
 test("sans annales : format et nombre demandés respectés ; défauts raisonnables sinon", async () => {
-  const { planMockExam } = await import("../lib/mcp/tools/generate-mock-exam");
+  const { planMockExam } = await import("../lib/generation");
   const mcq = planMockExam({ format: "mcq", count: 15, focus: null, hasPastExams: false });
   assert.deepEqual(["error" in mcq ? null : [mcq.jobType, mcq.count]], [["qcm", 15]]);
-  const written = planMockExam({ focus: "intégrales", hasPastExams: false });
+  const written = planMockExam({ request: "intégrales", focus: "intégrales", hasPastExams: false });
   assert.deepEqual(["error" in written ? null : [written.format, written.jobType, written.count]], [["written", "exam", 6]]);
   assert.match("error" in written ? "" : written.note ?? "", /6 exercices/);
   const nine = planMockExam({ format: "written", count: 9, focus: null, hasPastExams: false });
@@ -81,12 +81,35 @@ test("sans annales : format et nombre demandés respectés ; défauts raisonnabl
   assert.ok("error" in tooMany, "un examen écrit compte au plus 12 exercices");
 });
 
-test("avec des annales : le format réel reste la règle (un focus qui parle de QCM ne change rien), sauf format explicite", async () => {
-  const { planMockExam } = await import("../lib/mcp/tools/generate-mock-exam");
-  const p = planMockExam({ focus: "QCM sur les séries", hasPastExams: true });
+test("avec des annales : leur format reste la règle, même si on demande des QCM — et la réponse le dit", async () => {
+  const { planMockExam } = await import("../lib/generation");
+  const p = planMockExam({ request: "QCM sur les séries", focus: "QCM sur les séries", hasPastExams: true });
   assert.deepEqual(["error" in p ? null : [p.format, p.jobType, p.count, p.note]], [["written", "exam", null, null]]);
+  // L'app ne génère des QCM que si les annales en contiennent (format détecté) : le connecteur ne contourne pas cette règle.
   const explicit = planMockExam({ format: "mcq", focus: null, hasPastExams: true });
-  assert.deepEqual(["error" in explicit ? null : explicit.jobType], ["qcm"]);
+  assert.ok(!("error" in explicit));
+  assert.deepEqual([explicit.jobType, explicit.format], ["exam", "written"]);
+  assert.match(explicit.note ?? "", /annales/);
+});
+
+test("détection des QCM dans la demande : pluriel et nombre lus, négations et titres de chapitre ignorés", async () => {
+  const { planMockExam } = await import("../lib/generation");
+  const kind = (request: string, focus = request) => {
+    const p = planMockExam({ request, focus, hasPastExams: false });
+    return "error" in p ? "error" : `${p.format}:${p.count}`;
+  };
+  assert.equal(kind("~30 QCM sur Galilée"), "mcq:30");
+  assert.equal(kind("des QCMs sur Newton"), "mcq:20");
+  assert.equal(kind("15 questions à choix multiples"), "mcq:15");
+  assert.equal(kind("pas de QCM, que des exercices"), "written:6");
+  assert.equal(kind("sans QCM"), "written:6");
+  assert.equal(kind("no MCQ please"), "written:6");
+  // Le titre d'un chapitre (« QCM et statistiques ») n'est pas une demande de format.
+  const chapter = planMockExam({ request: null, focus: "Chapitre 4 : QCM et statistiques", hasPastExams: false });
+  assert.deepEqual(["error" in chapter ? null : chapter.format], ["written"]);
+  // Un nombre explicite l'emporte sur celui du texte.
+  const explicit = planMockExam({ request: "~30 QCM", focus: "~30 QCM", count: 12, hasPastExams: false });
+  assert.deepEqual(["error" in explicit ? null : explicit.count], [12]);
 });
 
 // ───────────────────────────── par le connecteur ─────────────────────────────
@@ -135,5 +158,37 @@ test("generate_mock_exam sur HUM-285 (sans annales) : devis pour 20 QCM au tarif
   const exam = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "MATH-101", focus: "QCM sur les séries" } })) as ToolResult;
   const ex = exam.structuredContent as { format: string; exercise_count: number | null; note: string | null };
   assert.deepEqual([ex.format, ex.exercise_count, ex.note], ["written", null, null], "avec annales : format réel");
+  await c.close();
+});
+
+test("get_job_status sur un examen QCM terminé : les questions et leurs options, les réponses seulement sur demande", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { runWithUser } = await import("../db/context");
+  const { q } = await import("../db/q");
+  const { getQcmExam } = await import("../lib/qcm");
+  const jobs = await import("../lib/jobs");
+  const { listCoursesOf } = await import("../lib/courses");
+  const course = listCoursesOf(ALICE).find((x) => x.examCode === "HUM-285")!.id;
+  const jobId = await runWithUser(ALICE, () => runWithCourse(course, async () => {
+    await getQcmExam(0); // amorce le schéma QCM du cours
+    const examId = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','ready')`);
+    for (const [idx, stem, options, correct] of [[0, "Qui a publié le Sidereus Nuncius ?", ["Galilée", "Kepler", "Newton"], [0]], [1, "En quelle année ?", ["1543", "1610", "1687"], [1]]] as const) {
+      await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        examId, idx, "Galilée", "scq", stem, JSON.stringify(options), JSON.stringify(correct), "[]", "Publié à Venise en 1610.", 1);
+    }
+    const id = await jobs.createJob("qcm");
+    await jobs.setJob(id, { status: "done", progress: 100, resultId: examId, resultPath: `/mock/${examId}` });
+    return id;
+  }));
+  const c = await client();
+  type Status = { exam: { questions: { statement: string; solution: string | null }[] } | null; job: { result_link: string | null } };
+  const plain = (await c.callTool({ name: "get_job_status", arguments: { course: "HUM-285", job_id: jobId } })) as ToolResult;
+  const sc = plain.structuredContent as Status;
+  assert.equal(sc.exam?.questions.length, 2, text(plain));
+  assert.match(sc.exam!.questions[0].statement, /Sidereus Nuncius[\s\S]*A\) Galilée[\s\S]*B\) Kepler/);
+  assert.equal(sc.exam!.questions[0].solution, null, "pas de réponse sans include_solutions");
+  assert.match(sc.job.result_link ?? "", /\/mock\//);
+  const keys = ((await c.callTool({ name: "get_job_status", arguments: { course: "HUM-285", job_id: jobId, include_solutions: true } })) as ToolResult).structuredContent as Status;
+  assert.match(keys.exam!.questions[1].solution ?? "", /B[\s\S]*1610/);
   await c.close();
 });
