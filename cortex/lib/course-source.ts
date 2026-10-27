@@ -22,11 +22,33 @@ import { checkStorage } from "@/lib/storage-quota";
  * de lectures d'URL est borné par compte et par heure (SOURCE_FETCH_PER_HOUR).
  */
 
-export const SOURCE_CATEGORIES = ["past_exam", "lecture", "exercises", "notes"] as const;
+export const SOURCE_CATEGORIES = ["past_exam", "lecture", "exercises", "notes", "sample_questions", "exam_info"] as const;
 export type SourceCategory = (typeof SOURCE_CATEGORIES)[number];
 
-/** Catégorie → dossier du cours (mêmes dossiers que le classifieur de l'import). */
-const BUCKET: Record<SourceCategory, string> = { past_exam: "refs", lecture: "lectures", exercises: "series", notes: "notes" };
+/**
+ * Catégorie → dossier du cours (mêmes dossiers que le classifieur de l'import).
+ * Deux dossiers servent le FORMAT d'un cours sans annale (lib/format) :
+ * exam-samples = questions d'exemple officielles (style imité), exam-info =
+ * consignes d'examen (syllabus, page Moodle : « QCM, 45 min »).
+ */
+const BUCKET: Record<SourceCategory, string> = {
+  past_exam: "refs", lecture: "lectures", exercises: "series", notes: "notes",
+  sample_questions: "exam-samples", exam_info: "exam-info",
+};
+
+/** Type d'ingestion imposé par le dossier (exam-samples/, exam-info/), sinon null : le nom du fichier décide. */
+export function sourceTypeForFolder(rel: string): "sample_questions" | "exam_info" | null {
+  const f = rel.replace(/\\/g, "/").toLowerCase();
+  if (/(^|\/)exam-samples\//.test(f)) return "sample_questions";
+  if (/(^|\/)exam-info\//.test(f)) return "exam_info";
+  return null;
+}
+
+/** Libellés lisibles des catégories (app). */
+export const SOURCE_CATEGORY_LABEL: Record<SourceCategory, string> = {
+  past_exam: "Annale", lecture: "Cours", exercises: "Série d'exercices", notes: "Notes",
+  sample_questions: "Questions d'exemple officielles", exam_info: "Consignes d'examen",
+};
 
 /** Même plafond par fichier que l'import de l'app. */
 export const SOURCE_MAX_BYTES = 30 * 1024 * 1024;
@@ -91,6 +113,16 @@ async function store(courseId: string, name: string, category: SourceCategory | 
     }
   }
   throw new SourceError(409, "Trop de fichiers du même nom dans ce cours : donne un autre titre.");
+}
+
+/** Fichier déposé depuis l'app (multipart) : mêmes gardes que le connecteur, catégorie imposée. */
+export async function addFileSource(courseId: string, a: { name: string; data: Buffer; category: SourceCategory; contentType: string }): Promise<SavedSource> {
+  if (!a.data.length) throw new SourceError(400, "Fichier vide.");
+  if (a.data.length > SOURCE_MAX_BYTES) throw new SourceError(413, `Fichier trop volumineux (maximum ${SOURCE_MAX_BYTES / 1024 / 1024} Mo).`);
+  const ext = path.extname(a.name).toLowerCase();
+  if (![".pdf", ".md", ".txt", ".html", ".htm"].includes(ext)) throw new SourceError(415, "Formats acceptés : PDF, TXT, MD, HTML.");
+  if (ext === ".pdf" && a.data.subarray(0, 5).toString("latin1") !== "%PDF-") throw new SourceError(415, "Ce fichier n'est pas un PDF valide.");
+  return store(courseId, fileName(path.basename(a.name, ext), null, ext === ".htm" ? ".html" : ext), a.category, a.data, a.contentType);
 }
 
 export async function addTextSource(courseId: string, a: { text: string; title?: string; category?: SourceCategory }): Promise<SavedSource> {

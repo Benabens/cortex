@@ -14,13 +14,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
-import { planMockExam, type ExamFormat } from "../lib/exam-format";
+import type { ExamFormat, MockExamPlan, MockExamRequest } from "../lib/exam-format";
 
+// Le dossier de données AVANT tout chargement du moteur (lib/courses le lit à l'import) :
+// d'où les imports dynamiques, jamais statiques, dans ce fichier.
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-exam-format-"));
 process.env.CORTEX_DATA_DIR = tmp;
 
+let planMockExam: (f: ExamFormat, r: MockExamRequest) => MockExamPlan;
+
 before(async () => {
   delete process.env.CORTEX_USER;
+  ({ planMockExam } = await import("../lib/exam-format"));
   const { ensureCoursesLoaded } = await import("../lib/courses");
   await ensureCoursesLoaded();
 });
@@ -210,4 +215,19 @@ test("CS-202 garde son format historique (exercices de calcul et de trace)", asy
   const f = await resolve("cs-202");
   assert.equal(f.basis, "annales");
   assert.equal(f.kind, "exercises");
+});
+
+// ─────────────────────── lancement (app et connecteur) ───────────────────────
+
+test("lancer un examen blanc sans format connu est refusé (409) avec ce qu'il faut déclarer, sans créer de job", async () => {
+  const id = await newCourse();
+  await addSource(id, "course_pdf", "Séance 1", "Le leadership transformationnel motive par le sens.");
+  const { runWithCourse } = await import("../db/client");
+  const { startGenerationJob } = await import("../lib/generation");
+  const { q } = await import("../db/q");
+  const r = await runWithCourse(id, () => startGenerationJob("exam"));
+  assert.equal(r.ok, false);
+  assert.ok(!r.ok && r.status === 409 && /Format d'examen inconnu/.test(r.error), JSON.stringify(r));
+  const jobs = await runWithCourse(id, async () => { await q.ensureTable("jobs"); return q.get<{ n: number }>(`SELECT count(*) n FROM jobs`); });
+  assert.equal(Number(jobs?.n), 0);
 });

@@ -10,7 +10,8 @@ import { enterCourse } from "../db/client";
 import { ensureCoursesLoaded } from "../lib/courses";
 import { q } from "../db/q";
 import { llmAvailable, llmUnavailableReason } from "../lib/llm";
-import { generateExamViaClaudeCode, generateTargetedExercise } from "../lib/exam";
+import { generateTargetedExercise } from "../lib/exam";
+import { generateMockExam } from "../lib/mock-exam";
 import { texAvailable } from "../lib/exam-latex";
 import { assertJobCourseOwned, getJob, heartbeatJob, logJob, setJob } from "../lib/jobs";
 import { setCurrentJob } from "../lib/billing/usage-context";
@@ -235,7 +236,7 @@ async function main() {
     await logJob(jobId, s);
   };
 
-  // composeur (CS-202) : count d'exercices + « Mets l'accent sur… » (focus) optionnels dans le target 'exam'.
+  // composeur : count (questions ou exercices) + « Mets l'accent sur… » (focus thématique) optionnels dans le target 'exam'.
   let examCount: number | undefined, examFocus: string | undefined;
   if (job.type === "exam" && job.target) {
     try {
@@ -251,7 +252,8 @@ async function main() {
         ? await generateTargetedExercise(job.target ?? "", { onStep })
         : job.type === "lab-exercise"
           ? await generateLabExercise(job.target ?? "", { onStep })
-          : await generateExamViaClaudeCode({ count: examCount, focus: examFocus, onStep, jobId });
+          // Examen blanc : le format du cours choisit le générateur (QCM, exercices, essai…), cf. lib/mock-exam.
+          : await generateMockExam({ count: examCount, focus: examFocus, onStep, jobId });
     if (res.texError) {
       // le résultat existe (HTML lisible) mais le PDF a échoué → erreur LaTeX gardée pour debug
       await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, repli HTML lisible. Détail : ${res.texError.slice(0, 500)}` });
