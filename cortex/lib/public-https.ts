@@ -16,9 +16,32 @@ import net from "node:net";
  *  - taille et durée bornées.
  */
 
+/** Les 8 groupes de 16 bits d'une IPv6 (« :: » développé, IPv4 finale pointée convertie), ou null. */
+function ipv6Groups(ip: string): number[] | null {
+  let s = ip.toLowerCase().split("%")[0];
+  const dotted = s.match(/^(.*:)(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (dotted) {
+    const [a, b, c, d] = dotted.slice(2).map(Number);
+    s = `${dotted[1]}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const halves = s.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const groups = halves.length === 2 ? [...head, ...Array(8 - head.length - tail.length).fill("0"), ...tail] : head;
+  if (groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+  return groups.map((g) => parseInt(g, 16));
+}
+
+/** IPv4 portée par deux groupes de 16 bits. */
+const v4of = (hi: number, lo: number) => `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+
 /**
  * Adresse joignable depuis Internet ? Refuse bouclage, privé (RFC 1918, ULA),
- * lien local, CGNAT, multicast, non spécifié et adresses de documentation.
+ * lien local, CGNAT, multicast, non spécifié et adresses de documentation. Une
+ * IPv4 portée par une IPv6 (mappée ::ffff:, compatible ::, NAT64 64:ff9b::,
+ * 6to4 2002::) est jugée sur l'IPv4 qu'elle porte — le parseur d'URL écrit
+ * `[::ffff:127.0.0.1]` en hexadécimal, `[::ffff:7f00:1]`.
  */
 export function isPublicAddress(ip: string): boolean {
   if (net.isIPv4(ip)) {
@@ -33,18 +56,22 @@ export function isPublicAddress(ip: string): boolean {
     if (a === 203 && b === 0) return false;
     return true;
   }
-  if (net.isIPv6(ip)) {
-    const low = ip.toLowerCase();
-    const mapped = low.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    if (mapped) return isPublicAddress(mapped[1]);
-    if (low === "::" || low === "::1") return false;
-    if (/^f[cd]/.test(low)) return false; // ULA fc00::/7
-    if (/^fe[89ab]/.test(low)) return false; // lien local fe80::/10
-    if (low.startsWith("ff")) return false; // multicast
-    if (low.startsWith("2001:db8")) return false; // documentation
-    return true;
+  if (!net.isIPv6(ip)) return false;
+  const g = ipv6Groups(ip);
+  if (!g) return false;
+  const zeros = (from: number, to: number) => g.slice(from, to).every((x) => x === 0);
+  if (zeros(0, 5) && (g[5] === 0xffff || g[5] === 0)) {
+    if (g[5] === 0 && g[6] === 0) return false; // :: et ::1 (et le reste de ::/112)
+    return isPublicAddress(v4of(g[6], g[7])); // mappée ou compatible
   }
-  return false;
+  if (g[0] === 0x64 && g[1] === 0xff9b) return zeros(2, 6) && isPublicAddress(v4of(g[6], g[7])); // NAT64 (64:ff9b:1::/48 local : refusé)
+  if (g[0] === 0x2002) return isPublicAddress(v4of(g[1], g[2])); // 6to4
+  if ((g[0] & 0xfe00) === 0xfc00) return false; // ULA fc00::/7
+  if ((g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xffc0) === 0xfec0) return false; // lien local, site local
+  if ((g[0] & 0xff00) === 0xff00) return false; // multicast
+  if (g[0] === 0x2001 && (g[1] === 0x0db8 || g[1] === 0)) return false; // documentation, Teredo
+  if (g[0] === 0x0100 && zeros(1, 4)) return false; // 100::/64, à jeter
+  return true;
 }
 
 export type PublicFetchFailure = "invalid_url" | "blocked" | "redirect" | "status" | "too_large" | "timeout" | "network";
