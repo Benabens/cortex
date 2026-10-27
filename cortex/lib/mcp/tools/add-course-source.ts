@@ -8,7 +8,7 @@ const output = z.object({
   course: courseRef,
   source: z.object({
     file: z.string().describe("File name stored in the course."),
-    folder: z.string().describe("Where it was filed: refs (past exams), lectures, series (exercises), notes, sites, images or misc."),
+    folder: z.string().describe("Where it was filed: refs (past exams), lectures, series (exercises), notes, exam-samples (official sample questions), exam-info (exam instructions), sites, images or misc."),
     bytes: z.number(),
     content_type: z.string(),
   }),
@@ -21,7 +21,9 @@ export default defineTool({
   description:
     "Add one material to a course (free; counts toward the account's storage quota), either from a public https URL (PDF, web page or plain text, 30 MB max; redirects are not followed, " +
     "pass the final URL) or from pasted text. category tells Cortex what it is: past_exam (an exam from a previous year, used to learn the exam format), " +
-    "lecture, exercises or notes; when omitted it is guessed from the file name. The file is only stored: call prepare_course once all materials are added.",
+    "lecture, exercises, notes, sample_questions (official example questions published by the teacher: their style is imitated when there are no past exams) " +
+    "or exam_info (exam instructions: syllabus or course page describing the exam, e.g. \"MCQ, 45 min\"); when omitted it is guessed from the file name. " +
+    "The file is only stored: call prepare_course once all materials are added.",
   kind: "write",
   openWorld: true,
   input: z.object({
@@ -29,7 +31,7 @@ export default defineTool({
     url: z.string().url().max(2000).optional().describe("Public https URL of a PDF, web page or text file. Give either url or text."),
     text: z.string().min(1).max(200_000).optional().describe("Pasted text (stored as Markdown). Give either url or text."),
     title: z.string().min(1).max(120).optional().describe("Name for the stored file, e.g. \"Final 2024\" (default: from the URL)."),
-    category: z.enum(SOURCE_CATEGORIES).optional().describe("past_exam, lecture, exercises or notes."),
+    category: z.enum(SOURCE_CATEGORIES).optional().describe("past_exam, lecture, exercises, notes, sample_questions or exam_info."),
   }),
   output,
   async run(args, ctx) {

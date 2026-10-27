@@ -17,7 +17,7 @@
 import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
-import { getFormatProfile, type FormatProfile } from "@/lib/format";
+import type { FormatProfile } from "@/lib/format";
 
 export const EXAM_KINDS = ["qcm", "exercises", "mixed", "essay", "oral"] as const;
 export type ExamKind = (typeof EXAM_KINDS)[number];
@@ -182,27 +182,41 @@ export function detectLanguage(text: string): Language | null {
 
 // ───────────────────────────── résolution ─────────────────────────────
 
-/** Le format détecté stocké en base, avec ce que la détection hors annales y ajoute. */
-type StoredProfile = FormatProfile & {
+/** Le format détecté stocké en base, avec ce que la détection hors annales y ajoute (lib/format). */
+export type StoredProfile = FormatProfile & {
   basis?: FormatBasis;
   exam_kind?: ExamKind | null;
   question_count?: number | null;
   open_count?: number | null;
   evidence?: string[];
-  language?: string | null;
+  /** Questions d'exemple officielles citées mot pour mot (style, sans annale). */
+  examples?: string[];
 };
 
-async function annalesText(cap = 8000): Promise<string | null> {
-  let rows: { text: string }[] = [];
+/** Dernier profil détecté (lu ici plutôt que via lib/format, qui dépend de ce module). */
+export async function readStoredProfile(): Promise<StoredProfile | null> {
   try {
-    rows = await q.all<{ text: string }>(
-      `SELECT i.text FROM items i JOIN sources s ON s.id = i.source_id WHERE s.type IN ('final','midterm') ORDER BY s.id, i.id LIMIT 40`,
-    );
+    await q.ensureTable("format_profile");
+    const r = await q.get<{ json: string }>(`SELECT json FROM format_profile ORDER BY id DESC LIMIT 1`);
+    return r ? (JSON.parse(r.json) as StoredProfile) : null;
   } catch {
     return null;
   }
-  if (!rows.length) return null;
-  return rows.map((r) => r.text).join("\n").slice(0, cap);
+}
+
+/** Annales ingérées (finals, partiels) : leur nombre, et un échantillon de leur texte pour la langue. */
+async function annales(cap = 8000): Promise<{ count: number; text: string }> {
+  try {
+    const n = await q.get<{ n: number }>(`SELECT count(*) n FROM sources WHERE type IN ('final','midterm')`);
+    const count = Number(n?.n ?? 0);
+    if (!count) return { count, text: "" };
+    const rows = await q.all<{ text: string }>(
+      `SELECT i.text FROM items i JOIN sources s ON s.id = i.source_id WHERE s.type IN ('final','midterm') ORDER BY s.id, i.id LIMIT 40`,
+    );
+    return { count, text: rows.map((r) => r.text).join("\n").slice(0, cap) };
+  } catch {
+    return { count: 0, text: "" };
+  }
 }
 
 /** Format lu dans des annales : mêmes défauts que le générateur QCM historique. */
@@ -242,23 +256,24 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
   const courseId = currentCourse();
   const course = getCourse(courseId);
   const declared = course.examFormat;
-  const annales = await annalesText();
-  const language = declared?.language || (annales ? detectLanguage(annales) : null) || course.language || "fr";
-  const stored = (await getFormatProfile().catch(() => null)) as StoredProfile | null;
+  const past = await annales();
+  const hasAnnales = past.count > 0;
+  const language = declared?.language || (past.text ? detectLanguage(past.text) : null) || course.language || "fr";
+  const stored = await readStoredProfile();
   const basisOf = (p: StoredProfile) => p.basis ?? "annales";
 
   let format: ExamFormat;
   if (courseId === DEFAULT_COURSE) {
     // Format historique figé (calcul / trace / figures) : jamais re-détecté.
     format = make({ basis: "annales", kind: "exercises", questionCount: null, openCount: null, durationMin: course.durationMin, language, evidence: [] });
-  } else if (annales && stored && basisOf(stored) === "annales") {
+  } else if (hasAnnales && stored && basisOf(stored) === "annales") {
     format = fromAnnalesProfile(stored, language);
   } else if (declared) {
     format = make({
       basis: "declared", kind: declared.kind, questionCount: declared.questionCount, openCount: null,
       durationMin: declared.durationMin, language, evidence: [],
     });
-  } else if (annales) {
+  } else if (hasAnnales) {
     format = make({ basis: "annales", kind: "exercises", questionCount: null, openCount: null, durationMin: null, language, evidence: [] });
   } else if (stored && (basisOf(stored) === "sample_questions" || basisOf(stored) === "course_info") && stored.exam_kind) {
     format = make({
@@ -282,4 +297,9 @@ export function examLanguageFor(courseId: string): string {
   if (memo?.course === courseId) return memo.format.language;
   const c = getCourse(courseId);
   return c.examFormat?.language || c.language || "fr";
+}
+
+/** true si l'examen blanc du cours courant part au générateur QCM (QCM ou mixte). */
+export async function isQcmCourse(): Promise<boolean> {
+  return planMockExam(await resolveExamFormat(), {}).generator === "qcm";
 }

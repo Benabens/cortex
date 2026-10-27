@@ -43,7 +43,7 @@ const MCP_URL = `${ISSUER}/mcp`;
 const REDIRECT = "https://claude.ai/api/mcp/auth_callback";
 const OWNER = "usr_owner_write";
 const ALICE = "usr_alice_write";
-const WRITE_TOOLS = ["add_course_source", "create_course", "prepare_course"];
+const WRITE_TOOLS = ["add_course_source", "create_course", "prepare_course", "set_exam_format"];
 const ENV_KEYS = ["CORTEX_DATA_DIR", "DB_DRIVER", "DATABASE_URL", "MCP_ENABLED", "AUTH_URL", "BILLING_ENABLED", "SIGNUP_FREE_CREDITS",
   "DAILY_GEN_QUOTA", "DAILY_ASSIST_QUOTA", "MAX_ACTIVE_JOBS", "CORTEX_OWNER_EMAIL", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS",
   "LLM_MAX_RETRIES", "LLM_BASE_URL"];
@@ -231,7 +231,7 @@ test("sans cortex.write : create_course, add_course_source et prepare_course ré
   const { listCoursesOf } = await import("../lib/courses");
   const before = listCoursesOf(ALICE).length;
   const { access } = await connectAs(ALICE, { generate: true });
-  for (const [name, args] of [["create_course", { name: "Cours sans droit" }], ["add_course_source", { text: "x" }], ["prepare_course", {}]] as const) {
+  for (const [name, args] of [["create_course", { name: "Cours sans droit" }], ["add_course_source", { text: "x" }], ["prepare_course", {}], ["set_exam_format", { kind: "qcm" }]] as const) {
     const res = await rawCall(access, name, args);
     assert.equal(res.status, 403, name);
     assert.match(res.headers.get("www-authenticate") ?? "", /error="insufficient_scope"/, name);
@@ -278,6 +278,80 @@ test("add_course_source, texte collé : rangé selon la catégorie, jamais écra
   assert.equal((again.structuredContent as { source: { file: string } }).source.file, "Formulaire-2.md");
   assert.deepEqual(await filesOf(courseId), ["content/notes/Formulaire-2.md", "content/notes/Formulaire.md", "refs/Final_2025.md"]);
   assert.equal(errorCode(await call(alice, "add_course_source", { course: "MATH-232", text: "x", url: "https://example.com/a.pdf" })), "invalid_input");
+});
+
+test("add_course_source : questions d'exemple officielles et consignes d'examen ont leur propre rangement", async () => {
+  const samples = await call(alice, "add_course_source", { course: "MATH-232", text: "Question 1. Une seule réponse correcte. A) … B) …", title: "Questions modeles", category: "sample_questions" });
+  assert.equal(samples.isError, undefined, text(samples));
+  assert.equal((samples.structuredContent as { source: { folder: string } }).source.folder, "exam-samples");
+  const info = await call(alice, "add_course_source", { course: "MATH-232", text: "Examen : QCM de 20 questions, 45 minutes, sans documents.", title: "Consignes", category: "exam_info" });
+  assert.equal((info.structuredContent as { source: { folder: string } }).source.folder, "exam-info");
+  const files = await filesOf(courseId);
+  assert.ok(files.includes("content/exam-samples/Questions_modeles.md") && files.includes("content/exam-info/Consignes.md"), files.join(", "));
+});
+
+test("examen blanc sans annale ni format déclaré : refusé AVANT tout devis, avec ce qu'il faut déclarer ; rien n'est débité", async () => {
+  const credits = await import("../lib/billing/credits");
+  const before = await credits.getBalanceCenti(ALICE);
+  const r = await call(alice, "generate_mock_exam", { course: "MATH-232", focus: "QCM ~20 questions" });
+  assert.equal(r.isError, true);
+  assert.equal(errorCode(r), "format_required");
+  assert.match(text(r), /set_exam_format/);
+  assert.match(text(r), /QCM[\s\S]*exercices[\s\S]*essai/);
+  assert.equal(await credits.getBalanceCenti(ALICE), before);
+});
+
+test("set_exam_format : déclare puis efface le format d'un cours ; create_course accepte exam_format", async () => {
+  const set = await call(alice, "set_exam_format", { course: "MATH-232", kind: "qcm", question_count: 20, duration_min: 45 });
+  assert.equal(set.isError, undefined, text(set));
+  const out = set.structuredContent as { status: string; exam_format: { kind: string; basis: string; question_count: number | null; summary: string } };
+  assert.equal(out.status, "updated");
+  assert.deepEqual([out.exam_format.kind, out.exam_format.basis, out.exam_format.question_count], ["qcm", "declared", 20]);
+  assert.equal((await call(alice, "set_exam_format", { course: "MATH-232", kind: "dissertation" })).isError, true, "type inconnu refusé par le schéma");
+  assert.equal(errorCode(await call(alice, "set_exam_format", { course: "MATH-232" })), "invalid_input", "ni type ni effacement");
+  const cleared = await call(alice, "set_exam_format", { course: "MATH-232", clear: true });
+  assert.equal((cleared.structuredContent as { exam_format: { basis: string } }).exam_format.basis, "unknown");
+
+  const owner = await mcp((await connectAs(OWNER, { generate: true, write: true })).access);
+  const c = await call(owner, "create_course", { name: "Enjeux mondiaux", code: "HUM-285", exam_format: { kind: "qcm", question_count: 20, duration_min: 45 } });
+  assert.equal(c.isError, undefined, text(c));
+  const { getCourse } = await import("../lib/courses");
+  assert.deepEqual(getCourse((c.structuredContent as { course: { id: string } }).course.id).examFormat, { kind: "qcm", questionCount: 20, durationMin: 45, language: null });
+  // Le format déclaré passe la porte du format ; c'est le pré-check suivant de l'app (corpus vide) qui refuse ici.
+  const gen = await call(owner, "generate_mock_exam", { course: "HUM-285" });
+  assert.equal(errorCode(gen), "conflict", text(gen));
+  assert.match(text(gen), /Corpus non ingéré/);
+  await owner.close();
+});
+
+test("get_job_status : un examen blanc devenu QCM rend ses questions et leurs options (corrigé seulement sur demande)", async () => {
+  const { listCoursesOf } = await import("../lib/courses");
+  const { runWithUser } = await import("../db/context");
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const hum = listCoursesOf(OWNER).find((c) => c.examCode === "HUM-285")!;
+  const jobId = await runWithUser(OWNER, () => runWithCourse(hum.id, async () => {
+    for (const t of ["exams", "qcm_items", "jobs"]) await q.ensureTable(t);
+    const examId = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','ready')`);
+    await q.run(
+      `INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      examId, 0, "nudges", "scq", "Laquelle de ces mesures est un nudge ?",
+      JSON.stringify(["Une taxe sur l'électricité", "Un mode éco activé par défaut, désactivable en un clic", "Une interdiction des chauffages d'appoint", "Un mode éco imposé, sans désactivation possible"]),
+      JSON.stringify([1]), JSON.stringify(["incitation financière", "", "interdiction", "défaut sans liberté de choix"]), "Un nudge préserve la liberté de choix.", 1,
+    );
+    return q.insert(`INSERT INTO jobs (type, status, progress, result_id, result_path) VALUES ('exam','done',100,?,?)`, examId, `/mock/${examId}`);
+  }));
+  const owner = await mcp((await connectAs(OWNER, { generate: true })).access);
+  type Out = { exam: { questions: { statement: string; solution: string | null; verification: string }[] } | null; job: { result_link: string | null } };
+  const plain = (await call(owner, "get_job_status", { course: "HUM-285", job_id: jobId })).structuredContent as Out;
+  assert.equal(plain.exam?.questions.length, 1);
+  assert.match(plain.exam!.questions[0].statement, /nudge[\s\S]*B\) Un mode éco activé par défaut/);
+  assert.equal(plain.exam!.questions[0].solution, null);
+  assert.equal(plain.exam!.questions[0].verification, "reviewed_by_model", "une résolution à l'aveugle par le modèle n'est pas une preuve");
+  assert.match(plain.job.result_link ?? "", /\/mock\//);
+  const solved = (await call(owner, "get_job_status", { course: "HUM-285", job_id: jobId, include_solutions: true })).structuredContent as Out;
+  assert.match(solved.exam!.questions[0].solution ?? "", /Réponse : B\b[\s\S]*liberté de choix/);
+  await owner.close();
 });
 
 test("le cours d'un autre compte est introuvable pour add_course_source et prepare_course, rien n'y est écrit", async () => {

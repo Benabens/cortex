@@ -77,7 +77,8 @@ before(async () => {
   const { ensureCoursesLoaded, reloadCourses } = await import("../lib/courses");
   await ensureCoursesLoaded();
   for (const [user, name, code] of [[ALICE, "Algèbre linéaire", "MATH-111"], [BOB, "Réseaux", "COM-208"], [CAROL, "Analyse I", "MATH-101"], [DAVE, "Physique", "PHYS-101"]]) {
-    const row = buildCourseRow({ name, code }, user);
+    // Le cours de Carol déclare son format : sans lui, generate_mock_exam refuse avant tout devis (lib/exam-format).
+    const row = buildCourseRow({ name, code, ...(user === CAROL ? { examFormat: { kind: "exercises" } } : {}) }, user);
     await insertCourse(row);
     courses[user] = row.id;
   }

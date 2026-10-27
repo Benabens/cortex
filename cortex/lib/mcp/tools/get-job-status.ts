@@ -106,8 +106,10 @@ export default defineTool({
       const job = await getJob(job_id);
       if (!job) throw new ToolError("not_found", `Aucune génération n° ${job_id} dans ce cours.`);
       let exam: z.infer<typeof output>["exam"] = null;
-      if (job.type === "qcm" && job.status === "done" && job.resultId) {
-        exam = await qcmView(job.resultId, !!include_solutions);
+      // QCM : job « qcm », ou job « exam » aiguillé vers le générateur QCM par le format du cours (lib/mock-exam).
+      const qcm = (job.type === "qcm" || job.type === "exam") && job.status === "done" && job.resultId ? await qcmView(job.resultId, !!include_solutions) : null;
+      if (qcm) {
+        exam = qcm;
       } else if (job.type === "exam" && job.status === "done" && job.resultId) {
         const rows = await examQuestions(job.resultId, MAX_QUESTIONS + 1);
         exam = {
