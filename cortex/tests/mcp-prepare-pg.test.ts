@@ -152,5 +152,32 @@ test("create_course → add_course_source → prepare_course confirmé : le work
   // Avant le correctif : erreur à 5 % (« Ingestion… »), ou job bloqué à 95 % (« Récap… »).
   assert.ok(job.progress_pct >= 34, `ingestion non terminée : ${JSON.stringify(job)}`);
   assert.match(text(await call("search_course_materials", { course, query: "Zorglubienne" })), /Zorglubienne/);
+
+  // get_study_plan sur les vraies formes de données Postgres (27/10 : « résultat non conforme »
+  // sur tous les cours) : cours préparé, cours vide sans date d'examen, cours avec date.
+  const bare = await call("create_course", { name: "Cours vide", code: "EMPTY-1" });
+  const dated = await call("create_course", { name: "Cours daté", code: "DATED-1", exam_date: "2027-01-20" });
+  for (const id of [course, (bare.structuredContent as { course: { id: string } }).course.id, (dated.structuredContent as { course: { id: string } }).course.id]) {
+    const plan = await call("get_study_plan", { course: id });
+    assert.equal(plan.isError, undefined, `${id} : ${text(plan)}`);
+    const sr = (plan.structuredContent as { spaced_repetition: { concepts: unknown; due: unknown } }).spaced_repetition;
+    assert.deepEqual([typeof sr.concepts, typeof sr.due], ["number", "number"], id);
+  }
   await client.close();
+});
+
+test("Postgres : un comptage (bigint) se lit comme un nombre, comme en SQLite et PGlite", { skip }, async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { runWithUser } = await import("../db/context");
+  const { q } = await import("../db/q");
+  const { authGet } = await import("../db/auth-store");
+  const { listCoursesOf } = await import("../lib/courses");
+  const course = listCoursesOf(USER)[0].id;
+  const r = await runWithUser(USER, () => runWithCourse(course, () => q.get<{ n: unknown; m: unknown }>(`SELECT count(*) n, sum(1)::bigint m FROM jobs`)));
+  assert.deepEqual([typeof r?.n, typeof r?.m], ["number", "number"]);
+  // Un zéro doit être FAUX (« 0 » en chaîne passait pour vrai : `if (!items)` dans lib/preflight).
+  const zero = await runWithUser(USER, () => runWithCourse(course, () => q.get<{ n: unknown }>(`SELECT count(*) n FROM jobs WHERE 1 = 0`)));
+  assert.equal(zero?.n, 0);
+  const auth = await authGet<{ n: unknown }>(`SELECT count(*) n FROM users`);
+  assert.equal(typeof auth?.n, "number");
 });

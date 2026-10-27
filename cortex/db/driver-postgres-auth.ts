@@ -1,3 +1,4 @@
+import { PG_TYPES } from "./pg-types";
 import type { SqlParam } from "./q";
 import { databaseUrl, pglitePublicQuery, pglitePublicTransaction, pgSafeParams } from "./driver-postgres";
 
@@ -21,7 +22,7 @@ export async function authPgQuery(text: string, params: SqlParam[]): Promise<Rec
     // Une connexion par réservation en cours (transaction dédiée) : le pool doit
     // en offrir assez pour des réservations vraiment concurrentes (PG_AUTH_POOL_MAX, défaut 4).
     const max = Math.max(1, Number(process.env.PG_AUTH_POOL_MAX) || 4);
-    _pool = postgres(url, { max, connection: { search_path: "public" }, onnotice: () => {} });
+    _pool = postgres(url, { max, connection: { search_path: "public" }, onnotice: () => {}, types: PG_TYPES });
   }
   const r = await _pool.unsafe(text, pgSafeParams(params) as never[]);
   return r as unknown as Record<string, unknown>[];

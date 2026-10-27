@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { currentUser, tenantSchema } from "./context";
 import { currentCourse } from "./client";
+import { PG_TYPES } from "./pg-types";
 import { registerDriver, type QueryDriver, type RunResult, type SqlParam } from "./q";
 import { allDdl } from "./tables";
 
@@ -104,6 +105,7 @@ function poolFor(schema: string): PostgresSql {
       connection: { search_path: `"${schema}"` },
       onnotice: () => {},
       idle_timeout: 30,
+      types: PG_TYPES,
     });
     pgPools.set(schema, pool);
     // Éviction LRU (Map = ordre d'insertion) au-delà du plafond. On NE retire
