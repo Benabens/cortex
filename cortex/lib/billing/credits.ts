@@ -3,6 +3,7 @@ import { currentUser } from "@/db/context";
 import { authAll, authGet, authRun, authSqlite } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
+import { isOwner } from "./owner";
 
 /**
  * CRÉDITS (modèle payant).
@@ -373,7 +374,7 @@ export async function setSubscriptionStatus(p: {
  * exige le coût MINIMUM d'une génération (1 crédit).
  */
 export async function creditsGate(kind?: string, costCenti?: number): Promise<{ status: number; error: string } | null> {
-  if (!billingEnabled()) return null;
+  if (!billingEnabled() || (await isOwner())) return null;
   const cost = costCenti ?? (kind ? creditCost(kind) : CENTI);
   const balance = await getBalanceCenti();
   return insufficient(balance, cost);

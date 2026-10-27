@@ -1,8 +1,6 @@
-import dns from "node:dns";
-import https from "node:https";
-import net from "node:net";
 import { authGet, authRun } from "@/db/auth-store";
 import { nowStr } from "@/db/q";
+import { readPublicHttps } from "@/lib/public-https";
 import { newId } from "./secrets";
 
 /**
@@ -184,82 +182,14 @@ const CIMD_TIMEOUT_MS = 5000;
 const CIMD_MIN_CACHE_S = 300;
 const CIMD_MAX_CACHE_S = 86400;
 
-/**
- * Adresse joignable depuis Internet ? Refuse bouclage, privé (RFC 1918, ULA),
- * lien local, CGNAT, multicast, non spécifié et adresses de documentation : un
- * client_id CIMD ne doit pas faire lire au serveur son propre réseau interne (SSRF).
- */
-export function isPublicAddress(ip: string): boolean {
-  if (net.isIPv4(ip)) {
-    const [a, b] = ip.split(".").map(Number);
-    if (a === 0 || a === 10 || a === 127 || a >= 224) return false;
-    if (a === 100 && b >= 64 && b <= 127) return false; // CGNAT
-    if (a === 169 && b === 254) return false; // lien local (dont métadonnées cloud)
-    if (a === 172 && b >= 16 && b <= 31) return false;
-    if (a === 192 && b === 168) return false;
-    if (a === 192 && b === 0) return false; // 192.0.0.0/24 et 192.0.2.0/24
-    if (a === 198 && (b === 18 || b === 19 || b === 51)) return false;
-    if (a === 203 && b === 0) return false;
-    return true;
-  }
-  if (net.isIPv6(ip)) {
-    const low = ip.toLowerCase();
-    const mapped = low.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    if (mapped) return isPublicAddress(mapped[1]);
-    if (low === "::" || low === "::1") return false;
-    if (/^f[cd]/.test(low)) return false; // ULA fc00::/7
-    if (/^fe[89ab]/.test(low)) return false; // lien local fe80::/10
-    if (low.startsWith("ff")) return false; // multicast
-    if (low.startsWith("2001:db8")) return false; // documentation
-    return true;
-  }
-  return false;
-}
+export { isPublicAddress } from "@/lib/public-https";
 
-/**
- * Lecture HTTPS durcie : résolution DNS vérifiée AU MOMENT de la connexion (le
- * `lookup` de la requête — pas de fenêtre de « DNS rebinding » entre contrôle et
- * connexion), aucune redirection suivie, 5 s et 5 Ko au maximum.
- */
-export const fetchClientMetadata: MetadataFetcher = (url) =>
-  new Promise((resolve, reject) => {
-    const req = https.get(url, {
-      headers: { accept: "application/json", "user-agent": "Cortex-OAuth/1.0" },
-      timeout: CIMD_TIMEOUT_MS,
-      lookup: (host, opts, cb) => {
-        dns.lookup(host, { all: true }, (err, addrs) => {
-          if (err) return cb(err, "", 4);
-          const list = addrs as dns.LookupAddress[];
-          if (!list.length || list.some((a) => !isPublicAddress(a.address))) {
-            return cb(new Error("adresse non publique refusée"), "", 4);
-          }
-          const all = (opts as { all?: boolean }).all;
-          if (all) return (cb as unknown as (e: null, a: dns.LookupAddress[]) => void)(null, list);
-          cb(null, list[0].address, list[0].family);
-        });
-      },
-    }, (res) => {
-      if (res.statusCode !== 200) {
-        res.resume();
-        return reject(new Error(`HTTP ${res.statusCode}`));
-      }
-      let size = 0;
-      const chunks: Buffer[] = [];
-      res.on("data", (c: Buffer) => {
-        size += c.length;
-        if (size > CIMD_MAX_BYTES) { req.destroy(new Error("document trop volumineux")); return; }
-        chunks.push(c);
-      });
-      res.on("end", () => {
-        const cc = String(res.headers["cache-control"] ?? "");
-        const m = cc.match(/max-age=(\d+)/);
-        resolve({ body: Buffer.concat(chunks).toString("utf8"), maxAgeS: m && !/no-store/.test(cc) ? Number(m[1]) : null });
-      });
-      res.on("error", reject);
-    });
-    req.on("timeout", () => req.destroy(new Error("délai dépassé")));
-    req.on("error", reject);
-  });
+/** Lecture du document CIMD : la lecture durcie commune (lib/public-https), 5 s et 5 Ko au maximum. */
+export const fetchClientMetadata: MetadataFetcher = async (url) => {
+  const r = await readPublicHttps(url, { maxBytes: CIMD_MAX_BYTES, timeoutMs: CIMD_TIMEOUT_MS, accept: "application/json", userAgent: "Cortex-OAuth/1.0" });
+  const m = r.cacheControl.match(/max-age=(\d+)/);
+  return { body: r.body.toString("utf8"), maxAgeS: m && !/no-store/.test(r.cacheControl) ? Number(m[1]) : null };
+};
 
 /** Valide un document CIMD : il doit se désigner lui-même et déclarer des URL de retour valides. */
 export function parseCimdDocument(clientId: string, body: string): OAuthClient {

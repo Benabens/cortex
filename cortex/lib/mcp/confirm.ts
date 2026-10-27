@@ -5,7 +5,8 @@ import {
 } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { billingEnabled, creditsGate, fmtCredits, fromCenti, getBalanceCenti } from "@/lib/billing/credits";
-import { generationGate, quotaFor, usedToday } from "@/lib/billing/guards";
+import { dailyLimit, generationGate, usedToday } from "@/lib/billing/guards";
+import { isOwner } from "@/lib/billing/owner";
 import { llmUnavailableReason } from "@/lib/llm";
 import type { Principal } from "@/lib/oauth/server";
 import { QUOTE_TTL_S, argsHash, issueQuote, redeemQuote } from "./quotes";
@@ -65,8 +66,9 @@ async function precheck(cost: Cost): Promise<void> {
   if (engine) throw new ToolError("unavailable", engine);
 }
 
-function costPhrase(costCenti: number, billing: boolean): string {
+function costPhrase(costCenti: number, billing: boolean, owner: boolean): string {
   if (!billing) return "sans crédit (facturation désactivée sur cette instance)";
+  if (owner) return "sans crédit (compte propriétaire)";
   return `${fmtCredits(costCenti)} crédit${costCenti > 100 ? "s" : ""}`;
 }
 
@@ -78,7 +80,9 @@ export async function confirmCost(
 ): Promise<Confirmation> {
   await precheck(cost);
   const billing = billingEnabled();
-  const costCenti = billing ? cost.costCenti : 0;
+  // Compte du propriétaire : rien n'est débité ni compté (lib/billing/owner) — le devis le dit.
+  const owner = await isOwner(p.principal.userId);
+  const costCenti = billing && !owner ? cost.costCenti : 0;
   const binding = { userId: p.principal.userId, grantId: p.principal.grantId, tool: p.tool, args, costCenti };
 
   if (token) {
@@ -90,10 +94,10 @@ export async function confirmCost(
   }
 
   const used = await usedToday(cost.bucket);
-  const limit = quotaFor(cost.bucket);
+  const limit = await dailyLimit(cost.bucket);
   const balance = billing ? await getBalanceCenti() : null;
   const quotaText = limit === null ? "quota du jour non limité" : `${QUOTA_LABEL[bucketLabel(cost.bucket)]} aujourd'hui : ${used}/${limit}`;
-  const message = `${cost.summary} Coût : ${costPhrase(costCenti, billing)}` +
+  const message = `${cost.summary} Coût : ${costPhrase(costCenti, billing, owner)}` +
     (balance !== null ? ` (solde ${fmtCredits(balance)} → ${fmtCredits(balance - costCenti)})` : "") + `, ${quotaText}. Confirmer ?`;
 
   // Capacités déclarées PAR REQUÊTE (ère 2026-07-28). Le type d'enveloppe du SDK est vide : lecture explicite.

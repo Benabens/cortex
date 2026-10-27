@@ -1,6 +1,6 @@
 import { nextRechargeDate, standingOf } from "@/lib/billing/subscription-windows";
 import { billingEnabled, creditCost, fromCenti, getSubscription, listTransactions, purchasedBalanceCenti, subscriptionCreditsCenti } from "@/lib/billing/credits";
-import { quotaFor, usedToday } from "@/lib/billing/guards";
+import { dailyLimit, usedToday } from "@/lib/billing/guards";
 import { listOffers } from "@/lib/billing/offers";
 import { contactEmail } from "@/lib/contact";
 import { legalEnglishUrl, legalLinks, purchasesAllowed, stripeConfigured as stripeReady, termsState } from "@/lib/legal";
@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
     usedToday: { gen: await usedToday("gen"), assist: await usedToday("assist") },
     // Limites EFFECTIVES du compte (valeur posée, sinon défaut du déploiement
     // gardé ; null = levée) : l'écran les affiche au-dessus des offres.
-    quotas: { gen: quotaFor("gen"), assist: quotaFor("assist") },
+    quotas: { gen: await dailyLimit("gen"), assist: await dailyLimit("assist") },
     storageQuotaMb: storageQuotaMb(),
     transactions: on
       ? (await listTransactions()).map((t) => ({

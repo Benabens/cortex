@@ -14,7 +14,9 @@ import { publicOrigin } from "@/lib/public-url";
 
 export const SCOPE_READ = "cortex.read";
 export const SCOPE_GENERATE = "cortex.generate";
-export const SUPPORTED_SCOPES = [SCOPE_READ, SCOPE_GENERATE] as const;
+/** Administration des cours (créer, ajouter des supports, préparer) : proposée et accordée au SEUL propriétaire. */
+export const SCOPE_ADMIN = "cortex.admin";
+export const SUPPORTED_SCOPES = [SCOPE_READ, SCOPE_GENERATE, SCOPE_ADMIN] as const;
 
 /** Durées de vie, en secondes. Jeton d'accès court ; refresh tournant à chaque usage. */
 export const ACCESS_TOKEN_TTL_S = 3600;
