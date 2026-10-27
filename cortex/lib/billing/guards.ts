@@ -4,6 +4,7 @@ import { authGet, authRun } from "@/db/auth-store";
 import { nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import { guardsActive, intLimit } from "./env";
+import { isOwner } from "./owner";
 
 /**
  * GARDE-FOUS PAR UTILISATEUR :
@@ -90,6 +91,7 @@ export async function rateGate(): Promise<GateIssue | null> {
  * de débit par minute (burst) puis le quota quotidien.
  */
 export async function generationGate(bucket: QuotaBucket): Promise<GateIssue | null> {
+  if (await isOwner()) return null;
   const burst = await rateGate();
   if (burst) return burst;
   const cap = quotaFor(bucket);
