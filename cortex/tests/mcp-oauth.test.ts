@@ -294,8 +294,8 @@ test("un client qui ne demande que « générer » reçoit aussi la lecture (san
   const { grantableScopes } = await import("../lib/oauth/server");
   assert.deepEqual(grantableScopes("cortex.generate"), ["cortex.read", "cortex.generate"]);
   assert.deepEqual(grantableScopes("cortex.read"), ["cortex.read"]);
-  // Aucune portée connue = toutes celles du serveur ; cortex.admin est ensuite retirée à tout autre compte que le propriétaire (mcp-admin.test).
-  assert.deepEqual(grantableScopes("inconnu"), ["cortex.read", "cortex.generate", "cortex.admin"]);
+  // Aucune portée connue = toutes celles du serveur (chacune reste décochable à l'écran de consentement).
+  assert.deepEqual(grantableScopes("inconnu"), ["cortex.read", "cortex.generate", "cortex.write"]);
 });
 
 test("en-tête Basic malformé au point de jeton : 401 invalid_client, jamais 500", async () => {

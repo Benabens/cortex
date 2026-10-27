@@ -18,10 +18,10 @@ export default defineTool({
   name: "create_course",
   title: "Create a course",
   description:
-    "Owner only. Create a new course in the owner's Cortex account (the same as \"New course\" in the app): name, optional exam code (e.g. \"MATH-111\"), " +
+    "Create a new course in the student's Cortex account (the same as \"New course\" in the app, free): name, optional exam code (e.g. \"MATH-111\"), " +
     "university, language of the course and exam date. Refuses a second course with the same exam code. " +
     "Then add its materials with add_course_source and build it with prepare_course.",
-  kind: "admin",
+  kind: "write",
   input: z.object({
     name: z.string().min(2).max(80).describe("Course name, e.g. \"Linear algebra\"."),
     code: z.string().min(1).max(24).optional().describe("Exam / course code, e.g. \"MATH-111\"."),
