@@ -105,7 +105,9 @@ export async function addUrlSource(
     if (!(e instanceof PublicFetchError)) throw e;
     if (e.reason === "too_large") throw new SourceError(413, `Document trop volumineux (maximum ${SOURCE_MAX_BYTES / 1024 / 1024} Mo).`);
     if (e.reason === "redirect") {
-      throw new SourceError(400, `Cette adresse redirige${e.location ? ` vers ${e.location.slice(0, 300)}` : ""} : redonne directement l'adresse finale (https).`);
+      // L'hôte seulement : le reste de l'en-tête Location vient du serveur distant et irait tel quel au modèle.
+      const host = (() => { try { return e.location ? new URL(e.location, a.url).host : null; } catch { return null; } })();
+      throw new SourceError(400, `Cette adresse redirige${host ? ` vers ${host}` : ""} : redonne directement l'adresse finale (https).`);
     }
     if (e.reason === "blocked" || e.reason === "invalid_url") {
       throw new SourceError(400, "Adresse refusée : seules les adresses https publiques sont lues (pas de réseau interne ni d'adresse locale).");

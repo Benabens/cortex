@@ -45,6 +45,11 @@ export function quotaFor(bucket: QuotaBucket): number | null {
   return intLimit(name, QUOTA_DEFAULT[bucket]);
 }
 
+/** Limite du jour qui s'applique À CE COMPTE (affichage, devis) : null pour le propriétaire (lib/billing/owner). */
+export async function dailyLimit(bucket: QuotaBucket, userId = currentUser()): Promise<number | null> {
+  return (await isOwner(userId)) ? null : quotaFor(bucket);
+}
+
 /** Limite de DÉBIT par utilisateur et par minute — arrête une boucle scriptée
  *  bien avant le quota quotidien. Défaut 20/min : aucun humain ne déclenche 20
  *  générations en une minute ; le quota quotidien reste la borne de coût. */

@@ -1,6 +1,6 @@
 import * as z from "zod/v4";
 import { billingEnabled, creditCost, fromCenti, purchasedBalanceCenti, subscriptionCreditsCenti } from "@/lib/billing/credits";
-import { quotaFor, usedToday } from "@/lib/billing/guards";
+import { dailyLimit, usedToday } from "@/lib/billing/guards";
 import { isOwner } from "@/lib/billing/owner";
 import { defineTool } from "../tool";
 
@@ -44,8 +44,8 @@ export default defineTool({
       credits: on ? { balance: fromCenti(purchased + sub), purchased: fromCenti(purchased), subscription_this_month: fromCenti(sub) } : null,
       costs: { mock_exam: fromCenti(creditCost("exam")), drill: fromCenti(creditCost("assist")), check_answer: fromCenti(creditCost("assist")) },
       quotas: {
-        generations: { used: await usedToday("gen"), limit: owner ? null : quotaFor("gen") },
-        assistance: { used: await usedToday("assist"), limit: owner ? null : quotaFor("assist") },
+        generations: { used: await usedToday("gen"), limit: await dailyLimit("gen") },
+        assistance: { used: await usedToday("assist"), limit: await dailyLimit("assist") },
       },
       app_link: `${ctx.appOrigin}/compte`,
     };

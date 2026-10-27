@@ -5,7 +5,7 @@ import {
 } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { billingEnabled, creditsGate, fmtCredits, fromCenti, getBalanceCenti } from "@/lib/billing/credits";
-import { generationGate, quotaFor, usedToday } from "@/lib/billing/guards";
+import { dailyLimit, generationGate, usedToday } from "@/lib/billing/guards";
 import { isOwner } from "@/lib/billing/owner";
 import { llmUnavailableReason } from "@/lib/llm";
 import type { Principal } from "@/lib/oauth/server";
@@ -94,7 +94,7 @@ export async function confirmCost(
   }
 
   const used = await usedToday(cost.bucket);
-  const limit = owner ? null : quotaFor(cost.bucket);
+  const limit = await dailyLimit(cost.bucket);
   const balance = billing ? await getBalanceCenti() : null;
   const quotaText = limit === null ? "quota du jour non limité" : `${QUOTA_LABEL[bucketLabel(cost.bucket)]} aujourd'hui : ${used}/${limit}`;
   const message = `${cost.summary} Coût : ${costPhrase(costCenti, billing, owner)}` +

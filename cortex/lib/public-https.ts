@@ -13,7 +13,7 @@ import net from "node:net";
  *    (le `lookup` de la requête), donc pas de fenêtre de « DNS rebinding » ;
  *  - aucune redirection suivie (la cible d'une redirection n'est pas vérifiée) :
  *    elle est rapportée, à l'appelant de redemander l'adresse finale ;
- *  - taille et durée bornées.
+ *  - taille et durée TOTALE bornées.
  */
 
 /** Les 8 groupes de 16 bits d'une IPv6 (« :: » développé, IPv4 finale pointée convertie), ou null. */
@@ -64,6 +64,7 @@ export function isPublicAddress(ip: string): boolean {
     if (g[5] === 0 && g[6] === 0) return false; // :: et ::1 (et le reste de ::/112)
     return isPublicAddress(v4of(g[6], g[7])); // mappée ou compatible
   }
+  if (zeros(0, 4) && g[4] === 0xffff && g[5] === 0) return isPublicAddress(v4of(g[6], g[7])); // traduite ::ffff:0:0/96
   if (g[0] === 0x64 && g[1] === 0xff9b) return zeros(2, 6) && isPublicAddress(v4of(g[6], g[7])); // NAT64 (64:ff9b:1::/48 local : refusé)
   if (g[0] === 0x2002) return isPublicAddress(v4of(g[1], g[2])); // 6to4
   if ((g[0] & 0xfe00) === 0xfc00) return false; // ULA fc00::/7
@@ -136,6 +137,10 @@ export const readPublicHttps: PublicFetcher = (raw, opts) =>
       }));
       res.on("error", reject);
     });
+    // `timeout` ci-dessus n'est qu'un délai d'INACTIVITÉ : un serveur qui envoie un octet de temps en
+    // temps tiendrait la requête indéfiniment. Ce minuteur borne la durée TOTALE.
+    const deadline = setTimeout(() => req.destroy(new PublicFetchError("timeout", "délai dépassé")), opts.timeoutMs);
+    req.on("close", () => clearTimeout(deadline));
     req.on("timeout", () => req.destroy(new PublicFetchError("timeout", "délai dépassé")));
     req.on("error", (e) => reject(e instanceof PublicFetchError ? e : new PublicFetchError("network", e.message.slice(0, 120))));
   });
