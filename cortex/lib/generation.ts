@@ -1,3 +1,5 @@
+import { creditsGate } from "@/lib/billing/credits";
+import { generationGate } from "@/lib/billing/guards";
 import { ReservationRefused, activeJob, createJobExclusive, startWorker, type JobType } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
 
@@ -20,11 +22,34 @@ export type StartedJob = { ok: true; jobId: number; existing: boolean };
 export type StartRefused = { ok: false; status: number; error: string; command?: string };
 
 export async function startGenerationJob(type: JobType, target?: string): Promise<StartedJob | StartRefused> {
+  return startJob(type, target, async () => {
+    const issue = await preflightGeneration(type);
+    return issue && { ok: false, status: issue.status, error: issue.error, command: issue.command };
+  });
+}
+
+/**
+ * PRÉPARATION D'UN COURS (job « prepare » : ingestion du contenu et des annales →
+ * détection du format → plan), partagée par POST /api/prepare et l'outil MCP
+ * prepare_course. Même séquence qu'une génération, sans les pré-checks de corpus
+ * et de LaTeX (c'est elle qui construit le corpus) : quota du jour et solde, puis
+ * la réservation atomique.
+ */
+export async function startPrepareJob(): Promise<StartedJob | StartRefused> {
+  return startJob("prepare", undefined, async () => {
+    // La préparation fait de la vision LLM sur les annales (coûteux) → quota + crédits comme toute génération.
+    const gate = (await generationGate("gen")) ?? (await creditsGate("prepare"));
+    return gate && { ok: false, status: gate.status, error: gate.error };
+  });
+}
+
+/** Séquence commune : job actif réutilisé → pré-checks propres au type → réservation + insertion → worker. */
+async function startJob(type: JobType, target: string | undefined, precheck: () => Promise<StartRefused | null>): Promise<StartedJob | StartRefused> {
   const existing = await activeJob(type);
   if (existing) return { ok: true, jobId: existing.id, existing: true };
 
-  const issue = await preflightGeneration(type);
-  if (issue) return { ok: false, status: issue.status, error: issue.error, command: issue.command };
+  const refused = await precheck();
+  if (refused) return refused;
 
   let created: { id: number; existing: boolean };
   try {

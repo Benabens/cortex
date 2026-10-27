@@ -5,6 +5,13 @@ import { Button } from "@/components/ui/Button";
 
 type App = { id: string; name: string | null; host: string | null; scopes: string[]; connectedAt: string; lastUsedAt: string | null };
 
+/** Ce que l'application peut faire, en clair (portées cortex.read / .generate / .admin). */
+function accessLabel(scopes: string[]): string {
+  const extra = [scopes.includes("cortex.generate") && "génération", scopes.includes("cortex.admin") && "administration"].filter(Boolean);
+  if (!extra.length) return "Lecture seule";
+  return `Lecture${extra.length === 2 ? ", " : " et "}${extra.join(" et ")}`;
+}
+
 const fmt = (s: string | null) => {
   if (!s) return "jamais";
   const d = new Date(s.replace(" ", "T") + "Z");
@@ -64,7 +71,7 @@ export function ConnectedApps() {
                   {a.host && a.name && <span className="ml-2 text-[0.8rem] font-normal text-ink-3">{a.host}</span>}
                 </div>
                 <div className="mt-0.5 text-[0.8rem] text-ink-3">
-                  {a.scopes.includes("cortex.generate") ? "Lecture et génération" : "Lecture seule"} · connectée le {fmt(a.connectedAt)} · utilisée {a.lastUsedAt ? `le ${fmt(a.lastUsedAt)}` : "jamais"}
+                  {accessLabel(a.scopes)} · connectée le {fmt(a.connectedAt)} · utilisée {a.lastUsedAt ? `le ${fmt(a.lastUsedAt)}` : "jamais"}
                 </div>
               </div>
               <Button size="sm" variant="subtle" loading={busy === a.id} onClick={() => void revoke(a)} aria-label={`Révoquer ${a.name ?? a.host ?? "l'application"}`}>

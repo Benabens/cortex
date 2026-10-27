@@ -349,6 +349,8 @@ async function assertSpendCapUnchecked(): Promise<void> {
     }
   }
 
+  // Vaut aussi pour le propriétaire (lib/billing/owner) : une boucle sur son compte
+  // épuiserait sinon le plafond global, donc la génération de tous les comptes.
   const perUserCap = spendCapPerUserUsd();
   if (perUserCap !== null) {
     const spentUser = await spentTodayByUser();

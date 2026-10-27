@@ -8,6 +8,7 @@ import { log } from "@/lib/metrics";
 import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, insufficient, subscriptionLive, type SubRow, DELTA_CENTI } from "./credits";
 import { intLimit } from "./env";
 import { quotaFor, quotaTrackingActive, ratePerUserPerMin, type GateIssue, type QuotaBucket } from "./guards";
+import { isOwner } from "./owner";
 
 /**
  * RÉSERVATION — la décision UNIQUE et ATOMIQUE qui autorise une dépense LLM.
@@ -72,10 +73,11 @@ export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
   // Indépendant de la facturation : posé explicitement, ou défaut d'un déploiement gardé.
   const slotCap = o.jobSlot ? maxActiveJobs() : null;
 
-  // Rien à décider ni à écrire : dev €0 nu.
+  // Rien à décider ni à écrire : dev €0 nu, ou compte du propriétaire (lib/billing/owner).
   if (!billing && rateCap === null && dayCap === null && slotCap === null && !tracking) {
     return { ok: true, ref: o.ref, costCenti: 0 };
   }
+  if (await isOwner(userId)) return { ok: true, ref: o.ref, costCenti: 0 };
   if (billing) {
     await ensureLedgerUnit();
     await ensureSignupCredits(userId);

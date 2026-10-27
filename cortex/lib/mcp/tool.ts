@@ -13,8 +13,11 @@ import type { Principal } from "@/lib/oauth/server";
 /** Ère du protocole d'une requête : 2025 (« initialize ») ou 2026-07-28 (enveloppe par requête). */
 export type Era = "legacy" | "modern";
 
-/** Lecture (portée cortex.read, gratuite) ou génération (portée cortex.generate, coût confirmé). */
-export type ToolKind = "read" | "generate";
+/**
+ * Lecture (portée cortex.read, gratuite), génération (portée cortex.generate, coût
+ * confirmé) ou administration des cours (portée cortex.admin, propriétaire seulement).
+ */
+export type ToolKind = "read" | "generate" | "admin";
 
 /** Codes d'erreur d'outil, lisibles par le modèle dans `_meta["com.cortexexam/error"]`. */
 export type ToolErrorCode =
@@ -26,6 +29,7 @@ export type ToolErrorCode =
   | "confirmation_invalid"
   | "unavailable"
   | "too_large"
+  | "forbidden"
   | "internal";
 
 /**
@@ -46,7 +50,7 @@ export function codeForStatus(status: number): ToolErrorCode {
   if (status === 429) return "quota_exceeded";
   if (status === 404) return "not_found";
   if (status === 409) return "conflict";
-  if (status === 400 || status === 413) return "invalid_input";
+  if (status === 400 || status === 413 || status === 415) return "invalid_input";
   if (status === 412 || status === 503 || status === 507) return "unavailable";
   return "internal";
 }
@@ -118,6 +122,8 @@ export type ToolDef<I extends z.ZodObject = z.ZodObject, O extends z.ZodObject =
   /** Écrite pour qu'un modèle choisisse le bon outil (anglais). */
   description: string;
   kind: ToolKind;
+  /** Va chercher des données hors de Cortex (annotation openWorldHint) — ex. une URL fournie. */
+  openWorld?: boolean;
   input: I;
   output: O;
   /**

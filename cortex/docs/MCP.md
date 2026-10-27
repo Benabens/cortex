@@ -81,9 +81,10 @@ Tous les outils prennent un `course` facultatif : identifiant, code (« CS-233 �
 absent, le seul cours du compte est pris, sinon l'outil liste les cours et demande lequel.
 
 Annotations : lecture = `readOnlyHint: true, destructiveHint: false, idempotentHint: true,
-openWorldHint: false` ; génération = `readOnlyHint: false, destructiveHint: false,
-idempotentHint: false, openWorldHint: false`. Aucun outil n'écrit, ne supprime un cours, ni ne
-touche au paiement.
+openWorldHint: false` ; génération et administration = `readOnlyHint: false, destructiveHint: false,
+idempotentHint: false`, `openWorldHint: true` pour le seul `add_course_source` (il lit une URL fournie),
+`false` ailleurs. Seuls les outils d'administration du propriétaire écrivent (créer un cours, y ranger un
+fichier, lancer sa préparation) ; aucun outil ne supprime un cours ni ne touche au paiement.
 
 ### Lecture (portée `cortex.read`, gratuites)
 
@@ -109,6 +110,30 @@ Les coûts viennent des mêmes fonctions que l'app (`creditCost`, `costForJob`, 
 changer un tarif change le devis MCP. Un examen déjà en cours est réutilisé sans devis ni débit, comme
 dans l'app. Les pré-checks propres à l'examen (corpus ingéré, moteur LaTeX, place disque) s'exécutent à la
 confirmation, dans `startGenerationJob` : un refus à ce stade ne débite rien.
+
+**Compte du propriétaire** (`CORTEX_OWNER_EMAIL`, ou `CORTEX_OWNER_USER_ID`) : rien n'est débité ni compté
+contre lui, dans l'app comme ici (`lib/billing/owner.ts`, un seul point de décision consulté par la
+réservation et les pré-contrôles ; `dailyLimit` pour l'affichage). Son devis annonce donc 0 crédit et
+aucun quota, et la confirmation reste demandée. Restent actifs pour lui : les plafonds de **dépense**
+réelle (`SPEND_CAP_USD` du mois, `SPEND_CAP_PER_USER_USD` du jour — sans ce dernier, une boucle d'agent
+ou un jeton volé sur son compte épuiserait le plafond global et couperait la génération de tous), la
+limite par compte du point MCP, l'enregistrement des coûts dans `llm_usage` et le quota de stockage.
+Sans variable de propriétaire, personne n'est exempté.
+
+### Administration (portée `cortex.admin`, propriétaire seulement)
+
+Proposée à l'écran de consentement **au seul compte du propriétaire** ; un autre compte ne la voit pas et
+ne peut l'obtenir ni par un formulaire forgé, ni par un refresh (`scopesOfferedTo`, appliqué au
+consentement puis à la décision). Les outils n'existent que pour un jeton qui la porte (absents de
+`tools/list` sinon, comme la ligne qui les présente dans les `instructions` du serveur), et chaque appel
+revérifie que le compte est **encore** le propriétaire (`forbidden` sinon). Pas de confirmation de coût :
+rien n'est facturé au propriétaire (les plafonds de dépense le bornent). Pas d'outil de suppression.
+
+| Outil | Entrée | Effet |
+|---|---|---|
+| `create_course` | `name` (2-80), `code?` (≤ 24), `university?`, `language?` (fr, en, de, it, es, pt, nl), `exam_date?` (AAAA-MM-JJ) | crée le cours comme « Nouveau cours » (`buildCourseRow`) ; refuse un second cours au même code (`conflict`) |
+| `add_course_source` | `course?`, `url?` **ou** `text?` (≤ 200 000 car.), `title?`, `category?` (`past_exam`, `lecture`, `exercises`, `notes` ; défaut : deviné du nom comme l'import) | range le fichier dans le cours (`lib/course-source.ts`) sans l'ingérer ; URL : https publique seulement, lue par `lib/public-https` (IP littérales et résolues vérifiées, y compris une IPv4 portée par une IPv6 ; aucune redirection suivie, seul l'hôte de destination est rapporté ; 30 s au total, 30 Mo), PDF (signature `%PDF-` exigée), HTML ou texte ; quota de stockage, chemin confiné, jamais d'écrasement (`-2`, `-3`…) |
+| `prepare_course` | `course?` | lance le job `prepare` (ingestion → format → plan), le même que le bouton de l'app (`startPrepareJob`) ; un job déjà en cours est réutilisé ; suivi avec `get_job_status` |
 
 ### Confirmation d'un coût
 
@@ -145,7 +170,7 @@ Client MCP                         Cortex (AS + ressource)                    Pe
 ──────────                         ───────────────────────                    ────────
 POST /mcp (sans jeton) ──────────► 401  WWW-Authenticate: Bearer
                                    resource_metadata=".../.well-known/oauth-protected-resource/mcp",
-                                   scope="cortex.read cortex.generate"
+                                   scope="cortex.read cortex.generate cortex.admin"
 GET /.well-known/oauth-protected-resource/mcp ─► { resource: ".../mcp", authorization_servers: [issuer] }
 GET /.well-known/oauth-authorization-server ───► endpoints, S256, CIMD supporté, iss RFC 9207
 (CIMD : client_id = URL https de ses métadonnées — sinon POST /oauth/register, DCR)
@@ -185,11 +210,17 @@ Règles :
   vérifié pour un client CIMD (hôte du `client_id`) ou l'hôte de l'URL de retour pour un client DCR
   (nom déclaré, non vérifié). Case « Générer (coûte des crédits) » décochable : le jeton ne porte alors
   que `cortex.read`, et un outil de génération répond `403 insufficient_scope` (le client relance une
-  connexion pour la portée manquante).
+  connexion pour la portée manquante). Case « Administrer », **décochée** par défaut (accorder
+  l'écriture doit être un geste), affichée au **seul** propriétaire quand le client demande
+  `cortex.admin` (ou aucune portée) ; non cochée, le jeton ne la porte pas.
 - **Autorisations** : une par (compte, client), listées dans *Mon compte → Applications connectées* ;
   « Révoquer » coupe immédiatement tous ses jetons.
-- **CIMD** : document lu en HTTPS uniquement, résolution DNS vérifiée au moment de la connexion
-  (IP privées, bouclage, lien local, CGNAT, ULA refusées), aucune redirection suivie, 5 s, 5 Ko, cache
+- **CIMD** : document lu en HTTPS uniquement par la lecture durcie commune (`lib/public-https.ts`) :
+  IP littérale vérifiée avant connexion (Node ne passe pas par le `lookup` pour une IP : avant le
+  27/10/2026, `https://127.0.0.1/…` échappait au contrôle ; une IPv4 portée par une IPv6 — mappée,
+  compatible, traduite, NAT64, 6to4 — est jugée sur l'IPv4), résolution DNS vérifiée au moment de la
+  connexion (IP privées, bouclage, lien local, CGNAT, ULA refusées), aucune redirection suivie, 5 s au
+  total (et non plus seulement d'inactivité), 5 Ko, cache
   5 min-24 h ; le document doit se désigner lui-même (`client_id` = son URL), déclarer `client_name` et
   des `redirect_uris` valides, et être un client public (`none`).
 - **DCR** : ouvert (spec), toujours en client public. Un client jamais autorisé au bout de 7 jours est
@@ -204,9 +235,11 @@ Règles :
 | Phishing de consentement (client DCR qui se fait appeler « Claude ») | Domaine affiché (vérifié pour CIMD, URL de retour pour DCR), mention « nom déclaré par l'application » ; URL de retour exacte ; consentement à chaque connexion. |
 | CSRF sur la décision | Cookie de session SameSite=Lax, `Origin` = l'app, ticket opaque lié au compte, usage unique. |
 | Code d'autorisation intercepté | PKCE S256 obligatoire ; code 60 s, usage unique, lié au client et à l'URL de retour. |
-| SSRF via un `client_id` CIMD | HTTPS seulement, IP vérifiées à la connexion (pas de fenêtre de rebinding), pas de redirection, taille et délai bornés. |
+| SSRF via un `client_id` CIMD ou `add_course_source` | Une seule porte, `lib/public-https.ts` : HTTPS seulement, sans identifiants dans l'URL, IP littérale vérifiée avant connexion, IP résolues vérifiées à la connexion (pas de fenêtre de rebinding), pas de redirection, taille et délai bornés. Testé : `tests/mcp-admin.test.ts`. |
+| Jeton du propriétaire détourné (contenu piégé, jeton volé) | `add_course_source` est un GET sortant vers une URL choisie par le modèle : un contenu piégé pourrait lui faire porter des données dans l'adresse (exfiltration). Bornes : outil réservé au propriétaire, portée décochée par défaut, appels visibles dans le client, révocation dans Mon compte. `prepare_course` dépense des appels LLM sans confirmation : bornée par les plafonds de dépense par compte et global, qui restent actifs pour le propriétaire. |
+| Portée `cortex.admin` obtenue par un autre compte | Proposée et accordée au seul propriétaire (consentement puis décision, refresh borné par l'autorisation) ; outils absents de `tools/list` sans elle ; propriétaire revérifié à chaque appel. Testé : `tests/mcp-admin.test.ts`. |
 | Dépense non voulue (crédits) | Portée `cortex.generate` séparée et décochable ; coût exact annoncé ; confirmation par élicitation (humain) ou devis à jeton unique lié aux arguments ; puis réservation atomique de l'app (solde, quota, rafale, places, plafond mensuel global). |
-| Injection de prompt par le contenu des cours | Sorties encadrées comme **données** (`<cortex_data>…</cortex_data>`, `<` échappé en `<` dans le JSON pour qu'aucun contenu ne ferme le bloc) ; consigne serveur (`instructions`) ; aucun outil d'écriture, de suppression ou de paiement, donc un contenu piégé ne peut au pire que faire **demander** une génération, qui reste soumise à confirmation. |
+| Injection de prompt par le contenu des cours | Sorties encadrées comme **données** (`<cortex_data>…</cortex_data>`, `<` échappé en `<` dans le JSON pour qu'aucun contenu ne ferme le bloc) ; consigne serveur (`instructions`) ; aucun outil de suppression ni de paiement ; les outils d'écriture n'existent que pour le propriétaire, et n'ajoutent que du contenu à ses propres cours. Pour tout autre compte, un contenu piégé ne peut au pire que faire **demander** une génération, qui reste soumise à confirmation. |
 | Flood / boucle d'agent | Limite par IP du proxy, `/mcp` compris (un jeton, même inventé, n'ouvre pas de compteur à part : sinon la limite se contournait) ; limite par compte au point MCP, après vérification du jeton ; quotas et rafale de la réservation ; corps ≤ 256 Kio. Derrière claude.ai, tous les comptes partagent les adresses de sortie d'Anthropic : à surveiller si l'usage grandit (DEPLOY.md § 14). |
 | Sorties géantes | Listes bornées par outil, textes tronqués, plafond global ~40 000 caractères par résultat (sous les limites de claude.ai et de Claude Code). |
 | Fuite par les journaux | Journal : outil, empreinte tronquée du compte, durée, code d'erreur. Jamais d'argument, de contenu de cours, de jeton ni d'e-mail. Les erreurs inattendues donnent un message générique au client. |
@@ -227,6 +260,13 @@ comptes, quota, devis/confirmation, jeton révoqué.
   lecture au nom du compte, cours d'un autre compte introuvable, devis puis confirmation (et jeton
   rejoué, autre argument, autre compte), quota du jour dépassé, solde insuffisant, élicitation (ère
   2026-07-28), portée manquante → 403, jeton révoqué → 401.
+- `tests/mcp-admin.test.ts` — portée `cortex.admin` annoncée (métadonnées, défi 401), proposée et
+  accordée au seul propriétaire (formulaire forgé, refresh élargi refusés), outils absents sans elle,
+  `create_course`, `add_course_source` (texte, SSRF par URL, types, redirection), `prepare_course`,
+  devis du propriétaire à 0 crédit, propriétaire changé → `forbidden`.
+- `tests/owner-mode.test.ts` — mode propriétaire côté facturation : réservation et pré-contrôles levés
+  pour lui seul ; plafonds de dépense (par compte, global) maintenus ; limites affichées dans Mon compte ;
+  autres comptes inchangés ; opt-in.
 - Vérification réelle : inspecteur MCP (`npx @modelcontextprotocol/inspector`) contre le serveur local
   et `claude mcp add --transport http` dans un Claude Code de test (compte rendu dans la PR).
 
@@ -236,3 +276,9 @@ Voir DEPLOY.md, section « Connecteur MCP ». En bref : `MCP_ENABLED=1` sur Rail
 déjà posée), redéployer, puis dans claude.ai → Paramètres → Connecteurs → Ajouter un connecteur
 personnalisé → `https://app.cortexexam.com/mcp`. Rien à changer côté Google : la connexion réutilise
 le login existant de l'app.
+
+**Outils d'administration (propriétaire)** : `CORTEX_OWNER_EMAIL` posée sur Railway (adresse du compte
+Google de Ben). Un connecteur déjà branché avant l'ajout de `cortex.admin` garde son ancien jeton (lecture
++ génération) : dans claude.ai → Paramètres → Connecteurs → Cortex → **Déconnecter**, puis **Connecter** ;
+sur l'écran de consentement, **cocher** « Administrer » (décochée par défaut). Les nouveaux outils apparaissent ensuite
+dans la conversation (en ouvrir une nouvelle si claude.ai a mis la liste en cache).

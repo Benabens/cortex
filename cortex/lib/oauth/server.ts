@@ -1,8 +1,9 @@
 import { authAll, authGet, authRun, authTx } from "@/db/auth-store";
 import { nowStr } from "@/db/q";
+import { isOwner } from "@/lib/billing/owner";
 import { findClient, redirectUriMatches, type MetadataFetcher, type OAuthClient } from "./clients";
 import {
-  ACCESS_TOKEN_TTL_S, AUTH_CODE_TTL_S, CONSENT_TTL_S, REFRESH_TOKEN_TTL_S, SCOPE_GENERATE, SCOPE_READ, SUPPORTED_SCOPES,
+  ACCESS_TOKEN_TTL_S, AUTH_CODE_TTL_S, CONSENT_TTL_S, REFRESH_TOKEN_TTL_S, SCOPE_ADMIN, SCOPE_GENERATE, SCOPE_READ, SUPPORTED_SCOPES,
   canonicalResource,
 } from "./config";
 import { digest, newId, newSecret, pkceChallenge, safeEqual } from "./secrets";
@@ -58,6 +59,16 @@ export function grantableScopes(raw: string | null): string[] {
   const asked = (raw ?? "").split(/\s+/).filter((s) => (SUPPORTED_SCOPES as readonly string[]).includes(s));
   if (!asked.length) return [...SUPPORTED_SCOPES];
   return SUPPORTED_SCOPES.filter((s) => s === SCOPE_READ || asked.includes(s));
+}
+
+/**
+ * Portées proposées à CE compte : cortex.admin n'existe que pour le propriétaire
+ * de l'instance (lib/billing/owner). Appliqué à l'écran de consentement, et de
+ * nouveau à la décision : un formulaire forgé n'obtient pas plus.
+ */
+export async function scopesOfferedTo(userId: string, scopes: string[]): Promise<string[]> {
+  if (!scopes.includes(SCOPE_ADMIN) || (await isOwner(userId))) return scopes;
+  return scopes.filter((s) => s !== SCOPE_ADMIN);
 }
 
 /** Intersection de deux listes de portées séparées par des espaces, dans l'ordre de la première. */
@@ -132,10 +143,11 @@ type RequestRow = { user_id: string; client_id: string; redirect_uri: string; co
  * Décision de la personne sur un ticket. Accepter crée (ou met à jour)
  * l'autorisation et émet un code à usage unique (60 s) ; refuser renvoie
  * access_denied. Renvoie l'URL vers laquelle rediriger le navigateur.
- * `withGenerate` = la case « générer » est restée cochée (sinon lecture seule).
+ * `withGenerate` = la case « générer » est restée cochée (sinon lecture seule) ;
+ * `withAdmin` = la case « administrer », présente pour le seul propriétaire.
  */
 export async function decideConsent(
-  userId: string, ticket: string, approve: boolean, issuer: string, withGenerate: boolean,
+  userId: string, ticket: string, approve: boolean, issuer: string, withGenerate: boolean, withAdmin = false,
 ): Promise<string> {
   const now = nowStr();
   const row = await authTx((tx) => tx.get<RequestRow>(
@@ -148,7 +160,8 @@ export async function decideConsent(
 
   const client = await findClient(row.client_id);
   if (!client) throw new OAuthError("invalid_client", "Application inconnue.");
-  const scopes = row.scope.split(" ").filter((s) => withGenerate || s !== SCOPE_GENERATE);
+  const chosen = row.scope.split(" ").filter((s) => (withGenerate || s !== SCOPE_GENERATE) && (withAdmin || s !== SCOPE_ADMIN));
+  const scopes = await scopesOfferedTo(userId, chosen);
   if (!scopes.length) scopes.push(SCOPE_READ);
   const grantId = await upsertGrant(userId, client, row.redirect_uri, scopes.join(" "), row.resource);
   const code = newSecret("code");
