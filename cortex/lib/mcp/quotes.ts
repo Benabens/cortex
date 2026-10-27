@@ -85,3 +85,16 @@ export async function hasUnansweredQuote(b: QuoteBinding, olderThanS: number): P
   );
   return Number(row?.n ?? 0) > 0;
 }
+
+/**
+ * Brûle TOUS les devis encore ouverts pour exactement cette action : un refus dans le
+ * dialogue est définitif. Sans cela, une demande plus ancienne restée sans réponse
+ * déclenchait, au rappel suivant, le repli sur un devis à jeton malgré le refus.
+ */
+export async function burnOpenQuotes(b: QuoteBinding): Promise<void> {
+  const now = nowStr();
+  await authRun(
+    `UPDATE mcp_quotes SET used_at = ? WHERE user_id = ? AND grant_id = ? AND tool = ? AND args_hash = ? AND used_at IS NULL`,
+    now, b.userId, b.grantId, b.tool, argsHash(b.args),
+  );
+}

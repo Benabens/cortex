@@ -10,7 +10,7 @@ import { isOwner } from "@/lib/billing/owner";
 import { llmUnavailableReason } from "@/lib/llm";
 import { log } from "@/lib/metrics";
 import type { Principal } from "@/lib/oauth/server";
-import { QUOTE_TTL_S, argsHash, hasUnansweredQuote, issueQuote, quoteRef, redeemQuote, redeemQuoteRef } from "./quotes";
+import { QUOTE_TTL_S, argsHash, burnOpenQuotes, hasUnansweredQuote, issueQuote, quoteRef, redeemQuote, redeemQuoteRef } from "./quotes";
 import { QUOTA_LABEL, ToolError, codeForStatus, type Confirmation, type Cost, type Era } from "./tool";
 
 /**
@@ -18,7 +18,7 @@ import { QUOTA_LABEL, ToolError, codeForStatus, type Confirmation, type Cost, ty
  *
  *  1. pré-vérification lecture seule avec les gardes de l'app (rafale + quota
  *     du jour, solde, moteur) : on ne fait pas confirmer ce qui sera refusé ;
- *  2. coût nul (le propriétaire, ou facturation désactivée) → rien à confirmer ;
+ *  2. compte du propriétaire (rien ne lui est facturé) → rien à confirmer ;
  *  3. jeton de devis présenté → consommé s'il correspond exactement ;
  *  4. client qui AFFICHE l'élicitation (MCP_ELICITATION_CLIENTS, défaut Claude
  *     Code) en ère 2026-07-28 → `input_required` : la personne confirme dans son
@@ -99,14 +99,20 @@ async function precheck(cost: Cost): Promise<void> {
   if (engine) throw new ToolError("unavailable", engine);
 }
 
+/** Nom du client tel qu'il se présente (ère 2026-07-28 : enveloppe de la requête), ou null. */
+export function clientNameOf(envelope: unknown): string | null {
+  const name = (envelope as Record<string, { name?: unknown } | undefined> | undefined)?.[CLIENT_INFO_META_KEY]?.name;
+  return typeof name === "string" && name.trim() ? name.trim().slice(0, 40) : null;
+}
+
 /**
  * Clients qui affichent vraiment l'élicitation : noms clientInfo séparés par des
  * virgules dans MCP_ELICITATION_CLIENTS (défaut « claude-code » ; vide = personne).
  */
-function showsElicitation(clientName: unknown): boolean {
-  if (typeof clientName !== "string" || !clientName.trim()) return false;
+function showsElicitation(clientName: string | null): boolean {
+  if (!clientName) return false;
   const allowed = (process.env.MCP_ELICITATION_CLIENTS ?? "claude-code").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
-  return allowed.includes(clientName.trim().toLowerCase());
+  return allowed.includes(clientName.toLowerCase());
 }
 
 /** Au-delà, une demande restée sans réponse cède la place au devis à jeton. */
@@ -129,8 +135,9 @@ export async function confirmCost(
   // Compte du propriétaire : rien n'est débité ni compté (lib/billing/owner) — le devis le dit.
   const owner = await isOwner(p.principal.userId);
   const costCenti = billing && !owner ? cost.costCenti : 0;
-  // Rien à payer : rien à confirmer, l'action part directement.
-  if (costCenti === 0) return { kind: "confirmed" };
+  // Compte du propriétaire : rien ne lui est facturé, rien à confirmer — l'action part directement
+  // (décision de Ben). Facturation désactivée ne suffit pas : l'action consomme quand même du quota.
+  if (owner) return { kind: "confirmed" };
   const binding = { userId: p.principal.userId, grantId: p.principal.grantId, tool: p.tool, args, costCenti };
 
   if (token) {
@@ -151,7 +158,7 @@ export async function confirmCost(
   // Capacités déclarées PAR REQUÊTE (ère 2026-07-28). Le type d'enveloppe du SDK est vide : lecture explicite.
   const envelope = p.mcpReq.envelope as Record<string, unknown> | undefined;
   const clientCaps = envelope?.[CLIENT_CAPABILITIES_META_KEY] as { elicitation?: unknown } | undefined;
-  const clientName = (envelope?.[CLIENT_INFO_META_KEY] as { name?: unknown } | undefined)?.name;
+  const clientName = clientNameOf(envelope);
   const answer = inputResponse(p.mcpReq.inputResponses, "confirm");
   const elicit = p.era === "modern" && !!clientCaps?.elicitation && showsElicitation(clientName)
     && (answer.kind !== "missing" || !(await hasUnansweredQuote(binding, ELICITATION_FALLBACK_S)));
@@ -166,8 +173,8 @@ export async function confirmCost(
     const h = argsHash(args);
     const bound = state && state.u === binding.userId && state.g === binding.grantId && state.t === p.tool && state.h === h && state.c === costCenti;
     if (answer.kind === "elicit" && answer.action !== "accept") {
-      // Un refus BRÛLE le devis de la question : il ne peut plus servir, par aucun chemin.
-      if (bound) await redeemQuoteRef(state.n, binding);
+      // Un refus BRÛLE tous les devis ouverts de cette action : ils ne peuvent plus servir, par aucun chemin.
+      if (bound) await burnOpenQuotes(binding);
       return declined(answer.action === "cancel" ? "cancel" : "decline");
     }
     const accepted = acceptedContent(p.mcpReq.inputResponses, "confirm", confirmSchema);
@@ -176,7 +183,7 @@ export async function confirmCost(
       throw new ToolError("confirmation_invalid", "Cette confirmation a déjà servi ou a expiré : rien n'a été débité. Relance la demande pour une nouvelle confirmation.");
     }
     if (accepted && accepted.confirm !== true) {
-      if (bound) await redeemQuoteRef(state.n, binding);
+      if (bound) await burnOpenQuotes(binding);
       return declined("decline");
     }
     return {

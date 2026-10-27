@@ -1,11 +1,11 @@
 import * as z from "zod/v4";
 import { getPlanChapters, type PlanChapter } from "@/lib/course-plan";
 import { FIELD_LIMITS } from "@/lib/field-limits";
-import { q } from "@/db/q";
-import { examTarget, startGenerationJob } from "@/lib/generation";
+import { MCQ_DEFAULT, MCQ_MAX, WRITTEN_DEFAULT, WRITTEN_MAX, planMockExam, startGenerationJob } from "@/lib/generation";
 import { activeJob, costForJob } from "@/lib/jobs";
 import { log } from "@/lib/metrics";
 import { redactMessage } from "@/lib/observability";
+import { pastExamCount } from "@/lib/sources";
 import { clip } from "../content";
 import { courseLabel } from "../courses";
 import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, generationStatus, quoteSchema, quoteSummary } from "../schemas";
@@ -26,62 +26,6 @@ const output = z.object({
     track_with: z.string(),
   }).nullable(),
 });
-
-/** Sans annales : composition par défaut (exercices écrits, ou QCM). */
-const WRITTEN_DEFAULT = 6;
-const MCQ_DEFAULT = 20;
-const WRITTEN_MAX = 12;
-const MCQ_MAX = 40;
-/** Un focus qui demande des QCM (« ~20 QCM », « multiple choice »…). */
-const MCQ_WORDS = /\b(qcm|mcq|multiple[- ]choice|choix multiples?)\b/i;
-
-export type MockExamPlan = {
-  format: "written" | "mcq";
-  /** Type de job : « exam » (générateur d'examen écrit) ou « qcm » (générateur QCM). */
-  jobType: "exam" | "qcm";
-  /** Exercices (écrit) ou questions (QCM) ; null = comme les annales. */
-  count: number | null;
-  /** Cible du job telle que le worker la lit (absente = défauts du moteur). */
-  target?: string;
-  /** Ce qui a été décidé faute d'annales, à dire à la personne ; null avec des annales. */
-  note: string | null;
-};
-
-/**
- * COMPOSITION D'UN EXAMEN BLANC. Avec des annales, leur format fait la règle (le focus
- * n'est qu'un accent) — sauf format demandé explicitement. SANS annales, rien ne dit à
- * quoi ressemble l'examen : on suit la demande — QCM si `format` ou le focus le disent,
- * nombre `count` — avec un défaut raisonnable, et on le dit (27/10/2026 : « ~20 QCM »
- * sur HUM-285 donnait UN exercice, le blueprint d'un cours sans annales n'ayant qu'un créneau).
- */
-export function planMockExam(a: { format?: "written" | "mcq"; count?: number; focus: string | null; hasPastExams: boolean }): MockExamPlan | { error: string } {
-  const focus = a.focus?.trim() || null;
-  const format = a.format ?? (!a.hasPastExams && focus && MCQ_WORDS.test(focus) ? "mcq" : "written");
-  const defaulted = a.count === undefined;
-  if (format === "mcq") {
-    const count = Math.min(MCQ_MAX, a.count ?? MCQ_DEFAULT);
-    const target = JSON.stringify(a.hasPastExams ? { count, focus: focus ?? undefined } : { count, openCount: 0, focus: focus ?? undefined });
-    const note = a.hasPastExams ? null
-      : `Ce cours n'a pas d'annales : examen composé selon la demande, ${count} QCM${defaulted ? " (nombre par défaut)" : ""}.`;
-    return { format, jobType: "qcm", count, target, note };
-  }
-  if (a.count !== undefined && a.count > WRITTEN_MAX) {
-    return { error: `Un examen écrit compte au plus ${WRITTEN_MAX} exercices : réduis exercise_count, ou demande des QCM (format "mcq", jusqu'à ${MCQ_MAX}).` };
-  }
-  const count = a.count ?? (a.hasPastExams ? null : WRITTEN_DEFAULT);
-  const note = a.hasPastExams ? null
-    : `Ce cours n'a pas d'annales : ${count} exercices écrits${defaulted ? " (nombre par défaut)" : ""}, format générique faute d'examens réels.`;
-  return { format, jobType: "exam", count, target: examTarget(count ?? undefined, focus ?? undefined), note };
-}
-
-/** Le cours a-t-il des annales (finals, partiels) ingérées ? Table absente (cours neuf) = non. */
-async function pastExamCount(): Promise<number> {
-  try {
-    return Number((await q.get<{ n: number }>(`SELECT count(*) n FROM sources WHERE type IN ('final','midterm')`))?.n ?? 0);
-  } catch {
-    return 0;
-  }
-}
 
 /** Chapitre du plan désigné par son numéro (ordre ou n° de cours) ou par son titre. */
 function findChapter(chapters: PlanChapter[], ref: string): PlanChapter | undefined {
@@ -128,7 +72,8 @@ export default defineTool({
       if (focus && focus.length > FIELD_LIMITS.focus) {
         throw new ToolError("invalid_input", `Le sujet demandé dépasse ${FIELD_LIMITS.focus} caractères : raccourcis « focus ».`);
       }
-      const plan = planMockExam({ format: args.format, count: args.exercise_count, focus, hasPastExams: (await pastExamCount()) > 0 });
+      // La demande libre décide du format ; un titre de chapitre (« QCM et statistiques ») ne le fait pas.
+      const plan = planMockExam({ format: args.format, count: args.exercise_count, request: args.focus ?? null, focus, hasPastExams: (await pastExamCount()) > 0 });
       if ("error" in plan) throw new ToolError("invalid_input", plan.error);
       const base = { course: courseRefOf(c), focus, format: plan.format, exercise_count: plan.count, note: plan.note, confirmation: null, declined: null, job: null };
       const track = (jobId: number) => ({ job_id: jobId, estimated_minutes: "10-20", track_with: `get_job_status with job_id=${jobId}` });
@@ -146,7 +91,8 @@ export default defineTool({
           costCenti: costForJob(plan.jobType, plan.target),
           summary: `Générer ${what}${focus ? " avec l'accent demandé" : ""} — ${courseLabel(c)} (10-20 min).`,
         },
-        { course: c.id, focus, format: plan.format, count: plan.count },
+        // Le jeton est lié à la composition EXACTE du job : si elle change (annales ajoutées entre-temps), il faut un nouveau devis.
+        { course: c.id, focus, format: plan.format, count: plan.count, target: plan.target ?? null },
         args.confirmation_token,
       );
       const pending = pendingResult(decision, base);

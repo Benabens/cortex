@@ -102,7 +102,7 @@ préparation) ; aucun outil ne supprime un cours ou un document, ni ne touche au
 
 | Outil | Entrée | Coût | Sortie |
 |---|---|---|---|
-| `generate_mock_exam` | `course?`, `chapter?` (numéro ou titre du plan), `focus?` (≤ 400), `format?` (`written` / `mcq`), `exercise_count?` (écrit 1-12, QCM 1-40), `confirmation_token?` | `exam` = 2 crédits, +1 par tranche de 4 exercices au-delà de 8 ; QCM au tarif de `qcm` (`costForJob`) ; 1 génération du quota du jour (`DAILY_GEN_QUOTA`) | `job_id` → suivre avec `get_job_status` (10-20 min). Avec des annales, leur format fait la règle. **Sans annales** : la demande est suivie (QCM si `format` ou le focus le disent ; défauts 6 exercices ou 20 QCM), et `note` le dit (`planMockExam`) |
+| `generate_mock_exam` | `course?`, `chapter?` (numéro ou titre du plan), `focus?` (≤ 400), `format?` (`written` / `mcq`), `exercise_count?` (écrit 1-12, QCM 1-40), `confirmation_token?` | `exam` = 2 crédits, +1 par tranche de 4 exercices au-delà de 8 ; QCM au tarif de `qcm` (`costForJob`) ; 1 génération du quota du jour (`DAILY_GEN_QUOTA`) | `job_id` → suivre avec `get_job_status` (10-20 min ; un QCM terminé y rend ses questions et options). Avec des annales, leur format fait la règle (une demande de QCM n'est pas appliquée, `note` le dit). **Sans annales** : la demande est suivie, avec QCM si `format` vaut `mcq` ou si la demande libre en réclame (négations et titres de chapitre ignorés, nombre lu dans le texte) ; défauts 6 exercices ou 20 QCM ; `note` le dit (`lib/generation.ts` `planMockExam`) |
 | `generate_drill` | `course?`, `concept?` (≤ 500 ; défaut : le point faible le plus grave), `confirmation_token?` | `assist` = 0,1 crédit ; 1 assistance du quota du jour (`DAILY_ASSIST_QUOTA`) | une question type examen, 5 indices progressifs, corrigé |
 | `check_answer` | `course?`, `statement` (≤ 8000), `answer` (≤ 8000), `confirmation_token?` | `assist` = 0,1 crédit ; 1 assistance du quota du jour | verdict, barème critère par critère, score, retour, solution |
 
@@ -144,8 +144,9 @@ devis, les gardes lecture seule de l'app (`generationGate` : rafale + quota du j
 solde ; moteur disponible) refusent ce qui serait refusé de toute façon — on ne fait pas confirmer
 une dépense impossible.
 
-1. **Coût nul** (le propriétaire de l'instance, ou facturation désactivée) : rien à confirmer, l'action
-   part directement (décision de Ben, 27/10/2026).
+1. **Compte du propriétaire** : rien ne lui est facturé, rien à confirmer, l'action part directement
+   (décision de Ben, 27/10/2026). Une instance sans facturation ne suffit pas : l'action consomme
+   quand même du quota, un compte ordinaire confirme.
 2. **Par défaut : devis en deux temps.** Premier appel = **devis** sans aucun effet, avec un
    `confirmation_token` (usage unique, 10 min, haché en base, lié au compte, à l'autorisation OAuth, à
    l'outil, aux arguments et au coût). Claude montre le coût dans la conversation, attend l'accord
@@ -158,9 +159,11 @@ une dépense impossible.
    répond `input_required` avec un formulaire « Confirmer — N crédits » ; le client le montre et relance
    l'appel avec la réponse. Le `requestState` signé (10 min) porte la **référence** du devis (son
    empreinte, jamais le jeton, car le codec signe sans chiffrer). Un état expiré ou falsifié fait
-   redemander, un refus brûle le devis. **Repli** : si une demande pour la même action est restée plus de
-   30 s sans réponse, l'appel suivant reçoit le devis à jeton au lieu d'un nouveau dialogue. Le serveur,
-   sans état, ne peut pas interrompre un dialogue déjà affiché ; le client, lui, peut toujours rappeler.
+   redemander, un refus brûle **tous** les devis ouverts de cette action. **Repli** : si une demande pour
+   la même action est restée plus de 30 s sans réponse, l'appel suivant reçoit le devis à jeton au lieu
+   d'un nouveau dialogue. Le serveur, sans état, ne peut pas interrompre un dialogue déjà envoyé : un
+   client qui ne l'affiche pas garde le premier appel en suspens jusqu'à son propre délai, et les
+   instructions du serveur disent alors au modèle de rappeler l'outil.
    Si la personne refuse (`decline`) ou ferme la confirmation (`cancel`), l'outil rend
    `status: "declined"` sans jeton de repli.
 
