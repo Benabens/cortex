@@ -100,6 +100,12 @@ async function main() {
   if (job.status === "canceled") process.exit(0);
   // Attribution des appels LLM de ce job (colonnes job_id/call_site de llm_usage).
   setCurrentJob(jobId, job.type);
+  // Format d'examen résolu une fois pour le process : les consignes des profils
+  // génériques (langue, style des sujets) le lisent de façon synchrone (lib/exam-format).
+  if (job.type !== "ingest") {
+    const { resolveExamFormat } = await import("../lib/exam-format");
+    await resolveExamFormat().catch(() => null);
+  }
   // Le cours doit encore appartenir à l'utilisateur du job (CORTEX_USER) : sinon
   // erreur sans remboursement, et rien n'est généré (cf. lib/jobs).
   if (!(await assertJobCourseOwned(jobId, COURSE))) process.exit(1);
@@ -134,6 +140,8 @@ async function main() {
       }
       const { detectFormat } = await import("../lib/format");
       await detectFormat({ onStep: async (s, p) => { await setJob(jobId, { currentStep: `Format : ${s}`, progress: 34 + Math.round(p * 0.33) }); } });
+      // Le format vient de changer : les consignes du plan (archétypes, langue) suivent le nouveau.
+      await (await import("../lib/exam-format")).resolveExamFormat().catch(() => null);
       await setJob(jobId, { currentStep: "Format détecté — index exo-par-exo des finals…", progress: 50 });
       const { rebuildBlueprintFromIndex } = await import("../lib/program");
       const r = await rebuildBlueprintFromIndex({ onStep: async (s, p) => { await setJob(jobId, { currentStep: `Blueprint : ${s}`, progress: 50 + Math.round(p * 0.48) }); } });

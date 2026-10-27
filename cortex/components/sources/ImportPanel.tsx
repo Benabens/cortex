@@ -5,6 +5,7 @@ import { UploadCloud, Check, Sparkles, FolderInput, AlertTriangle } from "lucide
 import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { WeightBar } from "@/components/viz/WeightBar";
+import { Segmented } from "@/components/ui/Segmented";
 import { useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@/lib/ux/api";
 import { cn } from "@/lib/ux/cn";
 
@@ -13,6 +14,18 @@ const ACCEPT = ".pdf,.html,.htm,.txt,.md";
 const FOLDER_EXTENSIONS = ["pdf", "html", "htm", "txt", "md", "tex", "c", "h", "png", "jpg", "jpeg", "webp", "pptx", "docx"];
 const ACCEPT_FOLDER = new RegExp(`\\.(${FOLDER_EXTENSIONS.join("|")})$`, "i");
 const ACCEPT_FOLDER_ATTRIBUTE = FOLDER_EXTENSIONS.map((ext) => `.${ext}`).join(",");
+
+/**
+ * Ce que sont les fichiers déposés. Une annale décide du format ; sans annale, les
+ * questions d'exemple publiées par l'enseignant donnent le style des QCM, et les
+ * consignes d'examen (syllabus, page Moodle) le format — lus à la préparation.
+ */
+type DropKind = "past_exam" | "sample_questions" | "exam_info";
+const DROP_KINDS: { value: DropKind; label: string }[] = [
+  { value: "past_exam", label: "Annales" },
+  { value: "sample_questions", label: "Questions d’exemple" },
+  { value: "exam_info", label: "Consignes d’examen" },
+];
 
 /**
  * Import UNIFIÉ — tout part du NAVIGATEUR, plus jamais d'un chemin sur le serveur :
@@ -26,6 +39,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [dropKind, setDropKind] = useState<DropKind>("past_exam");
 
   const [uploading, setUploading] = useState(false);
   const [uploadedMsg, setUploadedMsg] = useState<string | null>(null);
@@ -81,6 +95,15 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
     try {
       const fd = new FormData();
       for (const f of list) fd.append("file", f);
+      if (dropKind !== "past_exam") {
+        // Questions d'exemple / consignes : rangées à part, puis ingérées avec le reste du cours.
+        const res = await fetch(`/api/sources/add?course=${encodeURIComponent(courseId)}&category=${dropKind}`, { method: "POST", body: fd });
+        const d = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
+        setUploadedMsg(`${d.files} fichier${d.files > 1 ? "s" : ""} déposé${d.files > 1 ? "s" : ""} : indexation… Relance « Préparer le cours » pour relire le format.`);
+        startJob(d.jobId, "ingest");
+        return;
+      }
       const res = await fetch(`/api/refs/upload?course=${encodeURIComponent(courseId)}`, { method: "POST", body: fd });
       const d = await res.json().catch(() => null);
       if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
@@ -149,6 +172,14 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
     <Panel className="flex flex-col gap-5 p-5">
       <h2 className="text-[0.95rem] font-semibold text-ink-1">Importer</h2>
 
+      <Segmented
+        size="sm"
+        label="Ces fichiers sont"
+        options={DROP_KINDS}
+        value={dropKind}
+        onChange={setDropKind}
+      />
+
       {/* Dropzone fichiers — glisser un examen / cours / PDF */}
       <label
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -177,7 +208,13 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
         </span>
         <div>
           <p className="text-[0.92rem] font-semibold text-ink-1">
-            {uploading ? "Ingestion en cours…" : "Glisse un examen, un cours, un PDF"}
+            {uploading
+              ? "Ingestion en cours…"
+              : dropKind === "past_exam"
+                ? "Glisse un examen, un cours, un PDF"
+                : dropKind === "sample_questions"
+                  ? "Glisse les questions d’exemple de l’enseignant"
+                  : "Glisse les consignes d’examen (syllabus, page du cours)"}
           </p>
           <p className="mt-0.5 text-[0.8rem] text-ink-3">ou clique pour parcourir</p>
         </div>

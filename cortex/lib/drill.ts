@@ -1,3 +1,4 @@
+import { resolveExamFormat } from "@/lib/exam-format";
 import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 
@@ -22,6 +23,8 @@ const DRILL_SCHEMA = {
 
 /** Génère UNE question ciblée façon examen CS-202 + 5 indices progressifs (via le LLM). */
 export async function generateDrill(concept: string): Promise<Drill> {
+  // Langue et style de l'examen du cours, lus avant les consignes (synchrones) du profil.
+  await resolveExamFormat().catch(() => null);
   const p = profile();
   const prompt = [
     p.qaIntro(),

@@ -1,5 +1,6 @@
 import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { getFormatProfile } from "@/lib/format";
+import { isQcmCourse } from "@/lib/exam-format";
 import { preflightGeneration } from "@/lib/preflight";
 import { requireCourse, useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
@@ -33,8 +34,8 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (tooLong) return tooLong;
   const target = JSON.stringify({ count: c, openCount: oc, focus: focusRaw || undefined });
 
-  const fmt = await getFormatProfile();
-  if (!fmt?.has_mcq) return NextResponse.json({ error: "Format non détecté ou sans QCM pour ce cours. Lance la détection de format d'abord." }, { status: 400 });
+  // Même aiguillage que le reste (lib/exam-format) : annales, format déclaré, exemples officiels, infos de cours.
+  if (!(await isQcmCourse())) return NextResponse.json({ error: "Ce cours ne s'examine pas en QCM (ou son format est inconnu) : déclare le format de l'épreuve dans la fiche du cours." }, { status: 400 });
 
   const existing = await activeJob("qcm");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });

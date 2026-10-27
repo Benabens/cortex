@@ -6,6 +6,7 @@ import { Pencil, Trash2, X, Check, AlertTriangle, BookPlus } from "lucide-react"
 import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { useCourse, type CourseInfo } from "@/lib/ux/api";
+import { ExamFormatFields, formatDraftOf, formatPayload, type ExamFormatDraft } from "@/components/cours/ExamFormatFields";
 
 const field =
   "w-full rounded-lg border border-line-strong bg-surface-2/40 px-3 py-2 text-[0.85rem] text-ink-1 " +
@@ -27,6 +28,7 @@ export function CourseList() {
   const { courses, courseId, refresh } = useCourse();
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState({ name: "", code: "", university: "", examDate: "" });
+  const [format, setFormat] = useState<ExamFormatDraft>(formatDraftOf(null));
   const router = useRouter();
   // Cours dont on vient dater le final depuis l'Accueil (lu une fois, quand la liste est là).
   const datingFromHome = useRef<string | null>(null);
@@ -40,6 +42,7 @@ export function CourseList() {
     setConfirming(null);
     setEditing(c.id);
     setDraft({ name: c.name, code: c.code, university: c.university, examDate: c.examDate ?? "" });
+    setFormat(formatDraftOf(c.examFormat));
   };
 
   useEffect(() => {
@@ -53,6 +56,7 @@ export function CourseList() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setEditing(target.id);
     setDraft({ name: target.name, code: target.code, university: target.university, examDate: target.examDate ?? "" });
+    setFormat(formatDraftOf(target.examFormat));
     requestAnimationFrame(() => dateField.current?.focus());
   }, [courses]);
 
@@ -63,11 +67,13 @@ export function CourseList() {
       // On n'envoie que ce qui a changé : toucher au code réécrit aussi le nom court du cours
       // côté back, ce qu'on ne veut pas provoquer en ajoutant seulement une date.
       const before = courses.find((c) => c.id === id);
-      const changes: Partial<typeof draft> = {};
+      const changes: Partial<typeof draft> & { examFormat?: ReturnType<typeof formatPayload> } = {};
       if (draft.name !== before?.name) changes.name = draft.name;
       if (draft.code !== before?.code) changes.code = draft.code;
       if (draft.university !== before?.university) changes.university = draft.university;
       if (draft.examDate !== (before?.examDate ?? "")) changes.examDate = draft.examDate;
+      const nextFormat = formatPayload(format);
+      if (JSON.stringify(nextFormat) !== JSON.stringify(formatPayload(formatDraftOf(before?.examFormat)))) changes.examFormat = nextFormat;
       if (Object.keys(changes).length) {
         const res = await fetch(`/api/courses/${encodeURIComponent(id)}`, {
           method: "PATCH",
@@ -163,6 +169,7 @@ export function CourseList() {
                   Elle sert au compte à rebours de l’Accueil. Laisse vide si tu ne la connais pas encore.
                 </span>
               </label>
+              <ExamFormatFields value={format} onChange={setFormat} fieldClass={field} />
               <div className="flex gap-2">
                 <Button size="sm" variant="primary" loading={busy} onClick={() => save(c.id)}>
                   <Check className="size-4" strokeWidth={2.5} />
