@@ -1,4 +1,4 @@
-import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
+import { startPrepareJob } from "@/lib/generation";
 import { requireCourse } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -8,28 +8,12 @@ export const dynamic = "force-dynamic";
 /**
  * ONBOARDING/préparation d'un cours DEPUIS L'UI (plus seulement en CLI). POST → job 'prepare'
  * (ingestion contenu+annales → détection du format → blueprint), avec progression suivie par l'UI.
+ * Séquence partagée avec l'outil MCP prepare_course : lib/generation startPrepareJob.
  */
 export async function POST(req: NextRequest) {
-  const { course, denied } = requireCourse(req);
+  const { denied } = requireCourse(req);
   if (denied) return denied;
-  const existing = await activeJob("prepare");
-  if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
-  // La préparation d'un cours fait de la VISION LLM sur les
-  // annales (coûteux) → quota + crédits comme toute génération.
-  {
-    const { generationGate } = await import("@/lib/billing/guards");
-    const { creditsGate } = await import("@/lib/billing/credits");
-    const gate = (await generationGate("gen")) ?? (await creditsGate("prepare"));
-    if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
-  }
-  let jobId: number;
-  try {
-    ({ id: jobId } = await createJobExclusive("prepare"));
-  } catch (e) {
-    if (e instanceof ReservationRefused) return NextResponse.json({ error: e.message }, { status: e.status });
-    throw e;
-  }
-  try { await startWorker(jobId, course); }
-  catch (e: any) { return NextResponse.json({ error: `worker : ${e?.message ?? e}` }, { status: 500 }); }
-  return NextResponse.json({ ok: true, jobId });
+  const started = await startPrepareJob();
+  if (!started.ok) return NextResponse.json({ error: started.error }, { status: started.status });
+  return NextResponse.json(started.existing ? { ok: true, jobId: started.jobId, existing: true } : { ok: true, jobId: started.jobId });
 }

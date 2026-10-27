@@ -1,4 +1,6 @@
+import addCourseSource from "./tools/add-course-source";
 import checkAnswer from "./tools/check-answer";
+import createCourse from "./tools/create-course";
 import generateDrill from "./tools/generate-drill";
 import generateMockExam from "./tools/generate-mock-exam";
 import getAccountStatus from "./tools/get-account-status";
@@ -7,6 +9,7 @@ import getResults from "./tools/get-results";
 import getStudyPlan from "./tools/get-study-plan";
 import getWeakPoints from "./tools/get-weak-points";
 import listCourses from "./tools/list-courses";
+import prepareCourse from "./tools/prepare-course";
 import searchCourseMaterials from "./tools/search-course-materials";
 import type { ToolDef } from "./tool";
 
@@ -18,8 +21,8 @@ import type { ToolDef } from "./tool";
  * ou en double fait échouer le démarrage plutôt qu'un appel chez le client.
  */
 const ALL: ToolDef[] = [
-  checkAnswer, generateDrill, generateMockExam, getAccountStatus, getJobStatus,
-  getResults, getStudyPlan, getWeakPoints, listCourses, searchCourseMaterials,
+  addCourseSource, checkAnswer, createCourse, generateDrill, generateMockExam, getAccountStatus, getJobStatus,
+  getResults, getStudyPlan, getWeakPoints, listCourses, prepareCourse, searchCourseMaterials,
 ] as unknown as ToolDef[];
 
 function validate(tools: ToolDef[]): ToolDef[] {
