@@ -1,5 +1,5 @@
 import { generateExamViaClaudeCode, type StepCb } from "@/lib/exam";
-import { planMockExam, resolveExamFormat } from "@/lib/exam-format";
+import { planMockExam, requestedFormat, resolveExamFormat, type ExamKind } from "@/lib/exam-format";
 
 /**
  * EXAMEN BLANC — point d'entrée unique du job « exam » (app, connecteur MCP).
@@ -9,9 +9,10 @@ import { planMockExam, resolveExamFormat } from "@/lib/exam-format";
  */
 export type MockExamResult = { id: number; url: string; texError?: string };
 
-export async function generateMockExam(opts: { count?: number; focus?: string; onStep?: StepCb; jobId?: number } = {}): Promise<MockExamResult> {
+export async function generateMockExam(opts: { count?: number; focus?: string; kind?: ExamKind | null; onStep?: StepCb; jobId?: number } = {}): Promise<MockExamResult> {
   const step = opts.onStep ?? (() => {});
-  const format = await resolveExamFormat();
+  // Un format demandé pour cet examen (cible du job) l'emporte sur celui du cours, sauf annales.
+  const format = requestedFormat(await resolveExamFormat(), opts.kind);
   const plan = planMockExam(format, { count: opts.count, focus: opts.focus });
   if (plan.generator === "none") throw new Error(plan.reason);
   step(`Format : ${format.summary}`, 3);

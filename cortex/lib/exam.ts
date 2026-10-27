@@ -93,6 +93,13 @@ async function gatherContext() {
        WHERE s.type IN ('final','midterm') ORDER BY s.year DESC, RANDOM() LIMIT 12`
     );
   }
+  // Sans annale : les questions d'exemple officielles de l'enseignant donnent le style à imiter.
+  if (!styleRows.length) {
+    styleRows = await q.all<{ src: string; text: string }>(
+      `SELECT s.title src, i.text text FROM items i JOIN sources s ON s.id = i.source_id
+       WHERE s.type = 'sample_questions' ORDER BY s.id, i.id LIMIT 12`
+    );
+  }
   const style = styleRows.slice(0, 12).map((r) => ({ src: r.src, excerpt: trunc(r.text, 1600) }));
 
   // CONTENU = tout le corpus, en priorité les séries d'exos + le reste (trimé pour la vitesse).

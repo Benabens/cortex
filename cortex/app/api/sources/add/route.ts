@@ -33,24 +33,31 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (!files.length) return NextResponse.json({ error: "Aucun fichier." }, { status: 400 });
   if (files.length > MAX_FILES) return NextResponse.json({ error: `Trop de fichiers (${files.length}, maximum ${MAX_FILES}).` }, { status: 400 });
 
+  // Un fichier refusé n'empêche pas d'indexer ceux qui sont déjà rangés.
   const saved: string[] = [];
+  const refused: { file: string; error: string; status: number }[] = [];
   for (const f of files) {
     try {
       const s = await addFileSource(course, { name: f.name, data: Buffer.from(await f.arrayBuffer()), category: category as SourceCategory, contentType: f.type || "application/octet-stream" });
       saved.push(s.name);
     } catch (e) {
-      if (e instanceof SourceError) return NextResponse.json({ error: `${f.name} : ${e.message}`, saved }, { status: e.status });
-      throw e;
+      if (!(e instanceof SourceError)) throw e;
+      refused.push({ file: f.name, error: e.message, status: e.status });
     }
   }
+  if (!saved.length) {
+    const first = refused[0];
+    return NextResponse.json({ error: `${first.file} : ${first.error}` }, { status: first.status });
+  }
+  const skipped = refused.map((r) => `${r.file} : ${r.error}`);
 
   const existing = await activeJob("ingest");
-  if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true, files: saved.length });
+  if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true, files: saved.length, skipped });
   const { id: jobId } = await createJobExclusive("ingest");
   try {
     await startWorker(jobId, course);
   } catch (e) {
     return NextResponse.json({ error: `Impossible de lancer le worker : ${(e as Error)?.message ?? e}` }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, jobId, files: saved.length });
+  return NextResponse.json({ ok: true, jobId, files: saved.length, skipped });
 })

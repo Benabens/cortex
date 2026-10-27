@@ -39,13 +39,18 @@ function arg(name: string): string | undefined {
 async function setup(): Promise<void> {
   const from = arg("from");
   const name = arg("name");
-  if (!from || !name) throw new Error("setup --name <nom> --from <dossier> [--code X] [--language fr]");
+  if (!from || !name) throw new Error("setup --name <nom> --from <dossier> [--code X] [--language fr] [--declare qcm:20] [--category sample_questions]");
   const { buildCourseRow } = await import("../lib/course-create");
   const { insertCourse } = await import("../db/courses-store");
-  const row = buildCourseRow({ name, code: arg("code"), language: arg("language") ?? "fr" }, "owner");
+  // --declare kind[:nombre] : format déclaré, comme la fiche du cours dans l'app.
+  const [kind, count] = (arg("declare") ?? "").split(":");
+  const examFormat = kind ? { kind, questionCount: count ? Number(count) : null } : undefined;
+  const row = buildCourseRow({ name, code: arg("code"), language: arg("language") ?? "fr", examFormat }, "owner");
   await insertCourse(row);
   await reloadCourses();
-  const dest = path.join(coursePaths(row.id).contentRoot, "lectures");
+  // --category : dossier d'une catégorie de lib/course-source (exam-samples, exam-info…), sinon les cours.
+  const folders: Record<string, string> = { sample_questions: "exam-samples", exam_info: "exam-info", lecture: "lectures", notes: "notes" };
+  const dest = path.join(coursePaths(row.id).contentRoot, folders[arg("category") ?? "lecture"] ?? "lectures");
   fs.mkdirSync(dest, { recursive: true });
   let n = 0;
   const walk = (dir: string) => {
@@ -224,7 +229,16 @@ async function judge(): Promise<void> {
   if (out) fs.writeFileSync(out, JSON.stringify(results, null, 2));
 }
 
+/** Jamais sur la prod : SQLite dans un dossier de données explicite, ou rien. */
+function assertLocalBench(): void {
+  if (process.env.DATABASE_URL || (process.env.DB_DRIVER ?? "sqlite") !== "sqlite") {
+    throw new Error("Banc refusé : DATABASE_URL ou DB_DRIVER=postgres est posé. Le banc ne tourne que sur SQLite local.");
+  }
+  if (!process.env.CORTEX_DATA_DIR) throw new Error("Banc refusé : pose CORTEX_DATA_DIR sur un dossier jetable.");
+}
+
 const cmd = process.argv[2];
+try { assertLocalBench(); } catch (e) { console.error((e as Error).message); process.exit(1); }
 ensureCoursesLoaded()
   .then(() => (cmd === "setup" ? setup() : cmd === "run" ? run() : cmd === "judge" ? judge() : Promise.reject(new Error("usage : setup | run | judge"))))
   .then(() => process.exit(0))

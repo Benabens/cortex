@@ -595,15 +595,6 @@ const TERMS_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
 ];
 /** Colonnes ajoutées à `subscriptions` : fenêtres ancrées sur la période de
  *  facturation (lib/billing/subscription-windows) et suspension après reprise. */
-/**
- * Colonnes ajoutées à `courses` après coup. `exam_format` : format d'examen
- * DÉCLARÉ par l'étudiant (JSON : type, nombre de questions, durée, langue) —
- * seule source de format d'un cours sans annale (lib/exam-format).
- */
-const COURSES_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
-  { name: "exam_format", sqlite: "TEXT", pg: "text" },
-];
-
 const SUBS_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "period_start", sqlite: "TEXT", pg: "text" },
   { name: "window_anchor", sqlite: "TEXT", pg: "text" },
@@ -612,6 +603,15 @@ const SUBS_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   // ancien, livré en retard, ne l'écrase pas. Et résiliation programmée en fin de période.
   { name: "status_at", sqlite: "TEXT", pg: "text" },
   { name: "cancel_at_period_end", sqlite: "INTEGER NOT NULL DEFAULT 0", pg: "integer NOT NULL DEFAULT 0" },
+];
+
+/**
+ * Colonnes ajoutées à `courses` après coup. `exam_format` : format d'examen
+ * DÉCLARÉ par l'étudiant (JSON : type, nombre de questions, durée, langue) —
+ * seule source de format d'un cours sans annale (lib/exam-format).
+ */
+const COURSES_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
+  { name: "exam_format", sqlite: "TEXT", pg: "text" },
 ];
 const CREDIT_TX_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "sub_amount", sqlite: "INTEGER NOT NULL DEFAULT 0", pg: "integer NOT NULL DEFAULT 0" },

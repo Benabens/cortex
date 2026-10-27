@@ -20,6 +20,8 @@ import type { ExamFormat, MockExamPlan, MockExamRequest } from "../lib/exam-form
 // d'où les imports dynamiques, jamais statiques, dans ce fichier.
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-exam-format-"));
 process.env.CORTEX_DATA_DIR = tmp;
+// Ce fichier crée un cours par cas : la limite horaire de création n'est pas l'objet du test.
+process.env.MAX_COURSES_CREATED_PER_HOUR = "unlimited";
 
 let planMockExam: (f: ExamFormat, r: MockExamRequest) => MockExamPlan;
 
@@ -32,6 +34,7 @@ before(async () => {
 
 after(() => {
   delete process.env.CORTEX_DATA_DIR;
+  delete process.env.MAX_COURSES_CREATED_PER_HOUR;
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -230,4 +233,27 @@ test("lancer un examen blanc sans format connu est refusé (409) avec ce qu'il f
   assert.ok(!r.ok && r.status === 409 && /Format d'examen inconnu/.test(r.error), JSON.stringify(r));
   const jobs = await runWithCourse(id, async () => { await q.ensureTable("jobs"); return q.get<{ n: number }>(`SELECT count(*) n FROM jobs`); });
   assert.equal(Number(jobs?.n), 0);
+});
+
+test("un format demandé pour CET examen suit le job jusqu'au worker : ni refus au lancement, ni retour au format du cours", async () => {
+  const { requestedFormat, planMockExam: plan, resolveExamFormat } = await import("../lib/exam-format");
+  const { runWithCourse } = await import("../db/client");
+  // Cours sans format : « written » demandé → exercices, pas de refus.
+  const unknown = await newCourse();
+  const f = await runWithCourse(unknown, () => resolveExamFormat());
+  assert.equal(plan(requestedFormat(f, "exercises"), {}).generator, "exercises");
+  // Cours déclaré QCM : « written » demandé → exercices (pas le générateur QCM au prix d'un écrit).
+  const qcm = await newCourse({ examFormat: { kind: "qcm", questionCount: 20 } });
+  const g = await runWithCourse(qcm, () => resolveExamFormat());
+  assert.equal(plan(requestedFormat(g, "exercises"), {}).generator, "exercises");
+  // Des annales : leur format fait la règle, la demande est ignorée.
+  const withAnnales = await newCourse();
+  await addSource(withAnnales, "final", "Final 2022", "Examen final. Exercice 1 : on considère la fonction f et on étudie sa dérivée.");
+  const h = await runWithCourse(withAnnales, () => resolveExamFormat());
+  assert.equal(requestedFormat(h, "qcm").kind, "exercises");
+  // Le pré-check de lancement lit la demande dans la cible du job.
+  const { startGenerationJob } = await import("../lib/generation");
+  await addSource(unknown, "course_pdf", "Séance 1", "Le leadership transformationnel motive par le sens.");
+  const r = await runWithCourse(unknown, () => startGenerationJob("exam", JSON.stringify({ kind: "exercises" })));
+  assert.ok(!(r.ok === false && /Format d'examen inconnu/.test(r.error)), JSON.stringify(r));
 });

@@ -1,4 +1,4 @@
-import { isQcmCourse } from "@/lib/format";
+import { planMockExam, resolveExamFormat } from "@/lib/exam-format";
 import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
 import { getTopic, topicTarget } from "@/lib/program";
@@ -22,7 +22,10 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const topic = await getTopic(Number(topicId));
   if (!topic) return NextResponse.json({ error: "Type introuvable." }, { status: 404 });
 
-  const qcm = await isQcmCourse();
+  // Même aiguillage que les examens blancs (lib/exam-format) : format inconnu → on le dit, on n'invente pas.
+  const plan = planMockExam(await resolveExamFormat(), {});
+  if (plan.generator === "none") return NextResponse.json({ error: plan.reason }, { status: 409 });
+  const qcm = plan.generator === "qcm";
   const jobType = qcm ? "qcm" : "exercise";
   // un job de ce type en cours ? on le réutilise (un seul actif à la fois).
   const existing = await activeJob(jobType);
