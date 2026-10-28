@@ -3,6 +3,7 @@ import type { CourseConfig } from "@/lib/courses";
 import { courseLabel } from "./courses";
 import { fmtCredits, toCenti } from "@/lib/billing/credits";
 import { QUOTA_LABEL, type DeclinedView, type QuoteView } from "./tool";
+import { EXAM_KINDS, LANGUAGES, type ExamFormat } from "@/lib/exam-format";
 
 /** Pièces de schéma partagées par les outils (entrées et sorties). */
 
@@ -58,3 +59,26 @@ export function quoteSummary(q: QuoteView): string {
   return `Confirmation requise avant toute dépense : ${cost}${balance}${quota}. Rien n'a été débité. ` +
     `Montre ce coût à la personne ; seulement si elle accepte, rappelle l'outil avec les mêmes arguments et confirmation_token (valable ${Math.round(q.expires_in_seconds / 60)} min).`;
 }
+
+/** Format d'examen d'un cours tel que le moteur le comprend (lib/exam-format). */
+export const examFormatSchema = z.object({
+  kind: z.enum(EXAM_KINDS).nullable().describe("qcm, exercises, mixed (QCM + open questions), essay, oral — null when unknown."),
+  basis: z.enum(["annales", "declared", "sample_questions", "course_info", "unknown"])
+    .describe("Where the format comes from, most reliable first: past exams, declared by the student, official sample questions, course information, or unknown."),
+  question_count: z.number().nullable(),
+  duration_min: z.number().nullable(),
+  language: z.string().describe("Language of the generated exam."),
+  summary: z.string(),
+});
+
+export function examFormatOf(f: ExamFormat): z.infer<typeof examFormatSchema> {
+  return { kind: f.kind, basis: f.basis, question_count: f.questionCount, duration_min: f.durationMin, language: f.language, summary: f.summary };
+}
+
+/** Entrée d'un format déclaré (create_course, set_exam_format). */
+export const examFormatInput = {
+  kind: z.enum(EXAM_KINDS).describe("Exam type: qcm (multiple choice), exercises (problems to solve), mixed (multiple choice + open questions), essay, oral."),
+  question_count: z.number().int().min(1).max(200).optional().describe("Number of questions (qcm) or of exercises / essay topics."),
+  duration_min: z.number().int().min(5).max(600).optional().describe("Exam duration in minutes."),
+  language: z.enum(LANGUAGES).optional().describe("Language of the exam, when it differs from the course language."),
+};

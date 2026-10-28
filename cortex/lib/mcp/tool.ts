@@ -29,6 +29,7 @@ export type ToolErrorCode =
   | "confirmation_invalid"
   | "unavailable"
   | "too_large"
+  | "format_required"
   | "internal";
 
 /**

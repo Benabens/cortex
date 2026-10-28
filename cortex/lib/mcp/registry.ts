@@ -11,6 +11,7 @@ import getWeakPoints from "./tools/get-weak-points";
 import listCourses from "./tools/list-courses";
 import prepareCourse from "./tools/prepare-course";
 import searchCourseMaterials from "./tools/search-course-materials";
+import setExamFormat from "./tools/set-exam-format";
 import type { ToolDef } from "./tool";
 
 /**
@@ -22,7 +23,7 @@ import type { ToolDef } from "./tool";
  */
 const ALL: ToolDef[] = [
   addCourseSource, checkAnswer, createCourse, generateDrill, generateMockExam, getAccountStatus, getJobStatus,
-  getResults, getStudyPlan, getWeakPoints, listCourses, prepareCourse, searchCourseMaterials,
+  getResults, getStudyPlan, getWeakPoints, listCourses, prepareCourse, searchCourseMaterials, setExamFormat,
 ] as unknown as ToolDef[];
 
 function validate(tools: ToolDef[]): ToolDef[] {

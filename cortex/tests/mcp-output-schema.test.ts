@@ -48,13 +48,15 @@ before(async () => {
   const { runWithCourse } = await import("../db/client");
   const { runWithUser } = await import("../db/context");
   const { q } = await import("../db/q");
+  // Sans annale, un cours doit avoir un format (déclaré ici) pour qu'un examen blanc parte : sinon
+  // generate_mock_exam refuse avant tout devis (format_required, lib/exam-format).
   for (const [user, email, courses] of [
-    [OWNER, "ben@example.com", [["Histoire des sciences", "HUM-285", false], ["Philosophie", "HUM-300", false]]],
-    [ALICE, "alice@example.com", [["Probabilités", "MATH-232", false], ["Analyse", "MATH-101", true], ["Algèbre", "MATH-111", false], ["Géométrie", "MATH-120", false]]],
+    [OWNER, "ben@example.com", [["Histoire des sciences", "HUM-285", false, "qcm"], ["Philosophie", "HUM-300", false, "exercises"]]],
+    [ALICE, "alice@example.com", [["Probabilités", "MATH-232", false, "qcm"], ["Analyse", "MATH-101", true, null], ["Algèbre", "MATH-111", false, "exercises"], ["Géométrie", "MATH-120", false, "exercises"]]],
   ] as const) {
     await authRun(`INSERT INTO users (id, email, name) VALUES (?,?,?)`, user, email, user);
-    for (const [name, code, withExams] of courses) {
-      const row = buildCourseRow({ name, code }, user);
+    for (const [name, code, withExams, kind] of courses) {
+      const row = buildCourseRow({ name, code, ...(kind ? { examFormat: { kind } } : {}) }, user);
       await insertCourse(row);
       // Un passage indexé (le corpus n'est pas vide), et des annales pour MATH-101.
       await runWithUser(user, () => runWithCourse(row.id, async () => {

@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { CourseRow } from "@/db/courses-store";
+import type { DeclaredFormat } from "@/lib/exam-format";
 
 /**
  * COUCHE D'ACCÈS AUX COURS (« les cours en base »).
@@ -52,6 +53,8 @@ export type CourseConfig = {
   durationMin: number;
   /** Date de l'examen (ISO, optionnel) — alimente le compte à rebours du dashboard. */
   examDate?: string;
+  /** Format d'examen DÉCLARÉ par l'étudiant (null = rien de déclaré) — cf. lib/exam-format. */
+  examFormat: DeclaredFormat | null;
   createdAt: string;
   /**
    * Chemins HISTORIQUES stockés en base (cs-202 = data/cortex.db, data/refs…).
@@ -96,6 +99,28 @@ function parseList(raw: string | null | undefined, fallback: string[]): string[]
   }
 }
 
+/**
+ * Format déclaré stocké en JSON. Validé à l'écriture (lib/exam-format
+ * parseDeclaredFormat) ; ici, une ligne illisible vaut « rien de déclaré »
+ * plutôt qu'une erreur au chargement de tous les cours.
+ */
+function parseExamFormat(raw: string | null | undefined): DeclaredFormat | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as Record<string, unknown>;
+    if (!v || typeof v !== "object" || typeof v.kind !== "string") return null;
+    const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : null);
+    return {
+      kind: v.kind as DeclaredFormat["kind"],
+      questionCount: num(v.questionCount),
+      durationMin: num(v.durationMin),
+      language: typeof v.language === "string" ? v.language : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Ligne de base → config consommée par le moteur. */
 export function rowToConfig(r: CourseRow): CourseConfig {
   const name = r.name;
@@ -114,6 +139,7 @@ export function rowToConfig(r: CourseRow): CourseConfig {
     language: r.language || "fr",
     profileId: r.profile_id ?? null,
     durationMin: r.duration_min ?? 180,
+    examFormat: parseExamFormat(r.exam_format),
     createdAt: r.created_at,
   };
   if (r.exam_date) cfg.examDate = r.exam_date;

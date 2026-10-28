@@ -1,6 +1,7 @@
 import { currentCourse } from "@/db/client";
 import { getCourse } from "@/lib/courses";
-import { getFormatProfile, isQcmCourse } from "@/lib/format";
+import { getFormatProfile } from "@/lib/format";
+import { planMockExam, resolveExamFormat } from "@/lib/exam-format";
 import { profile } from "@/lib/course-profile";
 
 /**
@@ -10,8 +11,11 @@ import { profile } from "@/lib/course-profile";
  */
 export type CompositionPlan = {
   course: string;
-  /** "qcm" = composeur QCM+ouvertes (cours QCM-dominant) ; "exam" = composeur calcul/trace (CS-202). */
-  kind: "qcm" | "exam";
+  /**
+   * "qcm" = composeur QCM+ouvertes ; "exam" = composeur d'exercices (calcul/trace, essai, oral) ;
+   * "unknown" = format d'examen inconnu : rien à composer, `summary` dit quoi déclarer.
+   */
+  kind: "qcm" | "exam" | "unknown";
   /** Phrase de transparence : ce qui a été détecté. */
   summary: string;
   durationMin: number;
@@ -24,6 +28,8 @@ export type CompositionPlan = {
   // kind === "exam"
   exercises?: number;  // défaut = nb d'exercices du blueprint
   categories?: string[];
+  /** Ce qu'on compte : « exercice » (problèmes), « sujet » (essai), « question » (oral). */
+  unit?: "exercice" | "sujet" | "question";
 };
 
 /** Composition proposée pour le cours COURANT (lue du format détecté ; jamais de valeur en dur). */
@@ -31,8 +37,29 @@ export async function getComposition(): Promise<CompositionPlan> {
   const course = currentCourse();
   const c = getCourse(course);
 
-  if (await isQcmCourse()) {
-    const fmt = (await getFormatProfile())!;
+  // Le MÊME aiguillage que le worker et le connecteur (lib/exam-format).
+  const format = await resolveExamFormat();
+  const plan = planMockExam(format, {});
+  if (plan.generator === "none") {
+    return { course, kind: "unknown", summary: plan.reason, durationMin: c.durationMin, totalPoints: null };
+  }
+
+  const fmt = format.basis === "annales" ? await getFormatProfile() : null;
+  if (plan.generator === "qcm" && !fmt) {
+    // Format déclaré ou lu dans les sources (pas d'annale) : la composition vient de lui.
+    return {
+      course,
+      kind: "qcm",
+      summary: format.summary,
+      durationMin: format.durationMin || c.durationMin,
+      totalPoints: null,
+      qcm: plan.qcmCount,
+      open: plan.openCount,
+      scq: plan.qcmCount,
+      mcq: 0,
+    };
+  }
+  if (plan.generator === "qcm" && fmt) {
     const types = fmt.question_types ?? [];
     const sum = (t: string) => types.filter((x) => x.type === t).reduce((s, x) => s + (x.approx_count || 0), 0);
     const scq = sum("scq");
@@ -52,18 +79,23 @@ export async function getComposition(): Promise<CompositionPlan> {
     };
   }
 
-  // Cours calcul/trace (CS-202) : la compo = le blueprint (types pondérés des vrais finals).
+  // Cours à exercices (CS-202 : calcul/trace) : la compo = le blueprint (types pondérés des vrais finals).
   let slots: { category: string; points: number }[];
   try { slots = await profile().buildBlueprint(); } catch { slots = await profile().examSlots(); }
   const categories = Array.from(new Set(slots.map((s) => s.category)));
   const totalPoints = slots.reduce((s, x) => s + (x.points || 0), 0);
+  const style = plan.generator === "exercises" ? plan.style : "problems";
+  const exercises = (plan.generator === "exercises" ? plan.exerciseCount : null) ?? slots.length;
   return {
     course,
     kind: "exam",
-    summary: `${c.examCode} ${c.examName} — ${c.examKind} : ${slots.length} exercices (calcul/trace : ${categories.join(", ")}), ${c.durationMin} min, ${totalPoints} pts`,
-    durationMin: c.durationMin,
+    summary: format.basis === "annales"
+      ? `${c.examCode} ${c.examName} — ${c.examKind} : ${slots.length} exercices (calcul/trace : ${categories.join(", ")}), ${c.durationMin} min, ${totalPoints} pts`
+      : format.summary,
+    durationMin: format.durationMin || c.durationMin,
     totalPoints,
-    exercises: slots.length,
+    exercises,
     categories,
+    unit: style === "essay" ? "sujet" : style === "oral" ? "question" : "exercice",
   };
 }

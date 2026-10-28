@@ -10,7 +10,8 @@ import { enterCourse } from "../db/client";
 import { ensureCoursesLoaded } from "../lib/courses";
 import { q } from "../db/q";
 import { llmAvailable, llmUnavailableReason } from "../lib/llm";
-import { generateExamViaClaudeCode, generateTargetedExercise } from "../lib/exam";
+import { generateTargetedExercise } from "../lib/exam";
+import { generateMockExam } from "../lib/mock-exam";
 import { texAvailable } from "../lib/exam-latex";
 import { assertJobCourseOwned, getJob, heartbeatJob, logJob, setJob } from "../lib/jobs";
 import { setCurrentJob } from "../lib/billing/usage-context";
@@ -103,6 +104,13 @@ async function main() {
   // erreur sans remboursement, et rien n'est généré (cf. lib/jobs).
   if (!(await assertJobCourseOwned(jobId, COURSE))) process.exit(1);
 
+  // Format d'examen résolu une fois pour le process : les consignes des profils
+  // génériques (langue, style des sujets) le lisent de façon synchrone (lib/exam-format).
+  if (job.type !== "ingest") {
+    const { resolveExamFormat } = await import("../lib/exam-format");
+    await resolveExamFormat().catch(() => null);
+  }
+
   if (job.type === "ingest") {
     try {
       await runIngestJob(job.target);
@@ -133,6 +141,8 @@ async function main() {
       }
       const { detectFormat } = await import("../lib/format");
       await detectFormat({ onStep: async (s, p) => { await setJob(jobId, { currentStep: `Format : ${s}`, progress: 34 + Math.round(p * 0.33) }); } });
+      // Le format vient de changer : les consignes du plan (archétypes, langue) suivent le nouveau.
+      await (await import("../lib/exam-format")).resolveExamFormat().catch(() => null);
       await setJob(jobId, { currentStep: "Format détecté — index exo-par-exo des finals…", progress: 50 });
       const { rebuildBlueprintFromIndex } = await import("../lib/program");
       const r = await rebuildBlueprintFromIndex({ onStep: async (s, p) => { await setJob(jobId, { currentStep: `Blueprint : ${s}`, progress: 50 + Math.round(p * 0.48) }); } });
@@ -235,7 +245,7 @@ async function main() {
     await logJob(jobId, s);
   };
 
-  // composeur (CS-202) : count d'exercices + « Mets l'accent sur… » (focus) optionnels dans le target 'exam'.
+  // composeur : count (questions ou exercices) + « Mets l'accent sur… » (focus thématique) optionnels dans le target 'exam'.
   let examCount: number | undefined, examFocus: string | undefined;
   if (job.type === "exam" && job.target) {
     try {
@@ -244,6 +254,8 @@ async function main() {
       if (typeof t.focus === "string" && t.focus.trim()) examFocus = t.focus.trim();
     } catch {}
   }
+  const { targetKind } = await import("../lib/exam-format");
+  const examKind = job.type === "exam" ? targetKind(job.target) : null;
 
   try {
     const res =
@@ -251,7 +263,8 @@ async function main() {
         ? await generateTargetedExercise(job.target ?? "", { onStep })
         : job.type === "lab-exercise"
           ? await generateLabExercise(job.target ?? "", { onStep })
-          : await generateExamViaClaudeCode({ count: examCount, focus: examFocus, onStep, jobId });
+          // Examen blanc : le format du cours choisit le générateur (QCM, exercices, essai…), cf. lib/mock-exam.
+          : await generateMockExam({ count: examCount, focus: examFocus, kind: examKind, onStep, jobId });
     if (res.texError) {
       // le résultat existe (HTML lisible) mais le PDF a échoué → erreur LaTeX gardée pour debug
       await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, repli HTML lisible. Détail : ${res.texError.slice(0, 500)}` });

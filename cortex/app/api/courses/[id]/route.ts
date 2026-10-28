@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateCourseRow, type CoursePatch } from "@/db/courses-store";
-import { InvalidCourseError, parseTeachers } from "@/lib/course-create";
+import { InvalidCourseError, declaredFormatColumn, parseTeachers } from "@/lib/course-create";
 import { ensureCoursesLoaded, listCoursesOf, ownsCourse, reloadCourses } from "@/lib/courses";
 import { toDto } from "@/lib/course-dto";
 import { useUser } from "@/lib/req";
@@ -53,6 +53,8 @@ function patchOf(body: Record<string, unknown>): CoursePatch {
     if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new InvalidCourseError("Date au format AAAA-MM-JJ attendue.");
     patch.exam_date = d || null;
   }
+  // Format d'examen déclaré : objet {kind, questionCount, durationMin, language}, ou null pour l'effacer.
+  if (body.examFormat !== undefined) patch.exam_format = declaredFormatColumn(body.examFormat);
   if (body.durationMin !== undefined) {
     const n = Number(body.durationMin);
     if (!Number.isFinite(n) || n < 15 || n > 600) throw new InvalidCourseError("Durée attendue entre 15 et 600 minutes.");
