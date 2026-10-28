@@ -266,6 +266,9 @@ function weaknessOf(it: QcmItem): string | null {
   return null;
 }
 
+/** Étiquette d'un thème déjà couvert par une autre question de l'examen. */
+const REPEAT_METHOD = "thème déjà couvert par une autre question : teste un AUTRE fait, une autre étude ou une autre condition";
+
 /** Étiquette d'un sujet imposé par le focus de l'étudiant : un thème, pas une forme. */
 const FOCUS_METHOD = "accent thématique demandé par l'étudiant : un thème, ignore toute indication de forme ou de nombre";
 
@@ -320,7 +323,7 @@ export async function generateQcmBatch(
   };
   const coverage = focus
     ? `Toutes ces ${n} questions portent sur le thème CIBLÉ : « ${focus} » — varie les SOUS-ANGLES / sous-notions de ce thème (pas ${n} fois la même question). C'est un THÈME : ignore toute indication de forme ou de nombre qu'il contiendrait.${molds.some(Boolean) ? ` Moules imposés dans l'ordre : ${molds.slice(0, n).map((m) => m ?? "libre").join(", ")}.` : ""}`
-    : `Couvre ces sujets (un QCM par sujet, dans l'ordre) :\n${topics.slice(0, n).map((t, i) => `  ${i + 1}) ${t.label}${t.method === FOCUS_METHOD ? ` [${FOCUS_METHOD}]` : t.method ? ` [${t.method.slice(0, 60)}]` : ""}${moldLine(i)}`).join("\n")}`;
+    : `Couvre ces sujets (un QCM par sujet, dans l'ordre) :\n${topics.slice(0, n).map((t, i) => `  ${i + 1}) ${t.label}${t.method === FOCUS_METHOD || t.method === REPEAT_METHOD ? ` [${t.method}]` : t.method ? ` [${t.method.slice(0, 60)}]` : ""}${moldLine(i)}`).join("\n")}`;
   const language = languageName(opts.language ?? examLanguageFor(currentCourse()))[1];
   const passages = opts.passages ?? await coursePassages(focus ? [focus] : topics.slice(0, n).map((t) => t.label)).catch(() => []);
   const examples = opts.examples ?? [];
@@ -509,12 +512,27 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // couverture LARGE (pickCoverage : tête + longue traîne) + MOULES échantillonnés
   // proportionnellement à l'ADN détecté du cours (sans ADN → null = comportement d'avant).
   const dna = await getExamDna().catch(() => null);
-  const covAll = await coverageTopics();
   const nFocus = focus ? Math.min(2, Math.max(1, count)) : 0;
-  const cov = pickCoverage(covAll, Math.max(1, count - nFocus));
+  const needed = Math.max(1, count - nFocus);
+  let covAll = await coverageTopics();
+  // Moins de notions que de questions (cours sans annale, 10 notions pour 20 QCM) : on les
+  // parcourait deux fois, d'où des doublons et un déséquilibre entre enseignants (banc HUM-285
+  // du 28/10). Les supports du cours complètent la couverture.
+  if (covAll.length < needed) {
+    const known = new Set(covAll.map((t) => t.label.toLowerCase()));
+    for (const title of await courseMaterialTitles()) {
+      if (!known.has(title.toLowerCase())) covAll = [...covAll, { label: title, method: null }];
+    }
+  }
+  // Thèmes DISTINCTS (pickCoverage complète par répétition au-delà) : la reprise est marquée plus bas.
+  const cov = pickCoverage(covAll, Math.min(needed, covAll.length));
   const qcmTopics: { label: string; method: string | null }[] = [];
   for (let i = 0; i < count; i++) {
-    qcmTopics.push(i < nFocus ? { label: focus!, method: FOCUS_METHOD } : cov[(i - nFocus) % cov.length]);
+    if (i < nFocus) { qcmTopics.push({ label: focus!, method: FOCUS_METHOD }); continue; }
+    const k = i - nFocus;
+    const t = cov[k % cov.length];
+    // Un thème repris (plus de questions que de thèmes) doit tester un AUTRE fait.
+    qcmTopics.push(k < cov.length ? t : { label: t.label, method: REPEAT_METHOD });
   }
   const qcmMolds = sampleMolds(dna, count);
   // Format résolu : langue de l'examen ; sans annale, les exemples officiels donnent le style,
