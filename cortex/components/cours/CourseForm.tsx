@@ -6,6 +6,7 @@ import { AlertTriangle, Check } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { useCourse } from "@/lib/ux/api";
+import { EMPTY_FORMAT, ExamFormatFields, formatPayload, type ExamFormatDraft } from "@/components/cours/ExamFormatFields";
 
 const LANGUES: { value: string; label: string }[] = [
   { value: "fr", label: "Français" },
@@ -21,9 +22,9 @@ const field =
 
 /**
  * CRÉER UN COURS — le geste qui manquait : plus aucune ligne de code ni de
- * terminal pour ajouter une matière. Seul le NOM est obligatoire ; le reste
- * n'habille que la page de garde des sujets générés. Le format, lui, se déduit
- * des annales importées ensuite (aucun profil à écrire).
+ * terminal pour ajouter une matière. Seul le NOM est obligatoire. Le format de
+ * l'épreuve se déduit des annales importées ensuite ; sans annale, celui déclaré
+ * ici (type, nombre de questions, durée, langue) est le seul que Cortex suit.
  */
 export function CourseForm() {
   const router = useRouter();
@@ -36,6 +37,7 @@ export function CourseForm() {
     language: "fr",
     examDate: "",
   });
+  const [format, setFormat] = useState<ExamFormatDraft>(EMPTY_FORMAT);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
@@ -52,7 +54,7 @@ export function CourseForm() {
       const res = await fetch("/api/courses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, examFormat: formatPayload(format) }),
       });
       const d = await res.json().catch(() => null);
       if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
@@ -132,9 +134,10 @@ export function CourseForm() {
         </div>
 
         <p className="text-[0.78rem] leading-relaxed text-ink-3">
-          Ces informations n’habillent que la page de garde des sujets générés. Le format réel
-          de l’épreuve, lui, sera déduit des annales que tu importeras à l’étape suivante.
+          Ces informations habillent la page de garde des sujets générés.
         </p>
+
+        <ExamFormatFields value={format} onChange={setFormat} fieldClass={field} />
 
         {error && (
           <p role="alert" className="inline-flex items-start gap-1.5 text-[0.8rem] text-danger-hi">

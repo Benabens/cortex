@@ -3,10 +3,10 @@ import { CourseCreationLimitError, insertCourse } from "@/db/courses-store";
 import { InvalidCourseError, buildCourseRow } from "@/lib/course-create";
 import { ensureCoursesLoaded, listCoursesOf, reloadCourses } from "@/lib/courses";
 import { courseLabel } from "../courses";
-import { courseRef, courseRefOf } from "../schemas";
+import { LANGUAGES } from "@/lib/exam-format";
+import { courseRef, courseRefOf, examFormatInput } from "../schemas";
 import { ToolError, defineTool } from "../tool";
 
-const LANGUAGES = ["fr", "en", "de", "it", "es", "pt", "nl"] as const;
 
 const output = z.object({
   status: z.enum(["created"]),
@@ -20,7 +20,8 @@ export default defineTool({
   description:
     "Create a new course in the student's Cortex account (the same as \"New course\" in the app, free): name, optional exam code (e.g. \"MATH-111\"), " +
     "university, language of the course and exam date. Refuses a second course with the same exam code. " +
-    "Then add its materials with add_course_source and build it with prepare_course.",
+    "Pass exam_format when the student knows how the exam looks (type, number of questions, duration), especially without past exams: " +
+    "Cortex never invents a format. Then add its materials with add_course_source and build it with prepare_course.",
   kind: "write",
   input: z.object({
     name: z.string().min(2).max(80).describe("Course name, e.g. \"Linear algebra\"."),
@@ -28,6 +29,7 @@ export default defineTool({
     university: z.string().min(1).max(80).optional().describe("University or school, e.g. \"EPFL\"."),
     language: z.enum(LANGUAGES).optional().describe("Language of the course materials and exams (default fr)."),
     exam_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Exam date, YYYY-MM-DD."),
+    exam_format: z.object(examFormatInput).optional().describe("Real format of the exam, if known (can be changed later with set_exam_format)."),
   }),
   output,
   async run(args, ctx) {
@@ -38,7 +40,7 @@ export default defineTool({
     if (twin) throw new ToolError("conflict", `Un cours porte déjà le code ${code} : ${courseLabel(twin)} (id ${twin.id}).`);
     let row;
     try {
-      row = buildCourseRow({ name: args.name, code, university: args.university, language: args.language, examDate: args.exam_date }, userId);
+      row = buildCourseRow({ name: args.name, code, university: args.university, language: args.language, examDate: args.exam_date, examFormat: args.exam_format }, userId);
     } catch (e) {
       if (e instanceof InvalidCourseError) throw new ToolError("invalid_input", e.message);
       throw e;

@@ -1,4 +1,5 @@
 import type { CourseConfig } from "@/lib/courses";
+import type { DeclaredFormat } from "@/lib/exam-format";
 
 /** Vue d'un cours exposée par /api/courses — jamais les chemins ni le propriétaire. */
 export type CourseDto = {
@@ -11,6 +12,8 @@ export type CourseDto = {
   language: string;
   examDate: string | null;
   durationMin: number;
+  /** Format d'examen déclaré (null = rien de déclaré). */
+  examFormat: DeclaredFormat | null;
   createdAt: string;
 };
 
@@ -25,6 +28,7 @@ export function toDto(c: CourseConfig): CourseDto {
     language: c.language,
     examDate: c.examDate ?? null,
     durationMin: c.durationMin,
+    examFormat: c.examFormat,
     createdAt: c.createdAt,
   };
 }

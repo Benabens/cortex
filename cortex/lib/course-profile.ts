@@ -73,7 +73,8 @@ export function getProfile(courseId?: string): CourseProfile {
   if (curated) return curated;
   if (id && id !== DEFAULT_COURSE && c) {
     let g = GENERIC_CACHE.get(id);
-    if (!g) { g = makeGenericProfile(id, genericArchetypes()); GENERIC_CACHE.set(id, g); }
+    // adaptatif : langue de l'examen et archétypes selon le format résolu (lib/exam-format).
+    if (!g) { g = makeGenericProfile(id, genericArchetypes(), { adaptive: true }); GENERIC_CACHE.set(id, g); }
     return g;
   }
   return PROFILES[DEFAULT_COURSE];

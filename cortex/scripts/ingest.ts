@@ -17,6 +17,7 @@ import { dbDriverName, q } from "../db/q";
 import { coursePaths, DEFAULT_COURSE, ensureCoursesLoaded } from "../lib/courses";
 import { importFolder } from "../lib/import-folder";
 import { ingestAllRefs } from "../lib/sources";
+import { sourceTypeForFolder } from "../lib/course-source";
 import { tokenize } from "../lib/text";
 import { extractOfficeText, type OfficeExtension } from "../lib/office-documents";
 
@@ -406,6 +407,9 @@ async function buildVocab(): Promise<number> {
 
 // ---------- Ingestion GÉNÉRIQUE (cours ≠ cs-202) : tout le contenu de data/<id>/content ----------
 function inferGenericType(rel: string): { type: string; year: number | null } {
+  // Dossier rangé par catégorie (questions d'exemple officielles, consignes d'examen) : il prime sur le nom.
+  const byFolder = sourceTypeForFolder(rel);
+  if (byFolder) return { type: byFolder, year: null };
   const f = rel.toLowerCase();
   let m;
   if ((m = f.match(/final.*?(\d{4})|(\d{4}).*?final/))) return { type: "final", year: +(m[1] || m[2]) };

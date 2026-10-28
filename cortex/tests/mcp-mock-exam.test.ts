@@ -1,9 +1,10 @@
 /**
  * EXAMEN BLANC SUR UN COURS SANS ANNALES — HUM-285 (27/10/2026) : sans annales, le
  * blueprint n'avait qu'un créneau, et une demande de « ~20 QCM » produisait UN exercice.
- * Désormais, sans annales, l'outil suit la demande : le format (QCM si `format: "mcq"`
- * ou si le focus le dit) et le nombre (`exercise_count`), avec un défaut raisonnable, et
- * il le dit dans sa réponse. Avec des annales, le format réel des examens reste la règle.
+ * Désormais l'outil suit le FORMAT du cours (lib/exam-format : annales > déclaré >
+ * exemples officiels > infos de cours), ou celui demandé explicitement pour cet examen
+ * (`format`) ; le focus n'est qu'un thème. Sans rien pour dire le format : refus
+ * format_required, avant tout devis. Avec des annales, leur format reste la règle.
  */
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
@@ -56,62 +57,6 @@ after(async () => {
   fs.rmSync(DATA_DIR, { recursive: true, force: true });
 });
 
-// ───────────────────────────── décision ─────────────────────────────
-
-test("sans annales : le focus « ~20 QCM » donne 20 QCM (générateur QCM), et la réponse le dit", async () => {
-  const { planMockExam } = await import("../lib/generation");
-  const p = planMockExam({ request: "~20 QCM sur la révolution scientifique", focus: "~20 QCM sur la révolution scientifique", hasPastExams: false });
-  assert.ok(!("error" in p));
-  assert.deepEqual([p.format, p.jobType, p.count], ["mcq", "qcm", 20]);
-  assert.deepEqual(JSON.parse(p.target!), { count: 20, openCount: 0, focus: "~20 QCM sur la révolution scientifique" });
-  assert.match(p.note ?? "", /annales/);
-  assert.match(p.note ?? "", /20 QCM/);
-});
-
-test("sans annales : format et nombre demandés respectés ; défauts raisonnables sinon", async () => {
-  const { planMockExam } = await import("../lib/generation");
-  const mcq = planMockExam({ format: "mcq", count: 15, focus: null, hasPastExams: false });
-  assert.deepEqual(["error" in mcq ? null : [mcq.jobType, mcq.count]], [["qcm", 15]]);
-  const written = planMockExam({ request: "intégrales", focus: "intégrales", hasPastExams: false });
-  assert.deepEqual(["error" in written ? null : [written.format, written.jobType, written.count]], [["written", "exam", 6]]);
-  assert.match("error" in written ? "" : written.note ?? "", /6 exercices/);
-  const nine = planMockExam({ format: "written", count: 9, focus: null, hasPastExams: false });
-  assert.deepEqual(["error" in nine ? null : nine.count], [9]);
-  const tooMany = planMockExam({ format: "written", count: 20, focus: null, hasPastExams: false });
-  assert.ok("error" in tooMany, "un examen écrit compte au plus 12 exercices");
-});
-
-test("avec des annales : leur format reste la règle, même si on demande des QCM — et la réponse le dit", async () => {
-  const { planMockExam } = await import("../lib/generation");
-  const p = planMockExam({ request: "QCM sur les séries", focus: "QCM sur les séries", hasPastExams: true });
-  assert.deepEqual(["error" in p ? null : [p.format, p.jobType, p.count, p.note]], [["written", "exam", null, null]]);
-  // L'app ne génère des QCM que si les annales en contiennent (format détecté) : le connecteur ne contourne pas cette règle.
-  const explicit = planMockExam({ format: "mcq", focus: null, hasPastExams: true });
-  assert.ok(!("error" in explicit));
-  assert.deepEqual([explicit.jobType, explicit.format], ["exam", "written"]);
-  assert.match(explicit.note ?? "", /annales/);
-});
-
-test("détection des QCM dans la demande : pluriel et nombre lus, négations et titres de chapitre ignorés", async () => {
-  const { planMockExam } = await import("../lib/generation");
-  const kind = (request: string, focus = request) => {
-    const p = planMockExam({ request, focus, hasPastExams: false });
-    return "error" in p ? "error" : `${p.format}:${p.count}`;
-  };
-  assert.equal(kind("~30 QCM sur Galilée"), "mcq:30");
-  assert.equal(kind("des QCMs sur Newton"), "mcq:20");
-  assert.equal(kind("15 questions à choix multiples"), "mcq:15");
-  assert.equal(kind("pas de QCM, que des exercices"), "written:6");
-  assert.equal(kind("sans QCM"), "written:6");
-  assert.equal(kind("no MCQ please"), "written:6");
-  // Le titre d'un chapitre (« QCM et statistiques ») n'est pas une demande de format.
-  const chapter = planMockExam({ request: null, focus: "Chapitre 4 : QCM et statistiques", hasPastExams: false });
-  assert.deepEqual(["error" in chapter ? null : chapter.format], ["written"]);
-  // Un nombre explicite l'emporte sur celui du texte.
-  const explicit = planMockExam({ request: "~30 QCM", focus: "~30 QCM", count: 12, hasPastExams: false });
-  assert.deepEqual(["error" in explicit ? null : explicit.count], [12]);
-});
-
 // ───────────────────────────── par le connecteur ─────────────────────────────
 
 const formPost = (p: string, fields: Record<string, string>, headers: Record<string, string> = {}) =>
@@ -142,22 +87,63 @@ async function client(): Promise<Client> {
 type ToolResult = { isError?: boolean; content?: Array<{ text?: string }>; structuredContent?: Record<string, unknown> };
 const text = (r: ToolResult) => (r.content ?? []).map((x) => x.text ?? "").join("\n");
 
-test("generate_mock_exam sur HUM-285 (sans annales) : devis pour 20 QCM au tarif du QCM, et la raison dans la réponse", async () => {
+const errorCode = (r: ToolResult & { _meta?: Record<string, unknown> }) => (r._meta?.["com.cortexexam/error"] as { code?: string } | undefined)?.code;
+
+test("sans annales ni format : « ~20 QCM » dans le focus ne décide pas du format — refus format_required, sans devis", async () => {
+  const c = await client();
+  const r = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "HUM-285", focus: "~20 QCM sur la révolution scientifique" } })) as ToolResult;
+  assert.equal(r.isError, true);
+  assert.equal(errorCode(r), "format_required");
+  assert.match(text(r), /set_exam_format/);
+  await c.close();
+});
+
+test("format demandé pour CET examen : QCM au nombre voulu et au tarif du QCM ; écrit borné à 12 exercices", async () => {
   const { costForJob } = await import("../lib/jobs");
   const { fromCenti } = await import("../lib/billing/credits");
   const c = await client();
-  const r = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "HUM-285", focus: "~20 QCM sur la révolution scientifique" } })) as ToolResult;
+  const r = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "HUM-285", format: "mcq", exercise_count: 15, focus: "Galilée" } })) as ToolResult;
+  assert.equal(r.isError, undefined, text(r));
+  const sc = r.structuredContent as { status: string; format: string; exercise_count: number; note: string | null; confirmation: { cost_credits: number } };
+  assert.deepEqual([sc.status, sc.format, sc.exercise_count], ["confirmation_required", "mcq", 15]);
+  assert.equal(sc.confirmation.cost_credits, fromCenti(costForJob("qcm", JSON.stringify({ count: 15, openCount: 0, focus: "Galilée" }))));
+  assert.match(sc.note ?? "", /annales/);
+  const tooMany = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "HUM-285", format: "written", exercise_count: 20 } })) as ToolResult;
+  assert.equal(errorCode(tooMany), "invalid_input");
+  // « written » sur un cours au format inconnu : devis d'un écrit, et la demande voyage dans la cible du job
+  // (sans elle, le lancement relirait le format du cours, inconnu, et refuserait après confirmation).
+  const written = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "HUM-285", format: "written", exercise_count: 3 } })) as ToolResult;
+  assert.equal(written.isError, undefined, text(written));
+  const w = written.structuredContent as { format: string; exercise_count: number; confirmation: { cost_credits: number } };
+  assert.deepEqual([w.format, w.exercise_count], ["written", 3]);
+  assert.equal(w.confirmation.cost_credits, fromCenti(costForJob("exam", JSON.stringify({ count: 3, kind: "exercises" }))));
+  await c.close();
+});
+
+test("HUM-285 au format déclaré (QCM, 20 questions) : devis pour 20 QCM au tarif du QCM, et la raison dans la réponse", async () => {
+  const { costForJob } = await import("../lib/jobs");
+  const { fromCenti } = await import("../lib/billing/credits");
+  const { updateCourseRow } = await import("../db/courses-store");
+  const { listCoursesOf, reloadCourses } = await import("../lib/courses");
+  const hum = listCoursesOf(ALICE).find((x) => x.examCode === "HUM-285")!;
+  await updateCourseRow(hum.id, ALICE, { exam_format: JSON.stringify({ kind: "qcm", questionCount: 20, durationMin: 45, language: null }) });
+  await reloadCourses();
+  const c = await client();
+  const r = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "HUM-285", focus: "moitié Bendahan, moitié Cavallaro" } })) as ToolResult;
   assert.equal(r.isError, undefined, text(r));
   const sc = r.structuredContent as { status: string; format: string; exercise_count: number; note: string | null; confirmation: { cost_credits: number } };
   assert.deepEqual([sc.status, sc.format, sc.exercise_count], ["confirmation_required", "mcq", 20]);
   assert.match(sc.note ?? "", /annales/);
-  const target = JSON.stringify({ count: 20, openCount: 0, focus: "~20 QCM sur la révolution scientifique" });
+  assert.match(sc.note ?? "", /déclaré/, "la note dit d'où vient le format");
+  const target = JSON.stringify({ count: 20, openCount: 0, focus: "moitié Bendahan, moitié Cavallaro" });
   assert.equal(sc.confirmation.cost_credits, fromCenti(costForJob("qcm", target)));
   assert.match(text(r), /annales/, "le résumé lu par le modèle le dit aussi");
 
-  const exam = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "MATH-101", focus: "QCM sur les séries" } })) as ToolResult;
+  // Avec des annales : leur format fait la règle, une demande de QCM n'est pas appliquée — et c'est dit.
+  const exam = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "MATH-101", focus: "QCM sur les séries", format: "mcq" } })) as ToolResult;
   const ex = exam.structuredContent as { format: string; exercise_count: number | null; note: string | null };
-  assert.deepEqual([ex.format, ex.exercise_count, ex.note], ["written", null, null], "avec annales : format réel");
+  assert.deepEqual([ex.format, ex.exercise_count], ["written", null], "avec annales : format réel");
+  assert.match(ex.note ?? "", /annales/);
   await c.close();
 });
 

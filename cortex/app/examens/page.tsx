@@ -79,6 +79,15 @@ export default function ExamensPage() {
             </Button>
           )}
         </Panel>
+      ) : compose.data.plan.kind === "unknown" ? (
+        <Panel className="flex flex-col items-center gap-3 rounded-xl px-6 py-12 text-center">
+          <FileText className="size-6 text-ink-3" strokeWidth={2} />
+          <p className="text-[0.95rem] font-medium text-ink-1">Format de l’examen inconnu</p>
+          <p className="max-w-md text-[0.85rem] leading-relaxed text-ink-3">{compose.data.plan.summary}</p>
+          <Button variant="primary" size="sm" href="/cours">
+            Déclarer le format
+          </Button>
+        </Panel>
       ) : (
         <ExamComposer plan={compose.data.plan} onGenerated={exams.refetch} />
       )}

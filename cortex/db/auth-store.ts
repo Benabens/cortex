@@ -604,6 +604,15 @@ const SUBS_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "status_at", sqlite: "TEXT", pg: "text" },
   { name: "cancel_at_period_end", sqlite: "INTEGER NOT NULL DEFAULT 0", pg: "integer NOT NULL DEFAULT 0" },
 ];
+
+/**
+ * Colonnes ajoutées à `courses` après coup. `exam_format` : format d'examen
+ * DÉCLARÉ par l'étudiant (JSON : type, nombre de questions, durée, langue) —
+ * seule source de format d'un cours sans annale (lib/exam-format).
+ */
+const COURSES_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
+  { name: "exam_format", sqlite: "TEXT", pg: "text" },
+];
 const CREDIT_TX_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "sub_amount", sqlite: "INTEGER NOT NULL DEFAULT 0", pg: "integer NOT NULL DEFAULT 0" },
   // Unité de `delta` PAR LIGNE : 'centi' (écrit par ce code), NULL = crédits
@@ -668,6 +677,12 @@ function sqliteAuth(): Database.Database {
     for (const c of SUBS_ADDED) {
       if (!haveSubs.has(c.name)) _sqliteAuth.exec(`ALTER TABLE subscriptions ADD COLUMN ${c.name} ${c.sqlite}`);
     }
+    const haveCourses = new Set(
+      (_sqliteAuth.prepare("PRAGMA table_info(courses)").all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    for (const c of COURSES_ADDED) {
+      if (!haveCourses.has(c.name)) _sqliteAuth.exec(`ALTER TABLE courses ADD COLUMN ${c.name} ${c.sqlite}`);
+    }
   }
   return _sqliteAuth;
 }
@@ -713,6 +728,9 @@ async function pgExec(): Promise<{
     }
     for (const c of SUBS_ADDED) {
       await authPgQuery(`ALTER TABLE public.subscriptions ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
+    }
+    for (const c of COURSES_ADDED) {
+      await authPgQuery(`ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
     }
     _pgReady = true;
     await ensureCreditRefUnique();
