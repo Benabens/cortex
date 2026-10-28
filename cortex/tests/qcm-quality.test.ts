@@ -182,3 +182,21 @@ test("juge à l'aveugle : un item réussi avec les seuls noms des notions est r�
     assert.match(it.options[it.correct[0]], /six fois plus vite que les vraies/, "la clé suit sa proposition après mélange");
   }
 });
+
+test("forme des options : celle des annales quand il y en a (valeurs courtes en calcul), propositions complètes sinon ; les lots se connaissent", async () => {
+  const id = await humCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmBatch } = await import("../lib/qcm");
+  const topics = [{ label: "Descente de gradient", method: null }];
+  const others = ["Descente de gradient", "Noyaux et SVM", "K-means"];
+  prompts.length = 0;
+  await runWithCourse(id, () => generateQcmBatch(topics, 1, () => {}, undefined, undefined, { withAnnales: true, examTopics: others }));
+  const withAnnales = prompts.find((p) => /"items"/.test(p))!;
+  assert.match(withAnnales, /même forme que dans les annales/i);
+  assert.doesNotMatch(withAnnales, /PROPOSITIONS COMPLÈTES : chaque option/);
+  assert.match(withAnnales, /Noyaux et SVM[\s\S]*K-means/, "le lot voit les sujets des autres questions de l'examen");
+  assert.match(withAnnales, /phrase commune/i);
+  prompts.length = 0;
+  await runWithCourse(id, () => generateQcmBatch(topics, 1, () => {}, undefined, undefined, { withAnnales: false }));
+  assert.match(prompts.find((p) => /"items"/.test(p))!, /PROPOSITIONS COMPLÈTES/);
+});

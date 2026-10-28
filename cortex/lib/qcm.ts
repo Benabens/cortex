@@ -123,11 +123,24 @@ const DISTRACTOR_TAXONOMY = [
   `  · [calcul] (matières quantitatives) l'erreur de calcul ou de méthode typique — jamais une valeur au hasard.`,
 ];
 
+/** Sans annale : rien ne dit la forme des options ; une proposition complète discrimine, un nom de notion non. */
+const OPTIONS_WITHOUT_ANNALES =
+  `  - OPTIONS = PROPOSITIONS COMPLÈTES : chaque option est une phrase autonome qui affirme quelque chose de vérifiable — jamais un mot isolé ni un simple nom de notion ; longueurs comparables (±30 %), même structure grammaticale ; toutes plausibles pour un étudiant qui n'a retenu que les noms des notions.`;
+
+/**
+ * Avec annales : leur forme fait foi. Imposer des phrases à un cours de calcul (CS-233)
+ * allongeait les options et répétait la même phrase en tête de chacune : le juge à
+ * l'aveugle préférait alors l'ancien examen (banc du 28/10/2026).
+ */
+const OPTIONS_WITH_ANNALES =
+  `  - OPTIONS : même forme que dans les annales du cours — une valeur ou une expression courte pour une question de calcul, une affirmation COMPLÈTE pour une question conceptuelle (jamais un nom de notion seul) ; longueurs comparables.`;
+
 const OPTION_RULES = [
-  `  - OPTIONS = PROPOSITIONS COMPLÈTES : chaque option est une phrase autonome qui affirme quelque chose de vérifiable — jamais un mot isolé ni un simple nom de notion ; longueurs comparables (±30 %), même structure grammaticale ; toutes plausibles pour un étudiant qui n'a retenu que les noms des notions.`,
+  `  - Aucune phrase commune répétée en tête de chaque option : factorise-la dans l'énoncé.`,
   `  - AUCUN distracteur réfutable par le bon sens ou par le sens des mots (définition évidente, contresens grossier, absolu) : chacun doit paraître juste à un étudiant qui connaît le thème mais pas le détail du cours ; même registre et même degré de nuance que la bonne réponse.`,
   `  - TIGES INDÉPENDANTES : chaque question se comprend seule, sans scénario partagé avec une autre question, et ne donne pas la réponse d'une autre.`,
   `  - EXPLICATION : désigne les options par leur CONTENU, jamais par leur lettre ou leur numéro (l'ordre des options est mélangé après coup).`,
+  `  - MCQ : fais varier le nombre de bonnes réponses d'une question à l'autre (une régularité se devine).`,
   `  - ANCRAGE : chaque question teste un FAIT PRÉCIS des extraits du cours fournis (résultat d'étude avec auteurs et chiffres, condition d'une définition, mécanisme) ; recopie ce fait dans "source_fact". Rien hors des extraits et du programme.`,
 ];
 
@@ -285,8 +298,10 @@ export async function generateQcmBatch(
     examples?: { src: string; text: string }[];
     /** Langue de l'examen ; absente → celle du cours (lib/exam-format). */
     language?: string;
-    /** Les annales du cours contiennent ce genre de question : « classe ce cas » permis. */
-    allowClassification?: boolean;
+    /** Le cours a des annales : leur forme d'options fait foi, « classe ce cas » seulement si elles en ont. */
+    withAnnales?: boolean;
+    /** Sujets de TOUTES les questions de l'examen : un lot ne réutilise ni la fonction ni le scénario d'un autre. */
+    examTopics?: string[];
   } = {}
 ): Promise<QcmItem[]> {
   const fmt = await getFormatProfile();
@@ -326,8 +341,9 @@ export async function generateQcmBatch(
     imgs.length ? `Pages d'examens réelles à imiter (outil Read) :\n${imgs.map((p) => `  - ${p}`).join("\n")}` : ``,
     ``,
     ...ARCHITECT_QCM_RULES,
+    opts.withAnnales ? OPTIONS_WITH_ANNALES : OPTIONS_WITHOUT_ANNALES,
     ...OPTION_RULES,
-    opts.allowClassification ? CLASSIFICATION_IF_ANNALES : NO_CLASSIFICATION,
+    opts.withAnnales ? CLASSIFICATION_IF_ANNALES : NO_CLASSIFICATION,
     `  - LANGUE : toutes les questions, options et explications en ${language}.`,
     // Avec des moules (ADN des annales) : la consigne historique. Sans : un scénario n'est
     // qu'un moyen de tester un fait ou une condition, jamais un cas à étiqueter (HUM-285).
@@ -346,6 +362,9 @@ export async function generateQcmBatch(
     examples.length ? dataBlock(`QUESTIONS D'EXEMPLE OFFICIELLES de l'enseignant — imite leur STYLE (forme des options, niveau de détail, pièges), ne les recopie JAMAIS`, examples) : null,
     ``,
     coverage,
+    opts.examTopics?.length
+      ? `Les autres questions de l'examen portent sur : ${[...new Set(opts.examTopics)].map((t) => sanitizeCorpus(t).slice(0, 80)).join(" · ")}. Ne réutilise ni leur fonction, ni leurs données, ni leur scénario : chaque question doit rester indépendante.`
+      : null,
     guidance ? `\n${guidance}` : null,
     `Réponds UNIQUEMENT avec l'objet JSON { "items": [ … ] } (${n} QCM). Aucun fichier.`,
     JSON.stringify(QCM_BATCH_SCHEMA, null, 2),
@@ -497,7 +516,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const shared = {
     dna,
     language: format?.language,
-    allowClassification: withAnnales,
+    withAnnales,
+    examTopics: qcmTopics.map((t) => t.label),
     examples: withAnnales ? [] : await officialExamples().catch(() => []),
   };
   step(`Architecte : ${count} QCM + ${openCount} ouverte(s)${focus ? ` (accent : « ${focus} »)` : ""}${dna ? ` · moules ADN (${dna.molds.length})` : " au format détecté"}…`, 8);
