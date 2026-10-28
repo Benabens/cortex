@@ -26,6 +26,8 @@ process.env.LLM_MAX_RETRIES = "0";
 
 const prompts: string[] = [];
 let verifyCalls = 0;
+/** Le juge résout la question 2 avec DEUX réponses (une SCQ ambiguë) au premier passage. */
+let twoKeys = false;
 
 /** Un QCM bien construit : propositions complètes, longueurs comparables. */
 function item(i: number, regen = false) {
@@ -57,7 +59,9 @@ function reply(prompt: string): unknown {
       return { i, key: opt ? Number(opt[1]) : 0 };
     });
     // Première vérification : la question 1 se résout avec les seuls noms des notions → faible.
-    return { results: solved.map(({ i, key }) => verifyCalls === 1 && i === 1
+    return { results: solved.map(({ i, key }) => twoKeys && verifyCalls === 1 && i === 2
+      ? { index: i, correct: [key, (key + 1) % 4], ok: false, discrimination: 4, name_only: false, issue: "deux réponses défendables" }
+      : verifyCalls === 1 && i === 1
       ? { index: i, correct: [key], ok: true, discrimination: 1, name_only: true, issue: "options = noms de notions, réussie sans connaître l'étude" }
       : { index: i, correct: [key], ok: true, discrimination: 4, name_only: false, issue: "" }) };
   }
@@ -192,11 +196,31 @@ test("forme des options : celle des annales quand il y en a (valeurs courtes en 
   prompts.length = 0;
   await runWithCourse(id, () => generateQcmBatch(topics, 1, () => {}, undefined, undefined, { withAnnales: true, examTopics: others }));
   const withAnnales = prompts.find((p) => /"items"/.test(p))!;
-  assert.match(withAnnales, /même forme que dans les annales/i);
+  assert.match(withAnnales, /même forme et même nombre d'options que dans les annales/i);
   assert.doesNotMatch(withAnnales, /PROPOSITIONS COMPLÈTES : chaque option/);
   assert.match(withAnnales, /Noyaux et SVM[\s\S]*K-means/, "le lot voit les sujets des autres questions de l'examen");
   assert.match(withAnnales, /phrase commune/i);
   prompts.length = 0;
   await runWithCourse(id, () => generateQcmBatch(topics, 1, () => {}, undefined, undefined, { withAnnales: false }));
   assert.match(prompts.find((p) => /"items"/.test(p))!, /PROPOSITIONS COMPLÈTES/);
+});
+
+test("une question à réponse unique que le juge résout avec deux réponses est faible : régénérée, jamais gardée avec deux clés", async () => {
+  const id = await humCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  prompts.length = 0;
+  verifyCalls = 0;
+  twoKeys = true;
+  try {
+    const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
+    const regen = prompts.find((p) => /À CORRIGER/.test(p));
+    assert.match(regen ?? "", /plusieurs réponses défendables|deux réponses défendables/);
+    const exam = await runWithCourse(id, () => getQcmExam(r.id, true));
+    for (const it of exam!.items as (NonNullable<typeof exam>["items"][number] & { correct: number[] })[]) {
+      if (it.type === "scq") assert.equal(it.correct.length, 1, it.stem);
+    }
+  } finally {
+    twoKeys = false;
+  }
 });

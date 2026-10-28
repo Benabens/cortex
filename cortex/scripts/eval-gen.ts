@@ -10,7 +10,7 @@
  *   CORTEX_DATA_DIR=/tmp/banc npx tsx scripts/eval-gen.ts run --course <id> --job prepare
  *   CORTEX_DATA_DIR=/tmp/banc npx tsx scripts/eval-gen.ts run --course <id> --job exam \
  *        --target '{"focus":"…"}' --out /tmp/hum-apres.json
- *   # 3. le juge à l'aveugle (chaque examen noté seul, puis une comparaison en ordre tiré au sort)
+ *   # 3. le juge à l'aveugle (chaque examen noté seul, puis --pairs N comparaisons en ordre tiré au sort)
  *   CORTEX_DATA_DIR=/tmp/banc npx tsx scripts/eval-gen.ts judge --course <id> --truth "QCM ~20 questions…" \
  *        --exams /tmp/hum-avant.json,/tmp/hum-apres.json --out /tmp/hum-juge.json
  *
@@ -218,12 +218,19 @@ async function judge(): Promise<void> {
     console.log(JSON.stringify({ exam: e.file, ...(results[e.file] as object) }));
   }
   if (exams.length === 2 && exams.every((e) => e.data.exam)) {
-    // Ordre tiré au sort (graine affichée) : le juge ne sait pas lequel est « avant ».
-    const seed = crypto.randomInt(0, 2);
-    const [x, y] = seed ? [exams[1], exams[0]] : [exams[0], exams[1]];
-    const p = await judgePair(x.data.exam!, y.data.exam!, truth);
-    results.pairwise = { X: x.file, Y: y.file, preferred: p.preferred === "X" ? x.file : y.file, why: p.why };
-    console.log(JSON.stringify(results.pairwise));
+    // Ordre tiré au sort à chaque comparaison : le juge ne sait pas lequel est « avant ».
+    // --pairs N : N comparaisons, pour lisser le bruit d'un juge LLM (décompte des préférences).
+    const runs = Math.max(1, Number(arg("pairs") ?? 1));
+    const pairs: { X: string; Y: string; preferred: string; why: string }[] = [];
+    for (let i = 0; i < runs; i++) {
+      const [x, y] = crypto.randomInt(0, 2) ? [exams[1], exams[0]] : [exams[0], exams[1]];
+      const p = await judgePair(x.data.exam!, y.data.exam!, truth);
+      pairs.push({ X: x.file, Y: y.file, preferred: p.preferred === "X" ? x.file : y.file, why: p.why });
+      console.log(JSON.stringify(pairs[pairs.length - 1]));
+    }
+    results.pairwise = pairs[0];
+    results.pairwise_tally = Object.fromEntries(exams.map((e) => [e.file, pairs.filter((p) => p.preferred === e.file).length]));
+    results.pairwise_all = pairs;
   }
   const out = arg("out");
   if (out) fs.writeFileSync(out, JSON.stringify(results, null, 2));
