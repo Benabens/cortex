@@ -136,6 +136,16 @@ test("la longueur ou la position ne trahissent plus la bonne réponse", async ()
   assert.ok(moved.size >= 3, "la bonne réponse change de position d'un item à l'autre");
 });
 
+test("une explication qui renvoie à une option par sa lettre ou son numéro est repérée, pas une tournure française", async () => {
+  const { citesOptionLabel } = await import("../lib/qcm");
+  for (const t of ["L'option 3 confond corrélation et causalité.", "La réponse B inverse le résultat.", "(C) sur-généralise.", "A) est faux car…", "Option b : mauvaise attribution."]) {
+    assert.equal(citesOptionLabel(t), true, t);
+  }
+  for (const t of ["L'option d'interdire supprime la liberté de choix.", "Une option de sortie existe.", "Le choix d'un défaut change tout.", "A nudge preserves freedom of choice."]) {
+    assert.equal(citesOptionLabel(t), false, t);
+  }
+});
+
 test("conception : taxonomie de distracteurs, langue, faits précis du cours, exemples officiels, pas de « classe ce cas »", async () => {
   const id = await humCourse();
   const { runWithCourse } = await import("../db/client");

@@ -66,7 +66,7 @@ const QCM_BATCH_SCHEMA = {
           correct: { type: "array", items: { type: "integer" }, description: "Indices 0-based de la/des bonne(s) réponse(s). Exactement 1 pour scq." },
           misconceptions: { type: "array", items: { type: "string" }, description: "Pour CHAQUE option : « [procédé] idée fausse précise » que ce distracteur punit (procédé de la taxonomie) ; chaîne vide pour les bonnes réponses." },
           source_fact: { type: "string", description: "Le fait PRÉCIS du cours que la question teste (étude et chiffre, condition d'une définition, mécanisme), tel qu'il apparaît dans les extraits." },
-          explanation: { type: "string", description: "Pourquoi la bonne réponse est correcte ET pourquoi chaque distracteur est faux." },
+          explanation: { type: "string", description: "Pourquoi la bonne réponse est correcte ET pourquoi chaque distracteur est faux, en désignant chaque option par son CONTENU — jamais « option 2 », « B » ni « (c) » : l'ordre des options est mélangé après coup." },
           mold: { type: "string", description: "Recopie le MOULE imposé pour cette question (voir la consigne par question)." },
           figure_spec: { type: "object", description: "UNIQUEMENT si la question exige une figure data/plot (moule figure_reading) : le FIGURE SPEC JSON décrit dans le prompt. Sinon omets ce champ." },
         },
@@ -118,13 +118,14 @@ const DISTRACTOR_TAXONOMY = [
   `  · [inversion] le résultat ou le sens d'un effet est inversé (augmente ↔ diminue, plus ↔ moins, cause ↔ conséquence) ;`,
   `  · [mauvaise condition] la bonne notion, mais une condition de sa définition change ou manque (même mesure, une seule condition diffère) ;`,
   `  · [mauvaise attribution] le bon chiffre ou le bon résultat attribué à la mauvaise étude, au mauvais auteur, pays, année ou acteur ;`,
-  `  · [sur-généralisation] un résultat vrai sous conditions présenté comme universel (« toujours », « dans tous les cas », « suffit à ») ;`,
+  `  · [sur-généralisation] un résultat vrai sous conditions, étendu à une condition voisine où il ne tient plus — SANS marqueur d'absolu (« toujours », « jamais », « suffit à », « quelles que soient », « dans tous les cas » trahissent le distracteur) ;`,
   `  · [quasi-synonyme] une notion voisine du cours, confondue avec la bonne (même famille, autre définition) ;`,
   `  · [calcul] (matières quantitatives) l'erreur de calcul ou de méthode typique — jamais une valeur au hasard.`,
 ];
 
 const OPTION_RULES = [
   `  - OPTIONS = PROPOSITIONS COMPLÈTES : chaque option est une phrase autonome qui affirme quelque chose de vérifiable — jamais un mot isolé ni un simple nom de notion ; longueurs comparables (±30 %), même structure grammaticale ; toutes plausibles pour un étudiant qui n'a retenu que les noms des notions.`,
+  `  - AUCUN distracteur réfutable par le bon sens ou par le sens des mots (définition évidente, contresens grossier, absolu) : chacun doit paraître juste à un étudiant qui connaît le thème mais pas le détail du cours ; même registre et même degré de nuance que la bonne réponse.`,
   `  - TIGES INDÉPENDANTES : chaque question se comprend seule, sans scénario partagé avec une autre question, et ne donne pas la réponse d'une autre.`,
   `  - EXPLICATION : désigne les options par leur CONTENU, jamais par leur lettre ou leur numéro (l'ordre des options est mélangé après coup).`,
   `  - ANCRAGE : chaque question teste un FAIT PRÉCIS des extraits du cours fournis (résultat d'étude avec auteurs et chiffres, condition d'une définition, mécanisme) ; recopie ce fait dans "source_fact". Rien hors des extraits et du programme.`,
@@ -137,8 +138,16 @@ const NO_CLASSIFICATION =
 const CLASSIFICATION_IF_ANNALES =
   `  - Les questions « classe ce cas dans la notion X » (options = noms de notions) ne sont permises QUE si les vraies questions des annales du cours en contiennent ; sinon, teste les CONDITIONS qui font qu'un cas relève ou non d'une notion.`;
 
-/** Une explication qui cite une option par sa lettre deviendrait fausse après le mélange des options. */
-const LETTER_REF = /\b(?:option|réponse|choix|answer|choice|proposition)\s*\(?[A-H1-5]\)?(?![\p{L}])|\([A-H]\)|(?:^|\s)[A-H]\)\s/iu;
+/**
+ * Une explication qui cite une option par sa lettre ou son numéro deviendrait fausse
+ * après le mélange des options : elle n'est pas mélangée. Pas les tournures françaises
+ * (« l'option d'interdire ») ni l'article anglais « A ».
+ */
+export function citesOptionLabel(text: string): boolean {
+  return /\b(?:[Oo]ptions?|[Rr]éponses?|[Cc]hoix|[Aa]nswers?|[Cc]hoices?|[Pp]ropositions?)\s*\(?(?:[A-Ha-h]|[0-9])\)?(?![\p{L}'’])/u.test(text)
+    || /\([A-H0-9]\)/.test(text)
+    || /(?:^|\s)[A-H]\)\s/.test(text);
+}
 
 /** Types de sources jamais pris comme « faits du cours » à tester (annales : on n'en recopie pas les questions). */
 const NOT_COURSE_FACTS = new Set<string>(EXAM_SOURCE_TYPES);
@@ -360,7 +369,7 @@ export async function generateQcmBatch(
     };
     delete (base as { source_fact?: unknown }).source_fact;
     // Position de la bonne réponse mélangée (graine = l'énoncé : reproductible), jamais pour une question à figure.
-    const it = Array.isArray(base.options) && Array.isArray(base.correct) && !(raw as { figure_spec?: unknown }).figure_spec && !LETTER_REF.test(base.explanation ?? "")
+    const it = Array.isArray(base.options) && Array.isArray(base.correct) && !(raw as { figure_spec?: unknown }).figure_spec && !citesOptionLabel(base.explanation ?? "")
       ? shuffleQcmOptions(base, seedOf(base.stem ?? ""))
       : base;
     // figure : rendu SANDBOX immédiat (le vérifieur doit la VOIR). Échec de rendu →
