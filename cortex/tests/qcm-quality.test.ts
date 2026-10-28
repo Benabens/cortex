@@ -224,3 +224,15 @@ test("une question à réponse unique que le juge résout avec deux réponses es
     twoKeys = false;
   }
 });
+
+test("moins de notions que de questions : les supports du cours complètent la couverture, un thème repris exige un autre fait", async () => {
+  const id = await humCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  prompts.length = 0;
+  verifyCalls = 0;
+  await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
+  const gens = prompts.filter((p) => /"items"/.test(p) && !/À CORRIGER/.test(p)).join("\n");
+  assert.match(gens, /Couvre ces sujets[\s\S]*Vérifier et entreprendre/, "le titre du support entre dans la couverture");
+  assert.match(gens, /AUTRE fait/, "un thème repris demande un autre fait que la question précédente");
+});
