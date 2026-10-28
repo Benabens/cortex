@@ -8,7 +8,7 @@ import { log } from "@/lib/metrics";
 import { redactMessage } from "@/lib/observability";
 import { clip } from "../content";
 import { courseLabel } from "../courses";
-import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, examFormatOf, examFormatSchema, generationStatus, quoteSchema, quoteSummary } from "../schemas";
+import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, generationStatus, quoteSchema, quoteSummary } from "../schemas";
 import { ToolError, codeForStatus, defineTool, pendingResult } from "../tool";
 
 const output = z.object({
@@ -17,8 +17,9 @@ const output = z.object({
   focus: z.string().nullable().describe("The THEMATIC emphasis sent to the generator (chapter and/or free focus)."),
   format: z.enum(["written", "mcq"]).describe("written = exercises (or essay / oral topics); mcq = multiple-choice questions."),
   exercise_count: z.number().nullable().describe("Exercises (written) or questions (mcq); null = as in the course's exam format."),
-  exam_format: examFormatSchema.describe("The course's exam format the mock exam follows, and where it comes from."),
-  note: z.string().nullable().describe("How the exam was composed when it does not come from past exams (tell the student)."),
+  // Pas de nouveau champ de sortie : un client qui garde la liste d'outils en cache rejette un champ
+  // ajouté (« additional properties », 28/10/2026) ; le format et sa source passent dans `note`.
+  note: z.string().nullable().describe("How the exam was composed when it does not come from past exams: the exam format followed and where it comes from (tell the student)."),
   confirmation: quoteSchema.nullable(),
   declined: declinedSchema.nullable().describe("When status is declined: why, and the cost that was announced."),
   job: z.object({
@@ -98,7 +99,7 @@ export default defineTool({
       const note = course.basis === "annales"
         ? (args.format === "mcq" && !qcm ? "Ce cours a des annales : l'examen suit leur format, la demande de QCM n'est pas appliquée." : null)
         : `Ce cours n'a pas d'annales : format ${format.summary}.`;
-      const base = { course: courseRefOf(c), focus, format: qcm ? "mcq" as const : "written" as const, exercise_count: count, exam_format: examFormatOf(format), note, confirmation: null, declined: null, job: null };
+      const base = { course: courseRefOf(c), focus, format: qcm ? "mcq" as const : "written" as const, exercise_count: count, note, confirmation: null, declined: null, job: null };
       const track = (jobId: number) => ({ job_id: jobId, estimated_minutes: "10-20", track_with: `get_job_status with job_id=${jobId}` });
 
       // Un examen déjà en cours est réutilisé, comme dans l'app : rien à confirmer, rien de débité.

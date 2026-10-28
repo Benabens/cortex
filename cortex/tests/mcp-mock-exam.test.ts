@@ -131,17 +131,18 @@ test("HUM-285 au format déclaré (QCM, 20 questions) : devis pour 20 QCM au tar
   const c = await client();
   const r = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "HUM-285", focus: "moitié Bendahan, moitié Cavallaro" } })) as ToolResult;
   assert.equal(r.isError, undefined, text(r));
-  const sc = r.structuredContent as { status: string; format: string; exercise_count: number; note: string | null; exam_format: { basis: string }; confirmation: { cost_credits: number } };
-  assert.deepEqual([sc.status, sc.format, sc.exercise_count, sc.exam_format.basis], ["confirmation_required", "mcq", 20, "declared"]);
+  const sc = r.structuredContent as { status: string; format: string; exercise_count: number; note: string | null; confirmation: { cost_credits: number } };
+  assert.deepEqual([sc.status, sc.format, sc.exercise_count], ["confirmation_required", "mcq", 20]);
   assert.match(sc.note ?? "", /annales/);
+  assert.match(sc.note ?? "", /déclaré/, "la note dit d'où vient le format");
   const target = JSON.stringify({ count: 20, openCount: 0, focus: "moitié Bendahan, moitié Cavallaro" });
   assert.equal(sc.confirmation.cost_credits, fromCenti(costForJob("qcm", target)));
   assert.match(text(r), /annales/, "le résumé lu par le modèle le dit aussi");
 
   // Avec des annales : leur format fait la règle, une demande de QCM n'est pas appliquée — et c'est dit.
   const exam = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "MATH-101", focus: "QCM sur les séries", format: "mcq" } })) as ToolResult;
-  const ex = exam.structuredContent as { format: string; exercise_count: number | null; note: string | null; exam_format: { basis: string } };
-  assert.deepEqual([ex.format, ex.exercise_count, ex.exam_format.basis], ["written", null, "annales"], "avec annales : format réel");
+  const ex = exam.structuredContent as { format: string; exercise_count: number | null; note: string | null };
+  assert.deepEqual([ex.format, ex.exercise_count], ["written", null], "avec annales : format réel");
   assert.match(ex.note ?? "", /annales/);
   await c.close();
 });
