@@ -133,7 +133,7 @@ const OPTIONS_WITHOUT_ANNALES =
  * l'aveugle préférait alors l'ancien examen (banc du 28/10/2026).
  */
 const OPTIONS_WITH_ANNALES =
-  `  - OPTIONS : même forme que dans les annales du cours — une valeur ou une expression courte pour une question de calcul, une affirmation COMPLÈTE pour une question conceptuelle (jamais un nom de notion seul) ; longueurs comparables.`;
+  `  - OPTIONS : même forme et même NOMBRE d'options que dans les annales du cours — une valeur ou une expression courte pour une question de calcul, une affirmation COMPLÈTE pour une question conceptuelle (jamais un nom de notion seul) ; longueurs comparables.`;
 
 const OPTION_RULES = [
   `  - Aucune phrase commune répétée en tête de chaque option : factorise-la dans l'énoncé.`,
@@ -258,6 +258,7 @@ const seedOf = (s: string) => [...s].reduce((h, ch) => (Math.imul(h, 31) + ch.ch
 
 /** Pourquoi un QCM vérifié est trop faible pour être gardé tel quel, ou null. */
 function weaknessOf(it: QcmItem): string | null {
+  if (it.verified === 0) return it.judgeIssue ?? "clé non confirmée à la vérification à l'aveugle";
   const issue = it.judgeIssue ? ` (${it.judgeIssue})` : "";
   if (it.nameOnly) return `réussie avec les seuls noms des notions ou par élimination${issue}`;
   if (typeof it.discrimination === "number" && it.discrimination <= 2) return `pouvoir discriminant faible (${it.discrimination}/5)${issue}`;
@@ -474,6 +475,13 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     q.nameOnly = typeof r.name_only === "boolean" ? r.name_only : null;
     q.judgeIssue = r.issue?.trim() ? r.issue.trim().slice(0, 240) : null;
     const keyMatch = JSON.stringify([...(q.correct ?? [])].sort()) === JSON.stringify([...(r.correct ?? [])].sort());
+    // Une question à réponse unique que le juge résout avec 0 ou plusieurs réponses est ambiguë :
+    // ni sa clé ni son type ne sont fiables (« SCQ » avec deux clés, banc du 28/10) → à régénérer.
+    if (q.type === "scq" && (r.correct?.length ?? 0) !== 1) {
+      q.verified = 0;
+      q.judgeIssue = `question à réponse unique avec plusieurs réponses défendables${r.issue ? ` (${r.issue.trim().slice(0, 160)})` : ""}`;
+      continue;
+    }
     if (r.ok && keyMatch) q.verified = 1;
     else if (r.correct?.length) { q.correct = r.correct; q.verified = 1; q.explanation = (q.explanation ? q.explanation + " " : "") + (r.issue ? `[clé corrigée à la vérif : ${r.issue}]` : "[clé alignée sur la résolution indépendante]"); }
     else q.verified = 0;
