@@ -86,6 +86,12 @@ idempotentHint: false`, `openWorldHint: true` pour le seul `add_course_source` (
 `false` ailleurs. Seuls les outils d'ajout écrivent (créer un cours, y ranger un fichier, lancer sa
 préparation) ; aucun outil ne supprime un cours ou un document, ni ne touche au paiement.
 
+Schémas de sortie : chaque `outputSchema` est publié **tolérant aux champs en plus** (pas de
+`additionalProperties: false`), et la sortie est validée strictement côté serveur avant l'envoi.
+claude.ai garde la liste d'outils en cache et rejetait une réponse portant un champ ajouté depuis
+(« data must NOT have additional properties », 28/10/2026, `format` et `note` de `generate_mock_exam`).
+Testé contre le validateur des clients MCP : `tests/mcp-output-schema.test.ts`.
+
 ### Lecture (portée `cortex.read`, gratuites)
 
 | Outil | Entrée | Sortie |
