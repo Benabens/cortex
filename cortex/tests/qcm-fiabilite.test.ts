@@ -393,3 +393,21 @@ test("M — ouvertes en parallèle des QCM, QCM visibles avant les ouvertes, dur
   assert.equal(final!.open.length, 2);
 });
 
+test("M — cache de prompt : le contexte stable d'un job est le même « system » pour tous ses lots", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
+  await runWithCourse(id, () => generateQcmExam({ count: 7, openCount: 0 }));
+  type Msg = { role: string; content: string };
+  const lots = designBodies.map((b) => (b as { messages: Msg[] }).messages).filter((m) => !/À CORRIGER/.test(m.map((x) => x.content).join("\n")));
+  assert.ok(lots.length >= 2, `${lots.length} lots`);
+  const system = lots.map((m) => m.find((x) => x.role === "system")?.content ?? "");
+  assert.ok(system[0].length > 2000, "un préfixe assez long pour le cache (règles, taxonomie, schéma)");
+  assert.equal(system[1], system[0], "identique d'un lot à l'autre : lu en cache après le premier");
+  assert.match(system[0], /NIVEAU EXAMEN RÉEL[\s\S]*TAXONOMIE DES DISTRACTEURS[\s\S]*"items"/);
+  const user = lots[0].find((x) => x.role === "user")?.content ?? "";
+  assert.match(user, /Couvre ces sujets/);
+  assert.doesNotMatch(user, /TAXONOMIE DES DISTRACTEURS/, "le variable reste hors du préfixe caché");
+});
+
