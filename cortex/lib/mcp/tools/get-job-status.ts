@@ -26,6 +26,8 @@ const output = z.object({
     exam_id: z.number(),
     questions: z.array(z.object({
       number: z.number(),
+      kind: z.enum(["single_choice", "multiple_choice", "open", "written"]).optional()
+        .describe("single_choice / multiple_choice: options lettered in the statement; open: written answer of a multiple-choice exam; written: exercise of a written exam."),
       concept: z.string(),
       statement: z.string(),
       solution: z.string().nullable(),
@@ -45,15 +47,17 @@ const LETTERS = "ABCDEFGHIJ";
 
 type ExamOut = NonNullable<z.infer<typeof output>["exam"]>;
 
-/** Examen QCM terminé : énoncé + options lettrées ; réponses et explication seulement sur demande. */
+/**
+ * Examen QCM terminé : énoncé + options lettrées, puis sa partie OUVERTE (qui
+ * manquait : seuls les QCM sortaient) ; réponses et corrigés seulement sur demande.
+ */
 async function qcmView(examId: number, withSolutions: boolean): Promise<ExamOut | null> {
   const exam = await getQcmExam(examId, withSolutions);
   if (!exam) return null;
   const items = exam.items as (typeof exam.items[number] & { correct?: number[] })[];
-  return {
-    exam_id: examId,
-    questions: items.slice(0, MAX_QCM).map((it, i) => ({
+  const qcm = items.slice(0, MAX_QCM).map((it, i) => ({
       number: i + 1,
+      kind: it.type === "mcq" ? "multiple_choice" as const : "single_choice" as const,
       concept: clip(it.topic, 200),
       statement: clip(`${it.stem}\n${(it.options as string[]).map((o, k) => `${LETTERS[k] ?? k + 1}) ${o}`).join("\n")}`, 1500),
       solution: withSolutions
@@ -61,9 +65,17 @@ async function qcmView(examId: number, withSolutions: boolean): Promise<ExamOut 
         : null,
       // Vérifié = relu par un modèle, jamais une preuve (invariant n° 2).
       verification: it.verified ? "reviewed_by_model" as const : "not_verified" as const,
-    })),
-    truncated: items.length > MAX_QCM,
-  };
+    }));
+  const open = exam.open.slice(0, Math.max(0, MAX_QCM - qcm.length)).map((o, k) => ({
+    number: qcm.length + k + 1,
+    kind: "open" as const,
+    concept: clip(o.concept, 200),
+    statement: clip(htmlToText(o.statement), 3000),
+    solution: withSolutions ? clip(htmlToText(o.solution), 3000) || null : null,
+    // Relue par l'audit de l'architecte au mieux : jamais « prouvée ».
+    verification: "not_verified" as const,
+  }));
+  return { exam_id: examId, questions: [...qcm, ...open], truncated: items.length + exam.open.length > MAX_QCM };
 }
 
 function jobView(j: Job, appOrigin: string, courseId: string): z.infer<typeof jobOut> {
@@ -116,6 +128,7 @@ export default defineTool({
           exam_id: job.resultId,
           questions: rows.slice(0, MAX_QUESTIONS).map((r, i) => ({
             number: i + 1,
+            kind: "written" as const,
             concept: clip(r.concept, 200),
             statement: clip(htmlToText(r.statementHtml), 3000),
             solution: include_solutions ? clip(htmlToText(r.solutionHtml), 3000) || null : null,

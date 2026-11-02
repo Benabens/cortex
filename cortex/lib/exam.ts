@@ -3,7 +3,7 @@ import { nowStr, q } from "@/db/q";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import type { Archetype } from "@/lib/archetypes";
 import { profile, type Slot } from "@/lib/course-profile";
-import { completeText, completeVia, extractJson } from "@/lib/llm";
+import { HARD_STOP_CODES, completeJson, completeText, completeVia, extractJson, llmErrorCode } from "@/lib/llm";
 import { search } from "@/lib/search";
 import { difficultyBlockForExam } from "@/lib/difficulty";
 import { buildExamArtifact, buildExerciseArtifact } from "@/lib/exam-latex";
@@ -251,13 +251,17 @@ function stubExam(_ctx: Ctx): ExamSpec {
 // ---------- Persistance ----------
 export async function listExams() {
   await q.ensureTable("exams");
+  // Un examen QCM range ses QCM dans qcm_items et sa partie ouverte dans exam_questions :
+  // compter la seconde seule donnait « 1 question » à chaque examen QCM.
+  await q.ensureTable("qcm_items");
   let verifyCol = "NULL";
   try {
     if ((await q.columns("exams")).includes("verify_summary")) verifyCol = "e.verify_summary";
   } catch {}
   const rows = await q.all<any>(
     `SELECT e.id, e.created_at, e.status, e.html_path, ${verifyCol} verify_summary,
-            (SELECT count(*) FROM exam_questions q WHERE q.exam_id = e.id) nq
+            (SELECT count(*) FROM exam_questions q WHERE q.exam_id = e.id)
+              + (SELECT count(*) FROM qcm_items i WHERE i.exam_id = e.id) nq
      FROM exams e WHERE e.format_template IS NULL OR e.format_template != 'exercise'
      ORDER BY e.created_at DESC, e.id DESC`
   );
@@ -265,7 +269,7 @@ export async function listExams() {
     id: r.id,
     createdAt: r.created_at,
     status: r.status,
-    questionCount: r.nq,
+    questionCount: Number(r.nq ?? 0),
     verifySummary: r.verify_summary ?? null,
     url: r.html_path ? `/exam/${path.basename(r.html_path)}${courseQ()}` : null,
     solutionsUrl:
@@ -634,13 +638,14 @@ async function generateBatch(ctx: Ctx, slots: Slot[]): Promise<ExamQuestion[]> {
       solution_tex: "Solution de test.", points: s.points,
     }));
   }
-  const text = await completeText({
+  // Réponse illisible → redemandée avec l'erreur (completeJson) ; sortie structurée si le fournisseur l'offre.
+  const r = await completeJson<{ questions: ExamQuestion[] }>({
     prompt: buildBatchPrompt(ctx, slots as any),
     model: "opus",
     // un lot de 3 << un appel de 6 ; surchargeable (P3 : « augmente le timeout par lot »).
     timeoutMs: Number(process.env.CORTEX_BATCH_TIMEOUT_MS) || 600_000,
-  });
-  const r = extractJson<{ questions: ExamQuestion[] }>(text);
+    json: { schema: BATCH_SCHEMA },
+  }, { check: (v) => (Array.isArray(v?.questions) ? null : "le champ « questions » (tableau) manque") });
   const qs = Array.isArray(r.questions) ? r.questions : [];
   // réaligne catégorie/points sur les slots imposés
   return qs.slice(0, slots.length).map((q, i) => ({ ...q, category: slots[i].category, points: slots[i].points }));
@@ -653,7 +658,7 @@ async function generateBatch(ctx: Ctx, slots: Slot[]): Promise<ExamQuestion[]> {
  */
 export type StepCb = (step: string, progress: number) => void;
 
-export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?: number; focus?: string; onStep?: StepCb; jobId?: number } = {}): Promise<{ id: number; url: string; texError?: string }> {
+export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?: number; focus?: string; onStep?: StepCb; jobId?: number } = {}): Promise<{ id: number; url: string; texError?: string; produced: number; requested: number }> {
   const t0 = Date.now();
   // progression MONOTONE : les lots/vérifs parallèles rapportent dans le désordre → max courant.
   const raw = opts.onStep ?? (() => {});
@@ -712,6 +717,9 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
   const batches = chunk(slots, BATCH).filter((b) => b.length);
   const nBatches = batches.length;
   const auditAll: Record<string, unknown> = {};
+  /** Slots restés sans exercice, par lot (comblés en fin de génération). */
+  const missingByLot: Slot[][] = [];
+  let lastError: unknown = null;
   let qDone = 0;
   const qTotal = slots.length;
 
@@ -764,6 +772,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
           auditAll[`lot${lotIdx + 1}-q${k + 1}-${a.id}`] = r.auditLog;
         } catch (e) {
           failed.push(k);
+          lastError = e;
           step(`Lot ${lotIdx + 1} · Q${k + 1} — architecte échoué (${(e as Error).message.slice(0, 80)}) → repli one-shot`, 0);
         }
         qDone++;
@@ -781,6 +790,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
       }
     }
     const qs = out.filter((q): q is ExamQuestion => !!q);
+    missingByLot[lotIdx] = bslots.filter((_, k) => !out[k]);
     // RÉSILIENCE : on RENVOIE ce qu'on a (même partiel/vide). Un lot incomplet ne fait
     // JAMAIS échouer le job — l'examen sort avec les questions réussies, l'écart est loggé.
     if (qs.length < bslots.length) step(`Lot ${lotIdx + 1} : ${qs.length}/${bslots.length} questions (le reste a échoué et est ignoré)`, 0);
@@ -823,10 +833,13 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
               if (g.length) { got = g; break; }
               throw new Error("lot vide");
             } catch (e) {
+              lastError = e;
               step(`Lot ${i + 1}/${nBatches} — ${attempt < 2 ? "réessai" : "timeout/échec → lot ignoré"} (${(e as Error).message.slice(0, 80)})`, 8 + i * 2);
             }
           }
-          if (got.length < bslots.length) step(`Lot ${i + 1} : ${got.length}/${bslots.length} questions (le reste est ignoré)`, 0);
+          // generateBatch réaligne ses questions sur les premiers slots : ceux qui manquent sont en fin de lot.
+          missingByLot[i] = bslots.slice(got.length);
+          if (got.length < bslots.length) step(`Lot ${i + 1} : ${got.length}/${bslots.length} questions (relancées en fin de génération)`, 0);
           qs = got; // peut être partiel ou vide → le job CONTINUE
           if (qs.length) {
             saved[i] = qs;
@@ -846,11 +859,55 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
           return { questions: qs, report: null as VerifyReport | null };
         }
       } catch (e) {
+        lastError = e;
+        missingByLot[i] = bslots;
         step(`Lot ${i + 1}/${nBatches} — échec complet, lot ignoré (${(e as Error).message.slice(0, 80)})`, 0);
         return { questions: [] as ExamQuestion[], report: null as VerifyReport | null };
       }
     })
   );
+
+  // NOMBRE GARANTI : les exercices manquants (lot échoué, question perdue, retirée à la
+  // vérification) sont relancés UNE fois en un lot, sauf si la cause est une garde. Ils
+  // s'ajoutent en fin d'examen avec leur propre rapport de vérification.
+  // Slots manquants d'un lot = ses slots MOINS les questions qui en restent, appariés par
+  // catégorie et barème (une question retirée à la vérification laisse SON slot, pas le
+  // dernier du lot) ; ceux que la génération a perdus d'abord, puis les autres.
+  const redo: Slot[] = [];
+  settled.forEach((s, i) => {
+    const left = new Map<string, number>();
+    for (const q of s.questions) left.set(`${q.category}|${q.points}`, (left.get(`${q.category}|${q.points}`) ?? 0) + 1);
+    const known = new Set(missingByLot[i] ?? []);
+    for (const slot of [...batches[i].filter((x) => known.has(x)), ...batches[i].filter((x) => !known.has(x))]) {
+      const key = `${slot.category}|${slot.points}`;
+      const n = left.get(key) ?? 0;
+      if (n > 0) left.set(key, n - 1);
+      else redo.push(slot);
+    }
+  });
+  const stop = llmErrorCode(lastError);
+  if (redo.length && !(stop && HARD_STOP_CODES.has(stop))) {
+    step(`${redo.length} exercice(s) manquant(s) → nouvel essai`, 80);
+    // Lots de la taille habituelle (les petits lots évitent les timeouts), en parallèle.
+    await Promise.all(chunk(redo, BATCH).map(async (lot, k) => {
+      try {
+        const extra = (await generateBatch(ctx, lot)).filter(Boolean);
+        if (!extra.length) return;
+        let report: VerifyReport | null = null;
+        let questions = extra;
+        if (doVerify) {
+          try {
+            const v = await verifyAndHarden({ title: "", questions: extra }, regenerateExercise, 2, (m) => step(`Comblement ${k + 1} · ${m}`, 0));
+            questions = v.spec.questions;
+            report = v.report as VerifyReport | null;
+          } catch (e) { step(`Comblement ${k + 1} — vérif interrompue : ${(e as Error).message}`, 0); }
+        }
+        settled.push({ questions, report });
+      } catch (e) {
+        step(`Comblement ${k + 1} échoué (${(e as Error).message.slice(0, 80)})`, 0);
+      }
+    }));
+  }
 
   const c = getCourse(currentCourse());
   const allQuestions = settled.flatMap((s) => s.questions);
@@ -900,7 +957,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
   }
   if (out.texError) step(`⚠ Compilation LaTeX échouée → repli HTML lisible (${out.texError.slice(0, 180)})`, 97);
   step(`Terminé ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 100);
-  return out;
+  return { ...out, produced: allQuestions.length, requested: qTotal };
 }
 
 /** Prompt pour le provider CLI (headless) : le brief complet + sortie JSON stricte. */

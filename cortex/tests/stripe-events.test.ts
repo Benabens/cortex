@@ -357,10 +357,21 @@ test("charge Kairo remboursée (metadata app=kairo, client inconnu) → ignorée
 // n'existent plus : abonnement dans parent.subscription_details, prix dans
 // lines.data[].pricing.price_details.price (un id), paiements dans invoice.payments.
 
+// La fixture est une vraie facture capturée le 28/09/2026, période du 28/09 au 28/10 : ses dates
+// sont décalées pour que la période coure AUJOURD'HUI, sinon l'abonnement est déjà échu et le
+// test dépend de la date du jour (rouge depuis le 28/10/2026, CI de main bloquée).
+const BASIL_PAID_AT = 1790619922;
+const basilShift = Math.floor(Date.now() / 1000) - 86_400 - BASIL_PAID_AT;
+const rebaseUnix = (v: unknown): unknown =>
+  Array.isArray(v) ? v.map(rebaseUnix)
+    : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, rebaseUnix(x)]))
+      : typeof v === "number" && Number.isInteger(v) && v > 1.5e9 && v < 2.5e9 ? v + basilShift : v;
 const basilInvoice = (over: Record<string, unknown> = {}) => {
-  const base = JSON.parse(fs.readFileSync(new URL("./fixtures/stripe-invoice-basil.json", import.meta.url), "utf8"));
-  return { ...base, ...over };
+  const base = rebaseUnix(JSON.parse(fs.readFileSync(new URL("./fixtures/stripe-invoice-basil.json", import.meta.url), "utf8"))) as Record<string, unknown>;
+  return { ...base, ...over } as Record<string, unknown> & { lines: { object?: string; data: Record<string, unknown>[] } };
 };
+/** Fin de période de la fixture décalée, au format stocké (UTC, jour). */
+const basilPeriodEndDay = new Date((1793211922 + basilShift) * 1000).toISOString().slice(0, 10);
 const priceLookup = { lookupKeyOfPrice: async (id: string) => (id === "price_test_pro_monthly" ? "cortex_pro_monthly" : null) };
 
 test("nouveau format : facture réelle (fixture) → +20 crédits, abonnement lié, idempotent sous un autre event.id", async () => {
@@ -374,7 +385,7 @@ test("nouveau format : facture réelle (fixture) → +20 crédits, abonnement li
   assert.equal(sub?.plan, "cortex_pro_monthly", "plan résolu depuis l'id de prix (ou metadata.plan)");
   const inv = await authGet<{ subscription_id: string; period_end: string }>(`SELECT subscription_id, period_end FROM stripe_invoices WHERE invoice_id = ?`, "in_test_basil_1");
   assert.equal(inv?.subscription_id, "sub_test_basil_1");
-  assert.match(inv?.period_end ?? "", /^2026-10-2\d/);
+  assert.equal((inv?.period_end ?? "").slice(0, 10), basilPeriodEndDay);
   const again = await handleStripeEvent(ev("evt_basil_1bis", "invoice.paid", basilInvoice()));
   assert.equal(again.action, "invoice-duplicate");
   assert.equal(await credits.getBalance("basil-user"), 20);

@@ -1,4 +1,4 @@
-import { LlmError } from "@/lib/llm";
+import { LlmError, OWN_LLM_CODES, llmUserMessage } from "@/lib/llm";
 import { generateDrill } from "@/lib/drill";
 import { useCourseOr404 } from "@/lib/req";
 import { logLoopRoute } from "@/lib/req-log";
@@ -33,7 +33,8 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     if (tooLong) return tooLong;
     try {
       // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
-      // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, non remboursé.
+      // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, rendu seulement si
+      // l'appel n'est pas parti ou si la réponse est restée illisible (lib/billing/reserve).
       const { assistCall } = await import("@/lib/billing/reserve");
       const drill = await assistCall("drill", () => generateDrill(c));
       return NextResponse.json({ ok: true, drill });
@@ -41,8 +42,9 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
       const { AssistRefused } = await import("@/lib/billing/reserve");
       if (e instanceof AssistRefused) return NextResponse.json({ error: e.message }, { status: e.status });
       const err = e as LlmError;
-      const status = err.code === "UNAVAILABLE" || err.code === "SPEND_CAP" || err.code === "QUOTA" || err.code === "CREDITS" ? 503 : 502;
-      return NextResponse.json({ error: err.message ?? String(e), code: err.code }, { status });
+      const status = err.code && OWN_LLM_CODES.has(err.code) ? 503 : 502;
+      // Jamais le texte brut du fournisseur : une cause lisible (lib/llm/errors).
+      return NextResponse.json({ error: llmUserMessage(e), code: err.code }, { status });
     }
   } finally {
     logLoopRoute(req, "drill", t0);

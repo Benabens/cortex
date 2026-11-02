@@ -113,26 +113,51 @@ function renderQcmItem(q: QcmItem, n: number, points: number, withKey: boolean):
   ].filter(Boolean).join("\n");
 }
 
+/**
+ * Un nœud TikZ dont le texte contient « \\\\ » exige align= ; la figure peut redéfinir
+ * « every node » et écraser un réglage global (examen 2 de CS-290) : on l'ajoute donc à
+ * chaque nœud qui n'en a pas (sans effet sur un texte d'une ligne). Seulement DANS les
+ * figures tikzpicture : ailleurs, « node[i] » est du code ou du texte. Des options
+ * imbriquées (label={[red]…}) sont laissées telles quelles.
+ */
+export function alignTikzNodes(tex: string): string {
+  const inNode = (fig: string) => fig
+    .replace(/(\\?\bnode)\[(?![^\[\]]*\balign\s*=)([^\[\]]*)\](?!\])/g, (_m, kw: string, opts: string) => `${kw}[${opts.trim() ? `${opts}, ` : ""}align=center]`)
+    .replace(/(\\?\bnode)(?=\s*(?:\(|\{|at\b))/g, "$1[align=center]");
+  return tex.replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, inNode);
+}
+
 function renderOpen(q: ExamQuestion, n: number, withSol: boolean, defaultPts = 15): string {
   // les énoncés ouverts (architecte ML) sont déjà en LaTeX (corps) — on les insère tels quels,
   // précédés d'un en-tête. Si pas de \subq dedans, on ajoute un espace de réponse.
-  const stmt = (q.statement_tex ?? "").trim();
+  const stmt = alignTikzNodes((q.statement_tex ?? "").trim());
   const hasSpace = /\\rulelines|\\diskgrid|\\statesim|\\packetgrid|\\forwardgrid/.test(stmt);
   return [
     String.raw`\clearpage\needspace{4\baselineskip}{\large\textbf{Open question ${n} \quad-- ${esc(q.concept)} \hfill [${q.points ?? defaultPts} points]}}\par\vspace{4pt}\hrule\vspace{8pt}`,
     stmt,
     hasSpace ? "" : String.raw`\vspace{4pt}\rulelines{8}`,
-    withSol ? String.raw`\par\medskip{\textbf{\color{epflred}Solution.}}\par\smallskip` + "\n" + (q.solution_tex ?? "") : "",
+    withSol ? String.raw`\par\medskip{\textbf{\color{epflred}Solution.}}\par\smallskip` + "\n" + alignTikzNodes(q.solution_tex ?? "") : "",
   ].filter(Boolean).join("\n");
 }
 
 export type QcmExamData = { items: QcmItem[]; open: ExamQuestion[]; qcmPoints?: number };
+
+/**
+ * Les questions OUVERTES arrivent en LaTeX libre (architecte) : deux tournures courantes
+ * faisaient échouer tout le PDF (examens 1 et 2 de CS-290, 01/11/2026 — seuls les .tex
+ * existaient) : \captionof sans paquet, et « \\ » dans un nœud TikZ sans align. Ajouté au
+ * préambule QCM seulement (le préambule commun fixe le .tex de CS-202, invariant), sans
+ * nouveau paquet : le cache tectonic de l'image n'est préchauffé que pour le commun.
+ */
+const OPEN_TEX_COMPAT = String.raw`\providecommand{\captionof}[2]{\par\smallskip{\small\itshape #2}\par}
+\tikzset{every node/.append style={align=center}}`;
 
 /** Source .tex complet de l'examen QCM (+ ouvert), corrigé optionnel. */
 export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSolutions: boolean): Promise<string> {
   let preamble = fs.readFileSync(path.join(LATEX_DIR, "preamble.tex"), "utf8");
   const figPath = path.join(LATEX_DIR, "figures.tex");
   if (fs.existsSync(figPath)) preamble += "\n" + fs.readFileSync(figPath, "utf8");
+  preamble += "\n" + OPEN_TEX_COMPAT;
 
   const fmt = await getFormatProfile();
   const dur = fmt?.duration_min ?? 180;
@@ -192,8 +217,25 @@ export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, inc
   ].join("\n");
 }
 
+/**
+ * LaTeX libre d'une question ouverte → texte simple échappé (repli quand il casse la
+ * compilation) : figures TikZ remplacées par une mention, environnements et commandes
+ * retirés, leur texte gardé, paragraphes conservés.
+ */
+export function plainOpenTex(tex: string): string {
+  const text = (tex ?? "")
+    .replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, " [figure : voir l'examen dans l'app] ")
+    .replace(/\\(?:begin|end)\{[^}]*\}(?:\[[^\]]*\])?(?:\{[^}]*\})?/g, " ")
+    .replace(/\\\\(?:\[[^\]]*\])?/g, "\n")
+    .replace(/\\[a-zA-Z@]+\*?(?:\[[^\]]*\])?/g, " ")
+    .replace(/\\([%$&#_{}])/g, "$1")
+    .replace(/[{}]/g, "")
+    .replace(/[ \t]+/g, " ");
+  return text.split(/\n\s*\n/).map((p) => esc(p.trim())).filter(Boolean).join("\n\n");
+}
+
 /** Écrit énoncé + corrigé .tex et compile les 2 PDF. Renvoie le nom du PDF énoncé (ou throw/repli). */
-export async function buildQcmArtifact(examId: number, data: QcmExamData, dateLabel: string): Promise<{ file: string; texError?: string }> {
+export async function buildQcmArtifact(examId: number, data: QcmExamData, dateLabel: string): Promise<{ file: string; texError?: string; texWarning?: string }> {
   fs.mkdirSync(examsDir(), { recursive: true });
   const base = `qcm-${examId}`;
   for (const ext of ["pdf", "png"]) {
@@ -212,6 +254,21 @@ export async function buildQcmArtifact(examId: number, data: QcmExamData, dateLa
     try { await compileExamPdf(`${base}-corrige`); } catch (e) { console.error(`[qcm] corrigé #${examId} non compilé :`, (e as Error).message); }
     return { file: pdf };
   } catch (e) {
-    return { file: `${base}.tex`, texError: (e as Error).message };
+    // Le LaTeX libre des questions ouvertes est la cause habituelle : plutôt que de perdre tout
+    // le PDF, elles passent en texte simple (contenu gardé, mise en forme perdue).
+    if (!data.open.length) return { file: `${base}.tex`, texError: (e as Error).message };
+    const plain = { ...data, open: data.open.map((q) => ({ ...q, statement_tex: plainOpenTex(q.statement_tex), solution_tex: plainOpenTex(q.solution_tex) })) };
+    try {
+      const [enonce, corrige] = [await renderQcmExamTex(plain, dateLabel, false), await renderQcmExamTex(plain, dateLabel, true)];
+      assertTexSafe(enonce);
+      assertTexSafe(corrige);
+      fs.writeFileSync(path.join(examsDir(), `${base}.tex`), enonce);
+      fs.writeFileSync(path.join(examsDir(), `${base}-corrige.tex`), corrige);
+      const pdf = await compileExamPdf(base);
+      try { await compileExamPdf(`${base}-corrige`); } catch (e2) { console.error(`[qcm] corrigé #${examId} non compilé :`, (e2 as Error).message); }
+      return { file: pdf, texWarning: `PDF compilé avec les questions ouvertes en texte simple (leur LaTeX ne compilait pas : ${(e as Error).message.slice(0, 200)})` };
+    } catch (e2) {
+      return { file: `${base}.tex`, texError: `${(e as Error).message} — repli en texte simple échoué aussi : ${(e2 as Error).message.slice(0, 200)}` };
+    }
   }
 }

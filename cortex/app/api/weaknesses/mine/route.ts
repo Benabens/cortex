@@ -72,7 +72,8 @@ async function handlePOST(req: NextRequest) {
 
   try {
     // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
-    // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, non remboursé.
+    // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, rendu seulement si
+    // l'appel n'est pas parti ou si la réponse est inutilisable (lib/billing/reserve).
     const { assistCall } = await import("@/lib/billing/reserve");
     const mined = await assistCall("weakness-mine", () => mineConversation(t));
     if (!mined.length) return NextResponse.json({ created: 0, weaknesses: await listWeaknesses(), note: "Aucune faiblesse claire détectée dans cette discussion." });

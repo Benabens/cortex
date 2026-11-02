@@ -75,19 +75,32 @@ export type CompleteResult = {
 /**
  * Erreur unique du moteur LLM.
  * codes : "TIMEOUT" | "UNAVAILABLE" | "ABORTED" | "RATE_LIMIT" | "OVERLOADED" |
- *         "AUTH" | "UNSUPPORTED" | undefined (erreur générique du backend).
+ *         "AUTH" | "UNSUPPORTED" | "TRUNCATED" (réponse coupée par max_tokens) |
+ *         "REFUSAL" (refus du modèle) | "BAD_OUTPUT" (JSON illisible après réessais) |
+ *         undefined (erreur générique du backend).
  */
 export class LlmError extends Error {
   code?: string;
   /** true → un retry a du sens (429/5xx/réseau). Les échecs métier restent false. */
   retryable: boolean;
-  constructor(message: string, code?: string, retryable = false) {
+  /** Compteurs réels quand le fournisseur a répondu (et facturé) une réponse inutilisable. */
+  usage?: LlmUsage;
+  constructor(message: string, code?: string, retryable = false, usage?: LlmUsage) {
     super(message);
     this.name = "LlmError";
     this.code = code;
     this.retryable = retryable;
+    if (usage) this.usage = usage;
   }
 }
+
+/** Réponse coupée par max_tokens : jamais rendue comme un texte complet (cf. lib/llm/json). */
+export function truncatedError(maxTokens: number | undefined, usage?: LlmUsage): LlmError {
+  return new LlmError(`Réponse du modèle coupée par la limite de longueur (${maxTokens ?? DEFAULT_MAX_TOKENS} tokens).`, "TRUNCATED", false, usage);
+}
+
+/** Budget de sortie par défaut des providers API. */
+export const DEFAULT_MAX_TOKENS = 16_000;
 
 export interface LlmProvider {
   readonly name: string;
