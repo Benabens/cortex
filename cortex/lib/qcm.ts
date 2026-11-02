@@ -83,7 +83,7 @@ const QCM_BATCH_SCHEMA = {
           correct: { type: "array", items: { type: "integer" }, description: "Indices 0-based de la/des bonne(s) réponse(s). Exactement 1 pour scq." },
           misconceptions: { type: "array", items: { type: "string" }, description: "Pour CHAQUE option : « [procédé] idée fausse précise » que ce distracteur punit (procédé de la taxonomie) ; chaîne vide pour les bonnes réponses." },
           source_fact: { type: "string", description: "Le fait PRÉCIS du cours que la question teste (étude et chiffre, condition d'une définition, mécanisme), tel qu'il apparaît dans les extraits." },
-          explanation: { type: "string", description: "Pourquoi la bonne réponse est correcte ET pourquoi chaque distracteur est faux, en désignant chaque option par son CONTENU — jamais « option 2 », « B » ni « (c) » : l'ordre des options est mélangé après coup." },
+          explanation: { type: "string", description: "Pourquoi la bonne réponse est correcte ET pourquoi chaque distracteur est faux, en désignant chaque option par son CONTENU — jamais « option 2 », « B », « (c) » ni « la première » : l'ordre des options est mélangé après coup." },
           mold: { type: "string", description: "Recopie le MOULE imposé pour cette question (voir la consigne par question)." },
           figure_spec: { type: "object", description: "UNIQUEMENT si la question exige une figure data/plot (moule figure_reading) : le FIGURE SPEC JSON décrit dans le prompt. Sinon omets ce champ." },
         },
@@ -227,15 +227,39 @@ const NO_CLASSIFICATION =
 const CLASSIFICATION_IF_ANNALES =
   `  - Les questions « classe ce cas dans la notion X » (options = noms de notions) ne sont permises QUE si les vraies questions des annales du cours en contiennent ; sinon, teste les CONDITIONS qui font qu'un cas relève ou non d'une notion.`;
 
-/**
- * Une explication qui cite une option par sa lettre ou son numéro deviendrait fausse
- * après le mélange des options : elle n'est pas mélangée. Pas les tournures françaises
- * (« l'option d'interdire ») ni l'article anglais « A ».
- */
-export function citesOptionLabel(text: string): boolean {
+/** Une option citée par sa lettre ou son numéro (« option 3 », « (C) », « B) »). Pas « l'option d'interdire » ni l'article anglais « A ». */
+function citesOptionLetter(text: string): boolean {
   return /\b(?:[Oo]ptions?|[Rr]éponses?|[Cc]hoix|[Aa]nswers?|[Cc]hoices?|[Pp]ropositions?)\s*\(?(?:[A-Ha-h]|[0-9])\)?(?![\p{L}'’])/u.test(text)
     || /\([A-H0-9]\)/.test(text)
     || /(?:^|\s)[A-H]\)\s/.test(text);
+}
+
+const RANK_FR = "premi(?:er|ère)s?|deuxi[eè]mes?|secondes?|troisi[eè]mes?|quatri[eè]mes?|cinqui[eè]mes?|(?:avant-)?derni(?:er|ère)s?";
+const NOUN_FR = "options?|réponses?|propositions?|affirmations?|choix|énoncés?";
+const RANK_EN = "first|second|third|fourth|fifth|last|penultimate";
+const NOUN_EN = "options?|answers?|choices?|statements?|alternatives?|propositions?";
+/** Rangs d'option : « la première option », « la troisième est fausse », « options two and four ». Pas « la première étude ». */
+const RANK_PATTERNS = [
+  new RegExp(`(?:^|[^\\p{L}])(?:la|le|les|l['’])\\s*(?:deux\\s+|trois\\s+)?(?:${RANK_FR})\\s+(?:${NOUN_FR})(?![\\p{L}])`, "iu"),
+  new RegExp(`(?:^|[^\\p{L}])(?:la|le)\\s+(?:${RANK_FR})\\s+(?:est|n['’]est|sont|reste|affirme|confond|inverse|décrit|attribue|propose|correspond|oublie|exagère|prétend)(?![\\p{L}])`, "iu"),
+  new RegExp(`(?:^|[^\\p{L}])(?:${NOUN_FR})\\s*(?:n°|numéro)\\s*\\d`, "iu"),
+  new RegExp(`(?:^|[^\\p{L}])(?:${NOUN_FR})\\s+(?:une|deux|trois|quatre|cinq)(?:\\s+et|\\s*,|\\s+sont|\\s+est|[.;:]|$)`, "iu"),
+  new RegExp(`\\bthe\\s+(?:two\\s+)?(?:${RANK_EN})\\s+(?:one\\s+)?(?:${NOUN_EN}|is|isn['’]t|confuses|reverses|inverts|describes|states|attributes|claims)\\b`, "i"),
+  new RegExp(`\\b(?:${NOUN_EN})\\s+(?:one|two|three|four|five)\\b`, "i"),
+];
+
+/** Une option désignée par son RANG (« la première option ») : le mélange des options le change. */
+export function citesOptionRank(text: string): boolean {
+  return RANK_PATTERNS.some((re) => re.test(text));
+}
+
+/**
+ * Une explication qui désigne une option par sa lettre, son numéro ou son rang deviendrait
+ * fausse après le mélange des options (Q12 de l'examen 3 de HUM-285, 02/11 : « la première
+ * option », mélangée depuis) : elle n'est jamais mélangée, et la vérification la rejette.
+ */
+export function citesOptionLabel(text: string): boolean {
+  return citesOptionLetter(text) || citesOptionRank(text);
 }
 
 /** Questions d'exemple officielles (sans annale) : citées par la détection du format, et sources « exemples ». */
@@ -555,6 +579,18 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   // la mémoire de calibration des QCM est aussi réinjectée à la CRITIQUE : un « trop facile »
   // passé rend la vérif plus sévère sur la trivialité/les indices qui trahissent.
   const calib = await calibrationBlock("qcm");
+  /** Rejette l'item (jamais gardé tel quel) ; `advice` guide sa régénération. */
+  const reject = (q: QcmItem, reason: string, advice: string) => {
+    q.verified = 0;
+    q.rejected = reason.slice(0, 400);
+    q.judgeIssue = `${q.rejected} — ${advice}`;
+    step(`QCM rejeté — ${q.rejected.slice(0, 160)}`, 70);
+  };
+  // Déterministe, avant le correcteur (et même s'il échoue) : une explication qui désigne une
+  // option par sa position ou sa lettre est fausse dès que les options sont mélangées.
+  for (const q of items) {
+    if (citesOptionLabel(q.explanation ?? "")) reject(q, "explication qui désigne une option par sa position ou sa lettre", "désigne chaque option par son contenu dans l'explication, jamais par son rang (« la première ») ni sa lettre");
+  }
   // DÉFINITIONS DU COURS : le juge résout et contrôle avec celles du cours, pas celles du web.
   const passages = await coursePassages([...new Set(items.map((q) => q.topic).filter(Boolean))], 2, 700).catch(() => []);
   // Cache de prompt (M) : consignes et schéma stables dans le système, lots et extraits à part.
@@ -592,16 +628,9 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   // juge l'a crue du cours.
   const termsOf = (r: { course_terms?: unknown }) => (Array.isArray(r.course_terms) ? r.course_terms.filter((t): t is string => typeof t === "string") : []);
   const absent = new Set((await absentCourseTerms((res.results ?? []).flatMap(termsOf))).map((t) => normalize(t)));
-  /** Rejette l'item (jamais gardé tel quel) ; `advice` guide sa régénération. */
-  const reject = (q: QcmItem, reason: string, advice: string) => {
-    q.verified = 0;
-    q.rejected = reason.slice(0, 400);
-    q.judgeIssue = `${q.rejected} — ${advice}`;
-    step(`QCM rejeté — ${q.rejected.slice(0, 160)}`, 70);
-  };
   for (const r of res.results ?? []) {
     const q = items[r.index];
-    if (!q) continue;
+    if (!q || q.rejected) continue;
     const missing = termsOf(r).filter((t) => absent.has(normalize(t.trim())));
     // Un signalement du juge ne compte que s'il a VU des extraits et qu'il nomme quelque chose
     // (« None », « Aucune », « N/A » ne rejettent rien) : jamais de rejet faute de pouvoir vérifier.
@@ -1066,9 +1095,16 @@ const LEGACY_KEY_NOTE = /\[clé (?:corrigée à la vérif\b|alignée sur la rés
 /** L'explication telle que l'étudiant la lit. */
 export function shownExplanation(raw: string | null | undefined): string {
   const text = raw ?? "";
-  return LEGACY_KEY_NOTE.test(text)
-    ? "Explication retirée : la vérification avait relevé un problème sur cette question, et l'explication d'origine peut ne pas justifier la réponse retenue."
-    : text;
+  if (LEGACY_KEY_NOTE.test(text)) {
+    return "Explication retirée : la vérification avait relevé un problème sur cette question, et l'explication d'origine peut ne pas justifier la réponse retenue.";
+  }
+  // Avant le 03/11/2026, une explication par RANG (« la première option ») n'était pas repérée et
+  // les options étaient mélangées : elle désigne une autre option que celle qu'elle nomme. Une
+  // explication par lettre, elle, gardait ses options dans l'ordre.
+  if (citesOptionRank(text) && !citesOptionLetter(text)) {
+    return "Explication retirée : elle désignait les options par leur position, que le mélange des options a changée.";
+  }
+  return text;
 }
 
 export type QcmOpenView = { id: number; concept: string; statement: string; solution: string };
