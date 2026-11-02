@@ -4,6 +4,7 @@ import { use, useCallback, useEffect, useState, type CSSProperties } from "react
 import { useCourse } from "@/lib/ux/api";
 import { SafeHtml } from "@/components/ui/SafeHtml";
 import { OpenResponse } from "@/components/exam/OpenResponse";
+import { ReportButton } from "@/components/exam/ReportButton";
 import type { QcmGradeDetail } from "@/lib/qcm";
 
 type Item = { id: number; idx: number; topic: string; type: "scq" | "mcq"; stem: string; options: string[]; verified: number | null };
@@ -110,6 +111,7 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
                 })}
               </div>
               {det && det.explanation && <p className="mt-3 text-[12.5px]" style={{ color: "var(--ink-2)" }}><strong style={{ color: "var(--ink)" }}>Pourquoi :</strong> {det.explanation}</p>}
+              <ReportButton courseId={courseId ?? ""} examId={Number(id)} kind="qcm" itemId={it.id} />
             </section>
           );
         })}
@@ -133,6 +135,7 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
                     graded={!!graded}
                     solution={sol?.solution ?? null}
                   />
+                  <ReportButton courseId={courseId ?? ""} examId={Number(id)} kind="open" itemId={o.id} />
                 </section>
               );
             })}

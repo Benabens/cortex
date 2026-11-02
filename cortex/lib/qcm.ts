@@ -319,6 +319,9 @@ export async function generateQcmBatch(
   // boucle FERMÉE : la mémoire de calibration des QCM (« trop facile / pas le style / faux »)
   // est réinjectée à la CONCEPTION → durcit/réoriente réellement les QCM suivants.
   const calib = await calibrationBlock("qcm");
+  // Boucle de relecture : les questions signalées sur ce cours sont des contre-exemples.
+  const { counterExamplesBlock } = await import("@/lib/question-reports");
+  const counter = await counterExamplesBlock().catch(() => "");
   const molds = opts.molds ?? [];
   const withFigures = (opts.dna?.figures.kinds.length ?? 0) > 0;
   const moldLine = (i: number) => {
@@ -362,6 +365,7 @@ export async function generateQcmBatch(
     ...DISTRACTOR_TAXONOMY,
     withFigures ? `  - Pour un moule figure_reading : ÉMETS "figure_spec" (contrat ci-dessous) — la question doit être RÉSOLUBLE depuis la figure seule.` : null,
     calib || null,
+    counter || null,
     texture,
     fewShots.length ? `\nVRAIES questions de ces moules dans CE cours (imite le STYLE et l'ancrage — ne copie JAMAIS l'énoncé) :\n${fewShots.join("\n")}` : null,
     withFigures ? `\n${figureSpecPromptBlock()}` : null,

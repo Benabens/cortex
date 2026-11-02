@@ -62,7 +62,7 @@ after(async () => {
 const formPost = (p: string, fields: Record<string, string>, headers: Record<string, string> = {}) =>
   new Request(`${ISSUER}${p}`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", ...headers }, body: new URLSearchParams(fields).toString() });
 
-async function client(): Promise<Client> {
+async function client(write = false): Promise<Client> {
   const { registerEndpoint, prepareConsent, consentDecisionEndpoint, tokenEndpoint } = await import("../lib/oauth/routes");
   const reg = await (await registerEndpoint(new Request(`${ISSUER}/oauth/register`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_name: "Claude (test)", redirect_uris: [REDIRECT] }),
@@ -73,7 +73,7 @@ async function client(): Promise<Client> {
     code_challenge: crypto.createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256",
   }), ALICE);
   if (view.kind !== "consent") throw new Error(JSON.stringify(view));
-  const decided = await consentDecisionEndpoint(formPost("/oauth/authorize/decision", { ticket: view.ticket, decision: "approve", generate: "on" }, { origin: ISSUER }), ALICE);
+  const decided = await consentDecisionEndpoint(formPost("/oauth/authorize/decision", { ticket: view.ticket, decision: "approve", generate: "on", ...(write ? { write: "on" } : {}) }, { origin: ISSUER }), ALICE);
   const code = new URL(decided.headers.get("location")!).searchParams.get("code")!;
   const token = (await (await tokenEndpoint(formPost("/oauth/token", {
     grant_type: "authorization_code", code, code_verifier: verifier, client_id: reg.client_id, redirect_uri: REDIRECT, resource: MCP_URL,
@@ -188,3 +188,34 @@ test("get_job_status sur un examen QCM terminé : les questions et leurs options
   assert.equal(results.mock_exams[0]?.questions, 3);
   await c.close();
 });
+
+test("report_question : un agent remonte la relecture d'un examen, question par question", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { runWithUser } = await import("../db/context");
+  const { q } = await import("../db/q");
+  const { getQcmExam } = await import("../lib/qcm");
+  const { listCoursesOf } = await import("../lib/courses");
+  const course = listCoursesOf(ALICE).find((x) => x.examCode === "HUM-285")!.id;
+  const examId = await runWithUser(ALICE, () => runWithCourse(course, async () => {
+    await getQcmExam(0);
+    const id = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','ready')`);
+    for (const idx of [0, 1]) {
+      await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        id, idx, "Galilée", "scq", `Question ${idx} sur Galilée ?`, JSON.stringify(["a", "b"]), "[0]", "[]", "…", 1);
+    }
+    return id;
+  }));
+  // Signaler modifie les données de l'étudiant (révisions, remboursement) : droit d'écriture.
+  const c = await client(true);
+  const r = (await c.callTool({ name: "report_question", arguments: { course: "HUM-285", exam_id: examId, question_number: 2, reason: "duplicate", comment: "Même question que la 1." } })) as ToolResult;
+  assert.ok(!r.isError, text(r));
+  const sc = r.structuredContent as { report_id: number; status: string; refunded_credits: number };
+  assert.ok(sc.report_id > 0);
+  assert.equal(sc.status, "open");
+  const { listReports } = await import("../lib/question-reports");
+  assert.ok((await listReports(10)).some((x) => x.id === sc.report_id && /Question 1 sur Galilée/.test(x.stem) && x.userId === ALICE));
+  const missing = (await c.callTool({ name: "report_question", arguments: { course: "HUM-285", exam_id: examId, question_number: 9, reason: "ambiguous" } })) as ToolResult & { _meta?: Record<string, unknown> };
+  assert.equal(errorCode(missing), "not_found");
+  await c.close();
+});
+
