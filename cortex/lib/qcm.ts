@@ -4,7 +4,7 @@ import { HARD_STOP_CODES, LlmError, completeJson, llmErrorCode, llmFailureReason
 import { courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFormat } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
-import { COURSE_TERMS_RULE, absentCourseTerms, coursePassages } from "@/lib/course-grounding";
+import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseTerms, coursePassages } from "@/lib/course-grounding";
 import { assignChapters, spreadOverChapters } from "@/lib/coverage";
 import { normalize } from "@/lib/text";
 import { courseRefImages } from "@/lib/course-vision";
@@ -288,6 +288,7 @@ const ARCHITECT_QCM_RULES = [
   `  - Teste la COMPRÉHENSION / le raisonnement, pas la récitation d'une définition.`,
   `  - Calibre la difficulté sur les VRAIS examens du cours (regarde les pages fournies).`,
   COURSE_TERMS_RULE,
+  COURSE_MATTER_RULE,
 ];
 
 /** Génère un LOT de QCM (1 appel LLM) couvrant des sujets donnés, au format du cours.
@@ -458,8 +459,9 @@ const VERIFY_SCHEMA = {
           name_only: { type: "boolean", description: "true si elle se réussit avec les seuls noms des notions, ou en éliminant des options absurdes." },
           course_terms: { type: "array", items: { type: "string" }, description: "Les notions nommées dont dépend la BONNE réponse, chacune écrite EXACTEMENT comme dans les extraits du cours (copie le terme du cours)." },
           off_course: { type: "string", description: "Non vide si la bonne réponse, un distracteur ou l'explication repose sur une notion ABSENTE des extraits du cours, ou que le cours définit AUTREMENT : laquelle, et ce que dit le cours. Vide sinon." },
+          off_matter: { type: "string", description: "Non vide si la question porte sur les modalités d'examen (format, barème, grille ou critères d'évaluation, consignes) ou sur la forme d'un rendu (poster, essai, bibliographie) plutôt que sur la matière du cours : ce qu'elle teste. Vide sinon." },
         },
-        required: ["index", "correct", "ok", "discrimination", "name_only", "course_terms", "off_course"],
+        required: ["index", "correct", "ok", "discrimination", "name_only", "course_terms", "off_course", "off_matter"],
         additionalProperties: false,
       },
     },
@@ -487,6 +489,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
       ? `Résous et juge avec les DÉFINITIONS DU COURS (extraits ci-dessous), jamais avec celles d'une autre source. course_terms : les notions dont dépend la bonne réponse, écrites comme dans le cours. off_course : toute notion de la question absente des extraits, ou que le cours définit autrement (vide sinon).`
       : `course_terms : les notions nommées dont dépend la bonne réponse. off_course : laisse vide (aucun extrait du cours fourni ici).`,
     `Signale si : la question est ambiguë (2 réponses défendables), un distracteur est absurde, ou un indice trahit la bonne réponse (longueur, « toutes les réponses », grammaire).`,
+    `off_matter : ce que teste une question qui porte sur les modalités d'examen (format, barème, grille ou critères d'évaluation, consignes) ou sur la forme d'un rendu (poster, essai, bibliographie) au lieu de la matière du cours (vide sinon).`,
     `Note aussi son POUVOIR DISCRIMINANT (discrimination, 1 à 5) : mets-toi à la place d'un étudiant qui ne connaît que les noms des notions du cours — pas leurs conditions, pas les résultats des études. S'il la réussit (ou élimine assez d'options pour la deviner), discrimination ≤ 2 et name_only = true.`,
     figDirs.length ? `Certaines questions ont une FIGURE : OUVRE le PNG indiqué (outil Read) et résous DEPUIS la figure. Si la figure ne suffit pas à répondre, mets ok=false avec issue="figure insuffisante".` : null,
     calib ? `${calib}\nÀ la lumière de ces leçons, sois SÉVÈRE : signale aussi (issue) tout QCM trop trivial / au distracteur trop faible si l'étudiant a jugé ce type « trop facile ».` : null,
@@ -499,7 +502,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     JSON.stringify(VERIFY_SCHEMA, null, 2),
   ].filter((l) => l != null).join("\n");
   step("Vérification à l'aveugle des QCM (résolution indépendante, figures vues)…", 70);
-  let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean; course_terms?: string[]; off_course?: string }[] };
+  let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean; course_terms?: string[]; off_course?: string; off_matter?: string }[] };
   try {
     res = await completeJson(
       { prompt, model: "opus", timeoutMs: 420_000, addDirs: figDirs, json: { schema: VERIFY_SCHEMA } },
@@ -523,6 +526,15 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
       q.verified = 0;
       q.rejected = `hors cours : ${off.slice(0, 240)}`;
       q.judgeIssue = `notion hors cours (${off.slice(0, 240)}) : n'utilise que les notions et les définitions des extraits du cours`;
+      step(`QCM rejeté — ${q.rejected}`, 70);
+      continue;
+    }
+    // Une question sur l'évaluation du cours (grille, consignes, forme d'un rendu) ne teste pas sa matière.
+    const offMatter = typeof r.off_matter === "string" && !NO_FLAG.test(r.off_matter.trim()) ? r.off_matter.trim().slice(0, 240) : "";
+    if (offMatter) {
+      q.verified = 0;
+      q.rejected = `hors matière : ${offMatter}`;
+      q.judgeIssue = `question hors matière (${offMatter}) : teste un fait de la matière du cours, jamais les modalités d'examen ni la forme d'un rendu`;
       step(`QCM rejeté — ${q.rejected}`, 70);
       continue;
     }
