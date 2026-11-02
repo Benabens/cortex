@@ -1,6 +1,7 @@
 import { enterCourse } from "@/db/client";
 import { q } from "../db/q";
 import { buildQcmArtifact } from "@/lib/qcm-latex";
+import { shownExplanation } from "@/lib/qcm";
 
 enterCourse(process.env.CORTEX_COURSE || "ml");
 const examId = Number(process.argv[2] || 2);
@@ -10,7 +11,7 @@ const dateLabel = process.argv[3] || "June 16, 2026";
   const items = ((await q.all<any>(`SELECT * FROM qcm_items WHERE exam_id=? ORDER BY idx`, examId)) as any[]).map((r) => ({
     idx: r.idx, topic: r.topic, type: r.type, stem: r.stem,
     options: JSON.parse(r.options_json), correct: JSON.parse(r.correct_json),
-    misconceptions: JSON.parse(r.misconceptions_json), explanation: r.explanation, verified: r.verified,
+    misconceptions: JSON.parse(r.misconceptions_json), explanation: shownExplanation(r.explanation), verified: r.verified,
   }));
   const open = ((await q.all<any>(`SELECT * FROM exam_questions WHERE exam_id=?`, examId)) as any[]).map((r) => ({
     concept: r.concept, statement_tex: r.statement_html, solution_tex: r.solution_html,
