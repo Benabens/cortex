@@ -1,5 +1,5 @@
 import { currentCourse } from "@/db/client";
-import { completeText, extractJson } from "@/lib/llm";
+import { completeJson, extractJson } from "@/lib/llm";
 import { getCourse } from "@/lib/courses";
 
 export type CheckResult = {
@@ -49,9 +49,39 @@ function fallbackResult(result: LegacyCheckResult): CheckResult {
   return { ...result, criteria, score: { earned: achieved, total: 2 } };
 }
 
+/** Contrat de sortie du correcteur (sortie structurée des fournisseurs API). */
+const CHECK_SCHEMA = {
+  type: "object",
+  properties: {
+    verdict: { type: "string", enum: ["correct", "partial", "wrong"] },
+    feedback: { type: "string" },
+    correct_solution: { type: "string" },
+    criteria: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+          points: { type: "integer" },
+          achieved: { type: "boolean" },
+          essential: { type: "boolean" },
+          justification: { type: "string" },
+        },
+        required: ["label", "points", "achieved", "essential", "justification"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["verdict", "feedback", "correct_solution", "criteria"],
+  additionalProperties: false,
+} as const;
+
 /** Parse et valide la sortie du correcteur ; l'ancien contrat reçoit un barème de compatibilité. */
 export function parseCheckResult(text: string): CheckResult {
-  const parsed = extractJson<unknown>(text);
+  return checkResultFrom(extractJson<unknown>(text));
+}
+
+function checkResultFrom(parsed: unknown): CheckResult {
   if (!isLegacyResult(parsed)) throw new Error("Réponse de correction invalide.");
   const candidate = parsed as LegacyCheckResult & { criteria?: unknown };
   if (!Array.isArray(candidate.criteria) || candidate.criteria.length < 2 || candidate.criteria.length > 5) return fallbackResult(parsed);
@@ -109,6 +139,9 @@ export async function checkSolution(input: { statement: string; answer?: string;
     `5) correct_solution : la bonne solution, concise mais complète.`,
     `Réponds UNIQUEMENT avec un objet JSON {"verdict","feedback","correct_solution","criteria":[{"label","points","achieved","essential","justification"}]}. Aucune prose autour, aucune balise markdown.`
   );
-  const text = await completeText({ prompt: lines.join("\n"), model: "opus", timeoutMs: 200_000 });
-  return parseCheckResult(text);
+  const parsed = await completeJson<unknown>(
+    { prompt: lines.join("\n"), model: "opus", timeoutMs: 200_000, json: { schema: CHECK_SCHEMA } },
+    { check: (v) => (isLegacyResult(v) ? null : "verdict (correct | partial | wrong), feedback et correct_solution sont requis") },
+  );
+  return checkResultFrom(parsed);
 }

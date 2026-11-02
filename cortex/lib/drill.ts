@@ -1,5 +1,5 @@
 import { resolveExamFormat } from "@/lib/exam-format";
-import { completeText, extractJson } from "@/lib/llm";
+import { completeJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 
 export type Drill = {
@@ -37,8 +37,12 @@ export async function generateDrill(concept: string): Promise<Drill> {
     `Réponds UNIQUEMENT avec l'objet JSON conforme au schéma. Aucun outil, aucun fichier.`,
     JSON.stringify(DRILL_SCHEMA, null, 2),
   ].join("\n");
-  const text = await completeText({ prompt, model: "opus", timeoutMs: 220_000 });
-  const d = extractJson<Drill>(text);
+  // Sortie structurée quand le fournisseur l'offre ; sinon réponse lue par extractJson et
+  // redemandée avec l'erreur si elle est illisible (énoncés avec code : cf. CS-290).
+  const d = await completeJson<Drill>(
+    { prompt, model: "opus", timeoutMs: 220_000, json: { schema: DRILL_SCHEMA } },
+    { check: (v) => (typeof v?.statement_html === "string" && v.statement_html.trim() && typeof v.solution_html === "string" ? null : "statement_html et solution_html (chaînes) sont requis") },
+  );
   if (!Array.isArray(d.hints)) d.hints = [];
   d.hints = d.hints.slice(0, 5);
   return d;
