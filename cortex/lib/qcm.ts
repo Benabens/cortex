@@ -1,6 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { q, nowStr } from "@/db/q";
-import { completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
+import { LlmError, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
 import { EXAM_SOURCE_TYPES, courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFormat } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
@@ -49,6 +49,8 @@ export type QcmItem = {
   discrimination?: number | null;
   nameOnly?: boolean | null;
   judgeIssue?: string | null;
+  /** Rang du sujet dans le lot demandé (non persisté) : un item écarté laisse SON sujet à combler. */
+  slot?: number;
 };
 
 const QCM_BATCH_SCHEMA = {
@@ -414,6 +416,7 @@ export async function generateQcmBatch(
       figureFile: null,
       figureTruth: null,
       sourceFact: typeof fact === "string" ? fact : null,
+      slot: i,
     };
     delete (base as { source_fact?: unknown }).source_fact;
     // Position de la bonne réponse mélangée (graine = l'énoncé : reproductible), jamais pour une question à figure.
@@ -611,7 +614,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       ...weak.map((w) => `  - « ${sanitizeCorpus(w.it.stem).slice(0, 160)} » : ${sanitizeCorpus(w.why)}`),
     ].join("\n");
     try {
-      const pick = <T,>(arr: T[]) => weak.map((w) => arr[w.i]);
+      const pick = <T,>(arr: T[]) => weak.map((w) => arr[w.it.slot ?? w.i]);
       const again = await verifyQcmBatch(await generateQcmBatch(pick(bt.topics), weak.length, step, undefined, guidance, { ...shared, molds: pick(bt.molds) }), step);
       // Un item écarté à la conception décalerait l'appariement : on ne remplace qu'un lot complet,
       // et seulement par une version VÉRIFIÉE (une vérification en échec rend des items non vérifiés).
@@ -619,7 +622,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       const out = items.slice();
       weak.forEach((w, k) => {
         const n = again[k];
-        if (n.verified === 1 && (!weaknessOf(n) || (n.discrimination ?? 0) > (w.it.discrimination ?? 0))) out[w.i] = n;
+        if (n.verified === 1 && (!weaknessOf(n) || (n.discrimination ?? 0) > (w.it.discrimination ?? 0))) out[w.i] = { ...n, slot: w.it.slot };
       });
       return out;
     } catch (e) {
@@ -653,7 +656,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
         all.push(...g.items.slice(0, Math.max(0, count - all.length)));
         if (g.error) lastError = g.error;
         const bt = group[k];
-        for (let j = g.items.length; j < bt.topics.length; j++) missing.push({ topic: bt.topics[j], mold: bt.molds[j] ?? null });
+        const filled = new Set(g.items.map((it, n) => it.slot ?? n));
+        bt.topics.forEach((topic, j) => { if (!filled.has(j)) missing.push({ topic, mold: bt.molds[j] ?? null }); });
       });
       step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
     }
@@ -668,7 +672,9 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     step(`${count - all.length} QCM manquant(s) → ${pending.length} lot(s) de comblement`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
   }
   // count>0 mais 0 QCM produit = tous les lots ont échoué → erreur claire (sauf drill 0 QCM + ouvertes).
-  if (count > 0 && !all.length) throw new Error(`Aucun QCM généré : ${llmFailureReason(lastError)}`);
+  // Aucun appel en erreur mais tous les items écartés (mal formés) : c'est une réponse inutilisable.
+  const cause = () => lastError ?? new LlmError("Toutes les questions reçues étaient mal formées.", "BAD_OUTPUT");
+  if (count > 0 && !all.length) throw new Error(`Aucun QCM généré : ${llmFailureReason(cause())}`);
 
   // partie OUVERTE : chaque question via l'architecte (multi-passes + vérif), au niveau réel.
   // moules « ouverts » échantillonnés depuis l'ADN, imposés à l'architecte.
@@ -688,11 +694,11 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       try {
         const r = await architectQuestion(a, `${t.label}${t.method ? ` — ${t.method}` : ""}`, 15, { maxRounds: 1, mold: openMolds[i] ?? null, onStep: (m) => step(`Ouverte ${i + 1} · ${m}`, 82 + i) });
         openQs.push({ ...r.q, points: 15 });
-      } catch (e) { step(`Question ouverte ${i + 1} ignorée : ${(e as Error).message.slice(0, 60)}`, 82 + i); }
+      } catch (e) { lastError = e; step(`Question ouverte ${i + 1} ignorée : ${(e as Error).message.slice(0, 60)}`, 82 + i); }
     }
   }
 
-  if (!all.length && !openQs.length) throw new Error(`Rien n'a pu être généré (lots QCM et questions ouvertes échoués) : ${llmFailureReason(lastError)}`);
+  if (!all.length && !openQs.length) throw new Error(`Rien n'a pu être généré (lots QCM et questions ouvertes échoués) : ${llmFailureReason(cause())}`);
 
   // persiste l'exam + les QCM + les ouvertes. Les figures rendues (PNG temporaires) prennent leur
   // nom DÉFINITIF qcm-<examId>-fig<idx>.png (dans examsDir, à côté du .tex compilé).
