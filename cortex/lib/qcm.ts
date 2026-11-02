@@ -1,6 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { q, nowStr } from "@/db/q";
-import { LlmError, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
+import { HARD_STOP_CODES, LlmError, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
 import { EXAM_SOURCE_TYPES, courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFormat } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
@@ -529,8 +529,7 @@ export type QcmExamResult = { id: number; count: number; requested: number; veri
 
 /** Nombre de rondes de comblement des QCM manquants, et lots supplémentaires permis (× lots prévus). */
 const TOPUP_ROUNDS = 2;
-/** Échecs où relancer un lot ne servirait à rien (garde, plafond, configuration, annulation). */
-const NO_TOPUP_CODES = new Set(["UNAVAILABLE", "SPEND_CAP", "QUOTA", "CREDITS", "AUTH", "UNSUPPORTED", "ABORTED"]);
+
 
 /** Génère un examen QCM complet (N QCM + M ouvertes), vérifié, persisté, rendu en PDF.
  *  `count`/`openCount` : la COMPOSITION choisie par l'utilisateur (composeur). `focus` : « Mets l'accent
@@ -662,7 +661,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
     }
     const stop = llmErrorCode(lastError);
-    if (!missing.length || all.length >= count || round >= TOPUP_ROUNDS || extraBudget <= 0 || (stop && NO_TOPUP_CODES.has(stop))) break;
+    if (!missing.length || all.length >= count || round >= TOPUP_ROUNDS || extraBudget <= 0 || (stop && HARD_STOP_CODES.has(stop))) break;
     pending = [];
     for (let i = 0; i < missing.length && pending.length < extraBudget; i += BATCH) {
       const slice = missing.slice(i, i + BATCH);
@@ -678,7 +677,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
 
   // partie OUVERTE : chaque question via l'architecte (multi-passes + vérif), au niveau réel.
   // moules « ouverts » échantillonnés depuis l'ADN, imposés à l'architecte.
-  const openQs: ExamQuestion[] = [];
+  const openBySlot = new Map<number, ExamQuestion>();
   if (openCount > 0) {
     const { architectQuestion } = await import("@/lib/architect");
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -687,15 +686,34 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const openMolds = sampleMolds(dna, openCount, {
       only: ["proof_analysis", "derivation", "design", "applied_scenario", "formula_computation", "code_trace", "table_fill", "figure_reading"],
     });
-    for (let i = 0; i < openCount; i++) {
-      const t = cov[(count + i) % cov.length]; // ouvertes = couverture programme (le focus reste sur les QCM)
-      const a = archs[i % archs.length];
-      step(`Question ouverte ${i + 1}/${openCount} (architecte) — ${t.label}…`, 82 + i);
-      try {
-        const r = await architectQuestion(a, `${t.label}${t.method ? ` — ${t.method}` : ""}`, 15, { maxRounds: 1, mold: openMolds[i] ?? null, onStep: (m) => step(`Ouverte ${i + 1} · ${m}`, 82 + i) });
-        openQs.push({ ...r.q, points: 15 });
-      } catch (e) { lastError = e; step(`Question ouverte ${i + 1} ignorée : ${(e as Error).message.slice(0, 60)}`, 82 + i); }
+    // NOMBRE GARANTI, comme pour les QCM : une ouverte échouée (job 8 de CS-290 : 2 sur 3, sans
+    // un mot) est relancée UNE fois, sauf si la cause est une garde ; sinon l'écart est dit.
+    let pendingOpen = Array.from({ length: openCount }, (_, i) => i);
+    for (let round = 0; pendingOpen.length && round < 2; round++) {
+      const failed: number[] = [];
+      for (const i of pendingOpen) {
+        const t = cov[(count + i) % cov.length]; // ouvertes = couverture programme (le focus reste sur les QCM)
+        const a = archs[i % archs.length];
+        step(`Question ouverte ${i + 1}/${openCount} (architecte${round ? ", nouvel essai" : ""}) — ${t.label}…`, 82 + i);
+        try {
+          const r = await architectQuestion(a, `${t.label}${t.method ? ` — ${t.method}` : ""}`, 15, { maxRounds: 1, mold: openMolds[i] ?? null, onStep: (m) => step(`Ouverte ${i + 1} · ${m}`, 82 + i) });
+          openBySlot.set(i, { ...r.q, points: 15 });
+        } catch (e) {
+          lastError = e;
+          failed.push(i);
+          step(`Question ouverte ${i + 1} ignorée : ${llmFailureReason(e).slice(0, 120)}`, 82 + i);
+        }
+      }
+      pendingOpen = failed;
+      const stop = llmErrorCode(lastError);
+      if (!pendingOpen.length || (stop && HARD_STOP_CODES.has(stop))) break;
+      if (round === 0) step(`${pendingOpen.length} question(s) ouverte(s) manquante(s) → nouvel essai`, 88);
     }
+  }
+  const openQs = [...openBySlot.entries()].sort((a, b) => a[0] - b[0]).map(([, oq]) => oq);
+  // Contrôle final du total demandé : ce qui manque encore est dit ici, et remboursé par le job.
+  if (all.length + openQs.length < count + openCount) {
+    step(`⚠ ${all.length + openQs.length} questions sur ${count + openCount} demandées (${all.length}/${count} QCM, ${openQs.length}/${openCount} ouvertes)`, 90);
   }
 
   if (!all.length && !openQs.length) throw new Error(`Rien n'a pu être généré (lots QCM et questions ouvertes échoués) : ${llmFailureReason(cause())}`);
