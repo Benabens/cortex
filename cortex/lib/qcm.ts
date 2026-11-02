@@ -614,6 +614,25 @@ async function duplicateItems(items: QcmItem[]): Promise<number[]> {
   return [...drop].sort((a, b) => a - b);
 }
 
+/** Questions ouvertes construites en même temps (QCM_OPEN_CONCURRENCY, défaut 3). */
+function openConcurrency(): number {
+  const n = Number(process.env.QCM_OPEN_CONCURRENCY);
+  return Number.isInteger(n) && n >= 1 ? Math.min(n, 8) : 3;
+}
+
+/** `fn` sur chaque élément, `n` à la fois au plus. */
+async function runPool<T>(items: T[], n: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (next < items.length) await fn(items[next++]);
+  }));
+}
+
+function formatDuration(ms: number): string {
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`;
+}
+
 /** `requested` / `openRequested` : la composition demandée — `count` / `open` peuvent rester en dessous. */
 export type QcmExamResult = { id: number; count: number; requested: number; verified: number; open: number; openRequested: number; pdf?: string; texError?: string };
 
@@ -624,9 +643,12 @@ const TOPUP_ROUNDS = 2;
 /** Génère un examen QCM complet (N QCM + M ouvertes), vérifié, persisté, rendu en PDF.
  *  `count`/`openCount` : la COMPOSITION choisie par l'utilisateur (composeur). `focus` : « Mets l'accent
  *  sur… » (générique) — garantit ~2 QCM sur le thème sans monopoliser (count ≤ 2 → entièrement ciblé). */
-export async function generateQcmExam(opts: { count?: number; openCount?: number; focus?: string; onStep?: StepCb } = {}): Promise<QcmExamResult> {
+export async function generateQcmExam(opts: { count?: number; openCount?: number; focus?: string; onStep?: StepCb; onExamReady?: (examId: number) => void | Promise<void> } = {}): Promise<QcmExamResult> {
   await ensureQcmSchema();
   const step = opts.onStep ?? (() => {});
+  // M — durée de chaque phase dans le journal du job (mesure avant/après).
+  const tStart = Date.now();
+  const logPhase = (label: string, since: number) => step(`⏱ ${label} : ${formatDuration(Date.now() - since)}`, 0);
   const fmt = await getFormatProfile();
   const focus = (opts.focus ?? "").trim() || undefined;
   const qcmShare = (fmt?.question_types ?? []).filter((t) => t.type === "scq" || t.type === "mcq").reduce((s, t) => s + (t.approx_count || 0), 0);
@@ -755,11 +777,55 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       return { items: [], error: e };
     }
   };
+  let lastError: unknown = null;
+  // partie OUVERTE : chaque question via l'architecte (multi-passes + vérif), au niveau réel.
+  // moules « ouverts » échantillonnés depuis l'ADN, imposés à l'architecte.
+  // M — lancée AVANT les lots QCM et en parallèle d'eux, plusieurs à la fois (job 9 de CS-290 :
+  // 3 ouvertes en série, 16 min sur 27) ; le limiteur global des appels et le backoff du
+  // fournisseur bornent la charge. Aucune passe de qualité n'est retirée.
+  const openBySlot = new Map<number, ExamQuestion>();
+  let abandoned = false;
+  const tOpen = Date.now();
+  const openPhase = (async () => {
+    if (openCount <= 0) return;
+    const { architectQuestion } = await import("@/lib/architect");
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { profile } = require("@/lib/course-profile") as typeof import("@/lib/course-profile");
+    const archs: Archetype[] = profile().archetypes;
+    const openMolds = sampleMolds(dna, openCount, {
+      only: ["proof_analysis", "derivation", "design", "applied_scenario", "formula_computation", "code_trace", "table_fill", "figure_reading"],
+    });
+    // NOMBRE GARANTI, comme pour les QCM : une ouverte échouée (job 8 de CS-290 : 2 sur 3, sans
+    // un mot) est relancée UNE fois, sauf si la cause est une garde ; sinon l'écart est dit.
+    let pendingOpen = Array.from({ length: openCount }, (_, i) => i);
+    for (let round = 0; pendingOpen.length && round < 2 && !abandoned; round++) {
+      const failed: number[] = [];
+      await runPool(pendingOpen, openConcurrency(), async (i) => {
+        if (abandoned) return;
+        const t = openTopic(i); // ouvertes = couverture programme (le focus reste sur les QCM)
+        const a = archs[i % archs.length];
+        step(`Question ouverte ${i + 1}/${openCount} (architecte${round ? ", nouvel essai" : ""}) — ${t.label}…`, 82 + i);
+        try {
+          const r = await architectQuestion(a, `${t.label}${t.method ? ` — ${t.method}` : ""}`, 15, { maxRounds: 1, mold: openMolds[i] ?? null, onStep: (m) => step(`Ouverte ${i + 1} · ${m}`, 82 + i) });
+          openBySlot.set(i, { ...r.q, points: 15 });
+        } catch (e) {
+          lastError = e;
+          failed.push(i);
+          step(`Question ouverte ${i + 1} ignorée : ${llmFailureReason(e).slice(0, 120)}`, 82 + i);
+        }
+      });
+      pendingOpen = failed.sort((x, y) => x - y);
+      const stop = llmErrorCode(lastError);
+      if (!pendingOpen.length || (stop && HARD_STOP_CODES.has(stop))) break;
+      if (round === 0) step(`${pendingOpen.length} question(s) ouverte(s) manquante(s) → nouvel essai`, 88);
+    }
+  })();
+  const tQcm = Date.now();
+
   // NOMBRE GARANTI : les sujets restés sans QCM (lot échoué, items écartés) sont regroupés en
   // nouveaux lots, au plus TOPUP_ROUNDS rondes et autant de lots en plus que de lots prévus.
   // En dessous malgré tout, l'examen le dit (requested) et le job rembourse au prorata.
   const all: QcmItem[] = [];
-  let lastError: unknown = null;
   let pending = batches;
   let extraBudget = batches.length;
   for (let round = 0; pending.length; round++) {
@@ -806,54 +872,16 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   }
   // Aucun appel en erreur mais tous les items écartés (mal formés) : c'est une réponse inutilisable.
   const cause = () => lastError ?? new LlmError("Toutes les questions reçues étaient mal formées.", "BAD_OUTPUT");
-  if (count > 0 && !all.length) throw new Error(`Aucun QCM généré : ${llmFailureReason(cause())}`);
-
-  // partie OUVERTE : chaque question via l'architecte (multi-passes + vérif), au niveau réel.
-  // moules « ouverts » échantillonnés depuis l'ADN, imposés à l'architecte.
-  const openBySlot = new Map<number, ExamQuestion>();
-  if (openCount > 0) {
-    const { architectQuestion } = await import("@/lib/architect");
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { profile } = require("@/lib/course-profile") as typeof import("@/lib/course-profile");
-    const archs: Archetype[] = profile().archetypes;
-    const openMolds = sampleMolds(dna, openCount, {
-      only: ["proof_analysis", "derivation", "design", "applied_scenario", "formula_computation", "code_trace", "table_fill", "figure_reading"],
-    });
-    // NOMBRE GARANTI, comme pour les QCM : une ouverte échouée (job 8 de CS-290 : 2 sur 3, sans
-    // un mot) est relancée UNE fois, sauf si la cause est une garde ; sinon l'écart est dit.
-    let pendingOpen = Array.from({ length: openCount }, (_, i) => i);
-    for (let round = 0; pendingOpen.length && round < 2; round++) {
-      const failed: number[] = [];
-      for (const i of pendingOpen) {
-        const t = openTopic(i); // ouvertes = couverture programme (le focus reste sur les QCM)
-        const a = archs[i % archs.length];
-        step(`Question ouverte ${i + 1}/${openCount} (architecte${round ? ", nouvel essai" : ""}) — ${t.label}…`, 82 + i);
-        try {
-          const r = await architectQuestion(a, `${t.label}${t.method ? ` — ${t.method}` : ""}`, 15, { maxRounds: 1, mold: openMolds[i] ?? null, onStep: (m) => step(`Ouverte ${i + 1} · ${m}`, 82 + i) });
-          openBySlot.set(i, { ...r.q, points: 15 });
-        } catch (e) {
-          lastError = e;
-          failed.push(i);
-          step(`Question ouverte ${i + 1} ignorée : ${llmFailureReason(e).slice(0, 120)}`, 82 + i);
-        }
-      }
-      pendingOpen = failed;
-      const stop = llmErrorCode(lastError);
-      if (!pendingOpen.length || (stop && HARD_STOP_CODES.has(stop))) break;
-      if (round === 0) step(`${pendingOpen.length} question(s) ouverte(s) manquante(s) → nouvel essai`, 88);
-    }
+  if (count > 0 && !all.length) {
+    abandoned = true; // les ouvertes en cours s'arrêtent après leur question
+    await openPhase;
+    throw new Error(`Aucun QCM généré : ${llmFailureReason(cause())}`);
   }
-  const openQs = [...openBySlot.entries()].sort((a, b) => a[0] - b[0]).map(([, oq]) => oq);
-  // Contrôle final du total demandé : ce qui manque encore est dit ici, et remboursé par le job.
-  if (all.length + openQs.length < count + openCount) {
-    step(`⚠ ${all.length + openQs.length} questions sur ${count + openCount} demandées (${all.length}/${count} QCM, ${openQs.length}/${openCount} ouvertes)`, 90);
-  }
+  logPhase("QCM", tQcm);
 
-  if (!all.length && !openQs.length) throw new Error(`Rien n'a pu être généré (lots QCM et questions ouvertes échoués) : ${llmFailureReason(cause())}`);
-
-  // persiste l'exam + les QCM + les ouvertes. Les figures rendues (PNG temporaires) prennent leur
-  // nom DÉFINITIF qcm-<examId>-fig<idx>.png (dans examsDir, à côté du .tex compilé).
-  const examId = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','ready')`);
+  // M — LIVRAISON PROGRESSIVE : l'examen et ses QCM vérifiés sont enregistrés tout de suite
+  // (statut « generating ») et visibles dans /mock/N ; les ouvertes arrivent ensuite.
+  const examId = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','generating')`);
   for (let i = 0; i < all.length; i++) {
     const it = all[i];
     if (it.figureFile) {
@@ -870,15 +898,39 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       const figureJson = it.figureSpec ? JSON.stringify({ spec: it.figureSpec, file: it.figureFile, truth: it.figureTruth }) : null;
       await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified, mold, figure_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, examId, i, it.topic, it.type, it.stem, JSON.stringify(it.options), JSON.stringify(it.correct), JSON.stringify(it.misconceptions), it.explanation, it.verified, it.mold ?? null, figureJson);
     }
+  });
+  const verified = all.filter((it) => it.verified === 1).length;
+  if (openCount > 0 && all.length) {
+    await q.run(`UPDATE exams SET verify_summary = ? WHERE id = ?`, `${qcmExamSummary({ count: all.length, requested: count, verified, open: 0, openRequested: 0 })} — questions ouvertes en cours`, examId);
+    step(`${all.length} QCM visibles dans l'examen #${examId} — questions ouvertes en cours…`, 82);
+    await opts.onExamReady?.(examId);
+  }
+  await openPhase;
+  if (openCount > 0) logPhase("Questions ouvertes", tOpen);
+
+  const openQs = [...openBySlot.entries()].sort((a, b) => a[0] - b[0]).map(([, oq]) => oq);
+  // Contrôle final du total demandé : ce qui manque encore est dit ici, et remboursé par le job.
+  if (all.length + openQs.length < count + openCount) {
+    step(`⚠ ${all.length + openQs.length} questions sur ${count + openCount} demandées (${all.length}/${count} QCM, ${openQs.length}/${openCount} ouvertes)`, 90);
+  }
+
+  if (!all.length && !openQs.length) {
+    // L'examen a été enregistré tôt (livraison progressive) : vide, il ne reste pas en liste.
+    await q.run(`DELETE FROM exams WHERE id = ?`, examId);
+    throw new Error(`Rien n'a pu être généré (lots QCM et questions ouvertes échoués) : ${llmFailureReason(cause())}`);
+  }
+
+  // Les ouvertes rejoignent l'examen déjà enregistré ; il passe « prêt ».
+  await q.tx(async () => {
     for (const oq of openQs) {
       await q.run(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration) VALUES (?,?,?,?,?)`, examId, oq.concept, oq.statement_tex, oq.solution_tex, "qcm-open");
     }
   });
-  const verified = all.filter((it) => it.verified === 1).length;
-  await q.run(`UPDATE exams SET verify_summary = ? WHERE id = ?`, qcmExamSummary({ count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount }), examId);
+  await q.run(`UPDATE exams SET verify_summary = ?, status = 'ready' WHERE id = ?`, qcmExamSummary({ count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount }), examId);
 
   // rendu PDF (énoncé + corrigé) au look d'un vrai final du cours
   step("Rendu du PDF (look vrai final)…", 92);
+  const tPdf = Date.now();
   let pdf: string | undefined, texError: string | undefined;
   try {
     const { buildQcmArtifact } = await import("@/lib/qcm-latex");
@@ -892,6 +944,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // trace) : l'étape le dit, l'examen reste consultable en ligne et le PDF se régénère à part.
   if (texError) step(`⚠ PDF non compilé (${texError.slice(0, 160)}) — l'examen reste consultable en ligne`, 97);
 
+  logPhase("PDF", tPdf);
+  logPhase("Total", tStart);
   step(`Examen QCM #${examId} prêt — ${qcmExamSummary({ count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount })} ✓`, 100);
   return { id: examId, count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount, pdf, texError };
 }
@@ -904,7 +958,7 @@ export function qcmExamSummary(r: Pick<QcmExamResult, "count" | "requested" | "v
 }
 
 export type QcmOpenView = { id: number; concept: string; statement: string; solution: string };
-export type QcmExamView = { id: number; createdAt: string; verifySummary: string | null; pdf: string | null; items: (Omit<QcmItem, "correct" | "misconceptions"> & { id: number; idx: number })[]; open: QcmOpenView[] };
+export type QcmExamView = { id: number; createdAt: string; status: string; verifySummary: string | null; pdf: string | null; items: (Omit<QcmItem, "correct" | "misconceptions"> & { id: number; idx: number })[]; open: QcmOpenView[] };
 type QcmExamRow = { id: number; created_at: string; verify_summary: string | null; html_path: string | null };
 type QcmItemRow = {
   id: number; idx: number; topic: string; type: "scq" | "mcq"; stem: string;
@@ -916,7 +970,7 @@ type QcmOpenRow = { id: number; concept: string; statement_html: string | null; 
 /** Un examen QCM pour l'affichage (SANS les clés — l'auto-correction se fait via /api). */
 export async function getQcmExam(examId: number, withKeys = false): Promise<QcmExamView | null> {
   await ensureQcmSchema();
-  const e = await q.get<QcmExamRow>(`SELECT id, created_at, verify_summary, html_path FROM exams WHERE id = ? AND format_template = 'qcm'`, examId);
+  const e = await q.get<QcmExamRow & { status: string | null }>(`SELECT id, created_at, status, verify_summary, html_path FROM exams WHERE id = ? AND format_template = 'qcm'`, examId);
   if (!e) return null;
   const rows = await q.all<QcmItemRow>(`SELECT * FROM qcm_items WHERE exam_id = ? ORDER BY idx`, examId);
   let open: QcmOpenView[] = [];
@@ -927,7 +981,7 @@ export async function getQcmExam(examId: number, withKeys = false): Promise<QcmE
       .map((r) => ({ id: r.id, concept: r.concept, statement: texToHtml(r.statement_html ?? ""), solution: withKeys ? texToHtml(r.solution_html ?? "") : "" }));
   } catch {}
   return {
-    id: e.id, createdAt: e.created_at, verifySummary: e.verify_summary, pdf: e.html_path ?? null,
+    id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: e.verify_summary, pdf: e.html_path ?? null,
     items: rows.map((r) => {
       let figure: string | null = null;
       try { figure = r.figure_json ? (JSON.parse(r.figure_json).file ?? null) : null; } catch {}

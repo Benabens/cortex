@@ -160,7 +160,7 @@ export default function ExamensPage() {
                         {e.onlineUrl ? <a href={e.onlineUrl} className="hover:underline">Examen #{e.id}</a> : <>Examen #{e.id}</>}
                       </h3>
                       <Badge tone={ready ? "success" : "neutral"} Icon={ready ? CheckCircle2 : undefined} size="xs">
-                        {ready ? "Prêt" : e.status}
+                        {ready ? "Prêt" : e.status === "generating" ? "Ouvertes en cours" : e.status}
                       </Badge>
                     </div>
                     <p className="mt-0.5 truncate text-[0.8rem] text-ink-3">
