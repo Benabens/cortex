@@ -56,8 +56,13 @@ export type QcmItem = {
   judgeIssue?: string | null;
   /** Rang du sujet dans le lot demandé (non persisté) : un item écarté laisse SON sujet à combler. */
   slot?: number;
-  /** Notion hors cours (absente du corpus ou définie autrement), relevée à la vérification : item écarté. */
-  offCourse?: string | null;
+  /**
+   * Raison de rejet relevée à la vérification (notion hors cours, clé contestée) : l'item est
+   * régénéré une fois, puis écarté et son sujet comblé. Jamais gardé tel quel.
+   */
+  rejected?: string | null;
+  /** Le correcteur valide la question telle quelle : sa réponse est la clé, sans ambiguïté ni indice. */
+  judgeOk?: boolean | null;
 };
 
 const QCM_BATCH_SCHEMA = {
@@ -262,6 +267,8 @@ function weaknessOf(it: QcmItem): string | null {
   if (it.verified === 0) return it.judgeIssue ?? "clé non confirmée à la vérification à l'aveugle";
   const issue = it.judgeIssue ? ` (${it.judgeIssue})` : "";
   if (it.nameOnly) return `réussie avec les seuls noms des notions ou par élimination${issue}`;
+  // Clé confirmée, mais le correcteur relève une ambiguïté, un indice ou un distracteur absurde.
+  if (it.judgeOk === false) return `défaut relevé par le correcteur${issue}`;
   if (typeof it.discrimination === "number" && it.discrimination <= 2) return `pouvoir discriminant faible (${it.discrimination}/5)${issue}`;
   if (qcmLengthCue(it.options, it.correct)) return "la bonne option se repère à sa longueur";
   return null;
@@ -514,9 +521,9 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     const off = [missing.length ? `absent du cours : ${missing.join(", ")}` : "", flagged].filter(Boolean).join(" ; ");
     if (off) {
       q.verified = 0;
-      q.offCourse = off.slice(0, 240);
-      q.judgeIssue = `notion hors cours (${q.offCourse}) : n'utilise que les notions et les définitions des extraits du cours`;
-      step(`QCM rejeté — hors cours : ${q.offCourse}`, 70);
+      q.rejected = `hors cours : ${off.slice(0, 240)}`;
+      q.judgeIssue = `notion hors cours (${off.slice(0, 240)}) : n'utilise que les notions et les définitions des extraits du cours`;
+      step(`QCM rejeté — ${q.rejected}`, 70);
       continue;
     }
     q.discrimination = Number.isInteger(r.discrimination) ? Math.max(1, Math.min(5, r.discrimination!)) : null;
@@ -530,9 +537,18 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
       q.judgeIssue = `question à réponse unique avec plusieurs réponses défendables${r.issue ? ` (${r.issue.trim().slice(0, 160)})` : ""}`;
       continue;
     }
-    if (r.ok && keyMatch) q.verified = 1;
-    else if (r.correct?.length) { q.correct = r.correct; q.verified = 1; q.explanation = (q.explanation ? q.explanation + " " : "") + (r.issue ? `[clé corrigée à la vérif : ${r.issue}]` : "[clé alignée sur la résolution indépendante]"); }
-    else q.verified = 0;
+    q.judgeOk = !!r.ok && keyMatch;
+    if (keyMatch) { q.verified = 1; continue; }
+    q.verified = 0;
+    if (!r.correct?.length) continue;
+    // Le correcteur trouve une AUTRE réponse que la clé : l'explication défend la clé d'origine,
+    // la remplacer donnait une clé et une explication contradictoires (HUM-285, Q19 du 02/11).
+    // L'item est régénéré avec ce que le correcteur a trouvé, sinon écarté ; jamais corrigé en place.
+    const found = r.correct.map((k) => `« ${sanitizeCorpus(q.options[k] ?? `option ${k}`).slice(0, 120)} »`).join(", ");
+    const why = q.judgeIssue ? ` (${q.judgeIssue})` : "";
+    q.rejected = `clé contestée : le correcteur trouve ${found}${why}`.slice(0, 400);
+    q.judgeIssue = `${q.rejected} — vérifie la réponse et écris une explication qui la justifie`;
+    step(`QCM rejeté — ${q.rejected.slice(0, 160)}`, 70);
   }
   return items;
 }
@@ -656,9 +672,9 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const safeBatch = async (bt: Batch): Promise<{ items: QcmItem[]; error: unknown }> => {
     try {
       const items = await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, undefined, { ...shared, molds: bt.molds });
-      // Un item resté hors cours après régénération n'est jamais gardé : son sujet est comblé.
+      // Un item resté rejeté après régénération (hors cours, clé contestée) n'est jamais gardé : son sujet est comblé.
       const kept = items.length ? await strengthen(bt, await verifyQcmBatch(items, step)) : [];
-      return { items: kept.filter((it) => !it.offCourse), error: null };
+      return { items: kept.filter((it) => !it.rejected), error: null };
     } catch (e) {
       step(`Lot QCM échoué (${(e as Error).message.slice(0, 80)})`, 0);
       return { items: [], error: e };
@@ -792,6 +808,21 @@ export function qcmExamSummary(r: Pick<QcmExamResult, "count" | "requested" | "v
   return `QCM ${qcm} (${r.verified} vér.) + ${open} ouverte(s)`;
 }
 
+/**
+ * Note que la vérification ajoutait à l'explication quand elle remplaçait la clé (avant le
+ * 02/11/2026) : l'explication défendait alors l'ANCIENNE clé. Encore présente dans les examens
+ * déjà générés ; elle n'est jamais montrée, ni l'explication qu'elle accompagne.
+ */
+const LEGACY_KEY_NOTE = /\[clé (?:corrigée à la vérif\b|alignée sur la résolution indépendante)/;
+
+/** L'explication telle que l'étudiant la lit. */
+export function shownExplanation(raw: string | null | undefined): string {
+  const text = raw ?? "";
+  return LEGACY_KEY_NOTE.test(text)
+    ? "Explication retirée : la clé de cette question a été corrigée après sa rédaction, et l'explication d'origine justifiait l'ancienne réponse."
+    : text;
+}
+
 export type QcmOpenView = { id: number; concept: string; statement: string; solution: string };
 export type QcmExamView = { id: number; createdAt: string; verifySummary: string | null; pdf: string | null; items: (Omit<QcmItem, "correct" | "misconceptions"> & { id: number; idx: number })[]; open: QcmOpenView[] };
 type QcmExamRow = { id: number; created_at: string; verify_summary: string | null; html_path: string | null };
@@ -822,7 +853,7 @@ export async function getQcmExam(examId: number, withKeys = false): Promise<QcmE
       try { figure = r.figure_json ? (JSON.parse(r.figure_json).file ?? null) : null; } catch {}
       return {
         id: r.id, idx: r.idx, topic: r.topic, type: r.type, stem: r.stem,
-        options: JSON.parse(r.options_json), explanation: withKeys ? r.explanation : "", verified: r.verified,
+        options: JSON.parse(r.options_json), explanation: withKeys ? shownExplanation(r.explanation) : "", verified: r.verified,
         mold: r.mold ?? null, figureFile: figure,
         ...(withKeys ? { correct: JSON.parse(r.correct_json), misconceptions: JSON.parse(r.misconceptions_json) } : {}),
       };
@@ -871,7 +902,7 @@ export async function gradeQcm(examId: number, answers: Record<number, number[]>
     const chosen = [...new Set((answers[r.idx] ?? []).filter((value) => Number.isInteger(value) && value >= 0 && value < optionCount))].sort((a, b) => a - b);
     const ok = JSON.stringify(correct.slice().sort()) === JSON.stringify(chosen);
     const points = scoreQcmAnswer(correct, chosen, optionCount);
-    return { idx: r.idx, correct, chosen, ok, points, explanation: r.explanation, misconceptions: JSON.parse(r.misconceptions_json) };
+    return { idx: r.idx, correct, chosen, ok, points, explanation: shownExplanation(r.explanation), misconceptions: JSON.parse(r.misconceptions_json) };
   });
   return { score: detail.reduce((sum, item) => sum + item.points, 0), total: rows.length, detail };
 }

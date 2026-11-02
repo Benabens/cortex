@@ -250,8 +250,8 @@ export async function buildParcours(opts: { budgetQcm?: number; budgetOpen?: num
       const kept = items.slice(0, chunk.length);
       for (let j = 0; j < kept.length; j++) {
         const it = kept[j];
-        // Une question hors cours (notion absente du corpus, lib/course-grounding) n'entre pas dans la banque.
-        if (it.offCourse) continue;
+        // Une question rejetée à la vérification (hors cours, clé contestée) n'entre pas dans la banque.
+        if (it.rejected) continue;
         const tp = chunk[j] ?? it.topic;
         const optStr = (it.options ?? []).map((o, k) => `${LETTERS[k]}) ${o}`).join("\n");
         const correct = (it.correct ?? []).map((c) => LETTERS[c] ?? "?").join(", ");
@@ -443,7 +443,7 @@ export async function extendParcours(opts: {
         try { items = await verifyQcmBatch(items, () => {}); } catch {}
         let inserted = 0;
         for (const it of items) {
-          if (!it.stem || !(it.options ?? []).length || it.offCourse) continue;
+          if (!it.stem || !(it.options ?? []).length || it.rejected) continue;
           const st = tokens(it.stem);
           if (coveredSets.some((c) => jaccard(c, st) > 0.72)) continue; // quasi-doublon → skip
           const optStr = (it.options ?? []).map((o, k) => `${LETTERS[k]}) ${o}`).join("\n");
