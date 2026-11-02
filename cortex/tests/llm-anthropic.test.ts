@@ -68,7 +68,7 @@ test("anthropic : stream + modèle par défaut + output_config + thinking + imag
     model: "opus",
     maxTokens: 2000,
     thinking: "adaptive",
-    json: { schema: { type: "object" }, effort: "high" },
+    json: { schema: { type: "object", properties: { topic: { type: "string" } }, required: ["topic"] }, effort: "high" },
     images: [{ mediaType: "image/png", base64: "QUJD" }],
     timeoutMs: 5_000,
   });
@@ -83,7 +83,7 @@ test("anthropic : stream + modèle par défaut + output_config + thinking + imag
   assert.equal(captured!.stream, true);
   assert.deepEqual(captured!.thinking, { type: "adaptive" });
   assert.deepEqual(captured!.output_config, {
-    format: { type: "json_schema", schema: { type: "object" } },
+    format: { type: "json_schema", schema: { type: "object", properties: { topic: { type: "string" } }, required: ["topic"], additionalProperties: false } },
     effort: "high",
   });
   const messages = captured!.messages as Array<{ role: string; content: Array<Record<string, unknown>> }>;
