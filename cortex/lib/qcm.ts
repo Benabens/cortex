@@ -863,10 +863,13 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const { buildQcmArtifact } = await import("@/lib/qcm-latex");
     const dateLabel = nowStr().slice(0, 10);
     const out = await buildQcmArtifact(examId, { items: all, open: openQs }, dateLabel);
-    pdf = out.file; texError = out.texError;
+    pdf = out.file || undefined; texError = out.texError;
     if (out.texWarning) step(`⚠ ${out.texWarning}`, 96);
-    await q.run(`UPDATE exams SET html_path = ? WHERE id = ?`, out.file, examId);
+    if (out.file) await q.run(`UPDATE exams SET html_path = ? WHERE id = ?`, out.file, examId);
   } catch (e) { texError = (e as Error).message; }
+  // Jamais silencieux (examen 4 de CS-290 : « prêt » 16 ms après « Rendu du PDF », sans PDF ni
+  // trace) : l'étape le dit, l'examen reste consultable en ligne et le PDF se régénère à part.
+  if (texError) step(`⚠ PDF non compilé (${texError.slice(0, 160)}) — l'examen reste consultable en ligne`, 97);
 
   step(`Examen QCM #${examId} prêt — ${qcmExamSummary({ count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount })} ✓`, 100);
   return { id: examId, count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount, pdf, texError };

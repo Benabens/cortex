@@ -234,7 +234,13 @@ export function plainOpenTex(tex: string): string {
   return text.split(/\n\s*\n/).map((p) => esc(p.trim())).filter(Boolean).join("\n\n");
 }
 
-/** Écrit énoncé + corrigé .tex et compile les 2 PDF. Renvoie le nom du PDF énoncé (ou throw/repli). */
+/**
+ * Écrit énoncé + corrigé .tex et compile les 2 PDF. Le garde passe AVANT toute écriture
+ * (lib/tex-guard). Un refus du garde ou un échec de compilation n'est jamais silencieux
+ * ni fatal tant qu'un repli existe : les questions ouvertes (LaTeX libre, la cause
+ * habituelle) passent en texte simple ; un corrigé qui ne compile pas a le même repli,
+ * pour rester cohérent avec l'énoncé. `file` vide : aucun .tex sûr n'a pu être écrit.
+ */
 export async function buildQcmArtifact(examId: number, data: QcmExamData, dateLabel: string): Promise<{ file: string; texError?: string; texWarning?: string }> {
   fs.mkdirSync(examsDir(), { recursive: true });
   const base = `qcm-${examId}`;
@@ -242,33 +248,42 @@ export async function buildQcmArtifact(examId: number, data: QcmExamData, dateLa
     const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
     if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
   }
-  // Garde AVANT toute écriture (cf. lib/tex-guard).
-  const texEnonce = await renderQcmExamTex(data, dateLabel, false);
-  const texCorrige = await renderQcmExamTex(data, dateLabel, true);
-  assertTexSafe(texEnonce);
-  assertTexSafe(texCorrige);
-  fs.writeFileSync(path.join(examsDir(), `${base}.tex`), texEnonce);
-  fs.writeFileSync(path.join(examsDir(), `${base}-corrige.tex`), texCorrige);
+  const plain: QcmExamData = { ...data, open: data.open.map((q) => ({ ...q, statement_tex: plainOpenTex(q.statement_tex), solution_tex: plainOpenTex(q.solution_tex) })) };
+  const write = async (d: QcmExamData, solutions: boolean): Promise<string> => {
+    const tex = await renderQcmExamTex(d, dateLabel, solutions);
+    assertTexSafe(tex);
+    const name = solutions ? `${base}-corrige` : base;
+    fs.writeFileSync(path.join(examsDir(), `${name}.tex`), tex);
+    return name;
+  };
+  const why = (e: unknown) => (e as Error).message.slice(0, 200);
+
+  let pdf: string;
+  let warning: string | undefined;
   try {
-    const pdf = await compileExamPdf(base);
-    try { await compileExamPdf(`${base}-corrige`); } catch (e) { console.error(`[qcm] corrigé #${examId} non compilé :`, (e as Error).message); }
-    return { file: pdf };
+    pdf = await compileExamPdf(await write(data, false));
   } catch (e) {
-    // Le LaTeX libre des questions ouvertes est la cause habituelle : plutôt que de perdre tout
-    // le PDF, elles passent en texte simple (contenu gardé, mise en forme perdue).
-    if (!data.open.length) return { file: `${base}.tex`, texError: (e as Error).message };
-    const plain = { ...data, open: data.open.map((q) => ({ ...q, statement_tex: plainOpenTex(q.statement_tex), solution_tex: plainOpenTex(q.solution_tex) })) };
+    if (!data.open.length) return { file: fs.existsSync(path.join(examsDir(), `${base}.tex`)) ? `${base}.tex` : "", texError: (e as Error).message };
     try {
-      const [enonce, corrige] = [await renderQcmExamTex(plain, dateLabel, false), await renderQcmExamTex(plain, dateLabel, true)];
-      assertTexSafe(enonce);
-      assertTexSafe(corrige);
-      fs.writeFileSync(path.join(examsDir(), `${base}.tex`), enonce);
-      fs.writeFileSync(path.join(examsDir(), `${base}-corrige.tex`), corrige);
-      const pdf = await compileExamPdf(base);
-      try { await compileExamPdf(`${base}-corrige`); } catch (e2) { console.error(`[qcm] corrigé #${examId} non compilé :`, (e2 as Error).message); }
-      return { file: pdf, texWarning: `PDF compilé avec les questions ouvertes en texte simple (leur LaTeX ne compilait pas : ${(e as Error).message.slice(0, 200)})` };
+      pdf = await compileExamPdf(await write(plain, false));
+      warning = `PDF compilé avec les questions ouvertes en texte simple (leur LaTeX ne passait pas : ${why(e)})`;
     } catch (e2) {
-      return { file: `${base}.tex`, texError: `${(e as Error).message} — repli en texte simple échoué aussi : ${(e2 as Error).message.slice(0, 200)}` };
+      return { file: fs.existsSync(path.join(examsDir(), `${base}.tex`)) ? `${base}.tex` : "", texError: `${(e as Error).message} — repli en texte simple échoué aussi : ${why(e2)}` };
     }
   }
+  // Corrigé : même source que l'énoncé, puis le même repli s'il ne compile pas (examen 2 de
+  // CS-290 : « Énoncé » sans « Corrigé »).
+  try {
+    await compileExamPdf(await write(warning ? plain : data, true));
+  } catch (e) {
+    try {
+      if (warning || !data.open.length) throw e;
+      await compileExamPdf(await write(plain, true));
+      warning = `Corrigé compilé avec les questions ouvertes en texte simple (${why(e)})`;
+    } catch (e2) {
+      warning = `${warning ? `${warning} ; ` : ""}corrigé non compilé : ${why(e2)}`;
+      console.error(`[qcm] corrigé #${examId} non compilé :`, (e2 as Error).message);
+    }
+  }
+  return { file: pdf, ...(warning ? { texWarning: warning } : {}) };
 }
