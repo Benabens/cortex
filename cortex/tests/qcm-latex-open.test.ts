@@ -64,3 +64,43 @@ test("une question ouverte avec \\captionof et un nœud TikZ multiligne compile 
   assert.equal(out.texError, undefined, out.texError);
   assert.match(out.file, /\.pdf$/);
 });
+
+test("align n'est ajouté qu'aux nœuds TikZ, jamais au code ni au texte", async () => {
+  const { alignTikzNodes } = await import("../lib/qcm-latex");
+  const code = String.raw`\begin{lstlisting}
+tree.node[i] = x
+\end{lstlisting} Le \texttt{graph.node[0]} reste tel quel.`;
+  assert.equal(alignTikzNodes(code), code, "code et texte intacts hors d'une figure TikZ");
+  const fig = String.raw`\begin{tikzpicture}[every node/.style={font=\small}]
+\node[draw] (a) {A\\B};
+\node at (0,1) {C\\D};
+\node (b) at (2,0) {E};
+\draw (a) -- (b) node {m\\n};
+\node[align=left] (c) {F};
+\node[label={[red]x}] (d) {G};
+\end{tikzpicture}`;
+  const out = alignTikzNodes(fig);
+  assert.match(out, /\\node\[draw, align=center\] \(a\)/);
+  assert.match(out, /\\node\[align=center\] at \(0,1\)/);
+  assert.match(out, /\\node\[align=center\] \(b\)/);
+  assert.match(out, /node\[align=center\] \{m/);
+  assert.match(out, /\\node\[align=left\] \(c\)/, "un align existant est gardé");
+  assert.match(out, /\\node\[label=\{\[red\]x\}\] \(d\)/, "options imbriquées : laissées telles quelles");
+});
+
+test("une question ouverte au LaTeX encore cassé : le PDF sort quand même, la question en texte simple", async (t) => {
+  const { texAvailable } = await import("../lib/exam-latex");
+  if (!texAvailable()) return t.skip("tectonic/pdflatex absent");
+  const { runWithCourse } = await import("../db/client");
+  const { buildQcmArtifact } = await import("../lib/qcm-latex");
+  const item = {
+    topic: "Fairness", type: "scq" as const, stem: "Which metric compares error rates?", options: ["Equalized odds", "Demographic parity"], correct: [0],
+    misconceptions: ["", "a"], explanation: "Equalized odds.", verified: 1 as const,
+  };
+  const broken = String.raw`\textbf{Setting.} Compute the \undefinedmacro{FPR} of each group \begin{tikzpicture}\node {a\\b};\end{tikzpicture} with 37 \% of positives.`;
+  const out = await runWithCourse("ml", () => buildQcmArtifact(4343, { items: [item], open: [{ category: "F", concept: "FPR", statement_tex: broken, solution_tex: "FP/(FP+TN)", points: 15 }] }, "2026-11-02"));
+  assert.equal(out.texError, undefined, out.texError);
+  assert.match(out.file, /\.pdf$/);
+  assert.match(out.texWarning ?? "", /texte simple/);
+});
+
