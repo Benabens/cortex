@@ -22,9 +22,12 @@ import { jsonrepair } from "jsonrepair";
 /** Réponse illisible du modèle : `code` aligné sur LlmError pour les routes et le connecteur. */
 export class JsonOutputError extends Error {
   readonly code = "BAD_OUTPUT";
-  constructor(message: string) {
+  /** true : la réponse s'arrête avant la fin de son JSON (à redemander plus concise). */
+  readonly truncated: boolean;
+  constructor(message: string, opts: { truncated?: boolean } = {}) {
     super(message);
     this.name = "JsonOutputError";
+    this.truncated = opts.truncated ?? false;
   }
 }
 
@@ -78,22 +81,55 @@ function scanValue(s: string, start: number): Scan {
 }
 
 /**
- * Valeurs les plus externes du texte, sans jamais redescendre dans l'une
- * d'elles : un objet tronqué ne doit pas rendre son premier élément complet
- * comme s'il était la réponse. Une valeur ouverte court jusqu'à la fin.
+ * Longueur du plus long préfixe de `s` conforme à la grammaire JSON : s.length
+ * quand le texte s'arrête avant la fin d'une valeur (réponse COUPÉE), moins
+ * quand il dévie (prose, guillemet non échappé). Lu sur la position que donne
+ * JSON.parse (« … in JSON at position N », ou « Unexpected end of JSON input »).
  */
-function outerSpans(s: string): ({ start: number } & Scan)[] {
-  const spans: ({ start: number } & Scan)[] = [];
+function validPrefix(s: string): number {
+  try {
+    JSON.parse(s);
+    return s.length;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const at = /at position (\d+)/.exec(msg);
+    if (at) return Number(at[1]);
+    return /end of JSON input/i.test(msg) ? s.length : 0;
+  }
+}
+
+type Span = { start: number; end: number; closed: boolean; prefix: number };
+
+/**
+ * Valeurs candidates du texte, sans redescendre dans une valeur fermée. Une
+ * valeur NON fermée dont la grammaire tient jusqu'à la fin du texte est une
+ * réponse coupée : rien après elle n'est indépendant, le balayage s'arrête
+ * (sinon son premier élément complet passerait pour la réponse). Une valeur
+ * non fermée qui dévie avant (crochet de prose « [0, 1[ », guillemet non
+ * échappé) n'arrête pas le balayage.
+ */
+function candidateSpans(s: string): Span[] {
+  const spans: Span[] = [];
   let starts = 0;
   for (let i = 0; i < s.length && starts < MAX_STARTS; i++) {
     if (s[i] !== "{" && s[i] !== "[") continue;
     starts++;
     const r = scanValue(s, i);
-    spans.push({ start: i, ...r });
-    if (r.state === "open") break;
-    i = r.end;
+    if (r.state === "closed") {
+      spans.push({ start: i, end: r.end, closed: true, prefix: r.end + 1 - i });
+      i = r.end;
+      continue;
+    }
+    const prefix = validPrefix(s.slice(i));
+    spans.push({ start: i, end: s.length - 1, closed: false, prefix });
+    if (i + prefix >= s.length) break;
   }
   return spans;
+}
+
+/** Une valeur suivie de « , ] } » est un élément d'une structure plus grande, pas la réponse. */
+function isInnerElement(s: string, sp: Span): boolean {
+  return /^\s*[,\]}]/.test(s.slice(sp.end + 1));
 }
 
 /** Extrait la valeur JSON (objet ou tableau) d'une réponse de modèle. Lève JsonOutputError. */
@@ -116,13 +152,16 @@ export function extractJson<T = unknown>(text: string): T {
     if (r.ok) return r.value as T;
   }
 
-  // La plus grande valeur externe est la réponse ; la prose autour peut contenir
-  // des crochets (« selon [1] ») ou des accolades sans être du JSON.
+  // La plus grande valeur candidate est la réponse ; la prose autour peut contenir
+  // des crochets (« selon [1] », « [0, 1[ ») ou des accolades sans être du JSON. Une
+  // valeur non fermée compte pour la part de son texte qui reste du JSON.
   const body = whole ?? t;
-  const best = outerSpans(body).sort((a, b) => b.end - b.start - (a.end - a.start))[0];
+  const best = candidateSpans(body)
+    .filter((sp) => !sp.closed || !isInnerElement(body, sp))
+    .sort((a, b) => b.prefix - a.prefix)[0];
   if (!best) throw new JsonOutputError("Réponse du modèle sans JSON (objet ou tableau attendu).");
   let parseError = direct.error;
-  if (best.state === "closed") {
+  if (best.closed) {
     const r = tryParse(body.slice(best.start, best.end + 1));
     if (r.ok) return r.value as T;
     parseError = r.error;
@@ -131,11 +170,11 @@ export function extractJson<T = unknown>(text: string): T {
   // Réparation en dernier recours. Une réponse COUPÉE (max_tokens, flux interrompu)
   // n'est jamais complétée : jsonrepair fermerait les accolades et rendrait un
   // objet partiel qui passerait pour une réponse complète.
-  const target = best.state === "closed"
+  const target = best.closed
     ? body.slice(best.start, best.end + 1)
     : body.slice(best.start).replace(/\n?```\s*$/, "").trimEnd();
-  if (best.state === "open" && !/[}\]]$/.test(target)) {
-    throw new JsonOutputError("Réponse du modèle tronquée : le JSON s'arrête avant sa fin.");
+  if (!best.closed && best.prefix >= target.length) {
+    throw new JsonOutputError("Réponse du modèle tronquée : le JSON s'arrête avant sa fin.", { truncated: true });
   }
   try {
     return JSON.parse(jsonrepair(target)) as T;

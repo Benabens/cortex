@@ -78,3 +78,21 @@ test("aucun JSON : erreur explicite, code BAD_OUTPUT", () => {
     assert.throws(() => extractJson(text), (e: unknown) => e instanceof JsonOutputError && e.code === "BAD_OUTPUT");
   }
 });
+
+test("un crochet ouvert dans la prose (intervalle [0, 1[) ne capture pas la réponse", () => {
+  const payload = { verdict: "correct", feedback: "ok" };
+  assert.deepEqual(extractJson(`Pour x dans [0, 1[, voici :\n${JSON.stringify(payload)}`), payload);
+  assert.deepEqual(extractJson(`${JSON.stringify(payload)}\nVoir aussi [1`), payload);
+});
+
+test("coupée juste après un élément complet : tronquée, pas un objet partiel", () => {
+  assert.throws(() => extractJson(`{"items":[{"a":1},{"b":2}`), (e: unknown) => e instanceof JsonOutputError && e.truncated);
+  assert.throws(() => extractJson(`Selon [1], voici :\n{"items":[{"a":1},`), (e: unknown) => e instanceof JsonOutputError && e.truncated);
+});
+
+test("guillemet non échappé (nombre impair) : la réponse entière est réparée, jamais un de ses éléments seul", () => {
+  const r = extractJson<{ items?: { stem: string }[]; stem?: string }>(`{"items": [{"stem": "le "x mot"}, {"stem": "Q2"}]}`);
+  assert.ok(Array.isArray(r.items), JSON.stringify(r));
+  assert.equal(r.items!.at(-1)!.stem, "Q2");
+});
+
