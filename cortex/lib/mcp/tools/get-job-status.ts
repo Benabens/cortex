@@ -1,6 +1,6 @@
 import * as z from "zod/v4";
 import { examQuestions } from "@/lib/exam";
-import { activeJob, getJob, listJobs, type Job } from "@/lib/jobs";
+import { activeJob, getJob, jobEta, listJobs, type Job } from "@/lib/jobs";
 import { getQcmExam } from "@/lib/qcm";
 import { redactMessage } from "@/lib/observability";
 import { clip, htmlToText } from "../content";
@@ -17,6 +17,7 @@ const jobOut = z.object({
   created_at: z.string(),
   updated_at: z.string(),
   result_link: z.string().nullable(),
+  remaining: z.string().nullable().optional().describe("Estimated time left for a running generation (from this course's past jobs), e.g. \"≈ 5 min restantes\"."),
 });
 
 const output = z.object({
@@ -137,7 +138,8 @@ export default defineTool({
           truncated: rows.length > MAX_QUESTIONS,
         };
       }
-      return { ...base, job: jobView(job, ctx.appOrigin, c.id), exam };
+      const eta = await jobEta(job).catch(() => null);
+      return { ...base, job: { ...jobView(job, ctx.appOrigin, c.id), remaining: eta?.label ?? null }, exam };
     });
   },
   summarize: (o) => {
@@ -145,6 +147,6 @@ export default defineTool({
     const j = o.job;
     if (j.status === "done") return `Génération n° ${j.job_id} terminée.${o.exam ? ` ${o.exam.questions.length} question(s).` : ""}`;
     if (j.status === "error" || j.status === "canceled") return `Génération n° ${j.job_id} : ${j.status === "error" ? "échec" : "annulée"}.`;
-    return `Génération n° ${j.job_id} : ${j.progress_pct} % — repasse dans une minute.`;
+    return `Génération n° ${j.job_id} : ${j.progress_pct} %${j.remaining ? `, ${j.remaining}` : ""} — repasse dans une minute.`;
   },
 });

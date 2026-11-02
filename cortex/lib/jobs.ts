@@ -563,6 +563,24 @@ async function cleanupPartial(job: Job): Promise<void> {
   } catch {}
 }
 
+/**
+ * Temps restant estimé d'un job actif (lib/eta), d'après la durée des derniers jobs
+ * terminés du même type dans ce cours ; null pour un job terminé.
+ */
+export async function jobEta(job: Job): Promise<import("@/lib/eta").Eta | null> {
+  if (!["queued", "running", "verifying", "compiling"].includes(job.status)) return null;
+  const { estimateRemaining } = await import("@/lib/eta");
+  const ms = (s: string) => new Date(`${s.replace(" ", "T")}Z`).getTime();
+  const hist = await q.all<{ created_at: string; updated_at: string }>(
+    `SELECT created_at, updated_at FROM jobs WHERE type = ? AND status = 'done' AND id <> ? ORDER BY id DESC LIMIT 5`, job.type, job.id,
+  ).catch(() => []);
+  const row = await q.get<{ attempts: number | null }>(`SELECT attempts FROM jobs WHERE id = ?`, job.id).catch(() => undefined);
+  return estimateRemaining({
+    type: job.type, status: job.status, progress: job.progress, elapsedMs: Math.max(0, Date.now() - ms(job.createdAt)),
+    attempts: Number(row?.attempts ?? 0), historyMs: hist.map((h) => ms(h.updated_at) - ms(h.created_at)),
+  });
+}
+
 /** Le job actif le plus récent (pour réafficher la progression au reload). */
 export async function activeJob(type?: JobType): Promise<Job | null> {
   await ensureJobsSchema();
