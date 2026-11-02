@@ -26,7 +26,7 @@ after(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-const NOTES = "Cognitive biases in design: stereotypes; confirmation bias (seeking confirming evidence); groupthink; the sunk-cost fallacy. Biais de représentation : un échantillon non représentatif. Users were quickly disabused.";
+const NOTES = "Cognitive biases in design: stereotypes; confirmation bias (seeking confirming evidence); groupthink; the sunk-cost fallacy. Biais de représentation : un échantillon non représentatif. Users were quickly disabused. Le biais d'ancrage et le taux d’erreur. Simpson's paradox. AUC (area under the curve). A confusion matrix per criterion. Two LLM agents.";
 
 test("un terme absent du corpus est signalé, les variantes d'un terme présent ne le sont pas", async () => {
   const { runWithCourse } = await import("../db/client");
@@ -41,6 +41,11 @@ test("un terme absent du corpus est signalé, les variantes d'un terme présent 
       ["Status quo bias"],
     );
     assert.deepEqual(await absentCourseTerms([]), []);
+    // Écrits comme dans le cours, ou à une flexion près : jamais rejetés (relecture du 02/11).
+    assert.deepEqual(
+      await absentCourseTerms(["biais d'ancrage", "taux d'erreur", "Simpson's paradox", "AUC (area under the curve)", "confusion matrices", "criteria", "LLMs"]),
+      [],
+    );
     assert.deepEqual(await absentCourseTerms(["abuse"]), ["abuse"], "un mot n'est pas trouvé à l'intérieur d'un autre");
   });
 });

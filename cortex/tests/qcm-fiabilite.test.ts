@@ -51,6 +51,8 @@ const designPrompts: string[] = [];
 const designBodies: Record<string, unknown>[] = [];
 
 const verifyPrompts: string[] = [];
+/** Ce que le juge met dans off_course pour chaque question (vide : rien à signaler). */
+let judgeFlag = "";
 function verifyReply(prompt: string): string {
   verifyPrompts.push(prompt);
   const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
@@ -60,7 +62,7 @@ function verifyReply(prompt: string): string {
     // Le juge cite les termes du cours dont dépend la clé ; pour la question « status quo », il ne
     // remarque pas que la notion manque au cours (le contrôle déterministe doit l'attraper).
     const course_terms = /Status quo/.test(b) ? ["status quo bias", "groupthink"] : ["groupby"];
-    return { index: i, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms, off_course: "" };
+    return { index: i, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms, off_course: judgeFlag };
   });
   return JSON.stringify({ results });
 }
@@ -278,5 +280,22 @@ test("check-solution : la correction juge avec les définitions du cours", async
   const r = await runWithCourse(id, () => checkSolution({ statement: "Which cognitive bias explains why nobody voices a concern in the meeting?", answer: "Groupthink" }));
   assert.equal(r.verdict, "correct");
   assert.match(assistPrompts[0], /DÉFINITIONS DU COURS[\s\S]*EXTRAITS DU COURS[\s\S]*groupthink/);
+});
+
+test("un juge qui répond « None » dans off_course ne rejette rien", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
+  judgeFlag = "None";
+  try {
+    const steps: string[] = [];
+    const r = await runWithCourse(id, () => generateQcmExam({ count: 3, openCount: 0, onStep: (s) => { steps.push(s); } }));
+    assert.equal(r.count, 3);
+    assert.ok(!steps.some((s) => /hors cours/.test(s)), steps.filter((s) => /hors cours/.test(s)).join("\n"));
+    assert.equal(designCalls, 1, "aucune régénération");
+  } finally {
+    judgeFlag = "";
+  }
 });
 
