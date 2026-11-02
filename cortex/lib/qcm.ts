@@ -625,6 +625,12 @@ async function duplicateItems(items: QcmItem[]): Promise<number[]> {
   return [...drop].sort((a, b) => a - b);
 }
 
+/** Lots QCM menés en même temps (QCM_BATCH_CONCURRENCY, défaut 3). */
+function batchConcurrency(): number {
+  const n = Number(process.env.QCM_BATCH_CONCURRENCY);
+  return Number.isInteger(n) && n >= 1 ? Math.min(n, 8) : 3;
+}
+
 /** Questions ouvertes construites en même temps (QCM_OPEN_CONCURRENCY, défaut 3). */
 function openConcurrency(): number {
   const n = Number(process.env.QCM_OPEN_CONCURRENCY);
@@ -841,8 +847,11 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   let extraBudget = batches.length;
   for (let round = 0; pending.length; round++) {
     const missing: { topic: { label: string; method: string | null }; mold: MoldKind | null }[] = [];
-    for (let b = 0; b < pending.length; b += 2) {
-      const group = pending.slice(b, b + 2);
+    // Lots QCM menés en même temps (QCM_BATCH_CONCURRENCY, défaut 3) ; le limiteur global des appels
+    // (LLM_MAX_CONCURRENCY) reste la borne commune avec les questions ouvertes.
+    const width = batchConcurrency();
+    for (let b = 0; b < pending.length; b += width) {
+      const group = pending.slice(b, b + width);
       const got = await Promise.all(group.map(safeBatch));
       got.forEach((g, k) => {
         all.push(...g.items.slice(0, Math.max(0, count - all.length)));
