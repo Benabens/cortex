@@ -27,7 +27,8 @@ export const REASON_LABELS: Record<ReportReason, string> = {
   duplicate: "Doublon",
   ambiguous: "Énoncé ambigu",
 };
-export type ReportKind = "qcm" | "open";
+/** qcm : un QCM ; open : une question ouverte ; part : une sous-question d'une question composée (lib/blocks). */
+export type ReportKind = "qcm" | "open" | "part";
 export type ReportStatus = "open" | "confirmed" | "not_confirmed";
 
 /** Refus montrable tel quel (message en français), avec son statut HTTP. */
@@ -45,7 +46,7 @@ type QcmRow = { topic: string; type: "scq" | "mcq"; stem: string; options_json: 
 
 export async function reportQuestion(input: ReportInput): Promise<ReportResult> {
   if (!(REPORT_REASONS as readonly string[]).includes(input.reason)) throw new ReportError(400, "Motif de signalement inconnu.");
-  if (input.kind !== "qcm" && input.kind !== "open") throw new ReportError(400, "Type de question inconnu (qcm ou open).");
+  if (input.kind !== "qcm" && input.kind !== "open" && input.kind !== "part") throw new ReportError(400, "Type de question inconnu (qcm, open ou part).");
   if (!Number.isInteger(input.examId) || !Number.isInteger(input.itemId)) throw new ReportError(400, "Examen ou question invalide.");
   const comment = (input.comment ?? "").trim().slice(0, 1000) || null;
 
@@ -59,6 +60,19 @@ export async function reportQuestion(input: ReportInput): Promise<ReportResult> 
       topic: row.topic, type: row.type, stem: row.stem, options: JSON.parse(row.options_json), correct: JSON.parse(row.correct_json),
       misconceptions: JSON.parse(row.misconceptions_json ?? "[]"), explanation: row.explanation ?? "", verified: null,
     };
+  } else if (input.kind === "part") {
+    const row = await q.get<{ kind: string; prompt: string; options_json: string | null; correct: number | null; explanation: string | null; scenario: string; title: string }>(
+      `SELECT p.kind, p.prompt, p.options_json, p.correct, p.explanation, b.scenario, b.title FROM block_parts p JOIN exam_blocks b ON b.id = p.block_id WHERE p.id = ? AND p.exam_id = ?`, input.itemId, input.examId,
+    ).catch(() => undefined);
+    if (!row) throw new ReportError(404, "Question introuvable dans cet examen.");
+    stem = `${row.title} — ${row.prompt}`;
+    // Un choix unique se re-vérifie comme un QCM : son scénario fait partie de l'énoncé.
+    if (row.kind === "scq") {
+      qcm = {
+        topic: row.title, type: "scq", stem: `${row.scenario}\n\n${row.prompt}`, options: JSON.parse(row.options_json ?? "[]"), correct: [Number(row.correct)],
+        misconceptions: [], explanation: row.explanation ?? "", verified: null,
+      };
+    }
   } else {
     const row = await q.get<{ concept: string; statement_html: string }>(`SELECT concept, statement_html FROM exam_questions WHERE id = ? AND exam_id = ?`, input.itemId, input.examId).catch(() => undefined);
     if (!row) throw new ReportError(404, "Question introuvable dans cet examen.");
@@ -84,7 +98,7 @@ export async function reportQuestion(input: ReportInput): Promise<ReportResult> 
       const confirmed = keyChanged || checked.verified === 0 || !!checked.offCourse;
       status = confirmed ? "confirmed" : "not_confirmed";
       if (confirmed) {
-        await q.run(`UPDATE qcm_items SET verified = 0 WHERE id = ?`, input.itemId);
+        if (input.kind === "qcm") await q.run(`UPDATE qcm_items SET verified = 0 WHERE id = ?`, input.itemId);
         refunded = await refundQuestion(input.examId, input.kind, input.itemId);
       }
     }
@@ -103,9 +117,12 @@ async function refundQuestion(examId: number, kind: ReportKind, itemId: number):
     `SELECT credit_ref, type FROM jobs WHERE result_id = ? AND type IN ('qcm','exam') ORDER BY id DESC LIMIT 1`, examId,
   ).catch(() => undefined);
   if (!job?.credit_ref) return 0;
-  const n = await q.get<{ n: number }>(
-    `SELECT (SELECT count(*) FROM qcm_items WHERE exam_id = ?) + (SELECT count(*) FROM exam_questions WHERE exam_id = ?) n`, examId, examId,
-  ).catch(() => undefined);
+  // Sa part : une question parmi celles de l'examen (sous-questions d'une question composée comprises).
+  const n = kind === "part"
+    ? await q.get<{ n: number }>(`SELECT count(*) n FROM block_parts WHERE exam_id = ?`, examId).catch(() => undefined)
+    : await q.get<{ n: number }>(
+      `SELECT (SELECT count(*) FROM qcm_items WHERE exam_id = ?) + (SELECT count(*) FROM exam_questions WHERE exam_id = ?) n`, examId, examId,
+    ).catch(() => undefined);
   const total = Number(n?.n ?? 0);
   if (!total) return 0;
   const { refundGeneration } = await import("@/lib/billing/credits");

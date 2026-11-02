@@ -15,7 +15,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const { reportQuestion, ReportError } = await import("@/lib/question-reports");
   try {
     const r = await reportQuestion({
-      examId: Number(body.examId), kind: String(body.kind) as "qcm" | "open", itemId: Number(body.itemId),
+      examId: Number(body.examId), kind: String(body.kind) as "qcm" | "open" | "part", itemId: Number(body.itemId),
       reason: String(body.reason) as "wrong_answer", comment: typeof body.comment === "string" ? body.comment : null,
     });
     return NextResponse.json({ ok: true, ...r });

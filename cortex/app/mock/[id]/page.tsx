@@ -5,6 +5,8 @@ import { useCourse } from "@/lib/ux/api";
 import { SafeHtml } from "@/components/ui/SafeHtml";
 import { OpenResponse } from "@/components/exam/OpenResponse";
 import { ReportButton } from "@/components/exam/ReportButton";
+import { BlockExam } from "@/components/exam/BlockExam";
+import type { BlockExamView } from "@/lib/blocks";
 import type { QcmGradeDetail } from "@/lib/qcm";
 
 type Item = { id: number; idx: number; topic: string; type: "scq" | "mcq"; stem: string; options: string[]; verified: number | null };
@@ -20,6 +22,8 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
   const { courseId, ready } = useCourse();
   const qs = `?course=${encodeURIComponent(courseId ?? "")}`;
   const [exam, setExam] = useState<Exam | null>(null);
+  // Examen à questions composées (lib/blocks) : sa propre vue.
+  const [blocks, setBlocks] = useState<BlockExamView | null>(null);
   const [answers, setAnswers] = useState<Record<number, number[]>>({});
   const [graded, setGraded] = useState<Graded | null>(null);
   const [busy, setBusy] = useState(false);
@@ -33,7 +37,7 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
       try {
         const d = await (await fetch(`/api/qcm/${id}${qs}`)).json();
         if (stop) return;
-        if (d.error) setErr(d.error); else setExam(d);
+        if (d.error) setErr(d.error); else if (d.kind === "blocks") setBlocks(d); else setExam(d);
         // Livraison progressive : les QCM sont là, les questions ouvertes arrivent → on repasse.
         if (!d.error && d.status === "generating") timer = setTimeout(load, 15_000);
       } catch { if (!stop) setErr("Chargement impossible."); }
@@ -61,6 +65,7 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
 
   const detailFor = (idx: number) => graded?.detail.find((d) => d.idx === idx);
 
+  if (blocks) return <BlockExam exam={blocks} courseId={courseId ?? ""} qs={qs} />;
   if (err && !exam) return <main className="page page-narrow"><div role="alert" className="card card-pad" style={{ color: "var(--red)" }}>{err}</div></main>;
   if (!exam) return <main className="page page-narrow"><div className="skeleton" style={{ height: 200 }} /></main>;
 

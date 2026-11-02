@@ -14,7 +14,7 @@ const REASONS = [
  * discret tant qu'il est fermé ; un motif, un commentaire libre, et le verdict
  * (re-vérification d'une « réponse fausse », remboursement éventuel) en retour.
  */
-export function ReportButton({ courseId, examId, kind, itemId }: { courseId: string; examId: number; kind: "qcm" | "open"; itemId: number }) {
+export function ReportButton({ courseId, examId, kind, itemId }: { courseId: string; examId: number; kind: "qcm" | "open" | "part"; itemId: number }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState<string>("");
   const [comment, setComment] = useState("");

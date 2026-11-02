@@ -4,12 +4,14 @@ import { useId, useState } from "react";
 import { SafeHtml } from "@/components/ui/SafeHtml";
 import type { CheckResult } from "@/lib/check-solution";
 
-export function OpenResponse({ questionId, statement, courseId, graded, solution }: {
+export function OpenResponse({ questionId, statement, courseId, graded, solution, part }: {
   questionId: number;
   statement: string;
   courseId: string;
   graded: boolean;
   solution: string | null;
+  /** Réponse courte d'une question composée : corrigée sur son barème (lu côté serveur). */
+  part?: { examId: number; partId: number };
 }) {
   const [answer, setAnswer] = useState("");
   const [check, setCheck] = useState<CheckResult | null>(null);
@@ -26,7 +28,7 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
       const response = await fetch(`/api/check-solution?course=${encodeURIComponent(courseId)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ statement, answer }),
+        body: JSON.stringify(part ? { examId: part.examId, partId: part.partId, answer } : { statement, answer }),
       });
       const data = await response.json();
       if (!response.ok || data.error) setError(data.error ?? "La vérification n’a pas abouti. Réessaie.");
