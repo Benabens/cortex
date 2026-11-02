@@ -17,16 +17,20 @@ import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 
 type Question = { topic?: string | null; stem: string; options: string[]; correct: number[]; sourceFact?: string | null };
 
-/** Extraits que voit le correcteur pour un lot : le fait de chaque question d'abord, ses mots ensuite, son sujet en dernier. */
+/**
+ * Extraits que voit le correcteur pour un lot : le fait de chaque question d'abord, ses mots
+ * ensuite (énoncé et TOUTES les options : centrer sur la clé orienterait une résolution qui se
+ * veut à l'aveugle), son sujet en dernier.
+ */
 export async function verifierPassages(items: Question[]): Promise<{ src: string; text: string }[]> {
   const facts = items.map((it) => it.sourceFact ?? "");
-  const stems = items.map((it) => `${it.stem} ${(it.correct ?? []).map((k) => it.options[k] ?? "").join(" ")}`);
+  const stems = items.map((it) => `${it.stem} ${it.options.join(" ")}`);
   const topics = [...new Set(items.map((it) => it.topic ?? "").filter(Boolean))];
   return evidencePassages([...facts, ...stems, ...topics], { perQuery: 2, cap: 1800, budget: 24_000 });
 }
 
-/** Une question que le correcteur juge hors cours, avec ce qu'il dit absent. */
-export type OffCourseFlag = Question & { explanation?: string | null; flag: string; terms: string[] };
+/** Une question que le correcteur juge hors cours : `reason`, ce qu'il en dit ; `terms`, ce qu'il dit absent. */
+export type OffCourseFlag = Question & { explanation?: string | null; reason: string; terms: string[] };
 
 const SECOND_LOOK_SCHEMA = {
   type: "object",
@@ -56,22 +60,26 @@ function quoted(flag: string): string[] {
 /**
  * Second regard sur les questions jugées hors cours, avec les passages trouvés dans tout le
  * cours pour ce que le correcteur dit absent. Rend, par question (même ordre), la raison
- * confirmée (non vide = hors cours) ou "" (fondée sur le cours) ; null si le second regard a
- * échoué (le rejet du correcteur tient alors).
+ * confirmée (non vide = hors cours) ou "" (fondée sur le cours). Une question dont la notion
+ * n'a AUCUN passage dans le cours reste hors cours sans appel au modèle ; si le second regard
+ * échoue, toutes gardent le rejet du correcteur.
  */
-export async function secondLookOffCourse(flags: OffCourseFlag[]): Promise<string[] | null> {
-  if (!flags.length) return [];
-  const queries = flags.flatMap((f) => {
-    const terms = f.terms.length ? f.terms : quoted(f.flag);
-    return terms.length ? terms : [f.flag];
-  });
-  const passages = await evidencePassages([...queries, ...flags.map((f) => f.sourceFact ?? "")], { perQuery: 3, cap: 2000, budget: 30_000 }).catch(() => []);
-  const block = flags.map((f, i) => [
+export async function secondLookOffCourse(flags: OffCourseFlag[]): Promise<string[]> {
+  const evidence = await Promise.all(flags.map((f) => {
+    const terms = f.terms.length ? f.terms : quoted(f.reason);
+    return evidencePassages(terms.length ? terms : [f.reason], { perQuery: 3, cap: 2000, budget: 10_000 }).catch(() => []);
+  }));
+  const verdicts = flags.map((f) => f.reason);
+  const open = flags.map((f, i) => ({ f, i })).filter((x) => evidence[x.i].length);
+  if (!open.length) return verdicts;
+  const seen = new Set<string>();
+  const passages = open.flatMap((x) => evidence[x.i]).filter((p) => !seen.has(p.text) && !!seen.add(p.text));
+  const block = open.map(({ f }, i) => [
     `Q${i}. ${sanitizeCorpus(f.stem)}`,
     ...f.options.map((o, k) => `   (${k}) ${sanitizeCorpus(o)}`),
     `   [clé : ${(f.correct ?? []).join(", ")}]`,
     f.explanation ? `   [explication : ${sanitizeCorpus(f.explanation).slice(0, 600)}]` : "",
-    `   [jugée hors cours : ${sanitizeCorpus(f.flag).slice(0, 300)}]`,
+    `   [jugée hors cours : ${sanitizeCorpus(f.reason).slice(0, 300)}]`,
   ].filter(Boolean).join("\n")).join("\n\n");
   const prompt = [
     `Un premier correcteur, qui ne voyait que de courts extraits du cours, a jugé les questions ci-dessous hors cours. Voici des passages trouvés pour ces notions dans TOUT le cours.`,
@@ -79,7 +87,7 @@ export async function secondLookOffCourse(flags: OffCourseFlag[]): Promise<strin
     `Une option qui n'est qu'une affirmation fausse (résultat inversé, condition changée, chiffre ou auteur déplacé) n'est pas hors cours : c'est le rôle d'un distracteur.`,
     ``,
     DATA_RULE,
-    passages.length ? dataBlock(`PASSAGES DU COURS`, passages) : `(Aucun passage trouvé dans le cours pour ces notions.)`,
+    dataBlock(`PASSAGES DU COURS`, passages),
     ``,
     `═══ QUESTIONS JUGÉES HORS COURS ═══`,
     block,
@@ -94,11 +102,12 @@ export async function secondLookOffCourse(flags: OffCourseFlag[]): Promise<strin
     );
     const byIndex = new Map(r.second_look.filter((x) => Number.isInteger(x?.index)).map((x) => [x.index, typeof x.off_course === "string" ? x.off_course.trim() : null]));
     // Une question sans réponse du second regard garde le signalement du correcteur.
-    return flags.map((f, i) => {
-      const v = byIndex.get(i);
-      return v === undefined || v === null ? f.flag : v;
+    open.forEach(({ i }, k) => {
+      const v = byIndex.get(k);
+      if (typeof v === "string") verdicts[i] = v;
     });
   } catch {
-    return null;
+    // Second regard illisible ou en échec : le rejet du correcteur tient.
   }
+  return verdicts;
 }

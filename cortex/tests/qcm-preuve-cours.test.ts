@@ -200,3 +200,31 @@ test("second regard impossible (réponse illisible) : le rejet du correcteur tie
   assert.equal(r.count, 2);
   assert.ok(view.items.every((it) => !it.options.some((o) => /négativité/.test(o))));
 });
+
+test("fenêtre de preuve : le mot cherché reste dedans après calage, et deux mots écartés tiennent ensemble s'ils le peuvent", async () => {
+  const { densestWindow } = await import("../lib/course-grounding");
+  const filler = (n: number) => "intuition raison méthode ".repeat(Math.ceil(n / 25)).slice(0, n);
+  // Cas de la revue : une fin de phrase juste avant la fenêtre la décalait, et « Svenson » en sortait.
+  const a = `${filler(1100)}. ${filler(1848)} Svenson (1981) conclut.`;
+  assert.match(densestWindow(a, "Svenson", 1800), /Svenson/);
+  // Deux mots à 1 611 caractères l'un de l'autre : une fenêtre de 1 800 les contient tous les deux.
+  const b = `${filler(500)} Thaler ${filler(1600)} Sunstein ${filler(2000)}`;
+  const w = densestWindow(b, "Thaler Sunstein", 1800);
+  assert.match(w, /Thaler/);
+  assert.match(w, /Sunstein/);
+  assert.ok(w.length <= 1800 + 200, `fenêtre bornée (${w.length})`);
+});
+
+test("rien dans tout le cours sur la notion signalée : rejet sans second regard (rien pour la blanchir)", async () => {
+  const id = await course();
+  design = (n, call) => Array.from({ length: n }, (_, i) => (call === 1 && i === 0 ? svensonItem(0, "Le cadre SMACIT pousse les conducteurs à sous-estimer leur habileté.") : svensonItem(call * 10 + i)));
+  flag = (block) => (/SMACIT/.test(block) ? { off: "SMACIT n'apparaît nulle part dans les extraits.", terms: ["SMACIT"] } : null);
+  secondLook = (prompt) => {
+    const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
+    return blocks.map((b) => ({ index: Number(/^Q(\d+)\./.exec(b)![1]), off_course: "" }));
+  };
+  const { r, view } = await exam(id, 2);
+  assert.equal(r.count, 2);
+  assert.ok(view.items.every((it) => !it.options.some((o) => /SMACIT/.test(o))), "la question n'est pas blanchie");
+  assert.equal(secondLookPrompts.length, 0, "aucun appel : aucun passage ne parle de la notion");
+});

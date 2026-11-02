@@ -196,18 +196,21 @@ export function parseDeclaredFormat(input: unknown): DeclaredFormat | null {
   return { kind: kind as ExamKind, questionCount, durationMin, language, ...(answerMode ? { answerMode } : {}) };
 }
 
+/** Réponse unique quand rien ne dit le contraire (sans annale, sans déclaration, sources muettes). */
+export const DEFAULT_ANSWER_MODE: AnswerMode = "single";
+
 /** Un format à questions à choix, qui a donc un mode de réponse. */
 const hasChoices = (kind: ExamKind | null) => kind === "qcm" || kind === "mixed";
 
 /**
- * Mode de réponse lu dans les annales : les types de QCM que la détection y a comptés. Sans
- * décompte, aucune contrainte (« mixte ») : le générateur suit la convention écrite du format.
+ * Mode de réponse lu dans les annales : les types de QCM que la détection y a comptés ; null si
+ * elle n'en a compté aucun (la déclaration décide alors, sinon aucune contrainte).
  */
-export function annalesAnswerMode(p: Pick<FormatProfile, "question_types">): AnswerMode {
+export function annalesAnswerMode(p: Pick<FormatProfile, "question_types">): AnswerMode | null {
   const types = new Set((p.question_types ?? []).map((t) => t.type));
   if (types.has("scq") && types.has("mcq")) return "mixed";
   if (types.has("mcq")) return "multiple";
-  return types.has("scq") ? "single" : "mixed";
+  return types.has("scq") ? "single" : null;
 }
 
 // ───────────────────────────── langue des annales ─────────────────────────────
@@ -357,8 +360,8 @@ export function blocksOf(p: Pick<FormatProfile, "format_summary" | "sections" | 
   return { count: Math.min(sections.length, BLOCKS_MAX), sections: sections.slice(0, BLOCKS_MAX), partsMin: lo, partsMax: clamp(Number(m[2]), lo, 8), totalPoints };
 }
 
-/** Format lu dans des annales : mêmes défauts que le générateur QCM historique. */
-function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Discipline): ExamFormat {
+/** Format lu dans des annales : mêmes défauts que le générateur QCM historique. `declared` : le mode déclaré, si les annales ne le disent pas. */
+function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Discipline, declared: AnswerMode | undefined): ExamFormat {
   const types = p.question_types ?? [];
   const qcmShare = types.filter((t) => t.type === "scq" || t.type === "mcq").reduce((s, t) => s + (t.approx_count || 0), 0);
   const base = { basis: "annales" as const, durationMin: p.duration_min || null, language, discipline, summary: p.format_summary || "", evidence: [] };
@@ -371,7 +374,8 @@ function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Disc
   const questionCount = Math.min(20, Math.max(8, qcmShare || 12));
   const openCount = Math.min(3, Math.max(0, types.find((t) => t.type === "open")?.approx_count ?? 2));
   const kind = openCount > 0 ? "mixed" : "qcm";
-  return { ...base, kind, questionCount, openCount, answerMode: annalesAnswerMode(p), summary: withAnswerMode(base.summary, annalesAnswerMode(p)) };
+  const answerMode = annalesAnswerMode(p) ?? declared ?? "mixed";
+  return { ...base, kind, questionCount, openCount, answerMode, summary: withAnswerMode(base.summary, answerMode) };
 }
 
 const ANSWER_LABEL: Record<AnswerMode, string> = { single: "à réponse unique", multiple: "à réponses multiples", mixed: "à réponse unique ou multiple" };
@@ -428,7 +432,7 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
     // Format historique figé (calcul / trace / figures) : jamais re-détecté.
     format = make({ basis: "annales", kind: "exercises", questionCount: null, openCount: null, durationMin: course.durationMin, language, discipline: "stem", evidence: [] });
   } else if (hasAnnales && stored && basisOf(stored) === "annales") {
-    format = fromAnnalesProfile(stored, language, discipline);
+    format = fromAnnalesProfile(stored, language, discipline, declared?.answerMode);
   } else if (declared) {
     // Mode non déclaré : celui que disent les sources (détection sans annale), sinon réponse unique.
     const fromSources = stored && basisOf(stored) !== "annales" ? stored.answer_mode : null;
@@ -436,7 +440,7 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
       basis: "declared", kind: declared.kind, questionCount: declared.questionCount, openCount: null,
       durationMin: declared.durationMin, language, discipline, evidence: [],
       ...(declared.kind === "composite" ? { blocks: { sections: [], ...PARTS_DEFAULT, totalPoints: null } } : {}),
-      answerMode: hasChoices(declared.kind) ? declared.answerMode ?? fromSources ?? "single" : null,
+      answerMode: hasChoices(declared.kind) ? declared.answerMode ?? fromSources ?? DEFAULT_ANSWER_MODE : null,
     });
   } else if (hasAnnales) {
     format = make({ basis: "annales", kind: "exercises", questionCount: null, openCount: null, durationMin: null, language, discipline, evidence: [] });
@@ -446,7 +450,7 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
       basis: basisOf(stored), kind: stored.exam_kind, questionCount: stored.question_count ?? blocks?.count ?? null, openCount: stored.open_count ?? null,
       durationMin: stored.duration_min || null, language, discipline, evidence: stored.evidence ?? [],
       ...(stored.exam_kind === "composite" ? { blocks: blocks ? { sections: blocks.sections, partsMin: blocks.partsMin, partsMax: blocks.partsMax, totalPoints: blocks.totalPoints } : { sections: [], ...PARTS_DEFAULT, totalPoints: null } } : {}),
-      answerMode: hasChoices(stored.exam_kind) ? stored.answer_mode ?? "single" : null,
+      answerMode: hasChoices(stored.exam_kind) ? stored.answer_mode ?? DEFAULT_ANSWER_MODE : null,
     });
   } else {
     format = make({ basis: "unknown", kind: null, questionCount: null, openCount: null, durationMin: null, language, discipline, evidence: [] }, "Format inconnu");

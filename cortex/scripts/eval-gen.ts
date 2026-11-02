@@ -220,7 +220,10 @@ async function judge(): Promise<void> {
     const { citesOptionLabel } = await import("../lib/qcm");
     const qcm = e.data.exam.items.filter((it) => it.options);
     const counts = { multi_answer_items: qcm.filter((it) => (it.correct ?? []).length > 1).length, positional_explanations: qcm.filter((it) => citesOptionLabel(it.explanation ?? "")).length };
-    results[e.file] = { items: e.data.exam.items.length, kind: e.data.exam.kind, ...r, ...counts, mean };
+    // mean6 : les six critères d'avant « overlap », pour comparer aux bancs précédents.
+    const six = CRITERIA.filter((c) => c !== "overlap");
+    const mean6 = Math.round((six.reduce((s, c) => s + (r.scores[c] ?? 0), 0) / six.length) * 100) / 100;
+    results[e.file] = { items: e.data.exam.items.length, kind: e.data.exam.kind, ...r, ...counts, mean, mean6 };
     console.log(JSON.stringify({ exam: e.file, ...(results[e.file] as object) }));
   }
   if (exams.length === 2 && exams.every((e) => e.data.exam)) {

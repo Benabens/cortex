@@ -130,3 +130,26 @@ test("sans annale ni déclaration : le mode lu dans les sources, sinon réponse 
   await saveProfile(forced, { ...profile([]), basis: "course_info", exam_kind: "qcm", answer_mode: "multiple", evidence: ["Plusieurs réponses possibles."] });
   assert.equal((await resolve(forced)).answerMode, "single");
 });
+
+test("annales dont la détection n'a pas compté les types de QCM : la déclaration décide, sinon aucune contrainte", async () => {
+  const declared = await newCourse({ examFormat: { kind: "qcm", answerMode: "single" } });
+  await addSource(declared, "final", "Final 2022", "Examen final. Répondez aux questions suivantes.");
+  await saveProfile(declared, profile([]));
+  assert.equal((await resolve(declared)).answerMode, "single");
+
+  const silent = await newCourse();
+  await addSource(silent, "final", "Final 2022", "Examen final. Répondez aux questions suivantes.");
+  await saveProfile(silent, profile([]));
+  assert.equal((await resolve(silent)).answerMode, "mixed");
+});
+
+test("composeur sans annale : la composition proposée suit le mode de réponse (QCM à réponses multiples → MCQ)", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { getComposition } = await import("../lib/composer");
+  const many = await newCourse({ examFormat: { kind: "qcm", questionCount: 12, answerMode: "multiple" } });
+  const m = await runWithCourse(many, () => getComposition());
+  assert.deepEqual([m.scq, m.mcq], [0, 12]);
+  const one = await newCourse({ examFormat: { kind: "qcm", questionCount: 12 } });
+  const o = await runWithCourse(one, () => getComposition());
+  assert.deepEqual([o.scq, o.mcq], [12, 0]);
+});

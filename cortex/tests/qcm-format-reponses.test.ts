@@ -162,10 +162,15 @@ const Q12 = "La première option est la bonne : le cours définit le nudge comme
 
 test("une explication qui désigne une option par sa position ou sa lettre est repérée, pas une tournure du cours", async () => {
   const { citesOptionLabel } = await import("../lib/qcm");
-  for (const t of [Q12, "La deuxième option inverse le résultat.", "Les deux premières propositions sont fausses.", "La dernière réponse sur-généralise.", "L'option n°2 confond les deux.", "The first option is correct.", "The last answer reverses the effect.", "Options two and four are wrong.", "La troisième est fausse : elle attribue l'étude à Thaler."]) {
+  for (const t of [Q12, "La deuxième option inverse le résultat.", "Les deux premières propositions sont fausses.", "La dernière réponse sur-généralise.", "L'option n°2 confond les deux.", "The first option is correct.", "The last answer reverses the effect.", "Options two and four are wrong.", "La troisième est fausse : elle attribue l'étude à Thaler.",
+    "Le second énoncé confond les deux notions.", "Les deux dernières sont fausses.", "La 2e option inverse le résultat.", "La première des options est la bonne.", "La sixième proposition exagère l'effet.", "The 2nd option is wrong.", "The third confuses the two notions.",
+    "La bonne réponse est la troisième.", "La première, qui inverse le résultat, est fausse.", "The first and third options are wrong.", "The correct answer is the second."]) {
     assert.equal(citesOptionLabel(t), true, t);
   }
-  for (const t of ["La première étude de Vosoughi porte sur Twitter.", "Le premier biais du cours est l'ancrage.", "La deuxième vague de régulation vise les plateformes.", "First-mover advantage explains the market share.", "A nudge preserves freedom of choice.", "L'option d'interdire supprime la liberté de choix.", "Le dernier rapport de l'OCDE le confirme."]) {
+  for (const t of ["La première étude de Vosoughi porte sur Twitter.", "Le premier biais du cours est l'ancrage.", "La deuxième vague de régulation vise les plateformes.", "First-mover advantage explains the market share.", "A nudge preserves freedom of choice.", "L'option d'interdire supprime la liberté de choix.", "Le dernier rapport de l'OCDE le confirme.",
+    // Tournures du cours (HUM-285, Système 1) : relevées par la revue, ce ne sont pas des renvois à une option.
+    "Le premier est l'ancrage, le second la disponibilité.", "La première est celle de Svenson (1981).", "La dernière correspond à la phase de vérification.", "La première réponse qui vient à l'esprit relève du Système 1.", "The choices one makes depend on the default.", "This answers one of the key questions.", "The first is anchoring, the second availability.",
+    "Le premier affirme que les incitations comptent (Becker).", "La première proposition de Thaler porte sur l'épargne.", "It is the answer one would expect."]) {
     assert.equal(citesOptionLabel(t), false, t);
   }
 });
@@ -195,4 +200,23 @@ test("examen déjà en base : une explication par position (options mélangées 
     const graded = await gradeQcm(examId, { 0: [2] });
     assert.doesNotMatch(graded.detail[0].explanation, /première option/);
   });
+});
+
+test("mode déclaré contraire aux sources : la consigne de l'examen ne reprend pas la convention des sources", async () => {
+  const id = await course({ kind: "qcm", questionCount: 2, answerMode: "multiple" });
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  await runWithCourse(id, async () => {
+    await q.ensureTable("format_profile");
+    await q.run(`INSERT INTO format_profile (json) VALUES (?)`, JSON.stringify({
+      basis: "course_info", exam_kind: "qcm", answer_mode: "single", format_summary: "QCM, une seule réponse correcte", has_mcq: true, duration_min: 0, total_points: 0,
+      scq_vs_mcq_convention: "une seule réponse correcte", question_types: [{ type: "scq", approx_count: 0, share_pct: 100, points_each: 1, note: "" }],
+      sections: [], topics_emphasis: [], evidence: ["Une seule réponse correcte"], examples: [],
+    }));
+  });
+  design = (n, call) => Array.from({ length: n }, (_, i) => item(call * 10 + i, [0, 2]));
+  const { view } = await exam(id, 2);
+  for (const it of view.items) assert.equal(it.type, "mcq");
+  assert.match(designPrompts[0], /RÉPONSES MULTIPLES/);
+  assert.doesNotMatch(designPrompts[0], /une seule réponse correcte/);
 });

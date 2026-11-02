@@ -161,20 +161,24 @@ export function densestWindow(text: string, query: string, cap: number): string 
     return at;
   }).filter((a) => a.length);
   if (!positions.length) return t.slice(0, cap);
+  // Fenêtres essayées autour de chaque occurrence : le mot au premier quart, au début, ou à la fin.
   const lead = Math.floor(cap / 4);
+  const starts = new Set<number>();
+  for (const p of positions.flat()) for (const s of [p - lead, p, p - cap + 60]) starts.add(Math.max(0, Math.min(s, t.length - cap)));
   let best = 0;
   let bestScore = -1;
-  for (const p of positions.flat()) {
-    const start = Math.max(0, Math.min(p - lead, t.length - cap));
+  for (const start of [...starts].sort((x, y) => x - y)) {
     const score = positions.filter((at) => at.some((i) => i >= start && i < start + cap)).length;
     if (score > bestScore) { bestScore = score; best = start; }
   }
-  // Calage : début après une fin de phrase proche (sinon une espace), fin sur une espace.
+  // Calage : le début recule jusqu'à une fin de phrase proche (sinon un mot) ; la fin ne recule
+  // jamais, pour ne rien perdre de ce que la fenêtre contenait, et avance jusqu'au mot suivant.
   const sentence = t.lastIndexOf(". ", best);
-  const start = best === 0 ? 0 : sentence >= 0 && best - sentence < 160 ? sentence + 2 : Math.max(0, t.lastIndexOf(" ", best) + 1);
-  const end = Math.min(t.length, start + cap);
-  const cut = end < t.length ? t.lastIndexOf(" ", end) : end;
-  return t.slice(start, cut > start ? cut : end);
+  const start = best === 0 ? 0 : sentence >= 0 && best - sentence < 160 ? sentence + 2 : t.lastIndexOf(" ", best) + 1;
+  let end = Math.min(t.length, best + cap);
+  const space = t.indexOf(" ", end);
+  if (end < t.length && space >= 0 && space - end < 40) end = space;
+  return t.slice(start, end);
 }
 
 /**
@@ -185,16 +189,18 @@ export function densestWindow(text: string, query: string, cap: number): string 
  */
 export async function evidencePassages(queries: string[], opts: { perQuery?: number; cap?: number; budget?: number } = {}): Promise<{ src: string; text: string }[]> {
   const { perQuery = 2, cap = 1800, budget = 24_000 } = opts;
-  const { search } = await import("@/lib/search");
+  // Par pertinence, tous types confondus : search() regroupe par type (exercices avant supports),
+  // ce qui pouvait faire passer le meilleur passage d'un support après deux exercices voisins.
+  const { rankedHits } = await import("@/lib/search");
   const out: { src: string; text: string }[] = [];
   const windows = new Map<number, string[]>();
   let used = 0;
   for (const query of queries.map((x) => x.trim()).filter(Boolean)) {
     if (used >= budget) break;
-    let groups: Awaited<ReturnType<typeof search>> = [];
-    try { groups = await search(query.slice(0, 400), 16, "or"); } catch { continue; }
+    let hits: Awaited<ReturnType<typeof rankedHits>> = [];
+    try { hits = await rankedHits(query.slice(0, 400), 16, "or"); } catch { continue; }
     let k = 0;
-    for (const h of groups.flatMap((g) => g.hits)) {
+    for (const h of hits) {
       if (k >= perQuery || used >= budget) break;
       if (NOT_COURSE_FACTS.has(h.sourceType)) continue;
       const row = await q.get<{ text: string }>(`SELECT text FROM items WHERE id = ?`, h.itemId);
