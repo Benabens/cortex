@@ -17,6 +17,11 @@ function figrefDirFor(course: string): string {
   return path.join(coursePaths(course).refsDir, "figref");
 }
 
+/** PDF dont une image rendue vient (« final2024-sol-2.png » → « final2024-sol »), ou null. */
+function imageBase(file: string): string | null {
+  return /^(.*)-\d+\.(?:png|jpe?g)$/i.exec(file)?.[1] ?? null;
+}
+
 /** Chemin relatif au cwd (ce que l'outil Read du provider CLI attend). */
 function relToCwd(abs: string): string {
   return path.relative(process.cwd(), abs);
@@ -53,11 +58,11 @@ export function renderCourseRefImages(course: string, pagesPerRef = 3): number {
   for (const f of fs.readdirSync(refsDir)) {
     if (!/\.pdf$/i.test(f)) continue;
     const base = f.replace(/\.pdf$/i, "");
-    const already = fs.readdirSync(outDir).some((x) => x.startsWith(base + "-"));
+    const already = fs.readdirSync(outDir).some((x) => imageBase(x) === base);
     if (already) continue;
     try {
       execFileSync(bin, ["-png", "-r", "110", "-f", "1", "-l", String(pagesPerRef), path.join(refsDir, f), path.join(outDir, base)], { stdio: "ignore" });
-      made += fs.readdirSync(outDir).filter((x) => x.startsWith(base + "-")).length;
+      made += fs.readdirSync(outDir).filter((x) => imageBase(x) === base).length;
     } catch {
       /* PDF illisible → on saute */
     }
@@ -65,13 +70,19 @@ export function renderCourseRefImages(course: string, pagesPerRef = 3): number {
   return made;
 }
 
-/** Images-étalon disponibles pour le cours courant (chemins relatifs au cwd), triées. */
+/**
+ * Images-étalon disponibles pour le cours courant (chemins relatifs au cwd), triées. Seulement
+ * celles d'une annale encore présente : retirer une annale (grille d'évaluation de HUM-285,
+ * reclassée en consignes) laisse ses images sur le disque, jamais dans un prompt.
+ */
 export function courseRefImages(): string[] {
-  const dir = figrefDirFor(currentCourse());
+  const course = currentCourse();
+  const dir = figrefDirFor(course);
   if (!fs.existsSync(dir)) return [];
+  const refs = new Set(fs.readdirSync(coursePaths(course).refsDir).filter((f) => /\.pdf$/i.test(f)).map((f) => f.replace(/\.pdf$/i, "")));
   return fs
     .readdirSync(dir)
-    .filter((x) => /\.(png|jpe?g)$/i.test(x))
+    .filter((x) => refs.has(imageBase(x) ?? ""))
     .sort()
     .map((x) => relToCwd(path.join(dir, x)));
 }
