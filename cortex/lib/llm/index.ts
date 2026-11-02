@@ -147,7 +147,7 @@ export async function completeText(req: CompleteRequest): Promise<string> {
   return (await complete(req)).text;
 }
 
-export { extractJson } from "../claude-code";
+export { extractJson, JsonOutputError } from "./json";
 export { PROVIDER_NAMES, type ProviderName } from "./config";
 export { LlmError } from "./types";
 export type { CompleteRequest, CompleteResult, LlmImage, LlmModel, LlmProvider, LlmUsage } from "./types";
