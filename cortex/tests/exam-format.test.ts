@@ -246,11 +246,13 @@ test("un format demandé pour CET examen suit le job jusqu'au worker : ni refus 
   const qcm = await newCourse({ examFormat: { kind: "qcm", questionCount: 20 } });
   const g = await runWithCourse(qcm, () => resolveExamFormat());
   assert.equal(plan(requestedFormat(g, "exercises"), {}).generator, "exercises");
-  // Des annales : leur format fait la règle, la demande est ignorée.
+  // Des annales : leur format n'est qu'un DÉFAUT, une demande explicite l'emporte (job 9 de
+  // CS-290 : « QCM seulement » demandé, 3 ouvertes imposées par l'annale mixte).
   const withAnnales = await newCourse();
   await addSource(withAnnales, "final", "Final 2022", "Examen final. Exercice 1 : on considère la fonction f et on étudie sa dérivée.");
   const h = await runWithCourse(withAnnales, () => resolveExamFormat());
-  assert.equal(requestedFormat(h, "qcm").kind, "exercises");
+  assert.equal(requestedFormat(h, "qcm").kind, "qcm");
+  assert.deepEqual(plan(requestedFormat({ ...h, kind: "mixed", questionCount: 17, openCount: 3 }, "qcm"), {}), { generator: "qcm", qcmCount: 17, openCount: 0 }, "QCM demandés : aucune ouverte, le nombre de QCM du format reste");
   // Le pré-check de lancement lit la demande dans la cible du job.
   const { startGenerationJob } = await import("../lib/generation");
   await addSource(unknown, "course_pdf", "Séance 1", "Le leadership transformationnel motive par le sens.");

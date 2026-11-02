@@ -139,11 +139,12 @@ test("HUM-285 au format déclaré (QCM, 20 questions) : devis pour 20 QCM au tar
   assert.equal(sc.confirmation.cost_credits, fromCenti(costForJob("qcm", target)));
   assert.match(text(r), /annales/, "le résumé lu par le modèle le dit aussi");
 
-  // Avec des annales : leur format fait la règle, une demande de QCM n'est pas appliquée — et c'est dit.
-  const exam = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "MATH-101", focus: "QCM sur les séries", format: "mcq" } })) as ToolResult;
-  const ex = exam.structuredContent as { format: string; exercise_count: number | null; note: string | null };
-  assert.deepEqual([ex.format, ex.exercise_count], ["written", null], "avec annales : format réel");
-  assert.match(ex.note ?? "", /annales/);
+  // Avec des annales : la demande explicite l'emporte, leur format n'est qu'un défaut — et c'est dit.
+  const exam = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "MATH-101", focus: "les séries", format: "mcq", exercise_count: 12 } })) as ToolResult;
+  const ex = exam.structuredContent as { format: string; exercise_count: number | null; note: string | null; confirmation: { cost_credits: number } };
+  assert.deepEqual([ex.format, ex.exercise_count], ["mcq", 12], "QCM demandés : QCM, même avec des annales");
+  assert.match(ex.note ?? "", /annales[\s\S]*défaut/);
+  assert.equal(ex.confirmation.cost_credits, fromCenti(costForJob("qcm", JSON.stringify({ count: 12, openCount: 0, focus: "les séries" }))), "aucune question ouverte");
   await c.close();
 });
 
