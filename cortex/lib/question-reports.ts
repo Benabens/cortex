@@ -1,6 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { currentUser } from "@/db/context";
-import { authAll, authInsert } from "@/db/auth-store";
+import { authAll, authGet, authInsert } from "@/db/auth-store";
 import { nowStr, q } from "@/db/q";
 import { sanitizeCorpus } from "@/lib/prompt-safety";
 import type { QcmItem } from "@/lib/qcm";
@@ -90,7 +90,16 @@ export async function reportQuestion(input: ReportInput): Promise<ReportResult> 
   // Juge indisponible (verified reste null) : le signalement reste ouvert, sans verdict.
   let status: ReportStatus = "open";
   let refunded = 0;
-  if (input.reason === "wrong_answer" && qcm) {
+  // Une question ne se re-vérifie qu'UNE fois (appel au modèle non facturé) : un nouveau
+  // « réponse fausse » reprend le verdict déjà rendu, sans rappeler le modèle.
+  const judged = input.reason === "wrong_answer" && qcm
+    ? await authGet<{ status: ReportStatus }>(
+      `SELECT status FROM question_reports WHERE user_id = ? AND course = ? AND exam_id = ? AND kind = ? AND item_id = ? AND reason = 'wrong_answer' AND status <> 'open' ORDER BY id LIMIT 1`,
+      currentUser(), currentCourse(), input.examId, input.kind, input.itemId,
+    ).catch(() => undefined)
+    : undefined;
+  if (judged) status = judged.status;
+  else if (input.reason === "wrong_answer" && qcm) {
     const { verifyQcmBatch } = await import("@/lib/qcm");
     const [checked] = await verifyQcmBatch([{ ...qcm }], () => {}).catch(() => [null]);
     if (checked && checked.verified !== null) {
