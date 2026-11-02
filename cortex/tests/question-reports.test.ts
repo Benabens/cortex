@@ -170,3 +170,17 @@ test("route POST /api/questions/report : motif inconnu → 400 au message lisibl
   assert.equal(missing.status, 404);
 });
 
+
+test("une question ne se re-vérifie qu'une fois : un nouveau « réponse fausse » reprend le verdict sans rappeler le modèle", async () => {
+  const { runWithUser } = await import("../db/context");
+  const { runWithCourse } = await import("../db/client");
+  const { reportQuestion } = await import("../lib/question-reports");
+  await runWithUser(USER, () => runWithCourse("ml", async () => {
+    const { examId, itemIds } = await paidExam();
+    judgeKey = 0;
+    assert.equal((await reportQuestion({ examId, kind: "qcm", itemId: itemIds[1], reason: "wrong_answer" })).status, "not_confirmed");
+    const calls = prompts.length;
+    for (let i = 0; i < 3; i++) assert.equal((await reportQuestion({ examId, kind: "qcm", itemId: itemIds[1], reason: "wrong_answer" })).status, "not_confirmed");
+    assert.equal(prompts.length, calls, "aucun appel au modèle de plus");
+  }));
+});
