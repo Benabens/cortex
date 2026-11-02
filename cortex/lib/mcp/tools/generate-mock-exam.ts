@@ -44,7 +44,7 @@ export default defineTool({
     "Generate a full mock exam in the course's real exam format — multiple choice, exercises, mixed, essay or oral — taken from its past exams, " +
     "else from the format the student declared (set_exam_format), else from official sample questions or exam instructions found in its materials. " +
     "If nothing says what the exam looks like, the call fails with format_required: ask the student (type, number of questions, duration) and record it with set_exam_format, " +
-    "or pass format for this exam only. Optionally emphasise a chapter of the course plan (e.g. chapter \"3\") or a free focus: a THEME, never a format " +
+    "or pass format for this exam only. When the student asks for a type for THIS exam (e.g. multiple-choice only), pass format (mcq = multiple-choice questions only): it wins over the course's format, which is only the default. Optionally emphasise a chapter of the course plan (e.g. chapter \"3\") or a free focus: a THEME, never a format " +
     "(\"20 MCQ\" in focus does not make a multiple-choice exam); 1-2 questions target it, the rest keeps the exam's balance. " +
     "Costs credits (as in the app: a written exam 2 by default, +1 per 4 exercises beyond 8; a multiple-choice exam by its number of questions) and one daily generation. The first call returns the exact cost and a confirmation_token " +
     "without spending anything; ask the user in the conversation and call again with the same arguments plus confirmation_token ONLY after they explicitly approved (nothing to confirm when nothing is charged). " +
@@ -56,7 +56,7 @@ export default defineTool({
       .describe("Chapter of the course plan to emphasise: its number (3) or title. See get_study_plan for the chapters."),
     focus: z.string().min(1).max(FIELD_LIMITS.focus).optional().describe("Free THEMATIC emphasis, e.g. \"eigenvalues and diagonalisation\" (a topic, not a format)."),
     format: z.enum(["written", "mcq"]).optional()
-      .describe("Explicit format for THIS exam when the student asks for it: written (exercises) or mcq. Ignored when the course has past exams (their format rules). Default: the course's exam format."),
+      .describe("Explicit format for THIS exam when the student asks for it: written (exercises) or mcq (multiple-choice questions ONLY, no open question). Wins over the course's exam format, past exams included, which is only the default."),
     exercise_count: z.number().int().min(1).max(MCQ_MAX).optional()
       .describe(`Exercises (written, 1-${WRITTEN_MAX}) or questions (mcq, 1-${MCQ_MAX}). Default: as in the course's exam format.`),
     confirmation_token: confirmationTokenArg,
@@ -77,12 +77,12 @@ export default defineTool({
         throw new ToolError("invalid_input", `Le sujet demandé dépasse ${FIELD_LIMITS.focus} caractères : raccourcis « focus ».`);
       }
       // Format du cours (annales > déclaré > exemples officiels > infos de cours), jamais déduit du focus.
-      // Un format demandé pour CET examen vaut déclaration, sauf face à des annales (l'app ne contourne pas leur format).
+      // Un format demandé pour CET examen l'emporte, annales comprises : le format du cours n'est qu'un défaut.
       const course = await resolveExamFormat();
       const asked = args.format === "mcq" ? "qcm" as const : args.format === "written" ? "exercises" as const : null;
       const format = requestedFormat(course, asked);
       // Le worker et le pré-check relisent la demande dans la cible du job (sinon ils reviendraient au format du cours).
-      const askedKind = format.basis !== "annales" && asked ? asked : undefined;
+      const askedKind = asked ?? undefined;
       const plan = planMockExam(format, { count: args.exercise_count, focus });
       if (plan.generator === "none") {
         throw new ToolError("format_required", `${plan.reason} Demande-le à la personne, puis enregistre-le avec set_exam_format (kind, question_count, duration_min, language), ou passe format pour cet examen seulement.`);
@@ -97,7 +97,7 @@ export default defineTool({
         ? JSON.stringify({ count: plan.qcmCount, openCount: plan.openCount, focus: focus ?? undefined })
         : examTarget(plan.exerciseCount ?? undefined, focus ?? undefined, askedKind);
       const note = course.basis === "annales"
-        ? (args.format === "mcq" && !qcm ? "Ce cours a des annales : l'examen suit leur format, la demande de QCM n'est pas appliquée." : null)
+        ? (asked ? `Format demandé pour cet examen : ${format.summary} ; celui des annales du cours reste le défaut.` : null)
         : `Ce cours n'a pas d'annales : format ${format.summary}.`;
       const base = { course: courseRefOf(c), focus, format: qcm ? "mcq" as const : "written" as const, exercise_count: count, note, confirmation: null, declined: null, job: null };
       const track = (jobId: number) => ({ job_id: jobId, estimated_minutes: "10-20", track_with: `get_job_status with job_id=${jobId}` });

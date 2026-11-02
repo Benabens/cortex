@@ -380,14 +380,22 @@ export function formatContextFor(courseId: string): { kind: ExamKind | null; lan
 }
 
 /**
- * Format demandé explicitement pour UN examen (connecteur : `format`). Il vaut
- * déclaration, sauf face à des annales : leur format fait la règle. Appliqué à
- * l'identique au devis, au lancement et dans le worker (la demande voyage dans la
- * cible du job, `kind`).
+ * Format demandé explicitement pour UN examen (connecteur : `format`). Il l'emporte
+ * sur le format du cours, annales comprises : celui-ci n'est qu'un DÉFAUT (job 9 de
+ * CS-290 : « QCM seulement » demandé, 3 ouvertes imposées par l'annale mixte). « QCM »
+ * demandé = QCM seuls, aucune ouverte ; le nombre de questions du cours reste quand il
+ * vaut pour ce type. Appliqué à l'identique au devis, au lancement et dans le worker
+ * (la demande voyage dans la cible du job, `kind`).
  */
 export function requestedFormat(format: ExamFormat, kind: ExamKind | null | undefined): ExamFormat {
-  if (!kind || format.basis === "annales") return format;
-  return { ...format, basis: "declared", kind, questionCount: null, openCount: null, summary: `${KIND_LABEL[kind]} (demandé pour cet examen, en ${format.language})` };
+  if (!kind) return format;
+  const sameType = kind === "qcm" ? format.kind === "qcm" || format.kind === "mixed" : format.kind === kind;
+  return {
+    ...format, basis: "declared", kind,
+    questionCount: sameType ? format.questionCount : null,
+    openCount: kind === "qcm" ? 0 : null,
+    summary: `${KIND_LABEL[kind]} (demandé pour cet examen, en ${format.language})`,
+  };
 }
 
 /** Le `kind` d'une cible de job d'examen (JSON), s'il en porte un valide. */
