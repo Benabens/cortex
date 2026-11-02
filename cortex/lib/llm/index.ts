@@ -179,7 +179,7 @@ function rejection(e: unknown): { reason: string; truncated: boolean } | null {
  */
 export async function completeJson<T = unknown>(
   req: CompleteRequest,
-  opts: { attempts?: number; check?: (value: T) => string | null } = {},
+  opts: { attempts?: number; check?: (value: T) => string | null | Promise<string | null> } = {},
 ): Promise<T> {
   const attempts = Math.max(1, opts.attempts ?? JSON_ATTEMPTS);
   let last = "";
@@ -187,7 +187,7 @@ export async function completeJson<T = unknown>(
     const prompt = n === 1 ? req.prompt : `${req.prompt}\n\n${retryNote(last, n, attempts)}`;
     try {
       const value = extractJson<T>((await complete({ ...req, prompt })).text);
-      const issue = opts.check?.(value) ?? null;
+      const issue = (await opts.check?.(value)) ?? null;
       if (!issue) return value;
       last = `réponse JSON lisible mais incomplète : ${issue}`;
     } catch (e) {
