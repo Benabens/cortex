@@ -10,6 +10,9 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { listExamSourceRows } from "@/lib/sources";
+import { COURSE_MATTER_RULE } from "@/lib/course-grounding";
+import { courseLanguage } from "@/lib/exam-format";
+import { languageName } from "@/lib/profiles/generic-directives";
 
 /**
  * INDEX EXHAUSTIF exo-par-exo des finals (remplace le résumé tronqué à 16 k).
@@ -131,19 +134,24 @@ async function indexOneExam(course: string, src: { path: string; title: string; 
   const pages = renderExamPages(course, basename);
   if (!pages.length) { step(`${src.title} : pages non rendues (ignoré)`, prog); return []; }
   const p = profile();
+  const lang = languageName(await courseLanguage())[1];
   const archetypeList = p.archetypes.map((a) => `  - id="${a.id}" · ${a.concept} (${a.topics.join(", ")})`).join("\n");
   const prompt = [
     p.qaIntro?.() ?? "Tu es l'équipe enseignante du cours.",
     `Voici TOUTES les pages d'UN vrai examen : « ${src.title} »${src.year ? ` (${src.year})` : ""}. Ouvre-les (outil Read) et lis l'examen EN ENTIER.`,
     ...pages.map((pg) => `  - page ${pg.page} : ${pg.rel}`),
     ``,
-    `EXTRAIS CHAQUE exercice / problème / question (et sous-question si elle teste une technique distincte). N'en OUBLIE AUCUN. Pour chacun : la PAGE où il commence, un topic COURT (EN), la méthode, le format réel (exo_type), le piège, l'archétype le plus proche, un énoncé fidèle COURT, le barème si indiqué, le MOULE générique et le type de figure éventuel.`,
+    `EXTRAIS CHAQUE exercice / problème / question (et sous-question si elle teste une technique distincte). N'en OUBLIE AUCUN. Pour chacun : la PAGE où il commence, un topic COURT en ${lang}, la méthode, le format réel (exo_type), le piège, l'archétype le plus proche, un énoncé fidèle COURT, le barème si indiqué, le MOULE générique et le type de figure éventuel.`,
     ``,
     `═══ TAXONOMIE DES MOULES (champ "mold" — un par exo, le dominant) ═══`,
     moldTaxonomyBlock(),
     ``,
     `═══ ARCHÉTYPES (rattache via "archetype", "" si aucun) ═══`,
     archetypeList,
+    ``,
+    // Une grille d'évaluation classée en annale (HUM-285, 27/10) devenait des « exercices » D1/D2/D3.
+    COURSE_MATTER_RULE,
+    `  - Un document qui n'est qu'une grille ou des critères d'évaluation, un barème ou des consignes ne contient AUCUN exercice : rends alors { "exercises": [] }.`,
     ``,
     `Réponds UNIQUEMENT avec l'objet JSON { "exercises": [ … ] }. Aucun texte autour.`,
     JSON.stringify(EXO_SCHEMA, null, 2),
@@ -226,8 +234,10 @@ export async function indexExamExercises(opts: { onStep?: (m: string, p: number)
   const course = currentCourse();
   const all = await listExamSourceRows();
   const exams = pickEnonces(all);
+  // Index reconstruit à chaque passe, y compris quand il n'y a plus d'annale : une source
+  // reclassée (grille d'évaluation de HUM-285, d'abord classée midterm) n'y laisse rien.
+  await q.exec(`DELETE FROM exam_exercises`);
   if (!exams.length) { step("Aucun final ingéré — index vide.", 100); return { exams: 0, exercises: 0 }; }
-  await q.exec(`DELETE FROM exam_exercises`); // index reconstruit à chaque passe
   let total = 0;
   for (let i = 0; i < exams.length; i++) {
     const prog = 8 + Math.round((i / exams.length) * 82);

@@ -7,6 +7,9 @@ import { rebuildCoursePlan, getPlanChapters, ensurePlanSchema, type PlanChapter 
 import { detectExamDna } from "@/lib/exam-dna";
 import { courseOrderKey } from "@/lib/course-order";
 import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
+import { COURSE_MATTER_RULE } from "@/lib/course-grounding";
+import { courseLanguage } from "@/lib/exam-format";
+import { languageName } from "@/lib/profiles/generic-directives";
 
 export { courseOrderKey };
 
@@ -184,6 +187,8 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
     .join("\n");
   // Vision : si le cours a des images-étalon (vrais finals rendus), le LLM les REGARDE.
   const vision = p.visionBlock?.() ?? "";
+  // Libellés dans la langue du cours : « SHS Conceptual Link (D1) » dans un cours en français (HUM-285).
+  const lang = languageName(await courseLanguage())[1];
 
   const prompt = [
     p.qaIntro(),
@@ -210,8 +215,9 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
     `1) Classe CHAQUE exercice des past-exams en un TYPE/MÉTHODE précis (ex. « intégrale double — Fubini / changement de variable », « plus court chemin — Dijkstra / Bellman-Ford », « programmation dynamique — récurrence + table »…). Regroupe les exercices équivalents sous UN seul type.`,
     `2) Compte combien de fois chaque type apparaît dans les past-exams (exam_count) et déduis son POIDS exam_weight = part d'emphase en % (sur les past-exams ; la somme de TOUS les exam_weight ≈ 100).`,
     `3) Ajoute les types présents dans les SÉRIES ou le PLAN mais PAS (encore) tombés en final : source="serie" ou "cours", exam_count=0, exam_weight petit mais > 0.`,
-    `4) Pour chaque type : un "label" COURT (EN ANGLAIS, comme sur l'examen), "method" = la méthode/technique testée, "exo_type" = le FORMAT réel de l'exo (échelle à remplir, tableau d'accès, vrai/faux à justifier, écrire une fonction C, arbre de processus…), "trap" = le PIÈGE typique (l'idée fausse punie), "category" (regroupement), "archetype" (id ci-dessus le plus proche ou ""), "source" ("final" si vu en final, sinon "serie"/"cours"), "description" (une phrase).`,
+    `4) Pour chaque type : un "label" COURT, en ${lang} (la langue du cours, comme sur l'examen), "method" = la méthode/technique testée, "exo_type" = le FORMAT réel de l'exo (échelle à remplir, tableau d'accès, vrai/faux à justifier, écrire une fonction C, arbre de processus…), "trap" = le PIÈGE typique (l'idée fausse punie), "category" (regroupement), "archetype" (id ci-dessus le plus proche ou ""), "source" ("final" si vu en final, sinon "serie"/"cours"), "description" (une phrase).`,
     `Vise 6 à 14 types — ni trop fin, ni trop grossier. Pas de doublon.`,
+    COURSE_MATTER_RULE,
     ``,
     `Réponds UNIQUEMENT avec l'objet JSON { "topics": [ … ] } (aucun texte autour, aucun outil au-delà de Read d'images) :`,
     JSON.stringify(TOPIC_SCHEMA, null, 2),
@@ -235,7 +241,14 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
        exam_weight=excluded.exam_weight, exam_count=excluded.exam_count,
        source=excluded.source, description=excluded.description`;
   const knownArche = new Set(p.archetypes.map((a) => a.id));
+  const labels = new Set(cleaned.map((t) => t.label.trim().slice(0, 160)));
   await q.tx(async () => {
+    // L'analyse REFAIT la carte : une notion qu'elle ne rend plus (préparation précédente, source
+    // reclassée depuis, index d'une grille d'évaluation) disparaît, sauf si l'étudiant l'a travaillée.
+    const stale = await q.all<{ id: number; label: string }>(
+      `SELECT t.id, t.label FROM topics t WHERE NOT EXISTS (SELECT 1 FROM mastery m WHERE m.topic_id = t.id AND m.attempts > 0)`,
+    );
+    for (const r of stale) if (!labels.has(r.label)) await q.run(`DELETE FROM topics WHERE id = ?`, r.id);
     for (const t of cleaned) {
       await q.run(
         upSql,
@@ -269,7 +282,7 @@ const CLUSTER_SCHEMA = {
       items: {
         type: "object",
         properties: {
-          label: { type: "string", description: "Label canonique COURT (EN) du type d'exercice." },
+          label: { type: "string", description: "Label canonique COURT du type d'exercice, dans la langue du cours." },
           method: { type: "string" },
           category: { type: "string" },
           archetype: { type: "string", description: "id d'archétype le plus proche, ou \"\"." },
@@ -302,6 +315,7 @@ export type PartitionType = { label: string; method: string | null; exo_type: st
 export async function clusterIndexLabels(rawCount: Map<string, number>): Promise<TopicCluster[]> {
   const rawLabels = [...rawCount.keys()];
   const p0 = profile();
+  const lang = languageName(await courseLanguage())[1];
   const prompt = [
     p0.qaIntro?.() ?? "Tu es l'équipe enseignante du cours.",
     `Voici les libellés BRUTS des exercices extraits des vrais finals (avec leur nombre d'occurrences). Regroupe les ÉQUIVALENTS sous un même TYPE canonique (ex. « Strassen / matrix multiplication » et « Strassen's algorithm » → un seul type « Divide & Conquer — Strassen »). Ne fusionne PAS des techniques différentes.`,
@@ -310,7 +324,7 @@ export async function clusterIndexLabels(rawCount: Map<string, number>): Promise
     `═══ ARCHÉTYPES (rattache via "archetype", "" si aucun) ═══`,
     p0.archetypes.map((a) => `  - id="${a.id}" · ${a.concept}`).join("\n"),
     ``,
-    `Vise 15 à 30 types canoniques (regroupement par GRANDE technique : Divide & Conquer, Greedy, Dynamic Programming, Graphes/plus courts chemins, Flots/coupes, Arbres couvrants, Tris/sélection, Structures de données, Hachage, Récurrences/asymptotique, NP/réductions, Preuves…). Chaque label BRUT doit apparaître dans EXACTEMENT un type (members = labels bruts exacts, copiés tels quels). Réponds UNIQUEMENT avec { "types": [ … ] } :`,
+    `Vise 15 à 30 types canoniques (regroupement par GRANDE technique : Divide & Conquer, Greedy, Dynamic Programming, Graphes/plus courts chemins, Flots/coupes, Arbres couvrants, Tris/sélection, Structures de données, Hachage, Récurrences/asymptotique, NP/réductions, Preuves…). Labels canoniques en ${lang}. Chaque label BRUT doit apparaître dans EXACTEMENT un type (members = labels bruts exacts, copiés tels quels). Réponds UNIQUEMENT avec { "types": [ … ] } :`,
     JSON.stringify(CLUSTER_SCHEMA, null, 2),
   ].join("\n");
   const parsed = extractJson<{ types?: TopicCluster[] }>(await completeText({ prompt, model: "opus", timeoutMs: 600_000 }));
