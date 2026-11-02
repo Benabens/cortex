@@ -116,7 +116,7 @@ async function run(): Promise<void> {
 
 // ───────────────────────────── judge ─────────────────────────────
 
-const CRITERIA = ["discrimination", "distractors", "single_answer", "fidelity", "language", "format"] as const;
+const CRITERIA = ["discrimination", "distractors", "single_answer", "fidelity", "language", "format", "overlap"] as const;
 type Scores = Record<(typeof CRITERIA)[number], number>;
 
 const JUDGE_SCHEMA = {
@@ -131,9 +131,10 @@ const JUDGE_SCHEMA = {
     name_only_items: { type: "integer", description: "Nombre de questions qu'un étudiant ne connaissant que les NOMS des notions réussirait." },
     ambiguous_items: { type: "integer", description: "Nombre de questions à 0 ou plusieurs réponses défendables (pour un QCM à réponse unique)." },
     unfaithful_items: { type: "integer", description: "Nombre de questions qui contredisent les extraits du cours ou en sortent." },
+    overlapping_items: { type: "integer", description: "Nombre de questions qui testent la même notion qu'une autre question de l'examen sans angle vraiment distinct (compte la seconde de chaque paire)." },
     verdict: { type: "string", description: "Trois phrases : forces, défauts, utilité pour réviser ce vrai examen." },
   },
-  required: ["scores", "name_only_items", "ambiguous_items", "unfaithful_items", "verdict"],
+  required: ["scores", "name_only_items", "ambiguous_items", "unfaithful_items", "overlapping_items", "verdict"],
   additionalProperties: false,
 } as const;
 
@@ -166,7 +167,7 @@ async function passagesFor(exam: NonNullable<Exported["exam"]>, cap = 14_000): P
   return out;
 }
 
-async function judgeOne(exam: NonNullable<Exported["exam"]>, truth: string): Promise<{ scores: Scores; name_only_items: number; ambiguous_items: number; unfaithful_items: number; verdict: string }> {
+async function judgeOne(exam: NonNullable<Exported["exam"]>, truth: string): Promise<{ scores: Scores; name_only_items: number; ambiguous_items: number; unfaithful_items: number; overlapping_items: number; verdict: string }> {
   const prompt = [
     `Tu es un examinateur exigeant. On te montre UN examen blanc généré automatiquement pour un cours. Tu ne sais pas comment il a été produit. Évalue-le pour un étudiant qui prépare le VRAI examen décrit ci-dessous.`,
     `LE VRAI EXAMEN DE CE COURS : ${truth}`,
@@ -183,8 +184,9 @@ async function judgeOne(exam: NonNullable<Exported["exam"]>, truth: string): Pro
     `- single_answer : chaque question a-t-elle exactement une réponse défendable, cohérente avec la clé ou le corrigé ?`,
     `- fidelity : les questions s'appuient-elles sur des faits précis des extraits du cours, sans erreur ni hors-sujet ?`,
     `- language : la langue est-elle celle du vrai examen, sans mélange ?`,
-    `- format : la forme correspond-elle au vrai examen (type de questions, nombre, indépendance des questions) ?`,
-    `Compte aussi name_only_items, ambiguous_items, unfaithful_items. Réponds UNIQUEMENT avec l'objet JSON conforme.`,
+    `- format : la forme correspond-elle au vrai examen (type de questions, nombre, réponse unique ou multiple, indépendance des questions) ?`,
+    `- overlap : chaque question teste-t-elle une notion ou un fait DISTINCT ? Deux questions sur la même notion ne se justifient que s'il y a plus de questions que de notions au programme, et alors sous des angles vraiment différents ; chaque recoupement abaisse la note (5 = aucun, 1 = la moitié des questions se recoupent).`,
+    `Compte aussi name_only_items, ambiguous_items, unfaithful_items, overlapping_items. Réponds UNIQUEMENT avec l'objet JSON conforme.`,
     JSON.stringify(JUDGE_SCHEMA, null, 2),
   ].join("\n");
   return extractJson(await completeText({ prompt, model: "opus", timeoutMs: 900_000 }));
@@ -214,7 +216,11 @@ async function judge(): Promise<void> {
     if (!e.data.exam) { results[e.file] = { error: e.data.job.error ?? "aucun examen produit" }; continue; }
     const r = await judgeOne(e.data.exam, truth);
     const mean = Math.round((CRITERIA.reduce((s, c) => s + (r.scores[c] ?? 0), 0) / CRITERIA.length) * 100) / 100;
-    results[e.file] = { items: e.data.exam.items.length, kind: e.data.exam.kind, ...r, mean };
+    // Décomptes déterministes, sans le juge : questions à plusieurs clés, explications qui désignent une option par sa position ou sa lettre.
+    const { citesOptionLabel } = await import("../lib/qcm");
+    const qcm = e.data.exam.items.filter((it) => it.options);
+    const counts = { multi_answer_items: qcm.filter((it) => (it.correct ?? []).length > 1).length, positional_explanations: qcm.filter((it) => citesOptionLabel(it.explanation ?? "")).length };
+    results[e.file] = { items: e.data.exam.items.length, kind: e.data.exam.kind, ...r, ...counts, mean };
     console.log(JSON.stringify({ exam: e.file, ...(results[e.file] as object) }));
   }
   if (exams.length === 2 && exams.every((e) => e.data.exam)) {
