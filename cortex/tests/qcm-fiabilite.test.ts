@@ -23,6 +23,9 @@ process.env.LLM_PROVIDER = "openai-compatible";
 process.env.LLM_API_KEY = "test";
 process.env.LLM_MODEL_OPUS = "claude-sonnet-5";
 process.env.LLM_MAX_RETRIES = "0";
+// Un cours neuf par test : au-delà de 10, la garde « 10 cours par heure » refuserait la création.
+process.env.MAX_COURSES_CREATED_PER_HOUR = "unlimited";
+process.env.MAX_COURSES_PER_USER = "unlimited";
 
 const BT = "```";
 const CODE_STEM = `Considérez le code suivant :\n${BT}python\nimport pandas as pd\ndf = pd.DataFrame({"sex": ["F", "M"], "income": [3, 5]})\nprint(df.groupby("sex")["income"].mean())\n${BT}\nQue fait la dernière ligne ?`;
@@ -71,6 +74,9 @@ const DESIGN = { misconception: "confondre FPR et FDR", edge_case: "groupes de t
 const AUDIT_GOOD = { pattern_matcher_answer: "FDR", pattern_matcher_correct: false, strong_student_answer: "FPR", strong_student_stuck: false, rubric_misses: [], trap_present: true, hardening: "", verdict: "good" };
 let writeCalls = 0;
 const assistPrompts: string[] = [];
+const dedupePrompts: string[] = [];
+/** Paires en doublon que rend le contrôle de fin d'examen (aucune par défaut). */
+let dedupe: (prompt: string) => { first: number; second: number; reason: string }[] = () => [];
 /** Drill : n = rang de l'appel. */
 let drill: (n: number) => string = () => "{}";
 const VERDICT = { verdict: "correct", feedback: "Conforme au cours.", correct_solution: "Groupthink.", criteria: [
@@ -92,7 +98,8 @@ before(async () => {
       let text = "{}";
       // Architecte des questions ouvertes (conception → rédaction → audit), testé avant "items" :
       // le schéma de conception contient lui aussi des tableaux « "items" ».
-      if (/"hints"/.test(content)) { assistPrompts.push(content); text = drill(assistPrompts.length); }
+      if (/"duplicates"/.test(content)) { dedupePrompts.push(content); text = JSON.stringify({ duplicates: dedupe(content) }); }
+      else if (/"hints"/.test(content)) { assistPrompts.push(content); text = drill(assistPrompts.length); }
       else if (/RÉPONSE DE L'ÉTUDIANT/.test(content)) { assistPrompts.push(content); text = JSON.stringify(VERDICT); }
       else if (/"edge_case"/.test(content)) text = JSON.stringify(DESIGN);
       else if (/"pattern_matcher_answer"/.test(content)) text = JSON.stringify(AUDIT_GOOD);
@@ -114,11 +121,11 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { assistPrompts.length = 0; designCalls = 0; writeCalls = 0; designPrompts.length = 0; designBodies.length = 0; verifyPrompts.length = 0; });
+beforeEach(() => { dedupePrompts.length = 0; dedupe = () => []; assistPrompts.length = 0; designCalls = 0; writeCalls = 0; designPrompts.length = 0; designBodies.length = 0; verifyPrompts.length = 0; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
-  for (const k of ["CORTEX_DATA_DIR", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS", "LLM_MAX_RETRIES", "LLM_BASE_URL"]) delete process.env[k];
+  for (const k of ["CORTEX_DATA_DIR", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS", "LLM_MAX_RETRIES", "LLM_BASE_URL", "MAX_COURSES_CREATED_PER_HOUR", "MAX_COURSES_PER_USER"]) delete process.env[k];
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -297,5 +304,31 @@ test("un juge qui répond « None » dans off_course ne rejette rien", async () 
   } finally {
     judgeFlag = "";
   }
+});
+
+test("H — deux QCM sur la même notion : le second est retiré et remplacé par une autre notion", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  design = (n, call) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(10 * call + i, `Simpson ${call}.${i} : que montre le tableau agrégé ? (Q${call}.${i})`)) });
+  dedupe = (p) => (/Simpson 1\.0/.test(p) && /Simpson 1\.2/.test(p) ? [{ first: 0, second: 2, reason: "même paradoxe de Simpson" }] : []);
+  const steps: string[] = [];
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 3, openCount: 0, onStep: (s) => { steps.push(s); } }));
+  assert.equal(r.count, 3);
+  const stems = (await runWithCourse(id, () => getQcmExam(r.id)))!.items.map((x) => x.stem);
+  assert.ok(!stems.some((x) => x.startsWith("Simpson 1.2")), stems.join(" | "));
+  assert.ok(stems.some((x) => x.startsWith("Simpson 2.")), "remplacé par un nouveau lot");
+  assert.ok(steps.some((x) => /doublon/.test(x)), "le retrait est dit");
+});
+
+test("H — les questions des examens précédents du même cours ne sont pas reprises", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  design = (n, call) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i, `Ancienne ${call}.${i} : que renvoie groupby ? (Q${call}.${i})`)) });
+  await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 0 }));
+  designPrompts.length = 0;
+  await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 0 }));
+  assert.match(designPrompts[0], /examens précédents[\s\S]*Ancienne 1\.0/, "les énoncés déjà posés sont donnés à ne pas reprendre");
 });
 
