@@ -47,6 +47,8 @@ export type ComposeResp = { plan: Plan | null };
 
 export type ExamRow = {
   id: number;
+  /** qcm : QCM (+ ouvertes) ; blocks : questions composées ; written : exercices. */
+  kind?: "qcm" | "blocks" | "written";
   createdAt: string;
   status: string;
   questionCount: number;

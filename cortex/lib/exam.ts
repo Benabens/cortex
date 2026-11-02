@@ -281,7 +281,7 @@ export async function listExams() {
       id: r.id,
       createdAt: r.created_at,
       status: r.status,
-      kind: qcm ? "qcm" as const : "written" as const,
+      kind: qcm ? "qcm" as const : r.format_template === "blocks" ? "blocks" as const : "written" as const,
       questionCount: Number(r.nq ?? 0),
       verifySummary: r.verify_summary ?? null,
       // Page en ligne, TOUJOURS ouvrable (examen 4 de CS-290 : sans PDF, la carte n'ouvrait rien).

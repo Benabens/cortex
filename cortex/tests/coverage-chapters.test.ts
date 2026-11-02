@@ -147,7 +147,7 @@ test("programme à 5 chapitres, notions de Fairness 1 en tête : 7 questions tou
 });
 
 // ─────────── A — non-régression : la forme du cours RS (CS-290, 02/11) ───────────
-// Rattachement réel des 34 notions du cours aux supports (banc du dump, 02/11) : Fairness 1
+// Rattachement réel des 38 notions du cours aux supports (banc du dump, 02/11) : Fairness 1
 // en porte 23 (trois préparations successives, variantes bilingues), Introduction deux,
 // Safety 2 une seule, dont la méthode énumère quatre phénomènes. Avant : 7 QCM sur 12 en
 // Fairness 1, rien sur Introduction, et les boucles de rétroaction jamais posées.

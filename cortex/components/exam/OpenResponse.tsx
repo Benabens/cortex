@@ -4,7 +4,7 @@ import { useId, useState } from "react";
 import { SafeHtml } from "@/components/ui/SafeHtml";
 import type { CheckResult } from "@/lib/check-solution";
 
-export function OpenResponse({ questionId, statement, courseId, graded, solution, part }: {
+export function OpenResponse({ questionId, statement, courseId, graded, solution, part, onChecked }: {
   questionId: number;
   statement: string;
   courseId: string;
@@ -12,6 +12,8 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
   solution: string | null;
   /** Réponse courte d'une question composée : corrigée sur son barème (lu côté serveur). */
   part?: { examId: number; partId: number };
+  /** Points obtenus à la vérification (score de l'examen à questions composées). */
+  onChecked?: (score: { earned: number; total: number }) => void;
 }) {
   const [answer, setAnswer] = useState("");
   const [check, setCheck] = useState<CheckResult | null>(null);
@@ -32,7 +34,10 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
       });
       const data = await response.json();
       if (!response.ok || data.error) setError(data.error ?? "La vérification n’a pas abouti. Réessaie.");
-      else setCheck(data.result);
+      else {
+        setCheck(data.result);
+        onChecked?.(data.result.score);
+      }
     } catch {
       setError("La vérification n’a pas abouti. Réessaie.");
     } finally {

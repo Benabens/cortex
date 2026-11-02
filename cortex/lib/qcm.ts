@@ -988,7 +988,7 @@ export function qcmExamSummary(r: Pick<QcmExamResult, "count" | "requested" | "v
 }
 
 export type QcmOpenView = { id: number; concept: string; statement: string; solution: string };
-export type QcmExamView = { id: number; createdAt: string; status: string; verifySummary: string | null; pdf: string | null; items: (Omit<QcmItem, "correct" | "misconceptions"> & { id: number; idx: number })[]; open: QcmOpenView[] };
+export type QcmExamView = { id: number; createdAt: string; status: string; verifySummary: string | null; pdf: string | null; solutions: string | null; items: (Omit<QcmItem, "correct" | "misconceptions"> & { id: number; idx: number })[]; open: QcmOpenView[] };
 type QcmExamRow = { id: number; created_at: string; verify_summary: string | null; html_path: string | null };
 type QcmItemRow = {
   id: number; idx: number; topic: string; type: "scq" | "mcq"; stem: string;
@@ -1012,6 +1012,8 @@ export async function getQcmExam(examId: number, withKeys = false): Promise<QcmE
   } catch {}
   return {
     id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: e.verify_summary, pdf: e.html_path ?? null,
+    // Corrigé : seulement s'il a compilé (J — examen 2 de CS-290 : « Énoncé » sans « Corrigé »).
+    solutions: e.html_path?.endsWith(".pdf") && fs.existsSync(path.join(examsDir(), path.basename(e.html_path).replace(/\.pdf$/, "-corrige.pdf"))) ? e.html_path.replace(/\.pdf$/, "-corrige.pdf") : null,
     items: rows.map((r) => {
       let figure: string | null = null;
       try { figure = r.figure_json ? (JSON.parse(r.figure_json).file ?? null) : null; } catch {}
