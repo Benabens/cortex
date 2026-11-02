@@ -240,6 +240,19 @@ test("C — un bloc toujours rejeté : l'examen sort avec les autres, le manque 
   assert.ok(steps.some((s) => /2\/3 questions composées/.test(s)), steps.join("\n"));
 });
 
+test("C — une sous-question se signale comme une question : contre-exemple des prochaines générations", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { getBlockExam } = await import("../lib/blocks");
+  const { reportQuestion, counterExamplesBlock } = await import("../lib/question-reports");
+  await runWithCourse(examCourse, async () => {
+    const exam = (await getBlockExam(examId, true))!;
+    const sh = exam.blocks[0].parts.find((p) => p.kind === "short")!;
+    const r = await reportQuestion({ examId, kind: "part", itemId: sh.id, reason: "ambiguous", comment: "Deux réponses possibles." });
+    assert.equal(r.status, "open");
+    assert.match(await counterExamplesBlock(), /Énoncé ambigu[\s\S]*Explain in two sentences[\s\S]*Deux réponses possibles/);
+  });
+});
+
 test("C — PDF : un extrait de code garde son indentation, et une ligne qui commence par « [ » compile", async (t) => {
   if (!texAvailable()) return t.skip("tectonic/pdflatex absent");
   try { execFileSync("which", ["pdftotext"], { stdio: "ignore" }); } catch { return t.skip("pdftotext absent"); }
