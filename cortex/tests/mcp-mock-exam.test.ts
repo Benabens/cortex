@@ -162,19 +162,29 @@ test("get_job_status sur un examen QCM terminé : les questions et leurs options
       await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified) VALUES (?,?,?,?,?,?,?,?,?,?)`,
         examId, idx, "Galilée", "scq", stem, JSON.stringify(options), JSON.stringify(correct), "[]", "Publié à Venise en 1610.", 1);
     }
+    // Partie ouverte de l'examen QCM (job 8 de CS-290 : le connecteur ne la rendait pas).
+    await q.run(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration) VALUES (?,?,?,?,?)`,
+      examId, "Lunette de Galilée", "\\textbf{Scénario.} Expliquer ce que Galilée observe de Jupiter en 1610.", "Quatre satellites : un système en orbite autour d'une autre planète que la Terre.", "qcm-open");
     const id = await jobs.createJob("qcm");
     await jobs.setJob(id, { status: "done", progress: 100, resultId: examId, resultPath: `/mock/${examId}` });
     return id;
   }));
   const c = await client();
-  type Status = { exam: { questions: { statement: string; solution: string | null }[] } | null; job: { result_link: string | null } };
+  type Status = { exam: { questions: { statement: string; solution: string | null; kind?: string }[] } | null; job: { result_link: string | null } };
   const plain = (await c.callTool({ name: "get_job_status", arguments: { course: "HUM-285", job_id: jobId } })) as ToolResult;
   const sc = plain.structuredContent as Status;
-  assert.equal(sc.exam?.questions.length, 2, text(plain));
+  assert.equal(sc.exam?.questions.length, 3, `QCM + partie ouverte : ${text(plain)}`);
+  assert.deepEqual(sc.exam!.questions.map((x) => x.kind), ["single_choice", "single_choice", "open"]);
+  assert.match(sc.exam!.questions[2].statement, /Jupiter en 1610/);
+  assert.equal(sc.exam!.questions[2].solution, null, "pas de corrigé sans include_solutions");
   assert.match(sc.exam!.questions[0].statement, /Sidereus Nuncius[\s\S]*A\) Galilée[\s\S]*B\) Kepler/);
   assert.equal(sc.exam!.questions[0].solution, null, "pas de réponse sans include_solutions");
   assert.match(sc.job.result_link ?? "", /\/mock\//);
   const keys = ((await c.callTool({ name: "get_job_status", arguments: { course: "HUM-285", job_id: jobId, include_solutions: true } })) as ToolResult).structuredContent as Status;
   assert.match(keys.exam!.questions[1].solution ?? "", /B[\s\S]*1610/);
+  assert.match(keys.exam!.questions[2].solution ?? "", /Quatre satellites/);
+  // get_results comptait les seules questions ouvertes (« questions: 1 » pour chaque examen QCM).
+  const results = ((await c.callTool({ name: "get_results", arguments: { course: "HUM-285" } })) as ToolResult).structuredContent as { mock_exams: { questions: number }[] };
+  assert.equal(results.mock_exams[0]?.questions, 3);
   await c.close();
 });

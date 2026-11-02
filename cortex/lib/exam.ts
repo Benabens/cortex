@@ -251,13 +251,17 @@ function stubExam(_ctx: Ctx): ExamSpec {
 // ---------- Persistance ----------
 export async function listExams() {
   await q.ensureTable("exams");
+  // Un examen QCM range ses QCM dans qcm_items et sa partie ouverte dans exam_questions :
+  // compter la seconde seule donnait « 1 question » à chaque examen QCM.
+  await q.ensureTable("qcm_items");
   let verifyCol = "NULL";
   try {
     if ((await q.columns("exams")).includes("verify_summary")) verifyCol = "e.verify_summary";
   } catch {}
   const rows = await q.all<any>(
     `SELECT e.id, e.created_at, e.status, e.html_path, ${verifyCol} verify_summary,
-            (SELECT count(*) FROM exam_questions q WHERE q.exam_id = e.id) nq
+            (SELECT count(*) FROM exam_questions q WHERE q.exam_id = e.id)
+              + (SELECT count(*) FROM qcm_items i WHERE i.exam_id = e.id) nq
      FROM exams e WHERE e.format_template IS NULL OR e.format_template != 'exercise'
      ORDER BY e.created_at DESC, e.id DESC`
   );
@@ -265,7 +269,7 @@ export async function listExams() {
     id: r.id,
     createdAt: r.created_at,
     status: r.status,
-    questionCount: r.nq,
+    questionCount: Number(r.nq ?? 0),
     verifySummary: r.verify_summary ?? null,
     url: r.html_path ? `/exam/${path.basename(r.html_path)}${courseQ()}` : null,
     solutionsUrl:
