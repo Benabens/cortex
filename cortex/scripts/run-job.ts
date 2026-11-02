@@ -44,10 +44,10 @@ async function fail(msg: string): Promise<never> {
   // No-op sans BILLING_ENABLED.
   try {
     const { refundJobCredits } = await import("../lib/jobs");
-    const { fmtCredits } = await import("../lib/billing/credits");
+    const { fmtCreditsBack } = await import("../lib/billing/credits");
     const j = await getJob(jobId);
     const back = j ? await refundJobCredits(j, "failed") : 0;
-    if (back > 0) await setJob(jobId, { error: `${msg} — ${fmtCredits(back)} crédit${back >= 200 ? "s rendus" : " rendu"}.` });
+    if (back > 0) await setJob(jobId, { error: `${msg} — ${fmtCreditsBack(back)}.` });
   } catch {}
   process.exit(1);
 }
@@ -182,7 +182,7 @@ async function main() {
     await logJob(jobId, `Worker démarré (PID ${process.pid})`);
     if (!llmAvailable()) await fail(llmUnavailableReason()!);
     try {
-      const { generateQcmExam } = await import("../lib/qcm");
+      const { generateQcmExam, qcmExamSummary } = await import("../lib/qcm");
       // composeur : {count, openCount, focus} ; count/openCount peuvent valoir 0 (respectés).
       let count: number | undefined, openCount: number | undefined, focus: string | undefined;
       try {
@@ -201,8 +201,7 @@ async function main() {
       // Examen incomplet : dit et remboursé au prorata (lib/jobs settleShortfall).
       const { settleShortfall } = await import("../lib/jobs");
       const notice = await settleShortfall(job, res.count + res.open, res.requested + res.openRequested);
-      const made = `${res.count}${res.count < res.requested ? ` QCM sur ${res.requested}` : " QCM"} + ${res.open} ouverte(s)`;
-      await setJob(jobId, { status: "done", progress: 100, resultId: res.id, resultPath: `/mock/${res.id}`, currentStep: notice ? `Mock QCM #${res.id} — ${made} ⚠ ${notice}` : `Mock QCM #${res.id} — ${made} (${res.verified} vérifiés) ✓` });
+      await setJob(jobId, { status: "done", progress: 100, resultId: res.id, resultPath: `/mock/${res.id}`, currentStep: `Mock QCM #${res.id} — ${qcmExamSummary(res)}${notice ? ` ⚠ ${notice}` : " ✓"}` });
       await logJob(jobId, `Mock QCM #${res.id} prêt → /mock/${res.id}`);
       process.exit(0);
     } catch (e) {

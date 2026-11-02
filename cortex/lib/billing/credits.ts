@@ -1,6 +1,6 @@
 import { rechargeDue, standingOf } from "./subscription-windows";
 import { currentUser } from "@/db/context";
-import { authAll, authGet, authRun, authSqlite } from "@/db/auth-store";
+import { authAll, authGet, authRun, authSqlite, authTx } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import { isOwner } from "./owner";
@@ -51,6 +51,11 @@ export function fromCenti(centi: number): number {
 /** Affichage : « 2 », « 1,9 », « 0,1 » crédit(s). */
 export function fmtCredits(centi: number): string {
   return fromCenti(centi).toFixed(2).replace(/\.?0+$/, "").replace(".", ",");
+}
+
+/** « 0,2 crédit rendu » / « 2 crédits rendus » (le pluriel commence à 2 en français). */
+export function fmtCreditsBack(centi: number): string {
+  return `${fmtCredits(centi)} ${centi >= 2 * CENTI ? "crédits rendus" : "crédit rendu"}`;
 }
 
 /** Coût EN CRÉDITS par type de génération. Surcharge : CREDITS_COST_JSON (décimales acceptées). */
@@ -425,21 +430,28 @@ export async function refundGeneration(kind: string, ref: string, userId = curre
     const part = (centi: number) => Math.min(centi, Math.ceil(centi * share - 1e-9));
     const purchasedBack = part(Math.max(0, -Number(debited.delta)));
     const subBack = part(Math.max(0, Number(debited.sub_amount ?? 0)));
-    // Ligne de remboursement de la part achetée + marqueur d'idempotence (delta 0 accepté),
-    // écrite AVANT la part d'abonnement : deux remboursements concurrents n'en rendent qu'un.
-    const label = share < 1 ? `remboursement partiel ${kind}` : `remboursement ${kind}`;
-    if (!(await addTransaction(u, purchasedBack, label, `refund:${ref}`))) return 0;
-    let subReturned = 0;
+    let subOk = false;
     if (subBack > 0) {
       const s = await getSubscription(u);
       const windowStart = s ? (s.window_anchor ?? s.period_start ?? (s.month_anchor ? `${s.month_anchor}-01 00:00:00` : null)) : null;
       const sameWindow = !!windowStart && String(debited.created_at) >= windowStart && !rechargeDue(s!, nowStr());
-      if (subscriptionLive(s) && sameWindow) {
-        await authRun(`UPDATE subscriptions SET remaining = remaining + ?, updated_at = ? WHERE user_id = ?`, subBack, nowStr(), u);
-        subReturned = subBack;
-      }
+      subOk = subscriptionLive(s) && sameWindow;
     }
-    return purchasedBack + subReturned;
+    // Ligne de remboursement de la part achetée (delta 0 accepté) = marqueur d'idempotence,
+    // écrite dans la MÊME transaction que la part d'abonnement : ni double remboursement
+    // (ref UNIQUE, rejeu annulé), ni part d'abonnement perdue si l'une des écritures échoue.
+    await ensureLedgerUnit();
+    const label = share < 1 ? `remboursement partiel ${kind}` : `remboursement ${kind}`;
+    return await authTx(async (tx) => {
+      if (await tx.get<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, `refund:${ref}`)) return 0;
+      const t = nowStr();
+      await tx.run(
+        `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, created_at) VALUES (?,?,?,?,'centi',?)`,
+        u, purchasedBack, label, `refund:${ref}`, t,
+      );
+      if (subOk) await tx.run(`UPDATE subscriptions SET remaining = remaining + ?, updated_at = ? WHERE user_id = ?`, subBack, t, u);
+      return purchasedBack + (subOk ? subBack : 0);
+    });
   } catch (e) {
     log("warn", "credits.refund_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
     return 0;

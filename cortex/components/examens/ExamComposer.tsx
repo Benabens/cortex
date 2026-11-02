@@ -67,7 +67,12 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
     if (job.status === "error" || job.status === "failed") {
       setGenError({ message: asText(job.error) ?? "La génération a échoué. Réessaie." });
     } else {
-      setDoneMsg("Examen généré : il apparaît dans « Examens prêts » ci-dessous.");
+      // Examen incomplet : le worker termine son étape par « ⚠ <n questions manquantes, crédits rendus> ».
+      const step = asText(job.currentStep) ?? "";
+      const shortfall = step.includes("⚠") ? step.slice(step.indexOf("⚠") + 1).trim() : null;
+      setDoneMsg(shortfall
+        ? `Examen généré, incomplet : ${shortfall}. Il apparaît dans « Examens prêts » ci-dessous.`
+        : "Examen généré : il apparaît dans « Examens prêts » ci-dessous.");
       onGenerated();
     }
   }, [job, onGenerated]);
