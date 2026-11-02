@@ -106,6 +106,15 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
           // tronquée, inconnue) garde l'estimation : mieux vaut surcompter.
           const code = e instanceof LlmError ? e.code : undefined;
           if (code && DISCARD_CODES.has(code)) await discardUsage(pending);
+          // Réponse facturée mais inutilisable (coupée, refusée) : compteurs réels.
+          else if (e instanceof LlmError && e.usage) {
+            await closeUsage(pending, {
+              provider: provider.name, model: modelId,
+              tokensIn: e.usage.inputTokens, tokensOut: e.usage.outputTokens,
+              cacheRead: e.usage.cacheReadTokens, cacheWrite: e.usage.cacheWriteTokens,
+              latencyMs: Date.now() - t0,
+            });
+          }
           throw e;
         }
       }, {

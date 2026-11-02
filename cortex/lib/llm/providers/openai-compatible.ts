@@ -9,7 +9,7 @@ import { LlmError, type CompleteRequest, type CompleteResult, type LlmProvider }
  */
 
 type ChatCompletionResponse = {
-  choices?: Array<{ message?: { content?: string | null } }>;
+  choices?: Array<{ message?: { content?: string | null }; finish_reason?: string | null }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 };
 
@@ -112,14 +112,14 @@ export const openaiCompatibleProvider: LlmProvider = {
     if (typeof text !== "string") {
       throw new LlmError("Réponse du endpoint LLM illisible (choices[0].message.content attendu).");
     }
-    return {
-      text,
-      usage: {
-        inputTokens: json?.usage?.prompt_tokens,
-        outputTokens: json?.usage?.completion_tokens,
-      },
-      provider: this.name,
-      model,
+    const usage = {
+      inputTokens: json?.usage?.prompt_tokens,
+      outputTokens: json?.usage?.completion_tokens,
     };
+    // Réponse coupée par max_tokens : jamais rendue comme un texte complet (cf. extractJson).
+    if (json?.choices?.[0]?.finish_reason === "length") {
+      throw new LlmError(`Réponse du modèle coupée par la limite de longueur (${req.maxTokens ?? 16_000} tokens).`, "TRUNCATED", false, usage);
+    }
+    return { text, usage, provider: this.name, model };
   },
 };
