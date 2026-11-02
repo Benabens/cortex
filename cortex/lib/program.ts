@@ -7,6 +7,8 @@ import { rebuildCoursePlan, getPlanChapters, ensurePlanSchema, type PlanChapter 
 import { detectExamDna } from "@/lib/exam-dna";
 import { courseOrderKey } from "@/lib/course-order";
 import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
+import { COURSE_MATTER_RULE } from "@/lib/course-grounding";
+import { courseLanguageName } from "@/lib/exam-format";
 
 export { courseOrderKey };
 
@@ -117,10 +119,41 @@ async function gatherForBlueprint() {
     }
     return out.trim();
   };
+  /**
+   * Chaque source à PART ÉGALE du budget, dans l'ordre : lues dans l'ordre jusqu'au budget, les
+   * premiers supports ingérés (un seul enseignant) faisaient toutes les notions — banc HUM-285 du
+   * 28/10 : 16 questions Bendahan contre 4 Cavallaro.
+   */
+  const fairShare = async (types: string[], cap: number): Promise<string> => {
+    const ph = types.map(() => "?").join(",");
+    let rows: { sid: number; text: string; title: string }[] = [];
+    try {
+      rows = await q.all<{ sid: number; text: string; title: string }>(
+        `SELECT s.id sid, i.text text, s.title title FROM items i JOIN sources s ON s.id = i.source_id
+           WHERE s.type IN (${ph}) ORDER BY s.recency_weight DESC, s.id, i.id`,
+        ...types
+      );
+    } catch {}
+    const bySource = new Map<number, { title: string; text: string }>();
+    for (const r of rows) {
+      const cur = bySource.get(r.sid);
+      if (cur) cur.text += `\n${r.text}`;
+      else bySource.set(r.sid, { title: r.title, text: r.text });
+    }
+    const share = Math.max(300, Math.floor(cap / Math.max(1, bySource.size)));
+    let out = "";
+    for (const { title, text } of bySource.values()) {
+      if (out.length + share > cap + share / 2) break;
+      out += `\n— (${title}) —\n${trunc(text, share)}\n`;
+    }
+    return out.trim();
+  };
+  const finals = await byTypes(["final", "midterm"], 16000);
   return {
-    finals: await byTypes(["final", "midterm"], 16000),
-    series: await byTypes(["serie", "exercise"], 6000),
-    plan: await byTypes(["note", "course_pdf", "course"], 4000),
+    finals,
+    series: await fairShare(["serie", "exercise"], 6000),
+    // Sans annale, le budget des annales revient aux supports du cours : c'est d'eux que viennent les notions.
+    plan: await fairShare(["note", "course_pdf", "course"], finals ? 4000 : 16000),
   };
 }
 
@@ -184,6 +217,8 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
     .join("\n");
   // Vision : si le cours a des images-étalon (vrais finals rendus), le LLM les REGARDE.
   const vision = p.visionBlock?.() ?? "";
+  // Libellés dans la langue du cours : « SHS Conceptual Link (D1) » dans un cours en français (HUM-285).
+  const lang = await courseLanguageName();
 
   const prompt = [
     p.qaIntro(),
@@ -210,8 +245,9 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
     `1) Classe CHAQUE exercice des past-exams en un TYPE/MÉTHODE précis (ex. « intégrale double — Fubini / changement de variable », « plus court chemin — Dijkstra / Bellman-Ford », « programmation dynamique — récurrence + table »…). Regroupe les exercices équivalents sous UN seul type.`,
     `2) Compte combien de fois chaque type apparaît dans les past-exams (exam_count) et déduis son POIDS exam_weight = part d'emphase en % (sur les past-exams ; la somme de TOUS les exam_weight ≈ 100).`,
     `3) Ajoute les types présents dans les SÉRIES ou le PLAN mais PAS (encore) tombés en final : source="serie" ou "cours", exam_count=0, exam_weight petit mais > 0.`,
-    `4) Pour chaque type : un "label" COURT (EN ANGLAIS, comme sur l'examen), "method" = la méthode/technique testée, "exo_type" = le FORMAT réel de l'exo (échelle à remplir, tableau d'accès, vrai/faux à justifier, écrire une fonction C, arbre de processus…), "trap" = le PIÈGE typique (l'idée fausse punie), "category" (regroupement), "archetype" (id ci-dessus le plus proche ou ""), "source" ("final" si vu en final, sinon "serie"/"cours"), "description" (une phrase).`,
+    `4) Pour chaque type : un "label" COURT, en ${lang} (la langue du cours, comme sur l'examen), "method" = la méthode/technique testée, "exo_type" = le FORMAT réel de l'exo (échelle à remplir, tableau d'accès, vrai/faux à justifier, écrire une fonction C, arbre de processus…), "trap" = le PIÈGE typique (l'idée fausse punie), "category" (regroupement), "archetype" (id ci-dessus le plus proche ou ""), "source" ("final" si vu en final, sinon "serie"/"cours"), "description" (une phrase).`,
     `Vise 6 à 14 types — ni trop fin, ni trop grossier. Pas de doublon.`,
+    COURSE_MATTER_RULE,
     ``,
     `Réponds UNIQUEMENT avec l'objet JSON { "topics": [ … ] } (aucun texte autour, aucun outil au-delà de Read d'images) :`,
     JSON.stringify(TOPIC_SCHEMA, null, 2),
@@ -235,7 +271,14 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
        exam_weight=excluded.exam_weight, exam_count=excluded.exam_count,
        source=excluded.source, description=excluded.description`;
   const knownArche = new Set(p.archetypes.map((a) => a.id));
+  const labels = new Set(cleaned.map((t) => t.label.trim().slice(0, 160)));
   await q.tx(async () => {
+    // L'analyse REFAIT la carte : une notion qu'elle ne rend plus (préparation précédente, source
+    // reclassée depuis, index d'une grille d'évaluation) disparaît, sauf si l'étudiant l'a travaillée.
+    const stale = await q.all<{ id: number; label: string }>(
+      `SELECT t.id, t.label FROM topics t WHERE NOT EXISTS (SELECT 1 FROM mastery m WHERE m.topic_id = t.id AND m.attempts > 0)`,
+    );
+    for (const r of stale) if (!labels.has(r.label)) await q.run(`DELETE FROM topics WHERE id = ?`, r.id);
     for (const t of cleaned) {
       await q.run(
         upSql,
@@ -269,7 +312,7 @@ const CLUSTER_SCHEMA = {
       items: {
         type: "object",
         properties: {
-          label: { type: "string", description: "Label canonique COURT (EN) du type d'exercice." },
+          label: { type: "string", description: "Label canonique COURT du type d'exercice, dans la langue du cours." },
           method: { type: "string" },
           category: { type: "string" },
           archetype: { type: "string", description: "id d'archétype le plus proche, ou \"\"." },
@@ -302,6 +345,7 @@ export type PartitionType = { label: string; method: string | null; exo_type: st
 export async function clusterIndexLabels(rawCount: Map<string, number>): Promise<TopicCluster[]> {
   const rawLabels = [...rawCount.keys()];
   const p0 = profile();
+  const lang = await courseLanguageName();
   const prompt = [
     p0.qaIntro?.() ?? "Tu es l'équipe enseignante du cours.",
     `Voici les libellés BRUTS des exercices extraits des vrais finals (avec leur nombre d'occurrences). Regroupe les ÉQUIVALENTS sous un même TYPE canonique (ex. « Strassen / matrix multiplication » et « Strassen's algorithm » → un seul type « Divide & Conquer — Strassen »). Ne fusionne PAS des techniques différentes.`,
@@ -310,7 +354,7 @@ export async function clusterIndexLabels(rawCount: Map<string, number>): Promise
     `═══ ARCHÉTYPES (rattache via "archetype", "" si aucun) ═══`,
     p0.archetypes.map((a) => `  - id="${a.id}" · ${a.concept}`).join("\n"),
     ``,
-    `Vise 15 à 30 types canoniques (regroupement par GRANDE technique : Divide & Conquer, Greedy, Dynamic Programming, Graphes/plus courts chemins, Flots/coupes, Arbres couvrants, Tris/sélection, Structures de données, Hachage, Récurrences/asymptotique, NP/réductions, Preuves…). Chaque label BRUT doit apparaître dans EXACTEMENT un type (members = labels bruts exacts, copiés tels quels). Réponds UNIQUEMENT avec { "types": [ … ] } :`,
+    `Vise 15 à 30 types canoniques (regroupement par GRANDE technique : Divide & Conquer, Greedy, Dynamic Programming, Graphes/plus courts chemins, Flots/coupes, Arbres couvrants, Tris/sélection, Structures de données, Hachage, Récurrences/asymptotique, NP/réductions, Preuves…). Labels canoniques en ${lang}. Chaque label BRUT doit apparaître dans EXACTEMENT un type (members = labels bruts exacts, copiés tels quels). Réponds UNIQUEMENT avec { "types": [ … ] } :`,
     JSON.stringify(CLUSTER_SCHEMA, null, 2),
   ].join("\n");
   const parsed = extractJson<{ types?: TopicCluster[] }>(await completeText({ prompt, model: "opus", timeoutMs: 600_000 }));

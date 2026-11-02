@@ -1,7 +1,7 @@
 import { resolveExamFormat } from "@/lib/exam-format";
 import { completeJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
-import { COURSE_TERMS_RULE, absentCourseTerms, coursePassages } from "@/lib/course-grounding";
+import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseTerms, coursePassages } from "@/lib/course-grounding";
 import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
 
 export type Drill = {
@@ -42,6 +42,7 @@ export async function generateDrill(concept: string): Promise<Drill> {
     `Fournis aussi une ÉCHELLE DE 5 INDICES, du plus vague (juste nommer la technique/le concept à utiliser) au plus précis (presque la solution complète, étape par étape) — ils seront révélés un par un.`,
     `statement_html et solution_html en HTML SIMPLE (<p>,<ul>,<li>,<code>,<pre>,<table>,<strong>). Pas d'images, pas de LaTeX.`,
     COURSE_TERMS_RULE,
+    COURSE_MATTER_RULE,
     passages.length ? `\n${DATA_RULE}` : null,
     passages.length ? dataBlock(`EXTRAITS DU COURS — les notions et définitions qui font foi`, passages) : null,
     `Réponds UNIQUEMENT avec l'objet JSON conforme au schéma. Aucun outil, aucun fichier.`,
