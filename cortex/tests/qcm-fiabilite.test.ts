@@ -86,7 +86,7 @@ const VERDICT = { verdict: "correct", feedback: "Conforme au cours.", correct_so
   { label: "Justifie", points: 1, achieved: true, essential: false, justification: "Le silence du groupe est expliqué." },
 ] };
 /** Rédaction d'une question ouverte (n = rang de l'appel). */
-let write: (n: number) => string = (n) => JSON.stringify({ category: "Fairness", concept: `Ouverte ${n}`, statement_tex: `\\textbf{Scénario ${n}.} Calculez le FPR de chaque groupe.`, solution_tex: "FPR = FP / (FP + TN).", points: 15 });
+let write: (n: number, prompt: string) => string = (n) => JSON.stringify({ category: "Fairness", concept: `Ouverte ${n}`, statement_tex: `\\textbf{Scénario ${n}.} Calculez le FPR de chaque groupe.`, solution_tex: "FPR = FP / (FP + TN).", points: 15 });
 
 let llm: http.Server;
 before(async () => {
@@ -105,7 +105,7 @@ before(async () => {
       else if (/RÉPONSE DE L'ÉTUDIANT/.test(content)) { assistPrompts.push(content); text = JSON.stringify(VERDICT); }
       else if (/"edge_case"/.test(content)) text = JSON.stringify(DESIGN);
       else if (/"pattern_matcher_answer"/.test(content)) text = JSON.stringify(AUDIT_GOOD);
-      else if (/"statement_tex"/.test(content)) { writeCalls++; text = write(writeCalls); }
+      else if (/"statement_tex"/.test(content)) { writeCalls++; text = write(writeCalls, content); }
       else if (/"results"/.test(content)) text = verifyReply(content);
       else if (/"items"/.test(content)) {
         designCalls++;
@@ -229,14 +229,17 @@ test("une question ouverte qui échoue est relancée : 2 QCM + 3 ouvertes sur 2 
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
   design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
   const ok = write;
-  // La 2ᵉ ouverte (rédactions 2 à 4 : 3 essais) ne rend que du texte : elle échoue, puis est relancée.
-  write = (n) => (n >= 2 && n <= 4 ? "Voici l'énoncé demandé." : ok(n));
+  // L'ouverte sur « pandas groupby » (une seule l'a) ne rend que du texte à ses 3 premiers essais : elle
+  // échoue, puis est relancée (les ouvertes tournent en parallèle : ciblée par son sujet).
+  let target = 0;
+  write = (n, p) => (/pandas groupby/.test(p) && ++target <= 3 ? "Voici l'énoncé demandé." : ok(n, p));
   try {
     const steps: string[] = [];
     const r = await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 3, onStep: (s) => { steps.push(s); } }));
     assert.equal(r.open, 3, steps.filter((s) => /uverte/.test(s)).join("\n"));
     assert.equal(r.openRequested, 3);
-    assert.ok(steps.some((s) => /Question ouverte 2 ignorée/.test(s)), "l'échec est dit, avec sa cause");
+    assert.equal(target, 4, "trois essais ratés, puis la relance");
+    assert.ok(steps.some((s) => /Question ouverte \d ignorée : le modèle a renvoyé une réponse illisible/.test(s)), "l'échec est dit, avec sa cause");
     assert.ok(steps.some((s) => /ouverte\(s\) manquante\(s\)/.test(s)), "et la relance aussi");
     const exam = await runWithCourse(id, () => getQcmExam(r.id));
     assert.equal(exam!.open.length, 3);
@@ -362,5 +365,31 @@ test("K — la consigne de l'étudiant s'ajoute au niveau par défaut, sur chaqu
     assert.match(p, /NIVEAU EXAMEN RÉEL/);
     assert.match(p, /CONSIGNE DE L'ÉTUDIANT[^\n]*HARD : distinctions fines/);
   }
+});
+
+test("M — ouvertes en parallèle des QCM, QCM visibles avant les ouvertes, durées des phases journalisées", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
+  const steps: string[] = [];
+  let early: { examId: number; items: number; open: number; status: string | null } | null = null;
+  const r = await runWithCourse(id, () => generateQcmExam({
+    count: 4, openCount: 2,
+    onStep: (s) => { steps.push(s); },
+    onExamReady: async (examId) => {
+      const v = await getQcmExam(examId);
+      early = { examId, items: v?.items.length ?? 0, open: v?.open.length ?? 0, status: v?.status ?? null };
+    },
+  }));
+  assert.ok(early, "l'examen est livré dès que ses QCM sont prêts");
+  assert.deepEqual(early, { examId: r.id, items: 4, open: 0, status: "generating" }, "QCM visibles, ouvertes en cours");
+  const firstOpen = steps.findIndex((x) => /Question ouverte 1\/2/.test(x));
+  const qcmDone = steps.findIndex((x) => /4\/4 QCM construits/.test(x));
+  assert.ok(firstOpen >= 0 && firstOpen < qcmDone, "les ouvertes démarrent avant la fin des QCM");
+  for (const phase of [/⏱ QCM/, /⏱ Questions ouvertes/, /⏱ PDF/, /⏱ Total/]) assert.ok(steps.some((x) => phase.test(x)), String(phase));
+  const final = await runWithCourse(id, () => getQcmExam(r.id));
+  assert.equal(final!.status, "ready");
+  assert.equal(final!.open.length, 2);
 });
 

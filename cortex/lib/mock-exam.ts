@@ -10,7 +10,7 @@ import { planMockExam, requestedFormat, resolveExamFormat, type ExamKind } from 
 /** `produced` / `requested` : questions livrées sur questions demandées, quand le générateur les compte. */
 export type MockExamResult = { id: number; url: string; texError?: string; produced?: number; requested?: number };
 
-export async function generateMockExam(opts: { count?: number; focus?: string; kind?: ExamKind | null; onStep?: StepCb; jobId?: number } = {}): Promise<MockExamResult> {
+export async function generateMockExam(opts: { count?: number; focus?: string; kind?: ExamKind | null; onStep?: StepCb; jobId?: number; onExamReady?: (examId: number) => void | Promise<void> } = {}): Promise<MockExamResult> {
   const step = opts.onStep ?? (() => {});
   // Un format demandé pour cet examen (cible du job) l'emporte sur celui du cours, sauf annales.
   const format = requestedFormat(await resolveExamFormat(), opts.kind);
@@ -19,7 +19,7 @@ export async function generateMockExam(opts: { count?: number; focus?: string; k
   step(`Format : ${format.summary}`, 3);
   if (plan.generator === "qcm") {
     const { generateQcmExam } = await import("@/lib/qcm");
-    const r = await generateQcmExam({ count: plan.qcmCount, openCount: plan.openCount, focus: opts.focus, onStep: step });
+    const r = await generateQcmExam({ count: plan.qcmCount, openCount: plan.openCount, focus: opts.focus, onStep: step, onExamReady: opts.onExamReady });
     return { id: r.id, url: `/mock/${r.id}`, texError: r.texError, produced: r.count + r.open, requested: r.requested + r.openRequested };
   }
   // Exercices : sans nombre demandé, le plan du cours décide (comportement historique, CS-202 compris).

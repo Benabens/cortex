@@ -9,7 +9,7 @@ import type { QcmGradeDetail } from "@/lib/qcm";
 
 type Item = { id: number; idx: number; topic: string; type: "scq" | "mcq"; stem: string; options: string[]; verified: number | null };
 type Open = { id: number; concept: string; statement: string; solution: string };
-type Exam = { id: number; verifySummary: string | null; pdf: string | null; items: Item[]; open: Open[] };
+type Exam = { id: number; status?: string; verifySummary: string | null; pdf: string | null; items: Item[]; open: Open[] };
 type Graded = { score: number; total: number; detail: QcmGradeDetail[]; openSolutions: Open[] };
 
 const LETTER = "ABCDEFGH".split("");
@@ -27,9 +27,19 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
 
   useEffect(() => {
     if (!ready || !courseId) return;
-    (async () => {
-      try { const d = await (await fetch(`/api/qcm/${id}${qs}`)).json(); if (d.error) setErr(d.error); else setExam(d); } catch { setErr("Chargement impossible."); }
-    })();
+    let stop = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      try {
+        const d = await (await fetch(`/api/qcm/${id}${qs}`)).json();
+        if (stop) return;
+        if (d.error) setErr(d.error); else setExam(d);
+        // Livraison progressive : les QCM sont là, les questions ouvertes arrivent → on repasse.
+        if (!d.error && d.status === "generating") timer = setTimeout(load, 15_000);
+      } catch { if (!stop) setErr("Chargement impossible."); }
+    };
+    load();
+    return () => { stop = true; if (timer) clearTimeout(timer); };
   }, [id, ready, courseId, qs]);
 
   const toggle = useCallback((it: Item, k: number) => {
@@ -117,6 +127,9 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
         })}
       </div>
 
+      {exam.status === "generating" && (
+        <p className="mt-7 text-[13px]" style={{ color: "var(--ink-3)" }}>Questions ouvertes en cours de génération : elles apparaîtront ici (la page se met à jour toute seule).</p>
+      )}
       {exam.open.length > 0 && (
         <div className="mt-7">
           <div className="section-head"><span className="section-title">Partie ouverte : {exam.open.length} question(s) à rédiger</span></div>

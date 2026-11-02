@@ -197,7 +197,9 @@ async function main() {
         await setJob(jobId, { currentStep: s, progress: p, status: p >= 100 ? "done" : "running" });
         await logJob(jobId, s);
       };
-      const res = await generateQcmExam({ count, openCount, focus, onStep });
+      // Livraison progressive : le job pointe vers l'examen dès que ses QCM sont prêts.
+      const onExamReady = async (examId: number) => { await setJob(jobId, { resultId: examId, resultPath: `/mock/${examId}` }); };
+      const res = await generateQcmExam({ count, openCount, focus, onStep, onExamReady });
       // Examen incomplet : dit et remboursé au prorata (lib/jobs settleShortfall).
       const { settleShortfall } = await import("../lib/jobs");
       const notice = await settleShortfall(job, res.count + res.open, res.requested + res.openRequested);
@@ -277,7 +279,7 @@ async function main() {
         : job.type === "lab-exercise"
           ? await generateLabExercise(job.target ?? "", { onStep })
           // Examen blanc : le format du cours choisit le générateur (QCM, exercices, essai…), cf. lib/mock-exam.
-          : await generateMockExam({ count: examCount, focus: examFocus, kind: examKind, onStep, jobId });
+          : await generateMockExam({ count: examCount, focus: examFocus, kind: examKind, onStep, jobId, onExamReady: async (examId: number) => { await setJob(jobId, { resultId: examId, resultPath: `/mock/${examId}` }); } });
     if (res.texError) {
       // le résultat existe (HTML lisible) mais le PDF a échoué → erreur LaTeX gardée pour debug
       await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, repli HTML lisible. Détail : ${res.texError.slice(0, 500)}` });
