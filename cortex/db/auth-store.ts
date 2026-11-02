@@ -651,6 +651,9 @@ const CREDIT_TX_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   // entiers (ancien code — déploiement glissant, base héritée). Les lectures
   // normalisent (lib/billing/credits DELTA_CENTI) : aucune ne dépend d'un drapeau.
   { name: "unit", sqlite: "TEXT", pg: "text" },
+  // Part d'un débit qu'une ligne de remboursement rend, en millièmes (NULL : ligne d'avant, ou
+  // pas un remboursement) : la somme des parts d'un même débit ne dépasse jamais 1000.
+  { name: "share_milli", sqlite: "INTEGER", pg: "integer" },
 ];
 const STRIPE_PURCHASE_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "livemode", sqlite: "INTEGER", pg: "integer" },
