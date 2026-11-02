@@ -201,6 +201,11 @@ async function main() {
       // Examen incomplet : dit et remboursé au prorata (lib/jobs settleShortfall).
       const { settleShortfall } = await import("../lib/jobs");
       const notice = await settleShortfall(job, res.count + res.open, res.requested + res.openRequested);
+      // PDF non compilé : dit, comme pour l'examen écrit (avant : silencieux, seul le .tex existait).
+      if (res.texError) {
+        await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, l'examen reste lisible dans l'app. Détail : ${res.texError.slice(0, 500)}` });
+        await logJob(jobId, `⚠ Erreur LaTeX : ${res.texError.slice(0, 300)}`);
+      }
       await setJob(jobId, { status: "done", progress: 100, resultId: res.id, resultPath: `/mock/${res.id}`, currentStep: `Mock QCM #${res.id} — ${qcmExamSummary(res)}${notice ? ` ⚠ ${notice}` : " ✓"}` });
       await logJob(jobId, `Mock QCM #${res.id} prêt → /mock/${res.id}`);
       process.exit(0);

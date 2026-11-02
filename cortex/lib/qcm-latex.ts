@@ -113,26 +113,48 @@ function renderQcmItem(q: QcmItem, n: number, points: number, withKey: boolean):
   ].filter(Boolean).join("\n");
 }
 
+/**
+ * Un nœud TikZ dont le texte contient « \\ » exige align= ; la figure peut redéfinir
+ * « every node » et écraser un réglage global (examen 2 de CS-290) : on l'ajoute donc à
+ * chaque nœud qui n'en a pas (sans effet sur un texte d'une ligne).
+ */
+export function alignTikzNodes(tex: string): string {
+  return tex
+    .replace(/(\\?\bnode)\[(?![^\]]*\balign\s*=)([^\]]*)\]/g, (_m, kw: string, opts: string) => `${kw}[${opts.trim() ? `${opts}, ` : ""}align=center]`)
+    .replace(/(\\node)(?=\s*[({])/g, "$1[align=center]");
+}
+
 function renderOpen(q: ExamQuestion, n: number, withSol: boolean, defaultPts = 15): string {
   // les énoncés ouverts (architecte ML) sont déjà en LaTeX (corps) — on les insère tels quels,
   // précédés d'un en-tête. Si pas de \subq dedans, on ajoute un espace de réponse.
-  const stmt = (q.statement_tex ?? "").trim();
+  const stmt = alignTikzNodes((q.statement_tex ?? "").trim());
   const hasSpace = /\\rulelines|\\diskgrid|\\statesim|\\packetgrid|\\forwardgrid/.test(stmt);
   return [
     String.raw`\clearpage\needspace{4\baselineskip}{\large\textbf{Open question ${n} \quad-- ${esc(q.concept)} \hfill [${q.points ?? defaultPts} points]}}\par\vspace{4pt}\hrule\vspace{8pt}`,
     stmt,
     hasSpace ? "" : String.raw`\vspace{4pt}\rulelines{8}`,
-    withSol ? String.raw`\par\medskip{\textbf{\color{epflred}Solution.}}\par\smallskip` + "\n" + (q.solution_tex ?? "") : "",
+    withSol ? String.raw`\par\medskip{\textbf{\color{epflred}Solution.}}\par\smallskip` + "\n" + alignTikzNodes(q.solution_tex ?? "") : "",
   ].filter(Boolean).join("\n");
 }
 
 export type QcmExamData = { items: QcmItem[]; open: ExamQuestion[]; qcmPoints?: number };
+
+/**
+ * Les questions OUVERTES arrivent en LaTeX libre (architecte) : deux tournures courantes
+ * faisaient échouer tout le PDF (examens 1 et 2 de CS-290, 01/11/2026 — seuls les .tex
+ * existaient) : \captionof sans paquet, et « \\ » dans un nœud TikZ sans align. Ajouté au
+ * préambule QCM seulement (le préambule commun fixe le .tex de CS-202, invariant), sans
+ * nouveau paquet : le cache tectonic de l'image n'est préchauffé que pour le commun.
+ */
+const OPEN_TEX_COMPAT = String.raw`\providecommand{\captionof}[2]{\par\smallskip{\small\itshape #2}\par}
+\tikzset{every node/.append style={align=center}}`;
 
 /** Source .tex complet de l'examen QCM (+ ouvert), corrigé optionnel. */
 export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSolutions: boolean): Promise<string> {
   let preamble = fs.readFileSync(path.join(LATEX_DIR, "preamble.tex"), "utf8");
   const figPath = path.join(LATEX_DIR, "figures.tex");
   if (fs.existsSync(figPath)) preamble += "\n" + fs.readFileSync(figPath, "utf8");
+  preamble += "\n" + OPEN_TEX_COMPAT;
 
   const fmt = await getFormatProfile();
   const dur = fmt?.duration_min ?? 180;
