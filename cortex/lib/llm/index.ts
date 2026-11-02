@@ -162,7 +162,7 @@ export const JSON_ATTEMPTS = 3;
 
 /** Motif de rejet d'une réponse, ou null si elle n'est pas en cause (erreur du fournisseur). */
 function rejection(e: unknown): { reason: string; truncated: boolean } | null {
-  if (e instanceof JsonOutputError) return { reason: e.message, truncated: /tronqu/i.test(e.message) };
+  if (e instanceof JsonOutputError) return { reason: e.message, truncated: e.truncated };
   if (e instanceof LlmError && e.code === "TRUNCATED") return { reason: e.message, truncated: true };
   return null;
 }
