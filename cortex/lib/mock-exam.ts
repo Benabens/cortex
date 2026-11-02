@@ -7,7 +7,8 @@ import { planMockExam, requestedFormat, resolveExamFormat, type ExamKind } from 
  * → architecte QCM ; exercices, essai, oral → générateur d'exercices, avec les
  * archétypes de la discipline. Le focus n'est qu'un accent thématique.
  */
-export type MockExamResult = { id: number; url: string; texError?: string };
+/** `produced` / `requested` : questions livrées sur questions demandées, quand le générateur les compte. */
+export type MockExamResult = { id: number; url: string; texError?: string; produced?: number; requested?: number };
 
 export async function generateMockExam(opts: { count?: number; focus?: string; kind?: ExamKind | null; onStep?: StepCb; jobId?: number } = {}): Promise<MockExamResult> {
   const step = opts.onStep ?? (() => {});
@@ -19,7 +20,7 @@ export async function generateMockExam(opts: { count?: number; focus?: string; k
   if (plan.generator === "qcm") {
     const { generateQcmExam } = await import("@/lib/qcm");
     const r = await generateQcmExam({ count: plan.qcmCount, openCount: plan.openCount, focus: opts.focus, onStep: step });
-    return { id: r.id, url: `/mock/${r.id}`, texError: r.texError };
+    return { id: r.id, url: `/mock/${r.id}`, texError: r.texError, produced: r.count + r.open, requested: r.requested + r.openRequested };
   }
   // Exercices : sans nombre demandé, le plan du cours décide (comportement historique, CS-202 compris).
   return generateExamViaClaudeCode({ count: plan.exerciseCount ?? undefined, focus: opts.focus, onStep: step, jobId: opts.jobId });

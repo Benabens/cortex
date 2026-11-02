@@ -407,30 +407,42 @@ export function insufficient(balanceCenti: number, costCenti: number, subCenti =
  * `remaining` SEULEMENT si le débit date de la FENÊTRE en cours et que la
  * période court — une fois la fenêtre passée elle est perdue comme le reliquat
  * (jamais reportée). Le user crédité est celui du débit d'origine.
+ * `fraction` < 1 : remboursement PARTIEL (examen incomplet), au prorata de
+ * chaque part, arrondi au centième SUPÉRIEUR (en faveur de l'utilisateur).
+ * Un seul remboursement par débit, partiel ou non. Rend les centièmes rendus.
  */
-export async function refundGeneration(kind: string, ref: string, userId = currentUser()): Promise<void> {
-  if (!billingEnabled()) return;
+export async function refundGeneration(kind: string, ref: string, userId = currentUser(), fraction = 1): Promise<number> {
+  if (!billingEnabled()) return 0;
+  const share = Math.min(1, Math.max(0, fraction));
+  if (share <= 0) return 0;
   try {
-    if (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, `refund:${ref}`)) return;
+    if (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, `refund:${ref}`)) return 0;
     const debited = await authGet<{ delta: number; user_id: string; sub_amount: number | null; created_at: string }>(
       `SELECT ${DELTA_CENTI} AS delta, user_id, sub_amount, created_at FROM credit_transactions WHERE ref = ?`, ref,
     );
-    if (!debited) return;               // jamais débité → rien à rendre
+    if (!debited) return 0;             // jamais débité → rien à rendre
     const u = debited.user_id || userId;
-    const purchasedBack = Math.max(0, -Number(debited.delta));
-    const subBack = Math.max(0, Number(debited.sub_amount ?? 0));
+    const part = (centi: number) => Math.min(centi, Math.ceil(centi * share - 1e-9));
+    const purchasedBack = part(Math.max(0, -Number(debited.delta)));
+    const subBack = part(Math.max(0, Number(debited.sub_amount ?? 0)));
+    // Ligne de remboursement de la part achetée + marqueur d'idempotence (delta 0 accepté),
+    // écrite AVANT la part d'abonnement : deux remboursements concurrents n'en rendent qu'un.
+    const label = share < 1 ? `remboursement partiel ${kind}` : `remboursement ${kind}`;
+    if (!(await addTransaction(u, purchasedBack, label, `refund:${ref}`))) return 0;
+    let subReturned = 0;
     if (subBack > 0) {
       const s = await getSubscription(u);
       const windowStart = s ? (s.window_anchor ?? s.period_start ?? (s.month_anchor ? `${s.month_anchor}-01 00:00:00` : null)) : null;
       const sameWindow = !!windowStart && String(debited.created_at) >= windowStart && !rechargeDue(s!, nowStr());
       if (subscriptionLive(s) && sameWindow) {
         await authRun(`UPDATE subscriptions SET remaining = remaining + ?, updated_at = ? WHERE user_id = ?`, subBack, nowStr(), u);
+        subReturned = subBack;
       }
     }
-    // Ligne de remboursement de la part achetée + marqueur d'idempotence (delta 0 accepté).
-    await addTransaction(u, purchasedBack, `remboursement ${kind}`, `refund:${ref}`);
+    return purchasedBack + subReturned;
   } catch (e) {
     log("warn", "credits.refund_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
+    return 0;
   }
 }
 
