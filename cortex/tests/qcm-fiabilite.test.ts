@@ -65,7 +65,9 @@ function verifyReply(prompt: string): string {
     // Le juge cite les termes du cours dont dépend la clé ; pour la question « status quo », il ne
     // remarque pas que la notion manque au cours (le contrôle déterministe doit l'attraper).
     const course_terms = /Status quo/.test(b) ? ["status quo bias", "groupthink"] : ["groupby"];
-    return { index: i, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms, off_course: judgeFlag };
+    // K — le juge repère un distracteur qu'on élimine sans connaître le cours (« TypeError » hors sujet).
+    const trivial = [...b.matchAll(/^\s+\((\d+)\) (.*)$/gm)].filter((m) => /TypeError/.test(m[2])).map((m) => Number(m[1]));
+    return { index: i, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms, off_course: judgeFlag, trivial_distractors: trivial };
   });
   return JSON.stringify({ results });
 }
@@ -330,5 +332,35 @@ test("H — les questions des examens précédents du même cours ne sont pas re
   designPrompts.length = 0;
   await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 0 }));
   assert.match(designPrompts[0], /examens précédents[\s\S]*Ancienne 1\.0/, "les énoncés déjà posés sont donnés à ne pas reprendre");
+});
+
+test("K — niveau examen réel par défaut ; un distracteur éliminable sans le cours (« TypeError ») est régénéré", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  // Mock 4 de CS-290 (consigne neutre) : distracteurs « erreur d'arrondi », « TypeError ».
+  const easy = { ...item(0), options: ["La moyenne des revenus calculée séparément pour chaque modalité de sex.", "Une TypeError, car groupby ne s'applique pas à une colonne texte.", "Une erreur d'arrondi due aux nombres flottants de la colonne income.", "La somme des revenus calculée séparément pour chaque modalité de sex."] };
+  design = (n, call) => JSON.stringify({ items: call === 1 ? [easy, ...Array.from({ length: n - 1 }, (_, i) => item(1 + i))] : Array.from({ length: n }, (_, i) => item(10 * call + i)) });
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 0 }));
+  assert.equal(r.count, 2);
+  assert.match(designPrompts[0], /NIVEAU EXAMEN RÉEL/, "la difficulté d'examen est le défaut, sans consigne");
+  const regen = designPrompts.find((p) => /À CORRIGER/.test(p));
+  assert.match(regen ?? "", /éliminable/, "régénération ciblée sur le distracteur trivial");
+  const options = (await runWithCourse(id, () => getQcmExam(r.id)))!.items.flatMap((x) => x.options);
+  assert.ok(!options.some((o) => /TypeError/.test(o)), options.join(" | "));
+});
+
+test("K — la consigne de l'étudiant s'ajoute au niveau par défaut, sur chaque lot", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
+  await runWithCourse(id, () => generateQcmExam({ count: 6, openCount: 0, focus: "HARD : distinctions fines entre notions proches" }));
+  const firsts = designPrompts.filter((p) => !/À CORRIGER/.test(p));
+  assert.ok(firsts.length >= 2);
+  for (const p of firsts) {
+    assert.match(p, /NIVEAU EXAMEN RÉEL/);
+    assert.match(p, /CONSIGNE DE L'ÉTUDIANT[^\n]*HARD : distinctions fines/);
+  }
 });
 
