@@ -68,12 +68,11 @@ export const examFormatSchema = z.object({
   question_count: z.number().nullable(),
   duration_min: z.number().nullable(),
   language: z.string().describe("Language of the generated exam."),
-  answer_mode: z.enum(ANSWER_MODES).nullable().describe("Multiple-choice exams: single (exactly one correct answer), multiple (one or more), mixed — null for other exam types."),
   summary: z.string(),
 });
 
 export function examFormatOf(f: ExamFormat): z.infer<typeof examFormatSchema> {
-  return { kind: f.kind, basis: f.basis, question_count: f.questionCount, duration_min: f.durationMin, language: f.language, answer_mode: f.answerMode ?? null, summary: f.summary };
+  return { kind: f.kind, basis: f.basis, question_count: f.questionCount, duration_min: f.durationMin, language: f.language, summary: f.summary };
 }
 
 /** Entrée d'un format déclaré (create_course, set_exam_format). */

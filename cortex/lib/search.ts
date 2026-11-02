@@ -179,24 +179,28 @@ export async function unindexSource(sourceId: number): Promise<void> {
   await q.run(`DELETE FROM fts_items WHERE source_id = ?`, sourceId);
 }
 
-export async function search(raw: string, limit = 60, mode: "and" | "or" = "and"): Promise<SearchGroup[]> {
-  let rows: SearchHit[];
+/** Les résultats dans l'ordre de pertinence (bm25 pondéré par la récence), sans regroupement par type. */
+export async function rankedHits(raw: string, limit = 60, mode: "and" | "or" = "and"): Promise<SearchHit[]> {
   try {
     if (q.dialect === "postgres") {
       let terms = tokenize(raw, 2);
       if (mode === "or") terms = terms.filter((t) => t.length >= 3 && !STOP.has(t));
       if (!terms.length) return [];
       const tsq = toPgTsQuery(terms, mode, await vocab());
-      rows = await q.all<SearchHit>(PG_SEARCH_SQL, tsq, tsq, tsq, limit);
+      return await q.all<SearchHit>(PG_SEARCH_SQL, tsq, tsq, tsq, limit);
     } else {
       const ftsQuery = await toFtsQuery(raw, mode);
       if (!ftsQuery) return [];
       // exécuté à l'appel → lié à la connexion du cours courant (façade `q`)
-      rows = await q.all<SearchHit>(SEARCH_SQL, ftsQuery, limit);
+      return await q.all<SearchHit>(SEARCH_SQL, ftsQuery, limit);
     }
   } catch {
     return [];
   }
+}
+
+export async function search(raw: string, limit = 60, mode: "and" | "or" = "and"): Promise<SearchGroup[]> {
+  const rows = await rankedHits(raw, limit, mode);
   const byType = new Map<string, SearchHit[]>();
   for (const r of rows) {
     if (!byType.has(r.sourceType)) byType.set(r.sourceType, []);

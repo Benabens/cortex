@@ -56,8 +56,9 @@ export async function getComposition(): Promise<CompositionPlan> {
       totalPoints: null,
       qcm: plan.qcmCount,
       open: plan.openCount,
-      scq: plan.qcmCount,
-      mcq: 0,
+      // Réponses multiples déclarées ou lues dans les sources : des MCQ ; sinon (unique, ou mixte sans proportion connue) des SCQ.
+      scq: format.answerMode === "multiple" ? 0 : plan.qcmCount,
+      mcq: format.answerMode === "multiple" ? plan.qcmCount : 0,
     };
   }
   if (plan.generator === "qcm" && fmt) {

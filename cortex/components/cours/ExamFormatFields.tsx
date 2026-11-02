@@ -8,9 +8,11 @@
  * restent prioritaires.
  */
 
+import type { AnswerMode } from "@/lib/exam-format";
+
 export type ExamFormatDraft = { kind: string; questionCount: string; durationMin: string; language: string; answerMode: string };
 
-export type DeclaredFormatDto = { kind: string; questionCount: number | null; durationMin: number | null; language: string | null; answerMode?: string };
+export type DeclaredFormatDto = { kind: string; questionCount: number | null; durationMin: number | null; language: string | null; answerMode?: AnswerMode };
 
 export const EMPTY_FORMAT: ExamFormatDraft = { kind: "", questionCount: "", durationMin: "", language: "", answerMode: "" };
 
@@ -24,9 +26,9 @@ const KINDS: { value: string; label: string }[] = [
   { value: "oral", label: "Oral" },
 ];
 
-/** Réponse unique ou multiple (lib/exam-format, ANSWER_MODES) : sans précision, une seule. */
-const REPONSES: { value: string; label: string }[] = [
-  { value: "", label: "Non précisé (une seule)" },
+/** Réponse unique ou multiple (lib/exam-format, ANSWER_MODES) : sans précision, ce que disent les sources, sinon une seule. */
+const REPONSES: { value: "" | AnswerMode; label: string }[] = [
+  { value: "", label: "Non précisé : selon les sources, sinon une seule" },
   { value: "single", label: "Une seule bonne réponse" },
   { value: "multiple", label: "Une ou plusieurs bonnes réponses" },
   { value: "mixed", label: "Selon la question" },
@@ -60,7 +62,7 @@ export function formatPayload(d: ExamFormatDraft): DeclaredFormatDto | null {
   const n = (s: string) => (s.trim() ? Number(s) : null);
   return {
     kind: d.kind, questionCount: n(d.questionCount), durationMin: n(d.durationMin), language: d.language || null,
-    ...(hasChoices(d.kind) && d.answerMode ? { answerMode: d.answerMode } : {}),
+    ...(hasChoices(d.kind) && d.answerMode ? { answerMode: d.answerMode as AnswerMode } : {}),
   };
 }
 
@@ -75,7 +77,7 @@ export function ExamFormatFields({
 }) {
   const set = (k: keyof ExamFormatDraft) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     onChange({ ...value, [k]: e.target.value });
-  const counted = hasChoices(value.kind);
+  const choices = hasChoices(value.kind);
 
   return (
     <fieldset className="flex flex-col gap-3">
@@ -90,7 +92,7 @@ export function ExamFormatFields({
           </select>
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-[0.78rem] text-ink-3">{counted ? "Nombre de questions" : "Nombre d’exercices ou de sujets"}</span>
+          <span className="text-[0.78rem] text-ink-3">{choices ? "Nombre de questions" : "Nombre d’exercices ou de sujets"}</span>
           <input
             type="number"
             inputMode="numeric"
@@ -99,7 +101,7 @@ export function ExamFormatFields({
             value={value.questionCount}
             onChange={set("questionCount")}
             disabled={!value.kind}
-            placeholder={counted ? "20" : "4"}
+            placeholder={choices ? "20" : "4"}
             className={fieldClass}
           />
         </label>
@@ -125,7 +127,7 @@ export function ExamFormatFields({
             ))}
           </select>
         </label>
-        {counted && (
+        {choices && (
           <label className="flex flex-col gap-1.5">
             <span className="text-[0.78rem] text-ink-3">Bonnes réponses par question</span>
             <select value={value.answerMode} onChange={set("answerMode")} className={fieldClass}>

@@ -1,7 +1,7 @@
 import { currentCourse } from "@/db/client";
 import { q, nowStr } from "@/db/q";
 import { HARD_STOP_CODES, LlmError, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
-import { courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFormat, type AnswerMode } from "@/lib/exam-format";
+import { DEFAULT_ANSWER_MODE, courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFormat, type AnswerMode } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseTerms, coursePassages } from "@/lib/course-grounding";
@@ -97,20 +97,19 @@ const QCM_BATCH_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+/** Le type que le mode de réponse impose à chaque question (null : au choix, selon la convention du format). */
+const IMPOSED_TYPE: Record<AnswerMode, "scq" | "mcq" | null> = { single: "scq", multiple: "mcq", mixed: null };
+
 /**
- * Le schéma d'un lot pour un mode de réponse : en réponse unique (ou multiple), le type de
- * chaque question est imposé ; sans figure, figure_spec (objet libre) est retiré, ce qui le
- * rend exprimable en sortie structurée stricte.
+ * Le schéma d'un lot pour un mode de réponse : le type imposé, s'il y en a un ; sans figure,
+ * figure_spec (objet libre) est retiré, ce qui le rend exprimable en sortie structurée stricte.
  */
 function batchSchema(mode: AnswerMode, withFigures: boolean): object {
   const s = JSON.parse(JSON.stringify(QCM_BATCH_SCHEMA));
   const props = s.properties.items.items.properties;
-  if (mode === "single") {
-    props.type = { type: "string", enum: ["scq"], description: "scq : l'examen est à réponse unique." };
-    props.correct.description = "Indice 0-based de LA bonne réponse : exactement un.";
-  } else if (mode === "multiple") {
-    props.type = { type: "string", enum: ["mcq"], description: "mcq : l'examen est à réponses multiples." };
-  }
+  const imposed = IMPOSED_TYPE[mode];
+  if (imposed) props.type = { type: "string", enum: [imposed], description: imposed === "scq" ? "scq : l'examen est à réponse unique." : "mcq : l'examen est à réponses multiples." };
+  if (imposed === "scq") props.correct.description = "Indice 0-based de LA bonne réponse : exactement un.";
   if (!withFigures) delete props.figure_spec;
   return s;
 }
@@ -127,10 +126,10 @@ function answerModeRule(mode: AnswerMode): string {
  * Le type d'une question conçue, dans le mode de l'examen, ou null si elle n'y a pas sa place :
  * une question à plusieurs clés dans un examen à réponse unique est écartée (son sujet est comblé).
  */
-function typeInMode(correct: number[], declared: unknown, mode: AnswerMode): "scq" | "mcq" | null {
-  if (mode === "single") return correct.length === 1 ? "scq" : null;
-  if (mode === "multiple") return "mcq";
-  return correct.length > 1 || declared === "mcq" ? "mcq" : "scq";
+function typeInMode(correct: number[], modelType: unknown, mode: AnswerMode): "scq" | "mcq" | null {
+  const imposed = IMPOSED_TYPE[mode];
+  if (imposed === "scq") return correct.length === 1 ? "scq" : null;
+  return imposed ?? (correct.length > 1 || modelType === "mcq" ? "mcq" : "scq");
 }
 
 /** Un QCM exploitable : énoncé, au moins 2 options texte, clé(s) valide(s). Sinon écarté (et comblé). */
@@ -235,18 +234,34 @@ function citesOptionLetter(text: string): boolean {
     || /(?:^|\s)[A-H]\)\s/.test(text);
 }
 
-const RANK_FR = "premi(?:er|ère)s?|deuxi[eè]mes?|secondes?|troisi[eè]mes?|quatri[eè]mes?|cinqui[eè]mes?|(?:avant-)?derni(?:er|ère)s?";
+const RANK_FR = "premi(?:er|ère)s?|deuxi[eè]mes?|seconde?s?|troisi[eè]mes?|quatri[eè]mes?|cinqui[eè]mes?|sixi[eè]mes?|(?:avant-)?derni(?:er|ère)s?|\\d+\\s*(?:re|er|ère|ème|eme|e)s?";
 const NOUN_FR = "options?|réponses?|propositions?|affirmations?|choix|énoncés?";
-const RANK_EN = "first|second|third|fourth|fifth|last|penultimate";
+/** Jugement porté sur une option (« est fausse », « sont justes ») : ce qui sépare un renvoi d'une tournure du cours (« le premier est l'ancrage »). */
+const JUDGED_FR = "(?:est|sont|n['’]est|ne\\s+sont)\\s+(?:pas\\s+)?(?:fausses?|faux|justes?|correctes?|incorrectes?|exactes?|inexactes?|erronées?|vraies?|valides?|la\\s+bonne|les\\s+bonnes)";
+const CRITIQUE_FR = "confond(?:ent)?|invers(?:e|ent)|attribu(?:e|ent)|exagèr(?:e|ent)|sur-généralis(?:e|ent)|oubli(?:e|ent)|prétend(?:ent)?|déform(?:e|ent)";
+const RANK_EN = "first|second|third|fourth|fifth|sixth|last|penultimate|\\d+(?:st|nd|rd|th)";
 const NOUN_EN = "options?|answers?|choices?|statements?|alternatives?|propositions?";
-/** Rangs d'option : « la première option », « la troisième est fausse », « options two and four ». Pas « la première étude ». */
+const JUDGED_EN = "(?:is|are|isn['’]t|aren['’]t)\\s+(?:not\\s+)?(?:correct|incorrect|wrong|right|false|true|valid|invalid)";
+const CRITIQUE_EN = "confuses|reverses|inverts|attributes|misattributes|overstates|overgeneralizes";
+const BEFORE = "(?:^|[^\\p{L}])";
+/**
+ * Rangs d'option : « la première option », « la troisième est fausse », « la bonne réponse est la
+ * troisième », « the first and third options ». Pas les tournures du cours : « la première étude »,
+ * « le premier est l'ancrage », « la première proposition de Thaler », « la première réponse qui
+ * vient à l'esprit » (Système 1), « the choices one makes ».
+ */
 const RANK_PATTERNS = [
-  new RegExp(`(?:^|[^\\p{L}])(?:la|le|les|l['’])\\s*(?:deux\\s+|trois\\s+)?(?:${RANK_FR})\\s+(?:${NOUN_FR})(?![\\p{L}])`, "iu"),
-  new RegExp(`(?:^|[^\\p{L}])(?:la|le)\\s+(?:${RANK_FR})\\s+(?:est|n['’]est|sont|reste|affirme|confond|inverse|décrit|attribue|propose|correspond|oublie|exagère|prétend)(?![\\p{L}])`, "iu"),
-  new RegExp(`(?:^|[^\\p{L}])(?:${NOUN_FR})\\s*(?:n°|numéro)\\s*\\d`, "iu"),
-  new RegExp(`(?:^|[^\\p{L}])(?:${NOUN_FR})\\s+(?:une|deux|trois|quatre|cinq)(?:\\s+et|\\s*,|\\s+sont|\\s+est|[.;:]|$)`, "iu"),
-  new RegExp(`\\bthe\\s+(?:two\\s+)?(?:${RANK_EN})\\s+(?:one\\s+)?(?:${NOUN_EN}|is|isn['’]t|confuses|reverses|inverts|describes|states|attributes|claims)\\b`, "i"),
-  new RegExp(`\\b(?:${NOUN_EN})\\s+(?:one|two|three|four|five)\\b`, "i"),
+  new RegExp(`${BEFORE}(?:la|le|les|l['’])\\s*(?:deux\\s+|trois\\s+)?(?:${RANK_FR})\\s+(?:${NOUN_FR})(?![\\p{L}])(?!\\s+(?:de|du|des)\\s)(?!\\s+d['’])(?!\\s+qui\\s+(?:vien|surgi))(?!\\s+(?:spontanée|intuitive|instinctive|immédiate)s?)`, "iu"),
+  new RegExp(`${BEFORE}(?:la|le|les|l['’])\\s*(?:${RANK_FR})\\s+(?:des|d['’]entre\\s+les)\\s+(?:${NOUN_FR})`, "iu"),
+  new RegExp(`${BEFORE}(?:la|le|les)\\s+(?:deux\\s+|trois\\s+)?(?:${RANK_FR})\\s+(?:${JUDGED_FR}|${CRITIQUE_FR})(?![\\p{L}])`, "iu"),
+  new RegExp(`${BEFORE}(?:est|sont)\\s+(?:la|le|les)\\s+(?:deux\\s+)?(?:${RANK_FR})\\s*(?:[.,;:)!]|$|\\s+et\\s)`, "iu"),
+  new RegExp(`(?:^|[.;:!?]\\s+)(?:la|le|les)\\s+(?:deux\\s+)?(?:${RANK_FR})\\s*,[^.]{0,160}?${JUDGED_FR}`, "iu"),
+  new RegExp(`${BEFORE}(?:${NOUN_FR})\\s*(?:n°|numéro)\\s*\\d`, "iu"),
+  new RegExp(`${BEFORE}(?:options?|réponses?|propositions?)\\s+(?:une|deux|trois|quatre|cinq)(?:\\s+et|\\s*,|\\s+sont|\\s+est|[.;:]|$)`, "iu"),
+  new RegExp(`\\bthe\\s+(?:two\\s+)?(?:${RANK_EN})(?:\\s*(?:,|and)\\s*(?:the\\s+)?(?:${RANK_EN}))*\\s+(?:${NOUN_EN})\\b`, "i"),
+  new RegExp(`\\bthe\\s+(?:${RANK_EN})\\s+(?:one\\s+)?(?:${JUDGED_EN}|${CRITIQUE_EN})\\b`, "i"),
+  new RegExp(`\\b(?:is|are)\\s+the\\s+(?:${RANK_EN})(?:\\s+one)?\\s*(?:[.,;:)!]|$)`, "i"),
+  new RegExp(`\\b(?:options?|answers?|choices?)\\s+(?:one|two|three|four|five)(?:\\s+and|\\s*,|\\s+(?:is|are)\\b|[.;:]|$)`, "i"),
 ];
 
 /** Une option désignée par son RANG (« la première option ») : le mélange des options le change. */
@@ -387,10 +402,12 @@ export async function generateQcmBatch(
     studentFocus?: string;
     /** Mode de réponse de l'examen ; absent → celui du format du cours, sinon réponse unique. */
     answerMode?: AnswerMode;
+    /** Résumé du format RÉSOLU (lib/exam-format), cohérent avec le mode ; absent → celui de la détection. */
+    formatSummary?: string;
   } = {}
 ): Promise<QcmItem[]> {
   const fmt = await getFormatProfile();
-  const mode = opts.answerMode ?? (await resolveExamFormat().catch(() => null))?.answerMode ?? "single";
+  const mode = opts.answerMode ?? (await resolveExamFormat().catch(() => null))?.answerMode ?? DEFAULT_ANSWER_MODE;
   const imgs = courseRefImages().slice(0, 4);
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { profile } = require("@/lib/course-profile") as typeof import("@/lib/course-profile");
@@ -429,7 +446,9 @@ export async function generateQcmBatch(
   const system = [
     profile().qaIntro?.() ?? "Tu es l'équipe enseignante du cours.",
     `Tu rédiges des QCM INÉDITS de niveau examen pour ce cours, au FORMAT réel détecté.`,
-    fmt ? `Format du cours : ${fmt.format_summary} — convention SCQ/MCQ : ${fmt.scq_vs_mcq_convention}.` : ``,
+    // La convention SCQ/MCQ des sources ne sert qu'en mode mixte : sinon le mode de l'examen la
+    // remplace (un mode déclaré peut contredire une source qui dit « une seule réponse correcte »).
+    fmt || opts.formatSummary ? `Format du cours : ${opts.formatSummary ?? fmt?.format_summary}${mode === "mixed" && fmt ? ` — convention SCQ/MCQ : ${fmt.scq_vs_mcq_convention}` : ""}.` : ``,
     imgs.length ? `Pages d'examens réelles à imiter (outil Read) :\n${imgs.map((p) => `  - ${p}`).join("\n")}` : ``,
     ``,
     ...ARCHITECT_QCM_RULES,
@@ -574,13 +593,6 @@ const VERIFY_SCHEMA = {
  *  Les questions à FIGURE sont re-résolues DEPUIS la figure (vision : le solveur
  *  ouvre le PNG rendu) ; sans quoi une question de lecture de figure serait jugée au hasard. */
 export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<QcmItem[]> {
-  const blind = items.map((q, i) =>
-    `Q${i}. [${q.type}]${q.figureFile ? ` [FIGURE : ouvre ${path.join(path.relative(process.cwd(), examsDir()), q.figureFile)} avec l'outil Read]` : ""} ${q.stem}\n${q.options.map((o, k) => `   (${k}) ${o}`).join("\n")}`
-  ).join("\n\n");
-  const figDirs = items.some((q) => q.figureFile) ? [examsDir()] : [];
-  // la mémoire de calibration des QCM est aussi réinjectée à la CRITIQUE : un « trop facile »
-  // passé rend la vérif plus sévère sur la trivialité/les indices qui trahissent.
-  const calib = await calibrationBlock("qcm");
   /** Rejette l'item (jamais gardé tel quel) ; `advice` guide sa régénération. */
   const reject = (q: QcmItem, reason: string, advice: string) => {
     q.verified = 0;
@@ -593,10 +605,20 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   for (const q of items) {
     if (citesOptionLabel(q.explanation ?? "")) reject(q, "explication qui désigne une option par sa position ou sa lettre", "désigne chaque option par son contenu dans l'explication, jamais par son rang (« la première ») ni sa lettre");
   }
+  // Le correcteur ne voit que les questions encore en lice, sous leur numéro dans le lot.
+  const judged = items.filter((q) => !q.rejected);
+  if (!judged.length) return items;
+  const blind = items.map((q, i) => (q.rejected ? null :
+    `Q${i}. [${q.type}]${q.figureFile ? ` [FIGURE : ouvre ${path.join(path.relative(process.cwd(), examsDir()), q.figureFile)} avec l'outil Read]` : ""} ${q.stem}\n${q.options.map((o, k) => `   (${k}) ${o}`).join("\n")}`
+  )).filter(Boolean).join("\n\n");
+  const figDirs = judged.some((q) => q.figureFile) ? [examsDir()] : [];
+  // la mémoire de calibration des QCM est aussi réinjectée à la CRITIQUE : un « trop facile »
+  // passé rend la vérif plus sévère sur la trivialité/les indices qui trahissent.
+  const calib = await calibrationBlock("qcm");
   // DÉFINITIONS DU COURS : le juge résout et contrôle avec celles du cours, pas celles du web.
   // Autour du fait que teste chaque question, en fenêtres larges (banc HUM-285 du 02/11 : deux
   // extraits de 700 caractères par sujet, et 22 à 27 questions justes rejetées « hors cours »).
-  const passages = await verifierPassages(items).catch(() => []);
+  const passages = await verifierPassages(judged).catch(() => []);
   // Cache de prompt (M) : consignes et schéma stables dans le système, lots et extraits à part.
   const system = [
     `Tu es un correcteur rigoureux du cours. Pour CHAQUE QCM fourni, RÉSOUS-LE toi-même de zéro (sans clé fournie) et donne la/les bonne(s) réponse(s) par INDEX.`,
@@ -655,7 +677,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     if (flagged || mismatch) {
       const terms = Array.isArray(r.off_course_terms) ? r.off_course_terms.filter((t): t is string => typeof t === "string" && !!t.trim()) : [];
       const reason = [flagged, mismatch ? `définition différente du cours : ${mismatch}` : ""].filter(Boolean).join(" ; ");
-      appeals.push({ q, flag: { ...q, flag: reason, terms } });
+      appeals.push({ q, flag: { ...q, reason, terms } });
     }
     // Une question sur l'évaluation du cours (grille, consignes, forme d'un rendu) ne teste pas sa matière.
     const offMatter = typeof r.off_matter === "string" && !NO_FLAG.test(r.off_matter.trim()) ? r.off_matter.trim().slice(0, 240) : "";
@@ -692,11 +714,11 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   // Second regard sur les questions jugées hors cours (et pas déjà rejetées pour une autre raison).
   const pending = appeals.filter((a) => !a.q.rejected);
   if (pending.length) {
-    const verdicts = await secondLookOffCourse(pending.map((a) => a.flag)).catch(() => null);
+    const verdicts = await secondLookOffCourse(pending.map((a) => a.flag));
     pending.forEach((a, i) => {
-      const confirmed = verdicts ? verdicts[i] : a.flag.flag;
+      const confirmed = verdicts[i];
       if (confirmed && !NO_FLAG.test(confirmed)) reject(a.q, `hors cours : ${confirmed.slice(0, 240)}`, offCourseAdvice);
-      else step(`QCM gardé — jugé hors cours sur les extraits, mais trouvé dans le cours (${a.flag.flag.slice(0, 100)})`, 70);
+      else step(`QCM gardé — jugé hors cours sur les extraits, mais trouvé dans le cours (${a.flag.reason.slice(0, 100)})`, 70);
     });
   }
   return items;
@@ -862,7 +884,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     studentFocus: focus,
     examples: withAnnales ? [] : await officialExamples().catch(() => []),
     // Avec annales, leur forme ; sinon le mode déclaré ou lu dans les sources, à défaut la réponse unique.
-    answerMode: format?.answerMode ?? "single",
+    answerMode: format?.answerMode ?? DEFAULT_ANSWER_MODE,
+    formatSummary: format?.summary,
   };
   step(`Architecte : ${count} QCM + ${openCount} ouverte(s)${focus ? ` (accent : « ${focus} »)` : ""}${dna ? ` · moules ADN (${dna.molds.length})` : " au format détecté"}…`, 8);
 
@@ -1121,9 +1144,10 @@ export function shownExplanation(raw: string | null | undefined): string {
   if (LEGACY_KEY_NOTE.test(text)) {
     return "Explication retirée : la vérification avait relevé un problème sur cette question, et l'explication d'origine peut ne pas justifier la réponse retenue.";
   }
-  // Avant le 03/11/2026, une explication par RANG (« la première option ») n'était pas repérée et
-  // les options étaient mélangées : elle désigne une autre option que celle qu'elle nomme. Une
-  // explication par lettre, elle, gardait ses options dans l'ordre.
+  // Une explication par RANG (« la première option ») ne peut venir que d'avant ce contrôle : elle
+  // n'était pas repérée et ses options ont été mélangées, elle désigne donc une autre option que
+  // celle qu'elle nomme (la vérification la rejette désormais). Par lettre, les options restaient
+  // dans l'ordre.
   if (citesOptionRank(text) && !citesOptionLetter(text)) {
     return "Explication retirée : elle désignait les options par leur position, que le mélange des options a changée.";
   }
