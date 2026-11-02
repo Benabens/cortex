@@ -62,6 +62,8 @@ async function seedUser(id: string, email: string, course: string) {
   await authRun(`INSERT INTO llm_usage (user_id, course, provider, model, tokens_in, tokens_out, cost_usd, created_at) VALUES (?,?,?,?,?,?,?,?)`, id, course, "anthropic", "claude-sonnet-5", 1000, 500, 0.7, "2026-01-01 00:00:00");
   // Tables de facturation/réservation ajoutées par le durcissement : elles portent aussi l'identité.
   await authRun(`INSERT INTO active_jobs (user_id, course, job_ref, created_at) VALUES (?,?,?,?)`, id, course, `job:${id}:${course}:x`, "2026-01-01 00:00:00");
+  // Signalement de question (boucle de relecture) : son commentaire est du texte de l'utilisateur.
+  await authRun(`INSERT INTO question_reports (user_id, course, exam_id, kind, item_id, reason, comment, stem, status, refunded_centi, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, id, course, 1, "qcm", 1, "ambiguous", "commentaire perso", "Q ?", "open", 0, "2026-01-01 00:00:00");
   await authRun(`INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, created_at) VALUES (?,?,?,?,?)`, `cs_${id}`, `pi_${id}`, id, 1000, "2026-01-01 00:00:00");
   await authRun(`INSERT INTO subscriptions (user_id, customer_id, subscription_id, status, plan, monthly_credits, remaining, period_end, month_anchor, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`, id, `cus_${id}`, `sub_${id}`, "active", "cortex_pro_monthly", 2000, 1500, "2099-01-01 00:00:00", "2026-01", "2026-01-01 00:00:00");
   await authRun(`INSERT INTO stripe_invoices (invoice_id, subscription_id, customer_id, payment_intent, user_id, granted_centi, period_end, created_at) VALUES (?,?,?,?,?,?,?,?)`, `in_${id}`, `sub_${id}`, `cus_${id}`, `pi_in_${id}`, id, 2000, "2099-01-01 00:00:00", "2026-01-01 00:00:00");
@@ -105,6 +107,7 @@ test("supprimer A efface TOUT le sien (lignes, schéma, fichiers) et ne touche R
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM credit_transactions WHERE user_id = ?`, "alice"))!.n, 0);
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM tenants WHERE user_id = ?`, "alice"))!.n, 0);
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM active_jobs WHERE user_id = ?`, "alice"))!.n, 0, "places de jobs effacées");
+  assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM question_reports WHERE user_id = ?`, "alice"))!.n, 0, "signalements effacés");
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM stripe_purchases WHERE user_id = ?`, "alice"))!.n, 0, "achats Stripe détachés du compte");
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM subscriptions WHERE user_id = ?`, "alice"))!.n, 0, "abonnement effacé");
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM stripe_invoices WHERE user_id = ?`, "alice"))!.n, 0, "factures d'abonnement détachées");
