@@ -432,6 +432,9 @@ export async function generateQcmBatch(
   return items;
 }
 
+/** Réponses du juge qui ne signalent rien. */
+const NO_FLAG = /^(?:|[-—.…]+|none\.?|no|nothing|n\/?a|null|aucune?\.?|rien\.?|néant|non|ras|ok)$/i;
+
 const VERIFY_SCHEMA = {
   type: "object",
   properties: {
@@ -473,7 +476,9 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   const passages = await coursePassages([...new Set(items.map((q) => q.topic).filter(Boolean))], 2, 700).catch(() => []);
   const prompt = [
     `Tu es un correcteur rigoureux du cours. Pour CHAQUE QCM ci-dessous, RÉSOUS-LE toi-même de zéro (sans clé fournie) et donne la/les bonne(s) réponse(s) par INDEX.`,
-    `Résous et juge avec les DÉFINITIONS DU COURS (extraits ci-dessous), jamais avec celles d'une autre source. course_terms : les notions dont dépend la bonne réponse, écrites comme dans le cours. off_course : toute notion de la question absente du cours, ou que le cours définit autrement.`,
+    passages.length
+      ? `Résous et juge avec les DÉFINITIONS DU COURS (extraits ci-dessous), jamais avec celles d'une autre source. course_terms : les notions dont dépend la bonne réponse, écrites comme dans le cours. off_course : toute notion de la question absente des extraits, ou que le cours définit autrement (vide sinon).`
+      : `course_terms : les notions nommées dont dépend la bonne réponse. off_course : laisse vide (aucun extrait du cours fourni ici).`,
     `Signale si : la question est ambiguë (2 réponses défendables), un distracteur est absurde, ou un indice trahit la bonne réponse (longueur, « toutes les réponses », grammaire).`,
     `Note aussi son POUVOIR DISCRIMINANT (discrimination, 1 à 5) : mets-toi à la place d'un étudiant qui ne connaît que les noms des notions du cours — pas leurs conditions, pas les résultats des études. S'il la réussit (ou élimine assez d'options pour la deviner), discrimination ≤ 2 et name_only = true.`,
     figDirs.length ? `Certaines questions ont une FIGURE : OUVRE le PNG indiqué (outil Read) et résous DEPUIS la figure. Si la figure ne suffit pas à répondre, mets ok=false avec issue="figure insuffisante".` : null,
@@ -503,7 +508,10 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     const q = items[r.index];
     if (!q) continue;
     const missing = termsOf(r).filter((t) => absent.has(normalize(t.trim())));
-    const off = [missing.length ? `absent du cours : ${missing.join(", ")}` : "", typeof r.off_course === "string" ? r.off_course.trim() : ""].filter(Boolean).join(" ; ");
+    // Un signalement du juge ne compte que s'il a VU des extraits et qu'il nomme quelque chose
+    // (« None », « Aucune », « N/A » ne rejettent rien) : jamais de rejet faute de pouvoir vérifier.
+    const flagged = passages.length && typeof r.off_course === "string" && !NO_FLAG.test(r.off_course.trim()) ? r.off_course.trim() : "";
+    const off = [missing.length ? `absent du cours : ${missing.join(", ")}` : "", flagged].filter(Boolean).join(" ; ");
     if (off) {
       q.verified = 0;
       q.offCourse = off.slice(0, 240);

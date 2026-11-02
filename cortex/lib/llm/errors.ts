@@ -30,7 +30,7 @@ export function llmFailureReason(e: unknown): string {
     return "le fournisseur d'IA est surchargé ou injoignable en ce moment, malgré plusieurs essais espacés. Réessaie dans quelques minutes.";
   }
   if (code === "TIMEOUT") return "le modèle a mis trop de temps à répondre. Réessaie dans quelques minutes.";
-  if (code && BAD_OUTPUT_CODES.has(code)) return "le modèle a renvoyé une réponse illisible malgré plusieurs essais. Réessaie ; si ça se reproduit sur ce cours, signale-le.";
+  if (code && BAD_OUTPUT_CODES.has(code)) return "le modèle a renvoyé une réponse illisible ou inutilisable malgré plusieurs essais. Réessaie ; si ça se reproduit sur ce cours, signale-le.";
   if (code === "REFUSAL") return "le modèle a refusé de traiter cette demande.";
   if (code === "ABORTED") return "la génération a été annulée.";
   return "erreur inattendue du moteur d'IA. Réessaie dans un instant.";

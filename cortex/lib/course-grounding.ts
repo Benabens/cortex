@@ -25,19 +25,29 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Racine tolérante d'un mot : « stereotypes », « stereotype », « stereotyping » → « stereotyp ». */
+/**
+ * Racine tolérante d'un mot, comparée en PRÉFIXE : « stereotypes » → « stereoty »,
+ * « matrices » → « matri » (matrix), « criteria » → « crite » (criterion), « LLMs » →
+ * « llm ». Volontairement large : un faux rejet coûte une question juste, un faux
+ * accueil n'est qu'un filet en moins (le juge voit aussi les extraits).
+ */
 function stem(word: string): string {
-  return word.length > 4 ? word.replace(/(ies|es|s|e)$/, "") : word;
+  if (word.length >= 6) return word.slice(0, Math.max(4, word.length - 3));
+  return word.length >= 3 ? word.replace(/s$/, "") : word;
 }
 
-/** Motifs d'un terme dans un texte normalisé : mots dans l'ordre, séparés d'espaces ou de tirets ; mots accolés aussi. */
+/**
+ * Motifs d'un terme dans un texte TOKENISÉ (mots séparés d'une espace, ponctuation
+ * retirée : élisions « d'ancrage », apostrophes « Simpson's », parenthèses) : mots dans
+ * l'ordre ; mots accolés aussi (« group think » / « groupthink »).
+ */
 function termPatterns(term: string): RegExp[] {
   const words = tokenize(term, 1);
   if (!words.length) return [];
   const word = (w: string) => `${escapeRe(stem(w))}\\p{L}*`;
-  const start = "(?<![\\p{L}\\p{N}])";
-  const out = [new RegExp(`${start}${words.map(word).join("[\\s\\-_/]{0,3}")}`, "u")];
-  if (words.length > 1) out.push(new RegExp(`${start}${word(words.join(""))}`, "u"));
+  const start = "(?:^| )";
+  const out = [new RegExp(`${start}${words.map(word).join(" ")}(?= |$)`, "u")];
+  if (words.length > 1) out.push(new RegExp(`${start}${word(words.join(""))}(?= |$)`, "u"));
   return out;
 }
 
@@ -51,7 +61,7 @@ async function corpusTexts(): Promise<string[] | null> {
     if (!r.text) continue;
     total += r.text.length;
     if (total > MAX_CORPUS_CHARS) return null;
-    texts.push(normalize(r.text).replace(/\s+/g, " "));
+    texts.push(tokenize(r.text, 1).join(" "));
   }
   return texts.length ? texts : null;
 }
