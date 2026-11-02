@@ -870,33 +870,43 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
   // NOMBRE GARANTI : les exercices manquants (lot échoué, question perdue, retirée à la
   // vérification) sont relancés UNE fois en un lot, sauf si la cause est une garde. Ils
   // s'ajoutent en fin d'examen avec leur propre rapport de vérification.
+  // Slots manquants d'un lot = ses slots MOINS les questions qui en restent, appariés par
+  // catégorie et barème (une question retirée à la vérification laisse SON slot, pas le
+  // dernier du lot) ; ceux que la génération a perdus d'abord, puis les autres.
   const redo: Slot[] = [];
   settled.forEach((s, i) => {
-    const lack = batches[i].length - s.questions.length;
-    if (lack <= 0) return;
-    const known = (missingByLot[i] ?? []).slice(0, lack);
-    redo.push(...known, ...batches[i].slice(batches[i].length - (lack - known.length)));
+    const left = new Map<string, number>();
+    for (const q of s.questions) left.set(`${q.category}|${q.points}`, (left.get(`${q.category}|${q.points}`) ?? 0) + 1);
+    const known = new Set(missingByLot[i] ?? []);
+    for (const slot of [...batches[i].filter((x) => known.has(x)), ...batches[i].filter((x) => !known.has(x))]) {
+      const key = `${slot.category}|${slot.points}`;
+      const n = left.get(key) ?? 0;
+      if (n > 0) left.set(key, n - 1);
+      else redo.push(slot);
+    }
   });
   const stop = llmErrorCode(lastError);
   if (redo.length && !(stop && HARD_STOP_CODES.has(stop))) {
     step(`${redo.length} exercice(s) manquant(s) → nouvel essai`, 80);
-    try {
-      const extra = (await generateBatch(ctx, redo)).filter(Boolean);
-      if (extra.length) {
+    // Lots de la taille habituelle (les petits lots évitent les timeouts), en parallèle.
+    await Promise.all(chunk(redo, BATCH).map(async (lot, k) => {
+      try {
+        const extra = (await generateBatch(ctx, lot)).filter(Boolean);
+        if (!extra.length) return;
         let report: VerifyReport | null = null;
         let questions = extra;
         if (doVerify) {
           try {
-            const v = await verifyAndHarden({ title: "", questions: extra }, regenerateExercise, 2, (m) => step(`Comblement · ${m}`, 0));
+            const v = await verifyAndHarden({ title: "", questions: extra }, regenerateExercise, 2, (m) => step(`Comblement ${k + 1} · ${m}`, 0));
             questions = v.spec.questions;
             report = v.report as VerifyReport | null;
-          } catch (e) { step(`Comblement — vérif interrompue : ${(e as Error).message}`, 0); }
+          } catch (e) { step(`Comblement ${k + 1} — vérif interrompue : ${(e as Error).message}`, 0); }
         }
         settled.push({ questions, report });
+      } catch (e) {
+        step(`Comblement ${k + 1} échoué (${(e as Error).message.slice(0, 80)})`, 0);
       }
-    } catch (e) {
-      step(`Comblement échoué (${(e as Error).message.slice(0, 80)})`, 0);
-    }
+    }));
   }
 
   const c = getCourse(currentCourse());
