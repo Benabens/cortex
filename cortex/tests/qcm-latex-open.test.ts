@@ -164,3 +164,22 @@ test("J — un examen QCM sans PDF reste ouvrable en ligne, et se recompile sans
   assert.deepEqual(await runWithCourse("ml", () => recompileMissingQcmPdfs()), [], "plus rien à rattraper");
 });
 
+
+test("J × #54 — le corrigé recompilé ne ressort pas une explication à note de clé périmée", async (t) => {
+  const { texAvailable } = await import("../lib/exam-latex");
+  if (!texAvailable()) return t.skip("tectonic/pdflatex absent");
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { getQcmExam, recompileQcmPdf } = await import("../lib/qcm");
+  const { examsDir } = await import("../lib/paths");
+  const tex = await runWithCourse("ml", async () => {
+    await getQcmExam(0);
+    const id = await q.insert(`INSERT INTO exams (format_template, status, html_path) VALUES ('qcm','ready','')`);
+    await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      id, 0, "Fairness", "scq", "Which metric compares error rates?", JSON.stringify(["Equalized odds", "Demographic parity"]), "[0]", "[]", "Demographic parity compares rates. [clé corrigée à la vérif : la clé était B]", 1);
+    await recompileQcmPdf(id);
+    return fs.readFileSync(path.join(examsDir(), `qcm-${id}-corrige.tex`), "utf8");
+  });
+  assert.ok(!/clé corrigée à la vérif/.test(tex), "note périmée absente du corrigé");
+  assert.match(tex, /Explication retirée/);
+});

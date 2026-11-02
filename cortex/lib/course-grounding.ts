@@ -18,6 +18,17 @@ import { normalize, tokenize } from "@/lib/text";
 export const COURSE_TERMS_RULE =
   `  - NOTIONS DU COURS SEULEMENT : toute notion nommée (dans la bonne réponse, les distracteurs, l'explication ou le corrigé) doit figurer dans les extraits ou les supports du cours, avec LA DÉFINITION DU COURS — jamais celle d'une autre source, ni plus étroite (une condition ajoutée), ni plus large (une condition oubliée) ; ne confonds jamais deux notions voisines du cours. N'introduis aucune notion que le cours ne présente pas (un biais, une métrique, une catégorie, une théorie), même plausible.`;
 
+/**
+ * La matière, pas l'évaluation : une grille d'évaluation, des consignes d'examen ou le
+ * guide d'un poster disent COMMENT le cours est évalué, pas CE qu'il enseigne (HUM-285,
+ * 02/11 : ~6 questions sur la grille D1/D2/D3 de l'essai et la bibliographie du poster) ; le plan
+ * d'un support (« quelle place les biais occupent-ils dans le plan annoncé ? », banc du 02/11) ne
+ * l'enseigne pas davantage.
+ * Commune à l'extraction des notions et à la conception des questions.
+ */
+export const COURSE_MATTER_RULE =
+  `  - MATIÈRE DU COURS SEULEMENT : aucune question ni notion sur les modalités d'examen (format, durée, barème, grille ou critères d'évaluation, consignes) ni sur la forme d'un rendu (poster, essai, rapport, mise en forme d'une bibliographie), ni sur l'organisation du cours (plan, ordre des chapitres, ce qu'annonce une diapositive) : teste ce que le cours enseigne, pas comment il est évalué ou découpé.`;
+
 /** Au-delà, le corpus n'est pas chargé en mémoire : sans vérification possible, rien n'est rejeté. */
 const MAX_CORPUS_CHARS = 30_000_000;
 
@@ -51,10 +62,16 @@ function termPatterns(term: string): RegExp[] {
   return out;
 }
 
-/** Textes normalisés du corpus du cours courant, ou null s'il est vide ou trop gros pour être vérifié. */
+/**
+ * Textes normalisés du corpus du cours courant, ou null s'il est vide ou trop gros pour être vérifié.
+ * Sans les consignes d'examen (exam_info) : une grille d'évaluation dit comment le cours est noté,
+ * ses termes (« lien conceptuel SHS », D1 de HUM-285) ne sont pas des notions du cours.
+ */
 async function corpusTexts(): Promise<string[] | null> {
   let rows: { text: string | null }[] = [];
-  try { rows = await q.all<{ text: string | null }>(`SELECT text FROM items`); } catch { return null; }
+  try {
+    rows = await q.all<{ text: string | null }>(`SELECT i.text FROM items i LEFT JOIN sources s ON s.id = i.source_id WHERE s.type IS NULL OR s.type <> 'exam_info'`);
+  } catch { return null; }
   let total = 0;
   const texts: string[] = [];
   for (const r of rows) {

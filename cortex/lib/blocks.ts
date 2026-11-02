@@ -1,7 +1,7 @@
 import { currentCourse } from "@/db/client";
 import { nowStr, q } from "@/db/q";
 import { getCourse } from "@/lib/courses";
-import { COURSE_TERMS_RULE, coursePassages } from "@/lib/course-grounding";
+import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, coursePassages } from "@/lib/course-grounding";
 import { assignChapters, spreadOverChapters } from "@/lib/coverage";
 import type { StepCb } from "@/lib/exam";
 import { examLanguageFor, type BlockFormat } from "@/lib/exam-format";
@@ -281,6 +281,7 @@ function systemPrompt(plan: BlockPlan, n: number, counterExamples: string): stri
     `  - "code_output" — lecture de code : "code" = un extrait Python AUTONOME et court (bibliothèque standard ; pandas seulement si le cours l'emploie ; ni fichier, ni réseau, ni hasard, ni horloge), "prompt" demande ce qu'il affiche, "answer" = sa sortie EXACTE, ligne pour ligne. Jamais d'écriture de code.`,
     `  - Chaque sous-question se répond seule à partir du scénario : aucune ne dépend de la réponse d'une autre, aucune ne donne la réponse d'une autre.`,
     COURSE_TERMS_RULE,
+    COURSE_MATTER_RULE,
     `  - Barème : 1 point par choix unique, 1 à 3 points par réponse courte, 1 à 2 points par lecture de code${perBlock ? ` ; environ ${perBlock} points pour la question entière` : ""}.`,
     `Langue de l'examen : ${language} (énoncés, options, réponses et critères).`,
     counterExamples,

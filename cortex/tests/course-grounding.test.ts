@@ -59,3 +59,21 @@ test("cours sans corpus : rien à vérifier, rien n'est rejeté", async () => {
     assert.deepEqual(await absentCourseTerms(["status quo bias"]), []);
   });
 });
+
+test("un terme qui n'apparaît que dans les consignes d'examen (grille d'évaluation) n'est pas un terme du cours", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { absentCourseTerms } = await import("../lib/course-grounding");
+  await runWithCourse("ml", async () => {
+    for (const t of ["sources", "items"]) await q.ensureTable(t);
+    // HUM-285, 02/11 : la grille de l'essai (exam_info) nommait D1 « lien conceptuel SHS ».
+    const add = async (type: string, title: string, text: string) => {
+      const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, type, title, `${type}/${title}`, null, 1);
+      await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, type, title, text);
+    };
+    await add("exam_info", "Grille d'évaluation de l'essai", "D1 Lien conceptuel SHS : l'essai mobilise un concept du cours. D2 Vocabulaire conceptuel précis.");
+    await add("sample_questions", "Questions d'exemple", "Lequel de ces énoncés décrit le mieux un nudge numérique ?");
+    assert.deepEqual(await absentCourseTerms(["lien conceptuel SHS", "vocabulaire conceptuel"]), ["lien conceptuel SHS", "vocabulaire conceptuel"]);
+    assert.deepEqual(await absentCourseTerms(["nudge numérique", "groupthink"]), [], "les questions d'exemple de l'enseignant restent du cours");
+  });
+});
