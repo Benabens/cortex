@@ -777,6 +777,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const dateLabel = nowStr().slice(0, 10);
     const out = await buildQcmArtifact(examId, { items: all, open: openQs }, dateLabel);
     pdf = out.file; texError = out.texError;
+    if (out.texWarning) step(`⚠ ${out.texWarning}`, 96);
     await q.run(`UPDATE exams SET html_path = ? WHERE id = ?`, out.file, examId);
   } catch (e) { texError = (e as Error).message; }
 
