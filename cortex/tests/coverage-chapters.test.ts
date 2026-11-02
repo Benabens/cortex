@@ -39,6 +39,13 @@ test("répartition : au moins une question par chapitre, le surplus au prorata d
   assert.equal(new Set(three.map((x) => x.chapter)).size, 3, "moins de questions que de chapitres : un chapitre chacune");
   const twelve = spreadOverChapters(topics, 12)!;
   assert.ok(twelve.some((x) => x.repeat), "au-delà des sujets d'un chapitre, la reprise est marquée");
+  // Variantes d'une même notion (trois préparations successives sur CS-290) : pas deux à la suite.
+  const variants = [
+    t("Sensitive / proxy / latent attributes", "F1", 11), t("Proxy attribute / latent attributes", "F1", 10.9),
+    t("Simpson's paradox", "F1", 9), t("Keyword filtering", "S1", 5),
+  ];
+  const picked = spreadOverChapters(variants, 3)!.filter((x) => x.chapter === "F1").map((x) => x.label);
+  assert.deepEqual(picked, ["Sensitive / proxy / latent attributes", "Simpson's paradox"], "une variante cède la place à une autre notion");
   assert.equal(spreadOverChapters([t("a", null, 1), t("b", null, 1)], 4), null, "sans chapitres : rien à répartir");
   assert.equal(spreadOverChapters([t("a", "X", 1), t("b", "X", 1)], 4), null, "un seul chapitre : rien à répartir");
 });

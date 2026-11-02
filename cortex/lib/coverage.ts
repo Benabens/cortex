@@ -20,6 +20,24 @@ export type CoverageTopic = { label: string; method: string | null; weight: numb
 
 const UNCLASSIFIED = "(non classé)";
 
+/** Deux libellés sont des variantes d'une même notion s'ils partagent la moitié de leurs mots. */
+function variants(a: string, b: string): boolean {
+  const x = new Set(tokenize(a, 3));
+  const y = new Set(tokenize(b, 3));
+  const inter = [...x].filter((w) => y.has(w)).length;
+  const union = new Set([...x, ...y]).size;
+  return union > 0 && inter / union >= 0.5;
+}
+
+/** Notions d'un chapitre par poids, les variantes d'une notion déjà prise renvoyées en fin de liste. */
+function diverse(topics: CoverageTopic[]): CoverageTopic[] {
+  const byWeight = [...topics].sort((a, b) => b.weight - a.weight);
+  const first: CoverageTopic[] = [];
+  const later: CoverageTopic[] = [];
+  for (const t of byWeight) (first.some((f) => variants(f.label, t.label)) ? later : first).push(t);
+  return [...first, ...later];
+}
+
 /**
  * n sujets répartis sur les chapitres : un par chapitre (les plus lourds
  * d'abord s'il y a moins de questions que de chapitres), le surplus au prorata
@@ -38,7 +56,7 @@ export function spreadOverChapters(topics: CoverageTopic[], n: number): Coverage
   if ([...groups.keys()].filter((k) => k !== UNCLASSIFIED).length < 2) return null;
   const chapters = [...groups.entries()].map(([name, ts]) => ({
     name,
-    topics: [...ts].sort((a, b) => b.weight - a.weight),
+    topics: diverse(ts),
     weight: ts.reduce((s, t) => s + Math.max(0, t.weight), 0) || ts.length,
   })).sort((a, b) => b.weight - a.weight);
 
@@ -81,7 +99,7 @@ export async function assignChapters(topics: { label: string; method: string | n
   try {
     const exam = new Set<string>(EXAM_SOURCE_TYPES);
     const rows = await q.all<{ title: string; type: string; text: string | null }>(
-      `SELECT s.title, s.type, i.text FROM items i JOIN sources s ON s.id = i.source_id`,
+      `SELECT s.title, s.type, i.text FROM items i JOIN sources s ON s.id = i.source_id ORDER BY s.id, i.id`,
     );
     const bySource = new Map<string, Set<string>>();
     for (const r of rows) {
@@ -98,11 +116,13 @@ export async function assignChapters(topics: { label: string; method: string | n
     const words = new Map<string, number>();
     for (const tok of tokenize(t.method ?? "", 4)) words.set(tok, 1);
     for (const tok of tokenize(t.label, 4)) words.set(tok, 2);
-    let best: { title: string; score: number } | null = null;
+    let best: { title: string; score: number; size: number } | null = null;
     for (const d of docs) {
       let score = 0;
       for (const [tok, w] of words) if (d.tokens.has(tok)) score += w / df(tok);
-      if (score > 0 && (!best || score > best.score)) best = { title: d.title, score };
+      // À égalité, le support le plus SPÉCIFIQUE (le moins de mots) : un polycopié qui contient
+      // tout ne doit pas absorber les notions de chaque chapitre.
+      if (score > 0 && (!best || score > best.score || (score === best.score && d.tokens.size < best.size))) best = { title: d.title, score, size: d.tokens.size };
     }
     return { label: t.label, method: t.method, weight: t.weight, chapter: best?.title ?? null };
   });
