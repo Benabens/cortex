@@ -462,7 +462,7 @@ async function jobCreditRef(jobId: number): Promise<string> {
 export async function refundJobCredits(job: Pick<Job, "id" | "type">, why: "failed" | "canceled" = "canceled"): Promise<number> {
   if (job.type === "ingest") return 0;
   try {
-    const { billingEnabled, refundGeneration, fmtCredits } = await import("@/lib/billing/credits");
+    const { billingEnabled, refundGeneration, fmtCreditsBack } = await import("@/lib/billing/credits");
     if (!billingEnabled()) return 0;
     const spent = await jobLlmCostUsd(currentUser(), currentCourse(), job.id);
     if (why === "canceled" && spent > 0) {
@@ -471,7 +471,7 @@ export async function refundJobCredits(job: Pick<Job, "id" | "type">, why: "fail
     }
     const back = await refundGeneration(job.type, await jobCreditRef(job.id));
     if (back > 0) {
-      await logJob(job.id, `Crédits rendus (${fmtCredits(back)}) : le job n'a rien produit${spent > 0 ? ` — les ${spent.toFixed(3)} $ d'appels au modèle sont à notre charge` : ""}.`).catch(() => {});
+      await logJob(job.id, `${fmtCreditsBack(back)} : le job n'a rien produit${spent > 0 ? ` — les ${spent.toFixed(3)} $ d'appels au modèle sont à notre charge` : ""}.`).catch(() => {});
     }
     return back;
   } catch { return 0; /* best-effort : jamais bloquant */ }
@@ -489,14 +489,12 @@ export async function settleShortfall(job: Pick<Job, "id" | "type">, produced: n
   const what = missing === 1
     ? `1 question sur ${requested} n'a pas pu être générée`
     : `${missing} questions sur ${requested} n'ont pas pu être générées`;
-  let back = 0;
-  let fmt = (c: number) => String(c);
+  let notice = what;
   try {
-    const { billingEnabled, refundGeneration, fmtCredits } = await import("@/lib/billing/credits");
-    fmt = fmtCredits;
-    if (billingEnabled()) back = await refundGeneration(job.type, await jobCreditRef(job.id), currentUser(), missing / requested);
+    const { billingEnabled, refundGeneration, fmtCreditsBack } = await import("@/lib/billing/credits");
+    const back = billingEnabled() ? await refundGeneration(job.type, await jobCreditRef(job.id), currentUser(), missing / requested) : 0;
+    if (back > 0) notice = `${what} : ${fmtCreditsBack(back)}`;
   } catch { /* best-effort : le message reste dû */ }
-  const notice = back > 0 ? `${what} : ${fmt(back)} ${back >= 200 ? "crédits rendus" : "crédit rendu"}` : what;
   await logJob(job.id, `⚠ ${notice}.`).catch(() => {});
   return notice;
 }
