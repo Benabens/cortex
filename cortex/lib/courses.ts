@@ -1,6 +1,9 @@
 import path from "node:path";
 import type { CourseRow } from "@/db/courses-store";
-import type { DeclaredFormat } from "@/lib/exam-format";
+import type { AnswerMode, DeclaredFormat } from "@/lib/exam-format";
+
+/** Modes de réponse reconnus en base (copie de ANSWER_MODES : lib/exam-format importe ce module). */
+const STORED_ANSWER_MODES: readonly unknown[] = ["single", "multiple", "mixed"] satisfies AnswerMode[];
 
 /**
  * COUCHE D'ACCÈS AUX COURS (« les cours en base »).
@@ -115,6 +118,7 @@ function parseExamFormat(raw: string | null | undefined): DeclaredFormat | null 
       questionCount: num(v.questionCount),
       durationMin: num(v.durationMin),
       language: typeof v.language === "string" ? v.language : null,
+      ...(STORED_ANSWER_MODES.includes(v.answerMode) ? { answerMode: v.answerMode as AnswerMode } : {}),
     };
   } catch {
     return null;

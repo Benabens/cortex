@@ -1,7 +1,7 @@
 import { currentCourse } from "@/db/client";
 import { q, nowStr } from "@/db/q";
 import { HARD_STOP_CODES, LlmError, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
-import { courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFormat } from "@/lib/exam-format";
+import { courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFormat, type AnswerMode } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseTerms, coursePassages } from "@/lib/course-grounding";
@@ -96,12 +96,41 @@ const QCM_BATCH_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-/** Le même schéma sans figure_spec (objet libre) : exprimable en sortie structurée stricte. */
-const QCM_BATCH_SCHEMA_NO_FIGURE: object = (() => {
+/**
+ * Le schéma d'un lot pour un mode de réponse : en réponse unique (ou multiple), le type de
+ * chaque question est imposé ; sans figure, figure_spec (objet libre) est retiré, ce qui le
+ * rend exprimable en sortie structurée stricte.
+ */
+function batchSchema(mode: AnswerMode, withFigures: boolean): object {
   const s = JSON.parse(JSON.stringify(QCM_BATCH_SCHEMA));
-  delete s.properties.items.items.properties.figure_spec;
+  const props = s.properties.items.items.properties;
+  if (mode === "single") {
+    props.type = { type: "string", enum: ["scq"], description: "scq : l'examen est à réponse unique." };
+    props.correct.description = "Indice 0-based de LA bonne réponse : exactement un.";
+  } else if (mode === "multiple") {
+    props.type = { type: "string", enum: ["mcq"], description: "mcq : l'examen est à réponses multiples." };
+  }
+  if (!withFigures) delete props.figure_spec;
   return s;
-})();
+}
+
+/** Consigne du mode de réponse de l'examen (lib/exam-format) : le générateur la suit strictement. */
+function answerModeRule(mode: AnswerMode): string {
+  if (mode === "single") return `  - RÉPONSE UNIQUE : l'examen est à réponse unique. Chaque question est de type scq, avec EXACTEMENT une bonne réponse ; jamais de question à plusieurs bonnes réponses.`;
+  const vary = `fais varier le nombre de bonnes réponses d'une question à l'autre (une régularité se devine)`;
+  if (mode === "multiple") return `  - RÉPONSES MULTIPLES : l'examen est à réponses multiples. Chaque question est de type mcq : le sous-ensemble correct (une ou plusieurs bonnes réponses) ; ${vary}.`;
+  return `  - SCQ : EXACTEMENT une bonne réponse. MCQ : le sous-ensemble correct (≥1), selon la convention du format ; pour les MCQ, ${vary}.`;
+}
+
+/**
+ * Le type d'une question conçue, dans le mode de l'examen, ou null si elle n'y a pas sa place :
+ * une question à plusieurs clés dans un examen à réponse unique est écartée (son sujet est comblé).
+ */
+function typeInMode(correct: number[], declared: unknown, mode: AnswerMode): "scq" | "mcq" | null {
+  if (mode === "single") return correct.length === 1 ? "scq" : null;
+  if (mode === "multiple") return "mcq";
+  return correct.length > 1 || declared === "mcq" ? "mcq" : "scq";
+}
 
 /** Un QCM exploitable : énoncé, au moins 2 options texte, clé(s) valide(s). Sinon écarté (et comblé). */
 function wellFormed(raw: unknown): boolean {
@@ -187,8 +216,7 @@ const OPTION_RULES = [
   `  - Aucune phrase commune répétée en tête de chaque option : factorise-la dans l'énoncé.`,
   `  - AUCUN distracteur réfutable par le bon sens ou par le sens des mots (définition évidente, contresens grossier, absolu) : chacun doit paraître juste à un étudiant qui connaît le thème mais pas le détail du cours ; même registre et même degré de nuance que la bonne réponse.`,
   `  - TIGES INDÉPENDANTES : chaque question se comprend seule, sans scénario partagé avec une autre question, et ne donne pas la réponse d'une autre.`,
-  `  - EXPLICATION : désigne les options par leur CONTENU, jamais par leur lettre ou leur numéro (l'ordre des options est mélangé après coup).`,
-  `  - MCQ : fais varier le nombre de bonnes réponses d'une question à l'autre (une régularité se devine).`,
+  `  - EXPLICATION : désigne les options par leur CONTENU, jamais par leur lettre, leur numéro ni leur rang (« la première », « la deuxième », « la dernière ») : l'ordre des options est mélangé après coup.`,
   `  - ANCRAGE : chaque question teste un FAIT PRÉCIS des extraits du cours fournis (résultat d'étude avec auteurs et chiffres, condition d'une définition, mécanisme) ; recopie ce fait dans "source_fact". Rien hors des extraits et du programme.`,
 ];
 
@@ -293,7 +321,6 @@ const FOCUS_METHOD = "accent thématique demandé par l'étudiant : un thème, i
 const ARCHITECT_QCM_RULES = [
   `RÈGLES D'ARCHITECTE QCM (impératives) :`,
   `  - Chaque DISTRACTEUR cible une IDÉE FAUSSE réelle et précise (une mauvaise intuition courante), JAMAIS du remplissage ni de l'absurde.`,
-  `  - SCQ : EXACTEMENT une bonne réponse. MCQ : le sous-ensemble correct (≥1), selon la convention du format.`,
   `  - AUCUN indice qui trahit : la bonne option n'est ni plus longue ni plus détaillée ; pas de « toutes les réponses ci-dessus » ; cohérence grammaticale stem↔options ; options de longueur comparable ; pas de négations piégeuses gratuites.`,
   `  - Teste la COMPRÉHENSION / le raisonnement, pas la récitation d'une définition.`,
   `  - Calibre la difficulté sur les VRAIS examens du cours (regarde les pages fournies).`,
@@ -333,9 +360,12 @@ export async function generateQcmBatch(
     previousStems?: string[];
     /** Consigne de l'étudiant (« Mets l'accent sur… ») : s'ajoute aux règles, sur chaque lot. */
     studentFocus?: string;
+    /** Mode de réponse de l'examen ; absent → celui du format du cours, sinon réponse unique. */
+    answerMode?: AnswerMode;
   } = {}
 ): Promise<QcmItem[]> {
   const fmt = await getFormatProfile();
+  const mode = opts.answerMode ?? (await resolveExamFormat().catch(() => null))?.answerMode ?? "single";
   const imgs = courseRefImages().slice(0, 4);
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { profile } = require("@/lib/course-profile") as typeof import("@/lib/course-profile");
@@ -378,6 +408,7 @@ export async function generateQcmBatch(
     imgs.length ? `Pages d'examens réelles à imiter (outil Read) :\n${imgs.map((p) => `  - ${p}`).join("\n")}` : ``,
     ``,
     ...ARCHITECT_QCM_RULES,
+    answerModeRule(mode),
     opts.withAnnales ? OPTIONS_WITH_ANNALES : OPTIONS_WITHOUT_ANNALES,
     ...OPTION_RULES,
     opts.withAnnales ? CLASSIFICATION_IF_ANNALES : NO_CLASSIFICATION,
@@ -392,7 +423,7 @@ export async function generateQcmBatch(
     examples.length ? `\n${DATA_RULE}` : null,
     examples.length ? dataBlock(`QUESTIONS D'EXEMPLE OFFICIELLES de l'enseignant — imite leur STYLE (forme des options, niveau de détail, pièges), ne les recopie JAMAIS`, examples) : null,
     `Format de réponse : UNIQUEMENT l'objet JSON { "items": [ … ] } conforme à ce schéma, aucun fichier.`,
-    JSON.stringify(QCM_BATCH_SCHEMA, null, 2),
+    JSON.stringify(batchSchema(mode, true), null, 2),
   ].filter((l) => l != null && l !== "").join("\n");
   const prompt = [
     `Ce lot : ${n} QCM.`,
@@ -423,7 +454,7 @@ export async function generateQcmBatch(
   // est un objet libre, inexprimable → texte libre, lu par extractJson. Réponse illisible →
   // redemandée avec l'erreur (completeJson, 3 essais).
   const r = await completeJson<{ items: (QcmItem & { figure_spec?: FigureSpec })[] }>(
-    { system, prompt, model: "opus", timeoutMs: 480_000, json: { schema: withFigures ? QCM_BATCH_SCHEMA : QCM_BATCH_SCHEMA_NO_FIGURE } },
+    { system, prompt, model: "opus", timeoutMs: 480_000, json: { schema: batchSchema(mode, withFigures) } },
     { check: (v) => (!Array.isArray(v?.items) ? "le champ « items » (tableau de QCM) manque" : v.items.length ? null : "« items » est vide") },
   );
   const items: QcmItem[] = [];
@@ -432,10 +463,16 @@ export async function generateQcmBatch(
   for (let i = 0; i < raws.length; i++) {
     const raw = raws[i];
     if (!wellFormed(raw)) continue;
+    const type = typeInMode(raw.correct, raw.type, mode);
+    if (!type) {
+      step(`QCM à plusieurs bonnes réponses écarté : l'examen est à réponse unique`, 30);
+      continue;
+    }
     const imposed = molds[i] ?? null;
     const fact = (raw as { source_fact?: unknown }).source_fact;
     const base: QcmItem = {
       ...raw,
+      type,
       misconceptions: Array.isArray(raw.misconceptions) ? raw.misconceptions : [],
       verified: null,
       mold: normalizeMold(raw.mold) ?? imposed,
@@ -772,6 +809,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     previousStems: recent.map((r) => r.stem),
     studentFocus: focus,
     examples: withAnnales ? [] : await officialExamples().catch(() => []),
+    // Avec annales, leur forme ; sinon le mode déclaré ou lu dans les sources, à défaut la réponse unique.
+    answerMode: format?.answerMode ?? "single",
   };
   step(`Architecte : ${count} QCM + ${openCount} ouverte(s)${focus ? ` (accent : « ${focus} »)` : ""}${dna ? ` · moules ADN (${dna.molds.length})` : " au format détecté"}…`, 8);
 

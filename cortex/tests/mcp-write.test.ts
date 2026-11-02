@@ -324,6 +324,25 @@ test("set_exam_format : déclare puis efface le format d'un cours ; create_cours
   await owner.close();
 });
 
+test("set_exam_format et create_course : réponse unique ou multiple se déclare (answer_mode), unique par défaut", async () => {
+  const set = await call(alice, "set_exam_format", { course: "MATH-232", kind: "qcm", answer_mode: "multiple" });
+  assert.equal(set.isError, undefined, text(set));
+  const out = set.structuredContent as { exam_format: { answer_mode: string | null; summary: string } };
+  assert.equal(out.exam_format.answer_mode, "multiple");
+  assert.match(out.exam_format.summary, /réponses multiples/);
+  assert.equal((await call(alice, "set_exam_format", { course: "MATH-232", kind: "qcm", answer_mode: "plusieurs" })).isError, true, "mode inconnu refusé par le schéma");
+  const plain = await call(alice, "set_exam_format", { course: "MATH-232", kind: "qcm" });
+  assert.equal((plain.structuredContent as { exam_format: { answer_mode: string | null } }).exam_format.answer_mode, "single");
+  await call(alice, "set_exam_format", { course: "MATH-232", clear: true });
+
+  const owner = await mcp((await connectAs(OWNER, { generate: true, write: true })).access);
+  const c = await call(owner, "create_course", { name: "Société numérique", code: "HUM-286", exam_format: { kind: "qcm", question_count: 20, answer_mode: "single" } });
+  assert.equal(c.isError, undefined, text(c));
+  const { getCourse } = await import("../lib/courses");
+  assert.equal(getCourse((c.structuredContent as { course: { id: string } }).course.id).examFormat?.answerMode, "single");
+  await owner.close();
+});
+
 test("get_job_status : un examen blanc devenu QCM rend ses questions et leurs options (corrigé seulement sur demande)", async () => {
   const { listCoursesOf } = await import("../lib/courses");
   const { runWithUser } = await import("../db/context");

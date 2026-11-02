@@ -3,7 +3,7 @@ import type { CourseConfig } from "@/lib/courses";
 import { courseLabel } from "./courses";
 import { fmtCredits, toCenti } from "@/lib/billing/credits";
 import { QUOTA_LABEL, type DeclinedView, type QuoteView } from "./tool";
-import { EXAM_KINDS, LANGUAGES, type ExamFormat } from "@/lib/exam-format";
+import { ANSWER_MODES, EXAM_KINDS, LANGUAGES, type ExamFormat } from "@/lib/exam-format";
 
 /** Pièces de schéma partagées par les outils (entrées et sorties). */
 
@@ -68,11 +68,12 @@ export const examFormatSchema = z.object({
   question_count: z.number().nullable(),
   duration_min: z.number().nullable(),
   language: z.string().describe("Language of the generated exam."),
+  answer_mode: z.enum(ANSWER_MODES).nullable().describe("Multiple-choice exams: single (exactly one correct answer), multiple (one or more), mixed — null for other exam types."),
   summary: z.string(),
 });
 
 export function examFormatOf(f: ExamFormat): z.infer<typeof examFormatSchema> {
-  return { kind: f.kind, basis: f.basis, question_count: f.questionCount, duration_min: f.durationMin, language: f.language, summary: f.summary };
+  return { kind: f.kind, basis: f.basis, question_count: f.questionCount, duration_min: f.durationMin, language: f.language, answer_mode: f.answerMode ?? null, summary: f.summary };
 }
 
 /** Entrée d'un format déclaré (create_course, set_exam_format). */
@@ -81,4 +82,5 @@ export const examFormatInput = {
   question_count: z.number().int().min(1).max(200).optional().describe("Number of questions (qcm, composite) or of exercises / essay topics."),
   duration_min: z.number().int().min(5).max(600).optional().describe("Exam duration in minutes."),
   language: z.enum(LANGUAGES).optional().describe("Language of the exam, when it differs from the course language."),
+  answer_mode: z.enum(ANSWER_MODES).optional().describe("Multiple-choice exams: single (exactly one correct answer per question, the default when nothing says otherwise), multiple (one or more correct answers), or mixed. Past exams, when present, decide instead."),
 };
