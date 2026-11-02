@@ -129,6 +129,8 @@ test("ce qui est légitime passe : figures relatives, macros du cours, maths", a
     String.raw`\begin{tabular}{|l|c|}\hline a & b \\ \hline\end{tabular} \begin{center}\begin{minipage}{0.5\textwidth}x\end{minipage}\end{center}`,
     String.raw`$\begin{pmatrix} 1 & 0 \\ 0 & 1 \end{pmatrix}$ \begin{cases} 1 & x>0 \\ 0 & \text{sinon} \end{cases} \begin{verbatim}int main(){}\end{verbatim}`,
     String.raw`\begin{lstlisting}[language=C]\nprintf("x");\n\end{lstlisting} \begin{tikzpicture}\draw (0,0)--(1,1);\end{tikzpicture} \begin{figure}[h]\centering x\end{figure}`,
+    // Indices de maths (examen 4 de CS-290 : le garde refusait tout le PDF, en silence).
+    String.raw`$\sigma_x$, $\epsilon_i + \mu_{A}$, $\theta_1 - \hat{\beta}_0$, $\tau_{\text{H}}$ et $\varepsilon_t$`,
   ];
   for (const c of ok) assert.deepEqual(findTexHazards(c), [], `faux positif : ${c}`);
 });

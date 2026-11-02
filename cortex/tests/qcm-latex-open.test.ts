@@ -104,3 +104,30 @@ test("une question ouverte au LaTeX encore cassé : le PDF sort quand même, la 
   assert.match(out.texWarning ?? "", /texte simple/);
 });
 
+test("J — des indices de maths dans une ouverte (\\sigma_x) ne font plus disparaître le PDF", async (t) => {
+  const { texAvailable } = await import("../lib/exam-latex");
+  if (!texAvailable()) return t.skip("tectonic/pdflatex absent");
+  const { runWithCourse } = await import("../db/client");
+  const { buildQcmArtifact } = await import("../lib/qcm-latex");
+  const item = {
+    topic: "Fairness", type: "scq" as const, stem: "Which metric compares error rates?", options: ["Equalized odds", "Demographic parity"], correct: [0],
+    misconceptions: ["", "a"], explanation: "Equalized odds.", verified: 1 as const,
+  };
+  const open = [{ category: "F", concept: "Risk score", statement_tex: String.raw`Let $\sigma_x$ be the score spread and $\epsilon_i$ the noise of applicant $i$; compute $\mu_A - \mu_B$.`, solution_tex: String.raw`$\mu_A - \mu_B = 0{,}12$.`, points: 15 }];
+  const out = await runWithCourse("ml", () => buildQcmArtifact(4444, { items: [item], open }, "2026-11-02"));
+  assert.equal(out.texError, undefined, out.texError);
+  assert.match(out.file, /\.pdf$/);
+  assert.equal(out.texWarning, undefined, "rendu normal, pas de repli");
+});
+
+test("J — un LaTeX refusé par le garde passe en texte simple au lieu de faire disparaître le PDF", async (t) => {
+  const { texAvailable } = await import("../lib/exam-latex");
+  if (!texAvailable()) return t.skip("tectonic/pdflatex absent");
+  const { runWithCourse } = await import("../db/client");
+  const { buildQcmArtifact } = await import("../lib/qcm-latex");
+  const item = { topic: "F", type: "scq" as const, stem: "Q ?", options: ["a", "b"], correct: [0], misconceptions: ["", "x"], explanation: "…", verified: 1 as const };
+  const open = [{ category: "F", concept: "Piège", statement_tex: String.raw`Lire \input{/etc/passwd} puis répondre.`, solution_tex: "x", points: 15 }];
+  const out = await runWithCourse("ml", () => buildQcmArtifact(4545, { items: [item], open }, "2026-11-02"));
+  assert.match(out.file, /\.pdf$/, out.texError);
+  assert.match(out.texWarning ?? "", /texte simple/);
+});

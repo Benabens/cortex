@@ -50,10 +50,17 @@ const BANNED = [
   "pgfimage", "pgfdeclareimage",
   "usepackage", "RequirePackage", "documentclass",
   "batchmode", "nonstopmode", "scrollmode", "errorstopmode",
+  // expl3 : sans \ExplSyntaxOn, « _ » et « : » ne sont pas des lettres, un nom expl3 n'en est pas un.
+  "ExplSyntaxOn",
 ];
 const BANNED_RE = new RegExp(String.raw`\\@*(?:${BANNED.join("|")})(?![A-Za-z@])`, "g");
-/** Noms expl3 (`\file_input:n`, `\ior_open:Nn`…) : lettres + `_`/`:` — jamais dans un énoncé. */
-const EXPL3_RE = /\\[A-Za-z@]+[_:][A-Za-z_:@]*/g;
+/**
+ * Fonctions expl3 (`\file_input:n`, `\ior_open:Nn`…) : un nom suivi de sa SIGNATURE
+ * « :… ». L'ancien motif (« _ » ou « : » après le nom) refusait tout indice de maths
+ * (`$\sigma_x$`, `$\epsilon_i$`) et faisait disparaître le PDF entier (examen 4 de CS-290).
+ * Défense en profondeur : \ExplSyntaxOn, sans lequel aucun nom expl3 n'existe, est banni.
+ */
+const EXPL3_RE = /\\[A-Za-z@]+(?:_[A-Za-z@]+)*:[A-Za-z]*/g;
 /** Primitives XeTeX (tectonic = XeTeX) : \XeTeXpicfile, \XeTeXpdffile, encodages, glyphes… */
 const XETEX_RE = /\\XeTeX[A-Za-z]*/g;
 const ENV_RE = /\\(?:begin|end)\s*\{([^}]*)\}/g;
