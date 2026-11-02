@@ -5,6 +5,7 @@ import { courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFo
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseTerms, coursePassages } from "@/lib/course-grounding";
+import { secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
 import { assignChapters, spreadOverChapters } from "@/lib/coverage";
 import { normalize } from "@/lib/text";
 import { courseRefImages } from "@/lib/course-vision";
@@ -554,12 +555,13 @@ const VERIFY_SCHEMA = {
           discrimination: { type: "integer", description: "Pouvoir discriminant, 1 à 5 : 1 = un étudiant qui ne connaît que les NOMS des notions (ni leurs conditions, ni les résultats des études) la réussit ; 5 = seul un étudiant qui maîtrise le détail du cours la réussit." },
           name_only: { type: "boolean", description: "true si elle se réussit avec les seuls noms des notions, ou en éliminant des options absurdes." },
           course_terms: { type: "array", items: { type: "string" }, description: "Les notions nommées dont dépend la BONNE réponse, chacune écrite EXACTEMENT comme dans les extraits du cours (copie le terme du cours)." },
-          off_course: { type: "string", description: "Non vide si la bonne réponse, un distracteur ou l'explication repose sur une notion ABSENTE des extraits du cours, ou que le cours définit AUTREMENT : laquelle, et ce que dit le cours. Vide sinon." },
+          off_course: { type: "string", description: "Non vide si la bonne réponse ou l'explication repose sur une notion ou un fait ABSENT des extraits du cours, ou que le cours définit AUTREMENT, ou si une option NOMME une notion que le cours ne présente pas : laquelle, et ce que dit le cours. Un distracteur qui n'est qu'une affirmation fausse n'est pas hors cours. Vide sinon." },
+          off_course_terms: { type: "array", items: { type: "string" }, description: "Les notions ou faits précis que off_course dit absents, écrits comme dans la question (ils seront cherchés dans tout le cours). Vide si off_course est vide." },
           off_matter: { type: "string", description: "Non vide si la question porte sur les modalités d'examen (format, barème, grille ou critères d'évaluation, consignes), sur la forme d'un rendu (poster, essai, bibliographie) ou sur l'organisation du cours (plan, ordre des chapitres) plutôt que sur sa matière : ce qu'elle teste. Vide sinon." },
           trivial_distractors: { type: "array", items: { type: "integer" }, description: "Indices des MAUVAISES options qu'un étudiant élimine sans connaître le cours (générique, hors sujet, absurde, réfutable par le bon sens). Liste vide si toutes sont plausibles." },
           definition_mismatch: { type: "string", description: "Chaque définition employée ou sous-entendue (énoncé, clé, distracteurs, explication) comparée à celle des extraits du cours. Non vide si l'une est PLUS ÉTROITE (une condition ajoutée), PLUS LARGE (une condition oubliée), ou si deux notions du cours sont confondues : laquelle, ce que dit la question, ce que dit le cours. Vide sinon." },
         },
-        required: ["index", "correct", "ok", "discrimination", "name_only", "course_terms", "off_course", "off_matter", "trivial_distractors", "definition_mismatch"],
+        required: ["index", "correct", "ok", "discrimination", "name_only", "course_terms", "off_course", "off_course_terms", "off_matter", "trivial_distractors", "definition_mismatch"],
         additionalProperties: false,
       },
     },
@@ -592,11 +594,13 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     if (citesOptionLabel(q.explanation ?? "")) reject(q, "explication qui désigne une option par sa position ou sa lettre", "désigne chaque option par son contenu dans l'explication, jamais par son rang (« la première ») ni sa lettre");
   }
   // DÉFINITIONS DU COURS : le juge résout et contrôle avec celles du cours, pas celles du web.
-  const passages = await coursePassages([...new Set(items.map((q) => q.topic).filter(Boolean))], 2, 700).catch(() => []);
+  // Autour du fait que teste chaque question, en fenêtres larges (banc HUM-285 du 02/11 : deux
+  // extraits de 700 caractères par sujet, et 22 à 27 questions justes rejetées « hors cours »).
+  const passages = await verifierPassages(items).catch(() => []);
   // Cache de prompt (M) : consignes et schéma stables dans le système, lots et extraits à part.
   const system = [
     `Tu es un correcteur rigoureux du cours. Pour CHAQUE QCM fourni, RÉSOUS-LE toi-même de zéro (sans clé fournie) et donne la/les bonne(s) réponse(s) par INDEX.`,
-    `Quand des extraits du cours sont fournis, résous et juge avec LEURS DÉFINITIONS, jamais avec celles d'une autre source. course_terms : les notions dont dépend la bonne réponse, écrites comme dans le cours. off_course : toute notion de la question absente des extraits (vide sinon).`,
+    `Quand des extraits du cours sont fournis, résous et juge avec LEURS DÉFINITIONS, jamais avec celles d'une autre source. course_terms : les notions dont dépend la bonne réponse, écrites comme dans le cours. off_course : une notion ou un fait dont dépend la bonne réponse ou l'explication, absent des extraits ou que le cours définit autrement, ou une notion qu'une option NOMME sans que le cours la présente (vide sinon) ; un distracteur qui n'est qu'une affirmation fausse (résultat inversé, condition changée) n'est pas hors cours, c'est son rôle. Les extraits ne couvrent pas tout le cours : nomme dans off_course_terms ce que tu dis absent, on le cherchera dans tout le cours.`,
     `DÉFINITIONS (definition_mismatch) : compare chaque définition que la question emploie ou sous-entend à celle des extraits. Une définition plus étroite (une condition ajoutée, « seulement si… »), plus large (une condition oubliée) que celle du cours, ou deux notions voisines confondues rendent la question fausse, même si sa clé est cohérente avec sa propre définition.`,
     `Signale si : la question est ambiguë (2 réponses défendables), un distracteur est absurde, ou un indice trahit la bonne réponse (longueur, « toutes les réponses », grammaire).`,
     `off_matter : ce que teste une question qui porte sur les modalités d'examen (format, barème, grille ou critères d'évaluation, consignes), sur la forme d'un rendu (poster, essai, bibliographie) ou sur l'organisation du cours (plan, ordre des chapitres) au lieu de sa matière (vide sinon).`,
@@ -616,7 +620,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     `Réponds UNIQUEMENT avec l'objet JSON { "results": [ … ] } conforme.`,
   ].filter((l) => l != null).join("\n");
   step("Vérification à l'aveugle des QCM (résolution indépendante, figures vues)…", 70);
-  let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean; course_terms?: string[]; off_course?: string; off_matter?: string; trivial_distractors?: number[]; definition_mismatch?: string }[] };
+  let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean; course_terms?: string[]; off_course?: string; off_course_terms?: string[]; off_matter?: string; trivial_distractors?: number[]; definition_mismatch?: string }[] };
   try {
     res = await completeJson(
       { system, prompt, model: "opus", timeoutMs: 420_000, addDirs: figDirs, json: { schema: VERIFY_SCHEMA } },
@@ -628,21 +632,30 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   // juge l'a crue du cours.
   const termsOf = (r: { course_terms?: unknown }) => (Array.isArray(r.course_terms) ? r.course_terms.filter((t): t is string => typeof t === "string") : []);
   const absent = new Set((await absentCourseTerms((res.results ?? []).flatMap(termsOf))).map((t) => normalize(t)));
+  const offCourseAdvice = "n'utilise que les notions et les définitions des extraits du cours";
+  /** Jugées hors cours par le correcteur seul : rejetées seulement après une recherche dans tout le cours. */
+  const appeals: { q: QcmItem; flag: OffCourseFlag }[] = [];
   for (const r of res.results ?? []) {
     const q = items[r.index];
     if (!q || q.rejected) continue;
     const missing = termsOf(r).filter((t) => absent.has(normalize(t.trim())));
+    // Notion de la clé absente de TOUT le corpus (contrôle déterministe) : rejet immédiat.
+    if (missing.length) {
+      reject(q, `hors cours : absent du cours : ${missing.join(", ").slice(0, 220)}`, offCourseAdvice);
+      continue;
+    }
     // Un signalement du juge ne compte que s'il a VU des extraits et qu'il nomme quelque chose
     // (« None », « Aucune », « N/A » ne rejettent rien) : jamais de rejet faute de pouvoir vérifier.
     const said = (x: unknown) => (passages.length && typeof x === "string" && !NO_FLAG.test(x.trim()) ? x.trim() : "");
     const flagged = said(r.off_course);
     // B — mock 4 de CS-290 : « sensitive » réduit aux attributs protégés par la loi (le cours : loi
-    // OU éthique) ; une définition qui s'écarte de celle du cours rejette la question comme une notion absente.
+    // OU éthique) ; une définition qui s'écarte de celle du cours rejette la question comme une notion
+    // absente, et comme elle, seulement après une recherche dans tout le cours.
     const mismatch = said(r.definition_mismatch);
-    const off = [missing.length ? `absent du cours : ${missing.join(", ")}` : "", flagged, mismatch ? `définition différente du cours : ${mismatch}` : ""].filter(Boolean).join(" ; ");
-    if (off) {
-      reject(q, `hors cours : ${off.slice(0, 240)}`, "n'utilise que les notions et les définitions des extraits du cours");
-      continue;
+    if (flagged || mismatch) {
+      const terms = Array.isArray(r.off_course_terms) ? r.off_course_terms.filter((t): t is string => typeof t === "string" && !!t.trim()) : [];
+      const reason = [flagged, mismatch ? `définition différente du cours : ${mismatch}` : ""].filter(Boolean).join(" ; ");
+      appeals.push({ q, flag: { ...q, flag: reason, terms } });
     }
     // Une question sur l'évaluation du cours (grille, consignes, forme d'un rendu) ne teste pas sa matière.
     const offMatter = typeof r.off_matter === "string" && !NO_FLAG.test(r.off_matter.trim()) ? r.off_matter.trim().slice(0, 240) : "";
@@ -675,6 +688,16 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     // L'item est régénéré avec ce que le correcteur a trouvé, sinon écarté ; jamais corrigé en place.
     const found = r.correct.map((k) => `« ${sanitizeCorpus(q.options[k] ?? `option ${k}`).slice(0, 120)} »`).join(", ");
     reject(q, `clé contestée : le correcteur trouve ${found}${q.judgeIssue ? ` (${q.judgeIssue})` : ""}`, "vérifie la réponse et écris une explication qui la justifie");
+  }
+  // Second regard sur les questions jugées hors cours (et pas déjà rejetées pour une autre raison).
+  const pending = appeals.filter((a) => !a.q.rejected);
+  if (pending.length) {
+    const verdicts = await secondLookOffCourse(pending.map((a) => a.flag)).catch(() => null);
+    pending.forEach((a, i) => {
+      const confirmed = verdicts ? verdicts[i] : a.flag.flag;
+      if (confirmed && !NO_FLAG.test(confirmed)) reject(a.q, `hors cours : ${confirmed.slice(0, 240)}`, offCourseAdvice);
+      else step(`QCM gardé — jugé hors cours sur les extraits, mais trouvé dans le cours (${a.flag.flag.slice(0, 100)})`, 70);
+    });
   }
   return items;
 }
