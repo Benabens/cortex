@@ -208,6 +208,7 @@ function retryNote(reason: string, n: number, attempts: number): string {
 }
 
 export { extractJson, JsonOutputError } from "./json";
+export { BAD_OUTPUT_CODES, PROVIDER_DOWN_CODES, llmErrorCode, llmFailureReason, llmUserMessage } from "./errors";
 export { PROVIDER_NAMES, type ProviderName } from "./config";
 export { LlmError } from "./types";
 export type { CompleteRequest, CompleteResult, LlmImage, LlmModel, LlmProvider, LlmUsage } from "./types";
