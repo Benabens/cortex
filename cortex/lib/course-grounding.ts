@@ -18,6 +18,15 @@ import { normalize, tokenize } from "@/lib/text";
 export const COURSE_TERMS_RULE =
   `  - NOTIONS DU COURS SEULEMENT : toute notion nommée (dans la bonne réponse, les distracteurs, l'explication ou le corrigé) doit figurer dans les extraits ou les supports du cours, avec LA DÉFINITION DU COURS — jamais celle d'une autre source. N'introduis aucune notion que le cours ne présente pas (un biais, une métrique, une catégorie, une théorie), même plausible.`;
 
+/**
+ * La matière, pas l'évaluation : une grille d'évaluation, des consignes d'examen ou le
+ * guide d'un poster disent COMMENT le cours est évalué, pas CE qu'il enseigne (HUM-285,
+ * 02/11 : ~6 questions sur la grille D1/D2/D3 de l'essai et la bibliographie du poster).
+ * Commune à l'extraction des notions et à la conception des questions.
+ */
+export const COURSE_MATTER_RULE =
+  `  - MATIÈRE DU COURS SEULEMENT : aucune question ni notion sur les modalités d'examen (format, durée, barème, grille ou critères d'évaluation, consignes) ni sur la forme d'un rendu (poster, essai, rapport, mise en forme d'une bibliographie) : ces documents disent comment le cours est évalué, pas ce qu'il enseigne.`;
+
 /** Au-delà, le corpus n'est pas chargé en mémoire : sans vérification possible, rien n'est rejeté. */
 const MAX_CORPUS_CHARS = 30_000_000;
 

@@ -9,6 +9,9 @@
  *  - un item dont la clé est contestée est régénéré, jamais gardé avec son explication ;
  *  - toujours contesté après régénération : écarté, et son sujet comblé ;
  *  - aucune note interne de vérification dans une explication, y compris d'un examen déjà en base.
+ * Et, même examen : ~6 questions portaient sur la grille d'évaluation de l'essai (D1/D2/D3),
+ * la question ouverte finale ou la mise en forme de la bibliographie du poster. Une question
+ * sur les modalités d'examen ou la forme d'un rendu, plutôt que sur la matière, est rejetée.
  */
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -56,9 +59,10 @@ const plain = (i: number) => item(`Quel énoncé décrit la souveraineté des do
 let design: (n: number, call: number, prompt: string) => string = (n, call) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => plain(call * 10 + i)) });
 let designCalls = 0;
 const designPrompts: string[] = [];
+const verifyPrompts: string[] = [];
 /** Ce que le juge répond pour une question : la réponse qu'il trouve (texte de l'option), ok, issue. */
 const EXTERNAL = /^L'alignement externe relie les objectifs d'un système aux valeurs/;
-let judge: (block: string) => { answer: RegExp; ok?: boolean; issue?: string } = (b) => (
+let judge: (block: string) => { answer: RegExp; ok?: boolean; issue?: string; offMatter?: string } = (b) => (
   !/alignement/.test(b) ? { answer: /^Un État contrôle/ }
     : /\(v\d+\)/.test(b) ? { answer: EXTERNAL, issue: "la clé devrait être l'alignement externe" } : { answer: EXTERNAL }
 );
@@ -69,7 +73,7 @@ function verifyReply(prompt: string): string {
     const j = judge(b);
     const opt = [...b.matchAll(/^\s+\((\d+)\) (.*)$/gm)].find((m) => j.answer.test(m[2]));
     const correct = [opt ? Number(opt[1]) : 0];
-    return { index: i, correct, ok: j.ok ?? !j.issue, discrimination: 4, name_only: false, issue: j.issue ?? "", course_terms: [], off_course: "" };
+    return { index: i, correct, ok: j.ok ?? !j.issue, discrimination: 4, name_only: false, issue: j.issue ?? "", course_terms: [], off_course: "", off_matter: j.offMatter ?? "" };
   });
   return JSON.stringify({ results });
 }
@@ -84,7 +88,7 @@ before(async () => {
       const parsed = JSON.parse(body) as { messages: { content: unknown }[] };
       const content = parsed.messages.map((m) => typeof m.content === "string" ? m.content : JSON.stringify(m.content)).join("\n");
       let text = "{}";
-      if (/"results"/.test(content)) text = verifyReply(content);
+      if (/"results"/.test(content)) { verifyPrompts.push(content); text = verifyReply(content); }
       else if (/"items"/.test(content)) {
         designCalls++;
         designPrompts.push(content);
@@ -100,7 +104,7 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { designCalls = 0; designPrompts.length = 0; });
+beforeEach(() => { designCalls = 0; designPrompts.length = 0; verifyPrompts.length = 0; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -224,4 +228,33 @@ test("examen déjà en base avec une note de vérification : ni la note ni l'exp
   }
   assert.equal(exam!.items[2].explanation, "Explication saine.", "une explication sans note est intacte");
   assert.match(exam!.items[0].explanation, /clé .*corrigée après/i, "l'étudiant sait pourquoi l'explication manque");
+});
+
+test("question sur la grille d'évaluation ou la forme d'un rendu : rejetée et remplacée par une question de matière", async () => {
+  const id = await course();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  const rubric = item("Selon la grille d'évaluation de l'essai, que mesure le critère D1 ? (grille)", [
+    "Le lien entre l'essai et un concept des sciences humaines vu en cours.",
+    "La qualité de la mise en forme de la bibliographie selon les normes APA.",
+    "Le respect de la longueur maximale imposée pour l'essai final.",
+    "La présence d'au moins trois sources académiques dans l'essai.",
+  ]);
+  design = (n, call) => JSON.stringify({ items: call === 1 ? [rubric, ...Array.from({ length: n - 1 }, (_, i) => plain(i))] : Array.from({ length: n }, (_, i) => plain(call * 10 + i)) });
+  const ok = judge;
+  judge = (b) => (/\(grille\)/.test(b)
+    ? { answer: /^Le lien entre l'essai/, offMatter: "porte sur la grille d'évaluation de l'essai, pas sur la matière du cours" }
+    : { answer: /^Un État contrôle/ });
+  try {
+    const steps: string[] = [];
+    const r = await runWithCourse(id, () => generateQcmExam({ count: 3, openCount: 0, onStep: (s) => { steps.push(s); } }));
+    assert.equal(r.count, 3, steps.join("\n"));
+    const exam = await runWithCourse(id, () => getQcmExam(r.id, true));
+    assert.ok(exam!.items.every((it) => !/grille/i.test(it.stem)), "la question sur la grille n'est pas gardée");
+    assert.ok(steps.some((s) => /rejeté — hors matière[^\n]*grille d'évaluation/.test(s)), "le rejet est dit, avec sa raison");
+    assert.match(verifyPrompts[0], /modalités d'examen[\s\S]*forme d'un rendu/, "le correcteur sait qu'il doit le relever");
+    assert.match(designPrompts[0], /MATIÈRE[^\n]*modalités d'examen[^\n]*forme d'un rendu/, "la conception l'interdit d'emblée");
+  } finally {
+    judge = ok;
+  }
 });
