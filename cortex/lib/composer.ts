@@ -12,7 +12,8 @@ import { profile } from "@/lib/course-profile";
 export type CompositionPlan = {
   course: string;
   /**
-   * "qcm" = composeur QCM+ouvertes ; "exam" = composeur d'exercices (calcul/trace, essai, oral) ;
+   * "qcm" = composeur QCM+ouvertes ; "exam" = composeur d'exercices (calcul/trace, essai, oral)
+   * ou de questions composées ;
    * "unknown" = format d'examen inconnu : rien à composer, `summary` dit quoi déclarer.
    */
   kind: "qcm" | "exam" | "unknown";
@@ -76,6 +77,20 @@ export async function getComposition(): Promise<CompositionPlan> {
       open,
       scq,
       mcq,
+    };
+  }
+
+  // Questions composées (mid-term de CS-290) : une question par section de l'annale modèle.
+  if (plan.generator === "blocks") {
+    return {
+      course,
+      kind: "exam",
+      summary: format.summary,
+      durationMin: format.durationMin || c.durationMin,
+      totalPoints: plan.totalPoints,
+      exercises: plan.blockCount,
+      categories: plan.sections.map((s) => s.name),
+      unit: "question",
     };
   }
 

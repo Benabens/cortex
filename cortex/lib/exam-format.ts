@@ -20,7 +20,7 @@ import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import { sanitizeCorpus } from "@/lib/prompt-safety";
 import type { FormatProfile } from "@/lib/format";
 
-export const EXAM_KINDS = ["qcm", "exercises", "mixed", "essay", "oral"] as const;
+export const EXAM_KINDS = ["qcm", "exercises", "mixed", "composite", "essay", "oral"] as const;
 export type ExamKind = (typeof EXAM_KINDS)[number];
 
 /** Langues d'un cours ou d'un examen (mêmes codes que la fiche du cours). */
@@ -66,7 +66,16 @@ export type ExamFormat = {
   summary: string;
   /** Citations des sources quand le format a été déduit hors annales. */
   evidence: string[];
+  /** Questions composées (kind « composite ») : sections de l'annale modèle, sous-questions par question. */
+  blocks?: BlockFormat | null;
 };
+
+/**
+ * Format à QUESTIONS COMPOSÉES (mid-term de CS-290, le format le plus courant à l'EPFL) :
+ * chaque question est un scénario ou un extrait de code suivi de sous-questions mêlées.
+ * `sections` : une par question de l'annale modèle (vide : la couverture des chapitres décide).
+ */
+export type BlockFormat = { sections: { name: string; description: string }[]; partsMin: number; partsMax: number; totalPoints: number | null };
 
 export type MockExamRequest = { count?: number | null; focus?: string | null };
 
@@ -75,6 +84,7 @@ export type ExerciseStyle = "problems" | "essay" | "oral";
 
 export type MockExamPlan =
   | { generator: "qcm"; qcmCount: number; openCount: number }
+  | { generator: "blocks"; blockCount: number; partsMin: number; partsMax: number; sections: BlockFormat["sections"]; totalPoints: number | null }
   | { generator: "exercises"; style: ExerciseStyle; exerciseCount: number | null }
   | { generator: "none"; reason: string };
 
@@ -82,6 +92,9 @@ const QCM_DEFAULT = 20;
 export const QCM_MAX = 40;
 const MIXED_OPEN_DEFAULT = 2;
 export const EXERCISES_MAX = 12;
+export const BLOCKS_MAX = 10;
+const BLOCKS_DEFAULT = 5;
+const PARTS_DEFAULT = { partsMin: 3, partsMax: 6 };
 
 /** Types de sources qui parlent de l'EXAMEN (annales, exemples officiels, consignes), pas de la matière. */
 export const EXAM_SOURCE_TYPES = ["final", "midterm", "sample_questions", "exam_info"] as const;
@@ -110,6 +123,11 @@ export function planMockExam(format: ExamFormat, req: MockExamRequest): MockExam
         : 0;
       return { generator: "qcm", qcmCount, openCount };
     }
+    case "composite": {
+      const b = format.blocks ?? { sections: [], ...PARTS_DEFAULT, totalPoints: null };
+      const blockCount = clamp(asked ?? (positive(format.questionCount) ? format.questionCount : b.sections.length || BLOCKS_DEFAULT), 1, BLOCKS_MAX);
+      return { generator: "blocks", blockCount, partsMin: b.partsMin, partsMax: b.partsMax, sections: b.sections, totalPoints: b.totalPoints };
+    }
     case "exercises": {
       const n = asked ?? (positive(format.questionCount) ? format.questionCount : null);
       return { generator: "exercises", style: "problems", exerciseCount: n === null ? null : clamp(n, 1, EXERCISES_MAX) };
@@ -125,7 +143,7 @@ export function planMockExam(format: ExamFormat, req: MockExamRequest): MockExam
 
 // ───────────────────────────── format déclaré ─────────────────────────────
 
-const KIND_LABEL: Record<ExamKind, string> = { qcm: "QCM", exercises: "exercices", mixed: "QCM + questions ouvertes", essay: "essai", oral: "oral" };
+const KIND_LABEL: Record<ExamKind, string> = { qcm: "QCM", exercises: "exercices", mixed: "QCM + questions ouvertes", composite: "questions composées (scénario + sous-questions)", essay: "essai", oral: "oral" };
 
 /**
  * Valide un format déclaré (app : camelCase, connecteur : snake_case accepté).
@@ -138,7 +156,7 @@ export function parseDeclaredFormat(input: unknown): DeclaredFormat | null {
   const o = input as Record<string, unknown>;
   const kind = typeof o.kind === "string" ? o.kind.trim().toLowerCase() : "";
   if (!(EXAM_KINDS as readonly string[]).includes(kind)) {
-    throw new InvalidFormatError(`Type d'examen non reconnu : « ${String(o.kind ?? "")} » (attendu : QCM, exercices, mixte, essai ou oral).`);
+    throw new InvalidFormatError(`Type d'examen non reconnu : « ${String(o.kind ?? "")} » (attendu : QCM, exercices, mixte, composite, essai ou oral).`);
   }
   const int = (raw: unknown, label: string, lo: number, hi: number): number | null => {
     if (raw === undefined || raw === null || raw === "") return null;
@@ -280,11 +298,35 @@ async function annales(cap = 8000): Promise<{ count: number; text: string }> {
   }
 }
 
+/**
+ * Questions composées lues dans un profil : le champ de la détection, sinon (profils détectés
+ * avant lui, CS-290 du 01/11) des sections et un résumé qui annonce « 3 à 6 sous-questions ».
+ */
+export function blocksOf(p: Pick<FormatProfile, "format_summary" | "sections" | "total_points" | "composite">): (BlockFormat & { count: number }) | null {
+  const sections = (p.sections ?? []).filter((s) => s?.name).map((s) => ({ name: String(s.name), description: String(s.description ?? "") }));
+  const totalPoints = positive(p.total_points) ? p.total_points : null;
+  const c = p.composite;
+  if (c && positive(c.block_count)) {
+    const lo = clamp(positive(c.parts_min) ? c.parts_min : PARTS_DEFAULT.partsMin, 2, 8);
+    return { count: clamp(c.block_count, 1, BLOCKS_MAX), sections: sections.slice(0, BLOCKS_MAX), partsMin: lo, partsMax: clamp(positive(c.parts_max) ? c.parts_max : lo, lo, 8), totalPoints };
+  }
+  const text = [p.format_summary, ...sections.map((s) => s.description)].join(" ");
+  const m = /(\d)\s*(?:à|a|-|–|to)\s*(\d)\s*(?:sous-questions|sub-?questions)/i.exec(text);
+  if (!m || sections.length < 2) return null;
+  const lo = clamp(Number(m[1]), 2, 8);
+  return { count: Math.min(sections.length, BLOCKS_MAX), sections: sections.slice(0, BLOCKS_MAX), partsMin: lo, partsMax: clamp(Number(m[2]), lo, 8), totalPoints };
+}
+
 /** Format lu dans des annales : mêmes défauts que le générateur QCM historique. */
 function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Discipline): ExamFormat {
   const types = p.question_types ?? [];
   const qcmShare = types.filter((t) => t.type === "scq" || t.type === "mcq").reduce((s, t) => s + (t.approx_count || 0), 0);
   const base = { basis: "annales" as const, durationMin: p.duration_min || null, language, discipline, summary: p.format_summary || "", evidence: [] };
+  const composite = blocksOf(p);
+  if (composite) {
+    const { count, ...blocks } = composite;
+    return { ...base, kind: "composite", questionCount: count, openCount: null, blocks };
+  }
   if (!p.has_mcq) return { ...base, kind: "exercises", questionCount: null, openCount: null };
   const questionCount = Math.min(20, Math.max(8, qcmShare || 12));
   const openCount = Math.min(3, Math.max(0, types.find((t) => t.type === "open")?.approx_count ?? 2));
@@ -294,7 +336,8 @@ function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Disc
 function describe(f: Omit<ExamFormat, "summary">): string {
   if (!f.kind) return "Format inconnu";
   const parts = [KIND_LABEL[f.kind]];
-  if (f.questionCount) parts.push(`${f.questionCount} ${f.kind === "exercises" || f.kind === "essay" || f.kind === "oral" ? "sujet(s)" : "questions"}`);
+  if (f.kind === "composite") parts[0] = `${f.questionCount ? `${f.questionCount} ` : ""}questions composées (scénario + ${f.blocks ? `${f.blocks.partsMin} à ${f.blocks.partsMax}` : "plusieurs"} sous-questions)`;
+  else if (f.questionCount) parts.push(`${f.questionCount} ${f.kind === "exercises" || f.kind === "essay" || f.kind === "oral" ? "sujet(s)" : "questions"}`);
   if (f.durationMin) parts.push(`${f.durationMin} min`);
   const from = { annales: "d'après les annales", declared: "déclaré", sample_questions: "d'après les questions d'exemple officielles", course_info: "d'après les infos du cours", unknown: "" }[f.basis];
   return `${parts.join(", ")} (${from}, en ${f.language})`;
@@ -340,13 +383,16 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
     format = make({
       basis: "declared", kind: declared.kind, questionCount: declared.questionCount, openCount: null,
       durationMin: declared.durationMin, language, discipline, evidence: [],
+      ...(declared.kind === "composite" ? { blocks: { sections: [], ...PARTS_DEFAULT, totalPoints: null } } : {}),
     });
   } else if (hasAnnales) {
     format = make({ basis: "annales", kind: "exercises", questionCount: null, openCount: null, durationMin: null, language, discipline, evidence: [] });
   } else if (stored && (basisOf(stored) === "sample_questions" || basisOf(stored) === "course_info") && stored.exam_kind) {
+    const blocks = stored.exam_kind === "composite" ? blocksOf(stored) : null;
     format = make({
-      basis: basisOf(stored), kind: stored.exam_kind, questionCount: stored.question_count ?? null, openCount: stored.open_count ?? null,
+      basis: basisOf(stored), kind: stored.exam_kind, questionCount: stored.question_count ?? blocks?.count ?? null, openCount: stored.open_count ?? null,
       durationMin: stored.duration_min || null, language, discipline, evidence: stored.evidence ?? [],
+      ...(stored.exam_kind === "composite" ? { blocks: blocks ? { sections: blocks.sections, partsMin: blocks.partsMin, partsMax: blocks.partsMax, totalPoints: blocks.totalPoints } : { sections: [], ...PARTS_DEFAULT, totalPoints: null } } : {}),
     });
   } else {
     format = make({ basis: "unknown", kind: null, questionCount: null, openCount: null, durationMin: null, language, discipline, evidence: [] }, "Format inconnu");
@@ -394,6 +440,7 @@ export function requestedFormat(format: ExamFormat, kind: ExamKind | null | unde
     ...format, basis: "declared", kind,
     questionCount: sameType ? format.questionCount : null,
     openCount: kind === "qcm" ? 0 : null,
+    blocks: kind === "composite" ? (sameType && format.blocks ? format.blocks : { sections: [], ...PARTS_DEFAULT, totalPoints: null }) : null,
     summary: `${KIND_LABEL[kind]} (demandé pour cet examen, en ${format.language})`,
   };
 }

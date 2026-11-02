@@ -1,7 +1,7 @@
 import * as z from "zod/v4";
 import { getPlanChapters, type PlanChapter } from "@/lib/course-plan";
 import { FIELD_LIMITS } from "@/lib/field-limits";
-import { EXERCISES_MAX as WRITTEN_MAX, QCM_MAX as MCQ_MAX, planMockExam, requestedFormat, resolveExamFormat } from "@/lib/exam-format";
+import { BLOCKS_MAX, EXERCISES_MAX as WRITTEN_MAX, QCM_MAX as MCQ_MAX, planMockExam, requestedFormat, resolveExamFormat } from "@/lib/exam-format";
 import { examTarget, startGenerationJob } from "@/lib/generation";
 import { activeJob, costForJob } from "@/lib/jobs";
 import { log } from "@/lib/metrics";
@@ -41,7 +41,7 @@ export default defineTool({
   name: "generate_mock_exam",
   title: "Generate a mock exam",
   description:
-    "Generate a full mock exam in the course's real exam format — multiple choice, exercises, mixed, essay or oral — taken from its past exams, " +
+    "Generate a full mock exam in the course's real exam format — multiple choice, exercises, mixed, composite questions (scenario + sub-questions), essay or oral — taken from its past exams, " +
     "else from the format the student declared (set_exam_format), else from official sample questions or exam instructions found in its materials. " +
     "If nothing says what the exam looks like, the call fails with format_required: ask the student (type, number of questions, duration) and record it with set_exam_format, " +
     "or pass format for this exam only. When the student asks for a type for THIS exam (e.g. multiple-choice only), pass format (mcq = multiple-choice questions only): it wins over the course's format, which is only the default. Optionally emphasise a chapter of the course plan (e.g. chapter \"3\") or a free focus: a THEME, never a format " +
@@ -55,10 +55,10 @@ export default defineTool({
     chapter: z.union([z.number().int().positive(), z.string().min(1).max(160)]).optional()
       .describe("Chapter of the course plan to emphasise: its number (3) or title. See get_study_plan for the chapters."),
     focus: z.string().min(1).max(FIELD_LIMITS.focus).optional().describe("Free THEMATIC emphasis, e.g. \"eigenvalues and diagonalisation\" (a topic, not a format)."),
-    format: z.enum(["written", "mcq"]).optional()
-      .describe("Explicit format for THIS exam when the student asks for it: written (exercises) or mcq (multiple-choice questions ONLY, no open question). Wins over the course's exam format, past exams included, which is only the default."),
+    format: z.enum(["written", "mcq", "composite"]).optional()
+      .describe("Explicit format for THIS exam when the student asks for it: written (exercises), mcq (multiple-choice questions ONLY, no open question) or composite (each question = a short scenario or code excerpt followed by 3-6 sub-questions mixing single choice, code reading and short answers). Wins over the course's exam format, past exams included, which is only the default."),
     exercise_count: z.number().int().min(1).max(MCQ_MAX).optional()
-      .describe(`Exercises (written, 1-${WRITTEN_MAX}) or questions (mcq, 1-${MCQ_MAX}). Default: as in the course's exam format.`),
+      .describe(`Exercises (written, 1-${WRITTEN_MAX}), questions (mcq, 1-${MCQ_MAX}) or composite questions (1-${BLOCKS_MAX}). Default: as in the course's exam format.`),
     confirmation_token: confirmationTokenArg,
   }),
   output,
@@ -79,7 +79,7 @@ export default defineTool({
       // Format du cours (annales > déclaré > exemples officiels > infos de cours), jamais déduit du focus.
       // Un format demandé pour CET examen l'emporte, annales comprises : le format du cours n'est qu'un défaut.
       const course = await resolveExamFormat();
-      const asked = args.format === "mcq" ? "qcm" as const : args.format === "written" ? "exercises" as const : null;
+      const asked = args.format === "mcq" ? "qcm" as const : args.format === "written" ? "exercises" as const : args.format === "composite" ? "composite" as const : null;
       const format = requestedFormat(course, asked);
       // Le worker et le pré-check relisent la demande dans la cible du job (sinon ils reviendraient au format du cours).
       const askedKind = asked ?? undefined;
@@ -92,10 +92,10 @@ export default defineTool({
       }
       const qcm = plan.generator === "qcm";
       const jobType = qcm ? "qcm" as const : "exam" as const;
-      const count = qcm ? plan.qcmCount : plan.exerciseCount;
-      const target = qcm
+      const count = plan.generator === "qcm" ? plan.qcmCount : plan.generator === "blocks" ? plan.blockCount : plan.exerciseCount;
+      const target = plan.generator === "qcm"
         ? JSON.stringify({ count: plan.qcmCount, openCount: plan.openCount, focus: focus ?? undefined })
-        : examTarget(plan.exerciseCount ?? undefined, focus ?? undefined, askedKind);
+        : examTarget(count ?? undefined, focus ?? undefined, askedKind);
       const note = course.basis === "annales"
         ? (asked ? `Format demandé pour cet examen : ${format.summary} ; celui des annales du cours reste le défaut.` : null)
         : `Ce cours n'a pas d'annales : format ${format.summary}.`;
@@ -106,9 +106,11 @@ export default defineTool({
       const running = await activeJob(jobType);
       if (running) return { ...base, status: "already_running" as const, job: track(running.id) };
 
-      const what = qcm
+      const what = plan.generator === "qcm"
         ? `un examen blanc de ${plan.qcmCount} QCM${plan.openCount ? ` + ${plan.openCount} question(s) ouverte(s)` : ""}`
-        : `un examen blanc${count ? ` de ${count} ${plan.style === "essay" ? "sujet(s) d'essai" : plan.style === "oral" ? "question(s) d'oral" : "exercices"}` : " au format des annales"}`;
+        : plan.generator === "blocks"
+          ? `un examen blanc de ${plan.blockCount} questions composées (scénario + ${plan.partsMin} à ${plan.partsMax} sous-questions)`
+          : `un examen blanc${count ? ` de ${count} ${plan.style === "essay" ? "sujet(s) d'essai" : plan.style === "oral" ? "question(s) d'oral" : "exercices"}` : " au format des annales"}`;
       const decision = await ctx.confirm(
         {
           bucket: "gen",
