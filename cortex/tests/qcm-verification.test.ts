@@ -227,7 +227,7 @@ test("examen déjà en base avec une note de vérification : ni la note ni l'exp
     assert.ok(!text.includes(ALIGN[0]) || text === "Explication saine.", `explication contredite montrée : ${text}`);
   }
   assert.equal(exam!.items[2].explanation, "Explication saine.", "une explication sans note est intacte");
-  assert.match(exam!.items[0].explanation, /clé .*corrigée après/i, "l'étudiant sait pourquoi l'explication manque");
+  assert.match(exam!.items[0].explanation, /vérification avait relevé un problème/, "l'étudiant sait pourquoi l'explication manque");
 });
 
 test("question sur la grille d'évaluation ou la forme d'un rendu : rejetée et remplacée par une question de matière", async () => {

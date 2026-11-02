@@ -42,7 +42,7 @@ const Q_SCHEMA = {
         properties: {
           page: { type: "integer", description: "Page (1-based) de la question." },
           kind: { type: "string", description: "qcm (à choix A-E) | open (à rédiger)." },
-          topic: { type: "string", description: "Sujet COURT (EN) du cours (ex. « Linear regression », « PCA », « K-means », « Backpropagation »)." },
+          topic: { type: "string", description: "Sujet COURT du cours, dans la langue du cours (ex. « Linear regression », « PCA », « K-means », « Backpropagation »)." },
           subtopic: { type: "string", description: "Sous-sujet précis si pertinent." },
           statement: { type: "string", description: "Énoncé FIDÈLE (recopié/condensé) de la question (ou sous-question)." },
           options: { type: "string", description: "QCM uniquement : toutes les options, une par ligne (A) … B) … …). Vide pour open." },
