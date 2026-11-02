@@ -40,6 +40,9 @@ function Rich({ text }: { text: string }) {
 export function BlockExam({ exam, courseId, qs }: { exam: BlockExamView; courseId: string; qs: string }) {
   const [answers, setAnswers] = useState<Record<number, number | string>>({});
   const [graded, setGraded] = useState<Graded | null>(null);
+  // Réponses courtes vérifiées critère par critère : leurs points s'ajoutent au score.
+  const [checked, setChecked] = useState<Record<number, { earned: number; total: number }>>({});
+  const shortScore = Object.values(checked).reduce((s, c) => ({ earned: s.earned + c.earned, total: s.total + c.total }), { earned: 0, total: 0 });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const parts = exam.blocks.flatMap((b) => b.parts);
@@ -102,6 +105,7 @@ export function BlockExam({ exam, courseId, qs }: { exam: BlockExamView; courseI
             courseId={courseId}
             graded={!!graded}
             part={{ examId: exam.id, partId: p.id }}
+            onChecked={(score) => setChecked((c) => ({ ...c, [p.id]: score }))}
             solution={det ? `<p>${escapeHtml(det.answer)}</p><p><strong>Barème</strong></p><ul>${det.criteria.map((c) => `<li>${escapeHtml(c.label)} (${c.points} pt${c.points > 1 ? "s" : ""})</li>`).join("")}</ul>` : null}
           />
         )}
@@ -119,7 +123,7 @@ export function BlockExam({ exam, courseId, qs }: { exam: BlockExamView; courseI
         {exam.pdf?.endsWith(".pdf") && (
           <div className="mt-3 flex gap-2">
             <a className="btn btn-ghost btn-sm" href={`/exam/${exam.pdf}${qs}`} target="_blank" rel="noopener">📄 PDF énoncé</a>
-            <a className="btn btn-quiet btn-sm" style={{ color: "var(--green)" }} href={`/exam/${exam.pdf.replace(/(\.pdf)$/, "-corrige$1")}${qs}`} target="_blank" rel="noopener">PDF corrigé</a>
+            {exam.solutions && <a className="btn btn-quiet btn-sm" style={{ color: "var(--green)" }} href={`/exam/${exam.solutions}${qs}`} target="_blank" rel="noopener">PDF corrigé</a>}
           </div>
         )}
       </header>
@@ -132,7 +136,11 @@ export function BlockExam({ exam, courseId, qs }: { exam: BlockExamView; courseI
             <div className="ring" style={{ "--val": graded.total ? Math.round((graded.score / graded.total) * 100) : 0, "--c": "var(--accent)" } as CSSProperties}><span>{graded.total ? Math.round((graded.score / graded.total) * 100) : 0}%</span></div>
             <div>
               <div className="stat-value">{formatPoints(graded.score)} / {formatPoints(graded.total)}</div>
-              <div className="stat-label">Choix unique et lecture de code{graded.pending ? ` · ${formatPoints(graded.pending)} pts de réponses courtes à vérifier ci-dessous` : ""}</div>
+              <div className="stat-label">
+                Choix unique et lecture de code
+                {shortScore.total ? ` · réponses courtes vérifiées : ${formatPoints(shortScore.earned)} / ${formatPoints(shortScore.total)}` : ""}
+                {graded.pending > shortScore.total ? ` · ${formatPoints(graded.pending - shortScore.total)} pts de réponses courtes à vérifier ci-dessous` : ""}
+              </div>
             </div>
           </div>
         </div>

@@ -11,7 +11,7 @@ import type { QcmGradeDetail } from "@/lib/qcm";
 
 type Item = { id: number; idx: number; topic: string; type: "scq" | "mcq"; stem: string; options: string[]; verified: number | null };
 type Open = { id: number; concept: string; statement: string; solution: string };
-type Exam = { id: number; status?: string; verifySummary: string | null; pdf: string | null; items: Item[]; open: Open[] };
+type Exam = { id: number; status?: string; verifySummary: string | null; pdf: string | null; solutions?: string | null; items: Item[]; open: Open[] };
 type Graded = { score: number; total: number; detail: QcmGradeDetail[]; openSolutions: Open[] };
 
 const LETTER = "ABCDEFGH".split("");
@@ -74,10 +74,10 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
       <header className="mb-6 rise">
         <h1 className="h1" style={{ fontSize: 28 }}>Examen blanc #{exam.id}</h1>
         <p className="sub mt-2">{exam.items.length} questions à choix{exam.open.length ? ` + ${exam.open.length} ouverte(s)` : ""} · réponds, puis corrige-toi. SCQ = une seule case ; MCQ = une ou plusieurs.</p>
-        {exam.pdf && (
+        {exam.pdf?.endsWith(".pdf") && (
           <div className="mt-3 flex gap-2">
             <a className="btn btn-ghost btn-sm" href={`/exam/${exam.pdf}${qs}`} target="_blank" rel="noopener">📄 PDF énoncé</a>
-            <a className="btn btn-quiet btn-sm" style={{ color: "var(--green)" }} href={`/exam/${exam.pdf.replace(/(\.pdf)$/, "-corrige$1")}${qs}`} target="_blank" rel="noopener">PDF corrigé</a>
+            {exam.solutions && <a className="btn btn-quiet btn-sm" style={{ color: "var(--green)" }} href={`/exam/${exam.solutions}${qs}`} target="_blank" rel="noopener">PDF corrigé</a>}
           </div>
         )}
       </header>
