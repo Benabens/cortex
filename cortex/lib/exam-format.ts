@@ -18,6 +18,7 @@ import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import { sanitizeCorpus } from "@/lib/prompt-safety";
+import { languageName } from "@/lib/profiles/generic-directives";
 import type { FormatProfile } from "@/lib/format";
 
 export const EXAM_KINDS = ["qcm", "exercises", "mixed", "essay", "oral"] as const;
@@ -367,9 +368,13 @@ export function examLanguageFor(courseId: string): string {
   return formatContextFor(courseId).language;
 }
 
-/** Langue du cours courant pour ce qu'en tire le moteur (libellés des notions) : celle de l'examen résolu. */
-export async function courseLanguage(): Promise<string> {
-  return (await resolveExamFormat().catch(() => null))?.language ?? examLanguageFor(currentCourse());
+/**
+ * Nom de la langue du cours courant (« français »), pour les libellés des notions qu'en tire la
+ * préparation. Celle de l'examen RÉSOLU (annales, déclaration) : examLanguageFor, synchrone, ne
+ * lit que la dernière résolution de ce process ou la fiche du cours.
+ */
+export async function courseLanguageName(): Promise<string> {
+  return languageName((await resolveExamFormat().catch(() => null))?.language ?? examLanguageFor(currentCourse()))[1];
 }
 
 /**

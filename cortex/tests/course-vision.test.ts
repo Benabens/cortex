@@ -34,9 +34,9 @@ test("une image dont l'annale a été retirée n'est plus montrée comme page d'
   fs.mkdirSync(path.join(refs, "figref"), { recursive: true });
   fs.writeFileSync(path.join(refs, "final2024.pdf"), "%PDF-1.4");
   fs.writeFileSync(path.join(refs, "final2024-sol.pdf"), "%PDF-1.4");
-  for (const png of ["final2024-1.png", "final2024-2.png", "final2024-sol-1.png", "HUM285_grille_midterm_2025-1.png", "final2024-sol-old-1.png"]) {
+  for (const png of ["final2024-1.png", "final2024-2.png", "final2024-sol-1.png", "HUM285_grille_midterm_2025-1.png", "final2024-sol-old-1.png", "topo-2024.png", "notes.txt"]) {
     fs.writeFileSync(path.join(refs, "figref", png), "png");
   }
   const shown = await runWithCourse("ml", async () => courseRefImages().map((p) => path.basename(p)));
-  assert.deepEqual(shown, ["final2024-1.png", "final2024-2.png", "final2024-sol-1.png"]);
+  assert.deepEqual(shown, ["final2024-1.png", "final2024-2.png", "final2024-sol-1.png", "topo-2024.png"], "une image posée à la main reste");
 });

@@ -57,11 +57,12 @@ export type QcmItem = {
   /** Rang du sujet dans le lot demandé (non persisté) : un item écarté laisse SON sujet à combler. */
   slot?: number;
   /**
-   * Raison de rejet relevée à la vérification (notion hors cours, clé contestée) : l'item est
-   * régénéré une fois, puis écarté et son sujet comblé. Jamais gardé tel quel.
+   * Raison de rejet relevée à la vérification (hors cours, hors matière, clé contestée), non
+   * persistée : jamais gardé tel quel. Dans un examen, régénéré une fois puis écarté et son sujet
+   * comblé ; dans la banque de révision, écarté.
    */
   rejected?: string | null;
-  /** Le correcteur valide la question telle quelle : sa réponse est la clé, sans ambiguïté ni indice. */
+  /** Le correcteur valide la question telle quelle (sa réponse est la clé, sans ambiguïté ni indice), non persisté. */
   judgeOk?: boolean | null;
 };
 
@@ -514,6 +515,13 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   // juge l'a crue du cours.
   const termsOf = (r: { course_terms?: unknown }) => (Array.isArray(r.course_terms) ? r.course_terms.filter((t): t is string => typeof t === "string") : []);
   const absent = new Set((await absentCourseTerms((res.results ?? []).flatMap(termsOf))).map((t) => normalize(t)));
+  /** Rejette l'item (jamais gardé tel quel) ; `advice` guide sa régénération. */
+  const reject = (q: QcmItem, reason: string, advice: string) => {
+    q.verified = 0;
+    q.rejected = reason.slice(0, 400);
+    q.judgeIssue = `${q.rejected} — ${advice}`;
+    step(`QCM rejeté — ${q.rejected.slice(0, 160)}`, 70);
+  };
   for (const r of res.results ?? []) {
     const q = items[r.index];
     if (!q) continue;
@@ -523,19 +531,13 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     const flagged = passages.length && typeof r.off_course === "string" && !NO_FLAG.test(r.off_course.trim()) ? r.off_course.trim() : "";
     const off = [missing.length ? `absent du cours : ${missing.join(", ")}` : "", flagged].filter(Boolean).join(" ; ");
     if (off) {
-      q.verified = 0;
-      q.rejected = `hors cours : ${off.slice(0, 240)}`;
-      q.judgeIssue = `notion hors cours (${off.slice(0, 240)}) : n'utilise que les notions et les définitions des extraits du cours`;
-      step(`QCM rejeté — ${q.rejected}`, 70);
+      reject(q, `hors cours : ${off.slice(0, 240)}`, "n'utilise que les notions et les définitions des extraits du cours");
       continue;
     }
     // Une question sur l'évaluation du cours (grille, consignes, forme d'un rendu) ne teste pas sa matière.
     const offMatter = typeof r.off_matter === "string" && !NO_FLAG.test(r.off_matter.trim()) ? r.off_matter.trim().slice(0, 240) : "";
     if (offMatter) {
-      q.verified = 0;
-      q.rejected = `hors matière : ${offMatter}`;
-      q.judgeIssue = `question hors matière (${offMatter}) : teste un fait de la matière du cours, jamais les modalités d'examen ni la forme d'un rendu`;
-      step(`QCM rejeté — ${q.rejected}`, 70);
+      reject(q, `hors matière : ${offMatter}`, "teste un fait de la matière du cours, jamais les modalités d'examen ni la forme d'un rendu");
       continue;
     }
     q.discrimination = Number.isInteger(r.discrimination) ? Math.max(1, Math.min(5, r.discrimination!)) : null;
@@ -557,10 +559,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     // la remplacer donnait une clé et une explication contradictoires (HUM-285, Q19 du 02/11).
     // L'item est régénéré avec ce que le correcteur a trouvé, sinon écarté ; jamais corrigé en place.
     const found = r.correct.map((k) => `« ${sanitizeCorpus(q.options[k] ?? `option ${k}`).slice(0, 120)} »`).join(", ");
-    const why = q.judgeIssue ? ` (${q.judgeIssue})` : "";
-    q.rejected = `clé contestée : le correcteur trouve ${found}${why}`.slice(0, 400);
-    q.judgeIssue = `${q.rejected} — vérifie la réponse et écris une explication qui la justifie`;
-    step(`QCM rejeté — ${q.rejected.slice(0, 160)}`, 70);
+    reject(q, `clé contestée : le correcteur trouve ${found}${q.judgeIssue ? ` (${q.judgeIssue})` : ""}`, "vérifie la réponse et écris une explication qui la justifie");
   }
   return items;
 }
@@ -822,9 +821,10 @@ export function qcmExamSummary(r: Pick<QcmExamResult, "count" | "requested" | "v
 }
 
 /**
- * Note que la vérification ajoutait à l'explication quand elle remplaçait la clé (avant le
- * 02/11/2026) : l'explication défendait alors l'ANCIENNE clé. Encore présente dans les examens
- * déjà générés ; elle n'est jamais montrée, ni l'explication qu'elle accompagne.
+ * Note que la vérification ajoutait à l'explication (avant le 02/11/2026) quand le correcteur
+ * contestait la clé — qu'elle la remplace (l'explication défendait alors l'ANCIENNE réponse) ou
+ * qu'il relève seulement un défaut. Les deux cas ne se distinguent plus : la note n'est jamais
+ * montrée, ni l'explication qu'elle accompagne.
  */
 const LEGACY_KEY_NOTE = /\[clé (?:corrigée à la vérif\b|alignée sur la résolution indépendante)/;
 
@@ -832,7 +832,7 @@ const LEGACY_KEY_NOTE = /\[clé (?:corrigée à la vérif\b|alignée sur la rés
 export function shownExplanation(raw: string | null | undefined): string {
   const text = raw ?? "";
   return LEGACY_KEY_NOTE.test(text)
-    ? "Explication retirée : la clé de cette question a été corrigée après sa rédaction, et l'explication d'origine justifiait l'ancienne réponse."
+    ? "Explication retirée : la vérification avait relevé un problème sur cette question, et l'explication d'origine peut ne pas justifier la réponse retenue."
     : text;
 }
 

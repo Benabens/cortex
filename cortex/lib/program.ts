@@ -8,8 +8,7 @@ import { detectExamDna } from "@/lib/exam-dna";
 import { courseOrderKey } from "@/lib/course-order";
 import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE } from "@/lib/course-grounding";
-import { courseLanguage } from "@/lib/exam-format";
-import { languageName } from "@/lib/profiles/generic-directives";
+import { courseLanguageName } from "@/lib/exam-format";
 
 export { courseOrderKey };
 
@@ -219,7 +218,7 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
   // Vision : si le cours a des images-étalon (vrais finals rendus), le LLM les REGARDE.
   const vision = p.visionBlock?.() ?? "";
   // Libellés dans la langue du cours : « SHS Conceptual Link (D1) » dans un cours en français (HUM-285).
-  const lang = languageName(await courseLanguage())[1];
+  const lang = await courseLanguageName();
 
   const prompt = [
     p.qaIntro(),
@@ -346,7 +345,7 @@ export type PartitionType = { label: string; method: string | null; exo_type: st
 export async function clusterIndexLabels(rawCount: Map<string, number>): Promise<TopicCluster[]> {
   const rawLabels = [...rawCount.keys()];
   const p0 = profile();
-  const lang = languageName(await courseLanguage())[1];
+  const lang = await courseLanguageName();
   const prompt = [
     p0.qaIntro?.() ?? "Tu es l'équipe enseignante du cours.",
     `Voici les libellés BRUTS des exercices extraits des vrais finals (avec leur nombre d'occurrences). Regroupe les ÉQUIVALENTS sous un même TYPE canonique (ex. « Strassen / matrix multiplication » et « Strassen's algorithm » → un seul type « Divide & Conquer — Strassen »). Ne fusionne PAS des techniques différentes.`,

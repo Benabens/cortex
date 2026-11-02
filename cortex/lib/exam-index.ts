@@ -11,8 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { listExamSourceRows } from "@/lib/sources";
 import { COURSE_MATTER_RULE } from "@/lib/course-grounding";
-import { courseLanguage } from "@/lib/exam-format";
-import { languageName } from "@/lib/profiles/generic-directives";
+import { courseLanguageName } from "@/lib/exam-format";
 
 /**
  * INDEX EXHAUSTIF exo-par-exo des finals (remplace le résumé tronqué à 16 k).
@@ -92,7 +91,7 @@ const EXO_SCHEMA = {
         type: "object",
         properties: {
           page: { type: "integer", description: "Numéro de page (1-based) où commence cet exercice." },
-          topic: { type: "string", description: "Label COURT (EN, comme sur l'examen) du sujet/technique (ex. « Strassen / matrix multiplication », « Dijkstra shortest path », « DP — knapsack »)." },
+          topic: { type: "string", description: "Label COURT du sujet/technique, dans la langue du cours (ex. « Strassen / matrix multiplication », « Dijkstra shortest path », « DP — knapsack »)." },
           method: { type: "string", description: "La méthode/technique précise testée." },
           exo_type: { type: "string", description: "Le FORMAT réel de l'exo (QCM à réponse unique, preuve à rédiger, écrire un algo + complexité, remplir un tableau de DP, tracer un parcours…)." },
           trap: { type: "string", description: "Le piège typique / l'idée fausse punie, en une phrase (si visible)." },
@@ -129,12 +128,11 @@ export async function courseHrefFor(course: string, topic: string, method: strin
 }
 
 /** Indexe UN examen : rend ses pages, vision → chaque exo, calcule les 2 liens. Résilient (retourne []). */
-async function indexOneExam(course: string, src: { path: string; title: string; year: number | null }, step: (m: string, p: number) => void, prog: number): Promise<Omit<ExamExercise, "id" | "topicId">[]> {
+async function indexOneExam(course: string, src: { path: string; title: string; year: number | null }, step: (m: string, p: number) => void, prog: number, lang: string): Promise<Omit<ExamExercise, "id" | "topicId">[]> {
   const basename = path.basename(src.path);
   const pages = renderExamPages(course, basename);
   if (!pages.length) { step(`${src.title} : pages non rendues (ignoré)`, prog); return []; }
   const p = profile();
-  const lang = languageName(await courseLanguage())[1];
   const archetypeList = p.archetypes.map((a) => `  - id="${a.id}" · ${a.concept} (${a.topics.join(", ")})`).join("\n");
   const prompt = [
     p.qaIntro?.() ?? "Tu es l'équipe enseignante du cours.",
@@ -238,12 +236,13 @@ export async function indexExamExercises(opts: { onStep?: (m: string, p: number)
   // reclassée (grille d'évaluation de HUM-285, d'abord classée midterm) n'y laisse rien.
   await q.exec(`DELETE FROM exam_exercises`);
   if (!exams.length) { step("Aucun final ingéré — index vide.", 100); return { exams: 0, exercises: 0 }; }
+  const lang = await courseLanguageName();
   let total = 0;
   for (let i = 0; i < exams.length; i++) {
     const prog = 8 + Math.round((i / exams.length) * 82);
     step(`Indexation ${i + 1}/${exams.length} — ${exams[i].title}…`, prog);
     let rows: Omit<ExamExercise, "id" | "topicId">[] = [];
-    try { rows = await indexOneExam(course, exams[i], step, prog); } catch (e) { step(`${exams[i].title} : ignoré (${(e as Error).message.slice(0, 50)})`, prog); }
+    try { rows = await indexOneExam(course, exams[i], step, prog, lang); } catch (e) { step(`${exams[i].title} : ignoré (${(e as Error).message.slice(0, 50)})`, prog); }
     await q.tx(async () => {
       for (const r of rows) {
         await q.run(
