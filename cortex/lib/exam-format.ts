@@ -367,6 +367,11 @@ export function examLanguageFor(courseId: string): string {
   return formatContextFor(courseId).language;
 }
 
+/** Langue du cours courant pour ce qu'en tire le moteur (libellés des notions) : celle de l'examen résolu. */
+export async function courseLanguage(): Promise<string> {
+  return (await resolveExamFormat().catch(() => null))?.language ?? examLanguageFor(currentCourse());
+}
+
 /**
  * Ce que les profils génériques lisent du format, en SYNCHRONE : la dernière
  * résolution du cours dans ce process, sinon la déclaration, la langue et le
