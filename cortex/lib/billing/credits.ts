@@ -414,24 +414,24 @@ export function insufficient(balanceCenti: number, costCenti: number, subCenti =
  * (jamais reportée). Le user crédité est celui du débit d'origine.
  * `fraction` < 1 : remboursement PARTIEL (examen incomplet), au prorata de
  * chaque part, arrondi au centième SUPÉRIEUR (en faveur de l'utilisateur).
- * Un seul remboursement par débit, partiel ou non. Rend les centièmes rendus.
+ * Un seul remboursement par débit et par `marker` (défaut : refund:<ref>) — une question
+ * signalée a le sien (lib/question-reports). Rend les centièmes rendus.
  */
-export async function refundGeneration(kind: string, ref: string, userId = currentUser(), fraction = 1): Promise<number> {
+export async function refundGeneration(kind: string, ref: string, userId = currentUser(), fraction = 1, marker = `refund:${ref}`): Promise<number> {
   if (!billingEnabled()) return 0;
-  const share = Math.min(1, Math.max(0, fraction));
-  if (share <= 0) return 0;
+  const asked = Math.min(1000, Math.max(0, Math.round(fraction * 1000)));
+  if (asked <= 0) return 0;
   try {
-    if (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, `refund:${ref}`)) return 0;
+    if (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, marker)) return 0;
     const debited = await authGet<{ delta: number; user_id: string; sub_amount: number | null; created_at: string }>(
       `SELECT ${DELTA_CENTI} AS delta, user_id, sub_amount, created_at FROM credit_transactions WHERE ref = ?`, ref,
     );
     if (!debited) return 0;             // jamais débité → rien à rendre
     const u = debited.user_id || userId;
-    const part = (centi: number) => Math.min(centi, Math.ceil(centi * share - 1e-9));
-    const purchasedBack = part(Math.max(0, -Number(debited.delta)));
-    const subBack = part(Math.max(0, Number(debited.sub_amount ?? 0)));
+    const purchasedDebit = Math.max(0, -Number(debited.delta));
+    const subDebit = Math.max(0, Number(debited.sub_amount ?? 0));
     let subOk = false;
-    if (subBack > 0) {
+    if (subDebit > 0) {
       const s = await getSubscription(u);
       const windowStart = s ? (s.window_anchor ?? s.period_start ?? (s.month_anchor ? `${s.month_anchor}-01 00:00:00` : null)) : null;
       const sameWindow = !!windowStart && String(debited.created_at) >= windowStart && !rechargeDue(s!, nowStr());
@@ -441,13 +441,25 @@ export async function refundGeneration(kind: string, ref: string, userId = curre
     // écrite dans la MÊME transaction que la part d'abonnement : ni double remboursement
     // (ref UNIQUE, rejeu annulé), ni part d'abonnement perdue si l'une des écritures échoue.
     await ensureLedgerUnit();
-    const label = share < 1 ? `remboursement partiel ${kind}` : `remboursement ${kind}`;
     return await authTx(async (tx) => {
-      if (await tx.get<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, `refund:${ref}`)) return 0;
+      if (await tx.get<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, marker)) return 0;
+      // PLAFOND : un même débit peut être rendu en plusieurs fois (manque à la livraison, puis
+      // questions signalées, ou échec) ; la somme des parts ne dépasse jamais le débit. Une ligne
+      // d'avant ce compte (part inconnue) vaut tout le débit : rien de plus n'est rendu.
+      const base = `refund:${ref}`;
+      const prior = await tx.all<{ delta: number; share_milli: number | null }>(
+        `SELECT ${DELTA_CENTI} AS delta, share_milli FROM credit_transactions WHERE ref = ? OR substr(ref, 1, ?) = ?`, base, base.length + 1, `${base}:`,
+      );
+      const share = Math.min(asked, 1000 - prior.reduce((s, r) => s + (r.share_milli == null ? 1000 : Number(r.share_milli)), 0)) / 1000;
+      if (share <= 0) return 0;
+      const part = (centi: number) => Math.min(centi, Math.ceil(centi * share - 1e-9));
+      const purchasedBack = Math.min(part(purchasedDebit), Math.max(0, purchasedDebit - prior.reduce((s, r) => s + Math.max(0, Number(r.delta)), 0)));
+      const subBack = part(subDebit);
+      const label = share < 1 ? `remboursement partiel ${kind}` : `remboursement ${kind}`;
       const t = nowStr();
       await tx.run(
-        `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, created_at) VALUES (?,?,?,?,'centi',?)`,
-        u, purchasedBack, label, `refund:${ref}`, t,
+        `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, share_milli, created_at) VALUES (?,?,?,?,'centi',?,?)`,
+        u, purchasedBack, label, marker, Math.round(share * 1000), t,
       );
       if (subOk) await tx.run(`UPDATE subscriptions SET remaining = remaining + ?, updated_at = ? WHERE user_id = ?`, subBack, t, u);
       return purchasedBack + (subOk ? subBack : 0);

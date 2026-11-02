@@ -62,7 +62,7 @@ after(async () => {
 const formPost = (p: string, fields: Record<string, string>, headers: Record<string, string> = {}) =>
   new Request(`${ISSUER}${p}`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", ...headers }, body: new URLSearchParams(fields).toString() });
 
-async function client(): Promise<Client> {
+async function client(write = false): Promise<Client> {
   const { registerEndpoint, prepareConsent, consentDecisionEndpoint, tokenEndpoint } = await import("../lib/oauth/routes");
   const reg = await (await registerEndpoint(new Request(`${ISSUER}/oauth/register`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_name: "Claude (test)", redirect_uris: [REDIRECT] }),
@@ -73,7 +73,7 @@ async function client(): Promise<Client> {
     code_challenge: crypto.createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256",
   }), ALICE);
   if (view.kind !== "consent") throw new Error(JSON.stringify(view));
-  const decided = await consentDecisionEndpoint(formPost("/oauth/authorize/decision", { ticket: view.ticket, decision: "approve", generate: "on" }, { origin: ISSUER }), ALICE);
+  const decided = await consentDecisionEndpoint(formPost("/oauth/authorize/decision", { ticket: view.ticket, decision: "approve", generate: "on", ...(write ? { write: "on" } : {}) }, { origin: ISSUER }), ALICE);
   const code = new URL(decided.headers.get("location")!).searchParams.get("code")!;
   const token = (await (await tokenEndpoint(formPost("/oauth/token", {
     grant_type: "authorization_code", code, code_verifier: verifier, client_id: reg.client_id, redirect_uri: REDIRECT, resource: MCP_URL,
@@ -139,11 +139,12 @@ test("HUM-285 au format déclaré (QCM, 20 questions) : devis pour 20 QCM au tar
   assert.equal(sc.confirmation.cost_credits, fromCenti(costForJob("qcm", target)));
   assert.match(text(r), /annales/, "le résumé lu par le modèle le dit aussi");
 
-  // Avec des annales : leur format fait la règle, une demande de QCM n'est pas appliquée — et c'est dit.
-  const exam = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "MATH-101", focus: "QCM sur les séries", format: "mcq" } })) as ToolResult;
-  const ex = exam.structuredContent as { format: string; exercise_count: number | null; note: string | null };
-  assert.deepEqual([ex.format, ex.exercise_count], ["written", null], "avec annales : format réel");
-  assert.match(ex.note ?? "", /annales/);
+  // Avec des annales : la demande explicite l'emporte, leur format n'est qu'un défaut — et c'est dit.
+  const exam = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "MATH-101", focus: "les séries", format: "mcq", exercise_count: 12 } })) as ToolResult;
+  const ex = exam.structuredContent as { format: string; exercise_count: number | null; note: string | null; confirmation: { cost_credits: number } };
+  assert.deepEqual([ex.format, ex.exercise_count], ["mcq", 12], "QCM demandés : QCM, même avec des annales");
+  assert.match(ex.note ?? "", /annales[\s\S]*défaut/);
+  assert.equal(ex.confirmation.cost_credits, fromCenti(costForJob("qcm", JSON.stringify({ count: 12, openCount: 0, focus: "les séries" }))), "aucune question ouverte");
   await c.close();
 });
 
@@ -186,5 +187,70 @@ test("get_job_status sur un examen QCM terminé : les questions et leurs options
   // get_results comptait les seules questions ouvertes (« questions: 1 » pour chaque examen QCM).
   const results = ((await c.callTool({ name: "get_results", arguments: { course: "HUM-285" } })) as ToolResult).structuredContent as { mock_exams: { questions: number }[] };
   assert.equal(results.mock_exams[0]?.questions, 3);
+  await c.close();
+});
+
+test("report_question : un agent remonte la relecture d'un examen, question par question", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { runWithUser } = await import("../db/context");
+  const { q } = await import("../db/q");
+  const { getQcmExam } = await import("../lib/qcm");
+  const { listCoursesOf } = await import("../lib/courses");
+  const course = listCoursesOf(ALICE).find((x) => x.examCode === "HUM-285")!.id;
+  const examId = await runWithUser(ALICE, () => runWithCourse(course, async () => {
+    await getQcmExam(0);
+    const id = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','ready')`);
+    for (const idx of [0, 1]) {
+      await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        id, idx, "Galilée", "scq", `Question ${idx} sur Galilée ?`, JSON.stringify(["a", "b"]), "[0]", "[]", "…", 1);
+    }
+    return id;
+  }));
+  // Signaler modifie les données de l'étudiant (révisions, remboursement) : droit d'écriture.
+  const c = await client(true);
+  const r = (await c.callTool({ name: "report_question", arguments: { course: "HUM-285", exam_id: examId, question_number: 2, reason: "duplicate", comment: "Même question que la 1." } })) as ToolResult;
+  assert.ok(!r.isError, text(r));
+  const sc = r.structuredContent as { report_id: number; status: string; refunded_credits: number };
+  assert.ok(sc.report_id > 0);
+  assert.equal(sc.status, "open");
+  const { listReports } = await import("../lib/question-reports");
+  assert.ok((await listReports(10)).some((x) => x.id === sc.report_id && /Question 1 sur Galilée/.test(x.stem) && x.userId === ALICE));
+  const missing = (await c.callTool({ name: "report_question", arguments: { course: "HUM-285", exam_id: examId, question_number: 9, reason: "ambiguous" } })) as ToolResult & { _meta?: Record<string, unknown> };
+  assert.equal(errorCode(missing), "not_found");
+  await c.close();
+});
+
+
+test("C — questions composées au connecteur : une entrée par sous-question (scénario en tête), et chacune se signale", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { runWithUser } = await import("../db/context");
+  const { q } = await import("../db/q");
+  const { getBlockExam } = await import("../lib/blocks");
+  const jobs = await import("../lib/jobs");
+  const { listCoursesOf } = await import("../lib/courses");
+  const course = listCoursesOf(ALICE).find((x) => x.examCode === "HUM-285")!.id;
+  const { jobId, examId } = await runWithUser(ALICE, () => runWithCourse(course, async () => {
+    await getBlockExam(0); // amorce le schéma des questions composées
+    const examId = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('blocks','ready')`);
+    const blockId = await q.insert(`INSERT INTO exam_blocks (exam_id, idx, title, section, scenario, points, verified) VALUES (?,?,?,?,?,?,?)`, examId, 0, "Le procès de Galilée", "Q1", "En 1633, Galilée comparaît devant l'Inquisition.", 3, 1);
+    await q.run(`INSERT INTO block_parts (block_id, exam_id, idx, kind, prompt, options_json, correct, answer, criteria_json, points, explanation) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      blockId, examId, 0, "scq", "Quel ouvrage est en cause ?", JSON.stringify(["Le Dialogue", "Le Sidereus Nuncius"]), 0, "", "[]", 1, "Le Dialogue de 1632.");
+    await q.run(`INSERT INTO block_parts (block_id, exam_id, idx, kind, prompt, options_json, correct, answer, criteria_json, points, explanation) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      blockId, examId, 1, "short", "Pourquoi le livre dérange-t-il ?", "[]", -1, "Il défend l'héliocentrisme.", JSON.stringify([{ label: "Nomme l'héliocentrisme", points: 2 }]), 2, "");
+    const id = await jobs.createJob("exam");
+    await jobs.setJob(id, { status: "done", progress: 100, resultId: examId, resultPath: `/mock/${examId}` });
+    return { jobId: id, examId };
+  }));
+  const c = await client(true);
+  type Status = { exam: { questions: { statement: string; solution: string | null; kind?: string }[] } | null };
+  const sc = ((await c.callTool({ name: "get_job_status", arguments: { course: "HUM-285", job_id: jobId, include_solutions: true } })) as ToolResult).structuredContent as Status;
+  assert.deepEqual(sc.exam?.questions.map((x) => x.kind), ["single_choice", "written"]);
+  assert.match(sc.exam!.questions[1].statement, /Inquisition[\s\S]*\(b\)[\s\S]*Pourquoi le livre/);
+  assert.match(sc.exam!.questions[1].solution ?? "", /héliocentrisme[\s\S]*Barème/);
+  const r = (await c.callTool({ name: "report_question", arguments: { course: "HUM-285", exam_id: examId, question_number: 2, reason: "ambiguous" } })) as ToolResult;
+  assert.ok(!r.isError, text(r));
+  const { listReports } = await import("../lib/question-reports");
+  const id = (r.structuredContent as { report_id: number }).report_id;
+  assert.ok((await listReports(20)).some((x) => x.id === id && x.kind === "part" && /Pourquoi le livre/.test(x.stem)));
   await c.close();
 });

@@ -120,6 +120,8 @@ export async function deleteCourseWithData(userId: string, courseId: string, opt
   } catch (e) {
     residues.push(`fichiers ${root} : ${e instanceof Error ? e.message : String(e)}`);
   }
+  // Signalements des questions de ce cours (store global, lib/question-reports), quel que soit le pilote.
+  try { await authRun(`DELETE FROM question_reports WHERE user_id = ? AND course = ?`, userId, courseId); } catch (e) { residues.push(`question_reports : ${e instanceof Error ? e.message : String(e)}`); }
   const n = await deleteCourseRow(courseId, userId);
   await reloadCourses();
   await unmarkCourseDeleting(userId, courseId);

@@ -16,17 +16,64 @@ import { normalize, tokenize } from "@/lib/text";
  * réparti (l'appelant garde son ordre par poids).
  */
 
-export type CoverageTopic = { label: string; method: string | null; weight: number; chapter: string | null; repeat?: boolean };
+export type CoverageTopic = { label: string; method: string | null; weight: number; chapter: string | null; repeat?: boolean; subTheme?: string | null };
 
 const UNCLASSIFIED = "(non classé)";
 
-/** Deux libellés sont des variantes d'une même notion s'ils partagent la moitié de leurs mots. */
-function variants(a: string, b: string): boolean {
-  const x = new Set(tokenize(a, 3));
-  const y = new Set(tokenize(b, 3));
+/** Racines des mots d'un libellé : 5 premières lettres, pour rapprocher « paradox »/« paradoxe », « sensitive »/« sensibles ». */
+function roots(label: string): Set<string> {
+  return new Set(tokenize(label, 3).map((w) => (w.length >= 5 ? w.slice(0, 5) : w)));
+}
+
+/**
+ * Deux libellés sont des variantes d'une même notion s'ils partagent au moins
+ * 40 % de leurs racines — y compris d'une langue à l'autre (mock 4 de CS-290 :
+ * « Simpson's paradox / confounder » et « Paradoxe de Simpson — Berkeley »).
+ */
+export function variants(a: string, b: string): boolean {
+  const x = roots(a);
+  const y = roots(b);
   const inter = [...x].filter((w) => y.has(w)).length;
   const union = new Set([...x, ...y]).size;
-  return union > 0 && inter / union >= 0.5;
+  return union > 0 && inter / union >= 0.4;
+}
+
+/**
+ * Sous-thèmes nommés d'une notion : les énumérations entre parenthèses de son libellé ou de
+ * sa méthode (au moins trois éléments séparés par « , » ou « / »). CS-290 : « nommer le
+ * phénomène (filter bubble, illusory truth effect, mis/dis/malinformation, reinforcing vs
+ * balancing loop) » — le générateur prenait toujours le premier, les boucles jamais.
+ */
+export function subThemes(label: string, method: string | null): string[] {
+  const out: string[] = [];
+  for (const src of [label, method ?? ""]) {
+    for (const m of src.matchAll(/\(([^()]{6,})\)/g)) {
+      const parts = m[1].split(/\s*,\s*|\s+\/\s+/).map((x) => x.trim()).filter((x) => x.length >= 3);
+      if (parts.length >= 3) out.push(...parts);
+    }
+  }
+  return [...new Set(out)];
+}
+
+/** Un texte déjà posé (énoncé, thème) parle-t-il de ce sous-thème : au moins la moitié de ses mots. */
+function mentions(text: string, sub: string): boolean {
+  const words = tokenize(normalize(sub), 4);
+  const want = words.length ? words : tokenize(normalize(sub), 2);
+  if (!want.length) return false;
+  const have = new Set(tokenize(normalize(text), 2));
+  return want.filter((w) => have.has(w)).length * 2 >= want.length;
+}
+
+/**
+ * Poids d'un chapitre : ses notions DISTINCTES (une variante ne compte qu'une fois), sommées
+ * puis divisées par la racine de leur nombre. Un chapitre découpé en vingt notions (ou préparé
+ * trois fois) ne prend pas l'examen pour autant : CS-290, 7 QCM sur 12 en Fairness 1.
+ */
+function chapterWeight(topics: CoverageTopic[]): number {
+  const distinct: CoverageTopic[] = [];
+  for (const t of [...topics].sort((a, b) => b.weight - a.weight)) if (!distinct.some((d) => variants(d.label, t.label))) distinct.push(t);
+  const sum = distinct.reduce((s, t) => s + Math.max(0, t.weight), 0);
+  return sum ? sum / Math.sqrt(distinct.length) : topics.length;
 }
 
 /** Notions d'un chapitre par poids, les variantes d'une notion déjà prise renvoyées en fin de liste. */
@@ -45,7 +92,7 @@ function diverse(topics: CoverageTopic[]): CoverageTopic[] {
  * reprise marquée `repeat` seulement quand il n'en reste plus. Ordre alterné
  * entre chapitres, pour que chaque lot en mêle plusieurs.
  */
-export function spreadOverChapters(topics: CoverageTopic[], n: number): CoverageTopic[] | null {
+export function spreadOverChapters(topics: CoverageTopic[], n: number, opts: { avoid?: string[]; asked?: string[] } = {}): CoverageTopic[] | null {
   if (n <= 0 || !topics.length) return null;
   const groups = new Map<string, CoverageTopic[]>();
   for (const t of topics) {
@@ -54,10 +101,19 @@ export function spreadOverChapters(topics: CoverageTopic[], n: number): Coverage
   }
   // Au moins deux VRAIS chapitres ; les notions non rattachées forment alors un groupe de plus.
   if ([...groups.keys()].filter((k) => k !== UNCLASSIFIED).length < 2) return null;
+  const avoid = opts.avoid ?? [];
+  const asked = opts.asked ?? [];
+  const isAsked = (x: string) => asked.some((a) => mentions(a, x));
+  // Une notion à sous-thèmes nommés compte une fois par sous-thème (ceux pas encore posés dans
+  // les examens précédents d'abord) : une reprise teste une AUTRE facette, ce n'est pas un doublon.
+  const expand = (ts: CoverageTopic[]) => ts.flatMap((t) => {
+    const all = subThemes(t.label, t.method);
+    return all.length ? [...all.filter((x) => !isAsked(x)), ...all.filter(isAsked)].map((subTheme) => ({ ...t, subTheme })) : [t];
+  });
   const chapters = [...groups.entries()].map(([name, ts]) => ({
     name,
-    topics: diverse(ts),
-    weight: ts.reduce((s, t) => s + Math.max(0, t.weight), 0) || ts.length,
+    topics: diverse(expand(ts)),
+    weight: chapterWeight(ts),
   })).sort((a, b) => b.weight - a.weight);
 
   const quota = new Map<string, number>();
@@ -74,11 +130,70 @@ export function spreadOverChapters(topics: CoverageTopic[], n: number): Coverage
     for (let i = 0; left > 0; i = (i + 1) % ideal.length, left--) quota.set(ideal[i].c.name, quota.get(ideal[i].c.name)! + 1);
   }
 
-  const picks = chapters
-    .filter((c) => quota.get(c.name))
-    .map((c) => Array.from({ length: quota.get(c.name)! }, (_, k) => ({ ...c.topics[k % c.topics.length], repeat: k >= c.topics.length })));
+  // Tour par tour, un sujet par chapitre encore sous son quota : d'abord une notion qui n'est
+  // la variante d'AUCUNE notion déjà prise dans l'examen (tous chapitres confondus) ni d'une
+  // notion des examens précédents (`avoid`), puis une non reprise, puis une reprise marquée.
+  // Une notion à sous-thèmes n'est « déjà posée » que pour les sous-thèmes que les énoncés des
+  // examens précédents (`asked`) ont traités.
   const out: CoverageTopic[] = [];
-  for (let k = 0; out.length < n && picks.some((p) => p[k]); k++) for (const p of picks) if (p[k] && out.length < n) out.push(p[k]);
+  const taken = new Map<string, Set<CoverageTopic>>();
+  const active = chapters.filter((c) => quota.get(c.name));
+  // Part de chaque chapitre (n × poids / total) et charge prévue (quota + places reçues − cédées) :
+  // une place cédée pour la nouveauté va au chapitre le MOINS servi, jamais au-delà de sa part
+  // arrondie au supérieur (CS-290 : toutes partaient vers Fairness 1, le plus riche en notions).
+  const totalWeight = chapters.reduce((s, c) => s + c.weight, 0) || 1;
+  const share = new Map(chapters.map((c) => [c.name, (n * c.weight) / totalWeight]));
+  const cap = new Map(chapters.map((c) => [c.name, Math.max(quota.get(c.name) ?? 0, Math.ceil(share.get(c.name)!))]));
+  const load = new Map(chapters.map((c) => [c.name, quota.get(c.name) ?? 0]));
+  for (let k = 0; out.length < n; k++) {
+    let added = false;
+    for (const c of active) {
+      if (k >= quota.get(c.name)! || out.length >= n) continue;
+      const mine = taken.get(c.name) ?? new Set<CoverageTopic>();
+      const free = c.topics.filter((t) => !mine.has(t));
+      const otherFacet = (o: CoverageTopic, t: CoverageTopic) => o.label === t.label && !!o.subTheme && !!t.subTheme && o.subTheme !== t.subTheme;
+      const clash = (t: CoverageTopic) => out.some((o) => variants(o.label, t.label) && !otherFacet(o, t));
+      const old = (t: CoverageTopic) => (t.subTheme ? isAsked(t.subTheme) : avoid.some((a) => variants(a, t.label)));
+      // Plus que des variantes ou des notions déjà posées ici : la place va à un autre chapitre
+      // qui a mieux (pas de doublon dans l'examen plutôt qu'un prorata exact) ; pour la seule
+      // nouveauté, dans la limite de sa part.
+      const elsewhere = (ok: (t: CoverageTopic) => boolean, capped: boolean): { pick: CoverageTopic; owner: string } | null => {
+        let best: { pick: CoverageTopic; owner: string; served: number } | null = null;
+        for (const d of chapters) {
+          if (d.name === c.name || (capped && load.get(d.name)! >= cap.get(d.name)!)) continue;
+          const t = d.topics.find((x) => !(taken.get(d.name)?.has(x)) && ok(x));
+          const served = load.get(d.name)! / Math.max(share.get(d.name)!, 1e-9);
+          if (t && (!best || served < best.served)) best = { pick: t, owner: d.name, served };
+        }
+        return best && { pick: best.pick, owner: best.owner };
+      };
+      const fresh = (t: CoverageTopic) => !clash(t) && !old(t);
+      // Ordre de préférence : notion neuve ici, neuve ailleurs, non doublon ici, non doublon ailleurs.
+      // La PREMIÈRE question d'un chapitre y reste même sur une notion déjà posée : la couverture
+      // de chaque chapitre passe avant la nouveauté (CS-290 : Safety 2 n'a qu'une notion).
+      let pick: CoverageTopic | undefined = free.find(fresh) ?? (k === 0 ? free.find((t) => !clash(t)) : undefined);
+      let owner = c.name;
+      if (!pick) {
+        const moved = elsewhere(fresh, true) ?? (free.some((t) => !clash(t)) ? null : elsewhere((t) => !clash(t), false));
+        if (moved) {
+          ({ pick, owner } = moved);
+          load.set(owner, load.get(owner)! + 1);
+          load.set(c.name, load.get(c.name)! - 1);
+        } else pick = free.find((t) => !clash(t));
+      }
+      pick ??= free[0];
+      if (pick) {
+        const set = taken.get(owner) ?? new Set<CoverageTopic>();
+        set.add(pick);
+        taken.set(owner, set);
+        out.push(pick);
+      } else {
+        out.push({ ...c.topics[k % c.topics.length], repeat: true });
+      }
+      added = true;
+    }
+    if (!added) break;
+  }
   return out;
 }
 

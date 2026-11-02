@@ -50,10 +50,20 @@ const BANNED = [
   "pgfimage", "pgfdeclareimage",
   "usepackage", "RequirePackage", "documentclass",
   "batchmode", "nonstopmode", "scrollmode", "errorstopmode",
+  // expl3 : sans \ExplSyntaxOn, « _ » et « : » ne sont pas des lettres, un nom expl3 n'en est pas un.
+  // \ProvidesExplPackage / Class / File l'allument aussi, pour toute la suite du fichier.
+  "ExplSyntaxOn", "ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile",
 ];
 const BANNED_RE = new RegExp(String.raw`\\@*(?:${BANNED.join("|")})(?![A-Za-z@])`, "g");
-/** Noms expl3 (`\file_input:n`, `\ior_open:Nn`…) : lettres + `_`/`:` — jamais dans un énoncé. */
-const EXPL3_RE = /\\[A-Za-z@]+[_:][A-Za-z_:@]*/g;
+/**
+ * Fonctions expl3 (`\file_input:n`, `\ior_open:Nn`, `\use:c`…) : un nom de module (avec « _ »)
+ * suivi de « : », ou un nom suivi d'une SIGNATURE non vide. L'ancien motif (« _ » ou « : »
+ * après le nom) refusait tout indice de maths (`$\sigma_x$`) et faisait disparaître le PDF
+ * entier (examen 4 de CS-290) ; une application `$\phi: X \to Y$` (signature vide) passe.
+ * Défense en profondeur : \ExplSyntaxOn et \ProvidesExpl…, sans lesquels aucun nom expl3
+ * n'existe, sont bannis.
+ */
+const EXPL3_RE = /\\[A-Za-z@]+(?:_[A-Za-z@]+)+:[A-Za-z]*|\\[A-Za-z@]+:[A-Za-z]+/g;
 /** Primitives XeTeX (tectonic = XeTeX) : \XeTeXpicfile, \XeTeXpdffile, encodages, glyphes… */
 const XETEX_RE = /\\XeTeX[A-Za-z]*/g;
 const ENV_RE = /\\(?:begin|end)\s*\{([^}]*)\}/g;

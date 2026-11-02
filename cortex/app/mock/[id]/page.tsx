@@ -4,11 +4,14 @@ import { use, useCallback, useEffect, useState, type CSSProperties } from "react
 import { useCourse } from "@/lib/ux/api";
 import { SafeHtml } from "@/components/ui/SafeHtml";
 import { OpenResponse } from "@/components/exam/OpenResponse";
+import { ReportButton } from "@/components/exam/ReportButton";
+import { BlockExam } from "@/components/exam/BlockExam";
+import type { BlockExamView } from "@/lib/blocks";
 import type { QcmGradeDetail } from "@/lib/qcm";
 
 type Item = { id: number; idx: number; topic: string; type: "scq" | "mcq"; stem: string; options: string[]; verified: number | null };
 type Open = { id: number; concept: string; statement: string; solution: string };
-type Exam = { id: number; verifySummary: string | null; pdf: string | null; items: Item[]; open: Open[] };
+type Exam = { id: number; status?: string; verifySummary: string | null; pdf: string | null; solutions?: string | null; items: Item[]; open: Open[] };
 type Graded = { score: number; total: number; detail: QcmGradeDetail[]; openSolutions: Open[] };
 
 const LETTER = "ABCDEFGH".split("");
@@ -19,6 +22,8 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
   const { courseId, ready } = useCourse();
   const qs = `?course=${encodeURIComponent(courseId ?? "")}`;
   const [exam, setExam] = useState<Exam | null>(null);
+  // Examen à questions composées (lib/blocks) : sa propre vue.
+  const [blocks, setBlocks] = useState<BlockExamView | null>(null);
   const [answers, setAnswers] = useState<Record<number, number[]>>({});
   const [graded, setGraded] = useState<Graded | null>(null);
   const [busy, setBusy] = useState(false);
@@ -26,9 +31,19 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
 
   useEffect(() => {
     if (!ready || !courseId) return;
-    (async () => {
-      try { const d = await (await fetch(`/api/qcm/${id}${qs}`)).json(); if (d.error) setErr(d.error); else setExam(d); } catch { setErr("Chargement impossible."); }
-    })();
+    let stop = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      try {
+        const d = await (await fetch(`/api/qcm/${id}${qs}`)).json();
+        if (stop) return;
+        if (d.error) setErr(d.error); else if (d.kind === "blocks") setBlocks(d); else setExam(d);
+        // Livraison progressive : les QCM sont là, les questions ouvertes arrivent → on repasse.
+        if (!d.error && d.status === "generating") timer = setTimeout(load, 15_000);
+      } catch { if (!stop) setErr("Chargement impossible."); }
+    };
+    load();
+    return () => { stop = true; if (timer) clearTimeout(timer); };
   }, [id, ready, courseId, qs]);
 
   const toggle = useCallback((it: Item, k: number) => {
@@ -50,6 +65,7 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
 
   const detailFor = (idx: number) => graded?.detail.find((d) => d.idx === idx);
 
+  if (blocks) return <BlockExam exam={blocks} courseId={courseId ?? ""} qs={qs} />;
   if (err && !exam) return <main className="page page-narrow"><div role="alert" className="card card-pad" style={{ color: "var(--red)" }}>{err}</div></main>;
   if (!exam) return <main className="page page-narrow"><div className="skeleton" style={{ height: 200 }} /></main>;
 
@@ -58,10 +74,10 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
       <header className="mb-6 rise">
         <h1 className="h1" style={{ fontSize: 28 }}>Examen blanc #{exam.id}</h1>
         <p className="sub mt-2">{exam.items.length} questions à choix{exam.open.length ? ` + ${exam.open.length} ouverte(s)` : ""} · réponds, puis corrige-toi. SCQ = une seule case ; MCQ = une ou plusieurs.</p>
-        {exam.pdf && (
+        {exam.pdf?.endsWith(".pdf") && (
           <div className="mt-3 flex gap-2">
             <a className="btn btn-ghost btn-sm" href={`/exam/${exam.pdf}${qs}`} target="_blank" rel="noopener">📄 PDF énoncé</a>
-            <a className="btn btn-quiet btn-sm" style={{ color: "var(--green)" }} href={`/exam/${exam.pdf.replace(/(\.pdf)$/, "-corrige$1")}${qs}`} target="_blank" rel="noopener">PDF corrigé</a>
+            {exam.solutions && <a className="btn btn-quiet btn-sm" style={{ color: "var(--green)" }} href={`/exam/${exam.solutions}${qs}`} target="_blank" rel="noopener">PDF corrigé</a>}
           </div>
         )}
       </header>
@@ -110,11 +126,15 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
                 })}
               </div>
               {det && det.explanation && <p className="mt-3 text-[12.5px]" style={{ color: "var(--ink-2)" }}><strong style={{ color: "var(--ink)" }}>Pourquoi :</strong> {det.explanation}</p>}
+              <ReportButton courseId={courseId ?? ""} examId={Number(id)} kind="qcm" itemId={it.id} />
             </section>
           );
         })}
       </div>
 
+      {exam.status === "generating" && (
+        <p className="mt-7 text-[13px]" style={{ color: "var(--ink-3)" }}>Questions ouvertes en cours de génération : elles apparaîtront ici (la page se met à jour toute seule).</p>
+      )}
       {exam.open.length > 0 && (
         <div className="mt-7">
           <div className="section-head"><span className="section-title">Partie ouverte : {exam.open.length} question(s) à rédiger</span></div>
@@ -133,6 +153,7 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
                     graded={!!graded}
                     solution={sol?.solution ?? null}
                   />
+                  <ReportButton courseId={courseId ?? ""} examId={Number(id)} kind="open" itemId={o.id} />
                 </section>
               );
             })}

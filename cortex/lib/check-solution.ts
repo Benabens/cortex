@@ -115,10 +115,30 @@ function checkResultFrom(parsed: unknown): CheckResult {
 }
 
 /**
+ * Barème IMPOSÉ (réponse courte d'une question composée, lib/blocks) : les critères et leurs
+ * points sont ceux de la génération, le correcteur ne décide que de leur atteinte. Le verdict
+ * se déduit des points (tous : correct ; aucun : faux ; sinon partiel).
+ */
+function withRubric(parsed: unknown, rubric: { label: string; points: number }[]): CheckResult {
+  const r = parsed as LegacyCheckResult & { criteria?: { achieved?: unknown; essential?: unknown; justification?: unknown }[] };
+  const criteria: CheckCriterion[] = rubric.map((c, i) => {
+    const got = r.criteria?.[i];
+    return {
+      label: c.label, points: c.points, achieved: got?.achieved === true, essential: got?.essential === true,
+      justification: typeof got?.justification === "string" && got.justification.trim() ? got.justification.trim() : "—",
+    };
+  });
+  const total = criteria.reduce((s, c) => s + c.points, 0);
+  const earned = criteria.reduce((s, c) => s + (c.achieved ? c.points : 0), 0);
+  return { verdict: earned === total ? "correct" : earned === 0 ? "wrong" : "partial", feedback: r.feedback, correct_solution: r.correct_solution, criteria, score: { earned, total } };
+}
+
+/**
  * Vérificateur perso : re-résout la question indépendamment puis compare à la réponse de l'étudiant.
  * Via le fournisseur LLM configuré. `imageRel` = chemin relatif au cwd d'une photo de la réponse.
+ * `rubric` (+ `reference`, la réponse modèle) : barème imposé, corrigé critère par critère.
  */
-export async function checkSolution(input: { statement: string; answer?: string; imageRel?: string | null }): Promise<CheckResult> {
+export async function checkSolution(input: { statement: string; answer?: string; imageRel?: string | null; rubric?: { label: string; points: number }[]; reference?: string }): Promise<CheckResult> {
   const c = getCourse(currentCourse());
   // Définitions DU COURS : la correction en dépend (une réponse conforme au cours est juste).
   const passages = await coursePassages([input.statement.slice(0, 300)], 3, 900).catch(() => []);
@@ -130,11 +150,18 @@ export async function checkSolution(input: { statement: string; answer?: string;
   ];
   if (input.imageRel) lines.push(`La réponse de l'étudiant est dans l'image située à ${input.imageRel} — lis-la avec l'outil Read (elle peut être manuscrite).`);
   if (input.answer) lines.push(`RÉPONSE DE L'ÉTUDIANT (texte) : « ${input.answer} »`);
+  const rubric = input.rubric?.length ? input.rubric : null;
   lines.push(
     ``,
     `Procède ainsi :`,
     `1) Résous la question toi-même, de zéro, rigoureusement.`,
-    `2) À partir de TA résolution, construis un barème de 2 à 5 critères atomiques et observables. Chaque critère contient : label (action et résultat attendus précis), points (entier strictement positif), achieved (booléen), essential (booléen : son absence invalide l'essentiel de la réponse), justification (une phrase fondée sur la réponse de l'étudiant).`,
+    rubric
+      ? [
+          `2) BARÈME IMPOSÉ — garde exactement ces critères, dans cet ordre, avec leurs points ; décide seulement s'ils sont atteints dans la réponse de l'étudiant (achieved), et pourquoi (justification, une phrase fondée sur sa réponse) :`,
+          ...rubric.map((c, i) => `   ${i + 1}) ${c.label} (${c.points} pt${c.points > 1 ? "s" : ""})`),
+          input.reference ? `   Réponse modèle de l'équipe enseignante (une autre formulation juste vaut autant) : « ${input.reference} »` : "",
+        ].filter(Boolean).join("\n")
+      : `2) À partir de TA résolution, construis un barème de 2 à 5 critères atomiques et observables. Chaque critère contient : label (action et résultat attendus précis), points (entier strictement positif), achieved (booléen), essential (booléen : son absence invalide l'essentiel de la réponse), justification (une phrase fondée sur la réponse de l'étudiant).`,
     `3) Compare ta solution à la réponse de l'étudiant. Verdict cohérent avec le barème :`,
     `   - "correct" : juste et complet.`,
     `   - "partial" : une partie des points est obtenue et tous les critères essentiels sont atteints.`,
@@ -147,7 +174,13 @@ export async function checkSolution(input: { statement: string; answer?: string;
   );
   const parsed = await completeJson<unknown>(
     { prompt: lines.join("\n"), model: "opus", timeoutMs: 200_000, json: { schema: CHECK_SCHEMA } },
-    { check: (v) => (isLegacyResult(v) ? null : "verdict (correct | partial | wrong), feedback et correct_solution sont requis") },
+    {
+      check: (v) => !isLegacyResult(v)
+        ? "verdict (correct | partial | wrong), feedback et correct_solution sont requis"
+        : rubric && (v as { criteria?: unknown[] }).criteria?.length !== rubric.length
+          ? `« criteria » doit reprendre les ${rubric.length} critères du barème imposé, dans l'ordre`
+          : null,
+    },
   );
-  return checkResultFrom(parsed);
+  return rubric ? withRubric(parsed, rubric) : checkResultFrom(parsed);
 }

@@ -43,7 +43,7 @@ const MCP_URL = `${ISSUER}/mcp`;
 const REDIRECT = "https://claude.ai/api/mcp/auth_callback";
 const OWNER = "usr_owner_write";
 const ALICE = "usr_alice_write";
-const WRITE_TOOLS = ["add_course_source", "create_course", "prepare_course", "set_exam_format"];
+const WRITE_TOOLS = ["add_course_source", "create_course", "prepare_course", "report_question", "set_exam_format"];
 const ENV_KEYS = ["CORTEX_DATA_DIR", "DB_DRIVER", "DATABASE_URL", "MCP_ENABLED", "AUTH_URL", "BILLING_ENABLED", "SIGNUP_FREE_CREDITS",
   "DAILY_GEN_QUOTA", "DAILY_ASSIST_QUOTA", "MAX_ACTIVE_JOBS", "CORTEX_OWNER_EMAIL", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS",
   "LLM_MAX_RETRIES", "LLM_BASE_URL"];

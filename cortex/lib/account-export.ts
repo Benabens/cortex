@@ -162,6 +162,9 @@ export async function writeAccountExport(userId: string, dir: string, budget: Bu
   ).catch(() => undefined);
   write("credits.json", { unit: "centi (1 crédit = 100)", transactions, purchases, invoices, usage: { calls: Number(usage?.calls ?? 0), costUsd: Number(usage?.cost_usd ?? 0) } });
 
+  const reports = await authAll(`SELECT course, exam_id, kind, item_id, reason, comment, stem, status, refunded_centi, created_at FROM question_reports WHERE user_id = ? ORDER BY id`, userId).catch(() => []);
+  write("signalements.json", reports);
+
   const readers = await tenantReaders(userId);
   const courseIds = readers.map((r) => r.course);
   for (const r of readers) {

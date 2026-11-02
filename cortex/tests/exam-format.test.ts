@@ -22,6 +22,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-exam-format-"));
 process.env.CORTEX_DATA_DIR = tmp;
 // Ce fichier crée un cours par cas : la limite horaire de création n'est pas l'objet du test.
 process.env.MAX_COURSES_CREATED_PER_HOUR = "unlimited";
+process.env.MAX_COURSES_PER_USER = "unlimited";
 
 let planMockExam: (f: ExamFormat, r: MockExamRequest) => MockExamPlan;
 
@@ -35,6 +36,7 @@ before(async () => {
 after(() => {
   delete process.env.CORTEX_DATA_DIR;
   delete process.env.MAX_COURSES_CREATED_PER_HOUR;
+  delete process.env.MAX_COURSES_PER_USER;
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -246,14 +248,81 @@ test("un format demandé pour CET examen suit le job jusqu'au worker : ni refus 
   const qcm = await newCourse({ examFormat: { kind: "qcm", questionCount: 20 } });
   const g = await runWithCourse(qcm, () => resolveExamFormat());
   assert.equal(plan(requestedFormat(g, "exercises"), {}).generator, "exercises");
-  // Des annales : leur format fait la règle, la demande est ignorée.
+  // Des annales : leur format n'est qu'un DÉFAUT, une demande explicite l'emporte (job 9 de
+  // CS-290 : « QCM seulement » demandé, 3 ouvertes imposées par l'annale mixte).
   const withAnnales = await newCourse();
   await addSource(withAnnales, "final", "Final 2022", "Examen final. Exercice 1 : on considère la fonction f et on étudie sa dérivée.");
   const h = await runWithCourse(withAnnales, () => resolveExamFormat());
-  assert.equal(requestedFormat(h, "qcm").kind, "exercises");
+  assert.equal(requestedFormat(h, "qcm").kind, "qcm");
+  assert.deepEqual(plan(requestedFormat({ ...h, kind: "mixed", questionCount: 17, openCount: 3 }, "qcm"), {}), { generator: "qcm", qcmCount: 17, openCount: 0 }, "QCM demandés : aucune ouverte, le nombre de QCM du format reste");
   // Le pré-check de lancement lit la demande dans la cible du job.
   const { startGenerationJob } = await import("../lib/generation");
   await addSource(unknown, "course_pdf", "Séance 1", "Le leadership transformationnel motive par le sens.");
   const r = await runWithCourse(unknown, () => startGenerationJob("exam", JSON.stringify({ kind: "exercises" })));
   assert.ok(!(r.ok === false && /Format d'examen inconnu/.test(r.error)), JSON.stringify(r));
+});
+
+// ─────────── C — questions COMPOSÉES (format mid-term de CS-290) ───────────
+// L'annale modèle : 7 questions, chacune un scénario ou un extrait de code suivi de 3 à 6
+// sous-questions mêlées. Le profil le disait (sections, résumé) mais n'en gardait que
+// « has_mcq » et les comptes par type : 17 QCM indépendants + 3 ouvertes.
+const COMPOSITE_PROFILE = {
+  format_summary: "7 questions de 6 à 9 points ; chaque question = un court scénario ou un extrait de code suivi de 3 à 6 sous-questions mêlant choix unique, lecture de code et réponses courtes.",
+  duration_min: 90, total_points: 50, has_mcq: true, scq_vs_mcq_convention: "single choice",
+  question_types: [{ type: "scq", approx_count: 17, share_pct: 34 }, { type: "open", approx_count: 9, share_pct: 32 }, { type: "calc", approx_count: 7, share_pct: 34 }],
+  sections: [
+    { name: "Q1 — Introduction", description: "Théories éthiques, parties prenantes." },
+    { name: "Q2 — Safety 1", description: "Code de modération, métriques." },
+    { name: "Q3 — Safety 2", description: "Recommandation, boucles de rétroaction." },
+  ],
+  topics_emphasis: [],
+};
+
+test("C — annale modèle à questions composées : format composite, une question par section, 3 à 6 sous-questions", async () => {
+  const id = await newCourse({ language: "en" });
+  await addSource(id, "final", "Mid-term format reference", ENGLISH_FINAL);
+  await saveProfile(id, COMPOSITE_PROFILE);
+  const f = await resolve(id);
+  assert.equal(f.kind, "composite");
+  assert.equal(f.questionCount, 3);
+  assert.deepEqual(f.blocks?.sections.map((s) => s.name), ["Q1 — Introduction", "Q2 — Safety 1", "Q3 — Safety 2"]);
+  assert.deepEqual([f.blocks?.partsMin, f.blocks?.partsMax, f.blocks?.totalPoints], [3, 6, 50]);
+  const plan = planMockExam(f, {});
+  assert.equal(plan.generator, "blocks");
+  assert.equal(plan.generator === "blocks" && plan.blockCount, 3);
+  // Le champ explicite de la détection l'emporte sur le résumé.
+  const explicit = await newCourse({ language: "en" });
+  await addSource(explicit, "final", "Midterm", ENGLISH_FINAL);
+  await saveProfile(explicit, { ...ANNALES_PROFILE, composite: { block_count: 5, parts_min: 2, parts_max: 4 } });
+  const g = await resolve(explicit);
+  assert.deepEqual([g.kind, g.questionCount, g.blocks?.partsMin, g.blocks?.partsMax], ["composite", 5, 2, 4]);
+  // Des QCM indépendants restent des QCM.
+  const plain = await newCourse({ language: "en" });
+  await addSource(plain, "final", "Final", ENGLISH_FINAL);
+  await saveProfile(plain, ANNALES_PROFILE);
+  assert.equal((await resolve(plain)).kind, "mixed");
+});
+
+test("C — format composite déclaré (set_exam_format) : N questions composées ; « QCM seulement » reste possible", async () => {
+  const { parseDeclaredFormat, requestedFormat } = await import("../lib/exam-format");
+  assert.deepEqual(parseDeclaredFormat({ kind: "composite", question_count: 5 }), { kind: "composite", questionCount: 5, durationMin: null, language: null });
+  const id = await newCourse({ examFormat: { kind: "composite", questionCount: 4 } });
+  const f = await resolve(id);
+  assert.deepEqual([f.basis, f.kind, f.questionCount, f.blocks?.partsMin, f.blocks?.partsMax], ["declared", "composite", 4, 3, 6]);
+  const plan = planMockExam(f, { count: 2 });
+  assert.deepEqual(plan.generator === "blocks" ? [plan.blockCount, plan.sections.length] : plan, [2, 0]);
+  assert.equal(planMockExam(requestedFormat(f, "qcm"), {}).generator, "qcm");
+  assert.match(f.summary, /questions composées/);
+});
+
+test("C — un examen d'exercices à sous-questions, sans choix, reste un examen d'exercices", async () => {
+  const id = await newCourse({ language: "en" });
+  await addSource(id, "final", "Final", ENGLISH_FINAL);
+  await saveProfile(id, {
+    ...COMPOSITE_PROFILE, has_mcq: false,
+    format_summary: "4 problems, each with 3 to 5 sub-questions (derivations and proofs).",
+    question_types: [{ type: "calc", approx_count: 12, share_pct: 60 }, { type: "proof", approx_count: 4, share_pct: 40 }],
+    composite: { block_count: 4, parts_min: 3, parts_max: 5 },
+  });
+  assert.equal((await resolve(id)).kind, "exercises");
 });

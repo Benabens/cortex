@@ -30,7 +30,7 @@ export default defineTool({
   }),
   output,
   async run(args, ctx) {
-    if (!args.clear && !args.kind) throw new ToolError("invalid_input", "Donne « kind » (qcm, exercises, mixed, essay ou oral), ou clear=true pour effacer le format déclaré.");
+    if (!args.clear && !args.kind) throw new ToolError("invalid_input", "Donne « kind » (qcm, exercises, mixed, composite, essay ou oral), ou clear=true pour effacer le format déclaré.");
     return ctx.inCourse(args.course, async (c) => {
       let column: string | null = null;
       if (!args.clear) {
