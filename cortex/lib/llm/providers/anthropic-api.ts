@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { apiKey, baseUrl, mapModel } from "../config";
-import { LlmError, type CompleteRequest, type CompleteResult, type LlmProvider, type LlmUsage } from "../types";
+import { DEFAULT_MAX_TOKENS, LlmError, truncatedError, type CompleteRequest, type CompleteResult, type LlmProvider, type LlmUsage } from "../types";
 
 /**
  * Provider API Anthropic officielle (voie production, clé requise).
@@ -118,7 +118,7 @@ export const anthropicProvider: LlmProvider = {
 
     const params: Record<string, unknown> = {
       model,
-      max_tokens: req.maxTokens ?? 16_000,
+      max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
       messages: [{ role: "user", content }],
     };
     // CACHE DE PROMPT : le prompt système, s'il existe, est le préfixe STABLE
@@ -184,9 +184,7 @@ export const anthropicProvider: LlmProvider = {
     if (u?.cache_creation_input_tokens != null) usage.cacheWriteTokens = u.cache_creation_input_tokens;
     // Une réponse COUPÉE ou REFUSÉE n'est jamais rendue comme un texte valide :
     // elle passerait à extractJson, qui ne doit pas la prendre pour une réponse complète.
-    if (msg.stop_reason === "max_tokens") {
-      throw new LlmError(`Réponse du modèle coupée par la limite de longueur (${req.maxTokens ?? 16_000} tokens).`, "TRUNCATED", false, usage);
-    }
+    if (msg.stop_reason === "max_tokens") throw truncatedError(req.maxTokens, usage);
     if (msg.stop_reason === "refusal") {
       throw new LlmError("Le modèle a refusé de traiter cette demande.", "REFUSAL", false, usage);
     }

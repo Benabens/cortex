@@ -38,9 +38,12 @@ export type ToolErrorCode =
  * « internal » avec un message générique.
  */
 export class ToolError extends Error {
-  constructor(readonly code: ToolErrorCode, message: string) {
+  /** Cause précise côté moteur (BAD_OUTPUT, OVERLOADED, TIMEOUT…), exposée avec le code. */
+  readonly reason?: string;
+  constructor(readonly code: ToolErrorCode, message: string, reason?: string) {
     super(message);
     this.name = "ToolError";
+    if (reason) this.reason = reason;
   }
 }
 

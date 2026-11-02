@@ -4,6 +4,7 @@ import { currentCourse } from "@/db/client";
 import { currentUser } from "@/db/context";
 import { authRun, authTx, type AuthTx } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
+import { BAD_OUTPUT_CODES, llmErrorCode } from "@/lib/llm/errors";
 import { log } from "@/lib/metrics";
 import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, insufficient, subscriptionLive, type SubRow, DELTA_CENTI } from "./credits";
 import { intLimit } from "./env";
@@ -209,11 +210,11 @@ export class AssistRefused extends Error {
 /**
  * Réservation RENDUE : nos gardes ont arrêté l'appel avant envoi (comptage en
  * vol fail-closed, plafond de dépense), ou le modèle n'a renvoyé qu'une réponse
- * illisible malgré les réessais (BAD_OUTPUT) — notre défaut, l'utilisateur n'a
- * rien reçu. Un échec du fournisseur lui-même (429, 5xx, réseau) reste débité,
+ * inutilisable (BAD_OUTPUT_CODES : illisible, coupée) — notre défaut,
+ * l'utilisateur n'a rien reçu ; le connecteur l'annonce sur la même table. Un échec du fournisseur lui-même (429, 5xx, réseau) reste débité,
  * comme décidé au lot 2 : l'appel est parti.
  */
-const REFUNDED_CODES = new Set(["UNAVAILABLE", "SPEND_CAP", "BAD_OUTPUT"]);
+const REFUNDED_CODES = new Set(["UNAVAILABLE", "SPEND_CAP", ...BAD_OUTPUT_CODES]);
 
 /**
  * Réserve 0,1 crédit, exécute l'appel, et REMBOURSE si l'appel a été refusé par
@@ -226,7 +227,7 @@ export async function assistCall<T>(kind: string, fn: () => Promise<T>): Promise
   try {
     return await fn();
   } catch (e) {
-    const code = (e as { code?: string } | null)?.code;
+    const code = llmErrorCode(e);
     if (code && REFUNDED_CODES.has(code)) {
       const { refundGeneration } = await import("./credits");
       await refundGeneration(`assist ${kind}`, r.ref);

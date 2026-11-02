@@ -1,10 +1,7 @@
 import { AssistRefused, assistCall } from "@/lib/billing/reserve";
-import { BAD_OUTPUT_CODES, llmErrorCode, llmUserMessage } from "@/lib/llm";
+import { BAD_OUTPUT_CODES, OWN_LLM_CODES, llmErrorCode, llmUserMessage } from "@/lib/llm";
 import { log } from "@/lib/metrics";
 import { ToolError, codeForStatus } from "./tool";
-
-/** Codes d'erreur LLM émis par NOS gardes (messages rédigés par Cortex, sûrs à montrer). */
-const OWN_LLM_CODES = new Set(["UNAVAILABLE", "SPEND_CAP", "QUOTA", "CREDITS"]);
 
 /**
  * Appel d'ASSISTANCE au nom du compte courant, exactement comme les routes de
@@ -23,10 +20,11 @@ export async function runAssist<T>(kind: string, fn: () => Promise<T>): Promise<
     if (code && OWN_LLM_CODES.has(code)) throw new ToolError("unavailable", (e as Error).message);
     // Le code journalisé nomme la cause (BAD_OUTPUT, OVERLOADED, TIMEOUT…) ; à défaut,
     // la classe de l'erreur — un « unknown » ne permet aucun diagnostic.
-    log("warn", "mcp.assist_failed", { kind, code: code ?? (e instanceof Error ? e.name : "unknown") });
+    const reason = code ?? (e instanceof Error ? e.name : "unknown");
+    log("warn", "mcp.assist_failed", { kind, code: reason });
     const billing = code && BAD_OUTPUT_CODES.has(code)
       ? "Rien n'a été débité."
       : "L'appel est parti, il reste débité.";
-    throw new ToolError("unavailable", `${llmUserMessage(e)} ${billing}`);
+    throw new ToolError("unavailable", `${llmUserMessage(e)} ${billing}`, reason);
   }
 }

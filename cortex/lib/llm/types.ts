@@ -94,6 +94,14 @@ export class LlmError extends Error {
   }
 }
 
+/** Réponse coupée par max_tokens : jamais rendue comme un texte complet (cf. lib/llm/json). */
+export function truncatedError(maxTokens: number | undefined, usage?: LlmUsage): LlmError {
+  return new LlmError(`Réponse du modèle coupée par la limite de longueur (${maxTokens ?? DEFAULT_MAX_TOKENS} tokens).`, "TRUNCATED", false, usage);
+}
+
+/** Budget de sortie par défaut des providers API. */
+export const DEFAULT_MAX_TOKENS = 16_000;
+
 export interface LlmProvider {
   readonly name: string;
   /** Le provider peut-il servir un appel maintenant ? (binaire présent / clé posée / URL posée) */

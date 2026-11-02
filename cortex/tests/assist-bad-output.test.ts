@@ -133,7 +133,7 @@ test("connecteur MCP : chaque cause a son message et son code, jamais « unknown
     [new LlmError("Request timed out", "TIMEOUT", true), /trop de temps/],
   ];
   for (const [err, msg] of cases) {
-    await assert.rejects(runAssist("drill", async () => { throw err; }), (e: unknown) => e instanceof ToolError && e.code === "unavailable" && msg.test(e.message) && !/529|overloaded_error|timed out/.test(e.message));
+    await assert.rejects(runAssist("drill", async () => { throw err; }), (e: unknown) => e instanceof ToolError && e.code === "unavailable" && e.reason === (err as InstanceType<typeof LlmError>).code && msg.test(e.message) && !/529|overloaded_error|timed out/.test(e.message));
   }
   // BAD_OUTPUT rendu, pannes du fournisseur débitées (lot 2) : 2 appels de 0,1 crédit restent dus.
   assert.equal(await credits.getBalanceCenti("owner"), before - 20);
