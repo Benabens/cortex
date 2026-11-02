@@ -8,6 +8,7 @@ import { anthropicProvider } from "./providers/anthropic-api";
 import { claudeCodeProvider } from "./providers/claude-code";
 import { openaiCompatibleProvider } from "./providers/openai-compatible";
 import { withRetry } from "./retry";
+import { extractJson, JsonOutputError } from "./json";
 import { LlmError, type CompleteRequest, type CompleteResult, type LlmProvider } from "./types";
 
 /**
@@ -154,6 +155,56 @@ export function completeVia(name: ProviderName, req: CompleteRequest): Promise<C
 /** Raccourci : texte final seul (l'écrasante majorité des call sites). */
 export async function completeText(req: CompleteRequest): Promise<string> {
   return (await complete(req)).text;
+}
+
+/** Nombre d'essais par défaut de completeJson (le premier compris). */
+export const JSON_ATTEMPTS = 3;
+
+/** Motif de rejet d'une réponse, ou null si elle n'est pas en cause (erreur du fournisseur). */
+function rejection(e: unknown): { reason: string; truncated: boolean } | null {
+  if (e instanceof JsonOutputError) return { reason: e.message, truncated: /tronqu/i.test(e.message) };
+  if (e instanceof LlmError && e.code === "TRUNCATED") return { reason: e.message, truncated: true };
+  return null;
+}
+
+/**
+ * Appel dont la réponse doit être du JSON : lit la réponse (extractJson) et la
+ * valide (`check` → motif de rejet, ou null). Une réponse illisible, coupée ou
+ * de mauvaise forme est REDEMANDÉE avec le motif précis ajouté au prompt — un
+ * rejeu à l'identique redonne la même erreur (et la même réponse en cache).
+ * Les erreurs du fournisseur (429, 5xx, réseau) sont réessayées plus bas
+ * (completeWith) et remontent telles quelles. Après `attempts` essais :
+ * LlmError BAD_OUTPUT. Passer `json` à la requête active en plus la sortie
+ * structurée des fournisseurs API, qui supprime l'essentiel de ces rejets.
+ */
+export async function completeJson<T = unknown>(
+  req: CompleteRequest,
+  opts: { attempts?: number; check?: (value: T) => string | null } = {},
+): Promise<T> {
+  const attempts = Math.max(1, opts.attempts ?? JSON_ATTEMPTS);
+  let last = "";
+  for (let n = 1; n <= attempts; n++) {
+    const prompt = n === 1 ? req.prompt : `${req.prompt}\n\n${retryNote(last, n, attempts)}`;
+    try {
+      const value = extractJson<T>((await complete({ ...req, prompt })).text);
+      const issue = opts.check?.(value) ?? null;
+      if (!issue) return value;
+      last = `réponse JSON lisible mais incomplète : ${issue}`;
+    } catch (e) {
+      const r = rejection(e);
+      if (!r) throw e;
+      last = r.truncated ? `${r.reason} Sois plus concis (explications plus courtes) pour que la réponse tienne en entier.` : r.reason;
+    }
+    console.error(`[llm] réponse JSON rejetée (essai ${n}/${attempts}) : ${last.slice(0, 200)}`);
+  }
+  throw new LlmError(`Le modèle a renvoyé une réponse illisible ${attempts} fois de suite (${last.slice(0, 200)}).`, "BAD_OUTPUT");
+}
+
+function retryNote(reason: string, n: number, attempts: number): string {
+  return [
+    `ATTENTION (essai ${n}/${attempts}) : ta réponse précédente n'était pas un JSON valide utilisable — ${reason}`,
+    `Renvoie UNIQUEMENT la valeur JSON demandée, complète : aucun texte autour, pas de bloc markdown. Dans les chaînes, échappe les guillemets (\\"), les antislashs (\\\\) et les retours à la ligne (\\n), y compris dans le code et le LaTeX.`,
+  ].join("\n");
 }
 
 export { extractJson, JsonOutputError } from "./json";
