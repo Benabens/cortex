@@ -4,7 +4,7 @@ import { completeText, extractJson } from "@/lib/llm";
 import { coursePaths } from "@/lib/courses";
 import { sourceHref } from "@/lib/deeplink";
 import { renderExamPages } from "@/lib/exam-index";
-import { generateQcmBatch, verifyQcmBatch } from "@/lib/qcm";
+import { generateQcmBatch, shownExplanation, verifyQcmBatch } from "@/lib/qcm";
 import fs from "node:fs";
 import path from "node:path";
 import { listExamSourceRows } from "@/lib/sources";
@@ -498,7 +498,7 @@ export async function planQuestions(): Promise<PlanQuestion[]> {
   return (await q.all<any>(
     `SELECT id, kind, topic, lecture_rank AS "lectureRank", statement, options, correct, misconceptions, explanation, solution, verified, verify_method AS "verifyMethod"
      FROM revision_plan ORDER BY (lecture_rank IS NULL), lecture_rank, topic, id`
-  ) as any[]).map((r) => ({ ...r }));
+  ) as any[]).map((r) => ({ ...r, explanation: r.explanation == null ? null : shownExplanation(r.explanation) }));
 }
 
 export async function planStats(): Promise<{ qcm: number; open: number; topics: number }> {

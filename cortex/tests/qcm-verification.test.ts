@@ -62,7 +62,7 @@ const designPrompts: string[] = [];
 const verifyPrompts: string[] = [];
 /** Ce que le juge répond pour une question : la réponse qu'il trouve (texte de l'option), ok, issue. */
 const EXTERNAL = /^L'alignement externe relie les objectifs d'un système aux valeurs/;
-let judge: (block: string) => { answer: RegExp; ok?: boolean; issue?: string; offMatter?: string } = (b) => (
+let judge: (block: string) => { answer: RegExp; ok?: boolean; issue?: string; offMatter?: string; nameOnly?: boolean } = (b) => (
   !/alignement/.test(b) ? { answer: /^Un État contrôle/ }
     : /\(v\d+\)/.test(b) ? { answer: EXTERNAL, issue: "la clé devrait être l'alignement externe" } : { answer: EXTERNAL }
 );
@@ -73,7 +73,7 @@ function verifyReply(prompt: string): string {
     const j = judge(b);
     const opt = [...b.matchAll(/^\s+\((\d+)\) (.*)$/gm)].find((m) => j.answer.test(m[2]));
     const correct = [opt ? Number(opt[1]) : 0];
-    return { index: i, correct, ok: j.ok ?? !j.issue, discrimination: 4, name_only: false, issue: j.issue ?? "", course_terms: [], off_course: "", off_matter: j.offMatter ?? "" };
+    return { index: i, correct, ok: j.ok ?? !j.issue, discrimination: j.nameOnly ? 2 : 4, name_only: !!j.nameOnly, issue: j.issue ?? "", course_terms: [], off_course: "", off_matter: j.offMatter ?? "" };
   });
   return JSON.stringify({ results });
 }
@@ -254,6 +254,44 @@ test("question sur la grille d'évaluation ou la forme d'un rendu : rejetée et 
     assert.ok(steps.some((s) => /rejeté — hors matière[^\n]*grille d'évaluation/.test(s)), "le rejet est dit, avec sa raison");
     assert.match(verifyPrompts[0], /modalités d'examen[\s\S]*forme d'un rendu/, "le correcteur sait qu'il doit le relever");
     assert.match(designPrompts[0], /MATIÈRE[^\n]*modalités d'examen[^\n]*forme d'un rendu/, "la conception l'interdit d'emblée");
+  } finally {
+    judge = ok;
+  }
+});
+
+test("banque de révision déjà en base avec une note de vérification : la note n'est pas montrée", async () => {
+  const id = await course();
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { planQuestions } = await import("../lib/revision");
+  const shown = await runWithCourse(id, async () => {
+    await planQuestions(); // crée la table du parcours
+    await q.run(`INSERT INTO revision_plan (kind, topic, statement, options, correct, explanation, verified) VALUES ('qcm',?,?,?,?,?,?)`,
+      "alignement", "Que désigne l'alignement interne ?", ALIGN.join("\n"), "B", `${ALIGN[0]} [clé corrigée à la vérif : la clé devrait être l'alignement externe]`, 1);
+    return planQuestions();
+  });
+  assert.equal(shown.length, 1);
+  assert.doesNotMatch(shown[0].explanation ?? "", /\[clé (?:corrigée|alignée)/);
+  assert.ok(!(shown[0].explanation ?? "").includes(ALIGN[0]), "l'explication contredite n'est pas montrée");
+});
+
+test("clé contestée, version régénérée valide mais peu discriminante : elle remplace l'item rejeté, sans lot de comblement", async () => {
+  const id = await course();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  design = (n, call, prompt) => {
+    if (call === 1) return JSON.stringify({ items: [contested(1), ...Array.from({ length: n - 1 }, (_, i) => plain(i))] });
+    if (/À CORRIGER/.test(prompt)) return JSON.stringify({ items: [item("Que désigne l'alignement externe ? (r2)", ALIGN, 1)] });
+    return JSON.stringify({ items: Array.from({ length: n }, (_, i) => plain(call * 10 + i)) });
+  };
+  const ok = judge;
+  judge = (b) => (/\(r2\)/.test(b) ? { answer: EXTERNAL, nameOnly: true } : ok(b));
+  try {
+    const r = await runWithCourse(id, () => generateQcmExam({ count: 3, openCount: 0 }));
+    assert.equal(r.count, 3);
+    const exam = await runWithCourse(id, () => getQcmExam(r.id, true));
+    assert.ok(exam!.items.some((it) => /\(r2\)/.test(it.stem)), "la version régénérée est gardée");
+    assert.equal(designCalls, 2, "conception + régénération, aucun comblement");
   } finally {
     judge = ok;
   }

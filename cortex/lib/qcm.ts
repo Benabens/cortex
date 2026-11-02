@@ -672,7 +672,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       const out = items.slice();
       weak.forEach((w, k) => {
         const n = again[k];
-        if (n.verified === 1 && (!weaknessOf(n) || (n.discrimination ?? 0) > (w.it.discrimination ?? 0))) out[w.i] = { ...n, slot: w.it.slot };
+        // Un item rejeté n'est jamais gardé : toute version vérifiée vaut mieux qu'un lot de comblement.
+        if (n.verified === 1 && (w.it.rejected || !weaknessOf(n) || (n.discrimination ?? 0) > (w.it.discrimination ?? 0))) out[w.i] = { ...n, slot: w.it.slot };
       });
       return out;
     } catch (e) {
