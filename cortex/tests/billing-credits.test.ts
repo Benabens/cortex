@@ -122,3 +122,18 @@ test("webhook Stripe : crédit au 1er passage, PAS de double crédit au rejeu, s
   assert.equal(res3.status, 400);
   assert.equal(await credits.getBalance("alice"), before5 + 5);
 });
+
+test("remboursements partiels d'un même débit (manque, puis questions signalées) : jamais plus que le débit", async () => {
+  const { runWithUser } = await import("../db/context");
+  await runWithUser("capper", async () => {
+    const start = await credits.getBalanceCenti("capper");
+    assert.equal((await reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:cap:1" })).ok, true); // exam = 2 crédits
+    assert.equal(await credits.getBalanceCenti("capper"), start - 200);
+    const shortfall = await credits.refundGeneration("exam", "job:cap:1", "capper", 0.5); // la moitié n'a pas été livrée
+    const q1 = await credits.refundGeneration("question signalée", "job:cap:1", "capper", 0.5, "refund:job:cap:1:qcm:1");
+    const q2 = await credits.refundGeneration("question signalée", "job:cap:1", "capper", 0.5, "refund:job:cap:1:qcm:2");
+    assert.deepEqual([shortfall, q1, q2], [100, 100, 0], "le second signalement ne rend plus rien : tout est rendu");
+    assert.equal(await credits.getBalanceCenti("capper"), start);
+    assert.equal(await credits.refundGeneration("exam", "job:cap:1", "capper"), 0, "un échec après coup ne rend rien de plus");
+  });
+});
