@@ -53,6 +53,10 @@ export type ExamRow = {
   verifySummary: unknown;
   url: string | null;
   solutionsUrl: string | null;
+  /** Page en ligne de l'examen (QCM : /mock/N), indépendante du PDF. */
+  onlineUrl?: string | null;
+  /** Examen QCM sans PDF : « régénérer le PDF » (gratuit, sans le modèle). */
+  pdfMissing?: boolean;
 };
 
 export type ExamsResp = {

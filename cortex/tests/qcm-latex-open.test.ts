@@ -131,3 +131,36 @@ test("J — un LaTeX refusé par le garde passe en texte simple au lieu de faire
   assert.match(out.file, /\.pdf$/, out.texError);
   assert.match(out.texWarning ?? "", /texte simple/);
 });
+
+test("J — un examen QCM sans PDF reste ouvrable en ligne, et se recompile sans le modèle (énoncé + corrigé)", async (t) => {
+  const { texAvailable } = await import("../lib/exam-latex");
+  if (!texAvailable()) return t.skip("tectonic/pdflatex absent");
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { getQcmExam, recompileMissingQcmPdfs } = await import("../lib/qcm");
+  const { listExams } = await import("../lib/exam");
+  const { NextRequest } = await import("next/server");
+  const { POST } = await import("../app/api/exams/[id]/pdf/route");
+  const examId = await runWithCourse("ml", async () => {
+    await getQcmExam(0);
+    await q.ensureTable("exam_questions");
+    const id = await q.insert(`INSERT INTO exams (format_template, status, html_path) VALUES ('qcm','ready','')`);
+    await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      id, 0, "Fairness", "scq", "Which metric compares error rates?", JSON.stringify(["Equalized odds", "Demographic parity"]), "[0]", "[]", "Equalized odds.", 1);
+    await q.run(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration) VALUES (?,?,?,?,?)`,
+      id, "Risk", String.raw`Let $\sigma_x$ be the spread.`, "$0{,}12$", "qcm-open");
+    return id;
+  });
+  const before = (await runWithCourse("ml", () => listExams())).find((e) => e.id === examId)!;
+  assert.equal(before.url, null, "pas d'« Énoncé » vers un fichier absent");
+  assert.match(before.onlineUrl ?? "", new RegExp(`/mock/${examId}`), "la carte ouvre la page en ligne");
+  assert.equal(before.pdfMissing, true);
+  const res = await POST(new NextRequest(`http://cortex.test/api/exams/${examId}/pdf?course=ml`, { method: "POST" }), { params: Promise.resolve({ id: String(examId) }) });
+  assert.equal(res.status, 200, JSON.stringify(await res.clone().json()));
+  const after = (await runWithCourse("ml", () => listExams())).find((e) => e.id === examId)!;
+  assert.match(after.url ?? "", /\.pdf/);
+  assert.match(after.solutionsUrl ?? "", /-corrige\.pdf/, "le corrigé suit l'énoncé");
+  assert.equal(after.pdfMissing, false);
+  assert.deepEqual(await runWithCourse("ml", () => recompileMissingQcmPdfs()), [], "plus rien à rattraper");
+});
+
