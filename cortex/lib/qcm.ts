@@ -460,7 +460,7 @@ const VERIFY_SCHEMA = {
           name_only: { type: "boolean", description: "true si elle se réussit avec les seuls noms des notions, ou en éliminant des options absurdes." },
           course_terms: { type: "array", items: { type: "string" }, description: "Les notions nommées dont dépend la BONNE réponse, chacune écrite EXACTEMENT comme dans les extraits du cours (copie le terme du cours)." },
           off_course: { type: "string", description: "Non vide si la bonne réponse, un distracteur ou l'explication repose sur une notion ABSENTE des extraits du cours, ou que le cours définit AUTREMENT : laquelle, et ce que dit le cours. Vide sinon." },
-          off_matter: { type: "string", description: "Non vide si la question porte sur les modalités d'examen (format, barème, grille ou critères d'évaluation, consignes) ou sur la forme d'un rendu (poster, essai, bibliographie) plutôt que sur la matière du cours : ce qu'elle teste. Vide sinon." },
+          off_matter: { type: "string", description: "Non vide si la question porte sur les modalités d'examen (format, barème, grille ou critères d'évaluation, consignes), sur la forme d'un rendu (poster, essai, bibliographie) ou sur l'organisation du cours (plan, ordre des chapitres) plutôt que sur sa matière : ce qu'elle teste. Vide sinon." },
         },
         required: ["index", "correct", "ok", "discrimination", "name_only", "course_terms", "off_course", "off_matter"],
         additionalProperties: false,
@@ -490,7 +490,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
       ? `Résous et juge avec les DÉFINITIONS DU COURS (extraits ci-dessous), jamais avec celles d'une autre source. course_terms : les notions dont dépend la bonne réponse, écrites comme dans le cours. off_course : toute notion de la question absente des extraits, ou que le cours définit autrement (vide sinon).`
       : `course_terms : les notions nommées dont dépend la bonne réponse. off_course : laisse vide (aucun extrait du cours fourni ici).`,
     `Signale si : la question est ambiguë (2 réponses défendables), un distracteur est absurde, ou un indice trahit la bonne réponse (longueur, « toutes les réponses », grammaire).`,
-    `off_matter : ce que teste une question qui porte sur les modalités d'examen (format, barème, grille ou critères d'évaluation, consignes) ou sur la forme d'un rendu (poster, essai, bibliographie) au lieu de la matière du cours (vide sinon).`,
+    `off_matter : ce que teste une question qui porte sur les modalités d'examen (format, barème, grille ou critères d'évaluation, consignes), sur la forme d'un rendu (poster, essai, bibliographie) ou sur l'organisation du cours (plan, ordre des chapitres) au lieu de sa matière (vide sinon).`,
     `Note aussi son POUVOIR DISCRIMINANT (discrimination, 1 à 5) : mets-toi à la place d'un étudiant qui ne connaît que les noms des notions du cours — pas leurs conditions, pas les résultats des études. S'il la réussit (ou élimine assez d'options pour la deviner), discrimination ≤ 2 et name_only = true.`,
     figDirs.length ? `Certaines questions ont une FIGURE : OUVRE le PNG indiqué (outil Read) et résous DEPUIS la figure. Si la figure ne suffit pas à répondre, mets ok=false avec issue="figure insuffisante".` : null,
     calib ? `${calib}\nÀ la lumière de ces leçons, sois SÉVÈRE : signale aussi (issue) tout QCM trop trivial / au distracteur trop faible si l'étudiant a jugé ce type « trop facile ».` : null,
