@@ -5,6 +5,7 @@ import { courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFo
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_TERMS_RULE, absentCourseTerms, coursePassages } from "@/lib/course-grounding";
+import { assignChapters, spreadOverChapters } from "@/lib/coverage";
 import { normalize } from "@/lib/text";
 import { courseRefImages } from "@/lib/course-vision";
 import type { ExamQuestion, StepCb } from "@/lib/exam";
@@ -117,11 +118,23 @@ async function ensureQcmSchema(): Promise<void> {
 /** Sujets à couvrir : blueprint (topics pondérés) si dispo, sinon archétypes du cours.
  *  Retourne TOUTE la liste ordonnée par poids (plus de LIMIT 14 : la LARGEUR
  *  est gérée à l'échantillonnage par pickCoverage, qui inclut la longue traîne). */
-async function coverageTopics(): Promise<{ label: string; method: string | null }[]> {
+type CovTopic = { label: string; method: string | null; weight?: number; chapterId?: number | null };
+
+async function coverageTopics(): Promise<CovTopic[]> {
+  const order = `ORDER BY exam_weight DESC, exam_count DESC, label`;
   try {
-    const rows = await q.all<{ label: string; method: string | null }>(`SELECT label, method FROM topics ORDER BY exam_weight DESC, exam_count DESC, label`);
-    if (rows.length) return rows;
-  } catch {}
+    // Poids et chapitre du plan : la répartition sur les chapitres en dépend (lib/coverage).
+    const rows = await q.all<{ label: string; method: string | null; weight: number | null; chapterId: number | null }>(
+      `SELECT label, method, exam_weight AS weight, plan_chapter_id AS "chapterId" FROM topics ${order}`,
+    );
+    if (rows.length) return rows.map((r) => ({ label: r.label, method: r.method, weight: Number(r.weight ?? 0), chapterId: r.chapterId }));
+  } catch {
+    // Base sans la colonne du plan de cours (antérieure à course-plan) : poids et libellés seuls.
+    try {
+      const rows = await q.all<{ label: string; method: string | null; weight: number | null }>(`SELECT label, method, exam_weight AS weight FROM topics ${order}`);
+      if (rows.length) return rows.map((r) => ({ label: r.label, method: r.method, weight: Number(r.weight ?? 0) }));
+    } catch {}
+  }
   // Pas encore de notions analysées : les titres des supports du cours, plutôt que des archétypes
   // génériques qui ne parlent d'aucune notion (cas d'un cours sans annale fraîchement préparé).
   const titles = await courseMaterialTitles();
@@ -553,16 +566,26 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       if (!known.has(title.toLowerCase())) covAll = [...covAll, { label: title, method: null }];
     }
   }
-  // Thèmes DISTINCTS (pickCoverage complète par répétition au-delà) : la reprise est marquée plus bas.
-  const cov = pickCoverage(covAll, Math.min(needed, covAll.length));
+  // RÉPARTITION SUR LES CHAPITRES (plan du cours, sinon supports) au prorata de leur poids, QCM
+  // puis ouvertes : CS-290 (02/11) n'avait que Fairness 1, en tête par poids. Sans au moins deux
+  // chapitres, thèmes DISTINCTS par poids (pickCoverage), la reprise étant marquée plus bas.
+  const spread = spreadOverChapters(
+    await assignChapters(covAll.map((t) => ({ ...t, weight: t.weight ?? 0 }))).catch(() => []),
+    needed + openCount,
+  );
+  const cov: { label: string; method: string | null }[] = spread
+    ? spread.map((t) => ({ label: t.label, method: t.repeat ? REPEAT_METHOD : t.method }))
+    : pickCoverage(covAll, Math.min(needed, covAll.length)).map((t) => ({ label: t.label, method: t.method }));
   const qcmTopics: { label: string; method: string | null }[] = [];
   for (let i = 0; i < count; i++) {
     if (i < nFocus) { qcmTopics.push({ label: focus!, method: FOCUS_METHOD }); continue; }
     const k = i - nFocus;
     const t = cov[k % cov.length];
     // Un thème repris (plus de questions que de thèmes) doit tester un AUTRE fait.
-    qcmTopics.push(k < cov.length ? t : { label: t.label, method: REPEAT_METHOD });
+    qcmTopics.push(spread || k < cov.length ? t : { label: t.label, method: REPEAT_METHOD });
   }
+  // Ouvertes : la suite de la répartition (les chapitres que les QCM n'ont pas pris d'abord).
+  const openTopic = (i: number) => (spread ? cov[(needed + i) % cov.length] : cov[(count + i) % cov.length]);
   const qcmMolds = sampleMolds(dna, count);
   // Format résolu : langue de l'examen ; sans annale, les exemples officiels donnent le style,
   // et les questions « classe ce cas » restent interdites (permises si les annales en ont le style).
@@ -686,7 +709,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     for (let round = 0; pendingOpen.length && round < 2; round++) {
       const failed: number[] = [];
       for (const i of pendingOpen) {
-        const t = cov[(count + i) % cov.length]; // ouvertes = couverture programme (le focus reste sur les QCM)
+        const t = openTopic(i); // ouvertes = couverture programme (le focus reste sur les QCM)
         const a = archs[i % archs.length];
         step(`Question ouverte ${i + 1}/${openCount} (architecte${round ? ", nouvel essai" : ""}) — ${t.label}…`, 82 + i);
         try {
