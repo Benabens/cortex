@@ -1,5 +1,5 @@
 import { completeJson } from "@/lib/llm";
-import { COURSE_TERMS_RULE } from "@/lib/course-grounding";
+import { COURSE_MATTER_RULE, COURSE_TERMS_RULE } from "@/lib/course-grounding";
 import { profile } from "@/lib/course-profile";
 import type { Archetype } from "@/lib/archetypes";
 import { calibrationBlock } from "@/lib/calibration";
@@ -274,6 +274,7 @@ async function writeFromDesign(a: Archetype, target: string, pts: number, design
     `Rédige l'énoncé COMPLET (statement_tex) avec ses sous-questions \\subq{N.M}{...}{pts} et ses grilles de réponse, et le corrigé COMPLET (solution_tex) résolu étape par étape (le piège y est explicité). Le piège doit être RÉELLEMENT testé : un étudiant qui pattern-matche se trompe.`,
     // Notions et définitions DU COURS seulement (lib/course-grounding), comme les QCM et les drills.
     COURSE_TERMS_RULE.trim(),
+    COURSE_MATTER_RULE.trim(),
     `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points${withFigures ? ", figure_spec?" : ""}}. Aucun outil au-delà de Read, aucun fichier.`,
     JSON.stringify(schema, null, 2),
   ].filter((l) => l != null).join("\n");

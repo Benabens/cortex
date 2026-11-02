@@ -104,7 +104,8 @@ export async function reportQuestion(input: ReportInput): Promise<ReportResult> 
     const [checked] = await verifyQcmBatch([{ ...qcm }], () => {}).catch(() => [null]);
     if (checked && checked.verified !== null) {
       const keyChanged = JSON.stringify([...checked.correct].sort()) !== JSON.stringify([...qcm.correct].sort());
-      const confirmed = keyChanged || checked.verified === 0 || !!checked.offCourse;
+      // Clé contestée, hors cours, définition différente, hors matière : le juge rejette (lib/qcm).
+      const confirmed = keyChanged || checked.verified === 0 || !!checked.rejected;
       status = confirmed ? "confirmed" : "not_confirmed";
       if (confirmed) {
         if (input.kind === "qcm") await q.run(`UPDATE qcm_items SET verified = 0 WHERE id = ?`, input.itemId);

@@ -86,8 +86,12 @@ before(async () => {
       const content = (JSON.parse(body).messages as { content: unknown }[]).map((m) => typeof m.content === "string" ? m.content : JSON.stringify(m.content)).join("\n");
       let text = "{}";
       if (/"results"/.test(content)) {
-        const n = (content.match(/^Q\d+\./gm) ?? []).length;
-        text = JSON.stringify({ results: Array.from({ length: n }, (_, i) => ({ index: i, correct: [0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms: [], off_course: "" })) });
+        // Le juge trouve la bonne option là où le mélange l'a mise (une clé contestée serait rejetée).
+        const blocks = content.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
+        text = JSON.stringify({ results: blocks.map((b, i) => {
+          const right = /^\s+\((\d+)\) Une proposition complète/m.exec(b);
+          return { index: i, correct: [right ? Number(right[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms: [], off_course: "" };
+        }) });
       } else if (/"items"/.test(content)) {
         prompts.push(content);
         const n = Number(/\((\d+) QCM\)/.exec(content)?.[1] ?? 1);

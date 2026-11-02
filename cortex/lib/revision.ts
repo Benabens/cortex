@@ -4,7 +4,7 @@ import { completeText, extractJson } from "@/lib/llm";
 import { coursePaths } from "@/lib/courses";
 import { sourceHref } from "@/lib/deeplink";
 import { renderExamPages } from "@/lib/exam-index";
-import { generateQcmBatch, verifyQcmBatch } from "@/lib/qcm";
+import { generateQcmBatch, shownExplanation, verifyQcmBatch } from "@/lib/qcm";
 import fs from "node:fs";
 import path from "node:path";
 import { listExamSourceRows } from "@/lib/sources";
@@ -42,7 +42,7 @@ const Q_SCHEMA = {
         properties: {
           page: { type: "integer", description: "Page (1-based) de la question." },
           kind: { type: "string", description: "qcm (à choix A-E) | open (à rédiger)." },
-          topic: { type: "string", description: "Sujet COURT (EN) du cours (ex. « Linear regression », « PCA », « K-means », « Backpropagation »)." },
+          topic: { type: "string", description: "Sujet COURT du cours, dans la langue du cours (ex. « Linear regression », « PCA », « K-means », « Backpropagation »)." },
           subtopic: { type: "string", description: "Sous-sujet précis si pertinent." },
           statement: { type: "string", description: "Énoncé FIDÈLE (recopié/condensé) de la question (ou sous-question)." },
           options: { type: "string", description: "QCM uniquement : toutes les options, une par ligne (A) … B) … …). Vide pour open." },
@@ -250,8 +250,8 @@ export async function buildParcours(opts: { budgetQcm?: number; budgetOpen?: num
       const kept = items.slice(0, chunk.length);
       for (let j = 0; j < kept.length; j++) {
         const it = kept[j];
-        // Une question hors cours (notion absente du corpus, lib/course-grounding) n'entre pas dans la banque.
-        if (it.offCourse) continue;
+        // Une question rejetée à la vérification (hors cours, clé contestée) n'entre pas dans la banque.
+        if (it.rejected) continue;
         const tp = chunk[j] ?? it.topic;
         const optStr = (it.options ?? []).map((o, k) => `${LETTERS[k]}) ${o}`).join("\n");
         const correct = (it.correct ?? []).map((c) => LETTERS[c] ?? "?").join(", ");
@@ -443,7 +443,7 @@ export async function extendParcours(opts: {
         try { items = await verifyQcmBatch(items, () => {}); } catch {}
         let inserted = 0;
         for (const it of items) {
-          if (!it.stem || !(it.options ?? []).length || it.offCourse) continue;
+          if (!it.stem || !(it.options ?? []).length || it.rejected) continue;
           const st = tokens(it.stem);
           if (coveredSets.some((c) => jaccard(c, st) > 0.72)) continue; // quasi-doublon → skip
           const optStr = (it.options ?? []).map((o, k) => `${LETTERS[k]}) ${o}`).join("\n");
@@ -498,7 +498,7 @@ export async function planQuestions(): Promise<PlanQuestion[]> {
   return (await q.all<any>(
     `SELECT id, kind, topic, lecture_rank AS "lectureRank", statement, options, correct, misconceptions, explanation, solution, verified, verify_method AS "verifyMethod"
      FROM revision_plan ORDER BY (lecture_rank IS NULL), lecture_rank, topic, id`
-  ) as any[]).map((r) => ({ ...r }));
+  ) as any[]).map((r) => ({ ...r, explanation: r.explanation == null ? null : shownExplanation(r.explanation) }));
 }
 
 export async function planStats(): Promise<{ qcm: number; open: number; topics: number }> {
