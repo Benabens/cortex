@@ -4,7 +4,7 @@ import { HARD_STOP_CODES, LlmError, completeJson, llmErrorCode, llmFailureReason
 import { courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFormat } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
-import { COURSE_TERMS_RULE, absentCourseTerms, coursePassages } from "@/lib/course-grounding";
+import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseTerms, coursePassages } from "@/lib/course-grounding";
 import { assignChapters, spreadOverChapters } from "@/lib/coverage";
 import { normalize } from "@/lib/text";
 import { courseRefImages } from "@/lib/course-vision";
@@ -56,8 +56,14 @@ export type QcmItem = {
   judgeIssue?: string | null;
   /** Rang du sujet dans le lot demandé (non persisté) : un item écarté laisse SON sujet à combler. */
   slot?: number;
-  /** Notion hors cours (absente du corpus ou définie autrement), relevée à la vérification : item écarté. */
-  offCourse?: string | null;
+  /**
+   * Raison de rejet relevée à la vérification (hors cours, hors matière, clé contestée), non
+   * persistée : jamais gardé tel quel. Dans un examen, régénéré une fois puis écarté et son sujet
+   * comblé ; dans la banque de révision, écarté.
+   */
+  rejected?: string | null;
+  /** Le correcteur valide la question telle quelle (sa réponse est la clé, sans ambiguïté ni indice), non persisté. */
+  judgeOk?: boolean | null;
 };
 
 const QCM_BATCH_SCHEMA = {
@@ -262,6 +268,8 @@ function weaknessOf(it: QcmItem): string | null {
   if (it.verified === 0) return it.judgeIssue ?? "clé non confirmée à la vérification à l'aveugle";
   const issue = it.judgeIssue ? ` (${it.judgeIssue})` : "";
   if (it.nameOnly) return `réussie avec les seuls noms des notions ou par élimination${issue}`;
+  // Clé confirmée, mais le correcteur relève une ambiguïté, un indice ou un distracteur absurde.
+  if (it.judgeOk === false) return `défaut relevé par le correcteur${issue}`;
   if (typeof it.discrimination === "number" && it.discrimination <= 2) return `pouvoir discriminant faible (${it.discrimination}/5)${issue}`;
   if (qcmLengthCue(it.options, it.correct)) return "la bonne option se repère à sa longueur";
   return null;
@@ -281,6 +289,7 @@ const ARCHITECT_QCM_RULES = [
   `  - Teste la COMPRÉHENSION / le raisonnement, pas la récitation d'une définition.`,
   `  - Calibre la difficulté sur les VRAIS examens du cours (regarde les pages fournies).`,
   COURSE_TERMS_RULE,
+  COURSE_MATTER_RULE,
 ];
 
 /** Génère un LOT de QCM (1 appel LLM) couvrant des sujets donnés, au format du cours.
@@ -451,8 +460,9 @@ const VERIFY_SCHEMA = {
           name_only: { type: "boolean", description: "true si elle se réussit avec les seuls noms des notions, ou en éliminant des options absurdes." },
           course_terms: { type: "array", items: { type: "string" }, description: "Les notions nommées dont dépend la BONNE réponse, chacune écrite EXACTEMENT comme dans les extraits du cours (copie le terme du cours)." },
           off_course: { type: "string", description: "Non vide si la bonne réponse, un distracteur ou l'explication repose sur une notion ABSENTE des extraits du cours, ou que le cours définit AUTREMENT : laquelle, et ce que dit le cours. Vide sinon." },
+          off_matter: { type: "string", description: "Non vide si la question porte sur les modalités d'examen (format, barème, grille ou critères d'évaluation, consignes), sur la forme d'un rendu (poster, essai, bibliographie) ou sur l'organisation du cours (plan, ordre des chapitres) plutôt que sur sa matière : ce qu'elle teste. Vide sinon." },
         },
-        required: ["index", "correct", "ok", "discrimination", "name_only", "course_terms", "off_course"],
+        required: ["index", "correct", "ok", "discrimination", "name_only", "course_terms", "off_course", "off_matter"],
         additionalProperties: false,
       },
     },
@@ -480,6 +490,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
       ? `Résous et juge avec les DÉFINITIONS DU COURS (extraits ci-dessous), jamais avec celles d'une autre source. course_terms : les notions dont dépend la bonne réponse, écrites comme dans le cours. off_course : toute notion de la question absente des extraits, ou que le cours définit autrement (vide sinon).`
       : `course_terms : les notions nommées dont dépend la bonne réponse. off_course : laisse vide (aucun extrait du cours fourni ici).`,
     `Signale si : la question est ambiguë (2 réponses défendables), un distracteur est absurde, ou un indice trahit la bonne réponse (longueur, « toutes les réponses », grammaire).`,
+    `off_matter : ce que teste une question qui porte sur les modalités d'examen (format, barème, grille ou critères d'évaluation, consignes), sur la forme d'un rendu (poster, essai, bibliographie) ou sur l'organisation du cours (plan, ordre des chapitres) au lieu de sa matière (vide sinon).`,
     `Note aussi son POUVOIR DISCRIMINANT (discrimination, 1 à 5) : mets-toi à la place d'un étudiant qui ne connaît que les noms des notions du cours — pas leurs conditions, pas les résultats des études. S'il la réussit (ou élimine assez d'options pour la deviner), discrimination ≤ 2 et name_only = true.`,
     figDirs.length ? `Certaines questions ont une FIGURE : OUVRE le PNG indiqué (outil Read) et résous DEPUIS la figure. Si la figure ne suffit pas à répondre, mets ok=false avec issue="figure insuffisante".` : null,
     calib ? `${calib}\nÀ la lumière de ces leçons, sois SÉVÈRE : signale aussi (issue) tout QCM trop trivial / au distracteur trop faible si l'étudiant a jugé ce type « trop facile ».` : null,
@@ -492,7 +503,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     JSON.stringify(VERIFY_SCHEMA, null, 2),
   ].filter((l) => l != null).join("\n");
   step("Vérification à l'aveugle des QCM (résolution indépendante, figures vues)…", 70);
-  let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean; course_terms?: string[]; off_course?: string }[] };
+  let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean; course_terms?: string[]; off_course?: string; off_matter?: string }[] };
   try {
     res = await completeJson(
       { prompt, model: "opus", timeoutMs: 420_000, addDirs: figDirs, json: { schema: VERIFY_SCHEMA } },
@@ -504,6 +515,13 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   // juge l'a crue du cours.
   const termsOf = (r: { course_terms?: unknown }) => (Array.isArray(r.course_terms) ? r.course_terms.filter((t): t is string => typeof t === "string") : []);
   const absent = new Set((await absentCourseTerms((res.results ?? []).flatMap(termsOf))).map((t) => normalize(t)));
+  /** Rejette l'item (jamais gardé tel quel) ; `advice` guide sa régénération. */
+  const reject = (q: QcmItem, reason: string, advice: string) => {
+    q.verified = 0;
+    q.rejected = reason.slice(0, 400);
+    q.judgeIssue = `${q.rejected} — ${advice}`;
+    step(`QCM rejeté — ${q.rejected.slice(0, 160)}`, 70);
+  };
   for (const r of res.results ?? []) {
     const q = items[r.index];
     if (!q) continue;
@@ -513,10 +531,13 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     const flagged = passages.length && typeof r.off_course === "string" && !NO_FLAG.test(r.off_course.trim()) ? r.off_course.trim() : "";
     const off = [missing.length ? `absent du cours : ${missing.join(", ")}` : "", flagged].filter(Boolean).join(" ; ");
     if (off) {
-      q.verified = 0;
-      q.offCourse = off.slice(0, 240);
-      q.judgeIssue = `notion hors cours (${q.offCourse}) : n'utilise que les notions et les définitions des extraits du cours`;
-      step(`QCM rejeté — hors cours : ${q.offCourse}`, 70);
+      reject(q, `hors cours : ${off.slice(0, 240)}`, "n'utilise que les notions et les définitions des extraits du cours");
+      continue;
+    }
+    // Une question sur l'évaluation du cours (grille, consignes, forme d'un rendu) ne teste pas sa matière.
+    const offMatter = typeof r.off_matter === "string" && !NO_FLAG.test(r.off_matter.trim()) ? r.off_matter.trim().slice(0, 240) : "";
+    if (offMatter) {
+      reject(q, `hors matière : ${offMatter}`, "teste un fait de la matière du cours, jamais les modalités d'examen ni la forme d'un rendu");
       continue;
     }
     q.discrimination = Number.isInteger(r.discrimination) ? Math.max(1, Math.min(5, r.discrimination!)) : null;
@@ -530,9 +551,15 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
       q.judgeIssue = `question à réponse unique avec plusieurs réponses défendables${r.issue ? ` (${r.issue.trim().slice(0, 160)})` : ""}`;
       continue;
     }
-    if (r.ok && keyMatch) q.verified = 1;
-    else if (r.correct?.length) { q.correct = r.correct; q.verified = 1; q.explanation = (q.explanation ? q.explanation + " " : "") + (r.issue ? `[clé corrigée à la vérif : ${r.issue}]` : "[clé alignée sur la résolution indépendante]"); }
-    else q.verified = 0;
+    q.judgeOk = !!r.ok && keyMatch;
+    if (keyMatch) { q.verified = 1; continue; }
+    q.verified = 0;
+    if (!r.correct?.length) continue;
+    // Le correcteur trouve une AUTRE réponse que la clé : l'explication défend la clé d'origine,
+    // la remplacer donnait une clé et une explication contradictoires (HUM-285, Q19 du 02/11).
+    // L'item est régénéré avec ce que le correcteur a trouvé, sinon écarté ; jamais corrigé en place.
+    const found = r.correct.map((k) => `« ${sanitizeCorpus(q.options[k] ?? `option ${k}`).slice(0, 120)} »`).join(", ");
+    reject(q, `clé contestée : le correcteur trouve ${found}${q.judgeIssue ? ` (${q.judgeIssue})` : ""}`, "vérifie la réponse et écris une explication qui la justifie");
   }
   return items;
 }
@@ -644,7 +671,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       const out = items.slice();
       weak.forEach((w, k) => {
         const n = again[k];
-        if (n.verified === 1 && (!weaknessOf(n) || (n.discrimination ?? 0) > (w.it.discrimination ?? 0))) out[w.i] = { ...n, slot: w.it.slot };
+        // Un item rejeté n'est jamais gardé : toute version vérifiée vaut mieux qu'un lot de comblement.
+        if (n.verified === 1 && (w.it.rejected || !weaknessOf(n) || (n.discrimination ?? 0) > (w.it.discrimination ?? 0))) out[w.i] = { ...n, slot: w.it.slot };
       });
       return out;
     } catch (e) {
@@ -656,9 +684,9 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const safeBatch = async (bt: Batch): Promise<{ items: QcmItem[]; error: unknown }> => {
     try {
       const items = await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, undefined, { ...shared, molds: bt.molds });
-      // Un item resté hors cours après régénération n'est jamais gardé : son sujet est comblé.
+      // Un item resté rejeté après régénération (hors cours, clé contestée) n'est jamais gardé : son sujet est comblé.
       const kept = items.length ? await strengthen(bt, await verifyQcmBatch(items, step)) : [];
-      return { items: kept.filter((it) => !it.offCourse), error: null };
+      return { items: kept.filter((it) => !it.rejected), error: null };
     } catch (e) {
       step(`Lot QCM échoué (${(e as Error).message.slice(0, 80)})`, 0);
       return { items: [], error: e };
@@ -792,6 +820,22 @@ export function qcmExamSummary(r: Pick<QcmExamResult, "count" | "requested" | "v
   return `QCM ${qcm} (${r.verified} vér.) + ${open} ouverte(s)`;
 }
 
+/**
+ * Note que la vérification ajoutait à l'explication (avant le 02/11/2026) quand le correcteur
+ * contestait la clé — qu'elle la remplace (l'explication défendait alors l'ANCIENNE réponse) ou
+ * qu'il relève seulement un défaut. Les deux cas ne se distinguent plus : la note n'est jamais
+ * montrée, ni l'explication qu'elle accompagne.
+ */
+const LEGACY_KEY_NOTE = /\[clé (?:corrigée à la vérif\b|alignée sur la résolution indépendante)/;
+
+/** L'explication telle que l'étudiant la lit. */
+export function shownExplanation(raw: string | null | undefined): string {
+  const text = raw ?? "";
+  return LEGACY_KEY_NOTE.test(text)
+    ? "Explication retirée : la vérification avait relevé un problème sur cette question, et l'explication d'origine peut ne pas justifier la réponse retenue."
+    : text;
+}
+
 export type QcmOpenView = { id: number; concept: string; statement: string; solution: string };
 export type QcmExamView = { id: number; createdAt: string; verifySummary: string | null; pdf: string | null; items: (Omit<QcmItem, "correct" | "misconceptions"> & { id: number; idx: number })[]; open: QcmOpenView[] };
 type QcmExamRow = { id: number; created_at: string; verify_summary: string | null; html_path: string | null };
@@ -822,7 +866,7 @@ export async function getQcmExam(examId: number, withKeys = false): Promise<QcmE
       try { figure = r.figure_json ? (JSON.parse(r.figure_json).file ?? null) : null; } catch {}
       return {
         id: r.id, idx: r.idx, topic: r.topic, type: r.type, stem: r.stem,
-        options: JSON.parse(r.options_json), explanation: withKeys ? r.explanation : "", verified: r.verified,
+        options: JSON.parse(r.options_json), explanation: withKeys ? shownExplanation(r.explanation) : "", verified: r.verified,
         mold: r.mold ?? null, figureFile: figure,
         ...(withKeys ? { correct: JSON.parse(r.correct_json), misconceptions: JSON.parse(r.misconceptions_json) } : {}),
       };
@@ -871,7 +915,7 @@ export async function gradeQcm(examId: number, answers: Record<number, number[]>
     const chosen = [...new Set((answers[r.idx] ?? []).filter((value) => Number.isInteger(value) && value >= 0 && value < optionCount))].sort((a, b) => a - b);
     const ok = JSON.stringify(correct.slice().sort()) === JSON.stringify(chosen);
     const points = scoreQcmAnswer(correct, chosen, optionCount);
-    return { idx: r.idx, correct, chosen, ok, points, explanation: r.explanation, misconceptions: JSON.parse(r.misconceptions_json) };
+    return { idx: r.idx, correct, chosen, ok, points, explanation: shownExplanation(r.explanation), misconceptions: JSON.parse(r.misconceptions_json) };
   });
   return { score: detail.reduce((sum, item) => sum + item.points, 0), total: rows.length, detail };
 }
