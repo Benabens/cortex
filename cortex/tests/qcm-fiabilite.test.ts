@@ -169,3 +169,21 @@ test("aucun lot lisible : erreur claire qui dit pourquoi, jamais « unknown »",
   );
   assert.ok(designCalls <= 6, `essais bornés (${designCalls})`);
 });
+
+test("un item mal formé au milieu d'un lot : c'est SON sujet qui est comblé", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  design = (n, call) => {
+    const items = Array.from({ length: n }, (_, i) => item(call * 10 + i));
+    if (call === 1) items[1] = { ...items[1], options: [] }; // 2ᵉ QCM du 1ᵉʳ lot inutilisable
+    return JSON.stringify({ items });
+  };
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 3, openCount: 0 }));
+  assert.equal(r.count, 3);
+  const subjects = (p: string) => [...p.matchAll(/^ {2}(\d+)\) (.+?)(?: \[|$)/gm)].map((m) => m[2].trim());
+  const first = subjects(designPrompts[0]);
+  const topup = subjects(designPrompts[1]);
+  assert.deepEqual(topup, [first[1]], `comblé : ${topup.join(" | ")} ; lot : ${first.join(" | ")}`);
+});
+
