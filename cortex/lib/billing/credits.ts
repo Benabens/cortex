@@ -414,14 +414,15 @@ export function insufficient(balanceCenti: number, costCenti: number, subCenti =
  * (jamais reportée). Le user crédité est celui du débit d'origine.
  * `fraction` < 1 : remboursement PARTIEL (examen incomplet), au prorata de
  * chaque part, arrondi au centième SUPÉRIEUR (en faveur de l'utilisateur).
- * Un seul remboursement par débit, partiel ou non. Rend les centièmes rendus.
+ * Un seul remboursement par débit et par `marker` (défaut : refund:<ref>) — une question
+ * signalée a le sien (lib/question-reports). Rend les centièmes rendus.
  */
-export async function refundGeneration(kind: string, ref: string, userId = currentUser(), fraction = 1): Promise<number> {
+export async function refundGeneration(kind: string, ref: string, userId = currentUser(), fraction = 1, marker = `refund:${ref}`): Promise<number> {
   if (!billingEnabled()) return 0;
   const share = Math.min(1, Math.max(0, fraction));
   if (share <= 0) return 0;
   try {
-    if (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, `refund:${ref}`)) return 0;
+    if (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, marker)) return 0;
     const debited = await authGet<{ delta: number; user_id: string; sub_amount: number | null; created_at: string }>(
       `SELECT ${DELTA_CENTI} AS delta, user_id, sub_amount, created_at FROM credit_transactions WHERE ref = ?`, ref,
     );
@@ -443,11 +444,11 @@ export async function refundGeneration(kind: string, ref: string, userId = curre
     await ensureLedgerUnit();
     const label = share < 1 ? `remboursement partiel ${kind}` : `remboursement ${kind}`;
     return await authTx(async (tx) => {
-      if (await tx.get<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, `refund:${ref}`)) return 0;
+      if (await tx.get<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, marker)) return 0;
       const t = nowStr();
       await tx.run(
         `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, created_at) VALUES (?,?,?,?,'centi',?)`,
-        u, purchasedBack, label, `refund:${ref}`, t,
+        u, purchasedBack, label, marker, t,
       );
       if (subOk) await tx.run(`UPDATE subscriptions SET remaining = remaining + ?, updated_at = ? WHERE user_id = ?`, subBack, t, u);
       return purchasedBack + (subOk ? subBack : 0);
