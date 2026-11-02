@@ -62,7 +62,8 @@ before(async () => {
           };
         });
         text = JSON.stringify({
-          verdicts,
+          // Juge muet : aucun verdict rendu.
+          verdicts: /SILENT/.test(content) ? [] : verdicts,
           off_course: "",
           definition_mismatch: /NARROW/.test(content) ? "feedback loop : la question la réduit aux boucles positives ; le cours : renforçante OU équilibrante" : "",
           trivial_distractors: [],
@@ -267,4 +268,52 @@ test("C — PDF : un extrait de code garde son indentation, et une ligne qui com
   const indent = (re: RegExp) => /^(\s*)/.exec(txt.split("\n").find((l) => re.test(l)) ?? "")![1].length;
   assert.ok(indent(/for x in xs:/) > indent(/def f\(xs\):/), txt.slice(0, 600));
   assert.ok(indent(/print\(x\)/) > indent(/for x in xs:/));
+});
+
+test("C — un juge qui ne rend aucun verdict ne vaut pas vérification", async () => {
+  const id = await compositeCourse(3);
+  script = {
+    "Ethical theories": [block("A", [scq("A"), short("A"), code("[1, 2]")])],
+    "Keyword filtering": [block("B", [scq("B"), short("B"), code("[1, 2]")], "SILENT judge on this one.")],
+    "Feedback loops": [block("C", [scq("C"), short("C"), code("[1, 2]")])],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateMockExam } = await import("../lib/mock-exam");
+  const { getBlockExam } = await import("../lib/blocks");
+  const r = await runWithCourse(id, () => generateMockExam({}));
+  assert.deepEqual([r.produced, r.requested], [3, 3]);
+  const exam = (await runWithCourse(id, () => getBlockExam(r.id, false)))!;
+  assert.match(exam.verifySummary ?? "", /^2\/3 /, exam.verifySummary ?? "");
+});
+
+test("C — garantie du nombre : une réponse restée illisible n'arrête pas l'emplacement, une section ratée est reprise sur une de ses notions", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { generateMockExam } = await import("../lib/mock-exam");
+  const { getBlockExam } = await import("../lib/blocks");
+  // Annale modèle à deux sections : la 2ᵉ section, prise telle quelle, est toujours rejetée.
+  const id = await compositeCourse(2);
+  await runWithCourse(id, async () => {
+    for (const t of ["sources", "items", "format_profile"]) await q.ensureTable(t);
+    const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "final", "Midterm model", "final/model", 2026, 1);
+    await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "exercise", "Midterm model", "Question 1 and Question 2, each with sub-questions.");
+    await q.run(`INSERT INTO format_profile (json) VALUES (?)`, JSON.stringify({
+      format_summary: "2 questions, each a scenario followed by 3 to 5 sub-questions.", duration_min: 60, total_points: 20, has_mcq: true, scq_vs_mcq_convention: "",
+      question_types: [{ type: "scq", approx_count: 4, share_pct: 40 }, { type: "open", approx_count: 4, share_pct: 60 }],
+      sections: [{ name: "Q1 — Ethics", description: "ethical theories and stakeholders" }, { name: "Q2 — Moderation", description: "keyword filtering of posts" }],
+      topics_emphasis: [],
+    }));
+  });
+  const twoParts = block("bad", [scq("bad"), short("bad")]);
+  script = {
+    "centrée sur": [block("spare", [scq("S"), short("S"), code("[1, 2]")])],
+    // Trois réponses mal formées d'affilée (completeJson abandonne), puis une bonne.
+    "Q1 — Ethics": [twoParts, twoParts, twoParts, block("Q1", [scq("Q1"), short("Q1"), code("[1, 2]")])],
+    "Q2 — Moderation": [block("Q2", [scq("Q2"), short("Q2"), code("[1, 2]")], "NARROW: always.")],
+  };
+  const steps: string[] = [];
+  const r = await runWithCourse(id, () => generateMockExam({ onStep: (s) => { steps.push(s); } }));
+  assert.deepEqual([r.produced, r.requested], [2, 2], steps.join("\n"));
+  const exam = (await runWithCourse(id, () => getBlockExam(r.id, false)))!;
+  assert.deepEqual(exam.blocks.map((b) => b.section), ["Q1 — Ethics", "Q2 — Moderation"], "la reprise garde sa section");
 });
