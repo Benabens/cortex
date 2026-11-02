@@ -60,10 +60,16 @@ function termPatterns(term: string): RegExp[] {
   return out;
 }
 
-/** Textes normalisés du corpus du cours courant, ou null s'il est vide ou trop gros pour être vérifié. */
+/**
+ * Textes normalisés du corpus du cours courant, ou null s'il est vide ou trop gros pour être vérifié.
+ * Sans les consignes d'examen (exam_info) : une grille d'évaluation dit comment le cours est noté,
+ * ses termes (« lien conceptuel SHS », D1 de HUM-285) ne sont pas des notions du cours.
+ */
 async function corpusTexts(): Promise<string[] | null> {
   let rows: { text: string | null }[] = [];
-  try { rows = await q.all<{ text: string | null }>(`SELECT text FROM items`); } catch { return null; }
+  try {
+    rows = await q.all<{ text: string | null }>(`SELECT i.text FROM items i LEFT JOIN sources s ON s.id = i.source_id WHERE s.type IS NULL OR s.type <> 'exam_info'`);
+  } catch { return null; }
   let total = 0;
   const texts: string[] = [];
   for (const r of rows) {
