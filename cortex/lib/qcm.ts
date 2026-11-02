@@ -1,6 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { q, nowStr } from "@/db/q";
-import { completeText, extractJson } from "@/lib/llm";
+import { completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
 import { EXAM_SOURCE_TYPES, courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFormat } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
@@ -78,6 +78,22 @@ const QCM_BATCH_SCHEMA = {
   required: ["items"],
   additionalProperties: false,
 } as const;
+
+/** Le même schéma sans figure_spec (objet libre) : exprimable en sortie structurée stricte. */
+const QCM_BATCH_SCHEMA_NO_FIGURE: object = (() => {
+  const s = JSON.parse(JSON.stringify(QCM_BATCH_SCHEMA));
+  delete s.properties.items.items.properties.figure_spec;
+  return s;
+})();
+
+/** Un QCM exploitable : énoncé, au moins 2 options texte, clé(s) valide(s). Sinon écarté (et comblé). */
+function wellFormed(raw: unknown): boolean {
+  const it = raw as Partial<QcmItem> | null;
+  if (!it || typeof it.stem !== "string" || !it.stem.trim()) return false;
+  if (!Array.isArray(it.options) || it.options.length < 2 || !it.options.every((o) => typeof o === "string" && o.trim())) return false;
+  const n = it.options.length;
+  return Array.isArray(it.correct) && it.correct.length > 0 && it.correct.every((k) => Number.isInteger(k) && k >= 0 && k < n);
+}
 
 async function ensureQcmSchema(): Promise<void> {
   // l'examen QCM s'insère dans `exams` (partagée) ; garantir la colonne verify_summary (les DB de
@@ -374,10 +390,19 @@ export async function generateQcmBatch(
     JSON.stringify(QCM_BATCH_SCHEMA, null, 2),
   ].filter((l) => l != null && l !== "").join("\n");
   step(`Génération de ${n} QCM (architecte · moules + idées fausses)…`, 30);
-  const r = extractJson<{ items: (QcmItem & { figure_spec?: FigureSpec })[] }>(await completeText({ prompt, model: "opus", timeoutMs: 480_000 }));
+  // Sortie structurée (fournisseurs API) : sans figure, le schéma est strict ; une figure_spec
+  // est un objet libre, inexprimable → texte libre, lu par extractJson. Réponse illisible →
+  // redemandée avec l'erreur (completeJson, 3 essais).
+  const r = await completeJson<{ items: (QcmItem & { figure_spec?: FigureSpec })[] }>(
+    { prompt, model: "opus", timeoutMs: 480_000, json: { schema: withFigures ? QCM_BATCH_SCHEMA : QCM_BATCH_SCHEMA_NO_FIGURE } },
+    { check: (v) => (!Array.isArray(v?.items) ? "le champ « items » (tableau de QCM) manque" : v.items.length ? null : "« items » est vide") },
+  );
   const items: QcmItem[] = [];
-  for (let i = 0; i < (r.items ?? []).length; i++) {
-    const raw = r.items[i];
+  // Jamais plus que demandé au lot ; un item mal formé est écarté (le comblement le remplace).
+  const raws = r.items.slice(0, n);
+  for (let i = 0; i < raws.length; i++) {
+    const raw = raws[i];
+    if (!wellFormed(raw)) continue;
     const imposed = molds[i] ?? null;
     const fact = (raw as { source_fact?: unknown }).source_fact;
     const base: QcmItem = {
@@ -469,8 +494,12 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   ].filter((l) => l != null).join("\n");
   step("Vérification à l'aveugle des QCM (résolution indépendante, figures vues)…", 70);
   let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean }[] };
-  try { res = extractJson(await completeText({ prompt, model: "opus", timeoutMs: 420_000, addDirs: figDirs })); }
-  catch { return items; } // fallback honnête : non vérifiés
+  try {
+    res = await completeJson(
+      { prompt, model: "opus", timeoutMs: 420_000, addDirs: figDirs, json: { schema: VERIFY_SCHEMA } },
+      { check: (v) => (Array.isArray((v as { results?: unknown })?.results) ? null : "le champ « results » manque") },
+    );
+  } catch { return items; } // fallback honnête : non vérifiés
   for (const r of res.results ?? []) {
     const q = items[r.index];
     if (!q) continue;
@@ -492,7 +521,13 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   return items;
 }
 
-export type QcmExamResult = { id: number; count: number; verified: number; open: number; pdf?: string; texError?: string };
+/** `requested` / `openRequested` : la composition demandée — `count` / `open` peuvent rester en dessous. */
+export type QcmExamResult = { id: number; count: number; requested: number; verified: number; open: number; openRequested: number; pdf?: string; texError?: string };
+
+/** Nombre de rondes de comblement des QCM manquants, et lots supplémentaires permis (× lots prévus). */
+const TOPUP_ROUNDS = 2;
+/** Échecs où relancer un lot ne servirait à rien (garde, plafond, configuration, annulation). */
+const NO_TOPUP_CODES = new Set(["UNAVAILABLE", "SPEND_CAP", "QUOTA", "CREDITS", "AUTH", "UNSUPPORTED", "ABORTED"]);
 
 /** Génère un examen QCM complet (N QCM + M ouvertes), vérifié, persisté, rendu en PDF.
  *  `count`/`openCount` : la COMPOSITION choisie par l'utilisateur (composeur). `focus` : « Mets l'accent
@@ -548,10 +583,11 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   };
   step(`Architecte : ${count} QCM + ${openCount} ouverte(s)${focus ? ` (accent : « ${focus} »)` : ""}${dna ? ` · moules ADN (${dna.molds.length})` : " au format détecté"}…`, 8);
 
-  // lots de 4 QCM en parallèle borné (2 lots à la fois). RÉSILIENT : un lot qui échoue (JSON
-  // malformé du modèle sur du math) est réessayé une fois puis IGNORÉ — il ne plante pas le job.
+  // lots de 4 QCM en parallèle borné (2 lots à la fois). RÉSILIENT : un lot illisible est redemandé
+  // avec l'erreur (completeJson), un lot échoué ne plante pas le job et ses sujets sont comblés plus bas.
   const BATCH = 4;
-  const batches: { topics: { label: string; method: string | null }[]; molds: (MoldKind | null)[] }[] = [];
+  type Batch = { topics: { label: string; method: string | null }[]; molds: (MoldKind | null)[] };
+  const batches: Batch[] = [];
   for (let i = 0; i < count; i += BATCH) {
     const topicsSlice: { label: string; method: string | null }[] = [];
     const moldsSlice: (MoldKind | null)[] = [];
@@ -566,7 +602,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
    * peu discriminants, ou trahis par leur longueur) sont régénérés UNE fois, critique à l'appui,
    * et remplacés si la nouvelle version est meilleure.
    */
-  const strengthen = async (bt: { topics: { label: string; method: string | null }[]; molds: (MoldKind | null)[] }, items: QcmItem[]): Promise<QcmItem[]> => {
+  const strengthen = async (bt: Batch, items: QcmItem[]): Promise<QcmItem[]> => {
     const weak = items.map((it, i) => ({ it, i, why: weaknessOf(it) })).filter((w): w is { it: QcmItem; i: number; why: string } => !!w.why);
     if (!weak.length) return items;
     step(`${weak.length} QCM trop faible(s) → régénération ciblée`, 0);
@@ -591,25 +627,48 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       return items;
     }
   };
-  const safeBatch = async (bt: { topics: { label: string; method: string | null }[]; molds: (MoldKind | null)[] }): Promise<QcmItem[]> => {
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const items = await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, undefined, { ...shared, molds: bt.molds });
-        if (items.length) return await strengthen(bt, await verifyQcmBatch(items, step));
-      } catch (e) {
-        step(`Lot QCM échoué (${(e as Error).message.slice(0, 50)})${attempt < 2 ? " — réessai" : " — ignoré"}`, 0);
-      }
+  /** Un lot conçu, vérifié, renforcé. Un échec (après les réessais de completeJson) rend 0 item et sa cause. */
+  const safeBatch = async (bt: Batch): Promise<{ items: QcmItem[]; error: unknown }> => {
+    try {
+      const items = await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, undefined, { ...shared, molds: bt.molds });
+      return { items: items.length ? await strengthen(bt, await verifyQcmBatch(items, step)) : [], error: null };
+    } catch (e) {
+      step(`Lot QCM échoué (${(e as Error).message.slice(0, 80)})`, 0);
+      return { items: [], error: e };
     }
-    return [];
   };
+  // NOMBRE GARANTI : les sujets restés sans QCM (lot échoué, items écartés) sont regroupés en
+  // nouveaux lots, au plus TOPUP_ROUNDS rondes et autant de lots en plus que de lots prévus.
+  // En dessous malgré tout, l'examen le dit (requested) et le job rembourse au prorata.
   const all: QcmItem[] = [];
-  for (let b = 0; b < batches.length; b += 2) {
-    const got = await Promise.all(batches.slice(b, b + 2).map(safeBatch));
-    for (const g of got) all.push(...g);
-    step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
+  let lastError: unknown = null;
+  let pending = batches;
+  let extraBudget = batches.length;
+  for (let round = 0; pending.length; round++) {
+    const missing: { topic: { label: string; method: string | null }; mold: MoldKind | null }[] = [];
+    for (let b = 0; b < pending.length; b += 2) {
+      const group = pending.slice(b, b + 2);
+      const got = await Promise.all(group.map(safeBatch));
+      got.forEach((g, k) => {
+        all.push(...g.items.slice(0, Math.max(0, count - all.length)));
+        if (g.error) lastError = g.error;
+        const bt = group[k];
+        for (let j = g.items.length; j < bt.topics.length; j++) missing.push({ topic: bt.topics[j], mold: bt.molds[j] ?? null });
+      });
+      step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
+    }
+    const stop = llmErrorCode(lastError);
+    if (!missing.length || all.length >= count || round >= TOPUP_ROUNDS || extraBudget <= 0 || (stop && NO_TOPUP_CODES.has(stop))) break;
+    pending = [];
+    for (let i = 0; i < missing.length && pending.length < extraBudget; i += BATCH) {
+      const slice = missing.slice(i, i + BATCH);
+      pending.push({ topics: slice.map((m) => m.topic), molds: slice.map((m) => m.mold) });
+    }
+    extraBudget -= pending.length;
+    step(`${count - all.length} QCM manquant(s) → ${pending.length} lot(s) de comblement`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
   }
   // count>0 mais 0 QCM produit = tous les lots ont échoué → erreur claire (sauf drill 0 QCM + ouvertes).
-  if (count > 0 && !all.length) throw new Error("Aucun QCM généré (tous les lots ont échoué). Réessaie.");
+  if (count > 0 && !all.length) throw new Error(`Aucun QCM généré : ${llmFailureReason(lastError)}`);
 
   // partie OUVERTE : chaque question via l'architecte (multi-passes + vérif), au niveau réel.
   // moules « ouverts » échantillonnés depuis l'ADN, imposés à l'architecte.
@@ -633,7 +692,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     }
   }
 
-  if (!all.length && !openQs.length) throw new Error("Rien n'a pu être généré (lots QCM et questions ouvertes échoués). Réessaie.");
+  if (!all.length && !openQs.length) throw new Error(`Rien n'a pu être généré (lots QCM et questions ouvertes échoués) : ${llmFailureReason(lastError)}`);
 
   // persiste l'exam + les QCM + les ouvertes. Les figures rendues (PNG temporaires) prennent leur
   // nom DÉFINITIF qcm-<examId>-fig<idx>.png (dans examsDir, à côté du .tex compilé).
@@ -659,7 +718,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     }
   });
   const verified = all.filter((it) => it.verified === 1).length;
-  await q.run(`UPDATE exams SET verify_summary = ? WHERE id = ?`, `QCM ${all.length} (${verified} vér.) + ${openQs.length} ouverte(s)`, examId);
+  await q.run(`UPDATE exams SET verify_summary = ? WHERE id = ?`, qcmExamSummary({ count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount }), examId);
 
   // rendu PDF (énoncé + corrigé) au look d'un vrai final du cours
   step("Rendu du PDF (look vrai final)…", 92);
@@ -672,8 +731,15 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     await q.run(`UPDATE exams SET html_path = ? WHERE id = ?`, out.file, examId);
   } catch (e) { texError = (e as Error).message; }
 
-  step(`Examen QCM #${examId} prêt — ${all.length} QCM + ${openQs.length} ouverte(s) ✓`, 100);
-  return { id: examId, count: all.length, verified, open: openQs.length, pdf, texError };
+  step(`Examen QCM #${examId} prêt — ${qcmExamSummary({ count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount })} ✓`, 100);
+  return { id: examId, count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount, pdf, texError };
+}
+
+/** Résumé de l'examen : « QCM 5 sur 7 demandés (4 vér.) + 3 ouverte(s) » ; rien de signalé s'il est complet. */
+export function qcmExamSummary(r: Pick<QcmExamResult, "count" | "requested" | "verified" | "open" | "openRequested">): string {
+  const qcm = r.count < r.requested ? `${r.count} sur ${r.requested} demandés` : `${r.count}`;
+  const open = r.open < r.openRequested ? `${r.open} sur ${r.openRequested}` : `${r.open}`;
+  return `QCM ${qcm} (${r.verified} vér.) + ${open} ouverte(s)`;
 }
 
 export type QcmOpenView = { id: number; concept: string; statement: string; solution: string };
