@@ -314,3 +314,15 @@ test("C — format composite déclaré (set_exam_format) : N questions composée
   assert.equal(planMockExam(requestedFormat(f, "qcm"), {}).generator, "qcm");
   assert.match(f.summary, /questions composées/);
 });
+
+test("C — un examen d'exercices à sous-questions, sans choix, reste un examen d'exercices", async () => {
+  const id = await newCourse({ language: "en" });
+  await addSource(id, "final", "Final", ENGLISH_FINAL);
+  await saveProfile(id, {
+    ...COMPOSITE_PROFILE, has_mcq: false,
+    format_summary: "4 problems, each with 3 to 5 sub-questions (derivations and proofs).",
+    question_types: [{ type: "calc", approx_count: 12, share_pct: 60 }, { type: "proof", approx_count: 4, share_pct: 40 }],
+    composite: { block_count: 4, parts_min: 3, parts_max: 5 },
+  });
+  assert.equal((await resolve(id)).kind, "exercises");
+});

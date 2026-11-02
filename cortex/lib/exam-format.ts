@@ -301,8 +301,12 @@ async function annales(cap = 8000): Promise<{ count: number; text: string }> {
 /**
  * Questions composées lues dans un profil : le champ de la détection, sinon (profils détectés
  * avant lui, CS-290 du 01/11) des sections et un résumé qui annonce « 3 à 6 sous-questions ».
+ * Seulement avec des questions à choix : le générateur de blocs mêle choix unique, réponse
+ * courte et lecture de code ; un problème de calcul ou de preuve à sous-questions (STEM)
+ * reste un exercice.
  */
-export function blocksOf(p: Pick<FormatProfile, "format_summary" | "sections" | "total_points" | "composite">): (BlockFormat & { count: number }) | null {
+export function blocksOf(p: Pick<FormatProfile, "format_summary" | "sections" | "total_points" | "composite" | "has_mcq">): (BlockFormat & { count: number }) | null {
+  if (!p.has_mcq) return null;
   const sections = (p.sections ?? []).filter((s) => s?.name).map((s) => ({ name: String(s.name), description: String(s.description ?? "") }));
   const totalPoints = positive(p.total_points) ? p.total_points : null;
   const c = p.composite;

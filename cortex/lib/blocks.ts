@@ -5,12 +5,15 @@ import { COURSE_TERMS_RULE, coursePassages } from "@/lib/course-grounding";
 import { assignChapters, spreadOverChapters } from "@/lib/coverage";
 import type { StepCb } from "@/lib/exam";
 import { examLanguageFor, type BlockFormat } from "@/lib/exam-format";
-import { completeJson, llmFailureReason } from "@/lib/llm";
+import { HARD_STOP_CODES, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { NO_FLAG, coverageTopics, runPool } from "@/lib/qcm";
+import { examsDir } from "@/lib/paths";
 import { runSandboxed } from "@/lib/sandbox-exec";
 import { normalize, tokenize } from "@/lib/text";
+import fs from "node:fs";
+import path from "node:path";
 
 /**
  * QUESTIONS COMPOSÉES — le format d'examen le plus courant à l'EPFL (mid-term de CS-290) :
@@ -147,13 +150,13 @@ export function blockIssue(v: unknown, min: number, max: number): string | null 
     if (!text(p.prompt)) return `${at} : « prompt » est vide`;
     if (!isInt(p.points) || p.points < 1) return `${at} : « points » doit être un entier ≥ 1`;
     if (p.kind === "scq") {
-      const opts = Array.isArray(p.options) ? p.options.filter((o) => text(o)) : [];
-      if (opts.length < 3 || opts.length > 6) return `${at} (scq) : il faut 4 options non vides`;
+      const opts = Array.isArray(p.options) ? p.options : [];
+      if (opts.length < 3 || opts.length > 6 || opts.some((o) => !text(o))) return `${at} (scq) : 3 à 6 options non vides (4 de préférence)`;
       if (!isInt(p.correct) || p.correct < 0 || p.correct >= opts.length) return `${at} (scq) : « correct » doit être l'indice de la bonne option`;
     } else if (p.kind === "short") {
       const crit = Array.isArray(p.criteria) ? p.criteria : [];
       if (!text(p.answer)) return `${at} (short) : « answer » (la réponse modèle) est vide`;
-      if (crit.length < 1 || crit.length > 4 || crit.some((c) => !text(c?.label) || !isInt(c?.points) || c.points < 1)) return `${at} (short) : 1 à 3 critères { label, points entiers ≥ 1 }`;
+      if (crit.length < 1 || crit.length > 4 || crit.some((c) => !text(c?.label) || !isInt(c?.points) || c.points < 1)) return `${at} (short) : 1 à 4 critères { label, points entiers ≥ 1 } (3 au plus de préférence)`;
       if (crit.reduce((s, c) => s + c.points, 0) !== p.points) return `${at} (short) : la somme des points des critères doit valoir « points » (${p.points})`;
     } else {
       if (!text(p.code)) return `${at} (code_output) : « code » (l'extrait à lire) est vide`;
@@ -199,7 +202,7 @@ function cleanPart(p: Partial<BlockPart>): BlockPart {
     kind,
     prompt: text(p.prompt),
     code: kind === "code_output" ? String(p.code ?? "").replace(/\s+$/, "") : "",
-    options: kind === "scq" ? (p.options ?? []).map((o) => text(o)).filter(Boolean) : [],
+    options: kind === "scq" ? (p.options ?? []).map((o) => text(o)) : [],
     correct: kind === "scq" ? Number(p.correct) : -1,
     answer: kind === "scq" ? "" : String(p.answer ?? "").trim(),
     criteria: kind === "short" ? (p.criteria ?? []).map((c) => ({ label: text(c.label), points: Number(c.points) })) : [],
@@ -229,9 +232,16 @@ async function planSlots(plan: BlockPlan): Promise<{ slots: BlockSlot[]; spares:
       const theme = s.description ? `${s.name} — ${s.description}` : s.name;
       return { theme, section: s.name, query: [s.name, s.description].filter(Boolean), notions: nearestNotions(theme, topics) };
     });
-    // Plus de questions demandées que de sections : les suivantes reprennent les sections dans l'ordre.
-    for (let i = slots.length; i < plan.blockCount; i++) slots.push({ ...slots[i % plan.sections.length] });
-    return { slots, spares: [] };
+    // Plus de questions demandées que de sections : les suivantes reprennent les sections dans
+    // l'ordre, recentrées sur une autre de leurs notions (pas deux fois la même question, H).
+    for (let i = slots.length; i < plan.blockCount; i++) {
+      const s = slots[i % plan.sections.length];
+      const nm = s.notions[Math.floor(i / plan.sections.length) % Math.max(1, s.notions.length)];
+      slots.push(nm ? { ...s, theme: `${s.theme} — centrée sur : ${nm}`, query: [...s.query, nm] } : { ...s });
+    }
+    // Réserves : chaque section recentrée sur une de ses notions, pour remplacer un bloc rejeté sans changer de section.
+    const spares = slots.slice(0, plan.sections.length).flatMap((s) => s.notions.slice(0, 2).map((nm) => ({ ...s, theme: `${s.theme} — centrée sur : ${nm}`, query: [...s.query, nm] })));
+    return { slots, spares };
   }
   const assigned = await assignChapters(topics.map((t) => ({ ...t, weight: t.weight ?? 0 }))).catch(() => []);
   const spread = spreadOverChapters(assigned, plan.blockCount + 2)
@@ -339,16 +349,19 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
   ].join("\n\n");
   let res: { verdicts?: { index: number; answer: string; ok: boolean; issue?: string }[]; off_course?: string; definition_mismatch?: string; trivial_distractors?: { index: number; options: string[] }[] };
   try {
-    res = await completeJson({ system, prompt, model: "opus", timeoutMs: 240_000, json: { schema: VERDICT_SCHEMA } }, { check: (v: typeof res) => (Array.isArray(v?.verdicts) ? null : "le champ « verdicts » manque") });
+    // Un verdict par sous-question, sinon rien n'est vérifié (jamais de faux « vérifié »).
+    const covers = (v: typeof res) => b.parts.every((_, i) => v.verdicts?.some((x) => x.index === i));
+    res = await completeJson({ system, prompt, model: "opus", timeoutMs: 240_000, json: { schema: VERDICT_SCHEMA } }, {
+      check: (v: typeof res) => (!Array.isArray(v?.verdicts) ? "le champ « verdicts » manque" : covers(v) ? null : `un verdict par sous-question (index 0 à ${b.parts.length - 1})`),
+    });
   } catch {
     return null;
   }
   const issues: string[] = [];
   const said = (x: unknown) => (passages.length && typeof x === "string" && !NO_FLAG.test(x.trim()) ? x.trim() : "");
   for (const [i, p] of b.parts.entries()) {
-    const v = res.verdicts?.find((x) => x.index === i);
+    const v = res.verdicts!.find((x) => x.index === i)!;
     const at = `(${LETTER[i].toLowerCase()})`;
-    if (!v) continue;
     if (v.ok === false) issues.push(`${at} ${v.issue || "ambiguë ou contraire au cours"}`);
     if (p.kind === "scq") {
       const a = String(v.answer ?? "").trim().toUpperCase();
@@ -378,8 +391,14 @@ async function buildBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan
       b = await generateBlock(slot, i, n, plan, ctx, guidance, passages);
     } catch (e) {
       why = llmFailureReason(e);
-      step(`Question composée ${i + 1} ignorée : ${why.slice(0, 140)}`, progress);
-      return { block: null, why };
+      // Quota, clé, plafond de dépense : inutile d'insister. Une réponse restée illisible : version suivante.
+      const code = llmErrorCode(e);
+      if (code && HARD_STOP_CODES.has(code)) {
+        step(`Question composée ${i + 1} ignorée : ${why.slice(0, 140)}`, progress);
+        return { block: null, why };
+      }
+      step(`Question composée ${i + 1}, version ${attempt} inutilisable : ${why.slice(0, 140)}`, progress);
+      continue;
     }
     const issues = [...await runCodeParts(b)];
     const judged = await judgeBlock(b, passages);
@@ -417,13 +436,22 @@ export async function generateBlockExam(
     if (r.block) built.set(i, r.block);
     else failed.push({ i, why: r.why });
   });
-  // Réserves : une autre notion pour chaque emplacement resté vide.
+  // Réserves, une à une jusqu'à un bloc qui passe : d'abord celles de la même section (annale
+  // modèle : seulement elles, une section ne se remplace pas par une autre), sinon une autre notion.
   for (const f of failed.sort((a, b) => a.i - b.i)) {
-    const spare = spares.shift();
-    if (!spare) break;
-    step(`Question composée ${f.i + 1} : une autre notion (${spare.theme.slice(0, 60)})…`, 82);
-    const r = await buildBlock(spare, f.i, n, plan, ctx, step, 82);
-    if (r.block) built.set(f.i, r.block);
+    const section = slots[f.i].section;
+    for (;;) {
+      const k = spares.findIndex((s) => s.section === section);
+      const at = k >= 0 ? k : plan.sections.length ? -1 : 0;
+      if (at < 0 || !spares.length) break;
+      const [spare] = spares.splice(at, 1);
+      step(`Question composée ${f.i + 1} : reprise sur ${spare.theme.slice(0, 80)}…`, 82);
+      const r = await buildBlock(spare, f.i, n, plan, ctx, step, 82);
+      if (r.block) {
+        built.set(f.i, r.block);
+        break;
+      }
+    }
   }
   const blocks = [...built.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => b);
   if (!blocks.length) throw new Error(`Aucune question composée n'a passé la vérification${failed[0]?.why ? ` (${failed[0].why.slice(0, 200)})` : ""}.`);
@@ -440,6 +468,12 @@ export async function generateBlockExam(
   await q.run(`UPDATE exams SET status = 'ready', html_path = ?, verify_summary = ? WHERE id = ?`, art.file || null, `${verified}/${blocks.length} questions composées vérifiées à l'aveugle`, examId);
   step(`Examen #${examId} prêt — ${blocks.length} questions composées ✓`, 100);
   return { id: examId, count: blocks.length, requested: n, ...(art.texError ? { texError: art.texError } : {}), ...(art.texWarning ? { texWarning: art.texWarning } : {}) };
+}
+
+/** Le corrigé PDF d'un examen, s'il a compilé. */
+export function solutionsPdf(htmlPath: string | null): string | null {
+  const file = htmlPath && htmlPath.endsWith(".pdf") ? htmlPath.replace(/\.pdf$/, "-corrige.pdf") : "";
+  return file && fs.existsSync(path.join(examsDir(), path.basename(file))) ? file : null;
 }
 
 async function ensureBlockSchema(): Promise<void> {
@@ -468,7 +502,8 @@ async function saveBlockExam(blocks: ExamBlock[]): Promise<number> {
 
 export type PartView = { id: number; idx: number; kind: PartKind; prompt: string; code: string; options: string[]; points: number; correct?: number; answer?: string; criteria?: Criterion[]; explanation?: string };
 export type BlockView = { id: number; idx: number; title: string; section: string | null; scenario: string; points: number; parts: PartView[] };
-export type BlockExamView = { kind: "blocks"; id: number; createdAt: string; status: string; verifySummary: string | null; pdf: string | null; blocks: BlockView[] };
+/** `solutions` : le PDF du corrigé, seulement s'il existe (il peut ne pas avoir compilé). */
+export type BlockExamView = { kind: "blocks"; id: number; createdAt: string; status: string; verifySummary: string | null; pdf: string | null; solutions: string | null; blocks: BlockView[] };
 
 type PartRow = { id: number; block_id: number; idx: number; kind: PartKind; prompt: string; code: string | null; options_json: string | null; correct: number | null; answer: string | null; criteria_json: string | null; points: number; explanation: string | null };
 
@@ -482,7 +517,7 @@ export async function getBlockExam(examId: number, withKeys = false): Promise<Bl
   const blocks = await q.all<{ id: number; idx: number; title: string; section: string | null; scenario: string; points: number }>(`SELECT id, idx, title, section, scenario, points FROM exam_blocks WHERE exam_id = ? ORDER BY idx`, examId);
   const parts = await q.all<PartRow>(`SELECT * FROM block_parts WHERE exam_id = ? ORDER BY block_id, idx`, examId);
   return {
-    kind: "blocks", id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: e.verify_summary, pdf: e.html_path ?? null,
+    kind: "blocks", id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: e.verify_summary, pdf: e.html_path ?? null, solutions: solutionsPdf(e.html_path),
     blocks: blocks.map((b) => ({
       id: b.id, idx: b.idx, title: b.title, section: b.section, scenario: b.scenario, points: Number(b.points),
       parts: parts.filter((p) => p.block_id === b.id).map((p) => ({
