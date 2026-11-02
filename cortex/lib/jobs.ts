@@ -1,6 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { currentUser } from "@/db/context";
-import { q, nowStr } from "@/db/q";
+import { dbDriverName, q, nowStr } from "@/db/q";
 import { inc, observe } from "@/lib/metrics";
 import { examsDir } from "@/lib/paths";
 import { spawn } from "node:child_process";
@@ -261,8 +261,12 @@ export async function logJob(id: number, msg: string): Promise<void> {
   // Transactionnel : les onStep sont émis sans await (fire-and-forget) —
   // sans tx, deux logJob concurrents relisaient le même tableau et s'écrasaient
   // mutuellement (entrées perdues, cf. race read-modify-write historique).
+  // En Postgres (READ COMMITTED) la transaction ne suffit pas : sans verrou de
+  // ligne, deux écritures relisent le même tableau et l'une efface l'autre
+  // (job 8 de CS-290 : la moitié des étapes perdues, dont la cause d'un échec).
+  const lock = dbDriverName() === "postgres" ? " FOR UPDATE" : "";
   await q.tx(async () => {
-    const row = await q.get<{ log_json: string }>(`SELECT log_json FROM jobs WHERE id = ?`, id);
+    const row = await q.get<{ log_json: string }>(`SELECT log_json FROM jobs WHERE id = ?${lock}`, id);
     let arr: { t: string; msg: string }[] = [];
     try { arr = JSON.parse(row?.log_json ?? "[]"); } catch {}
     arr.push({ t: new Date().toISOString(), msg });
