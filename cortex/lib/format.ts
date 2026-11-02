@@ -2,7 +2,7 @@ import { q } from "@/db/q";
 import { completeText, extractJson } from "@/lib/llm";
 import { courseRefImages } from "@/lib/course-vision";
 import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
-import { EXAM_KINDS, type ExamKind, type StoredProfile } from "@/lib/exam-format";
+import { ANSWER_MODES, EXAM_KINDS, type AnswerMode, type ExamKind, type StoredProfile } from "@/lib/exam-format";
 
 /**
  * DÉTECTION DE FORMAT (générique, par matière). Le moteur ne hardcode RIEN : il LIT le
@@ -206,6 +206,7 @@ const NO_ANNALES_SCHEMA = {
     exam_kind: { type: ["string", "null"], description: "qcm | exercises | mixed | composite | essay | oral — ou null si les passages ne disent PAS la forme de l'examen." },
     question_count: { type: ["integer", "null"], description: "Nombre de questions de l'examen s'il est écrit, sinon null." },
     open_count: { type: ["integer", "null"], description: "Questions ouvertes d'un examen mixte si c'est écrit, sinon null." },
+    answer_mode: { type: ["string", "null"], description: "QCM : single (« une seule réponse correcte »), multiple (une ou plusieurs réponses correctes), mixed (les deux) — null si les extraits ne le disent pas." },
     duration_min: { type: ["integer", "null"], description: "Durée en minutes si elle est écrite, sinon null." },
     format_summary: { type: "string", description: "Une phrase : ce que les passages disent de l'examen." },
     evidence: { type: "array", items: { type: "string" }, description: "Citations EXACTES (copiées mot pour mot, ≤ 200 caractères chacune) des passages qui justifient exam_kind." },
@@ -253,6 +254,7 @@ async function detectWithoutAnnales(step: (m: string, p: number) => void): Promi
     ``,
     `═══ TA TÂCHE ═══`,
     `exam_kind : qcm (questions à choix), exercises (problèmes à résoudre), mixed (QCM + questions ouvertes), composite (questions composées : un scénario ou un extrait de code suivi de sous-questions de types mêlés), essay (essai / dissertation argumentée), oral — ou null si les extraits ne le disent pas.`,
+    `answer_mode : pour un QCM, single, multiple ou mixed seulement si les extraits le DISENT (« une seule réponse correcte », « une ou plusieurs réponses ») — sinon null.`,
     `evidence : recopie MOT POUR MOT les phrases des extraits qui le justifient (elles seront vérifiées ; une citation introuvable annule la détection).`,
     `examples : recopie mot pour mot les questions d'exemple présentes (énoncé + options), sinon [].`,
     `Réponds UNIQUEMENT avec l'objet JSON conforme.`,
@@ -277,6 +279,8 @@ async function detectWithoutAnnales(step: (m: string, p: number) => void): Promi
   const questionCount = intOrNull(raw.question_count, 1, 200);
   const openCount = intOrNull(raw.open_count, 0, 50);
   const isQcm = kind === "qcm" || kind === "mixed";
+  // Le mode de réponse n'est gardé que s'il est l'un des trois ; sinon les sources ne le disent pas.
+  const answerMode = isQcm && (ANSWER_MODES as readonly unknown[]).includes(raw.answer_mode) ? (raw.answer_mode as AnswerMode) : null;
   const profile: StoredProfile = {
     basis: ev.basis,
     exam_kind: kind,
@@ -286,12 +290,13 @@ async function detectWithoutAnnales(step: (m: string, p: number) => void): Promi
     duration_min: intOrNull(raw.duration_min, 5, 600) ?? 0,
     total_points: 0,
     has_mcq: isQcm,
-    scq_vs_mcq_convention: "",
-    question_types: isQcm ? [{ type: "scq", approx_count: questionCount ?? 0, share_pct: kind === "qcm" ? 100 : 60, points_each: 1, note: "" }] : [],
+    scq_vs_mcq_convention: answerMode === "multiple" ? "une ou plusieurs réponses correctes" : answerMode === "mixed" ? "réponse unique ou multiple selon la question" : answerMode ? "une seule réponse correcte" : "",
+    question_types: isQcm ? [{ type: answerMode === "multiple" ? "mcq" : "scq", approx_count: questionCount ?? 0, share_pct: kind === "qcm" ? 100 : 60, points_each: 1, note: "" }] : [],
     sections: [],
     topics_emphasis: [],
     evidence,
     examples: verifiedQuotes(raw.examples, ev.passages, 600).slice(0, 4),
+    answer_mode: answerMode,
   };
   await saveProfile(profile);
   step(`Format déduit des ${ev.basis === "sample_questions" ? "questions d'exemple officielles" : "infos du cours"} ✓`, 100);

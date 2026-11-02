@@ -1,0 +1,158 @@
+/**
+ * FORME DES RÉPONSES D'UN EXAMEN QCM — suites du banc HUM-285 et de l'examen 3 de prod (02/11/2026).
+ *  - Réponse unique : 7 questions sur 19 à réponses multiples dans un examen à réponse unique.
+ *    Le générateur suit le mode du format strictement : en réponse unique, une question à
+ *    plusieurs clés n'entre jamais dans l'examen (son sujet est comblé).
+ *  - Explications : la Q12 de l'examen 3 renvoyait à « la première option » après le mélange
+ *    des options, qui l'avait déplacée. Une explication qui désigne une option par sa position
+ *    ou sa lettre est régénérée ; elle n'entre jamais dans un examen.
+ * Fournisseur LLM simulé : aucune dépense.
+ */
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import http from "node:http";
+import os from "node:os";
+import path from "node:path";
+import type { AddressInfo } from "node:net";
+import { after, before, beforeEach, test } from "node:test";
+
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-qcm-reponses-"));
+process.env.CORTEX_DATA_DIR = tmp;
+process.env.LLM_PROVIDER = "openai-compatible";
+process.env.LLM_API_KEY = "test";
+process.env.LLM_MODEL_OPUS = "claude-sonnet-5";
+process.env.LLM_MAX_RETRIES = "0";
+process.env.MAX_COURSES_CREATED_PER_HOUR = "unlimited";
+
+type Raw = { topic: string; type: string; stem: string; options: string[]; correct: number[]; misconceptions: string[]; explanation: string };
+
+/** Une question sur les nudges ; `keys` = indices des bonnes options (marquées « (clé) » pour le faux juge). */
+function item(n: number, keys = [0], explanation?: string): Raw {
+  const options = [
+    "Un nudge oriente un choix sans interdire aucune option ni en changer le coût.",
+    "Un nudge interdit les options jugées nuisibles pour la personne qui choisit.",
+    "Un nudge change le coût des options par une taxe ou une subvention ciblée.",
+    "Un nudge impose l'option par défaut sans possibilité de s'en écarter.",
+  ].map((o, i) => (keys.includes(i) ? `${o} (clé)` : o));
+  return {
+    topic: "Nudges numériques",
+    type: keys.length > 1 ? "mcq" : "scq",
+    stem: `Selon le cours, qu'est-ce qui distingue un nudge d'une obligation ? (q${n})`,
+    options,
+    correct: keys,
+    misconceptions: options.map((_, i) => (keys.includes(i) ? "" : "[quasi-synonyme] confond nudge et contrainte")),
+    explanation: explanation ?? "Un nudge préserve la liberté de choix : il ne supprime aucune option et n'en change pas le coût, contrairement à une interdiction ou une taxe.",
+  };
+}
+
+let design: (n: number, call: number, prompt: string) => Raw[] = (n, call) => Array.from({ length: n }, (_, i) => item(call * 10 + i));
+let designCalls = 0;
+const designPrompts: string[] = [];
+
+function verifyReply(prompt: string): string {
+  const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
+  const results = blocks.map((b) => {
+    const index = Number(/^Q(\d+)\./.exec(b)![1]);
+    const correct = [...b.matchAll(/^\s+\((\d+)\) (.*)$/gm)].filter((m) => /\(clé\)/.test(m[2])).map((m) => Number(m[1]));
+    return { index, correct, ok: true, discrimination: 4, name_only: false, issue: "", course_terms: [], off_course: "", off_course_terms: [], off_matter: "" };
+  });
+  return JSON.stringify({ results });
+}
+
+let llm: http.Server;
+before(async () => {
+  delete process.env.CORTEX_USER;
+  llm = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => { body += c; });
+    req.on("end", () => {
+      const parsed = JSON.parse(body) as { messages: { content: unknown }[] };
+      const content = parsed.messages.map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))).join("\n");
+      let text = "{}";
+      if (/"results"/.test(content)) text = verifyReply(content);
+      else if (/"items"/.test(content)) {
+        designCalls++;
+        designPrompts.push(content);
+        text = JSON.stringify({ items: design(Number(/\((\d+) QCM\)/.exec(content)?.[1] ?? 1), designCalls, content) });
+      }
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ choices: [{ message: { content: text }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 10 } }));
+    });
+  });
+  await new Promise<void>((r) => llm.listen(0, "127.0.0.1", r));
+  process.env.LLM_BASE_URL = `http://127.0.0.1:${(llm.address() as AddressInfo).port}/v1`;
+  const { ensureCoursesLoaded } = await import("../lib/courses");
+  await ensureCoursesLoaded();
+});
+
+beforeEach(() => {
+  designCalls = 0;
+  designPrompts.length = 0;
+  design = (n, call) => Array.from({ length: n }, (_, i) => item(call * 10 + i));
+});
+
+after(async () => {
+  await new Promise((r) => llm.close(r));
+  for (const k of ["CORTEX_DATA_DIR", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS", "LLM_MAX_RETRIES", "LLM_BASE_URL", "MAX_COURSES_CREATED_PER_HOUR"]) delete process.env[k];
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+let courseN = 0;
+async function course(examFormat: Record<string, unknown>): Promise<string> {
+  const { buildCourseRow } = await import("../lib/course-create");
+  const { insertCourse } = await import("../db/courses-store");
+  const { reloadCourses } = await import("../lib/courses");
+  const { runWithCourse, ensureFts } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { indexItemForSearch } = await import("../lib/search");
+  const row = buildCourseRow({ name: `Enjeux mondiaux réponses ${++courseN}`, code: "HUM-285", language: "fr", examFormat }, "owner");
+  await insertCourse(row);
+  await reloadCourses();
+  await runWithCourse(row.id, async () => {
+    ensureFts();
+    for (const t of ["sources", "items", "topics"]) await q.ensureTable(t);
+    const text = "Nudges numériques : un nudge est une incitation indirecte qui oriente un choix sans interdire aucune option ni en changer le coût (Thaler et Sunstein).";
+    const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", "Nudges", "course_pdf/nudges", null, 1);
+    const iid = await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", "Nudges", text);
+    await indexItemForSearch(iid, sid, "Nudges", text);
+    for (const label of ["Nudges numériques", "Architecture du choix", "Paternalisme libéral"]) {
+      await q.run(`INSERT INTO topics (label, method, exam_weight, exam_count) VALUES (?,?,?,?)`, label, null, 3, 1);
+    }
+  });
+  return row.id;
+}
+
+async function exam(id: string, count: number) {
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  return runWithCourse(id, async () => {
+    const r = await generateQcmExam({ count, openCount: 0 });
+    return { r, view: (await getQcmExam(r.id, true))! };
+  });
+}
+
+test("réponse unique (défaut d'un QCM déclaré) : consigne explicite, et une question à deux clés n'entre jamais dans l'examen", async () => {
+  const id = await course({ kind: "qcm", questionCount: 4 });
+  // Premier lot : une question à deux clés, une « mcq » à une seule clé ; ensuite des questions propres.
+  design = (n, call) => Array.from({ length: n }, (_, i) => (call === 1 && i === 0 ? item(i, [0, 2]) : call === 1 && i === 1 ? { ...item(i), type: "mcq" } : item(call * 10 + i)));
+  const { r, view } = await exam(id, 4);
+  assert.equal(r.count, 4, "le sujet de la question écartée est comblé");
+  for (const it of view.items) {
+    assert.equal(it.type, "scq", it.stem);
+    assert.equal((it as unknown as { correct: number[] }).correct.length, 1, it.stem);
+  }
+  assert.ok(!view.items.some((it) => /\(q0\)/.test(it.stem)), "la question à deux clés est écartée");
+  assert.ok(view.items.some((it) => /\(q1\)/.test(it.stem)), "une question « mcq » à une seule clé est gardée, en réponse unique");
+  assert.match(designPrompts[0], /RÉPONSE UNIQUE/);
+  assert.doesNotMatch(designPrompts[0], /fais varier le nombre de bonnes réponses/);
+});
+
+test("réponses multiples déclarées : toutes les questions sont à choix multiple, et la consigne le dit", async () => {
+  const id = await course({ kind: "qcm", questionCount: 3, answerMode: "multiple" });
+  design = (n, call) => Array.from({ length: n }, (_, i) => item(call * 10 + i, i % 2 ? [0, 2] : [0]));
+  const { r, view } = await exam(id, 3);
+  assert.equal(r.count, 3);
+  for (const it of view.items) assert.equal(it.type, "mcq", it.stem);
+  assert.match(designPrompts[0], /RÉPONSES MULTIPLES/);
+  assert.match(designPrompts[0], /fais varier le nombre de bonnes réponses/);
+});

@@ -42,7 +42,7 @@ export type CourseInfo = {
   examDate: string | null;
   durationMin: number;
   /** Format d'examen déclaré (null = rien de déclaré). */
-  examFormat: { kind: string; questionCount: number | null; durationMin: number | null; language: string | null } | null;
+  examFormat: { kind: string; questionCount: number | null; durationMin: number | null; language: string | null; answerMode?: string } | null;
   createdAt: string;
 };
 
