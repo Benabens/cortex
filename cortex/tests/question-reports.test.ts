@@ -184,3 +184,22 @@ test("une question ne se re-vérifie qu'une fois : un nouveau « réponse fausse
     assert.equal(prompts.length, calls, "aucun appel au modèle de plus");
   }));
 });
+
+test("signalement « réponse fausse » sur une question dont l'explication cite une lettre : seule la clé est jugée, rien n'est remboursé si elle est bonne", async () => {
+  const { runWithUser } = await import("../db/context");
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const credits = await import("../lib/billing/credits");
+  const { reportQuestion } = await import("../lib/question-reports");
+  await runWithUser(USER, () => runWithCourse("ml", async () => {
+    const { examId, itemIds } = await paidExam();
+    // Ancienne explication par lettre : options jamais mélangées, elle reste juste ; la clé aussi.
+    await q.run(`UPDATE qcm_items SET explanation = ? WHERE id = ?`, "A) est la bonne réponse : la loi définit les attributs protégés. B) élargit trop.", itemIds[1]);
+    const before = await credits.getBalanceCenti(USER);
+    judgeKey = 0;
+    const r = await reportQuestion({ examId, kind: "qcm", itemId: itemIds[1], reason: "wrong_answer" });
+    assert.equal(r.status, "not_confirmed");
+    assert.equal(r.refundedCenti, 0);
+    assert.equal(await credits.getBalanceCenti(USER), before);
+  }));
+});

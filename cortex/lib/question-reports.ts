@@ -101,7 +101,9 @@ export async function reportQuestion(input: ReportInput): Promise<ReportResult> 
   if (judged) status = judged.status;
   else if (input.reason === "wrong_answer" && qcm) {
     const { verifyQcmBatch } = await import("@/lib/qcm");
-    const [checked] = await verifyQcmBatch([{ ...qcm }], () => {}).catch(() => [null]);
+    // « Réponse fausse » : seule la clé est jugée. Sans l'explication, le rejet d'une explication par
+    // position ou par lettre (forme, pas réponse) ne confirme pas un signalement sur une clé juste.
+    const [checked] = await verifyQcmBatch([{ ...qcm, explanation: "" }], () => {}).catch(() => [null]);
     if (checked && checked.verified !== null) {
       const keyChanged = JSON.stringify([...checked.correct].sort()) !== JSON.stringify([...qcm.correct].sort());
       // Clé contestée, hors cours, définition différente, hors matière : le juge rejette (lib/qcm).
