@@ -140,3 +140,22 @@ test("libellés des notions dans la langue du cours", async () => {
   assert.match(pFr, /"label" COURT, en français/, "cours en français : libellés en français");
   assert.match(pEn, /"label" COURT, en anglais/, "cours en anglais : libellés en anglais, comme avant");
 });
+
+test("cours sans annale : chaque support du cours est lu par l'analyse, pas seulement les premiers", async () => {
+  const id = await hum285();
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { rebuildBlueprintFromIndex } = await import("../lib/program");
+  // Banc HUM-285 du 28/10 : 16 questions Bendahan contre 4 Cavallaro. L'analyse ne lisait que les
+  // 4 000 premiers caractères des supports, ceux du premier enseignant ingéré.
+  await runWithCourse(id, async () => {
+    for (let k = 1; k <= 8; k++) {
+      const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", `Séance ${k}`, `course_pdf/s${k}`, null, 1);
+      for (let p = 0; p < 3; p++) await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", `Séance ${k} — p.${p + 1}`, `Notion centrale de la séance ${k} : concept${k}x${p}. ${"Développement du cours. ".repeat(60)}`);
+    }
+  });
+  await runWithCourse(id, () => rebuildBlueprintFromIndex());
+  const prompt = blueprintPrompts[0];
+  const missing = Array.from({ length: 8 }, (_, i) => `concept${i + 1}x0`).filter((c) => !prompt.includes(c));
+  assert.deepEqual(missing, [], "chaque séance est représentée");
+});

@@ -120,10 +120,41 @@ async function gatherForBlueprint() {
     }
     return out.trim();
   };
+  /**
+   * Chaque source à PART ÉGALE du budget, dans l'ordre : lues dans l'ordre jusqu'au budget, les
+   * premiers supports ingérés (un seul enseignant) faisaient toutes les notions — banc HUM-285 du
+   * 28/10 : 16 questions Bendahan contre 4 Cavallaro.
+   */
+  const fairShare = async (types: string[], cap: number): Promise<string> => {
+    const ph = types.map(() => "?").join(",");
+    let rows: { sid: number; text: string; title: string }[] = [];
+    try {
+      rows = await q.all<{ sid: number; text: string; title: string }>(
+        `SELECT s.id sid, i.text text, s.title title FROM items i JOIN sources s ON s.id = i.source_id
+           WHERE s.type IN (${ph}) ORDER BY s.recency_weight DESC, s.id, i.id`,
+        ...types
+      );
+    } catch {}
+    const bySource = new Map<number, { title: string; text: string }>();
+    for (const r of rows) {
+      const cur = bySource.get(r.sid);
+      if (cur) cur.text += `\n${r.text}`;
+      else bySource.set(r.sid, { title: r.title, text: r.text });
+    }
+    const share = Math.max(300, Math.floor(cap / Math.max(1, bySource.size)));
+    let out = "";
+    for (const { title, text } of bySource.values()) {
+      if (out.length + share > cap + share / 2) break;
+      out += `\n— (${title}) —\n${trunc(text, share)}\n`;
+    }
+    return out.trim();
+  };
+  const finals = await byTypes(["final", "midterm"], 16000);
   return {
-    finals: await byTypes(["final", "midterm"], 16000),
-    series: await byTypes(["serie", "exercise"], 6000),
-    plan: await byTypes(["note", "course_pdf", "course"], 4000),
+    finals,
+    series: await fairShare(["serie", "exercise"], 6000),
+    // Sans annale, le budget des annales revient aux supports du cours : c'est d'eux que viennent les notions.
+    plan: await fairShare(["note", "course_pdf", "course"], finals ? 4000 : 16000),
   };
 }
 
