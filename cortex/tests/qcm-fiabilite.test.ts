@@ -50,12 +50,17 @@ let designCalls = 0;
 const designPrompts: string[] = [];
 const designBodies: Record<string, unknown>[] = [];
 
+const verifyPrompts: string[] = [];
 function verifyReply(prompt: string): string {
+  verifyPrompts.push(prompt);
   const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
   const results = blocks.map((b) => {
     const i = Number(/^Q(\d+)\./.exec(b)![1]);
-    const opt = [...b.matchAll(/^\s+\((\d+)\) (.*)$/gm)].find((m) => /moyenne des revenus calculée séparément/.test(m[2]));
-    return { index: i, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "" };
+    const opt = [...b.matchAll(/^\s+\((\d+)\) (.*)$/gm)].find((m) => /moyenne des revenus calculée séparément|Status quo bias explains/.test(m[2]));
+    // Le juge cite les termes du cours dont dépend la clé ; pour la question « status quo », il ne
+    // remarque pas que la notion manque au cours (le contrôle déterministe doit l'attraper).
+    const course_terms = /Status quo/.test(b) ? ["status quo bias", "groupthink"] : ["groupby"];
+    return { index: i, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms, off_course: "" };
   });
   return JSON.stringify({ results });
 }
@@ -63,6 +68,13 @@ function verifyReply(prompt: string): string {
 const DESIGN = { misconception: "confondre FPR et FDR", edge_case: "groupes de tailles différentes", reasoning_chain: ["a", "b"], bookkeeping: "tableau 2×2", discriminator: "FDR", awkward_numbers: "37, 113", subquestion_plan: ["a", "b"] };
 const AUDIT_GOOD = { pattern_matcher_answer: "FDR", pattern_matcher_correct: false, strong_student_answer: "FPR", strong_student_stuck: false, rubric_misses: [], trap_present: true, hardening: "", verdict: "good" };
 let writeCalls = 0;
+const assistPrompts: string[] = [];
+/** Drill : n = rang de l'appel. */
+let drill: (n: number) => string = () => "{}";
+const VERDICT = { verdict: "correct", feedback: "Conforme au cours.", correct_solution: "Groupthink.", criteria: [
+  { label: "Nomme le biais du cours", points: 1, achieved: true, essential: true, justification: "Groupthink est nommé." },
+  { label: "Justifie", points: 1, achieved: true, essential: false, justification: "Le silence du groupe est expliqué." },
+] };
 /** Rédaction d'une question ouverte (n = rang de l'appel). */
 let write: (n: number) => string = (n) => JSON.stringify({ category: "Fairness", concept: `Ouverte ${n}`, statement_tex: `\\textbf{Scénario ${n}.} Calculez le FPR de chaque groupe.`, solution_tex: "FPR = FP / (FP + TN).", points: 15 });
 
@@ -78,7 +90,9 @@ before(async () => {
       let text = "{}";
       // Architecte des questions ouvertes (conception → rédaction → audit), testé avant "items" :
       // le schéma de conception contient lui aussi des tableaux « "items" ».
-      if (/"edge_case"/.test(content)) text = JSON.stringify(DESIGN);
+      if (/"hints"/.test(content)) { assistPrompts.push(content); text = drill(assistPrompts.length); }
+      else if (/RÉPONSE DE L'ÉTUDIANT/.test(content)) { assistPrompts.push(content); text = JSON.stringify(VERDICT); }
+      else if (/"edge_case"/.test(content)) text = JSON.stringify(DESIGN);
       else if (/"pattern_matcher_answer"/.test(content)) text = JSON.stringify(AUDIT_GOOD);
       else if (/"statement_tex"/.test(content)) { writeCalls++; text = write(writeCalls); }
       else if (/"results"/.test(content)) text = verifyReply(content);
@@ -98,7 +112,7 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { designCalls = 0; writeCalls = 0; designPrompts.length = 0; designBodies.length = 0; });
+beforeEach(() => { assistPrompts.length = 0; designCalls = 0; writeCalls = 0; designPrompts.length = 0; designBodies.length = 0; verifyPrompts.length = 0; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -120,7 +134,7 @@ async function codeCourse(): Promise<string> {
   await runWithCourse(row.id, async () => {
     ensureFts();
     for (const t of ["sources", "items", "topics"]) await q.ensureTable(t);
-    const text = "Notebook 3 : df.groupby('sex')['income'].mean() calcule la moyenne des revenus par groupe.";
+    const text = "Notebook 3 : df.groupby('sex')['income'].mean() calcule la moyenne des revenus par groupe. Cognitive biases in design: stereotypes, confirmation bias, groupthink (no one voices a concern because no one else objects), sunk cost fallacy.";
     const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", "Notebook pandas", "course_pdf/nb3", null, 1);
     const iid = await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", "Notebook pandas", text);
     await indexItemForSearch(iid, sid, "Notebook pandas", text);
@@ -218,5 +232,51 @@ test("une question ouverte qui échoue est relancée : 2 QCM + 3 ouvertes sur 2 
   } finally {
     write = ok;
   }
+});
+
+test("une clé qui repose sur une notion absente du cours (« status quo bias ») est rejetée et remplacée", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  const offCourse = {
+    ...item(0, "A team keeps an outdated authentication mechanism to avoid the effort of change, and nobody voices concerns because no one else objects first. Which pair of biases explains (1) and (2)?"),
+    options: [
+      "Status quo bias explains the reluctance to change, while groupthink explains the silence in the meeting.",
+      "Groupthink explains the reluctance to change, while confirmation bias explains the silence in the meeting.",
+      "Confirmation bias explains the reluctance to change, while sunk cost fallacy explains the silence in the meeting.",
+      "Sunk cost fallacy explains the reluctance to change, while stereotypes explain the silence in the meeting.",
+    ],
+  };
+  design = (n, call) => JSON.stringify({ items: call === 1 ? [offCourse, ...Array.from({ length: n - 1 }, (_, i) => item(1 + i))] : Array.from({ length: n }, (_, i) => item(10 * call + i)) });
+  const steps: string[] = [];
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 3, openCount: 0, onStep: (s) => { steps.push(s); } }));
+  assert.equal(r.count, 3, steps.join("\n"));
+  const exam = await runWithCourse(id, () => getQcmExam(r.id));
+  assert.ok(exam!.items.every((it) => !/Status quo/i.test(`${it.stem} ${it.options.join(" ")}`)), "la question hors cours n'est pas gardée");
+  assert.ok(steps.some((s) => /hors cours[^\n]*status quo bias/i.test(s)), "le rejet est dit, avec la notion en cause");
+  assert.match(verifyPrompts[0], /EXTRAITS DU COURS[\s\S]*groupthink/, "le juge voit les définitions du cours");
+});
+
+test("drill : définitions du cours fournies, et une notion absente du cours est redemandée", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateDrill } = await import("../lib/drill");
+  const base = { concept: "Cognitive biases", statement_html: "<p>A team stays silent in a meeting.</p>", hints: ["a", "b", "c", "d", "e"], solution_html: "<p>Groupthink.</p>" };
+  drill = (n) => JSON.stringify({ ...base, course_terms: n === 1 ? ["status quo bias"] : ["groupthink"] });
+  const d = await runWithCourse(id, () => generateDrill("cognitive biases in design"));
+  assert.equal(d.solution_html, "<p>Groupthink.</p>");
+  assert.equal((d as { course_terms?: unknown }).course_terms, undefined, "les termes contrôlés ne sortent pas du moteur");
+  assert.equal(assistPrompts.length, 2);
+  assert.match(assistPrompts[0], /EXTRAITS DU COURS[\s\S]*groupthink/, "le drill voit les définitions du cours");
+  assert.match(assistPrompts[1], /notions absentes du cours : status quo bias/);
+});
+
+test("check-solution : la correction juge avec les définitions du cours", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { checkSolution } = await import("../lib/check-solution");
+  const r = await runWithCourse(id, () => checkSolution({ statement: "Which cognitive bias explains why nobody voices a concern in the meeting?", answer: "Groupthink" }));
+  assert.equal(r.verdict, "correct");
+  assert.match(assistPrompts[0], /DÉFINITIONS DU COURS[\s\S]*EXTRAITS DU COURS[\s\S]*groupthink/);
 });
 
