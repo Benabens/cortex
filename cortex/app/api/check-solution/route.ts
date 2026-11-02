@@ -34,6 +34,7 @@ async function handlePOST(req: NextRequest) {
   let statement = "";
   let answer = "";
   let imageRel: string | null = null;
+  let rubric: { rubric: { label: string; points: number }[]; reference: string } | null = null;
 
   if (ct.includes("multipart/form-data")) {
     // Quota de stockage du compte + espace libre du volume, AVANT de lire l'envoi.
@@ -56,6 +57,14 @@ async function handlePOST(req: NextRequest) {
     const body = await readJson(req, ({}));
     statement = String(body.statement ?? "").trim();
     answer = String(body.answer ?? "").trim();
+    // Réponse courte d'une question composée : énoncé, barème et réponse modèle viennent de la base.
+    if (body.partId !== undefined) {
+      const { shortPartForCheck } = await import("@/lib/blocks");
+      const part = await shortPartForCheck(Number(body.examId), Number(body.partId));
+      if (!part) return NextResponse.json({ error: "Sous-question introuvable dans cet examen." }, { status: 404 });
+      ({ statement } = part);
+      rubric = part;
+    }
   }
 
   if (!statement) return NextResponse.json({ error: "Énoncé manquant." }, { status: 400 });
@@ -68,7 +77,7 @@ async function handlePOST(req: NextRequest) {
     // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, rendu seulement si
     // l'appel n'est pas parti ou si la réponse est restée illisible (lib/billing/reserve).
     const { assistCall } = await import("@/lib/billing/reserve");
-    const result = await assistCall("check-solution", () => checkSolution({ statement, answer, imageRel }));
+    const result = await assistCall("check-solution", () => checkSolution({ statement, answer, imageRel, ...(rubric ? { rubric: rubric.rubric, reference: rubric.reference } : {}) }));
     return NextResponse.json({ ok: true, result });
   } catch (e: unknown) {
     const { AssistRefused } = await import("@/lib/billing/reserve");

@@ -19,6 +19,7 @@ const KINDS: { value: string; label: string }[] = [
   { value: "qcm", label: "QCM" },
   { value: "exercises", label: "Exercices / problèmes" },
   { value: "mixed", label: "QCM + questions ouvertes" },
+  { value: "composite", label: "Questions composées (scénario + sous-questions)" },
   { value: "essay", label: "Essai / dissertation" },
   { value: "oral", label: "Oral" },
 ];

@@ -77,8 +77,8 @@ export function examFormatOf(f: ExamFormat): z.infer<typeof examFormatSchema> {
 
 /** Entrée d'un format déclaré (create_course, set_exam_format). */
 export const examFormatInput = {
-  kind: z.enum(EXAM_KINDS).describe("Exam type: qcm (multiple choice), exercises (problems to solve), mixed (multiple choice + open questions), essay, oral."),
-  question_count: z.number().int().min(1).max(200).optional().describe("Number of questions (qcm) or of exercises / essay topics."),
+  kind: z.enum(EXAM_KINDS).describe("Exam type: qcm (multiple choice), exercises (problems to solve), mixed (multiple choice + open questions), composite (each question = a short scenario or code excerpt followed by sub-questions mixing single choice, code reading and short answers), essay, oral."),
+  question_count: z.number().int().min(1).max(200).optional().describe("Number of questions (qcm, composite) or of exercises / essay topics."),
   duration_min: z.number().int().min(5).max(600).optional().describe("Exam duration in minutes."),
   language: z.enum(LANGUAGES).optional().describe("Language of the exam, when it differs from the course language."),
 };

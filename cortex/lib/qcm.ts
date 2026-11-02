@@ -120,9 +120,9 @@ async function ensureQcmSchema(): Promise<void> {
 /** Sujets à couvrir : blueprint (topics pondérés) si dispo, sinon archétypes du cours.
  *  Retourne TOUTE la liste ordonnée par poids (plus de LIMIT 14 : la LARGEUR
  *  est gérée à l'échantillonnage par pickCoverage, qui inclut la longue traîne). */
-type CovTopic = { label: string; method: string | null; weight?: number; chapterId?: number | null };
+export type CovTopic = { label: string; method: string | null; weight?: number; chapterId?: number | null };
 
-async function coverageTopics(): Promise<CovTopic[]> {
+export async function coverageTopics(): Promise<CovTopic[]> {
   const order = `ORDER BY exam_weight DESC, exam_count DESC, label`;
   try {
     // Poids et chapitre du plan : la répartition sur les chapitres en dépend (lib/coverage).
@@ -466,7 +466,7 @@ export async function generateQcmBatch(
 }
 
 /** Réponses du juge qui ne signalent rien. */
-const NO_FLAG = /^(?:|[-—.…]+|none\.?|no|nothing|n\/?a|null|aucune?\.?|rien\.?|néant|non|ras|ok)$/i;
+export const NO_FLAG = /^(?:|[-—.…]+|none\.?|no|nothing|n\/?a|null|aucune?\.?|rien\.?|néant|non|ras|ok)$/i;
 
 const VERIFY_SCHEMA = {
   type: "object",
@@ -647,7 +647,7 @@ function openConcurrency(): number {
 }
 
 /** `fn` sur chaque élément, `n` à la fois au plus. */
-async function runPool<T>(items: T[], n: number, fn: (item: T) => Promise<void>): Promise<void> {
+export async function runPool<T>(items: T[], n: number, fn: (item: T) => Promise<void>): Promise<void> {
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
     while (next < items.length) await fn(items[next++]);
