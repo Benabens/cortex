@@ -67,7 +67,13 @@ function verifyReply(prompt: string): string {
     const course_terms = /Status quo/.test(b) ? ["status quo bias", "groupthink"] : ["groupby"];
     // K — le juge repère un distracteur qu'on élimine sans connaître le cours (« TypeError » hors sujet).
     const trivial = [...b.matchAll(/^\s+\((\d+)\) (.*)$/gm)].filter((m) => /TypeError/.test(m[2])).map((m) => Number(m[1]));
-    return { index: i, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms, off_course: judgeFlag, trivial_distractors: trivial };
+    // B — le juge compare les définitions employées à celles des extraits du cours.
+    const definition_mismatch = /legally protected/.test(b)
+      ? "sensitive attribute : la question le restreint aux attributs protégés par la loi ; le cours : par la loi OU par l'éthique (couleur de cheveux)"
+      : /latent variable is a proxy/.test(b)
+        ? "latent variable : le cours la définit comme non observable, mesurée indirectement — pas comme un proxy enregistré"
+        : "";
+    return { index: i, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms, off_course: judgeFlag, trivial_distractors: trivial, definition_mismatch };
   });
   return JSON.stringify({ results });
 }
@@ -409,5 +415,34 @@ test("M — cache de prompt : le contexte stable d'un job est le même « system
   const user = lots[0].find((x) => x.role === "user")?.content ?? "";
   assert.match(user, /Couvre ces sujets/);
   assert.doesNotMatch(user, /TAXONOMIE DES DISTRACTEURS/, "le variable reste hors du préfixe caché");
+});
+
+test("B — une définition plus étroite ou confondue avec une autre (sensitive, latent/proxy) est rejetée et remplacée", async () => {
+  const id = await codeCourse();
+  const { runWithCourse, ensureFts } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { indexItemForSearch } = await import("../lib/search");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  // Définitions du cours (paraphrasées) : sensible par la loi OU l'éthique ; proxy ; variable latente.
+  const defs = "Fairness 1, théorie. Sensitive attributes : protégés par la loi OU par l'éthique (la couleur de cheveux est sensible : observée, subjective). Proxy attributes : corrélés à un attribut sensible, d'où la discrimination by proxy. Latent variable : non observable, mesurée indirectement (l'intérêt mesuré par les clics).";
+  await runWithCourse(id, async () => {
+    ensureFts();
+    const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "note", "Fairness 1 - sources of unfairness", "note/f1", null, 1);
+    const iid = await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "note", "Fairness 1 - sources of unfairness", defs);
+    await indexItemForSearch(iid, sid, "Fairness 1 - sources of unfairness", defs);
+    await q.run(`INSERT INTO topics (label, method, exam_weight, exam_count) VALUES (?,?,?,?)`, "Sensitive / proxy / latent attributes", null, 9, 1);
+  });
+  const narrow = { ...item(0, "Mock 4, Q3 : an attribute is sensitive only when it is explicitly recorded and legally protected. True for which case?"), topic: "Sensitive / proxy / latent attributes" };
+  const merged = { ...item(1, "In the course, a latent variable is a proxy attribute recorded in the dataset. Which example fits?"), topic: "Sensitive / proxy / latent attributes" };
+  design = (n, call) => JSON.stringify({ items: call === 1 ? [narrow, merged, ...Array.from({ length: Math.max(0, n - 2) }, (_, i) => item(2 + i))] : Array.from({ length: n }, (_, i) => item(10 * call + i)) });
+  const steps: string[] = [];
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 3, openCount: 0, onStep: (x) => { steps.push(x); } }));
+  assert.equal(r.count, 3);
+  const stems = (await runWithCourse(id, () => getQcmExam(r.id)))!.items.map((x) => x.stem);
+  assert.ok(!stems.some((x) => /legally protected|latent variable is a proxy/.test(x)), stems.join(" | "));
+  assert.ok(steps.some((x) => /définition différente du cours[^\n]*sensitive attribute/.test(x)), "le rejet nomme la définition en cause");
+  const judged = verifyPrompts.find((p) => /legally protected/.test(p)) ?? "";
+  assert.match(judged, /plus étroite[\s\S]*plus large/, "le juge doit comparer chaque définition à celle du cours");
+  assert.match(judged, /EXTRAITS DU COURS[\s\S]*OU par l'éthique/, "avec les définitions du cours sous les yeux");
 });
 

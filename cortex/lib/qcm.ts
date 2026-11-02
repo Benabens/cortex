@@ -482,8 +482,9 @@ const VERIFY_SCHEMA = {
           course_terms: { type: "array", items: { type: "string" }, description: "Les notions nommées dont dépend la BONNE réponse, chacune écrite EXACTEMENT comme dans les extraits du cours (copie le terme du cours)." },
           off_course: { type: "string", description: "Non vide si la bonne réponse, un distracteur ou l'explication repose sur une notion ABSENTE des extraits du cours, ou que le cours définit AUTREMENT : laquelle, et ce que dit le cours. Vide sinon." },
           trivial_distractors: { type: "array", items: { type: "integer" }, description: "Indices des MAUVAISES options qu'un étudiant élimine sans connaître le cours (générique, hors sujet, absurde, réfutable par le bon sens). Liste vide si toutes sont plausibles." },
+          definition_mismatch: { type: "string", description: "Chaque définition employée ou sous-entendue (énoncé, clé, distracteurs, explication) comparée à celle des extraits du cours. Non vide si l'une est PLUS ÉTROITE (une condition ajoutée), PLUS LARGE (une condition oubliée), ou si deux notions du cours sont confondues : laquelle, ce que dit la question, ce que dit le cours. Vide sinon." },
         },
-        required: ["index", "correct", "ok", "discrimination", "name_only", "course_terms", "off_course", "trivial_distractors"],
+        required: ["index", "correct", "ok", "discrimination", "name_only", "course_terms", "off_course", "trivial_distractors", "definition_mismatch"],
         additionalProperties: false,
       },
     },
@@ -508,7 +509,8 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   // Cache de prompt (M) : consignes et schéma stables dans le système, lots et extraits à part.
   const system = [
     `Tu es un correcteur rigoureux du cours. Pour CHAQUE QCM fourni, RÉSOUS-LE toi-même de zéro (sans clé fournie) et donne la/les bonne(s) réponse(s) par INDEX.`,
-    `Quand des extraits du cours sont fournis, résous et juge avec LEURS DÉFINITIONS, jamais avec celles d'une autre source. course_terms : les notions dont dépend la bonne réponse, écrites comme dans le cours. off_course : toute notion de la question absente des extraits, ou que le cours définit autrement (vide sinon).`,
+    `Quand des extraits du cours sont fournis, résous et juge avec LEURS DÉFINITIONS, jamais avec celles d'une autre source. course_terms : les notions dont dépend la bonne réponse, écrites comme dans le cours. off_course : toute notion de la question absente des extraits (vide sinon).`,
+    `DÉFINITIONS (definition_mismatch) : compare chaque définition que la question emploie ou sous-entend à celle des extraits. Une définition plus étroite (une condition ajoutée, « seulement si… »), plus large (une condition oubliée) que celle du cours, ou deux notions voisines confondues rendent la question fausse, même si sa clé est cohérente avec sa propre définition.`,
     `Signale si : la question est ambiguë (2 réponses défendables), un distracteur est absurde, ou un indice trahit la bonne réponse (longueur, « toutes les réponses », grammaire).`,
     `Note aussi son POUVOIR DISCRIMINANT (discrimination, 1 à 5) : mets-toi à la place d'un étudiant qui ne connaît que les noms des notions du cours — pas leurs conditions, pas les résultats des études. S'il la réussit (ou élimine assez d'options pour la deviner), discrimination ≤ 2 et name_only = true.`,
     calib ? `${calib}\nÀ la lumière de ces leçons, sois SÉVÈRE : signale aussi (issue) tout QCM trop trivial / au distracteur trop faible si l'étudiant a jugé ce type « trop facile ».` : null,
@@ -526,7 +528,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     `Réponds UNIQUEMENT avec l'objet JSON { "results": [ … ] } conforme.`,
   ].filter((l) => l != null).join("\n");
   step("Vérification à l'aveugle des QCM (résolution indépendante, figures vues)…", 70);
-  let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean; course_terms?: string[]; off_course?: string; trivial_distractors?: number[] }[] };
+  let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean; course_terms?: string[]; off_course?: string; trivial_distractors?: number[]; definition_mismatch?: string }[] };
   try {
     res = await completeJson(
       { system, prompt, model: "opus", timeoutMs: 420_000, addDirs: figDirs, json: { schema: VERIFY_SCHEMA } },
@@ -544,8 +546,12 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     const missing = termsOf(r).filter((t) => absent.has(normalize(t.trim())));
     // Un signalement du juge ne compte que s'il a VU des extraits et qu'il nomme quelque chose
     // (« None », « Aucune », « N/A » ne rejettent rien) : jamais de rejet faute de pouvoir vérifier.
-    const flagged = passages.length && typeof r.off_course === "string" && !NO_FLAG.test(r.off_course.trim()) ? r.off_course.trim() : "";
-    const off = [missing.length ? `absent du cours : ${missing.join(", ")}` : "", flagged].filter(Boolean).join(" ; ");
+    const said = (x: unknown) => (passages.length && typeof x === "string" && !NO_FLAG.test(x.trim()) ? x.trim() : "");
+    const flagged = said(r.off_course);
+    // B — mock 4 de CS-290 : « sensitive » réduit aux attributs protégés par la loi (le cours : loi
+    // OU éthique) ; une définition qui s'écarte de celle du cours rejette la question comme une notion absente.
+    const mismatch = said(r.definition_mismatch);
+    const off = [missing.length ? `absent du cours : ${missing.join(", ")}` : "", flagged, mismatch ? `définition différente du cours : ${mismatch}` : ""].filter(Boolean).join(" ; ");
     if (off) {
       q.verified = 0;
       q.offCourse = off.slice(0, 240);
