@@ -46,6 +46,18 @@ test("répartition : au moins une question par chapitre, le surplus au prorata d
   ];
   const picked = spreadOverChapters(variants, 3)!.filter((x) => x.chapter === "F1").map((x) => x.label);
   assert.deepEqual(picked, ["Sensitive / proxy / latent attributes", "Simpson's paradox"], "une variante cède la place à une autre notion");
+  // H — mock 4 de CS-290 : Q6/Q12 sur le paradoxe de Simpson, libellés en deux langues et dans deux chapitres.
+  const bilingual = [
+    t("Simpson's paradox / confounder", "F1", 9), t("Paradoxe de Simpson — Berkeley", "NB", 8),
+    t("Sensitive / proxy / latent attributes", "F1", 11), t("Attributs sensibles / biais latents / GDPR", "F1", 10),
+    t("Demographic parity judgment", "F1", 10), t("Groupby aggregation table", "NB", 9), t("Weighted score & normalization", "NB", 7),
+  ];
+  const five = spreadOverChapters(bilingual, 5)!.map((x) => x.label);
+  assert.ok(!(five.includes("Simpson's paradox / confounder") && five.includes("Paradoxe de Simpson — Berkeley")), five.join(" | "));
+  assert.ok(!(five.includes("Sensitive / proxy / latent attributes") && five.includes("Attributs sensibles / biais latents / GDPR")), five.join(" | "));
+  // Notions des examens précédents de l'utilisateur : reprises seulement en dernier.
+  const fresh = spreadOverChapters(bilingual, 3, { avoid: ["Sensitive, proxy and latent attributes", "Simpson paradox"] })!.map((x) => x.label);
+  assert.ok(!fresh.some((l) => /Sensitive|Attributs sensibles|Simpson/.test(l)), fresh.join(" | "));
   assert.equal(spreadOverChapters([t("a", null, 1), t("b", null, 1)], 4), null, "sans chapitres : rien à répartir");
   assert.equal(spreadOverChapters([t("a", "X", 1), t("b", "X", 1)], 4), null, "un seul chapitre : rien à répartir");
 });

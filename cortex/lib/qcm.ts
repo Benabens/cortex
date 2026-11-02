@@ -308,6 +308,8 @@ export async function generateQcmBatch(
     withAnnales?: boolean;
     /** Sujets de TOUTES les questions de l'examen : un lot ne réutilise ni la fonction ni le scénario d'un autre. */
     examTopics?: string[];
+    /** Énoncés déjà posés dans les examens précédents de ce cours : à ne pas reprendre. */
+    previousStems?: string[];
   } = {}
 ): Promise<QcmItem[]> {
   const fmt = await getFormatProfile();
@@ -368,6 +370,9 @@ export async function generateQcmBatch(
     examples.length ? dataBlock(`QUESTIONS D'EXEMPLE OFFICIELLES de l'enseignant — imite leur STYLE (forme des options, niveau de détail, pièges), ne les recopie JAMAIS`, examples) : null,
     ``,
     coverage,
+    opts.previousStems?.length
+      ? `Déjà posées dans les examens précédents de ce cours (ne reprends ni leur énoncé, ni le fait qu'elles testent) :\n${opts.previousStems.slice(0, 15).map((x) => `  · ${sanitizeCorpus(x).slice(0, 140)}`).join("\n")}`
+      : null,
     opts.examTopics?.length
       ? `Les autres questions de l'examen portent sur : ${[...new Set(opts.examTopics)].map((t) => sanitizeCorpus(t).slice(0, 80)).join(" · ")}. Ne réutilise ni leur fonction, ni leurs données, ni leur scénario : chaque question doit rester indépendante.`
       : null,
@@ -537,6 +542,55 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   return items;
 }
 
+/** Énoncés et thèmes des QCM des derniers examens de ce cours (base du tenant : ceux de l'utilisateur). */
+async function recentQuestions(limit = 60): Promise<{ topic: string; stem: string }[]> {
+  try {
+    return await q.all<{ topic: string; stem: string }>(`SELECT topic, stem FROM qcm_items ORDER BY exam_id DESC, idx LIMIT ?`, limit);
+  } catch {
+    return [];
+  }
+}
+
+const DUP_SCHEMA = {
+  type: "object",
+  properties: {
+    duplicates: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { first: { type: "integer" }, second: { type: "integer" }, reason: { type: "string" } },
+        required: ["first", "second", "reason"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["duplicates"],
+  additionalProperties: false,
+} as const;
+
+/** Indices des QCM qui doublonnent un QCM plus haut (même notion, même fait ou même raisonnement). */
+async function duplicateItems(items: QcmItem[]): Promise<number[]> {
+  const list = items.map((it, i) => `Q${i}. (${sanitizeCorpus(it.topic ?? "").slice(0, 60)}) ${sanitizeCorpus(it.stem).slice(0, 400)}`).join("\n");
+  const r = await completeJson<{ duplicates: { first: number; second: number }[] }>({
+    prompt: [
+      `Voici les QCM d'un même examen. Repère les paires qui testent la MÊME notion avec le même fait, le même raisonnement ou le même type de calcul (deux questions sur le paradoxe de Simpson, deux sur la même condition logique…), même formulées autrement ou dans deux langues. Deux questions sur des notions voisines mais distinctes ne sont pas des doublons.`,
+      ``,
+      list,
+      ``,
+      `Réponds UNIQUEMENT avec {"duplicates": [{"first": i, "second": j, "reason": "…"}]} (first < second ; liste vide s'il n'y en a pas).`,
+    ].join("\n"),
+    model: "opus",
+    timeoutMs: 180_000,
+    json: { schema: DUP_SCHEMA },
+  }, { check: (v) => (Array.isArray(v?.duplicates) ? null : "le champ « duplicates » (tableau) manque") });
+  const drop = new Set<number>();
+  for (const d of r.duplicates) {
+    const later = Math.max(d.first, d.second);
+    if (Number.isInteger(later) && later >= 0 && later < items.length && d.first !== d.second) drop.add(later);
+  }
+  return [...drop].sort((a, b) => a - b);
+}
+
 /** `requested` / `openRequested` : la composition demandée — `count` / `open` peuvent rester en dessous. */
 export type QcmExamResult = { id: number; count: number; requested: number; verified: number; open: number; openRequested: number; pdf?: string; texError?: string };
 
@@ -577,9 +631,14 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // RÉPARTITION SUR LES CHAPITRES (plan du cours, sinon supports) au prorata de leur poids, QCM
   // puis ouvertes : CS-290 (02/11) n'avait que Fairness 1, en tête par poids. Sans au moins deux
   // chapitres, thèmes DISTINCTS par poids (pickCoverage), la reprise étant marquée plus bas.
+  // H — notions des examens précédents de CE cours (même utilisateur : base du tenant) reprises
+  // en dernier ; quelques notions de RÉSERVE en plus, pour remplacer un doublon retiré.
+  const recent = await recentQuestions();
+  const SPARE = 4;
   const spread = spreadOverChapters(
     await assignChapters(covAll.map((t) => ({ ...t, weight: t.weight ?? 0 }))).catch(() => []),
-    needed + openCount,
+    needed + openCount + SPARE,
+    { avoid: recent.map((r) => r.topic) },
   );
   const cov: { label: string; method: string | null }[] = spread
     ? spread.map((t) => ({ label: t.label, method: t.repeat ? REPEAT_METHOD : t.method }))
@@ -594,6 +653,12 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   }
   // Ouvertes : la suite de la répartition (les chapitres que les QCM n'ont pas pris d'abord).
   const openTopic = (i: number) => (spread ? cov[(needed + i) % cov.length] : cov[(count + i) % cov.length]);
+  // Réserve : les notions que la répartition n'a données ni aux QCM ni aux ouvertes ; sans
+  // répartition, les notions non prises, puis les autres en reprise (un AUTRE fait).
+  const used = new Set(qcmTopics.map((t) => t.label));
+  const spareTopics = spread
+    ? cov.slice(needed + openCount)
+    : [...covAll.filter((t) => !used.has(t.label)), ...covAll.map((t) => ({ label: t.label, method: REPEAT_METHOD }))];
   const qcmMolds = sampleMolds(dna, count);
   // Format résolu : langue de l'examen ; sans annale, les exemples officiels donnent le style,
   // et les questions « classe ce cas » restent interdites (permises si les annales en ont le style).
@@ -604,6 +669,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     language: format?.language,
     withAnnales,
     examTopics: qcmTopics.map((t) => t.label),
+    previousStems: recent.map((r) => r.stem),
     examples: withAnnales ? [] : await officialExamples().catch(() => []),
   };
   step(`Architecte : ${count} QCM + ${openCount} ouverte(s)${focus ? ` (accent : « ${focus} »)` : ""}${dna ? ` · moules ADN (${dna.molds.length})` : " au format détecté"}…`, 8);
@@ -696,6 +762,23 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     step(`${count - all.length} QCM manquant(s) → ${pending.length} lot(s) de comblement`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
   }
   // count>0 mais 0 QCM produit = tous les lots ont échoué → erreur claire (sauf drill 0 QCM + ouvertes).
+  // H — DOUBLONS À L'ÉCHELLE DE L'EXAMEN (mock 4 de CS-290 : deux QCM sur le paradoxe de Simpson,
+  // deux sur la même logique OR) : un contrôle par le modèle, car deux libellés différents ne se
+  // rapprochent pas mot à mot ; le second de chaque paire est remplacé par une notion de réserve.
+  if (all.length >= 2) {
+    const drop = await duplicateItems(all).catch(() => [] as number[]);
+    if (drop.length) {
+      step(`${drop.length} QCM en doublon retiré(s) (même notion qu'une autre question) → remplacement`, 80);
+      const kept = all.filter((_, i) => !drop.includes(i));
+      all.splice(0, all.length, ...kept);
+      const spare = spareTopics.slice(0, count - all.length);
+      if (spare.length) {
+        const got = await safeBatch({ topics: spare, molds: spare.map(() => null) });
+        if (got.error) lastError = got.error;
+        all.push(...got.items.slice(0, count - all.length));
+      }
+    }
+  }
   // Aucun appel en erreur mais tous les items écartés (mal formés) : c'est une réponse inutilisable.
   const cause = () => lastError ?? new LlmError("Toutes les questions reçues étaient mal formées.", "BAD_OUTPUT");
   if (count > 0 && !all.length) throw new Error(`Aucun QCM généré : ${llmFailureReason(cause())}`);

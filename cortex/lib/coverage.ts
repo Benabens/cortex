@@ -20,13 +20,22 @@ export type CoverageTopic = { label: string; method: string | null; weight: numb
 
 const UNCLASSIFIED = "(non classé)";
 
-/** Deux libellés sont des variantes d'une même notion s'ils partagent la moitié de leurs mots. */
-function variants(a: string, b: string): boolean {
-  const x = new Set(tokenize(a, 3));
-  const y = new Set(tokenize(b, 3));
+/** Racines des mots d'un libellé : 5 premières lettres, pour rapprocher « paradox »/« paradoxe », « sensitive »/« sensibles ». */
+function roots(label: string): Set<string> {
+  return new Set(tokenize(label, 3).map((w) => (w.length >= 5 ? w.slice(0, 5) : w)));
+}
+
+/**
+ * Deux libellés sont des variantes d'une même notion s'ils partagent au moins
+ * 40 % de leurs racines — y compris d'une langue à l'autre (mock 4 de CS-290 :
+ * « Simpson's paradox / confounder » et « Paradoxe de Simpson — Berkeley »).
+ */
+export function variants(a: string, b: string): boolean {
+  const x = roots(a);
+  const y = roots(b);
   const inter = [...x].filter((w) => y.has(w)).length;
   const union = new Set([...x, ...y]).size;
-  return union > 0 && inter / union >= 0.5;
+  return union > 0 && inter / union >= 0.4;
 }
 
 /** Notions d'un chapitre par poids, les variantes d'une notion déjà prise renvoyées en fin de liste. */
@@ -45,7 +54,7 @@ function diverse(topics: CoverageTopic[]): CoverageTopic[] {
  * reprise marquée `repeat` seulement quand il n'en reste plus. Ordre alterné
  * entre chapitres, pour que chaque lot en mêle plusieurs.
  */
-export function spreadOverChapters(topics: CoverageTopic[], n: number): CoverageTopic[] | null {
+export function spreadOverChapters(topics: CoverageTopic[], n: number, opts: { avoid?: string[] } = {}): CoverageTopic[] | null {
   if (n <= 0 || !topics.length) return null;
   const groups = new Map<string, CoverageTopic[]>();
   for (const t of topics) {
@@ -74,11 +83,52 @@ export function spreadOverChapters(topics: CoverageTopic[], n: number): Coverage
     for (let i = 0; left > 0; i = (i + 1) % ideal.length, left--) quota.set(ideal[i].c.name, quota.get(ideal[i].c.name)! + 1);
   }
 
-  const picks = chapters
-    .filter((c) => quota.get(c.name))
-    .map((c) => Array.from({ length: quota.get(c.name)! }, (_, k) => ({ ...c.topics[k % c.topics.length], repeat: k >= c.topics.length })));
+  // Tour par tour, un sujet par chapitre encore sous son quota : d'abord une notion qui n'est
+  // la variante d'AUCUNE notion déjà prise dans l'examen (tous chapitres confondus) ni d'une
+  // notion des examens précédents (`avoid`), puis une non reprise, puis une reprise marquée.
+  const avoid = opts.avoid ?? [];
   const out: CoverageTopic[] = [];
-  for (let k = 0; out.length < n && picks.some((p) => p[k]); k++) for (const p of picks) if (p[k] && out.length < n) out.push(p[k]);
+  const taken = new Map<string, Set<CoverageTopic>>();
+  const active = chapters.filter((c) => quota.get(c.name));
+  for (let k = 0; out.length < n; k++) {
+    let added = false;
+    for (const c of active) {
+      if (k >= quota.get(c.name)! || out.length >= n) continue;
+      const mine = taken.get(c.name) ?? new Set<CoverageTopic>();
+      const free = c.topics.filter((t) => !mine.has(t));
+      const clash = (t: CoverageTopic) => out.some((o) => variants(o.label, t.label));
+      const old = (t: CoverageTopic) => avoid.some((a) => variants(a, t.label));
+      // Plus que des variantes ou des notions déjà posées ici : la place va à un autre chapitre
+      // qui a mieux (pas de doublon dans l'examen plutôt qu'un prorata exact).
+      const elsewhere = (ok: (t: CoverageTopic) => boolean): { pick: CoverageTopic; owner: string } | null => {
+        for (const d of chapters) {
+          const t = d.topics.find((x) => !(taken.get(d.name)?.has(x)) && ok(x));
+          if (t) return { pick: t, owner: d.name };
+        }
+        return null;
+      };
+      const fresh = (t: CoverageTopic) => !clash(t) && !old(t);
+      // Ordre de préférence : notion neuve ici, neuve ailleurs, non doublon ici, non doublon ailleurs.
+      let pick: CoverageTopic | undefined = free.find(fresh);
+      let owner = c.name;
+      if (!pick) {
+        const moved = elsewhere(fresh) ?? (free.some((t) => !clash(t)) ? null : elsewhere((t) => !clash(t)));
+        if (moved) ({ pick, owner } = moved);
+        else pick = free.find((t) => !clash(t));
+      }
+      pick ??= free[0];
+      if (pick) {
+        const set = taken.get(owner) ?? new Set<CoverageTopic>();
+        set.add(pick);
+        taken.set(owner, set);
+        out.push(pick);
+      } else {
+        out.push({ ...c.topics[k % c.topics.length], repeat: true });
+      }
+      added = true;
+    }
+    if (!added) break;
+  }
   return out;
 }
 
