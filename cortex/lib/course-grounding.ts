@@ -16,7 +16,7 @@ import { normalize, tokenize } from "@/lib/text";
 
 /** Consigne commune à la conception et à la correction. */
 export const COURSE_TERMS_RULE =
-  `  - NOTIONS DU COURS SEULEMENT : toute notion nommée (dans la bonne réponse, les distracteurs, l'explication ou le corrigé) doit figurer dans les extraits ou les supports du cours, avec LA DÉFINITION DU COURS — jamais celle d'une autre source. N'introduis aucune notion que le cours ne présente pas (un biais, une métrique, une catégorie, une théorie), même plausible.`;
+  `  - NOTIONS DU COURS SEULEMENT : toute notion nommée (dans la bonne réponse, les distracteurs, l'explication ou le corrigé) doit figurer dans les extraits ou les supports du cours, avec LA DÉFINITION DU COURS — jamais celle d'une autre source, ni plus étroite (une condition ajoutée), ni plus large (une condition oubliée) ; ne confonds jamais deux notions voisines du cours. N'introduis aucune notion que le cours ne présente pas (un biais, une métrique, une catégorie, une théorie), même plausible.`;
 
 /** Au-delà, le corpus n'est pas chargé en mémoire : sans vérification possible, rien n'est rejeté. */
 const MAX_CORPUS_CHARS = 30_000_000;
