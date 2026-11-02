@@ -736,6 +736,19 @@ async function recentQuestions(limit = 60): Promise<{ topic: string; stem: strin
 const DUP_SCHEMA = {
   type: "object",
   properties: {
+    notions: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          index: { type: "integer" },
+          notion: { type: "string", description: "La notion du cours que la question teste, nommée comme le cours ; EXACTEMENT le même libellé pour deux questions sur la même notion." },
+          angle: { type: "string", description: "Le fait, la condition, l'étude ou le calcul précis qu'elle teste ; le même libellé pour deux questions au même angle." },
+        },
+        required: ["index", "notion", "angle"],
+        additionalProperties: false,
+      },
+    },
     duplicates: {
       type: "array",
       items: {
@@ -746,32 +759,63 @@ const DUP_SCHEMA = {
       },
     },
   },
-  required: ["duplicates"],
+  required: ["notions", "duplicates"],
   additionalProperties: false,
 } as const;
 
-/** Indices des QCM qui doublonnent un QCM plus haut (même notion, même fait ou même raisonnement). */
-async function duplicateItems(items: QcmItem[]): Promise<number[]> {
+/**
+ * Doublons d'un examen : les indices des QCM à retirer (le premier de chaque notion reste) et la
+ * notion de chaque QCM. `strict` (au moins autant de notions au programme que de questions,
+ * examen 4 de HUM-285 : biais de négativité ×3, nudge ×2…) : UNE NOTION = UNE QUESTION, quel que
+ * soit l'angle. Sinon (plus de questions que de notions, ou un accent demandé) : plusieurs
+ * questions sur une notion sous des angles vraiment distincts ; seul le même angle est un doublon.
+ * Le modèle nomme la notion et l'angle de chaque question ; la décision, elle, est faite ici.
+ */
+async function duplicateItems(items: QcmItem[], opts: { strict: boolean }): Promise<{ drop: number[]; notions: string[] }> {
   const list = items.map((it, i) => `Q${i}. (${sanitizeCorpus(it.topic ?? "").slice(0, 60)}) ${sanitizeCorpus(it.stem).slice(0, 400)}`).join("\n");
-  const r = await completeJson<{ duplicates: { first: number; second: number }[] }>({
+  const criterion = opts.strict
+    ? `Le programme a au moins autant de notions que l'examen a de questions : UNE NOTION = UNE QUESTION. Deux questions sur la même notion (le biais de négativité, le nudge, la souveraineté des données…) sont des doublons même sous deux angles différents.`
+    : `L'examen a plus de questions que le programme n'a de notions : deux questions sur une même notion sont permises si elles testent des angles VRAIMENT distincts (un autre fait, une autre condition, une autre étude) ; sont des doublons celles qui testent la même notion au même angle (le même fait, le même raisonnement, le même type de calcul).`;
+  const r = await completeJson<{ notions?: { index: number; notion: string; angle: string }[]; duplicates: { first: number; second: number }[] }>({
     prompt: [
-      `Voici les QCM d'un même examen. Repère les paires qui testent la MÊME notion avec le même fait, le même raisonnement ou le même type de calcul (deux questions sur le paradoxe de Simpson, deux sur la même condition logique…), même formulées autrement ou dans deux langues. Deux questions sur des notions voisines mais distinctes ne sont pas des doublons.`,
+      `Voici les QCM d'un même examen. Pour chacun, nomme la notion du cours qu'il teste (notion, le MÊME libellé exact pour deux questions sur la même notion, même formulées autrement ou dans deux langues) et l'angle précis (angle).`,
+      criterion,
+      `Puis liste les paires en doublon selon ce critère. Deux notions voisines mais distinctes ne sont pas un doublon.`,
       ``,
       list,
       ``,
-      `Réponds UNIQUEMENT avec {"duplicates": [{"first": i, "second": j, "reason": "…"}]} (first < second ; liste vide s'il n'y en a pas).`,
+      `Réponds UNIQUEMENT avec {"notions": [{"index": i, "notion": "…", "angle": "…"}], "duplicates": [{"first": i, "second": j, "reason": "…"}]} (first < second ; listes vides s'il n'y a rien).`,
     ].join("\n"),
     model: "opus",
     timeoutMs: 180_000,
     json: { schema: DUP_SCHEMA },
   }, { check: (v) => (Array.isArray(v?.duplicates) ? null : "le champ « duplicates » (tableau) manque") });
+  const notions = items.map(() => "");
+  const angles = items.map(() => "");
+  for (const n of r.notions ?? []) {
+    if (!Number.isInteger(n?.index) || n.index < 0 || n.index >= items.length) continue;
+    notions[n.index] = typeof n.notion === "string" ? n.notion.trim() : "";
+    angles[n.index] = typeof n.angle === "string" ? n.angle.trim() : "";
+  }
   const drop = new Set<number>();
+  // Par libellé : la première question d'une notion (ou d'une notion et d'un angle) reste.
+  const seen = new Set<string>();
+  items.forEach((_, i) => {
+    if (!notions[i]) return;
+    const key = opts.strict ? normalize(notions[i]) : `${normalize(notions[i])}\u0000${normalize(angles[i])}`;
+    if (seen.has(key)) drop.add(i);
+    else seen.add(key);
+  });
+  // Les paires que le modèle signale en plus (sans libellé, ou libellés différents) : la seconde part.
   for (const d of r.duplicates) {
     const later = Math.max(d.first, d.second);
     if (Number.isInteger(later) && later >= 0 && later < items.length && d.first !== d.second) drop.add(later);
   }
-  return [...drop].sort((a, b) => a - b);
+  return { drop: [...drop].sort((a, b) => a - b), notions };
 }
+
+/** Rondes du contrôle des doublons : retrait et remplacement, puis un contrôle des remplacements. */
+const DEDUP_ROUNDS = 2;
 
 /** Lots QCM menés en même temps (QCM_BATCH_CONCURRENCY, défaut 3). */
 function batchConcurrency(): number {
@@ -844,7 +888,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // H — notions des examens précédents de CE cours (même utilisateur : base du tenant) reprises
   // en dernier ; quelques notions de RÉSERVE en plus, pour remplacer un doublon retiré.
   const recent = await recentQuestions();
-  const SPARE = 4;
+  // 8 : l'examen 4 de HUM-285 avait cinq questions en trop sur des notions déjà posées.
+  const SPARE = 8;
   const spread = spreadOverChapters(
     await assignChapters(covAll.map((t) => ({ ...t, weight: t.weight ?? 0 }))).catch(() => []),
     needed + openCount + SPARE,
@@ -892,7 +937,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // lots de 4 QCM en parallèle borné (2 lots à la fois). RÉSILIENT : un lot illisible est redemandé
   // avec l'erreur (completeJson), un lot échoué ne plante pas le job et ses sujets sont comblés plus bas.
   const BATCH = 4;
-  type Batch = { topics: QcmSlot[]; molds: (MoldKind | null)[] };
+  type Batch = { topics: QcmSlot[]; molds: (MoldKind | null)[]; guidance?: string };
   const batches: Batch[] = [];
   for (let i = 0; i < count; i += BATCH) {
     const topicsSlice: QcmSlot[] = [];
@@ -937,7 +982,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   /** Un lot conçu, vérifié, renforcé. Un échec (après les réessais de completeJson) rend 0 item et sa cause. */
   const safeBatch = async (bt: Batch): Promise<{ items: QcmItem[]; error: unknown }> => {
     try {
-      const items = await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, undefined, { ...shared, molds: bt.molds });
+      const items = await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, bt.guidance, { ...shared, molds: bt.molds });
       // Un item resté rejeté après régénération (hors cours, définition différente, hors matière, clé
       // contestée), ou encore éliminable sans connaître le cours, n'est jamais gardé : son sujet est comblé.
       const kept = items.length ? await strengthen(bt, await verifyQcmBatch(items, step)) : [];
@@ -1029,19 +1074,27 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // H — DOUBLONS À L'ÉCHELLE DE L'EXAMEN (mock 4 de CS-290 : deux QCM sur le paradoxe de Simpson,
   // deux sur la même logique OR) : un contrôle par le modèle, car deux libellés différents ne se
   // rapprochent pas mot à mot ; le second de chaque paire est remplacé par une notion de réserve.
-  if (all.length >= 2) {
-    const drop = await duplicateItems(all).catch(() => [] as number[]);
-    if (drop.length) {
-      step(`${drop.length} QCM en doublon retiré(s) (même notion qu'une autre question) → remplacement`, 80);
-      const kept = all.filter((_, i) => !drop.includes(i));
-      all.splice(0, all.length, ...kept);
-      const spare = spareTopics.slice(0, count - all.length);
-      if (spare.length) {
-        const got = await safeBatch({ topics: spare, molds: spare.map(() => null) });
-        if (got.error) lastError = got.error;
-        all.push(...got.items.slice(0, count - all.length));
-      }
-    }
+  // Une notion = une question tant que le programme a au moins autant de notions que l'examen a
+  // de questions ; un accent demandé par l'étudiant pose volontairement plusieurs questions sur un thème.
+  const strict = !focus && covAll.length >= count;
+  let nextSpare = 0;
+  for (let round = 0; round < DEDUP_ROUNDS && all.length >= 2; round++) {
+    const { drop, notions } = await duplicateItems(all, { strict }).catch(() => ({ drop: [] as number[], notions: [] as string[] }));
+    if (!drop.length) break;
+    step(`${drop.length} QCM en doublon retiré(s) (même notion qu'une autre question) → remplacement`, 80);
+    const keptNotions = [...new Set(notions.filter((n, i) => n && !drop.includes(i)))];
+    const kept = all.filter((_, i) => !drop.includes(i));
+    all.splice(0, all.length, ...kept);
+    const spare = spareTopics.slice(nextSpare, nextSpare + count - all.length);
+    nextSpare += spare.length;
+    if (!spare.length) break;
+    // Le lot de remplacement sait quelles notions l'examen pose déjà.
+    const guidance = keptNotions.length
+      ? `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen — n'en reprends AUCUNE, même sous un autre angle : ${keptNotions.map((n) => sanitizeCorpus(n).slice(0, 80)).join(" · ")}.`
+      : undefined;
+    const got = await safeBatch({ topics: spare, molds: spare.map(() => null), guidance });
+    if (got.error) lastError = got.error;
+    all.push(...got.items.slice(0, count - all.length));
   }
   // Aucun appel en erreur mais tous les items écartés (mal formés) : c'est une réponse inutilisable.
   const cause = () => lastError ?? new LlmError("Toutes les questions reçues étaient mal formées.", "BAD_OUTPUT");
