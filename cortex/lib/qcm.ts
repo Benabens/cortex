@@ -921,6 +921,46 @@ export async function getQcmExam(examId: number, withKeys = false): Promise<QcmE
   };
 }
 
+/**
+ * Recompile le PDF d'un examen QCM depuis la base, SANS le modèle (gratuit) : examens
+ * restés sans PDF (garde trop strict, LaTeX d'une ouverte cassé) — bouton « régénérer le
+ * PDF » et rattrapage des examens existants. null si l'examen n'est pas un examen QCM.
+ */
+export async function recompileQcmPdf(examId: number): Promise<{ file: string; texError?: string; texWarning?: string } | null> {
+  await ensureQcmSchema();
+  const e = await q.get<{ id: number; created_at: string }>(`SELECT id, created_at FROM exams WHERE id = ? AND format_template = 'qcm'`, examId);
+  if (!e) return null;
+  const rows = await q.all<QcmItemRow>(`SELECT * FROM qcm_items WHERE exam_id = ? ORDER BY idx`, examId);
+  const items: QcmItem[] = rows.map((r) => {
+    let fig: { spec?: FigureSpec; file?: string; truth?: Record<string, number> } = {};
+    try { fig = r.figure_json ? JSON.parse(r.figure_json) : {}; } catch {}
+    return {
+      topic: r.topic, type: r.type, stem: r.stem, options: JSON.parse(r.options_json), correct: JSON.parse(r.correct_json),
+      misconceptions: JSON.parse(r.misconceptions_json ?? "[]"), explanation: r.explanation ?? "", verified: r.verified,
+      mold: r.mold ?? null, figureSpec: fig.spec ?? null, figureFile: fig.file ?? null, figureTruth: fig.truth ?? null,
+    };
+  });
+  await q.ensureTable("exam_questions");
+  const open = (await q.all<QcmOpenRow>(`SELECT id, concept, statement_html, solution_html FROM exam_questions WHERE exam_id = ? AND source_inspiration = 'qcm-open' ORDER BY id`, examId))
+    .map((r) => ({ category: "", concept: r.concept, statement_tex: r.statement_html ?? "", solution_tex: r.solution_html ?? "", points: 15 }));
+  const { buildQcmArtifact } = await import("@/lib/qcm-latex");
+  const out = await buildQcmArtifact(examId, { items, open }, String(e.created_at ?? nowStr()).slice(0, 10));
+  if (out.file) await q.run(`UPDATE exams SET html_path = ? WHERE id = ?`, out.file, examId);
+  return out;
+}
+
+/** Rattrapage : recompile les examens QCM du cours courant restés sans PDF (sans le modèle). */
+export async function recompileMissingQcmPdfs(): Promise<{ examId: number; file: string; texError?: string }[]> {
+  await ensureQcmSchema();
+  const rows = await q.all<{ id: number }>(`SELECT id FROM exams WHERE format_template = 'qcm' AND (html_path IS NULL OR html_path NOT LIKE '%.pdf') ORDER BY id`);
+  const out: { examId: number; file: string; texError?: string }[] = [];
+  for (const r of rows) {
+    const res = await recompileQcmPdf(Number(r.id));
+    if (res) out.push({ examId: Number(r.id), file: res.file, ...(res.texError ? { texError: res.texError } : {}) });
+  }
+  return out;
+}
+
 /** Note une réponse QCM sur 1. Un choix unique reste binaire ; un choix multiple pénalise les erreurs. */
 export function scoreQcmAnswer(correctAnswer: number[], chosenAnswer: number[], optionCount: number): number {
   const correct = new Set(correctAnswer.filter((value) => Number.isInteger(value) && value >= 0 && value < optionCount));

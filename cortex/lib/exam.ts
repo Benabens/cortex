@@ -259,24 +259,34 @@ export async function listExams() {
     if ((await q.columns("exams")).includes("verify_summary")) verifyCol = "e.verify_summary";
   } catch {}
   const rows = await q.all<any>(
-    `SELECT e.id, e.created_at, e.status, e.html_path, ${verifyCol} verify_summary,
+    `SELECT e.id, e.created_at, e.status, e.html_path, e.format_template, ${verifyCol} verify_summary,
             (SELECT count(*) FROM exam_questions q WHERE q.exam_id = e.id)
               + (SELECT count(*) FROM qcm_items i WHERE i.exam_id = e.id) nq
      FROM exams e WHERE e.format_template IS NULL OR e.format_template != 'exercise'
      ORDER BY e.created_at DESC, e.id DESC`
   );
-  return rows.map((r) => ({
-    id: r.id,
-    createdAt: r.created_at,
-    status: r.status,
-    questionCount: Number(r.nq ?? 0),
-    verifySummary: r.verify_summary ?? null,
-    url: r.html_path ? `/exam/${path.basename(r.html_path)}${courseQ()}` : null,
-    solutionsUrl:
-      r.html_path && r.html_path.endsWith(".pdf") && fs.existsSync(path.join(EXAM_DIR(), path.basename(r.html_path, ".pdf") + "-corrige.pdf"))
-        ? `/exam/${path.basename(r.html_path, ".pdf")}-corrige.pdf${courseQ()}`
-        : null,
-  }));
+  return rows.map((r) => {
+    const file = r.html_path ? path.basename(r.html_path) : "";
+    // Énoncé/Corrigé : seulement des fichiers qui EXISTENT (un .tex n'est pas un énoncé lisible).
+    const readable = !!file && /\.(pdf|html)$/.test(file) && fs.existsSync(path.join(EXAM_DIR(), file));
+    const qcm = r.format_template === "qcm";
+    const solutions = file.endsWith(".pdf") ? `${path.basename(file, ".pdf")}-corrige.pdf` : "";
+    const url = readable ? `/exam/${file}${courseQ()}` : null;
+    return {
+      id: r.id,
+      createdAt: r.created_at,
+      status: r.status,
+      kind: qcm ? "qcm" as const : "written" as const,
+      questionCount: Number(r.nq ?? 0),
+      verifySummary: r.verify_summary ?? null,
+      // Page en ligne, TOUJOURS ouvrable (examen 4 de CS-290 : sans PDF, la carte n'ouvrait rien).
+      onlineUrl: qcm ? `/mock/${r.id}${courseQ()}` : url,
+      url,
+      solutionsUrl: readable && solutions && fs.existsSync(path.join(EXAM_DIR(), solutions)) ? `/exam/${solutions}${courseQ()}` : null,
+      // Examen QCM sans PDF lisible : il se recompile gratuitement (sans le modèle).
+      pdfMissing: qcm && !url,
+    };
+  });
 }
 
 export async function deleteExam(id: number) {
