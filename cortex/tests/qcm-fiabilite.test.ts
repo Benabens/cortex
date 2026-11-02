@@ -23,6 +23,9 @@ process.env.LLM_PROVIDER = "openai-compatible";
 process.env.LLM_API_KEY = "test";
 process.env.LLM_MODEL_OPUS = "claude-sonnet-5";
 process.env.LLM_MAX_RETRIES = "0";
+// Un cours neuf par test : au-delà de 10, la garde « 10 cours par heure » refuserait la création.
+process.env.MAX_COURSES_CREATED_PER_HOUR = "unlimited";
+process.env.MAX_COURSES_PER_USER = "unlimited";
 
 const BT = "```";
 const CODE_STEM = `Considérez le code suivant :\n${BT}python\nimport pandas as pd\ndf = pd.DataFrame({"sex": ["F", "M"], "income": [3, 5]})\nprint(df.groupby("sex")["income"].mean())\n${BT}\nQue fait la dernière ligne ?`;
@@ -62,7 +65,15 @@ function verifyReply(prompt: string): string {
     // Le juge cite les termes du cours dont dépend la clé ; pour la question « status quo », il ne
     // remarque pas que la notion manque au cours (le contrôle déterministe doit l'attraper).
     const course_terms = /Status quo/.test(b) ? ["status quo bias", "groupthink"] : ["groupby"];
-    return { index: i, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms, off_course: judgeFlag };
+    // K — le juge repère un distracteur qu'on élimine sans connaître le cours (« TypeError » hors sujet).
+    const trivial = [...b.matchAll(/^\s+\((\d+)\) (.*)$/gm)].filter((m) => /TypeError/.test(m[2])).map((m) => Number(m[1]));
+    // B — le juge compare les définitions employées à celles des extraits du cours.
+    const definition_mismatch = /legally protected/.test(b)
+      ? "sensitive attribute : la question le restreint aux attributs protégés par la loi ; le cours : par la loi OU par l'éthique (couleur de cheveux)"
+      : /latent variable is a proxy/.test(b)
+        ? "latent variable : le cours la définit comme non observable, mesurée indirectement — pas comme un proxy enregistré"
+        : "";
+    return { index: i, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms, off_course: judgeFlag, trivial_distractors: trivial, definition_mismatch };
   });
   return JSON.stringify({ results });
 }
@@ -71,6 +82,9 @@ const DESIGN = { misconception: "confondre FPR et FDR", edge_case: "groupes de t
 const AUDIT_GOOD = { pattern_matcher_answer: "FDR", pattern_matcher_correct: false, strong_student_answer: "FPR", strong_student_stuck: false, rubric_misses: [], trap_present: true, hardening: "", verdict: "good" };
 let writeCalls = 0;
 const assistPrompts: string[] = [];
+const dedupePrompts: string[] = [];
+/** Paires en doublon que rend le contrôle de fin d'examen (aucune par défaut). */
+let dedupe: (prompt: string) => { first: number; second: number; reason: string }[] = () => [];
 /** Drill : n = rang de l'appel. */
 let drill: (n: number) => string = () => "{}";
 const VERDICT = { verdict: "correct", feedback: "Conforme au cours.", correct_solution: "Groupthink.", criteria: [
@@ -78,7 +92,7 @@ const VERDICT = { verdict: "correct", feedback: "Conforme au cours.", correct_so
   { label: "Justifie", points: 1, achieved: true, essential: false, justification: "Le silence du groupe est expliqué." },
 ] };
 /** Rédaction d'une question ouverte (n = rang de l'appel). */
-let write: (n: number) => string = (n) => JSON.stringify({ category: "Fairness", concept: `Ouverte ${n}`, statement_tex: `\\textbf{Scénario ${n}.} Calculez le FPR de chaque groupe.`, solution_tex: "FPR = FP / (FP + TN).", points: 15 });
+let write: (n: number, prompt: string) => string = (n) => JSON.stringify({ category: "Fairness", concept: `Ouverte ${n}`, statement_tex: `\\textbf{Scénario ${n}.} Calculez le FPR de chaque groupe.`, solution_tex: "FPR = FP / (FP + TN).", points: 15 });
 
 let llm: http.Server;
 before(async () => {
@@ -92,11 +106,12 @@ before(async () => {
       let text = "{}";
       // Architecte des questions ouvertes (conception → rédaction → audit), testé avant "items" :
       // le schéma de conception contient lui aussi des tableaux « "items" ».
-      if (/"hints"/.test(content)) { assistPrompts.push(content); text = drill(assistPrompts.length); }
+      if (/"duplicates"/.test(content)) { dedupePrompts.push(content); text = JSON.stringify({ duplicates: dedupe(content) }); }
+      else if (/"hints"/.test(content)) { assistPrompts.push(content); text = drill(assistPrompts.length); }
       else if (/RÉPONSE DE L'ÉTUDIANT/.test(content)) { assistPrompts.push(content); text = JSON.stringify(VERDICT); }
       else if (/"edge_case"/.test(content)) text = JSON.stringify(DESIGN);
       else if (/"pattern_matcher_answer"/.test(content)) text = JSON.stringify(AUDIT_GOOD);
-      else if (/"statement_tex"/.test(content)) { writeCalls++; text = write(writeCalls); }
+      else if (/"statement_tex"/.test(content)) { writeCalls++; text = write(writeCalls, content); }
       else if (/"results"/.test(content)) text = verifyReply(content);
       else if (/"items"/.test(content)) {
         designCalls++;
@@ -114,11 +129,11 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { assistPrompts.length = 0; designCalls = 0; writeCalls = 0; designPrompts.length = 0; designBodies.length = 0; verifyPrompts.length = 0; });
+beforeEach(() => { dedupePrompts.length = 0; dedupe = () => []; assistPrompts.length = 0; designCalls = 0; writeCalls = 0; designPrompts.length = 0; designBodies.length = 0; verifyPrompts.length = 0; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
-  for (const k of ["CORTEX_DATA_DIR", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS", "LLM_MAX_RETRIES", "LLM_BASE_URL"]) delete process.env[k];
+  for (const k of ["CORTEX_DATA_DIR", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS", "LLM_MAX_RETRIES", "LLM_BASE_URL", "MAX_COURSES_CREATED_PER_HOUR", "MAX_COURSES_PER_USER"]) delete process.env[k];
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -220,14 +235,17 @@ test("une question ouverte qui échoue est relancée : 2 QCM + 3 ouvertes sur 2 
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
   design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
   const ok = write;
-  // La 2ᵉ ouverte (rédactions 2 à 4 : 3 essais) ne rend que du texte : elle échoue, puis est relancée.
-  write = (n) => (n >= 2 && n <= 4 ? "Voici l'énoncé demandé." : ok(n));
+  // L'ouverte sur « pandas groupby » (une seule l'a) ne rend que du texte à ses 3 premiers essais : elle
+  // échoue, puis est relancée (les ouvertes tournent en parallèle : ciblée par son sujet).
+  let target = 0;
+  write = (n, p) => (/pandas groupby/.test(p) && ++target <= 3 ? "Voici l'énoncé demandé." : ok(n, p));
   try {
     const steps: string[] = [];
     const r = await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 3, onStep: (s) => { steps.push(s); } }));
     assert.equal(r.open, 3, steps.filter((s) => /uverte/.test(s)).join("\n"));
     assert.equal(r.openRequested, 3);
-    assert.ok(steps.some((s) => /Question ouverte 2 ignorée/.test(s)), "l'échec est dit, avec sa cause");
+    assert.equal(target, 4, "trois essais ratés, puis la relance");
+    assert.ok(steps.some((s) => /Question ouverte \d ignorée : le modèle a renvoyé une réponse illisible/.test(s)), "l'échec est dit, avec sa cause");
     assert.ok(steps.some((s) => /ouverte\(s\) manquante\(s\)/.test(s)), "et la relance aussi");
     const exam = await runWithCourse(id, () => getQcmExam(r.id));
     assert.equal(exam!.open.length, 3);
@@ -297,5 +315,134 @@ test("un juge qui répond « None » dans off_course ne rejette rien", async () 
   } finally {
     judgeFlag = "";
   }
+});
+
+test("H — deux QCM sur la même notion : le second est retiré et remplacé par une autre notion", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  design = (n, call) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(10 * call + i, `Simpson ${call}.${i} : que montre le tableau agrégé ? (Q${call}.${i})`)) });
+  dedupe = (p) => (/Simpson 1\.0/.test(p) && /Simpson 1\.2/.test(p) ? [{ first: 0, second: 2, reason: "même paradoxe de Simpson" }] : []);
+  const steps: string[] = [];
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 3, openCount: 0, onStep: (s) => { steps.push(s); } }));
+  assert.equal(r.count, 3);
+  const stems = (await runWithCourse(id, () => getQcmExam(r.id)))!.items.map((x) => x.stem);
+  assert.ok(!stems.some((x) => x.startsWith("Simpson 1.2")), stems.join(" | "));
+  assert.ok(stems.some((x) => x.startsWith("Simpson 2.")), "remplacé par un nouveau lot");
+  assert.ok(steps.some((x) => /doublon/.test(x)), "le retrait est dit");
+});
+
+test("H — les questions des examens précédents du même cours ne sont pas reprises", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  design = (n, call) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i, `Ancienne ${call}.${i} : que renvoie groupby ? (Q${call}.${i})`)) });
+  await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 0 }));
+  designPrompts.length = 0;
+  await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 0 }));
+  assert.match(designPrompts[0], /examens précédents[\s\S]*Ancienne 1\.0/, "les énoncés déjà posés sont donnés à ne pas reprendre");
+});
+
+test("K — niveau examen réel par défaut ; un distracteur éliminable sans le cours (« TypeError ») est régénéré", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  // Mock 4 de CS-290 (consigne neutre) : distracteurs « erreur d'arrondi », « TypeError ».
+  const easy = { ...item(0), options: ["La moyenne des revenus calculée séparément pour chaque modalité de sex.", "Une TypeError, car groupby ne s'applique pas à une colonne texte.", "Une erreur d'arrondi due aux nombres flottants de la colonne income.", "La somme des revenus calculée séparément pour chaque modalité de sex."] };
+  design = (n, call) => JSON.stringify({ items: call === 1 ? [easy, ...Array.from({ length: n - 1 }, (_, i) => item(1 + i))] : Array.from({ length: n }, (_, i) => item(10 * call + i)) });
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 0 }));
+  assert.equal(r.count, 2);
+  assert.match(designPrompts[0], /NIVEAU EXAMEN RÉEL/, "la difficulté d'examen est le défaut, sans consigne");
+  const regen = designPrompts.find((p) => /À CORRIGER/.test(p));
+  assert.match(regen ?? "", /éliminable/, "régénération ciblée sur le distracteur trivial");
+  const options = (await runWithCourse(id, () => getQcmExam(r.id)))!.items.flatMap((x) => x.options);
+  assert.ok(!options.some((o) => /TypeError/.test(o)), options.join(" | "));
+});
+
+test("K — la consigne de l'étudiant s'ajoute au niveau par défaut, sur chaque lot", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
+  await runWithCourse(id, () => generateQcmExam({ count: 6, openCount: 0, focus: "HARD : distinctions fines entre notions proches" }));
+  const firsts = designPrompts.filter((p) => !/À CORRIGER/.test(p));
+  assert.ok(firsts.length >= 2);
+  for (const p of firsts) {
+    assert.match(p, /NIVEAU EXAMEN RÉEL/);
+    assert.match(p, /CONSIGNE DE L'ÉTUDIANT[^\n]*HARD : distinctions fines/);
+  }
+});
+
+test("M — ouvertes en parallèle des QCM, QCM visibles avant les ouvertes, durées des phases journalisées", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
+  const steps: string[] = [];
+  let early: { examId: number; items: number; open: number; status: string | null } | null = null;
+  const r = await runWithCourse(id, () => generateQcmExam({
+    count: 4, openCount: 2,
+    onStep: (s) => { steps.push(s); },
+    onExamReady: async (examId) => {
+      const v = await getQcmExam(examId);
+      early = { examId, items: v?.items.length ?? 0, open: v?.open.length ?? 0, status: v?.status ?? null };
+    },
+  }));
+  assert.ok(early, "l'examen est livré dès que ses QCM sont prêts");
+  assert.deepEqual(early, { examId: r.id, items: 4, open: 0, status: "generating" }, "QCM visibles, ouvertes en cours");
+  const firstOpen = steps.findIndex((x) => /Question ouverte 1\/2/.test(x));
+  const qcmDone = steps.findIndex((x) => /4\/4 QCM construits/.test(x));
+  assert.ok(firstOpen >= 0 && firstOpen < qcmDone, "les ouvertes démarrent avant la fin des QCM");
+  for (const phase of [/⏱ QCM/, /⏱ Questions ouvertes/, /⏱ PDF/, /⏱ Total/]) assert.ok(steps.some((x) => phase.test(x)), String(phase));
+  const final = await runWithCourse(id, () => getQcmExam(r.id));
+  assert.equal(final!.status, "ready");
+  assert.equal(final!.open.length, 2);
+});
+
+test("M — cache de prompt : le contexte stable d'un job est le même « system » pour tous ses lots", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
+  await runWithCourse(id, () => generateQcmExam({ count: 7, openCount: 0 }));
+  type Msg = { role: string; content: string };
+  const lots = designBodies.map((b) => (b as { messages: Msg[] }).messages).filter((m) => !/À CORRIGER/.test(m.map((x) => x.content).join("\n")));
+  assert.ok(lots.length >= 2, `${lots.length} lots`);
+  const system = lots.map((m) => m.find((x) => x.role === "system")?.content ?? "");
+  assert.ok(system[0].length > 2000, "un préfixe assez long pour le cache (règles, taxonomie, schéma)");
+  assert.equal(system[1], system[0], "identique d'un lot à l'autre : lu en cache après le premier");
+  assert.match(system[0], /NIVEAU EXAMEN RÉEL[\s\S]*TAXONOMIE DES DISTRACTEURS[\s\S]*"items"/);
+  const user = lots[0].find((x) => x.role === "user")?.content ?? "";
+  assert.match(user, /Couvre ces sujets/);
+  assert.doesNotMatch(user, /TAXONOMIE DES DISTRACTEURS/, "le variable reste hors du préfixe caché");
+});
+
+test("B — une définition plus étroite ou confondue avec une autre (sensitive, latent/proxy) est rejetée et remplacée", async () => {
+  const id = await codeCourse();
+  const { runWithCourse, ensureFts } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { indexItemForSearch } = await import("../lib/search");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  // Définitions du cours (paraphrasées) : sensible par la loi OU l'éthique ; proxy ; variable latente.
+  const defs = "Fairness 1, théorie. Sensitive attributes : protégés par la loi OU par l'éthique (la couleur de cheveux est sensible : observée, subjective). Proxy attributes : corrélés à un attribut sensible, d'où la discrimination by proxy. Latent variable : non observable, mesurée indirectement (l'intérêt mesuré par les clics).";
+  await runWithCourse(id, async () => {
+    ensureFts();
+    const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "note", "Fairness 1 - sources of unfairness", "note/f1", null, 1);
+    const iid = await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "note", "Fairness 1 - sources of unfairness", defs);
+    await indexItemForSearch(iid, sid, "Fairness 1 - sources of unfairness", defs);
+    await q.run(`INSERT INTO topics (label, method, exam_weight, exam_count) VALUES (?,?,?,?)`, "Sensitive / proxy / latent attributes", null, 9, 1);
+  });
+  const narrow = { ...item(0, "Mock 4, Q3 : an attribute is sensitive only when it is explicitly recorded and legally protected. True for which case?"), topic: "Sensitive / proxy / latent attributes" };
+  const merged = { ...item(1, "In the course, a latent variable is a proxy attribute recorded in the dataset. Which example fits?"), topic: "Sensitive / proxy / latent attributes" };
+  design = (n, call) => JSON.stringify({ items: call === 1 ? [narrow, merged, ...Array.from({ length: Math.max(0, n - 2) }, (_, i) => item(2 + i))] : Array.from({ length: n }, (_, i) => item(10 * call + i)) });
+  const steps: string[] = [];
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 3, openCount: 0, onStep: (x) => { steps.push(x); } }));
+  assert.equal(r.count, 3);
+  const stems = (await runWithCourse(id, () => getQcmExam(r.id)))!.items.map((x) => x.stem);
+  assert.ok(!stems.some((x) => /legally protected|latent variable is a proxy/.test(x)), stems.join(" | "));
+  assert.ok(steps.some((x) => /définition différente du cours[^\n]*sensitive attribute/.test(x)), "le rejet nomme la définition en cause");
+  const judged = verifyPrompts.find((p) => /legally protected/.test(p)) ?? "";
+  assert.match(judged, /plus étroite[\s\S]*plus large/, "le juge doit comparer chaque définition à celle du cours");
+  assert.match(judged, /EXTRAITS DU COURS[\s\S]*OU par l'éthique/, "avec les définitions du cours sous les yeux");
 });
 

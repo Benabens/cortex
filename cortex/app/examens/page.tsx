@@ -18,6 +18,22 @@ export default function ExamensPage() {
   const { courseId } = useCourse();
   const [deleting, setDeleting] = useState<number | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [recompiling, setRecompiling] = useState<number | null>(null);
+
+  // PDF manquant (examen QCM) : recompilé depuis la base, sans le modèle, gratuitement.
+  const recompile = async (id: number) => {
+    if (recompiling) return;
+    setRecompiling(id);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/exams/${id}/pdf?course=${encodeURIComponent(courseId)}`, { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) setDeleteError(d.error ?? "Le PDF n’a pas pu être régénéré.");
+      exams.refetch();
+    } finally {
+      setRecompiling(null);
+    }
+  };
 
   const removeExam = async (id: number) => {
     if (deleting) return;
@@ -139,9 +155,12 @@ export default function ExamensPage() {
                 <Panel key={e.id} className="flex flex-wrap items-center gap-4 p-4">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <h3 className="truncate text-[0.95rem] font-semibold text-ink-1">Examen #{e.id}</h3>
+                      <h3 className="truncate text-[0.95rem] font-semibold text-ink-1">
+                        {/* Toujours ouvrable en ligne, PDF ou pas (examen 4 de CS-290). */}
+                        {e.onlineUrl ? <a href={e.onlineUrl} className="hover:underline">Examen #{e.id}</a> : <>Examen #{e.id}</>}
+                      </h3>
                       <Badge tone={ready ? "success" : "neutral"} Icon={ready ? CheckCircle2 : undefined} size="xs">
-                        {ready ? "Prêt" : e.status}
+                        {ready ? "Prêt" : e.status === "generating" ? (e.kind === "blocks" ? "PDF en cours" : "Ouvertes en cours") : e.status}
                       </Badge>
                     </div>
                     <p className="mt-0.5 truncate text-[0.8rem] text-ink-3">
@@ -172,6 +191,16 @@ export default function ExamensPage() {
                         Corrigé
                         <ExternalLink className="size-3.5" aria-hidden="true" />
                       </a>
+                    )}
+                    {e.pdfMissing && (
+                      <button
+                        type="button"
+                        onClick={() => recompile(e.id)}
+                        disabled={recompiling === e.id}
+                        className="inline-flex h-10 items-center rounded-md border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-3 transition-colors hover:text-ink-1 disabled:opacity-50"
+                      >
+                        {recompiling === e.id ? "Régénération…" : "PDF indisponible — régénérer le PDF"}
+                      </button>
                     )}
                     <button
                       type="button"

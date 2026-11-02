@@ -23,7 +23,8 @@ import { stillBilling } from "@/lib/billing/subscription-windows";
  *    moyen de se connecter ;
  *  - `courses` possédés, `tenants` (registre), `gen_events`, `credit_transactions`,
  *    `active_jobs` (réservations en cours), `stripe_purchases` (achats),
- *    `subscriptions` et `stripe_invoices` (abonnement Pro), `terms_acceptances` ;
+ *    `subscriptions` et `stripe_invoices` (abonnement Pro), `terms_acceptances`,
+ *    `question_reports` (signalements de questions et leurs commentaires) ;
  *  - chaque schéma tenant `t_<user>_<cours>` (Postgres, DROP … CASCADE) — donc
  *    sources, items, examens, faiblesses, planning, jobs, banque… d'un coup ;
  *  - tous les fichiers du volume sous `data/u/<slug>/` (données des cours créés +
@@ -192,6 +193,8 @@ export async function deleteAccount(userId: string, deps: DeletionDeps = {}): Pr
     await authRun(`UPDATE withdrawal_requests SET user_id = ?, email = NULL, retained_until = ? WHERE user_id = ?`, legalId, retainedUntil, userId);
     // Connecteur MCP : applications connectées, jetons, codes, tickets de consentement, devis.
     // Effacer les jetons rend aussitôt inutilisable tout accès encore détenu par un client.
+    // Signalements de questions : leurs commentaires sont du texte de l'utilisateur.
+    await authRun(`DELETE FROM question_reports WHERE user_id = ?`, userId);
     for (const table of ["oauth_tokens", "oauth_codes", "oauth_requests", "oauth_grants", "mcp_quotes"]) {
       await authRun(`DELETE FROM ${table} WHERE user_id = ?`, userId);
     }

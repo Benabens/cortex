@@ -1,3 +1,4 @@
+import { gradeBlocks } from "@/lib/blocks";
 import { getQcmExam, gradeQcm } from "@/lib/qcm";
 import { recordFeedback } from "@/lib/calibration";
 import { useCourseOr404 } from "@/lib/req";
@@ -10,12 +11,18 @@ export const dynamic = "force-dynamic";
 /**
  * POST {answers: {idx: number[]}} → corrige (clé connue), renvoie score + détail (idée fausse par
  * distracteur choisi). Le résultat nourrit la boucle de feedback de calibration.
+ * POST {blockAnswers: {partId: indice | sortie | texte}} → examen à questions composées (lib/blocks).
  */
 export const POST = withBodyLimit(async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const denied = useCourseOr404(req);
   if (denied) return denied;
   const { id } = await params;
   const body = await readJson(req, ({}));
+  if (body?.blockAnswers && typeof body.blockAnswers === "object") {
+    const graded = await gradeBlocks(Number(id), body.blockAnswers as Record<string, unknown>);
+    if (!graded) return NextResponse.json({ error: "Examen introuvable." }, { status: 404 });
+    return NextResponse.json(graded);
+  }
   const answers: Record<number, number[]> = body?.answers ?? {};
   const res = await gradeQcm(Number(id), answers);
   if (!res.total) return NextResponse.json({ error: "Mock introuvable ou vide." }, { status: 404 });

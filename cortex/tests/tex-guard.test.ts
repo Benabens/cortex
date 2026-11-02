@@ -76,6 +76,10 @@ test("les primitives dangereuses sont rejetées, une par une", async () => {
     String.raw`\begin{@@input}/etc/passwd\end{@@input}`,
     String.raw`\ExplSyntaxOn \file_input:n{/etc/passwd} \ExplSyntaxOff`,
     String.raw`\ExplSyntaxOn \ior_open:Nn \g_tmpa_ior {/etc/passwd} \ExplSyntaxOff`,
+    // \ProvidesExpl… allume la syntaxe expl3 pour la suite du fichier, comme \ExplSyntaxOn.
+    String.raw`\ProvidesExplFile{x.tex}{2026/11/02}{1}{x} \file_input:n{/etc/passwd}`,
+    String.raw`\ProvidesExplPackage{x}{2026/11/02}{1}{x}`,
+    String.raw`\use:c{@@input}{/etc/passwd}`,
     String.raw`\XeTeXpdffile "/data/u/autre/exams/exam-1.pdf" page 1`,
     String.raw`\XeTeXpicfile "/etc/x.png"`,
     String.raw`\begin{filecontents}{piege.tex}x\end{filecontents}`,
@@ -129,6 +133,10 @@ test("ce qui est légitime passe : figures relatives, macros du cours, maths", a
     String.raw`\begin{tabular}{|l|c|}\hline a & b \\ \hline\end{tabular} \begin{center}\begin{minipage}{0.5\textwidth}x\end{minipage}\end{center}`,
     String.raw`$\begin{pmatrix} 1 & 0 \\ 0 & 1 \end{pmatrix}$ \begin{cases} 1 & x>0 \\ 0 & \text{sinon} \end{cases} \begin{verbatim}int main(){}\end{verbatim}`,
     String.raw`\begin{lstlisting}[language=C]\nprintf("x");\n\end{lstlisting} \begin{tikzpicture}\draw (0,0)--(1,1);\end{tikzpicture} \begin{figure}[h]\centering x\end{figure}`,
+    // Indices de maths (examen 4 de CS-290 : le garde refusait tout le PDF, en silence).
+    String.raw`$\sigma_x$, $\epsilon_i + \mu_{A}$, $\theta_1 - \hat{\beta}_0$, $\tau_{\text{H}}$ et $\varepsilon_t$`,
+    // Deux-points après une lettre grecque : une application, pas une fonction expl3.
+    String.raw`$\phi: X \to Y$, $\sigma:\mathbb{R}\to\mathbb{R}$ et $\pi :\Omega \to [0,1]$`,
   ];
   for (const c of ok) assert.deepEqual(findTexHazards(c), [], `faux positif : ${c}`);
 });

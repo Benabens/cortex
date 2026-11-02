@@ -36,7 +36,7 @@ const UMATH: [RegExp, string][] = [
   [/[⊗]/g, "\\ensuremath{\\otimes}"], [/[⊕]/g, "\\ensuremath{\\oplus}"], [/[⊤]/g, "\\ensuremath{\\top}"], [/[⊥]/g, "\\ensuremath{\\perp}"], [/[…]/g, "\\ldots{}"], [/[•]/g, "\\ensuremath{\\bullet}"],
 ];
 
-function esc(s: string): string {
+export function esc(s: string): string {
   let t = (s ?? "")
     .replace(/\\/g, "\\textbackslash{}")
     .replace(/([&%$#_{}])/g, "\\$1")
@@ -54,22 +54,18 @@ function esc(s: string): string {
 const LETTER = "ABCDEFGH".split("");
 const BOX = String.raw`\ding{113}`; // □ (pifont) — comme les annales CS-233
 
-function footDate(dateLabel: string): string {
+export function footDate(dateLabel: string): string {
   const m = dateLabel.match(/(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return dateLabel;
   const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   return `${months[+m[2] - 1]} ${+m[3]}, ${m[1]}`;
 }
 
-/** Page de garde course-aware (style CS-233 : lecturer, SCIPER, convention SCQ/MCQ détectée). */
-async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts: number, durationMin: number): Promise<string> {
+/** En-tête de la page de garde : logo, enseignant, cours, date et durée, anonymisation, nom et SCIPER. */
+export function coverHeader(dateLabel: string, durationMin: number): string[] {
   const c = getCourse(currentCourse());
   const code = c.examCode.replace(/-/g, "--");
   const lecturer = c.profs[0] ?? "";
-  const fmt = await getFormatProfile();
-  const convention = fmt?.scq_vs_mcq_convention
-    ? esc(fmt.scq_vs_mcq_convention)
-    : "There are single-choice questions (SCQ) where exactly one box is correct, and multiple-choice questions (MCQ) where one or more boxes are correct.";
   return [
     String.raw`\thispagestyle{empty}`,
     String.raw`\noindent\begin{minipage}[t]{0.62\textwidth}\vspace{0pt}\epfllogo[26]\par\smallskip\footnotesize`,
@@ -79,6 +75,17 @@ async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts
     String.raw`\end{minipage}\hfill\begin{minipage}[t]{0.32\textwidth}\vspace{0pt}\raggedleft\footnotesize Anonymisation:\\ \textbf{\#0000}\end{minipage}`,
     String.raw`\vspace{6pt}\noindent\rule{\textwidth}{1pt}`,
     String.raw`\vspace{6pt}\noindent{\Large\textbf{Student One}}\hfill SCIPER: \textbf{111111}`,
+  ];
+}
+
+/** Page de garde course-aware (style CS-233 : lecturer, SCIPER, convention SCQ/MCQ détectée). */
+async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts: number, durationMin: number): Promise<string> {
+  const fmt = await getFormatProfile();
+  const convention = fmt?.scq_vs_mcq_convention
+    ? esc(fmt.scq_vs_mcq_convention)
+    : "There are single-choice questions (SCQ) where exactly one box is correct, and multiple-choice questions (MCQ) where one or more boxes are correct.";
+  return [
+    ...coverHeader(dateLabel, durationMin),
     String.raw`\vspace{0.4cm}\par\noindent{\large\textbf{Instructions}}\par\smallskip\small`,
     String.raw`\begin{enumerate}\setlength{\itemsep}{3pt}`,
     (() => {
@@ -152,12 +159,43 @@ export type QcmExamData = { items: QcmItem[]; open: ExamQuestion[]; qcmPoints?: 
 const OPEN_TEX_COMPAT = String.raw`\providecommand{\captionof}[2]{\par\smallskip{\small\itshape #2}\par}
 \tikzset{every node/.append style={align=center}}`;
 
-/** Source .tex complet de l'examen QCM (+ ouvert), corrigé optionnel. */
-export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSolutions: boolean): Promise<string> {
+/**
+ * Document complet autour de `body` : préambule commun (figé par CS-202) + figures et compat
+ * des ouvertes, en-tête et pied de page du cours (le préambule est écrit pour CS-202).
+ */
+export function examDocument(body: string[], dateLabel: string): string {
   let preamble = fs.readFileSync(path.join(LATEX_DIR, "preamble.tex"), "utf8");
   const figPath = path.join(LATEX_DIR, "figures.tex");
   if (fs.existsSync(figPath)) preamble += "\n" + fs.readFileSync(figPath, "utf8");
   preamble += "\n" + OPEN_TEX_COMPAT;
+  const c = getCourse(currentCourse());
+  const code = c.examCode.replace(/-/g, "--");
+  const profsTex = c.profs.length ? c.profs.join(", ") : "";
+  const footOverride = [
+    String.raw`\fancyhead[L]{}`,
+    `\\fancyhead[R]{\\qrcode[height=1.25cm]{${c.examCode}-FINAL-EXAM}}`,
+    `\\fancyfoot[C]{\\small\\textbf{${code}, ${c.examKind}}${profsTex ? `\\\\[-2pt]\\small ${profsTex}` : ""}}`,
+  ].join("\n");
+  return [
+    preamble,
+    footOverride,
+    String.raw`\newcommand{\FOOTDATE}{${footDate(dateLabel)}}`,
+    String.raw`\begin{document}`,
+    ...body,
+    String.raw`\end{document}`,
+  ].join("\n");
+}
+
+/** Copie le logo de la page de garde à côté des .tex compilés. */
+export function copyExamLogo(): void {
+  for (const ext of ["pdf", "png"]) {
+    const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
+    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
+  }
+}
+
+/** Source .tex complet de l'examen QCM (+ ouvert), corrigé optionnel. */
+export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSolutions: boolean): Promise<string> {
 
   const fmt = await getFormatProfile();
   const dur = fmt?.duration_min ?? 180;
@@ -195,26 +233,7 @@ export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, inc
       ].filter(Boolean).join("\n")
     : "";
 
-  // header/footer course-aware (le preamble est hardcodé CS-202 → on l'override pour ce doc)
-  const c = getCourse(currentCourse());
-  const code = c.examCode.replace(/-/g, "--");
-  const profsTex = c.profs.length ? c.profs.join(", ") : "";
-  const footOverride = [
-    String.raw`\fancyhead[L]{}`,
-    `\\fancyhead[R]{\\qrcode[height=1.25cm]{${c.examCode}-FINAL-EXAM}}`,
-    `\\fancyfoot[C]{\\small\\textbf{${code}, ${c.examKind}}${profsTex ? `\\\\[-2pt]\\small ${profsTex}` : ""}}`,
-  ].join("\n");
-
-  return [
-    preamble,
-    footOverride,
-    String.raw`\newcommand{\FOOTDATE}{${footDate(dateLabel)}}`,
-    String.raw`\begin{document}`,
-    await qcmCover(dateLabel, data.items.length, data.open.length, totalPts, dur),
-    firstPart,
-    secondPart,
-    String.raw`\end{document}`,
-  ].join("\n");
+  return examDocument([await qcmCover(dateLabel, data.items.length, data.open.length, totalPts, dur), firstPart, secondPart], dateLabel);
 }
 
 /**
@@ -234,41 +253,53 @@ export function plainOpenTex(tex: string): string {
   return text.split(/\n\s*\n/).map((p) => esc(p.trim())).filter(Boolean).join("\n\n");
 }
 
-/** Écrit énoncé + corrigé .tex et compile les 2 PDF. Renvoie le nom du PDF énoncé (ou throw/repli). */
+/**
+ * Écrit énoncé + corrigé .tex et compile les 2 PDF. Le garde passe AVANT toute écriture
+ * (lib/tex-guard). Un refus du garde ou un échec de compilation n'est jamais silencieux
+ * ni fatal tant qu'un repli existe : les questions ouvertes (LaTeX libre, la cause
+ * habituelle) passent en texte simple ; un corrigé qui ne compile pas a le même repli,
+ * pour rester cohérent avec l'énoncé. `file` vide : aucun .tex sûr n'a pu être écrit.
+ */
 export async function buildQcmArtifact(examId: number, data: QcmExamData, dateLabel: string): Promise<{ file: string; texError?: string; texWarning?: string }> {
   fs.mkdirSync(examsDir(), { recursive: true });
   const base = `qcm-${examId}`;
-  for (const ext of ["pdf", "png"]) {
-    const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
-  }
-  // Garde AVANT toute écriture (cf. lib/tex-guard).
-  const texEnonce = await renderQcmExamTex(data, dateLabel, false);
-  const texCorrige = await renderQcmExamTex(data, dateLabel, true);
-  assertTexSafe(texEnonce);
-  assertTexSafe(texCorrige);
-  fs.writeFileSync(path.join(examsDir(), `${base}.tex`), texEnonce);
-  fs.writeFileSync(path.join(examsDir(), `${base}-corrige.tex`), texCorrige);
+  copyExamLogo();
+  const plain: QcmExamData = { ...data, open: data.open.map((q) => ({ ...q, statement_tex: plainOpenTex(q.statement_tex), solution_tex: plainOpenTex(q.solution_tex) })) };
+  const write = async (d: QcmExamData, solutions: boolean): Promise<string> => {
+    const tex = await renderQcmExamTex(d, dateLabel, solutions);
+    assertTexSafe(tex);
+    const name = solutions ? `${base}-corrige` : base;
+    fs.writeFileSync(path.join(examsDir(), `${name}.tex`), tex);
+    return name;
+  };
+  const why = (e: unknown) => (e as Error).message.slice(0, 200);
+
+  let pdf: string;
+  let warning: string | undefined;
   try {
-    const pdf = await compileExamPdf(base);
-    try { await compileExamPdf(`${base}-corrige`); } catch (e) { console.error(`[qcm] corrigé #${examId} non compilé :`, (e as Error).message); }
-    return { file: pdf };
+    pdf = await compileExamPdf(await write(data, false));
   } catch (e) {
-    // Le LaTeX libre des questions ouvertes est la cause habituelle : plutôt que de perdre tout
-    // le PDF, elles passent en texte simple (contenu gardé, mise en forme perdue).
-    if (!data.open.length) return { file: `${base}.tex`, texError: (e as Error).message };
-    const plain = { ...data, open: data.open.map((q) => ({ ...q, statement_tex: plainOpenTex(q.statement_tex), solution_tex: plainOpenTex(q.solution_tex) })) };
+    if (!data.open.length) return { file: fs.existsSync(path.join(examsDir(), `${base}.tex`)) ? `${base}.tex` : "", texError: (e as Error).message };
     try {
-      const [enonce, corrige] = [await renderQcmExamTex(plain, dateLabel, false), await renderQcmExamTex(plain, dateLabel, true)];
-      assertTexSafe(enonce);
-      assertTexSafe(corrige);
-      fs.writeFileSync(path.join(examsDir(), `${base}.tex`), enonce);
-      fs.writeFileSync(path.join(examsDir(), `${base}-corrige.tex`), corrige);
-      const pdf = await compileExamPdf(base);
-      try { await compileExamPdf(`${base}-corrige`); } catch (e2) { console.error(`[qcm] corrigé #${examId} non compilé :`, (e2 as Error).message); }
-      return { file: pdf, texWarning: `PDF compilé avec les questions ouvertes en texte simple (leur LaTeX ne compilait pas : ${(e as Error).message.slice(0, 200)})` };
+      pdf = await compileExamPdf(await write(plain, false));
+      warning = `PDF compilé avec les questions ouvertes en texte simple (leur LaTeX ne passait pas : ${why(e)})`;
     } catch (e2) {
-      return { file: `${base}.tex`, texError: `${(e as Error).message} — repli en texte simple échoué aussi : ${(e2 as Error).message.slice(0, 200)}` };
+      return { file: fs.existsSync(path.join(examsDir(), `${base}.tex`)) ? `${base}.tex` : "", texError: `${(e as Error).message} — repli en texte simple échoué aussi : ${why(e2)}` };
     }
   }
+  // Corrigé : même source que l'énoncé, puis le même repli s'il ne compile pas (examen 2 de
+  // CS-290 : « Énoncé » sans « Corrigé »).
+  try {
+    await compileExamPdf(await write(warning ? plain : data, true));
+  } catch (e) {
+    try {
+      if (warning || !data.open.length) throw e;
+      await compileExamPdf(await write(plain, true));
+      warning = `Corrigé compilé avec les questions ouvertes en texte simple (${why(e)})`;
+    } catch (e2) {
+      warning = `${warning ? `${warning} ; ` : ""}corrigé non compilé : ${why(e2)}`;
+      console.error(`[qcm] corrigé #${examId} non compilé :`, (e2 as Error).message);
+    }
+  }
+  return { file: pdf, ...(warning ? { texWarning: warning } : {}) };
 }

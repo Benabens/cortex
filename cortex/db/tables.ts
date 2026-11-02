@@ -382,6 +382,41 @@ export const TABLES: TableSpec[] = [
     ],
   },
   {
+    // QUESTIONS COMPOSÉES (lib/blocks) : un scénario ou un extrait de code, puis ses sous-questions
+    // (block_parts) — choix unique, réponse courte (barème figé à la génération), lecture de code.
+    name: "exam_blocks",
+    cols: [
+      { name: "id", type: "int", pk: true, ai: true },
+      { name: "exam_id", type: "int", nn: true },
+      { name: "idx", type: "int", nn: true },
+      { name: "title", type: "text" },
+      { name: "section", type: "text" },
+      { name: "scenario", type: "text" },
+      { name: "points", type: "real" },
+      { name: "verified", type: "int" },
+    ],
+  },
+  {
+    name: "block_parts",
+    cols: [
+      { name: "id", type: "int", pk: true, ai: true },
+      { name: "block_id", type: "int", nn: true },
+      { name: "exam_id", type: "int", nn: true },
+      { name: "idx", type: "int", nn: true },
+      { name: "kind", type: "text", nn: true },
+      { name: "prompt", type: "text" },
+      { name: "code", type: "text" },
+      { name: "options_json", type: "text" },
+      { name: "correct", type: "int" },
+      { name: "answer", type: "text" },
+      { name: "criteria_json", type: "text" },
+      { name: "points", type: "real" },
+      { name: "explanation", type: "text" },
+      // 1 : la sortie attendue est celle de l'exécution du code (bac à sable).
+      { name: "code_checked", type: "int" },
+    ],
+  },
+  {
     name: "vocab",
     cols: [
       { name: "term", type: "text", pk: true },

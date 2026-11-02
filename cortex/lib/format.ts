@@ -24,6 +24,8 @@ export type FormatProfile = {
   question_types: { type: QuestionType; approx_count: number; share_pct: number; points_each: number; note: string }[];
   sections: { name: string; description: string }[];
   topics_emphasis: { topic: string; share_pct: number }[];
+  /** Questions COMPOSÉES (scénario ou extrait de code + sous-questions mêlées) ; absent sinon. */
+  composite?: { block_count: number; parts_min: number; parts_max: number } | null;
 };
 
 const FORMAT_SCHEMA = {
@@ -51,6 +53,17 @@ const FORMAT_SCHEMA = {
     },
     sections: { type: "array", items: { type: "object", properties: { name: { type: "string" }, description: { type: "string" } }, required: ["name"], additionalProperties: false } },
     topics_emphasis: { type: "array", items: { type: "object", properties: { topic: { type: "string" }, share_pct: { type: "number" } }, required: ["topic"], additionalProperties: false } },
+    composite: {
+      type: "object",
+      description: "Seulement si chaque question de l'examen est COMPOSÉE : un scénario ou un extrait de code suivi de sous-questions (a, b, c…) de types mêlés. Absent si les questions sont indépendantes.",
+      properties: {
+        block_count: { type: "integer", description: "Nombre de questions composées dans un examen." },
+        parts_min: { type: "integer", description: "Nombre minimal de sous-questions par question." },
+        parts_max: { type: "integer", description: "Nombre maximal de sous-questions par question." },
+      },
+      required: ["block_count", "parts_min", "parts_max"],
+      additionalProperties: false,
+    },
   },
   required: ["format_summary", "has_mcq", "question_types"],
   additionalProperties: false,
@@ -99,7 +112,7 @@ export async function detectFormat(opts: { onStep?: (m: string, p: number) => vo
     dataBlock(`TEXTE DES EXAMENS PASSÉS (vérité terrain)`, [{ src: "annales", text }]),
     ``,
     `═══ TA TÂCHE ═══`,
-    `Décris le format d'UN examen type : structure (sections), TYPES de questions (scq = QCM à UNE seule réponse / mcq = QCM à PLUSIEURS réponses possibles / open / calc / proof), leur NOMBRE et leur PART en % des points, le BARÈME, la DURÉE, le total de points, et surtout la CONVENTION écrite qui distingue « exactement une bonne réponse » de « une ou plusieurs » (cite la formulation réelle). has_mcq=true s'il y a un bloc de QCM. Ajoute l'emphase par thème si visible.`,
+    `Décris le format d'UN examen type : structure (sections), TYPES de questions (scq = QCM à UNE seule réponse / mcq = QCM à PLUSIEURS réponses possibles / open / calc / proof), leur NOMBRE et leur PART en % des points, le BARÈME, la DURÉE, le total de points, et surtout la CONVENTION écrite qui distingue « exactement une bonne réponse » de « une ou plusieurs » (cite la formulation réelle). has_mcq=true s'il y a un bloc de QCM. Si chaque question est COMPOSÉE (un scénario ou un extrait de code suivi de sous-questions a, b, c… de types mêlés), remplis composite (nombre de questions, sous-questions min et max) et une section par question. Ajoute l'emphase par thème si visible.`,
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier écrit.`,
     JSON.stringify(FORMAT_SCHEMA, null, 2),
   ].filter(Boolean).join("\n");
@@ -190,7 +203,7 @@ export async function gatherFormatEvidence(): Promise<FormatEvidence | null> {
 const NO_ANNALES_SCHEMA = {
   type: "object",
   properties: {
-    exam_kind: { type: ["string", "null"], description: "qcm | exercises | mixed | essay | oral — ou null si les passages ne disent PAS la forme de l'examen." },
+    exam_kind: { type: ["string", "null"], description: "qcm | exercises | mixed | composite | essay | oral — ou null si les passages ne disent PAS la forme de l'examen." },
     question_count: { type: ["integer", "null"], description: "Nombre de questions de l'examen s'il est écrit, sinon null." },
     open_count: { type: ["integer", "null"], description: "Questions ouvertes d'un examen mixte si c'est écrit, sinon null." },
     duration_min: { type: ["integer", "null"], description: "Durée en minutes si elle est écrite, sinon null." },
@@ -239,7 +252,7 @@ async function detectWithoutAnnales(step: (m: string, p: number) => void): Promi
     dataBlock(`EXTRAITS DES SOURCES DU COURS`, ev.passages),
     ``,
     `═══ TA TÂCHE ═══`,
-    `exam_kind : qcm (questions à choix), exercises (problèmes à résoudre), mixed (QCM + questions ouvertes), essay (essai / dissertation argumentée), oral — ou null si les extraits ne le disent pas.`,
+    `exam_kind : qcm (questions à choix), exercises (problèmes à résoudre), mixed (QCM + questions ouvertes), composite (questions composées : un scénario ou un extrait de code suivi de sous-questions de types mêlés), essay (essai / dissertation argumentée), oral — ou null si les extraits ne le disent pas.`,
     `evidence : recopie MOT POUR MOT les phrases des extraits qui le justifient (elles seront vérifiées ; une citation introuvable annule la détection).`,
     `examples : recopie mot pour mot les questions d'exemple présentes (énoncé + options), sinon [].`,
     `Réponds UNIQUEMENT avec l'objet JSON conforme.`,
