@@ -97,7 +97,8 @@ export default defineTool({
         ? JSON.stringify({ count: plan.qcmCount, openCount: plan.openCount, focus: focus ?? undefined })
         : examTarget(count ?? undefined, focus ?? undefined, askedKind);
       const note = course.basis === "annales"
-        ? (asked ? `Format demandé pour cet examen : ${format.summary} ; celui des annales du cours reste le défaut.` : null)
+        // « format » vaut written pour des questions composées (schéma de sortie figé, clients en cache) : la note le précise.
+        ? (asked ? `Format demandé pour cet examen : ${format.summary} ; celui des annales du cours reste le défaut.` : plan.generator === "blocks" ? `Format des annales : ${format.summary}.` : null)
         : `Ce cours n'a pas d'annales : format ${format.summary}.`;
       const base = { course: courseRefOf(c), focus, format: qcm ? "mcq" as const : "written" as const, exercise_count: count, note, confirmation: null, declined: null, job: null };
       const track = (jobId: number) => ({ job_id: jobId, estimated_minutes: "10-20", track_with: `get_job_status with job_id=${jobId}` });

@@ -31,13 +31,19 @@ export default defineTool({
   output,
   async run(args, ctx) {
     return ctx.inCourse(args.course, async (c) => {
-      // Même numérotation que get_job_status : QCM par rang, puis questions ouvertes / exercices.
+      // Même numérotation que get_job_status : QCM par rang, puis questions ouvertes / exercices ;
+      // examen à questions composées : ses sous-questions dans l'ordre.
       const qcm = await q.all<{ id: number }>(`SELECT id FROM qcm_items WHERE exam_id = ? ORDER BY idx`, args.exam_id).catch(() => []);
       const open = await q.all<{ id: number }>(`SELECT id FROM exam_questions WHERE exam_id = ? ORDER BY id`, args.exam_id).catch(() => []);
+      const parts = qcm.length || open.length ? [] : await q.all<{ id: number }>(
+        `SELECT p.id FROM block_parts p JOIN exam_blocks b ON b.id = p.block_id WHERE p.exam_id = ? ORDER BY b.idx, p.idx`, args.exam_id,
+      ).catch(() => []);
       const n = args.question_number;
-      const target = n <= qcm.length
-        ? { kind: "qcm" as const, itemId: Number(qcm[n - 1].id) }
-        : n - qcm.length <= open.length ? { kind: "open" as const, itemId: Number(open[n - qcm.length - 1].id) } : null;
+      const target = parts.length
+        ? (n <= parts.length ? { kind: "part" as const, itemId: Number(parts[n - 1].id) } : null)
+        : n <= qcm.length
+          ? { kind: "qcm" as const, itemId: Number(qcm[n - 1].id) }
+          : n - qcm.length <= open.length ? { kind: "open" as const, itemId: Number(open[n - qcm.length - 1].id) } : null;
       if (!target) throw new ToolError("not_found", `L'examen n° ${args.exam_id} n'a pas de question ${n} dans ce cours.`);
       try {
         const r = await reportQuestion({ examId: args.exam_id, ...target, reason: args.reason, comment: args.comment ?? null });
