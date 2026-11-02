@@ -1,6 +1,7 @@
 import * as z from "zod/v4";
 import { examQuestions } from "@/lib/exam";
 import { activeJob, getJob, jobEta, listJobs, type Job } from "@/lib/jobs";
+import { getBlockExam } from "@/lib/blocks";
 import { getQcmExam } from "@/lib/qcm";
 import { redactMessage } from "@/lib/observability";
 import { clip, htmlToText } from "../content";
@@ -47,6 +48,30 @@ const MAX_QCM = 40;
 const LETTERS = "ABCDEFGHIJ";
 
 type ExamOut = NonNullable<z.infer<typeof output>["exam"]>;
+
+/**
+ * Examen à questions composées (lib/blocks) : une entrée par SOUS-QUESTION (même numérotation
+ * que report_question), son scénario en tête de l'énoncé ; réponse et barème sur demande.
+ */
+async function blocksView(examId: number, withSolutions: boolean): Promise<ExamOut | null> {
+  const exam = await getBlockExam(examId, withSolutions);
+  if (!exam) return null;
+  const parts = exam.blocks.flatMap((b, bi) => b.parts.map((p, pi) => ({ b, bi, p, pi })));
+  return {
+    exam_id: examId,
+    questions: parts.slice(0, MAX_QCM).map(({ b, bi, p, pi }, i) => ({
+      number: i + 1,
+      kind: p.kind === "scq" ? "single_choice" as const : "written" as const,
+      concept: clip(`Question ${bi + 1}${String.fromCharCode(97 + pi)} — ${b.title}`, 200),
+      statement: clip(`${b.scenario}\n\n(${String.fromCharCode(97 + pi)}) [${p.points} pt] ${p.prompt}${p.code ? `\n${p.code}` : ""}${p.options.length ? `\n${p.options.map((o, k) => `${LETTERS[k] ?? k + 1}) ${o}`).join("\n")}` : ""}`, 3000),
+      solution: withSolutions
+        ? clip(p.kind === "scq" ? `${LETTERS[p.correct ?? -1] ?? "?"} — ${p.explanation ?? ""}` : `${p.answer ?? ""}${p.criteria?.length ? `\nBarème : ${p.criteria.map((c) => `${c.label} (${c.points} pt)`).join(" ; ")}` : ""}`, 3000) || null
+        : null,
+      verification: "reviewed_by_model" as const,
+    })),
+    truncated: parts.length > MAX_QCM,
+  };
+}
 
 /**
  * Examen QCM terminé : énoncé + options lettrées, puis sa partie OUVERTE (qui
@@ -121,8 +146,11 @@ export default defineTool({
       let exam: z.infer<typeof output>["exam"] = null;
       // QCM : job « qcm », ou job « exam » aiguillé vers le générateur QCM par le format du cours (lib/mock-exam).
       const qcm = (job.type === "qcm" || job.type === "exam") && job.status === "done" && job.resultId ? await qcmView(job.resultId, !!include_solutions) : null;
+      const blocks = !qcm && job.type === "exam" && job.status === "done" && job.resultId ? await blocksView(job.resultId, !!include_solutions) : null;
       if (qcm) {
         exam = qcm;
+      } else if (blocks) {
+        exam = blocks;
       } else if (job.type === "exam" && job.status === "done" && job.resultId) {
         const rows = await examQuestions(job.resultId, MAX_QUESTIONS + 1);
         exam = {

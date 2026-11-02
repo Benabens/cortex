@@ -220,3 +220,37 @@ test("report_question : un agent remonte la relecture d'un examen, question par 
   await c.close();
 });
 
+
+test("C — questions composées au connecteur : une entrée par sous-question (scénario en tête), et chacune se signale", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { runWithUser } = await import("../db/context");
+  const { q } = await import("../db/q");
+  const { getBlockExam } = await import("../lib/blocks");
+  const jobs = await import("../lib/jobs");
+  const { listCoursesOf } = await import("../lib/courses");
+  const course = listCoursesOf(ALICE).find((x) => x.examCode === "HUM-285")!.id;
+  const { jobId, examId } = await runWithUser(ALICE, () => runWithCourse(course, async () => {
+    await getBlockExam(0); // amorce le schéma des questions composées
+    const examId = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('blocks','ready')`);
+    const blockId = await q.insert(`INSERT INTO exam_blocks (exam_id, idx, title, section, scenario, points, verified) VALUES (?,?,?,?,?,?,?)`, examId, 0, "Le procès de Galilée", "Q1", "En 1633, Galilée comparaît devant l'Inquisition.", 3, 1);
+    await q.run(`INSERT INTO block_parts (block_id, exam_id, idx, kind, prompt, options_json, correct, answer, criteria_json, points, explanation) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      blockId, examId, 0, "scq", "Quel ouvrage est en cause ?", JSON.stringify(["Le Dialogue", "Le Sidereus Nuncius"]), 0, "", "[]", 1, "Le Dialogue de 1632.");
+    await q.run(`INSERT INTO block_parts (block_id, exam_id, idx, kind, prompt, options_json, correct, answer, criteria_json, points, explanation) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      blockId, examId, 1, "short", "Pourquoi le livre dérange-t-il ?", "[]", -1, "Il défend l'héliocentrisme.", JSON.stringify([{ label: "Nomme l'héliocentrisme", points: 2 }]), 2, "");
+    const id = await jobs.createJob("exam");
+    await jobs.setJob(id, { status: "done", progress: 100, resultId: examId, resultPath: `/mock/${examId}` });
+    return { jobId: id, examId };
+  }));
+  const c = await client(true);
+  type Status = { exam: { questions: { statement: string; solution: string | null; kind?: string }[] } | null };
+  const sc = ((await c.callTool({ name: "get_job_status", arguments: { course: "HUM-285", job_id: jobId, include_solutions: true } })) as ToolResult).structuredContent as Status;
+  assert.deepEqual(sc.exam?.questions.map((x) => x.kind), ["single_choice", "written"]);
+  assert.match(sc.exam!.questions[1].statement, /Inquisition[\s\S]*\(b\)[\s\S]*Pourquoi le livre/);
+  assert.match(sc.exam!.questions[1].solution ?? "", /héliocentrisme[\s\S]*Barème/);
+  const r = (await c.callTool({ name: "report_question", arguments: { course: "HUM-285", exam_id: examId, question_number: 2, reason: "ambiguous" } })) as ToolResult;
+  assert.ok(!r.isError, text(r));
+  const { listReports } = await import("../lib/question-reports");
+  const id = (r.structuredContent as { report_id: number }).report_id;
+  assert.ok((await listReports(20)).some((x) => x.id === id && x.kind === "part" && /Pourquoi le livre/.test(x.stem)));
+  await c.close();
+});
