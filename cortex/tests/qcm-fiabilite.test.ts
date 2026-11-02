@@ -60,6 +60,12 @@ function verifyReply(prompt: string): string {
   return JSON.stringify({ results });
 }
 
+const DESIGN = { misconception: "confondre FPR et FDR", edge_case: "groupes de tailles différentes", reasoning_chain: ["a", "b"], bookkeeping: "tableau 2×2", discriminator: "FDR", awkward_numbers: "37, 113", subquestion_plan: ["a", "b"] };
+const AUDIT_GOOD = { pattern_matcher_answer: "FDR", pattern_matcher_correct: false, strong_student_answer: "FPR", strong_student_stuck: false, rubric_misses: [], trap_present: true, hardening: "", verdict: "good" };
+let writeCalls = 0;
+/** Rédaction d'une question ouverte (n = rang de l'appel). */
+let write: (n: number) => string = (n) => JSON.stringify({ category: "Fairness", concept: `Ouverte ${n}`, statement_tex: `\\textbf{Scénario ${n}.} Calculez le FPR de chaque groupe.`, solution_tex: "FPR = FP / (FP + TN).", points: 15 });
+
 let llm: http.Server;
 before(async () => {
   delete process.env.CORTEX_USER;
@@ -70,7 +76,12 @@ before(async () => {
       const parsed = JSON.parse(body) as { messages: { content: unknown }[] };
       const content = parsed.messages.map((m) => typeof m.content === "string" ? m.content : JSON.stringify(m.content)).join("\n");
       let text = "{}";
-      if (/"results"/.test(content)) text = verifyReply(content);
+      // Architecte des questions ouvertes (conception → rédaction → audit), testé avant "items" :
+      // le schéma de conception contient lui aussi des tableaux « "items" ».
+      if (/"edge_case"/.test(content)) text = JSON.stringify(DESIGN);
+      else if (/"pattern_matcher_answer"/.test(content)) text = JSON.stringify(AUDIT_GOOD);
+      else if (/"statement_tex"/.test(content)) { writeCalls++; text = write(writeCalls); }
+      else if (/"results"/.test(content)) text = verifyReply(content);
       else if (/"items"/.test(content)) {
         designCalls++;
         designPrompts.push(content);
@@ -87,7 +98,7 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { designCalls = 0; designPrompts.length = 0; designBodies.length = 0; });
+beforeEach(() => { designCalls = 0; writeCalls = 0; designPrompts.length = 0; designBodies.length = 0; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -185,5 +196,27 @@ test("un item mal formé au milieu d'un lot : c'est SON sujet qui est comblé", 
   const first = subjects(designPrompts[0]);
   const topup = subjects(designPrompts[1]);
   assert.deepEqual(topup, [first[1]], `comblé : ${topup.join(" | ")} ; lot : ${first.join(" | ")}`);
+});
+
+test("une question ouverte qui échoue est relancée : 2 QCM + 3 ouvertes sur 2 + 3", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
+  const ok = write;
+  // La 2ᵉ ouverte (rédactions 2 à 4 : 3 essais) ne rend que du texte : elle échoue, puis est relancée.
+  write = (n) => (n >= 2 && n <= 4 ? "Voici l'énoncé demandé." : ok(n));
+  try {
+    const steps: string[] = [];
+    const r = await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 3, onStep: (s) => { steps.push(s); } }));
+    assert.equal(r.open, 3, steps.filter((s) => /uverte/.test(s)).join("\n"));
+    assert.equal(r.openRequested, 3);
+    assert.ok(steps.some((s) => /Question ouverte 2 ignorée/.test(s)), "l'échec est dit, avec sa cause");
+    assert.ok(steps.some((s) => /ouverte\(s\) manquante\(s\)/.test(s)), "et la relance aussi");
+    const exam = await runWithCourse(id, () => getQcmExam(r.id));
+    assert.equal(exam!.open.length, 3);
+  } finally {
+    write = ok;
+  }
 });
 

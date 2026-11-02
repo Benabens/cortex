@@ -8,6 +8,9 @@ export const OWN_LLM_CODES = new Set(["UNAVAILABLE", "SPEND_CAP", "QUOTA", "CRED
 /** Le fournisseur a refusé ou n'a pas répondu, après les réessais espacés (rien n'a été traité). */
 export const PROVIDER_DOWN_CODES = new Set(["OVERLOADED", "RATE_LIMIT", "UPSTREAM", "NETWORK"]);
 
+/** Échecs où relancer une génération ne servirait à rien : garde, plafond, configuration, annulation. */
+export const HARD_STOP_CODES = new Set(["UNAVAILABLE", "SPEND_CAP", "QUOTA", "CREDITS", "AUTH", "UNSUPPORTED", "ABORTED"]);
+
 /** Le modèle a répondu, mais rien d'utilisable (JSON illisible après réessais, réponse coupée). */
 export const BAD_OUTPUT_CODES = new Set(["BAD_OUTPUT", "TRUNCATED"]);
 
