@@ -252,8 +252,8 @@ test("question sur la grille d'évaluation ou la forme d'un rendu : rejetée et 
     const exam = await runWithCourse(id, () => getQcmExam(r.id, true));
     assert.ok(exam!.items.every((it) => !/grille/i.test(it.stem)), "la question sur la grille n'est pas gardée");
     assert.ok(steps.some((s) => /rejeté — hors matière[^\n]*grille d'évaluation/.test(s)), "le rejet est dit, avec sa raison");
-    assert.match(verifyPrompts[0], /modalités d'examen[\s\S]*forme d'un rendu/, "le correcteur sait qu'il doit le relever");
-    assert.match(designPrompts[0], /MATIÈRE[^\n]*modalités d'examen[^\n]*forme d'un rendu/, "la conception l'interdit d'emblée");
+    assert.match(verifyPrompts[0], /modalités d'examen[\s\S]*forme d'un rendu[\s\S]*organisation du cours/, "le correcteur sait qu'il doit le relever");
+    assert.match(designPrompts[0], /MATIÈRE[^\n]*modalités d'examen[^\n]*forme d'un rendu[^\n]*organisation du cours/, "la conception l'interdit d'emblée");
   } finally {
     judge = ok;
   }

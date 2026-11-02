@@ -21,11 +21,13 @@ export const COURSE_TERMS_RULE =
 /**
  * La matière, pas l'évaluation : une grille d'évaluation, des consignes d'examen ou le
  * guide d'un poster disent COMMENT le cours est évalué, pas CE qu'il enseigne (HUM-285,
- * 02/11 : ~6 questions sur la grille D1/D2/D3 de l'essai et la bibliographie du poster).
+ * 02/11 : ~6 questions sur la grille D1/D2/D3 de l'essai et la bibliographie du poster) ; le plan
+ * d'un support (« quelle place les biais occupent-ils dans le plan annoncé ? », banc du 02/11) ne
+ * l'enseigne pas davantage.
  * Commune à l'extraction des notions et à la conception des questions.
  */
 export const COURSE_MATTER_RULE =
-  `  - MATIÈRE DU COURS SEULEMENT : aucune question ni notion sur les modalités d'examen (format, durée, barème, grille ou critères d'évaluation, consignes) ni sur la forme d'un rendu (poster, essai, rapport, mise en forme d'une bibliographie) : ces documents disent comment le cours est évalué, pas ce qu'il enseigne.`;
+  `  - MATIÈRE DU COURS SEULEMENT : aucune question ni notion sur les modalités d'examen (format, durée, barème, grille ou critères d'évaluation, consignes) ni sur la forme d'un rendu (poster, essai, rapport, mise en forme d'une bibliographie), ni sur l'organisation du cours (plan, ordre des chapitres, ce qu'annonce une diapositive) : teste ce que le cours enseigne, pas comment il est évalué ou découpé.`;
 
 /** Au-delà, le corpus n'est pas chargé en mémoire : sans vérification possible, rien n'est rejeté. */
 const MAX_CORPUS_CHARS = 30_000_000;
