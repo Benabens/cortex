@@ -56,7 +56,7 @@ function errorResult(e: ToolError): CallToolResult {
   return {
     content: [{ type: "text", text: e.message }],
     isError: true,
-    _meta: { [ERROR_META]: { code: e.code, retryable: e.code === "unavailable" || e.code === "quota_exceeded" } },
+    _meta: { [ERROR_META]: { code: e.code, retryable: e.code === "unavailable" || e.code === "quota_exceeded", ...(e.reason ? { reason: e.reason } : {}) } },
   };
 }
 

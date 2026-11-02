@@ -1,5 +1,5 @@
 import { checkSolution } from "@/lib/check-solution";
-import { LlmError, llmUserMessage } from "@/lib/llm";
+import { LlmError, OWN_LLM_CODES, llmUserMessage } from "@/lib/llm";
 import { useCourseOr404 } from "@/lib/req";
 import { UPLOAD_LIMITS, readFormData, readJson, withBodyLimit } from "@/lib/upload-limit";
 import { fieldTooLong } from "@/lib/field-limits";
@@ -74,7 +74,7 @@ async function handlePOST(req: NextRequest) {
     const { AssistRefused } = await import("@/lib/billing/reserve");
     if (e instanceof AssistRefused) return NextResponse.json({ error: e.message }, { status: e.status });
     const err = e as LlmError;
-    const status = err.code === "UNAVAILABLE" || err.code === "SPEND_CAP" || err.code === "QUOTA" || err.code === "CREDITS" ? 503 : 502;
+    const status = err.code && OWN_LLM_CODES.has(err.code) ? 503 : 502;
     // Jamais le texte brut du fournisseur : une cause lisible (lib/llm/errors).
     return NextResponse.json({ error: llmUserMessage(e), code: err.code }, { status });
   }

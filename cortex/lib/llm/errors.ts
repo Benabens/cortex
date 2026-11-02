@@ -3,7 +3,7 @@
  * brut d'un fournisseur (« 529 overloaded_error… ») ne sort jamais tel quel :
  * seuls nos propres messages (gardes, plafonds) sont repris mot pour mot.
  */
-const OWN_CODES = new Set(["UNAVAILABLE", "SPEND_CAP", "QUOTA", "CREDITS"]);
+export const OWN_LLM_CODES = new Set(["UNAVAILABLE", "SPEND_CAP", "QUOTA", "CREDITS"]);
 
 /** Le fournisseur a refusé ou n'a pas répondu, après les réessais espacés (rien n'a été traité). */
 export const PROVIDER_DOWN_CODES = new Set(["OVERLOADED", "RATE_LIMIT", "UPSTREAM", "NETWORK"]);
@@ -19,7 +19,7 @@ export function llmErrorCode(e: unknown): string | undefined {
 /** Cause d'un échec, en minuscule pour se composer (« Aucun QCM généré : <cause> »). */
 export function llmFailureReason(e: unknown): string {
   const code = llmErrorCode(e);
-  if (code && OWN_CODES.has(code)) {
+  if (code && OWN_LLM_CODES.has(code)) {
     const m = (e as Error).message;
     return m.charAt(0).toLowerCase() + m.slice(1);
   }

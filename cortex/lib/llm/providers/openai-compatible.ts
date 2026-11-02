@@ -1,5 +1,5 @@
 import { apiKey, baseUrl, mapModel } from "../config";
-import { LlmError, type CompleteRequest, type CompleteResult, type LlmProvider } from "../types";
+import { DEFAULT_MAX_TOKENS, LlmError, truncatedError, type CompleteRequest, type CompleteResult, type LlmProvider } from "../types";
 
 /**
  * Provider générique « OpenAI-compatible » : n'importe quel endpoint
@@ -58,7 +58,7 @@ export const openaiCompatibleProvider: LlmProvider = {
         ...(req.system ? [{ role: "system", content: req.system }] : []),
         { role: "user", content: userContent },
       ],
-      max_tokens: req.maxTokens ?? 16_000,
+      max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
     };
     if (req.json) {
       body.response_format = {
@@ -117,9 +117,7 @@ export const openaiCompatibleProvider: LlmProvider = {
       outputTokens: json?.usage?.completion_tokens,
     };
     // Réponse coupée par max_tokens : jamais rendue comme un texte complet (cf. extractJson).
-    if (json?.choices?.[0]?.finish_reason === "length") {
-      throw new LlmError(`Réponse du modèle coupée par la limite de longueur (${req.maxTokens ?? 16_000} tokens).`, "TRUNCATED", false, usage);
-    }
+    if (json?.choices?.[0]?.finish_reason === "length") throw truncatedError(req.maxTokens, usage);
     return { text, usage, provider: this.name, model };
   },
 };
