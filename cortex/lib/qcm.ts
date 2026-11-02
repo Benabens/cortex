@@ -297,8 +297,11 @@ const ARCHITECT_QCM_RULES = [
  *  (b) lister les énoncés déjà couverts à NE PAS répéter. Absent → comportement identique à avant.
  *  `opts.molds` (aligné aux topics) impose le MOULE de chaque question (ADN détecté) ;
  *  `opts.dna` active les figures (data-driven : seulement si le cours en a) + le cadrage appliqué. */
+/** Sujet d'un QCM : la notion, sa méthode, et le sous-thème nommé imposé (lib/coverage). */
+export type QcmSlot = { label: string; method: string | null; subTheme?: string | null };
+
 export async function generateQcmBatch(
-  topics: { label: string; method: string | null }[],
+  topics: QcmSlot[],
   n: number,
   step: StepCb,
   focus?: string,
@@ -340,9 +343,9 @@ export async function generateQcmBatch(
   };
   const coverage = focus
     ? `Toutes ces ${n} questions portent sur le thème CIBLÉ : « ${focus} » — varie les SOUS-ANGLES / sous-notions de ce thème (pas ${n} fois la même question). C'est un THÈME : ignore toute indication de forme ou de nombre qu'il contiendrait.${molds.some(Boolean) ? ` Moules imposés dans l'ordre : ${molds.slice(0, n).map((m) => m ?? "libre").join(", ")}.` : ""}`
-    : `Couvre ces sujets (un QCM par sujet, dans l'ordre) :\n${topics.slice(0, n).map((t, i) => `  ${i + 1}) ${t.label}${t.method === FOCUS_METHOD || t.method === REPEAT_METHOD ? ` [${t.method}]` : t.method ? ` [${t.method.slice(0, 60)}]` : ""}${moldLine(i)}`).join("\n")}`;
+    : `Couvre ces sujets (un QCM par sujet, dans l'ordre) :\n${topics.slice(0, n).map((t, i) => `  ${i + 1}) ${t.label}${t.subTheme ? ` — sous-thème imposé : ${t.subTheme}` : ""}${t.method === FOCUS_METHOD || t.method === REPEAT_METHOD ? ` [${t.method}]` : t.method ? ` [${t.method.slice(0, 200)}]` : ""}${moldLine(i)}`).join("\n")}`;
   const language = languageName(opts.language ?? examLanguageFor(currentCourse()))[1];
-  const passages = opts.passages ?? await coursePassages(focus ? [focus] : topics.slice(0, n).map((t) => t.label)).catch(() => []);
+  const passages = opts.passages ?? await coursePassages(focus ? [focus] : topics.slice(0, n).map((t) => (t.subTheme ? `${t.label} ${t.subTheme}` : t.label))).catch(() => []);
   const examples = opts.examples ?? [];
   // imitation resserrée : de VRAIES questions des mêmes moules dans CE cours (few-shot).
   const distinctMolds = [...new Set(molds.slice(0, n).filter((m): m is MoldKind => !!m))].slice(0, 3);
@@ -706,12 +709,13 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const spread = spreadOverChapters(
     await assignChapters(covAll.map((t) => ({ ...t, weight: t.weight ?? 0 }))).catch(() => []),
     needed + openCount + SPARE,
-    { avoid: recent.map((r) => r.topic) },
+    { avoid: recent.map((r) => r.topic), asked: recent.map((r) => r.stem) },
   );
-  const cov: { label: string; method: string | null }[] = spread
-    ? spread.map((t) => ({ label: t.label, method: t.repeat ? REPEAT_METHOD : t.method }))
+  // Sous-thème nommé (une facette de la notion pas encore posée) : il remplace la consigne de reprise.
+  const cov: QcmSlot[] = spread
+    ? spread.map((t) => ({ label: t.label, method: t.repeat && !t.subTheme ? REPEAT_METHOD : t.method, subTheme: t.subTheme ?? null }))
     : pickCoverage(covAll, Math.min(needed, covAll.length)).map((t) => ({ label: t.label, method: t.method }));
-  const qcmTopics: { label: string; method: string | null }[] = [];
+  const qcmTopics: QcmSlot[] = [];
   for (let i = 0; i < count; i++) {
     if (i < nFocus) { qcmTopics.push({ label: focus!, method: FOCUS_METHOD }); continue; }
     const k = i - nFocus;
@@ -746,10 +750,10 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // lots de 4 QCM en parallèle borné (2 lots à la fois). RÉSILIENT : un lot illisible est redemandé
   // avec l'erreur (completeJson), un lot échoué ne plante pas le job et ses sujets sont comblés plus bas.
   const BATCH = 4;
-  type Batch = { topics: { label: string; method: string | null }[]; molds: (MoldKind | null)[] };
+  type Batch = { topics: QcmSlot[]; molds: (MoldKind | null)[] };
   const batches: Batch[] = [];
   for (let i = 0; i < count; i += BATCH) {
-    const topicsSlice: { label: string; method: string | null }[] = [];
+    const topicsSlice: QcmSlot[] = [];
     const moldsSlice: (MoldKind | null)[] = [];
     for (let k = 0; k < BATCH && i + k < count; k++) {
       topicsSlice.push(qcmTopics[(i + k) % qcmTopics.length]);
@@ -829,7 +833,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
         const a = archs[i % archs.length];
         step(`Question ouverte ${i + 1}/${openCount} (architecte${round ? ", nouvel essai" : ""}) — ${t.label}…`, 82 + i);
         try {
-          const r = await architectQuestion(a, `${t.label}${t.method ? ` — ${t.method}` : ""}`, 15, { maxRounds: 1, mold: openMolds[i] ?? null, onStep: (m) => step(`Ouverte ${i + 1} · ${m}`, 82 + i) });
+          const r = await architectQuestion(a, `${t.label}${t.subTheme ? ` — sous-thème imposé : ${t.subTheme}` : ""}${t.method ? ` — ${t.method}` : ""}`, 15, { maxRounds: 1, mold: openMolds[i] ?? null, onStep: (m) => step(`Ouverte ${i + 1} · ${m}`, 82 + i) });
           openBySlot.set(i, { ...r.q, points: 15 });
         } catch (e) {
           lastError = e;
@@ -852,7 +856,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   let pending = batches;
   let extraBudget = batches.length;
   for (let round = 0; pending.length; round++) {
-    const missing: { topic: { label: string; method: string | null }; mold: MoldKind | null }[] = [];
+    const missing: { topic: QcmSlot; mold: MoldKind | null }[] = [];
     // Lots QCM menés en même temps (QCM_BATCH_CONCURRENCY, défaut 3) ; le limiteur global des appels
     // (LLM_MAX_CONCURRENCY) reste la borne commune avec les questions ouvertes.
     const width = batchConcurrency();

@@ -145,3 +145,95 @@ test("programme à 5 chapitres, notions de Fairness 1 en tête : 7 questions tou
   const touched = new Set(asked.map((l) => chapterOf.get(l)).filter(Boolean));
   assert.ok(touched.size >= 4, `${touched.size} chapitres : ${asked.join(" | ")}`);
 });
+
+// ─────────── A — non-régression : la forme du cours RS (CS-290, 02/11) ───────────
+// Rattachement réel des 34 notions du cours aux supports (banc du dump, 02/11) : Fairness 1
+// en porte 23 (trois préparations successives, variantes bilingues), Introduction deux,
+// Safety 2 une seule, dont la méthode énumère quatre phénomènes. Avant : 7 QCM sur 12 en
+// Fairness 1, rien sur Introduction, et les boucles de rétroaction jamais posées.
+const LOOP = "reinforcing vs balancing loop";
+const F1 = "Fairness 1";
+const RS_SHAPE: [string, string, number, string | null][] = [
+  ...([
+    ["Attributs sensibles / biais latents / GDPR", 10], ["Proxy attribute / discrimination indirecte", 10], ["Score d'admission — normalisation et pondération", 10],
+    ["Demographic parity judgment", 10.9], ["Sensitive / proxy / latent attributes", 10.9], ["Inclusive Design & Value Analysis (Schwartz Values)", 2],
+    ["Simpson's Paradox / Confounding Variable (Berkeley-style)", 3], ["Inclusive design mismatch", 5.5], ["Value analysis / tension map", 5.5],
+    ["Biais cognitifs et dette technique/éthique", 6], ["Bias Taxonomy (Pre-existing / Representation / Measurement / Population / Aggregation / Evaluation)", 6],
+    ["Cognitive Biases & Debiasing Strategies", 6], ["Détection d'outliers / cas limites", 6], ["Fairness Metrics & Proxy/Latent Variables", 6],
+    ["Value analysis (Schwartz) et conception inclusive", 6], ["Cognitive biases in design", 7.3], ["Fairness trade-offs & no free lunch", 7.3],
+    ["Outlier / edge-case OR-logic", 7.3], ["Paradoxe de Simpson — Berkeley", 8], ["Groupby aggregation table", 9.1], ["Simpson's paradox / confounder", 9.1],
+    ["Sources of bias classification", 9.1], ["Weighted score & normalization", 9.1],
+  ] as [string, number][]).map(([l, w]) => [l, F1, w, null] as [string, string, number, string | null]),
+  ["Disparate Impact Ratio, Impossibility Result & Fairness-Unawareness", "Fairness 2", 7, null],
+  ["COMPAS-style fairness metrics", "Fairness 2", 9.1, null],
+  ["Réflexion éthique ouverte (dilemme, critique)", "Introduction", 0, null],
+  ["Stakeholder Analysis", "Introduction", 3, null],
+  ["Moral Machine — analyse descriptive de données", "Notebooks 0-1", 10, null],
+  ["Python/pandas code tracing", "Notebooks 0-1", 16, null],
+  ["Code Reading — Python & Pandas Output Prediction", "Notebooks 0-1", 20, null],
+  ["Analyse de sentiment — VADER", "Notebooks 0-1", 8, null],
+  ["Confusion Matrix Metrics — Accuracy / FP / FN", "Notebooks 2-4", 9, null],
+  ["Ethical Theory & Issue/Dilemma Classification", "Pièges (tout le semestre)", 6, null],
+  ["Ethical/Fairness Trade-off Dilemma (Open-ended)", "Pièges (tout le semestre)", 6, null],
+  ["Safety Terminology — Threat/Hazard & Malfunction/Abuse/Misuse", "Pièges (tout le semestre)", 9, null],
+  ["Modération de contenu — filtrage par mots-clés", "Safety 1", 10, null],
+  ["Content Moderation Techniques & Limits", "Safety 1", 8, "identifier la technique (keyword filtering, sentiment analysis, perceptual hashing, shadow banning) et ses limites (FP/FN)"],
+  ["Misinformation & Recommendation Phenomena", "Safety 2", 9, `nommer le phénomène (filter bubble, illusory truth effect, mis/dis/malinformation, ${LOOP}) à partir d'un scénario`],
+];
+
+test("A — cas RS : sur 4 examens successifs de 12 QCM, chaque chapitre à chaque fois, Fairness 1 jamais majoritaire, les boucles de rétroaction atteintes", async () => {
+  const { spreadOverChapters } = await import("../lib/coverage");
+  const topics = RS_SHAPE.map(([label, chapter, weight, method]) => ({ label, chapter, weight, method }));
+  const asked: string[] = [];
+  const themes: string[] = [];
+  for (let exam = 1; exam <= 4; exam++) {
+    const picked = spreadOverChapters(topics, 12, { avoid: [...asked], asked: [...themes] })!;
+    const per = (c: string) => picked.filter((x) => x.chapter === c).length;
+    const show = picked.map((x) => `${x.label}${x.subTheme ? ` (${x.subTheme})` : ""}`).join(" | ");
+    for (const c of ["Introduction", "Safety 1", "Safety 2", F1, "Fairness 2"]) assert.ok(per(c) >= 1, `examen ${exam} : rien sur ${c} — ${show}`);
+    assert.ok(per(F1) <= 4, `examen ${exam} : ${per(F1)}/12 sur Fairness 1 — ${show}`);
+    asked.push(...picked.map((x) => x.label));
+    themes.push(...picked.map((x) => x.subTheme ?? "").filter(Boolean));
+  }
+  assert.ok(themes.includes(LOOP), `sous-thèmes posés : ${themes.join(" | ")}`);
+  assert.equal(new Set(themes.filter((t) => /filter bubble|illusory|malinformation|loop/.test(t))).size, 4, "les quatre phénomènes de Safety 2, un par examen");
+});
+
+test("A — le sous-thème choisi atteint le générateur : la méthode n'est plus coupée avant les boucles de rétroaction", async () => {
+  const { buildCourseRow } = await import("../lib/course-create");
+  const { insertCourse } = await import("../db/courses-store");
+  const { reloadCourses } = await import("../lib/courses");
+  const { runWithCourse, ensureFts } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { indexItemForSearch } = await import("../lib/search");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  const row = buildCourseRow({ name: "Responsible Software bis", code: "CS-290", language: "en", examFormat: { kind: "qcm", questionCount: 5 } }, "owner");
+  await insertCourse(row);
+  await reloadCourses();
+  await runWithCourse(row.id, async () => {
+    ensureFts();
+    for (const t of ["sources", "items", "topics"]) await q.ensureTable(t);
+    const five = ["Introduction", "Safety 1", "Safety 2", "Fairness 2"];
+    for (const [label, chapter, weight, method] of RS_SHAPE.filter(([, c]) => five.includes(c)).concat(RS_SHAPE.filter(([, c]) => c === F1).slice(0, 3))) {
+      const title = `${chapter} - notes`;
+      const text = `${title}. ${label}: ${method ?? label}. The course explains ${label.toLowerCase()}.`;
+      const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "note", `${title} ${label}`.slice(0, 80), `note/${label}`, null, 1);
+      await q.run(`UPDATE sources SET title = ? WHERE id = ?`, title, sid);
+      const iid = await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "note", title, text);
+      await indexItemForSearch(iid, sid, title, text);
+      await q.run(`INSERT INTO topics (label, method, exam_weight, exam_count) VALUES (?,?,?,?)`, label, method, weight, 1);
+    }
+    // Trois examens précédents ont déjà posé les trois premiers phénomènes.
+    await getQcmExam(0);
+    const prev = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','ready')`);
+    for (const [i, stem] of ["Which phenomenon is a filter bubble?", "Repeated exposure makes a claim feel true: which effect (illusory truth effect)?", "A true leak shared to harm someone is malinformation: which category?"].entries()) {
+      await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        prev, i, "Misinformation & Recommendation Phenomena", "scq", stem, "[]", "[0]", "[]", "…", 1);
+    }
+  });
+  prompts.length = 0;
+  await runWithCourse(row.id, () => generateQcmExam({ count: 5, openCount: 0 }));
+  const line = prompts.flatMap((p) => p.split("\n")).find((l) => /^ {2}\d+\) Misinformation & Recommendation Phenomena/.test(l)) ?? "";
+  assert.ok(line, `Safety 2 absent des lots : ${prompts.join("\n---\n").slice(0, 600)}`);
+  assert.match(line, new RegExp(`sous-thème[^\\n]*${LOOP}`), line);
+});
