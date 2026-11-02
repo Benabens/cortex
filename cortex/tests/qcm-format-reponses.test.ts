@@ -156,3 +156,43 @@ test("réponses multiples déclarées : toutes les questions sont à choix multi
   assert.match(designPrompts[0], /RÉPONSES MULTIPLES/);
   assert.match(designPrompts[0], /fais varier le nombre de bonnes réponses/);
 });
+
+/** Explication de la Q12 de l'examen 3 (02/11) : elle désigne les options par leur rang, que le mélange change. */
+const Q12 = "La première option est la bonne : le cours définit le nudge comme une incitation indirecte. La deuxième confond nudge et interdiction, la troisième décrit une taxe.";
+
+test("une explication qui désigne une option par sa position ou sa lettre est repérée, pas une tournure du cours", async () => {
+  const { citesOptionLabel } = await import("../lib/qcm");
+  for (const t of [Q12, "La deuxième option inverse le résultat.", "Les deux premières propositions sont fausses.", "La dernière réponse sur-généralise.", "L'option n°2 confond les deux.", "The first option is correct.", "The last answer reverses the effect.", "Options two and four are wrong.", "La troisième est fausse : elle attribue l'étude à Thaler."]) {
+    assert.equal(citesOptionLabel(t), true, t);
+  }
+  for (const t of ["La première étude de Vosoughi porte sur Twitter.", "Le premier biais du cours est l'ancrage.", "La deuxième vague de régulation vise les plateformes.", "First-mover advantage explains the market share.", "A nudge preserves freedom of choice.", "L'option d'interdire supprime la liberté de choix.", "Le dernier rapport de l'OCDE le confirme."]) {
+    assert.equal(citesOptionLabel(t), false, t);
+  }
+});
+
+test("Q12 de l'examen 3 : une explication par position est régénérée et n'entre jamais dans l'examen", async () => {
+  const id = await course({ kind: "qcm", questionCount: 4 });
+  design = (n, call) => Array.from({ length: n }, (_, i) => (call === 1 && i === 2 ? item(2, [0], Q12) : item(call * 10 + i)));
+  const { r, view } = await exam(id, 4);
+  assert.equal(r.count, 4);
+  for (const it of view.items) assert.doesNotMatch(it.explanation, /première option|deuxième|troisième/, it.stem);
+  assert.ok(designPrompts.slice(1).some((p) => /position|lettre/.test(p) && /\(q2\)/.test(p)), "la régénération dit pourquoi la question est refaite");
+});
+
+test("examen déjà en base : une explication par position (options mélangées depuis) n'est plus montrée", async () => {
+  const id = await course({ kind: "qcm", questionCount: 1 });
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { getQcmExam, gradeQcm } = await import("../lib/qcm");
+  await runWithCourse(id, async () => {
+    for (const t of ["exams", "qcm_items"]) await q.ensureTable(t);
+    const examId = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','ready')`);
+    const it = item(3, [2]);
+    await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified) VALUES (?,?,?,?,?,?,?,?,?,?)`, examId, 0, it.topic, "scq", it.stem, JSON.stringify(it.options), "[2]", JSON.stringify(it.misconceptions), Q12, 1);
+    const view = (await getQcmExam(examId, true))!;
+    assert.doesNotMatch(view.items[0].explanation, /première option/);
+    assert.match(view.items[0].explanation, /position/);
+    const graded = await gradeQcm(examId, { 0: [2] });
+    assert.doesNotMatch(graded.detail[0].explanation, /première option/);
+  });
+});
