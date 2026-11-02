@@ -30,6 +30,8 @@ hb.unref();
 heartbeatJob(jobId).catch(() => {});
 
 async function fail(msg: string): Promise<never> {
+  // Annulé entre-temps par l'utilisateur : cancelJob a statué (remboursement compris), on n'écrase rien.
+  try { if ((await getJob(jobId))?.status === "canceled") process.exit(0); } catch {}
   try { await setJob(jobId, { status: "error", error: msg }); await logJob(jobId, "ERREUR : " + msg); } catch {}
   // Suivi d'erreurs optionnel : un job qui échoue de nuit doit être visible.
   // Étiquettes techniques seulement — le message de job peut citer un cours.
@@ -37,12 +39,15 @@ async function fail(msg: string): Promise<never> {
     const { captureError } = await import("../lib/observability");
     captureError(new Error(msg), { service: "worker", job: String(jobId) });
   } catch {}
-  // Un job en ÉCHEC est REMBOURSÉ (idempotent — ref refund:job:…,
-  // et seulement si le débit a eu lieu). No-op sans BILLING_ENABLED.
+  // Un job en ÉCHEC n'a rien livré : REMBOURSÉ en entier, même après des appels
+  // payants (idempotent — ref refund:job:…, et seulement si le débit a eu lieu).
+  // No-op sans BILLING_ENABLED.
   try {
     const { refundJobCredits } = await import("../lib/jobs");
+    const { fmtCreditsBack } = await import("../lib/billing/credits");
     const j = await getJob(jobId);
-    if (j) await refundJobCredits(j);
+    const back = j ? await refundJobCredits(j, "failed") : 0;
+    if (back > 0) await setJob(jobId, { error: `${msg} — ${fmtCreditsBack(back)}.` });
   } catch {}
   process.exit(1);
 }
@@ -177,7 +182,7 @@ async function main() {
     await logJob(jobId, `Worker démarré (PID ${process.pid})`);
     if (!llmAvailable()) await fail(llmUnavailableReason()!);
     try {
-      const { generateQcmExam } = await import("../lib/qcm");
+      const { generateQcmExam, qcmExamSummary } = await import("../lib/qcm");
       // composeur : {count, openCount, focus} ; count/openCount peuvent valoir 0 (respectés).
       let count: number | undefined, openCount: number | undefined, focus: string | undefined;
       try {
@@ -193,7 +198,15 @@ async function main() {
         await logJob(jobId, s);
       };
       const res = await generateQcmExam({ count, openCount, focus, onStep });
-      await setJob(jobId, { status: "done", progress: 100, resultId: res.id, resultPath: `/mock/${res.id}`, currentStep: `Mock QCM #${res.id} — ${res.count} QCM + ${res.open} ouverte(s) (${res.verified} vérifiés) ✓` });
+      // Examen incomplet : dit et remboursé au prorata (lib/jobs settleShortfall).
+      const { settleShortfall } = await import("../lib/jobs");
+      const notice = await settleShortfall(job, res.count + res.open, res.requested + res.openRequested);
+      // PDF non compilé : dit, comme pour l'examen écrit (avant : silencieux, seul le .tex existait).
+      if (res.texError) {
+        await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, l'examen reste lisible dans l'app. Détail : ${res.texError.slice(0, 500)}` });
+        await logJob(jobId, `⚠ Erreur LaTeX : ${res.texError.slice(0, 300)}`);
+      }
+      await setJob(jobId, { status: "done", progress: 100, resultId: res.id, resultPath: `/mock/${res.id}`, currentStep: `Mock QCM #${res.id} — ${qcmExamSummary(res)}${notice ? ` ⚠ ${notice}` : " ✓"}` });
       await logJob(jobId, `Mock QCM #${res.id} prêt → /mock/${res.id}`);
       process.exit(0);
     } catch (e) {
@@ -270,7 +283,13 @@ async function main() {
       await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, repli HTML lisible. Détail : ${res.texError.slice(0, 500)}` });
       await logJob(jobId, `⚠ Erreur LaTeX : ${res.texError.slice(0, 300)}`);
     }
-    await setJob(jobId, { status: "done", progress: 100, resultPath: res.url, resultId: res.id, currentStep: "Terminé ✓" });
+    const { settleShortfall } = await import("../lib/jobs");
+    // Seul l'examen blanc compte ses questions (MockExamResult) ; exercices et labs n'en ont qu'une.
+    const counts = res as { produced?: number; requested?: number };
+    const notice = counts.produced != null && counts.requested != null
+      ? await settleShortfall(job, counts.produced, counts.requested)
+      : null;
+    await setJob(jobId, { status: "done", progress: 100, resultPath: res.url, resultId: res.id, currentStep: notice ? `Terminé ⚠ ${notice}` : "Terminé ✓" });
     await logJob(jobId, `${job.type === "exercise" ? "Exercice" : job.type === "lab-exercise" ? "Exercice Labs" : "Examen"} #${res.id} prêt → ${res.url}`);
     process.exit(0);
   } catch (e) {

@@ -1,6 +1,8 @@
 import { currentCourse } from "@/db/client";
-import { completeText, extractJson } from "@/lib/llm";
+import { completeJson, extractJson } from "@/lib/llm";
 import { getCourse } from "@/lib/courses";
+import { coursePassages } from "@/lib/course-grounding";
+import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
 
 export type CheckResult = {
   verdict: "correct" | "partial" | "wrong";
@@ -49,9 +51,39 @@ function fallbackResult(result: LegacyCheckResult): CheckResult {
   return { ...result, criteria, score: { earned: achieved, total: 2 } };
 }
 
+/** Contrat de sortie du correcteur (sortie structurée des fournisseurs API). */
+const CHECK_SCHEMA = {
+  type: "object",
+  properties: {
+    verdict: { type: "string", enum: ["correct", "partial", "wrong"] },
+    feedback: { type: "string" },
+    correct_solution: { type: "string" },
+    criteria: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+          points: { type: "integer" },
+          achieved: { type: "boolean" },
+          essential: { type: "boolean" },
+          justification: { type: "string" },
+        },
+        required: ["label", "points", "achieved", "essential", "justification"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["verdict", "feedback", "correct_solution", "criteria"],
+  additionalProperties: false,
+} as const;
+
 /** Parse et valide la sortie du correcteur ; l'ancien contrat reçoit un barème de compatibilité. */
 export function parseCheckResult(text: string): CheckResult {
-  const parsed = extractJson<unknown>(text);
+  return checkResultFrom(extractJson<unknown>(text));
+}
+
+function checkResultFrom(parsed: unknown): CheckResult {
   if (!isLegacyResult(parsed)) throw new Error("Réponse de correction invalide.");
   const candidate = parsed as LegacyCheckResult & { criteria?: unknown };
   if (!Array.isArray(candidate.criteria) || candidate.criteria.length < 2 || candidate.criteria.length > 5) return fallbackResult(parsed);
@@ -88,6 +120,8 @@ export function parseCheckResult(text: string): CheckResult {
  */
 export async function checkSolution(input: { statement: string; answer?: string; imageRel?: string | null }): Promise<CheckResult> {
   const c = getCourse(currentCourse());
+  // Définitions DU COURS : la correction en dépend (une réponse conforme au cours est juste).
+  const passages = await coursePassages([input.statement.slice(0, 300)], 3, 900).catch(() => []);
   const lines = [
     `Tu es un correcteur rigoureux de ${c.examCode} ${c.examName} (${c.university}).`,
     `VOICI LA QUESTION D'EXAMEN :`,
@@ -107,8 +141,13 @@ export async function checkSolution(input: { statement: string; answer?: string;
     `   - "wrong" : aucun point ou au moins un critère essentiel manque.`,
     `4) feedback : explication CIBLÉE et actionnable de l'erreur (OÙ et POURQUOI ça coince, ce qu'il faut revoir), en français. Pas de blabla.`,
     `5) correct_solution : la bonne solution, concise mais complète.`,
+    `Juge avec les DÉFINITIONS DU COURS${passages.length ? " (extraits ci-dessous)" : ""}, jamais avec celles d'une autre source : une réponse conforme au cours est juste, même si une autre source la formule autrement.`,
+    ...(passages.length ? [DATA_RULE, dataBlock(`EXTRAITS DU COURS — les définitions qui font foi`, passages)] : []),
     `Réponds UNIQUEMENT avec un objet JSON {"verdict","feedback","correct_solution","criteria":[{"label","points","achieved","essential","justification"}]}. Aucune prose autour, aucune balise markdown.`
   );
-  const text = await completeText({ prompt: lines.join("\n"), model: "opus", timeoutMs: 200_000 });
-  return parseCheckResult(text);
+  const parsed = await completeJson<unknown>(
+    { prompt: lines.join("\n"), model: "opus", timeoutMs: 200_000, json: { schema: CHECK_SCHEMA } },
+    { check: (v) => (isLegacyResult(v) ? null : "verdict (correct | partial | wrong), feedback et correct_solution sont requis") },
+  );
+  return checkResultFrom(parsed);
 }

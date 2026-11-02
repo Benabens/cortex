@@ -1,9 +1,12 @@
 import { currentCourse } from "@/db/client";
 import { q, nowStr } from "@/db/q";
-import { completeText, extractJson } from "@/lib/llm";
-import { EXAM_SOURCE_TYPES, courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFormat } from "@/lib/exam-format";
+import { HARD_STOP_CODES, LlmError, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
+import { courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFormat } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
+import { COURSE_TERMS_RULE, absentCourseTerms, coursePassages } from "@/lib/course-grounding";
+import { assignChapters, spreadOverChapters } from "@/lib/coverage";
+import { normalize } from "@/lib/text";
 import { courseRefImages } from "@/lib/course-vision";
 import type { ExamQuestion, StepCb } from "@/lib/exam";
 import { getFormatProfile } from "@/lib/format";
@@ -28,6 +31,8 @@ import path from "node:path";
  * Persisté dans `qcm_items` (par exam). La correction est instantanée (clé connue).
  */
 
+export { coursePassages } from "@/lib/course-grounding";
+
 export type QcmItem = {
   topic: string;
   type: "scq" | "mcq";
@@ -49,6 +54,10 @@ export type QcmItem = {
   discrimination?: number | null;
   nameOnly?: boolean | null;
   judgeIssue?: string | null;
+  /** Rang du sujet dans le lot demandé (non persisté) : un item écarté laisse SON sujet à combler. */
+  slot?: number;
+  /** Notion hors cours (absente du corpus ou définie autrement), relevée à la vérification : item écarté. */
+  offCourse?: string | null;
 };
 
 const QCM_BATCH_SCHEMA = {
@@ -79,6 +88,22 @@ const QCM_BATCH_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+/** Le même schéma sans figure_spec (objet libre) : exprimable en sortie structurée stricte. */
+const QCM_BATCH_SCHEMA_NO_FIGURE: object = (() => {
+  const s = JSON.parse(JSON.stringify(QCM_BATCH_SCHEMA));
+  delete s.properties.items.items.properties.figure_spec;
+  return s;
+})();
+
+/** Un QCM exploitable : énoncé, au moins 2 options texte, clé(s) valide(s). Sinon écarté (et comblé). */
+function wellFormed(raw: unknown): boolean {
+  const it = raw as Partial<QcmItem> | null;
+  if (!it || typeof it.stem !== "string" || !it.stem.trim()) return false;
+  if (!Array.isArray(it.options) || it.options.length < 2 || !it.options.every((o) => typeof o === "string" && o.trim())) return false;
+  const n = it.options.length;
+  return Array.isArray(it.correct) && it.correct.length > 0 && it.correct.every((k) => Number.isInteger(k) && k >= 0 && k < n);
+}
+
 async function ensureQcmSchema(): Promise<void> {
   // l'examen QCM s'insère dans `exams` (partagée) ; garantir la colonne verify_summary (les DB de
   // cours créées hors cs-202 ne l'ont pas — ensureExamCols n'a pas tourné). DDL canonique : db/tables.ts.
@@ -93,11 +118,23 @@ async function ensureQcmSchema(): Promise<void> {
 /** Sujets à couvrir : blueprint (topics pondérés) si dispo, sinon archétypes du cours.
  *  Retourne TOUTE la liste ordonnée par poids (plus de LIMIT 14 : la LARGEUR
  *  est gérée à l'échantillonnage par pickCoverage, qui inclut la longue traîne). */
-async function coverageTopics(): Promise<{ label: string; method: string | null }[]> {
+type CovTopic = { label: string; method: string | null; weight?: number; chapterId?: number | null };
+
+async function coverageTopics(): Promise<CovTopic[]> {
+  const order = `ORDER BY exam_weight DESC, exam_count DESC, label`;
   try {
-    const rows = await q.all<{ label: string; method: string | null }>(`SELECT label, method FROM topics ORDER BY exam_weight DESC, exam_count DESC, label`);
-    if (rows.length) return rows;
-  } catch {}
+    // Poids et chapitre du plan : la répartition sur les chapitres en dépend (lib/coverage).
+    const rows = await q.all<{ label: string; method: string | null; weight: number | null; chapterId: number | null }>(
+      `SELECT label, method, exam_weight AS weight, plan_chapter_id AS "chapterId" FROM topics ${order}`,
+    );
+    if (rows.length) return rows.map((r) => ({ label: r.label, method: r.method, weight: Number(r.weight ?? 0), chapterId: r.chapterId }));
+  } catch {
+    // Base sans la colonne du plan de cours (antérieure à course-plan) : poids et libellés seuls.
+    try {
+      const rows = await q.all<{ label: string; method: string | null; weight: number | null }>(`SELECT label, method, exam_weight AS weight FROM topics ${order}`);
+      if (rows.length) return rows.map((r) => ({ label: r.label, method: r.method, weight: Number(r.weight ?? 0) }));
+    } catch {}
+  }
   // Pas encore de notions analysées : les titres des supports du cours, plutôt que des archétypes
   // génériques qui ne parlent d'aucune notion (cas d'un cours sans annale fraîchement préparé).
   const titles = await courseMaterialTitles();
@@ -160,42 +197,6 @@ export function citesOptionLabel(text: string): boolean {
   return /\b(?:[Oo]ptions?|[Rr]éponses?|[Cc]hoix|[Aa]nswers?|[Cc]hoices?|[Pp]ropositions?)\s*\(?(?:[A-Ha-h]|[0-9])\)?(?![\p{L}'’])/u.test(text)
     || /\([A-H0-9]\)/.test(text)
     || /(?:^|\s)[A-H]\)\s/.test(text);
-}
-
-/** Types de sources jamais pris comme « faits du cours » à tester (annales : on n'en recopie pas les questions). */
-const NOT_COURSE_FACTS = new Set<string>(EXAM_SOURCE_TYPES);
-
-/** Fenêtre d'un texte autour du premier mot de la requête qu'il contient. */
-function windowAround(text: string, query: string, cap: number): string {
-  const t = text.replace(/\s+/g, " ").trim();
-  if (t.length <= cap) return t;
-  const words = query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4);
-  const lower = t.toLowerCase();
-  const at = words.map((w) => lower.indexOf(w)).filter((i) => i >= 0).sort((a, b) => a - b)[0] ?? 0;
-  const start = Math.max(0, Math.min(at - Math.floor(cap / 3), t.length - cap));
-  return t.slice(start, start + cap);
-}
-
-/** Extraits du cours sur les sujets d'un lot (recherche plein texte), pour ancrer chaque question sur un fait précis. */
-export async function coursePassages(topics: string[], perTopic = 2, cap = 900): Promise<{ src: string; text: string }[]> {
-  const { search } = await import("@/lib/search");
-  const out: { src: string; text: string }[] = [];
-  const seen = new Set<number>();
-  for (const topic of topics) {
-    let groups: Awaited<ReturnType<typeof search>> = [];
-    try { groups = await search(topic, 16, "or"); } catch { continue; }
-    let k = 0;
-    for (const h of groups.flatMap((g) => g.hits)) {
-      if (k >= perTopic) break;
-      if (NOT_COURSE_FACTS.has(h.sourceType) || seen.has(h.itemId)) continue;
-      seen.add(h.itemId);
-      const row = await q.get<{ text: string }>(`SELECT text FROM items WHERE id = ?`, h.itemId);
-      if (!row?.text) continue;
-      out.push({ src: h.sourceTitle, text: windowAround(row.text, topic, cap) });
-      k++;
-    }
-  }
-  return out;
 }
 
 /** Questions d'exemple officielles (sans annale) : citées par la détection du format, et sources « exemples ». */
@@ -279,6 +280,7 @@ const ARCHITECT_QCM_RULES = [
   `  - AUCUN indice qui trahit : la bonne option n'est ni plus longue ni plus détaillée ; pas de « toutes les réponses ci-dessus » ; cohérence grammaticale stem↔options ; options de longueur comparable ; pas de négations piégeuses gratuites.`,
   `  - Teste la COMPRÉHENSION / le raisonnement, pas la récitation d'une définition.`,
   `  - Calibre la difficulté sur les VRAIS examens du cours (regarde les pages fournies).`,
+  COURSE_TERMS_RULE,
 ];
 
 /** Génère un LOT de QCM (1 appel LLM) couvrant des sujets donnés, au format du cours.
@@ -374,10 +376,19 @@ export async function generateQcmBatch(
     JSON.stringify(QCM_BATCH_SCHEMA, null, 2),
   ].filter((l) => l != null && l !== "").join("\n");
   step(`Génération de ${n} QCM (architecte · moules + idées fausses)…`, 30);
-  const r = extractJson<{ items: (QcmItem & { figure_spec?: FigureSpec })[] }>(await completeText({ prompt, model: "opus", timeoutMs: 480_000 }));
+  // Sortie structurée (fournisseurs API) : sans figure, le schéma est strict ; une figure_spec
+  // est un objet libre, inexprimable → texte libre, lu par extractJson. Réponse illisible →
+  // redemandée avec l'erreur (completeJson, 3 essais).
+  const r = await completeJson<{ items: (QcmItem & { figure_spec?: FigureSpec })[] }>(
+    { prompt, model: "opus", timeoutMs: 480_000, json: { schema: withFigures ? QCM_BATCH_SCHEMA : QCM_BATCH_SCHEMA_NO_FIGURE } },
+    { check: (v) => (!Array.isArray(v?.items) ? "le champ « items » (tableau de QCM) manque" : v.items.length ? null : "« items » est vide") },
+  );
   const items: QcmItem[] = [];
-  for (let i = 0; i < (r.items ?? []).length; i++) {
-    const raw = r.items[i];
+  // Jamais plus que demandé au lot ; un item mal formé est écarté (le comblement le remplace).
+  const raws = r.items.slice(0, n);
+  for (let i = 0; i < raws.length; i++) {
+    const raw = raws[i];
+    if (!wellFormed(raw)) continue;
     const imposed = molds[i] ?? null;
     const fact = (raw as { source_fact?: unknown }).source_fact;
     const base: QcmItem = {
@@ -389,6 +400,7 @@ export async function generateQcmBatch(
       figureFile: null,
       figureTruth: null,
       sourceFact: typeof fact === "string" ? fact : null,
+      slot: i,
     };
     delete (base as { source_fact?: unknown }).source_fact;
     // Position de la bonne réponse mélangée (graine = l'énoncé : reproductible), jamais pour une question à figure.
@@ -420,6 +432,9 @@ export async function generateQcmBatch(
   return items;
 }
 
+/** Réponses du juge qui ne signalent rien. */
+const NO_FLAG = /^(?:|[-—.…]+|none\.?|no|nothing|n\/?a|null|aucune?\.?|rien\.?|néant|non|ras|ok)$/i;
+
 const VERIFY_SCHEMA = {
   type: "object",
   properties: {
@@ -434,8 +449,10 @@ const VERIFY_SCHEMA = {
           issue: { type: "string", description: "Court : ce qui cloche (clé fausse, 2 réponses défendables, indice qui trahit, distracteur absurde, réussie sans connaître le cours). Vide si ok." },
           discrimination: { type: "integer", description: "Pouvoir discriminant, 1 à 5 : 1 = un étudiant qui ne connaît que les NOMS des notions (ni leurs conditions, ni les résultats des études) la réussit ; 5 = seul un étudiant qui maîtrise le détail du cours la réussit." },
           name_only: { type: "boolean", description: "true si elle se réussit avec les seuls noms des notions, ou en éliminant des options absurdes." },
+          course_terms: { type: "array", items: { type: "string" }, description: "Les notions nommées dont dépend la BONNE réponse, chacune écrite EXACTEMENT comme dans les extraits du cours (copie le terme du cours)." },
+          off_course: { type: "string", description: "Non vide si la bonne réponse, un distracteur ou l'explication repose sur une notion ABSENTE des extraits du cours, ou que le cours définit AUTREMENT : laquelle, et ce que dit le cours. Vide sinon." },
         },
-        required: ["index", "correct", "ok", "discrimination", "name_only"],
+        required: ["index", "correct", "ok", "discrimination", "name_only", "course_terms", "off_course"],
         additionalProperties: false,
       },
     },
@@ -455,12 +472,19 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   // la mémoire de calibration des QCM est aussi réinjectée à la CRITIQUE : un « trop facile »
   // passé rend la vérif plus sévère sur la trivialité/les indices qui trahissent.
   const calib = await calibrationBlock("qcm");
+  // DÉFINITIONS DU COURS : le juge résout et contrôle avec celles du cours, pas celles du web.
+  const passages = await coursePassages([...new Set(items.map((q) => q.topic).filter(Boolean))], 2, 700).catch(() => []);
   const prompt = [
     `Tu es un correcteur rigoureux du cours. Pour CHAQUE QCM ci-dessous, RÉSOUS-LE toi-même de zéro (sans clé fournie) et donne la/les bonne(s) réponse(s) par INDEX.`,
+    passages.length
+      ? `Résous et juge avec les DÉFINITIONS DU COURS (extraits ci-dessous), jamais avec celles d'une autre source. course_terms : les notions dont dépend la bonne réponse, écrites comme dans le cours. off_course : toute notion de la question absente des extraits, ou que le cours définit autrement (vide sinon).`
+      : `course_terms : les notions nommées dont dépend la bonne réponse. off_course : laisse vide (aucun extrait du cours fourni ici).`,
     `Signale si : la question est ambiguë (2 réponses défendables), un distracteur est absurde, ou un indice trahit la bonne réponse (longueur, « toutes les réponses », grammaire).`,
     `Note aussi son POUVOIR DISCRIMINANT (discrimination, 1 à 5) : mets-toi à la place d'un étudiant qui ne connaît que les noms des notions du cours — pas leurs conditions, pas les résultats des études. S'il la réussit (ou élimine assez d'options pour la deviner), discrimination ≤ 2 et name_only = true.`,
     figDirs.length ? `Certaines questions ont une FIGURE : OUVRE le PNG indiqué (outil Read) et résous DEPUIS la figure. Si la figure ne suffit pas à répondre, mets ok=false avec issue="figure insuffisante".` : null,
     calib ? `${calib}\nÀ la lumière de ces leçons, sois SÉVÈRE : signale aussi (issue) tout QCM trop trivial / au distracteur trop faible si l'étudiant a jugé ce type « trop facile ».` : null,
+    passages.length ? `\n${DATA_RULE}` : null,
+    passages.length ? dataBlock(`EXTRAITS DU COURS — les définitions qui font foi`, passages) : null,
     ``,
     blind,
     ``,
@@ -468,12 +492,33 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     JSON.stringify(VERIFY_SCHEMA, null, 2),
   ].filter((l) => l != null).join("\n");
   step("Vérification à l'aveugle des QCM (résolution indépendante, figures vues)…", 70);
-  let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean }[] };
-  try { res = extractJson(await completeText({ prompt, model: "opus", timeoutMs: 420_000, addDirs: figDirs })); }
-  catch { return items; } // fallback honnête : non vérifiés
+  let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean; course_terms?: string[]; off_course?: string }[] };
+  try {
+    res = await completeJson(
+      { prompt, model: "opus", timeoutMs: 420_000, addDirs: figDirs, json: { schema: VERIFY_SCHEMA } },
+      { check: (v) => (Array.isArray((v as { results?: unknown })?.results) ? null : "le champ « results » manque") },
+    );
+  } catch { return items; } // fallback honnête : non vérifiés
+  // Contrôle DÉTERMINISTE des termes que le juge dit avoir lus dans le cours : une notion
+  // inventée (« status quo bias », absent du corpus de CS-290) ne passe pas parce que le
+  // juge l'a crue du cours.
+  const termsOf = (r: { course_terms?: unknown }) => (Array.isArray(r.course_terms) ? r.course_terms.filter((t): t is string => typeof t === "string") : []);
+  const absent = new Set((await absentCourseTerms((res.results ?? []).flatMap(termsOf))).map((t) => normalize(t)));
   for (const r of res.results ?? []) {
     const q = items[r.index];
     if (!q) continue;
+    const missing = termsOf(r).filter((t) => absent.has(normalize(t.trim())));
+    // Un signalement du juge ne compte que s'il a VU des extraits et qu'il nomme quelque chose
+    // (« None », « Aucune », « N/A » ne rejettent rien) : jamais de rejet faute de pouvoir vérifier.
+    const flagged = passages.length && typeof r.off_course === "string" && !NO_FLAG.test(r.off_course.trim()) ? r.off_course.trim() : "";
+    const off = [missing.length ? `absent du cours : ${missing.join(", ")}` : "", flagged].filter(Boolean).join(" ; ");
+    if (off) {
+      q.verified = 0;
+      q.offCourse = off.slice(0, 240);
+      q.judgeIssue = `notion hors cours (${q.offCourse}) : n'utilise que les notions et les définitions des extraits du cours`;
+      step(`QCM rejeté — hors cours : ${q.offCourse}`, 70);
+      continue;
+    }
     q.discrimination = Number.isInteger(r.discrimination) ? Math.max(1, Math.min(5, r.discrimination!)) : null;
     q.nameOnly = typeof r.name_only === "boolean" ? r.name_only : null;
     q.judgeIssue = r.issue?.trim() ? r.issue.trim().slice(0, 240) : null;
@@ -492,7 +537,12 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   return items;
 }
 
-export type QcmExamResult = { id: number; count: number; verified: number; open: number; pdf?: string; texError?: string };
+/** `requested` / `openRequested` : la composition demandée — `count` / `open` peuvent rester en dessous. */
+export type QcmExamResult = { id: number; count: number; requested: number; verified: number; open: number; openRequested: number; pdf?: string; texError?: string };
+
+/** Nombre de rondes de comblement des QCM manquants, et lots supplémentaires permis (× lots prévus). */
+const TOPUP_ROUNDS = 2;
+
 
 /** Génère un examen QCM complet (N QCM + M ouvertes), vérifié, persisté, rendu en PDF.
  *  `count`/`openCount` : la COMPOSITION choisie par l'utilisateur (composeur). `focus` : « Mets l'accent
@@ -524,16 +574,26 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       if (!known.has(title.toLowerCase())) covAll = [...covAll, { label: title, method: null }];
     }
   }
-  // Thèmes DISTINCTS (pickCoverage complète par répétition au-delà) : la reprise est marquée plus bas.
-  const cov = pickCoverage(covAll, Math.min(needed, covAll.length));
+  // RÉPARTITION SUR LES CHAPITRES (plan du cours, sinon supports) au prorata de leur poids, QCM
+  // puis ouvertes : CS-290 (02/11) n'avait que Fairness 1, en tête par poids. Sans au moins deux
+  // chapitres, thèmes DISTINCTS par poids (pickCoverage), la reprise étant marquée plus bas.
+  const spread = spreadOverChapters(
+    await assignChapters(covAll.map((t) => ({ ...t, weight: t.weight ?? 0 }))).catch(() => []),
+    needed + openCount,
+  );
+  const cov: { label: string; method: string | null }[] = spread
+    ? spread.map((t) => ({ label: t.label, method: t.repeat ? REPEAT_METHOD : t.method }))
+    : pickCoverage(covAll, Math.min(needed, covAll.length)).map((t) => ({ label: t.label, method: t.method }));
   const qcmTopics: { label: string; method: string | null }[] = [];
   for (let i = 0; i < count; i++) {
     if (i < nFocus) { qcmTopics.push({ label: focus!, method: FOCUS_METHOD }); continue; }
     const k = i - nFocus;
     const t = cov[k % cov.length];
     // Un thème repris (plus de questions que de thèmes) doit tester un AUTRE fait.
-    qcmTopics.push(k < cov.length ? t : { label: t.label, method: REPEAT_METHOD });
+    qcmTopics.push(spread || k < cov.length ? t : { label: t.label, method: REPEAT_METHOD });
   }
+  // Ouvertes : la suite de la répartition (les chapitres que les QCM n'ont pas pris d'abord).
+  const openTopic = (i: number) => (spread ? cov[(needed + i) % cov.length] : cov[(count + i) % cov.length]);
   const qcmMolds = sampleMolds(dna, count);
   // Format résolu : langue de l'examen ; sans annale, les exemples officiels donnent le style,
   // et les questions « classe ce cas » restent interdites (permises si les annales en ont le style).
@@ -548,10 +608,11 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   };
   step(`Architecte : ${count} QCM + ${openCount} ouverte(s)${focus ? ` (accent : « ${focus} »)` : ""}${dna ? ` · moules ADN (${dna.molds.length})` : " au format détecté"}…`, 8);
 
-  // lots de 4 QCM en parallèle borné (2 lots à la fois). RÉSILIENT : un lot qui échoue (JSON
-  // malformé du modèle sur du math) est réessayé une fois puis IGNORÉ — il ne plante pas le job.
+  // lots de 4 QCM en parallèle borné (2 lots à la fois). RÉSILIENT : un lot illisible est redemandé
+  // avec l'erreur (completeJson), un lot échoué ne plante pas le job et ses sujets sont comblés plus bas.
   const BATCH = 4;
-  const batches: { topics: { label: string; method: string | null }[]; molds: (MoldKind | null)[] }[] = [];
+  type Batch = { topics: { label: string; method: string | null }[]; molds: (MoldKind | null)[] };
+  const batches: Batch[] = [];
   for (let i = 0; i < count; i += BATCH) {
     const topicsSlice: { label: string; method: string | null }[] = [];
     const moldsSlice: (MoldKind | null)[] = [];
@@ -566,7 +627,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
    * peu discriminants, ou trahis par leur longueur) sont régénérés UNE fois, critique à l'appui,
    * et remplacés si la nouvelle version est meilleure.
    */
-  const strengthen = async (bt: { topics: { label: string; method: string | null }[]; molds: (MoldKind | null)[] }, items: QcmItem[]): Promise<QcmItem[]> => {
+  const strengthen = async (bt: Batch, items: QcmItem[]): Promise<QcmItem[]> => {
     const weak = items.map((it, i) => ({ it, i, why: weaknessOf(it) })).filter((w): w is { it: QcmItem; i: number; why: string } => !!w.why);
     if (!weak.length) return items;
     step(`${weak.length} QCM trop faible(s) → régénération ciblée`, 0);
@@ -575,7 +636,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       ...weak.map((w) => `  - « ${sanitizeCorpus(w.it.stem).slice(0, 160)} » : ${sanitizeCorpus(w.why)}`),
     ].join("\n");
     try {
-      const pick = <T,>(arr: T[]) => weak.map((w) => arr[w.i]);
+      const pick = <T,>(arr: T[]) => weak.map((w) => arr[w.it.slot ?? w.i]);
       const again = await verifyQcmBatch(await generateQcmBatch(pick(bt.topics), weak.length, step, undefined, guidance, { ...shared, molds: pick(bt.molds) }), step);
       // Un item écarté à la conception décalerait l'appariement : on ne remplace qu'un lot complet,
       // et seulement par une version VÉRIFIÉE (une vérification en échec rend des items non vérifiés).
@@ -583,7 +644,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       const out = items.slice();
       weak.forEach((w, k) => {
         const n = again[k];
-        if (n.verified === 1 && (!weaknessOf(n) || (n.discrimination ?? 0) > (w.it.discrimination ?? 0))) out[w.i] = n;
+        if (n.verified === 1 && (!weaknessOf(n) || (n.discrimination ?? 0) > (w.it.discrimination ?? 0))) out[w.i] = { ...n, slot: w.it.slot };
       });
       return out;
     } catch (e) {
@@ -591,29 +652,57 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       return items;
     }
   };
-  const safeBatch = async (bt: { topics: { label: string; method: string | null }[]; molds: (MoldKind | null)[] }): Promise<QcmItem[]> => {
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const items = await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, undefined, { ...shared, molds: bt.molds });
-        if (items.length) return await strengthen(bt, await verifyQcmBatch(items, step));
-      } catch (e) {
-        step(`Lot QCM échoué (${(e as Error).message.slice(0, 50)})${attempt < 2 ? " — réessai" : " — ignoré"}`, 0);
-      }
+  /** Un lot conçu, vérifié, renforcé. Un échec (après les réessais de completeJson) rend 0 item et sa cause. */
+  const safeBatch = async (bt: Batch): Promise<{ items: QcmItem[]; error: unknown }> => {
+    try {
+      const items = await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, undefined, { ...shared, molds: bt.molds });
+      // Un item resté hors cours après régénération n'est jamais gardé : son sujet est comblé.
+      const kept = items.length ? await strengthen(bt, await verifyQcmBatch(items, step)) : [];
+      return { items: kept.filter((it) => !it.offCourse), error: null };
+    } catch (e) {
+      step(`Lot QCM échoué (${(e as Error).message.slice(0, 80)})`, 0);
+      return { items: [], error: e };
     }
-    return [];
   };
+  // NOMBRE GARANTI : les sujets restés sans QCM (lot échoué, items écartés) sont regroupés en
+  // nouveaux lots, au plus TOPUP_ROUNDS rondes et autant de lots en plus que de lots prévus.
+  // En dessous malgré tout, l'examen le dit (requested) et le job rembourse au prorata.
   const all: QcmItem[] = [];
-  for (let b = 0; b < batches.length; b += 2) {
-    const got = await Promise.all(batches.slice(b, b + 2).map(safeBatch));
-    for (const g of got) all.push(...g);
-    step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
+  let lastError: unknown = null;
+  let pending = batches;
+  let extraBudget = batches.length;
+  for (let round = 0; pending.length; round++) {
+    const missing: { topic: { label: string; method: string | null }; mold: MoldKind | null }[] = [];
+    for (let b = 0; b < pending.length; b += 2) {
+      const group = pending.slice(b, b + 2);
+      const got = await Promise.all(group.map(safeBatch));
+      got.forEach((g, k) => {
+        all.push(...g.items.slice(0, Math.max(0, count - all.length)));
+        if (g.error) lastError = g.error;
+        const bt = group[k];
+        const filled = new Set(g.items.map((it, n) => it.slot ?? n));
+        bt.topics.forEach((topic, j) => { if (!filled.has(j)) missing.push({ topic, mold: bt.molds[j] ?? null }); });
+      });
+      step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
+    }
+    const stop = llmErrorCode(lastError);
+    if (!missing.length || all.length >= count || round >= TOPUP_ROUNDS || extraBudget <= 0 || (stop && HARD_STOP_CODES.has(stop))) break;
+    pending = [];
+    for (let i = 0; i < missing.length && pending.length < extraBudget; i += BATCH) {
+      const slice = missing.slice(i, i + BATCH);
+      pending.push({ topics: slice.map((m) => m.topic), molds: slice.map((m) => m.mold) });
+    }
+    extraBudget -= pending.length;
+    step(`${count - all.length} QCM manquant(s) → ${pending.length} lot(s) de comblement`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
   }
   // count>0 mais 0 QCM produit = tous les lots ont échoué → erreur claire (sauf drill 0 QCM + ouvertes).
-  if (count > 0 && !all.length) throw new Error("Aucun QCM généré (tous les lots ont échoué). Réessaie.");
+  // Aucun appel en erreur mais tous les items écartés (mal formés) : c'est une réponse inutilisable.
+  const cause = () => lastError ?? new LlmError("Toutes les questions reçues étaient mal formées.", "BAD_OUTPUT");
+  if (count > 0 && !all.length) throw new Error(`Aucun QCM généré : ${llmFailureReason(cause())}`);
 
   // partie OUVERTE : chaque question via l'architecte (multi-passes + vérif), au niveau réel.
   // moules « ouverts » échantillonnés depuis l'ADN, imposés à l'architecte.
-  const openQs: ExamQuestion[] = [];
+  const openBySlot = new Map<number, ExamQuestion>();
   if (openCount > 0) {
     const { architectQuestion } = await import("@/lib/architect");
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -622,18 +711,37 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const openMolds = sampleMolds(dna, openCount, {
       only: ["proof_analysis", "derivation", "design", "applied_scenario", "formula_computation", "code_trace", "table_fill", "figure_reading"],
     });
-    for (let i = 0; i < openCount; i++) {
-      const t = cov[(count + i) % cov.length]; // ouvertes = couverture programme (le focus reste sur les QCM)
-      const a = archs[i % archs.length];
-      step(`Question ouverte ${i + 1}/${openCount} (architecte) — ${t.label}…`, 82 + i);
-      try {
-        const r = await architectQuestion(a, `${t.label}${t.method ? ` — ${t.method}` : ""}`, 15, { maxRounds: 1, mold: openMolds[i] ?? null, onStep: (m) => step(`Ouverte ${i + 1} · ${m}`, 82 + i) });
-        openQs.push({ ...r.q, points: 15 });
-      } catch (e) { step(`Question ouverte ${i + 1} ignorée : ${(e as Error).message.slice(0, 60)}`, 82 + i); }
+    // NOMBRE GARANTI, comme pour les QCM : une ouverte échouée (job 8 de CS-290 : 2 sur 3, sans
+    // un mot) est relancée UNE fois, sauf si la cause est une garde ; sinon l'écart est dit.
+    let pendingOpen = Array.from({ length: openCount }, (_, i) => i);
+    for (let round = 0; pendingOpen.length && round < 2; round++) {
+      const failed: number[] = [];
+      for (const i of pendingOpen) {
+        const t = openTopic(i); // ouvertes = couverture programme (le focus reste sur les QCM)
+        const a = archs[i % archs.length];
+        step(`Question ouverte ${i + 1}/${openCount} (architecte${round ? ", nouvel essai" : ""}) — ${t.label}…`, 82 + i);
+        try {
+          const r = await architectQuestion(a, `${t.label}${t.method ? ` — ${t.method}` : ""}`, 15, { maxRounds: 1, mold: openMolds[i] ?? null, onStep: (m) => step(`Ouverte ${i + 1} · ${m}`, 82 + i) });
+          openBySlot.set(i, { ...r.q, points: 15 });
+        } catch (e) {
+          lastError = e;
+          failed.push(i);
+          step(`Question ouverte ${i + 1} ignorée : ${llmFailureReason(e).slice(0, 120)}`, 82 + i);
+        }
+      }
+      pendingOpen = failed;
+      const stop = llmErrorCode(lastError);
+      if (!pendingOpen.length || (stop && HARD_STOP_CODES.has(stop))) break;
+      if (round === 0) step(`${pendingOpen.length} question(s) ouverte(s) manquante(s) → nouvel essai`, 88);
     }
   }
+  const openQs = [...openBySlot.entries()].sort((a, b) => a[0] - b[0]).map(([, oq]) => oq);
+  // Contrôle final du total demandé : ce qui manque encore est dit ici, et remboursé par le job.
+  if (all.length + openQs.length < count + openCount) {
+    step(`⚠ ${all.length + openQs.length} questions sur ${count + openCount} demandées (${all.length}/${count} QCM, ${openQs.length}/${openCount} ouvertes)`, 90);
+  }
 
-  if (!all.length && !openQs.length) throw new Error("Rien n'a pu être généré (lots QCM et questions ouvertes échoués). Réessaie.");
+  if (!all.length && !openQs.length) throw new Error(`Rien n'a pu être généré (lots QCM et questions ouvertes échoués) : ${llmFailureReason(cause())}`);
 
   // persiste l'exam + les QCM + les ouvertes. Les figures rendues (PNG temporaires) prennent leur
   // nom DÉFINITIF qcm-<examId>-fig<idx>.png (dans examsDir, à côté du .tex compilé).
@@ -659,7 +767,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     }
   });
   const verified = all.filter((it) => it.verified === 1).length;
-  await q.run(`UPDATE exams SET verify_summary = ? WHERE id = ?`, `QCM ${all.length} (${verified} vér.) + ${openQs.length} ouverte(s)`, examId);
+  await q.run(`UPDATE exams SET verify_summary = ? WHERE id = ?`, qcmExamSummary({ count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount }), examId);
 
   // rendu PDF (énoncé + corrigé) au look d'un vrai final du cours
   step("Rendu du PDF (look vrai final)…", 92);
@@ -669,11 +777,19 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const dateLabel = nowStr().slice(0, 10);
     const out = await buildQcmArtifact(examId, { items: all, open: openQs }, dateLabel);
     pdf = out.file; texError = out.texError;
+    if (out.texWarning) step(`⚠ ${out.texWarning}`, 96);
     await q.run(`UPDATE exams SET html_path = ? WHERE id = ?`, out.file, examId);
   } catch (e) { texError = (e as Error).message; }
 
-  step(`Examen QCM #${examId} prêt — ${all.length} QCM + ${openQs.length} ouverte(s) ✓`, 100);
-  return { id: examId, count: all.length, verified, open: openQs.length, pdf, texError };
+  step(`Examen QCM #${examId} prêt — ${qcmExamSummary({ count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount })} ✓`, 100);
+  return { id: examId, count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount, pdf, texError };
+}
+
+/** Résumé de l'examen : « QCM 5 sur 7 demandés (4 vér.) + 3 ouverte(s) » ; rien de signalé s'il est complet. */
+export function qcmExamSummary(r: Pick<QcmExamResult, "count" | "requested" | "verified" | "open" | "openRequested">): string {
+  const qcm = r.count < r.requested ? `${r.count} sur ${r.requested} demandés` : `${r.count}`;
+  const open = r.open < r.openRequested ? `${r.open} sur ${r.openRequested}` : `${r.open}`;
+  return `QCM ${qcm} (${r.verified} vér.) + ${open} ouverte(s)`;
 }
 
 export type QcmOpenView = { id: number; concept: string; statement: string; solution: string };

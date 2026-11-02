@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { apiKey, baseUrl, mapModel } from "../config";
-import { LlmError, type CompleteRequest, type CompleteResult, type LlmProvider, type LlmUsage } from "../types";
+import { DEFAULT_MAX_TOKENS, LlmError, truncatedError, type CompleteRequest, type CompleteResult, type LlmProvider, type LlmUsage } from "../types";
 
 /**
  * Provider API Anthropic officielle (voie production, clé requise).
@@ -22,6 +22,46 @@ function client(key: string): Anthropic {
 /** Statuts HTTP qui justifient un retry (rate limit / surcharge / transitoire). */
 function retryableStatus(status: number | undefined): boolean {
   return status === 408 || status === 429 || status === 500 || status === 502 || status === 503 || status === 529;
+}
+
+/** Mots-clés que la sortie structurée n'accepte pas : retirés (le site d'appel valide lui-même). */
+const UNSUPPORTED_KEYWORDS = new Set([
+  "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+  "minLength", "maxLength", "pattern", "minItems", "maxItems", "uniqueItems", "minProperties", "maxProperties",
+]);
+
+/**
+ * Copie du schéma acceptable par la sortie structurée (output_config.format) :
+ * `additionalProperties: false` sur chaque objet, contraintes non prises en
+ * charge retirées. null si un objet est libre (sans propriétés, ou ouvert) :
+ * aucun schéma strict ne l'exprime, l'appel part alors en texte libre.
+ */
+export function structuredSchema(schema: object): object | null {
+  let ok = true;
+  const walk = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(walk);
+    if (!node || typeof node !== "object") return node;
+    const src = node as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(src)) {
+      if (UNSUPPORTED_KEYWORDS.has(k)) continue;
+      if (k === "properties" || k === "$defs" || k === "definitions") {
+        out[k] = Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([name, sub]) => [name, walk(sub)]));
+      } else if (k === "items" || k === "anyOf" || k === "allOf" || k === "oneOf") {
+        out[k] = walk(v);
+      } else {
+        out[k] = v;
+      }
+    }
+    const types = Array.isArray(src.type) ? src.type : [src.type];
+    if (types.includes("object")) {
+      if (!src.properties || (src.additionalProperties !== undefined && src.additionalProperties !== false)) ok = false;
+      out.additionalProperties = false;
+    }
+    return out;
+  };
+  const strict = walk(schema);
+  return ok ? (strict as object) : null;
 }
 
 function toLlmError(e: unknown): LlmError {
@@ -78,7 +118,7 @@ export const anthropicProvider: LlmProvider = {
 
     const params: Record<string, unknown> = {
       model,
-      max_tokens: req.maxTokens ?? 16_000,
+      max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
       messages: [{ role: "user", content }],
     };
     // CACHE DE PROMPT : le prompt système, s'il existe, est le préfixe STABLE
@@ -92,35 +132,62 @@ export const anthropicProvider: LlmProvider = {
       params.system = [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }];
     }
     if (req.thinking === "adaptive") params.thinking = { type: "adaptive" };
-    if (req.json) {
-      params.output_config = {
-        format: { type: "json_schema", schema: req.json.schema },
-        ...(req.json.effort ? { effort: req.json.effort } : {}),
-      };
-    }
+    // SORTIE STRUCTURÉE : la réponse est garantie conforme au schéma (plus de JSON
+    // illisible). Schéma inexprimable → texte libre, lu par extractJson.
+    const strict = req.json ? structuredSchema(req.json.schema) : null;
+    const outputConfig = {
+      ...(strict ? { format: { type: "json_schema", schema: strict } } : {}),
+      ...(req.json?.effort ? { effort: req.json.effort } : {}),
+    };
+    if (Object.keys(outputConfig).length) params.output_config = outputConfig;
 
-    try {
+    const run = async (p: Record<string, unknown>) => {
       const stream = client(key).messages.stream(
-        params as Parameters<Anthropic["messages"]["stream"]>[0],
+        p as Parameters<Anthropic["messages"]["stream"]>[0],
         { ...(req.timeoutMs ? { timeout: req.timeoutMs } : {}), ...(req.signal ? { signal: req.signal } : {}) }
       );
-      const msg = await stream.finalMessage();
-      const textBlock = msg.content.find((b) => b.type === "text") as { text?: string } | undefined;
-      // `usage` de l'API = comptes EXACTS (jamais estimés). cache_* renseignés dès
-      // qu'un `cache_control` est envoyé (mesure du cache de prompt).
-      const u = msg.usage as
-        | { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }
-        | undefined;
-      const usage: LlmUsage = {
-        inputTokens: u?.input_tokens ?? undefined,
-        outputTokens: u?.output_tokens ?? undefined,
-      };
-      // Champs cache : présents seulement quand l'API les renvoie (cache_control envoyé).
-      if (u?.cache_read_input_tokens != null) usage.cacheReadTokens = u.cache_read_input_tokens;
-      if (u?.cache_creation_input_tokens != null) usage.cacheWriteTokens = u.cache_creation_input_tokens;
-      return { text: textBlock?.text ?? "", usage, provider: this.name, model };
+      return stream.finalMessage();
+    };
+
+    let msg: Awaited<ReturnType<typeof run>>;
+    try {
+      try {
+        msg = await run(params);
+      } catch (e) {
+        // Un schéma refusé par l'API (400) ne doit pas faire échouer la génération :
+        // un seul rejeu en texte libre, sans le format (l'effort est gardé).
+        if ((e as { status?: number })?.status !== 400 || !strict) throw e;
+        console.error(`[llm] anthropic : sortie structurée refusée (${(e as Error).message.slice(0, 160)}) — rejeu en texte libre`);
+        const rest = { ...outputConfig } as Record<string, unknown>;
+        delete rest.format;
+        const fallback = { ...params };
+        if (Object.keys(rest).length) fallback.output_config = rest;
+        else delete fallback.output_config;
+        msg = await run(fallback);
+      }
     } catch (e) {
       throw toLlmError(e);
     }
+
+    const textBlock = msg.content.find((b) => b.type === "text") as { text?: string } | undefined;
+    // `usage` de l'API = comptes EXACTS (jamais estimés). cache_* renseignés dès
+    // qu'un `cache_control` est envoyé (mesure du cache de prompt).
+    const u = msg.usage as
+      | { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }
+      | undefined;
+    const usage: LlmUsage = {
+      inputTokens: u?.input_tokens ?? undefined,
+      outputTokens: u?.output_tokens ?? undefined,
+    };
+    // Champs cache : présents seulement quand l'API les renvoie (cache_control envoyé).
+    if (u?.cache_read_input_tokens != null) usage.cacheReadTokens = u.cache_read_input_tokens;
+    if (u?.cache_creation_input_tokens != null) usage.cacheWriteTokens = u.cache_creation_input_tokens;
+    // Une réponse COUPÉE ou REFUSÉE n'est jamais rendue comme un texte valide :
+    // elle passerait à extractJson, qui ne doit pas la prendre pour une réponse complète.
+    if (msg.stop_reason === "max_tokens") throw truncatedError(req.maxTokens, usage);
+    if (msg.stop_reason === "refusal") {
+      throw new LlmError("Le modèle a refusé de traiter cette demande.", "REFUSAL", false, usage);
+    }
+    return { text: textBlock?.text ?? "", usage, provider: this.name, model };
   },
 };
