@@ -207,12 +207,13 @@ export class AssistRefused extends Error {
 }
 
 /**
- * Codes d'erreur émis par NOS gardes AVANT que quoi que ce soit ne parte chez le
- * fournisseur (comptage en vol fail-closed, plafond de dépense) : la réservation
- * est rendue. Un échec du fournisseur lui-même (429, 5xx, réseau) reste débité,
+ * Réservation RENDUE : nos gardes ont arrêté l'appel avant envoi (comptage en
+ * vol fail-closed, plafond de dépense), ou le modèle n'a renvoyé qu'une réponse
+ * illisible malgré les réessais (BAD_OUTPUT) — notre défaut, l'utilisateur n'a
+ * rien reçu. Un échec du fournisseur lui-même (429, 5xx, réseau) reste débité,
  * comme décidé au lot 2 : l'appel est parti.
  */
-const OWN_GATE_CODES = new Set(["UNAVAILABLE", "SPEND_CAP"]);
+const REFUNDED_CODES = new Set(["UNAVAILABLE", "SPEND_CAP", "BAD_OUTPUT"]);
 
 /**
  * Réserve 0,1 crédit, exécute l'appel, et REMBOURSE si l'appel a été refusé par
@@ -226,7 +227,7 @@ export async function assistCall<T>(kind: string, fn: () => Promise<T>): Promise
     return await fn();
   } catch (e) {
     const code = (e as { code?: string } | null)?.code;
-    if (code && OWN_GATE_CODES.has(code)) {
+    if (code && REFUNDED_CODES.has(code)) {
       const { refundGeneration } = await import("./credits");
       await refundGeneration(`assist ${kind}`, r.ref);
     }
