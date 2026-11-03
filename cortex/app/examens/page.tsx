@@ -1,5 +1,6 @@
 "use client";
 
+import styles from "@/app/secondary.module.css";
 import { ExternalLink, CheckCircle2, ClipboardList, WifiOff, RotateCw, Trash2, FileText } from "lucide-react";
 import { TrainingNav } from "@/components/entrainement/TrainingNav";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -52,7 +53,7 @@ export default function ExamensPage() {
   };
 
   return (
-    <div className="flex flex-col gap-7">
+    <div className={styles.page}>
       <PageHeader title="S’entraîner" description="Compose un examen blanc au format de ton final et retrouve les examens prêts." />
       <TrainingNav current="/examens" />
 

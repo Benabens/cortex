@@ -169,8 +169,8 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   };
 
   return (
-    <Panel className="flex flex-col gap-5 p-5">
-      <h2 className="text-[0.95rem] font-semibold text-ink-1">Importer</h2>
+    <Panel className="flex flex-col gap-5 p-6">
+      <div><span className="text-xs font-medium text-violet-hi">Étape 1 · Tes documents</span><h2 className="mt-2 text-[1.2rem] font-semibold text-ink-1">Enrichir le cours</h2><p className="mt-2 text-sm leading-relaxed text-ink-3">Ajoute les supports de ton enseignant, puis prépare le programme à travailler.</p></div>
 
       <Segmented
         size="sm"
@@ -260,12 +260,13 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
 
       {/* Préparer le cours (pipeline complet) */}
       <div className="border-t border-line pt-4">
+        <p className="mb-3 text-xs font-medium text-violet-hi">Étape 2 · Ton programme</p>
         <Button variant="primary" onClick={prepare} loading={running && jobKind === "prepare"} disabled={running && jobKind !== "prepare"} className="w-full">
           {!(running && jobKind === "prepare") && <Sparkles className="size-4" strokeWidth={2.5} />}
           Préparer le cours
         </Button>
         <p className="mt-2 text-[0.76rem] leading-relaxed text-ink-3">
-          Pipeline complet : ingestion du corpus → détection du format → types d’exos et poids.
+          Cortex lit tes supports, reconnaît le format du final et organise les notions à travailler.
         </p>
       </div>
 

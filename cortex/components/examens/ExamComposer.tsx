@@ -1,5 +1,6 @@
 "use client";
 
+import styles from "@/app/secondary.module.css";
 import { useEffect, useRef, useState } from "react";
 import { Play, Check, AlertTriangle, Clock3, SlidersHorizontal, Target, ChevronDown } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
@@ -78,7 +79,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
   }, [job, onGenerated]);
 
   const running = launching || (job != null && JOB_ACTIVE.includes(job.status));
-  const totalCount = isQcm ? nQcm + nOpen : nExos;
+
 
   const generate = async () => {
     if (running) return;
@@ -107,14 +108,16 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
   };
 
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.55fr_1fr]">
+    <div className={styles.split}>
       {/* Composer */}
-      <Panel className="p-5 sm:p-6">
-        <h2 className="text-[1.05rem] font-semibold text-ink-1">Compositeur d’examen</h2>
+      <Panel className="p-6 sm:p-8">
+        <div className={styles.eyebrow}>Examen blanc</div>
+        <h2 className="text-[1.5rem] font-semibold leading-tight text-ink-1">En conditions de final</h2>
+        <p className="mt-3 text-sm leading-relaxed text-ink-3">Pars du format détecté dans tes annales. Ajuste les questions ou cible une notion si tu en as besoin.</p>
 
         {/* composition : proposition compacte (défaut) + disclosure de réglage fin */}
-        <div className="mt-5 rounded-lg border border-line bg-surface-2/40">
-          <div className="flex items-center justify-between px-4 py-3">
+        <div className="mt-6 rounded-2xl border border-line bg-surface-2/40">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-5">
             <span className="text-[0.82rem] text-ink-2">Composition</span>
             <span className="font-data text-[1.02rem] font-semibold tabular text-ink-1">
               {isQcm ? (
@@ -196,7 +199,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
         )}
 
         {/* action unique */}
-        <div className="mt-5 flex flex-wrap items-center gap-3">
+        <div className="mt-6 flex flex-wrap items-center gap-3">
           <Button variant="primary" onClick={generate} loading={running}>
             {!running && <Play className="size-4" strokeWidth={2.5} fill="currentColor" />}
             {running ? "Génération…" : "Générer l’examen"}
@@ -220,8 +223,8 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
 
       {/* Format détecté (réel) */}
       <div className="flex flex-col gap-5">
-        <Panel className="p-5">
-          <h2 className="text-[0.95rem] font-semibold text-ink-1">Format détecté</h2>
+        <Panel className="p-6">
+          <h2 className="text-[1.2rem] font-semibold text-ink-1">Ton final, comme repère</h2>
           <span className="mt-2 inline-flex rounded-full border border-line bg-surface-2/50 px-2.5 py-1 text-[0.72rem] font-medium text-cyan-hi">
             {isQcm ? "QCM et questions ouvertes" : "Exercices ouverts"}
           </span>
@@ -251,6 +254,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
             )}
           </div>
         </Panel>
+        <aside className={styles.guide}><h2>Une fois l’examen prêt</h2><ol className={styles.steps}><li><span><strong>Ouvre l’énoncé</strong>Travaille sans consulter le corrigé.</span></li><li><span><strong>Compare tes réponses</strong>Le corrigé reste disponible dans tes examens prêts.</span></li><li><span><strong>Reprends une notion</strong>Utilise l’onglet « Exo sur mesure » pour retravailler une difficulté.</span></li></ol></aside>
       </div>
     </div>
   );
