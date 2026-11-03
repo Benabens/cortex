@@ -19,13 +19,12 @@ export const metadata: Metadata = { ...NOINDEX, title: "Connecter une applicatio
  * ticket opaque lié au compte connecté. Même direction artistique que /login.
  */
 
-// faint : #8a8798 (5,2:1 sur la surface) — le #6f6c7d de /login reste sous 4,5:1 pour du petit texte.
-const C = { bg: "#0b0b0f", ink: "#f4f2fb", muted: "#a5a2b3", faint: "#8a8798", line: "rgba(255,255,255,0.10)", surface: "#141419" };
+const C = { bg: "var(--color-bg)", ink: "var(--color-ink-1)", muted: "var(--color-ink-2)", faint: "var(--color-ink-3)", line: "var(--color-line-strong)", surface: "var(--color-surface-2)" };
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <main style={{ background: C.bg, color: C.ink }} className="flex min-h-dvh flex-col items-center justify-center px-4 py-10">
-      <div className="w-full max-w-[26rem]">
+      <div className="d2-card w-full max-w-[32rem] p-6 sm:p-9">
         <div className="flex justify-center"><Wordmark markSize={30} /></div>
         {children}
       </div>
@@ -109,7 +108,7 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
             {canGenerate && (
               <li className="rounded-lg px-4 py-3" style={{ border: `1px solid ${C.line}` }}>
                 <label className="flex cursor-pointer items-start gap-3">
-                  <input type="checkbox" name="generate" defaultChecked className="mt-1 size-4 accent-[#ececee]" />
+                  <input type="checkbox" name="generate" defaultChecked className="mt-1 size-4 accent-violet" />
                   <span>
                     <span className="font-medium">Générer</span>
                     <span style={{ color: C.muted }}> des examens blancs, des questions d’entraînement et des corrections. Ces actions coûtent des crédits : chacune t’annonce son coût et attend ton accord.</span>
@@ -120,7 +119,7 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
             {canWrite && (
               <li className="rounded-lg px-4 py-3" style={{ border: `1px solid ${C.line}` }}>
                 <label className="flex cursor-pointer items-start gap-3">
-                  <input type="checkbox" name="write" defaultChecked className="mt-1 size-4 accent-[#ececee]" />
+                  <input type="checkbox" name="write" defaultChecked className="mt-1 size-4 accent-violet" />
                   <span>
                     <span className="font-medium">Ajouter des cours et des supports</span>
                     <span style={{ color: C.muted }}> : créer un cours et y ranger un document (adresse web ou texte), gratuitement. Le préparer coûte des crédits : il faut aussi « Générer », et son coût t’est annoncé avant ton accord.</span>
@@ -137,12 +136,12 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
 
         <div className="mt-6 flex flex-col gap-3">
           <button type="submit" name="decision" value="approve"
-            className="inline-flex h-12 w-full items-center justify-center rounded-lg bg-[#ececee] text-[0.92rem] font-semibold text-[#111214] transition-colors duration-150 hover:bg-white active:bg-[#dedee2]">
+            className="inline-flex h-12 w-full items-center justify-center rounded-full bg-violet-deep text-[0.92rem] font-semibold text-white transition-colors duration-150 hover:brightness-110 active:brightness-95">
             Autoriser
           </button>
           <button type="submit" name="decision" value="deny"
             // Couleurs en classes : un `style` inline l'emporterait sur le survol.
-            className="inline-flex h-12 w-full items-center justify-center rounded-lg border border-white/15 bg-[#141419] text-[0.92rem] font-medium text-[#f4f2fb] transition-colors duration-150 hover:bg-[#1b1b22]">
+            className="inline-flex h-12 w-full items-center justify-center rounded-full border border-line-strong bg-surface-2 text-[0.92rem] font-medium text-ink-1 transition-colors duration-150 hover:bg-surface-3">
             Refuser
           </button>
         </div>

@@ -36,7 +36,7 @@ import { cn } from "@/lib/ux/cn";
 
 function QA({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="panel rounded-xl p-5">
+    <section className="d2-card p-5">
       <h2 className="mb-4 text-[0.95rem] font-semibold text-ink-1">{title}</h2>
       {children}
     </section>
