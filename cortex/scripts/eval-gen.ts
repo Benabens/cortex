@@ -167,6 +167,11 @@ async function passagesFor(exam: NonNullable<Exported["exam"]>, cap = 14_000): P
   return out;
 }
 
+/** Notions du programme du cours (topics) : le juge en a besoin pour l'exception « plus de questions que de notions ». */
+async function notionCount(): Promise<number> {
+  try { return Number((await q.get<{ n: number }>(`SELECT count(*) n FROM topics`))?.n ?? 0); } catch { return 0; }
+}
+
 async function judgeOne(exam: NonNullable<Exported["exam"]>, truth: string): Promise<{ scores: Scores; name_only_items: number; ambiguous_items: number; unfaithful_items: number; overlapping_items: number; verdict: string }> {
   const prompt = [
     `Tu es un examinateur exigeant. On te montre UN examen blanc généré automatiquement pour un cours. Tu ne sais pas comment il a été produit. Évalue-le pour un étudiant qui prépare le VRAI examen décrit ci-dessous.`,
@@ -185,7 +190,7 @@ async function judgeOne(exam: NonNullable<Exported["exam"]>, truth: string): Pro
     `- fidelity : les questions s'appuient-elles sur des faits précis des extraits du cours, sans erreur ni hors-sujet ?`,
     `- language : la langue est-elle celle du vrai examen, sans mélange ?`,
     `- format : la forme correspond-elle au vrai examen (type de questions, nombre, réponse unique ou multiple, indépendance des questions) ?`,
-    `- overlap : chaque question teste-t-elle une notion ou un fait DISTINCT ? Deux questions sur la même notion ne se justifient que s'il y a plus de questions que de notions au programme, et alors sous des angles vraiment différents ; chaque recoupement abaisse la note (5 = aucun, 1 = la moitié des questions se recoupent).`,
+    `- overlap (le programme compte ${await notionCount()} notions pour ${exam.items.length} questions) : chaque question teste-t-elle une notion ou un fait DISTINCT ? Deux questions sur la même notion ne se justifient que s'il y a plus de questions que de notions au programme, et alors sous des angles vraiment différents ; chaque recoupement abaisse la note (5 = aucun, 1 = la moitié des questions se recoupent).`,
     `Compte aussi name_only_items, ambiguous_items, unfaithful_items, overlapping_items. Réponds UNIQUEMENT avec l'objet JSON conforme.`,
     JSON.stringify(JUDGE_SCHEMA, null, 2),
   ].join("\n");
