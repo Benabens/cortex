@@ -168,11 +168,23 @@ export function spreadOverChapters(topics: CoverageTopic[], n: number, opts: { a
         return best && { pick: best.pick, owner: best.owner };
       };
       const fresh = (t: CoverageTopic) => !clash(t) && !old(t);
+      // Une autre facette d'une notion déjà donnée à l'examen n'est pas une notion neuve : une notion
+      // = une question tant qu'il en reste (examen 4 de HUM-285), les facettes servent ensuite.
+      const unseen = (t: CoverageTopic) => fresh(t) && !(t.subTheme && out.some((o) => o.label === t.label));
       // Ordre de préférence : notion neuve ici, neuve ailleurs, non doublon ici, non doublon ailleurs.
       // La PREMIÈRE question d'un chapitre y reste même sur une notion déjà posée : la couverture
       // de chaque chapitre passe avant la nouveauté (CS-290 : Safety 2 n'a qu'une notion).
-      let pick: CoverageTopic | undefined = free.find(fresh) ?? (k === 0 ? free.find((t) => !clash(t)) : undefined);
+      let pick: CoverageTopic | undefined = free.find(unseen);
       let owner = c.name;
+      if (!pick && k > 0) {
+        const moved = elsewhere(unseen, true);
+        if (moved) {
+          ({ pick, owner } = moved);
+          load.set(owner, load.get(owner)! + 1);
+          load.set(c.name, load.get(c.name)! - 1);
+        }
+      }
+      pick ??= free.find(fresh) ?? (k === 0 ? free.find((t) => !clash(t)) : undefined);
       if (!pick) {
         const moved = elsewhere(fresh, true) ?? (free.some((t) => !clash(t)) ? null : elsewhere((t) => !clash(t), false));
         if (moved) {
