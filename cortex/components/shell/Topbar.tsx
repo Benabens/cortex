@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Search, ChevronDown, CalendarClock, UserRound } from "lucide-react";
+import { HeaderSearch } from "./HeaderSearch";
 import { Wordmark } from "./Logo";
 
 import { useApi, useCourse } from "@/lib/ux/api";
@@ -28,17 +29,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           <Wordmark markSize={23} />
         </Link>
 
-        {/* Search / command trigger */}
-        <Link
-          href="/recherche"
-          className="group hidden h-10 max-w-[420px] flex-1 items-center gap-2.5 rounded-lg border border-line bg-surface-2/50 px-3 text-ink-3 transition-colors hover:border-line-strong hover:bg-surface-2 sm:flex"
-          aria-label="Ouvrir la recherche"
-        >
-          <Search className="size-4 shrink-0" strokeWidth={2} />
-          <span className="flex-1 truncate text-[0.85rem]">
-            Rechercher un cours, une série, un final…
-          </span>
-        </Link>
+        <HeaderSearch />
 
         <div className="flex-1 sm:hidden" />
 

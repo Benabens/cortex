@@ -12,7 +12,7 @@ export function Panel({
   return (
     <div
       className={cn(
-        "panel",
+        "d2-card",
         interactive &&
           "transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-0.5 hover:border-[color-mix(in_oklch,var(--color-violet)_34%,transparent)] hover:shadow-[var(--shadow-pop)]",
         className
@@ -38,7 +38,7 @@ export function SectionHeader({
   return (
     <div className={cn("mb-3 flex items-end justify-between gap-4", className)}>
       <div>
-        <h2 className="text-[0.95rem] font-semibold text-ink-1">{title}</h2>
+        <h2 className="text-[1.1875rem] font-semibold text-ink-1">{title}</h2>
         {hint && <p className="mt-0.5 text-[0.8rem] text-ink-3">{hint}</p>}
       </div>
       {action && (
