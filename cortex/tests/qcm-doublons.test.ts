@@ -56,7 +56,7 @@ const dedupePrompts: string[] = [];
 
 /** Le contrôle de fin d'examen simulé : il lit la notion et l'angle de chaque question dans son énoncé. */
 function dedupeReply(prompt: string): string {
-  const lines = [...prompt.matchAll(/^Q(\d+)\. .*?\[notion:([^\]]+)\] \[angle:([^\]]+)\]/gm)];
+  const lines = [...prompt.matchAll(/^Q(\d+)\. .*?\[notion:([^\]]+)\] \[angle:([^\]]*)\]/gm)];
   return JSON.stringify({ notions: lines.map((m) => ({ index: Number(m[1]), notion: m[2], angle: m[3] })), duplicates: [] });
 }
 
@@ -107,9 +107,12 @@ after(async () => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+/** Libellés de notions sans racine commune (variants() les rapprocherait sinon). */
+const LABELS = ["Ancrage", "Bulles filtrantes", "Cadrage", "Désinformation", "Externalités", "Fact-checking", "Gouvernance", "Heuristiques", "Inclusion", "Jeux de rôle", "Kahneman", "Leadership", "Monopoles", "Nudges", "Open source", "Plateformes", "Quotas", "Régulation", "Souveraineté", "Tirage au sort", "Utilitarisme", "Vote", "Wikipédia", "Xénophobie", "Algorithmes", "Biométrie", "Cybersécurité", "Données personnelles", "Éthique", "Fracture numérique"];
+
 let courseN = 0;
 /** Un cours à `notions` notions (assez pour l'examen, ou moins). */
-async function course(notions: number): Promise<string> {
+async function course(notions: number, supports = 1): Promise<string> {
   const { buildCourseRow } = await import("../lib/course-create");
   const { insertCourse } = await import("../db/courses-store");
   const { reloadCourses } = await import("../lib/courses");
@@ -123,10 +126,13 @@ async function course(notions: number): Promise<string> {
     ensureFts();
     for (const t of ["sources", "items", "topics"]) await q.ensureTable(t);
     const text = "Biais de négativité, nudges, souveraineté des données, détecteurs de contenus synthétiques et leurs faux positifs.";
-    const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", "Séances 1 à 6", "course_pdf/seances", null, 1);
-    const iid = await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", "Séances 1 à 6", text);
-    await indexItemForSearch(iid, sid, "Séances 1 à 6", text);
-    for (let k = 1; k <= notions; k++) await q.run(`INSERT INTO topics (label, method, exam_weight, exam_count) VALUES (?,?,?,?)`, `Notion du cours ${k}`, null, 3, 1);
+    for (let k = 1; k <= supports; k++) {
+      const title = supports === 1 ? "Séances 1 à 6" : `Support ${k}`;
+      const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", title, `course_pdf/s${k}`, null, 1);
+      const iid = await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", title, text);
+      await indexItemForSearch(iid, sid, title, text);
+    }
+    for (let k = 1; k <= notions; k++) await q.run(`INSERT INTO topics (label, method, exam_weight, exam_count) VALUES (?,?,?,?)`, LABELS[k - 1], null, 3, 1);
   });
   return row.id;
 }
@@ -144,7 +150,7 @@ async function exam(id: string, count: number, focus?: string) {
 const notionIn = (stem: string) => /\[notion:([^\]]+)\]/.exec(stem)?.[1] ?? "";
 
 test("examen 4 : une notion = une question — Q11, Q19, Q16, Q20 et Q14 retirées et remplacées, les premières gardées", async () => {
-  const id = await course(24);
+  const id = await course(30);
   const { r, steps, stems } = await exam(id, 20);
   assert.equal(r.count, 20);
   const notions = stems.map(notionIn);
@@ -158,7 +164,7 @@ test("examen 4 : une notion = une question — Q11, Q19, Q16, Q20 et Q14 retiré
 });
 
 test("un remplacement qui retombe sur une notion déjà posée est retiré à son tour", async () => {
-  const id = await course(24);
+  const id = await course(30);
   // Le 1ᵉʳ lot de remplacement repose encore une question sur le nudge (déjà Q12).
   design = (n, call) => (call === 6 ? Array.from({ length: n }, (_, i) => item(i === 0 ? `Remplacement 6.0 [notion:nudge] [angle:autre] : que dit le cours ?` : `Remplacement 6.${i} [notion:neuve 6.${i}] [angle:a] : que dit le cours ?`)) : defaultDesign(n, call));
   const { r, stems } = await exam(id, 20);
@@ -180,15 +186,56 @@ test("plus de questions que de notions : deux questions sur une notion restent, 
   assert.equal(r.count, 6);
   assert.ok(stems.some((s) => s.startsWith("Question 1 ")) && stems.some((s) => s.startsWith("Question 4 ")), "angles distincts : les deux gardées");
   assert.ok(!stems.some((s) => s.startsWith("Question 5 ")), "même angle : la seconde retirée");
+  assert.ok(stems.some((s) => s.startsWith("Question 3 ")) && stems.some((s) => s.startsWith("Question 6 ")), "souveraineté : deux angles distincts, gardées");
   assert.doesNotMatch(dedupePrompts[0], /une notion = une question/i);
+  const last = designPrompts[designPrompts.length - 1];
+  assert.match(last, /angle vraiment distinct/, "plus de questions que de notions : le remplacement peut reprendre une notion sous un autre angle");
+  assert.doesNotMatch(last, /n'en reprends AUCUNE/);
 });
 
-test("accent demandé par l'étudiant : ses questions partagent un thème, le contrôle ne les retire pas pour ça", async () => {
-  const id = await course(24);
+test("accent demandé par l'étudiant : ses questions partagent un thème sans être retirées, les autres restent une notion = une question", async () => {
+  const id = await course(30);
+  // Q1 et Q2 : les deux questions de l'accent (nudges). Q4 : une question hors accent sur le nudge
+  // (doublon d'une question de l'accent) ; Q5 et Q6 : même notion entre elles, hors accent.
   design = (n, call) => Array.from({ length: n }, (_, i) => {
     const q = (call - 1) * 4 + i + 1;
-    return item(q <= 2 ? `Question ${q} [notion:nudge] [angle:facette ${q}] : que dit le cours ?` : `Question ${q} [notion:autre ${q}] [angle:a] : que dit le cours ?`);
+    const tag = q <= 2 ? `[notion:nudge] [angle:facette ${q}]` : q === 4 ? `[notion:nudge] [angle:facette 4]` : q === 6 ? `[notion:autre 5] [angle:b]` : `[notion:autre ${q}] [angle:a]`;
+    return item(call <= 2 ? `Question ${q} ${tag} : que dit le cours ?` : `Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`);
   });
-  const { stems } = await exam(id, 4, "les nudges");
-  assert.ok(stems.some((s) => s.startsWith("Question 1 ")) && stems.some((s) => s.startsWith("Question 2 ")));
+  const { r, stems } = await exam(id, 6, "les nudges");
+  assert.equal(r.count, 6);
+  assert.ok(stems.some((s) => s.startsWith("Question 1 ")) && stems.some((s) => s.startsWith("Question 2 ")), "l'accent garde ses deux questions");
+  assert.ok(!stems.some((s) => s.startsWith("Question 4 ")), "une 3ᵉ question sur le nudge, hors accent, est retirée");
+  assert.ok(!stems.some((s) => s.startsWith("Question 6 ")), "hors accent, une notion = une question, quel que soit l'angle");
+  assert.match(dedupePrompts[0], /une notion = une question/i);
+});
+
+test("le dernier lot de remplacement est contrôlé lui aussi : une notion déjà posée n'y reste pas", async () => {
+  const id = await course(30);
+  // Chaque lot de remplacement repose une question sur le nudge (déjà Q12).
+  design = (n, call) => (call >= 6 ? Array.from({ length: n }, (_, i) => item(i === 0 ? `Remplacement ${call}.0 [notion:nudge] [angle:encore ${call}] : que dit le cours ?` : `Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`)) : defaultDesign(n, call));
+  const { stems } = await exam(id, 20);
+  const notions = stems.map(notionIn);
+  assert.equal(new Set(notions).size, notions.length, `aucune notion deux fois :\n${notions.join("\n")}`);
+  assert.equal(notions.filter((n) => n === "nudge").length, 1);
+});
+
+test("titres de supports ajoutés faute de notions : ils ne comptent pas comme notions pour décider du mode strict", async () => {
+  const id = await course(3, 30);
+  design = (n, call) => Array.from({ length: n }, (_, i) => {
+    const q = (call - 1) * 4 + i + 1;
+    return item(call <= 2 ? `Question ${q} [notion:${q % 3}] [angle:fait ${q}] : que dit le cours ?` : `Remplacement ${call}.${i} [notion:0] [angle:autre ${call}.${i}] : que dit le cours ?`);
+  });
+  await exam(id, 6);
+  assert.doesNotMatch(dedupePrompts[0], /une notion = une question/i, "3 notions pour 6 questions : plusieurs questions par notion, sous des angles distincts");
+});
+
+test("plus de questions que de notions, angle non nommé par le modèle : pas de retrait sur la seule notion", async () => {
+  const id = await course(3);
+  design = (n, call) => Array.from({ length: n }, (_, i) => {
+    const q = (call - 1) * 4 + i + 1;
+    return item(`Question ${q} [notion:${q === 1 || q === 4 ? "nudge" : `autre ${q}`}] [angle:] : que dit le cours ?`);
+  });
+  const { stems } = await exam(id, 6);
+  assert.ok(stems.some((s) => s.startsWith("Question 1 ")) && stems.some((s) => s.startsWith("Question 4 ")));
 });
