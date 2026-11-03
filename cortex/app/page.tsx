@@ -1,7 +1,7 @@
 "use client";
 
 import { WifiOff, RotateCw } from "lucide-react";
-import { useApi, asText } from "@/lib/ux/api";
+import { useApi } from "@/lib/ux/api";
 import type { Dash } from "@/lib/ux/types";
 import { CourseLine } from "@/components/dashboard/CourseLine";
 import { PlanOverview } from "@/components/dashboard/PlanOverview";
@@ -34,10 +34,8 @@ export default function DashboardPage() {
     );
   }
 
-  const next = data.next;
-  const nextLabel = next ? asText(next.label) : null;
   // Onboarding : rien d'actionnable (cours pas analysé, ou données inutilisables — cf. MAPPING cs-202).
-  const onboarding = !data.analyzed || !next || !nextLabel;
+  const onboarding = !data.analyzed || data.stats.total === 0;
 
   return (
     <div className={column}>
