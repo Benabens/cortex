@@ -151,10 +151,12 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
   };
 
   return (
-    <section className="panel top-light relative overflow-hidden rounded-xl p-5 sm:p-6" aria-labelledby="inbox-title">
-      <h2 id="inbox-title" className="text-[1.05rem] font-semibold text-ink-1">
+    <section className="d2-card relative overflow-hidden p-5 sm:p-6" aria-labelledby="inbox-title">
+      <h2 id="inbox-title" className="text-xl font-semibold text-ink-1">
         <label htmlFor={inputId}>Ajoute ce qui t’a piégé</label>
       </h2>
+
+      <p className="mt-2 text-sm leading-relaxed text-ink-3">Une note, une discussion, une capture ou un PDF. Cortex relie tes erreurs aux notions du cours.</p>
 
       {/* Zone de dépôt unique : texte, capture collée, PDF ou image glissés. */}
       <div

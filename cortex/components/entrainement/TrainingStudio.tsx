@@ -53,13 +53,14 @@ export function TrainingStudio() {
   const [jobId, setJobId] = useState<number | null>(null);
   const [launching, setLaunching] = useState(false);
   const job = useJob(jobId);
-  const jobRunning = launching || (job != null && JOB_ACTIVE.includes(job.status));
+  const jobRunning = launching || (jobId != null && !job) || (job != null && JOB_ACTIVE.includes(job.status));
   const jobDone = job != null && !JOB_ACTIVE.includes(job.status) && job.status !== "error" && job.status !== "failed";
   const jobFailed = job != null && (job.status === "error" || job.status === "failed");
 
   const [error, setError] = useState<{ offline: boolean; message: string } | null>(null);
   const [fbSent, setFbSent] = useState<string | null>(null);
   const [fbBusy, setFbBusy] = useState(false);
+  const [fbError, setFbError] = useState<string | null>(null);
 
   const busy = drilling || jobRunning;
 
@@ -67,7 +68,7 @@ export function TrainingStudio() {
   // le cours initial se résout de cs-202 → ml via un effet (courseId change au montage) ; effacer
   // l'input ici écraserait le pré-remplissage ?prefill= (déposé au montage). Le × / l'édition suffisent.
   useEffect(() => {
-    setDrill(null); setJobId(null); setError(null); setFbSent(null); setShownHints(0); setShowSolution(false);
+    setDrill(null); setJobId(null); setError(null); setFbSent(null); setFbError(null); setShownHints(0); setShowSolution(false);
   }, [courseId]);
 
   // Deep-link ?prefill=<concept> (bouton « S'entraîner » des Faiblesses ; legacy ?drill= toléré).
@@ -87,7 +88,7 @@ export function TrainingStudio() {
   async function launchDrill(c?: string) {
     const chosen = (c ?? input).trim();
     if (!chosen || busy) return;
-    setError(null); setDrill(null); setJobId(null); setFbSent(null);
+    setError(null); setDrill(null); setJobId(null); setFbSent(null); setFbError(null);
     setShownHints(0); setShowSolution(false);
     setDrilling(true);
     try {
@@ -108,7 +109,7 @@ export function TrainingStudio() {
 
   async function launchArchitect() {
     if (busy) return;
-    setError(null); setDrill(null); setFbSent(null); setJobId(null);
+    setError(null); setDrill(null); setFbSent(null); setFbError(null); setJobId(null);
     setLaunching(true);
     try {
       const fd = new FormData();
@@ -145,6 +146,7 @@ export function TrainingStudio() {
   async function sendFeedback(verdict: string) {
     if (fbBusy || fbSent) return;
     setFbBusy(true);
+    setFbError(null);
     try {
       await apiPost("/api/feedback", courseId, {
         examId: jobDone ? (job as { resultId?: number }).resultId : undefined,
@@ -152,8 +154,8 @@ export function TrainingStudio() {
         verdict,
       });
       setFbSent(verdict);
-    } catch {
-      setFbSent(verdict);
+    } catch (error) {
+      setFbError((error as ApiError).message || "Ton retour n’a pas pu être enregistré. Réessaie.");
     } finally {
       setFbBusy(false);
     }
@@ -216,6 +218,12 @@ export function TrainingStudio() {
           />
         </div>
 
+        {list.error && (
+          <div className="mt-4 rounded-xl border border-line p-3 text-sm text-ink-3">
+            <p>Les suggestions de révision ne sont pas disponibles.</p>
+            <Button className="mt-2" size="sm" onClick={list.refetch}>Recharger les suggestions</Button>
+          </div>
+        )}
         {/* puces : dus / faiblesses réels */}
         {!list.loading && !list.error && (dueChips.length > 0 || weakChips.length > 0) && (
           <div className="mt-4 space-y-3">
@@ -293,7 +301,7 @@ export function TrainingStudio() {
                 </Button>
               )}
             </div>
-            <FeedbackBar onSend={sendFeedback} sent={fbSent} busy={fbBusy} />
+            <FeedbackBar onSend={sendFeedback} sent={fbSent} busy={fbBusy} error={fbError} />
           </>
         ) : waiting ? (
           <div className="flex flex-1 flex-col justify-center gap-3" aria-live="polite">
@@ -325,13 +333,14 @@ export function TrainingStudio() {
                 <span className="text-[0.82rem] font-medium text-ink-1">Corrigé</span>
               </a>
             </div>
-            <FeedbackBar onSend={sendFeedback} sent={fbSent} busy={fbBusy} />
+            <FeedbackBar onSend={sendFeedback} sent={fbSent} busy={fbBusy} error={fbError} />
           </>
         ) : jobFailed ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
             <AlertTriangle className="size-6 text-danger-hi" strokeWidth={2} />
             <p className="text-[0.9rem] font-medium text-ink-1">La génération a échoué</p>
-            <p className="max-w-xs text-[0.82rem] text-ink-3">{asText(job?.error) ?? "Réessaie. Si ça persiste, vérifie le moteur LLM et le moteur LaTeX."}</p>
+            <p role="alert" className="max-w-xs text-sm text-ink-3">{asText(job?.error) ?? "L’exercice n’a pas pu être terminé. Ta consigne est conservée."}</p>
+            <Button variant="secondary" onClick={submit}>Réessayer la génération</Button>
           </div>
         ) : null}
       </Panel>
@@ -340,7 +349,7 @@ export function TrainingStudio() {
   );
 }
 
-function FeedbackBar({ onSend, sent, busy }: { onSend: (verdict: string) => void; sent: string | null; busy: boolean }) {
+function FeedbackBar({ onSend, sent, busy, error }: { onSend: (verdict: string) => void; sent: string | null; busy: boolean; error: string | null }) {
   return (
     <div className="mt-auto border-t border-line pt-4">
       <div className="mb-2.5 flex items-center gap-2 text-[0.82rem] text-ink-2">
@@ -356,7 +365,7 @@ function FeedbackBar({ onSend, sent, busy }: { onSend: (verdict: string) => void
             disabled={busy || !!sent}
             aria-pressed={sent === o.verdict}
             className={cn(
-              "h-10 rounded-md border px-3 text-[0.8rem] font-medium transition-colors disabled:opacity-60",
+              "min-h-11 rounded-full border px-3 text-[0.8rem] font-medium transition-colors disabled:opacity-60",
               sent === o.verdict
                 ? "border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_16%,transparent)] text-ink-1"
                 : "border-line bg-surface-2/40 text-ink-2 hover:bg-surface-2 hover:text-ink-1"
@@ -366,6 +375,7 @@ function FeedbackBar({ onSend, sent, busy }: { onSend: (verdict: string) => void
           </button>
         ))}
       </div>
+      {error && <p role="alert" className="mt-2 text-sm text-danger-hi">{error}</p>}
       {sent && <p className="mt-2 text-[0.78rem] text-emerald-hi" aria-live="polite">Merci : Cortex recalibre la difficulté des prochains exos.</p>}
     </div>
   );

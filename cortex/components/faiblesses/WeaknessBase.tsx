@@ -38,6 +38,7 @@ export function WeaknessBase({
   const [filter, setFilter] = useState<Severity | "ALL">("ALL");
   const [grouped, setGrouped] = useState(false); // P-C : grouper par chapitre (thème du plan)
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const rows =
     filter === "ALL" ? weaknesses : weaknesses.filter((w) => sevOf(w.severity) === filter);
@@ -48,11 +49,18 @@ export function WeaknessBase({
     if (deleting) return;
     if (!window.confirm(`Retirer « ${w.topic} » du suivi ? Cette action est définitive.`)) return;
     setDeleting(w.id);
+    setDeleteError(null);
     try {
-      await fetch(`/api/weaknesses?id=${w.id}&course=${encodeURIComponent(courseId)}`, {
+      const response = await fetch(`/api/weaknesses?id=${w.id}&course=${encodeURIComponent(courseId)}`, {
         method: "DELETE",
       });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error ?? "Le retrait a échoué. Réessaie.");
+      }
       onChanged();
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Le retrait a échoué. Réessaie.");
     } finally {
       setDeleting(null);
     }
@@ -77,10 +85,11 @@ export function WeaknessBase({
 
   return (
     <section>
-      <SectionHeader title="Base des faiblesses" />
+      <SectionHeader title="À retravailler" hint="Sélectionne une faiblesse pour créer un exercice ciblé." />
+      {deleteError && <p role="alert" className="mb-3 rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger-hi">{deleteError}</p>}
 
       {weaknesses.length === 0 ? (
-        <div className="panel flex flex-col items-center gap-3 rounded-xl px-6 py-14 text-center">
+        <div className="d2-card flex flex-col items-center gap-3 rounded-xl px-6 py-14 text-center">
           <span className="grid size-11 place-items-center rounded-lg border border-line bg-surface-2/60 text-ink-3">
             <Target className="size-5" strokeWidth={2} />
           </span>
@@ -112,7 +121,7 @@ export function WeaknessBase({
           </div>
 
           {rows.length === 0 ? (
-            <div className="panel rounded-xl p-1.5">
+            <div className="d2-card rounded-xl p-1.5">
               <p className="px-4 py-8 text-center text-[0.85rem] text-ink-3">
                 Aucune lacune {FILTERS.find((f) => f.key === filter)?.label.toLowerCase()} : retire le filtre pour tout voir.
               </p>
@@ -120,7 +129,7 @@ export function WeaknessBase({
           ) : grouped ? (
             <div className="space-y-2.5">
               {groups.map((g, gi) => (
-                <div key={g.theme ?? `__none-${gi}`} className="panel overflow-hidden rounded-xl p-0">
+                <div key={g.theme ?? `__none-${gi}`} className="d2-card overflow-hidden rounded-xl p-0">
                   <div className="flex items-center justify-between gap-2 border-b border-line bg-surface-2/30 px-4 py-2.5">
                     <h3 className="text-[0.88rem] font-semibold text-ink-1">{g.theme ?? "Sans chapitre"}</h3>
                     <span className="font-data text-[0.72rem] tabular text-ink-4">{g.rows.length}</span>
@@ -134,7 +143,7 @@ export function WeaknessBase({
               ))}
             </div>
           ) : (
-            <div className="panel overflow-hidden rounded-xl p-1.5">
+            <div className="d2-card overflow-hidden rounded-xl p-1.5">
               {rows.slice().sort(bySeverity).map((w, i) => (
                 <WeaknessRow key={w.id} w={w} i={i} deleting={deleting} onRemove={remove} />
               ))}
@@ -164,7 +173,7 @@ function WeaknessRow({
   return (
     <div
       className={cn(
-        "group flex flex-col gap-3 rounded-lg px-3 py-3.5 transition-colors hover:bg-surface-2/50 md:flex-row md:items-center md:gap-4",
+        "group flex flex-col gap-3 rounded-lg px-3 py-3.5 transition-colors hover:bg-surface-2/50 lg:flex-row lg:items-start lg:gap-4",
         i > 0 && "border-t border-line"
       )}
     >
@@ -181,9 +190,9 @@ function WeaknessRow({
             )}
           </div>
           {w.description && (
-            <p className="mt-0.5 line-clamp-2 max-w-2xl text-[0.8rem] text-ink-3">{w.description}</p>
+            <p className="mt-0.5 max-w-2xl text-[0.8rem] text-ink-3">{w.description}</p>
           )}
-          <p className="mt-1 text-[0.74rem] text-ink-4">
+          <p className="mt-1 text-[0.74rem] text-ink-3">
             {sourceLabel(w.source)}
             {day ? ` · ${day}` : ""}
             {w.timesSeen > 1 ? ` · vue ${w.timesSeen} fois` : ""}
@@ -210,7 +219,7 @@ function WeaknessRow({
       </div>
 
       {(chips.length > 0 || w.theme) && (
-        <div className="flex flex-wrap items-center gap-1.5 md:w-[200px] md:shrink-0">
+        <div className="flex flex-wrap items-center gap-1.5 lg:max-w-[140px] lg:shrink-0">
           {w.theme && (
             <span className="rounded-full border border-line bg-surface-1/60 px-2 py-0.5 text-[0.7rem] text-ink-3">{w.theme}</span>
           )}
@@ -224,7 +233,7 @@ function WeaknessRow({
         <a
           href={`/entrainement?prefill=${encodeURIComponent(w.topic)}`}
           aria-label={`S'entraîner sur : ${w.topic}`}
-          className="inline-flex h-10 items-center justify-center gap-1 rounded-md border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_38%,transparent)] hover:text-ink-1"
+          className="inline-flex min-h-11 items-center justify-center gap-1 rounded-full border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_38%,transparent)] hover:text-ink-1"
         >
           S’entraîner
           <ArrowUpRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
@@ -232,9 +241,9 @@ function WeaknessRow({
         <button
           type="button"
           onClick={() => onRemove(w)}
-          disabled={deleting === w.id}
+          disabled={deleting !== null}
           aria-label={`Retirer du suivi : ${w.topic}`}
-          className="grid size-10 place-items-center rounded-md border border-transparent text-ink-4 transition-colors hover:border-[color-mix(in_oklch,var(--color-danger)_35%,transparent)] hover:text-danger-hi disabled:opacity-50"
+          className="grid size-11 place-items-center rounded-full border border-transparent text-ink-4 transition-colors hover:border-[color-mix(in_oklch,var(--color-danger)_35%,transparent)] hover:text-danger-hi disabled:opacity-50"
         >
           <Trash2 className="size-4" strokeWidth={2} />
         </button>

@@ -12,7 +12,7 @@ export default function EntrainementPage() {
 
   return (
     <div className={styles.page}>
-      <PageHeader title="S’entraîner" description="Crée un exercice sur une notion, une consigne ou une image." />
+      <PageHeader title="Entraînement" description="Crée un exercice sur une notion, une consigne ou une image." />
       <TrainingNav current="/entrainement" />
       <TrainingStudio key={courseId} />
       {/* La série Labs est propre à CS-202 (moule Q6 2025 sur le code des labs). */}
