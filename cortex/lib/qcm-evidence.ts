@@ -65,9 +65,11 @@ function quoted(flag: string): string[] {
  * échoue, toutes gardent le rejet du correcteur.
  */
 export async function secondLookOffCourse(flags: OffCourseFlag[]): Promise<string[]> {
+  // Les notions nommées par le correcteur, celles qu'il cite entre guillemets (une définition
+  // contestée, PR #55), puis sa phrase elle-même : chaque signalement a ses propres passages.
   const evidence = await Promise.all(flags.map((f) => {
-    const terms = f.terms.length ? f.terms : quoted(f.reason);
-    return evidencePassages(terms.length ? terms : [f.reason], { perQuery: 3, cap: 2000, budget: 10_000 }).catch(() => []);
+    const queries = [...new Set([...f.terms, ...quoted(f.reason), f.reason])];
+    return evidencePassages(queries, { perQuery: 3, cap: 2000, budget: 10_000 }).catch(() => []);
   }));
   const verdicts = flags.map((f) => f.reason);
   const open = flags.map((f, i) => ({ f, i })).filter((x) => evidence[x.i].length);

@@ -62,6 +62,8 @@ const secondLookPrompts: string[] = [];
 let flag: (block: string, prompt: string) => { off: string; terms: string[] } | null = (block, prompt) => (
   /Svenson/.test(block) && !prompt.includes("93 % des conducteurs") ? { off: "L'étude de Svenson (1981) n'apparaît dans aucun extrait du cours.", terms: ["Svenson (1981)"] } : null
 );
+/** Définition jugée différente de celle du cours (PR #55), d'après le bloc de la question. */
+let mismatch: (block: string) => string = () => "";
 /** Ce que répond le second regard (recherche dans tout le cours) ; null = réponse illisible. */
 let secondLook: (prompt: string) => { index: number; off_course: string }[] | null = (prompt) => {
   const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
@@ -74,7 +76,7 @@ function verifyReply(prompt: string): string {
     const index = Number(/^Q(\d+)\./.exec(b)![1]);
     const opt = [...b.matchAll(/^\s+\((\d+)\) (.*)$/gm)].find((m) => /^Une large majorité/.test(m[2]));
     const f = flag(b, prompt);
-    return { index, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms: [], off_course: f?.off ?? "", off_course_terms: f?.terms ?? [], off_matter: "" };
+    return { index, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms: [], off_course: f?.off ?? "", off_course_terms: f?.terms ?? [], off_matter: "", trivial_distractors: [], definition_mismatch: mismatch(b) };
   });
   return JSON.stringify({ results });
 }
@@ -108,12 +110,12 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-const defaults = { design, flag, secondLook };
+const defaults = { design, flag, secondLook, mismatch };
 beforeEach(() => {
   designCalls = 0;
   verifyPrompts.length = 0;
   secondLookPrompts.length = 0;
-  ({ design, flag, secondLook } = defaults);
+  ({ design, flag, secondLook, mismatch } = defaults);
 });
 
 after(async () => {
@@ -227,4 +229,19 @@ test("rien dans tout le cours sur la notion signalée : rejet sans second regard
   assert.equal(r.count, 2);
   assert.ok(view.items.every((it) => !it.options.some((o) => /SMACIT/.test(o))), "la question n'est pas blanchie");
   assert.equal(secondLookPrompts.length, 0, "aucun appel : aucun passage ne parle de la notion");
+});
+
+test("définition jugée différente sur des extraits partiels (#55), mais conforme au cours entier : gardée après le second regard", async () => {
+  const id = await course();
+  flag = () => null;
+  mismatch = (b) => (/Svenson/.test(b) ? "« supériorité illusoire » : la question la réduit aux conducteurs ; les extraits ne la définissent pas" : "");
+  secondLook = (prompt) => {
+    assert.match(prompt, /définition différente du cours/);
+    const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
+    return blocks.map((b) => ({ index: Number(/^Q(\d+)\./.exec(b)![1]), off_course: "" }));
+  };
+  const { r, steps } = await exam(id, 2);
+  assert.equal(r.count, 2);
+  assert.ok(!steps.some((s) => /QCM rejeté/.test(s)), steps.filter((s) => /rejeté/.test(s)).join("\n"));
+  assert.equal(designCalls, 1);
 });
