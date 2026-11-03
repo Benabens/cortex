@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { Wordmark } from "./Logo";
 import { CourseSelector } from "./CourseSelector";
@@ -9,35 +9,38 @@ import { SECONDARY_NAV } from "./nav";
 import { NavList } from "./NavList";
 
 export function MobileNav({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const close = useRef(onClose);
+  useEffect(() => { close.current = onClose; }, [onClose]);
+
   useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", onKey);
+    const node = dialog.current;
+    if (!node || !open) return;
+    // Le dialogue natif isole le fond, retient le focus et le rend au bouton d’ouverture.
+    const previousOverflow = document.body.style.overflow;
+    node.showModal();
     document.body.style.overflow = "hidden";
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    const onResize = () => { if (desktop.matches) close.current(); };
+    desktop.addEventListener("change", onResize);
     return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
+      node.close();
+      document.body.style.overflow = previousOverflow;
+      desktop.removeEventListener("change", onResize);
     };
-  }, [open, onClose]);
+  }, [open]);
 
   return (
-    <div
-      className={`fixed inset-0 z-50 lg:hidden ${open ? "" : "pointer-events-none"}`}
-      aria-hidden={!open}
-      inert={!open}
+    <dialog
+      ref={dialog}
+      aria-label="Cours et ressources"
+      onCancel={(event) => { event.preventDefault(); onClose(); }}
+      className="fixed inset-0 m-0 h-dvh max-h-none w-screen max-w-none border-0 bg-transparent p-0 text-ink-1 backdrop:bg-black/60 backdrop:backdrop-blur-sm"
     >
-      {/* scrim */}
-      <div
-        onClick={onClose}
-        className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-200 ${
-          open ? "opacity-100" : "opacity-0"
-        }`}
-      />
+      <button type="button" onClick={onClose} aria-label="Fermer les ressources"
+        tabIndex={-1} className="absolute inset-0 cursor-default" />
       {/* drawer */}
       <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Menu de navigation"
         className={`absolute inset-y-0 left-0 flex w-[min(84vw,320px)] flex-col border-r border-line bg-bg shadow-[var(--shadow-hero)] transition-transform duration-300 ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
@@ -62,6 +65,6 @@ export function MobileNav({ open, onClose }: { open: boolean; onClose: () => voi
           <Link href="/cours" onClick={onClose} className="flex min-h-11 items-center px-3 text-sm text-ink-2">Gérer mes cours</Link>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }

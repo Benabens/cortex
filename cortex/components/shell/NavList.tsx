@@ -22,7 +22,7 @@ export function NavList({ onNavigate, items = NAV, compact = false }: {
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "group relative flex items-center rounded-md font-medium transition-colors duration-150",
+              "group relative flex items-center rounded-xl font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-hi",
               compact ? "min-h-14 flex-col justify-center gap-1 text-[0.69rem]" : "h-11 gap-3 px-3 text-[0.9rem]",
               active
                 ? "bg-violet/15 text-violet-hi"
@@ -43,6 +43,7 @@ export function NavList({ onNavigate, items = NAV, compact = false }: {
                 active ? "text-violet-hi" : "text-ink-3 group-hover:text-ink-2"
               )}
               strokeWidth={2}
+              aria-hidden="true"
             />
             <span>{label}</span>
           </Link>
