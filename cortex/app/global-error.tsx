@@ -60,7 +60,7 @@ export default function GlobalError({
               cortex
               <span
                 aria-hidden="true"
-                style={{ display: "inline-block", width: "0.17em", height: "0.17em", marginLeft: "0.035em", borderRadius: "50%", background: "#7a5cff" }}
+                style={{ display: "inline-block", width: "0.17em", height: "0.17em", marginLeft: "0.035em", borderRadius: "50%", background: "#548dff" }}
               />
             </div>
             <h1 style={{ fontSize: 22, fontWeight: 700, margin: "14px 0 8px" }}>Erreur critique</h1>

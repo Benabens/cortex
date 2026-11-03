@@ -1,5 +1,8 @@
 "use client";
 
+import { StudyMilestones } from "@/components/dashboard/StudyMilestones";
+import { ExamActivity } from "@/components/dashboard/PlanOverview";
+import type { Dash } from "@/lib/ux/types";
 import { WifiOff, RotateCw } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { WeaknessInbox } from "@/components/faiblesses/WeaknessInbox";
@@ -10,15 +13,26 @@ import { useApi } from "@/lib/ux/api";
 import type { WeaknessesResp } from "@/lib/ux/weaknesses";
 
 export default function FaiblessesPage() {
+  const { data: dashboard } = useApi<Dash>("/api/dashboard");
   const { data, loading, error, refetch } = useApi<WeaknessesResp>("/api/weaknesses");
 
   return (
     <div className="flex flex-col gap-7">
       <PageHeader
-        title="Faiblesses"
-        description="Transforme tes erreurs en plan de révision. Cortex extrait tes lacunes et les garde à l’œil."
+        title="Progrès"
+        description="Retrouve les notions que tu maîtrises, tes faiblesses et ton activité."
       />
 
+      {dashboard && (
+        <section className="d2-hero p-5 sm:p-7">
+          <h2 className="text-2xl font-semibold">Maîtrise du programme</h2>
+          <p className="mt-3 text-sm text-blue-100">{dashboard.stats.mastered} sur {dashboard.stats.total} notions solides</p>
+          <progress className="mt-3 h-2 w-full max-w-lg accent-blue-300" aria-label="Notions solides"
+            max={Math.max(1, dashboard.stats.total)} value={dashboard.stats.mastered} />
+        </section>
+      )}
+      <StudyMilestones />
+      <h2 id="faiblesses" className="scroll-mt-24 text-2xl font-semibold">Faiblesses</h2>
       <WeaknessInbox onAdded={refetch} />
 
       {loading ? (
@@ -54,6 +68,7 @@ export default function FaiblessesPage() {
       ) : (
         <WeaknessBase weaknesses={data.weaknesses} onChanged={refetch} />
       )}
+      {dashboard && <ExamActivity exams={dashboard.exams} />}
     </div>
   );
 }

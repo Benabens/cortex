@@ -4,25 +4,13 @@ import { WifiOff, RotateCw } from "lucide-react";
 import { useApi, asText } from "@/lib/ux/api";
 import type { Dash } from "@/lib/ux/types";
 import { CourseLine } from "@/components/dashboard/CourseLine";
-import { PriorityHero } from "@/components/dashboard/PriorityHero";
-import { UpNext } from "@/components/dashboard/UpNext";
+import { PlanOverview } from "@/components/dashboard/PlanOverview";
 import { OnboardingHero } from "@/components/dashboard/OnboardingHero";
-import { QuietDoors } from "@/components/dashboard/QuietDoors";
 import { JobBanner } from "@/components/dashboard/JobBanner";
 import { Button } from "@/components/ui/Button";
 import { Panel } from "@/components/ui/primitives";
 
-/**
- * ACCUEIL — l'écran répond à UNE question : « par où je commence maintenant ? »
- *
- * « Next up » : la ligne du cours et du final, la notion à travailler en très grand avec sa
- * raison et son bouton, puis « Ensuite » (les trois suivantes) et au plus deux portes en texte.
- * Rien d'autre : ni carte autour du héro, ni métrique. Maîtrise, programme couvert, faiblesses,
- * examens récents vivent sur leurs pages ; les dupliquer ici faisait de l'accueil un bulletin.
- */
-
-/** Colonne de l'Accueil : 884 px au plus, en retrait de la marge de l'app sur grand écran (maquette du labo). */
-const column = "w-full max-w-[55.25rem] lg:ml-12 lg:mt-11";
+const column = "flex w-full flex-col gap-5";
 
 export default function DashboardPage() {
   const { data, loading, error, refetch } = useApi<Dash>("/api/dashboard");
@@ -53,7 +41,15 @@ export default function DashboardPage() {
 
   return (
     <div className={column}>
-      <CourseLine courseId={data.course.id} code={data.course.examCode} countdown={data.countdown} />
+      <header>
+        <p className="mb-2 text-sm font-medium text-violet-hi">Aujourd’hui</p>
+        <h1 className="mb-3 break-words text-3xl font-semibold tracking-tight sm:text-5xl">
+          {data.countdown && data.countdown.days >= 0
+            ? data.countdown.days === 0 ? "Final aujourd’hui" : `Final dans ${data.countdown.days} jours`
+            : data.course.name}
+        </h1>
+        <CourseLine courseId={data.course.id} code={data.course.examCode} countdown={data.countdown} />
+      </header>
 
       {data.job && (
         <div className="mt-5">
@@ -66,30 +62,11 @@ export default function DashboardPage() {
       )}
 
       {onboarding ? (
-        <div className="mt-6 max-w-[46rem]">
+        <div className="d2-card max-w-[46rem] p-5 sm:p-7">
           <OnboardingHero courseName={data.course.name} />
         </div>
       ) : (
-        <>
-          <div className="mt-[1.875rem]">
-            <PriorityHero
-              title={nextLabel}
-              facts={{
-                count: next.count,
-                examWeight: next.examWeight,
-                status: next.status,
-                mastery: next.mastery,
-                chapter: next.chapter ? { lectureNo: next.chapter.lectureNo, title: asText(next.chapter.title) } : null,
-              }}
-            />
-          </div>
-          <div className="mt-11">
-            <UpNext topics={data.upNext ?? []} />
-          </div>
-          <div className="mt-2.5">
-            <QuietDoors weaknessCount={data.weaknesses.count} reviewsDue={data.schedule.due} />
-          </div>
-        </>
+        <PlanOverview data={data} />
       )}
     </div>
   );

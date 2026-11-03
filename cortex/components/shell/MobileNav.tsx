@@ -4,6 +4,8 @@ import { useEffect } from "react";
 import { X } from "lucide-react";
 import { Wordmark } from "./Logo";
 import { CourseSelector } from "./CourseSelector";
+import Link from "next/link";
+import { SECONDARY_NAV } from "./nav";
 import { NavList } from "./NavList";
 
 export function MobileNav({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -56,7 +58,8 @@ export function MobileNav({ open, onClose }: { open: boolean; onClose: () => voi
           <CourseSelector />
         </div>
         <div className="mt-4 flex-1 overflow-y-auto px-3">
-          <NavList onNavigate={onClose} />
+          <NavList onNavigate={onClose} items={SECONDARY_NAV} />
+          <Link href="/cours" onClick={onClose} className="flex min-h-11 items-center px-3 text-sm text-ink-2">Gérer mes cours</Link>
         </div>
       </div>
     </div>

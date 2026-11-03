@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Search, Menu, CalendarClock, UserRound } from "lucide-react";
+import { Search, ChevronDown, CalendarClock, UserRound } from "lucide-react";
 import { Wordmark } from "./Logo";
 
-import { useApi } from "@/lib/ux/api";
+import { useApi, useCourse } from "@/lib/ux/api";
 
 type DashCountdown = { countdown: { date: string; days: number } | null };
 
@@ -12,6 +12,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
   // Compte à rebours RÉEL (même requête que l'Accueil : dédupliquée par le cache).
   // Masqué si absent ou si l'examen est déjà passé (days < 0).
   const { data } = useApi<DashCountdown>("/api/dashboard");
+  const { course } = useCourse();
   const days = data?.countdown?.days;
   const showCountdown = typeof days === "number" && days >= 0;
 
@@ -24,7 +25,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           className="mr-1 flex items-center lg:hidden"
           aria-label="Cortex : accueil"
         >
-          <Wordmark markSize={26} />
+          <Wordmark markSize={23} />
         </Link>
 
         {/* Search / command trigger */}
@@ -73,10 +74,11 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           <button
             type="button"
             onClick={onOpenMenu}
-            aria-label="Ouvrir le menu"
-            className="grid size-11 place-items-center rounded-lg border border-line bg-surface-2/50 text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink-1 lg:hidden"
+            aria-label="Changer de cours ou ouvrir les ressources"
+            className="order-first flex min-h-11 min-w-0 items-center gap-1 rounded-full border border-line bg-surface-2/50 px-2 text-xs text-ink-2 hover:bg-surface-2 lg:hidden"
           >
-            <Menu className="size-[1.15rem]" strokeWidth={2} />
+            <span className="max-w-20 truncate">{course?.short || "Cours"}</span>
+            <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
           </button>
         </div>
       </div>

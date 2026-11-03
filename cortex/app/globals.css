@@ -6,11 +6,11 @@
    ========================================================================== */
 
 @theme {
-  /* — Surfaces (blue-violet tinted near-black; never pure black, never white) — */
-  --color-bg: oklch(0.155 0.018 274);
-  --color-surface-1: oklch(0.196 0.021 274);
-  --color-surface-2: oklch(0.232 0.023 274);
-  --color-surface-3: oklch(0.278 0.025 274);
+  /* — Surfaces (blue tinted near-black; never pure black, never white) — */
+  --color-bg: oklch(0.155 0.018 260);
+  --color-surface-1: oklch(0.196 0.021 260);
+  --color-surface-2: oklch(0.232 0.023 260);
+  --color-surface-3: oklch(0.278 0.025 260);
 
   /* — Ink (contrast-verified) — */
   --color-ink-1: oklch(0.971 0.004 270);
@@ -19,9 +19,9 @@
   --color-ink-4: oklch(0.52 0.014 272);
 
   /* — Brand accents (imposed) — */
-  --color-violet: oklch(0.685 0.165 285);
-  --color-violet-hi: oklch(0.772 0.132 285);
-  --color-violet-deep: oklch(0.545 0.176 283);
+  --color-violet: oklch(0.66 0.15 259);
+  --color-violet-hi: oklch(0.78 0.12 258);
+  --color-violet-deep: oklch(0.50 0.18 262);
   --color-cyan: oklch(0.805 0.115 210);
   --color-cyan-hi: oklch(0.86 0.10 205);
   --color-emerald: oklch(0.835 0.145 168);
@@ -567,4 +567,43 @@ h4 {
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* D2 · Le plan */
+.d2-card,
+.d2-hero {
+  border: 1px solid var(--color-line);
+  border-radius: 1.125rem;
+  background: var(--color-surface-1);
+}
+.d2-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 1.375rem;
+  background: radial-gradient(ellipse at top right, oklch(0.52 0.15 252 / 0.45), transparent 68%),
+    linear-gradient(145deg, oklch(0.39 0.13 258), oklch(0.28 0.095 264));
+}
+a.d2-card {
+  display: block;
+}
+a.d2-card:hover {
+  background: var(--color-surface-2);
+  border-color: var(--color-line-strong);
+}
+
+
+.d2-hero::after {
+  position: absolute;
+  z-index: -1;
+  right: -7.5rem;
+  bottom: -12.5rem;
+  width: 26rem;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 14%),
+    0 0 0 4rem rgb(255 255 255 / 3%),
+    0 0 0 calc(4rem + 1px) rgb(255 255 255 / 8%);
+  content: "";
+  pointer-events: none;
 }
