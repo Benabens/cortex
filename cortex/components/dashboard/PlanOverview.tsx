@@ -9,10 +9,11 @@ import {
   Layers3,
   Target,
 } from "lucide-react";
+import { UpNext } from "./UpNext";
 import { Segmented } from "@/components/ui/Segmented";
 import { asText } from "@/lib/ux/api";
 import { formatDay, type Dash } from "@/lib/ux/types";
-import { trainHref, reason } from "@/lib/ux/next-up";
+import { trainHref, reason, themeHref } from "@/lib/ux/next-up";
 
 export function PlanOverview({ data }: { data: Dash }) {
   const [view, setView] = useState<"week" | "final">("week");
@@ -32,7 +33,7 @@ export function PlanOverview({ data }: { data: Dash }) {
     {
       label: "Notions solides",
       value: data.stats.mastered,
-      href: "/faiblesses",
+      href: "/programme?filtre=solides",
       Icon: Layers3,
     },
     {
@@ -96,6 +97,18 @@ export function PlanOverview({ data }: { data: Dash }) {
               </li>
             ))}
           </ul>
+          {data.next && asText(data.next.label) && (
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <Link href={trainHref(asText(data.next.label)!)}
+                className="inline-flex min-h-11 items-center rounded-full bg-blue-50 px-4 text-sm font-semibold text-blue-950 hover:bg-white">
+                M’entraîner sur {asText(data.next.label)}
+              </Link>
+              <Link href={themeHref(data.next.chapter ? { lectureNo: data.next.chapter.lectureNo, title: asText(data.next.chapter.title) } : null)}
+                className="inline-flex min-h-11 items-center text-sm text-blue-50 underline underline-offset-4">
+                Voir le thème
+              </Link>
+            </div>
+          )}
           <Link
             href="/seance"
             className="mt-auto inline-flex min-h-11 items-center gap-2 rounded-full bg-blue-50 px-4 text-sm font-semibold text-blue-950 hover:bg-white"
@@ -192,6 +205,7 @@ export function PlanOverview({ data }: { data: Dash }) {
           </Link>
         ))}
       </div>
+      <section className="d2-card p-5 sm:p-6"><UpNext topics={data.upNext ?? []} /></section>
       <ExamActivity exams={data.exams} />
     </>
   );

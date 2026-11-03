@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/ux/cn";
-import { NAV, isActive } from "./nav";
+import { NAV, MOBILE_NAV, isActive } from "./nav";
 
 export function NavList({ onNavigate, items = NAV, compact = false }: {
   onNavigate?: () => void;
@@ -13,7 +13,7 @@ export function NavList({ onNavigate, items = NAV, compact = false }: {
   const pathname = usePathname();
   return (
     <nav aria-label={items === NAV ? "Navigation principale" : "Ressources et compte"} className={compact ? "grid grid-cols-4 gap-1" : "flex flex-col gap-1"}>
-      {items.map(({ href, label, Icon }) => {
+      {(compact ? MOBILE_NAV : items).map(({ href, label, Icon }) => {
         const active = isActive(pathname, href);
         return (
           <Link
