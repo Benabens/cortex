@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { FileText, BookOpen } from "lucide-react";
@@ -31,9 +31,15 @@ export function ProgramMap({
   const params = useSearchParams();
   const router = useRouter();
   const selected = Number(params.get("notion")) || null;
-  const [filter, setFilter] = useState(
-    params.get("filtre") === "prioritaires" ? "priority" : "all",
-  );
+  const filters: Record<string, string> = { prioritaires: "priority", solides: "solid", travailler: "work", finals: "final" };
+  const filter = filters[params.get("filtre") ?? ""] ?? "all";
+  const setFilter = (value: string) => {
+    const url = new URL(window.location.href);
+    const key = Object.keys(filters).find((key) => filters[key] === value);
+    if (key) url.searchParams.set("filtre", key);
+    else url.searchParams.delete("filtre");
+    router.replace(url.pathname + url.search, { scroll: false });
+  };
   const detail = useRef<HTMLElement>(null);
   useEffect(() => {
     if (selected && !window.matchMedia("(min-width: 1024px)").matches)
@@ -61,6 +67,13 @@ export function ProgramMap({
       .slice(0, 10)
       .map((n) => n.key),
   );
+  const visibleChapters = chapters.map((chapter) => ({
+    ...chapter,
+    notions: chapter.notions.filter((item) =>
+      filter === "all" || (filter === "priority" ? priorityIds.has(item.key)
+        : filter === "work" ? statusOf(item.key) !== "SOLIDE"
+          : filter === "solid" ? statusOf(item.key) === "SOLIDE" : item.count > 0)),
+  })).filter((chapter) => filter === "all" || chapter.notions.length > 0);
   const chosen = selected == null ? null : byId.get(selected);
   return (
     <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,.47fr)]">
@@ -98,7 +111,13 @@ export function ProgramMap({
             </li>
           ))}
         </ul>
-        {chapters.map((chapter) => (
+        {visibleChapters.length === 0 && (
+          <div className="border-t border-line py-8 text-center">
+            <p className="text-sm text-ink-2">Aucune notion ne correspond à ce filtre pour ce cours.</p>
+            <button type="button" className="mt-3 min-h-11 rounded-full border border-line px-4 text-sm" onClick={() => setFilter("all")}>Voir tout le programme</button>
+          </div>
+        )}
+        {visibleChapters.map((chapter) => (
           <div
             key={chapter.id ?? chapter.title}
             className="border-t border-line py-3"
@@ -116,17 +135,6 @@ export function ProgramMap({
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {chapter.notions
-                .filter(
-                  (item) =>
-                    filter === "all" ||
-                    (filter === "priority"
-                      ? priorityIds.has(item.key)
-                      : filter === "work"
-                        ? statusOf(item.key) !== "SOLIDE"
-                        : filter === "solid"
-                          ? statusOf(item.key) === "SOLIDE"
-                          : item.count > 0),
-                )
                 .map((item) => {
                   const status = statusOf(item.key);
                   return (
