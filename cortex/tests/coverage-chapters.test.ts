@@ -241,3 +241,20 @@ test("A — le sous-thème choisi atteint le générateur : la méthode n'est pl
   assert.ok(line, `Safety 2 absent des lots : ${prompts.join("\n---\n").slice(0, 600)}`);
   assert.match(line, new RegExp(`sous-thème[^\\n]*${LOOP}`), line);
 });
+
+test("une notion = une question : une autre facette d'une notion déjà posée passe après une notion neuve", async () => {
+  const { spreadOverChapters } = await import("../lib/coverage");
+  const t = (label: string, method: string | null, chapter: string, weight: number) => ({ label, method, weight, chapter });
+  // Le chapitre le plus lourd n'a qu'une notion, à trois facettes nommées : sa 2ᵉ place prenait une
+  // autre facette alors que les autres chapitres avaient des notions neuves.
+  const topics = [
+    t("Biais cognitifs", "nommer le biais (négativité, ancrage, disponibilité)", "Décision", 12),
+    t("Souveraineté des données", null, "Souveraineté", 5), t("Résidence des serveurs", null, "Souveraineté", 5),
+    t("Détecteurs de contenus synthétiques", null, "Désinformation", 5), t("Hypertrucages électoraux", null, "Désinformation", 4),
+  ];
+  const four = spreadOverChapters(topics, 4)!;
+  assert.equal(new Set(four.map((x) => x.label)).size, 4, `cinq notions pour quatre questions : ${four.map((x) => `${x.label}${x.subTheme ? ` (${x.subTheme})` : ""}`).join(" | ")}`);
+  // Plus de questions que de notions : les facettes servent ensuite (angles distincts).
+  const six = spreadOverChapters(topics, 6)!;
+  assert.ok(six.filter((x) => x.label === "Biais cognitifs").length >= 2, six.map((x) => x.subTheme ?? x.label).join(" | "));
+});
