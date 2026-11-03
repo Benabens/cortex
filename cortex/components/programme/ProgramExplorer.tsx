@@ -1,17 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { ListTree, Flame } from "lucide-react";
+import { ListTree, Flame, Map } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
 import { Segmented, type SegmentedOption } from "@/components/ui/Segmented";
 import { ChapterAccordion } from "./ChapterAccordion";
+import { ProgramMap } from "./ProgramMap";
 import { NotionRow } from "./NotionRow";
-import { buildPlan, byPriority, sectionBlocks, typesMeta, type UiType, type ProgramChapter } from "@/lib/ux/program";
+import { buildPlan, byPriority, sectionBlocks, typesMeta, type UiType, type ProgramChapter, type ProgramTopic } from "@/lib/ux/program";
 import { cn } from "@/lib/ux/cn";
 
-type Mode = "section" | "priority";
+type Mode = "map" | "section" | "priority";
 
 const MODES: SegmentedOption<Mode>[] = [
+  { value: "map", label: "Carte", Icon: Map },
   { value: "section", label: "Par section", Icon: ListTree },
   { value: "priority", label: "Par priorité", Icon: Flame },
 ];
@@ -26,17 +28,19 @@ export function ProgramExplorer({
   types,
   chapters,
   planOk,
+  topics,
 }: {
   types: UiType[];
   chapters: ProgramChapter[];
   planOk: boolean;
+  topics: ProgramTopic[];
 }) {
-  const [mode, setMode] = useState<Mode>("section");
   // Lien profond ?chapitre=<n° de lecture> : ouvre ce chapitre. Lu à l'initialisation : ce composant
   // n'est rendu que côté client, une fois les données chargées (aucun écart d'hydratation).
   const [focusLecture] = useState<number | null>(() =>
     typeof window === "undefined" ? null : Number(new URLSearchParams(window.location.search).get("chapitre")) || null
   );
+  const [mode, setMode] = useState<Mode>(focusLecture === null ? "map" : "section");
   const meta = typesMeta(types);
   const plan = buildPlan(types, chapters);
   const flat = byPriority(types);
@@ -62,7 +66,12 @@ export function ProgramExplorer({
         </p>
       </div>
 
-      {mode === "section" ? (
+      {mode === "map" ? (
+        <ProgramMap topics={topics} chapters={hasPlan ? plan : sectionBlocks(types).map((block, i) => ({
+          id: i, title: block.section ?? "Autres notions", lectureNo: null, subtitle: null, sourceHref: null,
+          notions: block.types, fallenCount: 0, occurrenceCount: 0,
+        }))} />
+      ) : mode === "section" ? (
         hasPlan ? (
           <div className="space-y-2.5">
             {plan.map((c) => (

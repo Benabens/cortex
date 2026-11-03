@@ -1,6 +1,7 @@
 "use client";
 
 import { ExternalLink, CheckCircle2, ClipboardList, WifiOff, RotateCw, Trash2, FileText } from "lucide-react";
+import { TrainingNav } from "@/components/entrainement/TrainingNav";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, SectionHeader } from "@/components/ui/primitives";
 import { Badge } from "@/components/ui/Badge";
@@ -52,10 +53,8 @@ export default function ExamensPage() {
 
   return (
     <div className="flex flex-col gap-7">
-      <PageHeader
-        title="Examens"
-        description="Compose un examen blanc au format réel du final, puis lance-le. Un examen qui aurait pu tomber."
-      />
+      <PageHeader title="S’entraîner" description="Compose un examen blanc au format de ton final et retrouve les examens prêts." />
+      <TrainingNav current="/examens" />
 
       {deleteError && (
         <p role="alert" className="text-[0.85rem] text-danger-hi">

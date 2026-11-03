@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { NavList } from "./NavList";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { MobileNav } from "./MobileNav";
@@ -68,8 +69,11 @@ export function AppShell({ children, legal, legalEnglish, contact }: {
 
   return (
     <CourseProvider>
-      <div className="relative min-h-dvh overflow-x-clip">
+      <div className="relative min-h-dvh overflow-x-clip pb-20 lg:pb-0">
         <Sidebar />
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface-1 px-2 pt-1 pb-[env(safe-area-inset-bottom)] lg:hidden">
+          <NavList compact />
+        </div>
         <MobileNav open={menuOpen} onClose={() => setMenuOpen(false)} />
 
         <div className="relative z-10 lg:pl-rail">

@@ -5,17 +5,15 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/ux/cn";
 import { NAV, isActive } from "./nav";
 
-/**
- * Nav verticale — état actif SOBRE (POLISH 2026, P0.1) :
- * surface remplie discrète + barre d'accent 2 px à gauche + label ink-1.
- * Aucun halo, aucun ring violet. Hover = fond léger 150 ms.
- * Le focus clavier reste l'anneau net global (:focus-visible).
- */
-export function NavList({ onNavigate }: { onNavigate?: () => void }) {
+export function NavList({ onNavigate, items = NAV, compact = false }: {
+  onNavigate?: () => void;
+  items?: typeof NAV;
+  compact?: boolean;
+}) {
   const pathname = usePathname();
   return (
-    <nav aria-label="Navigation principale" className="flex flex-col gap-0.5">
-      {NAV.map(({ href, label, Icon }) => {
+    <nav aria-label={items === NAV ? "Navigation principale" : "Ressources et compte"} className={compact ? "grid grid-cols-4 gap-1" : "flex flex-col gap-1"}>
+      {items.map(({ href, label, Icon }) => {
         const active = isActive(pathname, href);
         return (
           <Link
@@ -24,9 +22,10 @@ export function NavList({ onNavigate }: { onNavigate?: () => void }) {
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "group relative flex h-11 items-center gap-3 rounded-md px-3 text-[0.9rem] font-medium transition-colors duration-150",
+              "group relative flex items-center rounded-md font-medium transition-colors duration-150",
+              compact ? "min-h-14 flex-col justify-center gap-1 text-[0.69rem]" : "h-11 gap-3 px-3 text-[0.9rem]",
               active
-                ? "bg-surface-2 text-ink-1"
+                ? "bg-violet/15 text-violet-hi"
                 : "text-ink-3 hover:bg-surface-2/60 hover:text-ink-1 focus-visible:bg-surface-2/60"
             )}
           >
@@ -35,7 +34,7 @@ export function NavList({ onNavigate }: { onNavigate?: () => void }) {
               aria-hidden="true"
               className={cn(
                 "absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full transition-opacity duration-150",
-                active ? "bg-violet opacity-100" : "opacity-0"
+                active && !compact ? "bg-violet opacity-100" : "opacity-0"
               )}
             />
             <Icon

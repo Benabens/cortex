@@ -1,14 +1,14 @@
 import { cn } from "@/lib/ux/cn";
 import { CortexMark, MARK_NODE } from "./CortexMark";
 
-/** Couleur du point du wordmark : le violet du nœud du mark (un seul violet dans le lockup). */
+/** Couleur du point du wordmark : le bleu du nœud du mark (un seul violet dans le lockup). */
 export const WORDMARK_DOT = MARK_NODE;
 
 /**
  * Lockup : mark Dissolution v2 (CortexMark, logo définitif validé le 28/09) + wordmark
  * « cortex. » selon la décision typo du 28/09 : Funnel Display 700, approche -0.04em,
  * suivi d'un point ROND (pastille CSS ~0.17em, plus présent que le point du texte) en
- * #7a5cff, le violet du nœud. Le mark est posé directement sur le fond, sans tuile.
+ * #548dff, le bleu du nœud. Le mark est posé directement sur le fond, sans tuile.
  * Les réglages fixes sont en styles inline pour survivre aux pages d'erreur sans CSS global.
  */
 export function Wordmark({

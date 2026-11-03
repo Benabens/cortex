@@ -6,7 +6,7 @@ import { cn } from "@/lib/ux/cn";
  * décroissants, dont le premier, violet, est le nœud actif.
  * Masters (hors dépôt, poste de Ben) : ~/Projects/brand-logos/cortex/favori/.
  *
- * - Encre = text-ink-1 (via `currentColor`) ; seul le nœud est violet. #7a5cff
+ * - Encre = text-ink-1 (via `currentColor`) ; seul le nœud est bleu. #548dff
  *   est une décision de marque, volontairement distincte du token --color-violet.
  * - À 24 px et moins, coupe 16 px : les deux petits points du master tombent
  *   sous le pixel, donc le dernier est retiré et les autres grossissent.
@@ -16,7 +16,7 @@ import { cn } from "@/lib/ux/cn";
  */
 
 /** Violet du nœud, repris par le point final du wordmark (lockup v2). */
-export const MARK_NODE = "#7a5cff";
+export const MARK_NODE = "#548dff";
 
 type Dot = { cx: number; cy: number; r: number };
 type Geometry = { viewBox: string; ring: string; node: Dot; dots: Dot[] };
