@@ -15,7 +15,7 @@ export const SECONDARY_NAV: NavItem[] = [
 ];
 
 export function isActive(pathname: string, href: string) {
-  if (href === "/seance" && (["/entrainement", "/examens", "/revision", "/qa"].includes(pathname) || pathname.startsWith("/mock/"))) return true;
+  if (href === "/seance" && (["/entrainement", "/examens", "/revision"].includes(pathname) || pathname.startsWith("/mock/"))) return true;
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(href + "/");
 }

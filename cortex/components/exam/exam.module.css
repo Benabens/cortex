@@ -1,0 +1,9 @@
+.exam { width: 100%; max-width: 960px; margin: 0 auto; min-width: 0; }
+.exam :global(.card) { border-radius: 18px; background: var(--color-surface-1); }
+.exam :global(.card-pad) { padding: 24px; }
+.exam :global(.btn) { border-radius: 999px; min-height: 44px; }
+.exam :global(button.inset) { min-height: 48px; border-radius: 12px; }
+.exam :global(button:focus-visible), .exam :global(a:focus-visible) { outline: 2px solid var(--color-violet-hi); outline-offset: 3px; }
+.exam :global(header .h1) { font-size: clamp(28px, 4vw, 40px) !important; letter-spacing: -.02em; }
+.exam :global(header .sub) { max-width: 680px; line-height: 1.65; }
+@media (max-width: 540px) { .exam :global(.card-pad) { padding: 18px; } .exam :global(button.inset) { flex-wrap: wrap; } }

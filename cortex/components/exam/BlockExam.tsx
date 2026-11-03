@@ -1,5 +1,8 @@
 "use client";
 
+import Link from "next/link";
+import styles from "@/components/exam/exam.module.css";
+
 import { useState, type CSSProperties } from "react";
 import { OpenResponse } from "@/components/exam/OpenResponse";
 import { ReportButton } from "@/components/exam/ReportButton";
@@ -77,7 +80,7 @@ export function BlockExam({ exam, courseId, qs }: { exam: BlockExamView; courseI
               const bg = det ? (isCorrect ? "var(--green-wash)" : wrongPick ? "var(--red-wash)" : "var(--surface-inset)") : picked ? "var(--accent-wash)" : "var(--surface-inset)";
               const bd = det ? (isCorrect ? "var(--green)" : wrongPick ? "var(--red)" : "var(--line)") : picked ? "var(--accent-line)" : "var(--line)";
               return (
-                <button key={i} onClick={() => !graded && setAnswers((a) => ({ ...a, [p.id]: i }))} disabled={!!graded} className="inset" style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "9px 12px", textAlign: "left", background: bg, border: `1px solid ${bd}`, cursor: graded ? "default" : "pointer" }}>
+                <button key={i} onClick={() => !graded && setAnswers((a) => ({ ...a, [p.id]: i }))} disabled={!!graded} aria-pressed={picked} className="inset" style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "9px 12px", textAlign: "left", background: bg, border: `1px solid ${bd}`, cursor: graded ? "default" : "pointer" }}>
                   <span style={{ width: 22, height: 22, flex: "none", borderRadius: 999, border: `1.5px solid ${bd}`, display: "grid", placeItems: "center", fontSize: 12, fontWeight: 700, color: "var(--ink-2)" }}>{LETTER[i]}</span>
                   <span style={{ fontSize: 13.5, color: "var(--ink)", flex: 1 }}>{o}</span>
                   {isCorrect && <span style={{ color: "var(--green-ink)", fontSize: 13 }}>✓</span>}
@@ -116,8 +119,9 @@ export function BlockExam({ exam, courseId, qs }: { exam: BlockExamView; courseI
   };
 
   return (
-    <main className="page page-narrow">
+    <div className={styles.exam}>
       <header className="mb-6 rise">
+        <Link href="/examens" className="mb-4 inline-flex min-h-11 items-center text-sm font-medium text-violet-hi">← Mes examens blancs</Link>
         <h1 className="h1" style={{ fontSize: 28 }}>Examen blanc #{exam.id}</h1>
         <p className="sub mt-2">{exam.blocks.length} question{exam.blocks.length > 1 ? "s" : ""} composée{exam.blocks.length > 1 ? "s" : ""} : un scénario, puis ses sous-questions. Le choix unique et la lecture de code se corrigent d&apos;un coup ; une réponse courte se vérifie critère par critère.</p>
         {exam.pdf?.endsWith(".pdf") && (
@@ -168,6 +172,6 @@ export function BlockExam({ exam, courseId, qs }: { exam: BlockExamView; courseI
       ) : (
         <div className="mt-6"><a href="/examens" className="btn btn-ghost">← retour aux examens</a></div>
       )}
-    </main>
+    </div>
   );
 }

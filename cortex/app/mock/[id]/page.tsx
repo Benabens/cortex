@@ -1,5 +1,8 @@
 "use client";
 
+import Link from "next/link";
+import styles from "@/components/exam/exam.module.css";
+
 import { use, useCallback, useEffect, useState, type CSSProperties } from "react";
 import { useCourse } from "@/lib/ux/api";
 import { SafeHtml } from "@/components/ui/SafeHtml";
@@ -66,12 +69,13 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
   const detailFor = (idx: number) => graded?.detail.find((d) => d.idx === idx);
 
   if (blocks) return <BlockExam exam={blocks} courseId={courseId ?? ""} qs={qs} />;
-  if (err && !exam) return <main className="page page-narrow"><div role="alert" className="card card-pad" style={{ color: "var(--red)" }}>{err}</div></main>;
-  if (!exam) return <main className="page page-narrow"><div className="skeleton" style={{ height: 200 }} /></main>;
+  if (err && !exam) return <div className={styles.exam}><div role="alert" className="card card-pad" style={{ color: "var(--red)" }}>{err}</div></div>;
+  if (!exam) return <div className={styles.exam}><div className="skeleton" style={{ height: 200 }} /></div>;
 
   return (
-    <main className="page page-narrow">
+    <div className={styles.exam}>
       <header className="mb-6 rise">
+        <Link href="/examens" className="mb-4 inline-flex min-h-11 items-center text-sm font-medium text-violet-hi">← Mes examens blancs</Link>
         <h1 className="h1" style={{ fontSize: 28 }}>Examen blanc #{exam.id}</h1>
         <p className="sub mt-2">{exam.items.length} questions à choix{exam.open.length ? ` + ${exam.open.length} ouverte(s)` : ""} · réponds, puis corrige-toi. SCQ = une seule case ; MCQ = une ou plusieurs.</p>
         {exam.pdf?.endsWith(".pdf") && (
@@ -116,7 +120,7 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
                   const bg = det ? (isCorrect ? "var(--green-wash)" : wrongPick ? "var(--red-wash)" : "var(--surface-inset)") : picked ? "var(--accent-wash)" : "var(--surface-inset)";
                   const bd = det ? (isCorrect ? "var(--green)" : wrongPick ? "var(--red)" : "var(--line)") : picked ? "var(--accent-line)" : "var(--line)";
                   return (
-                    <button key={k} onClick={() => toggle(it, k)} disabled={!!graded} className="inset" style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "9px 12px", textAlign: "left", background: bg, border: `1px solid ${bd}`, cursor: graded ? "default" : "pointer" }}>
+                    <button key={k} onClick={() => toggle(it, k)} disabled={!!graded} aria-pressed={picked} className="inset" style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "9px 12px", textAlign: "left", background: bg, border: `1px solid ${bd}`, cursor: graded ? "default" : "pointer" }}>
                       <span style={{ width: 22, height: 22, flex: "none", borderRadius: it.type === "mcq" ? 6 : 999, border: `1.5px solid ${bd}`, display: "grid", placeItems: "center", fontSize: 12, fontWeight: 700, color: "var(--ink-2)" }}>{LETTER[k]}</span>
                       <span style={{ fontSize: 13.5, color: "var(--ink)", flex: 1 }}>{o}</span>
                       {det && isCorrect && <span style={{ color: "var(--green-ink)", fontSize: 13 }}>✓</span>}
@@ -169,6 +173,6 @@ export default function MockPage({ params }: { params: Promise<{ id: string }> }
       ) : (
         <div className="mt-6"><a href="/examens" className="btn btn-ghost">← retour aux examens</a></div>
       )}
-    </main>
+    </div>
   );
 }
