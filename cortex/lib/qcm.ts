@@ -6,7 +6,7 @@ import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseTerms, coursePassages } from "@/lib/course-grounding";
 import { secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
-import { assignChapters, spreadOverChapters } from "@/lib/coverage";
+import { assignChapters, spreadOverChapters, variants } from "@/lib/coverage";
 import { normalize } from "@/lib/text";
 import { courseRefImages } from "@/lib/course-vision";
 import type { ExamQuestion, StepCb } from "@/lib/exam";
@@ -65,6 +65,8 @@ export type QcmItem = {
   rejected?: string | null;
   /** Le correcteur valide la question telle quelle (sa réponse est la clé, sans ambiguïté ni indice), non persisté. */
   judgeOk?: boolean | null;
+  /** Question d'un sujet de l'accent demandé par l'étudiant (non persisté) : elle partage ce thème avec les autres. */
+  focusSlot?: boolean;
   /** Options qu'on élimine sans connaître le cours (juge à l'aveugle) : régénéré, puis écarté. */
   trivialDistractors?: number[] | null;
 };
@@ -771,7 +773,7 @@ const DUP_SCHEMA = {
  * questions sur une notion sous des angles vraiment distincts ; seul le même angle est un doublon.
  * Le modèle nomme la notion et l'angle de chaque question ; la décision, elle, est faite ici.
  */
-async function duplicateItems(items: QcmItem[], opts: { strict: boolean }): Promise<{ drop: number[]; notions: string[] }> {
+async function duplicateItems(items: QcmItem[], opts: { strict: boolean }): Promise<{ drop: number[]; notions: string[]; angles: string[] }> {
   const list = items.map((it, i) => `Q${i}. (${sanitizeCorpus(it.topic ?? "").slice(0, 60)}) ${sanitizeCorpus(it.stem).slice(0, 400)}`).join("\n");
   const criterion = opts.strict
     ? `Le programme a au moins autant de notions que l'examen a de questions : UNE NOTION = UNE QUESTION. Deux questions sur la même notion (le biais de négativité, le nudge, la souveraineté des données…) sont des doublons même sous deux angles différents.`
@@ -798,24 +800,40 @@ async function duplicateItems(items: QcmItem[], opts: { strict: boolean }): Prom
     angles[n.index] = typeof n.angle === "string" ? n.angle.trim() : "";
   }
   const drop = new Set<number>();
+  // Les questions de l'accent demandé par l'étudiant portent volontairement sur un même thème :
+  // elles ne sont pas des doublons ENTRE ELLES (une autre question sur ce thème, si).
+  const focusPair = (a: number, b: number) => !!items[a]?.focusSlot && !!items[b]?.focusSlot;
   // Par libellé : la première question d'une notion (ou d'une notion et d'un angle) reste.
-  const seen = new Set<string>();
+  const first = new Map<string, number>();
   items.forEach((_, i) => {
-    if (!notions[i]) return;
+    // Sans notion, ou (hors mode strict) sans angle : pas de décision par libellé, seules les paires comptent.
+    if (!notions[i] || (!opts.strict && !angles[i])) return;
     const key = opts.strict ? normalize(notions[i]) : `${normalize(notions[i])}\u0000${normalize(angles[i])}`;
-    if (seen.has(key)) drop.add(i);
-    else seen.add(key);
+    const holder = first.get(key);
+    if (holder === undefined) first.set(key, i);
+    else if (!focusPair(holder, i)) drop.add(i);
   });
   // Les paires que le modèle signale en plus (sans libellé, ou libellés différents) : la seconde part.
   for (const d of r.duplicates) {
     const later = Math.max(d.first, d.second);
-    if (Number.isInteger(later) && later >= 0 && later < items.length && d.first !== d.second) drop.add(later);
+    if (Number.isInteger(later) && later >= 0 && later < items.length && d.first !== d.second && !focusPair(d.first, d.second)) drop.add(later);
   }
-  return { drop: [...drop].sort((a, b) => a - b), notions };
+  return { drop: [...drop].sort((a, b) => a - b), notions, angles };
 }
 
-/** Rondes du contrôle des doublons : retrait et remplacement, puis un contrôle des remplacements. */
+/** Remplacements de doublons au plus ; le contrôle repasse après chacun (le dernier aussi). */
 const DEDUP_ROUNDS = 2;
+
+/**
+ * Notions distinctes d'une liste de libellés (variantes rapprochées, lib/coverage) : c'est elle,
+ * pas le nombre de lignes ni les titres de supports ajoutés faute de notions, qui dit si l'examen
+ * a assez de notions pour une question chacune.
+ */
+function distinctNotions(labels: string[]): number {
+  const reps: string[] = [];
+  for (const l of labels) if (!reps.some((r) => variants(r, l))) reps.push(l);
+  return reps.length;
+}
 
 /** Lots QCM menés en même temps (QCM_BATCH_CONCURRENCY, défaut 3). */
 function batchConcurrency(): number {
@@ -873,6 +891,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const nFocus = focus ? Math.min(2, Math.max(1, count)) : 0;
   const needed = Math.max(1, count - nFocus);
   let covAll = await coverageTopics();
+  // Notions réelles du programme, avant l'ajout des titres de supports (mode strict, plus bas).
+  const notionCount = distinctNotions(covAll.map((t) => t.label));
   // Moins de notions que de questions (cours sans annale, 10 notions pour 20 QCM) : on les
   // parcourait deux fois, d'où des doublons et un déséquilibre entre enseignants (banc HUM-285
   // du 28/10). Les supports du cours complètent la couverture.
@@ -930,7 +950,9 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     examples: withAnnales ? [] : await officialExamples().catch(() => []),
     // Avec annales, leur forme ; sinon le mode déclaré ou lu dans les sources, à défaut la réponse unique.
     answerMode: format?.answerMode ?? DEFAULT_ANSWER_MODE,
-    formatSummary: format?.summary,
+    // Le résumé du format du cours seulement s'il est à choix : un QCM demandé pour un cours
+    // d'exercices ou à questions composées ne doit pas lire « Format du cours : exercices ».
+    formatSummary: format?.answerMode ? format.summary : undefined,
   };
   step(`Architecte : ${count} QCM + ${openCount} ouverte(s)${focus ? ` (accent : « ${focus} »)` : ""}${dna ? ` · moules ADN (${dna.molds.length})` : " au format détecté"}…`, 8);
 
@@ -963,7 +985,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     ].join("\n");
     try {
       const pick = <T,>(arr: T[]) => weak.map((w) => arr[w.it.slot ?? w.i]);
-      const again = await verifyQcmBatch(await generateQcmBatch(pick(bt.topics), weak.length, step, undefined, guidance, { ...shared, molds: pick(bt.molds) }), step);
+      // La consigne du lot (notions déjà posées, pour un remplacement de doublon) suit la régénération.
+      const again = await verifyQcmBatch(await generateQcmBatch(pick(bt.topics), weak.length, step, undefined, [guidance, bt.guidance].filter(Boolean).join("\n"), { ...shared, molds: pick(bt.molds) }), step);
       // Un item écarté à la conception décalerait l'appariement : on ne remplace qu'un lot complet,
       // et seulement par une version VÉRIFIÉE (une vérification en échec rend des items non vérifiés).
       if (again.length !== weak.length) return items;
@@ -986,7 +1009,9 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       // Un item resté rejeté après régénération (hors cours, définition différente, hors matière, clé
       // contestée), ou encore éliminable sans connaître le cours, n'est jamais gardé : son sujet est comblé.
       const kept = items.length ? await strengthen(bt, await verifyQcmBatch(items, step)) : [];
-      return { items: kept.filter((it) => !it.rejected && !it.trivialDistractors?.length), error: null };
+      const out = kept.filter((it) => !it.rejected && !it.trivialDistractors?.length);
+      for (const it of out) if (bt.topics[it.slot ?? -1]?.method === FOCUS_METHOD) it.focusSlot = true;
+      return { items: out, error: null };
     } catch (e) {
       step(`Lot QCM échoué (${(e as Error).message.slice(0, 80)})`, 0);
       return { items: [], error: e };
@@ -1074,24 +1099,39 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // H — DOUBLONS À L'ÉCHELLE DE L'EXAMEN (mock 4 de CS-290 : deux QCM sur le paradoxe de Simpson,
   // deux sur la même logique OR) : un contrôle par le modèle, car deux libellés différents ne se
   // rapprochent pas mot à mot ; le second de chaque paire est remplacé par une notion de réserve.
-  // Une notion = une question tant que le programme a au moins autant de notions que l'examen a
-  // de questions ; un accent demandé par l'étudiant pose volontairement plusieurs questions sur un thème.
-  const strict = !focus && covAll.length >= count;
+  // Une notion = une question tant que le programme a au moins autant de notions que l'examen a de
+  // questions ; sinon plusieurs questions par notion, sous des angles vraiment distincts. Les
+  // questions de l'accent demandé par l'étudiant partagent leur thème sans être des doublons.
+  const strict = notionCount >= count;
+  // Réserve : en mode strict, ni une reprise ni une autre facette d'une notion déjà donnée à
+  // l'examen ; à défaut, les supports du cours pas encore pris (ils ramènent d'autres passages).
+  // Au-delà, l'examen est dit incomplet et remboursé plutôt que de reposer une notion.
+  const fresh: QcmSlot[] = [
+    ...spareTopics.filter((t) => t.method !== REPEAT_METHOD && !used.has(t.label)),
+    ...(await courseMaterialTitles().catch(() => [] as string[])).filter((t) => !used.has(t)).map((label) => ({ label, method: null })),
+  ];
+  const pool: QcmSlot[] = strict ? fresh.filter((t, i) => fresh.findIndex((x) => x.label === t.label) === i) : spareTopics;
   let nextSpare = 0;
-  for (let round = 0; round < DEDUP_ROUNDS && all.length >= 2; round++) {
-    const { drop, notions } = await duplicateItems(all, { strict }).catch(() => ({ drop: [] as number[], notions: [] as string[] }));
+  for (let round = 0; round <= DEDUP_ROUNDS && all.length >= 2; round++) {
+    const { drop, notions, angles } = await duplicateItems(all, { strict }).catch(() => ({ drop: [] as number[], notions: [] as string[], angles: [] as string[] }));
     if (!drop.length) break;
-    step(`${drop.length} QCM en doublon retiré(s) (même notion qu'une autre question) → remplacement`, 80);
-    const keptNotions = [...new Set(notions.filter((n, i) => n && !drop.includes(i)))];
     const kept = all.filter((_, i) => !drop.includes(i));
+    const keptIdx = all.map((_, i) => i).filter((i) => !drop.includes(i));
     all.splice(0, all.length, ...kept);
-    const spare = spareTopics.slice(nextSpare, nextSpare + count - all.length);
+    const spare = round < DEDUP_ROUNDS ? pool.slice(nextSpare, nextSpare + count - all.length) : [];
     nextSpare += spare.length;
-    if (!spare.length) break;
-    // Le lot de remplacement sait quelles notions l'examen pose déjà.
-    const guidance = keptNotions.length
-      ? `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen — n'en reprends AUCUNE, même sous un autre angle : ${keptNotions.map((n) => sanitizeCorpus(n).slice(0, 80)).join(" · ")}.`
-      : undefined;
+    if (!spare.length) {
+      // Dernier contrôle, ou réserve épuisée : retirés sans remplacement (l'examen le dit, le job rembourse).
+      step(`${drop.length} QCM en doublon retiré(s) (même notion qu'une autre question), sans remplacement`, 80);
+      break;
+    }
+    step(`${drop.length} QCM en doublon retiré(s) (même notion qu'une autre question) → remplacement`, 80);
+    // Le lot de remplacement sait ce que l'examen pose déjà : en mode strict, aucune de ces notions ;
+    // sinon, une notion reprise doit l'être sous un angle vraiment distinct.
+    const taken = keptIdx.filter((i) => notions[i]);
+    const guidance = !taken.length ? undefined : strict
+      ? `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen — n'en reprends AUCUNE, même sous un autre angle : ${[...new Set(taken.map((i) => sanitizeCorpus(notions[i]).slice(0, 80)))].join(" · ")}.`
+      : `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen, avec leur angle — si tu reprends l'une d'elles, teste un angle vraiment distinct : ${taken.map((i) => `${sanitizeCorpus(notions[i]).slice(0, 60)} (${sanitizeCorpus(angles[i] || "?").slice(0, 60)})`).join(" · ")}.`;
     const got = await safeBatch({ topics: spare, molds: spare.map(() => null), guidance });
     if (got.error) lastError = got.error;
     all.push(...got.items.slice(0, count - all.length));
