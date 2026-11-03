@@ -35,6 +35,21 @@ export function MobileNav({ open, onClose }: { open: boolean; onClose: () => voi
       ref={dialog}
       aria-label="Cours et ressources"
       onCancel={(event) => { event.preventDefault(); onClose(); }}
+      onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), select:not([disabled]), [tabindex="0"]'
+        )).filter((element) => element.tabIndex >= 0 && element.getClientRects().length > 0);
+        const first = controls[0];
+        const last = controls.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }}
       className="fixed inset-0 m-0 h-dvh max-h-none w-screen max-w-none border-0 bg-transparent p-0 text-ink-1 backdrop:bg-black/60 backdrop:backdrop-blur-sm"
     >
       <button type="button" onClick={onClose} aria-label="Fermer les ressources"
@@ -52,6 +67,7 @@ export function MobileNav({ open, onClose }: { open: boolean; onClose: () => voi
             type="button"
             onClick={onClose}
             aria-label="Fermer le menu"
+            autoFocus
             className="grid size-11 place-items-center rounded-md text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink-1"
           >
             <X className="size-5" />
