@@ -41,7 +41,7 @@ function SearchField({ courseId }: { courseId: string }) {
           if (event.key === "Escape") setOpen(false);
           if (event.key === "ArrowDown") { event.preventDefault(); setOpen(true); setSelected((value) => Math.min(value + 1, Math.max(0, hits.length - 1))); }
           if (event.key === "ArrowUp") { event.preventDefault(); setSelected((value) => Math.max(0, value - 1)); }
-          if (event.key === "Enter" && ready && hits[selected]) {
+          if (event.key === "Enter" && open && ready && !loading && hits[selected]) {
             event.preventDefault();
             window.location.assign(hitHref(courseId, hits[selected], debounced));
           }
