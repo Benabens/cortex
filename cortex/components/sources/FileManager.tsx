@@ -91,13 +91,14 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
 
   return (
     <Panel className="overflow-hidden p-0">
+      <h2 className="px-6 pt-6 text-[1.2rem] font-semibold">Bibliothèque du cours</h2>
       {removeError && (
         <p role="alert" className="border-b border-line px-4 py-2.5 text-[0.82rem] text-danger-hi">
           Retrait impossible : {removeError}
         </p>
       )}
       {/* résumé + FACETTES cliquables */}
-      <div className="border-b border-line px-4 py-3.5">
+      <div className="border-b border-line px-6 py-5">
         <div className="flex items-center gap-2 text-[0.76rem] text-ink-3">
           <Layers className="size-3.5" strokeWidth={2} />
           <span>
@@ -134,7 +135,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
               const isBusy = busy.has(f.path);
               const href = hrefByPath.get(f.path) ?? null;
               return (
-                <div key={f.path} className={cn("flex flex-wrap items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-surface-2/40", i > 0 && "border-t border-line")}>
+                <div key={f.path} className={cn("flex flex-wrap items-center gap-3 rounded-xl px-4 py-4 transition-colors hover:bg-surface-2/40", i > 0 && "border-t border-line")}>
                   <span className="grid size-8 shrink-0 place-items-center rounded-md border border-line bg-surface-2/60" style={{ color: tone }}>
                     <Icon className="size-4" strokeWidth={2} />
                   </span>
@@ -159,7 +160,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
                         onClick={() => remove(f)}
                         disabled={isBusy}
                         aria-label={`Retirer ${f.title}`}
-                        className="grid size-8 shrink-0 place-items-center rounded-md text-ink-4 transition-colors hover:bg-surface-2 hover:text-danger-hi focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2 disabled:opacity-40"
+                        className="grid size-11 shrink-0 place-items-center rounded-full text-ink-3 transition-colors hover:bg-surface-2 hover:text-danger-hi focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2 disabled:opacity-40"
                       >
                         <Trash2 className="size-4" strokeWidth={2} />
                       </button>
@@ -188,7 +189,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
               const Icon = ext === "HTML" || ext === "HTM" ? FileCode2 : FileText;
               const tone = extTone[ext] ?? "var(--color-ink-3)";
               return (
-                <div key={s.path} className={cn("flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-surface-2/40", i > 0 && "border-t border-line")}>
+                <div key={s.path} className={cn("flex items-center gap-3 rounded-xl px-4 py-4 transition-colors hover:bg-surface-2/40", i > 0 && "border-t border-line")}>
                   <span className="grid size-8 shrink-0 place-items-center rounded-md border border-line bg-surface-2/60" style={{ color: tone }}>
                     <Icon className="size-4" strokeWidth={2} />
                   </span>
@@ -220,7 +221,7 @@ function SeeLink({ href, label }: { href: string; label: string }) {
       target="_blank"
       rel="noopener noreferrer"
       aria-label={`Ouvrir : ${label}`}
-      className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-line bg-surface-2/40 px-2.5 text-[0.78rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_40%,transparent)] hover:text-violet-hi focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2"
+      className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-md border border-line bg-surface-2/40 px-2.5 text-[0.78rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_40%,transparent)] hover:text-violet-hi focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2"
     >
       voir
       <ArrowUpRight className="size-3.5" strokeWidth={2.25} />
@@ -239,7 +240,7 @@ function RefCheckbox({ checked, busy, onToggle, label }: { checked: boolean; bus
       disabled={busy}
       onClick={onToggle}
       className={cn(
-        "inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-[0.78rem] font-medium transition-colors",
+        "inline-flex min-h-11 items-center gap-2 rounded-md border px-2.5 text-[0.78rem] font-medium transition-colors",
         "focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2 disabled:opacity-50",
         checked
           ? "border-[color-mix(in_oklch,var(--color-violet)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_16%,transparent)] text-violet-hi"

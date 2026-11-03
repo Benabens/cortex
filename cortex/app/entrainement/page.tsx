@@ -1,5 +1,6 @@
 "use client";
 
+import styles from "@/app/secondary.module.css";
 import { TrainingNav } from "@/components/entrainement/TrainingNav";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { TrainingStudio } from "@/components/entrainement/TrainingStudio";
@@ -10,7 +11,7 @@ export default function EntrainementPage() {
   const { courseId } = useCourse();
 
   return (
-    <div className="flex flex-col gap-7">
+    <div className={styles.page}>
       <PageHeader title="S’entraîner" description="Crée un exercice sur une notion, une consigne ou une image." />
       <TrainingNav current="/entrainement" />
       <TrainingStudio key={courseId} />

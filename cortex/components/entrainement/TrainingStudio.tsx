@@ -1,5 +1,6 @@
 "use client";
 
+import styles from "@/app/secondary.module.css";
 import { useEffect, useRef, useState } from "react";
 import {
   Target,
@@ -176,10 +177,12 @@ export function TrainingStudio() {
   const weakChips = list.data?.weaknesses ?? [];
 
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.15fr_1fr]">
+    <div className={styles.split}>
       {/* ── Zone unique d'entrée ── */}
-      <Panel className="p-5 sm:p-6">
-        <h2 className="text-[1.05rem] font-semibold text-ink-1">Génère un exo à travailler</h2>
+      <Panel className="p-6 sm:p-8">
+        <div className={styles.eyebrow}>Exercice sur mesure</div>
+        <h2 className="text-[1.5rem] font-semibold leading-tight text-ink-1">Qu’est-ce que tu veux travailler ?</h2>
+        <p className="mt-3 text-sm leading-relaxed text-ink-3">Une notion à éclaircir, une consigne du cours ou une photo d’exercice : pars de ce qui te bloque.</p>
 
         {/* pré-remplissage depuis Faiblesses : bandeau éditable + × pour vider */}
         {prefillNote && input === prefillNote && (
@@ -206,7 +209,7 @@ export function TrainingStudio() {
             onChange={setInput}
             image={image}
             onImageChange={setImage}
-            rows={3}
+            rows={5}
             ariaLabel="Concept, consigne ou énoncé à travailler (image collable)"
             placeholder="Ex. « rétropropagation », « max-flow avec une coupe », ou colle une consigne / un énoncé…"
             onEnter={submit}
@@ -242,9 +245,17 @@ export function TrainingStudio() {
         )}
       </Panel>
 
-      {/* ── Résultat unique : absent tant qu'aucun exo n'a été demandé ── */}
+      {!hasResult && <aside className={styles.guide}>
+        <div className={styles.eyebrow}>À ton rythme</div><h2>Essaie d’abord. Débloque ensuite.</h2>
+        <ol className={styles.steps}>
+          <li><span><strong>Un exercice ciblé</strong>Le format s’appuie sur les références de ton cours.</span></li>
+          <li><span><strong>Des indices à la demande</strong>Pour une notion saisie en texte, révèle les indices un par un avant la solution.</span></li>
+          <li><span><strong>Un retour utile</strong>Indique la difficulté pour ajuster les prochains exercices.</span></li>
+        </ol>
+      </aside>}
+      {/* Le résultat remplace le guide, sans déplacer le formulaire. */}
       {hasResult && (
-      <Panel ref={resultRef} className="flex scroll-mt-20 flex-col p-5 sm:p-6">
+      <Panel ref={resultRef} className="flex scroll-mt-20 flex-col gap-2 p-6 sm:p-8">
         {drill ? (
           <>
             <div className="flex items-center justify-between">
