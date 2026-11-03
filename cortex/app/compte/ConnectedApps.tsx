@@ -53,18 +53,19 @@ export function ConnectedApps() {
   };
 
   return (
-    <section className="rounded-lg border border-line bg-surface-2/40 p-5" aria-labelledby="apps-title">
-      <h2 id="apps-title" className="text-[1.05rem] font-semibold text-ink-1">Applications connectées</h2>
+    <section className="d2-card p-5 sm:p-6" aria-labelledby="apps-title">
+      <h2 id="apps-title" className="text-xl font-semibold text-ink-1">Applications connectées</h2>
       <p className="mt-1 max-w-2xl text-[0.9rem] text-ink-2">
         Les assistants que tu as branchés sur ton compte (par exemple Claude, avec l’adresse <code className="text-ink-1">/mcp</code>).
         Révoquer coupe leur accès immédiatement.
       </p>
       {error && <p role="alert" className="mt-3 text-[0.85rem] text-[#f7b6ae]">{error}</p>}
+      {!apps && !error && <div className="skeleton mt-4 h-20 rounded-xl" aria-label="Chargement des applications connectées" aria-busy="true" />}
       {apps && apps.length === 0 && <p className="mt-3 text-[0.88rem] text-ink-3">Aucune application connectée.</p>}
       {apps && apps.length > 0 && (
-        <ul className="mt-4 flex flex-col divide-y divide-line rounded-md border border-line">
+        <ul className="mt-4 flex flex-col gap-3">
           {apps.map((a) => (
-            <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface-2/40 px-4 py-4">
               <div className="min-w-0">
                 <div className="text-[0.92rem] font-medium text-ink-1">
                   {a.name ?? a.host ?? "Application"}
