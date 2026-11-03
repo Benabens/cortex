@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadError } from "@/components/ui/LoadError";
 import { StudyMilestones } from "@/components/dashboard/StudyMilestones";
 import { ExamActivity } from "@/components/dashboard/PlanOverview";
 import type { Dash } from "@/lib/ux/types";
@@ -13,7 +14,7 @@ import { useApi } from "@/lib/ux/api";
 import type { WeaknessesResp } from "@/lib/ux/weaknesses";
 
 export default function FaiblessesPage() {
-  const { data: dashboard } = useApi<Dash>("/api/dashboard");
+  const { data: dashboard, loading: dashboardLoading, error: dashboardError, refetch: refreshDashboard } = useApi<Dash>("/api/dashboard");
   const { data, loading, error, refetch } = useApi<WeaknessesResp>("/api/weaknesses");
 
   return (
@@ -23,6 +24,8 @@ export default function FaiblessesPage() {
         description="Retrouve les notions que tu maîtrises, tes faiblesses et ton activité."
       />
 
+      {dashboardLoading && <div className="skeleton h-40 rounded-xl" aria-label="Chargement des progrès" />}
+      {dashboardError && <LoadError title="Impossible de charger tes progrès" onRetry={refreshDashboard} />}
       {dashboard && (
         <section className="d2-hero p-5 sm:p-7">
           <h2 className="text-2xl font-semibold">Maîtrise du programme</h2>
@@ -32,6 +35,7 @@ export default function FaiblessesPage() {
         </section>
       )}
       <StudyMilestones />
+      <Panel className="p-5 sm:p-6"><h2 className="text-xl font-semibold">Ta progression dans le temps</h2><p className="mt-2 text-sm text-ink-3">La carte présente ta maîtrise actuelle. Un historique daté des séances n’est pas encore disponible pour tracer une courbe fiable.</p></Panel>
       <h2 id="faiblesses" className="scroll-mt-24 text-2xl font-semibold">Faiblesses</h2>
       <WeaknessInbox onAdded={refetch} />
 

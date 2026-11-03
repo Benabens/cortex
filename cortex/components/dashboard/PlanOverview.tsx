@@ -6,7 +6,7 @@ import { ArrowUpRight, BookOpen, CalendarDays, Layers3, Target } from "lucide-re
 import { Segmented } from "@/components/ui/Segmented";
 import { asText } from "@/lib/ux/api";
 import { formatDay, type Dash } from "@/lib/ux/types";
-import { trainHref } from "@/lib/ux/next-up";
+import { trainHref, reason } from "@/lib/ux/next-up";
 
 export function PlanOverview({ data }: { data: Dash }) {
   const [view, setView] = useState<"week" | "final">("week");
@@ -33,6 +33,7 @@ export function PlanOverview({ data }: { data: Dash }) {
             <span className="text-lg font-medium text-blue-50">notions à travailler</span>
           </div>
           {data.schedule.due > 0 && <p className="mt-1 text-sm text-blue-100">{data.schedule.due} révisions dues</p>}
+          {data.next && <p className="mt-3 max-w-lg text-sm leading-relaxed text-blue-100">{(() => { const why = reason({ ...data.next!, chapter: null }); return <><span>{asText(data.next?.label)} : </span>{why.lead}<strong>{why.strong}</strong>{why.rest}</>; })()}</p>}
           <ul className="mb-6 mt-4 flex flex-wrap gap-2">
             {topics.map((topic) => <li key={topic.id} className="break-words rounded-full bg-white/12 px-3 py-1 text-sm">{topic.title}</li>)}
           </ul>
@@ -44,7 +45,7 @@ export function PlanOverview({ data }: { data: Dash }) {
           <Segmented label="Horizon de révision" value={view} onChange={setView}
             options={[{ value: "week", label: "Cette semaine" }, { value: "final", label: "Avant le final" }]} />
           {view === "week" ? (
-            <ol className="mt-4 divide-y divide-line">
+            <><p className="mt-3 text-xs text-ink-3">Un rythme proposé, à adapter à tes disponibilités.</p><ol className="mt-4 divide-y divide-line">
               <li className="py-3">
                 <Link href="/seance" className="flex items-baseline gap-3 text-sm hover:text-violet-hi">
                   <span className="min-w-20 text-xs text-violet-hi">Aujourd’hui</span>
@@ -63,9 +64,9 @@ export function PlanOverview({ data }: { data: Dash }) {
                   <span>Revoir les questions du cours</span>
                 </Link>
               </li>
-            </ol>
+            </ol></>
           ) : (
-            <div className="mt-5">
+            <div className="mt-5"><p className="mb-3 text-sm font-medium">Consolider le programme, puis se tester</p>
               <p className="text-sm text-ink-2">{data.stats.mastered} sur {data.stats.total} notions solides</p>
               <progress className="mt-3 h-2 w-full accent-violet" max={Math.max(1, data.stats.total)} value={data.stats.mastered} aria-label="Notions solides" />
               <Link href="/programme" className="mt-3 inline-flex min-h-11 items-center text-sm text-violet-hi">Voir la carte du programme →</Link>
@@ -95,7 +96,7 @@ export function ExamActivity({ exams }: { exams: Dash["exams"] }) {
       {exams.length ? (
         <ul className="mt-3 divide-y divide-line">
           {exams.slice(0, 4).map((exam) => <li key={exam.id} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
-            <Link href="/examens" className="text-violet-hi">Examen blanc nº {exam.id}</Link>
+            <Link href={exam.url ?? "/examens"} className="text-violet-hi">Examen blanc nº {exam.id}</Link>
             <span className="text-ink-3">{formatDay(exam.createdAt)} · {exam.questionCount} questions</span>
           </li>)}
         </ul>
