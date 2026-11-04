@@ -273,9 +273,9 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
 
       {/* ── Solde : deux poches ── */}
       <Panel className="overflow-hidden divide-y divide-line p-0">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 bg-[linear-gradient(135deg,oklch(0.36_0.12_258),oklch(0.25_0.07_264))] px-6 py-6">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 px-6 py-6">
           <div>
-            <div className="text-sm text-blue-100">Solde disponible</div>
+            <div className="text-sm text-ink-3">Solde disponible</div>
             <div className="mt-2 font-display text-4xl font-semibold leading-none tracking-tight text-ink-1 sm:text-5xl">{credits(data.balance ?? 0)}</div>
           </div>
           {(data.balance ?? 0) < 0 && (
@@ -370,7 +370,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
                     </div>
                   )}
                   <label className="mt-4 flex max-w-xl items-start gap-3 rounded-xl bg-bg/40 p-3 text-xs leading-relaxed text-ink-2">
-                    <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-[var(--color-violet)]" checked={!!consents[o.plan]}
+                    <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-[var(--color-accent)]" checked={!!consents[o.plan]}
                       disabled={!data.purchase.enabled || !!busy || (isSub && hasSub)}
                       onChange={(e) => setConsents((current) => ({ ...current, [o.plan]: e.target.checked }))} />
                     <span>{isSub
@@ -473,7 +473,7 @@ function TermsConsent({ data, busy, canAccept, legalOk, onAcceptTerms }: {
         <label className="flex items-start gap-3">
           <input
             type="checkbox"
-            className="mt-0.5 size-4 shrink-0 accent-[var(--color-violet)]"
+            className="mt-0.5 size-4 shrink-0 accent-[var(--color-accent)]"
             disabled={busy === "terms" || !canAccept}
             checked={terms}
             onChange={(e) => setTerms(e.target.checked)}

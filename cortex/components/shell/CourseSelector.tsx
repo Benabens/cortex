@@ -29,12 +29,12 @@ export function CourseSelector({ className }: { className?: string }) {
         onClick={() => router.push("/cours/nouveau")}
         className={cn(
           "group flex w-full items-center gap-3 rounded-lg border border-dashed border-line-strong bg-surface-2/40 p-2 pr-2.5 text-left transition-colors",
-          "hover:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] hover:bg-surface-2",
-          "focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2",
+          "hover:border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] hover:bg-surface-2",
+          "focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2",
           className
         )}
       >
-        <span className="grid size-9 shrink-0 place-items-center rounded-md border border-line text-violet-hi">
+        <span className="grid size-9 shrink-0 place-items-center rounded-md border border-line text-accent-hi">
           <Plus className="size-4" strokeWidth={2.5} aria-hidden="true" />
         </span>
         <span className="min-w-0 flex-1">
@@ -49,8 +49,8 @@ export function CourseSelector({ className }: { className?: string }) {
     <div
       className={cn(
         "group relative flex w-full items-center gap-3 rounded-lg border border-line bg-surface-2/60 p-2 pr-2.5 text-left transition-colors",
-        "hover:border-[color-mix(in_oklch,var(--color-violet)_34%,transparent)] hover:bg-surface-2",
-        "focus-within:outline-2 focus-within:outline-violet focus-within:outline-offset-2",
+        "hover:border-[color-mix(in_oklch,var(--color-accent)_34%,transparent)] hover:bg-surface-2",
+        "focus-within:outline-2 focus-within:outline-accent focus-within:outline-offset-2",
         className
       )}
     >

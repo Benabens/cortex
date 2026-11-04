@@ -14,7 +14,7 @@ export function Panel({
       className={cn(
         "d2-card",
         interactive &&
-          "transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-0.5 hover:border-[color-mix(in_oklch,var(--color-violet)_34%,transparent)] hover:shadow-[var(--shadow-pop)]",
+          "transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-0.5 hover:border-[color-mix(in_oklch,var(--color-accent)_34%,transparent)] hover:shadow-[var(--shadow-pop)]",
         className
       )}
       {...rest}
@@ -44,7 +44,7 @@ export function SectionHeader({
       {action && (
         <Link
           href={action.href}
-          className="group -mx-2 -my-3 inline-flex min-h-11 shrink-0 items-center gap-1 whitespace-nowrap rounded px-2 text-[0.8rem] font-medium text-ink-3 transition-colors hover:text-violet-hi focus-visible:text-violet-hi"
+          className="group -mx-2 -my-3 inline-flex min-h-11 shrink-0 items-center gap-1 whitespace-nowrap rounded px-2 text-[0.8rem] font-medium text-ink-3 transition-colors hover:text-accent-hi focus-visible:text-accent-hi"
         >
           {action.label}
           <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />

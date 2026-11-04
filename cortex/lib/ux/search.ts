@@ -42,7 +42,7 @@ export const SUGGEST: Record<string, string[]> = {
 
 /** Méta d'affichage par sourceType RÉEL (fallback générique pour l'inconnu). */
 export const TYPE_META: Record<string, { Icon: LucideIcon; tone: Tone }> = {
-  review: { Icon: Repeat2, tone: "violet" },
+  review: { Icon: Repeat2, tone: "accent" },
   course_pdf: { Icon: Presentation, tone: "neutral" },
   lecture: { Icon: BookOpen, tone: "neutral" },
   final: { Icon: GraduationCap, tone: "warning" },
@@ -50,7 +50,7 @@ export const TYPE_META: Record<string, { Icon: LucideIcon; tone: Tone }> = {
   serie: { Icon: PenLine, tone: "info" },
   exercise: { Icon: PenLine, tone: "info" },
   cheatsheet: { Icon: ScrollText, tone: "success" },
-  code: { Icon: Code2, tone: "violet" },
+  code: { Icon: Code2, tone: "accent" },
 };
 
 export function metaFor(sourceType: string) {

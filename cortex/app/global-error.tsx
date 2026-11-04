@@ -7,7 +7,7 @@ import { THEME_STORAGE_KEY, LIGHT_QUERY, parseThemePref, resolveTheme } from "@/
 // enfant texte de <style> : aucun caractère que React échapperait (& < > " ').
 const PALETTE = `
 :root{color-scheme:dark;--ge-bg:#0c0d15;--ge-ink:#f4f2fb;--ge-muted:#c9c7d6;--ge-faint:#8a8798;--ge-card:rgba(255,255,255,0.03);--ge-line:rgba(255,255,255,0.09);--ge-shadow:0 8px 26px -6px rgba(0,0,0,0.6);--ge-cta:#ececee;--ge-cta-ink:#111214}
-:root[data-theme=light]{color-scheme:light;--ge-bg:#f4f6fb;--ge-ink:#0f172a;--ge-muted:#334155;--ge-faint:#5f6b7e;--ge-card:#ffffff;--ge-line:#e6eaf2;--ge-shadow:0 1px 2px rgba(15,23,42,0.04),0 8px 24px -12px rgba(15,23,42,0.12);--ge-cta:#2563eb;--ge-cta-ink:#ffffff}`;
+:root[data-theme=light]{color-scheme:light;--ge-bg:#f4f6fb;--ge-ink:#0f172a;--ge-muted:#334155;--ge-faint:#5f6b7e;--ge-card:#ffffff;--ge-line:#e6eaf2;--ge-shadow:0 1px 2px rgba(15,23,42,0.04),0 8px 24px -12px rgba(15,23,42,0.12);--ge-cta:#2764ec;--ge-cta-ink:#ffffff}`;
 
 /**
  * Erreur CRITIQUE au niveau du layout racine : global-error remplace tout le
@@ -80,7 +80,7 @@ export default function GlobalError({
               cortex
               <span
                 aria-hidden="true"
-                style={{ display: "inline-block", width: "0.17em", height: "0.17em", marginLeft: "0.035em", borderRadius: "50%", background: "#548dff" }}
+                style={{ display: "inline-block", width: "0.17em", height: "0.17em", marginLeft: "0.035em", borderRadius: "50%", background: "#2764ec" }}
               />
             </div>
             <h1 style={{ fontSize: 22, fontWeight: 700, margin: "14px 0 8px" }}>Erreur critique</h1>

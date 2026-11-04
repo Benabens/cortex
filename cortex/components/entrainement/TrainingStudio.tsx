@@ -186,16 +186,16 @@ export function TrainingStudio() {
 
         {/* pré-remplissage depuis Faiblesses : bandeau éditable + × pour vider */}
         {prefillNote && input === prefillNote && (
-          <div className="mt-4 flex items-center justify-between gap-2 rounded-lg border border-[color-mix(in_oklch,var(--color-violet)_35%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_9%,transparent)] px-3 py-2 text-[0.78rem] text-ink-2">
+          <div className="mt-4 flex items-center justify-between gap-2 rounded-lg border border-[color-mix(in_oklch,var(--color-accent)_35%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_9%,transparent)] px-3 py-2 text-[0.78rem] text-ink-2">
             <span className="inline-flex min-w-0 items-center gap-1.5">
-              <Target className="size-3.5 shrink-0 text-violet-hi" strokeWidth={2.25} />
+              <Target className="size-3.5 shrink-0 text-accent-hi" strokeWidth={2.25} />
               <span className="truncate">Pré-rempli : modifie-le ou lance tel quel.</span>
             </span>
             <button
               type="button"
               onClick={() => { setInput(""); setPrefillNote(null); }}
               aria-label="Vider le pré-remplissage"
-              className="grid size-6 shrink-0 place-items-center rounded text-ink-3 transition-colors hover:text-ink-1 focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2"
+              className="grid size-6 shrink-0 place-items-center rounded text-ink-3 transition-colors hover:text-ink-1 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
             >
               <X className="size-3.5" strokeWidth={2.5} />
             </button>
@@ -314,7 +314,7 @@ export function TrainingStudio() {
             </span>
             <h2 className="mt-3 text-[1.05rem] font-semibold text-ink-1">{input.trim() || "Exercice sur mesure"}</h2>
             <div className="mt-4 grid grid-cols-2 gap-3">
-              <a href={resultLink ?? "/examens"} target={resultLink ? "_blank" : undefined} rel="noopener noreferrer" className="flex items-center gap-3 rounded-lg border border-line bg-surface-2/40 p-3 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_34%,transparent)]">
+              <a href={resultLink ?? "/examens"} target={resultLink ? "_blank" : undefined} rel="noopener noreferrer" className="flex items-center gap-3 rounded-lg border border-line bg-surface-2/40 p-3 transition-colors hover:border-[color-mix(in_oklch,var(--color-accent)_34%,transparent)]">
                 <FileText className="size-5 text-cyan-hi" strokeWidth={2} />
                 <span className="text-[0.82rem] font-medium text-ink-1">{resultLink ? "Énoncé PDF" : "Voir dans Examens"}</span>
               </a>
@@ -357,7 +357,7 @@ function FeedbackBar({ onSend, sent, busy, error }: { onSend: (verdict: string) 
             className={cn(
               "min-h-11 rounded-full border px-3 text-[0.8rem] font-medium transition-colors disabled:opacity-60",
               sent === o.verdict
-                ? "border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_16%,transparent)] text-ink-1"
+                ? "border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_16%,transparent)] text-ink-1"
                 : "border-line bg-surface-2/40 text-ink-2 hover:bg-surface-2 hover:text-ink-1"
             )}
           >
@@ -385,7 +385,7 @@ function ChipGroup({ label, chips, onPick, selected }: { label: string; chips: s
             className={cn(
               "inline-flex min-h-9 items-center rounded-full border px-3 py-1 text-left text-[0.8rem] font-medium transition-colors",
               selected === c
-                ? "border-[color-mix(in_oklch,var(--color-violet)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_14%,transparent)] text-ink-1"
+                ? "border-[color-mix(in_oklch,var(--color-accent)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_14%,transparent)] text-ink-1"
                 : "border-line bg-surface-1/60 text-ink-2 hover:bg-surface-2 hover:text-ink-1"
             )}
           >

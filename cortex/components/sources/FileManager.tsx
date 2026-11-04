@@ -14,7 +14,7 @@ const extTone: Record<string, string> = {
   HTML: "var(--color-cyan)",
   HTM: "var(--color-cyan)",
   TXT: "var(--color-ink-3)",
-  MD: "var(--color-violet)",
+  MD: "var(--color-accent)",
 };
 
 const ANNALE_TYPES = new Set(["final", "midterm"]);
@@ -159,7 +159,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
                         onClick={() => remove(f)}
                         disabled={isBusy}
                         aria-label={`Retirer ${f.title}`}
-                        className="grid size-11 shrink-0 place-items-center rounded-full text-ink-3 transition-colors hover:bg-surface-2 hover:text-danger-hi focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2 disabled:opacity-40"
+                        className="grid size-11 shrink-0 place-items-center rounded-full text-ink-3 transition-colors hover:bg-surface-2 hover:text-danger-hi focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:opacity-40"
                       >
                         <Trash2 className="size-4" strokeWidth={2} />
                       </button>
@@ -220,7 +220,7 @@ function SeeLink({ href, label }: { href: string; label: string }) {
       target="_blank"
       rel="noopener noreferrer"
       aria-label={`Ouvrir : ${label}`}
-      className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-md border border-line bg-surface-2/40 px-2.5 text-[0.78rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_40%,transparent)] hover:text-violet-hi focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2"
+      className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-md border border-line bg-surface-2/40 px-2.5 text-[0.78rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-accent)_40%,transparent)] hover:text-accent-hi focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
     >
       voir
       <ArrowUpRight className="size-3.5" strokeWidth={2.25} />
@@ -240,15 +240,15 @@ function RefCheckbox({ checked, busy, onToggle, label }: { checked: boolean; bus
       onClick={onToggle}
       className={cn(
         "inline-flex min-h-11 items-center gap-2 rounded-md border px-2.5 text-[0.78rem] font-medium transition-colors",
-        "focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2 disabled:opacity-50",
+        "focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:opacity-50",
         checked
-          ? "border-[color-mix(in_oklch,var(--color-violet)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_16%,transparent)] text-violet-hi"
+          ? "border-[color-mix(in_oklch,var(--color-accent)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_16%,transparent)] text-accent-hi"
           : "border-line bg-surface-2/40 text-ink-3 hover:text-ink-1"
       )}
     >
       <span
         aria-hidden="true"
-        className={cn("grid size-4 place-items-center rounded-[5px] border transition-colors", checked ? "border-transparent bg-violet-deep text-white" : "border-line-strong bg-surface-1")}
+        className={cn("grid size-4 place-items-center rounded-[5px] border transition-colors", checked ? "border-transparent bg-accent-deep text-white" : "border-line-strong bg-surface-1")}
       >
         {checked && <Check className="size-3" strokeWidth={3} />}
       </span>

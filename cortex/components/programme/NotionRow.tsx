@@ -27,7 +27,7 @@ export function NotionRow({ t }: { t: UiType }) {
         className={cn(
           "group flex w-full flex-wrap items-start gap-3 rounded-xl px-3 py-4 text-left transition-colors",
           hasDetail ? "hover:bg-surface-2/40" : "cursor-default",
-          "focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-[-2px]"
+          "focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-[-2px]"
         )}
       >
         <ChevronRight

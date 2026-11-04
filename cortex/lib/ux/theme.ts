@@ -15,7 +15,7 @@ export const THEME_STORAGE_KEY = "cortex-theme";
 export const LIGHT_QUERY = "(prefers-color-scheme: light)";
 
 /** Couleur de la barre du navigateur (meta theme-color) : le fond de chaque thème. */
-export const THEME_COLORS: Record<Theme, string> = { dark: "#0c0d15", light: "#f4f6fb" };
+export const THEME_COLORS: Record<Theme, string> = { dark: "#080c14", light: "#f4f6fb" };
 
 /** Valeur enregistrée → préférence. Tout ce qui n'est pas « light » / « dark » vaut « système ». */
 export function parseThemePref(raw: string | null | undefined): ThemePref {

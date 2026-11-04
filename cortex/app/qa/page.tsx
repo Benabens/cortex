@@ -159,7 +159,7 @@ export default function QAPage() {
             >
               <span className={cn(
                 "grid size-5 place-items-center rounded-[5px] border transition-colors",
-                v ? "border-transparent bg-violet-deep text-white" : "border-line-strong bg-surface-2"
+                v ? "border-transparent bg-accent-deep text-white" : "border-line-strong bg-surface-2"
               )}>
                 {v && <Check className="size-3.5" strokeWidth={3} />}
               </span>
@@ -177,14 +177,14 @@ export default function QAPage() {
       <QA title="Badge : tous les tons × tailles × emphase">
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone="neutral" Icon={CircleDashed}>Neutral</Badge>
-          <Badge tone="violet" Icon={Repeat2}>Violet</Badge>
+          <Badge tone="accent" Icon={Repeat2}>Accent</Badge>
           <Badge tone="info" Icon={CircleDot}>Info</Badge>
           <Badge tone="success" Icon={CheckCircle2}>Success</Badge>
           <Badge tone="warning" Icon={AlertTriangle}>Warning</Badge>
           <Badge tone="danger" Icon={ShieldAlert}>Danger</Badge>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Badge tone="violet" Icon={Info} size="xs">Taille xs</Badge>
+          <Badge tone="accent" Icon={Info} size="xs">Taille xs</Badge>
           <Badge tone="success" Icon={Check} size="sm">Taille sm</Badge>
           <Badge tone="danger" Icon={ShieldAlert} emphasis>Emphase</Badge>
         </div>
@@ -196,17 +196,17 @@ export default function QAPage() {
           <div className="space-y-1.5">
             <Label>vide (placeholder)</Label>
             <input type="text" placeholder="Rechercher un thème…" aria-label="Démo vide"
-              className="h-11 w-full rounded-lg border border-line-strong bg-surface-2/40 px-3.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:outline-none focus:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-violet)_28%,transparent)]" />
+              className="h-11 w-full rounded-lg border border-line-strong bg-surface-2/40 px-3.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:outline-none focus:border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-accent)_28%,transparent)]" />
           </div>
           <div className="space-y-1.5">
             <Label>rempli</Label>
             <input type="text" defaultValue="Descente de gradient" aria-label="Démo remplie"
-              className="h-11 w-full rounded-lg border border-line-strong bg-surface-2/40 px-3.5 text-[0.9rem] text-ink-1 focus:outline-none focus:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-violet)_28%,transparent)]" />
+              className="h-11 w-full rounded-lg border border-line-strong bg-surface-2/40 px-3.5 text-[0.9rem] text-ink-1 focus:outline-none focus:border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-accent)_28%,transparent)]" />
           </div>
           <div className="space-y-1.5">
             <Label>focus (simulé)</Label>
             <input type="text" defaultValue="SVM & kernels" aria-label="Démo focus"
-              className="h-11 w-full rounded-lg border bg-surface-2/40 px-3.5 text-[0.9rem] text-ink-1 border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] ring-2 ring-[color-mix(in_oklch,var(--color-violet)_28%,transparent)] focus:outline-none" />
+              className="h-11 w-full rounded-lg border bg-surface-2/40 px-3.5 text-[0.9rem] text-ink-1 border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] ring-2 ring-[color-mix(in_oklch,var(--color-accent)_28%,transparent)] focus:outline-none" />
           </div>
           <div className="space-y-1.5">
             <Label>erreur</Label>
@@ -218,7 +218,7 @@ export default function QAPage() {
         <div className="mt-4 space-y-1.5">
           <Label>textarea</Label>
           <textarea rows={2} placeholder="Colle une discussion…" aria-label="Démo textarea"
-            className="w-full resize-none rounded-lg border border-line-strong bg-surface-2/40 p-3.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:outline-none focus:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-violet)_28%,transparent)]" />
+            className="w-full resize-none rounded-lg border border-line-strong bg-surface-2/40 p-3.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:outline-none focus:border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-accent)_28%,transparent)]" />
         </div>
       </QA>
 
@@ -253,7 +253,7 @@ export default function QAPage() {
       {/* CHIPS / KBD / ROWS */}
       <QA title="Chips · Rangées (default / hover simulé / focus)">
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" aria-pressed="true" className="inline-flex h-9 items-center gap-2 rounded-full border border-[color-mix(in_oklch,var(--color-violet)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_14%,transparent)] px-3 text-[0.82rem] font-medium text-ink-1">
+          <button type="button" aria-pressed="true" className="inline-flex h-9 items-center gap-2 rounded-full border border-[color-mix(in_oklch,var(--color-accent)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_14%,transparent)] px-3 text-[0.82rem] font-medium text-ink-1">
             Chip actif <span className="font-data text-[0.72rem] tabular text-ink-4">12</span>
           </button>
           <button type="button" aria-pressed="false" className="inline-flex h-9 items-center gap-2 rounded-full border border-line bg-surface-1/60 px-3 text-[0.82rem] font-medium text-ink-2 hover:bg-surface-2">
@@ -271,8 +271,8 @@ export default function QAPage() {
           <div className="flex items-center gap-3 border-t border-line bg-surface-2/60 px-3 py-2.5">
             <Search className="size-4 text-ink-2" /><span className="flex-1 text-[0.88rem] text-ink-1">Rangée hover (simulée)</span><Label>bg-surface-2</Label>
           </div>
-          <div className="flex items-center gap-3 border-t border-line bg-surface-2 px-3 py-2.5 ring-1 ring-inset ring-[color-mix(in_oklch,var(--color-violet)_35%,transparent)]">
-            <Search className="size-4 text-violet-hi" /><span className="flex-1 text-[0.88rem] text-ink-1">Rangée sélectionnée</span><Label>ring violet</Label>
+          <div className="flex items-center gap-3 border-t border-line bg-surface-2 px-3 py-2.5 ring-1 ring-inset ring-[color-mix(in_oklch,var(--color-accent)_35%,transparent)]">
+            <Search className="size-4 text-accent-hi" /><span className="flex-1 text-[0.88rem] text-ink-1">Rangée sélectionnée</span><Label>anneau accent</Label>
           </div>
         </div>
         <div className="mt-4 w-56 overflow-hidden rounded-lg border border-line p-3">
@@ -353,14 +353,14 @@ export default function QAPage() {
       <QA title="Panel interactif & focus-ring près d’un bord overflow-hidden">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Panel interactive className="p-4">
-            <SectionHeader title="Panel interactif" hint="hover : lift + bordure violette" action={{ label: "Action", href: "/qa" }} />
+            <SectionHeader title="Panel interactif" hint="hover : lift + bordure bleue" action={{ label: "Action", href: "/qa" }} />
             <p className="text-[0.85rem] text-ink-2">Contenu…</p>
           </Panel>
           <div className="panel overflow-hidden rounded-xl p-1.5">
             <div className="rounded-lg p-2">
               <span
                 className="inline-flex rounded-md"
-                style={{ outline: "2px solid var(--color-violet)", outlineOffset: 2 }}
+                style={{ outline: "2px solid var(--color-accent)", outlineOffset: 2 }}
               >
                 <Button variant="secondary" size="sm">Ring simulé près du bord (clippé ?)</Button>
               </span>

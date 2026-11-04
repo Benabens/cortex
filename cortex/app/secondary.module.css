@@ -6,7 +6,7 @@
 .coverage { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-top: 18px; }
 .coverageRow { padding: 14px; border-radius: 14px; background: var(--color-surface-2); display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 10px; font-size: 13px; }
 .coverageRow .track { grid-column: 1 / -1; height: 5px; background: var(--color-line); border-radius: 5px; overflow: hidden; }
-.coverageRow .track > div { height: 100%; background: var(--color-violet); border-radius: inherit; }
+.coverageRow .track > div { height: 100%; background: var(--color-accent); border-radius: inherit; }
 .question { border: 1px solid var(--color-line); background: var(--color-surface-2); border-radius: 14px; padding: 18px; line-height: 1.7; }
 .questionGroup { border-radius: 18px; background: var(--color-surface-1); box-shadow: inset 0 0 0 1px var(--color-line); overflow: hidden; }
 .questionToggle { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 20px; cursor: pointer; }

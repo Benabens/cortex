@@ -23,7 +23,7 @@ function Snippet({ text }: { text: string }) {
         p.hit ? (
           <mark
             key={i}
-            className="rounded bg-[color-mix(in_oklch,var(--color-violet)_30%,transparent)] px-0.5 text-ink-1"
+            className="rounded bg-[color-mix(in_oklch,var(--color-accent)_30%,transparent)] px-0.5 text-ink-1"
           >
             {p.text}
           </mark>
@@ -120,7 +120,7 @@ export function SearchExperience() {
     <div className="flex flex-col gap-5">
       {/* Barre de recherche — sobre : bord 1 px, focus net, AUCUN halo (P0.1) */}
       <div>
-        <div className="group relative flex items-center gap-3 rounded-full border border-line-strong bg-surface-1/80 px-4 transition-[border-color,box-shadow] duration-150 focus-within:border-[color-mix(in_oklch,var(--color-violet)_60%,transparent)] focus-within:[box-shadow:inset_0_0_0_1px_color-mix(in_oklch,var(--color-violet)_45%,transparent)]">
+        <div className="group relative flex items-center gap-3 rounded-full border border-line-strong bg-surface-1/80 px-4 transition-[border-color,box-shadow] duration-150 focus-within:border-[color-mix(in_oklch,var(--color-accent)_60%,transparent)] focus-within:[box-shadow:inset_0_0_0_1px_color-mix(in_oklch,var(--color-accent)_45%,transparent)]">
           <Search className="size-5 shrink-0 text-ink-3 transition-colors group-focus-within:text-ink-2" strokeWidth={2} />
           <input
             ref={inputRef}
@@ -162,7 +162,7 @@ export function SearchExperience() {
                   setQuery(s);
                   inputRef.current?.focus();
                 }}
-                className="inline-flex min-h-10 items-center rounded-full border border-line bg-surface-1/70 px-3.5 text-[0.85rem] text-ink-2 transition-colors duration-150 hover:border-[color-mix(in_oklch,var(--color-violet)_38%,transparent)] hover:bg-surface-2 hover:text-ink-1"
+                className="inline-flex min-h-10 items-center rounded-full border border-line bg-surface-1/70 px-3.5 text-[0.85rem] text-ink-2 transition-colors duration-150 hover:border-[color-mix(in_oklch,var(--color-accent)_38%,transparent)] hover:bg-surface-2 hover:text-ink-1"
               >
                 {s}
               </button>

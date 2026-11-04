@@ -12,11 +12,11 @@ type Props = {
   delay?: number;
 };
 
-/** Slim gradient progress/weight bar with a clip-path reveal (reduced-motion safe). */
+/** Slim progress/weight bar (solid accent by default) with a clip-path reveal (reduced-motion safe). */
 export function WeightBar({
   pct,
-  from = "var(--color-violet)",
-  to = "var(--color-cyan)",
+  from = "var(--color-accent)",
+  to = "var(--color-accent)",
   height = 8,
   className,
   delay = 0,

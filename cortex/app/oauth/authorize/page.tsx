@@ -117,7 +117,7 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
             {canGenerate && (
               <li className="rounded-lg px-4 py-3" style={{ border: `1px solid ${C.line}` }}>
                 <label className="flex cursor-pointer items-start gap-3">
-                  <input type="checkbox" name="generate" defaultChecked className="mt-1 size-4 accent-violet" />
+                  <input type="checkbox" name="generate" defaultChecked className="mt-1 size-4 accent-accent" />
                   <span>
                     <span className="font-medium">Générer</span>
                     <span style={{ color: C.muted }}> des examens blancs, des questions d’entraînement et des corrections. Ces actions coûtent des crédits : chacune t’annonce son coût et attend ton accord.</span>
@@ -128,7 +128,7 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
             {canWrite && (
               <li className="rounded-lg px-4 py-3" style={{ border: `1px solid ${C.line}` }}>
                 <label className="flex cursor-pointer items-start gap-3">
-                  <input type="checkbox" name="write" defaultChecked className="mt-1 size-4 accent-violet" />
+                  <input type="checkbox" name="write" defaultChecked className="mt-1 size-4 accent-accent" />
                   <span>
                     <span className="font-medium">Ajouter des cours et des supports</span>
                     <span style={{ color: C.muted }}> : créer un cours et y ranger un document (adresse web ou texte), gratuitement. Le préparer coûte des crédits : il faut aussi « Générer », et son coût t’est annoncé avant ton accord.</span>

@@ -18,7 +18,7 @@ const LANGUES: { value: string; label: string }[] = [
 
 const field =
   "w-full rounded-lg border border-line-strong bg-surface-2/40 px-3 py-2.5 text-[0.88rem] text-ink-1 " +
-  "placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] focus:outline-none";
+  "placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] focus:outline-none";
 
 /**
  * CRÉER UN COURS — le geste qui manquait : plus aucune ligne de code ni de

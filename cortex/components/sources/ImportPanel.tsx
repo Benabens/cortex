@@ -188,8 +188,8 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
         className={cn(
           "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-4 py-8 text-center transition-colors",
           dragOver
-            ? "border-[color-mix(in_oklch,var(--color-violet)_60%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_10%,transparent)]"
-            : "border-line-strong bg-surface-2/30 hover:border-[color-mix(in_oklch,var(--color-violet)_45%,transparent)]"
+            ? "border-[color-mix(in_oklch,var(--color-accent)_60%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_10%,transparent)]"
+            : "border-line-strong bg-surface-2/30 hover:border-[color-mix(in_oklch,var(--color-accent)_45%,transparent)]"
         )}
       >
         <input

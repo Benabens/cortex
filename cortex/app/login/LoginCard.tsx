@@ -127,7 +127,7 @@ export function LoginCard({
                 value={addr}
                 onChange={(e) => setAddr(e.target.value)}
                 placeholder="ton@email.com"
-                className="h-12 w-full rounded-lg border px-3.5 text-[0.9rem] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-hi"
+                className="h-12 w-full rounded-lg border px-3.5 text-[0.9rem] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hi"
                 style={{ background: "var(--bare-surface)", color: "var(--bare-ink)", borderColor: "var(--bare-field-line)" }}
               />
               {/* Chemin secondaire : surface neutre bordée (le bouton clair reste Google, l'action principale). */}

@@ -10,7 +10,7 @@ import { ExamFormatFields, formatDraftOf, formatPayload, type ExamFormatDraft } 
 
 const field =
   "w-full rounded-lg border border-line-strong bg-surface-2/40 px-3 py-2 text-[0.85rem] text-ink-1 " +
-  "placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] focus:outline-none";
+  "placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] focus:outline-none";
 
 /** "2027-01-18" → « 18 janvier 2027 ». */
 const longDay = (iso: string) =>
@@ -112,7 +112,7 @@ export function CourseList() {
   if (!courses.length) {
     return (
       <Panel className="flex flex-col items-center gap-3 rounded-xl px-6 py-12 text-center">
-        <BookPlus className="size-6 text-violet-hi" strokeWidth={2} aria-hidden="true" />
+        <BookPlus className="size-6 text-accent-hi" strokeWidth={2} aria-hidden="true" />
         <p className="text-[0.95rem] font-medium text-ink-1">Aucun cours pour l’instant</p>
         <Button variant="primary" size="sm" href="/cours/nouveau">
           Créer ma première matière

@@ -90,7 +90,7 @@ export function WeaknessBase({
 
       {weaknesses.length === 0 ? (
         <div className="d2-card flex flex-col items-center gap-3 px-6 py-16 text-center">
-          <span className="grid size-12 place-items-center rounded-2xl border border-violet/25 bg-violet/10 text-violet-hi">
+          <span className="grid size-12 place-items-center rounded-2xl border border-accent/25 bg-accent/10 text-accent-hi">
             <Target className="size-5" strokeWidth={2} />
           </span>
           <p className="text-[0.95rem] font-medium text-ink-1">Aucune faiblesse suivie</p>
@@ -203,7 +203,7 @@ function WeaknessRow({
                   href={w.screenshotUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-ink-3 underline-offset-2 hover:text-violet-hi hover:underline"
+                  className="inline-flex items-center gap-1 text-ink-3 underline-offset-2 hover:text-accent-hi hover:underline"
                 >
                   {/\.pdf$/i.test(w.screenshotUrl) ? (
                     <FileText className="size-3" strokeWidth={2} />
@@ -233,7 +233,7 @@ function WeaknessRow({
         <a
           href={`/entrainement?prefill=${encodeURIComponent(w.topic)}`}
           aria-label={`S'entraîner sur : ${w.topic}`}
-          className="inline-flex min-h-11 items-center justify-center gap-1 rounded-full border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_38%,transparent)] hover:text-ink-1"
+          className="inline-flex min-h-11 items-center justify-center gap-1 rounded-full border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-accent)_38%,transparent)] hover:text-ink-1"
         >
           S’entraîner
           <ArrowUpRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
