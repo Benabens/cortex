@@ -232,3 +232,8 @@ test("banc du 04/11 : distracteur trivial ET autre faiblesse — après la rég�
   assert.equal(r.count, 4, steps.join("\n"));
   assert.ok(!steps.some((s) => /comblement/.test(s)), steps.join("\n"));
 });
+
+test("le remplacement des distracteurs voit les extraits du cours (distracteurs bâtis sur des notions voisines, pas inventés)", async () => {
+  await exam(await course(), 4);
+  assert.match(repairPrompts[0], /EXTRAITS DU COURS[\s\S]*impact disparate/i, repairPrompts[0].slice(0, 600));
+});
