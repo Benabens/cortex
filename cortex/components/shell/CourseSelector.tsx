@@ -55,11 +55,8 @@ export function CourseSelector({ className }: { className?: string }) {
       )}
     >
       <span
-        className="grid size-9 shrink-0 place-items-center rounded-md font-data text-[0.72rem] font-semibold text-white"
-        style={{
-          background: "linear-gradient(150deg, var(--color-violet), var(--color-cyan))",
-          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.3)",
-        }}
+        className="grid size-9 shrink-0 place-items-center rounded-md font-data text-[0.72rem] font-semibold"
+        style={{ background: "var(--tile-bg)", color: "var(--tile-ink)", boxShadow: "var(--tile-edge)" }}
         aria-hidden="true"
       >
         {initials}

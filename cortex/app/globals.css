@@ -1,7 +1,8 @@
 @import "tailwindcss";
 
 /* ============================================================================
-   CORTEX — design tokens (dark-only, OKLCH, token-driven)
+   CORTEX — design tokens (OKLCH, token-driven). Sombre par défaut ; thème clair
+   en bas de fichier, sous :root[data-theme="light"].
    Bar: Linear · Vercel · Raycast · Arc. Data as light, never a flat admin panel.
    ========================================================================== */
 
@@ -39,6 +40,23 @@
   --color-line-soft: rgba(255, 255, 255, 0.05);
   --color-line-strong: rgba(255, 255, 255, 0.14);
 
+  /* — Action pleine (bouton principal) : aplat blanc cassé en sombre, bleu plein en clair — */
+  --color-primary: #ececee;
+  --color-primary-hover: #ffffff;
+  --color-primary-active: #dedee2;
+  --color-on-primary: #111214;
+  --color-on-danger: #111214;
+
+  /* — Voiles neutres (survols, bouton discret) et fond des modales — */
+  --color-wash: rgba(255, 255, 255, 0.04);
+  --color-wash-hi: rgba(255, 255, 255, 0.07);
+  --color-scrim: rgba(0, 0, 0, 0.6);
+
+  /* — Soulignement des liens de texte (repos, repos appuyé, survol) — */
+  --color-underline: rgba(255, 255, 255, 0.15);
+  --color-underline-hi: rgba(255, 255, 255, 0.25);
+  --color-underline-hover: rgba(255, 255, 255, 0.6);
+
   /* — Typography (décision 2026-09-28) : interface en police système, Funnel Display
        réservée aux titres (h1/h2/h3, titres de cartes) et au wordmark. — */
   --font-display: var(--font-funnel-display), "Funnel Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
@@ -72,6 +90,45 @@
 
   /* — Layout — */
   --spacing-rail: 244px;
+}
+
+/* — Jetons hors palette Tailwind (reflets, dégradés, ombres de pastille) : redéfinis par
+     le thème clair en bas de fichier. — */
+:root {
+  --edge-hl: rgba(255, 255, 255, 0.05);
+  --top-light-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 45%);
+  --top-light-edge: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  --rail-bg: linear-gradient(180deg, color-mix(in oklch, var(--color-surface-1) 60%, var(--color-bg)), var(--color-bg));
+  --drawer-bg: var(--color-bg);
+  /* Tuile d'initiales du cours et pastille d'import */
+  --tile-bg: linear-gradient(150deg, var(--color-violet), var(--color-cyan));
+  --tile-ink: #fff;
+  --tile-edge: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  --knob-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --switch-knob-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shimmer: rgba(255, 255, 255, 0.06);
+  --scrollbar: var(--color-surface-3);
+  --selection: color-mix(in oklch, var(--color-violet) 42%, transparent);
+
+  /* Pages hors coquille (/login, /oauth) : la DA sombre de la landing. */
+  --bare-bg: #0b0b0f;
+  --bare-ink: #f4f2fb;
+  --bare-muted: #a5a2b3;
+  --bare-faint: #8a8798;
+  --bare-line: rgba(255, 255, 255, 0.10);
+  --bare-surface: #141419;
+  --bare-surface-hover: #1b1b22;
+  --bare-field-line: rgba(255, 255, 255, 0.14);
+  --bare-cta: #ececee;
+  --bare-cta-hover: #ffffff;
+  --bare-cta-active: #dedee2;
+  --bare-cta-ink: #111214;
+  --bare-cta-line: transparent;
+  --bare-error-bg: rgba(234, 67, 53, 0.10);
+  --bare-error-line: rgba(234, 67, 53, 0.35);
+  /* Texte d'erreur des messages d'alerte (login, oauth, Compte). */
+  --error-ink: #f7b6ae;
+  --warn-ink: #f0c987;
 }
 
 /* — Base — */
@@ -131,21 +188,21 @@ h4 {
 
 /* — Selection — */
 ::selection {
-  background: color-mix(in oklch, var(--color-violet) 42%, transparent);
+  background: var(--selection);
   color: var(--color-ink-1);
 }
 
 /* — Scrollbars (thin, dark, unobtrusive) — */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-surface-3) transparent;
+  scrollbar-color: var(--scrollbar) transparent;
 }
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 *::-webkit-scrollbar-thumb {
-  background: var(--color-surface-3);
+  background: var(--scrollbar);
   border-radius: 999px;
   border: 3px solid transparent;
   background-clip: content-box;
@@ -165,7 +222,7 @@ h4 {
   background: var(--color-surface-1);
   border: 1px solid var(--color-line-soft);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: var(--shadow-card), inset 0 1px 0 var(--edge-hl);
 }
 
 /* Glass: translucent + blur, reserved for topbar / command palette only */
@@ -178,7 +235,7 @@ h4 {
 
 /* Hairline top inner highlight */
 @utility edge-top {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 var(--edge-hl);
 }
 
 /* Subtle interactive ring for hoverable surfaces */
@@ -190,8 +247,8 @@ h4 {
    avant. Un léger dégradé blanc en haut du bloc + un filet clair, aucune couleur.
    Classe non « layerisée » : elle gagne sur la box-shadow de .panel. */
 .top-light {
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 45%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09), var(--shadow-card);
+  background-image: var(--top-light-bg);
+  box-shadow: var(--top-light-edge), var(--shadow-card);
 }
 
 /* — Entrance motion — */
@@ -267,7 +324,7 @@ h4 {
   position: absolute;
   inset: 0;
   transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.06), transparent);
+  background: linear-gradient(90deg, transparent, var(--shimmer), transparent);
   animation: shimmer 1.4s infinite;
 }
 
@@ -292,7 +349,7 @@ h4 {
   border-radius: 50%;
   background: #fff;
   border: 2px solid color-mix(in oklch, var(--color-violet) 55%, white);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--knob-shadow);
   cursor: grab;
   transition: transform 0.12s var(--ease-out-quint);
 }
@@ -306,7 +363,7 @@ h4 {
   border-radius: 50%;
   background: #fff;
   border: 2px solid color-mix(in oklch, var(--color-violet) 55%, white);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--knob-shadow);
   cursor: grab;
 }
 .slider:focus-visible {
@@ -489,7 +546,7 @@ h4 {
   height: 20px;
   border-radius: 999px;
   background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--switch-knob-shadow);
   transform: translateX(var(--switch-left));
 }
 .switch input:checked + .switch-track {
@@ -555,6 +612,127 @@ h4 {
       --switch-left var(--switch-press) var(--ease-out-quint),
       --switch-right var(--switch-duration) var(--switch-spring);
   }
+}
+
+
+/* ============================================================================
+   THÈME CLAIR — `data-theme="light"` sur <html>, posé avant le premier rendu par le
+   script de app/layout.tsx (lib/ux/theme). Le sombre reste le défaut : sans attribut,
+   rien ne change. Référence : labo app-v14, LIGHT(d), option B « V14 assagie » (27/10).
+   Contrastes mesurés sur blanc · fond · surface-2 (WCAG 2.1, texte ≥ 4,5:1).
+   ========================================================================== */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --color-bg: #f4f6fb;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #f1f4fa;
+  --color-surface-3: #e8edf6;
+
+  --color-ink-1: #0f172a; /* 17,9 · 16,5 · 16,2 */
+  --color-ink-2: #334155; /* 10,4 · 9,6 · 9,4 */
+  --color-ink-3: #4b5567; /* 7,5 · 7,0 · 6,8 */
+  --color-ink-4: #5f6b7e; /* 5,4 · 5,0 · 4,9 */
+
+  /* Accent bleu : #2563eb pour les aplats, le focus et les filets ; #1d4ed8 pour le texte. */
+  --color-violet: #2563eb; /* 5,2 · 4,8 · 4,7 */
+  --color-violet-hi: #1d4ed8; /* 6,7 · 6,2 · 6,1 */
+  --color-violet-deep: #2563eb; /* fond du texte blanc : 5,2 */
+  --color-cyan: #3b82f6; /* fin des dégradés, remplissages seulement */
+  --color-cyan-hi: #2563eb;
+  --color-emerald: #16a34a; /* remplissages */
+  --color-emerald-hi: #137a36; /* texte : 5,5 · 5,0 · 4,9 ; 5,0 sur fond vert 8 % */
+
+  --color-success: #16a34a;
+  --color-info: #2563eb;
+  --color-warning: #a34a06; /* 5,9 · 5,5 · 5,4 */
+  --color-danger: #c81e1e; /* 5,7 · 5,3 · 5,2 */
+  --color-danger-hi: #991b1b; /* 8,3 ; 7,3 sur fond rouge 8 % */
+
+  --color-line: #e6eaf2;
+  --color-line-soft: #eef1f7;
+  --color-line-strong: #d6dce8;
+
+  --color-primary: #2563eb; /* texte blanc : 5,2 */
+  --color-primary-hover: #1d4ed8;
+  --color-primary-active: #1e40af;
+  --color-on-primary: #ffffff;
+  --color-on-danger: #ffffff; /* sur #c81e1e : 5,7 */
+
+  --color-wash: rgba(15, 23, 42, 0.03);
+  --color-wash-hi: rgba(15, 23, 42, 0.06);
+  --color-scrim: rgba(15, 23, 42, 0.32);
+  --color-underline: rgba(15, 23, 42, 0.28);
+  --color-underline-hi: rgba(15, 23, 42, 0.38);
+  --color-underline-hover: rgba(15, 23, 42, 0.7);
+
+  /* Ombres douces, teintées ardoise : la profondeur vient de l'ombre, plus du reflet. */
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -12px rgba(15, 23, 42, 0.12);
+  --shadow-pop: 0 12px 32px -12px rgba(15, 23, 42, 0.18), 0 2px 6px rgba(15, 23, 42, 0.06);
+  --shadow-hero: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -12px rgba(15, 23, 42, 0.12);
+
+  --edge-hl: transparent;
+  --top-light-bg: none;
+  --top-light-edge: 0 0 0 0 transparent;
+  --rail-bg: var(--color-surface-1);
+  --drawer-bg: var(--color-surface-1);
+  /* Tuile du cours : dégradé bleu foncé, initiales blanches à 5,2:1 minimum. */
+  --tile-bg: linear-gradient(150deg, #1d4ed8, #2563eb);
+  --tile-ink: #fff;
+  --tile-edge: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  --knob-shadow: 0 1px 3px rgba(15, 23, 42, 0.28);
+  --switch-knob-shadow: 0 1px 2px rgba(15, 23, 42, 0.3);
+  --shimmer: rgba(255, 255, 255, 0.7);
+  --scrollbar: #c9d1dd;
+  --selection: color-mix(in oklch, var(--color-violet) 20%, transparent);
+
+  --bare-bg: #f4f6fb;
+  --bare-ink: #0f172a;
+  --bare-muted: #4b5567;
+  --bare-faint: #5f6b7e;
+  --bare-line: #e6eaf2;
+  --bare-surface: #ffffff;
+  --bare-surface-hover: #f8fafc;
+  --bare-field-line: #cbd3df;
+  /* Bouton Google : le « G » multicolore reste sur blanc (charte Google), bordé. */
+  --bare-cta: #ffffff;
+  --bare-cta-hover: #f8fafc;
+  --bare-cta-active: #eef1f7;
+  --bare-cta-ink: #0f172a;
+  --bare-cta-line: #cbd3df;
+  --bare-error-bg: rgba(200, 30, 30, 0.06);
+  --bare-error-line: rgba(200, 30, 30, 0.3);
+  --error-ink: #991b1b; /* 7,3 sur le fond rouge 6 % */
+  --warn-ink: #a34a06;
+}
+
+/* Bascule de thème : aucune transition pendant l'échange des jetons, sinon chaque élément
+   `transition-colors` change de teinte à sa propre vitesse. Retiré à l'image suivante.
+   Seule l'icône soleil / lune garde son animation : c'est le retour de l'action. */
+.theme-switching,
+.theme-switching *:not(.theme-icon-sun, .theme-icon-moon),
+.theme-switching *::before,
+.theme-switching *::after {
+  transition: none !important;
+}
+
+/* Bouton soleil / lune de la barre du haut : l'icône montre le thème EN COURS (lune en
+   sombre, soleil en clair) et suit l'attribut en CSS, sans attendre l'hydratation. */
+.theme-icon-sun,
+.theme-icon-moon {
+  grid-area: 1 / 1;
+  transition: opacity 160ms var(--ease-out-quint), scale 220ms var(--ease-out-quint), rotate 220ms var(--ease-out-quint);
+}
+.theme-icon-sun,
+:root[data-theme="light"] .theme-icon-moon {
+  opacity: 0;
+  scale: 0.6;
+  rotate: -45deg;
+}
+:root[data-theme="light"] .theme-icon-sun {
+  opacity: 1;
+  scale: 1;
+  rotate: 0deg;
 }
 
 /* — Reduced motion: render complete, no drift / count-up / shimmer chase — */
