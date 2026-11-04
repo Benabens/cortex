@@ -5,16 +5,10 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/ux/cn";
 import { NAV, isActive } from "./nav";
 
-/**
- * Nav verticale — état actif SOBRE (POLISH 2026, P0.1) :
- * surface remplie discrète + barre d'accent 2 px à gauche + label ink-1.
- * Aucun halo, aucun ring violet. Hover = fond léger 150 ms.
- * Le focus clavier reste l'anneau net global (:focus-visible).
- */
 export function NavList({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   return (
-    <nav aria-label="Navigation principale" className="flex flex-col gap-0.5">
+    <nav aria-label="Navigation principale" className="flex flex-col gap-1">
       {NAV.map(({ href, label, Icon }) => {
         const active = isActive(pathname, href);
         return (
@@ -24,9 +18,10 @@ export function NavList({ onNavigate }: { onNavigate?: () => void }) {
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "group relative flex h-11 items-center gap-3 rounded-md px-3 text-[0.9rem] font-medium transition-colors duration-150",
+              "group relative flex items-center rounded-xl font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hi",
+              "h-11 gap-3 px-3 text-[0.9rem]",
               active
-                ? "bg-surface-2 text-ink-1"
+                ? "bg-accent/15 text-accent-hi"
                 : "text-ink-3 hover:bg-surface-2/60 hover:text-ink-1 focus-visible:bg-surface-2/60"
             )}
           >
@@ -35,15 +30,16 @@ export function NavList({ onNavigate }: { onNavigate?: () => void }) {
               aria-hidden="true"
               className={cn(
                 "absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full transition-opacity duration-150",
-                active ? "bg-violet opacity-100" : "opacity-0"
+                active ? "bg-accent opacity-100" : "opacity-0"
               )}
             />
             <Icon
               className={cn(
                 "size-[1.15rem] shrink-0 transition-colors",
-                active ? "text-violet-hi" : "text-ink-3 group-hover:text-ink-2"
+                active ? "text-accent-hi" : "text-ink-3 group-hover:text-ink-2"
               )}
               strokeWidth={2}
+              aria-hidden="true"
             />
             <span>{label}</span>
           </Link>

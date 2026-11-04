@@ -85,7 +85,7 @@ export function ReanalyzeButton({ onDone }: { onDone: () => void }) {
         disabled={phase === "running"}
         className={cn(
           "relative inline-flex h-11 items-center gap-2 rounded-md border px-4 text-sm font-medium transition-colors",
-          "focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2",
+          "focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2",
           phase === "done"
             ? "border-[color-mix(in_oklch,var(--color-emerald)_45%,transparent)] text-emerald-hi"
             : phase === "error"

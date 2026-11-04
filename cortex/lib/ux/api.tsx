@@ -269,7 +269,9 @@ export async function apiPost<T>(
     const err: ApiError = { status: res.status, message };
     throw err;
   }
-  return (await res.json()) as T;
+  const data = (await res.json()) as T;
+  cache.clear();
+  return data;
 }
 
 /* ------------------------------------------------------------------ hardening */

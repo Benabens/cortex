@@ -12,17 +12,8 @@ import { JobBanner } from "@/components/dashboard/JobBanner";
 import { Button } from "@/components/ui/Button";
 import { Panel } from "@/components/ui/primitives";
 
-/**
- * ACCUEIL — l'écran répond à UNE question : « par où je commence maintenant ? »
- *
- * « Next up » : la ligne du cours et du final, la notion à travailler en très grand avec sa
- * raison et son bouton, puis « Ensuite » (les trois suivantes) et au plus deux portes en texte.
- * Rien d'autre : ni carte autour du héro, ni métrique. Maîtrise, programme couvert, faiblesses,
- * examens récents vivent sur leurs pages ; les dupliquer ici faisait de l'accueil un bulletin.
- */
-
-/** Colonne de l'Accueil : 884 px au plus, en retrait de la marge de l'app sur grand écran (maquette du labo). */
-const column = "w-full max-w-[55.25rem] lg:ml-12 lg:mt-11";
+/** Même priorité et mêmes portes que l’accueil de production, habillées en D2. */
+const column = "w-full max-w-[64rem] mx-auto";
 
 export default function DashboardPage() {
   const { data, loading, error, refetch } = useApi<Dash>("/api/dashboard");
@@ -83,7 +74,7 @@ export default function DashboardPage() {
               }}
             />
           </div>
-          <div className="mt-11">
+          <div className="mt-7">
             <UpNext topics={data.upNext ?? []} />
           </div>
           <div className="mt-2.5">
@@ -105,7 +96,7 @@ function DashboardSkeleton() {
       <div className="skeleton mt-4 h-4 w-[34rem] max-w-full" />
       <div className="skeleton mt-2 h-4 w-80 max-w-full" />
       <div className="skeleton mt-6 h-11 w-36 rounded-md" />
-      <div className="mt-11 flex flex-col gap-3">
+      <div className="mt-7 flex flex-col gap-3">
         <div className="skeleton h-3.5 w-16" />
         {[0, 1, 2].map((i) => (
           <div key={i} className="skeleton h-10" />

@@ -1,27 +1,33 @@
 @import "tailwindcss";
 
 /* ============================================================================
-   CORTEX — design tokens (dark-only, OKLCH, token-driven)
+   CORTEX — design tokens (OKLCH, token-driven). Sombre par défaut ; thème clair
+   en bas de fichier, sous :root[data-theme="light"].
    Bar: Linear · Vercel · Raycast · Arc. Data as light, never a flat admin panel.
    ========================================================================== */
 
 @theme {
-  /* — Surfaces (blue-violet tinted near-black; never pure black, never white) — */
-  --color-bg: oklch(0.155 0.018 274);
-  --color-surface-1: oklch(0.196 0.021 274);
-  --color-surface-2: oklch(0.232 0.023 274);
-  --color-surface-3: oklch(0.278 0.025 274);
+  /* — Surfaces (blue tinted near-black; never pure black, never white) — */
+  --color-bg: oklch(0.155 0.018 260);
+  --color-surface-1: oklch(0.196 0.021 260);
+  --color-surface-2: oklch(0.232 0.023 260);
+  --color-surface-3: oklch(0.278 0.025 260);
 
   /* — Ink (contrast-verified) — */
   --color-ink-1: oklch(0.971 0.004 270);
   --color-ink-2: oklch(0.812 0.011 272);
   --color-ink-3: oklch(0.672 0.016 272);
-  --color-ink-4: oklch(0.52 0.014 272);
+  --color-ink-4: oklch(0.615 0.014 266); /* ≥ 4,5:1 sur fond, surface-1 et surface-2 */
 
-  /* — Brand accents (imposed) — */
-  --color-violet: oklch(0.685 0.165 285);
-  --color-violet-hi: oklch(0.772 0.132 285);
-  --color-violet-deep: oklch(0.545 0.176 283);
+  /* — Accent : UN seul bleu (refonte D2, 04/11/2026 ; plus de violet). --color-accent est le
+       même dans les deux thèmes : aplats, focus, sélection, graphiques, tuile du cours, nœud du
+       logo (#2764ec, cf. MARK_NODE). Texte blanc dessus 5,1:1 ; ≥ 3,3:1 sur toutes les surfaces
+       claires et sombres. Aucun bleu unique ne tient 4,5:1 à la fois sur le fond sombre et sur le
+       fond clair (plafond ≈ 4,2:1) : le texte bleu prend donc un ton par thème, --color-accent-hi. — */
+  --color-accent: oklch(0.55 0.215 263);
+  --color-accent-hi: oklch(0.78 0.12 258); /* texte et icônes en sombre : ≥ 8:1 */
+  --color-accent-deep: oklch(0.47 0.2 265); /* survol des aplats, fin du dégradé héros clair */
+  /* Cyan : statut « info » et sévérité légère seulement, jamais en dégradé avec l'accent. */
   --color-cyan: oklch(0.805 0.115 210);
   --color-cyan-hi: oklch(0.86 0.10 205);
   --color-emerald: oklch(0.835 0.145 168);
@@ -38,6 +44,31 @@
   --color-line: rgba(255, 255, 255, 0.075);
   --color-line-soft: rgba(255, 255, 255, 0.05);
   --color-line-strong: rgba(255, 255, 255, 0.14);
+
+  /* — Action pleine (bouton principal) : aplat blanc cassé en sombre, bleu plein en clair — */
+  --color-primary: #ececee;
+  --color-primary-hover: #ffffff;
+  --color-primary-active: #dedee2;
+  --color-on-primary: #111214;
+  --color-on-danger: #111214;
+
+  /* — Voiles neutres (survols, bouton discret) et fond des modales — */
+  --color-wash: rgba(255, 255, 255, 0.04);
+  --color-wash-hi: rgba(255, 255, 255, 0.07);
+  --color-scrim: rgba(0, 0, 0, 0.6);
+
+  /* — Carte héros (priorité de l'Accueil, compte) : bleu profond dans les deux thèmes, texte clair.
+       Secondaire ≥ 4,6:1 sur le départ du dégradé, bouton blanc cassé à texte bleu nuit. — */
+  --color-on-hero: #ffffff;
+  --color-on-hero-2: oklch(0.88 0.03 258);
+  --color-hero-btn: oklch(0.96 0.012 262);
+  --color-hero-btn-hover: #ffffff;
+  --color-on-hero-btn: oklch(0.32 0.12 264);
+
+  /* — Soulignement des liens de texte (repos, repos appuyé, survol) — */
+  --color-underline: rgba(255, 255, 255, 0.15);
+  --color-underline-hi: rgba(255, 255, 255, 0.25);
+  --color-underline-hover: rgba(255, 255, 255, 0.6);
 
   /* — Typography (décision 2026-09-28) : interface en police système, Funnel Display
        réservée aux titres (h1/h2/h3, titres de cartes) et au wordmark. — */
@@ -72,6 +103,54 @@
 
   /* — Layout — */
   --spacing-rail: 244px;
+}
+
+/* — Jetons hors palette Tailwind (reflets, dégradés, ombres de pastille) : redéfinis par
+     le thème clair en bas de fichier. — */
+:root {
+  --edge-hl: rgba(255, 255, 255, 0.05);
+  --top-light-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 45%);
+  --top-light-edge: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  --rail-bg: linear-gradient(180deg, color-mix(in oklch, var(--color-surface-1) 60%, var(--color-bg)), var(--color-bg));
+  --drawer-bg: var(--color-bg);
+  /* Tuile d'initiales du cours et pastille d'import */
+  --tile-bg: var(--color-accent);
+  --tile-ink: #fff;
+  --tile-edge: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  /* Carte héros D2 : dégradé plus profond en sombre pour ne pas éblouir, mêmes teintes. */
+  --hero-bg: radial-gradient(ellipse at top right, oklch(0.52 0.15 258 / 0.42), transparent 68%),
+    linear-gradient(145deg, oklch(0.4 0.14 262), oklch(0.29 0.1 266));
+  /* Cartes D2 : en sombre un filet, sans ombre ; en clair une ombre douce, sans filet. */
+  --card-line: var(--color-line);
+  --card-shadow: none;
+  --card-hover-bg: var(--color-surface-2);
+  --card-hover-line: var(--color-line-strong);
+  --card-hover-shadow: none;
+  --knob-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --switch-knob-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shimmer: rgba(255, 255, 255, 0.06);
+  --scrollbar: var(--color-surface-3);
+  --selection: color-mix(in oklch, var(--color-accent) 42%, transparent);
+
+  /* Pages hors coquille (/login, /oauth) : les surfaces de l'app (D2), sans la coquille. */
+  --bare-bg: var(--color-bg);
+  --bare-ink: var(--color-ink-1);
+  --bare-muted: var(--color-ink-2);
+  --bare-faint: var(--color-ink-3);
+  --bare-line: rgba(255, 255, 255, 0.10);
+  --bare-surface: var(--color-surface-1);
+  --bare-surface-hover: var(--color-surface-2);
+  --bare-field-line: rgba(255, 255, 255, 0.14);
+  --bare-cta: #ececee;
+  --bare-cta-hover: #ffffff;
+  --bare-cta-active: #dedee2;
+  --bare-cta-ink: #111214;
+  --bare-cta-line: transparent;
+  --bare-error-bg: rgba(234, 67, 53, 0.10);
+  --bare-error-line: rgba(234, 67, 53, 0.35);
+  /* Texte d'erreur des messages d'alerte (login, oauth, Compte). */
+  --error-ink: #f7b6ae;
+  --warn-ink: #f0c987;
 }
 
 /* — Base — */
@@ -115,10 +194,10 @@ h4 {
 }
 
 /* — Focus : visible, net, jamais supprimé. Exception : les champs marqués
-     [data-focus-parent] délèguent l'indication à leur CONTENEUR (bord violet
+     [data-focus-parent] délèguent l'indication à leur CONTENEUR (bord bleu
      via focus-within) — sinon double anneau à l'intérieur de la barre. — */
 :focus-visible:not([data-focus-parent]) {
-  outline: 2px solid var(--color-violet);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
   border-radius: var(--radius-xs);
 }
@@ -131,21 +210,21 @@ h4 {
 
 /* — Selection — */
 ::selection {
-  background: color-mix(in oklch, var(--color-violet) 42%, transparent);
+  background: var(--selection);
   color: var(--color-ink-1);
 }
 
 /* — Scrollbars (thin, dark, unobtrusive) — */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-surface-3) transparent;
+  scrollbar-color: var(--scrollbar) transparent;
 }
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 *::-webkit-scrollbar-thumb {
-  background: var(--color-surface-3);
+  background: var(--scrollbar);
   border-radius: 999px;
   border: 3px solid transparent;
   background-clip: content-box;
@@ -165,7 +244,7 @@ h4 {
   background: var(--color-surface-1);
   border: 1px solid var(--color-line-soft);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: var(--shadow-card), inset 0 1px 0 var(--edge-hl);
 }
 
 /* Glass: translucent + blur, reserved for topbar / command palette only */
@@ -178,7 +257,7 @@ h4 {
 
 /* Hairline top inner highlight */
 @utility edge-top {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 var(--edge-hl);
 }
 
 /* Subtle interactive ring for hoverable surfaces */
@@ -190,8 +269,8 @@ h4 {
    avant. Un léger dégradé blanc en haut du bloc + un filet clair, aucune couleur.
    Classe non « layerisée » : elle gagne sur la box-shadow de .panel. */
 .top-light {
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 45%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09), var(--shadow-card);
+  background-image: var(--top-light-bg);
+  box-shadow: var(--top-light-edge), var(--shadow-card);
 }
 
 /* — Entrance motion — */
@@ -267,7 +346,7 @@ h4 {
   position: absolute;
   inset: 0;
   transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.06), transparent);
+  background: linear-gradient(90deg, transparent, var(--shimmer), transparent);
   animation: shimmer 1.4s infinite;
 }
 
@@ -281,7 +360,7 @@ h4 {
   outline: none;
   cursor: pointer;
   background:
-    linear-gradient(90deg, var(--color-violet), var(--color-cyan)) 0 / var(--fill, 50%) 100% no-repeat,
+    linear-gradient(var(--color-accent), var(--color-accent)) 0 / var(--fill, 50%) 100% no-repeat,
     var(--color-surface-3);
 }
 .slider::-webkit-slider-thumb {
@@ -291,8 +370,8 @@ h4 {
   height: 18px;
   border-radius: 50%;
   background: #fff;
-  border: 2px solid color-mix(in oklch, var(--color-violet) 55%, white);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  border: 2px solid color-mix(in oklch, var(--color-accent) 55%, white);
+  box-shadow: var(--knob-shadow);
   cursor: grab;
   transition: transform 0.12s var(--ease-out-quint);
 }
@@ -305,12 +384,12 @@ h4 {
   height: 18px;
   border-radius: 50%;
   background: #fff;
-  border: 2px solid color-mix(in oklch, var(--color-violet) 55%, white);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  border: 2px solid color-mix(in oklch, var(--color-accent) 55%, white);
+  box-shadow: var(--knob-shadow);
   cursor: grab;
 }
 .slider:focus-visible {
-  outline: 2px solid var(--color-violet);
+  outline: 2px solid var(--color-accent);
   outline-offset: 3px;
 }
 
@@ -411,7 +490,7 @@ h4 {
   height: 2px;
   margin-inline: 6px;
   border-radius: 1px;
-  background: var(--color-violet);
+  background: var(--color-accent);
 }
 /* Sans JavaScript (ou avant la première mesure), l'option choisie porte elle-même son fond. */
 .seg:not([data-placed]) .seg-opt[aria-checked="true"] {
@@ -489,17 +568,17 @@ h4 {
   height: 20px;
   border-radius: 999px;
   background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--switch-knob-shadow);
   transform: translateX(var(--switch-left));
 }
 .switch input:checked + .switch-track {
   --switch-left: 20px;
   --switch-right: 20px;
-  background: var(--color-violet-deep);
-  box-shadow: inset 0 0 0 1px var(--color-violet);
+  background: var(--color-accent-deep);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
 }
 .switch input:focus-visible + .switch-track {
-  outline: 2px solid var(--color-violet);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 .switch input:disabled + .switch-track {
@@ -520,7 +599,7 @@ h4 {
     background: color-mix(in oklch, var(--color-ink-1) 7%, var(--color-surface-3));
   }
   .switch:hover input:checked:not(:disabled) + .switch-track {
-    background: color-mix(in oklch, var(--color-violet-deep) 80%, var(--color-violet));
+    background: color-mix(in oklch, var(--color-accent-deep) 80%, var(--color-accent));
   }
 }
 @media (prefers-reduced-motion: no-preference) {
@@ -557,6 +636,142 @@ h4 {
   }
 }
 
+
+/* ============================================================================
+   THÈME CLAIR — `data-theme="light"` sur <html>, posé avant le premier rendu par le
+   script de app/layout.tsx (lib/ux/theme). Le sombre reste le défaut : sans attribut,
+   rien ne change. Référence : labo app-v14, LIGHT(d), option B « V14 assagie » (27/10).
+   Contrastes mesurés sur blanc · fond · surface-2 (WCAG 2.1, texte ≥ 4,5:1).
+   ========================================================================== */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --color-bg: #f4f6fb;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #f1f4fa;
+  --color-surface-3: #e8edf6;
+
+  --color-ink-1: #0f172a; /* 17,9 · 16,5 · 16,2 */
+  --color-ink-2: #334155; /* 10,4 · 9,6 · 9,4 */
+  --color-ink-3: #4b5567; /* 7,5 · 7,0 · 6,8 */
+  --color-ink-4: #5f6b7e; /* 5,4 · 5,0 · 4,9 */
+
+  /* Accent : le même bleu qu'en sombre (aplats, focus, filets) ; texte bleu plus foncé. */
+  --color-accent: oklch(0.55 0.215 263); /* 5,1 · 4,7 · 4,6 */
+  --color-accent-hi: oklch(0.49 0.2 264); /* 6,6 · 6,1 · 5,6 sur surface-3 */
+  --color-accent-deep: oklch(0.47 0.2 265);
+  /* Info et sévérité légère : bleu-vert, distinct de l'accent (Sévère est sur l'accent). */
+  --color-cyan: oklch(0.6 0.11 210); /* remplissages */
+  --color-cyan-hi: oklch(0.5 0.09 215); /* texte : 5,8 · 5,4 · 5,3 */
+  --color-emerald: #16a34a; /* remplissages */
+  --color-emerald-hi: #137a36; /* texte : 5,5 · 5,0 · 4,9 ; 5,0 sur fond vert 8 % */
+
+  --color-success: #16a34a;
+  --color-info: oklch(0.6 0.11 210);
+  --color-warning: #a34a06; /* 5,9 · 5,5 · 5,4 */
+  --color-danger: #c81e1e; /* 5,7 · 5,3 · 5,2 */
+  --color-danger-hi: #991b1b; /* 8,3 ; 7,3 sur fond rouge 8 % */
+
+  --color-line: #e6eaf2;
+  --color-line-soft: #eef1f7;
+  --color-line-strong: #d6dce8;
+
+  --color-primary: var(--color-accent); /* texte blanc : 5,1 */
+  --color-primary-hover: var(--color-accent-deep);
+  --color-primary-active: oklch(0.42 0.18 266);
+  --color-on-primary: #ffffff;
+  --color-on-danger: #ffffff; /* sur #c81e1e : 5,7 */
+
+  --color-wash: rgba(15, 23, 42, 0.03);
+  --color-wash-hi: rgba(15, 23, 42, 0.06);
+  --color-scrim: rgba(15, 23, 42, 0.32);
+  --color-underline: rgba(15, 23, 42, 0.28);
+  --color-underline-hi: rgba(15, 23, 42, 0.38);
+  --color-underline-hover: rgba(15, 23, 42, 0.7);
+
+  /* Ombres douces, teintées ardoise : la profondeur vient de l'ombre, plus du reflet. */
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -12px rgba(15, 23, 42, 0.12);
+  --shadow-pop: 0 12px 32px -12px rgba(15, 23, 42, 0.18), 0 2px 6px rgba(15, 23, 42, 0.06);
+  --shadow-hero: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -12px rgba(15, 23, 42, 0.12);
+
+  --edge-hl: transparent;
+  --top-light-bg: none;
+  --top-light-edge: 0 0 0 0 transparent;
+  --rail-bg: var(--color-surface-1);
+  --drawer-bg: var(--color-surface-1);
+  /* Tuile du cours : aplat d'accent, initiales blanches à 5,1:1. */
+  --tile-bg: var(--color-accent);
+  --tile-ink: #fff;
+  --tile-edge: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  /* Carte héros : départ sur l'accent (texte blanc 5,1:1, secondaire 4,65:1), halo discret en haut à droite. */
+  --hero-bg: radial-gradient(ellipse at top right, oklch(0.62 0.17 258 / 0.38), transparent 66%),
+    linear-gradient(145deg, oklch(0.55 0.215 263), oklch(0.47 0.2 265) 55%, oklch(0.42 0.18 266));
+  /* La carte héros reste bleue en clair : mêmes encres et même bouton qu'en sombre. */
+  --color-on-hero: #ffffff;
+  --color-on-hero-2: oklch(0.97 0.02 258);
+  --color-hero-btn: oklch(0.96 0.012 262);
+  --color-hero-btn-hover: #ffffff;
+  --color-on-hero-btn: oklch(0.32 0.12 264);
+  --card-line: transparent;
+  --card-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 2px 10px -3px rgba(15, 23, 42, 0.08);
+  --card-hover-bg: var(--color-surface-1);
+  --card-hover-line: transparent;
+  --card-hover-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 14px 32px -14px rgba(15, 23, 42, 0.22);
+  --knob-shadow: 0 1px 3px rgba(15, 23, 42, 0.28);
+  --switch-knob-shadow: 0 1px 2px rgba(15, 23, 42, 0.3);
+  --shimmer: rgba(255, 255, 255, 0.7);
+  --scrollbar: #c9d1dd;
+  --selection: color-mix(in oklch, var(--color-accent) 20%, transparent);
+
+  --bare-bg: #f4f6fb;
+  --bare-ink: #0f172a;
+  --bare-muted: #4b5567;
+  --bare-faint: #5f6b7e;
+  --bare-line: #e6eaf2;
+  --bare-surface: #ffffff;
+  --bare-surface-hover: #f8fafc;
+  --bare-field-line: #cbd3df;
+  /* Bouton Google : le « G » multicolore reste sur blanc (charte Google), bordé. */
+  --bare-cta: #ffffff;
+  --bare-cta-hover: #f8fafc;
+  --bare-cta-active: #eef1f7;
+  --bare-cta-ink: #0f172a;
+  --bare-cta-line: #cbd3df;
+  --bare-error-bg: rgba(200, 30, 30, 0.06);
+  --bare-error-line: rgba(200, 30, 30, 0.3);
+  --error-ink: #991b1b; /* 7,3 sur le fond rouge 6 % */
+  --warn-ink: #a34a06;
+}
+
+/* Bascule de thème : aucune transition pendant l'échange des jetons, sinon chaque élément
+   `transition-colors` change de teinte à sa propre vitesse. Retiré à l'image suivante.
+   Seule l'icône soleil / lune garde son animation : c'est le retour de l'action. */
+.theme-switching,
+.theme-switching *:not(.theme-icon-sun, .theme-icon-moon),
+.theme-switching *::before,
+.theme-switching *::after {
+  transition: none !important;
+}
+
+/* Bouton soleil / lune de la barre du haut : l'icône montre le thème EN COURS (lune en
+   sombre, soleil en clair) et suit l'attribut en CSS, sans attendre l'hydratation. */
+.theme-icon-sun,
+.theme-icon-moon {
+  grid-area: 1 / 1;
+  transition: opacity 160ms var(--ease-out-quint), scale 220ms var(--ease-out-quint), rotate 220ms var(--ease-out-quint);
+}
+.theme-icon-sun,
+:root[data-theme="light"] .theme-icon-moon {
+  opacity: 0;
+  scale: 0.6;
+  rotate: -45deg;
+}
+:root[data-theme="light"] .theme-icon-sun {
+  opacity: 1;
+  scale: 1;
+  rotate: 0deg;
+}
+
 /* — Reduced motion: render complete, no drift / count-up / shimmer chase — */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -567,4 +782,80 @@ h4 {
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Menu mobile (<dialog>, components/shell/MobileNav) : le tiroir glisse à l'ouverture
+   (@starting-style) et à la fermeture (display et overlay restent le temps de la transition,
+   navigateurs Chromium ; ailleurs la fermeture est immédiate). */
+.drawer-dialog,
+.drawer-dialog::backdrop {
+  transition: display 300ms allow-discrete, overlay 300ms allow-discrete, opacity 200ms ease-out;
+}
+.drawer-dialog:not([open]),
+.drawer-dialog:not([open])::backdrop {
+  opacity: 0;
+}
+.drawer-dialog .drawer-panel {
+  transition: transform 300ms var(--ease-out-quint);
+}
+.drawer-dialog:not([open]) .drawer-panel {
+  transform: translateX(-100%);
+}
+@starting-style {
+  .drawer-dialog[open],
+  .drawer-dialog[open]::backdrop {
+    opacity: 0;
+  }
+  .drawer-dialog[open] .drawer-panel {
+    transform: translateX(-100%);
+  }
+}
+
+/* D2 · Le plan */
+/* Cartes et carte héros : jetons --card-* et --hero-bg (sombre en haut de fichier, clair plus bas). */
+.d2-card {
+  border: 1px solid var(--card-line);
+  border-radius: 1.125rem;
+  background: var(--color-surface-1);
+  box-shadow: var(--card-shadow);
+}
+.d2-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1.375rem;
+  background: var(--hero-bg);
+  color: var(--color-on-hero);
+}
+/* Les titres globaux (h1-h3, hors @layer) prendraient l'encre de la page : sur la carte héros,
+   ils gardent l'encre du héros, claire dans les deux thèmes. */
+.d2-hero :is(h1, h2, h3) {
+  color: inherit;
+}
+a.d2-card {
+  display: block;
+  transition: background-color 160ms var(--ease-out-quint), border-color 160ms var(--ease-out-quint),
+    box-shadow 200ms var(--ease-out-quint);
+}
+a.d2-card:hover {
+  background: var(--card-hover-bg);
+  border-color: var(--card-hover-line);
+  box-shadow: var(--card-hover-shadow);
+}
+
+
+.d2-hero::after {
+  position: absolute;
+  z-index: -1;
+  right: -7.5rem;
+  bottom: -12.5rem;
+  width: 26rem;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 14%),
+    0 0 0 4rem rgb(255 255 255 / 3%),
+    0 0 0 calc(4rem + 1px) rgb(255 255 255 / 8%);
+  content: "";
+  pointer-events: none;
 }

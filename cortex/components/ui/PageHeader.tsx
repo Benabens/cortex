@@ -27,13 +27,13 @@ export function PageHeader({
     >
       <div className="min-w-0">
         {context && course && (
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8rem] text-ink-3">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-accent-hi">
             <span>{course.short}</span>
             <span className="text-ink-4">·</span>
             <span className="truncate">{course.name}</span>
           </div>
         )}
-        <h1 className="mt-2 text-[1.9rem] font-semibold leading-tight sm:text-[2.15rem]">{title}</h1>
+        <h1 className="mt-2 break-words text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">{title}</h1>
         {description && (
           <p className="mt-2 max-w-2xl text-[0.95rem] text-ink-2">{description}</p>
         )}

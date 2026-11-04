@@ -7,22 +7,22 @@ type Size = "sm" | "md" | "lg";
 
 const base =
   "relative inline-flex items-center justify-center gap-2 font-medium whitespace-nowrap select-none " +
-  "rounded-md transition-[transform,background,box-shadow,border-color,color] duration-150 " +
-  "focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2 " +
+  "rounded-full transition-[transform,background,box-shadow,border-color,color] duration-150 " +
+  "focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 " +
   "active:translate-y-px disabled:pointer-events-none disabled:opacity-50";
 
 const variants: Record<Variant, string> = {
-  // Bouton principal (anti-slop 2026-09) : aplat blanc cassé, texte sombre, ni dégradé,
-  // ni reflet, ni lueur. Le seul élément clair de l'écran = l'action. Une icône max.
+  // Bouton principal (anti-slop 2026-09) : aplat plein, ni dégradé, ni reflet, ni lueur.
+  // Blanc cassé en sombre, bleu en clair (jetons --color-primary*). Une icône max.
   primary:
-    "text-[#111214] font-semibold bg-[#ececee] border border-transparent " +
-    "hover:bg-white active:bg-[#dedee2]",
+    "text-on-primary font-semibold bg-primary border border-transparent " +
+    "hover:bg-primary-hover active:bg-primary-active",
   secondary:
     "text-ink-1 bg-surface-2 border border-line-strong edge-top " +
-    "hover:bg-surface-3 hover:border-[color-mix(in_oklch,var(--color-violet)_35%,transparent)]",
+    "hover:bg-surface-3 hover:border-[color-mix(in_oklch,var(--color-accent)_35%,transparent)]",
   ghost: "text-ink-2 border border-transparent hover:text-ink-1 hover:bg-surface-2/70",
   subtle:
-    "text-ink-2 bg-white/[0.04] border border-line hover:bg-white/[0.07] hover:text-ink-1",
+    "text-ink-2 bg-wash border border-line hover:bg-wash-hi hover:text-ink-1",
 };
 
 const sizes: Record<Size, string> = {
