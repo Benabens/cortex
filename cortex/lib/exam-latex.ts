@@ -266,6 +266,30 @@ export function dropFailingFigure(tex: string, line: number): string | null {
   return [...lines.slice(0, begin), DROPPED_FIGURE, ...lines.slice(end + 1)].join("\n");
 }
 
+/** Macros de babel-french que le modèle écrit, que le préambule (sans babel) ne définit pas. */
+const FRENCH_MACROS: [RegExp, string][] = [
+  [/\\og(\{\})?\s*/g, "« "],
+  [/\s*\\fg(\{\})?/g, " »"],
+  [/\\iere(\{\})?/g, "\\textsuperscript{re}"],
+  [/\\ier(\{\})?/g, "\\textsuperscript{er}"],
+  [/\\ieme(\{\})?/g, "\\textsuperscript{e}"],
+  [/\\up\{([^{}]*)\}/g, "\\textsuperscript{$1}"],
+  [/\\nombre\{([^{}]*)\}/g, "$1"],
+  [/\\bsc\{([^{}]*)\}/g, "\\textsc{$1}"],
+];
+const FRENCH_MACRO = /\\(og|fg|iere|ier|ieme|up|nombre|bsc)(?![a-zA-Z])/;
+
+/**
+ * Le document où les macros de babel-french sont remplacées par leur équivalent, si la ligne
+ * fautive en contient une ; null sinon. Banc moteur du 04/11/2026 (synth-written12) : « \og » non
+ * défini, ligne 375 : douze exercices livrés sans PDF. Le préambule partagé reste intact (le rendu
+ * de CS-202 est épinglé octet pour octet).
+ */
+export function repairFrenchMacros(tex: string, line: number): string | null {
+  if (!FRENCH_MACRO.test(tex.split("\n")[line - 1] ?? "")) return null;
+  return FRENCH_MACROS.reduce((t, [re, to]) => t.replace(re, to), tex);
+}
+
 /** Ligne fautive d'une compilation : « error: x.tex:648: … » (tectonic) ou « l.648 » (journal pdflatex). */
 export function failingLine(text: string): number | null {
   // Les avertissements (« warning: x.tex:85: Underfull… ») précèdent l'erreur : seule la ligne « error: » compte.
@@ -274,14 +298,16 @@ export function failingLine(text: string): number | null {
 }
 
 export async function compileExamPdf(base: string): Promise<string> {
-  // Une figure générée qui ne compile pas est retirée (encadré), puis on recompile (3 fois au plus).
+  // Une figure générée qui ne compile pas est retirée (encadré), des macros de babel-french sont
+  // remplacées, puis on recompile (3 fois au plus).
   for (let attempt = 0; ; attempt++) {
     try {
       return await compileOnce(base);
     } catch (e) {
       const texAbs = path.join(examsDir(), `${base}.tex`);
       const line = failingLine(`${(e as { raw?: string }).raw ?? ""}\n${readLog(base)}`);
-      const fixed = attempt < 3 && line && fs.existsSync(texAbs) ? dropFailingFigure(fs.readFileSync(texAbs, "utf8"), line) : null;
+      const src = attempt < 3 && line && fs.existsSync(texAbs) ? fs.readFileSync(texAbs, "utf8") : null;
+      const fixed = src && line ? dropFailingFigure(src, line) ?? repairFrenchMacros(src, line) : null;
       if (!fixed) throw e;
       fs.writeFileSync(texAbs, fixed);
     }
