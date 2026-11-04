@@ -200,13 +200,27 @@ export type AnalyzeResult = { count: number; topics: TopicView[] };
  * sur les vrais finals si le cours a des images-étalon). Persiste dans `topics` (UPSERT par label
  * → la maîtrise déjà accumulée est préservée).
  */
+/**
+ * Pourquoi le corpus est vide, dit à l'étudiant (banc du 04/11, synth-scan : « ingère d'abord le cours
+ * avec npm run ingest » pour un PDF scanné déposé). Des supports sans aucun texte lu sont, dans les
+ * faits, des scans ou des images : la lecture des scans n'est pas prise en charge.
+ */
+async function emptyCorpusReason(): Promise<string> {
+  const unread = await q.all<{ title: string }>(
+    `SELECT s.title FROM sources s WHERE NOT EXISTS (SELECT 1 FROM items i WHERE i.source_id = s.id AND length(i.text) > 3) ORDER BY s.id LIMIT 5`,
+  ).catch(() => []);
+  if (unread.length) {
+    return `Aucun texte lisible dans les supports du cours (${unread.map((u) => u.title).join(", ")}) : ce sont sans doute des PDF scannés ou des images, que Cortex ne sait pas encore lire. Dépose une version avec du texte (PDF exporté depuis le logiciel, DOCX, notes), puis relance la préparation.`;
+  }
+  return "Aucun support dans ce cours : dépose les supports (cours, séries, annales), puis relance la préparation.";
+}
+
 export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) => void } = {}): Promise<AnalyzeResult> {
   await ensureProgramSchema();
   const step = opts.onStep ?? (() => {});
   step("Lecture du corpus (finals + séries + plan du cours)…", 10);
   const corpus = await gatherForBlueprint();
-  if (!corpus.finals && !corpus.series && !corpus.plan)
-    throw new Error("Corpus vide : ingère d'abord le cours (cours + séries + finals) avec « npm run ingest ».");
+  if (!corpus.finals && !corpus.series && !corpus.plan) throw new Error(await emptyCorpusReason());
 
   const p = profile();
   // Les archétypes du cours = la liste des types que le GÉNÉRATEUR sait produire. On demande au LLM
