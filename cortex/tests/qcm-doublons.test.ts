@@ -57,7 +57,10 @@ const dedupePrompts: string[] = [];
 /** Le contrôle de fin d'examen simulé : il lit la notion et l'angle de chaque question dans son énoncé. */
 function dedupeReply(prompt: string): string {
   const lines = [...prompt.matchAll(/^Q(\d+)\. .*?\[notion:([^\]]+)\] \[angle:([^\]]*)\]/gm)];
-  return JSON.stringify({ notions: lines.map((m) => ({ index: Number(m[1]), notion: m[2], angle: m[3] })), duplicates: [] });
+  // Questions des examens précédents (P0, P1…) : une question qui en reprend une (même notion, même angle).
+  const previous = [...prompt.matchAll(/^P(\d+)\. .*?\[notion:([^\]]+)\] \[angle:([^\]]*)\]/gm)];
+  const repeats = lines.flatMap((m) => previous.filter((p) => p[2] === m[2] && p[3] === m[3]).map((p) => ({ index: Number(m[1]), previous: Number(p[1]) })));
+  return JSON.stringify({ notions: lines.map((m) => ({ index: Number(m[1]), notion: m[2], angle: m[3] })), duplicates: [], repeats });
 }
 
 function verifyReply(prompt: string): string {
@@ -238,4 +241,24 @@ test("plus de questions que de notions, angle non nommé par le modèle : pas de
   });
   const { stems } = await exam(id, 6);
   assert.ok(stems.some((s) => s.startsWith("Question 1 ")) && stems.some((s) => s.startsWith("Question 4 ")));
+});
+
+test("banc du 04/11 (CS-290) : une question qui reprend celle d'un examen précédent est retirée et remplacée", async () => {
+  const id = await course(30);
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  await runWithCourse(id, async () => {
+    // Un examen précédent du cours a déjà posé la question 7 (même notion, même angle).
+    const examId = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','ready')`);
+    await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      examId, 0, "HUM-285", "scq", "Ancienne [notion:faux positifs des détecteurs] [angle:fait 7] : que dit le cours ?", "[]", "[0]", "[]", "", 1);
+  });
+  design = (n, call) => Array.from({ length: n }, (_, i) => {
+    const qn = (call - 1) * 4 + i + 1;
+    return call === 1 ? item(qn === 3 ? "Question 3 [notion:faux positifs des détecteurs] [angle:fait 7] : que dit le cours ?" : `Question ${qn} [notion:neuve ${qn}] [angle:a] : que dit le cours ?`) : item(`Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`);
+  });
+  const { r, stems } = await exam(id, 4);
+  assert.equal(r.count, 4);
+  assert.ok(!stems.some((s) => s.startsWith("Question 3 ")), `la reprise de l'examen précédent est retirée :\n${stems.join("\n")}`);
+  assert.match(dedupePrompts[0], /^P\d+\. .*faux positifs des détecteurs/m, "le contrôle reçoit les questions des examens précédents");
 });

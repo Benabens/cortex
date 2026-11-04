@@ -899,8 +899,18 @@ const DUP_SCHEMA = {
         additionalProperties: false,
       },
     },
+    // Reprises d'un examen précédent du cours (P…), signalées par le contrôle de fin d'examen.
+    repeats: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { index: { type: "integer" }, previous: { type: "integer" } },
+        required: ["index", "previous"],
+        additionalProperties: false,
+      },
+    },
   },
-  required: ["notions", "duplicates"],
+  required: ["notions", "duplicates", "repeats"],
   additionalProperties: false,
 } as const;
 
@@ -912,20 +922,25 @@ const DUP_SCHEMA = {
  * questions sur une notion sous des angles vraiment distincts ; seul le même angle est un doublon.
  * Le modèle nomme la notion et l'angle de chaque question ; la décision, elle, est faite ici.
  */
-async function duplicateItems(items: QcmItem[], opts: { strict: boolean }): Promise<{ drop: number[]; notions: string[]; angles: string[] }> {
+async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previous?: string[] }): Promise<{ drop: number[]; notions: string[]; angles: string[] }> {
   const list = items.map((it, i) => `Q${i}. (${sanitizeCorpus(it.topic ?? "").slice(0, 60)}) ${sanitizeCorpus(it.stem).slice(0, 400)}`).join("\n");
+  // Banc du 04/11 (CS-290) : 2 questions sur 15 reprenaient un examen précédent du cours ; le concepteur
+  // les voit, mais seul ce contrôle peut les retirer.
+  const previous = (opts.previous ?? []).slice(0, 60).map((stem, i) => `P${i}. ${sanitizeCorpus(stem).slice(0, 220)}`).join("\n");
   const criterion = opts.strict
     ? `Le programme a au moins autant de notions que l'examen a de questions : UNE NOTION = UNE QUESTION. Deux questions sur la même notion (le biais de négativité, le nudge, la souveraineté des données…) sont des doublons même sous deux angles différents.`
     : `L'examen a plus de questions que le programme n'a de notions : deux questions sur une même notion sont permises si elles testent des angles VRAIMENT distincts (un autre fait, une autre condition, une autre étude) ; sont des doublons celles qui testent la même notion au même angle (le même fait, le même raisonnement, le même type de calcul).`;
-  const r = await completeJson<{ notions?: { index: number; notion: string; angle: string }[]; duplicates: { first: number; second: number }[] }>({
+  const r = await completeJson<{ notions?: { index: number; notion: string; angle: string }[]; duplicates: { first: number; second: number }[]; repeats?: { index: number; previous: number }[] }>({
     prompt: [
       `Voici les QCM d'un même examen. Pour chacun, nomme la notion du cours qu'il teste (notion, le MÊME libellé exact pour deux questions sur la même notion, même formulées autrement ou dans deux langues) et l'angle précis (angle).`,
       criterion,
       `Puis liste les paires en doublon selon ce critère. Deux notions voisines mais distinctes ne sont pas un doublon.`,
+      ...(previous ? [`Liste aussi, dans "repeats", les QCM qui reprennent une question des EXAMENS PRÉCÉDENTS du cours (P…) : même notion ET même angle, même reformulée.`] : []),
       ``,
       list,
+      ...(previous ? [``, `QUESTIONS DES EXAMENS PRÉCÉDENTS :`, previous] : []),
       ``,
-      `Réponds UNIQUEMENT avec {"notions": [{"index": i, "notion": "…", "angle": "…"}], "duplicates": [{"first": i, "second": j, "reason": "…"}]} (first < second ; listes vides s'il n'y a rien).`,
+      `Réponds UNIQUEMENT avec {"notions": [{"index": i, "notion": "…", "angle": "…"}], "duplicates": [{"first": i, "second": j, "reason": "…"}]${previous ? `, "repeats": [{"index": i, "previous": p}]` : ""}} (first < second ; listes vides s'il n'y a rien).`,
     ].join("\n"),
     model: "opus",
     timeoutMs: 180_000,
@@ -939,6 +954,7 @@ async function duplicateItems(items: QcmItem[], opts: { strict: boolean }): Prom
     angles[n.index] = typeof n.angle === "string" ? n.angle.trim() : "";
   }
   const drop = new Set<number>();
+  for (const rp of Array.isArray(r.repeats) ? r.repeats : []) if (Number.isInteger(rp?.index) && rp.index >= 0 && rp.index < items.length) drop.add(rp.index);
   // Les questions de l'accent demandé par l'étudiant portent volontairement sur un même thème :
   // elles ne sont pas des doublons ENTRE ELLES (une autre question sur ce thème, si).
   const focusPair = (a: number, b: number) => !!items[a]?.focusSlot && !!items[b]?.focusSlot;
@@ -1322,7 +1338,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const pool: QcmSlot[] = strict ? fresh.filter((t, i) => fresh.findIndex((x) => x.label === t.label) === i) : spareTopics;
   let nextSpare = 0;
   for (let round = 0; round <= DEDUP_ROUNDS && all.length >= 2; round++) {
-    const { drop, notions, angles } = await duplicateItems(all, { strict }).catch(() => ({ drop: [] as number[], notions: [] as string[], angles: [] as string[] }));
+    const { drop, notions, angles } = await duplicateItems(all, { strict, previous: recent.map((x) => x.stem) }).catch(() => ({ drop: [] as number[], notions: [] as string[], angles: [] as string[] }));
     if (!drop.length) break;
     const kept = all.filter((_, i) => !drop.includes(i));
     const keptIdx = all.map((_, i) => i).filter((i) => !drop.includes(i));
