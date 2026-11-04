@@ -1144,7 +1144,17 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const [fixed, out] = await Promise.all([repaired, regenerated]);
     fixable.forEach((w, k) => {
       const n = fixed[k];
-      if (n && n.verified === 1 && !n.rejected && !weaknessOf(n)) out[w.i] = { ...n, slot: w.it.slot };
+      // Rendu tel quel (remplacement échoué) : l'item d'origine suit la règle commune.
+      if (!n || n === w.it || n.verified !== 1 || n.rejected) return;
+      if (!weaknessOf(n)) { out[w.i] = { ...n, slot: w.it.slot }; return; }
+      // Banc du 04/11 (CS-290 mixte, 4 QCM livrés sur 12) : un remplaçant encore signalé trivial
+      // faisait jeter la question, alors que le juge du banc trouvait autant de distracteurs triviaux
+      // dans les QCM gardés — signalement trop bruité pour coûter une question. Après cette unique
+      // tentative, la question est livrée, comme après une régénération pour une autre faiblesse.
+      if (onlyTrivialDistractors(n)) {
+        step(`QCM gardé après remplacement : un distracteur reste jugé facile (${(n.trivialDistractors ?? []).length})`, 0);
+        out[w.i] = { ...n, slot: w.it.slot, trivialDistractors: null };
+      }
     });
     return out;
   };
