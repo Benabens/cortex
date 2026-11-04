@@ -80,8 +80,8 @@ export function ImageTextArea({
         setDragOver(false);
       }}
       className={cn(
-        "rounded-xl border bg-surface-2/40 transition-colors focus-within:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] focus-within:ring-2 focus-within:ring-[color-mix(in_oklch,var(--color-violet)_22%,transparent)]",
-        dragOver ? "border-[color-mix(in_oklch,var(--color-violet)_60%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_7%,transparent)]" : "border-line-strong",
+        "rounded-xl border bg-surface-2/40 transition-colors focus-within:border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] focus-within:ring-2 focus-within:ring-[color-mix(in_oklch,var(--color-accent)_22%,transparent)]",
+        dragOver ? "border-[color-mix(in_oklch,var(--color-accent)_60%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_7%,transparent)]" : "border-line-strong",
         disabled && "opacity-60",
         className
       )}
@@ -95,7 +95,7 @@ export function ImageTextArea({
               type="button"
               onClick={() => onImageChange(null)}
               aria-label="Retirer l’image"
-              className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-line-strong bg-surface-3 text-ink-2 shadow-[var(--shadow-pop)] transition-colors hover:text-ink-1 focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2"
+              className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-line-strong bg-surface-3 text-ink-2 shadow-[var(--shadow-pop)] transition-colors hover:text-ink-1 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
             >
               <X className="size-3" strokeWidth={2.5} />
             </button>

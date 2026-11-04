@@ -17,8 +17,8 @@ export function Sparkline({
   values,
   width = 120,
   height = 34,
-  from = "var(--color-violet-hi)",
-  to = "var(--color-cyan)",
+  from = "var(--color-accent-hi)",
+  to = "var(--color-accent)",
   className,
   ariaLabel,
 }: Props) {

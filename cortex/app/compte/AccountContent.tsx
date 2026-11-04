@@ -19,8 +19,8 @@ export function AccountContent({ email, enabled, connectedAppsEnabled }: {
       </div>
 
       {email && (
-        <div className="d2-hero p-5 sm:p-6">
-          <div className="text-sm text-blue-100">Connecté en tant que</div>
+        <div className="d2-card p-5 sm:p-6">
+          <div className="text-sm text-ink-3">Connecté en tant que</div>
           <div className="mt-1 break-all text-lg font-medium text-ink-1">{email}</div>
         </div>
       )}

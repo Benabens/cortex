@@ -173,7 +173,7 @@ export default function ExamensPage() {
                         href={e.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex min-h-11 items-center gap-1 rounded-full border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_38%,transparent)] hover:text-ink-1"
+                        className="inline-flex min-h-11 items-center gap-1 rounded-full border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-accent)_38%,transparent)] hover:text-ink-1"
                       >
                         Énoncé
                         <ExternalLink className="size-3.5" aria-hidden="true" />

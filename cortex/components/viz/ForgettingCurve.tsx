@@ -55,12 +55,12 @@ export function ForgettingCurve({
     >
       <defs>
         <linearGradient id={`fc-fill-${id}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--color-violet)" stopOpacity="0.34" />
-          <stop offset="100%" stopColor="var(--color-violet)" stopOpacity="0" />
+          <stop offset="0%" stopColor="var(--color-accent)" stopOpacity="0.34" />
+          <stop offset="100%" stopColor="var(--color-accent)" stopOpacity="0" />
         </linearGradient>
         <linearGradient id={`fc-line-${id}`} x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="var(--color-violet-hi)" />
-          <stop offset="100%" stopColor="var(--color-cyan)" />
+          <stop offset="0%" stopColor="var(--color-accent-hi)" />
+          <stop offset="100%" stopColor="var(--color-accent)" />
         </linearGradient>
       </defs>
 
@@ -90,18 +90,18 @@ export function ForgettingCurve({
         y1={my}
         x2={mx}
         y2={h - padBottom}
-        stroke="var(--color-cyan)"
+        stroke="var(--color-accent)"
         strokeWidth="1"
         strokeDasharray="2 3"
         opacity="0.7"
       />
-      <circle cx={mx} cy={my} r="6.5" fill="var(--color-cyan)" opacity="0.18" />
+      <circle cx={mx} cy={my} r="6.5" fill="var(--color-accent)" opacity="0.18" />
       <circle
         cx={mx}
         cy={my}
         r="3.4"
         fill="var(--color-bg)"
-        stroke="var(--color-cyan)"
+        stroke="var(--color-accent)"
         strokeWidth="2"
       />
     </svg>

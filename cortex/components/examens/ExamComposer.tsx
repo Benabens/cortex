@@ -10,7 +10,7 @@ import { apiPost, useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@
 import type { PlanExam, PlanQcm } from "@/lib/ux/exams";
 import { cn } from "@/lib/ux/cn";
 
-const V = "var(--color-violet)";
+const V = "var(--color-accent)";
 const C = "var(--color-cyan)";
 
 /**
@@ -143,7 +143,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
               ) : (
                 <SliderRow label={`${unit[0].toUpperCase()}${unit.slice(1)}s`} hint={`proposé : ${"exercises" in plan ? plan.exercises : 6}`} color={V} value={nExos} min={1} max={12} onChange={setNExos} />
               )}
-              <button type="button" onClick={proposal} className="mt-4 text-[0.78rem] text-ink-3 underline-offset-2 transition-colors hover:text-violet-hi hover:underline">
+              <button type="button" onClick={proposal} className="mt-4 text-[0.78rem] text-ink-3 underline-offset-2 transition-colors hover:text-accent-hi hover:underline">
                 Revenir à la proposition
               </button>
             </div>
@@ -164,7 +164,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
               <Target className="size-3.5 shrink-0" strokeWidth={2.25} />
               <span className="truncate">
                 Mets l’accent sur un thème
-                {!focusOpen && focus.trim() && <span className="ml-1 text-violet-hi">· {focus.trim()}</span>}
+                {!focusOpen && focus.trim() && <span className="ml-1 text-accent-hi">· {focus.trim()}</span>}
               </span>
             </span>
             <ChevronDown className={cn("size-4 shrink-0 transition-transform", focusOpen && "rotate-180")} strokeWidth={2.25} />
@@ -177,7 +177,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
                 onChange={(e) => setFocus(e.target.value)}
                 autoFocus
                 placeholder={isQcm ? "ex. régularisation, PCA, backprop…" : "ex. un thème précis à travailler"}
-                className="w-full rounded-lg border border-line-strong bg-surface-2/40 px-3.5 py-2.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] focus:outline-none focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-violet)_28%,transparent)]"
+                className="w-full rounded-lg border border-line-strong bg-surface-2/40 px-3.5 py-2.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] focus:outline-none focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-accent)_28%,transparent)]"
               />
               <p className="mt-1.5 text-[0.74rem] text-ink-4">Un thème, pas un format : 1-2 questions porteront dessus, sans monopoliser l’examen.</p>
             </div>

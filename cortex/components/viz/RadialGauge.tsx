@@ -36,8 +36,8 @@ export function RadialGauge({
   thickness = 12,
   label,
   sublabel,
-  from = "var(--color-violet)",
-  to = "var(--color-cyan)",
+  from = "var(--color-accent)",
+  to = "var(--color-accent)",
   sweep = 270,
 }: Props) {
   const id = useId().replace(/:/g, "");

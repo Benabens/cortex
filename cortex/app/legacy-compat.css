@@ -20,11 +20,11 @@
   --line: var(--color-line);
   --line-2: var(--color-line);
   --line-strong: var(--color-line-strong);
-  --accent: var(--color-violet);
-  --accent-ink: var(--color-violet-hi);
-  --accent-2: var(--color-violet-deep);
-  --accent-wash: color-mix(in oklch, var(--color-violet) 13%, transparent);
-  --accent-line: color-mix(in oklch, var(--color-violet) 34%, transparent);
+  --accent: var(--color-accent);
+  --accent-ink: var(--color-accent-hi);
+  --accent-2: var(--color-accent-deep);
+  --accent-wash: color-mix(in oklch, var(--color-accent) 13%, transparent);
+  --accent-line: color-mix(in oklch, var(--color-accent) 34%, transparent);
   --green: var(--color-emerald);
   --green-ink: var(--color-emerald-hi);
   --green-wash: color-mix(in oklch, var(--color-emerald) 12%, transparent);
@@ -34,9 +34,7 @@
   --red: var(--color-danger);
   --red-ink: var(--color-danger-hi);
   --red-wash: color-mix(in oklch, var(--color-danger) 12%, transparent);
-  --violet: var(--color-violet);
-  --violet-wash: color-mix(in oklch, var(--color-violet) 12%, transparent);
-  --r-xs: var(--radius-xs);
+    --r-xs: var(--radius-xs);
   --r-sm: var(--radius-sm);
   --r: var(--radius-md);
   --r-lg: var(--radius-lg);
@@ -83,7 +81,6 @@
 
 .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--ink-2); background: var(--surface); cursor: pointer; }
 .chip-active { background: var(--accent-wash); border-color: var(--accent-line); color: var(--accent-ink); }
-.badge { font-size: 10.5px; font-weight: 650; letter-spacing: 0.03em; text-transform: uppercase; padding: 2.5px 7px; border-radius: 6px; background: var(--accent-wash); color: var(--accent-ink); }
 .tag { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 550; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2); }
 .tag-green { color: var(--green-ink); background: var(--green-wash); border-color: transparent; }
 .tag-blue { color: var(--blue-ink); background: var(--blue-wash); border-color: transparent; }
@@ -111,7 +108,7 @@
 
 .progress { height: 8px; border-radius: 999px; overflow: hidden; background: var(--surface-inset); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4); }
 :root[data-theme="light"] .progress { box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08); }
-.progress > .progress-bar { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--color-violet), var(--color-cyan)); transition: width 0.5s var(--ease-out-quint); }
+.progress > .progress-bar { height: 100%; border-radius: 999px; background: var(--color-accent); transition: width 0.5s var(--ease-out-quint); }
 .spinner { display: inline-block; width: 15px; height: 15px; border: 2px solid var(--line-strong); border-top-color: var(--accent); border-radius: 999px; animation: legacy-spin 0.7s linear infinite; vertical-align: -2px; }
 @keyframes legacy-spin { 100% { transform: rotate(360deg); } }
 .kbd { font: 11px var(--font-mono); padding: 1.5px 6px; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--ink-2); }

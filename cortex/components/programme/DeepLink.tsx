@@ -21,9 +21,9 @@ export function DeepLink({
       target="_blank"
       rel="noopener noreferrer"
       className={cn(
-        "inline-flex min-h-10 items-center gap-2 rounded-full border border-violet/20 bg-violet/8 px-3 py-2 text-xs font-medium text-violet-hi",
-        "transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_40%,transparent)] hover:text-violet-hi",
-        "focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2",
+        "inline-flex min-h-10 items-center gap-2 rounded-full border border-accent/20 bg-accent/8 px-3 py-2 text-xs font-medium text-accent-hi",
+        "transition-colors hover:border-[color-mix(in_oklch,var(--color-accent)_40%,transparent)] hover:text-accent-hi",
+        "focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2",
         className
       )}
     >

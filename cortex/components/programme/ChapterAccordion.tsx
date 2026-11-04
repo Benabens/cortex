@@ -23,7 +23,7 @@ export function ChapterAccordion({ c, defaultOpen = false }: { c: PlanChapterUi;
   }, [defaultOpen]);
 
   return (
-    <div ref={rootRef} className={cn("d2-card scroll-mt-24 overflow-hidden p-0 transition-colors", open && "border-violet/35")}>
+    <div ref={rootRef} className={cn("d2-card scroll-mt-24 overflow-hidden p-0 transition-colors", open && "border-accent/35")}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -31,8 +31,8 @@ export function ChapterAccordion({ c, defaultOpen = false }: { c: PlanChapterUi;
         aria-controls={panelId}
         className={cn(
           "flex w-full flex-wrap items-center gap-3 px-4 py-5 text-left sm:px-5 transition-colors hover:bg-surface-2/30",
-          "focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-[-2px]",
-          open && "border-b border-line bg-violet/8"
+          "focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-[-2px]",
+          open && "border-b border-line bg-accent/8"
         )}
       >
         <ChevronRight
@@ -41,7 +41,7 @@ export function ChapterAccordion({ c, defaultOpen = false }: { c: PlanChapterUi;
           aria-hidden="true"
         />
         {c.lectureNo != null && (
-          <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-violet/20 bg-violet/10 font-data text-xs font-medium tabular text-violet-hi">
+          <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-accent/20 bg-accent/10 font-data text-xs font-medium tabular text-accent-hi">
             L{c.lectureNo}
           </span>
         )}

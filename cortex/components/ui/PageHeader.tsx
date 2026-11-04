@@ -27,7 +27,7 @@ export function PageHeader({
     >
       <div className="min-w-0">
         {context && course && (
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-violet-hi">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-accent-hi">
             <span>{course.short}</span>
             <span className="text-ink-4">·</span>
             <span className="truncate">{course.name}</span>

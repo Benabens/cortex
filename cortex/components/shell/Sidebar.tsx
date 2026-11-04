@@ -17,7 +17,7 @@ export function Sidebar() {
       <div className="flex h-16 items-center px-5">
         <Link
           href="/"
-          className="inline-flex min-h-11 items-center rounded-md focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2"
+          className="inline-flex min-h-11 items-center rounded-md focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
         >
           <Wordmark />
         </Link>
@@ -27,7 +27,7 @@ export function Sidebar() {
         <CourseSelector />
         <Link
           href="/cours"
-          className="mt-1.5 inline-flex min-h-9 items-center rounded px-2 text-[0.72rem] text-ink-4 transition-colors hover:text-violet-hi focus-visible:text-violet-hi"
+          className="mt-1.5 inline-flex min-h-9 items-center rounded px-2 text-[0.72rem] text-ink-4 transition-colors hover:text-accent-hi focus-visible:text-accent-hi"
         >
           Gérer mes cours
         </Link>

@@ -118,7 +118,7 @@ export default function RevisionPage() {
                   <div key={t.topic} className={styles.coverageRow}>
                     <span className="tag">{lr(t.lectureRank)}</span>
                     <div className="min-w-0"><span className="text-ink-1">{t.topic}</span><div className="mt-1 text-xs text-ink-3">{t.qcm} QCM · {t.open} ouvertes</div></div>
-                    <span className="tabular-nums text-violet-hi">{pct}%</span>
+                    <span className="tabular-nums text-accent-hi">{pct}%</span>
                     <div className={styles.track} aria-label={`${pct} % des questions`}><div style={{ width: `${pct}%` }} /></div>
                   </div>
                 );
