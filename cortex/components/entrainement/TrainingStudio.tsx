@@ -53,7 +53,7 @@ export function TrainingStudio() {
   const [jobId, setJobId] = useState<number | null>(null);
   const [launching, setLaunching] = useState(false);
   const job = useJob(jobId);
-  const jobRunning = launching || (jobId != null && !job) || (job != null && JOB_ACTIVE.includes(job.status));
+  const jobRunning = launching || (job != null && JOB_ACTIVE.includes(job.status));
   const jobDone = job != null && !JOB_ACTIVE.includes(job.status) && job.status !== "error" && job.status !== "failed";
   const jobFailed = job != null && (job.status === "error" || job.status === "failed");
 

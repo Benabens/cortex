@@ -569,6 +569,33 @@ h4 {
   }
 }
 
+/* Menu mobile (<dialog>, components/shell/MobileNav) : le tiroir glisse à l'ouverture
+   (@starting-style) et à la fermeture (display et overlay restent le temps de la transition,
+   navigateurs Chromium ; ailleurs la fermeture est immédiate). */
+.drawer-dialog,
+.drawer-dialog::backdrop {
+  transition: display 300ms allow-discrete, overlay 300ms allow-discrete, opacity 200ms ease-out;
+}
+.drawer-dialog:not([open]),
+.drawer-dialog:not([open])::backdrop {
+  opacity: 0;
+}
+.drawer-dialog .drawer-panel {
+  transition: transform 300ms var(--ease-out-quint);
+}
+.drawer-dialog:not([open]) .drawer-panel {
+  transform: translateX(-100%);
+}
+@starting-style {
+  .drawer-dialog[open],
+  .drawer-dialog[open]::backdrop {
+    opacity: 0;
+  }
+  .drawer-dialog[open] .drawer-panel {
+    transform: translateX(-100%);
+  }
+}
+
 /* D2 · Le plan */
 .d2-card,
 .d2-hero {

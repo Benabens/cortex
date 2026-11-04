@@ -1,21 +1,8 @@
 .page { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
-.eyebrow { font-size: 12px; font-weight: 600; color: var(--color-violet-hi); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 10px; }
-.stats { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
-.stat { border-radius: 18px; padding: 20px; background: var(--color-surface-1); box-shadow: inset 0 0 0 1px var(--color-line); }
-.stat strong { display: block; font-size: 32px; line-height: 1.2; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.025em; }
-.stat span { display: block; margin-top: 7px; font-size: 13px; color: var(--color-ink-3); }
 .split { display: grid; grid-template-columns: minmax(0,1.5fr) minmax(300px,1fr); gap: 24px; align-items: start; }
-.stack { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
 .guide { padding: 26px; border-radius: 18px; background: var(--color-surface-1); box-shadow: inset 0 0 0 1px var(--color-line); }
-.guide h2, .sectionTitle { font-size: 19px; line-height: 1.3; font-weight: 600; letter-spacing: -.02em; }
+.guide h2 { font-size: 19px; line-height: 1.3; font-weight: 600; letter-spacing: -.02em; }
 .guide p { font-size: 14px; color: var(--color-ink-3); line-height: 1.7; }
-.steps { list-style: none; padding: 0; margin: 22px 0 0; display: grid; gap: 22px; counter-reset: steps; }
-.steps li { display: grid; grid-template-columns: 28px 1fr; gap: 12px; color: var(--color-ink-2); font-size: 14px; line-height: 1.6; }
-.steps li::before { counter-increment: steps; content: counter(steps); display: grid; place-items: center; align-self: start; height: 28px; border-radius: 50%; background: var(--color-surface-2); color: var(--color-violet-hi); font-weight: 600; font-size: 12px; }
-.steps strong { display: block; color: var(--color-ink-1); font-weight: 600; }
-.accountSection { display: grid; grid-template-columns: 210px minmax(0,1fr); gap: 32px; padding-top: 28px; border-top: 1px solid var(--color-line); }
-.accountSection > header p { margin-top: 8px; color: var(--color-ink-3); font-size: 13px; line-height: 1.65; }
-.courseGrid { display: grid; grid-template-columns: minmax(0,1fr) 290px; align-items: start; gap: 24px; }
 .coverage { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-top: 18px; }
 .coverageRow { padding: 14px; border-radius: 14px; background: var(--color-surface-2); display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 10px; font-size: 13px; }
 .coverageRow .track { grid-column: 1 / -1; height: 5px; background: var(--color-line); border-radius: 5px; overflow: hidden; }
@@ -25,5 +12,5 @@
 .questionToggle { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 20px; cursor: pointer; }
 .questionToggle:hover { background: var(--color-surface-2); }
 .toolbar { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 16px 20px; border-radius: 14px; background: var(--color-surface-1); color: var(--color-ink-3); font-size: 13px; }
-@media(max-width: 900px) { .split, .courseGrid { grid-template-columns: 1fr; } .accountSection { grid-template-columns: 1fr; gap: 16px; } }
-@media(max-width: 540px) { .stats { gap: 8px; } .stat { padding: 15px 12px; border-radius: 16px; } .stat strong { font-size: 25px; } .stat span { font-size: 12px; } .coverage { grid-template-columns: 1fr; } .questionToggle { padding: 16px; gap: 8px; } .questionToggle > :last-child { grid-column: 2 / -1; } .guide { padding: 22px; } }
+@media(max-width: 900px) { .split { grid-template-columns: 1fr; } }
+@media(max-width: 540px) { .coverage { grid-template-columns: 1fr; } .questionToggle { padding: 16px; gap: 8px; } .questionToggle > :last-child { grid-column: 2 / -1; } .guide { padding: 22px; } }
