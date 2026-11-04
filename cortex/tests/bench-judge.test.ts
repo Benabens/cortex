@@ -112,4 +112,7 @@ test("chapitre : un rang rendu à la place de l'identifiant est rattaché ; un p
   assert.equal(chapterOf(7, plan), null);
   assert.equal(chapterOf(null, plan), null);
   assert.equal(chapterOf(null, [plan[0]]), 1000019, "un seul chapitre : toute question en relève");
+  // CS-290 au banc : le juge rendait l'identifiant en chaîne (« "1000028" »), aucune question rattachée.
+  assert.equal(chapterOf("1000020" as unknown as number, plan), 1000020);
+  assert.equal(chapterOf("2" as unknown as number, plan), 1000020);
 });
