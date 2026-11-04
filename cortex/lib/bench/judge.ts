@@ -160,10 +160,12 @@ async function rejections(rejected: BenchRun["rejected"]): Promise<Verdicts["rej
  * Chapitre retenu pour une question : l'identifiant rendu par le juge s'il est au plan ; un rang
  * (seq) rendu à sa place est rattaché à son chapitre ; un plan d'un seul chapitre couvre tout.
  */
-export function chapterOf(raw: number | null | undefined, chapters: BenchRun["plan"]["chapters"]): number | null {
+export function chapterOf(raw: number | string | null | undefined, chapters: BenchRun["plan"]["chapters"]): number | null {
   if (chapters.length === 1) return chapters[0].id;
-  if (raw == null) return null;
-  return chapters.find((c) => c.id === raw)?.id ?? chapters.find((c) => c.seq === raw)?.id ?? null;
+  // Le juge rend parfois l'identifiant en chaîne (« "1000028" »).
+  const n = raw == null || raw === "" ? NaN : Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return chapters.find((c) => c.id === n)?.id ?? chapters.find((c) => c.seq === n)?.id ?? null;
 }
 
 export async function judgeExam(run: BenchRun): Promise<Verdicts> {
