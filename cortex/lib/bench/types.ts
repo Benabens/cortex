@@ -55,7 +55,8 @@ export type BenchRun = {
   samples: { t: number; progress: number; status: string; etaMs: number | null; late: boolean; step: string }[];
   exam: null | { id: number; kind: "qcm" | "exercises" | "blocks"; items: BenchItem[] };
   render: { statement: PdfCheck | null; corrige: PdfCheck | null; web: { ok: boolean; items: number; error?: string } };
-  plan: { chapters: { id: number; seq: number; title: string }[]; topicChapter: Record<string, number | null> };
+  /** Chapitres du plan ; `basis: "sources"` quand le cours n'a pas de plan (un chapitre par support hors annales). */
+  plan: { basis?: "plan" | "sources"; chapters: { id: number; seq: number; title: string }[]; topicChapter: Record<string, number | null> };
   /** Questions des examens générés AVANT ce run (doublons « vs examens précédents »). */
   previous: { stem: string; topic: string | null }[];
   usage: { site: string | null; model: string; tokensIn: number; tokensOut: number; attempt: number; latencyMs: number | null }[];
