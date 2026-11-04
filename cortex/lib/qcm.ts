@@ -273,6 +273,53 @@ export function citesOptionRank(text: string): boolean {
   return RANK_PATTERNS.some((re) => re.test(text));
 }
 
+const ORD_FR: Record<string, number> = { premier: 0, "première": 0, premiere: 0, "deuxième": 1, deuxieme: 1, second: 1, seconde: 1, "troisième": 2, troisieme: 2, "quatrième": 3, quatrieme: 3, "cinquième": 4, cinquieme: 4, dernier: -1, "dernière": -1, derniere: -1 };
+const ORD_EN: Record<string, number> = { first: 0, second: 1, third: 2, fourth: 3, fifth: 4, last: -1 };
+const WRONG = /^(?:erronée|fausse|incorrecte|inexacte|wrong|incorrect|false)$/i;
+const RIGHT = /^(?:correcte|juste|exacte|bonne|correct|right|true)$/i;
+
+/**
+ * Réécrit les renvois à une option par son RANG ou sa LETTRE (« la première proposition », « la
+ * deuxième option fausse », « l'option C », « the second option ») en citant son contenu, dans
+ * l'ordre d'avant le mélange. Banc moteur du 04/11/2026 : 4 explications sur 28 (synth-3p) en
+ * avaient, chacune rejetée puis régénérée. null si un renvoi reste ambigu (« les deux premières »)
+ * ou désigne une option absente : l'item suit alors le rejet habituel.
+ */
+export function repairOptionRefs(text: string, options: string[], correct: number[]): string | null {
+  let bad = false;
+  const at = (k: number) => (k >= 0 && k < options.length ? options[k] : (bad = true, null));
+  const nth = (n: number, among: number[]) => (n === -1 ? among[among.length - 1] : among[n]) ?? -1;
+  const all = options.map((_, i) => i);
+  const wrong = all.filter((i) => !correct.includes(i));
+  const pick = (n: number, qualifier?: string) => nth(n, qualifier && WRONG.test(qualifier) ? wrong : qualifier && RIGHT.test(qualifier) ? correct.slice().sort((a, b) => a - b) : all);
+  const article = (noun: string, cap: boolean) => {
+    const a = /^[aeéiou]/i.test(noun) ? "l'" : "la ";
+    return cap ? a.charAt(0).toUpperCase() + a.slice(1) : a;
+  };
+  let out = text.replace(/\b(La|la|Le|le|L['’]|l['’])\s*(premi(?:er|ère|ere)|deuxi[eè]me|seconde?|troisi[eè]me|quatri[eè]me|cinqui[eè]me|derni(?:er|ère|ere))\s+(option|proposition|réponse|affirmation)(?:\s+(erronée|fausse|incorrecte|inexacte|correcte|juste|exacte|bonne))?(?![\p{L}])/gu,
+    (_m, art: string, ord: string, noun: string, qual?: string) => {
+      const o = at(pick(ORD_FR[ord.toLowerCase()] ?? 99, qual));
+      if (o === null) return _m;
+      return `${article(noun, /^[LA-Z]/.test(art))}${noun}${qual ? ` ${qual}` : ""} « ${o} »`;
+    });
+  out = out.replace(/\b(L['’]option|l['’]option|La réponse|la réponse|La proposition|la proposition)\s+\(?([A-H])\)?(?![\p{L}])/gu,
+    (_m, head: string, letter: string) => {
+      const o = at(letter.charCodeAt(0) - 65);
+      return o === null ? _m : `${head} « ${o} »`;
+    });
+  out = out.replace(/\b(The|the)\s+(first|second|third|fourth|fifth|last)\s+(option|answer|choice|statement)\b/g,
+    (_m, the: string, ord: string, noun: string) => {
+      const o = at(pick(ORD_EN[ord.toLowerCase()]));
+      return o === null ? _m : `${the} ${noun} “${o}”`;
+    });
+  out = out.replace(/\b(Option|option|Answer|answer|Choice|choice)\s+\(?([A-H])\)?(?![\p{L}])/gu,
+    (_m, noun: string, letter: string) => {
+      const o = at(letter.charCodeAt(0) - 65);
+      return o === null ? _m : `${noun} “${o}”`;
+    });
+  return bad || citesOptionLabel(out) ? null : out;
+}
+
 /**
  * Une explication qui désigne une option par sa lettre, son numéro ou son rang deviendrait
  * fausse après le mélange des options (Q12 de l'examen 3 de HUM-285, 02/11 : « la première
@@ -587,6 +634,12 @@ export async function generateQcmBatch(
       slot: i,
     };
     delete (base as { source_fact?: unknown }).source_fact;
+    // Une explication qui renvoie à une option par son rang ou sa lettre est réécrite d'après son
+    // contenu, AVANT le mélange (sinon rejetée puis régénérée à la vérification).
+    if (Array.isArray(base.options) && Array.isArray(base.correct) && citesOptionLabel(base.explanation ?? "")) {
+      const fixed = repairOptionRefs(base.explanation ?? "", base.options, base.correct);
+      if (fixed) base.explanation = fixed;
+    }
     // Position de la bonne réponse mélangée (graine = l'énoncé : reproductible), jamais pour une question à figure.
     const it = Array.isArray(base.options) && Array.isArray(base.correct) && !(raw as { figure_spec?: unknown }).figure_spec && !citesOptionLabel(base.explanation ?? "")
       ? shuffleQcmOptions(base, seedOf(base.stem ?? ""))
