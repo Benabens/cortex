@@ -1205,9 +1205,11 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       progress.done("QCM", 0.5);
       designed.done = true;
       // Un item resté rejeté après régénération (hors cours, définition différente, hors matière, clé
-      // contestée), ou encore éliminable sans connaître le cours, n'est jamais gardé : son sujet est comblé.
+      // contestée) n'est jamais gardé : son sujet est comblé. Un distracteur encore signalé facile après
+      // la tentative (remplacement ou régénération) ne coûte plus la question : banc du 04/11, CS-290 —
+      // 6 QCM manquants au premier tour pour 2 rejets, le signalement étant trop bruité (lib/bench).
       const kept = items.length ? await strengthen(bt, await verifyQcmBatch(items, step)) : [];
-      const out = kept.filter((it) => !it.rejected && !it.trivialDistractors?.length);
+      const out = kept.filter((it) => !it.rejected).map((it) => (it.trivialDistractors?.length ? { ...it, trivialDistractors: null } : it));
       qualityDropped += kept.length - out.length;
       for (const it of out) if (bt.topics[it.slot ?? -1]?.method === FOCUS_METHOD) it.focusSlot = true;
       return { items: out, error: null };
