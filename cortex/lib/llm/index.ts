@@ -43,11 +43,14 @@ export function getProvider(name?: ProviderName): LlmProvider {
 
 /** Le moteur par défaut peut-il servir un appel ? (remplace les gardes claudeBinPath()). */
 export function llmAvailable(name?: ProviderName): boolean {
+  // Banc en rejeu : la bande répond à la place du fournisseur (CI sans CLI ni clé).
+  if (tapeMode()?.mode === "replay") return true;
   return getProvider(name).available();
 }
 
 /** Raison humaine si le moteur est indisponible (messages UI/CLI). */
 export function llmUnavailableReason(name?: ProviderName): string | null {
+  if (tapeMode()?.mode === "replay") return null;
   return getProvider(name).unavailableReason();
 }
 
