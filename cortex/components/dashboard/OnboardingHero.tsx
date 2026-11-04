@@ -27,7 +27,7 @@ export function OnboardingHero({ courseName }: { courseName: string }) {
 
   return (
     <section
-      className="panel top-light relative overflow-hidden rounded-xl"
+      className="d2-card relative overflow-hidden"
       aria-labelledby="onboarding-title"
     >
       <div className="relative p-5 sm:p-7">
@@ -46,7 +46,7 @@ export function OnboardingHero({ courseName }: { courseName: string }) {
               key={title}
               className="rounded-lg border border-line bg-surface-2/40 p-3.5 edge-top"
             >
-              <span className="grid size-9 place-items-center rounded-lg border border-line bg-surface-2/60 text-violet-hi">
+              <span className="grid size-9 place-items-center rounded-lg border border-line bg-surface-2/60 text-accent-hi">
                 <Icon className="size-[1.05rem]" strokeWidth={2.25} aria-hidden="true" />
               </span>
               <p className="mt-2.5 text-[0.85rem] font-medium text-ink-1">

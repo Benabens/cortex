@@ -1,5 +1,6 @@
 "use client";
 
+import styles from "@/app/secondary.module.css";
 import { WifiOff, RotateCw, FolderOpen } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FileManager } from "@/components/sources/FileManager";
@@ -13,16 +14,16 @@ export default function SourcesPage() {
   const { data, loading, error, refetch } = useApi<SourcesResp>("/api/sources");
 
   return (
-    <div className="flex flex-col gap-7">
+    <div className={styles.page}>
       <PageHeader
         title="Sources"
         description="Le corpus qui nourrit Cortex : tes annales, séries et slides. Importe, puis prépare le cours."
       />
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.55fr_1fr]">
+      <div className={styles.split}>
         {/* Skeleton UNIQUEMENT au premier chargement : un refetch (ex. coche « Référence »)
             garde la liste montée → plus de saut/remontage (fix jank). */}
         {loading && !data ? (
-          <div className="skeleton h-[28rem] rounded-lg" aria-busy="true" aria-label="Chargement du corpus" />
+          <div className="skeleton h-[28rem] rounded-lg" role="status" aria-busy="true" aria-label="Chargement du corpus" />
         ) : error ? (
           <Panel className="flex flex-col items-center justify-center gap-3 rounded-xl px-6 py-16 text-center">
             <WifiOff className="size-6 text-danger-hi" strokeWidth={2} />
@@ -36,7 +37,7 @@ export default function SourcesPage() {
               Réessayer
             </Button>
           </Panel>
-        ) : !data || data.exams.length === 0 ? (
+        ) : !data || (data.exams.length === 0 && data.corpus.length === 0) ? (
           <Panel className="flex flex-col items-center justify-center gap-3 rounded-xl px-6 py-16 text-center">
             <span className="grid size-11 place-items-center rounded-lg border border-line bg-surface-2/60 text-ink-3">
               <FolderOpen className="size-5" strokeWidth={2} />

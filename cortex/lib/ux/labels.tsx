@@ -13,7 +13,7 @@ import {
 
 export type Tone =
   | "neutral"
-  | "violet"
+  | "accent"
   | "info"
   | "success"
   | "warning"
@@ -34,14 +34,14 @@ export const STATUS: Record<
 /* ---- Weakness severity (GROS · MOYEN · LÉGER) ---- */
 export type Severity = "GROS" | "MOYEN" | "LÉGER";
 
-// REFONTE ALLÉGÉE : 3 niveaux SANS rouge dramatisant. GROS passe sur l'accent violet (identité,
+// REFONTE ALLÉGÉE : 3 niveaux SANS rouge dramatisant. GROS passe sur l'accent bleu (identité,
 // « priorité haute » sans alarme) ; le sens reste porté par l'icône + la forme (SeverityMeter) + le
 // libellé → colorblind-safe. MOYEN (ambre) et LÉGER (cyan) inchangés.
 export const SEVERITY: Record<
   Severity,
   { label: string; tone: Tone; level: 1 | 2 | 3; Icon: LucideIcon }
 > = {
-  GROS: { label: "Sévère", tone: "violet", level: 3, Icon: ShieldAlert },
+  GROS: { label: "Sévère", tone: "accent", level: 3, Icon: ShieldAlert },
   MOYEN: { label: "Moyen", tone: "warning", level: 2, Icon: AlertTriangle },
   LÉGER: { label: "Léger", tone: "info", level: 1, Icon: Info },
 };
@@ -58,7 +58,7 @@ export const WSTATE: Record<WState, { label: string; tone: Tone; Icon: LucideIco
 /** Tone → foreground text color (used for pills, icons, accents). */
 export const toneText: Record<Tone, string> = {
   neutral: "text-ink-3",
-  violet: "text-violet-hi",
+  accent: "text-accent-hi",
   info: "text-cyan-hi",
   success: "text-emerald-hi",
   warning: "text-warning",
@@ -68,7 +68,7 @@ export const toneText: Record<Tone, string> = {
 /** Tone → the raw token var (for SVG strokes / inline styles). */
 export const toneVar: Record<Tone, string> = {
   neutral: "var(--color-ink-3)",
-  violet: "var(--color-violet)",
+  accent: "var(--color-accent)",
   info: "var(--color-cyan)",
   success: "var(--color-emerald)",
   warning: "var(--color-warning)",

@@ -52,7 +52,7 @@ const optionStyle: Record<Variant, Record<Size, string>> = {
 };
 
 const VIOLET_THUMB =
-  "border border-[color-mix(in_oklch,var(--color-violet)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_14%,transparent)]";
+  "border border-[color-mix(in_oklch,var(--color-accent)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_14%,transparent)]";
 
 const thumbStyle: Record<Variant, string> = {
   track: "rounded-md bg-surface-2 shadow-[0_0_0_1px_var(--color-line-strong)]",

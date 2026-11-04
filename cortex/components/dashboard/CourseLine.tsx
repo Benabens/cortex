@@ -27,7 +27,7 @@ export function CourseLine({
       {exam.state !== "upcoming" && (
         <Link
           href={`/cours?date=${encodeURIComponent(courseId)}`}
-          className="-my-3 inline-flex min-h-11 items-center rounded-sm text-ink-1 underline decoration-white/25 decoration-1 underline-offset-4 transition-colors hover:decoration-white/60"
+          className="-my-3 inline-flex min-h-11 items-center rounded-sm text-ink-1 underline decoration-underline-hi decoration-1 underline-offset-4 transition-colors hover:decoration-underline-hover"
         >
           {exam.action}
         </Link>

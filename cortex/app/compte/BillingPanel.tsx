@@ -13,7 +13,7 @@ import { cn } from "@/lib/ux/cn";
  * ABONNEMENT & CRÉDITS — un seul écran pour comprendre son solde et payer :
  * les deux poches (abonnement du mois, crédits achetés), la date de recharge,
  * les offres au prix lu dans Stripe, l'historique, et la porte vers le portail
- * Stripe. Dense et sobre : composants existants, aucun style nouveau.
+ * Stripe. Les offres, consentements et mouvements restent visibles dans leurs cartes dédiées.
  * On n'encaisse pas sans CGV acceptées ni sans documents légaux publiés : le
  * serveur le refuse et l'interface le dit avant que l'utilisateur ne clique.
  */
@@ -193,7 +193,7 @@ export function BillingPanel() {
       </Panel>
     );
   }
-  if (!data) return <div className="skeleton h-40 rounded-lg" aria-busy="true" aria-label="Chargement du solde" />;
+  if (!data) return <div className="skeleton h-40 rounded-lg" role="status" aria-busy="true" aria-label="Chargement du solde" />;
   return (
     <BillingView
       data={data}
@@ -224,8 +224,8 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
   const [consents, setConsents] = useState<Record<string, boolean>>({});
   if (!data.billing) {
     return (
-      <Panel className="p-5">
-        <h2 className="text-[0.95rem] font-semibold text-ink-1">Abonnement & crédits</h2>
+      <Panel className="p-5 sm:p-6">
+        <h2 className="text-xl font-semibold text-ink-1">Abonnement & crédits</h2>
         <p className="mt-1.5 text-[0.85rem] leading-relaxed text-ink-2">
           La facturation n’est pas activée sur cette instance : les générations ne consomment pas de crédits.
         </p>
@@ -250,7 +250,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
     <section className="flex flex-col gap-4" aria-labelledby="billing-title">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h2 id="billing-title" className="text-[0.95rem] font-semibold text-ink-1">Abonnement & crédits</h2>
+          <h2 id="billing-title" className="text-xl font-semibold text-ink-1">Abonnement & crédits</h2>
           <p className="mt-0.5 text-[0.8rem] text-ink-3">
             Un examen coûte {credits(data.costs.exam)}, un mock QCM ou un exercice {credits(data.costs.qcm)}, une aide (drill, correction) {nf.format(data.costs.assist)}.
           </p>
@@ -272,11 +272,11 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
       )}
 
       {/* ── Solde : deux poches ── */}
-      <Panel className="divide-y divide-line p-0">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 px-5 py-4">
+      <Panel className="overflow-hidden divide-y divide-line p-0">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 px-6 py-6">
           <div>
-            <div className="text-[0.8rem] text-ink-3">Solde disponible</div>
-            <div className="mt-0.5 font-data text-[1.6rem] font-semibold leading-none text-ink-1">{credits(data.balance ?? 0)}</div>
+            <div className="text-sm text-ink-3">Solde disponible</div>
+            <div className="mt-2 font-display text-4xl font-semibold leading-none tracking-tight text-ink-1 sm:text-5xl">{credits(data.balance ?? 0)}</div>
           </div>
           {(data.balance ?? 0) < 0 && (
             <Badge tone="danger" emphasis>Solde négatif : un paiement a été repris. Recharge pour continuer.</Badge>
@@ -298,7 +298,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
                   {sub.nextRechargeAt && <span className="text-ink-3"> · recharge le {dateFr(sub.nextRechargeAt)}</span>}
                   {canceling && sub.periodEnd && <span className="text-ink-3"> · se termine le {dateFr(sub.periodEnd)}</span>}
                   {!canceling && !sub.nextRechargeAt && sub.periodEnd && <span className="text-ink-3"> · jusqu’au {dateFr(sub.periodEnd)}</span>}
-                  <div className="mt-0.5 text-[0.78rem] text-ink-4">Non reportables : ce qui n’est pas utilisé dans le mois est perdu. Consommés avant tes crédits achetés.</div>
+                  <div className="mt-2 text-xs leading-relaxed text-ink-3">Non reportables : ce qui n’est pas utilisé dans le mois est perdu. Consommés avant tes crédits achetés.</div>
                 </>
               )}
               {standing === "renewing" && (
@@ -340,23 +340,23 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
       {/* ── Offres ── */}
       <Panel className="p-0">
         <div className="px-5 pt-4">
-          <h3 className="text-[0.9rem] font-semibold text-ink-1">Recharger</h3>
+          <h3 className="text-xl font-semibold text-ink-1">Recharger</h3>
           <p className="mt-1 max-w-3xl text-[0.8rem] leading-relaxed text-ink-3">{usageNote(data)}</p>
           {!data.purchase.enabled && (
             <p role="status" className="mt-1.5 text-[0.85rem] text-warning">{data.purchase.reason}</p>
           )}
         </div>
-        <ul className="mt-3 divide-y divide-line">
+        <ul className="grid gap-3 p-4 lg:grid-cols-3">
           {data.offers.map((o) => {
             const isSub = o.kind === "subscription";
             // `busy` couvre TOUTES les offres : pendant une redirection vers Stripe,
             // aucune autre ne doit pouvoir ouvrir une seconde session de paiement.
             const disabled = !canBuy || !consents[o.plan] || !!busy || (isSub && hasSub);
             return (
-              <li key={o.plan} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-3.5">
+              <li key={o.plan} className="flex min-w-0 flex-col gap-5 rounded-2xl border border-line bg-surface-2/40 p-5">
                 <div className="min-w-0">
-                  <div className="text-[0.9rem] font-medium text-ink-1">{o.label}</div>
-                  <div className="text-[0.8rem] text-ink-3">
+                  <div className="font-display text-xl font-semibold text-ink-1">{o.label}</div>
+                  <div className="mt-2 text-sm leading-relaxed text-ink-2">
                     {isSub ? `Autant de cours que tu veux · ${nf.format(o.credits)} crédits par mois, non reportables` : `${nf.format(o.credits)} crédits, sans date d’expiration`}
                     {isSub && hasSub && <span> · tu as déjà un abonnement</span>}
                   </div>
@@ -364,13 +364,13 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
                       elles ne vivaient que dans le bloc « Gérer mon abonnement », invisible
                       pour un compte neuf (audit de pré-lancement). */}
                   {isSub && (
-                    <div className="mt-0.5 text-[0.78rem] text-ink-4">
+                    <div className="mt-2 text-xs leading-relaxed text-ink-3">
                       Renouvellement automatique chaque {o.interval === "year" ? "année" : "mois"} · résiliable à tout moment
                       depuis Mon compte, effet en fin de période.
                     </div>
                   )}
-                  <label className="mt-2 flex max-w-xl items-start gap-2 text-[0.78rem] leading-relaxed text-ink-3">
-                    <input type="checkbox" className="mt-0.5 size-4 accent-[var(--color-violet)]" checked={!!consents[o.plan]}
+                  <label className="mt-4 flex max-w-xl items-start gap-3 rounded-xl bg-bg/40 p-3 text-xs leading-relaxed text-ink-2">
+                    <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-[var(--color-accent)]" checked={!!consents[o.plan]}
                       disabled={!data.purchase.enabled || !!busy || (isSub && hasSub)}
                       onChange={(e) => setConsents((current) => ({ ...current, [o.plan]: e.target.checked }))} />
                     <span>{isSub
@@ -378,8 +378,8 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
                       : "Je demande l’accès immédiat à mes crédits et reconnais perdre mon droit de rétractation dès leur première utilisation."}</span>
                   </label>
                 </div>
-                <div className="flex items-center gap-4">
-                  <span className={cn("text-[0.9rem] tabular-nums", o.price ? "text-ink-1" : "text-ink-4")}>{price(o.price, o.interval)}</span>
+                <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+                  <span className={cn("text-lg font-semibold tabular-nums", o.price ? "text-ink-1" : "text-ink-4")}>{price(o.price, o.interval)}</span>
                   <Button
                     variant={isSub ? "primary" : "secondary"}
                     size="sm"
@@ -410,29 +410,29 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
 
       {/* ── Historique ── */}
       <Panel className="p-0">
-        <h3 className="px-5 pt-4 text-[0.9rem] font-semibold text-ink-1">Historique</h3>
+        <h3 className="px-5 pt-5 text-xl font-semibold text-ink-1">Historique</h3>
         {data.transactions.length === 0 ? (
           <p className="px-5 pb-4 pt-1.5 text-[0.85rem] text-ink-3">Aucun mouvement pour l’instant. Choisis un abonnement ou un pack ci-dessus pour obtenir des crédits.</p>
         ) : (
-          <div className="mt-2 overflow-x-auto">
+          <div className="mt-4 overflow-x-auto rounded-b-[18px]" role="region" aria-label="Historique des crédits, tableau défilant" tabIndex={0}>
             <table className="w-full text-[0.82rem]">
-              <thead className="text-left text-ink-4">
+              <thead className="bg-surface-2/50 text-left text-ink-3">
                 <tr>
-                  <th scope="col" className="px-5 py-1.5 font-medium">Date</th>
-                  <th scope="col" className="px-2 py-1.5 font-medium">Mouvement</th>
-                  <th scope="col" className="px-2 py-1.5 text-right font-medium">Achetés</th>
-                  <th scope="col" className="px-5 py-1.5 text-right font-medium">Abonnement</th>
+                  <th scope="col" className="px-5 py-3 font-medium">Date</th>
+                  <th scope="col" className="px-2 py-3 font-medium">Mouvement</th>
+                  <th scope="col" className="px-2 py-3 text-right font-medium">Achetés</th>
+                  <th scope="col" className="px-5 py-3 text-right font-medium">Abonnement</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line-soft">
                 {data.transactions.map((t, i) => (
                   <tr key={t.ref ?? i} className="text-ink-2">
-                    <td className="whitespace-nowrap px-5 py-1.5 tabular-nums text-ink-3">{dateFr(t.created_at)}</td>
-                    <td className="px-2 py-1.5">{t.reason}</td>
-                    <td className={cn("px-2 py-1.5 text-right tabular-nums", t.delta > 0 ? "text-emerald-hi" : t.delta < 0 ? "text-ink-1" : "text-ink-4")}>
+                    <td className="whitespace-nowrap px-5 py-3 tabular-nums text-ink-3">{dateFr(t.created_at)}</td>
+                    <td className="px-2 py-3">{t.reason}</td>
+                    <td className={cn("px-2 py-3 text-right tabular-nums", t.delta > 0 ? "text-emerald-hi" : t.delta < 0 ? "text-ink-1" : "text-ink-4")}>
                       {t.delta === 0 ? "—" : `${t.delta > 0 ? "+" : ""}${nf.format(t.delta)}`}
                     </td>
-                    <td className="px-5 py-1.5 text-right tabular-nums text-ink-3">{t.subAmount > 0 ? `−${nf.format(t.subAmount)}` : "—"}</td>
+                    <td className="px-5 py-3 text-right tabular-nums text-ink-3">{t.subAmount > 0 ? `−${nf.format(t.subAmount)}` : "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -473,7 +473,7 @@ function TermsConsent({ data, busy, canAccept, legalOk, onAcceptTerms }: {
         <label className="flex items-start gap-3">
           <input
             type="checkbox"
-            className="mt-0.5 size-4 accent-[var(--color-violet)]"
+            className="mt-0.5 size-4 shrink-0 accent-[var(--color-accent)]"
             disabled={busy === "terms" || !canAccept}
             checked={terms}
             onChange={(e) => setTerms(e.target.checked)}

@@ -69,12 +69,13 @@ export function AppShell({ children, legal, legalEnglish, contact }: {
   return (
     <CourseProvider>
       <div className="relative min-h-dvh overflow-x-clip">
+        <a href="#main-content" className="sr-only fixed left-4 top-4 z-50 rounded-full bg-ink-1 px-5 py-3 text-surface-0 focus:not-sr-only">Aller au contenu</a>
         <Sidebar />
         <MobileNav open={menuOpen} onClose={() => setMenuOpen(false)} />
 
         <div className="relative z-10 lg:pl-rail">
           <Topbar onOpenMenu={() => setMenuOpen(true)} />
-          <main className="mx-auto w-full max-w-[1240px] px-4 pb-16 pt-6 sm:px-6 lg:px-8 lg:pt-8">
+          <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-[1240px] px-4 pb-16 pt-6 sm:px-6 lg:px-8 lg:pt-8">
             <Body>{children}</Body>
           </main>
           {legal && (
