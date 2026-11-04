@@ -9,10 +9,10 @@ Cette règle remplace les anciennes consignes « Funnel Display pour les titres 
 | Logo cortex | Funnel Display 700, inchangé | --font-brand / font-brand |
 | Interface, navigation, formulaires | Inter variable | --font-sans / font-sans |
 | Titres, sections, offres, compteurs | Inter variable | --font-display / font-display |
-| Code et références monospace | Police native existante, SF Mono / Menlo | --font-mono / font-mono |
+| Code et références monospace | Commit Mono (400/700, normal/italique) | --font-mono / font-mono |
 
 Inter est la famille observée sur le site et la démonstration officielle de Linear le 5 novembre 2026 : https://linear.app/ et https://linear.app/demo.
-Linear utilise également Berkeley Mono. Cette fonte commerciale n'est pas intégrée sans licence et fichiers autorisés ; le monospace actuel reste en place. Ne pas présenter la pile de repli comme une copie exacte de Berkeley Mono.
+Linear utilise également Berkeley Mono. À la demande de l’utilisateur, cette fonte commerciale est remplacée par Commit Mono, alternative neutre à chasse fixe, libre pour un usage commercial sous SIL OFL 1.1. Ce choix rapproche le caractère sobre de l’interface sans prétendre reproduire exactement Berkeley Mono. Source officielle : https://github.com/eigilnikolajsen/commit-mono (version 1.143, fichiers et licence conservés).
 
 Les tailles, graisses, interlignes et espacements actuels de Cortex sont conservés. La demande concerne les familles typographiques, pas une refonte des pages.
 Les thèmes clair/sombre/système, couleurs, mises en page, menus, fonctionnalités et parcours existants restent inchangés.

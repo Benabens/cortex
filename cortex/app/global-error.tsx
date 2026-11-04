@@ -90,7 +90,7 @@ export default function GlobalError({
               si le problème persiste, réessaie dans un instant.
             </p>
             {error?.digest && (
-              <p style={{ fontSize: 12, color: "var(--ge-faint)", marginTop: 12, fontFamily: "ui-monospace, monospace" }}>
+              <p style={{ fontSize: 12, color: "var(--ge-faint)", marginTop: 12, fontFamily: "'Cortex Mono', ui-monospace, monospace" }}>
                 réf. {error.digest}
               </p>
             )}
