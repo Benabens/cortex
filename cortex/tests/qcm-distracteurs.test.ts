@@ -31,6 +31,8 @@ let third = ABSURD;
 let scalarKey = false;
 /** Le correcteur trouve une autre réponse que la clé, pour chaque question (clé contestée). */
 let contestKey = false;
+/** Le correcteur juge chaque question réussie avec les seuls noms des notions (autre faiblesse). */
+let nameOnly = false;
 const NEW_DISTRACTOR = "Une affirmation proche du cours, fausse à une condition près.";
 
 function item(q: number) {
@@ -58,7 +60,7 @@ function verifyReply(prompt: string): string {
     const trivial = opts.filter((m) => m[2].startsWith("Une option absurde")).map((m) => Number(m[1]));
     const foreign = opts.filter((m) => m[2].startsWith("Une affirmation qui nomme une notion étrangère")).map((m) => Number(m[1]));
     return {
-      index, correct: contestKey ? [key && Number(key[1]) === 0 ? 1 : 0] : scalarKey ? (key ? Number(key[1]) : 0) : [key ? Number(key[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms: [],
+      index, correct: contestKey ? [key && Number(key[1]) === 0 ? 1 : 0] : scalarKey ? (key ? Number(key[1]) : 0) : [key ? Number(key[1]) : 0], ok: true, discrimination: 4, name_only: nameOnly, issue: "", course_terms: [],
       off_course: foreign.length ? "Une mauvaise option nomme une notion que le cours ne présente pas." : "", off_course_terms: foreign.length ? ["notion étrangère"] : [],
       off_course_options: foreign, off_course_key: false, off_matter: "", trivial_distractors: trivial, definition_mismatch: "",
     };
@@ -104,7 +106,7 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { designCalls = 0; repairCalls = 0; repairPrompts = []; replacement = NEW_DISTRACTOR; third = ABSURD; scalarKey = false; contestKey = false; });
+beforeEach(() => { designCalls = 0; repairCalls = 0; repairPrompts = []; replacement = NEW_DISTRACTOR; third = ABSURD; scalarKey = false; contestKey = false; nameOnly = false; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -220,4 +222,13 @@ test("banc du 04/11 : tous les lots d'une ronde partent ensemble (15 QCM = 4 lot
   } finally {
     process.env.QCM_BATCH_CONCURRENCY = saved;
   }
+});
+
+test("banc du 04/11 : distracteur trivial ET autre faiblesse — après la régénération, la question n'est pas jetée pour son distracteur", async () => {
+  // CS-290 15 QCM, tous les correctifs précédents : seuls 2 rejets, mais 6 QCM manquants au premier
+  // tour — des questions régénérées pour une autre faiblesse, puis jetées pour un distracteur encore signalé.
+  nameOnly = true;
+  const { r, steps } = await exam(await course(), 4);
+  assert.equal(r.count, 4, steps.join("\n"));
+  assert.ok(!steps.some((s) => /comblement/.test(s)), steps.join("\n"));
 });
