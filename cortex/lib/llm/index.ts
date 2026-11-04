@@ -8,6 +8,7 @@ import { anthropicProvider } from "./providers/anthropic-api";
 import { claudeCodeProvider } from "./providers/claude-code";
 import { openaiCompatibleProvider } from "./providers/openai-compatible";
 import { withRetry } from "./retry";
+import { nextRank, recordCall, replayCall, tapeMode } from "./tape";
 import { extractJson, JsonOutputError } from "./json";
 import { LlmError, type CompleteRequest, type CompleteResult, type LlmProvider } from "./types";
 
@@ -57,6 +58,11 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
   // job courant s'il y en a un (jobs = 1 par process).
   const callSite = callerSite();
   const job = currentJob();
+  // Banc (scripts/bench) : bande enregistrée ou rejouée ; rejeu = aucun appel, aucun compteur.
+  const tape = tapeMode();
+  const tapeSite = callSite ?? "?";
+  const tapeRank = tape ? nextRank(tape.file, tapeSite) : 0;
+  if (tape?.mode === "replay") return replayCall(tape, req, tapeSite, tapeRank);
 
   // Cache par hash de contenu (opt-in CACHE_ENABLED) — hit = zéro appel modèle.
   const key = cacheable(req) ? cacheKey(provider.name, req) : null;
@@ -92,8 +98,10 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
           tokensIn: tokensInEstimate, tokensOut: req.maxTokens ?? 16_000,
           callSite: siteLabel, jobId: job?.id ?? null, attempt: a,
         });
+        const tCall = Date.now();
         try {
           const r = await provider.complete(req);
+          if (tape) recordCall(tape, req, tapeSite, tapeRank, Date.now() - tCall, { result: r });
           await closeUsage(pending, {
             provider: r.provider ?? provider.name, model: r.model ?? modelId,
             tokensIn: r.usage?.inputTokens, tokensOut: r.usage?.outputTokens,
@@ -102,6 +110,7 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
           });
           return r;
         } catch (e) {
+          if (tape) recordCall(tape, req, tapeSite, tapeRank, Date.now() - tCall, { error: e });
           // Retirée seulement sur un refus IDENTIFIÉ avant traitement ; toute
           // autre erreur (timeout, annulation, coupure en cours de flux, réponse
           // tronquée, inconnue) garde l'estimation : mieux vaut surcompter.
