@@ -377,7 +377,13 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
   if (off) issues.push(`hors cours : ${off}`);
   const mismatch = said(res.definition_mismatch);
   if (mismatch) issues.push(`définition différente du cours : ${mismatch}`);
-  for (const t of res.trivial_distractors ?? []) if (t.options?.length) issues.push(`(${LETTER[t.index]?.toLowerCase() ?? "?"}) distracteurs éliminables sans le cours : ${t.options.slice(0, 3).join(" ; ")}`);
+  // Sortie du modèle non garantie : banc du 04/11 (CS-290 composite), « options » rendu en chaîne a
+  // fait planter tout l'examen (« t.options.slice(...).join is not a function »).
+  for (const t of Array.isArray(res.trivial_distractors) ? res.trivial_distractors : []) {
+    const raw: unknown = t?.options;
+    const opts = Array.isArray(raw) ? raw.map(String) : typeof raw === "string" && raw.trim() ? [raw.trim()] : [];
+    if (opts.length) issues.push(`(${LETTER[t.index]?.toLowerCase() ?? "?"}) distracteurs éliminables sans le cours : ${opts.slice(0, 3).join(" ; ")}`);
+  }
   return issues;
 }
 
