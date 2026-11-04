@@ -1175,6 +1175,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       // contestée), ou encore éliminable sans connaître le cours, n'est jamais gardé : son sujet est comblé.
       const kept = items.length ? await strengthen(bt, await verifyQcmBatch(items, step)) : [];
       const out = kept.filter((it) => !it.rejected && !it.trivialDistractors?.length);
+      qualityDropped += kept.length - out.length;
       for (const it of out) if (bt.topics[it.slot ?? -1]?.method === FOCUS_METHOD) it.focusSlot = true;
       return { items: out, error: null };
     } catch (e) {
@@ -1183,6 +1184,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     }
   };
   let lastError: unknown = null;
+  /** QCM conçus puis écartés par les contrôles (rejet, distracteur trivial) : la cause d'un examen vide n'est pas alors une réponse illisible. */
+  let qualityDropped = 0;
   // partie OUVERTE : chaque question via l'architecte (multi-passes + vérif), au niveau réel.
   // moules « ouverts » échantillonnés depuis l'ADN, imposés à l'architecte.
   // M — lancée AVANT les lots QCM et en parallèle d'eux, plusieurs à la fois (job 9 de CS-290 :
@@ -1313,6 +1316,11 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   if (count > 0 && !all.length) {
     abandoned = true; // les ouvertes en cours s'arrêtent après leur question
     await openPhase;
+    // Banc du 04/11 : « réponse illisible » se disait aussi quand le modèle avait répondu et que
+    // toutes ses questions avaient été écartées par les contrôles — la cause doit être exacte.
+    if (!lastError && qualityDropped > 0) {
+      throw new Error(`Aucun QCM généré : les ${qualityDropped} questions conçues ont toutes été écartées par les contrôles de qualité (hors cours, clé contestée, distracteurs trop faciles). Réessaie ; si ça se reproduit sur ce cours, signale-le.`);
+    }
     throw new Error(`Aucun QCM généré : ${llmFailureReason(cause())}`);
   }
   logPhase("QCM", tQcm);

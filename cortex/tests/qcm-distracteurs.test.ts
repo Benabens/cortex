@@ -155,9 +155,16 @@ test("le remplaçant reste trivial à la revérification : aucune question livr�
   replacement = "Une option absurde que tout étudiant élimine encore.";
   // Ici chaque question garde un distracteur trivial : rien n'est livrable, la génération échoue
   // (comme avant ce correctif) plutôt que de livrer ces questions.
-  const got = await exam(await course(), 4).catch(() => null);
+  let error = "";
+  const got = await exam(await course(), 4).catch((e: Error) => { error = e.message; return null; });
   for (const it of got?.items ?? []) assert.ok(!it.options.some((o) => o.startsWith("Une option absurde")), it.options.join(" | "));
   assert.equal(repairCalls >= 1, true, "le remplacement a bien été tenté");
+  // Banc du 04/11 : l'échec se disait « réponse illisible » alors que le modèle avait répondu, et
+  // que les questions avaient été écartées par les contrôles de qualité.
+  if (!got) {
+    assert.doesNotMatch(error, /illisible|mal formées/, error);
+    assert.match(error, /contrôles de qualité/, error);
+  }
 });
 
 test("banc du 04/11 : l'avancement bouge dès qu'un lot est conçu, sans attendre sa vérification (8 % pendant 3 à 5 min)", async () => {
