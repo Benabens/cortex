@@ -72,3 +72,11 @@ test("rejeu : durée, coût et temps restant sans objet (réponses instantanées
   for (const id of ["perf.duration", "perf.cost", "ux.eta"]) assert.equal(v.find((x) => x.id === id)?.pass, null, id);
   assert.deepEqual(v.filter((x) => x.pass === false).map((x) => x.id), ["duplicates.intra"]);
 });
+
+test("CI : seule une régression compte — un seuil vert à la référence enregistrée qui passe au rouge", async () => {
+  const { regressions } = await import("../lib/bench/thresholds");
+  const v = (id: string, pass: boolean | null) => ({ id, label: id, value: "", limit: "", pass });
+  const base = [v("delivery.complete", true), v("difficulty.trivial", false), v("ux.eta", null)];
+  assert.deepEqual(regressions(base, [v("delivery.complete", true), v("difficulty.trivial", false), v("ux.eta", false)]).map((x) => x.id), [], "rouge déjà rouge, ou sans objet à la référence : pas une régression");
+  assert.deepEqual(regressions(base, [v("delivery.complete", false), v("difficulty.trivial", true), v("ux.eta", null)]).map((x) => x.id), ["delivery.complete"]);
+});
