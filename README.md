@@ -8,6 +8,8 @@ Most question generators produce generic multiple-choice quizzes that look nothi
 
 ---
 
+Design system de l’application : [typographie](docs/DESIGN_SYSTEM.md).
+
 ## What it does
 
 | | |
