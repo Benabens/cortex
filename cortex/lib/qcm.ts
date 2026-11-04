@@ -974,10 +974,14 @@ function distinctNotions(labels: string[]): number {
   return reps.length;
 }
 
-/** Lots QCM menés en même temps (QCM_BATCH_CONCURRENCY, défaut 3). */
+/**
+ * Lots QCM menés en même temps (QCM_BATCH_CONCURRENCY, défaut 8 = le plafond). Banc moteur du
+ * 04/11/2026 (CS-290, 15 QCM = 4 lots) : à 3, le 4e lot attendait les trois premiers, 7 min de plus
+ * en série ; le limiteur global des appels (LLM_MAX_CONCURRENCY) borne déjà la charge.
+ */
 function batchConcurrency(): number {
   const n = Number(process.env.QCM_BATCH_CONCURRENCY);
-  return Number.isInteger(n) && n >= 1 ? Math.min(n, 8) : 3;
+  return Number.isInteger(n) && n >= 1 ? Math.min(n, 8) : 8;
 }
 
 /** Questions ouvertes construites en même temps (QCM_OPEN_CONCURRENCY, défaut 3). */
@@ -1272,7 +1276,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   let extraBudget = batches.length;
   for (let round = 0; pending.length; round++) {
     const missing: { topic: QcmSlot; mold: MoldKind | null }[] = [];
-    // Lots QCM menés en même temps (QCM_BATCH_CONCURRENCY, défaut 3) ; le limiteur global des appels
+    // Lots QCM menés en même temps (QCM_BATCH_CONCURRENCY, défaut 8) ; le limiteur global des appels
     // (LLM_MAX_CONCURRENCY) reste la borne commune avec les questions ouvertes.
     const width = batchConcurrency();
     for (let b = 0; b < pending.length; b += width) {
