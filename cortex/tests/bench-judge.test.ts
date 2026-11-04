@@ -30,7 +30,8 @@ function reply(prompt: string): unknown {
   if (/examinateur exigeant/.test(prompt)) {
     return {
       items: [
-        { q: 0, key: "wrong", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [3, 0], chapter: 1, notion: "ordre des segments", code: null },
+        // Indices hors bornes, non entiers ou en chaîne (sortie non garantie) : jamais comptés.
+        { q: 0, key: "wrong", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [3, 0, 7, 1.5, "2"], chapter: 1, notion: "ordre des segments", code: null },
         { q: 1, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 99, notion: "somme", code: { language: "python", source: "print(2 + 2)", stdin: "", expected: "5" } },
         { q: 2, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 1, notion: "pandas", code: { language: "python", source: "import module_absent_du_banc\nprint(1)", stdin: "", expected: "1" } },
       ],

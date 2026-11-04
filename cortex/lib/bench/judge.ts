@@ -205,7 +205,8 @@ export async function judgeExam(run: BenchRun): Promise<Verdicts> {
         definition: v?.definition ?? "na",
         offCourse: !!v?.off_course,
         distractors,
-        trivialDistractors: Math.min(distractors, new Set((v?.trivial ?? []).filter((k) => !(it.correct ?? []).includes(k))).size),
+        // Même règle que le correcteur du moteur (lib/qcm) : un indice d'option fausse, entier et dans les bornes.
+        trivialDistractors: Math.min(distractors, new Set((Array.isArray(v?.trivial) ? v.trivial : []).filter((k) => Number.isInteger(k) && k >= 0 && k < (it.options?.length ?? 0) && !(it.correct ?? []).includes(k))).size),
         ...(code ? { code } : {}),
       });
     }
