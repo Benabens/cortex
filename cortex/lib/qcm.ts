@@ -231,10 +231,16 @@ const NO_CLASSIFICATION =
 const CLASSIFICATION_IF_ANNALES =
   `  - Les questions « classe ce cas dans la notion X » (options = noms de notions) ne sont permises QUE si les vraies questions des annales du cours en contiennent ; sinon, teste les CONDITIONS qui font qu'un cas relève ou non d'une notion.`;
 
-/** Une option citée par sa lettre ou son numéro (« option 3 », « (C) », « B) »). Pas « l'option d'interdire » ni l'article anglais « A ». */
-function citesOptionLetter(text: string): boolean {
+/**
+ * Une option citée par sa lettre ou son numéro (« option 3 », « (C) », « B) »). Pas « l'option
+ * d'interdire » ni l'article anglais « A ». Avec `optionCount`, un chiffre entre parenthèses ne
+ * compte que s'il désigne une option existante : « le nombre de lignes (7) » d'un QCM à 4 options
+ * n'en est pas une (banc du 04/11, CS-290 : question juste rejetée pour ce motif).
+ */
+function citesOptionLetter(text: string, optionCount?: number): boolean {
+  const digitRef = [...text.matchAll(/\(([0-9])\)/g)].some((m) => optionCount === undefined || Number(m[1]) < optionCount);
   return /\b(?:[Oo]ptions?|[Rr]éponses?|[Cc]hoix|[Aa]nswers?|[Cc]hoices?|[Pp]ropositions?)\s*\(?(?:[A-Ha-h]|[0-9])\)?(?![\p{L}'’])/u.test(text)
-    || /\([A-H0-9]\)/.test(text)
+    || /\([A-H]\)/.test(text) || digitRef
     || /(?:^|\s)[A-H]\)\s/.test(text);
 }
 
@@ -317,7 +323,7 @@ export function repairOptionRefs(text: string, options: string[], correct: numbe
       const o = at(letter.charCodeAt(0) - 65);
       return o === null ? _m : `${noun} “${o}”`;
     });
-  return bad || citesOptionLabel(out) ? null : out;
+  return bad || citesOptionLabel(out, options.length) ? null : out;
 }
 
 /**
@@ -325,8 +331,8 @@ export function repairOptionRefs(text: string, options: string[], correct: numbe
  * fausse après le mélange des options (Q12 de l'examen 3 de HUM-285, 02/11 : « la première
  * option », mélangée depuis) : elle n'est jamais mélangée, et la vérification la rejette.
  */
-export function citesOptionLabel(text: string): boolean {
-  return citesOptionLetter(text) || citesOptionRank(text);
+export function citesOptionLabel(text: string, optionCount?: number): boolean {
+  return citesOptionLetter(text, optionCount) || citesOptionRank(text);
 }
 
 /** Questions d'exemple officielles (sans annale) : citées par la détection du format, et sources « exemples ». */
@@ -448,7 +454,7 @@ async function replaceTrivialDistractors(items: QcmItem[], step: StepCb, languag
       misconceptions[d.option] = d.misconception ?? misconceptions[d.option] ?? "";
     }
     if (options.every((o, j) => o === it.options[j])) return null;
-    const explanation = r.explanation && !citesOptionLabel(r.explanation) ? r.explanation : it.explanation;
+    const explanation = r.explanation && !citesOptionLabel(r.explanation, options.length) ? r.explanation : it.explanation;
     return { ...it, options, misconceptions, explanation, verified: null, trivialDistractors: null, judgeIssue: null, judgeOk: null, discrimination: null, nameOnly: null } as QcmItem;
   });
   const sent = repaired.filter((x): x is QcmItem => !!x);
@@ -636,12 +642,12 @@ export async function generateQcmBatch(
     delete (base as { source_fact?: unknown }).source_fact;
     // Une explication qui renvoie à une option par son rang ou sa lettre est réécrite d'après son
     // contenu, AVANT le mélange (sinon rejetée puis régénérée à la vérification).
-    if (Array.isArray(base.options) && Array.isArray(base.correct) && citesOptionLabel(base.explanation ?? "")) {
+    if (Array.isArray(base.options) && Array.isArray(base.correct) && citesOptionLabel(base.explanation ?? "", base.options.length)) {
       const fixed = repairOptionRefs(base.explanation ?? "", base.options, base.correct);
       if (fixed) base.explanation = fixed;
     }
     // Position de la bonne réponse mélangée (graine = l'énoncé : reproductible), jamais pour une question à figure.
-    const it = Array.isArray(base.options) && Array.isArray(base.correct) && !(raw as { figure_spec?: unknown }).figure_spec && !citesOptionLabel(base.explanation ?? "")
+    const it = Array.isArray(base.options) && Array.isArray(base.correct) && !(raw as { figure_spec?: unknown }).figure_spec && !citesOptionLabel(base.explanation ?? "", base.options.length)
       ? shuffleQcmOptions(base, seedOf(base.stem ?? ""))
       : base;
     // figure : rendu SANDBOX immédiat (le vérifieur doit la VOIR). Échec de rendu →
@@ -717,7 +723,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   // Déterministe, avant le correcteur (et même s'il échoue) : une explication qui désigne une
   // option par sa position ou sa lettre est fausse dès que les options sont mélangées.
   for (const q of items) {
-    if (citesOptionLabel(q.explanation ?? "")) reject(q, "explication qui désigne une option par sa position ou sa lettre", "désigne chaque option par son contenu dans l'explication, jamais par son rang (« la première ») ni sa lettre");
+    if (citesOptionLabel(q.explanation ?? "", q.options.length)) reject(q, "explication qui désigne une option par sa position ou sa lettre", "désigne chaque option par son contenu dans l'explication, jamais par son rang (« la première ») ni sa lettre");
   }
   // Le correcteur ne voit que les questions encore en lice, sous leur numéro dans le lot.
   const judged = items.filter((q) => !q.rejected);
