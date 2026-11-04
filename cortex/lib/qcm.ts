@@ -782,12 +782,12 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   for (const r of res.results ?? []) {
     const q = items[r.index];
     if (!q || q.rejected) continue;
+    // Notion de la clé introuvable MOT POUR MOT dans tout le corpus (contrôle déterministe) : soumise
+    // au second regard comme un signalement. Banc du 04/11 (CS-290) : le correcteur recopie en
+    // paraphrase ou en traduction (« keyword filter false positive », « mask booléen combiné avec & »
+    // pour un cours en anglais) et le rejet immédiat écartait des questions justes. Sans aucun passage
+    // sur la notion, le second regard confirme le rejet sans appel (lib/qcm-evidence).
     const missing = termsOf(r).filter((t) => absent.has(normalize(t.trim())));
-    // Notion de la clé absente de TOUT le corpus (contrôle déterministe) : rejet immédiat.
-    if (missing.length) {
-      reject(q, `hors cours : absent du cours : ${missing.join(", ").slice(0, 220)}`, offCourseAdvice);
-      continue;
-    }
     // Un signalement du juge ne compte que s'il a VU des extraits et qu'il nomme quelque chose
     // (« None », « Aucune », « N/A » ne rejettent rien) : jamais de rejet faute de pouvoir vérifier.
     const said = (x: unknown) => (passages.length && typeof x === "string" && !NO_FLAG.test(x.trim()) ? x.trim() : "");
@@ -796,9 +796,10 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     // OU éthique) ; une définition qui s'écarte de celle du cours rejette la question comme une notion
     // absente, et comme elle, seulement après une recherche dans tout le cours.
     const mismatch = said(r.definition_mismatch);
-    if (flagged || mismatch) {
-      const terms = Array.isArray(r.off_course_terms) ? r.off_course_terms.filter((t): t is string => typeof t === "string" && !!t.trim()) : [];
-      const reason = [flagged, mismatch ? `définition différente du cours : ${mismatch}` : ""].filter(Boolean).join(" ; ");
+    if (missing.length || flagged || mismatch) {
+      const named = Array.isArray(r.off_course_terms) ? r.off_course_terms.filter((t): t is string => typeof t === "string" && !!t.trim()) : [];
+      const terms = [...new Set([...missing, ...named])];
+      const reason = [missing.length ? `absent du cours : ${missing.join(", ").slice(0, 220)}` : "", flagged, mismatch ? `définition différente du cours : ${mismatch}` : ""].filter(Boolean).join(" ; ");
       appeals.push({ q, flag: { ...q, reason, terms } });
     }
     // Une question sur l'évaluation du cours (grille, consignes, forme d'un rendu) ne teste pas sa matière.
