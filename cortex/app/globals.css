@@ -75,8 +75,8 @@
   --font-brand: var(--font-funnel-display), "Funnel Display", sans-serif;
   --font-display: "Cortex Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-sans: "Cortex Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  /* Berkeley Mono n'est pas distribuée sans licence : repli monospace natif conservé. */
-  --font-mono: ui-monospace, "SF Mono", "SFMono-Regular", "Menlo", monospace;
+  /* Commit Mono : alternative libre OFL, sans licence commerciale payante. */
+  --font-mono: "Cortex Mono", ui-monospace, "SF Mono", "SFMono-Regular", "Menlo", monospace;
 
   /* — Radius (cards cap at 20) — */
   --radius-xs: 6px;
