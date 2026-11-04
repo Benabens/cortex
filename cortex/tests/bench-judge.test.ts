@@ -30,6 +30,7 @@ function reply(prompt: string): unknown {
       items: [
         { q: 0, key: "wrong", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [3, 0], chapter: 1, notion: "ordre des segments", code: null },
         { q: 1, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 99, notion: "somme", code: { language: "python", source: "print(2 + 2)", stdin: "", expected: "5" } },
+        { q: 2, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 1, notion: "pandas", code: { language: "python", source: "import module_absent_du_banc\nprint(1)", stdin: "", expected: "1" } },
       ],
     };
   }
@@ -66,6 +67,7 @@ const run = {
     id: 1, kind: "qcm", items: [
       { idx: 0, kind: "qcm", topic: "t", stem: "Quel protocole numérote les segments ?", options: ["TCP", "UDP", "IP", "ICMP"], correct: [0], explanation: "TCP numérote." },
       { idx: 1, kind: "qcm", topic: "t", stem: "Que vaut la sortie de print(2 + 2) ?", options: ["4", "5", "22", "Erreur"], correct: [1], explanation: "Elle affiche 5." },
+      { idx: 2, kind: "qcm", topic: "t", stem: "Que vaut df.iloc[0] ?", options: ["1", "2", "3", "4"], correct: [0], explanation: "La première ligne vaut 1." },
     ],
   },
   plan: { chapters: [{ id: 1, seq: 1, title: "Transport" }], topicChapter: {} },
@@ -93,6 +95,8 @@ test("juge : arbitre, code exécuté, doublons et faux rejets ; la clé n'est ja
   assert.equal(v.items[1].chapter, null, "un chapitre hors du plan n'est pas retenu");
   if (sandboxAvailable()) {
     assert.deepEqual([v.items[1].code?.ran, v.items[1].code?.ok, v.items[1].key], [true, false, "wrong"], "la sortie réelle (4) contredit la clé (5)");
+    // Un programme qui ne tourne pas ici (module absent) ne prouve rien contre la clé.
+    assert.deepEqual([v.items[2].code?.ran, v.items[2].key], [false, "right"]);
   }
   assert.deepEqual(v.duplicatesIntra, [[0, 1]]);
   assert.deepEqual(v.duplicatesPrevious, [1]);

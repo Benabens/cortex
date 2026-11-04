@@ -106,8 +106,10 @@ async function adjudicate(batch: BenchItem[], passages: Passage[], solver: Map<n
 async function runCode(c: NonNullable<RawVerdict["code"]>): Promise<ItemVerdict["code"]> {
   if (c.language !== "python" && c.language !== "c") return { ran: false, ok: true, detail: `langage ${c.language} non exécuté` };
   const r = await verifyCode(c.language, c.source, [{ stdin: c.stdin ?? "", expect: c.expected }]);
-  if (r.verified === "not_applicable") return { ran: false, ok: true, detail: r.detail.slice(0, 200) };
-  return { ran: true, ok: r.verified === true, detail: r.detail.slice(0, 300) };
+  // Seule une exécution qui ABOUTIT tranche : un programme qui plante ici (module absent, extrait
+  // incomplet) ne prouve rien contre la clé.
+  const ranToEnd = r.verified === true || /sortie « [\s\S]* » ≠ attendu/.test(r.detail);
+  return { ran: ranToEnd, ok: r.verified === true || !ranToEnd, detail: r.detail.slice(0, 300) };
 }
 
 const DUP_SCHEMA = { type: "object", properties: { intra: { type: "array", items: { type: "array", items: { type: "integer" } } }, previous: { type: "array", items: { type: "integer" } } }, required: ["intra", "previous"] } as const;
