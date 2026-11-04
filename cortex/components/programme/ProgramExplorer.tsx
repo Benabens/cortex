@@ -1,19 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { ListTree, Flame, Map } from "lucide-react";
+import { ListTree, Flame } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
 import { Segmented, type SegmentedOption } from "@/components/ui/Segmented";
 import { ChapterAccordion } from "./ChapterAccordion";
-import { ProgramMap } from "./ProgramMap";
 import { NotionRow } from "./NotionRow";
-import { buildPlan, byPriority, sectionBlocks, typesMeta, type UiType, type ProgramChapter, type ProgramTopic } from "@/lib/ux/program";
+import { buildPlan, byPriority, sectionBlocks, typesMeta, type UiType, type ProgramChapter } from "@/lib/ux/program";
 import { cn } from "@/lib/ux/cn";
 
-type Mode = "map" | "section" | "priority";
+type Mode = "section" | "priority";
 
 const MODES: SegmentedOption<Mode>[] = [
-  { value: "map", label: "Carte", Icon: Map },
   { value: "section", label: "Par section", Icon: ListTree },
   { value: "priority", label: "Par priorité", Icon: Flame },
 ];
@@ -28,19 +26,17 @@ export function ProgramExplorer({
   types,
   chapters,
   planOk,
-  topics,
 }: {
   types: UiType[];
   chapters: ProgramChapter[];
   planOk: boolean;
-  topics: ProgramTopic[];
 }) {
+  const [mode, setMode] = useState<Mode>("section");
   // Lien profond ?chapitre=<n° de lecture> : ouvre ce chapitre. Lu à l'initialisation : ce composant
   // n'est rendu que côté client, une fois les données chargées (aucun écart d'hydratation).
   const [focusLecture] = useState<number | null>(() =>
     typeof window === "undefined" ? null : Number(new URLSearchParams(window.location.search).get("chapitre")) || null
   );
-  const [mode, setMode] = useState<Mode>(focusLecture === null ? "map" : "section");
   const meta = typesMeta(types);
   const plan = buildPlan(types, chapters);
   const flat = byPriority(types);
@@ -48,9 +44,9 @@ export function ProgramExplorer({
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface-1 px-4 py-3">
         <Segmented label="Organiser les notions" options={MODES} value={mode} onChange={setMode} />
-        <p className="text-[0.76rem] text-ink-4">
+        <p className="text-[0.8rem] text-ink-3">
           {mode === "section" && hasPlan ? (
             <>
               <span className="font-data tabular text-ink-3">{plan.filter((c) => c.id != null).length}</span> chapitres
@@ -66,14 +62,9 @@ export function ProgramExplorer({
         </p>
       </div>
 
-      {mode === "map" ? (
-        <ProgramMap topics={topics} chapters={hasPlan ? plan : sectionBlocks(types).map((block, i) => ({
-          id: i, title: block.section ?? "Autres notions", lectureNo: null, subtitle: null, sourceHref: null,
-          notions: block.types, fallenCount: 0, occurrenceCount: 0,
-        }))} />
-      ) : mode === "section" ? (
+      {mode === "section" ? (
         hasPlan ? (
-          <div className="space-y-2.5">
+          <div className="space-y-3">
             {plan.map((c) => (
               <ChapterAccordion key={c.id ?? "orphan"} c={c} defaultOpen={focusLecture != null && c.lectureNo === focusLecture} />
             ))}
@@ -99,8 +90,8 @@ export function ProgramExplorer({
 function FallbackSections({ types }: { types: UiType[] }) {
   const blocks = sectionBlocks(types);
   return (
-    <div className="space-y-2.5">
-      <p className="text-[0.76rem] text-ink-4">
+    <div className="space-y-3">
+      <p className="text-[0.8rem] text-ink-3">
         Le plan de cours du prof n’a pas pu être dérivé pour ce cours : les notions sont regroupées par
         thème, dans l’ordre indicatif du cours.
       </p>

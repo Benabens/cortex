@@ -78,8 +78,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
     }
   }, [job, onGenerated]);
 
-  const running = launching || (job != null && JOB_ACTIVE.includes(job.status));
-
+  const running = launching || (jobId != null && !job) || (job != null && JOB_ACTIVE.includes(job.status));
 
   const generate = async () => {
     if (running) return;
@@ -111,9 +110,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
     <div className={styles.split}>
       {/* Composer */}
       <Panel className="p-6 sm:p-8">
-        <div className={styles.eyebrow}>Examen blanc</div>
-        <h2 className="text-[1.5rem] font-semibold leading-tight text-ink-1">En conditions de final</h2>
-        <p className="mt-3 text-sm leading-relaxed text-ink-3">Pars du format détecté dans tes annales. Ajuste les questions ou cible une notion si tu en as besoin.</p>
+        <h2 className="font-display text-[1.5rem] font-semibold leading-tight text-ink-1">Compositeur d’examen</h2>
 
         {/* composition : proposition compacte (défaut) + disclosure de réglage fin */}
         <div className="mt-6 rounded-2xl border border-line bg-surface-2/40">
@@ -131,7 +128,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
             type="button"
             onClick={() => setAdjust((a) => !a)}
             aria-expanded={adjust}
-            className="flex w-full items-center justify-between gap-2 border-t border-line px-4 py-2.5 text-[0.8rem] text-ink-3 transition-colors hover:text-ink-1"
+            className="flex w-full items-center justify-between gap-2 border-t border-line min-h-11 px-5 py-3 text-sm text-ink-3 transition-colors hover:text-ink-1"
           >
             <span className="inline-flex items-center gap-2"><SlidersHorizontal className="size-3.5" strokeWidth={2.25} /> Ajuster la composition</span>
             <ChevronDown className={cn("size-4 transition-transform", adjust && "rotate-180")} strokeWidth={2.25} />
@@ -161,7 +158,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
             onClick={() => setFocusOpen((o) => !o)}
             aria-expanded={focusOpen}
             aria-controls="exam-focus-panel"
-            className="flex w-full items-center justify-between gap-2 rounded-lg px-1 py-1.5 text-[0.8rem] text-ink-3 transition-colors hover:text-ink-1"
+            className="flex w-full items-center justify-between gap-2 min-h-11 rounded-lg px-1 py-2 text-sm text-ink-3 transition-colors hover:text-ink-1"
           >
             <span className="inline-flex min-w-0 items-center gap-2">
               <Target className="size-3.5 shrink-0" strokeWidth={2.25} />
@@ -224,7 +221,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
       {/* Format détecté (réel) */}
       <div className="flex flex-col gap-5">
         <Panel className="p-6">
-          <h2 className="text-[1.2rem] font-semibold text-ink-1">Ton final, comme repère</h2>
+          <h2 className="text-[1.2rem] font-semibold text-ink-1">Format détecté</h2>
           <span className="mt-2 inline-flex rounded-full border border-line bg-surface-2/50 px-2.5 py-1 text-[0.72rem] font-medium text-cyan-hi">
             {isQcm ? "QCM et questions ouvertes" : "Exercices ouverts"}
           </span>
@@ -254,7 +251,6 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
             )}
           </div>
         </Panel>
-        <aside className={styles.guide}><h2>Une fois l’examen prêt</h2><ol className={styles.steps}><li><span><strong>Ouvre l’énoncé</strong>Travaille sans consulter le corrigé.</span></li><li><span><strong>Compare tes réponses</strong>Le corrigé reste disponible dans tes examens prêts.</span></li><li><span><strong>Reprends une notion</strong>Utilise l’onglet « Exo sur mesure » pour retravailler une difficulté.</span></li></ol></aside>
       </div>
     </div>
   );

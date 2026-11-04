@@ -1,16 +1,19 @@
 "use client";
 
 import { WifiOff, RotateCw } from "lucide-react";
-import { useApi } from "@/lib/ux/api";
+import { useApi, asText } from "@/lib/ux/api";
 import type { Dash } from "@/lib/ux/types";
 import { CourseLine } from "@/components/dashboard/CourseLine";
-import { PlanOverview } from "@/components/dashboard/PlanOverview";
+import { PriorityHero } from "@/components/dashboard/PriorityHero";
+import { UpNext } from "@/components/dashboard/UpNext";
 import { OnboardingHero } from "@/components/dashboard/OnboardingHero";
+import { QuietDoors } from "@/components/dashboard/QuietDoors";
 import { JobBanner } from "@/components/dashboard/JobBanner";
 import { Button } from "@/components/ui/Button";
 import { Panel } from "@/components/ui/primitives";
 
-const column = "flex w-full flex-col gap-5";
+/** Même priorité et mêmes portes que l’accueil de production, habillées en D2. */
+const column = "w-full max-w-[64rem] mx-auto";
 
 export default function DashboardPage() {
   const { data, loading, error, refetch } = useApi<Dash>("/api/dashboard");
@@ -34,20 +37,14 @@ export default function DashboardPage() {
     );
   }
 
+  const next = data.next;
+  const nextLabel = next ? asText(next.label) : null;
   // Onboarding : rien d'actionnable (cours pas analysé, ou données inutilisables — cf. MAPPING cs-202).
-  const onboarding = !data.analyzed || data.stats.total === 0;
+  const onboarding = !data.analyzed || !next || !nextLabel;
 
   return (
     <div className={column}>
-      <header>
-        <p className="mb-2 text-sm font-medium text-violet-hi">Aujourd’hui</p>
-        <h1 className="mb-3 break-words text-3xl font-semibold tracking-tight sm:text-5xl">
-          {data.countdown && data.countdown.days >= 0
-            ? data.countdown.days === 0 ? "Final aujourd’hui" : `Final dans ${data.countdown.days} jours`
-            : data.course.name}
-        </h1>
-        <CourseLine courseId={data.course.id} code={data.course.examCode} countdown={data.countdown} />
-      </header>
+      <CourseLine courseId={data.course.id} code={data.course.examCode} countdown={data.countdown} />
 
       {data.job && (
         <div className="mt-5">
@@ -60,11 +57,30 @@ export default function DashboardPage() {
       )}
 
       {onboarding ? (
-        <div className="d2-card max-w-[46rem] p-5 sm:p-7">
+        <div className="mt-6 max-w-[46rem]">
           <OnboardingHero courseName={data.course.name} />
         </div>
       ) : (
-        <PlanOverview data={data} />
+        <>
+          <div className="mt-[1.875rem]">
+            <PriorityHero
+              title={nextLabel}
+              facts={{
+                count: next.count,
+                examWeight: next.examWeight,
+                status: next.status,
+                mastery: next.mastery,
+                chapter: next.chapter ? { lectureNo: next.chapter.lectureNo, title: asText(next.chapter.title) } : null,
+              }}
+            />
+          </div>
+          <div className="mt-7">
+            <UpNext topics={data.upNext ?? []} />
+          </div>
+          <div className="mt-2.5">
+            <QuietDoors weaknessCount={data.weaknesses.count} reviewsDue={data.schedule.due} />
+          </div>
+        </>
       )}
     </div>
   );
@@ -80,7 +96,7 @@ function DashboardSkeleton() {
       <div className="skeleton mt-4 h-4 w-[34rem] max-w-full" />
       <div className="skeleton mt-2 h-4 w-80 max-w-full" />
       <div className="skeleton mt-6 h-11 w-36 rounded-md" />
-      <div className="mt-11 flex flex-col gap-3">
+      <div className="mt-7 flex flex-col gap-3">
         <div className="skeleton h-3.5 w-16" />
         {[0, 1, 2].map((i) => (
           <div key={i} className="skeleton h-10" />

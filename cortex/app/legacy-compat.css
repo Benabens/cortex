@@ -1,8 +1,7 @@
 /* ============================================================================
-   LEGACY COMPAT — uniquement pour les pages PAS ENCORE refaites
-   (app/revision, app/projet, app/mock). Alias des anciens tokens vers les
-   nouveaux (identité violet/cyan/émeraude) + les anciennes classes qu'elles utilisent.
-   ⚠️ À SUPPRIMER quand ces écrans passeront sur la nouvelle UI.
+   LEGACY COMPAT — composants historiques, palette D2 partagée
+   (révision et questions). Alias des anciens tokens vers les
+   nouveaux (bleu et couleurs de statut) + les anciennes classes qu'elles utilisent.
    ========================================================================== */
 
 :root {
@@ -70,8 +69,8 @@
 .btn:disabled { opacity: 0.45; cursor: default; }
 .btn-sm { font-size: 13px; padding: 6px 12px; }
 .btn-lg { font-size: 15px; padding: 11px 20px; }
-.btn-primary { background: #ececee; color: #111214; font-weight: 600; }
-.btn-primary:hover:not(:disabled) { background: #ffffff; }
+.btn-primary { background: linear-gradient(135deg, oklch(0.56 0.18 258), oklch(0.50 0.18 262)); color: white; font-weight: 600; border-color: var(--line-strong); }
+.btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
 .btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--line-strong); box-shadow: var(--hairline-top); }
 .btn-ghost:hover:not(:disabled) { background: var(--surface-hover); }
 .btn-quiet { background: transparent; color: var(--ink-3); padding: 6px 10px; }

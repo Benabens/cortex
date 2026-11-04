@@ -64,12 +64,12 @@ export default function ProgrammePage() {
     <div className="flex flex-col gap-7">
       <PageHeader
         title="Programme"
-        description="Explore les notions par chapitre et retrouve les annales liées à chacune."
+        description="Le plan du cours du prof, chapitre par chapitre. Déplie un chapitre pour ses notions, puis une notion pour voir chaque final où elle est tombée et le passage de cours."
       >
         <ReanalyzeButton onDone={refetch} />
       </PageHeader>
 
-      <ProgramExplorer types={types} topics={data.topics} chapters={chapters} planOk={planOk} />
+      <ProgramExplorer types={types} chapters={chapters} planOk={planOk} />
     </div>
   );
 }

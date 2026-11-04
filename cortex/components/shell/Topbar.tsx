@@ -1,11 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Search, ChevronDown, CalendarClock, UserRound } from "lucide-react";
-import { HeaderSearch } from "./HeaderSearch";
+import { Search, Menu, CalendarClock, UserRound } from "lucide-react";
 import { Wordmark } from "./Logo";
 
-import { useApi, useCourse } from "@/lib/ux/api";
+import { useApi } from "@/lib/ux/api";
 
 type DashCountdown = { countdown: { date: string; days: number } | null };
 
@@ -13,7 +12,6 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
   // Compte à rebours RÉEL (même requête que l'Accueil : dédupliquée par le cache).
   // Masqué si absent ou si l'examen est déjà passé (days < 0).
   const { data } = useApi<DashCountdown>("/api/dashboard");
-  const { course } = useCourse();
   const days = data?.countdown?.days;
   const showCountdown = typeof days === "number" && days >= 0;
 
@@ -26,10 +24,20 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           className="mr-1 flex items-center lg:hidden"
           aria-label="Cortex : accueil"
         >
-          <Wordmark markSize={23} />
+          <Wordmark markSize={26} />
         </Link>
 
-        <HeaderSearch />
+        {/* Search / command trigger */}
+        <Link
+          href="/recherche"
+          className="group hidden h-10 max-w-[420px] flex-1 items-center gap-2.5 rounded-full border border-line bg-surface-2/50 px-4 text-ink-3 transition-colors hover:border-line-strong hover:bg-surface-2 sm:flex"
+          aria-label="Ouvrir la recherche"
+        >
+          <Search className="size-4 shrink-0" strokeWidth={2} />
+          <span className="flex-1 truncate text-[0.85rem]">
+            Rechercher un cours, une série, un final…
+          </span>
+        </Link>
 
         <div className="flex-1 sm:hidden" />
 
@@ -65,11 +73,10 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           <button
             type="button"
             onClick={onOpenMenu}
-            aria-label="Changer de cours ou ouvrir les ressources"
-            className="order-first flex min-h-11 min-w-0 items-center gap-1 rounded-full border border-line bg-surface-2/50 px-2 text-xs text-ink-2 hover:bg-surface-2 lg:hidden"
+            aria-label="Ouvrir le menu"
+            className="grid size-11 place-items-center rounded-lg border border-line bg-surface-2/50 text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink-1 lg:hidden"
           >
-            <span className="max-w-20 truncate">{course?.short || "Cours"}</span>
-            <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
+            <Menu className="size-[1.15rem]" strokeWidth={2} />
           </button>
         </div>
       </div>

@@ -27,7 +27,7 @@ export function FirstRunHero() {
   ];
 
   return (
-    <section className="panel top-light relative overflow-hidden rounded-xl" aria-labelledby="firstrun-title">
+    <section className="d2-card relative overflow-hidden" aria-labelledby="firstrun-title">
       <div className="relative p-5 sm:p-7">
         <h2 id="firstrun-title" className="max-w-xl text-[1.75rem] font-semibold leading-[1.1] sm:text-[2.15rem]">
           Commence par créer ta première matière.

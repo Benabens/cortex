@@ -41,17 +41,6 @@
   }
 }
 
-.exam {
-  max-width: 1160px;
-}
-.back {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 44px;
-  color: var(--color-violet-hi);
-  font-size: 14px;
-}
 .header {
   display: flex;
   justify-content: space-between;
@@ -65,12 +54,6 @@
   font-size: clamp(30px, 4vw, 42px);
   font-weight: 600;
   letter-spacing: -0.025em;
-}
-.eyebrow {
-  color: var(--color-violet-hi);
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 8px;
 }
 .description {
   max-width: 690px;
@@ -94,85 +77,8 @@
   padding: 0 14px;
   font-size: 13px;
 }
-.layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 236px;
-  gap: 24px;
-  align-items: start;
-}
 .content {
   min-width: 0;
-  grid-column: 1;
-  grid-row: 1;
-}
-.outline {
-  grid-column: 2;
-  grid-row: 1;
-  position: sticky;
-  top: 88px;
-  border: 1px solid var(--color-line);
-  border-radius: 18px;
-  padding: 20px;
-  background: var(--color-surface-1);
-}
-.outlineTitle {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 13px;
-}
-.outlineTitle h2 {
-  font-size: 16px;
-  font-weight: 600;
-}
-.outlineTitle span {
-  color: var(--color-violet-hi);
-  font-variant-numeric: tabular-nums;
-}
-.outline progress {
-  width: 100%;
-  height: 5px;
-  accent-color: var(--color-violet);
-  margin: 16px 0;
-}
-.outline p {
-  color: var(--color-ink-3);
-  font-size: 12px;
-  line-height: 1.65;
-  margin-top: 14px;
-}
-.questionLinks {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-}
-.questionLinks a {
-  min-height: 40px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--color-line-strong);
-  border-radius: 10px;
-  font-size: 13px;
-  background: var(--color-bg);
-}
-.questionLinks a[data-answered="true"] {
-  background: color-mix(
-    in oklch,
-    var(--color-violet) 18%,
-    var(--color-surface-1)
-  );
-  color: var(--color-violet-hi);
-  border-color: var(--color-violet);
-}
-.jump {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 44px;
-  margin-top: 12px;
-  font-size: 12px;
-  color: var(--color-violet-hi);
 }
 .content section[id],
 .content [id="exam-submit"] {
@@ -205,47 +111,4 @@
 }
 .exam :global(.stat-value) {
   font-family: var(--font-display);
-}
-@media (max-width: 900px) {
-  .layout {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-  .outline {
-    position: static;
-    width: 100%;
-    padding: 16px;
-  }
-  .questionLinks {
-    grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
-  }
-  .questionLinks a {
-    min-height: 44px;
-  }
-  .content {
-    width: 100%;
-  }
-  .outline p,
-  .jump {
-    display: none;
-  }
-}
-.outline progress {
-  appearance: none;
-  overflow: hidden;
-  border: 0;
-  border-radius: 999px;
-  background: var(--color-surface-3);
-}
-.outline progress::-webkit-progress-bar {
-  background: var(--color-surface-3);
-}
-.outline progress::-webkit-progress-value {
-  background: var(--color-violet);
-  border-radius: 999px;
-}
-.outline progress::-moz-progress-bar {
-  background: var(--color-violet);
-  border-radius: 999px;
 }

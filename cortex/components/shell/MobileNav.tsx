@@ -5,7 +5,6 @@ import { X } from "lucide-react";
 import { Wordmark } from "./Logo";
 import { CourseSelector } from "./CourseSelector";
 import Link from "next/link";
-import { SECONDARY_NAV } from "./nav";
 import { NavList } from "./NavList";
 
 export function MobileNav({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -33,7 +32,7 @@ export function MobileNav({ open, onClose }: { open: boolean; onClose: () => voi
   return (
     <dialog
       ref={dialog}
-      aria-label="Cours et ressources"
+      aria-label="Navigation"
       onCancel={(event) => { event.preventDefault(); onClose(); }}
       onKeyDown={(event) => {
         if (event.key !== "Tab") return;
@@ -52,7 +51,7 @@ export function MobileNav({ open, onClose }: { open: boolean; onClose: () => voi
       }}
       className="fixed inset-0 m-0 h-dvh max-h-none w-screen max-w-none border-0 bg-transparent p-0 text-ink-1 backdrop:bg-black/60 backdrop:backdrop-blur-sm"
     >
-      <button type="button" onClick={onClose} aria-label="Fermer les ressources"
+      <button type="button" onClick={onClose} aria-label="Fermer le menu de navigation"
         tabIndex={-1} className="absolute inset-0 cursor-default" />
       {/* drawer */}
       <div
@@ -79,7 +78,6 @@ export function MobileNav({ open, onClose }: { open: boolean; onClose: () => voi
         <div className="mt-4 flex-1 overflow-y-auto px-3">
           <NavList onNavigate={onClose} />
           <div className="my-3 border-t border-line" />
-          <NavList onNavigate={onClose} items={SECONDARY_NAV} />
           <Link href="/cours" onClick={onClose} className="flex min-h-11 items-center px-3 text-sm text-ink-2">Gérer mes cours</Link>
         </div>
       </div>
