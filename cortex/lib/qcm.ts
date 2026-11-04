@@ -18,6 +18,7 @@ import { renderFigure, figureSpecPromptBlock, type FigureSpec } from "@/lib/figu
 import { examsDir } from "@/lib/paths";
 import type { Archetype } from "@/lib/archetypes";
 import { PhaseProgress, phaseLine } from "@/lib/progress";
+import { benchTrace } from "@/lib/bench/trace";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -601,6 +602,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     q.verified = 0;
     q.rejected = reason.slice(0, 400);
     q.judgeIssue = `${q.rejected} — ${advice}`;
+    benchTrace("qcm.rejected", { stem: q.stem, options: q.options, correct: q.correct, reason: q.rejected });
     step(`QCM rejeté — ${q.rejected.slice(0, 160)}`, 70);
   };
   // Déterministe, avant le correcteur (et même s'il échoue) : une explication qui désigne une
