@@ -88,7 +88,7 @@ test("chaque appel enregistré garde de quoi estimer le coût : tailles, emprein
   assert.ok(second.at >= first.at);
 });
 
-test("prompt modifié depuis l'enregistrement : réponse du même rang au même site, signalée", async () => {
+test("prompt modifié depuis l'enregistrement : réponse du prompt enregistré le plus proche au même site, signalée", async () => {
   const file = tapeFile("derive");
   process.env.LLM_TAPE = `record:${file}`;
   replies = [{ content: "premier lot" }, { content: "second lot" }];
@@ -99,7 +99,7 @@ test("prompt modifié depuis l'enregistrement : réponse du même rang au même 
   assert.equal(await poseQuestion("Lot 1 du cours, consigne retouchée"), "premier lot");
   assert.equal(await poseQuestion("Lot 2 du cours"), "second lot");
   const uses = fs.readFileSync(`${file}.replay.jsonl`, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { site: string; match: string });
-  assert.deepEqual(uses.map((u) => u.match), ["rank", "exact"]);
+  assert.deepEqual(uses.map((u) => u.match), ["similar", "exact"]);
   assert.equal(uses[0].site, "poseQuestion");
   assert.equal(served, 2, "seuls les deux appels enregistrés ont touché le fournisseur");
 });
@@ -140,5 +140,25 @@ test("en rejeu, le moteur est disponible même sans fournisseur joignable (CI sa
     assert.equal(llmUnavailableReason(), null);
   } finally {
     process.env.LLM_BASE_URL = saved;
+  }
+});
+
+test("prompts retouchés ET rejoués dans un autre ordre : chacun reçoit la réponse du prompt enregistré le plus proche", async () => {
+  const file = tapeFile("ordre");
+  process.env.LLM_TAPE = `record:${file}`;
+  replies = [{ content: "réponse Svenson" }, { content: "réponse Thaler" }];
+  await poseQuestion("Lot sur l'étude de Svenson (1981), supériorité illusoire des conducteurs américains, 93 % plus habiles que la moyenne.");
+  await poseQuestion("Lot sur les nudges de Thaler et Sunstein, architecture du choix, option par défaut et dons d'organes.");
+
+  process.env.LLM_TAPE = `replay:${file}`;
+  process.env.LLM_TAPE_LOG = path.join(tmp, "ordre.log.jsonl");
+  try {
+    // Ordre inversé (parallélisme) et consigne retouchée (code modifié depuis l'enregistrement).
+    assert.equal(await poseQuestion("CONSIGNE v2. Lot sur les nudges de Thaler et Sunstein, architecture du choix, option par défaut et dons d'organes."), "réponse Thaler");
+    assert.equal(await poseQuestion("CONSIGNE v2. Lot sur l'étude de Svenson (1981), supériorité illusoire des conducteurs américains, 93 % plus habiles que la moyenne."), "réponse Svenson");
+    const uses = fs.readFileSync(process.env.LLM_TAPE_LOG, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { match: string });
+    assert.deepEqual(uses.map((u) => u.match), ["similar", "similar"]);
+  } finally {
+    delete process.env.LLM_TAPE_LOG;
   }
 });
