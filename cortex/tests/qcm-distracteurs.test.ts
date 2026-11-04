@@ -128,9 +128,10 @@ async function exam(id: string, count: number) {
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
   const steps: string[] = [];
+  const pcts: { s: string; p: number }[] = [];
   return runWithCourse(id, async () => {
-    const r = await generateQcmExam({ count, openCount: 0, onStep: (s) => { steps.push(s); } });
-    return { r, steps, items: (await getQcmExam(r.id, true))!.items };
+    const r = await generateQcmExam({ count, openCount: 0, onStep: (s, p) => { steps.push(s); pcts.push({ s, p }); } });
+    return { r, steps, pcts, items: (await getQcmExam(r.id, true))!.items };
   });
 }
 
@@ -157,4 +158,10 @@ test("le remplaçant reste trivial à la revérification : aucune question livr�
   const got = await exam(await course(), 4).catch(() => null);
   for (const it of got?.items ?? []) assert.ok(!it.options.some((o) => o.startsWith("Une option absurde")), it.options.join(" | "));
   assert.equal(repairCalls >= 1, true, "le remplacement a bien été tenté");
+});
+
+test("banc du 04/11 : l'avancement bouge dès qu'un lot est conçu, sans attendre sa vérification (8 % pendant 3 à 5 min)", async () => {
+  const { pcts } = await exam(await course(), 4);
+  const verifying = pcts.find((x) => /Vérification à l'aveugle/.test(x.s));
+  assert.ok(verifying && verifying.p > 8, `avancement pendant la première vérification : ${verifying?.p}`);
 });
