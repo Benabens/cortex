@@ -53,7 +53,7 @@ export default function Error({
           ça persiste, reviens à l&apos;accueil et relance ton action.
         </p>
         {error?.digest && (
-          <p style={{ fontSize: 12, color: "var(--color-ink-3, #79768a)", marginTop: 12, fontFamily: "ui-monospace, monospace" }}>
+          <p style={{ fontSize: 12, color: "var(--color-ink-3, #79768a)", marginTop: 12, fontFamily: "var(--font-mono)" }}>
             réf. {error.digest}
           </p>
         )}
