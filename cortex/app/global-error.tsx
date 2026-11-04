@@ -1,6 +1,7 @@
 "use client"; // Obligatoire (error boundary). global-error REMPLACE le layout racine.
 
 import { useEffect } from "react";
+import "./typography.css";
 import { THEME_STORAGE_KEY, LIGHT_QUERY, parseThemePref, resolveTheme } from "@/lib/ux/theme";
 
 // Palette autonome des deux thèmes (le CSS global peut être la cause du crash). Rendue comme
@@ -53,7 +54,7 @@ export default function GlobalError({
             padding: "48px 24px",
             background: "var(--ge-bg)",
             color: "var(--ge-ink)",
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif",
+            fontFamily: "'Cortex Inter', -apple-system, BlinkMacSystemFont, sans-serif",
           }}
         >
           <div
@@ -67,10 +68,10 @@ export default function GlobalError({
               boxShadow: "var(--ge-shadow)",
             }}
           >
-            {/* Wordmark inline (aucun CSS global ici) : Funnel Display si déjà en cache, sinon police système. */}
+            {/* Wordmark autonome : même Funnel Display, sous un alias local indépendant du layout. */}
             <div
               style={{
-                fontFamily: "'Funnel Display', -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+                fontFamily: "'Cortex Brand', sans-serif",
                 fontSize: 18,
                 fontWeight: 700,
                 letterSpacing: "-0.04em",
@@ -103,6 +104,7 @@ export default function GlobalError({
                   borderRadius: 12,
                   padding: "10px 20px",
                   fontSize: 14,
+                  fontFamily: "inherit",
                   fontWeight: 600,
                   color: "var(--ge-cta-ink)",
                   background: "var(--ge-cta)",
