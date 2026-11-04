@@ -5,7 +5,8 @@
  *
  *   LLM_PROVIDER=claude-code CORTEX_BENCH_HOME=… CORTEX_BENCH_PG_URL=postgres://…@127.0.0.1:…/postgres \
  *     npm run bench -- run --case rs-qcm15            # run complet (bandes enregistrées)
- *   npm run bench -- run --case synth-3p --replay tests/fixtures/bench/synth-3p   # rejeu, sans modèle
+ *   npm run bench -- run --case synth-3p --replay tests/fixtures/bench/synth-3p \
+ *     --baseline tests/fixtures/bench/synth-3p/metrics.json --strict                 # CI : rejeu, sans modèle
  *   npm run bench -- mark-ref --run <dossier du run>   # ce run devient la référence de son cas
  *   npm run bench -- report [--out rapport.md]        # référence → actuel, tous les cas
  *   npm run bench -- list
@@ -154,6 +155,7 @@ async function prepareCourse(ctx: Ctx): Promise<void> {
     for (const d of c.source.dirs) copyTree(d.path, path.join(dirs.content, CATEGORY_DIR[d.category ?? "lecture"]), d.exclude);
   }
   process.env.LLM_TAPE = ctx.replayDir ? `replay:${path.join(ctx.replayDir, "prepare.tape.jsonl")}` : `record:${path.join(ctx.runDir, "prepare.tape.jsonl")}`;
+  process.env.LLM_TAPE_LOG = path.join(ctx.runDir, "prepare.replay.jsonl");
   const { startPrepareJob } = await import("../lib/generation");
   const { runWithCourse } = await import("../db/client");
   const started = await runWithCourse(courseId, () => startPrepareJob());
@@ -283,6 +285,9 @@ async function runCase(c: BenchCase): Promise<string> {
   createdDb = db;
   const url = dbUrl(need("CORTEX_BENCH_PG_URL"), db);
   runEnv(path.join(runDir, "data"), url);
+  // Rejeu (CI) : un appel à la fois, pour que l'ordre des appels — donc les prompts qui dépendent
+  // des réponses précédentes — ne dépende ni du parallélisme ni de l'ordre de retour de la base.
+  if (replayDir) Object.assign(process.env, { LLM_MAX_CONCURRENCY: "1", QCM_BATCH_CONCURRENCY: "1" });
   assertBenchEnv(process.env);
   // Le worker (enfant de ce processus) prend le modèle de prod ; le juge, lui, tourne à part (Opus).
   process.env.LLM_MODEL_OPUS = ENGINE_MODEL;
@@ -308,6 +313,7 @@ async function runCase(c: BenchCase): Promise<string> {
   const target = resolveTarget(c, plan);
 
   process.env.LLM_TAPE = replayDir ? `replay:${path.join(replayDir, "run.tape.jsonl")}` : `record:${path.join(runDir, "run.tape.jsonl")}`;
+  process.env.LLM_TAPE_LOG = path.join(runDir, "run.replay.jsonl");
   const startedAt = new Date();
   const { startGenerationJob } = await import("../lib/generation");
   const started = await runWithCourse(courseId, () => startGenerationJob(c.request.job, target ? JSON.stringify(target) : undefined));
@@ -345,7 +351,7 @@ async function runCase(c: BenchCase): Promise<string> {
 /** Le juge tourne dans un processus à part : son modèle (Opus) n'hérite pas du modèle du moteur. */
 function spawnJudge(runDir: string): Promise<void> {
   const replay = arg("replay");
-  const env: NodeJS.ProcessEnv = { ...process.env, LLM_TAPE: replay ? `replay:${path.join(path.resolve(replay), "judge.tape.jsonl")}` : `record:${path.join(runDir, "judge.tape.jsonl")}` };
+  const env: NodeJS.ProcessEnv = { ...process.env, LLM_TAPE: replay ? `replay:${path.join(path.resolve(replay), "judge.tape.jsonl")}` : `record:${path.join(runDir, "judge.tape.jsonl")}`, LLM_TAPE_LOG: path.join(runDir, "judge.replay.jsonl") };
   delete env.LLM_MODEL_OPUS;
   delete env.CORTEX_BENCH_TRACE;
   return new Promise((resolve, reject) => {
@@ -385,8 +391,14 @@ async function scoreRun(runDir: string, c: BenchCase): Promise<void> {
   const red = verdictsOut.filter((v) => v.pass === false);
   for (const v of verdictsOut) console.log(`  ${v.pass === null ? "·" : v.pass ? "✓" : "✗"} ${v.label} : ${v.value} (seuil ${v.limit})`);
   console.log(red.length ? `  ROUGE (${red.length}) : ${red.map((v) => v.id).join(", ")}` : "  VERT");
-  // --strict (CI) : un seuil rouge fait échouer la commande.
-  if (red.length && flag("strict")) process.exitCode = 2;
+  // --strict (CI) : échoue sur un seuil rouge ; avec --baseline <metrics.json>, seulement sur une
+  // RÉGRESSION face à la référence enregistrée (réponses du modèle figées : seul le code a changé).
+  const baseline = arg("baseline");
+  const blocking = baseline
+    ? (await import("../lib/bench/thresholds")).regressions((JSON.parse(fs.readFileSync(path.resolve(baseline), "utf8")) as { thresholds: typeof verdictsOut }).thresholds, verdictsOut)
+    : red;
+  if (baseline) console.log(blocking.length ? `  RÉGRESSION (${blocking.length}) : ${blocking.map((v) => v.id).join(", ")}` : "  aucune régression face à la référence enregistrée");
+  if (blocking.length && flag("strict")) process.exitCode = 2;
 }
 
 async function main(): Promise<void> {

@@ -54,3 +54,12 @@ export function checkThresholds(m: Metrics, opts: ThresholdOpts = {}, ref?: Metr
   add("ux.eta", "Erreur médiane du temps restant", e === null ? "—" : pct(e), "≤ 25 %", e === null || opts.replay ? null : e <= 0.25);
   return out;
 }
+
+/**
+ * Régressions d'un run rejoué face à sa référence enregistrée (CI) : les seuils verts à la
+ * référence et rouges maintenant. Les réponses du modèle étant figées, seul le code a changé.
+ */
+export function regressions(base: Verdict[], cur: Verdict[]): Verdict[] {
+  const was = new Map(base.map((v) => [v.id, v.pass]));
+  return cur.filter((v) => v.pass === false && was.get(v.id) === true);
+}
