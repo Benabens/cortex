@@ -10,6 +10,7 @@ import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { NO_FLAG, coverageTopics, runPool } from "@/lib/qcm";
 import { examsDir } from "@/lib/paths";
+import { PhaseProgress, phaseLine } from "@/lib/progress";
 import { runSandboxed } from "@/lib/sandbox-exec";
 import { normalize, tokenize } from "@/lib/text";
 import fs from "node:fs";
@@ -381,12 +382,20 @@ async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[
 }
 
 /** Un bloc vérifié pour un emplacement : jusqu'à 3 versions, chacune corrigée des reproches de la précédente. */
-async function buildBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan, ctx: { system: string; previous: string[]; focus?: string }, step: StepCb, progress: number): Promise<{ block: ExamBlock | null; why: string }> {
+/** Phase des blocs dans l'avancement : une unité par version d'un bloc (lib/progress). */
+const BLOCKS_PHASE = "Questions composées";
+
+async function buildBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan, ctx: { system: string; previous: string[]; focus?: string }, step: StepCb, work: PhaseProgress): Promise<{ block: ExamBlock | null; why: string }> {
   const passages = await coursePassages(slot.query, 3, 900).catch(() => []);
   let guidance: string | null = null;
   let why = "";
+  // Une version finie compte une unité ; en décider une de plus en AJOUTE une (le temps restant remonte alors).
+  const retry = (attempt: number) => {
+    work.done(BLOCKS_PHASE);
+    if (attempt < ATTEMPTS) work.add(BLOCKS_PHASE);
+  };
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
-    step(`Question composée ${i + 1}/${n}${attempt > 1 ? ` (version ${attempt})` : ""} — ${slot.section ?? slot.theme.slice(0, 60)}…`, progress);
+    step(`Question composée ${i + 1}/${n}${attempt > 1 ? ` (version ${attempt})` : ""} — ${slot.section ?? slot.theme.slice(0, 60)}…`, 0);
     let b: ExamBlock;
     try {
       b = await generateBlock(slot, i, n, plan, ctx, guidance, passages);
@@ -395,22 +404,31 @@ async function buildBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan
       // Quota, clé, plafond de dépense : inutile d'insister. Une réponse restée illisible : version suivante.
       const code = llmErrorCode(e);
       if (code && HARD_STOP_CODES.has(code)) {
-        step(`Question composée ${i + 1} ignorée : ${why.slice(0, 140)}`, progress);
+        work.done(BLOCKS_PHASE);
+        step(`Question composée ${i + 1} ignorée : ${why.slice(0, 140)}`, 0);
         return { block: null, why };
       }
-      step(`Question composée ${i + 1}, version ${attempt} inutilisable : ${why.slice(0, 140)}`, progress);
+      retry(attempt);
+      step(`Question composée ${i + 1}, version ${attempt} inutilisable : ${why.slice(0, 140)}`, 0);
       continue;
     }
     const issues = [...await runCodeParts(b)];
     const judged = await judgeBlock(b, passages);
     if (judged) issues.push(...judged);
-    if (!issues.length) return { block: { ...b, verified: judged ? 1 : null }, why: "" };
+    if (!issues.length) {
+      work.done(BLOCKS_PHASE);
+      return { block: { ...b, verified: judged ? 1 : null }, why: "" };
+    }
     why = issues.join(" ; ");
-    step(`Question composée ${i + 1} rejetée — ${why.slice(0, 220)}`, progress);
+    retry(attempt);
+    step(`Question composée ${i + 1} rejetée — ${why.slice(0, 220)}`, 0);
     guidance = why.slice(0, 1200);
   }
   return { block: null, why };
 }
+
+/** Durées des phases sans historique (lib/jobs phaseHistory sinon), mêmes noms que les lignes « ⏱ ». */
+const DEFAULT_PHASE_MS: Record<string, number> = { [BLOCKS_PHASE]: 8 * 60_000, PDF: 30_000 };
 
 /**
  * Examen à questions composées : un bloc par emplacement (section de l'annale modèle ou
@@ -420,10 +438,16 @@ async function buildBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan
  */
 export async function generateBlockExam(
   plan: BlockPlan,
-  opts: { focus?: string; onStep?: StepCb; onExamReady?: (examId: number) => void | Promise<void> } = {},
+  opts: { focus?: string; onStep?: StepCb; onExamReady?: (examId: number) => void | Promise<void>; phaseMs?: Record<string, number> } = {},
 ): Promise<{ id: number; count: number; requested: number; texError?: string; texWarning?: string }> {
-  const step = opts.onStep ?? (() => {});
+  const report = opts.onStep ?? (() => {});
+  const tStart = Date.now();
   const n = plan.blockCount;
+  // TEMPS RESTANT — avancement PAR PHASE (lib/progress) : les blocs construits en parallèle
+  // publiaient chacun leur pourcentage (10 + 70·i/n au départ de chacun) ; il reculait.
+  const phaseMs = { ...DEFAULT_PHASE_MS, ...(opts.phaseMs ?? {}) };
+  const work = new PhaseProgress(8, [[{ name: BLOCKS_PHASE, units: n, ms: phaseMs[BLOCKS_PHASE] }], [{ name: "PDF", units: 1, ms: phaseMs.PDF }]]);
+  const step: StepCb = (m) => report(m, work.pct());
   const { slots, spares } = await planSlots(plan);
   if (!slots.length) throw new Error("Aucune notion ni section du cours à couvrir : prépare le cours avant de générer.");
   const { counterExamplesBlock } = await import("@/lib/question-reports");
@@ -432,8 +456,9 @@ export async function generateBlockExam(
 
   const built = new Map<number, ExamBlock>();
   const failed: { i: number; why: string }[] = [];
+  const tBlocks = Date.now();
   await runPool(slots.map((s, i) => ({ s, i })), blockConcurrency(), async ({ s, i }) => {
-    const r = await buildBlock(s, i, n, plan, ctx, step, 10 + Math.round((70 * i) / n));
+    const r = await buildBlock(s, i, n, plan, ctx, step, work);
     if (r.block) built.set(i, r.block);
     else failed.push({ i, why: r.why });
   });
@@ -446,8 +471,9 @@ export async function generateBlockExam(
       const at = k >= 0 ? k : plan.sections.length ? -1 : 0;
       if (at < 0 || !spares.length) break;
       const [spare] = spares.splice(at, 1);
-      step(`Question composée ${f.i + 1} : reprise sur ${spare.theme.slice(0, 80)}…`, 82);
-      const r = await buildBlock(spare, f.i, n, plan, ctx, step, 82);
+      work.add(BLOCKS_PHASE); // une reprise : réessai ajouté
+      step(`Question composée ${f.i + 1} : reprise sur ${spare.theme.slice(0, 80)}…`, 0);
+      const r = await buildBlock(spare, f.i, n, plan, ctx, step, work);
       if (r.block) {
         built.set(f.i, r.block);
         break;
@@ -456,18 +482,23 @@ export async function generateBlockExam(
   }
   const blocks = [...built.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => b);
   if (!blocks.length) throw new Error(`Aucune question composée n'a passé la vérification${failed[0]?.why ? ` (${failed[0].why.slice(0, 200)})` : ""}.`);
-  if (blocks.length < n) step(`⚠ ${blocks.length}/${n} questions composées livrées : ${n - blocks.length} rejetée(s) après ${ATTEMPTS} versions.`, 86);
+  if (blocks.length < n) step(`⚠ ${blocks.length}/${n} questions composées livrées : ${n - blocks.length} rejetée(s) après ${ATTEMPTS} versions.`, 0);
+  step(phaseLine(BLOCKS_PHASE, Date.now() - tBlocks), 0);
 
   const examId = await saveBlockExam(blocks);
   await opts.onExamReady?.(examId);
-  step("Rendu du PDF (énoncé + corrigé)…", 92);
+  step("Rendu du PDF (énoncé + corrigé)…", 0);
+  const tPdf = Date.now();
   const { buildBlocksArtifact } = await import("@/lib/blocks-latex");
   const art = await buildBlocksArtifact(examId, blocks, nowStr().slice(0, 10)).catch((e: Error) => ({ file: "", texError: e.message, texWarning: undefined as string | undefined }));
-  if (art.texError) step(`⚠ PDF non compilé (${art.texError.slice(0, 160)}) — l'examen reste consultable en ligne`, 96);
-  else if (art.texWarning) step(`⚠ ${art.texWarning.slice(0, 200)}`, 96);
+  work.done("PDF");
+  if (art.texError) step(`⚠ PDF non compilé (${art.texError.slice(0, 160)}) — l'examen reste consultable en ligne`, 0);
+  else if (art.texWarning) step(`⚠ ${art.texWarning.slice(0, 200)}`, 0);
+  step(phaseLine("PDF", Date.now() - tPdf), 0);
+  step(phaseLine("Total", Date.now() - tStart), 0);
   const verified = blocks.filter((b) => b.verified === 1).length;
   await q.run(`UPDATE exams SET status = 'ready', html_path = ?, verify_summary = ? WHERE id = ?`, art.file || null, `${verified}/${blocks.length} questions composées vérifiées à l'aveugle`, examId);
-  step(`Examen #${examId} prêt — ${blocks.length} questions composées ✓`, 100);
+  report(`Examen #${examId} prêt — ${blocks.length} questions composées ✓`, 100);
   return { id: examId, count: blocks.length, requested: n, ...(art.texError ? { texError: art.texError } : {}), ...(art.texWarning ? { texWarning: art.texWarning } : {}) };
 }
 

@@ -16,6 +16,7 @@ import { MOLD_DEFS, normalizeMold, type MoldKind } from "@/lib/molds";
 import { renderFigure, figureSpecPromptBlock, type FigureSpec } from "@/lib/figure-gen";
 import { examsDir } from "@/lib/paths";
 import type { Archetype } from "@/lib/archetypes";
+import { PhaseProgress, phaseLine } from "@/lib/progress";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -682,10 +683,6 @@ export async function runPool<T>(items: T[], n: number, fn: (item: T) => Promise
   }));
 }
 
-function formatDuration(ms: number): string {
-  const s = Math.round(ms / 1000);
-  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`;
-}
 
 /** `requested` / `openRequested` : la composition demandée — `count` / `open` peuvent rester en dessous. */
 export type QcmExamResult = { id: number; count: number; requested: number; verified: number; open: number; openRequested: number; pdf?: string; texError?: string };
@@ -693,16 +690,28 @@ export type QcmExamResult = { id: number; count: number; requested: number; veri
 /** Nombre de rondes de comblement des QCM manquants, et lots supplémentaires permis (× lots prévus). */
 const TOPUP_ROUNDS = 2;
 
+/**
+ * Durée de chaque phase d'un examen QCM sans historique (banc de M : ~10 min à
+ * LLM_MAX_CONCURRENCY=4, QCM et ouvertes en parallèle) ; sinon la médiane des journaux
+ * des derniers jobs du cours (lib/jobs phaseHistory). Mêmes noms que les lignes « ⏱ ».
+ */
+const DEFAULT_PHASE_MS: Record<string, number> = { QCM: 6 * 60_000, "Questions ouvertes": 6 * 60_000, PDF: 30_000 };
+
 
 /** Génère un examen QCM complet (N QCM + M ouvertes), vérifié, persisté, rendu en PDF.
  *  `count`/`openCount` : la COMPOSITION choisie par l'utilisateur (composeur). `focus` : « Mets l'accent
  *  sur… » (générique) — garantit ~2 QCM sur le thème sans monopoliser (count ≤ 2 → entièrement ciblé). */
-export async function generateQcmExam(opts: { count?: number; openCount?: number; focus?: string; onStep?: StepCb; onExamReady?: (examId: number) => void | Promise<void> } = {}): Promise<QcmExamResult> {
+export async function generateQcmExam(opts: { count?: number; openCount?: number; focus?: string; onStep?: StepCb; onExamReady?: (examId: number) => void | Promise<void>; phaseMs?: Record<string, number> } = {}): Promise<QcmExamResult> {
   await ensureQcmSchema();
-  const step = opts.onStep ?? (() => {});
+  const report = opts.onStep ?? (() => {});
+  // TEMPS RESTANT — avancement PAR PHASE (lib/progress) dès que les lots sont connus : les
+  // pourcentages des étapes sont ignorés. Lots et ouvertes en parallèle publiaient chacun les
+  // leurs (82 %, puis 30 %, puis 70 %) et le journal 0 % : le temps restant remontait.
+  let work: PhaseProgress | null = null;
+  const step: StepCb = (m, p) => report(m, work ? work.pct() : Math.min(p, 8));
   // M — durée de chaque phase dans le journal du job (mesure avant/après).
   const tStart = Date.now();
-  const logPhase = (label: string, since: number) => step(`⏱ ${label} : ${formatDuration(Date.now() - since)}`, 0);
+  const logPhase = (label: string, since: number) => step(phaseLine(label, Date.now() - since), 0);
   const fmt = await getFormatProfile();
   const focus = (opts.focus ?? "").trim() || undefined;
   const qcmShare = (fmt?.question_types ?? []).filter((t) => t.type === "scq" || t.type === "mcq").reduce((s, t) => s + (t.approx_count || 0), 0);
@@ -789,6 +798,12 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     }
     batches.push({ topics: topicsSlice, molds: moldsSlice });
   }
+  const phaseMs = { ...DEFAULT_PHASE_MS, ...(opts.phaseMs ?? {}) };
+  work = new PhaseProgress(8, [
+    [{ name: "QCM", units: batches.length, ms: phaseMs.QCM }, { name: "Questions ouvertes", units: openCount, ms: phaseMs["Questions ouvertes"] }],
+    [{ name: "PDF", units: 1, ms: phaseMs.PDF }],
+  ]);
+  const progress = work;
   /**
    * Un lot vérifié à l'aveugle ; ses items FAIBLES (réussis avec les seuls noms des notions,
    * peu discriminants, ou trahis par leur longueur) sont régénérés UNE fois, critique à l'appui,
@@ -822,6 +837,13 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   };
   /** Un lot conçu, vérifié, renforcé. Un échec (après les réessais de completeJson) rend 0 item et sa cause. */
   const safeBatch = async (bt: Batch): Promise<{ items: QcmItem[]; error: unknown }> => {
+    try {
+      return await buildBatch(bt);
+    } finally {
+      progress.done("QCM");
+    }
+  };
+  const buildBatch = async (bt: Batch): Promise<{ items: QcmItem[]; error: unknown }> => {
     try {
       const items = await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, undefined, { ...shared, molds: bt.molds });
       // Un item resté rejeté après régénération (hors cours, définition différente, hors matière, clé
@@ -868,12 +890,17 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
           lastError = e;
           failed.push(i);
           step(`Question ouverte ${i + 1} ignorée : ${llmFailureReason(e).slice(0, 120)}`, 82 + i);
+        } finally {
+          progress.done("Questions ouvertes");
         }
       });
       pendingOpen = failed.sort((x, y) => x - y);
       const stop = llmErrorCode(lastError);
       if (!pendingOpen.length || (stop && HARD_STOP_CODES.has(stop))) break;
-      if (round === 0) step(`${pendingOpen.length} question(s) ouverte(s) manquante(s) → nouvel essai`, 88);
+      if (round === 0) {
+        progress.add("Questions ouvertes", pendingOpen.length); // réessai ajouté : le temps restant peut remonter
+        step(`${pendingOpen.length} question(s) ouverte(s) manquante(s) → nouvel essai`, 88);
+      }
     }
   })();
   const tQcm = Date.now();
@@ -909,6 +936,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       pending.push({ topics: slice.map((m) => m.topic), molds: slice.map((m) => m.mold) });
     }
     extraBudget -= pending.length;
+    progress.add("QCM", pending.length); // réessai ajouté : le temps restant peut remonter
     step(`${count - all.length} QCM manquant(s) → ${pending.length} lot(s) de comblement`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
   }
   // count>0 mais 0 QCM produit = tous les lots ont échoué → erreur claire (sauf drill 0 QCM + ouvertes).
@@ -918,10 +946,11 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   if (all.length >= 2) {
     const drop = await duplicateItems(all).catch(() => [] as number[]);
     if (drop.length) {
-      step(`${drop.length} QCM en doublon retiré(s) (même notion qu'une autre question) → remplacement`, 80);
       const kept = all.filter((_, i) => !drop.includes(i));
       all.splice(0, all.length, ...kept);
       const spare = spareTopics.slice(0, count - all.length);
+      if (spare.length) progress.add("QCM"); // un lot de remplacement : réessai ajouté
+      step(`${drop.length} QCM en doublon retiré(s) (même notion qu'une autre question) → remplacement`, 80);
       if (spare.length) {
         const got = await safeBatch({ topics: spare, molds: spare.map(() => null) });
         if (got.error) lastError = got.error;
@@ -1002,10 +1031,11 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // Jamais silencieux (examen 4 de CS-290 : « prêt » 16 ms après « Rendu du PDF », sans PDF ni
   // trace) : l'étape le dit, l'examen reste consultable en ligne et le PDF se régénère à part.
   if (texError) step(`⚠ PDF non compilé (${texError.slice(0, 160)}) — l'examen reste consultable en ligne`, 97);
+  progress.done("PDF");
 
   logPhase("PDF", tPdf);
   logPhase("Total", tStart);
-  step(`Examen QCM #${examId} prêt — ${qcmExamSummary({ count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount })} ✓`, 100);
+  report(`Examen QCM #${examId} prêt — ${qcmExamSummary({ count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount })} ✓`, 100);
   return { id: examId, count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount, pdf, texError };
 }
 
