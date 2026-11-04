@@ -356,6 +356,62 @@ function weaknessOf(it: QcmItem): string | null {
   return null;
 }
 
+/** Le seul défaut d'un QCM vérifié est-il un ou des distracteurs éliminables sans le cours ? */
+function onlyTrivialDistractors(it: QcmItem): boolean {
+  return !!it.trivialDistractors?.length && !it.rejected && !it.figureFile && weaknessOf({ ...it, trivialDistractors: null }) === null;
+}
+
+const REPLACEMENTS_SCHEMA = `{ "replacements": [ { "index": <numéro Q>, "distractors": [ { "option": <numéro de l'option remplacée>, "text": "<nouvelle option>", "misconception": "[procédé] l'idée fausse visée" } ], "explanation": "<explication de la clé, mise à jour>" } ] }`;
+
+/**
+ * DISTRACTEURS TRIVIAUX REMPLACÉS, PAS LA QUESTION — banc moteur du 04/11/2026 (CS-290) : 41 QCM
+ * vérifiés sur 50 avaient au moins un distracteur éliminable sans le cours ; régénérer la question
+ * entière jetait un énoncé et une clé justes, et l'item était perdu si le nouveau tirage en gardait
+ * un. Un seul appel par lot remplace les options relevées (taxonomie des distracteurs), avec
+ * l'explication ; l'énoncé, la clé et les autres options restent. Le résultat est revérifié.
+ */
+async function replaceTrivialDistractors(items: QcmItem[], step: StepCb, language?: string): Promise<QcmItem[]> {
+  const lang = languageName(language ?? examLanguageFor(currentCourse()))[1];
+  const body = items.map((it, k) => [
+    `Q${k}. ${sanitizeCorpus(it.stem)}`,
+    ...it.options.map((o, j) => `   (${j}) ${sanitizeCorpus(o)}${it.correct.includes(j) ? "  (bonne réponse — à garder)" : (it.trivialDistractors ?? []).includes(j) ? "  ← À REMPLACER : éliminable sans connaître le cours" : ""}`),
+    it.sourceFact ? `   Fait du cours testé : ${sanitizeCorpus(it.sourceFact).slice(0, 400)}` : "",
+  ].filter(Boolean).join("\n")).join("\n\n");
+  const out = await completeJson<{ replacements: { index: number; distractors: { option: number; text: string; misconception?: string }[]; explanation?: string }[] }>({
+    model: "opus", timeoutMs: 300_000,
+    prompt: [
+      `Tu es l'équipe enseignante du cours. Dans chacun de ces QCM, les options marquées « À REMPLACER » se devinent fausses sans connaître le cours. Écris pour chacune UN nouveau distracteur, sans toucher à l'énoncé, à la bonne réponse ni aux autres options.`,
+      ...DISTRACTOR_TAXONOMY,
+      `RÈGLES : chaque nouveau distracteur est FAUX selon le cours mais paraît juste à un étudiant qui connaît le thème sans le détail ; même registre, même structure et longueur comparable (±30 %) que la bonne réponse ; il ne dit jamais pourquoi il est faux ; aucun marqueur d'absolu ; il ne répète aucune autre option. Réécris aussi l'explication de la clé pour qu'elle couvre les options finales, en désignant les options par leur CONTENU, jamais par leur lettre ni leur rang. Tout en ${lang}.`,
+      DATA_RULE,
+      "",
+      body,
+      "",
+      `Réponds UNIQUEMENT avec ce JSON : ${REPLACEMENTS_SCHEMA}`,
+    ].join("\n"),
+  }, { check: (v) => (Array.isArray(v?.replacements) ? null : "il manque la liste replacements") });
+  const repaired = items.map((it, k) => {
+    const r = out.replacements.find((x) => x.index === k);
+    if (!r) return null;
+    const options = it.options.slice();
+    const misconceptions = it.misconceptions.slice();
+    for (const d of r.distractors ?? []) {
+      if (!(it.trivialDistractors ?? []).includes(d.option) || typeof d.text !== "string" || !d.text.trim()) continue;
+      options[d.option] = d.text.trim();
+      misconceptions[d.option] = d.misconception ?? misconceptions[d.option] ?? "";
+    }
+    if (options.every((o, j) => o === it.options[j])) return null;
+    const explanation = r.explanation && !citesOptionLabel(r.explanation) ? r.explanation : it.explanation;
+    return { ...it, options, misconceptions, explanation, verified: null, trivialDistractors: null, judgeIssue: null, judgeOk: null, discrimination: null, nameOnly: null } as QcmItem;
+  });
+  const sent = repaired.filter((x): x is QcmItem => !!x);
+  if (!sent.length) return items;
+  step(`${sent.length} QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés`, 0);
+  const checked = await verifyQcmBatch(sent, step);
+  let n = 0;
+  return repaired.map((x, k) => (x ? { ...checked[n++], slot: items[k].slot } : items[k]));
+}
+
 /** Étiquette d'un thème déjà couvert par une autre question de l'examen. */
 const REPEAT_METHOD = "thème déjà couvert par une autre question : teste un AUTRE fait, une autre étude ou une autre condition";
 
@@ -993,8 +1049,27 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
    * et remplacés si la nouvelle version est meilleure.
    */
   const strengthen = async (bt: Batch, items: QcmItem[]): Promise<QcmItem[]> => {
-    const weak = items.map((it, i) => ({ it, i, why: weaknessOf(it) })).filter((w): w is { it: QcmItem; i: number; why: string } => !!w.why);
-    if (!weak.length) return items;
+    const all = items.map((it, i) => ({ it, i, why: weaknessOf(it) })).filter((w): w is { it: QcmItem; i: number; why: string } => !!w.why);
+    if (!all.length) return items;
+    // Seuls des distracteurs triviaux : on les remplace (énoncé et clé gardés) ; le reste est régénéré.
+    const fixable = all.filter((w) => onlyTrivialDistractors(w.it));
+    const weak = all.filter((w) => !fixable.includes(w));
+    const repaired = fixable.length
+      ? replaceTrivialDistractors(fixable.map((w) => w.it), step, shared.language).catch((e) => {
+        step(`Remplacement des distracteurs ignoré (${(e as Error).message.slice(0, 50)})`, 0);
+        return fixable.map((w) => w.it);
+      })
+      : Promise.resolve([] as QcmItem[]);
+    const regenerated = weak.length ? regenerate(bt, items, weak) : Promise.resolve(items);
+    const [fixed, out] = await Promise.all([repaired, regenerated]);
+    fixable.forEach((w, k) => {
+      const n = fixed[k];
+      if (n && n.verified === 1 && !n.rejected && !weaknessOf(n)) out[w.i] = { ...n, slot: w.it.slot };
+    });
+    return out;
+  };
+  /** Régénère en entier les QCM faibles (autre défaut que des distracteurs triviaux). */
+  const regenerate = async (bt: Batch, items: QcmItem[], weak: { it: QcmItem; i: number; why: string }[]): Promise<QcmItem[]> => {
     step(`${weak.length} QCM trop faible(s) → régénération ciblée`, 0);
     const guidance = [
       `À CORRIGER — ces questions étaient trop faibles ; écris-en de NOUVELLES sur les mêmes sujets, sans ces défauts (options = propositions complètes, distracteurs de la taxonomie, fait précis du cours) :`,
