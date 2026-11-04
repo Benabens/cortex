@@ -8,8 +8,7 @@ import { legalEnglishUrl, legalLinks } from "@/lib/legal";
 import { NOINDEX } from "@/lib/seo";
 import { THEME_COLORS, THEME_INIT_SCRIPT } from "@/lib/ux/theme";
 
-// Typo (décision 2026-09-28) : Funnel Display pour les titres et le wordmark ;
-// l'interface est en police système (aucune autre police chargée).
+// Funnel Display pour le logo uniquement ; Inter local pour toute l’interface.
 const funnelDisplay = Funnel_Display({
   variable: "--font-funnel-display",
   subsets: ["latin"],

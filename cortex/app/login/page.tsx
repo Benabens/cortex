@@ -3,7 +3,7 @@ import { contactEmail } from "@/lib/contact";
 import { DEFAULT_LANDING_URL, LANDING_ENGLISH_PATH, landingOrigin, legalLinks } from "@/lib/legal";
 import { LoginCard } from "./LoginCard";
 
-// Police système + Funnel Display pour le titre, comme le reste de l'app (Geist retirée : liste interdite anti-slop).
+// Inter pour l’interface, Funnel Display uniquement pour le logo.
 export const dynamic = "force-dynamic";
 
 /**

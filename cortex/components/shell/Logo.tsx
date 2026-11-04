@@ -25,7 +25,7 @@ export function Wordmark({
     <span className={cn("inline-flex items-center gap-2.5", className)}>
       <CortexMark size={markSize} />
       <span
-        className="font-display inline-flex items-baseline leading-none text-ink-1"
+        className="font-brand inline-flex items-baseline leading-none text-ink-1"
         style={{ fontSize: textSize, fontWeight: 700, letterSpacing: "-0.04em" }}
       >
         cortex
