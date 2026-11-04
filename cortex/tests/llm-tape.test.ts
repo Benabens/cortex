@@ -128,3 +128,17 @@ test("une erreur du fournisseur enregistrée est rejouée avec son code", async 
   await assert.rejects(poseQuestion("Q"), (e: unknown) => e instanceof LlmError && e.code === code);
   assert.equal(served, 1);
 });
+
+test("en rejeu, le moteur est disponible même sans fournisseur joignable (CI sans CLI ni clé)", async () => {
+  const { llmAvailable, llmUnavailableReason } = await import("../lib/llm");
+  const saved = process.env.LLM_BASE_URL;
+  delete process.env.LLM_BASE_URL;
+  try {
+    assert.equal(llmAvailable(), false, "sans base URL, openai-compatible est indisponible");
+    process.env.LLM_TAPE = `replay:${tapeFile("dispo")}`;
+    assert.equal(llmAvailable(), true);
+    assert.equal(llmUnavailableReason(), null);
+  } finally {
+    process.env.LLM_BASE_URL = saved;
+  }
+});
