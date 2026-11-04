@@ -24,14 +24,18 @@ process.env.LLM_MAX_RETRIES = "0";
 process.env.MAX_COURSES_CREATED_PER_HOUR = "unlimited";
 
 const ABSURD = "Une option absurde que tout étudiant élimine.";
+const FOREIGN = "Une affirmation qui nomme une notion étrangère au cours.";
+/** Troisième option des QCM conçus : triviale par défaut, ou une notion hors du cours. */
+let third = ABSURD;
 const NEW_DISTRACTOR = "Une affirmation proche du cours, fausse à une condition près.";
 
 function item(q: number) {
   return {
     topic: "CS-290", type: "scq", stem: `Question ${q} : que dit le cours sur la notion ${q} ?`,
-    options: ["Une affirmation juste, tirée du cours. (clé)", "Une affirmation inversée par rapport au cours.", ABSURD, "Une affirmation attribuée à la mauvaise étude."],
+    options: ["Une affirmation juste, tirée du cours. (clé)", "Une affirmation inversée par rapport au cours.", third, "Une affirmation attribuée à la mauvaise étude."],
     correct: [0], misconceptions: ["", "[inversion] x", "[remplissage] x", "[mauvaise attribution] x"],
     explanation: "La bonne réponse reprend le cours ; l'inversion et la mauvaise attribution le déforment.",
+    source_fact: "Équité des modèles, taux de faux positifs, impact disparate, modération de contenus.",
   };
 }
 
@@ -48,7 +52,12 @@ function verifyReply(prompt: string): string {
     const opts = [...b.matchAll(/^\s+\((\d+)\) (.*)$/gm)];
     const key = opts.find((m) => /\(clé\)/.test(m[2]));
     const trivial = opts.filter((m) => m[2].startsWith("Une option absurde")).map((m) => Number(m[1]));
-    return { index, correct: [key ? Number(key[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms: [], off_course: "", off_course_terms: [], off_matter: "", trivial_distractors: trivial, definition_mismatch: "" };
+    const foreign = opts.filter((m) => m[2].startsWith("Une affirmation qui nomme une notion étrangère")).map((m) => Number(m[1]));
+    return {
+      index, correct: [key ? Number(key[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms: [],
+      off_course: foreign.length ? "Une mauvaise option nomme une notion que le cours ne présente pas." : "", off_course_terms: foreign.length ? ["notion étrangère"] : [],
+      off_course_options: foreign, off_course_key: false, off_matter: "", trivial_distractors: trivial, definition_mismatch: "",
+    };
   }) });
 }
 
@@ -91,7 +100,7 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { designCalls = 0; repairCalls = 0; repairPrompts = []; replacement = NEW_DISTRACTOR; });
+beforeEach(() => { designCalls = 0; repairCalls = 0; repairPrompts = []; replacement = NEW_DISTRACTOR; third = ABSURD; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -171,4 +180,14 @@ test("banc du 04/11 : l'avancement bouge dès qu'un lot est conçu, sans attendr
   const { pcts } = await exam(await course(), 4);
   const verifying = pcts.find((x) => /Vérification à l'aveugle/.test(x.s));
   assert.ok(verifying && verifying.p > 8, `avancement pendant la première vérification : ${verifying?.p}`);
+});
+
+test("banc du 04/11 : seule une MAUVAISE option nomme une notion hors du cours — l'option est remplacée, la question gardée", async () => {
+  third = FOREIGN;
+  const { r, steps, items } = await exam(await course(), 4);
+  assert.equal(r.count, 4, steps.join("\n"));
+  assert.equal(designCalls, 1, "aucune question régénérée ni rejetée");
+  assert.ok(!steps.some((s) => /QCM rejeté — hors cours/.test(s)), steps.join("\n"));
+  for (const it of items) assert.ok(!it.options.includes(FOREIGN) && it.options.includes(NEW_DISTRACTOR), it.options.join(" | "));
+  assert.match(repairPrompts[0], /notion étrangère au cours.*← À REMPLACER/);
 });

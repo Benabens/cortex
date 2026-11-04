@@ -429,7 +429,7 @@ async function replaceTrivialDistractors(items: QcmItem[], step: StepCb, languag
   const lang = languageName(language ?? examLanguageFor(currentCourse()))[1];
   const body = items.map((it, k) => [
     `Q${k}. ${sanitizeCorpus(it.stem)}`,
-    ...it.options.map((o, j) => `   (${j}) ${sanitizeCorpus(o)}${it.correct.includes(j) ? "  (bonne réponse — à garder)" : (it.trivialDistractors ?? []).includes(j) ? "  ← À REMPLACER : éliminable sans connaître le cours" : ""}`),
+    ...it.options.map((o, j) => `   (${j}) ${sanitizeCorpus(o)}${it.correct.includes(j) ? "  (bonne réponse — à garder)" : (it.trivialDistractors ?? []).includes(j) ? "  ← À REMPLACER : se devine fausse sans connaître le cours, ou nomme une notion que le cours ne présente pas" : ""}`),
     it.sourceFact ? `   Fait du cours testé : ${sanitizeCorpus(it.sourceFact).slice(0, 400)}` : "",
   ].filter(Boolean).join("\n")).join("\n\n");
   const out = await completeJson<{ replacements: { index: number; distractors: { option: number; text: string; misconception?: string }[]; explanation?: string }[] }>({
@@ -697,11 +697,13 @@ const VERIFY_SCHEMA = {
           course_terms: { type: "array", items: { type: "string" }, description: "Les notions nommées dont dépend la BONNE réponse, chacune écrite EXACTEMENT comme dans les extraits du cours (copie le terme du cours)." },
           off_course: { type: "string", description: "Non vide si la bonne réponse ou l'explication repose sur une notion ou un fait ABSENT des extraits du cours, ou que le cours définit AUTREMENT, ou si une option NOMME une notion que le cours ne présente pas : laquelle, et ce que dit le cours. Un distracteur qui n'est qu'une affirmation fausse n'est pas hors cours. Vide sinon." },
           off_course_terms: { type: "array", items: { type: "string" }, description: "Les notions ou faits précis que off_course dit absents, écrits comme dans la question (ils seront cherchés dans tout le cours). Vide si off_course est vide." },
+          off_course_key: { type: "boolean", description: "true si ce que off_course dit absent porte la BONNE réponse ou l'explication ; false si seules des MAUVAISES options le nomment. false si off_course est vide." },
+          off_course_options: { type: "array", items: { type: "integer" }, description: "Indices des MAUVAISES options qui nomment ce que off_course dit absent du cours. Vide si off_course est vide." },
           off_matter: { type: "string", description: "Non vide si la question porte sur les modalités d'examen (format, barème, grille ou critères d'évaluation, consignes), sur la forme d'un rendu (poster, essai, bibliographie) ou sur l'organisation du cours (plan, ordre des chapitres) plutôt que sur sa matière : ce qu'elle teste. Vide sinon." },
           trivial_distractors: { type: "array", items: { type: "integer" }, description: "Indices des MAUVAISES options qu'un étudiant élimine sans connaître le cours (générique, hors sujet, absurde, réfutable par le bon sens). Liste vide si toutes sont plausibles." },
           definition_mismatch: { type: "string", description: "Chaque définition employée ou sous-entendue (énoncé, clé, distracteurs, explication) comparée à celle des extraits du cours. Non vide si l'une est PLUS ÉTROITE (une condition ajoutée), PLUS LARGE (une condition oubliée), ou si deux notions du cours sont confondues : laquelle, ce que dit la question, ce que dit le cours. Vide sinon." },
         },
-        required: ["index", "correct", "ok", "discrimination", "name_only", "course_terms", "off_course", "off_course_terms", "off_matter", "trivial_distractors", "definition_mismatch"],
+        required: ["index", "correct", "ok", "discrimination", "name_only", "course_terms", "off_course", "off_course_terms", "off_course_key", "off_course_options", "off_matter", "trivial_distractors", "definition_mismatch"],
         additionalProperties: false,
       },
     },
@@ -764,7 +766,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     `Réponds UNIQUEMENT avec l'objet JSON { "results": [ … ] } conforme.`,
   ].filter((l) => l != null).join("\n");
   step("Vérification à l'aveugle des QCM (résolution indépendante, figures vues)…", 70);
-  let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean; course_terms?: string[]; off_course?: string; off_course_terms?: string[]; off_matter?: string; trivial_distractors?: number[]; definition_mismatch?: string }[] };
+  let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean; course_terms?: string[]; off_course?: string; off_course_terms?: string[]; off_course_key?: boolean; off_course_options?: number[]; off_matter?: string; trivial_distractors?: number[]; definition_mismatch?: string }[] };
   try {
     res = await completeJson(
       { system, prompt, model: "opus", timeoutMs: 420_000, addDirs: figDirs, json: { schema: VERIFY_SCHEMA } },
@@ -791,7 +793,15 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     // Un signalement du juge ne compte que s'il a VU des extraits et qu'il nomme quelque chose
     // (« None », « Aucune », « N/A » ne rejettent rien) : jamais de rejet faute de pouvoir vérifier.
     const said = (x: unknown) => (passages.length && typeof x === "string" && !NO_FLAG.test(x.trim()) ? x.trim() : "");
-    const flagged = said(r.off_course);
+    // Banc du 04/11 (CS-290) : la plupart des rejets « hors cours » venaient d'une MAUVAISE option
+    // qui nommait une notion absente du cours (« selection bias », « shadow banning ») : la question
+    // était jetée pour un distracteur. Seule la clé ou l'explication hors cours rejette désormais ;
+    // une option hors cours est remplacée comme un distracteur trivial.
+    const offOptions = Array.isArray(r.off_course_options)
+      ? r.off_course_options.filter((k) => Number.isInteger(k) && k >= 0 && k < q.options.length && !(q.correct ?? []).includes(k))
+      : [];
+    const distractorOnly = !!said(r.off_course) && r.off_course_key === false && offOptions.length > 0;
+    const flagged = distractorOnly ? "" : said(r.off_course);
     // B — mock 4 de CS-290 : « sensitive » réduit aux attributs protégés par la loi (le cours : loi
     // OU éthique) ; une définition qui s'écarte de celle du cours rejette la question comme une notion
     // absente, et comme elle, seulement après une recherche dans tout le cours.
@@ -812,9 +822,10 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     q.nameOnly = typeof r.name_only === "boolean" ? r.name_only : null;
     q.judgeIssue = r.issue?.trim() ? r.issue.trim().slice(0, 240) : null;
     // Plausibilité de chaque distracteur (une bonne réponse n'en est jamais un).
-    const trivial = Array.isArray(r.trivial_distractors)
-      ? r.trivial_distractors.filter((k) => Number.isInteger(k) && k >= 0 && k < q.options.length && !(q.correct ?? []).includes(k))
-      : [];
+    const trivial = [...new Set([
+      ...(Array.isArray(r.trivial_distractors) ? r.trivial_distractors.filter((k) => Number.isInteger(k) && k >= 0 && k < q.options.length && !(q.correct ?? []).includes(k)) : []),
+      ...(distractorOnly ? offOptions : []),
+    ])];
     q.trivialDistractors = trivial.length ? trivial : null;
     const keyMatch = JSON.stringify([...(q.correct ?? [])].sort()) === JSON.stringify([...(r.correct ?? [])].sort());
     // Une question à réponse unique que le juge résout avec 0 ou plusieurs réponses est ambiguë :
