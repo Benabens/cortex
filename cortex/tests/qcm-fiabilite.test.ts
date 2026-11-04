@@ -446,3 +446,39 @@ test("B — une définition plus étroite ou confondue avec une autre (sensitive
   assert.match(judged, /EXTRAITS DU COURS[\s\S]*OU par l'éthique/, "avec les définitions du cours sous les yeux");
 });
 
+
+// ─────────── TEMPS RESTANT : l'avancement d'un examen ne recule jamais sans réessai ───────────
+// Depuis le parallélisme (M), les ouvertes publiaient 82 % dès le départ, puis les lots de QCM
+// 30 %, puis 70 % ; les lignes de journal (« ⏱ QCM : … », « régénération ciblée ») publiaient
+// 0 %. Le temps restant, calculé sur l'avancement, remontait sans raison.
+/** Les reculs d'avancement d'une étape à la suivante, avec leur message. */
+const regressions = (seq: { s: string; p: number }[]) => seq.filter((x, i) => i > 0 && x.p < seq[i - 1].p).map((x) => `${x.p} % — ${x.s}`);
+
+test("ETA — sans réessai, l'avancement d'un examen QCM (lots et ouvertes en parallèle) ne recule jamais", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
+  const seq: { s: string; p: number }[] = [];
+  await runWithCourse(id, () => generateQcmExam({ count: 8, openCount: 2, onStep: (s, p) => { seq.push({ s, p }); } }));
+  assert.deepEqual(regressions(seq), [], seq.map((x) => `${x.p} ${x.s}`).join("\n"));
+  assert.equal(seq.at(-1)?.p, 100);
+});
+
+test("ETA — l'avancement ne recule qu'à l'ajout d'un réessai (une ouverte relancée)", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
+  const ok = write;
+  let target = 0;
+  write = (n, p) => (/pandas groupby/.test(p) && ++target <= 3 ? "Voici l'énoncé demandé." : ok(n, p));
+  try {
+    const seq: { s: string; p: number }[] = [];
+    await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 3, onStep: (s, p) => { seq.push({ s, p }); } }));
+    const back = regressions(seq);
+    assert.ok(back.every((x) => /→ nouvel essai/.test(x)), `recul hors réessai :\n${back.join("\n")}`);
+  } finally {
+    write = ok;
+  }
+});

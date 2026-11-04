@@ -317,3 +317,19 @@ test("C — garantie du nombre : une réponse restée illisible n'arrête pas l'
   const exam = (await runWithCourse(id, () => getBlockExam(r.id, false)))!;
   assert.deepEqual(exam.blocks.map((b) => b.section), ["Q1 — Ethics", "Q2 — Moderation"], "la reprise garde sa section");
 });
+
+test("C × temps restant — l'avancement des questions composées ne recule qu'à l'ajout d'une version ou d'une reprise", async () => {
+  const id = await compositeCourse(3);
+  script = {
+    "Ethical theories": [block("A", [scq("A"), short("A"), code("[1, 2]")])],
+    "Keyword filtering": [block("B", [scq("B"), short("B"), code("[1, 2]")], "NARROW: a feedback loop is always positive."), block("B", [scq("B"), short("B"), code("[1, 2]")])],
+    "Feedback loops": [block("C", [scq("C"), short("C"), code("[1, 2]")])],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateMockExam } = await import("../lib/mock-exam");
+  const seq: { s: string; p: number }[] = [];
+  await runWithCourse(id, () => generateMockExam({ onStep: (s, p) => { seq.push({ s, p }); } }));
+  const back = seq.filter((x, i) => i > 0 && x.p < seq[i - 1].p).map((x) => `${x.p} % — ${x.s}`);
+  assert.ok(back.every((x) => /rejetée|inutilisable|reprise/.test(x)), `recul hors réessai :\n${back.join("\n")}\n---\n${seq.map((x) => `${x.p} ${x.s}`).join("\n")}`);
+  assert.ok(seq.filter((x) => x.p >= 100).length === 1 && seq.at(-1)!.p === 100, "100 % une seule fois, à la fin");
+});

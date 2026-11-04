@@ -1,7 +1,8 @@
 /**
  * TEMPS RESTANT D'UNE GÉNÉRATION — le suivi d'un job ne donnait qu'un pourcentage.
  * Durée attendue : la médiane des derniers jobs du même type du cours (insensible à un
- * job hors norme), à défaut une durée par type ; elle se recale sur l'avancement. Pur :
+ * job hors norme), à défaut une durée par type ; reste sa part non faite, lue sur l'avancement
+ * PAR PHASE (lib/progress) — jamais sur le temps écoulé, qui la faisait remonter. Pur :
  * le calcul ne lit ni l'horloge ni la base (lib/jobs lui passe l'écoulé et l'historique).
  */
 
@@ -56,8 +57,9 @@ export function estimateRemaining(i: EtaInput): Eta {
   if (i.elapsedMs > expected * LATE_FACTOR && progress < 95) {
     return { remainingMs: null, late: true, basis, label: "Plus long que d'habitude — la génération continue" };
   }
-  const byTime = Math.max(0, expected - i.elapsedMs);
-  const byProgress = progress >= 10 ? (i.elapsedMs * (100 - progress)) / progress : null;
-  const remaining = byProgress == null ? byTime : (byTime + byProgress) / 2;
+  // La part non faite de la durée attendue. Rien ne dépend du temps écoulé : une étape longue ne
+  // fait pas remonter l'estimation ; elle ne remonte que si l'avancement recule, c'est-à-dire
+  // quand la génération AJOUTE un réessai (lib/progress).
+  const remaining = expected * (1 - progress / 100);
   return { remainingMs: remaining, late: false, basis, label: `${minutes(remaining)}${suffix}` };
 }
