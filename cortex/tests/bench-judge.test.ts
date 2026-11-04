@@ -70,7 +70,7 @@ const run = {
       { idx: 2, kind: "qcm", topic: "t", stem: "Que vaut df.iloc[0] ?", options: ["1", "2", "3", "4"], correct: [0], explanation: "La première ligne vaut 1." },
     ],
   },
-  plan: { chapters: [{ id: 1, seq: 1, title: "Transport" }], topicChapter: {} },
+  plan: { chapters: [{ id: 1, seq: 1, title: "Transport" }, { id: 2, seq: 2, title: "Réseau" }], topicChapter: {} },
   previous: [{ stem: "Que vaut print(2 + 2) ?", topic: null }],
   rejected: [
     { stem: "Que garantit TCP ?", options: ["l'ordre", "rien"], correct: [0], reason: "hors cours : absent du cours : ordre" },
@@ -102,4 +102,14 @@ test("juge : arbitre, code exécuté, doublons et faux rejets ; la clé n'est ja
   assert.deepEqual(v.duplicatesPrevious, [1]);
   assert.deepEqual(v.rejected, [{ idx: 0, offCourseReject: true, falseRejection: true }, { idx: 1, offCourseReject: false, falseRejection: false }]);
   assert.match(v.rubric, /^v1:/);
+});
+
+test("chapitre : un rang rendu à la place de l'identifiant est rattaché ; un plan d'un seul chapitre est attribué d'office", async () => {
+  const { chapterOf } = await import("../lib/bench/judge");
+  const plan = [{ id: 1000019, seq: 1, title: "Fairness_1.md" }, { id: 1000020, seq: 2, title: "Safety_1.md" }];
+  assert.equal(chapterOf(1000020, plan), 1000020);
+  assert.equal(chapterOf(2, plan), 1000020, "le juge a rendu le rang du chapitre");
+  assert.equal(chapterOf(7, plan), null);
+  assert.equal(chapterOf(null, plan), null);
+  assert.equal(chapterOf(null, [plan[0]]), 1000019, "un seul chapitre : toute question en relève");
 });
