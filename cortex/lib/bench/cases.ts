@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import type { SynthSpec } from "./synth";
+import type { SynthFormat, SynthSpec } from "./synth";
 
 /**
  * CAS DU BANC — chacun = un cours restauré + UNE demande. Les cas synthétiques (domaine
@@ -13,7 +13,7 @@ export type CaseSource =
   | { kind: "dump"; file: string; schema?: string; refsDir?: string }
   /** Supports locaux : copiés dans le cours puis préparés (job prepare), une fois, puis instantané. */
   | { kind: "folder"; dirs: { path: string; category?: "lecture" | "exam_info" | "sample_questions" | "notes"; exclude?: string[] }[] }
-  | { kind: "synth"; spec: SynthSpec; format: "md" | "pdf" | "docx" | "scan" };
+  | { kind: "synth"; spec: SynthSpec; format: SynthFormat };
 
 export type BenchCase = {
   id: string;
@@ -39,11 +39,11 @@ export const SYNTH_CASES: BenchCase[] = [
   { id: "synth-500p", title: "Cours de plus de 500 pages", course: { name: "Veltrane intégral", language: "fr", examFormat: declared("qcm", 15) }, source: { kind: "synth", spec: synth(500, 40, 12, "fr", 3), format: "pdf" }, request: QCM(15), maxMinutes: 8 },
   { id: "synth-scan", title: "PDF scanné (sans couche texte)", course: { name: "Veltrane scanné", language: "fr", examFormat: declared("qcm", 15) }, source: { kind: "synth", spec: synth(31, 6, 4), format: "scan" }, request: QCM(15), maxMinutes: 8 },
   { id: "synth-docx", title: "Supports DOCX", course: { name: "Veltrane docx", language: "fr", examFormat: declared("qcm", 15) }, source: { kind: "synth", spec: synth(41, 8, 4), format: "docx" }, request: QCM(15), maxMinutes: 8 },
-  { id: "synth-bilingue", title: "Sources bilingues (fr/en)", course: { name: "Veltrane bilingue", language: "fr", examFormat: declared("qcm", 15) }, source: { kind: "synth", spec: synth(51, 8, 4, "bilingual"), format: "pdf" }, request: QCM(15), maxMinutes: 8 },
-  { id: "synth-sans-format", title: "Aucun format ni annale", course: { name: "Veltrane sans format", language: "fr" }, source: { kind: "synth", spec: synth(61, 8, 4), format: "pdf" }, request: { job: "exam", requested: 0, expectRefusal: true } },
-  { id: "synth-focus", title: "Focus sur un seul chapitre", course: { name: "Veltrane focus", language: "fr", examFormat: declared("qcm", 15) }, source: { kind: "synth", spec: synth(71, 10, 4), format: "pdf" }, request: QCM(15, 0, { focusChapter: 3 }), maxMinutes: 8 },
-  { id: "synth-40qcm", title: "40 QCM", course: { name: "Veltrane quarante", language: "fr", examFormat: declared("qcm", 40) }, source: { kind: "synth", spec: synth(81, 12, 5), format: "pdf" }, request: QCM(40) },
-  { id: "synth-written12", title: "Écrit, 12 exercices", course: { name: "Veltrane écrit", language: "fr", examFormat: declared("exercises", 12) }, source: { kind: "synth", spec: synth(91, 10, 4), format: "pdf" }, request: { job: "exam", target: { count: 12, kind: "exercises" }, requested: 12 } },
+  { id: "synth-bilingue", title: "Sources bilingues (fr/en)", course: { name: "Veltrane bilingue", language: "fr", examFormat: declared("qcm", 15) }, source: { kind: "synth", spec: synth(51, 8, 4, "bilingual"), format: "pdf-chapters" }, request: QCM(15), maxMinutes: 8 },
+  { id: "synth-sans-format", title: "Aucun format ni annale", course: { name: "Veltrane sans format", language: "fr" }, source: { kind: "synth", spec: synth(61, 8, 4), format: "pdf-chapters" }, request: { job: "exam", requested: 0, expectRefusal: true } },
+  { id: "synth-focus", title: "Focus sur un seul chapitre", course: { name: "Veltrane focus", language: "fr", examFormat: declared("qcm", 15) }, source: { kind: "synth", spec: synth(71, 10, 4), format: "pdf-chapters" }, request: QCM(15, 0, { focusChapter: 3 }), maxMinutes: 8 },
+  { id: "synth-40qcm", title: "40 QCM", course: { name: "Veltrane quarante", language: "fr", examFormat: declared("qcm", 40) }, source: { kind: "synth", spec: synth(81, 12, 5), format: "pdf-chapters" }, request: QCM(40) },
+  { id: "synth-written12", title: "Écrit, 12 exercices", course: { name: "Veltrane écrit", language: "fr", examFormat: declared("exercises", 12) }, source: { kind: "synth", spec: synth(91, 10, 4), format: "pdf-chapters" }, request: { job: "exam", target: { count: 12, kind: "exercises" }, requested: 12 } },
 ];
 
 /** Cas de vrais cours : fichier local (CORTEX_BENCH_CASES), jamais dans le dépôt. */

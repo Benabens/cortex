@@ -297,7 +297,13 @@ async function runCase(c: BenchCase): Promise<string> {
 
   const { runWithCourse } = await import("../db/client");
   const { readPlan, readPrevious, readExam, readUsage, readBilling } = await import("../lib/bench/export");
-  const plan = await runWithCourse(courseId, () => readPlan());
+  let plan = await runWithCourse(courseId, () => readPlan());
+  if (c.source.kind === "synth") {
+    // Cours synthétique : la couverture se mesure sur sa VRAIE table des matières, pas sur le plan
+    // que le moteur en a tiré (un polycopié d'un seul fichier n'en donne aucun).
+    const { synthCourse } = await import("../lib/bench/synth");
+    plan = { basis: "synth", chapters: synthCourse(c.source.spec).chapters.map((ch) => ({ id: ch.seq, seq: ch.seq, title: ch.title })), topicChapter: {} };
+  }
   const previous = await runWithCourse(courseId, () => readPrevious());
   const target = resolveTarget(c, plan);
 
