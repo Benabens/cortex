@@ -51,3 +51,20 @@ test("compileExamPdf : figure cassée → PDF produit sans elle", { skip: hasTec
   assert.equal(await compileExamPdf("fig-cassee"), "fig-cassee.pdf");
   assert.ok(fs.existsSync(path.join(examsDir(), "fig-cassee.pdf")));
 });
+
+test("macros de babel-french sans babel (\\og, \\fg) : remplacées dans tout le document si l'erreur en vient", async () => {
+  const { repairFrenchMacros } = await import("../lib/exam-latex");
+  const tex = "Ligne 1\nselon laquelle \\og le seuil \\fg{} est fixe, puis \\og encore \\fg.\nLe 1\\ier{} cas.";
+  const out = repairFrenchMacros(tex, 2);
+  assert.ok(out);
+  assert.doesNotMatch(out!, /\\og|\\fg|\\ier/);
+  assert.match(out!, /« le seuil »/);
+  assert.equal(repairFrenchMacros(tex.replace(/\\og|\\fg/g, ""), 2), null, "rien de babel sur la ligne : pas de réparation");
+});
+
+test("compileExamPdf : un \\og sans babel ne fait plus tomber le PDF", { skip: hasTectonic ? false : "tectonic absent" }, async () => {
+  const { compileExamPdf } = await import("../lib/exam-latex");
+  const { examsDir } = await import("../lib/paths");
+  fs.writeFileSync(path.join(examsDir(), "og.tex"), "\\documentclass{article}\n\\usepackage[T1]{fontenc}\n\\begin{document}\nSelon \\og le cours \\fg, le seuil est fixe.\n\\end{document}\n");
+  assert.equal(await compileExamPdf("og"), "og.pdf");
+});
