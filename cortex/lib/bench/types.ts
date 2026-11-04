@@ -14,6 +14,8 @@ export type BenchItem = {
   correct?: number[];
   explanation?: string;
   solution?: string;
+  /** Question composée (lib/blocks) : ses sous-questions, QCM ou réponse courte. */
+  parts?: { prompt: string; code?: string; options?: string[]; correct?: number; answer?: string; explanation?: string }[];
 };
 
 export type PdfCheck = { file: string; exists: boolean; pages: number; textChars: number };
