@@ -301,7 +301,15 @@ async function runCase(c: BenchCase): Promise<string> {
   await ensureCoursesLoaded();
   const courseId = await createCourse(c);
   const ctx: Ctx = { c, runDir, url, courseId, replayDir };
-  await setupCourse(ctx);
+  // Une préparation en échec (synth-scan : aucun texte lisible) est un résultat du cas : le run est
+  // noté (livraison 0), pas abandonné.
+  let prepareError: string | undefined;
+  try {
+    await setupCourse(ctx);
+  } catch (e) {
+    prepareError = (e as Error).message;
+    console.error(`  préparation en échec : ${prepareError}`);
+  }
 
   const { runWithCourse } = await import("../db/client");
   const { readPlan, readPrevious, readExam, readUsage, readBilling } = await import("../lib/bench/export");
@@ -319,11 +327,13 @@ async function runCase(c: BenchCase): Promise<string> {
   process.env.LLM_TAPE_LOG = path.join(runDir, "run.replay.jsonl");
   const startedAt = new Date();
   const { startGenerationJob } = await import("../lib/generation");
-  const started = await runWithCourse(courseId, () => startGenerationJob(c.request.job, target ? JSON.stringify(target) : undefined));
   let followed: Followed & { job: (BenchRun["job"] & { creditRef?: string | null }) | null } = { job: null, samples: [] };
-  let refusal: string | undefined;
-  if (started.ok) followed = await followJob(courseId, started.jobId, startedAt.getTime());
-  else refusal = `${started.status} ${started.error}`;
+  let refusal: string | undefined = prepareError ? `préparation : ${prepareError}` : undefined;
+  if (!prepareError) {
+    const started = await runWithCourse(courseId, () => startGenerationJob(c.request.job, target ? JSON.stringify(target) : undefined));
+    if (started.ok) followed = await followJob(courseId, started.jobId, startedAt.getTime());
+    else refusal = `${started.status} ${started.error}`;
+  }
 
   const exported = followed.job?.resultId ? await runWithCourse(courseId, () => readExam(followed.job!.resultId!)) : null;
   const run: BenchRun & { courseId: string; engineModel: string; db: string; replay: boolean } = {
@@ -437,7 +447,8 @@ async function main(): Promise<void> {
     let keep = false;
     try {
       const runDir = await runCase(c);
-      if (!flag("no-judge")) {
+      const exported = JSON.parse(fs.readFileSync(path.join(runDir, "run.json"), "utf8")) as BenchRun;
+      if (!flag("no-judge") && exported.exam?.items.length) {
         try {
           await spawnJudge(runDir);
         } catch (e) {
