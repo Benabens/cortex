@@ -8,10 +8,11 @@ import { LlmError, type CompleteRequest, type CompleteResult } from "./types";
  * du modèle au fichier (JSONL) ; `LLM_TAPE=replay:<fichier>` les rejoue sans appeler
  * aucun fournisseur. Hors banc, la variable n'est pas posée : aucun effet.
  *
- * Rejeu : par empreinte de la requête (même prompt, même modèle, même schéma), sinon par
- * RANG au même site d'appel — un prompt retouché depuis l'enregistrement reçoit la réponse
- * de même forme, le moteur reste exercé de bout en bout. Chaque rejeu est noté dans
- * `<fichier>.replay.jsonl` (exact / rank) : le banc dit combien de réponses sont approchées.
+ * Rejeu : par empreinte de la requête (même prompt, même modèle, même schéma) ; sinon, au même
+ * site d'appel, la réponse du prompt enregistré le plus PROCHE (esquisse minhash des triplets de
+ * mots) encore inutilisée — un prompt retouché depuis l'enregistrement, ou appelé dans un autre
+ * ordre (parallélisme), reçoit la réponse de son homologue ; à défaut, par rang. Chaque rejeu est
+ * noté (exact / similar / rank) dans LLM_TAPE_LOG, sinon `<fichier>.replay.jsonl`.
  * Un site jamais enregistré échoue (UNAVAILABLE) : un rejeu n'invente rien.
  */
 
@@ -31,6 +32,8 @@ type Entry = {
   /** Redemande de completeJson après une réponse illisible. */
   jsonRetry?: boolean;
   at: number;
+  /** Esquisse du prompt (minhash) : rapproche un prompt retouché de son enregistrement. */
+  sketch?: number[];
   text?: string;
   provider?: string;
   usage?: CompleteResult["usage"];
@@ -58,6 +61,26 @@ export function tapeKey(req: CompleteRequest): string {
   return cacheKey("tape", req);
 }
 
+const SKETCH = 64;
+/** Les SKETCH plus petites empreintes des triplets de mots du prompt (bottom-k minhash). */
+export function promptSketch(text: string): number[] {
+  const words = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const seen = new Set<number>();
+  for (let i = 0; i < Math.max(1, words.length - 2); i++) {
+    const shingle = words.slice(i, i + 3).join(" ");
+    if (shingle) seen.add(crypto.createHash("sha1").update(shingle).digest().readUInt32BE(0));
+  }
+  return [...seen].sort((a, b) => a - b).slice(0, SKETCH);
+}
+
+/** Ressemblance de deux esquisses (estimateur bottom-k de Jaccard), de 0 à 1. */
+function likeness(a: number[], b: number[]): number {
+  if (!a.length || !b.length) return 0;
+  const sb = new Set(b), sa = new Set(a);
+  const union = [...new Set([...a, ...b])].sort((x, y) => x - y).slice(0, SKETCH);
+  return union.filter((h) => sa.has(h) && sb.has(h)).length / union.length;
+}
+
 export function recordCall(t: Mode, req: CompleteRequest, site: string, rank: number, ms: number, out: { result?: CompleteResult; error?: unknown }): void {
   const e = out.error;
   const entry: Entry = {
@@ -66,17 +89,19 @@ export function recordCall(t: Mode, req: CompleteRequest, site: string, rank: nu
     ...(req.system ? { systemHash: crypto.createHash("sha256").update(req.system).digest("hex").slice(0, 16) } : {}),
     ...(/\nATTENTION \(essai \d+\/\d+\)/.test(req.prompt) ? { jsonRetry: true } : {}),
     at: Date.now() - ms,
+    sketch: promptSketch(`${req.system ?? ""}\n${req.prompt}`),
     ...(out.result ? { text: out.result.text, provider: out.result.provider, usage: out.result.usage } : {}),
     ...(e ? { error: { code: e instanceof LlmError ? e.code : undefined, message: e instanceof Error ? e.message : String(e) } } : {}),
   };
   fs.appendFileSync(t.file, `${JSON.stringify(entry)}\n`);
 }
 
-const loaded = new Map<string, { byKey: Map<string, Entry[]>; bySite: Map<string, Entry[]> }>();
-function load(file: string): { byKey: Map<string, Entry[]>; bySite: Map<string, Entry[]> } {
+type Loaded = { byKey: Map<string, Entry[]>; bySite: Map<string, Entry[]>; used: Set<Entry> };
+const loaded = new Map<string, Loaded>();
+function load(file: string): Loaded {
   let t = loaded.get(file);
   if (t) return t;
-  t = { byKey: new Map(), bySite: new Map() };
+  t = { byKey: new Map(), bySite: new Map(), used: new Set() };
   const lines = fs.existsSync(file) ? fs.readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
   for (const line of lines) {
     const e = JSON.parse(line) as Entry;
@@ -91,13 +116,26 @@ function load(file: string): { byKey: Map<string, Entry[]>; bySite: Map<string, 
 /** Réponse rejouée (ou erreur rejouée) ; LlmError UNAVAILABLE si la bande n'a rien pour ce site. */
 export function replayCall(t: Mode, req: CompleteRequest, site: string, rank: number): CompleteResult {
   const tape = load(t.file);
+  const free = (e: Entry) => !tape.used.has(e);
   // Un même prompt peut revenir plusieurs fois (réessai à l'identique) : servi dans l'ordre.
   const same = tape.byKey.get(tapeKey(req)) ?? [];
-  const exact = same.find((e) => e.site === site && e.rank === rank) ?? same.find((e) => e.site === site) ?? same[0];
+  const exact = same.find((e) => e.site === site && free(e)) ?? same.find((e) => e.site === site) ?? same[0];
   const bySite = tape.bySite.get(site) ?? [];
-  const hit = exact ?? bySite.find((e) => e.rank === rank) ?? bySite[rank % Math.max(1, bySite.length)];
+  let similar: Entry | undefined;
+  if (!exact) {
+    const sketch = promptSketch(`${req.system ?? ""}\n${req.prompt}`);
+    let best = 0;
+    for (const e of bySite.filter(free)) {
+      const l = e.sketch ? likeness(sketch, e.sketch) : 0;
+      if (l > best) { best = l; similar = e; }
+    }
+  }
+  const byRank = bySite.find((e) => e.rank === rank && free(e)) ?? bySite.find(free) ?? bySite[rank % Math.max(1, bySite.length)];
+  const hit = exact ?? similar ?? byRank;
   if (!hit) throw new LlmError(`Bande du banc : aucun enregistrement pour le site « ${site} » (rang ${rank}) — réenregistre la bande.`, "UNAVAILABLE");
-  fs.appendFileSync(`${t.file}.replay.jsonl`, `${JSON.stringify({ site, rank, match: exact ? "exact" : "rank" })}\n`);
+  tape.used.add(hit);
+  // Journal des rejeux : LLM_TAPE_LOG (le banc le met dans le dossier du run), sinon à côté de la bande.
+  fs.appendFileSync(process.env.LLM_TAPE_LOG || `${t.file}.replay.jsonl`, `${JSON.stringify({ site, rank, match: exact ? "exact" : similar ? "similar" : "rank" })}\n`);
   if (hit.error) throw new LlmError(hit.error.message, hit.error.code);
   return { text: hit.text ?? "", provider: hit.provider ?? "tape", model: hit.model, usage: hit.usage };
 }
