@@ -1078,7 +1078,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // 8 : l'examen 4 de HUM-285 avait cinq questions en trop sur des notions déjà posées.
   const SPARE = 8;
   const spread = spreadOverChapters(
-    await assignChapters(covAll.map((t) => ({ ...t, weight: t.weight ?? 0 }))).catch(() => []),
+    await assignChapters(covAll.map((t) => ({ ...t, weight: t.weight ?? 0 })), { fillChapters: true }).catch(() => []),
     needed + openCount + SPARE,
     { avoid: recent.map((r) => r.topic), asked: recent.map((r) => r.stem) },
   );

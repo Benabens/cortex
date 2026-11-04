@@ -258,3 +258,31 @@ test("une notion = une question : une autre facette d'une notion déjà posée p
   const six = spreadOverChapters(topics, 6)!;
   assert.ok(six.filter((x) => x.label === "Biais cognitifs").length >= 2, six.map((x) => x.subTheme ?? x.label).join(" | "));
 });
+
+test("banc du 04/11 : un chapitre du plan sans notion rattachée reçoit quand même sa question (synth-40qcm : 4 chapitres sur 12 à 0)", async () => {
+  const { buildCourseRow } = await import("../lib/course-create");
+  const { insertCourse } = await import("../db/courses-store");
+  const { reloadCourses } = await import("../lib/courses");
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { assignChapters, spreadOverChapters } = await import("../lib/coverage");
+  const row = buildCourseRow({ name: "Plan à trous", language: "fr", examFormat: { kind: "qcm" } }, "owner");
+  await insertCourse(row);
+  await reloadCourses();
+  const spread = await runWithCourse(row.id, async () => {
+    await q.ensureTable("plan_chapters");
+    const ids: number[] = [];
+    for (const [k, title] of ["Bases", "Méthodes", "Applications", "Limites"].entries()) {
+      ids.push(await q.insert(`INSERT INTO plan_chapters (seq, lecture_no, title, subtitle, summary, source_href) VALUES (?,?,?,?,?,?)`, k + 1, k + 1, title, null, null, null));
+    }
+    // Les notions (types d'exercice d'un cours sans annale) ne touchent que les deux premiers chapitres.
+    const topics = [
+      { label: "Calcul de l'indice", method: null, weight: 3, chapterId: ids[0] },
+      { label: "Critique d'une erreur", method: null, weight: 3, chapterId: ids[1] },
+      { label: "Repères historiques", method: null, weight: 1, chapterId: null },
+    ];
+    return spreadOverChapters(await assignChapters(topics, { fillChapters: true }), 8);
+  });
+  assert.ok(spread, "répartition faite");
+  for (const ch of ["Bases", "Méthodes", "Applications", "Limites"]) assert.ok(spread!.some((t) => t.chapter === ch), `chapitre ${ch} : ${spread!.map((t) => `${t.label}@${t.chapter}`).join(" | ")}`);
+});
