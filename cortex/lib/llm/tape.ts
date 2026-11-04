@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import { cacheKey } from "./cache";
 import { LlmError, type CompleteRequest, type CompleteResult } from "./types";
@@ -25,6 +26,11 @@ type Entry = {
   systemChars: number;
   outputChars: number;
   ms: number;
+  /** Empreinte du prompt système : le banc estime le cache de prompt de l'API (même préfixe, 5 min). */
+  systemHash?: string;
+  /** Redemande de completeJson après une réponse illisible. */
+  jsonRetry?: boolean;
+  at: number;
   text?: string;
   provider?: string;
   usage?: CompleteResult["usage"];
@@ -57,6 +63,9 @@ export function recordCall(t: Mode, req: CompleteRequest, site: string, rank: nu
   const entry: Entry = {
     key: tapeKey(req), site, rank, model: String(req.model ?? "opus"),
     promptChars: req.prompt.length, systemChars: req.system?.length ?? 0, outputChars: out.result?.text.length ?? 0, ms,
+    ...(req.system ? { systemHash: crypto.createHash("sha256").update(req.system).digest("hex").slice(0, 16) } : {}),
+    ...(/\nATTENTION \(essai \d+\/\d+\)/.test(req.prompt) ? { jsonRetry: true } : {}),
+    at: Date.now() - ms,
     ...(out.result ? { text: out.result.text, provider: out.result.provider, usage: out.result.usage } : {}),
     ...(e ? { error: { code: e instanceof LlmError ? e.code : undefined, message: e instanceof Error ? e.message : String(e) } } : {}),
   };

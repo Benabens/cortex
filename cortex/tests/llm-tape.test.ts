@@ -75,6 +75,19 @@ test("enregistrée puis rejouée : mêmes réponses, aucun appel au fournisseur"
   assert.equal(served, 2, "le rejeu n'appelle pas le fournisseur");
 });
 
+test("chaque appel enregistré garde de quoi estimer le coût : tailles, empreinte du système, redemande JSON", async () => {
+  const file = tapeFile("mesures");
+  process.env.LLM_TAPE = `record:${file}`;
+  replies = [{ content: "pas du json" }, { content: '{"ok":true}' }];
+  const { completeJson } = await import("../lib/llm");
+  await completeJson({ prompt: "Donne {ok}.", system: "Tu es un examinateur." });
+  const [first, second] = fs.readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { promptChars: number; systemChars: number; systemHash?: string; jsonRetry?: boolean; at: number });
+  assert.equal(first.systemChars, "Tu es un examinateur.".length);
+  assert.ok(first.systemHash && first.systemHash === second.systemHash);
+  assert.deepEqual([!!first.jsonRetry, !!second.jsonRetry], [false, true]);
+  assert.ok(second.at >= first.at);
+});
+
 test("prompt modifié depuis l'enregistrement : réponse du même rang au même site, signalée", async () => {
   const file = tapeFile("derive");
   process.env.LLM_TAPE = `record:${file}`;
