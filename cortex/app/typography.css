@@ -1,0 +1,16 @@
+/* Famille de l'interface Linear, hébergée localement (licence OFL jointe). */
+@font-face {
+  font-family: "Cortex Inter";
+  src: url("/brand/fonts/inter-variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+/* Alias distinct : le logo de secours ne remplace pas la fonte next/font du logo normal. */
+@font-face {
+  font-family: "Cortex Brand";
+  src: url("/brand/fonts/funnel-display-latin.woff2") format("woff2");
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+}
