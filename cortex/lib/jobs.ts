@@ -592,14 +592,25 @@ export async function jobEta(job: Job): Promise<import("@/lib/eta").Eta | null> 
   if (!["queued", "running", "verifying", "compiling"].includes(job.status)) return null;
   const { estimateRemaining } = await import("@/lib/eta");
   const ms = (s: string) => new Date(`${s.replace(" ", "T")}Z`).getTime();
-  const hist = await q.all<{ created_at: string; updated_at: string }>(
-    `SELECT created_at, updated_at FROM jobs WHERE type = ? AND status = 'done' AND id <> ? ORDER BY id DESC LIMIT 5`, job.type, job.id,
+  const hist = await q.all<{ created_at: string; updated_at: string; target: string | null }>(
+    `SELECT created_at, updated_at, target FROM jobs WHERE type = ? AND status = 'done' AND id <> ? ORDER BY id DESC LIMIT 5`, job.type, job.id,
   ).catch(() => []);
+  const own = await q.get<{ target: string | null }>(`SELECT target FROM jobs WHERE id = ?`, job.id).catch(() => undefined);
   const row = await q.get<{ attempts: number | null }>(`SELECT attempts FROM jobs WHERE id = ?`, job.id).catch(() => undefined);
   return estimateRemaining({
     type: job.type, status: job.status, progress: job.progress, elapsedMs: Math.max(0, Date.now() - ms(job.createdAt)),
     attempts: Number(row?.attempts ?? 0), historyMs: hist.map((h) => ms(h.updated_at) - ms(h.created_at)),
+    historyUnits: hist.map((h) => orderedUnits(h.target)), units: orderedUnits(own?.target ?? null),
   });
+}
+
+/** Questions commandées par un job d'examen, lues dans sa cible (count + openCount) ; null si inconnues. */
+function orderedUnits(target: string | null): number | null {
+  try {
+    const t = target ? (JSON.parse(target) as { count?: unknown; openCount?: unknown }) : null;
+    const n = (typeof t?.count === "number" ? t.count : 0) + (typeof t?.openCount === "number" ? t.openCount : 0);
+    return n > 0 ? n : null;
+  } catch { return null; }
 }
 
 /** Le job actif le plus récent (pour réafficher la progression au reload). */
