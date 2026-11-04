@@ -142,6 +142,8 @@ function wellFormed(raw: unknown): boolean {
   if (!it || typeof it.stem !== "string" || !it.stem.trim()) return false;
   if (!Array.isArray(it.options) || it.options.length < 2 || !it.options.every((o) => typeof o === "string" && o.trim())) return false;
   const n = it.options.length;
+  // Sans explication, la clé n'est pas justifiée dans le corrigé (banc du 04/11 : un lot entier sans).
+  if (typeof it.explanation !== "string" || !it.explanation.trim()) return false;
   return Array.isArray(it.correct) && it.correct.length > 0 && it.correct.every((k) => Number.isInteger(k) && k >= 0 && k < n);
 }
 
