@@ -407,7 +407,14 @@ async function main(): Promise<void> {
     for (const c of allCases()) console.log(`${c.id.padEnd(22)} ${c.title}${c.ci ? " (CI)" : ""}`);
     return;
   }
-  if (cmd === "judge") return judgeRun(path.resolve(arg("run") ?? "."));
+  if (cmd === "judge") {
+    // Rejuger un run gardé : son environnement (base, données) se lit dans run.json.
+    const runDir = path.resolve(arg("run") ?? ".");
+    const run = JSON.parse(fs.readFileSync(path.join(runDir, "run.json"), "utf8")) as { db: string };
+    if (!process.env.DATABASE_URL && process.env.CORTEX_BENCH_PG_URL) runEnv(path.join(runDir, "data"), dbUrl(process.env.CORTEX_BENCH_PG_URL, run.db));
+    if (!process.env.LLM_TAPE) process.env.LLM_TAPE = `record:${path.join(runDir, "judge.tape.jsonl")}`;
+    return judgeRun(runDir);
+  }
   if (cmd === "mark-ref") {
     fs.writeFileSync(path.join(path.resolve(arg("run") ?? "."), "REFERENCE"), "");
     return;
@@ -424,12 +431,21 @@ async function main(): Promise<void> {
   }
   if (cmd === "run") {
     const c = findCase(arg("case") ?? "");
+    let keep = false;
     try {
       const runDir = await runCase(c);
-      if (!flag("no-judge")) await spawnJudge(runDir);
+      if (!flag("no-judge")) {
+        try {
+          await spawnJudge(runDir);
+        } catch (e) {
+          // La base reste : le jugement se refait sans régénérer (synth-bilingue, 04/11 : délai dépassé).
+          keep = true;
+          console.error(`  juge en échec (${(e as Error).message}) — base gardée ; rejuger : npm run bench -- judge --run ${runDir} && npm run bench -- score --run ${runDir}`);
+        }
+      }
       await scoreRun(runDir, c);
     } finally {
-      await dropCreatedDb();
+      if (!keep) await dropCreatedDb();
     }
     return;
   }
