@@ -5,14 +5,11 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/ux/cn";
 import { NAV, isActive } from "./nav";
 
-export function NavList({ onNavigate, items = NAV }: {
-  onNavigate?: () => void;
-  items?: typeof NAV;
-}) {
+export function NavList({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   return (
-    <nav aria-label={items === NAV ? "Navigation principale" : "Ressources et compte"} className="flex flex-col gap-1">
-      {items.map(({ href, label, Icon }) => {
+    <nav aria-label="Navigation principale" className="flex flex-col gap-1">
+      {NAV.map(({ href, label, Icon }) => {
         const active = isActive(pathname, href);
         return (
           <Link

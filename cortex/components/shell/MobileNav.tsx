@@ -49,17 +49,13 @@ export function MobileNav({ open, onClose }: { open: boolean; onClose: () => voi
           first?.focus();
         }
       }}
-      className="fixed inset-0 m-0 h-dvh max-h-none w-screen max-w-none border-0 bg-transparent p-0 text-ink-1 backdrop:bg-black/60 backdrop:backdrop-blur-sm"
+      className="drawer-dialog fixed inset-0 m-0 h-dvh max-h-none w-screen max-w-none border-0 bg-transparent p-0 text-ink-1 backdrop:bg-black/60 backdrop:backdrop-blur-sm"
     >
       <button type="button" onClick={onClose} aria-label="Fermer le menu de navigation"
         tabIndex={-1} className="absolute inset-0 cursor-default" />
-      {/* drawer */}
-      <div
-        className={`absolute inset-y-0 left-0 flex w-[min(84vw,320px)] flex-col border-r border-line bg-bg shadow-[var(--shadow-hero)] transition-transform duration-300 ${
-          open ? "translate-x-0" : "-translate-x-full"
-        }`}
-        style={{ transitionTimingFunction: "var(--ease-out-quint)" }}
-      >
+      {/* Glissement d'entrée et de sortie en CSS (globals.css, .drawer-dialog) : le dialogue
+          natif s'ouvre et se ferme d'un coup, @starting-style anime le tiroir à partir de là. */}
+      <div className="drawer-panel absolute inset-y-0 left-0 flex w-[min(84vw,320px)] flex-col border-r border-line bg-bg shadow-[var(--shadow-hero)]">
         <div className="flex h-16 items-center justify-between px-5">
           <Wordmark markSize={28} />
           <button

@@ -164,7 +164,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
                         <Trash2 className="size-4" strokeWidth={2} />
                       </button>
                     ) : (
-                      <span className="size-8 shrink-0" aria-hidden="true" />
+                      <span className="size-11 shrink-0" aria-hidden="true" />
                     )}
                   </div>
                 </div>

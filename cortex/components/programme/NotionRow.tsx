@@ -43,7 +43,7 @@ export function NotionRow({ t }: { t: UiType }) {
           <span className="block text-[0.9rem] font-medium text-ink-1">{t.title}</span>
           {t.desc && <span className="mt-1 block text-[0.8rem] leading-relaxed text-ink-3">{t.desc}</span>}
         </span>
-        <span className="ml-7 shrink-0 rounded-full border border-line bg-surface-2/50 px-2.5 py-1 text-xs text-ink-3 sm:ml-0">
+        <span className="ml-7 shrink-0 pt-0.5 text-[0.78rem] text-ink-3 sm:ml-0">
           {t.count > 0 ? (
             <span className="whitespace-nowrap" aria-label={`tombé ${t.count} fois aux finals`}>
               Tombé <span className="font-data font-semibold text-ink-1 tabular">{t.count}</span> fois

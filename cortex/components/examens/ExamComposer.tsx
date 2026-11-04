@@ -78,7 +78,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
     }
   }, [job, onGenerated]);
 
-  const running = launching || (jobId != null && !job) || (job != null && JOB_ACTIVE.includes(job.status));
+  const running = launching || (job != null && JOB_ACTIVE.includes(job.status));
 
   const generate = async () => {
     if (running) return;
