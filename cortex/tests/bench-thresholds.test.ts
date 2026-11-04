@@ -65,3 +65,10 @@ test("coût : +5 % toléré (bruit du modèle), au-delà rouge ; sans référenc
   assert.deepEqual(failed(metrics({ perf: { ...ref.perf, costUsd: 0.53 } }), {}, ref), ["perf.cost"]);
   assert.equal(checkThresholds(metrics(), {}).find((v) => v.id === "perf.cost")?.pass, null);
 });
+
+test("rejeu : durée, coût et temps restant sans objet (réponses instantanées), le reste reste exigé", () => {
+  const m = metrics({ perf: { ...metrics().perf, totalMs: 20 * 60_000, costUsd: 9 }, ux: { regressions: 0, unexplainedRegressions: 0, monotone: true, etaMedianError: 0.9 }, duplicates: { intra: 1, previous: 0 } });
+  const v = checkThresholds(m, { maxMinutes: 8, replay: true }, metrics());
+  for (const id of ["perf.duration", "perf.cost", "ux.eta"]) assert.equal(v.find((x) => x.id === id)?.pass, null, id);
+  assert.deepEqual(v.filter((x) => x.pass === false).map((x) => x.id), ["duplicates.intra"]);
+});

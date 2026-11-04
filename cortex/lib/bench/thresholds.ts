@@ -10,7 +10,8 @@ import type { Metrics } from "./metrics";
  *  - la durée est mesurée sur le provider du banc (claude-code), plus lent que l'API de prod.
  */
 
-export type ThresholdOpts = { maxMinutes?: number; expectRefusal?: boolean; focus?: boolean };
+/** `replay` : run rejoué depuis des bandes (CI) — durée, coût et temps restant n'y veulent rien dire. */
+export type ThresholdOpts = { maxMinutes?: number; expectRefusal?: boolean; focus?: boolean; replay?: boolean };
 export type Verdict = { id: string; label: string; value: string; limit: string; pass: boolean | null };
 
 const pct = (x: number) => `${Math.round(x * 1000) / 10} %`;
@@ -46,10 +47,10 @@ export function checkThresholds(m: Metrics, opts: ThresholdOpts = {}, ref?: Metr
   add("render.pdf", "PDF énoncé + corrigé", `${r.statementPdf ? "énoncé ✓" : "énoncé ✗"} ${r.corrigePdf ? "corrigé ✓" : "corrigé ✗"}`, "100 %", delivered ? r.statementPdf && r.corrigePdf : null);
 
   const min = m.perf.totalMs / 60_000;
-  add("perf.duration", "Durée totale", `${Math.round(min * 10) / 10} min`, opts.maxMinutes ? `< ${opts.maxMinutes} min` : "—", opts.maxMinutes && delivered ? min < opts.maxMinutes : null);
-  add("perf.cost", "Coût par examen (estimé)", `${m.perf.costUsd.toFixed(3)} $${ref ? ` (réf. ${ref.perf.costUsd.toFixed(3)} $)` : ""}`, "≤ réf. + 5 %", ref && ref.perf.costUsd > 0 ? m.perf.costUsd <= ref.perf.costUsd * 1.05 : null);
+  add("perf.duration", "Durée totale", `${Math.round(min * 10) / 10} min`, opts.maxMinutes ? `< ${opts.maxMinutes} min` : "—", opts.maxMinutes && delivered && !opts.replay ? min < opts.maxMinutes : null);
+  add("perf.cost", "Coût par examen (estimé)", `${m.perf.costUsd.toFixed(3)} $${ref ? ` (réf. ${ref.perf.costUsd.toFixed(3)} $)` : ""}`, "≤ réf. + 5 %", ref && ref.perf.costUsd > 0 && !opts.replay ? m.perf.costUsd <= ref.perf.costUsd * 1.05 : null);
 
   const e = m.ux.etaMedianError;
-  add("ux.eta", "Erreur médiane du temps restant", e === null ? "—" : pct(e), "≤ 25 %", e === null ? null : e <= 0.25);
+  add("ux.eta", "Erreur médiane du temps restant", e === null ? "—" : pct(e), "≤ 25 %", e === null || opts.replay ? null : e <= 0.25);
   return out;
 }
