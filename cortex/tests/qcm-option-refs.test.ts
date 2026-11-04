@@ -42,3 +42,11 @@ test("renvoi ambigu ou hors des options : pas de réécriture (le rejet actuel s
   assert.equal(repairOptionRefs("La cinquième option est juste.", OPTS, [0]), null);
   assert.equal(repairOptionRefs("Le seuil 0,39 est strict.", OPTS, [0]), "Le seuil 0,39 est strict.", "rien à réécrire : texte rendu tel quel");
 });
+
+test("un nombre entre parenthèses qui ne désigne aucune option n'est pas un renvoi (CS-290 : « row count (7) »)", async () => {
+  const { citesOptionLabel } = await import("../lib/qcm");
+  const fpr = "FN / (FN + TP) = 1/3. Dividing FN by the total row count (7) instead of by FN + TP gives the incorrect 0.14.";
+  assert.equal(citesOptionLabel(fpr, 4), false, "4 options : (7) n'en désigne aucune");
+  assert.equal(citesOptionLabel("La bonne réponse est (2), car le seuil est strict.", 4), true, "(2) désigne une option");
+  assert.equal(citesOptionLabel("L'option (C) confond les seuils.", 4), true);
+});
