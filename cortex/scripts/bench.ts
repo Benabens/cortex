@@ -189,7 +189,10 @@ async function setupCourse(ctx: Ctx): Promise<void> {
     if (c.source.refsDir) copyTree(c.source.refsDir, (await courseDirs(ctx.courseId)).refs);
     return;
   }
-  const snap = path.join(need("CORTEX_BENCH_HOME"), "snapshots", `${c.id}-${snapshotKey(c)}`);
+  // --prepare (ingestion ou préparation modifiée) : instantané à part, suffixé du commit ; celui de
+  // la référence, restauré par les runs ordinaires, n'est jamais écrasé.
+  const base = `${c.id}-${snapshotKey(c)}`;
+  const snap = path.join(need("CORTEX_BENCH_HOME"), "snapshots", flag("prepare") ? `${base}-${commitLabel()}` : base);
   if (!ctx.replayDir && !flag("prepare") && fs.existsSync(path.join(snap, "schema.dump"))) {
     await snapshotRestore(ctx, snap);
     return;
