@@ -219,7 +219,7 @@ function SeeLink({ href, label }: { href: string; label: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      aria-label={`Ouvrir : ${label}`}
+      aria-label={`Voir ${label}`}
       className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-md border border-line bg-surface-2/40 px-2.5 text-[0.78rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-accent)_40%,transparent)] hover:text-accent-hi focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
     >
       voir

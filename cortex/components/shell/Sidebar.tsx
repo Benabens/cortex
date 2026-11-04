@@ -27,7 +27,7 @@ export function Sidebar() {
         <CourseSelector />
         <Link
           href="/cours"
-          className="mt-1.5 inline-flex min-h-9 items-center rounded px-2 text-[0.72rem] text-ink-4 transition-colors hover:text-accent-hi focus-visible:text-accent-hi"
+          className="mt-1.5 inline-flex min-h-9 items-center rounded px-2 text-[0.75rem] text-ink-3 transition-colors hover:text-accent-hi focus-visible:text-accent-hi"
         >
           Gérer mes cours
         </Link>

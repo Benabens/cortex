@@ -240,6 +240,8 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           // Sélection d'un dossier entier : attribut non standard mais supporté par
           // tous les navigateurs de bureau ; React exige la casse DOM exacte.
           {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+          aria-label="Dossier de cours à importer"
+          tabIndex={-1}
           className="sr-only"
           onChange={(e) => e.target.files && importFolder(e.target.files)}
         />

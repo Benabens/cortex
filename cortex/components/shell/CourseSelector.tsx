@@ -62,7 +62,7 @@ export function CourseSelector({ className }: { className?: string }) {
         {initials}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[0.82rem] font-semibold text-ink-1">{title}</span>
+        <span className="line-clamp-2 block text-[0.82rem] font-semibold leading-snug text-ink-1">{title}</span>
         <span className="block truncate text-[0.72rem] text-ink-3">{subtitle}</span>
       </span>
       <ChevronsUpDown className="size-4 shrink-0 text-ink-4 transition-colors group-hover:text-ink-2" aria-hidden="true" />

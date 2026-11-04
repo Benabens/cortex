@@ -60,7 +60,7 @@ export function ConnectedApps() {
         Révoquer coupe leur accès immédiatement.
       </p>
       {error && <p role="alert" className="mt-3 text-[0.85rem] text-[var(--error-ink)]">{error}</p>}
-      {!apps && !error && <div className="skeleton mt-4 h-20 rounded-xl" aria-label="Chargement des applications connectées" aria-busy="true" />}
+      {!apps && !error && <div className="skeleton mt-4 h-20 rounded-xl" role="status" aria-label="Chargement des applications connectées" aria-busy="true" />}
       {apps && apps.length === 0 && <p className="mt-3 text-[0.88rem] text-ink-3">Aucune application connectée.</p>}
       {apps && apps.length > 0 && (
         <ul className="mt-4 flex flex-col gap-3">

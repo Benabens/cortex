@@ -197,7 +197,7 @@ export default function ExamensPage() {
                         disabled={recompiling === e.id}
                         className="inline-flex min-h-11 items-center rounded-full border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-3 transition-colors hover:text-ink-1 disabled:opacity-50"
                       >
-                        {recompiling === e.id ? "Régénération…" : "PDF indisponible — régénérer le PDF"}
+                        {recompiling === e.id ? "Régénération…" : "PDF indisponible : le régénérer"}
                       </button>
                     )}
                     <button
