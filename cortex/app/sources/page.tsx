@@ -17,13 +17,8 @@ export default function SourcesPage() {
     <div className={styles.page}>
       <PageHeader
         title="Sources"
-        description="Tes supports de cours, réunis au même endroit pour préparer le final."
+        description="Le corpus qui nourrit Cortex : tes annales, séries et slides. Importe, puis prépare le cours."
       />
-      {data && !error && <div className={styles.stats} aria-label="Contenu du cours">
-        <div className={styles.stat}><strong>{data.corpus.reduce((sum, c) => sum + c.sources, 0)}</strong><span>fichiers dans le cours</span></div>
-        <div className={styles.stat}><strong>{data.exams.length}</strong><span>annales disponibles</span></div>
-        <div className={styles.stat}><strong>{data.corpus.length}</strong><span>types de supports</span></div>
-      </div>}
       <div className={styles.split}>
         {/* Skeleton UNIQUEMENT au premier chargement : un refetch (ex. coche « Référence »)
             garde la liste montée → plus de saut/remontage (fix jank). */}

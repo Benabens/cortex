@@ -312,18 +312,11 @@ export function BlockExam({
   return (
     <ExamFrame
       id={exam.id}
-      description={`${exam.blocks.length} questions composées. Lis le scénario, puis réponds aux sous-questions. Les réponses courtes se vérifient critère par critère.`}
+      description={`${exam.blocks.length} question${exam.blocks.length > 1 ? "s" : ""} composée${exam.blocks.length > 1 ? "s" : ""} : un scénario, puis ses sous-questions. Le choix unique et la lecture de code se corrigent d’un coup ; une réponse courte se vérifie critère par critère.`}
       pdf={exam.pdf}
       solutions={exam.solutions}
       qs={qs}
-      graded={!!graded}
-      questions={exam.blocks.map((block, index) => ({
-        id: `block-${block.id}`,
-        label: `Question ${index + 1}`,
-        answered: block.parts.some(
-          (part) => answers[part.id] !== undefined && answers[part.id] !== "",
-        ),
-      }))}
+
     >
       {err && (
         <div

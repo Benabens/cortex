@@ -91,7 +91,6 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
 
   return (
     <Panel className="overflow-hidden p-0">
-      <h2 className="px-6 pt-6 text-[1.2rem] font-semibold">Bibliothèque du cours</h2>
       {removeError && (
         <p role="alert" className="border-b border-line px-4 py-2.5 text-[0.82rem] text-danger-hi">
           Retrait impossible : {removeError}

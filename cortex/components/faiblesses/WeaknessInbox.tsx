@@ -151,12 +151,10 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
   };
 
   return (
-    <section className="d2-card relative overflow-hidden p-5 sm:p-6" aria-labelledby="inbox-title">
+    <section className="d2-card relative overflow-hidden p-5 sm:p-7" aria-labelledby="inbox-title">
       <h2 id="inbox-title" className="text-xl font-semibold text-ink-1">
         <label htmlFor={inputId}>Ajoute ce qui t’a piégé</label>
       </h2>
-
-      <p className="mt-2 text-sm leading-relaxed text-ink-3">Une note, une discussion, une capture ou un PDF. Cortex relie tes erreurs aux notions du cours.</p>
 
       {/* Zone de dépôt unique : texte, capture collée, PDF ou image glissés. */}
       <div
@@ -170,11 +168,11 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
           setDragOver(false);
         }}
         className={cn(
-          "mt-4 flex min-h-[170px] flex-col rounded-xl border-[1.5px] border-dashed transition-colors",
+          "mt-5 flex min-h-[190px] flex-col rounded-2xl border-[1.5px] border-dashed transition-colors",
           "focus-within:border-[color-mix(in_oklch,var(--color-violet)_55%,transparent)]",
           dragOver
             ? "border-[color-mix(in_oklch,var(--color-violet)_65%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_7%,transparent)]"
-            : "border-line-strong bg-surface-2/30"
+            : "border-line-strong bg-surface-0/40"
         )}
       >
         {file && (
@@ -244,7 +242,7 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
       </p>
 
       {/* sévérité discrète (texte seul) + action */}
-      <div className="mt-3 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+      <div className="mt-4 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
         <Segmented
           variant="line"
           label="Sévérité"

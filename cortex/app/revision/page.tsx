@@ -1,7 +1,6 @@
 "use client";
 
 import styles from "@/app/secondary.module.css";
-import Link from "next/link";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useEffect, useMemo, useState } from "react";
 import { useApi, useCourse } from "@/lib/ux/api";
@@ -80,13 +79,10 @@ export default function RevisionPage() {
 
   return (
     <div className={styles.page}>
-      <PageHeader title="Réviser les annales" description="Retrouve les questions des vrais finals, classées dans l’ordre du cours. Avance à ton rythme et révèle les réponses quand tu es prêt." />
-      <Link href="/seance" className="self-start text-sm text-violet-hi hover:underline">← Revenir à ma séance</Link>
-      {d && !loading && !error && <div className={styles.stats}>
-        <div className={styles.stat}><strong>{totBank}</strong><span>questions des annales</span></div>
-        <div className={styles.stat}><strong>{d.plan.stats.qcm + d.plan.stats.open}</strong><span>questions du parcours</span></div>
-        <div className={styles.stat}><strong>{doneTotal}</strong><span>marquées comme faites</span></div>
-      </div>}
+      <PageHeader
+        title="Toutes les vraies questions des finals + un parcours qui couvre tout."
+        description="La banque exhaustive de chaque QCM et chaque ouverte des annales, triée par sujet dans l’ordre du cours, et un parcours généré couvrant 100 % du programme à la bonne proportion. Déjà prêt, rien à relancer."
+      />
 
       {!loading && error && (
         <LoadError
@@ -102,7 +98,7 @@ export default function RevisionPage() {
         <div className="card card-pad empty">
           <div className="empty-ico">📚</div>
           <div className="empty-title">Banque pas encore construite</div>
-          <div className="empty-sub">Les questions seront disponibles une fois les sources du cours préparées. <Link className="text-violet-hi underline underline-offset-4" href="/sources">Ouvrir les sources</Link>.</div>
+          <div className="empty-sub">Lance <code className="kbd">npm run revision -- --course={d?.course ?? "ml"}</code> (index + parcours), puis recharge.</div>
         </div>
       )}
 
@@ -111,7 +107,7 @@ export default function RevisionPage() {
           {/* récap proportions par sujet (ordre du cours) */}
           <section className={styles.guide}>
             <div className="flex flex-wrap items-center gap-2 mb-2">
-              <h2 className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>Les sujets de tes finals</h2>
+              <h2 className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>Couverture des finals par sujet (ordre du cours)</h2>
               <span className="tag tag-blue">{d.bank.stats.qcm} QCM · {d.bank.stats.open} ouvertes</span>
               {d.source === "json" && <span className="tag" title="chargé depuis le fichier committé">pré-construit ✓</span>}
             </div>
@@ -194,7 +190,7 @@ export default function RevisionPage() {
 
           {tab === "plan" && (
             (d.plan.questions.length === 0)
-              ? <div className="card card-pad empty"><div className="empty-title">Parcours pas encore généré</div><div className="empty-sub">Le parcours de ce cours n’est pas encore disponible. Les questions des annales restent accessibles dans les autres onglets.</div></div>
+              ? <div className="card card-pad empty"><div className="empty-title">Parcours pas encore généré</div><div className="empty-sub">Lance <code className="kbd">npm run revision -- --course={d.course} --parcours</code>.</div></div>
               : <div className="space-y-2">
                 {planGroups.map((g) => {
                   const key = `plan:${g.topic}`;

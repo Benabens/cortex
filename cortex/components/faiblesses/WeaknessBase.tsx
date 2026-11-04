@@ -85,12 +85,12 @@ export function WeaknessBase({
 
   return (
     <section>
-      <SectionHeader title="À retravailler" hint="Sélectionne une faiblesse pour créer un exercice ciblé." />
+      <SectionHeader title="Base des faiblesses" />
       {deleteError && <p role="alert" className="mb-3 rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger-hi">{deleteError}</p>}
 
       {weaknesses.length === 0 ? (
-        <div className="d2-card flex flex-col items-center gap-3 rounded-xl px-6 py-14 text-center">
-          <span className="grid size-11 place-items-center rounded-lg border border-line bg-surface-2/60 text-ink-3">
+        <div className="d2-card flex flex-col items-center gap-3 px-6 py-16 text-center">
+          <span className="grid size-12 place-items-center rounded-2xl border border-violet/25 bg-violet/10 text-violet-hi">
             <Target className="size-5" strokeWidth={2} />
           </span>
           <p className="text-[0.95rem] font-medium text-ink-1">Aucune faiblesse suivie</p>
@@ -173,7 +173,7 @@ function WeaknessRow({
   return (
     <div
       className={cn(
-        "group flex flex-col gap-3 rounded-lg px-3 py-3.5 transition-colors hover:bg-surface-2/50 lg:flex-row lg:items-start lg:gap-4",
+        "group flex flex-col gap-3 rounded-xl px-4 py-5 transition-colors hover:bg-surface-2/50 lg:flex-row lg:items-start lg:gap-4",
         i > 0 && "border-t border-line"
       )}
     >

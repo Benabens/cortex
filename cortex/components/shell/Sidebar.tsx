@@ -3,12 +3,18 @@ import { Wordmark } from "./Logo";
 import { CourseSelector } from "./CourseSelector";
 import { NavList } from "./NavList";
 
-import { SECONDARY_NAV } from "./nav";
-
+/**
+ * Rail gauche. Volontairement SANS footer profil/streak : le back ne fournit
+ * ni profil ni série de jours — on n'affiche que ce qui est nourri (honnêteté).
+ */
 export function Sidebar() {
   return (
     <aside
-      className="fixed inset-y-0 left-0 z-30 hidden w-rail flex-col border-r border-line bg-surface-1 lg:flex"
+      className="fixed inset-y-0 left-0 z-30 hidden w-rail flex-col border-r border-line lg:flex"
+      style={{
+        background:
+          "linear-gradient(180deg, color-mix(in oklch, var(--color-surface-1) 60%, var(--color-bg)), var(--color-bg))",
+      }}
     >
       <div className="flex h-16 items-center px-5">
         <Link
@@ -32,9 +38,6 @@ export function Sidebar() {
       {/* Plus d'intitulé « Espace de travail » : la position de la nav suffit (anti-slop 2026-09). */}
       <div className="mt-5 flex-1 overflow-y-auto px-3">
         <NavList />
-      </div>
-      <div className="border-t border-line p-3">
-        <NavList items={SECONDARY_NAV} />
       </div>
     </aside>
   );

@@ -181,16 +181,11 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
   return (
     <ExamFrame
       id={exam.id}
-      description={`${exam.items.length} questions à choix${exam.open.length ? ` + ${exam.open.length} ouverte(s)` : ""}. Réponds, puis corrige-toi. Choix unique (SCQ) ou multiple (MCQ) selon la question.`}
+      description={`${exam.items.length} questions à choix${exam.open.length ? ` + ${exam.open.length} ouverte(s)` : ""} · réponds, puis corrige-toi. SCQ = une seule case ; MCQ = une ou plusieurs.`}
       pdf={exam.pdf}
       solutions={exam.solutions}
       qs={qs}
-      graded={!!graded}
-      questions={exam.items.map((item) => ({
-        id: `question-${item.id}`,
-        label: `Question ${item.idx + 1}`,
-        answered: (answers[item.idx]?.length ?? 0) > 0,
-      }))}
+
     >
       {err && (
         <div

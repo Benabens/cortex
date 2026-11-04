@@ -27,7 +27,7 @@ export function OnboardingHero({ courseName }: { courseName: string }) {
 
   return (
     <section
-      className="panel top-light relative overflow-hidden rounded-xl"
+      className="d2-card relative overflow-hidden"
       aria-labelledby="onboarding-title"
     >
       <div className="relative p-5 sm:p-7">

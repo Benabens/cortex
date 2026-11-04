@@ -25,7 +25,7 @@ export function NotionRow({ t }: { t: UiType }) {
         aria-controls={hasDetail ? panelId : undefined}
         disabled={!hasDetail}
         className={cn(
-          "group flex w-full items-start gap-3 rounded-lg px-3 py-3 text-left transition-colors",
+          "group flex w-full flex-wrap items-start gap-3 rounded-xl px-3 py-4 text-left transition-colors",
           hasDetail ? "hover:bg-surface-2/40" : "cursor-default",
           "focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-[-2px]"
         )}
@@ -39,11 +39,11 @@ export function NotionRow({ t }: { t: UiType }) {
           strokeWidth={2.25}
           aria-hidden="true"
         />
-        <span className="min-w-0 flex-1">
+        <span className="min-w-[8rem] flex-1">
           <span className="block text-[0.9rem] font-medium text-ink-1">{t.title}</span>
-          {t.desc && <span className="mt-0.5 block line-clamp-2 text-[0.78rem] leading-relaxed text-ink-3">{t.desc}</span>}
+          {t.desc && <span className="mt-1 block text-[0.8rem] leading-relaxed text-ink-3">{t.desc}</span>}
         </span>
-        <span className="shrink-0 pt-0.5 text-[0.78rem] text-ink-3">
+        <span className="ml-7 shrink-0 rounded-full border border-line bg-surface-2/50 px-2.5 py-1 text-xs text-ink-3 sm:ml-0">
           {t.count > 0 ? (
             <span className="whitespace-nowrap" aria-label={`tombé ${t.count} fois aux finals`}>
               Tombé <span className="font-data font-semibold text-ink-1 tabular">{t.count}</span> fois
@@ -55,7 +55,7 @@ export function NotionRow({ t }: { t: UiType }) {
       </button>
 
       {hasDetail && open && (
-        <div id={panelId} className="rise-in pb-3 pl-10 pr-3">
+        <div id={panelId} className="rise-in mx-3 mb-3 rounded-xl border border-line bg-surface-0/40 p-4 sm:ml-10">
           {t.occurrences.length > 0 && (
             <div>
               {/* Pas d'intitulé en capitales : les chips (final + page) se lisent seules,

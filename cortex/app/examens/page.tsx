@@ -2,7 +2,6 @@
 
 import styles from "@/app/secondary.module.css";
 import { ExternalLink, CheckCircle2, ClipboardList, WifiOff, RotateCw, Trash2, FileText } from "lucide-react";
-import { TrainingNav } from "@/components/entrainement/TrainingNav";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, SectionHeader } from "@/components/ui/primitives";
 import { Badge } from "@/components/ui/Badge";
@@ -54,8 +53,7 @@ export default function ExamensPage() {
 
   return (
     <div className={styles.page}>
-      <PageHeader title="S’entraîner" description="Compose un examen blanc au format de ton final et retrouve les examens prêts." />
-      <TrainingNav current="/examens" />
+      <PageHeader title="Examens" description="Compose un examen blanc au format réel du final, puis lance-le. Un examen qui aurait pu tomber." />
 
       {deleteError && (
         <p role="alert" className="text-[0.85rem] text-danger-hi">
@@ -152,7 +150,7 @@ export default function ExamensPage() {
               const summary = asText(e.verifySummary);
               const day = formatDay(e.createdAt);
               return (
-                <Panel key={e.id} className="flex flex-wrap items-center gap-4 p-4">
+                <Panel key={e.id} className="flex flex-wrap items-center gap-5 p-5 sm:p-6">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <h3 className="truncate text-[0.95rem] font-semibold text-ink-1">
@@ -169,13 +167,13 @@ export default function ExamensPage() {
                     </p>
                   </div>
                   {/* Sur mobile, les actions passent sous le titre (sinon elles le recouvrent). */}
-                  <div className="flex w-full shrink-0 items-center gap-1.5 sm:w-auto">
+                  <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto">
                     {e.url && (
                       <a
                         href={e.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex h-10 items-center gap-1 rounded-md border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_38%,transparent)] hover:text-ink-1"
+                        className="inline-flex min-h-11 items-center gap-1 rounded-full border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_38%,transparent)] hover:text-ink-1"
                       >
                         Énoncé
                         <ExternalLink className="size-3.5" aria-hidden="true" />
@@ -186,7 +184,7 @@ export default function ExamensPage() {
                         href={e.solutionsUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex h-10 items-center gap-1 rounded-md border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-emerald)_38%,transparent)] hover:text-ink-1"
+                        className="inline-flex min-h-11 items-center gap-1 rounded-full border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-emerald)_38%,transparent)] hover:text-ink-1"
                       >
                         Corrigé
                         <ExternalLink className="size-3.5" aria-hidden="true" />
@@ -197,7 +195,7 @@ export default function ExamensPage() {
                         type="button"
                         onClick={() => recompile(e.id)}
                         disabled={recompiling === e.id}
-                        className="inline-flex h-10 items-center rounded-md border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-3 transition-colors hover:text-ink-1 disabled:opacity-50"
+                        className="inline-flex min-h-11 items-center rounded-full border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-3 transition-colors hover:text-ink-1 disabled:opacity-50"
                       >
                         {recompiling === e.id ? "Régénération…" : "PDF indisponible — régénérer le PDF"}
                       </button>
@@ -207,7 +205,7 @@ export default function ExamensPage() {
                       onClick={() => removeExam(e.id)}
                       disabled={deleting === e.id}
                       aria-label={`Supprimer l’examen #${e.id}`}
-                      className="grid size-10 place-items-center rounded-md border border-transparent text-ink-4 transition-colors hover:border-[color-mix(in_oklch,var(--color-danger)_35%,transparent)] hover:text-danger-hi disabled:opacity-50"
+                      className="grid size-11 place-items-center rounded-full border border-transparent text-ink-4 transition-colors hover:border-[color-mix(in_oklch,var(--color-danger)_35%,transparent)] hover:text-danger-hi disabled:opacity-50"
                     >
                       <Trash2 className="size-4" strokeWidth={2} />
                     </button>
