@@ -25,6 +25,9 @@ const execFileP = promisify(execFile);
 
 // ===================== Types exposés =====================
 
+/** md : un fichier par chapitre ; pdf, docx, scan : un seul polycopié ; pdf-chapters : un PDF par chapitre. */
+export type SynthFormat = "md" | "pdf" | "pdf-chapters" | "docx" | "scan";
+
 export type SynthSpec = {
   seed: number;
   chapters: number;
@@ -593,9 +596,28 @@ async function writeScan(course: SynthCourse, dir: string): Promise<string> {
   }
 }
 
-export async function writeCourseFiles(course: SynthCourse, dir: string, format: "md" | "pdf" | "docx" | "scan"): Promise<string[]> {
+/** Un PDF par chapitre (`chNN-<slug>.pdf`) : les supports d'un cours donné en séances (le moteur en tire son plan). */
+async function writePdfChapters(course: SynthCourse, dir: string): Promise<string[]> {
+  const out: string[] = [];
+  for (const ch of course.chapters) {
+    const base = `ch${String(ch.seq).padStart(2, "0")}-${slugify(ch.title)}`;
+    const tmp = await fsp.mkdtemp(path.join(dir, ".chap-"));
+    try {
+      const pdf = await writePdf({ ...course, chapters: [ch], facts: course.facts.filter((f) => f.chapter === ch.seq) }, tmp);
+      const dest = path.join(dir, `${base}.pdf`);
+      await fsp.rename(pdf, dest);
+      out.push(dest);
+    } finally {
+      await fsp.rm(tmp, { recursive: true, force: true });
+    }
+  }
+  return out;
+}
+
+export async function writeCourseFiles(course: SynthCourse, dir: string, format: SynthFormat): Promise<string[]> {
   if (!fs.existsSync(dir)) await fsp.mkdir(dir, { recursive: true });
   if (format === "md") return writeMd(course, dir);
+  if (format === "pdf-chapters") return writePdfChapters(course, dir);
   if (format === "pdf") return [await writePdf(course, dir)];
   if (format === "docx") return [await writeDocx(course, dir)];
   return [await writeScan(course, dir)];

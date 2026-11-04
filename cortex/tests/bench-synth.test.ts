@@ -104,3 +104,20 @@ test("pdf : pdftotext retrouve le nom d'une notion ; scan : quasi aucun texte, >
 function normalizePdfText(s: string): string {
   return s.replace(/-\n/g, "").replace(/ﬁ/g, "fi").replace(/ﬂ/g, "fl").replace(/\s+/g, " ");
 }
+
+test("pdf-chapters : un PDF par chapitre, comme les supports d'un cours en séances", { skip: hasTectonic ? false : "tectonic absent" }, async () => {
+  const course = synthCourse({ seed: 12, chapters: 3, conceptsPerChapter: 1, language: "bilingual" });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-synth-chap-"));
+  try {
+    const files = await writeCourseFiles(course, dir, "pdf-chapters");
+    assert.equal(files.length, 3);
+    assert.deepEqual(files.map((f) => path.basename(f).slice(0, 5)), ["ch01-", "ch02-", "ch03-"]);
+    for (const [i, f] of files.entries()) {
+      const text = execFileSync("pdftotext", [f, "-"], { encoding: "utf8" });
+      const concept = course.facts.find((x) => x.chapter === i + 1)!.concept;
+      assert.ok(text.includes(concept.slice(0, 6)), `${path.basename(f)} contient ${concept}`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
