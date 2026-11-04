@@ -773,6 +773,13 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
       { check: (v) => (Array.isArray((v as { results?: unknown })?.results) ? null : "le champ « results » manque") },
     );
   } catch { return items; } // fallback honnête : non vérifiés
+  // Sortie du modèle non garantie (banc du 04/11 : une clé rendue en nombre, des options en chaîne) :
+  // chaque verdict est ramené à sa forme une fois, à la lecture, plutôt que de faire planter le lot.
+  const ints = (x: unknown): number[] => (Array.isArray(x) ? x.filter((k): k is number => Number.isInteger(k)) : Number.isInteger(x) ? [x as number] : []);
+  res.results = (Array.isArray(res.results) ? res.results : []).filter((r) => r && Number.isInteger(r.index)).map((r) => ({
+    ...r, correct: ints(r.correct), trivial_distractors: ints(r.trivial_distractors), off_course_options: ints(r.off_course_options),
+    course_terms: Array.isArray(r.course_terms) ? r.course_terms : [], off_course_terms: Array.isArray(r.off_course_terms) ? r.off_course_terms : [],
+  }));
   // Contrôle DÉTERMINISTE des termes que le juge dit avoir lus dans le cours : une notion
   // inventée (« status quo bias », absent du corpus de CS-290) ne passe pas parce que le
   // juge l'a crue du cours.
