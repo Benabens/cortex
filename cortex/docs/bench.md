@@ -46,4 +46,6 @@ Rubrique figée et versionnée (`lib/bench/rubric.ts`, empreinte épinglée dans
 
 ## CI
 
-`tests/bench-replay.test.ts` rejoue le cas `synth-3p` depuis ses bandes (`tests/fixtures/bench/synth-3p`) : préparation, génération et juge, sans modèle, puis seuils. Un prompt modifié reçoit la réponse du même rang au même site d'appel ; un site absent de la bande échoue. Réenregistrer la bande : `npm run bench -- run --case synth-3p`, puis copier `prepare.tape.jsonl`, `run.tape.jsonl` et `judge.tape.jsonl` du run dans le dossier des fixtures.
+L'étape « Banc moteur (rejeu de synth-3p) » de `.github/workflows/ci.yml` rejoue le cas `synth-3p` depuis ses bandes (`tests/fixtures/bench/synth-3p`) : préparation, génération et juge, sans modèle, un appel à la fois. Elle échoue sur une **régression** : un seuil vert dans `metrics.json` (la référence enregistrée) qui passe au rouge. Les seuils déjà rouges ne bloquent pas : le moteur ne les tient pas encore.
+
+Rejeu : par empreinte exacte du prompt ; un prompt retouché reçoit la réponse du prompt enregistré le plus proche au même site (esquisse minhash), chaque entrée une seule fois ; un site absent de la bande échoue. Le décompte exact / proche / rang est écrit dans `*.replay.jsonl` du run. Réenregistrer après un changement de prompt important : `npm run bench -- run --case synth-3p --prepare`, copier `prepare.tape.jsonl`, `run.tape.jsonl` et `judge.tape.jsonl` du run dans le dossier des fixtures, rejouer une fois et copier son `metrics.json` comme nouvelle référence.
