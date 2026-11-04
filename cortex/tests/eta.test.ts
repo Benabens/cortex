@@ -86,3 +86,60 @@ test("jobEta lit l'historique du cours : durée des derniers jobs terminés du m
   });
 });
 
+
+test("à avancement constant, le temps restant ne remonte pas avec le temps qui passe (étape longue à 30 %)", async () => {
+  const { estimateRemaining } = await import("../lib/eta");
+  const at = (min: number) => estimateRemaining({ type: "qcm", status: "running", progress: 30, elapsedMs: min * MIN, attempts: 0, historyMs: [10 * MIN] }).remainingMs!;
+  assert.ok(at(5) <= at(3) && at(3) <= at(2), `${at(2) / MIN} → ${at(3) / MIN} → ${at(5) / MIN} min`);
+});
+
+test("avancement PAR PHASE : chemin critique des phases parallèles, puis la suivante ; ne recule qu'à l'ajout d'un réessai", async () => {
+  const { PhaseProgress } = await import("../lib/progress");
+  // QCM (2 lots, 8 min) en parallèle des ouvertes (2, 2 min), puis le PDF (30 s).
+  const w = new PhaseProgress(8, [[{ name: "QCM", units: 2, ms: 8 * MIN }, { name: "Ouvertes", units: 2, ms: 2 * MIN }], [{ name: "PDF", units: 1, ms: 0.5 * MIN }]]);
+  assert.equal(w.pct(), 8);
+  w.done("Ouvertes", 2);
+  assert.equal(w.pct(), 8, "les ouvertes finies n'avancent rien : les QCM, plus longs, restent le chemin critique");
+  w.done("QCM");
+  const half = w.pct();
+  assert.ok(half > 45 && half < 55, `${half} %`);
+  w.add("QCM"); // un lot de comblement : seul cas où l'avancement recule
+  assert.ok(w.pct() < half);
+  w.done("QCM", 2);
+  w.done("PDF");
+  assert.equal(w.pct(), 99, "jamais 100 avant l'étape finale (le worker la lit comme « terminé »)");
+});
+
+test("durées de phase lues dans le journal des jobs terminés (« ⏱ QCM : 5 min 12 s »)", async () => {
+  const { phaseDurationsFromLogs } = await import("../lib/progress");
+  const logs = [
+    [{ msg: "⏱ QCM : 5 min 12 s" }, { msg: "⏱ Questions ouvertes : 48 s" }, { msg: "⏱ PDF : 9 s" }],
+    [{ msg: "⏱ QCM : 6 min 00 s" }, { msg: "autre étape" }],
+    [{ msg: "⏱ QCM : 4 min 30 s" }],
+  ];
+  assert.deepEqual(phaseDurationsFromLogs(logs), { QCM: 312_000, "Questions ouvertes": 48_000, PDF: 9_000 });
+});
+
+test("worker : une ligne de journal (avancement 0) ne fait retomber ni l'avancement ni l'état d'un job", async () => {
+  const { stepFields } = await import("../lib/jobs");
+  const status = (p: number) => (p >= 100 ? "done" as const : p >= 45 ? "verifying" as const : "running" as const);
+  assert.deepEqual(stepFields("⏱ QCM : 5 min 12 s", 0, status), { currentStep: "⏱ QCM : 5 min 12 s" });
+  assert.deepEqual(stepFields("Vérification…", 70, status), { currentStep: "Vérification…", progress: 70, status: "verifying" });
+});
+
+test("historique des phases : médiane des lignes « ⏱ » des derniers jobs terminés du même type", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const jobs = await import("../lib/jobs");
+  await runWithCourse("algo", async () => {
+    for (const qcm of ["⏱ QCM : 4 min 00 s", "⏱ QCM : 6 min 00 s", "⏱ QCM : 5 min 00 s"]) {
+      const id = await jobs.createJob("qcm");
+      await jobs.logJob(id, qcm);
+      await jobs.logJob(id, "⏱ PDF : 20 s");
+      await q.run(`UPDATE jobs SET status = 'done' WHERE id = ?`, id);
+    }
+    const running = await jobs.createJob("qcm");
+    await jobs.logJob(running, "⏱ QCM : 59 min 00 s");
+    assert.deepEqual(await jobs.phaseHistory("qcm"), { QCM: 300_000, PDF: 20_000 }, "un job en cours ne compte pas");
+  });
+});

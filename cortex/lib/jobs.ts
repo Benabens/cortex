@@ -567,6 +567,27 @@ async function cleanupPartial(job: Job): Promise<void> {
  * Temps restant estimé d'un job actif (lib/eta), d'après la durée des derniers jobs
  * terminés du même type dans ce cours ; null pour un job terminé.
  */
+/**
+ * Ce qu'une étape d'un générateur écrit sur son job. Un avancement ≤ 0 est une simple ligne de
+ * journal (« ⏱ QCM : … », « régénération ciblée ») : il ne touche ni l'avancement ni l'état — il
+ * faisait retomber le job à 0 % en pleine génération, et son temps restant au total.
+ */
+export function stepFields(s: string, p: number, status: (p: number) => JobStatus): { currentStep: string; progress?: number; status?: JobStatus } {
+  return p > 0 ? { currentStep: s, progress: p, status: status(p) } : { currentStep: s };
+}
+
+/**
+ * Durée médiane de chaque phase (lignes « ⏱ » du journal) des derniers jobs TERMINÉS de ce type
+ * dans ce cours : les poids de l'avancement par phase (lib/progress).
+ */
+export async function phaseHistory(type: string, limit = 5): Promise<Record<string, number>> {
+  const { phaseDurationsFromLogs } = await import("@/lib/progress");
+  const rows = await q.all<{ log_json: string | null }>(`SELECT log_json FROM jobs WHERE type = ? AND status = 'done' ORDER BY id DESC LIMIT ?`, type, limit).catch(() => []);
+  return phaseDurationsFromLogs(rows.map((r) => {
+    try { return JSON.parse(r.log_json ?? "[]") as { msg: string }[]; } catch { return []; }
+  }));
+}
+
 export async function jobEta(job: Job): Promise<import("@/lib/eta").Eta | null> {
   if (!["queued", "running", "verifying", "compiling"].includes(job.status)) return null;
   const { estimateRemaining } = await import("@/lib/eta");
