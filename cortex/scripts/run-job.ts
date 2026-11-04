@@ -13,7 +13,7 @@ import { llmAvailable, llmUnavailableReason } from "../lib/llm";
 import { generateTargetedExercise } from "../lib/exam";
 import { generateMockExam } from "../lib/mock-exam";
 import { texAvailable } from "../lib/exam-latex";
-import { assertJobCourseOwned, getJob, heartbeatJob, logJob, setJob } from "../lib/jobs";
+import { assertJobCourseOwned, getJob, heartbeatJob, logJob, phaseHistory, setJob, stepFields } from "../lib/jobs";
 import { setCurrentJob } from "../lib/billing/usage-context";
 import { generateLabExercise } from "../lib/labs";
 import { analyzeBlueprint } from "../lib/program";
@@ -166,7 +166,7 @@ async function main() {
       const onStep = async (s: string, p: number) => {
         const j = await getJob(jobId);
         if (j?.status === "canceled") { await logJob(jobId, "Annulé."); process.exit(0); }
-        await setJob(jobId, { currentStep: s, progress: p, status: p >= 100 ? "done" : "running" });
+        await setJob(jobId, stepFields(s, p, (x) => (x >= 100 ? "done" : "running")));
         await logJob(jobId, s);
       };
       const f = await detectFormat({ onStep });
@@ -194,12 +194,13 @@ async function main() {
       const onStep = async (s: string, p: number) => {
         const j = await getJob(jobId);
         if (j?.status === "canceled") { await logJob(jobId, "Annulé."); process.exit(0); }
-        await setJob(jobId, { currentStep: s, progress: p, status: p >= 100 ? "done" : "running" });
+        await setJob(jobId, stepFields(s, p, (x) => (x >= 100 ? "done" : "running")));
         await logJob(jobId, s);
       };
       // Livraison progressive : le job pointe vers l'examen dès que ses QCM sont prêts.
       const onExamReady = async (examId: number) => { await setJob(jobId, { resultId: examId, resultPath: `/mock/${examId}` }); };
-      const res = await generateQcmExam({ count, openCount, focus, onStep, onExamReady });
+      // Poids de l'avancement par phase : durées mesurées des derniers examens QCM du cours.
+      const res = await generateQcmExam({ count, openCount, focus, onStep, onExamReady, phaseMs: await phaseHistory("qcm") });
       // Examen incomplet : dit et remboursé au prorata (lib/jobs settleShortfall).
       const { settleShortfall } = await import("../lib/jobs");
       const notice = await settleShortfall(job, res.count + res.open, res.requested + res.openRequested);
@@ -228,7 +229,7 @@ async function main() {
       const onStep = async (s: string, p: number) => {
         const j = await getJob(jobId);
         if (j?.status === "canceled") { await logJob(jobId, "Annulé."); process.exit(0); }
-        await setJob(jobId, { currentStep: s, progress: p, status: p >= 100 ? "done" : "running" });
+        await setJob(jobId, stepFields(s, p, (x) => (x >= 100 ? "done" : "running")));
         await logJob(jobId, s);
       };
       const { rebuildBlueprintFromIndex } = await import("../lib/program");
@@ -255,8 +256,7 @@ async function main() {
   const onStep = async (s: string, p: number) => {
     const j = await getJob(jobId);
     if (j?.status === "canceled") { await logJob(jobId, "Annulé."); process.exit(0); }
-    const status = p >= 100 ? "done" : p >= 92 ? "compiling" : p >= 45 ? "verifying" : "running";
-    await setJob(jobId, { currentStep: s, progress: p, status });
+    await setJob(jobId, stepFields(s, p, (x) => (x >= 100 ? "done" : x >= 92 ? "compiling" : x >= 45 ? "verifying" : "running")));
     await logJob(jobId, s);
   };
 
@@ -279,7 +279,7 @@ async function main() {
         : job.type === "lab-exercise"
           ? await generateLabExercise(job.target ?? "", { onStep })
           // Examen blanc : le format du cours choisit le générateur (QCM, exercices, essai…), cf. lib/mock-exam.
-          : await generateMockExam({ count: examCount, focus: examFocus, kind: examKind, onStep, jobId, onExamReady: async (examId: number) => { await setJob(jobId, { resultId: examId, resultPath: `/mock/${examId}` }); } });
+          : await generateMockExam({ count: examCount, focus: examFocus, kind: examKind, onStep, jobId, phaseMs: await phaseHistory(job.type), onExamReady: async (examId: number) => { await setJob(jobId, { resultId: examId, resultPath: `/mock/${examId}` }); } });
     if (res.texError) {
       // le résultat existe (HTML lisible) mais le PDF a échoué → erreur LaTeX gardée pour debug
       await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, repli HTML lisible. Détail : ${res.texError.slice(0, 500)}` });
