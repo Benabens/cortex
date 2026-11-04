@@ -29,6 +29,8 @@ const FOREIGN = "Une affirmation qui nomme une notion étrangère au cours.";
 let third = ABSURD;
 /** Le correcteur rend la clé en nombre (« correct: 0 ») au lieu d'un tableau. */
 let scalarKey = false;
+/** Le correcteur trouve une autre réponse que la clé, pour chaque question (clé contestée). */
+let contestKey = false;
 const NEW_DISTRACTOR = "Une affirmation proche du cours, fausse à une condition près.";
 
 function item(q: number) {
@@ -56,7 +58,7 @@ function verifyReply(prompt: string): string {
     const trivial = opts.filter((m) => m[2].startsWith("Une option absurde")).map((m) => Number(m[1]));
     const foreign = opts.filter((m) => m[2].startsWith("Une affirmation qui nomme une notion étrangère")).map((m) => Number(m[1]));
     return {
-      index, correct: scalarKey ? (key ? Number(key[1]) : 0) : [key ? Number(key[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms: [],
+      index, correct: contestKey ? [key && Number(key[1]) === 0 ? 1 : 0] : scalarKey ? (key ? Number(key[1]) : 0) : [key ? Number(key[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms: [],
       off_course: foreign.length ? "Une mauvaise option nomme une notion que le cours ne présente pas." : "", off_course_terms: foreign.length ? ["notion étrangère"] : [],
       off_course_options: foreign, off_course_key: false, off_matter: "", trivial_distractors: trivial, definition_mismatch: "",
     };
@@ -102,7 +104,7 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { designCalls = 0; repairCalls = 0; repairPrompts = []; replacement = NEW_DISTRACTOR; third = ABSURD; scalarKey = false; });
+beforeEach(() => { designCalls = 0; repairCalls = 0; repairPrompts = []; replacement = NEW_DISTRACTOR; third = ABSURD; scalarKey = false; contestKey = false; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -162,20 +164,24 @@ test("seul défaut = un distracteur trivial : l'option est remplacée, l'énonc�
   assert.doesNotMatch(repairPrompts[0], /"items"|"results"/, "le prompt de remplacement ne porte pas les marqueurs des autres appels");
 });
 
-test("le remplaçant reste trivial à la revérification : aucune question livrée avec lui", async () => {
+test("le remplaçant reste trivial à la revérification : la question est livrée après cette unique tentative, pas jetée", async () => {
+  // Banc du 04/11 (CS-290 mixte) : jeter la question pour un distracteur encore signalé laissait
+  // 4 QCM sur 12, et le juge du banc trouvait autant de distracteurs triviaux dans les QCM gardés :
+  // le signalement est trop bruité pour coûter une question entière.
   replacement = "Une option absurde que tout étudiant élimine encore.";
-  // Ici chaque question garde un distracteur trivial : rien n'est livrable, la génération échoue
-  // (comme avant ce correctif) plutôt que de livrer ces questions.
-  let error = "";
-  const got = await exam(await course(), 4).catch((e: Error) => { error = e.message; return null; });
-  for (const it of got?.items ?? []) assert.ok(!it.options.some((o) => o.startsWith("Une option absurde")), it.options.join(" | "));
-  assert.equal(repairCalls >= 1, true, "le remplacement a bien été tenté");
-  // Banc du 04/11 : l'échec se disait « réponse illisible » alors que le modèle avait répondu, et
-  // que les questions avaient été écartées par les contrôles de qualité.
-  if (!got) {
-    assert.doesNotMatch(error, /illisible|mal formées/, error);
-    assert.match(error, /contrôles de qualité/, error);
-  }
+  const { r, steps, items } = await exam(await course(), 4);
+  assert.equal(r.count, 4, steps.join("\n"));
+  assert.equal(repairCalls, 1, "une seule tentative de remplacement par lot");
+  assert.equal(designCalls, 1, "ni régénération ni comblement");
+  for (const it of items) assert.ok(!it.options.includes(ABSURD), "l'option d'origine a bien été remplacée");
+});
+
+test("toutes les questions rejetées par les contrôles : l'échec le dit, sans parler de réponse illisible", async () => {
+  contestKey = true;
+  const error = await exam(await course(), 4).then(() => "", (e: Error) => e.message);
+  // Banc du 04/11 : l'échec se disait « réponse illisible » alors que le modèle avait répondu.
+  assert.doesNotMatch(error, /illisible|mal formées/, error);
+  assert.match(error, /contrôles de qualité/, error);
 });
 
 test("banc du 04/11 : l'avancement bouge dès qu'un lot est conçu, sans attendre sa vérification (8 % pendant 3 à 5 min)", async () => {
