@@ -427,6 +427,9 @@ const REPLACEMENTS_SCHEMA = `{ "replacements": [ { "index": <numéro Q>, "distra
  */
 async function replaceTrivialDistractors(items: QcmItem[], step: StepCb, language?: string): Promise<QcmItem[]> {
   const lang = languageName(language ?? examLanguageFor(currentCourse()))[1];
+  // Banc du 04/11 : sans le cours sous les yeux, les remplaçants étaient eux aussi génériques et
+  // re-signalés une fois sur deux ; ils se bâtissent sur des notions voisines des extraits.
+  const passages = await coursePassages([...new Set(items.map((it) => it.topic).filter(Boolean))]).catch(() => []);
   const body = items.map((it, k) => [
     `Q${k}. ${sanitizeCorpus(it.stem)}`,
     ...it.options.map((o, j) => `   (${j}) ${sanitizeCorpus(o)}${it.correct.includes(j) ? "  (bonne réponse — à garder)" : (it.trivialDistractors ?? []).includes(j) ? "  ← À REMPLACER : se devine fausse sans connaître le cours, ou nomme une notion que le cours ne présente pas" : ""}`),
@@ -437,8 +440,9 @@ async function replaceTrivialDistractors(items: QcmItem[], step: StepCb, languag
     prompt: [
       `Tu es l'équipe enseignante du cours. Dans chacun de ces QCM, les options marquées « À REMPLACER » se devinent fausses sans connaître le cours. Écris pour chacune UN nouveau distracteur, sans toucher à l'énoncé, à la bonne réponse ni aux autres options.`,
       ...DISTRACTOR_TAXONOMY,
-      `RÈGLES : chaque nouveau distracteur est FAUX selon le cours mais paraît juste à un étudiant qui connaît le thème sans le détail ; même registre, même structure et longueur comparable (±30 %) que la bonne réponse ; il ne dit jamais pourquoi il est faux ; aucun marqueur d'absolu ; il ne répète aucune autre option. Réécris aussi l'explication de la clé pour qu'elle couvre les options finales, en désignant les options par leur CONTENU, jamais par leur lettre ni leur rang. Tout en ${lang}.`,
+      `RÈGLES : chaque nouveau distracteur s'appuie sur une notion, une définition, une condition ou un résultat VOISIN présent dans les extraits du cours ci-dessous (procédés de la taxonomie) ; il est FAUX selon le cours mais paraît juste à un étudiant qui connaît le thème sans le détail ; même registre, même structure et longueur comparable (±30 %) que la bonne réponse ; il ne dit jamais pourquoi il est faux ; aucun marqueur d'absolu ; il ne répète aucune autre option. Réécris aussi l'explication de la clé pour qu'elle couvre les options finales, en désignant les options par leur CONTENU, jamais par leur lettre ni leur rang. Tout en ${lang}.`,
       DATA_RULE,
+      passages.length ? dataBlock("EXTRAITS DU COURS", passages) : "",
       "",
       body,
       "",
