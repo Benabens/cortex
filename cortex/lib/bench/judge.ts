@@ -156,6 +156,16 @@ async function rejections(rejected: BenchRun["rejected"]): Promise<Verdicts["rej
   return out;
 }
 
+/**
+ * Chapitre retenu pour une question : l'identifiant rendu par le juge s'il est au plan ; un rang
+ * (seq) rendu à sa place est rattaché à son chapitre ; un plan d'un seul chapitre couvre tout.
+ */
+export function chapterOf(raw: number | null | undefined, chapters: BenchRun["plan"]["chapters"]): number | null {
+  if (chapters.length === 1) return chapters[0].id;
+  if (raw == null) return null;
+  return chapters.find((c) => c.id === raw)?.id ?? chapters.find((c) => c.seq === raw)?.id ?? null;
+}
+
 export async function judgeExam(run: BenchRun): Promise<Verdicts> {
   const items = run.exam?.items ?? [];
   const verdicts: ItemVerdict[] = [];
@@ -167,12 +177,11 @@ export async function judgeExam(run: BenchRun): Promise<Verdicts> {
     const raw = await adjudicate(batch, passages, solver, run.plan.chapters);
     for (const it of batch) {
       const v = raw.find((x) => x.q === it.idx);
-      const known = new Set(run.plan.chapters.map((c) => c.id));
       const code = v?.code?.source ? await runCode(v.code) : undefined;
       const distractors = it.options ? Math.max(0, it.options.length - (it.correct ?? []).length) : 0;
       verdicts.push({
         idx: it.idx,
-        chapter: v?.chapter != null && known.has(v.chapter) ? v.chapter : null,
+        chapter: chapterOf(v?.chapter, run.plan.chapters),
         notion: v?.notion ?? "",
         // Le code exécuté fait foi sur l'avis du modèle.
         key: code?.ran && !code.ok ? "wrong" : (v?.key ?? "unsure"),
