@@ -44,7 +44,7 @@ export function WithdrawalForm() {
         <p className="mt-1 text-[0.85rem] text-ink-3">Choisis un achat effectué il y a moins de 14 jours.</p>
         <select aria-label="Achat concerné par la rétractation" className="mt-3 min-h-11 w-full rounded-xl border border-line bg-surface-2 px-3 py-2 text-ink-1" value={selected} onChange={(e) => setSelected(e.target.value)}>
           <option value="">Choisir un achat</option>
-          {purchases.map((p) => <option key={`${p.type}:${p.id}`} value={`${p.type}:${p.id}`}>{p.label} — {new Date(p.purchasedAt).toLocaleDateString("fr-FR")}</option>)}
+          {purchases.map((p) => <option key={`${p.type}:${p.id}`} value={`${p.type}:${p.id}`}>{p.label}, acheté le {new Date(p.purchasedAt).toLocaleDateString("fr-FR")}</option>)}
         </select>
         <Button className="mt-3" size="sm" disabled={!chosen} onClick={() => setConfirming(true)}>Continuer</Button>
       </> : <>

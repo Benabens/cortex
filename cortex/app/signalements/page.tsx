@@ -20,7 +20,7 @@ export default function ReportsPage() {
   return (
     <div className="mx-auto w-full max-w-4xl">
       <PageHeader context={false} title="Signalements de questions" description="Ce que les étudiants (ou leurs agents) ont relevé dans les examens générés : de quoi corriger le moteur." />
-      {!reports && !error && <div className="skeleton mt-6 h-48 rounded-2xl" aria-label="Chargement des signalements" />}
+      {!reports && !error && <div className="skeleton mt-6 h-48 rounded-2xl" role="status" aria-label="Chargement des signalements" />}
       {error && <p role="alert" className="mt-6 text-sm text-danger-hi">{error}</p>}
       {reports && !reports.length && <p className="mt-6 text-[13px]" style={{ color: "var(--ink-3)" }}>Aucun signalement pour l&apos;instant.</p>}
       <div className="mt-6 flex flex-col gap-3">

@@ -208,7 +208,7 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
           onChange={(e) => setText(e.target.value)}
           onPaste={onPaste}
           onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submit(); } }}
-          placeholder="Colle un énoncé, une discussion ChatGPT, ⌘V une capture… ou glisse un PDF, PNG, JPG ici"
+          placeholder="Colle un énoncé, une discussion ChatGPT ou une capture, ou glisse ici un PDF, PNG, JPG"
           aria-describedby={statusId}
           rows={4}
           data-focus-parent

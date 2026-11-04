@@ -120,7 +120,7 @@ export function ImageTextArea({
           image » est annoncée aux lecteurs d'écran via aria-describedby, pas seulement visible. */}
       <div id={hintId} className={cn("pointer-events-none flex items-center gap-1.5 px-3.5 pb-2.5 text-[0.72rem] text-ink-4", image && "sr-only")}>
         <ImagePlus className="size-3.5 shrink-0" strokeWidth={2} aria-hidden="true" />
-        Colle (⌘V) ou glisse une image dans la zone pour la joindre.
+        Colle ou glisse une image dans la zone pour la joindre.
       </div>
     </div>
   );

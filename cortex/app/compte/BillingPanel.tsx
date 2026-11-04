@@ -193,7 +193,7 @@ export function BillingPanel() {
       </Panel>
     );
   }
-  if (!data) return <div className="skeleton h-40 rounded-lg" aria-busy="true" aria-label="Chargement du solde" />;
+  if (!data) return <div className="skeleton h-40 rounded-lg" role="status" aria-busy="true" aria-label="Chargement du solde" />;
   return (
     <BillingView
       data={data}
@@ -224,7 +224,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
   const [consents, setConsents] = useState<Record<string, boolean>>({});
   if (!data.billing) {
     return (
-      <Panel className="p-5">
+      <Panel className="p-5 sm:p-6">
         <h2 className="text-xl font-semibold text-ink-1">Abonnement & crédits</h2>
         <p className="mt-1.5 text-[0.85rem] leading-relaxed text-ink-2">
           La facturation n’est pas activée sur cette instance : les générations ne consomment pas de crédits.

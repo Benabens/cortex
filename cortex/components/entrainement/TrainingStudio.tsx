@@ -202,7 +202,7 @@ export function TrainingStudio() {
           </div>
         )}
 
-        {/* zone unique : texte + IMAGE INLINE (P-B) — colle ⌘V / glisse une image, continue à écrire */}
+        {/* zone unique : texte + IMAGE INLINE (P-B) — colle / glisse une image, continue à écrire */}
         <div className="mt-3">
           <ImageTextArea
             value={input}

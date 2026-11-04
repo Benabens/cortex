@@ -23,7 +23,7 @@ export default function SourcesPage() {
         {/* Skeleton UNIQUEMENT au premier chargement : un refetch (ex. coche « Référence »)
             garde la liste montée → plus de saut/remontage (fix jank). */}
         {loading && !data ? (
-          <div className="skeleton h-[28rem] rounded-lg" aria-busy="true" aria-label="Chargement du corpus" />
+          <div className="skeleton h-[28rem] rounded-lg" role="status" aria-busy="true" aria-label="Chargement du corpus" />
         ) : error ? (
           <Panel className="flex flex-col items-center justify-center gap-3 rounded-xl px-6 py-16 text-center">
             <WifiOff className="size-6 text-danger-hi" strokeWidth={2} />
