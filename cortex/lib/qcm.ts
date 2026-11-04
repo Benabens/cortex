@@ -1155,15 +1155,20 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   };
   /** Un lot conçu, vérifié, renforcé. Un échec (après les réessais de completeJson) rend 0 item et sa cause. */
   const safeBatch = async (bt: Batch): Promise<{ items: QcmItem[]; error: unknown }> => {
+    // Un lot conçu vaut une moitié de son unité, sa vérification l'autre (banc du 04/11 : 8 %
+    // affichés pendant 3 à 5 min, tant que le premier lot n'était pas vérifié et renforcé).
+    const designed = { done: false };
     try {
-      return await buildBatch(bt);
+      return await buildBatch(bt, designed);
     } finally {
-      progress.done("QCM");
+      progress.done("QCM", designed.done ? 0.5 : 1);
     }
   };
-  const buildBatch = async (bt: Batch): Promise<{ items: QcmItem[]; error: unknown }> => {
+  const buildBatch = async (bt: Batch, designed: { done: boolean }): Promise<{ items: QcmItem[]; error: unknown }> => {
     try {
       const items = await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, bt.guidance, { ...shared, molds: bt.molds });
+      progress.done("QCM", 0.5);
+      designed.done = true;
       // Un item resté rejeté après régénération (hors cours, définition différente, hors matière, clé
       // contestée), ou encore éliminable sans connaître le cours, n'est jamais gardé : son sujet est comblé.
       const kept = items.length ? await strengthen(bt, await verifyQcmBatch(items, step)) : [];
