@@ -4,7 +4,7 @@ import { WithdrawalForm } from "./WithdrawalForm";
 import { DeleteAccount } from "./DeleteAccount";
 import { ExportData } from "./ExportData";
 import { ConnectedApps } from "./ConnectedApps";
-
+import { AppearanceSetting } from "./AppearanceSetting";
 
 export function AccountContent({ email, enabled, connectedAppsEnabled }: {
   email: string | null;
@@ -24,6 +24,8 @@ export function AccountContent({ email, enabled, connectedAppsEnabled }: {
           <div className="mt-1 break-all text-lg font-medium text-ink-1">{email}</div>
         </div>
       )}
+
+      <AppearanceSetting />
 
       <BillingPanel />
       <WithdrawalForm />
