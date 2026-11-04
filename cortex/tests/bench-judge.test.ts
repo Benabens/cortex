@@ -20,6 +20,8 @@ process.env.LLM_MODEL_OPUS = "claude-sonnet-5";
 process.env.LLM_MAX_RETRIES = "0";
 
 const prompts: string[] = [];
+/** Appels de l'arbitre à faire échouer (503) avant de répondre : panne passagère du fournisseur. */
+let failAdjudicate = 0;
 let llm: http.Server;
 
 /** Réponse du faux modèle selon le rôle demandé par le juge. */
@@ -46,6 +48,12 @@ before(async () => {
     req.on("end", () => {
       const prompt = String((JSON.parse(body).messages as { content: string }[]).at(-1)?.content);
       prompts.push(prompt);
+      if (/examinateur exigeant/.test(prompt) && failAdjudicate > 0) {
+        failAdjudicate--;
+        res.statusCode = 503;
+        res.end("{}");
+        return;
+      }
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(reply(prompt)) }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 10 } }));
     });
@@ -115,4 +123,13 @@ test("chapitre : un rang rendu à la place de l'identifiant est rattaché ; un p
   // CS-290 au banc : le juge rendait l'identifiant en chaîne (« "1000028" »), aucune question rattachée.
   assert.equal(chapterOf("1000020" as unknown as number, plan), 1000020);
   assert.equal(chapterOf("2" as unknown as number, plan), 1000020);
+});
+
+test("une panne passagère du fournisseur pendant le jugement est réessayée, le jugement n'est pas perdu", async () => {
+  failAdjudicate = 1;
+  const { runWithCourse } = await import("../db/client");
+  const { judgeExam } = await import("../lib/bench/judge");
+  const v = await runWithCourse("ml", () => judgeExam(run));
+  assert.equal(failAdjudicate, 0, "la panne a bien eu lieu");
+  assert.equal(v.items.length, 3);
 });

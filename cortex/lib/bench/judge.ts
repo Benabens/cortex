@@ -21,6 +21,20 @@ import type { BenchItem, BenchRun, ItemVerdict, Verdicts } from "./types";
  */
 
 const BATCH = 5;
+
+/**
+ * Un appel du juge, réessayé une fois si le fournisseur dépasse son délai ou décroche (banc du
+ * 04/11 : un délai dépassé sous la charge de quatre runs faisait perdre tout le jugement).
+ */
+async function ask<T>(...args: Parameters<typeof completeJson<T>>): Promise<T> {
+  try {
+    return await completeJson<T>(...args);
+  } catch (e) {
+    const code = (e as { code?: string }).code;
+    if (code !== undefined && !["TIMEOUT", "UNAVAILABLE", "UPSTREAM", "NETWORK", "OVERLOADED"].includes(code)) throw e;
+    return completeJson<T>(...args);
+  }
+}
 const JUDGE_MODEL = "opus";
 const L = "ABCDEFGH";
 
@@ -59,7 +73,7 @@ const SOLVER_SCHEMA = { type: "object", properties: { answers: { type: "array", 
 async function solve(batch: BenchItem[], passages: Passage[]): Promise<Map<number, number[]>> {
   const qcm = batch.filter((it) => it.options);
   if (!qcm.length) return new Map();
-  const out = await completeJson<{ answers: { q: number; chosen: number[] }[] }>({
+  const out = await ask<{ answers: { q: number; chosen: number[] }[] }>({
     model: JUDGE_MODEL, timeoutMs: 600_000, json: { schema: SOLVER_SCHEMA },
     prompt: [SOLVER_RULES, DATA_RULE, dataBlock("EXTRAITS DU COURS", passages), "", "═══ QUESTIONS ═══", qcm.map((it) => renderItem(it, false)).join("\n\n"), "", `Réponds UNIQUEMENT avec l'objet JSON { "answers": [ { "q": <numéro>, "chosen": [indices] } ] }.`].join("\n"),
   });
@@ -95,7 +109,7 @@ const ITEM_SCHEMA = {
 async function adjudicate(batch: BenchItem[], passages: Passage[], solver: Map<number, number[]>, chapters: BenchRun["plan"]["chapters"]): Promise<RawVerdict[]> {
   const plan = chapters.map((c) => `${c.id} : ${sanitizeCorpus(c.title)}`).join("\n") || "(aucun plan)";
   const body = batch.map((it) => `${renderItem(it, true)}${solver.has(it.idx) ? `\n   SOLVEUR INDÉPENDANT : ${solver.get(it.idx)!.join(", ") || "aucune"}` : ""}`).join("\n\n");
-  const out = await completeJson<{ items: RawVerdict[] }>({
+  const out = await ask<{ items: RawVerdict[] }>({
     model: JUDGE_MODEL, timeoutMs: 600_000, json: { schema: ITEM_SCHEMA },
     prompt: [ITEM_RULES, DATA_RULE, dataBlock("EXTRAITS DU COURS", passages), "", "═══ PLAN DU COURS (id : titre) ═══", plan, "", "═══ QUESTIONS À JUGER ═══", body, "",
       `Réponds UNIQUEMENT avec l'objet JSON { "items": [ un objet par question, avec q, key, explanation, definition, off_course, distractors, trivial, chapter, notion, code ] }.`].join("\n"),
@@ -120,7 +134,7 @@ async function duplicates(items: BenchItem[], verdicts: ItemVerdict[], previous:
   const byIdx = new Map(verdicts.map((v) => [v.idx, v.notion]));
   const exam = items.map((it) => `Q${it.idx} [notion : ${sanitizeCorpus(byIdx.get(it.idx) ?? "?")}] ${sanitizeCorpus(it.stem).slice(0, 400)}`).join("\n");
   const prev = previous.slice(-150).map((p, i) => `P${i}. ${sanitizeCorpus(p.stem).slice(0, 220)}`).join("\n") || "(aucun examen précédent)";
-  const out = await completeJson<{ intra: number[][]; previous: number[] }>({
+  const out = await ask<{ intra: number[][]; previous: number[] }>({
     model: JUDGE_MODEL, timeoutMs: 600_000, json: { schema: DUP_SCHEMA },
     prompt: [DUPLICATE_RULES, `Le programme du cours compte ${notions} notions ; l'examen a ${items.length} questions.`, DATA_RULE, "", "═══ EXAMEN ═══", exam, "", "═══ QUESTIONS DES EXAMENS PRÉCÉDENTS ═══", prev, "",
       `Réponds UNIQUEMENT avec l'objet JSON { "intra": [[a, b], …] (paires de numéros Q, la seconde est le doublon), "previous": [numéros Q qui reprennent un examen précédent] }.`].join("\n"),
@@ -144,7 +158,7 @@ async function rejections(rejected: BenchRun["rejected"]): Promise<Verdicts["rej
       const it = rejected[r.idx];
       return `Q${r.idx}. ${sanitizeCorpus(it.stem)}\n${(it.options ?? []).map((o, k) => `   (${k}) ${sanitizeCorpus(o)}`).join("\n")}\n   CLÉ : ${(it.correct ?? []).join(", ")}\n   RAISON DU REJET : ${sanitizeCorpus(it.reason)}`;
     }).join("\n\n");
-    const res = await completeJson<{ items: { q: number; in_course: boolean }[] }>({
+    const res = await ask<{ items: { q: number; in_course: boolean }[] }>({
       model: JUDGE_MODEL, timeoutMs: 600_000, json: { schema: REJ_SCHEMA },
       prompt: [REJECTION_RULES, DATA_RULE, dataBlock("EXTRAITS DU COURS", passages), "", "═══ QUESTIONS ÉCARTÉES ═══", body, "", `Réponds UNIQUEMENT avec l'objet JSON { "items": [ { "q": <numéro>, "in_course": true|false } ] }.`].join("\n"),
     });
