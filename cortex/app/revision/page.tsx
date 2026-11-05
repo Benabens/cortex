@@ -1,5 +1,7 @@
 "use client";
 
+import styles from "@/app/secondary.module.css";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { useEffect, useMemo, useState } from "react";
 import { useApi, useCourse } from "@/lib/ux/api";
 import { LoadError } from "@/components/ui/LoadError";
@@ -63,7 +65,7 @@ export default function RevisionPage() {
   const resetDone = () => { setDone({}); try { localStorage.removeItem(`cortex:revision:done:${d?.course}`); } catch {} };
   const doneBtn = (k: string) => (
     <button type="button" onClick={() => toggleDone(k)} aria-pressed={!!done[k]} title={done[k] ? "fait : cliquer pour annuler" : "marquer comme fait"}
-      style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", borderRadius: "var(--r-sm)", padding: "3px 9px", fontSize: 12, lineHeight: 1.4, border: `1px solid ${done[k] ? "var(--green)" : "var(--line-strong)"}`, color: done[k] ? "var(--green-ink)" : "var(--ink-3)", background: done[k] ? "var(--green-wash)" : "transparent" }}>
+      style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", borderRadius: "var(--r-sm)", padding: "9px 12px", fontSize: 12, lineHeight: 1.4, border: `1px solid ${done[k] ? "var(--green)" : "var(--line-strong)"}`, color: done[k] ? "var(--green-ink)" : "var(--ink-3)", background: done[k] ? "var(--green-wash)" : "transparent" }}>
       <span style={{ width: 14, height: 14, borderRadius: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, border: `1.5px solid ${done[k] ? "var(--green)" : "var(--ink-3)"}`, color: "var(--green-ink)" }}>{done[k] ? "✓" : ""}</span>
       {done[k] ? "fait" : "à faire"}
     </button>
@@ -76,11 +78,11 @@ export default function RevisionPage() {
   const doneTotal = Object.values(done).filter(Boolean).length;
 
   return (
-    <main className="page">
-      <header className="mb-6 rise">
-        <h1 className="h1" style={{ fontSize: 28 }}>Toutes les vraies questions des finals + un parcours qui couvre tout.</h1>
-        <p className="sub mt-2">La banque exhaustive de chaque QCM et chaque ouverte des annales, triée par sujet dans l&apos;ordre du cours, et un parcours généré couvrant 100 % du programme à la bonne proportion. Déjà prêt, rien à relancer.</p>
-      </header>
+    <div className={styles.page}>
+      <PageHeader
+        title="Toutes les vraies questions des finals + un parcours qui couvre tout."
+        description="La banque exhaustive de chaque QCM et chaque ouverte des annales, triée par sujet dans l’ordre du cours, et un parcours généré couvrant 100 % du programme à la bonne proportion. Déjà prêt, rien à relancer."
+      />
 
       {!loading && error && (
         <LoadError
@@ -103,22 +105,21 @@ export default function RevisionPage() {
       {!loading && d && totBank > 0 && (
         <>
           {/* récap proportions par sujet (ordre du cours) */}
-          <section className="card card-pad mb-5 rise">
-            <div className="flex items-center gap-2 mb-2">
+          <section className={styles.guide}>
+            <div className="flex flex-wrap items-center gap-2 mb-2">
               <h2 className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>Couverture des finals par sujet (ordre du cours)</h2>
               <span className="tag tag-blue">{d.bank.stats.qcm} QCM · {d.bank.stats.open} ouvertes</span>
               {d.source === "json" && <span className="tag" title="chargé depuis le fichier committé">pré-construit ✓</span>}
             </div>
-            <div className="space-y-1.5">
+            <div className={styles.coverage}>
               {d.bank.stats.byTopic.map((t) => {
                 const tot = t.qcm + t.open; const pct = Math.round((tot / Math.max(1, totBank)) * 100);
                 return (
-                  <div key={t.topic} className="flex items-center gap-3 text-[13px]">
-                    <span className="tag" style={{ minWidth: 42, justifyContent: "center" }}>{lr(t.lectureRank)}</span>
-                    <span style={{ flex: 1, color: "var(--ink)" }}>{t.topic}</span>
-                    <span style={{ color: "var(--ink-3)" }}>{t.qcm} QCM · {t.open} ouv.</span>
-                    <div className="progress" style={{ width: 120 }}><div className="progress-bar" style={{ width: `${Math.min(100, pct * 3)}%`, background: "var(--blue)" }} /></div>
-                    <span className="tabular-nums" style={{ color: "var(--accent-ink)", minWidth: 34, textAlign: "right" }}>{pct}%</span>
+                  <div key={t.topic} className={styles.coverageRow}>
+                    <span className="tag">{lr(t.lectureRank)}</span>
+                    <div className="min-w-0"><span className="text-ink-1">{t.topic}</span><div className="mt-1 text-xs text-ink-3">{t.qcm} QCM · {t.open} ouvertes</div></div>
+                    <span className="tabular-nums text-accent-hi">{pct}%</span>
+                    <div className={styles.track} role="img" aria-label={`${pct} % des questions`}><div style={{ width: `${pct}%` }} /></div>
                   </div>
                 );
               })}
@@ -139,7 +140,7 @@ export default function RevisionPage() {
             onChange={setTab}
           />
 
-          <div className="flex items-center gap-3 mb-4 text-[12.5px] flex-wrap" style={{ color: "var(--ink-3)" }}>
+          <div className={styles.toolbar}>
             <Toggle checked={hideDone} onChange={toggleHide} label="Masquer les questions faites" labelVisible />
             <span style={{ color: "var(--ink-4)" }}>·</span>
             <span><strong style={{ color: "var(--ink-2)" }}>{doneTotal}</strong> question{doneTotal > 1 ? "s" : ""} marquée{doneTotal > 1 ? "s" : ""} faite{doneTotal > 1 ? "s" : ""}</span>
@@ -151,8 +152,8 @@ export default function RevisionPage() {
               {(tab === "qcm" ? qcmGroups : openGroups).map((g) => {
                 const key = `${tab}:${g.topic}`;
                 return (
-                  <div key={key} className="card" style={{ padding: 0 }}>
-                    <button className="t-row w-full text-left" style={{ gridTemplateColumns: "auto 1fr auto", width: "100%" }} onClick={() => setOpen((o) => ({ ...o, [key]: !o[key] }))}>
+                  <div key={key} className={styles.questionGroup}>
+                    <button className={styles.questionToggle} aria-expanded={!!open[key]} onClick={() => setOpen((o) => ({ ...o, [key]: !o[key] }))}>
                       <span className="tag" style={{ minWidth: 42, justifyContent: "center" }}>{lr(g.lectureRank)}</span>
                       <span className="font-medium" style={{ color: "var(--ink)" }}>{g.topic}</span>
                       <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>{g.items.filter((x) => done[`${tab}-${x.id}`]).length}/{g.items.length} faites · {open[key] ? "▾" : "▸"}</span>
@@ -163,7 +164,7 @@ export default function RevisionPage() {
                           const dk = `${tab}-${q.id}`;
                           if (hideDone && done[dk]) return null;
                           return (
-                          <div key={q.id} className="inset" style={{ padding: 12, opacity: done[dk] ? 0.55 : 1, transition: "opacity .15s" }}>
+                          <div key={q.id} className={styles.question} style={{ opacity: done[dk] ? 0.7 : 1, transition: "opacity .15s" }}>
                             <div className="flex items-center gap-2 flex-wrap text-[12px] mb-1">
                               {doneBtn(dk)}
                               <span className="tag tag-blue">{q.sourceExam?.replace(/_/g, " ").slice(0, 28)}{q.examYear ? ` ${q.examYear}` : ""}{q.examPage ? ` · p.${q.examPage}` : ""}</span>
@@ -194,8 +195,8 @@ export default function RevisionPage() {
                 {planGroups.map((g) => {
                   const key = `plan:${g.topic}`;
                   return (
-                    <div key={key} className="card" style={{ padding: 0 }}>
-                      <button className="t-row w-full text-left" style={{ gridTemplateColumns: "auto 1fr auto", width: "100%" }} onClick={() => setOpen((o) => ({ ...o, [key]: !o[key] }))}>
+                    <div key={key} className={styles.questionGroup}>
+                      <button className={styles.questionToggle} aria-expanded={!!open[key]} onClick={() => setOpen((o) => ({ ...o, [key]: !o[key] }))}>
                         <span className="tag" style={{ minWidth: 42, justifyContent: "center" }}>{lr(g.lectureRank)}</span>
                         <span className="font-medium" style={{ color: "var(--ink)" }}>{g.topic}</span>
                         <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>{g.items.filter((x) => done[`plan-${x.id}`]).length}/{g.items.length} faites · {g.items.filter((x) => x.kind === "qcm").length} QCM · {open[key] ? "▾" : "▸"}</span>
@@ -206,7 +207,7 @@ export default function RevisionPage() {
                             const dk = `plan-${q.id}`;
                             if (hideDone && done[dk]) return null;
                             return (
-                            <div key={q.id} className="inset" style={{ padding: 12, opacity: done[dk] ? 0.55 : 1, transition: "opacity .15s" }}>
+                            <div key={q.id} className={styles.question} style={{ opacity: done[dk] ? 0.7 : 1, transition: "opacity .15s" }}>
                               <div className="flex items-center gap-2 flex-wrap text-[12px] mb-1">
                                 {doneBtn(dk)}
                                 <span className={`tag ${q.kind === "qcm" ? "tag-blue" : "tag-amber"}`}>{q.kind === "qcm" ? "QCM" : "ouverte"}</span>
@@ -230,6 +231,6 @@ export default function RevisionPage() {
           )}
         </>
       )}
-    </main>
+    </div>
   );
 }

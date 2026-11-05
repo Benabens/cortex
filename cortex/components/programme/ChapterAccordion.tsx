@@ -23,16 +23,16 @@ export function ChapterAccordion({ c, defaultOpen = false }: { c: PlanChapterUi;
   }, [defaultOpen]);
 
   return (
-    <div ref={rootRef} className="panel scroll-mt-24 overflow-hidden p-0">
+    <div ref={rootRef} className={cn("d2-card scroll-mt-24 overflow-hidden p-0 transition-colors", open && "border-accent/35")}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-controls={panelId}
         className={cn(
-          "flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-surface-2/30",
-          "focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-[-2px]",
-          open && "border-b border-line"
+          "flex w-full flex-wrap items-center gap-3 px-4 py-5 text-left sm:px-5 transition-colors hover:bg-surface-2/30",
+          "focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-[-2px]",
+          open && "border-b border-line bg-accent/8"
         )}
       >
         <ChevronRight
@@ -41,15 +41,15 @@ export function ChapterAccordion({ c, defaultOpen = false }: { c: PlanChapterUi;
           aria-hidden="true"
         />
         {c.lectureNo != null && (
-          <span className="shrink-0 rounded-md border border-line bg-surface-2/60 px-1.5 py-0.5 font-data text-[0.72rem] font-medium tabular text-ink-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-accent/20 bg-accent/10 font-data text-xs font-medium tabular text-accent-hi">
             L{c.lectureNo}
           </span>
         )}
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[0.95rem] font-semibold text-ink-1">{c.title}</span>
+        <span className="min-w-[8rem] flex-1">
+          <span className="block text-base font-semibold text-ink-1">{c.title}</span>
         </span>
         {/* Tête légère : nb notions / nb tombées — jamais de débordement (complet au dépli). */}
-        <span className="shrink-0 whitespace-nowrap text-[0.76rem] text-ink-4">
+        <span className="ml-7 shrink-0 whitespace-nowrap text-xs text-ink-3 sm:ml-0">
           {n === 0 ? (
             "aucune notion"
           ) : c.fallenCount > 0 ? (
@@ -67,7 +67,7 @@ export function ChapterAccordion({ c, defaultOpen = false }: { c: PlanChapterUi;
       </button>
 
       {open && (
-        <div id={panelId} className="rise-in p-1.5 sm:p-2">
+        <div id={panelId} className="rise-in p-2 sm:p-3">
           {n === 0 ? (
             <div className="flex flex-col items-start gap-2 px-3 py-4">
               <p className="text-[0.82rem] text-ink-3">

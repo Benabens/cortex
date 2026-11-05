@@ -27,7 +27,7 @@ export function FirstRunHero() {
   ];
 
   return (
-    <section className="panel top-light relative overflow-hidden rounded-xl" aria-labelledby="firstrun-title">
+    <section className="d2-card relative overflow-hidden" aria-labelledby="firstrun-title">
       <div className="relative p-5 sm:p-7">
         <h2 id="firstrun-title" className="max-w-xl text-[1.75rem] font-semibold leading-[1.1] sm:text-[2.15rem]">
           Commence par créer ta première matière.
@@ -40,7 +40,7 @@ export function FirstRunHero() {
         <ol className="mt-6 grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-3">
           {steps.map(({ Icon, title, desc }, i) => (
             <li key={title} className="rounded-lg border border-line bg-surface-2/40 p-3.5 edge-top">
-              <span className="grid size-9 place-items-center rounded-lg border border-line bg-surface-2/60 text-violet-hi">
+              <span className="grid size-9 place-items-center rounded-lg border border-line bg-surface-2/60 text-accent-hi">
                 <Icon className="size-[1.05rem]" strokeWidth={2.25} aria-hidden="true" />
               </span>
               <p className="mt-2.5 text-[0.85rem] font-medium text-ink-1">

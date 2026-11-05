@@ -6,20 +6,21 @@ import { WeaknessInbox } from "@/components/faiblesses/WeaknessInbox";
 import { WeaknessBase } from "@/components/faiblesses/WeaknessBase";
 import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
-import { useApi } from "@/lib/ux/api";
+import { useApi, useCourse } from "@/lib/ux/api";
 import type { WeaknessesResp } from "@/lib/ux/weaknesses";
 
 export default function FaiblessesPage() {
+  const { courseId } = useCourse();
   const { data, loading, error, refetch } = useApi<WeaknessesResp>("/api/weaknesses");
 
   return (
-    <div className="flex flex-col gap-7">
+    <div className="flex flex-col gap-8">
       <PageHeader
         title="Faiblesses"
         description="Transforme tes erreurs en plan de révision. Cortex extrait tes lacunes et les garde à l’œil."
       />
 
-      <WeaknessInbox onAdded={refetch} />
+      <WeaknessInbox key={`inbox-${courseId}`} onAdded={refetch} />
 
       {loading ? (
         <div aria-busy="true" aria-label="Chargement des faiblesses">
@@ -52,7 +53,7 @@ export default function FaiblessesPage() {
           </Button>
         </Panel>
       ) : (
-        <WeaknessBase weaknesses={data.weaknesses} onChanged={refetch} />
+        <WeaknessBase key={`base-${courseId}`} weaknesses={data.weaknesses} onChanged={refetch} />
       )}
     </div>
   );

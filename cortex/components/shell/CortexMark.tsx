@@ -3,11 +3,13 @@ import { cn } from "@/lib/ux/cn";
 /**
  * CortexMark « Dissolution v2 » : logo définitif, validé le 28/09/2026.
  * Un anneau ouvert en « C » ; l'ouverture (haut-droite) se prolonge en points
- * décroissants, dont le premier, violet, est le nœud actif.
- * Masters (hors dépôt, poste de Ben) : ~/Projects/brand-logos/cortex/favori/.
+ * décroissants, dont le premier, bleu, est le nœud actif.
+ * Masters (hors dépôt, poste de Ben) : ~/Projects/cortex/brand/favori/ ; kit au nœud bleu :
+ * ~/Projects/cortex/brand/deploy/kit-bleu/ (le kit violet #7a5cff reste archivé dans kit/).
  *
- * - Encre = text-ink-1 (via `currentColor`) ; seul le nœud est violet. #7a5cff
- *   est une décision de marque, volontairement distincte du token --color-violet.
+ * - Encre = text-ink-1 (via `currentColor`) ; seul le nœud est bleu : #2764ec, la valeur de
+ *   --color-accent (oklch(0.55 0.215 263)) figée en hex pour les pages d'erreur sans CSS global
+ *   et les icônes. Changer l'un, c'est changer l'autre.
  * - À 24 px et moins, coupe 16 px : les deux petits points du master tombent
  *   sous le pixel, donc le dernier est retiré et les autres grossissent.
  * - `spinning` : rotation lente → spinner de chargement (statique si
@@ -15,8 +17,8 @@ import { cn } from "@/lib/ux/cn";
  *   viewBox : la rotation reste concentrique.
  */
 
-/** Violet du nœud, repris par le point final du wordmark (lockup v2). */
-export const MARK_NODE = "#7a5cff";
+/** Bleu du nœud, repris par le point final du wordmark (lockup v2). */
+export const MARK_NODE = "#2764ec";
 
 type Dot = { cx: number; cy: number; r: number };
 type Geometry = { viewBox: string; ring: string; node: Dot; dots: Dot[] };

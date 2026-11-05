@@ -37,7 +37,7 @@ export function QuietDoors({
           {i > 0 && <span aria-hidden="true">·</span>}
           <Link
             href={d.href}
-            className="inline-flex min-h-11 items-center rounded-sm text-ink-1 underline decoration-white/15 decoration-1 underline-offset-[5px] transition-colors hover:decoration-white/60"
+            className="inline-flex min-h-11 items-center rounded-sm text-ink-1 underline decoration-underline decoration-1 underline-offset-[5px] transition-colors hover:decoration-underline-hover"
           >
             {d.label}
           </Link>

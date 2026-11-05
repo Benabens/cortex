@@ -1,5 +1,6 @@
 "use client";
 
+import styles from "@/app/secondary.module.css";
 import { useEffect, useRef, useState } from "react";
 import { Play, Check, AlertTriangle, Clock3, SlidersHorizontal, Target, ChevronDown } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
@@ -9,7 +10,7 @@ import { apiPost, useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@
 import type { PlanExam, PlanQcm } from "@/lib/ux/exams";
 import { cn } from "@/lib/ux/cn";
 
-const V = "var(--color-violet)";
+const V = "var(--color-accent)";
 const C = "var(--color-cyan)";
 
 /**
@@ -78,7 +79,6 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
   }, [job, onGenerated]);
 
   const running = launching || (job != null && JOB_ACTIVE.includes(job.status));
-  const totalCount = isQcm ? nQcm + nOpen : nExos;
 
   const generate = async () => {
     if (running) return;
@@ -107,14 +107,14 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
   };
 
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.55fr_1fr]">
+    <div className={styles.split}>
       {/* Composer */}
-      <Panel className="p-5 sm:p-6">
-        <h2 className="text-[1.05rem] font-semibold text-ink-1">Compositeur d’examen</h2>
+      <Panel className="p-6 sm:p-8">
+        <h2 className="font-display text-[1.5rem] font-semibold leading-tight text-ink-1">Compositeur d’examen</h2>
 
         {/* composition : proposition compacte (défaut) + disclosure de réglage fin */}
-        <div className="mt-5 rounded-lg border border-line bg-surface-2/40">
-          <div className="flex items-center justify-between px-4 py-3">
+        <div className="mt-6 rounded-2xl border border-line bg-surface-2/40">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-5">
             <span className="text-[0.82rem] text-ink-2">Composition</span>
             <span className="font-data text-[1.02rem] font-semibold tabular text-ink-1">
               {isQcm ? (
@@ -128,7 +128,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
             type="button"
             onClick={() => setAdjust((a) => !a)}
             aria-expanded={adjust}
-            className="flex w-full items-center justify-between gap-2 border-t border-line px-4 py-2.5 text-[0.8rem] text-ink-3 transition-colors hover:text-ink-1"
+            className="flex w-full items-center justify-between gap-2 border-t border-line min-h-11 px-5 py-3 text-sm text-ink-3 transition-colors hover:text-ink-1"
           >
             <span className="inline-flex items-center gap-2"><SlidersHorizontal className="size-3.5" strokeWidth={2.25} /> Ajuster la composition</span>
             <ChevronDown className={cn("size-4 transition-transform", adjust && "rotate-180")} strokeWidth={2.25} />
@@ -143,7 +143,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
               ) : (
                 <SliderRow label={`${unit[0].toUpperCase()}${unit.slice(1)}s`} hint={`proposé : ${"exercises" in plan ? plan.exercises : 6}`} color={V} value={nExos} min={1} max={12} onChange={setNExos} />
               )}
-              <button type="button" onClick={proposal} className="mt-4 text-[0.78rem] text-ink-3 underline-offset-2 transition-colors hover:text-violet-hi hover:underline">
+              <button type="button" onClick={proposal} className="mt-4 text-[0.78rem] text-ink-3 underline-offset-2 transition-colors hover:text-accent-hi hover:underline">
                 Revenir à la proposition
               </button>
             </div>
@@ -158,13 +158,13 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
             onClick={() => setFocusOpen((o) => !o)}
             aria-expanded={focusOpen}
             aria-controls="exam-focus-panel"
-            className="flex w-full items-center justify-between gap-2 rounded-lg px-1 py-1.5 text-[0.8rem] text-ink-3 transition-colors hover:text-ink-1"
+            className="flex w-full items-center justify-between gap-2 min-h-11 rounded-lg px-1 py-2 text-sm text-ink-3 transition-colors hover:text-ink-1"
           >
             <span className="inline-flex min-w-0 items-center gap-2">
               <Target className="size-3.5 shrink-0" strokeWidth={2.25} />
               <span className="truncate">
                 Mets l’accent sur un thème
-                {!focusOpen && focus.trim() && <span className="ml-1 text-violet-hi">· {focus.trim()}</span>}
+                {!focusOpen && focus.trim() && <span className="ml-1 text-accent-hi">· {focus.trim()}</span>}
               </span>
             </span>
             <ChevronDown className={cn("size-4 shrink-0 transition-transform", focusOpen && "rotate-180")} strokeWidth={2.25} />
@@ -177,7 +177,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
                 onChange={(e) => setFocus(e.target.value)}
                 autoFocus
                 placeholder={isQcm ? "ex. régularisation, PCA, backprop…" : "ex. un thème précis à travailler"}
-                className="w-full rounded-lg border border-line-strong bg-surface-2/40 px-3.5 py-2.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] focus:outline-none focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-violet)_28%,transparent)]"
+                className="w-full rounded-lg border border-line-strong bg-surface-2/40 px-3.5 py-2.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] focus:outline-none focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-accent)_28%,transparent)]"
               />
               <p className="mt-1.5 text-[0.74rem] text-ink-4">Un thème, pas un format : 1-2 questions porteront dessus, sans monopoliser l’examen.</p>
             </div>
@@ -196,7 +196,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
         )}
 
         {/* action unique */}
-        <div className="mt-5 flex flex-wrap items-center gap-3">
+        <div className="mt-6 flex flex-wrap items-center gap-3">
           <Button variant="primary" onClick={generate} loading={running}>
             {!running && <Play className="size-4" strokeWidth={2.5} fill="currentColor" />}
             {running ? "Génération…" : "Générer l’examen"}
@@ -220,8 +220,8 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
 
       {/* Format détecté (réel) */}
       <div className="flex flex-col gap-5">
-        <Panel className="p-5">
-          <h2 className="text-[0.95rem] font-semibold text-ink-1">Format détecté</h2>
+        <Panel className="p-6">
+          <h2 className="text-[1.2rem] font-semibold text-ink-1">Format détecté</h2>
           <span className="mt-2 inline-flex rounded-full border border-line bg-surface-2/50 px-2.5 py-1 text-[0.72rem] font-medium text-cyan-hi">
             {isQcm ? "QCM et questions ouvertes" : "Exercices ouverts"}
           </span>

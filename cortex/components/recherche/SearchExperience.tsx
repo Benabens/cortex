@@ -23,7 +23,7 @@ function Snippet({ text }: { text: string }) {
         p.hit ? (
           <mark
             key={i}
-            className="rounded bg-[color-mix(in_oklch,var(--color-violet)_30%,transparent)] px-0.5 text-ink-1"
+            className="rounded bg-[color-mix(in_oklch,var(--color-accent)_30%,transparent)] px-0.5 text-ink-1"
           >
             {p.text}
           </mark>
@@ -85,13 +85,14 @@ export function SearchExperience() {
         inputRef.current?.select();
         return;
       }
+      if (!typing) return;
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setSelected((s) => Math.min(flat.length - 1, s + 1));
+        setSelected((s) => Math.min(Math.max(0, flat.length - 1), s + 1));
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         setSelected((s) => Math.max(0, s - 1));
-      } else if (e.key === "Enter" && flat[selected]) {
+      } else if (e.key === "Enter" && !loading && query.trim() === debounced && flat[selected]) {
         e.preventDefault();
         window.open(hitHref(courseId, flat[selected], debounced), "_blank", "noopener");
       } else if (e.key === "Escape") {
@@ -105,7 +106,7 @@ export function SearchExperience() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [flat, selected, query, debounced, courseId]);
+  }, [flat, selected, query, debounced, courseId, loading]);
 
   useEffect(() => {
     const node = listRef.current?.querySelector<HTMLElement>(`[data-idx="${selected}"]`);
@@ -119,7 +120,7 @@ export function SearchExperience() {
     <div className="flex flex-col gap-5">
       {/* Barre de recherche — sobre : bord 1 px, focus net, AUCUN halo (P0.1) */}
       <div>
-        <div className="group relative flex items-center gap-3 rounded-xl border border-line-strong bg-surface-1/80 px-4 transition-[border-color,box-shadow] duration-150 focus-within:border-[color-mix(in_oklch,var(--color-violet)_60%,transparent)] focus-within:[box-shadow:inset_0_0_0_1px_color-mix(in_oklch,var(--color-violet)_45%,transparent)]">
+        <div className="group relative flex items-center gap-3 rounded-full border border-line-strong bg-surface-1/80 px-4 transition-[border-color,box-shadow] duration-150 focus-within:border-[color-mix(in_oklch,var(--color-accent)_60%,transparent)] focus-within:[box-shadow:inset_0_0_0_1px_color-mix(in_oklch,var(--color-accent)_45%,transparent)]">
           <Search className="size-5 shrink-0 text-ink-3 transition-colors group-focus-within:text-ink-2" strokeWidth={2} />
           <input
             ref={inputRef}
@@ -130,7 +131,7 @@ export function SearchExperience() {
             data-focus-parent
             aria-label="Rechercher dans tout ton corpus"
             placeholder="Rechercher un cours, une série, un final…"
-            className="h-13 min-w-0 flex-1 truncate bg-transparent text-[1rem] text-ink-1 placeholder:text-ink-4 focus:outline-none focus-visible:outline-none"
+            className="h-14 min-w-0 flex-1 truncate bg-transparent text-[1rem] text-ink-1 placeholder:text-ink-4 focus:outline-none focus-visible:outline-none"
           />
           {query && (
             <button
@@ -140,7 +141,7 @@ export function SearchExperience() {
                 inputRef.current?.focus();
               }}
               aria-label="Effacer la recherche"
-              className="grid size-8 place-items-center rounded-md text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink-1"
+              className="grid size-11 place-items-center rounded-full text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink-1"
             >
               <X className="size-4" />
             </button>
@@ -161,7 +162,7 @@ export function SearchExperience() {
                   setQuery(s);
                   inputRef.current?.focus();
                 }}
-                className="inline-flex min-h-10 items-center rounded-full border border-line bg-surface-1/70 px-3.5 text-[0.85rem] text-ink-2 transition-colors duration-150 hover:border-[color-mix(in_oklch,var(--color-violet)_38%,transparent)] hover:bg-surface-2 hover:text-ink-1"
+                className="inline-flex min-h-10 items-center rounded-full border border-line bg-surface-1/70 px-3.5 text-[0.85rem] text-ink-2 transition-colors duration-150 hover:border-[color-mix(in_oklch,var(--color-accent)_38%,transparent)] hover:bg-surface-2 hover:text-ink-1"
               >
                 {s}
               </button>
@@ -195,7 +196,7 @@ export function SearchExperience() {
 
       {/* Résultats — rien à afficher tant que la requête est trop courte (l'état vide vit au-dessus) */}
       {!active ? null : loading ? (
-        <div className="panel space-y-2 rounded-xl p-3" aria-busy="true" aria-label="Recherche en cours">
+        <div className="d2-card space-y-2 rounded-xl p-3" aria-busy="true" aria-label="Recherche en cours">
           {[0, 1, 2, 3, 4].map((i) => (
             <div key={i} className="flex items-center gap-3 px-2 py-1.5">
               <div className="skeleton size-9 rounded-lg" />
@@ -207,7 +208,7 @@ export function SearchExperience() {
           ))}
         </div>
       ) : error ? (
-        <div className="panel flex flex-col items-center gap-3 rounded-xl px-6 py-12 text-center">
+        <div className="d2-card flex flex-col items-center gap-3 rounded-xl px-6 py-12 text-center">
           <WifiOff className="size-6 text-danger-hi" strokeWidth={2} />
           <p className="text-[0.95rem] font-medium text-ink-1">La recherche ne répond pas</p>
           <p className="max-w-xs text-[0.85rem] text-ink-3">Réessaie dans un instant.</p>
@@ -217,7 +218,7 @@ export function SearchExperience() {
           </Button>
         </div>
       ) : flat.length === 0 ? (
-        <div className="panel grid place-items-center rounded-xl px-6 py-16 text-center">
+        <div className="d2-card grid place-items-center rounded-xl px-6 py-16 text-center">
           <Search className="size-7 text-ink-4" strokeWidth={1.75} />
           <p className="mt-3 text-[0.95rem] font-medium text-ink-1">
             Aucun résultat pour «&nbsp;{debounced}&nbsp;»
@@ -234,7 +235,7 @@ export function SearchExperience() {
           )}
         </div>
       ) : (
-        <div ref={listRef} className="panel overflow-hidden rounded-xl p-1.5">
+        <div ref={listRef} className="d2-card overflow-hidden rounded-xl p-1.5">
           {(() => {
             let idx = -1;
             return groups.map((g) => (
@@ -259,7 +260,7 @@ export function SearchExperience() {
                       onMouseMove={() => setSelected(i)}
                       aria-label={`${g.label} : ${h.title}`}
                       className={cn(
-                        "group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors",
+                        "group flex items-center gap-3 rounded-xl px-4 py-4 transition-colors",
                         isSel ? "bg-surface-2" : "hover:bg-surface-2/60"
                       )}
                     >
@@ -273,8 +274,8 @@ export function SearchExperience() {
                         <meta.Icon className="size-[1.1rem]" strokeWidth={2} />
                       </span>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-[0.92rem] font-medium text-ink-1">{h.title}</div>
-                        <div className="truncate text-[0.78rem] text-ink-3">
+                        <div className="break-words text-[0.92rem] font-medium text-ink-1">{h.title}</div>
+                        <div className="line-clamp-2 text-[0.78rem] text-ink-3">
                           <Snippet text={h.snippet} />
                         </div>
                       </div>

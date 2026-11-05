@@ -151,8 +151,8 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
   };
 
   return (
-    <section className="panel top-light relative overflow-hidden rounded-xl p-5 sm:p-6" aria-labelledby="inbox-title">
-      <h2 id="inbox-title" className="text-[1.05rem] font-semibold text-ink-1">
+    <section className="d2-card relative overflow-hidden p-5 sm:p-7" aria-labelledby="inbox-title">
+      <h2 id="inbox-title" className="text-xl font-semibold text-ink-1">
         <label htmlFor={inputId}>Ajoute ce qui t’a piégé</label>
       </h2>
 
@@ -168,11 +168,11 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
           setDragOver(false);
         }}
         className={cn(
-          "mt-4 flex min-h-[170px] flex-col rounded-xl border-[1.5px] border-dashed transition-colors",
-          "focus-within:border-[color-mix(in_oklch,var(--color-violet)_55%,transparent)]",
+          "mt-5 flex min-h-[190px] flex-col rounded-2xl border-[1.5px] border-dashed transition-colors",
+          "focus-within:border-[color-mix(in_oklch,var(--color-accent)_55%,transparent)]",
           dragOver
-            ? "border-[color-mix(in_oklch,var(--color-violet)_65%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_7%,transparent)]"
-            : "border-line-strong bg-surface-2/30"
+            ? "border-[color-mix(in_oklch,var(--color-accent)_65%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_7%,transparent)]"
+            : "border-line-strong bg-surface-0/40"
         )}
       >
         {file && (
@@ -208,7 +208,7 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
           onChange={(e) => setText(e.target.value)}
           onPaste={onPaste}
           onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submit(); } }}
-          placeholder="Colle un énoncé, une discussion ChatGPT, ⌘V une capture… ou glisse un PDF, PNG, JPG ici"
+          placeholder="Colle un énoncé, une discussion ChatGPT ou une capture, ou glisse ici un PDF, PNG, JPG"
           aria-describedby={statusId}
           rows={4}
           data-focus-parent
@@ -242,7 +242,7 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
       </p>
 
       {/* sévérité discrète (texte seul) + action */}
-      <div className="mt-3 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+      <div className="mt-4 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
         <Segmented
           variant="line"
           label="Sévérité"

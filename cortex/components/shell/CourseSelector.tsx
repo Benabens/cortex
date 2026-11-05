@@ -29,12 +29,12 @@ export function CourseSelector({ className }: { className?: string }) {
         onClick={() => router.push("/cours/nouveau")}
         className={cn(
           "group flex w-full items-center gap-3 rounded-lg border border-dashed border-line-strong bg-surface-2/40 p-2 pr-2.5 text-left transition-colors",
-          "hover:border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] hover:bg-surface-2",
-          "focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2",
+          "hover:border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] hover:bg-surface-2",
+          "focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2",
           className
         )}
       >
-        <span className="grid size-9 shrink-0 place-items-center rounded-md border border-line text-violet-hi">
+        <span className="grid size-9 shrink-0 place-items-center rounded-md border border-line text-accent-hi">
           <Plus className="size-4" strokeWidth={2.5} aria-hidden="true" />
         </span>
         <span className="min-w-0 flex-1">
@@ -49,23 +49,20 @@ export function CourseSelector({ className }: { className?: string }) {
     <div
       className={cn(
         "group relative flex w-full items-center gap-3 rounded-lg border border-line bg-surface-2/60 p-2 pr-2.5 text-left transition-colors",
-        "hover:border-[color-mix(in_oklch,var(--color-violet)_34%,transparent)] hover:bg-surface-2",
-        "focus-within:outline-2 focus-within:outline-violet focus-within:outline-offset-2",
+        "hover:border-[color-mix(in_oklch,var(--color-accent)_34%,transparent)] hover:bg-surface-2",
+        "focus-within:outline-2 focus-within:outline-accent focus-within:outline-offset-2",
         className
       )}
     >
       <span
-        className="grid size-9 shrink-0 place-items-center rounded-md font-data text-[0.72rem] font-semibold text-white"
-        style={{
-          background: "linear-gradient(150deg, var(--color-violet), var(--color-cyan))",
-          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.3)",
-        }}
+        className="grid size-9 shrink-0 place-items-center rounded-md font-data text-[0.72rem] font-semibold"
+        style={{ background: "var(--tile-bg)", color: "var(--tile-ink)", boxShadow: "var(--tile-edge)" }}
         aria-hidden="true"
       >
         {initials}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[0.82rem] font-semibold text-ink-1">{title}</span>
+        <span className="line-clamp-2 block text-[0.82rem] font-semibold leading-snug text-ink-1">{title}</span>
         <span className="block truncate text-[0.72rem] text-ink-3">{subtitle}</span>
       </span>
       <ChevronsUpDown className="size-4 shrink-0 text-ink-4 transition-colors group-hover:text-ink-2" aria-hidden="true" />

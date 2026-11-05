@@ -1,5 +1,6 @@
 "use client";
 
+import styles from "@/app/secondary.module.css";
 import { useEffect, useRef, useState } from "react";
 import {
   Target,
@@ -59,6 +60,7 @@ export function TrainingStudio() {
   const [error, setError] = useState<{ offline: boolean; message: string } | null>(null);
   const [fbSent, setFbSent] = useState<string | null>(null);
   const [fbBusy, setFbBusy] = useState(false);
+  const [fbError, setFbError] = useState<string | null>(null);
 
   const busy = drilling || jobRunning;
 
@@ -66,7 +68,7 @@ export function TrainingStudio() {
   // le cours initial se résout de cs-202 → ml via un effet (courseId change au montage) ; effacer
   // l'input ici écraserait le pré-remplissage ?prefill= (déposé au montage). Le × / l'édition suffisent.
   useEffect(() => {
-    setDrill(null); setJobId(null); setError(null); setFbSent(null); setShownHints(0); setShowSolution(false);
+    setDrill(null); setJobId(null); setError(null); setFbSent(null); setFbError(null); setShownHints(0); setShowSolution(false);
   }, [courseId]);
 
   // Deep-link ?prefill=<concept> (bouton « S'entraîner » des Faiblesses ; legacy ?drill= toléré).
@@ -86,7 +88,7 @@ export function TrainingStudio() {
   async function launchDrill(c?: string) {
     const chosen = (c ?? input).trim();
     if (!chosen || busy) return;
-    setError(null); setDrill(null); setJobId(null); setFbSent(null);
+    setError(null); setDrill(null); setJobId(null); setFbSent(null); setFbError(null);
     setShownHints(0); setShowSolution(false);
     setDrilling(true);
     try {
@@ -107,7 +109,7 @@ export function TrainingStudio() {
 
   async function launchArchitect() {
     if (busy) return;
-    setError(null); setDrill(null); setFbSent(null); setJobId(null);
+    setError(null); setDrill(null); setFbSent(null); setFbError(null); setJobId(null);
     setLaunching(true);
     try {
       const fd = new FormData();
@@ -144,6 +146,7 @@ export function TrainingStudio() {
   async function sendFeedback(verdict: string) {
     if (fbBusy || fbSent) return;
     setFbBusy(true);
+    setFbError(null);
     try {
       await apiPost("/api/feedback", courseId, {
         examId: jobDone ? (job as { resultId?: number }).resultId : undefined,
@@ -151,8 +154,8 @@ export function TrainingStudio() {
         verdict,
       });
       setFbSent(verdict);
-    } catch {
-      setFbSent(verdict);
+    } catch (error) {
+      setFbError((error as ApiError).message || "Ton retour n’a pas pu être enregistré. Réessaie.");
     } finally {
       setFbBusy(false);
     }
@@ -176,43 +179,49 @@ export function TrainingStudio() {
   const weakChips = list.data?.weaknesses ?? [];
 
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.15fr_1fr]">
+    <div className={styles.split}>
       {/* ── Zone unique d'entrée ── */}
-      <Panel className="p-5 sm:p-6">
-        <h2 className="text-[1.05rem] font-semibold text-ink-1">Génère un exo à travailler</h2>
+      <Panel className="p-6 sm:p-8">
+        <h2 className="font-display text-[1.5rem] font-semibold leading-tight text-ink-1">Génère un exo à travailler</h2>
 
         {/* pré-remplissage depuis Faiblesses : bandeau éditable + × pour vider */}
         {prefillNote && input === prefillNote && (
-          <div className="mt-4 flex items-center justify-between gap-2 rounded-lg border border-[color-mix(in_oklch,var(--color-violet)_35%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_9%,transparent)] px-3 py-2 text-[0.78rem] text-ink-2">
+          <div className="mt-4 flex items-center justify-between gap-2 rounded-lg border border-[color-mix(in_oklch,var(--color-accent)_35%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_9%,transparent)] px-3 py-2 text-[0.78rem] text-ink-2">
             <span className="inline-flex min-w-0 items-center gap-1.5">
-              <Target className="size-3.5 shrink-0 text-violet-hi" strokeWidth={2.25} />
+              <Target className="size-3.5 shrink-0 text-accent-hi" strokeWidth={2.25} />
               <span className="truncate">Pré-rempli : modifie-le ou lance tel quel.</span>
             </span>
             <button
               type="button"
               onClick={() => { setInput(""); setPrefillNote(null); }}
               aria-label="Vider le pré-remplissage"
-              className="grid size-6 shrink-0 place-items-center rounded text-ink-3 transition-colors hover:text-ink-1 focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2"
+              className="grid size-6 shrink-0 place-items-center rounded text-ink-3 transition-colors hover:text-ink-1 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
             >
               <X className="size-3.5" strokeWidth={2.5} />
             </button>
           </div>
         )}
 
-        {/* zone unique : texte + IMAGE INLINE (P-B) — colle ⌘V / glisse une image, continue à écrire */}
+        {/* zone unique : texte + IMAGE INLINE (P-B) — colle / glisse une image, continue à écrire */}
         <div className="mt-3">
           <ImageTextArea
             value={input}
             onChange={setInput}
             image={image}
             onImageChange={setImage}
-            rows={3}
+            rows={5}
             ariaLabel="Concept, consigne ou énoncé à travailler (image collable)"
             placeholder="Ex. « rétropropagation », « max-flow avec une coupe », ou colle une consigne / un énoncé…"
             onEnter={submit}
           />
         </div>
 
+        {list.error && (
+          <div className="mt-4 rounded-xl border border-line p-3 text-sm text-ink-3">
+            <p>Les suggestions de révision ne sont pas disponibles.</p>
+            <Button className="mt-2" size="sm" onClick={list.refetch}>Recharger les suggestions</Button>
+          </div>
+        )}
         {/* puces : dus / faiblesses réels */}
         {!list.loading && !list.error && (dueChips.length > 0 || weakChips.length > 0) && (
           <div className="mt-4 space-y-3">
@@ -242,9 +251,9 @@ export function TrainingStudio() {
         )}
       </Panel>
 
-      {/* ── Résultat unique : absent tant qu'aucun exo n'a été demandé ── */}
+      {/* Résultat unique, uniquement après une demande d’exercice. */}
       {hasResult && (
-      <Panel ref={resultRef} className="flex scroll-mt-20 flex-col p-5 sm:p-6">
+      <Panel ref={resultRef} className="flex scroll-mt-20 flex-col gap-2 p-6 sm:p-8">
         {drill ? (
           <>
             <div className="flex items-center justify-between">
@@ -282,7 +291,7 @@ export function TrainingStudio() {
                 </Button>
               )}
             </div>
-            <FeedbackBar onSend={sendFeedback} sent={fbSent} busy={fbBusy} />
+            <FeedbackBar onSend={sendFeedback} sent={fbSent} busy={fbBusy} error={fbError} />
           </>
         ) : waiting ? (
           <div className="flex flex-1 flex-col justify-center gap-3" aria-live="polite">
@@ -305,7 +314,7 @@ export function TrainingStudio() {
             </span>
             <h2 className="mt-3 text-[1.05rem] font-semibold text-ink-1">{input.trim() || "Exercice sur mesure"}</h2>
             <div className="mt-4 grid grid-cols-2 gap-3">
-              <a href={resultLink ?? "/examens"} target={resultLink ? "_blank" : undefined} rel="noopener noreferrer" className="flex items-center gap-3 rounded-lg border border-line bg-surface-2/40 p-3 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_34%,transparent)]">
+              <a href={resultLink ?? "/examens"} target={resultLink ? "_blank" : undefined} rel="noopener noreferrer" className="flex items-center gap-3 rounded-lg border border-line bg-surface-2/40 p-3 transition-colors hover:border-[color-mix(in_oklch,var(--color-accent)_34%,transparent)]">
                 <FileText className="size-5 text-cyan-hi" strokeWidth={2} />
                 <span className="text-[0.82rem] font-medium text-ink-1">{resultLink ? "Énoncé PDF" : "Voir dans Examens"}</span>
               </a>
@@ -314,13 +323,14 @@ export function TrainingStudio() {
                 <span className="text-[0.82rem] font-medium text-ink-1">Corrigé</span>
               </a>
             </div>
-            <FeedbackBar onSend={sendFeedback} sent={fbSent} busy={fbBusy} />
+            <FeedbackBar onSend={sendFeedback} sent={fbSent} busy={fbBusy} error={fbError} />
           </>
         ) : jobFailed ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
             <AlertTriangle className="size-6 text-danger-hi" strokeWidth={2} />
             <p className="text-[0.9rem] font-medium text-ink-1">La génération a échoué</p>
-            <p className="max-w-xs text-[0.82rem] text-ink-3">{asText(job?.error) ?? "Réessaie. Si ça persiste, vérifie le moteur LLM et le moteur LaTeX."}</p>
+            <p role="alert" className="max-w-xs text-sm text-ink-3">{asText(job?.error) ?? "L’exercice n’a pas pu être terminé. Ta consigne est conservée."}</p>
+            <Button variant="secondary" onClick={submit}>Réessayer la génération</Button>
           </div>
         ) : null}
       </Panel>
@@ -329,7 +339,7 @@ export function TrainingStudio() {
   );
 }
 
-function FeedbackBar({ onSend, sent, busy }: { onSend: (verdict: string) => void; sent: string | null; busy: boolean }) {
+function FeedbackBar({ onSend, sent, busy, error }: { onSend: (verdict: string) => void; sent: string | null; busy: boolean; error: string | null }) {
   return (
     <div className="mt-auto border-t border-line pt-4">
       <div className="mb-2.5 flex items-center gap-2 text-[0.82rem] text-ink-2">
@@ -345,9 +355,9 @@ function FeedbackBar({ onSend, sent, busy }: { onSend: (verdict: string) => void
             disabled={busy || !!sent}
             aria-pressed={sent === o.verdict}
             className={cn(
-              "h-10 rounded-md border px-3 text-[0.8rem] font-medium transition-colors disabled:opacity-60",
+              "min-h-11 rounded-full border px-3 text-[0.8rem] font-medium transition-colors disabled:opacity-60",
               sent === o.verdict
-                ? "border-[color-mix(in_oklch,var(--color-violet)_50%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_16%,transparent)] text-ink-1"
+                ? "border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_16%,transparent)] text-ink-1"
                 : "border-line bg-surface-2/40 text-ink-2 hover:bg-surface-2 hover:text-ink-1"
             )}
           >
@@ -355,6 +365,7 @@ function FeedbackBar({ onSend, sent, busy }: { onSend: (verdict: string) => void
           </button>
         ))}
       </div>
+      {error && <p role="alert" className="mt-2 text-sm text-danger-hi">{error}</p>}
       {sent && <p className="mt-2 text-[0.78rem] text-emerald-hi" aria-live="polite">Merci : Cortex recalibre la difficulté des prochains exos.</p>}
     </div>
   );
@@ -374,7 +385,7 @@ function ChipGroup({ label, chips, onPick, selected }: { label: string; chips: s
             className={cn(
               "inline-flex min-h-9 items-center rounded-full border px-3 py-1 text-left text-[0.8rem] font-medium transition-colors",
               selected === c
-                ? "border-[color-mix(in_oklch,var(--color-violet)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_14%,transparent)] text-ink-1"
+                ? "border-[color-mix(in_oklch,var(--color-accent)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_14%,transparent)] text-ink-1"
                 : "border-line bg-surface-1/60 text-ink-2 hover:bg-surface-2 hover:text-ink-1"
             )}
           >

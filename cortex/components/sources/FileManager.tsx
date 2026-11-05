@@ -14,7 +14,7 @@ const extTone: Record<string, string> = {
   HTML: "var(--color-cyan)",
   HTM: "var(--color-cyan)",
   TXT: "var(--color-ink-3)",
-  MD: "var(--color-violet)",
+  MD: "var(--color-accent)",
 };
 
 const ANNALE_TYPES = new Set(["final", "midterm"]);
@@ -97,7 +97,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
         </p>
       )}
       {/* résumé + FACETTES cliquables */}
-      <div className="border-b border-line px-4 py-3.5">
+      <div className="border-b border-line px-6 py-5">
         <div className="flex items-center gap-2 text-[0.76rem] text-ink-3">
           <Layers className="size-3.5" strokeWidth={2} />
           <span>
@@ -134,7 +134,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
               const isBusy = busy.has(f.path);
               const href = hrefByPath.get(f.path) ?? null;
               return (
-                <div key={f.path} className={cn("flex flex-wrap items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-surface-2/40", i > 0 && "border-t border-line")}>
+                <div key={f.path} className={cn("flex flex-wrap items-center gap-3 rounded-xl px-4 py-4 transition-colors hover:bg-surface-2/40", i > 0 && "border-t border-line")}>
                   <span className="grid size-8 shrink-0 place-items-center rounded-md border border-line bg-surface-2/60" style={{ color: tone }}>
                     <Icon className="size-4" strokeWidth={2} />
                   </span>
@@ -159,12 +159,12 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
                         onClick={() => remove(f)}
                         disabled={isBusy}
                         aria-label={`Retirer ${f.title}`}
-                        className="grid size-8 shrink-0 place-items-center rounded-md text-ink-4 transition-colors hover:bg-surface-2 hover:text-danger-hi focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2 disabled:opacity-40"
+                        className="grid size-11 shrink-0 place-items-center rounded-full text-ink-3 transition-colors hover:bg-surface-2 hover:text-danger-hi focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:opacity-40"
                       >
                         <Trash2 className="size-4" strokeWidth={2} />
                       </button>
                     ) : (
-                      <span className="size-8 shrink-0" aria-hidden="true" />
+                      <span className="size-11 shrink-0" aria-hidden="true" />
                     )}
                   </div>
                 </div>
@@ -188,7 +188,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
               const Icon = ext === "HTML" || ext === "HTM" ? FileCode2 : FileText;
               const tone = extTone[ext] ?? "var(--color-ink-3)";
               return (
-                <div key={s.path} className={cn("flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-surface-2/40", i > 0 && "border-t border-line")}>
+                <div key={s.path} className={cn("flex items-center gap-3 rounded-xl px-4 py-4 transition-colors hover:bg-surface-2/40", i > 0 && "border-t border-line")}>
                   <span className="grid size-8 shrink-0 place-items-center rounded-md border border-line bg-surface-2/60" style={{ color: tone }}>
                     <Icon className="size-4" strokeWidth={2} />
                   </span>
@@ -219,8 +219,8 @@ function SeeLink({ href, label }: { href: string; label: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      aria-label={`Ouvrir : ${label}`}
-      className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-line bg-surface-2/40 px-2.5 text-[0.78rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-violet)_40%,transparent)] hover:text-violet-hi focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2"
+      aria-label={`Voir ${label}`}
+      className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-md border border-line bg-surface-2/40 px-2.5 text-[0.78rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-accent)_40%,transparent)] hover:text-accent-hi focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
     >
       voir
       <ArrowUpRight className="size-3.5" strokeWidth={2.25} />
@@ -239,16 +239,16 @@ function RefCheckbox({ checked, busy, onToggle, label }: { checked: boolean; bus
       disabled={busy}
       onClick={onToggle}
       className={cn(
-        "inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-[0.78rem] font-medium transition-colors",
-        "focus-visible:outline-2 focus-visible:outline-violet focus-visible:outline-offset-2 disabled:opacity-50",
+        "inline-flex min-h-11 items-center gap-2 rounded-md border px-2.5 text-[0.78rem] font-medium transition-colors",
+        "focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:opacity-50",
         checked
-          ? "border-[color-mix(in_oklch,var(--color-violet)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_16%,transparent)] text-violet-hi"
+          ? "border-[color-mix(in_oklch,var(--color-accent)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_16%,transparent)] text-accent-hi"
           : "border-line bg-surface-2/40 text-ink-3 hover:text-ink-1"
       )}
     >
       <span
         aria-hidden="true"
-        className={cn("grid size-4 place-items-center rounded-[5px] border transition-colors", checked ? "border-transparent bg-violet-deep text-white" : "border-line-strong bg-surface-1")}
+        className={cn("grid size-4 place-items-center rounded-[5px] border transition-colors", checked ? "border-transparent bg-accent-deep text-white" : "border-line-strong bg-surface-1")}
       >
         {checked && <Check className="size-3" strokeWidth={3} />}
       </span>

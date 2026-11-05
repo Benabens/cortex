@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Search, Menu, CalendarClock, UserRound } from "lucide-react";
 import { Wordmark } from "./Logo";
+import { ThemeToggle } from "./ThemeToggle";
 
 import { useApi } from "@/lib/ux/api";
 
@@ -30,8 +31,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
         {/* Search / command trigger */}
         <Link
           href="/recherche"
-          className="group hidden h-10 max-w-[420px] flex-1 items-center gap-2.5 rounded-lg border border-line bg-surface-2/50 px-3 text-ink-3 transition-colors hover:border-line-strong hover:bg-surface-2 sm:flex"
-          aria-label="Ouvrir la recherche"
+          className="group hidden h-10 max-w-[420px] flex-1 items-center gap-2.5 rounded-full border border-line bg-surface-2/50 px-4 text-ink-3 transition-colors hover:border-line-strong hover:bg-surface-2 sm:flex"
         >
           <Search className="size-4 shrink-0" strokeWidth={2} />
           <span className="flex-1 truncate text-[0.85rem]">
@@ -61,6 +61,8 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           >
             <Search className="size-[1.15rem]" strokeWidth={2} />
           </Link>
+
+          <ThemeToggle />
 
           <Link
             href="/compte"

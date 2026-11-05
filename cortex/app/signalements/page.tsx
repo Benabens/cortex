@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PageHeader } from "@/components/ui/PageHeader";
 
 type Report = { id: number; userId: string; course: string; examId: number; kind: string; reasonLabel: string; comment: string | null; stem: string; status: string; refundedCenti: number; createdAt: string };
 
@@ -17,14 +18,14 @@ export default function ReportsPage() {
     }).catch(() => setError("Chargement impossible."));
   }, []);
   return (
-    <main className="mx-auto max-w-4xl px-4 py-8">
-      <h1 className="text-[20px] font-semibold" style={{ color: "var(--ink)" }}>Signalements de questions</h1>
-      <p className="sub mt-1">Ce que les étudiants (ou leurs agents) ont relevé dans les examens générés : de quoi corriger le moteur.</p>
-      {error && <p className="mt-6 text-[13px]" style={{ color: "var(--ink-3)" }}>{error}</p>}
+    <div className="mx-auto w-full max-w-4xl">
+      <PageHeader context={false} title="Signalements de questions" description="Ce que les étudiants (ou leurs agents) ont relevé dans les examens générés : de quoi corriger le moteur." />
+      {!reports && !error && <div className="skeleton mt-6 h-48 rounded-2xl" role="status" aria-label="Chargement des signalements" />}
+      {error && <p role="alert" className="mt-6 text-sm text-danger-hi">{error}</p>}
       {reports && !reports.length && <p className="mt-6 text-[13px]" style={{ color: "var(--ink-3)" }}>Aucun signalement pour l&apos;instant.</p>}
       <div className="mt-6 flex flex-col gap-3">
         {reports?.map((r) => (
-          <section key={r.id} className="card card-pad">
+          <section key={r.id} className="d2-card break-words p-5 sm:p-6">
             <div className="text-[12px]" style={{ color: "var(--ink-3)" }}>
               #{r.id} · {r.createdAt} · {r.course} · examen {r.examId} ({r.kind}) · compte {r.userId.slice(0, 10)}… · <strong style={{ color: "var(--ink-2)" }}>{r.reasonLabel}</strong> · {STATUS[r.status] ?? r.status}{r.refundedCenti ? ` · ${r.refundedCenti / 100} crédit rendu` : ""}
             </div>
@@ -33,6 +34,6 @@ export default function ReportsPage() {
           </section>
         ))}
       </div>
-    </main>
+    </div>
   );
 }
