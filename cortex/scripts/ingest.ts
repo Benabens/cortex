@@ -20,6 +20,7 @@ import { ingestAllRefs } from "../lib/sources";
 import { sourceTypeForFolder } from "../lib/course-source";
 import { tokenize } from "../lib/text";
 import { extractOfficeText, type OfficeExtension } from "../lib/office-documents";
+import { splitChapters, splitPages } from "../lib/chapters";
 
 // Args : `npm run ingest -- --course=algo --from "<dossier>"` (défaut cs-202, pas d'import).
 function argVal(name: string): string | undefined {
@@ -422,6 +423,32 @@ function inferGenericType(rel: string): { type: string; year: number | null } {
   return { type: "exercise", year: null };
 }
 
+/** Supports découpés par chapitre quand ce sont des polycopiés (jamais un examen : « Part 1/2/3 »). */
+const SPLITTABLE = new Set(["course_pdf", "note"]);
+
+/**
+ * Un long support d'un seul fichier, découpé en un support par chapitre (lib/chapters) : plan du
+ * cours, couverture et analyse se structurent par support. false si le document ne s'y prête pas.
+ */
+async function addChapteredSource(type: string, title: string, rel: string, year: number | null, pages: string[]): Promise<boolean> {
+  if (!SPLITTABLE.has(type)) return false;
+  const pdf = pages.length > 1;
+  const parts: { title: string; pages: number[]; text?: string }[] | null | undefined = pdf
+    ? splitPages(pages)
+    : splitChapters(pages[0] ?? "")?.map((c) => ({ title: c.title, pages: [], text: c.text }));
+  if (!parts) return false;
+  for (const [k, part] of parts.entries()) {
+    const lectureId = `chapitre-${k + 1}`;
+    const label = `${title} — ${part.title}`;
+    const items: ItemRec[] = pdf
+      ? part.pages.map((i) => ({ type, lectureId, title: `${label} — p.${i + 1}`, text: pages[i], anchor: `${rel}#page=${i + 1}` }))
+      : [{ type, lectureId, title: label, text: part.text ?? "", anchor: rel }];
+    await addSource(type, label, rel, year, items);
+  }
+  console.log(`  ✂ ${rel} : ${parts.length} chapitres, un support chacun`);
+  return true;
+}
+
 async function ingestGenericContent(): Promise<void> {
   if (!fs.existsSync(CONTENT_ROOT)) {
     console.log(`⚠ Dossier de contenu absent : ${CONTENT_ROOT}. Dépose le matériel du cours là (sites/séries/notes/cours) puis relance.`);
@@ -438,17 +465,20 @@ async function ingestGenericContent(): Promise<void> {
         const { text } = await extractText(pdf, { mergePages: false });
         const pages = (Array.isArray(text) ? text : [text]).map(clean).filter((t) => t.length > 3);
         const title = path.basename(rel, ".pdf");
-        await addSource(type, title, rel, year, pages.map((t, i) => ({ type, lectureId: null, title: `${title} — p.${i + 1}`, text: t, anchor: `${rel}#page=${i + 1}` })));
+        if (!(await addChapteredSource(type, title, rel, year, pages))) {
+          await addSource(type, title, rel, year, pages.map((t, i) => ({ type, lectureId: null, title: `${title} — p.${i + 1}`, text: t, anchor: `${rel}#page=${i + 1}` })));
+        }
       } else if (/\.(pptx|docx)$/i.test(rel)) {
         const title = path.basename(rel, path.extname(rel));
         const text = await extractOfficeText(fs.readFileSync(path.join(CONTENT_ROOT, rel)), path.extname(rel) as OfficeExtension);
-        await addSource(type, title, rel, year, [{ type, lectureId: null, title, text, anchor: rel }]);
+        if (!(await addChapteredSource(type, title, rel, year, [text]))) await addSource(type, title, rel, year, [{ type, lectureId: null, title, text, anchor: rel }]);
       } else if (/\.html?$/.test(rel)) {
         const { title, text } = htmlToText(rel);
         await addSource(type, title, rel, year, [{ type, lectureId: null, title, text, anchor: rel }]);
       } else {
         const title = path.basename(rel);
-        await addSource(type, title, rel, year, [{ type, lectureId: null, title, text: read(rel), anchor: rel }]);
+        const text = read(rel);
+        if (!(await addChapteredSource(type, title, rel, year, [text]))) await addSource(type, title, rel, year, [{ type, lectureId: null, title, text, anchor: rel }]);
       }
       nSources++;
     } catch (e) {

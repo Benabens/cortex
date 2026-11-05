@@ -214,13 +214,19 @@ export function spreadOverChapters(topics: CoverageTopic[], n: number, opts: { a
  * le support du cours (hors annales) dont le texte porte ses mots les plus
  * rares (idf), ceux du libellé comptant double. null si rien ne la rattache.
  */
-export async function assignChapters(topics: { label: string; method: string | null; weight: number; chapterId?: number | null }[]): Promise<CoverageTopic[]> {
+export async function assignChapters(
+  topics: { label: string; method: string | null; weight: number; chapterId?: number | null }[],
+  opts: { fillChapters?: boolean } = {},
+): Promise<CoverageTopic[]> {
   if (topics.some((t) => t.chapterId != null)) {
     let titles = new Map<number, string>();
     try {
-      titles = new Map((await q.all<{ id: number; title: string }>(`SELECT id, title FROM plan_chapters`)).map((r) => [Number(r.id), r.title]));
+      titles = new Map((await q.all<{ id: number; title: string }>(`SELECT id, title FROM plan_chapters ORDER BY seq`)).map((r) => [Number(r.id), r.title]));
     } catch { /* pas de plan */ }
-    if (titles.size) return topics.map((t) => ({ label: t.label, method: t.method, weight: t.weight, chapter: t.chapterId != null ? titles.get(Number(t.chapterId)) ?? null : null }));
+    if (titles.size) {
+      const out = topics.map((t) => ({ label: t.label, method: t.method, weight: t.weight, chapter: t.chapterId != null ? titles.get(Number(t.chapterId)) ?? null : null }));
+      return opts.fillChapters ? withEmptyChapters(out, [...titles.values()]) : out;
+    }
   }
   let docs: { title: string; tokens: Set<string> }[] = [];
   try {
@@ -239,7 +245,7 @@ export async function assignChapters(topics: { label: string; method: string | n
   } catch { /* corpus illisible : aucun chapitre */ }
   if (docs.length < 2) return topics.map((t) => ({ label: t.label, method: t.method, weight: t.weight, chapter: null }));
   const df = (tok: string) => docs.reduce((n, d) => n + (d.tokens.has(tok) ? 1 : 0), 0);
-  return topics.map((t) => {
+  const assigned = topics.map((t) => {
     const words = new Map<string, number>();
     for (const tok of tokenize(t.method ?? "", 4)) words.set(tok, 1);
     for (const tok of tokenize(t.label, 4)) words.set(tok, 2);
@@ -253,4 +259,18 @@ export async function assignChapters(topics: { label: string; method: string | n
     }
     return { label: t.label, method: t.method, weight: t.weight, chapter: best?.title ?? null };
   });
+  return opts.fillChapters ? withEmptyChapters(assigned, docs.map((d) => d.title)) : assigned;
+}
+
+/**
+ * Une notion « de chapitre » (son titre) pour chaque chapitre qui n'en a aucune : banc moteur du
+ * 04/11/2026 — sans annale, les notions sont des types d'exercice rattachés à quelques chapitres
+ * seulement, et la répartition ignorait les autres (synth-40qcm : 4 chapitres sur 12 à 0 ; HUM-285 :
+ * 10 sur 16). Poids : le plus faible des notions, pour ne pas peser plus que le cours.
+ */
+function withEmptyChapters(topics: CoverageTopic[], chapters: string[]): CoverageTopic[] {
+  const covered = new Set(topics.map((t) => t.chapter).filter(Boolean));
+  const weight = Math.max(1, Math.min(...topics.map((t) => t.weight).filter((w) => w > 0), Infinity));
+  const extra = chapters.filter((c) => !covered.has(c)).map((c) => ({ label: c, method: null, weight: Number.isFinite(weight) ? weight : 1, chapter: c }));
+  return [...topics, ...extra];
 }

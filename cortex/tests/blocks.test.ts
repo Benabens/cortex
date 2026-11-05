@@ -66,7 +66,8 @@ before(async () => {
           verdicts: /SILENT/.test(content) ? [] : verdicts,
           off_course: "",
           definition_mismatch: /NARROW/.test(content) ? "feedback loop : la question la réduit aux boucles positives ; le cours : renforçante OU équilibrante" : "",
-          trivial_distractors: [],
+          // Banc du 04/11 (CS-290 composite) : le juge a rendu les options en CHAÎNE, l'examen entier plantait.
+          trivial_distractors: /STRINGOPTS/.test(content) ? [{ index: 0, options: "A, B — l'énoncé donne déjà la réponse" }] : [],
         });
       } else if (/"parts"/.test(content) && /"scenario"/.test(content)) {
         prompts.push(content);
@@ -332,4 +333,19 @@ test("C × temps restant — l'avancement des questions composées ne recule qu'
   const back = seq.filter((x, i) => i > 0 && x.p < seq[i - 1].p).map((x) => `${x.p} % — ${x.s}`);
   assert.ok(back.every((x) => /rejetée|inutilisable|reprise/.test(x)), `recul hors réessai :\n${back.join("\n")}\n---\n${seq.map((x) => `${x.p} ${x.s}`).join("\n")}`);
   assert.ok(seq.filter((x) => x.p >= 100).length === 1 && seq.at(-1)!.p === 100, "100 % une seule fois, à la fin");
+});
+
+test("C — un verdict du juge mal typé (options en chaîne) rejette le bloc sans faire planter l'examen", async () => {
+  const id = await compositeCourse(3);
+  script = {
+    "Ethical theories": [block("A", [scq("A"), short("A"), code("[1, 2]")])],
+    "Keyword filtering": [block("B", [scq("B"), short("B"), code("[1, 2]")], "STRINGOPTS: a filter."), block("B2", [scq("B2"), short("B2"), code("[1, 2]")])],
+    "Feedback loops": [block("C", [scq("C"), short("C"), code("[1, 2]")])],
+  };
+  const { runWithCourse } = await import("../db/client");
+  const { generateMockExam } = await import("../lib/mock-exam");
+  const steps: string[] = [];
+  const r = await runWithCourse(id, () => generateMockExam({ onStep: (s) => { steps.push(s); } }));
+  assert.deepEqual([r.produced, r.requested], [3, 3], steps.join("\n"));
+  assert.ok(steps.some((s) => /distracteurs éliminables sans le cours : A, B/.test(s)), steps.join("\n"));
 });
