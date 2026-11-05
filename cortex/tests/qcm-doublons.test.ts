@@ -1,6 +1,7 @@
 /**
  * UNE NOTION = UNE QUESTION (lib/qcm, contrôle de fin d'examen) — examen 4 de HUM-285 (03/11/2026) :
- * Q7 et Q16, Q2/Q11/Q19, Q12 et Q20, Q8 et Q14 testaient chacune une même notion. Le contrôle de
+ * Q7 et Q16 testaient l'avantage à long terme du leadership, Q2/Q11/Q19 les objectifs du même jeu
+ * de rôle sur la désinformation, Q12 et Q20 les terres rares, Q8 et Q14 le DSA. Le contrôle de
  * la PR #55 ne retirait que deux questions sur « la même notion ET le même fait ». Verrouillé :
  *  - quand le cours a au moins autant de notions que l'examen a de questions, une notion n'a
  *    qu'une question, quel que soit l'angle ; les suivantes sont retirées et remplacées ;
@@ -28,10 +29,10 @@ process.env.MAX_COURSES_CREATED_PER_HOUR = "unlimited";
 
 /** Examen 4 : les groupes de questions sur une même notion (numéros 1-based de l'examen). */
 const EXAM4: Record<number, string> = {
-  2: "biais de négativité", 11: "biais de négativité", 19: "biais de négativité",
-  7: "faux positifs des détecteurs", 16: "faux positifs des détecteurs",
-  12: "nudge", 20: "nudge",
-  8: "souveraineté des données", 14: "souveraineté des données",
+  2: "objectifs du jeu de rôle sur la désinformation", 11: "objectifs du jeu de rôle sur la désinformation", 19: "objectifs du jeu de rôle sur la désinformation",
+  7: "avantage à long terme du leadership", 16: "avantage à long terme du leadership",
+  12: "terres rares", 20: "terres rares",
+  8: "Digital Services Act (DSA)", 14: "Digital Services Act (DSA)",
 };
 const notionOf = (n: number) => EXAM4[n] ?? `notion distincte ${n}`;
 
@@ -125,7 +126,7 @@ async function course(notions: number, supports = 1): Promise<string> {
   await runWithCourse(row.id, async () => {
     ensureFts();
     for (const t of ["sources", "items", "topics"]) await q.ensureTable(t);
-    const text = "Biais de négativité, nudges, souveraineté des données, détecteurs de contenus synthétiques et leurs faux positifs.";
+    const text = "Leadership et avantage à long terme, objectifs du jeu de rôle sur la désinformation, terres rares et Digital Services Act (DSA).";
     for (let k = 1; k <= supports; k++) {
       const title = supports === 1 ? "Séances 1 à 6" : `Support ${k}`;
       const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", title, `course_pdf/s${k}`, null, 1);
@@ -149,7 +150,7 @@ async function exam(id: string, count: number, focus?: string) {
 
 const notionIn = (stem: string) => /\[notion:([^\]]+)\]/.exec(stem)?.[1] ?? "";
 
-test("examen 4 : une notion = une question — Q11, Q19, Q16, Q20 et Q14 retirées et remplacées, les premières gardées", async () => {
+test("HUM-285 examen 4 : une seule question sur le leadership à long terme, le jeu de rôle désinformation, les terres rares et le DSA", async () => {
   const id = await course(30);
   const { r, steps, stems } = await exam(id, 20);
   assert.equal(r.count, 20);
@@ -160,13 +161,13 @@ test("examen 4 : une notion = une question — Q11, Q19, Q16, Q20 et Q14 retiré
   assert.equal(stems.filter((s) => s.startsWith("Remplacement")).length, 5);
   assert.match(dedupePrompts[0], /une notion = une question/i, "le contrôle reçoit le critère strict");
   assert.ok(steps.some((s) => /5 QCM en doublon/.test(s)), steps.filter((s) => /doublon/.test(s)).join("\n"));
-  assert.match(designPrompts[designPrompts.length - 1], /biais de négativité/, "le lot de remplacement sait quelles notions sont déjà posées");
+  assert.match(designPrompts[designPrompts.length - 1], /objectifs du jeu de rôle sur la désinformation/, "le lot de remplacement sait quelles notions sont déjà posées");
 });
 
 test("un remplacement qui retombe sur une notion déjà posée est retiré à son tour", async () => {
   const id = await course(30);
-  // Le 1ᵉʳ lot de remplacement repose encore une question sur le nudge (déjà Q12).
-  design = (n, call) => (call === 6 ? Array.from({ length: n }, (_, i) => item(i === 0 ? `Remplacement 6.0 [notion:nudge] [angle:autre] : que dit le cours ?` : `Remplacement 6.${i} [notion:neuve 6.${i}] [angle:a] : que dit le cours ?`)) : defaultDesign(n, call));
+  // Le 1ᵉʳ lot de remplacement repose encore une question sur les terres rares (déjà Q12).
+  design = (n, call) => (call === 6 ? Array.from({ length: n }, (_, i) => item(i === 0 ? `Remplacement 6.0 [notion:terres rares] [angle:autre] : que dit le cours ?` : `Remplacement 6.${i} [notion:neuve 6.${i}] [angle:a] : que dit le cours ?`)) : defaultDesign(n, call));
   const { r, stems } = await exam(id, 20);
   assert.equal(r.count, 20);
   assert.equal(new Set(stems.map(notionIn)).size, 20, stems.map(notionIn).join("\n"));
@@ -212,12 +213,12 @@ test("accent demandé par l'étudiant : ses questions partagent un thème sans �
 
 test("le dernier lot de remplacement est contrôlé lui aussi : une notion déjà posée n'y reste pas", async () => {
   const id = await course(30);
-  // Chaque lot de remplacement repose une question sur le nudge (déjà Q12).
-  design = (n, call) => (call >= 6 ? Array.from({ length: n }, (_, i) => item(i === 0 ? `Remplacement ${call}.0 [notion:nudge] [angle:encore ${call}] : que dit le cours ?` : `Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`)) : defaultDesign(n, call));
+  // Chaque lot de remplacement repose une question sur les terres rares (déjà Q12).
+  design = (n, call) => (call >= 6 ? Array.from({ length: n }, (_, i) => item(i === 0 ? `Remplacement ${call}.0 [notion:terres rares] [angle:encore ${call}] : que dit le cours ?` : `Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`)) : defaultDesign(n, call));
   const { stems } = await exam(id, 20);
   const notions = stems.map(notionIn);
   assert.equal(new Set(notions).size, notions.length, `aucune notion deux fois :\n${notions.join("\n")}`);
-  assert.equal(notions.filter((n) => n === "nudge").length, 1);
+  assert.equal(notions.filter((n) => n === "terres rares").length, 1);
 });
 
 test("titres de supports ajoutés faute de notions : ils ne comptent pas comme notions pour décider du mode strict", async () => {
