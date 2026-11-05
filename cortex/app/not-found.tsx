@@ -2,8 +2,8 @@ import Link from "next/link";
 import { Wordmark } from "@/components/shell/Logo";
 
 /**
- * 404 — page introuvable. Thème DARK cohérent (la page 404 Next par défaut est
- * en thème clair). Server Component (aucune interactivité requise).
+ * 404 — page introuvable, aux jetons de l'app (sombre ou clair selon le thème ;
+ * replis littéraux du sombre si le CSS global manque). Server Component.
  */
 export default function NotFound() {
   return (
@@ -16,18 +16,18 @@ export default function NotFound() {
         justifyContent: "center",
         textAlign: "center",
         padding: "48px 24px",
-        color: "#f4f2fb",
+        color: "var(--color-ink-1, #f4f2fb)",
       }}
     >
       <div
         style={{
           maxWidth: 460,
           width: "100%",
-          background: "rgba(255,255,255,0.03)",
-          border: "1px solid rgba(255,255,255,0.09)",
+          background: "var(--color-surface-1, rgba(255,255,255,0.03))",
+          border: "1px solid var(--color-line, rgba(255,255,255,0.09))",
           borderRadius: 16,
           padding: "32px 28px",
-          boxShadow: "0 8px 26px -6px rgba(0,0,0,0.6)",
+          boxShadow: "var(--shadow-pop, 0 8px 26px -6px rgba(0,0,0,0.6))",
         }}
       >
         <div style={{ display: "flex", justifyContent: "center" }}>
@@ -35,7 +35,7 @@ export default function NotFound() {
         </div>
         <h1 style={{ fontSize: 44, fontWeight: 700, margin: "12px 0 4px", lineHeight: 1 }}>404</h1>
         <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px" }}>Page introuvable</h2>
-        <p style={{ fontSize: 14, lineHeight: 1.55, color: "#c9c7d6", margin: 0 }}>
+        <p style={{ fontSize: 14, lineHeight: 1.55, color: "var(--color-ink-2, #c9c7d6)", margin: 0 }}>
           Cette page n&apos;existe pas (ou plus). Vérifie l&apos;adresse, ou
           reviens à l&apos;accueil.
         </p>
@@ -49,9 +49,9 @@ export default function NotFound() {
               padding: "10px 20px",
               fontSize: 14,
               fontWeight: 600,
-              color: "#111214",
+              color: "var(--color-on-primary, #111214)",
               textDecoration: "none",
-              background: "#ececee",
+              background: "var(--color-primary, #ececee)",
             }}
           >
             Retour à l&apos;accueil

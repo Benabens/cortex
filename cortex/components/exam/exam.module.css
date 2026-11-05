@@ -1,0 +1,90 @@
+.exam {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  min-width: 0;
+}
+.exam :global(.card) {
+  border: 1px solid var(--color-line);
+  border-radius: 18px;
+  background: var(--color-surface-1);
+  box-shadow: none;
+}
+.exam :global(.card-pad) {
+  padding: 24px;
+}
+.exam :global(.btn) {
+  border-radius: 999px;
+  min-height: 44px;
+}
+.exam :global(button.inset) {
+  min-height: 48px;
+  border-radius: 12px;
+  line-height: 1.6;
+  padding: 13px 14px !important;
+}
+.exam :global(button:focus-visible),
+.exam :global(a:focus-visible) {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+.exam :global(textarea) {
+  line-height: 1.7;
+  border-radius: 12px;
+  padding: 14px;
+}
+.exam :global(.stat-value) {
+  font-family: var(--font-display);
+}
+@media (max-width: 540px) {
+  .exam :global(.card-pad) {
+    padding: 18px;
+  }
+  .exam :global(button.inset) {
+    flex-wrap: wrap;
+  }
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding: 16px 0 28px;
+}
+.header h1 {
+  font-family: var(--font-display);
+  font-size: clamp(30px, 4vw, 42px);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+.description {
+  max-width: 690px;
+  color: var(--color-ink-2);
+  font-size: 14px;
+  line-height: 1.7;
+  margin-top: 8px;
+}
+.documents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.documents a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 999px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+.content {
+  min-width: 0;
+}
+/* « Rendre la copie » reste visible sous l'en-tête collant quand on y saute. */
+.content [id="exam-submit"] {
+  scroll-margin-top: 88px;
+}

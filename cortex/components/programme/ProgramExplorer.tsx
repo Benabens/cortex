@@ -44,9 +44,9 @@ export function ProgramExplorer({
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface-1 px-4 py-3">
         <Segmented label="Organiser les notions" options={MODES} value={mode} onChange={setMode} />
-        <p className="text-[0.76rem] text-ink-4">
+        <p className="text-[0.8rem] text-ink-3">
           {mode === "section" && hasPlan ? (
             <>
               <span className="font-data tabular text-ink-3">{plan.filter((c) => c.id != null).length}</span> chapitres
@@ -64,7 +64,7 @@ export function ProgramExplorer({
 
       {mode === "section" ? (
         hasPlan ? (
-          <div className="space-y-2.5">
+          <div className="space-y-3">
             {plan.map((c) => (
               <ChapterAccordion key={c.id ?? "orphan"} c={c} defaultOpen={focusLecture != null && c.lectureNo === focusLecture} />
             ))}
@@ -90,8 +90,8 @@ export function ProgramExplorer({
 function FallbackSections({ types }: { types: UiType[] }) {
   const blocks = sectionBlocks(types);
   return (
-    <div className="space-y-2.5">
-      <p className="text-[0.76rem] text-ink-4">
+    <div className="space-y-3">
+      <p className="text-[0.8rem] text-ink-3">
         Le plan de cours du prof n’a pas pu être dérivé pour ce cours : les notions sont regroupées par
         thème, dans l’ordre indicatif du cours.
       </p>

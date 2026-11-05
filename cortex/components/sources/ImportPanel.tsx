@@ -169,8 +169,8 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   };
 
   return (
-    <Panel className="flex flex-col gap-5 p-5">
-      <h2 className="text-[0.95rem] font-semibold text-ink-1">Importer</h2>
+    <Panel className="flex flex-col gap-5 p-6">
+      <h2 className="text-xl font-semibold text-ink-1">Importer</h2>
 
       <Segmented
         size="sm"
@@ -188,8 +188,8 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
         className={cn(
           "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-4 py-8 text-center transition-colors",
           dragOver
-            ? "border-[color-mix(in_oklch,var(--color-violet)_60%,transparent)] bg-[color-mix(in_oklch,var(--color-violet)_10%,transparent)]"
-            : "border-line-strong bg-surface-2/30 hover:border-[color-mix(in_oklch,var(--color-violet)_45%,transparent)]"
+            ? "border-[color-mix(in_oklch,var(--color-accent)_60%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_10%,transparent)]"
+            : "border-line-strong bg-surface-2/30 hover:border-[color-mix(in_oklch,var(--color-accent)_45%,transparent)]"
         )}
       >
         <input
@@ -201,8 +201,8 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           onChange={(e) => e.target.files && upload(e.target.files)}
         />
         <span
-          className="grid size-11 place-items-center rounded-2xl text-white"
-          style={{ background: "linear-gradient(150deg, var(--color-violet), var(--color-cyan))", boxShadow: "var(--shadow-card), inset 0 1px 0 rgba(255,255,255,0.28)" }}
+          className="grid size-11 place-items-center rounded-2xl"
+          style={{ background: "var(--tile-bg)", color: "var(--tile-ink)", boxShadow: "var(--shadow-card), var(--tile-edge)" }}
         >
           <UploadCloud className="size-5" strokeWidth={2} />
         </span>
@@ -240,6 +240,8 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           // Sélection d'un dossier entier : attribut non standard mais supporté par
           // tous les navigateurs de bureau ; React exige la casse DOM exacte.
           {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+          aria-label="Dossier de cours à importer"
+          tabIndex={-1}
           className="sr-only"
           onChange={(e) => e.target.files && importFolder(e.target.files)}
         />
@@ -265,7 +267,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           Préparer le cours
         </Button>
         <p className="mt-2 text-[0.76rem] leading-relaxed text-ink-3">
-          Pipeline complet : ingestion du corpus → détection du format → types d’exos et poids.
+          Cortex lit tes supports, reconnaît le format du final et organise les notions à travailler.
         </p>
       </div>
 

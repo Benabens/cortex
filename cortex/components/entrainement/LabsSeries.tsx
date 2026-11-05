@@ -95,14 +95,14 @@ export function LabsSeries() {
           {data.series.map(({ lab, exams }) => {
             const isActive = activeLab === lab.id;
             return (
-              <Panel key={lab.id} className="flex flex-col gap-3 p-4">
-                <div className="flex items-center gap-3">
-                  <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-line bg-surface-2/60 text-cyan-hi">
+              <Panel key={lab.id} className="flex flex-col gap-4 p-5 sm:p-6">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="grid size-11 shrink-0 place-items-center rounded-2xl border border-line bg-surface-2/60 text-cyan-hi">
                     <FlaskConical className="size-[1.1rem]" strokeWidth={2} />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <h3 className="truncate text-[0.9rem] font-semibold text-ink-1">{lab.label}</h3>
-                    <p className="text-[0.76rem] text-ink-3">
+                    <h3 className="text-base font-semibold text-ink-1">{lab.label}</h3>
+                    <p className="text-sm text-ink-3">
                       {exams.length > 0
                         ? `${exams.length} exo${exams.length > 1 ? "s" : ""} généré${exams.length > 1 ? "s" : ""}`
                         : "Aucun exo généré pour l’instant"}
