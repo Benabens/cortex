@@ -31,6 +31,17 @@ export function claudeBinPath(): string | null {
   return null;
 }
 
+/** Chemin du binaire `codex` (surchargeable dans les tests et scripts locaux). */
+export function codexBinPath(): string | null {
+  const fromEnv = process.env.CORTEX_CODEX_BIN;
+  if (fromEnv && fs.existsSync(fromEnv)) return fromEnv;
+  for (const d of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (!d) continue;
+    try { const p = path.join(d, "codex"); if (fs.existsSync(p)) return p; } catch { /* ignore */ }
+  }
+  return null;
+}
+
 function resolveClaudeBin(): string {
   return claudeBinPath() ?? "claude"; // dernier recours : laisser le PATH résoudre
 }
@@ -64,6 +75,8 @@ export type RunOpts = {
   timeoutMs?: number;
   /** Annulation coopérative (kill du sous-processus). */
   signal?: AbortSignal;
+  /** Schéma de la réponse finale, transmis à Codex via --output-schema. */
+  jsonSchema?: object;
 };
 
 export type RunResult = {
@@ -80,6 +93,7 @@ export async function runClaudeCode(opts: RunOpts): Promise<string> {
 
 /** Comme runClaudeCode, mais renvoie aussi l'usage rapporté par le CLI. */
 export function runClaudeCodeRaw(opts: RunOpts): Promise<RunResult> {
+  if (process.env.CORTEX_LLM_BACKEND === "codex") return runCodexRaw(opts);
   const { model = "opus", addDirs = [], timeoutMs = 180_000, signal } = opts;
   // Le texte extrait des PDF (cours génériques) contient parfois des OCTETS NULS / contrôles que
   // spawn refuse en argument (« must be a string without null bytes ») → on les retire du prompt.
@@ -156,6 +170,94 @@ export function runClaudeCodeRaw(opts: RunOpts): Promise<RunResult> {
         done(() => reject(new ClaudeCodeError("Sortie de Claude Code illisible (JSON attendu).")));
       }
     });
+  });
+}
+
+/** Le backend abonnement ChatGPT est strictement réservé aux bancs sur une base SQLite locale. */
+export function assertCodexBackendAllowed(env: NodeJS.ProcessEnv = process.env): void {
+  if (env.NODE_ENV === "production") {
+    throw new ClaudeCodeError("Backend Codex refusé en production.", "UNSUPPORTED");
+  }
+  if (env.DATABASE_URL || (env.DB_DRIVER ?? "sqlite") !== "sqlite") {
+    throw new ClaudeCodeError("Backend Codex refusé : il ne fonctionne que sur une base SQLite locale.", "UNSUPPORTED");
+  }
+}
+
+/** `codex exec` headless : JSONL sur stdout, réponse finale dans un fichier dédié. */
+function runCodexRaw(opts: RunOpts): Promise<RunResult> {
+  assertCodexBackendAllowed();
+  const { addDirs = [], timeoutMs = 180_000, signal } = opts;
+  const prompt = opts.prompt.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ");
+  const bin = codexBinPath() ?? "codex";
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-codex-"));
+  const answerFile = path.join(temp, "answer.txt");
+  const schemaFile = path.join(temp, "schema.json");
+  if (opts.jsonSchema) fs.writeFileSync(schemaFile, JSON.stringify(opts.jsonSchema));
+  const args = [
+    "exec",
+    "--json",
+    "--sandbox", "read-only",
+    "--output-last-message", answerFile,
+  ];
+  if (opts.jsonSchema) args.push("--output-schema", schemaFile);
+  const codexModel = process.env.CORTEX_CODEX_MODEL?.trim();
+  if (codexModel) args.push("--model", codexModel);
+  for (const d of addDirs) args.push("--add-dir", d);
+  args.push("-");
+
+  return new Promise<RunResult>((resolve, reject) => {
+    let child;
+    let settled = false;
+    const cleanup = () => fs.rmSync(temp, { recursive: true, force: true });
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      cleanup();
+      fn();
+    };
+    if (signal?.aborted) {
+      cleanup();
+      return reject(new ClaudeCodeError("Appel Codex annulé.", "ABORTED"));
+    }
+    try {
+      child = spawn(bin, args, { env: { ...process.env }, cwd: process.cwd() });
+    } catch (e: any) {
+      cleanup();
+      return reject(new ClaudeCodeError(String(e?.message ?? e)));
+    }
+
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish(() => reject(new ClaudeCodeError("Codex a mis trop de temps (timeout).", "TIMEOUT")));
+    }, timeoutMs);
+    const onAbort = () => {
+      child.kill("SIGKILL");
+      finish(() => reject(new ClaudeCodeError("Appel Codex annulé.", "ABORTED")));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    child.stdout.on("data", (d) => (stdout += d));
+    child.stderr.on("data", (d) => (stderr += d));
+    child.stdin.on("error", () => {});
+    child.on("error", (e: any) => finish(() => reject(new ClaudeCodeError(
+      e?.code === "ENOENT" ? "CLI `codex` introuvable. Installe-le et authentifie-le, ou retire CORTEX_LLM_BACKEND=codex." : String(e?.message ?? e),
+      e?.code === "ENOENT" ? "UNAVAILABLE" : undefined
+    ))));
+    child.on("close", (code) => {
+      if (settled) return;
+      if (code !== 0) return finish(() => reject(new ClaudeCodeError(stderr.trim() || `codex a quitté (code ${code})`)));
+      try {
+        for (const line of stdout.split("\n").map((x) => x.trim()).filter(Boolean)) JSON.parse(line);
+        const text = fs.readFileSync(answerFile, "utf8");
+        finish(() => resolve({ text }));
+      } catch {
+        finish(() => reject(new ClaudeCodeError("Sortie de Codex illisible (JSONL et message final attendus).")));
+      }
+    });
+    child.stdin.end(prompt);
   });
 }
 

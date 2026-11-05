@@ -1,4 +1,4 @@
-import { claudeBinPath, ClaudeCodeError, runClaudeCodeRaw } from "../../claude-code";
+import { claudeBinPath, codexBinPath, ClaudeCodeError, runClaudeCodeRaw } from "../../claude-code";
 import { mapModel } from "../config";
 import { LlmError, type CompleteRequest, type CompleteResult, type LlmProvider } from "../types";
 
@@ -12,12 +12,13 @@ export const claudeCodeProvider: LlmProvider = {
   name: "claude-code",
 
   available(): boolean {
-    return claudeBinPath() !== null;
+    return process.env.CORTEX_LLM_BACKEND === "codex" ? codexBinPath() !== null : claudeBinPath() !== null;
   },
 
   unavailableReason(): string | null {
-    return this.available()
-      ? null
+    if (this.available()) return null;
+    return process.env.CORTEX_LLM_BACKEND === "codex"
+      ? "CLI « codex » introuvable. Installe-le et authentifie-le, puis réessaie (ou pose CORTEX_CODEX_BIN)."
       : "CLI « claude » introuvable. Installe-le et lance « claude » une fois pour t'authentifier, puis réessaie (ou pose CORTEX_CLAUDE_BIN, ou configure un autre LLM_PROVIDER).";
   },
 
@@ -37,6 +38,7 @@ export const claudeCodeProvider: LlmProvider = {
         addDirs: req.addDirs,
         timeoutMs: req.timeoutMs,
         signal: req.signal,
+        jsonSchema: req.json?.schema,
       });
       return { text: r.text, usage: r.usage, provider: this.name, model };
     } catch (e) {
