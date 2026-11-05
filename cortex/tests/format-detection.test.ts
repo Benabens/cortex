@@ -134,3 +134,21 @@ test("une affirmation du modèle sans citation retrouvée dans les sources vaut 
   await inCourse(id, () => detectFormat());
   assert.equal((await inCourse(id, () => resolveExamFormat())).basis, "unknown");
 });
+
+test("le mode de réponse que disent les sources est gardé ; un mode inventé ou absent laisse la réponse unique", async () => {
+  const MANY = "Examen : QCM de 20 questions. Pour chaque question, une ou plusieurs réponses peuvent être correctes. Cochez toutes les bonnes réponses.";
+  const id = await newCourse();
+  await addSource(id, "exam_info", "Consignes d'examen", MANY);
+  reply = { exam_kind: "qcm", answer_mode: "multiple", question_count: 20, open_count: 0, duration_min: null, format_summary: "QCM à réponses multiples", evidence: ["une ou plusieurs réponses peuvent être correctes"], examples: [] };
+  const { detectFormat } = await import("../lib/format");
+  const { resolveExamFormat } = await import("../lib/exam-format");
+  await inCourse(id, () => detectFormat());
+  assert.match(prompts[prompts.length - 1], /answer_mode/);
+  assert.equal((await inCourse(id, () => resolveExamFormat())).answerMode, "multiple");
+
+  const odd = await newCourse();
+  await addSource(odd, "course_pdf", "Vérifier et entreprendre", SLIDES);
+  reply = { exam_kind: "qcm", answer_mode: "several", question_count: null, open_count: null, duration_min: null, format_summary: "QCM", evidence: ["Une seule réponse correcte"], examples: [] };
+  await inCourse(odd, () => detectFormat());
+  assert.equal((await inCourse(odd, () => resolveExamFormat())).answerMode, "single");
+});

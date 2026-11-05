@@ -8,11 +8,13 @@
  * restent prioritaires.
  */
 
-export type ExamFormatDraft = { kind: string; questionCount: string; durationMin: string; language: string };
+import type { AnswerMode } from "@/lib/exam-format";
 
-export type DeclaredFormatDto = { kind: string; questionCount: number | null; durationMin: number | null; language: string | null };
+export type ExamFormatDraft = { kind: string; questionCount: string; durationMin: string; language: string; answerMode: string };
 
-export const EMPTY_FORMAT: ExamFormatDraft = { kind: "", questionCount: "", durationMin: "", language: "" };
+export type DeclaredFormatDto = { kind: string; questionCount: number | null; durationMin: number | null; language: string | null; answerMode?: AnswerMode };
+
+export const EMPTY_FORMAT: ExamFormatDraft = { kind: "", questionCount: "", durationMin: "", language: "", answerMode: "" };
 
 const KINDS: { value: string; label: string }[] = [
   { value: "", label: "Je ne sais pas encore" },
@@ -23,6 +25,16 @@ const KINDS: { value: string; label: string }[] = [
   { value: "essay", label: "Essai / dissertation" },
   { value: "oral", label: "Oral" },
 ];
+
+/** Réponse unique ou multiple (lib/exam-format, ANSWER_MODES) : sans précision, ce que disent les sources, sinon une seule. */
+const REPONSES: { value: "" | AnswerMode; label: string }[] = [
+  { value: "", label: "Non précisé : selon les sources, sinon une seule" },
+  { value: "single", label: "Une seule bonne réponse" },
+  { value: "multiple", label: "Une ou plusieurs bonnes réponses" },
+  { value: "mixed", label: "Selon la question" },
+];
+
+const hasChoices = (kind: string) => kind === "qcm" || kind === "mixed";
 
 const LANGUES: { value: string; label: string }[] = [
   { value: "", label: "Celle du cours" },
@@ -40,6 +52,7 @@ export function formatDraftOf(f: DeclaredFormatDto | null | undefined): ExamForm
     questionCount: f.questionCount ? String(f.questionCount) : "",
     durationMin: f.durationMin ? String(f.durationMin) : "",
     language: f.language ?? "",
+    answerMode: f.answerMode ?? "",
   };
 }
 
@@ -47,7 +60,10 @@ export function formatDraftOf(f: DeclaredFormatDto | null | undefined): ExamForm
 export function formatPayload(d: ExamFormatDraft): DeclaredFormatDto | null {
   if (!d.kind) return null;
   const n = (s: string) => (s.trim() ? Number(s) : null);
-  return { kind: d.kind, questionCount: n(d.questionCount), durationMin: n(d.durationMin), language: d.language || null };
+  return {
+    kind: d.kind, questionCount: n(d.questionCount), durationMin: n(d.durationMin), language: d.language || null,
+    ...(hasChoices(d.kind) && d.answerMode ? { answerMode: d.answerMode as AnswerMode } : {}),
+  };
 }
 
 export function ExamFormatFields({
@@ -61,7 +77,7 @@ export function ExamFormatFields({
 }) {
   const set = (k: keyof ExamFormatDraft) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     onChange({ ...value, [k]: e.target.value });
-  const counted = value.kind === "qcm" || value.kind === "mixed";
+  const choices = hasChoices(value.kind);
 
   return (
     <fieldset className="flex flex-col gap-3">
@@ -76,7 +92,7 @@ export function ExamFormatFields({
           </select>
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-[0.78rem] text-ink-3">{counted ? "Nombre de questions" : "Nombre d’exercices ou de sujets"}</span>
+          <span className="text-[0.78rem] text-ink-3">{choices ? "Nombre de questions" : "Nombre d’exercices ou de sujets"}</span>
           <input
             type="number"
             inputMode="numeric"
@@ -85,7 +101,7 @@ export function ExamFormatFields({
             value={value.questionCount}
             onChange={set("questionCount")}
             disabled={!value.kind}
-            placeholder={counted ? "20" : "4"}
+            placeholder={choices ? "20" : "4"}
             className={fieldClass}
           />
         </label>
@@ -111,6 +127,16 @@ export function ExamFormatFields({
             ))}
           </select>
         </label>
+        {choices && (
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[0.78rem] text-ink-3">Bonnes réponses par question</span>
+            <select value={value.answerMode} onChange={set("answerMode")} className={fieldClass}>
+              {REPONSES.map((r) => (
+                <option key={r.value} value={r.value}>{r.label}</option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
       <p className="text-[0.76rem] leading-relaxed text-ink-3">
         Sans annale, c’est ce format que suivent tes examens blancs. Des annales importées, elles, priment.

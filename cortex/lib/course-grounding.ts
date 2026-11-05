@@ -139,3 +139,81 @@ export async function coursePassages(topics: string[], perTopic = 2, cap = 900):
   }
   return out;
 }
+
+/** Mots porteurs d'une requête : 5 lettres ou plus, ou un nombre (année, pourcentage). */
+function queryWords(query: string): string[] {
+  const words = query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 5 || /^\d{2,}$/.test(w));
+  return [...new Set(words)].slice(0, 40);
+}
+
+/**
+ * La fenêtre de `cap` caractères qui contient le plus de mots DISTINCTS de la requête, calée
+ * sur une fin de phrase ou un mot : le fait cherché n'est pas toujours près du premier mot du
+ * sujet (Svenson (1981), à 3 500 caractères du titre d'un support de HUM-285, 02/11).
+ */
+export function densestWindow(text: string, query: string, cap: number): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= cap) return t;
+  const lower = t.toLowerCase();
+  const positions = queryWords(query).map((w) => {
+    const at: number[] = [];
+    for (let i = lower.indexOf(w); i >= 0 && at.length < 60; i = lower.indexOf(w, i + 1)) at.push(i);
+    return at;
+  }).filter((a) => a.length);
+  if (!positions.length) return t.slice(0, cap);
+  // Fenêtres essayées autour de chaque occurrence : le mot au premier quart, au début, ou à la fin.
+  const lead = Math.floor(cap / 4);
+  const starts = new Set<number>();
+  for (const p of positions.flat()) for (const s of [p - lead, p, p - cap + 60]) starts.add(Math.max(0, Math.min(s, t.length - cap)));
+  let best = 0;
+  let bestScore = -1;
+  for (const start of [...starts].sort((x, y) => x - y)) {
+    const score = positions.filter((at) => at.some((i) => i >= start && i < start + cap)).length;
+    if (score > bestScore) { bestScore = score; best = start; }
+  }
+  // Calage : le début recule jusqu'à une fin de phrase proche (sinon un mot) ; la fin ne recule
+  // jamais, pour ne rien perdre de ce que la fenêtre contenait, et avance jusqu'au mot suivant.
+  const sentence = t.lastIndexOf(". ", best);
+  const start = best === 0 ? 0 : sentence >= 0 && best - sentence < 160 ? sentence + 2 : t.lastIndexOf(" ", best) + 1;
+  let end = Math.min(t.length, best + cap);
+  const space = t.indexOf(" ", end);
+  if (end < t.length && space >= 0 && space - end < 40) end = space;
+  return t.slice(start, end);
+}
+
+/**
+ * Passages du cours qui servent de PREUVE : pour chaque requête (un fait, un énoncé, une
+ * notion), les meilleurs résultats de la recherche plein texte, en fenêtres larges centrées sur
+ * la requête. Deux fenêtres d'un même support ne sont gardées que si elles ne se recouvrent pas.
+ * Jamais les annales, exemples ni consignes d'examen. `budget` borne le total en caractères.
+ */
+export async function evidencePassages(queries: string[], opts: { perQuery?: number; cap?: number; budget?: number } = {}): Promise<{ src: string; text: string }[]> {
+  const { perQuery = 2, cap = 1800, budget = 24_000 } = opts;
+  // Par pertinence, tous types confondus : search() regroupe par type (exercices avant supports),
+  // ce qui pouvait faire passer le meilleur passage d'un support après deux exercices voisins.
+  const { rankedHits } = await import("@/lib/search");
+  const out: { src: string; text: string }[] = [];
+  const windows = new Map<number, string[]>();
+  let used = 0;
+  for (const query of queries.map((x) => x.trim()).filter(Boolean)) {
+    if (used >= budget) break;
+    let hits: Awaited<ReturnType<typeof rankedHits>> = [];
+    try { hits = await rankedHits(query.slice(0, 400), 16, "or"); } catch { continue; }
+    let k = 0;
+    for (const h of hits) {
+      if (k >= perQuery || used >= budget) break;
+      if (NOT_COURSE_FACTS.has(h.sourceType)) continue;
+      const row = await q.get<{ text: string }>(`SELECT text FROM items WHERE id = ?`, h.itemId);
+      if (!row?.text) continue;
+      const text = densestWindow(row.text, query, cap);
+      const seen = windows.get(h.itemId) ?? [];
+      // Même fenêtre (ou presque) déjà montrée pour une autre requête : rien de neuf.
+      if (seen.some((w) => w.includes(text.slice(0, 200)) || text.includes(w.slice(0, 200)))) { k++; continue; }
+      windows.set(h.itemId, [...seen, text]);
+      out.push({ src: h.sourceTitle, text });
+      used += text.length;
+      k++;
+    }
+  }
+  return out;
+}
