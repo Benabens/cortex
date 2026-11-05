@@ -16,7 +16,7 @@ export default defineTool({
   name: "set_exam_format",
   title: "Declare the exam format of a course",
   description:
-    "Declare (or clear) the real exam format of a course: type (qcm, exercises, mixed, essay, oral), number of questions, duration and language. " +
+    "Declare (or clear) the real exam format of a course: type (qcm, exercises, mixed, essay, oral), number of questions, duration, language, and for multiple-choice exams whether each question has a single correct answer or several (answer_mode). " +
     "Use it when generate_mock_exam answers format_required, or when the student tells you how the exam looks (e.g. \"a 20-question MCQ midterm, 45 min\"). " +
     "Free. Past exams of the course, when present and analysed, still take precedence; otherwise mock exams follow this format. clear=true removes the declaration.",
   kind: "write",
@@ -26,6 +26,7 @@ export default defineTool({
     question_count: examFormatInput.question_count,
     duration_min: examFormatInput.duration_min,
     language: examFormatInput.language,
+    answer_mode: examFormatInput.answer_mode,
     clear: z.boolean().optional().describe("true = remove the declared format."),
   }),
   output,
@@ -35,7 +36,7 @@ export default defineTool({
       let column: string | null = null;
       if (!args.clear) {
         try {
-          column = declaredFormatColumn({ kind: args.kind, questionCount: args.question_count, durationMin: args.duration_min, language: args.language });
+          column = declaredFormatColumn({ kind: args.kind, questionCount: args.question_count, durationMin: args.duration_min, language: args.language, answerMode: args.answer_mode });
         } catch (e) {
           if (e instanceof InvalidCourseError) throw new ToolError("invalid_input", e.message);
           throw e;
