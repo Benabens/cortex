@@ -35,8 +35,9 @@ export type CompleteRequest = {
   maxTokens?: number;
   /**
    * Sortie JSON structurée (providers API : output_config json_schema /
-   * response_format). Le provider claude-code l'IGNORE : les call sites
-   * historiques dumpent le schéma dans le prompt et parsent via extractJson().
+   * response_format). Le backend Claude CLI l'ignore ; le backend Codex local
+   * le transmet à `codex exec --output-schema`. Les call sites gardent leur
+   * parsing via extractJson().
    */
   json?: { schema: object; effort?: "low" | "medium" | "high" };
   /** Mode de réflexion (providers Anthropic seulement). */
