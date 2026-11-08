@@ -22,7 +22,10 @@
     "revision": "tsx scripts/revision.ts",
     "revision:extend": "tsx scripts/revision-extend.ts",
     "dna": "tsx scripts/exam-dna.ts",
-    "cost:report": "tsx scripts/cost-report.ts"
+    "cost:report": "tsx scripts/cost-report.ts",
+    "e2e": "playwright test",
+    "e2e:charge": "tsx e2e/load.ts",
+    "e2e:google": "playwright test --project=google"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
@@ -51,15 +54,19 @@
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.4",
     "@modelcontextprotocol/client": "^2.4.0",
+    "@playwright/test": "^1.65.0",
     "@tailwindcss/postcss": "^4",
+    "@types/autocannon": "^7.12.7",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/yauzl": "^3.4.0",
+    "autocannon": "^9.0.0",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.4.3",
+    "otplib": "^13.6.0",
     "tailwindcss": "^4",
     "typescript": "^5.9.3"
   }

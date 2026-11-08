@@ -36,6 +36,7 @@ export function LoginCard({
   callbackUrl,
   google,
   email,
+  e2eTest,
   legal,
   landing,
   english,
@@ -45,6 +46,7 @@ export function LoginCard({
   callbackUrl: string;
   google: boolean;
   email: boolean;
+  e2eTest: boolean;
   /** Liens légaux (LEGAL_*_URL ou vitrine déclarée) ; repli sur `landing` s'ils ne sont pas posés. */
   legal?: { terms: string | null; privacy: string | null; refund?: string | null; notice?: string | null };
   /** Origine de la vitrine, lue côté serveur à la requête (pas de variable figée au build). */
@@ -88,6 +90,21 @@ export function LoginCard({
         )}
 
         <div className="mt-7 flex flex-col gap-3">
+          {e2eTest && (
+            <button
+              type="button"
+              data-testid="e2e-login"
+              disabled={busy !== null}
+              onClick={() => {
+                setBusy("email");
+                const email = new URLSearchParams(window.location.search).get("persona") ?? "alice@e2e.cortex.test";
+                void signIn("e2e-test", { email, callbackUrl });
+              }}
+              className="inline-flex h-12 w-full items-center justify-center rounded-full border border-dashed text-[0.92rem] font-semibold"
+            >
+              Connexion persona E2E
+            </button>
+          )}
           {google && (
             <button
               type="button"
@@ -142,7 +159,7 @@ export function LoginCard({
             </form>
           )}
 
-          {!google && !email && (
+          {!google && !email && !e2eTest && (
             <p className="text-center text-[0.83rem]" style={{ color: "var(--bare-muted)" }}>
               Aucune méthode de connexion n’est configurée. Réessaie plus tard.
             </p>
