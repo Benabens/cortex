@@ -65,7 +65,7 @@ jobs:
           sudo apt-get update -q && sudo apt-get install -y -q sqlite3
           # Client PostgreSQL 18 (PGDG) : pg_dump doit être ≥ la version du serveur Postgres 18 démarré plus haut.
           sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          sudo curl --http1.1 --retry 5 --retry-all-errors -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo $VERSION_CODENAME)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -q && sudo apt-get install -y -q postgresql-client-18
           # Le pg_dump du PATH est le wrapper Ubuntu (client 16 préinstallé) : on met

@@ -45,6 +45,10 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   // refuse, l'UPLOAD reste acquis (contenu), seul le job de format est différé.
   let formatJobId: number | undefined;
   let formatSkipped: string | undefined;
+  if (process.env.E2E_TEST_AUTH === "1" && process.env.E2E_TEST_RUN === "1") {
+    formatSkipped = "Détection couverte par la préparation hermétique E2E";
+    return NextResponse.json({ ok: true, files: saved, formatSkipped });
+  }
   const { generationGate } = await import("@/lib/billing/guards");
   const { creditsGate } = await import("@/lib/billing/credits");
   const gate = (await generationGate("gen")) ?? (await creditsGate("format"));

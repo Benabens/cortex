@@ -51,6 +51,16 @@ test("2b-9 — prod-boot et instrumentation appellent la garde du provider", asy
   assert.match(fs.readFileSync("instrumentation.ts", "utf8"), /assertLlmProviderAllowed\(/);
 });
 
+test("E2E auth — impossible hors d'un run local explicitement isolé", async () => {
+  const { assertE2ETestAuthAllowed } = await import("../lib/boot-guards");
+  assert.throws(() => assertE2ETestAuthAllowed({ E2E_TEST_AUTH: "1" }), /E2E_TEST_RUN=1/);
+  assert.throws(() => assertE2ETestAuthAllowed({ E2E_TEST_AUTH: "1", E2E_TEST_RUN: "1", AUTH_URL: "http://localhost:3000", CORTEX_HOSTED: "1" }), /instance hébergée/);
+  assert.throws(() => assertE2ETestAuthAllowed({ E2E_TEST_AUTH: "1", E2E_TEST_RUN: "1", AUTH_URL: "http://localhost:3000", STRIPE_SECRET_KEY: "sk_live_danger" }), /Stripe live/);
+  assert.throws(() => assertE2ETestAuthAllowed({ E2E_TEST_AUTH: "1", E2E_TEST_RUN: "1", AUTH_URL: "https://cortex.example" }), /bouclage local/);
+  assert.doesNotThrow(() => assertE2ETestAuthAllowed({ E2E_TEST_AUTH: "1", E2E_TEST_RUN: "1", AUTH_URL: "http://127.0.0.1:3210", DATABASE_URL: "pglite://memory" }));
+  assert.doesNotThrow(() => assertE2ETestAuthAllowed({ E2E_TEST_AUTH: "0", CORTEX_HOSTED: "1" }));
+});
+
 test("revue — garde serveur : NODE_ENV=production AVEC une vraie base Postgres (VPS, next start direct) sans auth → refus ; sqlite/PGlite local → démarre", async () => {
   const { assertAuthRequiredHosted } = await import("../lib/boot-guards");
   assert.throws(() => assertAuthRequiredHosted({ NODE_ENV: "production", DB_DRIVER: "postgres", DATABASE_URL: "postgres://u@db/cortex" }), /AUTH_ENABLED/);

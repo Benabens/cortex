@@ -106,7 +106,7 @@ function cortexAdapter(): Adapter {
 }
 
 /** Disponibilité des méthodes de connexion (page /login) — source unique : lib/auth-providers. */
-export { emailLoginConfigured, googleLoginConfigured } from "@/lib/auth-providers";
+export { e2eTestLoginConfigured, emailLoginConfigured, googleLoginConfigured } from "@/lib/auth-providers";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: cortexAdapter(),
