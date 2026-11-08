@@ -8,6 +8,7 @@ export default defineConfig({
   testDir: "./e2e",
   testMatch: "**/*.spec.ts",
   fullyParallel: false,
+  workers: process.env.CI ? 1 : undefined,
   timeout: 90_000,
   expect: { timeout: 15_000 },
   retries: process.env.CI ? 1 : 0,

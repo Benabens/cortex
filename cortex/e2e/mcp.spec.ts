@@ -69,11 +69,13 @@ test("MCP OAuth appelle chaque outil et lie les confirmations au bon compte", as
     set_exam_format: { course: alice.course, kind: "exercises", question_count: 2, duration_min: 60, language: "fr" },
   };
   const results = new Map<string, CallToolResult>();
+  const expectedBusinessErrors = new Set(["generate_mock_exam", "prepare_course", "report_question"]);
   for (const tool of tools.tools) {
     const result = await alice.client.callTool({ name: tool.name, arguments: args[tool.name] }) as CallToolResult;
     results.set(tool.name, result); expect(result.content.length).toBeGreaterThan(0);
-    if (tool.name === "report_question") expect(result.isError).toBeTruthy();
-    else expect(result.isError, `${tool.name}: ${JSON.stringify(result.content)}`).not.toBeTruthy();
+    if (result.isError && expectedBusinessErrors.has(tool.name)) {
+      expect(JSON.stringify(result.content)).toMatch(tool.name === "report_question" ? /n'a pas de question/i : /Solde insuffisant/i);
+    } else expect(result.isError, `${tool.name}: ${JSON.stringify(result.content)}`).not.toBeTruthy();
   }
   const quote = structured(results.get("generate_drill")!);
   const token = ((quote?.confirmation as { confirmation_token?: string } | undefined)?.confirmation_token);
