@@ -375,33 +375,46 @@ export function forgetTenant(userId: string, courseId: string): void {
 async function ensureTenant(schema: string): Promise<TenantExec> {
   const ex = rawExec(schema);
   if (!bootstrapped.has(schema)) {
-    await ex.exec(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
-    // PGlite : le SET search_path a pu précéder la création → re-force.
-    if (isPglite()) _pgliteSchema = null;
-    for (const stmt of allDdl("postgres")) await ex.exec(stmt);
-    // Recherche plein-texte : équivalent PG de fts_items (cf. lib/search.ts).
-    await ex.exec(
-      `CREATE INDEX IF NOT EXISTS items_search_idx ON items USING GIN (to_tsvector('simple', coalesce(text_norm, '')))`
-    );
-    // Registre GLOBAL des tenants (schéma public) : permet au boot de prod de
-    // re-migrer/réconcilier tous les tenants connus (le nom de schéma seul ne
-    // suffit pas — pgIdent tronque user/cours). Best-effort : jamais bloquant.
-    try {
-      await ex.exec(
-        `CREATE TABLE IF NOT EXISTS public.tenants (
-          user_id text NOT NULL, course text NOT NULL,
-          schema_name text NOT NULL, last_seen text NOT NULL,
-          PRIMARY KEY (user_id, course))`
+    const bootstrap = async (target: TenantExec) => {
+      await target.exec(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
+      // PGlite : le SET search_path a pu précéder la création → re-force.
+      if (isPglite()) _pgliteSchema = null;
+      for (const stmt of allDdl("postgres")) await target.exec(stmt);
+      // Recherche plein-texte : équivalent PG de fts_items (cf. lib/search.ts).
+      await target.exec(
+        `CREATE INDEX IF NOT EXISTS items_search_idx ON items USING GIN (to_tsvector('simple', coalesce(text_norm, '')))`
       );
-      await ex.query(
-        `INSERT INTO public.tenants (user_id, course, schema_name, last_seen) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (user_id, course) DO UPDATE SET last_seen = EXCLUDED.last_seen`,
-        [currentUser(), currentCourse(), schema, new Date().toISOString().slice(0, 19).replace("T", " ")]
-      );
-    } catch {
-      // registre indisponible (ex. course/context hors chaîne) — le tenant reste fonctionnel
+      // Registre GLOBAL des tenants (schéma public) : permet au boot de prod de
+      // re-migrer/réconcilier tous les tenants connus (le nom de schéma seul ne
+      // suffit pas — pgIdent tronque user/cours). Best-effort : jamais bloquant.
+      try {
+        await target.exec(
+          `CREATE TABLE IF NOT EXISTS public.tenants (
+            user_id text NOT NULL, course text NOT NULL,
+            schema_name text NOT NULL, last_seen text NOT NULL,
+            PRIMARY KEY (user_id, course))`
+        );
+        await target.query(
+          `INSERT INTO public.tenants (user_id, course, schema_name, last_seen) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (user_id, course) DO UPDATE SET last_seen = EXCLUDED.last_seen`,
+          [currentUser(), currentCourse(), schema, new Date().toISOString().slice(0, 19).replace("T", " ")]
+        );
+      } catch {
+        // registre indisponible (ex. course/context hors chaîne) — le tenant reste fonctionnel
+      }
+      try { await hydrateFromSeedTenant(target, schema); } catch { /* best-effort */ }
+    };
+    if (isPglite()) {
+      await bootstrap(ex);
+    } else {
+      // `CREATE TABLE IF NOT EXISTS` n'est pas sûr face à deux transactions
+      // concurrentes sur une table encore absente (collision pg_type). Le lock
+      // transactionnel fonctionne aussi entre bundles/process Next distincts.
+      await ex.begin(async (tx) => {
+        await tx.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`cortex-tenant:${schema}`]);
+        await bootstrap(tx);
+      });
     }
-    try { await hydrateFromSeedTenant(ex, schema); } catch { /* best-effort */ }
     bootstrapped.add(schema);
   }
   return ex;
