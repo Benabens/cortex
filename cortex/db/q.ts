@@ -98,6 +98,7 @@ export function resetQueryCountForTests(): void { _queries = 0; }
  * est supprimé (`forgetSchemaMemo`).
  */
 const _ensured = new Set<string>();
+const _ensuring = new Map<string, Promise<void>>();
 /**
  * Vrai dans la chaîne async d'une transaction. Une DDL jouée dans une
  * transaction qui échoue est ANNULÉE avec elle : la mémoriser ferait croire à la
@@ -114,9 +115,10 @@ function tenantKey(): string {
 }
 /** Oublie le schéma mémoïsé d'un tenant (cours supprimé, base recréée). */
 export function forgetSchemaMemo(userId?: string, courseId?: string): void {
-  if (!userId || !courseId) { _ensured.clear(); return; }
+  if (!userId || !courseId) { _ensured.clear(); _ensuring.clear(); return; }
   const prefix = `${dbDriverName()}|${userId}|${courseId}|`;
   for (const k of [..._ensured]) if (k.startsWith(prefix)) _ensured.delete(k);
+  for (const k of [..._ensuring.keys()]) if (k.startsWith(prefix)) _ensuring.delete(k);
 }
 
 export const q = {
@@ -166,8 +168,14 @@ export const q = {
   async ensureTable(name: string): Promise<void> {
     const key = `${tenantKey()}|t:${name}`;
     if (_ensured.has(key)) return;
-    for (const stmt of ddl(name, driver().dialect)) await this.exec(stmt);
-    if (!_inTx.getStore()) _ensured.add(key);
+    const pending = _ensuring.get(key);
+    if (pending) return pending;
+    const operation = (async () => {
+      for (const stmt of ddl(name, driver().dialect)) await this.exec(stmt);
+      if (!_inTx.getStore()) _ensured.add(key);
+    })();
+    _ensuring.set(key, operation);
+    try { await operation; } finally { _ensuring.delete(key); }
   },
 
   /**
@@ -177,18 +185,24 @@ export const q = {
   async ensureColumns(table: string, colNames: string[]): Promise<void> {
     const key = `${tenantKey()}|c:${table}:${[...colNames].sort().join(",")}`;
     if (_ensured.has(key)) return;
-    const d = driver();
-    const existing = new Set(await this.columns(table));
-    const spec = getTable(table);
-    for (const name of colNames) {
-      if (existing.has(name)) continue;
-      const col = spec.cols.find((c) => c.name === name);
-      if (!col) throw new Error(`Colonne ${table}.${name} absente de db/tables.ts`);
-      const type = col.type === "int" ? (d.dialect === "sqlite" ? "INTEGER" : "integer") : col.type === "real" ? (d.dialect === "sqlite" ? "REAL" : "double precision") : "TEXT";
-      const nn = col.nn ? ` NOT NULL` : "";
-      const def = col.def !== undefined && col.def !== "NOW" ? ` DEFAULT ${col.def}` : "";
-      await d.addColumn(table, `${name} ${type}${nn}${def}`);
-    }
-    if (!_inTx.getStore()) _ensured.add(key);
+    const pending = _ensuring.get(key);
+    if (pending) return pending;
+    const operation = (async () => {
+      const d = driver();
+      const existing = new Set(await this.columns(table));
+      const spec = getTable(table);
+      for (const name of colNames) {
+        if (existing.has(name)) continue;
+        const col = spec.cols.find((c) => c.name === name);
+        if (!col) throw new Error(`Colonne ${table}.${name} absente de db/tables.ts`);
+        const type = col.type === "int" ? (d.dialect === "sqlite" ? "INTEGER" : "integer") : col.type === "real" ? (d.dialect === "sqlite" ? "REAL" : "double precision") : "TEXT";
+        const nn = col.nn ? ` NOT NULL` : "";
+        const def = col.def !== undefined && col.def !== "NOW" ? ` DEFAULT ${col.def}` : "";
+        await d.addColumn(table, `${name} ${type}${nn}${def}`);
+      }
+      if (!_inTx.getStore()) _ensured.add(key);
+    })();
+    _ensuring.set(key, operation);
+    try { await operation; } finally { _ensuring.delete(key); }
   },
 };
