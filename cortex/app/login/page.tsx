@@ -1,4 +1,4 @@
-import { emailLoginConfigured, googleLoginConfigured } from "@/lib/auth";
+import { e2eTestLoginConfigured, emailLoginConfigured, googleLoginConfigured } from "@/lib/auth";
 import { contactEmail } from "@/lib/contact";
 import { DEFAULT_LANDING_URL, LANDING_ENGLISH_PATH, landingOrigin, legalLinks } from "@/lib/legal";
 import { LoginCard } from "./LoginCard";
@@ -28,6 +28,7 @@ export default async function LoginPage({
       callbackUrl={callbackUrl}
       google={googleLoginConfigured()}
       email={emailLoginConfigured()}
+      e2eTest={e2eTestLoginConfigured()}
       legal={legalLinks()}
       landing={landingOrigin() ?? DEFAULT_LANDING_URL}
       english={`${landingOrigin() ?? DEFAULT_LANDING_URL}${LANDING_ENGLISH_PATH}`}

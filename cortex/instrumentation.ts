@@ -15,8 +15,9 @@ export async function register() {
   // Docker) chez l'hébergeur ou avec facturation, sans AUTH_ENABLED=1, ne sert
   // personne — chaque visiteur serait « owner ». (`next start` force
   // NODE_ENV=production même en local : on ne s'appuie pas sur lui ici.)
-  const { assertAuthRequiredHosted, assertLlmProviderAllowed } = await import("@/lib/boot-guards");
+  const { assertAuthRequiredHosted, assertE2ETestAuthAllowed, assertLlmProviderAllowed } = await import("@/lib/boot-guards");
   assertAuthRequiredHosted();
+  assertE2ETestAuthAllowed();
   assertLlmProviderAllowed();
   // Suivi d'erreurs optionnel (SENTRY_DSN) : sans la variable, rien n'est chargé.
   const { initErrorTracking } = await import("@/lib/observability");

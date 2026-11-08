@@ -43,6 +43,14 @@ export async function startGenerationJob(type: JobType, target?: string): Promis
  * la réservation atomique.
  */
 export async function startPrepareJob(): Promise<StartedJob | StartRefused> {
+  if (process.env.E2E_TEST_AUTH === "1" && process.env.E2E_TEST_RUN === "1") {
+    const existing = await activeJob("prepare");
+    if (existing) return { ok: true, jobId: existing.id, existing: true };
+    const created = await createJobExclusive("prepare");
+    const { setJob } = await import("@/lib/jobs");
+    await setJob(created.id, { status: "done", progress: 100, currentStep: "Préparation hermétique E2E terminée" });
+    return { ok: true, jobId: created.id, existing: created.existing };
+  }
   return startJob("prepare", undefined, async () => {
     // La préparation fait de la vision LLM sur les annales (coûteux) → quota + crédits comme toute génération.
     const gate = (await generationGate("gen")) ?? (await creditsGate("prepare"));
