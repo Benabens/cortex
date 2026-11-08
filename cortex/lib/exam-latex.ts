@@ -240,16 +240,92 @@ export function tectonicArgs(tex: string, opts: { untrustedSupported: boolean })
   return [...(opts.untrustedSupported ? ["--untrusted"] : []), "--chatter", "minimal", "--keep-logs", tex];
 }
 
+/** Encadré qui remplace une figure générée qui ne compilait pas. */
+const DROPPED_FIGURE = "\\fbox{\\parbox{0.8\\linewidth}{\\centering\\small Figure retirée : elle ne se compilait pas.}}";
+
+/**
+ * Le document sans la figure (tikzpicture) qui contient la ligne `line` (1-based), remplacée par un
+ * encadré ; null si la ligne n'est dans aucune figure. Banc moteur du 04/11/2026 (CS-202) : un nœud
+ * d'arbre de processus généré (« Missing \endgroup inserted ») faisait tomber énoncé et corrigé.
+ */
+export function dropFailingFigure(tex: string, line: number): string | null {
+  const lines = tex.split("\n");
+  const at = line - 1;
+  let begin = -1;
+  for (let i = Math.min(at, lines.length - 1); i >= 0; i--) {
+    if (/\\end\{tikzpicture\}/.test(lines[i]) && i < at) break;
+    if (/\\begin\{tikzpicture\}/.test(lines[i])) { begin = i; break; }
+  }
+  if (begin < 0) return null;
+  let end = -1;
+  for (let i = Math.max(at, begin); i < lines.length; i++) if (/\\end\{tikzpicture\}/.test(lines[i])) { end = i; break; }
+  if (end < 0) return null;
+  // Seulement une figure qui occupe ses propres lignes : retirer une ligne de texte où une figure
+  // est en ligne ôterait du contenu (le repli en texte simple de l'appelant s'en charge).
+  if (end === begin || !/^\\begin\{tikzpicture\}(\[[^\]]*\])?$/.test(lines[begin].trim()) || lines[end].trim() !== "\\end{tikzpicture}") return null;
+  return [...lines.slice(0, begin), DROPPED_FIGURE, ...lines.slice(end + 1)].join("\n");
+}
+
+/** Macros de babel-french que le modèle écrit, que le préambule (sans babel) ne définit pas. */
+const FRENCH_MACROS: [RegExp, string][] = [
+  [/\\og(\{\})?\s*/g, "« "],
+  [/\s*\\fg(\{\})?/g, " »"],
+  [/\\iere(\{\})?/g, "\\textsuperscript{re}"],
+  [/\\ier(\{\})?/g, "\\textsuperscript{er}"],
+  [/\\ieme(\{\})?/g, "\\textsuperscript{e}"],
+  [/\\up\{([^{}]*)\}/g, "\\textsuperscript{$1}"],
+  [/\\nombre\{([^{}]*)\}/g, "$1"],
+  [/\\bsc\{([^{}]*)\}/g, "\\textsc{$1}"],
+];
+const FRENCH_MACRO = /\\(og|fg|iere|ier|ieme|up|nombre|bsc)(?![a-zA-Z])/;
+
+/**
+ * Le document où les macros de babel-french sont remplacées par leur équivalent, si la ligne
+ * fautive en contient une ; null sinon. Banc moteur du 04/11/2026 (synth-written12) : « \og » non
+ * défini, ligne 375 : douze exercices livrés sans PDF. Le préambule partagé reste intact (le rendu
+ * de CS-202 est épinglé octet pour octet).
+ */
+export function repairFrenchMacros(tex: string, line: number): string | null {
+  if (!FRENCH_MACRO.test(tex.split("\n")[line - 1] ?? "")) return null;
+  return FRENCH_MACROS.reduce((t, [re, to]) => t.replace(re, to), tex);
+}
+
+/** Ligne fautive d'une compilation : « error: x.tex:648: … » (tectonic) ou « l.648 » (journal pdflatex). */
+export function failingLine(text: string): number | null {
+  // Les avertissements (« warning: x.tex:85: Underfull… ») précèdent l'erreur : seule la ligne « error: » compte.
+  const m = /^error: [^\n]*?\.tex:(\d+):/m.exec(text) ?? /^l\.(\d+)/m.exec(text);
+  return m ? Number(m[1]) : null;
+}
+
 export async function compileExamPdf(base: string): Promise<string> {
+  // Une figure générée qui ne compile pas est retirée (encadré), des macros de babel-french sont
+  // remplacées, puis on recompile (3 fois au plus).
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await compileOnce(base);
+    } catch (e) {
+      const texAbs = path.join(examsDir(), `${base}.tex`);
+      const line = failingLine(`${(e as { raw?: string }).raw ?? ""}\n${readLog(base)}`);
+      const src = attempt < 3 && line && fs.existsSync(texAbs) ? fs.readFileSync(texAbs, "utf8") : null;
+      const fixed = src && line ? dropFailingFigure(src, line) ?? repairFrenchMacros(src, line) : null;
+      if (!fixed) throw e;
+      fs.writeFileSync(texAbs, fixed);
+    }
+  }
+}
+
+async function compileOnce(base: string): Promise<string> {
   const tex = `${base}.tex`;
   const pdf = `${base}.pdf`;
   const pdfAbs = path.join(examsDir(), pdf);
+  let raw = "";
   let lastErr = "Aucun moteur LaTeX trouvé (installe tectonic : brew install tectonic).";
   for (const { bin, kind } of texCandidates()) {
     try {
       if (kind === "tectonic") {
         const r = await spawnP(bin, tectonicArgs(tex, { untrustedSupported: tectonicSupportsUntrusted(bin) }), examsDir(), 240_000);
         if (r.code === 0 && fs.existsSync(pdfAbs)) return pdf;
+        raw = r.err ?? "";
         lastErr = tailLog(base) || r.err || `tectonic code ${r.code}`;
       } else {
         // pdflatex : 2 passes (header/page refs)
@@ -264,14 +340,19 @@ export async function compileExamPdf(base: string): Promise<string> {
       lastErr = String(e?.message ?? e);
     }
   }
-  throw new Error(`Échec compilation LaTeX. ${lastErr}`);
+  throw Object.assign(new Error(`Échec compilation LaTeX. ${lastErr}`), { raw });
 }
 
-function tailLog(base: string): string {
+function readLog(base: string): string {
   const log = path.join(examsDir(), `${base}.log`);
-  if (!fs.existsSync(log)) return "";
-  const txt = fs.readFileSync(log, "utf8");
-  const lines = txt.split("\n").filter((l) => /^!|error|Undefined|Runaway/i.test(l));
+  return fs.existsSync(log) ? fs.readFileSync(log, "utf8") : "";
+}
+
+/** Bruit du paquet qrcode, pris pour des erreurs (« Error-correction level increased from M to Q »). */
+const QR_NOISE = /Error-correction level|errorblock|error block|Splitting off block/i;
+
+function tailLog(base: string): string {
+  const lines = readLog(base).split("\n").filter((l) => /^!|error|Undefined|Runaway/i.test(l) && !QR_NOISE.test(l));
   return lines.slice(0, 8).join(" | ").slice(0, 800);
 }
 

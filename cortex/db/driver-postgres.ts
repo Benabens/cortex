@@ -150,6 +150,9 @@ function poolFor(schema: string): PostgresSql {
 export function pgSafeParams<T>(params: T[]): T[] {
   let changed = false;
   const out = params.map((v) => {
+    // postgres.js refuse undefined (UNDEFINED_VALUE) là où sqlite et PGlite écrivent NULL : un
+    // champ absent faisait échouer tout un examen en prod (banc du 04/11/2026, synth-docx).
+    if (v === undefined) { changed = true; return null as unknown as T; }
     if (typeof v !== "string") return v;
     const clean = (v.includes("\u0000") ? v.replaceAll("\u0000", "") : v).toWellFormed();
     if (clean !== v) changed = true;
