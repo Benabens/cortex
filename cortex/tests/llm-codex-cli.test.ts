@@ -71,6 +71,23 @@ test("provider codex-cli : schéma structuré et image par chemin", async () => 
   assert.ok(args.includes('model_reasoning_effort="low"'));
 });
 
+test("provider codex-cli : convertit les dossiers d'images en arguments -i", async () => {
+  const figures = fs.mkdtempSync(path.join(tmp, "figures-"));
+  const image = path.join(figures, "page.png");
+  fs.writeFileSync(image, "x");
+  fs.writeFileSync(path.join(figures, "notes.txt"), "ignoré");
+  installFakeBin([
+    `cat >/dev/null`,
+    `out=""; prev=""; for arg in "$@"; do [ "$prev" = "-o" ] && out="$arg"; prev="$arg"; done`,
+    `node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify(process.argv.slice(2)))' "${capture}" "$@"`,
+    `printf ok > "$out"`,
+  ].join("\n"));
+  await codexCliProvider.complete({ prompt: "p", addDirs: [figures] });
+  const args = JSON.parse(fs.readFileSync(capture, "utf8")) as string[];
+  assert.deepEqual(args.slice(args.indexOf("-i"), args.indexOf("-i") + 2), ["-i", image]);
+  assert.equal(args.includes(path.join(figures, "notes.txt")), false);
+});
+
 test("provider codex-cli : image base64 non supportée", async () => {
   installFakeBin("exit 0");
   await assert.rejects(codexCliProvider.complete({ prompt: "p", images: [{ mediaType: "image/png", base64: "AAAA" }] }), (e: unknown) => e instanceof LlmError && e.code === "UNSUPPORTED");
