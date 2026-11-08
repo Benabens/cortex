@@ -22,6 +22,22 @@ export function assertAuthRequired(env: Partial<NodeJS.ProcessEnv> = process.env
   );
 }
 
+/** Auth par persona, réservé au banc E2E local. Le second drapeau évite qu'une
+ * variable copiée seule dans Railway transforme l'instance en porte dérobée. */
+export function assertE2ETestAuthAllowed(env: Partial<NodeJS.ProcessEnv> = process.env): void {
+  if (env.E2E_TEST_AUTH !== "1") return;
+  if (env.E2E_TEST_RUN !== "1") throw new Error("E2E_TEST_AUTH=1 exige E2E_TEST_RUN=1 (banc local explicite).");
+  if (env.RAILWAY_ENVIRONMENT || env.RAILWAY_PROJECT_ID || env.CORTEX_HOSTED === "1") {
+    throw new Error("E2E_TEST_AUTH est interdit sur une instance hébergée.");
+  }
+  if (env.STRIPE_SECRET_KEY?.startsWith("sk_live_")) throw new Error("E2E_TEST_AUTH est interdit avec une clé Stripe live.");
+  let loopback = false;
+  try { loopback = ["localhost", "127.0.0.1", "::1"].includes(new URL(env.AUTH_URL ?? "").hostname); } catch { loopback = false; }
+  if (!loopback) throw new Error("E2E_TEST_AUTH exige une AUTH_URL de bouclage local (localhost/127.0.0.1).");
+  const realPg = env.DB_DRIVER === "postgres" && !!env.DATABASE_URL && !env.DATABASE_URL.startsWith("pglite://");
+  if (realPg && env.E2E_ALLOW_LOCAL_POSTGRES !== "1") throw new Error("E2E_TEST_AUTH avec Postgres exige E2E_ALLOW_LOCAL_POSTGRES=1.");
+}
+
 /**
  * Variante pour le SERVEUR Next (instrumentation.register) : `next start` force
  * NODE_ENV=production en interne, même sur un poste de dev ou dans le smoke
@@ -88,6 +104,7 @@ export function assertLlmProviderAllowed(env: Partial<NodeJS.ProcessEnv> = proce
  * mono-utilisateur (CORTEX_OWNER_ONLY=1), pour son propriétaire seul.
  */
 export async function dryRunAllowed(env: Partial<NodeJS.ProcessEnv> = process.env, userId = ""): Promise<boolean> {
+  if (env.E2E_TEST_AUTH === "1" && env.E2E_TEST_RUN === "1" && !env.CORTEX_HOSTED && !env.RAILWAY_ENVIRONMENT && !env.RAILWAY_PROJECT_ID) return true;
   if (!isGuardedDeployment(env)) return true;
   if (env.CORTEX_OWNER_ONLY !== "1") return false;
   // Même notion de propriétaire que partout ailleurs (identifiant explicite,

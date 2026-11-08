@@ -1,5 +1,8 @@
 import type { Provider } from "next-auth/providers";
 import Google from "next-auth/providers/google";
+import Credentials from "next-auth/providers/credentials";
+import crypto from "node:crypto";
+import { authGet, authRun } from "@/db/auth-store";
 
 /**
  * PROVIDERS D'AUTHENTIFICATION, dérivés de l'environnement.
@@ -27,8 +30,31 @@ export function googleLoginConfigured(env: Partial<NodeJS.ProcessEnv> = process.
   return !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
 }
 
+export function e2eTestLoginConfigured(env: Partial<NodeJS.ProcessEnv> = process.env): boolean {
+  return env.E2E_TEST_AUTH === "1" && env.E2E_TEST_RUN === "1";
+}
+
 export function authProviders(env: Partial<NodeJS.ProcessEnv> = process.env): Provider[] {
   const providers: Provider[] = [];
+  if (e2eTestLoginConfigured(env)) {
+    providers.push(Credentials({
+      id: "e2e-test",
+      name: "Persona E2E",
+      credentials: { email: { label: "E-mail", type: "email" } },
+      async authorize(credentials) {
+        const email = String(credentials?.email ?? "").trim().toLowerCase();
+        if (!/^[a-z0-9._+-]+@e2e\.cortex\.test$/.test(email)) return null;
+        let user = await authGet<{ id: string; email: string; name: string | null }>("SELECT id, email, name FROM users WHERE email = ?", email);
+        if (!user) {
+          const id = crypto.randomUUID();
+          const name = email.split("@")[0].replace(/[._-]+/g, " ");
+          await authRun("INSERT INTO users (id, email, name, image, email_verified) VALUES (?,?,?,?,?)", id, email, name, null, new Date().toISOString());
+          user = { id, email, name };
+        }
+        return user;
+      },
+    }));
+  }
   if (emailLoginConfigured(env)) {
     providers.push({
       id: "email",
@@ -90,4 +116,3 @@ export async function sendMagicLink({ identifier, url }: { identifier: string; u
   }
   console.log(`\n🔐 [auth] Magic-link pour ${identifier} :\n   ${url}\n`);
 }
-
