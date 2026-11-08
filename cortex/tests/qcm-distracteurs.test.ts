@@ -166,16 +166,17 @@ test("seul défaut = un distracteur trivial : l'option est remplacée, l'énonc�
   assert.doesNotMatch(repairPrompts[0], /"items"|"results"/, "le prompt de remplacement ne porte pas les marqueurs des autres appels");
 });
 
-test("le remplaçant reste trivial à la revérification : la question est livrée après cette unique tentative, pas jetée", async () => {
-  // Banc du 04/11 (CS-290 mixte) : jeter la question pour un distracteur encore signalé laissait
-  // 4 QCM sur 12, et le juge du banc trouvait autant de distracteurs triviaux dans les QCM gardés :
-  // le signalement est trop bruité pour coûter une question entière.
+test("le remplaçant reste trivial à la revérification : seconde réparation puis régénération, jamais de verdict masqué", async () => {
   replacement = "Une option absurde que tout étudiant élimine encore.";
-  const { r, steps, items } = await exam(await course(), 4);
-  assert.equal(r.count, 4, steps.join("\n"));
-  assert.equal(repairCalls, 1, "une seule tentative de remplacement par lot");
-  assert.equal(designCalls, 1, "ni régénération ni comblement");
-  for (const it of items) assert.ok(!it.options.includes(ABSURD), "l'option d'origine a bien été remplacée");
+  const result = await exam(await course(), 4).then((x) => ({ ...x, error: "" }), (e: Error) => ({ r: null, steps: [] as string[], items: [], error: e.message }));
+  assert.ok(repairCalls >= 2, "deux réparations ciblées sont tentées");
+  assert.ok(designCalls > 1, "le défaut persistant déclenche une régénération ou un comblement");
+  if (result.r) {
+    assert.ok(result.steps.some((s) => /à régénérer après deux réparations/.test(s)), result.steps.join("\n"));
+    for (const it of result.items) assert.ok(!it.options.some((o) => o.startsWith("Une option absurde")), "aucun verdict trivial n'est masqué dans l'examen livré");
+  } else {
+    assert.match(result.error, /contrôles de qualité/, result.error);
+  }
 });
 
 test("toutes les questions rejetées par les contrôles : l'échec le dit, sans parler de réponse illisible", async () => {
@@ -224,13 +225,16 @@ test("banc du 04/11 : tous les lots d'une ronde partent ensemble (15 QCM = 4 lot
   }
 });
 
-test("banc du 04/11 : distracteur trivial ET autre faiblesse — après la régénération, la question n'est pas jetée pour son distracteur", async () => {
+test("distracteur trivial ET autre faiblesse — la version faible n'est jamais livrée", async () => {
   // CS-290 15 QCM, tous les correctifs précédents : seuls 2 rejets, mais 6 QCM manquants au premier
   // tour — des questions régénérées pour une autre faiblesse, puis jetées pour un distracteur encore signalé.
   nameOnly = true;
-  const { r, steps } = await exam(await course(), 4);
-  assert.equal(r.count, 4, steps.join("\n"));
-  assert.ok(!steps.some((s) => /comblement/.test(s)), steps.join("\n"));
+  const result = await exam(await course(), 4).then((x) => ({ ...x, error: "" }), (e: Error) => ({ r: null, steps: [] as string[], items: [], error: e.message }));
+  if (result.r) {
+    assert.ok(result.items.every((it) => !it.options.some((o) => o.startsWith("Une option absurde"))), result.steps.join("\n"));
+  } else {
+    assert.match(result.error, /contrôles de qualité/, result.error);
+  }
 });
 
 test("le remplacement des distracteurs voit les extraits du cours (distracteurs bâtis sur des notions voisines, pas inventés)", async () => {
