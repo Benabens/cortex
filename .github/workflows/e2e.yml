@@ -39,8 +39,6 @@ jobs:
       E2E_GOOGLE_EMAIL: ${{ github.event_name == 'schedule' && secrets.E2E_GOOGLE_EMAIL || '' }}
       E2E_GOOGLE_PASSWORD: ${{ github.event_name == 'schedule' && secrets.E2E_GOOGLE_PASSWORD || '' }}
       E2E_GOOGLE_TOTP_SECRET: ${{ github.event_name == 'schedule' && secrets.E2E_GOOGLE_TOTP_SECRET || '' }}
-      GOOGLE_CLIENT_ID: ${{ github.event_name == 'schedule' && secrets.GOOGLE_CLIENT_ID || '' }}
-      GOOGLE_CLIENT_SECRET: ${{ github.event_name == 'schedule' && secrets.GOOGLE_CLIENT_SECRET || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -54,7 +52,7 @@ jobs:
         run: npm run e2e -- --project=desktop --project=iphone
       - name: Google réel (nuit, secrets présents)
         if: github.event_name == 'schedule' && env.E2E_GOOGLE_EMAIL != ''
-        run: npm run e2e:google
+        run: npx playwright install --with-deps chrome && npm run e2e:google
       - name: Charge légère Linux (nuit)
         if: github.event_name == 'schedule'
         run: |
