@@ -64,9 +64,9 @@ export function mapModel(model: LlmModel, provider: ProviderName): string {
   if (provider !== "claude-code" && provider !== "codex-cli" && !isLlmModel(model)) {
     throw new LlmError(`Modèle « ${String(model)} » refusé : seuls les alias opus, sonnet et haiku sont acceptés sur un fournisseur payant.`, "UNSUPPORTED");
   }
+  if (provider === "codex-cli") return process.env.CORTEX_CODEX_MODEL?.trim() || "gpt-5.6-sol";
   const envKey = MODEL_ENV[model];
   if (envKey && process.env[envKey]) return process.env[envKey]!;
-  if (provider === "codex-cli") return process.env.CORTEX_CODEX_MODEL?.trim() || "gpt-5.6-sol";
   if (provider === "anthropic" && ANTHROPIC_DEFAULTS[model]) {
     // RÈGLE D'OR coûts : sur le provider API PAYANT, l'alias
     // logique « opus » ne se résout vers Opus (5×/25× plus cher que Sonnet en

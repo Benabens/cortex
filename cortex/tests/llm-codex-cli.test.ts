@@ -16,7 +16,7 @@ function installFakeBin(body: string): void {
 }
 
 afterEach(() => {
-  for (const key of ["CORTEX_CODEX_BIN", "CORTEX_CODEX_MODEL", "OPENAI_API_KEY", "CODEX_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "LLM_API_KEY", "RAILWAY_ENVIRONMENT"]) delete process.env[key];
+  for (const key of ["CORTEX_CODEX_BIN", "CORTEX_CODEX_MODEL", "LLM_MODEL_OPUS", "OPENAI_API_KEY", "CODEX_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "LLM_API_KEY", "RAILWAY_ENVIRONMENT"]) delete process.env[key];
   (process.env as Record<string, string | undefined>).NODE_ENV = "test";
   fs.rmSync(capture, { force: true });
   fs.rmSync(`${capture}.args`, { force: true });
@@ -36,6 +36,7 @@ test("provider codex-cli : exécution isolée, modèle/effort, usage et clés re
   process.env.ANTHROPIC_API_KEY = "secret";
   process.env.ANTHROPIC_AUTH_TOKEN = "secret";
   process.env.LLM_API_KEY = "secret";
+  process.env.LLM_MODEL_OPUS = "sonnet";
 
   const res = await codexCliProvider.complete({ prompt: "question", system: "système", model: "opus" });
   assert.deepEqual(res, { text: "réponse finale", usage: { inputTokens: 42, outputTokens: 7, cacheReadTokens: 10 }, provider: "codex-cli", model: "gpt-5.6-sol" });
@@ -88,4 +89,12 @@ test("provider codex-cli : binaire absent et interdiction production", async () 
   (process.env as Record<string, string | undefined>).NODE_ENV = "production";
   assert.equal(codexCliProvider.available(), false);
   await assert.rejects(codexCliProvider.complete({ prompt: "p" }), (e: unknown) => e instanceof LlmError && e.code === "UNAVAILABLE" && /production/.test(e.message));
+});
+
+test("provider codex-cli : conserve l'erreur JSONL quand stderr est vide", async () => {
+  installFakeBin(`cat >/dev/null; printf '%s\n' '{"type":"error","message":"schéma refusé"}'; exit 1`);
+  await assert.rejects(
+    codexCliProvider.complete({ prompt: "p" }),
+    (e: unknown) => e instanceof LlmError && /schéma refusé/.test(e.message),
+  );
 });
