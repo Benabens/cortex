@@ -3,6 +3,9 @@ import { defineConfig, devices } from "@playwright/test";
 const port = Number(process.env.E2E_PORT ?? 3210);
 const baseURL = `http://localhost:${port}`;
 const e2eDatabaseUrl = process.env.E2E_DATABASE_URL;
+// Le test « vrai Google » vise le vrai site (redirection OAuth déjà autorisée en prod) : aucun serveur local.
+const googleOnly = process.env.E2E_GOOGLE_ONLY === "1";
+const googleBaseURL = process.env.E2E_GOOGLE_BASE_URL ?? "https://app.cortexexam.com";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -14,7 +17,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: [["html", { open: "never" }], ["list"]],
   use: { baseURL, trace: "retain-on-failure", screenshot: "only-on-failure" },
-  webServer: [{
+  webServer: googleOnly ? undefined : [{
     command: `tsx e2e/reset-runtime.ts && npm run build && npm run start -- --hostname 127.0.0.1 --port ${port}`,
     url: `http://localhost:${port}/api/health`, reuseExistingServer: !process.env.CI, timeout: 300_000,
     env: {
@@ -35,6 +38,6 @@ export default defineConfig({
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"] }, grepInvert: /@google/ },
     { name: "iphone", use: { ...devices["iPhone 13"], browserName: "chromium" }, grep: /@principal/, grepInvert: /@google/ },
-    { name: "google", use: { channel: "chrome" }, grep: /@google/ },
+    { name: "google", use: { channel: "chrome", baseURL: googleBaseURL }, grep: /@google/ },
   ],
 });
