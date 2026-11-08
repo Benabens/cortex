@@ -16,7 +16,7 @@ import type { BenchItem, BenchRun, ItemVerdict, Verdicts } from "./types";
  *  3. le CODE dont dépend une clé est exécuté (lib/sandbox-exec) : sa sortie fait foi ;
  *  4. doublons dans l'examen et vs examens précédents ; faux rejets « hors cours ».
  *
- * Modèle : `opus` du provider par défaut (le banc exige claude-code). Le processus du juge
+ * Modèle : `opus` du provider par défaut (le banc exige codex-cli). Le processus du juge
  * ne pose pas LLM_MODEL_OPUS : c'est bien Opus, pas le modèle du moteur.
  */
 

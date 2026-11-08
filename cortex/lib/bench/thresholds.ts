@@ -7,7 +7,7 @@ import type { Metrics } from "./metrics";
  * Interprétations notées dans docs/bench.md :
  *  - « aucun chapitre à 0 dès 10 questions » : chapitres à 0 ≤ max(0, chapitres − questions) ;
  *  - « coût non en hausse » : au plus +5 % sur la référence (bruit d'un modèle non déterministe) ;
- *  - la durée est mesurée sur le provider du banc (claude-code), plus lent que l'API de prod.
+ *  - la durée est mesurée sur le provider du banc et ne représente pas l'API de production.
  */
 
 /** `replay` : run rejoué depuis des bandes (CI) — durée, coût et temps restant n'y veulent rien dire. */
