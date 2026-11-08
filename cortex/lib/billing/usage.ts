@@ -20,7 +20,7 @@ import { alertSpendThresholds, resetSpendAlerts } from "./spend-alerts";
  * SPEND_CAP_USD : plafond de dépense GLOBAL du MOIS CALENDAIRE en cours (UTC),
  * remis à zéro le 1er. Atteint → tout nouvel appel payant est refusé par une
  * LlmError code "SPEND_CAP" (message clair, jamais un 502 générique) ; le
- * provider claude-code (dev €0 via le CLI local) n'est JAMAIS bloqué ni compté
+ * providers CLI locaux (claude-code et codex-cli) ne sont JAMAIS bloqués ni comptés
  * (comportement historique intact).
  */
 
@@ -71,7 +71,7 @@ export function estimateCostUsd(
 
 /** Les providers dont les appels coûtent de l'argent réel. */
 export function isPaidProvider(provider: string): boolean {
-  return provider !== "claude-code";
+  return provider !== "claude-code" && provider !== "codex-cli";
 }
 
 /**
@@ -314,7 +314,7 @@ export async function spentTodayByUser(userId = currentUser()): Promise<number> 
 /**
  * KILL-SWITCH : refuse l'appel payant si le plafond GLOBAL du mois ou le
  * plafond PAR UTILISATEUR/JOUR est atteint. Ne concerne que les providers payants
- * (claude-code = €0, jamais bloqué). Message clair (code SPEND_CAP), jamais 502.
+ * (CLI local = €0, jamais bloqué). Message clair (code SPEND_CAP), jamais 502.
  */
 export async function assertSpendCap(provider: string): Promise<void> {
   if (!isPaidProvider(provider)) return;

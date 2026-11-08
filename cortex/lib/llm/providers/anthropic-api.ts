@@ -91,6 +91,9 @@ export const anthropicProvider: LlmProvider = {
   },
 
   async complete(req: CompleteRequest): Promise<CompleteResult> {
+    if (req.images?.some((image) => image.path)) {
+      throw new LlmError("Le provider anthropic accepte uniquement des images base64.", "UNSUPPORTED");
+    }
     if (req.addDirs?.length) {
       throw new LlmError(
         "Ce site d'appel repose sur la lecture de fichiers locaux (addDirs) — provider claude-code requis (LLM_PROVIDER=claude-code), ou adapte le site en images base64.",
@@ -111,7 +114,7 @@ export const anthropicProvider: LlmProvider = {
       // Images AVANT le texte (ordre historique de la route analyze).
       ...(req.images ?? []).map((im): Block => ({
         type: "image",
-        source: { type: "base64", media_type: im.mediaType, data: im.base64 },
+        source: { type: "base64", media_type: im.mediaType!, data: im.base64! },
       })),
       { type: "text", text: req.prompt },
     ];
