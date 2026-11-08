@@ -48,6 +48,16 @@ function parseUsage(stdout: string): LlmUsage | undefined {
   return usage;
 }
 
+function jsonlError(stdout: string): string | null {
+  for (const line of stdout.split("\n")) {
+    try {
+      const event = JSON.parse(line) as { type?: string; message?: string; error?: { message?: string } };
+      if (event.type === "error") return event.message ?? event.error?.message ?? null;
+    } catch { /* les diagnostics non JSON sont ignorés */ }
+  }
+  return null;
+}
+
 function childEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
@@ -124,7 +134,11 @@ export const codexCliProvider: LlmProvider = {
         error.code === "ENOENT" ? "UNAVAILABLE" : undefined,
       ))));
       child.on("close", (code) => {
-        if (code !== 0) return finish(() => reject(new LlmError(stderr.trim() || `codex a quitté (code ${code})`)));
+        if (code !== 0) {
+          const message = stderr.trim() || jsonlError(stdout) || `codex a quitté (code ${code})`;
+          const unavailable = /usage limit|quota|rate.?limit|temporarily unavailable/i.test(message);
+          return finish(() => reject(new LlmError(message, unavailable ? "UNAVAILABLE" : undefined)));
+        }
         if (!fs.existsSync(output)) return finish(() => reject(new LlmError("Codex CLI n'a produit aucune réponse finale.")));
         const text = fs.readFileSync(output, "utf8");
         finish(() => resolve({ text, usage: parseUsage(stdout), provider: "codex-cli", model }));
