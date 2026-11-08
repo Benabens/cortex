@@ -53,7 +53,7 @@ let designCalls = 0;
 const designPrompts: string[] = [];
 const repairPrompts: string[] = [];
 /** Remplacement d'un distracteur trivial (lib/qcm replaceTrivialDistractors) : une option proche du cours. */
-function repairReply(prompt: string): string {
+function defaultRepairReply(prompt: string): string {
   const replacements = [...prompt.matchAll(/^Q(\d+)\.[\s\S]*?(?=^Q\d+\.|$(?![\s\S]))/gm)].map((m) => ({
     index: Number(m[1]),
     distractors: [...m[0].matchAll(/^\s+\((\d+)\) .* ← À REMPLACER/gm)].map((x) => ({ option: Number(x[1]), text: "La médiane des revenus calculée séparément pour chaque modalité de sex.", misconception: "[quasi-synonyme] médiane pour moyenne" })),
@@ -61,6 +61,7 @@ function repairReply(prompt: string): string {
   }));
   return JSON.stringify({ replacements });
 }
+let repairReply: (prompt: string) => string = defaultRepairReply;
 const designBodies: Record<string, unknown>[] = [];
 
 const verifyPrompts: string[] = [];
@@ -140,7 +141,7 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { repairPrompts.length = 0; dedupePrompts.length = 0; dedupe = () => []; assistPrompts.length = 0; designCalls = 0; writeCalls = 0; designPrompts.length = 0; designBodies.length = 0; verifyPrompts.length = 0; });
+beforeEach(() => { repairPrompts.length = 0; repairReply = defaultRepairReply; dedupePrompts.length = 0; dedupe = () => []; assistPrompts.length = 0; designCalls = 0; writeCalls = 0; designPrompts.length = 0; designBodies.length = 0; verifyPrompts.length = 0; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -369,6 +370,42 @@ test("K — niveau examen réel par défaut ; un distracteur éliminable sans le
   assert.ok(!designPrompts.some((p) => /À CORRIGER/.test(p)), "aucune question régénérée en entier");
   const options = (await runWithCourse(id, () => getQcmExam(r.id)))!.items.flatMap((x) => x.options);
   assert.ok(!options.some((o) => /TypeError/.test(o)), options.join(" | "));
+});
+
+test("K — un distracteur encore trivial après remplacement est réparé une seconde fois", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  const easy = { ...item(0), options: ["La moyenne des revenus calculée séparément pour chaque modalité de sex.", "Une TypeError, car groupby ne s'applique pas à une colonne texte.", "Le nombre de lignes de chaque modalité de sex, sans calcul de moyenne.", "La somme des revenus calculée séparément pour chaque modalité de sex."] };
+  design = (n, call) => JSON.stringify({ items: call === 1 ? [easy, ...Array.from({ length: n - 1 }, (_, i) => item(1 + i))] : Array.from({ length: n }, (_, i) => item(10 * call + i)) });
+  let repairs = 0;
+  repairReply = (prompt) => {
+    repairs++;
+    if (repairs === 1) {
+      return defaultRepairReply(prompt).replace("La médiane des revenus calculée séparément pour chaque modalité de sex.", "Une TypeError provoquée par la modalité de sex.");
+    }
+    return defaultRepairReply(prompt);
+  };
+
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 0 }));
+
+  assert.equal(repairPrompts.length, 2, "le défaut persistant déclenche une seconde réparation ciblée");
+  const options = (await runWithCourse(id, () => getQcmExam(r.id)))!.items.flatMap((x) => x.options);
+  assert.ok(!options.some((o) => /TypeError/.test(o)), options.join(" | "));
+});
+
+test("K — après deux réparations insuffisantes, la question est régénérée avant le comblement", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  const easy = { ...item(0), options: ["La moyenne des revenus calculée séparément pour chaque modalité de sex.", "Une TypeError, car groupby ne s'applique pas à une colonne texte.", "Le nombre de lignes de chaque modalité de sex, sans calcul de moyenne.", "La somme des revenus calculée séparément pour chaque modalité de sex."] };
+  design = (n, call) => JSON.stringify({ items: call === 1 ? [easy, ...Array.from({ length: n - 1 }, (_, i) => item(1 + i))] : Array.from({ length: n }, (_, i) => item(10 * call + i)) });
+  repairReply = (prompt) => defaultRepairReply(prompt).replace("La médiane des revenus calculée séparément pour chaque modalité de sex.", "Une TypeError provoquée par la modalité de sex.");
+
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 0 }));
+
+  assert.equal(r.count, 2);
+  assert.ok(designPrompts.some((p) => /À CORRIGER/.test(p)), "régénération ciblée avant un lot générique de comblement");
 });
 
 test("K — la consigne de l'étudiant s'ajoute au niveau par défaut, sur chaque lot", async () => {
