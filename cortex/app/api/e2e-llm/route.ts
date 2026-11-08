@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
+import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
-export async function POST(req: Request) {
+export const POST = withBodyLimit(async function POST(req: Request) {
   if (process.env.E2E_TEST_RUN !== "1" || process.env.E2E_TEST_AUTH !== "1") return new NextResponse("Not found", { status: 404 });
-  const body = await req.json() as { response_format?: { json_schema?: { schema?: Record<string, unknown> } } };
+  const body = await readJson(req, {}) as { response_format?: { json_schema?: { schema?: Record<string, unknown> } } };
   const schema = body.response_format?.json_schema?.schema;
   const required = Array.isArray(schema?.required) ? schema.required : [];
   const content = schema
@@ -14,4 +15,4 @@ export async function POST(req: Request) {
       : { concept: "Intégrales", statement_html: "<p>Calcule ∫₀¹ x dx.</p>", hints: ["Cherche une primitive", "Utilise x²/2", "Évalue aux bornes", "Soustrais", "Le résultat vaut 1/2"], solution_html: "<p>1/2</p>", course_terms: [] })
     : "Réponse hermétique E2E";
   return NextResponse.json({ choices: [{ message: { content }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 10 } });
-}
+});
