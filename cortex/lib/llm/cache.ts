@@ -34,7 +34,9 @@ export function cacheKey(providerName: string, req: CompleteRequest): string {
     maxTokens: req.maxTokens ?? null,
     json: req.json ? { schema: req.json.schema, effort: req.json.effort ?? null } : null,
     thinking: req.thinking ?? null,
-    images: (req.images ?? []).map((i) => `${i.mediaType}:${crypto.createHash("sha256").update(i.base64).digest("hex")}`),
+    images: (req.images ?? []).map((i) => i.path
+      ? `path:${i.path}`
+      : `${i.mediaType}:${crypto.createHash("sha256").update(i.base64!).digest("hex")}`),
   });
   return crypto.createHash("sha256").update(material).digest("hex");
 }

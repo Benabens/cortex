@@ -7,7 +7,7 @@ import type { LlmModel } from "./types";
  * Voir .env.example pour la liste commentée.
  */
 
-export const PROVIDER_NAMES = ["claude-code", "anthropic", "openai-compatible"] as const;
+export const PROVIDER_NAMES = ["claude-code", "codex-cli", "anthropic", "openai-compatible"] as const;
 export type ProviderName = (typeof PROVIDER_NAMES)[number];
 
 /** Provider par défaut de l'app (env LLM_PROVIDER, défaut claude-code = dev €0). */
@@ -61,11 +61,12 @@ export function mapModel(model: LlmModel, provider: ProviderName): string {
   // Un id complet n'est JAMAIS accepté sur un fournisseur PAYANT : il
   // contournerait la règle LLM_ALLOW_OPUS (et le tarif connu). Seul le CLI
   // local (dev, €0) garde son passthrough historique.
-  if (provider !== "claude-code" && !isLlmModel(model)) {
+  if (provider !== "claude-code" && provider !== "codex-cli" && !isLlmModel(model)) {
     throw new LlmError(`Modèle « ${String(model)} » refusé : seuls les alias opus, sonnet et haiku sont acceptés sur un fournisseur payant.`, "UNSUPPORTED");
   }
   const envKey = MODEL_ENV[model];
   if (envKey && process.env[envKey]) return process.env[envKey]!;
+  if (provider === "codex-cli") return process.env.CORTEX_CODEX_MODEL?.trim() || "gpt-5.6-sol";
   if (provider === "anthropic" && ANTHROPIC_DEFAULTS[model]) {
     // RÈGLE D'OR coûts : sur le provider API PAYANT, l'alias
     // logique « opus » ne se résout vers Opus (5×/25× plus cher que Sonnet en
@@ -92,11 +93,11 @@ export function maxConcurrency(): number {
 
 /**
  * Nombre de RE-tentatives après un échec retryable.
- * Défaut : 0 pour claude-code (comportement historique — les call sites ont leurs
+ * Défaut : 0 pour les CLI locaux (comportement historique — les call sites ont leurs
  * propres fallbacks calibrés), 2 pour les providers API (429/5xx fréquents).
  */
 export function maxRetries(provider: ProviderName): number {
-  return envInt("LLM_MAX_RETRIES", provider === "claude-code" ? 0 : 2);
+  return envInt("LLM_MAX_RETRIES", provider === "claude-code" || provider === "codex-cli" ? 0 : 2);
 }
 
 export function retryBaseMs(): number {

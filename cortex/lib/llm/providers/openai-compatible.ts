@@ -31,6 +31,9 @@ export const openaiCompatibleProvider: LlmProvider = {
   },
 
   async complete(req: CompleteRequest): Promise<CompleteResult> {
+    if (req.images?.some((image) => image.path)) {
+      throw new LlmError("Le provider openai-compatible accepte uniquement des images base64.", "UNSUPPORTED");
+    }
     if (req.addDirs?.length) {
       throw new LlmError(
         "Ce site d'appel repose sur la lecture de fichiers locaux (addDirs) — provider claude-code requis (LLM_PROVIDER=claude-code), ou adapte le site en images base64.",
@@ -46,7 +49,7 @@ export const openaiCompatibleProvider: LlmProvider = {
       ? [
           ...req.images.map((im) => ({
             type: "image_url" as const,
-            image_url: { url: `data:${im.mediaType};base64,${im.base64}` },
+            image_url: { url: `data:${im.mediaType!};base64,${im.base64!}` },
           })),
           { type: "text" as const, text: req.prompt },
         ]

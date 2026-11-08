@@ -67,8 +67,9 @@ test("estimateCostUsd : tarifs par préfixe, inconnu → tarif le plus cher de l
   assert.equal(billing.estimateCostUsd("claude-sonnet-5"), 0);
 });
 
-test("recordUsage : claude-code (€0) n'écrit RIEN ; anthropic écrit coût + user + cours", async () => {
+test("recordUsage : les CLI locaux (€0) n'écrivent RIEN ; anthropic écrit coût + user + cours", async () => {
   await billing.recordUsage({ provider: "claude-code", model: "opus", tokensIn: 1000, tokensOut: 1000 });
+  await billing.recordUsage({ provider: "codex-cli", model: "gpt-5.6-sol", tokensIn: 1000, tokensOut: 1000 });
   let rows = await authAll<{ n: number }>("SELECT count(*) n FROM llm_usage");
   assert.equal(Number(rows[0].n), 0);
 
@@ -98,12 +99,14 @@ test("kill-switch : sous le plafond → passe ; plafond atteint → LlmError SPE
   );
   // le dev €0 n'est JAMAIS coupé
   await billing.assertSpendCap("claude-code");
+  await billing.assertSpendCap("codex-cli");
 
   // SPEND_CAP_USD=0 = kill-switch d'URGENCE : tout appel payant coupé
   process.env.SPEND_CAP_USD = "0";
   billing.resetSpendCache();
   await assert.rejects(() => billing.assertSpendCap("anthropic"), (e: Error & { code?: string }) => e.code === "SPEND_CAP");
   await billing.assertSpendCap("claude-code"); // dev €0 toujours intact
+  await billing.assertSpendCap("codex-cli");
 
   // sans plafond → no-op
   delete process.env.SPEND_CAP_USD;
