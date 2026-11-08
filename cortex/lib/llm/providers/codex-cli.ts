@@ -6,6 +6,10 @@ import { mapModel } from "../config";
 import { LlmError, type CompleteRequest, type CompleteResult, type LlmProvider, type LlmUsage } from "../types";
 
 const DEFAULT_TIMEOUT_MS = 180_000;
+const UNSUPPORTED_SCHEMA_KEYS = new Set([
+  "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+  "minLength", "maxLength", "pattern", "minItems", "maxItems", "uniqueItems", "minProperties", "maxProperties",
+]);
 
 function productionReason(): string | null {
   return process.env.NODE_ENV === "production" || process.env.RAILWAY_ENVIRONMENT !== undefined
@@ -58,6 +62,29 @@ function jsonlError(stdout: string): string | null {
   return null;
 }
 
+function codexSchema(schema: object): object {
+  const walk = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(walk);
+    if (!node || typeof node !== "object") return node;
+    const src = node as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(src)) {
+      if (UNSUPPORTED_SCHEMA_KEYS.has(key) || key === "required" || key === "additionalProperties") continue;
+      out[key] = walk(value);
+    }
+    const types = Array.isArray(src.type) ? src.type : [src.type];
+    if (types.includes("object")) {
+      const properties = src.properties && typeof src.properties === "object"
+        ? Object.keys(src.properties as Record<string, unknown>)
+        : [];
+      out.required = properties;
+      out.additionalProperties = false;
+    }
+    return out;
+  };
+  return walk(schema) as object;
+}
+
 function childEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
@@ -91,7 +118,7 @@ export const codexCliProvider: LlmProvider = {
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-codex-cli-"));
     const output = path.join(cwd, "final.txt");
     const schema = req.json ? path.join(cwd, "schema.json") : null;
-    if (schema) fs.writeFileSync(schema, JSON.stringify(req.json!.schema));
+    if (schema) fs.writeFileSync(schema, JSON.stringify(codexSchema(req.json!.schema)));
     const args = ["exec", "--skip-git-repo-check", "-s", "read-only", "-o", output, "--json", "--model", model, "-c", `model_reasoning_effort=\"${effort(alias)}\"`];
     if (schema) args.push("--output-schema", schema);
     for (const image of images) args.push("-i", image.path!);

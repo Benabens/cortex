@@ -58,10 +58,14 @@ test("provider codex-cli : schéma structuré et image par chemin", async () => 
     `printf '%s\\036' "$@" > "${capture}.args"`,
     `printf '{}' > "$out"`,
   ].join("\n"));
-  const schema = { type: "object", properties: { ok: { type: "boolean" } } };
+  const schema = { type: "object", properties: { ok: { type: "boolean" }, note: { type: "string" } }, required: ["ok"] };
   const res = await codexCliProvider.complete({ prompt: "p", model: "haiku", json: { schema }, images: [{ path: image }] });
   assert.equal(res.text, "{}");
-  assert.deepEqual(JSON.parse(fs.readFileSync(capture, "utf8")), schema);
+  assert.deepEqual(JSON.parse(fs.readFileSync(capture, "utf8")), {
+    ...schema,
+    required: ["ok", "note"],
+    additionalProperties: false,
+  });
   const args = fs.readFileSync(`${capture}.args`, "utf8").split("\u001e").filter(Boolean);
   assert.ok(args.includes("--output-schema") && args.includes("-i") && args.includes(image));
   assert.ok(args.includes('model_reasoning_effort="low"'));
