@@ -143,3 +143,30 @@ test("historique des phases : médiane des lignes « ⏱ » des derniers jobs te
     assert.deepEqual(await jobs.phaseHistory("qcm"), { QCM: 300_000, PDF: 20_000 }, "un job en cours ne compte pas");
   });
 });
+
+test("banc du 04/11 : la durée attendue suit la taille de la commande (temps par question), pas la seule médiane", async () => {
+  const { estimateRemaining } = await import("../lib/eta");
+  // Derniers jobs : 9 questions en 10 min, 9 en 12 min → ≈ 1,2 min par question ; ce job en demande 15.
+  const e = estimateRemaining({ type: "qcm", status: "running", progress: 0, elapsedMs: 0, attempts: 0, historyMs: [10 * MIN, 12 * MIN], historyUnits: [9, 9], units: 15 });
+  assert.equal(e.basis, "history");
+  assert.ok(Math.abs(e.remainingMs! - (11 / 9) * 15 * MIN) < MIN / 10, `${e.remainingMs! / MIN} min`);
+  // Sans historique : la durée par défaut aussi suit la commande (40 QCM ≠ 10 QCM).
+  const small = estimateRemaining({ type: "qcm", status: "running", progress: 0, elapsedMs: 0, attempts: 0, historyMs: [], units: 10 });
+  const big = estimateRemaining({ type: "qcm", status: "running", progress: 0, elapsedMs: 0, attempts: 0, historyMs: [], units: 40 });
+  assert.ok(big.remainingMs! > 3 * small.remainingMs!, `${small.remainingMs! / MIN} → ${big.remainingMs! / MIN} min`);
+});
+
+test("jobEta lit la taille de chaque commande dans la cible des jobs (count + openCount)", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { q, nowStr } = await import("../db/q");
+  const jobs = await import("../lib/jobs");
+  await runWithCourse("algo", async () => {
+    const done = await jobs.createJob("qcm", JSON.stringify({ count: 8, openCount: 2 }));
+    await q.run(`UPDATE jobs SET status = 'done', created_at = ?, updated_at = ? WHERE id = ?`, "2026-11-01 10:00:00", "2026-11-01 10:10:00", done);
+    const id = await jobs.createJob("qcm", JSON.stringify({ count: 20, openCount: 0 }));
+    await q.run(`UPDATE jobs SET status = 'running', progress = 0, created_at = ? WHERE id = ?`, nowStr(0), id);
+    const eta = await jobs.jobEta((await jobs.getJob(id))!);
+    // 10 questions en 10 min → 1 min par question → 20 min pour 20 questions.
+    assert.equal(eta?.label, "≈ 20 min restantes");
+  });
+});

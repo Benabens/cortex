@@ -51,6 +51,16 @@ function item(i: number, stem = `Que renvoie df.groupby("sex")["income"].mean() 
 let design: (n: number, call: number, prompt: string) => string = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
 let designCalls = 0;
 const designPrompts: string[] = [];
+const repairPrompts: string[] = [];
+/** Remplacement d'un distracteur trivial (lib/qcm replaceTrivialDistractors) : une option proche du cours. */
+function repairReply(prompt: string): string {
+  const replacements = [...prompt.matchAll(/^Q(\d+)\.[\s\S]*?(?=^Q\d+\.|$(?![\s\S]))/gm)].map((m) => ({
+    index: Number(m[1]),
+    distractors: [...m[0].matchAll(/^\s+\((\d+)\) .* ← À REMPLACER/gm)].map((x) => ({ option: Number(x[1]), text: "La médiane des revenus calculée séparément pour chaque modalité de sex.", misconception: "[quasi-synonyme] médiane pour moyenne" })),
+    explanation: "groupby puis mean donne la moyenne par groupe ; la médiane et la somme sont d'autres agrégats.",
+  }));
+  return JSON.stringify({ replacements });
+}
 const designBodies: Record<string, unknown>[] = [];
 
 const verifyPrompts: string[] = [];
@@ -106,7 +116,8 @@ before(async () => {
       let text = "{}";
       // Architecte des questions ouvertes (conception → rédaction → audit), testé avant "items" :
       // le schéma de conception contient lui aussi des tableaux « "items" ».
-      if (/"duplicates"/.test(content)) { dedupePrompts.push(content); text = JSON.stringify({ duplicates: dedupe(content) }); }
+      if (/"replacements"/.test(content)) { repairPrompts.push(content); text = repairReply(content); }
+      else if (/"duplicates"/.test(content)) { dedupePrompts.push(content); text = JSON.stringify({ duplicates: dedupe(content) }); }
       else if (/"hints"/.test(content)) { assistPrompts.push(content); text = drill(assistPrompts.length); }
       else if (/RÉPONSE DE L'ÉTUDIANT/.test(content)) { assistPrompts.push(content); text = JSON.stringify(VERDICT); }
       else if (/"edge_case"/.test(content)) text = JSON.stringify(DESIGN);
@@ -129,7 +140,7 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { dedupePrompts.length = 0; dedupe = () => []; assistPrompts.length = 0; designCalls = 0; writeCalls = 0; designPrompts.length = 0; designBodies.length = 0; verifyPrompts.length = 0; });
+beforeEach(() => { repairPrompts.length = 0; dedupePrompts.length = 0; dedupe = () => []; assistPrompts.length = 0; designCalls = 0; writeCalls = 0; designPrompts.length = 0; designBodies.length = 0; verifyPrompts.length = 0; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -343,7 +354,7 @@ test("H — les questions des examens précédents du même cours ne sont pas re
   assert.match(designPrompts[0], /examens précédents[\s\S]*Ancienne 1\.0/, "les énoncés déjà posés sont donnés à ne pas reprendre");
 });
 
-test("K — niveau examen réel par défaut ; un distracteur éliminable sans le cours (« TypeError ») est régénéré", async () => {
+test("K — niveau examen réel par défaut ; un distracteur éliminable sans le cours (« TypeError ») est remplacé", async () => {
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
@@ -353,8 +364,9 @@ test("K — niveau examen réel par défaut ; un distracteur éliminable sans le
   const r = await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 0 }));
   assert.equal(r.count, 2);
   assert.match(designPrompts[0], /NIVEAU EXAMEN RÉEL/, "la difficulté d'examen est le défaut, sans consigne");
-  const regen = designPrompts.find((p) => /À CORRIGER/.test(p));
-  assert.match(regen ?? "", /éliminable/, "régénération ciblée sur le distracteur trivial");
+  // Banc du 04/11 : seule l'option triviale est remplacée, l'énoncé et la clé restent.
+  assert.match(repairPrompts[0] ?? "", /TypeError.*← À REMPLACER/, "remplacement ciblé sur le distracteur trivial");
+  assert.ok(!designPrompts.some((p) => /À CORRIGER/.test(p)), "aucune question régénérée en entier");
   const options = (await runWithCourse(id, () => getQcmExam(r.id)))!.items.flatMap((x) => x.options);
   assert.ok(!options.some((o) => /TypeError/.test(o)), options.join(" | "));
 });

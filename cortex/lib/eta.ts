@@ -17,6 +17,10 @@ export type EtaInput = {
   attempts: number;
   /** Durées des derniers jobs du même type, terminés. */
   historyMs: number[];
+  /** Questions commandées par chacun de ces jobs (alignées sur historyMs), si connues. */
+  historyUnits?: (number | null)[];
+  /** Questions commandées par CE job (QCM + ouvertes, exercices), si connues. */
+  units?: number | null;
 };
 
 export type Eta = { remainingMs: number | null; late: boolean; basis: "history" | "default"; label: string };
@@ -24,6 +28,11 @@ export type Eta = { remainingMs: number | null; late: boolean; basis: "history" 
 const MIN = 60_000;
 /** Sans historique : ordres de grandeur mesurés (banc du job 9 de CS-290 pour un examen QCM). */
 const DEFAULT_MS: Record<string, number> = { qcm: 12 * MIN, exam: 15 * MIN, exercise: 6 * MIN, "lab-exercise": 6 * MIN, prepare: 8 * MIN, blueprint: 6 * MIN, format: 3 * MIN, ingest: 3 * MIN };
+/**
+ * Durée par question commandée, sans historique (même banc : ≈ 12 min pour 7 QCM + 2 ouvertes).
+ * Banc moteur du 04/11/2026 : une seule durée par type annonçait 12 min pour 10 comme pour 40 QCM.
+ */
+const DEFAULT_UNIT_MS: Record<string, number> = { qcm: 80_000, exam: 3 * MIN };
 /** Au-delà de la durée attendue × ce facteur, le job est « en retard » : plus d'estimation chiffrée. */
 const LATE_FACTOR = 1.25;
 
@@ -39,9 +48,18 @@ function minutes(ms: number): string {
 }
 
 export function estimateRemaining(i: EtaInput): Eta {
-  const history = i.historyMs.filter((x) => Number.isFinite(x) && x > 0).slice(0, 5);
+  const units = i.units && i.units > 0 ? i.units : null;
+  const runs = i.historyMs.map((ms, k) => ({ ms, n: i.historyUnits?.[k] ?? null })).filter((h) => Number.isFinite(h.ms) && h.ms > 0).slice(0, 5);
+  const history = runs.map((h) => h.ms);
   const basis = history.length ? "history" as const : "default" as const;
-  const expected = history.length ? median(history) : DEFAULT_MS[i.type] ?? 10 * MIN;
+  // La durée suit la taille de la commande quand on la connaît : temps par question des jobs passés
+  // (ceux dont on connaît la commande), à défaut le temps par question par défaut du type.
+  const perUnit = runs.filter((h) => h.n && h.n > 0).map((h) => h.ms / h.n!);
+  const expected = units && perUnit.length
+    ? median(perUnit) * units
+    : history.length
+      ? median(history)
+      : units && DEFAULT_UNIT_MS[i.type] ? DEFAULT_UNIT_MS[i.type] * units : DEFAULT_MS[i.type] ?? 10 * MIN;
   const suffix = basis === "default" ? " (estimation sans historique)" : "";
   const progress = Math.min(100, Math.max(0, i.progress));
 

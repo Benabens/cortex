@@ -64,6 +64,8 @@ let flag: (block: string, prompt: string) => { off: string; terms: string[] } | 
 );
 /** Définition jugée différente de celle du cours (PR #55), d'après le bloc de la question. */
 let mismatch: (block: string) => string = () => "";
+/** Notions dont dépend la clé, telles que le correcteur les recopie (parfois paraphrasées). */
+let courseTerms: (block: string) => string[] = () => [];
 /** Ce que répond le second regard (recherche dans tout le cours) ; null = réponse illisible. */
 let secondLook: (prompt: string) => { index: number; off_course: string }[] | null = (prompt) => {
   const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
@@ -76,7 +78,7 @@ function verifyReply(prompt: string): string {
     const index = Number(/^Q(\d+)\./.exec(b)![1]);
     const opt = [...b.matchAll(/^\s+\((\d+)\) (.*)$/gm)].find((m) => /^Une large majorité/.test(m[2]));
     const f = flag(b, prompt);
-    return { index, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms: [], off_course: f?.off ?? "", off_course_terms: f?.terms ?? [], off_matter: "", trivial_distractors: [], definition_mismatch: mismatch(b) };
+    return { index, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms: courseTerms(b), off_course: f?.off ?? "", off_course_terms: f?.terms ?? [], off_matter: "", trivial_distractors: [], definition_mismatch: mismatch(b) };
   });
   return JSON.stringify({ results });
 }
@@ -110,12 +112,12 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-const defaults = { design, flag, secondLook, mismatch };
+const defaults = { design, flag, secondLook, mismatch, courseTerms };
 beforeEach(() => {
   designCalls = 0;
   verifyPrompts.length = 0;
   secondLookPrompts.length = 0;
-  ({ design, flag, secondLook, mismatch } = defaults);
+  ({ design, flag, secondLook, mismatch, courseTerms } = defaults);
 });
 
 after(async () => {
@@ -244,4 +246,15 @@ test("définition jugée différente sur des extraits partiels (#55), mais confo
   assert.equal(r.count, 2);
   assert.ok(!steps.some((s) => /QCM rejeté/.test(s)), steps.filter((s) => /rejeté/.test(s)).join("\n"));
   assert.equal(designCalls, 1);
+});
+
+test("banc du 04/11 : une notion de la clé recopiée en paraphrase (introuvable mot pour mot) passe au second regard, pas au rejet immédiat", async () => {
+  const id = await course();
+  // CS-290 : « keyword filter false positive », « mask booléen combiné avec & » (cours en anglais) :
+  // le correcteur paraphrase ou traduit ; le contrôle mot pour mot rejetait des questions justes.
+  courseTerms = (block) => (/\(s10\)/.test(block) ? ["supériorité illusoire des automobilistes"] : []);
+  const { r, view, steps } = await exam(id, 2);
+  assert.equal(r.count, 2);
+  assert.ok(view.items.some((it) => /\(s10\)/.test(it.stem)), `la question est gardée :\n${steps.join("\n")}`);
+  assert.ok(secondLookPrompts.length >= 1, "le second regard a cherché dans tout le cours");
 });
