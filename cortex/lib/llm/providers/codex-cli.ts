@@ -85,6 +85,21 @@ function codexSchema(schema: object): object {
   return walk(schema) as object;
 }
 
+function imagesFromDirs(dirs: string[]): string[] {
+  const found: string[] = [];
+  const visit = (entry: string): void => {
+    const stat = fs.statSync(entry, { throwIfNoEntry: false });
+    if (!stat) return;
+    if (stat.isDirectory()) {
+      for (const name of fs.readdirSync(entry)) visit(path.join(entry, name));
+    } else if (/\.(?:png|jpe?g|webp|gif)$/i.test(entry)) {
+      found.push(path.resolve(entry));
+    }
+  };
+  for (const dir of dirs) visit(dir);
+  return found.sort();
+}
+
 function childEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
@@ -107,11 +122,15 @@ export const codexCliProvider: LlmProvider = {
   async complete(req: CompleteRequest): Promise<CompleteResult> {
     const unavailable = this.unavailableReason();
     if (unavailable) throw new LlmError(unavailable, "UNAVAILABLE");
-    const images = req.images ?? [];
+    const images = [...(req.images ?? [])];
     if (images.some((image) => !image.path)) {
       throw new LlmError("codex-cli accepte uniquement des images fournies par chemin de fichier local.", "UNSUPPORTED");
     }
-    if (req.addDirs?.length) throw new LlmError("codex-cli ne prend pas en charge addDirs.", "UNSUPPORTED");
+    if (req.addDirs?.length) {
+      const localImages = imagesFromDirs(req.addDirs);
+      if (!localImages.length) throw new LlmError("codex-cli accepte addDirs uniquement quand ils contiennent des images à transmettre avec -i.", "UNSUPPORTED");
+      images.push(...localImages.map((image) => ({ path: image })));
+    }
 
     const alias = req.model ?? "opus";
     const model = mapModel(alias, "codex-cli");
