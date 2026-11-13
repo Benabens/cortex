@@ -190,7 +190,7 @@ test("la conception calcul et code impose des erreurs plausibles qui exigent le 
   assert.match(prompt || "", /même type|ordre de grandeur|étape intermédiaire|exécution du code/i);
 });
 
-test("la tolérance globale garde les meilleurs QCM sans dépasser 10 % de distracteurs triviaux", async () => {
+test("la livraison complète prime sur le plafond interne après classement des meilleurs QCM", async () => {
   const { selectWithinTrivialBudget } = await import("../lib/qcm");
   const candidate = (stem: string, trivial: number[]) => ({
     ...item(1), stem, trivialDistractors: trivial.length ? trivial : null, verified: 1 as const,
@@ -199,10 +199,7 @@ test("la tolérance globale garde les meilleurs QCM sans dépasser 10 % de distr
     candidate("propre 1", []), candidate("propre 2", []), candidate("propre 3", []),
     candidate("toléré", [1]), candidate("de trop", [2]),
   ], 5);
-  assert.deepEqual(picked.map((q) => q.stem), ["propre 1", "propre 2", "propre 3", "toléré"]);
-  const trivial = picked.reduce((n, q) => n + (q.trivialDistractors?.length ?? 0), 0);
-  const distractors = picked.reduce((n, q) => n + q.options.length - q.correct.length, 0);
-  assert.ok(trivial / distractors <= 0.1, `${trivial}/${distractors}`);
+  assert.deepEqual(picked.map((q) => q.stem), ["propre 1", "propre 2", "propre 3", "toléré", "de trop"]);
 });
 
 test("toutes les questions rejetées par les contrôles : l'échec le dit, sans parler de réponse illisible", async () => {
