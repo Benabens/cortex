@@ -27,14 +27,15 @@ export async function startGenerationJob(type: JobType, target?: string): Promis
     // Le paywall précède les contraintes de contenu : à solde nul, toute
     // tentative de génération doit expliquer le coût et proposer l'achat,
     // même si le cours n'est pas encore prêt ou son format encore inconnu.
-    const issue = await preflightGeneration(type);
-    if (issue) return { ok: false, status: issue.status, error: issue.error, command: issue.command };
+    const billingIssue = (await generationGate("gen")) ?? (await creditsGate(type));
+    if (billingIssue) return { ok: false, status: billingIssue.status, error: billingIssue.error };
     // Un examen blanc suit le format du cours ; inconnu, il n'est jamais inventé (lib/exam-format).
     if (type === "exam") {
       const plan = planMockExam(requestedFormat(await resolveExamFormat(), targetKind(target)), {});
       if (plan.generator === "none") return { ok: false, status: 409, error: plan.reason };
     }
-    return null;
+    const issue = await preflightGeneration(type);
+    return issue && { ok: false, status: issue.status, error: issue.error, command: issue.command };
   });
 }
 
