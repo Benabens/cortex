@@ -1,5 +1,6 @@
 import { q } from "@/db/q";
 import { EXAM_SOURCE_TYPES } from "@/lib/exam-format";
+import { excludedSourceIds, isExcludedMaterial } from "@/lib/source-scope";
 import { normalize, tokenize } from "@/lib/text";
 
 /**
@@ -45,6 +46,30 @@ export function isExamLogistics(text: string): boolean {
   const t = normalize(text).replace(/[’']/g, "'");
   if (LOGISTICS_PHRASE.test(t)) return true;
   return EXAM_WORD.test(t) && LOGISTICS_WORD.test(t);
+}
+
+/**
+ * Notions de la MATIÈRE seulement, à l'usage (les notions d'un cours préparé avant la règle
+ * restent en base jusqu'à sa re-préparation) : ni une modalité d'examen, ni un libellé qui se
+ * dit hors programme ou archive (« Thèmes des posters 2024 »), ni une notion dont les meilleurs
+ * passages ne sont QUE dans des sources exclues (HUM-285, 13/11 : RGPD/LPD, d'une note d'archive
+ * « hors programme 2026 »). Recherche stricte (tous les mots) d'abord, large à défaut.
+ */
+export async function topicsInScope<T extends { label: string }>(topics: T[]): Promise<T[]> {
+  const byLabel = topics.filter((t) => !isExamLogistics(t.label) && !isExcludedMaterial(t.label));
+  const excluded = await excludedSourceIds();
+  if (!excluded.size) return byLabel;
+  const { rankedHits } = await import("@/lib/search");
+  const out: T[] = [];
+  for (const t of byLabel) {
+    const material = async (mode: "and" | "or") => (await rankedHits(t.label.slice(0, 200), 12, mode)).filter((h) => !NOT_COURSE_FACTS.has(h.sourceType));
+    const strict = await material("and");
+    const hits = strict.length ? strict : await material("or");
+    const top = hits.slice(0, 3);
+    if (top.length && top.every((h) => excluded.has(Number(h.sourceId)))) continue;
+    out.push(t);
+  }
+  return out;
 }
 
 /** Au-delà, le corpus n'est pas chargé en mémoire : sans vérification possible, rien n'est rejeté. */
@@ -141,16 +166,18 @@ export async function coursePassages(topics: string[], perTopic = 2, cap = 900):
   const { search } = await import("@/lib/search");
   const out: { src: string; text: string }[] = [];
   const seen = new Set<number>();
+  // Hors programme et archives d'organisation : jamais un passage à tester (lib/source-scope).
+  const excluded = await excludedSourceIds();
   for (const topic of topics) {
     let groups: Awaited<ReturnType<typeof search>> = [];
     try { groups = await search(topic, 16, "or"); } catch { continue; }
     let k = 0;
     for (const h of groups.flatMap((g) => g.hits)) {
       if (k >= perTopic) break;
-      if (NOT_COURSE_FACTS.has(h.sourceType) || seen.has(h.itemId)) continue;
+      if (NOT_COURSE_FACTS.has(h.sourceType) || excluded.has(Number(h.sourceId)) || seen.has(h.itemId)) continue;
       seen.add(h.itemId);
       const row = await q.get<{ text: string }>(`SELECT text FROM items WHERE id = ?`, h.itemId);
-      if (!row?.text) continue;
+      if (!row?.text || isExcludedMaterial("", row.text)) continue;
       out.push({ src: h.sourceTitle, text: windowAround(row.text, topic, cap) });
       k++;
     }
@@ -203,7 +230,7 @@ export function densestWindow(text: string, query: string, cap: number): string 
  * Passages du cours qui servent de PREUVE : pour chaque requête (un fait, un énoncé, une
  * notion), les meilleurs résultats de la recherche plein texte, en fenêtres larges centrées sur
  * la requête. Deux fenêtres d'un même support ne sont gardées que si elles ne se recouvrent pas.
- * Jamais les annales, exemples ni consignes d'examen. `budget` borne le total en caractères.
+ * Jamais les annales, exemples ni consignes d'examen, ni une source hors programme. `budget` borne le total en caractères.
  */
 export async function evidencePassages(queries: string[], opts: { perQuery?: number; cap?: number; budget?: number } = {}): Promise<{ src: string; text: string }[]> {
   const { perQuery = 2, cap = 1800, budget = 24_000 } = opts;
@@ -212,6 +239,7 @@ export async function evidencePassages(queries: string[], opts: { perQuery?: num
   const { rankedHits } = await import("@/lib/search");
   const out: { src: string; text: string }[] = [];
   const windows = new Map<number, string[]>();
+  const excluded = await excludedSourceIds();
   let used = 0;
   for (const query of queries.map((x) => x.trim()).filter(Boolean)) {
     if (used >= budget) break;
@@ -220,9 +248,9 @@ export async function evidencePassages(queries: string[], opts: { perQuery?: num
     let k = 0;
     for (const h of hits) {
       if (k >= perQuery || used >= budget) break;
-      if (NOT_COURSE_FACTS.has(h.sourceType)) continue;
+      if (NOT_COURSE_FACTS.has(h.sourceType) || excluded.has(Number(h.sourceId))) continue;
       const row = await q.get<{ text: string }>(`SELECT text FROM items WHERE id = ?`, h.itemId);
-      if (!row?.text) continue;
+      if (!row?.text || isExcludedMaterial("", row.text)) continue;
       const text = densestWindow(row.text, query, cap);
       const seen = windows.get(h.itemId) ?? [];
       // Même fenêtre (ou presque) déjà montrée pour une autre requête : rien de neuf.

@@ -4,7 +4,7 @@ import { HARD_STOP_CODES, LlmError, completeJson, llmErrorCode, llmFailureReason
 import { DEFAULT_ANSWER_MODE, courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFormat, type AnswerMode } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
-import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseTerms, coursePassages } from "@/lib/course-grounding";
+import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseTerms, coursePassages, topicsInScope } from "@/lib/course-grounding";
 import { secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
 import { assignChapters, spreadOverChapters, variants } from "@/lib/coverage";
 import { normalize } from "@/lib/text";
@@ -170,11 +170,13 @@ export async function coverageTopics(): Promise<CovTopic[]> {
     const rows = await q.all<{ label: string; method: string | null; weight: number | null; chapterId: number | null }>(
       `SELECT label, method, exam_weight AS weight, plan_chapter_id AS "chapterId" FROM topics ${order}`,
     );
-    if (rows.length) return rows.map((r) => ({ label: r.label, method: r.method, weight: Number(r.weight ?? 0), chapterId: r.chapterId }));
+    // Matière seulement : une notion d'archive ou hors programme extraite avant la règle est écartée.
+    const kept = await topicsInScope(rows);
+    if (kept.length) return kept.map((r) => ({ label: r.label, method: r.method, weight: Number(r.weight ?? 0), chapterId: r.chapterId }));
   } catch {
     // Base sans la colonne du plan de cours (antérieure à course-plan) : poids et libellés seuls.
     try {
-      const rows = await q.all<{ label: string; method: string | null; weight: number | null }>(`SELECT label, method, exam_weight AS weight FROM topics ${order}`);
+      const rows = await topicsInScope(await q.all<{ label: string; method: string | null; weight: number | null }>(`SELECT label, method, exam_weight AS weight FROM topics ${order}`));
       if (rows.length) return rows.map((r) => ({ label: r.label, method: r.method, weight: Number(r.weight ?? 0) }));
     } catch {}
   }
@@ -1022,8 +1024,10 @@ export async function runPool<T>(items: T[], n: number, fn: (item: T) => Promise
 /** `requested` / `openRequested` : la composition demandée — `count` / `open` peuvent rester en dessous. */
 export type QcmExamResult = { id: number; count: number; requested: number; verified: number; open: number; openRequested: number; pdf?: string; texError?: string };
 
-/** Nombre de rondes de comblement des QCM manquants, et lots supplémentaires permis (× lots prévus). */
+/** Nombre de rondes de comblement des QCM manquants. */
 const TOPUP_ROUNDS = 2;
+/** Lots supplémentaires permis, comblement et complément final compris (× lots prévus) : le budget borné. */
+const EXTRA_BATCHES = 2;
 
 /**
  * Durée de chaque phase d'un examen QCM sans historique (banc de M : ~10 min à
@@ -1219,8 +1223,12 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       return items;
     }
   };
-  /** Un lot conçu, vérifié, renforcé. Un échec (après les réessais de completeJson) rend 0 item et sa cause. */
-  const safeBatch = async (bt: Batch): Promise<{ items: QcmItem[]; error: unknown }> => {
+  /**
+   * Un lot conçu, vérifié, renforcé. Un échec (après les réessais de completeJson) rend 0 item et sa cause.
+   * `rejected` : les sujets dont la question a été conçue puis ÉCARTÉE par les contrôles (le sujet
+   * lui-même est en cause), à distinguer d'un item mal formé ou absent (un raté du modèle).
+   */
+  const safeBatch = async (bt: Batch): Promise<{ items: QcmItem[]; error: unknown; rejected: Set<number> }> => {
     // Un lot conçu vaut une moitié de son unité, sa vérification l'autre (banc du 04/11 : 8 %
     // affichés pendant 3 à 5 min, tant que le premier lot n'était pas vérifié et renforcé).
     const designed = { done: false };
@@ -1230,7 +1238,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       progress.done("QCM", designed.done ? 0.5 : 1);
     }
   };
-  const buildBatch = async (bt: Batch, designed: { done: boolean }): Promise<{ items: QcmItem[]; error: unknown }> => {
+  const buildBatch = async (bt: Batch, designed: { done: boolean }): Promise<{ items: QcmItem[]; error: unknown; rejected: Set<number> }> => {
     try {
       const items = await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, bt.guidance, { ...shared, molds: bt.molds });
       progress.done("QCM", 0.5);
@@ -1242,10 +1250,11 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       const out = kept.filter((it) => !it.rejected && !it.trivialDistractors?.length);
       qualityDropped += kept.length - out.length;
       for (const it of out) if (bt.topics[it.slot ?? -1]?.method === FOCUS_METHOD) it.focusSlot = true;
-      return { items: out, error: null };
+      const rejected = new Set(kept.map((it, n) => ({ it, slot: it.slot ?? n })).filter(({ it }) => !out.includes(it)).map(({ slot }) => slot));
+      return { items: out, error: null, rejected };
     } catch (e) {
       step(`Lot QCM échoué (${(e as Error).message.slice(0, 80)})`, 0);
-      return { items: [], error: e };
+      return { items: [], error: e, rejected: new Set() };
     }
   };
   let lastError: unknown = null;
@@ -1300,14 +1309,45 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   })();
   const tQcm = Date.now();
 
+  // H — Une notion = une question tant que le programme a au moins autant de notions que l'examen a de
+  // questions ; sinon plusieurs questions par notion, sous des angles vraiment distincts. Les
+  // questions de l'accent demandé par l'étudiant partagent leur thème sans être des doublons.
+  const strict = notionCount >= count;
+  // RÉSERVE COMMUNE au comblement, aux doublons et au complément final : en mode strict, ni une
+  // reprise ni une autre facette d'une notion déjà donnée à l'examen ; à défaut, les supports du
+  // cours pas encore pris (ils ramènent d'autres passages). Chaque notion n'est servie qu'une fois.
+  const fresh: QcmSlot[] = [
+    ...spareTopics.filter((t) => t.method !== REPEAT_METHOD && !used.has(t.label)),
+    ...(await courseMaterialTitles().catch(() => [] as string[])).filter((t) => !used.has(t)).map((label) => ({ label, method: null })),
+  ];
+  const pool: QcmSlot[] = strict ? fresh.filter((t, i) => fresh.findIndex((x) => x.label === t.label) === i) : spareTopics;
+  let nextSpare = 0;
+  const takeSpare = (n: number): QcmSlot[] => {
+    const out: QcmSlot[] = [];
+    while (out.length < n && nextSpare < pool.length) {
+      const t = pool[nextSpare++];
+      if (strict && used.has(t.label)) continue;
+      used.add(t.label);
+      out.push(t);
+    }
+    return out;
+  };
+  const hardStop = () => {
+    const code = llmErrorCode(lastError);
+    return !!code && HARD_STOP_CODES.has(code);
+  };
+
   // NOMBRE GARANTI : les sujets restés sans QCM (lot échoué, items écartés) sont regroupés en
-  // nouveaux lots, au plus TOPUP_ROUNDS rondes et autant de lots en plus que de lots prévus.
-  // En dessous malgré tout, l'examen le dit (requested) et le job rembourse au prorata.
+  // nouveaux lots, au plus TOPUP_ROUNDS rondes. Un sujet dont la question a été ÉCARTÉE (hors
+  // cours, hors matière, clé contestée…) cède sa place à une notion de réserve : redemandé tel
+  // quel, il rendait le même rejet (HUM-285, job 12 du 13/11 : 10 QCM sur 20). Un lot en échec
+  // (erreur du fournisseur) ou un item mal formé garde son sujet. En dessous malgré tout, l'examen le dit
+  // (requested) et le job rembourse au prorata.
   const all: QcmItem[] = [];
   let pending = batches;
-  let extraBudget = batches.length;
+  let extraBudget = EXTRA_BATCHES * batches.length;
   for (let round = 0; pending.length; round++) {
-    const missing: { topic: QcmSlot; mold: MoldKind | null }[] = [];
+    const missing: { topic: QcmSlot; mold: MoldKind | null; rejected: boolean }[] = [];
     // Lots QCM menés en même temps (QCM_BATCH_CONCURRENCY, défaut 8) ; le limiteur global des appels
     // (LLM_MAX_CONCURRENCY) reste la borne commune avec les questions ouvertes.
     const width = batchConcurrency();
@@ -1319,52 +1359,42 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
         if (g.error) lastError = g.error;
         const bt = group[k];
         const filled = new Set(g.items.map((it, n) => it.slot ?? n));
-        bt.topics.forEach((topic, j) => { if (!filled.has(j)) missing.push({ topic, mold: bt.molds[j] ?? null }); });
+        bt.topics.forEach((topic, j) => { if (!filled.has(j)) missing.push({ topic, mold: bt.molds[j] ?? null, rejected: g.rejected.has(j) }); });
       });
       step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
     }
-    const stop = llmErrorCode(lastError);
     // completeJson a déjà essayé trois fois chaque lot illisible. Si aucun lot n'a produit le
     // moindre item et qu'une erreur LLM existe, répéter trois rondes identiques multiplie seulement
     // les appels (12 au banc) ; les pertes de qualité, elles, n'ont pas `g.error` et restent comblées.
-    if ((!all.length && lastError) || !missing.length || all.length >= count || round >= TOPUP_ROUNDS || extraBudget <= 0 || (stop && HARD_STOP_CODES.has(stop))) break;
+    if ((!all.length && lastError) || !missing.length || all.length >= count || round >= TOPUP_ROUNDS || extraBudget <= 0 || hardStop()) break;
+    // Sujets écartés → notions de réserve ; l'accent demandé par l'étudiant reste le sien.
+    const swappable = (m: (typeof missing)[number]) => m.rejected && m.topic.method !== FOCUS_METHOD;
+    const swaps = takeSpare(Math.min(missing.filter(swappable).length, extraBudget * BATCH));
+    let s = 0;
+    const slots = missing.map((m) => (swappable(m) && s < swaps.length ? { ...m, topic: swaps[s++] } : m));
     pending = [];
-    for (let i = 0; i < missing.length && pending.length < extraBudget; i += BATCH) {
-      const slice = missing.slice(i, i + BATCH);
+    for (let i = 0; i < slots.length && pending.length < extraBudget; i += BATCH) {
+      const slice = slots.slice(i, i + BATCH);
       pending.push({ topics: slice.map((m) => m.topic), molds: slice.map((m) => m.mold) });
     }
     extraBudget -= pending.length;
     progress.add("QCM", pending.length); // réessai ajouté : le temps restant peut remonter
-    step(`${count - all.length} QCM manquant(s) → ${pending.length} lot(s) de comblement`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
+    step(`${count - all.length} QCM manquant(s) → ${pending.length} lot(s) de comblement${swaps.length ? ` (${swaps.length} sujet(s) écarté(s) remplacé(s) par une notion de réserve)` : ""}`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
   }
   // count>0 mais 0 QCM produit = tous les lots ont échoué → erreur claire (sauf drill 0 QCM + ouvertes).
   // H — DOUBLONS À L'ÉCHELLE DE L'EXAMEN (mock 4 de CS-290 : deux QCM sur le paradoxe de Simpson,
   // deux sur la même logique OR) : un contrôle par le modèle, car deux libellés différents ne se
   // rapprochent pas mot à mot ; le second de chaque paire est remplacé par une notion de réserve.
-  // Une notion = une question tant que le programme a au moins autant de notions que l'examen a de
-  // questions ; sinon plusieurs questions par notion, sous des angles vraiment distincts. Les
-  // questions de l'accent demandé par l'étudiant partagent leur thème sans être des doublons.
-  const strict = notionCount >= count;
-  // Réserve : en mode strict, ni une reprise ni une autre facette d'une notion déjà donnée à
-  // l'examen ; à défaut, les supports du cours pas encore pris (ils ramènent d'autres passages).
-  // Au-delà, l'examen est dit incomplet et remboursé plutôt que de reposer une notion.
-  const fresh: QcmSlot[] = [
-    ...spareTopics.filter((t) => t.method !== REPEAT_METHOD && !used.has(t.label)),
-    ...(await courseMaterialTitles().catch(() => [] as string[])).filter((t) => !used.has(t)).map((label) => ({ label, method: null })),
-  ];
-  const pool: QcmSlot[] = strict ? fresh.filter((t, i) => fresh.findIndex((x) => x.label === t.label) === i) : spareTopics;
-  let nextSpare = 0;
   for (let round = 0; round <= DEDUP_ROUNDS && all.length >= 2; round++) {
     const { drop, notions, angles } = await duplicateItems(all, { strict, previous: recent.map((x) => x.stem) }).catch(() => ({ drop: [] as number[], notions: [] as string[], angles: [] as string[] }));
     if (!drop.length) break;
     const kept = all.filter((_, i) => !drop.includes(i));
     const keptIdx = all.map((_, i) => i).filter((i) => !drop.includes(i));
     all.splice(0, all.length, ...kept);
-    const spare = round < DEDUP_ROUNDS ? pool.slice(nextSpare, nextSpare + count - all.length) : [];
-    nextSpare += spare.length;
+    const spare = round < DEDUP_ROUNDS ? takeSpare(count - all.length) : [];
     if (!spare.length) {
-      // Dernier contrôle, ou réserve épuisée : retirés sans remplacement (l'examen le dit, le job rembourse).
-      step(`${drop.length} QCM en doublon retiré(s) (même notion qu'une autre question), sans remplacement`, 80);
+      // Dernier contrôle, ou réserve épuisée : le complément final (plus bas) reprend la main.
+      step(`${drop.length} QCM en doublon retiré(s) (même notion qu'une autre question), sans notion de réserve`, 80);
       break;
     }
     progress.add("QCM"); // un lot de remplacement : réessai ajouté
@@ -1378,6 +1408,44 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const got = await safeBatch({ topics: spare, molds: spare.map(() => null), guidance });
     if (got.error) lastError = got.error;
     all.push(...got.items.slice(0, count - all.length));
+  }
+  // COMPLÉMENT FINAL — encore en dessous du nombre demandé (réserve épuisée, doublons retirés,
+  // rejets répétés) : une ronde, dans ce qui reste du budget de lots. Les notions de réserve
+  // d'abord ; à défaut, les notions les moins posées, sous un angle VRAIMENT distinct : le nombre
+  // demandé est tenu plutôt que remboursé. Le contrôle des doublons repasse, sur les seules nouvelles.
+  const short = count - all.length;
+  if (short > 0 && all.length && extraBudget > 0 && !hardStop()) {
+    const slots = takeSpare(short);
+    const angle = slots.length < short;
+    const asked = new Map<string, number>();
+    for (const it of all) if (it.topic) asked.set(it.topic, (asked.get(it.topic) ?? 0) + 1);
+    const repeats = [...asked.entries()].sort((a, b) => a[1] - b[1]).map(([label]) => ({ label, method: REPEAT_METHOD }));
+    for (let i = 0; slots.length < short && repeats.length; i++) slots.push(repeats[i % repeats.length]);
+    const tested = [...new Set(all.map((it) => sanitizeCorpus(it.topic).slice(0, 80)).filter(Boolean))].join(" · ");
+    const guidance = angle
+      ? `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen : ${tested}. Une notion reprise doit l'être sous un angle VRAIMENT distinct (un autre fait, une autre condition, une autre étude), jamais la même question reformulée.`
+      : `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen — n'en reprends AUCUNE, même sous un autre angle : ${tested}.`;
+    const fill: Batch[] = [];
+    for (let i = 0; i < slots.length && fill.length < extraBudget; i += BATCH) {
+      const slice = slots.slice(i, i + BATCH);
+      fill.push({ topics: slice, molds: slice.map(() => null), guidance });
+    }
+    extraBudget -= fill.length;
+    progress.add("QCM", fill.length);
+    step(`${short} QCM manquant(s) → complément final, ${fill.length} lot(s)${angle ? " (notions reprises sous un autre angle)" : ""}`, 80);
+    const before = all.length;
+    for (const g of await Promise.all(fill.map(safeBatch))) {
+      if (g.error) lastError = g.error;
+      all.push(...g.items.slice(0, Math.max(0, count - all.length)));
+    }
+    if (all.length > before) {
+      const { drop } = await duplicateItems(all, { strict: strict && !angle, previous: recent.map((x) => x.stem) }).catch(() => ({ drop: [] as number[] }));
+      const late = new Set(drop.filter((i) => i >= before));
+      if (late.size) {
+        all.splice(0, all.length, ...all.filter((_, i) => !late.has(i)));
+        step(`${late.size} QCM du complément en doublon retiré(s)`, 80);
+      }
+    }
   }
   // Aucun appel en erreur mais tous les items écartés (mal formés) : c'est une réponse inutilisable.
   const cause = () => lastError ?? new LlmError("Toutes les questions reçues étaient mal formées.", "BAD_OUTPUT");

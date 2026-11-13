@@ -15,6 +15,7 @@ import { verifyAndHarden, type VerifyReport } from "@/lib/verify";
 import fs from "node:fs";
 import path from "node:path";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
+import { excludedSourceIds } from "@/lib/source-scope";
 
 const EXAM_DIR = () => examsDir();
 
@@ -47,14 +48,15 @@ function trunc(s: string, n: number) {
 /** Échantillon diversifié d'items du corpus pour un ou plusieurs types de source. */
 async function sampleByType(types: string[], perItem: number, maxItems: number): Promise<{ src: string; text: string }[]> {
   const ph = types.map(() => "?").join(",");
-  const rows = await q.all<{ src: string; text: string }>(
-    `SELECT s.title src, i.text text
+  const excluded = await excludedSourceIds();
+  const rows = (await q.all<{ sid: number; src: string; text: string }>(
+    `SELECT s.id sid, s.title src, i.text text
      FROM items i JOIN sources s ON s.id = i.source_id
      WHERE s.type IN (${ph}) AND length(i.text) > 120
      ORDER BY s.recency_weight DESC, RANDOM() LIMIT ?`,
     ...types,
     maxItems * 4
-  );
+  )).filter((r) => !excluded.has(Number(r.sid))); // hors programme, archives d'organisation : pas du contenu
   const out: { src: string; text: string }[] = [];
   const perSrc = new Map<string, number>();
   for (const r of rows) {
