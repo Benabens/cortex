@@ -225,6 +225,31 @@ test("un candidat résiduel refusé tôt redevient admissible après l'arrivée 
   assert.ok(state.pool.every((q) => !q.rejected), "un rejet hors cours ou à clé contestée n'entre jamais dans le pool");
 });
 
+test("le pool privilégie la couverture avant une seconde question du même thème", async () => {
+  const { updateVerifiedCandidates } = await import("../lib/qcm");
+  const candidate = (stem: string, topic: string, discrimination: number) => ({
+    ...item(1, stem), topic, verified: 1 as const, rejected: false,
+    discrimination, trivialDistractors: null,
+  });
+  const state = updateVerifiedCandidates([], [
+    candidate("alpha difficile", "chapitre alpha", 5),
+    candidate("alpha bis", "chapitre alpha", 5),
+    candidate("bêta", "chapitre bêta", 3),
+  ], 2);
+  assert.deepEqual(state.selected.map((q) => q.stem), ["alpha difficile", "bêta"]);
+});
+
+test("le correcteur interne cherche les mêmes distracteurs triviaux que le banc", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  await runWithCourse(id, () => generateQcmExam({ count: 1, openCount: 0 }));
+  const prompt = verifyPrompts.join("\n");
+  assert.match(prompt, /substitution d[’']étiquettes/i);
+  assert.match(prompt, /lecture directe (?:des|de) chiffres/i);
+  assert.match(prompt, /mêmes critères/i);
+});
+
 test("lot name_only avec un distracteur trivial : répare l'option sans reconcevoir la question", async () => {
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
