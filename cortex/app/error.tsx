@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { Wordmark } from "@/components/shell/Logo";
+import { captureClientError } from "@/lib/observability-browser";
 
 /**
  * Erreur de segment (route sous le layout racine), aux jetons de l'app : sombre
@@ -16,8 +17,9 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Journalise pour le suivi d'erreurs (futur branchement Sentry).
     console.error(error);
+    // Rattrapée par cette frontière, l'erreur n'atteint jamais window.onerror : on la signale ici.
+    captureClientError(error);
   }, [error]);
 
   return (

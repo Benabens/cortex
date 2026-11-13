@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import "./typography.css";
 import { THEME_STORAGE_KEY, LIGHT_QUERY, parseThemePref, resolveTheme } from "@/lib/ux/theme";
+import { captureClientError } from "@/lib/observability-browser";
 
 // Palette autonome des deux thèmes (le CSS global peut être la cause du crash). Rendue comme
 // enfant texte de <style> : aucun caractère que React échapperait (& < > " ').
@@ -25,6 +26,7 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error(error);
+    captureClientError(error);
   }, [error]);
 
   useEffect(() => {

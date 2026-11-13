@@ -1,3 +1,5 @@
+import type { Instrumentation } from "next";
+
 /**
  * ZÉRO JOB ZOMBIE, ZÉRO RUN PERDU au démarrage du serveur.
  *
@@ -103,3 +105,13 @@ export async function register() {
     console.error("[instrumentation] rappels de reconduction non démarrés :", (e as Error)?.message);
   }
 }
+
+/**
+ * Erreur NON gérée d'un rendu, d'une route ou d'une action serveur : Next la
+ * passe ici. Sans SENTRY_DSN, captureRequestError ne fait rien.
+ */
+export const onRequestError: Instrumentation.onRequestError = async (error, _request, context) => {
+  if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  const { captureRequestError } = await import("@/lib/observability");
+  captureRequestError(error, context);
+};

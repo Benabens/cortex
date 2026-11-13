@@ -30,6 +30,11 @@ export async function GET() {
   } catch { db = false; }
   const body = {
     status: db ? "ok" : "degraded",
+    // Commit servi et environnement Railway : le workflow post-deploy attend que
+    // la prod serve SON commit avant de la tester (et de la rétablir si le test
+    // casse). Posés par Railway à chaque déploiement ; null hors Railway.
+    commit: process.env.RAILWAY_GIT_COMMIT_SHA || null,
+    environment: process.env.RAILWAY_ENVIRONMENT_NAME || null,
     driver: q.dialect,
     checks: {
       db,
