@@ -3,6 +3,12 @@ import { CONSENT_PATH, CSP_CONSENT, GLOBAL_HEADERS_SOURCE, SECURITY_HEADERS } fr
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  experimental: {
+    // Un import de dossier envoie un seul fichier par requête. La borne Next
+    // doit dépasser la borne applicative (30 Mio) pour laisser la route rendre
+    // un 413 JSON explicite, sans troncature silencieuse par le proxy.
+    proxyClientMaxBodySize: "32mb",
+  },
   // better-sqlite3 est un module natif : ne pas le bundler côté serveur.
   // @electric-sql/pglite embarque des assets WASM que le bundler perd
   // (« /ROOT/…/pglite.data ») — requis externe pour le mode pglite:// sous

@@ -88,6 +88,16 @@ function schedule(key: string, w: Watch, ms: number): void {
   w.timer = deps.setTimer(() => { w.timer = null; void poll(key, w); }, ms);
 }
 
+function failWatch(key: string, w: Watch, message: string): void {
+  const [, idStr] = key.split("|");
+  const job: Job = {
+    id: Number(idStr), type: "unknown", status: "failed", progress: 0,
+    currentStep: null, resultPath: null, error: message,
+  };
+  w.last = job;
+  for (const listener of [...w.listeners]) listener(job);
+}
+
 async function poll(key: string, w: Watch): Promise<void> {
   if (!w.listeners.size || w.polling) return;
   const [course, idStr] = key.split("|");
@@ -104,11 +114,19 @@ async function poll(key: string, w: Watch): Promise<void> {
       return;
     }
     if (++w.failures < JOB_MAX_FAILURES) schedule(key, w, JOB_RETRY_MS);
+    else failWatch(key, w, "Traitement introuvable. Actualise la page avant de le relancer.");
   } catch (e) {
     // 404/403 : le job n'existe pas ou n'est pas le nôtre — inutile d'insister.
     const status = (e as { status?: number } | null)?.status;
     w.failures = status === 404 || status === 403 ? JOB_MAX_FAILURES : w.failures + 1;
     if (w.failures < JOB_MAX_FAILURES) schedule(key, w, JOB_RETRY_MS);
+    else failWatch(
+      key,
+      w,
+      status === 404 || status === 403
+        ? "Traitement introuvable. Actualise la page avant de le relancer."
+        : "Connexion perdue pendant le suivi du traitement. Actualise la page pour vérifier son état.",
+    );
   } finally {
     w.polling = false;
   }

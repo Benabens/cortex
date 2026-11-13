@@ -517,7 +517,7 @@ export function LegalLine({ legal, english, contact, className }: { legal: Billi
       {present.length > 0 && english && (
         <a href={english} hrefLang="en" lang="en" target="_blank" rel="noreferrer" className="underline-offset-2 hover:text-ink-2 hover:underline">English version</a>
       )}
-      {contact && <a href={`mailto:${contact}`} className="underline-offset-2 hover:text-ink-2 hover:underline">Contact : {contact}</a>}
+      {contact && <a href={`mailto:${contact}`} className="underline-offset-2 hover:text-ink-2 hover:underline">Contact</a>}
     </p>
   );
 }
