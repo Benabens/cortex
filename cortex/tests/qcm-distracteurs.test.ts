@@ -205,6 +205,15 @@ test("la tolérance globale garde les meilleurs QCM sans dépasser 10 % de distr
   assert.ok(trivial / distractors <= 0.1, `${trivial}/${distractors}`);
 });
 
+test("les moules mécaniques ne monopolisent pas un examen QCM", async () => {
+  const { capMechanicalMolds } = await import("../lib/qcm");
+  const molds = capMechanicalMolds([
+    "code_trace", "code_trace", "formula_computation", "code_trace", "formula_computation",
+    "applied_scenario", "statement_truefalse", "code_trace", "applied_scenario", "code_trace",
+  ]);
+  assert.ok(molds.filter((m) => m === "code_trace" || m === "formula_computation").length <= 3, molds.join(", "));
+});
+
 test("toutes les questions rejetées par les contrôles : l'échec le dit, sans parler de réponse illisible", async () => {
   contestKey = true;
   const error = await exam(await course(), 4).then(() => "", (e: Error) => e.message);
