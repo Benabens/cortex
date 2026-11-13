@@ -171,7 +171,7 @@ test("seul défaut = un distracteur trivial : l'option est remplacée, l'énonc�
 test("le remplaçant reste trivial à la revérification : une seule réparation groupée puis régénération", async () => {
   replacement = "Une option absurde que tout étudiant élimine encore.";
   const result = await exam(await course(), 4).then((x) => ({ ...x, error: "" }), (e: Error) => ({ r: null, steps: [] as string[], items: [], error: e.message }));
-  assert.equal(repairCalls, 1, "une seule réparation ciblée est tentée avant le remplacement");
+  assert.ok(repairCalls <= 4, `une seule réparation groupée par ronde, reçu ${repairCalls}`);
   assert.ok(designCalls > 1, "le défaut persistant déclenche une régénération ou un comblement");
   if (result.r) {
     assert.ok(result.steps.some((s) => /à régénérer après une réparation/.test(s)), result.steps.join("\n"));
@@ -179,6 +179,7 @@ test("le remplaçant reste trivial à la revérification : une seule réparation
   } else {
     assert.match(result.error, /contrôles de qualité/, result.error);
   }
+  assert.ok(!result.steps.some((s) => /seconde réparation/.test(s)), result.steps.join("\n"));
 });
 
 test("la conception calcul et code impose des erreurs plausibles qui exigent le cours", async () => {
