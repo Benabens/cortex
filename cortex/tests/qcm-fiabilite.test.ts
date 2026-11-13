@@ -212,6 +212,19 @@ test("lot valide sans rejet ni distracteur trivial : arrêt après la vérificat
   assert.equal(verifyPrompts.length, 1, "une seule vérification groupée suffit");
 });
 
+test("un candidat résiduel refusé tôt redevient admissible après l'arrivée de QCM propres", async () => {
+  const { updateVerifiedCandidates } = await import("../lib/qcm");
+  const candidate = (stem: string, trivial: number[], rejected = false) => ({
+    ...item(1, stem), verified: 1 as const, rejected, discrimination: 4,
+    trivialDistractors: trivial.length ? trivial : null,
+  });
+  let state = updateVerifiedCandidates([], [candidate("résiduel", [1])], 4);
+  assert.equal(state.selected.length, 0, "1 distracteur sur 3 dépasse provisoirement 10 %");
+  state = updateVerifiedCandidates(state.pool, [candidate("propre 1", []), candidate("propre 2", []), candidate("propre 3", []), candidate("rejeté", [], true)], 4);
+  assert.deepEqual(state.selected.map((q) => q.stem), ["propre 1", "propre 2", "propre 3", "résiduel"]);
+  assert.ok(state.pool.every((q) => !q.rejected), "un rejet hors cours ou à clé contestée n'entre jamais dans le pool");
+});
+
 test("lot name_only avec un distracteur trivial : répare l'option sans reconcevoir la question", async () => {
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
