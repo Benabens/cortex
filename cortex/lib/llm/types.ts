@@ -20,6 +20,12 @@ export type LlmImage = {
   mediaType: string;
   /** contenu encodé base64 (sans préfixe data:) */
   base64: string;
+  path?: never;
+} | {
+  /** Chemin absolu d'une image locale (provider codex-cli uniquement). */
+  path: string;
+  mediaType?: never;
+  base64?: never;
 };
 
 export type CompleteRequest = {

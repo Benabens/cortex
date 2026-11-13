@@ -111,12 +111,12 @@ jobs:
       # l'image) pour compiler les PDF.
       - name: Banc moteur (rejeu de synth-3p)
         env:
-          LLM_PROVIDER: claude-code
+          LLM_PROVIDER: codex-cli
           CORTEX_BENCH_HOME: ${{ runner.temp }}/bench
           CORTEX_BENCH_PG_URL: postgres://postgres@localhost:5432/postgres
         run: |
           curl -fsSL "https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.15.0/tectonic-0.15.0-x86_64-unknown-linux-musl.tar.gz" | sudo tar -xz -C /usr/local/bin tectonic
-          npm run bench -- run --case synth-3p --replay tests/fixtures/bench/synth-3p --baseline tests/fixtures/bench/synth-3p/metrics.json --strict
+          npm run bench -- run --case synth-3p --provider codex-cli --replay tests/fixtures/bench/synth-3p --baseline tests/fixtures/bench/synth-3p/metrics.json --strict
 
       # Cet invariant a besoin du corpus du cours de référence, qui n'est pas
       # versionné (les supports de cours appartiennent à leur établissement).

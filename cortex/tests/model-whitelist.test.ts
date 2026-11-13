@@ -35,6 +35,7 @@ test("mapModel : un id complet est refusé sur un fournisseur payant, les alias 
   assert.throws(() => mapModel("claude-opus-4-8" as never, "anthropic"), /refusé|non autorisé/i);
   assert.throws(() => mapModel("gpt-5" as never, "openai-compatible"), /refusé|non autorisé/i);
   assert.equal(mapModel("opus", "claude-code"), "opus", "le CLI local garde le passthrough des alias");
+  assert.equal(mapModel("opus", "codex-cli"), "gpt-5.6-sol");
   assert.equal(isLlmModel("sonnet"), true);
   assert.equal(isLlmModel("claude-sonnet-5"), false);
 });

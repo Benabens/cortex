@@ -5,18 +5,17 @@ Mesure la génération d'examens sur des cas fixes (un cours restauré + une dem
 ## Lancer
 
 ```sh
-LLM_PROVIDER=claude-code \
 CORTEX_BENCH_HOME=~/Projects/cortex/contenu-prive/bench \
 CORTEX_BENCH_PG_URL=postgres://cortex@127.0.0.1:55433/postgres \
 CORTEX_BENCH_CASES=~/Projects/cortex/contenu-prive/bench/cases.json \
-npm run bench -- run --case rs-qcm15
+npm run bench -- run --case rs-qcm15 --provider codex-cli
 ```
 
 - `list` : les cas. `run --case <id>` : un run complet (préparation ou instantané, génération, juge, métriques, seuils). Options : `--ref <dossier d'un run>` (compare le coût), `--prepare` (refait la préparation au lieu de l'instantané), `--keep` (garde la base), `--no-judge`, `--replay <dossier>` (rejoue des bandes, sans modèle).
 - `mark-ref --run <dossier>` : ce run devient la référence de son cas. `report [--out f.md]` : tableau référence → actuel de tous les cas.
 - Postgres local jetable : `LC_ALL=C initdb -D <dir> -U cortex --auth=trust --locale=C`, puis `port`, `listen_addresses = 'localhost'` et `unix_socket_directories = ''` dans `postgresql.conf`. Chaque run crée sa base et la supprime à la fin.
 
-**Jamais l'API payante** (décision du 04/11/2026) : le banc refuse de démarrer si `LLM_PROVIDER` n'est pas `claude-code` ou si `ANTHROPIC_API_KEY`, `LLM_API_KEY` ou `ANTHROPIC_AUTH_TOKEN` est chargée. Il refuse aussi une `DATABASE_URL` qui ne vise pas l'hôte local.
+**Jamais l'API payante** : le banc refuse de démarrer si le provider n'est pas `codex-cli` ou si une clé Anthropic, OpenAI, Codex ou générique est chargée. Il refuse aussi une `DATABASE_URL` qui ne vise pas l'hôte local. Les providers `claude-code`, `anthropic` et `openai-compatible` sont donc explicitement interdits pour les vrais runs.
 
 ## Cas
 
@@ -30,11 +29,11 @@ Les cas synthétiques (`lib/bench/cases.ts`, domaine inventé de `lib/bench/synt
 | Couverture par chapitre | plan du cours (à défaut : un chapitre par support hors annales, comme `lib/coverage`), chapitre donné par le juge | mesuré + juge |
 | Doublons, fidélité, distracteurs, hors cours | juge à l'aveugle (`lib/bench/judge`) ; code exécuté en bac à sable | juge |
 | Rendu | PDF énoncé et corrigé (pages, texte), page en ligne (`getQcmExam` / `getBlockExam`) | mesuré |
-| Durées, appels, réessais | journal du job, bande LLM, `llm_usage` | mesuré sur claude-code |
+| Durées, appels, réessais | journal du job, bande LLM, `llm_usage` | mesuré sur codex-cli, non représentatif de la prod |
 | Tokens d'entrée, cache de prompt, coût $ | taille des prompts (≈ 4 car./token), tarif API, cache = même système dans les 5 min | **estimé, non mesuré** |
 | UX | relevés toutes les 2 s : avancement et temps restant affichés | mesuré |
 
-Écarts connus entre providers : claude-code ignore la sortie structurée (`json`), donc plus de redemandes JSON (comptées à part) ; il est plus lent que l'API (lancement du CLI à chaque appel) ; il charge la configuration Claude Code de la machine. Les durées mesurées ici sont donc un majorant de la prod.
+Écarts connus entre providers : codex-cli utilise la sortie structurée quand un schéma est fourni, mais lance un processus local à chaque appel et s'exécute avec l'abonnement Codex. Ses durées et l'estimation de coût du rapport ne sont pas celles du provider Anthropic de production.
 
 ## Seuils (`lib/bench/thresholds.ts`)
 
