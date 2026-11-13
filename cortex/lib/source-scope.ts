@@ -71,13 +71,30 @@ export function materialLabel(title: string): string | null {
   return t;
 }
 
+/**
+ * Titre et début du premier item de chaque source (ou des sources `ids`). Le début est coupé ICI,
+ * pas en SQL : sur une base SQL_ASCII, `substr` coupe en octets, au milieu d'un « é », et le pilote
+ * rejette toute la requête (banc HUM-285 du 13/11 : aucune archive écartée). Base illisible → titres seuls.
+ */
+export async function sourceHeads(ids?: number[]): Promise<{ id: number; title: string; head: string }[]> {
+  const where = ids ? `WHERE s.id IN (${ids.map(() => "?").join(",")})` : "";
+  try {
+    const rows = await q.all<{ id: number | string; title: string | null; head: string | null }>(
+      `SELECT s.id, s.title, (SELECT i.text FROM items i WHERE i.source_id = s.id ORDER BY i.id LIMIT 1) head FROM sources s ${where}`,
+      ...(ids ?? []),
+    );
+    return rows.map((r) => ({ id: Number(r.id), title: r.title ?? "", head: (r.head ?? "").slice(0, 400) }));
+  } catch {
+    const rows = await q.all<{ id: number | string; title: string | null }>(`SELECT s.id, s.title FROM sources s ${where}`, ...(ids ?? []));
+    return rows.map((r) => ({ id: Number(r.id), title: r.title ?? "", head: "" }));
+  }
+}
+
 /** Identifiants des sources exclues de la matière (titre + début du premier item). Base illisible → aucune. */
 export async function excludedSourceIds(): Promise<Set<number>> {
   try {
-    const rows = await q.all<{ id: number | string; title: string | null; head: string | null }>(
-      `SELECT s.id, s.title, (SELECT substr(i.text, 1, 400) FROM items i WHERE i.source_id = s.id ORDER BY i.id LIMIT 1) head FROM sources s`,
-    );
-    return new Set(rows.filter((r) => isExcludedMaterial(r.title ?? "", r.head ?? "")).map((r) => Number(r.id)));
+    const rows = await sourceHeads();
+    return new Set(rows.filter((r) => isExcludedMaterial(r.title, r.head)).map((r) => r.id));
   } catch {
     return new Set();
   }

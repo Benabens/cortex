@@ -284,7 +284,9 @@ async function runCase(c: BenchCase): Promise<string> {
   const runDir = path.join(home, "runs", c.id, `${stamp}-${commit}`);
   fs.mkdirSync(runDir, { recursive: true });
   const db = `bench_${c.id.replace(/[^a-z0-9]/gi, "_")}_${Date.now()}`.toLowerCase();
-  await adminSql((sql) => sql.unsafe(`CREATE DATABASE "${db}"`));
+  // UTF8 comme la prod, quel que soit le cluster local (initdb en locale C = SQL_ASCII : `substr`
+  // y coupe en octets et le pilote rejette la ligne — banc HUM-285 du 13/11).
+  await adminSql((sql) => sql.unsafe(`CREATE DATABASE "${db}" ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE template0`));
   createdDb = db;
   const url = dbUrl(need("CORTEX_BENCH_PG_URL"), db);
   runEnv(path.join(runDir, "data"), url);
