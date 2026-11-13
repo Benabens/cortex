@@ -122,6 +122,8 @@ jobs:
         env:
           E2E_SMOKE_BASE_URL: ${{ env.PROD_URL }}
           E2E_EXPECTED_SHA: ${{ steps.target.outputs.sha }}
+          # Facultatif : avec lui, le smoke vérifie aussi base, moteur et LaTeX.
+          SMOKE_METRICS_TOKEN: ${{ secrets.METRICS_TOKEN }}
         run: npm run e2e:smoke
 
       # Rollback si le commit est en ligne mais casse, ou si la prod ne répond plus

@@ -13,14 +13,18 @@ const origin = new URL(base).origin;
 const expectedSha = process.env.E2E_EXPECTED_SHA;
 
 test("@smoke santé : base joignable, moteur prêt, commit attendu en ligne", async ({ request }) => {
-  const r = await request.get("/api/health");
+  // Le détail (db, moteur, LaTeX) n'est servi qu'avec METRICS_TOKEN ; sans lui, status + commit.
+  const token = process.env.SMOKE_METRICS_TOKEN;
+  const r = await request.get("/api/health", token ? { headers: { authorization: `Bearer ${token}` } } : undefined);
   expect(r.status()).toBe(200);
   const body = await r.json();
   expect(body.status).toBe("ok");
-  expect(body.checks.db).toBe(true);
-  expect(body.checks.llm, "moteur LLM configuré").toBe(true);
-  expect(body.checks.latex, "LaTeX présent dans l'image").toBe(true);
   if (expectedSha) expect(body.commit, "commit servi").toBe(expectedSha);
+  if (token) {
+    expect(body.checks.db).toBe(true);
+    expect(body.checks.llm, "moteur LLM configuré").toBe(true);
+    expect(body.checks.latex, "LaTeX présent dans l'image").toBe(true);
+  }
 });
 
 test("@smoke visiteur anonyme : la racine mène à /login, qui s'affiche sans erreur JavaScript", async ({ page }) => {
