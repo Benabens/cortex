@@ -7,7 +7,7 @@ import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseTerms, coursePassages } from "@/lib/course-grounding";
 import { secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
 import { assignChapters, spreadOverChapters, variants } from "@/lib/coverage";
-import { normalize } from "@/lib/text";
+import { normalize, tokenize } from "@/lib/text";
 import { courseRefImages } from "@/lib/course-vision";
 import type { ExamQuestion, StepCb } from "@/lib/exam";
 import { getFormatProfile } from "@/lib/format";
@@ -684,6 +684,35 @@ export async function generateQcmBatch(
 /** Réponses du juge qui ne signalent rien. */
 export const NO_FLAG = /^(?:|[-—.…]+|none\.?|no|nothing|n\/?a|null|aucune?\.?|rien\.?|néant|non|ras|ok)$/i;
 
+const PROOF_STOP_WORDS = new Set([
+  "avec", "dans", "des", "elle", "elles", "entre", "est", "les", "leur", "leurs", "mais", "par", "pas", "plus", "pour", "que", "qui", "sans", "selon", "son", "sont", "sur", "une",
+  "and", "are", "for", "from", "into", "that", "the", "their", "this", "was", "were", "with",
+]);
+
+/**
+ * Une preuve peut être reformulée par le concepteur, coupée sur plusieurs lignes par un PDF ou
+ * contenir une notation LaTeX différemment échappée. Les nombres doivent tous rester présents et
+ * au moins la moitié des termes informatifs doit se retrouver dans les passages du cours.
+ */
+function sourceFactSupported(sourceFact: string, passages: string): boolean {
+  const compact = (s: string) => normalize(s)
+    .replace(/\\(?:mathrm|text|operatorname)\s*\{([^}]*)\}/g, "$1")
+    .replace(/([\p{L}\p{N}])-\s*\n\s*([\p{L}\p{N}])/gu, "$1$2")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+  const source = compact(sourceFact);
+  const course = compact(passages);
+  if (source.length < 20) return false;
+  if (course.includes(source)) return true;
+  const wanted = [...new Set(tokenize(source, 2).filter((t) => !PROOF_STOP_WORDS.has(t)))];
+  if (wanted.length < 4) return false;
+  const have = new Set(tokenize(course, 2));
+  const numbers = wanted.filter((t) => /^\d/.test(t));
+  if (numbers.some((t) => !have.has(t))) return false;
+  const overlap = wanted.filter((t) => have.has(t)).length;
+  return overlap >= 4 && overlap / wanted.length >= 0.5;
+}
+
 const VERIFY_SCHEMA = {
   type: "object",
   properties: {
@@ -860,14 +889,13 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   const pending = appeals.filter((a) => !a.q.rejected);
   if (pending.length) {
     const verdicts = await secondLookOffCourse(pending.map((a) => a.flag));
-    const courseEvidence = normalize(passages.map((p) => p.text).join("\n"));
+    const courseEvidence = passages.map((p) => p.text).join("\n");
     pending.forEach((a, i) => {
       const confirmed = verdicts[i];
       // Le fait source est désormais une citation verbatim obligatoire. S'il est effectivement
       // retrouvé dans les extraits et que le correcteur a résolu la même clé, cette preuve
       // déterministe prime sur un second regard probabiliste trop sévère (banc RS : 4/4 faux rejets).
-      const source = normalize(a.q.sourceFact ?? "");
-      const groundedKey = source.length >= 20 && courseEvidence.includes(source);
+      const groundedKey = sourceFactSupported(a.q.sourceFact ?? "", courseEvidence);
       if (confirmed && !NO_FLAG.test(confirmed) && !groundedKey) reject(a.q, `hors cours : ${confirmed.slice(0, 240)}`, offCourseAdvice);
       else step(`QCM gardé — jugé hors cours sur les extraits, mais trouvé dans le cours (${a.flag.reason.slice(0, 100)})`, 70);
     });

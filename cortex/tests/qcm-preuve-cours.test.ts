@@ -200,6 +200,23 @@ test("un second regard trop sévère ne rejette pas une clé établie par une ci
   assert.equal(designCalls, 1);
 });
 
+test("une preuve paraphrasée avec les mêmes faits, nombres et notation reste fondée sur le cours", async () => {
+  const id = await course();
+  design = (n, call) => Array.from({ length: n }, (_, i) => ({
+    ...svensonItem(call * 10 + i),
+    source_fact: "En 1981, Svenson observe que 93% des automobilistes américains se jugent meilleurs conducteurs que la moyenne.",
+  }));
+  flag = (block) => (/Svenson/.test(block) ? { off: "La formulation exacte n'apparaît pas dans les extraits.", terms: ["Svenson 1981"] } : null);
+  secondLook = (prompt) => {
+    const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
+    return blocks.map((b) => ({ index: Number(/^Q(\d+)\./.exec(b)![1]), off_course: "La phrase n'est pas une citation mot pour mot." }));
+  };
+  const { r, steps } = await exam(id, 2);
+  assert.equal(r.count, 2);
+  assert.ok(!steps.some((s) => /QCM rejeté/.test(s)), steps.filter((s) => /rejeté/.test(s)).join("\n"));
+  assert.equal(designCalls, 1, "la paraphrase ne provoque aucun remplacement");
+});
+
 test("vrai hors-cours (une notion que le cours ne présente pas) : confirmé par le second regard, rejeté et remplacé", async () => {
   const id = await course();
   design = (n, call) => Array.from({ length: n }, (_, i) => (call === 1 && i === 0 ? { ...svensonItem(0, "Le biais de négativité pousse les conducteurs à sous-estimer leur habileté."), source_fact: "Le biais de négativité détermine l'auto-évaluation des conducteurs." } : svensonItem(call * 10 + i)));
