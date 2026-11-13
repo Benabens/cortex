@@ -212,6 +212,23 @@ test("lot valide sans rejet ni distracteur trivial : arrêt après la vérificat
   assert.equal(verifyPrompts.length, 1, "une seule vérification groupée suffit");
 });
 
+test("lot name_only avec un distracteur trivial : répare l'option sans reconcevoir la question", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  judgeWeak = true;
+  design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => {
+    const q = item(i);
+    q.options[1] = "Une TypeError est levée avant tout regroupement.";
+    return q;
+  }) });
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
+  assert.equal(r.count, 4);
+  assert.equal(designCalls, 1, "l'énoncé, la clé et la preuve sont conservés");
+  assert.equal(repairPrompts.length, 1, "les seules mauvaises options sont réparées en lot");
+  assert.equal(verifyPrompts.length, 2, "le lot réparé est revérifié une fois");
+});
+
 test("le modèle ne rend jamais assez de QCM : comblement borné, et l'examen dit « n sur 7 »", async () => {
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");

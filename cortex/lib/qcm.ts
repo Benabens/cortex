@@ -1195,7 +1195,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       .filter((w): w is { it: QcmItem; i: number; why: string } => !!w.why);
     if (!all.length) return items;
     // Seuls des distracteurs triviaux : on les remplace (énoncé et clé gardés) ; le reste est régénéré.
-    const fixable = all.filter((w) => onlyTrivialDistractors(w.it));
+    const fixable = all.filter((w) => w.it.verified === 1 && !w.it.rejected && !!w.it.trivialDistractors?.length);
     const weak = all.filter((w) => !fixable.includes(w));
     const repaired = fixable.length
       ? replaceTrivialDistractors(fixable.map((w) => w.it), step, shared.language).catch((e) => {
@@ -1219,7 +1219,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       const n = fixed[k];
       // Rendu tel quel (remplacement échoué) : l'item d'origine suit la règle commune.
       if (!n || n === w.it || n.verified !== 1 || n.rejected) return;
-      if (!weaknessOf(n)) { out[w.i] = { ...n, slot: w.it.slot }; return; }
+      if (!n.rejected && !n.trivialDistractors?.length) { out[w.i] = { ...n, slot: w.it.slot }; return; }
       if (onlyTrivialDistractors(n)) step(`QCM à régénérer après deux réparations : un distracteur reste éliminable sans le cours`, 0);
     });
     const stubborn = fixable.map((w, k) => ({ w, n: fixed[k] })).filter(({ n }) => n?.verified === 1 && onlyTrivialDistractors(n));
