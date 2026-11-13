@@ -73,7 +73,7 @@ test("@principal importe un dossier de 60 Mo par fichiers bornés et signale un 
     const folder = page.getByLabel("Dossier de cours à importer");
     await page.route("**/api/sources/import?**", async (route) => {
       if (new URL(route.request().url()).searchParams.get("action") === "finish") {
-        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
       }
       await route.continue();
     });
