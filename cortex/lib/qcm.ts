@@ -1388,6 +1388,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   ];
   const pool: QcmSlot[] = strict ? fresh.filter((t, i) => fresh.findIndex((x) => x.label === t.label) === i) : spareTopics;
   let nextSpare = 0;
+  const acquiredBeforeDedup = all.slice();
   // Une passe de remplacement peut elle-même perdre des items aux contrôles qualité. Il faut alors
   // recombler même si l'audit suivant ne voit plus de doublon, puis auditer ce nouveau lot. Le budget
   // reste borné par la taille de l'examen et par la réserve de notions.
@@ -1424,6 +1425,19 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const got = await safeBatch({ topics: spare, molds: spare.map(() => null), guidance });
     if (got.error) lastError = got.error;
     all.push(...got.items.slice(0, count - all.length));
+  }
+  // La diversité ne vaut jamais des questions absentes : si la réserve ou les remplacements
+  // s'épuisent, on rétablit juste assez de questions acquises avant l'audit final. Elles restent
+  // valides et vérifiées ; un éventuel doublon est préférable à un remboursement subi.
+  if (all.length < acquiredBeforeDedup.length) {
+    const present = new Set(all.map((it) => it.stem));
+    for (const it of acquiredBeforeDedup) {
+      if (all.length >= acquiredBeforeDedup.length) break;
+      if (present.has(it.stem)) continue;
+      all.push(it);
+      present.add(it.stem);
+    }
+    step(`Audit des doublons : ${all.length}/${acquiredBeforeDedup.length} QCM acquis conservés`, 80);
   }
   // Aucun appel en erreur mais tous les items écartés (mal formés) : c'est une réponse inutilisable.
   const cause = () => lastError ?? new LlmError("Toutes les questions reçues étaient mal formées.", "BAD_OUTPUT");
