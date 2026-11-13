@@ -97,6 +97,31 @@ test("@principal importe un dossier de 60 Mo par fichiers bornés et signale un 
   }
 });
 
+test("annales de plus de 10 Mo puis de plus de 32 Mo en un envoi : passent le proxy sans troncature", async ({ page }) => {
+  // Prod, 13/11/2026 : « Request body exceeded 10MB » puis 400 au bout de 30 s. Le
+  // proxy tronquait le corps sous le plafond de la route (annales : 64 Mio).
+  const annale = (name: string, mb: number) => ({
+    name, mimeType: "text/plain",
+    buffer: Buffer.alloc(mb * 1024 * 1024, "Annale intégrales E2E, exercice 1. "),
+  });
+  await loginPersona(page, "owner");
+  await page.goto("/cours/nouveau");
+  await page.getByRole("textbox").first().fill(`Annales lourdes E2E ${Date.now()}`);
+  await page.getByRole("button", { name: "Créer le cours" }).click();
+  await expect(page).toHaveURL(/\/sources/);
+  const drop = page.locator('input[type="file"]').first();
+
+  const single = page.waitForResponse((r) => r.url().includes("/api/refs/upload"));
+  await drop.setInputFiles([annale("annale-12mo.txt", 12)]);
+  expect((await single).status()).toBe(200);
+  await expect(page.getByText("1 fichier ingéré.")).toBeVisible({ timeout: 60_000 });
+
+  const pair = page.waitForResponse((r) => r.url().includes("/api/refs/upload"));
+  await drop.setInputFiles([annale("annale-2024.txt", 20), annale("annale-2025.txt", 20)]);
+  expect((await pair).status()).toBe(200);
+  await expect(page.getByText("2 fichiers ingérés.")).toBeVisible({ timeout: 60_000 });
+});
+
 test("nouveau compte à 0 crédit : import et consultation gratuits, préparation et génération paywallées", async ({ page }) => {
   await loginPersona(page, `nocredit-${Date.now()}`);
   const normal = await api<{ quotas: { gen: number | null }; balance: number }>(page, "/api/billing");
