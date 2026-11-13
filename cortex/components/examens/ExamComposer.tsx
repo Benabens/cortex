@@ -9,6 +9,7 @@ import { WeightBar } from "@/components/viz/WeightBar";
 import { apiPost, useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@/lib/ux/api";
 import type { PlanExam, PlanQcm } from "@/lib/ux/exams";
 import { cn } from "@/lib/ux/cn";
+import { PaywallNotice } from "@/components/billing/PaywallNotice";
 
 const V = "var(--color-accent)";
 const C = "var(--color-cyan)";
@@ -35,7 +36,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
 
   const [jobId, setJobId] = useState<number | null>(null);
   const [launching, setLaunching] = useState(false);
-  const [genError, setGenError] = useState<{ message: string; command?: string } | null>(null);
+  const [genError, setGenError] = useState<{ message: string; command?: string; paywall?: boolean } | null>(null);
   const [doneMsg, setDoneMsg] = useState<string | null>(null);
   const job = useJob(jobId);
   const notified = useRef(false);
@@ -100,6 +101,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
       const err = e as ApiError & { command?: string };
       setGenError({
         message: err.status === 503 ? `Le moteur LLM est injoignable : ${err.message}` : err.message || "Impossible de lancer la génération.",
+        paywall: err.status === 402,
       });
     } finally {
       setLaunching(false);
@@ -216,6 +218,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
             </span>
           </div>
         )}
+        {genError?.paywall && <div className="mt-3"><PaywallNotice credits={isQcm ? 1 : 2} /></div>}
       </Panel>
 
       {/* Format détecté (réel) */}
