@@ -327,10 +327,12 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
    `[prod-boot] volume initialisé` → `migrations` → `next start` (2-3 min la
    première fois).
 2. Checklist post-déploiement, depuis l'URL publique :
-   - [ ] `/api/health` → `{"status":"ok"…}` — et regarde `checks.sandbox` :
-         s'il est `false`, les figures matplotlib et la vérification de code
-         seront désactivées (les examens restent produits, sans figures
-         générées) ;
+   - [ ] `/api/health` → `{"status":"ok"}` (réponse publique, rien d'autre) ;
+         le détail se lit avec le jeton des métriques :
+         `curl -H "Authorization: Bearer $METRICS_TOKEN" …/api/health`. Regarde
+         `checks.sandbox` : s'il est `false`, les figures matplotlib et la
+         vérification de code seront désactivées (les examens restent produits,
+         sans figures générées) ;
    - [ ] `/` en navigation privée → redirection vers `/login` ;
    - [ ] **Se connecter** avec ton compte Google → session ;
    - [ ] en lancement fermé (`INVITE_ONLY=1`) seulement : un compte NON invité
@@ -568,7 +570,7 @@ Rien n'est restauré. Code de sortie ≠ 0 = sauvegarde inutilisable.
   désactivée** en production (vérification de programmes, sympy, figures
   matplotlib) et ces voies répondent `not_applicable` ; les items à figures
   sont écartés proprement (jamais de PDF cassé). `/api/health` l'affiche
-  (`checks.sandbox: false`, `verification.mode: "disabled"`). Rouvrir
+  avec `METRICS_TOKEN` (`checks.sandbox: false`, `verification.mode: "disabled"`). Rouvrir
   l'exécution demande un exécuteur séparé (conteneur dédié, gVisor, e2b).
 - Génération d'un examen complet : **10-20 min** (multi-passes + vérification)
   — c'est le prix de la qualité ; l'UI suit le job en direct.
