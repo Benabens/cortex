@@ -255,7 +255,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
         </div>
         <div className="flex flex-wrap justify-center gap-1.5">
           {["PDF", "HTML", "TXT", "MD", "ZIP"].map((f) => (
-            <span key={f} className="rounded-md border border-line bg-surface-1/60 px-2 py-0.5 font-mono text-xs text-ink-3">{f}</span>
+            <span key={f} className="rounded-md border border-line bg-surface-1/60 px-2 py-0.5 font-data text-xs text-ink-3">{f}</span>
           ))}
         </div>
       </label>

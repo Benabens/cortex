@@ -135,7 +135,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
                       {f.year ? <span className="ml-1.5 text-ink-3">· {f.year}</span> : null}
                     </div>
                     <div className="text-[0.72rem] text-ink-4">
-                      <span className="font-mono">{ext}</span>
+                      <span className="font-data">{ext}</span>
                     </div>
                   </div>
 
@@ -188,7 +188,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
                       {s.year ? <span className="ml-1.5 text-ink-3">· {s.year}</span> : null}
                     </div>
                     <div className="text-[0.72rem] text-ink-4">
-                      <span className="font-mono">{ext}</span>
+                      <span className="font-data">{ext}</span>
                     </div>
                   </div>
                   {s.href && <SeeLink href={s.href} label={s.title} />}

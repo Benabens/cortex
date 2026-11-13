@@ -16,7 +16,7 @@ export function CourseLine({
 }) {
   const exam = examLine(countdown);
   return (
-    <p className="flex flex-wrap items-center gap-x-[1ch] font-mono text-[0.78rem] font-medium leading-[1.4] tracking-[0.01em] text-ink-3">
+    <p className="flex flex-wrap items-center gap-x-[1ch] text-[0.78rem] font-medium leading-[1.4] text-ink-3">
       {code && (
         <>
           <span>{code}</span>
