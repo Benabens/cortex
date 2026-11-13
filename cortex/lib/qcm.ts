@@ -397,6 +397,22 @@ export function shuffleQcmOptions<T extends { options: string[]; correct: number
 
 const seedOf = (s: string) => [...s].reduce((h, ch) => (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0, 7);
 
+/** Énoncé qui ne demande que d'associer un cas à une étiquette de cours. */
+export function labelClassificationRisk(stem: string): boolean {
+  const s = normalize(stem);
+  return /\b(which|what|quel(?:le)?)\b/.test(s)
+    && /\b(analysis|assessment|diagnosis|entry|analyse|evaluation|diagnostic|entree)\b/.test(s)
+    && /\b(identif|describ|classif|decrit|qualif|correspond|best|mieux|most accurately|plus precisement)\w*/.test(s);
+}
+
+/** Lecture de sortie où l'énoncé nomme déjà les deux valeurs à recopier. */
+export function directReadingRisk(stem: string): boolean {
+  const s = normalize(stem);
+  return /\b(which|what|quel(?:le)?)\b/.test(s)
+    && /\b(pair|couple)\b/.test(s)
+    && /\b(row order|ordre des lignes|median|mediane|output|sortie|reindex)\b/.test(s);
+}
+
 /** Pourquoi un QCM vérifié est trop faible pour être gardé tel quel, ou null. */
 function weaknessOf(it: QcmItem): string | null {
   if (it.verified === 0) return it.judgeIssue ?? "clé non confirmée à la vérification à l'aveugle";
@@ -835,6 +851,8 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   // option par sa position ou sa lettre est fausse dès que les options sont mélangées.
   for (const q of items) {
     if (citesOptionLabel(q.explanation ?? "", q.options.length)) reject(q, "explication qui désigne une option par sa position ou sa lettre", "désigne chaque option par son contenu dans l'explication, jamais par son rang (« la première ») ni sa lettre");
+    else if (labelClassificationRisk(q.stem)) reject(q, "classification d'étiquettes réussie sans raisonnement du cours", "demande un calcul, un contre-factuel ou une application en plusieurs étapes ; pas seulement le nom de la catégorie");
+    else if (directReadingRisk(q.stem)) reject(q, "lecture directe de valeurs déjà désignées dans l'énoncé", "demande une transformation ou une interprétation qui exige la méthode du cours");
   }
   // Le correcteur ne voit que les questions encore en lice, sous leur numéro dans le lot.
   const judged = items.filter((q) => !q.rejected);
