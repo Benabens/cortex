@@ -30,7 +30,10 @@ test("jeton en Authorization: Bearer → accepté ; faux jeton (même longueur o
 
 test("la comparaison passe par timingSafeEqual", async () => {
   const fs = await import("node:fs");
-  const src = fs.readFileSync(new URL("../app/api/metrics/route.ts", import.meta.url), "utf8");
+  const src = fs.readFileSync(new URL("../lib/metrics-token.ts", import.meta.url), "utf8");
   assert.match(src, /timingSafeEqual/);
-  assert.ok(!/searchParams\.get\("token"\)/.test(src), "le jeton est encore lu en query string");
+  for (const file of ["../app/api/metrics/route.ts", "../app/api/health/route.ts", "../lib/metrics-token.ts"]) {
+    const route = fs.readFileSync(new URL(file, import.meta.url), "utf8");
+    assert.ok(!/searchParams\.get\("token"\)/.test(route), `${file} : le jeton est encore lu en query string`);
+  }
 });

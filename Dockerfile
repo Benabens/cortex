@@ -133,12 +133,12 @@ ENV NODE_ENV=production \
 # les examens perdent leurs figures matplotlib et la vérification de code. Un
 # `unshare -rn` peut être bloqué par la politique seccomp de l'hôte : on le
 # teste ici pour que l'écart soit visible au build, pas découvert en prod.
-# (Non bloquant : l'image reste utilisable, /api/health signale « sandbox ».)
+# (Non bloquant : l'image reste utilisable, /api/health signale « sandbox » avec METRICS_TOKEN.)
 RUN if unshare -rn true 2>/dev/null; then \
       echo "✓ sandbox : unshare -rn opérationnel"; \
     else \
       echo "⚠ AVERTISSEMENT : unshare -rn indisponible au BUILD (normal chez certains builders)."; \
-      echo "  Vérifie /api/health (champ sandbox) après le déploiement : si false,"; \
+      echo "  Vérifie /api/health avec METRICS_TOKEN (champ sandbox) : si false,"; \
       echo "  les figures matplotlib et la vérif de code seront désactivées."; \
     fi
 
