@@ -424,7 +424,7 @@ function onlyTrivialDistractors(it: QcmItem): boolean {
  * imparfaite peut ensuite éviter un remboursement, sans que plusieurs lots dépassent ensemble
  * le budget de l'examen.
  */
-export function selectWithinTrivialBudget<T extends Pick<QcmItem, "options" | "correct" | "trivialDistractors" | "discrimination">>(current: T[], candidates: T[], limit: number): T[] {
+export function selectWithinTrivialBudget<T extends Pick<QcmItem, "options" | "correct" | "trivialDistractors" | "discrimination"> & { topic?: string }>(current: T[], candidates: T[], limit: number): T[] {
   const out = current.slice(0, limit);
   let distractors = out.reduce((n, q) => n + Math.max(0, q.options.length - q.correct.length), 0);
   let trivial = out.reduce((n, q) => n + (q.trivialDistractors?.length ?? 0), 0);
@@ -432,20 +432,36 @@ export function selectWithinTrivialBudget<T extends Pick<QcmItem, "options" | "c
     (a.q.trivialDistractors?.length ?? 0) - (b.q.trivialDistractors?.length ?? 0)
       || (b.q.discrimination ?? 0) - (a.q.discrimination ?? 0)
       || a.i - b.i);
-  for (const { q } of ranked) {
-    if (out.length >= limit) break;
+  const append = (q: T) => {
+    if (out.length >= limit) return;
     const nextDistractors = distractors + Math.max(0, q.options.length - q.correct.length);
     const nextTrivial = trivial + (q.trivialDistractors?.length ?? 0);
-    if (nextDistractors > 0 && nextTrivial / nextDistractors > 0.1) continue;
+    if (nextDistractors > 0 && nextTrivial / nextDistractors > 0.1) return;
     out.push(q);
     distractors = nextDistractors;
     trivial = nextTrivial;
+  };
+  // Une question un peu moins discriminante sur un chapitre encore absent vaut mieux qu'une
+  // seconde question propre sur le même thème. Le second passage remplit ensuite les places.
+  const covered = new Set(out.map((q) => normalize(q.topic ?? "")).filter(Boolean));
+  for (const { q } of ranked) {
+    if (out.length >= limit) break;
+    const topic = normalize(q.topic ?? "");
+    if (!topic || covered.has(topic)) continue;
+    const before = out.length;
+    append(q);
+    if (out.length > before) covered.add(topic);
+  }
+  for (const { q } of ranked) {
+    if (out.length >= limit) break;
+    if (out.includes(q)) continue;
+    append(q);
   }
   return out;
 }
 
 /** Pool cumulatif : un candidat non sélectionné reste disponible pour les rondes suivantes. */
-export function updateVerifiedCandidates<T extends Pick<QcmItem, "stem" | "options" | "correct" | "trivialDistractors" | "discrimination" | "verified" | "rejected">>(pool: T[], incoming: T[], limit: number): { pool: T[]; selected: T[] } {
+export function updateVerifiedCandidates<T extends Pick<QcmItem, "stem" | "options" | "correct" | "trivialDistractors" | "discrimination" | "verified"> & { topic?: string; rejected?: unknown }>(pool: T[], incoming: T[], limit: number): { pool: T[]; selected: T[] } {
   const byStem = new Map(pool.filter((q) => q.verified === 1 && !q.rejected).map((q) => [q.stem, q]));
   for (const q of incoming) {
     if (q.verified !== 1 || q.rejected) continue;
@@ -489,7 +505,7 @@ async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, la
     prompt: [
       `Tu es l'équipe enseignante du cours. Dans chacun de ces QCM, les options marquées « À REMPLACER » se devinent fausses sans connaître le cours. Écris pour chacune UN nouveau distracteur, sans toucher à l'énoncé, à la bonne réponse ni aux autres options.`,
       ...DISTRACTOR_TAXONOMY,
-      `RÈGLES : chaque nouveau distracteur s'appuie sur une notion, une définition, une condition ou un résultat VOISIN présent dans les extraits du cours ci-dessous (procédés de la taxonomie) ; il est FAUX selon le cours mais paraît juste à un étudiant qui connaît le thème sans le détail ; même registre, même structure et longueur comparable (±30 %) que la bonne réponse ; il ne dit jamais pourquoi il est faux ; aucun marqueur d'absolu ; il ne répète aucune autre option. Réécris aussi l'explication de la clé pour qu'elle couvre les options finales, en désignant les options par leur CONTENU, jamais par leur lettre ni leur rang. Tout en ${lang}.`,
+      `RÈGLES : chaque nouveau distracteur s'appuie sur une notion, une définition, une condition ou un résultat VOISIN présent dans les extraits du cours ci-dessous (procédés de la taxonomie) ; il est FAUX selon le cours mais paraît juste à un étudiant qui connaît le thème sans le détail ; il applique les MÊMES critères que la bonne réponse et se trompe sur un détail du cours. Interdits : simple substitution d'étiquette manifestement incompatible, lecture directe de chiffres, contradiction avec un critère déjà donné dans l'énoncé. Même registre, même structure et longueur comparable (±30 %) que la bonne réponse ; il ne dit jamais pourquoi il est faux ; aucun marqueur d'absolu ; il ne répète aucune autre option. Réécris aussi l'explication de la clé pour qu'elle couvre les options finales, en désignant les options par leur CONTENU, jamais par leur lettre ni leur rang. Tout en ${lang}.`,
       DATA_RULE,
       passages.length ? dataBlock("EXTRAITS DU COURS", passages) : "",
       "",
@@ -530,6 +546,7 @@ const ARCHITECT_QCM_RULES = [
   `RÈGLES D'ARCHITECTE QCM (impératives) :`,
   `  - Chaque DISTRACTEUR cible une IDÉE FAUSSE réelle et précise (une mauvaise intuition courante), JAMAIS du remplissage ni de l'absurde.`,
   `  - AUCUN indice qui trahit : la bonne option n'est ni plus longue ni plus détaillée ; pas de « toutes les réponses ci-dessus » ; cohérence grammaticale stem↔options ; options de longueur comparable ; pas de négations piégeuses gratuites.`,
+  `  - INTERDIT : une clé qui récite la définition tandis que les distracteurs ne font que substituer des étiquettes manifestement incompatibles ; une lecture directe de chiffres ; des options réfutables par un critère déjà écrit dans l'énoncé. Chaque distracteur doit être une erreur plausible qui applique les MÊMES critères que la clé mais se trompe sur un détail du cours.`,
   `  - Teste la COMPRÉHENSION / le raisonnement, pas la récitation d'une définition.`,
   `  - Calibre la difficulté sur les VRAIS examens du cours (regarde les pages fournies).`,
   COURSE_TERMS_RULE,
@@ -830,7 +847,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     `Tu es un correcteur rigoureux du cours. Pour CHAQUE QCM fourni, RÉSOUS-LE toi-même de zéro (sans clé fournie) et donne la/les bonne(s) réponse(s) par INDEX.`,
     `Quand des extraits du cours sont fournis, résous et juge avec LEURS DÉFINITIONS, jamais avec celles d'une autre source. course_terms : les notions dont dépend la bonne réponse, écrites comme dans le cours. off_course : une notion ou un fait dont DÉPEND la bonne réponse ou l'explication, absent des extraits ou que le cours définit autrement (vide si les extraits permettent de résoudre, même avec un synonyme usuel de la matière) ; un distracteur qui n'est qu'une affirmation fausse (résultat inversé, condition changée) n'est pas hors cours, c'est son rôle. Les extraits ne couvrent pas tout le cours : nomme dans off_course_terms ce que tu dis absent, on le cherchera dans tout le cours.`,
     `DÉFINITIONS (definition_mismatch) : compare chaque définition que la question emploie ou sous-entend à celle des extraits. Une définition plus étroite (une condition ajoutée, « seulement si… »), plus large (une condition oubliée) que celle du cours, ou deux notions voisines confondues rendent la question fausse, même si sa clé est cohérente avec sa propre définition.`,
-    `Signale si : la question est ambiguë (2 réponses défendables), ou une mauvaise option s'élimine sans connaître le cours — absurdité, hors sujet, marqueur absolu, grammaire, longueur, calcul élémentaire manifestement faux, ou contradiction avec un critère déjà donné dans l'énoncé. Dans ce dernier cas, ajoute son index à trivial_distractors, même si elle illustre une erreur fréquente.`,
+    `Signale si : la question est ambiguë (2 réponses défendables), ou une mauvaise option s'élimine sans connaître le cours — absurdité, hors sujet, marqueur absolu, grammaire, longueur, calcul élémentaire manifestement faux, ou contradiction avec un critère déjà donné dans l'énoncé. Compte aussi comme triviaux : une substitution d'étiquettes proches mais manifestement incompatibles quand la clé récite la définition ; la lecture directe des chiffres fournis sans calcul ni interprétation ; une option qui n'applique pas les mêmes critères que la clé. Des distracteurs plausibles doivent partager les mêmes critères et ne différer que par un détail qu'il faut connaître du cours. Ajoute chaque index à trivial_distractors, même si l'option illustre une erreur fréquente.`,
     `off_matter : ce que teste une question qui porte sur les modalités d'examen (format, barème, grille ou critères d'évaluation, consignes), sur la forme d'un rendu (poster, essai, bibliographie) ou sur l'organisation du cours (plan, ordre des chapitres) au lieu de sa matière (vide sinon).`,
     `Note aussi son POUVOIR DISCRIMINANT (discrimination, 1 à 5) : mets-toi à la place d'un étudiant qui ne connaît que les noms des notions du cours — pas leurs conditions, pas les résultats des études. S'il la réussit (ou élimine assez d'options pour la deviner), discrimination ≤ 2 et name_only = true.`,
     calib ? `${calib}\nÀ la lumière de ces leçons, sois SÉVÈRE : signale aussi (issue) tout QCM trop trivial / au distracteur trop faible si l'étudiant a jugé ce type « trop facile ».` : null,
@@ -1008,7 +1025,7 @@ const DUP_SCHEMA = {
  * questions sur une notion sous des angles vraiment distincts ; seul le même angle est un doublon.
  * Le modèle nomme la notion et l'angle de chaque question ; la décision, elle, est faite ici.
  */
-async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previous?: string[] }): Promise<{ drop: number[]; notions: string[]; angles: string[] }> {
+async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previous?: string[] }): Promise<{ drop: number[]; repeats: number[]; notions: string[]; angles: string[] }> {
   const list = items.map((it, i) => `Q${i}. (${sanitizeCorpus(it.topic ?? "").slice(0, 60)}) ${sanitizeCorpus(it.stem).slice(0, 400)}`).join("\n");
   // Banc du 04/11 (CS-290) : 2 questions sur 15 reprenaient un examen précédent du cours ; le concepteur
   // les voit, mais seul ce contrôle peut les retirer.
@@ -1040,7 +1057,11 @@ async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previou
     angles[n.index] = typeof n.angle === "string" ? n.angle.trim() : "";
   }
   const drop = new Set<number>();
-  for (const rp of Array.isArray(r.repeats) ? r.repeats : []) if (Number.isInteger(rp?.index) && rp.index >= 0 && rp.index < items.length) drop.add(rp.index);
+  const repeats = new Set<number>();
+  for (const rp of Array.isArray(r.repeats) ? r.repeats : []) if (Number.isInteger(rp?.index) && rp.index >= 0 && rp.index < items.length) {
+    drop.add(rp.index);
+    repeats.add(rp.index);
+  }
   // Les questions de l'accent demandé par l'étudiant portent volontairement sur un même thème :
   // elles ne sont pas des doublons ENTRE ELLES (une autre question sur ce thème, si).
   const focusPair = (a: number, b: number) => !!items[a]?.focusSlot && !!items[b]?.focusSlot;
@@ -1059,7 +1080,7 @@ async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previou
     const later = Math.max(d.first, d.second);
     if (Number.isInteger(later) && later >= 0 && later < items.length && d.first !== d.second && !focusPair(d.first, d.second)) drop.add(later);
   }
-  return { drop: [...drop].sort((a, b) => a - b), notions, angles };
+  return { drop: [...drop].sort((a, b) => a - b), repeats: [...repeats].sort((a, b) => a - b), notions, angles };
 }
 
 /** Remplacements de doublons au plus ; le contrôle repasse après chacun (le dernier aussi). */
@@ -1438,20 +1459,29 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const pool: QcmSlot[] = strict ? fresh.filter((t, i) => fresh.findIndex((x) => x.label === t.label) === i) : spareTopics;
   let nextSpare = 0;
   const acquiredBeforeDedup = all.slice();
+  const historicalRepeats = new Set<string>();
+  const auditDuplicates = new Set<string>();
   // Une passe de remplacement peut elle-même perdre des items aux contrôles qualité. Il faut alors
   // recombler même si l'audit suivant ne voit plus de doublon, puis auditer ce nouveau lot. Le budget
   // reste borné par la taille de l'examen et par la réserve de notions.
   const finalRoundBudget = Math.max(DEDUP_ROUNDS, Math.ceil(count / BATCH) + 2);
   let repairAfterDedup = false;
   for (let round = 0; round <= finalRoundBudget && all.length >= 2; round++) {
-    const { drop, notions, angles } = await duplicateItems(all, { strict, previous: recent.map((x) => x.stem) }).catch(() => ({ drop: [] as number[], notions: [] as string[], angles: [] as string[] }));
+    const { drop, repeats, notions, angles } = await duplicateItems(all, { strict, previous: recent.map((x) => x.stem) }).catch(() => ({ drop: [] as number[], repeats: [] as number[], notions: [] as string[], angles: [] as string[] }));
     // Cette seconde enveloppe ne prolonge que les pertes qu'elle a elle-même causées. Un examen
     // déjà incomplet après le budget de comblement principal conserve sa borne historique.
     if (!drop.length && !repairAfterDedup) break;
     if (drop.length) repairAfterDedup = true;
     const kept = all.filter((_, i) => !drop.includes(i));
+    drop.forEach((i) => { if (all[i]) auditDuplicates.add(all[i].stem); });
+    repeats.forEach((i) => { if (all[i]) historicalRepeats.add(all[i].stem); });
     const keptIdx = all.map((_, i) => i).filter((i) => !drop.includes(i));
     all.splice(0, all.length, ...kept);
+    // Les candidats déjà payés mais écartés par le budget global sont essayés avant un nouvel
+    // appel. Une reprise d'un examen précédent, elle, ne peut jamais revenir par ce chemin.
+    const present = new Set(all.map((it) => it.stem));
+    const alternatives = verifiedCandidates.filter((it) => !present.has(it.stem) && !auditDuplicates.has(it.stem));
+    all.splice(0, all.length, ...selectWithinTrivialBudget(all, alternatives, count));
     const missing = count - all.length;
     if (missing <= 0) break;
     const spare = round < finalRoundBudget ? pool.slice(nextSpare, nextSpare + missing) : [];
@@ -1482,7 +1512,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const present = new Set(all.map((it) => it.stem));
     for (const it of acquiredBeforeDedup) {
       if (all.length >= acquiredBeforeDedup.length) break;
-      if (present.has(it.stem)) continue;
+      if (present.has(it.stem) || historicalRepeats.has(it.stem)) continue;
       all.push(it);
       present.add(it.stem);
     }
@@ -1495,8 +1525,9 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     await openPhase;
     // Banc du 04/11 : « réponse illisible » se disait aussi quand le modèle avait répondu et que
     // toutes ses questions avaient été écartées par les contrôles — la cause doit être exacte.
-    if (!lastError && qualityDropped > 0) {
-      throw new Error(`Aucun QCM généré : les ${qualityDropped} questions conçues ont toutes été écartées par les contrôles de qualité (hors cours, clé contestée, distracteurs trop faciles). Réessaie ; si ça se reproduit sur ce cours, signale-le.`);
+    if (!lastError && (qualityDropped > 0 || verifiedCandidates.length > 0)) {
+      const dropped = Math.max(qualityDropped, verifiedCandidates.length);
+      throw new Error(`Aucun QCM généré : les ${dropped} questions conçues ont toutes été écartées par les contrôles de qualité (hors cours, clé contestée, distracteurs trop faciles). Réessaie ; si ça se reproduit sur ce cours, signale-le.`);
     }
     throw new Error(`Aucun QCM généré : ${llmFailureReason(cause())}`);
   }
