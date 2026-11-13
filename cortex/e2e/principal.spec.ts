@@ -3,6 +3,7 @@ import { loginPersona } from "./helpers";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import JSZip from "jszip";
 
 async function api<T>(page: Page, path: string, init: RequestInit = {}): Promise<{ status: number; body: T }> {
   return page.evaluate(async ({ path, init }) => {
@@ -72,7 +73,7 @@ test("@principal importe un dossier de 60 Mo par fichiers bornés et signale un 
     const folder = page.getByLabel("Dossier de cours à importer");
     await page.route("**/api/sources/import?**", async (route) => {
       if (new URL(route.request().url()).searchParams.get("action") === "finish") {
-        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
       }
       await route.continue();
     });
@@ -95,6 +96,62 @@ test("@principal importe un dossier de 60 Mo par fichiers bornés et signale un 
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("@principal importe les sources d'une archive Moodle de 80 Mo dans un dossier", async ({ page }) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-zip-e2e-"));
+  try {
+    const zip = new JSZip();
+    zip.file("Analyse 3/polycopie.pdf", minimalPdf());
+    zip.file("Analyse 3/series/serie-1.txt", "Exercice E2E sur les intégrales.");
+    zip.file("Analyse 3/__MACOSX/._polycopie.pdf", "metadata");
+    zip.file("export-moodle.bin", Buffer.alloc(80 * 1024 * 1024), { compression: "STORE" });
+    const archivePath = path.join(root, "export-moodle.zip");
+    await new Promise<void>((resolve, reject) => {
+      zip.generateNodeStream({ streamFiles: true, compression: "DEFLATE" })
+        .pipe(fs.createWriteStream(archivePath))
+        .on("finish", resolve)
+        .on("error", reject);
+    });
+    expect(fs.statSync(archivePath).size).toBeGreaterThan(79 * 1024 * 1024);
+
+    await loginPersona(page, "owner");
+    await page.goto("/cours/nouveau");
+    await page.getByRole("textbox").first().fill(`Archive Moodle E2E ${Date.now()}`);
+    await page.getByRole("button", { name: "Créer le cours" }).click();
+    await page.getByLabel("Dossier de cours à importer").setInputFiles(root);
+    await expect(page.getByText(/2 fichiers déposés/)).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText(/Dossier ingéré/)).toBeVisible({ timeout: 60_000 });
+    await page.getByRole("radio", { name: /série/i }).click();
+    await expect(page.getByText("serie-1.txt", { exact: false })).toBeVisible();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("annales de plus de 10 Mo puis de plus de 32 Mo en un envoi : passent le proxy sans troncature", async ({ page }) => {
+  // Prod, 13/11/2026 : « Request body exceeded 10MB » puis 400 au bout de 30 s. Le
+  // proxy tronquait le corps sous le plafond de la route (annales : 64 Mio).
+  const annale = (name: string, mb: number) => ({
+    name, mimeType: "text/plain",
+    buffer: Buffer.alloc(mb * 1024 * 1024, "Annale intégrales E2E, exercice 1. "),
+  });
+  await loginPersona(page, "owner");
+  await page.goto("/cours/nouveau");
+  await page.getByRole("textbox").first().fill(`Annales lourdes E2E ${Date.now()}`);
+  await page.getByRole("button", { name: "Créer le cours" }).click();
+  await expect(page).toHaveURL(/\/sources/);
+  const drop = page.locator('input[type="file"]').first();
+
+  const single = page.waitForResponse((r) => r.url().includes("/api/refs/upload"));
+  await drop.setInputFiles([annale("annale-12mo.txt", 12)]);
+  expect((await single).status()).toBe(200);
+  await expect(page.getByText("1 fichier ingéré.")).toBeVisible({ timeout: 60_000 });
+
+  const pair = page.waitForResponse((r) => r.url().includes("/api/refs/upload"));
+  await drop.setInputFiles([annale("annale-2024.txt", 20), annale("annale-2025.txt", 20)]);
+  expect((await pair).status()).toBe(200);
+  await expect(page.getByText("2 fichiers ingérés.")).toBeVisible({ timeout: 60_000 });
 });
 
 test("nouveau compte à 0 crédit : import et consultation gratuits, préparation et génération paywallées", async ({ page }) => {

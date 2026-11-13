@@ -9,11 +9,11 @@ import { Segmented } from "@/components/ui/Segmented";
 import { useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@/lib/ux/api";
 import { cn } from "@/lib/ux/cn";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
-import { FOLDER_EXTENSIONS, prepareFolderImport, type FolderImportRefusal } from "@/lib/folder-import";
+import { FOLDER_EXTENSIONS, prepareCourseImport, type FolderImportRefusal } from "@/lib/folder-import";
 
-const ACCEPT = ".pdf,.html,.htm,.txt,.md";
+const ACCEPT = ".pdf,.html,.htm,.txt,.md,.zip";
 /** Un dossier de cours contient plus que des annales : slides, séries, images, notes. */
-const ACCEPT_FOLDER_ATTRIBUTE = FOLDER_EXTENSIONS.map((ext) => `.${ext}`).join(",");
+const ACCEPT_FOLDER_ATTRIBUTE = [...FOLDER_EXTENSIONS.map((ext) => `.${ext}`), ".zip"].join(",");
 
 /**
  * Ce que sont les fichiers déposés. Une annale décide du format ; sans annale, les
@@ -89,6 +89,10 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   };
 
   const upload = async (files: FileList | File[]) => {
+    if ([...files].some((file) => /\.zip$/i.test(file.name))) {
+      await importFolder(files);
+      return;
+    }
     const list = [...files].filter((f) => /\.(pdf|html?|txt|md)$/i.test(f.name));
     if (!list.length) {
       setError("Formats acceptés : PDF, HTML, TXT, MD.");
@@ -130,17 +134,17 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
    * téléverser inutilement (le serveur refiltre de toute façon).
    */
   const importFolder = async (files: FileList | File[]) => {
-    const selection = prepareFolderImport(files);
-    setFolderRefusals(selection.rejected);
-    if (!selection.accepted.length) {
-      setError("Aucun fichier exploitable dans ce dossier. Vérifie les formats et les limites indiquées.");
-      return;
-    }
     setError(null);
     setUploadedMsg(null);
     setUploading(true);
-    setFolderProgress({ done: 0, total: selection.accepted.length });
+    setFolderProgress(null);
     try {
+      const selection = await prepareCourseImport(files);
+      setFolderRefusals(selection.rejected);
+      if (!selection.accepted.length) {
+        throw { status: 400, message: "Aucun fichier exploitable dans cette sélection. Vérifie les formats et les limites indiquées." } as ApiError;
+      }
+      setFolderProgress({ done: 0, total: selection.accepted.length });
       const refused = [...selection.rejected];
       let saved = 0;
       for (const [index, entry] of selection.accepted.entries()) {
@@ -250,7 +254,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           <p className="mt-0.5 text-[0.8rem] text-ink-3">ou clique pour parcourir</p>
         </div>
         <div className="flex flex-wrap justify-center gap-1.5">
-          {["PDF", "HTML", "TXT", "MD"].map((f) => (
+          {["PDF", "HTML", "TXT", "MD", "ZIP"].map((f) => (
             <span key={f} className="rounded-md border border-line bg-surface-1/60 px-2 py-0.5 font-mono text-[0.68rem] text-ink-3">{f}</span>
           ))}
         </div>
@@ -293,7 +297,8 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
         <p className="mt-2 text-[0.76rem] leading-relaxed text-ink-3">
           Finals et midterms partent dans tes annales (ils décident du format) ; slides,
           séries, documents Word et notes rejoignent le corpus. 30 Mo maximum par fichier ;
-          le total du cours suit le quota de stockage de ton compte.
+          le total du cours suit le quota de stockage de ton compte. Les ZIP sont décompressés
+          dans ton navigateur et peuvent contenir une archive imbriquée.
         </p>
       </div>
 

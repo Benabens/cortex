@@ -7,6 +7,7 @@
  *   npm run backup:verify -- --latest        # rapatrie la plus récente depuis S3 (BACKUP_S3_*)
  *   npm run backup:verify -- --remote=<dossier>
  *   npm run backup:verify -- --list          # liste les sauvegardes distantes
+ *   npm run backup:verify -- --latest --keep=<dossier>   # garde la copie rapatriée (essai de restauration)
  *
  * Code de sortie ≠ 0 si la sauvegarde est inutilisable. Rien n'est restauré.
  */
@@ -24,6 +25,7 @@ async function main(): Promise<void> {
   const remote = hasFlag("--latest") || hasFlag("--list") || argValue("--remote");
   let dir = args.find((a) => !a.startsWith("--"));
   let tmp: string | null = null;
+  const keep = remote ? argValue("--keep") : undefined;
 
   if (remote) {
     const cfg = backupS3Config();
@@ -37,14 +39,19 @@ async function main(): Promise<void> {
     }
     const folder = argValue("--remote") ?? all.find((b) => b.complete)?.folder;
     if (!folder) throw new Error("Aucune sauvegarde distante complète à vérifier.");
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-verify-"));
-    dir = await pullBackup(store, cfg, folder, path.join(tmp, folder));
+    if (keep) {
+      dir = await pullBackup(store, cfg, folder, path.resolve(keep, folder));
+    } else {
+      tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-verify-"));
+      dir = await pullBackup(store, cfg, folder, path.join(tmp, folder));
+    }
   }
   if (!dir) throw new Error("Indique un dossier de sauvegarde, ou --latest / --remote=<dossier> avec BACKUP_S3_*.");
 
   try {
     const r = await verifyBackup(dir);
     console.log(`\n✓ Sauvegarde vérifiée : ${path.basename(dir)} (créée le ${r.manifest.createdAt})`);
+    if (keep) console.log(`  copie  : ${dir}`);
     console.log(`  volume : ${r.dataEntries} entrées`);
     if (r.pgToc !== null) console.log(`  dump   : ${r.pgTables} tables, schémas ${r.pgSchemas.join(", ")}`);
     else console.log(`  dump   : aucun (base SQLite/PGlite incluse dans le volume)`);

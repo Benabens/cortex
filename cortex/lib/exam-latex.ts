@@ -34,6 +34,11 @@ function texEscape(s: string): string {
 function unwrapLockedFigures(t: string): string {
   const FIG = String.raw`\\(?:examinode|examstates)\b`;
   return t
+    // Un modèle peut oublier de doubler l'antislash dans son JSON : `\begin` devient alors
+    // U+0008 + "egin" et `\frac` U+000C + "rac" après JSON.parse, ce que TeX refuse comme
+    // « invalid character ». Ces contrôles n'ont aucun emploi légitime dans un source LaTeX.
+    .replace(/\u0008/g, String.raw`\b`)
+    .replace(/\u000c/g, String.raw`\f`)
     .replace(new RegExp(String.raw`\\begin\{tikzpicture\}(?:\[[^\]]*\])?\s*(${FIG})\s*\\end\{tikzpicture\}`, "g"), "$1")
     .replace(new RegExp(String.raw`\\begin\{center\}\s*(${FIG})\s*\\end\{center\}`, "g"), "$1")
     // glyphes Unicode que le modèle émet parfois et que pdflatex ne connaît pas (vécu : corrigé
