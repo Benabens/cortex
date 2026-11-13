@@ -401,8 +401,8 @@ const seedOf = (s: string) => [...s].reduce((h, ch) => (Math.imul(h, 31) + ch.ch
 export function labelClassificationRisk(stem: string): boolean {
   const s = normalize(stem);
   return /\b(which|what|quel(?:le)?)\b/.test(s)
-    && /\b(analysis|assessment|diagnosis|entry|analyse|evaluation|diagnostic|entree)\b/.test(s)
-    && /\b(identif|describ|classif|decrit|qualif|correspond|best|mieux|most accurately|plus precisement)\w*/.test(s);
+    && /\b(analysis|assessment|diagnosis|entry|phenomenon|conclusion|revision|analyse|evaluation|diagnostic|entree|phenomene|conclusion|revision)\b/.test(s)
+    && /\b(identif|describ|classif|decrit|qualif|correspond|explain|account|counter|match|best|correctly|mieux|correctement|precisement)\w*/.test(s);
 }
 
 /** Lecture de sortie où l'énoncé nomme déjà les deux valeurs à recopier. */
