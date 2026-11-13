@@ -12,9 +12,10 @@ import { test } from "node:test";
 import { contactEmail } from "../lib/contact";
 import { landingOrigin, legalEnglishUrl, legalLinks, legalReady } from "../lib/legal";
 
-test("adresse de contact : celle de l'éditeur par défaut, CONTACT_EMAIL la remplace si elle est valide", () => {
+test("adresse de contact : celle de l'éditeur par défaut, PUBLIC_CONTACT_EMAIL la remplace si elle est valide", () => {
   assert.equal(contactEmail({}), "abensur.benjamin@gmail.com");
   assert.equal(contactEmail({ CONTACT_EMAIL: " support@cortexexam.com " }), "support@cortexexam.com");
+  assert.equal(contactEmail({ PUBLIC_CONTACT_EMAIL: " contact@cortexexam.com " }), "contact@cortexexam.com");
   assert.equal(contactEmail({ CONTACT_EMAIL: "pas-une-adresse" }), "abensur.benjamin@gmail.com");
   assert.equal(contactEmail({ CONTACT_EMAIL: "a@b.c?subject=x\"><script>" }), "abensur.benjamin@gmail.com", "rien qui casserait un lien mailto");
 });

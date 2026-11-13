@@ -57,6 +57,13 @@ test("checkStorage : sous le quota → null ; envoi qui ferait dépasser → 413
   setStatfsForTests(null);
 });
 
+test("la marge disque reste à 10 % par défaut et peut être neutralisée pour l’E2E hermétique", async () => {
+  const { storageMinFreeRatio } = await import("../lib/storage-quota");
+  assert.equal(storageMinFreeRatio({}), 0.10);
+  assert.equal(storageMinFreeRatio({ STORAGE_MIN_FREE_PERCENT: "0" }), 0);
+  assert.equal(storageMinFreeRatio({ STORAGE_MIN_FREE_PERCENT: "101" }), 0.10);
+});
+
 test("routes d'envoi : refs/upload refuse en 413 quand le quota est atteint, sans écrire le fichier", async () => {
   const { setStatfsForTests } = await import("../lib/storage-quota");
   setStatfsForTests(() => ({ free: 80 * 1024 * MiB, total: 100 * 1024 * MiB }));
