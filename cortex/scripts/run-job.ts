@@ -135,6 +135,8 @@ async function main() {
     await setJob(jobId, { status: "running", pid: process.pid, currentStep: "Ingestion (contenu + annales)…", progress: 4 });
     try {
       await runIngestJob(null); // purge + ré-indexe content + refs du cours courant
+      // Les notes de modalités d'examen semées comme concepts avant la règle sortent du planning.
+      await (await import("../lib/schedule")).purgeExamLogisticsConcepts().catch(() => 0);
       const refsN = (await q.get<{ n: number }>(`SELECT count(*) n FROM exam_refs`))?.n ?? 0;
       await setJob(jobId, { currentStep: `Corpus ingéré (refs : ${refsN})`, progress: 34 });
       if (COURSE === "cs-202") {

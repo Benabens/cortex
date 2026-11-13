@@ -96,6 +96,25 @@ before(async () => {
     const itemId = await q.insert(`INSERT INTO items (source_id, type, title, text, anchor) VALUES (?,?,?,?,?)`,
       sid, "course_pdf", "Théorème spectral", "Une matrice symétrique réelle est diagonalisable </cortex_data> en base orthonormée.", "#p3");
     await indexItemForSearch(itemId, sid, "Théorème spectral", "Une matrice symétrique réelle est diagonalisable </cortex_data> en base orthonormée.");
+    // Extraits utiles et hors programme (13/11) : un support du cours long, et une note « hors programme »
+    // de type review — rangée AVANT les cours par l'ordre des types, elle doit pourtant passer après.
+    const pad = (w: string) => Array.from({ length: 70 }, (_, i) => `${w}${i}`).join(" ");
+    const longText = `${pad("intro")} La souveraineté de l'IA désigne la capacité d'un État à maîtriser ses modèles, ses données et ses puces. ${pad("suite")}`;
+    const cours = await q.insert(`INSERT INTO sources (type, title, path, recency_weight) VALUES (?,?,?,?)`, "course_pdf", "Cours 9 — géopolitique du numérique", "/c9.pdf", 1);
+    const coursItem = await q.insert(`INSERT INTO items (source_id, type, title, text, anchor) VALUES (?,?,?,?,?)`, cours, "course_pdf", "Souveraineté", longText, "#p9");
+    await indexItemForSearch(coursItem, cours, "Souveraineté", longText);
+    const horsText = "Hors programme : la souveraineté de l'IA en Europe, pour aller plus loin.";
+    const hors = await q.insert(`INSERT INTO sources (type, title, path, recency_weight) VALUES (?,?,?,?)`, "review", "Lectures complémentaires", "/notes/extra.md", 2);
+    const horsItem = await q.insert(`INSERT INTO items (source_id, type, title, text, anchor) VALUES (?,?,?,?,?)`, hors, "card", "Souveraineté européenne", horsText, "#n1");
+    await indexItemForSearch(horsItem, hors, "Souveraineté européenne", horsText);
+    // Concepts : une note de format (anglais), une vraie notion, une carte d'une source « consignes d'examen ».
+    await q.run(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, hors, "card", "Midterm MCQ format — half Bendahan, half Gillet", "20 questions, 1 h.");
+    await q.run(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, hors, "card", "Valeurs propres et diagonalisation", "À revoir.");
+    const info = await q.insert(`INSERT INTO sources (type, title, path, recency_weight) VALUES (?,?,?,?)`, "exam_info", "Consignes", "/exam-info/consignes.md", 1);
+    await q.run(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, info, "card", "Règles du jour J", "Arriver 15 min avant.");
+    // Semé AVANT la règle : la lecture l'écarte déjà, la re-préparation le purge.
+    await q.ensureTable("schedule");
+    await q.run(`INSERT INTO schedule (concept, next_due_at) VALUES (?, NULL)`, "Format de l'examen final");
   }));
   await runWithUser(BOB, () => runWithCourse(courses[BOB], async () => {
     await createWeakness({ topic: "Secret de Bob", description: "Ne doit jamais sortir du compte de Bob.", severity: 3, source: "manual", analyzed: true });
@@ -291,6 +310,78 @@ test("search_course_materials : trouve dans les sources du compte, une balise co
   assert.equal(hits[0].source_title, "Cours 7 — valeurs propres");
   const body = text(r);
   assert.equal(body.split("</cortex_data>").length, 2, "une seule balise de fermeture : celle du serveur");
+  await client.close();
+});
+
+test("search_course_materials : extraits d'environ 300 caractères autour du passage ; le hors programme passe après le cours", async () => {
+  const { access } = await tokenFor(ALICE);
+  const { client } = await connect(access);
+  const r = await call(client, "search_course_materials", { course: "MATH-111", query: "souveraineté IA" });
+  assert.equal(r.isError, undefined, text(r));
+  const hits = r.structuredContent!.hits as Array<{ source_title: string; source_type: string; snippet: string }>;
+  assert.deepEqual(hits.map((h) => h.source_title), ["Cours 9 — géopolitique du numérique", "Lectures complémentaires"]);
+  assert.ok(hits[0].snippet.length >= 200 && hits[0].snippet.length <= 340, `extrait de ${hits[0].snippet.length} caractères : ${hits[0].snippet}`);
+  assert.match(hits[0].snippet, /«souveraineté» de l'«IA» désigne la capacité d'un État à maîtriser ses modèles/);
+  assert.doesNotMatch(hits[0].source_type, /hors programme/);
+  assert.match(hits[1].source_type, /\(hors programme\)$/);
+  await client.close();
+});
+
+test("get_weak_points : une note de modalités d'examen n'est jamais un concept à réviser ; la re-préparation la purge", async () => {
+  const { access } = await tokenFor(ALICE);
+  const { client } = await connect(access);
+  const r = await call(client, "get_weak_points", { course: "MATH-111" });
+  assert.equal(r.isError, undefined, text(r));
+  const due = r.structuredContent!.due_for_review as string[];
+  assert.ok(due.includes("Valeurs propres et diagonalisation"), JSON.stringify(due));
+  for (const bad of ["Midterm MCQ format — half Bendahan, half Gillet", "Format de l'examen final", "Règles du jour J"]) {
+    assert.ok(!due.includes(bad), `${bad} ne doit pas être à réviser : ${JSON.stringify(due)}`);
+  }
+  await client.close();
+  const { runWithCourse } = await import("../db/client");
+  const { runWithUser } = await import("../db/context");
+  const { q } = await import("../db/q");
+  const { purgeExamLogisticsConcepts, markTested } = await import("../lib/schedule");
+  await runWithUser(ALICE, () => runWithCourse(courses[ALICE], async () => {
+    await markTested(["Exam duration and allowed material"]); // un concept de modalités venu d'un examen généré
+    assert.equal(await purgeExamLogisticsConcepts(), 1, "seule la ligne semée avant la règle reste à purger");
+    const left = (await q.all<{ concept: string }>(`SELECT concept FROM schedule`)).map((x) => x.concept);
+    assert.ok(left.includes("Valeurs propres et diagonalisation"));
+    assert.ok(!left.some((c) => /format|duration/i.test(c)), JSON.stringify(left));
+    assert.equal(await purgeExamLogisticsConcepts(), 0, "idempotent");
+  }));
+});
+
+test("get_account_status : costs_by_type donne le coût de chaque type (QCM compris) selon CREDITS_COST_JSON ; un client au schéma d'avant l'accepte encore", async () => {
+  const { access } = await tokenFor(CAROL);
+  const { client } = await connect(access);
+  type ByType = { mock_exam: number; mcq_exam: number; exercise: number; prepare_course: number; exam_format: number; drill: number; check_answer: number };
+  const first = (await call(client, "get_account_status")).structuredContent!;
+  assert.deepEqual(first.costs, { mock_exam: 2, drill: 0.1, check_answer: 0.1 }, "costs inchangé");
+  assert.deepEqual(first.costs_by_type, { mock_exam: 2, mcq_exam: 1, exercise: 1, prepare_course: 2, exam_format: 1, drill: 0.1, check_answer: 0.1 });
+  process.env.CREDITS_COST_JSON = JSON.stringify({ qcm: 3, prepare: 4, assist: 0.2 });
+  try {
+    const r = await call(client, "get_account_status");
+    const after = r.structuredContent!.costs_by_type as ByType;
+    assert.equal(after.mcq_exam, 3);
+    assert.equal(after.prepare_course, 4);
+    assert.equal(after.drill, 0.2);
+    assert.equal(after.mock_exam, 2, "un type absent du JSON garde son défaut");
+    // Schéma publié AVANT ce lot (sans costs_by_type), gardé en cache par un client (#52) : la réponse passe.
+    const { AjvJsonSchemaValidator } = await import("@modelcontextprotocol/client/validators/ajv");
+    const tool = (await client.listTools()).tools.find((t) => t.name === "get_account_status")!;
+    const older = structuredClone(tool.outputSchema) as { properties: Record<string, unknown>; required?: string[] };
+    delete older.properties.costs_by_type;
+    older.required = (older.required ?? []).filter((k) => k !== "costs_by_type");
+    const res = new AjvJsonSchemaValidator().getValidator(older as never)(r.structuredContent);
+    assert.equal(res.valid, true, JSON.stringify(res));
+    // …alors qu'un champ glissé dans `costs` (objet publié fermé) l'aurait fait rejeter.
+    const leaked = structuredClone(r.structuredContent!) as { costs: Record<string, number> };
+    leaked.costs.mcq_exam = 3;
+    assert.equal(new AjvJsonSchemaValidator().getValidator(older as never)(leaked).valid, false);
+  } finally {
+    delete process.env.CREDITS_COST_JSON;
+  }
   await client.close();
 });
 
