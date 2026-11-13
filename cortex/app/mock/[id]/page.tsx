@@ -260,14 +260,8 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
                   style={{ color: "var(--ink-3)" }}
                 >
                   Q{it.idx + 1} · {it.topic} ·{" "}
-                  <span
-                    style={{
-                      color:
-                        it.type === "mcq"
-                          ? "var(--blue-ink)"
-                          : "var(--accent-ink)",
-                    }}
-                  >
+                  {/* Un seul accent : il signale le cas qui change la façon de répondre (plusieurs cases). */}
+                  <span style={it.type === "mcq" ? { color: "var(--accent-ink)" } : undefined}>
                     {it.type === "mcq" ? "plusieurs réponses" : "une réponse"}
                   </span>
                 </span>

@@ -107,7 +107,7 @@ export default function RevisionPage() {
           <section className={styles.guide}>
             <div className="flex flex-wrap items-center gap-2 mb-2">
               <h2 className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>Couverture des finals par sujet (ordre du cours)</h2>
-              <span className="tag tag-blue">{d.bank.stats.qcm} QCM · {d.bank.stats.open} ouvertes</span>
+              <span className="tag tag-blue">{d.bank.stats.qcm} QCM · {d.bank.stats.open} {d.bank.stats.open > 1 ? "ouvertes" : "ouverte"}</span>
             </div>
             <div className={styles.coverage}>
               {d.bank.stats.byTopic.map((t) => {
@@ -115,7 +115,7 @@ export default function RevisionPage() {
                 return (
                   <div key={t.topic} className={styles.coverageRow}>
                     <span className="tag">{lr(t.lectureRank)}</span>
-                    <div className="min-w-0"><span className="text-ink-1">{t.topic}</span><div className="mt-1 text-xs text-ink-3">{t.qcm} QCM · {t.open} ouvertes</div></div>
+                    <div className="min-w-0"><span className="text-ink-1">{t.topic}</span><div className="mt-1 text-xs text-ink-3">{t.qcm} QCM · {t.open} {t.open > 1 ? "ouvertes" : "ouverte"}</div></div>
                     <span className="tabular-nums text-accent-hi">{pct} %</span>
                     <div className={styles.track} role="img" aria-label={`${pct} % des questions`}><div style={{ width: `${pct}%` }} /></div>
                   </div>
