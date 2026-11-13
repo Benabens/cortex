@@ -315,8 +315,8 @@ const STALL_MS = 15 * 60_000;
  */
 export async function reconcileStaleJobs(): Promise<number> {
   await ensureJobsSchema();
-  const rows = await q.all<{ id: number; type: string; pid: number | null; created_at: string; updated_at: string; heartbeat_at: string | null; attempts: number; max_attempts: number }>(
-    `SELECT id, type, pid, created_at, updated_at, heartbeat_at, attempts, max_attempts FROM jobs WHERE status IN ${ACTIVE_STATES}`,
+  const rows = await q.all<{ id: number; type: string; pid: number | null; created_at: string; updated_at: string; heartbeat_at: string | null; attempts: number; max_attempts: number; credit_ref: string | null }>(
+    `SELECT id, type, pid, created_at, updated_at, heartbeat_at, attempts, max_attempts, credit_ref FROM jobs WHERE status IN ${ACTIVE_STATES}`,
   );
   let fixed = 0;
   for (const r of rows) {
@@ -343,7 +343,8 @@ export async function reconcileStaleJobs(): Promise<number> {
     // eu lieu (spawn échoué, ou réservation impossible dont la mise en erreur a
     // elle-même échoué). Erreur, remboursé si rien n'a coûté ; l'utilisateur relance.
     const neverStarted = !r.pid && attempts === 0;
-    if (attempts < maxAttempts && !neverStarted) {
+    const reservationValid = r.type === "ingest" || await (await import("@/lib/llm/authorization")).reservationExists(r.credit_ref);
+    if (attempts < maxAttempts && !neverStarted && reservationValid) {
       const msg = `Worker interrompu — reprise automatique (tentative ${attempts + 1}/${maxAttempts}), progression conservée.`;
       await q.run(
         `UPDATE jobs SET status = 'queued', pid = NULL, heartbeat_at = NULL, worker_id = NULL, attempts = ?, current_step = ?, updated_at = ? WHERE id = ?`,
@@ -351,8 +352,9 @@ export async function reconcileStaleJobs(): Promise<number> {
       );
       await logJob(r.id, msg);
     } else {
-      await setJob(r.id, { status: "error", error: ZOMBIE_MSG });
-      await logJob(r.id, ZOMBIE_MSG);
+      const error = reservationValid ? ZOMBIE_MSG : "Reprise annulée : la réservation de crédits est absente ou n’est plus valide.";
+      await setJob(r.id, { status: "error", error });
+      await logJob(r.id, error);
       // Échec définitif hors du worker (celui-ci est mort sans passer par
       // fail()) → c'est ICI qu'il faut rendre les crédits : rien n'a été livré.
       await refundJobCredits({ id: r.id, type: r.type as JobType }, "failed");
