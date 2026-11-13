@@ -1,5 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 import { loginPersona } from "./helpers";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 async function api<T>(page: Page, path: string, init: RequestInit = {}): Promise<{ status: number; body: T }> {
   return page.evaluate(async ({ path, init }) => {
@@ -48,6 +51,50 @@ test("@principal onboarding complet, PDF, préparation, drill, correction et exa
   const exam = await api<{ ok: boolean }>(page, `/api/exams/generate?dry=1&course=${encodeURIComponent(course!)}`, { method: "POST", body: "{}" });
   expect(exam.status).toBe(200); expect(exam.body.ok).toBeTruthy();
   await page.goto("/examens"); await expect(page.getByRole("heading", { name: "Examens prêts" })).toBeVisible();
+});
+
+test("@principal importe un dossier de 60 Mo par fichiers bornés et signale un fichier trop gros", async ({ page }) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-folder-e2e-"));
+  try {
+    const chapter = path.join(root, "chapitre-1");
+    const scans = path.join(root, "scans");
+    fs.mkdirSync(chapter); fs.mkdirSync(scans);
+    for (let index = 0; index < 4; index++) {
+      const destination = index < 2 ? chapter : scans;
+      fs.writeFileSync(path.join(destination, `notes-${index}.txt`), Buffer.alloc(15 * 1024 * 1024, 0x61 + index));
+    }
+    fs.writeFileSync(path.join(root, ".DS_Store"), "ignoré");
+
+    await loginPersona(page, "owner");
+    await page.goto("/cours/nouveau");
+    await page.getByRole("textbox").first().fill(`Dossier E2E ${Date.now()}`);
+    await page.getByRole("button", { name: "Créer le cours" }).click();
+    const folder = page.getByLabel("Dossier de cours à importer");
+    await page.route("**/api/sources/import?**", async (route) => {
+      if (new URL(route.request().url()).searchParams.get("action") === "finish") {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+      }
+      await route.continue();
+    });
+    await folder.setInputFiles(root);
+    await expect(page.getByText(/Envoi de 4\/4 fichiers/)).toBeVisible();
+    await expect(page.getByText(/4 fichiers déposés/)).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText(/Dossier ingéré/)).toBeVisible({ timeout: 60_000 });
+    await page.getByRole("radio", { name: /note 2/i }).click();
+    await expect(page.getByText("notes-2.txt", { exact: false })).toBeVisible();
+
+    const oversized = path.join(root, "trop-gros.pdf");
+    fs.writeFileSync(oversized, Buffer.alloc(30 * 1024 * 1024 + 1));
+    await folder.setInputFiles(root);
+    await expect(page.getByText(/trop-gros\.pdf.*30 Mo maximum par fichier/)).toBeVisible();
+
+    await page.getByRole("button", { name: "Préparer le cours" }).click();
+    await expect(page.getByText(/Cours préparé/)).toBeVisible({ timeout: 60_000 });
+    await page.goto("/programme");
+    await expect(page.getByRole("heading", { name: "Programme" })).toBeVisible();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("utilisateur sans crédit bloqué proprement et propriétaire sans limite", async ({ page }) => {

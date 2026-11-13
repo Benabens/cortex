@@ -60,7 +60,8 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.google_reel && env.E2E_GOOGLE_EMAIL != ''
         run: npx playwright install --with-deps chrome && npm run e2e:google
       - name: Charge légère Linux (nuit)
-        if: github.event_name == 'schedule'
+        # !cancelled() : la charge tourne même si une étape précédente a échoué.
+        if: ${{ !cancelled() && github.event_name == 'schedule' }}
         run: |
           mkdir -p e2e/.runtime/data
           AUTH_ENABLED=1 AUTH_SECRET=nightly-e2e AUTH_URL=http://127.0.0.1:3210 E2E_TEST_AUTH=1 E2E_TEST_RUN=1 \
@@ -72,6 +73,11 @@ jobs:
           trap 'kill "$app_pid" 2>/dev/null || true' EXIT
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:3210/api/health >/dev/null && break; sleep 1; done
           E2E_LOAD_SECONDS=5 npm run e2e:charge
+      - name: Bouton Google → bonne redirection OAuth (nuit, vrai site)
+        # La vraie connexion Google est bloquée par Google depuis les serveurs de CI :
+        # elle se lance depuis le Mac (npm run e2e:google). Ici, on vérifie la redirection.
+        if: ${{ !cancelled() && github.event_name == 'schedule' }}
+        run: npm run e2e:google-redirect
       - uses: actions/upload-artifact@v4
         if: always()
         with:
