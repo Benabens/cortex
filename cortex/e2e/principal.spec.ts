@@ -70,6 +70,12 @@ test("@principal importe un dossier de 60 Mo par fichiers bornés et signale un 
     await page.getByRole("textbox").first().fill(`Dossier E2E ${Date.now()}`);
     await page.getByRole("button", { name: "Créer le cours" }).click();
     const folder = page.getByLabel("Dossier de cours à importer");
+    await page.route("**/api/sources/import?**", async (route) => {
+      if (new URL(route.request().url()).searchParams.get("action") === "finish") {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+      }
+      await route.continue();
+    });
     await folder.setInputFiles(root);
     await expect(page.getByText(/Envoi de 4\/4 fichiers/)).toBeVisible();
     await expect(page.getByText(/4 fichiers déposés/)).toBeVisible({ timeout: 60_000 });
