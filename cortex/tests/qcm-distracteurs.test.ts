@@ -90,6 +90,7 @@ before(async () => {
       let text = "{}";
       if (/"replacements"/.test(content)) { repairCalls++; repairPrompts.push(content); text = repairReply(content); }
       else if (/"duplicates"/.test(content)) text = JSON.stringify({ notions: [], duplicates: [] });
+      else if (/"offCourse"/.test(content)) text = JSON.stringify({ items: [...content.matchAll(/^Q(\d+)\./gm)].map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })) });
       else if (/"results"/.test(content)) text = verifyReply(content);
       else if (/"items"/.test(content)) {
         designCalls++;

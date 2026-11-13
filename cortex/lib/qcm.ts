@@ -498,7 +498,7 @@ async function replaceTrivialDistractors(items: QcmItem[], step: StepCb, languag
   return repaired.flat();
 }
 
-async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, language?: string): Promise<QcmItem[]> {
+async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, language?: string, verify = true): Promise<QcmItem[]> {
   const lang = languageName(language ?? examLanguageFor(currentCourse()))[1];
   // Banc du 04/11 : sans le cours sous les yeux, les remplaçants étaient eux aussi génériques et
   // re-signalés une fois sur deux ; ils se bâtissent sur des notions voisines des extraits.
@@ -539,9 +539,61 @@ async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, la
   const sent = repaired.filter((x): x is QcmItem => !!x);
   if (!sent.length) return items;
   step(`${sent.length} QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés`, 0);
+  if (!verify) {
+    let n = 0;
+    return repaired.map((x, k) => (x ? { ...sent[n++], slot: items[k].slot } : items[k]));
+  }
   const checked = await verifyQcmBatch(sent, step);
   let n = 0;
   return repaired.map((x, k) => (x ? { ...checked[n++], slot: items[k].slot } : items[k]));
+}
+
+type FinalQualityVerdict = { index: number; key: boolean; offCourse: boolean; trivial: number[] };
+
+/** Applique les verdicts de l'audit final sans jamais conserver une clé fausse ou du hors-cours. */
+export function applyFinalQualityVerdicts<T extends Pick<QcmItem, "options" | "correct"> & Partial<Pick<QcmItem, "verified" | "judgeOk" | "rejected" | "trivialDistractors">>>(items: T[], verdicts: FinalQualityVerdict[]): (T & Pick<QcmItem, "verified" | "judgeOk" | "rejected" | "trivialDistractors">)[] {
+  const byIndex = new Map(verdicts.map((v) => [v.index, v]));
+  return items.flatMap((it, index) => {
+    const v = byIndex.get(index);
+    if (!v || !v.key || v.offCourse) return [];
+    const trivial = [...new Set((v.trivial ?? []).filter((k) => Number.isInteger(k) && k >= 0 && k < it.options.length && !it.correct.includes(k)))];
+    return [{ ...it, verified: 1, judgeOk: true, rejected: null, trivialDistractors: trivial.length ? trivial : null }];
+  });
+}
+
+const FINAL_QUALITY_SCHEMA = {
+  type: "object",
+  properties: {
+    items: { type: "array", items: { type: "object", properties: {
+      index: { type: "integer" }, key: { type: "boolean" }, offCourse: { type: "boolean" },
+      trivial: { type: "array", items: { type: "integer" } },
+    }, required: ["index", "key", "offCourse", "trivial"], additionalProperties: false } },
+  }, required: ["items"], additionalProperties: false,
+} as const;
+
+/** Une passe courte calquée sur la rubrique du banc, avec clé et explication visibles. */
+async function finalQualityAudit(items: QcmItem[], step: StepCb): Promise<QcmItem[]> {
+  if (!items.length) return [];
+  const passages = await coursePassages([...new Set(items.map((it) => it.topic).filter(Boolean))]).catch(() => []);
+  const body = items.map((it, index) => [
+    `Q${index}. ${sanitizeCorpus(it.stem)}`,
+    ...it.options.map((o, k) => `   (${k}) ${sanitizeCorpus(o)}`),
+    `   CLÉ : ${it.correct.join(", ")}`,
+    `   EXPLICATION : ${sanitizeCorpus(it.explanation ?? "")}`,
+  ].join("\n")).join("\n\n");
+  const out = await completeJson<{ items: FinalQualityVerdict[] }>({
+    model: "opus", timeoutMs: 420_000, json: { schema: FINAL_QUALITY_SCHEMA },
+    prompt: [
+      `Tu es un examinateur exigeant. Pour chaque QCM, tranche selon les extraits du cours.`,
+      `key : true seulement si la clé est juste et la seule défendable ; false si elle est fausse, si une autre option est au moins aussi défendable ou s'il manque une bonne réponse.`,
+      `offCourse : true si la bonne réponse ou l'explication repose sur une notion ou un fait absent des extraits et qui n'est pas une connaissance générale de la matière. Un distracteur faux n'est pas hors cours.`,
+      `trivial : indices des mauvaises options qu'un étudiant qui ne connaît PAS le cours élimine quand même : absurde, hors sujet, marqueur d'absolu évident, incohérence grammaticale ou longueur qui trahit.`,
+      DATA_RULE, passages.length ? dataBlock("EXTRAITS DU COURS", passages) : "", "", body, "",
+      `Réponds UNIQUEMENT avec {"items":[{"index":0,"key":true,"offCourse":false,"trivial":[]}]}, un objet par QCM.`,
+    ].join("\n"),
+  }, { check: (v) => (Array.isArray(v?.items) && v.items.length >= items.length ? null : "il faut un verdict par QCM") });
+  step(`Audit final : clés, hors-cours et distracteurs contrôlés en un lot`, 79);
+  return applyFinalQualityVerdicts(items, out.items ?? []);
 }
 
 /** Étiquette d'un thème déjà couvert par une autre question de l'examen. */
@@ -1448,6 +1500,23 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     extraBudget -= pending.length;
     progress.add("QCM", pending.length); // réessai ajouté : le temps restant peut remonter
     step(`${count - all.length} QCM manquant(s) → ${pending.length} lot(s) de comblement`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
+  }
+  // Audit de sortie unique, calqué sur la rubrique du banc. Il porte sur tout le pool déjà payé :
+  // une clé fausse ou du hors-cours sont remplacés par un autre candidat sans nouvelle conception.
+  // Les distracteurs relevés sont réparés en UN lot, puis tout le pool repasse UNE seule fois.
+  if (verifiedCandidates.length) {
+    const audited = await finalQualityAudit(verifiedCandidates, step);
+    let selected = selectWithinTrivialBudget([], audited, count);
+    const flagged = selected.filter((it) => !!it.trivialDistractors?.length);
+    if (flagged.length) {
+      const repaired = await replaceTrivialDistractorsBatch(flagged, step, shared.language, false);
+      const byStem = new Map(flagged.map((it, i) => [it.stem, repaired[i] ?? it]));
+      selected = selected.map((it) => byStem.get(it.stem) ?? it);
+    }
+    const chosen = new Set(selected.map((it) => it.stem));
+    const reserves = audited.filter((it) => !chosen.has(it.stem));
+    const confirmed = await finalQualityAudit([...selected, ...reserves], step);
+    all.splice(0, all.length, ...selectWithinTrivialBudget([], confirmed, count));
   }
   // count>0 mais 0 QCM produit = tous les lots ont échoué → erreur claire (sauf drill 0 QCM + ouvertes).
   // H — DOUBLONS À L'ÉCHELLE DE L'EXAMEN (mock 4 de CS-290 : deux QCM sur le paradoxe de Simpson,

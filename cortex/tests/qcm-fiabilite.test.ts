@@ -97,6 +97,12 @@ const assistPrompts: string[] = [];
 const dedupePrompts: string[] = [];
 /** Paires en doublon que rend le contrôle de fin d'examen (aucune par défaut). */
 let dedupe: (prompt: string) => { first: number; second: number; reason: string }[] = () => [];
+let finalAuditCalls = 0;
+function finalAuditReply(prompt: string): string {
+  const items = [...prompt.matchAll(/^Q(\d+)\.[\s\S]*?(?=^Q\d+\.|$(?![\s\S]))/gm)]
+    .map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] }));
+  return JSON.stringify({ items });
+}
 /** Drill : n = rang de l'appel. */
 let drill: (n: number) => string = () => "{}";
 const VERDICT = { verdict: "correct", feedback: "Conforme au cours.", correct_solution: "Groupthink.", criteria: [
@@ -120,6 +126,7 @@ before(async () => {
       // le schéma de conception contient lui aussi des tableaux « "items" ».
       if (/"replacements"/.test(content)) { repairPrompts.push(content); text = repairReply(content); }
       else if (/"duplicates"/.test(content)) { dedupePrompts.push(content); text = JSON.stringify({ duplicates: dedupe(content) }); }
+      else if (/"offCourse"/.test(content)) { finalAuditCalls++; text = finalAuditReply(content); }
       else if (/"hints"/.test(content)) { assistPrompts.push(content); text = drill(assistPrompts.length); }
       else if (/RÉPONSE DE L'ÉTUDIANT/.test(content)) { assistPrompts.push(content); text = JSON.stringify(VERDICT); }
       else if (/"edge_case"/.test(content)) text = JSON.stringify(DESIGN);
@@ -142,7 +149,7 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { repairPrompts.length = 0; repairReply = defaultRepairReply; dedupePrompts.length = 0; dedupe = () => []; assistPrompts.length = 0; designCalls = 0; writeCalls = 0; designPrompts.length = 0; designBodies.length = 0; verifyPrompts.length = 0; judgeWeak = false; });
+beforeEach(() => { repairPrompts.length = 0; repairReply = defaultRepairReply; dedupePrompts.length = 0; dedupe = () => []; finalAuditCalls = 0; assistPrompts.length = 0; designCalls = 0; writeCalls = 0; designPrompts.length = 0; designBodies.length = 0; verifyPrompts.length = 0; judgeWeak = false; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -194,6 +201,7 @@ test("sorties problématiques du modèle → 7 QCM sur 7, code des énoncés int
   assert.ok(retry, "le lot illisible est redemandé avec l'erreur");
   assert.match(retry!, /sans JSON/);
   assert.ok(designBodies.every((b) => b.response_format), "la conception demande une sortie structurée");
+  assert.equal(finalAuditCalls, 2, "un audit final puis une seule ré-audit, sans cascade");
   const exam = await runWithCourse(id, () => getQcmExam(r.id));
   assert.equal(exam!.items.length, 7);
   assert.ok(exam!.items.some((it) => it.stem.includes(`${BT}python\nimport pandas as pd`)), "le bloc de code de l'énoncé est gardé tel quel");

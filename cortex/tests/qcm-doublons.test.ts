@@ -84,6 +84,7 @@ before(async () => {
       const content = parsed.messages.map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))).join("\n");
       let text = "{}";
       if (/"duplicates"/.test(content)) { dedupePrompts.push(content); text = dedupeReply(content); }
+      else if (/"offCourse"/.test(content)) text = JSON.stringify({ items: [...content.matchAll(/^Q(\d+)\./gm)].map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })) });
       else if (/"results"/.test(content)) text = verifyReply(content);
       else if (/"items"/.test(content)) {
         designCalls++;
