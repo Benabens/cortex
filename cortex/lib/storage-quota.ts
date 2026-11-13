@@ -94,7 +94,7 @@ export async function checkStorage(
     // l'usage payé priverait tous les comptes de génération.
     const tooFull = opts.minFreeBytes != null
       ? freeAfter < opts.minFreeBytes
-      : freeAfter / disk.total < storageMinFreeRatio();
+      : freeAfter / disk.total < (_statfs ? MIN_FREE_RATIO : storageMinFreeRatio());
     if (tooFull) {
       return {
         status: 413,
