@@ -1355,8 +1355,13 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // recombler même si l'audit suivant ne voit plus de doublon, puis auditer ce nouveau lot. Le budget
   // reste borné par la taille de l'examen et par la réserve de notions.
   const finalRoundBudget = Math.max(DEDUP_ROUNDS, Math.ceil(count / BATCH) + 2);
+  let repairAfterDedup = false;
   for (let round = 0; round <= finalRoundBudget && all.length >= 2; round++) {
     const { drop, notions, angles } = await duplicateItems(all, { strict, previous: recent.map((x) => x.stem) }).catch(() => ({ drop: [] as number[], notions: [] as string[], angles: [] as string[] }));
+    // Cette seconde enveloppe ne prolonge que les pertes qu'elle a elle-même causées. Un examen
+    // déjà incomplet après le budget de comblement principal conserve sa borne historique.
+    if (!drop.length && !repairAfterDedup) break;
+    if (drop.length) repairAfterDedup = true;
     const kept = all.filter((_, i) => !drop.includes(i));
     const keptIdx = all.map((_, i) => i).filter((i) => !drop.includes(i));
     all.splice(0, all.length, ...kept);
