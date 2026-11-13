@@ -91,6 +91,9 @@ Schémas de sortie : chaque `outputSchema` est publié **tolérant aux champs en
 claude.ai garde la liste d'outils en cache et rejetait une réponse portant un champ ajouté depuis
 (« data must NOT have additional properties », 28/10/2026, `format` et `note` de `generate_mock_exam`).
 Testé contre le validateur des clients MCP : `tests/mcp-output-schema.test.ts`.
+**Seule la racine est tolérante** : les objets imbriqués (ex. `costs` de `get_account_status`) sont
+encore publiés fermés. Un champ nouveau va donc à la racine (`costs_by_type`, 13/11), jamais dans
+un objet imbriqué existant ; `tests/mcp-tools.test.ts` montre qu'un ajout dans `costs` serait rejeté.
 
 ### Lecture (portée `cortex.read`, gratuites)
 
@@ -100,8 +103,8 @@ Testé contre le validateur des clients MCP : `tests/mcp-output-schema.test.ts`.
 | `get_study_plan` | `course?` | maîtrise et couverture pondérées, notions à revoir, répétition espacée, chapitres du plan, notion prioritaire + 3 suivantes, notions (40 max, par priorité), compte à rebours |
 | `get_weak_points` | `course?`, `limit?` (≤ 50) | points faibles par gravité (sujet, thème, description bornée), regroupement par thème, concepts dus en répétition espacée |
 | `get_results` | `course?`, `limit?` (≤ 30) | examens blancs générés (date, statut, nb de questions, vérification), scores de maîtrise par notion, retours notés |
-| `search_course_materials` | `course?`, `query` (2-200 car.), `limit?` (≤ 30) | passages des sources du cours (titre, type, extrait borné) |
-| `get_account_status` | — | solde (achetés + abonnement), coûts, quotas du jour utilisés / plafonds |
+| `search_course_materials` | `course?`, `query` (2-200 car.), `limit?` (≤ 30) | passages des sources du cours (titre, type, extrait d'environ 300 caractères autour du passage, termes entre « ») ; une source marquée hors programme (titre ou début de note) passe après les supports du cours, type suffixé « (hors programme) » |
+| `get_account_status` | — | solde (achetés + abonnement), coûts (`costs`, figé depuis #52 ; détail par type, QCM compris, dans `costs_by_type`, lu dans `CREDITS_COST_JSON`), quotas du jour utilisés / plafonds |
 | `get_job_status` | `course?`, `job_id?` | état d'une génération (statut, avancement, étape, erreur) ; terminée : énoncés de l'examen (+ corrigés si `include_solutions`) et liens vers l'app ; sans `job_id` : job en cours + récents |
 
 ### Génération (portée `cortex.generate`, coût annoncé puis confirmé)
