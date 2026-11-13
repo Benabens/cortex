@@ -399,7 +399,7 @@ export function insufficient(balanceCenti: number, costCenti: number, subCenti =
     const dont = subCenti > 0 ? ` (dont ${fmtCredits(subCenti)} d'abonnement ce mois-ci)` : "";
     return {
       status: 402,
-      error: `Solde insuffisant : il te faut ${fmtCredits(costCenti)} crédit(s) — solde ${fmtCredits(balanceCenti)}${dont}. Acheter : https://app.cortexexam.com/compte#credits`,
+      error: `Solde insuffisant : il te faut ${fmtCredits(costCenti)} crédit(s), génération à ${fmtCredits(costCenti)} — solde ${fmtCredits(balanceCenti)}${dont}. Acheter : https://app.cortexexam.com/compte#credits`,
     };
   }
   return null;
