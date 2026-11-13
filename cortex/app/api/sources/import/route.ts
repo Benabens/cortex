@@ -1,11 +1,11 @@
 import { currentUser } from "@/db/context";
 import { coursePaths, getCourse } from "@/lib/courses";
-import { COURSE_IMPORT_MAX_BYTES, FOLDER_EXTENSIONS, SOURCE_FILE_MAX_BYTES } from "@/lib/folder-import";
+import { FOLDER_EXTENSIONS, SOURCE_FILE_MAX_BYTES } from "@/lib/folder-import";
 import { classifyFile } from "@/lib/import-folder";
 import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { extractOfficeText, OfficeDocumentError, type OfficeExtension } from "@/lib/office-documents";
 import { requireCourse } from "@/lib/req";
-import { checkStorage, declaredBytes } from "@/lib/storage-quota";
+import { checkStorage, declaredBytes, storageQuotaBytes } from "@/lib/storage-quota";
 import { readFormData, UPLOAD_LIMITS, withBodyLimit } from "@/lib/upload-limit";
 import fs from "node:fs";
 import path from "node:path";
@@ -84,8 +84,9 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   }
 
   const { refsDir, contentRoot } = coursePaths(course);
-  if (directoryBytes(refsDir) + directoryBytes(contentRoot) + file.size > COURSE_IMPORT_MAX_BYTES) {
-    return NextResponse.json({ error: `${file.name} : plafond de 150 Mo atteint pour ce cours.` }, { status: 413 });
+  const courseMax = storageQuotaBytes();
+  if (courseMax !== null && directoryBytes(refsDir) + directoryBytes(contentRoot) + file.size > courseMax) {
+    return NextResponse.json({ error: `${file.name} : plafond de ${Math.round(courseMax / (1024 * 1024))} Mo atteint pour ce cours (quota de stockage configurable).` }, { status: 413 });
   }
   const { bucket } = classifyFile(rel);
   const name = path.basename(rel);

@@ -287,7 +287,8 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
         )}
         <p className="mt-2 text-[0.76rem] leading-relaxed text-ink-3">
           Finals et midterms partent dans tes annales (ils décident du format) ; slides,
-          séries, documents Word et notes rejoignent le corpus.
+          séries, documents Word et notes rejoignent le corpus. 30 Mo maximum par fichier ;
+          le total du cours suit le quota de stockage de ton compte.
         </p>
       </div>
 
