@@ -8,6 +8,7 @@ import { WeightBar } from "@/components/viz/WeightBar";
 import { Segmented } from "@/components/ui/Segmented";
 import { useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@/lib/ux/api";
 import { cn } from "@/lib/ux/cn";
+import { PaywallNotice } from "@/components/billing/PaywallNotice";
 
 const ACCEPT = ".pdf,.html,.htm,.txt,.md";
 /** Un dossier de cours contient plus que des annales : slides, séries, images, notes. */
@@ -44,6 +45,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   const [uploading, setUploading] = useState(false);
   const [uploadedMsg, setUploadedMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [paywall, setPaywall] = useState(false);
   const [jobId, setJobId] = useState<number | null>(null);
   const [jobKind, setJobKind] = useState<"format" | "ingest" | "prepare" | null>(null);
   const job = useJob(jobId);
@@ -157,14 +159,17 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   const prepare = async () => {
     if (running) return;
     setError(null);
+    setPaywall(false);
     setUploadedMsg(null);
     try {
       const res = await fetch(`/api/prepare?course=${encodeURIComponent(courseId)}`, { method: "POST" });
       const d = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
+      if (!res.ok) throw { status: res.status, message: d?.error ?? `Erreur ${res.status}` } as ApiError;
       startJob(d.jobId, "prepare");
     } catch (e) {
-      setError((e as Error).message || "Impossible de lancer la préparation.");
+      const err = e as ApiError;
+      setPaywall(err.status === 402);
+      setError(err.message || "Impossible de lancer la préparation.");
     }
   };
 
@@ -272,6 +277,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
       </div>
 
       {/* progression de job (format / ingest / prepare) */}
+      {paywall && <PaywallNotice credits={2} />}
       {running && job && (
         <div className="rounded-lg border border-line bg-surface-2/30 px-3.5 py-3" aria-live="polite">
           <div className="mb-2 flex items-center justify-between text-[0.78rem]">
