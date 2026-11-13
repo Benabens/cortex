@@ -200,7 +200,7 @@ test("sorties problématiques du modèle → 7 QCM sur 7, code des énoncés int
   assert.doesNotMatch(exam!.verifySummary ?? "", /sur 7/, "un examen complet ne signale rien");
 });
 
-test("lot valide sans rejet ni distracteur trivial : arrêt après la vérification du lot", async () => {
+test("lot name_only sans indice trivial : une régénération maximum puis secours vérifié", async () => {
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam } = await import("../lib/qcm");
@@ -208,8 +208,8 @@ test("lot valide sans rejet ni distracteur trivial : arrêt après la vérificat
   design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
   const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
   assert.equal(r.count, 4);
-  assert.equal(designCalls, 1, "la difficulté perfectible ne déclenche pas une seconde conception complète");
-  assert.equal(verifyPrompts.length, 1, "une seule vérification groupée suffit");
+  assert.equal(designCalls, 2, "une seule régénération ciblée est tentée");
+  assert.equal(verifyPrompts.length, 2, "le secours vérifié est conservé si le défaut persiste");
 });
 
 test("un candidat résiduel refusé tôt redevient admissible après l'arrivée de QCM propres", async () => {
