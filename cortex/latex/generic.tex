@@ -1,0 +1,10 @@
+% ============================================================================
+% Compléments du préambule pour les cours HORS CS-202 (lib/exam-latex.ts).
+% Fichier de confiance (lib/tex-guard) : jamais ajouté au rendu de CS-202,
+% dont l'empreinte .tex reste byte-identique.
+% ============================================================================
+% Indicatrice 𝟙 : \mathbb{1} d'amssymb n'a pas de chiffre et rend un glyphe
+% cassé (prod du 13/11, test-e2e-calcul-matriciel) ; le rendu réécrit
+% \mathbb{1}, \mathbbm{1} et 𝟙 en \indic.
+\usepackage{dsfont}
+\providecommand{\indic}{\mathds{1}}

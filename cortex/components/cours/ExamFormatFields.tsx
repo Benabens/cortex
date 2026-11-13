@@ -8,13 +8,13 @@
  * restent prioritaires.
  */
 
-import type { AnswerMode } from "@/lib/exam-format";
+import type { AnswerMode, DocumentRule } from "@/lib/exam-format";
 
-export type ExamFormatDraft = { kind: string; questionCount: string; durationMin: string; language: string; answerMode: string };
+export type ExamFormatDraft = { kind: string; questionCount: string; durationMin: string; language: string; answerMode: string; documents: string };
 
-export type DeclaredFormatDto = { kind: string; questionCount: number | null; durationMin: number | null; language: string | null; answerMode?: AnswerMode };
+export type DeclaredFormatDto = { kind: string; questionCount: number | null; durationMin: number | null; language: string | null; answerMode?: AnswerMode; documents?: DocumentRule };
 
-export const EMPTY_FORMAT: ExamFormatDraft = { kind: "", questionCount: "", durationMin: "", language: "", answerMode: "" };
+export const EMPTY_FORMAT: ExamFormatDraft = { kind: "", questionCount: "", durationMin: "", language: "", answerMode: "", documents: "" };
 
 const KINDS: { value: string; label: string }[] = [
   { value: "", label: "Je ne sais pas encore" },
@@ -32,6 +32,14 @@ const REPONSES: { value: "" | AnswerMode; label: string }[] = [
   { value: "single", label: "Une seule bonne réponse" },
   { value: "multiple", label: "Une ou plusieurs bonnes réponses" },
   { value: "mixed", label: "Selon la question" },
+];
+
+/** Documents permis (lib/exam-format, DOCUMENT_RULES) : imprimés sur la garde de l'examen blanc ; rien si non précisé. */
+const DOCUMENTS: { value: "" | DocumentRule; label: string }[] = [
+  { value: "", label: "Non précisé" },
+  { value: "none", label: "Aucun document" },
+  { value: "notes", label: "Notes personnelles" },
+  { value: "open", label: "Tous les documents" },
 ];
 
 const hasChoices = (kind: string) => kind === "qcm" || kind === "mixed";
@@ -53,6 +61,7 @@ export function formatDraftOf(f: DeclaredFormatDto | null | undefined): ExamForm
     durationMin: f.durationMin ? String(f.durationMin) : "",
     language: f.language ?? "",
     answerMode: f.answerMode ?? "",
+    documents: f.documents ?? "",
   };
 }
 
@@ -63,6 +72,7 @@ export function formatPayload(d: ExamFormatDraft): DeclaredFormatDto | null {
   return {
     kind: d.kind, questionCount: n(d.questionCount), durationMin: n(d.durationMin), language: d.language || null,
     ...(hasChoices(d.kind) && d.answerMode ? { answerMode: d.answerMode as AnswerMode } : {}),
+    ...(d.documents ? { documents: d.documents as DocumentRule } : {}),
   };
 }
 
@@ -124,6 +134,14 @@ export function ExamFormatFields({
           <select value={value.language} onChange={set("language")} disabled={!value.kind} className={fieldClass}>
             {LANGUES.map((l) => (
               <option key={l.value} value={l.value}>{l.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[0.78rem] text-ink-3">Documents autorisés</span>
+          <select value={value.documents} onChange={set("documents")} disabled={!value.kind} className={fieldClass}>
+            {DOCUMENTS.map((d) => (
+              <option key={d.value} value={d.value}>{d.label}</option>
             ))}
           </select>
         </label>
