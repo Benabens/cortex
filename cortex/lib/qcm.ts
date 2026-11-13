@@ -413,11 +413,6 @@ function weaknessOf(it: QcmItem): string | null {
   return null;
 }
 
-/** Le seul défaut d'un QCM vérifié est-il un ou des distracteurs éliminables sans le cours ? */
-function onlyTrivialDistractors(it: QcmItem): boolean {
-  return !!it.trivialDistractors?.length && !it.rejected && !it.figureFile && weaknessOf({ ...it, trivialDistractors: null }) === null;
-}
-
 /**
  * Garde les meilleurs QCM déjà vérifiés tout en bornant à 10 % la part des distracteurs
  * signalés comme triviaux. Les candidats propres passent d'abord ; une question légèrement
@@ -1222,33 +1217,11 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       .map((it) => ({ it, i: items.indexOf(it), why: weaknessOf(it) }))
       .filter((w): w is { it: QcmItem; i: number; why: string } => !!w.why);
     if (!all.length) return items;
-    // Seuls des distracteurs triviaux : on les remplace (énoncé et clé gardés) ; le reste est régénéré.
+    // Les distracteurs triviaux seront réparés en un seul appel pour tout le groupe de lots ; ici,
+    // seules les autres faiblesses imposent encore une régénération de la question entière.
     const fixable = all.filter((w) => w.it.verified === 1 && !w.it.rejected && !!w.it.trivialDistractors?.length);
     const weak = all.filter((w) => !fixable.includes(w));
-    const repaired = fixable.length
-      ? replaceTrivialDistractors(fixable.map((w) => w.it), step, shared.language).catch((e) => {
-        step(`Remplacement des distracteurs ignoré (${(e as Error).message.slice(0, 50)})`, 0);
-        return fixable.map((w) => w.it);
-      })
-      : Promise.resolve([] as QcmItem[]);
-    const regenerated = weak.length ? regenerate(bt, items, weak) : Promise.resolve(items);
-    const [fixed, initial] = await Promise.all([repaired, regenerated]);
-    let out = initial;
-    fixable.forEach((w, k) => {
-      const n = fixed[k];
-      // Rendu tel quel (remplacement échoué) : l'item d'origine suit la règle commune.
-      if (!n || n === w.it || n.verified !== 1 || n.rejected) return;
-      if (!n.rejected && !n.trivialDistractors?.length) { out[w.i] = { ...n, slot: w.it.slot }; return; }
-      if (onlyTrivialDistractors(n)) step(`QCM à régénérer après une réparation : un distracteur reste éliminable sans le cours`, 0);
-    });
-    // Après cette unique réparation groupée, un résidu trivial reste candidat au budget global
-    // de 10 %. Le régénérer ici ajoutait conception + vérification à chaque lot, puis trois rondes
-    // de comblement, alors qu'une question absente est plus dommageable pour l'étudiant.
-    fixable.forEach((w, k) => {
-      const n = fixed[k];
-      if (n?.verified === 1 && !n.rejected && onlyTrivialDistractors(n)) out[w.i] = { ...n, slot: w.it.slot };
-    });
-    return out;
+    return weak.length ? regenerate(bt, items, weak) : items;
   };
   /** Régénère en entier les QCM faibles (autre défaut que des distracteurs triviaux). */
   const regenerate = async (bt: Batch, items: QcmItem[], weak: { it: QcmItem; i: number; why: string }[]): Promise<QcmItem[]> => {
@@ -1361,6 +1334,22 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // nouveaux lots, au plus TOPUP_ROUNDS rondes et autant de lots en plus que de lots prévus.
   // En dessous malgré tout, l'examen le dit (requested) et le job rembourse au prorata.
   const all: QcmItem[] = [];
+  /** Une réparation et une revérification pour tous les lots lancés ensemble, jamais une paire par lot. */
+  const repairGroup = async (results: { items: QcmItem[]; error: unknown }[]): Promise<void> => {
+    const refs = results.flatMap((g) => g.items.map((it, i) => ({ g, i, it })))
+      .filter(({ it }) => it.verified === 1 && !it.rejected && !!it.trivialDistractors?.length);
+    if (!refs.length) return;
+    try {
+      const fixed = await replaceTrivialDistractors(refs.map(({ it }) => it), step, shared.language);
+      const checked = fixed.length ? await verifyQcmBatch(fixed, step) : [];
+      refs.forEach(({ g, i, it }, k) => {
+        const n = checked[k];
+        if (n) g.items[i] = { ...n, slot: it.slot };
+      });
+    } catch (e) {
+      step(`Remplacement groupé des distracteurs ignoré (${(e as Error).message.slice(0, 50)})`, 0);
+    }
+  };
   let pending = batches;
   let extraBudget = batches.length * TOPUP_ROUNDS;
   for (let round = 0; pending.length; round++) {
@@ -1371,6 +1360,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     for (let b = 0; b < pending.length; b += width) {
       const group = pending.slice(b, b + width);
       const got = await Promise.all(group.map(safeBatch));
+      await repairGroup(got);
       got.forEach((g, k) => {
         const before = new Set(all);
         const selected = selectWithinTrivialBudget(all, g.items, count);
@@ -1450,6 +1440,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       ? `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen — n'en reprends AUCUNE, même sous un autre angle : ${[...new Set(taken.map((i) => sanitizeCorpus(notions[i]).slice(0, 80)))].join(" · ")}.`
       : `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen, avec leur angle — si tu reprends l'une d'elles, teste un angle vraiment distinct : ${taken.map((i) => `${sanitizeCorpus(notions[i]).slice(0, 60)} (${sanitizeCorpus(angles[i] || "?").slice(0, 60)})`).join(" · ")}.`;
     const got = await safeBatch({ topics: spare, molds: spare.map(() => null), guidance });
+    await repairGroup([got]);
     if (got.error) lastError = got.error;
     all.splice(0, all.length, ...selectWithinTrivialBudget(all, got.items, count));
   }
