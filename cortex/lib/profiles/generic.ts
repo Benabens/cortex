@@ -37,7 +37,6 @@ const GENERIC_LATEX_CONTRACT = [
   `Macros disponibles (utilise-les) :`,
   `  - \\subq{1.1}{Titre de la sous-question}{16}  → en-tête de sous-question avec points.`,
   `  - \\cn{1} \\cn{2} \\cn{3}  → énumérateurs entourés ① ② ③.`,
-  `  - \\callout{This question is \\textbf{\\large FOR ALL STUDENTS.}}  → encadré centré.`,
   `  - \\rulelines{6}  → APRÈS CHAQUE sous-question : un espace-réponse ligné (choisis le nb de lignes selon la charge attendue). JAMAIS un simple blanc.`,
   `Conventions LaTeX :`,
   `  - Listes : \\begin{itemize}...\\end{itemize} ; options a) b) c) : \\begin{enumerate}[label=\\alph*)]...\\end{enumerate}.`,

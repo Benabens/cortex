@@ -107,7 +107,7 @@ WORKDIR /app/cortex
 RUN set -eux; \
     mkdir -p /tmp/tectonic-warm; \
     cp latex/epfl-logo.png /tmp/tectonic-warm/ 2>/dev/null || true; \
-    cat latex/preamble.tex latex/figures.tex > /tmp/tectonic-warm/warm.tex; \
+    cat latex/preamble.tex latex/figures.tex latex/generic.tex > /tmp/tectonic-warm/warm.tex; \
     printf '\n\\newcommand{\\FOOTDATE}{Warm}\n\\begin{document}\nWarm-up.\n\\end{document}\n' >> /tmp/tectonic-warm/warm.tex; \
     (cd /tmp/tectonic-warm && /usr/local/bin/tectonic --chatter minimal warm.tex) \
       || echo "AVERTISSEMENT: warm-up tectonic incomplet (bundle téléchargé au 1er run)"; \

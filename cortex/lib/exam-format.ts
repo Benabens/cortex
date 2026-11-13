@@ -37,6 +37,10 @@ export type Language = (typeof LANGUAGES)[number];
 export const ANSWER_MODES = ["single", "multiple", "mixed"] as const;
 export type AnswerMode = (typeof ANSWER_MODES)[number];
 
+/** Documents permis pendant l'examen : aucun, notes personnelles, tous. */
+export const DOCUMENT_RULES = ["none", "notes", "open"] as const;
+export type DocumentRule = (typeof DOCUMENT_RULES)[number];
+
 /** Format DÉCLARÉ par l'étudiant (fiche du cours, app ou connecteur). */
 export type DeclaredFormat = {
   kind: ExamKind;
@@ -46,6 +50,8 @@ export type DeclaredFormat = {
   language: string | null;
   /** Absent = rien de déclaré : les sources, sinon la réponse unique. */
   answerMode?: AnswerMode;
+  /** Absent = rien de déclaré : la garde de l'examen n'en dit rien. */
+  documents?: DocumentRule;
 };
 
 export class InvalidFormatError extends Error {
@@ -194,7 +200,14 @@ export function parseDeclaredFormat(input: unknown): DeclaredFormat | null {
     if (!(ANSWER_MODES as readonly string[]).includes(m)) throw new InvalidFormatError(`Mode de réponse non reconnu : « ${String(rawMode)} » (attendu : réponse unique, réponses multiples ou mixte).`);
     answerMode = m as AnswerMode;
   }
-  return { kind: kind as ExamKind, questionCount, durationMin, language, ...(answerMode ? { answerMode } : {}) };
+  const rawDocs = o.documents;
+  let documents: DocumentRule | null = null;
+  if (rawDocs !== undefined && rawDocs !== null && rawDocs !== "") {
+    const d = String(rawDocs).trim().toLowerCase();
+    if (!(DOCUMENT_RULES as readonly string[]).includes(d)) throw new InvalidFormatError(`Règle de documents non reconnue : « ${String(rawDocs)} » (attendu : aucun, notes personnelles ou tous).`);
+    documents = d as DocumentRule;
+  }
+  return { kind: kind as ExamKind, questionCount, durationMin, language, ...(answerMode ? { answerMode } : {}), ...(documents ? { documents } : {}) };
 }
 
 /** Réponse unique quand rien ne dit le contraire (sans annale, sans déclaration, sources muettes). */
@@ -489,11 +502,13 @@ export async function courseLanguageName(): Promise<string> {
  * résolution du cours dans ce process, sinon la déclaration, la langue et le
  * code du cours (discipline sans échantillon de corpus).
  */
-export function formatContextFor(courseId: string): { kind: ExamKind | null; language: string; discipline: Discipline } {
+export function formatContextFor(courseId: string): { kind: ExamKind | null; language: string; discipline: Discipline; durationMin: number | null; documents: DocumentRule | null } {
   const known = memo.get(courseId);
-  if (known) return { kind: known.kind, language: known.language, discipline: known.discipline };
   const c = getCourse(courseId);
-  return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || "fr", discipline: inferDiscipline({ code: c.examCode }) };
+  // Les documents permis ne viennent que de la déclaration : aucune source ne les détecte.
+  const documents = c.examFormat?.documents ?? null;
+  if (known) return { kind: known.kind, language: known.language, discipline: known.discipline, durationMin: known.durationMin, documents };
+  return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || "fr", discipline: inferDiscipline({ code: c.examCode }), durationMin: c.examFormat?.durationMin ?? null, documents };
 }
 
 /**

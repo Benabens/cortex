@@ -3,7 +3,7 @@ import type { CourseConfig } from "@/lib/courses";
 import { courseLabel } from "./courses";
 import { fmtCredits, toCenti } from "@/lib/billing/credits";
 import { QUOTA_LABEL, type DeclinedView, type QuoteView } from "./tool";
-import { ANSWER_MODES, EXAM_KINDS, LANGUAGES, type ExamFormat } from "@/lib/exam-format";
+import { ANSWER_MODES, DOCUMENT_RULES, EXAM_KINDS, LANGUAGES, type ExamFormat } from "@/lib/exam-format";
 
 /** Pièces de schéma partagées par les outils (entrées et sorties). */
 
@@ -82,4 +82,5 @@ export const examFormatInput = {
   duration_min: z.number().int().min(5).max(600).optional().describe("Exam duration in minutes."),
   language: z.enum(LANGUAGES).optional().describe("Language of the exam, when it differs from the course language."),
   answer_mode: z.enum(ANSWER_MODES).optional().describe("Multiple-choice exams: single (exactly one correct answer per question, the default when nothing says otherwise), multiple (one or more correct answers), or mixed. Past exams, when present, decide instead."),
+  documents: z.enum(DOCUMENT_RULES).optional().describe("Documents allowed during the exam: none, notes (personal notes / cheat sheet) or open (everything). Printed on the cover of the mock exam; omit when unknown."),
 };
