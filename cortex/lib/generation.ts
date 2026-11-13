@@ -24,14 +24,17 @@ export type StartRefused = { ok: false; status: number; error: string; command?:
 
 export async function startGenerationJob(type: JobType, target?: string): Promise<StartedJob | StartRefused> {
   return startJob(type, target, async () => {
+    // Le paywall précède les contraintes de contenu : à solde nul, toute
+    // tentative de génération doit expliquer le coût et proposer l'achat,
+    // même si le cours n'est pas encore prêt ou son format encore inconnu.
+    const issue = await preflightGeneration(type);
+    if (issue) return { ok: false, status: issue.status, error: issue.error, command: issue.command };
     // Un examen blanc suit le format du cours ; inconnu, il n'est jamais inventé (lib/exam-format).
-    // Vérifié en premier : c'est gratuit, et c'est ce que l'étudiant doit corriger.
     if (type === "exam") {
       const plan = planMockExam(requestedFormat(await resolveExamFormat(), targetKind(target)), {});
       if (plan.generator === "none") return { ok: false, status: 409, error: plan.reason };
     }
-    const issue = await preflightGeneration(type);
-    return issue && { ok: false, status: issue.status, error: issue.error, command: issue.command };
+    return null;
   });
 }
 
