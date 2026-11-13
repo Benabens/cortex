@@ -1324,7 +1324,10 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
     }
     const stop = llmErrorCode(lastError);
-    if (!missing.length || all.length >= count || round >= TOPUP_ROUNDS || extraBudget <= 0 || (stop && HARD_STOP_CODES.has(stop))) break;
+    // completeJson a déjà essayé trois fois chaque lot illisible. Si aucun lot n'a produit le
+    // moindre item et qu'une erreur LLM existe, répéter trois rondes identiques multiplie seulement
+    // les appels (12 au banc) ; les pertes de qualité, elles, n'ont pas `g.error` et restent comblées.
+    if ((!all.length && lastError) || !missing.length || all.length >= count || round >= TOPUP_ROUNDS || extraBudget <= 0 || (stop && HARD_STOP_CODES.has(stop))) break;
     pending = [];
     for (let i = 0; i < missing.length && pending.length < extraBudget; i += BATCH) {
       const slice = missing.slice(i, i + BATCH);

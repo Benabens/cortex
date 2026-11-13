@@ -75,9 +75,10 @@ export function estimateRemaining(i: EtaInput): Eta {
   if (i.elapsedMs > expected * LATE_FACTOR && progress < 95) {
     return { remainingMs: null, late: true, basis, label: "Plus long que d'habitude — la génération continue" };
   }
-  // La part non faite de la durée attendue. Rien ne dépend du temps écoulé : une étape longue ne
-  // fait pas remonter l'estimation ; elle ne remonte que si l'avancement recule, c'est-à-dire
-  // quand la génération AJOUTE un réessai (lib/progress).
-  const remaining = expected * (1 - progress / 100);
+  // L'avancement peut être provisoirement haut avant que les contrôles ajoutent leurs lots de
+  // reprise. Il ne doit donc jamais annoncer moins que le simple compte à rebours historique.
+  // Les deux bornes décroissent à état constant ; seule l'ajout explicite d'un réessai peut faire
+  // remonter la composante liée à l'avancement (lib/progress).
+  const remaining = Math.max(expected * (1 - progress / 100), expected - i.elapsedMs, 0);
   return { remainingMs: remaining, late: false, basis, label: `${minutes(remaining)}${suffix}` };
 }
