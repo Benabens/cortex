@@ -57,7 +57,7 @@ test("nouveau compte à 0 crédit : import et consultation gratuits, préparatio
   const created = await api<{ course: { id: string } }>(page, "/api/courses", { method: "POST", body: JSON.stringify({ name: `Cours sans crédit ${Date.now()}` }) });
   expect(created.status).toBe(201);
 
-  const imported = await page.request.post(`/api/sources/add?course=${encodeURIComponent(created.body.course.id)}&category=content`, {
+  const imported = await page.request.post(`/api/sources/add?course=${encodeURIComponent(created.body.course.id)}&category=lecture`, {
     multipart: { file: { name: "cours.txt", mimeType: "text/plain", buffer: Buffer.from("Cours E2E sur les limites et les intégrales.") } },
   });
   expect(imported.status()).toBe(200);
