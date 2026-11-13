@@ -137,7 +137,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
       if (d.error) setErr(d.error);
       else {
         setGraded(d);
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
       }
     } catch {
       setErr("Correction impossible.");
@@ -156,7 +156,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
         <div
           role="alert"
           className="card card-pad"
-          style={{ color: "var(--red)" }}
+          style={{ color: "var(--red-ink)" }}
         >
           {err}
           <button
@@ -181,7 +181,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
   return (
     <ExamFrame
       id={exam.id}
-      description={`${exam.items.length} questions à choix${exam.open.length ? ` + ${exam.open.length} ouverte(s)` : ""} · réponds, puis corrige-toi. SCQ = une seule case ; MCQ = une ou plusieurs.`}
+      description={`${exam.items.length} questions à choix${exam.open.length ? ` et ${exam.open.length} question${exam.open.length > 1 ? "s" : ""} à rédiger` : ""} : réponds, puis corrige-toi.`}
       pdf={exam.pdf}
       solutions={exam.solutions}
       qs={qs}
@@ -191,7 +191,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
         <div
           role="alert"
           className="card card-pad mb-4"
-          style={{ color: "var(--red)" }}
+          style={{ color: "var(--red-ink)" }}
         >
           {err}
         </div>
@@ -266,7 +266,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
                           : "var(--accent-ink)",
                     }}
                   >
-                    {it.type.toUpperCase()}
+                    {it.type === "mcq" ? "plusieurs réponses" : "une réponse"}
                   </span>
                 </span>
                 {det && (
@@ -410,9 +410,9 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
       {exam.open.length > 0 && (
         <div className="mt-7">
           <div className="section-head">
-            <span className="section-title">
-              Partie ouverte : {exam.open.length} question(s) à rédiger
-            </span>
+            <h2 className="section-title">
+              Partie ouverte : {exam.open.length} question{exam.open.length > 1 ? "s" : ""} à rédiger
+            </h2>
           </div>
           <div className="flex flex-col gap-4">
             {exam.open.map((o, i) => {

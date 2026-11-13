@@ -12,7 +12,6 @@ import { cn } from "@/lib/ux/cn";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
 
 const V = "var(--color-accent)";
-const C = "var(--color-cyan)";
 
 /**
  * Compositeur RÉEL (REFONTE ALLÉGÉE) : la PROPOSITION par défaut (format réel du final) suffit —
@@ -111,8 +110,8 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
   return (
     <div className={styles.split}>
       {/* Composer */}
-      <Panel className="p-6 sm:p-8">
-        <h2 className="font-display text-[1.5rem] font-semibold leading-tight text-ink-1">Compositeur d’examen</h2>
+      <Panel className="p-6">
+        <h2 className="text-[1.2rem] font-semibold leading-tight text-ink-1">Compositeur d’examen</h2>
 
         {/* composition : proposition compacte (défaut) + disclosure de réglage fin */}
         <div className="mt-6 rounded-2xl border border-line bg-surface-2/40">
@@ -140,7 +139,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
               {isQcm ? (
                 <div className="space-y-5">
                   <SliderRow label="QCM" hint={`proposé : ${q.qcm}`} color={V} value={nQcm} max={40} onChange={setNQcm} />
-                  <SliderRow label="Questions ouvertes" hint={`proposé : ${q.open}`} color={C} value={nOpen} max={12} onChange={setNOpen} />
+                  <SliderRow label="Questions ouvertes" hint={`proposé : ${q.open}`} color={V} value={nOpen} max={12} onChange={setNOpen} />
                 </div>
               ) : (
                 <SliderRow label={`${unit[0].toUpperCase()}${unit.slice(1)}s`} hint={`proposé : ${"exercises" in plan ? plan.exercises : 6}`} color={V} value={nExos} min={1} max={12} onChange={setNExos} />
@@ -165,7 +164,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
             <span className="inline-flex min-w-0 items-center gap-2">
               <Target className="size-3.5 shrink-0" strokeWidth={2.25} />
               <span className="truncate">
-                Mets l’accent sur un thème
+                Mets l’accent sur une notion
                 {!focusOpen && focus.trim() && <span className="ml-1 text-accent-hi">· {focus.trim()}</span>}
               </span>
             </span>
@@ -178,10 +177,10 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
                 value={focus}
                 onChange={(e) => setFocus(e.target.value)}
                 autoFocus
-                placeholder={isQcm ? "ex. régularisation, PCA, backprop…" : "ex. un thème précis à travailler"}
+                placeholder={isQcm ? "ex. régularisation, PCA, backprop…" : "ex. une notion précise à travailler"}
                 className="w-full rounded-lg border border-line-strong bg-surface-2/40 px-3.5 py-2.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] focus:outline-none focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-accent)_28%,transparent)]"
               />
-              <p className="mt-1.5 text-[0.74rem] text-ink-4">Un thème, pas un format : 1-2 questions porteront dessus, sans monopoliser l’examen.</p>
+              <p className="mt-1.5 text-[0.74rem] text-ink-4">Une notion, pas un format : 1 ou 2 questions porteront dessus, sans monopoliser l’examen.</p>
             </div>
           )}
         </div>
@@ -225,7 +224,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
       <div className="flex flex-col gap-5">
         <Panel className="p-6">
           <h2 className="text-[1.2rem] font-semibold text-ink-1">Format détecté</h2>
-          <span className="mt-2 inline-flex rounded-full border border-line bg-surface-2/50 px-2.5 py-1 text-[0.72rem] font-medium text-cyan-hi">
+          <span className="mt-2 inline-flex rounded-full border border-line bg-surface-2/50 px-2.5 py-1 text-xs font-medium text-ink-2">
             {isQcm ? "QCM et questions ouvertes" : "Exercices ouverts"}
           </span>
           <p className="mt-3 text-[0.85rem] leading-relaxed text-ink-2">{plan.summary}</p>

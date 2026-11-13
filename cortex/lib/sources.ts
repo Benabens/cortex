@@ -101,7 +101,7 @@ export async function ingestRefFile(relPath: string): Promise<number> {
   const chunks = pages.length ? pages : [""];
   for (const [i, text] of chunks.entries()) {
     if (text.length < 3) continue;
-    const label = chunks.length > 1 ? `${title} — p.${i + 1}` : title;
+    const label = chunks.length > 1 ? `${title}, p. ${i + 1}` : title;
     const anchor = chunks.length > 1 ? `${relPath}#page=${i + 1}` : relPath;
     const itemId = await q.insert(
       INS_ITEM_SQL,

@@ -122,7 +122,7 @@ export const EXAM_SOURCE_TYPES = ["final", "midterm", "sample_questions", "exam_
 /** Ce qu'il faut déclarer quand rien ne dit la forme de l'épreuve. */
 export const FORMAT_UNKNOWN_MESSAGE =
   "Format d'examen inconnu pour ce cours : aucune annale, aucun format déclaré, et rien dans les sources ne décrit la forme de l'épreuve. " +
-  "Indique-le avant de générer (type : QCM, exercices, mixte, essai ou oral ; nombre de questions ; durée ; langue) — Cortex ne l'invente pas.";
+  "Indique-le avant de générer (type : QCM, exercices, mixte, essai ou oral ; nombre de questions ; durée ; langue). Cortex ne l'invente pas.";
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.floor(n)));
 const positive = (n: number | null | undefined): n is number => typeof n === "number" && Number.isFinite(n) && n > 0;
@@ -400,7 +400,7 @@ const ANSWER_LABEL: Record<AnswerMode, string> = { single: "à réponse unique",
 /** Le résumé d'un format à choix dit son mode de réponse (sauf s'il le dit déjà). */
 function withAnswerMode(summary: string, mode: AnswerMode | null | undefined): string {
   if (!mode || !summary || /réponses? (?:unique|multiples?)/i.test(summary)) return summary;
-  return `${summary} — ${ANSWER_LABEL[mode]}`;
+  return `${summary}, ${ANSWER_LABEL[mode]}`;
 }
 
 function describe(f: Omit<ExamFormat, "summary">): string {

@@ -25,9 +25,9 @@ export default function DashboardPage() {
     return (
       <Panel className="flex flex-col items-center gap-3 rounded-xl px-6 py-12 text-center">
         <WifiOff className="size-6 text-danger-hi" strokeWidth={2} aria-hidden="true" />
-        <p className="text-[0.95rem] font-medium text-ink-1">Impossible de charger ta priorité</p>
+        <h1 className="text-[0.95rem] font-medium tracking-normal text-ink-1">Impossible de charger ta priorité</h1>
         <p className="max-w-xs text-[0.85rem] leading-relaxed text-ink-3">
-          Le moteur ne répond pas. Vérifie que l’app tourne, puis réessaie.
+          Cortex ne répond pas pour l’instant. Réessaie dans un moment.
         </p>
         <Button variant="secondary" size="sm" onClick={refetch}>
           <RotateCw className="size-4" strokeWidth={2.25} aria-hidden="true" />

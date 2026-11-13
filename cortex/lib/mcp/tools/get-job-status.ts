@@ -62,10 +62,10 @@ async function blocksView(examId: number, withSolutions: boolean): Promise<ExamO
     questions: parts.slice(0, MAX_QCM).map(({ b, bi, p, pi }, i) => ({
       number: i + 1,
       kind: p.kind === "scq" ? "single_choice" as const : "written" as const,
-      concept: clip(`Question ${bi + 1}${String.fromCharCode(97 + pi)} — ${b.title}`, 200),
+      concept: clip(`Question ${bi + 1}${String.fromCharCode(97 + pi)} : ${b.title}`, 200),
       statement: clip(`${b.scenario}\n\n(${String.fromCharCode(97 + pi)}) [${p.points} pt] ${p.prompt}${p.code ? `\n${p.code}` : ""}${p.options.length ? `\n${p.options.map((o, k) => `${LETTERS[k] ?? k + 1}) ${o}`).join("\n")}` : ""}`, 3000),
       solution: withSolutions
-        ? clip(p.kind === "scq" ? `${LETTERS[p.correct ?? -1] ?? "?"} — ${p.explanation ?? ""}` : `${p.answer ?? ""}${p.criteria?.length ? `\nBarème : ${p.criteria.map((c) => `${c.label} (${c.points} pt)`).join(" ; ")}` : ""}`, 3000) || null
+        ? clip(p.kind === "scq" ? `${LETTERS[p.correct ?? -1] ?? "?"} : ${p.explanation ?? ""}` : `${p.answer ?? ""}${p.criteria?.length ? `\nBarème : ${p.criteria.map((c) => `${c.label} (${c.points} pt)`).join(" ; ")}` : ""}`, 3000) || null
         : null,
       verification: "reviewed_by_model" as const,
     })),
@@ -175,6 +175,6 @@ export default defineTool({
     const j = o.job;
     if (j.status === "done") return `Génération n° ${j.job_id} terminée.${o.exam ? ` ${o.exam.questions.length} question(s).` : ""}`;
     if (j.status === "error" || j.status === "canceled") return `Génération n° ${j.job_id} : ${j.status === "error" ? "échec" : "annulée"}.`;
-    return `Génération n° ${j.job_id} : ${j.progress_pct} %${j.remaining ? `, ${j.remaining}` : ""} — repasse dans une minute.`;
+    return `Génération n° ${j.job_id} : ${j.progress_pct} %${j.remaining ? `, ${j.remaining}` : ""}, repasse dans une minute.`;
   },
 });

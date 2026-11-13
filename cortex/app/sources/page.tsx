@@ -26,11 +26,11 @@ export default function SourcesPage() {
           <div className="skeleton h-[28rem] rounded-lg" role="status" aria-busy="true" aria-label="Chargement du corpus" />
         ) : error ? (
           <Panel className="flex flex-col items-center justify-center gap-3 rounded-xl px-6 py-16 text-center">
-            <WifiOff className="size-6 text-danger-hi" strokeWidth={2} />
-            <p className="text-[0.95rem] font-medium text-ink-1">Le corpus ne répond pas</p>
+            <WifiOff className="size-6 text-danger-hi" strokeWidth={2} aria-hidden="true" />
+            <p className="text-[0.95rem] font-medium text-ink-1">Impossible de charger tes sources</p>
             <p className="max-w-sm text-[0.85rem] leading-relaxed text-ink-3">
-              Impossible de lister les sources de ce cours. Réessaie : si ça persiste,
-              le cours n’a peut-être pas encore de corpus ingéré.
+              Réessaie dans un instant. Si ça persiste, ce cours n’a peut-être encore aucun
+              document importé.
             </p>
             <Button variant="secondary" size="sm" onClick={refetch}>
               <RotateCw className="size-4" strokeWidth={2.25} aria-hidden="true" />

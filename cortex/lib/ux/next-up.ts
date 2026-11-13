@@ -108,6 +108,6 @@ export function rowFactsSpoken(n: Pick<NotionFacts, "count" | "examWeight" | "ch
 /** Lien « M'entraîner » : le studio s'ouvre avec la notion déjà saisie (il ne lance rien seul). */
 export const trainHref = (label: string) => `/entrainement?prefill=${encodeURIComponent(label)}`;
 
-/** Lien « Voir le thème » : le Programme, ouvert sur le chapitre de la notion quand on le connaît. */
+/** Lien « Voir dans le programme » : le Programme, ouvert sur le chapitre de la notion quand on le connaît. */
 export const themeHref = (chapter: NotionFacts["chapter"]) =>
   chapter?.lectureNo != null ? `/programme?chapitre=${chapter.lectureNo}` : "/programme";

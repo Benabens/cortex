@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { ExamComposer } from "@/components/examens/ExamComposer";
 import { useApi, useCourse, asText } from "@/lib/ux/api";
 import { formatDay } from "@/lib/ux/types";
+import { examSummaryLabel } from "@/lib/exam-summary";
 import type { ComposeResp, ExamsResp } from "@/lib/ux/exams";
 import { useState } from "react";
 import { apiDelete } from "@/lib/ux/write";
@@ -147,7 +148,7 @@ export default function ExamensPage() {
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {exams.data.exams.map((e) => {
               const ready = e.status === "ready";
-              const summary = asText(e.verifySummary);
+              const summary = examSummaryLabel(asText(e.verifySummary));
               const day = formatDay(e.createdAt);
               return (
                 <Panel key={e.id} className="flex flex-wrap items-center gap-5 p-5 sm:p-6">
@@ -158,10 +159,10 @@ export default function ExamensPage() {
                         {e.onlineUrl ? <a href={e.onlineUrl} className="hover:underline">Examen #{e.id}</a> : <>Examen #{e.id}</>}
                       </h3>
                       <Badge tone={ready ? "success" : "neutral"} Icon={ready ? CheckCircle2 : undefined} size="xs">
-                        {ready ? "Prêt" : e.status === "generating" ? (e.kind === "blocks" ? "PDF en cours" : "Ouvertes en cours") : e.status}
+                        {ready ? "Prêt" : e.status === "generating" ? (e.kind === "blocks" ? "PDF en cours" : "Questions ouvertes en cours") : "Inachevé"}
                       </Badge>
                     </div>
-                    <p className="mt-0.5 truncate text-[0.8rem] text-ink-3">
+                    <p className="mt-0.5 line-clamp-2 text-[0.8rem] text-ink-3">
                       {summary ?? `${e.questionCount} question${e.questionCount > 1 ? "s" : ""}`}
                       {day ? ` · ${day}` : ""}
                     </p>

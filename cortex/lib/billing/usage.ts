@@ -341,7 +341,7 @@ async function assertSpendCapUnchecked(): Promise<void> {
     await alertOnSpend(spend);
     if (spent >= globalCap) {
       throw new LlmError(
-        `Plafond de dépense global du mois atteint (${spent.toFixed(2)} $ ≥ SPEND_CAP_USD=${globalCap} $ pour ${spend.month}) — génération coupée. ` +
+        `Plafond de dépense global du mois atteint (${spent.toFixed(2)} $ ≥ SPEND_CAP_USD=${globalCap} $ pour ${spend.month}), génération coupée. ` +
         `Le reste du site fonctionne ; elle rouvre le 1er du mois prochain (UTC), ou dès que SPEND_CAP_USD est relevé.`,
         "SPEND_CAP",
         false,

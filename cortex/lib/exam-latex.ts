@@ -406,7 +406,7 @@ export function renderExamTex(spec: ExamSpec, dateLabel: string, includeSolution
     String.raw`\clearpage{\Large\textbf{Corrigé}}\par\vspace{6pt}\hrule\medskip`,
     ...qs.map((q, i) =>
       [
-        String.raw`\par\medskip\needspace{4\baselineskip}{\large\textbf{Question ${i + 1} — ${texEscape(q.concept)} \hfill [${qPoints(q)} points]}}\par\smallskip`,
+        String.raw`\par\medskip\needspace{4\baselineskip}{\large\textbf{Question ${i + 1} : ${texEscape(q.concept)} \hfill [${qPoints(q)} points]}}\par\smallskip`,
         unwrapLockedFigures(courseTex((q as any).solution_tex ?? "", i + 1)),
       ].join("\n")
     ),
@@ -652,6 +652,22 @@ function replaceBalanced(src: string, cmd: string, wrap: (inner: string) => stri
 
 const CIRCLED = "⓪①②③④⑤⑥⑦⑧⑨";
 
+/** Corps d'un `tabular` → <table> : lignes sur `\\`, cellules sur `&`, chaque cellule rendue comme le texte courant. */
+function tabularToHtml(body: string): string {
+  const rows = body
+    .replace(/\\(hline|toprule|midrule|bottomrule)\b|\\cline\{[^}]*\}/g, "")
+    .split(/\\\\(?:\[[^\]]*\])?/)
+    .map((row) => row.trim())
+    .filter(Boolean);
+  if (!rows.length) return "";
+  const cell = (c: string) => {
+    const multi = /^\\multicolumn\{(\d+)\}\{[^{}]*\}\{([\s\S]*)\}$/.exec(c);
+    return multi ? `<td colspan="${multi[1]}">${texToHtml(multi[2])}</td>` : `<td>${texToHtml(c)}</td>`;
+  };
+  const tr = (row: string) => `<tr>${row.split(/(?<!\\)&/).map((c) => cell(c.trim())).join("")}</tr>`;
+  return `<div class="tab"><table><tbody>${rows.map(tr).join("")}</tbody></table></div>`;
+}
+
 /**
  * Convertit le LaTeX du modèle en HTML basique LISIBLE. Repli best-effort (PAS un rendu
  * fidèle) : code en <pre>, gras/italique/code inline, listes, sous-questions en titres,
@@ -666,21 +682,23 @@ export function texToHtml(tex: string): string {
   // blocs préservés (code, tableaux) ou remplacés par une note (figures/grilles non rendables en HTML)
   t = t.replace(/\\begin\{lstlisting\}(?:\[[^\]]*\])?\n?([\s\S]*?)\\end\{lstlisting\}/g, (_, c) => keep(`<pre class="code">${escHtml(c.replace(/\s+$/, ""))}</pre>`));
   t = t.replace(/\\begin\{verbatim\}\n?([\s\S]*?)\\end\{verbatim\}/g, (_, c) => keep(`<pre class="code">${escHtml(c.replace(/\s+$/, ""))}</pre>`));
-  t = t.replace(/\\begin\{tabular\}[\s\S]*?\\end\{tabular\}/g, (m) => keep(`<pre class="tab">${escHtml(m)}</pre>`));
-  t = t.replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, () => keep(`<div class="fig">⬚ figure TikZ — visible uniquement dans le PDF</div>`));
-  t = t.replace(/\\begin\{examproctree\}[\s\S]*?\\end\{examproctree\}/g, () => keep(`<div class="fig">⬚ arbre de processus (fork/exec) — visible uniquement dans le PDF</div>`));
-  t = t.replace(/\\tcpladder(\{[^{}]*\}){0,6}/g, () => keep(`<div class="fig">⬚ diagramme TCP en échelle (window/cwnd/ssthresh/état + handshake) — à tracer sur papier</div>`));
+  t = t.replace(/\\begin\{tabular\}(?:\[[^\]]*\])?\{(?:[^{}]|\{[^{}]*\})*\}([\s\S]*?)\\end\{tabular\}/g, (_, body: string) => keep(tabularToHtml(body)));
+  t = t.replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, () => keep(`<div class="fig">⬚ figure TikZ : visible uniquement dans le PDF</div>`));
+  t = t.replace(/\\begin\{examproctree\}[\s\S]*?\\end\{examproctree\}/g, () => keep(`<div class="fig">⬚ arbre de processus (fork/exec) : visible uniquement dans le PDF</div>`));
+  t = t.replace(/\\tcpladder(\{[^{}]*\}){0,6}/g, () => keep(`<div class="fig">⬚ diagramme TCP en échelle (window/cwnd/ssthresh/état + handshake) : à tracer sur papier</div>`));
   t = t.replace(/\\examtopo\b/g, () => keep(`<div class="fig">⬚ Figure : topologie canonique 2-AS (R1–R4, SW1/SW2, clusters A/B/C/D, B1=DNS, D1=d1.epfl.ch, coûts/débits, cloud Internet)</div>`));
   t = t.replace(/\\examinode\b/g, () => keep(`<div class="fig">⬚ Figure : inode v6 (addr[0..7], single/double-indirect → index → data)</div>`));
   t = t.replace(/\\examstates\b/g, () => keep(`<div class="fig">⬚ Figure : états de processus (Running/Ready/Blocked + transitions)</div>`));
-  t = t.replace(/\\(packetgrid|statesim|diskgrid|forwardgrid|rulelines)\{(\d+)\}/g, (_, k, n) => keep(`<div class="grid">✎ grille de réponse (${k}, ${n} lignes) — réponds sur papier</div>`));
+  t = t.replace(/\\(packetgrid|statesim|diskgrid|forwardgrid|rulelines)\{(\d+)\}/g, (_, k, n) => keep(`<div class="grid">✎ grille de réponse (${k}, ${n} lignes) : réponds sur papier</div>`));
   t = t.replace(/\\\$/g, () => keep("$")); // dollar littéral ≠ délimiteur math
 
   // échappe le texte courant
   t = escHtml(t);
+  // ligatures LaTeX des tirets (« --- » → —, « -- » → –), hors math : sinon « --- » s'affiche tel quel
+  t = t.replace(/(\$[^$]*\$)|---|--/g, (m, math) => math ?? (m === "---" ? "—" : "–"));
 
   // macros inline
-  t = t.replace(/\\subq\{([^{}]*)\}\{([^{}]*)\}\{([^{}]*)\}/g, `<h3>$1 — $2 <span class="pts">[$3 pts]</span></h3>`);
+  t = t.replace(/\\subq\{([^{}]*)\}\{([^{}]*)\}\{([^{}]*)\}/g, `<h3>$1 · $2 <span class="pts">[$3 pts]</span></h3>`);
   for (let pass = 0; pass < 3; pass++) {
     t = replaceBalanced(t, "\\callout", (x) => `<div class="callout">${x}</div>`);
     t = replaceBalanced(t, "\\textbf", (x) => `<b>${x}</b>`);
@@ -720,7 +738,7 @@ export function texToHtml(tex: string): string {
   t = t.replace(/\\(vspace|hspace|needspace)\*?\{[^}]*\}/g, " ");
   t = t.replace(/\\\\(\[[^\]]*\])?/g, "<br>");
   t = t.replace(/\\(quad|qquad|;|,|!)/g, " ");
-  t = t.replace(/\\&/g, "&amp;").replace(/\\([%#_])/g, "$1").replace(/\\textbackslash\{?\}?/g, "\\");
+  t = t.replace(/\\&amp;/g, "&amp;").replace(/\\([%#_])/g, "$1").replace(/\\textbackslash\{?\}?/g, "\\");
   t = t.replace(/~/g, " ");
   t = t.replace(/\\ldots/g, "…");
   // macro inconnue : garde l'argument, puis retire les commandes nues et accolades restantes
@@ -740,7 +758,7 @@ export function htmlFallback(spec: ExamSpec, id: number, dateLabel: string, reas
   const blocks = qs
     .map(
       (q, i) => `<section>
-<h2>Question ${i + 1} — ${escHtml(q.concept)} <span class="pts">[${qPoints(q)} points]</span></h2>
+<h2>Question ${i + 1} : ${escHtml(q.concept)} <span class="pts">[${qPoints(q)} points]</span></h2>
 <div class="stmt">${texToHtml((q as any).statement_tex ?? "")}</div>
 <details><summary>Corrigé</summary><div class="sol">${texToHtml((q as any).solution_tex ?? "")}</div></details>
 </section>`
@@ -757,13 +775,14 @@ code{background:#f2f2f3;padding:1px 5px;border-radius:5px;font-size:.92em}
 .callout{border:1.5px solid #1d1d1f;padding:8px 14px;margin:12px auto;text-align:center;max-width:85%}
 .caption{text-align:center;font-size:12.5px;color:#666;margin:4px 0 12px}
 .center{text-align:center}
+.tab{overflow-x:auto;margin:10px 0}.tab table{border-collapse:collapse;margin:0 auto}.tab td{border:1px solid #ccc;padding:4px 8px}
 .warn{background:#fff3e0;border:1px solid #e0a96d;padding:10px 14px;border-radius:8px;font-size:13.5px}
 details{margin:8px 0}summary{cursor:pointer;color:#2563eb;font-size:13px}
 .sol{border-left:3px solid #cfe3cf;padding-left:12px;margin-top:6px}
 ul,ol{margin:6px 0 6px 22px}
 </style>
 <h1>${escHtml(spec.title)}</h1>
-<p class="warn">⚠️ La compilation LaTeX (PDF) a échoué — rendu HTML lisible de secours (figures/grilles remplacées par des notes).${
+<p class="warn">⚠️ La compilation LaTeX (PDF) a échoué, rendu HTML lisible de secours (figures/grilles remplacées par des notes).${
     reason ? `<br><b>Erreur LaTeX :</b> <code>${escHtml(reason.slice(0, 300))}</code>` : ""
   }<br>Pour le vrai PDF EPFL : <code>brew install tectonic</code>, redémarre l'app, régénère.</p>
 ${blocks}`;

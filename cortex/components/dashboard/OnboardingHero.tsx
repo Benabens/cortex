@@ -1,4 +1,4 @@
-import { FolderUp, ArrowRight, ScanSearch, CalendarClock } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 
 /**
@@ -9,17 +9,14 @@ import { Button } from "@/components/ui/Button";
 export function OnboardingHero({ courseName }: { courseName: string }) {
   const steps = [
     {
-      Icon: FolderUp,
       title: "Importe les annales",
       desc: "Dépose les vrais finals du cours (PDF, HTML…).",
     },
     {
-      Icon: ScanSearch,
       title: "Cortex les lit",
       desc: "Il déduit les types d’exos et leur poids réel à l’examen.",
     },
     {
-      Icon: CalendarClock,
       title: "Révise au bon moment",
       desc: "La courbe de l’oubli replanifie chaque type pour toi.",
     },
@@ -40,20 +37,19 @@ export function OnboardingHero({ courseName }: { courseName: string }) {
           les types d’exercices, leur poids à l’examen, et te dit toujours quoi travailler ensuite.
         </p>
 
-        <ol className="mt-6 grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-3">
-          {steps.map(({ Icon, title, desc }, i) => (
-            <li
-              key={title}
-              className="rounded-lg border border-line bg-surface-2/40 p-3.5 edge-top"
-            >
-              <span className="grid size-9 place-items-center rounded-lg border border-line bg-surface-2/60 text-accent-hi">
-                <Icon className="size-[1.05rem]" strokeWidth={2.25} aria-hidden="true" />
+        <ol className="mt-6 max-w-xl divide-y divide-line border-y border-line">
+          {steps.map(({ title, desc }, i) => (
+            <li key={title} className="flex gap-4 py-3.5">
+              <span aria-hidden="true" className="w-4 shrink-0 font-data text-[0.85rem] tabular text-ink-3">
+                {i + 1}
               </span>
-              <p className="mt-2.5 text-[0.85rem] font-medium text-ink-1">
-                <span className="sr-only">Étape {i + 1} : </span>
-                {title}
-              </p>
-              <p className="mt-1 text-[0.78rem] leading-snug text-ink-3">{desc}</p>
+              <div>
+                <p className="text-[0.9rem] font-medium text-ink-1">
+                  <span className="sr-only">Étape {i + 1} : </span>
+                  {title}
+                </p>
+                <p className="mt-0.5 text-[0.82rem] leading-snug text-ink-3">{desc}</p>
+              </div>
             </li>
           ))}
         </ol>
