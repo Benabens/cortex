@@ -405,9 +405,12 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
 
 Les journaux Railway sont purgés au bout de 7 jours et le healthcheck redémarre
 le conteneur sans prévenir personne : un plantage de nuit passe inaperçu. Pose
-`SENTRY_DSN` (offre gratuite suffisante) et les erreurs du serveur **et des
-workers** remontent, avec alerte. Sans la variable, **rien ne change** : le SDK
-n'est même pas chargé.
+`SENTRY_DSN` (offre gratuite Developer suffisante) et les erreurs du serveur,
+des workers **et du navigateur** remontent, avec alerte e-mail. Sans la
+variable, **rien ne change** : aucun SDK n'est chargé, ni côté serveur ni côté
+navigateur. Tout se fait par le script guidé (compte, DSN, alerte « nouvelle
+erreur en production », IP non stockées, erreur de test) :
+`bash cortex/scripts/setup-fiabilite.sh` (étapes 1 et 2).
 
 Sans Sentry, deux choses arrivent quand même par e-mail : les alertes de
 dépense et celles du rappel de reconduction (ci-dessus). Tout le reste (un
@@ -419,20 +422,78 @@ journal, écrites sans passer par `captureError`. Poser `SENTRY_DSN` ne les
 ferait pas remonter ; aujourd'hui seul un job en erreur est signalé ainsi
 (`cortex/scripts/run-job.ts`).
 
-Ce qui part : type et message d'erreur, pile, service (`web` / `worker`), URL
-**sans paramètres**. Ce qui ne part **jamais** : e-mail, identifiant de compte,
-en-têtes, cookies, corps de requête, prompt, énoncé — l'événement est nettoyé
-avant envoi (`cortex/lib/observability.ts`, testé). Le SDK est `@sentry/node`,
-pas celui de Next : aucun rapport depuis le navigateur, donc aucune session
-d'étudiant instrumentée.
+Ce qui part : type et message d'erreur, pile, service (`web` / `worker` /
+`browser`), URL **sans paramètres**, navigateur et système. Chaque événement
+porte le **commit déployé** (`release` = `RAILWAY_GIT_COMMIT_SHA`) et
+l'environnement (`production`, ou `preview` pour une preview de PR). Ce qui ne
+part **jamais** : e-mail, identifiant de compte, en-têtes, cookies, corps de
+requête, prompt, énoncé, miettes de navigation (clics, console), sessions,
+replay — l'événement est nettoyé avant envoi (`cortex/lib/observability-scrub.ts`,
+testé).
+
+Comment c'est branché : `@sentry/node` côté serveur (plus le crochet
+`onRequestError` de Next pour les erreurs de rendu et de route non gérées) et
+`@sentry/browser` côté navigateur, chargé seulement si `GET /api/monitoring`
+renvoie une configuration (204 sans DSN). Le navigateur envoie ses erreurs à
+`/api/monitoring` (même origine), qui ne relaie qu'au projet du DSN configuré :
+la CSP garde `connect-src 'self'`. Pas de `@sentry/nextjs` : il tire webpack et
+le binaire sentry-cli (~100 Mo dans l'image) pour des source maps qu'on
+n'envoie pas.
 
 ```env
 SENTRY_DSN=https://…@oNNN.ingest.sentry.io/NNN
-SENTRY_ENVIRONMENT=production
+# SENTRY_ENVIRONMENT : inutile sur Railway (déduit de l'environnement)
 ```
 
 Complément indispensable : un **moniteur externe** (Better Stack, UptimeRobot…)
 sur `/api/health` — Sentry voit les erreurs, pas un conteneur qui ne répond plus.
+
+### Après chaque déploiement : smoke de la prod et rollback automatique
+
+`.github/workflows/post-deploy.yml` démarre quand Railway signale à GitHub un
+déploiement de production réussi (statut de déploiement, pas un push sur main :
+avec « Wait for CI », une workflow sur push qui attendrait la prod bloquerait le
+déploiement qu'elle attend). Elle :
+
+1. attend que `/api/health` serve le commit déployé (`commit`, 15 min au plus) ;
+2. lance le smoke Playwright en **lecture seule** (`cortex/e2e/smoke.spec.ts`) :
+   santé (base, LLM, LaTeX), landing → `/login`, redirection OAuth Google,
+   métadonnées OAuth du MCP, manifeste et robots. Aucune écriture en base ;
+3. si le smoke casse ou si la prod ne répond plus : **rollback** vers le
+   déploiement précédent (`cortex/scripts/railway-rollback.ts`, API Railway),
+   puis échoue en rouge avec la raison. Un rollback remet l'image **et les
+   variables** de ce déploiement-là. Jamais de rollback en cascade : un commit
+   qui n'est plus la tête de main, un déploiement qui n'est plus le dernier de
+   la production, ou un déploiement qui est déjà un rollback, est vérifié mais
+   laissé tel quel. La cible saute aussi tout déploiement dont on a déjà dû
+   revenir (A, B cassé, rollback, C cassé : retour sur A, pas sur B).
+
+Il lui faut le secret GitHub `RAILWAY_TOKEN` (jeton de **projet** limité à
+production) : `bash cortex/scripts/setup-fiabilite.sh --etape=3`. Sans lui, le
+smoke tourne, seul le rollback manque. Essai sans risque après le merge :
+Actions → post-deploy → Run workflow (rollback simulé coché par défaut).
+
+### Previews de PR (désactivées : payantes)
+
+Tout est prêt mais **rien n'est activé** : sur le plan Hobby (5 $ inclus, prod
+déjà estimée au-dessus), chaque PR ouverte ferait tourner une copie de l'app et
+une Postgres neuve, facturées à l'usage. Le filet gratuit reste la workflow
+`e2e` : les parcours Playwright sur chaque PR, contre un build local de la PR.
+
+Si tu les actives (`setup-fiabilite.sh --etape=4`, qui fait poser un plafond de
+dépense d'abord) : `railway.json` fait démarrer chaque preview par
+`cortex/scripts/preview-entrypoint.sh`, qui retire les secrets copiés de la
+prod (clés LLM, Resend, S3, Google, Stripe live), régénère `AUTH_SECRET`, pose
+le LLM hermétique et l'auth persona E2E ; la garde de démarrage
+(`railwayPreviewViolations`) refuse de servir s'il reste un trou, et refuse
+toujours `E2E_TEST_AUTH` en production. `.github/workflows/preview.yml` joue
+alors les parcours desktop contre l'URL de la preview, en check de la PR.
+
+Le dépôt est **public** : l'URL de chaque preview l'est aussi (commentaire du
+bot Railway). La connexion persona y exige donc `E2E_PERSONA_KEY` (64 caractères
+hexadécimaux, générée par l'étape 4, posée en variable Railway et en secret
+GitHub) ; sans elle, la preview refuse de démarrer. La workflow ne publie aucune
+trace Playwright (elle contiendrait la clé).
 
 ## 10. Sauvegardes et restauration
 

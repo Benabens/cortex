@@ -1,11 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
+import { baseURL, googleBaseURL, localPort as port, remoteBaseURL, smokeBaseURL } from "./e2e/base-url";
 
-const port = Number(process.env.E2E_PORT ?? 3210);
-const baseURL = `http://localhost:${port}`;
 const e2eDatabaseUrl = process.env.E2E_DATABASE_URL;
-// Le test « vrai Google » vise le vrai site (redirection OAuth déjà autorisée en prod) : aucun serveur local.
-const googleOnly = process.env.E2E_GOOGLE_ONLY === "1"; // tests visant le vrai site : pas de serveur local
-const googleBaseURL = process.env.E2E_GOOGLE_BASE_URL ?? "https://app.cortexexam.com";
+// Tests visant un site DÉJÀ en ligne — vrai Google et smoke de la prod, ou preview d'une PR
+// (E2E_BASE_URL) : aucun serveur local.
+const external = process.env.E2E_GOOGLE_ONLY === "1" || process.env.E2E_EXTERNAL === "1" || !!remoteBaseURL;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -17,7 +16,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: [["html", { open: "never" }], ["list"]],
   use: { baseURL, trace: "retain-on-failure", screenshot: "only-on-failure" },
-  webServer: googleOnly ? undefined : [{
+  webServer: external ? undefined : [{
     command: `tsx e2e/reset-runtime.ts && npm run build && npm run start -- --hostname 127.0.0.1 --port ${port}`,
     url: `http://localhost:${port}/api/health`, reuseExistingServer: !process.env.CI, timeout: 300_000,
     env: {
@@ -37,9 +36,11 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI, timeout: 30_000,
   }],
   projects: [
-    { name: "desktop", use: { ...devices["Desktop Chrome"] }, grepInvert: /@google/ },
+    { name: "desktop", use: { ...devices["Desktop Chrome"] }, grepInvert: /@google|@smoke/ },
     { name: "iphone", use: { ...devices["iPhone 13"], browserName: "chromium" }, grep: /@principal/, grepInvert: /@google/ },
     { name: "google", use: { channel: "chrome", baseURL: googleBaseURL }, grep: /@google\b/ },
     { name: "google-redirect", use: { ...devices["Desktop Chrome"], baseURL: googleBaseURL }, grep: /@googleredirect/ },
+    // Après chaque déploiement de la prod (post-deploy.yml) : lecture seule, voir e2e/smoke.spec.ts.
+    { name: "smoke", use: { ...devices["Desktop Chrome"], baseURL: smokeBaseURL }, grep: /@smoke/ },
   ],
 });

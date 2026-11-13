@@ -1,4 +1,8 @@
 import { test, expect } from "@playwright/test";
+import { remoteBaseURL } from "./base-url";
+
+// Le lien est capté par e2e/mail-receiver.ts, sur la machine du banc : une preview distante n'y écrit pas.
+test.skip(!!remoteBaseURL, "Preview distante : pas de capture locale des e-mails.");
 
 test("compte Cortex seul par lien magique capturé localement", async ({ page, request }) => {
   const email = `magic-${Date.now()}@e2e.cortex.test`;

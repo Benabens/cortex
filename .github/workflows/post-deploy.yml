@@ -1,0 +1,184 @@
+# Après chaque déploiement de la PROD par Railway : attend que la prod serve le
+# commit déployé, la teste en lecture seule (cortex/e2e/smoke.spec.ts) et, si
+# elle casse, remet en ligne le déploiement précédent
+# (cortex/scripts/railway-rollback.ts), puis échoue en rouge avec la raison.
+#
+# Déclenché par le statut de déploiement que Railway publie sur GitHub, et NON
+# par un push sur main : « Wait for CI » fait attendre chaque déploiement
+# jusqu'à la fin de TOUTES les workflows du commit. Une workflow sur push main
+# qui attend la prod bloquerait donc le déploiement qu'elle attend, puis le
+# ferait sauter en échouant. Ici, elle démarre une fois le déploiement en ligne.
+#
+# Secret : RAILWAY_TOKEN (jeton de PROJET limité à production), posé par
+# cortex/scripts/setup-fiabilite.sh. Sans lui, le smoke tourne quand même ;
+# seul le rollback est impossible (et le job le dit).
+name: post-deploy
+
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit attendu en prod (vide = tête de main)"
+        required: false
+      dry_run:
+        description: "Rollback simulé : affiche la cible sans rien modifier"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  deployments: read
+
+# Jamais d'annulation en cours de route : un rollback interrompu laisserait la prod dans un état inconnu.
+concurrency:
+  group: post-deploy-production
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.deployment_status.state == 'success' &&
+       endsWith(github.event.deployment.environment, '/ production') &&
+       github.event.deployment.creator.login == 'railway-app[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: cortex
+    env:
+      PROD_URL: https://app.cortexexam.com
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Le déploiement le plus récent de la prod est testé, même si main a avancé
+      # entre-temps (commit suivant sauté par Railway, CI rouge…). Le rollback, lui,
+      # n'est permis que si ce commit est la tête de main : un rollback ou un
+      # redéploiement d'un commit plus ancien ne se rétablit pas (pas de cascade).
+      - name: Déploiement à vérifier
+        id: target
+        env:
+          DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.sha }}
+          DEPLOYMENT_ID: ${{ github.event.deployment.id }}
+          PROD_ENV: ${{ github.event.deployment.environment || 'wonderful-creativity / production' }}
+        run: |
+          latest=$(gh api -X GET "repos/${{ github.repository }}/deployments" -f environment="$PROD_ENV" -f per_page=1 --jq '.[0] | "\(.id) \(.sha)"')
+          head=$(gh api "repos/${{ github.repository }}/commits/main" --jq .sha)
+          sha="${DEPLOYED_SHA:-${latest#* }}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          if [ -n "$DEPLOYMENT_ID" ] && [ "${latest%% *}" != "$DEPLOYMENT_ID" ]; then
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::un déploiement plus récent de la prod existe : il sera vérifié à son tour."
+          else
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$sha" = "$head" ]; then echo "rollback=true" >> "$GITHUB_OUTPUT"; else echo "rollback=false" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/setup-node@v4
+        if: steps.target.outputs.current == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cortex/package-lock.json
+
+      - name: Dépendances
+        if: steps.target.outputs.current == 'true'
+        run: npm ci
+
+      - name: Attente du commit en production (15 min max)
+        id: wait
+        if: steps.target.outputs.current == 'true'
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          state=down; served=""; deadline=$((SECONDS + 900))
+          while :; do
+            # Sans -f : un 503 (base injoignable) dit quand même quel commit est en ligne ;
+            # le smoke, lui, exige un 200.
+            served=$(curl -sS -m 10 "$PROD_URL/api/health" | jq -r '.commit // ""' 2>/dev/null || true)
+            if [ "$served" = "$SHA" ]; then state=served; break; fi
+            if [ -n "$served" ]; then state=other; else state=down; fi
+            [ "$SECONDS" -ge "$deadline" ] && break
+            sleep 15
+          done
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+          echo "served=$served" >> "$GITHUB_OUTPUT"
+          case "$state" in
+            served) echo "✓ la prod sert ${SHA:0:7}" ;;
+            other) echo "::warning::après 15 min, la prod sert ${served:0:7} et non ${SHA:0:7}" ;;
+            down) echo "::warning::après 15 min, /api/health ne répond pas (ou sans commit)" ;;
+          esac
+
+      - name: Navigateur du smoke
+        if: steps.wait.outputs.state == 'served'
+        run: npx playwright install --with-deps chromium
+
+      - name: Smoke en lecture seule contre la prod
+        id: smoke
+        if: steps.wait.outputs.state == 'served'
+        continue-on-error: true
+        env:
+          E2E_SMOKE_BASE_URL: ${{ env.PROD_URL }}
+          E2E_EXPECTED_SHA: ${{ steps.target.outputs.sha }}
+          # Facultatif : avec lui, le smoke vérifie aussi base, moteur et LaTeX.
+          SMOKE_METRICS_TOKEN: ${{ secrets.METRICS_TOKEN }}
+        run: npm run e2e:smoke
+
+      # Rollback si le commit est en ligne mais casse, ou si la prod ne répond plus
+      # alors que Railway a déclaré ce déploiement réussi (healthcheck passé, puis
+      # arrêt). Une prod saine qui sert un AUTRE commit n'a rien à rétablir.
+      - name: Rollback vers le déploiement précédent
+        id: rollback
+        if: >-
+          steps.target.outputs.rollback == 'true' &&
+          (steps.smoke.outcome == 'failure' || steps.wait.outputs.state == 'down')
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          SHA: ${{ steps.target.outputs.sha }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '--dry-run' || '' }}
+        run: |
+          # Le verdict (étape suivante) fait échouer le job ; ici on ne fait que rapporter.
+          out=$(npx tsx scripts/railway-rollback.ts --sha "$SHA" $DRY_RUN 2>&1) || true
+          echo "$out"
+          { echo "result<<EOF"; echo "$out"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
+      - name: Verdict
+        if: steps.target.outputs.current == 'true'
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+          STATE: ${{ steps.wait.outputs.state }}
+          SERVED: ${{ steps.wait.outputs.served }}
+          SMOKE: ${{ steps.smoke.outcome }}
+          ROLLBACK: ${{ steps.rollback.outputs.result }}
+          ROLLBACK_ALLOWED: ${{ steps.target.outputs.rollback }}
+        run: |
+          [ "$ROLLBACK_ALLOWED" = "true" ] || ROLLBACK="pas de rollback automatique : ${SHA:0:7} n'est pas la tête de main"
+          case "$STATE/$SMOKE" in
+            served/success) reason="" ;;
+            served/failure) reason="le smoke de la prod a échoué sur ${SHA:0:7} (rapport Playwright en artefact)" ;;
+            other/*) reason="après 15 min, la prod sert ${SERVED:0:7} au lieu de ${SHA:0:7} : déploiement à vérifier dans Railway" ;;
+            *) reason="après 15 min, /api/health ne répond pas pour ${SHA:0:7}" ;;
+          esac
+          {
+            echo "## Post-deploy ${SHA:0:7}"
+            echo "- Commit en ligne : ${STATE:-?}"
+            echo "- Smoke : ${SMOKE:-non lancé}"
+            [ -n "$ROLLBACK" ] && echo "- Rollback : $ROLLBACK"
+            [ -n "$reason" ] && echo "- **Échec** : $reason"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$reason" ]; then
+            echo "::error::$reason${ROLLBACK:+ — $ROLLBACK}"
+            exit 1
+          fi
+          echo "✓ prod saine sur ${SHA:0:7}"
+
+      - uses: actions/upload-artifact@v4
+        if: failure() || steps.smoke.outcome == 'failure'
+        with:
+          name: smoke-report
+          path: |
+            cortex/playwright-report
+            cortex/test-results
+          if-no-files-found: ignore
