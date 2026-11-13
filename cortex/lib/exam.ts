@@ -646,7 +646,7 @@ export function buildBatchPrompt(ctx: Ctx, slots: { category: string; points: nu
 
 const CKPT = () => path.join(examsDir(), ".gen-checkpoint.json");
 
-async function generateBatch(ctx: Ctx, slots: Slot[]): Promise<ExamQuestion[]> {
+async function generateBatch(ctx: Ctx, slots: Slot[], opts: { retryTruncated?: boolean } = {}): Promise<ExamQuestion[]> {
   // Crochet de TEST (inerte sauf si l'env est posé) : rend des questions déterministes sans appeler
   // le LLM → permet de prouver la RÉSILIENCE du pipeline de façon reproductible et gratuite.
   if (process.env.CORTEX_TEST_STUB_BATCH) {
@@ -663,10 +663,33 @@ async function generateBatch(ctx: Ctx, slots: Slot[]): Promise<ExamQuestion[]> {
     // un lot de 3 << un appel de 6 ; surchargeable (P3 : « augmente le timeout par lot »).
     timeoutMs: Number(process.env.CORTEX_BATCH_TIMEOUT_MS) || 600_000,
     json: { schema: BATCH_SCHEMA },
-  }, { check: (v) => (Array.isArray(v?.questions) ? null : "le champ « questions » (tableau) manque") });
+  }, { check: (v) => (Array.isArray(v?.questions) ? null : "le champ « questions » (tableau) manque"), retryTruncated: opts.retryTruncated });
   const qs = Array.isArray(r.questions) ? r.questions : [];
   // réaligne catégorie/points sur les slots imposés
   return qs.slice(0, slots.length).map((q, i) => ({ ...q, category: slots[i].category, points: slots[i].points }));
+}
+
+/**
+ * Exercices d'un lot, alignés sur ses slots (null = pas d'exercice pour ce slot) ; ne lève jamais.
+ * Le lot entier d'abord ; ce qui manque est redemandé SLOT PAR SLOT. Une réponse coupée par la
+ * limite de longueur n'est pas redemandée telle quelle à plusieurs : elle ressortirait coupée
+ * (job 2 de test-e2e-calcul-matriciel, 13/11 : 9 appels identiques, examen à 2 questions sur 4).
+ */
+async function generateSlots(ctx: Ctx, slots: Slot[]): Promise<{ qs: (ExamQuestion | null)[]; error: unknown }> {
+  const qs: (ExamQuestion | null)[] = slots.map(() => null);
+  let error: unknown = null;
+  try {
+    const g = await generateBatch(ctx, slots, { retryTruncated: slots.length === 1 });
+    g.forEach((q, i) => { if (q) qs[i] = q; });
+  } catch (e) { error = e; }
+  if (slots.length > 1 && qs.some((q) => !q) && !HARD_STOP_CODES.has(llmErrorCode(error) ?? "")) {
+    await Promise.all(slots.map(async (slot, i) => {
+      if (qs[i]) return;
+      try { qs[i] = (await generateBatch(ctx, [slot]))[0] ?? null; } catch (e) { error = e; }
+    }));
+  }
+  if (!error && qs.some((q) => !q)) error = new Error("lot incomplet");
+  return { qs, error };
 }
 
 /**
@@ -842,21 +865,15 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
           await saveCkpt(i);
           step(`Lot ${i + 1}/${nBatches} construit par l'architecte ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 40);
         } else {
-          // cours sans architecte : voie one-shot, RÉSILIENTE — réessai puis IGNORE le lot.
+          // cours sans architecte : voie one-shot, RÉSILIENTE — le lot, puis chaque exercice manquant seul.
           step(`Lot ${i + 1}/${nBatches} — génération de ${bslots.length} exercices…`, 8 + i * 2);
-          let got: ExamQuestion[] = [];
-          for (let attempt = 1; attempt <= 2; attempt++) {
-            try {
-              const g = (await generateBatch(ctx, bslots as any)).filter(Boolean);
-              if (g.length) { got = g; break; }
-              throw new Error("lot vide");
-            } catch (e) {
-              lastError = e;
-              step(`Lot ${i + 1}/${nBatches} — ${attempt < 2 ? "réessai" : "timeout/échec → lot ignoré"} (${(e as Error).message.slice(0, 80)})`, 8 + i * 2);
-            }
+          const r = await generateSlots(ctx, bslots);
+          if (r.error) {
+            lastError = r.error;
+            step(`Lot ${i + 1}/${nBatches} — échec partiel (${(r.error as Error).message.slice(0, 80)})`, 8 + i * 2);
           }
-          // generateBatch réaligne ses questions sur les premiers slots : ceux qui manquent sont en fin de lot.
-          missingByLot[i] = bslots.slice(got.length);
+          const got = r.qs.filter((q): q is ExamQuestion => !!q);
+          missingByLot[i] = bslots.filter((_, k) => !r.qs[k]);
           if (got.length < bslots.length) step(`Lot ${i + 1} : ${got.length}/${bslots.length} questions (relancées en fin de génération)`, 0);
           qs = got; // peut être partiel ou vide → le job CONTINUE
           if (qs.length) {
@@ -906,8 +923,9 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
   const stop = llmErrorCode(lastError);
   if (redo.length && !(stop && HARD_STOP_CODES.has(stop))) {
     step(`${redo.length} exercice(s) manquant(s) → nouvel essai`, 80);
-    // Lots de la taille habituelle (les petits lots évitent les timeouts), en parallèle.
-    await Promise.all(chunk(redo, BATCH).map(async (lot, k) => {
+    // Un exercice par appel, en parallèle : la relance vise la question qui manque, et une
+    // réponse trop longue pour un lot tient seule.
+    await Promise.all(chunk(redo, 1).map(async (lot, k) => {
       try {
         const extra = (await generateBatch(ctx, lot)).filter(Boolean);
         if (!extra.length) return;
