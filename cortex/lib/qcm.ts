@@ -444,6 +444,17 @@ export function selectWithinTrivialBudget<T extends Pick<QcmItem, "options" | "c
   return out;
 }
 
+/** Pool cumulatif : un candidat non sélectionné reste disponible pour les rondes suivantes. */
+export function updateVerifiedCandidates<T extends Pick<QcmItem, "stem" | "options" | "correct" | "trivialDistractors" | "discrimination" | "verified" | "rejected">>(pool: T[], incoming: T[], limit: number): { pool: T[]; selected: T[] } {
+  const byStem = new Map(pool.filter((q) => q.verified === 1 && !q.rejected).map((q) => [q.stem, q]));
+  for (const q of incoming) {
+    if (q.verified !== 1 || q.rejected) continue;
+    byStem.set(q.stem, q);
+  }
+  const next = [...byStem.values()];
+  return { pool: next, selected: selectWithinTrivialBudget([], next, limit) };
+}
+
 const REPLACEMENTS_SCHEMA = `{ "replacements": [ { "index": <numéro Q>, "distractors": [ { "option": <numéro de l'option remplacée>, "text": "<nouvelle option>", "misconception": "[procédé] l'idée fausse visée" } ], "explanation": "<explication de la clé, mise à jour>" } ] }`;
 
 /**
@@ -454,6 +465,16 @@ const REPLACEMENTS_SCHEMA = `{ "replacements": [ { "index": <numéro Q>, "distra
  * l'explication ; l'énoncé, la clé et les autres options restent. Le résultat est revérifié.
  */
 async function replaceTrivialDistractors(items: QcmItem[], step: StepCb, language?: string): Promise<QcmItem[]> {
+  const chunks: QcmItem[][] = [];
+  for (let i = 0; i < items.length; i += 4) chunks.push(items.slice(i, i + 4));
+  const repaired = await Promise.all(chunks.map((chunk) => replaceTrivialDistractorsBatch(chunk, step, language).catch((e) => {
+    step(`Micro-lot de distracteurs ignoré (${(e as Error).message.slice(0, 50)})`, 0);
+    return chunk;
+  })));
+  return repaired.flat();
+}
+
+async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, language?: string): Promise<QcmItem[]> {
   const lang = languageName(language ?? examLanguageFor(currentCourse()))[1];
   // Banc du 04/11 : sans le cours sous les yeux, les remplaçants étaient eux aussi génériques et
   // re-signalés une fois sur deux ; ils se bâtissent sur des notions voisines des extraits.
@@ -1218,7 +1239,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // Une note de difficulté perfectible guide les prochaines générations, mais ne justifie pas
     // à elle seule une nouvelle conception + une nouvelle vérification du lot entier.
     const all = items
-      .filter((it) => it.verified === 0 || it.judgeOk === false || !!it.rejected || !!it.trivialDistractors?.length)
+      .filter((it) => it.verified === 0 || it.judgeOk === false || !!it.nameOnly || !!it.rejected || !!it.trivialDistractors?.length)
       .map((it) => ({ it, i: items.indexOf(it), why: weaknessOf(it) }))
       .filter((w): w is { it: QcmItem; i: number; why: string } => !!w.why);
     if (!all.length) return items;
@@ -1361,6 +1382,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // nouveaux lots, au plus TOPUP_ROUNDS rondes et autant de lots en plus que de lots prévus.
   // En dessous malgré tout, l'examen le dit (requested) et le job rembourse au prorata.
   const all: QcmItem[] = [];
+  const verifiedCandidates: QcmItem[] = [];
   let pending = batches;
   let extraBudget = batches.length * TOPUP_ROUNDS;
   for (let round = 0; pending.length; round++) {
@@ -1371,15 +1393,15 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     for (let b = 0; b < pending.length; b += width) {
       const group = pending.slice(b, b + width);
       const got = await Promise.all(group.map(safeBatch));
+      const incoming = got.flatMap((g) => g.items);
+      const state = updateVerifiedCandidates(verifiedCandidates, incoming, count);
+      verifiedCandidates.splice(0, verifiedCandidates.length, ...state.pool);
+      all.splice(0, all.length, ...state.selected);
       got.forEach((g, k) => {
-        const before = new Set(all);
-        const selected = selectWithinTrivialBudget(all, g.items, count);
-        const accepted = selected.filter((it) => !before.has(it));
-        all.splice(0, all.length, ...selected);
-        qualityDropped += g.items.length - accepted.length;
+        qualityDropped += g.items.filter((it) => it.verified !== 1 || !!it.rejected).length;
         if (g.error) lastError = g.error;
         const bt = group[k];
-        const filled = new Set(accepted.map((it, n) => it.slot ?? n));
+        const filled = new Set(g.items.filter((it) => all.includes(it)).map((it, n) => it.slot ?? n));
         bt.topics.forEach((topic, j) => { if (!filled.has(j)) missing.push({ topic, mold: bt.molds[j] ?? null }); });
       });
       step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
