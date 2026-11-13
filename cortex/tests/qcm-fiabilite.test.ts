@@ -241,6 +241,28 @@ test("un item mal formé au milieu d'un lot : c'est SON sujet qui est comblé", 
   assert.deepEqual(topup, [first[1]], `comblé : ${topup.join(" | ")} ; lot : ${first.join(" | ")}`);
 });
 
+test("un remplacement de doublons partiellement rejeté est recomblé jusqu'au total demandé", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  let dedupeCall = 0;
+  dedupe = () => (++dedupeCall === 1 ? [
+    { first: 0, second: 1, reason: "même notion" },
+    { first: 2, second: 3, reason: "même notion" },
+  ] : []);
+  design = (n, call) => {
+    const items = Array.from({ length: n }, (_, i) => item(call * 10 + i));
+    // Le premier lot de remplacement perd un item au contrôle de forme. Le moteur doit
+    // recombler ce trou même si le contrôle suivant ne trouve plus aucun doublon.
+    if (call === 3 && items[1]) items[1] = { ...items[1], options: [] };
+    return JSON.stringify({ items });
+  };
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 7, openCount: 0 }));
+  assert.equal(r.count, 7);
+  assert.ok(designCalls >= 4, `un lot de recomblement final est attendu, appels=${designCalls}`);
+  assert.ok(dedupeCall >= 3, `le lot recomblé doit être recontrôlé, contrôles=${dedupeCall}`);
+});
+
 test("une question ouverte qui échoue est relancée : 2 QCM + 3 ouvertes sur 2 + 3", async () => {
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");

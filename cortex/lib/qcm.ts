@@ -1351,21 +1351,28 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   ];
   const pool: QcmSlot[] = strict ? fresh.filter((t, i) => fresh.findIndex((x) => x.label === t.label) === i) : spareTopics;
   let nextSpare = 0;
-  for (let round = 0; round <= DEDUP_ROUNDS && all.length >= 2; round++) {
+  // Une passe de remplacement peut elle-même perdre des items aux contrôles qualité. Il faut alors
+  // recombler même si l'audit suivant ne voit plus de doublon, puis auditer ce nouveau lot. Le budget
+  // reste borné par la taille de l'examen et par la réserve de notions.
+  const finalRoundBudget = Math.max(DEDUP_ROUNDS, Math.ceil(count / BATCH) + 2);
+  for (let round = 0; round <= finalRoundBudget && all.length >= 2; round++) {
     const { drop, notions, angles } = await duplicateItems(all, { strict, previous: recent.map((x) => x.stem) }).catch(() => ({ drop: [] as number[], notions: [] as string[], angles: [] as string[] }));
-    if (!drop.length) break;
     const kept = all.filter((_, i) => !drop.includes(i));
     const keptIdx = all.map((_, i) => i).filter((i) => !drop.includes(i));
     all.splice(0, all.length, ...kept);
-    const spare = round < DEDUP_ROUNDS ? pool.slice(nextSpare, nextSpare + count - all.length) : [];
+    const missing = count - all.length;
+    if (missing <= 0) break;
+    const spare = round < finalRoundBudget ? pool.slice(nextSpare, nextSpare + missing) : [];
     nextSpare += spare.length;
     if (!spare.length) {
-      // Dernier contrôle, ou réserve épuisée : retirés sans remplacement (l'examen le dit, le job rembourse).
-      step(`${drop.length} QCM en doublon retiré(s) (même notion qu'une autre question), sans remplacement`, 80);
+      // Dernier contrôle, ou réserve épuisée : le manque reste explicite et sera remboursé.
+      if (drop.length) step(`${drop.length} QCM en doublon retiré(s) (même notion qu'une autre question), sans remplacement`, 80);
       break;
     }
     progress.add("QCM"); // un lot de remplacement : réessai ajouté
-    step(`${drop.length} QCM en doublon retiré(s) (même notion qu'une autre question) → remplacement`, 80);
+    step(drop.length
+      ? `${drop.length} QCM en doublon retiré(s) (même notion qu'une autre question) → remplacement`
+      : `${missing} QCM perdu(s) pendant le remplacement → recomblement`, 80);
     // Le lot de remplacement sait ce que l'examen pose déjà : en mode strict, aucune de ces notions ;
     // sinon, une notion reprise doit l'être sous un angle vraiment distinct.
     const taken = keptIdx.filter((i) => notions[i]);
