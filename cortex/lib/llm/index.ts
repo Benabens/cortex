@@ -12,6 +12,7 @@ import { withRetry } from "./retry";
 import { nextRank, recordCall, replayCall, tapeMode } from "./tape";
 import { extractJson, JsonOutputError } from "./json";
 import { LlmError, type CompleteRequest, type CompleteResult, type LlmProvider } from "./types";
+import { assertLlmAuthorized } from "./authorization";
 
 /**
  * Point d'entrée UNIQUE des appels LLM de l'app.
@@ -57,6 +58,7 @@ export function llmUnavailableReason(name?: ProviderName): string | null {
 }
 
 async function completeWith(provider: LlmProvider, req: CompleteRequest): Promise<CompleteResult> {
+  await assertLlmAuthorized();
   const model = req.model ?? "opus";
   const labels = { provider: provider.name, model };
   // Attribution (llm_usage) : site d'appel capturé AVANT tout await (pile sync),

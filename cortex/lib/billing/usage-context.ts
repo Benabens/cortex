@@ -8,16 +8,16 @@
  *   de la pile — best-effort, jamais bloquant.
  */
 
-let _job: { id: string; type: string } | null = null;
+let _job: { id: string; type: string; creditRef: string | null } | null = null;
 
 /** Déclare le job courant (appelé une fois par process de job). */
-export function setCurrentJob(id: number | string, type: string): void {
-  _job = { id: String(id), type };
+export function setCurrentJob(id: number | string, type: string, creditRef: string | null = null): void {
+  _job = { id: String(id), type, creditRef };
 }
 export function clearCurrentJob(): void {
   _job = null;
 }
-export function currentJob(): { id: string; type: string } | null {
+export function currentJob(): { id: string; type: string; creditRef: string | null } | null {
   return _job;
 }
 

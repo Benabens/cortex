@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "CORTEX_LLM_TEST_AUTH=1 tsx --test tests/*.test.ts",
     "regression": "tsx scripts/regression-cs202.ts",
     "ingest": "tsx scripts/ingest.ts",
     "prepare:course": "tsx scripts/prepare.ts",
