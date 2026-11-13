@@ -263,3 +263,11 @@ test("banc du 04/11 (CS-290) : une question qui reprend celle d'un examen préc�
   assert.ok(!stems.some((s) => s.startsWith("Question 3 ")), `la reprise de l'examen précédent est retirée :\n${stems.join("\n")}`);
   assert.match(dedupePrompts[0], /^P\d+\. .*faux positifs des détecteurs/m, "le contrôle reçoit les questions des examens précédents");
 });
+
+test("réserve épuisée : le dédoublonnage ne réduit jamais le nombre déjà acquis", async () => {
+  const id = await course(4, 0);
+  design = (n, call) => Array.from({ length: n }, (_, i) => item(`Question ${call}.${i} [notion:unique] [angle:${call}.${i}] : que dit le cours ?`));
+  const { r, stems, steps } = await exam(id, 4);
+  assert.equal(r.count, 4, steps.filter((s) => /doublon|remplacement/.test(s)).join("\n"));
+  assert.equal(stems.length, 4);
+});
