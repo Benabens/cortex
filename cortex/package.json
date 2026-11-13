@@ -25,7 +25,8 @@
     "cost:report": "tsx scripts/cost-report.ts",
     "e2e": "playwright test",
     "e2e:charge": "tsx e2e/load.ts",
-    "e2e:google": "E2E_GOOGLE_ONLY=1 playwright test --project=google"
+    "e2e:google": "E2E_GOOGLE_ONLY=1 playwright test --project=google",
+    "e2e:google-redirect": "E2E_GOOGLE_ONLY=1 playwright test --project=google-redirect"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",

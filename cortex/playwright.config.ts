@@ -4,7 +4,7 @@ const port = Number(process.env.E2E_PORT ?? 3210);
 const baseURL = `http://localhost:${port}`;
 const e2eDatabaseUrl = process.env.E2E_DATABASE_URL;
 // Le test « vrai Google » vise le vrai site (redirection OAuth déjà autorisée en prod) : aucun serveur local.
-const googleOnly = process.env.E2E_GOOGLE_ONLY === "1";
+const googleOnly = process.env.E2E_GOOGLE_ONLY === "1"; // tests visant le vrai site : pas de serveur local
 const googleBaseURL = process.env.E2E_GOOGLE_BASE_URL ?? "https://app.cortexexam.com";
 
 export default defineConfig({
@@ -25,6 +25,7 @@ export default defineConfig({
       AUTH_ENABLED: "1", AUTH_SECRET: "e2e-only-secret-not-for-production", AUTH_URL: baseURL,
       E2E_TEST_AUTH: "1", E2E_TEST_RUN: "1", E2E_ALLOW_LOCAL_POSTGRES: e2eDatabaseUrl ? "1" : "0", DB_DRIVER: e2eDatabaseUrl ? "postgres" : "sqlite",
       ...(e2eDatabaseUrl ? { DATABASE_URL: e2eDatabaseUrl } : {}), CORTEX_DATA_DIR: `${process.cwd()}/e2e/.runtime/data`,
+      STORAGE_MIN_FREE_PERCENT: "0",
       LLM_PROVIDER: "openai-compatible", LLM_BASE_URL: `${baseURL}/api/e2e-llm`, LLM_API_KEY: "e2e-hermetic",
       LLM_MODEL_OPUS: "e2e", LLM_MODEL_SONNET: "e2e", LLM_MODEL_HAIKU: "e2e", LLM_MAX_RETRIES: "0",
       MCP_ENABLED: "1", BILLING_ENABLED: "1", SIGNUP_FREE_CREDITS: "0.1",
@@ -38,6 +39,7 @@ export default defineConfig({
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"] }, grepInvert: /@google/ },
     { name: "iphone", use: { ...devices["iPhone 13"], browserName: "chromium" }, grep: /@principal/, grepInvert: /@google/ },
-    { name: "google", use: { channel: "chrome", baseURL: googleBaseURL }, grep: /@google/ },
+    { name: "google", use: { channel: "chrome", baseURL: googleBaseURL }, grep: /@google\b/ },
+    { name: "google-redirect", use: { ...devices["Desktop Chrome"], baseURL: googleBaseURL }, grep: /@googleredirect/ },
   ],
 });
