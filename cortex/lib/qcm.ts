@@ -888,15 +888,14 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   // Second regard sur les questions jugées hors cours (et pas déjà rejetées pour une autre raison).
   const pending = appeals.filter((a) => !a.q.rejected);
   if (pending.length) {
-    const verdicts = await secondLookOffCourse(pending.map((a) => a.flag));
     const courseEvidence = passages.map((p) => p.text).join("\n");
-    pending.forEach((a, i) => {
+    const grounded = new Set(pending.filter((a) => sourceFactSupported(a.q.sourceFact ?? "", courseEvidence)));
+    for (const a of grounded) step(`QCM gardé — preuve du cours retrouvée sans second arbitrage (${a.flag.reason.slice(0, 100)})`, 70);
+    const contested = pending.filter((a) => !grounded.has(a));
+    const verdicts = contested.length ? await secondLookOffCourse(contested.map((a) => a.flag)) : [];
+    contested.forEach((a, i) => {
       const confirmed = verdicts[i];
-      // Le fait source est désormais une citation verbatim obligatoire. S'il est effectivement
-      // retrouvé dans les extraits et que le correcteur a résolu la même clé, cette preuve
-      // déterministe prime sur un second regard probabiliste trop sévère (banc RS : 4/4 faux rejets).
-      const groundedKey = sourceFactSupported(a.q.sourceFact ?? "", courseEvidence);
-      if (confirmed && !NO_FLAG.test(confirmed) && !groundedKey) reject(a.q, `hors cours : ${confirmed.slice(0, 240)}`, offCourseAdvice);
+      if (confirmed && !NO_FLAG.test(confirmed)) reject(a.q, `hors cours : ${confirmed.slice(0, 240)}`, offCourseAdvice);
       else step(`QCM gardé — jugé hors cours sur les extraits, mais trouvé dans le cours (${a.flag.reason.slice(0, 100)})`, 70);
     });
   }
