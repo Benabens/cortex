@@ -87,12 +87,12 @@ const QCM_BATCH_SCHEMA = {
           options: { type: "array", items: { type: "string" }, description: "4 à 5 options : des PROPOSITIONS COMPLÈTES de longueurs COMPARABLES, pas d'« toutes les réponses ci-dessus »." },
           correct: { type: "array", items: { type: "integer" }, description: "Indices 0-based de la/des bonne(s) réponse(s). Exactement 1 pour scq." },
           misconceptions: { type: "array", items: { type: "string" }, description: "Pour CHAQUE option : « [procédé] idée fausse précise » que ce distracteur punit (procédé de la taxonomie) ; chaîne vide pour les bonnes réponses." },
-          source_fact: { type: "string", description: "Le fait PRÉCIS du cours que la question teste (étude et chiffre, condition d'une définition, mécanisme), tel qu'il apparaît dans les extraits." },
+          source_fact: { type: "string", description: "Une citation courte, VERBATIM, recopiée mot pour mot depuis les EXTRAITS DU COURS et qui suffit à établir la bonne réponse." },
           explanation: { type: "string", description: "Pourquoi la bonne réponse est correcte ET pourquoi chaque distracteur est faux, en désignant chaque option par son CONTENU — jamais « option 2 », « B », « (c) » ni « la première » : l'ordre des options est mélangé après coup." },
           mold: { type: "string", description: "Recopie le MOULE imposé pour cette question (voir la consigne par question)." },
           figure_spec: { type: "object", description: "UNIQUEMENT si la question exige une figure data/plot (moule figure_reading) : le FIGURE SPEC JSON décrit dans le prompt. Sinon omets ce champ." },
         },
-        required: ["topic", "type", "stem", "options", "correct", "misconceptions", "explanation"],
+        required: ["topic", "type", "stem", "options", "correct", "misconceptions", "source_fact", "explanation"],
         additionalProperties: false,
       },
     },
@@ -223,7 +223,7 @@ const OPTION_RULES = [
   `  - AUCUN distracteur réfutable par le bon sens ou par le sens des mots (définition évidente, contresens grossier, absolu) : chacun doit paraître juste à un étudiant qui connaît le thème mais pas le détail du cours ; même registre et même degré de nuance que la bonne réponse.`,
   `  - TIGES INDÉPENDANTES : chaque question se comprend seule, sans scénario partagé avec une autre question, et ne donne pas la réponse d'une autre.`,
   `  - EXPLICATION : désigne les options par leur CONTENU, jamais par leur lettre, leur numéro ni leur rang (« la première », « la deuxième », « la dernière ») : l'ordre des options est mélangé après coup.`,
-  `  - ANCRAGE : chaque question teste un FAIT PRÉCIS des extraits du cours fournis (résultat d'étude avec auteurs et chiffres, condition d'une définition, mécanisme) ; recopie ce fait dans "source_fact". Rien hors des extraits et du programme.`,
+  `  - ANCRAGE : chaque question teste un FAIT PRÉCIS des extraits du cours fournis (résultat d'étude avec auteurs et chiffres, condition d'une définition, mécanisme) ; "source_fact" est une CITATION courte, VERBATIM, recopiée MOT POUR MOT depuis ces extraits et suffit à établir la bonne réponse. La clé, son explication et les notions nommées par les distracteurs ne dépendent de RIEN hors de cette citation et des extraits.`,
 ];
 
 const NO_CLASSIFICATION =
@@ -699,7 +699,7 @@ const VERIFY_SCHEMA = {
           discrimination: { type: "integer", description: "Pouvoir discriminant, 1 à 5 : 1 = un étudiant qui ne connaît que les NOMS des notions (ni leurs conditions, ni les résultats des études) la réussit ; 5 = seul un étudiant qui maîtrise le détail du cours la réussit." },
           name_only: { type: "boolean", description: "true si elle se réussit avec les seuls noms des notions, ou en éliminant des options absurdes." },
           course_terms: { type: "array", items: { type: "string" }, description: "Les notions nommées dont dépend la BONNE réponse, chacune écrite EXACTEMENT comme dans les extraits du cours (copie le terme du cours)." },
-          off_course: { type: "string", description: "Non vide si la bonne réponse ou l'explication repose sur une notion ou un fait ABSENT des extraits du cours, ou que le cours définit AUTREMENT, ou si une option NOMME une notion que le cours ne présente pas : laquelle, et ce que dit le cours. Un distracteur qui n'est qu'une affirmation fausse n'est pas hors cours. Vide sinon." },
+          off_course: { type: "string", description: "Non vide si la bonne réponse ou l'explication DÉPEND d'une notion ou d'un fait ABSENT des extraits, ou que le cours définit AUTREMENT : laquelle, et ce que dit le cours. Vide si les extraits permettent de résoudre, même avec un synonyme usuel. Un distracteur faux n'est pas hors cours." },
           off_course_terms: { type: "array", items: { type: "string" }, description: "Les notions ou faits précis que off_course dit absents, écrits comme dans la question (ils seront cherchés dans tout le cours). Vide si off_course est vide." },
           off_course_key: { type: "boolean", description: "true si ce que off_course dit absent porte la BONNE réponse ou l'explication ; false si seules des MAUVAISES options le nomment. false si off_course est vide." },
           off_course_options: { type: "array", items: { type: "integer" }, description: "Indices des MAUVAISES options qui nomment ce que off_course dit absent du cours. Vide si off_course est vide." },
@@ -750,7 +750,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   // Cache de prompt (M) : consignes et schéma stables dans le système, lots et extraits à part.
   const system = [
     `Tu es un correcteur rigoureux du cours. Pour CHAQUE QCM fourni, RÉSOUS-LE toi-même de zéro (sans clé fournie) et donne la/les bonne(s) réponse(s) par INDEX.`,
-    `Quand des extraits du cours sont fournis, résous et juge avec LEURS DÉFINITIONS, jamais avec celles d'une autre source. course_terms : les notions dont dépend la bonne réponse, écrites comme dans le cours. off_course : une notion ou un fait dont dépend la bonne réponse ou l'explication, absent des extraits ou que le cours définit autrement, ou une notion qu'une option NOMME sans que le cours la présente (vide sinon) ; un distracteur qui n'est qu'une affirmation fausse (résultat inversé, condition changée) n'est pas hors cours, c'est son rôle. Les extraits ne couvrent pas tout le cours : nomme dans off_course_terms ce que tu dis absent, on le cherchera dans tout le cours.`,
+    `Quand des extraits du cours sont fournis, résous et juge avec LEURS DÉFINITIONS, jamais avec celles d'une autre source. course_terms : les notions dont dépend la bonne réponse, écrites comme dans le cours. off_course : une notion ou un fait dont DÉPEND la bonne réponse ou l'explication, absent des extraits ou que le cours définit autrement (vide si les extraits permettent de résoudre, même avec un synonyme usuel de la matière) ; un distracteur qui n'est qu'une affirmation fausse (résultat inversé, condition changée) n'est pas hors cours, c'est son rôle. Les extraits ne couvrent pas tout le cours : nomme dans off_course_terms ce que tu dis absent, on le cherchera dans tout le cours.`,
     `DÉFINITIONS (definition_mismatch) : compare chaque définition que la question emploie ou sous-entend à celle des extraits. Une définition plus étroite (une condition ajoutée, « seulement si… »), plus large (une condition oubliée) que celle du cours, ou deux notions voisines confondues rendent la question fausse, même si sa clé est cohérente avec sa propre définition.`,
     `Signale si : la question est ambiguë (2 réponses défendables), ou une mauvaise option s'élimine sans connaître le cours — absurdité, hors sujet, marqueur absolu, grammaire, longueur, calcul élémentaire manifestement faux, ou contradiction avec un critère déjà donné dans l'énoncé. Dans ce dernier cas, ajoute son index à trivial_distractors, même si elle illustre une erreur fréquente.`,
     `off_matter : ce que teste une question qui porte sur les modalités d'examen (format, barème, grille ou critères d'évaluation, consignes), sur la forme d'un rendu (poster, essai, bibliographie) ou sur l'organisation du cours (plan, ordre des chapitres) au lieu de sa matière (vide sinon).`,
@@ -860,9 +860,15 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   const pending = appeals.filter((a) => !a.q.rejected);
   if (pending.length) {
     const verdicts = await secondLookOffCourse(pending.map((a) => a.flag));
+    const courseEvidence = normalize(passages.map((p) => p.text).join("\n"));
     pending.forEach((a, i) => {
       const confirmed = verdicts[i];
-      if (confirmed && !NO_FLAG.test(confirmed)) reject(a.q, `hors cours : ${confirmed.slice(0, 240)}`, offCourseAdvice);
+      // Le fait source est désormais une citation verbatim obligatoire. S'il est effectivement
+      // retrouvé dans les extraits et que le correcteur a résolu la même clé, cette preuve
+      // déterministe prime sur un second regard probabiliste trop sévère (banc RS : 4/4 faux rejets).
+      const source = normalize(a.q.sourceFact ?? "");
+      const groundedKey = source.length >= 20 && courseEvidence.includes(source);
+      if (confirmed && !NO_FLAG.test(confirmed) && !groundedKey) reject(a.q, `hors cours : ${confirmed.slice(0, 240)}`, offCourseAdvice);
       else step(`QCM gardé — jugé hors cours sur les extraits, mais trouvé dans le cours (${a.flag.reason.slice(0, 100)})`, 70);
     });
   }
