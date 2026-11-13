@@ -221,6 +221,8 @@ const OPTION_RULES = [
   `  - NIVEAU EXAMEN RÉEL, par défaut : distinctions fines entre notions proches du cours. Chaque distracteur est une notion, une définition, une valeur ou une sortie de code RÉELLEMENT présente dans le cours (ou une idée fausse documentée), légèrement déformée et proche de la bonne réponse — jamais une option générique ou hors sujet (« erreur d'arrondi », exception sans rapport comme « TypeError », « aucune de ces réponses ») qu'on élimine sans connaître le cours.`,
   `  - Aucune phrase commune répétée en tête de chaque option : factorise-la dans l'énoncé.`,
   `  - AUCUN distracteur réfutable par le bon sens ou par le sens des mots (définition évidente, contresens grossier, absolu) : chacun doit paraître juste à un étudiant qui connaît le thème mais pas le détail du cours ; même registre et même degré de nuance que la bonne réponse.`,
+  `  - CALCUL : les mauvaises valeurs viennent d'une erreur plausible à une ÉTAPE INTERMÉDIAIRE (formule voisine du cours, mauvais dénominateur, agrégation ou condition omise) ; elles gardent le même type, les mêmes unités et le même ordre de grandeur que la clé. Elles ne sont jamais incompatibles avec leurs propres données et ne se réfutent pas par un calcul élémentaire déjà entièrement donné dans l'énoncé.`,
+  `  - CODE : chaque mauvaise sortie correspond à une exécution plausible du code avec UNE confusion réellement enseignée (ordre des filtres, masque, index, agrégation, sous-chaîne) ; aucun distracteur n'est une exception arbitraire. La bonne réponse exige d'appliquer au moins une règle du cours, pas seulement de recopier ou d'exécuter mécaniquement le code affiché.`,
   `  - TIGES INDÉPENDANTES : chaque question se comprend seule, sans scénario partagé avec une autre question, et ne donne pas la réponse d'une autre.`,
   `  - EXPLICATION : désigne les options par leur CONTENU, jamais par leur lettre, leur numéro ni leur rang (« la première », « la deuxième », « la dernière ») : l'ordre des options est mélangé après coup.`,
   `  - ANCRAGE : chaque question teste un FAIT PRÉCIS des extraits du cours fournis (résultat d'étude avec auteurs et chiffres, condition d'une définition, mécanisme) ; "source_fact" est une CITATION courte, VERBATIM, recopiée MOT POUR MOT depuis ces extraits et suffit à établir la bonne réponse. La clé, son explication et les notions nommées par les distracteurs ne dépendent de RIEN hors de cette citation et des extraits.`,
@@ -1190,7 +1192,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // Une note de difficulté perfectible guide les prochaines générations, mais ne justifie pas
     // à elle seule une nouvelle conception + une nouvelle vérification du lot entier.
     const all = items
-      .filter((it) => it.verified === 0 || !!it.rejected || !!it.trivialDistractors?.length)
+      .filter((it) => it.verified === 0 || it.judgeOk === false || !!it.rejected || !!it.trivialDistractors?.length)
       .map((it) => ({ it, i: items.indexOf(it), why: weaknessOf(it) }))
       .filter((w): w is { it: QcmItem; i: number; why: string } => !!w.why);
     if (!all.length) return items;
@@ -1204,30 +1206,21 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       })
       : Promise.resolve([] as QcmItem[]);
     const regenerated = weak.length ? regenerate(bt, items, weak) : Promise.resolve(items);
-    let [fixed, out] = await Promise.all([repaired, regenerated]);
-    const stillTrivial = fixed.map((it, k) => ({ it, k })).filter(({ it }) => it.verified === 1 && onlyTrivialDistractors(it));
-    if (stillTrivial.length) {
-      step(`${stillTrivial.length} QCM : seconde réparation des distracteurs encore éliminables`, 0);
-      const retried = await replaceTrivialDistractors(stillTrivial.map(({ it }) => it), step, shared.language).catch((e) => {
-        step(`Seconde réparation des distracteurs ignorée (${(e as Error).message.slice(0, 50)})`, 0);
-        return stillTrivial.map(({ it }) => it);
-      });
-      fixed = fixed.slice();
-      stillTrivial.forEach(({ k }, i) => { fixed[k] = retried[i] ?? fixed[k]; });
-    }
+    const [fixed, initial] = await Promise.all([repaired, regenerated]);
+    let out = initial;
     fixable.forEach((w, k) => {
       const n = fixed[k];
       // Rendu tel quel (remplacement échoué) : l'item d'origine suit la règle commune.
       if (!n || n === w.it || n.verified !== 1 || n.rejected) return;
       if (!n.rejected && !n.trivialDistractors?.length) { out[w.i] = { ...n, slot: w.it.slot }; return; }
-      if (onlyTrivialDistractors(n)) step(`QCM à régénérer après deux réparations : un distracteur reste éliminable sans le cours`, 0);
+      if (onlyTrivialDistractors(n)) step(`QCM à régénérer après une réparation : un distracteur reste éliminable sans le cours`, 0);
     });
     const stubborn = fixable.map((w, k) => ({ w, n: fixed[k] })).filter(({ n }) => n?.verified === 1 && onlyTrivialDistractors(n));
     if (stubborn.length) {
       out = await regenerate(bt, out, stubborn.map(({ w, n }) => ({
         it: { ...n, slot: w.it.slot },
         i: w.i,
-        why: weaknessOf(n) ?? "distracteur encore éliminable après deux réparations",
+        why: weaknessOf(n) ?? "distracteur encore éliminable après une réparation",
       })));
     }
     return out;
@@ -1276,7 +1269,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       designed.done = true;
       // Un item resté rejeté après régénération (hors cours, définition différente, hors matière, clé
       // contestée) n'est jamais gardé : son sujet est comblé. Même règle pour un distracteur resté
-      // éliminable après deux réparations : masquer le verdict du moteur créait le désaccord avec le banc.
+      // éliminable après une réparation : masquer le verdict du moteur créait le désaccord avec le banc.
       const kept = items.length ? await strengthen(bt, await verifyQcmBatch(items, step)) : [];
       const out = kept.filter((it) => !it.rejected && !it.trivialDistractors?.length);
       qualityDropped += kept.length - out.length;
