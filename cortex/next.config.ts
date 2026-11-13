@@ -1,13 +1,14 @@
 import type { NextConfig } from "next";
+import { proxyBodyLimitBytes } from "./lib/body-size-limits";
 import { CONSENT_PATH, CSP_CONSENT, GLOBAL_HEADERS_SOURCE, SECURITY_HEADERS } from "./lib/security-headers";
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   experimental: {
-    // Un import de dossier envoie un seul fichier par requête. La borne Next
-    // doit dépasser la borne applicative (30 Mio) pour laisser la route rendre
-    // un 413 JSON explicite, sans troncature silencieuse par le proxy.
-    proxyClientMaxBodySize: "32mb",
+    // Le proxy tronque le corps au-delà de cette borne : elle doit dépasser le
+    // plus grand plafond de route (annales : 64 Mio, ou UPLOAD_MAX_MB) pour que
+    // la route rende un 413 JSON explicite, sans troncature silencieuse.
+    proxyClientMaxBodySize: proxyBodyLimitBytes(),
   },
   // better-sqlite3 est un module natif : ne pas le bundler côté serveur.
   // @electric-sql/pglite embarque des assets WASM que le bundler perd
