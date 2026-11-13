@@ -439,6 +439,23 @@ export function selectWithinTrivialBudget<T extends Pick<QcmItem, "options" | "c
   return out;
 }
 
+/**
+ * L'ADN conserve ses thèmes et sa texture, mais les moules dont la réponse se calcule ou s'exécute
+ * mécaniquement ne peuvent occuper plus de 30 % d'un QCM. Les slots excédentaires deviennent des
+ * scénarios conceptuels sur le même sujet : la couverture reste identique et la règle enseignée,
+ * plutôt que la simple lecture de l'énoncé, devient nécessaire.
+ */
+export function capMechanicalMolds(molds: (MoldKind | null)[]): (MoldKind | null)[] {
+  const max = Math.max(1, Math.ceil(molds.length * 0.3));
+  let mechanical = 0;
+  return molds.map((m, i) => {
+    if (m !== "code_trace" && m !== "formula_computation") return m;
+    mechanical++;
+    if (mechanical <= max) return m;
+    return i % 2 ? "applied_scenario" : "statement_truefalse";
+  });
+}
+
 const REPLACEMENTS_SCHEMA = `{ "replacements": [ { "index": <numéro Q>, "distractors": [ { "option": <numéro de l'option remplacée>, "text": "<nouvelle option>", "misconception": "[procédé] l'idée fausse visée" } ], "explanation": "<explication de la clé, mise à jour>" } ] }`;
 
 /**
@@ -1162,7 +1179,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const spareTopics = spread
     ? cov.slice(needed + openCount)
     : [...covAll.filter((t) => !used.has(t.label)), ...covAll.map((t) => ({ label: t.label, method: REPEAT_METHOD }))];
-  const qcmMolds = sampleMolds(dna, count);
+  const qcmMolds = capMechanicalMolds(sampleMolds(dna, count));
   // Format résolu : langue de l'examen ; sans annale, les exemples officiels donnent le style,
   // et les questions « classe ce cas » restent interdites (permises si les annales en ont le style).
   const format = await resolveExamFormat().catch(() => null);
