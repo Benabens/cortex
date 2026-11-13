@@ -27,19 +27,9 @@ export class PayloadTooLarge extends Error {
 /** Plafond par défaut d'un corps JSON/texte (1 Mio). */
 export const JSON_MAX_BYTES = 1024 * 1024;
 
-export const MiB = 1024 * 1024;
-
-/** Plafonds par route (octets). Env : UPLOAD_MAX_MB relève/abaisse le défaut « refs ». */
-export const UPLOAD_LIMITS = {
-  /** Annales (plusieurs PDF par envoi). */
-  refs: (Number(process.env.UPLOAD_MAX_MB) > 0 ? Number(process.env.UPLOAD_MAX_MB) : 64) * MiB,
-  /** Un fichier de source (30 Mo max côté fichier) + enveloppe multipart. */
-  source: 32 * MiB,
-  /** Un fichier d'un dossier de cours (30 Mio + enveloppe multipart). */
-  folderFile: 32 * MiB,
-  /** Une photo (12 Mo max côté fichier) + champs texte. */
-  image: 16 * MiB,
-} as const;
+// Plafonds par route : définis sans dépendance à Next, pour que next.config.ts
+// en dérive la borne du proxy (cf. lib/body-size-limits).
+export { MiB, UPLOAD_LIMITS } from "./body-size-limits";
 
 /** À appeler AVANT `req.formData()`. Renvoie une réponse 411/413 à retourner telle quelle, sinon null. */
 export function rejectOversizedBody(req: Request, maxBytes: number): NextResponse | null {
