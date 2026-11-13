@@ -19,7 +19,7 @@ import { examsDir } from "@/lib/paths";
 import type { Archetype } from "@/lib/archetypes";
 import { PhaseProgress, phaseLine } from "@/lib/progress";
 import { benchTrace } from "@/lib/bench/trace";
-import { qcmSummaryText } from "@/lib/exam-summary";
+import { examSummaryLabel, qcmSummaryText } from "@/lib/exam-summary";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -1587,7 +1587,7 @@ export async function getQcmExam(examId: number, withKeys = false): Promise<QcmE
       .map((r) => ({ id: r.id, concept: r.concept, statement: texToHtml(r.statement_html ?? ""), solution: withKeys ? texToHtml(r.solution_html ?? "") : "" }));
   } catch {}
   return {
-    id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: e.verify_summary, pdf: e.html_path ?? null,
+    id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: examSummaryLabel(e.verify_summary), pdf: e.html_path ?? null,
     // Corrigé : seulement s'il a compilé (J — examen 2 de CS-290 : « Énoncé » sans « Corrigé »).
     solutions: e.html_path?.endsWith(".pdf") && fs.existsSync(path.join(examsDir(), path.basename(e.html_path).replace(/\.pdf$/, "-corrige.pdf"))) ? e.html_path.replace(/\.pdf$/, "-corrige.pdf") : null,
     items: rows.map((r) => {

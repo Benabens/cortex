@@ -5,6 +5,7 @@ import { ExamFrame } from "./ExamFrame";
 import { useState, type CSSProperties } from "react";
 import { OpenResponse } from "@/components/exam/OpenResponse";
 import { ReportButton } from "@/components/exam/ReportButton";
+import { useReducedMotion } from "@/lib/ux/hooks";
 import type {
   BlockExamView,
   PartGrade,
@@ -94,6 +95,7 @@ export function BlockExam({
   courseId: string;
   qs: string;
 }) {
+  const reducedMotion = useReducedMotion();
   const [answers, setAnswers] = useState<Record<number, number | string>>({});
   const [graded, setGraded] = useState<Graded | null>(null);
   // Réponses courtes vérifiées critère par critère : leurs points s'ajoutent au score.
@@ -127,7 +129,7 @@ export function BlockExam({
       if (d.error) setErr(d.error);
       else {
         setGraded(d);
-        window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        window.scrollTo({ top: 0, behavior: reducedMotion ? "auto" : "smooth" });
       }
     } catch {
       setErr("Correction impossible.");

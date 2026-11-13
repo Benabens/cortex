@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/Button";
 import { ExamComposer } from "@/components/examens/ExamComposer";
 import { useApi, useCourse, asText } from "@/lib/ux/api";
 import { formatDay } from "@/lib/ux/types";
-import { examSummaryLabel } from "@/lib/exam-summary";
 import type { ComposeResp, ExamsResp } from "@/lib/ux/exams";
 import { useState } from "react";
 import { apiDelete } from "@/lib/ux/write";
@@ -148,7 +147,7 @@ export default function ExamensPage() {
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {exams.data.exams.map((e) => {
               const ready = e.status === "ready";
-              const summary = examSummaryLabel(asText(e.verifySummary));
+              const summary = asText(e.verifySummary);
               const day = formatDay(e.createdAt);
               return (
                 <Panel key={e.id} className="flex flex-wrap items-center gap-5 p-5 sm:p-6">

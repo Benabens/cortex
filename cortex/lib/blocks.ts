@@ -1,5 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { nowStr, q } from "@/db/q";
+import { examSummaryLabel } from "@/lib/exam-summary";
 import { getCourse } from "@/lib/courses";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, coursePassages } from "@/lib/course-grounding";
 import { assignChapters, spreadOverChapters } from "@/lib/coverage";
@@ -555,7 +556,7 @@ export async function getBlockExam(examId: number, withKeys = false): Promise<Bl
   const blocks = await q.all<{ id: number; idx: number; title: string; section: string | null; scenario: string; points: number }>(`SELECT id, idx, title, section, scenario, points FROM exam_blocks WHERE exam_id = ? ORDER BY idx`, examId);
   const parts = await q.all<PartRow>(`SELECT * FROM block_parts WHERE exam_id = ? ORDER BY block_id, idx`, examId);
   return {
-    kind: "blocks", id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: e.verify_summary, pdf: e.html_path ?? null, solutions: solutionsPdf(e.html_path),
+    kind: "blocks", id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: examSummaryLabel(e.verify_summary), pdf: e.html_path ?? null, solutions: solutionsPdf(e.html_path),
     blocks: blocks.map((b) => ({
       id: b.id, idx: b.idx, title: b.title, section: b.section, scenario: b.scenario, points: Number(b.points),
       parts: parts.filter((p) => p.block_id === b.id).map((p) => ({

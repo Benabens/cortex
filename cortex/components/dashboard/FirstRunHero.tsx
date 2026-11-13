@@ -1,5 +1,6 @@
 import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { StepList } from "./StepList";
 
 /**
  * PREMIER LANCEMENT — un compte sans AUCUN cours. On ne montre ni tableau de
@@ -34,22 +35,7 @@ export function FirstRunHero() {
           sujets d’entraînement qui lui ressemblent vraiment. Tout part d’un cours : le tien.
         </p>
 
-        <ol className="mt-6 max-w-xl divide-y divide-line border-y border-line">
-          {steps.map(({ title, desc }, i) => (
-            <li key={title} className="flex gap-4 py-3.5">
-              <span aria-hidden="true" className="w-4 shrink-0 font-data text-[0.85rem] tabular text-ink-3">
-                {i + 1}
-              </span>
-              <div>
-                <p className="text-[0.9rem] font-medium text-ink-1">
-                  <span className="sr-only">Étape {i + 1} : </span>
-                  {title}
-                </p>
-                <p className="mt-0.5 text-[0.82rem] leading-snug text-ink-3">{desc}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
+        <StepList steps={steps} />
 
         <div className="mt-6">
           <Button variant="primary" size="lg" href="/cours/nouveau">

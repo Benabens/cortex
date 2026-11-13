@@ -162,7 +162,7 @@
 html {
   color-scheme: dark;
   -webkit-text-size-adjust: 100%;
-  /* la barre du haut est collante : l'élément qui reçoit le focus ne doit pas passer dessous */
+  /* la barre du haut est collante (h-16, 4rem) : l'élément qui reçoit le focus s'arrête 1rem dessous */
   scroll-padding-top: 5rem;
 }
 
@@ -173,7 +173,9 @@ a, button, label, summary, [role="button"] {
 
 /* iOS zoome sur tout champ sous 16 px au focus : plancher sur écran tactile. */
 @media (pointer: coarse) {
-  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea {
+  input:where(:not([type]), [type="text"], [type="search"], [type="email"], [type="url"], [type="tel"], [type="number"], [type="password"]),
+  select,
+  textarea {
     font-size: 16px !important;
   }
 }
@@ -443,7 +445,6 @@ h4 {
 .seg-opt {
   display: inline-flex;
   align-items: center;
-  touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 .seg-label {
