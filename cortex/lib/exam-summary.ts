@@ -1,6 +1,7 @@
 /**
  * Résumé lisible d'un examen QCM (« 16 QCM vérifiés · 2 questions ouvertes »). Module pur :
- * écrit en base par lib/qcm à la génération, et relu par l'écran Examens.
+ * écrit en base par lib/qcm à la génération ; les lecteurs (lib/exam, lib/qcm, lib/blocks)
+ * passent la valeur lue par `examSummaryLabel`, pour l'écran comme pour le connecteur MCP.
  *
  * Les examens générés avant le 13/11/2026 portent l'ancien format abrégé
  * (« QCM 16 (16 vér.) + 2 ouverte(s) — … ») : `examSummaryLabel` le réécrit à l'affichage.
@@ -16,13 +17,15 @@ export type QcmSummaryCounts = {
 
 const plural = (n: number, one: string, many: string) => `${n} ${n > 1 ? many : one}`;
 
+const verifiedPart = (n: number) => (n > 0 ? plural(n, "vérifié", "vérifiés") : "aucun vérifié");
+
 export function qcmSummaryText(r: QcmSummaryCounts): string {
   const qcm =
     r.count < r.requested
-      ? `QCM : ${r.count} sur ${r.requested} demandés, dont ${r.verified} vérifiés`
+      ? `QCM : ${r.count} sur ${r.requested} demandés, dont ${verifiedPart(r.verified)}`
       : r.verified >= r.count
-        ? `${r.count} QCM vérifiés`
-        : `${r.count} QCM dont ${r.verified} vérifiés`;
+        ? `${r.count} QCM ${r.count > 1 ? "vérifiés" : "vérifié"}`
+        : `${r.count} QCM, dont ${verifiedPart(r.verified)}`;
   if (!r.open && !r.openRequested) return qcm;
   const open = plural(r.open, "question ouverte", "questions ouvertes");
   return `${qcm} · ${r.open < r.openRequested ? `${open} sur ${r.openRequested}` : open}`;

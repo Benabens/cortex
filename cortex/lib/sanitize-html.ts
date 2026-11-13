@@ -26,6 +26,17 @@ const ALLOWED_TAGS = [
 // `class` : le rendu des questions ouvertes (texToHtml) pose pre.code, div.fig, span.pts.
 const ALLOWED_ATTR = ["class", "colspan", "rowspan", "lang", "dir"];
 
+/** Un bloc de code ou un tableau (div.tab) défile horizontalement sur mobile : il doit être atteignable au clavier (WCAG 2.1.1). */
+const isScrollBlock = (el: Element) =>
+  el.nodeName === "PRE" || (el.nodeName === "DIV" && (el.getAttribute("class") ?? "").split(/\s+/).includes("tab"));
+
+// Posé sur le DOM, APRÈS le filtre des attributs : jamais par une regex sur le HTML sérialisé
+// (une valeur d'attribut contenant « <pre » y fabriquerait un vrai attribut).
+DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+  const el = node as Element; // côté serveur (jsdom), pas de classe Element globale : on teste nodeType
+  if (el.nodeType === 1 && isScrollBlock(el)) el.setAttribute("tabindex", "0");
+});
+
 export function sanitizeHtml(html: string): string {
   if (typeof html !== "string" || !html) return "";
   return DOMPurify.sanitize(html, {

@@ -11,6 +11,7 @@ import {
   type CSSProperties,
 } from "react";
 import { useCourse } from "@/lib/ux/api";
+import { useReducedMotion } from "@/lib/ux/hooks";
 import { SafeHtml } from "@/components/ui/SafeHtml";
 import { OpenResponse } from "@/components/exam/OpenResponse";
 import { ReportButton } from "@/components/exam/ReportButton";
@@ -71,6 +72,7 @@ export default function MockPage({
 }
 
 function MockExam({ id, courseId }: { id: string; courseId: string }) {
+  const reducedMotion = useReducedMotion();
   const qs = `?course=${encodeURIComponent(courseId ?? "")}`;
   const [retry, setRetry] = useState(0);
   const [exam, setExam] = useState<Exam | null>(null);
@@ -137,7 +139,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
       if (d.error) setErr(d.error);
       else {
         setGraded(d);
-        window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        window.scrollTo({ top: 0, behavior: reducedMotion ? "auto" : "smooth" });
       }
     } catch {
       setErr("Correction impossible.");

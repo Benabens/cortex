@@ -16,6 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { excludedSourceIds } from "@/lib/source-scope";
+import { examSummaryLabel } from "@/lib/exam-summary";
 
 const EXAM_DIR = () => examsDir();
 
@@ -285,7 +286,7 @@ export async function listExams() {
       status: r.status,
       kind: qcm ? "qcm" as const : r.format_template === "blocks" ? "blocks" as const : "written" as const,
       questionCount: Number(r.nq ?? 0),
-      verifySummary: r.verify_summary ?? null,
+      verifySummary: examSummaryLabel(r.verify_summary ?? null),
       // Page en ligne, TOUJOURS ouvrable (examen 4 de CS-290 : sans PDF, la carte n'ouvrait rien).
       onlineUrl: online ? `/mock/${r.id}${courseQ()}` : url,
       url,

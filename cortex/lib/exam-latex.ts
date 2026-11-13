@@ -652,19 +652,88 @@ function replaceBalanced(src: string, cmd: string, wrap: (inner: string) => stri
 
 const CIRCLED = "⓪①②③④⑤⑥⑦⑧⑨";
 
-/** Corps d'un `tabular` → <table> : lignes sur `\\`, cellules sur `&`, chaque cellule rendue comme le texte courant. */
-function tabularToHtml(body: string): string {
-  const rows = body
-    .replace(/\\(hline|toprule|midrule|bottomrule)\b|\\cline\{[^}]*\}/g, "")
-    .split(/\\\\(?:\[[^\]]*\])?/)
-    .map((row) => row.trim())
+/** Groupe {…} équilibré qui s'ouvre en src[i] (espaces sautés) ; null s'il n'y en a pas ou s'il n'est pas fermé. */
+function readGroup(src: string, i: number): { inner: string; end: number } | null {
+  while (src[i] === " " || src[i] === "\n" || src[i] === "\t") i++;
+  if (src[i] !== "{") return null;
+  let depth = 0;
+  for (let p = i; p < src.length; p++) {
+    if (src[p] === "\\") { p++; continue; } // \{ et \} échappés
+    if (src[p] === "{") depth++;
+    else if (src[p] === "}" && --depth === 0) return { inner: src.slice(i + 1, p), end: p + 1 };
+  }
+  return null;
+}
+
+/**
+ * Découpe un corps de tableau au niveau supérieur, sur `&` (cellules) ou `\\` (lignes) : jamais
+ * dans des accolades, des maths $…$ ou un environnement imbriqué (pmatrix, tabular…), ni sur `\&`.
+ */
+function splitTop(src: string, sep: "&" | "\\\\"): string[] {
+  const parts: string[] = [];
+  let braces = 0, envs = 0, math = false, start = 0;
+  const top = () => braces === 0 && envs === 0 && !math;
+  for (let p = 0; p < src.length; p++) {
+    const c = src[p];
+    if (c === "\\") {
+      if (src.startsWith("\\begin{", p)) envs++;
+      else if (src.startsWith("\\end{", p)) envs = Math.max(0, envs - 1);
+      else if (sep === "\\\\" && src[p + 1] === "\\" && top()) { parts.push(src.slice(start, p)); start = p + 2; }
+      p++; // commande, ou caractère échappé (\&, \$, \{)
+      continue;
+    }
+    if (c === "{") braces++;
+    else if (c === "}") braces = Math.max(0, braces - 1);
+    else if (c === "$") math = !math;
+    else if (c === "&" && sep === "&" && top()) { parts.push(src.slice(start, p)); start = p + 1; }
+  }
+  parts.push(src.slice(start));
+  return parts;
+}
+
+/** Remplace chaque environnement tabular (fin appariée, imbrications comprises) par render(corps). */
+function replaceTabulars(src: string, render: (body: string) => string): string {
+  const OPEN = "\\begin{tabular}", CLOSE = "\\end{tabular}";
+  let out = "";
+  let i = 0;
+  for (;;) {
+    const k = src.indexOf(OPEN, i);
+    if (k < 0) return out + src.slice(i);
+    let p = k + OPEN.length;
+    const pos = /^\[[^\]]*\]/.exec(src.slice(p)); // [t], [b]…
+    if (pos) p += pos[0].length;
+    const cols = readGroup(src, p); // {|c|p{3cm}|…}
+    if (!cols) return out + src.slice(i);
+    let depth = 1, q = cols.end, end = -1;
+    while (end < 0) {
+      const o = src.indexOf(OPEN, q), c = src.indexOf(CLOSE, q);
+      if (c < 0) break;
+      if (o >= 0 && o < c) { depth++; q = o + OPEN.length; }
+      else if (--depth === 0) end = c;
+      else q = c + CLOSE.length;
+    }
+    if (end < 0) return out + src.slice(i);
+    out += src.slice(i, k) + render(src.slice(cols.end, end));
+    i = end + CLOSE.length;
+  }
+}
+
+/** Corps d'un `tabular` → <table> ; chaque cellule est rendue comme le texte courant (renderCell). */
+function tabularToHtml(body: string, renderCell: (tex: string) => string): string {
+  const rows = splitTop(body.replace(/\\(hline|toprule|midrule|bottomrule)\b|\\cline\{[^}]*\}/g, ""), "\\\\")
+    .map((row) => row.replace(/^\s*\[[^\]]*\]/, "").trim()) // « \\[2pt] » : espacement de ligne
     .filter(Boolean);
   if (!rows.length) return "";
   const cell = (c: string) => {
-    const multi = /^\\multicolumn\{(\d+)\}\{[^{}]*\}\{([\s\S]*)\}$/.exec(c);
-    return multi ? `<td colspan="${multi[1]}">${texToHtml(multi[2])}</td>` : `<td>${texToHtml(c)}</td>`;
+    const multi = /^\\multicolumn\b/.exec(c);
+    const span = multi && readGroup(c, multi[0].length);
+    const fmt = span && readGroup(c, span.end);
+    const content = fmt && readGroup(c, fmt.end);
+    return span && content && /^\d+$/.test(span.inner.trim())
+      ? `<td colspan="${span.inner.trim()}">${renderCell(content.inner)}</td>`
+      : `<td>${renderCell(c)}</td>`;
   };
-  const tr = (row: string) => `<tr>${row.split(/(?<!\\)&/).map((c) => cell(c.trim())).join("")}</tr>`;
+  const tr = (row: string) => `<tr>${splitTop(row, "&").map((c) => cell(c.trim())).join("")}</tr>`;
   return `<div class="tab"><table><tbody>${rows.map(tr).join("")}</tbody></table></div>`;
 }
 
@@ -674,15 +743,21 @@ function tabularToHtml(body: string): string {
  * notes à la place des figures/grilles. Le vrai rendu reste le PDF.
  */
 export function texToHtml(tex: string): string {
+  return renderTex(tex, 0);
+}
+
+function renderTex(tex: string, level: number): string {
   let t = tex ?? "";
   const stash: string[] = [];
-  const NUL = String.fromCharCode(0); // sentinelle impossible dans du LaTeX, survit a escHtml -> zero collision
+  // sentinelle impossible dans du LaTeX, survit a escHtml -> zero collision. Une par niveau : le rendu
+  // imbriqué d'une cellule de tableau laisse intacts les jetons du niveau parent (code déjà mis de côté).
+  const NUL = String.fromCharCode(level);
   const keep = (html: string) => `${NUL}${stash.push(html) - 1}${NUL}`;
 
   // blocs préservés (code, tableaux) ou remplacés par une note (figures/grilles non rendables en HTML)
   t = t.replace(/\\begin\{lstlisting\}(?:\[[^\]]*\])?\n?([\s\S]*?)\\end\{lstlisting\}/g, (_, c) => keep(`<pre class="code">${escHtml(c.replace(/\s+$/, ""))}</pre>`));
   t = t.replace(/\\begin\{verbatim\}\n?([\s\S]*?)\\end\{verbatim\}/g, (_, c) => keep(`<pre class="code">${escHtml(c.replace(/\s+$/, ""))}</pre>`));
-  t = t.replace(/\\begin\{tabular\}(?:\[[^\]]*\])?\{(?:[^{}]|\{[^{}]*\})*\}([\s\S]*?)\\end\{tabular\}/g, (_, body: string) => keep(tabularToHtml(body)));
+  t = replaceTabulars(t, (body) => keep(tabularToHtml(body, (cell) => renderTex(cell, level + 1))));
   t = t.replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, () => keep(`<div class="fig">⬚ figure TikZ : visible uniquement dans le PDF</div>`));
   t = t.replace(/\\begin\{examproctree\}[\s\S]*?\\end\{examproctree\}/g, () => keep(`<div class="fig">⬚ arbre de processus (fork/exec) : visible uniquement dans le PDF</div>`));
   t = t.replace(/\\tcpladder(\{[^{}]*\}){0,6}/g, () => keep(`<div class="fig">⬚ diagramme TCP en échelle (window/cwnd/ssthresh/état + handshake) : à tracer sur papier</div>`));
@@ -694,8 +769,9 @@ export function texToHtml(tex: string): string {
 
   // échappe le texte courant
   t = escHtml(t);
-  // ligatures LaTeX des tirets (« --- » → —, « -- » → –), hors math : sinon « --- » s'affiche tel quel
-  t = t.replace(/(\$[^$]*\$)|---|--/g, (m, math) => math ?? (m === "---" ? "—" : "–"));
+  // ligatures LaTeX des tirets (« --- » → —, « -- » → –), sinon « --- » s'affiche tel quel ;
+  // jamais dans les maths ni dans le code (\texttt{i--}, \verb|--x| restent tels quels, comme dans le PDF)
+  t = t.replace(/(\$\$[\s\S]*?\$\$|\$[^$]*\$|\\texttt\{[^{}]*\}|\\verb(\S)[\s\S]*?\2)|---|--/g, (m, verbatim) => verbatim ?? (m === "---" ? "—" : "–"));
 
   // macros inline
   t = t.replace(/\\subq\{([^{}]*)\}\{([^{}]*)\}\{([^{}]*)\}/g, `<h3>$1 · $2 <span class="pts">[$3 pts]</span></h3>`);
@@ -747,8 +823,9 @@ export function texToHtml(tex: string): string {
   t = t.replace(/[{}]/g, "");
   t = t.replace(/\n{2,}/g, "<br><br>");
 
-  // blocs préservés réinjectés
-  t = t.replace(new RegExp(`${NUL}(\\d+)${NUL}`, "g"), (_, i) => stash[+i]);
+  // blocs préservés réinjectés (un tableau mis de côté peut contenir à son tour des jetons de ce niveau)
+  const token = new RegExp(`${NUL}(\\d+)${NUL}`, "g");
+  for (let pass = 0; pass < 4 && t.includes(NUL); pass++) t = t.replace(token, (_, i) => stash[+i] ?? "");
   return t;
 }
 
