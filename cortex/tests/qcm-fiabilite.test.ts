@@ -207,9 +207,21 @@ test("le modèle ne rend jamais assez de QCM : comblement borné, et l'examen di
   const r = await runWithCourse(id, () => generateQcmExam({ count: 7, openCount: 0 }));
   assert.ok(r.count > 0 && r.count < 7, `count=${r.count}`);
   assert.equal(r.requested, 7);
-  assert.ok(designCalls <= 4, `budget de comblement borné (${designCalls} lots demandés pour 2 prévus)`);
+  assert.ok(designCalls <= 8, `budget de comblement borné (${designCalls} lots demandés pour 2 prévus)`);
   const exam = await runWithCourse(id, () => getQcmExam(r.id));
   assert.match(exam!.verifySummary ?? "", new RegExp(`${r.count} sur 7`));
+});
+
+test("plusieurs rondes de lots très incomplets finissent par livrer le total demandé", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  design = (n, call) => JSON.stringify({
+    items: call <= 4 ? [item(call)] : Array.from({ length: n }, (_, i) => item(call * 10 + i)),
+  });
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 7, openCount: 0 }));
+  assert.equal(r.count, 7);
+  assert.ok(designCalls > 4 && designCalls <= 8, `rondes=${designCalls}`);
 });
 
 test("aucun lot lisible : erreur claire qui dit pourquoi, jamais « unknown »", async () => {

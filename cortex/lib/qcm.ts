@@ -1023,7 +1023,7 @@ export async function runPool<T>(items: T[], n: number, fn: (item: T) => Promise
 export type QcmExamResult = { id: number; count: number; requested: number; verified: number; open: number; openRequested: number; pdf?: string; texError?: string };
 
 /** Nombre de rondes de comblement des QCM manquants, et lots supplémentaires permis (× lots prévus). */
-const TOPUP_ROUNDS = 2;
+const TOPUP_ROUNDS = 3;
 
 /**
  * Durée de chaque phase d'un examen QCM sans historique (banc de M : ~10 min à
@@ -1305,7 +1305,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // En dessous malgré tout, l'examen le dit (requested) et le job rembourse au prorata.
   const all: QcmItem[] = [];
   let pending = batches;
-  let extraBudget = batches.length;
+  let extraBudget = batches.length * TOPUP_ROUNDS;
   for (let round = 0; pending.length; round++) {
     const missing: { topic: QcmSlot; mold: MoldKind | null }[] = [];
     // Lots QCM menés en même temps (QCM_BATCH_CONCURRENCY, défaut 8) ; le limiteur global des appels
