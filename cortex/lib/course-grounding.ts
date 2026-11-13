@@ -1,6 +1,6 @@
 import { q } from "@/db/q";
 import { EXAM_SOURCE_TYPES } from "@/lib/exam-format";
-import { excludedSourceIds, isExcludedMaterial } from "@/lib/source-scope";
+import { excludedSourceIds, isExcludedMaterial, isExcludedPassage } from "@/lib/source-scope";
 import { normalize, tokenize } from "@/lib/text";
 
 /**
@@ -56,7 +56,9 @@ export function isExamLogistics(text: string): boolean {
  * « hors programme 2026 »). Recherche stricte (tous les mots) d'abord, large à défaut.
  */
 export async function topicsInScope<T extends { label: string }>(topics: T[]): Promise<T[]> {
-  const byLabel = topics.filter((t) => !isExamLogistics(t.label) && !isExcludedMaterial(t.label));
+  // Un nom de fichier n'est jamais une notion (« S_ance_1_…_slides_01.00.md », job 14 de HUM-285).
+  const fileName = (l: string) => /\.(md|markdown|txt|pdf|docx?|pptx?|html?)$/i.test(l.trim()) || /\w_\w/.test(l);
+  const byLabel = topics.filter((t) => !isExamLogistics(t.label) && !isExcludedMaterial(t.label) && !fileName(t.label));
   const excluded = await excludedSourceIds();
   if (!excluded.size) return byLabel;
   const { rankedHits } = await import("@/lib/search");
@@ -177,7 +179,7 @@ export async function coursePassages(topics: string[], perTopic = 2, cap = 900):
       if (NOT_COURSE_FACTS.has(h.sourceType) || excluded.has(Number(h.sourceId)) || seen.has(h.itemId)) continue;
       seen.add(h.itemId);
       const row = await q.get<{ text: string }>(`SELECT text FROM items WHERE id = ?`, h.itemId);
-      if (!row?.text || isExcludedMaterial("", row.text)) continue;
+      if (!row?.text || isExcludedPassage(row.text)) continue;
       out.push({ src: h.sourceTitle, text: windowAround(row.text, topic, cap) });
       k++;
     }
@@ -250,7 +252,7 @@ export async function evidencePassages(queries: string[], opts: { perQuery?: num
       if (k >= perQuery || used >= budget) break;
       if (NOT_COURSE_FACTS.has(h.sourceType) || excluded.has(Number(h.sourceId))) continue;
       const row = await q.get<{ text: string }>(`SELECT text FROM items WHERE id = ?`, h.itemId);
-      if (!row?.text || isExcludedMaterial("", row.text)) continue;
+      if (!row?.text || isExcludedPassage(row.text)) continue;
       const text = densestWindow(row.text, query, cap);
       const seen = windows.get(h.itemId) ?? [];
       // Même fenêtre (ou presque) déjà montrée pour une autre requête : rien de neuf.
