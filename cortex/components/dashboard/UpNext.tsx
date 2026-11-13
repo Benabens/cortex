@@ -36,7 +36,7 @@ export function UpNext({ topics }: { topics: DashNext[] }) {
               {/* « L11 · tombé 9 fois » se lit mal à voix haute : version en toutes lettres à côté. */}
               <span
                 aria-hidden="true"
-                className="shrink-0 font-mono text-[0.78rem] text-ink-3 transition-colors duration-150 group-hover:text-ink-2"
+                className="shrink-0 font-data text-[0.78rem] text-ink-3 transition-colors duration-150 group-hover:text-ink-2"
               >
                 {rowFacts(facts)}
               </span>

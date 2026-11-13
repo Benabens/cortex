@@ -55,7 +55,7 @@ export default function Error({
           persiste, reviens à l’accueil et relance ton action.
         </p>
         {error?.digest && (
-          <p style={{ fontSize: 12, color: "var(--color-ink-3, #9295a0)", marginTop: 12, fontFamily: "var(--font-mono)" }}>
+          <p style={{ fontSize: 12, color: "var(--color-ink-3, #9295a0)", marginTop: 12, fontVariantNumeric: "tabular-nums" }}>
             réf. {error.digest}
           </p>
         )}
