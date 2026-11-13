@@ -175,6 +175,8 @@ test("jugé hors cours sur des extraits partiels, mais présent dans le cours : 
   flag = (block) => (/Svenson/.test(block) ? { off: "L'étude de Svenson (1981) n'apparaît dans aucun extrait.", terms: ["Svenson (1981)"] } : null);
   secondLook = (prompt) => {
     assert.match(prompt, /93 % des conducteurs/, "le second regard montre le passage trouvé dans le cours");
+    assert.match(prompt, /bonne réponse ou l'explication DÉPEND/i, "un simple synonyme nommé ne suffit pas à rejeter");
+    assert.doesNotMatch(prompt, /une option NOMME/, "une mauvaise option est traitée comme distracteur, pas comme hors cours");
     const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
     return blocks.map((b) => ({ index: Number(/^Q(\d+)\./.exec(b)![1]), off_course: "" }));
   };
@@ -185,9 +187,22 @@ test("jugé hors cours sur des extraits partiels, mais présent dans le cours : 
   assert.equal(designCalls, 1);
 });
 
+test("un second regard trop sévère ne rejette pas une clé établie par une citation verbatim du cours", async () => {
+  const id = await course();
+  flag = (block) => (/Svenson/.test(block) ? { off: "La formulation emploie un synonyme absent.", terms: ["habileté perçue"] } : null);
+  secondLook = (prompt) => {
+    const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
+    return blocks.map((b) => ({ index: Number(/^Q(\d+)\./.exec(b)![1]), off_course: "Le synonyme n'est pas présenté tel quel." }));
+  };
+  const { r, steps } = await exam(id, 2);
+  assert.equal(r.count, 2);
+  assert.ok(!steps.some((s) => /QCM rejeté/.test(s)), steps.filter((s) => /rejeté/.test(s)).join("\n"));
+  assert.equal(designCalls, 1);
+});
+
 test("vrai hors-cours (une notion que le cours ne présente pas) : confirmé par le second regard, rejeté et remplacé", async () => {
   const id = await course();
-  design = (n, call) => Array.from({ length: n }, (_, i) => (call === 1 && i === 0 ? svensonItem(0, "Le biais de négativité pousse les conducteurs à sous-estimer leur habileté.") : svensonItem(call * 10 + i)));
+  design = (n, call) => Array.from({ length: n }, (_, i) => (call === 1 && i === 0 ? { ...svensonItem(0, "Le biais de négativité pousse les conducteurs à sous-estimer leur habileté."), source_fact: "Le biais de négativité détermine l'auto-évaluation des conducteurs." } : svensonItem(call * 10 + i)));
   flag = (block) => (/négativité/.test(block) ? { off: "Le « biais de négativité » n'apparaît pas dans les extraits.", terms: ["biais de négativité"] } : null);
   const { r, steps, view } = await exam(id, 2);
   assert.equal(r.count, 2);
@@ -197,7 +212,7 @@ test("vrai hors-cours (une notion que le cours ne présente pas) : confirmé par
 
 test("second regard impossible (réponse illisible) : le rejet du correcteur tient", async () => {
   const id = await course();
-  design = (n, call) => Array.from({ length: n }, (_, i) => (call === 1 && i === 0 ? svensonItem(0, "Le biais de négativité pousse les conducteurs à sous-estimer leur habileté.") : svensonItem(call * 10 + i)));
+  design = (n, call) => Array.from({ length: n }, (_, i) => (call === 1 && i === 0 ? { ...svensonItem(0, "Le biais de négativité pousse les conducteurs à sous-estimer leur habileté."), source_fact: "Le biais de négativité détermine l'auto-évaluation des conducteurs." } : svensonItem(call * 10 + i)));
   flag = (block) => (/négativité/.test(block) ? { off: "Le « biais de négativité » n'apparaît pas dans les extraits.", terms: ["biais de négativité"] } : null);
   secondLook = () => null;
   const { r, view } = await exam(id, 2);
@@ -221,7 +236,7 @@ test("fenêtre de preuve : le mot cherché reste dedans après calage, et deux m
 
 test("rien dans tout le cours sur la notion signalée : rejet sans second regard (rien pour la blanchir)", async () => {
   const id = await course();
-  design = (n, call) => Array.from({ length: n }, (_, i) => (call === 1 && i === 0 ? svensonItem(0, "Le cadre SMACIT pousse les conducteurs à sous-estimer leur habileté.") : svensonItem(call * 10 + i)));
+  design = (n, call) => Array.from({ length: n }, (_, i) => (call === 1 && i === 0 ? { ...svensonItem(0, "Le cadre SMACIT pousse les conducteurs à sous-estimer leur habileté."), source_fact: "Le cadre SMACIT détermine l'auto-évaluation des conducteurs." } : svensonItem(call * 10 + i)));
   flag = (block) => (/SMACIT/.test(block) ? { off: "SMACIT n'apparaît nulle part dans les extraits.", terms: ["SMACIT"] } : null);
   secondLook = (prompt) => {
     const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));

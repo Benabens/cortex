@@ -41,7 +41,7 @@ const SECOND_LOOK_SCHEMA = {
         type: "object",
         properties: {
           index: { type: "integer" },
-          off_course: { type: "string", description: "La notion ou le fait que la question NOMME et que le cours ne présente pas (ou définit autrement), et ce que dit le cours. Vide si les passages le contiennent." },
+          off_course: { type: "string", description: "La notion ou le fait absent du cours dont la bonne réponse ou l'explication DÉPEND, et ce que dit le cours. Vide si les passages permettent de résoudre la question, même avec un synonyme usuel." },
         },
         required: ["index", "off_course"],
         additionalProperties: false,
@@ -85,7 +85,7 @@ export async function secondLookOffCourse(flags: OffCourseFlag[]): Promise<strin
   ].filter(Boolean).join("\n")).join("\n\n");
   const prompt = [
     `Un premier correcteur, qui ne voyait que de courts extraits du cours, a jugé les questions ci-dessous hors cours. Voici des passages trouvés pour ces notions dans TOUT le cours.`,
-    `Pour chaque question, off_course : la notion ou le fait que la bonne réponse, l'explication ou une option NOMME et que le cours ne présente pas, ou que le cours définit autrement, avec ce que dit le cours. Laisse-le VIDE si les passages contiennent cette notion ou ce fait avec la même définition.`,
+    `Pour chaque question, off_course : la notion ou le fait absent du cours dont la bonne réponse ou l'explication DÉPEND, ou que le cours définit autrement, avec ce que dit le cours. Laisse-le VIDE si les passages permettent de résoudre la question, même si elle emploie un synonyme usuel de la matière.`,
     `Une option qui n'est qu'une affirmation fausse (résultat inversé, condition changée, chiffre ou auteur déplacé) n'est pas hors cours : c'est le rôle d'un distracteur.`,
     ``,
     DATA_RULE,
