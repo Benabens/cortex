@@ -250,6 +250,18 @@ test("le correcteur interne cherche les mêmes distracteurs triviaux que le banc
   assert.match(prompt, /mêmes critères/i);
 });
 
+test("l'audit final écarte une clé fausse ou hors cours et annote les distracteurs", async () => {
+  const { applyFinalQualityVerdicts } = await import("../lib/qcm");
+  const candidates = [item(0), item(1), item(2)];
+  const kept = applyFinalQualityVerdicts(candidates, [
+    { index: 0, key: true, offCourse: false, trivial: [2] },
+    { index: 1, key: false, offCourse: false, trivial: [] },
+    { index: 2, key: true, offCourse: true, trivial: [] },
+  ]);
+  assert.equal(kept.length, 1);
+  assert.deepEqual(kept[0].trivialDistractors, [2]);
+});
+
 test("lot name_only avec un distracteur trivial : répare l'option sans reconcevoir la question", async () => {
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
