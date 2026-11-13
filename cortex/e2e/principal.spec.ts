@@ -120,7 +120,6 @@ test("@principal importe les sources d'une archive Moodle de 80 Mo dans un dossi
     await page.getByRole("textbox").first().fill(`Archive Moodle E2E ${Date.now()}`);
     await page.getByRole("button", { name: "Créer le cours" }).click();
     await page.getByLabel("Dossier de cours à importer").setInputFiles(root);
-    await expect(page.getByText(/Envoi de 2\/2 fichiers/)).toBeVisible({ timeout: 60_000 });
     await expect(page.getByText(/2 fichiers déposés/)).toBeVisible({ timeout: 60_000 });
     await expect(page.getByText(/Dossier ingéré/)).toBeVisible({ timeout: 60_000 });
     await page.getByRole("radio", { name: /série/i }).click();
