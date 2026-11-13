@@ -1184,9 +1184,15 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
    * Un lot vérifié à l'aveugle ; ses items FAIBLES (réussis avec les seuls noms des notions,
    * peu discriminants, ou trahis par leur longueur) sont régénérés UNE fois, critique à l'appui,
    * et remplacés si la nouvelle version est meilleure.
-   */
+  */
   const strengthen = async (bt: Batch, items: QcmItem[]): Promise<QcmItem[]> => {
-    const all = items.map((it, i) => ({ it, i, why: weaknessOf(it) })).filter((w): w is { it: QcmItem; i: number; why: string } => !!w.why);
+    // Arrêt anticipé : une clé confirmée sans rejet ni distracteur signalé est livrable.
+    // Une note de difficulté perfectible guide les prochaines générations, mais ne justifie pas
+    // à elle seule une nouvelle conception + une nouvelle vérification du lot entier.
+    const all = items
+      .filter((it) => it.verified === 0 || !!it.rejected || !!it.trivialDistractors?.length)
+      .map((it) => ({ it, i: items.indexOf(it), why: weaknessOf(it) }))
+      .filter((w): w is { it: QcmItem; i: number; why: string } => !!w.why);
     if (!all.length) return items;
     // Seuls des distracteurs triviaux : on les remplace (énoncé et clé gardés) ; le reste est régénéré.
     const fixable = all.filter((w) => onlyTrivialDistractors(w.it));
