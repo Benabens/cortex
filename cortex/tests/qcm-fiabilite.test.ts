@@ -67,6 +67,7 @@ const designBodies: Record<string, unknown>[] = [];
 const verifyPrompts: string[] = [];
 /** Ce que le juge met dans off_course pour chaque question (vide : rien à signaler). */
 let judgeFlag = "";
+let judgeWeak = false;
 function verifyReply(prompt: string): string {
   verifyPrompts.push(prompt);
   const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
@@ -84,7 +85,7 @@ function verifyReply(prompt: string): string {
       : /latent variable is a proxy/.test(b)
         ? "latent variable : le cours la définit comme non observable, mesurée indirectement — pas comme un proxy enregistré"
         : "";
-    return { index: i, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms, off_course: judgeFlag, trivial_distractors: trivial, definition_mismatch };
+    return { index: i, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: judgeWeak ? 2 : 4, name_only: judgeWeak, issue: "", course_terms, off_course: judgeFlag, trivial_distractors: trivial, definition_mismatch };
   });
   return JSON.stringify({ results });
 }
@@ -141,7 +142,7 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { repairPrompts.length = 0; repairReply = defaultRepairReply; dedupePrompts.length = 0; dedupe = () => []; assistPrompts.length = 0; designCalls = 0; writeCalls = 0; designPrompts.length = 0; designBodies.length = 0; verifyPrompts.length = 0; });
+beforeEach(() => { repairPrompts.length = 0; repairReply = defaultRepairReply; dedupePrompts.length = 0; dedupe = () => []; assistPrompts.length = 0; designCalls = 0; writeCalls = 0; designPrompts.length = 0; designBodies.length = 0; verifyPrompts.length = 0; judgeWeak = false; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -197,6 +198,18 @@ test("sorties problématiques du modèle → 7 QCM sur 7, code des énoncés int
   assert.equal(exam!.items.length, 7);
   assert.ok(exam!.items.some((it) => it.stem.includes(`${BT}python\nimport pandas as pd`)), "le bloc de code de l'énoncé est gardé tel quel");
   assert.doesNotMatch(exam!.verifySummary ?? "", /sur 7/, "un examen complet ne signale rien");
+});
+
+test("lot valide sans rejet ni distracteur trivial : arrêt après la vérification du lot", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  judgeWeak = true;
+  design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
+  assert.equal(r.count, 4);
+  assert.equal(designCalls, 1, "la difficulté perfectible ne déclenche pas une seconde conception complète");
+  assert.equal(verifyPrompts.length, 1, "une seule vérification groupée suffit");
 });
 
 test("le modèle ne rend jamais assez de QCM : comblement borné, et l'examen dit « n sur 7 »", async () => {
