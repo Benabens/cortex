@@ -35,6 +35,8 @@ export const UPLOAD_LIMITS = {
   refs: (Number(process.env.UPLOAD_MAX_MB) > 0 ? Number(process.env.UPLOAD_MAX_MB) : 64) * MiB,
   /** Un fichier de source (30 Mo max côté fichier) + enveloppe multipart. */
   source: 32 * MiB,
+  /** Un fichier d'un dossier de cours (30 Mio + enveloppe multipart). */
+  folderFile: 32 * MiB,
   /** Une photo (12 Mo max côté fichier) + champs texte. */
   image: 16 * MiB,
 } as const;
