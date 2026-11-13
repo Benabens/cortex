@@ -48,6 +48,22 @@ test("le .tex d'un examen normal est byte-identique et passe le garde", async ()
   assertTexSafe(tex); // ne lève pas, ne modifie rien
 });
 
+test("répare les antislashs LaTeX mangés par les échappements JSON", async () => {
+  const { renderExamTex } = await import("../lib/exam-latex");
+  const damaged = {
+    ...SPEC,
+    questions: [{
+      ...SPEC.questions[0],
+      statement_tex: "\begin{center}Table\\end{center}",
+      solution_tex: "Le résultat vaut \frac{1}{2}",
+    }],
+  };
+  const tex = await runWithCourse("cs-202", async () => renderExamTex(damaged as never, "2026-06-11", true));
+  assert.match(tex, /\\begin\{center\}Table\\end\{center\}/);
+  assert.match(tex, /\\frac\{1\}\{2\}/);
+  assert.ok(![...tex].some((c) => c.charCodeAt(0) === 8 || c.charCodeAt(0) === 12));
+});
+
 test("les primitives dangereuses sont rejetées, une par une", async () => {
   const { findTexHazards } = await import("../lib/tex-guard");
   const cases = [
