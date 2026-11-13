@@ -1,7 +1,7 @@
 import { q } from "@/db/q";
 import { EXAM_SOURCE_TYPES } from "@/lib/exam-format";
 import { normalize, tokenize } from "@/lib/text";
-import { excludedSourceIds } from "@/lib/source-scope";
+import { excludedSourceIds, materialLabel } from "@/lib/source-scope";
 
 /**
  * COUVERTURE DES CHAPITRES — les questions d'un examen se répartissent sur
@@ -274,6 +274,7 @@ export async function assignChapters(
 function withEmptyChapters(topics: CoverageTopic[], chapters: string[]): CoverageTopic[] {
   const covered = new Set(topics.map((t) => t.chapter).filter(Boolean));
   const weight = Math.max(1, Math.min(...topics.map((t) => t.weight).filter((w) => w > 0), Infinity));
-  const extra = chapters.filter((c) => !covered.has(c)).map((c) => ({ label: c, method: null, weight: Number.isFinite(weight) ? weight : 1, chapter: c }));
+  // Un chapitre nommé par un fichier (« Archive_2025-26_Thèmes_des_posters_2024.md ») ne devient jamais une notion (job 14 de HUM-285).
+  const extra = chapters.filter((c) => !covered.has(c) && materialLabel(c)).map((c) => ({ label: c, method: null, weight: Number.isFinite(weight) ? weight : 1, chapter: c }));
   return [...topics, ...extra];
 }
