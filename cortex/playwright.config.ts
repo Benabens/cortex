@@ -27,7 +27,7 @@ export default defineConfig({
       ...(e2eDatabaseUrl ? { DATABASE_URL: e2eDatabaseUrl } : {}), CORTEX_DATA_DIR: `${process.cwd()}/e2e/.runtime/data`,
       LLM_PROVIDER: "openai-compatible", LLM_BASE_URL: `${baseURL}/api/e2e-llm`, LLM_API_KEY: "e2e-hermetic",
       LLM_MODEL_OPUS: "e2e", LLM_MODEL_SONNET: "e2e", LLM_MODEL_HAIKU: "e2e", LLM_MAX_RETRIES: "0",
-      MCP_ENABLED: "1", BILLING_ENABLED: "1", SIGNUP_FREE_CREDITS: "0.1",
+      MCP_ENABLED: "1", BILLING_ENABLED: "1", SIGNUP_FREE_CREDITS: "0",
       AUTH_EMAIL_ENABLED: "1", AUTH_EMAIL_ENDPOINT: "http://127.0.0.1:3211/capture",
       CORTEX_OWNER_EMAIL: "owner@e2e.cortex.test", RATE_LIMIT_PER_MIN: "unlimited",
     },
