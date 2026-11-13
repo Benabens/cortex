@@ -11,7 +11,7 @@
  *    passer faute d'avoir pu vérifier.
  * Le contrôle déterministe des notions de la clé (absentCourseTerms) reste en amont, inchangé.
  */
-import { evidencePassages } from "@/lib/course-grounding";
+import { corpusWindows, evidencePassages } from "@/lib/course-grounding";
 import { completeJson } from "@/lib/llm";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 
@@ -67,9 +67,22 @@ function quoted(flag: string): string[] {
 export async function secondLookOffCourse(flags: OffCourseFlag[]): Promise<string[]> {
   // Les notions nommées par le correcteur, celles qu'il cite entre guillemets (une définition
   // contestée, PR #55), puis sa phrase elle-même : chaque signalement a ses propres passages.
-  const evidence = await Promise.all(flags.map((f) => {
-    const queries = [...new Set([...f.terms, ...quoted(f.reason), f.reason])];
-    return evidencePassages(queries, { perQuery: 3, cap: 2000, budget: 10_000 }).catch(() => []);
+  // Puis, hors de la recherche plein texte, les mêmes notions cherchées par leurs racines dans TOUT
+  // le corpus (accents, pluriels, flexions), et la bonne réponse pour contexte : banc HUM-285 du
+  // 13/11, 29 rejets « pas présenté dans ces passages » sur des faits que le cours détaille ailleurs.
+  // Rien sur la NOTION signalée, ni par l'une ni par l'autre : le rejet tient sans appel.
+  const overlaps = (a: string, b: string) => a.includes(b.slice(0, 200)) || b.includes(a.slice(0, 200));
+  const merge = (a: { src: string; text: string }[], b: { src: string; text: string }[]) => [...a, ...b.filter((p) => !a.some((x) => overlaps(x.text, p.text)))];
+  const evidence = await Promise.all(flags.map(async (f) => {
+    const named = [...new Set([...f.terms, ...quoted(f.reason)])];
+    const [fts, scan] = await Promise.all([
+      evidencePassages([...new Set([...named, f.reason])], { perQuery: 3, cap: 2000, budget: 10_000 }).catch(() => []),
+      corpusWindows(named, { perQuery: 2, cap: 1800, budget: 6_000 }).catch(() => []),
+    ]);
+    const notion = merge(fts, scan);
+    if (!notion.length) return notion;
+    const key = (f.correct ?? []).map((k) => f.options[k] ?? "").filter(Boolean);
+    return merge(notion, await corpusWindows([...key, `${f.stem} ${key.join(" ")}`], { perQuery: 2, cap: 1800, budget: 4_000 }).catch(() => []));
   }));
   const verdicts = flags.map((f) => f.reason);
   const open = flags.map((f, i) => ({ f, i })).filter((x) => evidence[x.i].length);
@@ -84,8 +97,9 @@ export async function secondLookOffCourse(flags: OffCourseFlag[]): Promise<strin
     `   [jugée hors cours : ${sanitizeCorpus(f.reason).slice(0, 300)}]`,
   ].filter(Boolean).join("\n")).join("\n\n");
   const prompt = [
-    `Un premier correcteur, qui ne voyait que de courts extraits du cours, a jugé les questions ci-dessous hors cours. Voici des passages trouvés pour ces notions dans TOUT le cours.`,
+    `Un premier correcteur, qui ne voyait que de courts extraits du cours, a jugé les questions ci-dessous hors cours. Voici des passages trouvés pour ces notions dans TOUT le cours (par leurs racines : accents, pluriels et flexions compris).`,
     `Pour chaque question, off_course : la notion ou le fait que la bonne réponse, l'explication ou une option NOMME et que le cours ne présente pas, ou que le cours définit autrement, avec ce que dit le cours. Laisse-le VIDE si les passages contiennent cette notion ou ce fait avec la même définition.`,
+    `Juge sur le FOND, pas sur les mots : une notion que le cours présente sous un autre nom (synonyme, traduction, singulier ou pluriel), une reformulation fidèle, ou la conséquence directe d'une définition ou d'un exemple du cours n'est PAS hors cours, même si la phrase exacte n'y figure pas. Hors cours : un fait, un chiffre, un cadre ou une notion que le cours ne présente nulle part dans ces passages, ou une définition qu'il contredit.`,
     `Une option qui n'est qu'une affirmation fausse (résultat inversé, condition changée, chiffre ou auteur déplacé) n'est pas hors cours : c'est le rôle d'un distracteur.`,
     ``,
     DATA_RULE,

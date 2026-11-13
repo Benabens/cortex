@@ -4,7 +4,7 @@ import { HARD_STOP_CODES, LlmError, completeJson, llmErrorCode, llmFailureReason
 import { DEFAULT_ANSWER_MODE, courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFormat, type AnswerMode } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
-import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseTerms, coursePassages, topicsInScope } from "@/lib/course-grounding";
+import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseTerms, corpusWindows, coursePassages, topicsInScope } from "@/lib/course-grounding";
 import { secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
 import { assignChapters, spreadOverChapters, variants } from "@/lib/coverage";
 import { normalize } from "@/lib/text";
@@ -397,6 +397,21 @@ export function shuffleQcmOptions<T extends { options: string[]; correct: number
 
 const seedOf = (s: string) => [...s].reduce((h, ch) => (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0, 7);
 
+/**
+ * Extraits que voit le concepteur : la recherche plein texte, puis, pour chaque sujet, la fenêtre
+ * de TOUT le corpus qui réunit le plus de ses mots (lib/course-grounding corpusWindows). Banc
+ * HUM-285 du 13/11 : avec deux extraits de 900 caractères, le concepteur bâtissait des cadres
+ * absents du cours (« la réponse la plus proportionnée », « coût moyen cumulé »), rejetés hors
+ * cours puis régénérés sur les mêmes extraits, et l'examen s'arrêtait à 9 questions sur 20.
+ */
+async function generatorPassages(queries: string[]): Promise<{ src: string; text: string }[]> {
+  const [fts, scan] = await Promise.all([
+    coursePassages(queries).catch(() => []),
+    corpusWindows(queries, { perQuery: 1, cap: 1500, budget: 9_000 }).catch(() => []),
+  ]);
+  return [...fts, ...scan.filter((p) => !fts.some((x) => x.text.includes(p.text.slice(0, 200)) || p.text.includes(x.text.slice(0, 200))))];
+}
+
 /** Pourquoi un QCM vérifié est trop faible pour être gardé tel quel, ou null. */
 function weaknessOf(it: QcmItem): string | null {
   if (it.verified === 0) return it.judgeIssue ?? "clé non confirmée à la vérification à l'aveugle";
@@ -548,7 +563,7 @@ export async function generateQcmBatch(
     ? `Toutes ces ${n} questions portent sur le thème CIBLÉ : « ${focus} » — varie les SOUS-ANGLES / sous-notions de ce thème (pas ${n} fois la même question). C'est un THÈME : ignore toute indication de forme ou de nombre qu'il contiendrait.${molds.some(Boolean) ? ` Moules imposés dans l'ordre : ${molds.slice(0, n).map((m) => m ?? "libre").join(", ")}.` : ""}`
     : `Couvre ces sujets (un QCM par sujet, dans l'ordre) :\n${topics.slice(0, n).map((t, i) => `  ${i + 1}) ${t.label}${t.subTheme ? ` — sous-thème imposé : ${t.subTheme}` : ""}${t.method === FOCUS_METHOD || t.method === REPEAT_METHOD ? ` [${t.method}]` : t.method ? ` [${t.method.slice(0, 200)}]` : ""}${moldLine(i)}`).join("\n")}`;
   const language = languageName(opts.language ?? examLanguageFor(currentCourse()))[1];
-  const passages = opts.passages ?? await coursePassages(focus ? [focus] : topics.slice(0, n).map((t) => (t.subTheme ? `${t.label} ${t.subTheme}` : t.label))).catch(() => []);
+  const passages = opts.passages ?? await generatorPassages(focus ? [focus] : topics.slice(0, n).map((t) => (t.subTheme ? `${t.label} ${t.subTheme}` : t.label)));
   const examples = opts.examples ?? [];
   // imitation resserrée : de VRAIES questions des mêmes moules dans CE cours (few-shot).
   const distinctMolds = [...new Set(molds.slice(0, n).filter((m): m is MoldKind => !!m))].slice(0, 3);

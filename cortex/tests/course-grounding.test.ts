@@ -77,3 +77,35 @@ test("un terme qui n'apparaît que dans les consignes d'examen (grille d'évalua
     assert.deepEqual(await absentCourseTerms(["nudge numérique", "groupthink"]), [], "les questions d'exemple de l'enseignant restent du cours");
   });
 });
+
+test("matière d'un item : la diapo des enseignants retirée, le reste de la séance gardé ; une archive ne garde rien", async () => {
+  const { courseMatter } = await import("../lib/source-scope");
+  const seance = "# Présentation des enseignants\n\nDomaines de recherche : Samuel Bendahan — théorie de la décision appliquée.\n\nLe leadership, c'est la mobilisation de plusieurs personnes vers un objectif commun.";
+  assert.equal(courseMatter(seance), "Le leadership, c'est la mobilisation de plusieurs personnes vers un objectif commun.");
+  assert.equal(courseMatter("Le marché biface met en relation producteurs et consommateurs."), "Le marché biface met en relation producteurs et consommateurs.");
+  assert.equal(courseMatter("> Archive 2025-26 (Gillet 2025) — hors programme 2026.\n\nSouveraineté numérique."), "");
+});
+
+test("recherche dans tout le corpus : accents, pluriels et flexions trouvés ; archives, annales et diapo des enseignants jamais montrées", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { corpusWindows } = await import("../lib/course-grounding");
+  await runWithCourse("fictif", async () => {
+    for (const t of ["sources", "items"]) await q.ensureTable(t);
+    const add = async (type: string, title: string, text: string) => {
+      const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, type, title, `${type}/${title}`, null, 1);
+      await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, type, title, text);
+    };
+    const filler = "Le numérique transforme les organisations. ".repeat(60);
+    await add("course_pdf", "S_ance_3_Bendahan_Entreprises.md", `${filler}Ces exemples illustrent un modèle d'affaires basé sur des marchés bifaces, qui mettent en relation des producteurs et des consommateurs. ${filler}`);
+    await add("course_pdf", "S_ance_1_Bendahan_Leadership.md", "# Présentation des enseignants\n\nDomaines de recherche : Samuel Bendahan, théorie de la décision.\n\nLe leadership mobilise plusieurs personnes.");
+    await add("course_pdf", "Archive_2025-26_Exemple_de_r_sum_et_bibliographie_attendu_du_rendu_poster.md", "Rewilding par clonage et rétroaction du pergélisol : exemple de résumé.");
+    await add("final", "Examen 2025", "Un marché biface relie producteurs et consommateurs : vrai ou faux ?");
+    const biface = await corpusWindows(["plateforme biface producteurs consommateurs"], { cap: 400 });
+    assert.equal(biface.length, 1, JSON.stringify(biface));
+    assert.match(biface[0].text, /marchés bifaces/);
+    assert.equal(biface[0].src, "S_ance_3_Bendahan_Entreprises.md");
+    assert.deepEqual(await corpusWindows(["rewilding par clonage"]), [], "archive jamais montrée");
+    assert.deepEqual(await corpusWindows(["domaines de recherche Bendahan théorie décision"]), [], "diapo des enseignants jamais montrée");
+  });
+});

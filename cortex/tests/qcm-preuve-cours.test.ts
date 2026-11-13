@@ -258,3 +258,26 @@ test("banc du 04/11 : une notion de la clé recopiée en paraphrase (introuvable
   assert.ok(view.items.some((it) => /\(s10\)/.test(it.stem)), `la question est gardée :\n${steps.join("\n")}`);
   assert.ok(secondLookPrompts.length >= 1, "le second regard a cherché dans tout le cours");
 });
+
+test("banc HUM-285 du 13/11 : notion jugée absente, que la recherche plein texte ne trouve pas mais que le cours détaille (pluriel) — gardée", async () => {
+  const id = await course();
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  // Un second support, NON indexé pour la recherche plein texte : seule la recherche dans tout le corpus le voit.
+  await runWithCourse(id, async () => {
+    const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", "S_ance_3_Bendahan_Entreprises.md", "course_pdf/s3", null, 1);
+    await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", "S_ance_3_Bendahan_Entreprises.md", `${"Le numérique transforme les entreprises. ".repeat(40)}Ces exemples illustrent un modèle d'affaires basé sur des marchés bifaces, qui mettent en relation des producteurs et des consommateurs.`);
+  });
+  flag = (block) => (/Svenson/.test(block) ? { off: "Le « marché biface » n'est présenté dans aucun extrait.", terms: ["marché biface producteurs consommateurs"] } : null);
+  secondLook = (prompt) => {
+    const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
+    const seen = /marchés bifaces/.test(prompt.split("═══ QUESTIONS")[0]);
+    return blocks.map((b) => ({ index: Number(/^Q(\d+)\./.exec(b)![1]), off_course: seen ? "" : "Le marché biface n'est présenté nulle part dans le cours." }));
+  };
+  const { r, steps } = await exam(id, 2);
+  assert.equal(r.count, 2);
+  assert.ok(secondLookPrompts.length >= 1);
+  assert.match(secondLookPrompts[0], /marchés bifaces/, "le second regard voit le passage trouvé par les racines, hors recherche plein texte");
+  assert.ok(!steps.some((s) => /QCM rejeté/.test(s)), steps.filter((s) => /rejeté/.test(s)).join("\n"));
+  assert.match(secondLookPrompts[0], /Juge sur le FOND/, "un synonyme ou une reformulation fidèle n'est pas hors cours");
+});
