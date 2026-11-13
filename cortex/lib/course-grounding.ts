@@ -29,6 +29,24 @@ export const COURSE_TERMS_RULE =
 export const COURSE_MATTER_RULE =
   `  - MATIÈRE DU COURS SEULEMENT : aucune question ni notion sur les modalités d'examen (format, durée, barème, grille ou critères d'évaluation, consignes) ni sur la forme d'un rendu (poster, essai, rapport, mise en forme d'une bibliographie), ni sur l'organisation du cours (plan, ordre des chapitres, ce qu'annonce une diapositive) : teste ce que le cours enseigne, pas comment il est évalué ou découpé.`;
 
+/** Un examen nommé : « midterm », « QCM », « final exam »… (« final » seul est trop courant : « final value theorem »). */
+const EXAM_WORD = /\b(exam|exams|examen|examens|midterm|midterms|mid-term|partiel|partiels|quiz|qcm|mcq|mcqs|final exam|examen final|finals|oral exam|examen oral)\b/;
+/** Ce qu'une note de modalités dit d'un examen : son format, sa durée, son barème, ce qui est permis. */
+const LOGISTICS_WORD = /\b(format|formats|modalites?|duree|duration|bareme|grading|graded|notation|ponderation|weighting|consignes?|instructions|allowed|autorises?|autorisees?|permitted|closed book|open book|calculat\w*|deadline|rubric|nombre de questions|number of questions)\b/;
+/** Formules qui suffisent seules. */
+const LOGISTICS_PHRASE = /\b(modalites d.examen|modalites d.evaluation|exam format|format de l.examen|grading scheme|grille d.evaluation|criteres d.evaluation|evaluation criteria|closed book|open book|cheat ?sheet (allowed|autorise\w*))\b/;
+
+/**
+ * Une note de MODALITÉS D'EXAMEN, pas une notion du cours (même règle que
+ * COURSE_MATTER_RULE, appliquée sans modèle) : « Midterm MCQ format — half Bendahan… »
+ * (HUM, 13/11) remontait comme concept à réviser. Lu sur un titre de carte ou un concept.
+ */
+export function isExamLogistics(text: string): boolean {
+  const t = normalize(text).replace(/[’']/g, "'");
+  if (LOGISTICS_PHRASE.test(t)) return true;
+  return EXAM_WORD.test(t) && LOGISTICS_WORD.test(t);
+}
+
 /** Au-delà, le corpus n'est pas chargé en mémoire : sans vérification possible, rien n'est rejeté. */
 const MAX_CORPUS_CHARS = 30_000_000;
 
