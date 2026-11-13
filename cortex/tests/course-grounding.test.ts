@@ -109,3 +109,20 @@ test("recherche dans tout le corpus : accents, pluriels et flexions trouvés ; a
     assert.deepEqual(await corpusWindows(["domaines de recherche Bendahan théorie décision"]), [], "diapo des enseignants jamais montrée");
   });
 });
+
+test("chiffres porteurs : pourcentages, années et entiers trouvés dans le cours ; un chiffre d'archive ne compte pas", async () => {
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { absentCourseNumbers, factNumbers } = await import("../lib/course-grounding");
+  assert.deepEqual(factNumbers("Hausse de 14 % (34 % chez les novices), étude de 2023, 0,55 crédit, 3 groupes."), ["14", "34", "2023"]);
+  await runWithCourse("cs-202", async () => {
+    for (const t of ["sources", "items"]) await q.ensureTable(t);
+    const add = async (title: string, text: string) => {
+      const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", title, `course_pdf/${title}`, null, 1);
+      await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", title, text);
+    };
+    await add("S_ance_2_Bendahan.md", "Svenson (1981) : 93 % des conducteurs s'estiment plus habiles que la moyenne.");
+    await add("Archive_2025-26_Th\u00e8mes_des_posters_2024.md", "Poster 2024 : 61 % de faux positifs.");
+    assert.deepEqual(await absentCourseNumbers(["93", "1981", "61", "14"]), ["61", "14"]);
+  });
+});
