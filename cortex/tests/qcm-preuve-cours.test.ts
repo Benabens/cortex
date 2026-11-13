@@ -198,6 +198,7 @@ test("un second regard trop sévère ne rejette pas une clé établie par une ci
   assert.equal(r.count, 2);
   assert.ok(!steps.some((s) => /QCM rejeté/.test(s)), steps.filter((s) => /rejeté/.test(s)).join("\n"));
   assert.equal(designCalls, 1);
+  assert.equal(secondLookPrompts.length, 0, "la preuve directe évite un second arbitrage");
 });
 
 test("une preuve paraphrasée avec les mêmes faits, nombres et notation reste fondée sur le cours", async () => {
@@ -215,6 +216,7 @@ test("une preuve paraphrasée avec les mêmes faits, nombres et notation reste f
   assert.equal(r.count, 2);
   assert.ok(!steps.some((s) => /QCM rejeté/.test(s)), steps.filter((s) => /rejeté/.test(s)).join("\n"));
   assert.equal(designCalls, 1, "la paraphrase ne provoque aucun remplacement");
+  assert.equal(secondLookPrompts.length, 0, "la preuve fidèle évite un second arbitrage");
 });
 
 test("vrai hors-cours (une notion que le cours ne présente pas) : confirmé par le second regard, rejeté et remplacé", async () => {
