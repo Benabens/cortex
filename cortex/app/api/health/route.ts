@@ -4,6 +4,7 @@ import { ensureCoursesLoaded, listCourses } from "@/lib/courses";
 import { llmAvailable } from "@/lib/llm";
 import { sandboxAvailable } from "@/lib/sandbox-exec";
 import { texAvailable } from "@/lib/exam-latex";
+import { railwayEnvironmentName } from "@/lib/railway-env";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -34,7 +35,7 @@ export async function GET() {
     // la prod serve SON commit avant de la tester (et de la rétablir si le test
     // casse). Posés par Railway à chaque déploiement ; null hors Railway.
     commit: process.env.RAILWAY_GIT_COMMIT_SHA || null,
-    environment: process.env.RAILWAY_ENVIRONMENT_NAME || null,
+    environment: railwayEnvironmentName() || null,
     driver: q.dialect,
     checks: {
       db,

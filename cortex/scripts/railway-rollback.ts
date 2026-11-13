@@ -37,7 +37,12 @@ export function pickRollbackTarget(deployments: RailwayDeployment[], badSha: str
   if (bad.meta?.reason === "rollback") return { bad, refusal: "ce déploiement est déjà un rollback : pas de rollback en cascade" };
   const newer = sorted.find((d) => d.createdAt > bad.createdAt && d.status === "SUCCESS");
   if (newer) return { bad, refusal: `un déploiement plus récent est en ligne (${newer.meta?.commitHash?.slice(0, 7) ?? newer.id}) : rien à annuler` };
-  const target = sorted.find((d) => d.createdAt < bad.createdAt && d.canRollback && SERVED.has(d.status) && d.meta?.commitHash !== badSha);
+  // Un déploiement suivi d'un rollback a déjà été jugé cassé : on ne le remet pas
+  // en ligne (A, B cassé → rollback vers A, C cassé : retour sur A, pas sur B).
+  // Un redéploiement du même commit porte le même code cassé : exclu aussi.
+  const rolledBackFrom = (d: RailwayDeployment) =>
+    sorted.filter((n) => n.createdAt > d.createdAt && SERVED.has(n.status)).at(-1)?.meta?.reason === "rollback";
+  const target = sorted.find((d) => d.createdAt < bad.createdAt && d.canRollback && SERVED.has(d.status) && d.meta?.commitHash !== badSha && !rolledBackFrom(d));
   if (!target) return { bad, refusal: "aucun déploiement antérieur réutilisable" };
   return { bad, target };
 }

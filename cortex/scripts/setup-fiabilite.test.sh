@@ -107,7 +107,7 @@ run() { # $1 = scénario, puis les options du script
   (
     export S LEURRES="$TMP/leurres" HOME="$S/home"
     # Un shell appelant qui aurait exporté des variables du même nom que celles du script.
-    export DSN=parasite RW_TOKEN=parasite HTTP_BODY=parasite val=parasite out=parasite body=parasite secret=parasite msg=parasite
+    export DSN=parasite RW_TOKEN=parasite PERSONA_KEY=parasite HTTP_BODY=parasite val=parasite out=parasite body=parasite secret=parasite msg=parasite
     # shellcheck source=/dev/null
     source "$SCRIPT"
     curl() {
@@ -124,7 +124,7 @@ run() { # $1 = scénario, puis les options du script
       case "${1:-} ${2:-}" in
         "whoami "*) return 0 ;;
         "variable list") if [[ -n "${HAS_DSN:-}" ]]; then printf '{"AUTH_URL":"x","SENTRY_DSN":"ancien"}'; else printf '{"AUTH_URL":"x"}'; fi; return "${RAILWAY_LIST_RC:-0}" ;;
-        "variable set") cat > "$S/railway.stdin.$3"; return "${RAILWAY_SET_RC:-0}" ;;
+        "variable set") cat > "$S/railway.stdin.$3"; if [[ "$3" == E2E_PERSONA_KEY ]]; then return "${RAILWAY_KEY_RC:-0}"; fi; return "${RAILWAY_SET_RC:-0}" ;;
       esac
     }
     gh() {
@@ -164,7 +164,7 @@ echo "Statique (bash ${BASH_VERSION})"
 t "syntaxe valide" bash -n "$SCRIPT"
 t "aucun here-string (<<<)" bash -c "! grep -n '<<<' '$SCRIPT'"
 t "aucune trace d'exécution activée" bash -c "! grep -nE 'set -[a-z]*x|set -o xtrace' '$SCRIPT'"
-t "aucun secret écrit dans un fichier" bash -c "! grep -nE '\\\$\\{?(DSN|RW_TOKEN)([^A-Za-z_][^|]*)?>>?[^&]' '$SCRIPT'"
+t "aucun secret écrit dans un fichier" bash -c "! grep -nE '\\\$\\{?(DSN|RW_TOKEN|PERSONA_KEY)([^A-Za-z_][^|]*)?>>?[^&]' '$SCRIPT'"
 t "bash -x est refusé avant toute saisie" bash -c "bash -x '$SCRIPT' --dry-run 2>&1 </dev/null | grep -q 'elle afficherait les clés'"
 t "refus hors d'un terminal, avant toute action" bash -c "out=\"\$(bash '$SCRIPT' </dev/null 2>&1)\"; [[ \$? -eq 1 && \"\$out\" == *'À lancer dans un Terminal'* ]]"
 t "aucun caractère invisible dans le source" node -e 'process.exit(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/.test(require("fs").readFileSync(process.argv[1],"utf8"))?1:0)' "$SCRIPT"
@@ -285,6 +285,15 @@ t "… dit quoi faire" out_has "gh auth login"
 OUI=oui run previews-oui --etape=4
 t "previews acceptées : plafond de dépense d'abord, puis les environnements de PR" bash -c "grep -n 'workspace/usage' '$S/open.log' | cut -d: -f1 | head -1 | { read -r a; b=\$(grep -n 'settings/environments' '$S/open.log' | cut -d: -f1 | head -1); [[ -n \"\$a\" && -n \"\$b\" && \$a -lt \$b ]]; }"
 t "… et le récap le dit" out_has "Previews de PR activées"
+t "clé persona tirée au hasard (64 hexadécimaux), la même posée sur Railway et sur GitHub" bash -c "k=\$(cat '$S/railway.stdin.E2E_PERSONA_KEY'); [[ \"\$k\" =~ ^[0-9a-f]{64}\$ && \"\$k\" == \"\$(cat '$S/gh.stdin.E2E_PERSONA_KEY')\" ]]"
+t "… par l'entrée standard, sans redéploiement" log_has railway.argv "variable set E2E_PERSONA_KEY --stdin -p d32e7d48-251b-437d-9f7a-b7a71ea58e5c -e production -s cortex-app --skip-deploys"
+t "… jamais affichée, en argument ou en environnement" bash -c "k=\$(cat '$S/railway.stdin.E2E_PERSONA_KEY'); ! grep -qF \"\$k\" '$S/out' '$S/railway.argv' '$S/gh.argv' '$S/env.dump'"
+
+OUI=oui RAILWAY_KEY_RC=1 run previews-cle-refusee --etape=4
+t "clé persona refusée par Railway : previews non activées" bash -c "! grep -q 'settings/environments' '$S/open.log' && grep -qF 'N'\''active pas les previews' '$S/out'"
+
+OUI=oui GH_AUTH_RC=1 run previews-sans-gh --etape=4
+t "previews sans gh : rien posé, rien activé" bash -c "[[ ! -e '$S/railway.stdin.E2E_PERSONA_KEY' ]] && ! grep -q 'settings/environments' '$S/open.log'"
 
 GH_WORKFLOW_RC=1 run avant-merge --etape=5
 t "avant le merge : pas de workflow lancée, relance conseillée" bash -c "[[ ! -e '$S/workflow-run' ]] && grep -qF 'après le merge' '$S/out'"

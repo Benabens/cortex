@@ -81,7 +81,7 @@ const preview = {
   AUTH_URL: "https://cortex-app-cortex-pr-66-1a2b.up.railway.app", AUTH_SECRET: "preview-3f9c0d",
   DB_DRIVER: "postgres", DATABASE_URL: "postgresql://postgres:pw@postgres.railway.internal:5432/railway",
   LLM_PROVIDER: "openai-compatible", LLM_BASE_URL: "http://127.0.0.1:8080/api/e2e-llm",
-  STRIPE_SECRET_KEY: "sk_test_x",
+  STRIPE_SECRET_KEY: "sk_test_x", E2E_PERSONA_KEY: "k".repeat(64),
 };
 
 test("preview de PR assainie : auth persona autorisée", async () => {
@@ -103,7 +103,11 @@ test("preview de PR : refus maintenu en production, et dès qu'une variable copi
     ["e-mails réels", { RESEND_API_KEY: "re_x" }, /RESEND_API_KEY/],
     ["sauvegardes vers le vrai bucket", { BACKUP_S3_BUCKET: "cortex-backups" }, /BACKUP_S3_BUCKET/],
     ["clé Stripe live", { STRIPE_SECRET_KEY: "sk_live_x" }, /Stripe live/],
+    ["clé Stripe restreinte live", { STRIPE_SECRET_KEY: "rk_live_x" }, /Stripe live/],
     ["hébergement hors Railway", { CORTEX_HOSTED: "1" }, /CORTEX_HOSTED/],
+    ["DB_DRIVER avec une espace, base hors réseau privé", { DB_DRIVER: "postgres ", DATABASE_URL: "postgresql://u:p@shinkansen.proxy.rlwy.net:41234/railway" }, /base/],
+    ["connexion persona sans clé (URL publiée sur un dépôt public)", { E2E_PERSONA_KEY: undefined }, /E2E_PERSONA_KEY/],
+    ["clé persona trop courte", { E2E_PERSONA_KEY: "court" }, /E2E_PERSONA_KEY/],
   ];
   for (const [why, patch, message] of refused) {
     assert.throws(() => assertE2ETestAuthAllowed({ ...preview, ...patch }), message, why);

@@ -1,7 +1,9 @@
 import { expect, type Page } from "@playwright/test";
 
 export async function loginPersona(page: Page, name = "alice") {
-  await page.goto(`/login?persona=${encodeURIComponent(`${name}@e2e.cortex.test`)}`);
+  // Preview de PR : clé persona (secret GitHub E2E_PERSONA_KEY) ; rien en local.
+  const key = process.env.E2E_PERSONA_KEY ? `&persona_key=${encodeURIComponent(process.env.E2E_PERSONA_KEY)}` : "";
+  await page.goto(`/login?persona=${encodeURIComponent(`${name}@e2e.cortex.test`)}${key}`);
   await page.getByTestId("e2e-login").click();
   await expect(page).not.toHaveURL(/\/login/);
 }

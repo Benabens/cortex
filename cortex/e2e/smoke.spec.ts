@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { smokeBaseURL as base } from "./base-url";
 import { expectGoogleOAuthRedirect } from "./helpers";
 
 /**
@@ -8,7 +9,6 @@ import { expectGoogleOAuthRedirect } from "./helpers";
  * l'app casse vraiment (démarrage, rendu, auth, connecteur MCP), jamais un
  * service tiers que le rollback ne réparerait pas (la vitrine Vercel, par exemple).
  */
-const base = process.env.E2E_SMOKE_BASE_URL ?? "https://app.cortexexam.com";
 const origin = new URL(base).origin;
 const expectedSha = process.env.E2E_EXPECTED_SHA;
 

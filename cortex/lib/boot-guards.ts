@@ -7,6 +7,7 @@
  * instance qui encaisse (BILLING_ENABLED=1) sans identité ne peut créditer
  * personne. On refuse donc de démarrer plutôt que de le découvrir en prod.
  */
+import { isPrEnvironment, railwayEnvironmentName } from "@/lib/railway-env";
 export function assertAuthRequired(env: Partial<NodeJS.ProcessEnv> = process.env): void {
   const authOn = env.AUTH_ENABLED === "1";
   if (authOn) return;
@@ -28,7 +29,6 @@ const hostOf = (url: string | undefined): string => {
 const LOOPBACK = ["localhost", "127.0.0.1", "::1"];
 
 /** Nom donné par Railway aux environnements éphémères de PR (« cortex-pr-66 »). */
-const PR_ENVIRONMENT = /(?:^|-)pr-\d+$/i;
 
 /**
  * PREVIEW PAR PR. Railway crée l'environnement d'une PR en COPIANT les
@@ -44,30 +44,34 @@ const PR_ENVIRONMENT = /(?:^|-)pr-\d+$/i;
  * - Postgres joint par le réseau PRIVÉ, cloisonné par environnement chez
  *   Railway : c'est forcément la base vierge de la preview ;
  * - LLM hermétique en bouclage (/api/e2e-llm), jamais un modèle payant ;
- * - ni e-mails réels ni sauvegardes vers le vrai bucket.
+ * - ni e-mails réels, ni sauvegardes vers le vrai bucket, ni clé Stripe live ;
+ * - connexion persona fermée par E2E_PERSONA_KEY : l'URL de la preview est
+ *   publiée sur un dépôt public.
  */
 export function railwayPreviewViolations(env: Partial<NodeJS.ProcessEnv> = process.env): string[] {
   const why: string[] = [];
-  const name = env.RAILWAY_ENVIRONMENT_NAME || env.RAILWAY_ENVIRONMENT || "";
-  if (name === "production" || !PR_ENVIRONMENT.test(name)) why.push(`environnement « ${name || "inconnu"} » qui n'est pas une preview de PR`);
+  const name = railwayEnvironmentName(env);
+  if (!isPrEnvironment(name)) why.push(`environnement « ${name || "inconnu"} » qui n'est pas une preview de PR`);
   if (env.CORTEX_PREVIEW !== "1") why.push("CORTEX_PREVIEW=1 absent");
   if (env.CORTEX_HOSTED === "1") why.push("CORTEX_HOSTED=1 (hébergement hors Railway)");
   const domain = env.RAILWAY_PUBLIC_DOMAIN ?? "";
   if (!domain.endsWith(".up.railway.app") || hostOf(env.AUTH_URL) !== domain) why.push("AUTH_URL ≠ domaine Railway de la preview");
   if (!env.AUTH_SECRET?.startsWith("preview-")) why.push("AUTH_SECRET non régénéré pour la preview");
-  if (env.DB_DRIVER === "postgres" && !hostOf(env.DATABASE_URL).endsWith(".railway.internal")) why.push("base hors du réseau privé de la preview");
-  let llm: URL | null = null;
-  try { llm = new URL(env.LLM_BASE_URL ?? ""); } catch { llm = null; }
-  if (env.LLM_PROVIDER !== "openai-compatible" || !llm || !LOOPBACK.includes(llm.hostname) || llm.pathname !== "/api/e2e-llm") {
+  if ((env.DB_DRIVER ?? "").trim() === "postgres" && !hostOf(env.DATABASE_URL).endsWith(".railway.internal")) why.push("base hors du réseau privé de la preview");
+  const llmPath = (() => { try { return new URL(env.LLM_BASE_URL ?? "").pathname; } catch { return ""; } })();
+  if (env.LLM_PROVIDER !== "openai-compatible" || !LOOPBACK.includes(hostOf(env.LLM_BASE_URL)) || llmPath !== "/api/e2e-llm") {
     why.push("LLM non hermétique");
   }
+  if (/^(sk|rk)_live_/.test(env.STRIPE_SECRET_KEY ?? "")) why.push("clé Stripe live");
+  if ((env.E2E_PERSONA_KEY ?? "").length < 32) why.push("E2E_PERSONA_KEY absente ou trop courte (connexion persona ouverte à qui trouve l'URL)");
   if (env.RESEND_API_KEY) why.push("RESEND_API_KEY posé (e-mails réels)");
   if (env.BACKUP_S3_BUCKET) why.push("BACKUP_S3_BUCKET posé (sauvegardes vers le vrai bucket)");
   return why;
 }
 
+/** Instance chez l'hébergeur : variables posées par Railway, ou CORTEX_HOSTED=1 ailleurs. */
 const hostedInstance = (env: Partial<NodeJS.ProcessEnv>): boolean =>
-  Boolean(env.RAILWAY_ENVIRONMENT || env.RAILWAY_ENVIRONMENT_NAME || env.RAILWAY_PROJECT_ID) || env.CORTEX_HOSTED === "1";
+  Boolean(railwayEnvironmentName(env) || env.RAILWAY_PROJECT_ID) || env.CORTEX_HOSTED === "1";
 
 /** Auth par persona : banc E2E local, ou preview de PR Railway assainie. Le
  * second drapeau évite qu'une variable copiée seule dans Railway transforme
@@ -75,7 +79,7 @@ const hostedInstance = (env: Partial<NodeJS.ProcessEnv>): boolean =>
 export function assertE2ETestAuthAllowed(env: Partial<NodeJS.ProcessEnv> = process.env): void {
   if (env.E2E_TEST_AUTH !== "1") return;
   if (env.E2E_TEST_RUN !== "1") throw new Error("E2E_TEST_AUTH=1 exige E2E_TEST_RUN=1 (banc local explicite).");
-  if (env.STRIPE_SECRET_KEY?.startsWith("sk_live_")) throw new Error("E2E_TEST_AUTH est interdit avec une clé Stripe live.");
+  if (/^(sk|rk)_live_/.test(env.STRIPE_SECRET_KEY ?? "")) throw new Error("E2E_TEST_AUTH est interdit avec une clé Stripe live.");
   if (hostedInstance(env)) {
     const why = railwayPreviewViolations(env);
     if (why.length) throw new Error(`E2E_TEST_AUTH est interdit sur une instance hébergée hors preview de PR assainie : ${why.join(" ; ")}.`);
@@ -99,7 +103,7 @@ export function assertAuthRequiredHosted(env: Partial<NodeJS.ProcessEnv> = proce
   if (env.AUTH_ENABLED === "1") return;
   const reasons: string[] = [];
   if (env.BILLING_ENABLED === "1") reasons.push("BILLING_ENABLED=1");
-  if (env.RAILWAY_ENVIRONMENT || env.RAILWAY_PROJECT_ID || env.CORTEX_HOSTED === "1") reasons.push("instance hébergée (Railway / CORTEX_HOSTED=1)");
+  if (hostedInstance(env)) reasons.push("instance hébergée (Railway / CORTEX_HOSTED=1)");
   // `next start` direct sur un VPS : NODE_ENV=production ne prouve rien seul
   // (Next le force), mais associé à une VRAIE base Postgres (pas PGlite, pas
   // sqlite) c'est une mise en ligne, pas un poste de dev ni le smoke test CI.
@@ -119,8 +123,7 @@ export function assertAuthRequiredHosted(env: Partial<NodeJS.ProcessEnv> = proce
  * CORTEX_HOSTED=1. Les gardes « fail-closed » ne s'appliquent que là.
  */
 export function isGuardedDeployment(env: Partial<NodeJS.ProcessEnv> = process.env): boolean {
-  return env.AUTH_ENABLED === "1" || env.BILLING_ENABLED === "1" ||
-    Boolean(env.RAILWAY_ENVIRONMENT || env.RAILWAY_PROJECT_ID) || env.CORTEX_HOSTED === "1";
+  return env.AUTH_ENABLED === "1" || env.BILLING_ENABLED === "1" || hostedInstance(env);
 }
 
 /**

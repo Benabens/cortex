@@ -28,6 +28,7 @@ on:
 
 permissions:
   contents: read
+  deployments: read
 
 # Jamais d'annulation en cours de route : un rollback interrompu laisserait la prod dans un état inconnu.
 concurrency:
@@ -52,22 +53,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Commit à vérifier, encore en tête de main ?
+      # Le déploiement le plus récent de la prod est testé, même si main a avancé
+      # entre-temps (commit suivant sauté par Railway, CI rouge…). Le rollback, lui,
+      # n'est permis que si ce commit est la tête de main : un rollback ou un
+      # redéploiement d'un commit plus ancien ne se rétablit pas (pas de cascade).
+      - name: Déploiement à vérifier
         id: target
         env:
           DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.sha }}
+          DEPLOYMENT_ID: ${{ github.event.deployment.id }}
+          PROD_ENV: ${{ github.event.deployment.environment || 'wonderful-creativity / production' }}
         run: |
+          latest=$(gh api -X GET "repos/${{ github.repository }}/deployments" -f environment="$PROD_ENV" -f per_page=1 --jq '.[0] | "\(.id) \(.sha)"')
           head=$(gh api "repos/${{ github.repository }}/commits/main" --jq .sha)
-          sha="${DEPLOYED_SHA:-$head}"
+          sha="${DEPLOYED_SHA:-${latest#* }}"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          # Un déploiement d'un commit plus ancien (rollback, redéploiement manuel)
-          # ne se teste ni ne se rétablit : pas de rollback en cascade.
-          if [ "$sha" != "$head" ]; then
+          if [ -n "$DEPLOYMENT_ID" ] && [ "${latest%% *}" != "$DEPLOYMENT_ID" ]; then
             echo "current=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::${sha:0:7} n'est plus la tête de main (${head:0:7}) : rien à vérifier."
+            echo "::notice::un déploiement plus récent de la prod existe : il sera vérifié à son tour."
           else
             echo "current=true" >> "$GITHUB_OUTPUT"
           fi
+          if [ "$sha" = "$head" ]; then echo "rollback=true" >> "$GITHUB_OUTPUT"; else echo "rollback=false" >> "$GITHUB_OUTPUT"; fi
 
       - uses: actions/setup-node@v4
         if: steps.target.outputs.current == 'true'
@@ -88,7 +95,9 @@ jobs:
         run: |
           state=down; served=""; deadline=$((SECONDS + 900))
           while :; do
-            served=$(curl -fsS -m 10 "$PROD_URL/api/health" | jq -r '.commit // ""' 2>/dev/null || true)
+            # Sans -f : un 503 (base injoignable) dit quand même quel commit est en ligne ;
+            # le smoke, lui, exige un 200.
+            served=$(curl -sS -m 10 "$PROD_URL/api/health" | jq -r '.commit // ""' 2>/dev/null || true)
             if [ "$served" = "$SHA" ]; then state=served; break; fi
             if [ -n "$served" ]; then state=other; else state=down; fi
             [ "$SECONDS" -ge "$deadline" ] && break
@@ -115,11 +124,14 @@ jobs:
           E2E_EXPECTED_SHA: ${{ steps.target.outputs.sha }}
         run: npm run e2e:smoke
 
-      # Rollback si le commit est en ligne mais casse, ou si la prod ne répond plus.
-      # Une prod saine qui sert un AUTRE commit n'a rien à rétablir.
+      # Rollback si le commit est en ligne mais casse, ou si la prod ne répond plus
+      # alors que Railway a déclaré ce déploiement réussi (healthcheck passé, puis
+      # arrêt). Une prod saine qui sert un AUTRE commit n'a rien à rétablir.
       - name: Rollback vers le déploiement précédent
         id: rollback
-        if: steps.smoke.outcome == 'failure' || steps.wait.outputs.state == 'down'
+        if: >-
+          steps.target.outputs.rollback == 'true' &&
+          (steps.smoke.outcome == 'failure' || steps.wait.outputs.state == 'down')
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           SHA: ${{ steps.target.outputs.sha }}
@@ -138,7 +150,9 @@ jobs:
           SERVED: ${{ steps.wait.outputs.served }}
           SMOKE: ${{ steps.smoke.outcome }}
           ROLLBACK: ${{ steps.rollback.outputs.result }}
+          ROLLBACK_ALLOWED: ${{ steps.target.outputs.rollback }}
         run: |
+          [ "$ROLLBACK_ALLOWED" = "true" ] || ROLLBACK="pas de rollback automatique : ${SHA:0:7} n'est pas la tête de main"
           case "$STATE/$SMOKE" in
             served/success) reason="" ;;
             served/failure) reason="le smoke de la prod a échoué sur ${SHA:0:7} (rapport Playwright en artefact)" ;;

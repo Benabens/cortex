@@ -39,6 +39,8 @@ const copiedFromProduction: Record<string, string> = {
   INVITE_ONLY: "1", INVITE_EMAILS: "ben@exemple.com", REDIRECT_FROM_HOSTS: "cortex-app-production-6a65.up.railway.app",
   SENTRY_DSN: "https://cle@o0.ingest.sentry.io/1", SENTRY_ENVIRONMENT: "production",
   RATE_LIMIT_PER_MIN: "120", CORTEX_OWNER_EMAIL: "ben@exemple.com",
+  // Posée sur la prod par setup-fiabilite.sh (étape 4), inerte là-bas (pas d'E2E_TEST_AUTH).
+  E2E_PERSONA_KEY: "9f".repeat(32),
 };
 
 test("PR : les variables copiées de la prod sont neutralisées et la garde de démarrage accepte le résultat", async () => {
@@ -70,4 +72,25 @@ test("hors environnement de PR : refus de démarrer, l'app n'est jamais lancée"
     assert.notEqual(r.status, 0, name);
     assert.equal(r.started, null, `${name || "(vide)"} : démarré quand même`);
   }
+});
+
+test("PR sans clé persona : refus de démarrer (l'URL de la preview est publiée sur un dépôt public)", () => {
+  for (const key of [undefined, "court"]) {
+    const env: Record<string, string> = { ...copiedFromProduction };
+    if (key === undefined) delete env.E2E_PERSONA_KEY; else env.E2E_PERSONA_KEY = key;
+    const r = run(env);
+    assert.notEqual(r.status, 0);
+    assert.equal(r.started, null);
+    assert.match(r.stderr, /E2E_PERSONA_KEY/);
+  }
+});
+
+test("PR : mêmes réglages que le banc E2E de playwright.config.ts, sinon les parcours joués contre la preview divergent", async () => {
+  const { default: config } = await import("../playwright.config");
+  const bench = (Array.isArray(config.webServer) ? config.webServer[0] : config.webServer)?.env ?? {};
+  const env = run(copiedFromProduction).started!;
+  const shared = ["AUTH_ENABLED", "E2E_TEST_AUTH", "E2E_TEST_RUN", "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL_OPUS", "LLM_MODEL_SONNET",
+    "LLM_MODEL_HAIKU", "LLM_MAX_RETRIES", "MCP_ENABLED", "BILLING_ENABLED", "SIGNUP_FREE_CREDITS", "CORTEX_OWNER_EMAIL", "RATE_LIMIT_PER_MIN"];
+  assert.deepEqual(Object.fromEntries(shared.map((k) => [k, env[k]])), Object.fromEntries(shared.map((k) => [k, bench[k]])));
+  assert.equal(new URL(env.LLM_BASE_URL).pathname, new URL(bench.LLM_BASE_URL).pathname);
 });

@@ -18,13 +18,14 @@
  * source maps, que nous n'utilisons pas. Les erreurs de rendu et de route non
  * gérées arrivent par le crochet `onRequestError` de Next (instrumentation.ts).
  */
+import type { Instrumentation } from "next";
 import { log } from "@/lib/metrics";
 import {
   MONITORING_TUNNEL, scrubEvent, scrubSpan, sentryEnvironment, sentryRelease,
   type ClientErrorTrackingConfig, type MinimalEvent,
 } from "@/lib/observability-scrub";
 
-export { MONITORING_TUNNEL, redactMessage, scrubEvent, scrubSpan, type ClientErrorTrackingConfig } from "@/lib/observability-scrub";
+export { redactMessage, scrubEvent } from "@/lib/observability-scrub";
 
 type SentryLike = {
   init: (options: Record<string, unknown>) => void;
@@ -87,11 +88,7 @@ export function captureError(e: unknown, tags: Record<string, string> = {}): voi
 }
 
 /** Contexte que Next passe à `onRequestError` (instrumentation.ts). */
-export type RequestErrorContext = {
-  routerKind: "Pages Router" | "App Router";
-  routePath: string;
-  routeType: "render" | "route" | "action" | "middleware" | "proxy";
-};
+export type RequestErrorContext = Parameters<Instrumentation.onRequestError>[2];
 
 /**
  * Erreur NON gérée d'un rendu ou d'une route, remontée par Next. On garde le
