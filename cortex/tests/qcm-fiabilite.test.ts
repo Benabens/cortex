@@ -254,6 +254,10 @@ test("une simple classification d'étiquettes est repérée avant livraison", as
   const { labelClassificationRisk, directReadingRisk } = await import("../lib/qcm");
   assert.equal(labelClassificationRisk("Which analysis best identifies the source of bias?"), true);
   assert.equal(labelClassificationRisk("Which stakeholder entry most accurately describes the contractors?"), true);
+  assert.equal(labelClassificationRisk("Which course phenomenon best explains the narrowing?"), true);
+  assert.equal(labelClassificationRisk("Which conclusion correctly accounts for both observations?"), true);
+  assert.equal(labelClassificationRisk("Which revision best counters this process?"), true);
+  assert.equal(labelClassificationRisk("Which assessment matches the course analysis?"), true);
   assert.equal(labelClassificationRisk("Quelle analyse identifie le mieux la source du biais ?"), true);
   assert.equal(labelClassificationRisk("Quel diagnostic décrit le plus précisément cette situation ?"), true);
   assert.equal(labelClassificationRisk("Calculate the false-positive rate from this confusion matrix."), false);
