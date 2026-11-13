@@ -190,6 +190,37 @@ test("2b-6 : session gratuite (no_payment_required / montant 0) → AUCUN crédi
   assert.equal(await credits.getBalance("free"), 0);
 });
 
+test("code promo à 0 € : crédité seulement si son id promo_ est dans STRIPE_FREE_PROMO_CODES, une seule fois", async () => {
+  const freeSession = (evt: string, cs: string, user: string, discounts: unknown) =>
+    ev(evt, "checkout.session.completed", { id: cs, mode: "payment", payment_status: "no_payment_required", amount_total: 0, payment_intent: null, discounts, metadata: { app: "cortex", cortexUserId: user, plan: "credits_10", credits: "10" } });
+  const prev = process.env.STRIPE_FREE_PROMO_CODES;
+  try {
+    // Liste vide (défaut) : refus inchangé, même avec un code promo.
+    delete process.env.STRIPE_FREE_PROMO_CODES;
+    assert.equal((await handleStripeEvent(freeSession("evt_promo_0", "cs_promo_0", "promo-user", [{ coupon: "co_100", promotion_code: "promo_TEST0" }]))).credited, false);
+    assert.equal(await credits.getBalance("promo-user"), 0);
+
+    process.env.STRIPE_FREE_PROMO_CODES = " promo_TEST0 , promo_AUTRE,pas_un_id ";
+    // Un autre code (ou aucun) : refusé.
+    assert.equal((await handleStripeEvent(freeSession("evt_promo_1", "cs_promo_1", "promo-user", [{ coupon: "co_100", promotion_code: "promo_INCONNU" }]))).credited, false);
+    assert.equal((await handleStripeEvent(freeSession("evt_promo_2", "cs_promo_2", "promo-user", []))).credited, false);
+    // Un id qui ne commence pas par promo_ n'entre jamais dans la liste.
+    assert.equal((await handleStripeEvent(freeSession("evt_promo_3", "cs_promo_3", "promo-user", [{ promotion_code: "pas_un_id" }]))).credited, false);
+    assert.equal(await credits.getBalance("promo-user"), 0);
+
+    // Le code de la liste blanche (id simple ou objet développé) : +10, une fois par session.
+    const ok = await handleStripeEvent(freeSession("evt_promo_4", "cs_promo_4", "promo-user", [{ coupon: "co_100", promotion_code: "promo_TEST0" }]));
+    assert.equal(ok.credited, true);
+    assert.equal(await credits.getBalance("promo-user"), 10);
+    assert.equal((await handleStripeEvent(freeSession("evt_promo_4b", "cs_promo_4", "promo-user", [{ promotion_code: { id: "promo_TEST0" } }]))).credited, false, "même session : pas de double crédit");
+    assert.equal(await credits.getBalance("promo-user"), 10);
+    assert.equal((await handleStripeEvent(freeSession("evt_promo_5", "cs_promo_5", "promo-user", [{ promotion_code: { id: "promo_AUTRE" } }]))).credited, true);
+    assert.equal(await credits.getBalance("promo-user"), 20);
+  } finally {
+    if (prev === undefined) delete process.env.STRIPE_FREE_PROMO_CODES; else process.env.STRIPE_FREE_PROMO_CODES = prev;
+  }
+});
+
 test("2b-6 : remboursement reçu AVANT l'achat → reprise mémorisée puis appliquée quand l'achat arrive (solde net 0)", async () => {
   const { authGet } = await import("../db/auth-store");
   const early = await handleStripeEvent(ev("evt_early_refund", "charge.refunded", { payment_intent: "pi_cs_early", amount: 900, amount_refunded: 900, metadata: { app: "cortex" } }));

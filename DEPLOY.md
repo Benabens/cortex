@@ -96,7 +96,9 @@ CORTEX_DATA_DIR=/data
 # — moteur LLM (PAYANT → éco par défaut) —
 LLM_PROVIDER=anthropic
 LLM_API_KEY=⟨sk-ant-… (étape 5)⟩
-LLM_MAX_CONCURRENCY=2
+# Appels modèle simultanés pour toute l'instance (défaut 4). 6 en prod depuis le
+# 13/11/2026 : au-delà, la limite de débit Anthropic du palier reprend la main.
+LLM_MAX_CONCURRENCY=6
 
 # — auth (génération DERRIÈRE login) —
 AUTH_ENABLED=1
@@ -104,10 +106,12 @@ AUTH_SECRET=⟨sortie de : openssl rand -base64 32⟩
 AUTH_URL=https://⟨ton-domaine-railway⟩
 GOOGLE_CLIENT_ID=⟨… (console Google Cloud)⟩
 GOOGLE_CLIENT_SECRET=⟨…⟩
-# Lien magique par e-mail : OPTIONNEL, désactivé par défaut (étape 6 si voulu)
-# AUTH_EMAIL_ENABLED=1
-# RESEND_API_KEY=⟨re_… (étape 6)⟩
-# AUTH_EMAIL_FROM=Cortex <onboarding@resend.dev>
+# Lien magique par e-mail (étape 6) : désactivé par défaut. ACTIF en prod depuis le
+# 13/11/2026 (domaine Resend vérifié, DKIM + SPF en DNS) : sans lui, Google est
+# la seule porte d'entrée.
+AUTH_EMAIL_ENABLED=1
+RESEND_API_KEY=⟨re_… (étape 6)⟩
+AUTH_EMAIL_FROM=Cortex <⟨adresse du domaine vérifié⟩>
 
 # — garde-fous de coût (OBLIGATOIRES) —
 # Plafond global du MOIS calendaire (UTC), remis à zéro le 1er.
@@ -265,7 +269,9 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
      constante ; un test le vérifie.
    - Garanties : crédit du pack et enregistrement de l'achat dans **une**
      transaction (échec → 500, Stripe rejoue, rien de crédité à moitié) ; une
-     session **gratuite** (`no_payment_required`, montant 0) ne crédite jamais ;
+     session **gratuite** (`no_payment_required`, montant 0) ne crédite pas,
+     sauf si son code promo est sur la liste blanche `STRIPE_FREE_PROMO_CODES`
+     (voir « Codes promo » ci-dessous) ;
      un remboursement dont l'achat est **inconnu** en base remonte à la session
      Checkout via l'API Stripe, puis aux métadonnées de la charge, puis au
      client/e-mail avec le montant converti en crédits (`CREDIT_PRICE_CENTS`,
@@ -274,7 +280,18 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
      arrive. Surveille ce journal : c'est le seul cas à contrôler à la main.
 5. Test de paiement : carte `4242 4242 4242 4242`, n'importe quelle date
    future/CVC. Le webhook crédite le solde (idempotent — un retry Stripe ne
-   crédite jamais deux fois, c'est testé).
+   crédite jamais deux fois, c'est testé). Circuit complet en local, sans
+   frais : `~/Projects/cortex/briefs/paiement-sans-frais.txt` (partie 1).
+   **Codes promo** : le Checkout affiche toujours le champ « code promo »
+   (`allow_promotion_codes`) ; seuls les codes créés dans le tableau de bord
+   (Catalogue → Coupons → code promotionnel) fonctionnent. Une réduction
+   partielle crédite normalement. Un code à **100 %** donne une session à
+   0 € : l'abonnement est crédité par `invoice.paid` comme d'habitude, le pack
+   **seulement** si l'id `promo_…` du code figure dans
+   `STRIPE_FREE_PROMO_CODES` (liste séparée par des virgules, vide par
+   défaut). Sert à vérifier la chaîne live sans frais Stripe : crée un code à
+   100 % limité à 1 utilisation, pose son id, fais l'achat, puis retire l'id et
+   désactive le code.
 6. **Bascule LIVE plus tard** : [docs/STRIPE-LIVE.md](docs/STRIPE-LIVE.md)
    (produits et prix exacts, webhook, portail, pied de facture, variables,
    nettoyage des données de test, test réel avec remboursement). **Aucun
@@ -650,6 +667,30 @@ vente ouvre en collant la clé live ([docs/STRIPE-LIVE.md](docs/STRIPE-LIVE.md))
 À vérifier **après** : un compte Google jamais vu se connecte, arrive sur
 l'écran de premier lancement, crée un cours, et « Mon compte » affiche un solde
 de 2 crédits.
+
+### Mise en ligne commerciale : état au 13/11/2026
+
+Audit du 13/11 (`PRELAUNCH-AUDIT-2026-11-13-commercialisation.md`, hors git ;
+copie dans le vault, `projet/Cortex/`). Fait en prod :
+
+- [x] Annales de plus de 10 Mo : le proxy laisse passer tout corps sous le plus
+      grand plafond d'envoi + 1 Mio (`lib/body-size-limits.ts`, PR #71).
+- [x] `/api/health` public réduit à `{ status }` ; le détail demande
+      `Authorization: Bearer $METRICS_TOKEN` (PR #72).
+- [x] `AUTH_EMAIL_ENABLED=1` (domaine Resend vérifié, DKIM et SPF en DNS) :
+      `/api/auth/providers` doit lister `email` en plus de `google`.
+- [x] `LLM_MAX_CONCURRENCY=6`.
+
+Reste, côté Ben (guide pas à pas : `~/Projects/cortex/briefs/ben-actions.sh`) :
+
+- [ ] Écran de consentement Google « En production » (voir la liste ci-dessus).
+- [ ] Plafond dur de dépense chez Anthropic, alerte et limite d'usage chez Railway.
+- [ ] Avis de situation SIRENE à jour, médiateur de la consommation choisi et
+      nommé dans les CGV et les mentions légales.
+- [ ] Coût réel par génération (`bash scripts/cout-reel-ben.sh`, lecture seule)
+      et essai de restauration chronométré (`bash scripts/restauration-ben.sh`).
+- [ ] Premier achat live de bout en bout sans frais : code promo à 100 %
+      (§ 7, « Codes promo »), puis retrait des crédits de test.
 
 ## 13. Nom de domaine
 
