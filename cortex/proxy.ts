@@ -19,7 +19,7 @@ import type { NextRequest } from "next/server";
 
 const AUTH_ON = process.env.AUTH_ENABLED === "1";
 
-const PUBLIC_PREFIXES = ["/api/auth", "/api/e2e-llm", "/login", "/api/health", "/api/metrics", "/api/billing/webhook", "/_next", "/favicon", "/brand/"];
+const PUBLIC_PREFIXES = ["/api/auth", "/api/e2e-llm", "/login", "/api/health", "/api/monitoring", "/api/metrics", "/api/billing/webhook", "/_next", "/favicon", "/brand/"];
 
 /** Icônes et manifest (fichiers de métadonnées Next) : lus SANS session par
  *  l'onglet et l'écran d'accueil. Égalité stricte : un préfixe « /icon » ouvrirait

@@ -1,0 +1,109 @@
+# Parcours Playwright desktop contre la PREVIEW Railway d'une PR, une fois
+# qu'elle est en ligne ; le résultat s'affiche en check de la PR (la workflow
+# tourne sur le commit de la PR). Dormante tant que les environnements de PR ne
+# sont pas activés dans Railway (cortex/scripts/setup-fiabilite.sh, étape 3,
+# payante au-delà des 5 $ du plan Hobby).
+#
+# La preview démarre par cortex/scripts/preview-entrypoint.sh (railway.json) :
+# base Postgres vierge de la PR, LLM hermétique, aucun e-mail, Stripe test seul,
+# auth persona E2E autorisée par la garde de démarrage UNIQUEMENT là.
+#
+# Aucun secret ici : l'URL de la preview est lue dans le commentaire que le bot
+# Railway pose sur la PR. Railway ne déploie que les PR des membres du projet.
+name: preview
+
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "URL d'une preview en ligne (https://….up.railway.app)"
+        required: true
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: preview-${{ github.event.deployment.environment || inputs.url }}
+  cancel-in-progress: true
+
+jobs:
+  playwright:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.deployment_status.state == 'success' &&
+       !endsWith(github.event.deployment.environment, '/ production') &&
+       contains(github.event.deployment.environment, '-pr-') &&
+       github.event.deployment.creator.login == 'railway-app[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: cortex
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: URL de la preview
+        id: preview
+        env:
+          DEPLOY_ENV: ${{ github.event.deployment.environment }}
+          MANUAL_URL: ${{ inputs.url }}
+        run: |
+          # « wonderful-creativity / cortex-pr-66 » → environnement cortex-pr-66, PR 66.
+          name="${DEPLOY_ENV##*/ }"
+          url="$MANUAL_URL"
+          if [ -z "$url" ]; then
+            pr="${name##*-pr-}"
+            url=$(gh api "repos/${{ github.repository }}/issues/$pr/comments" --paginate \
+              --jq '.[] | select(.user.login == "railway-app[bot]") | .body' \
+              | grep -oE 'https://[a-z0-9-]+\.up\.railway\.app' | tail -1 || true)
+          fi
+          case "$url" in
+            https://*.up.railway.app) ;;
+            *) echo "::error::URL de la preview introuvable (commentaire du bot Railway sur la PR ${name##*-pr-}). Relance à la main : Actions → preview → Run workflow avec l'URL."; exit 1 ;;
+          esac
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "Preview : $url ($name)"
+
+      - name: Attente du commit de la PR sur la preview (15 min max)
+        env:
+          URL: ${{ steps.preview.outputs.url }}
+          SHA: ${{ github.event.deployment.sha }}
+        run: |
+          deadline=$((SECONDS + 900))
+          while :; do
+            health=$(curl -fsS -m 10 "$URL/api/health" 2>/dev/null || true)
+            commit=$(echo "$health" | jq -r '.commit // ""' 2>/dev/null || true)
+            if [ -n "$health" ] && { [ -z "$SHA" ] || [ "$commit" = "$SHA" ]; }; then echo "✓ preview en ligne ($commit)"; exit 0; fi
+            [ "$SECONDS" -ge "$deadline" ] && break
+            sleep 15
+          done
+          echo "::error::la preview ne sert pas ${SHA:0:7} après 15 min (dernier commit vu : ${commit:-aucun})"
+          exit 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cortex/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - name: Parcours Playwright desktop contre la preview
+        env:
+          E2E_BASE_URL: ${{ steps.preview.outputs.url }}
+        run: npx playwright test --project=desktop
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: preview-playwright-report
+          path: |
+            cortex/playwright-report
+            cortex/test-results
+          if-no-files-found: ignore
