@@ -148,8 +148,9 @@ test("réseau durablement en panne : le sondage renonce après quelques essais",
   resetJobWatch();
   h = harness();
   let essais = 0;
+  const statuses: string[] = [];
   configureJobWatch({ ...h.deps, fetchJob: async () => { essais++; throw new Error("réseau"); } });
-  watchJob(8, "cs-202", () => {});
+  watchJob(8, "cs-202", (job) => statuses.push(`${job.status}:${job.error}`));
   for (let i = 0; i < JOB_MAX_FAILURES + 3; i++) {
     await new Promise((r) => setImmediate(r));
     h.tick();
@@ -157,4 +158,5 @@ test("réseau durablement en panne : le sondage renonce après quelques essais",
   await new Promise((r) => setImmediate(r));
   assert.equal(essais, JOB_MAX_FAILURES, `${essais} essais au lieu de ${JOB_MAX_FAILURES}`);
   assert.equal(h.pending(), 0, "plus aucun tour en attente");
+  assert.deepEqual(statuses, ["failed:Connexion perdue pendant le suivi du traitement. Actualise la page pour vérifier son état."]);
 });
