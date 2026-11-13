@@ -119,6 +119,9 @@ async function extractArchive(file: File, limits: ZipImportLimits, budget: Extra
     if (entry.originalSize != null && budget.total + entry.originalSize > limits.maxTotalBytes) {
       fatal = `archive refusée : taille décompressée totale supérieure à ${Math.round(limits.maxTotalBytes / MiB)} Mo`;
     }
+    if (entry.size != null && entry.size > 0 && entry.originalSize != null && entry.originalSize / entry.size > limits.maxRatio) {
+      fatal = `archive refusée : ratio de décompression supérieur à ${limits.maxRatio}`;
+    }
     const chunks: Uint8Array[] = [];
     let entryBytes = 0;
     let oversized = entry.originalSize != null && entry.originalSize > limits.maxEntryBytes && !/\.zip$/i.test(decoded);
@@ -129,7 +132,10 @@ async function extractArchive(file: File, limits: ZipImportLimits, budget: Extra
         archiveTotal += chunk.byteLength;
         budget.total += chunk.byteLength;
         if (budget.total > limits.maxTotalBytes) fatal = `archive refusée : taille décompressée totale supérieure à ${Math.round(limits.maxTotalBytes / MiB)} Mo`;
-        if (file.size > 0 && archiveTotal / file.size > limits.maxRatio) fatal = `archive refusée : ratio de décompression supérieur à ${limits.maxRatio}`;
+        if ((entry.size != null && entry.size > 0 && entryBytes / entry.size > limits.maxRatio)
+          || (file.size > 0 && archiveTotal / file.size > limits.maxRatio)) {
+          fatal = `archive refusée : ratio de décompression supérieur à ${limits.maxRatio}`;
+        }
         if (entryBytes <= limits.maxEntryBytes || /\.zip$/i.test(decoded)) chunks.push(chunk);
       }
       if (!final || fatal) return;

@@ -101,8 +101,12 @@ test("les plafonds d'une archive portent sur les extraits, le nombre et le ratio
   const countResult = await prepareCourseImport([tooMany], { maxEntryBytes: 100, maxTotalBytes: 1_000, maxEntries: 2, maxRatio: 1_000 });
   assert.match(countResult.rejected[0].reason, /trop de fichiers/);
 
-  const bomb = await archive("bombe.zip", { "cours.txt": "a".repeat(20_000) });
-  const ratioResult = await prepareCourseImport([bomb], { maxEntryBytes: 30_000, maxTotalBytes: 30_000, maxEntries: 10, maxRatio: 2 });
+  const bombZip = new JSZip();
+  bombZip.file("cours.txt", "a".repeat(20_000), { compression: "DEFLATE" });
+  bombZip.file("padding.bin", Uint8Array.from({ length: 20_000 }, (_, index) => index % 251), { compression: "STORE" });
+  const bombBytes = await bombZip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+  const bomb = new File([bombBytes.slice().buffer as ArrayBuffer], "bombe-rembourree.zip");
+  const ratioResult = await prepareCourseImport([bomb], { maxEntryBytes: 30_000, maxTotalBytes: 50_000, maxEntries: 10, maxRatio: 2 });
   assert.match(ratioResult.rejected[0].reason, /ratio de décompression/);
 });
 
