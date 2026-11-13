@@ -58,13 +58,13 @@ export function llmUnavailableReason(name?: ProviderName): string | null {
 }
 
 async function completeWith(provider: LlmProvider, req: CompleteRequest): Promise<CompleteResult> {
-  await assertLlmAuthorized();
   const model = req.model ?? "opus";
   const labels = { provider: provider.name, model };
   // Attribution (llm_usage) : site d'appel capturé AVANT tout await (pile sync),
   // job courant s'il y en a un (jobs = 1 par process).
   const callSite = callerSite();
   const job = currentJob();
+  await assertLlmAuthorized();
   // Banc (scripts/bench) : bande enregistrée ou rejouée ; rejeu = aucun appel, aucun compteur.
   const tape = tapeMode();
   const tapeSite = callSite ?? "?";
