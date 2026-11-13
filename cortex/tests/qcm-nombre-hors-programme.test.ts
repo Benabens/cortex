@@ -315,5 +315,8 @@ test("job 14 rejoué : l'analyse des notions lit chaque séance en entier, aucun
   for (const leak of ["Domaines de recherche", "rewilding", "Critère D1", "infrastructure résiliente", "surveillance algorithmique"]) assert.ok(!prompt!.includes(leak), leak);
   assert.match(prompt!, /CHAQUE support du plan/);
   assert.match(prompt!, /« S ance 5 Cavallaro S curit IA et responsabilit s mondiales »/, "supports nommés sans « _ » ni extension");
-  assert.match(prompt!, /Vise 12 à \d+ notions/);
+  assert.match(prompt!, /Vise \d+ à \d+ notions LARGES/);
+  const { notionTarget } = await import("../lib/program");
+  assert.equal(notionTarget(11), "11 à 14", "à peu près une notion large par support (banc du 13/11 : 32 notions fines → 9 QCM sur 20)");
+  assert.equal(notionTarget(3), "8 à 11");
 });

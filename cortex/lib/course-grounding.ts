@@ -113,17 +113,21 @@ function termPatterns(term: string): RegExp[] {
  * ses termes (« lien conceptuel SHS », D1 de HUM-285) ne sont pas des notions du cours.
  */
 async function corpusTexts(): Promise<string[] | null> {
-  let rows: { text: string | null }[] = [];
+  let rows: { sid: number | null; text: string | null }[] = [];
   try {
-    rows = await q.all<{ text: string | null }>(`SELECT i.text FROM items i LEFT JOIN sources s ON s.id = i.source_id WHERE s.type IS NULL OR s.type <> 'exam_info'`);
+    rows = await q.all<{ sid: number | null; text: string | null }>(`SELECT s.id sid, i.text FROM items i LEFT JOIN sources s ON s.id = i.source_id WHERE s.type IS NULL OR s.type <> 'exam_info'`);
   } catch { return null; }
+  // Ni archive ni source hors programme ni diapo des enseignants : rien de cela ne fait un terme du cours.
+  const excluded = await excludedSourceIds();
   let total = 0;
   const texts: string[] = [];
   for (const r of rows) {
-    if (!r.text) continue;
-    total += r.text.length;
+    if (r.sid != null && excluded.has(Number(r.sid))) continue;
+    const text = courseMatter(r.text ?? "");
+    if (!text) continue;
+    total += text.length;
     if (total > MAX_CORPUS_CHARS) return null;
-    texts.push(tokenize(r.text, 1).join(" "));
+    texts.push(tokenize(text, 1).join(" "));
   }
   return texts.length ? texts : null;
 }
@@ -147,6 +151,26 @@ export async function absentCourseTerms(terms: string[]): Promise<string[]> {
     const patterns = termPatterns(term);
     return patterns.length > 0 && !texts.some((t) => patterns.some((re) => re.test(t)));
   });
+}
+
+/** Nombres porteurs d'un texte : pourcentages, années, entiers de deux chiffres ou plus (pas les décimales). */
+export function factNumbers(text: string): string[] {
+  const out = new Set<string>();
+  for (const m of text.matchAll(/(?<![\d.,])(\d{2,})(?![\d]|[.,]\d)/g)) out.add(m[1]);
+  return [...out];
+}
+
+/**
+ * Nombres absents de tout le corpus du cours (sans les consignes d'examen). Vide si le cours n'a pas
+ * de corpus : jamais de rejet faute de pouvoir vérifier. Un chiffre inventé (« hausse de 14 % des
+ * tickets ») se repère sans modèle.
+ */
+export async function absentCourseNumbers(numbers: string[]): Promise<string[]> {
+  const wanted = [...new Set(numbers)];
+  if (!wanted.length) return [];
+  const texts = await corpusTexts();
+  if (!texts) return [];
+  return wanted.filter((n) => { const re = new RegExp(`(?:^| )${n}(?= |$)`); return !texts.some((t) => re.test(t)); });
 }
 
 /** Types de sources jamais pris comme « faits du cours » à tester (annales : on n'en recopie pas les questions). */

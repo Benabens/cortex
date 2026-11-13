@@ -217,10 +217,15 @@ type RawTopic = {
   exo_type?: string; trap?: string;
 };
 
-/** Nombre de notions visé sans annale : deux à trois par support, entre 12 et 30. */
+/**
+ * Nombre de notions visé sans annale : à peu près une par support, entre 8 et 16. Banc HUM-285 du
+ * 13/11 : à deux ou trois par support (24 à 32 notions fines), chaque question visait un détail que
+ * les diapositives ne développent pas, le concepteur le complétait hors du cours, 30 questions
+ * étaient rejetées hors cours et l'examen s'arrêtait à 9 sur 20 (12 notions larges : 14 sur 20).
+ */
 export function notionTarget(supports: number): string {
-  const lo = Math.min(30, Math.max(12, 2 * supports));
-  return `${lo} à ${Math.min(36, Math.max(lo + 4, 3 * supports))}`;
+  const lo = Math.min(14, Math.max(8, supports));
+  return `${lo} à ${Math.min(16, lo + 3)}`;
 }
 
 export type AnalyzeResult = { count: number; topics: TopicView[] };
@@ -297,7 +302,7 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
         // Sans annale, les notions viennent des supports : 11 notions pour 9 séances et 20 QCM (job 13
         // de HUM-285) laissaient des séances sans notion et des QCM sur le même sujet.
         `Sans annale, CHAQUE support du plan ci-dessous a au moins une notion à lui (chaque séance, chaque enseignant) : ${corpus.supports.map((t) => `« ${sanitizeCorpus(t).slice(0, 80)} »`).join(", ")}.`,
-        `Vise ${notionTarget(corpus.supports.length)} notions — une notion = un concept, un résultat, une étude ou un cadre enseigné, jamais le titre d'un support. Pas de doublon.`,
+        `Vise ${notionTarget(corpus.supports.length)} notions LARGES — une notion = un thème que le support développe sur plusieurs faits (concepts, résultats, études qui s'y rattachent), jamais un détail isolé ni le titre d'un support. Pas de doublon.`,
       ]),
     COURSE_MATTER_RULE,
     ``,
