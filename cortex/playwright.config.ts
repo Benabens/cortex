@@ -1,12 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
-import { baseURL, localPort as port, remoteBaseURL } from "./e2e/base-url";
+import { baseURL, googleBaseURL, localPort as port, remoteBaseURL, smokeBaseURL } from "./e2e/base-url";
 
 const e2eDatabaseUrl = process.env.E2E_DATABASE_URL;
 // Tests visant un site DÉJÀ en ligne — vrai Google et smoke de la prod, ou preview d'une PR
 // (E2E_BASE_URL) : aucun serveur local.
 const external = process.env.E2E_GOOGLE_ONLY === "1" || process.env.E2E_EXTERNAL === "1" || !!remoteBaseURL;
-const googleBaseURL = process.env.E2E_GOOGLE_BASE_URL ?? "https://app.cortexexam.com";
-const smokeBaseURL = process.env.E2E_SMOKE_BASE_URL ?? "https://app.cortexexam.com";
 
 export default defineConfig({
   testDir: "./e2e",

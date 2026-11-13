@@ -21,6 +21,13 @@ if [[ -z "${RAILWAY_PUBLIC_DOMAIN:-}" ]]; then
   echo "[preview] refus : pas de domaine Railway pour cette preview" >&2
   exit 1
 fi
+# L'URL de la preview est publiée sur la PR, dans un dépôt public : sans clé,
+# n'importe qui y entrerait par la connexion persona, propriétaire compris.
+persona_key="${E2E_PERSONA_KEY:-}"
+if [[ "${#persona_key}" -lt 32 ]]; then
+  echo "[preview] refus : E2E_PERSONA_KEY absente ou trop courte (cortex/scripts/setup-fiabilite.sh, étape 4)" >&2
+  exit 1
+fi
 
 # Monde réel : modèle payant, e-mails, sauvegardes vers le vrai bucket, Google,
 # métriques, lancement fermé et amorçage de la prod.
@@ -46,7 +53,7 @@ export CORTEX_PREVIEW=1 E2E_TEST_AUTH=1 E2E_TEST_RUN=1 SENTRY_ENVIRONMENT=previe
 export LLM_PROVIDER=openai-compatible LLM_BASE_URL="http://127.0.0.1:${PORT:-3000}/api/e2e-llm" LLM_API_KEY=e2e-hermetic
 export LLM_MODEL_OPUS=e2e LLM_MODEL_SONNET=e2e LLM_MODEL_HAIKU=e2e LLM_MAX_RETRIES=0
 # Mêmes réglages que le banc E2E (playwright.config.ts) : les parcours y tournent tels quels.
-export AUTH_ENABLED=1 BILLING_ENABLED=1 MCP_ENABLED=1 SIGNUP_FREE_CREDITS=0.1 RATE_LIMIT_PER_MIN=unlimited \
+export AUTH_ENABLED=1 BILLING_ENABLED=1 MCP_ENABLED=1 SIGNUP_FREE_CREDITS=0 RATE_LIMIT_PER_MIN=unlimited \
   CORTEX_OWNER_EMAIL=owner@e2e.cortex.test
 
 echo "[preview] environnement ${name} assaini, domaine ${RAILWAY_PUBLIC_DOMAIN}"

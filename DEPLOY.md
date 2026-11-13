@@ -461,8 +461,10 @@ déploiement qu'elle attend). Elle :
    déploiement précédent (`cortex/scripts/railway-rollback.ts`, API Railway),
    puis échoue en rouge avec la raison. Un rollback remet l'image **et les
    variables** de ce déploiement-là. Jamais de rollback en cascade : un commit
-   qui n'est plus la tête de main, ou un déploiement qui est déjà un rollback,
-   est laissé tel quel.
+   qui n'est plus la tête de main, un déploiement qui n'est plus le dernier de
+   la production, ou un déploiement qui est déjà un rollback, est vérifié mais
+   laissé tel quel. La cible saute aussi tout déploiement dont on a déjà dû
+   revenir (A, B cassé, rollback, C cassé : retour sur A, pas sur B).
 
 Il lui faut le secret GitHub `RAILWAY_TOKEN` (jeton de **projet** limité à
 production) : `bash cortex/scripts/setup-fiabilite.sh --etape=3`. Sans lui, le
@@ -484,6 +486,12 @@ le LLM hermétique et l'auth persona E2E ; la garde de démarrage
 (`railwayPreviewViolations`) refuse de servir s'il reste un trou, et refuse
 toujours `E2E_TEST_AUTH` en production. `.github/workflows/preview.yml` joue
 alors les parcours desktop contre l'URL de la preview, en check de la PR.
+
+Le dépôt est **public** : l'URL de chaque preview l'est aussi (commentaire du
+bot Railway). La connexion persona y exige donc `E2E_PERSONA_KEY` (64 caractères
+hexadécimaux, générée par l'étape 4, posée en variable Railway et en secret
+GitHub) ; sans elle, la preview refuse de démarrer. La workflow ne publie aucune
+trace Playwright (elle contiendrait la clé).
 
 ## 10. Sauvegardes et restauration
 

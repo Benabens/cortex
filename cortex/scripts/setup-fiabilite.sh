@@ -14,11 +14,13 @@
 # une variable déjà posée n'est remplacée qu'après accord. Les previews de PR
 # (étape 4) coûtent de l'argent : elles ne s'activent que sur un « oui » tapé.
 #
-# SECRETS : le DSN Sentry et le jeton Railway sont saisis masqués, ne sont jamais
+# SECRETS : le DSN Sentry et le jeton Railway sont saisis masqués (la clé persona
+# des previews est tirée au hasard ici), ne sont jamais
 # écrits sur disque, ni affichés, ni passés en argument ou en variable
 # d'environnement d'une commande : ils voyagent par l'entrée standard de curl,
 # de la CLI Railway et de gh. Le DSN va à Railway (SENTRY_DSN) et à Sentry
-# (erreur de test), le jeton à Railway (contrôle) et à GitHub (RAILWAY_TOKEN).
+# (erreur de test), le jeton à Railway (contrôle) et à GitHub (RAILWAY_TOKEN),
+# la clé persona à Railway et à GitHub (E2E_PERSONA_KEY).
 #
 # Banc d'essai (faux curl, railway, gh, rien de réel) : bash cortex/scripts/setup-fiabilite.test.sh
 set -euo pipefail
@@ -40,19 +42,20 @@ TOKEN_NAME="github-post-deploy"
 
 # Un shell appelant qui exporterait une variable de ce nom la ferait hériter, avec sa valeur
 # du moment, par chaque commande lancée : on repart de variables neuves, non exportées.
-unset DSN RW_TOKEN HTTP_CODE HTTP_BODY key val h out body secret msg
+unset DSN RW_TOKEN PERSONA_KEY HTTP_CODE HTTP_BODY key val h out body secret msg
 DRY=0
 FROM=1
 DONE=()
 SKIPPED=()
 DSN=""
 RW_TOKEN=""
+PERSONA_KEY=""
 HTTP_CODE=""
 HTTP_BODY=""
 ASKED_TOKEN=0
 
 usage() { sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
-forget_secrets() { DSN=""; RW_TOKEN=""; HTTP_BODY=""; }
+forget_secrets() { DSN=""; RW_TOKEN=""; PERSONA_KEY=""; HTTP_BODY=""; }
 
 title() { printf '\n== %s ==\n' "$1"; }
 info() { printf '   %s\n' "$1"; }
@@ -358,6 +361,28 @@ step_previews() {
   browse "$RW_USAGE_PAGE"
   info "D'abord un plafond : Usage → Usage limits → Hard limit (par exemple 10 \$)."
   wait_enter "Plafond posé ?"
+  # Le dépôt est public, l'URL de chaque preview aussi : la connexion persona y exige
+  # une clé. Posée sur la prod (que Railway recopie dans les PR), où elle est inerte
+  # (pas d'E2E_TEST_AUTH), et en secret GitHub pour la workflow preview.
+  if [[ "$DRY" -eq 1 ]]; then
+    info "(tirerait une clé persona, puis : railway variable set E2E_PERSONA_KEY --stdin et gh secret set E2E_PERSONA_KEY)"
+  else
+    if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+      ko "gh absent ou non connecté : lance « gh auth login », puis relance avec --etape=4."
+      SKIPPED+=("4 Previews de PR (gh non connecté)")
+      return 0
+    fi
+    PERSONA_KEY="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+    if ! printf '%s' "$PERSONA_KEY" | railway variable set E2E_PERSONA_KEY --stdin -p "$RW_PROJECT" -e "$RW_ENV" -s "$RW_SERVICE" --skip-deploys >/dev/null 2>&1 \
+      || ! printf '%s' "$PERSONA_KEY" | gh secret set E2E_PERSONA_KEY --repo "$GH_REPO" >/dev/null 2>&1; then
+      PERSONA_KEY=""
+      ko "Clé persona non posée (Railway ou GitHub a refusé). N'active pas les previews : relance avec --etape=4."
+      SKIPPED+=("4 Previews de PR (clé persona non posée)")
+      return 0
+    fi
+    PERSONA_KEY=""
+    ok "Clé persona posée (Railway : E2E_PERSONA_KEY, inerte en prod ; GitHub : secret E2E_PERSONA_KEY)."
+  fi
   browse "$RW_ENVIRONMENTS_PAGE"
   info "PR Environments : Enable · Base environment : production · PR des bots : non."
   info "Le démarrage des previews est déjà prévu (railway.json → scripts/preview-entrypoint.sh) :"

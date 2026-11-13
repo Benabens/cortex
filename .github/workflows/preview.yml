@@ -8,8 +8,10 @@
 # base Postgres vierge de la PR, LLM hermétique, aucun e-mail, Stripe test seul,
 # auth persona E2E autorisée par la garde de démarrage UNIQUEMENT là.
 #
-# Aucun secret ici : l'URL de la preview est lue dans le commentaire que le bot
-# Railway pose sur la PR. Railway ne déploie que les PR des membres du projet.
+# L'URL de la preview est lue dans le commentaire que le bot Railway pose sur la
+# PR (Railway ne déploie que les PR des membres du projet). Seul secret :
+# E2E_PERSONA_KEY, la clé de la connexion persona (dépôt public : sans elle,
+# qui trouve l'URL entre). Aucune trace ni capture publiée : elles la citeraient.
 name: preview
 
 on:
@@ -62,10 +64,10 @@ jobs:
               --jq '.[] | select(.user.login == "railway-app[bot]") | .body' \
               | grep -oE 'https://[a-z0-9-]+\.up\.railway\.app' | tail -1 || true)
           fi
-          case "$url" in
-            https://*.up.railway.app) ;;
-            *) echo "::error::URL de la preview introuvable (commentaire du bot Railway sur la PR ${name##*-pr-}). Relance à la main : Actions → preview → Run workflow avec l'URL."; exit 1 ;;
-          esac
+          if [[ ! "$url" =~ ^https://[a-z0-9-]+\.up\.railway\.app$ ]]; then
+            echo "::error::URL de la preview introuvable ou invalide (commentaire du bot Railway sur la PR ${name##*-pr-}). Relance à la main : Actions → preview → Run workflow avec l'URL."
+            exit 1
+          fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "Preview : $url ($name)"
@@ -97,13 +99,7 @@ jobs:
       - name: Parcours Playwright desktop contre la preview
         env:
           E2E_BASE_URL: ${{ steps.preview.outputs.url }}
-        run: npx playwright test --project=desktop
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: preview-playwright-report
-          path: |
-            cortex/playwright-report
-            cortex/test-results
-          if-no-files-found: ignore
+          E2E_PERSONA_KEY: ${{ secrets.E2E_PERSONA_KEY }}
+        run: |
+          [ -n "$E2E_PERSONA_KEY" ] || { echo "::error::secret E2E_PERSONA_KEY absent (cortex/scripts/setup-fiabilite.sh, étape 4)"; exit 1; }
+          npx playwright test --project=desktop --trace=off --reporter=list

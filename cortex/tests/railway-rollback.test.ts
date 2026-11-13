@@ -38,6 +38,19 @@ test("refus : commit inconnu, rollback d'un rollback, déploiement plus récent 
   assert.match(pickRollbackTarget([history[0], { ...history[3], canRollback: false }], BAD).refusal ?? "", /réutilisable/);
 });
 
+test("jamais de retour vers un déploiement dont on a déjà dû revenir", async () => {
+  const { pickRollbackTarget } = await import("../scripts/railway-rollback");
+  const A = "1111111111111111111111111111111111111111", B = "2222222222222222222222222222222222222222", C = "3333333333333333333333333333333333333333";
+  // A sain, B cassé → rollback R (image de A, plus réutilisable), puis C cassé.
+  const plan = pickRollbackTarget([
+    d("dep-c", "SUCCESS", "2026-11-13T18:00:00Z", C),
+    d("dep-r", "REMOVED", "2026-11-13T17:30:00Z", A, { canRollback: false, meta: { commitHash: A, reason: "rollback" } }),
+    d("dep-b", "REMOVED", "2026-11-13T17:00:00Z", B),
+    d("dep-a", "REMOVED", "2026-11-13T16:00:00Z", A),
+  ], C);
+  assert.equal(plan.target?.id, "dep-a", "B a été annulé : on ne le remet pas en ligne");
+});
+
 test("rollback via l'API Railway avec le jeton de projet ; --dry-run ne modifie rien", async () => {
   const { rollback } = await import("../scripts/railway-rollback");
   const calls: Array<{ query: string; variables: Record<string, unknown>; token: string | null }> = [];

@@ -82,7 +82,7 @@ test("navigateur : la configuration vient de /api/monitoring ; 204, réponse inv
 
 test("erreur non gérée d'une route (onRequestError) : remontée avec la route, sans la requête ; rien sans SENTRY_DSN", async () => {
   const { initErrorTracking, captureRequestError } = await import("../lib/observability");
-  const context = { routerKind: "App Router", routePath: "/api/drill", routeType: "route" } as const;
+  const context = { routerKind: "App Router", routePath: "/api/drill", routeType: "route", revalidateReason: undefined } as const;
   captureRequestError(new Error("hors suivi"), context); // aucun SDK chargé : ne doit rien faire ni lever
   env.SENTRY_DSN = DSN;
   const sent: Array<{ e: unknown; hint: Record<string, unknown> }> = [];

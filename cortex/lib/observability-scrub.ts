@@ -3,6 +3,7 @@
  * (lib/observability) et le navigateur (lib/observability-browser) : aucune
  * dépendance serveur ici, ce module part dans le bundle client.
  */
+import { isPrEnvironment, railwayEnvironmentName } from "@/lib/railway-env";
 
 /** Événement Sentry, réduit à ce que nous manipulons. */
 export type MinimalEvent = {
@@ -88,17 +89,14 @@ export function scrubSpan(span: Record<string, unknown>): Record<string, unknown
   return s;
 }
 
-/** Environnement éphémère de PR chez Railway (« cortex-pr-66 »). */
-const PR_ENVIRONMENT = /(?:^|-)pr-\d+$/i;
-
 /**
  * Environnement Sentry. Une preview de PR l'emporte sur SENTRY_ENVIRONMENT :
  * Railway copie les variables de la prod dans l'environnement de la PR, et ses
  * erreurs ne doivent pas déclencher les alertes de la production.
  */
 export function sentryEnvironment(env: Partial<NodeJS.ProcessEnv>): string {
-  const railway = env.RAILWAY_ENVIRONMENT_NAME || env.RAILWAY_ENVIRONMENT || "";
-  if (env.CORTEX_PREVIEW === "1" || PR_ENVIRONMENT.test(railway)) return "preview";
+  const railway = railwayEnvironmentName(env);
+  if (env.CORTEX_PREVIEW === "1" || isPrEnvironment(railway)) return "preview";
   return env.SENTRY_ENVIRONMENT?.trim() || (railway === "production" ? "production" : env.NODE_ENV || "development");
 }
 
