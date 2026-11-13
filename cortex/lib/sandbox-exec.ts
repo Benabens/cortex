@@ -2,6 +2,7 @@ import { execFile, execFileSync, type ExecFileSyncOptions } from "node:child_pro
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pythonWasmAvailable, runPythonWasm } from "./pyodide-sandbox";
 
 /**
  * SANDBOX D'EXÉCUTION — pour tout code non fiable (réponses « écris une
@@ -161,7 +162,10 @@ const norm = (s: string) => s.replace(/\r\n/g, "\n").trimEnd();
  */
 export async function verifyCode(language: "c" | "python", source: string, tests: CodeTest[]): Promise<CodeRunReport> {
   if (!tests.length) return { verified: "not_applicable", detail: "aucun cas de test" };
-  if (!sandboxAvailable()) return { verified: "not_applicable", detail: "sandbox indisponible — exécution refusée" };
+  const nativeSandbox = sandboxAvailable();
+  if (!nativeSandbox && !(language === "python" && pythonWasmAvailable())) {
+    return { verified: "not_applicable", detail: "sandbox indisponible — exécution refusée" };
+  }
 
   if (language === "c") {
     const cc = findBin([process.env.CORTEX_CC ?? "", "cc", "gcc", "clang"].filter(Boolean));
@@ -184,6 +188,18 @@ export async function verifyCode(language: "c" | "python", source: string, tests
       }
     }
     return { verified: true, detail: `${tests.length} test(s) C passés en sandbox` };
+  }
+
+  if (!nativeSandbox) {
+    for (const [i, t] of tests.entries()) {
+      const r = await runPythonWasm(source, { stdin: t.stdin, args: t.args, timeoutMs: 10_000 });
+      if (!r.ok && r.reason === "timeout") return { verified: false, detail: `test ${i + 1} : timeout` };
+      if (!r.ok) return { verified: false, detail: `test ${i + 1} : ${r.stderr.slice(0, 200) || r.reason}` };
+      if (norm(r.stdout) !== norm(t.expect)) {
+        return { verified: false, detail: `test ${i + 1} : sortie « ${norm(r.stdout).slice(0, 80)} » ≠ attendu « ${norm(t.expect).slice(0, 80)} »` };
+      }
+    }
+    return { verified: true, detail: `${tests.length} test(s) Python passés en WebAssembly isolé` };
   }
 
   const py = findBin([process.env.CORTEX_PYTHON ?? "", "python3", "python"].filter(Boolean));
