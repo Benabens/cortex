@@ -7,7 +7,7 @@ import { currentCourse } from "@/db/client";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
 import { examsDir } from "@/lib/paths";
-import { formatContextFor, type DocumentRule } from "@/lib/exam-format";
+import { formatContextFor, type DocumentRule, type Language } from "@/lib/exam-format";
 
 const LATEX_DIR = path.join(process.cwd(), "latex");
 
@@ -102,7 +102,7 @@ type CoverWords = {
   anonymisation: string;
 };
 
-const COVER_WORDS: Record<string, CoverWords> = {
+const COVER_WORDS: Record<Language, CoverWords> = {
   en: {
     months: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
     date: (d, m, y) => `${m} ${d}, ${y}`,
@@ -117,7 +117,7 @@ const COVER_WORDS: Record<string, CoverWords> = {
     readCarefully: String.raw`Carefully and \emph{completely} read each question so as to do only what is actually asked.`,
     exercises: (n, t) => `The exam consists of ${n} independent exercises (points are indicated, the total is ${t} points).`,
     leaveEmpty: "LEAVE THIS EMPTY",
-    name: "NAME", seat: String.raw`Seat \#`, anonymisation: "Anonymisation",
+    name: "NAME:", seat: String.raw`Seat \#:`, anonymisation: "Anonymisation:",
   },
   fr: {
     months: ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"],
@@ -133,7 +133,7 @@ const COVER_WORDS: Record<string, CoverWords> = {
     readCarefully: String.raw`Lisez chaque question attentivement et \emph{en entier}, pour ne faire que ce qui est demandé.`,
     exercises: (n, t) => `L'examen comporte ${n} exercices indépendants (barème indiqué, total : ${t} points).`,
     leaveEmpty: "NE RIEN ÉCRIRE ICI",
-    name: "NOM", seat: String.raw`Place n\textsuperscript{o}`, anonymisation: "Anonymisation",
+    name: "NOM :", seat: String.raw`Place n\textsuperscript{o} :`, anonymisation: "Anonymisation :",
   },
   de: {
     months: ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"],
@@ -149,7 +149,7 @@ const COVER_WORDS: Record<string, CoverWords> = {
     readCarefully: String.raw`Lesen Sie jede Frage sorgfältig und \emph{vollständig}.`,
     exercises: (n, t) => `Die Prüfung besteht aus ${n} unabhängigen Aufgaben (Punkte angegeben, insgesamt ${t} Punkte).`,
     leaveEmpty: "BITTE LEER LASSEN",
-    name: "NAME", seat: "Platz Nr.", anonymisation: "Anonymisierung",
+    name: "NAME:", seat: "Platz Nr.:", anonymisation: "Anonymisierung:",
   },
   it: {
     months: ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"],
@@ -165,12 +165,60 @@ const COVER_WORDS: Record<string, CoverWords> = {
     readCarefully: String.raw`Leggete ogni domanda attentamente e \emph{per intero}.`,
     exercises: (n, t) => `L'esame comprende ${n} esercizi indipendenti (punti indicati, totale ${t} punti).`,
     leaveEmpty: "NON SCRIVERE QUI",
-    name: "NOME", seat: "Posto n.", anonymisation: "Anonimizzazione",
+    name: "NOME:", seat: "Posto n.:", anonymisation: "Anonimizzazione:",
+  },
+  es: {
+    months: ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"],
+    date: (d, m, y) => `${d} de ${m} de ${y}`,
+    duration: (d) => `Dispone de ${d} para este examen.`,
+    minutes: (n) => `${n} minutos`,
+    hours: (n) => `${n} horas`,
+    documents: { none: "No se permite ningún documento.", notes: "Se permiten los apuntes personales.", open: "Se permiten todos los documentos." },
+    instructions: "INSTRUCCIONES (léalas con atención)",
+    important: String.raw`\textbf{¡IMPORTANTE!} Siga estrictamente estas instrucciones.`,
+    ink: String.raw`Escriba \textbf{con tinta negra o azul oscuro}, ni a lápiz ni en otro color.`,
+    onSheet: String.raw`Responda \textbf{directamente en la hoja de examen}, en el espacio previsto.`,
+    readCarefully: String.raw`Lea cada pregunta con atención y \emph{por completo}.`,
+    exercises: (n, t) => `El examen consta de ${n} ejercicios independientes (puntos indicados, total: ${t} puntos).`,
+    leaveEmpty: "NO ESCRIBA AQUÍ",
+    name: "NOMBRE:", seat: "Asiento n.º:", anonymisation: "Anonimización:",
+  },
+  pt: {
+    months: ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"],
+    date: (d, m, y) => `${d} de ${m} de ${y}`,
+    duration: (d) => `Dispõe de ${d} para este exame.`,
+    minutes: (n) => `${n} minutos`,
+    hours: (n) => `${n} horas`,
+    documents: { none: "Não é permitido nenhum documento.", notes: "São permitidas notas pessoais.", open: "São permitidos todos os documentos." },
+    instructions: "INSTRUÇÕES (leia com atenção)",
+    important: String.raw`\textbf{IMPORTANTE!} Siga rigorosamente estas instruções.`,
+    ink: String.raw`Escreva \textbf{a tinta preta ou azul-escura}, nem a lápis nem noutra cor.`,
+    onSheet: String.raw`Responda \textbf{diretamente na folha de exame}, no espaço previsto.`,
+    readCarefully: String.raw`Leia cada pergunta com atenção e \emph{por inteiro}.`,
+    exercises: (n, t) => `O exame tem ${n} exercícios independentes (pontuação indicada, total: ${t} pontos).`,
+    leaveEmpty: "NÃO ESCREVER AQUI",
+    name: "NOME:", seat: "Lugar n.º:", anonymisation: "Anonimização:",
+  },
+  nl: {
+    months: ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"],
+    date: (d, m, y) => `${d} ${m} ${y}`,
+    duration: (d) => `U hebt ${d} voor dit examen.`,
+    minutes: (n) => `${n} minuten`,
+    hours: (n) => `${n} uur`,
+    documents: { none: "Er zijn geen documenten toegestaan.", notes: "Persoonlijke aantekeningen zijn toegestaan.", open: "Alle documenten zijn toegestaan." },
+    instructions: "INSTRUCTIES (lees aandachtig)",
+    important: String.raw`\textbf{BELANGRIJK!} Volg deze instructies nauwgezet.`,
+    ink: String.raw`Schrijf \textbf{met zwarte of donkerblauwe inkt}, niet met potlood of in een andere kleur.`,
+    onSheet: String.raw`Beantwoord de vragen \textbf{rechtstreeks op het examenblad}, in de voorziene ruimte.`,
+    readCarefully: String.raw`Lees elke vraag aandachtig en \emph{volledig}.`,
+    exercises: (n, t) => `Het examen bestaat uit ${n} onafhankelijke oefeningen (punten aangegeven, totaal ${t} punten).`,
+    leaveEmpty: "HIER NIETS SCHRIJVEN",
+    name: "NAAM:", seat: "Plaats nr.:", anonymisation: "Anonimisering:",
   },
 };
 
 function coverWords(language: string): CoverWords {
-  return COVER_WORDS[language] ?? COVER_WORDS.en;
+  return COVER_WORDS[language as Language] ?? COVER_WORDS.en;
 }
 
 function localDate(dateLabel: string, w: CoverWords): string {
@@ -208,8 +256,8 @@ function genericCoverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string):
     String.raw`${uniLines}\end{minipage}`,
     String.raw`\vspace{2pt}\noindent\rule{\textwidth}{1pt}`,
     String.raw`\noindent\begin{minipage}[t]{0.7\textwidth}\vspace{0pt}\footnotesize ${facultyLine}\end{minipage}\hfill`,
-    String.raw`\begin{minipage}[t]{0.25\textwidth}\vspace{0pt}\raggedleft\footnotesize ${w.anonymisation}:\\ \textbf{\#0000}\end{minipage}`,
-    String.raw`\vspace{10pt}\noindent\normalsize ${w.name} : Hanon Ymous \quad(000000)\hfill\textbf{${w.seat}:} 0`,
+    String.raw`\begin{minipage}[t]{0.25\textwidth}\vspace{0pt}\raggedleft\footnotesize ${w.anonymisation}\\ \textbf{\#0000}\end{minipage}`,
+    String.raw`\vspace{10pt}\noindent\normalsize ${w.name} Hanon Ymous \quad(000000)\hfill\textbf{${w.seat}} 0`,
     String.raw`\vspace{0.5cm}\begin{center}{\Large\textbf{${examCodeTex} ${texEscape(c.examName.toUpperCase())}}}\\[6pt]{\large\textbf{${texEscape(c.examKind)}}}\\[5pt]${localDate(dateLabel, w)}\end{center}`,
     String.raw`\vspace{0.25cm}\noindent{\large\textbf{${w.instructions}}}\par\smallskip`,
     String.raw`\noindent ${w.important}`,

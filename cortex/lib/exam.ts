@@ -677,19 +677,22 @@ async function generateBatch(ctx: Ctx, slots: Slot[], opts: { retryTruncated?: b
  */
 async function generateSlots(ctx: Ctx, slots: Slot[]): Promise<{ qs: (ExamQuestion | null)[]; error: unknown }> {
   const qs: (ExamQuestion | null)[] = slots.map(() => null);
-  let error: unknown = null;
+  const errors: unknown[] = [];
   try {
     const g = await generateBatch(ctx, slots, { retryTruncated: slots.length === 1 });
     g.forEach((q, i) => { if (q) qs[i] = q; });
-  } catch (e) { error = e; }
-  if (slots.length > 1 && qs.some((q) => !q) && !HARD_STOP_CODES.has(llmErrorCode(error) ?? "")) {
+  } catch (e) { errors.push(e); }
+  const hardStop = () => errors.find((e) => HARD_STOP_CODES.has(llmErrorCode(e) ?? ""));
+  if (slots.length > 1 && qs.some((q) => !q) && !hardStop()) {
     await Promise.all(slots.map(async (slot, i) => {
       if (qs[i]) return;
-      try { qs[i] = (await generateBatch(ctx, [slot]))[0] ?? null; } catch (e) { error = e; }
+      try { qs[i] = (await generateBatch(ctx, [slot]))[0] ?? null; } catch (e) { errors.push(e); }
     }));
   }
-  if (!error && qs.some((q) => !q)) error = new Error("lot incomplet");
-  return { qs, error };
+  // Tout rattrapé : l'échec du lot entier ne compte plus. Sinon une garde (plafond, quota…)
+  // l'emporte, quel que soit l'appel parallèle qui a échoué en dernier : elle bloque le comblement.
+  if (qs.every(Boolean)) return { qs, error: null };
+  return { qs, error: hardStop() ?? errors[errors.length - 1] ?? new Error("lot incomplet") };
 }
 
 /**
@@ -903,7 +906,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
   );
 
   // NOMBRE GARANTI : les exercices manquants (lot échoué, question perdue, retirée à la
-  // vérification) sont relancés UNE fois en un lot, sauf si la cause est une garde. Ils
+  // vérification) sont relancés UNE fois, un par appel, sauf si la cause est une garde. Ils
   // s'ajoutent en fin d'examen avec leur propre rapport de vérification.
   // Slots manquants d'un lot = ses slots MOINS les questions qui en restent, appariés par
   // catégorie et barème (une question retirée à la vérification laisse SON slot, pas le
