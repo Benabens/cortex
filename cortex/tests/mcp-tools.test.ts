@@ -109,7 +109,7 @@ before(async () => {
     await indexItemForSearch(horsItem, hors, "Souveraineté européenne", horsText);
     // Concepts : une note de format (anglais), une vraie notion, une carte d'une source « consignes d'examen ».
     await q.run(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, hors, "card", "Midterm MCQ format — half Bendahan, half Gillet", "20 questions, 1 h.");
-    await q.run(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, hors, "card", "Valeurs propres et diagonalisation", "À revoir.");
+    await q.run(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "card", "Valeurs propres et diagonalisation", "À revoir.");
     const info = await q.insert(`INSERT INTO sources (type, title, path, recency_weight) VALUES (?,?,?,?)`, "exam_info", "Consignes", "/exam-info/consignes.md", 1);
     await q.run(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, info, "card", "Règles du jour J", "Arriver 15 min avant.");
     // Semé AVANT la règle : la lecture l'écarte déjà, la re-préparation le purge.
@@ -334,7 +334,8 @@ test("get_weak_points : une note de modalités d'examen n'est jamais un concept 
   assert.equal(r.isError, undefined, text(r));
   const due = r.structuredContent!.due_for_review as string[];
   assert.ok(due.includes("Valeurs propres et diagonalisation"), JSON.stringify(due));
-  for (const bad of ["Midterm MCQ format — half Bendahan, half Gillet", "Format de l'examen final", "Règles du jour J"]) {
+  // « Souveraineté européenne » : une carte de la note hors programme, pas une notion à réviser.
+  for (const bad of ["Midterm MCQ format — half Bendahan, half Gillet", "Format de l'examen final", "Règles du jour J", "Souveraineté européenne"]) {
     assert.ok(!due.includes(bad), `${bad} ne doit pas être à réviser : ${JSON.stringify(due)}`);
   }
   await client.close();

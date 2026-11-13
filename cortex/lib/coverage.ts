@@ -1,6 +1,7 @@
 import { q } from "@/db/q";
 import { EXAM_SOURCE_TYPES } from "@/lib/exam-format";
 import { normalize, tokenize } from "@/lib/text";
+import { excludedSourceIds } from "@/lib/source-scope";
 
 /**
  * COUVERTURE DES CHAPITRES — les questions d'un examen se répartissent sur
@@ -231,12 +232,14 @@ export async function assignChapters(
   let docs: { title: string; tokens: Set<string> }[] = [];
   try {
     const exam = new Set<string>(EXAM_SOURCE_TYPES);
-    const rows = await q.all<{ title: string; type: string; text: string | null }>(
-      `SELECT s.title, s.type, i.text FROM items i JOIN sources s ON s.id = i.source_id ORDER BY s.id, i.id`,
+    const excluded = await excludedSourceIds();
+    const rows = await q.all<{ sid: number; title: string; type: string; text: string | null }>(
+      `SELECT s.id sid, s.title, s.type, i.text FROM items i JOIN sources s ON s.id = i.source_id ORDER BY s.id, i.id`,
     );
     const bySource = new Map<string, Set<string>>();
     for (const r of rows) {
-      if (exam.has(r.type) || !r.text) continue;
+      // Une archive (thèmes des posters, note hors programme) n'est pas un chapitre du cours.
+      if (exam.has(r.type) || excluded.has(Number(r.sid)) || !r.text) continue;
       const set = bySource.get(r.title) ?? new Set<string>();
       for (const tok of tokenize(normalize(r.text), 4)) set.add(tok);
       bySource.set(r.title, set);

@@ -18,6 +18,7 @@ import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import { sanitizeCorpus } from "@/lib/prompt-safety";
+import { excludedSourceIds } from "@/lib/source-scope";
 import { languageName } from "@/lib/profiles/generic-directives";
 import type { FormatProfile } from "@/lib/format";
 
@@ -269,17 +270,20 @@ export function inferDiscipline(c: { code?: string | null; sample?: string | nul
 }
 
 /**
- * Titres des supports de cours (hors annales, exemples, consignes), à défaut de notions
+ * Titres des supports de cours (hors annales, exemples, consignes, sources hors programme), à défaut de notions
  * analysées. Un titre vient d'un nom de fichier ou d'une balise <title> : assaini et
  * borné avant d'entrer dans un prompt (il n'est pas encadré comme donnée).
  */
 export async function courseMaterialTitles(): Promise<string[]> {
   try {
-    const rows = await q.all<{ title: string }>(
-      `SELECT DISTINCT s.title FROM sources s WHERE s.type NOT IN (${EXAM_SOURCE_TYPES.map(() => "?").join(",")}) ORDER BY s.recency_weight DESC, s.id`,
+    const rows = await q.all<{ id: number | string; title: string }>(
+      `SELECT s.id, s.title FROM sources s WHERE s.type NOT IN (${EXAM_SOURCE_TYPES.map(() => "?").join(",")}) ORDER BY s.recency_weight DESC, s.id`,
       ...EXAM_SOURCE_TYPES,
     );
-    return rows.map((r) => sanitizeCorpus(r.title).replace(/\s+/g, " ").trim().slice(0, 120)).filter(Boolean);
+    // Ni une source hors programme, ni une archive d'organisation (thèmes des posters) : pas un sujet.
+    const excluded = await excludedSourceIds();
+    const titles = rows.filter((r) => !excluded.has(Number(r.id))).map((r) => sanitizeCorpus(r.title).replace(/\s+/g, " ").trim().slice(0, 120)).filter(Boolean);
+    return [...new Set(titles)];
   } catch {
     return [];
   }

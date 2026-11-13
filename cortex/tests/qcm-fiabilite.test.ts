@@ -207,7 +207,8 @@ test("le modèle ne rend jamais assez de QCM : comblement borné, et l'examen di
   const r = await runWithCourse(id, () => generateQcmExam({ count: 7, openCount: 0 }));
   assert.ok(r.count > 0 && r.count < 7, `count=${r.count}`);
   assert.equal(r.requested, 7);
-  assert.ok(designCalls <= 4, `budget de comblement borné (${designCalls} lots demandés pour 2 prévus)`);
+  // Budget borné : les 2 lots prévus, plus au plus 2 × 2 lots de comblement et de complément final.
+  assert.ok(designCalls <= 6, `budget de comblement borné (${designCalls} lots demandés pour 2 prévus)`);
   const exam = await runWithCourse(id, () => getQcmExam(r.id));
   assert.match(exam!.verifySummary ?? "", new RegExp(`${r.count} sur 7`));
 });

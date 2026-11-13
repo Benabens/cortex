@@ -9,6 +9,7 @@ import { courseOrderKey } from "@/lib/course-order";
 import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE } from "@/lib/course-grounding";
 import { courseLanguageName } from "@/lib/exam-format";
+import { excludedSourceIds } from "@/lib/source-scope";
 
 export { courseOrderKey };
 
@@ -101,15 +102,18 @@ const trunc = (s: string, n: number) => (s.length > n ? s.slice(0, n) + " […]"
 
 /** Texte du corpus regroupé par usage pour l'analyse (past-exams = vérité terrain des poids). */
 async function gatherForBlueprint() {
+  // Sources hors programme et archives d'organisation (thèmes des posters) : aucune notion n'en vient
+  // (HUM-285, 13/11) ; leurs notions déjà extraites disparaissent à la re-préparation (UPSERT + purge).
+  const excluded = await excludedSourceIds();
   const byTypes = async (types: string[], cap: number): Promise<string> => {
     const ph = types.map(() => "?").join(",");
-    let rows: { text: string; title: string }[] = [];
+    let rows: { sid: number; text: string; title: string }[] = [];
     try {
-      rows = await q.all<{ text: string; title: string }>(
-        `SELECT i.text text, s.title title FROM items i JOIN sources s ON s.id = i.source_id
+      rows = (await q.all<{ sid: number; text: string; title: string }>(
+        `SELECT s.id sid, i.text text, s.title title FROM items i JOIN sources s ON s.id = i.source_id
            WHERE s.type IN (${ph}) ORDER BY s.recency_weight DESC, s.id`,
         ...types
-      );
+      )).filter((r) => !excluded.has(Number(r.sid)));
     } catch {}
     let out = "";
     for (const r of rows) {
@@ -133,6 +137,7 @@ async function gatherForBlueprint() {
            WHERE s.type IN (${ph}) ORDER BY s.recency_weight DESC, s.id, i.id`,
         ...types
       );
+      rows = rows.filter((r) => !excluded.has(Number(r.sid)));
     } catch {}
     const bySource = new Map<number, { title: string; text: string }>();
     for (const r of rows) {
