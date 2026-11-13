@@ -127,7 +127,7 @@ TRUST_PROXY=1
 
 # — crédits Stripe (mode TEST, étape 7) —
 BILLING_ENABLED=1
-SIGNUP_FREE_CREDITS=2
+SIGNUP_FREE_CREDITS=0
 STRIPE_SECRET_KEY=⟨sk_test_…⟩
 STRIPE_WEBHOOK_SECRET=⟨whsec_…⟩
 # Prix référencés par lookup_key dans Stripe (étape 7) — rien d'autre à poser.

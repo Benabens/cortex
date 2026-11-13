@@ -1,5 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 import { loginPersona } from "./helpers";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 async function api<T>(page: Page, path: string, init: RequestInit = {}): Promise<{ status: number; body: T }> {
   return page.evaluate(async ({ path, init }) => {
@@ -50,17 +53,72 @@ test("@principal onboarding complet, PDF, préparation, drill, correction et exa
   await page.goto("/examens"); await expect(page.getByRole("heading", { name: "Examens prêts" })).toBeVisible();
 });
 
-test("utilisateur sans crédit bloqué proprement et propriétaire sans limite", async ({ page }) => {
+test("@principal importe un dossier de 60 Mo par fichiers bornés et signale un fichier trop gros", async ({ page }) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-folder-e2e-"));
+  try {
+    const chapter = path.join(root, "chapitre-1");
+    const scans = path.join(root, "scans");
+    fs.mkdirSync(chapter); fs.mkdirSync(scans);
+    for (let index = 0; index < 4; index++) {
+      const destination = index < 2 ? chapter : scans;
+      fs.writeFileSync(path.join(destination, `notes-${index}.txt`), Buffer.alloc(15 * 1024 * 1024, 0x61 + index));
+    }
+    fs.writeFileSync(path.join(root, ".DS_Store"), "ignoré");
+
+    await loginPersona(page, "owner");
+    await page.goto("/cours/nouveau");
+    await page.getByRole("textbox").first().fill(`Dossier E2E ${Date.now()}`);
+    await page.getByRole("button", { name: "Créer le cours" }).click();
+    const folder = page.getByLabel("Dossier de cours à importer");
+    await page.route("**/api/sources/import?**", async (route) => {
+      if (new URL(route.request().url()).searchParams.get("action") === "finish") {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+      }
+      await route.continue();
+    });
+    await folder.setInputFiles(root);
+    await expect(page.getByText(/Envoi de 4\/4 fichiers/)).toBeVisible();
+    await expect(page.getByText(/4 fichiers déposés/)).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText(/Dossier ingéré/)).toBeVisible({ timeout: 60_000 });
+    await page.getByRole("radio", { name: /note 2/i }).click();
+    await expect(page.getByText("notes-2.txt", { exact: false })).toBeVisible();
+
+    const oversized = path.join(root, "trop-gros.pdf");
+    fs.writeFileSync(oversized, Buffer.alloc(30 * 1024 * 1024 + 1));
+    await folder.setInputFiles(root);
+    await expect(page.getByText(/trop-gros\.pdf.*30 Mo maximum par fichier/)).toBeVisible();
+
+    await page.getByRole("button", { name: "Préparer le cours" }).click();
+    await expect(page.getByText(/Cours préparé/)).toBeVisible({ timeout: 60_000 });
+    await page.goto("/programme");
+    await expect(page.getByRole("heading", { name: "Programme" })).toBeVisible();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("nouveau compte à 0 crédit : import et consultation gratuits, préparation et génération paywallées", async ({ page }) => {
   await loginPersona(page, `nocredit-${Date.now()}`);
   const normal = await api<{ quotas: { gen: number | null }; balance: number }>(page, "/api/billing");
-  expect(normal.body.balance).toBe(0.1); expect(normal.body.quotas.gen).not.toBeNull();
+  expect(normal.body.balance).toBe(0); expect(normal.body.quotas.gen).not.toBeNull();
   const created = await api<{ course: { id: string } }>(page, "/api/courses", { method: "POST", body: JSON.stringify({ name: `Cours sans crédit ${Date.now()}` }) });
   expect(created.status).toBe(201);
-  const spent = await api(page, `/api/drill?course=${encodeURIComponent(created.body.course.id)}`, { method: "POST", body: JSON.stringify({ concept: "limites" }) });
-  expect(spent.status).toBe(200);
-  const empty = await api<{ balance: number }>(page, "/api/billing"); expect(empty.body.balance).toBe(0);
-  const denied = await api<{ error: string }>(page, `/api/drill?course=${encodeURIComponent(created.body.course.id)}`, { method: "POST", body: JSON.stringify({ concept: "limites" }) });
-  expect(denied.status).toBe(402); expect(denied.body.error).toMatch(/crédit/i);
+
+  const imported = await page.request.post(`/api/sources/add?course=${encodeURIComponent(created.body.course.id)}&category=lecture`, {
+    multipart: { file: { name: "cours.txt", mimeType: "text/plain", buffer: Buffer.from("Cours E2E sur les limites et les intégrales.") } },
+  });
+  expect(imported.status()).toBe(200);
+  const catalog = await api<{ courses: unknown[] }>(page, "/api/courses");
+  expect(catalog.status).toBe(200); expect(catalog.body.courses.length).toBeGreaterThan(0);
+
+  await page.goto(`/sources?course=${encodeURIComponent(created.body.course.id)}`);
+  await page.getByRole("button", { name: "Préparer le cours" }).click();
+  await expect(page.getByRole("dialog", { name: "Crédits requis" })).toContainText("Il te faut 2 crédits");
+  await expect(page.getByRole("link", { name: "Acheter" })).toHaveAttribute("href", "/compte#credits");
+
+  const denied = await api<{ error: string }>(page, `/api/exams/generate?course=${encodeURIComponent(created.body.course.id)}`, { method: "POST", body: "{}" });
+  expect(denied.status).toBe(402); expect(denied.body.error).toMatch(/2 crédit/i);
+
   await page.context().clearCookies(); await loginPersona(page, "owner");
   const owner = await api<{ quotas: { gen: number | null; assist: number | null } }>(page, "/api/billing");
   expect(owner.body.quotas).toEqual({ gen: null, assist: null });

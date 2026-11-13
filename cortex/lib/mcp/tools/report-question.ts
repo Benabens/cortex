@@ -7,7 +7,7 @@ import { ToolError, defineTool } from "../tool";
 const output = z.object({
   course: courseRef,
   report_id: z.number(),
-  status: z.enum(["open", "confirmed", "not_confirmed"]).describe("confirmed / not_confirmed: verdict of the automatic re-check of a reported wrong answer against the course material; open: kept for review."),
+  status: z.enum(["open", "confirmed", "not_confirmed"]).describe("open: recorded for human review without a paid model call."),
   refunded_credits: z.number().describe("Credits given back for this question (a confirmed wrong answer)."),
   removed_from_revision: z.boolean(),
 });
@@ -18,7 +18,7 @@ export default defineTool({
   description:
     "Report one question of a mock exam Cortex generated: wrong_answer, off_course (not in the syllabus, or a definition that differs from the course), duplicate, or ambiguous. " +
     "Identify it by exam_id and the question number shown by get_job_status (multiple-choice questions first, then open ones). Free. " +
-    "The question leaves the student's revisions and becomes a counter-example for the course's next exams; a reported wrong answer is re-checked against the course material and refunded when confirmed. " +
+    "The question leaves the student's revisions and is recorded for human review without a paid model call; a refund can follow after confirmation. " +
     "Use it to pass on a careful review of an exam, one call per faulty question, with the reason in comment.",
   kind: "write",
   input: z.object({
