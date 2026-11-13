@@ -418,6 +418,32 @@ function onlyTrivialDistractors(it: QcmItem): boolean {
   return !!it.trivialDistractors?.length && !it.rejected && !it.figureFile && weaknessOf({ ...it, trivialDistractors: null }) === null;
 }
 
+/**
+ * Garde les meilleurs QCM déjà vérifiés tout en bornant à 10 % la part des distracteurs
+ * signalés comme triviaux. Les candidats propres passent d'abord ; une question légèrement
+ * imparfaite peut ensuite éviter un remboursement, sans que plusieurs lots dépassent ensemble
+ * le budget de l'examen.
+ */
+export function selectWithinTrivialBudget<T extends Pick<QcmItem, "options" | "correct" | "trivialDistractors" | "discrimination">>(current: T[], candidates: T[], limit: number): T[] {
+  const out = current.slice(0, limit);
+  let distractors = out.reduce((n, q) => n + Math.max(0, q.options.length - q.correct.length), 0);
+  let trivial = out.reduce((n, q) => n + (q.trivialDistractors?.length ?? 0), 0);
+  const ranked = candidates.map((q, i) => ({ q, i })).sort((a, b) =>
+    (a.q.trivialDistractors?.length ?? 0) - (b.q.trivialDistractors?.length ?? 0)
+      || (b.q.discrimination ?? 0) - (a.q.discrimination ?? 0)
+      || a.i - b.i);
+  for (const { q } of ranked) {
+    if (out.length >= limit) break;
+    const nextDistractors = distractors + Math.max(0, q.options.length - q.correct.length);
+    const nextTrivial = trivial + (q.trivialDistractors?.length ?? 0);
+    if (nextDistractors > 0 && nextTrivial / nextDistractors > 0.1) continue;
+    out.push(q);
+    distractors = nextDistractors;
+    trivial = nextTrivial;
+  }
+  return out;
+}
+
 const REPLACEMENTS_SCHEMA = `{ "replacements": [ { "index": <numéro Q>, "distractors": [ { "option": <numéro de l'option remplacée>, "text": "<nouvelle option>", "misconception": "[procédé] l'idée fausse visée" } ], "explanation": "<explication de la clé, mise à jour>" } ] }`;
 
 /**
@@ -1215,14 +1241,13 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       if (!n.rejected && !n.trivialDistractors?.length) { out[w.i] = { ...n, slot: w.it.slot }; return; }
       if (onlyTrivialDistractors(n)) step(`QCM à régénérer après une réparation : un distracteur reste éliminable sans le cours`, 0);
     });
-    const stubborn = fixable.map((w, k) => ({ w, n: fixed[k] })).filter(({ n }) => n?.verified === 1 && onlyTrivialDistractors(n));
-    if (stubborn.length) {
-      out = await regenerate(bt, out, stubborn.map(({ w, n }) => ({
-        it: { ...n, slot: w.it.slot },
-        i: w.i,
-        why: weaknessOf(n) ?? "distracteur encore éliminable après une réparation",
-      })));
-    }
+    // Après cette unique réparation groupée, un résidu trivial reste candidat au budget global
+    // de 10 %. Le régénérer ici ajoutait conception + vérification à chaque lot, puis trois rondes
+    // de comblement, alors qu'une question absente est plus dommageable pour l'étudiant.
+    fixable.forEach((w, k) => {
+      const n = fixed[k];
+      if (n?.verified === 1 && !n.rejected && onlyTrivialDistractors(n)) out[w.i] = { ...n, slot: w.it.slot };
+    });
     return out;
   };
   /** Régénère en entier les QCM faibles (autre défaut que des distracteurs triviaux). */
@@ -1271,7 +1296,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       // contestée) n'est jamais gardé : son sujet est comblé. Même règle pour un distracteur resté
       // éliminable après une réparation : masquer le verdict du moteur créait le désaccord avec le banc.
       const kept = items.length ? await strengthen(bt, await verifyQcmBatch(items, step)) : [];
-      const out = kept.filter((it) => !it.rejected && !it.trivialDistractors?.length);
+      const out = kept.filter((it) => it.verified === 1 && !it.rejected && (it.judgeOk !== false || !!it.trivialDistractors?.length));
       qualityDropped += kept.length - out.length;
       for (const it of out) if (bt.topics[it.slot ?? -1]?.method === FOCUS_METHOD) it.focusSlot = true;
       return { items: out, error: null };
@@ -1347,10 +1372,14 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       const group = pending.slice(b, b + width);
       const got = await Promise.all(group.map(safeBatch));
       got.forEach((g, k) => {
-        all.push(...g.items.slice(0, Math.max(0, count - all.length)));
+        const before = new Set(all);
+        const selected = selectWithinTrivialBudget(all, g.items, count);
+        const accepted = selected.filter((it) => !before.has(it));
+        all.splice(0, all.length, ...selected);
+        qualityDropped += g.items.length - accepted.length;
         if (g.error) lastError = g.error;
         const bt = group[k];
-        const filled = new Set(g.items.map((it, n) => it.slot ?? n));
+        const filled = new Set(accepted.map((it, n) => it.slot ?? n));
         bt.topics.forEach((topic, j) => { if (!filled.has(j)) missing.push({ topic, mold: bt.molds[j] ?? null }); });
       });
       step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
@@ -1422,7 +1451,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       : `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen, avec leur angle — si tu reprends l'une d'elles, teste un angle vraiment distinct : ${taken.map((i) => `${sanitizeCorpus(notions[i]).slice(0, 60)} (${sanitizeCorpus(angles[i] || "?").slice(0, 60)})`).join(" · ")}.`;
     const got = await safeBatch({ topics: spare, molds: spare.map(() => null), guidance });
     if (got.error) lastError = got.error;
-    all.push(...got.items.slice(0, count - all.length));
+    all.splice(0, all.length, ...selectWithinTrivialBudget(all, got.items, count));
   }
   // La diversité ne vaut jamais des questions absentes : si la réserve ou les remplacements
   // s'épuisent, on rétablit juste assez de questions acquises avant l'audit final. Elles restent
