@@ -28,9 +28,10 @@
   --green: var(--color-emerald);
   --green-ink: var(--color-emerald-hi);
   --green-wash: color-mix(in oklch, var(--color-emerald) 12%, transparent);
-  --blue: var(--color-cyan);
-  --blue-ink: var(--color-cyan-hi);
-  --blue-wash: color-mix(in oklch, var(--color-cyan) 12%, transparent);
+  /* ancien « bleu » secondaire (cyan) : rebranché sur l'accent unique, plus de second accent à l'écran */
+  --blue: var(--color-accent);
+  --blue-ink: var(--color-accent-hi);
+  --blue-wash: color-mix(in oklch, var(--color-accent) 12%, transparent);
   --red: var(--color-danger);
   --red-ink: var(--color-danger-hi);
   --red-wash: color-mix(in oklch, var(--color-danger) 12%, transparent);
