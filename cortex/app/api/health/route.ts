@@ -3,6 +3,7 @@ import { authGet } from "@/db/auth-store";
 import { ensureCoursesLoaded, listCourses } from "@/lib/courses";
 import { llmAvailable } from "@/lib/llm";
 import { sandboxAvailable } from "@/lib/sandbox-exec";
+import { pythonWasmAvailable } from "@/lib/pyodide-sandbox";
 import { texAvailable } from "@/lib/exam-latex";
 import { hasMetricsToken } from "@/lib/metrics-token";
 import { NextResponse } from "next/server";
@@ -36,6 +37,8 @@ export async function GET(req: Request) {
   const status = db ? "ok" : "degraded";
   const code = db ? 200 : 503;
   if (!hasMetricsToken(req)) return NextResponse.json({ status }, { status: code });
+  const nativeSandbox = sandboxAvailable();
+  const pythonWasm = pythonWasmAvailable();
   const body = {
     status,
     driver: q.dialect,
@@ -43,18 +46,19 @@ export async function GET(req: Request) {
       db,
       courses,
       llm: llmAvailable(),
-      sandbox: sandboxAvailable(),
+      sandbox: nativeSandbox,
+      pythonWasm,
       latex: texAvailable(),
     },
-    // Décision d'isolation : sans bac à sable noyau (cas de Railway, où unshare est
-    // refusé), AUCUN code n'est exécuté — ni sympy, ni figures matplotlib, ni
-    // programmes candidats — et la vérification par exécution répond
-    // not_applicable (jamais un faux « prouvé »). Cf. ARCHITECTURE.md § Isolation.
+    // Sans isolation noyau, seul Python peut être rouvert explicitement dans
+    // Pyodide. C, sympy et matplotlib restent refusés. Cf. ARCHITECTURE.md § Isolation.
     verification: {
-      byExecution: sandboxAvailable(),
-      mode: sandboxAvailable() ? "sandboxed" : "disabled",
-      note: sandboxAvailable()
+      byExecution: nativeSandbox || pythonWasm,
+      mode: nativeSandbox ? "sandboxed" : pythonWasm ? "python-wasm" : "disabled",
+      note: nativeSandbox
         ? "exécution de code isolée (seatbelt / namespaces)"
+        : pythonWasm
+          ? "Python isolé par WebAssembly ; C, SymPy et figures restent désactivés"
         : "aucune isolation noyau disponible : exécution de code désactivée, verdict not_applicable",
     },
     uptimeSec: Math.round(process.uptime()),

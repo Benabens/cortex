@@ -65,7 +65,9 @@ En développement, sans configuration, tout tourne sur SQLite en mono-utilisateu
 
 ## Isolation de l'exécution : décision
 
-Le moteur n'exécute du code que dans un bac à sable noyau (Seatbelt sur macOS, espaces de noms `unshare -rn` sur Linux). Sur Railway, l'hôte refuse `unshare` : **aucune isolation n'est disponible en production**, donc toute exécution est **désactivée** — vérification de programmes (C/Python), équivalences symboliques via sympy, figures matplotlib. Le verdict de ces voies est `not_applicable`, jamais un faux « prouvé » ; les items qui exigent une figure sont écartés proprement. `/api/health` l'expose (`checks.sandbox`, `verification.mode`) et l'interface n'affiche la mention « prouvé » que pour les réponses effectivement vérifiées. Rouvrir l'exécution en production suppose un exécuteur séparé (conteneur dédié, gVisor, service type e2b) : décision reportée, assumée dans la documentation de déploiement.
+Le moteur privilégie un bac à sable noyau (Seatbelt sur macOS, espaces de noms `unshare -rn` sur Linux). Sur Railway, l'hôte refuse `unshare` : par défaut toute exécution reste **désactivée** et ces voies répondent `not_applicable`, jamais un faux « prouvé ».
+
+La vérification de programmes Python peut être activée explicitement avec `CORTEX_PYTHON_WASM=1`. Elle exécute Pyodide dans un worker WebAssembly jetable : aucun accès au réseau ni au système de fichiers hôte, pont JavaScript et capacités Python réseau/fichiers refusés avant exécution, pandas préchargé à la demande, worker tué au timeout et sortie tronquée. La mémoire du candidat est surveillée par `tracemalloc`, les grosses allocations usuelles sont refusées avant exécution et le tas JavaScript du worker est plafonné. `resourceLimits` ne plafonne toutefois pas à lui seul la mémoire linéaire WASM : le flag reste désactivé par défaut tant que le déploiement Railway n'a pas été validé en charge avec la limite mémoire du conteneur. Cette voie ne réactive ni C, ni SymPy, ni les figures. `/api/health` distingue `verification.mode: "python-wasm"` de l'isolation noyau.
 
 ## Coût et facturation
 
