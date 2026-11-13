@@ -207,7 +207,7 @@ elles sont déjà justes :
 | `AUTH_URL` | l'URL publique de l'app (retours de paiement, portail) |
 | `LANDING_URL` ou les quatre `LEGAL_*_URL` | les pages légales en ligne |
 | `LEGAL_TERMS_VERSION` | la version des CGV publiées |
-| `SIGNUP_FREE_CREDITS` | `2` |
+| `SIGNUP_FREE_CREDITS` | `0` |
 | `SUBSCRIPTION_MONTHLY_CREDITS` | `20` (ou absente) |
 | `PUBLISHER_EMAIL` | l'adresse qui reçoit les demandes de rétractation et, à défaut de `CORTEX_OWNER_EMAIL`, les alertes (dépense, rappel de reconduction : § 12) |
 
