@@ -401,7 +401,7 @@ async function buildBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan
     if (attempt < ATTEMPTS) work.add(BLOCKS_PHASE);
   };
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
-    step(`Question composée ${i + 1}/${n}${attempt > 1 ? ` (version ${attempt})` : ""} — ${slot.section ?? slot.theme.slice(0, 60)}…`, 0);
+    step(`Question composée ${i + 1}/${n}${attempt > 1 ? ` (version ${attempt})` : ""} : ${slot.section ?? slot.theme.slice(0, 60)}…`, 0);
     let b: ExamBlock;
     try {
       b = await generateBlock(slot, i, n, plan, ctx, guidance, passages);
@@ -427,7 +427,7 @@ async function buildBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan
     }
     why = issues.join(" ; ");
     retry(attempt);
-    step(`Question composée ${i + 1} rejetée — ${why.slice(0, 220)}`, 0);
+    step(`Question composée ${i + 1} rejetée : ${why.slice(0, 220)}`, 0);
     guidance = why.slice(0, 1200);
   }
   return { block: null, why };
@@ -498,13 +498,13 @@ export async function generateBlockExam(
   const { buildBlocksArtifact } = await import("@/lib/blocks-latex");
   const art = await buildBlocksArtifact(examId, blocks, nowStr().slice(0, 10)).catch((e: Error) => ({ file: "", texError: e.message, texWarning: undefined as string | undefined }));
   work.done("PDF");
-  if (art.texError) step(`⚠ PDF non compilé (${art.texError.slice(0, 160)}) — l'examen reste consultable en ligne`, 0);
+  if (art.texError) step(`⚠ PDF non compilé (${art.texError.slice(0, 160)}), l'examen reste consultable en ligne`, 0);
   else if (art.texWarning) step(`⚠ ${art.texWarning.slice(0, 200)}`, 0);
   step(phaseLine("PDF", Date.now() - tPdf), 0);
   step(phaseLine("Total", Date.now() - tStart), 0);
   const verified = blocks.filter((b) => b.verified === 1).length;
   await q.run(`UPDATE exams SET status = 'ready', html_path = ?, verify_summary = ? WHERE id = ?`, art.file || null, `${verified}/${blocks.length} questions composées vérifiées à l'aveugle`, examId);
-  report(`Examen #${examId} prêt — ${blocks.length} questions composées ✓`, 100);
+  report(`Examen #${examId} prêt : ${blocks.length} questions composées ✓`, 100);
   return { id: examId, count: blocks.length, requested: n, ...(art.texError ? { texError: art.texError } : {}), ...(art.texWarning ? { texWarning: art.texWarning } : {}) };
 }
 

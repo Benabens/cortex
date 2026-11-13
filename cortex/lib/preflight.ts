@@ -40,7 +40,7 @@ export async function preflightGeneration(kind?: string): Promise<PreflightIssue
   if (!items)
     return {
       status: 409,
-      error: "Corpus non ingéré — la génération n'aurait aucune matière. Lance l'ingestion puis réessaie.",
+      error: "Corpus non ingéré : la génération n'aurait aucune matière. Lance l'ingestion puis réessaie.",
       command: "npm run ingest",
     };
   if (!texAvailable())

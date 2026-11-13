@@ -19,7 +19,7 @@ export function UpNext({ topics }: { topics: DashNext[] }) {
       <h2 id="upnext-title" className="mb-3 text-lg font-semibold text-ink-1">
         Ensuite
       </h2>
-      <ul className="border-b border-line">
+      <ul className="divide-y divide-line">
         {rows.map(({ t, label }) => {
           const facts = {
             count: t.count,
@@ -27,10 +27,10 @@ export function UpNext({ topics }: { topics: DashNext[] }) {
             chapter: t.chapter ? { lectureNo: t.chapter.lectureNo, title: asText(t.chapter.title) } : null,
           };
           return (
-          <li key={t.id} className="border-t border-line">
+          <li key={t.id}>
             <Link
               href={trainHref(label)}
-              className="group -mx-3 flex flex-col gap-x-4 gap-y-1 rounded-xl px-3 py-4 transition-colors duration-150 hover:bg-accent/10 sm:flex-row sm:items-baseline"
+              className="group -mx-3 flex flex-col gap-x-4 gap-y-1 rounded-xl px-3 py-4 transition-colors duration-150 hover:bg-accent/10 active:bg-accent/10 sm:flex-row sm:items-baseline"
             >
               <span className="min-w-0 flex-1 text-[0.97rem] text-ink-1">{label}</span>
               {/* « L11 · tombé 9 fois » se lit mal à voix haute : version en toutes lettres à côté. */}

@@ -12,5 +12,5 @@
 .questionToggle { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 20px; cursor: pointer; }
 .questionToggle:hover { background: var(--color-surface-2); }
 .toolbar { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 16px 20px; border-radius: 14px; background: var(--color-surface-1); color: var(--color-ink-3); font-size: 13px; }
-@media(max-width: 900px) { .split { grid-template-columns: 1fr; } }
+@media(max-width: 900px) { .split { grid-template-columns: minmax(0,1fr); } }
 @media(max-width: 540px) { .coverage { grid-template-columns: 1fr; } .questionToggle { padding: 16px; gap: 8px; } .questionToggle > :last-child { grid-column: 2 / -1; } .guide { padding: 22px; } }

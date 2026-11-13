@@ -28,7 +28,7 @@ const SPEC = {
 // Invariant de non-régression du RENDU, épinglé aussi dans .github/workflows/ci.yml.
 // L'empreinte du PROMPT n'est volontairement pas épinglée : elle change dès qu'on
 // améliore la formulation (cf. lib/prompt-safety) et dépend du corpus présent.
-const CANONICAL_TEX_SHA = "9a294bb25e9d919c";
+const CANONICAL_TEX_SHA = "6832fc091a5be25e";
 const sha = (s: string) => crypto.createHash("sha256").update(s).digest("hex").slice(0, 16);
 
 before(async () => {

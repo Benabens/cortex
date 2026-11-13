@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, X, CornerDownLeft, WifiOff, RotateCw } from "lucide-react";
+import { Search, X, ExternalLink, WifiOff, RotateCw } from "lucide-react";
 import { useApi, useCourse } from "@/lib/ux/api";
 import { SUGGEST, metaFor, hitHref, snippetParts, type SearchResp, type Hit } from "@/lib/ux/search";
 import { toneVar } from "@/lib/ux/labels";
@@ -258,7 +258,6 @@ export function SearchExperience() {
                       rel="noopener noreferrer"
                       data-idx={i}
                       onMouseMove={() => setSelected(i)}
-                      aria-label={`${g.label} : ${h.title}`}
                       className={cn(
                         "group flex items-center gap-3 rounded-xl px-4 py-4 transition-colors",
                         isSel ? "bg-surface-2" : "hover:bg-surface-2/60"
@@ -274,7 +273,10 @@ export function SearchExperience() {
                         <meta.Icon className="size-[1.1rem]" strokeWidth={2} />
                       </span>
                       <div className="min-w-0 flex-1">
-                        <div className="break-words text-[0.92rem] font-medium text-ink-1">{h.title}</div>
+                        <div className="break-words text-[0.92rem] font-medium text-ink-1">
+                          <span className="sr-only">{g.label} : </span>
+                          {h.title.replace(/\s+—\s+p\.(\d+)$/, ", p. $1")}
+                        </div>
                         <div className="line-clamp-2 text-[0.78rem] text-ink-3">
                           <Snippet text={h.snippet} />
                         </div>
@@ -282,10 +284,11 @@ export function SearchExperience() {
                       <span
                         className={cn(
                           "shrink-0 items-center gap-1 text-[0.72rem] text-ink-3",
-                          isSel ? "flex" : "hidden md:group-hover:flex"
+                          isSel ? "hidden md:flex" : "hidden md:group-hover:flex"
                         )}
                       >
-                        <CornerDownLeft className="size-3.5" strokeWidth={2.25} /> Ouvrir
+                        Ouvrir <ExternalLink className="size-3.5" strokeWidth={2.25} aria-hidden="true" />
+                        <span className="sr-only">(nouvel onglet)</span>
                       </span>
                     </a>
                   );

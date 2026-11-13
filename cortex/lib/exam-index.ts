@@ -163,7 +163,7 @@ async function indexOneExam(course: string, src: { path: string; title: string; 
       raw = parsed?.exercises ?? [];
       if (raw.length) break;
     } catch (e) {
-      step(`${src.title} : extraction échouée${attempt < 2 ? " — réessai" : " — ignoré"} (${(e as Error).message.slice(0, 50)})`, prog);
+      step(`${src.title} : extraction échouée${attempt < 2 ? ", réessai" : ", ignoré"} (${(e as Error).message.slice(0, 50)})`, prog);
     }
   }
   const knownArche = new Set(p.archetypes.map((a) => a.id));
@@ -235,12 +235,12 @@ export async function indexExamExercises(opts: { onStep?: (m: string, p: number)
   // Index reconstruit à chaque passe, y compris quand il n'y a plus d'annale : une source
   // reclassée (grille d'évaluation de HUM-285, d'abord classée midterm) n'y laisse rien.
   await q.exec(`DELETE FROM exam_exercises`);
-  if (!exams.length) { step("Aucun final ingéré — index vide.", 100); return { exams: 0, exercises: 0 }; }
+  if (!exams.length) { step("Aucun final ingéré : index vide.", 100); return { exams: 0, exercises: 0 }; }
   const lang = await courseLanguageName();
   let total = 0;
   for (let i = 0; i < exams.length; i++) {
     const prog = 8 + Math.round((i / exams.length) * 82);
-    step(`Indexation ${i + 1}/${exams.length} — ${exams[i].title}…`, prog);
+    step(`Indexation ${i + 1}/${exams.length} : ${exams[i].title}…`, prog);
     let rows: Omit<ExamExercise, "id" | "topicId">[] = [];
     try { rows = await indexOneExam(course, exams[i], step, prog, lang); } catch (e) { step(`${exams[i].title} : ignoré (${(e as Error).message.slice(0, 50)})`, prog); }
     await q.tx(async () => {

@@ -136,7 +136,7 @@ export function WeaknessBase({
                   </div>
                   <div className="p-1.5">
                     {g.rows.map((w, i) => (
-                      <WeaknessRow key={w.id} w={w} i={i} deleting={deleting} onRemove={remove} />
+                      <WeaknessRow key={w.id} w={w} i={i} level="h4" deleting={deleting} onRemove={remove} />
                     ))}
                   </div>
                 </div>
@@ -145,7 +145,7 @@ export function WeaknessBase({
           ) : (
             <div className="d2-card overflow-hidden rounded-xl p-1.5">
               {rows.slice().sort(bySeverity).map((w, i) => (
-                <WeaknessRow key={w.id} w={w} i={i} deleting={deleting} onRemove={remove} />
+                <WeaknessRow key={w.id} w={w} i={i} level="h3" deleting={deleting} onRemove={remove} />
               ))}
             </div>
           )}
@@ -159,11 +159,14 @@ export function WeaknessBase({
 function WeaknessRow({
   w,
   i,
+  level: Title,
   deleting,
   onRemove,
 }: {
   w: Weakness;
   i: number;
+  /** h3 dans la liste, h4 sous un chapitre (h3) : l'ordre des titres reste continu. */
+  level: "h3" | "h4";
   deleting: number | null;
   onRemove: (w: Weakness) => void;
 }) {
@@ -181,7 +184,7 @@ function WeaknessRow({
         <SeverityMeter level={sev.level} tone={sev.tone} className="mt-1 shrink-0" />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h4 className="text-[0.95rem] font-medium text-ink-1">{w.topic}</h4>
+            <Title className="text-[0.95rem] font-medium text-ink-1">{w.topic}</Title>
             {/* Pastille « Analysée » retirée (série 3) : seule l'exception reste signalée. */}
             {!w.analyzed && (
               <Badge tone="warning" size="xs">

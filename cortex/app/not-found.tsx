@@ -7,7 +7,7 @@ import { Wordmark } from "@/components/shell/Logo";
  */
 export default function NotFound() {
   return (
-    <main
+    <div
       style={{
         minHeight: "70vh",
         display: "flex",
@@ -16,7 +16,7 @@ export default function NotFound() {
         justifyContent: "center",
         textAlign: "center",
         padding: "48px 24px",
-        color: "var(--color-ink-1, #f4f2fb)",
+        color: "var(--color-ink-1, #f4f5f8)",
       }}
     >
       <div
@@ -27,7 +27,7 @@ export default function NotFound() {
           border: "1px solid var(--color-line, rgba(255,255,255,0.09))",
           borderRadius: 16,
           padding: "32px 28px",
-          boxShadow: "var(--shadow-pop, 0 8px 26px -6px rgba(0,0,0,0.6))",
+          boxShadow: "var(--card-shadow, none)",
         }}
       >
         <div style={{ display: "flex", justifyContent: "center" }}>
@@ -35,9 +35,9 @@ export default function NotFound() {
         </div>
         <h1 style={{ fontSize: 44, fontWeight: 700, margin: "12px 0 4px", lineHeight: 1 }}>404</h1>
         <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px" }}>Page introuvable</h2>
-        <p style={{ fontSize: 14, lineHeight: 1.55, color: "var(--color-ink-2, #c9c7d6)", margin: 0 }}>
-          Cette page n&apos;existe pas (ou plus). Vérifie l&apos;adresse, ou
-          reviens à l&apos;accueil.
+        <p style={{ fontSize: 14, lineHeight: 1.55, color: "var(--color-ink-2, #bfc1c9)", margin: 0 }}>
+          Cette page n’existe pas (ou plus). Vérifie l’adresse, ou reviens à
+          l’accueil.
         </p>
         <div style={{ marginTop: 22 }}>
           <Link
@@ -45,7 +45,7 @@ export default function NotFound() {
             style={{
               display: "inline-flex",
               alignItems: "center",
-              borderRadius: 12,
+              borderRadius: 9999,
               padding: "10px 20px",
               fontSize: 14,
               fontWeight: 600,
@@ -54,10 +54,10 @@ export default function NotFound() {
               background: "var(--color-primary, #ececee)",
             }}
           >
-            Retour à l&apos;accueil
+            Retour à l’accueil
           </Link>
         </div>
       </div>
-    </main>
+    </div>
   );
 }

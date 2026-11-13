@@ -127,7 +127,7 @@ export function BlockExam({
       if (d.error) setErr(d.error);
       else {
         setGraded(d);
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
       }
     } catch {
       setErr("Correction impossible.");
@@ -322,7 +322,7 @@ export function BlockExam({
         <div
           role="alert"
           className="card card-pad mb-4"
-          style={{ color: "var(--red)" }}
+          style={{ color: "var(--red-ink)" }}
         >
           {err}
         </div>

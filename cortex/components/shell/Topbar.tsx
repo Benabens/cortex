@@ -39,8 +39,6 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           </span>
         </Link>
 
-        <div className="flex-1 sm:hidden" />
-
         {/* Right cluster */}
         <div className="ml-auto flex items-center gap-2">
           {showCountdown && (
@@ -48,7 +46,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
               className="hidden items-center gap-2 rounded-full border border-line bg-surface-2/50 px-3 py-1.5 text-[0.78rem] md:inline-flex"
               title="Prochain examen"
             >
-              <CalendarClock className="size-3.5 text-cyan-hi" strokeWidth={2.25} />
+              <CalendarClock className="size-3.5 text-ink-3" strokeWidth={2.25} />
               <span className="text-ink-3">Final dans</span>
               <span className="font-data font-semibold text-ink-1">{days} j</span>
             </span>
@@ -67,7 +65,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           <Link
             href="/compte"
             aria-label="Mon compte"
-            className="grid size-11 place-items-center rounded-lg border border-line bg-surface-2/50 text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink-1"
+            className="hidden size-11 min-[360px]:grid place-items-center rounded-lg border border-line bg-surface-2/50 text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink-1"
           >
             <UserRound className="size-[1.15rem]" strokeWidth={2} />
           </Link>

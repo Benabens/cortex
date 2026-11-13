@@ -75,8 +75,8 @@ export type PlanKey = "pro_monthly" | "pro_yearly" | "credits_10";
 export type PlanSpec = { lookupKey: string; mode: "subscription" | "payment"; credits?: number; label: string };
 
 export const PLANS: Record<PlanKey, PlanSpec> = {
-  pro_monthly: { lookupKey: "cortex_pro_monthly", mode: "subscription", label: "Pro — mensuel" },
-  pro_yearly: { lookupKey: "cortex_pro_yearly", mode: "subscription", label: "Pro — annuel" },
+  pro_monthly: { lookupKey: "cortex_pro_monthly", mode: "subscription", label: "Pro mensuel" },
+  pro_yearly: { lookupKey: "cortex_pro_yearly", mode: "subscription", label: "Pro annuel" },
   credits_10: { lookupKey: "cortex_credits_10", mode: "payment", credits: 10, label: "Pack de 10 crédits" },
 };
 

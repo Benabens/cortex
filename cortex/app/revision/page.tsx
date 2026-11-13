@@ -64,10 +64,10 @@ export default function RevisionPage() {
   });
   const resetDone = () => { setDone({}); try { localStorage.removeItem(`cortex:revision:done:${d?.course}`); } catch {} };
   const doneBtn = (k: string) => (
-    <button type="button" onClick={() => toggleDone(k)} aria-pressed={!!done[k]} title={done[k] ? "fait : cliquer pour annuler" : "marquer comme fait"}
+    <button type="button" onClick={() => toggleDone(k)} aria-pressed={!!done[k]} title={done[k] ? "Fait : cliquer pour annuler" : "Marquer comme fait"}
       style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", borderRadius: "var(--r-sm)", padding: "9px 12px", fontSize: 12, lineHeight: 1.4, border: `1px solid ${done[k] ? "var(--green)" : "var(--line-strong)"}`, color: done[k] ? "var(--green-ink)" : "var(--ink-3)", background: done[k] ? "var(--green-wash)" : "transparent" }}>
       <span style={{ width: 14, height: 14, borderRadius: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, border: `1.5px solid ${done[k] ? "var(--green)" : "var(--ink-3)"}`, color: "var(--green-ink)" }}>{done[k] ? "✓" : ""}</span>
-      {done[k] ? "fait" : "à faire"}
+      {done[k] ? "Fait" : "À faire"}
     </button>
   );
 
@@ -80,8 +80,8 @@ export default function RevisionPage() {
   return (
     <div className={styles.page}>
       <PageHeader
-        title="Toutes les vraies questions des finals + un parcours qui couvre tout."
-        description="La banque exhaustive de chaque QCM et chaque ouverte des annales, triée par sujet dans l’ordre du cours, et un parcours généré couvrant 100 % du programme à la bonne proportion. Déjà prêt, rien à relancer."
+        title="Révision"
+        description="Toutes les questions des finals, QCM et ouvertes, triées par sujet dans l’ordre du cours, et un parcours généré qui couvre tout le programme dans les bonnes proportions."
       />
 
       {!loading && error && (
@@ -96,9 +96,8 @@ export default function RevisionPage() {
 
       {!loading && !error && totBank === 0 && (d?.plan.stats.qcm ?? 0) === 0 && (
         <div className="card card-pad empty">
-          <div className="empty-ico">📚</div>
-          <div className="empty-title">Banque pas encore construite</div>
-          <div className="empty-sub">Lance <code className="kbd">npm run revision -- --course={d?.course ?? "ml"}</code> (index + parcours), puis recharge.</div>
+          <div className="empty-title">Banque de questions pas encore prête</div>
+          <div className="empty-sub">Les questions des finals de ce cours n’ont pas encore été rassemblées. En attendant, entraîne-toi depuis l’onglet Entraînement.</div>
         </div>
       )}
 
@@ -109,7 +108,6 @@ export default function RevisionPage() {
             <div className="flex flex-wrap items-center gap-2 mb-2">
               <h2 className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>Couverture des finals par sujet (ordre du cours)</h2>
               <span className="tag tag-blue">{d.bank.stats.qcm} QCM · {d.bank.stats.open} ouvertes</span>
-              {d.source === "json" && <span className="tag" title="chargé depuis le fichier committé">pré-construit ✓</span>}
             </div>
             <div className={styles.coverage}>
               {d.bank.stats.byTopic.map((t) => {
@@ -118,7 +116,7 @@ export default function RevisionPage() {
                   <div key={t.topic} className={styles.coverageRow}>
                     <span className="tag">{lr(t.lectureRank)}</span>
                     <div className="min-w-0"><span className="text-ink-1">{t.topic}</span><div className="mt-1 text-xs text-ink-3">{t.qcm} QCM · {t.open} ouvertes</div></div>
-                    <span className="tabular-nums text-accent-hi">{pct}%</span>
+                    <span className="tabular-nums text-accent-hi">{pct} %</span>
                     <div className={styles.track} role="img" aria-label={`${pct} % des questions`}><div style={{ width: `${pct}%` }} /></div>
                   </div>
                 );
@@ -144,7 +142,7 @@ export default function RevisionPage() {
             <Toggle checked={hideDone} onChange={toggleHide} label="Masquer les questions faites" labelVisible />
             <span style={{ color: "var(--ink-4)" }}>·</span>
             <span><strong style={{ color: "var(--ink-2)" }}>{doneTotal}</strong> question{doneTotal > 1 ? "s" : ""} marquée{doneTotal > 1 ? "s" : ""} faite{doneTotal > 1 ? "s" : ""}</span>
-            {doneTotal > 0 && <button className="btn btn-quiet btn-sm" onClick={resetDone}>réinitialiser</button>}
+            {doneTotal > 0 && <button className="btn btn-quiet btn-sm" onClick={resetDone}>Réinitialiser</button>}
           </div>
 
           {tab !== "plan" && (qcmGroups.length || openGroups.length) ? (
@@ -168,14 +166,14 @@ export default function RevisionPage() {
                             <div className="flex items-center gap-2 flex-wrap text-[12px] mb-1">
                               {doneBtn(dk)}
                               <span className="tag tag-blue">{q.sourceExam?.replace(/_/g, " ").slice(0, 28)}{q.examYear ? ` ${q.examYear}` : ""}{q.examPage ? ` · p.${q.examPage}` : ""}</span>
-                              {q.examHref && <a className="btn btn-quiet btn-sm" style={{ color: "var(--accent-ink)" }} href={q.examHref} target="_blank" rel="noopener">ouvrir (PDF) →</a>}
+                              {q.examHref && <a className="btn btn-quiet btn-sm" style={{ color: "var(--accent-ink)" }} href={q.examHref} target="_blank" rel="noopener">Ouvrir le PDF →</a>}
                             </div>
                             <div className="text-[13.5px]" style={{ color: "var(--ink)" }}>{q.statement}</div>
                             {q.options && <pre className="mt-1 text-[12.5px]" style={{ color: "var(--ink-2)", whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{q.options}</pre>}
                             {q.officialAnswer && (
                               reveal[q.id]
                                 ? <div className="mt-1.5 text-[13px]" style={{ color: "var(--green-ink)" }}><strong>Réponse officielle :</strong> {q.officialAnswer}</div>
-                                : <button className="btn btn-quiet btn-sm mt-1" style={{ color: "var(--green)" }} onClick={() => setReveal((r) => ({ ...r, [q.id]: true }))}>révéler la réponse</button>
+                                : <button className="btn btn-quiet btn-sm mt-1" style={{ color: "var(--green-ink)" }} onClick={() => setReveal((r) => ({ ...r, [q.id]: true }))}>Révéler la réponse</button>
                             )}
                           </div>
                           );
@@ -190,7 +188,7 @@ export default function RevisionPage() {
 
           {tab === "plan" && (
             (d.plan.questions.length === 0)
-              ? <div className="card card-pad empty"><div className="empty-title">Parcours pas encore généré</div><div className="empty-sub">Lance <code className="kbd">npm run revision -- --course={d.course} --parcours</code>.</div></div>
+              ? <div className="card card-pad empty"><div className="empty-title">Parcours pas encore généré</div><div className="empty-sub">Le parcours de ce cours n’a pas encore été généré. Les questions des finals restent disponibles dans les deux autres onglets.</div></div>
               : <div className="space-y-2">
                 {planGroups.map((g) => {
                   const key = `plan:${g.topic}`;
@@ -218,7 +216,7 @@ export default function RevisionPage() {
                               {q.options && <pre className="mt-1 text-[12.5px]" style={{ color: "var(--ink-2)", whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{q.options}</pre>}
                               {reveal[q.id]
                                 ? <div className="mt-1.5 text-[13px]" style={{ color: "var(--green-ink)" }}>{q.kind === "qcm" ? <><strong>Réponse :</strong> {q.correct}. {q.explanation}</> : <><strong>Corrigé :</strong> {q.solution}</>}</div>
-                                : <button className="btn btn-quiet btn-sm mt-1" style={{ color: "var(--green)" }} onClick={() => setReveal((r) => ({ ...r, [q.id]: true }))}>révéler</button>}
+                                : <button className="btn btn-quiet btn-sm mt-1" style={{ color: "var(--green-ink)" }} onClick={() => setReveal((r) => ({ ...r, [q.id]: true }))}>Révéler la réponse</button>}
                             </div>
                             );
                           })}

@@ -23,7 +23,7 @@ export default function Error({
   }, [error]);
 
   return (
-    <main
+    <div
       style={{
         minHeight: "70vh",
         display: "flex",
@@ -32,7 +32,7 @@ export default function Error({
         justifyContent: "center",
         textAlign: "center",
         padding: "48px 24px",
-        color: "var(--color-ink-1, #f4f2fb)",
+        color: "var(--color-ink-1, #f4f5f8)",
       }}
     >
       <div
@@ -43,19 +43,19 @@ export default function Error({
           border: "1px solid var(--color-line, rgba(255,255,255,0.09))",
           borderRadius: 16,
           padding: "32px 28px",
-          boxShadow: "var(--shadow-pop, 0 8px 26px -6px rgba(0,0,0,0.6))",
+          boxShadow: "var(--card-shadow, none)",
         }}
       >
         <div style={{ display: "flex", justifyContent: "center" }}>
           <Wordmark markSize={24} textSize="1.15rem" />
         </div>
         <h1 style={{ fontSize: 22, fontWeight: 700, margin: "14px 0 8px" }}>Une erreur est survenue</h1>
-        <p style={{ fontSize: 14, lineHeight: 1.55, color: "var(--color-ink-2, #c9c7d6)", margin: 0 }}>
-          Quelque chose s&apos;est mal passé de notre côté. Tu peux réessayer ; si
-          ça persiste, reviens à l&apos;accueil et relance ton action.
+        <p style={{ fontSize: 14, lineHeight: 1.55, color: "var(--color-ink-2, #bfc1c9)", margin: 0 }}>
+          Quelque chose s’est mal passé de notre côté. Tu peux réessayer. Si ça
+          persiste, reviens à l’accueil et relance ton action.
         </p>
         {error?.digest && (
-          <p style={{ fontSize: 12, color: "var(--color-ink-3, #79768a)", marginTop: 12, fontFamily: "var(--font-mono)" }}>
+          <p style={{ fontSize: 12, color: "var(--color-ink-3, #9295a0)", marginTop: 12, fontFamily: "var(--font-mono)" }}>
             réf. {error.digest}
           </p>
         )}
@@ -66,7 +66,7 @@ export default function Error({
               appearance: "none",
               cursor: "pointer",
               border: "1px solid transparent",
-              borderRadius: 12,
+              borderRadius: 9999,
               padding: "10px 20px",
               fontSize: 14,
               fontWeight: 600,
@@ -81,19 +81,19 @@ export default function Error({
             style={{
               display: "inline-flex",
               alignItems: "center",
-              borderRadius: 12,
+              borderRadius: 9999,
               padding: "10px 20px",
               fontSize: 14,
               fontWeight: 550,
-              color: "var(--color-ink-2, #c9c7d6)",
+              color: "var(--color-ink-2, #bfc1c9)",
               border: "1px solid var(--color-line-strong, rgba(255,255,255,0.14))",
               textDecoration: "none",
             }}
           >
-            Retour à l&apos;accueil
+            Retour à l’accueil
           </a>
         </div>
       </div>
-    </main>
+    </div>
   );
 }
