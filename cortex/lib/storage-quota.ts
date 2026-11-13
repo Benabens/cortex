@@ -21,6 +21,13 @@ import { intLimit } from "@/lib/billing/env";
 export const MiB = 1024 * 1024;
 export const MIN_FREE_RATIO = 0.10;
 
+export function storageMinFreeRatio(env: Partial<NodeJS.ProcessEnv> = process.env): number {
+  const raw = env.STORAGE_MIN_FREE_PERCENT;
+  if (raw == null || raw.trim() === "") return MIN_FREE_RATIO;
+  const percent = Number(raw);
+  return Number.isFinite(percent) && percent >= 0 && percent <= 100 ? percent / 100 : MIN_FREE_RATIO;
+}
+
 export function storageQuotaBytes(): number | null {
   const mb = intLimit("STORAGE_QUOTA_MB", 200);
   return mb === null ? null : mb * MiB;
@@ -87,7 +94,7 @@ export async function checkStorage(
     // l'usage payé priverait tous les comptes de génération.
     const tooFull = opts.minFreeBytes != null
       ? freeAfter < opts.minFreeBytes
-      : freeAfter / disk.total < MIN_FREE_RATIO;
+      : freeAfter / disk.total < (_statfs ? MIN_FREE_RATIO : storageMinFreeRatio());
     if (tooFull) {
       return {
         status: 413,

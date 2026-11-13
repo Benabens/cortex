@@ -83,9 +83,15 @@ test("un DOCX corrompu est refusé avec une erreur client explicite", async () =
 });
 
 test("la route d'import répond en 4xx pour un DOCX corrompu", async () => {
-  const response = await importRequest(new File(["archive cassée"], "cours.docx"));
-  assert.equal(response.status, 422);
-  assert.match((await response.json()).error, /corrompu|illisible/i);
+  const { setStatfsForTests } = await import("../lib/storage-quota");
+  setStatfsForTests(() => ({ free: 900 * 1024 * 1024, total: 1024 * 1024 * 1024 }));
+  try {
+    const response = await importRequest(new File(["archive cassée"], "cours.docx"));
+    assert.equal(response.status, 422);
+    assert.match((await response.json()).error, /corrompu|illisible/i);
+  } finally {
+    setStatfsForTests(null);
+  }
 });
 
 test("un DOCX à taille décompressée excessive est refusé avant extraction", async () => {

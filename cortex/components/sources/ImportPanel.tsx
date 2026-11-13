@@ -8,11 +8,11 @@ import { WeightBar } from "@/components/viz/WeightBar";
 import { Segmented } from "@/components/ui/Segmented";
 import { useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@/lib/ux/api";
 import { cn } from "@/lib/ux/cn";
+import { PaywallNotice } from "@/components/billing/PaywallNotice";
+import { FOLDER_EXTENSIONS, prepareFolderImport, type FolderImportRefusal } from "@/lib/folder-import";
 
 const ACCEPT = ".pdf,.html,.htm,.txt,.md";
 /** Un dossier de cours contient plus que des annales : slides, séries, images, notes. */
-const FOLDER_EXTENSIONS = ["pdf", "html", "htm", "txt", "md", "tex", "c", "h", "png", "jpg", "jpeg", "webp", "pptx", "docx"];
-const ACCEPT_FOLDER = new RegExp(`\\.(${FOLDER_EXTENSIONS.join("|")})$`, "i");
 const ACCEPT_FOLDER_ATTRIBUTE = FOLDER_EXTENSIONS.map((ext) => `.${ext}`).join(",");
 
 /**
@@ -44,6 +44,9 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   const [uploading, setUploading] = useState(false);
   const [uploadedMsg, setUploadedMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [paywall, setPaywall] = useState(false);
+  const [folderProgress, setFolderProgress] = useState<{ done: number; total: number } | null>(null);
+  const [folderRefusals, setFolderRefusals] = useState<FolderImportRefusal[]>([]);
   const [jobId, setJobId] = useState<number | null>(null);
   const [jobKind, setJobKind] = useState<"format" | "ingest" | "prepare" | null>(null);
   const job = useJob(jobId);
@@ -55,6 +58,8 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
     setJobKind(null);
     setError(null);
     setUploadedMsg(null);
+    setFolderProgress(null);
+    setFolderRefusals([]);
     notified.current = false;
   }, [courseId]);
 
@@ -125,27 +130,50 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
    * téléverser inutilement (le serveur refiltre de toute façon).
    */
   const importFolder = async (files: FileList | File[]) => {
-    const list = [...files].filter((f) => ACCEPT_FOLDER.test(f.name) && f.size > 0);
-    if (!list.length) {
-      setError("Aucun fichier exploitable dans ce dossier.");
+    const selection = prepareFolderImport(files);
+    setFolderRefusals(selection.rejected);
+    if (!selection.accepted.length) {
+      setError("Aucun fichier exploitable dans ce dossier. Vérifie les formats et les limites indiquées.");
       return;
     }
     setError(null);
     setUploadedMsg(null);
     setUploading(true);
+    setFolderProgress({ done: 0, total: selection.accepted.length });
     try {
-      const fd = new FormData();
-      for (const f of list) {
-        fd.append("file", f);
-        fd.append("relpath", (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name);
+      const refused = [...selection.rejected];
+      let saved = 0;
+      for (const [index, entry] of selection.accepted.entries()) {
+        let failure = "";
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            const fd = new FormData();
+            fd.append("file", entry.file);
+            fd.append("relpath", entry.relativePath);
+            const res = await fetch(`/api/sources/import?course=${encodeURIComponent(courseId)}`, { method: "POST", body: fd });
+            const data = await res.json().catch(() => null);
+            if (!res.ok) {
+              failure = data?.error ?? (res.status === 413 ? "fichier ou quota trop volumineux" : `erreur ${res.status}`);
+              if (res.status < 500) break;
+              continue;
+            }
+            saved++;
+            failure = "";
+            break;
+          } catch {
+            failure = "connexion interrompue après 3 tentatives";
+          }
+        }
+        if (failure) refused.push({ name: entry.relativePath, reason: failure });
+        setFolderProgress({ done: index + 1, total: selection.accepted.length });
       }
-      const res = await fetch(`/api/sources/import?course=${encodeURIComponent(courseId)}`, { method: "POST", body: fd });
-      const d = await res.json().catch(() => null);
-      if (!res.ok) throw { status: res.status, message: d?.error ?? `Erreur ${res.status}` } as ApiError;
-      setUploadedMsg(
-        `${d.files} fichier${d.files > 1 ? "s" : ""} déposé${d.files > 1 ? "s" : ""}${d.skipped ? ` (${d.skipped} ignoré${d.skipped > 1 ? "s" : ""})` : ""} : indexation…`
-      );
-      startJob(d.jobId, "ingest");
+      setFolderRefusals(refused);
+      if (!saved) throw { status: 400, message: "Aucun fichier n’a pu être importé. Consulte la liste des refus ci-dessous." } as ApiError;
+      const res = await fetch(`/api/sources/import?course=${encodeURIComponent(courseId)}&action=finish`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw { status: res.status, message: data?.error ?? `Erreur ${res.status}` } as ApiError;
+      setUploadedMsg(`${saved} fichier${saved > 1 ? "s" : ""} déposé${saved > 1 ? "s" : ""}${refused.length ? `, ${refused.length} refusé${refused.length > 1 ? "s" : ""}` : ""} : indexation…`);
+      startJob(data.jobId, "ingest");
     } catch (e) {
       setError((e as ApiError).message || "L’import du dossier a échoué.");
     } finally {
@@ -157,14 +185,17 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   const prepare = async () => {
     if (running) return;
     setError(null);
+    setPaywall(false);
     setUploadedMsg(null);
     try {
       const res = await fetch(`/api/prepare?course=${encodeURIComponent(courseId)}`, { method: "POST" });
       const d = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
+      if (!res.ok) throw { status: res.status, message: d?.error ?? `Erreur ${res.status}` } as ApiError;
       startJob(d.jobId, "prepare");
     } catch (e) {
-      setError((e as Error).message || "Impossible de lancer la préparation.");
+      const err = e as ApiError;
+      setPaywall(err.status === 402);
+      setError(err.message || "Impossible de lancer la préparation.");
     }
   };
 
@@ -209,7 +240,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
         <div>
           <p className="text-[0.92rem] font-semibold text-ink-1">
             {uploading
-              ? "Ingestion en cours…"
+              ? "Téléversement en cours…"
               : dropKind === "past_exam"
                 ? "Glisse un examen, un cours, un PDF"
                 : dropKind === "sample_questions"
@@ -254,9 +285,15 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           <FolderInput className="size-4" strokeWidth={2.25} />
           Choisir un dossier de cours
         </Button>
+        {uploading && folderProgress && (
+          <p className="mt-2 text-[0.8rem] font-medium text-ink-2" aria-live="polite">
+            Envoi de {folderProgress.done}/{folderProgress.total} fichiers…
+          </p>
+        )}
         <p className="mt-2 text-[0.76rem] leading-relaxed text-ink-3">
           Finals et midterms partent dans tes annales (ils décident du format) ; slides,
-          séries, documents Word et notes rejoignent le corpus.
+          séries, documents Word et notes rejoignent le corpus. 30 Mo maximum par fichier ;
+          le total du cours suit le quota de stockage de ton compte.
         </p>
       </div>
 
@@ -272,6 +309,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
       </div>
 
       {/* progression de job (format / ingest / prepare) */}
+      {paywall && <PaywallNotice credits={2} />}
       {running && job && (
         <div className="rounded-lg border border-line bg-surface-2/30 px-3.5 py-3" aria-live="polite">
           <div className="mb-2 flex items-center justify-between text-[0.78rem]">
@@ -296,6 +334,14 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" strokeWidth={2.25} />
           {error}
         </p>
+      )}
+      {folderRefusals.length > 0 && (
+        <div className="rounded-lg border border-line bg-surface-2/30 px-3.5 py-3 text-[0.78rem] text-ink-3">
+          <p className="font-semibold text-ink-2">Fichiers non importés</p>
+          <ul className="mt-1.5 list-disc space-y-1 pl-4">
+            {folderRefusals.map((item, index) => <li key={`${item.name}-${index}`}><span className="break-all">{item.name}</span> — {item.reason}</li>)}
+          </ul>
+        </div>
       )}
     </Panel>
   );

@@ -39,3 +39,21 @@ test("job queued sans PID depuis 3 min → erreur, pas de remise en file, la pom
     assert.equal(started, 0);
   });
 });
+
+test("job interrompu sans référence de réservation → aucune reprise automatique", async () => {
+  const jobs = await import("../lib/jobs");
+  const { q, nowStr } = await import("../db/q");
+  const { runWithCourse } = await import("../db/client");
+  await runWithCourse("algo", async () => {
+    await jobs.ensureJobsSchema();
+    const id = await q.insert(
+      `INSERT INTO jobs (type, target, status, current_step, progress, pid, attempts, max_attempts, created_at, updated_at)
+       VALUES (?,?,'running','Génération…',30,999999,1,2,?,?)`,
+      "exam", null, nowStr(-180_000), nowStr(-180_000),
+    );
+    await jobs.reconcileStaleJobs();
+    const row = await q.get<{ status: string; credit_ref: string | null }>(`SELECT status, credit_ref FROM jobs WHERE id = ?`, id);
+    assert.equal(row?.credit_ref, null);
+    assert.equal(row?.status, "error", "un job sans réservation ne doit jamais être remis en file");
+  });
+});
