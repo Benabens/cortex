@@ -378,6 +378,9 @@ function spawnJudge(runDir: string): Promise<void> {
 async function judgeRun(runDir: string): Promise<void> {
   const run = JSON.parse(fs.readFileSync(path.join(runDir, "run.json"), "utf8")) as BenchRun & { courseId: string };
   assertBenchEnv(process.env);
+  // Le juge n'a pas de job, donc pas de réservation (230f686, 13/11 : « Il te faut des crédits ») :
+  // il juge comme le propriétaire du cours du banc (« owner », lib/bench), sur l'abonnement Codex.
+  process.env.CORTEX_OWNER_USER_ID ||= "owner";
   const { ensureCoursesLoaded } = await import("../lib/courses");
   await ensureCoursesLoaded();
   const { runWithCourse } = await import("../db/client");

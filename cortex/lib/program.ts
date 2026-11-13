@@ -9,7 +9,7 @@ import { courseOrderKey } from "@/lib/course-order";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE } from "@/lib/course-grounding";
 import { courseLanguageName } from "@/lib/exam-format";
-import { excludedSourceIds, isExcludedPassage, readableTitle } from "@/lib/source-scope";
+import { courseMatter, excludedSourceIds, readableTitle } from "@/lib/source-scope";
 
 export { courseOrderKey };
 
@@ -154,7 +154,7 @@ async function gatherForBlueprint() {
         ...types
       );
       // Ni une source exclue, ni une page qui présente le cours (enseignants, grille d'évaluation).
-      rows = rows.filter((r) => !excluded.has(Number(r.sid)) && !isExcludedPassage(r.text));
+      rows = rows.filter((r) => !excluded.has(Number(r.sid))).map((r) => ({ ...r, text: courseMatter(r.text) })).filter((r) => r.text);
     } catch {}
     const bySource = new Map<number, { title: string; text: string }>();
     for (const r of rows) {

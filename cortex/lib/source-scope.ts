@@ -61,6 +61,18 @@ export function isExcludedPassage(text: string): boolean {
 }
 
 /**
+ * La MATIÈRE d'un item : vide si l'item se dit hors programme ou archive (par son début), sinon
+ * son texte sans les paragraphes qui présentent le cours (enseignants, grille d'évaluation).
+ * Un PDF a un item par page, mais un .md ou un .docx n'en a qu'un : écarter l'item entier pour
+ * sa diapo d'introduction retirait toute la séance 1 de HUM-285 (banc du 13/11).
+ */
+export function courseMatter(text: string): string {
+  if (!text || isExcludedMaterial("", text)) return "";
+  if (!isCourseFramePassage(text) && !COURSE_FRAME.test(normalize(text).replace(/[’']/g, "'"))) return text;
+  return text.split(/\n\s*\n/).filter((p) => !isCourseFramePassage(p)).join("\n\n").trim();
+}
+
+/**
  * Libellé lisible d'un support quand il doit nommer un chapitre ou une réserve : jamais un nom de
  * fichier — null, et l'appelant s'en passe.
  */

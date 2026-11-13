@@ -1,6 +1,6 @@
 import { q } from "@/db/q";
 import { EXAM_SOURCE_TYPES } from "@/lib/exam-format";
-import { excludedSourceIds, isExcludedMaterial, isExcludedPassage } from "@/lib/source-scope";
+import { courseMatter, excludedSourceIds, isExcludedMaterial } from "@/lib/source-scope";
 import { normalize, tokenize } from "@/lib/text";
 
 /**
@@ -179,8 +179,9 @@ export async function coursePassages(topics: string[], perTopic = 2, cap = 900):
       if (NOT_COURSE_FACTS.has(h.sourceType) || excluded.has(Number(h.sourceId)) || seen.has(h.itemId)) continue;
       seen.add(h.itemId);
       const row = await q.get<{ text: string }>(`SELECT text FROM items WHERE id = ?`, h.itemId);
-      if (!row?.text || isExcludedPassage(row.text)) continue;
-      out.push({ src: h.sourceTitle, text: windowAround(row.text, topic, cap) });
+      const matter = courseMatter(row?.text ?? "");
+      if (!matter) continue;
+      out.push({ src: h.sourceTitle, text: windowAround(matter, topic, cap) });
       k++;
     }
   }
@@ -252,8 +253,9 @@ export async function evidencePassages(queries: string[], opts: { perQuery?: num
       if (k >= perQuery || used >= budget) break;
       if (NOT_COURSE_FACTS.has(h.sourceType) || excluded.has(Number(h.sourceId))) continue;
       const row = await q.get<{ text: string }>(`SELECT text FROM items WHERE id = ?`, h.itemId);
-      if (!row?.text || isExcludedPassage(row.text)) continue;
-      const text = densestWindow(row.text, query, cap);
+      const matter = courseMatter(row?.text ?? "");
+      if (!matter) continue;
+      const text = densestWindow(matter, query, cap);
       const seen = windows.get(h.itemId) ?? [];
       // Même fenêtre (ou presque) déjà montrée pour une autre requête : rien de neuf.
       if (seen.some((w) => w.includes(text.slice(0, 200)) || text.includes(w.slice(0, 200)))) { k++; continue; }
@@ -261,6 +263,79 @@ export async function evidencePassages(queries: string[], opts: { perQuery?: num
       out.push({ src: h.sourceTitle, text });
       used += text.length;
       k++;
+    }
+  }
+  return out;
+}
+
+/** Mots vides ignorés par la recherche dans tout le corpus (articles, liaisons, verbes d'énoncé). */
+const SCAN_STOP = new Set("les des une dans pour par sur aux avec sans son ses leur leurs plus moins pas cette ces elle elles ils sont etre fait faire selon cours quelle quel quels quelles lequel laquelle entre comme tout tous toute toutes meme peut peuvent deux aussi ainsi alors donc dont mais encore notion notions passage passages present presente presentee presentes presentees explicitement seulement indique mentionne the and for with from that this which are".split(" "));
+
+/** Texte replié (minuscules, sans accents) de MÊME LONGUEUR que l'original : une position y vaut une position de l'original. */
+function fold(text: string): string {
+  let out = "";
+  for (const ch of text) {
+    const f = ch.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+    out += f.length === ch.length ? f : ch.length === 1 ? (f[0] ?? ch) : ch;
+  }
+  return out;
+}
+
+/**
+ * Passages trouvés dans TOUT le corpus du cours, sans la recherche plein texte : chaque mot
+ * porteur de la requête est cherché par sa racine (accents, pluriels, flexions : « bifaces » pour
+ * « biface », « vérifiabilité » pour « vérifiable »), et la fenêtre qui en réunit le plus est
+ * gardée. Banc HUM-285 du 13/11 : 29 questions rejetées « hors cours » par un second regard qui
+ * n'avait vu que les extraits de la recherche plein texte (« le RLHF n'est pas présenté dans ces
+ * passages », alors que la séance 7 le détaille). Jamais une source exclue, une annale ni le cadre du cours.
+ */
+export async function corpusWindows(queries: string[], opts: { perQuery?: number; cap?: number; budget?: number } = {}): Promise<{ src: string; text: string }[]> {
+  const { perQuery = 2, cap = 1800, budget = 12_000 } = opts;
+  let rows: { id: number; sid: number; type: string; title: string; text: string | null }[] = [];
+  try {
+    rows = await q.all(`SELECT i.id, s.id sid, s.type, s.title, i.text FROM items i JOIN sources s ON s.id = i.source_id`);
+  } catch { return []; }
+  const excluded = await excludedSourceIds();
+  const docs: { id: number; src: string; text: string; folded: string }[] = [];
+  let total = 0;
+  for (const r of rows) {
+    if (NOT_COURSE_FACTS.has(r.type) || r.type === "exam_info" || excluded.has(Number(r.sid))) continue;
+    const text = courseMatter(r.text ?? "").replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    total += text.length;
+    if (total > MAX_CORPUS_CHARS) return [];
+    docs.push({ id: Number(r.id), src: r.title, text, folded: fold(text) });
+  }
+  const out: { src: string; text: string }[] = [];
+  const shown = new Set<string>();
+  let used = 0;
+  for (const query of queries.map((x) => x.trim()).filter(Boolean)) {
+    if (used >= budget) break;
+    const stems = [...new Set(tokenize(query, 4).filter((w) => !SCAN_STOP.has(w) && !/^\d+$/.test(w)).map(stem))].slice(0, 24);
+    if (!stems.length) continue;
+    const res = stems.map((s) => new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(s)}\\p{L}*`, "gu"));
+    const scored: { doc: (typeof docs)[number]; start: number; score: number }[] = [];
+    for (const doc of docs) {
+      const hits = res.map((re) => [...doc.folded.matchAll(re)].slice(0, 80).map((m) => m.index!));
+      if (hits.filter((h) => h.length).length < Math.min(2, stems.length)) continue;
+      let best = { start: 0, score: 0 };
+      for (const p of hits.flat()) {
+        const start = Math.max(0, Math.min(p - Math.floor(cap / 3), doc.text.length - cap));
+        const score = hits.filter((h) => h.some((i) => i >= start && i < start + cap)).length;
+        if (score > best.score) best = { start, score };
+      }
+      scored.push({ doc, ...best });
+    }
+    // Au moins la moitié des mots porteurs dans une même fenêtre : un mot isolé ne prouve rien.
+    const need = Math.max(2, Math.ceil(stems.length / 2));
+    for (const s of scored.filter((x) => x.score >= Math.min(need, stems.length)).sort((a, b) => b.score - a.score).slice(0, perQuery)) {
+      const begin = s.start === 0 ? 0 : s.doc.text.lastIndexOf(" ", s.start) + 1;
+      const text = s.doc.text.slice(begin, begin + cap);
+      const key = `${s.doc.id}:${begin}`;
+      if (shown.has(key) || used >= budget) continue;
+      shown.add(key);
+      out.push({ src: s.doc.src, text });
+      used += text.length;
     }
   }
   return out;
