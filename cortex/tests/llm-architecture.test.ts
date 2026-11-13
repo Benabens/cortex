@@ -29,7 +29,7 @@ test("architecture : aucun chemin de production ne contourne le point d'entrée 
 
 test("architecture : le paywall précède les contraintes gratuites d'un examen", () => {
   const generation = fs.readFileSync("lib/generation.ts", "utf8");
-  const paywall = generation.indexOf("await preflightGeneration(type)");
+  const paywall = generation.indexOf("await creditsGate(type)");
   const examPlan = generation.indexOf("planMockExam(");
   assert.ok(paywall >= 0 && examPlan > paywall, "un compte sans crédit doit recevoir 402 avant une éventuelle erreur de format");
 });
