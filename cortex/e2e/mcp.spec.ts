@@ -1,9 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
 import crypto from "node:crypto";
 import { Client, StreamableHTTPClientTransport, type CallToolResult } from "@modelcontextprotocol/client";
+import { baseURL } from "./base-url";
 import { loginPersona } from "./helpers";
 
-const origin = "http://localhost:3210";
+const origin = new URL(baseURL).origin;
 const callback = `${origin}/e2e-oauth-callback`;
 
 async function oauthClient(page: Page, persona: string) {

@@ -3,6 +3,7 @@ import { Funnel_Display } from "next/font/google";
 import "./globals.css";
 import "./legacy-compat.css";
 import { AppShell } from "@/components/shell/AppShell";
+import { ErrorTracking } from "@/components/ErrorTracking";
 import { contactEmail } from "@/lib/contact";
 import { legalEnglishUrl, legalLinks } from "@/lib/legal";
 import { NOINDEX } from "@/lib/seo";
@@ -50,6 +51,8 @@ export default function RootLayout({
         <script>{THEME_INIT_SCRIPT}</script>
       </head>
       <body className="min-h-full">
+        {/* Suivi d'erreurs du navigateur : sans SENTRY_DSN, rien n'est téléchargé. */}
+        <ErrorTracking />
         <AppShell legal={legalLinks()} legalEnglish={legalEnglishUrl()} contact={contactEmail()}>{children}</AppShell>
       </body>
     </html>

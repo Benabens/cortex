@@ -5,6 +5,7 @@ import { llmAvailable } from "@/lib/llm";
 import { sandboxAvailable } from "@/lib/sandbox-exec";
 import { pythonWasmAvailable } from "@/lib/pyodide-sandbox";
 import { texAvailable } from "@/lib/exam-latex";
+import { railwayEnvironmentName } from "@/lib/railway-env";
 import { hasMetricsToken } from "@/lib/metrics-token";
 import { NextResponse } from "next/server";
 
@@ -36,11 +37,16 @@ export async function GET(req: Request) {
   } catch { db = false; }
   const status = db ? "ok" : "degraded";
   const code = db ? 200 : 503;
-  if (!hasMetricsToken(req)) return NextResponse.json({ status }, { status: code });
+  // Commit servi (public : le dépôt l'est aussi) — le workflow post-deploy attend que
+  // la prod serve SON commit avant de la tester. Posé par Railway ; null hors Railway.
+  const commit = process.env.RAILWAY_GIT_COMMIT_SHA || null;
+  if (!hasMetricsToken(req)) return NextResponse.json({ status, commit }, { status: code });
   const nativeSandbox = sandboxAvailable();
   const pythonWasm = pythonWasmAvailable();
   const body = {
     status,
+    commit,
+    environment: railwayEnvironmentName() || null,
     driver: q.dialect,
     checks: {
       db,

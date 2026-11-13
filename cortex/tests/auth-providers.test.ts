@@ -28,3 +28,14 @@ test("I9 — AUTH_EMAIL_ENABLED=1 ET un transport configuré activent le lien ma
   // Transport sans activation explicite → non plus.
   assert.equal(emailLoginConfigured({ RESEND_API_KEY: "re_x" }), false);
 });
+
+test("persona E2E : avec E2E_PERSONA_KEY (preview de PR, dépôt public), la clé exacte est exigée ; banc local inchangé", async () => {
+  const { personaKeyAccepted } = await import("../lib/auth-providers");
+  const key = "a".repeat(64);
+  assert.equal(personaKeyAccepted(undefined, {}), true, "banc local : pas de clé");
+  assert.equal(personaKeyAccepted(key, { E2E_PERSONA_KEY: key }), true);
+  assert.equal(personaKeyAccepted(undefined, { E2E_PERSONA_KEY: key }), false, "l'URL publique de la preview ne suffit pas");
+  assert.equal(personaKeyAccepted("", { E2E_PERSONA_KEY: key }), false);
+  assert.equal(personaKeyAccepted("a".repeat(63) + "b", { E2E_PERSONA_KEY: key }), false);
+  assert.equal(personaKeyAccepted(key.slice(1), { E2E_PERSONA_KEY: key }), false);
+});

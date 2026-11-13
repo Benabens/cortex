@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 /**
  * /api/health est public (sonde UptimeRobot, healthcheck Railway, smoke CI) :
- * il ne doit dire que « ok / degraded ». Le détail de l'infrastructure (pilote,
+ * il ne doit dire que « ok / degraded » et le commit servi (public, comme le dépôt). Le détail de l'infrastructure (pilote,
  * nombre de cours, moteur, sandbox, LaTeX) n'est servi qu'avec METRICS_TOKEN.
  */
 
@@ -13,11 +13,11 @@ process.env.METRICS_TOKEN = "jeton-sante-0123456789";
 
 const url = "http://cortex.test/api/health";
 
-test("sans jeton : { status } seul, 200", async () => {
+test("sans jeton : { status, commit } seuls, 200", async () => {
   const { GET } = await import("../app/api/health/route");
   const res = await GET(new Request(url));
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { status: "ok" });
+  assert.deepEqual(await res.json(), { status: "ok", commit: null });
 });
 
 test("faux jeton ou jeton en query string : réponse publique", async () => {
@@ -26,7 +26,7 @@ test("faux jeton ou jeton en query string : réponse publique", async () => {
     new Request(url, { headers: { authorization: "Bearer jeton-sante-9876543210" } }),
     new Request(`${url}?token=jeton-sante-0123456789`),
   ]) {
-    assert.deepEqual(Object.keys(await (await GET(req)).json()), ["status"]);
+    assert.deepEqual(Object.keys(await (await GET(req)).json()), ["status", "commit"]);
   }
 });
 
