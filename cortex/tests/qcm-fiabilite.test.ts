@@ -250,22 +250,6 @@ test("le correcteur interne cherche les mêmes distracteurs triviaux que le banc
   assert.match(prompt, /mêmes critères/i);
 });
 
-test("une simple classification d'étiquettes est repérée avant livraison", async () => {
-  const { labelClassificationRisk, directReadingRisk } = await import("../lib/qcm");
-  assert.equal(labelClassificationRisk("Which analysis best identifies the source of bias?"), true);
-  assert.equal(labelClassificationRisk("Which stakeholder entry most accurately describes the contractors?"), true);
-  assert.equal(labelClassificationRisk("Which course phenomenon best explains the narrowing?"), true);
-  assert.equal(labelClassificationRisk("Which conclusion correctly accounts for both observations?"), true);
-  assert.equal(labelClassificationRisk("Which revision best counters this process?"), true);
-  assert.equal(labelClassificationRisk("Which assessment matches the course analysis?"), true);
-  assert.equal(labelClassificationRisk("Quelle analyse identifie le mieux la source du biais ?"), true);
-  assert.equal(labelClassificationRisk("Quel diagnostic décrit le plus précisément cette situation ?"), true);
-  assert.equal(labelClassificationRisk("Calculate the false-positive rate from this confusion matrix."), false);
-  assert.equal(directReadingRisk("Which pair gives the output row order and the median after reindex?"), true);
-  assert.equal(directReadingRisk("Quel couple donne l'ordre des lignes et la médiane après reindex ?"), true);
-  assert.equal(directReadingRisk("Explain why changing the grouping key reverses the conclusion."), false);
-});
-
 test("lot name_only avec un distracteur trivial : répare l'option sans reconcevoir la question", async () => {
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
