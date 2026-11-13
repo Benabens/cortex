@@ -5,8 +5,7 @@
  * énoncé ambigu) :
  *  - retire la question des révisions de l'utilisateur ;
  *  - devient un contre-exemple des prochaines générations de CE cours ;
- *  - « réponse fausse » : re-vérifiée à l'aveugle contre le cours ; confirmée →
- *    la question est remboursée (sa part de l'examen, une seule fois) ;
+ *  - reste gratuit et ouvert pour revue, sans appel LLM caché ;
  *  - est listé pour le propriétaire de l'instance.
  * Fournisseur LLM simulé (openai-compatible) : aucune dépense.
  */
@@ -85,7 +84,7 @@ async function paidExam(): Promise<{ examId: number; itemIds: number[]; openId: 
   return { examId, itemIds, openId };
 }
 
-test("réponse fausse confirmée par la re-vérification : retirée des révisions, remboursée une fois à sa part", async () => {
+test("réponse fausse : retirée des révisions et gardée ouverte sans appel LLM ni remboursement", async () => {
   const { runWithUser } = await import("../db/context");
   const { runWithCourse } = await import("../db/client");
   const { q } = await import("../db/q");
@@ -94,21 +93,22 @@ test("réponse fausse confirmée par la re-vérification : retirée des révisio
   await runWithUser(USER, () => runWithCourse("ml", async () => {
     const { examId, itemIds } = await paidExam();
     const before = await credits.getBalanceCenti(USER);
-    judgeKey = 1; // le juge, avec les extraits du cours, trouve l'AUTRE réponse
+    const calls = prompts.length;
     const r = await reportQuestion({ examId, kind: "qcm", itemId: itemIds[0], reason: "wrong_answer", comment: "Le cours dit : sensible dès qu'il a des implications éthiques." });
-    assert.equal(r.status, "confirmed");
-    assert.equal(r.refundedCenti, 34, "1 crédit pour 3 questions : 34 centièmes (arrondi en faveur de l'utilisateur)");
-    assert.equal(await credits.getBalanceCenti(USER), before + 34);
+    assert.equal(r.status, "open");
+    assert.equal(r.refundedCenti, 0);
+    assert.equal(await credits.getBalanceCenti(USER), before);
+    assert.equal(prompts.length, calls, "le signalement gratuit ne déclenche aucun modèle");
     assert.equal(r.removedFromRevision, 1);
     assert.equal((await q.get<{ n: number }>(`SELECT count(*) n FROM revision_plan WHERE statement = ?`, STEM))?.n, 0);
-    assert.equal((await q.get<{ verified: number }>(`SELECT verified FROM qcm_items WHERE id = ?`, itemIds[0]))?.verified, 0);
+    assert.equal((await q.get<{ verified: number }>(`SELECT verified FROM qcm_items WHERE id = ?`, itemIds[0]))?.verified, 1);
     const again = await reportQuestion({ examId, kind: "qcm", itemId: itemIds[0], reason: "wrong_answer" });
     assert.equal(again.refundedCenti, 0, "une question n'est remboursée qu'une fois");
-    assert.equal(await credits.getBalanceCenti(USER), before + 34);
+    assert.equal(await credits.getBalanceCenti(USER), before);
   }));
 });
 
-test("réponse fausse NON confirmée : signalement gardé, rien remboursé", async () => {
+test("réponse fausse : signalement ouvert, rien remboursé", async () => {
   const { runWithUser } = await import("../db/context");
   const { runWithCourse } = await import("../db/client");
   const credits = await import("../lib/billing/credits");
@@ -118,7 +118,7 @@ test("réponse fausse NON confirmée : signalement gardé, rien remboursé", asy
     const before = await credits.getBalanceCenti(USER);
     judgeKey = 0;
     const r = await reportQuestion({ examId, kind: "qcm", itemId: itemIds[1], reason: "wrong_answer" });
-    assert.equal(r.status, "not_confirmed");
+    assert.equal(r.status, "open");
     assert.equal(r.refundedCenti, 0);
     assert.equal(await credits.getBalanceCenti(USER), before);
   }));
@@ -156,7 +156,7 @@ test("le propriétaire voit les signalements de tous les comptes ; une saisie in
   }));
   const all = await listReports(50);
   assert.ok(all.some((r) => r.userId === "usr_bis" && r.course === "algo" && r.reason === "duplicate" && /Que calcule le DIR/.test(r.stem)));
-  assert.ok(all.some((r) => r.userId === USER && r.status === "confirmed"));
+  assert.ok(all.some((r) => r.userId === USER && r.status === "open"));
 });
 
 test("route POST /api/questions/report : motif inconnu → 400 au message lisible ; question absente → 404", async () => {
@@ -171,16 +171,16 @@ test("route POST /api/questions/report : motif inconnu → 400 au message lisibl
 });
 
 
-test("une question ne se re-vérifie qu'une fois : un nouveau « réponse fausse » reprend le verdict sans rappeler le modèle", async () => {
+test("répéter un signalement gratuit ne rappelle jamais le modèle", async () => {
   const { runWithUser } = await import("../db/context");
   const { runWithCourse } = await import("../db/client");
   const { reportQuestion } = await import("../lib/question-reports");
   await runWithUser(USER, () => runWithCourse("ml", async () => {
     const { examId, itemIds } = await paidExam();
     judgeKey = 0;
-    assert.equal((await reportQuestion({ examId, kind: "qcm", itemId: itemIds[1], reason: "wrong_answer" })).status, "not_confirmed");
+    assert.equal((await reportQuestion({ examId, kind: "qcm", itemId: itemIds[1], reason: "wrong_answer" })).status, "open");
     const calls = prompts.length;
-    for (let i = 0; i < 3; i++) assert.equal((await reportQuestion({ examId, kind: "qcm", itemId: itemIds[1], reason: "wrong_answer" })).status, "not_confirmed");
+    for (let i = 0; i < 3; i++) assert.equal((await reportQuestion({ examId, kind: "qcm", itemId: itemIds[1], reason: "wrong_answer" })).status, "open");
     assert.equal(prompts.length, calls, "aucun appel au modèle de plus");
   }));
 });
@@ -198,7 +198,7 @@ test("signalement « réponse fausse » sur une question dont l'explication cite
     const before = await credits.getBalanceCenti(USER);
     judgeKey = 0;
     const r = await reportQuestion({ examId, kind: "qcm", itemId: itemIds[1], reason: "wrong_answer" });
-    assert.equal(r.status, "not_confirmed");
+    assert.equal(r.status, "open");
     assert.equal(r.refundedCenti, 0);
     assert.equal(await credits.getBalanceCenti(USER), before);
   }));

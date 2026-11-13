@@ -225,7 +225,8 @@ export async function assistCall<T>(kind: string, fn: () => Promise<T>): Promise
   const r = await assistReserve(kind);
   if ("issue" in r) throw new AssistRefused(r.issue.status, r.issue.error);
   try {
-    return await fn();
+    const { runWithLlmAuthorization } = await import("@/lib/llm/authorization");
+    return await runWithLlmAuthorization({ kind: "assist", ref: r.ref }, fn);
   } catch (e) {
     const code = llmErrorCode(e);
     if (code && REFUNDED_CODES.has(code)) {

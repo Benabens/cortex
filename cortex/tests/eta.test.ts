@@ -93,6 +93,12 @@ test("à avancement constant, le temps restant ne remonte pas avec le temps qui 
   assert.ok(at(5) <= at(3) && at(3) <= at(2), `${at(2) / MIN} → ${at(3) / MIN} → ${at(5) / MIN} min`);
 });
 
+test("un avancement qui précède les lots de reprise ne sous-estime pas le compte à rebours", async () => {
+  const { estimateRemaining } = await import("../lib/eta");
+  const e = estimateRemaining({ type: "qcm", status: "running", progress: 80, elapsedMs: 4 * MIN, attempts: 0, historyMs: [10 * MIN] });
+  assert.equal(e.remainingMs, 6 * MIN, "à 4 min d'un historique de 10 min, 80 % provisoires ne doivent pas annoncer 2 min");
+});
+
 test("avancement PAR PHASE : chemin critique des phases parallèles, puis la suivante ; ne recule qu'à l'ajout d'un réessai", async () => {
   const { PhaseProgress } = await import("../lib/progress");
   // QCM (2 lots, 8 min) en parallèle des ouvertes (2, 2 min), puis le PDF (30 s).

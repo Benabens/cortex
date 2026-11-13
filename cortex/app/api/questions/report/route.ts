@@ -4,8 +4,7 @@ import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// Une « réponse fausse » est re-vérifiée par le modèle avant de répondre.
-export const maxDuration = 240;
+export const maxDuration = 30;
 
 /** Signale une question d'un examen du cours (lib/question-reports). Gratuit. */
 export const POST = withBodyLimit(async function POST(req: NextRequest) {
