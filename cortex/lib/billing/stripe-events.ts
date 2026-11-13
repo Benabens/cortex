@@ -278,6 +278,22 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
   return res;
 }
 
+/** Ids `promo_…` dont une session à 0 € crédite quand même le pack (STRIPE_FREE_PROMO_CODES, séparés par des virgules). */
+export function freePromoCodes(): Set<string> {
+  return new Set((process.env.STRIPE_FREE_PROMO_CODES ?? "").split(",").map((c) => c.trim()).filter((c) => c.startsWith("promo_")));
+}
+
+/** Le code promo de la session s'il est sur la liste blanche, sinon null. Seul un code créé dans le tableau de bord porte un id promo_. */
+function allowedFreePromo(s: Stripe.Checkout.Session): string | null {
+  const allowed = freePromoCodes();
+  if (!allowed.size) return null;
+  for (const d of s.discounts ?? []) {
+    const id = idOf(d.promotion_code);
+    if (id && allowed.has(id)) return id;
+  }
+  return null;
+}
+
 async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: string | null, livemode: boolean): Promise<HandleResult> {
   const userId = s.metadata?.cortexUserId ?? null;
   const plan = s.metadata?.plan ?? null;
@@ -295,13 +311,17 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: strin
 
   // Pack : crédité seulement si de l'argent a RÉELLEMENT été encaissé — moyen
   // différé → async_payment_succeeded ; session gratuite (no_payment_required,
-  // coupon 100 %, montant 0) → jamais de crédit.
+  // coupon 100 %, montant 0) → pas de crédit, SAUF code promo de la liste
+  // blanche STRIPE_FREE_PROMO_CODES (vide par défaut : refus inchangé).
   const amount = s.amount_total == null ? null : Number(s.amount_total);
+  const free = s.payment_status === "no_payment_required" || amount === 0;
   if (s.payment_status !== "paid" || (amount !== null && !(amount > 0))) {
-    if (s.payment_status === "no_payment_required" || amount === 0) {
-      log("warn", "stripe.free_session_ignored", { session: s.id, status: s.payment_status, amount });
+    const promo = free ? allowedFreePromo(s) : null;
+    if (!promo) {
+      if (free) log("warn", "stripe.free_session_ignored", { session: s.id, status: s.payment_status, amount });
+      return { ok: true, action: "pack-unpaid", credited: false };
     }
-    return { ok: true, action: "pack-unpaid", credited: false };
+    log("info", "stripe.free_session_allowed", { session: s.id, promotionCode: promo });
   }
   const credits = Number(s.metadata?.credits ?? 0);
   if (!userId || !(credits > 0)) return { ok: false, action: "pack", error: "métadonnées manquantes" };
