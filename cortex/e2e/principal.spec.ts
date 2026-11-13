@@ -3,6 +3,7 @@ import { loginPersona } from "./helpers";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import JSZip from "jszip";
 
 async function api<T>(page: Page, path: string, init: RequestInit = {}): Promise<{ status: number; body: T }> {
   return page.evaluate(async ({ path, init }) => {
@@ -92,6 +93,38 @@ test("@principal importe un dossier de 60 Mo par fichiers bornés et signale un 
     await expect(page.getByText(/Cours préparé/)).toBeVisible({ timeout: 60_000 });
     await page.goto("/programme");
     await expect(page.getByRole("heading", { name: "Programme" })).toBeVisible();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("@principal importe les sources d'une archive Moodle de 80 Mo dans un dossier", async ({ page }) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-zip-e2e-"));
+  try {
+    const zip = new JSZip();
+    zip.file("Analyse 3/polycopie.pdf", minimalPdf());
+    zip.file("Analyse 3/series/serie-1.txt", "Exercice E2E sur les intégrales.");
+    zip.file("Analyse 3/__MACOSX/._polycopie.pdf", "metadata");
+    zip.file("export-moodle.bin", Buffer.alloc(80 * 1024 * 1024), { compression: "STORE" });
+    const archivePath = path.join(root, "export-moodle.zip");
+    await new Promise<void>((resolve, reject) => {
+      zip.generateNodeStream({ streamFiles: true, compression: "DEFLATE" })
+        .pipe(fs.createWriteStream(archivePath))
+        .on("finish", resolve)
+        .on("error", reject);
+    });
+    expect(fs.statSync(archivePath).size).toBeGreaterThan(79 * 1024 * 1024);
+
+    await loginPersona(page, "owner");
+    await page.goto("/cours/nouveau");
+    await page.getByRole("textbox").first().fill(`Archive Moodle E2E ${Date.now()}`);
+    await page.getByRole("button", { name: "Créer le cours" }).click();
+    await page.getByLabel("Dossier de cours à importer").setInputFiles(root);
+    await expect(page.getByText(/Envoi de 2\/2 fichiers/)).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText(/2 fichiers déposés/)).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText(/Dossier ingéré/)).toBeVisible({ timeout: 60_000 });
+    await page.getByRole("radio", { name: /série/i }).click();
+    await expect(page.getByText("serie-1.txt", { exact: false })).toBeVisible();
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
