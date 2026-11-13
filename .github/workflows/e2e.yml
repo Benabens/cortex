@@ -5,6 +5,12 @@ on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+    inputs:
+      google_reel:
+        description: "Lancer le parcours Google réel"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: e2e-${{ github.ref }}
@@ -36,9 +42,9 @@ jobs:
       STRIPE_PRICE_PRO_MONTHLY: ${{ github.event_name == 'schedule' && secrets.STRIPE_PRICE_PRO_MONTHLY || '' }}
       STRIPE_PRICE_PRO_YEARLY: ${{ github.event_name == 'schedule' && secrets.STRIPE_PRICE_PRO_YEARLY || '' }}
       STRIPE_WEBHOOK_SECRET: ${{ github.event_name == 'schedule' && secrets.STRIPE_WEBHOOK_SECRET || '' }}
-      E2E_GOOGLE_EMAIL: ${{ github.event_name == 'schedule' && secrets.E2E_GOOGLE_EMAIL || '' }}
-      E2E_GOOGLE_PASSWORD: ${{ github.event_name == 'schedule' && secrets.E2E_GOOGLE_PASSWORD || '' }}
-      E2E_GOOGLE_TOTP_SECRET: ${{ github.event_name == 'schedule' && secrets.E2E_GOOGLE_TOTP_SECRET || '' }}
+      E2E_GOOGLE_EMAIL: ${{ github.event_name == 'workflow_dispatch' && inputs.google_reel && secrets.E2E_GOOGLE_EMAIL || '' }}
+      E2E_GOOGLE_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && inputs.google_reel && secrets.E2E_GOOGLE_PASSWORD || '' }}
+      E2E_GOOGLE_TOTP_SECRET: ${{ github.event_name == 'workflow_dispatch' && inputs.google_reel && secrets.E2E_GOOGLE_TOTP_SECRET || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -50,8 +56,8 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Parcours Playwright hermétiques
         run: npm run e2e -- --project=desktop --project=iphone
-      - name: Google réel (nuit, secrets présents)
-        if: github.event_name == 'schedule' && env.E2E_GOOGLE_EMAIL != ''
+      - name: Google réel (lancement manuel)
+        if: github.event_name == 'workflow_dispatch' && inputs.google_reel && env.E2E_GOOGLE_EMAIL != ''
         run: npx playwright install --with-deps chrome && npm run e2e:google
       - name: Charge légère Linux (nuit)
         if: github.event_name == 'schedule'
