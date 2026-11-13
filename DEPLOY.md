@@ -564,12 +564,12 @@ Rien n'est restauré. Code de sortie ≠ 0 = sauvegarde inutilisable.
   là un document que tu ne veux pas partager. Les examens générés et les
   screenshots, eux, sont isolés par utilisateur (`data/u/<user>/…`).
 - **Isolation (décision)** : le runtime Railway refuse `unshare`, donc aucun
-  bac à sable noyau n'est disponible → **toute exécution de code est
-  désactivée** en production (vérification de programmes, sympy, figures
-  matplotlib) et ces voies répondent `not_applicable` ; les items à figures
-  sont écartés proprement (jamais de PDF cassé). `/api/health` l'affiche
-  (`checks.sandbox: false`, `verification.mode: "disabled"`). Rouvrir
-  l'exécution demande un exécuteur séparé (conteneur dédié, gVisor, e2b).
+  bac à sable noyau n'est disponible et l'exécution reste désactivée par
+  défaut. La vérification Python WebAssembly/Pyodide est prête derrière
+  `CORTEX_PYTHON_WASM=1`, mais ce flag ne doit être activé qu'après validation
+  en charge sur Railway. Elle ne réactive ni C, ni sympy, ni matplotlib.
+  `/api/health` expose alors `checks.pythonWasm: true` et
+  `verification.mode: "python-wasm"` ; sans le flag le mode reste `disabled`.
 - Génération d'un examen complet : **10-20 min** (multi-passes + vérification)
   — c'est le prix de la qualité ; l'UI suit le job en direct.
 - Magic-link (`AUTH_EMAIL_ENABLED=1`) sans `RESEND_API_KEY` : en production la
