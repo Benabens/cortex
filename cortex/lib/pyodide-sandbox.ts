@@ -35,7 +35,10 @@ const send = (value) => parentPort.postMessage(value);
     stdout: (value) => { stdout = append(stdout, value); },
     stderr: (value) => { stderr = append(stderr, value); },
   });
-  if (/\b(?:import\s+pandas|from\s+pandas)\b/.test(source)) {
+  // Le code est ensuite validé par l'AST ; ici un simple indice suffit pour précharger le paquet.
+  // La détection par expression régulière dans la source évaluée du worker variait selon
+  // l'interprétation des antislashs et pouvait laisser l'import pandas sans paquet chargé.
+  if (source.includes("pandas")) {
     await pyodide.loadPackage("pandas");
     // Les messages de chargement appartiennent au runtime, pas au programme candidat.
     stdout = "";
