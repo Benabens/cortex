@@ -238,7 +238,6 @@ test("un verdict du correcteur mal typé (clé en nombre) ne fait pas perdre le 
 });
 
 test("banc du 04/11 : tous les lots d'une ronde partent ensemble (15 QCM = 4 lots, le 4e attendait les 3 premiers, +7 min)", async () => {
-  third = "Une affirmation qui change une condition du cours.";
   const saved = process.env.QCM_BATCH_CONCURRENCY;
   delete process.env.QCM_BATCH_CONCURRENCY;
   try {
@@ -246,6 +245,7 @@ test("banc du 04/11 : tous les lots d'une ronde partent ensemble (15 QCM = 4 lot
     assert.equal(r.count, 15, steps.join("\n"));
     const firstBuilt = steps.findIndex((s) => /QCM construits \+ vérifiés/.test(s));
     assert.equal(steps.slice(0, firstBuilt).filter((s) => /^Génération de \d+ QCM/.test(s)).length, 4, steps.slice(0, firstBuilt + 1).join("\n"));
+    assert.equal(repairCalls, 1, "les distracteurs des quatre lots sont réparés dans un seul appel groupé");
   } finally {
     process.env.QCM_BATCH_CONCURRENCY = saved;
   }
