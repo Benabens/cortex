@@ -704,7 +704,7 @@ const VERIFY_SCHEMA = {
           off_course_key: { type: "boolean", description: "true si ce que off_course dit absent porte la BONNE réponse ou l'explication ; false si seules des MAUVAISES options le nomment. false si off_course est vide." },
           off_course_options: { type: "array", items: { type: "integer" }, description: "Indices des MAUVAISES options qui nomment ce que off_course dit absent du cours. Vide si off_course est vide." },
           off_matter: { type: "string", description: "Non vide si la question porte sur les modalités d'examen (format, barème, grille ou critères d'évaluation, consignes), sur la forme d'un rendu (poster, essai, bibliographie) ou sur l'organisation du cours (plan, ordre des chapitres) plutôt que sur sa matière : ce qu'elle teste. Vide sinon." },
-          trivial_distractors: { type: "array", items: { type: "integer" }, description: "Indices des MAUVAISES options qu'un étudiant élimine sans connaître le cours (générique, hors sujet, absurde, réfutable par le bon sens). Liste vide si toutes sont plausibles." },
+          trivial_distractors: { type: "array", items: { type: "integer" }, description: "Indices des MAUVAISES options qu'un étudiant élimine sans connaître le cours : absurde, hors sujet, générique, réfutable par le bon sens, par un calcul élémentaire ou par un critère déjà donné dans l'énoncé ; marqueur absolu, faute grammaticale avec l'énoncé, ou longueur qui trahit la réponse. Liste vide si toutes sont plausibles." },
           definition_mismatch: { type: "string", description: "Chaque définition employée ou sous-entendue (énoncé, clé, distracteurs, explication) comparée à celle des extraits du cours. Non vide si l'une est PLUS ÉTROITE (une condition ajoutée), PLUS LARGE (une condition oubliée), ou si deux notions du cours sont confondues : laquelle, ce que dit la question, ce que dit le cours. Vide sinon." },
         },
         required: ["index", "correct", "ok", "discrimination", "name_only", "course_terms", "off_course", "off_course_terms", "off_course_key", "off_course_options", "off_matter", "trivial_distractors", "definition_mismatch"],
@@ -752,7 +752,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     `Tu es un correcteur rigoureux du cours. Pour CHAQUE QCM fourni, RÉSOUS-LE toi-même de zéro (sans clé fournie) et donne la/les bonne(s) réponse(s) par INDEX.`,
     `Quand des extraits du cours sont fournis, résous et juge avec LEURS DÉFINITIONS, jamais avec celles d'une autre source. course_terms : les notions dont dépend la bonne réponse, écrites comme dans le cours. off_course : une notion ou un fait dont dépend la bonne réponse ou l'explication, absent des extraits ou que le cours définit autrement, ou une notion qu'une option NOMME sans que le cours la présente (vide sinon) ; un distracteur qui n'est qu'une affirmation fausse (résultat inversé, condition changée) n'est pas hors cours, c'est son rôle. Les extraits ne couvrent pas tout le cours : nomme dans off_course_terms ce que tu dis absent, on le cherchera dans tout le cours.`,
     `DÉFINITIONS (definition_mismatch) : compare chaque définition que la question emploie ou sous-entend à celle des extraits. Une définition plus étroite (une condition ajoutée, « seulement si… »), plus large (une condition oubliée) que celle du cours, ou deux notions voisines confondues rendent la question fausse, même si sa clé est cohérente avec sa propre définition.`,
-    `Signale si : la question est ambiguë (2 réponses défendables), un distracteur est absurde, ou un indice trahit la bonne réponse (longueur, « toutes les réponses », grammaire).`,
+    `Signale si : la question est ambiguë (2 réponses défendables), ou une mauvaise option s'élimine sans connaître le cours — absurdité, hors sujet, marqueur absolu, grammaire, longueur, calcul élémentaire manifestement faux, ou contradiction avec un critère déjà donné dans l'énoncé. Dans ce dernier cas, ajoute son index à trivial_distractors, même si elle illustre une erreur fréquente.`,
     `off_matter : ce que teste une question qui porte sur les modalités d'examen (format, barème, grille ou critères d'évaluation, consignes), sur la forme d'un rendu (poster, essai, bibliographie) ou sur l'organisation du cours (plan, ordre des chapitres) au lieu de sa matière (vide sinon).`,
     `Note aussi son POUVOIR DISCRIMINANT (discrimination, 1 à 5) : mets-toi à la place d'un étudiant qui ne connaît que les noms des notions du cours — pas leurs conditions, pas les résultats des études. S'il la réussit (ou élimine assez d'options pour la deviner), discrimination ≤ 2 et name_only = true.`,
     calib ? `${calib}\nÀ la lumière de ces leçons, sois SÉVÈRE : signale aussi (issue) tout QCM trop trivial / au distracteur trop faible si l'étudiant a jugé ce type « trop facile ».` : null,
@@ -1165,21 +1165,32 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       })
       : Promise.resolve([] as QcmItem[]);
     const regenerated = weak.length ? regenerate(bt, items, weak) : Promise.resolve(items);
-    const [fixed, out] = await Promise.all([repaired, regenerated]);
+    let [fixed, out] = await Promise.all([repaired, regenerated]);
+    const stillTrivial = fixed.map((it, k) => ({ it, k })).filter(({ it }) => it.verified === 1 && onlyTrivialDistractors(it));
+    if (stillTrivial.length) {
+      step(`${stillTrivial.length} QCM : seconde réparation des distracteurs encore éliminables`, 0);
+      const retried = await replaceTrivialDistractors(stillTrivial.map(({ it }) => it), step, shared.language).catch((e) => {
+        step(`Seconde réparation des distracteurs ignorée (${(e as Error).message.slice(0, 50)})`, 0);
+        return stillTrivial.map(({ it }) => it);
+      });
+      fixed = fixed.slice();
+      stillTrivial.forEach(({ k }, i) => { fixed[k] = retried[i] ?? fixed[k]; });
+    }
     fixable.forEach((w, k) => {
       const n = fixed[k];
       // Rendu tel quel (remplacement échoué) : l'item d'origine suit la règle commune.
       if (!n || n === w.it || n.verified !== 1 || n.rejected) return;
       if (!weaknessOf(n)) { out[w.i] = { ...n, slot: w.it.slot }; return; }
-      // Banc du 04/11 (CS-290 mixte, 4 QCM livrés sur 12) : un remplaçant encore signalé trivial
-      // faisait jeter la question, alors que le juge du banc trouvait autant de distracteurs triviaux
-      // dans les QCM gardés — signalement trop bruité pour coûter une question. Après cette unique
-      // tentative, la question est livrée, comme après une régénération pour une autre faiblesse.
-      if (onlyTrivialDistractors(n)) {
-        step(`QCM gardé après remplacement : un distracteur reste jugé facile (${(n.trivialDistractors ?? []).length})`, 0);
-        out[w.i] = { ...n, slot: w.it.slot, trivialDistractors: null };
-      }
+      if (onlyTrivialDistractors(n)) step(`QCM à régénérer après deux réparations : un distracteur reste éliminable sans le cours`, 0);
     });
+    const stubborn = fixable.map((w, k) => ({ w, n: fixed[k] })).filter(({ n }) => n?.verified === 1 && onlyTrivialDistractors(n));
+    if (stubborn.length) {
+      out = await regenerate(bt, out, stubborn.map(({ w, n }) => ({
+        it: { ...n, slot: w.it.slot },
+        i: w.i,
+        why: weaknessOf(n) ?? "distracteur encore éliminable après deux réparations",
+      })));
+    }
     return out;
   };
   /** Régénère en entier les QCM faibles (autre défaut que des distracteurs triviaux). */
@@ -1225,11 +1236,10 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       progress.done("QCM", 0.5);
       designed.done = true;
       // Un item resté rejeté après régénération (hors cours, définition différente, hors matière, clé
-      // contestée) n'est jamais gardé : son sujet est comblé. Un distracteur encore signalé facile après
-      // la tentative (remplacement ou régénération) ne coûte plus la question : banc du 04/11, CS-290 —
-      // 6 QCM manquants au premier tour pour 2 rejets, le signalement étant trop bruité (lib/bench).
+      // contestée) n'est jamais gardé : son sujet est comblé. Même règle pour un distracteur resté
+      // éliminable après deux réparations : masquer le verdict du moteur créait le désaccord avec le banc.
       const kept = items.length ? await strengthen(bt, await verifyQcmBatch(items, step)) : [];
-      const out = kept.filter((it) => !it.rejected).map((it) => (it.trivialDistractors?.length ? { ...it, trivialDistractors: null } : it));
+      const out = kept.filter((it) => !it.rejected && !it.trivialDistractors?.length);
       qualityDropped += kept.length - out.length;
       for (const it of out) if (bt.topics[it.slot ?? -1]?.method === FOCUS_METHOD) it.focusSlot = true;
       return { items: out, error: null };

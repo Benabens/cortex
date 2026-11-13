@@ -3,15 +3,15 @@
  * réelle (le vrai worker), ses relevés, le juge à l'aveugle, les métriques et les seuils.
  * Mode d'emploi : docs/bench.md.
  *
- *   LLM_PROVIDER=claude-code CORTEX_BENCH_HOME=… CORTEX_BENCH_PG_URL=postgres://…@127.0.0.1:…/postgres \
- *     npm run bench -- run --case rs-qcm15            # run complet (bandes enregistrées)
+ *   CORTEX_BENCH_HOME=… CORTEX_BENCH_PG_URL=postgres://…@127.0.0.1:…/postgres \
+ *     npm run bench -- run --case rs-qcm15 --provider codex-cli # run complet (bandes enregistrées)
  *   npm run bench -- run --case synth-3p --replay tests/fixtures/bench/synth-3p \
  *     --baseline tests/fixtures/bench/synth-3p/metrics.json --strict                 # CI : rejeu, sans modèle
  *   npm run bench -- mark-ref --run <dossier du run>   # ce run devient la référence de son cas
  *   npm run bench -- report [--out rapport.md]        # référence → actuel, tous les cas
  *   npm run bench -- list
  *
- * Jamais l'API payante ni la prod (lib/bench/guard) : provider claude-code exigé, aucune clé
+ * Jamais l'API payante ni la prod (lib/bench/guard) : provider codex-cli exigé, aucune clé
  * API chargée, base Postgres locale créée pour le run, données dans CORTEX_BENCH_HOME.
  */
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -395,7 +395,7 @@ async function scoreRun(runDir: string, c: BenchCase): Promise<void> {
   const ref = arg("ref") ? (JSON.parse(fs.readFileSync(path.join(path.resolve(arg("ref")!), "metrics.json"), "utf8")) as { metrics: typeof metrics }).metrics : undefined;
   const replay = !!(run as BenchRun & { replay?: boolean }).replay;
   const verdictsOut = checkThresholds(metrics, { maxMinutes: c.maxMinutes, expectRefusal: c.request.expectRefusal, focus: !!run.request.target.focus, replay }, ref);
-  fs.writeFileSync(path.join(runDir, "metrics.json"), JSON.stringify({ case: c.id, commit: run.commit, metrics, thresholds: verdictsOut }, null, 1));
+  fs.writeFileSync(path.join(runDir, "metrics.json"), JSON.stringify({ case: c.id, commit: run.commit, provider: run.provider, metrics, thresholds: verdictsOut }, null, 1));
   if (verdicts && run.exam) {
     const cal = calibrationSample(run, verdicts);
     fs.writeFileSync(path.join(runDir, "calibration.md"), cal.markdown);
@@ -416,6 +416,8 @@ async function scoreRun(runDir: string, c: BenchCase): Promise<void> {
 
 async function main(): Promise<void> {
   const cmd = process.argv[2];
+  const provider = arg("provider");
+  if (provider) process.env.LLM_PROVIDER = provider;
   if (cmd === "list") {
     for (const c of allCases()) console.log(`${c.id.padEnd(22)} ${c.title}${c.ci ? " (CI)" : ""}`);
     return;
@@ -463,7 +465,7 @@ async function main(): Promise<void> {
     }
     return;
   }
-  throw new Error("usage : bench run --case <id> [--replay <dossier>] [--ref <run>] [--prepare] [--keep] [--no-judge] | judge --run <dossier> | score --run <dossier> [--ref <run>] | mark-ref --run <dossier> | report [--out fichier.md] | list");
+  throw new Error("usage : bench run --case <id> --provider codex-cli [--replay <dossier>] [--ref <run>] [--prepare] [--keep] [--no-judge] | judge --run <dossier> | score --run <dossier> [--ref <run>] | mark-ref --run <dossier> | report [--out fichier.md] | list");
 }
 
 main().then(() => process.exit(process.exitCode ?? 0)).catch((e) => { console.error(`Banc : ${(e as Error).message}`); process.exit(1); });

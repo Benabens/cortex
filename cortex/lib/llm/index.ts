@@ -6,6 +6,7 @@ import { defaultProviderName, mapModel, maxRetries, retryBaseMs, type ProviderNa
 import { globalLimiter } from "./limiter";
 import { anthropicProvider } from "./providers/anthropic-api";
 import { claudeCodeProvider } from "./providers/claude-code";
+import { codexCliProvider } from "./providers/codex-cli";
 import { openaiCompatibleProvider } from "./providers/openai-compatible";
 import { withRetry } from "./retry";
 import { nextRank, recordCall, replayCall, tapeMode } from "./tape";
@@ -32,6 +33,7 @@ const DISCARD_CODES = new Set(["RATE_LIMIT", "OVERLOADED", "AUTH", "UNSUPPORTED"
 
 const REGISTRY: Record<ProviderName, LlmProvider> = {
   "claude-code": claudeCodeProvider,
+  "codex-cli": codexCliProvider,
   anthropic: anthropicProvider,
   "openai-compatible": openaiCompatibleProvider,
 };

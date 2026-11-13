@@ -12,7 +12,7 @@ import type { BenchRun, Verdicts } from "./types";
  * part (calibration-juge.json) pour comparer après coup sans être influencé.
  */
 
-type Scored = { case: string; commit: string; metrics: Metrics; thresholds: Verdict[]; dir: string };
+type Scored = { case: string; commit: string; provider?: string; metrics: Metrics; thresholds: Verdict[]; dir: string };
 
 /** Questions de l'échantillon : ≈ 10 % (au moins 1), tirées par empreinte du run (même run → même tirage). */
 export function calibrationPick(run: BenchRun): number[] {
@@ -66,14 +66,14 @@ export function writeReport(home: string, out?: string): string {
     const ref = load(latestRun(path.join(runs, c), "REFERENCE"));
     const cur = load(latestRun(path.join(runs, c)));
     if (!cur) continue;
-    lines.push(`## ${c}`, "", `Référence : ${ref ? `${ref.commit}` : "—"} · actuel : ${cur.commit}`, "", "| Métrique | Référence | Actuel | Seuil | |", "|---|---|---|---|---|");
+    lines.push(`## ${c}`, "", `Référence : ${ref ? `${ref.commit} (${ref.provider ?? "provider inconnu"})` : "—"} · actuel : ${cur.commit} (${cur.provider ?? "provider inconnu"})`, "", "| Métrique | Référence | Actuel | Seuil | |", "|---|---|---|---|---|");
     for (const v of cur.thresholds) {
       const r = ref?.thresholds.find((x) => x.id === v.id);
       lines.push(`| ${v.label} | ${r?.value ?? "—"} | ${v.value} | ${v.limit} | ${v.pass === null ? "·" : v.pass ? "✅" : "❌"} |`);
       if (v.pass === false) red.push(`${c} : ${v.label} (${v.value}, seuil ${v.limit})`);
     }
     const p = cur.metrics.perf;
-    lines.push("", `Perf (claude-code mesuré) : ${Math.round(p.totalMs / 1000)} s, ${p.calls} appels, ${p.jsonRetries} redemandes JSON, ${p.topupBatches} lots de comblement, ${p.dedupReplacements} remplacements de doublons. Estimé (API, non mesuré) : ${p.tokensIn} tokens en entrée, ${p.tokensOut} en sortie, cache ${Math.round(p.cacheRate * 100)} %, ${p.costUsd.toFixed(3)} $.`, "");
+    lines.push("", `Perf (${cur.provider ?? "provider inconnu"}, propre au banc et non représentative de la production) : ${Math.round(p.totalMs / 1000)} s, ${p.calls} appels, ${p.jsonRetries} redemandes JSON, ${p.topupBatches} lots de comblement, ${p.dedupReplacements} remplacements de doublons. Coût de production estimé (non mesuré, non facturé par ce run) : ${p.tokensIn} tokens en entrée, ${p.tokensOut} en sortie, cache ${Math.round(p.cacheRate * 100)} %, ${p.costUsd.toFixed(3)} $.`, "");
   }
   lines.push("## Reste rouge", "", ...(red.length ? red.map((r) => `- ${r}`) : ["- rien"]), "");
   const text = lines.join("\n");

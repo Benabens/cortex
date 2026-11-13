@@ -66,7 +66,7 @@ export type OffCourse = {
 export type Render = { statementPdf: boolean; corrigePdf: boolean; web: boolean };
 
 /**
- * Performance. Durées et nombre d'appels : MESURÉS sur le provider du run (claude-code).
+ * Performance. Durées et nombre d'appels : MESURÉS sur le provider du run.
  * Tokens d'entrée, cache de prompt et coût $ : ESTIMÉS (≈ 4 caractères par token, tarif de
  * l'API, cache = même prompt système dans les 5 min) — le CLI ne les mesure pas comme l'API.
  */
