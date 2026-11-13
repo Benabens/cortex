@@ -80,7 +80,8 @@ test("@principal importe un dossier de 60 Mo par fichiers bornés et signale un 
     await expect(page.getByText(/Envoi de 4\/4 fichiers/)).toBeVisible();
     await expect(page.getByText(/4 fichiers déposés/)).toBeVisible({ timeout: 60_000 });
     await expect(page.getByText(/Dossier ingéré/)).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByText("notes-0.txt", { exact: false })).toBeVisible();
+    await page.getByRole("radio", { name: /note 2/i }).click();
+    await expect(page.getByText("notes-2.txt", { exact: false })).toBeVisible();
 
     const oversized = path.join(root, "trop-gros.pdf");
     fs.writeFileSync(oversized, Buffer.alloc(30 * 1024 * 1024 + 1));
