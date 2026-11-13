@@ -75,12 +75,5 @@ export function contextExcerpt(text: string, query: string, size = EXCERPT_CHARS
   return `${start > 0 ? "… " : ""}${out}${end < flat.length ? " …" : ""}`;
 }
 
-/**
- * Source marquée HORS PROGRAMME par son titre ou par le début de son texte (une
- * note « Hors programme : … ») : elle passe après les supports du cours.
- */
-const OFF_PROGRAM = /\b(hors[ -]?programme|hors du programme|pas au programme|non examinables?|not examinable|not examined|not on the exam|not in the exam|out of scope|off[- ]syllabus|not part of the (syllabus|exam))\b/;
-
-export function isOffProgram(title: string, head = ""): boolean {
-  return OFF_PROGRAM.test(normalize(`${title}\n${head.slice(0, 400)}`));
-}
+/** Source marquée hors programme : elle passe après les supports du cours (règle commune : lib/source-scope). */
+export { isOffProgram } from "@/lib/source-scope";

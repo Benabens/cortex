@@ -4,6 +4,7 @@ import { genericRefImageFor, genericVisionBlock } from "@/lib/course-vision";
 import type { CourseProfile, Slot } from "@/lib/course-profile";
 import { getCourse } from "@/lib/courses";
 import { courseMaterialTitles, formatContextFor } from "@/lib/exam-format";
+import { excludedSourceIds } from "@/lib/source-scope";
 import { genericDirectivesBlock, languageName, type GenericStyle } from "@/lib/profiles/generic-directives";
 import { getExamDna, pickCoverage, sampleMolds } from "@/lib/exam-dna";
 
@@ -18,10 +19,12 @@ import { getExamDna, pickCoverage, sampleMolds } from "@/lib/exam-dna";
 async function genericStaffNotes(max: number): Promise<string> {
   let rows: { text: string }[] = [];
   try {
-    rows = await q.all<{ text: string }>(
-      `SELECT i.text FROM items i JOIN sources s ON s.id = i.source_id
+    // Une note hors programme ou une archive d'organisation n'est pas de la matière (lib/source-scope).
+    const excluded = await excludedSourceIds();
+    rows = (await q.all<{ sid: number; text: string }>(
+      `SELECT s.id sid, i.text FROM items i JOIN sources s ON s.id = i.source_id
        WHERE s.type = 'note' ORDER BY s.recency_weight DESC, s.title`
-    );
+    )).filter((r) => !excluded.has(Number(r.sid)));
   } catch {}
   let out = rows.map((r) => r.text).join("\n\n");
   if (out.length > max) out = out.slice(0, max) + " […]";
