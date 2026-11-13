@@ -91,7 +91,7 @@ test("les sous-questions portent le numéro de leur question, énoncé et corrig
   const doc = tex.slice(tex.indexOf("\n" + String.raw`\begin{document}` + "\n"));
   const q2 = doc.slice(doc.indexOf(String.raw`\examq{2}`), doc.indexOf("Corrigé"));
   assert.deepEqual([...q2.matchAll(/\\subq\{([\d.]+)\}/g)].map((m) => m[1]), ["2.1", "2.2"]);
-  const sol2 = doc.slice(doc.indexOf("Question 2 —"));
+  const sol2 = doc.slice(doc.indexOf("Question 2 :"));
   assert.deepEqual([...sol2.matchAll(/\\subq\{([\d.]+)\}/g)].map((m) => m[1]), ["2.1", "2.2"]);
   const q1 = doc.slice(doc.indexOf(String.raw`\examq{1}`), doc.indexOf(String.raw`\examq{2}`));
   assert.deepEqual([...q1.matchAll(/\\subq\{([\d.]+)\}/g)].map((m) => m[1]), ["1.1", "1.2"]);
