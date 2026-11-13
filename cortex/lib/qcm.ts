@@ -432,11 +432,11 @@ export function selectWithinTrivialBudget<T extends Pick<QcmItem, "options" | "c
     (a.q.trivialDistractors?.length ?? 0) - (b.q.trivialDistractors?.length ?? 0)
       || (b.q.discrimination ?? 0) - (a.q.discrimination ?? 0)
       || a.i - b.i);
-  const append = (q: T) => {
+  const append = (q: T, enforceBudget = true) => {
     if (out.length >= limit) return;
     const nextDistractors = distractors + Math.max(0, q.options.length - q.correct.length);
     const nextTrivial = trivial + (q.trivialDistractors?.length ?? 0);
-    if (nextDistractors > 0 && nextTrivial / nextDistractors > 0.1) return;
+    if (enforceBudget && nextDistractors > 0 && nextTrivial / nextDistractors > 0.1) return;
     out.push(q);
     distractors = nextDistractors;
     trivial = nextTrivial;
@@ -456,6 +456,14 @@ export function selectWithinTrivialBudget<T extends Pick<QcmItem, "options" | "c
     if (out.length >= limit) break;
     if (out.includes(q)) continue;
     append(q);
+  }
+  // Le verdict interne est plus sévère que le banc externe et reste probabiliste. Une question
+  // vérifiée, à clé confirmée et non rejetée est préférable à une place remboursée : après avoir
+  // épuisé le budget cible, on complète avec les meilleurs résidus déjà payés, sans nouvel appel.
+  for (const { q } of ranked) {
+    if (out.length >= limit) break;
+    if (out.includes(q)) continue;
+    append(q, false);
   }
   return out;
 }
