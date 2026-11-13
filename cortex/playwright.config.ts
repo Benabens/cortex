@@ -4,7 +4,7 @@ const port = Number(process.env.E2E_PORT ?? 3210);
 const baseURL = `http://localhost:${port}`;
 const e2eDatabaseUrl = process.env.E2E_DATABASE_URL;
 // Le test « vrai Google » vise le vrai site (redirection OAuth déjà autorisée en prod) : aucun serveur local.
-const googleOnly = process.env.E2E_GOOGLE_ONLY === "1";
+const googleOnly = process.env.E2E_GOOGLE_ONLY === "1"; // tests visant le vrai site : pas de serveur local
 const googleBaseURL = process.env.E2E_GOOGLE_BASE_URL ?? "https://app.cortexexam.com";
 
 export default defineConfig({
@@ -38,6 +38,7 @@ export default defineConfig({
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"] }, grepInvert: /@google/ },
     { name: "iphone", use: { ...devices["iPhone 13"], browserName: "chromium" }, grep: /@principal/, grepInvert: /@google/ },
-    { name: "google", use: { channel: "chrome", baseURL: googleBaseURL }, grep: /@google/ },
+    { name: "google", use: { channel: "chrome", baseURL: googleBaseURL }, grep: /@google\b/ },
+    { name: "google-redirect", use: { ...devices["Desktop Chrome"], baseURL: googleBaseURL }, grep: /@googleredirect/ },
   ],
 });
