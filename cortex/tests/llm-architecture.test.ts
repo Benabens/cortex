@@ -26,3 +26,10 @@ test("architecture : aucun chemin de production ne contourne le point d'entrée 
   const provider = entry.indexOf("provider.complete(req)");
   assert.ok(guard >= 0 && provider > guard, "la garde doit précéder tout appel provider");
 });
+
+test("architecture : le paywall précède les contraintes gratuites d'un examen", () => {
+  const generation = fs.readFileSync("lib/generation.ts", "utf8");
+  const paywall = generation.indexOf("await preflightGeneration(type)");
+  const examPlan = generation.indexOf("planMockExam(");
+  assert.ok(paywall >= 0 && examPlan > paywall, "un compte sans crédit doit recevoir 402 avant une éventuelle erreur de format");
+});
