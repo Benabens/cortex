@@ -1,15 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  COURSE_IMPORT_MAX_BYTES,
   SOURCE_FILE_MAX_BYTES,
   prepareFolderImport,
 } from "../lib/folder-import";
 
 function file(name: string, size: number, relativePath = name): File {
-  const value = new File([new Uint8Array(size)], name);
-  Object.defineProperty(value, "webkitRelativePath", { value: relativePath });
-  return value;
+  return { name, size, webkitRelativePath: relativePath } as File;
 }
 
 test("l'import de dossier ignore les fichiers cachés, les formats inconnus et les doublons", () => {
@@ -34,14 +31,14 @@ test("l'import de dossier ignore les fichiers cachés, les formats inconnus et l
   ]);
 });
 
-test("les limites par fichier et par cours produisent une raison actionnable", () => {
+test("la limite par fichier est actionnable sans bloquer un dossier de 300 Mo", () => {
   const tooLarge = prepareFolderImport([file("video.pdf", SOURCE_FILE_MAX_BYTES + 1)]);
   assert.match(tooLarge.rejected[0].reason, /30 Mo maximum par fichier/);
 
-  const files = Array.from({ length: 6 }, (_, index) =>
+  const files = Array.from({ length: 10 }, (_, index) =>
     file(`partie-${index}.pdf`, 30 * 1024 * 1024, `cours/partie-${index}.pdf`),
   );
-  const overCourse = prepareFolderImport(files);
-  assert.equal(overCourse.accepted.reduce((sum, entry) => sum + entry.file.size, 0), COURSE_IMPORT_MAX_BYTES);
-  assert.match(overCourse.rejected[0].reason, /150 Mo maximum par cours/);
+  const largeCourse = prepareFolderImport(files);
+  assert.equal(largeCourse.accepted.length, 10);
+  assert.equal(largeCourse.rejected.length, 0);
 });

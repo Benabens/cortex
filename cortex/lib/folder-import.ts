@@ -1,6 +1,5 @@
 export const MiB = 1024 * 1024;
 export const SOURCE_FILE_MAX_BYTES = 30 * MiB;
-export const COURSE_IMPORT_MAX_BYTES = 150 * MiB;
 
 export const FOLDER_EXTENSIONS = [
   "pdf", "docx", "pptx", "txt", "md", "html", "htm",
@@ -28,7 +27,6 @@ export function prepareFolderImport(files: Iterable<File>): {
   const accepted: FolderImportEntry[] = [];
   const rejected: FolderImportRefusal[] = [];
   const seen = new Set<string>();
-  let total = 0;
 
   for (const file of files) {
     const rel = relativePath(file);
@@ -40,8 +38,6 @@ export function prepareFolderImport(files: Iterable<File>): {
     const signature = `${file.name.toLocaleLowerCase()}\0${file.size}`;
     if (seen.has(signature)) { reject("doublon ignoré"); continue; }
     seen.add(signature);
-    if (total + file.size > COURSE_IMPORT_MAX_BYTES) { reject("150 Mo maximum par cours"); continue; }
-    total += file.size;
     accepted.push({ file, relativePath: rel });
   }
   return { accepted, rejected };
