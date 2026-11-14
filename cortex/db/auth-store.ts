@@ -181,6 +181,34 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       created_at TEXT NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS stripe_invoices_pi_idx ON stripe_invoices (payment_intent)`,
+    // Argent RÉELLEMENT encaissé par paiement (pack ou facture), en unités mineures
+    // de sa devise : base du budget IA par compte (lib/billing/revenue).
+    `CREATE TABLE IF NOT EXISTS stripe_payments (
+      source_id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      payment_intent TEXT,
+      user_id TEXT NOT NULL,
+      currency TEXT NOT NULL,
+      amount_cents INTEGER NOT NULL,
+      tax_cents INTEGER NOT NULL DEFAULT 0,
+      fee_cents INTEGER NOT NULL DEFAULT 0,
+      fee_estimated INTEGER NOT NULL DEFAULT 0,
+      livemode INTEGER,
+      paid_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS stripe_payments_pi_idx ON stripe_payments (payment_intent)`,
+    `CREATE INDEX IF NOT EXISTS stripe_payments_user_idx ON stripe_payments (user_id, paid_at)`,
+    // Pertes d'un paiement (remboursé cumulé, contesté, frais de litige), par payment_intent :
+    // un remboursement arrivé AVANT l'achat s'y applique dès que l'achat est enregistré.
+    `CREATE TABLE IF NOT EXISTS stripe_payment_losses (
+      payment_intent TEXT PRIMARY KEY,
+      refunded_cents INTEGER NOT NULL DEFAULT 0,
+      disputed_cents INTEGER NOT NULL DEFAULT 0,
+      dispute_fee_cents INTEGER NOT NULL DEFAULT 0,
+      dispute_fee_estimated INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    )`,
     `CREATE TABLE IF NOT EXISTS processed_events (
       event_id TEXT PRIMARY KEY,
       created_at TEXT NOT NULL
@@ -472,6 +500,32 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       created_at text NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS stripe_invoices_pi_idx ON public.stripe_invoices (payment_intent)`,
+    `CREATE TABLE IF NOT EXISTS public.stripe_payments (
+      source_id text PRIMARY KEY,
+      kind text NOT NULL,
+      payment_intent text,
+      user_id text NOT NULL,
+      currency text NOT NULL,
+      amount_cents integer NOT NULL,
+      tax_cents integer NOT NULL DEFAULT 0,
+      fee_cents integer NOT NULL DEFAULT 0,
+      fee_estimated integer NOT NULL DEFAULT 0,
+      livemode integer,
+      paid_at text NOT NULL,
+      updated_at text NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS stripe_payments_pi_idx ON public.stripe_payments (payment_intent)`,
+    `CREATE INDEX IF NOT EXISTS stripe_payments_user_idx ON public.stripe_payments (user_id, paid_at)`,
+    // Pertes d'un paiement (remboursé cumulé, contesté, frais de litige), par payment_intent :
+    // un remboursement arrivé AVANT l'achat s'y applique dès que l'achat est enregistré.
+    `CREATE TABLE IF NOT EXISTS public.stripe_payment_losses (
+      payment_intent text PRIMARY KEY,
+      refunded_cents integer NOT NULL DEFAULT 0,
+      disputed_cents integer NOT NULL DEFAULT 0,
+      dispute_fee_cents integer NOT NULL DEFAULT 0,
+      dispute_fee_estimated integer NOT NULL DEFAULT 0,
+      updated_at text NOT NULL
+    )`,
     `CREATE TABLE IF NOT EXISTS public.processed_events (
       event_id text PRIMARY KEY,
       created_at text NOT NULL

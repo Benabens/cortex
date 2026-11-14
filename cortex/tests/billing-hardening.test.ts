@@ -14,6 +14,8 @@ import path from "node:path";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-harden-"));
 process.env.CORTEX_DATA_DIR = tmp;
+// Budget IA lié au revenu (testé dans ai-budget.test.ts) : ici, les comptes sont financés par des crédits offerts.
+process.env.AI_BUDGET_MARGIN = "unlimited";
 
 let credits: typeof import("../lib/billing/credits");
 let guards: typeof import("../lib/billing/guards");

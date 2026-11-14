@@ -6,6 +6,7 @@ import { authRun, authTx, type AuthTx } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
 import { BAD_OUTPUT_CODES, llmErrorCode } from "@/lib/llm/errors";
 import { log } from "@/lib/metrics";
+import { budgetCheckFor, budgetVerdict, purchasedLedgerCenti } from "./budget";
 import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, insufficient, subscriptionLive, type SubRow, DELTA_CENTI } from "./credits";
 import { intLimit } from "./env";
 import { quotaFor, quotaTrackingActive, ratePerUserPerMin, type GateIssue, type QuotaBucket } from "./guards";
@@ -24,7 +25,9 @@ import { isOwner } from "./owner";
  *   2. quota du jour du bucket              → 429
  *   3. générations en cours (MAX_ACTIVE_JOBS, hors facturation) → 429
  *   4. solde ≥ coût (si facturation active) → 402
- *   5. sinon : écriture du compteur, de la place active et du débit — ensemble.
+ *   5. budget IA lié au revenu (lib/billing/budget) : au-delà, 402 — sauf
+ *      crédits achetés, toujours servis — puis plafond du jour du compte → 429
+ *   6. sinon : écriture du compteur, de la place active et du débit — ensemble.
  *
  * Un refus est une VALEUR renvoyée, jamais une exception (cf. authTx : un
  * ROLLBACK n'est réservé qu'aux vraies erreurs). Le débit porte la `ref` du
@@ -82,6 +85,19 @@ export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
   if (billing) {
     await ensureLedgerUnit();
     await ensureSignupCredits(userId);
+  }
+  // Revenu et dépense lus AVANT la transaction : ils ne dépendent pas du verrou
+  // (la dépense s'écrit pendant les appels au modèle, pas ici). Deux réservations
+  // simultanées peuvent donc passer ensemble : MAX_ACTIVE_JOBS borne l'écart, la marge l'absorbe.
+  let budget: Awaited<ReturnType<typeof budgetCheckFor>> = null;
+  if (billing && cost > 0) {
+    try {
+      budget = await budgetCheckFor(userId, o.bucket === "assist" ? "assist" : o.kind, cost);
+    } catch (e) {
+      // Budget invérifiable : refusé comme un plafond invérifiable (fail-closed), rien n'est débité.
+      log("error", "billing.budget_check_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
+      return { ok: false, status: 503, error: "Budget de calcul invérifiable (base indisponible) : réessaie dans un instant." };
+    }
   }
 
   const t = nowStr();
@@ -141,6 +157,11 @@ export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
         const purchased = Number(bal?.total ?? 0);
         const refusal = insufficient(purchased + subAvail, cost, subAvail);
         if (refusal) return { ok: false, ...refusal };
+        if (budget) {
+          const paid = subAvail + (await purchasedLedgerCenti(tx, userId, purchased));
+          const over = budgetVerdict(budget, cost, paid, { userId, kind: o.kind });
+          if (over) return { ok: false, ...over };
+        }
         if (cost > 0) {
           const usedSub = Math.min(cost, subAvail);
           await tx.run(

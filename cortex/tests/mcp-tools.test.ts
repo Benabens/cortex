@@ -16,6 +16,8 @@ import { after, before, test } from "node:test";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
 process.env.DB_DRIVER = "postgres";
+// Budget IA lié au revenu (testé dans ai-budget.test.ts) : ici, les comptes sont financés par des crédits offerts.
+process.env.AI_BUDGET_MARGIN = "unlimited";
 process.env.DATABASE_URL = "pglite://memory";
 process.env.MCP_ENABLED = "1";
 process.env.AUTH_URL = "https://cortex.test";

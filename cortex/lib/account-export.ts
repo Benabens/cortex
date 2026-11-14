@@ -157,10 +157,13 @@ export async function writeAccountExport(userId: string, dir: string, budget: Bu
   );
   const purchases = await authAll(`SELECT session_id, payment_intent, credits_centi, created_at FROM stripe_purchases WHERE user_id = ? ORDER BY created_at`, userId).catch(() => []);
   const invoices = await authAll(`SELECT invoice_id, subscription_id, granted_centi, period_end, created_at FROM stripe_invoices WHERE user_id = ? ORDER BY created_at`, userId).catch(() => []);
+  const payments = await authAll(
+    `SELECT source_id, kind, currency, amount_cents, tax_cents, fee_cents, paid_at FROM stripe_payments WHERE user_id = ? ORDER BY paid_at`, userId,
+  ).catch(() => []);
   const usage = await authGet<{ calls: number | string; cost_usd: number | string | null }>(
     `SELECT count(*) calls, coalesce(sum(cost_usd), 0) cost_usd FROM llm_usage WHERE user_id = ?`, userId,
   ).catch(() => undefined);
-  write("credits.json", { unit: "centi (1 crédit = 100)", transactions, purchases, invoices, usage: { calls: Number(usage?.calls ?? 0), costUsd: Number(usage?.cost_usd ?? 0) } });
+  write("credits.json", { unit: "centi (1 crédit = 100)", transactions, purchases, invoices, payments, usage: { calls: Number(usage?.calls ?? 0), costUsd: Number(usage?.cost_usd ?? 0) } });
 
   const reports = await authAll(`SELECT course, exam_id, kind, item_id, reason, comment, stem, status, refunded_centi, created_at FROM question_reports WHERE user_id = ? ORDER BY id`, userId).catch(() => []);
   write("signalements.json", reports);

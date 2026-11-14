@@ -4,7 +4,7 @@ import { dailyLimit, usedToday } from "@/lib/billing/guards";
 import { listOffers } from "@/lib/billing/offers";
 import { contactEmail } from "@/lib/contact";
 import { legalEnglishUrl, legalLinks, purchasesAllowed, stripeConfigured as stripeReady, termsState } from "@/lib/legal";
-import { MiB, storageQuotaBytes } from "@/lib/storage-quota";
+import { MiB, storageQuotaBytesFor } from "@/lib/storage-quota";
 import { useUser } from "@/lib/req";
 import { currentUser } from "@/db/context";
 import { nowStr } from "@/db/q";
@@ -13,9 +13,9 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function storageQuotaMb(): number | null {
-  const bytes = storageQuotaBytes();
-  return bytes === null ? null : bytes / MiB;
+async function storageQuotaMb(): Promise<number | null> {
+  const bytes = await storageQuotaBytesFor(currentUser());
+  return bytes === null ? null : Math.floor(bytes / MiB);
 }
 
 /**
@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
     // Limites EFFECTIVES du compte (valeur posée, sinon défaut du déploiement
     // gardé ; null = levée) : l'écran les affiche au-dessus des offres.
     quotas: { gen: await dailyLimit("gen"), assist: await dailyLimit("assist") },
-    storageQuotaMb: storageQuotaMb(),
+    storageQuotaMb: await storageQuotaMb(),
     transactions: on
       ? (await listTransactions()).map((t) => ({
           ...t,
