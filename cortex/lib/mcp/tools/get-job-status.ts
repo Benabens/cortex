@@ -124,7 +124,7 @@ export default defineTool({
   name: "get_job_status",
   title: "Track a generation",
   description:
-    "Track a long-running generation started with generate_mock_exam (typically 10-20 minutes): status, progress and current step. " +
+    "Track a long-running generation started with generate_mock_exam (typically 10-35 minutes, longer for a large exam): status, progress and current step. " +
     "When the mock exam (written or multiple-choice) is done, returns its questions (and the solutions if include_solutions is true) plus a link to it in Cortex. " +
     "Without job_id, returns the generation currently running and the latest ones. Poll at most every 30-60 seconds. Read-only and free.",
   kind: "read",

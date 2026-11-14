@@ -345,6 +345,56 @@ export function citesOptionLabel(text: string, optionCount?: number): boolean {
   return citesOptionLetter(text, optionCount) || citesOptionRank(text);
 }
 
+/** Introduit une affirmation hypothétique que l'explication réfute ensuite (« affirmer qu'… », « claiming that… »). */
+const CLAIM_INTRO = /\b(?:affirmer|dire|pr[ée]tendre|soutenir|penser|croire|supposer|avancer|objecter|sugg[ée]rer)\s+qu(?:e\b|['’])\s*|\b(?:claims?(?:ing)?|argu(?:es?|ing)|say(?:ing|s)?|suggest(?:s|ing)?|assum(?:es?|ing)|assert(?:s|ing)?)\s+that\s+/iu;
+
+/** Découpe en phrases (bornes `.`, `!`, `?`), sans perdre la ponctuation qui les termine. */
+function sentences(text: string): string[] {
+  return text.split(/(?<=[.!?])\s+/u).filter((s) => s.trim());
+}
+
+/**
+ * `clause` (ce que l'explication prête à tort à l'étudiant puis réfute) correspond-elle à une
+ * option RÉELLEMENT proposée ? Trop courte pour juger (< 2 termes informatifs) : jamais signalée,
+ * pour ne jamais rejeter à tort une explication légitime.
+ */
+function claimGrounded(clause: string, options: string[]): boolean {
+  const wanted = tokenize(clause, 4).filter((t) => !PROOF_STOP_WORDS.has(t));
+  if (wanted.length < 2) return true;
+  const have = new Set(tokenize(options.join(" "), 3));
+  const overlap = wanted.filter((t) => have.has(t)).length;
+  return overlap / wanted.length >= 0.34;
+}
+
+/**
+ * true si l'explication réfute une affirmation qui ne correspond à AUCUNE option réelle — elle
+ * réfute donc un distracteur qui n'existe pas (job 17, 14/11, HUM-285 : une clé marginale nulle et
+ * une « tokenisation » absentes des 4 options respectives). Repéré par phrase, jamais par
+ * l'ensemble du texte : une seule phrase en trop ne doit pas faire perdre les autres.
+ */
+export function citesAbsentDistractor(text: string, options: string[]): boolean {
+  return sentences(text).some((s) => {
+    const m = CLAIM_INTRO.exec(s);
+    return !!m && !claimGrounded(s.slice(m.index + m[0].length), options);
+  });
+}
+
+/**
+ * Retire les phrases qui réfutent une affirmation absente des options réelles (inspiré de
+ * repairOptionRefs) : l'énoncé, la clé et les options réelles restent discutés. null si rien à
+ * retirer, ou si la retirer viderait l'explication (le rejet habituel s'applique alors).
+ */
+export function repairAbsentDistractorRefs(text: string, options: string[]): string | null {
+  const parts = sentences(text);
+  const kept = parts.filter((s) => {
+    const m = CLAIM_INTRO.exec(s);
+    return !m || claimGrounded(s.slice(m.index + m[0].length), options);
+  });
+  if (kept.length === parts.length) return null;
+  const out = kept.join(" ").trim();
+  return out.length >= 20 && !citesAbsentDistractor(out, options) ? out : null;
+}
+
 /** Questions d'exemple officielles (sans annale) : citées par la détection du format, et sources « exemples ». */
 export async function officialExamples(max = 3, cap = 700): Promise<{ src: string; text: string }[]> {
   const out: { src: string; text: string }[] = [];
@@ -805,6 +855,12 @@ export async function generateQcmBatch(
       const fixed = repairOptionRefs(base.explanation ?? "", base.options, base.correct);
       if (fixed) base.explanation = fixed;
     }
+    // Une explication qui réfute une affirmation absente des options (plus de distracteurs
+    // réfutés qu'il n'y en a) est réécrite sur les options réelles, AVANT le mélange.
+    if (Array.isArray(base.options) && citesAbsentDistractor(base.explanation ?? "", base.options)) {
+      const fixed = repairAbsentDistractorRefs(base.explanation ?? "", base.options);
+      if (fixed) base.explanation = fixed;
+    }
     // Position de la bonne réponse mélangée (graine = l'énoncé : reproductible), jamais pour une question à figure.
     const it = Array.isArray(base.options) && Array.isArray(base.correct) && !(raw as { figure_spec?: unknown }).figure_spec && !citesOptionLabel(base.explanation ?? "", base.options.length)
       ? shuffleQcmOptions(base, seedOf(base.stem ?? ""))
@@ -914,6 +970,14 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   // option par sa position ou sa lettre est fausse dès que les options sont mélangées.
   for (const q of items) {
     if (citesOptionLabel(q.explanation ?? "", q.options.length)) reject(q, "explication qui désigne une option par sa position ou sa lettre", "désigne chaque option par son contenu dans l'explication, jamais par son rang (« la première ») ni sa lettre");
+    // Idem pour une explication qui réfute un distracteur absent (ex. replaceTrivialDistractorsBatch
+    // réécrit l'explication sans repasser par la réparation faite à la conception) : réécrite sur
+    // les options réelles quand c'est possible, sinon rejetée comme un défaut classique.
+    else if (citesAbsentDistractor(q.explanation ?? "", q.options)) {
+      const fixed = repairAbsentDistractorRefs(q.explanation ?? "", q.options);
+      if (fixed) q.explanation = fixed;
+      else reject(q, "explication qui réfute une affirmation absente des options", "ne réfute que les options réellement proposées, jamais une affirmation qui n'y figure pas");
+    }
   }
   // Le correcteur ne voit que les questions encore en lice, sous leur numéro dans le lot.
   const judged = items.filter((q) => !q.rejected);
@@ -1096,8 +1160,9 @@ const DUP_SCHEMA = {
           index: { type: "integer" },
           notion: { type: "string", description: "La notion du cours que la question teste, nommée comme le cours ; EXACTEMENT le même libellé pour deux questions sur la même notion." },
           angle: { type: "string", description: "Le fait, la condition, l'étude ou le calcul précis qu'elle teste ; le même libellé pour deux questions au même angle." },
+          regle: { type: "string", description: "La règle ou la réponse logique exacte que la question vérifie, SANS le décor du scénario (ex. « option par défaut gardée = nudge, supprimée = pas un nudge ») ; EXACTEMENT le même libellé pour deux questions qui vérifient la même règle, même sous un décor différent." },
         },
-        required: ["index", "notion", "angle"],
+        required: ["index", "notion", "angle", "regle"],
         additionalProperties: false,
       },
     },
@@ -1133,7 +1198,7 @@ const DUP_SCHEMA = {
  * questions sur une notion sous des angles vraiment distincts ; seul le même angle est un doublon.
  * Le modèle nomme la notion et l'angle de chaque question ; la décision, elle, est faite ici.
  */
-async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previous?: string[] }): Promise<{ drop: number[]; repeats: number[]; notions: string[]; angles: string[] }> {
+async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previous?: string[] }): Promise<{ drop: number[]; repeats: number[]; notions: string[]; angles: string[]; regles: string[] }> {
   // Le seul énoncé ne suffit pas à repérer deux questions qui exploitent le même fait : au job 16
   // de HUM-285, la réponse d'un jeu de rôle devenait le distracteur d'une seconde question, et deux
   // formulations différentes testaient la même condition d'un système de vote. Le contrôle voit
@@ -1149,18 +1214,18 @@ async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previou
   const previous = (opts.previous ?? []).slice(0, 60).map((stem, i) => `P${i}. ${sanitizeCorpus(stem).slice(0, 220)}`).join("\n");
   const criterion = opts.strict
     ? `Le programme a au moins autant de notions que l'examen a de questions : UNE NOTION = UNE QUESTION. Deux questions sur la même notion (le biais de négativité, le nudge, la souveraineté des données…) sont des doublons même sous deux angles différents.`
-    : `L'examen a plus de questions que le programme n'a de notions : deux questions sur une même notion sont permises si elles testent des angles VRAIMENT distincts (un autre fait, une autre condition, une autre étude) ; sont des doublons celles qui testent le même fait, la même condition, le même scénario ou le même raisonnement, même si l'une transforme la réponse de l'autre en distracteur ou reformule la question.`;
-  const r = await completeJson<{ notions?: { index: number; notion: string; angle: string }[]; duplicates: { first: number; second: number }[]; repeats?: { index: number; previous: number }[] }>({
+    : `L'examen a plus de questions que le programme n'a de notions : deux questions sur une même notion sont permises si elles testent des angles VRAIMENT distincts (un autre fait, une autre condition, une autre étude) ; sont des doublons celles qui testent le même fait, la même condition, le même scénario ou le même raisonnement, même si l'une transforme la réponse de l'autre en distracteur ou reformule la question. Un décor différent (livraison de repas, e-commerce…) habillant la MÊME règle, avec la même réponse logique, reste un doublon : seul le FOND compte, jamais l'habillage.`;
+  const r = await completeJson<{ notions?: { index: number; notion: string; angle: string; regle?: string }[]; duplicates: { first: number; second: number }[]; repeats?: { index: number; previous: number }[] }>({
     prompt: [
-      `Voici les QCM d'un même examen. Pour chacun, nomme la notion du cours qu'il teste (notion, le MÊME libellé exact pour deux questions sur la même notion, même formulées autrement ou dans deux langues) et l'angle précis (angle).`,
+      `Voici les QCM d'un même examen. Pour chacun, nomme la notion du cours qu'il teste (notion, le MÊME libellé exact pour deux questions sur la même notion, même formulées autrement ou dans deux langues), l'angle précis (angle), et la règle ou réponse logique exacte qu'il vérifie SANS le décor du scénario (regle, le MÊME libellé exact si deux questions vérifient la même règle sous un décor différent).`,
       criterion,
-      `Puis liste les paires en doublon selon ce critère. Compare l'énoncé, les options, le fait source et l'explication : recycler le même cas ou le même fait dans une autre option reste un doublon. Deux notions voisines mais distinctes ne sont pas un doublon.`,
+      `Puis liste les paires en doublon selon ce critère. Compare l'énoncé, les options, le fait source et l'explication : recycler le même cas ou le même fait dans une autre option reste un doublon, de même que deux scénarios différents qui vérifient la même règle (regle identique). Deux notions voisines mais distinctes ne sont pas un doublon.`,
       ...(previous ? [`Liste aussi, dans "repeats", les QCM qui reprennent une question des EXAMENS PRÉCÉDENTS du cours (P…) : même notion ET même angle, même reformulée.`] : []),
       ``,
       list,
       ...(previous ? [``, `QUESTIONS DES EXAMENS PRÉCÉDENTS :`, previous] : []),
       ``,
-      `Réponds UNIQUEMENT avec {"notions": [{"index": i, "notion": "…", "angle": "…"}], "duplicates": [{"first": i, "second": j, "reason": "…"}]${previous ? `, "repeats": [{"index": i, "previous": p}]` : ""}} (first < second ; listes vides s'il n'y a rien).`,
+      `Réponds UNIQUEMENT avec {"notions": [{"index": i, "notion": "…", "angle": "…", "regle": "…"}], "duplicates": [{"first": i, "second": j, "reason": "…"}]${previous ? `, "repeats": [{"index": i, "previous": p}]` : ""}} (first < second ; listes vides s'il n'y a rien).`,
     ].join("\n"),
     model: "opus",
     timeoutMs: 180_000,
@@ -1168,10 +1233,12 @@ async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previou
   }, { check: (v) => (Array.isArray(v?.duplicates) ? null : "le champ « duplicates » (tableau) manque") });
   const notions = items.map(() => "");
   const angles = items.map(() => "");
+  const regles = items.map(() => "");
   for (const n of r.notions ?? []) {
     if (!Number.isInteger(n?.index) || n.index < 0 || n.index >= items.length) continue;
     notions[n.index] = typeof n.notion === "string" ? n.notion.trim() : "";
     angles[n.index] = typeof n.angle === "string" ? n.angle.trim() : "";
+    regles[n.index] = typeof n.regle === "string" ? n.regle.trim() : "";
   }
   const drop = new Set<number>();
   const repeats = new Set<number>();
@@ -1192,12 +1259,24 @@ async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previou
     if (holder === undefined) first.set(key, i);
     else if (!focusPair(holder, i)) drop.add(i);
   });
+  // Même règle logique sous un décor différent (livraison de repas / e-commerce…) : un doublon
+  // même si l'angle (le décor) diffère — seul le mode strict ignore déjà l'angle.
+  if (!opts.strict) {
+    const firstByRule = new Map<string, number>();
+    items.forEach((_, i) => {
+      if (!notions[i] || !regles[i]) return;
+      const key = `${normalize(notions[i])}\u0000${normalize(regles[i])}`;
+      const holder = firstByRule.get(key);
+      if (holder === undefined) firstByRule.set(key, i);
+      else if (!focusPair(holder, i)) drop.add(i);
+    });
+  }
   // Les paires que le modèle signale en plus (sans libellé, ou libellés différents) : la seconde part.
   for (const d of r.duplicates) {
     const later = Math.max(d.first, d.second);
     if (Number.isInteger(later) && later >= 0 && later < items.length && d.first !== d.second && !focusPair(d.first, d.second)) drop.add(later);
   }
-  return { drop: [...drop].sort((a, b) => a - b), repeats: [...repeats].sort((a, b) => a - b), notions, angles };
+  return { drop: [...drop].sort((a, b) => a - b), repeats: [...repeats].sort((a, b) => a - b), notions, angles, regles };
 }
 
 /** Remplacements de doublons au plus ; le contrôle repasse après chacun (le dernier aussi). */
@@ -1611,19 +1690,32 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   }
   // Audit de sortie unique, calqué sur la rubrique du banc. Il porte sur tout le pool déjà payé :
   // une clé fausse ou du hors-cours sont remplacés par un autre candidat sans nouvelle conception.
-  // Les distracteurs relevés sont réparés en UN lot, puis tout le pool repasse UNE seule fois.
   if (verifiedCandidates.length) {
     const audited = await finalQualityAudit(verifiedCandidates, step);
     let selected = selectWithinTrivialBudget([], audited, count);
     const flagged = selected.filter((it) => !!it.trivialDistractors?.length);
+    // Les distracteurs relevés sont réparés en UN lot, puis SEULS les items réparés repassent
+    // l'audit : job 17 (14/11, HUM-285, 20 QCM → 35 min) le refaisait sur tout le pool, déjà
+    // audité une première fois juste au-dessus, même quand rien n'avait changé. Un item non
+    // réparé garde le verdict déjà rendu : son contenu est identique, le ré-auditer n'apprend rien.
+    let confirmed = audited;
     if (flagged.length) {
       const repaired = await replaceTrivialDistractorsBatch(flagged, step, shared.language);
+      // repaired[i] est l'item lui-même (même référence), inchangé, si rien n'avait de distracteur
+      // réparable pour ce QCM : seuls ceux VRAIMENT modifiés ont besoin d'un nouveau verdict.
+      const changedStems = new Set(flagged.filter((it, i) => repaired[i] && repaired[i] !== it).map((it) => it.stem));
       const byStem = new Map(flagged.map((it, i) => [it.stem, repaired[i] ?? it]));
       selected = selected.map((it) => byStem.get(it.stem) ?? it);
+      if (changedStems.size) {
+        const toReaudit = selected.filter((it) => changedStems.has(it.stem));
+        const reaudited = await finalQualityAudit(toReaudit, step);
+        const byReaudited = new Map(reaudited.map((it) => [it.stem, it]));
+        confirmed = [
+          ...audited.filter((it) => !changedStems.has(it.stem)),
+          ...toReaudit.map((it) => byReaudited.get(it.stem) ?? it),
+        ];
+      }
     }
-    const chosen = new Set(selected.map((it) => it.stem));
-    const reserves = audited.filter((it) => !chosen.has(it.stem));
-    const confirmed = await finalQualityAudit([...selected, ...reserves], step);
     all.splice(0, all.length, ...selectWithinTrivialBudget([], confirmed, count));
   }
   // count>0 mais 0 QCM produit = tous les lots ont échoué → erreur claire (sauf drill 0 QCM + ouvertes).
