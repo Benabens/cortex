@@ -167,6 +167,18 @@ async function exam(count: number) {
 
 const total = () => Object.values(calls).reduce((s, n) => s + n, 0);
 
+test("rs-qcm15 simulé : 15/15 livrées, réparations et vérifications regroupées par ronde", async (t) => {
+  const { r, steps } = await exam(15);
+  const perDelivered = total() / Math.max(1, r.count);
+  // Avant (lot par lot, même scénario) : 28 appels — design 8, verify 12, repair 5, audit 2, dedup 1.
+  t.diagnostic(`${r.count}/15 livrées · ${JSON.stringify(calls)} → ${total()} appels, ${perDelivered.toFixed(2)} par question livrée`);
+  const detail = `${JSON.stringify(calls)} → ${total()} appels, ${perDelivered.toFixed(2)} par question livrée\n${steps.join("\n")}`;
+  assert.equal(r.count, 15, detail);
+  assert.ok(calls.verify <= 4, `vérifications regroupées par ronde : ${detail}`);
+  assert.ok(calls.repair <= 2, `réparations regroupées par ronde : ${detail}`);
+  assert.ok(perDelivered <= 1.2, `appels par question livrée : ${detail}`);
+});
+
 test("audit final illisible : les QCM déjà vérifiés sont livrés, l'examen n'est pas perdu", async () => {
   contestedEvery = 0; trivialEvery = 0;
   auditUnreadable = true;
