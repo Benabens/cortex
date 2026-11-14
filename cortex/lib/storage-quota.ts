@@ -3,6 +3,8 @@ import path from "node:path";
 import { userSlug } from "@/db/context";
 import { dataRoot } from "@/lib/courses";
 import { floatLimit, guardsActive, intLimit } from "@/lib/billing/env";
+import { log } from "@/lib/metrics";
+import { purgePageCache } from "@/lib/page-cache";
 
 /**
  * QUOTA DE STOCKAGE PAR UTILISATEUR + GARDE D'ESPACE LIBRE DU VOLUME.
@@ -17,13 +19,16 @@ import { floatLimit, guardsActive, intLimit } from "@/lib/billing/env";
  *    plus STORAGE_FREE_VOLUME_PERCENT (défaut 5) % du volume ;
  *  - + STORAGE_QUOTA_MB_PER_USD (défaut 100) Mo par dollar de revenu net sur 12
  *    mois glissants (lib/billing/revenue) ;
- *  - plafonné à STORAGE_QUOTA_MAX_MB (défaut 3072), que le propriétaire a d'office ;
+ *  - plafonné à STORAGE_QUOTA_MAX_MB (défaut 3072), que le propriétaire a d'office,
+ *    et à STORAGE_ACCOUNT_MAX_VOLUME_PERCENT (défaut 20) % du volume par compte
+ *    client : un payant ne remplit pas le disque de tous ;
  *  - jamais plus que la place utile du volume (hors marge d'espace libre).
  * Revenu illisible (base indisponible) : la base s'applique.
  *
  * Et quel que soit le compte, aucun envoi n'est accepté si le volume garde moins
  * de 10 % d'espace libre : un conteneur unique dont le disque est plein tombe
- * pour tout le monde. Contrôlé AVANT de lire ou d'écrire, sur la taille
+ * pour tout le monde. Avant de refuser, le cache des images de pages (régénérable,
+ * lib/page-cache) est vidé et le volume mesuré de nouveau. Contrôlé AVANT de lire ou d'écrire, sur la taille
  * annoncée (Content-Length) — la lecture réelle reste bornée par
  * lib/upload-limit.
  */
@@ -94,7 +99,9 @@ export async function storageQuotaBytesFor(userId: string): Promise<number | nul
     }
     const perUsd = floatLimit("STORAGE_QUOTA_MB_PER_USD", 100);
     const growth = netUsd <= 0 ? 0 : perUsd === null ? Infinity : Math.floor(perUsd * netUsd * MiB);
-    quota = Math.min(max, freeBase + growth);
+    const share = floatLimit("STORAGE_ACCOUNT_MAX_VOLUME_PERCENT", 20);
+    const shareCap = disk && share !== null ? Math.max(freeBase, Math.floor((Math.min(100, share) / 100) * disk.total)) : Infinity;
+    quota = Math.min(max, shareCap, freeBase + growth);
   }
   quota = Math.min(quota, usable);
   return Number.isFinite(quota) ? quota : null;
@@ -139,16 +146,24 @@ export async function checkStorage(
   incomingBytes: number,
   opts: { minFreeBytes?: number; what?: string } = {},
 ): Promise<StorageRefusal | null> {
-  const disk = volume();
+  // Envoi : 10 % du volume (on protège la marge). Génération : une marge
+  // ABSOLUE (cf. GENERATION_MIN_FREE_BYTES) — sinon un volume rempli par
+  // l'usage payé priverait tous les comptes de génération.
+  const tooFull = (d: { free: number; total: number }) => {
+    const freeAfter = d.free - Math.max(0, incomingBytes);
+    return opts.minFreeBytes != null ? freeAfter < opts.minFreeBytes : freeAfter / d.total < minFreeRatio();
+  };
+  let disk = volume();
+  if (disk && tooFull(disk)) {
+    // Le cache des pages se régénère : il part avant qu'un envoi soit refusé.
+    const freed = purgePageCache();
+    if (freed > 0) {
+      log("warn", "storage.page_cache_purged", { freedBytes: freed });
+      disk = volume();
+    }
+  }
   if (disk) {
-    const freeAfter = disk.free - Math.max(0, incomingBytes);
-    // Envoi : 10 % du volume (on protège la marge). Génération : une marge
-    // ABSOLUE (cf. GENERATION_MIN_FREE_BYTES) — sinon un volume rempli par
-    // l'usage payé priverait tous les comptes de génération.
-    const tooFull = opts.minFreeBytes != null
-      ? freeAfter < opts.minFreeBytes
-      : freeAfter / disk.total < minFreeRatio();
-    if (tooFull) {
+    if (tooFull(disk)) {
       return {
         status: 413,
         error: `Espace disque insuffisant sur le serveur pour ${opts.what ?? "accepter ce fichier"}. Réessaie plus tard ; l'équipe est prévenue.`,

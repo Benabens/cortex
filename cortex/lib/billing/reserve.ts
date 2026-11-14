@@ -87,8 +87,12 @@ export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
     await ensureSignupCredits(userId);
   }
   // Revenu et dépense lus AVANT la transaction : ils ne dépendent pas du verrou
-  // (la dépense s'écrit pendant les appels au modèle, pas ici). Deux réservations
-  // simultanées peuvent donc passer ensemble : MAX_ACTIVE_JOBS borne l'écart, la marge l'absorbe.
+  // (la dépense s'écrit pendant les appels au modèle, pas ici), et un job déjà lancé
+  // n'a encore presque rien dépensé. Des générations simultanées voient donc la même
+  // dépense : l'écart est borné par MAX_ACTIVE_JOBS (2 par défaut) pour les jobs, par
+  // DAILY_ASSIST_QUOTA et le débit par minute pour l'assistance, et en dernier ressort
+  // par le fusible du jour SPEND_CAP_PER_USER_USD et le plafond global lié au revenu,
+  // vérifiés à chaque appel payant (lib/billing/usage).
   let budget: Awaited<ReturnType<typeof budgetCheckFor>> = null;
   if (billing && cost > 0) {
     try {

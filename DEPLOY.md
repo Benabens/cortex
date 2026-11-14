@@ -114,10 +114,11 @@ RESEND_API_KEY=⟨re_… (étape 6)⟩
 AUTH_EMAIL_FROM=Cortex <⟨adresse du domaine vérifié⟩>
 
 # — garde-fous de coût (OBLIGATOIRES) —
-# Fusible global du MOIS calendaire (UTC), remis à zéro le 1er. Le plafond
-# effectif suit le revenu encaissé (SPEND_CAP_BASE_USD + marge × revenu) ;
-# celui-ci est la limite ultime : pose-le au plafond de la console Anthropic.
-SPEND_CAP_USD=25
+# Fusible global du MOIS calendaire (UTC), remis à zéro le 1er, propriétaire
+# compris : c'est lui qui borne la consommation des crédits ACHETÉS (toujours
+# servis). La dépense des crédits offerts suit en plus le revenu encaissé
+# (SPEND_CAP_BASE_USD + marge × revenu). Pose-le au plafond de la console Anthropic.
+SPEND_CAP_USD=⟨plafond mensuel de la console Anthropic, en $⟩
 DAILY_GEN_QUOTA=3
 DAILY_ASSIST_QUOTA=20
 RATE_LIMIT_PER_MIN=120
@@ -317,7 +318,8 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
 - **Mesure avant de fixer les prix** : `npm run cost:report` (dans le
   conteneur ou avec `DATABASE_URL`) sort le coût réel moyen/max par type de
   job et par appel d'assistance depuis `llm_usage`, face au prix en crédits
-  (`CREDIT_PRICE_CHF`, `CHF_PER_USD`).
+  (revenu net d'un crédit `CREDIT_NET_USD`, prix minimal à la marge
+  `AI_BUDGET_MARGIN`). En lecture seule : aucune écriture, aucune migration.
 - Garde-fous : une génération n'existe qu'après une **réservation atomique**
   (solde, quota du jour, rafale, `MAX_ACTIVE_JOBS` = 2 générations
   simultanées par compte) ; un job échoué (rien livré) est remboursé en

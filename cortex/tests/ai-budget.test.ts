@@ -188,32 +188,55 @@ test("plafond du jour par compte : min(fusible, max(plancher, ¼ B)), vérifié 
   assert.equal(await credits.getBalanceCenti("daily"), 2000);
 });
 
-test("plafond global des comptes clients = base + marge × revenu ; le propriétaire n'y est pas soumis ; SPEND_CAP_USD reste le fusible", async () => {
-  // Le fusible par compte et par jour est hors sujet ici.
+test("plafond global lié au revenu : vérifié au lancement, il borne ce que les paiements ne couvrent pas, jamais les crédits achetés ; SPEND_CAP_USD reste le fusible", async () => {
+  // Les fusibles (par compte et par jour, total du mois) sont hors sujet ici, sauf à la fin.
   process.env.SPEND_CAP_PER_USER_USD = "unlimited";
-  // Revenu total déjà posé par les tests précédents : on lit le plafond plutôt que de le supposer.
-  const cap = await budget.globalRevenueCapUsd();
-  assert.ok(cap !== null && cap >= 20);
-  // La dépense client du mois atteint ce plafond → appels coupés pour les clients, pas pour le propriétaire.
-  const month = await usage.monthSpendUsd();
-  const nonOwner = month - (await budget.ownerMonthSpendUsd());
-  await spend("whale", Math.max(0, cap! - nonOwner) + 0.01);
-  usage.resetSpendCache();
-  await assert.rejects(inMl("whale", () => usage.assertSpendCap("anthropic")), (e: Error & { code?: string }) => e.code === "SPEND_CAP");
-  await inMl("boss", () => usage.assertSpendCap("anthropic"));
-  // Plus de revenu → le plafond monte, les clients repassent.
-  await paid("payer", 1000);
-  usage.resetSpendCache();
-  await inMl("whale", () => usage.assertSpendCap("anthropic"));
-  // Le fusible total vaut pour tous, propriétaire compris.
-  process.env.SPEND_CAP_USD = "1";
+  process.env.SPEND_CAP_USD = "100000";
   try {
+    // « gifted » a payé (budget large) mais lance avec des crédits OFFERTS ; « buyer2 » avec des crédits achetés.
+    await paid("gifted", 100);
+    await gift("gifted", 4);
+    await handleStripeEvent({
+      id: "evt_pk3", type: "checkout.session.completed", created: Math.floor(Date.now() / 1000), livemode: false,
+      data: { object: {
+        id: "cs_pk3", mode: "payment", payment_status: "paid", payment_intent: "pi_pk3", amount_total: 900, currency: "eur",
+        metadata: { cortexUserId: "buyer2", plan: "credits_10", credits: "10" },
+      } },
+    } as never, { lookup: { async sessionByPaymentIntent() { return null; }, async paymentDetails() { return { feeCents: 38 }; } } });
+    // La dépense des clients du mois atteint le plafond lié au revenu.
+    const cap = await budget.globalRevenueCapUsd();
+    assert.ok(cap !== null && cap >= 20);
+    await spend("whale", Math.max(0, cap! - (await budget.clientMonthSpendUsd())) + 0.01);
+    const refused = await reserveQcm("gifted");
+    assert.equal(refused.ok, false, "dépense non couverte par un paiement : refusée");
+    assert.equal(!refused.ok && refused.status, 402);
+    assert.match(!refused.ok ? refused.error : "", /achet/i, "le message dit que les crédits achetés restent utilisables");
+    // Crédits achetés : servis, au lancement comme à chaque appel payant.
+    assert.equal((await reserveQcm("buyer2")).ok, true);
+    usage.resetSpendCache();
+    await inMl("buyer2", () => usage.assertSpendCap("anthropic"));
+    await inMl("boss", () => usage.assertSpendCap("anthropic"));
+    // Plus de revenu → le plafond monte, la dépense offerte repasse.
+    await paid("payer", 1000);
+    assert.equal((await reserveQcm("gifted")).ok, true);
+    // Le fusible total vaut pour tous, propriétaire compris.
+    process.env.SPEND_CAP_USD = "1";
     usage.resetSpendCache();
     await assert.rejects(inMl("boss", () => usage.assertSpendCap("anthropic")), (e: Error & { code?: string }) => e.code === "SPEND_CAP");
   } finally {
     process.env.SPEND_CAP_USD = "200";
     process.env.SPEND_CAP_PER_USER_USD = "50";
   }
+});
+
+test("plafond global : un paiement du mois précédent ne soutient pas la dépense de ce mois-ci (seulement sa part de la moyenne sur 12 mois)", async () => {
+  const before = (await budget.globalRevenueCapUsd())!;
+  const now = new Date();
+  const lastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) - 3600_000).toISOString().slice(0, 19).replace("T", " ");
+  await revenue.recordPayment({ sourceId: "cs_prev", kind: "pack", paymentIntent: "pi_prev", userId: "prev", currency: "eur", amountCents: 120_000_00, feeCents: 0, paidAt: lastMonth });
+  const rise = (await budget.globalRevenueCapUsd())! - before;
+  // 0,6 × 120 000 $ / 12 = 6 000 $ au plus ; compté en entier, il en ferait 72 000.
+  assert.ok(rise > 0 && rise <= 6000.01, `hausse ${rise}`);
 });
 
 test("AI_BUDGET_MARGIN=unlimited : pas de budget (déploiement qui ne le veut pas)", async () => {

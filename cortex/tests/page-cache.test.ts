@@ -8,8 +8,9 @@
  * posée à la main reste.
  *
  * Quota : base modeste pour un compte gratuit (STORAGE_QUOTA_MB, au plus 5 % du
- * volume), + 100 Mo par dollar de revenu net sur 12 mois, plafonné à 3 Go et à la
- * place utile du volume ; le propriétaire a le plafond.
+ * volume), + 100 Mo par dollar de revenu net sur 12 mois, plafonné à 3 Go et à
+ * 20 % du volume par compte ; le propriétaire a le plafond, borné par la place
+ * utile du volume. Volume presque plein : le cache des pages est purgé d'abord.
  *
  * Seams : exam-index.renderExamPages, course-vision.renderCourseRefImages /
  * courseRefImages, sources.removeUploadedRef, course-deletion.deleteCourseWithData,
@@ -122,7 +123,7 @@ test("rendu des pages : dans le cache, hors du dossier du compte (hors quota), u
   assert.equal(pngsUnder(path.join(tmp, ".page-cache")).length, before + 2);
   const imgs = await inCourse(() => courseRefImages());
   assert.ok(imgs.some((p) => p.endsWith("schema-prof.png")), "l'image posée à la main reste");
-  assert.equal(imgs.filter((p) => /final_2024-\d+\.png$/.test(p)).length, 3, "vision : les 3 premières pages");
+  assert.equal(imgs.filter((p) => /final_2024[^/]*-\d+\.png$/.test(p)).length, 3, "vision : les 3 premières pages");
   assert.equal(imgs.filter((p) => /midterm-\d+\.png$/.test(p)).length, 2);
 
   // Plus aucune image de page dans le dossier du compte (hors celle posée à la main).
@@ -136,7 +137,7 @@ test("cache purgeable : supprimé, il est rendu à nouveau à la demande", async
   fs.rmSync(path.join(tmp, ".page-cache"), { recursive: true, force: true });
   const { courseRefImages } = await import("../lib/course-vision");
   const imgs = await inCourse(() => courseRefImages());
-  assert.equal(imgs.filter((p) => /final_2024-\d+\.png$/.test(p)).length, 3);
+  assert.equal(imgs.filter((p) => /final_2024[^/]*-\d+\.png$/.test(p)).length, 3);
 });
 
 test("retrait d'une annale : ses images de pages sont purgées, celles des autres restent", async (t) => {
@@ -151,8 +152,39 @@ test("retrait d'une annale : ses images de pages sont purgées, celles des autre
     await removeUploadedRef("refs/final 2024.pdf");
   });
   const left = pngsUnder(path.join(tmp, ".page-cache")).map((p) => path.basename(p));
-  assert.ok(!left.some((f) => f.startsWith("final_2024-")), left.join(","));
+  assert.ok(!left.some((f) => f.startsWith("final_2024")), left.join(","));
   assert.ok(left.some((f) => f.startsWith("midterm-")));
+});
+
+test("annales aux noms voisins (« a b.pdf », « a_b.pdf ») : rendus distincts, retirer l'une garde l'autre", async (t) => {
+  if (!hasPdftoppm) return t.skip("pdftoppm absent");
+  fs.writeFileSync(path.join(refsDir, "a b.pdf"), pdf(2));
+  fs.writeFileSync(path.join(refsDir, "a_b.pdf"), pdf(4));
+  try {
+    const { renderExamPages } = await import("../lib/exam-index");
+    const { purgePdfPages } = await import("../lib/page-cache");
+    assert.equal((await inCourse(() => renderExamPages("pgcache", "a b.pdf"))).length, 2);
+    const other = await inCourse(() => renderExamPages("pgcache", "a_b.pdf"));
+    assert.equal(other.length, 4, "les pages de « a b.pdf » ne passent pas pour celles de « a_b.pdf »");
+    purgePdfPages("pgcache", "a b.pdf");
+    assert.ok(other.every((p) => fs.existsSync(path.resolve(p.rel))), "retirer « a b.pdf » garde les pages de « a_b.pdf »");
+  } finally {
+    fs.rmSync(path.join(refsDir, "a b.pdf"), { force: true });
+    fs.rmSync(path.join(refsDir, "a_b.pdf"), { force: true });
+  }
+});
+
+test("volume presque plein : le cache des pages (régénérable) est purgé avant de refuser un envoi", async () => {
+  const { setStatfsForTests, checkStorage } = await import("../lib/storage-quota");
+  const root = path.join(tmp, ".page-cache");
+  fs.mkdirSync(path.join(root, "u", "x"), { recursive: true });
+  fs.writeFileSync(path.join(root, "u", "x", "p-1.png"), Buffer.alloc(10));
+  // Mesure simulée : le volume ne repasse au-dessus de la marge qu'une fois le cache parti.
+  setStatfsForTests(() => (fs.existsSync(root) ? { free: 50 * MiB, total: 10240 * MiB } : { free: 9000 * MiB, total: 10240 * MiB }));
+  try {
+    assert.equal(await checkStorage("alice", MiB), null);
+    assert.equal(fs.existsSync(root), false);
+  } finally { setStatfsForTests(null); }
 });
 
 test("sauvegarde : le cache n'est pas archivé", async () => {
@@ -178,7 +210,7 @@ test("suppression du cours : son cache est purgé aussi", async (t) => {
   assert.equal(fs.existsSync(cacheDir), false);
 });
 
-test("quota lié au revenu : base modeste (≤ 5 % du volume), +100 Mo par dollar net, plafonné ; propriétaire au plafond", async () => {
+test("quota lié au revenu : base modeste (≤ 5 % du volume), +100 Mo par dollar net, plafonné (3 Go, 20 % du volume) ; propriétaire au plafond", async () => {
   const { setStatfsForTests, storageQuotaBytesFor, checkStorage } = await import("../lib/storage-quota");
   const { recordPayment } = await import("../lib/billing/revenue");
   // Volume de 500 Mo (la prod) : base = min(150 Mo, 25 Mo).
@@ -190,11 +222,13 @@ test("quota lié au revenu : base modeste (≤ 5 % du volume), +100 Mo par dolla
   await recordPayment({ sourceId: "cs_store", kind: "pack", paymentIntent: "pi_store", userId: "payer", currency: "eur", amountCents: 900, feeCents: 0 });
   assert.equal(await storageQuotaBytesFor("payer"), 1050 * MiB);
   await recordPayment({ sourceId: "cs_store2", kind: "pack", paymentIntent: "pi_store2", userId: "payer", currency: "eur", amountCents: 900_00, feeCents: 0 });
-  assert.equal(await storageQuotaBytesFor("payer"), 3072 * MiB);
+  // Un compte ne prend jamais plus de 20 % du volume (2 Go sur 10) : un payant ne remplit pas le disque de tous.
+  assert.equal(await storageQuotaBytesFor("payer"), Math.floor(0.2 * 10240 * MiB));
   assert.equal(await storageQuotaBytesFor("boss"), 3072 * MiB);
-  // Jamais plus que la place utile du volume (90 % de 2 Go).
+  // Volume de 2 Go : 20 % pour un compte ; le propriétaire, la place utile (90 %).
   setStatfsForTests(() => ({ free: 1500 * MiB, total: 2048 * MiB }));
-  assert.equal(await storageQuotaBytesFor("payer"), Math.floor(0.9 * 2048 * MiB));
+  assert.equal(await storageQuotaBytesFor("payer"), Math.floor(0.2 * 2048 * MiB));
+  assert.equal(await storageQuotaBytesFor("boss"), Math.floor(0.9 * 2048 * MiB));
   // checkStorage applique le quota du compte : un payant envoie ce qu'un gratuit ne peut pas.
   setStatfsForTests(() => ({ free: 9000 * MiB, total: 10240 * MiB }));
   assert.equal((await checkStorage("free-user", 200 * MiB))?.status, 413);

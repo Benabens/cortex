@@ -74,9 +74,10 @@ export function creditNetUsd(env: Partial<NodeJS.ProcessEnv> = process.env): num
   return Number.isFinite(n) && n > 0 ? n : 0.47;
 }
 
+/** Marge du prix conseillé : AI_BUDGET_MARGIN bornée à 1 comme le budget ; levée ou invalide → 0,6 (un prix se conseille toujours). */
 function safeMargin(env: Partial<NodeJS.ProcessEnv> = process.env): number {
   const n = Number(env.AI_BUDGET_MARGIN);
-  return Number.isFinite(n) && n > 0 && n <= 1 ? n : 0.6;
+  return Number.isFinite(n) && n > 0 ? Math.min(1, n) : 0.6;
 }
 
 const median = (xs: number[]) => {
@@ -108,6 +109,8 @@ async function jobStatuses(reader: ReportReader, pairs: Set<string>): Promise<Ma
   for (const t of tenants) {
     if (!pairs.has(`${t.user_id}|${t.course}`) || !/^[a-z0-9_]+$/.test(t.schema_name)) continue;
     try {
+      // Exception à l'invariant 4 (search_path), comme l'export de compte : lecture seule d'un
+      // schéma nommé par public.tenants et filtré ci-dessus, sans passer par le store.
       const rows = await reader.all<{ id: number | string; status: string }>(`SELECT id, status FROM "${t.schema_name}".jobs`);
       for (const r of rows) out.set(`${t.user_id}|${t.course}|${r.id}`, r.status);
     } catch { /* tenant sans table jobs */ }
