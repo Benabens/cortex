@@ -18,7 +18,7 @@ import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import { sanitizeCorpus } from "@/lib/prompt-safety";
-import { excludedSourceIds } from "@/lib/source-scope";
+import { excludedSourceIds, materialLabel } from "@/lib/source-scope";
 import { languageName } from "@/lib/profiles/generic-directives";
 import type { FormatProfile } from "@/lib/format";
 
@@ -283,7 +283,8 @@ export function inferDiscipline(c: { code?: string | null; sample?: string | nul
 }
 
 /**
- * Titres des supports de cours (hors annales, exemples, consignes, sources hors programme), à défaut de notions
+ * Titres LISIBLES des supports de cours (hors annales, exemples, consignes, sources hors programme,
+ * noms de fichiers), à défaut de notions
  * analysées. Un titre vient d'un nom de fichier ou d'une balise <title> : assaini et
  * borné avant d'entrer dans un prompt (il n'est pas encadré comme donnée).
  */
@@ -295,8 +296,9 @@ export async function courseMaterialTitles(): Promise<string[]> {
     );
     // Ni une source hors programme, ni une archive d'organisation (thèmes des posters) : pas un sujet.
     const excluded = await excludedSourceIds();
-    const titles = rows.filter((r) => !excluded.has(Number(r.id))).map((r) => sanitizeCorpus(r.title).replace(/\s+/g, " ").trim().slice(0, 120)).filter(Boolean);
-    return [...new Set(titles)];
+    // Jamais un nom de fichier (« S_ance_1_…_slides_01.00.md ») : il devenait le sujet affiché d'un QCM (job 14 de HUM-285).
+    const titles = rows.filter((r) => !excluded.has(Number(r.id))).map((r) => materialLabel(sanitizeCorpus(r.title).replace(/\s+/g, " ").trim().slice(0, 120)));
+    return [...new Set(titles.filter((t): t is string => !!t))];
   } catch {
     return [];
   }

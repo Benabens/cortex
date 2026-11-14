@@ -6,10 +6,10 @@ import { createWeakness, ensureSchema as ensureWeaknessSchema } from "@/lib/weak
 import { rebuildCoursePlan, getPlanChapters, ensurePlanSchema, type PlanChapter } from "@/lib/course-plan";
 import { detectExamDna } from "@/lib/exam-dna";
 import { courseOrderKey } from "@/lib/course-order";
-import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
+import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE } from "@/lib/course-grounding";
 import { courseLanguageName } from "@/lib/exam-format";
-import { excludedSourceIds } from "@/lib/source-scope";
+import { courseMatter, excludedSourceIds, readableTitle } from "@/lib/source-scope";
 
 export { courseOrderKey };
 
@@ -100,6 +100,22 @@ export async function ensureProgramSchema(): Promise<void> {
 
 const trunc = (s: string, n: number) => (s.length > n ? s.slice(0, n) + " […]" : s);
 
+/**
+ * `n` caractères pris sur TOUT le support (quatre fenêtres réparties), pas seulement son début :
+ * le début d'une séance, c'est sa page de titre et la présentation des enseignants (job 13 de
+ * HUM-285, 13/11 : notions des diapos d'introduction, séances de Cavallaro absentes).
+ */
+export function spreadSample(text: string, n: number, windows = 4): string {
+  if (text.length <= n) return text;
+  const w = Math.floor(n / windows);
+  const parts: string[] = [];
+  for (let k = 0; k < windows; k++) {
+    const at = Math.floor(((text.length - w) * k) / Math.max(1, windows - 1));
+    parts.push(text.slice(at, at + w).trim());
+  }
+  return parts.join(" […] ");
+}
+
 /** Texte du corpus regroupé par usage pour l'analyse (past-exams = vérité terrain des poids). */
 async function gatherForBlueprint() {
   // Sources hors programme et archives d'organisation (thèmes des posters) : aucune notion n'en vient
@@ -128,7 +144,7 @@ async function gatherForBlueprint() {
    * premiers supports ingérés (un seul enseignant) faisaient toutes les notions — banc HUM-285 du
    * 28/10 : 16 questions Bendahan contre 4 Cavallaro.
    */
-  const fairShare = async (types: string[], cap: number): Promise<string> => {
+  const fairShare = async (types: string[], cap: number): Promise<{ text: string; supports: string[] }> => {
     const ph = types.map(() => "?").join(",");
     let rows: { sid: number; text: string; title: string }[] = [];
     try {
@@ -137,28 +153,32 @@ async function gatherForBlueprint() {
            WHERE s.type IN (${ph}) ORDER BY s.recency_weight DESC, s.id, i.id`,
         ...types
       );
-      rows = rows.filter((r) => !excluded.has(Number(r.sid)));
+      // Ni une source exclue, ni une page qui présente le cours (enseignants, grille d'évaluation).
+      rows = rows.filter((r) => !excluded.has(Number(r.sid))).map((r) => ({ ...r, text: courseMatter(r.text) })).filter((r) => r.text);
     } catch {}
     const bySource = new Map<number, { title: string; text: string }>();
     for (const r of rows) {
       const cur = bySource.get(r.sid);
       if (cur) cur.text += `\n${r.text}`;
-      else bySource.set(r.sid, { title: r.title, text: r.text });
+      else bySource.set(r.sid, { title: readableTitle(r.title), text: r.text });
     }
     const share = Math.max(300, Math.floor(cap / Math.max(1, bySource.size)));
     let out = "";
     for (const { title, text } of bySource.values()) {
       if (out.length + share > cap + share / 2) break;
-      out += `\n— (${title}) —\n${trunc(text, share)}\n`;
+      out += `\n— (${title}) —\n${spreadSample(text, share)}\n`;
     }
-    return out.trim();
+    return { text: out.trim(), supports: [...bySource.values()].map((v) => v.title) };
   };
   const finals = await byTypes(["final", "midterm"], 16000);
+  // Sans annale, le budget des annales revient aux supports du cours : c'est d'eux que viennent
+  // les notions, et chacun doit être lu au-delà de son début (16 000 : ~1 600 car. par séance).
+  const plan = await fairShare(["note", "course_pdf", "course"], finals ? 4000 : 36000);
   return {
     finals,
-    series: await fairShare(["serie", "exercise"], 6000),
-    // Sans annale, le budget des annales revient aux supports du cours : c'est d'eux que viennent les notions.
-    plan: await fairShare(["note", "course_pdf", "course"], finals ? 4000 : 16000),
+    series: (await fairShare(["serie", "exercise"], 6000)).text,
+    plan: plan.text,
+    supports: plan.supports,
   };
 }
 
@@ -196,6 +216,17 @@ type RawTopic = {
   exam_weight?: number; exam_count?: number; source?: string; description?: string;
   exo_type?: string; trap?: string;
 };
+
+/**
+ * Nombre de notions visé sans annale : à peu près une par support, entre 8 et 16. Banc HUM-285 du
+ * 13/11 : à deux ou trois par support (24 à 32 notions fines), chaque question visait un détail que
+ * les diapositives ne développent pas, le concepteur le complétait hors du cours, 30 questions
+ * étaient rejetées hors cours et l'examen s'arrêtait à 9 sur 20 (12 notions larges : 14 sur 20).
+ */
+export function notionTarget(supports: number): string {
+  const lo = Math.min(14, Math.max(8, supports));
+  return `${lo} à ${Math.min(16, lo + 3)}`;
+}
 
 export type AnalyzeResult = { count: number; topics: TopicView[] };
 
@@ -265,7 +296,14 @@ export async function analyzeBlueprint(opts: { onStep?: (m: string, p: number) =
     `2) Compte combien de fois chaque type apparaît dans les past-exams (exam_count) et déduis son POIDS exam_weight = part d'emphase en % (sur les past-exams ; la somme de TOUS les exam_weight ≈ 100).`,
     `3) Ajoute les types présents dans les SÉRIES ou le PLAN mais PAS (encore) tombés en final : source="serie" ou "cours", exam_count=0, exam_weight petit mais > 0.`,
     `4) Pour chaque type : un "label" COURT, en ${lang} (la langue du cours, comme sur l'examen), "method" = la méthode/technique testée, "exo_type" = le FORMAT réel de l'exo (échelle à remplir, tableau d'accès, vrai/faux à justifier, écrire une fonction C, arbre de processus…), "trap" = le PIÈGE typique (l'idée fausse punie), "category" (regroupement), "archetype" (id ci-dessus le plus proche ou ""), "source" ("final" si vu en final, sinon "serie"/"cours"), "description" (une phrase).`,
-    `Vise 6 à 14 types — ni trop fin, ni trop grossier. Pas de doublon.`,
+    ...(corpus.finals || !corpus.supports.length
+      ? [`Vise 6 à 14 types — ni trop fin, ni trop grossier. Pas de doublon.`]
+      : [
+        // Sans annale, les notions viennent des supports : 11 notions pour 9 séances et 20 QCM (job 13
+        // de HUM-285) laissaient des séances sans notion et des QCM sur le même sujet.
+        `Sans annale, CHAQUE support du plan ci-dessous a au moins une notion à lui (chaque séance, chaque enseignant) : ${corpus.supports.map((t) => `« ${sanitizeCorpus(t).slice(0, 80)} »`).join(", ")}.`,
+        `Vise ${notionTarget(corpus.supports.length)} notions LARGES — une notion = un thème que le support développe sur plusieurs faits (concepts, résultats, études qui s'y rattachent), jamais un détail isolé ni le titre d'un support. Pas de doublon.`,
+      ]),
     COURSE_MATTER_RULE,
     ``,
     `Réponds UNIQUEMENT avec l'objet JSON { "topics": [ … ] } (aucun texte autour, aucun outil au-delà de Read d'images) :`,
