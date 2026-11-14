@@ -60,13 +60,13 @@ export function footDate(dateLabel: string): string {
 /** En-tête de la page de garde : logo, enseignant, cours, date et durée, anonymisation, nom et SCIPER. */
 export function coverHeader(dateLabel: string, durationMin: number): string[] {
   const c = getCourse(currentCourse());
-  const code = esc(c.examCode).replace(/-/g, "--");
+  const code = texEscape(c.examCode).replace(/-/g, "--");
   const lecturer = c.profs[0] ?? "";
   return [
     String.raw`\thispagestyle{empty}`,
     String.raw`\noindent\begin{minipage}[t]{0.62\textwidth}\vspace{0pt}\epfllogo[26]\par\smallskip\footnotesize`,
-    lecturer ? `Lecturer: ${esc(lecturer)}\\\\` : "",
-    `\\textbf{${code}: ${esc(c.examName)}}\\\\`,
+    lecturer ? `Lecturer: ${texEscape(lecturer)}\\\\` : "",
+    `\\textbf{${code}: ${texEscape(c.examName)}}\\\\`,
     `${footDate(dateLabel)}\\quad Duration: ${durationMin} minutes`,
     String.raw`\end{minipage}\hfill\begin{minipage}[t]{0.32\textwidth}\vspace{0pt}\raggedleft\footnotesize Anonymisation:\\ \textbf{\#0000}\end{minipage}`,
     String.raw`\vspace{6pt}\noindent\rule{\textwidth}{1pt}`,
@@ -165,13 +165,14 @@ export function examDocument(body: string[], dateLabel: string): string {
   if (fs.existsSync(figPath)) preamble += "\n" + fs.readFileSync(figPath, "utf8");
   preamble += "\n" + OPEN_TEX_COMPAT;
   const c = getCourse(currentCourse());
-  // Métadonnées saisies à la création du cours : échappées (audit du 14/11/2026, 🔴 1).
-  const code = esc(c.examCode).replace(/-/g, "--");
-  const profsTex = c.profs.map(esc).join(", ");
+  // Métadonnées saisies à la création du cours : échappées (audit du 14/11/2026, 🔴 1). texEscape,
+  // pas esc : esc remplace tout caractère au-delà de Latin-1 par une espace (« Dvořák »).
+  const code = texEscape(c.examCode).replace(/-/g, "--");
+  const profsTex = c.profs.map(texEscape).join(", ");
   const footOverride = [
     String.raw`\fancyhead[L]{}`,
     `\\fancyhead[R]{\\qrcode[height=1.25cm]{${qrText(c.examCode)}-FINAL-EXAM}}`,
-    `\\fancyfoot[C]{\\small\\textbf{${code}, ${esc(c.examKind)}}${profsTex ? `\\\\[-2pt]\\small ${profsTex}` : ""}}`,
+    `\\fancyfoot[C]{\\small\\textbf{${code}, ${texEscape(c.examKind)}}${profsTex ? `\\\\[-2pt]\\small ${profsTex}` : ""}}`,
   ].join("\n");
   return [
     preamble,

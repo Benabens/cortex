@@ -61,6 +61,8 @@ test("la garde refuse les tracés PGF/TikZ qui lisent ou écrivent un fichier", 
     String.raw`\draw plot % commentaire
       file {x.table};`,
     String.raw`\font\x=/etc/hostname`,
+    String.raw`\lowercase{\def\p{PLOT}}\draw \p file\f;`,
+    String.raw`\lowercase{\def\p{PLOT FILE}}\draw \p {x.table};`,
   ];
   for (const c of cases) assert.ok(findTexHazards(doc(c)).length > 0, `non détecté : ${c}`);
 });
@@ -75,6 +77,10 @@ test("les tracés légitimes passent : coordonnées et expressions calculées pa
     "Le plot du fichier de log est en annexe.",
     String.raw`The function \(f\) maps a file $F$ of the file system to its size.`,
     String.raw`{\fontsize{9}{11}\selectfont petit}`,
+    // Énoncés cs-202 réels (relecture du 14/11) : « file » suivi d'une macro de mise en forme.
+    String.raw`The file \texttt{records.bin} is opened twice. A regular file \texttt{/home/cs202/a.txt}.`,
+    String.raw`The function {\tt foo} returns.`,
+    String.raw`Plot the CDF and the function \(F\).`,
   ];
   for (const c of ok) assert.deepEqual(findTexHazards(doc(c)), [], c);
 });
