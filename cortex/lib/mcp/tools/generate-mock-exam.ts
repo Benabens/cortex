@@ -48,7 +48,10 @@ export default defineTool({
     "(\"20 MCQ\" in focus does not make a multiple-choice exam); 1-2 questions target it, the rest keeps the exam's balance. " +
     "Costs credits (as in the app: a written exam 2 by default, +1 per 4 exercises beyond 8; a multiple-choice exam by its number of questions) and one daily generation. The first call returns the exact cost and a confirmation_token " +
     "without spending anything; ask the user in the conversation and call again with the same arguments plus confirmation_token ONLY after they explicitly approved (nothing to confirm when nothing is charged). " +
-    "Generation then runs in the background for 10-20 minutes: track it with get_job_status.",
+    // Job 17 (14/11/2026, HUM-285) : 20 QCM ont pris 35 min, hors de l'ancienne annonce (10-20) —
+    // élargie plutôt que resserrée tant qu'un examen chargé (beaucoup de questions, doublons à
+    // remplacer) n'est pas mesuré sur plusieurs runs réels.
+    "Generation then runs in the background for 10-35 minutes (longer for a large exam): track it with get_job_status.",
   kind: "generate",
   input: z.object({
     course: courseArg,
@@ -101,7 +104,7 @@ export default defineTool({
         ? (asked ? `Format demandé pour cet examen : ${format.summary} ; celui des annales du cours reste le défaut.` : plan.generator === "blocks" ? `Format des annales : ${format.summary}.` : null)
         : `Ce cours n'a pas d'annales : format ${format.summary}.`;
       const base = { course: courseRefOf(c), focus, format: qcm ? "mcq" as const : "written" as const, exercise_count: count, note, confirmation: null, declined: null, job: null };
-      const track = (jobId: number) => ({ job_id: jobId, estimated_minutes: "10-20", track_with: `get_job_status with job_id=${jobId}` });
+      const track = (jobId: number) => ({ job_id: jobId, estimated_minutes: "10-35", track_with: `get_job_status with job_id=${jobId}` });
 
       // Un examen déjà en cours est réutilisé, comme dans l'app : rien à confirmer, rien de débité.
       const running = await activeJob(jobType);
@@ -116,7 +119,7 @@ export default defineTool({
         {
           bucket: "gen",
           costCenti: costForJob(jobType, target),
-          summary: `Générer ${what}${focus ? " avec l'accent demandé" : ""}, ${courseLabel(c)} (10-20 min).`,
+          summary: `Générer ${what}${focus ? " avec l'accent demandé" : ""}, ${courseLabel(c)} (10-35 min).`,
         },
         // Le jeton est lié à la composition EXACTE du job : si elle change (annales ajoutées entre-temps), il faut un nouveau devis.
         { course: c.id, focus, format: base.format, count, target: target ?? null },
@@ -143,7 +146,7 @@ export default defineTool({
     const note = o.note ? ` ${o.note}` : "";
     if (o.status === "confirmation_required" && o.confirmation) return `${quoteSummary(o.confirmation)}${note}`;
     if (o.status === "declined" && o.declined) return declinedSummary(o.declined);
-    if (o.job) return `${o.status === "started" ? "Examen blanc lancé" : "Un examen blanc est déjà en cours"} (job ${o.job.job_id}, 10-20 min) : suis-le avec get_job_status.${note}`;
+    if (o.job) return `${o.status === "started" ? "Examen blanc lancé" : "Un examen blanc est déjà en cours"} (job ${o.job.job_id}, 10-35 min) : suis-le avec get_job_status.${note}`;
     return `Examen blanc.${note}`;
   },
 });
