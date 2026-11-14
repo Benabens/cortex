@@ -55,13 +55,13 @@ let designCalls = 0;
 const designPrompts: string[] = [];
 const dedupePrompts: string[] = [];
 
-/** Le contrôle de fin d'examen simulé : il lit la notion et l'angle de chaque question dans son énoncé. */
+/** Le contrôle de fin d'examen simulé : il lit la notion, l'angle (et la règle, si présente) de chaque question dans son énoncé. */
 function dedupeReply(prompt: string): string {
-  const lines = [...prompt.matchAll(/^Q(\d+)\. .*?\[notion:([^\]]+)\] \[angle:([^\]]*)\]/gm)];
+  const lines = [...prompt.matchAll(/^Q(\d+)\. .*?\[notion:([^\]]+)\] \[angle:([^\]]*)\](?: \[regle:([^\]]*)\])?/gm)];
   // Questions des examens précédents (P0, P1…) : une question qui en reprend une (même notion, même angle).
   const previous = [...prompt.matchAll(/^P(\d+)\. .*?\[notion:([^\]]+)\] \[angle:([^\]]*)\]/gm)];
   const repeats = lines.flatMap((m) => previous.filter((p) => p[2] === m[2] && p[3] === m[3]).map((p) => ({ index: Number(m[1]), previous: Number(p[1]) })));
-  return JSON.stringify({ notions: lines.map((m) => ({ index: Number(m[1]), notion: m[2], angle: m[3] })), duplicates: [], repeats });
+  return JSON.stringify({ notions: lines.map((m) => ({ index: Number(m[1]), notion: m[2], angle: m[3], regle: m[4] ?? "" })), duplicates: [], repeats });
 }
 
 function verifyReply(prompt: string): string {
@@ -197,6 +197,31 @@ test("plus de questions que de notions : deux questions sur une notion restent, 
   const last = designPrompts[designPrompts.length - 1];
   assert.match(last, /angle vraiment distinct/, "plus de questions que de notions : le remplacement peut reprendre une notion sous un autre angle");
   assert.doesNotMatch(last, /n'en reprends AUCUNE/);
+});
+
+test("job 17 anonymisé (14/11, HUM-285) : même règle sous un décor différent reste un doublon malgré des angles distincts", async () => {
+  const id = await course(3);
+  // Q1/Q4 : même notion (nudge), même règle logique, décors différents (angles différents) — le
+  // doublon livré en prod (Q16/Q17 : livraison de repas vs e-commerce, même définition du nudge).
+  // Q2/Q5 et Q3/Q6 : angle ET règle distincts, gardées comme avant.
+  design = (n, call) => Array.from({ length: n }, (_, i) => {
+    const q = (call - 1) * 4 + i + 1;
+    const tags: Record<number, string> = {
+      1: "[notion:nudge] [angle:livraison de repas] [regle:option par défaut gardée = nudge, supprimée = pas un nudge]",
+      4: "[notion:nudge] [angle:e-commerce] [regle:option par défaut gardée = nudge, supprimée = pas un nudge]",
+      2: "[notion:biais] [angle:Svenson] [regle:ancrage sur un premier chiffre vu]",
+      5: "[notion:biais] [angle:ancrage] [regle:effet de halo sur une autre dimension]",
+      3: "[notion:souveraineté] [angle:résidence] [regle:loi du pays où les données résident]",
+      6: "[notion:souveraineté] [angle:extraterritorialité] [regle:loi du pays qui exerce une juridiction extraterritoriale]",
+    };
+    return item(call <= 2 ? `Question ${q} ${tags[q]} : que dit le cours ?` : `Remplacement ${call}.${i} [notion:biais] [angle:ancrage ${call}.${i}] [regle:ancrage ${call}.${i}] : que dit le cours ?`);
+  });
+  const { r, stems } = await exam(id, 6);
+  assert.equal(r.count, 6);
+  assert.ok(stems.some((s) => s.startsWith("Question 1 ")), "le premier décor du nudge reste");
+  assert.ok(!stems.some((s) => s.startsWith("Question 4 ")), "même règle, décor différent (e-commerce) : la seconde est retirée");
+  assert.ok(stems.some((s) => s.startsWith("Question 2 ")) && stems.some((s) => s.startsWith("Question 5 ")), "biais : angle ET règle distincts, les deux gardées");
+  assert.ok(stems.some((s) => s.startsWith("Question 3 ")) && stems.some((s) => s.startsWith("Question 6 ")), "souveraineté : angle ET règle distincts, gardées");
 });
 
 test("accent demandé par l'étudiant : ses questions partagent un thème sans être retirées, les autres restent une notion = une question", async () => {
