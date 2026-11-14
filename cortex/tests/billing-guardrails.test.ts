@@ -107,7 +107,15 @@ test("plafond de dépense PAR UTILISATEUR : compte au-delà → SPEND_CAP ; un a
     assert.ok((await usage.spentTodayByUser()) >= 1);
     await assert.rejects(
       () => usage.assertSpendCap("anthropic"),
-      (e: Error & { code?: string }) => e.code === "SPEND_CAP" && /ce compte/.test(e.message),
+      (e: Error & { code?: string }) => {
+        assert.equal(e.code, "SPEND_CAP");
+        assert.match(e.message, /ce compte/);
+        // Message ÉTUDIANT (repris mot pour mot jusqu'à l'app et au connecteur MCP) :
+        // jamais de montant ni de nom de variable d'environnement (constat prod 14/11).
+        assert.ok(!/\$/.test(e.message), `pas de montant : ${e.message}`);
+        assert.ok(!/SPEND_CAP/.test(e.message), `pas de nom de variable : ${e.message}`);
+        return true;
+      },
       "le compte au-delà de SON plafond doit être coupé",
     );
   });
@@ -119,6 +127,26 @@ test("plafond de dépense PAR UTILISATEUR : compte au-delà → SPEND_CAP ; un a
   await ctx.runWithUser("spend-big", async () => {
     await usage.assertSpendCap("claude-code");
   });
+});
+
+test("plafond de dépense : refusé AVANT de créer le job (spendCapGate), même message propre", async () => {
+  process.env.AUTH_ENABLED = "1";
+  process.env.LLM_PROVIDER = "anthropic";
+  process.env.SPEND_CAP_PER_USER_USD = "1";
+  try {
+    await ctx.runWithUser("spend-gate", async () => {
+      await usage.recordUsage({ provider: "anthropic", model: "claude-sonnet-5", tokensIn: 1_000_000, tokensOut: 0 });
+      const gate = await usage.spendCapGate();
+      assert.ok(gate, "le plafond déjà atteint doit refuser avant même de créer le job");
+      assert.equal(gate!.status, 429);
+      assert.ok(!/\$/.test(gate!.error) && !/SPEND_CAP/.test(gate!.error), `message propre : ${gate!.error}`);
+    });
+    await ctx.runWithUser("spend-gate-none", async () => {
+      assert.equal(await usage.spendCapGate(), null, "un compte qui n'a rien dépensé n'est pas bloqué");
+    });
+  } finally {
+    delete process.env.LLM_PROVIDER;
+  }
 });
 
 test("mesure : llm_usage écrit pour le provider CLI local quand le suivi est actif (estimated=1, coût 0)", async () => {
