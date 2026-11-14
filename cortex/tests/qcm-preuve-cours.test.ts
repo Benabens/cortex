@@ -222,7 +222,9 @@ test("une preuve paraphrasée avec les mêmes faits, nombres et notation reste f
   assert.equal(r.count, 2);
   assert.ok(!steps.some((s) => /QCM rejeté/.test(s)), steps.filter((s) => /rejeté/.test(s)).join("\n"));
   assert.equal(designCalls, 1, "la paraphrase ne provoque aucun remplacement");
-  assert.equal(secondLookPrompts.length, 0, "la preuve fidèle évite un second arbitrage");
+  // Le second regard tourne (lui seul voit une explication hors cours), mais son rejet ne tient pas
+  // face à une preuve fidèle : la clé est fondée sur le cours.
+  assert.equal(secondLookPrompts.length, 1, "un seul second regard pour le lot, sans rejet");
 });
 
 test("vrai hors-cours (une notion que le cours ne présente pas) : confirmé par le second regard, rejeté et remplacé", async () => {
