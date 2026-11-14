@@ -79,15 +79,16 @@ test("dry-run : rien n'est écrit, le rapport annonce les paiements à reprendre
 
 test("--write : revenu net exact ; rejeu sans double compte", async () => {
   await backfillRevenue({ read, api, write: true });
-  // ana : pack 900 − 300 remboursés − 46 de frais = 554 ; facture 1490 − 500 contestés − 74 − 1500 de frais de litige = −584.
+  // ana : pack 900 − 300 remboursés − 46 de frais = 554 ; facture 1490 − 500 contestés − 74 − 1500 de frais de litige
+  // − 11 de frais Stripe Billing (0,7 %) = −595.
   const ana = await revenue.accountRevenue("ana");
   assert.equal(ana.payments, 2);
-  assert.equal(Math.round(ana.netUsd * 100), -30);
+  assert.equal(Math.round(ana.netUsd * 100), -41);
   assert.equal(ana.estimatedFees, 0, "frais réels partout");
   // cleo : frais réels (46) au lieu de l'estimation (55).
   assert.equal(Math.round((await revenue.accountRevenue("cleo")).netUsd * 100), 854);
   const again = await backfillRevenue({ read, api, write: true });
   assert.equal(again.toRecord, 0);
   assert.equal(again.feesToFix, 0);
-  assert.equal(Math.round((await revenue.accountRevenue("ana")).netUsd * 100), -30, "remboursement et litige non additionnés deux fois");
+  assert.equal(Math.round((await revenue.accountRevenue("ana")).netUsd * 100), -41, "remboursement et litige non additionnés deux fois");
 });

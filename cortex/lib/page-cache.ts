@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { userSlug } from "@/db/context";
@@ -20,7 +21,9 @@ import { findPdftoppm, renderPdfPages } from "@/lib/pdftoppm";
  * ou d'un compte purge son cache.
  *
  * Nommage : `<base>-<n>.png`, base = nom du PDF sans extension, caractères hors
- * [a-zA-Z0-9._-] remplacés par « _ ». Un marqueur `<base>.pages` retient jusqu'à
+ * [a-zA-Z0-9._-] remplacés par « _ » ; si ce remplacement a changé le nom, un
+ * court hachage du nom d'origine suit (« a b.pdf » et « a_b.pdf » ne partagent
+ * jamais leurs pages). Les pages se cherchent en respectant la casse. Un marqueur `<base>.pages` retient jusqu'à
  * quelle page le PDF a été demandé : un PDF de 2 pages demandé jusqu'à 16 n'est
  * pas rendu à chaque appel.
  */
@@ -31,8 +34,14 @@ export function pageCacheRoot(): string {
   return path.join(dataRoot(), PAGE_CACHE_DIR);
 }
 
-/** « final 2024.pdf » → « final_2024 ». */
+/** « midterm.pdf » → « midterm » ; « final 2024.pdf » → « final_2024.<hachage> ». */
 export function pageBase(pdfName: string): string {
+  const raw = path.basename(pdfName).replace(/\.pdf$/i, "");
+  const safe = sanitizedBase(pdfName);
+  return safe === raw ? safe : `${safe}.${createHash("sha256").update(raw).digest("hex").slice(0, 8)}`;
+}
+
+function sanitizedBase(pdfName: string): string {
   return path.basename(pdfName).replace(/\.pdf$/i, "").replace(/[^a-zA-Z0-9._-]+/g, "_");
 }
 
@@ -59,7 +68,7 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 function cachedPages(dir: string, base: string): { page: number; abs: string }[] {
   let names: string[];
   try { names = fs.readdirSync(dir); } catch { return []; }
-  const re = new RegExp(`^${escapeRe(base)}-(\\d{1,3})\\.png$`, "i");
+  const re = new RegExp(`^${escapeRe(base)}-(\\d{1,3})\\.png$`);
   return names
     .map((n) => ({ m: re.exec(n), n }))
     .filter((x): x is { m: RegExpExecArray; n: string } => !!x.m)
@@ -93,7 +102,7 @@ function dropLegacyRenders(course: string): void {
   const vision = path.join(refsDir, "figref");
   let pdfs: Set<string>;
   try {
-    pdfs = new Set(fs.readdirSync(refsDir).filter((f) => /\.pdf$/i.test(f)).flatMap((f) => [f.replace(/\.pdf$/i, ""), pageBase(f)]));
+    pdfs = new Set(fs.readdirSync(refsDir).filter((f) => /\.pdf$/i.test(f)).flatMap((f) => [f.replace(/\.pdf$/i, ""), sanitizedBase(f)]));
   } catch { return; }
   try {
     for (const f of fs.readdirSync(vision)) {
@@ -139,4 +148,22 @@ export function purgePdfPages(course: string, pdfName: string): void {
   const base = pageBase(pdfName);
   for (const p of cachedPages(dir, base)) fs.rmSync(p.abs, { force: true });
   fs.rmSync(path.join(dir, `${base}.pages`), { force: true });
+}
+
+/** Vide tout le cache (volume presque plein) : tout se rend de nouveau à la demande. Rend les octets libérés. */
+export function purgePageCache(): number {
+  const root = pageCacheRoot();
+  let bytes = 0;
+  const walk = (dir: string) => {
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else { try { bytes += fs.statSync(p).size; } catch { /* disparu */ } }
+    }
+  };
+  walk(root);
+  fs.rmSync(root, { recursive: true, force: true });
+  return bytes;
 }

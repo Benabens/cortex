@@ -38,6 +38,9 @@ import { accountRevenue, sinceDays, totalRevenue } from "./revenue";
  * jamais coupé en route par ce plafond. SPEND_CAP_PER_USER_USD reste le fusible
  * vérifié à chaque appel (lib/billing/usage).
  *
+ * Plafond global du mois lié au revenu (globalRevenueCapUsd) : vérifié au
+ * lancement aussi, pour la seule dépense que les paiements ne couvrent pas.
+ *
  * Le propriétaire est exempt (lib/billing/owner) ; AI_BUDGET_MARGIN=unlimited
  * retire le budget.
  */
@@ -114,12 +117,20 @@ export async function accountBudget(userId: string): Promise<AccountBudget | nul
   };
 }
 
-export type BudgetCheck = { budget: AccountBudget; expectedUsd: number };
+export type BudgetCheck = {
+  budget: AccountBudget;
+  expectedUsd: number;
+  /** Plafond global du mois lié au revenu et dépense des clients du mois ; null si levé. */
+  global: { capUsd: number; spentUsd: number } | null;
+};
 
 /** Ce qu'il faut lire AVANT la transaction de réservation (rien n'y dépend du verrou). */
 export async function budgetCheckFor(userId: string, kind: string, costCenti: number): Promise<BudgetCheck | null> {
   const budget = await accountBudget(userId);
-  return budget ? { budget, expectedUsd: expectedJobCostUsd(kind, costCenti) } : null;
+  if (!budget) return null;
+  const cap = await globalRevenueCapUsd();
+  const global = cap === null ? null : { capUsd: cap, spentUsd: round4(await clientMonthSpendUsd()) };
+  return { budget, expectedUsd: expectedJobCostUsd(kind, costCenti), global };
 }
 
 /** Crédits ACHETÉS disponibles dans le ledger (tout sauf les crédits offerts, consommés en dernier), en centièmes. */
@@ -139,7 +150,16 @@ const BUY_URL = "https://app.cortexexam.com/compte#credits";
 export function budgetVerdict(
   check: BudgetCheck, costCenti: number, paidCenti: number, ctx: { userId: string; kind: string },
 ): { status: number; error: string } | null {
-  const { budget, expectedUsd } = check;
+  const { budget, expectedUsd, global } = check;
+  // Dépense que les paiements ne couvrent pas (crédits offerts) : bornée aussi par le plafond global du mois.
+  if (costCenti > paidCenti && global && global.spentUsd + expectedUsd > global.capUsd) {
+    log("warn", "billing.revenue_cap_refused", { user: ctx.userId, kind: ctx.kind, spentUsd: global.spentUsd, capUsd: global.capUsd, expectedUsd });
+    return {
+      status: 402,
+      error: "La capacité de génération offerte ce mois-ci est épuisée. Les crédits achetés restent toujours utilisables : "
+        + `achète un pack ou abonne-toi pour continuer, sinon elle rouvre le 1er du mois. ${BUY_URL}`,
+    };
+  }
   if (budget.spentUsd + expectedUsd > budget.budgetUsd) {
     if (costCenti <= paidCenti) {
       // Crédits achetés : toujours servis. Le signal sert à corriger le PRIX.
@@ -172,34 +192,30 @@ export function budgetVerdict(
 /**
  * Plafond de dépense du MOIS des comptes clients (hors propriétaire), garanti
  * par les paiements : SPEND_CAP_BASE_USD + marge × revenu du mois — le revenu
- * des 30 derniers jours, ou la moyenne mensuelle des 12 derniers mois si elle est
- * plus haute (un abonnement annuel paie une fois pour douze mois). null : pas de
- * plafond lié au revenu (base ou marge levées). SPEND_CAP_USD reste le fusible
- * total, propriétaire compris.
+ * encaissé depuis le 1er (même fenêtre que la dépense : un paiement ne soutient
+ * qu'un mois), ou la moyenne mensuelle des 12 derniers mois si elle est plus
+ * haute (un abonnement annuel paie une fois pour douze mois). null : pas de
+ * plafond lié au revenu (base ou marge levées).
+ *
+ * Vérifié AU LANCEMENT, pour la seule dépense que les paiements ne couvrent pas
+ * (crédits offerts) : avec les prix actuels, les crédits achetés coûtent plus que
+ * ce qu'ils rapportent, et un plafond appliqué à chaque appel les bloquerait —
+ * un seul acheteur couperait la génération de tous. Les crédits achetés ne sont
+ * bornés que par le fusible SPEND_CAP_USD (lib/billing/usage), à régler au
+ * plafond de la console Anthropic ; c'est leur prix qui doit garantir la marge.
  */
 export async function globalRevenueCapUsd(): Promise<number | null> {
   const base = floatLimit("SPEND_CAP_BASE_USD", 20);
   const margin = aiBudgetMargin();
   if (base === null || margin === null) return null;
   const owners = await ownerUserIds();
-  const r30 = (await totalRevenue({ days: 30, excludeUserIds: owners })).netUsd;
-  const r365 = (await totalRevenue({ days: 365, excludeUserIds: owners })).netUsd;
-  return Math.round((base + margin * Math.max(0, r30, r365 / 12)) * 100) / 100;
+  const month = (await totalRevenue({ since: monthStart(), excludeUserIds: owners })).netUsd;
+  const year = (await totalRevenue({ excludeUserIds: owners })).netUsd;
+  return Math.round((base + margin * Math.max(0, month, year / 12)) * 100) / 100;
 }
 
 function monthStart(): string {
   return `${nowStr().slice(0, 7)}-01 00:00:00`;
-}
-
-/** Dépense du mois calendaire (UTC) des comptes propriétaires. */
-export async function ownerMonthSpendUsd(): Promise<number> {
-  const owners = await ownerUserIds();
-  if (!owners.length) return 0;
-  const rows = await authAll<{ total: number | string | null }>(
-    `SELECT coalesce(sum(cost_usd), 0) AS total FROM llm_usage WHERE created_at >= ? AND user_id IN (${owners.map(() => "?").join(",")})`,
-    monthStart(), ...owners,
-  );
-  return Number(rows[0]?.total ?? 0);
 }
 
 /** Dépense du mois calendaire (UTC) des comptes clients (hors propriétaire). */

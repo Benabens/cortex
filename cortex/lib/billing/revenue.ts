@@ -10,7 +10,7 @@ import { log } from "@/lib/metrics";
  * des remboursements et des litiges.
  *
  * Deux tables, écrites par le webhook (lib/billing/stripe-events) et par la
- * reprise de l'historique (scripts/stripe-revenue-backfill.ts) :
+ * reprise de l'historique (npm run billing:backfill, lib/billing/revenue-backfill) :
  *  - `stripe_payments` : un paiement (pack ou facture d'abonnement), son montant,
  *    sa devise, la taxe, les frais Stripe (réels, ou ESTIMÉS si Stripe n'a pas
  *    répondu — `fee_estimated`, remplacés par la reprise) ;
@@ -22,7 +22,9 @@ import { log } from "@/lib/metrics";
  * où gardé = montant − min(montant, remboursé + contesté). Les frais Stripe ne
  * sont pas rendus sur un remboursement : un paiement remboursé coûte ses frais.
  * Un litige est compté PERDU dès son ouverture (charge.dispute.closed n'est pas
- * écouté) : prudent.
+ * écouté) : prudent. Facture d'abonnement : les frais Stripe Billing
+ * (STRIPE_BILLING_FEE_PERCENT, défaut 0,7 %, prélevés à part) sont déduits aussi.
+ * Avec une clé live, seuls les paiements live comptent (et inversement).
  *
  * Conversion en dollars (la dépense IA est en dollars) : FX_USD_JSON, dollars
  * pour une unité de devise. Défaut {"usd":1,"eur":1} : l'euro compté au pair,
@@ -169,7 +171,7 @@ export async function linkInvoicePaymentIntent(paymentIntent: string | null): Pr
 }
 
 type Row = {
-  currency: string; amount_cents: number | string; tax_cents: number | string; fee_cents: number | string;
+  kind: string; currency: string; amount_cents: number | string; tax_cents: number | string; fee_cents: number | string;
   fee_estimated: number | string; refunded_cents: number | string | null; disputed_cents: number | string | null;
   dispute_fee_cents: number | string | null;
 };
@@ -188,8 +190,10 @@ function sumRevenue(rows: Row[]): Revenue {
   const unconverted = new Set<string>();
   for (const r of rows) {
     const amount = Number(r.amount_cents);
+    // Stripe Billing prélève à part un pourcentage du facturé (abonnements) : absent de la balance transaction.
+    const billingFee = r.kind === "subscription" ? Math.ceil((amount * envNumber("STRIPE_BILLING_FEE_PERCENT", 0.7)) / 100) : 0;
     const n = netCents({
-      amount, tax: Number(r.tax_cents), fee: Number(r.fee_cents),
+      amount, tax: Number(r.tax_cents), fee: Number(r.fee_cents) + billingFee,
       refunded: Number(r.refunded_cents ?? 0), disputed: Number(r.disputed_cents ?? 0), disputeFee: Number(r.dispute_fee_cents ?? 0),
     });
     if (Number(r.fee_estimated)) estimated++;
@@ -201,11 +205,13 @@ function sumRevenue(rows: Row[]): Revenue {
     gross += (amount * rate) / 100;
     net += (n * rate) / 100;
   }
+  // Sans taux, le paiement compte 0 (prudent) : à corriger par FX_USD_JSON.
+  if (unconverted.size) log("warn", "billing.revenue_unconverted", { currencies: [...unconverted].sort() });
   return { payments: rows.length, grossUsd: round6(gross), netUsd: round6(net), estimatedFees: estimated, unconverted: [...unconverted].sort() };
 }
 const round6 = (x: number) => Math.round(x * 1e6) / 1e6;
 
-const SELECT_ROWS = `SELECT p.currency, p.amount_cents, p.tax_cents, p.fee_cents, p.fee_estimated,
+const SELECT_ROWS = `SELECT p.kind, p.currency, p.amount_cents, p.tax_cents, p.fee_cents, p.fee_estimated,
     l.refunded_cents, l.disputed_cents, l.dispute_fee_cents
   FROM stripe_payments p LEFT JOIN stripe_payment_losses l ON l.payment_intent = p.payment_intent`;
 
@@ -214,16 +220,30 @@ export function sinceDays(days: number, now = Date.now()): string {
   return new Date(now - days * DAY_MS).toISOString().slice(0, 19).replace("T", " ");
 }
 
-/** Revenu net d'un compte sur les `days` derniers jours (12 mois glissants par défaut). */
-export async function accountRevenue(userId: string, opts: { days?: number } = {}): Promise<Revenue> {
-  const rows = await authAll<Row>(`${SELECT_ROWS} WHERE p.user_id = ? AND p.paid_at >= ?`, userId, sinceDays(opts.days ?? 365));
+/**
+ * Mode de la clé Stripe posée : avec une clé live, seuls les paiements live
+ * comptent (une base qui a connu une période de test garde ses paiements de
+ * test) ; avec une clé de test, seuls ceux de test. Sans clé : aucun filtre.
+ */
+function livemodeFilter(): { sql: string; params: number[] } {
+  const key = process.env.STRIPE_SECRET_KEY?.trim() ?? "";
+  if (/^(sk|rk)_live_/.test(key)) return { sql: " AND p.livemode = ?", params: [1] };
+  if (/^(sk|rk)_test_/.test(key)) return { sql: " AND p.livemode = ?", params: [0] };
+  return { sql: "", params: [] };
+}
+
+/** Revenu net d'un compte sur 12 mois glissants. */
+export async function accountRevenue(userId: string): Promise<Revenue> {
+  const mode = livemodeFilter();
+  const rows = await authAll<Row>(`${SELECT_ROWS} WHERE p.user_id = ? AND p.paid_at >= ?${mode.sql}`, userId, sinceDays(365), ...mode.params);
   return sumRevenue(rows);
 }
 
-/** Revenu net de tous les comptes (plafond global), hors comptes exclus (propriétaire). */
-export async function totalRevenue(opts: { days?: number; excludeUserIds?: string[] } = {}): Promise<Revenue> {
+/** Revenu net de tous les comptes payé depuis `since` (12 mois par défaut), hors comptes exclus (propriétaire). */
+export async function totalRevenue(opts: { since?: string; excludeUserIds?: string[] } = {}): Promise<Revenue> {
   const excluded = (opts.excludeUserIds ?? []).filter(Boolean);
   const notIn = excluded.length ? ` AND p.user_id NOT IN (${excluded.map(() => "?").join(",")})` : "";
-  const rows = await authAll<Row>(`${SELECT_ROWS} WHERE p.paid_at >= ?${notIn}`, sinceDays(opts.days ?? 365), ...excluded);
+  const mode = livemodeFilter();
+  const rows = await authAll<Row>(`${SELECT_ROWS} WHERE p.paid_at >= ?${notIn}${mode.sql}`, opts.since ?? sinceDays(365), ...excluded, ...mode.params);
   return sumRevenue(rows);
 }

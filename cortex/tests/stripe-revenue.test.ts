@@ -9,7 +9,8 @@
  * déduite ; remboursements partiels CUMULÉS (jamais additionnés deux fois, un
  * événement ancien livré en retard ne fait pas baisser le remboursé) ; litige
  * avec ses frais ; remboursement + litige du même paiement plafonnés au montant ;
- * facture d'abonnement ; rejeu sous un autre event.id sans double compte ;
+ * facture d'abonnement (frais Stripe Billing déduits) ; clé live → paiements de
+ * test ignorés ; rejeu sous un autre event.id sans double compte ;
  * fenêtre de 12 mois glissants ; devise inconnue → 0 (prudent) ; charge d'une
  * autre application → rien.
  *
@@ -145,7 +146,8 @@ test("facture d'abonnement payée : enregistrée une fois, même sous un autre e
   await handleStripeEvent(inv("evt_g1_bis"), { lookup: lookupWithFees({ pi_g1: 47 }) });
   const rev = await revenue.accountRevenue("ug");
   assert.equal(rev.payments, 1);
-  near(rev.netUsd, (1490 - 47) * 1.1 / 100);
+  // Frais Stripe Billing (0,7 % du facturé, prélevés à part) : ceil(10,43) = 11.
+  near(rev.netUsd, (1490 - 47 - 11) * 1.1 / 100);
 });
 
 test("12 mois glissants : un paiement de plus d'un an ne compte plus", async () => {
@@ -179,4 +181,16 @@ test("remboursement reçu AVANT l'achat : le paiement arrive déjà marqué remb
   }));
   await handleStripeEvent(pack("j1", "uj"), { lookup: lookupWithFees({ pi_j1: 38 }) });
   near((await revenue.accountRevenue("uj")).netUsd, -38 * 1.1 / 100);
+});
+
+test("clé live : un paiement en mode test (base partagée avec une période de test) ne compte pas", async () => {
+  await revenue.recordPayment({ sourceId: "cs_lm_test", kind: "pack", paymentIntent: "pi_lm_test", userId: "ul", currency: "eur", amountCents: 900, feeCents: 38, livemode: false });
+  await revenue.recordPayment({ sourceId: "cs_lm_live", kind: "pack", paymentIntent: "pi_lm_live", userId: "ul", currency: "eur", amountCents: 900, feeCents: 38, livemode: true });
+  process.env.STRIPE_SECRET_KEY = "sk_live_fictive";
+  try {
+    const rev = await revenue.accountRevenue("ul");
+    assert.equal(rev.payments, 1);
+    near(rev.netUsd, (900 - 38) * 1.1 / 100);
+  } finally { delete process.env.STRIPE_SECRET_KEY; }
+  assert.equal((await revenue.accountRevenue("ul")).payments, 2, "sans clé : pas de filtre (dev, tests)");
 });

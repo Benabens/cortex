@@ -16,12 +16,17 @@ export function feeInChargeCurrency(charge: { amount: number; currency: string }
   return Math.ceil((bt.fee / bt.amount) * charge.amount);
 }
 
-export async function feeOfPaymentIntent(stripe: Stripe, paymentIntent: string): Promise<number | null> {
+/** Dernière charge d'un paiement et ses frais réels (null tant que la balance transaction n'existe pas). */
+async function latestCharge(stripe: Stripe, paymentIntent: string): Promise<{ charge: Stripe.Charge; feeCents: number | null } | null> {
   const pi = await stripe.paymentIntents.retrieve(paymentIntent, { expand: ["latest_charge.balance_transaction"] });
   const charge = typeof pi.latest_charge === "object" ? pi.latest_charge : null;
-  const bt = charge && typeof charge.balance_transaction === "object" ? charge.balance_transaction : null;
-  if (!charge || !bt) return null;
-  return feeInChargeCurrency(charge, bt);
+  if (!charge) return null;
+  const bt = typeof charge.balance_transaction === "object" ? charge.balance_transaction : null;
+  return { charge, feeCents: bt ? feeInChargeCurrency(charge, bt) : null };
+}
+
+export async function feeOfPaymentIntent(stripe: Stripe, paymentIntent: string): Promise<number | null> {
+  return (await latestCharge(stripe, paymentIntent))?.feeCents ?? null;
 }
 
 /** Lecture Stripe de la reprise de l'historique (lib/billing/revenue-backfill) : rien n'y est écrit. */
@@ -47,14 +52,12 @@ export function stripeBackfillApi(stripe: Stripe): BackfillStripe {
       };
     },
     async payment(paymentIntent) {
-      const pi = await stripe.paymentIntents.retrieve(paymentIntent, { expand: ["latest_charge.balance_transaction"] });
-      const charge = typeof pi.latest_charge === "object" ? pi.latest_charge : null;
-      if (!charge) return null;
-      const bt = typeof charge.balance_transaction === "object" ? charge.balance_transaction : null;
+      const latest = await latestCharge(stripe, paymentIntent);
+      if (!latest) return null;
       const disputes = await stripe.disputes.list({ payment_intent: paymentIntent, limit: 100 });
       return {
-        feeCents: bt ? feeInChargeCurrency(charge, bt) : null,
-        refundedCents: charge.amount_refunded ?? 0,
+        feeCents: latest.feeCents,
+        refundedCents: latest.charge.amount_refunded ?? 0,
         disputes: disputes.data.map((d) => ({ amountCents: d.amount, feeCents: disputeFeeCents(d) })),
       };
     },

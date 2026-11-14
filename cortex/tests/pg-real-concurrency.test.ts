@@ -23,6 +23,8 @@ if (ENABLED) {
   process.env.PG_POOL_MAX = "8";
   process.env.BILLING_ENABLED = "1";
   process.env.SIGNUP_FREE_CREDITS = "2";
+  // Budget IA lié au revenu (testé dans ai-budget.test.ts) : ici, les comptes sont financés par des crédits offerts.
+  process.env.AI_BUDGET_MARGIN = "unlimited";
   process.env.DAILY_GEN_QUOTA = "unlimited";
   process.env.DAILY_ASSIST_QUOTA = "unlimited";
   process.env.RATE_LIMIT_PER_USER_MIN = "unlimited";
@@ -55,7 +57,7 @@ after(async () => {
   if (!ENABLED) return;
   const { closePostgres } = await import("../db/driver-postgres");
   await closePostgres();
-  for (const k of ["DB_DRIVER", "DATABASE_URL", "PG_AUTH_POOL_MAX", "PG_POOL_MAX", "BILLING_ENABLED", "SIGNUP_FREE_CREDITS", "DAILY_GEN_QUOTA", "DAILY_ASSIST_QUOTA", "RATE_LIMIT_PER_USER_MIN", "MAX_ACTIVE_JOBS", "LLM_PROVIDER"]) delete process.env[k];
+  for (const k of ["DB_DRIVER", "DATABASE_URL", "PG_AUTH_POOL_MAX", "PG_POOL_MAX", "BILLING_ENABLED", "SIGNUP_FREE_CREDITS", "AI_BUDGET_MARGIN", "DAILY_GEN_QUOTA", "DAILY_ASSIST_QUOTA", "RATE_LIMIT_PER_USER_MIN", "MAX_ACTIVE_JOBS", "LLM_PROVIDER"]) delete process.env[k];
 });
 
 const inCourse = async <T,>(user: string, course: string, fn: () => Promise<T>) => {

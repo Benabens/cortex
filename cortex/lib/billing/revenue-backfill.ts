@@ -28,7 +28,7 @@ export type BackfillStripe = {
   invoice(id: string): Promise<StripePaid | null>;
   payment(paymentIntent: string): Promise<StripePaymentFacts | null>;
 };
-type Read = (sql: string, ...params: Array<string | number | null>) => Promise<Record<string, unknown>[]>;
+type ReadOnlyQuery = (sql: string, ...params: Array<string | number | null>) => Promise<Record<string, unknown>[]>;
 
 export type BackfillReport = {
   /** Paiements absents de stripe_payments, retrouvés chez Stripe. */
@@ -44,15 +44,15 @@ export type BackfillReport = {
 const str = (v: unknown): string | null => (v == null || v === "" ? null : String(v));
 
 /** Table absente (base pas encore migrée, dry-run avant déploiement) → aucune ligne. */
-async function rowsOrNone(read: Read, sql: string): Promise<Record<string, unknown>[]> {
+async function rowsOrNone(read: ReadOnlyQuery, sql: string): Promise<Record<string, unknown>[]> {
   try { return await read(sql); } catch { return []; }
 }
 
-export async function backfillRevenue(o: { read: Read; api: BackfillStripe; write: boolean }): Promise<BackfillReport> {
+export async function backfillRevenue(o: { read: ReadOnlyQuery; api: BackfillStripe; write: boolean }): Promise<BackfillReport> {
   const report: BackfillReport = { toRecord: 0, recordedGrossUsd: 0, feesToFix: 0, refunds: 0, disputes: 0, skipped: [] };
-  const known = new Map<string, boolean>(); // source_id → frais estimés
+  const feeEstimatedBySource = new Map<string, boolean>(); // paiements déjà enregistrés
   for (const r of await rowsOrNone(o.read, `SELECT source_id, fee_estimated FROM stripe_payments`)) {
-    known.set(String(r.source_id), Number(r.fee_estimated) === 1);
+    feeEstimatedBySource.set(String(r.source_id), Number(r.fee_estimated) === 1);
   }
   const sources: Array<{ kind: PaymentKind; sourceId: string; paymentIntent: string | null; userId: string }> = [
     ...(await o.read(`SELECT session_id AS id, payment_intent, user_id FROM stripe_purchases ORDER BY created_at`)).map((r) => ({
@@ -64,8 +64,8 @@ export async function backfillRevenue(o: { read: Read; api: BackfillStripe; writ
   ];
 
   for (const s of sources) {
-    const isNew = !known.has(s.sourceId);
-    if (!isNew && !known.get(s.sourceId)) continue; // déjà enregistré avec ses frais réels
+    const isNew = !feeEstimatedBySource.has(s.sourceId);
+    if (!isNew && !feeEstimatedBySource.get(s.sourceId)) continue; // déjà enregistré avec ses frais réels
     try {
       let paid: StripePaid | null = null;
       if (isNew) {

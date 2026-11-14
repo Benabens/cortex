@@ -35,6 +35,8 @@ const DATA_DIR = ENABLED ? fs.mkdtempSync(path.join(os.tmpdir(), "cortex-prepare
 const ENV: Record<string, string> = {
   CORTEX_DATA_DIR: DATA_DIR, DB_DRIVER: "postgres", DATABASE_URL: DB_URL, MCP_ENABLED: "1", AUTH_URL: "https://cortex.test",
   BILLING_ENABLED: "1", SIGNUP_FREE_CREDITS: "5", DAILY_GEN_QUOTA: "unlimited", DAILY_ASSIST_QUOTA: "unlimited",
+  // Budget IA lié au revenu (testé dans ai-budget.test.ts) : ici, le compte est financé par des crédits offerts.
+  AI_BUDGET_MARGIN: "unlimited",
   RATE_LIMIT_PER_USER_MIN: "unlimited", MAX_ACTIVE_JOBS: "unlimited", MCP_RATE_LIMIT_PER_MIN: "unlimited", AUTH_SECRET: "x".repeat(40),
   // Le moteur doit être « disponible » pour le devis ; le faux fournisseur répond 500,
   // donc le worker échoue APRÈS l'ingestion, à la détection du format.

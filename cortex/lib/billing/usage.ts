@@ -20,7 +20,9 @@ import { alertSpendThresholds, resetSpendAlerts } from "./spend-alerts";
  * avec son coût estimé (tokens × tarif du modèle).
  *
  * SPEND_CAP_USD : plafond de dépense GLOBAL du MOIS CALENDAIRE en cours (UTC),
- * remis à zéro le 1er. Atteint → tout nouvel appel payant est refusé par une
+ * remis à zéro le 1er — le FUSIBLE ultime, propriétaire compris, à régler au
+ * plafond de la console Anthropic (la dépense non couverte par un paiement est
+ * en outre bornée au lancement : lib/billing/budget). Atteint → tout nouvel appel payant est refusé par une
  * LlmError code "SPEND_CAP" (message clair, jamais un 502 générique) ; le
  * providers CLI locaux (claude-code et codex-cli) ne sont JAMAIS bloqués ni comptés
  * (comportement historique intact).
