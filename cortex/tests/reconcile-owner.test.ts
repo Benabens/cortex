@@ -55,16 +55,37 @@ async function jobRow(id: number) {
   );
 }
 
+let ownerJobId = 0;
+
 test("propriétaire : un job interrompu par un redémarrage est remis en file, pas mis en erreur", async () => {
   const jobs = await import("../lib/jobs");
   await as(OWNER, async () => {
     const { id, existing } = await jobs.createJobExclusive("exam");
     assert.equal(existing, false);
+    ownerJobId = id;
     await killWorker(id);
     await jobs.reconcileStaleJobs();
     const row = await jobRow(id);
     assert.equal(row?.status, "queued", JSON.stringify(row));
     assert.equal(row?.attempts, 1);
+  });
+});
+
+test("propriétaire : un job dont la référence a été émise pour un autre compte n'est pas exempté", async () => {
+  // Une base partagée entre comptes (SQLite : une base par cours) ferait
+  // réconcilier sous l'identité du propriétaire les jobs des autres comptes.
+  const jobs = await import("../lib/jobs");
+  const { q } = await import("../db/q");
+  await as(OWNER, async () => {
+    const id = await q.insert(
+      `INSERT INTO jobs (type, target, status, current_step, progress, credit_ref) VALUES ('exam', NULL, 'queued', 'En file…', 0, ?)`,
+      `job:${OTHER}:ml:${crypto.randomUUID()}`,
+    );
+    await killWorker(id);
+    await jobs.reconcileStaleJobs();
+    const row = await jobRow(id);
+    assert.equal(row?.status, "error", JSON.stringify(row));
+    assert.match(row?.error ?? "", /réservation de crédits est absente/);
   });
 });
 
@@ -110,7 +131,7 @@ test("worker repris : la garde centrale du LLM laisse passer le job du propriét
     return assertLlmAuthorized();
   };
   try {
-    const ownerRef = (await as(OWNER, async () => (await jobRow(1))?.credit_ref)) ?? null;
+    const ownerRef = (await as(OWNER, async () => (await jobRow(ownerJobId))?.credit_ref)) ?? null;
     assert.ok(ownerRef?.startsWith(`job:${OWNER}:`), "le job du propriétaire porte une référence sans débit");
     await asWorker(OWNER, ownerRef);
     await assert.rejects(

@@ -41,8 +41,8 @@ test("architecture : la reprise d'un job interrompu exige une réservation débi
   const clauses = m[1].replace(/\/\/[^\n]*/g, "").split("||").map((c) => c.replace(/\s+/g, " ").trim());
   assert.deepEqual(clauses, [
     `r.type === "ingest"`,
-    `await (await import("@/lib/billing/owner")).isOwner()`,
+    `(refIssuedTo(r.credit_ref, currentUser(), currentCourse()) && await (await import("@/lib/billing/owner")).isOwner())`,
     `await (await import("@/lib/llm/authorization")).reservationExists(r.credit_ref)`,
-  ], "aucune autre exemption : ingest (gratuit), le propriétaire (critère unique de lib/billing/owner, user du tenant) ou une réservation débitée");
+  ], "aucune autre exemption : ingest (gratuit), le propriétaire pour un job émis à son nom (critère unique de lib/billing/owner) ou une réservation débitée");
   assert.ok(/attempts < maxAttempts && !neverStarted && reservationValid/.test(jobs), "la remise en file doit passer par reservationValid");
 });
