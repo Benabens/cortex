@@ -601,6 +601,8 @@ async function finalQualityAudit(items: QcmItem[], step: StepCb): Promise<QcmIte
     `   CLÉ : ${it.correct.join(", ")}`,
     `   EXPLICATION : ${sanitizeCorpus(it.explanation ?? "")}`,
   ].join("\n")).join("\n\n");
+  // Audit illisible ou en échec : les QCM gardent le verdict de leur vérification à l'aveugle. Lever
+  // ici perdait l'examen entier (« Aucun QCM généré ») alors que tout était déjà vérifié et payé.
   const out = await completeJson<{ items: FinalQualityVerdict[] }>({
     model: "opus", timeoutMs: 420_000, json: { schema: FINAL_QUALITY_SCHEMA },
     prompt: [
@@ -611,7 +613,11 @@ async function finalQualityAudit(items: QcmItem[], step: StepCb): Promise<QcmIte
       DATA_RULE, passages.length ? dataBlock("EXTRAITS DU COURS", passages) : "", "", body, "",
       `Réponds UNIQUEMENT avec {"items":[{"index":0,"key":true,"offCourse":false,"trivial":[]}]}, un objet par QCM.`,
     ].join("\n"),
-  }, { check: (v) => (Array.isArray(v?.items) && v.items.length >= items.length ? null : "il faut un verdict par QCM") });
+  }, { check: (v) => (Array.isArray(v?.items) && v.items.length >= items.length ? null : "il faut un verdict par QCM") }).catch((e) => {
+    step(`Audit final ignoré (${(e as Error).message.slice(0, 60)}) — verdicts de la vérification gardés`, 79);
+    return null;
+  });
+  if (!out) return items;
   step(`Audit final : clés, hors-cours et distracteurs contrôlés en un lot`, 79);
   return applyFinalQualityVerdicts(items, out.items ?? []);
 }
