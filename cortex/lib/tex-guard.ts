@@ -53,6 +53,9 @@ const BANNED = [
   // expl3 : sans \ExplSyntaxOn, « _ » et « : » ne sont pas des lettres, un nom expl3 n'en est pas un.
   // \ProvidesExplPackage / Class / File l'allument aussi, pour toute la suite du fichier.
   "ExplSyntaxOn", "ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile",
+  // PGF : tracés lus dans un fichier, tracés gnuplot (écrivent puis relisent un .table) et
+  // enregistrement d'un tracé dans un fichier. \font charge un fichier par son chemin.
+  "pgfplotxyfile", "pgfplotxyzfile", "pgfplotgnuplot", "pgfplothandlerrecord", "font",
 ];
 const BANNED_RE = new RegExp(String.raw`\\@*(?:${BANNED.join("|")})(?![A-Za-z@])`, "g");
 /**
@@ -64,6 +67,17 @@ const BANNED_RE = new RegExp(String.raw`\\@*(?:${BANNED.join("|")})(?![A-Za-z@])
  * n'existe, sont bannis.
  */
 const EXPL3_RE = /\\[A-Za-z@]+(?:_[A-Za-z@]+)+:[A-Za-z]*|\\[A-Za-z@]+:[A-Za-z]+/g;
+/**
+ * TikZ `plot file {…}` lit un fichier, `plot function {…}` relit un .table (audit du 14/11/2026).
+ * Ce ne sont pas des séquences de contrôle : deux règles. PLOT_OP_RE voit la suite littérale
+ * `plot [options] file|function`, y compris dans le corps d'un \def. Vérifié sous tectonic :
+ * une macro peut tenir lieu de `plot` (`\def\p{plot}\draw \p file {x};`), pas de `file` ;
+ * PLOT_ARG_RE refuse donc le mot-clé suivi de son argument (accolade ou macro), quoi qui le
+ * précède. `\(` reste permis : « the function \(f\) » est une tournure courante.
+ */
+const TEX_SPACE = String.raw`(?:\s|%[^\n]*\n)*`;
+const PLOT_OP_RE = new RegExp(String.raw`(?<![A-Za-z@\\])plot${TEX_SPACE}(?:\[(?:[^\[\]]|\[[^\]]*\])*\]${TEX_SPACE})?(?:file|function)(?![A-Za-z@])`, "g");
+const PLOT_ARG_RE = new RegExp(String.raw`(?<![A-Za-z@\\])(?:file|function)${TEX_SPACE}(?:\{|\\(?![()\[\]]))`, "g");
 /** Primitives XeTeX (tectonic = XeTeX) : \XeTeXpicfile, \XeTeXpdffile, encodages, glyphes… */
 const XETEX_RE = /\\XeTeX[A-Za-z]*/g;
 const ENV_RE = /\\(?:begin|end)\s*\{([^}]*)\}/g;
@@ -143,6 +157,8 @@ export function findTexHazards(tex: string): string[] {
   for (const m of body.matchAll(BANNED_RE)) found.push(m[0]);
   for (const m of body.matchAll(EXPL3_RE)) found.push(m[0]);
   for (const m of body.matchAll(XETEX_RE)) found.push(m[0]);
+  for (const m of body.matchAll(PLOT_OP_RE)) found.push(m[0].replace(/\s+/g, " "));
+  for (const m of body.matchAll(PLOT_ARG_RE)) found.push(m[0].replace(/\s+/g, " "));
   if (/\\ExplSyntaxOn/.test(body)) found.push("\\ExplSyntaxOn");
   if (/\^\^/.test(body)) found.push("^^");
   const envs = allowedEnvs();
