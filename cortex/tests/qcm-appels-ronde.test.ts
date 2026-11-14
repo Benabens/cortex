@@ -185,3 +185,22 @@ test("audit final illisible : les QCM déjà vérifiés sont livrés, l'examen n
   const { r } = await exam(8);
   assert.equal(r.count, 8, JSON.stringify(calls));
 });
+
+test("audit final : une clé jugée fausse est remplacée, la livraison reste 15/15", async (t) => {
+  contestedEvery = 0;
+  // Le premier audit écarte deux questions déjà vérifiées ; le ré-audit les confirme absentes.
+  auditRejects = (stem) => /Question (4|9) /.test(stem);
+  const { r, items } = await exam(15);
+  t.diagnostic(`${r.count}/15 livrées · ${JSON.stringify(calls)} → ${total()} appels`);
+  assert.equal(r.count, 15, JSON.stringify(calls));
+  assert.ok(!items.some((it) => /Question (4|9) /.test(it.stem)), "une clé fausse n'est jamais livrée");
+});
+
+test("dédoublonnage : un contrôle qui voit des doublons à chaque passe ne fait jamais tomber la livraison sous l'acquis", async (t) => {
+  contestedEvery = 0; trivialEvery = 0;
+  dedupe = () => [{ first: 0, second: 1, reason: "même notion" }, { first: 2, second: 3, reason: "même notion" }];
+  const { r } = await exam(15);
+  t.diagnostic(`${r.count}/15 livrées · ${JSON.stringify(calls)} → ${total()} appels`);
+  assert.equal(r.count, 15, JSON.stringify(calls));
+  assert.ok(calls.dedup <= 10, `contrôles des doublons bornés : ${calls.dedup}`);
+});
