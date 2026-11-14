@@ -46,14 +46,38 @@ beforeEach(() => {
 const spend = (usd: number) => usage.recordUsage({ provider: "anthropic", model: "claude-sonnet-5", tokensIn: usd * 500_000 });
 const isSpendCap = (e: unknown) => (e as { code?: string }).code === "SPEND_CAP";
 
+/**
+ * Le montant et le mois restent VÉRIFIÉS, mais dans les logs serveur : le message
+ * d'exception (repris mot pour mot jusqu'à l'étudiant, lib/llm/errors.ts) ne doit
+ * plus en porter aucun (constat prod du 14/11 — plafond par jour affiché avec son
+ * montant et SPEND_CAP_PER_USER_USD à l'étudiant).
+ */
+/** Capture les logs JSON émis pendant `fn`, qu'elle rejette ou non (ne change pas son issue). */
+async function captureLog(fn: () => Promise<unknown>): Promise<{ logs: Record<string, unknown>[]; error: unknown }> {
+  const origLog = console.log, origErr = console.error;
+  const lines: string[] = [];
+  console.log = (s: string) => lines.push(s);
+  console.error = (s: string) => lines.push(s);
+  let error: unknown;
+  try {
+    await fn();
+  } catch (e) {
+    error = e;
+  } finally {
+    console.log = origLog;
+    console.error = origErr;
+  }
+  return { logs: lines.map((l) => { try { return JSON.parse(l); } catch { return {}; } }), error };
+}
+
 test("le plafond global ne compte que le mois UTC en cours : atteint le 31, rouvert le 1er", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2026, 9, 31, 23, 59, 50) });
   process.env.SPEND_CAP_USD = "10";
   await spend(12);
-  await assert.rejects(
-    () => usage.assertSpendCap("anthropic"),
-    (e: Error) => isSpendCap(e) && /du mois/.test(e.message) && e.message.includes("12.00 $"),
-  );
+  const { logs, error } = await captureLog(() => usage.assertSpendCap("anthropic"));
+  assert.ok(isSpendCap(error), String(error));
+  assert.ok(!/\$|SPEND_CAP_USD/.test((error as Error).message), `message étudiant sans montant ni variable : ${(error as Error).message}`);
+  assert.ok(logs.some((l) => l.evt === "spend_cap.global_hit" && l.spent === 12), "le montant reste dans les logs serveur");
 
   // Quinze secondes plus tard, on est le 1er novembre : la dépense d'octobre ne compte plus.
   t.mock.timers.setTime(Date.UTC(2026, 10, 1, 0, 0, 5));
@@ -288,7 +312,11 @@ test("fail-closed inchangé : défaut de 50 $, « unlimited », kill-switch « 0
   assert.equal(sent.length, 0);
   await spend(11);
   freshProcess();
-  await assert.rejects(() => usage.assertSpendCap("anthropic"), (e: Error) => isSpendCap(e) && e.message.includes("SPEND_CAP_USD=50 $"));
+  {
+    const { logs, error } = await captureLog(() => usage.assertSpendCap("anthropic"));
+    assert.ok(isSpendCap(error), String(error));
+    assert.ok(logs.some((l) => l.evt === "spend_cap.global_hit" && l.cap === 50), "le défaut fail-closed (50 $) reste dans les logs serveur");
+  }
   assert.equal(sent.length, 1);
 
   // Levée explicite : plus de plafond, donc plus de seuil.
@@ -380,12 +408,19 @@ test("à minuit le 1er, la somme lue et le mois annoncé sont ceux du même mois
   await spend(12);
 
   // La somme de mars est demandée à 23:59:59 ; quand elle revient, on est en avril.
-  const refused = assert.rejects(
-    () => usage.assertSpendCap("anthropic"),
-    (e: Error) => isSpendCap(e) && e.message.includes("pour 2028-03"),
-  );
+  const origLog = console.log, origErr = console.error;
+  const lines: string[] = [];
+  console.log = (s: string) => lines.push(s);
+  console.error = (s: string) => lines.push(s);
+  let capturedError: unknown;
+  const refused = usage.assertSpendCap("anthropic").catch((e) => { capturedError = e; });
   t.mock.timers.setTime(Date.UTC(2028, 3, 1, 0, 0, 0));
   await refused;
+  console.log = origLog;
+  console.error = origErr;
+  assert.ok(isSpendCap(capturedError), String(capturedError));
+  const logs = lines.map((l) => { try { return JSON.parse(l); } catch { return {}; } });
+  assert.ok(logs.some((l) => l.evt === "spend_cap.global_hit" && l.month === "2028-03"), "le mois demandé reste dans les logs serveur");
   assert.equal(sent.length, 1);
   assert.ok(sent[0].text.includes("2028-03"), sent[0].text);
 

@@ -5,7 +5,9 @@ import { authAll, authInsert, authRun } from "@/db/auth-store";
 import { nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import { LlmError } from "@/lib/llm/types";
+import { defaultProviderName } from "@/lib/llm/config";
 import { guardsActive, floatLimit } from "./env";
+import type { GateIssue } from "./guards";
 import { ownerAlertBlocker } from "./owner-alert";
 import { alertSpendThresholds, resetSpendAlerts } from "./spend-alerts";
 
@@ -333,6 +335,38 @@ export async function assertSpendCap(provider: string): Promise<void> {
   }
 }
 
+/**
+ * Même garde qu'assertSpendCap, en VALEUR plutôt qu'en exception : à appeler
+ * AVANT de créer un job (lib/generation.ts), pour refuser tout de suite plutôt
+ * que de lancer un worker voué à l'échec 2 s après (constat prod du 14/11,
+ * job 21 HUM-285 — l'étudiant voyait un job « en cours » puis en erreur).
+ * N'écrit rien de plus que assertSpendCap (mêmes logs) ; ignore le provider CLI
+ * local (toujours gratuit).
+ */
+export async function spendCapGate(): Promise<GateIssue | null> {
+  if (!isPaidProvider(defaultProviderName())) return null;
+  try {
+    await assertSpendCapUnchecked();
+    return null;
+  } catch (e) {
+    if (e instanceof LlmError) return { status: 429, error: e.message };
+    // Base injoignable : laissé à assertSpendCap au moment de l'appel réel (fail-closed là, pas ici).
+    return null;
+  }
+}
+
+/**
+ * Message étudiant du plafond GLOBAL : jamais de montant ni de nom de variable
+ * (OWN_LLM_CODES le reprend mot pour mot jusqu'à l'app et au connecteur MCP,
+ * cf. lib/llm/errors.ts). Le détail (montants, mois) part dans les logs serveur.
+ */
+const GLOBAL_SPEND_CAP_MESSAGE =
+  "Limite de génération atteinte pour tout Cortex ce mois-ci. Le reste du site fonctionne normalement ; la génération rouvre le 1er du mois prochain.";
+
+/** Même principe pour le plafond PAR COMPTE — remboursement vérifié : lib/jobs.ts `fail()` rend les crédits réservés d'un job en erreur. */
+const PER_USER_SPEND_CAP_MESSAGE =
+  "Plafond de génération atteint pour ce compte aujourd'hui. Réessaie demain : tes crédits n'ont pas été débités.";
+
 async function assertSpendCapUnchecked(): Promise<void> {
   const globalCap = spendCapUsd();
   if (globalCap !== null) {
@@ -340,12 +374,8 @@ async function assertSpendCapUnchecked(): Promise<void> {
     const spent = spend.total;
     await alertOnSpend(spend);
     if (spent >= globalCap) {
-      throw new LlmError(
-        `Plafond de dépense global du mois atteint (${spent.toFixed(2)} $ ≥ SPEND_CAP_USD=${globalCap} $ pour ${spend.month}), génération coupée. ` +
-        `Le reste du site fonctionne ; elle rouvre le 1er du mois prochain (UTC), ou dès que SPEND_CAP_USD est relevé.`,
-        "SPEND_CAP",
-        false,
-      );
+      log("warn", "spend_cap.global_hit", { spent, cap: globalCap, month: spend.month });
+      throw new LlmError(GLOBAL_SPEND_CAP_MESSAGE, "SPEND_CAP", false);
     }
   }
 
@@ -355,12 +385,8 @@ async function assertSpendCapUnchecked(): Promise<void> {
   if (perUserCap !== null) {
     const spentUser = await spentTodayByUser();
     if (spentUser >= perUserCap) {
-      throw new LlmError(
-        `Plafond de dépense quotidien atteint pour ce compte (${spentUser.toFixed(2)} $ ≥ ${perUserCap} $/jour). ` +
-        `Réessaie demain, ou augmente SPEND_CAP_PER_USER_USD.`,
-        "SPEND_CAP",
-        false,
-      );
+      log("warn", "spend_cap.per_user_hit", { spentUser, cap: perUserCap, userId: currentUser() });
+      throw new LlmError(PER_USER_SPEND_CAP_MESSAGE, "SPEND_CAP", false);
     }
   }
 }

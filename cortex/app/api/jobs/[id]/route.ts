@@ -1,4 +1,5 @@
 import { cancelJob, getJob, jobEta } from "@/lib/jobs";
+import { redactMessage } from "@/lib/observability";
 import { useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -13,7 +14,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!job) return NextResponse.json({ error: "job introuvable" }, { status: 404 });
   // Temps restant estimé (lib/eta) : affiché par le suivi, jamais bloquant.
   const eta = await jobEta(job).catch(() => null);
-  return NextResponse.json({ ...job, eta: eta?.label ?? null });
+  // Même nettoyage que le connecteur MCP (lib/mcp/tools/get-job-status) : error ET
+  // currentStep sont affichés tels quels par l'app (JobBanner, ExamComposer…), et une
+  // cause brute (fournisseur, journal tectonic) peut citer un chemin ou un identifiant.
+  return NextResponse.json({
+    ...job,
+    error: job.error ? redactMessage(job.error) : job.error,
+    currentStep: job.currentStep ? redactMessage(job.currentStep) : job.currentStep,
+    eta: eta?.label ?? null,
+  });
 }
 
 /** Annulation (alias historique de /cancel) : tue réellement le worker et ses enfants. */

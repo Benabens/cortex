@@ -1,6 +1,8 @@
 import { creditsGate } from "@/lib/billing/credits";
 import { generationGate } from "@/lib/billing/guards";
+import { spendCapGate } from "@/lib/billing/usage";
 import { ReservationRefused, activeJob, createJobExclusive, startWorker, type JobType } from "@/lib/jobs";
+import { log } from "@/lib/metrics";
 import { preflightGeneration } from "@/lib/preflight";
 import { planMockExam, requestedFormat, resolveExamFormat, targetKind, type ExamKind } from "@/lib/exam-format";
 
@@ -27,7 +29,7 @@ export async function startGenerationJob(type: JobType, target?: string): Promis
     // Le paywall précède les contraintes de contenu : à solde nul, toute
     // tentative de génération doit expliquer le coût et proposer l'achat,
     // même si le cours n'est pas encore prêt ou son format encore inconnu.
-    const billingIssue = (await generationGate("gen")) ?? (await creditsGate(type));
+    const billingIssue = (await generationGate("gen")) ?? (await creditsGate(type)) ?? (await spendCapGate());
     if (billingIssue) return { ok: false, status: billingIssue.status, error: billingIssue.error };
     // Un examen blanc suit le format du cours ; inconnu, il n'est jamais inventé (lib/exam-format).
     if (type === "exam") {
@@ -59,7 +61,7 @@ export async function startPrepareJob(): Promise<StartedJob | StartRefused> {
   }
   return startJob("prepare", undefined, async () => {
     // La préparation fait de la vision LLM sur les annales (coûteux) → quota + crédits comme toute génération.
-    const gate = (await generationGate("gen")) ?? (await creditsGate("prepare"));
+    const gate = (await generationGate("gen")) ?? (await creditsGate("prepare")) ?? (await spendCapGate());
     return gate && { ok: false, status: gate.status, error: gate.error };
   });
 }
@@ -82,7 +84,8 @@ async function startJob(type: JobType, target: string | undefined, precheck: () 
   try {
     await startWorker(created.id, undefined);
   } catch (e) {
-    return { ok: false, status: 500, error: `Impossible de lancer le worker : ${(e as Error)?.message ?? e}` };
+    log("error", "generation.start_worker_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
+    return { ok: false, status: 500, error: "Impossible de démarrer la génération. Réessaie dans un instant." };
   }
   return { ok: true, jobId: created.id, existing: created.existing };
 }

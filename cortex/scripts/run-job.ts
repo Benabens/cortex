@@ -32,7 +32,17 @@ heartbeatJob(jobId).catch(() => {});
 async function fail(msg: string): Promise<never> {
   // Annulé entre-temps par l'utilisateur : cancelJob a statué (remboursement compris), on n'écrase rien.
   try { if ((await getJob(jobId))?.status === "canceled") process.exit(0); } catch {}
-  try { await setJob(jobId, { status: "error", error: msg }); await logJob(jobId, "ERREUR : " + msg); } catch {}
+  try {
+    // Rien de livrable (pas de résultat) : la progression PAR PHASE (lib/progress) peut
+    // afficher un pourcentage très avancé pour un échec immédiat — un lot QCM qui échoue
+    // vaut « son unité faite » pour l'ETA (progress.done("QCM", 1) dans lib/qcm.ts), ce qui
+    // gonfle l'avancement même à 0 question construite (constat prod 14/11, job 21 HUM-285 :
+    // plafond de dépense touché en 2 s, progress_pct affiché à 99). Sans résultat, 0 est le
+    // seul pourcentage honnête.
+    const current = await getJob(jobId);
+    await setJob(jobId, { status: "error", error: msg, ...(current && !current.resultId ? { progress: 0 } : {}) });
+    await logJob(jobId, "ERREUR : " + msg);
+  } catch {}
   // Suivi d'erreurs optionnel : un job qui échoue de nuit doit être visible.
   // Étiquettes techniques seulement — le message de job peut citer un cours.
   try {
