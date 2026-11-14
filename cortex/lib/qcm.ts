@@ -584,11 +584,11 @@ export function applyFinalQualityVerdicts<T extends Pick<QcmItem, "options" | "c
 const FINAL_QUALITY_SCHEMA = {
   type: "object",
   properties: {
-    items: { type: "array", items: { type: "object", properties: {
+    verdicts: { type: "array", items: { type: "object", properties: {
       index: { type: "integer" }, key: { type: "boolean" }, offCourse: { type: "boolean" },
       trivial: { type: "array", items: { type: "integer" } },
     }, required: ["index", "key", "offCourse", "trivial"], additionalProperties: false } },
-  }, required: ["items"], additionalProperties: false,
+  }, required: ["verdicts"], additionalProperties: false,
 } as const;
 
 /** Une passe courte calquée sur la rubrique du banc, avec clé et explication visibles. */
@@ -603,7 +603,7 @@ async function finalQualityAudit(items: QcmItem[], step: StepCb): Promise<QcmIte
   ].join("\n")).join("\n\n");
   // Audit illisible ou en échec : les QCM gardent le verdict de leur vérification à l'aveugle. Lever
   // ici perdait l'examen entier (« Aucun QCM généré ») alors que tout était déjà vérifié et payé.
-  const out = await completeJson<{ items: FinalQualityVerdict[] }>({
+  const out = await completeJson<{ verdicts: FinalQualityVerdict[] }>({
     model: "opus", timeoutMs: 420_000, json: { schema: FINAL_QUALITY_SCHEMA },
     prompt: [
       `Tu es un examinateur exigeant. Pour chaque QCM, tranche selon les extraits du cours.`,
@@ -611,15 +611,15 @@ async function finalQualityAudit(items: QcmItem[], step: StepCb): Promise<QcmIte
       `offCourse : true si la bonne réponse ou l'explication repose sur une notion ou un fait absent des extraits et qui n'est pas une connaissance générale de la matière. Un distracteur faux n'est pas hors cours.`,
       `trivial : indices des mauvaises options qu'un étudiant qui ne connaît PAS le cours élimine quand même : absurde, hors sujet, marqueur d'absolu évident, incohérence grammaticale ou longueur qui trahit.`,
       DATA_RULE, passages.length ? dataBlock("EXTRAITS DU COURS", passages) : "", "", body, "",
-      `Réponds UNIQUEMENT avec {"items":[{"index":0,"key":true,"offCourse":false,"trivial":[]}]}, un objet par QCM.`,
+      `Réponds UNIQUEMENT avec {"verdicts":[{"index":0,"key":true,"offCourse":false,"trivial":[]}]}, un objet par QCM.`,
     ].join("\n"),
-  }, { check: (v) => (Array.isArray(v?.items) && v.items.length >= items.length ? null : "il faut un verdict par QCM") }).catch((e) => {
+  }, { check: (v) => (Array.isArray(v?.verdicts) && v.verdicts.length >= items.length && v.verdicts.every((x) => typeof x?.key === "boolean") ? null : "il faut un verdict par QCM") }).catch((e) => {
     step(`Audit final ignoré (${(e as Error).message.slice(0, 60)}) — verdicts de la vérification gardés`, 79);
     return null;
   });
   if (!out) return items;
   step(`Audit final : clés, hors-cours et distracteurs contrôlés en un lot`, 79);
-  return applyFinalQualityVerdicts(items, out.items ?? []);
+  return applyFinalQualityVerdicts(items, out.verdicts ?? []);
 }
 
 /** Étiquette d'un thème déjà couvert par une autre question de l'examen. */
