@@ -438,25 +438,38 @@ function onlyTrivialDistractors(it: QcmItem): boolean {
   return !!it.trivialDistractors?.length && !it.rejected && !it.figureFile && weaknessOf({ ...it, trivialDistractors: null }) === null;
 }
 
+/** Part maximale de distracteurs triviaux dans un examen livré (critère « triviaux » du banc). */
+const TRIVIAL_BUDGET = 0.1;
+
+/** Part de distracteurs triviaux d'une sélection au-dessus du budget (banc : « triviaux »). */
+export function overTrivialBudget(items: Pick<QcmItem, "options" | "correct" | "trivialDistractors">[]): boolean {
+  const distractors = items.reduce((n, q) => n + Math.max(0, q.options.length - q.correct.length), 0);
+  const trivial = items.reduce((n, q) => n + (q.trivialDistractors?.length ?? 0), 0);
+  return distractors > 0 && trivial / distractors > TRIVIAL_BUDGET;
+}
+
 /**
  * Garde les meilleurs QCM déjà vérifiés tout en bornant à 10 % la part des distracteurs
  * signalés comme triviaux. Les candidats propres passent d'abord ; une question légèrement
  * imparfaite peut ensuite éviter un remboursement, sans que plusieurs lots dépassent ensemble
  * le budget de l'examen.
  */
-export function selectWithinTrivialBudget<T extends Pick<QcmItem, "options" | "correct" | "trivialDistractors" | "discrimination"> & { topic?: string }>(current: T[], candidates: T[], limit: number): T[] {
+
+export function selectWithinTrivialBudget<T extends Pick<QcmItem, "options" | "correct" | "trivialDistractors" | "discrimination"> & { topic?: string; judgeOk?: boolean | null }>(current: T[], candidates: T[], limit: number): T[] {
   const out = current.slice(0, limit);
   let distractors = out.reduce((n, q) => n + Math.max(0, q.options.length - q.correct.length), 0);
   let trivial = out.reduce((n, q) => n + (q.trivialDistractors?.length ?? 0), 0);
   const ranked = candidates.map((q, i) => ({ q, i })).sort((a, b) =>
     (a.q.trivialDistractors?.length ?? 0) - (b.q.trivialDistractors?.length ?? 0)
+      // Clé confirmée mais défaut relevé par le correcteur : gardée, après les questions sans défaut.
+      || Number(a.q.judgeOk === false) - Number(b.q.judgeOk === false)
       || (b.q.discrimination ?? 0) - (a.q.discrimination ?? 0)
       || a.i - b.i);
   const append = (q: T, enforceBudget = true) => {
     if (out.length >= limit) return;
     const nextDistractors = distractors + Math.max(0, q.options.length - q.correct.length);
     const nextTrivial = trivial + (q.trivialDistractors?.length ?? 0);
-    if (enforceBudget && nextDistractors > 0 && nextTrivial / nextDistractors > 0.1) return;
+    if (enforceBudget && nextDistractors > 0 && nextTrivial / nextDistractors > TRIVIAL_BUDGET) return;
     out.push(q);
     distractors = nextDistractors;
     trivial = nextTrivial;
@@ -505,20 +518,10 @@ const REPLACEMENTS_SCHEMA = `{ "replacements": [ { "index": <numéro Q>, "distra
  * DISTRACTEURS TRIVIAUX REMPLACÉS, PAS LA QUESTION — banc moteur du 04/11/2026 (CS-290) : 41 QCM
  * vérifiés sur 50 avaient au moins un distracteur éliminable sans le cours ; régénérer la question
  * entière jetait un énoncé et une clé justes, et l'item était perdu si le nouveau tirage en gardait
- * un. Un seul appel par lot remplace les options relevées (taxonomie des distracteurs), avec
+ * un. Un seul appel par ronde remplace les options relevées (taxonomie des distracteurs), avec
  * l'explication ; l'énoncé, la clé et les autres options restent. Le résultat est revérifié.
  */
-async function replaceTrivialDistractors(items: QcmItem[], step: StepCb, language?: string): Promise<QcmItem[]> {
-  const chunks: QcmItem[][] = [];
-  for (let i = 0; i < items.length; i += 4) chunks.push(items.slice(i, i + 4));
-  const repaired = await Promise.all(chunks.map((chunk) => replaceTrivialDistractorsBatch(chunk, step, language).catch((e) => {
-    step(`Micro-lot de distracteurs ignoré (${(e as Error).message.slice(0, 50)})`, 0);
-    return chunk;
-  })));
-  return repaired.flat();
-}
-
-async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, language?: string, verify = true): Promise<QcmItem[]> {
+async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, language?: string): Promise<QcmItem[]> {
   const lang = languageName(language ?? examLanguageFor(currentCourse()))[1];
   // Banc du 04/11 : sans le cours sous les yeux, les remplaçants étaient eux aussi génériques et
   // re-signalés une fois sur deux ; ils se bâtissent sur des notions voisines des extraits.
@@ -559,13 +562,9 @@ async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, la
   const sent = repaired.filter((x): x is QcmItem => !!x);
   if (!sent.length) return items;
   step(`${sent.length} QCM : distracteur(s) éliminable(s) remplacé(s), énoncé et clé gardés`, 0);
-  if (!verify) {
-    let n = 0;
-    return repaired.map((x, k) => (x ? { ...sent[n++], slot: items[k].slot } : items[k]));
-  }
-  const checked = await verifyQcmBatch(sent, step);
+  // Rendus non vérifiés : l'appelant les revérifie en groupe (ronde) ou les ré-audite (audit final).
   let n = 0;
-  return repaired.map((x, k) => (x ? { ...checked[n++], slot: items[k].slot } : items[k]));
+  return repaired.map((x, k) => (x ? { ...sent[n++], slot: items[k].slot } : items[k]));
 }
 
 type FinalQualityVerdict = { index: number; key: boolean; offCourse: boolean; trivial: number[] };
@@ -576,7 +575,8 @@ export function applyFinalQualityVerdicts<T extends Pick<QcmItem, "options" | "c
   return items.flatMap((it, index) => {
     const v = byIndex.get(index);
     if (!v || !v.key || v.offCourse) return [];
-    const trivial = [...new Set((v.trivial ?? []).filter((k) => Number.isInteger(k) && k >= 0 && k < it.options.length && !it.correct.includes(k)))];
+    // Les deux verdicts se cumulent : l'audit ne masque jamais un distracteur que la vérification a relevé.
+    const trivial = [...new Set([...(v.trivial ?? []), ...(it.trivialDistractors ?? [])].filter((k) => Number.isInteger(k) && k >= 0 && k < it.options.length && !it.correct.includes(k)))];
     return [{ ...it, verified: 1, judgeOk: true, rejected: null, trivialDistractors: trivial.length ? trivial : null }];
   });
 }
@@ -1359,107 +1359,107 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     [{ name: "PDF", units: 1, ms: phaseMs.PDF }],
   ]);
   const progress = work;
-  /**
-   * Un lot vérifié à l'aveugle ; ses items FAIBLES (réussis avec les seuls noms des notions,
-   * peu discriminants, ou trahis par leur longueur) sont régénérés UNE fois, critique à l'appui,
-   * et remplacés si la nouvelle version est meilleure.
-  */
-  const strengthen = async (bt: Batch, items: QcmItem[]): Promise<QcmItem[]> => {
-    // Arrêt anticipé : une clé confirmée sans rejet ni distracteur signalé est livrable.
-    // Une note de difficulté perfectible guide les prochaines générations, mais ne justifie pas
-    // à elle seule une nouvelle conception + une nouvelle vérification du lot entier.
-    const all = items
-      .filter((it) => it.verified === 0 || it.judgeOk === false || !!it.nameOnly || !!it.rejected || !!it.trivialDistractors?.length)
-      .map((it) => ({ it, i: items.indexOf(it), why: weaknessOf(it) }))
-      .filter((w): w is { it: QcmItem; i: number; why: string } => !!w.why);
-    if (!all.length) return items;
-    // Seuls des distracteurs triviaux : on les remplace (énoncé et clé gardés) ; le reste est régénéré.
-    const fixable = all.filter((w) => w.it.verified === 1 && !w.it.rejected && !!w.it.trivialDistractors?.length);
-    const weak = all.filter((w) => !fixable.includes(w));
-    const repaired = fixable.length
-      ? replaceTrivialDistractors(fixable.map((w) => w.it), step, shared.language).catch((e) => {
-        step(`Remplacement des distracteurs ignoré (${(e as Error).message.slice(0, 50)})`, 0);
-        return fixable.map((w) => w.it);
-      })
-      : Promise.resolve([] as QcmItem[]);
-    const regenerated = weak.length ? regenerate(bt, items, weak) : Promise.resolve(items);
-    const [fixed, initial] = await Promise.all([repaired, regenerated]);
-    let out = initial;
-    fixable.forEach((w, k) => {
-      const n = fixed[k];
-      // Rendu tel quel (remplacement échoué) : l'item d'origine suit la règle commune.
-      if (!n || n === w.it || n.verified !== 1 || n.rejected) return;
-      if (!n.rejected && !n.trivialDistractors?.length) { out[w.i] = { ...n, slot: w.it.slot }; return; }
-      if (onlyTrivialDistractors(n)) step(`QCM à régénérer après une réparation : un distracteur reste éliminable sans le cours`, 0);
-    });
-    // Après cette unique réparation groupée, un résidu trivial reste candidat au budget global
-    // de 10 %. Le régénérer ici ajoutait conception + vérification à chaque lot, puis trois rondes
-    // de comblement, alors qu'une question absente est plus dommageable pour l'étudiant.
-    fixable.forEach((w, k) => {
-      const n = fixed[k];
-      if (n?.verified === 1 && !n.rejected && onlyTrivialDistractors(n)) out[w.i] = { ...n, slot: w.it.slot };
-    });
+  type BatchResult = { items: QcmItem[]; error: unknown; rejected: Set<number> };
+  /** En-tête de la consigne d'une nouvelle conception sur des sujets dont la question était trop faible. */
+  const TO_FIX = `À CORRIGER — ces questions étaient trop faibles ; écris-en de NOUVELLES sur les mêmes sujets, sans ces défauts (options = propositions complètes, distracteurs de la taxonomie, fait précis du cours) :`;
+  type Weak = { b: number; it: QcmItem; i: number; why: string };
+  /** Une vérification ou une réparation groupée porte au plus GROUP questions (plusieurs lots). */
+  const GROUP = 8;
+  const chunked = <T,>(xs: T[]): T[][] => Array.from({ length: Math.ceil(xs.length / GROUP) }, (_, k) => xs.slice(k * GROUP, (k + 1) * GROUP));
+  /** verifyQcmBatch écrit ses verdicts SUR les items reçus (verified, rejected…) : rien à réassembler. */
+  const verifyGrouped = async (items: QcmItem[]): Promise<void> => { await Promise.all(chunked(items).map((c) => verifyQcmBatch(c, step))); };
+  /** Défaut d'un QCM vérifié qui justifie une réparation ou une régénération, ou null s'il est livrable. */
+  const defectOf = (it: QcmItem) => (it.verified === 0 || it.judgeOk === false || !!it.nameOnly || !!it.rejected || !!it.trivialDistractors?.length ? weaknessOf(it) : null);
+  /** Régénère en entier des QCM faibles de plusieurs lots, en appels groupés par consigne de lot. */
+  const regenerateGrouped = async (group: Batch[], weak: Weak[]): Promise<Map<Weak, QcmItem>> => {
+    const out = new Map<Weak, QcmItem>();
+    if (!weak.length) return out;
+    step(`${weak.length} QCM trop faible(s) → régénération ciblée`, 0);
+    const byGuidance = new Map<string, Weak[]>();
+    for (const w of weak) byGuidance.set(group[w.b].guidance ?? "", [...(byGuidance.get(group[w.b].guidance ?? "") ?? []), w]);
+    // Par paquets d'un lot (BATCH) : un item écarté à la conception fait perdre son paquet entier.
+    const lots = (ws: Weak[]) => Array.from({ length: Math.ceil(ws.length / BATCH) }, (_, k) => ws.slice(k * BATCH, (k + 1) * BATCH));
+    await Promise.all([...byGuidance].flatMap(([extra, ws]) => lots(ws).map(async (chunk) => {
+      const guidance = [
+        TO_FIX,
+        ...chunk.map((w) => `  - « ${sanitizeCorpus(w.it.stem).slice(0, 160)} » : ${sanitizeCorpus(w.why)}`),
+        // La consigne du lot (notions déjà posées, pour un remplacement de doublon) suit la régénération.
+        extra,
+      ].filter(Boolean).join("\n");
+      const slot = (w: Weak) => w.it.slot ?? w.i;
+      try {
+        const again = await generateQcmBatch(chunk.map((w) => group[w.b].topics[slot(w)]), chunk.length, step, undefined, guidance, { ...shared, molds: chunk.map((w) => group[w.b].molds[slot(w)] ?? null) });
+        // Un item écarté à la conception décalerait l'appariement : on ne remplace qu'un paquet complet.
+        if (again.length === chunk.length) chunk.forEach((w, k) => out.set(w, again[k]));
+      } catch (e) {
+        step(`Régénération ignorée (${(e as Error).message.slice(0, 50)}) — items d'origine gardés`, 0);
+      }
+    })));
     return out;
   };
-  /** Régénère en entier les QCM faibles (autre défaut que des distracteurs triviaux). */
-  const regenerate = async (bt: Batch, items: QcmItem[], weak: { it: QcmItem; i: number; why: string }[]): Promise<QcmItem[]> => {
-    step(`${weak.length} QCM trop faible(s) → régénération ciblée`, 0);
-    const guidance = [
-      `À CORRIGER — ces questions étaient trop faibles ; écris-en de NOUVELLES sur les mêmes sujets, sans ces défauts (options = propositions complètes, distracteurs de la taxonomie, fait précis du cours) :`,
-      ...weak.map((w) => `  - « ${sanitizeCorpus(w.it.stem).slice(0, 160)} » : ${sanitizeCorpus(w.why)}`),
-    ].join("\n");
-    try {
-      const pick = <T,>(arr: T[]) => weak.map((w) => arr[w.it.slot ?? w.i]);
-      // La consigne du lot (notions déjà posées, pour un remplacement de doublon) suit la régénération.
-      const again = await verifyQcmBatch(await generateQcmBatch(pick(bt.topics), weak.length, step, undefined, [guidance, bt.guidance].filter(Boolean).join("\n"), { ...shared, molds: pick(bt.molds) }), step);
-      // Un item écarté à la conception décalerait l'appariement : on ne remplace qu'un lot complet,
-      // et seulement par une version VÉRIFIÉE (une vérification en échec rend des items non vérifiés).
-      if (again.length !== weak.length) return items;
-      const out = items.slice();
-      weak.forEach((w, k) => {
-        const n = again[k];
-        // Un item rejeté n'est jamais gardé : toute version vérifiée vaut mieux qu'un lot de comblement.
-        if (n.verified === 1 && (w.it.rejected || !weaknessOf(n) || (n.discrimination ?? 0) > (w.it.discrimination ?? 0))) out[w.i] = { ...n, slot: w.it.slot };
-      });
-      return out;
-    } catch (e) {
-      step(`Régénération ignorée (${(e as Error).message.slice(0, 50)}) — items d'origine gardés`, 0);
-      return items;
-    }
-  };
   /**
-   * Un lot conçu, vérifié, renforcé. Un échec (après les réessais de completeJson) rend 0 item et sa cause.
-   * `rejected` : les sujets dont la question a été conçue puis ÉCARTÉE par les contrôles (le sujet
-   * lui-même est en cause), à distinguer d'un item mal formé ou absent (un raté du modèle).
+   * UNE RONDE GROUPÉE — banc du 13/11 (rs-qcm15) : chaque lot de 4 enchaînait seul conception →
+   * vérification → réparation → revérification, soit 23 vérifications et 12 réparations pour 12
+   * QCM livrés. Ici : les lots sont conçus en parallèle, vérifiés à l'aveugle par paquets de GROUP,
+   * et un QCM déjà bon s'arrête là. Les distracteurs triviaux de toute la ronde sont réparés en UN
+   * appel (énoncé et clé gardés), pendant que les QCM faibles sont régénérés ; réparés et régénérés
+   * repassent ensemble UNE vérification. Une version régénérée ne remplace que si elle est meilleure.
    */
-  const safeBatch = async (bt: Batch): Promise<{ items: QcmItem[]; error: unknown; rejected: Set<number> }> => {
-    // Un lot conçu vaut une moitié de son unité, sa vérification l'autre (banc du 04/11 : 8 %
-    // affichés pendant 3 à 5 min, tant que le premier lot n'était pas vérifié et renforcé).
-    const designed = { done: false };
-    try {
-      return await buildBatch(bt, designed);
-    } finally {
-      progress.done("QCM", designed.done ? 0.5 : 1);
-    }
-  };
-  const buildBatch = async (bt: Batch, designed: { done: boolean }): Promise<{ items: QcmItem[]; error: unknown; rejected: Set<number> }> => {
-    try {
-      const items = await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, bt.guidance, { ...shared, molds: bt.molds });
+  const runRound = async (group: Batch[]): Promise<BatchResult[]> => {
+    const designed = await Promise.all(group.map(async (bt) => {
+      try {
+        const items = await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, bt.guidance, { ...shared, molds: bt.molds });
+        progress.done("QCM", 0.5); // un lot conçu vaut une moitié de son unité, sa vérification l'autre
+        return { items, error: null as unknown };
+      } catch (e) {
+        step(`Lot QCM échoué (${(e as Error).message.slice(0, 80)})`, 0);
+        progress.done("QCM", 1);
+        return { items: [] as QcmItem[], error: e };
+      }
+    }));
+    await verifyGrouped(designed.flatMap((d) => d.items));
+    const outs = designed.map((d) => d.items.slice());
+    // Arrêt anticipé : une clé confirmée sans rejet ni distracteur signalé est livrable.
+    const defects: Weak[] = designed.flatMap((d, b) => d.items.map((it, i) => ({ b, it, i, why: defectOf(it) })))
+      .filter((w): w is Weak => !!w.why);
+    const fixable = defects.filter((w) => w.it.verified === 1 && !w.it.rejected && !!w.it.trivialDistractors?.length);
+    const weak = defects.filter((w) => !fixable.includes(w));
+    const [repaired, regenerated] = await Promise.all([
+      Promise.all(chunked(fixable).map((c) => replaceTrivialDistractorsBatch(c.map((w) => w.it), step, shared.language).catch((e) => {
+        step(`Remplacement des distracteurs ignoré (${(e as Error).message.slice(0, 50)})`, 0);
+        return c.map((w) => w.it);
+      }))).then((r) => r.flat()),
+      regenerateGrouped(group, weak),
+    ]);
+    const changed = fixable.map((w, k) => (repaired[k] && repaired[k] !== w.it ? repaired[k] : null));
+    await verifyGrouped([...changed.filter((n): n is QcmItem => !!n), ...regenerated.values()]);
+    fixable.forEach((w, k) => {
+      const n = changed[k];
+      // Rendu tel quel (remplacement échoué) : l'item d'origine suit la règle commune.
+      if (!n || n.verified !== 1 || n.rejected) return;
+      // Un résidu trivial après cette unique réparation reste candidat au budget global de 10 % :
+      // le régénérer ajoutait conception + vérification, et une question absente coûte plus cher.
+      if (!n.trivialDistractors?.length || onlyTrivialDistractors(n)) outs[w.b][w.i] = { ...n, slot: w.it.slot };
+      if (n.trivialDistractors?.length && onlyTrivialDistractors(n)) step(`QCM à régénérer après une réparation : un distracteur reste éliminable sans le cours (gardé en réserve)`, 0);
+    });
+    weak.forEach((w) => {
+      const n = regenerated.get(w);
+      // Un item rejeté n'est jamais gardé : toute version vérifiée vaut mieux qu'un lot de comblement.
+      if (n?.verified === 1 && (w.it.rejected || !weaknessOf(n) || (n.discrimination ?? 0) > (w.it.discrimination ?? 0))) outs[w.b][w.i] = { ...n, slot: w.it.slot };
+    });
+    return designed.map((d, b) => {
+      if (d.error) return { items: [], error: d.error, rejected: new Set<number>() };
       progress.done("QCM", 0.5);
-      designed.done = true;
-      // Un item resté rejeté après régénération (hors cours, définition différente, hors matière, clé
-      // contestée) n'est jamais gardé : son sujet est comblé. Même règle pour un distracteur resté
-      // éliminable après une réparation : masquer le verdict du moteur créait le désaccord avec le banc.
-      const kept = items.length ? await strengthen(bt, await verifyQcmBatch(items, step)) : [];
-      const out = kept.filter((it) => it.verified === 1 && !it.rejected && (it.judgeOk !== false || !!it.trivialDistractors?.length));
+      const kept = outs[b];
+      // Un item resté rejeté (hors cours, définition différente, hors matière, clé contestée) n'est
+      // jamais gardé : son sujet est comblé. Une clé confirmée dont le correcteur relève encore un
+      // défaut reste candidate : la sélection la classe après les questions sans défaut.
+      const out = kept.filter((it) => it.verified === 1 && !it.rejected);
       qualityDropped += kept.length - out.length;
-      for (const it of out) if (bt.topics[it.slot ?? -1]?.method === FOCUS_METHOD) it.focusSlot = true;
+      for (const it of out) if (group[b].topics[it.slot ?? -1]?.method === FOCUS_METHOD) it.focusSlot = true;
       const rejected = new Set(kept.map((it, n) => ({ it, slot: it.slot ?? n })).filter(({ it }) => !out.includes(it)).map(({ slot }) => slot));
       return { items: out, error: null, rejected };
-    } catch (e) {
-      step(`Lot QCM échoué (${(e as Error).message.slice(0, 80)})`, 0);
-      return { items: [], error: e, rejected: new Set() };
-    }
+    });
   };
   let lastError: unknown = null;
   /** QCM conçus puis écartés par les contrôles (rejet, distracteur trivial) : la cause d'un examen vide n'est pas alors une réponse illisible. */
@@ -1552,30 +1552,37 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   let pending = batches;
   let extraBudget = EXTRA_BATCHES * batches.length;
   for (let round = 0; pending.length; round++) {
-    const missing: { topic: QcmSlot; mold: MoldKind | null; rejected: boolean }[] = [];
+    const missing: { topic: QcmSlot; mold: MoldKind | null; rejected: boolean; why?: string }[] = [];
     // Lots QCM menés en même temps (QCM_BATCH_CONCURRENCY, défaut 8) ; le limiteur global des appels
     // (LLM_MAX_CONCURRENCY) reste la borne commune avec les questions ouvertes.
     const width = batchConcurrency();
     for (let b = 0; b < pending.length; b += width) {
       const group = pending.slice(b, b + width);
-      const got = await Promise.all(group.map(safeBatch));
+      const got = await runRound(group);
       const incoming = got.flatMap((g) => g.items);
       const state = updateVerifiedCandidates(verifiedCandidates, incoming, count);
       verifiedCandidates.splice(0, verifiedCandidates.length, ...state.pool);
       all.splice(0, all.length, ...state.selected);
+      // Les vraies pertes (rejets, doublons, complément final) gardent au moins un lot par lot prévu.
+      const overBudget = overTrivialBudget(all) && extraBudget > batches.length;
       got.forEach((g, k) => {
         qualityDropped += g.items.filter((it) => it.verified !== 1 || !!it.rejected).length;
         if (g.error) lastError = g.error;
         const bt = group[k];
         const filled = new Set(g.items.filter((it) => all.includes(it)).map((it, n) => it.slot ?? n));
         bt.topics.forEach((topic, j) => { if (!filled.has(j)) missing.push({ topic, mold: bt.molds[j] ?? null, rejected: g.rejected.has(j) }); });
+        // Au-delà du budget de triviaux, un QCM gardé faute de mieux est recomblé sur le même sujet,
+        // son défaut à l'appui ; il reste candidat, une place n'est donc jamais perdue.
+        if (overBudget) {
+          for (const it of g.items) if (all.includes(it) && it.trivialDistractors?.length && it.slot != null) missing.push({ topic: bt.topics[it.slot], mold: bt.molds[it.slot] ?? null, rejected: false, why: `« ${sanitizeCorpus(it.stem).slice(0, 160)} » : ${sanitizeCorpus(weaknessOf(it) ?? "")}` });
+        }
       });
       step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
     }
     // completeJson a déjà essayé trois fois chaque lot illisible. Si aucun lot n'a produit le
     // moindre item et qu'une erreur LLM existe, répéter trois rondes identiques multiplie seulement
     // les appels (12 au banc) ; les pertes de qualité, elles, n'ont pas `g.error` et restent comblées.
-    if ((!all.length && lastError) || !missing.length || all.length >= count || round >= TOPUP_ROUNDS || extraBudget <= 0 || hardStop()) break;
+    if ((!all.length && lastError) || !missing.length || (all.length >= count && !overTrivialBudget(all)) || round >= TOPUP_ROUNDS || extraBudget <= 0 || hardStop()) break;
     // Sujets écartés → notions de réserve ; l'accent demandé par l'étudiant reste le sien.
     const swappable = (m: (typeof missing)[number]) => m.rejected && m.topic.method !== FOCUS_METHOD;
     const swaps = takeSpare(Math.min(missing.filter(swappable).length, extraBudget * BATCH));
@@ -1584,7 +1591,9 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     pending = [];
     for (let i = 0; i < slots.length && pending.length < extraBudget; i += BATCH) {
       const slice = slots.slice(i, i + BATCH);
-      pending.push({ topics: slice.map((m) => m.topic), molds: slice.map((m) => m.mold) });
+      const fixes = slice.flatMap((m) => (m.why ? [`  - ${m.why}`] : []));
+      const guidance = fixes.length ? [TO_FIX, ...fixes].join("\n") : undefined;
+      pending.push({ topics: slice.map((m) => m.topic), molds: slice.map((m) => m.mold), guidance });
     }
     extraBudget -= pending.length;
     progress.add("QCM", pending.length); // réessai ajouté : le temps restant peut remonter
@@ -1598,7 +1607,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     let selected = selectWithinTrivialBudget([], audited, count);
     const flagged = selected.filter((it) => !!it.trivialDistractors?.length);
     if (flagged.length) {
-      const repaired = await replaceTrivialDistractorsBatch(flagged, step, shared.language, false);
+      const repaired = await replaceTrivialDistractorsBatch(flagged, step, shared.language);
       const byStem = new Map(flagged.map((it, i) => [it.stem, repaired[i] ?? it]));
       selected = selected.map((it) => byStem.get(it.stem) ?? it);
     }
@@ -1653,7 +1662,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const guidance = !taken.length ? undefined : strict
       ? `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen — n'en reprends AUCUNE, même sous un autre angle : ${[...new Set(taken.map((i) => sanitizeCorpus(notions[i]).slice(0, 80)))].join(" · ")}.`
       : `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen, avec leur angle — si tu reprends l'une d'elles, teste un angle vraiment distinct : ${taken.map((i) => `${sanitizeCorpus(notions[i]).slice(0, 60)} (${sanitizeCorpus(angles[i] || "?").slice(0, 60)})`).join(" · ")}.`;
-    const got = await safeBatch({ topics: spare, molds: spare.map(() => null), guidance });
+    const [got] = await runRound([{ topics: spare, molds: spare.map(() => null), guidance }]);
     if (got.error) lastError = got.error;
     all.splice(0, all.length, ...selectWithinTrivialBudget(all, got.items, count));
   }
@@ -1695,7 +1704,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     progress.add("QCM", fill.length);
     step(`${short} QCM manquant(s) → complément final, ${fill.length} lot(s)${angle ? " (notions reprises sous un autre angle)" : ""}`, 80);
     const before = all.length;
-    for (const g of await Promise.all(fill.map(safeBatch))) {
+    for (const g of await runRound(fill)) {
       if (g.error) lastError = g.error;
       all.push(...g.items.slice(0, Math.max(0, count - all.length)));
     }

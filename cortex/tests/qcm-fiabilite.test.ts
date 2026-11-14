@@ -291,7 +291,8 @@ test("le modèle ne rend jamais assez de QCM : comblement borné, et l'examen di
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
-  design = (_n, call) => JSON.stringify({ items: [item(call)] });
+  // Un seul QCM par lot, et toujours l'un des trois mêmes énoncés : aucun budget ne suffit.
+  design = (_n, call) => JSON.stringify({ items: [item(call % 3)] });
   const r = await runWithCourse(id, () => generateQcmExam({ count: 7, openCount: 0 }));
   assert.ok(r.count > 0 && r.count < 7, `count=${r.count}`);
   assert.equal(r.requested, 7);
@@ -512,7 +513,11 @@ test("K — un distracteur encore trivial après remplacement est réparé une s
 
   const r = await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 0 }));
 
-  assert.equal(repairPrompts.length, 2, "le défaut persistant déclenche une seconde réparation ciblée");
+  // Au-delà du budget de triviaux, le défaut persistant après la réparation groupée de la ronde
+  // déclenche un recomblement ciblé sur le même sujet, son défaut à l'appui (même coût qu'une
+  // seconde réparation : un appel + sa vérification) ; le remplaçant propre passe devant lui.
+  assert.equal(repairPrompts.length, 1, "une seule réparation groupée pour la ronde");
+  assert.ok(designPrompts.some((p) => /À CORRIGER[\s\S]*TypeError/.test(p)), "le recomblement nomme le défaut persistant");
   const options = (await runWithCourse(id, () => getQcmExam(r.id)))!.items.flatMap((x) => x.options);
   assert.ok(!options.some((o) => /TypeError/.test(o)), options.join(" | "));
 });
@@ -630,7 +635,7 @@ test("ETA — sans réessai, l'avancement d'un examen QCM (lots et ouvertes en p
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam } = await import("../lib/qcm");
-  design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
+  design = (n, call) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(10 * call + i)) });
   const seq: { s: string; p: number }[] = [];
   await runWithCourse(id, () => generateQcmExam({ count: 8, openCount: 2, onStep: (s, p) => { seq.push({ s, p }); } }));
   assert.deepEqual(regressions(seq), [], seq.map((x) => `${x.p} ${x.s}`).join("\n"));

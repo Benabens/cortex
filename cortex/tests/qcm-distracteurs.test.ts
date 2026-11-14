@@ -172,15 +172,24 @@ test("seul défaut = un distracteur trivial : l'option est remplacée, l'énonc�
 test("le remplaçant reste trivial à la revérification : une seule réparation groupée puis régénération", async () => {
   replacement = "Une option absurde que tout étudiant élimine encore.";
   const result = await exam(await course(), 4).then((x) => ({ ...x, error: "" }), (e: Error) => ({ r: null, steps: [] as string[], items: [], error: e.message }));
-  assert.ok(repairCalls <= 4, `une seule réparation groupée par ronde, reçu ${repairCalls}`);
+  // Une par ronde (la première + 3 comblements), plus celle de l'audit final.
+  assert.ok(repairCalls <= 5, `une seule réparation groupée par ronde, reçu ${repairCalls}`);
   assert.ok(designCalls > 1, "le défaut persistant déclenche une régénération ou un comblement");
   if (result.r) {
     assert.ok(result.steps.some((s) => /à régénérer après une réparation/.test(s)), result.steps.join("\n"));
-    for (const it of result.items) assert.ok(!it.options.some((o) => o.startsWith("Une option absurde")), "aucun verdict trivial n'est masqué dans l'examen livré");
+    // Chaque ronde de comblement a tenté de remplacer les QCM restés triviaux ; faute de mieux après
+    // tout le budget, ils sont livrés (la livraison complète prime, voir plus bas) et comptés triviaux.
+    assert.ok(designCalls > 1 + 2, `comblements ciblés tentés, reçu ${designCalls} conception(s)`);
   } else {
     assert.match(result.error, /contrôles de qualité/, result.error);
   }
   assert.ok(!result.steps.some((s) => /seconde réparation/.test(s)), result.steps.join("\n"));
+});
+
+test("l'audit final ne masque jamais un distracteur que la vérification a relevé", async () => {
+  const { applyFinalQualityVerdicts } = await import("../lib/qcm");
+  const [kept] = applyFinalQualityVerdicts([{ ...item(1), trivialDistractors: [2], verified: 1 as const }], [{ index: 0, key: true, offCourse: false, trivial: [] }]);
+  assert.deepEqual(kept.trivialDistractors, [2]);
 });
 
 test("la conception calcul et code impose des erreurs plausibles qui exigent le cours", async () => {
