@@ -71,7 +71,7 @@ test("archive et note hors programme exclues même quand un « é » tombe sur l
       await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", title, text);
       return Number(sid);
     };
-    const course = await add("S_ance_5_Cavallaro_D_sinformation.md", `Désinformation générative transnationale. ${"é".repeat(300)}`);
+    const course = await add("S_ance_5_Leroy_D_sinformation.md", `Désinformation générative transnationale. ${"é".repeat(300)}`);
     const note = await add("Notes_s_ance_8.md", offProgram);
     const archive = await add("Archive_2025-26_Exemple_de_r_sum_et_bibliographie_attendu_du_rendu_poster.md", `Rewilding et pergélisol. ${"é".repeat(300)}`);
     return { course, note, archive, excluded: await excludedSourceIds(), heads: await sourceHeads() };

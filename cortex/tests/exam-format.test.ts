@@ -52,7 +52,7 @@ test("un QCM déclaré de 20 questions part au générateur QCM avec 20 question
 });
 
 test("le nombre demandé l'emporte sur le format ; le focus ne change pas le générateur", () => {
-  const plan = planMockExam(fmt({ kind: "qcm", questionCount: 20 }), { count: 6, focus: "QCM ~20 questions moitié Bendahan / moitié Cavallaro" });
+  const plan = planMockExam(fmt({ kind: "qcm", questionCount: 20 }), { count: 6, focus: "QCM ~20 questions moitié Martin / moitié Leroy" });
   assert.deepEqual(plan, { generator: "qcm", qcmCount: 6, openCount: 0 });
 });
 

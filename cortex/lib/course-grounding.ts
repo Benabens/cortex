@@ -39,7 +39,7 @@ const LOGISTICS_PHRASE = /\b(modalites d.examen|modalites d.evaluation|exam form
 
 /**
  * Une note de MODALITÉS D'EXAMEN, pas une notion du cours (même règle que
- * COURSE_MATTER_RULE, appliquée sans modèle) : « Midterm MCQ format — half Bendahan… »
+ * COURSE_MATTER_RULE, appliquée sans modèle) : « Midterm MCQ format — half Martin… »
  * (HUM, 13/11) remontait comme concept à réviser. Lu sur un titre de carte ou un concept.
  */
 export function isExamLogistics(text: string): boolean {
