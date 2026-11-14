@@ -80,10 +80,10 @@ test("un terme qui n'apparaît que dans les consignes d'examen (grille d'évalua
 
 test("matière d'un item : la diapo des enseignants retirée, le reste de la séance gardé ; une archive ne garde rien", async () => {
   const { courseMatter } = await import("../lib/source-scope");
-  const seance = "# Présentation des enseignants\n\nDomaines de recherche : Samuel Bendahan — théorie de la décision appliquée.\n\nLe leadership, c'est la mobilisation de plusieurs personnes vers un objectif commun.";
+  const seance = "# Présentation des enseignants\n\nDomaines de recherche : Marc Martin — théorie des organisations appliquée.\n\nLe leadership, c'est la mobilisation de plusieurs personnes vers un objectif commun.";
   assert.equal(courseMatter(seance), "Le leadership, c'est la mobilisation de plusieurs personnes vers un objectif commun.");
   assert.equal(courseMatter("Le marché biface met en relation producteurs et consommateurs."), "Le marché biface met en relation producteurs et consommateurs.");
-  assert.equal(courseMatter("> Archive 2025-26 (Gillet 2025) — hors programme 2026.\n\nSouveraineté numérique."), "");
+  assert.equal(courseMatter("> Archive 2025-26 (Durand 2025) — hors programme 2026.\n\nSouveraineté numérique."), "");
 });
 
 test("recherche dans tout le corpus : accents, pluriels et flexions trouvés ; archives, annales et diapo des enseignants jamais montrées", async () => {
@@ -97,16 +97,16 @@ test("recherche dans tout le corpus : accents, pluriels et flexions trouvés ; a
       await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, type, title, text);
     };
     const filler = "Le numérique transforme les organisations. ".repeat(60);
-    await add("course_pdf", "S_ance_3_Bendahan_Entreprises.md", `${filler}Ces exemples illustrent un modèle d'affaires basé sur des marchés bifaces, qui mettent en relation des producteurs et des consommateurs. ${filler}`);
-    await add("course_pdf", "S_ance_1_Bendahan_Leadership.md", "# Présentation des enseignants\n\nDomaines de recherche : Samuel Bendahan, théorie de la décision.\n\nLe leadership mobilise plusieurs personnes.");
+    await add("course_pdf", "S_ance_3_Martin_Entreprises.md", `${filler}Ces exemples illustrent un modèle d'affaires basé sur des marchés bifaces, qui mettent en relation des producteurs et des consommateurs. ${filler}`);
+    await add("course_pdf", "S_ance_1_Martin_Leadership.md", "# Présentation des enseignants\n\nDomaines de recherche : Marc Martin, théorie des organisations.\n\nLe leadership mobilise plusieurs personnes.");
     await add("course_pdf", "Archive_2025-26_Exemple_de_r_sum_et_bibliographie_attendu_du_rendu_poster.md", "Rewilding par clonage et rétroaction du pergélisol : exemple de résumé.");
     await add("final", "Examen 2025", "Un marché biface relie producteurs et consommateurs : vrai ou faux ?");
     const biface = await corpusWindows(["plateforme biface producteurs consommateurs"], { cap: 400 });
     assert.equal(biface.length, 1, JSON.stringify(biface));
     assert.match(biface[0].text, /marchés bifaces/);
-    assert.equal(biface[0].src, "S_ance_3_Bendahan_Entreprises.md");
+    assert.equal(biface[0].src, "S_ance_3_Martin_Entreprises.md");
     assert.deepEqual(await corpusWindows(["rewilding par clonage"]), [], "archive jamais montrée");
-    assert.deepEqual(await corpusWindows(["domaines de recherche Bendahan théorie décision"]), [], "diapo des enseignants jamais montrée");
+    assert.deepEqual(await corpusWindows(["domaines de recherche Martin théorie organisations"]), [], "diapo des enseignants jamais montrée");
   });
 });
 
@@ -121,7 +121,7 @@ test("chiffres porteurs : pourcentages, années et entiers trouvés dans le cour
       const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", title, `course_pdf/${title}`, null, 1);
       await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", title, text);
     };
-    await add("S_ance_2_Bendahan.md", "Svenson (1981) : 93 % des conducteurs s'estiment plus habiles que la moyenne.");
+    await add("S_ance_2_Martin.md", "Svenson (1981) : 93 % des conducteurs s'estiment plus habiles que la moyenne.");
     await add("Archive_2025-26_Th\u00e8mes_des_posters_2024.md", "Poster 2024 : 61 % de faux positifs.");
     assert.deepEqual(await absentCourseNumbers(["93", "1981", "61", "14"]), ["61", "14"]);
   });

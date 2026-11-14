@@ -307,8 +307,8 @@ test("banc HUM-285 du 13/11 : notion jugée absente, que la recherche plein text
   const { q } = await import("../db/q");
   // Un second support, NON indexé pour la recherche plein texte : seule la recherche dans tout le corpus le voit.
   await runWithCourse(id, async () => {
-    const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", "S_ance_3_Bendahan_Entreprises.md", "course_pdf/s3", null, 1);
-    await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", "S_ance_3_Bendahan_Entreprises.md", `${"Le numérique transforme les entreprises. ".repeat(40)}Ces exemples illustrent un modèle d'affaires basé sur des marchés bifaces, qui mettent en relation des producteurs et des consommateurs.`);
+    const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", "S_ance_3_Martin_Entreprises.md", "course_pdf/s3", null, 1);
+    await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", "S_ance_3_Martin_Entreprises.md", `${"Le numérique transforme les entreprises. ".repeat(40)}Ces exemples illustrent un modèle d'affaires basé sur des marchés bifaces, qui mettent en relation des producteurs et des consommateurs.`);
   });
   flag = (block) => (/Svenson/.test(block) ? { off: "Le « marché biface » n'est présenté dans aucun extrait.", terms: ["marché biface producteurs consommateurs"] } : null);
   secondLook = (prompt) => {
