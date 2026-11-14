@@ -85,7 +85,7 @@ export async function rateGate(): Promise<GateIssue | null> {
     currentUser(), since,
   );
   if (Number(r?.n ?? 0) >= cap) {
-    return { status: 429, error: `Trop de requêtes — patiente une minute (limite ${cap}/min par compte).` };
+    return { status: 429, error: `Trop de requêtes, patiente une minute (limite ${cap}/min par compte).` };
   }
   return null;
 }

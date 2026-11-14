@@ -94,7 +94,7 @@ export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
         `SELECT count(*) n FROM gen_events WHERE user_id = ? AND created_at >= ?`, userId, nowStr(-60_000),
       );
       if (Number(r?.n ?? 0) >= rateCap) {
-        return { ok: false, status: 429, error: `Trop de requêtes — patiente une minute (limite ${rateCap}/min par compte).` };
+        return { ok: false, status: 429, error: `Trop de requêtes, patiente une minute (limite ${rateCap}/min par compte).` };
       }
     }
     if (dayCap !== null) {

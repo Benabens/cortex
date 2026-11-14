@@ -392,14 +392,14 @@ export function insufficient(balanceCenti: number, costCenti: number, subCenti =
   if (costCenti === 0) {
     return balanceCenti > 0 ? null : {
       status: 402,
-      error: "Solde épuisé. Il te faut des crédits pour cette action — Acheter : https://app.cortexexam.com/compte#credits",
+      error: "Solde épuisé. Il te faut des crédits pour cette action. Acheter : https://app.cortexexam.com/compte#credits",
     };
   }
   if (balanceCenti < costCenti) {
     const dont = subCenti > 0 ? ` (dont ${fmtCredits(subCenti)} d'abonnement ce mois-ci)` : "";
     return {
       status: 402,
-      error: `Solde insuffisant : il te faut ${fmtCredits(costCenti)} crédit(s), génération à ${fmtCredits(costCenti)} — solde ${fmtCredits(balanceCenti)}${dont}. Acheter : https://app.cortexexam.com/compte#credits`,
+      error: `Solde insuffisant : il te faut ${fmtCredits(costCenti)} crédit(s), génération à ${fmtCredits(costCenti)}, solde ${fmtCredits(balanceCenti)}${dont}. Acheter : https://app.cortexexam.com/compte#credits`,
     };
   }
   return null;

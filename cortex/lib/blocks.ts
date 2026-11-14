@@ -1,5 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { nowStr, q } from "@/db/q";
+import { examSummaryLabel } from "@/lib/exam-summary";
 import { getCourse } from "@/lib/courses";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, coursePassages } from "@/lib/course-grounding";
 import { assignChapters, spreadOverChapters } from "@/lib/coverage";
@@ -401,7 +402,7 @@ async function buildBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan
     if (attempt < ATTEMPTS) work.add(BLOCKS_PHASE);
   };
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
-    step(`Question composée ${i + 1}/${n}${attempt > 1 ? ` (version ${attempt})` : ""} — ${slot.section ?? slot.theme.slice(0, 60)}…`, 0);
+    step(`Question composée ${i + 1}/${n}${attempt > 1 ? ` (version ${attempt})` : ""} : ${slot.section ?? slot.theme.slice(0, 60)}…`, 0);
     let b: ExamBlock;
     try {
       b = await generateBlock(slot, i, n, plan, ctx, guidance, passages);
@@ -427,7 +428,7 @@ async function buildBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan
     }
     why = issues.join(" ; ");
     retry(attempt);
-    step(`Question composée ${i + 1} rejetée — ${why.slice(0, 220)}`, 0);
+    step(`Question composée ${i + 1} rejetée : ${why.slice(0, 220)}`, 0);
     guidance = why.slice(0, 1200);
   }
   return { block: null, why };
@@ -498,13 +499,13 @@ export async function generateBlockExam(
   const { buildBlocksArtifact } = await import("@/lib/blocks-latex");
   const art = await buildBlocksArtifact(examId, blocks, nowStr().slice(0, 10)).catch((e: Error) => ({ file: "", texError: e.message, texWarning: undefined as string | undefined }));
   work.done("PDF");
-  if (art.texError) step(`⚠ PDF non compilé (${art.texError.slice(0, 160)}) — l'examen reste consultable en ligne`, 0);
+  if (art.texError) step(`⚠ PDF non compilé (${art.texError.slice(0, 160)}), l'examen reste consultable en ligne`, 0);
   else if (art.texWarning) step(`⚠ ${art.texWarning.slice(0, 200)}`, 0);
   step(phaseLine("PDF", Date.now() - tPdf), 0);
   step(phaseLine("Total", Date.now() - tStart), 0);
   const verified = blocks.filter((b) => b.verified === 1).length;
   await q.run(`UPDATE exams SET status = 'ready', html_path = ?, verify_summary = ? WHERE id = ?`, art.file || null, `${verified}/${blocks.length} questions composées vérifiées à l'aveugle`, examId);
-  report(`Examen #${examId} prêt — ${blocks.length} questions composées ✓`, 100);
+  report(`Examen #${examId} prêt : ${blocks.length} questions composées ✓`, 100);
   return { id: examId, count: blocks.length, requested: n, ...(art.texError ? { texError: art.texError } : {}), ...(art.texWarning ? { texWarning: art.texWarning } : {}) };
 }
 
@@ -555,7 +556,7 @@ export async function getBlockExam(examId: number, withKeys = false): Promise<Bl
   const blocks = await q.all<{ id: number; idx: number; title: string; section: string | null; scenario: string; points: number }>(`SELECT id, idx, title, section, scenario, points FROM exam_blocks WHERE exam_id = ? ORDER BY idx`, examId);
   const parts = await q.all<PartRow>(`SELECT * FROM block_parts WHERE exam_id = ? ORDER BY block_id, idx`, examId);
   return {
-    kind: "blocks", id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: e.verify_summary, pdf: e.html_path ?? null, solutions: solutionsPdf(e.html_path),
+    kind: "blocks", id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: examSummaryLabel(e.verify_summary), pdf: e.html_path ?? null, solutions: solutionsPdf(e.html_path),
     blocks: blocks.map((b) => ({
       id: b.id, idx: b.idx, title: b.title, section: b.section, scenario: b.scenario, points: Number(b.points),
       parts: parts.filter((p) => p.block_id === b.id).map((p) => ({

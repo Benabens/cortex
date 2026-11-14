@@ -108,7 +108,7 @@ export async function handleMcp(req: Request): Promise<Response> {
   const { userId, grantId } = authInfo.extra as { userId: string; grantId: string };
   if (overRate(userId)) {
     return withCors(req, issuer, Response.json(
-      { jsonrpc: "2.0", id: null, error: { code: -32000, message: "Trop de requêtes MCP pour ce compte — réessaie dans une minute." } },
+      { jsonrpc: "2.0", id: null, error: { code: -32000, message: "Trop de requêtes MCP pour ce compte, réessaie dans une minute." } },
       { status: 429, headers: { "retry-after": "60" } },
     ));
   }

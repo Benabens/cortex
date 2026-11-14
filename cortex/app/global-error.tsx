@@ -8,7 +8,7 @@ import { captureClientError } from "@/lib/observability-browser";
 // Palette autonome des deux thèmes (le CSS global peut être la cause du crash). Rendue comme
 // enfant texte de <style> : aucun caractère que React échapperait (& < > " ').
 const PALETTE = `
-:root{color-scheme:dark;--ge-bg:#0c0d15;--ge-ink:#f4f2fb;--ge-muted:#c9c7d6;--ge-faint:#8a8798;--ge-card:rgba(255,255,255,0.03);--ge-line:rgba(255,255,255,0.09);--ge-shadow:0 8px 26px -6px rgba(0,0,0,0.6);--ge-cta:#ececee;--ge-cta-ink:#111214}
+:root{color-scheme:dark;--ge-bg:#080c14;--ge-ink:#f4f5f8;--ge-muted:#bfc1c9;--ge-faint:#9295a0;--ge-card:rgba(255,255,255,0.03);--ge-line:rgba(255,255,255,0.09);--ge-shadow:0 8px 26px -6px rgba(0,0,0,0.6);--ge-cta:#ececee;--ge-cta-ink:#111214}
 :root[data-theme=light]{color-scheme:light;--ge-bg:#f4f6fb;--ge-ink:#0f172a;--ge-muted:#334155;--ge-faint:#5f6b7e;--ge-card:#ffffff;--ge-line:#e6eaf2;--ge-shadow:0 1px 2px rgba(15,23,42,0.04),0 8px 24px -12px rgba(15,23,42,0.12);--ge-cta:#2764ec;--ge-cta-ink:#ffffff}`;
 
 /**
@@ -47,7 +47,7 @@ export default function GlobalError({
       <body style={{ margin: 0 }}>
         <main
           style={{
-            minHeight: "100vh",
+            minHeight: "100dvh",
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
@@ -88,11 +88,11 @@ export default function GlobalError({
             </div>
             <h1 style={{ fontSize: 22, fontWeight: 700, margin: "14px 0 8px" }}>Erreur critique</h1>
             <p style={{ fontSize: 14, lineHeight: 1.55, color: "var(--ge-muted)", margin: 0 }}>
-              L&apos;application n&apos;a pas pu s&apos;afficher. Recharge la page ;
-              si le problème persiste, réessaie dans un instant.
+              L’application n’a pas pu s’afficher. Recharge la page. Si le
+              problème persiste, réessaie dans un instant.
             </p>
             {error?.digest && (
-              <p style={{ fontSize: 12, color: "var(--ge-faint)", marginTop: 12, fontFamily: "'Cortex Mono', ui-monospace, monospace" }}>
+              <p style={{ fontSize: 12, color: "var(--ge-faint)", marginTop: 12, fontVariantNumeric: "tabular-nums" }}>
                 réf. {error.digest}
               </p>
             )}
@@ -103,7 +103,7 @@ export default function GlobalError({
                   appearance: "none",
                   cursor: "pointer",
                   border: "1px solid transparent",
-                  borderRadius: 12,
+                  borderRadius: 9999,
                   padding: "10px 20px",
                   fontSize: 14,
                   fontFamily: "inherit",

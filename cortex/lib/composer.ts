@@ -106,7 +106,7 @@ export async function getComposition(): Promise<CompositionPlan> {
     course,
     kind: "exam",
     summary: format.basis === "annales"
-      ? `${c.examCode} ${c.examName} — ${c.examKind} : ${slots.length} exercices (calcul/trace : ${categories.join(", ")}), ${c.durationMin} min, ${totalPoints} pts`
+      ? `${c.examCode} ${c.examName}, ${c.examKind} : ${slots.length} exercices (calcul/trace : ${categories.join(", ")}), ${c.durationMin} min, ${totalPoints} pts`
       : format.summary,
     durationMin: format.durationMin || c.durationMin,
     totalPoints,

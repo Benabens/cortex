@@ -64,7 +64,7 @@ function okResult(tool: ToolDef, out: unknown): CallToolResult {
   const parsed = tool.output.safeParse(out);
   if (!parsed.success) {
     log("error", "mcp.output_invalid", { tool: tool.name, issues: parsed.error.issues.slice(0, 5).map((i) => i.path.join(".")) });
-    throw new ToolError("internal", "Erreur interne de Cortex (résultat non conforme) — réessaie dans un instant.");
+    throw new ToolError("internal", "Erreur interne de Cortex (résultat non conforme), réessaie dans un instant.");
   }
   const text = renderData(tool.summarize(parsed.data), parsed.data);
   // Un client 2026-07-28 peut donner au modèle structuredContent plutôt que le texte :
@@ -141,7 +141,7 @@ function register(server: McpServer, tool: ToolDef, era: Era, appOrigin: string)
         const err = e as Error;
         log("error", "mcp.tool_crash", { tool: tool.name, name: err?.name ?? "Error", message: redactMessage(String(err?.message ?? e)) });
         captureError(e, { area: "mcp", tool: tool.name });
-        return errorResult(new ToolError("internal", "Erreur interne de Cortex — réessaie dans un instant."));
+        return errorResult(new ToolError("internal", "Erreur interne de Cortex, réessaie dans un instant."));
       } finally {
         // Nom du client : savoir QUI annonce l'élicitation sans l'afficher.
         log("info", "mcp.tool", { tool: tool.name, user: userTag(principal.userId), era, client: clientNameOf(ctx.mcpReq.envelope), ms: Date.now() - t0, outcome });

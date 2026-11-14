@@ -406,7 +406,7 @@ export function renderExamTex(spec: ExamSpec, dateLabel: string, includeSolution
     String.raw`\clearpage{\Large\textbf{Corrigé}}\par\vspace{6pt}\hrule\medskip`,
     ...qs.map((q, i) =>
       [
-        String.raw`\par\medskip\needspace{4\baselineskip}{\large\textbf{Question ${i + 1} — ${texEscape(q.concept)} \hfill [${qPoints(q)} points]}}\par\smallskip`,
+        String.raw`\par\medskip\needspace{4\baselineskip}{\large\textbf{Question ${i + 1} : ${texEscape(q.concept)} \hfill [${qPoints(q)} points]}}\par\smallskip`,
         unwrapLockedFigures(courseTex((q as any).solution_tex ?? "", i + 1)),
       ].join("\n")
     ),
@@ -652,35 +652,129 @@ function replaceBalanced(src: string, cmd: string, wrap: (inner: string) => stri
 
 const CIRCLED = "⓪①②③④⑤⑥⑦⑧⑨";
 
+/** Groupe {…} équilibré qui s'ouvre en src[i] (espaces sautés) ; null s'il n'y en a pas ou s'il n'est pas fermé. */
+function readGroup(src: string, i: number): { inner: string; end: number } | null {
+  while (src[i] === " " || src[i] === "\n" || src[i] === "\t") i++;
+  if (src[i] !== "{") return null;
+  let depth = 0;
+  for (let p = i; p < src.length; p++) {
+    if (src[p] === "\\") { p++; continue; } // \{ et \} échappés
+    if (src[p] === "{") depth++;
+    else if (src[p] === "}" && --depth === 0) return { inner: src.slice(i + 1, p), end: p + 1 };
+  }
+  return null;
+}
+
+/**
+ * Découpe un corps de tableau au niveau supérieur, sur `&` (cellules) ou `\\` (lignes) : jamais
+ * dans des accolades, des maths $…$ ou un environnement imbriqué (pmatrix, tabular…), ni sur `\&`.
+ */
+function splitTop(src: string, sep: "&" | "\\\\"): string[] {
+  const parts: string[] = [];
+  let braces = 0, envs = 0, math = false, start = 0;
+  const top = () => braces === 0 && envs === 0 && !math;
+  for (let p = 0; p < src.length; p++) {
+    const c = src[p];
+    if (c === "\\") {
+      if (src.startsWith("\\begin{", p)) envs++;
+      else if (src.startsWith("\\end{", p)) envs = Math.max(0, envs - 1);
+      else if (sep === "\\\\" && src[p + 1] === "\\" && top()) { parts.push(src.slice(start, p)); start = p + 2; }
+      p++; // commande, ou caractère échappé (\&, \$, \{)
+      continue;
+    }
+    if (c === "{") braces++;
+    else if (c === "}") braces = Math.max(0, braces - 1);
+    else if (c === "$") math = !math;
+    else if (c === "&" && sep === "&" && top()) { parts.push(src.slice(start, p)); start = p + 1; }
+  }
+  parts.push(src.slice(start));
+  return parts;
+}
+
+/** Remplace chaque environnement tabular (fin appariée, imbrications comprises) par render(corps). */
+function replaceTabulars(src: string, render: (body: string) => string): string {
+  const OPEN = "\\begin{tabular}", CLOSE = "\\end{tabular}";
+  let out = "";
+  let i = 0;
+  for (;;) {
+    const k = src.indexOf(OPEN, i);
+    if (k < 0) return out + src.slice(i);
+    let p = k + OPEN.length;
+    const pos = /^\[[^\]]*\]/.exec(src.slice(p)); // [t], [b]…
+    if (pos) p += pos[0].length;
+    const cols = readGroup(src, p); // {|c|p{3cm}|…}
+    if (!cols) return out + src.slice(i);
+    let depth = 1, q = cols.end, end = -1;
+    while (end < 0) {
+      const o = src.indexOf(OPEN, q), c = src.indexOf(CLOSE, q);
+      if (c < 0) break;
+      if (o >= 0 && o < c) { depth++; q = o + OPEN.length; }
+      else if (--depth === 0) end = c;
+      else q = c + CLOSE.length;
+    }
+    if (end < 0) return out + src.slice(i);
+    out += src.slice(i, k) + render(src.slice(cols.end, end));
+    i = end + CLOSE.length;
+  }
+}
+
+/** Corps d'un `tabular` → <table> ; chaque cellule est rendue comme le texte courant (renderCell). */
+function tabularToHtml(body: string, renderCell: (tex: string) => string): string {
+  const rows = splitTop(body.replace(/\\(hline|toprule|midrule|bottomrule)\b|\\cline\{[^}]*\}/g, ""), "\\\\")
+    .map((row) => row.replace(/^\s*\[[^\]]*\]/, "").trim()) // « \\[2pt] » : espacement de ligne
+    .filter(Boolean);
+  if (!rows.length) return "";
+  const cell = (c: string) => {
+    const multi = /^\\multicolumn\b/.exec(c);
+    const span = multi && readGroup(c, multi[0].length);
+    const fmt = span && readGroup(c, span.end);
+    const content = fmt && readGroup(c, fmt.end);
+    return span && content && /^\d+$/.test(span.inner.trim())
+      ? `<td colspan="${span.inner.trim()}">${renderCell(content.inner)}</td>`
+      : `<td>${renderCell(c)}</td>`;
+  };
+  const tr = (row: string) => `<tr>${splitTop(row, "&").map((c) => cell(c.trim())).join("")}</tr>`;
+  return `<div class="tab"><table><tbody>${rows.map(tr).join("")}</tbody></table></div>`;
+}
+
 /**
  * Convertit le LaTeX du modèle en HTML basique LISIBLE. Repli best-effort (PAS un rendu
  * fidèle) : code en <pre>, gras/italique/code inline, listes, sous-questions en titres,
  * notes à la place des figures/grilles. Le vrai rendu reste le PDF.
  */
 export function texToHtml(tex: string): string {
+  return renderTex(tex, 0);
+}
+
+function renderTex(tex: string, level: number): string {
   let t = tex ?? "";
   const stash: string[] = [];
-  const NUL = String.fromCharCode(0); // sentinelle impossible dans du LaTeX, survit a escHtml -> zero collision
+  // sentinelle impossible dans du LaTeX, survit a escHtml -> zero collision. Une par niveau : le rendu
+  // imbriqué d'une cellule de tableau laisse intacts les jetons du niveau parent (code déjà mis de côté).
+  const NUL = String.fromCharCode(level);
   const keep = (html: string) => `${NUL}${stash.push(html) - 1}${NUL}`;
 
   // blocs préservés (code, tableaux) ou remplacés par une note (figures/grilles non rendables en HTML)
   t = t.replace(/\\begin\{lstlisting\}(?:\[[^\]]*\])?\n?([\s\S]*?)\\end\{lstlisting\}/g, (_, c) => keep(`<pre class="code">${escHtml(c.replace(/\s+$/, ""))}</pre>`));
   t = t.replace(/\\begin\{verbatim\}\n?([\s\S]*?)\\end\{verbatim\}/g, (_, c) => keep(`<pre class="code">${escHtml(c.replace(/\s+$/, ""))}</pre>`));
-  t = t.replace(/\\begin\{tabular\}[\s\S]*?\\end\{tabular\}/g, (m) => keep(`<pre class="tab">${escHtml(m)}</pre>`));
-  t = t.replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, () => keep(`<div class="fig">⬚ figure TikZ — visible uniquement dans le PDF</div>`));
-  t = t.replace(/\\begin\{examproctree\}[\s\S]*?\\end\{examproctree\}/g, () => keep(`<div class="fig">⬚ arbre de processus (fork/exec) — visible uniquement dans le PDF</div>`));
-  t = t.replace(/\\tcpladder(\{[^{}]*\}){0,6}/g, () => keep(`<div class="fig">⬚ diagramme TCP en échelle (window/cwnd/ssthresh/état + handshake) — à tracer sur papier</div>`));
+  t = replaceTabulars(t, (body) => keep(tabularToHtml(body, (cell) => renderTex(cell, level + 1))));
+  t = t.replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, () => keep(`<div class="fig">⬚ figure TikZ : visible uniquement dans le PDF</div>`));
+  t = t.replace(/\\begin\{examproctree\}[\s\S]*?\\end\{examproctree\}/g, () => keep(`<div class="fig">⬚ arbre de processus (fork/exec) : visible uniquement dans le PDF</div>`));
+  t = t.replace(/\\tcpladder(\{[^{}]*\}){0,6}/g, () => keep(`<div class="fig">⬚ diagramme TCP en échelle (window/cwnd/ssthresh/état + handshake) : à tracer sur papier</div>`));
   t = t.replace(/\\examtopo\b/g, () => keep(`<div class="fig">⬚ Figure : topologie canonique 2-AS (R1–R4, SW1/SW2, clusters A/B/C/D, B1=DNS, D1=d1.epfl.ch, coûts/débits, cloud Internet)</div>`));
   t = t.replace(/\\examinode\b/g, () => keep(`<div class="fig">⬚ Figure : inode v6 (addr[0..7], single/double-indirect → index → data)</div>`));
   t = t.replace(/\\examstates\b/g, () => keep(`<div class="fig">⬚ Figure : états de processus (Running/Ready/Blocked + transitions)</div>`));
-  t = t.replace(/\\(packetgrid|statesim|diskgrid|forwardgrid|rulelines)\{(\d+)\}/g, (_, k, n) => keep(`<div class="grid">✎ grille de réponse (${k}, ${n} lignes) — réponds sur papier</div>`));
+  t = t.replace(/\\(packetgrid|statesim|diskgrid|forwardgrid|rulelines)\{(\d+)\}/g, (_, k, n) => keep(`<div class="grid">✎ grille de réponse (${k}, ${n} lignes) : réponds sur papier</div>`));
   t = t.replace(/\\\$/g, () => keep("$")); // dollar littéral ≠ délimiteur math
 
   // échappe le texte courant
   t = escHtml(t);
+  // ligatures LaTeX des tirets (« --- » → —, « -- » → –), sinon « --- » s'affiche tel quel ;
+  // jamais dans les maths ni dans le code (\texttt{i--}, \verb|--x| restent tels quels, comme dans le PDF)
+  t = t.replace(/(\$\$[\s\S]*?\$\$|\$[^$]*\$|\\texttt\{[^{}]*\}|\\verb(\S)[\s\S]*?\2)|---|--/g, (m, verbatim) => verbatim ?? (m === "---" ? "—" : "–"));
 
   // macros inline
-  t = t.replace(/\\subq\{([^{}]*)\}\{([^{}]*)\}\{([^{}]*)\}/g, `<h3>$1 — $2 <span class="pts">[$3 pts]</span></h3>`);
+  t = t.replace(/\\subq\{([^{}]*)\}\{([^{}]*)\}\{([^{}]*)\}/g, `<h3>$1 · $2 <span class="pts">[$3 pts]</span></h3>`);
   for (let pass = 0; pass < 3; pass++) {
     t = replaceBalanced(t, "\\callout", (x) => `<div class="callout">${x}</div>`);
     t = replaceBalanced(t, "\\textbf", (x) => `<b>${x}</b>`);
@@ -720,7 +814,7 @@ export function texToHtml(tex: string): string {
   t = t.replace(/\\(vspace|hspace|needspace)\*?\{[^}]*\}/g, " ");
   t = t.replace(/\\\\(\[[^\]]*\])?/g, "<br>");
   t = t.replace(/\\(quad|qquad|;|,|!)/g, " ");
-  t = t.replace(/\\&/g, "&amp;").replace(/\\([%#_])/g, "$1").replace(/\\textbackslash\{?\}?/g, "\\");
+  t = t.replace(/\\&amp;/g, "&amp;").replace(/\\([%#_])/g, "$1").replace(/\\textbackslash\{?\}?/g, "\\");
   t = t.replace(/~/g, " ");
   t = t.replace(/\\ldots/g, "…");
   // macro inconnue : garde l'argument, puis retire les commandes nues et accolades restantes
@@ -729,8 +823,9 @@ export function texToHtml(tex: string): string {
   t = t.replace(/[{}]/g, "");
   t = t.replace(/\n{2,}/g, "<br><br>");
 
-  // blocs préservés réinjectés
-  t = t.replace(new RegExp(`${NUL}(\\d+)${NUL}`, "g"), (_, i) => stash[+i]);
+  // blocs préservés réinjectés (un tableau mis de côté peut contenir à son tour des jetons de ce niveau)
+  const token = new RegExp(`${NUL}(\\d+)${NUL}`, "g");
+  for (let pass = 0; pass < 4 && t.includes(NUL); pass++) t = t.replace(token, (_, i) => stash[+i] ?? "");
   return t;
 }
 
@@ -740,7 +835,7 @@ export function htmlFallback(spec: ExamSpec, id: number, dateLabel: string, reas
   const blocks = qs
     .map(
       (q, i) => `<section>
-<h2>Question ${i + 1} — ${escHtml(q.concept)} <span class="pts">[${qPoints(q)} points]</span></h2>
+<h2>Question ${i + 1} : ${escHtml(q.concept)} <span class="pts">[${qPoints(q)} points]</span></h2>
 <div class="stmt">${texToHtml((q as any).statement_tex ?? "")}</div>
 <details><summary>Corrigé</summary><div class="sol">${texToHtml((q as any).solution_tex ?? "")}</div></details>
 </section>`
@@ -757,13 +852,14 @@ code{background:#f2f2f3;padding:1px 5px;border-radius:5px;font-size:.92em}
 .callout{border:1.5px solid #1d1d1f;padding:8px 14px;margin:12px auto;text-align:center;max-width:85%}
 .caption{text-align:center;font-size:12.5px;color:#666;margin:4px 0 12px}
 .center{text-align:center}
+.tab{overflow-x:auto;margin:10px 0}.tab table{border-collapse:collapse;margin:0 auto}.tab td{border:1px solid #ccc;padding:4px 8px}
 .warn{background:#fff3e0;border:1px solid #e0a96d;padding:10px 14px;border-radius:8px;font-size:13.5px}
 details{margin:8px 0}summary{cursor:pointer;color:#2563eb;font-size:13px}
 .sol{border-left:3px solid #cfe3cf;padding-left:12px;margin-top:6px}
 ul,ol{margin:6px 0 6px 22px}
 </style>
 <h1>${escHtml(spec.title)}</h1>
-<p class="warn">⚠️ La compilation LaTeX (PDF) a échoué — rendu HTML lisible de secours (figures/grilles remplacées par des notes).${
+<p class="warn">⚠️ La compilation LaTeX (PDF) a échoué, rendu HTML lisible de secours (figures/grilles remplacées par des notes).${
     reason ? `<br><b>Erreur LaTeX :</b> <code>${escHtml(reason.slice(0, 300))}</code>` : ""
   }<br>Pour le vrai PDF EPFL : <code>brew install tectonic</code>, redémarre l'app, régénère.</p>
 ${blocks}`;

@@ -55,7 +55,7 @@ export function NotionRow({ t }: { t: UiType }) {
       </button>
 
       {hasDetail && open && (
-        <div id={panelId} className="rise-in mx-3 mb-3 rounded-xl border border-line bg-surface-0/40 p-4 sm:ml-10">
+        <div id={panelId} className="rise-in mx-3 mb-3 rounded-xl border border-line bg-bg/40 p-4 sm:ml-10">
           {t.occurrences.length > 0 && (
             <div>
               {/* Pas d'intitulé en capitales : les chips (final + page) se lisent seules,

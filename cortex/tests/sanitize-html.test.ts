@@ -36,6 +36,19 @@ test("sanitizeHtml : scripts, handlers et URL javascript: disparaissent, le HTML
   }
 });
 
+test("sanitizeHtml : blocs de code et tableaux défilants atteignables au clavier, sans fabriquer d'attribut", async () => {
+  const { sanitizeHtml } = await import("../lib/sanitize-html");
+  const out = sanitizeHtml(`<pre onfocus="x">a</pre><div class="tab"><table><tr><td>1</td></tr></table></div><div class="fig">f</div>`);
+  assert.match(out, /<pre tabindex="0">a<\/pre>/);
+  assert.match(out, /<div class="tab" tabindex="0">/);
+  assert.match(out, /<div class="fig">f<\/div>/);
+  // « <pre » DANS une valeur d'attribut : intact, sans guillemet ajouté (donc relu comme une seule valeur de class)
+  const trap = `<span class="<pre autofocus onfocus=alert(1) x">a</span>`;
+  assert.equal(sanitizeHtml(trap), trap);
+  const { SafeHtml } = await import("../components/ui/SafeHtml");
+  assert.equal(renderToStaticMarkup(createElement(SafeHtml, { html: trap })), `<div>${trap}</div>`);
+});
+
 test("sanitizeHtml : entrée vide ou non-chaîne → chaîne vide (jamais d'exception)", async () => {
   const { sanitizeHtml } = await import("../lib/sanitize-html");
   assert.equal(sanitizeHtml(""), "");

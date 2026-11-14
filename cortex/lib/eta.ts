@@ -64,7 +64,7 @@ export function estimateRemaining(i: EtaInput): Eta {
   const progress = Math.min(100, Math.max(0, i.progress));
 
   if (i.status === "queued") {
-    return { remainingMs: expected, late: false, basis, label: `En file — environ ${Math.max(1, Math.round(expected / MIN))} min une fois lancé${suffix}` };
+    return { remainingMs: expected, late: false, basis, label: `En file : environ ${Math.max(1, Math.round(expected / MIN))} min une fois lancé${suffix}` };
   }
   // Repris après une coupure : le temps écoulé depuis le PREMIER départ ne dit plus rien ; la
   // reprise repart du dernier point sauvegardé, il reste la part non faite.
@@ -73,7 +73,7 @@ export function estimateRemaining(i: EtaInput): Eta {
     return { remainingMs: remaining, late: false, basis, label: `${minutes(remaining)} (reprise)${suffix}` };
   }
   if (i.elapsedMs > expected * LATE_FACTOR && progress < 95) {
-    return { remainingMs: null, late: true, basis, label: "Plus long que d'habitude — la génération continue" };
+    return { remainingMs: null, late: true, basis, label: "Plus long que d'habitude, la génération continue" };
   }
   // L'avancement peut être provisoirement haut avant que les contrôles ajoutent leurs lots de
   // reprise. Il ne doit donc jamais annoncer moins que le simple compte à rebours historique.

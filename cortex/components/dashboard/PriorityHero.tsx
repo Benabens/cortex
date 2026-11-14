@@ -37,7 +37,7 @@ export function PriorityHero({ title, facts }: { title: string; facts: NotionFac
           href={themeHref(facts.chapter)}
           className="inline-flex min-h-11 items-center rounded-sm text-[0.875rem] text-on-hero underline decoration-white/35 decoration-1 underline-offset-[5px] transition-colors hover:decoration-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
         >
-          Voir le thème
+          Voir dans le programme
         </Link>
       </div>
     </section>

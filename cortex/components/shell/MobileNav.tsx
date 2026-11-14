@@ -71,7 +71,7 @@ export function MobileNav({ open, onClose }: { open: boolean; onClose: () => voi
         <div className="px-3">
           <CourseSelector />
         </div>
-        <div className="mt-4 flex-1 overflow-y-auto px-3">
+        <div className="mt-4 flex-1 overflow-y-auto overscroll-contain px-3">
           <NavList onNavigate={onClose} />
           <div className="my-3 border-t border-line" />
           <Link href="/cours" onClick={onClose} className="flex min-h-11 items-center px-3 text-sm text-ink-2">Gérer mes cours</Link>
