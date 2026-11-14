@@ -80,7 +80,7 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
     } catch (e) {
       // Erreur technique du store (pas un refus) : pas de génération gratuite sur erreur DB.
       const msg = e instanceof Error ? e.message.slice(0, 200) : String(e);
-      throw new ReservationRefused(503, `Facturation indisponible — réessaie dans un instant. (${msg})`);
+      throw new ReservationRefused(503, `Facturation indisponible, réessaie dans un instant. (${msg})`);
     }
     if (!r.ok) throw new ReservationRefused(r.status, r.error);
   }
@@ -139,7 +139,7 @@ export async function assertJobCourseOwned(jobId: number, course: string): Promi
   await ensureCoursesLoaded();
   const user = currentUser();
   if (ownsCourse(user, course) && !(await isCourseDeleting(user, course))) return true;
-  const msg = `Cours « ${course} » inaccessible pour ce compte (supprimé ou transféré) — génération annulée.`;
+  const msg = `Cours « ${course} » inaccessible pour ce compte (supprimé ou transféré), génération annulée.`;
   // Cours SUPPRIMÉ (ou en suppression) : n'écrire nulle part — toute requête
   // sur le tenant recréerait un schéma vide. Transféré à un autre compte : on
   // marque le job en erreur dans le tenant qui existe encore.
@@ -297,7 +297,7 @@ function isPidAlive(pid: number): boolean {
 }
 
 const ACTIVE_STATES = "('queued','running','verifying','compiling')";
-const ZOMBIE_MSG = "Worker interrompu (process arrêté) — la génération ne tournait plus. Relance.";
+const ZOMBIE_MSG = "Worker interrompu (process arrêté), la génération ne tournait plus. Relance.";
 /** Un worker vivant qui n'a plus de heartbeat depuis ce délai est considéré bloqué. */
 const STALL_MS = 15 * 60_000;
 
@@ -345,7 +345,7 @@ export async function reconcileStaleJobs(): Promise<number> {
     const neverStarted = !r.pid && attempts === 0;
     const reservationValid = r.type === "ingest" || await (await import("@/lib/llm/authorization")).reservationExists(r.credit_ref);
     if (attempts < maxAttempts && !neverStarted && reservationValid) {
-      const msg = `Worker interrompu — reprise automatique (tentative ${attempts + 1}/${maxAttempts}), progression conservée.`;
+      const msg = `Worker interrompu, reprise automatique (tentative ${attempts + 1}/${maxAttempts}), progression conservée.`;
       await q.run(
         `UPDATE jobs SET status = 'queued', pid = NULL, heartbeat_at = NULL, worker_id = NULL, attempts = ?, current_step = ?, updated_at = ? WHERE id = ?`,
         attempts + 1, msg, nowStr(), r.id,
@@ -477,7 +477,7 @@ export async function refundJobCredits(job: Pick<Job, "id" | "type">, why: "fail
     }
     const back = await refundGeneration(job.type, await jobCreditRef(job.id));
     if (back > 0) {
-      await logJob(job.id, `${fmtCreditsBack(back)} : le job n'a rien produit${spent > 0 ? ` — les ${spent.toFixed(3)} $ d'appels au modèle sont à notre charge` : ""}.`).catch(() => {});
+      await logJob(job.id, `${fmtCreditsBack(back)} : le job n'a rien produit${spent > 0 ? `, les ${spent.toFixed(3)} $ d'appels au modèle sont à notre charge` : ""}.`).catch(() => {});
     }
     return back;
   } catch { return 0; /* best-effort : jamais bloquant */ }
@@ -530,7 +530,7 @@ export async function cancelJob(id: number): Promise<Job | null> {
   if (job.progress <= CANCEL_REFUND_MAX_PROGRESS) {
     await refundJobCredits(job, "canceled");
   } else {
-    await logJob(id, `Annulé à ${job.progress}% — la génération était déjà lancée, les crédits ne sont pas rendus.`);
+    await logJob(id, `Annulé à ${job.progress}%, la génération était déjà lancée, les crédits ne sont pas rendus.`);
   }
   if (job.pid) {
     // Tout l'arbre (tsx re-spawne le script) : groupe via ps, sinon -pid (worker
@@ -538,7 +538,7 @@ export async function cancelJob(id: number): Promise<Job | null> {
     killProcessGroup(job.pid, { expectCommand: /run-job|tsx|node/ });
   }
   await cleanupPartial(job);
-  await logJob(id, "Annulé par l'utilisateur — worker tué, artefacts partiels nettoyés.");
+  await logJob(id, "Annulé par l'utilisateur, worker tué, artefacts partiels nettoyés.");
   return await getJob(id);
 }
 

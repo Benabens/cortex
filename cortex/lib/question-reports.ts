@@ -57,11 +57,11 @@ export async function reportQuestion(input: ReportInput): Promise<ReportResult> 
       `SELECT p.kind, p.prompt, p.options_json, p.correct, p.explanation, b.scenario, b.title FROM block_parts p JOIN exam_blocks b ON b.id = p.block_id WHERE p.id = ? AND p.exam_id = ?`, input.itemId, input.examId,
     ).catch(() => undefined);
     if (!row) throw new ReportError(404, "Question introuvable dans cet examen.");
-    stem = `${row.title} — ${row.prompt}`;
+    stem = `${row.title} : ${row.prompt}`;
   } else {
     const row = await q.get<{ concept: string; statement_html: string }>(`SELECT concept, statement_html FROM exam_questions WHERE id = ? AND exam_id = ?`, input.itemId, input.examId).catch(() => undefined);
     if (!row) throw new ReportError(404, "Question introuvable dans cet examen.");
-    stem = `${row.concept} — ${row.statement_html}`;
+    stem = `${row.concept} : ${row.statement_html}`;
   }
 
   // La question quitte les révisions de l'utilisateur (banque de révision : même énoncé).

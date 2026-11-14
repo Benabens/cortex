@@ -231,7 +231,7 @@ test("banc du 04/11 : seule une MAUVAISE option nomme une notion hors du cours �
   const { r, steps, items } = await exam(await course(), 4);
   assert.equal(r.count, 4, steps.join("\n"));
   assert.equal(designCalls, 1, "aucune question régénérée ni rejetée");
-  assert.ok(!steps.some((s) => /QCM rejeté — hors cours/.test(s)), steps.join("\n"));
+  assert.ok(!steps.some((s) => /QCM rejeté : hors cours/.test(s)), steps.join("\n"));
   for (const it of items) assert.ok(!it.options.includes(FOREIGN) && it.options.includes(NEW_DISTRACTOR), it.options.join(" | "));
   assert.match(repairPrompts[0], /notion étrangère au cours.*← À REMPLACER/);
 });

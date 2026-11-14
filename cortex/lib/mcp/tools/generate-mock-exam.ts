@@ -71,7 +71,7 @@ export default defineTool({
         if (!ch) throw new ToolError("not_found", `Chapitre « ${clip(ref, 60)} » introuvable dans le plan de ce cours : get_study_plan liste les chapitres disponibles.`);
         chapterFocus = clip(`Chapitre ${ch.lectureNo ?? ch.seq} : ${ch.title}${ch.subtitle ? ` (${ch.subtitle})` : ""}`, 220);
       }
-      const focus = [chapterFocus, args.focus?.trim()].filter(Boolean).join(" — ") || null;
+      const focus = [chapterFocus, args.focus?.trim()].filter(Boolean).join(", ") || null;
       // Même règle que la route : un sujet trop long est refusé, jamais tronqué en silence.
       if (focus && focus.length > FIELD_LIMITS.focus) {
         throw new ToolError("invalid_input", `Le sujet demandé dépasse ${FIELD_LIMITS.focus} caractères : raccourcis « focus ».`);
@@ -116,7 +116,7 @@ export default defineTool({
         {
           bucket: "gen",
           costCenti: costForJob(jobType, target),
-          summary: `Générer ${what}${focus ? " avec l'accent demandé" : ""} — ${courseLabel(c)} (10-20 min).`,
+          summary: `Générer ${what}${focus ? " avec l'accent demandé" : ""}, ${courseLabel(c)} (10-20 min).`,
         },
         // Le jeton est lié à la composition EXACTE du job : si elle change (annales ajoutées entre-temps), il faut un nouveau devis.
         { course: c.id, focus, format: base.format, count, target: target ?? null },

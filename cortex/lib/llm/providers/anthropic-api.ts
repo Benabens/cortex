@@ -96,7 +96,7 @@ export const anthropicProvider: LlmProvider = {
     }
     if (req.addDirs?.length) {
       throw new LlmError(
-        "Ce site d'appel repose sur la lecture de fichiers locaux (addDirs) — provider claude-code requis (LLM_PROVIDER=claude-code), ou adapte le site en images base64.",
+        "Ce site d'appel repose sur la lecture de fichiers locaux (addDirs) : provider claude-code requis (LLM_PROVIDER=claude-code), ou adapte le site en images base64.",
         "UNSUPPORTED"
       );
     }

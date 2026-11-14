@@ -117,7 +117,7 @@ const SAFE_GRAPHICS_PATH = /^[A-Za-z0-9_][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_][A-Za-z
 export class TexHazardError extends Error {
   readonly hazards: string[];
   constructor(hazards: string[]) {
-    super(`Source LaTeX refusé — primitive dangereuse : ${hazards.slice(0, 5).join(", ")}${hazards.length > 5 ? "…" : ""}`);
+    super(`Source LaTeX refusé, primitive dangereuse : ${hazards.slice(0, 5).join(", ")}${hazards.length > 5 ? "…" : ""}`);
     this.name = "TexHazardError";
     this.hazards = hazards;
   }

@@ -69,7 +69,7 @@ export function AppShell({ children, legal, legalEnglish, contact }: {
   return (
     <CourseProvider>
       <div className="relative min-h-dvh overflow-x-clip">
-        <a href="#main-content" className="sr-only fixed left-4 top-4 z-50 rounded-full bg-ink-1 px-5 py-3 text-surface-0 focus:not-sr-only">Aller au contenu</a>
+        <a href="#main-content" className="sr-only fixed left-4 top-4 z-50 rounded-full bg-ink-1 px-5 py-3 text-bg focus:not-sr-only">Aller au contenu</a>
         <Sidebar />
         <MobileNav open={menuOpen} onClose={() => setMenuOpen(false)} />
 

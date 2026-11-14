@@ -40,10 +40,12 @@ export function ChapterAccordion({ c, defaultOpen = false }: { c: PlanChapterUi;
           strokeWidth={2.25}
           aria-hidden="true"
         />
-        {c.lectureNo != null && (
+        {c.lectureNo != null ? (
           <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-accent/20 bg-accent/10 font-data text-xs font-medium tabular text-accent-hi">
             L{c.lectureNo}
           </span>
+        ) : (
+          <span className="size-10 shrink-0" aria-hidden="true" />
         )}
         <span className="min-w-[8rem] flex-1">
           <span className="block text-base font-semibold text-ink-1">{c.title}</span>

@@ -84,7 +84,7 @@ export function ReanalyzeButton({ onDone }: { onDone: () => void }) {
         onClick={run}
         disabled={phase === "running"}
         className={cn(
-          "relative inline-flex h-11 items-center gap-2 rounded-md border px-4 text-sm font-medium transition-colors",
+          "relative inline-flex h-11 items-center gap-2 rounded-full border px-4 text-sm font-medium transition-colors",
           "focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2",
           phase === "done"
             ? "border-[color-mix(in_oklch,var(--color-emerald)_45%,transparent)] text-emerald-hi"
@@ -93,7 +93,7 @@ export function ReanalyzeButton({ onDone }: { onDone: () => void }) {
               : "border-line-strong bg-surface-2 text-ink-1 edge-top hover:bg-surface-3"
         )}
       >
-        {phase === "running" && <ScanLine className="size-4 animate-pulse text-cyan-hi" strokeWidth={2.25} />}
+        {phase === "running" && <ScanLine className="size-4 animate-pulse text-accent-hi" strokeWidth={2.25} />}
         {phase === "idle" && <RefreshCw className="size-4" strokeWidth={2.25} />}
         {phase === "done" && <Check className="size-4" strokeWidth={2.5} />}
         {phase === "error" && <AlertTriangle className="size-4" strokeWidth={2.25} />}

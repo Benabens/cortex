@@ -242,7 +242,7 @@ export async function buildParcours(opts: { budgetQcm?: number; budgetOpen?: num
   for (let b = 0; b < weighted.length; b += BATCH) {
     const chunk = weighted.slice(b, b + BATCH);
     const prog = 5 + Math.round((b / weighted.length) * 55);
-    step(`Parcours QCM — lot ${Math.floor(b / BATCH) + 1} (${chunk.join(", ").slice(0, 50)}…)`, prog);
+    step(`Parcours QCM : lot ${Math.floor(b / BATCH) + 1} (${chunk.join(", ").slice(0, 50)}…)`, prog);
     try {
       const topicsArg = chunk.map((t) => ({ label: t, method: null }));
       let items = await generateQcmBatch(topicsArg, chunk.length, () => {});
@@ -271,7 +271,7 @@ export async function buildParcours(opts: { budgetQcm?: number; budgetOpen?: num
   let no = 0;
   for (let i = 0; i < openTarget.length; i++) {
     const tp = openTarget[i].topic;
-    step(`Parcours ouvertes — ${tp} (${i + 1}/${openTarget.length})`, 62 + Math.round((i / Math.max(1, openTarget.length)) * 35));
+    step(`Parcours ouvertes : ${tp} (${i + 1}/${openTarget.length})`, 62 + Math.round((i / Math.max(1, openTarget.length)) * 35));
     try {
       const a = archs[i % archs.length];
       const r = await architectQuestion(a, tp, 15, { maxRounds: 1 });
@@ -426,7 +426,7 @@ export async function extendParcours(opts: {
     const have = await planCountForTheme(t);
     let need = Math.max(0, target - have.qcm);
     let needOpen = Math.max(0, openPerTopic - have.open);
-    step(`▶ ${t.label} (L${t.rank}) — a ${have.qcm} QCM/${have.open} ouv., cible ${target}/${openPerTopic} → +${need} QCM /+${needOpen} ouv.`, baseProg);
+    step(`▶ ${t.label} (L${t.rank}) : a ${have.qcm} QCM/${have.open} ouv., cible ${target}/${openPerTopic} → +${need} QCM /+${needOpen} ouv.`, baseProg);
 
     // énoncés déjà couverts (banque + parcours) → dédup + anti-répétition dans le prompt
     const covered = await coveredStemsForTheme(t);
@@ -453,9 +453,9 @@ export async function extendParcours(opts: {
           inserted++; qThis++; qcmAdded++; need--;
           if (need <= 0) break;
         }
-        step(`  ${t.label} — +${inserted} QCM (lot ${guard}), reste ${need}`, baseProg);
+        step(`  ${t.label} : +${inserted} QCM (lot ${guard}), reste ${need}`, baseProg);
         if (inserted === 0) break; // le modèle ne produit que des doublons → on arrête ce thème
-      } catch (e) { step(`  ${t.label} — lot QCM ignoré (${(e as Error).message.slice(0, 40)})`, baseProg); break; }
+      } catch (e) { step(`  ${t.label} : lot QCM ignoré (${(e as Error).message.slice(0, 40)})`, baseProg); break; }
     }
 
     // ── OUVERTES : architecte (multi-passes + vérif), style du prof, sur le thème ──
@@ -468,7 +468,7 @@ export async function extendParcours(opts: {
         if (coveredSets.some((c) => jaccard(c, st) > 0.72)) continue;
         await q.run(`INSERT INTO revision_plan (kind, topic, lecture_rank, statement, solution, verified, verify_method) VALUES ('open',?,?,?,?,?,?)`, t.label, t.rank, r.q.statement_tex, r.q.solution_tex, 1, "architect");
         coveredSets.push(st); oThis++; openAdded++;
-      } catch (e) { step(`  ${t.label} — ouverte ignorée (${(e as Error).message.slice(0, 40)})`, baseProg); }
+      } catch (e) { step(`  ${t.label} : ouverte ignorée (${(e as Error).message.slice(0, 40)})`, baseProg); }
     }
 
     themesDone++;
