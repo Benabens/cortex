@@ -284,7 +284,9 @@ async function runCase(c: BenchCase): Promise<string> {
   const runDir = path.join(home, "runs", c.id, `${stamp}-${commit}`);
   fs.mkdirSync(runDir, { recursive: true });
   const db = `bench_${c.id.replace(/[^a-z0-9]/gi, "_")}_${Date.now()}`.toLowerCase();
-  await adminSql((sql) => sql.unsafe(`CREATE DATABASE "${db}"`));
+  // UTF8 comme la prod, quel que soit le cluster local (initdb en locale C = SQL_ASCII : `substr`
+  // y coupe en octets et le pilote rejette la ligne — banc HUM-285 du 13/11).
+  await adminSql((sql) => sql.unsafe(`CREATE DATABASE "${db}" ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE template0`));
   createdDb = db;
   const url = dbUrl(need("CORTEX_BENCH_PG_URL"), db);
   runEnv(path.join(runDir, "data"), url);
@@ -376,6 +378,9 @@ function spawnJudge(runDir: string): Promise<void> {
 async function judgeRun(runDir: string): Promise<void> {
   const run = JSON.parse(fs.readFileSync(path.join(runDir, "run.json"), "utf8")) as BenchRun & { courseId: string };
   assertBenchEnv(process.env);
+  // Le juge n'a pas de job, donc pas de réservation (230f686, 13/11 : « Il te faut des crédits ») :
+  // il juge comme le propriétaire du cours du banc (« owner », lib/bench), sur l'abonnement Codex.
+  process.env.CORTEX_OWNER_USER_ID ||= "owner";
   const { ensureCoursesLoaded } = await import("../lib/courses");
   await ensureCoursesLoaded();
   const { runWithCourse } = await import("../db/client");

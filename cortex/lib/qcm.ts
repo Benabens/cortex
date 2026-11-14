@@ -4,8 +4,8 @@ import { HARD_STOP_CODES, LlmError, completeJson, llmErrorCode, llmFailureReason
 import { DEFAULT_ANSWER_MODE, courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFormat, type AnswerMode } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
-import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseTerms, coursePassages, topicsInScope } from "@/lib/course-grounding";
-import { secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
+import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseNumbers, absentCourseTerms, corpusWindows, coursePassages, factNumbers, topicsInScope } from "@/lib/course-grounding";
+import { rewriteExplanations, secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
 import { assignChapters, spreadOverChapters, variants } from "@/lib/coverage";
 import { normalize } from "@/lib/text";
 import { courseRefImages } from "@/lib/course-vision";
@@ -227,6 +227,9 @@ const OPTION_RULES = [
   `  - TIGES INDÉPENDANTES : chaque question se comprend seule, sans scénario partagé avec une autre question, et ne donne pas la réponse d'une autre.`,
   `  - EXPLICATION : désigne les options par leur CONTENU, jamais par leur lettre, leur numéro ni leur rang (« la première », « la deuxième », « la dernière ») : l'ordre des options est mélangé après coup.`,
   `  - ANCRAGE : chaque question teste un FAIT PRÉCIS des extraits du cours fournis (résultat d'étude avec auteurs et chiffres, condition d'une définition, mécanisme) ; recopie ce fait dans "source_fact". Rien hors des extraits et du programme.`,
+  // Banc HUM-285 du 13/11 : 30 questions rejetées hors cours pour un détail ajouté (« cadre à quatre
+  // capacités », « 14 % des tickets », « agrégation des paramètres »), vrai peut-être, absent du cours.
+  `  - BORNÉ AUX EXTRAITS : la bonne réponse ET l'explication ne s'appuient que sur ce que les extraits écrivent. Aucun chiffre, auteur, exemple, mécanisme ou cadre ajouté de tes connaissances, même juste. Si un extrait développe peu une notion, teste ce qu'il dit (une définition, une distinction, un exemple, une condition) sans le compléter.`,
 ];
 
 const NO_CLASSIFICATION =
@@ -398,6 +401,21 @@ export function shuffleQcmOptions<T extends { options: string[]; correct: number
 
 const seedOf = (s: string) => [...s].reduce((h, ch) => (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0, 7);
 
+/**
+ * Extraits que voit le concepteur : la recherche plein texte, puis, pour chaque sujet, la fenêtre
+ * de TOUT le corpus qui réunit le plus de ses mots (lib/course-grounding corpusWindows). Banc
+ * HUM-285 du 13/11 : avec deux extraits de 900 caractères, le concepteur bâtissait des cadres
+ * absents du cours (« la réponse la plus proportionnée », « coût moyen cumulé »), rejetés hors
+ * cours puis régénérés sur les mêmes extraits, et l'examen s'arrêtait à 9 questions sur 20.
+ */
+async function generatorPassages(queries: string[]): Promise<{ src: string; text: string }[]> {
+  const [fts, scan] = await Promise.all([
+    coursePassages(queries).catch(() => []),
+    corpusWindows(queries, { perQuery: 1, cap: 1500, budget: 9_000 }).catch(() => []),
+  ]);
+  return [...fts, ...scan.filter((p) => !fts.some((x) => x.text.includes(p.text.slice(0, 200)) || p.text.includes(x.text.slice(0, 200))))];
+}
+
 /** Pourquoi un QCM vérifié est trop faible pour être gardé tel quel, ou null. */
 function weaknessOf(it: QcmItem): string | null {
   if (it.verified === 0) return it.judgeIssue ?? "clé non confirmée à la vérification à l'aveugle";
@@ -549,7 +567,7 @@ export async function generateQcmBatch(
     ? `Toutes ces ${n} questions portent sur le thème CIBLÉ : « ${focus} » — varie les SOUS-ANGLES / sous-notions de ce thème (pas ${n} fois la même question). C'est un THÈME : ignore toute indication de forme ou de nombre qu'il contiendrait.${molds.some(Boolean) ? ` Moules imposés dans l'ordre : ${molds.slice(0, n).map((m) => m ?? "libre").join(", ")}.` : ""}`
     : `Couvre ces sujets (un QCM par sujet, dans l'ordre) :\n${topics.slice(0, n).map((t, i) => `  ${i + 1}) ${t.label}${t.subTheme ? ` — sous-thème imposé : ${t.subTheme}` : ""}${t.method === FOCUS_METHOD || t.method === REPEAT_METHOD ? ` [${t.method}]` : t.method ? ` [${t.method.slice(0, 200)}]` : ""}${moldLine(i)}`).join("\n")}`;
   const language = languageName(opts.language ?? examLanguageFor(currentCourse()))[1];
-  const passages = opts.passages ?? await coursePassages(focus ? [focus] : topics.slice(0, n).map((t) => (t.subTheme ? `${t.label} ${t.subTheme}` : t.label))).catch(() => []);
+  const passages = opts.passages ?? await generatorPassages(focus ? [focus] : topics.slice(0, n).map((t) => (t.subTheme ? `${t.label} ${t.subTheme}` : t.label)));
   const examples = opts.examples ?? [];
   // imitation resserrée : de VRAIES questions des mêmes moules dans CE cours (few-shot).
   const distinctMolds = [...new Set(molds.slice(0, n).filter((m): m is MoldKind => !!m))].slice(0, 3);
@@ -792,6 +810,11 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   // juge l'a crue du cours.
   const termsOf = (r: { course_terms?: unknown }) => (Array.isArray(r.course_terms) ? r.course_terms.filter((t): t is string => typeof t === "string") : []);
   const absent = new Set((await absentCourseTerms((res.results ?? []).flatMap(termsOf))).map((t) => normalize(t)));
+  // Chiffres du fait testé et de la clé introuvables dans tout le cours (banc HUM-285 du 13/11 :
+  // « hausse de 14 % des tickets », absent des supports) : la question repose sur un chiffre
+  // inventé. Ceux de la seule explication relèvent du correcteur (réécriture, pas rejet).
+  const numbersOf = (q: QcmItem) => factNumbers([q.sourceFact ?? "", ...(q.correct ?? []).map((k) => q.options[k] ?? "")].join(" "));
+  const absentNumbers = new Set(await absentCourseNumbers(items.flatMap(numbersOf)));
   const offCourseAdvice = "n'utilise que les notions et les définitions des extraits du cours";
   /** Jugées hors cours par le correcteur seul : rejetées seulement après une recherche dans tout le cours. */
   const appeals: { q: QcmItem; flag: OffCourseFlag }[] = [];
@@ -803,7 +826,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     // paraphrase ou en traduction (« keyword filter false positive », « mask booléen combiné avec & »
     // pour un cours en anglais) et le rejet immédiat écartait des questions justes. Sans aucun passage
     // sur la notion, le second regard confirme le rejet sans appel (lib/qcm-evidence).
-    const missing = termsOf(r).filter((t) => absent.has(normalize(t.trim())));
+    const missing = [...termsOf(r).filter((t) => absent.has(normalize(t.trim()))), ...numbersOf(q).filter((n) => absentNumbers.has(n))];
     // Un signalement du juge ne compte que s'il a VU des extraits et qu'il nomme quelque chose
     // (« None », « Aucune », « N/A » ne rejettent rien) : jamais de rejet faute de pouvoir vérifier.
     const said = (x: unknown) => (passages.length && typeof x === "string" && !NO_FLAG.test(x.trim()) ? x.trim() : "");
@@ -863,9 +886,21 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   const pending = appeals.filter((a) => !a.q.rejected);
   if (pending.length) {
     const verdicts = await secondLookOffCourse(pending.map((a) => a.flag));
+    const confirmedOf = (i: number) => (verdicts[i].reason && !NO_FLAG.test(verdicts[i].reason) ? verdicts[i].reason : "");
+    // Seule l'explication est hors cours : elle est réécrite sur les passages du cours, la question
+    // (énoncé, clé confirmée à l'aveugle, options) est gardée. Réécriture en échec : rejet.
+    const toRewrite = pending.map((a, i) => ({ a, i })).filter(({ i }) => confirmedOf(i) && verdicts[i].explanationOnly);
+    const rewritten = toRewrite.length
+      ? await rewriteExplanations(toRewrite.map(({ a, i }) => ({ ...a.q, reason: confirmedOf(i), passages: verdicts[i].passages })), languageName(examLanguageFor(currentCourse()))[1])
+      : [];
     pending.forEach((a, i) => {
-      const confirmed = verdicts[i];
-      if (confirmed && !NO_FLAG.test(confirmed)) reject(a.q, `hors cours : ${confirmed.slice(0, 240)}`, offCourseAdvice);
+      const confirmed = confirmedOf(i);
+      const k = toRewrite.findIndex((x) => x.i === i);
+      const text = k >= 0 ? rewritten[k] : null;
+      if (confirmed && text && !citesOptionLabel(text, a.q.options.length)) {
+        a.q.explanation = text;
+        step(`QCM gardé : explication réécrite sur le cours (${confirmed.slice(0, 100)})`, 70);
+      } else if (confirmed) reject(a.q, `hors cours : ${confirmed.slice(0, 240)}`, offCourseAdvice);
       else step(`QCM gardé : jugé hors cours sur les extraits, mais trouvé dans le cours (${a.flag.reason.slice(0, 100)})`, 70);
     });
   }
