@@ -97,6 +97,10 @@ jobs:
       - name: Script Resend (banc d'essai)
         run: bash ../scripts/resend-ben.test.sh
 
+      # Idem pour le script guidé de fiabilité (DSN Sentry, jeton Railway → secret GitHub).
+      - name: Script fiabilité (banc d'essai)
+        run: bash scripts/setup-fiabilite.test.sh
+
       - name: Tests unitaires (drivers, LLM hermétique, sandbox, vérif déterministe, isolation multi-tenant, vrai Postgres)
         env:
           CORTEX_TEST_PG_URL: postgres://postgres@localhost:5432/cortextest

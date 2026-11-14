@@ -18,6 +18,7 @@ import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import { sanitizeCorpus } from "@/lib/prompt-safety";
+import { excludedSourceIds, materialLabel } from "@/lib/source-scope";
 import { languageName } from "@/lib/profiles/generic-directives";
 import type { FormatProfile } from "@/lib/format";
 
@@ -36,6 +37,10 @@ export type Language = (typeof LANGUAGES)[number];
 export const ANSWER_MODES = ["single", "multiple", "mixed"] as const;
 export type AnswerMode = (typeof ANSWER_MODES)[number];
 
+/** Documents permis pendant l'examen : aucun, notes personnelles, tous. */
+export const DOCUMENT_RULES = ["none", "notes", "open"] as const;
+export type DocumentRule = (typeof DOCUMENT_RULES)[number];
+
 /** Format DÉCLARÉ par l'étudiant (fiche du cours, app ou connecteur). */
 export type DeclaredFormat = {
   kind: ExamKind;
@@ -45,6 +50,8 @@ export type DeclaredFormat = {
   language: string | null;
   /** Absent = rien de déclaré : les sources, sinon la réponse unique. */
   answerMode?: AnswerMode;
+  /** Absent = rien de déclaré : la garde de l'examen n'en dit rien. */
+  documents?: DocumentRule;
 };
 
 export class InvalidFormatError extends Error {
@@ -193,7 +200,14 @@ export function parseDeclaredFormat(input: unknown): DeclaredFormat | null {
     if (!(ANSWER_MODES as readonly string[]).includes(m)) throw new InvalidFormatError(`Mode de réponse non reconnu : « ${String(rawMode)} » (attendu : réponse unique, réponses multiples ou mixte).`);
     answerMode = m as AnswerMode;
   }
-  return { kind: kind as ExamKind, questionCount, durationMin, language, ...(answerMode ? { answerMode } : {}) };
+  const rawDocs = o.documents;
+  let documents: DocumentRule | null = null;
+  if (rawDocs !== undefined && rawDocs !== null && rawDocs !== "") {
+    const d = String(rawDocs).trim().toLowerCase();
+    if (!(DOCUMENT_RULES as readonly string[]).includes(d)) throw new InvalidFormatError(`Règle de documents non reconnue : « ${String(rawDocs)} » (attendu : aucun, notes personnelles ou tous).`);
+    documents = d as DocumentRule;
+  }
+  return { kind: kind as ExamKind, questionCount, durationMin, language, ...(answerMode ? { answerMode } : {}), ...(documents ? { documents } : {}) };
 }
 
 /** Réponse unique quand rien ne dit le contraire (sans annale, sans déclaration, sources muettes). */
@@ -269,17 +283,22 @@ export function inferDiscipline(c: { code?: string | null; sample?: string | nul
 }
 
 /**
- * Titres des supports de cours (hors annales, exemples, consignes), à défaut de notions
+ * Titres LISIBLES des supports de cours (hors annales, exemples, consignes, sources hors programme,
+ * noms de fichiers), à défaut de notions
  * analysées. Un titre vient d'un nom de fichier ou d'une balise <title> : assaini et
  * borné avant d'entrer dans un prompt (il n'est pas encadré comme donnée).
  */
 export async function courseMaterialTitles(): Promise<string[]> {
   try {
-    const rows = await q.all<{ title: string }>(
-      `SELECT DISTINCT s.title FROM sources s WHERE s.type NOT IN (${EXAM_SOURCE_TYPES.map(() => "?").join(",")}) ORDER BY s.recency_weight DESC, s.id`,
+    const rows = await q.all<{ id: number | string; title: string }>(
+      `SELECT s.id, s.title FROM sources s WHERE s.type NOT IN (${EXAM_SOURCE_TYPES.map(() => "?").join(",")}) ORDER BY s.recency_weight DESC, s.id`,
       ...EXAM_SOURCE_TYPES,
     );
-    return rows.map((r) => sanitizeCorpus(r.title).replace(/\s+/g, " ").trim().slice(0, 120)).filter(Boolean);
+    // Ni une source hors programme, ni une archive d'organisation (thèmes des posters) : pas un sujet.
+    const excluded = await excludedSourceIds();
+    // Jamais un nom de fichier (« S_ance_1_…_slides_01.00.md ») : il devenait le sujet affiché d'un QCM (job 14 de HUM-285).
+    const titles = rows.filter((r) => !excluded.has(Number(r.id))).map((r) => materialLabel(sanitizeCorpus(r.title).replace(/\s+/g, " ").trim().slice(0, 120)));
+    return [...new Set(titles.filter((t): t is string => !!t))];
   } catch {
     return [];
   }
@@ -485,11 +504,13 @@ export async function courseLanguageName(): Promise<string> {
  * résolution du cours dans ce process, sinon la déclaration, la langue et le
  * code du cours (discipline sans échantillon de corpus).
  */
-export function formatContextFor(courseId: string): { kind: ExamKind | null; language: string; discipline: Discipline } {
+export function formatContextFor(courseId: string): { kind: ExamKind | null; language: string; discipline: Discipline; durationMin: number | null; documents: DocumentRule | null } {
   const known = memo.get(courseId);
-  if (known) return { kind: known.kind, language: known.language, discipline: known.discipline };
   const c = getCourse(courseId);
-  return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || "fr", discipline: inferDiscipline({ code: c.examCode }) };
+  // Les documents permis ne viennent que de la déclaration : aucune source ne les détecte.
+  const documents = c.examFormat?.documents ?? null;
+  if (known) return { kind: known.kind, language: known.language, discipline: known.discipline, durationMin: known.durationMin, documents };
+  return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || "fr", discipline: inferDiscipline({ code: c.examCode }), durationMin: c.examFormat?.durationMin ?? null, documents };
 }
 
 /**

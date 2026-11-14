@@ -34,14 +34,27 @@ export function e2eTestLoginConfigured(env: Partial<NodeJS.ProcessEnv> = process
   return env.E2E_TEST_AUTH === "1" && env.E2E_TEST_RUN === "1";
 }
 
+/**
+ * Clé de la connexion persona. Le banc local n'en pose pas ; une preview de PR
+ * en exige une (garde de démarrage) : son URL est publiée sur un dépôt PUBLIC,
+ * et sans clé n'importe qui y entrerait, propriétaire compris.
+ */
+export function personaKeyAccepted(given: string | undefined, env: Partial<NodeJS.ProcessEnv> = process.env): boolean {
+  const expected = env.E2E_PERSONA_KEY ?? "";
+  if (!expected) return true;
+  const a = Buffer.from(given ?? ""), b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 export function authProviders(env: Partial<NodeJS.ProcessEnv> = process.env): Provider[] {
   const providers: Provider[] = [];
   if (e2eTestLoginConfigured(env)) {
     providers.push(Credentials({
       id: "e2e-test",
       name: "Persona E2E",
-      credentials: { email: { label: "E-mail", type: "email" } },
+      credentials: { email: { label: "E-mail", type: "email" }, key: { label: "Clé", type: "password" } },
       async authorize(credentials) {
+        if (!personaKeyAccepted(typeof credentials?.key === "string" ? credentials.key : undefined, env)) return null;
         const email = String(credentials?.email ?? "").trim().toLowerCase();
         if (!/^[a-z0-9._+-]+@e2e\.cortex\.test$/.test(email)) return null;
         let user = await authGet<{ id: string; email: string; name: string | null }>("SELECT id, email, name FROM users WHERE email = ?", email);

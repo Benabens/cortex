@@ -1,6 +1,7 @@
 import { q } from "@/db/q";
 import { EXAM_SOURCE_TYPES } from "@/lib/exam-format";
 import { normalize, tokenize } from "@/lib/text";
+import { excludedSourceIds, materialLabel } from "@/lib/source-scope";
 
 /**
  * COUVERTURE DES CHAPITRES — les questions d'un examen se répartissent sur
@@ -231,12 +232,14 @@ export async function assignChapters(
   let docs: { title: string; tokens: Set<string> }[] = [];
   try {
     const exam = new Set<string>(EXAM_SOURCE_TYPES);
-    const rows = await q.all<{ title: string; type: string; text: string | null }>(
-      `SELECT s.title, s.type, i.text FROM items i JOIN sources s ON s.id = i.source_id ORDER BY s.id, i.id`,
+    const excluded = await excludedSourceIds();
+    const rows = await q.all<{ sid: number; title: string; type: string; text: string | null }>(
+      `SELECT s.id sid, s.title, s.type, i.text FROM items i JOIN sources s ON s.id = i.source_id ORDER BY s.id, i.id`,
     );
     const bySource = new Map<string, Set<string>>();
     for (const r of rows) {
-      if (exam.has(r.type) || !r.text) continue;
+      // Une archive (thèmes des posters, note hors programme) n'est pas un chapitre du cours.
+      if (exam.has(r.type) || excluded.has(Number(r.sid)) || !r.text) continue;
       const set = bySource.get(r.title) ?? new Set<string>();
       for (const tok of tokenize(normalize(r.text), 4)) set.add(tok);
       bySource.set(r.title, set);
@@ -271,6 +274,7 @@ export async function assignChapters(
 function withEmptyChapters(topics: CoverageTopic[], chapters: string[]): CoverageTopic[] {
   const covered = new Set(topics.map((t) => t.chapter).filter(Boolean));
   const weight = Math.max(1, Math.min(...topics.map((t) => t.weight).filter((w) => w > 0), Infinity));
-  const extra = chapters.filter((c) => !covered.has(c)).map((c) => ({ label: c, method: null, weight: Number.isFinite(weight) ? weight : 1, chapter: c }));
+  // Un chapitre nommé par un fichier (« Archive_2025-26_Thèmes_des_posters_2024.md ») ne devient jamais une notion (job 14 de HUM-285).
+  const extra = chapters.filter((c) => !covered.has(c) && materialLabel(c)).map((c) => ({ label: c, method: null, weight: Number.isFinite(weight) ? weight : 1, chapter: c }));
   return [...topics, ...extra];
 }

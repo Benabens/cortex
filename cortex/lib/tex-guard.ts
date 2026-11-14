@@ -127,7 +127,7 @@ let _trusted: string[] | null = null;
 /** Textes de confiance retirés avant analyse : le préambule et les macros de figures du dépôt. */
 function trustedBlocks(): string[] {
   if (_trusted) return _trusted;
-  _trusted = ["preamble.tex", "figures.tex"]
+  _trusted = ["preamble.tex", "figures.tex", "generic.tex"]
     .map((f) => path.join(LATEX_DIR, f))
     .filter((p) => fs.existsSync(p))
     .map((p) => fs.readFileSync(p, "utf8"))

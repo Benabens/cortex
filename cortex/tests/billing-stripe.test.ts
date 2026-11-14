@@ -146,6 +146,8 @@ test("checkout : aucun moyen de paiement figé par le code, c'est le tableau de 
     assert.equal(params.metadata.cortexUserId, "alice");
     assert.equal(params.metadata.plan, plan);
     assert.deepEqual(params.line_items, [{ price: "price_test", quantity: 1 }]);
+    // Champ « code promo » proposé sur chaque offre (seuls les codes du tableau de bord valent).
+    assert.equal(params.allow_promotion_codes, true, plan);
   }
   // La route envoie ces paramètres tels quels : rien n'y est ajouté après coup.
   const route = fs.readFileSync(path.join(__dirname, "..", "app", "api", "billing", "checkout", "route.ts"), "utf8");

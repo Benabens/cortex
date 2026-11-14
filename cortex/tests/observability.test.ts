@@ -86,6 +86,17 @@ test("scrubEvent : le message d'une compilation LaTeX ratée ne sort ni chemin d
   assert.match(String(event.message), /Échec compilation LaTeX/);
 });
 
+test("une adresse e-mail dans un message d'erreur ne part jamais (serveur comme navigateur)", async () => {
+  const { scrubEvent } = await import("../lib/observability");
+  // Vu contre le vrai build (13/11) : une exception du navigateur citant l'adresse partait en clair.
+  const event = scrubEvent({
+    message: "Compte Jean.Dupont+cortex@gmail.com introuvable",
+    exception: { values: [{ type: "Error", value: "boum navigateur etudiant@epfl.ch (2e essai)" }] },
+  } as never) as { message?: string; exception: { values: Array<{ value: string }> } };
+  assert.equal(event.message, "Compte <e-mail> introuvable");
+  assert.equal(event.exception.values[0].value, "boum navigateur <e-mail> (2e essai)");
+});
+
 test("avec SENTRY_DSN : traces et spans passent par le même nettoyage que les erreurs", async () => {
   const { initErrorTracking } = await import("../lib/observability");
   process.env.SENTRY_DSN = "https://exemple@o0.ingest.sentry.io/1";

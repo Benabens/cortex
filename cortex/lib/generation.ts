@@ -24,8 +24,12 @@ export type StartRefused = { ok: false; status: number; error: string; command?:
 
 export async function startGenerationJob(type: JobType, target?: string): Promise<StartedJob | StartRefused> {
   return startJob(type, target, async () => {
+    // Le paywall précède les contraintes de contenu : à solde nul, toute
+    // tentative de génération doit expliquer le coût et proposer l'achat,
+    // même si le cours n'est pas encore prêt ou son format encore inconnu.
+    const billingIssue = (await generationGate("gen")) ?? (await creditsGate(type));
+    if (billingIssue) return { ok: false, status: billingIssue.status, error: billingIssue.error };
     // Un examen blanc suit le format du cours ; inconnu, il n'est jamais inventé (lib/exam-format).
-    // Vérifié en premier : c'est gratuit, et c'est ce que l'étudiant doit corriger.
     if (type === "exam") {
       const plan = planMockExam(requestedFormat(await resolveExamFormat(), targetKind(target)), {});
       if (plan.generator === "none") return { ok: false, status: 409, error: plan.reason };
@@ -46,6 +50,8 @@ export async function startPrepareJob(): Promise<StartedJob | StartRefused> {
   if (process.env.E2E_TEST_AUTH === "1" && process.env.E2E_TEST_RUN === "1") {
     const existing = await activeJob("prepare");
     if (existing) return { ok: true, jobId: existing.id, existing: true };
+    const gate = (await generationGate("gen")) ?? (await creditsGate("prepare"));
+    if (gate) return { ok: false, status: gate.status, error: gate.error };
     const created = await createJobExclusive("prepare");
     const { setJob } = await import("@/lib/jobs");
     await setJob(created.id, { status: "done", progress: 100, currentStep: "Préparation hermétique E2E terminée" });

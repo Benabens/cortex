@@ -23,7 +23,7 @@ import {
 } from "react";
 import { watchJob } from "./job-watch";
 import type { Job } from "./job-status";
-import type { AnswerMode } from "@/lib/exam-format";
+import type { AnswerMode, DocumentRule } from "@/lib/exam-format";
 
 /* ---------------------------------------------------------------- courses */
 
@@ -43,7 +43,7 @@ export type CourseInfo = {
   examDate: string | null;
   durationMin: number;
   /** Format d'examen déclaré (null = rien de déclaré). */
-  examFormat: { kind: string; questionCount: number | null; durationMin: number | null; language: string | null; answerMode?: AnswerMode } | null;
+  examFormat: { kind: string; questionCount: number | null; durationMin: number | null; language: string | null; answerMode?: AnswerMode; documents?: DocumentRule } | null;
   createdAt: string;
 };
 

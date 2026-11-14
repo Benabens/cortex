@@ -1,9 +1,9 @@
 import { test, expect } from "@playwright/test";
 import { generateSync } from "otplib";
 import fs from "node:fs";
+import { googleBaseURL } from "./base-url";
 
 const authFile = "e2e/.auth/google.json";
-const googleBaseURL = process.env.E2E_GOOGLE_BASE_URL ?? "https://app.cortexexam.com";
 const configured = !!(process.env.E2E_GOOGLE_EMAIL && process.env.E2E_GOOGLE_PASSWORD && process.env.E2E_GOOGLE_TOTP_SECRET);
 test.describe.configure({ mode: "serial" });
 
