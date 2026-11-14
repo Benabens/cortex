@@ -15,6 +15,9 @@ export function checkoutParams(o: { plan: PlanKey; priceId: string; userId: stri
     // Link) sont ceux activés dans le tableau de bord Stripe. Une liste écrite ici
     // prendrait sa place : ['card'] retirerait Link (docs/STRIPE-LIVE.md § 2).
     line_items: [{ price: o.priceId, quantity: 1 }],
+    // Champ « code promo » : seuls les codes créés dans le tableau de bord fonctionnent.
+    // Un pack à 0 € n'est crédité que si son code est dans STRIPE_FREE_PROMO_CODES (webhook).
+    allow_promotion_codes: true,
     success_url: `${origin}/compte?achat=ok`,
     cancel_url: `${origin}/compte?achat=annule`,
     ...(o.email ? { customer_email: o.email } : {}),

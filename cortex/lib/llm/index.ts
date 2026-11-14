@@ -12,6 +12,7 @@ import { withRetry } from "./retry";
 import { nextRank, recordCall, replayCall, tapeMode } from "./tape";
 import { extractJson, JsonOutputError } from "./json";
 import { LlmError, type CompleteRequest, type CompleteResult, type LlmProvider } from "./types";
+import { assertLlmAuthorized } from "./authorization";
 
 /**
  * Point d'entrée UNIQUE des appels LLM de l'app.
@@ -63,6 +64,7 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
   // job courant s'il y en a un (jobs = 1 par process).
   const callSite = callerSite();
   const job = currentJob();
+  await assertLlmAuthorized();
   // Banc (scripts/bench) : bande enregistrée ou rejouée ; rejeu = aucun appel, aucun compteur.
   const tape = tapeMode();
   const tapeSite = callSite ?? "?";
@@ -190,10 +192,13 @@ function rejection(e: unknown): { reason: string; truncated: boolean } | null {
  * (completeWith) et remontent telles quelles. Après `attempts` essais :
  * LlmError BAD_OUTPUT. Passer `json` à la requête active en plus la sortie
  * structurée des fournisseurs API, qui supprime l'essentiel de ces rejets.
+ * `retryTruncated: false` : une réponse COUPÉE remonte tout de suite en LlmError
+ * TRUNCATED, pour l'appelant qui sait découper sa demande (un lot d'exercices
+ * redemandé à l'identique ressort coupé : job 2 de test-e2e-calcul-matriciel, 13/11).
  */
 export async function completeJson<T = unknown>(
   req: CompleteRequest,
-  opts: { attempts?: number; check?: (value: T) => string | null | Promise<string | null> } = {},
+  opts: { attempts?: number; check?: (value: T) => string | null | Promise<string | null>; retryTruncated?: boolean } = {},
 ): Promise<T> {
   const attempts = Math.max(1, opts.attempts ?? JSON_ATTEMPTS);
   let last = "";
@@ -207,6 +212,7 @@ export async function completeJson<T = unknown>(
     } catch (e) {
       const r = rejection(e);
       if (!r) throw e;
+      if (r.truncated && opts.retryTruncated === false) throw e instanceof LlmError ? e : new LlmError(r.reason, "TRUNCATED");
       last = r.truncated ? `${r.reason} Sois plus concis (explications plus courtes) pour que la réponse tienne en entier.` : r.reason;
     }
     console.error(`[llm] réponse JSON rejetée (essai ${n}/${attempts}) : ${last.slice(0, 200)}`);

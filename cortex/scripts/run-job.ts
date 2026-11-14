@@ -104,7 +104,8 @@ async function main() {
   if (!job) { console.error("job introuvable: " + jobId); process.exit(1); }
   if (job.status === "canceled") process.exit(0);
   // Attribution des appels LLM de ce job (colonnes job_id/call_site de llm_usage).
-  setCurrentJob(jobId, job.type);
+  const reservation = await q.get<{ credit_ref: string | null }>(`SELECT credit_ref FROM jobs WHERE id = ?`, jobId);
+  setCurrentJob(jobId, job.type, reservation?.credit_ref ?? null);
   // Le cours doit encore appartenir à l'utilisateur du job (CORTEX_USER) : sinon
   // erreur sans remboursement, et rien n'est généré (cf. lib/jobs).
   if (!(await assertJobCourseOwned(jobId, COURSE))) process.exit(1);
@@ -134,6 +135,8 @@ async function main() {
     await setJob(jobId, { status: "running", pid: process.pid, currentStep: "Ingestion (contenu + annales)…", progress: 4 });
     try {
       await runIngestJob(null); // purge + ré-indexe content + refs du cours courant
+      // Les notes de modalités d'examen semées comme concepts avant la règle sortent du planning.
+      await (await import("../lib/schedule")).purgeExamLogisticsConcepts().catch(() => 0);
       const refsN = (await q.get<{ n: number }>(`SELECT count(*) n FROM exam_refs`))?.n ?? 0;
       await setJob(jobId, { currentStep: `Corpus ingéré (refs : ${refsN})`, progress: 34 });
       if (COURSE === "cs-202") {

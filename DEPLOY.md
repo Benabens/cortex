@@ -96,7 +96,9 @@ CORTEX_DATA_DIR=/data
 # — moteur LLM (PAYANT → éco par défaut) —
 LLM_PROVIDER=anthropic
 LLM_API_KEY=⟨sk-ant-… (étape 5)⟩
-LLM_MAX_CONCURRENCY=2
+# Appels modèle simultanés pour toute l'instance (défaut 4). 6 en prod depuis le
+# 13/11/2026 : au-delà, la limite de débit Anthropic du palier reprend la main.
+LLM_MAX_CONCURRENCY=6
 
 # — auth (génération DERRIÈRE login) —
 AUTH_ENABLED=1
@@ -104,10 +106,12 @@ AUTH_SECRET=⟨sortie de : openssl rand -base64 32⟩
 AUTH_URL=https://⟨ton-domaine-railway⟩
 GOOGLE_CLIENT_ID=⟨… (console Google Cloud)⟩
 GOOGLE_CLIENT_SECRET=⟨…⟩
-# Lien magique par e-mail : OPTIONNEL, désactivé par défaut (étape 6 si voulu)
-# AUTH_EMAIL_ENABLED=1
-# RESEND_API_KEY=⟨re_… (étape 6)⟩
-# AUTH_EMAIL_FROM=Cortex <onboarding@resend.dev>
+# Lien magique par e-mail (étape 6) : désactivé par défaut. ACTIF en prod depuis le
+# 13/11/2026 (domaine Resend vérifié, DKIM + SPF en DNS) : sans lui, Google est
+# la seule porte d'entrée.
+AUTH_EMAIL_ENABLED=1
+RESEND_API_KEY=⟨re_… (étape 6)⟩
+AUTH_EMAIL_FROM=Cortex <⟨adresse du domaine vérifié⟩>
 
 # — garde-fous de coût (OBLIGATOIRES) —
 # Plafond global du MOIS calendaire (UTC), remis à zéro le 1er.
@@ -127,7 +131,7 @@ TRUST_PROXY=1
 
 # — crédits Stripe (mode TEST, étape 7) —
 BILLING_ENABLED=1
-SIGNUP_FREE_CREDITS=2
+SIGNUP_FREE_CREDITS=0
 STRIPE_SECRET_KEY=⟨sk_test_…⟩
 STRIPE_WEBHOOK_SECRET=⟨whsec_…⟩
 # Prix référencés par lookup_key dans Stripe (étape 7) — rien d'autre à poser.
@@ -265,7 +269,9 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
      constante ; un test le vérifie.
    - Garanties : crédit du pack et enregistrement de l'achat dans **une**
      transaction (échec → 500, Stripe rejoue, rien de crédité à moitié) ; une
-     session **gratuite** (`no_payment_required`, montant 0) ne crédite jamais ;
+     session **gratuite** (`no_payment_required`, montant 0) ne crédite pas,
+     sauf si son code promo est sur la liste blanche `STRIPE_FREE_PROMO_CODES`
+     (voir « Codes promo » ci-dessous) ;
      un remboursement dont l'achat est **inconnu** en base remonte à la session
      Checkout via l'API Stripe, puis aux métadonnées de la charge, puis au
      client/e-mail avec le montant converti en crédits (`CREDIT_PRICE_CENTS`,
@@ -274,7 +280,18 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
      arrive. Surveille ce journal : c'est le seul cas à contrôler à la main.
 5. Test de paiement : carte `4242 4242 4242 4242`, n'importe quelle date
    future/CVC. Le webhook crédite le solde (idempotent — un retry Stripe ne
-   crédite jamais deux fois, c'est testé).
+   crédite jamais deux fois, c'est testé). Circuit complet en local, sans
+   frais : `~/Projects/cortex/briefs/paiement-sans-frais.txt` (partie 1).
+   **Codes promo** : le Checkout affiche toujours le champ « code promo »
+   (`allow_promotion_codes`) ; seuls les codes créés dans le tableau de bord
+   (Catalogue → Coupons → code promotionnel) fonctionnent. Une réduction
+   partielle crédite normalement. Un code à **100 %** donne une session à
+   0 € : l'abonnement est crédité par `invoice.paid` comme d'habitude, le pack
+   **seulement** si l'id `promo_…` du code figure dans
+   `STRIPE_FREE_PROMO_CODES` (liste séparée par des virgules, vide par
+   défaut). Sert à vérifier la chaîne live sans frais Stripe : crée un code à
+   100 % limité à 1 utilisation, pose son id, fais l'achat, puis retire l'id et
+   désactive le code.
 6. **Bascule LIVE plus tard** : [docs/STRIPE-LIVE.md](docs/STRIPE-LIVE.md)
    (produits et prix exacts, webhook, portail, pied de facture, variables,
    nettoyage des données de test, test réel avec remboursement). **Aucun
@@ -327,10 +344,12 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
    `[prod-boot] volume initialisé` → `migrations` → `next start` (2-3 min la
    première fois).
 2. Checklist post-déploiement, depuis l'URL publique :
-   - [ ] `/api/health` → `{"status":"ok"…}` — et regarde `checks.sandbox` :
-         s'il est `false`, les figures matplotlib et la vérification de code
-         seront désactivées (les examens restent produits, sans figures
-         générées) ;
+   - [ ] `/api/health` → `{"status":"ok"}` (réponse publique, rien d'autre) ;
+         le détail se lit avec le jeton des métriques :
+         `curl -H "Authorization: Bearer $METRICS_TOKEN" …/api/health`. Regarde
+         `checks.sandbox` : s'il est `false`, les figures matplotlib et la
+         vérification de code seront désactivées (les examens restent produits,
+         sans figures générées) ;
    - [ ] `/` en navigation privée → redirection vers `/login` ;
    - [ ] **Se connecter** avec ton compte Google → session ;
    - [ ] en lancement fermé (`INVITE_ONLY=1`) seulement : un compte NON invité
@@ -403,9 +422,12 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
 
 Les journaux Railway sont purgés au bout de 7 jours et le healthcheck redémarre
 le conteneur sans prévenir personne : un plantage de nuit passe inaperçu. Pose
-`SENTRY_DSN` (offre gratuite suffisante) et les erreurs du serveur **et des
-workers** remontent, avec alerte. Sans la variable, **rien ne change** : le SDK
-n'est même pas chargé.
+`SENTRY_DSN` (offre gratuite Developer suffisante) et les erreurs du serveur,
+des workers **et du navigateur** remontent, avec alerte e-mail. Sans la
+variable, **rien ne change** : aucun SDK n'est chargé, ni côté serveur ni côté
+navigateur. Tout se fait par le script guidé (compte, DSN, alerte « nouvelle
+erreur en production », IP non stockées, erreur de test) :
+`bash cortex/scripts/setup-fiabilite.sh` (étapes 1 et 2).
 
 Sans Sentry, deux choses arrivent quand même par e-mail : les alertes de
 dépense et celles du rappel de reconduction (ci-dessus). Tout le reste (un
@@ -417,20 +439,78 @@ journal, écrites sans passer par `captureError`. Poser `SENTRY_DSN` ne les
 ferait pas remonter ; aujourd'hui seul un job en erreur est signalé ainsi
 (`cortex/scripts/run-job.ts`).
 
-Ce qui part : type et message d'erreur, pile, service (`web` / `worker`), URL
-**sans paramètres**. Ce qui ne part **jamais** : e-mail, identifiant de compte,
-en-têtes, cookies, corps de requête, prompt, énoncé — l'événement est nettoyé
-avant envoi (`cortex/lib/observability.ts`, testé). Le SDK est `@sentry/node`,
-pas celui de Next : aucun rapport depuis le navigateur, donc aucune session
-d'étudiant instrumentée.
+Ce qui part : type et message d'erreur, pile, service (`web` / `worker` /
+`browser`), URL **sans paramètres**, navigateur et système. Chaque événement
+porte le **commit déployé** (`release` = `RAILWAY_GIT_COMMIT_SHA`) et
+l'environnement (`production`, ou `preview` pour une preview de PR). Ce qui ne
+part **jamais** : e-mail, identifiant de compte, en-têtes, cookies, corps de
+requête, prompt, énoncé, miettes de navigation (clics, console), sessions,
+replay — l'événement est nettoyé avant envoi (`cortex/lib/observability-scrub.ts`,
+testé).
+
+Comment c'est branché : `@sentry/node` côté serveur (plus le crochet
+`onRequestError` de Next pour les erreurs de rendu et de route non gérées) et
+`@sentry/browser` côté navigateur, chargé seulement si `GET /api/monitoring`
+renvoie une configuration (204 sans DSN). Le navigateur envoie ses erreurs à
+`/api/monitoring` (même origine), qui ne relaie qu'au projet du DSN configuré :
+la CSP garde `connect-src 'self'`. Pas de `@sentry/nextjs` : il tire webpack et
+le binaire sentry-cli (~100 Mo dans l'image) pour des source maps qu'on
+n'envoie pas.
 
 ```env
 SENTRY_DSN=https://…@oNNN.ingest.sentry.io/NNN
-SENTRY_ENVIRONMENT=production
+# SENTRY_ENVIRONMENT : inutile sur Railway (déduit de l'environnement)
 ```
 
 Complément indispensable : un **moniteur externe** (Better Stack, UptimeRobot…)
 sur `/api/health` — Sentry voit les erreurs, pas un conteneur qui ne répond plus.
+
+### Après chaque déploiement : smoke de la prod et rollback automatique
+
+`.github/workflows/post-deploy.yml` démarre quand Railway signale à GitHub un
+déploiement de production réussi (statut de déploiement, pas un push sur main :
+avec « Wait for CI », une workflow sur push qui attendrait la prod bloquerait le
+déploiement qu'elle attend). Elle :
+
+1. attend que `/api/health` serve le commit déployé (`commit`, 15 min au plus) ;
+2. lance le smoke Playwright en **lecture seule** (`cortex/e2e/smoke.spec.ts`) :
+   santé (base, LLM, LaTeX), landing → `/login`, redirection OAuth Google,
+   métadonnées OAuth du MCP, manifeste et robots. Aucune écriture en base ;
+3. si le smoke casse ou si la prod ne répond plus : **rollback** vers le
+   déploiement précédent (`cortex/scripts/railway-rollback.ts`, API Railway),
+   puis échoue en rouge avec la raison. Un rollback remet l'image **et les
+   variables** de ce déploiement-là. Jamais de rollback en cascade : un commit
+   qui n'est plus la tête de main, un déploiement qui n'est plus le dernier de
+   la production, ou un déploiement qui est déjà un rollback, est vérifié mais
+   laissé tel quel. La cible saute aussi tout déploiement dont on a déjà dû
+   revenir (A, B cassé, rollback, C cassé : retour sur A, pas sur B).
+
+Il lui faut le secret GitHub `RAILWAY_TOKEN` (jeton de **projet** limité à
+production) : `bash cortex/scripts/setup-fiabilite.sh --etape=3`. Sans lui, le
+smoke tourne, seul le rollback manque. Essai sans risque après le merge :
+Actions → post-deploy → Run workflow (rollback simulé coché par défaut).
+
+### Previews de PR (désactivées : payantes)
+
+Tout est prêt mais **rien n'est activé** : sur le plan Hobby (5 $ inclus, prod
+déjà estimée au-dessus), chaque PR ouverte ferait tourner une copie de l'app et
+une Postgres neuve, facturées à l'usage. Le filet gratuit reste la workflow
+`e2e` : les parcours Playwright sur chaque PR, contre un build local de la PR.
+
+Si tu les actives (`setup-fiabilite.sh --etape=4`, qui fait poser un plafond de
+dépense d'abord) : `railway.json` fait démarrer chaque preview par
+`cortex/scripts/preview-entrypoint.sh`, qui retire les secrets copiés de la
+prod (clés LLM, Resend, S3, Google, Stripe live), régénère `AUTH_SECRET`, pose
+le LLM hermétique et l'auth persona E2E ; la garde de démarrage
+(`railwayPreviewViolations`) refuse de servir s'il reste un trou, et refuse
+toujours `E2E_TEST_AUTH` en production. `.github/workflows/preview.yml` joue
+alors les parcours desktop contre l'URL de la preview, en check de la PR.
+
+Le dépôt est **public** : l'URL de chaque preview l'est aussi (commentaire du
+bot Railway). La connexion persona y exige donc `E2E_PERSONA_KEY` (64 caractères
+hexadécimaux, générée par l'étape 4, posée en variable Railway et en secret
+GitHub) ; sans elle, la preview refuse de démarrer. La workflow ne publie aucune
+trace Playwright (elle contiendrait la clé).
 
 ## 10. Sauvegardes et restauration
 
@@ -568,7 +648,7 @@ Rien n'est restauré. Code de sortie ≠ 0 = sauvegarde inutilisable.
   défaut. La vérification Python WebAssembly/Pyodide est prête derrière
   `CORTEX_PYTHON_WASM=1`, mais ce flag ne doit être activé qu'après validation
   en charge sur Railway. Elle ne réactive ni C, ni sympy, ni matplotlib.
-  `/api/health` expose alors `checks.pythonWasm: true` et
+  `/api/health` (avec `METRICS_TOKEN`) expose alors `checks.pythonWasm: true` et
   `verification.mode: "python-wasm"` ; sans le flag le mode reste `disabled`.
 - Génération d'un examen complet : **10-20 min** (multi-passes + vérification)
   — c'est le prix de la qualité ; l'UI suit le job en direct.
@@ -648,6 +728,30 @@ vente ouvre en collant la clé live ([docs/STRIPE-LIVE.md](docs/STRIPE-LIVE.md))
 À vérifier **après** : un compte Google jamais vu se connecte, arrive sur
 l'écran de premier lancement, crée un cours, et « Mon compte » affiche un solde
 de 2 crédits.
+
+### Mise en ligne commerciale : état au 13/11/2026
+
+Audit du 13/11 (`PRELAUNCH-AUDIT-2026-11-13-commercialisation.md`, hors git ;
+copie dans le vault, `projet/Cortex/`). Fait en prod :
+
+- [x] Annales de plus de 10 Mo : le proxy laisse passer tout corps sous le plus
+      grand plafond d'envoi + 1 Mio (`lib/body-size-limits.ts`, PR #71).
+- [x] `/api/health` public réduit à `{ status }` ; le détail demande
+      `Authorization: Bearer $METRICS_TOKEN` (PR #72).
+- [x] `AUTH_EMAIL_ENABLED=1` (domaine Resend vérifié, DKIM et SPF en DNS) :
+      `/api/auth/providers` doit lister `email` en plus de `google`.
+- [x] `LLM_MAX_CONCURRENCY=6`.
+
+Reste, côté Ben (guide pas à pas : `~/Projects/cortex/briefs/ben-actions.sh`) :
+
+- [ ] Écran de consentement Google « En production » (voir la liste ci-dessus).
+- [ ] Plafond dur de dépense chez Anthropic, alerte et limite d'usage chez Railway.
+- [ ] Avis de situation SIRENE à jour, médiateur de la consommation choisi et
+      nommé dans les CGV et les mentions légales.
+- [ ] Coût réel par génération (`bash scripts/cout-reel-ben.sh`, lecture seule)
+      et essai de restauration chronométré (`bash scripts/restauration-ben.sh`).
+- [ ] Premier achat live de bout en bout sans frais : code promo à 100 %
+      (§ 7, « Codes promo »), puis retrait des crédits de test.
 
 ## 13. Nom de domaine
 

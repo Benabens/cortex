@@ -8,11 +8,12 @@ import { WeightBar } from "@/components/viz/WeightBar";
 import { Segmented } from "@/components/ui/Segmented";
 import { useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@/lib/ux/api";
 import { cn } from "@/lib/ux/cn";
-import { FOLDER_EXTENSIONS, prepareFolderImport, type FolderImportRefusal } from "@/lib/folder-import";
+import { PaywallNotice } from "@/components/billing/PaywallNotice";
+import { FOLDER_EXTENSIONS, prepareCourseImport, type FolderImportRefusal } from "@/lib/folder-import";
 
-const ACCEPT = ".pdf,.html,.htm,.txt,.md";
+const ACCEPT = ".pdf,.html,.htm,.txt,.md,.zip";
 /** Un dossier de cours contient plus que des annales : slides, séries, images, notes. */
-const ACCEPT_FOLDER_ATTRIBUTE = FOLDER_EXTENSIONS.map((ext) => `.${ext}`).join(",");
+const ACCEPT_FOLDER_ATTRIBUTE = [...FOLDER_EXTENSIONS.map((ext) => `.${ext}`), ".zip"].join(",");
 
 /**
  * Ce que sont les fichiers déposés. Une annale décide du format ; sans annale, les
@@ -43,6 +44,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   const [uploading, setUploading] = useState(false);
   const [uploadedMsg, setUploadedMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [paywall, setPaywall] = useState(false);
   const [folderProgress, setFolderProgress] = useState<{ done: number; total: number } | null>(null);
   const [folderRefusals, setFolderRefusals] = useState<FolderImportRefusal[]>([]);
   const [jobId, setJobId] = useState<number | null>(null);
@@ -87,6 +89,10 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   };
 
   const upload = async (files: FileList | File[]) => {
+    if ([...files].some((file) => /\.zip$/i.test(file.name))) {
+      await importFolder(files);
+      return;
+    }
     const list = [...files].filter((f) => /\.(pdf|html?|txt|md)$/i.test(f.name));
     if (!list.length) {
       setError("Formats acceptés : PDF, HTML, TXT, MD.");
@@ -128,17 +134,17 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
    * téléverser inutilement (le serveur refiltre de toute façon).
    */
   const importFolder = async (files: FileList | File[]) => {
-    const selection = prepareFolderImport(files);
-    setFolderRefusals(selection.rejected);
-    if (!selection.accepted.length) {
-      setError("Aucun fichier exploitable dans ce dossier. Vérifie les formats et les limites indiquées.");
-      return;
-    }
     setError(null);
     setUploadedMsg(null);
     setUploading(true);
-    setFolderProgress({ done: 0, total: selection.accepted.length });
+    setFolderProgress(null);
     try {
+      const selection = await prepareCourseImport(files);
+      setFolderRefusals(selection.rejected);
+      if (!selection.accepted.length) {
+        throw { status: 400, message: "Aucun fichier exploitable dans cette sélection. Vérifie les formats et les limites indiquées." } as ApiError;
+      }
+      setFolderProgress({ done: 0, total: selection.accepted.length });
       const refused = [...selection.rejected];
       let saved = 0;
       for (const [index, entry] of selection.accepted.entries()) {
@@ -183,14 +189,17 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   const prepare = async () => {
     if (running) return;
     setError(null);
+    setPaywall(false);
     setUploadedMsg(null);
     try {
       const res = await fetch(`/api/prepare?course=${encodeURIComponent(courseId)}`, { method: "POST" });
       const d = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
+      if (!res.ok) throw { status: res.status, message: d?.error ?? `Erreur ${res.status}` } as ApiError;
       startJob(d.jobId, "prepare");
     } catch (e) {
-      setError((e as Error).message || "Impossible de lancer la préparation.");
+      const err = e as ApiError;
+      setPaywall(err.status === 402);
+      setError(err.message || "Impossible de lancer la préparation.");
     }
   };
 
@@ -245,7 +254,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           <p className="mt-0.5 text-[0.8rem] text-ink-3">ou clique pour parcourir</p>
         </div>
         <div className="flex flex-wrap justify-center gap-1.5">
-          {["PDF", "HTML", "TXT", "MD"].map((f) => (
+          {["PDF", "HTML", "TXT", "MD", "ZIP"].map((f) => (
             <span key={f} className="rounded-md border border-line bg-surface-1/60 px-2 py-0.5 font-mono text-[0.68rem] text-ink-3">{f}</span>
           ))}
         </div>
@@ -288,7 +297,8 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
         <p className="mt-2 text-[0.76rem] leading-relaxed text-ink-3">
           Finals et midterms partent dans tes annales (ils décident du format) ; slides,
           séries, documents Word et notes rejoignent le corpus. 30 Mo maximum par fichier ;
-          le total du cours suit le quota de stockage de ton compte.
+          le total du cours suit le quota de stockage de ton compte. Les ZIP sont décompressés
+          dans ton navigateur et peuvent contenir une archive imbriquée.
         </p>
       </div>
 
@@ -304,6 +314,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
       </div>
 
       {/* progression de job (format / ingest / prepare) */}
+      {paywall && <PaywallNotice credits={2} />}
       {running && job && (
         <div className="rounded-lg border border-line bg-surface-2/30 px-3.5 py-3" aria-live="polite">
           <div className="mb-2 flex items-center justify-between text-[0.78rem]">

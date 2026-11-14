@@ -1,20 +1,37 @@
 import { nowPlusDays, nowStr, q } from "@/db/q";
+import { isExamLogistics } from "@/lib/course-grounding";
+import { excludedSourceIds, isExcludedMaterial } from "@/lib/source-scope";
 
 /**
  * Répétition espacée au niveau examen (courbe de l'oubli).
  * Les "concepts" sont dérivés des cartes review (sujets flagués par la prof).
  * Seeding idempotent : n'écrase jamais la progression existante.
+ * Une note de modalités d'examen (format, durée, barème…) n'est JAMAIS un concept :
+ * ni semée, ni rendue due, ni marquée testée (isExamLogistics, COURSE_MATTER_RULE). Une carte
+ * d'une source hors programme ou d'une archive d'organisation non plus (lib/source-scope).
  */
+
+/** Concept hors matière : modalités d'examen, ou libellé qui se dit hors programme / archive. */
+const notMatter = (c: string) => isExamLogistics(c) || isExcludedMaterial(c);
+
+/** Titres de cartes de la matière (hors consignes d'examen, sources hors programme, archives). */
+async function matterConcepts(): Promise<Set<string>> {
+  const excluded = await excludedSourceIds();
+  const rows = await q.all<{ title: string; sid: number | null }>(
+    `SELECT i.title, s.id sid FROM items i LEFT JOIN sources s ON s.id = i.source_id
+     WHERE i.type = 'card' AND i.title IS NOT NULL AND length(i.title) > 4 AND (s.type IS NULL OR s.type <> 'exam_info')`
+  );
+  return new Set(rows.filter((r) => !(r.sid != null && excluded.has(Number(r.sid))) && !notMatter(r.title)).map((r) => r.title));
+}
 
 export async function ensureScheduleSeeded(): Promise<number> {
   await q.ensureTable("schedule");
   // Concepts = titres des cartes review (déjà ciblés sur les attendus de la prof)
-  const concepts = await q.all<{ title: string }>(
-    `SELECT DISTINCT title FROM items WHERE type = 'card' AND title IS NOT NULL AND length(title) > 4`
-  );
+  // …hors consignes d'examen déposées comme telles (exam-info), et hors titres de modalités.
+  const concepts = await matterConcepts();
   await q.tx(async () => {
     for (const c of concepts) {
-      await q.run(`INSERT INTO schedule (concept, next_due_at) VALUES (?, NULL) ON CONFLICT DO NOTHING`, c.title);
+      await q.run(`INSERT INTO schedule (concept, next_due_at) VALUES (?, NULL) ON CONFLICT DO NOTHING`, c);
     }
   });
   return (await q.get<{ n: number }>(`SELECT count(*) n FROM schedule`))!.n;
@@ -23,21 +40,38 @@ export async function ensureScheduleSeeded(): Promise<number> {
 /** Concepts "dus" : jamais testés, ou dont l'échéance est passée. Les plus en retard d'abord. */
 export async function dueConcepts(limit = 6): Promise<string[]> {
   await ensureScheduleSeeded();
+  // Filtré après lecture : une ligne semée avant la règle (purgée à la re-préparation) ne remonte déjà plus.
   const rows = await q.all<{ concept: string }>(
     `SELECT concept FROM schedule
      WHERE next_due_at IS NULL OR next_due_at <= ?
-     ORDER BY (next_due_at IS NOT NULL), next_due_at ASC
-     LIMIT ?`,
-    nowStr(),
-    limit
+     ORDER BY (next_due_at IS NOT NULL), next_due_at ASC`,
+    nowStr()
   );
-  return rows.map((r) => r.concept);
+  return rows.map((r) => r.concept).filter((c) => !notMatter(c)).slice(0, limit);
+}
+
+/**
+ * Retire du planning, à la (re)préparation du cours, les concepts hors matière : notes de
+ * modalités d'examen, et cartes venues SEULEMENT d'une source hors programme ou d'une archive.
+ * Un concept qui n'est plus une carte du tout (posé par markTested) reste.
+ */
+export async function purgeExamLogisticsConcepts(): Promise<number> {
+  await q.ensureTable("schedule");
+  const keep = await matterConcepts();
+  const cards = new Set((await q.all<{ title: string }>(`SELECT DISTINCT title FROM items WHERE type = 'card' AND title IS NOT NULL`)).map((r) => r.title));
+  const bad = (await q.all<{ concept: string }>(`SELECT concept FROM schedule`))
+    .filter((r) => notMatter(r.concept) || (cards.has(r.concept) && !keep.has(r.concept)));
+  if (!bad.length) return 0;
+  await q.tx(async () => {
+    for (const r of bad) await q.run(`DELETE FROM schedule WHERE concept = ?`, r.concept);
+  });
+  return bad.length;
 }
 
 /** Marque des concepts comme testés : avance l'intervalle (SM-2 simplifié). */
 export async function markTested(concepts: string[]): Promise<void> {
   await q.tx(async () => {
-    for (const c of concepts) {
+    for (const c of concepts.filter((x) => !notMatter(x))) {
       const row = await q.get<{ interval_days: number; ease: number }>(
         `SELECT interval_days, ease FROM schedule WHERE concept = ?`,
         c

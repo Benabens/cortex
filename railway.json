@@ -1,0 +1,10 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "environments": {
+    "pr": {
+      "deploy": {
+        "startCommand": "bash scripts/preview-entrypoint.sh"
+      }
+    }
+  }
+}

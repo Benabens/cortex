@@ -97,8 +97,10 @@ export function LoginCard({
               disabled={busy !== null}
               onClick={() => {
                 setBusy("email");
-                const email = new URLSearchParams(window.location.search).get("persona") ?? "alice@e2e.cortex.test";
-                void signIn("e2e-test", { email, callbackUrl });
+                const params = new URLSearchParams(window.location.search);
+                const email = params.get("persona") ?? "alice@e2e.cortex.test";
+                // Clé exigée par une preview de PR (lib/auth-providers, personaKeyAccepted) ; vide en local.
+                void signIn("e2e-test", { email, key: params.get("persona_key") ?? "", callbackUrl });
               }}
               className="inline-flex h-12 w-full items-center justify-center rounded-full border border-dashed text-[0.92rem] font-semibold"
             >

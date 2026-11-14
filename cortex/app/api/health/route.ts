@@ -5,6 +5,8 @@ import { llmAvailable } from "@/lib/llm";
 import { sandboxAvailable } from "@/lib/sandbox-exec";
 import { pythonWasmAvailable } from "@/lib/pyodide-sandbox";
 import { texAvailable } from "@/lib/exam-latex";
+import { railwayEnvironmentName } from "@/lib/railway-env";
+import { hasMetricsToken } from "@/lib/metrics-token";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -12,15 +14,19 @@ export const dynamic = "force-dynamic";
 
 /**
  * /api/health — sonde de disponibilité, PUBLIQUE (proxy.ts la laisse
- * passer). Rapide, sans secret : DB joignable, moteur LLM prêt, sandbox et LaTeX
- * présents. status 200 si la DB répond, 503 sinon (readiness).
+ * passer). Rapide, sans secret. status 200 si la DB répond, 503 sinon (readiness).
+ *
+ * En public, la réponse se limite à `{ status }` : le pilote de base, le nombre
+ * de cours, l'état du moteur, de la sandbox et de LaTeX décrivent l'infrastructure
+ * à n'importe qui (audit du 13/11/2026). Le détail reste servi avec
+ * `Authorization: Bearer <METRICS_TOKEN>`, comme /api/metrics.
  *
  * La sonde interroge le STORE GLOBAL, pas la base d'un cours : une instance sans
  * aucun cours (compte neuf, base fraîche) est parfaitement saine — elle attend
  * juste que l'utilisateur crée sa matière. Sonder un cours ferait échouer la
  * readiness d'un déploiement neuf.
  */
-export async function GET() {
+export async function GET(req: Request) {
   let db = false;
   let courses = 0;
   try {
@@ -29,10 +35,18 @@ export async function GET() {
     await ensureCoursesLoaded();
     courses = listCourses().length;
   } catch { db = false; }
+  const status = db ? "ok" : "degraded";
+  const code = db ? 200 : 503;
+  // Commit servi (public : le dépôt l'est aussi) — le workflow post-deploy attend que
+  // la prod serve SON commit avant de la tester. Posé par Railway ; null hors Railway.
+  const commit = process.env.RAILWAY_GIT_COMMIT_SHA || null;
+  if (!hasMetricsToken(req)) return NextResponse.json({ status, commit }, { status: code });
   const nativeSandbox = sandboxAvailable();
   const pythonWasm = pythonWasmAvailable();
   const body = {
-    status: db ? "ok" : "degraded",
+    status,
+    commit,
+    environment: railwayEnvironmentName() || null,
     driver: q.dialect,
     checks: {
       db,
@@ -55,5 +69,5 @@ export async function GET() {
     },
     uptimeSec: Math.round(process.uptime()),
   };
-  return NextResponse.json(body, { status: db ? 200 : 503 });
+  return NextResponse.json(body, { status: code });
 }

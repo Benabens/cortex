@@ -107,7 +107,7 @@ WORKDIR /app/cortex
 RUN set -eux; \
     mkdir -p /tmp/tectonic-warm; \
     cp latex/epfl-logo.png /tmp/tectonic-warm/ 2>/dev/null || true; \
-    cat latex/preamble.tex latex/figures.tex > /tmp/tectonic-warm/warm.tex; \
+    cat latex/preamble.tex latex/figures.tex latex/generic.tex > /tmp/tectonic-warm/warm.tex; \
     printf '\n\\newcommand{\\FOOTDATE}{Warm}\n\\begin{document}\nWarm-up.\n\\end{document}\n' >> /tmp/tectonic-warm/warm.tex; \
     (cd /tmp/tectonic-warm && /usr/local/bin/tectonic --chatter minimal warm.tex) \
       || echo "AVERTISSEMENT: warm-up tectonic incomplet (bundle téléchargé au 1er run)"; \
@@ -133,12 +133,12 @@ ENV NODE_ENV=production \
 # les examens perdent leurs figures matplotlib et la vérification de code. Un
 # `unshare -rn` peut être bloqué par la politique seccomp de l'hôte : on le
 # teste ici pour que l'écart soit visible au build, pas découvert en prod.
-# (Non bloquant : l'image reste utilisable, /api/health signale « sandbox ».)
+# (Non bloquant : l'image reste utilisable, /api/health signale « sandbox » avec METRICS_TOKEN.)
 RUN if unshare -rn true 2>/dev/null; then \
       echo "✓ sandbox : unshare -rn opérationnel"; \
     else \
       echo "⚠ AVERTISSEMENT : unshare -rn indisponible au BUILD (normal chez certains builders)."; \
-      echo "  Vérifie /api/health (champ sandbox) après le déploiement : si false,"; \
+      echo "  Vérifie /api/health avec METRICS_TOKEN (champ sandbox) : si false,"; \
       echo "  les figures matplotlib et la vérif de code seront désactivées."; \
     fi
 
