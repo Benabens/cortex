@@ -1134,18 +1134,27 @@ const DUP_SCHEMA = {
  * Le modèle nomme la notion et l'angle de chaque question ; la décision, elle, est faite ici.
  */
 async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previous?: string[] }): Promise<{ drop: number[]; repeats: number[]; notions: string[]; angles: string[] }> {
-  const list = items.map((it, i) => `Q${i}. (${sanitizeCorpus(it.topic ?? "").slice(0, 60)}) ${sanitizeCorpus(it.stem).slice(0, 400)}`).join("\n");
+  // Le seul énoncé ne suffit pas à repérer deux questions qui exploitent le même fait : au job 16
+  // de HUM-285, la réponse d'un jeu de rôle devenait le distracteur d'une seconde question, et deux
+  // formulations différentes testaient la même condition d'un système de vote. Le contrôle voit
+  // donc tout ce que l'étudiant voit, plus la preuve courte qui établit la clé.
+  const list = items.map((it, i) => [
+    `Q${i}. (${sanitizeCorpus(it.topic ?? "").slice(0, 80)}) ${sanitizeCorpus(it.stem).slice(0, 500)}`,
+    `  Options : ${it.options.map((o) => sanitizeCorpus(o).slice(0, 180)).join(" | ")}`,
+    `  Fait source : ${sanitizeCorpus(it.sourceFact ?? "").slice(0, 300)}`,
+    `  Explication : ${sanitizeCorpus(it.explanation ?? "").slice(0, 300)}`,
+  ].join("\n")).join("\n");
   // Banc du 04/11 (CS-290) : 2 questions sur 15 reprenaient un examen précédent du cours ; le concepteur
   // les voit, mais seul ce contrôle peut les retirer.
   const previous = (opts.previous ?? []).slice(0, 60).map((stem, i) => `P${i}. ${sanitizeCorpus(stem).slice(0, 220)}`).join("\n");
   const criterion = opts.strict
     ? `Le programme a au moins autant de notions que l'examen a de questions : UNE NOTION = UNE QUESTION. Deux questions sur la même notion (le biais de négativité, le nudge, la souveraineté des données…) sont des doublons même sous deux angles différents.`
-    : `L'examen a plus de questions que le programme n'a de notions : deux questions sur une même notion sont permises si elles testent des angles VRAIMENT distincts (un autre fait, une autre condition, une autre étude) ; sont des doublons celles qui testent la même notion au même angle (le même fait, le même raisonnement, le même type de calcul).`;
+    : `L'examen a plus de questions que le programme n'a de notions : deux questions sur une même notion sont permises si elles testent des angles VRAIMENT distincts (un autre fait, une autre condition, une autre étude) ; sont des doublons celles qui testent le même fait, la même condition, le même scénario ou le même raisonnement, même si l'une transforme la réponse de l'autre en distracteur ou reformule la question.`;
   const r = await completeJson<{ notions?: { index: number; notion: string; angle: string }[]; duplicates: { first: number; second: number }[]; repeats?: { index: number; previous: number }[] }>({
     prompt: [
       `Voici les QCM d'un même examen. Pour chacun, nomme la notion du cours qu'il teste (notion, le MÊME libellé exact pour deux questions sur la même notion, même formulées autrement ou dans deux langues) et l'angle précis (angle).`,
       criterion,
-      `Puis liste les paires en doublon selon ce critère. Deux notions voisines mais distinctes ne sont pas un doublon.`,
+      `Puis liste les paires en doublon selon ce critère. Compare l'énoncé, les options, le fait source et l'explication : recycler le même cas ou le même fait dans une autre option reste un doublon. Deux notions voisines mais distinctes ne sont pas un doublon.`,
       ...(previous ? [`Liste aussi, dans "repeats", les QCM qui reprennent une question des EXAMENS PRÉCÉDENTS du cours (P…) : même notion ET même angle, même reformulée.`] : []),
       ``,
       list,
@@ -1624,6 +1633,10 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const acquiredBeforeDedup = all.slice();
   const historicalRepeats = new Set<string>();
   const auditDuplicates = new Set<string>();
+  // Le comblement principal peut consommer toute sa réserve avant que les doublons, impossibles à
+  // connaître à l'échelle de l'examen, soient audités. Leur remplacement a donc son propre budget
+  // borné : au plus deux fois les lots prévus, partagé avec le complément final.
+  let lateBudget = Math.max(3, batches.length * 2);
   // Une passe de remplacement peut elle-même perdre des items aux contrôles qualité. Il faut alors
   // recombler même si l'audit suivant ne voit plus de doublon, puis auditer ce nouveau lot. Le budget
   // reste borné par la taille de l'examen et par la réserve de notions.
@@ -1648,7 +1661,14 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const missing = count - all.length;
     if (missing <= 0) break;
     const spare = round < finalRoundBudget ? takeSpare(missing) : [];
-    if (!spare.length) {
+    const angle = spare.length < missing;
+    if (angle) {
+      const asked = new Map<string, number>();
+      for (const it of all) if (it.topic) asked.set(it.topic, (asked.get(it.topic) ?? 0) + 1);
+      const repeats = [...asked.entries()].sort((a, b) => a[1] - b[1]).map(([label]) => ({ label, method: REPEAT_METHOD }));
+      for (let i = 0; spare.length < missing && repeats.length; i++) spare.push(repeats[i % repeats.length]);
+    }
+    if (!spare.length || lateBudget <= 0) {
       // Dernier contrôle, ou réserve épuisée : le manque reste explicite et sera remboursé.
       if (drop.length) step(`${drop.length} QCM en doublon retiré(s) (même notion qu'une autre question), sans remplacement`, 80);
       break;
@@ -1660,19 +1680,27 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // Le lot de remplacement sait ce que l'examen pose déjà : en mode strict, aucune de ces notions ;
     // sinon, une notion reprise doit l'être sous un angle vraiment distinct.
     const taken = keptIdx.filter((i) => notions[i]);
-    const guidance = !taken.length ? undefined : strict
+    const guidance = !taken.length ? undefined : strict && !angle
       ? `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen — n'en reprends AUCUNE, même sous un autre angle : ${[...new Set(taken.map((i) => sanitizeCorpus(notions[i]).slice(0, 80)))].join(" · ")}.`
       : `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen, avec leur angle — si tu reprends l'une d'elles, teste un angle vraiment distinct : ${taken.map((i) => `${sanitizeCorpus(notions[i]).slice(0, 60)} (${sanitizeCorpus(angles[i] || "?").slice(0, 60)})`).join(" · ")}.`;
-    const [got] = await runRound([{ topics: spare, molds: spare.map(() => null), guidance }]);
-    if (got.error) lastError = got.error;
-    all.splice(0, all.length, ...selectWithinTrivialBudget(all, got.items, count));
+    const replacement: Batch[] = [];
+    for (let i = 0; i < spare.length && replacement.length < lateBudget; i += BATCH) {
+      const slice = spare.slice(i, i + BATCH);
+      replacement.push({ topics: slice, molds: slice.map(() => null), guidance });
+    }
+    lateBudget -= replacement.length;
+    for (const got of await runRound(replacement)) {
+      if (got.error) lastError = got.error;
+      all.splice(0, all.length, ...selectWithinTrivialBudget(all, got.items, count));
+    }
   }
   // COMPLÉMENT FINAL — encore en dessous du nombre demandé (réserve épuisée, doublons retirés,
-  // rejets répétés) : une ronde, dans ce qui reste du budget de lots. Les notions de réserve
+  // rejets répétés) : plusieurs rondes, dans ce qui reste du budget global de lots. Les notions de réserve
   // d'abord ; à défaut, les notions les moins posées, sous un angle VRAIMENT distinct : le nombre
-  // demandé est tenu plutôt que remboursé. Le contrôle des doublons repasse, sur les seules nouvelles.
-  const short = count - all.length;
-  if (short > 0 && all.length && extraBudget > 0 && !hardStop()) {
+  // demandé est tenu plutôt que remboursé. Après chaque retrait tardif, le manque est redemandé :
+  // le job 16 s'arrêtait après avoir retiré 3 questions de son unique complément et livrait 12/20.
+  while (count - all.length > 0 && all.length && lateBudget > 0 && !hardStop()) {
+    const short = count - all.length;
     const slots = takeSpare(short);
     const angle = slots.length < short;
     const asked = new Map<string, number>();
@@ -1684,11 +1712,11 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       ? `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen : ${tested}. Une notion reprise doit l'être sous un angle VRAIMENT distinct (un autre fait, une autre condition, une autre étude), jamais la même question reformulée.`
       : `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen — n'en reprends AUCUNE, même sous un autre angle : ${tested}.`;
     const fill: Batch[] = [];
-    for (let i = 0; i < slots.length && fill.length < extraBudget; i += BATCH) {
+    for (let i = 0; i < slots.length && fill.length < lateBudget; i += BATCH) {
       const slice = slots.slice(i, i + BATCH);
       fill.push({ topics: slice, molds: slice.map(() => null), guidance });
     }
-    extraBudget -= fill.length;
+    lateBudget -= fill.length;
     progress.add("QCM", fill.length);
     step(`${short} QCM manquant(s) → complément final, ${fill.length} lot(s)${angle ? " (notions reprises sous un autre angle)" : ""}`, 80);
     const before = all.length;
@@ -1701,18 +1729,19 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       const late = new Set(drop.filter((i) => i >= before));
       if (late.size) {
         all.splice(0, all.length, ...all.filter((_, i) => !late.has(i)));
-        step(`${late.size} QCM du complément en doublon retiré(s)`, 80);
+        step(`${late.size} QCM du complément en doublon retiré(s) → nouveau complément`, 80);
       }
     }
   }
-  // La diversité ne vaut jamais des questions absentes : si la réserve, les remplacements et le
-  // complément final s'épuisent, on rétablit juste assez de questions acquises avant l'audit final. Elles restent
-  // valides et vérifiées ; un éventuel doublon est préférable à un remboursement subi.
+  // Si un contrôle qualité autre que la déduplication a réduit le pool, on peut rétablir les
+  // questions acquises et vérifiées. Une question explicitement reconnue comme doublon ne revient
+  // jamais par ce filet : le banc de reproduction livrait ainsi 20/20 en réinjectant les répétitions
+  // qu'il venait de trouver, au lieu d'assumer un manque exceptionnel après épuisement du budget.
   if (all.length < acquiredBeforeDedup.length) {
     const present = new Set(all.map((it) => it.stem));
     for (const it of acquiredBeforeDedup) {
       if (all.length >= acquiredBeforeDedup.length) break;
-      if (present.has(it.stem) || historicalRepeats.has(it.stem)) continue;
+      if (present.has(it.stem) || historicalRepeats.has(it.stem) || auditDuplicates.has(it.stem)) continue;
       all.push(it);
       present.add(it.stem);
     }
