@@ -103,7 +103,7 @@ const trunc = (s: string, n: number) => (s.length > n ? s.slice(0, n) + " […]"
 /**
  * `n` caractères pris sur TOUT le support (quatre fenêtres réparties), pas seulement son début :
  * le début d'une séance, c'est sa page de titre et la présentation des enseignants (job 13 de
- * HUM-285, 13/11 : notions des diapos d'introduction, séances de Cavallaro absentes).
+ * HUM-285, 13/11 : notions des diapos d'introduction, séances de Leroy absentes).
  */
 export function spreadSample(text: string, n: number, windows = 4): string {
   if (text.length <= n) return text;
@@ -142,7 +142,7 @@ async function gatherForBlueprint() {
   /**
    * Chaque source à PART ÉGALE du budget, dans l'ordre : lues dans l'ordre jusqu'au budget, les
    * premiers supports ingérés (un seul enseignant) faisaient toutes les notions — banc HUM-285 du
-   * 28/10 : 16 questions Bendahan contre 4 Cavallaro.
+   * 28/10 : 16 questions Martin contre 4 Leroy.
    */
   const fairShare = async (types: string[], cap: number): Promise<{ text: string; supports: string[] }> => {
     const ph = types.map(() => "?").join(",");
