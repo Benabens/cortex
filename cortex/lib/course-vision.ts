@@ -1,6 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { coursePaths, DEFAULT_COURSE } from "@/lib/courses";
-import { execFileSync } from "node:child_process";
+import { findPdftoppm, renderPdfPages } from "@/lib/pdftoppm";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -28,20 +28,6 @@ function relToCwd(abs: string): string {
   return path.relative(process.cwd(), abs);
 }
 
-/** Un binaire pdftoppm est-il disponible ? */
-function pdftoppm(): string | null {
-  for (const bin of ["pdftoppm", "/usr/bin/pdftoppm", "/opt/homebrew/bin/pdftoppm", "/usr/local/bin/pdftoppm"]) {
-    try {
-      execFileSync(bin, ["-v"], { stdio: "ignore" });
-      return bin;
-    } catch {
-      // -v renvoie un code non-zéro sur certaines versions mais le binaire existe → tester existence
-      if (bin.includes("/") && fs.existsSync(bin)) return bin;
-    }
-  }
-  return null;
-}
-
 /**
  * Rend les premières pages de chaque PDF de référence du cours en PNG (étalon vision).
  * Idempotent (saute un PDF déjà rendu). Retourne le nombre d'images produites.
@@ -51,7 +37,7 @@ export function renderCourseRefImages(course: string, pagesPerRef = 3): number {
   if (course === DEFAULT_COURSE) return 0;
   const refsDir = coursePaths(course).refsDir;
   if (!fs.existsSync(refsDir)) return 0;
-  const bin = pdftoppm();
+  const bin = findPdftoppm();
   if (!bin) return 0;
   const outDir = figrefDirFor(course);
   fs.mkdirSync(outDir, { recursive: true });
@@ -62,7 +48,7 @@ export function renderCourseRefImages(course: string, pagesPerRef = 3): number {
     const already = fs.readdirSync(outDir).some((x) => sourcePdfOf(x) === base);
     if (already) continue;
     try {
-      execFileSync(bin, ["-png", "-r", "110", "-f", "1", "-l", String(pagesPerRef), path.join(refsDir, f), path.join(outDir, base)], { stdio: "ignore" });
+      renderPdfPages(bin, path.join(refsDir, f), path.join(outDir, base), { lastPage: pagesPerRef });
       made += fs.readdirSync(outDir).filter((x) => sourcePdfOf(x) === base).length;
     } catch {
       /* PDF illisible → on saute */

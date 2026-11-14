@@ -28,8 +28,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     : await (await import("@/lib/qcm")).recompileQcmPdf(examId);
   if (!out) return NextResponse.json({ error: "Examen QCM introuvable." }, { status: 404 });
   const ok = out.file.endsWith(".pdf");
+  // Rien de la sortie du compilateur vers le client (audit du 14/11/2026, 🔴 1) : le détail va aux logs.
+  if (!ok) console.error(`[pdf] examen #${examId} non recompilé :`, out.texError ?? "");
   return NextResponse.json(
-    { ok, file: out.file || null, recompiled: true, warning: out.texWarning ?? null, error: ok ? null : `Le PDF ne compile toujours pas : ${(out.texError ?? "").slice(0, 300)}` },
+    { ok, file: out.file || null, recompiled: true, warning: out.texWarning ?? null, error: ok ? null : "Le PDF ne compile toujours pas." },
     { status: ok ? 200 : 500 },
   );
 }

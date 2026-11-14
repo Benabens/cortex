@@ -18,13 +18,16 @@ const catRank = (c?: string) => {
 };
 const qPoints = (q: ExamQuestion) => q.points ?? 10;
 
-/** Échappe le texte BRUT (titres, concepts) pour LaTeX. NE PAS appliquer au LaTeX du modèle. */
-function texEscape(s: string): string {
-  return (s ?? "")
-    .replace(/\\/g, "\\textbackslash{}")
-    .replace(/([&%$#_{}])/g, "\\$1")
-    .replace(/~/g, "\\textasciitilde{}")
-    .replace(/\^/g, "\\textasciicircum{}");
+const TEX_SPECIAL: Record<string, string> = { "\\": "\\textbackslash{}", "~": "\\textasciitilde{}", "^": "\\textasciicircum{}" };
+/** Échappe le texte BRUT (titres, concepts, métadonnées du cours) pour LaTeX. NE PAS appliquer au LaTeX du modèle. */
+export function texEscape(s: string): string {
+  // Une seule passe : échapper « \ » puis « { } » à part donnait « \textbackslash\{\} » (« \{} » dans le PDF).
+  return (s ?? "").replace(/[\\&%$#_{}~^]/g, (ch) => TEX_SPECIAL[ch] ?? `\\${ch}`);
+}
+
+/** Contenu d'un QR code : le code du cours est saisi par l'utilisateur, seuls lettres, chiffres, « . » et « - » passent. */
+export function qrText(s: string): string {
+  return (s ?? "").replace(/[^A-Za-z0-9.-]/g, "");
 }
 
 /**
@@ -281,12 +284,14 @@ function coverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string): string
   const hours = Math.round(dur / 60);
   // métadonnées du cours courant (cs-202 reproduit le texte historique à l'identique)
   const c = getCourse(currentCourse());
-  const examCodeTex = c.examCode.replace(/-/g, "--"); // « CS-202 » → « CS--202 » (en-dash LaTeX)
-  const uniLines = c.universityLines.join("\\\\ ");
-  const profsTex = c.profs.length
-    ? c.profs.slice(0, -1).join(", ") + (c.profs.length > 1 ? " \\& " : "") + c.profs[c.profs.length - 1]
+  // Toutes échappées (audit du 14/11/2026, 🔴 1) : sans caractère spécial, le texte est inchangé.
+  const examCodeTex = texEscape(c.examCode).replace(/-/g, "--"); // « CS-202 » → « CS--202 » (en-dash LaTeX)
+  const uniLines = c.universityLines.map(texEscape).join("\\\\ ");
+  const profs = c.profs.map(texEscape);
+  const profsTex = profs.length
+    ? profs.slice(0, -1).join(", ") + (profs.length > 1 ? " \\& " : "") + profs[profs.length - 1]
     : "";
-  const facultyLine = [`\\textbf{${c.faculty}}`, `${examCodeTex} ${c.examName}`, profsTex].filter(Boolean).join("\\\\ ");
+  const facultyLine = [`\\textbf{${texEscape(c.faculty)}}`, `${examCodeTex} ${texEscape(c.examName)}`, profsTex].filter(Boolean).join("\\\\ ");
   // Logo institutionnel : réservé à EPFL. Un cours hors EPFL ne doit produire
   // AUCUNE marque EPFL. cs-202 (university="EPFL") reste
   // byte-identique : la garde émet exactement `\epfllogo[30]` comme avant.
@@ -300,7 +305,7 @@ function coverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string): string
     `\\noindent\\begin{minipage}[t]{0.7\\textwidth}\\vspace{0pt}\\footnotesize${facultyLine}\\end{minipage}\\hfill`,
     String.raw`\begin{minipage}[t]{0.25\textwidth}\vspace{0pt}\raggedleft\footnotesize Anonymisation:\\ \textbf{\#0000}\end{minipage}`,
     String.raw`\vspace{10pt}\noindent\normalsize NOM : Hanon Ymous \quad(000000)\hfill\textbf{Seat \#:} 0`,
-    `\\vspace{0.5cm}\\begin{center}{\\Large\\textbf{${examCodeTex} ${c.examName.toUpperCase()}}}\\\\[6pt]{\\large\\textbf{${c.examKind}}}\\\\[5pt]${footDate(dateLabel)}\\end{center}`,
+    `\\vspace{0.5cm}\\begin{center}{\\Large\\textbf{${examCodeTex} ${texEscape(c.examName.toUpperCase())}}}\\\\[6pt]{\\large\\textbf{${texEscape(c.examKind)}}}\\\\[5pt]${footDate(dateLabel)}\\end{center}`,
     String.raw`\vspace{0.25cm}\noindent{\large\textbf{INSTRUCTIONS (please read carefully)}}\par\smallskip`,
     String.raw`\noindent\textbf{IMPORTANT!} Please strictly follow these instructions, otherwise your exam may be canceled.`,
     String.raw`\begin{enumerate}\setlength{\itemsep}{2pt}`,
@@ -435,11 +440,11 @@ function courseHeaderOverride(): string {
   const c = getCourse(id);
   if (id === DEFAULT_COURSE) return ""; // gabarit historique intact (hashé, byte-identique)
   if (c.id !== id) return ""; // hors registre → gabarit par défaut
-  const code = c.examCode.replace(/-/g, "--");
-  const profsTex = c.profs.length ? c.profs.join(", ") : c.university;
+  const code = texEscape(c.examCode).replace(/-/g, "--");
+  const profsTex = texEscape(c.profs.length ? c.profs.join(", ") : c.university);
   return [
-    `\\fancyhead[R]{\\qrcode[height=1.25cm]{${c.examCode}-EXAM}}`,
-    `\\fancyfoot[C]{\\small\\textbf{${code}, ${c.examKind}}\\\\[-2pt]\\small ${profsTex}}`,
+    `\\fancyhead[R]{\\qrcode[height=1.25cm]{${qrText(c.examCode)}-EXAM}}`,
+    `\\fancyfoot[C]{\\small\\textbf{${code}, ${texEscape(c.examKind)}}\\\\[-2pt]\\small ${profsTex}}`,
   ].join("\n");
 }
 
@@ -577,10 +582,22 @@ export async function compileExamPdf(base: string): Promise<string> {
       const line = failingLine(`${(e as { raw?: string }).raw ?? ""}\n${readLog(base)}`);
       const src = attempt < 3 && line && fs.existsSync(texAbs) ? fs.readFileSync(texAbs, "utf8") : null;
       const fixed = src && line ? dropFailingFigure(src, line) ?? repairFrenchMacros(src, line) : null;
-      if (!fixed) throw e;
+      if (!fixed) throw publicCompileError(base, e as Error & { detail?: string }, line);
       fs.writeFileSync(texAbs, fixed);
     }
   }
+}
+
+/**
+ * L'erreur qui sort du module : elle finit dans l'interface (repli HTML, étapes du job, route
+ * « Régénérer le PDF »). Le journal LaTeX cite le texte de la ligne fautive, donc celui d'un
+ * fichier lu par un source piégé (audit du 14/11/2026, 🔴 1) : il reste dans les logs serveur
+ * et dans le .log du dossier ; l'utilisateur ne reçoit que la nature de la panne et la ligne.
+ */
+function publicCompileError(base: string, e: Error & { detail?: string }, line: number | null): Error {
+  if (!e.detail) return e; // aucun moteur, délai dépassé : rien du journal dans le message
+  console.error(`[latex] ${base}.tex non compilé :`, e.detail);
+  return new Error(`Échec compilation LaTeX${line ? ` (ligne ${line} du source)` : ""}.`);
 }
 
 async function compileOnce(base: string): Promise<string> {
@@ -589,27 +606,29 @@ async function compileOnce(base: string): Promise<string> {
   const pdfAbs = path.join(examsDir(), pdf);
   let raw = "";
   let lastErr = "Aucun moteur LaTeX trouvé (installe tectonic : brew install tectonic).";
+  let detail = ""; // journal ou stderr du moteur : jamais dans le message (cf. publicCompileError)
   for (const { bin, kind } of texCandidates()) {
     try {
       if (kind === "tectonic") {
         const r = await spawnP(bin, tectonicArgs(tex, { untrustedSupported: tectonicSupportsUntrusted(bin) }), examsDir(), 240_000);
         if (r.code === 0 && fs.existsSync(pdfAbs)) return pdf;
         raw = r.err ?? "";
-        lastErr = tailLog(base) || r.err || `tectonic code ${r.code}`;
+        detail = tailLog(base) || r.err || `tectonic code ${r.code}`;
       } else {
         // pdflatex : 2 passes (header/page refs)
         const a = ["-interaction=nonstopmode", "-halt-on-error", tex];
         const r1 = await spawnP(bin, a, examsDir(), 120_000);
         if (r1.code === 0) await spawnP(bin, a, examsDir(), 120_000);
         if (fs.existsSync(pdfAbs) && r1.code === 0) return pdf;
-        lastErr = tailLog(base) || `pdflatex code ${r1.code}`;
+        detail = tailLog(base) || `pdflatex code ${r1.code}`;
       }
     } catch (e: any) {
       if (e?.enoent) continue; // binaire absent → essaie le suivant
       lastErr = String(e?.message ?? e);
+      detail = "";
     }
   }
-  throw Object.assign(new Error(`Échec compilation LaTeX. ${lastErr}`), { raw });
+  throw Object.assign(new Error(`Échec compilation LaTeX.${detail ? "" : ` ${lastErr}`}`), { raw, detail });
 }
 
 function readLog(base: string): string {

@@ -6,7 +6,7 @@ import { coursePaths } from "@/lib/courses";
 import { sourceHref } from "@/lib/deeplink";
 import { search } from "@/lib/search";
 import { MOLD_KINDS, moldTaxonomyBlock, normalizeMold, normalizeFigureKind } from "@/lib/molds";
-import { execFileSync } from "node:child_process";
+import { findPdftoppm, renderPdfPages } from "@/lib/pdftoppm";
 import fs from "node:fs";
 import path from "node:path";
 import { listExamSourceRows } from "@/lib/sources";
@@ -48,16 +48,9 @@ export async function ensureIndexSchema(): Promise<void> {
   await q.ensureColumns("exam_exercises", ["mold", "figure_kind"]);
 }
 
-function pdftoppm(): string | null {
-  for (const bin of ["pdftoppm", "/usr/bin/pdftoppm", "/opt/homebrew/bin/pdftoppm", "/usr/local/bin/pdftoppm"]) {
-    try { execFileSync(bin, ["-v"], { stdio: "ignore" }); return bin; } catch { if (bin.includes("/") && fs.existsSync(bin)) return bin; }
-  }
-  return null;
-}
-
 /** Rend TOUTES les pages (jusqu'à maxPages) d'un PDF d'examen en PNG → {page, rel} (chemin rel au cwd). */
 export function renderExamPages(course: string, refBasename: string, maxPages = 16): { page: number; rel: string }[] {
-  const bin = pdftoppm();
+  const bin = findPdftoppm();
   if (!bin) return [];
   const refsDir = coursePaths(course).refsDir;
   const pdf = path.join(refsDir, refBasename);
@@ -69,7 +62,7 @@ export function renderExamPages(course: string, refBasename: string, maxPages = 
   const existing = fs.readdirSync(outDir).filter((x) => x.startsWith(base + "-") && /\.png$/i.test(x));
   if (!existing.length) {
     try {
-      execFileSync(bin, ["-png", "-r", "120", "-f", "1", "-l", String(maxPages), pdf, path.join(outDir, base)], { stdio: "ignore" });
+      renderPdfPages(bin, pdf, path.join(outDir, base), { lastPage: maxPages });
     } catch { return []; }
   }
   return fs.readdirSync(outDir)
