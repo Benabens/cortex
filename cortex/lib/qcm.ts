@@ -1666,19 +1666,6 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     if (got.error) lastError = got.error;
     all.splice(0, all.length, ...selectWithinTrivialBudget(all, got.items, count));
   }
-  // La diversité ne vaut jamais des questions absentes : si la réserve ou les remplacements
-  // s'épuisent, on rétablit juste assez de questions acquises avant l'audit final. Elles restent
-  // valides et vérifiées ; un éventuel doublon est préférable à un remboursement subi.
-  if (all.length < acquiredBeforeDedup.length) {
-    const present = new Set(all.map((it) => it.stem));
-    for (const it of acquiredBeforeDedup) {
-      if (all.length >= acquiredBeforeDedup.length) break;
-      if (present.has(it.stem) || historicalRepeats.has(it.stem)) continue;
-      all.push(it);
-      present.add(it.stem);
-    }
-    step(`Audit des doublons : ${all.length}/${acquiredBeforeDedup.length} QCM acquis conservés`, 80);
-  }
   // COMPLÉMENT FINAL — encore en dessous du nombre demandé (réserve épuisée, doublons retirés,
   // rejets répétés) : une ronde, dans ce qui reste du budget de lots. Les notions de réserve
   // d'abord ; à défaut, les notions les moins posées, sous un angle VRAIMENT distinct : le nombre
@@ -1716,6 +1703,19 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
         step(`${late.size} QCM du complément en doublon retiré(s)`, 80);
       }
     }
+  }
+  // La diversité ne vaut jamais des questions absentes : si la réserve, les remplacements et le
+  // complément final s'épuisent, on rétablit juste assez de questions acquises avant l'audit final. Elles restent
+  // valides et vérifiées ; un éventuel doublon est préférable à un remboursement subi.
+  if (all.length < acquiredBeforeDedup.length) {
+    const present = new Set(all.map((it) => it.stem));
+    for (const it of acquiredBeforeDedup) {
+      if (all.length >= acquiredBeforeDedup.length) break;
+      if (present.has(it.stem) || historicalRepeats.has(it.stem)) continue;
+      all.push(it);
+      present.add(it.stem);
+    }
+    step(`Audit des doublons : ${all.length}/${acquiredBeforeDedup.length} QCM acquis conservés`, 80);
   }
   // Aucun appel en erreur mais tous les items écartés (mal formés) : c'est une réponse inutilisable.
   const cause = () => lastError ?? new LlmError("Toutes les questions reçues étaient mal formées.", "BAD_OUTPUT");
