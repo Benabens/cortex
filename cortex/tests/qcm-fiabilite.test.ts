@@ -100,8 +100,8 @@ let dedupe: (prompt: string) => { first: number; second: number; reason: string 
 let finalAuditCalls = 0;
 function finalAuditReply(prompt: string): string {
   const items = [...prompt.matchAll(/^Q(\d+)\.[\s\S]*?(?=^Q\d+\.|$(?![\s\S]))/gm)]
-    .map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] }));
-  return JSON.stringify({ items });
+    .map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [...m[0].matchAll(/^\s+\((\d+)\) (.*)$/gm)].filter((o) => /TypeError/.test(o[2])).map((o) => Number(o[1])) }));
+  return JSON.stringify({ verdicts: items });
 }
 /** Drill : n = rang de l'appel. */
 let drill: (n: number) => string = () => "{}";

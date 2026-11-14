@@ -85,7 +85,7 @@ function repair(prompt: string): string {
 }
 
 function audit(prompt: string): string {
-  return JSON.stringify({ items: blocks(prompt).map(({ index, body }) => ({
+  return JSON.stringify({ verdicts: blocks(prompt).map(({ index, body }) => ({
     index, key: !auditRejects(body, calls.audit), offCourse: false,
     trivial: [...body.matchAll(/^\s+\((\d+)\) (.*)$/gm)].filter((m) => m[2].startsWith(TRIVIAL)).map((m) => Number(m[1])),
   })) });
