@@ -287,19 +287,19 @@ test("lot name_only avec un distracteur trivial : répare l'option sans reconcev
   assert.equal(verifyPrompts.length, 2, "le lot réparé est revérifié une fois");
 });
 
-test("le modèle ne rend jamais assez de QCM : comblement borné, et l'examen dit « n sur 7 »", async () => {
+test("le modèle ne rend qu'un QCM par lot : le complément borné atteint 7 sur 7", async () => {
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
-  // Un seul QCM par lot, et toujours l'un des trois mêmes énoncés : aucun budget ne suffit.
+  // Un seul QCM par lot : le budget tardif poursuit après le comblement principal.
   design = (_n, call) => JSON.stringify({ items: [item(call % 3)] });
   const r = await runWithCourse(id, () => generateQcmExam({ count: 7, openCount: 0 }));
-  assert.ok(r.count > 0 && r.count < 7, `count=${r.count}`);
+  assert.equal(r.count, 7, `count=${r.count}`);
   assert.equal(r.requested, 7);
-  // Budget borné : les 2 lots prévus, plus au plus 3 × 2 lots de comblement et de complément final.
-  assert.ok(designCalls <= 8, `budget de comblement borné (${designCalls} lots demandés pour 2 prévus)`);
+  // Budget borné : 2 lots prévus, 3 × 2 de comblement principal, puis 3 lots tardifs au plus.
+  assert.ok(designCalls <= 11, `budget de comblement borné (${designCalls} lots demandés pour 2 prévus)`);
   const exam = await runWithCourse(id, () => getQcmExam(r.id));
-  assert.match(exam!.verifySummary ?? "", new RegExp(`${r.count} sur 7`));
+  assert.doesNotMatch(exam!.verifySummary ?? "", /sur 7/);
 });
 
 test("plusieurs rondes de lots très incomplets finissent par livrer le total demandé", async () => {

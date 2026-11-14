@@ -164,6 +164,7 @@ test("HUM-285 anonymisé : Q11, Q19, Q16, Q20 et Q14 sont remplacées, les premi
   for (const q of [11, 14, 16, 19, 20]) assert.ok(!stems.some((s) => s.startsWith(`Question ${q} `)), `Q${q} est retirée`);
   assert.equal(stems.filter((s) => s.startsWith("Remplacement")).length, 5);
   assert.match(dedupePrompts[0], /une notion = une question/i, "le contrôle reçoit le critère strict");
+  assert.match(dedupePrompts[0], /Options :/, "le contrôle voit aussi les réponses et distracteurs recyclés");
   assert.ok(steps.some((s) => /5 QCM en doublon/.test(s)), steps.filter((s) => /doublon/.test(s)).join("\n"));
   assert.match(designPrompts[designPrompts.length - 1], /concept fictif alpha/, "le lot de remplacement sait quelles notions sont déjà posées");
 });
@@ -270,10 +271,11 @@ test("banc du 04/11 (CS-290) : une question qui reprend celle d'un examen préc�
   assert.match(dedupePrompts[0], /^P\d+\. .*faux positifs des détecteurs/m, "le contrôle reçoit les questions des examens précédents");
 });
 
-test("réserve épuisée : le dédoublonnage ne réduit jamais le nombre déjà acquis", async () => {
+test("modèle qui répète toujours la même notion : budget borné, aucun doublon connu réinjecté", async () => {
   const id = await course(4, 0);
   design = (n, call) => Array.from({ length: n }, (_, i) => item(`Question ${call}.${i} [notion:unique] [angle:${call}.${i}] : que dit le cours ?`));
   const { r, stems, steps } = await exam(id, 4);
-  assert.equal(r.count, 4, steps.filter((s) => /doublon|remplacement/.test(s)).join("\n"));
-  assert.equal(stems.length, 4);
+  assert.equal(r.count, 1, steps.filter((s) => /doublon|remplacement/.test(s)).join("\n"));
+  assert.equal(stems.length, 1);
+  assert.ok(designCalls <= 4, `conception initiale + budget tardif borné, reçu ${designCalls}`);
 });

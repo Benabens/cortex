@@ -219,9 +219,23 @@ test("réserve épuisée par les doublons : complément final sous un autre angl
   dedupe = (n) => (n <= 2 ? [{ first: 0, second: 1, reason: "même notion" }] : []);
   const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
   assert.equal(r.count, 4, `count=${r.count}`);
-  assert.ok(designPrompts.some((p) => /angle VRAIMENT distinct/.test(p) && /NOTIONS DÉJÀ TESTÉES/.test(p)), "le complément reprend une notion sous un autre angle");
+  assert.ok(designPrompts.some((p) => /thème déjà couvert[\s\S]+AUTRE fait/i.test(p)), "le complément reprend une notion sous un autre angle");
   assert.ok(designPrompts.some((p) => subjects(p).includes("Cours 4 — souveraineté numérique")), "le titre du support sert d'abord de réserve");
   assert.equal(dedupeCalls, 3, "le contrôle des doublons repasse sur le complément");
+});
+
+test("un remplacement encore en doublon déclenche une nouvelle ronde bornée", async () => {
+  const id = await humCourse(NOTIONS.slice(0, 4));
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  // Les deux audits de remplacement puis le premier complément trouvent encore le même fait.
+  // La quatrième passe accepte enfin la nouvelle question : l'ancien code s'arrêtait à la troisième.
+  dedupe = (n) => (n <= 3 ? [{ first: 0, second: n === 3 ? 3 : 1, reason: "même fait testé" }] : []);
+  const steps: string[] = [];
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0, onStep: (s) => { steps.push(s); } }));
+  assert.equal(r.count, 4, steps.join("\n"));
+  assert.ok(steps.filter((s) => /en doublon retiré.*remplacement/.test(s)).length >= 3, steps.join("\n"));
+  assert.equal(dedupeCalls, 4, "chaque remplacement est contrôlé, puis remplacé dans le budget restant");
 });
 
 // ─── Job 14 de HUM-285 (13/11, après #78) : titres = noms de fichiers ─────────────────────────────
