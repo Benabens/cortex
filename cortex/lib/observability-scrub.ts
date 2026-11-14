@@ -35,7 +35,12 @@ export function redactMessage(text: string): string {
   if (cut > 0) t = t.slice(0, cut);
   t = t.replace(/\{[^{}]*\}/g, "{…}"); // \subq{énoncé}, \input{fichier}
   t = t.replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, "<e-mail>"); // identité d'un compte, avant les chemins (« @ » y est permis)
-  t = t.replace(/(?:[\w.~@%+-]*\/)+[\w.~@%+-]*/g, "<chemin>"); // data/u/<slug>/…, URL
+  // AU MOINS DEUX « / » (segment non vide de chaque côté) : un vrai chemin a plusieurs
+  // niveaux (data/u/<slug>/…, une URL) ; un seul « / » est bien plus souvent une paire
+  // (SCQ/MCQ), une fraction (3/4) ou « 15 $/jour » — tous vus en clair dans currentStep
+  // une fois celui-ci passé par ce nettoyage (constat prod du 14/11, job 21 HUM-285 :
+  // plafond de dépense par jour ET « Format : … barème · SCQ/MCQ » tous deux abîmés).
+  t = t.replace(/(?:[\w.~@%+-]+\/){2,}[\w.~@%+-]*/g, "<chemin>"); // data/u/<slug>/…, URL
   return t.length > MESSAGE_MAX ? t.slice(0, MESSAGE_MAX) + "…" : t;
 }
 

@@ -54,3 +54,18 @@ test("scripts/run-job.ts appelle la vérification avant tout travail", () => {
   assert.match(src, /assertJobCourseOwned\(/);
   assert.ok(src.indexOf("assertJobCourseOwned(") < src.indexOf('job.type === "ingest"'), "la vérification doit précéder le dispatch des jobs");
 });
+
+test("scripts/run-job.ts : un échec sans résultat remet la progression à 0 pour exam/qcm SEULEMENT (jamais 99 % pour un job mort-né, jamais écrasée pour prepare/ingest)", () => {
+  // Constat prod du 14/11 (job 21, HUM-285) : plafond de dépense touché 2 s après le
+  // lancement, progress_pct affiché à 99 avec « 0/20 QCM construits » — l'avancement par
+  // phase (lib/progress) compte un lot ÉCHOUÉ comme une unité « faite » pour l'ETA. fail()
+  // doit remettre la progression à 0 quand rien n'a été livré (pas de resultId) — MAIS
+  // seulement pour exam/qcm (resultId n'existe que pour eux) : un correctif trop large
+  // (régression constatée le même jour en CI, tests/mcp-prepare-pg.test.ts) écrasait aussi
+  // le pourcentage, déjà réel, d'un prepare_course qui échoue après une ingestion réussie.
+  const src = fs.readFileSync(path.join(__dirname, "..", "scripts", "run-job.ts"), "utf8");
+  const failFn = src.slice(src.indexOf("async function fail("), src.indexOf("\n}\n", src.indexOf("async function fail(")));
+  assert.match(failFn, /resetProgress[\s\S]*progress:\s*0|progress:\s*0[\s\S]*resetProgress/);
+  assert.match(failFn, /current\.type === "exam"/);
+  assert.match(failFn, /current\.type === "qcm"/);
+});
