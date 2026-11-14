@@ -71,13 +71,17 @@ const EXPL3_RE = /\\[A-Za-z@]+(?:_[A-Za-z@]+)+:[A-Za-z]*|\\[A-Za-z@]+:[A-Za-z]+/
  * TikZ `plot file {…}` lit un fichier, `plot function {…}` relit un .table (audit du 14/11/2026).
  * Ce ne sont pas des séquences de contrôle : deux règles. PLOT_OP_RE voit la suite littérale
  * `plot [options] file|function`, y compris dans le corps d'un \def. Vérifié sous tectonic :
- * une macro peut tenir lieu de `plot` (`\def\p{plot}\draw \p file {x};`), pas de `file` ;
- * PLOT_ARG_RE refuse donc le mot-clé suivi de son argument (accolade ou macro), quoi qui le
- * précède. `\(` reste permis : « the function \(f\) » est une tournure courante.
+ * une macro peut tenir lieu de `plot` (`\def\p{plot}\draw \p file {x};`), pas de `file`.
+ * PLOT_ARG_RE refuse donc le mot-clé suivi de son argument (accolade ou macro), mais seulement
+ * si le source contient un `plot` (toute casse : \lowercase le fabrique) qui n'est pas un tracé
+ * de coordonnées : « The file \texttt{records.bin} » est un énoncé cs-202 courant.
  */
 const TEX_SPACE = String.raw`(?:\s|%[^\n]*\n)*`;
-const PLOT_OP_RE = new RegExp(String.raw`(?<![A-Za-z@\\])plot${TEX_SPACE}(?:\[(?:[^\[\]]|\[[^\]]*\])*\]${TEX_SPACE})?(?:file|function)(?![A-Za-z@])`, "g");
-const PLOT_ARG_RE = new RegExp(String.raw`(?<![A-Za-z@\\])(?:file|function)${TEX_SPACE}(?:\{|\\(?![()\[\]]))`, "g");
+const PLOT_OPTS = String.raw`(?:\[(?:[^\[\]]|\[[^\]]*\])*\]${TEX_SPACE})?`;
+const PLOT_OP_RE = new RegExp(String.raw`(?<![A-Za-z@\\])plot${TEX_SPACE}${PLOT_OPTS}(?:file|function)(?![A-Za-z@])`, "gi");
+const PLOT_ARG_RE = new RegExp(String.raw`(?<![A-Za-z@\\])(?:file|function)${TEX_SPACE}(?:\{|\\(?![()\[\]]))`, "gi");
+/** Un `plot` qui n'est pas `plot coordinates {…}` ni `plot (x, {f(x)})` : prose, ou tracé détourné. */
+const PLOT_NOT_COORDS_RE = new RegExp(String.raw`(?<![A-Za-z@\\])plot(?![A-Za-z@])(?!${TEX_SPACE}${PLOT_OPTS}(?:coordinates(?![A-Za-z@])|\())`, "i");
 /** Primitives XeTeX (tectonic = XeTeX) : \XeTeXpicfile, \XeTeXpdffile, encodages, glyphes… */
 const XETEX_RE = /\\XeTeX[A-Za-z]*/g;
 const ENV_RE = /\\(?:begin|end)\s*\{([^}]*)\}/g;
@@ -158,7 +162,7 @@ export function findTexHazards(tex: string): string[] {
   for (const m of body.matchAll(EXPL3_RE)) found.push(m[0]);
   for (const m of body.matchAll(XETEX_RE)) found.push(m[0]);
   for (const m of body.matchAll(PLOT_OP_RE)) found.push(m[0].replace(/\s+/g, " "));
-  for (const m of body.matchAll(PLOT_ARG_RE)) found.push(m[0].replace(/\s+/g, " "));
+  if (PLOT_NOT_COORDS_RE.test(body)) for (const m of body.matchAll(PLOT_ARG_RE)) found.push(m[0].replace(/\s+/g, " "));
   if (/\\ExplSyntaxOn/.test(body)) found.push("\\ExplSyntaxOn");
   if (/\^\^/.test(body)) found.push("^^");
   const envs = allowedEnvs();
