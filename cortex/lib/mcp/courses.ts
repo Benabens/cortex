@@ -17,7 +17,7 @@ const norm = (s: string | null | undefined) =>
   (s ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[\s_-]+/g, "");
 
 export function courseLabel(c: CourseConfig): string {
-  return c.examCode && c.examCode !== c.name ? `${c.examCode} — ${c.name}` : c.name;
+  return c.examCode && c.examCode !== c.name ? `${c.examCode} · ${c.name}` : c.name;
 }
 
 export async function resolveCourse(userId: string, ref: string | undefined): Promise<CourseConfig> {

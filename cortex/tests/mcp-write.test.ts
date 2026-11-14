@@ -261,7 +261,7 @@ test("compte normal avec cortex.write : crée un cours (gratuit, comme dans l'ap
   assert.equal(r.isError, undefined, text(r));
   const created = r.structuredContent as { status: string; course: { id: string; label: string } };
   assert.equal(created.status, "created");
-  assert.equal(created.course.label, "MATH-232 — Probabilités et statistique");
+  assert.equal(created.course.label, "MATH-232 · Probabilités et statistique");
   courseId = created.course.id;
   assert.match(text(await call(alice, "list_courses")), /MATH-232/);
   assert.equal(errorCode(await call(alice, "create_course", { name: "Probas bis", code: "math-232" })), "conflict");

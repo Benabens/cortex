@@ -589,13 +589,13 @@ export async function rebuildBlueprintFromIndex(opts: { onStep?: (m: string, p: 
   }
   // plan de cours du prof + rattachement des notions (repli propre si non dérivable).
   const plan = await rebuildCoursePlan({ onStep: (s, p) => step(`Plan de cours : ${s}`, 74 + Math.round(p * 0.12)) });
-  step(plan.plan.ok ? `Plan : ${plan.plan.chapters} chapitres, ${plan.map.mapped}/${plan.map.total} notions rattachées ✓` : `Plan de cours non dérivé (${plan.plan.reason ?? "structure insuffisante"}) — regroupement existant conservé.`, 86);
+  step(plan.plan.ok ? `Plan : ${plan.plan.chapters} chapitres, ${plan.map.mapped}/${plan.map.total} notions rattachées ✓` : `Plan de cours non dérivé (${plan.plan.reason ?? "structure insuffisante"}), regroupement existant conservé.`, 86);
   // ADN d'examen (moules + figures + texture) détecté depuis les annales.
   // Ré-entrant ; jamais bloquant : un échec laisse l'ADN partiel, repris au prochain run / npm run dna.
   try {
     await detectExamDna({ onStep: (s, p) => step(`ADN : ${s}`, 86 + Math.round(p * 0.14)) });
   } catch (e) {
-    step(`ADN d'examen incomplet (${(e as Error).message.slice(0, 50)}) — relance « npm run dna »`, 100);
+    step(`ADN d'examen incomplet (${(e as Error).message.slice(0, 50)}), relance « npm run dna »`, 100);
   }
   return { exams: idx.exams, exercises: idx.exercises, types, chapters: plan.plan.chapters, mapped: plan.map.mapped };
 }

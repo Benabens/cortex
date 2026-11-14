@@ -170,8 +170,10 @@ test("nouveau compte à 0 crédit : import et consultation gratuits, préparatio
 
   await page.goto(`/sources?course=${encodeURIComponent(created.body.course.id)}`);
   await page.getByRole("button", { name: "Préparer le cours" }).click();
-  await expect(page.getByRole("dialog", { name: "Crédits requis" })).toContainText("Il te faut 2 crédits");
-  await expect(page.getByRole("link", { name: "Acheter" })).toHaveAttribute("href", "/compte#credits");
+  // Encart dans la page (pas une boîte modale) : annoncé comme statut.
+  const paywall = page.getByRole("status").filter({ hasText: "Il te faut 2 crédits" });
+  await expect(paywall).toBeVisible();
+  await expect(paywall.getByRole("link", { name: "Acheter des crédits" })).toHaveAttribute("href", "/compte#credits");
 
   const denied = await api<{ error: string }>(page, `/api/exams/generate?course=${encodeURIComponent(created.body.course.id)}`, { method: "POST", body: "{}" });
   expect(denied.status).toBe(402); expect(denied.body.error).toMatch(/2 crédit/i);

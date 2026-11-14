@@ -111,7 +111,7 @@ export function DeleteAccount() {
     <section className="rounded-[18px] border border-[color-mix(in_oklch,var(--color-danger)_35%,var(--color-line))] bg-[color-mix(in_oklch,var(--color-danger)_6%,transparent)] p-5">
       <h2 className="text-xl font-semibold text-ink-1">Supprimer mon compte</h2>
       <p className="mt-1.5 max-w-2xl text-[0.85rem] leading-relaxed text-ink-2">
-        Efface définitivement votre compte et toutes vos données : cours, annales,
+        Efface définitivement ton compte et toutes tes données : cours, annales,
         examens générés, faiblesses, planning, fichiers et crédits. Cette action est
         irréversible.
       </p>
@@ -140,17 +140,17 @@ export function DeleteAccount() {
             className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-xl border border-line-strong bg-surface-1 p-6 shadow-[var(--shadow-pop)]"
           >
             <h3 id="del-title" className="text-[1.05rem] font-semibold text-ink-1">
-              Supprimer votre compte ?
+              Supprimer ton compte ?
             </h3>
             <div className="mt-3 space-y-2 text-[0.85rem] leading-relaxed text-ink-2">
               <p>Cette action est définitive. Seront effacés :</p>
               <ul className="list-disc space-y-1 pl-5">
-                <li>votre compte et vos connexions ;</li>
-                <li>tous vos cours et leur contenu (annales, examens, faiblesses, planning) ;</li>
-                <li>vos fichiers et vos crédits.</li>
+                <li>ton compte et tes connexions ;</li>
+                <li>tous tes cours et leur contenu (annales, examens, faiblesses, planning) ;</li>
+                <li>tes fichiers et tes crédits.</li>
               </ul>
               <p className="text-ink-3">
-                Vos données d’usage sont anonymisées, sans lien avec vous.
+                Tes données d’usage sont anonymisées, sans lien avec toi.
                 L’effacement de nos sauvegardes se termine sous 30 jours.
               </p>
             </div>

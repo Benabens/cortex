@@ -182,7 +182,7 @@ test("toujours contestée après régénération : la question est écartée et 
   const exam = await runWithCourse(id, () => getQcmExam(r.id, true));
   assert.ok(exam!.items.every((it) => !/\(v\d+\)/.test(it.stem)), "aucune version contestée n'est gardée");
   assertCoherent(exam!.items);
-  assert.ok(steps.some((s) => /rejeté — clé contestée/.test(s)), "le rejet est dit");
+  assert.ok(steps.some((s) => /rejeté : clé contestée/.test(s)), "le rejet est dit");
   const topup = designPrompts.find((p, i) => i > 0 && !/À CORRIGER/.test(p));
   assert.match(topup ?? "", /Alignement interne et externe/, "le sujet de la question écartée est comblé");
 });
@@ -251,7 +251,7 @@ test("question sur la grille d'évaluation ou la forme d'un rendu : rejetée et 
     assert.equal(r.count, 3, steps.join("\n"));
     const exam = await runWithCourse(id, () => getQcmExam(r.id, true));
     assert.ok(exam!.items.every((it) => !/grille/i.test(it.stem)), "la question sur la grille n'est pas gardée");
-    assert.ok(steps.some((s) => /rejeté — hors matière[^\n]*grille d'évaluation/.test(s)), "le rejet est dit, avec sa raison");
+    assert.ok(steps.some((s) => /rejeté : hors matière[^\n]*grille d'évaluation/.test(s)), "le rejet est dit, avec sa raison");
     assert.match(verifyPrompts[0], /modalités d'examen[\s\S]*forme d'un rendu[\s\S]*organisation du cours/, "le correcteur sait qu'il doit le relever");
     assert.match(designPrompts[0], /MATIÈRE[^\n]*modalités d'examen[^\n]*forme d'un rendu[^\n]*organisation du cours/, "la conception l'interdit d'emblée");
   } finally {

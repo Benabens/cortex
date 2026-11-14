@@ -315,11 +315,11 @@ export function TrainingStudio() {
             <h2 className="mt-3 text-[1.05rem] font-semibold text-ink-1">{input.trim() || "Exercice sur mesure"}</h2>
             <div className="mt-4 grid grid-cols-2 gap-3">
               <a href={resultLink ?? "/examens"} target={resultLink ? "_blank" : undefined} rel="noopener noreferrer" className="flex items-center gap-3 rounded-lg border border-line bg-surface-2/40 p-3 transition-colors hover:border-[color-mix(in_oklch,var(--color-accent)_34%,transparent)]">
-                <FileText className="size-5 text-cyan-hi" strokeWidth={2} />
+                <FileText className="size-5 text-ink-3" strokeWidth={2} />
                 <span className="text-[0.82rem] font-medium text-ink-1">{resultLink ? "Énoncé PDF" : "Voir dans Examens"}</span>
               </a>
-              <a href="/examens" className="flex items-center gap-3 rounded-lg border border-line bg-surface-2/40 p-3 transition-colors hover:border-[color-mix(in_oklch,var(--color-emerald)_34%,transparent)]">
-                <CheckSquare className="size-5 text-emerald-hi" strokeWidth={2} />
+              <a href="/examens" className="flex items-center gap-3 rounded-lg border border-line bg-surface-2/40 p-3 transition-colors hover:border-[color-mix(in_oklch,var(--color-accent)_34%,transparent)]">
+                <CheckSquare className="size-5 text-ink-3" strokeWidth={2} />
                 <span className="text-[0.82rem] font-medium text-ink-1">Corrigé</span>
               </a>
             </div>
@@ -374,7 +374,7 @@ function FeedbackBar({ onSend, sent, busy, error }: { onSend: (verdict: string) 
 function ChipGroup({ label, chips, onPick, selected }: { label: string; chips: string[]; onPick: (c: string) => void; selected: string }) {
   return (
     <div>
-      <div className="mb-2 text-[0.72rem] font-medium text-ink-4">{label}</div>
+      <div className="mb-2 text-xs font-medium text-ink-4">{label}</div>
       <div className="flex flex-wrap gap-2">
         {chips.map((c) => (
           <button
@@ -382,14 +382,15 @@ function ChipGroup({ label, chips, onPick, selected }: { label: string; chips: s
             type="button"
             onClick={() => onPick(c)}
             aria-pressed={selected === c}
+            title={c}
             className={cn(
-              "inline-flex min-h-9 items-center rounded-full border px-3 py-1 text-left text-[0.8rem] font-medium transition-colors",
+              "inline-flex min-h-9 max-w-full items-center rounded-full border px-3 py-1 text-left text-[0.8rem] font-medium transition-colors",
               selected === c
                 ? "border-[color-mix(in_oklch,var(--color-accent)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_14%,transparent)] text-ink-1"
                 : "border-line bg-surface-1/60 text-ink-2 hover:bg-surface-2 hover:text-ink-1"
             )}
           >
-            {c}
+            <span className="truncate">{c}</span>
           </button>
         ))}
       </div>

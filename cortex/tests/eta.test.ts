@@ -51,7 +51,7 @@ test("réessai après une coupure : estimé sur ce qui reste à faire, pas sur l
   assert.ok(Math.abs(e.remainingMs! - 6 * MIN) <= MIN, `${e.remainingMs! / MIN} min`);
   assert.match(e.label, /reprise/);
   const queued = estimateRemaining({ type: "qcm", status: "queued", progress: 0, elapsedMs: 0, attempts: 0, historyMs: [10 * MIN] });
-  assert.match(queued.label, /En file — environ 10 min une fois lancé/);
+  assert.match(queued.label, /En file : environ 10 min une fois lancé/);
 });
 
 test("rendu du suivi : avancement, étape et temps restant", async () => {

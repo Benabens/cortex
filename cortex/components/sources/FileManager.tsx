@@ -9,14 +9,6 @@ import { corpusLabel, extOf, type SourcesResp, type SourceExam } from "@/lib/ux/
 import { cn } from "@/lib/ux/cn";
 import { apiDelete } from "@/lib/ux/write";
 
-const extTone: Record<string, string> = {
-  PDF: "var(--color-danger)",
-  HTML: "var(--color-cyan)",
-  HTM: "var(--color-cyan)",
-  TXT: "var(--color-ink-3)",
-  MD: "var(--color-accent)",
-};
-
 const ANNALE_TYPES = new Set(["final", "midterm"]);
 /** Valeur de la facette par défaut (les annales regroupent plusieurs types de source). */
 const ANNALES = "__annales__";
@@ -120,37 +112,36 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
       {facet === null ? (
         <>
           {/* en-tête table annales (desktop) */}
-          <div className="hidden items-center gap-3 border-b border-line px-4 py-2 text-[0.68rem] font-medium text-ink-4 md:flex">
+          <div className="hidden items-center gap-3 border-b border-line px-4 py-2 text-xs font-medium text-ink-4 md:flex">
             <span className="w-8" />
             <span className="flex-1">Annale</span>
-            <span className="w-52 text-right">Ouvrir · Référence</span>
+            <span className="pr-14 text-right">Voir · Référence</span>
           </div>
 
-          <div className="p-1.5">
-            {data.exams.map((f, i) => {
+          <div className="divide-y divide-line px-1.5">
+            {data.exams.map((f) => {
               const ext = extOf(f.path);
               const Icon = ext === "HTML" || ext === "HTM" ? FileCode2 : FileText;
-              const tone = extTone[ext] ?? "var(--color-ink-3)";
               const isBusy = busy.has(f.path);
               const href = hrefByPath.get(f.path) ?? null;
               return (
-                <div key={f.path} className={cn("flex flex-wrap items-center gap-3 rounded-xl px-4 py-4 transition-colors hover:bg-surface-2/40", i > 0 && "border-t border-line")}>
-                  <span className="grid size-8 shrink-0 place-items-center rounded-md border border-line bg-surface-2/60" style={{ color: tone }}>
+                <div key={f.path} className="flex flex-wrap items-center gap-3 px-4 py-4 transition-colors hover:bg-surface-2/40">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-md border border-line bg-surface-2/60 text-ink-3">
                     <Icon className="size-4" strokeWidth={2} />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[0.88rem] text-ink-1">
+                    <div className="truncate text-[0.88rem] text-ink-1" title={f.title}>
                       {f.title}
                       {f.year ? <span className="ml-1.5 text-ink-3">· {f.year}</span> : null}
                     </div>
                     <div className="text-[0.72rem] text-ink-4">
-                      <span className="font-mono">{ext}</span>
+                      <span className="font-data">{ext}</span>
                     </div>
                   </div>
 
                   {/* Ouvrir (voir) + Référence + emplacement RÉSERVÉ pour la poubelle → aucun décalage.
                       Sur mobile, le bloc passe sous le titre au lieu de l'écraser. */}
-                  <div className="flex w-full shrink-0 items-center justify-end gap-1.5 sm:w-52">
+                  <div className="flex w-full shrink-0 items-center justify-end gap-1.5 sm:w-auto">
                     {href && <SeeLink href={href} label={f.title} />}
                     <RefCheckbox checked={isRef(f)} busy={isBusy} onToggle={() => toggleRef(f)} label={f.title} />
                     {f.uploaded ? (
@@ -178,27 +169,26 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
           </div>
         </>
       ) : (
-        // Vue « browse » d'un type de corpus : chaque item ouvrable via « voir ».
-        <div className="p-1.5">
+        // Vue « browse » d'un type de corpus : chaque item ouvrable via « Voir ».
+        <div className="divide-y divide-line px-1.5">
           {browseRows.length === 0 ? (
             <p className="px-4 py-8 text-center text-[0.85rem] text-ink-3">Aucun élément de ce type dans le corpus.</p>
           ) : (
-            browseRows.map((s, i) => {
+            browseRows.map((s) => {
               const ext = extOf(s.path);
               const Icon = ext === "HTML" || ext === "HTM" ? FileCode2 : FileText;
-              const tone = extTone[ext] ?? "var(--color-ink-3)";
               return (
-                <div key={s.path} className={cn("flex items-center gap-3 rounded-xl px-4 py-4 transition-colors hover:bg-surface-2/40", i > 0 && "border-t border-line")}>
-                  <span className="grid size-8 shrink-0 place-items-center rounded-md border border-line bg-surface-2/60" style={{ color: tone }}>
+                <div key={s.path} className="flex items-center gap-3 px-4 py-4 transition-colors hover:bg-surface-2/40">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-md border border-line bg-surface-2/60 text-ink-3">
                     <Icon className="size-4" strokeWidth={2} />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[0.88rem] text-ink-1">
+                    <div className="truncate text-[0.88rem] text-ink-1" title={s.title}>
                       {s.title}
                       {s.year ? <span className="ml-1.5 text-ink-3">· {s.year}</span> : null}
                     </div>
                     <div className="text-[0.72rem] text-ink-4">
-                      <span className="font-mono">{ext}</span>
+                      <span className="font-data">{ext}</span>
                     </div>
                   </div>
                   {s.href && <SeeLink href={s.href} label={s.title} />}
@@ -219,10 +209,10 @@ function SeeLink({ href, label }: { href: string; label: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      aria-label={`Voir ${label}`}
+      aria-label={`Voir ${label} (nouvel onglet)`}
       className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-md border border-line bg-surface-2/40 px-2.5 text-[0.78rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-accent)_40%,transparent)] hover:text-accent-hi focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
     >
-      voir
+      Voir
       <ArrowUpRight className="size-3.5" strokeWidth={2.25} />
     </a>
   );

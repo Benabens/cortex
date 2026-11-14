@@ -182,7 +182,7 @@ export function CourseList() {
             </div>
           ) : (
             <div className="flex flex-wrap items-center gap-3">
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-1 basis-full sm:basis-0">
                 <p className="truncate text-[0.9rem] font-semibold text-ink-1">{c.name}</p>
                 <p className="mt-0.5 truncate text-[0.78rem] text-ink-3">
                   {[c.code, c.university, c.examDate ? `final le ${longDay(c.examDate)}` : null].filter(Boolean).join(" · ") ||

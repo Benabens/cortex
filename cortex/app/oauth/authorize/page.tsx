@@ -20,7 +20,7 @@ export const metadata: Metadata = { ...NOINDEX, title: "Connecter une applicatio
  */
 
 // Jetons --bare-* de globals.css : la DA sombre de /login, et son équivalent en thème clair.
-// faint : #8a8798 en sombre (5,2:1 sur la surface), #5f6b7e en clair (5,4:1).
+// faint : ink-3 en sombre (#9295a0, 6,1:1 sur la surface), #5f6b7e en clair (5,4:1).
 const C = {
   bg: "var(--bare-bg)",
   ink: "var(--bare-ink)",

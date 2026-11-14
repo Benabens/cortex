@@ -16,6 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { excludedSourceIds } from "@/lib/source-scope";
+import { examSummaryLabel } from "@/lib/exam-summary";
 
 const EXAM_DIR = () => examsDir();
 
@@ -223,7 +224,7 @@ async function callClaude(ctx: Ctx): Promise<ExamSpec> {
 // Examen factice pour tester le pipeline LaTeX sans IA.
 function stubExam(_ctx: Ctx): ExamSpec {
   return {
-    title: "CS-202 Computer Systems — Final Exam (dry-run)",
+    title: "CS-202 Computer Systems : Final Exam (dry-run)",
     duration_min: 180,
     questions: [
       {
@@ -285,7 +286,7 @@ export async function listExams() {
       status: r.status,
       kind: qcm ? "qcm" as const : r.format_template === "blocks" ? "blocks" as const : "written" as const,
       questionCount: Number(r.nq ?? 0),
-      verifySummary: r.verify_summary ?? null,
+      verifySummary: examSummaryLabel(r.verify_summary ?? null),
       // Page en ligne, TOUJOURS ouvrable (examen 4 de CS-290 : sans PDF, la carte n'ouvrait rien).
       onlineUrl: online ? `/mock/${r.id}${courseQ()}` : url,
       url,
@@ -501,7 +502,7 @@ export async function generateTargetedExercise(
             try { await createWeakness({ topic: w.topic, description: w.description, severity: w.severity, source: "log", analyzed: true }); } catch {}
           }
           const top = [...cls.weaknesses].sort((a, b) => b.severity - a.severity)[0];
-          stepFn(`${cls.weaknesses.length} faiblesse(s) extraite(s) — exo ciblé sur « ${top.topic} »`, 10);
+          stepFn(`${cls.weaknesses.length} faiblesse(s) extraite(s) : exo ciblé sur « ${top.topic} »`, 10);
           const res = await architectExercise(top.topic, { onStep: opts.onStep });
           return { id: res.id, url: res.url, texError: res.texError };
         }
@@ -748,7 +749,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
         : /THÈME : « [^»]*»[^.]*\./.test(slots[j].brief) ? slots[j].brief.replace(/THÈME : « [^»]*»[^.]*\./, accent) : `${slots[j].brief} ${accent}`;
       slots[j] = { ...(slots[j] as any), brief, archetypeId: undefined };
     }
-    step(`Accent demandé : « ${focus} » — ${nFocus} exercice(s) ciblé(s)`, 5);
+    step(`Accent demandé : « ${focus} », ${nFocus} exercice(s) ciblé(s)`, 5);
   }
   // (stub de test : vérifier des questions factices n'a aucun sens et appellerait le vrai LLM)
   const doVerify = opts.verify !== false && !process.env.CORTEX_TEST_STUB_BATCH;
@@ -819,7 +820,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
         } catch (e) {
           failed.push(k);
           lastError = e;
-          step(`Lot ${lotIdx + 1} · Q${k + 1} — architecte échoué (${(e as Error).message.slice(0, 80)}) → repli one-shot`, 0);
+          step(`Lot ${lotIdx + 1} · Q${k + 1} : architecte échoué (${(e as Error).message.slice(0, 80)}) → repli one-shot`, 0);
         }
         qDone++;
         step(`Architecte : ${qDone}/${qTotal} questions construites`, 10 + Math.round((qDone / qTotal) * 30));
@@ -864,18 +865,18 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
           qs = saved[i]!;
           qDone += bslots.length;
         } else if (useArchitect) {
-          step(`Lot ${i + 1}/${nBatches} — ARCHITECTE par question (piège → rédaction → audit adversarial)…`, 8 + i * 2);
+          step(`Lot ${i + 1}/${nBatches} : ARCHITECTE par question (piège → rédaction → audit adversarial)…`, 8 + i * 2);
           qs = await architectBatch(bslots, i);
           saved[i] = qs;
           await saveCkpt(i);
           step(`Lot ${i + 1}/${nBatches} construit par l'architecte ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 40);
         } else {
           // cours sans architecte : voie one-shot, RÉSILIENTE — le lot, puis chaque exercice manquant seul.
-          step(`Lot ${i + 1}/${nBatches} — génération de ${bslots.length} exercices…`, 8 + i * 2);
+          step(`Lot ${i + 1}/${nBatches} : génération de ${bslots.length} exercices…`, 8 + i * 2);
           const r = await generateSlots(ctx, bslots);
           if (r.error) {
             lastError = r.error;
-            step(`Lot ${i + 1}/${nBatches} — échec partiel (${(r.error as Error).message.slice(0, 80)})`, 8 + i * 2);
+            step(`Lot ${i + 1}/${nBatches} : échec partiel (${(r.error as Error).message.slice(0, 80)})`, 8 + i * 2);
           }
           const got = r.qs.filter((q): q is ExamQuestion => !!q);
           missingByLot[i] = bslots.filter((_, k) => !r.qs[k]);
@@ -889,19 +890,19 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
         }
         if (!qs.length) return { questions: [], report: null as VerifyReport | null };
         if (!doVerify) return { questions: qs, report: null as VerifyReport | null };
-        step(`Lot ${i + 1}/${nBatches} — vérification à l'aveugle + durcissement…`, 45);
+        step(`Lot ${i + 1}/${nBatches} : vérification à l'aveugle + durcissement…`, 45);
         try {
           const v = await verifyAndHarden({ title: "", questions: qs }, regenerateExercise, 2, (m) => step(`Lot ${i + 1} · ${m}`, 0));
           step(`Lot ${i + 1}/${nBatches} vérifié ✓ (${Math.round((Date.now() - t0) / 1000)}s)`, 70);
           return { questions: v.spec.questions, report: v.report as VerifyReport | null };
         } catch (e) {
-          step(`Lot ${i + 1} — vérif interrompue : ${(e as Error).message}`, 70);
+          step(`Lot ${i + 1}, vérif interrompue : ${(e as Error).message}`, 70);
           return { questions: qs, report: null as VerifyReport | null };
         }
       } catch (e) {
         lastError = e;
         missingByLot[i] = bslots;
-        step(`Lot ${i + 1}/${nBatches} — échec complet, lot ignoré (${(e as Error).message.slice(0, 80)})`, 0);
+        step(`Lot ${i + 1}/${nBatches} : échec complet, lot ignoré (${(e as Error).message.slice(0, 80)})`, 0);
         return { questions: [] as ExamQuestion[], report: null as VerifyReport | null };
       }
     })
@@ -941,7 +942,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
             const v = await verifyAndHarden({ title: "", questions: extra }, regenerateExercise, 2, (m) => step(`Comblement ${k + 1} · ${m}`, 0));
             questions = v.spec.questions;
             report = v.report as VerifyReport | null;
-          } catch (e) { step(`Comblement ${k + 1} — vérif interrompue : ${(e as Error).message}`, 0); }
+          } catch (e) { step(`Comblement ${k + 1}, vérif interrompue : ${(e as Error).message}`, 0); }
         }
         settled.push({ questions, report });
       } catch (e) {
@@ -958,9 +959,9 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
     throw new Error("Aucune question générée (tous les lots ont échoué/timeout). Relance : la génération reprend du checkpoint.");
   const missing = qTotal - allQuestions.length;
   if (missing > 0)
-    step(`⚠ Examen livré PARTIEL : ${allQuestions.length}/${qTotal} questions (${missing} ignorée(s) après timeout/échec) — relance pour compléter`, 90);
+    step(`⚠ Examen livré PARTIEL : ${allQuestions.length}/${qTotal} questions (${missing} ignorée(s) après timeout/échec), relance pour compléter`, 90);
   const spec: ExamSpec = {
-    title: `${c.examCode} ${c.examName} — ${c.examKind}`,
+    title: `${c.examCode} ${c.examName} : ${c.examKind}`,
     duration_min: c.durationMin,
     questions: allQuestions,
   };
