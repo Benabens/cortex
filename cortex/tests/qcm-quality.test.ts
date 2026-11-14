@@ -163,6 +163,8 @@ test("conception : taxonomie de distracteurs, langue, faits précis du cours, ex
   assert.match(gen, /propositions? compl[èe]tes?/i);
   assert.match(gen, /LANGUE[^\n]*fran[çc]ais/i);
   assert.match(gen, /six fois plus vite/, "le passage du cours à tester est fourni");
+  assert.match(gen, /"required"[\s\S]*"source_fact"/, "le fait source est obligatoire dans la sortie structurée");
+  assert.match(gen, /citation[^\n]*verbatim|recopie[^\n]*mot pour mot/i, "le fait source doit être une citation vérifiable des extraits");
   assert.match(gen, /mode éco activé par défaut/, "les questions d'exemple officielles servent de modèle de style");
   assert.match(gen, /classe[r]? ce cas|classification/i);
 });

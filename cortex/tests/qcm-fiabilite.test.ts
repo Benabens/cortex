@@ -67,6 +67,7 @@ const designBodies: Record<string, unknown>[] = [];
 const verifyPrompts: string[] = [];
 /** Ce que le juge met dans off_course pour chaque question (vide : rien à signaler). */
 let judgeFlag = "";
+let judgeWeak = false;
 function verifyReply(prompt: string): string {
   verifyPrompts.push(prompt);
   const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
@@ -84,7 +85,7 @@ function verifyReply(prompt: string): string {
       : /latent variable is a proxy/.test(b)
         ? "latent variable : le cours la définit comme non observable, mesurée indirectement — pas comme un proxy enregistré"
         : "";
-    return { index: i, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms, off_course: judgeFlag, trivial_distractors: trivial, definition_mismatch };
+    return { index: i, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: judgeWeak ? 2 : 4, name_only: judgeWeak, issue: "", course_terms, off_course: judgeFlag, trivial_distractors: trivial, definition_mismatch };
   });
   return JSON.stringify({ results });
 }
@@ -96,6 +97,12 @@ const assistPrompts: string[] = [];
 const dedupePrompts: string[] = [];
 /** Paires en doublon que rend le contrôle de fin d'examen (aucune par défaut). */
 let dedupe: (prompt: string) => { first: number; second: number; reason: string }[] = () => [];
+let finalAuditCalls = 0;
+function finalAuditReply(prompt: string): string {
+  const items = [...prompt.matchAll(/^Q(\d+)\.[\s\S]*?(?=^Q\d+\.|$(?![\s\S]))/gm)]
+    .map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [...m[0].matchAll(/^\s+\((\d+)\) (.*)$/gm)].filter((o) => /TypeError/.test(o[2])).map((o) => Number(o[1])) }));
+  return JSON.stringify({ verdicts: items });
+}
 /** Drill : n = rang de l'appel. */
 let drill: (n: number) => string = () => "{}";
 const VERDICT = { verdict: "correct", feedback: "Conforme au cours.", correct_solution: "Groupthink.", criteria: [
@@ -119,6 +126,7 @@ before(async () => {
       // le schéma de conception contient lui aussi des tableaux « "items" ».
       if (/"replacements"/.test(content)) { repairPrompts.push(content); text = repairReply(content); }
       else if (/"duplicates"/.test(content)) { dedupePrompts.push(content); text = JSON.stringify({ duplicates: dedupe(content) }); }
+      else if (/"offCourse"/.test(content)) { finalAuditCalls++; text = finalAuditReply(content); }
       else if (/"hints"/.test(content)) { assistPrompts.push(content); text = drill(assistPrompts.length); }
       else if (/RÉPONSE DE L'ÉTUDIANT/.test(content)) { assistPrompts.push(content); text = JSON.stringify(VERDICT); }
       else if (/"edge_case"/.test(content)) text = JSON.stringify(DESIGN);
@@ -141,7 +149,7 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { repairPrompts.length = 0; repairReply = defaultRepairReply; dedupePrompts.length = 0; dedupe = () => []; assistPrompts.length = 0; designCalls = 0; writeCalls = 0; designPrompts.length = 0; designBodies.length = 0; verifyPrompts.length = 0; });
+beforeEach(() => { repairPrompts.length = 0; repairReply = defaultRepairReply; dedupePrompts.length = 0; dedupe = () => []; finalAuditCalls = 0; assistPrompts.length = 0; designCalls = 0; writeCalls = 0; designPrompts.length = 0; designBodies.length = 0; verifyPrompts.length = 0; judgeWeak = false; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -193,24 +201,117 @@ test("sorties problématiques du modèle → 7 QCM sur 7, code des énoncés int
   assert.ok(retry, "le lot illisible est redemandé avec l'erreur");
   assert.match(retry!, /sans JSON/);
   assert.ok(designBodies.every((b) => b.response_format), "la conception demande une sortie structurée");
+  assert.equal(finalAuditCalls, 2, "un audit final puis une seule ré-audit, sans cascade");
   const exam = await runWithCourse(id, () => getQcmExam(r.id));
   assert.equal(exam!.items.length, 7);
   assert.ok(exam!.items.some((it) => it.stem.includes(`${BT}python\nimport pandas as pd`)), "le bloc de code de l'énoncé est gardé tel quel");
   assert.doesNotMatch(exam!.verifySummary ?? "", /sur 7/, "un examen complet ne signale rien");
 });
 
+test("lot name_only sans indice trivial : une régénération maximum puis secours vérifié", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  judgeWeak = true;
+  design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
+  assert.equal(r.count, 4);
+  assert.equal(designCalls, 2, "une seule régénération ciblée est tentée");
+  assert.equal(verifyPrompts.length, 2, "le secours vérifié est conservé si le défaut persiste");
+});
+
+test("un candidat résiduel refusé tôt redevient admissible après l'arrivée de QCM propres", async () => {
+  const { updateVerifiedCandidates } = await import("../lib/qcm");
+  const candidate = (stem: string, trivial: number[], rejected = false) => ({
+    ...item(1, stem), verified: 1 as const, rejected, discrimination: 4,
+    trivialDistractors: trivial.length ? trivial : null,
+  });
+  let state = updateVerifiedCandidates([], [candidate("résiduel", [1])], 4);
+  assert.equal(state.selected.length, 1, "un candidat vérifié évite une place remboursée même s'il dépasse provisoirement 10 %");
+  state = updateVerifiedCandidates(state.pool, [candidate("propre 1", []), candidate("propre 2", []), candidate("propre 3", []), candidate("rejeté", [], true)], 4);
+  assert.deepEqual(state.selected.map((q) => q.stem), ["propre 1", "propre 2", "propre 3", "résiduel"]);
+  assert.ok(state.pool.every((q) => !q.rejected), "un rejet hors cours ou à clé contestée n'entre jamais dans le pool");
+});
+
+test("le pool privilégie la couverture avant une seconde question du même thème", async () => {
+  const { updateVerifiedCandidates } = await import("../lib/qcm");
+  const candidate = (stem: string, topic: string, discrimination: number) => ({
+    ...item(1, stem), topic, verified: 1 as const, rejected: false,
+    discrimination, trivialDistractors: null,
+  });
+  const state = updateVerifiedCandidates([], [
+    candidate("alpha difficile", "chapitre alpha", 5),
+    candidate("alpha bis", "chapitre alpha", 5),
+    candidate("bêta", "chapitre bêta", 3),
+  ], 2);
+  assert.deepEqual(state.selected.map((q) => q.stem), ["alpha difficile", "bêta"]);
+});
+
+test("le correcteur interne cherche les mêmes distracteurs triviaux que le banc", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  await runWithCourse(id, () => generateQcmExam({ count: 1, openCount: 0 }));
+  const prompt = verifyPrompts.join("\n");
+  assert.match(prompt, /substitution d[’']étiquettes/i);
+  assert.match(prompt, /lecture directe (?:des|de) chiffres/i);
+  assert.match(prompt, /mêmes critères/i);
+});
+
+test("l'audit final écarte une clé fausse ou hors cours et annote les distracteurs", async () => {
+  const { applyFinalQualityVerdicts } = await import("../lib/qcm");
+  const candidates = [item(0), item(1), item(2)];
+  const kept = applyFinalQualityVerdicts(candidates, [
+    { index: 0, key: true, offCourse: false, trivial: [2] },
+    { index: 1, key: false, offCourse: false, trivial: [] },
+    { index: 2, key: true, offCourse: true, trivial: [] },
+  ]);
+  assert.equal(kept.length, 1);
+  assert.deepEqual(kept[0].trivialDistractors, [2]);
+});
+
+test("lot name_only avec un distracteur trivial : répare l'option sans reconcevoir la question", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  judgeWeak = true;
+  design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => {
+    const q = item(i);
+    q.options[1] = "Une TypeError est levée avant tout regroupement.";
+    return q;
+  }) });
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
+  assert.equal(r.count, 4);
+  assert.equal(designCalls, 1, "l'énoncé, la clé et la preuve sont conservés");
+  assert.equal(repairPrompts.length, 1, "les seules mauvaises options sont réparées en lot");
+  assert.equal(verifyPrompts.length, 2, "le lot réparé est revérifié une fois");
+});
+
 test("le modèle ne rend jamais assez de QCM : comblement borné, et l'examen dit « n sur 7 »", async () => {
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
-  design = (_n, call) => JSON.stringify({ items: [item(call)] });
+  // Un seul QCM par lot, et toujours l'un des trois mêmes énoncés : aucun budget ne suffit.
+  design = (_n, call) => JSON.stringify({ items: [item(call % 3)] });
   const r = await runWithCourse(id, () => generateQcmExam({ count: 7, openCount: 0 }));
   assert.ok(r.count > 0 && r.count < 7, `count=${r.count}`);
   assert.equal(r.requested, 7);
-  // Budget borné : les 2 lots prévus, plus au plus 2 × 2 lots de comblement et de complément final.
-  assert.ok(designCalls <= 6, `budget de comblement borné (${designCalls} lots demandés pour 2 prévus)`);
+  // Budget borné : les 2 lots prévus, plus au plus 3 × 2 lots de comblement et de complément final.
+  assert.ok(designCalls <= 8, `budget de comblement borné (${designCalls} lots demandés pour 2 prévus)`);
   const exam = await runWithCourse(id, () => getQcmExam(r.id));
   assert.match(exam!.verifySummary ?? "", new RegExp(`${r.count} sur 7`));
+});
+
+test("plusieurs rondes de lots très incomplets finissent par livrer le total demandé", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  design = (n, call) => JSON.stringify({
+    items: call <= 4 ? [item(call)] : Array.from({ length: n }, (_, i) => item(call * 10 + i)),
+  });
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 7, openCount: 0 }));
+  assert.equal(r.count, 7);
+  assert.ok(designCalls > 4 && designCalls <= 8, `rondes=${designCalls}`);
 });
 
 test("aucun lot lisible : erreur claire qui dit pourquoi, jamais « unknown »", async () => {
@@ -240,6 +341,28 @@ test("un item mal formé au milieu d'un lot : c'est SON sujet qui est comblé", 
   const first = subjects(designPrompts[0]);
   const topup = subjects(designPrompts[1]);
   assert.deepEqual(topup, [first[1]], `comblé : ${topup.join(" | ")} ; lot : ${first.join(" | ")}`);
+});
+
+test("un remplacement de doublons partiellement rejeté est recomblé jusqu'au total demandé", async () => {
+  const id = await codeCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  let dedupeCall = 0;
+  dedupe = () => (++dedupeCall === 1 ? [
+    { first: 0, second: 1, reason: "même notion" },
+    { first: 2, second: 3, reason: "même notion" },
+  ] : []);
+  design = (n, call) => {
+    const items = Array.from({ length: n }, (_, i) => item(call * 10 + i));
+    // Le premier lot de remplacement perd un item au contrôle de forme. Le moteur doit
+    // recombler ce trou même si le contrôle suivant ne trouve plus aucun doublon.
+    if (call === 3 && items[1]) items[1] = { ...items[1], options: [] };
+    return JSON.stringify({ items });
+  };
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 7, openCount: 0 }));
+  assert.equal(r.count, 7);
+  assert.ok(designCalls >= 4, `un lot de recomblement final est attendu, appels=${designCalls}`);
+  assert.ok(dedupeCall >= 3, `le lot recomblé doit être recontrôlé, contrôles=${dedupeCall}`);
 });
 
 test("une question ouverte qui échoue est relancée : 2 QCM + 3 ouvertes sur 2 + 3", async () => {
@@ -390,7 +513,11 @@ test("K — un distracteur encore trivial après remplacement est réparé une s
 
   const r = await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 0 }));
 
-  assert.equal(repairPrompts.length, 2, "le défaut persistant déclenche une seconde réparation ciblée");
+  // Au-delà du budget de triviaux, le défaut persistant après la réparation groupée de la ronde
+  // déclenche un recomblement ciblé sur le même sujet, son défaut à l'appui (même coût qu'une
+  // seconde réparation : un appel + sa vérification) ; le remplaçant propre passe devant lui.
+  assert.equal(repairPrompts.length, 1, "une seule réparation groupée pour la ronde");
+  assert.ok(designPrompts.some((p) => /À CORRIGER[\s\S]*TypeError/.test(p)), "le recomblement nomme le défaut persistant");
   const options = (await runWithCourse(id, () => getQcmExam(r.id)))!.items.flatMap((x) => x.options);
   assert.ok(!options.some((o) => /TypeError/.test(o)), options.join(" | "));
 });
@@ -508,7 +635,7 @@ test("ETA — sans réessai, l'avancement d'un examen QCM (lots et ouvertes en p
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam } = await import("../lib/qcm");
-  design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
+  design = (n, call) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(10 * call + i)) });
   const seq: { s: string; p: number }[] = [];
   await runWithCourse(id, () => generateQcmExam({ count: 8, openCount: 2, onStep: (s, p) => { seq.push({ s, p }); } }));
   assert.deepEqual(regressions(seq), [], seq.map((x) => `${x.p} ${x.s}`).join("\n"));
