@@ -207,3 +207,43 @@ export async function rewriteExplanations(items: { stem: string; options: string
     return items.map(() => null);
   }
 }
+
+/**
+ * EXPLICATION RÉÉCRITE SUR LES OPTIONS RÉELLES — job 23 (14/11/2026, HUM-285, examen QCM #9) : neuf
+ * explications sur vingt réfutaient des distracteurs absents de la question (« les distracteurs
+ * confondent ce mécanisme avec le biais de négativité… » alors qu'aucune option ne le nommait ;
+ * cinq options réfutées pour trois proposées), restes d'une version antérieure des options. Le
+ * contrôle déterministe (lib/qcm-checks) les repère ; ici chaque explication est réécrite sur les
+ * options telles qu'elles sont, sans toucher à l'énoncé, à la clé ni aux options. Rend, par
+ * question, la nouvelle explication ou null (échec : l'appelant se replie sur la justification
+ * de la clé seule).
+ */
+export async function rewriteExplanationsOnOptions(questions: { stem: string; options: string[]; correct: number[]; explanation?: string | null; issue: string }[], language: string, passages: { src: string; text: string }[] = []): Promise<(string | null)[]> {
+  if (!questions.length) return [];
+  const block = questions.map((it, i) => [
+    `Q${i}. ${sanitizeCorpus(it.stem)}`,
+    ...it.options.map((o, k) => `   (${k}) ${sanitizeCorpus(o)}${(it.correct ?? []).includes(k) ? "  (bonne réponse)" : ""}`),
+    it.explanation ? `   [ancienne explication : ${sanitizeCorpus(it.explanation).slice(0, 800)}]` : "",
+    `   [défaut : ${sanitizeCorpus(it.issue).slice(0, 300)}]`,
+  ].filter(Boolean).join("\n")).join("\n\n");
+  const prompt = [
+    `Les explications de ces QCM réfutent des options qui ne figurent pas dans la question (restes d'une version précédente des options). Réécris l'explication de chacun, sans toucher à l'énoncé, à la bonne réponse ni aux options.`,
+    `RÈGLES : l'explication dit pourquoi la bonne réponse est juste, puis pourquoi CHACUNE des options fausses listées est fausse — exactement celles-là, une par une, et aucune autre notion ni affirmation. Reprends les faits de l'ancienne explication quand ils sont justes${passages.length ? " et ceux des passages du cours" : ""}, sans en ajouter. Désigne les options par leur CONTENU, jamais par leur lettre ni leur rang. Trois à cinq phrases, en ${language}.`,
+    ...(passages.length ? [``, DATA_RULE, dataBlock(`PASSAGES DU COURS`, passages)] : []),
+    ``,
+    `═══ QCM ═══`,
+    block,
+    ``,
+    `Réponds UNIQUEMENT avec l'objet JSON {"explanations": [{"index": i, "explanation": "…"}]}, une entrée par question.`,
+  ].join("\n");
+  try {
+    const r = await completeJson<{ explanations: { index: number; explanation?: string }[] }>(
+      { prompt, model: "opus", timeoutMs: 300_000, json: { schema: REWRITE_SCHEMA } },
+      { check: (v) => (Array.isArray(v?.explanations) ? null : "le champ « explanations » (tableau) manque") },
+    );
+    const byIndex = new Map(r.explanations.filter((x) => Number.isInteger(x?.index)).map((x) => [x.index, typeof x.explanation === "string" ? x.explanation.trim() : ""]));
+    return questions.map((_, i) => byIndex.get(i) || null);
+  } catch {
+    return questions.map(() => null);
+  }
+}
