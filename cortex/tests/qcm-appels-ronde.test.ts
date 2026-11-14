@@ -203,4 +203,7 @@ test("dédoublonnage : un contrôle qui voit des doublons à chaque passe ne fai
   t.diagnostic(`${r.count}/15 livrées · ${JSON.stringify(calls)} → ${total()} appels`);
   assert.equal(r.count, 15, JSON.stringify(calls));
   assert.ok(calls.dedup <= 10, `contrôles des doublons bornés : ${calls.dedup}`);
+  // Job 17 (14/11) : l'audit final repassait sur tout le pool même quand aucun distracteur n'avait
+  // été réparé (ici : 0). Un seul passage suffit alors — l'ancien comportement en faisait 2.
+  assert.equal(calls.audit, 1, `audit final : un seul passage quand rien n'a été réparé : ${JSON.stringify(calls)}`);
 });
