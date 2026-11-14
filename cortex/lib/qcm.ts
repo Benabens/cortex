@@ -1046,24 +1046,28 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   const pending = appeals.filter((a) => !a.q.rejected);
   if (pending.length) {
     const courseEvidence = passages.map((p) => p.text).join("\n");
+    // Fait source retrouvé dans le cours : la clé est prouvée, un second regard trop sévère ne la
+    // rejette pas. Il tourne quand même, car seul lui voit qu'une EXPLICATION sort du cours.
     const grounded = new Set(pending.filter((a) => sourceFactSupported(a.q.sourceFact ?? "", courseEvidence)));
-    for (const a of grounded) step(`QCM gardé — preuve du cours retrouvée sans second arbitrage (${a.flag.reason.slice(0, 100)})`, 70);
-    const contested = pending.filter((a) => !grounded.has(a));
-    const verdicts = contested.length ? await secondLookOffCourse(contested.map((a) => a.flag)) : [];
+    const verdicts = await secondLookOffCourse(pending.map((a) => a.flag));
     const confirmedOf = (i: number) => (verdicts[i].reason && !NO_FLAG.test(verdicts[i].reason) ? verdicts[i].reason : "");
     // Seule l'explication est hors cours : elle est réécrite sur les passages du cours, la question
     // (énoncé, clé confirmée à l'aveugle, options) est gardée. Réécriture en échec : rejet.
-    const toRewrite = contested.map((a, i) => ({ a, i })).filter(({ i }) => confirmedOf(i) && verdicts[i].explanationOnly);
+    const toRewrite = pending.map((a, i) => ({ a, i })).filter(({ i }) => confirmedOf(i) && verdicts[i].explanationOnly);
     const rewritten = toRewrite.length
       ? await rewriteExplanations(toRewrite.map(({ a, i }) => ({ ...a.q, reason: confirmedOf(i), passages: verdicts[i].passages })), languageName(examLanguageFor(currentCourse()))[1])
       : [];
-    contested.forEach((a, i) => {
+    pending.forEach((a, i) => {
       const confirmed = confirmedOf(i);
       const k = toRewrite.findIndex((x) => x.i === i);
       const text = k >= 0 ? rewritten[k] : null;
       if (confirmed && text && !citesOptionLabel(text, a.q.options.length)) {
         a.q.explanation = text;
         step(`QCM gardé — explication réécrite sur le cours (${confirmed.slice(0, 100)})`, 70);
+      } else if (confirmed && grounded.has(a)) {
+        // Clé prouvée par le cours : ni un second regard trop sévère ni une réécriture d'explication
+        // en échec ne font un faux rejet.
+        step(`QCM gardé — preuve du cours retrouvée, rejet du second regard écarté (${confirmed.slice(0, 100)})`, 70);
       } else if (confirmed) reject(a.q, `hors cours : ${confirmed.slice(0, 240)}`, offCourseAdvice);
       else step(`QCM gardé — jugé hors cours sur les extraits, mais trouvé dans le cours (${a.flag.reason.slice(0, 100)})`, 70);
     });
