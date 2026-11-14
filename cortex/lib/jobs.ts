@@ -296,6 +296,12 @@ function isPidAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (e: any) { return e?.code === "EPERM"; }
 }
 
+/** La référence de débit a été émise pour ce compte et ce cours (createJobExclusive : job:<user>:<course>:<uuid>). */
+function refIssuedTo(ref: string | null, user: string, course: string): boolean {
+  const prefix = `job:${user}:${course}:`;
+  return !!ref && ref.startsWith(prefix) && !ref.slice(prefix.length).includes(":");
+}
+
 const ACTIVE_STATES = "('queued','running','verifying','compiling')";
 const ZOMBIE_MSG = "Worker interrompu (process arrêté), la génération ne tournait plus. Relance.";
 /** Un worker vivant qui n'a plus de heartbeat depuis ce délai est considéré bloqué. */
@@ -344,9 +350,10 @@ export async function reconcileStaleJobs(): Promise<number> {
     // elle-même échoué). Erreur, remboursé si rien n'a coûté ; l'utilisateur relance.
     const neverStarted = !r.pid && attempts === 0;
     // Le propriétaire n'a aucune réservation débitée (reserveGeneration ne l'écrit
-    // pas) : même exemption, même critère que la garde centrale du LLM.
+    // pas) : même exemption, même critère que la garde centrale du LLM — pour un
+    // job dont la référence a été émise à SON nom (base partagée entre comptes).
     const reservationValid = r.type === "ingest"
-      || await (await import("@/lib/billing/owner")).isOwner()
+      || (refIssuedTo(r.credit_ref, currentUser(), currentCourse()) && await (await import("@/lib/billing/owner")).isOwner())
       || await (await import("@/lib/llm/authorization")).reservationExists(r.credit_ref);
     if (attempts < maxAttempts && !neverStarted && reservationValid) {
       const msg = `Worker interrompu, reprise automatique (tentative ${attempts + 1}/${maxAttempts}), progression conservée.`;
