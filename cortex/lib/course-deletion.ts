@@ -21,6 +21,7 @@ import { LEGACY_COURSES } from "@/lib/courses-legacy";
 import { dataRoot, ensureCoursesLoaded, listCoursesOf, reloadCourses } from "@/lib/courses";
 import { deleteCourseRow } from "@/db/courses-store";
 import { log } from "@/lib/metrics";
+import { ownedCourseCacheDir } from "@/lib/page-cache";
 
 const LEGACY_IDS = new Set(LEGACY_COURSES.map((c) => c.id));
 
@@ -120,6 +121,9 @@ export async function deleteCourseWithData(userId: string, courseId: string, opt
   } catch (e) {
     residues.push(`fichiers ${root} : ${e instanceof Error ? e.message : String(e)}`);
   }
+  // Ses images de pages rendues (lib/page-cache), hors de data/u/.
+  const cache = ownedCourseCacheDir(userId, courseId);
+  try { fs.rmSync(cache, { recursive: true, force: true }); } catch (e) { residues.push(`cache ${cache} : ${e instanceof Error ? e.message : String(e)}`); }
   // Signalements des questions de ce cours (store global, lib/question-reports), quel que soit le pilote.
   try { await authRun(`DELETE FROM question_reports WHERE user_id = ? AND course = ?`, userId, courseId); } catch (e) { residues.push(`question_reports : ${e instanceof Error ? e.message : String(e)}`); }
   const n = await deleteCourseRow(courseId, userId);

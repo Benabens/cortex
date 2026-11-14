@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { extractText, getDocumentProxy } from "unpdf";
 import { extractOfficeText } from "@/lib/office-documents";
+import { purgePdfPages } from "@/lib/page-cache";
 
 /**
  * Examens de référence : le « format » à imiter pour la génération.
@@ -299,4 +300,6 @@ export async function removeUploadedRef(srcPath: string): Promise<void> {
     const abs = path.join(REFS_DIR(), path.basename(srcPath));
     if (fs.existsSync(abs)) fs.unlinkSync(abs);
   }
+  // Ses images de pages (lib/page-cache) : rendues de nouveau à la demande si le PDF reste.
+  purgePdfPages(currentCourse(), path.basename(srcPath));
 }

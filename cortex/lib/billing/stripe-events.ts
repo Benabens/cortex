@@ -6,6 +6,7 @@ import {
   DELTA_CENTI, addTransaction, ensureLedgerUnit, getSubscription, grantSubscriptionMonth, linkSubscription, resolveUserByCustomer,
   setSubscriptionStatus, subscriptionCreditsCenti, subscriptionLive, subscriptionMonthlyCreditsCenti, suspendSubscription, toCenti,
 } from "./credits";
+import { linkInvoicePaymentIntent, recordDispute, recordPayment, recordRefund } from "./revenue";
 
 /**
  * TRAITEMENT DES ÉVÉNEMENTS STRIPE (webhook). Séparé de la route pour être
@@ -68,6 +69,8 @@ export type StripeLookup = {
   lookupKeyOfPrice?(priceId: string): Promise<string | null>;
   /** Format récent : la charge ne porte plus `invoice` → facture retrouvée par payment_intent (InvoicePayments). */
   invoiceByPaymentIntent?(paymentIntent: string): Promise<{ invoiceId: string } | null>;
+  /** Frais Stripe réels d'un paiement (balance transaction de sa charge), en unités mineures de sa devise ; null si pas encore connus. */
+  paymentDetails?(paymentIntent: string): Promise<{ feeCents: number | null } | null>;
 };
 export type HandleOptions = { lookup?: StripeLookup };
 
@@ -109,7 +112,7 @@ export function idOf(v: unknown): string | null {
 }
 
 /** Timestamp Stripe (secondes) → "YYYY-MM-DD HH:MM:SS" UTC (format nowStr). */
-function unixToStr(unix: number | null | undefined): string | null {
+export function unixToStr(unix: number | null | undefined): string | null {
   if (!unix || !Number.isFinite(unix)) return null;
   return new Date(unix * 1000).toISOString().slice(0, 19).replace("T", " ");
 }
@@ -239,7 +242,7 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
   switch (event.type) {
     case "checkout.session.completed":
     case "checkout.session.async_payment_succeeded":
-      res = await onCheckout(event.data.object as Stripe.Checkout.Session, event.id, at, event.livemode);
+      res = await onCheckout(event.data.object as Stripe.Checkout.Session, event.id, at, event.livemode, opts.lookup);
       break;
     case "invoice.paid":
       res = await onInvoicePaid(event.data.object as Stripe.Invoice, opts.lookup, at);
@@ -258,6 +261,12 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
         metadata: charge.metadata ?? null, customerId: idOf(charge.customer),
         email: charge.billing_details?.email ?? charge.receipt_email ?? null, lookup: opts.lookup, livemode: event.livemode,
       });
+      // Revenu : le remboursé cumulé s'impute au paiement (même s'il n'est pas encore arrivé chez nous).
+      if (res.ok && res.action !== FOREIGN.action) {
+        const pi = idOf(charge.payment_intent);
+        await linkInvoicePaymentIntent(pi);
+        await recordRefund(pi, Number(charge.amount_refunded ?? 0));
+      }
       break;
     }
     case "charge.dispute.created": {
@@ -268,6 +277,11 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
         metadata: charge?.metadata ?? null, customerId: idOf(charge?.customer),
         email: charge?.billing_details?.email ?? null, lookup: opts.lookup, livemode: event.livemode,
       });
+      if (res.ok && res.action !== FOREIGN.action) {
+        const pi = idOf(dispute.payment_intent);
+        await linkInvoicePaymentIntent(pi);
+        await recordDispute(pi, Number(dispute.amount ?? 0), disputeFeeCents(dispute));
+      }
       break;
     }
     default:
@@ -294,7 +308,36 @@ function allowedFreePromo(s: Stripe.Checkout.Session): string | null {
   return null;
 }
 
-async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: string | null, livemode: boolean): Promise<HandleResult> {
+/** Frais de litige portés par le litige (ses balance transactions, dans sa devise), sinon null → estimés. */
+export function disputeFeeCents(d: Stripe.Dispute): number | null {
+  const bts = (d.balance_transactions ?? []).filter((b) => typeof b === "object" && b && (!b.currency || !d.currency || b.currency === d.currency));
+  return bts.length ? bts.reduce((sum, b) => sum + Math.max(0, Number(b.fee ?? 0)), 0) : null;
+}
+
+/**
+ * Frais réels d'un paiement demandés à Stripe. Jamais bloquant : Stripe
+ * injoignable ou frais pas encore connus → null (frais estimés, remplacés par la
+ * reprise de l'historique). Un crédit payé ne dépend pas de cette lecture.
+ */
+async function realFeeCents(lookup: StripeLookup | undefined, pi: string | null): Promise<number | null> {
+  if (!lookup?.paymentDetails || !pi) return null;
+  try {
+    return (await lookup.paymentDetails(pi))?.feeCents ?? null;
+  } catch (e) {
+    log("warn", "stripe.fee_lookup_failed", { paymentIntent: pi, error: String(e).slice(0, 160) });
+    return null;
+  }
+}
+
+/** Taxe collectée sur une facture (ancien format : `tax` ; récent : `total_taxes[]`). */
+export function invoiceTaxCents(inv: object): number {
+  const old = Number((inv as { tax?: number | null }).tax ?? NaN);
+  if (Number.isFinite(old)) return Math.max(0, old);
+  const list = (inv as { total_taxes?: Array<{ amount?: number }> | null }).total_taxes ?? [];
+  return list.reduce((sum, t) => sum + Math.max(0, Number(t.amount ?? 0)), 0);
+}
+
+async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: string | null, livemode: boolean, lookup?: StripeLookup): Promise<HandleResult> {
   const userId = s.metadata?.cortexUserId ?? null;
   const plan = s.metadata?.plan ?? null;
   // À Cortex seulement : plan Cortex ou cortexUserId (et jamais une autre app déclarée).
@@ -332,8 +375,11 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: strin
   const centi = toCenti(credits);
   const pi = idOf(s.payment_intent);
   await ensureLedgerUnit();
-  // Crédit + enregistrement de l'achat dans UNE transaction : un échec lève
-  // (rien de crédité, 500 → Stripe rejoue) ; le ref UNIQUE tranche une course.
+  // Frais réels lus AVANT la transaction (réseau), seulement pour un achat pas encore crédité.
+  const fee = amount && amount > 0 && !(await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, ref))
+    ? await realFeeCents(lookup, pi) : null;
+  // Crédit + enregistrement de l'achat ET du montant encaissé dans UNE transaction : un
+  // échec lève (rien de crédité, 500 → Stripe rejoue) ; le ref UNIQUE tranche une course.
   const credited = await authTx(async (tx) => {
     if (await tx.get<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, ref)) return false;
     await tx.run(
@@ -345,6 +391,12 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: strin
        ON CONFLICT (session_id) DO NOTHING`,
       s.id, pi, userId, centi, livemode ? 1 : 0, nowStr(),
     );
+    if (amount && amount > 0) {
+      await recordPayment({
+        sourceId: s.id, kind: "pack", paymentIntent: pi, userId, currency: s.currency ?? "eur", amountCents: amount,
+        taxCents: Number(s.total_details?.amount_tax ?? 0), feeCents: fee, livemode, paidAt: at,
+      }, tx);
+    }
     return true;
   }).catch(async (e) => {
     // Course sur le ref UNIQUE : l'autre instance a crédité — vérifié, pas supposé.
@@ -398,6 +450,15 @@ async function onInvoicePaid(invoice: Stripe.Invoice, lookup: StripeLookup | und
   const plan = [...lineKeys, ...keys].find((k) => CORTEX_LOOKUP_KEYS.has(k)) ?? keys[0] ?? null;
   const granted = await grantSubscriptionMonth({ userId, customerId, subscriptionId: subId, plan, periodEnd, periodStart: invoicePeriodStart(inv), at });
   if (inv.id) {
+    // Montant encaissé : compté même si la facture n'accorde rien (période plus ancienne), l'argent est là.
+    const paid = Number((inv as { amount_paid?: number }).amount_paid ?? 0);
+    const invPi = invoicePaymentIntent(inv);
+    if (paid > 0) {
+      await recordPayment({
+        sourceId: inv.id, kind: "subscription", paymentIntent: invPi, userId, currency: inv.currency ?? "eur", amountCents: paid,
+        taxCents: invoiceTaxCents(inv), feeCents: await realFeeCents(lookup, invPi), livemode: !!inv.livemode, paidAt: at,
+      });
+    }
     // Enregistrée même si elle n'accorde rien (période plus ancienne) : idempotence et reprise s'y rattachent.
     await authRun(
       `INSERT INTO stripe_invoices (invoice_id, subscription_id, customer_id, payment_intent, user_id, granted_centi, period_end, created_at)

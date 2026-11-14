@@ -61,6 +61,11 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
           const id = typeof inv === "string" ? inv : inv?.id;
           return id ? { invoiceId: id } : null;
         },
+        // Revenu net : frais réels du paiement (balance transaction de sa charge).
+        async paymentDetails(pi) {
+          const { feeOfPaymentIntent } = await import("@/lib/billing/stripe-fees");
+          return { feeCents: await feeOfPaymentIntent(stripe, pi) };
+        },
       },
     });
     // 200 = accusé (traité, doublon, ou échec PERMANENT type métadonnées

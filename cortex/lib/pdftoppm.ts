@@ -31,9 +31,9 @@ export function findPdftoppm(): string | null {
   return null;
 }
 
-/** Rend les pages 1 à `lastPage` de `pdf` en `<outPrefix>-<n>.png`. Lève si pdftoppm échoue ou dépasse le délai. */
-export function renderPdfPages(bin: string, pdf: string, outPrefix: string, opts: { lastPage: number; timeoutMs?: number }): void {
-  execFileSync(bin, ["-png", "-scale-to", String(PAGE_MAX_PX), "-f", "1", "-l", String(opts.lastPage), pdf, outPrefix], {
+/** Rend les pages `firstPage` (1 par défaut) à `lastPage` de `pdf` en `<outPrefix>-<n>.png`. Lève si pdftoppm échoue ou dépasse le délai. */
+export function renderPdfPages(bin: string, pdf: string, outPrefix: string, opts: { firstPage?: number; lastPage: number; timeoutMs?: number }): void {
+  execFileSync(bin, ["-png", "-scale-to", String(PAGE_MAX_PX), "-f", String(opts.firstPage ?? 1), "-l", String(opts.lastPage), pdf, outPrefix], {
     stdio: "ignore",
     timeout: opts.timeoutMs ?? TIMEOUT_MS,
     killSignal: "SIGKILL",

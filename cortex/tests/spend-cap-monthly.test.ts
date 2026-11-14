@@ -15,6 +15,8 @@ import path from "node:path";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-plafond-mois-"));
 process.env.CORTEX_DATA_DIR = tmp;
+// Ce fichier teste le FUSIBLE SPEND_CAP_USD ; le plafond lié au revenu est testé dans ai-budget.test.ts.
+process.env.SPEND_CAP_BASE_USD = "unlimited";
 process.env.DB_DRIVER = "postgres";
 process.env.DATABASE_URL = "pglite://memory";
 (process.env as Record<string, string>).NODE_ENV = "development";

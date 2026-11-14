@@ -15,6 +15,8 @@ import path from "node:path";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-refund-"));
 process.env.CORTEX_DATA_DIR = tmp;
+// Budget IA lié au revenu (testé dans ai-budget.test.ts) : ici, les comptes sont financés par des crédits offerts.
+process.env.AI_BUDGET_MARGIN = "unlimited";
 process.env.BILLING_ENABLED = "1";
 process.env.SIGNUP_FREE_CREDITS = "10";
 process.env.DAILY_GEN_QUOTA = "unlimited";

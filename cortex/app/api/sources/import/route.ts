@@ -5,7 +5,7 @@ import { classifyFile } from "@/lib/import-folder";
 import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { extractOfficeText, OfficeDocumentError, type OfficeExtension } from "@/lib/office-documents";
 import { requireCourse } from "@/lib/req";
-import { checkStorage, declaredBytes, storageQuotaBytes } from "@/lib/storage-quota";
+import { checkStorage, declaredBytes, storageQuotaBytesFor } from "@/lib/storage-quota";
 import { readFormData, UPLOAD_LIMITS, withBodyLimit } from "@/lib/upload-limit";
 import fs from "node:fs";
 import path from "node:path";
@@ -84,7 +84,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   }
 
   const { refsDir, contentRoot } = coursePaths(course);
-  const courseMax = storageQuotaBytes();
+  const courseMax = await storageQuotaBytesFor(currentUser());
   if (courseMax !== null && directoryBytes(refsDir) + directoryBytes(contentRoot) + file.size > courseMax) {
     return NextResponse.json({ error: `${file.name} : plafond de ${Math.round(courseMax / (1024 * 1024))} Mo atteint pour ce cours (quota de stockage configurable).` }, { status: 413 });
   }

@@ -114,7 +114,9 @@ RESEND_API_KEY=⟨re_… (étape 6)⟩
 AUTH_EMAIL_FROM=Cortex <⟨adresse du domaine vérifié⟩>
 
 # — garde-fous de coût (OBLIGATOIRES) —
-# Plafond global du MOIS calendaire (UTC), remis à zéro le 1er.
+# Fusible global du MOIS calendaire (UTC), remis à zéro le 1er. Le plafond
+# effectif suit le revenu encaissé (SPEND_CAP_BASE_USD + marge × revenu) ;
+# celui-ci est la limite ultime : pose-le au plafond de la console Anthropic.
 SPEND_CAP_USD=25
 DAILY_GEN_QUOTA=3
 DAILY_ASSIST_QUOTA=20
@@ -150,8 +152,13 @@ LEGAL_TERMS_VERSION=2026-10
 # CORTEX_OWNER_EMAIL, les alertes de dépense et celles du rappel de reconduction).
 PUBLISHER_EMAIL=⟨ton adresse⟩
 
-# — stockage : quota par compte (Mo) sur le volume, + refus sous 10 % d'espace libre —
-STORAGE_QUOTA_MB=200
+# — stockage : quota par compte lié au revenu (base gratuite, + 100 Mo par $ net,
+#   plafond 3 Go, borné par le volume), + refus sous 10 % d'espace libre —
+STORAGE_QUOTA_MB=150
+
+# — budget IA lié au revenu (cortex/.env.example § « Budget IA ») : défauts
+#   AI_BUDGET_MARGIN=0.6, SPEND_CAP_BASE_USD=20 ; rien à poser pour les appliquer.
+#   Après le premier déploiement : npm run billing:backfill (dry-run), puis --write.
 
 # — sauvegardes quotidiennes hors site (S3-compatible : R2, B2, MinIO…) —
 BACKUP_S3_ENDPOINT=https://⟨account⟩.r2.cloudflarestorage.com

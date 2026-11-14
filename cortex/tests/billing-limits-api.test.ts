@@ -22,8 +22,13 @@ before(async () => {
   delete process.env.CORTEX_USER;
   const { ensureCoursesLoaded } = await import("../lib/courses");
   await ensureCoursesLoaded();
+  // Volume de 10 Go : la base du quota n'est pas rognée par la borne de 5 % du volume.
+  const { setStatfsForTests } = await import("../lib/storage-quota");
+  setStatfsForTests(() => ({ free: 9 * 1024 ** 3, total: 10 * 1024 ** 3 }));
 });
-after(() => {
+after(async () => {
+  const { setStatfsForTests } = await import("../lib/storage-quota");
+  setStatfsForTests(null);
   for (const k of ["CORTEX_DATA_DIR", "BILLING_ENABLED", ...LIMITS]) delete env[k];
   fs.rmSync(tmp, { recursive: true, force: true });
 });
@@ -37,7 +42,7 @@ test("/api/billing : limites effectives du compte (défauts du déploiement gard
     return { quotas: body.quotas, storageQuotaMb: body.storageQuotaMb };
   };
   for (const k of LIMITS) delete env[k];
-  assert.deepEqual(await read(), { quotas: { gen: 10, assist: 40 }, storageQuotaMb: 200 }, "rien de posé : les défauts s'appliquent, donc s'affichent");
+  assert.deepEqual(await read(), { quotas: { gen: 10, assist: 40 }, storageQuotaMb: 150 }, "rien de posé : les défauts s'appliquent, donc s'affichent");
   env.DAILY_GEN_QUOTA = "3"; env.DAILY_ASSIST_QUOTA = "20"; env.STORAGE_QUOTA_MB = "500";
   assert.deepEqual(await read(), { quotas: { gen: 3, assist: 20 }, storageQuotaMb: 500 });
   for (const k of LIMITS) env[k] = "unlimited";
