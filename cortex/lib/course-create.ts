@@ -46,9 +46,20 @@ function str(v: unknown, field: string, { max, required = false }: { max: number
   }
   if (typeof v !== "string") throw new InvalidCourseError(`Le champ « ${field} » doit être du texte.`);
   const s = v.trim().replace(/\s+/g, " ");
+  noTexCommand(s, `Le champ « ${field} »`);
   if (required && s.length < 2) throw new InvalidCourseError(`Le champ « ${field} » est trop court.`);
   if (s.length > max) throw new InvalidCourseError(`Le champ « ${field} » dépasse ${max} caractères.`);
   return s;
+}
+
+/**
+ * Ces champs vont dans l'en-tête des PDF d'examen. Ils y sont échappés au rendu (lib/qcm-latex,
+ * lib/exam-latex) ; refuser l'antislash, seul caractère qui ouvre une commande LaTeX, est la
+ * seconde barrière (audit du 14/11/2026, 🔴 1). Rien n'est échappé ici : la valeur stockée
+ * est aussi celle que l'app affiche.
+ */
+export function noTexCommand(s: string, what: string): void {
+  if (s.includes("\\")) throw new InvalidCourseError(`${what} ne peut pas contenir d'antislash (\\).`);
 }
 
 /** Liste d'enseignant·es : tableau JSON ou saisie libre séparée par des virgules. */
@@ -57,6 +68,7 @@ export function parseTeachers(v: unknown): string[] {
   const out = raw.map((s) => s.trim().replace(/\s+/g, " ")).filter(Boolean).slice(0, 12);
   for (const t of out) {
     if (t.length > 60) throw new InvalidCourseError("Un nom d'enseignant·e dépasse 60 caractères.");
+    noTexCommand(t, "Un nom d'enseignant·e");
   }
   return out;
 }
