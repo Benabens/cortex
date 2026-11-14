@@ -86,16 +86,21 @@ test("scrubEvent : le message d'une compilation LaTeX ratée ne sort ni chemin d
   assert.match(String(event.message), /Échec compilation LaTeX/);
 });
 
-test("redactMessage : un « / » sans segment de chemin autour (plafond par jour, date, fraction) n'est pas un chemin", async () => {
+test("redactMessage : un seul « / » (plafond par jour, SCQ/MCQ, fraction) n'est pas un chemin", async () => {
   const { redactMessage } = await import("../lib/observability");
   // Constat prod du 14/11 (job 21, HUM-285) : le plafond de dépense par compte, repris mot
   // pour mot jusqu'à l'étudiant (lib/llm/errors.ts), devenait « 15 $<chemin> » au lieu de
-  // « 15 $/jour » — le « / » seul, sans texte de chemin avant, suffisait à matcher.
+  // « 15 $/jour ». Même constat sur l'étape affichée pendant la préparation d'un cours
+  // (lib/format.ts) : « … barème · SCQ/MCQ » devenait « … barème · <chemin> ».
   assert.equal(
     redactMessage("Plafond de génération atteint pour ce compte aujourd'hui (15.06 $ ≥ 15 $/jour)."),
     "Plafond de génération atteint pour ce compte aujourd'hui (15.06 $ ≥ 15 $/jour).",
   );
-  // Un vrai chemin (segment non vide des deux côtés d'au moins un « / ») reste masqué.
+  assert.equal(
+    redactMessage("Détection du format (types · proportions · barème · SCQ/MCQ) via le LLM…"),
+    "Détection du format (types · proportions · barème · SCQ/MCQ) via le LLM…",
+  );
+  // Un vrai chemin (au moins deux « / », donc plusieurs niveaux) reste masqué.
   assert.equal(redactMessage("Lecture impossible : data/u/alice/cours/texte.tex"), "Lecture impossible : <chemin>");
 });
 

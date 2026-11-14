@@ -33,14 +33,18 @@ async function fail(msg: string): Promise<never> {
   // Annulé entre-temps par l'utilisateur : cancelJob a statué (remboursement compris), on n'écrase rien.
   try { if ((await getJob(jobId))?.status === "canceled") process.exit(0); } catch {}
   try {
-    // Rien de livrable (pas de résultat) : la progression PAR PHASE (lib/progress) peut
-    // afficher un pourcentage très avancé pour un échec immédiat — un lot QCM qui échoue
-    // vaut « son unité faite » pour l'ETA (progress.done("QCM", 1) dans lib/qcm.ts), ce qui
-    // gonfle l'avancement même à 0 question construite (constat prod 14/11, job 21 HUM-285 :
-    // plafond de dépense touché en 2 s, progress_pct affiché à 99). Sans résultat, 0 est le
-    // seul pourcentage honnête.
+    // « exam »/« qcm » SEULEMENT : leur progression PAR PHASE (lib/progress) peut afficher
+    // un pourcentage très avancé pour un échec immédiat — un lot QCM qui échoue vaut « son
+    // unité faite » pour l'ETA (progress.done("QCM", 1) dans lib/qcm.ts), ce qui gonfle
+    // l'avancement même à 0 question construite (constat prod 14/11, job 21 HUM-285 :
+    // plafond de dépense touché en 2 s, progress_pct affiché à 99). resultId n'est posé QUE
+    // par ces deux types (onExamReady) : sans lui, rien de livrable, 0 est le seul pourcentage
+    // honnête. Les autres types (ingest, prepare, format, blueprint…) avancent pas à pas
+    // (stepFields) : leur pourcentage à l'échec est déjà réel — ne JAMAIS l'écraser (régression
+    // du 14/11 : un prepare_course qui échoue après une ingestion réussie retombait à 0 %).
     const current = await getJob(jobId);
-    await setJob(jobId, { status: "error", error: msg, ...(current && !current.resultId ? { progress: 0 } : {}) });
+    const resetProgress = current && (current.type === "exam" || current.type === "qcm") && !current.resultId;
+    await setJob(jobId, { status: "error", error: msg, ...(resetProgress ? { progress: 0 } : {}) });
     await logJob(jobId, "ERREUR : " + msg);
   } catch {}
   // Suivi d'erreurs optionnel : un job qui échoue de nuit doit être visible.
