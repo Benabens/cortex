@@ -33,3 +33,16 @@ test("architecture : le paywall précède les contraintes gratuites d'un examen"
   const examPlan = generation.indexOf("planMockExam(");
   assert.ok(paywall >= 0 && examPlan > paywall, "un compte sans crédit doit recevoir 402 avant une éventuelle erreur de format");
 });
+
+test("architecture : la reprise d'un job interrompu exige une réservation débitée, seul le propriétaire en est exempté", () => {
+  const jobs = fs.readFileSync("lib/jobs.ts", "utf8");
+  const m = jobs.match(/const reservationValid = ([\s\S]*?);\n/);
+  assert.ok(m, "la réconciliation doit décider de la reprise par reservationValid");
+  const clauses = m[1].replace(/\/\/[^\n]*/g, "").split("||").map((c) => c.replace(/\s+/g, " ").trim());
+  assert.deepEqual(clauses, [
+    `r.type === "ingest"`,
+    `await (await import("@/lib/billing/owner")).isOwner()`,
+    `await (await import("@/lib/llm/authorization")).reservationExists(r.credit_ref)`,
+  ], "aucune autre exemption : ingest (gratuit), le propriétaire (critère unique de lib/billing/owner, user du tenant) ou une réservation débitée");
+  assert.ok(/attempts < maxAttempts && !neverStarted && reservationValid/.test(jobs), "la remise en file doit passer par reservationValid");
+});
