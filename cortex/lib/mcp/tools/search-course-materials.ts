@@ -1,6 +1,7 @@
 import * as z from "zod/v4";
 import { q } from "@/db/q";
 import { search } from "@/lib/search";
+import { sourceHeads } from "@/lib/source-scope";
 import { clip, htmlToText } from "../content";
 import { EXCERPT_CHARS, contextExcerpt, isOffProgram } from "../excerpts";
 import { courseArg, courseRef, courseRefOf } from "../schemas";
@@ -80,9 +81,6 @@ async function itemTexts(ids: number[]): Promise<Map<number, string>> {
 async function offProgramSources(ids: number[]): Promise<Set<number>> {
   const unique = [...new Set(ids.filter((n) => Number.isFinite(n)))];
   if (!unique.length) return new Set();
-  const rows = await q.all<{ id: number | string; title: string | null; head: string | null }>(
-    `SELECT s.id, s.title, (SELECT substr(i.text, 1, 400) FROM items i WHERE i.source_id = s.id ORDER BY i.id LIMIT 1) head
-     FROM sources s WHERE s.id IN (${unique.map(() => "?").join(",")})`, ...unique,
-  );
-  return new Set(rows.filter((r) => isOffProgram(r.title ?? "", r.head ?? "")).map((r) => Number(r.id)));
+  const rows = await sourceHeads(unique);
+  return new Set(rows.filter((r) => isOffProgram(r.title, r.head)).map((r) => r.id));
 }

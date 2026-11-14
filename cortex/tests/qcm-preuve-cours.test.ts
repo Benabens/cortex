@@ -58,6 +58,7 @@ let design: (n: number, call: number) => Raw[] = (n, call) => Array.from({ lengt
 let designCalls = 0;
 const verifyPrompts: string[] = [];
 const secondLookPrompts: string[] = [];
+const rewritePrompts: string[] = [];
 /** Ce que le correcteur signale hors cours pour une question, d'après le prompt qu'il reçoit. */
 let flag: (block: string, prompt: string) => { off: string; terms: string[] } | null = (block, prompt) => (
   /Svenson/.test(block) && !prompt.includes("93 % des conducteurs") ? { off: "L'étude de Svenson (1981) n'apparaît dans aucun extrait du cours.", terms: ["Svenson (1981)"] } : null
@@ -93,7 +94,11 @@ before(async () => {
       const parsed = JSON.parse(body) as { messages: { content: unknown }[] };
       const content = parsed.messages.map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))).join("\n");
       let text = "{}";
-      if (/"second_look"/.test(content)) {
+      if (/"explanations"/.test(content)) {
+        rewritePrompts.push(content);
+        const blocks = content.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
+        text = JSON.stringify({ explanations: blocks.map((b) => ({ index: Number(/^Q(\d+)\./.exec(b)![1]), explanation: "Selon Svenson (1981), 93 % des conducteurs américains s'estiment plus habiles que la moyenne : l'option qui parle d'une large majorité est juste, celles qui disent moins habiles, aussi habiles ou seulement les novices déforment ce résultat." })) });
+      } else if (/"second_look"/.test(content)) {
         secondLookPrompts.push(content);
         const r = secondLook(content);
         text = r ? JSON.stringify({ second_look: r }) : "pas du JSON";
@@ -117,6 +122,7 @@ beforeEach(() => {
   designCalls = 0;
   verifyPrompts.length = 0;
   secondLookPrompts.length = 0;
+  rewritePrompts.length = 0;
   ({ design, flag, secondLook, mismatch, courseTerms } = defaults);
 });
 
@@ -257,4 +263,63 @@ test("banc du 04/11 : une notion de la clé recopiée en paraphrase (introuvable
   assert.equal(r.count, 2);
   assert.ok(view.items.some((it) => /\(s10\)/.test(it.stem)), `la question est gardée :\n${steps.join("\n")}`);
   assert.ok(secondLookPrompts.length >= 1, "le second regard a cherché dans tout le cours");
+});
+
+test("banc HUM-285 du 13/11 : notion jugée absente, que la recherche plein texte ne trouve pas mais que le cours détaille (pluriel) — gardée", async () => {
+  const id = await course();
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  // Un second support, NON indexé pour la recherche plein texte : seule la recherche dans tout le corpus le voit.
+  await runWithCourse(id, async () => {
+    const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", "S_ance_3_Bendahan_Entreprises.md", "course_pdf/s3", null, 1);
+    await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", "S_ance_3_Bendahan_Entreprises.md", `${"Le numérique transforme les entreprises. ".repeat(40)}Ces exemples illustrent un modèle d'affaires basé sur des marchés bifaces, qui mettent en relation des producteurs et des consommateurs.`);
+  });
+  flag = (block) => (/Svenson/.test(block) ? { off: "Le « marché biface » n'est présenté dans aucun extrait.", terms: ["marché biface producteurs consommateurs"] } : null);
+  secondLook = (prompt) => {
+    const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
+    const seen = /marchés bifaces/.test(prompt.split("═══ QUESTIONS")[0]);
+    return blocks.map((b) => ({ index: Number(/^Q(\d+)\./.exec(b)![1]), off_course: seen ? "" : "Le marché biface n'est présenté nulle part dans le cours." }));
+  };
+  const { r, steps } = await exam(id, 2);
+  assert.equal(r.count, 2);
+  assert.ok(secondLookPrompts.length >= 1);
+  assert.match(secondLookPrompts[0], /marchés bifaces/, "le second regard voit le passage trouvé par les racines, hors recherche plein texte");
+  assert.ok(!steps.some((s) => /QCM rejeté/.test(s)), steps.filter((s) => /rejeté/.test(s)).join("\n"));
+  assert.match(secondLookPrompts[0], /Juge sur le FOND/, "un synonyme ou une reformulation fidèle n'est pas hors cours");
+});
+
+test("banc HUM-285 du 13/11 : seule l'explication sort du cours — elle est réécrite sur les passages, la question est gardée", async () => {
+  const id = await course();
+  design = (n, call) => Array.from({ length: n }, (_, i) => ({ ...svensonItem(call * 10 + i), explanation: "Svenson (1981) : 93 % des conducteurs s'estiment plus habiles ; SynthID, filigrane de Google, le confirme." }));
+  // Le correcteur résout à l'aveugle (sans l'explication) : il signale d'après l'énoncé.
+  flag = (block) => (/Svenson/.test(block) ? { off: "L'explication ajoute que SynthID est un filigrane de Google, absent du cours.", terms: ["Svenson (1981)", "SynthID"] } : null);
+  secondLook = (prompt) => {
+    assert.match(prompt, /scope/, "le second regard dit si seule l'explication est en cause");
+    const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
+    return blocks.map((b) => ({ index: Number(/^Q(\d+)\./.exec(b)![1]), off_course: "SynthID n'est pas présenté dans le cours.", scope: "explication" }) as { index: number; off_course: string });
+  };
+  const { r, steps, view } = await exam(id, 2);
+  assert.equal(r.count, 2);
+  assert.equal(designCalls, 1, "aucune régénération : les questions sont gardées");
+  assert.ok(rewritePrompts.length >= 1);
+  assert.match(rewritePrompts[0], /93 % des conducteurs/, "la réécriture voit les passages du cours");
+  assert.ok(view.items.every((it) => !/SynthID/.test(it.explanation ?? "")), "l'explication hors cours est remplacée");
+  assert.ok(steps.some((s) => /explication réécrite sur le cours/.test(s)), steps.join("\n"));
+  assert.ok(!steps.some((s) => /QCM rejeté/.test(s)));
+});
+
+test("banc HUM-285 du 13/11 : un chiffre de la clé introuvable dans tout le cours fait passer la question au second regard", async () => {
+  const id = await course();
+  const invented = (n: number) => {
+    const it = svensonItem(n);
+    it.options[0] = "47 % des conducteurs américains s'estiment plus habiles que la moyenne.";
+    it.source_fact = "Svenson (1981) : 47 % des conducteurs s'estiment plus habiles que la moyenne.";
+    return it;
+  };
+  design = (n, call) => Array.from({ length: n }, (_, i) => (call === 1 && i === 0 ? invented(0) : svensonItem(call * 10 + i)));
+  // Le correcteur ne signale rien : seul le contrôle déterministe des chiffres attrape le 47 %.
+  flag = () => null;
+  const { r, view } = await exam(id, 2);
+  assert.equal(r.count, 2);
+  assert.ok(view.items.every((it) => !it.options.some((o) => /47 %/.test(o))), "la question au chiffre inventé n'est pas livrée");
 });
