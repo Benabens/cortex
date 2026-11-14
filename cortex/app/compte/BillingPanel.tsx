@@ -252,7 +252,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
         <div>
           <h2 id="billing-title" className="text-xl font-semibold text-ink-1">Abonnement & crédits</h2>
           <p className="mt-0.5 text-[0.8rem] text-ink-3">
-            Un examen coûte {credits(data.costs.exam)}, un mock QCM ou un exercice {credits(data.costs.qcm)}, une aide (drill, correction) {nf.format(data.costs.assist)}.
+            Un examen blanc coûte {credits(data.costs.exam)}, un examen blanc QCM ou un exercice {credits(data.costs.qcm)}, une aide (exercice d’entraînement, correction) {nf.format(data.costs.assist)}.
           </p>
         </div>
         <Button variant="ghost" size="sm" onClick={onRefresh} aria-label="Actualiser le solde">

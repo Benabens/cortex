@@ -18,7 +18,7 @@ export default function ProgrammePage() {
     return (
       <Panel className="flex flex-col items-center gap-3 rounded-xl px-6 py-12 text-center">
         <WifiOff className="size-6 text-danger-hi" strokeWidth={2} aria-hidden="true" />
-        <p className="text-[0.95rem] font-medium text-ink-1">Impossible de charger le programme</p>
+        <h1 className="text-[0.95rem] font-medium tracking-normal text-ink-1">Impossible de charger le programme</h1>
         <p className="max-w-xs text-[0.85rem] leading-relaxed text-ink-3">
           Le moteur ne répond pas pour ce cours. Réessaie, ou change de cours.
         </p>

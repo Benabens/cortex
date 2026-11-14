@@ -19,6 +19,7 @@ import { examsDir } from "@/lib/paths";
 import type { Archetype } from "@/lib/archetypes";
 import { PhaseProgress, phaseLine } from "@/lib/progress";
 import { benchTrace } from "@/lib/bench/trace";
+import { examSummaryLabel, qcmSummaryText } from "@/lib/exam-summary";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -746,7 +747,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     q.rejected = reason.slice(0, 400);
     q.judgeIssue = `${q.rejected} — ${advice}`;
     benchTrace("qcm.rejected", { stem: q.stem, options: q.options, correct: q.correct, reason: q.rejected });
-    step(`QCM rejeté — ${q.rejected.slice(0, 160)}`, 70);
+    step(`QCM rejeté : ${q.rejected.slice(0, 160)}`, 70);
   };
   // Déterministe, avant le correcteur (et même s'il échoue) : une explication qui désigne une
   // option par sa position ou sa lettre est fausse dès que les options sont mélangées.
@@ -898,9 +899,9 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
       const text = k >= 0 ? rewritten[k] : null;
       if (confirmed && text && !citesOptionLabel(text, a.q.options.length)) {
         a.q.explanation = text;
-        step(`QCM gardé — explication réécrite sur le cours (${confirmed.slice(0, 100)})`, 70);
+        step(`QCM gardé : explication réécrite sur le cours (${confirmed.slice(0, 100)})`, 70);
       } else if (confirmed) reject(a.q, `hors cours : ${confirmed.slice(0, 240)}`, offCourseAdvice);
-      else step(`QCM gardé — jugé hors cours sur les extraits, mais trouvé dans le cours (${a.flag.reason.slice(0, 100)})`, 70);
+      else step(`QCM gardé : jugé hors cours sur les extraits, mais trouvé dans le cours (${a.flag.reason.slice(0, 100)})`, 70);
     });
   }
   return items;
@@ -1254,7 +1255,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       });
       return out;
     } catch (e) {
-      step(`Régénération ignorée (${(e as Error).message.slice(0, 50)}) — items d'origine gardés`, 0);
+      step(`Régénération ignorée (${(e as Error).message.slice(0, 50)}), items d'origine gardés`, 0);
       return items;
     }
   };
@@ -1321,7 +1322,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
         if (abandoned) return;
         const t = openTopic(i); // ouvertes = couverture programme (le focus reste sur les QCM)
         const a = archs[i % archs.length];
-        step(`Question ouverte ${i + 1}/${openCount} (architecte${round ? ", nouvel essai" : ""}) — ${t.label}…`, 82 + i);
+        step(`Question ouverte ${i + 1}/${openCount} (architecte${round ? ", nouvel essai" : ""}) : ${t.label}…`, 82 + i);
         try {
           const r = await architectQuestion(a, `${t.label}${t.subTheme ? ` — sous-thème imposé : ${t.subTheme}` : ""}${t.method ? ` — ${t.method}` : ""}`, 15, { maxRounds: 1, mold: openMolds[i] ?? null, onStep: (m) => step(`Ouverte ${i + 1} · ${m}`, 82 + i) });
           openBySlot.set(i, { ...r.q, points: 15 });
@@ -1518,8 +1519,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   });
   const verified = all.filter((it) => it.verified === 1).length;
   if (openCount > 0 && all.length) {
-    await q.run(`UPDATE exams SET verify_summary = ? WHERE id = ?`, `${qcmExamSummary({ count: all.length, requested: count, verified, open: 0, openRequested: 0 })} — questions ouvertes en cours`, examId);
-    step(`${all.length} QCM visibles dans l'examen #${examId} — questions ouvertes en cours…`, 82);
+    await q.run(`UPDATE exams SET verify_summary = ? WHERE id = ?`, `${qcmExamSummary({ count: all.length, requested: count, verified, open: 0, openRequested: 0 })}, questions ouvertes en cours`, examId);
+    step(`${all.length} QCM visibles dans l'examen #${examId} : questions ouvertes en cours…`, 82);
     await opts.onExamReady?.(examId);
   }
   await openPhase;
@@ -1559,20 +1560,18 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   } catch (e) { texError = (e as Error).message; }
   // Jamais silencieux (examen 4 de CS-290 : « prêt » 16 ms après « Rendu du PDF », sans PDF ni
   // trace) : l'étape le dit, l'examen reste consultable en ligne et le PDF se régénère à part.
-  if (texError) step(`⚠ PDF non compilé (${texError.slice(0, 160)}) — l'examen reste consultable en ligne`, 97);
+  if (texError) step(`⚠ PDF non compilé (${texError.slice(0, 160)}), l'examen reste consultable en ligne`, 97);
   progress.done("PDF");
 
   logPhase("PDF", tPdf);
   logPhase("Total", tStart);
-  report(`Examen QCM #${examId} prêt — ${qcmExamSummary({ count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount })} ✓`, 100);
+  report(`Examen QCM #${examId} prêt : ${qcmExamSummary({ count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount })} ✓`, 100);
   return { id: examId, count: all.length, requested: count, verified, open: openQs.length, openRequested: openCount, pdf, texError };
 }
 
-/** Résumé de l'examen : « QCM 5 sur 7 demandés (4 vér.) + 3 ouverte(s) » ; rien de signalé s'il est complet. */
+/** Résumé de l'examen : « QCM : 5 sur 7 demandés, dont 4 vérifiés · 3 questions ouvertes » ; rien de signalé s'il est complet. */
 export function qcmExamSummary(r: Pick<QcmExamResult, "count" | "requested" | "verified" | "open" | "openRequested">): string {
-  const qcm = r.count < r.requested ? `${r.count} sur ${r.requested} demandés` : `${r.count}`;
-  const open = r.open < r.openRequested ? `${r.open} sur ${r.openRequested}` : `${r.open}`;
-  return `QCM ${qcm} (${r.verified} vér.) + ${open} ouverte(s)`;
+  return qcmSummaryText(r);
 }
 
 /**
@@ -1623,7 +1622,7 @@ export async function getQcmExam(examId: number, withKeys = false): Promise<QcmE
       .map((r) => ({ id: r.id, concept: r.concept, statement: texToHtml(r.statement_html ?? ""), solution: withKeys ? texToHtml(r.solution_html ?? "") : "" }));
   } catch {}
   return {
-    id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: e.verify_summary, pdf: e.html_path ?? null,
+    id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: examSummaryLabel(e.verify_summary), pdf: e.html_path ?? null,
     // Corrigé : seulement s'il a compilé (J — examen 2 de CS-290 : « Énoncé » sans « Corrigé »).
     solutions: e.html_path?.endsWith(".pdf") && fs.existsSync(path.join(examsDir(), path.basename(e.html_path).replace(/\.pdf$/, "-corrige.pdf"))) ? e.html_path.replace(/\.pdf$/, "-corrige.pdf") : null,
     items: rows.map((r) => {

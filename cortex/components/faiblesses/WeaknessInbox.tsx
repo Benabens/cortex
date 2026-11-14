@@ -172,7 +172,7 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
           "focus-within:border-[color-mix(in_oklch,var(--color-accent)_55%,transparent)]",
           dragOver
             ? "border-[color-mix(in_oklch,var(--color-accent)_65%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_7%,transparent)]"
-            : "border-line-strong bg-surface-0/40"
+            : "border-line-strong bg-bg/40"
         )}
       >
         {file && (

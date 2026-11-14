@@ -26,7 +26,7 @@ type Variant = "track" | "pills" | "chips" | "line";
 type Size = "sm" | "md";
 
 const rootStyle: Record<Variant, string> = {
-  track: "gap-1 rounded-lg border border-line bg-surface-1/60 p-1",
+  track: "max-w-full flex-wrap gap-1 rounded-lg border border-line bg-surface-1/60 p-1",
   pills: "flex-wrap gap-2",
   chips: "flex-wrap gap-2",
   line: "",
@@ -34,16 +34,16 @@ const rootStyle: Record<Variant, string> = {
 
 const optionStyle: Record<Variant, Record<Size, string>> = {
   track: {
-    sm: "h-8 rounded-md px-2.5 text-[0.78rem]",
+    sm: "h-10 rounded-md px-2.5 text-[0.78rem] sm:h-8",
     md: "h-10 rounded-md px-3 text-[0.82rem]",
   },
   pills: {
-    sm: "h-9 rounded-full border border-line bg-surface-1/60 px-3 text-[0.82rem]",
-    md: "h-9 rounded-full border border-line bg-surface-1/60 px-3 text-[0.82rem]",
+    sm: "h-10 rounded-full border border-line bg-surface-1/60 px-3 text-[0.82rem] sm:h-9",
+    md: "h-10 sm:h-9 rounded-full border border-line bg-surface-1/60 px-3 text-[0.82rem]",
   },
   chips: {
-    sm: "h-9 rounded-md border border-line bg-surface-1/60 px-2.5 text-[0.8rem]",
-    md: "h-9 rounded-md border border-line bg-surface-1/60 px-2.5 text-[0.8rem]",
+    sm: "h-10 rounded-md border border-line bg-surface-1/60 px-2.5 text-[0.8rem] sm:h-9",
+    md: "h-10 sm:h-9 rounded-md border border-line bg-surface-1/60 px-2.5 text-[0.8rem]",
   },
   line: {
     sm: "min-h-11 rounded px-1.5 text-[0.8rem]",
@@ -51,13 +51,13 @@ const optionStyle: Record<Variant, Record<Size, string>> = {
   },
 };
 
-const VIOLET_THUMB =
+const ACCENT_THUMB =
   "border border-[color-mix(in_oklch,var(--color-accent)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_14%,transparent)]";
 
 const thumbStyle: Record<Variant, string> = {
   track: "rounded-md bg-surface-2 shadow-[0_0_0_1px_var(--color-line-strong)]",
-  pills: cn("rounded-full", VIOLET_THUMB),
-  chips: cn("rounded-md", VIOLET_THUMB),
+  pills: cn("rounded-full", ACCENT_THUMB),
+  chips: cn("rounded-md", ACCENT_THUMB),
   line: "seg-thumb-line",
 };
 
@@ -237,7 +237,7 @@ export function Segmented<V extends string>({
             <span className={cn("seg-label", size === "sm" && variant === "track" ? "gap-1.5" : "gap-2")}>
               {o.Icon && <o.Icon className={size === "sm" || variant !== "track" ? "size-3.5" : "size-4"} strokeWidth={2} />}
               <span style={checked && o.tone ? { color: o.tone } : undefined}>{o.label}</span>
-              {o.count != null && <span className="font-data text-[0.72rem] tabular text-ink-4">{o.count}</span>}
+              {o.count != null && <span className={cn("font-data text-xs tabular", checked ? "text-ink-2" : "text-ink-3")}>{o.count}</span>}
             </span>
           </button>
           </Fragment>

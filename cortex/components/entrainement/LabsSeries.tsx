@@ -97,7 +97,7 @@ export function LabsSeries() {
             return (
               <Panel key={lab.id} className="flex flex-col gap-4 p-5 sm:p-6">
                 <div className="flex flex-wrap items-center gap-3">
-                  <span className="grid size-11 shrink-0 place-items-center rounded-2xl border border-line bg-surface-2/60 text-cyan-hi">
+                  <span className="grid size-11 shrink-0 place-items-center rounded-2xl border border-line bg-surface-2/60 text-ink-3">
                     <FlaskConical className="size-[1.1rem]" strokeWidth={2} />
                   </span>
                   <div className="min-w-0 flex-1">

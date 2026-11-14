@@ -376,7 +376,7 @@ export async function generateLabExercise(
   step(`Lab ciblé : ${lab.label}${topic ? ` (focus « ${topic} »)` : ""}`, 8);
 
   const prompt = await buildLabPrompt(lab, topic);
-  step("Génération de l'exercice Labs — moule Q6 2025 + vrai code du lab (LLM)…", 25);
+  step("Génération de l'exercice Labs : moule Q6 2025 + vrai code du lab (LLM)…", 25);
   const text = await completeText({ prompt, model: "opus", timeoutMs: 600_000 });
   let q = extractJson<ExamQuestion>(text);
   q.category = "Labs";

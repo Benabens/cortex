@@ -53,7 +53,7 @@ export default defineTool({
       if (!concept) throw new ToolError("invalid_input", "Aucun point faible ni concept à revoir sur ce cours : précise le concept à travailler (concept).");
       const base = { course: courseRefOf(c), concept: clip(concept, FIELD_LIMITS.concept), confirmation: null, declined: null, drill: null };
       const decision = await ctx.confirm(
-        { bucket: "assist", costCenti: creditCost("assist"), summary: `Générer une question d'entraînement (5 indices + corrigé) sur « ${clip(concept, 80)} » — ${courseLabel(c)}.` },
+        { bucket: "assist", costCenti: creditCost("assist"), summary: `Générer une question d'entraînement (5 indices + corrigé) sur « ${clip(concept, 80)} », ${courseLabel(c)}.` },
         { course: c.id, concept },
         args.confirmation_token,
       );

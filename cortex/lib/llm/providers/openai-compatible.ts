@@ -36,7 +36,7 @@ export const openaiCompatibleProvider: LlmProvider = {
     }
     if (req.addDirs?.length) {
       throw new LlmError(
-        "Ce site d'appel repose sur la lecture de fichiers locaux (addDirs) — provider claude-code requis (LLM_PROVIDER=claude-code), ou adapte le site en images base64.",
+        "Ce site d'appel repose sur la lecture de fichiers locaux (addDirs) : provider claude-code requis (LLM_PROVIDER=claude-code), ou adapte le site en images base64.",
         "UNSUPPORTED"
       );
     }
@@ -104,7 +104,7 @@ export const openaiCompatibleProvider: LlmProvider = {
       // UPSTREAM : le endpoint a refusé avant de traiter (4xx/5xx) — rien facturé.
       const code = res.status === 401 || res.status === 403 ? "AUTH" : res.status === 429 ? "RATE_LIMIT" : "UPSTREAM";
       throw new LlmError(
-        `Endpoint LLM : HTTP ${res.status}${detail ? ` — ${detail}` : ""}`,
+        `Endpoint LLM : HTTP ${res.status}${detail ? `, ${detail}` : ""}`,
         code,
         retryableStatus(res.status)
       );

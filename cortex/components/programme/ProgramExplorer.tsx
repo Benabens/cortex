@@ -12,7 +12,7 @@ import { cn } from "@/lib/ux/cn";
 type Mode = "section" | "priority";
 
 const MODES: SegmentedOption<Mode>[] = [
-  { value: "section", label: "Par section", Icon: ListTree },
+  { value: "section", label: "Par chapitre", Icon: ListTree },
   { value: "priority", label: "Par priorité", Icon: Flame },
 ];
 
@@ -99,7 +99,7 @@ function FallbackSections({ types }: { types: UiType[] }) {
         <Panel key={b.section ?? `__none-${i}`} className="overflow-hidden p-0">
           {b.section && (
             <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-b border-line bg-surface-2/30 px-4 py-3">
-              <h3 className="text-[0.95rem] font-semibold text-ink-1">{b.section}</h3>
+              <h2 className="text-[0.95rem] font-semibold text-ink-1">{b.section}</h2>
               {b.approx && <span className="text-[0.7rem] text-ink-4">ordre approximatif</span>}
             </div>
           )}

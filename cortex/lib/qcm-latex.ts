@@ -284,7 +284,7 @@ export async function buildQcmArtifact(examId: number, data: QcmExamData, dateLa
       pdf = await compileExamPdf(await write(plain, false));
       warning = `PDF compilé avec les questions ouvertes en texte simple (leur LaTeX ne passait pas : ${why(e)})`;
     } catch (e2) {
-      return { file: fs.existsSync(path.join(examsDir(), `${base}.tex`)) ? `${base}.tex` : "", texError: `${(e as Error).message} — repli en texte simple échoué aussi : ${why(e2)}` };
+      return { file: fs.existsSync(path.join(examsDir(), `${base}.tex`)) ? `${base}.tex` : "", texError: `${(e as Error).message}, repli en texte simple échoué aussi : ${why(e2)}` };
     }
   }
   // Corrigé : même source que l'énoncé, puis le même repli s'il ne compile pas (examen 2 de

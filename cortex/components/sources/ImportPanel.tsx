@@ -255,7 +255,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
         </div>
         <div className="flex flex-wrap justify-center gap-1.5">
           {["PDF", "HTML", "TXT", "MD", "ZIP"].map((f) => (
-            <span key={f} className="rounded-md border border-line bg-surface-1/60 px-2 py-0.5 font-mono text-[0.68rem] text-ink-3">{f}</span>
+            <span key={f} className="rounded-md border border-line bg-surface-1/60 px-2 py-0.5 font-data text-xs text-ink-3">{f}</span>
           ))}
         </div>
       </label>
@@ -295,10 +295,10 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           </p>
         )}
         <p className="mt-2 text-[0.76rem] leading-relaxed text-ink-3">
-          Finals et midterms partent dans tes annales (ils décident du format) ; slides,
-          séries, documents Word et notes rejoignent le corpus. 30 Mo maximum par fichier ;
-          le total du cours suit le quota de stockage de ton compte. Les ZIP sont décompressés
-          dans ton navigateur et peuvent contenir une archive imbriquée.
+          Finals et midterms vont dans tes annales : ce sont eux qui fixent le format. Slides,
+          séries, documents Word et notes rejoignent le reste du cours. 30 Mo maximum par
+          fichier, dans la limite de stockage de ton compte. Les ZIP sont décompressés dans ton
+          navigateur, même s’ils contiennent une autre archive.
         </p>
       </div>
 
@@ -344,7 +344,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
         <div className="rounded-lg border border-line bg-surface-2/30 px-3.5 py-3 text-[0.78rem] text-ink-3">
           <p className="font-semibold text-ink-2">Fichiers non importés</p>
           <ul className="mt-1.5 list-disc space-y-1 pl-4">
-            {folderRefusals.map((item, index) => <li key={`${item.name}-${index}`}><span className="break-all">{item.name}</span> — {item.reason}</li>)}
+            {folderRefusals.map((item, index) => <li key={`${item.name}-${index}`}><span className="break-all">{item.name}</span> : {item.reason}</li>)}
           </ul>
         </div>
       )}

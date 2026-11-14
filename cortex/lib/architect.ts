@@ -138,7 +138,7 @@ function imageIdSchema(): object {
 
 /** Lit l'image d'un exo (vision) et identifie l'archétype + le concept + la technique à retester. */
 async function identifyFromImage(image: string, note: string | undefined, step: StepCb): Promise<ImageId> {
-  step("Lecture de l'image (vision) — identification du concept…", 8);
+  step("Lecture de l'image (vision) : identification du concept…", 8);
   const ids = new Set(profile().archetypes.map((a) => a.id));
   const prompt = [
     `${persona()} OUVRE et observe attentivement cette image : ${image} (outil Read).`,
@@ -216,7 +216,7 @@ async function designTrap(a: Archetype, target: string, refImage: string | null,
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier.`,
     JSON.stringify(DESIGN_SCHEMA, null, 2),
   ].filter((l) => l != null).join("\n");
-  step("P1 — conception du piège (étude de la vraie page + design)…", 22);
+  step("P1 : conception du piège (étude de la vraie page + design)…", 22);
   const d = await completeJson<DesignBrief>({ prompt, model: "opus", timeoutMs: 300_000, json: { schema: DESIGN_SCHEMA } });
   // BLINDAGE : le modèle peut omettre un champ du schéma ; des défauts sûrs évitent
   // un crash `undefined.join/.map` en P2 (constaté sur un run réel : 3 questions perdues).
@@ -278,7 +278,7 @@ async function writeFromDesign(a: Archetype, target: string, pts: number, design
     `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points${withFigures ? ", figure_spec?" : ""}}. Aucun outil au-delà de Read, aucun fichier.`,
     JSON.stringify(schema, null, 2),
   ].filter((l) => l != null).join("\n");
-  step("P2 — rédaction de l'énoncé multi-étapes (format du cours + piège)…", 38);
+  step("P2 : rédaction de l'énoncé multi-étapes (format du cours + piège)…", 38);
   // Avec figure, figure_spec est un objet libre : le fournisseur repasse en texte libre (lib/llm).
   const q = await completeJson<ExamQuestion & { figure_spec?: FigureSpec }>({ prompt, model: "opus", timeoutMs: 480_000, json: { schema } });
   return { ...q, category: a.category, points: pts };
@@ -377,7 +377,7 @@ export async function architectQuestion(
   const dna = await getExamDna().catch(() => null);
   const withFigures = (dna?.figures.kinds.length ?? 0) > 0;
 
-  step(`P0 — étude : archétype « ${a.id} » (${a.category}), vraie page ${refImage ?? "—"}${mold ? ` · moule ${mold}` : ""}`, 12);
+  step(`P0, étude : archétype « ${a.id} » (${a.category}), vraie page ${refImage ?? "—"}${mold ? ` · moule ${mold}` : ""}`, 12);
   // P1 — concevoir le piège (en s'appuyant sur l'image / la consigne si fournie)
   const design = await designTrap(a, target, refImage, step, image, note, statement, mold);
   // P2 — rédiger (avec le contexte corpus pour ancrer le contenu)
@@ -386,26 +386,26 @@ export async function architectQuestion(
   // P3 — boucle adversariale + révision
   const auditLog: Audit[] = [];
   for (let round = 1; round <= maxRounds; round++) {
-    step(`P3 — critique adversariale (pattern-matcher vs étudiant fort), passe ${round}/${maxRounds}…`, 50 + round * 8);
+    step(`P3 : critique adversariale (pattern-matcher vs étudiant fort), passe ${round}/${maxRounds}…`, 50 + round * 8);
     let audit: Audit;
     try {
       audit = await adversarialAudit(a, q, refImage, step);
     } catch (e) {
-      step(`P3 — audit interrompu (${(e as Error).message}) — on garde la version courante`, 66);
+      step(`P3 : audit interrompu (${(e as Error).message}), on garde la version courante`, 66);
       break;
     }
     auditLog.push(audit);
     if (audit.verdict === "good" && !audit.pattern_matcher_correct && audit.trap_present && audit.rubric_misses.length === 0) {
-      step(`P3 — validé (piège tient, pattern-matcher échoue) à la passe ${round}`, 70);
+      step(`P3 : validé (piège tient, pattern-matcher échoue) à la passe ${round}`, 70);
       break;
     }
     if (round === maxRounds) {
-      step(`P3 — dernière passe : ${audit.verdict} (durcissement résiduel : ${audit.hardening.slice(0, 80)})`, 70);
+      step(`P3, dernière passe : ${audit.verdict} (durcissement résiduel : ${audit.hardening.slice(0, 80)})`, 70);
     }
     try {
       q = await reviseFromAudit(a, q, audit, refImage, step);
     } catch (e) {
-      step(`P3 — révision interrompue (${(e as Error).message})`, 70);
+      step(`P3 : révision interrompue (${(e as Error).message})`, 70);
       break;
     }
   }
@@ -424,11 +424,11 @@ export async function architectQuestion(
         step(`Figure rendue (sandbox) → ${file}`, 72);
       } else {
         q = { ...q, statement_tex: q.statement_tex.split("%%FIGURE%%").join("") };
-        step(`Figure NON rendue (${rf.reason ?? "échec"}) — question sans figure`, 72);
+        step(`Figure NON rendue (${rf.reason ?? "échec"}), question sans figure`, 72);
       }
     } catch (e) {
       q = { ...q, statement_tex: q.statement_tex.split("%%FIGURE%%").join("") };
-      step(`Figure NON rendue (${(e as Error).message.slice(0, 50)}) — question sans figure`, 72);
+      step(`Figure NON rendue (${(e as Error).message.slice(0, 50)}), question sans figure`, 72);
     }
     delete (q as ExamQuestion & { figure_spec?: FigureSpec }).figure_spec;
   }
@@ -458,7 +458,7 @@ export async function architectExercise(
       step(`Concept identifié : « ${id.concept} » → archétype ${a.id}`, 12);
     } catch (e) {
       a = pickArchetype(target);
-      step(`Identification image interrompue (${(e as Error).message}) — archétype par défaut ${a.id}`, 12);
+      step(`Identification image interrompue (${(e as Error).message}), archétype par défaut ${a.id}`, 12);
     }
   } else {
     a = pickArchetype(statement ? `${target} ${statement}` : target);
@@ -468,14 +468,14 @@ export async function architectExercise(
   let q = built;
 
   // P4 — justesse + scope (vérif à l'aveugle existante ; 1 tentative car la difficulté est déjà calée)
-  step("P4 — vérification de la justesse + scope (à l'aveugle)…", 80);
+  step("P4 : vérification de la justesse + scope (à l'aveugle)…", 80);
   let report: VerifyReport | undefined;
   try {
     const v = await verifyAndHarden({ title: q.concept, questions: [q] }, regenerateExercise, 1, (m) => step(m, 84));
     q = v.spec.questions[0] ?? q;
     report = v.report;
   } catch (e) {
-    step(`P4 — vérif interrompue : ${(e as Error).message}`, 86);
+    step(`P4, vérif interrompue : ${(e as Error).message}`, 86);
   }
 
   step("Compilation du PDF (sans garde)…", 92);

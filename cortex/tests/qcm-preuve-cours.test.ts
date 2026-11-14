@@ -198,7 +198,7 @@ test("vrai hors-cours (une notion que le cours ne présente pas) : confirmé par
   const { r, steps, view } = await exam(id, 2);
   assert.equal(r.count, 2);
   assert.ok(view.items.every((it) => !it.options.some((o) => /négativité/.test(o))), "la question hors cours n'est pas gardée");
-  assert.ok(steps.some((s) => /QCM rejeté — hors cours[^\n]*négativité/.test(s)), steps.join("\n"));
+  assert.ok(steps.some((s) => /QCM rejeté : hors cours[^\n]*négativité/.test(s)), steps.join("\n"));
 });
 
 test("second regard impossible (réponse illisible) : le rejet du correcteur tient", async () => {

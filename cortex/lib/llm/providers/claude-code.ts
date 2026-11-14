@@ -24,7 +24,7 @@ export const claudeCodeProvider: LlmProvider = {
   async complete(req: CompleteRequest): Promise<CompleteResult> {
     if (req.images?.length) {
       throw new LlmError(
-        "Le provider claude-code ne prend pas d'images base64 — passe des chemins de fichiers dans le prompt (+ addDirs si hors cwd).",
+        "Le provider claude-code ne prend pas d'images base64, passe des chemins de fichiers dans le prompt (+ addDirs si hors cwd).",
         "UNSUPPORTED"
       );
     }

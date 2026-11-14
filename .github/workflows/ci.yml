@@ -154,7 +154,7 @@ jobs:
           set -o pipefail
           npx tsx scripts/repair-cs202-db.ts --ci
           npx tsx scripts/regression-cs202.ts /tmp/ci-reg | tee /tmp/reg.out
-          grep -q '9a294bb25e9d919c' /tmp/reg.out || { echo '::error::tex sha ≠ canonique'; exit 1; }
+          grep -q '6832fc091a5be25e' /tmp/reg.out || { echo '::error::tex sha ≠ canonique'; exit 1; }
           echo "✓ rendu cs-202 byte-identique ; prompt sous plafond et consigne de données présente"
 
   # L'image du conteneur unique (app + worker + tectonic + python/matplotlib +

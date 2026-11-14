@@ -176,7 +176,7 @@ export async function classifyMolds(step: Step = () => {}): Promise<{ classified
         raw = parsed?.classified ?? [];
         if (raw.length) break;
       } catch (e) {
-        step(`Moules : lot ${i / BATCH + 1} échoué${attempt < 2 ? " — réessai" : " — ignoré (repris au prochain run)"} (${(e as Error).message.slice(0, 40)})`, Math.round((i / rows.length) * 100));
+        step(`Moules : lot ${i / BATCH + 1} échoué${attempt < 2 ? ", réessai" : ", ignoré (repris au prochain run)"} (${(e as Error).message.slice(0, 40)})`, Math.round((i / rows.length) * 100));
       }
     }
     const ids = new Set(batch.map((b) => b.id));
@@ -230,7 +230,7 @@ export async function scanFigures(step: Step = () => {}): Promise<ExamDna> {
   const dna = (await getExamDna()) ?? emptyDna(course);
   const all = await listExamSourceRows();
   const exams = pickEnonces(all);
-  if (!exams.length) { step("Figures : aucune annale — scan vide.", 100); return dna; }
+  if (!exams.length) { step("Figures : aucune annale, scan vide.", 100); return dna; }
   const p = profile();
   const todo = exams.filter((e) => !(e.title in dna.figures.scanned));
   let i = 0;
@@ -245,7 +245,7 @@ export async function scanFigures(step: Step = () => {}): Promise<ExamDna> {
       step(`Figures : ${exam.title} non scannable (pas de pages rendues)`, pct);
       continue;
     }
-    step(`Figures : scan ${i}/${todo.length} — ${exam.title} (${pages.length} p.)…`, pct);
+    step(`Figures : scan ${i}/${todo.length}, ${exam.title} (${pages.length} p.)…`, pct);
     const prompt = [
       p.qaIntro?.() ?? "Tu es l'équipe enseignante du cours.",
       `Voici TOUTES les pages d'une VRAIE annale : « ${exam.title} ». Ouvre-les (outil Read) et observe-les.`,
@@ -277,7 +277,7 @@ export async function scanFigures(step: Step = () => {}): Promise<ExamDna> {
         ok = true;
         break;
       } catch (e) {
-        step(`Figures : ${exam.title} échoué${attempt < 2 ? " — réessai" : " — repris au prochain run"} (${(e as Error).message.slice(0, 40)})`, pct);
+        step(`Figures : ${exam.title} échoué${attempt < 2 ? ", réessai" : ", repris au prochain run"} (${(e as Error).message.slice(0, 40)})`, pct);
       }
     }
     if (!ok) continue; // pas marqué scanné → ré-entrant
@@ -388,7 +388,7 @@ export async function aggregateDna(step: Step = () => {}): Promise<ExamDna> {
       }
     }
   } catch (e) {
-    step(`Texture non dérivée (${(e as Error).message.slice(0, 40)}) — ADN sans texture (honnête)`, 90);
+    step(`Texture non dérivée (${(e as Error).message.slice(0, 40)}), ADN sans texture (honnête)`, 90);
   }
 
   dna.detected_at = new Date().toISOString().slice(0, 19).replace("T", " ");
