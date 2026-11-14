@@ -129,13 +129,13 @@ test("HUM-285 au format déclaré (QCM, 20 questions) : devis pour 20 QCM au tar
   await updateCourseRow(hum.id, ALICE, { exam_format: JSON.stringify({ kind: "qcm", questionCount: 20, durationMin: 45, language: null }) });
   await reloadCourses();
   const c = await client();
-  const r = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "HUM-285", focus: "moitié Bendahan, moitié Cavallaro" } })) as ToolResult;
+  const r = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "HUM-285", focus: "moitié Martin, moitié Leroy" } })) as ToolResult;
   assert.equal(r.isError, undefined, text(r));
   const sc = r.structuredContent as { status: string; format: string; exercise_count: number; note: string | null; confirmation: { cost_credits: number } };
   assert.deepEqual([sc.status, sc.format, sc.exercise_count], ["confirmation_required", "mcq", 20]);
   assert.match(sc.note ?? "", /annales/);
   assert.match(sc.note ?? "", /déclaré/, "la note dit d'où vient le format");
-  const target = JSON.stringify({ count: 20, openCount: 0, focus: "moitié Bendahan, moitié Cavallaro" });
+  const target = JSON.stringify({ count: 20, openCount: 0, focus: "moitié Martin, moitié Leroy" });
   assert.equal(sc.confirmation.cost_credits, fromCenti(costForJob("qcm", target)));
   assert.match(text(r), /annales/, "le résumé lu par le modèle le dit aussi");
 

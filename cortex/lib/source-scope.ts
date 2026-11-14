@@ -6,7 +6,7 @@ import { normalize } from "@/lib/text";
  * ni aux notions, quel que soit leur type : une note ou un support marqué « hors
  * programme » (par son titre ou le début de son texte), une archive d'une année passée,
  * et les archives d'organisation (thèmes des posters, exemple de rendu, grille d'évaluation).
- * HUM-285, job 12 du 13/11 : 3 QCM sur 10 venaient de notes d'archive « Gillet 2025, hors
+ * HUM-285, job 12 du 13/11 : 3 QCM sur 10 venaient de notes d'archive « Durand 2025, hors
  * programme 2026 » et de l'archive des posters 2024 ; job 14 : 6 sur 14, les titres étant des
  * noms de fichiers (« Archive_2025-26_… »).
  */
@@ -46,7 +46,7 @@ export function isExcludedMaterial(title: string, head = ""): boolean {
 
 /**
  * Passage qui présente le cours plutôt que sa matière : la diapositive des enseignants et de leurs
- * domaines de recherche (job 14 de HUM-285 : « lequel de ces domaines est associé à Bendahan ? »),
+ * domaines de recherche (job 14 de HUM-285 : « lequel de ces domaines est associé à Martin ? »),
  * une grille ou des critères d'évaluation d'un rendu. Lu sur le début d'un item (une page, une diapo).
  */
 const COURSE_FRAME = /\b(domaines? (de recherche|d.expertise|de competences?)|(presentation|equipe) (des |de l.)?(enseignants?|intervenants?|enseignement|equipe pedagogique)|vos enseignants|qui sommes[- ]nous|teaching team|about (the|your) (instructors?|lecturers?|teachers?)|research interests|grilles? (d.)?evaluation|criteres? d.evaluation (du |de l.|de la |d.un |d.une )?(poster|essai|rendu|projet|travail|expose|presentation)|grading rubric)\b/;

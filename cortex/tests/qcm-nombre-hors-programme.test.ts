@@ -26,7 +26,7 @@ const ENV: Record<string, string> = {
 Object.assign(process.env, ENV);
 
 const COURSE_TEXT = "Cours 4 : la souveraineté numérique désigne la capacité d'un État à maîtriser ses données ; df.groupby calcule une moyenne par groupe. Le nudge modifie l'architecture du choix sans interdire d'option. Le biais de statu quo pousse à garder l'option par défaut.";
-const ARCHIVE_TEXT = "Hors programme 2026 (Gillet 2025) : le RGPD et la LPD encadrent le traitement des données personnelles ; rapports CNUCED sur l'économie numérique.";
+const ARCHIVE_TEXT = "Hors programme 2026 (Durand 2025) : le RGPD et la LPD encadrent le traitement des données personnelles ; rapports CNUCED sur l'économie numérique.";
 const POSTERS_TEXT = "Thèmes des posters 2024 : 1. surveillance algorithmique ; 2. économie de l'attention ; 3. cybersécurité des hôpitaux.";
 
 /** Sujets d'un prompt de conception : lignes « 1) sujet [méthode] ». */
@@ -131,7 +131,7 @@ async function humCourse(topics: string[]): Promise<string> {
       await indexItemForSearch(iid, sid, title, text);
     };
     await add("course_pdf", "Cours 4 — souveraineté numérique", COURSE_TEXT);
-    await add("note", "Archive Gillet 2025", ARCHIVE_TEXT);
+    await add("note", "Archive Durand 2025", ARCHIVE_TEXT);
     await add("note", "Thèmes des posters 2024", POSTERS_TEXT);
     for (const label of topics) await q.run(`INSERT INTO topics (label, method, exam_weight, exam_count) VALUES (?,?,?,?)`, label, null, 3, 1);
   });
@@ -143,8 +143,8 @@ const NOTIONS = ["Souveraineté numérique", "Nudge", "Biais de statu quo", "Arc
 test("règle : hors programme (titre ou début du texte) et archives d'organisation", async () => {
   const { isExcludedMaterial } = await import("../lib/source-scope");
   for (const [title, head] of [
-    ["Archive Gillet 2025 — RGPD et LPD (hors programme 2026)", ""],
-    ["Archive Gillet 2025", ARCHIVE_TEXT],
+    ["Archive Durand 2025 — RGPD et LPD (hors programme 2026)", ""],
+    ["Archive Durand 2025", ARCHIVE_TEXT],
     ["Thèmes des posters 2024", ""],
     ["Notes", POSTERS_TEXT],
     ["Exemple de rendu — essai noté 5,5", ""],
@@ -168,7 +168,7 @@ test("une source hors programme ou une archive ne donne ni passage, ni sujet, ni
     assert.ok(passages.length > 0, "le support du cours donne un passage");
     assert.ok(passages.every((p) => p.src === "Cours 4 — souveraineté numérique"), JSON.stringify(passages.map((p) => p.src)));
     const evidence = await evidencePassages(["RGPD et LPD", "CNUCED"]);
-    assert.ok(evidence.every((p) => !/Gillet|posters/.test(p.src)), JSON.stringify(evidence.map((p) => p.src)));
+    assert.ok(evidence.every((p) => !/Durand|posters/.test(p.src)), JSON.stringify(evidence.map((p) => p.src)));
     // Postgres : la requête d'avant (DISTINCT + ORDER BY) échouait et rendait toujours [].
     assert.deepEqual(await courseMaterialTitles(), ["Cours 4 — souveraineté numérique"]);
     const labels = (await coverageTopics()).map((t) => t.label);
@@ -183,8 +183,8 @@ test("examen QCM : aucune question ni aucun passage tiré des archives", async (
   const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
   assert.equal(r.count, 4);
   const asked = designPrompts.flatMap(subjects);
-  assert.ok(!asked.some((s) => /RGPD|posters|CNUCED|Gillet/i.test(s)), `sujets : ${asked.join(" | ")}`);
-  assert.ok(!allPrompts.some((p) => p.includes("Gillet 2025") || p.includes("économie de l'attention")), "le texte des archives n'entre dans aucun prompt");
+  assert.ok(!asked.some((s) => /RGPD|posters|CNUCED|Durand/i.test(s)), `sujets : ${asked.join(" | ")}`);
+  assert.ok(!allPrompts.some((p) => p.includes("Durand 2025") || p.includes("économie de l'attention")), "le texte des archives n'entre dans aucun prompt");
 });
 
 test("notions : l'analyse du programme ne lit pas les archives", async () => {
@@ -194,7 +194,7 @@ test("notions : l'analyse du programme ne lit pas les archives", async () => {
   await runWithCourse(id, () => analyzeBlueprint().catch(() => null));
   const prompt = allPrompts.find((p) => p.includes(COURSE_TEXT.slice(0, 40)));
   assert.ok(prompt, "l'analyse lit le support du cours");
-  assert.ok(!allPrompts.some((p) => p.includes("Gillet 2025") || p.includes("économie de l'attention")), "ni la note hors programme, ni l'archive des posters");
+  assert.ok(!allPrompts.some((p) => p.includes("Durand 2025") || p.includes("économie de l'attention")), "ni la note hors programme, ni l'archive des posters");
 });
 
 test("un sujet écarté à chaque fois cède sa place à une notion de réserve : 8 QCM sur 8", async () => {
@@ -241,12 +241,12 @@ test("un remplacement encore en doublon déclenche une nouvelle ronde bornée", 
 // ─── Job 14 de HUM-285 (13/11, après #78) : titres = noms de fichiers ─────────────────────────────
 // 14 QCM sur 20, dont des sujets « Archive_2025-26_Thèmes_des_posters_2024.md » ou
 // « S_ance_1_…_slides_01.00.md », la diapo des domaines de recherche des enseignants, la grille du
-// poster, des notes Gillet hors programme 2026 ; une seule question sur les séances de Cavallaro.
+// poster, des notes Durand hors programme 2026 ; une seule question sur les séances de Leroy.
 
-const INTRO_SLIDE = "Présentation des enseignants. Domaines de recherche : Samuel Bendahan, théorie de la décision appliquée ; Denis Gillet, interaction humain-machine et systèmes cyber-physiques.";
-const BENDAHAN_TEXT = "Le leadership repose sur la crédibilité ; la science avance par réfutation. Le biais de confirmation pousse à chercher ce qui confirme une croyance. Le double système de pensée oppose un système rapide et intuitif à un système lent et délibératif.";
-const CAVALLARO_END = "MARQUEUR-CAVALLARO : la gouvernance de la sécurité de l'IA répartit les responsabilités entre États, laboratoires et organisations internationales.";
-const cavallaroText = (n: number) => `${Array.from({ length: 900 }, (_, i) => `séance${n}mot${i}`).join(" ")} ${CAVALLARO_END}`;
+const INTRO_SLIDE = "Présentation des enseignants. Domaines de recherche : Marc Martin, théorie des organisations appliquée ; Henri Durand, modélisation statistique et traitement du signal.";
+const MARTIN_TEXT = "Le leadership repose sur la crédibilité ; la science avance par réfutation. Le biais de confirmation pousse à chercher ce qui confirme une croyance. Le double système de pensée oppose un système rapide et intuitif à un système lent et délibératif.";
+const LEROY_END = "MARQUEUR-LEROY : la gouvernance de la sécurité de l'IA répartit les responsabilités entre États, laboratoires et organisations internationales.";
+const leroyText = (n: number) => `${Array.from({ length: 900 }, (_, i) => `séance${n}mot${i}`).join(" ")} ${LEROY_END}`;
 const JOB14_ARCHIVES: [string, string][] = [
   ["Archive_2025-26_Thèmes_des_posters_2024.md", POSTERS_TEXT],
   ["Archive_2025-26_Exemple_de_résumé_et_bibliographie_attendu_du_rendu_poster.md", "Résumé : le rewilding par clonage du mammouth dans la toundra ; les températures arctiques augmentent deux fois plus vite."],
@@ -278,8 +278,8 @@ async function job14Course(topics: string[]): Promise<string> {
         await indexItemForSearch(iid, sid, title, text);
       }
     };
-    await add("S_ance_1_Bendahan_Leadership_et_science_slides_01.00.md", [INTRO_SLIDE, BENDAHAN_TEXT]);
-    for (const n of [5, 6, 7]) await add(`S_ance_${n}_Cavallaro_S_curit_IA_et_responsabilit_s_mondiales.md`, [cavallaroText(n)]);
+    await add("S_ance_1_Martin_Leadership_et_science_slides_01.00.md", [INTRO_SLIDE, MARTIN_TEXT]);
+    for (const n of [5, 6, 7]) await add(`S_ance_${n}_Leroy_S_curit_IA_et_responsabilit_s_mondiales.md`, [leroyText(n)]);
     for (const [title, text] of JOB14_ARCHIVES) await add(title, [text]);
     for (const label of topics) await q.run(`INSERT INTO topics (label, method, exam_weight, exam_count) VALUES (?,?,?,?)`, label, null, 3, 1);
   });
@@ -289,11 +289,11 @@ async function job14Course(topics: string[]): Promise<string> {
 test("job 14 rejoué : ni archive, ni grille, ni diapo des enseignants exclues à l'œil ; aucun nom de fichier comme notion", async () => {
   const { isExcludedMaterial, isExcludedPassage, materialLabel } = await import("../lib/source-scope");
   for (const [title, text] of JOB14_ARCHIVES) assert.equal(isExcludedMaterial(title, text), true, title);
-  assert.equal(isExcludedMaterial("S_ance_1_Bendahan_Leadership_et_science_slides_01.00.md", INTRO_SLIDE), false, "la séance reste au programme");
+  assert.equal(isExcludedMaterial("S_ance_1_Martin_Leadership_et_science_slides_01.00.md", INTRO_SLIDE), false, "la séance reste au programme");
   assert.equal(isExcludedPassage(INTRO_SLIDE), true, "sa diapo des enseignants, non");
-  assert.equal(isExcludedPassage(BENDAHAN_TEXT), false);
+  assert.equal(isExcludedPassage(MARTIN_TEXT), false);
   assert.equal(isExcludedPassage("Critères d'évaluation de la fiabilité d'une source : auteur, date, méthode."), false, "un critère de fiabilité est de la matière");
-  assert.equal(materialLabel("S_ance_1_Bendahan_Leadership_et_science_slides_01.00.md"), null);
+  assert.equal(materialLabel("S_ance_1_Martin_Leadership_et_science_slides_01.00.md"), null);
   assert.equal(materialLabel("Souveraineté de l'IA et flux de données"), "Souveraineté de l'IA et flux de données");
 });
 
@@ -324,11 +324,11 @@ test("job 14 rejoué : l'analyse des notions lit chaque séance en entier, aucun
   await runWithCourse(id, () => analyzeBlueprint().catch(() => null));
   const prompt = allPrompts.find((p) => p.includes("CARTE D'EXAMEN"));
   assert.ok(prompt, "l'analyse a été demandée");
-  assert.equal(prompt!.split("MARQUEUR-CAVALLARO").length - 1, 3, "la fin de chacune des 3 séances de Cavallaro est lue");
-  assert.ok(prompt!.includes("double système de pensée"), "la séance de Bendahan aussi");
+  assert.equal(prompt!.split("MARQUEUR-LEROY").length - 1, 3, "la fin de chacune des 3 séances de Leroy est lue");
+  assert.ok(prompt!.includes("double système de pensée"), "la séance de Martin aussi");
   for (const leak of ["Domaines de recherche", "rewilding", "Critère D1", "infrastructure résiliente", "surveillance algorithmique"]) assert.ok(!prompt!.includes(leak), leak);
   assert.match(prompt!, /CHAQUE support du plan/);
-  assert.match(prompt!, /« S ance 5 Cavallaro S curit IA et responsabilit s mondiales »/, "supports nommés sans « _ » ni extension");
+  assert.match(prompt!, /« S ance 5 Leroy S curit IA et responsabilit s mondiales »/, "supports nommés sans « _ » ni extension");
   assert.match(prompt!, /Vise \d+ à \d+ notions LARGES/);
   const { notionTarget } = await import("../lib/program");
   assert.equal(notionTarget(11), "11 à 14", "à peu près une notion large par support (banc du 13/11 : 32 notions fines → 9 QCM sur 20)");

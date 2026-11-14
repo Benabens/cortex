@@ -146,7 +146,7 @@ test("cours sans annale : chaque support du cours est lu par l'analyse, pas seul
   const { runWithCourse } = await import("../db/client");
   const { q } = await import("../db/q");
   const { rebuildBlueprintFromIndex } = await import("../lib/program");
-  // Banc HUM-285 du 28/10 : 16 questions Bendahan contre 4 Cavallaro. L'analyse ne lisait que les
+  // Banc HUM-285 du 28/10 : 16 questions Martin contre 4 Leroy. L'analyse ne lisait que les
   // 4 000 premiers caractères des supports, ceux du premier enseignant ingéré.
   await runWithCourse(id, async () => {
     for (let k = 1; k <= 8; k++) {

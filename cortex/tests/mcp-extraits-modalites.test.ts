@@ -43,7 +43,7 @@ test("hors programme : par le titre ou par le début de la note", () => {
 
 test("modalités d'examen : jamais un concept à réviser ; les notions du cours passent", () => {
   for (const t of [
-    "Midterm MCQ format — half Bendahan, half Gillet",
+    "Midterm MCQ format — half Martin, half Durand",
     "Modalités d'examen",
     "Format de l'examen final",
     "Exam duration and allowed material",
