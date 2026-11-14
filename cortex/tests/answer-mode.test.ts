@@ -1,7 +1,7 @@
 /**
  * RÉPONSE UNIQUE OU MULTIPLE (lib/exam-format) — banc HUM-285 du 02/11/2026 : 7 questions
  * sur 19 à réponses multiples, alors que le vrai examen est à réponse unique (« une seule
- * réponse correcte », slides de Bendahan). Le format déclaré « QCM » ne disait pas laquelle.
+ * réponse correcte », slides de Martin). Le format déclaré « QCM » ne disait pas laquelle.
  * Verrouillé ici : le mode se déclare (fiche du cours, connecteur), vaut « réponse unique »
  * quand rien ne dit le contraire, et, avec des annales, c'est leur forme qui fait foi.
  */
