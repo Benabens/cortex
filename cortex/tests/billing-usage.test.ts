@@ -95,7 +95,9 @@ test("kill-switch : sous le plafond → passe ; plafond atteint → LlmError SPE
   billing.resetSpendCache();
   await assert.rejects(
     () => billing.assertSpendCap("anthropic"),
-    (e: Error & { code?: string }) => e.code === "SPEND_CAP" && /Plafond de dépense/.test(e.message),
+    // Message étudiant générique (repris mot pour mot jusqu'à l'app et au connecteur
+    // MCP) : jamais de montant ni de nom de variable (constat prod du 14/11).
+    (e: Error & { code?: string }) => e.code === "SPEND_CAP" && /Limite de génération/.test(e.message) && !/\$/.test(e.message),
   );
   // le dev €0 n'est JAMAIS coupé
   await billing.assertSpendCap("claude-code");

@@ -35,7 +35,10 @@ export function redactMessage(text: string): string {
   if (cut > 0) t = t.slice(0, cut);
   t = t.replace(/\{[^{}]*\}/g, "{…}"); // \subq{énoncé}, \input{fichier}
   t = t.replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, "<e-mail>"); // identité d'un compte, avant les chemins (« @ » y est permis)
-  t = t.replace(/(?:[\w.~@%+-]*\/)+[\w.~@%+-]*/g, "<chemin>"); // data/u/<slug>/…, URL
+  // Segment NON VIDE avant chaque « / » : sinon « 15 $/jour » ou « réessaie, ou X/Y »
+  // (rien que des séparateurs sans chemin) devenait « 15 $<chemin> » (constat prod du
+  // 14/11 — le plafond de dépense par jour, repris mot pour mot jusqu'à l'étudiant).
+  t = t.replace(/(?:[\w.~@%+-]+\/)+[\w.~@%+-]*/g, "<chemin>"); // data/u/<slug>/…, URL
   return t.length > MESSAGE_MAX ? t.slice(0, MESSAGE_MAX) + "…" : t;
 }
 

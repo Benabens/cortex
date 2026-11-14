@@ -1,7 +1,7 @@
 import { currentCourse } from "@/db/client";
 import { currentUser } from "@/db/context";
 import { dbDriverName, q, nowStr } from "@/db/q";
-import { inc, observe } from "@/lib/metrics";
+import { inc, log, observe } from "@/lib/metrics";
 import { examsDir } from "@/lib/paths";
 import { spawn } from "node:child_process";
 import { killProcessGroup } from "@/lib/process-group";
@@ -79,8 +79,10 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
       r = await reserveGeneration({ bucket: "gen", kind: type, costCenti: costForJob(type, target), ref, jobSlot: true });
     } catch (e) {
       // Erreur technique du store (pas un refus) : pas de génération gratuite sur erreur DB.
+      // Détail (requête, chemin du store) dans les logs seulement — jamais à l'étudiant.
       const msg = e instanceof Error ? e.message.slice(0, 200) : String(e);
-      throw new ReservationRefused(503, `Facturation indisponible, réessaie dans un instant. (${msg})`);
+      log("error", "jobs.reservation_failed", { message: msg });
+      throw new ReservationRefused(503, "Facturation indisponible, réessaie dans un instant.");
     }
     if (!r.ok) throw new ReservationRefused(r.status, r.error);
   }

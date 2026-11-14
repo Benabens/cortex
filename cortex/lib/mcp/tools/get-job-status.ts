@@ -112,7 +112,7 @@ function jobView(j: Job, appOrigin: string, courseId: string): z.infer<typeof jo
     type: j.type,
     status: j.status,
     progress_pct: Math.round(j.progress ?? 0),
-    step: j.currentStep ? clip(j.currentStep, 200) : null,
+    step: j.currentStep ? clip(redactMessage(j.currentStep), 200) : null,
     error: j.error ? clip(redactMessage(j.error), 300) : null,
     created_at: j.createdAt,
     updated_at: j.updatedAt,
