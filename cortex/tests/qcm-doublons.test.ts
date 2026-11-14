@@ -84,6 +84,7 @@ before(async () => {
       const content = parsed.messages.map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))).join("\n");
       let text = "{}";
       if (/"duplicates"/.test(content)) { dedupePrompts.push(content); text = dedupeReply(content); }
+      else if (/"offCourse"/.test(content)) text = JSON.stringify({ verdicts: [...content.matchAll(/^Q(\d+)\./gm)].map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })) });
       else if (/"results"/.test(content)) text = verifyReply(content);
       else if (/"items"/.test(content)) {
         designCalls++;
@@ -214,14 +215,19 @@ test("accent demandé par l'étudiant : ses questions partagent un thème sans �
   assert.match(dedupePrompts[0], /une notion = une question/i);
 });
 
-test("le dernier lot de remplacement est contrôlé lui aussi : une notion déjà posée n'y reste pas", async () => {
+test("le dernier lot de remplacement est contrôlé lui aussi : une notion déjà posée n'y reste pas sous le même angle", async () => {
   const id = await course(30);
   // Chaque lot de remplacement repose une question sur le concept fictif gamma (déjà Q12).
   design = (n, call) => (call >= 6 ? Array.from({ length: n }, (_, i) => item(i === 0 ? `Remplacement ${call}.0 [notion:concept fictif gamma] [angle:encore ${call}] : que dit le cours ?` : `Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`)) : defaultDesign(n, call));
   const { stems } = await exam(id, 20);
   const notions = stems.map(notionIn);
-  assert.equal(new Set(notions).size, notions.length, `aucune notion deux fois :\n${notions.join("\n")}`);
-  assert.equal(notions.filter((n) => n === "concept fictif gamma").length, 1);
+  // Les remplacements ont épuisé la réserve : le nombre acquis (20) est tenu, et la seule notion
+  // reprise l'est par le complément final, sous un angle distinct — jamais la même question.
+  assert.equal(stems.length, 20, notions.join("\n"));
+  const pairs = stems.map((s) => `${notionIn(s)} | ${/\[angle:([^\]]*)\]/.exec(s)?.[1] ?? ""}`);
+  assert.equal(new Set(pairs).size, pairs.length, `aucune question deux fois :\n${pairs.join("\n")}`);
+  assert.ok(notions.filter((n) => n === "concept fictif gamma").length <= 2, notions.join("\n"));
+  assert.ok(new Set(notions).size >= 19, `au plus une notion reprise :\n${notions.join("\n")}`);
 });
 
 test("titres de supports ajoutés faute de notions : ils ne comptent pas comme notions pour décider du mode strict", async () => {
@@ -262,4 +268,12 @@ test("banc du 04/11 (CS-290) : une question qui reprend celle d'un examen préc�
   assert.equal(r.count, 4);
   assert.ok(!stems.some((s) => s.startsWith("Question 3 ")), `la reprise de l'examen précédent est retirée :\n${stems.join("\n")}`);
   assert.match(dedupePrompts[0], /^P\d+\. .*faux positifs des détecteurs/m, "le contrôle reçoit les questions des examens précédents");
+});
+
+test("réserve épuisée : le dédoublonnage ne réduit jamais le nombre déjà acquis", async () => {
+  const id = await course(4, 0);
+  design = (n, call) => Array.from({ length: n }, (_, i) => item(`Question ${call}.${i} [notion:unique] [angle:${call}.${i}] : que dit le cours ?`));
+  const { r, stems, steps } = await exam(id, 4);
+  assert.equal(r.count, 4, steps.filter((s) => /doublon|remplacement/.test(s)).join("\n"));
+  assert.equal(stems.length, 4);
 });

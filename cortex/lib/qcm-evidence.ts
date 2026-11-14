@@ -17,6 +17,11 @@ import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 
 type Question = { topic?: string | null; stem: string; options: string[]; correct: number[]; sourceFact?: string | null };
 
+/** Caractères d'extraits du correcteur : 6 000 par question, entre 24 000 (un lot de 4) et 60 000. */
+const PASSAGES_PER_ITEM = 6_000;
+const PASSAGES_MIN = 24_000;
+const PASSAGES_MAX = 60_000;
+
 /**
  * Extraits que voit le correcteur pour un lot : le fait de chaque question d'abord, ses mots
  * ensuite (énoncé et TOUTES les options : centrer sur la clé orienterait une résolution qui se
@@ -26,7 +31,10 @@ export async function verifierPassages(items: Question[]): Promise<{ src: string
   const facts = items.map((it) => it.sourceFact ?? "");
   const stems = items.map((it) => `${it.stem} ${it.options.join(" ")}`);
   const topics = [...new Set(items.map((it) => it.topic ?? "").filter(Boolean))];
-  return evidencePassages([...facts, ...stems, ...topics], { perQuery: 2, cap: 1800, budget: 24_000 });
+  // Le budget suit la taille du paquet : une vérification groupée de 8 questions garde, par
+  // question, les extraits d'un lot de 4 (moins d'extraits = plus de faux rejets « hors cours »).
+  const budget = Math.min(PASSAGES_MAX, Math.max(PASSAGES_MIN, PASSAGES_PER_ITEM * items.length));
+  return evidencePassages([...facts, ...stems, ...topics], { perQuery: 2, cap: 1800, budget });
 }
 
 /** Une question que le correcteur juge hors cours : `reason`, ce qu'il en dit ; `terms`, ce qu'il dit absent. */
@@ -41,7 +49,7 @@ const SECOND_LOOK_SCHEMA = {
         type: "object",
         properties: {
           index: { type: "integer" },
-          off_course: { type: "string", description: "La notion ou le fait que la question NOMME et que le cours ne présente pas (ou définit autrement), et ce que dit le cours. Vide si les passages le contiennent." },
+          off_course: { type: "string", description: "La notion ou le fait absent du cours dont la bonne réponse ou l'explication DÉPEND, et ce que dit le cours. Vide si les passages permettent de résoudre la question, même avec un synonyme usuel." },
           scope: { type: "string", enum: ["question", "explication"], description: "« explication » si SEULE l'explication ajoute ce qui est hors cours (énoncé, bonne réponse et options fondés sur le cours) ; « question » sinon." },
         },
         required: ["index", "off_course", "scope"],
@@ -108,7 +116,7 @@ export async function secondLookOffCourse(flags: OffCourseFlag[]): Promise<Secon
   ].filter(Boolean).join("\n")).join("\n\n");
   const prompt = [
     `Un premier correcteur, qui ne voyait que de courts extraits du cours, a jugé les questions ci-dessous hors cours. Voici des passages trouvés pour ces notions dans TOUT le cours (par leurs racines : accents, pluriels et flexions compris).`,
-    `Pour chaque question, off_course : la notion ou le fait que la bonne réponse, l'explication ou une option NOMME et que le cours ne présente pas, ou que le cours définit autrement, avec ce que dit le cours. Laisse-le VIDE si les passages contiennent cette notion ou ce fait avec la même définition.`,
+    `Pour chaque question, off_course : la notion ou le fait absent du cours dont la bonne réponse ou l'explication DÉPEND, ou que le cours définit autrement, avec ce que dit le cours. Laisse-le VIDE si les passages permettent de résoudre la question, même si elle emploie un synonyme usuel de la matière.`,
     `Juge sur le FOND, pas sur les mots : une notion que le cours présente sous un autre nom (synonyme, traduction, singulier ou pluriel), une reformulation fidèle, ou la conséquence directe d'une définition ou d'un exemple du cours n'est PAS hors cours, même si la phrase exacte n'y figure pas. Hors cours : un fait, un chiffre, un cadre ou une notion que le cours ne présente nulle part dans ces passages, ou une définition qu'il contredit.`,
     `Une option qui n'est qu'une affirmation fausse (résultat inversé, condition changée, chiffre ou auteur déplacé) n'est pas hors cours : c'est le rôle d'un distracteur.`,
     `scope : « explication » si SEULE l'explication ajoute ce qui est hors cours (l'énoncé, la bonne réponse et les options restent fondés sur les passages) : elle sera réécrite et la question gardée. « question » sinon.`,

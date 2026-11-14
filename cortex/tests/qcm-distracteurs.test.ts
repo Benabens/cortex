@@ -46,6 +46,7 @@ function item(q: number) {
 }
 
 let designCalls = 0;
+let designPrompts: string[] = [];
 let repairCalls = 0;
 let repairPrompts: string[] = [];
 /** Ce que le remplacement simulé propose : par défaut un distracteur de qualité. */
@@ -89,9 +90,11 @@ before(async () => {
       let text = "{}";
       if (/"replacements"/.test(content)) { repairCalls++; repairPrompts.push(content); text = repairReply(content); }
       else if (/"duplicates"/.test(content)) text = JSON.stringify({ notions: [], duplicates: [] });
+      else if (/"offCourse"/.test(content)) text = JSON.stringify({ verdicts: [...content.matchAll(/^Q(\d+)\./gm)].map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })) });
       else if (/"results"/.test(content)) text = verifyReply(content);
       else if (/"items"/.test(content)) {
         designCalls++;
+        designPrompts.push(content);
         const n = Number(/\((\d+) QCM\)/.exec(content)?.[1] ?? 1);
         text = JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(designCalls * 10 + i)) });
       }
@@ -106,7 +109,7 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { designCalls = 0; repairCalls = 0; repairPrompts = []; replacement = NEW_DISTRACTOR; third = ABSURD; scalarKey = false; contestKey = false; nameOnly = false; });
+beforeEach(() => { designCalls = 0; designPrompts = []; repairCalls = 0; repairPrompts = []; replacement = NEW_DISTRACTOR; third = ABSURD; scalarKey = false; contestKey = false; nameOnly = false; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -166,17 +169,47 @@ test("seul défaut = un distracteur trivial : l'option est remplacée, l'énonc�
   assert.doesNotMatch(repairPrompts[0], /"items"|"results"/, "le prompt de remplacement ne porte pas les marqueurs des autres appels");
 });
 
-test("le remplaçant reste trivial à la revérification : seconde réparation puis régénération, jamais de verdict masqué", async () => {
+test("le remplaçant reste trivial à la revérification : une seule réparation groupée puis régénération", async () => {
   replacement = "Une option absurde que tout étudiant élimine encore.";
   const result = await exam(await course(), 4).then((x) => ({ ...x, error: "" }), (e: Error) => ({ r: null, steps: [] as string[], items: [], error: e.message }));
-  assert.ok(repairCalls >= 2, "deux réparations ciblées sont tentées");
+  // Une par ronde (la première + 3 comblements), plus celle de l'audit final.
+  assert.ok(repairCalls <= 5, `une seule réparation groupée par ronde, reçu ${repairCalls}`);
   assert.ok(designCalls > 1, "le défaut persistant déclenche une régénération ou un comblement");
   if (result.r) {
-    assert.ok(result.steps.some((s) => /à régénérer après deux réparations/.test(s)), result.steps.join("\n"));
-    for (const it of result.items) assert.ok(!it.options.some((o) => o.startsWith("Une option absurde")), "aucun verdict trivial n'est masqué dans l'examen livré");
+    assert.ok(result.steps.some((s) => /à régénérer après une réparation/.test(s)), result.steps.join("\n"));
+    // Chaque ronde de comblement a tenté de remplacer les QCM restés triviaux ; faute de mieux après
+    // tout le budget, ils sont livrés (la livraison complète prime, voir plus bas) et comptés triviaux.
+    assert.ok(designCalls > 1 + 2, `comblements ciblés tentés, reçu ${designCalls} conception(s)`);
   } else {
     assert.match(result.error, /contrôles de qualité/, result.error);
   }
+  assert.ok(!result.steps.some((s) => /seconde réparation/.test(s)), result.steps.join("\n"));
+});
+
+test("l'audit final ne masque jamais un distracteur que la vérification a relevé", async () => {
+  const { applyFinalQualityVerdicts } = await import("../lib/qcm");
+  const [kept] = applyFinalQualityVerdicts([{ ...item(1), trivialDistractors: [2], verified: 1 as const }], [{ index: 0, key: true, offCourse: false, trivial: [] }]);
+  assert.deepEqual(kept.trivialDistractors, [2]);
+});
+
+test("la conception calcul et code impose des erreurs plausibles qui exigent le cours", async () => {
+  third = "Une affirmation qui change une condition du cours.";
+  await exam(await course(), 1);
+  const prompt = designPrompts[0] ?? "";
+  // La règle est portée par le système de conception, pas seulement par la réparation.
+  assert.match(prompt || "", /même type|ordre de grandeur|étape intermédiaire|exécution du code/i);
+});
+
+test("la livraison complète prime sur le plafond interne après classement des meilleurs QCM", async () => {
+  const { selectWithinTrivialBudget } = await import("../lib/qcm");
+  const candidate = (stem: string, trivial: number[]) => ({
+    ...item(1), stem, trivialDistractors: trivial.length ? trivial : null, verified: 1 as const,
+  });
+  const picked = selectWithinTrivialBudget([], [
+    candidate("propre 1", []), candidate("propre 2", []), candidate("propre 3", []),
+    candidate("toléré", [1]), candidate("de trop", [2]),
+  ], 5);
+  assert.deepEqual(picked.map((q) => q.stem), ["propre 1", "propre 2", "propre 3", "toléré", "de trop"]);
 });
 
 test("toutes les questions rejetées par les contrôles : l'échec le dit, sans parler de réponse illisible", async () => {
@@ -198,7 +231,7 @@ test("banc du 04/11 : seule une MAUVAISE option nomme une notion hors du cours �
   const { r, steps, items } = await exam(await course(), 4);
   assert.equal(r.count, 4, steps.join("\n"));
   assert.equal(designCalls, 1, "aucune question régénérée ni rejetée");
-  assert.ok(!steps.some((s) => /QCM rejeté — hors cours/.test(s)), steps.join("\n"));
+  assert.ok(!steps.some((s) => /QCM rejeté : hors cours/.test(s)), steps.join("\n"));
   for (const it of items) assert.ok(!it.options.includes(FOREIGN) && it.options.includes(NEW_DISTRACTOR), it.options.join(" | "));
   assert.match(repairPrompts[0], /notion étrangère au cours.*← À REMPLACER/);
 });
