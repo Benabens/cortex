@@ -343,7 +343,11 @@ export async function reconcileStaleJobs(): Promise<number> {
     // eu lieu (spawn échoué, ou réservation impossible dont la mise en erreur a
     // elle-même échoué). Erreur, remboursé si rien n'a coûté ; l'utilisateur relance.
     const neverStarted = !r.pid && attempts === 0;
-    const reservationValid = r.type === "ingest" || await (await import("@/lib/llm/authorization")).reservationExists(r.credit_ref);
+    // Le propriétaire n'a aucune réservation débitée (reserveGeneration ne l'écrit
+    // pas) : même exemption, même critère que la garde centrale du LLM.
+    const reservationValid = r.type === "ingest"
+      || await (await import("@/lib/billing/owner")).isOwner()
+      || await (await import("@/lib/llm/authorization")).reservationExists(r.credit_ref);
     if (attempts < maxAttempts && !neverStarted && reservationValid) {
       const msg = `Worker interrompu, reprise automatique (tentative ${attempts + 1}/${maxAttempts}), progression conservée.`;
       await q.run(
