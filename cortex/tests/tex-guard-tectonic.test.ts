@@ -81,6 +81,9 @@ const VECTORS: Array<{ label: string; body: string; preamble?: string }> = [
   // \filedump exige une longueur ≤ taille du fichier (sinon « read failed », rien de lu).
   { label: "\\filedump (hexadécimal)", body: `\\message{^^J\\filedump length ${TOKEN.length + 1} {${abs("secret.txt")}}^^J}` },
   { label: "\\filedump relatif", body: `\\message{^^J\\filedump length ${TOKEN.length + 1} {${rel("secret.txt")}}^^J}` },
+  // Audit du 14/11/2026, 🔴 1 : le journal d'erreur de TikZ cite le contenu lu.
+  { label: "TikZ plot file", body: `\\tikz\\draw plot file {${abs("secret.txt")}};`, preamble: "\\usepackage{tikz}" },
+  { label: "TikZ \\def\\p{plot} … file", body: `\\def\\p{plot}\\tikz\\draw \\p file {${rel("secret.txt")}};`, preamble: "\\usepackage{tikz}" },
 ];
 
 test("le témoin fonctionne : un \\input LÉGITIME dans le dossier fait apparaître le jeton", { skip: !HAS_TECTONIC && "tectonic absent" }, async () => {

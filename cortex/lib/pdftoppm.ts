@@ -1,0 +1,41 @@
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+
+/**
+ * RENDU DE PAGES PDF EN PNG (pdftoppm), pour les images-étalon et l'index des annales.
+ * Le PDF vient de l'utilisateur : une page géante (jusqu'à 5 m de côté) ou un fichier qui
+ * fait boucler poppler faisait manquer de mémoire le seul conteneur, ou bloquait le worker
+ * (audit du 14/11/2026, 🟠 18). Chaque rendu a donc un délai, tué par SIGKILL, et une
+ * taille plafonnée.
+ */
+
+/**
+ * Côté long d'une page rendue, en pixels. `-scale-to` remplace la résolution (`-r`) : 1 400 px
+ * est la taille d'une page A4 à 120 dpi, celle d'avant le plafond. Plus grand ne sert pas le
+ * modèle de vision et grossirait les images, qui comptent dans le quota du volume.
+ */
+export const PAGE_MAX_PX = 1400;
+const TIMEOUT_MS = 60_000;
+
+/** Un binaire pdftoppm est-il disponible ? */
+export function findPdftoppm(): string | null {
+  for (const bin of ["pdftoppm", "/usr/bin/pdftoppm", "/opt/homebrew/bin/pdftoppm", "/usr/local/bin/pdftoppm"]) {
+    try {
+      execFileSync(bin, ["-v"], { stdio: "ignore", timeout: 10_000 });
+      return bin;
+    } catch {
+      // -v renvoie un code non-zéro sur certaines versions mais le binaire existe → tester existence
+      if (bin.includes("/") && fs.existsSync(bin)) return bin;
+    }
+  }
+  return null;
+}
+
+/** Rend les pages 1 à `lastPage` de `pdf` en `<outPrefix>-<n>.png`. Lève si pdftoppm échoue ou dépasse le délai. */
+export function renderPdfPages(bin: string, pdf: string, outPrefix: string, opts: { lastPage: number; timeoutMs?: number }): void {
+  execFileSync(bin, ["-png", "-scale-to", String(PAGE_MAX_PX), "-f", "1", "-l", String(opts.lastPage), pdf, outPrefix], {
+    stdio: "ignore",
+    timeout: opts.timeoutMs ?? TIMEOUT_MS,
+    killSignal: "SIGKILL",
+  });
+}

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateCourseRow, type CoursePatch } from "@/db/courses-store";
-import { InvalidCourseError, declaredFormatColumn, parseTeachers } from "@/lib/course-create";
+import { InvalidCourseError, declaredFormatColumn, noTexCommand, parseTeachers } from "@/lib/course-create";
 import { ensureCoursesLoaded, listCoursesOf, ownsCourse, reloadCourses } from "@/lib/courses";
 import { toDto } from "@/lib/course-dto";
 import { useUser } from "@/lib/req";
@@ -28,6 +28,7 @@ function patchOf(body: Record<string, unknown>): CoursePatch {
   const text = (v: unknown, max: number, field: string): string => {
     if (typeof v !== "string") throw new InvalidCourseError(`Le champ « ${field} » doit être du texte.`);
     const s = v.trim().replace(/\s+/g, " ");
+    noTexCommand(s, `Le champ « ${field} »`);
     if (s.length > max) throw new InvalidCourseError(`Le champ « ${field} » dépasse ${max} caractères.`);
     return s;
   };
