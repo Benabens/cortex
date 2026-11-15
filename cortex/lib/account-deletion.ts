@@ -190,6 +190,7 @@ export async function deleteAccount(userId: string, deps: DeletionDeps = {}): Pr
     // (Un remboursement Stripe postérieur ne trouvera plus d'achat à reprendre :
     // le compte n'existe plus, il n'y a plus de solde à reprendre.)
     await authRun(`DELETE FROM active_jobs WHERE user_id = ?`, userId);
+    await authRun(`DELETE FROM job_queue WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM stripe_purchases WHERE user_id = ?`, userId);
     // Abonnement et factures : l'abonnement Stripe lui-même est résilié par le
     // propriétaire depuis le tableau de bord (le portail n'est plus accessible sans compte).
