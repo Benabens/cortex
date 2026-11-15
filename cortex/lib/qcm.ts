@@ -6,7 +6,7 @@ import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseNumbers, absentCourseTerms, corpusWindows, coursePassages, factNumbers, topicsInScope } from "@/lib/course-grounding";
 import { rewriteExplanations, rewriteExplanationsOnOptions, secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
-import { capDrops, describeExplanationIssue, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, optionHead } from "@/lib/qcm-checks";
+import { bestNotionMatch, capDrops, describeExplanationIssue, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, keyProposition, notionBase, notionCap, notionMismatch, optionHead, sameProposition, ultimateAuditActions } from "@/lib/qcm-checks";
 import { assignChapters, spreadOverChapters, variants } from "@/lib/coverage";
 import { normalize, tokenize } from "@/lib/text";
 import { courseRefImages } from "@/lib/course-vision";
@@ -826,7 +826,7 @@ export async function generateQcmBatch(
     ``,
     coverage,
     opts.previousStems?.length
-      ? `Déjà posées dans les examens précédents de ce cours (ne reprends ni leur énoncé, ni le fait qu'elles testent) :\n${opts.previousStems.slice(0, 15).map((x) => `  · ${sanitizeCorpus(x).slice(0, 140)}`).join("\n")}`
+      ? `Déjà posées dans les examens précédents de ce cours (ne reprends ni leur énoncé, ni le fait qu'elles testent) :\n${opts.previousStems.slice(0, 30).map((x) => `  · ${sanitizeCorpus(x).slice(0, 140)}`).join("\n")}`
       : null,
     opts.examTopics?.length
       ? `Les autres questions de l'examen portent sur : ${[...new Set(opts.examTopics)].map((t) => sanitizeCorpus(t).slice(0, 80)).join(" · ")}. Ne réutilise ni leur fonction, ni leurs données, ni leur scénario : chaque question doit rester indépendante.`
@@ -1219,12 +1219,15 @@ const DUP_SCHEMA = {
 
 /**
  * Paires à soumettre nommément au contrôle des doublons, repérées sans modèle : même notion du
- * programme, ou réponses croisées (la bonne réponse de chacune est une option de l'autre — job 23 :
- * « la réalité partagée » et « la confiance », clé de l'une et distracteur de l'autre). Au plus 30.
+ * programme, réponses croisées (la bonne réponse de chacune est une option de l'autre — job 23 :
+ * « la réalité partagée » et « la confiance », clé de l'une et distracteur de l'autre), ou bonnes
+ * réponses qui affirment le même fait sous un autre libellé de notion (job 25 : Q10/Q15, Q17/Q20,
+ * que `keyNotion` seul ne rapprochait pas). Au plus 30.
  */
 export function suspectPairs(items: Pick<QcmItem, "options" | "correct" | "notion" | "focusSlot">[]): [number, number][] {
   const heads = items.map((it) => new Set(it.options.map((o) => optionHead(o, it.options)).filter((h): h is string => !!h)));
   const keys = items.map((it) => keyNotion(it));
+  const props = items.map((it) => keyProposition(it));
   const out: [number, number][] = [];
   for (let i = 0; i < items.length && out.length < 30; i++) {
     for (let j = i + 1; j < items.length && out.length < 30; j++) {
@@ -1232,7 +1235,8 @@ export function suspectPairs(items: Pick<QcmItem, "options" | "correct" | "notio
       const sameNotion = !!items[i].notion && !!items[j].notion && notionBase(items[i].notion!) === notionBase(items[j].notion!);
       // Croisées dans les deux sens : la même distinction posée d'un côté puis de l'autre.
       const crossed = !!keys[i] && !!keys[j] && heads[j].has(keys[i]!) && heads[i].has(keys[j]!);
-      if (sameNotion || crossed) out.push([i, j]);
+      const sameFact = !!props[i] && !!props[j] && sameProposition(props[i]!, props[j]!);
+      if (sameNotion || crossed || sameFact) out.push([i, j]);
     }
   }
   return out;
@@ -1274,7 +1278,7 @@ async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previou
       criterion,
       `Puis liste les paires en doublon selon ce critère. Compare d'abord les BONNES RÉPONSES : deux questions dont la bonne réponse est la même notion, ou qui se réussissent par le même raisonnement (la même règle, la même distinction posée dans un sens puis dans l'autre), sont des doublons ; partager des distracteurs ne suffit pas. Compare aussi l'énoncé, les options, le fait source et l'explication : recycler le même cas ou le même fait dans une autre option reste un doublon, de même que deux scénarios différents qui vérifient la même règle (regle identique). Deux notions voisines mais distinctes ne sont pas un doublon.`,
       ...(suspects.length ? [`Paires à trancher en priorité (même notion du programme ou réponses croisées), à lister en doublon si elles testent la même chose : ${suspects.map(([a, b]) => `Q${a}–Q${b}`).join(", ")}.`] : []),
-      ...(previous ? [`Liste aussi, dans "repeats", les QCM qui reprennent une question des EXAMENS PRÉCÉDENTS du cours (P…) : même notion ET même angle, même reformulée.`] : []),
+      ...(previous ? [`Liste aussi, dans "repeats", les QCM qui reprennent une question des EXAMENS PRÉCÉDENTS du cours (P…) : même fait, même règle ou même réponse logique, même si la notion, l'angle ou le décor sont reformulés.`] : []),
       ``,
       list,
       ...(previous ? [``, `QUESTIONS DES EXAMENS PRÉCÉDENTS :`, previous] : []),
@@ -2169,6 +2173,20 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       });
       step(`Contrôle final : ${flagged.length} explication(s) réfutant des options absentes ou trop nombreuses → ${fixed} réécrite(s) sur les options réelles${trimmed ? `, ${trimmed} réduite(s) à la justification de la clé` : ""}`, 81);
     }
+    // 5. L'étiquette de notion a-t-elle un appui lexical dans ce que la question teste (fait source,
+    // bonne réponse, explication) ? Sans appel au modèle : recalée sur le libellé du programme le
+    // plus proche (job 25, Q5 : étiquetée hors sujet, les points faibles de l'étudiant en souffrent).
+    // L'accent demandé par l'étudiant garde son étiquette, choisie par lui, pas par le programme.
+    const programmeLabels = [...new Set([...cov, ...covAll].map((t) => t.label))];
+    let relabeled = 0;
+    for (const it of all) {
+      if (it.focusSlot || !it.notion) continue;
+      const tested = [it.sourceFact, it.explanation, it.options[it.correct[0] ?? -1]].filter(Boolean).join(" ");
+      if (!tested.trim() || !notionMismatch(it.notion, tested)) continue;
+      const best = bestNotionMatch(tested, programmeLabels);
+      if (best && notionBase(best) !== notionBase(it.notion)) { it.notion = best; relabeled++; }
+    }
+    if (relabeled) step(`Contrôle final : ${relabeled} étiquette(s) de notion recalée(s) sur le passage source de la clé`, 81);
   };
   // COMPLÉMENT FINAL — encore en dessous du nombre demandé (réserve épuisée, doublons retirés,
   // rejets répétés) : plusieurs rondes, dans ce qui reste du budget global de lots. Les notions de réserve
@@ -2241,6 +2259,57 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     await exitGate();
     if (pass > 0 || all.length >= count || lateBudget <= 0 || hardStop()) break;
     await complement();
+  }
+  // Ultime regard sur la version réellement livrée : une passe globale, une réparation au plus,
+  // puis un réaudit des seules questions modifiées. Un ensemble qui a déjà franchi la porte de
+  // sortie avant une coupure (point de reprise `final`) ne la repasse pas : sinon une reprise
+  // sans aucun appel au modèle en refaisait deux (audit, doublons) à chaque redémarrage. Même
+  // dans un run sans coupure, seules les questions pas encore vues par un audit final (ajoutées
+  // après la porte de sortie, ou jamais passées par elle) sont réauditées ici : les autres l'ont
+  // déjà franchie, les réauditer une seconde fois ferait tomber sous un verdict différent une
+  // question déjà acquise, sans le filet de rattrapage de la porte de sortie.
+  if (!ckFinal && all.length) {
+    const late = all.filter((it) => !auditedStems.has(it.stem));
+    if (late.length) {
+      late.forEach((it) => auditedStems.add(it.stem));
+      const audited = await finalQualityAudit(late, step);
+      const actions = ultimateAuditActions(late, audited);
+      const rejected = new Set(actions.drop.map((i) => late[i].stem));
+      const auditedByStem = new Map(audited.map((it) => [it.stem, it]));
+      all.splice(0, all.length, ...all.filter((it) => !rejected.has(it.stem)).map((it) => auditedByStem.get(it.stem) ?? it));
+      const repair = actions.repair.map((i) => audited.find((x) => x.stem === late[i].stem)!).filter(Boolean);
+      if (repair.length) {
+        const repaired = await replaceTrivialDistractorsBatch(repair, step, shared.language).catch(() => repair);
+        const changed = repaired.filter((it, i) => it !== repair[i]);
+        const passed = new Map((await finalQualityAudit(changed, step)).filter((it) => !it.trivialDistractors?.length).map((it) => [it.stem, it]));
+        for (const old of repair) {
+          const i = all.findIndex((it) => it.stem === old.stem);
+          if (i < 0) continue;
+          const candidate = repaired[repair.indexOf(old)];
+          const good = passed.get(candidate.stem);
+          if (good) all[i] = good;
+          else all.splice(i, 1);
+        }
+      }
+      const { drop, repeats }: { drop: number[]; repeats: number[] } = all.length >= 2 ? await findDuplicates(all, strict) : { drop: [], repeats: [] };
+      repeats.forEach((i) => { if (all[i]) historicalRepeats.add(all[i].stem); });
+      if (drop.length) all.splice(0, all.length, ...all.filter((_, i) => !drop.includes(i)));
+    }
+    // Cette ultime passe peut écarter une question (doublon, clé contestée, distracteur
+    // irréparable) : le nombre demandé reste tenu, comme partout ailleurs dans ce job — un
+    // complément la recomble (son propre contrôle des doublons voit le reste de l'examen).
+    // Les QCM ainsi ajoutés n'ont, eux, jamais traversé la porte de sortie : une seule passe
+    // supplémentaire (plafonds, options en double, vérification, explications) les y soumet.
+    // Un retrait à cette passe est recomblé une dernière fois (le manque reste tenu), sans
+    // repasser la passe elle-même : l'audit est borné à ce tour unique.
+    if (all.length < count && all.length && lateBudget > 0 && !hardStop()) {
+      const before = all.length;
+      await complement();
+      if (all.length > before) {
+        await exitGate();
+        if (all.length < count && all.length && lateBudget > 0 && !hardStop()) await complement();
+      }
+    }
   }
   // Aucun appel en erreur mais tous les items écartés (mal formés) : c'est une réponse inutilisable.
   const cause = () => lastError ?? new LlmError("Toutes les questions reçues étaient mal formées.", "BAD_OUTPUT");
