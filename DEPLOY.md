@@ -830,6 +830,12 @@ quotidiens (`DAILY_GEN_QUOTA`, `DAILY_ASSIST_QUOTA`).
       atteint, il coupe la génération pour tout le monde jusqu'au mois suivant,
       ou jusqu'à ce qu'on le relève. Dépense du mois : requête du § 7.
       (`SPEND_CAP_PER_USER_USD`, lui, est par compte et par jour.)
+- [ ] `SPEND_CAP_PER_USER_USD=15` en prod (ou variable absente : 15 par défaut).
+      Le compte propriétaire en est exempté par le code depuis la PR « limites
+      d'usage » : si la valeur avait été relevée pour lui, la remettre à 15. Il
+      reste soumis au fusible global `SPEND_CAP_USD`. Les étudiants voient leurs
+      limites dans **Mon compte › Mon usage** et à côté de chaque bouton de
+      génération (`GET /api/usage`), jamais en dollars.
 - [ ] `RESEND_API_KEY` posée, et `CORTEX_OWNER_EMAIL` ou `PUBLISHER_EMAIL` :
       sans elles, ni les alertes de dépense à 80 % et 100 %, ni celles du rappel
       de reconduction ne partent. Au démarrage, les logs ne doivent montrer ni

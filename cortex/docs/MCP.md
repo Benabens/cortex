@@ -123,10 +123,17 @@ confirmation, dans `startGenerationJob` : un refus à ce stade ne débite rien.
 **Compte du propriétaire** (`CORTEX_OWNER_EMAIL`, ou `CORTEX_OWNER_USER_ID`) : rien n'est débité ni compté
 contre lui, dans l'app comme ici (`lib/billing/owner.ts`, un seul point de décision consulté par la
 réservation et les pré-contrôles ; `dailyLimit` pour l'affichage). Son devis annonce donc 0 crédit et
-aucun quota, et la confirmation reste demandée. Restent actifs pour lui : les plafonds de **dépense**
-réelle (`SPEND_CAP_USD` du mois, `SPEND_CAP_PER_USER_USD` du jour — sans ce dernier, une boucle d'agent
-ou un jeton volé sur son compte épuiserait le plafond global et couperait la génération de tous), la
+aucun quota, et la confirmation reste demandée. Il est aussi exempt du fusible du jour par compte
+(`SPEND_CAP_PER_USER_USD`, décision du 15/11). Restent actifs pour lui : le fusible global de **dépense**
+réelle (`SPEND_CAP_USD` du mois, qui borne aussi une boucle d'agent ou un jeton volé sur son compte), la
 limite par compte du point MCP, l'enregistrement des coûts dans `llm_usage` et le quota de stockage.
+
+**Limites d'usage** : `get_account_status` renvoie `usage_limits`, calculé par la même fonction que
+la page « Mon usage » et que la réservation (`lib/billing/limits` `getUsageLimits`) : pour chaque type
+de génération, combien il en reste, la limite qui borne et sa remise à zéro ; et chaque limite
+(utilisé, plafond, restant, unité, remise à zéro). Jamais de montant en dollars. Les outils payants
+refusent AVANT le devis et avant tout job, avec le message que l'app afficherait ; le devis ajoute
+« Après celle-ci, il te restera… ».
 Sans variable de propriétaire, personne n'est exempté.
 
 ### Ajout de cours et de supports (portée `cortex.write`, tous les comptes)
