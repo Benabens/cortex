@@ -4,7 +4,7 @@ import type { ObjectBucket, S3Object } from "../../lib/storage/bucket";
 
 /**
  * Faux seau S3 en mémoire : une Map clé → {corps, date, type}. `clock` pilote
- * LastModified (défaut : l'heure réelle, comme un vrai seau) ; `calls` trace les opérations (les tests comptent les envois).
+ * LastModified (défaut : l'heure réelle, tronquée à la seconde comme un vrai seau) ; `calls` trace les opérations (les tests comptent les envois).
  * Un objet absent lève une erreur NoSuchKey, comme le SDK.
  */
 export function fakeBucket(clock?: { now: Date }) {
@@ -17,7 +17,9 @@ export function fakeBucket(clock?: { now: Date }) {
       bodies.push(Buffer.isBuffer(body) ? "buffer" : "file");
       const bytes = Buffer.isBuffer(body) ? Buffer.from(body) : fs.readFileSync(body.path);
       if (!Buffer.isBuffer(body) && bytes.length !== body.size) throw new Error("taille annoncée ≠ taille réelle");
-      objects.set(key, { body: bytes, at: clock ? new Date(clock.now) : new Date(), contentType });
+      const at = clock ? new Date(clock.now) : new Date();
+      at.setMilliseconds(0); // comme S3 : LastModified à la seconde
+      objects.set(key, { body: bytes, at, contentType });
       calls.push(`put ${key}`);
     },
     async list(prefix) {

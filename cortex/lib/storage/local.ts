@@ -4,6 +4,9 @@ import type { CourseFiles, FileEntry, FileStat, ServeOptions } from "@/lib/stora
 import { serveLocalFile } from "@/lib/storage/http";
 
 /** Fichiers sous `dir`, récursivement, sans suivre les liens symboliques. */
+/** Jamais des données de cours : un contenu de cours tiré d'un dépôt peut en contenir. */
+const NEVER_WALKED = new Set(["node_modules", ".git", ".next"]);
+
 export function walkFiles(dir: string): FileEntry[] {
   const out: FileEntry[] = [];
   const stack = [dir];
@@ -13,7 +16,7 @@ export function walkFiles(dir: string): FileEntry[] {
     try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { continue; }
     for (const e of entries) {
       const p = path.join(d, e.name);
-      if (e.isDirectory()) stack.push(p);
+      if (e.isDirectory()) { if (!NEVER_WALKED.has(e.name)) stack.push(p); }
       else if (e.isFile()) {
         try { const s = fs.statSync(p); out.push({ path: p, size: s.size, mtimeMs: s.mtimeMs }); } catch { /* disparu entre-temps */ }
       }
