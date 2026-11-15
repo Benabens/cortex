@@ -99,6 +99,12 @@ const LEADING = /^(?:(?:et|ou|ni|or|nor|and)\s+(?:encore\s+)?|soit\s+(?:parce\s+
 /** « confondent ce concept avec… » : la tournure qui précède le premier distracteur nommé. */
 const CONFUSES = /^(?:confond\p{L}*|assimil\p{L}*|mélang\p{L}*|rapproch\p{L}*|confus\p{L}*)\s+[^,()]{0,60}?\s+(?:avec|à|with)\s+/iu;
 
+/**
+ * « évoquent l'automatisation… », « parlent d'une satire… » : un verbe de renvoi en tête d'un
+ * élément d'énumération (job 25, Q6/Q7) ; il ne désigne rien par lui-même, seul ce qui suit compte.
+ */
+const VERB_LEAD = /^(?:évoqu\p{L}*|mentionn\p{L}*|décri\p{L}*|parl\p{L}*(?:\s+de)?|renvoi\p{L}*(?:\s+à)?|correspond\p{L}*(?:\s+à)?|port\p{L}*(?:\s+sur)?|concern\p{L}*|relev\p{L}*(?:\s+de)?|cit\p{L}*)\s+/iu;
+
 /** Les éléments que l'explication réfute, dans l'ordre (un par distracteur dans une explication saine). */
 export function refutedItems(explanation: string): string[] {
   const out: string[] = [];
@@ -107,7 +113,20 @@ export function refutedItems(explanation: string): string[] {
     if (ONE_OPTION.test(s)) { out.push(s); continue; }
     const anchors = GROUP_ANCHORS.map((re) => re.exec(s)).filter((m): m is RegExpExecArray => !!m).sort((a, b) => a.index - b.index);
     const a = anchors[0];
-    if (!a) continue;
+    if (!a) {
+      // « Il ne s'agit ni d'un X ni d'une Y, ni d'un Z » : au moins deux « ni », sans aucune autre
+      // amorce (« les autres options »…), ouvrent chacun un élément entier (job 25, Q8).
+      const niMatches = [...s.matchAll(/\bni\b/giu)];
+      if (niMatches.length < 2) continue;
+      const rest = s.slice(niMatches[0].index).replace(/[.!?]+$/u, "");
+      const pieces = splitTopLevel(rest, /^(?:,\s*|;\s*|\s*\bni\s+)/iu);
+      for (const raw of pieces) {
+        const lead = raw.replace(LEADING, "").replace(VERB_LEAD, "").trim();
+        if (!lead || SUMMARY.test(lead) || contentRoots(lead).size < 1) continue;
+        out.push(lead);
+      }
+      continue;
+    }
     let rest = s.slice(a.index + a[0].length).replace(/[.!?]+$/u, "");
     // « … des notions voisines : X, Y, ou Z » : la liste suit les deux-points.
     const colon = splitTopLevel(rest, /^\s:\s/);
@@ -117,16 +136,19 @@ export function refutedItems(explanation: string): string[] {
     if ((rest.match(/\bsoit\b/giu) ?? []).length >= 2) {
       const list = rest.slice(/\bsoit\b/iu.exec(rest)?.index ?? 0);
       const soit = splitTopLevel(list, /^,?\s*\bsoit\s+(?:parce\s+qu['’]\s*|parce\s+que\s+|que\s+)?/iu);
-      out.push(...soit.filter((p) => contentRoots(p).size >= 1));
+      out.push(...soit.map((p) => p.replace(VERB_LEAD, "").trim()).filter((p) => !SUMMARY.test(p) && contentRoots(p).size >= 1));
       continue;
     }
-    const pieces = splitTopLevel(rest, /^(?:,\s*|;\s*|\s+ni\s+)/iu);
+    // « les autres options évoquent X ou Y, ni Z » : « ou » et « ni » ouvrent chacun un élément
+    // au même titre qu'une virgule (job 25, Q6/Q9 : deux notions liées par « ou » comptaient pour une).
+    const pieces = splitTopLevel(rest, /^(?:,\s*|;\s*|\s+ni\s+|\s+ou\s+)/iu);
     const items: string[] = [];
     for (const raw of pieces) {
       const lead = raw.replace(LEADING, "");
-      // « confondent ce mécanisme avec le biais de négativité » : le distracteur suit « avec ».
-      const p = lead.replace(CONFUSES, "").trim();
-      if (!p) continue;
+      // « confondent ce mécanisme avec le biais de négativité » : le distracteur suit « avec » ;
+      // « évoquent l'automatisation » : le verbe de renvoi ne désigne rien par lui-même.
+      const p = lead.replace(CONFUSES, "").replace(VERB_LEAD, "").trim();
+      if (!p || SUMMARY.test(p)) continue;
       // « …, ou que la définition exige… » : coordonné, c'est un nouvel élément même s'il commence par « que ».
       const coordinated = lead.length < raw.trim().length;
       if (items.length && !coordinated && (CONTINUES.test(p) || contentRoots(p).size < 2)) { items[items.length - 1] += `, ${p}`; continue; }
@@ -266,6 +288,69 @@ export function duplicateOptionIndices(options: string[], correct: number[]): nu
 export function keyNotion(it: { options: string[]; correct: number[] }): string | null {
   if (it.correct.length !== 1) return null;
   return optionHead(it.options[it.correct[0]] ?? "", it.options);
+}
+
+/**
+ * Les racines de ce que la bonne réponse AFFIRME, texte entier (pas seulement sa tête de notion,
+ * que `keyNotion` ne détecte pas toujours — job 25, Q17/Q20 : « Le nudge rend une option plus
+ * attractive sans restreindre le choix », une phrase sans la ponctuation qu'exige `optionHead`).
+ * null pour une MCQ ou une bonne réponse trop courte pour juger.
+ */
+export function keyProposition(it: { options: string[]; correct: number[] }): Set<string> | null {
+  if (it.correct.length !== 1) return null;
+  const roots = contentRoots(it.options[it.correct[0]] ?? "");
+  return roots.size >= 3 ? roots : null;
+}
+
+/** Chevauchement de deux ensembles de racines, rapporté au plus petit : 1 si l'un couvre l'autre. */
+function overlapRatio(a: Set<string>, b: Set<string>): number {
+  const [small, big] = a.size <= b.size ? [a, b] : [b, a];
+  if (!small.size) return 0;
+  let shared = 0;
+  for (const r of small) if (big.has(r)) shared++;
+  return shared / small.size;
+}
+
+/**
+ * Deux bonnes réponses qui affirment le MÊME fait, même reformulé (job 25, Q10/Q15 : « les leaders
+ * utilisent les réseaux sociaux… » deux fois ; Q17/Q20 : la définition du nudge). Un recouvrement
+ * élevé plutôt qu'une égalité stricte, pour survivre à la reformulation ; le seuil reste haut pour
+ * ne pas confondre deux faits voisins mais distincts.
+ */
+export function sameProposition(a: Set<string>, b: Set<string>): boolean {
+  return overlapRatio(a, b) >= 0.7;
+}
+
+/**
+ * L'étiquette de notion n'a AUCUN appui lexical dans ce que la question teste réellement (l'énoncé,
+ * la bonne réponse, le fait source et l'explication) : elle alimente les points faibles de
+ * l'étudiant sur la mauvaise notion (job 25, Q5 : étiquetée « Économie de l'IA et concentration du
+ * marché » pour une question sur la désinformation et la vérification). Une étiquette sans mot
+ * propre (trop générale pour juger) n'est jamais signalée.
+ */
+export function notionMismatch(notion: string, tested: string): boolean {
+  const own = contentRoots(notion);
+  if (own.size < 2) return false;
+  const tr = contentRoots(tested);
+  return ![...own].some((r) => tr.has(r));
+}
+
+/**
+ * La notion du programme dont le libellé a le plus d'appui lexical dans `tested`, pour recaler une
+ * étiquette signalée par `notionMismatch` sans appel au modèle. null si aucune ne fait mieux que
+ * zéro mot commun.
+ */
+export function bestNotionMatch(tested: string, candidates: string[]): string | null {
+  const tr = contentRoots(tested);
+  if (!tr.size) return null;
+  let best: { label: string; score: number } | null = null;
+  for (const label of candidates) {
+    const own = contentRoots(label);
+    if (own.size < 2) continue;
+    const score = [...own].filter((r) => tr.has(r)).length;
+    if (score > 0 && (!best || score > best.score)) best = { label, score };
+  }
+  return best?.label ?? null;
 }
 
 /**

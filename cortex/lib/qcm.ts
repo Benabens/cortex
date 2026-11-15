@@ -6,7 +6,7 @@ import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseNumbers, absentCourseTerms, corpusWindows, coursePassages, factNumbers, topicsInScope } from "@/lib/course-grounding";
 import { rewriteExplanations, rewriteExplanationsOnOptions, secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
-import { capDrops, describeExplanationIssue, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, optionHead } from "@/lib/qcm-checks";
+import { bestNotionMatch, capDrops, describeExplanationIssue, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, keyProposition, notionBase, notionCap, notionMismatch, optionHead, sameProposition } from "@/lib/qcm-checks";
 import { assignChapters, spreadOverChapters, variants } from "@/lib/coverage";
 import { normalize, tokenize } from "@/lib/text";
 import { courseRefImages } from "@/lib/course-vision";
@@ -1211,12 +1211,15 @@ const DUP_SCHEMA = {
 
 /**
  * Paires à soumettre nommément au contrôle des doublons, repérées sans modèle : même notion du
- * programme, ou réponses croisées (la bonne réponse de chacune est une option de l'autre — job 23 :
- * « la réalité partagée » et « la confiance », clé de l'une et distracteur de l'autre). Au plus 30.
+ * programme, réponses croisées (la bonne réponse de chacune est une option de l'autre — job 23 :
+ * « la réalité partagée » et « la confiance », clé de l'une et distracteur de l'autre), ou bonnes
+ * réponses qui affirment le même fait sous un autre libellé de notion (job 25 : Q10/Q15, Q17/Q20,
+ * que `keyNotion` seul ne rapprochait pas). Au plus 30.
  */
 export function suspectPairs(items: Pick<QcmItem, "options" | "correct" | "notion" | "focusSlot">[]): [number, number][] {
   const heads = items.map((it) => new Set(it.options.map((o) => optionHead(o, it.options)).filter((h): h is string => !!h)));
   const keys = items.map((it) => keyNotion(it));
+  const props = items.map((it) => keyProposition(it));
   const out: [number, number][] = [];
   for (let i = 0; i < items.length && out.length < 30; i++) {
     for (let j = i + 1; j < items.length && out.length < 30; j++) {
@@ -1224,7 +1227,8 @@ export function suspectPairs(items: Pick<QcmItem, "options" | "correct" | "notio
       const sameNotion = !!items[i].notion && !!items[j].notion && notionBase(items[i].notion!) === notionBase(items[j].notion!);
       // Croisées dans les deux sens : la même distinction posée d'un côté puis de l'autre.
       const crossed = !!keys[i] && !!keys[j] && heads[j].has(keys[i]!) && heads[i].has(keys[j]!);
-      if (sameNotion || crossed) out.push([i, j]);
+      const sameFact = !!props[i] && !!props[j] && sameProposition(props[i]!, props[j]!);
+      if (sameNotion || crossed || sameFact) out.push([i, j]);
     }
   }
   return out;
@@ -2065,6 +2069,20 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       });
       step(`Contrôle final : ${flagged.length} explication(s) réfutant des options absentes ou trop nombreuses → ${fixed} réécrite(s) sur les options réelles${trimmed ? `, ${trimmed} réduite(s) à la justification de la clé` : ""}`, 81);
     }
+    // 5. L'étiquette de notion a-t-elle un appui lexical dans ce que la question teste (fait source,
+    // bonne réponse, explication) ? Sans appel au modèle : recalée sur le libellé du programme le
+    // plus proche (job 25, Q5 : étiquetée hors sujet, les points faibles de l'étudiant en souffrent).
+    // L'accent demandé par l'étudiant garde son étiquette, choisie par lui, pas par le programme.
+    const programmeLabels = [...new Set([...cov, ...covAll].map((t) => t.label))];
+    let relabeled = 0;
+    for (const it of all) {
+      if (it.focusSlot || !it.notion) continue;
+      const tested = [it.sourceFact, it.explanation, it.options[it.correct[0] ?? -1]].filter(Boolean).join(" ");
+      if (!tested.trim() || !notionMismatch(it.notion, tested)) continue;
+      const best = bestNotionMatch(tested, programmeLabels);
+      if (best && notionBase(best) !== notionBase(it.notion)) { it.notion = best; relabeled++; }
+    }
+    if (relabeled) step(`Contrôle final : ${relabeled} étiquette(s) de notion recalée(s) sur le passage source de la clé`, 81);
   };
   // COMPLÉMENT FINAL — encore en dessous du nombre demandé (réserve épuisée, doublons retirés,
   // rejets répétés) : plusieurs rondes, dans ce qui reste du budget global de lots. Les notions de réserve
