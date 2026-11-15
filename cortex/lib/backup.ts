@@ -174,8 +174,9 @@ export async function createBackup(opts: CreateBackupOptions): Promise<CreateBac
   // NB : on inclut VOLONTAIREMENT les WAL/SHM SQLite. Contrairement à git (qui
   // les ignore), un backup doit capturer l'état EXACT : le WAL contient les
   // écritures récentes non encore fusionnées dans le .db — les exclure perdrait
-  // des données. Seul le dossier de backup lui-même est exclu (anti-récursion).
-  const excluded: string[] = [];
+  // des données. Exclus : le dossier de backup lui-même (anti-récursion) et le
+  // cache des images de pages (lib/page-cache : rendu de nouveau à la demande).
+  const excluded: string[] = ["./.page-cache"]; // = PAGE_CACHE_DIR, littéral : ce module n'importe que node:*
   if (isInside(dataDir, opts.backupDir)) {
     excluded.push(`./${path.relative(dataDir, path.resolve(opts.backupDir))}`);
   }

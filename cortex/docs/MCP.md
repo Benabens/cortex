@@ -134,7 +134,7 @@ Sans variable de propriétaire, personne n'est exempté.
 Proposée à **tout** compte à l'écran de consentement (case « Ajouter des cours et des supports », cochée
 par défaut et décochable comme « Générer »). Sans elle, ces outils répondent `403 insufficient_scope`.
 Mêmes règles que l'app : créer un cours et ranger un support sont gratuits, mais comptent dans le quota de
-stockage (200 Mo par défaut). L'app n'a ni limite de nombre de cours ni paywall sur ces deux gestes. La
+stockage (150 Mo par défaut pour un compte gratuit, davantage avec les achats). L'app n'a ni limite de nombre de cours ni paywall sur ces deux gestes. La
 préparation coûte ses crédits habituels (`prepare` = 2) et une génération du quota du jour, annoncés puis
 confirmés comme `generate_mock_exam` ; elle exige donc aussi `cortex.generate`. Le compte du propriétaire
 garde son seul privilège : rien ne lui est débité ni compté (devis à 0 crédit). Pas d'outil de suppression.

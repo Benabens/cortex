@@ -114,8 +114,11 @@ RESEND_API_KEY=⟨re_… (étape 6)⟩
 AUTH_EMAIL_FROM=Cortex <⟨adresse du domaine vérifié⟩>
 
 # — garde-fous de coût (OBLIGATOIRES) —
-# Plafond global du MOIS calendaire (UTC), remis à zéro le 1er.
-SPEND_CAP_USD=25
+# Fusible global du MOIS calendaire (UTC), remis à zéro le 1er, propriétaire
+# compris : c'est lui qui borne la consommation des crédits ACHETÉS (toujours
+# servis). La dépense des crédits offerts suit en plus le revenu encaissé
+# (SPEND_CAP_BASE_USD + marge × revenu). Pose-le au plafond de la console Anthropic.
+SPEND_CAP_USD=⟨plafond mensuel de la console Anthropic, en $⟩
 DAILY_GEN_QUOTA=3
 DAILY_ASSIST_QUOTA=20
 RATE_LIMIT_PER_MIN=120
@@ -150,8 +153,13 @@ LEGAL_TERMS_VERSION=2026-10
 # CORTEX_OWNER_EMAIL, les alertes de dépense et celles du rappel de reconduction).
 PUBLISHER_EMAIL=⟨ton adresse⟩
 
-# — stockage : quota par compte (Mo) sur le volume, + refus sous 10 % d'espace libre —
-STORAGE_QUOTA_MB=200
+# — stockage : quota par compte lié au revenu (base gratuite, + 100 Mo par $ net,
+#   plafond 3 Go, borné par le volume), + refus sous 10 % d'espace libre —
+STORAGE_QUOTA_MB=150
+
+# — budget IA lié au revenu (cortex/.env.example § « Budget IA ») : défauts
+#   AI_BUDGET_MARGIN=0.6, SPEND_CAP_BASE_USD=20 ; rien à poser pour les appliquer.
+#   Après le premier déploiement : npm run billing:backfill (dry-run), puis --write.
 
 # — sauvegardes quotidiennes hors site (S3-compatible : R2, B2, MinIO…) —
 BACKUP_S3_ENDPOINT=https://⟨account⟩.r2.cloudflarestorage.com
@@ -310,7 +318,8 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
 - **Mesure avant de fixer les prix** : `npm run cost:report` (dans le
   conteneur ou avec `DATABASE_URL`) sort le coût réel moyen/max par type de
   job et par appel d'assistance depuis `llm_usage`, face au prix en crédits
-  (`CREDIT_PRICE_CHF`, `CHF_PER_USD`).
+  (revenu net d'un crédit `CREDIT_NET_USD`, prix minimal à la marge
+  `AI_BUDGET_MARGIN`). En lecture seule : aucune écriture, aucune migration.
 - Garde-fous : une génération n'existe qu'après une **réservation atomique**
   (solde, quota du jour, rafale, `MAX_ACTIVE_JOBS` = 2 générations
   simultanées par compte) ; un job échoué (rien livré) est remboursé en
