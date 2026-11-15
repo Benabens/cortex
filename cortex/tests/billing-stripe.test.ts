@@ -151,7 +151,9 @@ test("checkout : aucun moyen de paiement figé par le code, c'est le tableau de 
   }
   // La route envoie ces paramètres tels quels : rien n'y est ajouté après coup.
   const route = fs.readFileSync(path.join(__dirname, "..", "app", "api", "billing", "checkout", "route.ts"), "utf8");
-  assert.ok(route.includes("stripe.checkout.sessions.create(checkoutParams({ plan, priceId: price.id, userId, email }))"));
+  assert.ok(route.includes("openCheckout({ stripe, userId, plan, priceId: price.id, email })"));
+  const open = fs.readFileSync(path.join(__dirname, "..", "lib", "billing", "checkout-session.ts"), "utf8");
+  assert.equal((open.match(/checkout\.sessions\.create\(checkoutParams\(\{/g) ?? []).length, 2, "pack et abonnement : les paramètres de checkoutParams, tels quels");
 });
 test("clé restreinte rk_live_ : un événement live est accepté (livemode cohérent)", async () => {
   process.env.STRIPE_SECRET_KEY = "rk_live_fake_restricted_key";
