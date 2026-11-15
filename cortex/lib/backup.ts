@@ -44,6 +44,11 @@ export type BackupManifest = {
     sha256: string;
     excluded: string[];
   };
+  /**
+   * Stockage objet (lib/storage) : les fichiers de cours vivent dans ce seau et ne
+   * sont PAS dans l'archive du volume (seuls les fichiers locaux le sont).
+   */
+  objectStore?: { location: string };
   tools: { pgDump?: string; tar?: string; node: string };
 };
 
@@ -57,6 +62,11 @@ export type CreateBackupOptions = {
   label?: string;
   /** journal (défaut : console.log). */
   log?: (msg: string) => void;
+  /**
+   * Stockage objet actif : les fichiers dont `inBucket(chemin relatif)` est vrai
+   * ont déjà une copie à jour dans le seau `location` et ne sont pas archivés.
+   */
+  objectStore?: { location: string; inBucket: (rel: string) => boolean };
 };
 
 export type CreateBackupResult = { dir: string; manifest: BackupManifest };
@@ -112,15 +122,50 @@ function hasTool(bin: string): boolean {
   return r.status === 0;
 }
 
-/** Archive un dossier en tar.gz. `exclude` : motifs tar (verbatim, ancrés `./` si besoin). */
-function tarDir(srcDir: string, outFile: string, exclude: string[]): void {
+/**
+ * Archive un dossier en tar.gz. `exclude` : motifs tar (verbatim, ancrés `./` si
+ * besoin). `keep` : si fourni, seuls les fichiers dont il accepte le chemin
+ * relatif sont archivés (liste passée à tar, les motifs `exclude` s'y appliquent).
+ */
+function tarDir(srcDir: string, outFile: string, exclude: string[], keep?: (rel: string) => boolean): void {
   const args = ["-czf", outFile, "-C", srcDir];
   for (const e of exclude) args.push(`--exclude=${e}`);
-  args.push(".");
+  let list: string | null = null;
+  if (keep) {
+    const files = listFiles(srcDir).filter(keep).map((rel) => `./${rel}`);
+    list = path.join(path.dirname(outFile), ".tar-files");
+    fs.writeFileSync(list, files.join("\n") + (files.length ? "\n" : ""));
+    args.push("-T", list);
+  } else {
+    args.push(".");
+  }
   const r = spawnSync("tar", args, { encoding: "utf8" });
+  if (list) fs.rmSync(list, { force: true });
   if (r.status !== 0) {
     throw new Error(`tar a échoué (${r.status}) : ${(r.stderr || "").slice(0, 500)}`);
   }
+}
+
+/**
+ * Fichiers qui n'ont rien à faire dans une sauvegarde et peuvent disparaître pendant
+ * l'archivage (tar échoue sur un fichier listé puis absent) : cache des pages,
+ * exports en cours, téléchargements temporaires du stockage objet.
+ */
+function isTransient(rel: string): boolean {
+  return rel.startsWith(".page-cache/") || rel.startsWith(".export-tmp/") || /\.cortex-dl-[0-9a-f]+$/.test(rel);
+}
+
+/** Fichiers sous `dir` (chemins relatifs, séparateur `/`), sans suivre les liens symboliques. */
+function listFiles(dir: string, rel = ""): string[] {
+  const out: string[] = [];
+  let entries: fs.Dirent[];
+  try { entries = fs.readdirSync(path.join(dir, rel), { withFileTypes: true }); } catch { return out; } // disparu entre-temps
+  for (const e of entries) {
+    const r = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) out.push(...listFiles(dir, r));
+    else if (e.isFile()) out.push(r);
+  }
+  return out;
 }
 
 /** Extrait un tar.gz dans `destDir` (créé au besoin). */
@@ -180,9 +225,16 @@ export async function createBackup(opts: CreateBackupOptions): Promise<CreateBac
   if (isInside(dataDir, opts.backupDir)) {
     excluded.push(`./${path.relative(dataDir, path.resolve(opts.backupDir))}`);
   }
+  // Stockage objet : les fichiers de cours sont dans le seau, pas sur ce disque
+  // (qui n'en est que le cache) — ne restent à archiver que les fichiers locaux.
+  const store = opts.objectStore;
+  if (store) excluded.push(`fichiers de cours (dans ${store.location})`);
   const dataArchive = path.join(outDir, "data.tar.gz");
-  log(`[backup] archive du volume ${dataDir}…`);
-  tarDir(dataDir, dataArchive, excluded);
+  log(`[backup] archive du volume ${dataDir}${store ? ` (hors fichiers de ${store.location})` : ""}…`);
+  const backupRel = isInside(dataDir, opts.backupDir) ? path.relative(dataDir, path.resolve(opts.backupDir)).split(path.sep).join("/") : null;
+  tarDir(dataDir, dataArchive, store ? [] : excluded, store
+    ? (rel) => !store.inBucket(rel) && !isTransient(rel) && !(backupRel && (rel === backupRel || rel.startsWith(`${backupRel}/`)))
+    : undefined);
 
   // ── 2) base ───────────────────────────────────────────────────────────────
   let postgres: PgDumpEntry | null = null;
@@ -256,6 +308,7 @@ export async function createBackup(opts: CreateBackupOptions): Promise<CreateBac
       sha256: sha256File(dataArchive),
       excluded,
     },
+    ...(store ? { objectStore: { location: store.location } } : {}),
     tools: {
       pgDump: toolVersion("pg_dump"),
       tar: toolVersion("tar"),

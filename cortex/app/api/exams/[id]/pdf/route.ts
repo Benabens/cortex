@@ -1,8 +1,8 @@
-import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { q } from "@/db/q";
 import { examsDir } from "@/lib/paths";
+import { storage } from "@/lib/storage";
 import { useCourseOr404 } from "@/lib/req";
 
 export const runtime = "nodejs";
@@ -22,10 +22,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const row = await q.get<{ html_path: string | null; format_template: string }>(`SELECT html_path, format_template FROM exams WHERE id = ? AND format_template IN ('qcm','blocks')`, examId).catch(() => undefined);
   if (!row) return NextResponse.json({ error: "Examen QCM introuvable." }, { status: 404 });
   const file = row.html_path ? path.basename(row.html_path) : "";
-  if (file.endsWith(".pdf") && fs.existsSync(path.join(examsDir(), file))) return NextResponse.json({ ok: true, file, recompiled: false });
-  const out = row.format_template === "blocks"
+  if (file.endsWith(".pdf") && (await storage().stat(path.join(examsDir(), file)))) return NextResponse.json({ ok: true, file, recompiled: false });
+  // tectonic écrit dans le dossier des examens : il travaille sur sa copie locale, renvoyée au stockage ensuite.
+  const out = await storage().withLocalDir([examsDir()], async () => row.format_template === "blocks"
     ? await (await import("@/lib/blocks")).recompileBlocksPdf(examId)
-    : await (await import("@/lib/qcm")).recompileQcmPdf(examId);
+    : await (await import("@/lib/qcm")).recompileQcmPdf(examId));
   if (!out) return NextResponse.json({ error: "Examen QCM introuvable." }, { status: 404 });
   const ok = out.file.endsWith(".pdf");
   // Rien de la sortie du compilateur vers le client (audit du 14/11/2026, 🔴 1) : le détail va aux logs.

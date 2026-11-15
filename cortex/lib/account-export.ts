@@ -24,6 +24,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { storage } from "@/lib/storage";
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
 import { authAll, authGet } from "@/db/auth-store";
@@ -188,10 +189,13 @@ export async function writeAccountExport(userId: string, dir: string, budget: Bu
 
   const userDir = path.join(dataRoot(), "u", userSlug(userId));
   const skipped: string[] = [];
-  if (fs.existsSync(userDir) && !fs.lstatSync(userDir).isSymbolicLink()) {
-    linkTree(userDir, path.join(dir, "fichiers"), budget, skipped);
-    files.push("fichiers/");
-  }
+  // Stockage objet : les fichiers du compte sont d'abord rapatriés dans le cache local.
+  await storage().withLocalDir([userDir], async () => {
+    if (fs.existsSync(userDir) && !fs.lstatSync(userDir).isSymbolicLink()) {
+      linkTree(userDir, path.join(dir, "fichiers"), budget, skipped);
+      files.push("fichiers/");
+    }
+  });
   if (skipped.length) log("warn", "export.symlinks_skipped", { user: userId, count: skipped.length });
   write("manifest.json", { createdAt: new Date().toISOString(), userId, courses: courseIds, files, symlinksIgnored: skipped.length, bytes: budget.used });
   return { courses: courseIds, files };

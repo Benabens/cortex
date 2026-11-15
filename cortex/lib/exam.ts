@@ -10,6 +10,7 @@ import { buildExamArtifact, buildExerciseArtifact } from "@/lib/exam-latex";
 import { dueConcepts, markTested } from "@/lib/schedule";
 import { loadJobCheckpoint, saveJobCheckpoint } from "@/lib/jobs";
 import { examsDir } from "@/lib/paths";
+import { storage } from "@/lib/storage";
 import { referencePaths } from "@/lib/sources";
 import { verifyAndHarden, type VerifyReport } from "@/lib/verify";
 import fs from "node:fs";
@@ -271,10 +272,12 @@ export async function listExams() {
      FROM exams e WHERE e.format_template IS NULL OR e.format_template != 'exercise'
      ORDER BY e.created_at DESC, e.id DESC`
   );
+  // Un seul listage du dossier (stockage objet : une requête, pas une par examen).
+  const present = new Set((await storage().list(EXAM_DIR())).map((f) => path.basename(f.path)));
   return rows.map((r) => {
     const file = r.html_path ? path.basename(r.html_path) : "";
     // Énoncé/Corrigé : seulement des fichiers qui EXISTENT (un .tex n'est pas un énoncé lisible).
-    const readable = !!file && /\.(pdf|html)$/.test(file) && fs.existsSync(path.join(EXAM_DIR(), file));
+    const readable = !!file && /\.(pdf|html)$/.test(file) && present.has(file);
     const qcm = r.format_template === "qcm";
     // Page en ligne /mock/N : examens QCM et à questions composées.
     const online = qcm || r.format_template === "blocks";
@@ -290,7 +293,7 @@ export async function listExams() {
       // Page en ligne, TOUJOURS ouvrable (examen 4 de CS-290 : sans PDF, la carte n'ouvrait rien).
       onlineUrl: online ? `/mock/${r.id}${courseQ()}` : url,
       url,
-      solutionsUrl: readable && solutions && fs.existsSync(path.join(EXAM_DIR(), solutions)) ? `/exam/${solutions}${courseQ()}` : null,
+      solutionsUrl: readable && solutions && present.has(solutions) ? `/exam/${solutions}${courseQ()}` : null,
       // Examen QCM (ou à questions composées) sans PDF lisible : il se recompile gratuitement (sans le modèle).
       pdfMissing: online && !url,
     };
@@ -308,8 +311,7 @@ export async function deleteExam(id: number) {
     const baseNoExt = path.basename(row.html_path).replace(/\.[^.]+$/, "");
     for (const b of [baseNoExt, `${baseNoExt}-corrige`]) {
       for (const ext of ["pdf", "html", "tex", "log", "aux"]) {
-        const p = path.join(EXAM_DIR(), `${b}.${ext}`);
-        if (fs.existsSync(p)) fs.unlinkSync(p);
+        await storage().remove(path.join(EXAM_DIR(), `${b}.${ext}`));
       }
     }
   }

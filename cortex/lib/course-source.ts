@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 import { currentUser } from "@/db/context";
 import { intLimit } from "@/lib/billing/env";
@@ -6,6 +5,7 @@ import { coursePaths, getCourse } from "@/lib/courses";
 import { classifyFile } from "@/lib/import-folder";
 import { PublicFetchError, readPublicHttps, type PublicFetcher } from "@/lib/public-https";
 import { checkStorage } from "@/lib/storage-quota";
+import { storage as files } from "@/lib/storage";
 
 /**
  * AJOUT D'UN SUPPORT À UN COURS sans passer par le navigateur : une adresse https
@@ -98,19 +98,13 @@ async function store(courseId: string, name: string, category: SourceCategory | 
 
   const { refsDir, contentRoot } = coursePaths(courseId);
   const dir = path.resolve(folder === "refs" ? refsDir : path.join(contentRoot, folder));
-  fs.mkdirSync(dir, { recursive: true });
   const ext = path.extname(name);
   const stem = name.slice(0, -ext.length);
   for (let n = 1; n <= 50; n++) {
     const candidate = n === 1 ? name : `${stem}-${n}${ext}`;
     const abs = path.join(dir, candidate);
     if (!abs.startsWith(dir + path.sep)) break;
-    try {
-      fs.writeFileSync(abs, data, { flag: "wx" });
-      return { name: candidate, folder, bytes: data.length, contentType };
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-    }
+    if (await files().put(abs, data, { exclusive: true })) return { name: candidate, folder, bytes: data.length, contentType };
   }
   throw new SourceError(409, "Trop de fichiers du même nom dans ce cours : donne un autre titre.");
 }

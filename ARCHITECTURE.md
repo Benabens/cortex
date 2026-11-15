@@ -21,9 +21,9 @@ Comment Cortex est construit, et les raisons derrière les choix qui ne sont pas
 │   lib/  = le moteur (génération, vérification, facturation)  │
 └─────────────────────────────────────────────────────────────┘
         │                    │                     │
-   PostgreSQL          Volume persistant      Fournisseur LLM
-   (1 schéma par        (PDF générés,          (Anthropic / OpenAI-
-    user × cours)        imports)               compatible / CLI)
+   PostgreSQL       Volume ou seau S3      Fournisseur LLM
+   (1 schéma par     (PDF générés, imports  (Anthropic / OpenAI-
+    user × cours)     via lib/storage)       compatible / CLI)
 ```
 
 Le worker **n'est pas** un service séparé. `instrumentation.ts` démarre avec `next start`, réconcilie les jobs interrompus et consomme la file ; chaque génération est un process enfant. Conséquence assumée : **un seul replica**. La file est locale au conteneur (PID + heartbeat) — scaler horizontalement la casserait.
@@ -88,7 +88,8 @@ La facturation est un modèle de **crédits prépayés**. Vocabulaire, tel qu'il
 - **Reprise** (reversal) : ligne négative qui retire les crédits d'un achat remboursé ou contesté chez Stripe ; le solde peut devenir négatif, ce qui bloque toute génération jusqu'au prochain achat.
 - **Revenu encaissé** (`stripe_payments`, `stripe_payment_losses`) : ce que chaque paiement Stripe a réellement rapporté, net de taxe, de frais (réels, ou estimés si Stripe n'a pas répondu), de remboursements et de litiges. Écrit par le webhook ; l'historique antérieur se reprend avec `npm run billing:backfill`.
 - **Budget IA** : règle de Ben, Cortex reste toujours en bénéfice. Ce qu'un compte a coûté en IA sur 12 mois glissants (jobs échoués et remboursés compris) reste sous `AI_BUDGET_MARGIN` (0,6) × son revenu net sur la même fenêtre ; au-delà, refus 402 au lancement. Exception : les crédits **achetés** restent toujours utilisables (obligation contractuelle) ; c'est donc le prix en crédits, et non le budget, qui garantit la marge sur un compte payant. Le propriétaire est exempt. Le plafond du jour d'un compte suit son budget (plancher qui laisse finir un job payé, fusible `SPEND_CAP_PER_USER_USD`).
-- **Stockage** : quota par compte lié au revenu (base gratuite, croît avec les paiements, borné par le volume) ; les images de pages rendues vivent dans un cache purgeable hors quota et hors sauvegarde (`lib/page-cache`).
+- **Stockage** : quota par compte lié au revenu (base gratuite, croît avec les paiements, borné par le volume quand les fichiers y vivent) ; les images de pages rendues vivent dans un cache purgeable hors quota et hors sauvegarde (`lib/page-cache`).
+- **Fichiers de cours** (`lib/storage`, interface `CourseFiles`) : tout accès aux annales, uploads et examens d'une requête passe par elle. Sans variable, le disque (`LocalFsStore`) ; avec `STORAGE_S3_*`, un seau S3-compatible (`S3Store`) qui fait foi, sous la même arborescence, le disque n'étant plus qu'un cache. Le moteur (tectonic, pdftoppm, vision) reste sur disque : le worker tourne dans `withLocalDir`, qui rapatrie les dossiers du cours puis renvoie ses sorties.
 - **Assistance** : appel au modèle sans job (drill, correction, analyses) ; facturé une fraction de crédit, rendu seulement si nos gardes l'ont arrêté avant envoi ou si la réponse est restée inutilisable (illisible malgré les réessais) ; une panne du fournisseur reste débitée.
 
 ## Connecteur MCP

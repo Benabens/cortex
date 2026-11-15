@@ -1,7 +1,7 @@
 import { coursePaths } from "@/lib/courses";
 import { servedFileHeaders } from "@/lib/security-headers";
 import { requireCourse } from "@/lib/req";
-import fs from "node:fs";
+import { storage } from "@/lib/storage";
 import path from "node:path";
 import { NextResponse } from "next/server";
 
@@ -29,11 +29,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ file: st
   // partagées (audit de pré-lancement).
   const REFS_DIR = coursePaths(course).refsDir;
   const abs = path.join(REFS_DIR, file);
-  if (!abs.startsWith(REFS_DIR + path.sep) || !fs.existsSync(abs))
-    return new NextResponse("Not found", { status: 404 });
+  if (!abs.startsWith(REFS_DIR + path.sep)) return new NextResponse("Not found", { status: 404 });
   const ext = file.split(".").pop()?.toLowerCase() ?? "";
-  const buf = fs.readFileSync(abs);
-  return new NextResponse(new Uint8Array(buf), {
+  const res = await storage().serve(abs, req, {
+    contentType: MIME[ext] ?? "application/octet-stream",
     headers: servedFileHeaders(MIME[ext] ?? "application/octet-stream", { "cache-control": "private, max-age=3600" }),
   });
+  return res ?? new NextResponse("Not found", { status: 404 });
 }

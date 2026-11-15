@@ -5,8 +5,8 @@ import { coursePaths } from "@/lib/courses";
 import { sourceHref } from "@/lib/deeplink";
 import { renderExamPages } from "@/lib/exam-index";
 import { generateQcmBatch, shownExplanation, verifyQcmBatch } from "@/lib/qcm";
-import fs from "node:fs";
 import path from "node:path";
+import { storage } from "@/lib/storage";
 import { listExamSourceRows } from "@/lib/sources";
 
 /**
@@ -86,7 +86,7 @@ export async function indexBank(opts: { onStep?: StepCb } = {}): Promise<{ exams
     const basename = path.basename(ref.path);
     // lien vers l'ÉNONCÉ (pas le corrigé) si dispo : enlève « _solutions/with solutions » du nom.
     const enonce = basename.replace(/[_ ]*(with )?solutions?/i, "").replace(/[_ ]*answers?/i, "");
-    const refForLink = fs.existsSync(path.join(coursePaths(course).refsDir, enonce)) ? `refs/${enonce}` : ref.path;
+    const refForLink = (await storage().stat(path.join(coursePaths(course).refsDir, enonce))) ? `refs/${enonce}` : ref.path;
     const pages = renderExamPages(course, basename, 24);
     if (!pages.length) { step(`${ref.title} : pages non rendues (ignoré)`, prog); continue; }
     const prompt = [
@@ -142,7 +142,7 @@ export async function assignLectureRanks(opts: { onStep?: StepCb } = {}): Promis
   const topics = (await q.all<{ topic: string }>(`SELECT DISTINCT topic FROM bank_questions ORDER BY topic`)).map((r) => r.topic);
   if (!topics.length) return 0;
   // Approche robuste : on demande au LLM d'ORDONNER les topics selon le déroulé du cours (titres de
-  const lectureTitles = listLectureTitles(course);
+  const lectureTitles = await listLectureTitles(course);
   const prompt = [
     `Cours : Machine Learning (CS-233). Voici l'ordre des lectures (1 → ${lectureTitles.length}) :`,
     ...lectureTitles.map((t) => `  ${t.rank}. ${t.title}`),
@@ -164,14 +164,13 @@ export async function assignLectureRanks(opts: { onStep?: StepCb } = {}): Promis
 }
 
 /** Titres des lectures depuis le corpus ingéré (items de type course/slides), sinon noms de fichiers. */
-function listLectureTitles(course: string): { rank: number; title: string }[] {
-  const slidesDir = path.join(coursePaths(course).contentRoot, "slides");
+async function listLectureTitles(course: string): Promise<{ rank: number; title: string }[]> {
+  const slidesDir = path.resolve(coursePaths(course).contentRoot, "slides");
   const out: { rank: number; title: string }[] = [];
-  if (fs.existsSync(slidesDir)) {
-    for (const f of fs.readdirSync(slidesDir)) {
-      const m = f.match(/lecture[_ ]?(\d+)/i);
-      if (m) out.push({ rank: Number(m[1]), title: f.replace(/\.pdf$/i, "") });
-    }
+  const names = (await storage().list(slidesDir)).filter((e) => path.dirname(e.path) === slidesDir).map((e) => path.basename(e.path)).sort();
+  for (const f of names) {
+    const m = f.match(/lecture[_ ]?(\d+)/i);
+    if (m) out.push({ rank: Number(m[1]), title: f.replace(/\.pdf$/i, "") });
   }
   return out.sort((a, b) => a.rank - b.rank);
 }
@@ -532,13 +531,12 @@ function jsonPath(course = currentCourse()): string {
 /** Écrit la banque + le parcours dans un JSON COMMITTÉ (source de vérité portable, DB gitignorée). */
 export async function exportRevisionJson(): Promise<string> {
   const file = jsonPath();
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(await revisionPayload(), null, 2));
+  await storage().put(file, JSON.stringify(await revisionPayload(), null, 2));
   return file;
 }
 
 /** Charge le JSON committé (repli quand la DB du cours est vide chez l'utilisateur). */
-export function loadRevisionJson(course = currentCourse()): RevisionPayload | null {
-  try { const f = jsonPath(course); return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : null; } catch { return null; }
+export async function loadRevisionJson(course = currentCourse()): Promise<RevisionPayload | null> {
+  try { const buf = await storage().read(jsonPath(course)); return buf ? JSON.parse(buf.toString("utf8")) : null; } catch { return null; }
 }
 
