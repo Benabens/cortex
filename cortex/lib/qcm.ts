@@ -2274,7 +2274,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
         else all.splice(i, 1);
       }
     }
-    const { drop, repeats } = all.length >= 2 ? await findDuplicates(all, strict) : { drop: [], repeats: [] };
+    const { drop, repeats }: { drop: number[]; repeats: number[] } = all.length >= 2 ? await findDuplicates(all, strict) : { drop: [], repeats: [] };
     repeats.forEach((i) => { if (all[i]) historicalRepeats.add(all[i].stem); });
     if (drop.length) all.splice(0, all.length, ...all.filter((_, i) => !drop.includes(i)));
   }
