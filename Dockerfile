@@ -52,6 +52,12 @@ COPY cortex/ ./
 ENV NODE_ENV=
 RUN npm run build \
     && npm prune --omit=dev
+# Wheels pandas de la vérification Python en WebAssembly (CORTEX_PYTHON_WASM=1) : le paquet npm
+# pyodide ne les contient pas, et loadPackage les téléchargerait depuis le CDN jsDelivr dans
+# chaque nouveau conteneur, pendant une vérification. Toléré en échec (réseau), comme le
+# préchauffage tectonic ; la CI vérifie, réseau coupé, que l'image les contient.
+RUN node_modules/.bin/tsx scripts/pyodide-prefetch.ts \
+    || echo "AVERTISSEMENT: wheels Pyodide absents (téléchargés depuis le CDN au premier chargement)"
 
 # ── Étape 3 : runtime ───────────────────────────────────────────────────────
 FROM ${NODE_IMAGE} AS runtime

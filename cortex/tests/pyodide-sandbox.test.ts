@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { runPythonWasm, pythonWasmAvailable } from "../lib/pyodide-sandbox";
+import { runPythonWasm, pythonWasmAvailable, pyodidePackagesMissing } from "../lib/pyodide-sandbox";
 
 test("Pyodide reste désactivé sans flag", async () => {
   delete process.env.CORTEX_PYTHON_WASM;
@@ -197,5 +197,25 @@ test("verifyCode utilise Pyodide sans isolation noyau", async () => {
     delete process.env.CORTEX_SANDBOX;
     delete process.env.CORTEX_PYTHON_WASM;
     delete require.cache[require.resolve("../lib/sandbox-exec")];
+  }
+});
+
+test("Les paquets Pyodide absents du disque sont listés, dépendances comprises", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-pyodide-pkg-"));
+  try {
+    const pkg = (file_name: string, depends: string[]) => ({ file_name, depends });
+    fs.writeFileSync(path.join(dir, "pyodide-lock.json"), JSON.stringify({ packages: {
+      pandas: pkg("pandas.whl", ["numpy", "python-dateutil"]),
+      numpy: pkg("numpy.whl", []),
+      "python-dateutil": pkg("dateutil.whl", ["six"]),
+      six: pkg("six.whl", []),
+    } }));
+    for (const f of ["pandas.whl", "numpy.whl"]) fs.writeFileSync(path.join(dir, f), "");
+    assert.deepEqual(pyodidePackagesMissing(["pandas"], dir).sort(), ["dateutil.whl", "six.whl"]);
+    for (const f of ["dateutil.whl", "six.whl"]) fs.writeFileSync(path.join(dir, f), "");
+    assert.deepEqual(pyodidePackagesMissing(["pandas"], dir), []);
+    assert.deepEqual(pyodidePackagesMissing(["inconnu"], dir), ["inconnu (absent du lockfile)"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });

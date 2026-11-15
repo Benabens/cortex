@@ -29,6 +29,38 @@ export function pythonWasmAvailable(): boolean {
   return process.env.CORTEX_PYTHON_WASM === "1";
 }
 
+/** Dossier du paquet npm pyodide, celui que le worker charge (require résolu depuis le cwd). */
+export function pyodidePackageDir(): string {
+  return path.join(process.cwd(), "node_modules", "pyodide");
+}
+
+/**
+ * Fichiers des paquets Python demandés, dépendances comprises, absents du disque. Le paquet npm
+ * n'embarque que le runtime : loadPackage télécharge le reste depuis le CDN jsDelivr au premier
+ * besoin (puis le garde dans ce dossier). En prod ce serait à chaque déploiement, dans le délai
+ * d'une vérification ; l'image Docker les précharge donc (scripts/pyodide-prefetch.ts).
+ */
+export function pyodidePackagesMissing(names: string[], dir = pyodidePackageDir()): string[] {
+  let packages: Record<string, { file_name: string; depends: string[] }>;
+  try {
+    packages = JSON.parse(fs.readFileSync(path.join(dir, "pyodide-lock.json"), "utf8")).packages;
+  } catch {
+    return ["pyodide-lock.json (illisible)"];
+  }
+  const missing: string[] = [];
+  const seen = new Set<string>();
+  const visit = (name: string) => {
+    if (seen.has(name)) return;
+    seen.add(name);
+    const pkg = packages[name];
+    if (!pkg) return void missing.push(`${name} (absent du lockfile)`);
+    if (!fs.existsSync(path.join(dir, pkg.file_name))) missing.push(pkg.file_name);
+    for (const dep of pkg.depends) visit(dep);
+  };
+  for (const name of names) visit(name);
+  return missing;
+}
+
 /**
  * Vérifications simultanées, TOUS processus confondus (CORTEX_PYTHON_WASM_CONCURRENCY, défaut 4).
  * Chaque job est un processus tsx distinct (lib/jobs.ts) : un sémaphore en mémoire ne bornerait

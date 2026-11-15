@@ -269,6 +269,10 @@ jobs:
           docker exec cortex node_modules/.bin/tsx --version
           echo "✓ outillage complet"
 
+      # Sans réseau : pandas doit se charger depuis les wheels préchargés au build, jamais du CDN.
+      - name: Pyodide hors ligne — pandas exécuté depuis l'image
+        run: docker run --rm --network none cortex-app node --import tsx scripts/pyodide-prefetch.ts --check
+
       - name: Compilation LaTeX réelle dans le conteneur (préambule EPFL)
         run: |
           docker exec cortex bash -c '
