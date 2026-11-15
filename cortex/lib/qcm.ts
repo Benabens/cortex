@@ -6,7 +6,7 @@ import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseNumbers, absentCourseTerms, corpusWindows, coursePassages, factNumbers, topicsInScope } from "@/lib/course-grounding";
 import { rewriteExplanations, rewriteExplanationsOnOptions, secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
-import { auditConsensus, capDrops, describeExplanationIssue, duplicateAuditDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, optionHead, ultimateAuditActions } from "@/lib/qcm-checks";
+import { absentOptionCitations, auditConsensus, capDrops, describeExplanationIssue, duplicateAuditDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, optionHead, ultimateAuditActions } from "@/lib/qcm-checks";
 import { assignChapters, spreadOverChapters, variants } from "@/lib/coverage";
 import { normalize, tokenize } from "@/lib/text";
 import { courseRefImages } from "@/lib/course-vision";
@@ -619,8 +619,16 @@ async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, la
     if (options.every((o, j) => o === it.options[j])) return null;
     // L'explication doit réfuter les options FINALES : l'ancienne réfute souvent les distracteurs
     // remplacés (job 23 : neuf explications sur vingt réfutaient des options absentes).
-    const written = r.explanation && !citesOptionLabel(r.explanation, options.length) ? r.explanation : null;
-    const explanation = [written, it.explanation].find((e) => !!e && !explanationIssues(e, options, it.correct, it.stem)) ?? written ?? it.explanation;
+    const written = r.explanation
+      && !citesOptionLabel(r.explanation, options.length)
+      && !absentOptionCitations(r.explanation, options).length
+      && !explanationIssues(r.explanation, options, it.correct, it.stem)
+      ? r.explanation
+      : null;
+    // Toute option modifiée invalide l'explication précédente. Le même appel doit rendre une
+    // explication fondée sur les options finales ; sinon la réparation entière est refusée.
+    if (!written) return null;
+    const explanation = written;
     return { ...it, options, misconceptions, explanation, verified: null, trivialDistractors: null, duplicateOptions: null, judgeIssue: null, judgeOk: null, discrimination: null, nameOnly: null } as QcmItem;
   });
   const sent = repaired.filter((x): x is QcmItem => !!x);
@@ -999,7 +1007,20 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
       else reject(q, "explication qui réfute une affirmation absente des options", "ne réfute que les options réellement proposées, jamais une affirmation qui n'y figure pas");
     }
   }
-  // Le correcteur ne voit que les questions encore en lice, sous leur numéro dans le lot.
+  // Les passages sont cherchés avant tout appel au correcteur. Une clé sans citation précise
+  // retrouvée dans le support n'est jamais soumise au jugement ni livrée : elle sera remplacée.
+  const candidates = items.filter((q) => !q.rejected);
+  // DÉFINITIONS DU COURS : le juge résout et contrôle avec celles du cours, pas celles du web.
+  // Autour du fait que teste chaque question, en fenêtres larges (banc HUM-285 du 02/11 : deux
+  // extraits de 700 caractères par sujet, et 22 à 27 questions justes rejetées « hors cours »).
+  const passages = await verifierPassages(candidates).catch(() => []);
+  const courseEvidence = passages.map((p) => p.text).join("\n");
+  for (const q of candidates) {
+    if (!sourceFactSupported(q.sourceFact ?? "", courseEvidence)) {
+      reject(q, "preuve précise du cours manquante pour la clé", "recopie un passage précis du support qui suffit à établir la bonne réponse");
+    }
+  }
+  // Le correcteur ne voit que les questions dont la clé possède déjà une preuve déterministe.
   const judged = items.filter((q) => !q.rejected);
   if (!judged.length) return items;
   const blind = items.map((q, i) => (q.rejected ? null :
@@ -1009,10 +1030,6 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   // la mémoire de calibration des QCM est aussi réinjectée à la CRITIQUE : un « trop facile »
   // passé rend la vérif plus sévère sur la trivialité/les indices qui trahissent.
   const calib = await calibrationBlock("qcm");
-  // DÉFINITIONS DU COURS : le juge résout et contrôle avec celles du cours, pas celles du web.
-  // Autour du fait que teste chaque question, en fenêtres larges (banc HUM-285 du 02/11 : deux
-  // extraits de 700 caractères par sujet, et 22 à 27 questions justes rejetées « hors cours »).
-  const passages = await verifierPassages(judged).catch(() => []);
   // Cache de prompt (M) : consignes et schéma stables dans le système, lots et extraits à part.
   const system = [
     `Tu es un correcteur rigoureux du cours. Pour CHAQUE QCM fourni, RÉSOUS-LE toi-même de zéro (sans clé fournie) et donne la/les bonne(s) réponse(s) par INDEX.`,
@@ -1131,7 +1148,6 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   // Second regard sur les questions jugées hors cours (et pas déjà rejetées pour une autre raison).
   const pending = appeals.filter((a) => !a.q.rejected);
   if (pending.length) {
-    const courseEvidence = passages.map((p) => p.text).join("\n");
     // Fait source retrouvé dans le cours : la clé est prouvée, un second regard trop sévère ne la
     // rejette pas. Il tourne quand même, car seul lui voit qu'une EXPLICATION sort du cours.
     const grounded = new Set(pending.filter((a) => sourceFactSupported(a.q.sourceFact ?? "", courseEvidence)));
@@ -2012,11 +2028,15 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     }
     // 4. Explications : réfutent-elles exactement les options proposées ? Contrôle sans modèle, puis
     // réécriture sur les options réelles ; à défaut, l'explication est réduite à la justification de la clé.
-    const flagged = all.map((it) => ({ it, issue: explanationIssues(it.explanation ?? "", it.options, it.correct, it.stem) })).filter((x) => !!x.issue);
+    const flagged = all.map((it) => {
+      const absent = absentOptionCitations(it.explanation ?? "", it.options);
+      const issue = explanationIssues(it.explanation ?? "", it.options, it.correct, it.stem);
+      return { it, issue, absent };
+    }).filter((x) => !!x.issue || x.absent.length);
     if (flagged.length) {
       const passages = await coursePassages([...new Set(flagged.map((x) => x.it.topic).filter(Boolean))]).catch(() => []);
       const rewritten = await rewriteExplanationsOnOptions(
-        flagged.map(({ it, issue }) => ({ stem: it.stem, options: it.options, correct: it.correct, explanation: it.explanation, issue: describeExplanationIssue(issue!) })),
+        flagged.map(({ it, issue, absent }) => ({ stem: it.stem, options: it.options, correct: it.correct, explanation: it.explanation, issue: [issue ? describeExplanationIssue(issue) : "", absent.length ? `cite ${absent.map((x) => `« ${x} »`).join(", ")}, absent des options finales` : ""].filter(Boolean).join(" ; ") })),
         languageName(shared.language ?? examLanguageFor(currentCourse()))[1],
         passages,
       );
@@ -2024,7 +2044,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       let trimmed = 0;
       flagged.forEach(({ it }, k) => {
         const text = rewritten[k];
-        if (text && !citesOptionLabel(text, it.options.length) && !citesAbsentDistractor(text, it.options) && !explanationIssues(text, it.options, it.correct, it.stem)) {
+        if (text && !citesOptionLabel(text, it.options.length) && !citesAbsentDistractor(text, it.options) && !absentOptionCitations(text, it.options).length && !explanationIssues(text, it.options, it.correct, it.stem)) {
           it.explanation = text;
           fixed++;
           return;
