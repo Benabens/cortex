@@ -320,10 +320,12 @@ jobs:
           done
           if [ -z "$ok" ]; then docker logs cortex-v 2>&1 | tail -60; echo "::error::/api/health injoignable (volume)"; exit 1; fi
           docker logs cortex-v 2>&1 | grep -q "abandon de root" || { echo "::error::l'entrypoint n'a pas abandonné root"; exit 1; }
-          ps_out=$(docker exec cortex-v ps -eo user=,args=)
+          # Conteneur lancé en --user 0 : un docker exec y est root par défaut, d'où --user cortex
+          # (le ps lui-même ne doit pas compter) et la sauvegarde lancée en cortex, comme en prod.
+          ps_out=$(docker exec --user cortex cortex-v ps -eo user=,args=)
           echo "$ps_out"
           if echo "$ps_out" | grep -E '^root ' ; then echo "::error::un processus tourne en root malgré le volume"; exit 1; fi
-          docker exec cortex-v bash -c '
+          docker exec --user cortex cortex-v bash -c '
             set -e
             test "$(stat -c %U /data/u/x/fichier-root)" = cortex
             echo nouveau > /data/u/x/fichier-app
