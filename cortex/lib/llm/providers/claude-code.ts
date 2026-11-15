@@ -29,7 +29,9 @@ export const claudeCodeProvider: LlmProvider = {
       );
     }
     const model = mapModel(req.model ?? "opus", "claude-code");
-    const prompt = req.system ? `${req.system}\n\n${req.prompt}` : req.prompt;
+    // Mode banc (lib/claude-code) : le système passe à part, comme sur l'API.
+    const lean = process.env.CORTEX_CLAUDE_CODE_LEAN === "1";
+    const prompt = req.system && !lean ? `${req.system}\n\n${req.prompt}` : req.prompt;
     try {
       const r = await runClaudeCodeRaw({
         prompt,
@@ -37,6 +39,7 @@ export const claudeCodeProvider: LlmProvider = {
         addDirs: req.addDirs,
         timeoutMs: req.timeoutMs,
         signal: req.signal,
+        ...(lean ? { system: req.system, effort: req.effort } : {}),
       });
       return { text: r.text, usage: r.usage, provider: this.name, model };
     } catch (e) {

@@ -73,7 +73,7 @@ export function writeReport(home: string, out?: string): string {
       if (v.pass === false) red.push(`${c} : ${v.label} (${v.value}, seuil ${v.limit})`);
     }
     const p = cur.metrics.perf;
-    lines.push("", `Perf (${cur.provider ?? "provider inconnu"}, propre au banc et non représentative de la production) : ${Math.round(p.totalMs / 1000)} s, ${p.calls} appels, ${p.jsonRetries} redemandes JSON, ${p.topupBatches} lots de comblement, ${p.dedupReplacements} remplacements de doublons. ${p.estimated === false ? "Coût FACTURÉ par ce run sur l'API (llm_usage, échecs compris)" : "Coût de production estimé (non mesuré, non facturé par ce run)"} : ${p.tokensIn} tokens en entrée, ${p.tokensOut} en sortie, cache ${Math.round(p.cacheRate * 100)} %, ${p.costUsd.toFixed(3)} $.`, "");
+    lines.push("", `Perf (${cur.provider ?? "provider inconnu"}, propre au banc et non représentative de la production) : ${Math.round(p.totalMs / 1000)} s, ${p.calls} appels, ${p.jsonRetries} redemandes JSON, ${p.topupBatches} lots de comblement, ${p.dedupReplacements} remplacements de doublons. ${p.estimated === false ? "Coût FACTURÉ par ce run sur l'API (llm_usage, échecs compris)" : p.measuredCalls ? `Équivalent API (tokens mesurés par claude-code sur ${p.measuredCalls}/${p.calls} appels, réflexion comprise, cache simulé)` : "Coût de production estimé (non mesuré, non facturé par ce run)"} : ${p.tokensIn} tokens en entrée, ${p.tokensOut} en sortie, cache ${Math.round(p.cacheRate * 100)} %, ${p.costUsd.toFixed(3)} $.`, "");
   }
   lines.push("## Reste rouge", "", ...(red.length ? red.map((r) => `- ${r}`) : ["- rien"]), "");
   const text = lines.join("\n");

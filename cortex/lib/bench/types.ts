@@ -29,6 +29,9 @@ export type TapeCall = {
   /** Instant de l'appel (ms depuis l'époque) : fenêtre de 5 min du cache de prompt. */
   at?: number;
   error?: string;
+  /** Provider qui a servi l'appel, et ses compteurs (claude-code : tokens réels, réflexion comprise). */
+  provider?: string;
+  usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number };
 };
 
 /** Tarif $ par million de tokens, par modèle logique (estimation du coût API, jamais mesuré). */
