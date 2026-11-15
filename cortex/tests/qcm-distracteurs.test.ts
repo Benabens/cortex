@@ -173,7 +173,7 @@ test("le remplaçant reste trivial à la revérification : une seule réparation
   replacement = "Une option absurde que tout étudiant élimine encore.";
   const result = await exam(await course(), 4).then((x) => ({ ...x, error: "" }), (e: Error) => ({ r: null, steps: [] as string[], items: [], error: e.message }));
   // Une par ronde (la première + 3 comblements), plus celle de l'audit final.
-  assert.ok(repairCalls <= 5, `une seule réparation groupée par ronde, reçu ${repairCalls}`);
+  assert.ok(repairCalls <= 6, `une seule réparation groupée par ronde et à la livraison, reçu ${repairCalls}`);
   assert.ok(designCalls > 1, "le défaut persistant déclenche une régénération ou un comblement");
   if (result.r) {
     assert.ok(result.steps.some((s) => /à régénérer après une réparation/.test(s)), result.steps.join("\n"));
