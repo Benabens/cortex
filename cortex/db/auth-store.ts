@@ -182,6 +182,18 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       updated_at TEXT NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS subscriptions_customer_idx ON subscriptions (customer_id)`,
+    // Client Stripe UNIQUE par compte, créé au premier checkout (lib/billing/checkout-session).
+    `CREATE TABLE IF NOT EXISTS stripe_customers (
+      user_id TEXT PRIMARY KEY,
+      customer_id TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL
+    )`,
+    // Checkout d'abonnement ouvert par compte (session_id NULL = en cours d'ouverture).
+    `CREATE TABLE IF NOT EXISTS checkout_locks (
+      user_id TEXT PRIMARY KEY,
+      session_id TEXT,
+      created_at TEXT NOT NULL
+    )`,
     `CREATE TABLE IF NOT EXISTS stripe_invoices (
       invoice_id TEXT PRIMARY KEY,
       subscription_id TEXT,
@@ -512,6 +524,16 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       updated_at text NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS subscriptions_customer_idx ON public.subscriptions (customer_id)`,
+    `CREATE TABLE IF NOT EXISTS public.stripe_customers (
+      user_id text PRIMARY KEY,
+      customer_id text NOT NULL UNIQUE,
+      created_at text NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS public.checkout_locks (
+      user_id text PRIMARY KEY,
+      session_id text,
+      created_at text NOT NULL
+    )`,
     `CREATE TABLE IF NOT EXISTS public.stripe_invoices (
       invoice_id text PRIMARY KEY,
       subscription_id text,
