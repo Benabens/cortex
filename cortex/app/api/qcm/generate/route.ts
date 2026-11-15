@@ -39,7 +39,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
 
   const existing = await activeJob("qcm");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
-  const issue = await preflightGeneration("qcm");
+  const issue = await preflightGeneration("qcm", target);
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
   let jobId: number;
   try {

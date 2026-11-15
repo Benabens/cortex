@@ -4,8 +4,10 @@ import {
   type RequestStateCodec, type ServerContext,
 } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
-import { billingEnabled, creditsGate, fmtCredits, fromCenti, getBalanceCenti } from "@/lib/billing/credits";
-import { dailyLimit, generationGate, usedToday } from "@/lib/billing/guards";
+import { billingEnabled, fmtCredits, fromCenti, getBalanceCenti } from "@/lib/billing/credits";
+import { dailyLimit, usedToday } from "@/lib/billing/guards";
+import { LAUNCH_KINDS, kindUsage, launchVerdict, readLimitsState, type LaunchSpec } from "@/lib/billing/limits";
+import { afterLine, type KindUsage } from "@/lib/billing/limits-text";
 import { isOwner } from "@/lib/billing/owner";
 import { llmUnavailableReason } from "@/lib/llm";
 import { log } from "@/lib/metrics";
@@ -16,8 +18,9 @@ import { QUOTA_LABEL, ToolError, codeForStatus, type Confirmation, type Cost, ty
 /**
  * CONFIRMATION D'UN COÛT, avant toute dépense. Ordre fixe :
  *
- *  1. pré-vérification lecture seule avec les gardes de l'app (rafale + quota
- *     du jour, solde, moteur) : on ne fait pas confirmer ce qui sera refusé ;
+ *  1. pré-vérification lecture seule avec le verdict de l'app (lib/billing/limits :
+ *     toutes les limites d'usage, au coût exact) puis le moteur : on ne fait pas
+ *     confirmer ce qui sera refusé, et le refus porte le message de l'app ;
  *  2. compte du propriétaire (rien ne lui est facturé) → rien à confirmer ;
  *  3. jeton de devis présenté → consommé s'il correspond exactement ;
  *  4. client qui AFFICHE l'élicitation (MCP_ELICITATION_CLIENTS, défaut Claude
@@ -89,14 +92,28 @@ function bucketLabel(bucket: Cost["bucket"]): "generations" | "assistance" {
   return bucket === "gen" ? "generations" : "assistance";
 }
 
-/** Pré-vérification avec les gardes de l'app (aucune écriture) : refus → ToolError. */
-async function precheck(cost: Cost): Promise<void> {
-  const gate = await generationGate(cost.bucket);
-  if (gate) throw new ToolError(codeForStatus(gate.status), gate.error);
-  const credits = await creditsGate(undefined, cost.costCenti);
-  if (credits) throw new ToolError(codeForStatus(credits.status), credits.error);
+/** Ce que la réservation vérifiera pour ce coût (lib/billing/limits). */
+export function specOfCost(cost: Cost): LaunchSpec {
+  const jobType = LAUNCH_KINDS[cost.kind].jobType;
+  return jobType
+    ? { bucket: "gen", kind: jobType, costCenti: cost.costCenti, jobSlot: true }
+    : { bucket: "assist", kind: "assist", costCenti: cost.costCenti, jobSlot: false };
+}
+
+/**
+ * Pré-vérification avec le verdict de l'app (aucune écriture) : refus → ToolError,
+ * avec le message que la route et la réservation rendraient. Rend ce qu'il reste
+ * pour ce type de génération (le devis annonce le restant après celle-ci).
+ */
+async function precheck(cost: Cost): Promise<KindUsage> {
+  const state = await readLimitsState();
+  const spec = specOfCost(cost);
+  const refusal = launchVerdict(state, spec);
+  if (refusal) throw new ToolError(codeForStatus(refusal.status), refusal.error);
   const engine = llmUnavailableReason();
   if (engine) throw new ToolError("unavailable", engine);
+  const k = LAUNCH_KINDS[cost.kind];
+  return kindUsage(state, spec, cost.kind, k.label, k.plural);
 }
 
 /** Nom du client tel qu'il se présente (ère 2026-07-28 : enveloppe de la requête), ou null. */
@@ -130,7 +147,7 @@ export async function confirmCost(
   args: Record<string, unknown>,
   token: string | undefined,
 ): Promise<Confirmation> {
-  await precheck(cost);
+  const usage = await precheck(cost);
   const billing = billingEnabled();
   // Compte du propriétaire : rien n'est débité ni compté (lib/billing/owner) — le devis le dit.
   const owner = await isOwner(p.principal.userId);
@@ -153,7 +170,8 @@ export async function confirmCost(
   const balance = billing ? await getBalanceCenti() : null;
   const quotaText = limit === null ? "quota du jour non limité" : `${QUOTA_LABEL[bucketLabel(cost.bucket)]} aujourd'hui : ${used}/${limit}`;
   const message = `${cost.summary} Coût : ${costPhrase(costCenti, billing, owner)}` +
-    (balance !== null ? ` (solde ${fmtCredits(balance)} → ${fmtCredits(balance - costCenti)})` : "") + `, ${quotaText}. Confirmer ?`;
+    (balance !== null ? ` (solde ${fmtCredits(balance)} → ${fmtCredits(balance - costCenti)})` : "") + `, ${quotaText}.` +
+    (afterLine(usage) ? ` ${afterLine(usage)}.` : "") + " Confirmer ?";
 
   // Capacités déclarées PAR REQUÊTE (ère 2026-07-28). Le type d'enveloppe du SDK est vide : lecture explicite.
   const envelope = p.mcpReq.envelope as Record<string, unknown> | undefined;

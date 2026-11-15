@@ -31,12 +31,11 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const existing = await activeJob(jobType);
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true, topicId: topic.id, qcm });
 
-  const issue = await preflightGeneration(jobType);
-  if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
-
   const jobTarget = qcm
     ? JSON.stringify({ count: 4, openCount: 1, focus: topicTarget(topic) }) // QCM-first sur ce type
     : JSON.stringify({ target: topicTarget(topic), topicId: topic.id });
+  const issue = await preflightGeneration(jobType, jobTarget);
+  if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
   let jobId: number;
   try {
     ({ id: jobId } = await createJobExclusive(jobType, jobTarget));

@@ -247,7 +247,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
   const canAccept = data.purchase.enabled;
 
   return (
-    <section className="flex flex-col gap-4" aria-labelledby="billing-title">
+    <section id="credits" className="flex scroll-mt-24 flex-col gap-4" aria-labelledby="billing-title">
       <div className="flex items-end justify-between gap-4">
         <div>
           <h2 id="billing-title" className="text-xl font-semibold text-ink-1">Abonnement & crédits</h2>

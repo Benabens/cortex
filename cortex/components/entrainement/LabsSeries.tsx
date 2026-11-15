@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { WeightBar } from "@/components/viz/WeightBar";
 import { useApi, useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@/lib/ux/api";
 import { examLinkFromResultPath, type LabsResp } from "@/lib/ux/training";
+import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
 
 /**
  * Série Labs (spécifique CS-202 — le moule « Q6 2025 » sur le vrai code des labs).
@@ -22,6 +23,10 @@ export function LabsSeries() {
   const job = useJob(jobId);
   const running = jobId != null && (!job || JOB_ACTIVE.includes(job.status));
   const notified = useRef(false);
+  // Même verdict que POST /api/labs/generate, pour tous les boutons « Générer » de la série.
+  const launch = useLaunchUsage("lab-exercise");
+  const { refresh: refreshUsage } = launch;
+  useEffect(() => { if (!running) refreshUsage(); }, [running, refreshUsage]);
 
   useEffect(() => {
     if (!job || JOB_ACTIVE.includes(job.status) || notified.current) return;
@@ -91,6 +96,8 @@ export function LabsSeries() {
           </Button>
         </Panel>
       ) : (
+        <>
+        {!running && <UsageLine usage={launch.usage} now={launch.now} className="mb-3" />}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {data.series.map(({ lab, exams }) => {
             const isActive = activeLab === lab.id;
@@ -113,7 +120,7 @@ export function LabsSeries() {
                     size="sm"
                     onClick={() => generate(lab.id)}
                     loading={isActive && running}
-                    disabled={running && !isActive}
+                    disabled={(running && !isActive) || (!running && !launch.allowed)}
                   >
                     {!(isActive && running) && <Sparkles className="size-3.5" strokeWidth={2.25} />}
                     Générer
@@ -142,6 +149,7 @@ export function LabsSeries() {
             );
           })}
         </div>
+        </>
       )}
       {genError && (
         <p role="alert" className="mt-3 text-[0.84rem] text-danger-hi">

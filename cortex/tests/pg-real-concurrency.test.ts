@@ -93,6 +93,33 @@ test("quota du jour = 1 : 8 réservations parallèles → exactement 1 comptée"
   } finally { process.env.DAILY_GEN_QUOTA = "unlimited"; process.env.SIGNUP_FREE_CREDITS = "2"; }
 });
 
+test("calcul du jour (lib/billing/limits) : 3 dépensés, fusible 10, 4 attendus par QCM → 8 lancements parallèles, exactement 1", { skip }, async () => {
+  const { reserveGeneration } = await import("../lib/billing/reserve");
+  const credits = await import("../lib/billing/credits");
+  const { authRun } = await import("../db/auth-store");
+  const { nowStr } = await import("../db/q");
+  const { resetSpendCache } = await import("../lib/billing/usage");
+  process.env.SPEND_CAP_PER_USER_USD = "10";
+  process.env.AI_JOB_COST_USD_JSON = JSON.stringify({ qcm: 4 });
+  try {
+    const user = "pg_compute";
+    await credits.addTransaction(user, 5000, "test", `test:${user}:topup`);
+    await authRun(
+      `INSERT INTO llm_usage (user_id, course, provider, model, tokens_in, tokens_out, cost_usd, estimated, job_id, call_site, created_at)
+       VALUES (?, 'ml', 'anthropic', 'claude-sonnet-5', 1000, 500, 3, 0, '1', 'qcm:generateBatch', ?)`, user, nowStr());
+    resetSpendCache();
+    const before = await credits.getBalanceCenti(user);
+    // Coût attendu réservé sous verrou (active_jobs.expected_usd) : le 2e lancement voit le 1er.
+    const results = await Promise.all(Array.from({ length: N }, (_, i) =>
+      inCourse(user, "ml", () => reserveGeneration({ bucket: "gen", kind: "qcm", ref: `job:${user}:ml:${i}`, jobSlot: true }))
+    ));
+    assert.equal(results.filter((r) => r.ok).length, 1, JSON.stringify(results.map((r) => (r.ok ? "ok" : r.error))));
+    assert.ok(results.every((r) => r.ok || /calcul du jour/i.test(r.error)));
+    const debited = results.find((r) => r.ok);
+    assert.equal(await credits.getBalanceCenti(user), before - (debited?.ok ? debited.costCenti : 0), "un seul débit");
+  } finally { delete process.env.SPEND_CAP_PER_USER_USD; delete process.env.AI_JOB_COST_USD_JSON; }
+});
+
 test("assistance : solde pour UN appel, 8 assistGate parallèles → exactement 1", { skip }, async () => {
   const { assistGate } = await import("../lib/billing/reserve");
   const credits = await import("../lib/billing/credits");

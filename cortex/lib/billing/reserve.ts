@@ -1,16 +1,17 @@
 import crypto from "node:crypto";
-import { rechargeDue } from "./subscription-windows";
 import { currentCourse } from "@/db/client";
 import { currentUser } from "@/db/context";
 import { authRun, authTx, type AuthTx } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
 import { BAD_OUTPUT_CODES, llmErrorCode } from "@/lib/llm/errors";
 import { log } from "@/lib/metrics";
-import { budgetCheckFor, budgetVerdict, purchasedLedgerCenti } from "./budget";
-import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, insufficient, subscriptionLive, type SubRow, DELTA_CENTI } from "./credits";
-import { intLimit } from "./env";
-import { quotaFor, quotaTrackingActive, ratePerUserPerMin, type GateIssue, type QuotaBucket } from "./guards";
+import { defaultProviderName } from "@/lib/llm/config";
+import { expectedJobCostUsd } from "./budget";
+import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits } from "./credits";
+import { quotaTrackingActive, type GateIssue, type QuotaBucket } from "./guards";
+import { SLOT_MAX_AGE_MS, launchVerdict, maxActiveJobsLimit, readCounterState, readSpendState, type LaunchSpec, type LimitsState } from "./limits";
 import { isOwner } from "./owner";
+import { isPaidProvider, spendCapUsd } from "./usage";
 
 /**
  * RÉSERVATION — la décision UNIQUE et ATOMIQUE qui autorise une dépense LLM.
@@ -26,8 +27,16 @@ import { isOwner } from "./owner";
  *   3. générations en cours (MAX_ACTIVE_JOBS, hors facturation) → 429
  *   4. solde ≥ coût (si facturation active) → 402
  *   5. budget IA lié au revenu (lib/billing/budget) : au-delà, 402 — sauf
- *      crédits achetés, toujours servis — puis plafond du jour du compte → 429
- *   6. sinon : écriture du compteur, de la place active et du débit — ensemble.
+ *      crédits achetés, toujours servis ;
+ *   6. calcul du jour du compte (budget et fusible par compte), puis fusible
+ *      global du mois — dépense + coût attendu des jobs en cours + coût attendu
+ *      de celui-ci → 429 : un job admis ne sera pas coupé par une limite connue ;
+ *   7. sinon : écriture du compteur, de la place active (avec son coût attendu)
+ *      et du débit — ensemble.
+ *
+ * Les conditions et les messages sont ceux de lib/billing/limits (`launchVerdict`) :
+ * l'affichage, les pré-contrôles de l'app et du MCP et cette réservation rendent
+ * le même verdict, mot pour mot.
  *
  * Un refus est une VALEUR renvoyée, jamais une exception (cf. authTx : un
  * ROLLBACK n'est réservé qu'aux vraies erreurs). Le débit porte la `ref` du
@@ -55,16 +64,20 @@ export type ReserveOpts = {
 
 /** Plafond de générations simultanées par compte (défaut 2 en déploiement gardé ; « unlimited » pour lever). */
 export function maxActiveJobs(): number | null {
-  return intLimit("MAX_ACTIVE_JOBS", 2);
+  return maxActiveJobsLimit();
 }
-
-/** Au-delà de cet âge, une place active est considérée orpheline (worker mort sans état terminal). */
-const SLOT_MAX_AGE_MS = 6 * 3600_000;
 
 /** Verrou transactionnel par utilisateur (Postgres) ; sqlite sérialise déjà les écritures. */
 async function lockUser(tx: AuthTx, userId: string): Promise<void> {
   if (dbDriverName() === "postgres") await tx.run(`SELECT pg_advisory_xact_lock(hashtext(?))`, userId);
 }
+
+/**
+ * Verrou de la capacité GLOBALE du mois (Postgres) : deux comptes qui lancent en
+ * même temps ne voient pas tous les deux la même marge sous le fusible du mois.
+ * Toujours pris AVANT le verrou du compte (ordre fixe : pas d'interblocage).
+ */
+const GLOBAL_LOCK = "cortex:capacite-globale";
 
 export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
   const userId = o.userId ?? currentUser();
@@ -72,131 +85,93 @@ export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
   const cost = o.costCenti ?? creditCost(o.kind);
   const billing = billingEnabled();
   const tracking = quotaTrackingActive();
-  const rateCap = tracking ? ratePerUserPerMin() : null;
-  const dayCap = tracking ? quotaFor(o.bucket) : null;
-  // Indépendant de la facturation : posé explicitement, ou défaut d'un déploiement gardé.
-  const slotCap = o.jobSlot ? maxActiveJobs() : null;
 
-  // Rien à décider ni à écrire : dev €0 nu, ou compte du propriétaire (lib/billing/owner).
-  if (!billing && rateCap === null && dayCap === null && slotCap === null && !tracking) {
+  // Rien à décider ni à écrire : dev €0 nu (aucun garde-fou, aucun store à créer).
+  if (!billing && !tracking && maxActiveJobs() === null && spendCapUsd() === null) {
     return { ok: true, ref: o.ref, costCenti: 0 };
   }
-  if (await isOwner(userId)) return { ok: true, ref: o.ref, costCenti: 0 };
-  if (billing) {
+  // Le propriétaire (lib/billing/owner) n'est ni débité ni compté ; il reste soumis
+  // au fusible GLOBAL du mois, vérifié ici comme pour tous (le verdict l'applique).
+  const owner = await isOwner(userId);
+  if (billing && !owner) {
     await ensureLedgerUnit();
     await ensureSignupCredits(userId);
   }
-  // Revenu et dépense lus AVANT la transaction : ils ne dépendent pas du verrou
-  // (la dépense s'écrit pendant les appels au modèle, pas ici), et un job déjà lancé
-  // n'a encore presque rien dépensé. Des générations simultanées voient donc la même
-  // dépense : l'écart est borné par MAX_ACTIVE_JOBS (2 par défaut) pour les jobs, par
-  // DAILY_ASSIST_QUOTA et le débit par minute pour l'assistance, et en dernier ressort
-  // par le fusible du jour SPEND_CAP_PER_USER_USD et le plafond global lié au revenu,
-  // vérifiés à chaque appel payant (lib/billing/usage).
-  let budget: Awaited<ReturnType<typeof budgetCheckFor>> = null;
-  if (billing && cost > 0) {
-    try {
-      budget = await budgetCheckFor(userId, o.bucket === "assist" ? "assist" : o.kind, cost);
-    } catch (e) {
-      // Budget invérifiable : refusé comme un plafond invérifiable (fail-closed), rien n'est débité.
-      log("error", "billing.budget_check_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
-      return { ok: false, status: 503, error: "Budget de calcul invérifiable (base indisponible) : réessaie dans un instant." };
-    }
+  const spec: LaunchSpec = { bucket: o.bucket, kind: o.kind, costCenti: cost, jobSlot: !!o.jobSlot };
+  // Dépense (jour, budget lié au revenu, mois) lue AVANT la transaction : elle s'écrit
+  // pendant les appels au modèle, pas ici. Ce qui DOIT être lu sous le verrou — le coût
+  // attendu des jobs déjà admis et encore en cours — l'est : deux lancements
+  // simultanés ne passent pas tous les deux sous la même marge.
+  let spend: Awaited<ReturnType<typeof readSpendState>>;
+  try {
+    spend = await readSpendState(userId, owner, billing);
+  } catch (e) {
+    // Budget invérifiable : refusé comme un plafond invérifiable (fail-closed), rien n'est débité.
+    log("error", "billing.budget_check_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
+    return { ok: false, status: 503, error: "Budget de calcul invérifiable (base indisponible) : réessaie dans un instant." };
   }
+  const expectedUsd = expectedJobCostUsd(o.bucket === "assist" ? "assist" : o.kind, cost);
+  const keepSlot = !!o.jobSlot && (maxActiveJobs() !== null || spend.paid);
 
   const t = nowStr();
   const day = t.slice(0, 10);
   return authTx(async (tx): Promise<Reservation> => {
+    if (dbDriverName() === "postgres" && spend.paid && spend.globalCapUsd !== null) {
+      await tx.run(`SELECT pg_advisory_xact_lock(hashtext(?))`, GLOBAL_LOCK);
+    }
     await lockUser(tx, userId);
+    if (keepSlot) await tx.run(`DELETE FROM active_jobs WHERE created_at < ?`, nowStr(-SLOT_MAX_AGE_MS));
 
-    if (rateCap !== null) {
-      const r = await tx.get<{ n: number }>(
-        `SELECT count(*) n FROM gen_events WHERE user_id = ? AND created_at >= ?`, userId, nowStr(-60_000),
-      );
-      if (Number(r?.n ?? 0) >= rateCap) {
-        return { ok: false, status: 429, error: `Trop de requêtes, patiente une minute (limite ${rateCap}/min par compte).` };
-      }
+    const counters = await readCounterState(tx, userId, owner, billing, t);
+    // Rejeu de la même réservation (même ref) : déjà débitée, elle ne se re-vérifie pas sur le solde.
+    const seen = billing && !owner ? await tx.get<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, o.ref) : undefined;
+    const state: LimitsState = { ...spend, ...counters, credits: seen ? null : counters.credits, now: t, owner, billing, storage: null };
+    const refusal = launchVerdict(state, spec);
+    if (refusal) {
+      log("info", "billing.launch_refused", { user: userId, kind: o.kind, limit: refusal.key });
+      return { ok: false, status: refusal.status, error: refusal.error };
     }
-    if (dayCap !== null) {
-      const r = await tx.get<{ n: number }>(
-        `SELECT count(*) n FROM gen_events WHERE user_id = ? AND bucket = ? AND day = ?`, userId, o.bucket, day,
-      );
-      const used = Number(r?.n ?? 0);
-      if (used >= dayCap) {
-        return {
-          ok: false, status: 429,
-          error: o.bucket === "gen"
-            ? `Quota quotidien de générations atteint (${used}/${dayCap}). Réessaie demain.`
-            : `Quota quotidien d'assistance atteint (${used}/${dayCap}). Réessaie demain.`,
-        };
+
+    if (billing && !owner && !seen && counters.credits) {
+      // DEUX POCHES, sous le verrou utilisateur : abonnement (recharge de fenêtre
+      // comprise, annuel seulement) d'abord, puis crédits achetés — décidés et
+      // écrits dans la même transaction, aucune course entre les deux.
+      const { subCenti, rechargeWindow } = counters.credits;
+      if (rechargeWindow) {
+        await tx.run(`UPDATE subscriptions SET remaining = monthly_credits, window_anchor = ?, month_anchor = ?, updated_at = ? WHERE user_id = ?`, rechargeWindow, rechargeWindow.slice(0, 7), t, userId);
       }
-    }
-    if (o.jobSlot && slotCap !== null) {
-      await tx.run(`DELETE FROM active_jobs WHERE created_at < ?`, nowStr(-SLOT_MAX_AGE_MS));
-      const r = await tx.get<{ n: number }>(`SELECT count(*) n FROM active_jobs WHERE user_id = ?`, userId);
-      if (Number(r?.n ?? 0) >= slotCap) {
-        return { ok: false, status: 429, error: `Trop de générations en cours (${slotCap} au maximum par compte). Attends la fin d'un job.` };
-      }
-    }
-    if (billing) {
-      const seen = await tx.get<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, o.ref);
-      if (!seen) {
-        // DEUX POCHES, sous le verrou utilisateur : abonnement (recharge de
-        // fenêtre comprise, annuel seulement) d'abord, puis crédits achetés —
-        // décidés et écrits dans la même transaction, aucune course entre les deux.
-        const sub = await tx.get<SubRow>(`SELECT * FROM subscriptions WHERE user_id = ?`, userId);
-        let subAvail = 0;
-        if (subscriptionLive(sub, t)) {
-          const win = rechargeDue(sub!, t);
-          if (win) {
-            await tx.run(`UPDATE subscriptions SET remaining = monthly_credits, window_anchor = ?, month_anchor = ?, updated_at = ? WHERE user_id = ?`, win, win.slice(0, 7), t, userId);
-            subAvail = Number(sub!.monthly_credits) || 0;
-          } else {
-            subAvail = Math.max(0, Number(sub!.remaining) || 0);
-          }
-        }
-        const bal = await tx.get<{ total: number | null }>(
-          `SELECT coalesce(sum(${DELTA_CENTI}), 0) total FROM credit_transactions WHERE user_id = ?`, userId,
+      if (cost > 0) {
+        const usedSub = Math.min(cost, subCenti);
+        await tx.run(
+          `INSERT INTO credit_transactions (user_id, delta, reason, ref, sub_amount, unit, created_at) VALUES (?,?,?,?,?,'centi',?)`,
+          userId, -(cost - usedSub), `génération ${o.kind}`, o.ref, usedSub, t,
         );
-        const purchased = Number(bal?.total ?? 0);
-        const refusal = insufficient(purchased + subAvail, cost, subAvail);
-        if (refusal) return { ok: false, ...refusal };
-        if (budget) {
-          const paid = subAvail + (await purchasedLedgerCenti(tx, userId, purchased));
-          const over = budgetVerdict(budget, cost, paid, { userId, kind: o.kind });
-          if (over) return { ok: false, ...over };
-        }
-        if (cost > 0) {
-          const usedSub = Math.min(cost, subAvail);
-          await tx.run(
-            `INSERT INTO credit_transactions (user_id, delta, reason, ref, sub_amount, unit, created_at) VALUES (?,?,?,?,?,'centi',?)`,
-            userId, -(cost - usedSub), `génération ${o.kind}`, o.ref, usedSub, t,
-          );
-          if (usedSub > 0) {
-            await tx.run(`UPDATE subscriptions SET remaining = remaining - ?, updated_at = ? WHERE user_id = ?`, usedSub, t, userId);
-          }
+        if (usedSub > 0) {
+          await tx.run(`UPDATE subscriptions SET remaining = remaining - ?, updated_at = ? WHERE user_id = ?`, usedSub, t, userId);
         }
       }
     }
-    if (tracking) {
+    if (tracking && !owner) {
       await tx.run(
         `INSERT INTO gen_events (user_id, bucket, kind, course, day, created_at) VALUES (?,?,?,?,?,?)`,
         userId, o.bucket, o.kind, course, day, t,
       );
     }
-    if (o.jobSlot && slotCap !== null) {
+    if (keepSlot) {
+      // La place porte le coût attendu du job : le calcul du jour et le fusible du mois
+      // le comptent tant que le job tourne (y compris ceux du propriétaire, pour le mois).
       await tx.run(
-        `INSERT INTO active_jobs (user_id, course, job_ref, created_at) VALUES (?,?,?,?) ON CONFLICT (user_id, job_ref) DO NOTHING`,
-        userId, course, o.ref, t,
+        `INSERT INTO active_jobs (user_id, course, job_ref, kind, expected_usd, created_at) VALUES (?,?,?,?,?,?) ON CONFLICT (user_id, job_ref) DO NOTHING`,
+        userId, course, o.ref, o.kind, spend.paid ? expectedUsd : 0, t,
       );
     }
-    return { ok: true, ref: o.ref, costCenti: billing ? cost : 0 };
+    return { ok: true, ref: o.ref, costCenti: billing && !owner ? cost : 0 };
   });
 }
 
 /** Libère la place « en cours » d'une réservation (job terminal, ou réservation rendue). Best-effort. */
 export async function releaseJobSlot(userId: string, ref: string): Promise<void> {
-  if (maxActiveJobs() === null) return;
+  if (maxActiveJobs() === null && !isPaidProvider(defaultProviderName())) return;
   try {
     await authRun(`DELETE FROM active_jobs WHERE user_id = ? AND job_ref = ?`, userId, ref);
   } catch (e) {

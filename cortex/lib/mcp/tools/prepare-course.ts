@@ -38,7 +38,7 @@ export default defineTool({
       if (running) return { ...base, status: "already_running" as const, job: track(running.id) };
 
       const decision = await ctx.confirm(
-        { bucket: "gen", costCenti: costForJob("prepare"), summary: `Préparer le cours ${courseLabel(c)} : ingestion des supports, format des annales, plan (plusieurs minutes).` },
+        { bucket: "gen", kind: "prepare", costCenti: costForJob("prepare"), summary: `Préparer le cours ${courseLabel(c)} : ingestion des supports, format des annales, plan (plusieurs minutes).` },
         { course: c.id },
         args.confirmation_token,
       );

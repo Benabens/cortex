@@ -57,12 +57,11 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const existing = await activeJob("exercise");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
 
-  // pré-checks AVANT de lancer le worker : fournisseur LLM + corpus + moteur LaTeX
-  const issue = await preflightGeneration("exercise");
-  if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
-
   // target du job = texte simple (rétrocompat) OU JSON {target,imageRel,note} si image/note présentes
   const jobTarget = payload.imageRel || payload.note ? JSON.stringify(payload) : (payload.target ?? "");
+  // pré-checks AVANT de lancer le worker : limites d'usage, fournisseur LLM, corpus, moteur LaTeX
+  const issue = await preflightGeneration("exercise", jobTarget);
+  if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
   let jobId: number;
   try {
     ({ id: jobId } = await createJobExclusive("exercise", jobTarget));

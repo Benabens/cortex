@@ -118,6 +118,7 @@ export default defineTool({
       const decision = await ctx.confirm(
         {
           bucket: "gen",
+          kind: jobType,
           costCenti: costForJob(jobType, target),
           summary: `Générer ${what}${focus ? " avec l'accent demandé" : ""}, ${courseLabel(c)} (10-35 min).`,
         },
