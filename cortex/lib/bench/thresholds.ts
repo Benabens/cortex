@@ -48,7 +48,7 @@ export function checkThresholds(m: Metrics, opts: ThresholdOpts = {}, ref?: Metr
 
   const min = m.perf.totalMs / 60_000;
   add("perf.duration", "Durée totale", `${Math.round(min * 10) / 10} min`, opts.maxMinutes ? `< ${opts.maxMinutes} min` : "—", opts.maxMinutes && delivered && !opts.replay ? min < opts.maxMinutes : null);
-  add("perf.cost", "Coût par examen (estimé)", `${m.perf.costUsd.toFixed(3)} $${ref ? ` (réf. ${ref.perf.costUsd.toFixed(3)} $)` : ""}`, "≤ réf. + 5 %", ref && ref.perf.costUsd > 0 && !opts.replay ? m.perf.costUsd <= ref.perf.costUsd * 1.05 : null);
+  add("perf.cost", m.perf.estimated === false ? "Coût par examen (facturé)" : "Coût par examen (estimé)", `${m.perf.costUsd.toFixed(3)} $${ref ? ` (réf. ${ref.perf.costUsd.toFixed(3)} $)` : ""}`, "≤ réf. + 5 %", ref && ref.perf.costUsd > 0 && !opts.replay ? m.perf.costUsd <= ref.perf.costUsd * 1.05 : null);
 
   const e = m.ux.etaMedianError;
   add("ux.eta", "Erreur médiane du temps restant", e === null ? "—" : pct(e), "≤ 25 %", e === null || opts.replay ? null : e <= 0.25);

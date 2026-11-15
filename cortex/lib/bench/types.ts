@@ -63,7 +63,8 @@ export type BenchRun = {
   plan: { basis?: "plan" | "sources" | "synth"; chapters: { id: number; seq: number; title: string }[]; topicChapter: Record<string, number | null> };
   /** Questions des examens générés AVANT ce run (doublons « vs examens précédents »). */
   previous: { stem: string; topic: string | null }[];
-  usage: { site: string | null; model: string; tokensIn: number; tokensOut: number; attempt: number; latencyMs: number | null }[];
+  /** llm_usage du job. tokensIn = entrée NON cachée (sens de l'API) ; coût facturé (0 sur un abonnement), absent des runs antérieurs au 15/11. */
+  usage: { site: string | null; model: string; tokensIn: number; tokensOut: number; attempt: number; latencyMs: number | null; cacheRead?: number; cacheWrite?: number; costUsd?: number }[];
   calls: TapeCall[];
   /** Tarifs de l'API au jour du run, pour estimer ce que le run aurait coûté en prod. */
   rates: Rates;

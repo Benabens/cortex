@@ -103,10 +103,10 @@ export async function readExam(examId: number): Promise<{ exam: BenchRun["exam"]
 
 /** Appels au modèle comptés pour ce job (llm_usage, CORTEX_TRACK_USAGE=1). */
 export async function readUsage(jobId: number, course: string): Promise<BenchRun["usage"]> {
-  const rows = await authAll<{ call_site: string | null; model: string; tokens_in: number; tokens_out: number; attempt: number | null; latency_ms: number | null }>(
-    `SELECT call_site, model, tokens_in, tokens_out, attempt, latency_ms FROM llm_usage WHERE course = ? AND job_id = ? ORDER BY id`, course, String(jobId),
+  const rows = await authAll<{ call_site: string | null; model: string; tokens_in: number; tokens_out: number; attempt: number | null; latency_ms: number | null; cache_read: number | null; cache_write: number | null; cost_usd: number | null }>(
+    `SELECT call_site, model, tokens_in, tokens_out, attempt, latency_ms, cache_read, cache_write, cost_usd FROM llm_usage WHERE course = ? AND job_id = ? ORDER BY id`, course, String(jobId),
   ).catch(() => []);
-  return rows.map((r) => ({ site: r.call_site, model: r.model, tokensIn: Number(r.tokens_in), tokensOut: Number(r.tokens_out), attempt: Number(r.attempt ?? 1), latencyMs: r.latency_ms == null ? null : Number(r.latency_ms) }));
+  return rows.map((r) => ({ site: r.call_site, model: r.model, tokensIn: Number(r.tokens_in), tokensOut: Number(r.tokens_out), attempt: Number(r.attempt ?? 1), latencyMs: r.latency_ms == null ? null : Number(r.latency_ms), cacheRead: Number(r.cache_read ?? 0), cacheWrite: Number(r.cache_write ?? 0), costUsd: Number(r.cost_usd ?? 0) }));
 }
 
 /** Débit du job et parts remboursées (‰) ; null si la facturation n'était pas active. */

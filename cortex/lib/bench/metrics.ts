@@ -85,7 +85,8 @@ export type Perf = {
   cacheReadTokens: number;
   cacheRate: number;
   costUsd: number;
-  estimated: true;
+  /** false : tokens et coût FACTURÉS (llm_usage d'un run sur l'API) ; true : estimés depuis la bande. */
+  estimated: boolean;
 };
 
 export type Ux = {
@@ -192,9 +193,20 @@ const CACHE_TTL_MS = 5 * 60_000;
 
 const dbTime = (s: string) => Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s.replace(" ", "T") : `${s.replace(" ", "T")}Z`);
 
+/** Tokens et coût FACTURÉS : seulement quand llm_usage a compté de l'argent (run sur l'API), échecs compris. */
+function billed(r: BenchRun): { tokensIn: number; tokensOut: number; cacheRead: number; cost: number } | null {
+  if (!r.usage.some((u) => (u.costUsd ?? 0) > 0)) return null;
+  const sum = (f: (u: BenchRun["usage"][number]) => number) => r.usage.reduce((a, u) => a + f(u), 0);
+  return {
+    tokensIn: sum((u) => u.tokensIn + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0)),
+    tokensOut: sum((u) => u.tokensOut), cacheRead: sum((u) => u.cacheRead ?? 0), cost: sum((u) => u.costUsd ?? 0),
+  };
+}
+
 function perf(r: BenchRun): Perf {
   const log = r.job?.log ?? [];
   const totalMs = r.job ? Math.max(0, dbTime(r.job.updatedAt) - dbTime(r.job.createdAt)) : 0;
+  const measured = billed(r);
   let tokensIn = 0, tokensOut = 0, cacheRead = 0, cost = 0;
   const lastWrite = new Map<string, number>();
   for (const c of r.calls) {
@@ -220,7 +232,9 @@ function perf(r: BenchRun): Perf {
     providerRetries: r.usage.filter((u) => u.attempt > 1).length,
     topupBatches: log.filter((l) => TOPUP_LINE.test(l.msg)).length,
     dedupReplacements: log.filter((l) => DEDUP_LINE.test(l.msg)).length,
-    tokensIn, tokensOut, cacheReadTokens: cacheRead, cacheRate: tokensIn ? cacheRead / tokensIn : 0, costUsd: cost, estimated: true,
+    ...(measured
+      ? { tokensIn: measured.tokensIn, tokensOut: measured.tokensOut, cacheReadTokens: measured.cacheRead, cacheRate: measured.tokensIn ? measured.cacheRead / measured.tokensIn : 0, costUsd: measured.cost, estimated: false }
+      : { tokensIn, tokensOut, cacheReadTokens: cacheRead, cacheRate: tokensIn ? cacheRead / tokensIn : 0, costUsd: cost, estimated: true }),
   };
 }
 
