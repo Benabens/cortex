@@ -658,7 +658,9 @@ Rien n'est restauré. Code de sortie ≠ 0 = sauvegarde inutilisable.
   `CORTEX_PYTHON_WASM=1` (banc de charge : `npm run pyodide:load`, borne
   globale `CORTEX_PYTHON_WASM_CONCURRENCY`, défaut 4). Avant de l'activer,
   vérifier dans les logs de build Railway la ligne « ✓ paquets Pyodide en
-  local » (sinon pandas serait téléchargé du CDN au premier usage). Elle ne
+  local » (sinon pandas serait téléchargé du CDN au premier usage). Le banc
+  a tourné sur un Mac, pas sur Railway : après activation, surveiller la
+  mémoire et le CPU du service pendant les premières générations. Elle ne
   réactive ni C, ni sympy, ni matplotlib.
   `/api/health` (avec `METRICS_TOKEN`) expose alors `checks.pythonWasm: true` et
   `verification.mode: "python-wasm"` ; sans le flag le mode reste `disabled`.
