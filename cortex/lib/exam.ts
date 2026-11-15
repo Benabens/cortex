@@ -603,7 +603,7 @@ export async function regenerateExercise(q: ExamQuestion, diagnostic: string): P
     `Réponds UNIQUEMENT avec l'objet JSON {category, concept, statement_tex, solution_tex, points}. statement_tex/solution_tex en LaTeX. Aucun fichier.`,
     JSON.stringify(ONE_EX_SCHEMA, null, 2),
   ].join("\n");
-  const text = await completeText({ prompt, model: "opus", timeoutMs: 420_000, effort: "medium" });
+  const text = await completeText({ prompt, model: "opus", timeoutMs: 420_000 });
   const r = extractJson<ExamQuestion>(text);
   return { ...r, category: q.category, points: q.points };
 }
@@ -669,9 +669,11 @@ async function generateBatch(ctx: Ctx, slots: Slot[], opts: { retryTruncated?: b
     // un lot de 3 << un appel de 6 ; surchargeable (P3 : « augmente le timeout par lot »).
     timeoutMs: Number(process.env.CORTEX_BATCH_TIMEOUT_MS) || 600_000,
     json: { schema: BATCH_SCHEMA },
-    // Prod du 13/11 (job 2) : à l'effort par défaut, la réflexion d'un lot de 2 exercices
-    // remplissait les 16 000 tokens de sortie (15 760 en moyenne), d'où des lots coupés et refaits.
-    effort: "medium",
+    // Prod du 13/11 (job 2) : la réflexion d'un lot de 2 exercices remplissait les 16 000 tokens
+    // de sortie (15 760 en moyenne) : lots coupés, facturés, puis refaits exercice par exercice.
+    // L'effort reste celui par défaut (à effort moyen, banc du 15/11 : clés et explications moins
+    // justes) ; la limite laisse au lot la place de finir.
+    maxTokens: 32_000,
   }, { check: (v) => (Array.isArray(v?.questions) ? null : "le champ « questions » (tableau) manque"), retryTruncated: opts.retryTruncated });
   const qs = Array.isArray(r.questions) ? r.questions : [];
   // réaligne catégorie/points sur les slots imposés

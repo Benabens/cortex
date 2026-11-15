@@ -4,8 +4,8 @@
  * tokens par appel pour 1 à 2,5 k de réponse visible (77 % du coût d'un QCM), et la réflexion
  * butait sur la limite de 16 000 tokens : réponse coupée, appel refait.
  * Verrouillé, contre un faux /v1/messages Anthropic (aucune dépense) : chaque appel d'un job QCM
- * et d'un examen écrit porte l'effort de son étape — moyen pour concevoir et vérifier, bas pour
- * les étapes bornées (doublons, remplacement d'un distracteur).
+ * porte l'effort de son étape — moyen pour concevoir et vérifier, bas pour les étapes bornées
+ * (doublons, remplacement d'un distracteur) ; un lot d'examen écrit garde l'effort par défaut.
  */
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -79,6 +79,7 @@ function answer(text: string): { step: string; reply: string } {
 let designs = 0;
 /** Effort demandé par étape, dans l'ordre des appels. */
 const efforts = new Map<string, (string | undefined)[]>();
+const maxTokens = new Map<string, (number | undefined)[]>();
 let llm: http.Server;
 
 function sse(res: http.ServerResponse, text: string) {
@@ -100,7 +101,7 @@ before(async () => {
     let raw = "";
     req.on("data", (c) => { raw += c; });
     req.on("end", () => {
-      const body = JSON.parse(raw || "{}") as { system?: { text: string }[]; messages: { content: { type: string; text?: string }[] }[]; output_config?: { effort?: string; format?: unknown } };
+      const body = JSON.parse(raw || "{}") as { max_tokens?: number; system?: { text: string }[]; messages: { content: { type: string; text?: string }[] }[]; output_config?: { effort?: string; format?: unknown } };
       const text = [
         ...(body.system ?? []).map((s) => s.text),
         ...body.messages.flatMap((m) => m.content.map((c) => c.text ?? "")),
@@ -108,6 +109,7 @@ before(async () => {
       ].join("\n");
       const { step, reply } = answer(text);
       efforts.set(step, [...(efforts.get(step) ?? []), body.output_config?.effort]);
+      maxTokens.set(step, [...(maxTokens.get(step) ?? []), body.max_tokens]);
       sse(res, reply);
     });
   });
@@ -117,7 +119,7 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { efforts.clear(); designs = 0; });
+beforeEach(() => { efforts.clear(); maxTokens.clear(); designs = 0; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -168,10 +170,14 @@ test("job QCM : concevoir et vérifier à effort moyen, doublons et remplacement
   assert.deepEqual(only("doublons"), ["low"]);
 });
 
-test("examen écrit (voie des cours sans architecte) : les lots d'exercices sont conçus à effort moyen", async () => {
+test("examen écrit (voie des cours sans architecte) : un lot d'exercices garde l'effort par défaut, avec la place de finir", async () => {
+  // Banc du 15/11 (cs-202-ecrit, codex-cli) : à effort moyen, 2 clés fausses et 3 explications
+  // incohérentes sur 10 exercices, contre 0 sur 5 à l'effort par défaut. La réflexion reste
+  // donc entière ; ce qui coûtait (prod du 13/11, job 2), c'étaient les lots coupés à 16 000 tokens.
   const { runWithCourse } = await import("../db/client");
   const { generateExamViaClaudeCode } = await import("../lib/exam");
   const r = await runWithCourse("ml", () => generateExamViaClaudeCode({ count: 2, verify: false }));
   assert.equal(r.produced, 2);
-  assert.deepEqual([...new Set(efforts.get("conception d'exercices"))], ["medium"]);
+  assert.deepEqual([...new Set(efforts.get("conception d'exercices"))], [undefined]);
+  assert.ok((maxTokens.get("conception d'exercices") ?? []).every((m) => (m ?? 0) >= 32_000), `max_tokens : ${maxTokens.get("conception d'exercices")}`);
 });
