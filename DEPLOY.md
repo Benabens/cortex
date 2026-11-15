@@ -175,9 +175,14 @@ CORTEX_DATA_DIR=/data
 # — moteur LLM (PAYANT → éco par défaut) —
 LLM_PROVIDER=anthropic
 LLM_API_KEY=⟨sk-ant-… (étape 5)⟩
-# Appels modèle simultanés pour toute l'instance (défaut 4). 6 en prod depuis le
-# 13/11/2026 : au-delà, la limite de débit Anthropic du palier reprend la main.
+# Appels modèle simultanés PAR JOB (défaut 4) : chaque job est un process séparé,
+# avec son propre compteur. 6 en prod depuis le 13/11/2026.
 LLM_MAX_CONCURRENCY=6
+# Jobs (workers) simultanés pour TOUTE l'instance (défaut 4) ; au-delà, file
+# d'attente FIFO, l'étudiant voit sa place. Appels au modèle simultanés au plus :
+# MAX_GLOBAL_JOBS × LLM_MAX_CONCURRENCY (24). Monter selon la mémoire du conteneur
+# (onglet Metrics de Railway, un job en cours) et la limite de débit du palier Anthropic.
+MAX_GLOBAL_JOBS=4
 
 # — auth (génération DERRIÈRE login) —
 AUTH_ENABLED=1
@@ -401,7 +406,8 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
   `AI_BUDGET_MARGIN`). En lecture seule : aucune écriture, aucune migration.
 - Garde-fous : une génération n'existe qu'après une **réservation atomique**
   (solde, quota du jour, rafale, `MAX_ACTIVE_JOBS` = 2 générations
-  simultanées par compte) ; un job échoué (rien livré) est remboursé en
+  simultanées par compte) ; pour toute l'instance, `MAX_GLOBAL_JOBS` (défaut 4)
+  workers au plus, les suivants attendent en file FIFO (`cortex/lib/job-queue.ts`) ; un job échoué (rien livré) est remboursé en
   entier, un job annulé seulement s'il n'a rien coûté au fournisseur, un
   examen incomplet au prorata des questions manquantes ; un achat remboursé ou
   contesté est repris (solde négatif → tout est bloqué).

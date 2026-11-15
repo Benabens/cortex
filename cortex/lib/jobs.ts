@@ -125,7 +125,7 @@ async function releaseReservation(type: JobType, ref: string, user: string): Pro
  */
 export async function claimJobStart(jobId: number): Promise<boolean> {
   const r = await q.run(
-    `UPDATE jobs SET worker_id = 'spawn', updated_at = ? WHERE id = ? AND status = 'queued' AND (worker_id IS NULL OR worker_id = '' OR worker_id = '${DEFERRED}')`,
+    `UPDATE jobs SET worker_id = 'spawn', updated_at = ? WHERE id = ? AND status = 'queued' AND (worker_id IS NULL OR worker_id = '' OR worker_id IN ('${DEFERRED}', '${WAITING}'))`,
     nowStr(), jobId,
   );
   return r.changes === 1;
@@ -221,6 +221,8 @@ export function jobCheckpointStore(id: number): { load(): Promise<unknown>; save
 /** Battement de cœur du worker (posé toutes les ~30 s, cf. scripts/run-job.ts). */
 export async function heartbeatJob(id: number): Promise<void> {
   await q.run(`UPDATE jobs SET heartbeat_at = ?, worker_id = ? WHERE id = ?`, nowStr(), `${process.pid}`, id);
+  const { heartbeatQueuedJob } = await import("@/lib/job-queue");
+  await heartbeatQueuedJob(currentUser(), currentCourse(), id);
 }
 
 const TERMINAL_STATES: readonly JobStatus[] = ["done", "error", "canceled"];
@@ -244,8 +246,10 @@ export async function setJob(id: number, fields: Partial<{ status: JobStatus; cu
   const finishing = !!fields.status && TERMINAL_STATES.includes(fields.status);
   const stillOpen = finishing ? "" : ` AND status NOT IN (${TERMINAL_STATES.map((st) => `'${st}'`).join(", ")})`;
   await q.run(`UPDATE jobs SET ${sets.join(", ")} WHERE id = ?${stillOpen}`, ...vals, id);
-  // État terminal : la place « génération en cours » du compte est libérée.
+  // État terminal : la place « génération en cours » du compte est libérée, et celle de l'instance.
   if (finishing) {
+    const { releaseJob } = await import("@/lib/job-queue");
+    await releaseJob(currentUser(), currentCourse(), id);
     try {
       const row = await q.get<{ credit_ref: string | null }>(`SELECT credit_ref FROM jobs WHERE id = ?`, id);
       if (row?.credit_ref) {
@@ -319,6 +323,11 @@ const ACTIVE_STATES = "('queued','running','verifying','compiling')";
  * démarre au prochain boot, et la réconciliation ne le prend pas pour un spawn raté.
  */
 const DEFERRED = "deferred";
+/**
+ * worker_id d'un job en file qui attend une place de l'instance (lib/job-queue, MAX_GLOBAL_JOBS) :
+ * sa réservation est faite, la distribution le démarre à son tour. Pas un spawn raté non plus.
+ */
+const WAITING = "waiting";
 const DEFERRED_MSG = "Mise à jour du serveur : le job démarre dans quelques minutes.";
 const HANDOFF_MSG = "Mise à jour du serveur : reprise automatique dans quelques minutes, progression conservée.";
 const ZOMBIE_MSG = "Worker interrompu (process arrêté), la génération ne tournait plus. Relance.";
@@ -363,8 +372,8 @@ export async function reconcileStaleJobs(): Promise<number> {
         // PID « vivant » mais plus aucun battement : worker suspendu ou PID recyclé.
         if (Number.isFinite(hbAge) && hbAge > STALL_MS) zombie = true;
       }
-    } else if (r.status === "queued" && r.worker_id === DEFERRED) {
-      // Différé par un arrêt gracieux : il attend la pompe du conteneur suivant, ce n'est pas un spawn raté.
+    } else if (r.status === "queued" && (r.worker_id === DEFERRED || r.worker_id === WAITING)) {
+      // Différé par un arrêt gracieux, ou en file d'attente de l'instance : ce n'est pas un spawn raté.
       continue;
     } else {
       // sans PID : le worker n'a jamais démarré → zombie si plus vieux que 120 s (startWorker persiste
@@ -394,6 +403,8 @@ export async function reconcileStaleJobs(): Promise<number> {
         attempts + 1, msg, nowStr(), r.id,
       );
       await logJob(r.id, msg);
+      const { requeueJob } = await import("@/lib/job-queue");
+      await requeueJob(currentUser(), currentCourse(), r.id);
     } else {
       const error = reservationValid ? ZOMBIE_MSG : "Reprise annulée : la réservation de crédits est absente ou n’est plus valide.";
       await setJob(r.id, { status: "error", error });
@@ -416,13 +427,13 @@ export async function pumpQueuedJobs(): Promise<number> {
   await ensureJobsSchema();
   if (isDraining()) return 0; // arrêt gracieux : c'est le conteneur suivant qui reprend
   const rows = await q.all<{ id: number; updated_at: string; created_at: string; worker_id: string | null }>(
-    `SELECT id, updated_at, created_at, worker_id FROM jobs WHERE status = 'queued' AND pid IS NULL AND (attempts > 0 OR worker_id = '${DEFERRED}')`,
+    `SELECT id, updated_at, created_at, worker_id FROM jobs WHERE status = 'queued' AND pid IS NULL AND (attempts > 0 OR worker_id IN ('${DEFERRED}', '${WAITING}'))`,
   );
   let started = 0;
   for (const r of rows) {
     const ageMs = Date.now() - new Date((r.updated_at || r.created_at) + "Z").getTime();
     // Laisse le spawn initial se poser ; un job différé, lui, n'attend plus que nous.
-    if (r.worker_id !== DEFERRED && (!Number.isFinite(ageMs) || ageMs < 5_000)) continue;
+    if (r.worker_id !== DEFERRED && r.worker_id !== WAITING && (!Number.isFinite(ageMs) || ageMs < 5_000)) continue;
     await startWorker(r.id);
     started++;
   }
@@ -463,8 +474,20 @@ export async function startWorker(jobId: number, course?: string): Promise<void>
   // faite, le job reste en file, différé : le conteneur suivant le démarre à son boot.
   if (isDraining()) {
     await q.run(
-      `UPDATE jobs SET worker_id = '${DEFERRED}', current_step = ?, updated_at = ? WHERE id = ? AND status = 'queued' AND pid IS NULL AND (worker_id IS NULL OR worker_id = '')`,
+      `UPDATE jobs SET worker_id = '${DEFERRED}', current_step = ?, updated_at = ? WHERE id = ? AND status = 'queued' AND pid IS NULL AND (worker_id IS NULL OR worker_id = '' OR worker_id = '${WAITING}')`,
       DEFERRED_MSG, nowStr(), jobId,
+    );
+    return;
+  }
+  // PLAFOND DE L'INSTANCE (lib/job-queue) : sans place libre, ou s'il n'est pas en tête de file,
+  // le job attend son tour, en file. Il est démarré par la distribution quand une place se libère.
+  const { admitJob, dispatchQueue } = await import("@/lib/job-queue");
+  const admission = await admitJob(currentUser(), c, jobId);
+  if (!admission.admitted) {
+    await q.run(
+      `UPDATE jobs SET worker_id = '${WAITING}', current_step = ?, updated_at = ? WHERE id = ? AND status = 'queued' AND pid IS NULL AND (worker_id IS NULL OR worker_id IN ('', '${DEFERRED}', '${WAITING}'))`,
+      `En file d'attente (position ${admission.position}) : le serveur est à pleine charge, ta génération démarre dès qu'une place se libère.`,
+      nowStr(), jobId,
     );
     return;
   }
@@ -483,6 +506,8 @@ export async function startWorker(jobId: number, course?: string): Promise<void>
   const child = spawn(bin, args, { cwd, detached: true, stdio: "ignore", env });
   // Suivi jusqu'à sa sortie : un arrêt gracieux attend ce worker (lib/drain).
   trackWorker(child, { jobId, user: env.CORTEX_USER, course: c });
+  // Sa place se libère à sa sortie : le suivant de la file démarre sans attendre la pompe de 60 s.
+  child.once("exit", () => { setTimeout(() => { void dispatchQueue().catch(() => {}); }, 1_000).unref(); });
   // PID persisté tout de suite (le worker le ré-écrit au démarrage) → annulable même pendant le démarrage
   if (child.pid) await setJob(jobId, { pid: child.pid });
   child.unref();
@@ -510,6 +535,8 @@ export async function handOffJobs(workers: TrackedWorker[]): Promise<number> {
       if (r.changes === 1) {
         n++;
         await logJob(w.jobId, HANDOFF_MSG);
+        const { requeueJob } = await import("@/lib/job-queue");
+        await requeueJob(w.user, w.course, w.jobId);
       }
     })).catch(() => { /* tenant illisible : la réconciliation du conteneur suivant tranchera */ });
   }

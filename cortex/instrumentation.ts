@@ -66,6 +66,12 @@ export async function register() {
           resumed += await run(() => pumpQueuedJobs());
         } catch { /* DB du cours absente : rien à faire */ }
       }
+      // File de l'instance (MAX_GLOBAL_JOBS) : les places libérées par des workers d'un autre
+      // conteneur, ou mortes sans état terminal, reviennent aux suivants.
+      try {
+        const { dispatchQueue } = await import("@/lib/job-queue");
+        resumed += await dispatchQueue();
+      } catch { /* file indisponible : la pompe suivante réessaie */ }
       return { fixed, resumed };
     };
 
