@@ -284,3 +284,65 @@ jobs:
             cd /tmp/smoke && /usr/local/bin/tectonic --chatter minimal doc.tex
             test -s doc.pdf && echo "✓ PDF compilé ($(stat -c%s doc.pdf) octets)"
           '
+
+      # Audit du 14/11/2026, n° 17 : plus rien ne tourne en root dans le conteneur.
+      - name: Conteneur sans root — processus, tectonic hors ligne, pdftoppm
+        run: |
+          set -e
+          test "$(docker exec cortex id -u)" = "10001"
+          ps_out=$(docker exec cortex ps -eo user=,args=)
+          echo "$ps_out"
+          if echo "$ps_out" | grep -E '^root ' ; then echo "::error::un processus tourne en root"; exit 1; fi
+          # Le cache de bundles préchauffé au build appartient à cortex : la compilation se fait sans réseau.
+          docker run --rm --network none --entrypoint bash cortex-app -c '
+            set -e
+            mkdir -p /tmp/s && cd /tmp/s
+            cp /app/cortex/latex/epfl-logo.png . 2>/dev/null || true
+            # Mêmes fichiers que le préchauffage du Dockerfile : seul ce document est garanti en cache.
+            cat /app/cortex/latex/preamble.tex /app/cortex/latex/figures.tex /app/cortex/latex/generic.tex > doc.tex
+            printf "\n\\\\newcommand{\\\\FOOTDATE}{Smoke}\n\\\\begin{document}\nHors ligne.\n\\\\end{document}\n" >> doc.tex
+            /usr/local/bin/tectonic --chatter minimal --only-cached doc.tex
+            pdftoppm -png -r 50 -f 1 -l 1 doc.pdf page
+            ls page*.png && echo "✓ tectonic (cache hors ligne) et pdftoppm en $(id -un)"
+          '
+
+      # Volume Railway : monté en root, conteneur lancé en root par RAILWAY_RUN_UID=0.
+      - name: Volume monté en root — chown à l'entrypoint, app en cortex, sauvegarde du volume
+        run: |
+          set -e
+          docker volume create cortex-vol >/dev/null
+          docker run --rm -v cortex-vol:/data --user 0 --entrypoint bash cortex-app -c 'mkdir -p /data/u/x && echo ancien > /data/u/x/fichier-root && chown -R root:root /data'
+          docker run -d --name cortex-v --user 0 -p 3001:3000 -e NODE_ENV= -e CORTEX_DATA_DIR=/data -v cortex-vol:/data cortex-app
+          ok=""
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:3001/api/health >/dev/null 2>&1; then ok=1; break; fi
+            sleep 2
+          done
+          if [ -z "$ok" ]; then docker logs cortex-v 2>&1 | tail -60; echo "::error::/api/health injoignable (volume)"; exit 1; fi
+          docker logs cortex-v 2>&1 | grep -q "abandon de root" || { echo "::error::l'entrypoint n'a pas abandonné root"; exit 1; }
+          # Conteneur lancé en --user 0 : un docker exec y est root par défaut, d'où --user cortex
+          # (le ps lui-même ne doit pas compter) et la sauvegarde lancée en cortex, comme en prod.
+          ps_out=$(docker exec --user cortex cortex-v ps -eo user=,args=)
+          echo "$ps_out"
+          if echo "$ps_out" | grep -E '^root ' ; then echo "::error::un processus tourne en root malgré le volume"; exit 1; fi
+          docker exec --user cortex cortex-v bash -c '
+            set -e
+            test "$(stat -c %U /data/u/x/fichier-root)" = cortex
+            echo nouveau > /data/u/x/fichier-app
+            BACKUP_DIR=/tmp/bk node_modules/.bin/tsx scripts/backup.ts --label=ci
+            ls /tmp/bk/*/ && echo "✓ volume repris par cortex, sauvegarde du volume en $(id -un)"
+          '
+          docker rm -f cortex-v >/dev/null
+
+      - name: Volume monté en root sans RAILWAY_RUN_UID — refus de démarrer, message clair
+        run: |
+          set +e
+          docker volume create cortex-vol2 >/dev/null
+          docker run --rm -v cortex-vol2:/data --user 0 --entrypoint bash cortex-app -c 'chown root:root /data && chmod 755 /data'
+          # timeout : si l'image démarrait quand même (régression), l'étape échoue vite au lieu d'attendre.
+          out=$(timeout 120 docker run --rm -e CORTEX_DATA_DIR=/data -v cortex-vol2:/data cortex-app 2>&1)
+          code=$?
+          set -e
+          echo "$out" | tail -3
+          test "$code" -ne 0 || { echo "::error::démarré sur un volume non inscriptible"; exit 1; }
+          echo "$out" | grep -q "RAILWAY_RUN_UID=0" || { echo "::error::refus sans le message attendu"; exit 1; }

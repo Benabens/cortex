@@ -97,6 +97,19 @@ RUN set -eux; \
       | tar -xz -C /usr/local/bin tectonic; \
     /usr/local/bin/tectonic --version
 
+# ── Utilisateur sans privilège ──────────────────────────────────────────────
+# L'app, les workers, tectonic et pdftoppm traitent des fichiers NON FIABLES
+# (annales importées, LaTeX généré) : une faille dans l'un d'eux ne doit pas
+# donner root (audit du 14/11/2026, n° 17). Le code reste à root, en lecture
+# seule pour `cortex` ; seuls .next/ (cache de Next), data/ (sans volume),
+# backups/ et HOME (cache tectonic, fontconfig) lui appartiennent.
+# Le volume Railway est monté en root : RAILWAY_RUN_UID=0 lance le conteneur en
+# root, l'entrypoint fait le chown du volume puis abandonne root (setpriv).
+RUN groupadd --system --gid 10001 cortex \
+    && useradd --system --uid 10001 --gid cortex --home-dir /home/cortex --create-home --shell /usr/sbin/nologin cortex
+ENV HOME=/home/cortex \
+    XDG_CACHE_HOME=/home/cortex/.cache
+
 # Aucun contenu de cours n'est embarqué : annales, slides et supports
 # appartiennent à leur université et ne sont pas dans ce dépôt. Ce que
 # l'utilisateur importe via l'app vit sur le volume persistant
@@ -106,8 +119,14 @@ WORKDIR /app
 # L'app : .next + node_modules (prod + tsx) + sources TS + latex/.
 COPY --from=build /app/cortex /app/cortex
 WORKDIR /app/cortex
+RUN mkdir -p .next/cache data backups \
+    && chown -R cortex:cortex .next data backups
 
-# Préchauffe le cache de bundles tectonic (~/.cache/Tectonic) en compilant un
+# La suite (préchauffage tectonic, test de la sandbox) et le conteneur tournent
+# en `cortex` : le cache de bundles tectonic lui appartient.
+USER cortex
+
+# Préchauffe le cache de bundles tectonic ($XDG_CACHE_HOME/Tectonic) en compilant un
 # document avec le VRAI préambule — sinon la 1ʳᵉ génération en prod télécharge
 # ~100 Mo. Toléré en échec (réseau) : le runtime retéléchargera au besoin.
 RUN set -eux; \

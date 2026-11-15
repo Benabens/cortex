@@ -81,6 +81,16 @@ ouvertes à tous, sauf lancement fermé (`INVITE_ONLY=1`, § 12).
 2. C'est là que vivront PDFs générés, uploads, annales ajoutées — ils
    survivent aux redéploiements (le code le prouve : marqueur
    `.cortex-volume-initialise` + copie non-destructive au 1er boot).
+3. **`RAILWAY_RUN_UID=0`** dans les variables du service (§ 4), **obligatoire** :
+   l'image tourne en utilisateur `cortex` (uid 10001, sans privilège), mais
+   Railway monte le volume en root. Avec cette variable, le conteneur démarre
+   en root, l'entrypoint donne le volume à `cortex` (seuls les fichiers qui ne
+   lui appartiennent pas encore) puis abandonne root (`setpriv`) : app,
+   workers, tectonic, pdftoppm et sauvegardes tournent tous en `cortex`. Sans
+   elle, le conteneur **refuse de démarrer** (« pose RAILWAY_RUN_UID=0 ») ; avec
+   un volume, l'ancien conteneur est déjà arrêté : c'est une coupure, d'où la
+   variable à poser **avant** de déployer cette image. Un fichier créé en root
+   par `railway ssh` est rendu à `cortex` au démarrage suivant.
 
 ## 3 ter. Railway — laisser finir les jobs à chaque redéploiement
 
@@ -171,6 +181,8 @@ remplace chaque `⟨…⟩` :
 DB_DRIVER=postgres
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 CORTEX_DATA_DIR=/data
+# Volume monté en root : l'entrypoint en fait le chown puis abandonne root (§ 3).
+RAILWAY_RUN_UID=0
 
 # — moteur LLM (PAYANT → éco par défaut) —
 LLM_PROVIDER=anthropic
