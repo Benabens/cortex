@@ -1,7 +1,5 @@
-import { creditsGate } from "@/lib/billing/credits";
-import { generationGate } from "@/lib/billing/guards";
-import { spendCapGate } from "@/lib/billing/usage";
-import { ReservationRefused, activeJob, createJobExclusive, startWorker, type JobType } from "@/lib/jobs";
+import { jobSpec, launchGate } from "@/lib/billing/limits";
+import { ReservationRefused, activeJob, costForJob, createJobExclusive, startWorker, type JobType } from "@/lib/jobs";
 import { log } from "@/lib/metrics";
 import { preflightGeneration } from "@/lib/preflight";
 import { planMockExam, requestedFormat, resolveExamFormat, targetKind, type ExamKind } from "@/lib/exam-format";
@@ -14,7 +12,8 @@ import { planMockExam, requestedFormat, resolveExamFormat, targetKind, type Exam
  * leur propre copie, à rapatrier ici au besoin) :
  *
  *   1. un job actif du même type est RÉUTILISÉ (un seul à la fois, rien n'est débité) ;
- *   2. pré-checks (quota du jour, solde, disque, moteur, corpus, LaTeX) ;
+ *   2. pré-checks : limites d'usage (lib/billing/limits, le verdict que la
+ *      réservation rendra), puis disque, moteur, corpus, LaTeX ;
  *   3. réservation atomique + insertion exclusive (lib/jobs createJobExclusive) ;
  *   4. démarrage du worker détaché.
  *
@@ -29,14 +28,14 @@ export async function startGenerationJob(type: JobType, target?: string): Promis
     // Le paywall précède les contraintes de contenu : à solde nul, toute
     // tentative de génération doit expliquer le coût et proposer l'achat,
     // même si le cours n'est pas encore prêt ou son format encore inconnu.
-    const billingIssue = (await generationGate("gen")) ?? (await creditsGate(type)) ?? (await spendCapGate());
+    const billingIssue = await launchGate(jobSpec(type, costForJob(type, target)));
     if (billingIssue) return { ok: false, status: billingIssue.status, error: billingIssue.error };
     // Un examen blanc suit le format du cours ; inconnu, il n'est jamais inventé (lib/exam-format).
     if (type === "exam") {
       const plan = planMockExam(requestedFormat(await resolveExamFormat(), targetKind(target)), {});
       if (plan.generator === "none") return { ok: false, status: 409, error: plan.reason };
     }
-    const issue = await preflightGeneration(type);
+    const issue = await preflightGeneration(type, target);
     return issue && { ok: false, status: issue.status, error: issue.error, command: issue.command };
   });
 }
@@ -52,7 +51,7 @@ export async function startPrepareJob(): Promise<StartedJob | StartRefused> {
   if (process.env.E2E_TEST_AUTH === "1" && process.env.E2E_TEST_RUN === "1") {
     const existing = await activeJob("prepare");
     if (existing) return { ok: true, jobId: existing.id, existing: true };
-    const gate = (await generationGate("gen")) ?? (await creditsGate("prepare"));
+    const gate = await launchGate(jobSpec("prepare", costForJob("prepare")));
     if (gate) return { ok: false, status: gate.status, error: gate.error };
     const created = await createJobExclusive("prepare");
     const { setJob } = await import("@/lib/jobs");
@@ -61,7 +60,7 @@ export async function startPrepareJob(): Promise<StartedJob | StartRefused> {
   }
   return startJob("prepare", undefined, async () => {
     // La préparation fait de la vision LLM sur les annales (coûteux) → quota + crédits comme toute génération.
-    const gate = (await generationGate("gen")) ?? (await creditsGate("prepare")) ?? (await spendCapGate());
+    const gate = await launchGate(jobSpec("prepare", costForJob("prepare")));
     return gate && { ok: false, status: gate.status, error: gate.error };
   });
 }

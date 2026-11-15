@@ -3,7 +3,6 @@ import { currentUser } from "@/db/context";
 import { authAll, authGet, authRun, authSqlite, authTx } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
-import { isOwner } from "./owner";
 
 /**
  * CRÉDITS (modèle payant).
@@ -379,10 +378,11 @@ export async function setSubscriptionStatus(p: {
  * exige le coût MINIMUM d'une génération (1 crédit).
  */
 export async function creditsGate(kind?: string, costCenti?: number): Promise<{ status: number; error: string } | null> {
-  if (!billingEnabled() || (await isOwner())) return null;
+  if (!billingEnabled()) return null;
   const cost = costCenti ?? (kind ? creditCost(kind) : CENTI);
-  const balance = await getBalanceCenti();
-  return insufficient(balance, cost);
+  const { limitGate } = await import("./limits");
+  const r = await limitGate({ bucket: "gen", kind: kind ?? "exam", costCenti: cost, jobSlot: false }, ["credits"]);
+  return r && { status: r.status, error: r.error };
 }
 
 /** Verdict de solde (partagé avec la réservation atomique) : null = passe. */

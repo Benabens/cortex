@@ -37,14 +37,15 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const existing = await activeJob("lab-exercise");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
 
-  // pré-checks AVANT de lancer le worker : fournisseur LLM + corpus + moteur LaTeX
-  const issue = await preflightGeneration("lab-exercise");
+  const resolved = resolveLab(labStr || topicStr);
+  const jobTarget = JSON.stringify({ lab: resolved.id, topic: topicStr || undefined });
+  // pré-checks AVANT de lancer le worker : limites d'usage, fournisseur LLM, corpus, moteur LaTeX
+  const issue = await preflightGeneration("lab-exercise", jobTarget);
   if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
 
-  const resolved = resolveLab(labStr || topicStr);
   let jobId: number;
   try {
-    ({ id: jobId } = await createJobExclusive("lab-exercise", JSON.stringify({ lab: resolved.id, topic: topicStr || undefined })));
+    ({ id: jobId } = await createJobExclusive("lab-exercise", jobTarget));
   } catch (e) {
     if (e instanceof ReservationRefused) return NextResponse.json({ error: e.message }, { status: e.status });
     throw e;

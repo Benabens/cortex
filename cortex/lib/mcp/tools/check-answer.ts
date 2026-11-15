@@ -46,7 +46,7 @@ export default defineTool({
       const statement = args.statement.trim();
       const answer = args.answer.trim();
       const decision = await ctx.confirm(
-        { bucket: "assist", costCenti: creditCost("assist"), summary: `Corriger une réponse avec le barème de ${courseLabel(c)}.` },
+        { bucket: "assist", kind: "check", costCenti: creditCost("assist"), summary: `Corriger une réponse avec le barème de ${courseLabel(c)}.` },
         { course: c.id, statement, answer },
         args.confirmation_token,
       );

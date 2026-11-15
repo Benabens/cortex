@@ -61,7 +61,7 @@ test("base injoignable : gardé → refus ; non gardé → null (fail-open histo
   assert.ok((await openUsage(est)) !== null, "rétabli");
 });
 
-test("revue : l'assistance débitée puis refusée par NOTRE garde (fail-closed, plafond) est remboursée ; 503", async () => {
+test("revue : l'assistance débitée puis refusée par NOTRE garde (fail-closed) est remboursée ; plafond atteint : refus avant débit", async () => {
   delete process.env.CORTEX_USER;
   process.env.BILLING_ENABLED = "1";
   const { ensureCoursesLoaded } = await import("../lib/courses");
@@ -77,12 +77,14 @@ test("revue : l'assistance débitée puis refusée par NOTRE garde (fail-closed,
     assert.equal(r.status, 503, JSON.stringify(await r.clone().json()));
   } finally { await authRun("ALTER TABLE llm_usage_off RENAME TO llm_usage"); }
   assert.equal(await credits.getBalanceCenti("owner"), 100, "0,1 crédit rendu : rien n'est parti");
-  // 2) plafond de dépense atteint : même chose.
+  // 2) plafond de dépense atteint : refusé AU LANCEMENT (lib/billing/limits, même verdict que l'affichage),
+  // avant tout débit — plus de débit suivi d'un remboursement.
   process.env.SPEND_CAP_USD = "0";
   const { resetSpendCache } = await import("../lib/billing/usage");
   resetSpendCache();
   const r2 = await POST(post());
-  assert.equal(r2.status, 503);
+  assert.equal(r2.status, 429);
+  assert.match((await r2.json()).error, /tout Cortex/);
   assert.equal(await credits.getBalanceCenti("owner"), 100);
   delete process.env.SPEND_CAP_USD;
 });
