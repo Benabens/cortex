@@ -12,6 +12,9 @@
  *   npm run backup -- --push --no-local     # supprime la copie locale après envoi
  *                                           # (c'est ce que fait le planificateur quotidien)
  *
+ * Avec STORAGE_S3_* et --push, les objets du seau de fichiers sont aussi copiés
+ * (incrémental, par empreinte) dans le stockage de sauvegarde : lib/backup-objects.
+ *
  * Idempotent (chaque exécution = un dossier distinct). Aucun secret loggé.
  * Détails : lib/backup.ts, lib/backup-s3.ts et DEPLOY.md §« Sauvegardes ».
  */
@@ -19,7 +22,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createBackup } from "../lib/backup";
-import { backupS3Config, pruneBackups, pushBackup, s3Store } from "../lib/backup-s3";
+import { readRemoteIndex, snapshotObjects, type ObjectIndex } from "../lib/backup-objects";
+import { backupS3Config, listRemoteBackups, pruneBackups, pushBackup, s3Store } from "../lib/backup-s3";
 import { dataRoot } from "../lib/courses";
 import { dbDriverName } from "../db/q";
 import { storageS3Config } from "../lib/storage";
@@ -45,12 +49,24 @@ async function main(): Promise<void> {
     : push ? path.join(os.tmpdir(), "cortex-backups") : path.join(process.cwd(), "backups");
 
   // Stockage objet : les fichiers de cours déjà dans leur seau ne sont pas recopiés
-  // chaque jour dans l'archive ; ceux qui n'y sont pas (encore) le restent.
+  // chaque jour dans l'archive ; ceux qui n'y sont pas (encore) le restent. Avec
+  // --push, le contenu du seau est copié (par empreinte, incrémental) dans le
+  // stockage de sauvegarde, et l'index du jour accompagne la sauvegarde.
   const files = storageS3Config();
+  let index: ObjectIndex | undefined;
+  if (files && cfg) {
+    const store = s3Store(cfg);
+    const latest = (await listRemoteBackups(store, cfg)).find((b) => b.complete);
+    const previous = latest ? await readRemoteIndex(store, cfg, latest.folder) : null;
+    ({ index } = await snapshotObjects({ source: sdkBucket(files), sourcePrefix: files.prefix, store, cfg, previous }));
+  } else if (files) {
+    console.log("[backup] ⚠ sans --push, les objets du seau de fichiers ne sont pas copiés (seule la sauvegarde hors site les couvre).");
+  }
   const objectStore = files
     ? {
         location: `s3://${files.bucket}/${files.prefix}`,
         inBucket: await inBucketPredicate({ bucket: sdkBucket(files), root: dataRoot(), prefix: files.prefix }),
+        ...(index ? { index } : {}),
       }
     : undefined;
   const { dir, manifest } = await createBackup({
@@ -64,6 +80,9 @@ async function main(): Promise<void> {
 
   console.log(`\n✓ Sauvegarde créée : ${dir}`);
   console.log(`  volume   : ${manifest.dataDir.archive} (${(manifest.dataDir.bytes / 1024).toFixed(0)} Kio)${manifest.objectStore ? `, fichiers de cours dans ${manifest.objectStore.location} (non archivés)` : ""}`);
+  if (manifest.objectStore?.index) {
+    console.log(`  objets   : ${manifest.objectStore.index.objects} objet(s) du seau indexé(s) (${(manifest.objectStore.index.bytes / 1024 / 1024).toFixed(1)} Mo), contenu copié par empreinte`);
+  }
   if (manifest.postgres) {
     console.log(`  postgres : ${manifest.postgres.file} (${(manifest.postgres.bytes / 1024).toFixed(0)} Kio)`);
   } else if (manifest.pglite) {

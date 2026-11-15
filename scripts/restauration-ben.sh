@@ -7,8 +7,9 @@
 #   BACKUP_DIR=<dossier> bash scripts/restauration-ben.sh   # restaure un dossier déjà rapatrié (saute 1-2)
 #
 # Côté prod : LECTURE SEULE. Le script lit les variables BACKUP_S3_* sur Railway
-# et télécharge la sauvegarde ; il n'écrit ni dans la base, ni dans le bucket, ni
-# dans les variables. La restauration se fait sur un Postgres LOCAL jetable
+# et télécharge la sauvegarde (et, si le stockage objet est actif, les objets du
+# seau de fichiers qu'elle indexe) ; il n'écrit ni dans la base, ni dans aucun
+# bucket, ni dans les variables. La restauration se fait sur un Postgres LOCAL jetable
 # (port 55490, TCP seul), arrêté et effacé à la fin.
 #
 # La copie contient les données personnelles des utilisateurs : elle va dans
@@ -34,7 +35,9 @@ if [[ "${1:-}" == "--dry-run" ]]; then
  4. pg_restore 18 --no-owner --no-acl de postgres.dump → base « restore », chronométré
  5. contrôles : tables restaurées = tables du dump, comptes, crédits, schémas des cours
  6. tar -xzf data.tar.gz → $WORK/data, chronométré
- 7. arrêt du Postgres jetable ; effacement de $WORK (sauf GARDER=1)
+ 7. si la sauvegarde indexe les objets du seau : npm run backup:objects -- <dossier> --to=$WORK/objets
+    (contenus lus dans le stockage de sauvegarde, empreinte SHA-256 de chacun vérifiée), chronométré
+ 8. arrêt du Postgres jetable ; effacement de $WORK (sauf GARDER=1)
 EOF
   exit 0
 fi
@@ -56,16 +59,20 @@ cleanup() {
 trap cleanup EXIT
 T0=$(date +%s)
 
-if [[ -n "${BACKUP_DIR:-}" ]]; then
-  DIR="$BACKUP_DIR"
-  echo "Dossier local : $DIR (étapes 1-2 sautées)"
-else
-  step "1. Accès au bucket de sauvegarde (variables lues sur Railway, non affichées)"
+load_backup_vars() {
   while IFS=$'\t' read -r key value; do export "$key=$value"; done < <(
     railway variable list -p "$PROJECT" -e production -s cortex-app --json \
       | jq -r 'to_entries[] | select(.key | startswith("BACKUP_S3_")) | [.key, .value] | @tsv'
   )
   [[ -n "${BACKUP_S3_BUCKET:-}" ]] || { echo "BACKUP_S3_BUCKET introuvable sur Railway."; exit 1; }
+}
+
+if [[ -n "${BACKUP_DIR:-}" ]]; then
+  DIR="$BACKUP_DIR"
+  echo "Dossier local : $DIR (étapes 1-2 sautées)"
+else
+  step "1. Accès au bucket de sauvegarde (variables lues sur Railway, non affichées)"
+  load_backup_vars
   echo "bucket : $BACKUP_S3_BUCKET"
 
   step "2. Rapatriement + vérification de la plus récente"
@@ -113,8 +120,30 @@ mkdir -p "$WORK/data"
 tar -xzf "$DIR/data.tar.gz" -C "$WORK/data"
 echo "extraite en $(( $(date +%s) - T3 )) s : $(du -sh "$WORK/data" | cut -f1), $(find "$WORK/data" -type f | wc -l | tr -d ' ') fichiers"
 
+OBJ_OK=1
+OBJECTS=$(jq -r '.objectStore.index.objects // empty' "$DIR/manifest.json")
+if [[ -n "$OBJECTS" ]]; then
+  step "7. Objets du seau de fichiers ($OBJECTS indexés)"
+  [[ -n "${BACKUP_S3_BUCKET:-}" ]] || load_backup_vars
+  T4=$(date +%s)
+  set +e
+  (cd "$APP" && npx tsx scripts/backup-objects.ts "$DIR" --to="$WORK/objets")
+  OBJ_RC=$?
+  set -e
+  GOT=$(find "$WORK/objets" -type f 2>/dev/null | wc -l | tr -d ' ')
+  echo "restaurés en $(( $(date +%s) - T4 )) s : $GOT fichier(s) sur $OBJECTS, $(du -sh "$WORK/objets" 2>/dev/null | cut -f1)"
+  [[ "$OBJ_RC" -eq 0 && "$GOT" -eq "$OBJECTS" ]] || OBJ_OK=0
+else
+  echo
+  echo "(pas d'index d'objets dans cette sauvegarde : stockage objet inactif ce jour-là)"
+fi
+
 TOTAL=$(( $(date +%s) - T0 ))
 echo
+if [[ "$OBJ_OK" -ne 1 ]]; then
+  echo "✗ Objets du seau INCOMPLETS : contenu manquant ou empreinte fausse (journal ci-dessus)."
+  exit 1
+fi
 if [[ "$RC" -eq 0 && "$ERRORS" -eq 0 ]]; then
   echo "✓ Restauration OK en $TOTAL s au total (dump : $RESTORE_S s). Objectif de la checklist : moins de 5 min."
 else
