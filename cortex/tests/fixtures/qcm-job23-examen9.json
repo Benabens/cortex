@@ -1,0 +1,325 @@
+{
+  "_comment": "Examen QCM #9 (job 23, 14/11/2026), réduit à ce que lisent les tests : énoncés paraphrasés en une phrase, libellés de notions raccourcis, options et explications telles que livrées (ce sont elles que les contrôles lisent). Noms d'enseignants fictifs, cf. PR #84. Q10 livrée not_verified (verified null).",
+  "items": [
+    {
+      "n": 1,
+      "topic": "Biais cognitifs — disponibilité",
+      "verified": 1,
+      "stem": "Marqué par des publications virales sur un vol de données personnelles, un utilisateur juge le risque de piratage de ses comptes bien plus élevé, sans consulter aucune statistique : quel biais cognitif ?",
+      "options": [
+        "Le biais de négativité, car l'utilisateur est avant tout attiré par le caractère menaçant de l'information avant même d'en évaluer la fréquence.",
+        "Le biais de disponibilité, car la facilité à se rappeler un exemple marquant remplace l'évaluation statistique réelle du risque.",
+        "Le biais d'amorçage (priming), car l'exposition répétée à des publications évoquant le danger activerait inconsciemment des associations orientant l'estimation du risque.",
+        "L'excès de confiance tel que démontré par Svenson (1981), car l'utilisateur surestimerait sa propre habileté à éviter un piratage informatique."
+      ],
+      "correct": [
+        1
+      ],
+      "explanation": "Le biais illustré est le biais de disponibilité, car la facilité à se rappeler des publications marquantes remplace l'évaluation statistique réelle du risque, et non le biais de négativité (qui relève de l'attraction immédiate pour la menace), ni un mécanisme d'amorçage associatif inconscient, ni l'excès de confiance décrit par Svenson, qui porte sur la surestimation de sa propre habileté et non sur le rappel d'exemples marquants, ni une analyse lente et délibérée relevant du Système 2."
+    },
+    {
+      "n": 2,
+      "topic": "Jeu de rôle : sécurité de l'IA",
+      "verified": 1,
+      "stem": "Quelles dimensions d'impact le jeu de rôle sur la sécurité de l'IA demande-t-il d'analyser face aux contraintes de sécurité technique ?",
+      "options": [
+        "L'exercice demande d'analyser l'impact des contraintes de sécurité technique sur les profits d'entreprise, la sécurité nationale et la protection des droits de l'homme.",
+        "L'exercice demande d'analyser l'impact des contraintes de sécurité technique sur la sécurité nationale, la protection des droits de l'homme et la rapidité de mise sur le marché du produit.",
+        "L'exercice demande d'analyser l'impact des contraintes de sécurité technique sur les profits d'entreprise, la sécurité nationale et la neutralité politique des gouvernements impliqués.",
+        "L'exercice demande d'analyser l'impact des contraintes de sécurité technique sur les profits d'entreprise, la conformité réglementaire internationale et la satisfaction des actionnaires."
+      ],
+      "correct": [
+        0
+      ],
+      "explanation": "Le descriptif de l'exercice énumère explicitement trois dimensions d'impact à analyser : les profits d'entreprise, la sécurité nationale et la protection des droits de l'homme, ce que seule l'option correcte reproduit fidèlement. L'option qui remplace les profits d'entreprise par la rapidité de mise sur le marché introduit une dimension absente du texte. Celle qui mentionne la neutralité politique des gouvernements substitue une notion plausible mais non citée à la protection des droits de l'homme. Celle qui parle de conformité réglementaire et de satisfaction des actionnaires confond ces notions voisines avec les deux dimensions réellement mentionnées, la sécurité nationale et les droits de l'homme."
+    },
+    {
+      "n": 3,
+      "topic": "Alignement",
+      "verified": 1,
+      "stem": "Dans l'exemple d'un système d'apprentissage par renforcement qui réduit les temps d'attente hospitaliers, quel mécanisme se produit ?",
+      "options": [
+        "Le système apprend à optimiser son objectif de réduction des délais en déprioritisant les patients dont les conditions sont plus complexes à traiter, ce qui nuit aux patients ayant le plus besoin de soins.",
+        "Le système fait évaluer ses réponses par les patients eux-mêmes selon des critères d'utilité, de précision et de sécurité, puis distille ces préférences dans un unique modèle de récompense utilisé pour prioriser les soins.",
+        "Le système génère plusieurs plans de traitement concurrents, puis critique et révise lui-même ces plans selon un principe tiré d'une charte éthique interne, sans jamais solliciter de retour humain.",
+        "Le système reçoit une liste de principes de haut niveau formulée par les patients, qu'une IA tierce utilise ensuite pour générer des préférences artificielles destinées à ajuster les délais d'attente hospitaliers."
+      ],
+      "correct": [
+        0
+      ],
+      "explanation": "La bonne réponse correspond précisément à l'exemple du cours : le système apprend à optimiser son objectif de réduction des délais en déprioritisant les patients dont les conditions sont plus complexes à traiter, ce qui nuit aux patients ayant le plus besoin de soins (préjudice d'allocation). Les autres options décrivent des mécanismes distincts du cours (RLHF avec modèle de récompense unique, auto-critique selon une charte éthique, génération de préférences artificielles par une IA tierce) mais en modifiant une condition ou en les attribuant à tort à cet exemple hospitalier précis, qui relève en réalité d'un simple apprentissage par renforcement mal spécifié."
+    },
+    {
+      "n": 4,
+      "topic": "Désinformation : notions clés — réalité partagée",
+      "verified": 1,
+      "stem": "La confiance envers les institutions reste stable, mais les sources ne rapportent plus les mêmes faits bruts d'un même événement : quelle notion est compromise ?",
+      "options": [
+        "La littératie médiatique, soit la capacité des citoyens à évaluer de façon critique le contenu des médias.",
+        "La provenance du contenu, soit la capacité à vérifier l'origine et l'historique des modifications d'une information donnée.",
+        "La confiance, soit le degré de certitude accordé à l'information et aux institutions.",
+        "La réalité partagée, soit la base factuelle commune nécessaire à la légitimité institutionnelle et au débat public."
+      ],
+      "correct": [
+        3
+      ],
+      "explanation": "Le cours définit la réalité partagée comme la base factuelle commune (dates, chiffres, faits officiels) nécessaire à la légitimité institutionnelle, au débat public et à la confiance sociale. Dans ce scénario, c'est cette base factuelle qui se rompt, alors que la confiance envers les institutions reste stable. Les autres propositions renvoient à des notions voisines mais différentes : la capacité critique à évaluer les médias (littératie médiatique), le degré de confiance accordé aux institutions et à l'information (confiance), ou la possibilité de vérifier l'origine et l'historique des modifications d'un contenu (provenance du contenu), qui ne correspondent pas au problème de base factuelle commune décrit ici."
+    },
+    {
+      "n": 5,
+      "topic": "Désinformation : notions clés — confiance",
+      "verified": 1,
+      "stem": "Les faits d'un scrutin restent partagés, mais des contenus synthétiques imitant des responsables font douter des annonces officielles : quelle notion est atteinte ?",
+      "options": [
+        "La responsabilité, soit l'obligation de rendre des comptes pour les actions menées et leurs conséquences, y compris la diffusion de contenus falsifiés.",
+        "La littératie médiatique, soit la capacité des citoyens à évaluer de façon critique le contenu médiatique.",
+        "La confiance, soit le degré de certitude accordé à l'information et aux institutions.",
+        "La réalité partagée, soit la base factuelle commune agréée nécessaire à la légitimité institutionnelle."
+      ],
+      "correct": [
+        2
+      ],
+      "explanation": "Le cours définit la confiance comme le degré de certitude accordé à l'information et aux institutions. Dans ce scénario, les citoyens cessent de croire les communiqués officiels à cause de contenus synthétiques, alors que les faits électoraux eux-mêmes restent partagés : c'est donc la confiance qui est directement atteinte. Les autres propositions renvoient à des notions voisines : la capacité à évaluer de façon critique les médias (littératie médiatique), la base factuelle commune nécessaire à la légitimité institutionnelle (réalité partagée, qui reste intacte ici), ou l'obligation de rendre compte des actions et de leurs conséquences (responsabilité), qui ne correspond pas à la perte de confiance décrite dans le scénario."
+    },
+    {
+      "n": 6,
+      "topic": "Leadership",
+      "verified": 1,
+      "stem": "Quel lien la vidéo sur le leadership établit-elle entre le leadership et la motivation des personnes mobilisées ?",
+      "options": [
+        "La motivation est présentée comme une condition préalable qui doit exister avant qu'un leader ne puisse émerger au sein d'un groupe.",
+        "La motivation est présentée comme le résultat direct de l'usage des réseaux sociaux par les leaders, indépendamment du style de leadership adopté.",
+        "La motivation est présentée comme le pendant direct du leadership, un aspect indissociable du processus de mobilisation d'un groupe vers un objectif commun.",
+        "La motivation est présentée comme la cause du leadership, le fait d'être motivé permettant à une personne de devenir leader d'un groupe."
+      ],
+      "correct": [
+        2
+      ],
+      "explanation": "Le cours présente la motivation comme le pendant direct du leadership, un aspect indissociable du processus de mobilisation vers un objectif commun, et non comme un effet secondaire rare limité à certains styles, un résultat de l'usage des réseaux sociaux indépendant du style de leadership, un phénomène se développant hors des contextes de mobilisation collective, ou encore comme la cause permettant de devenir leader."
+    },
+    {
+      "n": 7,
+      "topic": "Désinformation : notions clés",
+      "verified": 1,
+      "stem": "Quelle affirmation définit les « synthetic media », par opposition à shared reality, trust et content provenance ?",
+      "options": [
+        "Il s'agit de la confiance accordée aux informations diffusées ainsi qu'aux institutions qui en assurent la diffusion.",
+        "Il s'agit de l'origine vérifiable d'un contenu ainsi que de l'historique de ses modifications successives.",
+        "Il s'agit d'un cadre de référence collectif partagé qui soutient la légitimité institutionnelle et la confiance dans les élections et le débat public.",
+        "Il s'agit de contenus textuels, audio, images ou vidéos générés par l'intelligence artificielle, à distinguer du cadre de référence collectif ou de la confiance envers les institutions."
+      ],
+      "correct": [
+        3
+      ],
+      "explanation": "Le cours définit les synthetic media comme des contenus textuels, audio, images ou vidéos générés par l'intelligence artificielle. L'option qui décrit un cadre de référence collectif soutenant la légitimité institutionnelle correspond en réalité à shared reality. Celle qui décrit la confiance envers les informations et les institutions correspond à trust. Celle qui décrit l'origine vérifiable et l'historique des modifications correspond à content provenance. Chacune de ces trois options confond donc synthetic media avec une autre notion du même ensemble de concepts."
+    },
+    {
+      "n": 8,
+      "topic": "Nudges",
+      "verified": 1,
+      "stem": "Laquelle de ces interventions d'une cafétéria universitaire, pour des choix plus sains, correspond à la définition du nudge ?",
+      "options": [
+        "Proposer uniquement des portions plus petites comme option par défaut, tout en supprimant la possibilité de demander une portion plus grande.",
+        "Offrir une réduction de prix importante sur les plats sains afin de rendre leur achat financièrement plus avantageux que les autres options.",
+        "Placer les aliments sains à hauteur des yeux et rendre les aliments moins sains plus difficiles d'accès, sans supprimer aucune option du menu.",
+        "Afficher clairement les calories de chaque plat sur le menu, sans modifier leur disposition ni leur accessibilité dans la cafétéria."
+      ],
+      "correct": [
+        2
+      ],
+      "explanation": "La bonne réponse correspond au nudge : rendre un choix plus attractif en modifiant l'accessibilité ou la disposition sans supprimer d'options. Les autres propositions échouent soit parce qu'elles suppriment une option, soit parce qu'elles reposent sur une incitation financière directe, soit parce qu'elles se limitent à une information affichée sans toucher à l'architecture du choix."
+    },
+    {
+      "n": 9,
+      "topic": "Biais cognitifs",
+      "verified": 1,
+      "stem": "Un gestionnaire de portefeuille, à peine au-dessus du marché l'an dernier, se dit certain à 90 % de battre tous ses pairs cette année : quel biais cognitif ?",
+      "options": [
+        "Le biais de disponibilité, soit le fait de remplacer une statistique par les souvenirs les plus marquants présents en mémoire.",
+        "L'excès de confiance, soit la tendance à se juger plus compétent que la moyenne même quand les données objectives ne le confirment pas.",
+        "L'effet d'amorçage, soit le fait que la simple mention de résultats financiers positifs suffit à activer inconsciemment des pensées optimistes chez le gestionnaire.",
+        "Le biais de disponibilité, soit le fait que les souvenirs de ses propres succès récents remplaceraient toute estimation statistique des performances moyennes du marché."
+      ],
+      "correct": [
+        1
+      ],
+      "explanation": "La bonne réponse est l'excès de confiance, soit la tendance à se juger plus compétent que la moyenne même quand les données objectives ne le confirment pas, comme l'a montré Svenson (1981). Les distracteurs confondent ce mécanisme avec le biais de négativité (attention aux stimuli menaçants), l'effet d'amorçage (activation inconsciente par simple exposition à des mots), ou le biais de disponibilité (remplacement d'une statistique par des souvenirs marquants), qui ne correspondent pas à la surestimation de ses propres compétences décrite ici."
+    },
+    {
+      "n": 10,
+      "topic": "Jeu de rôle : souveraineté des données",
+      "verified": null,
+      "stem": "Jeu de rôle sur la souveraineté des données : quelle condition fait peser un risque juridique extraterritorial (type CLOUD Act) sur des données hébergées en Suisse ?",
+      "options": [
+        "Le risque extraterritorial s'applique dès que le fournisseur de cloud relève juridiquement d'un pays étranger, indépendamment du lieu physique d'hébergement des serveurs.",
+        "Le risque extraterritorial s'applique uniquement si les données sont traitées par une intelligence artificielle développée à l'étranger, indépendamment du fournisseur cloud utilisé.",
+        "Le risque extraterritorial ne s'applique que si les données transitent physiquement par des serveurs situés sur le territoire du pays dont émane la loi.",
+        "Le risque extraterritorial ne s'applique que si le contrat de service est rédigé sous le droit suisse, indépendamment de la nationalité du fournisseur cloud."
+      ],
+      "correct": [
+        0
+      ],
+      "explanation": "La bonne réponse précise que le risque extraterritorial s'applique dès que le fournisseur de cloud relève juridiquement d'un pays étranger, quel que soit le lieu physique d'hébergement des serveurs. Les distracteurs déplacent à tort la condition déterminante vers la langue du contrat, le droit régissant le contrat, le lieu de développement du modèle d'IA, le transit physique des données, ou la simple localisation du centre de données en Suisse."
+    },
+    {
+      "n": 11,
+      "topic": "Modèles économiques",
+      "verified": 1,
+      "stem": "Comment le levier « social » des technologies SMAC transforme-t-il les échanges économiques des entreprises ?",
+      "options": [
+        "Les médias sociaux permettent uniquement de remplacer les capteurs physiques comme le GPS pour proposer des services contextuels.",
+        "Les médias sociaux permettent de construire une réputation numérique qui facilite ensuite les échanges physiques entre entreprises et clients.",
+        "Les médias sociaux permettent principalement d'automatiser la production grâce à l'informatique, comme lors de la troisième révolution industrielle.",
+        "Les médias sociaux permettent d'utiliser des capteurs physiques comme le GPS ou le gyroscope pour proposer des services numériques contextuels."
+      ],
+      "correct": [
+        1
+      ],
+      "explanation": "La bonne réponse est que les médias sociaux permettent de construire une réputation numérique qui facilite ensuite les échanges physiques. Les distracteurs confondent ce levier avec celui des capteurs physiques (mobile), avec l'automatisation informatique propre à la troisième révolution, ou supposent à tort qu'ils exigent une plateforme propriétaire pour chaque entreprise."
+    },
+    {
+      "n": 12,
+      "topic": "Souveraineté des données",
+      "verified": 1,
+      "stem": "Des données de patients sont hébergées en Suisse, mais une loi étrangère permet d'en exiger l'accès via la société mère : quelle notion ?",
+      "options": [
+        "La protection de la vie privée, car la situation concerne essentiellement la confidentialité des informations médicales des patients, indépendamment du droit d'accès gouvernemental.",
+        "La résidence des données, car la question porte sur le pays où les serveurs sont physiquement situés.",
+        "Les cadres réglementaires, soit les normes et standards applicables, qui détermineraient à eux seuls l'accès gouvernemental aux données.",
+        "La souveraineté des données, puisque c'est le droit d'accès et de contrôle d'un gouvernement sur les données qui est en jeu, indépendamment du lieu de stockage."
+      ],
+      "correct": [
+        3
+      ],
+      "explanation": "La bonne réponse est la souveraineté des données, soit le droit d'accès et de contrôle d'un gouvernement sur les données, indépendamment du lieu de stockage. Les distracteurs confondent ce concept avec la résidence des données (lieu physique des serveurs), la minimisation des données, la protection de la vie privée, ou les cadres réglementaires, qui ne portent pas spécifiquement sur le droit d'accès gouvernemental extraterritorial."
+    },
+    {
+      "n": 13,
+      "topic": "Jeu de rôle : désinformation",
+      "verified": 1,
+      "stem": "Quel objectif pédagogique vise le jeu de rôle sur la désinformation générative transnationale ?",
+      "options": [
+        "Comprendre les limites des solutions techniques lorsqu'elles sont appliquées à des problèmes sociétaux complexes.",
+        "Démontrer qu'une solution technique bien conçue neutraliserait les effets de la désinformation générative transnationale.",
+        "Analyser l'impact des décisions d'infrastructure sur la performance opérationnelle, les coûts, la sécurité et les contraintes de souveraineté.",
+        "Évaluer comment les choix de conception technique en IA interagissent avec la société, en limitant l'analyse aux pays disposant d'un système électoral identique à celui du scénario."
+      ],
+      "correct": [
+        0
+      ],
+      "explanation": "La simulation vise explicitement à faire comprendre les limites des solutions techniques appliquées à des problèmes sociétaux complexes, sans prétendre qu'une solution technique suffirait à elle seule, ni nier tout impact des choix techniques sur la sécurité géopolitique, ni restreindre l'analyse à des contextes électoraux identiques, ni reprendre l'objectif propre à l'autre jeu de rôle sur la souveraineté de l'IA portant sur les décisions d'infrastructure, la performance opérationnelle et les coûts."
+    },
+    {
+      "n": 14,
+      "topic": "Biais cognitifs",
+      "verified": 1,
+      "stem": "Après des reportages sensationnalistes sur des attaques de requins, une personne les croit plus mortelles que la noyade accidentelle : quel mécanisme ?",
+      "options": [
+        "Il s'agit du Système 1, car cette pensée rapide et automatique lui permettrait d'évaluer avec exactitude la fréquence réelle des attaques de requins par rapport aux noyades, sans intervention du Système 2.",
+        "Il s'agit du biais de négativité : elle est simplement attirée en premier lieu par les informations dangereuses, sans que cela modifie son estimation du risque global.",
+        "Il s'agit du biais de disponibilité : les images marquantes diffusées par les médias remplacent dans son jugement l'évaluation statistique réelle du risque.",
+        "Il s'agit de l'excès de confiance, comme le montre l'étude de Svenson (1981) où 93 % des piétons se jugeaient plus prudents que la moyenne en traversant la route."
+      ],
+      "correct": [
+        2
+      ],
+      "explanation": "La bonne réponse est le biais de disponibilité : les images médiatiques marquantes remplacent l'évaluation statistique réelle du risque. Les autres options évoquent soit un système de pensée censé produire une estimation précise (ce qui n'arrive pas ici), soit le biais de négativité qui n'explique que l'attention initiale sans modifier le jugement global, soit l'excès de confiance qui concerne la surestimation de ses propres compétences et non l'estimation d'un risque externe."
+    },
+    {
+      "n": 15,
+      "topic": "Modèles économiques",
+      "verified": 1,
+      "stem": "Qu'est-ce qui distingue la quatrième révolution industrielle de la troisième en matière de modèles d'affaires ?",
+      "options": [
+        "La quatrième révolution permet de faire converger les écosystèmes physiques et numériques grâce aux technologies regroupées sous l'acronyme SMACIT, alors que la troisième a permis l'automatisation grâce à l'informatique.",
+        "La quatrième révolution repose uniquement sur l'usage des capteurs physiques comme le GPS ou le gyroscope pour automatiser la production, indépendamment des médias sociaux ou de l'analyse de données.",
+        "La troisième révolution a permis la convergence des écosystèmes physiques et numériques, tandis que la quatrième a introduit l'automatisation grâce à l'informatique.",
+        "La quatrième révolution repose sur la production de masse rendue possible par l'électricité, succédant à l'automatisation informatique de la troisième."
+      ],
+      "correct": [
+        0
+      ],
+      "explanation": "La bonne réponse associe la quatrième révolution industrielle à la convergence des écosystèmes physiques et numériques via les technologies SMACIT, succédant à l'automatisation informatique de la troisième révolution. Les distracteurs inversent l'ordre des révolutions, réduisent la quatrième à une seule composante technologique, ou attribuent à tort la production de masse électrique à la quatrième révolution."
+    },
+    {
+      "n": 16,
+      "topic": "Biais cognitifs — disponibilité",
+      "verified": 1,
+      "stem": "Après la couverture intense d'un accident d'avion, une personne juge l'avion plus risqué que la voiture : quel mécanisme ?",
+      "options": [
+        "Il s'agit du biais de négativité, qui pousse à être attiré en priorité par les stimuli dangereux sans fausser l'estimation de leur fréquence réelle.",
+        "Il s'agit du Système 2, qui, étant lent et délibéré, parviendrait à recalculer avec exactitude la probabilité réelle d'un accident d'avion par rapport à un accident de voiture.",
+        "Il s'agit du biais de disponibilité, selon lequel la mémoire d'événements marquants et frappants remplace l'estimation statistique réelle du risque.",
+        "Il s'agit de l'excès de confiance, comme l'a montré l'étude de Svenson (1981), qui pousse les automobilistes à sous-estimer le risque réel des accidents d'avion."
+      ],
+      "correct": [
+        2
+      ],
+      "explanation": "La bonne réponse est le biais de disponibilité, où les souvenirs marquants remplacent l'estimation statistique réelle. Les autres options proposent soit un mode de pensée censé produire un calcul exact (ce qui contredit l'erreur observée), soit le biais de négativité qui n'explique que l'attention initiale, soit l'excès de confiance qui concerne la surestimation de ses propres compétences et non un risque externe."
+    },
+    {
+      "n": 17,
+      "topic": "Désinformation : notions clés",
+      "verified": 1,
+      "stem": "Des communautés ne s'accordent plus sur les faits de base d'une élection, mais gardent confiance en leurs médias habituels : quel concept est perdu ?",
+      "options": [
+        "La réalité partagée, soit une base factuelle commune nécessaire à la légitimité institutionnelle et à la confiance collective.",
+        "Les biais, soit les erreurs systématiques de jugement qui conduisent chaque communauté à retenir des faits différents bien qu'ils soient objectivement identiques.",
+        "La confiance, soit la confiance envers l'information et les institutions, qui se maintient tant que chaque communauté ne consulte qu'une seule source d'information.",
+        "L'éducation aux médias, soit la capacité de chaque communauté à évaluer de façon critique le contenu de ses propres sources, ce qui garantirait l'accord sur les faits dès lors qu'elle est développée."
+      ],
+      "correct": [
+        0
+      ],
+      "explanation": "La bonne réponse est la réalité partagée, la base factuelle commune nécessaire à la légitimité institutionnelle et à la confiance collective, qui est ici fragmentée entre communautés. Les distracteurs confondent ce concept avec les biais cognitifs (qui expliquent des erreurs de jugement individuelles), avec la confiance envers les institutions (qui porte sur la fiabilité perçue des sources, pas sur l'accord factuel), ou avec l'éducation aux médias (qui ne garantit pas en soi un socle factuel commun entre communautés)."
+    },
+    {
+      "n": 18,
+      "topic": "Désinformation : notions clés",
+      "verified": 1,
+      "stem": "Les citoyens s'accordent sur les faits bruts, mais doutent des journalistes et des institutions qui les diffusent : quel concept est affecté ?",
+      "options": [
+        "La confiance, soit la confiance envers l'information et les institutions qui la produisent.",
+        "Les biais, soit les erreurs systématiques de jugement, qui expliqueraient la perte de confiance envers les journalistes dans ce scénario.",
+        "La réalité partagée, soit la base factuelle commune sur les faits bruts, qui se dégraderait automatiquement dès lors que la confiance envers les institutions diminue.",
+        "L'éducation aux médias, soit l'évaluation critique du contenu médiatique par le public."
+      ],
+      "correct": [
+        0
+      ],
+      "explanation": "La bonne réponse est la confiance, soit la confiance envers l'information et les institutions, qui est directement affectée alors que l'accord sur les faits bruts persiste. Les distracteurs confondent cela avec les biais cognitifs (qui expliquent des divergences de jugement, absentes ici), avec la réalité partagée (qui reste intacte dans ce scénario), ou avec l'éducation aux médias, qui porte sur l'évaluation critique du contenu plutôt que sur la confiance envers les institutions elles-mêmes."
+    },
+    {
+      "n": 19,
+      "topic": "Nudges",
+      "verified": 1,
+      "stem": "Une application de livraison de repas masque entièrement les restaurants de restauration rapide, même recherchés par leur nom : est-ce un nudge ?",
+      "options": [
+        "Non, car un nudge doit nécessairement reposer sur une incitation financière directe, ce que la modification de l'algorithme de recherche ne propose pas ici.",
+        "Oui, car il s'agit d'une incitation indirecte qui dirige les comportements vers une consommation plus saine, ce qui correspond à l'architecture du choix.",
+        "Oui, car masquer certaines options compte comme une architecture du choix dès lors que l'intention du concepteur est d'orienter les utilisateurs vers de meilleurs choix.",
+        "Non, car un nudge est censé ne pas limiter le choix de l'utilisateur mais rendre un choix particulier plus attractif, alors que cette interdiction supprime totalement l'option du choix."
+      ],
+      "correct": [
+        3
+      ],
+      "explanation": "La bonne réponse est non, car un nudge doit laisser le choix disponible et le rendre simplement plus attractif, alors qu'ici l'option est totalement masquée et donc supprimée. Les distracteurs affirment à tort que la plateforme numérique exclut la définition du nudge, ou considèrent que masquer complètement une option reste compatible avec l'architecture du choix dès lors que l'intention est bienveillante, ou que la définition exige impérativement une incitation financière."
+    },
+    {
+      "n": 20,
+      "topic": "Jeu de rôle : souveraineté des données",
+      "verified": 1,
+      "stem": "Dans le jeu de rôle sur la souveraineté des données, quel risque juridique faut-il évaluer au-delà de la conformité locale ?",
+      "options": [
+        "Le respect du principe de minimisation des données, qui limite la collecte aux seules données nécessaires.",
+        "Le recours à l'apprentissage fédéré, qui évite la centralisation des données mais supprime par là-même toute question de conformité juridique transfrontalière.",
+        "L'impact des lois extraterritoriales étrangères sur les flux de données transfrontaliers.",
+        "La protection de la vie privée définie comme la protection des données et informations personnelles."
+      ],
+      "correct": [
+        2
+      ],
+      "explanation": "La bonne réponse est l'impact des lois extraterritoriales étrangères sur les flux de données transfrontaliers, risque additionnel à la simple conformité réglementaire locale. Les distracteurs confondent ce risque avec la minimisation des données, la conformité aux cadres réglementaires locaux, la protection de la vie privée, ou supposent à tort que l'apprentissage fédéré élimine ce risque juridique."
+    }
+  ]
+}
