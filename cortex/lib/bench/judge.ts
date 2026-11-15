@@ -65,7 +65,9 @@ function renderItem(it: BenchItem, withKey: boolean): string {
     }).join("\n");
     return `${head}\n${parts}`;
   }
-  return withKey ? `${head}\n   CORRIGÉ : ${sanitizeCorpus(it.solution ?? "").slice(0, 2500)}` : head;
+  // Corrigé entier jusqu'à 12 000 caractères : un exercice de CS-202 à six sous-questions en fait
+  // 3 500 à 6 600 ; coupé à 2 500, l'arbitre jugeait « tronqué » un corrigé complet (banc du 15/11).
+  return withKey ? `${head}\n   CORRIGÉ : ${sanitizeCorpus(it.solution ?? "").slice(0, 12_000)}` : head;
 }
 
 const SOLVER_SCHEMA = { type: "object", properties: { answers: { type: "array", items: { type: "object", properties: { q: { type: "integer" }, chosen: { type: "array", items: { type: "integer" } } }, required: ["q", "chosen"] } } }, required: ["answers"] } as const;
