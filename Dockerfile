@@ -127,9 +127,13 @@ RUN set -eux; \
 #   NODE_ENV=production : `next start` le pose pour lui-même, mais prod-boot et
 #   les workers tsx tournent hors de Next ; explicite, il active leurs gardes de
 #   production (refus de démarrer sans auth, magic-link jamais loggé).
+#   NEXT_MANUAL_SIG_HANDLE=1 : `next start` ne sort plus de lui-même au SIGTERM ;
+#   instrumentation.ts laisse finir les jobs en cours avant de sortir (lib/drain),
+#   dans le délai RAILWAY_DEPLOYMENT_DRAINING_SECONDS du service.
 ENV NODE_ENV=production \
     CORTEX_TEX_BIN=/usr/local/bin/tectonic \
     NEXT_TELEMETRY_DISABLED=1 \
+    NEXT_MANUAL_SIG_HANDLE=1 \
     PORT=3000 \
     CORTEX_SEED_COURSES= \
     SEED_NEW_TENANTS=0
