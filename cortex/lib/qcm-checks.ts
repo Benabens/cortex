@@ -163,6 +163,25 @@ export type ExplanationIssue = {
 };
 
 /**
+ * Options citées entre guillemets comme vraies ou fausses, mais absentes de la version finale.
+ * Une citation est textuelle : seuls les espaces et les apostrophes typographiques sont harmonisés.
+ * Les autres citations de l'explication (auteur, terme du cours) ne sont pas des options.
+ */
+export function absentOptionCitations(explanation: string, options: string[]): string[] {
+  const exact = (s: string) => s.trim().replace(/[’]/g, "'").replace(/\s+/g, " ");
+  const available = new Set(options.map(exact));
+  const absent: string[] = [];
+  for (const match of explanation.matchAll(/[«“"]\s*([^»”"]{3,500}?)\s*[»”"]/gu)) {
+    const cited = match[1].trim();
+    const start = match.index ?? 0;
+    const around = explanation.slice(Math.max(0, start - 50), Math.min(explanation.length, start + match[0].length + 50));
+    const optionLike = /(?:bonne|mauvaise)\s+r[ée]ponse|(?:option|proposition)|\b(?:juste|correcte?|fausse?|incorrecte?|d[ée]fendable)\b/iu.test(around);
+    if (optionLike && !available.has(exact(cited))) absent.push(cited);
+  }
+  return [...new Set(absent)];
+}
+
+/**
  * L'explication réfute-t-elle autre chose que les options fausses réellement proposées ? Signale :
  *  - plus d'éléments réfutés que d'options fausses (job 23, Q10 : cinq pour trois) ;
  *  - un élément réfuté dont les mots propres (hors énoncé et clé) ne se retrouvent dans aucune
