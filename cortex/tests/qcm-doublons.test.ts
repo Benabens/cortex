@@ -214,7 +214,9 @@ test("job 17 anonymisé (14/11, HUM-285) : même règle sous un décor différen
       3: "[notion:souveraineté] [angle:résidence] [regle:loi du pays où les données résident]",
       6: "[notion:souveraineté] [angle:extraterritorialité] [regle:loi du pays qui exerce une juridiction extraterritoriale]",
     };
-    return item(call <= 2 ? `Question ${q} ${tags[q]} : que dit le cours ?` : `Remplacement ${call}.${i} [notion:biais] [angle:ancrage ${call}.${i}] [regle:ancrage ${call}.${i}] : que dit le cours ?`);
+    // Le remplaçant porte une autre notion : un troisième « biais » dépasserait le plafond de deux
+    // questions par notion (job 23) et serait retiré à son tour.
+    return item(call <= 2 ? `Question ${q} ${tags[q]} : que dit le cours ?` : `Remplacement ${call}.${i} [notion:cadrage] [angle:ancrage ${call}.${i}] [regle:ancrage ${call}.${i}] : que dit le cours ?`);
   });
   const { r, stems } = await exam(id, 6);
   assert.equal(r.count, 6);

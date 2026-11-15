@@ -211,7 +211,7 @@ test("un sujet écarté à chaque fois cède sa place à une notion de réserve 
   assert.ok(designCalls <= 2 + 2 * 2 + 2, `budget borné (${designCalls} lots pour 2 prévus)`);
 });
 
-test("réserve épuisée par les doublons : complément final sous un autre angle, nombre tenu", async () => {
+test("réserve épuisée par les doublons : la notion restée sans question est redemandée, nombre tenu sans reposer une notion", async () => {
   // 4 notions pour 4 QCM (une notion = une question) ; un seul titre de support en réserve.
   const id = await humCourse(NOTIONS.slice(0, 4));
   const { runWithCourse } = await import("../db/client");
@@ -219,7 +219,10 @@ test("réserve épuisée par les doublons : complément final sous un autre angl
   dedupe = (n) => (n <= 2 ? [{ first: 0, second: 1, reason: "même notion" }] : []);
   const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
   assert.equal(r.count, 4, `count=${r.count}`);
-  assert.ok(designPrompts.some((p) => /thème déjà couvert[\s\S]+AUTRE fait/i.test(p)), "le complément reprend une notion sous un autre angle");
+  // Plafond dur (job 23) : une notion = une question. La notion dont la question a été retirée
+  // comme doublon n'a plus de question ; c'est elle qui est redemandée, pas une notion déjà posée.
+  assert.ok(!designPrompts.some((p) => /thème déjà couvert/i.test(p)), "aucune notion déjà posée n'est reprise");
+  assert.ok(designPrompts.slice(1).some((p) => subjects(p).includes("Biais de statu quo")), designPrompts.map((p) => subjects(p).join(" | ")).join("\n"));
   assert.ok(designPrompts.some((p) => subjects(p).includes("Cours 4 — souveraineté numérique")), "le titre du support sert d'abord de réserve");
   assert.equal(dedupeCalls, 3, "le contrôle des doublons repasse sur le complément");
 });
