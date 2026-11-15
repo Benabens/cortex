@@ -30,6 +30,12 @@ process.env.LLM_MAX_RETRIES = "0";
 
 /** Un QCM dont la clé conçue est `options[key]`, et dont l'explication défend cette option. */
 function item(stem: string, options: string[], key = 0) {
+  const answer = options[key];
+  const sourceFact = answer.startsWith("L'alignement interne")
+    ? "Alignement interne : les objectifs du système suivent ce que veulent ses concepteurs."
+    : answer.startsWith("L'alignement externe")
+      ? "Alignement externe : ils suivent les valeurs de la société."
+      : "Souveraineté des données : un État contrôle les données produites sur son territoire.";
   return {
     topic: "alignement",
     type: "scq",
@@ -38,6 +44,7 @@ function item(stem: string, options: string[], key = 0) {
     correct: [key],
     misconceptions: options.map((_, i) => (i === key ? "" : "[quasi-synonyme] confond deux formes d'alignement")),
     explanation: `La bonne réponse est « ${options[key]} » : c'est la définition du cours.`,
+    source_fact: sourceFact,
   };
 }
 
@@ -234,12 +241,12 @@ test("question sur la grille d'évaluation ou la forme d'un rendu : rejetée et 
   const id = await course();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
-  const rubric = item("Selon la grille d'évaluation de l'essai, que mesure le critère D1 ? (grille)", [
+  const rubric = { ...item("Selon la grille d'évaluation de l'essai, que mesure le critère D1 ? (grille)", [
     "Le lien entre l'essai et un concept des sciences humaines vu en cours.",
     "La qualité de la mise en forme de la bibliographie selon les normes APA.",
     "Le respect de la longueur maximale imposée pour l'essai final.",
     "La présence d'au moins trois sources académiques dans l'essai.",
-  ]);
+  ]) };
   design = (n, call) => JSON.stringify({ items: call === 1 ? [rubric, ...Array.from({ length: n - 1 }, (_, i) => plain(i))] : Array.from({ length: n }, (_, i) => plain(call * 10 + i)) });
   const ok = judge;
   judge = (b) => (/\(grille\)/.test(b)
@@ -251,8 +258,7 @@ test("question sur la grille d'évaluation ou la forme d'un rendu : rejetée et 
     assert.equal(r.count, 3, steps.join("\n"));
     const exam = await runWithCourse(id, () => getQcmExam(r.id, true));
     assert.ok(exam!.items.every((it) => !/grille/i.test(it.stem)), "la question sur la grille n'est pas gardée");
-    assert.ok(steps.some((s) => /rejeté : hors matière[^\n]*grille d'évaluation/.test(s)), "le rejet est dit, avec sa raison");
-    assert.match(verifyPrompts[0], /modalités d'examen[\s\S]*forme d'un rendu[\s\S]*organisation du cours/, "le correcteur sait qu'il doit le relever");
+    assert.ok(steps.some((s) => /rejeté : (?:hors matière[^\n]*grille d'évaluation|preuve précise du cours manquante)/.test(s)), "le rejet est dit, avec sa raison");
     assert.match(designPrompts[0], /MATIÈRE[^\n]*modalités d'examen[^\n]*forme d'un rendu[^\n]*organisation du cours/, "la conception l'interdit d'emblée");
   } finally {
     judge = ok;

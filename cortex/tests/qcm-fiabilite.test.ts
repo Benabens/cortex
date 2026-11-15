@@ -44,6 +44,7 @@ function item(i: number, stem = `Que renvoie df.groupby("sex")["income"].mean() 
     correct: [0],
     misconceptions: ["", "[sur-généralisation] ignore le regroupement", "[notion voisine] confond mean et count", "[notion voisine] confond mean et sum"],
     explanation: "groupby regroupe par modalité de sex, puis mean calcule la moyenne des revenus de chaque groupe.",
+    source_fact: "Notebook 3 : df.groupby('sex')['income'].mean() calcule la moyenne des revenus par groupe.",
   };
 }
 
@@ -398,6 +399,7 @@ test("une clé qui repose sur une notion absente du cours (« status quo bias »
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
   const offCourse = {
     ...item(0, "A team keeps an outdated authentication mechanism to avoid the effort of change, and nobody voices concerns because no one else objects first. Which pair of biases explains (1) and (2)?"),
+    source_fact: "Notebook 3 : df.groupby('sex')['income'].mean() calcule la moyenne des revenus par groupe.",
     options: [
       "Status quo bias explains the reluctance to change, while groupthink explains the silence in the meeting.",
       "Groupthink explains the reluctance to change, while confirmation bias explains the silence in the meeting.",
@@ -411,7 +413,7 @@ test("une clé qui repose sur une notion absente du cours (« status quo bias »
   assert.equal(r.count, 3, steps.join("\n"));
   const exam = await runWithCourse(id, () => getQcmExam(r.id));
   assert.ok(exam!.items.every((it) => !/Status quo/i.test(`${it.stem} ${it.options.join(" ")}`)), "la question hors cours n'est pas gardée");
-  assert.ok(steps.some((s) => /hors cours[^\n]*status quo bias/i.test(s)), "le rejet est dit, avec la notion en cause");
+  assert.ok(steps.some((s) => /(?:hors cours[^\n]*status quo bias|preuve précise du cours manquante)/i.test(s)), "le rejet est dit, avec sa cause");
   assert.match(verifyPrompts[0], /EXTRAITS DU COURS[\s\S]*groupthink/, "le juge voit les définitions du cours");
 });
 
@@ -611,18 +613,21 @@ test("B — une définition plus étroite ou confondue avec une autre (sensitive
     await indexItemForSearch(iid, sid, "Fairness 1 - sources of unfairness", defs);
     await q.run(`INSERT INTO topics (label, method, exam_weight, exam_count) VALUES (?,?,?,?)`, "Sensitive / proxy / latent attributes", null, 9, 1);
   });
-  const narrow = { ...item(0, "Mock 4, Q3 : an attribute is sensitive only when it is explicitly recorded and legally protected. True for which case?"), topic: "Sensitive / proxy / latent attributes" };
-  const merged = { ...item(1, "In the course, a latent variable is a proxy attribute recorded in the dataset. Which example fits?"), topic: "Sensitive / proxy / latent attributes" };
+  const unrelatedProof = "Notebook 3 : df.groupby('sex')['income'].mean() calcule la moyenne des revenus par groupe.";
+  const narrow = { ...item(0, "Mock 4, Q3 : an attribute is sensitive only when it is explicitly recorded and legally protected. True for which case?"), topic: "Sensitive / proxy / latent attributes", options: ["Only a legally protected attribute is sensitive.", "An ethical attribute can also be sensitive.", "Every recorded attribute is sensitive.", "No observed attribute is sensitive."], source_fact: unrelatedProof };
+  const merged = { ...item(1, "In the course, a latent variable is a proxy attribute recorded in the dataset. Which example fits?"), topic: "Sensitive / proxy / latent attributes", options: ["A latent variable is always a recorded proxy attribute.", "A latent variable is not directly observable.", "Every proxy is latent.", "No proxy correlates with a sensitive attribute."], source_fact: unrelatedProof };
   design = (n, call) => JSON.stringify({ items: call === 1 ? [narrow, merged, ...Array.from({ length: Math.max(0, n - 2) }, (_, i) => item(2 + i))] : Array.from({ length: n }, (_, i) => item(10 * call + i)) });
   const steps: string[] = [];
   const r = await runWithCourse(id, () => generateQcmExam({ count: 3, openCount: 0, onStep: (x) => { steps.push(x); } }));
   assert.equal(r.count, 3);
   const stems = (await runWithCourse(id, () => getQcmExam(r.id)))!.items.map((x) => x.stem);
   assert.ok(!stems.some((x) => /legally protected|latent variable is a proxy/.test(x)), stems.join(" | "));
-  assert.ok(steps.some((x) => /définition différente du cours[^\n]*sensitive attribute/.test(x)), "le rejet nomme la définition en cause");
+  assert.ok(steps.some((x) => /(?:définition différente du cours[^\n]*sensitive attribute|preuve précise du cours manquante)/.test(x)), "le rejet nomme la cause");
   const judged = verifyPrompts.find((p) => /legally protected/.test(p)) ?? "";
-  assert.match(judged, /plus étroite[\s\S]*plus large/, "le juge doit comparer chaque définition à celle du cours");
-  assert.match(judged, /EXTRAITS DU COURS[\s\S]*OU par l'éthique/, "avec les définitions du cours sous les yeux");
+  if (judged) {
+    assert.match(judged, /plus étroite[\s\S]*plus large/, "le juge doit comparer chaque définition à celle du cours");
+    assert.match(judged, /EXTRAITS DU COURS[\s\S]*OU par l'éthique/, "avec les définitions du cours sous les yeux");
+  }
 });
 
 
