@@ -2253,30 +2253,55 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     await complement();
   }
   // Ultime regard sur la version réellement livrée : une passe globale, une réparation au plus,
-  // puis un réaudit des seules questions modifiées. Aucun complément ni réinjection après ce point.
-  if (all.length) {
-    const before = all.slice();
-    const audited = await finalQualityAudit(before, step);
-    const actions = ultimateAuditActions(before, audited);
-    const rejected = new Set(actions.drop.map((i) => before[i]));
-    const repair = actions.repair.map((i) => audited.find((x) => x.stem === before[i].stem)!).filter(Boolean);
-    all.splice(0, all.length, ...audited.filter((it) => !rejected.has(it)));
-    if (repair.length) {
-      const repaired = await replaceTrivialDistractorsBatch(repair, step, shared.language).catch(() => repair);
-      const changed = repaired.filter((it, i) => it !== repair[i]);
-      const passed = new Map((await finalQualityAudit(changed, step)).filter((it) => !it.trivialDistractors?.length).map((it) => [it.stem, it]));
-      for (const old of repair) {
-        const i = all.findIndex((it) => it.stem === old.stem);
-        if (i < 0) continue;
-        const candidate = repaired[repair.indexOf(old)];
-        const good = passed.get(candidate.stem);
-        if (good) all[i] = good;
-        else all.splice(i, 1);
+  // puis un réaudit des seules questions modifiées. Un ensemble qui a déjà franchi la porte de
+  // sortie avant une coupure (point de reprise `final`) ne la repasse pas : sinon une reprise
+  // sans aucun appel au modèle en refaisait deux (audit, doublons) à chaque redémarrage. Même
+  // dans un run sans coupure, seules les questions pas encore vues par un audit final (ajoutées
+  // après la porte de sortie, ou jamais passées par elle) sont réauditées ici : les autres l'ont
+  // déjà franchie, les réauditer une seconde fois ferait tomber sous un verdict différent une
+  // question déjà acquise, sans le filet de rattrapage de la porte de sortie.
+  if (!ckFinal && all.length) {
+    const late = all.filter((it) => !auditedStems.has(it.stem));
+    if (late.length) {
+      late.forEach((it) => auditedStems.add(it.stem));
+      const audited = await finalQualityAudit(late, step);
+      const actions = ultimateAuditActions(late, audited);
+      const rejected = new Set(actions.drop.map((i) => late[i].stem));
+      const auditedByStem = new Map(audited.map((it) => [it.stem, it]));
+      all.splice(0, all.length, ...all.filter((it) => !rejected.has(it.stem)).map((it) => auditedByStem.get(it.stem) ?? it));
+      const repair = actions.repair.map((i) => audited.find((x) => x.stem === late[i].stem)!).filter(Boolean);
+      if (repair.length) {
+        const repaired = await replaceTrivialDistractorsBatch(repair, step, shared.language).catch(() => repair);
+        const changed = repaired.filter((it, i) => it !== repair[i]);
+        const passed = new Map((await finalQualityAudit(changed, step)).filter((it) => !it.trivialDistractors?.length).map((it) => [it.stem, it]));
+        for (const old of repair) {
+          const i = all.findIndex((it) => it.stem === old.stem);
+          if (i < 0) continue;
+          const candidate = repaired[repair.indexOf(old)];
+          const good = passed.get(candidate.stem);
+          if (good) all[i] = good;
+          else all.splice(i, 1);
+        }
+      }
+      const { drop, repeats }: { drop: number[]; repeats: number[] } = all.length >= 2 ? await findDuplicates(all, strict) : { drop: [], repeats: [] };
+      repeats.forEach((i) => { if (all[i]) historicalRepeats.add(all[i].stem); });
+      if (drop.length) all.splice(0, all.length, ...all.filter((_, i) => !drop.includes(i)));
+    }
+    // Cette ultime passe peut écarter une question (doublon, clé contestée, distracteur
+    // irréparable) : le nombre demandé reste tenu, comme partout ailleurs dans ce job — un
+    // complément la recomble (son propre contrôle des doublons voit le reste de l'examen).
+    // Les QCM ainsi ajoutés n'ont, eux, jamais traversé la porte de sortie : une seule passe
+    // supplémentaire (plafonds, options en double, vérification, explications) les y soumet.
+    // Un retrait à cette passe est recomblé une dernière fois (le manque reste tenu), sans
+    // repasser la passe elle-même : l'audit est borné à ce tour unique.
+    if (all.length < count && all.length && lateBudget > 0 && !hardStop()) {
+      const before = all.length;
+      await complement();
+      if (all.length > before) {
+        await exitGate();
+        if (all.length < count && all.length && lateBudget > 0 && !hardStop()) await complement();
       }
     }
-    const { drop, repeats }: { drop: number[]; repeats: number[] } = all.length >= 2 ? await findDuplicates(all, strict) : { drop: [], repeats: [] };
-    repeats.forEach((i) => { if (all[i]) historicalRepeats.add(all[i].stem); });
-    if (drop.length) all.splice(0, all.length, ...all.filter((_, i) => !drop.includes(i)));
   }
   // Aucun appel en erreur mais tous les items écartés (mal formés) : c'est une réponse inutilisable.
   const cause = () => lastError ?? new LlmError("Toutes les questions reçues étaient mal formées.", "BAD_OUTPUT");
