@@ -369,6 +369,11 @@ function spawnJudge(runDir: string): Promise<void> {
   const env: NodeJS.ProcessEnv = { ...process.env, LLM_TAPE: replay ? `replay:${path.join(path.resolve(replay), "judge.tape.jsonl")}` : `record:${path.join(runDir, "judge.tape.jsonl")}`, LLM_TAPE_LOG: path.join(runDir, "judge.replay.jsonl") };
   delete env.LLM_MODEL_OPUS;
   delete env.CORTEX_BENCH_TRACE;
+  // Mesure payante du moteur (lib/bench/guard) : le juge, lui, reste sur l'abonnement Codex.
+  if (env.CORTEX_BENCH_PAID) {
+    for (const k of ["CORTEX_BENCH_PAID", "SPEND_CAP_USD", "ANTHROPIC_API_KEY", "LLM_API_KEY"]) delete env[k];
+    env.LLM_PROVIDER = "codex-cli";
+  }
   return new Promise((resolve, reject) => {
     const child = spawn(path.join(process.cwd(), "node_modules", ".bin", "tsx"), ["scripts/bench.ts", "judge", "--run", runDir], { cwd: process.cwd(), env, stdio: "inherit" });
     child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`juge : code ${code}`))));
