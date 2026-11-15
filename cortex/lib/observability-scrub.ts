@@ -35,6 +35,9 @@ export function redactMessage(text: string): string {
   if (cut > 0) t = t.slice(0, cut);
   t = t.replace(/\{[^{}]*\}/g, "{…}"); // \subq{énoncé}, \input{fichier}
   t = t.replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, "<e-mail>"); // identité d'un compte, avant les chemins (« @ » y est permis)
+  // Identifiants Stripe (cus_, sub_, cs_test_…, pi_, in_, evt_…) : chacun relie l'alerte à un compte.
+  // Au moins une majuscule ou un chiffre : « worker_heartbeat » et autres noms de code restent lisibles.
+  t = t.replace(/\b[a-z]{2,6}_(?:test_|live_)?(?=[a-z]*[A-Z0-9])[A-Za-z0-9]{10,}\b/g, "<id stripe>");
   // AU MOINS DEUX « / » (segment non vide de chaque côté) : un vrai chemin a plusieurs
   // niveaux (data/u/<slug>/…, une URL) ; un seul « / » est bien plus souvent une paire
   // (SCQ/MCQ), une fraction (3/4) ou « 15 $/jour » — tous vus en clair dans currentStep

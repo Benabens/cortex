@@ -4,6 +4,7 @@ import { userSlug } from "@/db/context";
 import { dataRoot } from "@/lib/courses";
 import { floatLimit, guardsActive, intLimit } from "@/lib/billing/env";
 import { log } from "@/lib/metrics";
+import { captureError } from "@/lib/observability";
 import { purgePageCache } from "@/lib/page-cache";
 import { storage } from "@/lib/storage";
 
@@ -122,6 +123,23 @@ export async function userStorageBytes(userId: string): Promise<number> {
 export type StorageRefusal = { status: 413; error: string };
 
 /**
+ * Volume plein = panne pour tout le monde : Sentry est prévenu, une fois par heure et par
+ * process au plus (un refus par envoi noierait l'alerte). Le quota d'UN compte n'alerte pas.
+ */
+const VOLUME_ALERT_EVERY_MS = 3600_000;
+let lastVolumeAlert = 0;
+function alertVolumeFull(d: { free: number; total: number }, incomingBytes: number): void {
+  log("error", "storage.volume_full", { freeBytes: d.free, totalBytes: d.total, incomingBytes });
+  const now = Date.now();
+  if (now - lastVolumeAlert < VOLUME_ALERT_EVERY_MS) return;
+  lastVolumeAlert = now;
+  const pct = Math.round((d.free / d.total) * 1000) / 10;
+  captureError(new Error(`Volume presque plein : ${pct} % libre, envois et générations refusés`), { area: "storage", alert: "volume_full" });
+}
+/** (tests) réarme l'alerte de volume plein. */
+export function resetVolumeAlertForTests(): void { lastVolumeAlert = 0; }
+
+/**
  * Marge absolue exigée pour une GÉNÉRATION (quelques artefacts : PDF d'examen,
  * corrigé, figures). La règle des 10 % convient à un ENVOI — on refuse d'ajouter
  * un gros fichier sur un volume qui se remplit — mais l'appliquer à la
@@ -159,6 +177,7 @@ export async function checkStorage(
   }
   if (disk) {
     if (tooFull(disk)) {
+      alertVolumeFull(disk, incomingBytes);
       return {
         status: 413,
         error: `Espace disque insuffisant sur le serveur pour ${opts.what ?? "accepter ce fichier"}. Réessaie plus tard ; l'équipe est prévenue.`,
