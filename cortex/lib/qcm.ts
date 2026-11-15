@@ -6,7 +6,7 @@ import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseNumbers, absentCourseTerms, corpusWindows, coursePassages, factNumbers, topicsInScope } from "@/lib/course-grounding";
 import { rewriteExplanations, rewriteExplanationsOnOptions, secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
-import { capDrops, describeExplanationIssue, duplicateAuditDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, optionHead } from "@/lib/qcm-checks";
+import { capDrops, describeExplanationIssue, duplicateAuditDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, optionHead, ultimateAuditActions } from "@/lib/qcm-checks";
 import { assignChapters, spreadOverChapters, variants } from "@/lib/coverage";
 import { normalize, tokenize } from "@/lib/text";
 import { courseRefImages } from "@/lib/course-vision";
@@ -817,7 +817,7 @@ export async function generateQcmBatch(
     ``,
     coverage,
     opts.previousStems?.length
-      ? `Déjà posées dans les examens précédents de ce cours (ne reprends ni leur énoncé, ni le fait qu'elles testent) :\n${opts.previousStems.slice(0, 15).map((x) => `  · ${sanitizeCorpus(x).slice(0, 140)}`).join("\n")}`
+      ? `Déjà posées dans les examens précédents de ce cours (ne reprends ni leur énoncé, ni le fait qu'elles testent) :\n${opts.previousStems.slice(0, 30).map((x) => `  · ${sanitizeCorpus(x).slice(0, 140)}`).join("\n")}`
       : null,
     opts.examTopics?.length
       ? `Les autres questions de l'examen portent sur : ${[...new Set(opts.examTopics)].map((t) => sanitizeCorpus(t).slice(0, 80)).join(" · ")}. Ne réutilise ni leur fonction, ni leurs données, ni leur scénario : chaque question doit rester indépendante.`
@@ -1261,7 +1261,7 @@ async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previou
       criterion,
       `Puis liste les paires en doublon selon ce critère. Compare d'abord les BONNES RÉPONSES : deux questions dont la bonne réponse est la même notion, ou qui se réussissent par le même raisonnement (la même règle, la même distinction posée dans un sens puis dans l'autre), sont des doublons ; partager des distracteurs ne suffit pas. Compare aussi l'énoncé, les options, le fait source et l'explication : recycler le même cas ou le même fait dans une autre option reste un doublon, de même que deux scénarios différents qui vérifient la même règle (regle identique). Deux notions voisines mais distinctes ne sont pas un doublon.`,
       ...(suspects.length ? [`Paires à trancher en priorité (même notion du programme ou réponses croisées), à lister en doublon si elles testent la même chose : ${suspects.map(([a, b]) => `Q${a}–Q${b}`).join(", ")}.`] : []),
-      ...(previous ? [`Liste aussi, dans "repeats", les QCM qui reprennent une question des EXAMENS PRÉCÉDENTS du cours (P…) : même notion ET même angle, même reformulée.`] : []),
+      ...(previous ? [`Liste aussi, dans "repeats", les QCM qui reprennent une question des EXAMENS PRÉCÉDENTS du cours (P…) : même fait, même règle ou même réponse logique, même si la notion, l'angle ou le décor sont reformulés.`] : []),
       ``,
       list,
       ...(previous ? [``, `QUESTIONS DES EXAMENS PRÉCÉDENTS :`, previous] : []),
@@ -2102,6 +2102,48 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     await exitGate();
     if (pass > 0 || all.length >= count || lateBudget <= 0 || hardStop()) break;
     await complement();
+  }
+  // Ultime regard sur la version réellement livrée : une passe globale, une réparation au plus,
+  // puis un réaudit des seules questions modifiées. Aucun complément ni réinjection après ce point.
+  if (all.length) {
+    const before = all.slice();
+    const audited = await finalQualityAudit(before, step);
+    const actions = ultimateAuditActions(before, audited);
+    const byStem = new Map(audited.map((it) => [it.stem, it]));
+    const repair = actions.repair.map((i) => audited.find((x) => x.stem === before[i].stem)!).filter(Boolean);
+    // Une porte ultime ne défait pas la garantie de nombre : un rejet ne part que si un candidat
+    // déjà payé, audité et compatible peut prendre sa place. Les autres verdicts audités remplacent
+    // leur version antérieure sans changer l'ordre ni le nombre.
+    for (const it of before) {
+      const i = all.indexOf(it);
+      if (i < 0) continue;
+      const checked = byStem.get(it.stem);
+      if (checked) all[i] = checked;
+      else swapOut(it, false);
+    }
+    if (repair.length) {
+      const repaired = await replaceTrivialDistractorsBatch(repair, step, shared.language).catch(() => repair);
+      const changed = repaired.filter((it, i) => it !== repair[i]);
+      const passed = new Map((await finalQualityAudit(changed, step)).filter((it) => !it.trivialDistractors?.length).map((it) => [it.stem, it]));
+      for (const old of repair) {
+        const i = all.findIndex((it) => it.stem === old.stem);
+        if (i < 0) continue;
+        const candidate = repaired[repair.indexOf(old)];
+        const good = passed.get(candidate.stem);
+        if (good) all[i] = good;
+        else swapOut(all[i], false);
+      }
+    }
+    const { drop, repeats } = all.length >= 2 ? await findDuplicates(all, strict) : { drop: [], repeats: [] };
+    repeats.forEach((i) => { if (all[i]) historicalRepeats.add(all[i].stem); });
+    // Dernier contrôle sans boucle : remplace si possible par un candidat déjà audité ; sinon garde
+    // l'acquis plutôt que de livrer moins que le nombre garanti à cause d'un ultime faux positif.
+    for (const i of [...drop].sort((a, b) => b - a)) {
+      const it = all[i];
+      if (!it) continue;
+      auditDuplicates.add(it.stem);
+      swapOut(it, false);
+    }
   }
   // Aucun appel en erreur mais tous les items écartés (mal formés) : c'est une réponse inutilisable.
   const cause = () => lastError ?? new LlmError("Toutes les questions reçues étaient mal formées.", "BAD_OUTPUT");

@@ -315,6 +315,21 @@ export function capDrops<T extends { options: string[]; correct: number[]; focus
   return [...drop].sort((a, b) => a - b);
 }
 
+/** Décisions d'une ultime passe : absent = clé/hors-cours rejeté, triviaux = une réparation. */
+export function ultimateAuditActions<T extends { stem: string; trivialDistractors?: number[] | null }>(
+  initial: T[], audited: T[],
+): { drop: number[]; repair: number[] } {
+  const byStem = new Map(audited.map((it) => [it.stem, it]));
+  const drop: number[] = [];
+  const repair: number[] = [];
+  initial.forEach((it, i) => {
+    const checked = byStem.get(it.stem);
+    if (!checked) drop.push(i);
+    else if (checked.trivialDistractors?.length) repair.push(i);
+  });
+  return { drop, repair };
+}
+
 /**
  * Retraits décidés par l'audit sémantique des doublons. En mode strict, les notions du modèle
  * restent descriptives : seul le sujet planifié est assez stable pour appliquer un plafond. Les
