@@ -3,9 +3,9 @@
  * Sonnet 5 réfléchissait au défaut « high » partout. Les sorties facturées faisaient 8 à 15 k
  * tokens par appel pour 1 à 2,5 k de réponse visible (77 % du coût d'un QCM), et la réflexion
  * butait sur la limite de 16 000 tokens : réponse coupée, appel refait.
- * Verrouillé, contre un faux /v1/messages Anthropic (aucune dépense) : chaque appel d'un job QCM
- * porte l'effort de son étape — moyen pour concevoir et vérifier, bas pour les étapes bornées
- * (doublons, remplacement d'un distracteur) ; un lot d'examen écrit garde l'effort par défaut.
+ * Baisser l'effort a dégradé la justesse au banc du 15/11 (voir chaque test) : il reste au défaut.
+ * Verrouillé, contre un faux /v1/messages Anthropic (aucune dépense) : les étapes d'un job QCM et
+ * les lots d'un examen écrit ont la place de finir leur réponse au-delà de 16 000 tokens.
  */
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -151,23 +151,22 @@ async function pandasCourse(): Promise<string> {
   return row.id;
 }
 
-test("job QCM : concevoir et vérifier à effort moyen, doublons et remplacement de distracteur à effort bas", async () => {
+test("job QCM : chaque étape réfléchit à l'effort par défaut, avec la place de finir sa réponse", async () => {
+  // Banc du 15/11 (hum-285-job14, codex-cli) : à effort moyen et bas, 3 clés fausses, 3 explications
+  // incohérentes et 2 doublons sur 20 QCM, contre 0, 0 et 0 à l'effort par défaut. L'effort reste
+  // entier ; la limite de sortie passe au-dessus des 16 000 tokens où la réflexion coupait la réponse.
   const id = await pandasCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam } = await import("../lib/qcm");
   const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
   assert.equal(r.count, 4);
   assert.deepEqual(efforts.get("autre"), undefined, `appel non reconnu : ${[...efforts.keys()].join(", ")}`);
-  const only = (step: string) => {
+  for (const step of ["conception QCM", "vérification QCM", "audit final", "remplacement de distracteurs", "doublons"]) {
     const got = efforts.get(step);
     assert.ok(got?.length, `l'étape « ${step} » a tourné`);
-    return [...new Set(got)];
-  };
-  assert.deepEqual(only("conception QCM"), ["medium"]);
-  assert.deepEqual(only("vérification QCM"), ["medium"]);
-  assert.deepEqual(only("audit final"), ["medium"]);
-  assert.deepEqual(only("remplacement de distracteurs"), ["low"]);
-  assert.deepEqual(only("doublons"), ["low"]);
+    assert.deepEqual([...new Set(got)], [undefined], `effort de « ${step} »`);
+    assert.ok((maxTokens.get(step) ?? []).every((m) => (m ?? 0) >= 32_000), `max_tokens de « ${step} » : ${maxTokens.get(step)}`);
+  }
 });
 
 test("examen écrit (voie des cours sans architecte) : un lot d'exercices garde l'effort par défaut, avec la place de finir", async () => {
