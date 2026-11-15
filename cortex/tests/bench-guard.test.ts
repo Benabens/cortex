@@ -26,6 +26,21 @@ test("une clé API chargée dans l'environnement : refusé, même vide de sens p
   assert.doesNotThrow(() => assertBenchEnv({ ...ok, ANTHROPIC_API_KEY: "" }), "une variable vide n'est pas une clé");
 });
 
+test("mesure réelle sur l'API : seulement sur opt-in explicite, avec un plafond de dépense par run", () => {
+  // Chantier coût du 15/11 : Ben autorise des runs réels limités (15 $ au total). Sans opt-in,
+  // la règle du 04/11 tient ; avec, seule la clé Anthropic passe, plafonnée par SPEND_CAP_USD
+  // (kill-switch de lib/billing/usage, compté sur la base jetable du run).
+  const paid = { ...ok, LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-ant-xxx", CORTEX_BENCH_PAID: "anthropic", SPEND_CAP_USD: "4" };
+  assert.doesNotThrow(() => assertBenchEnv(paid));
+  assert.throws(() => assertBenchEnv({ ...paid, CORTEX_BENCH_PAID: undefined }), /LLM_PROVIDER=codex-cli/);
+  for (const cap of [undefined, "", "0", "abc", "16"]) {
+    assert.throws(() => assertBenchEnv({ ...paid, SPEND_CAP_USD: cap }), /SPEND_CAP_USD/, `plafond ${cap}`);
+  }
+  assert.throws(() => assertBenchEnv({ ...paid, LLM_PROVIDER: "openai-compatible" }), /anthropic/);
+  assert.throws(() => assertBenchEnv({ ...paid, OPENAI_API_KEY: "sk-xxx" }), /OPENAI_API_KEY/);
+  assert.throws(() => assertBenchEnv({ ...paid, DATABASE_URL: "postgres://u:p@db.railway.internal:5432/railway" }), /locale/);
+});
+
 test("base distante ou dossier de données absent : refusé", () => {
   assert.throws(() => assertBenchEnv({ ...ok, DATABASE_URL: "postgres://u:p@db.railway.internal:5432/railway" }), /locale/);
   assert.throws(() => assertBenchEnv({ ...ok, DATABASE_URL: undefined }), /DATABASE_URL/);
