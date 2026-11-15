@@ -1,7 +1,8 @@
 import { maxConcurrency } from "./config";
 
 /**
- * Limiteur de concurrence global des appels LLM (LLM_MAX_CONCURRENCY, défaut 4).
+ * Limiteur de concurrence des appels LLM du PROCESS (LLM_MAX_CONCURRENCY, défaut 4) : chaque job
+ * est un process, le plafond de l'instance est MAX_GLOBAL_JOBS × ce nombre (lib/job-queue).
  * Permet de paralléliser les lots (génération/vérif) sans dépasser les rate
  * limits — les appels excédentaires attendent leur tour (FIFO).
  */

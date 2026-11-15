@@ -131,6 +131,18 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       created_at TEXT NOT NULL,
       PRIMARY KEY (user_id, job_ref)
     )`,
+    // File GLOBALE des workers (lib/job-queue) : MAX_GLOBAL_JOBS en cours au plus, FIFO au-delà.
+    `CREATE TABLE IF NOT EXISTS job_queue (
+      user_id TEXT NOT NULL,
+      course TEXT NOT NULL,
+      job_id INTEGER NOT NULL,
+      state TEXT NOT NULL,
+      enqueued_at TEXT NOT NULL,
+      started_at TEXT,
+      heartbeat_at TEXT,
+      PRIMARY KEY (user_id, course, job_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS job_queue_state_idx ON job_queue (state, enqueued_at)`,
     `CREATE TABLE IF NOT EXISTS stripe_purchases (
       session_id TEXT PRIMARY KEY,
       payment_intent TEXT,
@@ -450,6 +462,17 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       created_at text NOT NULL,
       PRIMARY KEY (user_id, job_ref)
     )`,
+    `CREATE TABLE IF NOT EXISTS public.job_queue (
+      user_id text NOT NULL,
+      course text NOT NULL,
+      job_id integer NOT NULL,
+      state text NOT NULL,
+      enqueued_at text NOT NULL,
+      started_at text,
+      heartbeat_at text,
+      PRIMARY KEY (user_id, course, job_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS job_queue_state_idx ON public.job_queue (state, enqueued_at)`,
     `CREATE TABLE IF NOT EXISTS public.stripe_purchases (
       session_id text PRIMARY KEY,
       payment_intent text,
