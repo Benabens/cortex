@@ -481,7 +481,7 @@ export async function startWorker(jobId: number, course?: string): Promise<void>
   }
   // PLAFOND DE L'INSTANCE (lib/job-queue) : sans place libre, ou s'il n'est pas en tête de file,
   // le job attend son tour, en file. Il est démarré par la distribution quand une place se libère.
-  const { admitJob, dispatchQueue } = await import("@/lib/job-queue");
+  const { admitJob, dispatchQueue, releaseJob } = await import("@/lib/job-queue");
   const admission = await admitJob(currentUser(), c, jobId);
   if (!admission.admitted) {
     await q.run(
@@ -493,7 +493,13 @@ export async function startWorker(jobId: number, course?: string): Promise<void>
   }
   // Un seul démarrage par job en file (cf. claimJobStart) : ni un job terminé,
   // ni un job déjà pris par un autre appelant ne lance de worker.
-  if (!(await claimJobStart(jobId))) return;
+  if (!(await claimJobStart(jobId))) {
+    // Admis mais pas démarré : sans autre appelant qui le lance (job terminé ou disparu), la place
+    // qu'il vient de prendre est rendue. Un job actif garde la sienne : c'est celle de son worker.
+    const row = await q.get<{ status: string }>(`SELECT status FROM jobs WHERE id = ?`, jobId);
+    if (!row || !ACTIVE_STATES.includes(`'${row.status}'`)) await releaseJob(currentUser(), c, jobId);
+    return;
+  }
   const tsxLocal = path.join(cwd, "node_modules", ".bin", "tsx");
   const useLocal = fs.existsSync(tsxLocal);
   const bin = useLocal ? tsxLocal : "npx";

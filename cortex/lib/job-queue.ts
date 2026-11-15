@@ -31,8 +31,8 @@ export function maxGlobalJobs(): number | null {
 
 /** Un worker qui a battu (ou démarré) il y a moins de ça occupe sa place (battement toutes les 30 s). */
 const HEARTBEAT_FRESH_MS = 5 * 60_000;
-/** Une entrée en attente plus vieille que ça vient d'un job perdu de vue (tenant supprimé…). */
-const WAITING_MAX_AGE_MS = 48 * 3600_000;
+/** Une entrée sans signe de vie depuis ça vient d'un job perdu de vue (tenant supprimé…). */
+const STALE_ENTRY_MAX_AGE_MS = 48 * 3600_000;
 
 /** Horodatage à la milliseconde : l'ordre FIFO ne se joue pas à la seconde près. */
 function stamp(offsetMs = 0): string {
@@ -54,7 +54,9 @@ export async function admitJob(user: string, course: string, jobId: number): Pro
     if (dbDriverName() === "postgres") await tx.run(`SELECT pg_advisory_xact_lock(hashtext('cortex:job_queue'))`);
     const now = stamp();
     const fresh = stamp(-HEARTBEAT_FRESH_MS);
-    await tx.run(`DELETE FROM job_queue WHERE state = 'waiting' AND enqueued_at < ?`, stamp(-WAITING_MAX_AGE_MS));
+    // Entrées mortes depuis 48 h, en attente ou « en cours » sans battement : aucune ne compte
+    // plus, mais sans purge la table grossirait (job jamais terminé côté tenant, tenant supprimé).
+    await tx.run(`DELETE FROM job_queue WHERE COALESCE(heartbeat_at, enqueued_at) < ?`, stamp(-STALE_ENTRY_MAX_AGE_MS));
     await tx.run(
       `INSERT INTO job_queue (user_id, course, job_id, state, enqueued_at) VALUES (?,?,?,'waiting',?) ON CONFLICT (user_id, course, job_id) DO NOTHING`,
       user, course, jobId, now,
