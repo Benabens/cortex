@@ -30,6 +30,7 @@ export { redactMessage, scrubEvent } from "@/lib/observability-scrub";
 type SentryLike = {
   init: (options: Record<string, unknown>) => void;
   captureException?: (e: unknown, hint?: Record<string, unknown>) => void;
+  flush?: (timeoutMs?: number) => Promise<boolean>;
 };
 export type InitResult = "disabled" | "enabled" | "unavailable";
 
@@ -84,6 +85,20 @@ export function captureError(e: unknown, tags: Record<string, string> = {}): voi
     _sentry.captureException(e, { tags });
   } catch {
     /* le suivi d'erreurs ne doit jamais casser le chemin d'exécution */
+  }
+}
+
+/**
+ * Attend l'envoi des erreurs en file (au plus `timeoutMs`). L'envoi du SDK est
+ * asynchrone : un worker qui appelle process.exit juste après captureError
+ * perdait l'événement. No-op si le suivi n'est pas actif ; ne lève jamais.
+ */
+export async function flushErrorTracking(timeoutMs = 2_000): Promise<void> {
+  if (!_sentry?.flush) return;
+  try {
+    await _sentry.flush(timeoutMs);
+  } catch {
+    /* idem captureError */
   }
 }
 

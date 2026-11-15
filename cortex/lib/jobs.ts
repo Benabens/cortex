@@ -398,6 +398,11 @@ export async function reconcileStaleJobs(): Promise<number> {
       const error = reservationValid ? ZOMBIE_MSG : "Reprise annulée : la réservation de crédits est absente ou n’est plus valide.";
       await setJob(r.id, { status: "error", error });
       await logJob(r.id, error);
+      // Le worker est mort sans passer par fail() : personne d'autre ne le signalera.
+      const { captureError } = await import("@/lib/observability");
+      captureError(new Error(`Job abandonné par la réconciliation : ${reservationValid ? "worker interrompu, tentatives épuisées" : "réservation absente"}`), {
+        area: "jobs", step: "reconcile", job_type: r.type,
+      });
       // Échec définitif hors du worker (celui-ci est mort sans passer par
       // fail()) → c'est ICI qu'il faut rendre les crédits : rien n'a été livré.
       await refundJobCredits({ id: r.id, type: r.type as JobType }, "failed");
