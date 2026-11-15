@@ -68,6 +68,9 @@ function runEnv(dataDir: string, url: string): void {
     BILLING_ENABLED: "1", SIGNUP_FREE_CREDITS: "100000", DAILY_GEN_QUOTA: "unlimited", DAILY_ASSIST_QUOTA: "unlimited",
     RATE_LIMIT_PER_USER_MIN: "unlimited", MAX_ACTIVE_JOBS: "unlimited", MAX_COURSES_PER_USER: "unlimited", MAX_COURSES_CREATED_PER_HOUR: "unlimited",
     CORTEX_TRACK_USAGE: "1",
+    // Budget IA lié au revenu (PR #88) : la base jetable n'a aucun paiement, il refusait tout job
+    // (« billing.budget_refused », budget 0 $). Le banc mesure le moteur, pas la politique de vente.
+    AI_BUDGET_MARGIN: "unlimited",
   });
   delete process.env.CORTEX_USER;
   delete process.env.CACHE_ENABLED;
