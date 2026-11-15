@@ -13,10 +13,9 @@
  * suppression (retenue 14 j) : `npm run backup:verify -- --list` pour choisir.
  * Code de sortie 1 si un contenu manque ou si une empreinte diffère.
  */
-import fs from "node:fs";
 import path from "node:path";
 import { readManifest, verifyChecksums } from "../lib/backup";
-import { restoreObjects, type ObjectIndex } from "../lib/backup-objects";
+import { readLocalIndex, restoreObjects } from "../lib/backup-objects";
 import { backupS3Config, s3Store } from "../lib/backup-s3";
 import { storageS3Config } from "../lib/storage";
 import { sdkBucket } from "../lib/storage/bucket";
@@ -35,7 +34,7 @@ async function main(): Promise<void> {
   const entry = manifest.objectStore?.index;
   if (!entry) throw new Error("Cette sauvegarde ne porte pas d'index des objets du seau (stockage objet inactif ce jour-là, ou sauvegarde sans --push).");
   verifyChecksums(path.resolve(dir), manifest);
-  const index = JSON.parse(fs.readFileSync(path.join(dir, entry.file), "utf8")) as ObjectIndex;
+  const index = readLocalIndex(dir, entry)!;
 
   const cfg = backupS3Config();
   if (!cfg) throw new Error("BACKUP_S3_* non posés : les contenus sont dans le stockage de sauvegarde.");

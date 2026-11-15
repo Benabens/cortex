@@ -18,7 +18,7 @@ import path from "node:path";
 
 import { createBackup } from "../lib/backup";
 import { backupS3Config, listRemoteBackups, pruneBackups, pushBackup } from "../lib/backup-s3";
-import { readRemoteIndex, restoreObjects, snapshotObjects, verifyRemoteObjects } from "../lib/backup-objects";
+import { pruneBlobs, readRemoteIndex, restoreObjects, snapshotObjects, verifyRemoteObjects } from "../lib/backup-objects";
 import { fakeBucket } from "./helpers/fake-bucket";
 
 const tmps: string[] = [];
@@ -168,4 +168,66 @@ test("restauration vers un seau de fichiers neuf : mêmes clés sous son préfix
   assert.deepEqual([...fresh.objects.keys()].sort(), ["neuf/u/ben/ml/exams/e.pdf", "neuf/u/ben/ml/refs/a.pdf"]);
   assert.equal(fresh.objects.get("neuf/u/ben/ml/refs/a.pdf")?.body.toString(), "%PDF-a");
   assert.equal(fresh.objects.get("neuf/u/ben/ml/refs/a.pdf")?.contentType, "application/pdf");
+});
+
+test("14 j comptés depuis la suppression : un objet supprimé juste avant la sauvegarde suivante reste restaurable 14 j pleins", async () => {
+  const DAY = 86_400_000;
+  const HOUR = 3_600_000;
+  const t0 = new Date("2026-11-01T03:00:00Z");
+  const clock = { now: t0 };
+  const backup = fakeBucket(clock);
+  const source = await filesBucket({ "u/ben/ml/refs/a.pdf": "%PDF-a", "u/ben/ml/refs/b.pdf": "%PDF-b" });
+  const dataDir = mkTmp("cortex-objdata-");
+  fs.writeFileSync(path.join(dataDir, "auth.db"), "db");
+  async function daily(previous: Awaited<ReturnType<typeof snapshotObjects>>["index"] | null) {
+    const snap = await snapshotObjects({ source: source.bucket, sourcePrefix: "prod/", store: backup.bucket, cfg, previous, ...quiet });
+    const { dir } = await createBackup({
+      dataDir, backupDir: mkTmp("cortex-objout-"), dbDriver: "sqlite", now: clock.now, log: () => {},
+      objectStore: { location: "s3://cortex-files/prod/", inBucket: () => false, index: snap.index },
+    });
+    return { ...(await pushBackup(backup.bucket, cfg, dir, quiet)), index: snap.index };
+  }
+  const day0 = await daily(null);
+  const deletedAt = t0.getTime() + 23 * HOUR; // supprimé une heure avant la sauvegarde du lendemain
+  await source.bucket.remove(["prod/u/ben/ml/refs/b.pdf"]);
+  let prev = day0.index;
+  for (let d = 1; d <= 14; d++) {
+    clock.now = new Date(t0.getTime() + d * DAY);
+    prev = (await daily(prev)).index;
+    await pruneBackups(backup.bucket, cfg, clock.now, quiet);
+  }
+  // 14 j moins une heure après la suppression : b est encore cité par une sauvegarde retenue.
+  const justBefore = new Date(deletedAt + 14 * DAY - HOUR);
+  clock.now = justBefore;
+  await pruneBackups(backup.bucket, cfg, justBefore, quiet);
+  const still = await readRemoteIndex(backup.bucket, cfg, day0.folder);
+  assert.ok(still?.objects.some((o) => o.key === "u/ben/ml/refs/b.pdf"), "la sauvegarde d'avant la suppression est retenue");
+  const dest = mkTmp("cortex-objrestore-");
+  await restoreObjects({ store: backup.bucket, cfg, index: still!, toDir: dest, ...quiet });
+  assert.equal(fs.readFileSync(path.join(dest, "u/ben/ml/refs/b.pdf"), "utf8"), "%PDF-b");
+});
+
+test("les marqueurs de dossier du seau (clé finissant par /) ne sont pas indexés : la restauration n'échoue pas dessus", async () => {
+  const source = await filesBucket({ "u/ben/ml/refs/a.pdf": "%PDF-a" });
+  await source.bucket.put("prod/u/ben/ml/refs/", Buffer.alloc(0));
+  const backup = fakeBucket();
+  const { index } = await snapshotObjects({ source: source.bucket, sourcePrefix: "prod/", store: backup.bucket, cfg, ...quiet });
+  assert.deepEqual(index.objects.map((o) => o.key), ["u/ben/ml/refs/a.pdf"]);
+  assert.equal((await restoreObjects({ store: backup.bucket, cfg, index, toDir: mkTmp("cortex-objrestore-"), ...quiet })).restored, 1);
+});
+
+test("un contenu déjà présent mais qu'aucune sauvegarde ne cite (orphelin ancien) est renvoyé : sa date repart, la rétention ne l'efface pas sous l'index du jour", async () => {
+  const DAY = 86_400_000;
+  const now = new Date("2026-11-20T03:00:00Z");
+  const clock = { now: new Date(now.getTime() - 10 * DAY) };
+  const backup = fakeBucket(clock);
+  const orphan = `cortex/_objets/${sha("%PDF-a").slice(0, 2)}/${sha("%PDF-a")}`;
+  await backup.bucket.put(orphan, Buffer.from("%PDF-a")); // reste d'une sauvegarde purgée, daté d'il y a 10 j
+  clock.now = now;
+  const source = await filesBucket({ "u/ben/ml/refs/a.pdf": "%PDF-a" });
+  const snap = await snapshotObjects({ source: source.bucket, sourcePrefix: "prod/", store: backup.bucket, cfg, previous: null, ...quiet });
+  assert.equal(snap.uploaded, 1);
+  // Une purge concurrente, avant que l'index du jour ne soit envoyé, ne le voit pas encore cité.
+  assert.equal(await pruneBlobs(backup.bucket, cfg, [], now, quiet), 0);
+  assert.ok(backup.objects.has(orphan));
 });

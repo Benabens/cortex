@@ -616,7 +616,8 @@ sont posées, **le serveur lui-même** lance chaque jour (à partir de
 `BACKUP_HOUR_UTC`, défaut 3 h UTC) `npm run backup -- --push --prune --no-local` :
 dump `pg_dump` + archive du volume → bucket S3-compatible (Cloudflare R2 :
 10 Go gratuits, sans frais de sortie ; Backblaze B2 ; MinIO…), puis rétention
-`BACKUP_KEEP_DAYS` (défaut 14 ; **le dernier dossier complet n'est jamais
+`BACKUP_KEEP_DAYS` (défaut 14, comptés depuis qu'une sauvegarde a été
+**remplacée** par la suivante ; **le dernier dossier complet n'est jamais
 supprimé**). Un marqueur en base (`app_meta.backup:daily`) garantit **une seule
 exécution par jour** même avec deux instances pendant un redéploiement ; un
 échec rend le marqueur et le tick suivant (30 min) réessaie. Une configuration
@@ -661,14 +662,15 @@ est alors valide. Le seau, lui, est couvert par la sauvegarde **hors site**
 (`--push`, donc la quotidienne) :
 
 - chaque objet du seau est copié dans le bucket de sauvegarde, **une fois par
-  contenu** (`<BACKUP_S3_PREFIX>/_objets/<sha256>`) : un objet inchangé n'est
+  contenu** (`<BACKUP_S3_PREFIX>/_objets/<sha256[0:2]>/<sha256>`) : un objet inchangé n'est
   ni relu ni renvoyé, la copie quotidienne est incrémentale ;
 - chaque sauvegarde porte l'index du seau à son instant (`objects.json`, clé →
   empreinte, couvert par le manifeste) ;
 - **suppressions différées** : un objet supprimé du seau sort des index suivants
   mais reste dans ceux des jours retenus. Il se restaure donc pendant
-  `BACKUP_KEEP_DAYS` (14 j) ; son contenu est effacé quand plus aucune
-  sauvegarde retenue ne le cite (la rétention garde toujours la dernière complète).
+  `BACKUP_KEEP_DAYS` (14 j) pleins après sa suppression ; son contenu est effacé
+  quand plus aucune sauvegarde retenue ne le cite. Seule limite : un objet créé
+  **et** supprimé entre deux sauvegardes quotidiennes n'a jamais été copié.
 
 ```bash
 npm run backup:verify -- --latest --keep=/tmp/b   # + présence de chaque contenu indexé

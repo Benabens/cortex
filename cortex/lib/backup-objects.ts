@@ -42,6 +42,9 @@ export type ObjectEntry = {
 
 export type ObjectIndex = { version: 1; objects: ObjectEntry[] };
 
+/** Ce que le manifeste d'une sauvegarde dit de son index (fichier, volume, empreinte). */
+export type ObjectIndexRef = { file: string; objects: number; bytes: number; sha256: string };
+
 type Log = { log?: (msg: string) => void };
 
 export const blobKey = (cfg: BackupS3Config, sha256: string) => `${cfg.prefix}${BLOBS_DIR}/${sha256.slice(0, 2)}/${sha256}`;
@@ -82,8 +85,13 @@ export async function snapshotObjects(opts: SnapshotOptions): Promise<SnapshotRe
   const blobs = new Set((await opts.store.list(`${opts.cfg.prefix}${BLOBS_DIR}/`)).map((o) => o.key));
   const objects: ObjectEntry[] = [];
   const out: SnapshotResult = { index: { version: 1, objects }, downloaded: 0, uploaded: 0, bytesUploaded: 0 };
-  const sources = (await opts.source.list(opts.sourcePrefix)).filter((o) => o.key.length > opts.sourcePrefix.length);
+  // Un marqueur de dossier (clé finissant par « / », posé par certaines consoles) n'est pas un fichier.
+  const sources = (await opts.source.list(opts.sourcePrefix)).filter((o) => o.key.length > opts.sourcePrefix.length && !o.key.endsWith("/"));
   const known = new Map((opts.previous?.objects ?? []).map((e) => [e.key, e]));
+  // Un contenu présent mais cité par aucune sauvegarde retenue est un orphelin ancien : le
+  // réutiliser tel quel laisserait sa vieille date, et une purge concurrente l'effacerait
+  // avant l'envoi de l'index du jour. Il est donc renvoyé (sa date repart).
+  const cited = new Set((opts.previous?.objects ?? []).map((e) => blobKey(opts.cfg, e.sha256)));
   for (const o of sources.sort((a, b) => (a.key < b.key ? -1 : 1))) {
     const key = o.key.slice(opts.sourcePrefix.length);
     const prev = known.get(key);
@@ -96,9 +104,10 @@ export async function snapshotObjects(opts: SnapshotOptions): Promise<SnapshotRe
     out.downloaded++;
     try {
       const dest = blobKey(opts.cfg, got.sha256);
-      if (!blobs.has(dest)) {
+      if (!blobs.has(dest) || !cited.has(dest)) {
         await opts.store.put(dest, { path: got.file, size: got.size }, "application/octet-stream");
         blobs.add(dest);
+        cited.add(dest); // une seconde clé de même contenu, dans ce passage, ne le renvoie pas
         out.uploaded++;
         out.bytesUploaded += got.size;
       }
@@ -158,6 +167,11 @@ export async function verifyRemoteObjects(opts: Log & { store: BackupStore; cfg:
   const missing = opts.index.objects.filter((e) => sizes.get(blobKey(opts.cfg, e.sha256)) !== e.size).map((e) => e.key);
   log(`[backup:objets] ${opts.index.objects.length} objet(s) indexé(s)${missing.length ? `, ${missing.length} sans contenu valide : ${missing.slice(0, 5).join(", ")}` : ", contenus présents ✓"}`);
   return { objects: opts.index.objects.length, missing };
+}
+
+/** Index d'un dossier de sauvegarde local (rapatrié) ; null si la sauvegarde n'en porte pas. */
+export function readLocalIndex(dir: string, ref: ObjectIndexRef | undefined): ObjectIndex | null {
+  return ref ? (JSON.parse(fs.readFileSync(path.join(dir, ref.file), "utf8")) as ObjectIndex) : null;
 }
 
 /** Index d'une sauvegarde distante ; null si elle n'en a pas (pas de stockage objet ce jour-là). */

@@ -135,8 +135,9 @@ export async function listRemoteBackups(store: BackupStore, cfg: BackupS3Config)
 }
 
 /**
- * Supprime les dossiers plus vieux que `keepDays` (et tout dossier incomplet
- * expiré). Le dossier complet le plus récent est TOUJOURS conservé.
+ * Supprime les dossiers complets remplacés depuis plus de `keepDays` (par une
+ * sauvegarde complète plus récente) et les dossiers incomplets plus vieux que
+ * `keepDays`. Le dossier complet le plus récent est TOUJOURS conservé.
  */
 export async function pruneBackups(store: BackupStore, cfg: BackupS3Config, now: Date = new Date(), opts: Log = {}): Promise<string[]> {
   const log = opts.log ?? console.log;
@@ -144,9 +145,15 @@ export async function pruneBackups(store: BackupStore, cfg: BackupS3Config, now:
   const newestComplete = all.find((b) => b.complete);
   const limit = now.getTime() - cfg.keepDays * 86_400_000;
   const deleted: string[] = [];
+  let newerComplete: RemoteBackup | null = null; // `all` va du plus récent au plus ancien
   for (const b of all) {
-    if (b === newestComplete) continue;
-    if (b.createdAt.getTime() >= limit) continue;
+    // Un état complet est gardé `keepDays` après avoir été REMPLACÉ par le suivant :
+    // un objet supprimé du seau juste avant une sauvegarde n'est cité que par la
+    // précédente, qui reste donc restaurable keepDays pleins après la suppression.
+    const since = b.complete ? newerComplete?.createdAt ?? null : b.createdAt;
+    if (b.complete) newerComplete = b;
+    if (b === newestComplete || !since) continue;
+    if (since.getTime() >= limit) continue;
     log(`[backup:s3] rétention ${cfg.keepDays} j : suppression de ${b.folder}${b.complete ? "" : " (incomplet)"}`);
     await store.remove(b.keys);
     deleted.push(b.folder);
