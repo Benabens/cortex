@@ -166,6 +166,35 @@ const REWRITE_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+type RewriteQuestion = { stem: string; options: string[]; correct: number[]; explanation?: string | null };
+
+/** Bloc QCM d'une réécriture d'explication : énoncé, options (bonne réponse marquée), ancienne explication, défaut relevé. */
+function rewriteBlock<T extends RewriteQuestion>(questions: T[], oldMax: number, note: (it: T) => [label: string, text: string]): string {
+  return questions.map((it, i) => {
+    const [label, text] = note(it);
+    return [
+      `Q${i}. ${sanitizeCorpus(it.stem)}`,
+      ...it.options.map((o, k) => `   (${k}) ${sanitizeCorpus(o)}${(it.correct ?? []).includes(k) ? "  (bonne réponse)" : ""}`),
+      it.explanation ? `   [ancienne explication : ${sanitizeCorpus(it.explanation).slice(0, oldMax)}]` : "",
+      `   [${label} : ${sanitizeCorpus(text).slice(0, 300)}]`,
+    ].filter(Boolean).join("\n");
+  }).join("\n\n");
+}
+
+/** Appel commun des réécritures : par question, la nouvelle explication, ou null (échec de l'appel ou entrée manquante). */
+async function requestRewrites(prompt: string, n: number): Promise<(string | null)[]> {
+  try {
+    const r = await completeJson<{ explanations: { index: number; explanation?: string }[] }>(
+      { prompt, model: "opus", timeoutMs: 300_000, json: { schema: REWRITE_SCHEMA } },
+      { check: (v) => (Array.isArray(v?.explanations) ? null : "le champ « explanations » (tableau) manque") },
+    );
+    const byIndex = new Map(r.explanations.filter((x) => Number.isInteger(x?.index)).map((x) => [x.index, typeof x.explanation === "string" ? x.explanation.trim() : ""]));
+    return Array.from({ length: n }, (_, i) => byIndex.get(i) || null);
+  } catch {
+    return Array.from({ length: n }, () => null);
+  }
+}
+
 /**
  * EXPLICATION HORS COURS RÉÉCRITE, QUESTION GARDÉE — banc HUM-285 du 13/11 : une partie des rejets
  * « hors cours » ne visaient que l'explication (« l'explication ajoute que SynthID est limité aux
@@ -178,12 +207,7 @@ export async function rewriteExplanations(items: { stem: string; options: string
   if (!items.length) return [];
   const seen = new Set<string>();
   const passages = items.flatMap((it) => it.passages).filter((p) => !seen.has(p.text) && !!seen.add(p.text));
-  const block = items.map((it, i) => [
-    `Q${i}. ${sanitizeCorpus(it.stem)}`,
-    ...it.options.map((o, k) => `   (${k}) ${sanitizeCorpus(o)}${(it.correct ?? []).includes(k) ? "  (bonne réponse)" : ""}`),
-    it.explanation ? `   [ancienne explication : ${sanitizeCorpus(it.explanation).slice(0, 600)}]` : "",
-    `   [hors cours dans l'ancienne explication : ${sanitizeCorpus(it.reason).slice(0, 300)}]`,
-  ].filter(Boolean).join("\n")).join("\n\n");
+  const block = rewriteBlock(items, 600, (it) => ["hors cours dans l'ancienne explication", it.reason]);
   const prompt = [
     `Les explications de ces QCM ajoutent des faits que le cours ne présente pas. Réécris l'explication de chacun, sans toucher à l'énoncé, à la bonne réponse ni aux options.`,
     `RÈGLES : l'explication dit pourquoi la bonne réponse est juste et pourquoi chaque autre option est fausse, avec les SEULS faits des passages du cours ci-dessous ; rien de ce qui est signalé hors cours, aucun chiffre, auteur, exemple ou cadre absent des passages. Désigne les options par leur CONTENU, jamais par leur lettre ni leur rang. Trois à cinq phrases, en ${language}.`,
@@ -196,16 +220,7 @@ export async function rewriteExplanations(items: { stem: string; options: string
     ``,
     `Réponds UNIQUEMENT avec l'objet JSON {"explanations": [{"index": i, "explanation": "…"}]}, une entrée par question.`,
   ].join("\n");
-  try {
-    const r = await completeJson<{ explanations: { index: number; explanation?: string }[] }>(
-      { prompt, model: "opus", timeoutMs: 300_000, json: { schema: REWRITE_SCHEMA } },
-      { check: (v) => (Array.isArray(v?.explanations) ? null : "le champ « explanations » (tableau) manque") },
-    );
-    const byIndex = new Map(r.explanations.filter((x) => Number.isInteger(x?.index)).map((x) => [x.index, typeof x.explanation === "string" ? x.explanation.trim() : ""]));
-    return items.map((_, i) => byIndex.get(i) || null);
-  } catch {
-    return items.map(() => null);
-  }
+  return requestRewrites(prompt, items.length);
 }
 
 /**
@@ -220,12 +235,7 @@ export async function rewriteExplanations(items: { stem: string; options: string
  */
 export async function rewriteExplanationsOnOptions(questions: { stem: string; options: string[]; correct: number[]; explanation?: string | null; issue: string }[], language: string, passages: { src: string; text: string }[] = []): Promise<(string | null)[]> {
   if (!questions.length) return [];
-  const block = questions.map((it, i) => [
-    `Q${i}. ${sanitizeCorpus(it.stem)}`,
-    ...it.options.map((o, k) => `   (${k}) ${sanitizeCorpus(o)}${(it.correct ?? []).includes(k) ? "  (bonne réponse)" : ""}`),
-    it.explanation ? `   [ancienne explication : ${sanitizeCorpus(it.explanation).slice(0, 800)}]` : "",
-    `   [défaut : ${sanitizeCorpus(it.issue).slice(0, 300)}]`,
-  ].filter(Boolean).join("\n")).join("\n\n");
+  const block = rewriteBlock(questions, 800, (it) => ["défaut", it.issue]);
   const prompt = [
     `Les explications de ces QCM réfutent des options qui ne figurent pas dans la question (restes d'une version précédente des options). Réécris l'explication de chacun, sans toucher à l'énoncé, à la bonne réponse ni aux options.`,
     `RÈGLES : l'explication dit pourquoi la bonne réponse est juste, puis pourquoi CHACUNE des options fausses listées est fausse — exactement celles-là, une par une, et aucune autre notion ni affirmation. Reprends les faits de l'ancienne explication quand ils sont justes${passages.length ? " et ceux des passages du cours" : ""}, sans en ajouter. Désigne les options par leur CONTENU, jamais par leur lettre ni leur rang. Trois à cinq phrases, en ${language}.`,
@@ -236,14 +246,5 @@ export async function rewriteExplanationsOnOptions(questions: { stem: string; op
     ``,
     `Réponds UNIQUEMENT avec l'objet JSON {"explanations": [{"index": i, "explanation": "…"}]}, une entrée par question.`,
   ].join("\n");
-  try {
-    const r = await completeJson<{ explanations: { index: number; explanation?: string }[] }>(
-      { prompt, model: "opus", timeoutMs: 300_000, json: { schema: REWRITE_SCHEMA } },
-      { check: (v) => (Array.isArray(v?.explanations) ? null : "le champ « explanations » (tableau) manque") },
-    );
-    const byIndex = new Map(r.explanations.filter((x) => Number.isInteger(x?.index)).map((x) => [x.index, typeof x.explanation === "string" ? x.explanation.trim() : ""]));
-    return questions.map((_, i) => byIndex.get(i) || null);
-  } catch {
-    return questions.map(() => null);
-  }
+  return requestRewrites(prompt, questions.length);
 }

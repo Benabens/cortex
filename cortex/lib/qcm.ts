@@ -1838,6 +1838,9 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   }
   // Audit de sortie unique, calqué sur la rubrique du banc. Il porte sur tout le pool déjà payé :
   // une clé fausse ou du hors-cours sont remplacés par un autre candidat sans nouvelle conception.
+  // Ce qui arrive après (remplacements de doublons, complément) est audité à la porte de sortie.
+  const auditedStems = new Set<string>();
+  const auditRejected = new Set<string>();
   if (verifiedCandidates.length) {
     const audited = await finalQualityAudit(verifiedCandidates, step);
     let selected = selectCapped([], audited, count);
@@ -1877,6 +1880,14 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       }
     }
     all.splice(0, all.length, ...selectCapped([], confirmed, count));
+    // Le pool garde la version auditée de chaque candidat ; un candidat écarté par l'audit (clé
+    // contestée, hors cours) ne revient plus comme remplaçant.
+    const confirmedByStem = new Map(confirmed.map((it) => [it.stem, it]));
+    for (const c of verifiedCandidates) {
+      auditedStems.add(c.stem);
+      if (!confirmedByStem.has(c.stem)) auditRejected.add(c.stem);
+    }
+    verifiedCandidates.splice(0, verifiedCandidates.length, ...verifiedCandidates.map((c) => confirmedByStem.get(c.stem) ?? c));
   }
   // count>0 mais 0 QCM produit = tous les lots ont échoué → erreur claire (sauf drill 0 QCM + ouvertes).
   // H — DOUBLONS À L'ÉCHELLE DE L'EXAMEN (mock 4 de CS-290 : deux QCM sur le paradoxe de Simpson,
@@ -1908,7 +1919,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // Les candidats déjà payés mais écartés par le budget global sont essayés avant un nouvel
     // appel. Une reprise d'un examen précédent, elle, ne peut jamais revenir par ce chemin.
     const present = new Set(all.map((it) => it.stem));
-    const alternatives = verifiedCandidates.filter((it) => !present.has(it.stem) && !auditDuplicates.has(it.stem));
+    const alternatives = verifiedCandidates.filter((it) => !present.has(it.stem) && !auditDuplicates.has(it.stem) && !auditRejected.has(it.stem));
     all.splice(0, all.length, ...selectCapped(all, alternatives, count));
     const missing = count - all.length;
     if (missing <= 0) break;
@@ -1945,7 +1956,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   /** Candidats vérifiés, déjà payés, absents de l'examen et jamais reconnus comme doublons. */
   const spareCandidates = () => {
     const present = new Set(all.map((it) => it.stem));
-    return verifiedCandidates.filter((c) => c.verified === 1 && !c.rejected && !present.has(c.stem) && !auditDuplicates.has(c.stem) && !historicalRepeats.has(c.stem) && !duplicateOptionIndices(c.options, c.correct).length);
+    return verifiedCandidates.filter((c) => c.verified === 1 && !c.rejected && !present.has(c.stem) && !auditDuplicates.has(c.stem) && !auditRejected.has(c.stem) && !historicalRepeats.has(c.stem) && !duplicateOptionIndices(c.options, c.correct).length);
   };
   /** Remplace `it` par un candidat déjà payé qui tient les plafonds ; sinon le retire si `drop`. Rend vrai si remplacé. */
   const swapOut = (it: QcmItem, drop: boolean): boolean => {
@@ -1958,6 +1969,27 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     return false;
   };
   const exitGate = async () => {
+    // 0. Questions arrivées après l'audit final (remplacements de doublons, complément) : même audit,
+    // une clé contestée ou du hors-cours cède sa place à un candidat payé déjà audité, ou part.
+    const late = all.filter((it) => !auditedStems.has(it.stem));
+    const lateTrivial = new Set<string>();
+    if (late.length) {
+      const passed = new Map((await finalQualityAudit(late, step)).map((it) => [it.stem, it]));
+      let out = 0;
+      for (const it of late) {
+        auditedStems.add(it.stem);
+        const r = passed.get(it.stem);
+        if (r) {
+          all[all.indexOf(it)] = r;
+          if (r.trivialDistractors?.length) lateTrivial.add(r.stem);
+          continue;
+        }
+        auditRejected.add(it.stem);
+        swapOut(it, true);
+        out++;
+      }
+      if (out) step(`Contrôle final : ${out} QCM tardif(s) écarté(s) par l'audit (clé ou hors cours) → remplacé(s) ou retiré(s)`, 81);
+    }
     // 1. Plafonds par notion sur l'ensemble final ; un retrait est remplacé par un candidat payé.
     const over = capDrops(all, caps, (it) => [it.notion]).map((i) => all[i]);
     if (over.length) {
@@ -1966,26 +1998,29 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       all.splice(0, all.length, ...selectCapped(all, spareCandidates(), count));
       step(`Contrôle final : ${over.length} QCM au-delà du plafond par notion retiré(s)`, 81);
     }
-    // 2. Deux options qui nomment la même notion : la seconde est remplacée (énoncé et clé gardés),
-    // la question revérifiée à l'aveugle ; à défaut, un autre candidat payé prend sa place.
-    const repeated = all.filter((it) => duplicateOptionIndices(it.options, it.correct).length);
+    // 2. Deux options qui nomment la même notion (ou distracteurs éliminables relevés par l'audit
+    // tardif) : la seconde est remplacée (énoncé et clé gardés), la question revérifiée à l'aveugle ;
+    // deux essais, puis un autre candidat payé prend sa place.
+    const repeated = all.filter((it) => duplicateOptionIndices(it.options, it.correct).length || lateTrivial.has(it.stem));
     if (repeated.length) {
-      const sent = repeated.map((it) => {
-        const d = duplicateOptionIndices(it.options, it.correct);
-        return { ...it, duplicateOptions: d, trivialDistractors: [...new Set([...(it.trivialDistractors ?? []), ...d])] };
-      });
-      const repaired = await replaceTrivialDistractorsBatch(sent, step, shared.language).catch(() => sent);
-      const changed = repaired.filter((r, k) => r !== sent[k]);
-      if (changed.length) await verifyGrouped(changed);
-      let fixed = 0;
-      repeated.forEach((it, k) => {
-        const r = repaired[k];
-        if (r !== sent[k] && r.verified === 1 && !r.rejected && !duplicateOptionIndices(r.options, r.correct).length) {
+      let left = repeated;
+      for (let attempt = 0; attempt < 2 && left.length; attempt++) {
+        const sent = left.map((it) => {
+          const d = duplicateOptionIndices(it.options, it.correct);
+          return { ...it, duplicateOptions: d, trivialDistractors: [...new Set([...(it.trivialDistractors ?? []), ...d])] };
+        });
+        const repaired = await replaceTrivialDistractorsBatch(sent, step, shared.language).catch(() => sent);
+        const changed = repaired.filter((r, k) => r !== sent[k]);
+        if (changed.length) await verifyGrouped(changed);
+        left = left.filter((it, k) => {
+          const r = repaired[k];
+          if (r === sent[k] || r.verified !== 1 || !!r.rejected || duplicateOptionIndices(r.options, r.correct).length) return true;
           all[all.indexOf(it)] = r;
-          fixed++;
-        } else if (swapOut(it, false)) fixed++;
-      });
-      step(`Contrôle final : ${repeated.length} QCM à options répétées → ${fixed} corrigé(s)${fixed < repeated.length ? `, ${repeated.length - fixed} gardé(s) faute de remplaçant vérifié` : ""}`, 81);
+          return false;
+        });
+      }
+      const kept = left.filter((it) => !swapOut(it, false)).length;
+      step(`Contrôle final : ${repeated.length} QCM à options répétées ou éliminables → ${repeated.length - kept} corrigé(s)${kept ? `, ${kept} gardé(s) faute de remplaçant vérifié` : ""}`, 81);
     }
     // 3. Jamais de « not_verified » quand la vérification est possible : une question restée sans
     // verdict est vérifiée à l'aveugle ; rejetée, elle cède sa place à un candidat ou part ; correcteur
@@ -2030,41 +2065,44 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // d'abord ; à défaut, les notions les moins posées, sous un angle VRAIMENT distinct : le nombre
   // demandé est tenu plutôt que remboursé. Après chaque retrait tardif, le manque est redemandé :
   // le job 16 s'arrêtait après avoir retiré 3 questions de son unique complément et livrait 12/20.
-  while (count - all.length > 0 && all.length && lateBudget > 0 && !hardStop()) {
-    const short = count - all.length;
-    const slots = takeSpare(short);
-    const angle = slots.length < short;
-    slots.push(...repeatSlots(short - slots.length, slots));
-    // Toutes les notions à leur plafond et plus de réserve : le manque reste dit et remboursé.
-    if (!slots.length) break;
-    const tested = [...new Set(all.map((it) => sanitizeCorpus(it.topic).slice(0, 80)).filter(Boolean))].join(" · ");
-    const guidance = angle
-      ? `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen : ${tested}. Une notion reprise doit l'être sous un angle VRAIMENT distinct (un autre fait, une autre condition, une autre étude), jamais la même question reformulée.`
-      : `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen — n'en reprends AUCUNE, même sous un autre angle : ${tested}.`;
-    const fill: Batch[] = [];
-    for (let i = 0; i < slots.length && fill.length < lateBudget; i += BATCH) {
-      const slice = slots.slice(i, i + BATCH);
-      fill.push({ topics: slice, molds: slice.map(() => null), guidance });
-    }
-    lateBudget -= fill.length;
-    progress.add("QCM", fill.length);
-    step(`${short} QCM manquant(s) → complément final, ${fill.length} lot(s)${angle ? " (notions reprises sous un autre angle)" : ""}`, 80);
-    const before = all.length;
-    for (const g of await runRound(fill)) {
-      if (g.error) lastError = g.error;
-      all.splice(0, all.length, ...selectCapped(all, g.items, count));
-    }
-    if (all.length > before) {
-      // Contrôle sur l'ENSEMBLE de l'examen, pas sur le seul complément : un doublon entre deux
-      // questions déjà acquises compte aussi.
-      const { drop } = await findDuplicates(all, strict && !angle);
-      if (drop.length) {
-        drop.forEach((i) => { if (all[i]) auditDuplicates.add(all[i].stem); });
-        all.splice(0, all.length, ...all.filter((_, i) => !drop.includes(i)));
-        step(`${drop.length} QCM en doublon retiré(s) après le complément → nouveau complément`, 80);
+  const complement = async () => {
+    while (count - all.length > 0 && all.length && lateBudget > 0 && !hardStop()) {
+      const short = count - all.length;
+      const slots = takeSpare(short);
+      const angle = slots.length < short;
+      slots.push(...repeatSlots(short - slots.length, slots));
+      // Toutes les notions à leur plafond et plus de réserve : le manque reste dit et remboursé.
+      if (!slots.length) break;
+      const tested = [...new Set(all.map((it) => sanitizeCorpus(it.topic).slice(0, 80)).filter(Boolean))].join(" · ");
+      const guidance = angle
+        ? `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen : ${tested}. Une notion reprise doit l'être sous un angle VRAIMENT distinct (un autre fait, une autre condition, une autre étude), jamais la même question reformulée.`
+        : `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen — n'en reprends AUCUNE, même sous un autre angle : ${tested}.`;
+      const fill: Batch[] = [];
+      for (let i = 0; i < slots.length && fill.length < lateBudget; i += BATCH) {
+        const slice = slots.slice(i, i + BATCH);
+        fill.push({ topics: slice, molds: slice.map(() => null), guidance });
+      }
+      lateBudget -= fill.length;
+      progress.add("QCM", fill.length);
+      step(`${short} QCM manquant(s) → complément final, ${fill.length} lot(s)${angle ? " (notions reprises sous un autre angle)" : ""}`, 80);
+      const before = all.length;
+      for (const g of await runRound(fill)) {
+        if (g.error) lastError = g.error;
+        all.splice(0, all.length, ...selectCapped(all, g.items, count));
+      }
+      if (all.length > before) {
+        // Contrôle sur l'ENSEMBLE de l'examen, pas sur le seul complément : un doublon entre deux
+        // questions déjà acquises compte aussi.
+        const { drop } = await findDuplicates(all, strict && !angle);
+        if (drop.length) {
+          drop.forEach((i) => { if (all[i]) auditDuplicates.add(all[i].stem); });
+          all.splice(0, all.length, ...all.filter((_, i) => !drop.includes(i)));
+          step(`${drop.length} QCM en doublon retiré(s) après le complément → nouveau complément`, 80);
+        }
       }
     }
-  }
+  };
+  await complement();
   // Si un contrôle qualité autre que la déduplication a réduit le pool, on peut rétablir les
   // questions acquises et vérifiées. Une question explicitement reconnue comme doublon ne revient
   // jamais par ce filet : le banc de reproduction livrait ainsi 20/20 en réinjectant les répétitions
@@ -2086,8 +2124,13 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // « biais de disponibilité » dans une même question et une question « not_verified ». Rien n'est
   // enregistré sans passer ici, sur l'ensemble final, quel que soit le chemin suivi (rondes, audit,
   // doublons, complément) ; un job QCM repris après une coupure refait l'examen en entier (aucun
-  // point de reprise), donc passe ici lui aussi.
-  if (all.length) await exitGate();
+  // point de reprise), donc passe ici lui aussi. Une question retirée à la porte (audit tardif,
+  // revérification) est recomblée une fois, puis la porte repasse sur l'ensemble.
+  for (let pass = 0; all.length; pass++) {
+    await exitGate();
+    if (pass > 0 || all.length >= count || lateBudget <= 0 || hardStop()) break;
+    await complement();
+  }
   // Aucun appel en erreur mais tous les items écartés (mal formés) : c'est une réponse inutilisable.
   const cause = () => lastError ?? new LlmError("Toutes les questions reçues étaient mal formées.", "BAD_OUTPUT");
   if (count > 0 && !all.length) {

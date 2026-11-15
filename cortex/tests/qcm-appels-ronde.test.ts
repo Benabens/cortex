@@ -42,6 +42,8 @@ let auditUnreadable = false;
 /** Paires en doublon rendues par le contrôle de fin d'examen, par appel. */
 let dedupe: (call: number, prompt: string) => { first: number; second: number; reason: string }[] = () => [];
 const calls = { design: 0, verify: 0, repair: 0, audit: 0, dedup: 0, other: 0 };
+/** Énoncés soumis à chaque passage de l'audit final. */
+const auditedStems: string[][] = [];
 
 function design(prompt: string): string {
   const subjects = [...prompt.matchAll(/^ {2}(\d+)\) (.+?)(?: \[|$)/gm)].map((m) => m[2].trim());
@@ -103,7 +105,7 @@ before(async () => {
       let text = "{}";
       if (/"replacements"/.test(content)) { calls.repair++; text = repair(content); }
       else if (/"duplicates"/.test(content)) { calls.dedup++; text = JSON.stringify({ notions: [], duplicates: dedupe(calls.dedup, content) }); }
-      else if (/"offCourse"/.test(content)) { calls.audit++; text = auditUnreadable ? JSON.stringify({ verdicts: "ok" }) : audit(content); }
+      else if (/"offCourse"/.test(content)) { calls.audit++; auditedStems.push(blocks(content).map((b) => b.body.split("\n")[0])); text = auditUnreadable ? JSON.stringify({ verdicts: "ok" }) : audit(content); }
       else if (/"results"/.test(content)) { calls.verify++; text = verify(content); }
       else if (/"items"/.test(content)) { calls.design++; text = design(content); }
       else calls.other++;
@@ -121,6 +123,7 @@ beforeEach(() => {
   designed = 0; trivialEvery = 3; contestedEvery = 5;
   auditRejects = () => false; auditUnreadable = false; dedupe = () => [];
   for (const k of Object.keys(calls) as (keyof typeof calls)[]) calls[k] = 0;
+  auditedStems.length = 0;
 });
 
 after(async () => {
@@ -204,6 +207,9 @@ test("dédoublonnage : un contrôle qui voit des doublons à chaque passe ne fai
   assert.equal(r.count, 15, JSON.stringify(calls));
   assert.ok(calls.dedup <= 10, `contrôles des doublons bornés : ${calls.dedup}`);
   // Job 17 (14/11) : l'audit final repassait sur tout le pool même quand aucun distracteur n'avait
-  // été réparé (ici : 0). Un seul passage suffit alors — l'ancien comportement en faisait 2.
-  assert.equal(calls.audit, 1, `audit final : un seul passage quand rien n'a été réparé : ${JSON.stringify(calls)}`);
+  // été réparé (ici : 0). Une question n'est auditée qu'une fois : le second passage (job 23) ne
+  // porte que sur les remplaçants des doublons, arrivés après le premier.
+  assert.ok(calls.audit <= 2, `audit final : ${JSON.stringify(calls)}`);
+  const seen = auditedStems.flat();
+  assert.equal(new Set(seen).size, seen.length, `une question auditée deux fois : ${JSON.stringify(auditedStems)}`);
 });

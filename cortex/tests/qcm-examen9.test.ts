@@ -51,6 +51,7 @@ const stemOf = (b: string) => EXAM9.find((it) => b.includes(it.stem.slice(0, 80)
 
 let auditCalls = 0;
 let dedupeCalls = 0;
+const dedupePrompts: string[] = [];
 const replacementPrompts: string[] = [];
 const rewritePrompts: string[] = [];
 
@@ -70,15 +71,16 @@ function reply(content: string): string | null {
     }) });
   }
   // Le contrôle des doublons par le modèle tombe en panne : les plafonds doivent suffire.
-  if (/"duplicates"/.test(content)) { dedupeCalls++; return null; }
+  if (/"duplicates"/.test(content)) { dedupeCalls++; dedupePrompts.push(content); return null; }
   if (/"offCourse"/.test(content)) {
     auditCalls++;
     return JSON.stringify({ verdicts: blocks(content).map((b) => {
       const index = Number(/^Q(\d+)\./.exec(b)![1]);
-      const isQ10 = stemOf(b)?.n === 10;
+      const n = stemOf(b)?.n;
       // Premier audit : un distracteur de Q10 jugé trivial → réparé ; le nouvel audit écarte la version réparée.
-      const trivial = isQ10 && auditCalls === 1 ? optionLines(b).filter((o) => /uniquement si les données sont traitées/.test(o.text)).map((o) => o.k) : [];
-      return { index, key: !(isQ10 && auditCalls > 1), offCourse: false, trivial };
+      const trivial = n === 10 && auditCalls === 1 ? optionLines(b).filter((o) => /uniquement si les données sont traitées/.test(o.text)).map((o) => o.k) : [];
+      // Audit des questions arrivées après coup (complément) : la clé de Q3 est contestée.
+      return { index, key: !(n === 10 && auditCalls > 1) && !(n === 3 && auditCalls > 2), offCourse: false, trivial };
     }) });
   }
   if (/"results"/.test(content)) {
@@ -162,6 +164,10 @@ test("job 23 rejoué, contrôle des doublons du modèle en panne : examen livré
   assert.ok(dedupeCalls >= 2, `contrôle des doublons appelé ${dedupeCalls} fois`);
   assert.ok(steps.some((s) => /Contrôle des doublons en échec/.test(s)), steps.join("\n"));
   assert.ok(steps.some((s) => /plafonds par notion appliqués seuls/.test(s)), steps.join("\n"));
+  // Le contrôle voit la bonne réponse de chaque question et les paires à trancher en priorité.
+  assert.match(dedupePrompts[0], /Bonne réponse : Le biais de disponibilité, car/);
+  // Après le complément, Q5 (confiance, avec « réalité partagée » en distracteur) croise Q4 : paire à trancher.
+  assert.ok(dedupePrompts.some((p) => /Paires à trancher en priorité[^\n]*Q\d+–Q\d+/.test(p)), "une paire à trancher est soumise");
   // Une notion de bonne réponse = une question : Q1 reste, Q14 et Q16 (biais de disponibilité) et Q17 (réalité partagée) partent.
   assert.ok(delivered(1) && delivered(4), "les premières occurrences restent");
   for (const n of [14, 16, 17]) assert.ok(!delivered(n), `Q${n} retirée`);
@@ -179,6 +185,18 @@ test("job 23 rejoué, contrôle des doublons du modèle en panne : examen livré
   assert.ok(q10, "Q10 livrée");
   assert.deepEqual([...q10!.options].sort(), [...q(10).options].sort());
   assert.ok(auditCalls >= 2, "la version réparée a été ré-auditée");
+  // Les questions du complément passent l'audit final elles aussi : Q3, clé contestée, est écartée,
+  // et la place est recomblée par un nouveau complément au lieu d'être abandonnée.
+  assert.ok(steps.some((s) => /QCM tardif\(s\) écarté\(s\) par l'audit/.test(s)), steps.join("\n"));
+  assert.ok(!delivered(3), "Q3 écartée par l'audit tardif");
+  assert.equal(steps.filter((s) => /complément final/.test(s)).length, 2, steps.join("\n"));
   // Jamais de « not_verified » quand la vérification est possible.
   assert.deepEqual(items.filter((it) => it.verified !== 1).map((it) => it.stem.slice(0, 60)), []);
+});
+
+test("job 23 : Q8/Q19 (nudge) et Q10/Q20 (risque extraterritorial), que les plafonds laissent passer à deux par notion, sont soumises en priorité au contrôle des doublons", async () => {
+  const { suspectPairs } = await import("../lib/qcm");
+  // En prod, la notion d'une question est celle du programme qui l'a demandée (son « topic »).
+  const pairs = suspectPairs(EXAM9.map((it) => ({ ...it, notion: it.topic }))).map(([a, b]) => `${EXAM9[a].n}-${EXAM9[b].n}`);
+  for (const p of ["8-19", "10-20", "1-14", "1-16", "14-16", "4-17", "5-18"]) assert.ok(pairs.includes(p), `paire ${p} absente : ${pairs.join(", ")}`);
 });
