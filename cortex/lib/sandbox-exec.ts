@@ -190,34 +190,55 @@ export async function verifyCode(language: "c" | "python", source: string, tests
     return { verified: true, detail: `${tests.length} test(s) C passés en sandbox` };
   }
 
-  if (!nativeSandbox) {
-    for (const [i, t] of tests.entries()) {
-      const r = await runPythonWasm(source, { stdin: t.stdin, args: t.args, timeoutMs: 10_000 });
-      if (!r.ok && r.reason === "timeout") return { verified: false, detail: `test ${i + 1} : timeout` };
-      if (!r.ok) return { verified: false, detail: `test ${i + 1} : ${r.stderr.slice(0, 200) || r.reason}` };
-      if (norm(r.stdout) !== norm(t.expect)) {
-        return { verified: false, detail: `test ${i + 1} : sortie « ${norm(r.stdout).slice(0, 80)} » ≠ attendu « ${norm(t.expect).slice(0, 80)} »` };
-      }
-    }
-    return { verified: true, detail: `${tests.length} test(s) Python passés en WebAssembly isolé` };
-  }
-
-  const py = findBin([process.env.CORTEX_PYTHON ?? "", "python3", "python"].filter(Boolean));
-  if (!py) return { verified: "not_applicable", detail: "python indisponible" };
+  let engine: PythonRunResult["engine"] = null;
   for (const [i, t] of tests.entries()) {
-    const r = await runSandboxed({
-      cmd: py,
-      args: ["main.py", ...(t.args ?? [])],
-      files: { "main.py": source },
-      stdin: t.stdin,
-      timeoutMs: 10_000,
-    });
-    if (!r.ok && r.reason === "no-sandbox") return { verified: "not_applicable", detail: "sandbox indisponible" };
+    const r = await runPython(source, { stdin: t.stdin, args: t.args, timeoutMs: 10_000 });
+    if (!r.ok && r.reason === "unavailable") return { verified: "not_applicable", detail: r.stderr.slice(0, 200) || "sandbox indisponible" };
     if (!r.ok && r.reason === "timeout") return { verified: false, detail: `test ${i + 1} : timeout` };
     if (!r.ok) return { verified: false, detail: `test ${i + 1} : ${r.stderr.slice(0, 200) || r.reason}` };
     if (norm(r.stdout) !== norm(t.expect)) {
       return { verified: false, detail: `test ${i + 1} : sortie « ${norm(r.stdout).slice(0, 80)} » ≠ attendu « ${norm(t.expect).slice(0, 80)} »` };
     }
+    engine = r.engine;
   }
-  return { verified: true, detail: `${tests.length} test(s) Python passés en sandbox` };
+  return { verified: true, detail: `${tests.length} test(s) Python passés ${engine === "wasm" ? "en WebAssembly isolé" : "en sandbox"}` };
+}
+
+export type PythonRunResult = {
+  ok: boolean;
+  /**
+   * 'unavailable' : rien n'a pu juger le code (aucune isolation, pas de Python, runtime
+   * WebAssembly qui ne démarre pas, capacité refusée par le garde WebAssembly). Ni preuve
+   * ni reproche : l'appelant garde sa réponse non vérifiée.
+   */
+  reason?: "unavailable" | "timeout" | "error";
+  stdout: string;
+  stderr: string;
+  engine: "native" | "wasm" | null;
+};
+
+/**
+ * Exécute un programme Python dans la meilleure isolation disponible : le bac à sable noyau
+ * (avec l'interpréteur de la machine), sinon Pyodide si CORTEX_PYTHON_WASM=1, sinon rien.
+ */
+export async function runPython(
+  source: string,
+  opts: { stdin?: string; args?: string[]; timeoutMs?: number; cpuSeconds?: number; maxOutputBytes?: number } = {},
+): Promise<PythonRunResult> {
+  const timeoutMs = opts.timeoutMs ?? 10_000;
+  const py = sandboxAvailable() ? findBin([process.env.CORTEX_PYTHON ?? "", "python3", "python"].filter(Boolean)) : null;
+  if (py) {
+    const r = await runSandboxed({ cmd: py, args: ["main.py", ...(opts.args ?? [])], files: { "main.py": source }, stdin: opts.stdin, timeoutMs, cpuSeconds: opts.cpuSeconds, maxOutputBytes: opts.maxOutputBytes });
+    const reason = r.ok ? undefined : r.reason === "timeout" ? "timeout" : r.reason?.startsWith("exit-") ? "error" : "unavailable";
+    return { ok: r.ok, reason, stdout: r.stdout, stderr: r.stderr, engine: "native" };
+  }
+  if (!pythonWasmAvailable()) {
+    return { ok: false, reason: "unavailable", stdout: "", stderr: sandboxAvailable() ? "python indisponible" : "sandbox indisponible — exécution refusée", engine: null };
+  }
+  const r = await runPythonWasm(source, { stdin: opts.stdin, args: opts.args, timeoutMs, maxOutputBytes: opts.maxOutputBytes });
+  const reason = r.ok ? undefined
+    : r.reason === "timeout" ? "timeout"
+    : r.reason === "execution-error" || r.reason === "memory-limit" ? "error"
+    : "unavailable";
+  return { ok: r.ok, reason, stdout: r.stdout, stderr: r.stderr || (reason === "unavailable" ? `WebAssembly : ${r.reason}` : ""), engine: "wasm" };
 }

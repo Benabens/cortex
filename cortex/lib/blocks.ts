@@ -12,7 +12,7 @@ import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { NO_FLAG, coverageTopics, runPool } from "@/lib/qcm";
 import { examsDir } from "@/lib/paths";
 import { PhaseProgress, phaseLine } from "@/lib/progress";
-import { runSandboxed } from "@/lib/sandbox-exec";
+import { runPython } from "@/lib/sandbox-exec";
 import { normalize, tokenize } from "@/lib/text";
 import fs from "node:fs";
 import path from "node:path";
@@ -311,21 +311,22 @@ async function generateBlock(slot: BlockSlot, i: number, n: number, plan: BlockP
 }
 
 /**
- * Sortie de chaque extrait de code par EXÉCUTION (bac à sable) : elle remplace celle que le
- * modèle a prédite. Bac à sable, Python ou module absents : la prédiction reste, le juge la
- * vérifie. Un extrait qui plante est une erreur du bloc.
+ * Sortie de chaque extrait de code par EXÉCUTION (bac à sable noyau, sinon Pyodide si
+ * CORTEX_PYTHON_WASM=1) : elle remplace celle que le modèle a prédite. Bac à sable, Python ou
+ * module absents : la prédiction reste, le juge la vérifie. Un extrait qui plante est une
+ * erreur du bloc.
  */
 async function runCodeParts(b: ExamBlock): Promise<string[]> {
   const issues: string[] = [];
   for (const [i, p] of b.parts.entries()) {
     if (p.kind !== "code_output" || !p.code) continue;
-    const r = await runSandboxed({ cmd: process.env.CORTEX_PYTHON || "python3", args: ["main.py"], files: { "main.py": p.code }, timeoutMs: 10_000, cpuSeconds: 5, maxOutputBytes: 8_000 });
+    const r = await runPython(p.code, { timeoutMs: 10_000, cpuSeconds: 5, maxOutputBytes: 8_000 });
     if (r.ok) {
       p.answer = r.stdout.replace(/\s+$/, "");
       p.codeChecked = true;
     } else if (r.reason === "timeout") {
       issues.push(`l'extrait de la sous-question ${LETTER[i].toLowerCase()} ne termine pas`);
-    } else if (r.reason?.startsWith("exit-") && !/ModuleNotFoundError|ImportError/.test(r.stderr)) {
+    } else if (r.reason === "error" && !/ModuleNotFoundError|ImportError/.test(r.stderr)) {
       issues.push(`l'extrait de la sous-question ${LETTER[i].toLowerCase()} lève une erreur : ${r.stderr.trim().split("\n").pop()?.slice(0, 160) ?? r.reason}`);
     }
   }
