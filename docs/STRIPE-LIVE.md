@@ -185,6 +185,7 @@ que la clé secrète : elle ne peut faire que ce dont l'app a besoin.
 |---|---|---|
 | Checkout Sessions | écriture | créer et expirer une session de paiement, retrouver celle d'un remboursement |
 | Prices | lecture | afficher les prix, résoudre les `lookup_key` |
+| Customers | écriture | créer le client Stripe unique du compte au premier achat : ses abonnements se relisent chez Stripe avant d'en ouvrir un second (sans ce droit, le checkout marche comme avant, sans cette vérification) |
 | Customer portal | écriture | ouvrir le portail |
 | Invoices | lecture | retrouver la facture d'un paiement remboursé |
 | Subscriptions | écriture | programmer la résiliation (rétractation), résilier à la suppression du compte, relire l'abonnement avant le rappel de reconduction (§ 12) |

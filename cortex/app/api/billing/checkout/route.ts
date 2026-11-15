@@ -9,7 +9,7 @@ import { useUser } from "@/lib/req";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
 import { NextRequest, NextResponse } from "next/server";
 import { stripeClient } from "@/lib/billing/stripe-client";
-import { checkoutParams } from "@/lib/billing/checkout-params";
+import { openCheckout } from "@/lib/billing/checkout-session";
 import { publicOrigin } from "@/lib/public-url";
 import { consentForPlan, recordPurchaseConsent } from "@/lib/consumer-law";
 
@@ -52,7 +52,8 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   // premier — qui continuerait de facturer sans que l'app le sache. Le bouton
   // désactivé côté écran ne suffit pas (deux onglets, un POST direct). La garde
   // suit l'état de l'abonnement chez Stripe, pas la présence de crédits : en
-  // retard de paiement ou en cours de renouvellement, il facture toujours.
+  // retard de paiement ou en cours de renouvellement, il facture toujours. Avant le premier
+  // webhook, c'est openCheckout qui garde (verrou par compte, abonnements lus chez Stripe).
   const userId = currentUser();
   if (spec.mode === "subscription") {
     const refusal = secondSubscriptionRefusal(standingOf(await getSubscription(userId), nowStr()));
@@ -66,11 +67,13 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Prix introuvable pour « ${spec.lookupKey} » (crée-le dans Stripe).` }, { status: 400 });
   }
   const email = (await authGet<{ email: string | null }>(`SELECT email FROM users WHERE id = ?`, userId).catch(() => undefined))?.email ?? null;
-  const session = await stripe.checkout.sessions.create(checkoutParams({ plan, priceId: price.id, userId, email }));
+  // Client Stripe unique, un seul Checkout d'abonnement ouvert, état réel chez Stripe (lib/billing/checkout-session).
+  const session = await openCheckout({ stripe, userId, plan, priceId: price.id, email });
+  if (!session.ok) return NextResponse.json({ error: session.error }, { status: session.status });
   try {
-    await recordPurchaseConsent({ userId, plan, termsVersion: terms.version, stripeSessionId: session.id });
+    await recordPurchaseConsent({ userId, plan, termsVersion: terms.version, stripeSessionId: session.sessionId });
   } catch (error) {
-    await stripe.checkout.sessions.expire(session.id).catch(() => undefined);
+    await stripe.checkout.sessions.expire(session.sessionId).catch(() => undefined);
     throw error;
   }
   return NextResponse.json({ url: session.url });
