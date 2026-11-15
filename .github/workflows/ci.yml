@@ -297,7 +297,9 @@ jobs:
           docker run --rm --network none --entrypoint bash cortex-app -c '
             set -e
             mkdir -p /tmp/s && cd /tmp/s
-            cat /app/cortex/latex/preamble.tex /app/cortex/latex/figures.tex > doc.tex
+            cp /app/cortex/latex/epfl-logo.png . 2>/dev/null || true
+            # Mêmes fichiers que le préchauffage du Dockerfile : seul ce document est garanti en cache.
+            cat /app/cortex/latex/preamble.tex /app/cortex/latex/figures.tex /app/cortex/latex/generic.tex > doc.tex
             printf "\n\\\\newcommand{\\\\FOOTDATE}{Smoke}\n\\\\begin{document}\nHors ligne.\n\\\\end{document}\n" >> doc.tex
             /usr/local/bin/tectonic --chatter minimal --only-cached doc.tex
             pdftoppm -png -r 50 -f 1 -l 1 doc.pdf page
@@ -335,7 +337,8 @@ jobs:
           set +e
           docker volume create cortex-vol2 >/dev/null
           docker run --rm -v cortex-vol2:/data --user 0 --entrypoint bash cortex-app -c 'chown root:root /data && chmod 755 /data'
-          out=$(docker run --rm -e CORTEX_DATA_DIR=/data -v cortex-vol2:/data cortex-app 2>&1)
+          # timeout : si l'image démarrait quand même (régression), l'étape échoue vite au lieu d'attendre.
+          out=$(timeout 120 docker run --rm -e CORTEX_DATA_DIR=/data -v cortex-vol2:/data cortex-app 2>&1)
           code=$?
           set -e
           echo "$out" | tail -3
