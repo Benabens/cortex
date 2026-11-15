@@ -521,11 +521,27 @@ Sans Sentry, deux choses arrivent quand même par e-mail : les alertes de
 dépense et celles du rappel de reconduction (ci-dessus). Tout le reste (un
 plantage, une génération en erreur) ne se lit que dans les logs.
 
+Ce que Sentry signale en plus des plantages (étiquette `area`) :
+
+- `jobs` : un job abandonné par la réconciliation (worker mort, tentatives
+  épuisées, ou jamais démarré). Un job en échec dans son worker l'était déjà
+  (`service: worker`) ; l'envoi est désormais attendu avant la sortie du
+  process, sinon il partait avec lui ;
+- `billing` (`step: webhook`, `event_type`) : un webhook Stripe en 500. Stripe
+  réessaie pendant 3 jours puis abandonne : c'est un paiement peut-être non
+  crédité ;
+- `storage` (`alert: volume_full`) : le volume n'a plus la marge d'espace
+  libre, envois et générations sont refusés à tout le monde. Une alerte par
+  heure au plus. Le quota d'un seul compte n'alerte pas.
+
+À poser aussi côté Stripe (Workbench → Webhooks → l'endpoint → alertes
+e-mail) : Stripe prévient lui-même quand un endpoint échoue de façon répétée,
+même si Cortex ne répond plus du tout.
+
 À savoir avant de compter sur Sentry pour le rappel de reconduction : ses
 échecs (`renewal_reminder.missed`, `.not_sent`, `.disabled`) sont des lignes de
 journal, écrites sans passer par `captureError`. Poser `SENTRY_DSN` ne les
-ferait pas remonter ; aujourd'hui seul un job en erreur est signalé ainsi
-(`cortex/scripts/run-job.ts`).
+ferait pas remonter.
 
 Ce qui part : type et message d'erreur, pile, service (`web` / `worker` /
 `browser`), URL **sans paramètres**, navigateur et système. Chaque événement

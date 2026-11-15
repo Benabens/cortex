@@ -3,6 +3,7 @@ import { readText, withBodyLimit } from "@/lib/upload-limit";
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { stripeClient } from "@/lib/billing/stripe-client";
+import { captureError } from "@/lib/observability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -72,6 +73,9 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     // manquantes). Les échecs RETRYABLES lèvent → 500 → Stripe réessaie.
     return NextResponse.json(res, { status: 200 });
   } catch (e) {
+    // Stripe réessaie pendant 3 jours, puis abandonne : un paiement non crédité doit se voir
+    // avant. Étiquettes techniques seulement (le message peut citer un id client Stripe).
+    captureError(e, { area: "billing", step: "webhook", event_type: event.type });
     return NextResponse.json({ error: e instanceof Error ? e.message.slice(0, 200) : "Erreur de traitement." }, { status: 500 });
   }
 });

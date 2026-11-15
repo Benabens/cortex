@@ -64,8 +64,10 @@ async function fail(msg: string): Promise<never> {
   // Suivi d'erreurs optionnel : un job qui échoue de nuit doit être visible.
   // Étiquettes techniques seulement — le message de job peut citer un cours.
   try {
-    const { captureError } = await import("../lib/observability");
+    const { captureError, flushErrorTracking } = await import("../lib/observability");
     captureError(new Error(msg), { service: "worker", job: String(jobId) });
+    // L'envoi est asynchrone et le worker sort juste après : sans attente, l'erreur partait avec lui.
+    await flushErrorTracking();
   } catch {}
   // Un job en ÉCHEC n'a rien livré : REMBOURSÉ en entier, même après des appels
   // payants (idempotent — ref refund:job:…, et seulement si le débit a eu lieu).
@@ -360,8 +362,9 @@ async function runWithCourseFiles(): Promise<void> {
     // servis depuis ce conteneur, et perdus à son remplacement. À voir tout de suite.
     console.error(`[storage] job ${jobId} : envoi des fichiers au seau impossible : ${(e as Error)?.message ?? e}`);
     try {
-      const { captureError } = await import("../lib/observability");
+      const { captureError, flushErrorTracking } = await import("../lib/observability");
       captureError(e instanceof Error ? e : new Error(String(e)), { service: "worker", job: String(jobId), step: "storage.flush" });
+      await flushErrorTracking();
     } catch {}
     code = 1;
   }
