@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { mapModel } from "../config";
-import { LlmError, type CompleteRequest, type CompleteResult, type LlmProvider, type LlmUsage } from "../types";
+import { LlmError, type CompleteRequest, type CompleteResult, type LlmEffort, type LlmProvider, type LlmUsage } from "../types";
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 const UNSUPPORTED_SCHEMA_KEYS = new Set([
@@ -32,7 +32,8 @@ function binPath(): string | null {
   return null;
 }
 
-function effort(model: string): "high" | "medium" | "low" {
+/** Effort déduit de l'alias, quand le site d'appel n'en fixe pas. */
+function effort(model: string): LlmEffort {
   if (model === "haiku") return "low";
   if (model === "sonnet") return "medium";
   return "high";
@@ -138,7 +139,7 @@ export const codexCliProvider: LlmProvider = {
     const output = path.join(cwd, "final.txt");
     const schema = req.json ? path.join(cwd, "schema.json") : null;
     if (schema) fs.writeFileSync(schema, JSON.stringify(codexSchema(req.json!.schema)));
-    const args = ["exec", "--skip-git-repo-check", "-s", "read-only", "-o", output, "--json", "--model", model, "-c", `model_reasoning_effort=\"${effort(alias)}\"`];
+    const args = ["exec", "--skip-git-repo-check", "-s", "read-only", "-o", output, "--json", "--model", model, "-c", `model_reasoning_effort=\"${req.effort ?? effort(alias)}\"`];
     if (schema) args.push("--output-schema", schema);
     for (const image of images) args.push("-i", image.path!);
     args.push("-");

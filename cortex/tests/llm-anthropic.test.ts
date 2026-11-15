@@ -68,7 +68,8 @@ test("anthropic : stream + modèle par défaut + output_config + thinking + imag
     model: "opus",
     maxTokens: 2000,
     thinking: "adaptive",
-    json: { schema: { type: "object", properties: { topic: { type: "string" } }, required: ["topic"] }, effort: "high" },
+    json: { schema: { type: "object", properties: { topic: { type: "string" } }, required: ["topic"] } },
+    effort: "high",
     images: [{ mediaType: "image/png", base64: "QUJD" }],
     timeoutMs: 5_000,
   });
@@ -89,6 +90,22 @@ test("anthropic : stream + modèle par défaut + output_config + thinking + imag
   const messages = captured!.messages as Array<{ role: string; content: Array<Record<string, unknown>> }>;
   assert.equal(messages[0].content[0].type, "image");
   assert.equal(messages[0].content[1].type, "text");
+});
+
+test("anthropic : l'effort d'un site d'appel part dans output_config, avec ou sans schéma", async () => {
+  // Prod du 13-14/11 : sans effort, Sonnet 5 réfléchit au défaut « high » (8 à 15 k tokens
+  // facturés par appel pour 1 à 2,5 k de réponse visible). Un site peut le fixer ; aucun ne le
+  // baisse tant qu'une mesure sur Sonnet n'a pas montré la qualité intacte (banc du 15/11).
+  await anthropicProvider.complete({ prompt: "Doublons ?", model: "sonnet", effort: "low" });
+  assert.deepEqual(captured!.output_config, { effort: "low" });
+  assert.equal(captured!.thinking, undefined, "la réflexion adaptive reste celle du modèle");
+
+  await anthropicProvider.complete({ prompt: "p", model: "sonnet", effort: "medium", json: { schema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] } } });
+  assert.equal((captured!.output_config as { effort?: string }).effort, "medium");
+  assert.ok((captured!.output_config as { format?: unknown }).format, "le schéma reste envoyé");
+
+  await anthropicProvider.complete({ prompt: "p", model: "sonnet" });
+  assert.equal(captured!.output_config, undefined, "sans effort ni schéma : défaut du modèle, rien d'imposé");
 });
 
 test("anthropic : clé absente → UNAVAILABLE avec message ANTHROPIC_API_KEY (mapping 400 de la route analyze)", async () => {

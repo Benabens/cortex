@@ -71,6 +71,18 @@ test("provider codex-cli : schéma structuré et image par chemin", async () => 
   assert.ok(args.includes('model_reasoning_effort="low"'));
 });
 
+test("provider codex-cli : l'effort du site d'appel prime sur celui déduit du modèle", async () => {
+  installFakeBin([
+    `cat >/dev/null`,
+    `out=""; prev=""; for arg in "$@"; do [ "$prev" = "-o" ] && out="$arg"; prev="$arg"; done`,
+    `printf '%s\\036' "$@" > "${capture}.args"`,
+    `printf '{}' > "$out"`,
+  ].join("\n"));
+  await codexCliProvider.complete({ prompt: "p", model: "opus", effort: "low" });
+  const args = fs.readFileSync(`${capture}.args`, "utf8").split("\u001e").filter(Boolean);
+  assert.ok(args.includes('model_reasoning_effort="low"'), "le banc mesure la même politique d'effort que la prod");
+});
+
 test("provider codex-cli : convertit les dossiers d'images en arguments -i", async () => {
   const figures = fs.mkdtempSync(path.join(tmp, "figures-"));
   const image = path.join(figures, "page.png");

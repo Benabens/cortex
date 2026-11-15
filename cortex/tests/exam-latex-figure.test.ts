@@ -68,3 +68,16 @@ test("compileExamPdf : un \\og sans babel ne fait plus tomber le PDF", { skip: h
   fs.writeFileSync(path.join(examsDir(), "og.tex"), "\\documentclass{article}\n\\usepackage[T1]{fontenc}\n\\begin{document}\nSelon \\og le cours \\fg, le seuil est fixe.\n\\end{document}\n");
   assert.equal(await compileExamPdf("og"), "og.pdf");
 });
+
+test("compileExamPdf : un _ nu dans \\texttt (SEEK_CUR) ne fait plus tomber le PDF", { skip: hasTectonic ? false : "tectonic absent" }, async () => {
+  // Banc moteur du 15/11/2026 (cs-202-ecrit) : « Missing $ inserted » sur \texttt{lseek(fd2, -2, SEEK_CUR)},
+  // cinq exercices livrés sans PDF. Les maths et un \_ déjà échappé restent tels quels.
+  const { compileExamPdf } = await import("../lib/exam-latex");
+  const { examsDir } = await import("../lib/paths");
+  fs.writeFileSync(path.join(examsDir(), "souligne.tex"), [
+    "\\documentclass{article}", "\\usepackage[T1]{fontenc}", "\\begin{document}",
+    "Le thread B exécute \\texttt{lseek(fd2, -2, SEEK_CUR)} puis \\texttt{open(p, O\\_RDONLY)} ; on note $x_1$.",
+    "\\end{document}", "",
+  ].join("\n"));
+  assert.equal(await compileExamPdf("souligne"), "souligne.pdf");
+});
