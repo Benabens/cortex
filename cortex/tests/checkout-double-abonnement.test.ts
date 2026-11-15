@@ -16,7 +16,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-checkout-"));
 process.env.CORTEX_DATA_DIR = tmp;
 process.env.AUTH_URL = "https://cortex.example.ch";
 
-type Session = { id: string; url: string; status: "open" | "complete" | "expired"; params: Record<string, unknown> };
+type Session = { id: string; url: string; status: "open" | "complete" | "expired"; params: Record<string, unknown>; customer?: string };
 type Sub = { id: string; customer: string; status: string };
 
 function fakeStripe() {
@@ -27,6 +27,7 @@ function fakeStripe() {
   const tag = Math.random().toString(36).slice(2, 8); // ids uniques entre faux (la base est commune aux tests)
   let failCreate = false;
   let customersForbidden = false;
+  let afterCreate: (() => Promise<void>) | null = null;
   const stripe = {
     customers: {
       async create(params: Record<string, unknown>, opts?: { idempotencyKey?: string }) {
@@ -48,12 +49,13 @@ function fakeStripe() {
           if (failCreate) throw new Error("Stripe indisponible");
           const s: Session = { id: `cs_${tag}_${++n}`, url: `https://checkout.stripe.test/${n}`, status: "open", params };
           sessions.set(s.id, s);
+          if (afterCreate) { const fn = afterCreate; afterCreate = null; await fn(); }
           return { id: s.id, url: s.url };
         },
         async retrieve(id: string) {
           const s = sessions.get(id);
           if (!s) throw Object.assign(new Error("No such session"), { code: "resource_missing" });
-          return { id: s.id, url: s.url, status: s.status };
+          return { id: s.id, url: s.url, status: s.status, customer: s.customer ?? null };
         },
         async expire(id: string) {
           const s = sessions.get(id)!;
@@ -66,7 +68,13 @@ function fakeStripe() {
   };
   return {
     stripe, sessions, customers, subs,
-    pay(id: string) { const s = sessions.get(id)!; s.status = "complete"; subs.push({ id: `sub_${tag}_${++n}`, customer: String(s.params.customer), status: "active" }); },
+    pay(id: string) {
+      const s = sessions.get(id)!;
+      s.status = "complete";
+      s.customer = s.params.customer ? String(s.params.customer) : `cus_${tag}_checkout${++n}`; // sans client : Checkout en crée un
+      subs.push({ id: `sub_${tag}_${++n}`, customer: s.customer, status: "active" });
+    },
+    afterNextCreate(fn: () => Promise<void>) { afterCreate = fn; },
     failNextCreates(v: boolean) { failCreate = v; },
     forbidCustomers() { customersForbidden = true; },
   };
@@ -201,4 +209,30 @@ test("clé restreinte sans le droit Customers : le checkout marche comme avant (
   const b = await openCheckout({ stripe: f.stripe, ...sub("u-rk") });
   assert.ok(a.ok && b.ok);
   assert.equal(f.sessions.get(a.sessionId)!.status, "expired");
+});
+
+test("clé sans le droit Customers, premier onglet PAYÉ avant le webhook : le second est refusé d'après le client de la session payée", async () => {
+  const { openCheckout } = await import("../lib/billing/checkout-session");
+  const f = fakeStripe();
+  f.forbidCustomers();
+  const a = await openCheckout({ stripe: f.stripe, ...sub("u-rk-paid") });
+  assert.ok(a.ok);
+  f.pay(a.sessionId);
+  const b = await openCheckout({ stripe: f.stripe, ...sub("u-rk-paid") });
+  assert.equal(b.ok, false);
+  assert.equal(!b.ok && b.status, 409);
+  assert.equal(f.sessions.size, 1, "aucune seconde session payable");
+});
+
+test("base en panne juste après la création de la session : la session est expirée, rien ne reste payable sans verrou", async () => {
+  const { openCheckout } = await import("../lib/billing/checkout-session");
+  const { authRun } = await import("../db/auth-store");
+  const f = fakeStripe();
+  f.afterNextCreate(() => authRun(`ALTER TABLE checkout_locks RENAME TO checkout_locks_off`).then(() => {}));
+  try {
+    await assert.rejects(openCheckout({ stripe: f.stripe, ...sub("u-dbdown") }));
+  } finally {
+    await authRun(`ALTER TABLE checkout_locks_off RENAME TO checkout_locks`);
+  }
+  assert.deepEqual([...f.sessions.values()].map((x) => x.status), ["expired"]);
 });
