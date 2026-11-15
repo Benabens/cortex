@@ -22,7 +22,7 @@ Contexte technique : [ARCHITECTURE.md](ARCHITECTURE.md). Déploiement : [DEPLOY.
 
 7. **Aucun secret dans le dépôt.** Tout passe par des variables d'environnement ; `.env.example` est tenu à jour.
 
-8. **Aucun contenu de cours dans le dépôt.** Annales, slides et supports appartiennent à leur établissement. Ils vivent sur le volume de données, jamais dans git.
+8. **Aucun contenu de cours dans le dépôt.** Annales, slides et supports appartiennent à leur établissement. Ils vivent dans le dossier de données (ou le seau de stockage objet, via `lib/storage`), jamais dans git.
 
 ## Organisation
 

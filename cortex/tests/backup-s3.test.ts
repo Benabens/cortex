@@ -217,7 +217,8 @@ test("vrai Postgres : pg_dump → verify (pg_restore -l) liste public + tenants"
 before(() => { /* rien : PGlite s'initialise à la première requête du planificateur */ });
 
 test("stockage objet : l'archive du volume ne recopie pas les fichiers déjà dans le seau", async () => {
-  const { isObjectStored } = await import("../lib/storage");
+  const { inBucketPredicate, migrateToBucket } = await import("../lib/storage/migrate");
+  const { fakeBucket } = await import("./helpers/fake-bucket");
   const listTar = (archive: string) => spawnSync("tar", ["-tzf", archive], { encoding: "utf8" }).stdout.split("\n").filter(Boolean).sort();
   const dataDir = mkTmp("cortex-obj-data-");
   const backupDir = mkTmp("cortex-obj-out-");
@@ -227,17 +228,25 @@ test("stockage objet : l'archive du volume ne recopie pas les fichiers déjà da
   fs.writeFileSync(path.join(dataDir, "u/ben/ml/ml.db"), crypto.randomBytes(256));
   fs.mkdirSync(path.join(dataDir, ".page-cache/u/ben/ml/refs"), { recursive: true });
   fs.writeFileSync(path.join(dataDir, ".page-cache/u/ben/ml/refs/annale-1.png"), crypto.randomBytes(64));
-  const objectStore = { location: "s3://cortex-files/", isObjectStored };
+  const { bucket } = fakeBucket();
+  await migrateToBucket({ bucket, root: dataDir, prefix: "", write: true, log: () => {} }); // l'annale est dans le seau
+  // Écrit après : l'envoi du worker a échoué, il n'existe que sur le disque.
+  fs.writeFileSync(path.join(dataDir, "u/ben/ml/refs/pas-envoyee.pdf"), crypto.randomBytes(128));
+  const inBucket = await inBucketPredicate({ bucket, root: dataDir, prefix: "" });
+  const objectStore = { location: "s3://cortex-files/", inBucket };
   const { dir, manifest } = await createBackup({ dataDir, backupDir, dbDriver: "sqlite", objectStore, log: () => {} });
-  assert.deepEqual(listTar(path.join(dir, "data.tar.gz")), ["./auth.db", "./u/ben/ml/ml.db"], "bases locales seulement : ni annale (dans le seau), ni cache de pages");
+  assert.deepEqual(listTar(path.join(dir, "data.tar.gz")), ["./auth.db", "./u/ben/ml/ml.db", "./u/ben/ml/refs/pas-envoyee.pdf"],
+    "bases locales et fichier absent du seau : ni l'annale déjà envoyée, ni le cache de pages");
   assert.equal(manifest.objectStore?.location, "s3://cortex-files/");
-  assert.equal((await verifyBackup(dir, { log: () => {} })).dataEntries, 2);
+  assert.equal((await verifyBackup(dir, { log: () => {} })).dataEntries, 3);
 
   // Rien de local à archiver (prod : base Postgres, fichiers dans le seau) : archive vide mais valide.
   const onlyFiles = mkTmp("cortex-obj-only-");
   fs.mkdirSync(path.join(onlyFiles, "u/ben/ml/exams"), { recursive: true });
   fs.writeFileSync(path.join(onlyFiles, "u/ben/ml/exams/exam-1.pdf"), "%PDF");
-  const empty = await createBackup({ dataDir: onlyFiles, backupDir, dbDriver: "sqlite", objectStore, label: "vide", log: () => {} });
+  await migrateToBucket({ bucket, root: onlyFiles, prefix: "", write: true, log: () => {} });
+  const allSent = { location: "s3://cortex-files/", inBucket: await inBucketPredicate({ bucket, root: onlyFiles, prefix: "" }) };
+  const empty = await createBackup({ dataDir: onlyFiles, backupDir, dbDriver: "sqlite", objectStore: allSent, label: "vide", log: () => {} });
   assert.deepEqual(listTar(path.join(empty.dir, "data.tar.gz")), []);
   assert.equal((await verifyBackup(empty.dir, { log: () => {} })).dataEntries, 0, "vide mais valide : les fichiers sont dans le seau");
 });

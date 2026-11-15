@@ -25,7 +25,8 @@ const MIME: Record<string, string> = {
  * Repli anti-404 : si le chemin stocké ne résout pas (vieille ingestion, préfixe périmé
  * `lectures/` → `slides/`), on cherche le fichier par son BASENAME dans les dossiers du cours
  * (refs/ d'abord, puis content/**). Jamais de cul-de-sac silencieux quand le fichier existe ailleurs.
- * Parcours borné : on saute les dossiers lourds/inutiles et on plafonne le nombre de fichiers examinés.
+ * Parcours borné : le stockage ne descend jamais dans node_modules/.git/.next, on saute en plus
+ * les dossiers d'images et l'on plafonne le nombre de fichiers examinés.
  */
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "figref", "img", "images"]);
 async function findByBasename(roots: string[], basename: string): Promise<string | null> {

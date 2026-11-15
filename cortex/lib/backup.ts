@@ -63,10 +63,10 @@ export type CreateBackupOptions = {
   /** journal (défaut : console.log). */
   log?: (msg: string) => void;
   /**
-   * Stockage objet actif : les fichiers dont `isObjectStored(chemin relatif)` est
-   * vrai sont déjà dans le seau `location` et ne sont pas archivés.
+   * Stockage objet actif : les fichiers dont `inBucket(chemin relatif)` est vrai
+   * ont déjà une copie à jour dans le seau `location` et ne sont pas archivés.
    */
-  objectStore?: { location: string; isObjectStored: (rel: string) => boolean };
+  objectStore?: { location: string; inBucket: (rel: string) => boolean };
 };
 
 export type CreateBackupResult = { dir: string; manifest: BackupManifest };
@@ -146,10 +146,21 @@ function tarDir(srcDir: string, outFile: string, exclude: string[], keep?: (rel:
   }
 }
 
+/**
+ * Fichiers qui n'ont rien à faire dans une sauvegarde et peuvent disparaître pendant
+ * l'archivage (tar échoue sur un fichier listé puis absent) : cache des pages,
+ * exports en cours, téléchargements temporaires du stockage objet.
+ */
+function isTransient(rel: string): boolean {
+  return rel.startsWith(".page-cache/") || rel.startsWith(".export-tmp/") || /\.cortex-dl-[0-9a-f]+$/.test(rel);
+}
+
 /** Fichiers sous `dir` (chemins relatifs, séparateur `/`), sans suivre les liens symboliques. */
 function listFiles(dir: string, rel = ""): string[] {
   const out: string[] = [];
-  for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+  let entries: fs.Dirent[];
+  try { entries = fs.readdirSync(path.join(dir, rel), { withFileTypes: true }); } catch { return out; } // disparu entre-temps
+  for (const e of entries) {
     const r = rel ? `${rel}/${e.name}` : e.name;
     if (e.isDirectory()) out.push(...listFiles(dir, r));
     else if (e.isFile()) out.push(r);
@@ -222,7 +233,7 @@ export async function createBackup(opts: CreateBackupOptions): Promise<CreateBac
   log(`[backup] archive du volume ${dataDir}${store ? ` (hors fichiers de ${store.location})` : ""}…`);
   const backupRel = isInside(dataDir, opts.backupDir) ? path.relative(dataDir, path.resolve(opts.backupDir)).split(path.sep).join("/") : null;
   tarDir(dataDir, dataArchive, store ? [] : excluded, store
-    ? (rel) => !store.isObjectStored(rel) && !rel.startsWith(".page-cache/") && !(backupRel && (rel === backupRel || rel.startsWith(`${backupRel}/`)))
+    ? (rel) => !store.inBucket(rel) && !isTransient(rel) && !(backupRel && (rel === backupRel || rel.startsWith(`${backupRel}/`)))
     : undefined);
 
   // ── 2) base ───────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import path from "node:path";
 import { isNotFound, type ObjectBucket } from "@/lib/storage/bucket";
 import { isObjectStored, relativeToRoot } from "@/lib/storage/keys";
 import { walkFiles } from "@/lib/storage/local";
+import { contentTypeOf } from "@/lib/storage/s3";
 
 /**
  * MIGRATION DU VOLUME VERS LE SEAU (scripts/storage-migrate.ts).
@@ -52,14 +53,32 @@ function courseFiles(root: string, only?: string): { rel: string; path: string; 
 
 const sha256 = (buf: Buffer) => createHash("sha256").update(buf).digest("hex");
 
-export async function migrateToBucket(opts: MigrateOptions): Promise<MigrateReport> {
-  const log = opts.log ?? console.log;
+/** Fichiers de cours du volume dont le seau n'a pas de copie à jour (absente, autre taille, plus ancienne). */
+async function pendingFiles(opts: Omit<MigrateOptions, "write">) {
   const files = courseFiles(opts.root, opts.only);
   const remote = new Map((await opts.bucket.list(opts.prefix + (opts.only ?? ""))).map((o) => [o.key, o]));
   const pending = files.filter((f) => {
     const o = remote.get(opts.prefix + f.rel);
-    return !o || o.size !== f.size || f.mtimeMs > o.lastModified.getTime();
+    // LastModified est à la seconde (S3) : le fichier n'est plus récent que s'il l'est d'une seconde entière.
+    return !o || o.size !== f.size || Math.floor(f.mtimeMs / 1000) * 1000 > o.lastModified.getTime();
   });
+  return { files, pending };
+}
+
+/**
+ * Prédicat pour la sauvegarde : vrai si le fichier (chemin relatif) est un fichier
+ * de cours dont le seau a déjà une copie à jour. Un fichier resté local (envoi
+ * d'un worker en échec, script lancé à la main) est faux : il reste archivé.
+ */
+export async function inBucketPredicate(opts: Omit<MigrateOptions, "write" | "only">): Promise<(rel: string) => boolean> {
+  const { pending } = await pendingFiles(opts);
+  const local = new Set(pending.map((f) => f.rel));
+  return (rel) => isObjectStored(rel) && !local.has(rel);
+}
+
+export async function migrateToBucket(opts: MigrateOptions): Promise<MigrateReport> {
+  const log = opts.log ?? console.log;
+  const { files, pending } = await pendingFiles(opts);
   const report: MigrateReport = {
     files: files.length,
     toUpload: pending.map((f) => f.rel),
@@ -74,7 +93,7 @@ export async function migrateToBucket(opts: MigrateOptions): Promise<MigrateRepo
     return report;
   }
   for (const f of pending) {
-    await opts.bucket.put(opts.prefix + f.rel, { path: f.path, size: f.size });
+    await opts.bucket.put(opts.prefix + f.rel, { path: f.path, size: f.size }, contentTypeOf(f.path));
     report.uploaded++;
     if (report.uploaded % 100 === 0) log(`  ${report.uploaded}/${pending.length} envoyé(s)…`);
   }

@@ -261,6 +261,30 @@ describe("S3Store — le seau fait foi", () => {
     assert.equal(r?.status, 200, "pas encore dans le seau : servi depuis le disque, pas d'URL présignée vers un objet absent");
     assert.equal(await text(r), "%PDF-9");
   });
+
+  test("withLocalDir n'écrase jamais une copie locale plus récente que l'objet (worker concurrent pas encore envoyé)", async () => {
+    const { make } = s3();
+    const { store, root } = make();
+    const dir = path.join(root, "u/ben/ml/exams");
+    const ckpt = path.join(dir, ".gen-checkpoint.json");
+    await store.put(ckpt, "{\"v\":1}");
+    fs.writeFileSync(ckpt, "{\"v\":2,\"plus\":true}"); // le worker avance, taille différente
+    const later = new Date(Date.now() + 5_000);
+    fs.utimesSync(ckpt, later, later);
+    await store.withLocalDir([dir], async () => {
+      assert.equal(fs.readFileSync(ckpt, "utf8"), "{\"v\":2,\"plus\":true}");
+    });
+  });
+
+  test("une clé du seau qui sortirait du dossier de données n'est jamais écrite sur le disque", async () => {
+    const { fake, make } = s3();
+    const { store, root } = make();
+    const dir = path.join(root, "u/ben/ml");
+    fake.objects.set("u/ben/ml/../../../evil.txt", { body: Buffer.from("x"), at: new Date() });
+    await store.withLocalDir([dir], async () => {});
+    assert.equal(fs.existsSync(path.join(root, "..", "evil.txt")), false);
+    assert.deepEqual((await store.list(dir)).map((f) => f.path), []);
+  });
 });
 
 test("configuration : aucune variable = disque local ; partielle = refus nommé ; défauts Railway Buckets", async () => {

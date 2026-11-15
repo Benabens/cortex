@@ -49,7 +49,7 @@ const MIME: Record<string, string> = {
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 };
-const contentTypeOf = (file: string) => MIME[path.extname(file).slice(1).toLowerCase()] ?? "application/octet-stream";
+export const contentTypeOf = (file: string) => MIME[path.extname(file).slice(1).toLowerCase()] ?? "application/octet-stream";
 
 /** Exécute `fn` sur chaque élément, au plus `n` à la fois. */
 async function eachLimit<T>(items: T[], n: number, fn: (x: T) => Promise<void>): Promise<void> {
@@ -80,8 +80,11 @@ export class S3Store implements CourseFiles {
     return rel && isObjectStored(rel) ? this.prefix + rel : null;
   }
 
-  private localOf(key: string): string {
-    return path.join(this.root, ...key.slice(this.prefix.length).split("/"));
+  /** Chemin local d'une clé du seau ; null = clé hors arborescence (« .. », vide) : jamais écrite. */
+  private localOf(key: string): string | null {
+    const parts = key.slice(this.prefix.length).split("/");
+    if (!key.startsWith(this.prefix) || parts.some((p) => p === "" || p === "." || p === "..")) return null;
+    return path.join(this.root, ...parts);
   }
 
   /** Objets du seau sous `key` (la clé elle-même, ou ce qui est rangé dessous). */
@@ -121,7 +124,13 @@ export class S3Store implements CourseFiles {
     if (key) {
       try { return await this.bucket.get(key); } catch (e) { if (!isNotFound(e)) throw e; }
     }
-    try { return fs.readFileSync(file); } catch { return null; }
+    try {
+      return fs.readFileSync(file);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "EISDIR") return null;
+      throw e;
+    }
   }
 
   async stat(file: string): Promise<FileStat | null> {
@@ -138,11 +147,11 @@ export class S3Store implements CourseFiles {
     for (const o of await this.objectsUnder(key)) {
       if (o.key === key) continue; // `dir` est un fichier, pas un dossier
       const p = this.localOf(o.key);
+      if (!p) continue;
       out.set(p, { path: p, size: o.size, mtimeMs: o.lastModified.getTime() });
     }
     for (const f of local) {
-      const rel = relativeToRoot(this.root, f.path);
-      if (rel && isObjectStored(rel) && !out.has(f.path)) out.set(f.path, f);
+      if (this.keyOf(f.path) && !out.has(f.path)) out.set(f.path, f);
     }
     return [...out.values()];
   }
@@ -209,14 +218,20 @@ export class S3Store implements CourseFiles {
     return result;
   }
 
-  /** Rapatrie les objets absents du disque, de taille différente ou plus récents que la copie. */
+  /**
+   * Rapatrie les objets absents du disque ou plus récents que la copie locale. Une
+   * copie locale plus récente que l'objet (écrite par un worker, pas encore
+   * envoyée) n'est jamais écrasée, même de taille différente.
+   */
   private async hydrate(key: string): Promise<void> {
-    const stale = (await this.objectsUnder(key)).filter((o) => {
-      const s = statLocal(this.localOf(o.key));
-      return !s || s.size !== o.size || s.mtimeMs < o.lastModified.getTime();
+    const stale = (await this.objectsUnder(key)).flatMap((o) => {
+      const dest = this.localOf(o.key);
+      if (!dest) return [];
+      const s = statLocal(dest);
+      return !s || s.mtimeMs < o.lastModified.getTime() ? [{ ...o, dest }] : [];
     });
     await eachLimit(stale, PARALLEL, async (o) => {
-      const dest = this.localOf(o.key);
+      const dest = o.dest;
       const obj = await this.bucket.stream(o.key);
       if (!obj) return; // supprimé entre le listage et le téléchargement
       fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -238,8 +253,7 @@ export class S3Store implements CourseFiles {
       const one = statLocal(a);
       const files = one ? [{ path: a, ...one }] : walkFiles(a);
       for (const f of files) {
-        const rel = relativeToRoot(this.root, f.path);
-        if (rel && isObjectStored(rel)) out.set(f.path, { size: f.size, mtimeMs: f.mtimeMs });
+        if (this.keyOf(f.path)) out.set(f.path, { size: f.size, mtimeMs: f.mtimeMs });
       }
     }
     return out;
