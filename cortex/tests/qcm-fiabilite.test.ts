@@ -203,7 +203,7 @@ test("sorties problématiques du modèle → 7 QCM sur 7, code des énoncés int
   assert.ok(designBodies.every((b) => b.response_format), "la conception demande une sortie structurée");
   // Job 17 (14/11/2026) : la ré-audit ne tourne plus que si l'audit a effectivement
   // signalé puis réparé un distracteur trivial ; ici rien n'est signalé (aucun « TypeError »).
-  assert.equal(finalAuditCalls, 2, "aucun distracteur signalé : un seul ré-audit de livraison, sans cascade");
+  assert.equal(finalAuditCalls, 3, "aucun distracteur signalé : deux lectures de livraison, sans cascade");
   const exam = await runWithCourse(id, () => getQcmExam(r.id));
   assert.equal(exam!.items.length, 7);
   assert.ok(exam!.items.some((it) => it.stem.includes(`${BT}python\nimport pandas as pd`)), "le bloc de code de l'énoncé est gardé tel quel");
