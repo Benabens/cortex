@@ -34,6 +34,20 @@ const send = (value) => parentPort.postMessage(value);
   let stdout = "";
   let stderr = "";
   const append = (target, value) => (target + String(value) + "\n").slice(0, maxOutputBytes);
+  // Plafond de la mémoire linéaire WebAssembly, que resourceLimits ne couvre pas : tracemalloc ne
+  // voit une allocation C unique (np.ones(250_000_000) : 2 Go) qu'une fois faite. Emscripten grandit
+  // le tas par Memory.prototype.grow et traite un refus comme un malloc qui échoue : le programme
+  // reçoit un MemoryError. Armé au runtime prêt, le budget s'ajoute au tas du runtime (pandas compris).
+  let heapBudget = null;
+  let heapBase = 0;
+  const grow = WebAssembly.Memory.prototype.grow;
+  WebAssembly.Memory.prototype.grow = function (pages) {
+    if (heapBudget !== null) {
+      if (!heapBase) heapBase = this.buffer.byteLength;
+      if (this.buffer.byteLength + pages * 65536 > heapBase + heapBudget) throw new RangeError("CORTEX_MEMORY_LIMIT");
+    }
+    return grow.call(this, pages);
+  };
   const pyodide = await loadPyodide({
     // N'expose jamais globalThis (fetch, process, require) au pont Python-JavaScript.
     jsglobals: Object.freeze(Object.create(null)),
@@ -54,6 +68,7 @@ const send = (value) => parentPort.postMessage(value);
     stdout = "";
     stderr = "";
   }
+  heapBudget = memoryMb * 1024 * 1024;
   send({ type: "ready" });
   pyodide.globals.set("_cortex_source", source);
   pyodide.globals.set("_cortex_stdin", stdin);

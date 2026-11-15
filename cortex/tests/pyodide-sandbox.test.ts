@@ -48,6 +48,19 @@ test("Un runtime qui ne démarre pas dans son propre délai est signalé comme t
   }
 });
 
+test("Une allocation numpy unique au-delà du budget mémoire est refusée, pas seulement constatée", async () => {
+  process.env.CORTEX_PYTHON_WASM = "1";
+  try {
+    // 800 Mo en un seul appel C : aucun événement de traçage entre deux, tracemalloc ne voit rien.
+    const r = await runPythonWasm("import pandas as pd\nimport numpy as np\na = np.ones(100_000_000)\nprint(a.sum())", { timeoutMs: 20_000, memoryMb: 256 });
+    assert.deepEqual([r.ok, r.reason], [false, "memory-limit"], r.stdout + r.stderr.slice(-300));
+    const fits = await runPythonWasm("import pandas as pd\nimport numpy as np\nprint(np.ones(10_000_000).sum())", { timeoutMs: 20_000, memoryMb: 256 });
+    assert.equal(fits.stdout.trim(), "10000000.0", "80 Mo restent permis");
+  } finally {
+    delete process.env.CORTEX_PYTHON_WASM;
+  }
+});
+
 test("Pyodide interdit le réseau", async () => {
   process.env.CORTEX_PYTHON_WASM = "1";
   try {
