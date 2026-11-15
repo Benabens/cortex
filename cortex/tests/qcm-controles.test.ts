@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { auditConsensus, capDrops, duplicateAuditDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, refutedItems, ultimateAuditActions } from "../lib/qcm-checks";
+import { absentOptionCitations, auditConsensus, capDrops, duplicateAuditDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, refutedItems, ultimateAuditActions } from "../lib/qcm-checks";
 
 type Item = { n: number; topic: string; verified: 0 | 1 | null; stem: string; options: string[]; correct: number[]; explanation: string };
 const EXAM9: Item[] = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "qcm-job23-examen9.json"), "utf8")).items;
@@ -57,6 +57,22 @@ test("explication : le défaut relevé est le bon (compte, puis notion ou affirm
   const q19 = explanationIssues(q(19).explanation, q(19).options, q(19).correct, q(19).stem)!;
   assert.equal(q19.refuted, 3);
   assert.match(q19.absent.join(" | "), /plateforme numérique exclut/);
+});
+
+test("explication : toute option citée doit reprendre textuellement une option finale", () => {
+  const options = [
+    "Le mécanisme conserve la liberté de choix.",
+    "Le mécanisme interdit le choix concurrent.",
+    "Le mécanisme augmente directement le prix.",
+  ];
+  assert.deepEqual(absentOptionCitations(
+    "La bonne réponse est « Le mécanisme conserve la liberté de choix. ». « Le mécanisme supprime tout choix. » est fausse.",
+    options,
+  ), ["Le mécanisme supprime tout choix."]);
+  assert.deepEqual(absentOptionCitations(
+    "« Le mécanisme conserve la liberté de choix. » est juste ; « Le mécanisme interdit le choix concurrent. » est faux.",
+    options,
+  ), []);
 });
 
 test("explication : une réfutation par le défaut de l'option (« inversent l'ordre… », « soit parce qu'elles… ») n'est pas prise pour une option absente", () => {
