@@ -22,6 +22,32 @@ test("Pyodide exécute Python et pandas quand le flag est actif", async () => {
   }
 });
 
+test("Le délai d'exécution ne compte pas le démarrage du runtime, pandas compris", async () => {
+  process.env.CORTEX_PYTHON_WASM = "1";
+  try {
+    // Charger et importer pandas prend plusieurs secondes (2,5 s seul sur un Mac de développement,
+    // 11 s à 32 en parallèle) : un délai de 10 s qui l'inclut prend un extrait correct pour une
+    // boucle infinie.
+    const r = await runPythonWasm("import pandas as pd\nprint(pd.Series([20, 22]).sum())", { timeoutMs: 1_000 });
+    assert.equal(r.ok, true, `${r.reason} ${r.stderr}`);
+    assert.equal(r.stdout.trim(), "42");
+    assert.ok((r.startupMs ?? 0) > 1_000, `démarrage de ${r.startupMs} ms : le test ne prouve rien s'il tient dans le délai`);
+  } finally {
+    delete process.env.CORTEX_PYTHON_WASM;
+  }
+});
+
+test("Un runtime qui ne démarre pas dans son propre délai est signalé comme tel, pas comme un timeout du code", async () => {
+  process.env.CORTEX_PYTHON_WASM = "1";
+  try {
+    const r = await runPythonWasm("print(1)", { startupTimeoutMs: 1 });
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, "startup-timeout");
+  } finally {
+    delete process.env.CORTEX_PYTHON_WASM;
+  }
+});
+
 test("Pyodide interdit le réseau", async () => {
   process.env.CORTEX_PYTHON_WASM = "1";
   try {
@@ -66,7 +92,8 @@ test("Pyodide tue une boucle infinie au timeout", async () => {
     const r = await runPythonWasm("while True: pass", { timeoutMs: 500 });
     assert.equal(r.ok, false);
     assert.equal(r.reason, "timeout");
-    assert.ok(Date.now() - start < 5_000);
+    // Le délai court à partir du runtime prêt.
+    assert.ok(Date.now() - start - (r.startupMs ?? 0) < 3_000);
   } finally {
     delete process.env.CORTEX_PYTHON_WASM;
   }
