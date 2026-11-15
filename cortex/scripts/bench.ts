@@ -19,7 +19,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { allCases, findCase, type BenchCase } from "../lib/bench/cases";
-import { assertBenchEnv } from "../lib/bench/guard";
+import { assertBenchEnv, judgeEnv } from "../lib/bench/guard";
 import type { BenchRun, TapeCall, Verdicts } from "../lib/bench/types";
 
 function arg(name: string): string | undefined {
@@ -369,14 +369,10 @@ async function runCase(c: BenchCase): Promise<string> {
 /** Le juge tourne dans un processus à part : son modèle (Opus) n'hérite pas du modèle du moteur. */
 function spawnJudge(runDir: string): Promise<void> {
   const replay = arg("replay");
-  const env: NodeJS.ProcessEnv = { ...process.env, LLM_TAPE: replay ? `replay:${path.join(path.resolve(replay), "judge.tape.jsonl")}` : `record:${path.join(runDir, "judge.tape.jsonl")}`, LLM_TAPE_LOG: path.join(runDir, "judge.replay.jsonl") };
+  // Mesure payante du moteur (lib/bench/guard) : le juge, lui, reste sur l'abonnement Codex.
+  const env: NodeJS.ProcessEnv = judgeEnv({ ...process.env, LLM_TAPE: replay ? `replay:${path.join(path.resolve(replay), "judge.tape.jsonl")}` : `record:${path.join(runDir, "judge.tape.jsonl")}`, LLM_TAPE_LOG: path.join(runDir, "judge.replay.jsonl") });
   delete env.LLM_MODEL_OPUS;
   delete env.CORTEX_BENCH_TRACE;
-  // Mesure payante du moteur (lib/bench/guard) : le juge, lui, reste sur l'abonnement Codex.
-  if (env.CORTEX_BENCH_PAID) {
-    for (const k of ["CORTEX_BENCH_PAID", "SPEND_CAP_USD", "ANTHROPIC_API_KEY", "LLM_API_KEY"]) delete env[k];
-    env.LLM_PROVIDER = "codex-cli";
-  }
   return new Promise((resolve, reject) => {
     const child = spawn(path.join(process.cwd(), "node_modules", ".bin", "tsx"), ["scripts/bench.ts", "judge", "--run", runDir], { cwd: process.cwd(), env, stdio: "inherit" });
     child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`juge : code ${code}`))));
@@ -385,7 +381,7 @@ function spawnJudge(runDir: string): Promise<void> {
 
 async function judgeRun(runDir: string): Promise<void> {
   const run = JSON.parse(fs.readFileSync(path.join(runDir, "run.json"), "utf8")) as BenchRun & { courseId: string };
-  assertBenchEnv(process.env);
+  assertBenchEnv(process.env, { judge: true });
   // Le juge n'a pas de job, donc pas de réservation (230f686, 13/11 : « Il te faut des crédits ») :
   // il juge comme le propriétaire du cours du banc (« owner », lib/bench), sur l'abonnement Codex.
   process.env.CORTEX_OWNER_USER_ID ||= "owner";

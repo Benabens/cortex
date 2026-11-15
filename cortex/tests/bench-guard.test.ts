@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { assertBenchEnv } from "../lib/bench/guard";
+import { assertBenchEnv, judgeEnv } from "../lib/bench/guard";
 
 const ok = { LLM_PROVIDER: "codex-cli", CORTEX_DATA_DIR: "/tmp/banc", DB_DRIVER: "postgres", DATABASE_URL: "postgres://cortex@127.0.0.1:55433/banc" };
 
@@ -39,6 +39,17 @@ test("mesure réelle sur l'API : seulement sur opt-in explicite, avec un plafond
   assert.throws(() => assertBenchEnv({ ...paid, LLM_PROVIDER: "openai-compatible" }), /anthropic/);
   assert.throws(() => assertBenchEnv({ ...paid, OPENAI_API_KEY: "sk-xxx" }), /OPENAI_API_KEY/);
   assert.throws(() => assertBenchEnv({ ...paid, DATABASE_URL: "postgres://u:p@db.railway.internal:5432/railway" }), /locale/);
+});
+
+test("le juge ne tourne jamais sur l'API : environnement payant refusé, et l'environnement du juge retire la clé", () => {
+  // Relecture du 15/11 : un « judge --run » lancé à part, l'environnement payant encore exporté,
+  // passait la garde et jugeait sur l'API.
+  const paid = { ...ok, LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-ant-xxx", LLM_API_KEY: "sk-ant-yyy", CORTEX_BENCH_PAID: "anthropic", SPEND_CAP_USD: "4" };
+  assert.throws(() => assertBenchEnv(paid, { judge: true }), /juge/);
+  const env = judgeEnv(paid);
+  assert.doesNotThrow(() => assertBenchEnv(env, { judge: true }));
+  assert.deepEqual([env.LLM_PROVIDER, env.ANTHROPIC_API_KEY, env.LLM_API_KEY, env.CORTEX_BENCH_PAID, env.SPEND_CAP_USD], ["codex-cli", undefined, undefined, undefined, undefined]);
+  assert.deepEqual(judgeEnv(ok), ok, "hors mesure payante : rien ne change");
 });
 
 test("base distante ou dossier de données absent : refusé", () => {
