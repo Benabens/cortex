@@ -74,7 +74,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     return NextResponse.json(res, { status: 200 });
   } catch (e) {
     // Stripe réessaie pendant 3 jours, puis abandonne : un paiement non crédité doit se voir
-    // avant. Étiquettes techniques seulement (le message peut citer un id client Stripe).
+    // avant. Étiquettes techniques seulement ; un id Stripe cité par le message est masqué (redactMessage).
     captureError(e, { area: "billing", step: "webhook", event_type: event.type });
     return NextResponse.json({ error: e instanceof Error ? e.message.slice(0, 200) : "Erreur de traitement." }, { status: 500 });
   }

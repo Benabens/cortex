@@ -134,3 +134,21 @@ test("avec SENTRY_DSN : traces et spans passent par le même nettoyage que les e
   assert.equal(tx.request.url, "https://cortex.app/api/exams/generate");
   delete process.env.SENTRY_TRACES_SAMPLE_RATE;
 });
+
+test("un identifiant Stripe (client, abonnement, session…) dans un message d'erreur ne part jamais", async () => {
+  const { scrubEvent } = await import("../lib/observability");
+  // Webhook en erreur (audit du 14/11, n° 13) : lib/billing/stripe-events.ts cite le client
+  // (« utilisateur introuvable (customer cus_…) ») ; il relie l'alerte à un compte précis.
+  const event = scrubEvent({
+    message: "invoice.paid : utilisateur introuvable (customer cus_QxR4b7TzLm2Nop)",
+    exception: { values: [{ type: "Error", value: "abonnement sub_1PqRsTuVwXyZ0123 et session cs_test_a1B2c3D4e5F6g7H8 inconnus" }] },
+  } as Parameters<typeof scrubEvent>[0]) as { message?: string; exception: { values: { value: string }[] } };
+  const text = `${event.message} ${event.exception.values[0].value}`;
+  assert.doesNotMatch(text, /cus_|sub_1|cs_test_/);
+  assert.match(text, /utilisateur introuvable/, "la nature de la panne reste lisible");
+});
+
+test("redactMessage : un nom de code avec « _ » n'est pas pris pour un identifiant Stripe", async () => {
+  const { redactMessage } = await import("../lib/observability");
+  assert.equal(redactMessage("échec de worker_heartbeat sur job_queue_state_idx"), "échec de worker_heartbeat sur job_queue_state_idx");
+});
