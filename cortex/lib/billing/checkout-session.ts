@@ -30,7 +30,7 @@ export type CheckoutStripe = {
   checkout: {
     sessions: {
       create(p: Stripe.Checkout.SessionCreateParams): Promise<{ id: string; url: string | null }>;
-      retrieve(id: string): Promise<{ status: string | null }>;
+      retrieve(id: string): Promise<{ status: string | null; customer?: string | { id: string } | null }>;
       expire(id: string): Promise<unknown>;
     };
   };
@@ -107,14 +107,19 @@ export async function openCheckout(o: { stripe: CheckoutStripe; userId: string; 
 
   const lock = await claimLock(o.userId);
   if (!lock.ok) return { ok: false, status: 409, error: OPENING };
+  let created: string | null = null;
   try {
     // L'onglet précédent ne doit plus pouvoir payer. Déjà payé ou expiré : expire échoue, c'est
     // l'état des abonnements chez Stripe (ci-dessous) qui tranche.
+    let paidCustomer: string | null = null;
     if (lock.previous) {
       const prev = await o.stripe.checkout.sessions.retrieve(lock.previous).catch(() => null);
       if (prev?.status === "open") await o.stripe.checkout.sessions.expire(lock.previous).catch(() => {});
+      if (prev?.status === "complete" && prev.customer) paidCustomer = typeof prev.customer === "string" ? prev.customer : prev.customer.id;
     }
-    const customer = await customerFor(o.stripe, o.userId, o.email);
+    // Sans le droit Customers (pas de client à nous), le client que Checkout a créé pour l'onglet
+    // payé suffit à relire ses abonnements.
+    const customer = (await customerFor(o.stripe, o.userId, o.email)) ?? paidCustomer;
     const existing = customer ? (await o.stripe.subscriptions.list({ customer, status: "all", limit: 20 })).data : [];
     if (existing.some((s) => BILLING_STATUSES.has(s.status))) {
       await releaseLock(o.userId);
@@ -123,10 +128,14 @@ export async function openCheckout(o: { stripe: CheckoutStripe; userId: string; 
     const s = await o.stripe.checkout.sessions.create(checkoutParams({
       plan: o.plan, priceId: o.priceId, userId: o.userId, email: o.email, customer: customer ?? undefined, expiresAt: Math.floor(Date.now() / 1000) + SESSION_TTL_S,
     }));
+    created = s.id;
     await authRun(`UPDATE checkout_locks SET session_id = ?, created_at = ? WHERE user_id = ?`, s.id, nowStr(), o.userId);
     return { ok: true, url: s.url ?? "", sessionId: s.id };
   } catch (e) {
-    await releaseLock(o.userId);
+    // Une session créée mais pas inscrite au verrou ne doit pas rester payable : elle échapperait
+    // à l'expiration par l'onglet suivant.
+    if (created) await o.stripe.checkout.sessions.expire(created).catch(() => {});
+    await releaseLock(o.userId).catch(() => {});
     throw e;
   }
 }
