@@ -5,7 +5,7 @@
  *    plusieurs clés n'entre jamais dans l'examen (son sujet est comblé).
  *  - Explications : la Q12 de l'examen 3 renvoyait à « la première option » après le mélange
  *    des options, qui l'avait déplacée. Une explication qui désigne une option par sa position
- *    ou sa lettre est régénérée ; elle n'entre jamais dans un examen.
+ *    ou sa lettre est réécrite d'après son contenu, sinon écartée ; elle n'entre jamais dans un examen.
  * Fournisseur LLM simulé : aucune dépense.
  */
 import assert from "node:assert/strict";
@@ -69,7 +69,9 @@ before(async () => {
       const parsed = JSON.parse(body) as { messages: { content: unknown }[] };
       const content = parsed.messages.map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))).join("\n");
       let text = "{}";
-      if (/"results"/.test(content)) text = verifyReply(content);
+      // Revue finale : audit (verdicts) et doublons dans le même appel ; rien à signaler.
+      if (/"duplicates"/.test(content)) text = JSON.stringify({ verdicts: [...content.matchAll(/^Q(\d+)\./gm)].map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })), notions: [], duplicates: [], repeats: [] });
+      else if (/"results"/.test(content)) text = verifyReply(content);
       else if (/"items"/.test(content)) {
         designCalls++;
         designPrompts.push(content);
@@ -175,13 +177,13 @@ test("une explication qui désigne une option par sa position ou sa lettre est r
   }
 });
 
-test("Q12 de l'examen 3 : une explication par position est régénérée et n'entre jamais dans l'examen", async () => {
+test("Q12 de l'examen 3 : une explication par position est réécrite ou écartée, et n'entre jamais dans l'examen", async () => {
   const id = await course({ kind: "qcm", questionCount: 4 });
   design = (n, call) => Array.from({ length: n }, (_, i) => (call === 1 && i === 2 ? item(2, [0], Q12) : item(call * 10 + i)));
   const { r, view } = await exam(id, 4);
   assert.equal(r.count, 4);
   for (const it of view.items) assert.doesNotMatch(it.explanation, /première option|deuxième|troisième/, it.stem);
-  assert.ok(designPrompts.slice(1).some((p) => /position|lettre/.test(p) && /\(q2\)/.test(p)), "la régénération dit pourquoi la question est refaite");
+  assert.equal(designCalls, 1, "la question de réserve tient le total, sans régénération");
 });
 
 test("examen déjà en base : une explication par position (options mélangées depuis) n'est plus montrée", async () => {

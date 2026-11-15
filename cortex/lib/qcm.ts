@@ -5,8 +5,8 @@ import { DEFAULT_ANSWER_MODE, courseMaterialTitles, examLanguageFor, readStoredP
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseNumbers, absentCourseTerms, corpusWindows, coursePassages, factNumbers, topicsInScope } from "@/lib/course-grounding";
-import { rewriteExplanations, rewriteExplanationsOnOptions, secondLookOffCourse, verifierPassages, writeJustifications, type JustificationTarget, type OffCourseFlag } from "@/lib/qcm-evidence";
-import { bestNotionMatch, capDrops, describeExplanationIssue, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, keyProposition, notionBase, notionCap, notionMismatch, optionHead, sameProposition, sameSourceFact, ultimateAuditActions } from "@/lib/qcm-checks";
+import { rewriteExplanations, rewriteExplanationsOnOptions, secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
+import { bestNotionMatch, capDrops, describeExplanationIssue, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, keyProposition, notionBase, notionCap, notionMismatch, optionHead, sameProposition, sameSourceFact } from "@/lib/qcm-checks";
 import { assignChapters, spreadOverChapters, variants } from "@/lib/coverage";
 import { normalize, tokenize } from "@/lib/text";
 import { courseRefImages } from "@/lib/course-vision";
@@ -26,8 +26,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { storage } from "@/lib/storage";
 import { askedFacts, attributedFact, courseFacts, factDuplicates, planFacts, type CourseFact } from "@/lib/qcm-facts";
-import { JUSTIFICATION_SCHEMA, assembleExplanation, distractorIndices, fillRationale, invalidateRationale, permuteRationale, rationaleCheck, rationaleFromModel, storedExplanation, structuredExplanationsEnabled, toStoredRationale, type QcmRationale } from "@/lib/qcm-rationale";
-import { qcmCheckpointKey, readQcmCheckpoint, withFigurePresent, type QcmCheckpoint, type QcmCheckpointStore, type QcmMissingState, type QcmPlan, type QcmReserveState } from "@/lib/qcm-checkpoint";
+import { qcmCheckpointKey, readQcmCheckpoint, withFigurePresent, type QcmBatchState, type QcmCheckpoint, type QcmCheckpointStore, type QcmMissingState, type QcmPlan, type QcmReserveState } from "@/lib/qcm-checkpoint";
 
 /**
  * ARCHITECTE QCM (générique). Génère des QCM de haut niveau au format détecté :
@@ -83,13 +82,6 @@ export type QcmItem = {
   notion?: string | null;
   /** Fait testable du cours (lib/qcm-facts) que la question teste : jamais deux questions d'un examen sur le même. Persisté. */
   factId?: string | null;
-  /**
-   * Justification structurée (lib/qcm-rationale) : la clé, et une raison par option, rangée comme
-   * `misconceptions`. Présente, `explanation` en est l'assemblage (syncExplanation), jamais un
-   * paragraphe libre. Absente (QCM_STRUCTURED_EXPLANATIONS=0, réponse sans justification) :
-   * l'explication texte et ses contrôles lexicaux, comme avant. Persistée (rationale_json).
-   */
-  rationale?: QcmRationale | null;
 };
 
 /**
@@ -148,12 +140,6 @@ function batchSchema(mode: AnswerMode, withFigures: boolean, withFacts = false):
     props.options = { ...props.options, minItems: SCQ_OPTIONS, maxItems: SCQ_OPTIONS, description: `EXACTEMENT ${SCQ_OPTIONS} options : des PROPOSITIONS COMPLÈTES de longueurs COMPARABLES, pas d'« toutes les réponses ci-dessus ».` };
   }
   if (!withFigures) delete props.figure_spec;
-  // Justification structurée À LA PLACE du paragraphe libre (même appel, une sortie plus courte).
-  if (structuredExplanationsEnabled()) {
-    delete props.explanation;
-    props.justification = JUSTIFICATION_SCHEMA;
-    s.properties.items.items.required = s.properties.items.items.required.map((k: string) => (k === "explanation" ? "justification" : k));
-  }
   return s;
 }
 
@@ -201,8 +187,7 @@ function wellFormed(raw: unknown): boolean {
   if (!Array.isArray(it.options) || it.options.length < 2 || !it.options.every((o) => typeof o === "string" && o.trim())) return false;
   const n = it.options.length;
   // Sans explication, la clé n'est pas justifiée dans le corrigé (banc du 04/11 : un lot entier sans).
-  const key = (raw as { justification?: { key?: unknown } } | null)?.justification?.key;
-  if ((typeof it.explanation !== "string" || !it.explanation.trim()) && !(structuredExplanationsEnabled() && typeof key === "string" && key.trim())) return false;
+  if (typeof it.explanation !== "string" || !it.explanation.trim()) return false;
   return Array.isArray(it.correct) && it.correct.length > 0 && it.correct.every((k) => Number.isInteger(k) && k >= 0 && k < n);
 }
 
@@ -214,7 +199,7 @@ async function ensureQcmSchema(): Promise<void> {
   await q.ensureTable("exam_questions");
   await q.ensureTable("qcm_items");
   // moule + figure (spec/fichier/truth) par item, additif.
-  await q.ensureColumns("qcm_items", ["mold", "figure_json", "fact_id", "rationale_json"]);
+  await q.ensureColumns("qcm_items", ["mold", "figure_json", "fact_id"]);
 }
 
 /** Sujets à couvrir : blueprint (topics pondérés) si dispo, sinon archétypes du cours.
@@ -253,15 +238,21 @@ export async function coverageTopics(): Promise<CovTopic[]> {
  * TAXONOMIE DES DISTRACTEURS — ce qui sépare un QCM d'examen d'un QCM de remplissage
  * (cas HUM-285 : options d'un mot, mauvaises réponses évidentes). Chaque distracteur
  * porte son procédé entre crochets dans « misconceptions ».
+ *
+ * Banc HUM-285 du 15/11 (it0 + it1, juge à l'aveugle) : une notion voisine réelle du cours
+ * ([quasi-synonyme]) n'est triviale que 39 % du temps ; une restriction ajoutée à la bonne
+ * réponse (« mais seulement… »), une inversion ou une sur-généralisation se réfutent par le
+ * raisonnement 59 à 67 % du temps. Les quasi-synonymes passent donc en tête.
  */
 const DISTRACTOR_TAXONOMY = [
-  `TAXONOMIE DES DISTRACTEURS — chaque mauvaise option est construite par UN de ces procédés (écris-le entre crochets en tête de son "misconceptions", ex. « [inversion] … ») :`,
-  `  · [inversion] le résultat ou le sens d'un effet est inversé (augmente ↔ diminue, plus ↔ moins, cause ↔ conséquence) ;`,
-  `  · [mauvaise condition] la bonne notion, mais une condition de sa définition change ou manque (même mesure, une seule condition diffère) ;`,
-  `  · [mauvaise attribution] le bon chiffre ou le bon résultat attribué à la mauvaise étude, au mauvais auteur, pays, année ou acteur ;`,
+  `TAXONOMIE DES DISTRACTEURS — chaque mauvaise option est construite par UN de ces procédés (écris-le entre crochets en tête de son "misconceptions", ex. « [quasi-synonyme] … ») :`,
+  `  · [quasi-synonyme] PROCÉDÉ PRINCIPAL : une AUTRE notion, étude, technique ou acteur RÉELLEMENT présenté dans le cours, voisin de la bonne réponse (même famille), décrit par SA vraie caractéristique tirée des extraits et donné comme réponse à l'énoncé. Il paraît juste à qui ne connaît pas le cours, parce qu'il l'est ailleurs dans le cours ;`,
+  `  · [mauvaise condition] la bonne notion, une condition de sa définition REMPLACÉE par une autre condition du cours (même place, même longueur) — jamais AJOUTÉE en restriction (« mais seulement », « uniquement si », « ne … que », « à condition que ») : la bonne réponse sans la réserve se repère sans le cours ;`,
+  `  · [mauvaise attribution] le bon chiffre ou le bon résultat attribué à une AUTRE étude, un autre auteur, pays, année ou acteur que le cours cite aussi ;`,
+  `  · [inversion] le sens d'un effet est inversé — seulement si ce sens ne se déduit ni du nom de la notion ni du bon sens (« le Système 1 est lent », « le RLHF se passe d'humains » se réfutent par les mots) ;`,
   `  · [sur-généralisation] un résultat vrai sous conditions, étendu à une condition voisine où il ne tient plus — SANS marqueur d'absolu (« toujours », « jamais », « suffit à », « quelles que soient », « dans tous les cas » trahissent le distracteur) ;`,
-  `  · [quasi-synonyme] une notion voisine du cours, confondue avec la bonne (même famille, autre définition) ;`,
   `  · [calcul] (matières quantitatives) l'erreur de calcul ou de méthode typique — jamais une valeur au hasard.`,
+  `  RÉPARTITION : dans une question conceptuelle (ni calcul ni code), au moins deux distracteurs sur trois sont des [quasi-synonyme] ; la bonne réponse n'est jamais la seule option sans réserve ni la plus nuancée.`,
 ];
 
 /** Sans annale : rien ne dit la forme des options ; une proposition complète discrimine, un nom de notion non. */
@@ -276,13 +267,6 @@ const OPTIONS_WITHOUT_ANNALES =
 const OPTIONS_WITH_ANNALES =
   `  - OPTIONS : même forme et même NOMBRE d'options que dans les annales du cours — une valeur ou une expression courte pour une question de calcul, une affirmation COMPLÈTE pour une question conceptuelle (jamais un nom de notion seul) ; longueurs comparables.`;
 
-/** Consigne de l'explication : paragraphe libre (QCM_STRUCTURED_EXPLANATIONS=0) ou justification structurée. */
-function explanationRule(): string {
-  return structuredExplanationsEnabled()
-    ? `  - JUSTIFICATION (structurée, pas de paragraphe) : "key" dit pourquoi la bonne réponse est juste, avec le fait du cours, sans parler des autres options ; "distractors" a EXACTEMENT une entrée par option fausse de TON tableau "options" — "option_index" son indice 0-based, "why_wrong" pourquoi CETTE option est fausse (le détail du cours qu'elle contredit). Jamais d'entrée pour une option absente du tableau, jamais deux pour la même ; dans chaque raison, aucune autre option, aucune lettre, aucun numéro ni rang : l'ordre des options est mélangé après coup, le corrigé est assemblé à partir de ces champs.`
-    : `  - EXPLICATION : désigne les options par leur CONTENU, jamais par leur lettre, leur numéro ni leur rang (« la première », « la deuxième », « la dernière ») : l'ordre des options est mélangé après coup.`;
-}
-
 const OPTION_RULES = [
   // K — mock 4 de CS-290 : avec une consigne neutre, « erreur d'arrondi » ou « TypeError » comme
   // distracteurs ; le niveau ne doit jamais dépendre de la consigne de l'étudiant.
@@ -292,6 +276,7 @@ const OPTION_RULES = [
   `  - CALCUL : les mauvaises valeurs viennent d'une erreur plausible à une ÉTAPE INTERMÉDIAIRE (formule voisine du cours, mauvais dénominateur, agrégation ou condition omise) ; elles gardent le même type, les mêmes unités et le même ordre de grandeur que la clé. Elles ne sont jamais incompatibles avec leurs propres données et ne se réfutent pas par un calcul élémentaire déjà entièrement donné dans l'énoncé.`,
   `  - CODE : chaque mauvaise sortie correspond à une exécution plausible du code avec UNE confusion réellement enseignée (ordre des filtres, masque, index, agrégation, sous-chaîne) ; aucun distracteur n'est une exception arbitraire. La bonne réponse exige d'appliquer au moins une règle du cours, pas seulement de recopier ou d'exécuter mécaniquement le code affiché.`,
   `  - TIGES INDÉPENDANTES : chaque question se comprend seule, sans scénario partagé avec une autre question, et ne donne pas la réponse d'une autre.`,
+  `  - EXPLICATION : désigne les options par leur CONTENU, jamais par leur lettre, leur numéro ni leur rang (« la première », « la deuxième », « la dernière ») : l'ordre des options est mélangé après coup.`,
   `  - ANCRAGE : chaque question teste un FAIT PRÉCIS des extraits du cours fournis (résultat d'étude avec auteurs et chiffres, condition d'une définition, mécanisme) ; "source_fact" est une CITATION courte, VERBATIM, recopiée MOT POUR MOT depuis ces extraits et suffit à établir la bonne réponse. La clé, son explication et les notions nommées par les distracteurs ne dépendent de RIEN hors de cette citation et des extraits.`,
   // Banc HUM-285 du 13/11 : 30 questions rejetées hors cours pour un détail ajouté (« cadre à quatre
   // capacités », « 14 % des tickets », « agrégation des paramètres »), vrai peut-être, absent du cours.
@@ -499,7 +484,7 @@ function rng(seed: number): () => number {
  * Mélange les options d'un QCM (graine déterministe) en gardant la clé et les idées
  * fausses alignées : un modèle place volontiers la bonne réponse en B ou C.
  */
-export function shuffleQcmOptions<T extends { options: string[]; correct: number[]; misconceptions: string[]; rationale?: QcmRationale | null; explanation?: string }>(it: T, seed: number): T {
+export function shuffleQcmOptions<T extends { options: string[]; correct: number[]; misconceptions: string[] }>(it: T, seed: number): T {
   const order = it.options.map((_, i) => i);
   const r = rng(seed);
   for (let i = order.length - 1; i > 0; i--) {
@@ -507,37 +492,12 @@ export function shuffleQcmOptions<T extends { options: string[]; correct: number
     [order[i], order[j]] = [order[j], order[i]];
   }
   const where = new Map(order.map((from, to) => [from, to]));
-  const out = {
+  return {
     ...it,
     options: order.map((from) => it.options[from]),
     misconceptions: order.map((from) => it.misconceptions?.[from] ?? ""),
     correct: it.correct.map((k) => where.get(k) ?? k).sort((a, b) => a - b),
   };
-  // La justification structurée suit les options, case par case, et l'explication est réassemblée.
-  if (it.rationale) {
-    out.rationale = permuteRationale(it.rationale, order);
-    out.explanation = assembleExplanation(out.rationale, out.options, out.correct);
-  }
-  return out;
-}
-
-/** Réassemble l'explication d'un QCM à justification structurée depuis ses options actuelles (sans effet sinon). */
-export function syncExplanation<T extends Pick<QcmItem, "options" | "correct" | "explanation"> & { rationale?: QcmRationale | null }>(it: T): T {
-  if (it.rationale) it.explanation = assembleExplanation(it.rationale, it.options, it.correct);
-  return it;
-}
-
-/**
- * Filet sur les raisons rendues par le modèle (le mécanisme principal reste la structure) : une
- * raison qui désigne une option par sa lettre ou son rang est réécrite d'après son contenu, dans
- * l'ordre où le modèle voyait les options, sinon effacée (elle sera réécrite seule) ; une
- * justification de la clé qui réfute aussi d'autres options est réduite à la clé.
- */
-export function cleanRationale(r: QcmRationale, options: string[], correct: number[], stem = ""): QcmRationale {
-  const piece = (t: string) => (t && citesOptionLabel(t, options.length) ? repairOptionRefs(t, options, correct) ?? "" : t);
-  let key = piece(r.key);
-  if (key && explanationIssues(key, options, correct, stem)) key = keyOnlyExplanation(key) ?? key;
-  return { ...r, key, wrong: r.wrong.map((w, i) => (correct.includes(i) ? "" : piece(w))) };
 }
 
 const seedOf = (s: string) => [...s].reduce((h, ch) => (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0, 7);
@@ -571,11 +531,6 @@ function weaknessOf(it: QcmItem): string | null {
   if (typeof it.discrimination === "number" && it.discrimination <= 2) return `pouvoir discriminant faible (${it.discrimination}/5)${issue}`;
   if (qcmLengthCue(it.options, it.correct)) return "la bonne option se repère à sa longueur";
   return null;
-}
-
-/** Le seul défaut d'un QCM vérifié est-il un ou des distracteurs éliminables sans le cours ? */
-function onlyTrivialDistractors(it: QcmItem): boolean {
-  return !!it.trivialDistractors?.length && !it.rejected && !it.figureFile && weaknessOf({ ...it, trivialDistractors: null }) === null;
 }
 
 /** Part maximale de distracteurs triviaux dans un examen livré (critère « triviaux » du banc). */
@@ -656,19 +611,6 @@ export function updateVerifiedCandidates<T extends Pick<QcmItem, "stem" | "optio
 }
 
 const REPLACEMENTS_SCHEMA = `{ "replacements": [ { "index": <numéro Q>, "distractors": [ { "option": <numéro de l'option remplacée>, "text": "<nouvelle option>", "misconception": "[procédé] l'idée fausse visée" } ], "explanation": "<explication de la clé, mise à jour>" } ] }`;
-/** Sortie stricte du remplacement en justification structurée : la raison de chaque remplaçant est exigée. */
-const REPLACEMENTS_JSON_SCHEMA = {
-  type: "object",
-  properties: { replacements: { type: "array", items: { type: "object", properties: {
-    index: { type: "integer" },
-    distractors: { type: "array", items: { type: "object", properties: {
-      option: { type: "integer" }, text: { type: "string" }, misconception: { type: "string" }, why_wrong: { type: "string" },
-    }, required: ["option", "text", "misconception", "why_wrong"], additionalProperties: false } },
-  }, required: ["index", "distractors"], additionalProperties: false } } },
-  required: ["replacements"], additionalProperties: false,
-} as const;
-/** Justification structurée : chaque remplaçant porte sa raison, rien d'autre n'est réécrit (lib/qcm-rationale). */
-const REPLACEMENTS_SCHEMA_STRUCTURED = `{ "replacements": [ { "index": <numéro Q>, "distractors": [ { "option": <numéro de l'option remplacée>, "text": "<nouvelle option>", "misconception": "[procédé] l'idée fausse visée", "why_wrong": "<pourquoi CETTE nouvelle option est fausse selon le cours>" } ] } ] }`;
 
 /**
  * DISTRACTEURS TRIVIAUX REMPLACÉS, PAS LA QUESTION — banc moteur du 04/11/2026 (CS-290) : 41 QCM
@@ -682,26 +624,23 @@ async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, la
   // Banc du 04/11 : sans le cours sous les yeux, les remplaçants étaient eux aussi génériques et
   // re-signalés une fois sur deux ; ils se bâtissent sur des notions voisines des extraits.
   const passages = await coursePassages([...new Set(items.map((it) => it.topic).filter(Boolean))]).catch(() => []);
-  // Toutes justifiées par la structure : seules les raisons des remplaçants sont écrites (sortie
-  // plus courte) ; une seule à l'explication libre, et le paragraphe est redemandé comme avant.
-  const structured = items.every((it) => !!it.rationale);
   const body = items.map((it, k) => [
     `Q${k}. ${sanitizeCorpus(it.stem)}`,
     ...it.options.map((o, j) => `   (${j}) ${sanitizeCorpus(o)}${it.correct.includes(j) ? "  (bonne réponse — à garder)" : (it.duplicateOptions ?? []).includes(j) ? "  ← À REMPLACER : répète une autre option (même notion) ; le nouveau distracteur nomme une notion VOISINE du cours que les autres options ne nomment pas" : (it.trivialDistractors ?? []).includes(j) ? "  ← À REMPLACER : se devine fausse sans connaître le cours, ou nomme une notion que le cours ne présente pas" : ""}`),
     it.sourceFact ? `   Fait du cours testé : ${sanitizeCorpus(it.sourceFact).slice(0, 400)}` : "",
   ].filter(Boolean).join("\n")).join("\n\n");
-  const out = await completeJson<{ replacements: { index: number; distractors: { option: number; text: string; misconception?: string; why_wrong?: string }[]; explanation?: string }[] }>({
-    model: "opus", ...QCM_CALL_LIMITS, ...(structured ? { json: { schema: REPLACEMENTS_JSON_SCHEMA } } : {}),
+  const out = await completeJson<{ replacements: { index: number; distractors: { option: number; text: string; misconception?: string }[]; explanation?: string }[] }>({
+    model: "opus", ...QCM_CALL_LIMITS,
     prompt: [
       `Tu es l'équipe enseignante du cours. Dans chacun de ces QCM, les options marquées « À REMPLACER » se devinent fausses sans connaître le cours. Écris pour chacune UN nouveau distracteur, sans toucher à l'énoncé, à la bonne réponse ni aux autres options.`,
       ...DISTRACTOR_TAXONOMY,
-      `RÈGLES : chaque nouveau distracteur s'appuie sur une notion, une définition, une condition ou un résultat VOISIN présent dans les extraits du cours ci-dessous (procédés de la taxonomie) ; il est FAUX selon le cours mais paraît juste à un étudiant qui connaît le thème sans le détail ; il applique les MÊMES critères que la bonne réponse et se trompe sur un détail du cours. Interdits : simple substitution d'étiquette manifestement incompatible, lecture directe de chiffres, contradiction avec un critère déjà donné dans l'énoncé. Même registre, même structure et longueur comparable (±30 %) que la bonne réponse ; il ne dit jamais pourquoi il est faux ; aucun marqueur d'absolu ; il ne répète aucune autre option. ${structured ? `Pour chaque nouveau distracteur, "why_wrong" dit pourquoi IL est faux selon le cours (le détail qu'il contredit), sans citer d'autre option, ni lettre, ni rang.` : `Réécris aussi l'explication de la clé pour qu'elle couvre les options finales, en désignant les options par leur CONTENU, jamais par leur lettre ni leur rang.`} Tout en ${lang}.`,
+      `RÈGLES : hors question de calcul ou de code, chaque nouveau distracteur est un [quasi-synonyme] : une AUTRE notion, étude ou technique présente dans les extraits du cours ci-dessous, décrite par sa vraie caractéristique et donnée comme réponse — jamais l'option remplacée retouchée, ni la bonne réponse avec une réserve ajoutée ou un sens inversé ; il est FAUX selon le cours mais paraît juste à un étudiant qui connaît le thème sans le détail ; il applique les MÊMES critères que la bonne réponse et se trompe sur un détail du cours. Interdits : simple substitution d'étiquette manifestement incompatible, lecture directe de chiffres, contradiction avec un critère déjà donné dans l'énoncé. Même registre, même structure et longueur comparable (±30 %) que la bonne réponse ; il ne dit jamais pourquoi il est faux ; aucun marqueur d'absolu ; il ne répète aucune autre option. Réécris aussi l'explication de la clé pour qu'elle couvre les options finales, en désignant les options par leur CONTENU, jamais par leur lettre ni leur rang. Tout en ${lang}.`,
       DATA_RULE,
       passages.length ? dataBlock("EXTRAITS DU COURS", passages) : "",
       "",
       body,
       "",
-      `Réponds UNIQUEMENT avec ce JSON : ${structured ? REPLACEMENTS_SCHEMA_STRUCTURED : REPLACEMENTS_SCHEMA}`,
+      `Réponds UNIQUEMENT avec ce JSON : ${REPLACEMENTS_SCHEMA}`,
     ].join("\n"),
   }, { check: (v) => (Array.isArray(v?.replacements) ? null : "il manque la liste replacements") });
   const repaired = items.map((it, k) => {
@@ -709,34 +648,22 @@ async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, la
     if (!r) return null;
     const options = it.options.slice();
     const misconceptions = it.misconceptions.slice();
-    const whys = new Map<number, string>();
     for (const d of r.distractors ?? []) {
       if (!(it.trivialDistractors ?? []).includes(d.option) || typeof d.text !== "string" || !d.text.trim()) continue;
       options[d.option] = d.text.trim();
       misconceptions[d.option] = d.misconception ?? misconceptions[d.option] ?? "";
-      whys.set(d.option, typeof d.why_wrong === "string" ? d.why_wrong.trim() : "");
     }
     // Job 23 (Q9) : un remplaçant qui nomme la même notion qu'une autre option donnait deux fois
     // « le biais de disponibilité » ; il est refusé, l'option d'avant reste (et reste signalée).
     for (const j of duplicateOptionIndices(options, it.correct)) {
-      if (options[j] !== it.options[j]) { options[j] = it.options[j]; misconceptions[j] = it.misconceptions[j] ?? ""; whys.delete(j); }
+      if (options[j] !== it.options[j]) { options[j] = it.options[j]; misconceptions[j] = it.misconceptions[j] ?? ""; }
     }
     if (options.every((o, j) => o === it.options[j])) return null;
-    const reset = { verified: null, trivialDistractors: null, duplicateOptions: null, judgeIssue: null, judgeOk: null, discrimination: null, nameOnly: null } as const;
-    // Justification structurée : la raison d'une option remplacée est invalidée et remplacée par
-    // celle du remplaçant (même appel) ; les autres cases ne bougent pas. Sans raison rendue, la case
-    // reste vide : la porte de sortie la fait écrire seule (jamais l'ancienne, qui visait l'option partie).
-    if (it.rationale) {
-      const changedIdx = options.map((o, j) => (o !== it.options[j] ? j : -1)).filter((j) => j >= 0);
-      let rationale = invalidateRationale(it.rationale, changedIdx);
-      rationale = cleanRationale({ ...rationale, wrong: rationale.wrong.map((w, j) => (changedIdx.includes(j) ? whys.get(j) ?? "" : w)) }, options, it.correct, it.stem);
-      return syncExplanation({ ...it, options, misconceptions, rationale, ...reset } as QcmItem);
-    }
     // L'explication doit réfuter les options FINALES : l'ancienne réfute souvent les distracteurs
     // remplacés (job 23 : neuf explications sur vingt réfutaient des options absentes).
     const written = r.explanation && !citesOptionLabel(r.explanation, options.length) ? r.explanation : null;
     const explanation = [written, it.explanation].find((e) => !!e && !explanationIssues(e, options, it.correct, it.stem)) ?? written ?? it.explanation;
-    return { ...it, options, misconceptions, explanation, ...reset } as QcmItem;
+    return { ...it, options, misconceptions, explanation, verified: null, trivialDistractors: null, duplicateOptions: null, judgeIssue: null, judgeOk: null, discrimination: null, nameOnly: null } as QcmItem;
   });
   const sent = repaired.filter((x): x is QcmItem => !!x);
   if (!sent.length) return items;
@@ -770,76 +697,16 @@ const FINAL_QUALITY_SCHEMA = {
   }, required: ["verdicts"], additionalProperties: false,
 } as const;
 
-/**
- * Cases de justification encore vides (raison oubliée par la conception, effacée par le filet ou
- * non rendue par un remplacement) : écrites dans l'appel d'audit, qui passe de toute façon sur
- * chaque question finale — aucun appel de plus. Champ ajouté au schéma seulement quand il y en a.
- */
-const AUDIT_JUSTIFICATIONS = {
-  type: "array",
-  items: { type: "object", properties: {
-    index: { type: "integer" }, key: { type: "string" },
-    distractors: { type: "array", items: { type: "object", properties: { option_index: { type: "integer" }, why_wrong: { type: "string" } }, required: ["option_index", "why_wrong"], additionalProperties: false } },
-  }, required: ["index", "key", "distractors"], additionalProperties: false },
-} as const;
+/** Consignes de l'audit de sortie, calquées sur la rubrique du banc (audit seul ou revue finale). */
+const AUDIT_RULES = [
+  `key : true seulement si la clé est juste et la seule défendable ; false si elle est fausse, si une autre option est au moins aussi défendable ou s'il manque une bonne réponse.`,
+  `offCourse : true si la bonne réponse ou l'explication repose sur une notion ou un fait absent des extraits et qui n'est pas une connaissance générale de la matière. Un distracteur faux n'est pas hors cours.`,
+  `trivial : indices des mauvaises options qu'un étudiant qui ne connaît PAS le cours élimine quand même : absurde, hors sujet, marqueur d'absolu évident, incohérence grammaticale ou longueur qui trahit ; et toute mauvaise option qui nomme la même notion qu'une autre option du QCM.`,
+];
 
-/** Une passe courte calquée sur la rubrique du banc, avec clé et explication visibles. */
-async function finalQualityAudit(items: QcmItem[], step: StepCb, facts: CourseFact[] = []): Promise<QcmItem[]> {
-  if (!items.length) return [];
-  const wants = items.map((it) => {
-    const c = it.rationale ? rationaleCheck(it.rationale, it.options.length, it.correct) : null;
-    return c && !c.ok ? { key: !c.key, options: c.missing } : null;
-  });
-  const toJustify = wants.filter(Boolean).length;
-  const topicPassages = await coursePassages([...new Set(items.map((it) => it.topic).filter(Boolean))]).catch(() => []);
-  // Une question bâtie sur un fait du cours (lib/qcm-facts) a sa preuve dans le passage de ce fait,
-  // souvent hors des deux extraits de sa notion : sans lui, l'audit la jugeait hors cours (banc
-  // HUM-285 du 16/11 : 32 candidats sur 55, contre 7 à 10 conçus par notion, et un complément final
-  // de 7 questions). Le texte du cours qui porte ce passage, cherché dans le corpus, l'accompagne.
-  const proofs = [...new Set(items.flatMap((it) => facts.filter((f) => f.id === it.factId).map((f) => f.passage)))];
-  const factPassages = proofs.length ? await coursePassages(proofs, 1, 600).catch(() => []) : [];
-  const passages = [...topicPassages, ...factPassages.filter((p) => !topicPassages.some((x) => x.text === p.text))];
-  const body = items.map((it, index) => [
-    `Q${index}. ${sanitizeCorpus(it.stem)}`,
-    ...it.options.map((o, k) => `   (${k}) ${sanitizeCorpus(o)}${wants[index]?.options.includes(k) ? "  ← À JUSTIFIER (pourquoi elle est fausse)" : ""}`),
-    `   CLÉ : ${it.correct.join(", ")}${wants[index]?.key ? "  ← À JUSTIFIER (key)" : ""}`,
-    `   EXPLICATION : ${sanitizeCorpus(it.explanation ?? "")}`,
-  ].join("\n")).join("\n\n");
-  const schema = toJustify
-    ? { ...FINAL_QUALITY_SCHEMA, properties: { ...FINAL_QUALITY_SCHEMA.properties, justifications: AUDIT_JUSTIFICATIONS }, required: ["verdicts", "justifications"] }
-    : FINAL_QUALITY_SCHEMA;
-  // Audit illisible ou en échec : les QCM gardent le verdict de leur vérification à l'aveugle. Lever
-  // ici perdait l'examen entier (« Aucun QCM généré ») alors que tout était déjà vérifié et payé.
-  const out = await completeJson<{ verdicts: FinalQualityVerdict[]; justifications?: { index: number; key?: string; distractors?: { option_index: number; why_wrong: string }[] }[] }>({
-    model: "opus", ...QCM_CALL_LIMITS, json: { schema },
-    prompt: [
-      `Tu es un examinateur exigeant. Pour chaque QCM, tranche selon les extraits du cours.`,
-      `key : true seulement si la clé est juste et la seule défendable ; false si elle est fausse, si une autre option est au moins aussi défendable ou s'il manque une bonne réponse.`,
-      `offCourse : true si la bonne réponse ou l'explication repose sur une notion ou un fait absent des extraits et qui n'est pas une connaissance générale de la matière. Un distracteur faux n'est pas hors cours.`,
-      `trivial : indices des mauvaises options qu'un étudiant qui ne connaît PAS le cours élimine quand même : absurde, hors sujet, marqueur d'absolu évident, incohérence grammaticale ou longueur qui trahit ; et toute mauvaise option qui nomme la même notion qu'une autre option du QCM.`,
-      ...(toJustify ? [`justifications : pour chaque QCM qui a des cases « ← À JUSTIFIER », une entrée {index, key, distractors} — "key" (seulement si la clé est marquée, sinon vide) dit pourquoi elle est juste selon le cours ; "distractors" a une entrée par option marquée, et elles seules : "option_index" son numéro, "why_wrong" pourquoi CETTE option est fausse (le détail du cours qu'elle contredit), sans citer d'autre option, ni lettre, ni numéro.`] : []),
-      DATA_RULE, passages.length ? dataBlock("EXTRAITS DU COURS", passages) : "", "", body, "",
-      `Réponds UNIQUEMENT avec {"verdicts":[{"index":0,"key":true,"offCourse":false,"trivial":[]}]${toJustify ? `, "justifications":[{"index":0,"key":"","distractors":[{"option_index":1,"why_wrong":"…"}]}]` : ""}}, un objet par QCM.`,
-    ].join("\n"),
-  }, { check: (v) => (Array.isArray(v?.verdicts) && v.verdicts.length >= items.length && v.verdicts.every((x) => typeof x?.key === "boolean") ? null : "il faut un verdict par QCM") }).catch((e) => {
-    step(`Audit final ignoré (${(e as Error).message.slice(0, 60)}), verdicts de la vérification gardés`, 79);
-    return null;
-  });
-  if (!out) return items;
-  let justified = 0;
-  if (toJustify) {
-    const byIndex = new Map((Array.isArray(out.justifications) ? out.justifications : []).filter((x) => Number.isInteger(x?.index)).map((x) => [x.index, x]));
-    items.forEach((it, i) => {
-      const want = wants[i];
-      if (!want || !it.rationale) return;
-      it.rationale = cleanRationale(fillRationale(it.rationale, byIndex.get(i), want, it.options.length, it.correct), it.options, it.correct, it.stem);
-      syncExplanation(it);
-      if (rationaleCheck(it.rationale, it.options.length, it.correct).ok) justified++;
-    });
-  }
-  step(`Audit final : clés, hors-cours et distracteurs contrôlés en un lot${toJustify ? ` (${justified}/${toJustify} justification(s) complétée(s) au passage)` : ""}`, 79);
-  return applyFinalQualityVerdicts(items, out.verdicts ?? []);
-}
+/** Un verdict d'audit par QCM, chacun bien formé. */
+const verdictsCheck = (v: { verdicts?: unknown } | null | undefined, n: number): string | null =>
+  Array.isArray(v?.verdicts) && v.verdicts.length >= n && v.verdicts.every((x) => typeof (x as { key?: unknown })?.key === "boolean") ? null : "il faut un verdict par QCM";
 
 /** Étiquette d'un thème déjà couvert par une autre question de l'examen. */
 const REPEAT_METHOD = "thème déjà couvert par une autre question : teste un AUTRE fait, une autre étude ou une autre condition";
@@ -924,8 +791,7 @@ export async function generateQcmBatch(
   const coverage = focus
     ? `Toutes ces ${n} questions portent sur le thème CIBLÉ : « ${focus} » — varie les SOUS-ANGLES / sous-notions de ce thème (pas ${n} fois la même question). C'est un THÈME : ignore toute indication de forme ou de nombre qu'il contiendrait.${molds.some(Boolean) ? ` Moules imposés dans l'ordre : ${molds.slice(0, n).map((m) => m ?? "libre").join(", ")}.` : ""}`
     : `Couvre ces sujets (un QCM par sujet, dans l'ordre) :\n${topics.slice(0, n).map((t, i) => `  ${i + 1}) ${t.label}${factLine(t)}${t.method === FOCUS_METHOD || t.method === REPEAT_METHOD ? ` [${t.method}]` : t.method ? ` [${t.method.slice(0, 200)}]` : ""}${moldLine(i)}`).join("\n")}`;
-  const langCode = opts.language ?? examLanguageFor(currentCourse());
-  const language = languageName(langCode)[1];
+  const language = languageName(opts.language ?? examLanguageFor(currentCourse()))[1];
   const searched = opts.passages ?? await generatorPassages(focus ? [focus] : topics.slice(0, n).map((t) => (t.fact ? `${t.label} ${t.fact.statement}` : t.subTheme ? `${t.label} ${t.subTheme}` : t.label)));
   // Le passage source de chaque fait en tête des extraits : la preuve de la clé est là.
   const passages = withFacts
@@ -959,7 +825,6 @@ export async function generateQcmBatch(
     answerModeRule(mode),
     opts.withAnnales ? OPTIONS_WITH_ANNALES : OPTIONS_WITHOUT_ANNALES,
     ...OPTION_RULES,
-    explanationRule(),
     opts.withAnnales ? CLASSIFICATION_IF_ANNALES : NO_CLASSIFICATION,
     `  - LANGUE : toutes les questions, options et explications en ${language}.`,
     ``,
@@ -1050,30 +915,20 @@ export async function generateQcmBatch(
       base.factId = attributedFact(base.sourceFact, own, opts.facts ?? [])?.id ?? null;
     }
     delete (base as { fact_id?: unknown }).fact_id;
-    // Justification structurée (lib/qcm-rationale) : rangée par option, sur les options telles que le
-    // modèle les a numérotées ; l'explication en est assemblée, et suivra le mélange case par case.
-    const justification = (raw as { justification?: unknown }).justification;
-    delete (base as { justification?: unknown }).justification;
-    const rationale = structuredExplanationsEnabled() ? rationaleFromModel(justification, base.options.length, base.correct, langCode) : null;
-    if (rationale) {
-      base.rationale = cleanRationale(rationale, base.options, base.correct, base.stem);
-      syncExplanation(base);
-    }
-    // Paragraphe libre (interrupteur coupé, ou réponse sans justification) : les réparations d'avant.
     // Une explication qui renvoie à une option par son rang ou sa lettre est réécrite d'après son
     // contenu, AVANT le mélange (sinon rejetée puis régénérée à la vérification).
-    if (!base.rationale && Array.isArray(base.options) && Array.isArray(base.correct) && citesOptionLabel(base.explanation ?? "", base.options.length)) {
+    if (Array.isArray(base.options) && Array.isArray(base.correct) && citesOptionLabel(base.explanation ?? "", base.options.length)) {
       const fixed = repairOptionRefs(base.explanation ?? "", base.options, base.correct);
       if (fixed) base.explanation = fixed;
     }
     // Une explication qui réfute une affirmation absente des options (plus de distracteurs
     // réfutés qu'il n'y en a) est réécrite sur les options réelles, AVANT le mélange.
-    if (!base.rationale && Array.isArray(base.options) && citesAbsentDistractor(base.explanation ?? "", base.options)) {
+    if (Array.isArray(base.options) && citesAbsentDistractor(base.explanation ?? "", base.options)) {
       const fixed = repairAbsentDistractorRefs(base.explanation ?? "", base.options);
       if (fixed) base.explanation = fixed;
     }
     // Position de la bonne réponse mélangée (graine = l'énoncé : reproductible), jamais pour une question à figure.
-    const it = Array.isArray(base.options) && Array.isArray(base.correct) && !(raw as { figure_spec?: unknown }).figure_spec && (!!base.rationale || !citesOptionLabel(base.explanation ?? "", base.options.length))
+    const it = Array.isArray(base.options) && Array.isArray(base.correct) && !(raw as { figure_spec?: unknown }).figure_spec && !citesOptionLabel(base.explanation ?? "", base.options.length)
       ? shuffleQcmOptions(base, seedOf(base.stem ?? ""))
       : base;
     // figure : rendu SANDBOX immédiat (le vérifieur doit la VOIR). Échec de rendu →
@@ -1155,8 +1010,9 @@ const VERIFY_SCHEMA = {
           off_matter: { type: "string", description: "Non vide si la question porte sur les modalités d'examen (format, barème, grille ou critères d'évaluation, consignes), sur la forme d'un rendu (poster, essai, bibliographie) ou sur l'organisation du cours (plan, ordre des chapitres) plutôt que sur sa matière : ce qu'elle teste. Vide sinon." },
           trivial_distractors: { type: "array", items: { type: "integer" }, description: "Indices des MAUVAISES options qu'un étudiant élimine sans connaître le cours : absurde, hors sujet, générique, réfutable par le bon sens, par un calcul élémentaire ou par un critère déjà donné dans l'énoncé ; marqueur absolu, faute grammaticale avec l'énoncé, ou longueur qui trahit la réponse. Liste vide si toutes sont plausibles." },
           definition_mismatch: { type: "string", description: "Chaque définition employée ou sous-entendue (énoncé, clé, distracteurs, explication) comparée à celle des extraits du cours. Non vide si l'une est PLUS ÉTROITE (une condition ajoutée), PLUS LARGE (une condition oubliée), ou si deux notions du cours sont confondues : laquelle, ce que dit la question, ce que dit le cours. Vide sinon." },
+          definition_mismatch_key: { type: "boolean", description: "true si la définition différente est celle de l'énoncé, de la BONNE réponse ou de l'explication ; false si seules des MAUVAISES options la déforment (c'est le rôle d'un distracteur). false si definition_mismatch est vide." },
         },
-        required: ["index", "correct", "ok", "discrimination", "name_only", "course_terms", "off_course", "off_course_terms", "off_course_key", "off_course_options", "off_matter", "trivial_distractors", "definition_mismatch"],
+        required: ["index", "correct", "ok", "discrimination", "name_only", "course_terms", "off_course", "off_course_terms", "off_course_key", "off_course_options", "off_matter", "trivial_distractors", "definition_mismatch", "definition_mismatch_key"],
         additionalProperties: false,
       },
     },
@@ -1184,10 +1040,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     // comme un distracteur trivial (énoncé et clé gardés), que le correcteur la relève ou non.
     const dup = duplicateOptionIndices(q.options, q.correct ?? []);
     q.duplicateOptions = dup.length ? dup : null;
-    // Justification structurée : l'explication est assemblée depuis les options réelles, ces deux
-    // contrôles de texte libre n'ont rien à y chercher ; une raison fautive est effacée et réécrite seule.
-    if (q.rationale) { q.rationale = cleanRationale(q.rationale, q.options, q.correct ?? [], q.stem); syncExplanation(q); }
-    else if (citesOptionLabel(q.explanation ?? "", q.options.length)) reject(q, "explication qui désigne une option par sa position ou sa lettre", "désigne chaque option par son contenu dans l'explication, jamais par son rang (« la première ») ni sa lettre");
+    if (citesOptionLabel(q.explanation ?? "", q.options.length)) reject(q, "explication qui désigne une option par sa position ou sa lettre", "désigne chaque option par son contenu dans l'explication, jamais par son rang (« la première ») ni sa lettre");
     // Idem pour une explication qui réfute un distracteur absent (ex. replaceTrivialDistractorsBatch
     // réécrit l'explication sans repasser par la réparation faite à la conception) : réécrite sur
     // les options réelles quand c'est possible, sinon rejetée comme un défaut classique.
@@ -1215,7 +1068,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   const system = [
     `Tu es un correcteur rigoureux du cours. Pour CHAQUE QCM fourni, RÉSOUS-LE toi-même de zéro (sans clé fournie) et donne la/les bonne(s) réponse(s) par INDEX.`,
     `Quand des extraits du cours sont fournis, résous et juge avec LEURS DÉFINITIONS, jamais avec celles d'une autre source. course_terms : les notions dont dépend la bonne réponse, écrites comme dans le cours. off_course : une notion ou un fait dont DÉPEND la bonne réponse ou l'explication, absent des extraits ou que le cours définit autrement (vide si les extraits permettent de résoudre, même avec un synonyme usuel de la matière) ; un distracteur qui n'est qu'une affirmation fausse (résultat inversé, condition changée) n'est pas hors cours, c'est son rôle. Les extraits ne couvrent pas tout le cours : nomme dans off_course_terms ce que tu dis absent, on le cherchera dans tout le cours.`,
-    `DÉFINITIONS (definition_mismatch) : compare chaque définition que la question emploie ou sous-entend à celle des extraits. Une définition plus étroite (une condition ajoutée, « seulement si… »), plus large (une condition oubliée) que celle du cours, ou deux notions voisines confondues rendent la question fausse, même si sa clé est cohérente avec sa propre définition.`,
+    `DÉFINITIONS (definition_mismatch) : compare chaque définition que la question emploie ou sous-entend à celle des extraits. Une définition plus étroite (une condition ajoutée, « seulement si… »), plus large (une condition oubliée) que celle du cours, ou deux notions voisines confondues rendent la question fausse, même si sa clé est cohérente avec sa propre définition. definition_mismatch_key : true si cette définition est celle de l'énoncé, de la bonne réponse ou de l'explication ; false si seule une MAUVAISE option déforme la définition, car c'est le rôle d'un distracteur.`,
     `Signale si : la question est ambiguë (2 réponses défendables), ou une mauvaise option s'élimine sans connaître le cours — absurdité, hors sujet, marqueur absolu, grammaire, longueur, calcul élémentaire manifestement faux, ou contradiction avec un critère déjà donné dans l'énoncé. Compte aussi comme triviaux : une substitution d'étiquettes proches mais manifestement incompatibles quand la clé récite la définition ; la lecture directe des chiffres fournis sans calcul ni interprétation ; une option qui n'applique pas les mêmes critères que la clé. Des distracteurs plausibles doivent partager les mêmes critères et ne différer que par un détail qu'il faut connaître du cours. Ajoute chaque index à trivial_distractors, même si l'option illustre une erreur fréquente.`,
     `off_matter : ce que teste une question qui porte sur les modalités d'examen (format, barème, grille ou critères d'évaluation, consignes), sur la forme d'un rendu (poster, essai, bibliographie) ou sur l'organisation du cours (plan, ordre des chapitres) au lieu de sa matière (vide sinon).`,
     `Note aussi son POUVOIR DISCRIMINANT (discrimination, 1 à 5) : mets-toi à la place d'un étudiant qui ne connaît que les noms des notions du cours — pas leurs conditions, pas les résultats des études. S'il la réussit (ou élimine assez d'options pour la deviner), discrimination ≤ 2 et name_only = true.`,
@@ -1234,7 +1087,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     `Réponds UNIQUEMENT avec l'objet JSON { "results": [ … ] } conforme.`,
   ].filter((l) => l != null).join("\n");
   step("Vérification à l'aveugle des QCM (résolution indépendante, figures vues)…", 70);
-  let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean; course_terms?: string[]; off_course?: string; off_course_terms?: string[]; off_course_key?: boolean; off_course_options?: number[]; off_matter?: string; trivial_distractors?: number[]; definition_mismatch?: string }[] };
+  let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean; course_terms?: string[]; off_course?: string; off_course_terms?: string[]; off_course_key?: boolean; off_course_options?: number[]; off_matter?: string; trivial_distractors?: number[]; definition_mismatch?: string; definition_mismatch_key?: boolean }[] };
   try {
     res = await completeJson(
       { system, prompt, model: "opus", ...QCM_CALL_LIMITS, addDirs: figDirs, json: { schema: VERIFY_SCHEMA } },
@@ -1284,8 +1137,11 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     const flagged = distractorOnly ? "" : said(r.off_course);
     // B — mock 4 de CS-290 : « sensitive » réduit aux attributs protégés par la loi (le cours : loi
     // OU éthique) ; une définition qui s'écarte de celle du cours rejette la question comme une notion
-    // absente, et comme elle, seulement après une recherche dans tout le cours.
-    const mismatch = said(r.definition_mismatch);
+    // absente, et comme elle, seulement après une recherche dans tout le cours. Une définition
+    // déformée par une MAUVAISE option, elle, fait de cette option un distracteur : banc HUM-285 du
+    // 15/11, 14 seconds regards sur 64 appels pour « L'option 3 confond correction et prévention »,
+    // tous conclus « trouvé dans le cours ». Champ absent (fournisseur sans schéma) : la clé est en cause.
+    const mismatch = r.definition_mismatch_key === false ? "" : said(r.definition_mismatch);
     if (missing.length || flagged || mismatch) {
       const named = Array.isArray(r.off_course_terms) ? r.off_course_terms.filter((t): t is string => typeof t === "string" && !!t.trim()) : [];
       const terms = [...new Set([...missing, ...named])];
@@ -1337,34 +1193,14 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     const confirmedOf = (i: number) => (verdicts[i].reason && !NO_FLAG.test(verdicts[i].reason) ? verdicts[i].reason : "");
     // Seule l'explication est hors cours : elle est réécrite sur les passages du cours, la question
     // (énoncé, clé confirmée à l'aveugle, options) est gardée. Réécriture en échec : rejet.
-    // Justification structurée : toutes ses cases sont réécrites sur les passages du cours, en un
-    // appel du même type que le paragraphe libre ; acceptée seulement complète (une raison par distracteur).
     const toRewrite = pending.map((a, i) => ({ a, i })).filter(({ i }) => confirmedOf(i) && verdicts[i].explanationOnly);
-    const lang = languageName(examLanguageFor(currentCourse()))[1];
-    const freeRewrite = toRewrite.filter(({ a }) => !a.q.rationale);
-    const structRewrite = toRewrite.filter(({ a }) => !!a.q.rationale);
-    const [rewrittenFree, rewrittenStruct] = await Promise.all([
-      freeRewrite.length ? rewriteExplanations(freeRewrite.map(({ a, i }) => ({ ...a.q, reason: confirmedOf(i), passages: verdicts[i].passages })), lang) : Promise.resolve([] as (string | null)[]),
-      structRewrite.length
-        ? writeJustifications(structRewrite.map(({ a, i }) => ({ ...a.q, key: a.q.rationale!.key, wrong: a.q.rationale!.wrong, want: { key: true, options: distractorIndices(a.q.options.length, a.q.correct) }, reason: `hors cours dans l'ancienne justification : ${confirmedOf(i)}` })), lang, [...new Set(structRewrite.flatMap(({ i }) => verdicts[i].passages))])
-        : Promise.resolve([] as Awaited<ReturnType<typeof writeJustifications>>),
-    ]);
+    const rewritten = toRewrite.length
+      ? await rewriteExplanations(toRewrite.map(({ a, i }) => ({ ...a.q, reason: confirmedOf(i), passages: verdicts[i].passages })), languageName(examLanguageFor(currentCourse()))[1])
+      : [];
     pending.forEach((a, i) => {
       const confirmed = confirmedOf(i);
-      const ks = structRewrite.findIndex((x) => x.i === i);
-      if (confirmed && ks >= 0) {
-        const all = { key: true, options: distractorIndices(a.q.options.length, a.q.correct) };
-        // Cases repartant de zéro : rien de l'ancienne justification hors cours ne reste.
-        const next = cleanRationale(fillRationale({ ...a.q.rationale!, key: "", wrong: a.q.rationale!.wrong.map(() => "") }, rewrittenStruct[ks], all, a.q.options.length, a.q.correct), a.q.options, a.q.correct, a.q.stem);
-        if (rationaleCheck(next, a.q.options.length, a.q.correct).ok) {
-          a.q.rationale = next;
-          syncExplanation(a.q);
-          step(`QCM gardé : justification réécrite sur le cours (${confirmed.slice(0, 100)})`, 70);
-          return;
-        }
-      }
-      const k = freeRewrite.findIndex((x) => x.i === i);
-      const text = k >= 0 ? rewrittenFree[k] : null;
+      const k = toRewrite.findIndex((x) => x.i === i);
+      const text = k >= 0 ? rewritten[k] : null;
       if (confirmed && text && !citesOptionLabel(text, a.q.options.length)) {
         a.q.explanation = text;
         step(`QCM gardé : explication réécrite sur le cours (${confirmed.slice(0, 100)})`, 70);
@@ -1458,62 +1294,45 @@ export function suspectPairs(items: Pick<QcmItem, "options" | "correct" | "notio
   return out;
 }
 
+/** Doublons d'un examen : les QCM à retirer (`intra` : doublons dans l'examen), les reprises d'un examen précédent, et la notion, l'angle et la règle de chacun. */
+type DupResult = { drop: number[]; intra: number[]; repeats: number[]; notions: string[]; angles: string[]; regles: string[] };
+type DupAnswer = { notions?: { index: number; notion: string; angle: string; regle?: string }[]; duplicates: { first: number; second: number }[]; repeats?: { index: number; previous: number }[] };
+
 /**
- * Doublons d'un examen : les indices des QCM à retirer (le premier de chaque notion reste) et la
- * notion de chaque QCM. `strict` (au moins autant de notions au programme que de questions,
- * examen 4 de HUM-285 : biais de négativité ×3, nudge ×2…) : UNE NOTION = UNE QUESTION, quel que
- * soit l'angle. Sinon (plus de questions que de notions, ou un accent demandé) : plusieurs
+ * Consignes du contrôle des doublons. `strict` (au moins autant de notions au programme que de
+ * questions, examen 4 de HUM-285 : biais de négativité ×3, nudge ×2…) : UNE NOTION = UNE QUESTION,
+ * quel que soit l'angle. Sinon (plus de questions que de notions, ou un accent demandé) : plusieurs
  * questions sur une notion sous des angles vraiment distincts ; seul le même angle est un doublon.
- * Le modèle nomme la notion et l'angle de chaque question ; la décision, elle, est faite ici.
+ * Le modèle nomme la notion et l'angle de chaque question ; la décision, elle, est faite ici
+ * (decideDuplicates). Job 23 (14/11) : trois questions dont la réponse était « le biais de
+ * disponibilité » sont passées, le contrôle ne sachant pas quelle option était la bonne : il voit
+ * la RÉPONSE LOGIQUE, et les paires suspectes repérées sans modèle lui sont soumises nommément.
  */
-async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previous?: string[] }): Promise<{ drop: number[]; intra: number[]; repeats: number[]; notions: string[]; angles: string[]; regles: string[] }> {
-  // Le seul énoncé ne suffit pas à repérer deux questions qui exploitent le même fait : au job 16
-  // de HUM-285, la réponse d'un jeu de rôle devenait le distracteur d'une seconde question, et deux
-  // formulations différentes testaient la même condition d'un système de vote. Le contrôle voit
-  // donc tout ce que l'étudiant voit, plus la preuve courte qui établit la clé.
-  const list = items.map((it, i) => [
-    `Q${i}. (${sanitizeCorpus(it.topic ?? "").slice(0, 80)}) ${sanitizeCorpus(it.stem).slice(0, 500)}`,
-    `  Options : ${it.options.map((o) => sanitizeCorpus(o).slice(0, 180)).join(" | ")}`,
-    `  Bonne réponse : ${it.correct.map((k) => sanitizeCorpus(it.options[k] ?? "").slice(0, 180)).join(" | ")}`,
-    `  Fait source : ${sanitizeCorpus(it.sourceFact ?? "").slice(0, 300)}`,
-    `  Explication : ${sanitizeCorpus(it.explanation ?? "").slice(0, 300)}`,
-  ].join("\n")).join("\n");
-  // Job 23 (14/11) : trois questions dont la réponse était « le biais de disponibilité » sont
-  // passées, le contrôle ne sachant pas quelle option était la bonne. Il voit désormais la RÉPONSE
-  // LOGIQUE (la bonne réponse), et les paires suspectes repérées sans modèle lui sont soumises nommément.
+function duplicateRules(items: QcmItem[], opts: { strict: boolean; previous?: string[] }): string[] {
   const suspects = suspectPairs(items, opts.strict);
-  // Banc du 04/11 (CS-290) : 2 questions sur 15 reprenaient un examen précédent du cours ; le concepteur
-  // les voit, mais seul ce contrôle peut les retirer.
-  const previous = (opts.previous ?? []).slice(0, PREVIOUS_STEMS).map((stem, i) => `P${i}. ${sanitizeCorpus(stem).slice(0, 220)}`).join("\n");
   const criterion = opts.strict
     ? `Le programme a au moins autant de notions que l'examen a de questions : UNE NOTION = UNE QUESTION. Deux questions sur la même notion (le biais de négativité, le nudge, la souveraineté des données…) sont des doublons même sous deux angles différents. Deux questions qui s'appuient sur le MÊME exemple ou la MÊME étude du cours (même passage précis, même fait concret cité) sont aussi des doublons, même si l'une en demande les chiffres et l'autre ce qu'ils illustrent (finition v6, job 28 : la même comparaison chiffrée d'un grand quotidien et d'une encyclopédie collaborative) — ce n'est jamais un angle distinct, seulement l'habillage de la question qui change.`
     : `L'examen a plus de questions que le programme n'a de notions : deux questions sur une même notion sont permises si elles testent des angles VRAIMENT distincts (un autre fait, une autre condition, une autre étude) ; sont des doublons celles qui testent le même fait, la même condition, le même scénario ou le même raisonnement, même si l'une transforme la réponse de l'autre en distracteur ou reformule la question. Un décor différent (livraison de repas, e-commerce…) habillant la MÊME règle, avec la même réponse logique, reste un doublon : seul le FOND compte, jamais l'habillage. Reprendre le même exemple ou la même étude sous un angle vraiment distinct reste permis ici : le programme n'a pas assez de notions pour l'exclure.`;
-  const r = await completeJson<{ notions?: { index: number; notion: string; angle: string; regle?: string }[]; duplicates: { first: number; second: number }[]; repeats?: { index: number; previous: number }[] }>({
-    prompt: [
-      `Voici les QCM d'un même examen. Pour chacun, nomme la notion du cours qu'il teste (notion, le MÊME libellé exact pour deux questions sur la même notion, même formulées autrement ou dans deux langues), l'angle précis (angle), et la règle ou réponse logique exacte qu'il vérifie SANS le décor du scénario (regle, le MÊME libellé exact si deux questions vérifient la même règle sous un décor différent).`,
-      criterion,
-      `Puis liste les paires en doublon selon ce critère. Compare d'abord les BONNES RÉPONSES : deux questions dont la bonne réponse est la même notion, ou qui se réussissent par le même raisonnement (la même règle, la même distinction posée dans un sens puis dans l'autre), sont des doublons ; partager des distracteurs ne suffit pas. Compare aussi l'énoncé, les options, le fait source et l'explication : recycler le même cas ou le même fait dans une autre option reste un doublon, de même que deux scénarios différents qui vérifient la même règle (regle identique). Deux notions voisines mais distinctes ne sont pas un doublon.`,
-      // `suspects` couvre aussi la même PROPOSITION de la clé (texte de la bonne option + fait
-      // source, lib/qcm-checks.keyProposition) — finition v5, Q7/Q14 : deux énoncés sans rien en
-      // commun en apparence (un wiki, un forum d'entraide) mais la même clé en substance (« le
-      // succès du modèle bénévole… motivations non financières ») et deux notions différentes.
-      // Le nommer explicitement évite que deux libellés de notion distincts masquent le doublon.
-      // Elle couvre aussi, en mode strict, le même PASSAGE SOURCE (lib/qcm-checks.sameSourceFact,
-      // job 28 : Q1/Q7 sur le même exemple chiffré, chiffres d'un côté, interprétation de l'autre).
-      ...(suspects.length ? [`Paires à trancher en priorité (même notion du programme, réponses croisées, bonne réponse + fait source qui affirment la même chose même sous un énoncé ou une notion différente, OU même exemple/étude source), à lister en doublon si elles testent la même chose : ${suspects.map(([a, b]) => `Q${a}–Q${b}`).join(", ")}.`] : []),
-      ...(previous ? [`Liste aussi, dans "repeats", les QCM qui reprennent une question des EXAMENS PRÉCÉDENTS du cours (P…) : même fait, même règle ou même réponse logique, même si la notion, l'angle ou le décor sont reformulés.`] : []),
-      ``,
-      list,
-      ...(previous ? [``, `QUESTIONS DES EXAMENS PRÉCÉDENTS :`, previous] : []),
-      ``,
-      `Réponds UNIQUEMENT avec {"notions": [{"index": i, "notion": "…", "angle": "…", "regle": "…"}], "duplicates": [{"first": i, "second": j, "reason": "…"}]${previous ? `, "repeats": [{"index": i, "previous": p}]` : ""}} (first < second ; listes vides s'il n'y a rien).`,
-    ].join("\n"),
-    // 20 questions vues en entier (bonne réponse comprise) : la réflexion seule atteignait les
-    // 16 000 tokens (HUM-285, jobs 17 à 23 : 15 400 en moyenne), réponse coupée deux fois, contrôle perdu.
-    model: "opus",
-    ...QCM_CALL_LIMITS,
-    json: { schema: DUP_SCHEMA },
-  }, { check: (v) => (Array.isArray(v?.duplicates) ? null : "le champ « duplicates » (tableau) manque") });
+  return [
+    `Pour chaque QCM, nomme la notion du cours qu'il teste (notion, le MÊME libellé exact pour deux questions sur la même notion, même formulées autrement ou dans deux langues), l'angle précis (angle), et la règle ou réponse logique exacte qu'il vérifie SANS le décor du scénario (regle, le MÊME libellé exact si deux questions vérifient la même règle sous un décor différent).`,
+    criterion,
+    `Puis liste les paires en doublon selon ce critère. Compare d'abord les BONNES RÉPONSES : deux questions dont la bonne réponse est la même notion, ou qui se réussissent par le même raisonnement (la même règle, la même distinction posée dans un sens puis dans l'autre), sont des doublons ; partager des distracteurs ne suffit pas. Compare aussi l'énoncé, les options, le fait source et l'explication : recycler le même cas ou le même fait dans une autre option reste un doublon, de même que deux scénarios différents qui vérifient la même règle (regle identique). Deux notions voisines mais distinctes ne sont pas un doublon.`,
+    // `suspects` couvre aussi la même PROPOSITION de la clé (texte de la bonne option + fait
+    // source, lib/qcm-checks.keyProposition) — finition v5, Q7/Q14 : deux énoncés sans rien en
+    // commun en apparence (un wiki, un forum d'entraide) mais la même clé en substance (« le
+    // succès du modèle bénévole… motivations non financières ») et deux notions différentes.
+    // Le nommer explicitement évite que deux libellés de notion distincts masquent le doublon.
+    // Elle couvre aussi, en mode strict, le même PASSAGE SOURCE (lib/qcm-checks.sameSourceFact,
+    // job 28 : Q1/Q7 sur le même exemple chiffré, chiffres d'un côté, interprétation de l'autre).
+    ...(suspects.length ? [`Paires à trancher en priorité (même notion du programme, réponses croisées, bonne réponse + fait source qui affirment la même chose même sous un énoncé ou une notion différente, OU même exemple/étude source), à lister en doublon si elles testent la même chose : ${suspects.map(([a, b]) => `Q${a}–Q${b}`).join(", ")}.`] : []),
+    // Banc du 04/11 (CS-290) : 2 questions sur 15 reprenaient un examen précédent du cours ; le
+    // concepteur les voit, mais seul ce contrôle peut les retirer.
+    ...(opts.previous?.length ? [`Liste aussi, dans "repeats", les QCM qui reprennent une question des EXAMENS PRÉCÉDENTS du cours (P…) : même fait, même règle ou même réponse logique, même si la notion, l'angle ou le décor sont reformulés.`] : []),
+  ];
+}
+
+/** Doublons décidés à partir des libellés et des paires rendus par le modèle : le premier de chaque notion reste. */
+function decideDuplicates(items: QcmItem[], r: DupAnswer, opts: { strict: boolean; previousExams?: number }): DupResult {
   const notions = items.map(() => "");
   const angles = items.map(() => "");
   const regles = items.map(() => "");
@@ -1527,7 +1346,11 @@ async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previou
   // sont rendues à part, l'appelant ne les retire que s'il a de quoi les remplacer.
   const drop = new Set<number>();
   const repeats = new Set<number>();
-  for (const rp of Array.isArray(r.repeats) ? r.repeats : []) if (Number.isInteger(rp?.index) && rp.index >= 0 && rp.index < items.length) repeats.add(rp.index);
+  for (const rp of Array.isArray(r.repeats) ? r.repeats : []) if (Number.isInteger(rp?.index) && rp.index >= 0 && rp.index < items.length) {
+    // « Reprise » d'une question déjà retenue dans CET examen (P… au-delà des examens précédents) : un doublon dans l'examen.
+    if (opts.previousExams !== undefined && Number.isInteger(rp.previous) && rp.previous >= opts.previousExams) drop.add(rp.index);
+    else repeats.add(rp.index);
+  }
   // Les questions de l'accent demandé par l'étudiant portent volontairement sur un même thème :
   // elles ne sont pas des doublons ENTRE ELLES (une autre question sur ce thème, si).
   const focusPair = (a: number, b: number) => !!items[a]?.focusSlot && !!items[b]?.focusSlot;
@@ -1562,20 +1385,83 @@ async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previou
   return { drop: [...new Set([...intra, ...repeats])].sort((a, b) => a - b), intra, repeats: [...repeats].sort((a, b) => a - b), notions, angles, regles };
 }
 
-/** Remplacements de doublons au plus ; le contrôle repasse après chacun (le dernier aussi). */
-const DEDUP_ROUNDS = 2;
+const REVIEW_SCHEMA = {
+  type: "object",
+  properties: { verdicts: FINAL_QUALITY_SCHEMA.properties.verdicts, ...DUP_SCHEMA.properties },
+  required: ["verdicts", "notions", "duplicates", "repeats"],
+  additionalProperties: false,
+} as const;
 
 /**
- * Budget TEMPS de la phase finale (doublons, remplacements, complément, porte de sortie, ultime
- * passe) : QCM_FINAL_PHASE_BUDGET_MS, défaut 6 min (10 min jusqu'au job 28, finition v6 : examen
- * livré en 42 min, phase finale à 14 min pour une seule ronde de réparation). Job 26 (15/11/2026) :
- * à 99 % dès 30 min, puis 40 min de plus sur « un distracteur reste éliminable sans le cours »,
- * ronde après ronde de remplacement (conception → vérification → réparation → revérification,
- * jusqu'à 10 min d'appel chacune depuis #95) ; seul un budget de LOTS (lateBudget, 10 pour 20 QCM)
- * bornait la boucle. Une ronde réelle dure 5 à 7 min : 6 min laissent encore un remplacement ET la
- * porte de sortie (audit, vérification, explications — jamais bornés, cf. `finalPhaseExhausted`),
- * sans les 3 à 4 min de marge inutilisées que laissait l'ancien budget de 10. Le budget n'interrompt
- * aucun appel : il empêche d'en lancer une nouvelle ronde.
+ * REVUE FINALE EN UN APPEL — l'audit de sortie (clé, hors cours, distracteurs, calqué sur la
+ * rubrique du banc) et le contrôle des doublons lisaient la même liste en deux appels, l'audit
+ * repassant après chaque réparation (banc HUM-285 du 15/11, job 14 : deux audits de 96 000 et
+ * 24 000 caractères puis un contrôle des doublons de 28 000). Une seule revue voit désormais
+ * chaque question en entier, sa clé, son explication et le fait qui la prouve. Au job 16 de
+ * HUM-285, la réponse d'un jeu de rôle devenait le distracteur d'une seconde question : l'énoncé
+ * seul ne suffit pas à repérer deux questions qui exploitent le même fait.
+ * Rend, par question, sa version auditée ou null (écartée : clé fausse ou hors cours) — `audit`
+ * vaut null si la revue est illisible, et les verdicts de la vérification à l'aveugle tiennent —,
+ * et les doublons, null si le contrôle est indisponible : les plafonds par notion s'appliquent seuls.
+ */
+async function finalReview(items: QcmItem[], opts: { strict: boolean; previous?: string[]; current?: string[]; step: StepCb; facts?: CourseFact[] }): Promise<{ audit: (QcmItem | null)[] | null; dup: DupResult | null }> {
+  if (!items.length) return { audit: [], dup: null };
+  const topicPassages = await coursePassages([...new Set(items.map((it) => it.topic).filter(Boolean))]).catch(() => []);
+  // Une question bâtie sur un fait du cours (lib/qcm-facts) a sa preuve dans le passage de ce fait,
+  // souvent hors des deux extraits de sa notion : sans lui, l'audit la jugeait hors cours (banc
+  // HUM-285 du 16/11 : 32 candidats sur 55, contre 7 à 10 conçus par notion, et un complément final
+  // de 7 questions). Le texte du cours qui porte ce passage, cherché dans le corpus, l'accompagne.
+  const facts = opts.facts ?? [];
+  const proofs = [...new Set(items.flatMap((it) => facts.filter((f) => f.id === it.factId).map((f) => f.passage)))];
+  const factPassages = proofs.length ? await coursePassages(proofs, 1, 600).catch(() => []) : [];
+  const passages = [...topicPassages, ...factPassages.filter((p) => !topicPassages.some((x) => x.text === p.text))];
+  const body = items.map((it, index) => [
+    `Q${index}. (${sanitizeCorpus(it.topic ?? "").slice(0, 80)}) ${sanitizeCorpus(it.stem)}`,
+    ...it.options.map((o, k) => `   (${k}) ${sanitizeCorpus(o)}`),
+    `   CLÉ : ${it.correct.join(", ")}`,
+    `   EXPLICATION : ${sanitizeCorpus(it.explanation ?? "")}`,
+    `   FAIT SOURCE : ${sanitizeCorpus(it.sourceFact ?? "").slice(0, 300)}`,
+  ].join("\n")).join("\n\n");
+  // Examens précédents (bornés) PUIS questions déjà retenues dans cet examen : ces dernières ne
+  // sont jamais coupées par la borne, et une reprise de l'une d'elles est un doublon (decideDuplicates).
+  const previousExams = Math.min(opts.previous?.length ?? 0, PREVIOUS_STEMS);
+  const prior = [...(opts.previous ?? []).slice(0, PREVIOUS_STEMS), ...(opts.current ?? [])];
+  const previous = prior.map((stem, i) => `P${i}. ${sanitizeCorpus(stem).slice(0, 220)}`).join("\n");
+  const out = await completeJson<{ verdicts: FinalQualityVerdict[] } & DupAnswer>({
+    model: "opus", ...QCM_CALL_LIMITS, json: { schema: REVIEW_SCHEMA },
+    prompt: [
+      `Tu es un examinateur exigeant. Voici les QCM d'un même examen, avec leur clé, leur explication et le fait du cours qui les prouve. Deux contrôles, rendus dans le même objet JSON.`,
+      `1. AUDIT (verdicts) : pour chaque QCM, tranche selon les extraits du cours.`,
+      ...AUDIT_RULES,
+      `2. DOUBLONS (notions, duplicates, repeats).`,
+      ...duplicateRules(items, { strict: opts.strict, previous: prior }),
+      DATA_RULE, passages.length ? dataBlock("EXTRAITS DU COURS", passages) : "", "", body,
+      ...(previous ? ["", `QUESTIONS DES EXAMENS PRÉCÉDENTS :`, previous] : []),
+      "",
+      `Réponds UNIQUEMENT avec {"verdicts": [{"index": 0, "key": true, "offCourse": false, "trivial": []}], "notions": [{"index": i, "notion": "…", "angle": "…", "regle": "…"}], "duplicates": [{"first": i, "second": j, "reason": "…"}], "repeats": [{"index": i, "previous": p}]} : un verdict et une notion par QCM, first < second, listes vides s'il n'y a rien.`,
+    ].join("\n"),
+  }, { check: (v) => verdictsCheck(v, items.length) ?? (Array.isArray(v?.duplicates) ? null : "le champ « duplicates » (tableau) manque") }).catch((e) => {
+    opts.step(`Revue finale en échec (${llmFailureReason(e).split(/\.\s/u)[0].slice(0, 80)}) : verdicts de la vérification gardés, plafonds par notion appliqués seuls`, 79);
+    return null;
+  });
+  if (!out) return { audit: null, dup: null };
+  opts.step(`Revue finale : clés, hors-cours, distracteurs et doublons contrôlés en un appel`, 79);
+  const byIndex = new Map((out.verdicts ?? []).map((v) => [v.index, v]));
+  const audit = items.map((it, i) => applyFinalQualityVerdicts([it], byIndex.has(i) ? [{ ...byIndex.get(i)!, index: 0 }] : [])[0] ?? null);
+  return { audit, dup: decideDuplicates(items, out, { strict: opts.strict, previousExams }) };
+}
+
+/**
+ * Budget TEMPS de la phase finale (revue, comblement, réparation, porte de sortie) :
+ * QCM_FINAL_PHASE_BUDGET_MS, défaut 6 min (10 min jusqu'au job 28, finition v6 : examen livré en
+ * 42 min, phase finale à 14 min pour une seule ronde de réparation). Job 26 (15/11/2026) : à 99 %
+ * dès 30 min, puis 40 min de plus sur « un distracteur reste éliminable sans le cours », ronde après
+ * ronde de remplacement (conception → vérification → réparation → revérification, jusqu'à 10 min
+ * d'appel chacune depuis #95) ; seul un budget de lots (10 pour 20 QCM) bornait la boucle. Une
+ * ronde réelle dure 5 à 7 min : 6 min laissent encore un remplacement et la porte de sortie, sans
+ * les 3 à 4 min de marge inutilisées que laissait l'ancien budget de 10. Le budget n'interrompt aucun appel : il empêche d'en lancer une nouvelle ronde ; à épuisement, seuls les
+ * contrôles déterministes de la porte de sortie passent encore, ses appels au modèle (revérification,
+ * réécriture des explications) cèdent la place (#105) sans jamais garder une question non vérifiée.
  */
 const FINAL_PHASE_DEFAULT_MS = 6 * 60_000;
 function finalPhaseBudgetMs(): number {
@@ -1622,10 +1508,15 @@ export async function runPool<T>(items: T[], n: number, fn: (item: T) => Promise
 /** `requested` / `openRequested` : la composition demandée — `count` / `open` peuvent rester en dessous. */
 export type QcmExamResult = { id: number; count: number; requested: number; verified: number; open: number; openRequested: number; pdf?: string; texError?: string };
 
-/** Nombre de rondes de comblement des QCM manquants. */
-const TOPUP_ROUNDS = 3;
-/** Lots supplémentaires permis, comblement et complément final compris (× lots prévus) : le budget borné. */
-const EXTRA_BATCHES = 3;
+/**
+ * Questions conçues en plus de l'examen (15 %, au moins une), sur des notions de réserve : une
+ * question écartée par la vérification ou la revue finale est remplacée sans nouvelle conception.
+ * Banc HUM-285 du 15/11 : une clé contestée sur vingt, quand une ronde de comblement coûte au
+ * moins trois appels (conception, vérification, revue).
+ */
+function spareMargin(count: number): number {
+  return count > 0 ? Math.ceil(count * 0.15) : 0;
+}
 
 /**
  * Durée de chaque phase d'un examen QCM sans historique (banc de M : ~10 min à
@@ -1784,18 +1675,6 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const { notionCount, recent, covAll, cov, qcmTopics, spareTopics, qcmMolds } = plan;
   /** Examen conçu par faits testables : chaque question (hors accent) teste un fait distinct. */
   const factMode = !!plan.facts?.length && qcmTopics.some((t) => !!t.fact);
-  /**
-   * Notion du fait testable qu'une question teste (lib/qcm-facts), ou null. C'est l'étiquette
-   * affichée : examen #15 (16/11, job 30), une question sur une notion précise portait l'étiquette
-   * d'une autre notion du programme, le sujet que le concepteur avait recopié, pas la notion du fait
-   * qu'elle teste ; les points faibles de l'étudiant se rangeaient sous la mauvaise notion.
-   */
-  const factNotion = (id: string | null | undefined): string | null => (factMode && id ? plan.facts?.find((f) => f.id === id)?.notion ?? null : null);
-  /** Aligne la notion et l'étiquette affichée (topic) d'une question sur le fait qu'elle teste. */
-  const labelFromFact = (it: QcmItem): void => {
-    const n = it.focusSlot ? null : factNotion(it.factId);
-    if (n) { it.notion = n; it.topic = n; }
-  };
   const caps = { perNotion: notionCap(notionCount, count), perKey: 1 };
   // Ouvertes : la suite de la répartition (les chapitres que les QCM n'ont pas pris d'abord).
   const openTopic = (i: number) => (plan.spread ? cov[(needed + i) % cov.length] : cov[(count + i) % cov.length]);
@@ -1819,40 +1698,190 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   };
   step(`Architecte : ${count} QCM + ${openCount} ouverte(s)${focus ? ` (accent : « ${focus} »)` : ""}${dna ? ` · moules ADN (${dna.molds.length})` : " au format détecté"}…`, 8);
 
-  // lots de 4 QCM en parallèle borné (2 lots à la fois). RÉSILIENT : un lot illisible est redemandé
-  // avec l'erreur (completeJson), un lot échoué ne plante pas le job et ses sujets sont comblés plus bas.
-  const BATCH = 4;
-  type Batch = { topics: QcmSlot[]; molds: (MoldKind | null)[]; guidance?: string };
-  const batches: Batch[] = [];
-  for (let i = 0; i < count; i += BATCH) {
-    const topicsSlice: QcmSlot[] = [];
-    const moldsSlice: (MoldKind | null)[] = [];
-    for (let k = 0; k < BATCH && i + k < count; k++) {
-      topicsSlice.push(qcmTopics[(i + k) % qcmTopics.length]);
-      moldsSlice.push(qcmMolds[i + k] ?? null);
+  // SUR-GÉNÉRER PUIS FILTRER — banc HUM-285 du 15/11 (job 14, 20 QCM livrés en 64 appels) : lots de
+  // 4, vérification par paquets de 8, réparation puis revérification à chaque ronde, jusqu'à trois
+  // rondes de comblement lancées alors qu'aucune question ne manquait (budget de distracteurs
+  // triviaux dépassé), puis audit, réparation, ré-audit et contrôle des doublons en appels séparés.
+  // Ici, au nominal, six appels pour 20 QCM : trois lots de 8 conçus en parallèle avec une petite
+  // marge de notions de réserve (une question écartée est remplacée sans nouvelle conception), UNE
+  // vérification groupée, UNE réparation des distracteurs de la sélection et UNE revue finale
+  // (audit et doublons). Une seule ronde de comblement, et seulement s'il manque des questions.
+  const BATCH = 8;
+  type Batch = QcmBatchState;
+  type Slot = { topic: QcmSlot; mold: MoldKind | null };
+  /** Une vérification ou une réparation groupée porte au plus GROUP questions : un appel pour un examen de 20 QCM. */
+  const GROUP = 24;
+  const chunked = <T,>(xs: T[]): T[][] => Array.from({ length: Math.ceil(xs.length / GROUP) }, (_, k) => xs.slice(k * GROUP, (k + 1) * GROUP));
+  /** verifyQcmBatch écrit ses verdicts SUR les items reçus (verified, rejected…) : rien à réassembler. */
+  const verifyGrouped = async (items: QcmItem[]): Promise<void> => { await Promise.all(chunked(items).map((c) => verifyQcmBatch(c, step))); };
+  /** `slots` en lots équilibrés d'au plus BATCH questions (23 → 7, 8, 8). */
+  const toLots = (slots: Slot[], guidance?: string): Batch[] => {
+    const n = Math.ceil(slots.length / BATCH);
+    return Array.from({ length: n }, (_, k) => {
+      const slice = slots.slice(Math.floor((k * slots.length) / n), Math.floor(((k + 1) * slots.length) / n));
+      return { topics: slice.map((s) => s.topic), molds: slice.map((s) => s.mold), ...(guidance ? { guidance } : {}) };
+    });
+  };
+  let lastError: unknown = null;
+  /** Faits posés aux examens précédents du cours (plan) ; reprises gardées en réserve (plus bas). */
+  const askedBefore = new Set(plan.askedFacts ?? []);
+  /** QCM conçus puis écartés par les contrôles (rejet, distracteur trivial) : la cause d'un examen vide n'est pas alors une réponse illisible. */
+  let qualityDropped = 0;
+  const all: QcmItem[] = [];
+  /** Candidats vérifiés déjà payés : l'examen en retient `count`, les autres remplacent une question écartée. */
+  const verifiedCandidates: QcmItem[] = [];
+  /** Écartés pour de bon : doublons (du modèle ou au-delà d'un plafond), reprises d'un examen précédent, clés refusées par la revue. */
+  const auditDuplicates = new Set<string>();
+  const historicalRepeats = new Set<string>();
+  const auditRejected = new Set<string>();
+  /**
+   * REPRISES D'UN EXAMEN PRÉCÉDENT GARDÉES EN RÉSERVE — job 26 (15/11/2026, HUM-285, 11e examen du
+   * cours) : 9 QCM livrés sur 20. Le contrôle range dans « repeats » toute question qui reprend le
+   * même fait ou la même règle qu'une question des examens précédents, même reformulée ; sur un
+   * cours dont chaque notion a déjà été posée plusieurs fois, c'est une bonne part de l'examen, et
+   * ses remplaçants le sont à leur tour. Une reprise reste remplacée quand un remplaçant passe ;
+   * sinon, déjà vérifiée et auditée, elle reprend sa place plutôt que de laisser un trou. Un
+   * doublon DANS l'examen, lui, ne revient jamais.
+   */
+  const repeatFallback = new Map<string, QcmItem>();
+  /** Doublons du seul modèle entre faits distincts (revue finale) : repris faute de remplaçant. */
+  const softFallback = new Map<string, QcmItem>();
+  /** Notion et angle de chaque question retenue, nommés par la revue finale : le comblement sait ce que l'examen pose déjà. */
+  const reviewed = new Map<string, { notion: string; angle: string }>();
+  // H — Une notion = une question tant que le programme a au moins autant de notions que l'examen a de
+  // questions ; sinon plusieurs questions par notion, sous des angles vraiment distincts. Les
+  // questions de l'accent demandé par l'étudiant partagent leur thème sans être des doublons.
+  const strict = notionCount >= count;
+  // RÉSERVE COMMUNE à la marge et au comblement : en mode strict, ni une
+  // reprise ni une autre facette d'une notion déjà donnée à l'examen ; à défaut, les supports du
+  // cours pas encore pris (ils ramènent d'autres passages). Chaque notion n'est servie qu'une fois.
+  const fresh: QcmSlot[] = [
+    ...spareTopics.filter((t) => t.method !== REPEAT_METHOD && !used.has(t.label)),
+    ...(await courseMaterialTitles().catch(() => [] as string[])).filter((t) => !used.has(t)).map((label) => ({ label, method: null })),
+  ];
+  // Par faits : la réserve de faits, chacun donné une fois (un fait écarté ne revient pas).
+  const pool: QcmSlot[] = factMode ? spareTopics : strict ? fresh.filter((t, i) => fresh.findIndex((x) => x.label === t.label) === i) : spareTopics;
+  const usedFacts = new Set<string>(qcmTopics.flatMap((t) => (t.fact ? [t.fact.id] : [])));
+  /** Questions de l'examen (hors accent demandé) par base de notion, `extra` (sujets déjà retenus) compris. */
+  const notionCounts = (extra: QcmSlot[] = []): Map<string, { label: string; n: number }> => {
+    const counts = new Map<string, { label: string; n: number }>();
+    const add = (label: string) => {
+      const b = notionBase(label);
+      const c = counts.get(b) ?? { label, n: 0 };
+      c.n++;
+      counts.set(b, c);
+    };
+    for (const it of all) if (!it.focusSlot && (it.notion || it.topic)) add((it.notion || it.topic)!);
+    for (const t of extra) add(t.label);
+    return counts;
+  };
+  let nextSpare = 0;
+  /** `n` notions de réserve, sans dépasser le plafond par notion de l'examen, `planned` (sujets prévus) compris. */
+  const takeSpare = (n: number, planned: QcmSlot[] = []): QcmSlot[] => {
+    const out: QcmSlot[] = [];
+    if (factMode) {
+      // Le premier fait encore jamais donné d'une notion sous son plafond : une notion dont la
+      // question est partie retrouve un fait, les autres attendent leur tour.
+      for (const t of pool) {
+        if (out.length >= n) break;
+        if (!t.fact || usedFacts.has(t.fact.id)) continue;
+        if ((notionCounts([...planned, ...out]).get(notionBase(t.label))?.n ?? 0) >= caps.perNotion) continue;
+        usedFacts.add(t.fact.id);
+        out.push(t);
+      }
+      return out;
     }
-    batches.push({ topics: topicsSlice, molds: moldsSlice });
-  }
-  const phaseMs = { ...DEFAULT_PHASE_MS, ...(opts.phaseMs ?? {}) };
-  work = new PhaseProgress(8, [
-    [{ name: "QCM", units: batches.length, ms: phaseMs.QCM }, { name: "Questions ouvertes", units: openCount, ms: phaseMs["Questions ouvertes"] }],
-    [{ name: "PDF", units: 1, ms: phaseMs.PDF }],
-  ]);
-  const progress = work;
-  // Ce que le point de reprise garde, étape par étape (lib/qcm-checkpoint) ; la plus avancée prime.
-  let ckLoop = ck?.loop;
-  let ckAudited = ck?.audited;
+    while (out.length < n && nextSpare < pool.length) {
+      const t = pool[nextSpare++];
+      if (strict && used.has(t.label)) continue;
+      // Une notion déjà à son plafond dans l'examen ne reçoit pas une question de plus.
+      if ((notionCounts([...planned, ...out]).get(notionBase(t.label))?.n ?? 0) >= caps.perNotion) continue;
+      used.add(t.label);
+      out.push(t);
+    }
+    return out;
+  };
+  /**
+   * Sujets pour combler sans dépasser le plafond, les notions les moins posées d'abord : une notion
+   * du programme encore sans question (sa question a été retirée) est redemandée telle quelle, une
+   * notion déjà posée l'est sous un autre angle.
+   */
+  const repeatSlots = (n: number, extra: QcmSlot[]): QcmSlot[] => {
+    const counts = notionCounts(extra);
+    const programme = new Map<string, QcmSlot>();
+    for (const t of [...cov, ...covAll.map((c) => ({ label: c.label, method: c.method }))]) if (t.method !== FOCUS_METHOD && !programme.has(notionBase(t.label))) programme.set(notionBase(t.label), t);
+    for (const [b, t] of programme) if (!counts.has(b)) counts.set(b, { label: t.label, n: 0 });
+    const order = [...counts.entries()].sort((a, b) => a[1].n - b[1].n);
+    const out: QcmSlot[] = [];
+    for (let grew = true; out.length < n && grew;) {
+      grew = false;
+      for (const [b, c] of order) {
+        if (out.length >= n || c.n >= caps.perNotion) continue;
+        const fresh = c.n === 0 ? programme.get(b) : undefined;
+        c.n++;
+        grew = true;
+        out.push(fresh ? { label: fresh.label, method: fresh.method === REPEAT_METHOD ? null : fresh.method, subTheme: fresh.subTheme ?? null } : { label: c.label, method: REPEAT_METHOD });
+      }
+    }
+    return out;
+  };
+  const hardStop = () => {
+    const code = llmErrorCode(lastError);
+    return !!code && HARD_STOP_CODES.has(code);
+  };
+  /**
+   * selectWithinTrivialBudget sans franchir les plafonds par notion : un candidat qui les
+   * dépasserait (notion du programme, notion de la bonne réponse) est écarté et la sélection refaite.
+   * Les questions déjà retenues (`current`) passent en premier et restent.
+   */
+  /** Les candidats moins ceux qu'une sélection de `limit` ferait dépasser les plafonds. */
+  const cappedPool = (current: QcmItem[], candidates: QcmItem[], limit: number): QcmItem[] => {
+    let pool = candidates;
+    for (;;) {
+      const picked = selectWithinTrivialBudget(current, pool, limit);
+      const over = capDrops(picked, caps, (it) => [it.notion]).map((i) => picked[i]).filter((it) => !current.includes(it));
+      if (!over.length) return pool;
+      pool = pool.filter((it) => !over.includes(it));
+    }
+  };
+  const selectCapped = (current: QcmItem[], candidates: QcmItem[], limit: number): QcmItem[] =>
+    selectWithinTrivialBudget(current, cappedPool(current, candidates, limit), limit);
+  // POINT DE REPRISE (lib/qcm-checkpoint) : ce que le point de reprise garde, étape par étape ; la plus avancée prime.
+  let ckDesigned = ck?.designed;
+  let ckVerified = ck?.verified;
   let ckFinal = ck?.final;
   /** Copie figée : la suite modifie les QCM en place (explications réécrites, options remplacées). */
   const frozen = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
+  const restoreReserve = (r: QcmReserveState) => {
+    nextSpare = r.nextSpare;
+    used.clear();
+    for (const label of r.used) used.add(label);
+    for (const id of r.usedFacts ?? []) usedFacts.add(id);
+  };
+  const resumedReserve = ckVerified ?? ckDesigned;
+  if (resumedReserve) restoreReserve(resumedReserve);
+  // Les sujets de l'examen, puis la marge : des notions de réserve qui remplacent sans nouvelle
+  // conception une question écartée par la vérification ou la revue finale.
+  const lots: Batch[] = ckDesigned?.lots ?? (ckVerified || ckFinal ? [] : toLots([
+    ...qcmTopics.map((topic, i) => ({ topic, mold: qcmMolds[i] ?? null })),
+    ...takeSpare(spareMargin(count), qcmTopics).map((topic) => ({ topic, mold: null })),
+  ]));
+  const phaseMs = { ...DEFAULT_PHASE_MS, ...(opts.phaseMs ?? {}) };
+  // Une unité par lot conçu, une pour la vérification et la réparation, une pour la revue finale.
+  const qcmUnits = lots.length + 2;
+  work = new PhaseProgress(8, [
+    [{ name: "QCM", units: qcmUnits, ms: phaseMs.QCM }, { name: "Questions ouvertes", units: openCount, ms: phaseMs["Questions ouvertes"] }],
+    [{ name: "PDF", units: 1, ms: phaseMs.PDF }],
+  ]);
+  const progress = work;
   let persistChain: Promise<void> = Promise.resolve();
   /** Enregistre le point de reprise ; les écritures se suivent (la dernière porte l'état le plus récent). Un échec ne coûte que la reprise. */
   const persist = (): Promise<void> => {
     const store = opts.checkpoint;
     if (!store) return persistChain;
     persistChain = persistChain.then(async () => {
-      const stage = ckFinal ? { final: ckFinal } : ckAudited ? { audited: ckAudited } : ckLoop ? { loop: ckLoop } : {};
-      const data: QcmCheckpoint = { v: 1, key: ckKey, plan, open: [...openBySlot.entries()], ...stage };
+      const stage = ckFinal ? { final: ckFinal } : ckVerified ? { verified: ckVerified } : ckDesigned ? { designed: ckDesigned } : {};
+      const data: QcmCheckpoint = { v: 2, key: ckKey, plan, open: [...openBySlot.entries()], ...stage };
       try {
         await store.save(data);
       } catch (e) {
@@ -1861,127 +1890,6 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     });
     return persistChain;
   };
-  type BatchResult = { items: QcmItem[]; error: unknown; rejected: Set<number> };
-  /** En-tête de la consigne d'une nouvelle conception sur des sujets dont la question était trop faible. */
-  const TO_FIX = `À CORRIGER — ces questions étaient trop faibles ; écris-en de NOUVELLES sur les mêmes sujets, sans ces défauts (options = propositions complètes, distracteurs de la taxonomie, fait précis du cours) :`;
-  type Weak = { b: number; it: QcmItem; i: number; why: string };
-  /** Une vérification ou une réparation groupée porte au plus GROUP questions (plusieurs lots). */
-  const GROUP = 8;
-  const chunked = <T,>(xs: T[]): T[][] => Array.from({ length: Math.ceil(xs.length / GROUP) }, (_, k) => xs.slice(k * GROUP, (k + 1) * GROUP));
-  /** verifyQcmBatch écrit ses verdicts SUR les items reçus (verified, rejected…) : rien à réassembler. */
-  const verifyGrouped = async (items: QcmItem[]): Promise<void> => { await Promise.all(chunked(items).map((c) => verifyQcmBatch(c, step))); };
-  /** Défaut d'un QCM vérifié qui justifie une réparation ou une régénération, ou null s'il est livrable. */
-  const defectOf = (it: QcmItem) => (it.verified === 0 || it.judgeOk === false || !!it.nameOnly || !!it.rejected || !!it.trivialDistractors?.length ? weaknessOf(it) : null);
-  /** Régénère en entier des QCM faibles de plusieurs lots, en appels groupés par consigne de lot. */
-  const regenerateGrouped = async (group: Batch[], weak: Weak[]): Promise<Map<Weak, QcmItem>> => {
-    const out = new Map<Weak, QcmItem>();
-    if (!weak.length) return out;
-    step(`${weak.length} QCM trop faible(s) → régénération ciblée`, 0);
-    const byGuidance = new Map<string, Weak[]>();
-    for (const w of weak) byGuidance.set(group[w.b].guidance ?? "", [...(byGuidance.get(group[w.b].guidance ?? "") ?? []), w]);
-    // Par paquets d'un lot (BATCH) : un item écarté à la conception fait perdre son paquet entier.
-    const lots = (ws: Weak[]) => Array.from({ length: Math.ceil(ws.length / BATCH) }, (_, k) => ws.slice(k * BATCH, (k + 1) * BATCH));
-    await Promise.all([...byGuidance].flatMap(([extra, ws]) => lots(ws).map(async (chunk) => {
-      const guidance = [
-        TO_FIX,
-        ...chunk.map((w) => `  - « ${sanitizeCorpus(w.it.stem).slice(0, 160)} » : ${sanitizeCorpus(w.why)}`),
-        // La consigne du lot (notions déjà posées, pour un remplacement de doublon) suit la régénération.
-        extra,
-      ].filter(Boolean).join("\n");
-      const slot = (w: Weak) => w.it.slot ?? w.i;
-      try {
-        const again = await generateQcmBatch(chunk.map((w) => group[w.b].topics[slot(w)]), chunk.length, step, undefined, guidance, { ...shared, molds: chunk.map((w) => group[w.b].molds[slot(w)] ?? null) });
-        // Un item écarté à la conception décalerait l'appariement : on ne remplace qu'un paquet complet.
-        if (again.length === chunk.length) chunk.forEach((w, k) => out.set(w, again[k]));
-      } catch (e) {
-        step(`Régénération ignorée (${(e as Error).message.slice(0, 50)}), items d'origine gardés`, 0);
-      }
-    })));
-    return out;
-  };
-  /**
-   * UNE RONDE GROUPÉE — banc du 13/11 (rs-qcm15) : chaque lot de 4 enchaînait seul conception →
-   * vérification → réparation → revérification, soit 23 vérifications et 12 réparations pour 12
-   * QCM livrés. Ici : les lots sont conçus en parallèle, vérifiés à l'aveugle par paquets de GROUP,
-   * et un QCM déjà bon s'arrête là. Les distracteurs triviaux de toute la ronde sont réparés en UN
-   * appel (énoncé et clé gardés), pendant que les QCM faibles sont régénérés ; réparés et régénérés
-   * repassent ensemble UNE vérification. Une version régénérée ne remplace que si elle est meilleure.
-   */
-  const runRound = async (group: Batch[]): Promise<BatchResult[]> => {
-    const designed = await Promise.all(group.map(async (bt) => {
-      try {
-        const items = await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, bt.guidance, { ...shared, molds: bt.molds });
-        progress.done("QCM", 0.5); // un lot conçu vaut une moitié de son unité, sa vérification l'autre
-        return { items, error: null as unknown };
-      } catch (e) {
-        step(`Lot QCM échoué (${(e as Error).message.slice(0, 80)})`, 0);
-        progress.done("QCM", 1);
-        return { items: [] as QcmItem[], error: e };
-      }
-    }));
-    await verifyGrouped(designed.flatMap((d) => d.items));
-    const outs = designed.map((d) => d.items.slice());
-    // Arrêt anticipé : une clé confirmée sans rejet ni distracteur signalé est livrable.
-    const defects: Weak[] = designed.flatMap((d, b) => d.items.map((it, i) => ({ b, it, i, why: defectOf(it) })))
-      .filter((w): w is Weak => !!w.why);
-    const fixable = defects.filter((w) => w.it.verified === 1 && !w.it.rejected && !!w.it.trivialDistractors?.length);
-    const weak = defects.filter((w) => !fixable.includes(w));
-    const [repaired, regenerated] = await Promise.all([
-      Promise.all(chunked(fixable).map((c) => replaceTrivialDistractorsBatch(c.map((w) => w.it), step, shared.language).catch((e) => {
-        step(`Remplacement des distracteurs ignoré (${(e as Error).message.slice(0, 50)})`, 0);
-        return c.map((w) => w.it);
-      }))).then((r) => r.flat()),
-      regenerateGrouped(group, weak),
-    ]);
-    const changed = fixable.map((w, k) => (repaired[k] && repaired[k] !== w.it ? repaired[k] : null));
-    await verifyGrouped([...changed.filter((n): n is QcmItem => !!n), ...regenerated.values()]);
-    fixable.forEach((w, k) => {
-      const n = changed[k];
-      // Rendu tel quel (remplacement échoué) : l'item d'origine suit la règle commune.
-      if (!n || n.verified !== 1 || n.rejected) return;
-      // Un résidu trivial après cette unique réparation reste candidat au budget global de 10 % :
-      // le régénérer ajoutait conception + vérification, et une question absente coûte plus cher.
-      if (!n.trivialDistractors?.length || onlyTrivialDistractors(n)) outs[w.b][w.i] = { ...n, slot: w.it.slot };
-      if (n.trivialDistractors?.length && onlyTrivialDistractors(n)) step(`QCM à régénérer après une réparation : un distracteur reste éliminable sans le cours (gardé en réserve)`, 0);
-    });
-    weak.forEach((w) => {
-      const n = regenerated.get(w);
-      // Un item rejeté n'est jamais gardé : toute version vérifiée vaut mieux qu'un lot de comblement.
-      if (n?.verified === 1 && (w.it.rejected || !weaknessOf(n) || (n.discrimination ?? 0) > (w.it.discrimination ?? 0))) outs[w.b][w.i] = { ...n, slot: w.it.slot };
-    });
-    return designed.map((d, b) => {
-      if (d.error) return { items: [], error: d.error, rejected: new Set<number>() };
-      progress.done("QCM", 0.5);
-      const kept = outs[b];
-      // Un item resté rejeté (hors cours, définition différente, hors matière, clé contestée) n'est
-      // jamais gardé : son sujet est comblé. Une clé confirmée dont le correcteur relève encore un
-      // défaut reste candidate : la sélection la classe après les questions sans défaut.
-      const verified = kept.filter((it) => it.verified === 1 && !it.rejected);
-      qualityDropped += kept.length - verified.length;
-      // Un fait neuf demandé, mais la question rattachée à un fait déjà posé aux examens précédents
-      // (lib/qcm-facts.attributedFact) : une reprise. Gardée en réserve, son sujet passe à un autre fait.
-      const reprised = (it: QcmItem) => {
-        const asked = group[b].topics[it.slot ?? -1]?.fact;
-        return factMode && !!asked && !!it.factId && it.factId !== asked.id && askedBefore.has(it.factId) && !askedBefore.has(asked.id);
-      };
-      const out = verified.filter((it) => !reprised(it));
-      for (const it of verified) if (!out.includes(it)) repeatFallback.set(it.stem, it);
-      for (const it of verified) {
-        const slot = group[b].topics[it.slot ?? -1];
-        if (slot?.method === FOCUS_METHOD) it.focusSlot = true;
-        it.notion = slot?.label ?? it.notion ?? null;
-        labelFromFact(it);
-      }
-      const rejected = new Set(kept.map((it, n) => ({ it, slot: it.slot ?? n })).filter(({ it }) => !out.includes(it)).map(({ slot }) => slot));
-      return { items: out, error: null, rejected };
-    });
-  };
-  let lastError: unknown = null;
-  /** Faits posés aux examens précédents du cours (plan) ; reprises gardées en réserve (plus bas). */
-  const askedBefore = new Set(plan.askedFacts ?? []);
-  const repeatFallback = new Map<string, QcmItem>();
-  /** QCM conçus puis écartés par les contrôles (rejet, distracteur trivial) : la cause d'un examen vide n'est pas alors une réponse illisible. */
-  let qualityDropped = 0;
   // partie OUVERTE : chaque question via l'architecte (multi-passes + vérif), au niveau réel.
   // moules « ouverts » échantillonnés depuis l'ADN, imposés à l'architecte.
   // M — lancée AVANT les lots QCM et en parallèle d'eux, plusieurs à la fois (job 9 de CS-290 :
@@ -2034,441 +1942,198 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   })();
   const tQcm = Date.now();
 
-  // H — Une notion = une question tant que le programme a au moins autant de notions que l'examen a de
-  // questions ; sinon plusieurs questions par notion, sous des angles vraiment distincts. Les
-  // questions de l'accent demandé par l'étudiant partagent leur thème sans être des doublons.
-  const strict = notionCount >= count;
-  // RÉSERVE COMMUNE au comblement, aux doublons et au complément final : en mode strict, ni une
-  // reprise ni une autre facette d'une notion déjà donnée à l'examen ; à défaut, les supports du
-  // cours pas encore pris (ils ramènent d'autres passages). Chaque notion n'est servie qu'une fois.
-  const fresh: QcmSlot[] = [
-    ...spareTopics.filter((t) => t.method !== REPEAT_METHOD && !used.has(t.label)),
-    ...(await courseMaterialTitles().catch(() => [] as string[])).filter((t) => !used.has(t)).map((label) => ({ label, method: null })),
-  ];
-  // Par faits : la réserve de faits, chacun donné une fois (un fait écarté ne revient pas).
-  const pool: QcmSlot[] = factMode ? spareTopics : strict ? fresh.filter((t, i) => fresh.findIndex((x) => x.label === t.label) === i) : spareTopics;
-  const usedFacts = new Set<string>(qcmTopics.flatMap((t) => (t.fact ? [t.fact.id] : [])));
-  /** Questions de l'examen (hors accent demandé) par base de notion, `extra` (sujets déjà retenus) compris. */
-  const notionCounts = (extra: QcmSlot[] = []): Map<string, { label: string; n: number }> => {
-    const counts = new Map<string, { label: string; n: number }>();
-    const add = (label: string) => {
-      const b = notionBase(label);
-      const c = counts.get(b) ?? { label, n: 0 };
-      c.n++;
-      counts.set(b, c);
-    };
-    for (const it of all) if (!it.focusSlot && (it.notion || it.topic)) add((it.notion || it.topic)!);
-    for (const t of extra) add(t.label);
-    return counts;
-  };
-  let nextSpare = 0;
-  const takeSpare = (n: number): QcmSlot[] => {
-    const out: QcmSlot[] = [];
-    if (factMode) {
-      // Le premier fait encore jamais donné d'une notion sous son plafond : une notion dont la
-      // question est partie retrouve un fait, les autres attendent leur tour.
-      for (const t of pool) {
-        if (out.length >= n) break;
-        if (!t.fact || usedFacts.has(t.fact.id)) continue;
-        if ((notionCounts(out).get(notionBase(t.label))?.n ?? 0) >= caps.perNotion) continue;
-        usedFacts.add(t.fact.id);
-        out.push(t);
-      }
-      return out;
+  /** Rattache les QCM d'un lot à leur sujet (notion du programme, accent demandé par l'étudiant). */
+  const tagged = (bt: Batch, items: QcmItem[]): QcmItem[] => {
+    for (const it of items) {
+      const slot = bt.topics[it.slot ?? -1];
+      if (slot?.method === FOCUS_METHOD) it.focusSlot = true;
+      it.notion = slot?.label ?? it.notion ?? null;
     }
-    while (out.length < n && nextSpare < pool.length) {
-      const t = pool[nextSpare++];
-      if (strict && used.has(t.label)) continue;
-      // Une notion déjà à son plafond dans l'examen ne reçoit pas une question de plus.
-      if ((notionCounts(out).get(notionBase(t.label))?.n ?? 0) >= caps.perNotion) continue;
-      used.add(t.label);
-      out.push(t);
-    }
-    return out;
+    return items;
   };
   /**
-   * Sujets pour combler sans dépasser le plafond, les notions les moins posées d'abord : une notion
-   * du programme encore sans question (sa question a été retirée) est redemandée telle quelle, une
-   * notion déjà posée l'est sous un autre angle.
+   * Conçoit en parallèle (QCM_BATCH_CONCURRENCY) les lots pas encore conçus de `done`. RÉSILIENT : un
+   * lot illisible est redemandé avec l'erreur (completeJson) ; un lot en échec reste null et ses
+   * sujets attendent le comblement. `onLot` suit chaque lot terminé (point de reprise).
    */
-  const repeatSlots = (n: number, extra: QcmSlot[]): QcmSlot[] => {
-    const counts = notionCounts(extra);
-    const programme = new Map<string, QcmSlot>();
-    for (const t of [...cov, ...covAll.map((c) => ({ label: c.label, method: c.method }))]) if (t.method !== FOCUS_METHOD && !programme.has(notionBase(t.label))) programme.set(notionBase(t.label), t);
-    for (const [b, t] of programme) if (!counts.has(b)) counts.set(b, { label: t.label, n: 0 });
-    const order = [...counts.entries()].sort((a, b) => a[1].n - b[1].n);
-    const out: QcmSlot[] = [];
-    for (let grew = true; out.length < n && grew;) {
-      grew = false;
-      for (const [b, c] of order) {
-        if (out.length >= n || c.n >= caps.perNotion) continue;
-        const fresh = c.n === 0 ? programme.get(b) : undefined;
-        c.n++;
-        grew = true;
-        out.push(fresh ? { label: fresh.label, method: fresh.method === REPEAT_METHOD ? null : fresh.method, subTheme: fresh.subTheme ?? null } : { label: c.label, method: REPEAT_METHOD });
-      }
-    }
-    return out;
-  };
-  const hardStop = () => {
-    const code = llmErrorCode(lastError);
-    return !!code && HARD_STOP_CODES.has(code);
-  };
-  /**
-   * selectWithinTrivialBudget sans franchir les plafonds par notion : un candidat qui les
-   * dépasserait (notion du programme, notion de la bonne réponse) est écarté et la sélection refaite.
-   * Les questions déjà retenues (`current`) passent en premier et restent.
-   */
-  /** Les candidats moins ceux qu'une sélection de `limit` ferait dépasser les plafonds. */
-  const cappedPool = (current: QcmItem[], candidates: QcmItem[], limit: number): QcmItem[] => {
-    let pool = candidates;
-    for (;;) {
-      const picked = selectWithinTrivialBudget(current, pool, limit);
-      const over = capDrops(picked, caps, (it) => [it.notion]).map((i) => picked[i]).filter((it) => !current.includes(it));
-      if (!over.length) return pool;
-      pool = pool.filter((it) => !over.includes(it));
-    }
-  };
-  const selectCapped = (current: QcmItem[], candidates: QcmItem[], limit: number): QcmItem[] =>
-    selectWithinTrivialBudget(current, cappedPool(current, candidates, limit), limit);
-  /**
-   * DOUBLONS D'UN ENSEMBLE DE QCM — le contrôle du modèle (réponse logique comparée), puis les
-   * plafonds déterministes sur ce qui reste : notion du programme (sujet du lot, ou notion nommée
-   * par le contrôle) et notion de la bonne réponse. Job 23 : le contrôle du modèle seul, rattrapé
-   * en silence quand il échouait, avait laissé passer trois questions sur le biais de disponibilité.
-   * Un échec du modèle est réessayé une fois puis dit ; les plafonds s'appliquent dans tous les cas.
-   */
-  const findDuplicates = async (items: QcmItem[], strictMode: boolean) => {
-    let r: Awaited<ReturnType<typeof duplicateItems>> | null = null;
-    for (let attempt = 0; attempt < 2 && !r; attempt++) {
+  const designLots = async (group: Batch[], done: (QcmItem[] | null)[], onLot: () => Promise<void> = async () => {}) => {
+    const todo = group.map((_, k) => k).filter((k) => !done[k]);
+    progress.done("QCM", group.length - todo.length);
+    await runPool(todo, batchConcurrency(), async (k) => {
+      const bt = group[k];
       try {
-        r = await duplicateItems(items, { strict: strictMode, previous: recent.map((x) => x.stem) });
+        done[k] = tagged(bt, await generateQcmBatch(bt.topics, bt.topics.length, step, undefined, bt.guidance, { ...shared, molds: bt.molds }));
       } catch (e) {
-        const code = llmErrorCode(e);
-        step(`Contrôle des doublons en échec (${llmFailureReason(e).split(/\.\s/u)[0]})${attempt || (code && HARD_STOP_CODES.has(code)) ? "" : " → nouvel essai"}`, 80);
-        if (code && HARD_STOP_CODES.has(code)) break;
+        lastError = e;
+        done[k] = null;
+        step(`Lot QCM échoué (${(e as Error).message.slice(0, 80)})`, 0);
       }
-    }
-    const notions = r?.notions ?? items.map(() => "");
-    // Même fait testable (lib/qcm-facts) : doublon certain, sans modèle ; la première question reste.
-    const sameFact = new Set(factDuplicates(items));
-    if (sameFact.size) step(`Doublons : ${sameFact.size} question(s) sur un fait déjà testé par une autre question`, 80);
-    const llmDrop = new Set(r?.drop ?? []);
-    const llmIntra = new Set(r?.intra ?? []);
-    const rest = items.map((_, i) => i).filter((i) => !llmDrop.has(i) && !sameFact.has(i));
-    const capped = capDrops(rest.map((i) => items[i]), caps, (it, k) => [it.notion, notions[rest[k]]]).map((k) => rest[k]);
-    if (!r) step(`Doublons : contrôle du modèle indisponible, plafonds par notion appliqués seuls (${capped.length} retrait(s))`, 80);
-    else if (capped.length) step(`Doublons : ${capped.length} question(s) au-delà du plafond par notion (${caps.perNotion} par notion du programme, 1 par notion de bonne réponse)`, 80);
-    return {
-      drop: [...new Set([...llmDrop, ...sameFact, ...capped])].sort((a, b) => a - b),
-      /** Retirés pour un doublon dans l'examen (même fait, modèle ou plafond), pas pour une seule reprise d'un examen précédent. */
-      intra: [...new Set([...llmIntra, ...sameFact, ...capped])].sort((a, b) => a - b),
-      /**
-       * Doublons vus par le seul modèle entre deux questions de faits DISTINCTS : remplacés par un
-       * fait de la réserve, mais repris si l'examen resterait incomplet — le filet ne fait plus
-       * tomber le compte ; le même fait et les plafonds, eux, ne reviennent jamais.
-       */
-      soft: factMode ? [...llmIntra].filter((i) => !!items[i]?.factId && !sameFact.has(i) && !capped.includes(i)).sort((a, b) => a - b) : [],
-      repeats: r?.repeats ?? [],
-      notions,
-      angles: r?.angles ?? items.map(() => ""),
+      progress.done("QCM");
+      await onLot();
+    });
+    return done;
+  };
+  /**
+   * Vérifie à l'aveugle les QCM conçus (appels groupés) et garde ceux dont la clé est confirmée,
+   * sans rejet. Ceux qui peuvent entrer dans l'examen (`current` : déjà retenus) voient leurs
+   * distracteurs triviaux réparés en UN appel, énoncé et clé gardés ; la version réparée n'est pas
+   * revérifiée ici, la revue finale l'audite (clé unique comprise). Rend les candidats, la sélection
+   * en tête, et les sujets restés sans question : lot en échec (le sujet reste) ou question écartée.
+   */
+  const vet = async (group: Batch[], done: (QcmItem[] | null)[], current: QcmItem[]) => {
+    const designed = done.flatMap((d) => d ?? []);
+    await verifyGrouped(designed);
+    // Une question faible (réussie avec les seuls noms des notions, réponse trahie par sa longueur,
+    // défaut relevé par le correcteur) n'est plus régénérée : elle passe après les questions propres.
+    const weak = (it: QcmItem) => !!weaknessOf({ ...it, trivialDistractors: null });
+    const verified = designed.filter((it) => it.verified === 1 && !it.rejected);
+    qualityDropped += designed.length - verified.length;
+    // Un fait neuf demandé, mais la question rattachée à un fait déjà posé aux examens précédents
+    // (lib/qcm-facts.attributedFact) : une reprise. Gardée en réserve, son sujet passe à un autre fait.
+    const reprised = (bt: Batch, it: QcmItem) => {
+      const asked = bt.topics[it.slot ?? -1]?.fact;
+      return factMode && !!asked && !!it.factId && it.factId !== asked.id && askedBefore.has(it.factId) && !askedBefore.has(asked.id);
     };
+    const held = new Set(group.flatMap((bt, k) => (done[k] ?? []).filter((it) => verified.includes(it) && reprised(bt, it))));
+    for (const it of held) repeatFallback.set(it.stem, it);
+    const ok = verified.filter((it) => !held.has(it)).sort((a, b) => Number(weak(a)) - Number(weak(b)));
+    const missing: QcmMissingState[] = [];
+    group.forEach((bt, k) => {
+      const slots = (done[k] ?? []).map((it, n) => ({ it, s: it.slot ?? n }));
+      const got = new Set(slots.filter(({ it }) => ok.includes(it)).map(({ s }) => s));
+      // Écartée par la vérification : son sujet cède la place. Jamais conçue (lot en échec, item mal
+      // formé ou manquant) : son sujet est redemandé tel quel.
+      const designedSlots = new Set(slots.map(({ s }) => s));
+      bt.topics.forEach((topic, j) => { if (!got.has(j)) missing.push({ topic, mold: bt.molds[j] ?? null, rejected: designedSlots.has(j) }); });
+    });
+    const picked = selectCapped(current, ok, count).filter((it) => !current.includes(it));
+    const flagged = picked.filter((it) => !!it.trivialDistractors?.length);
+    const repaired = (await Promise.all(chunked(flagged).map((c) => replaceTrivialDistractorsBatch(c, step, shared.language).catch((e) => {
+      step(`Remplacement des distracteurs ignoré (${(e as Error).message.slice(0, 50)})`, 0);
+      return c;
+    })))).flat();
+    const byStem = new Map(flagged.map((it, k) => [it.stem, repaired[k] ?? it]));
+    const candidates = [...picked, ...ok.filter((it) => !picked.includes(it))].map((it) => byStem.get(it.stem) ?? it);
+    return { candidates, missing };
   };
-
-  // NOMBRE GARANTI : les sujets restés sans QCM (lot échoué, items écartés) sont regroupés en
-  // nouveaux lots, au plus TOPUP_ROUNDS rondes. Un sujet dont la question a été ÉCARTÉE (hors
-  // cours, hors matière, clé contestée…) cède sa place à une notion de réserve : redemandé tel
-  // quel, il rendait le même rejet (HUM-285, job 12 du 13/11 : 10 QCM sur 20). Un lot en échec
-  // (erreur du fournisseur) ou un item mal formé garde son sujet. En dessous malgré tout, l'examen le dit
-  // (requested) et le job rembourse au prorata.
-  const all: QcmItem[] = [];
-  const verifiedCandidates: QcmItem[] = [];
-  let pending = batches;
-  let extraBudget = EXTRA_BATCHES * batches.length;
-  // REPRISE : les QCM acquis (construits + vérifiés) reviennent sans aucun appel, la réserve de
-  // notions déjà consommée ne resert pas, et la conception repart du groupe de lots suivant.
-  let firstRound = 0;
-  let resumeAt = 0;
-  let resumeMissing: QcmMissingState[] = [];
-  const restorePool = (candidates: QcmItem[], selected: string[]) => {
-    verifiedCandidates.splice(0, verifiedCandidates.length, ...withFigurePresent(candidates, examsDir()));
-    const byStem = new Map(verifiedCandidates.map((c) => [c.stem, c]));
-    all.splice(0, all.length, ...selected.flatMap((st) => byStem.get(st) ?? []));
-  };
-  const restoreReserve = (r: QcmReserveState) => {
-    nextSpare = r.nextSpare;
-    used.clear();
-    for (const label of r.used) used.add(label);
-    for (const id of r.usedFacts ?? []) usedFacts.add(id);
-  };
-  if (ckFinal) {
-    pending = [];
-    // Enregistré : ses figures portent déjà leur nom définitif. Sinon, une figure perdue écarte son QCM.
-    all.push(...(ckFinal.examId != null ? ckFinal.items : withFigurePresent(ckFinal.items, examsDir())));
-    progress.done("QCM", batches.length);
-  } else if (ckAudited) {
-    pending = [];
-    restorePool(ckAudited.candidates, ckAudited.selected);
-    restoreReserve(ckAudited);
-    qualityDropped = ckAudited.qualityDropped;
-    progress.done("QCM", batches.length);
-  } else if (ckLoop) {
-    pending = ckLoop.pending;
-    firstRound = ckLoop.round;
-    resumeAt = ckLoop.next;
-    resumeMissing = ckLoop.missing;
-    extraBudget = ckLoop.extraBudget;
-    qualityDropped = ckLoop.qualityDropped;
-    restorePool(ckLoop.candidates, ckLoop.selected);
-    restoreReserve(ckLoop);
-    if (firstRound > 0) {
-      progress.done("QCM", batches.length);
-      progress.add("QCM", pending.length);
-    }
-    progress.done("QCM", Math.min(resumeAt, pending.length));
-  }
-  if (ck) step(`Reprise après interruption : ${all.length} QCM déjà construits et vérifiés${openBySlot.size ? `, ${openBySlot.size} question(s) ouverte(s)` : ""} repris sans nouvel appel`, 8);
-  /** Point de reprise du comblement principal : prochain groupe `next` de la ronde `round`. */
-  const saveLoop = (round: number, next: number, missing: QcmMissingState[]) => {
-    ckLoop = frozen({ round, next, pending, missing, extraBudget, candidates: verifiedCandidates, selected: all.map((it) => it.stem), qualityDropped, nextSpare, used: [...used], usedFacts: [...usedFacts] });
-    return persist();
-  };
-  for (let round = firstRound; pending.length; round++) {
-    const missing: QcmMissingState[] = round === firstRound ? resumeMissing : [];
-    // Lots QCM menés en même temps (QCM_BATCH_CONCURRENCY, défaut 8) ; le limiteur global des appels
-    // (LLM_MAX_CONCURRENCY) reste la borne commune avec les questions ouvertes.
-    const width = batchConcurrency();
-    for (let b = round === firstRound ? resumeAt : 0; b < pending.length; b += width) {
-      const group = pending.slice(b, b + width);
-      const got = await runRound(group);
-      const incoming = got.flatMap((g) => g.items);
-      const state = updateVerifiedCandidates(verifiedCandidates, incoming, count);
-      verifiedCandidates.splice(0, verifiedCandidates.length, ...state.pool);
-      all.splice(0, all.length, ...state.selected);
-      // Les vraies pertes (rejets, doublons, complément final) gardent au moins un lot par lot prévu.
-      const overBudget = overTrivialBudget(all) && extraBudget > batches.length;
-      got.forEach((g, k) => {
-        qualityDropped += g.items.filter((it) => it.verified !== 1 || !!it.rejected).length;
-        if (g.error) lastError = g.error;
-        const bt = group[k];
-        const filled = new Set(g.items.filter((it) => all.includes(it)).map((it, n) => it.slot ?? n));
-        // Une question vérifiée mais écartée parce que son fait est déjà testé par une autre (le
-        // concepteur a bâti sa question sur le fait d'une autre) : son sujet passe à un fait de réserve.
-        const factHeld = (j: number) => factMode && g.items.some((it) => it.slot === j && !!it.factId && !all.includes(it) && all.some((x) => x.factId === it.factId));
-        bt.topics.forEach((topic, j) => { if (!filled.has(j)) missing.push({ topic, mold: bt.molds[j] ?? null, rejected: g.rejected.has(j) || factHeld(j) }); });
-        // Au-delà du budget de triviaux, un QCM gardé faute de mieux est recomblé sur le même sujet,
-        // son défaut à l'appui ; il reste candidat, une place n'est donc jamais perdue.
-        if (overBudget) {
-          for (const it of g.items) if (all.includes(it) && it.trivialDistractors?.length && it.slot != null) missing.push({ topic: bt.topics[it.slot], mold: bt.molds[it.slot] ?? null, rejected: false, why: `« ${sanitizeCorpus(it.stem).slice(0, 160)} » : ${sanitizeCorpus(weaknessOf(it) ?? "")}` });
-        }
-      });
-      step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
-      await saveLoop(round, b + width, missing);
-    }
-    // completeJson a déjà essayé trois fois chaque lot illisible. Si aucun lot n'a produit le
-    // moindre item et qu'une erreur LLM existe, répéter trois rondes identiques multiplie seulement
-    // les appels (12 au banc) ; les pertes de qualité, elles, n'ont pas `g.error` et restent comblées.
-    if ((!all.length && lastError) || !missing.length || (all.length >= count && !overTrivialBudget(all)) || round >= TOPUP_ROUNDS || extraBudget <= 0 || hardStop()) break;
-    // Sujets écartés → notions de réserve ; l'accent demandé par l'étudiant reste le sien.
-    const swappable = (m: (typeof missing)[number]) => m.rejected && m.topic.method !== FOCUS_METHOD;
-    const swaps = takeSpare(Math.min(missing.filter(swappable).length, extraBudget * BATCH));
-    let s = 0;
-    const slots = missing.map((m) => (swappable(m) && s < swaps.length ? { ...m, topic: swaps[s++] } : m));
-    pending = [];
-    for (let i = 0; i < slots.length && pending.length < extraBudget; i += BATCH) {
-      const slice = slots.slice(i, i + BATCH);
-      const fixes = slice.flatMap((m) => (m.why ? [`  - ${m.why}`] : []));
-      const guidance = fixes.length ? [TO_FIX, ...fixes].join("\n") : undefined;
-      pending.push({ topics: slice.map((m) => m.topic), molds: slice.map((m) => m.mold), guidance });
-    }
-    extraBudget -= pending.length;
-    progress.add("QCM", pending.length); // réessai ajouté : le temps restant peut remonter
-    step(`${count - all.length} QCM manquant(s) → ${pending.length} lot(s) de comblement${swaps.length ? ` (${swaps.length} sujet(s) écarté(s) remplacé(s) par une notion de réserve)` : ""}`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
-    await saveLoop(round + 1, 0, []);
-  }
-  // Le comblement principal peut consommer toute sa réserve avant que les doublons, impossibles à
-  // connaître à l'échelle de l'examen, soient audités. Leur remplacement a donc son propre budget
-  // borné : au plus deux fois les lots prévus, partagé avec le complément final.
-  let lateBudget = Math.max(3, batches.length * 2);
-  // Une passe de remplacement peut elle-même perdre des items aux contrôles qualité. Il faut alors
-  // recombler même si l'audit suivant ne voit plus de doublon, puis auditer ce nouveau lot. Le budget
-  // reste borné par la taille de l'examen et par la réserve de notions.
-  const finalRoundBudget = Math.max(DEDUP_ROUNDS, Math.ceil(count / BATCH) + 2);
-  let repairAfterDedup = false;
   /**
-   * Budget TEMPS de TOUT ce qui suit la première vérification à l'aveugle du comblement principal
-   * (QCM_FINAL_PHASE_BUDGET_MS, défaut 6 min), partagé avec le budget d'appels (lateBudget). Job 26
-   * bis (15/11/2026, 20/20 en 50 min, cible ≤ 35 min) : la déclaration vivait plus bas, APRÈS l'audit
-   * de sortie initial et sa réparation groupée des distracteurs — ces deux appels (jusqu'à `count`
-   * questions réparées, puis réauditées) n'étaient bornés par rien. Elle couvre maintenant aussi cet
-   * audit initial, et les étapes de la porte de sortie qui appellent le modèle (revérification à
-   * l'aveugle des questions sans verdict, réécriture des explications) sont désormais gardées par
-   * `finalPhaseExhausted()` elles aussi (plus bas) — seule la détection déterministe (plafonds par
-   * notion, nombre d'options, retrait d'un candidat déjà payé) reste inconditionnelle : elle ne coûte
-   * aucun appel et garantit qu'aucune question non vérifiée ni à clé fausse n'est jamais livrée, budget
-   * épuisé ou non. À épuisement, la meilleure version déjà vérifiée est gardée plutôt qu'une ronde de
-   * plus — le manque éventuel est remboursé au prorata (lib/jobs.ts, refundGeneration).
+   * Revue finale de candidats en UN appel (finalReview : audit et doublons). `current` : les
+   * questions déjà retenues et revues, données comme déjà posées — un candidat qui en reprend une
+   * part. Clé refusée ou hors cours, doublon, reprise d'un examen précédent, notion au-delà de son
+   * plafond : écarté pour de bon. Rend les candidats qui restent, dans leur ordre.
    */
-  const finalPhaseDeadline = Date.now() + finalPhaseBudgetMs();
-  // Étape honnête : au-delà, l'avancement reste à 99 % (lib/progress) ; l'étudiant lit ce qui se passe
-  // et combien de temps cela peut encore prendre, au lieu de « moins d'une minute » pendant 40 min.
-  if (!ckFinal) step(`Dernière vérification de l'examen (doublons, clés, distracteurs) : au plus ${Math.ceil(finalPhaseBudgetMs() / 60_000)} min de plus`, 80);
-  let finalPhaseBudgetLogged = false;
-  const finalPhaseExhausted = (): boolean => {
-    const over = lateBudget <= 0 || Date.now() >= finalPhaseDeadline;
-    if (over && !finalPhaseBudgetLogged) {
-      finalPhaseBudgetLogged = true;
-      step(`Dernière vérification : budget de la phase finale atteint, les QCM déjà vérifiés sont gardés tels quels`, 85);
-    }
-    return over;
+  const review = async (cands: QcmItem[], current: QcmItem[]): Promise<QcmItem[]> => {
+    if (!cands.length) return [];
+    const { audit, dup } = await finalReview(cands, { strict, previous: recent.map((x) => x.stem), current: current.map((it) => it.stem), step, facts: shared.facts });
+    const out = cands.map((it, i) => (audit ? audit[i] : it));
+    cands.forEach((it, i) => { if (!out[i]) auditRejected.add(it.stem); });
+    // Même fait testable (lib/qcm-facts) qu'une question déjà retenue ou qu'un candidat avant lui :
+    // doublon certain, sans modèle ; le premier reste.
+    const sameFact = new Set(factDuplicates([...current, ...cands]).filter((k) => k >= current.length).map((k) => k - current.length));
+    if (sameFact.size) step(`Doublons : ${sameFact.size} question(s) sur un fait déjà testé par une autre question`, 80);
+    // Doublon DANS l'examen : écarté pour de bon. Reprise d'un examen précédent : écartée, mais
+    // gardée en réserve (repeatFallback) si rien ne la remplace.
+    const intra = new Set(dup?.intra ?? []);
+    for (const i of dup?.repeats ?? []) { historicalRepeats.add(cands[i].stem); if (!intra.has(i) && !sameFact.has(i) && out[i]) repeatFallback.set(cands[i].stem, out[i]!); }
+    // Doublon vu par le seul modèle entre deux questions de faits DISTINCTS : remplacé si possible,
+    // mais repris si l'examen resterait incomplet (softFallback) — le filet ne fait plus tomber le
+    // compte ; le même fait et les plafonds, eux, ne reviennent jamais.
+    if (factMode) for (const i of intra) if (cands[i].factId && !sameFact.has(i) && out[i]) softFallback.set(cands[i].stem, out[i]!);
+    const dropped = new Set([...(dup?.drop ?? []), ...sameFact]);
+    for (const i of [...intra, ...sameFact]) auditDuplicates.add(cands[i].stem);
+    // Plafonds par notion sur l'ensemble (questions déjà retenues d'abord) : notion du programme
+    // (sujet du lot) et notion nommée par la revue — celle de leur propre revue pour les questions
+    // déjà retenues —, puis notion de la bonne réponse.
+    const rest = cands.map((_, i) => i).filter((i) => out[i] && !dropped.has(i));
+    const capped = capDrops([...current, ...rest.map((i) => out[i]!)], caps, (it, k) => [it.notion, k >= current.length ? dup?.notions[rest[k - current.length]] : reviewed.get(it.stem)?.notion])
+      .filter((k) => k >= current.length).map((k) => rest[k - current.length]);
+    for (const i of capped) { auditDuplicates.add(cands[i].stem); softFallback.delete(cands[i].stem); }
+    if (!dup) step(`Doublons : revue finale indisponible, plafonds par notion appliqués seuls (${capped.length} retrait(s))`, 80);
+    const refused = out.filter((x) => !x).length;
+    const duplicates = [...dropped].filter((i) => out[i]).length + capped.length;
+    if (refused || duplicates) step(`Revue finale : ${refused} QCM écarté(s) (clé ou hors cours), ${duplicates} doublon(s) ou au-delà du plafond par notion`, 80);
+    const keptIdx = rest.filter((i) => !capped.includes(i));
+    for (const i of keptIdx) if (dup?.notions[i]) reviewed.set(out[i]!.stem, { notion: dup.notions[i], angle: dup.angles[i] ?? "" });
+    const kept = keptIdx.map((i) => out[i]!);
+    // Le pool garde la version revue de chaque candidat.
+    const byStem = new Map(kept.map((it) => [it.stem, it]));
+    verifiedCandidates.splice(0, verifiedCandidates.length, ...verifiedCandidates.map((c) => byStem.get(c.stem) ?? c));
+    return kept;
   };
-  // Audit de sortie unique, calqué sur la rubrique du banc. Il porte sur tout le pool déjà payé :
-  // une clé fausse ou du hors-cours sont remplacés par un autre candidat sans nouvelle conception.
-  // Ce qui arrive après (remplacements de doublons, complément) est audité à la porte de sortie.
-  const auditedStems = new Set<string>(ckAudited?.auditedStems ?? []);
-  const auditRejected = new Set<string>(ckAudited?.auditRejected ?? []);
-  // Déjà audité avant une coupure : le pool repris porte ses verdicts.
-  if (verifiedCandidates.length && !ckAudited) {
-    const auditPassed = await finalQualityAudit(verifiedCandidates, step, shared.facts);
-    // Plafonds par notion dès la sélection : seules les questions qui peuvent rester sont réparées.
-    const audited = cappedPool([], auditPassed, count);
-    let selected = selectWithinTrivialBudget([], audited, count);
-    const flagged = selected.filter((it) => !!it.trivialDistractors?.length);
-    // Les distracteurs relevés sont réparés en UN lot, puis SEULS les items réparés repassent
-    // l'audit : job 17 (14/11, HUM-285, 20 QCM → 35 min) le refaisait sur tout le pool, déjà
-    // audité une première fois juste au-dessus, même quand rien n'avait changé. Un item non
-    // réparé garde le verdict déjà rendu : son contenu est identique, le ré-auditer n'apprend rien.
-    // Budget de la phase finale déjà épuisé (reprise tardive, cours très chargé) : la réparation,
-    // optimisation de qualité et non une garantie, cède la place — les items gardent leur version
-    // auditée, jamais fausse ni non vérifiée.
-    let confirmed = audited;
-    if (flagged.length && !finalPhaseExhausted()) {
-      // Réparation en échec : les QCM gardent leur version auditée (une réponse illisible ici
-      // perdait l'examen entier).
-      const repaired = await replaceTrivialDistractorsBatch(flagged, step, shared.language).catch((e) => {
-        step(`Remplacement des distracteurs ignoré (${(e as Error).message.slice(0, 50)})`, 79);
-        return flagged;
-      });
-      // repaired[i] est l'item lui-même (même référence), inchangé, si rien n'avait de distracteur
-      // réparable pour ce QCM : seuls ceux VRAIMENT modifiés ont besoin d'un nouveau verdict.
-      const changedStems = new Set(flagged.filter((it, i) => repaired[i] && repaired[i] !== it).map((it) => it.stem));
-      const byStem = new Map(flagged.map((it, i) => [it.stem, repaired[i] ?? it]));
-      selected = selected.map((it) => byStem.get(it.stem) ?? it);
-      if (changedStems.size) {
-        const toReaudit = selected.filter((it) => changedStems.has(it.stem));
-        const reaudited = await finalQualityAudit(toReaudit, step, shared.facts);
-        const byReaudited = new Map(reaudited.map((it) => [it.stem, it]));
-        const beforeRepair = new Map(audited.map((it) => [it.stem, it]));
-        // Réparé mais écarté par le nouvel audit, ou resté sans verdict (audit en échec) : la version
-        // d'avant la réparation, déjà auditée, revient. Job 23 (Q10) : la version réparée, jamais
-        // revérifiée, était livrée « not_verified ».
-        confirmed = [
-          ...audited.filter((it) => !changedStems.has(it.stem)),
-          ...toReaudit.map((it) => {
-            const r = byReaudited.get(it.stem);
-            return r?.verified === 1 ? r : beforeRepair.get(it.stem) ?? it;
-          }),
-        ];
-      }
-    }
-    all.splice(0, all.length, ...selectCapped([], confirmed, count));
-    // Le pool garde la version auditée de chaque candidat ; un candidat écarté par l'audit (clé
-    // contestée, hors cours) ne revient plus comme remplaçant.
-    const confirmedByStem = new Map(confirmed.map((it) => [it.stem, it]));
-    const passedByStem = new Map(auditPassed.map((it) => [it.stem, it]));
-    for (const c of verifiedCandidates) {
-      auditedStems.add(c.stem);
-      if (!passedByStem.has(c.stem)) auditRejected.add(c.stem);
-    }
-    verifiedCandidates.splice(0, verifiedCandidates.length, ...verifiedCandidates.map((c) => confirmedByStem.get(c.stem) ?? passedByStem.get(c.stem) ?? c));
-    ckAudited = frozen({ candidates: verifiedCandidates, selected: all.map((it) => it.stem), auditedStems: [...auditedStems], auditRejected: [...auditRejected], qualityDropped, nextSpare, used: [...used], usedFacts: [...usedFacts] });
-    await persist();
-  }
-  // count>0 mais 0 QCM produit = tous les lots ont échoué → erreur claire (sauf drill 0 QCM + ouvertes).
-  // H — DOUBLONS À L'ÉCHELLE DE L'EXAMEN (mock 4 de CS-290 : deux QCM sur le paradoxe de Simpson,
-  // deux sur la même logique OR) : un contrôle par le modèle, car deux libellés différents ne se
-  // rapprochent pas mot à mot ; le second de chaque paire est remplacé par une notion de réserve.
-  const acquiredBeforeDedup = all.slice();
-  const historicalRepeats = new Set<string>();
-  const auditDuplicates = new Set<string>();
   /**
-   * REPRISES D'UN EXAMEN PRÉCÉDENT GARDÉES EN RÉSERVE — job 26 (15/11/2026, HUM-285, 11e examen du
-   * cours) : 9 QCM livrés sur 20. Depuis 5aa29e8, le contrôle range dans « repeats » toute question
-   * qui reprend le même fait ou la même règle qu'une question des examens précédents, même
-   * reformulée ; sur un cours dont chaque notion a déjà été posée plusieurs fois, c'est une bonne
-   * part de l'examen, et ses remplaçants le sont à leur tour. Une reprise était retirée sans retour
-   * possible (ni candidat de remplacement, ni filet final) : le manque s'accumulait, ronde après
-   * ronde. Une reprise reste remplacée quand un remplaçant passe ; sinon, déjà vérifiée et auditée,
-   * elle reprend sa place plutôt que de laisser un trou. Un doublon DANS l'examen, lui, ne revient jamais.
+   * COMBLEMENT, une ronde au plus — il manque des questions après la revue (lot en échec, rejets
+   * au-delà de la marge, doublons). Un sujet de lot en échec est redemandé tel quel ; une question
+   * écartée cède sa place à une notion de réserve (HUM-285, job 12 du 13/11 : un sujet hors cours
+   * redemandé tel quel rendait le même rejet) ; à défaut, les notions les moins posées, sous un
+   * angle VRAIMENT distinct. En dessous malgré tout, l'examen le dit (requested) et le job
+   * rembourse au prorata.
    */
-  /** Doublons du seul modèle entre faits distincts (findDuplicates `soft`) : repris faute de remplaçant. */
-  const softFallback = new Map<string, QcmItem>();
-  /** Classe les retraits d'un contrôle de doublons : doublon dans l'examen, ou seule reprise d'un examen précédent. */
-  const recordDuplicates = (items: QcmItem[], intra: number[], repeats: number[], soft: number[] = []) => {
-    intra.forEach((i) => { if (items[i]) auditDuplicates.add(items[i].stem); });
-    soft.forEach((i) => { if (items[i]) softFallback.set(items[i].stem, items[i]); });
-    for (const i of repeats) {
-      const it = items[i];
-      if (!it) continue;
-      historicalRepeats.add(it.stem);
-      if (!intra.includes(i)) repeatFallback.set(it.stem, it);
-    }
-  };
-  /** Consigne d'un lot de remplacement par faits : les faits que l'examen teste déjà. */
+  /** Consigne d'un lot de comblement par faits : les faits que l'examen teste déjà. */
   const factGuidance = (): string | undefined => {
     const facts = all.flatMap((it) => (it.factId ? plan.facts?.filter((f) => f.id === it.factId) ?? [] : []));
     return facts.length
       ? `FAITS DÉJÀ TESTÉS par d'autres questions de cet examen — n'en teste AUCUN, même sous un autre scénario ou un autre décor :\n${facts.map((f) => `  · [${f.id}] ${sanitizeCorpus(f.statement).slice(0, 160)}`).join("\n")}`
       : undefined;
   };
-  // Un ensemble repris après la porte de sortie (`final`) l'a déjà franchie : ni doublons ni complément à refaire.
-  for (let round = 0; !ckFinal && round <= finalRoundBudget && all.length >= 2; round++) {
-    const { drop, intra, soft, repeats, notions, angles } = await findDuplicates(all, strict);
-    // Cette seconde enveloppe ne prolonge que les pertes qu'elle a elle-même causées. Un examen
-    // déjà incomplet après le budget de comblement principal conserve sa borne historique.
-    if (!drop.length && !repairAfterDedup) break;
-    if (drop.length) repairAfterDedup = true;
-    const kept = all.filter((_, i) => !drop.includes(i));
-    recordDuplicates(all, intra, repeats, soft);
-    const keptIdx = all.map((_, i) => i).filter((i) => !drop.includes(i));
-    all.splice(0, all.length, ...kept);
-    // Les candidats déjà payés mais écartés par le budget global sont essayés avant un nouvel
-    // appel. Une reprise d'un examen précédent, elle, ne peut jamais revenir par ce chemin.
-    const present = new Set(all.map((it) => it.stem));
-    const alternatives = verifiedCandidates.filter((it) => !present.has(it.stem) && !auditDuplicates.has(it.stem) && !auditRejected.has(it.stem) && !historicalRepeats.has(it.stem));
-    all.splice(0, all.length, ...selectCapped(all, alternatives, count));
-    const missing = count - all.length;
-    if (missing <= 0) break;
-    const spare = round < finalRoundBudget ? takeSpare(missing) : [];
-    const angle = spare.length < missing;
-    // Une notion reprise sous un autre angle ne dépasse jamais son plafond.
-    if (angle) spare.push(...repeatSlots(missing - spare.length, spare));
-    if (!spare.length || finalPhaseExhausted()) {
-      // Dernier contrôle, réserve ou budget (temps/appels) épuisé : le manque reste explicite et sera remboursé.
-      if (drop.length) step(`${drop.length} QCM en doublon retiré(s) (${factMode ? "même fait ou même règle" : "même notion"} qu'une autre question), sans remplacement`, 80);
-      break;
-    }
-    progress.add("QCM"); // un lot de remplacement : réessai ajouté
-    step(drop.length
-      ? `${drop.length} QCM en doublon retiré(s) (${factMode ? "même fait ou même règle" : "même notion"} qu'une autre question) → remplacement`
-      : `${missing} QCM perdu(s) pendant le remplacement → recomblement`, 80);
-    // Le lot de remplacement sait ce que l'examen pose déjà : en mode strict, aucune de ces notions ;
-    // sinon, une notion reprise doit l'être sous un angle vraiment distinct.
-    const taken = keptIdx.filter((i) => notions[i]);
-    const guidance = factMode && !angle ? factGuidance() : !taken.length ? undefined : strict && !angle
-      ? `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen — n'en reprends AUCUNE, même sous un autre angle : ${[...new Set(taken.map((i) => sanitizeCorpus(notions[i]).slice(0, 80)))].join(" · ")}.`
-      : `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen, avec leur angle — si tu reprends l'une d'elles, teste un angle vraiment distinct : ${taken.map((i) => `${sanitizeCorpus(notions[i]).slice(0, 60)} (${sanitizeCorpus(angles[i] || "?").slice(0, 60)})`).join(" · ")}.`;
-    const replacement: Batch[] = [];
-    for (let i = 0; i < spare.length && replacement.length < lateBudget; i += BATCH) {
-      const slice = spare.slice(i, i + BATCH);
-      replacement.push({ topics: slice, molds: slice.map(() => null), guidance });
-    }
-    lateBudget -= replacement.length;
-    for (const got of await runRound(replacement)) {
-      if (got.error) lastError = got.error;
-      all.splice(0, all.length, ...selectCapped(all, got.items, count));
-    }
-  }
+  const topUp = async (missing: QcmMissingState[]) => {
+    const short = count - all.length;
+    if (short <= 0 || hardStop() || (!all.length && lastError)) return;
+    const want = short + spareMargin(short);
+    const retry: Slot[] = missing.filter((m) => !m.rejected || m.topic.method === FOCUS_METHOD).slice(0, want).map((m) => ({ topic: m.topic, mold: m.mold }));
+    const spare = takeSpare(want - retry.length);
+    const angle = retry.length + spare.length < short;
+    const slots: Slot[] = [...retry, ...spare.map((topic) => ({ topic, mold: null }))];
+    if (angle) slots.push(...repeatSlots(want - slots.length, slots.map((s) => s.topic)).map((topic) => ({ topic, mold: null })));
+    // Toutes les notions à leur plafond et plus de réserve : le manque reste dit et remboursé.
+    if (!slots.length) return;
+    // Le lot sait ce que l'examen pose déjà, sous les noms donnés par la revue (le libellé du
+    // programme à défaut) : en mode strict, aucune de ces notions ; sinon un angle vraiment distinct.
+    const known = all.map((it) => reviewed.get(it.stem) ?? { notion: it.notion ?? it.topic ?? "", angle: "" }).filter((k) => k.notion);
+    const guidance = factMode && !angle ? factGuidance() : !known.length ? undefined : strict && !angle
+      ? `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen — n'en reprends AUCUNE, même sous un autre angle : ${[...new Set(known.map((k) => sanitizeCorpus(k.notion).slice(0, 80)))].join(" · ")}.`
+      : `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen, avec leur angle — si tu reprends l'une d'elles, teste un angle vraiment distinct (un autre fait, une autre condition, une autre étude), jamais la même question reformulée : ${known.map((k) => `${sanitizeCorpus(k.notion).slice(0, 60)} (${sanitizeCorpus(k.angle || "?").slice(0, 60)})`).join(" · ")}.`;
+    const extra = toLots(slots, guidance);
+    progress.add("QCM", extra.length + 2); // ronde ajoutée : le temps restant peut remonter
+    step(`${short} QCM manquant(s) → ${extra.length} lot(s) de comblement${angle ? " (notions reprises sous un autre angle)" : ""}`, 80);
+    const done = await designLots(extra, []);
+    const { candidates } = await vet(extra, done, all);
+    verifiedCandidates.push(...candidates);
+    progress.done("QCM");
+    const passed = await review(candidates, all);
+    progress.done("QCM");
+    all.splice(0, all.length, ...selectCapped(all, passed, count));
+  };
+  /**
+   * DISTRACTEURS ENCORE ÉLIMINABLES — la revue relève un remplaçant sur deux encore éliminable
+   * (banc HUM-285 du 15/11), et deux options qui nomment la même notion trahissent la réponse (job
+   * 23, Q9). Au-delà du budget de 10 % de distracteurs triviaux, ou dès qu'une option se répète :
+   * UNE seconde réparation, revérifiée à l'aveugle en UN appel ; elle ne remplace que si elle est
+   * confirmée et meilleure. Le budget dépassé ne relance plus de lots de conception : une question
+   * imparfaite, vérifiée, vaut mieux qu'une place remboursée.
+   */
+  const repairResidue = async () => {
+    const over = overTrivialBudget(all);
+    const flagged = all.filter((it) => duplicateOptionIndices(it.options, it.correct).length || (over && !!it.trivialDistractors?.length));
+    if (!flagged.length) return;
+    const sent = flagged.map((it) => {
+      const d = duplicateOptionIndices(it.options, it.correct);
+      return { ...it, duplicateOptions: d, trivialDistractors: [...new Set([...(it.trivialDistractors ?? []), ...d])] };
+    });
+    const repaired = (await Promise.all(chunked(sent).map((c) => replaceTrivialDistractorsBatch(c, step, shared.language).catch(() => c)))).flat();
+    const changed = repaired.filter((r, k) => r !== sent[k]);
+    if (changed.length) await verifyGrouped(changed);
+    let fixed = 0;
+    flagged.forEach((it, k) => {
+      const r = repaired[k];
+      if (!r || r === sent[k] || r.verified !== 1 || !!r.rejected || duplicateOptionIndices(r.options, r.correct).length) return;
+      if (!duplicateOptionIndices(it.options, it.correct).length && (r.trivialDistractors?.length ?? 0) >= (it.trivialDistractors?.length ?? 0)) return;
+      all[all.indexOf(it)] = r;
+      fixed++;
+    });
+    step(`Contrôle final : ${flagged.length} QCM à distracteurs encore éliminables ou options répétées → ${fixed} corrigé(s), revérifiés à l'aveugle`, 81);
+  };
+  /** Le fait de `it` est-il déjà testé par une question de l'examen ? */
+  const factTaken = (it: QcmItem) => !!it.factId && all.some((x) => x !== it && x.factId === it.factId);
   /** Candidats vérifiés, déjà payés, absents de l'examen et jamais reconnus comme doublons. */
   const spareCandidates = () => {
     const present = new Set(all.map((it) => it.stem));
@@ -2484,34 +2149,25 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     if (drop) all.splice(i, 1);
     return false;
   };
-  const exitGate = async () => {
-    // 0. Questions arrivées après l'audit final (remplacements de doublons, complément) : même audit,
-    // une clé contestée ou du hors-cours cède sa place à un candidat payé déjà audité, ou part.
-    const late = all.filter((it) => !auditedStems.has(it.stem));
-    const lateTrivial = new Set<string>();
-    // Budget de la phase finale épuisé : cet audit supplémentaire (hors-cours, distracteurs
-    // éliminables) cède la place, les questions tardives gardent la vérification à l'aveugle
-    // déjà rendue — jamais de clé fausse, puisque rien d'audité ici ne change ce verdict.
-    if (late.length && finalPhaseExhausted()) {
-      for (const it of late) auditedStems.add(it.stem);
-    } else if (late.length) {
-      const passed = new Map((await finalQualityAudit(late, step, shared.facts)).map((it) => [it.stem, it]));
-      let out = 0;
-      for (const it of late) {
-        auditedStems.add(it.stem);
-        const r = passed.get(it.stem);
-        if (r) {
-          all[all.indexOf(it)] = r;
-          if (r.trivialDistractors?.length) lateTrivial.add(r.stem);
-          continue;
-        }
-        auditRejected.add(it.stem);
-        swapOut(it, true);
-        out++;
-      }
-      if (out) step(`Contrôle final : ${out} QCM tardif(s) écarté(s) par l'audit (clé ou hors cours) → remplacé(s) ou retiré(s)`, 81);
+  /**
+   * Budget TEMPS de la phase finale (finalPhaseBudgetMs), armé juste avant la revue finale : à
+   * épuisement, plus de ronde de comblement ni de réparation, et la porte de sortie n'appelle plus
+   * le modèle (revérification, explications) — la meilleure version déjà vérifiée est gardée, le
+   * manque éventuel est remboursé au prorata (lib/jobs.ts, refundGeneration). Seuls les contrôles
+   * déterministes de la porte de sortie restent inconditionnels.
+   */
+  let finalPhaseDeadline = Number.POSITIVE_INFINITY;
+  let finalPhaseBudgetLogged = false;
+  const finalPhaseExhausted = (): boolean => {
+    const over = Date.now() >= finalPhaseDeadline;
+    if (over && !finalPhaseBudgetLogged) {
+      finalPhaseBudgetLogged = true;
+      step(`Dernière vérification : budget de la phase finale atteint, les QCM déjà vérifiés sont gardés tels quels`, 85);
     }
-    // 0 bis. Nombre d'options, sans appel au modèle : une question à réponse unique a exactement
+    return over;
+  };
+  const exitGate = async () => {
+    // 0. Nombre d'options, sans appel au modèle : une question à réponse unique a exactement
     // SCQ_OPTIONS options, quel que soit son chemin (reprise d'un point de reprise compris).
     const misshapen = all.filter((it) => !optionCountFits(it.type, it.options.length));
     if (misshapen.length) {
@@ -2526,30 +2182,12 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       all.splice(0, all.length, ...selectCapped(all, spareCandidates(), count));
       step(`Contrôle final : ${over.length} QCM au-delà du plafond par notion retiré(s)`, 81);
     }
-    // 2. Deux options qui nomment la même notion (ou distracteurs éliminables relevés par l'audit
-    // tardif) : la seconde est remplacée (énoncé et clé gardés), la question revérifiée à l'aveugle ;
-    // UNE régénération par question dans cette phase finale (job 26, 15/11), puis un autre candidat
-    // payé prend sa place ou, à défaut, la question reste gardée telle que vérifiée (manque remboursé).
-    const repeated = all.filter((it) => duplicateOptionIndices(it.options, it.correct).length || lateTrivial.has(it.stem));
+    // 2. Deux options qui nomment encore la même notion après la seconde réparation : un autre
+    // candidat payé prend sa place, sinon la question reste (signalée au journal).
+    const repeated = all.filter((it) => duplicateOptionIndices(it.options, it.correct).length);
     if (repeated.length) {
-      let left = repeated;
-      for (let attempt = 0; attempt < 1 && left.length && !finalPhaseExhausted(); attempt++) {
-        const sent = left.map((it) => {
-          const d = duplicateOptionIndices(it.options, it.correct);
-          return { ...it, duplicateOptions: d, trivialDistractors: [...new Set([...(it.trivialDistractors ?? []), ...d])] };
-        });
-        const repaired = await replaceTrivialDistractorsBatch(sent, step, shared.language).catch(() => sent);
-        const changed = repaired.filter((r, k) => r !== sent[k]);
-        if (changed.length) await verifyGrouped(changed);
-        left = left.filter((it, k) => {
-          const r = repaired[k];
-          if (r === sent[k] || r.verified !== 1 || !!r.rejected || duplicateOptionIndices(r.options, r.correct).length) return true;
-          all[all.indexOf(it)] = r;
-          return false;
-        });
-      }
-      const kept = left.filter((it) => !swapOut(it, false)).length;
-      step(`Contrôle final : ${repeated.length} QCM à options répétées ou éliminables → ${repeated.length - kept} corrigé(s)${kept ? `, ${kept} gardé(s) faute de remplaçant vérifié` : ""}`, 81);
+      const kept = repeated.filter((it) => !swapOut(it, false)).length;
+      step(`Contrôle final : ${repeated.length} QCM à options répétées → ${repeated.length - kept} remplacé(s)${kept ? `, ${kept} gardé(s) faute de remplaçant vérifié` : ""}`, 81);
     }
     // 3. Jamais de « not_verified » quand la vérification est possible : une question restée sans
     // verdict est vérifiée à l'aveugle ; rejetée, elle cède sa place à un candidat ou part ; correcteur
@@ -2569,29 +2207,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // 4. Explications : réfutent-elles exactement les options proposées ? Contrôle sans modèle, puis
     // réécriture sur les options réelles ; à défaut, l'explication est réduite à la justification de la clé.
     // Optimisation de qualité, pas une garantie : elle cède la place au budget de la phase finale.
-    // Justification structurée (lib/qcm-rationale) : contrôle de la STRUCTURE, sans heuristique de
-    // texte — une raison par distracteur réel, aucune orpheline ; les seules cases vides (option
-    // remplacée sans raison rendue, raison effacée par le filet) sont écrites en UN appel groupé.
-    // L'explication est ensuite réassemblée depuis les options réelles : rien d'autre n'y entre.
-    const gaps = finalPhaseExhausted() ? [] : all.filter((it) => !!it.rationale && !rationaleCheck(it.rationale, it.options.length, it.correct).ok);
-    const filling = gaps.length
-      ? coursePassages([...new Set(gaps.map((it) => it.topic).filter(Boolean))]).catch(() => []).then((passages) => writeJustifications(gaps.map((it): JustificationTarget => {
-        const c = rationaleCheck(it.rationale, it.options.length, it.correct);
-        return { ...it, key: it.rationale!.key, wrong: it.rationale!.wrong, want: { key: !c.key, options: c.missing } };
-      }), languageName(shared.language ?? examLanguageFor(currentCourse()))[1], passages))
-      : Promise.resolve([]);
-    const flagged = finalPhaseExhausted() ? [] : all.filter((it) => !it.rationale).map((it) => ({ it, issue: explanationIssues(it.explanation ?? "", it.options, it.correct, it.stem) })).filter((x) => !!x.issue);
-    const filled = await filling;
-    if (gaps.length) {
-      let complete = 0;
-      gaps.forEach((it, k) => {
-        const c = rationaleCheck(it.rationale, it.options.length, it.correct);
-        it.rationale = cleanRationale(fillRationale(it.rationale!, filled[k], { key: !c.key, options: c.missing }, it.options.length, it.correct), it.options, it.correct, it.stem);
-        syncExplanation(it);
-        if (rationaleCheck(it.rationale, it.options.length, it.correct).ok) complete++;
-      });
-      step(`Contrôle final : ${gaps.length} justification(s) incomplète(s) → ${complete} complétée(s) case par case${complete < gaps.length ? `, ${gaps.length - complete} limitée(s) aux raisons écrites` : ""}`, 81);
-    }
+    const flagged = finalPhaseExhausted() ? [] : all.map((it) => ({ it, issue: explanationIssues(it.explanation ?? "", it.options, it.correct, it.stem) })).filter((x) => !!x.issue);
     if (flagged.length) {
       const passages = await coursePassages([...new Set(flagged.map((x) => x.it.topic).filter(Boolean))]).catch(() => []);
       const rewritten = await rewriteExplanationsOnOptions(
@@ -2627,183 +2243,96 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const programmeLabels = [...new Set([...cov, ...covAll].map((t) => t.label))];
     let relabeled = 0;
     for (const it of all) {
-      // Question bâtie sur un fait du cours : la notion de ce fait fait foi, sans heuristique.
-      labelFromFact(it);
-      if (it.focusSlot || !it.notion || factNotion(it.factId)) continue;
+      if (it.focusSlot || !it.notion) continue;
       const tested = [it.sourceFact, it.explanation, it.options[it.correct[0] ?? -1]].filter(Boolean).join(" ");
       if (!tested.trim() || !notionMismatch(it.notion, tested)) continue;
       const best = bestNotionMatch(tested, programmeLabels);
-      // L'étiquette AFFICHÉE suit (topic) : seule la notion interne changeait (job 25, Q5, resté affiché).
-      if (best && notionBase(best) !== notionBase(it.notion)) { it.notion = best; it.topic = best; relabeled++; }
+      if (best && notionBase(best) !== notionBase(it.notion)) { it.notion = best; relabeled++; }
     }
     if (relabeled) step(`Contrôle final : ${relabeled} étiquette(s) de notion recalée(s) sur le passage source de la clé`, 81);
   };
-  // COMPLÉMENT FINAL — encore en dessous du nombre demandé (réserve épuisée, doublons retirés,
-  // rejets répétés) : plusieurs rondes, dans ce qui reste du budget global de lots. Les notions de réserve
-  // d'abord ; à défaut, les notions les moins posées, sous un angle VRAIMENT distinct : le nombre
-  // demandé est tenu plutôt que remboursé. Après chaque retrait tardif, le manque est redemandé :
-  // le job 16 s'arrêtait après avoir retiré 3 questions de son unique complément et livrait 12/20.
-  const complement = async () => {
-    while (count - all.length > 0 && all.length && !finalPhaseExhausted() && !hardStop()) {
-      const short = count - all.length;
-      const slots = takeSpare(short);
-      const angle = slots.length < short;
-      slots.push(...repeatSlots(short - slots.length, slots));
-      // Toutes les notions à leur plafond et plus de réserve : le manque reste dit et remboursé.
-      if (!slots.length) break;
-      const tested = [...new Set(all.map((it) => sanitizeCorpus(it.topic).slice(0, 80)).filter(Boolean))].join(" · ");
-      const guidance = factMode && !angle
-        ? factGuidance()
-        : angle
-        ? `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen : ${tested}. Une notion reprise doit l'être sous un angle VRAIMENT distinct (un autre fait, une autre condition, une autre étude), jamais la même question reformulée.`
-        : `NOTIONS DÉJÀ TESTÉES par d'autres questions de cet examen — n'en reprends AUCUNE, même sous un autre angle : ${tested}.`;
-      const fill: Batch[] = [];
-      for (let i = 0; i < slots.length && fill.length < lateBudget; i += BATCH) {
-        const slice = slots.slice(i, i + BATCH);
-        fill.push({ topics: slice, molds: slice.map(() => null), guidance });
-      }
-      lateBudget -= fill.length;
-      progress.add("QCM", fill.length);
-      step(`${short} QCM manquant(s) → complément final, ${fill.length} lot(s)${angle ? " (notions reprises sous un autre angle)" : ""}`, 80);
-      const before = all.length;
-      for (const g of await runRound(fill)) {
-        if (g.error) lastError = g.error;
-        all.splice(0, all.length, ...selectCapped(all, g.items, count));
-      }
-      if (all.length > before) {
-        // Contrôle sur l'ENSEMBLE de l'examen, pas sur le seul complément : un doublon entre deux
-        // questions déjà acquises compte aussi.
-        const { drop, intra, soft, repeats } = await findDuplicates(all, strict && !angle);
-        if (drop.length) {
-          recordDuplicates(all, intra, repeats, soft);
-          all.splice(0, all.length, ...all.filter((_, i) => !drop.includes(i)));
-          step(`${drop.length} QCM en doublon retiré(s) après le complément → nouveau complément`, 80);
-        }
-      }
-    }
-  };
-  /** Le fait de `it` est-il déjà testé par une question de l'examen ? */
-  const factTaken = (it: QcmItem) => !!it.factId && all.some((x) => x !== it && x.factId === it.factId);
-  /**
-   * Toujours en dessous du nombre demandé : les questions que le seul contrôle du modèle avait
-   * retirées alors qu'elles testent un fait distinct reprennent les places vides (plafonds tenus,
-   * jamais un fait déjà testé). Le dédoublonnage par fait est structurel ; ce contrôle reste un filet
-   * qui remplace, mais ne fait plus tomber le compte.
-   */
-  const restoreSoft = (from: Iterable<QcmItem>): number => {
-    let back = 0;
-    for (const it of from) {
-      if (all.length >= count) break;
-      if (all.some((x) => x.stem === it.stem) || auditRejected.has(it.stem)) continue;
-      if (capDrops([...all, it], caps, (x) => [x.notion]).includes(all.length) || factTaken(it)) continue;
-      all.push(it);
-      back++;
-    }
-    if (back) step(`${back} question(s) d'un fait distinct gardée(s) faute de remplaçant, malgré un rapprochement signalé par le contrôle des doublons`, 80);
-    return back;
-  };
-  if (!ckFinal) await complement();
-  // Si un contrôle qualité autre que la déduplication a réduit le pool, on peut rétablir les
-  // questions acquises et vérifiées. Une question explicitement reconnue comme doublon ne revient
-  // jamais par ce filet : le banc de reproduction livrait ainsi 20/20 en réinjectant les répétitions
-  // qu'il venait de trouver, au lieu d'assumer un manque exceptionnel après épuisement du budget.
-  if (all.length < acquiredBeforeDedup.length) {
-    const present = new Set(all.map((it) => it.stem));
-    for (const it of acquiredBeforeDedup) {
-      if (all.length >= acquiredBeforeDedup.length) break;
-      if (present.has(it.stem) || historicalRepeats.has(it.stem) || auditDuplicates.has(it.stem)) continue;
-      // Ni au-delà du plafond par notion, ni sur un fait déjà testé.
-      if (capDrops([...all, it], caps, (x) => [x.notion]).includes(all.length) || factTaken(it)) continue;
-      all.push(it);
-      present.add(it.stem);
-    }
-    step(`Audit des doublons : ${all.length}/${acquiredBeforeDedup.length} QCM acquis conservés`, 80);
+  // REPRISE : ce qui est acquis revient sans aucun appel ; la conception ne refait que les lots
+  // manquants. Une figure perdue avec le conteneur écarte son QCM (son sujet est comblé).
+  const resumedDesign = (ckDesigned?.items ?? []).map((d) => (d ? withFigurePresent(d, examsDir()) : null));
+  let missing: QcmMissingState[] = [];
+  if (ckFinal) {
+    // Enregistré : ses figures portent déjà leur nom définitif.
+    all.push(...(ckFinal.examId != null ? ckFinal.items : withFigurePresent(ckFinal.items, examsDir())));
+    progress.done("QCM", qcmUnits);
+  } else if (ckVerified) {
+    verifiedCandidates.push(...withFigurePresent(ckVerified.candidates, examsDir()));
+    missing = ckVerified.missing;
+    qualityDropped = ckVerified.qualityDropped;
+    progress.done("QCM", qcmUnits - 1);
   }
-  // Toujours en dessous du nombre demandé : les reprises d'un examen précédent, déjà vérifiées et
-  // auditées, reprennent les places vides (plafonds par notion tenus) plutôt qu'un remboursement.
-  if (!ckFinal && all.length < count && repeatFallback.size) {
-    const present = new Set(all.map((it) => it.stem));
-    let back = 0;
-    for (const it of repeatFallback.values()) {
-      if (all.length >= count) break;
-      if (present.has(it.stem) || auditDuplicates.has(it.stem) || auditRejected.has(it.stem)) continue;
-      if (capDrops([...all, it], caps, (x) => [x.notion]).includes(all.length) || factTaken(it)) continue;
-      all.push(it);
-      present.add(it.stem);
-      back++;
+  if (ck) {
+    const acquired = ckFinal ? `${all.length} QCM prêts` : ckVerified ? `${verifiedCandidates.length} QCM déjà conçus et vérifiés` : `${resumedDesign.flat().filter(Boolean).length} QCM déjà conçus`;
+    step(`Reprise après interruption : ${acquired}${openBySlot.size ? `, ${openBySlot.size} question(s) ouverte(s)` : ""} repris sans nouvel appel`, 8);
+  }
+  if (!ckFinal) {
+    if (!ckVerified) {
+      const done = lots.map((_, k) => resumedDesign[k] ?? null);
+      const saveDesigned = () => {
+        ckDesigned = frozen({ lots, items: done, nextSpare, used: [...used], usedFacts: [...usedFacts] });
+        return persist();
+      };
+      await designLots(lots, done, saveDesigned);
+      const vetted = await vet(lots, done, []);
+      verifiedCandidates.push(...vetted.candidates);
+      missing = vetted.missing;
+      ckVerified = frozen({ candidates: verifiedCandidates, missing, qualityDropped, nextSpare, used: [...used], usedFacts: [...usedFacts] });
+      await persist();
+      progress.done("QCM");
     }
-    if (back) step(`${back} question(s) proche(s) d'un examen précédent gardée(s) faute de remplaçant : chaque notion du cours a déjà été posée`, 80);
-  }
-  if (!ckFinal) restoreSoft(softFallback.values());
-  // PORTE DE SORTIE — job 23 (14/11/2026, examen QCM #9) : livré avec trois questions sur
-  // le biais de disponibilité, neuf explications qui réfutaient des options absentes, deux options
-  // « biais de disponibilité » dans une même question et une question « not_verified ». Rien n'est
-  // enregistré sans passer ici, sur l'ensemble final, quel que soit le chemin suivi (rondes, audit,
-  // doublons, complément) ; un job QCM repris après une coupure passe ici lui aussi, QCM repris
-  // compris — seul un ensemble qui l'a déjà franchie (point de reprise `final`) ne la repasse pas.
-  // Une question retirée à la porte (audit tardif,
-  // revérification) est recomblée une fois, puis la porte repasse sur l'ensemble.
-  for (let pass = 0; !ckFinal && all.length; pass++) {
-    await exitGate();
-    if (pass > 0 || all.length >= count || finalPhaseExhausted() || hardStop()) break;
-    await complement();
-  }
-  // Ultime regard sur la version réellement livrée : une passe globale, une réparation au plus,
-  // puis un réaudit des seules questions modifiées. Un ensemble qui a déjà franchi la porte de
-  // sortie avant une coupure (point de reprise `final`) ne la repasse pas : sinon une reprise
-  // sans aucun appel au modèle en refaisait deux (audit, doublons) à chaque redémarrage. Même
-  // dans un run sans coupure, seules les questions pas encore vues par un audit final (ajoutées
-  // après la porte de sortie, ou jamais passées par elle) sont réauditées ici : les autres l'ont
-  // déjà franchie, les réauditer une seconde fois ferait tomber sous un verdict différent une
-  // question déjà acquise, sans le filet de rattrapage de la porte de sortie.
-  if (!ckFinal && all.length) {
-    const lateSoft: QcmItem[] = [];
-    const late = all.filter((it) => !auditedStems.has(it.stem));
-    if (late.length) {
-      late.forEach((it) => auditedStems.add(it.stem));
-      const audited = await finalQualityAudit(late, step, shared.facts);
-      const actions = ultimateAuditActions(late, audited);
-      const rejected = new Set(actions.drop.map((i) => late[i].stem));
-      const auditedByStem = new Map(audited.map((it) => [it.stem, it]));
-      all.splice(0, all.length, ...all.filter((it) => !rejected.has(it.stem)).map((it) => auditedByStem.get(it.stem) ?? it));
-      const repair = actions.repair.map((i) => audited.find((x) => x.stem === late[i].stem)!).filter(Boolean);
-      // Une réparation, une seule, dans le budget de la phase finale. Réparée et confirmée sans
-      // distracteur éliminable, la nouvelle version remplace ; sinon (réparation sans effet, en échec,
-      // réaudit qui la recale) la version auditée juste avant reste : clé confirmée, un distracteur
-      // jugé faible mais pas faux, dans le budget de 10 %. 5aa29e8 la RETIRAIT, sans remplaçant.
-      if (repair.length && !finalPhaseExhausted()) {
-        const repaired = await replaceTrivialDistractorsBatch(repair, step, shared.language).catch(() => repair);
-        const changed = repaired.filter((it, i) => it !== repair[i]);
-        const passed = new Map((await finalQualityAudit(changed, step, shared.facts)).filter((it) => !it.trivialDistractors?.length).map((it) => [it.stem, it]));
-        for (const old of repair) {
-          const i = all.findIndex((it) => it.stem === old.stem);
-          if (i < 0) continue;
-          const good = passed.get(repaired[repair.indexOf(old)].stem);
-          if (good) all[i] = good;
-        }
+    step(`${verifiedCandidates.length} QCM construits + vérifiés pour ${count} places → revue finale…`, 78);
+    // Le budget de la phase finale démarre ici, avant la revue finale (l'audit de tout le stock).
+    // Étape honnête : au-delà, l'avancement reste à 99 % (lib/progress) ; l'étudiant lit ce qui se
+    // passe et combien de temps cela peut encore prendre, au lieu de « moins d'une minute » pendant 40 min.
+    finalPhaseDeadline = Date.now() + finalPhaseBudgetMs();
+    step(`Dernière vérification de l'examen (doublons, clés, distracteurs) : au plus ${Math.ceil(finalPhaseBudgetMs() / 60_000)} min de plus`, 78);
+    const passed = await review(verifiedCandidates, []);
+    progress.done("QCM");
+    all.splice(0, all.length, ...selectCapped([], passed, count));
+    if (!finalPhaseExhausted()) await topUp(missing);
+    // Toujours en dessous du nombre demandé : les reprises d'un examen précédent, déjà vérifiées et
+    // auditées, reprennent les places vides (plafonds par notion tenus) plutôt qu'un remboursement.
+    if (all.length < count && repeatFallback.size) {
+      const present = new Set(all.map((it) => it.stem));
+      let back = 0;
+      for (const it of repeatFallback.values()) {
+        if (all.length >= count) break;
+        if (present.has(it.stem) || auditDuplicates.has(it.stem) || auditRejected.has(it.stem)) continue;
+        if (capDrops([...all, it], caps, (x) => [x.notion]).includes(all.length) || factTaken(it)) continue;
+        all.push(it);
+        present.add(it.stem);
+        back++;
       }
-      // Doublon DANS l'examen : retiré. Simple reprise d'un examen précédent à ce stade : gardée, le
-      // remplaçant ne pourrait plus traverser la porte de sortie.
-      const { intra, soft, repeats }: { intra: number[]; soft: number[]; repeats: number[] } = all.length >= 2 ? await findDuplicates(all, strict) : { intra: [], soft: [], repeats: [] };
-      repeats.forEach((i) => { if (all[i]) historicalRepeats.add(all[i].stem); });
-      // Doublon du seul modèle entre faits distincts : déjà passé par la porte de sortie, il revient
-      // plus bas si le complément ne le remplace pas.
-      lateSoft.push(...soft.map((i) => all[i]).filter(Boolean));
-      if (intra.length) all.splice(0, all.length, ...all.filter((_, i) => !intra.includes(i)));
+      if (back) step(`${back} question(s) proche(s) d'un examen précédent gardée(s) faute de remplaçant : chaque notion du cours a déjà été posée`, 80);
     }
-    // Cette ultime passe peut écarter une question (doublon, clé contestée, distracteur
-    // irréparable) : le nombre demandé reste tenu, comme partout ailleurs dans ce job — un
-    // complément la recomble (son propre contrôle des doublons voit le reste de l'examen).
-    // Les QCM ainsi ajoutés n'ont, eux, jamais traversé la porte de sortie : une seule passe
-    // supplémentaire (plafonds, options en double, vérification, explications) les y soumet. Un
-    // retrait à cette passe reste un manque, remboursé : c3e0db4 recomblait une dernière fois avec
-    // des QCM qui ne passaient plus par la porte de sortie (ni audit, ni contrôle des explications).
-    if (all.length < count && all.length && !finalPhaseExhausted() && !hardStop()) {
-      const before = all.length;
-      await complement();
-      if (all.length > before) await exitGate();
+    // Toujours en dessous : les questions que le seul contrôle du modèle avait retirées alors
+    // qu'elles testent un fait distinct reprennent les places vides (plafonds tenus, jamais un fait
+    // déjà testé). Le dédoublonnage par fait est structurel ; ce contrôle reste un filet qui
+    // remplace, mais ne fait plus tomber le compte.
+    if (all.length < count && softFallback.size) {
+      let back = 0;
+      for (const it of softFallback.values()) {
+        if (all.length >= count) break;
+        if (all.some((x) => x.stem === it.stem) || auditRejected.has(it.stem)) continue;
+        if (capDrops([...all, it], caps, (x) => [x.notion]).includes(all.length) || factTaken(it)) continue;
+        all.push(it);
+        back++;
+      }
+      if (back) step(`${back} question(s) d'un fait distinct gardée(s) faute de remplaçant, malgré un rapprochement signalé par le contrôle des doublons`, 80);
     }
-    restoreSoft(lateSoft);
+    // Une seule réparation, bornée ; optimisation de qualité et non une garantie, elle cède la
+    // place au budget de la phase finale (#105), les QCM gardent leur version vérifiée.
+    if (!finalPhaseExhausted()) await repairResidue();
+    // PORTE DE SORTIE — job 23 (14/11/2026, examen QCM #9) : livré avec trois questions sur le biais
+    // de disponibilité, neuf explications qui réfutaient des options absentes, deux options « biais
+    // de disponibilité » dans une même question et une question « not_verified ». Rien n'est
+    // enregistré sans passer ici, sur l'ensemble final, reprise comprise — seul un ensemble qui l'a
+    // déjà franchie (point de reprise `final`) ne la repasse pas.
+    if (all.length) await exitGate();
   }
   // Aucun appel en erreur mais tous les items écartés (mal formés) : c'est une réponse inutilisable.
   const cause = () => lastError ?? new LlmError("Toutes les questions reçues étaient mal formées.", "BAD_OUTPUT");
@@ -2831,14 +2360,6 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const reused = ckFinal.examId != null && !!(await q.get(`SELECT id FROM exams WHERE id = ?`, ckFinal.examId));
   const examId = reused ? ckFinal.examId! : await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','generating')`);
   if (!reused) {
-    // CONTRÔLE DÉTERMINISTE FINAL des justifications structurées : une raison par distracteur réel,
-    // chaque raison sur une option qui existe, aucune orpheline ; l'explication enregistrée est
-    // réassemblée ici, sur les options telles qu'elles partent en base.
-    const structured = all.filter((it) => !!it.rationale);
-    if (structured.length) {
-      const complete = structured.filter((it) => rationaleCheck(syncExplanation(it).rationale, it.options.length, it.correct).ok).length;
-      step(`Explications assemblées depuis leur justification : ${complete}/${structured.length} complètes (une raison par distracteur)${structured.length < all.length ? `, ${all.length - structured.length} en texte libre` : ""}`, 81);
-    }
     for (let i = 0; i < all.length; i++) {
       const it = all[i];
       if (it.figureFile) {
@@ -2853,8 +2374,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       for (let i = 0; i < all.length; i++) {
         const it = all[i];
         const figureJson = it.figureSpec ? JSON.stringify({ spec: it.figureSpec, file: it.figureFile, truth: it.figureTruth }) : null;
-        const rationaleJson = it.rationale ? JSON.stringify(toStoredRationale(it.rationale, it.options.length, it.correct)) : null;
-        await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified, mold, figure_json, fact_id, rationale_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, examId, i, it.topic, it.type, it.stem, JSON.stringify(it.options), JSON.stringify(it.correct), JSON.stringify(it.misconceptions), it.explanation, it.verified, it.mold ?? null, figureJson, it.factId ?? null, rationaleJson);
+        await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified, mold, figure_json, fact_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, examId, i, it.topic, it.type, it.stem, JSON.stringify(it.options), JSON.stringify(it.correct), JSON.stringify(it.misconceptions), it.explanation, it.verified, it.mold ?? null, figureJson, it.factId ?? null);
       }
     });
     ckFinal = { items: frozen(all), examId };
@@ -2949,13 +2469,8 @@ type QcmExamRow = { id: number; created_at: string; verify_summary: string | nul
 type QcmItemRow = {
   id: number; idx: number; topic: string; type: "scq" | "mcq"; stem: string;
   options_json: string; correct_json: string; misconceptions_json: string; explanation: string;
-  verified: 0 | 1 | null; mold: MoldKind | null; figure_json: string | null; rationale_json?: string | null;
+  verified: 0 | 1 | null; mold: MoldKind | null; figure_json: string | null;
 };
-
-/** L'explication lue d'un QCM enregistré : assemblée depuis sa justification structurée s'il en a une, sinon le texte d'avant. */
-function rowExplanation(r: { rationale_json?: string | null; options_json: string; correct_json: string; explanation: string | null }): string {
-  return r.rationale_json ? storedExplanation(r, shownExplanation(r.explanation)) : shownExplanation(r.explanation);
-}
 type QcmOpenRow = { id: number; concept: string; statement_html: string | null; solution_html: string | null };
 
 /** Un examen QCM pour l'affichage (SANS les clés — l'auto-correction se fait via /api). */
@@ -2980,7 +2495,7 @@ export async function getQcmExam(examId: number, withKeys = false): Promise<QcmE
       try { figure = r.figure_json ? (JSON.parse(r.figure_json).file ?? null) : null; } catch {}
       return {
         id: r.id, idx: r.idx, topic: r.topic, type: r.type, stem: r.stem,
-        options: JSON.parse(r.options_json), explanation: withKeys ? rowExplanation(r) : "", verified: r.verified,
+        options: JSON.parse(r.options_json), explanation: withKeys ? shownExplanation(r.explanation) : "", verified: r.verified,
         mold: r.mold ?? null, figureFile: figure,
         ...(withKeys ? { correct: JSON.parse(r.correct_json), misconceptions: JSON.parse(r.misconceptions_json) } : {}),
       };
@@ -3004,7 +2519,7 @@ export async function recompileQcmPdf(examId: number): Promise<{ file: string; t
     try { fig = r.figure_json ? JSON.parse(r.figure_json) : {}; } catch {}
     return {
       topic: r.topic, type: r.type, stem: r.stem, options: JSON.parse(r.options_json), correct: JSON.parse(r.correct_json),
-      misconceptions: JSON.parse(r.misconceptions_json ?? "[]"), explanation: rowExplanation(r), verified: r.verified,
+      misconceptions: JSON.parse(r.misconceptions_json ?? "[]"), explanation: shownExplanation(r.explanation), verified: r.verified,
       mold: r.mold ?? null, figureSpec: fig.spec ?? null, figureFile: fig.file ?? null, figureTruth: fig.truth ?? null,
     };
   });
@@ -3057,20 +2572,19 @@ type QcmGradeRow = {
   correct_json: string;
   explanation: string;
   misconceptions_json: string;
-  rationale_json?: string | null;
 };
 
 /** Corrige des réponses {idx: number[]} contre la clé connue → score + détail. */
 export async function gradeQcm(examId: number, answers: Record<number, number[]>): Promise<{ score: number; total: number; detail: QcmGradeDetail[] }> {
   await ensureQcmSchema();
-  const rows = await q.all<QcmGradeRow>(`SELECT idx, options_json, correct_json, explanation, misconceptions_json, rationale_json FROM qcm_items WHERE exam_id = ? ORDER BY idx`, examId);
+  const rows = await q.all<QcmGradeRow>(`SELECT idx, options_json, correct_json, explanation, misconceptions_json FROM qcm_items WHERE exam_id = ? ORDER BY idx`, examId);
   const detail = rows.map((r) => {
     const correct: number[] = JSON.parse(r.correct_json);
     const optionCount = (JSON.parse(r.options_json) as unknown[]).length;
     const chosen = [...new Set((answers[r.idx] ?? []).filter((value) => Number.isInteger(value) && value >= 0 && value < optionCount))].sort((a, b) => a - b);
     const ok = JSON.stringify(correct.slice().sort()) === JSON.stringify(chosen);
     const points = scoreQcmAnswer(correct, chosen, optionCount);
-    return { idx: r.idx, correct, chosen, ok, points, explanation: rowExplanation(r), misconceptions: JSON.parse(r.misconceptions_json) };
+    return { idx: r.idx, correct, chosen, ok, points, explanation: shownExplanation(r.explanation), misconceptions: JSON.parse(r.misconceptions_json) };
   });
   return { score: detail.reduce((sum, item) => sum + item.points, 0), total: rows.length, detail };
 }

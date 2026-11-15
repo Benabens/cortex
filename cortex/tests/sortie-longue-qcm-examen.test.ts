@@ -57,9 +57,9 @@ function answer(text: string): { step: string; reply: string } {
       explanation: "groupby puis mean donne la moyenne par groupe ; la médiane et la somme sont d'autres agrégats.",
     })) }) };
   }
-  if (/"duplicates"/.test(text)) return { step: "doublons", reply: JSON.stringify({ duplicates: [] }) };
+  // Revue finale : audit (verdicts) et doublons dans le même appel.
   if (/"offCourse"/.test(text)) {
-    return { step: "audit final", reply: JSON.stringify({ verdicts: qcmBlocks(text).map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })) }) };
+    return { step: "revue finale", reply: JSON.stringify({ verdicts: qcmBlocks(text).map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })), duplicates: [] }) };
   }
   if (/"results"/.test(text)) {
     return { step: "vérification QCM", reply: JSON.stringify({ results: qcmBlocks(text).map((m) => ({
@@ -70,7 +70,8 @@ function answer(text: string): { step: string; reply: string } {
   if (/"items"/.test(text)) {
     const n = Number(/\((\d+) QCM\)/.exec(text)?.[1] ?? 1);
     designs++;
-    return { step: "conception QCM", reply: JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i, designs === 1 && i === 0)) }) };
+    // Tout le premier lot porte un distracteur trivial : une question propre passerait sinon devant, sans réparation.
+    return { step: "conception QCM", reply: JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i, designs === 1)) }) };
   }
   return { step: "autre", reply: "{}" };
 }
@@ -160,7 +161,7 @@ test("job QCM : chaque étape réfléchit à l'effort par défaut, avec la place
   const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
   assert.equal(r.count, 4);
   assert.deepEqual(efforts.get("autre"), undefined, `appel non reconnu : ${[...efforts.keys()].join(", ")}`);
-  for (const step of ["conception QCM", "vérification QCM", "audit final", "remplacement de distracteurs", "doublons"]) {
+  for (const step of ["conception QCM", "vérification QCM", "revue finale", "remplacement de distracteurs"]) {
     const got = efforts.get(step);
     assert.ok(got?.length, `l'étape « ${step} » a tourné`);
     assert.deepEqual([...new Set(got)], [undefined], `effort de « ${step} »`);

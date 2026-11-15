@@ -29,6 +29,8 @@ process.env.MAX_COURSES_PER_USER = "unlimited";
 const KEY = "Une affirmation juste, tirée du cours.";
 const TRIVIAL = "Une option absurde que tout étudiant élimine.";
 const GOOD = "Une affirmation proche du cours, fausse à une condition près.";
+/** Remplaçant encore jugé éliminable : le correcteur et l'audit le signalent comme TRIVIAL. */
+const RESIDUE = "Une option encore éliminable après réparation.";
 
 /** Rang global de chaque QCM conçu : il fixe ses défauts, quel que soit le lot qui le porte. */
 let designed = 0;
@@ -41,7 +43,12 @@ let auditRejects: (stem: string, call: number) => boolean = () => false;
 let auditUnreadable = false;
 /** Paires en doublon rendues par le contrôle de fin d'examen, par appel. */
 let dedupe: (call: number, prompt: string) => { first: number; second: number; reason: string }[] = () => [];
-const calls = { design: 0, verify: 0, repair: 0, audit: 0, dedup: 0, other: 0 };
+/** Un remplaçant sur `residueEvery` reste éliminable (0 : tous réussis). */
+let residueEvery = 0;
+/** Le correcteur relève une « définition différente » portée par un DISTRACTEUR, une question sur `mismatchEvery`. */
+let mismatchEvery = 0;
+let repaired = 0;
+const calls = { design: 0, verify: 0, repair: 0, audit: 0, dedup: 0, review: 0, secondLook: 0, rewrite: 0, other: 0 };
 /** Énoncés soumis à chaque passage de l'audit final. */
 const auditedStems: string[][] = [];
 
@@ -73,7 +80,12 @@ function verify(prompt: string): string {
     return {
       index, correct: [/\(variante B\)/.test(body) ? (key === 0 ? 1 : 0) : key], ok: true, discrimination: 4, name_only: false, issue: "",
       course_terms: [], off_course: "", off_course_terms: [], off_course_options: [], off_course_key: false, off_matter: "",
-      trivial_distractors: opts.filter((m) => m[2].startsWith(TRIVIAL)).map((m) => Number(m[1])), definition_mismatch: "",
+      trivial_distractors: opts.filter((m) => m[2].startsWith(TRIVIAL) || m[2].startsWith(RESIDUE)).map((m) => Number(m[1])),
+      // HUM-285 (banc du 15/11) : « L'option 3 confond correction et prévention » — un distracteur
+      // qui déforme une définition fait son rôle ; la clé, elle, est fidèle au cours.
+      ...(mismatchEvery > 0 && index % mismatchEvery === 0
+        ? { definition_mismatch: "L'option 3 confond « taux de faux positifs » et « impact disparate ».", definition_mismatch_key: false }
+        : { definition_mismatch: "", definition_mismatch_key: false }),
     };
   }) });
 }
@@ -81,7 +93,7 @@ function verify(prompt: string): string {
 function repair(prompt: string): string {
   return JSON.stringify({ replacements: blocks(prompt).map(({ index, body }) => ({
     index,
-    distractors: [...body.matchAll(/^\s+\((\d+)\) .* ← À REMPLACER/gm)].map((x) => ({ option: Number(x[1]), text: GOOD, misconception: "[mauvaise condition] x" })),
+    distractors: [...body.matchAll(/^\s+\((\d+)\) .* ← À REMPLACER/gm)].map((x) => ({ option: Number(x[1]), text: residueEvery > 0 && ++repaired % residueEvery === 0 ? RESIDUE : GOOD, misconception: "[mauvaise condition] x" })),
     explanation: "La bonne réponse reprend le cours ; les autres changent une condition ou l'attribution.",
   })) });
 }
@@ -89,8 +101,12 @@ function repair(prompt: string): string {
 function audit(prompt: string): string {
   return JSON.stringify({ verdicts: blocks(prompt).map(({ index, body }) => ({
     index, key: !auditRejects(body, calls.audit), offCourse: false,
-    trivial: [...body.matchAll(/^\s+\((\d+)\) (.*)$/gm)].filter((m) => m[2].startsWith(TRIVIAL)).map((m) => Number(m[1])),
+    trivial: [...body.matchAll(/^\s+\((\d+)\) (.*)$/gm)].filter((m) => m[2].startsWith(TRIVIAL) || m[2].startsWith(RESIDUE)).map((m) => Number(m[1])),
   })) });
+}
+
+function secondLook(prompt: string): string {
+  return JSON.stringify({ second_look: blocks(prompt).map(({ index }) => ({ index, off_course: "", scope: "question" })) });
 }
 
 let llm: http.Server;
@@ -103,7 +119,16 @@ before(async () => {
       const parsed = JSON.parse(body) as { messages: { content: unknown }[] };
       const content = parsed.messages.map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))).join("\n");
       let text = "{}";
-      if (/"replacements"/.test(content)) { calls.repair++; text = repair(content); }
+      if (/"second_look"/.test(content)) { calls.secondLook++; text = secondLook(content); }
+      else if (/"explanations"/.test(content)) { calls.rewrite++; text = JSON.stringify({ explanations: [] }); }
+      else if (/"replacements"/.test(content)) { calls.repair++; text = repair(content); }
+      else if (/"duplicates"/.test(content) && /"offCourse"/.test(content)) {
+        // Revue finale : audit et doublons dans le même appel.
+        calls.review++;
+        auditedStems.push(blocks(content).map((b) => b.body.split("\n")[0]));
+        const verdicts = auditUnreadable ? "ok" : (JSON.parse(audit(content)) as { verdicts: unknown }).verdicts;
+        text = JSON.stringify({ verdicts, notions: [], duplicates: dedupe(calls.review, content), repeats: [] });
+      }
       else if (/"duplicates"/.test(content)) { calls.dedup++; text = JSON.stringify({ notions: [], duplicates: dedupe(calls.dedup, content) }); }
       else if (/"offCourse"/.test(content)) { calls.audit++; auditedStems.push(blocks(content).map((b) => b.body.split("\n")[0])); text = auditUnreadable ? JSON.stringify({ verdicts: "ok" }) : audit(content); }
       else if (/"results"/.test(content)) { calls.verify++; text = verify(content); }
@@ -120,7 +145,7 @@ before(async () => {
 });
 
 beforeEach(() => {
-  designed = 0; trivialEvery = 3; contestedEvery = 5;
+  designed = 0; trivialEvery = 3; contestedEvery = 5; residueEvery = 0; mismatchEvery = 0; repaired = 0;
   auditRejects = () => false; auditUnreadable = false; dedupe = () => [];
   for (const k of Object.keys(calls) as (keyof typeof calls)[]) calls[k] = 0;
   auditedStems.length = 0;
@@ -212,4 +237,18 @@ test("dédoublonnage : un contrôle qui voit des doublons à chaque passe ne fai
   assert.ok(calls.audit <= 2, `audit final : ${JSON.stringify(calls)}`);
   const seen = auditedStems.flat();
   assert.equal(new Set(seen).size, seen.length, `une question auditée deux fois : ${JSON.stringify(auditedStems)}`);
+});
+
+test("HUM-285 simulé (20 QCM, banc du 15/11) : au plus 8 appels, 20/20 livrées", async (t) => {
+  // La forme du run de référence (64 appels pour 20 QCM livrés) : 17 questions sur 20 avec un
+  // distracteur jugé trivial, un remplaçant sur deux encore éliminable, une clé contestée sur vingt,
+  // et une « définition différente » relevée sur un distracteur dans presque toutes les questions.
+  trivialEvery = 1; residueEvery = 2; contestedEvery = 20; mismatchEvery = 1;
+  const { r, steps } = await exam(20);
+  const detail = `${JSON.stringify(calls)} → ${total()} appels\n${steps.join("\n")}`;
+  t.diagnostic(`${r.count}/20 livrées · ${JSON.stringify(calls)} → ${total()} appels`);
+  assert.equal(r.count, 20, detail);
+  assert.ok(total() <= 8, `appels par examen de 20 QCM : ${detail}`);
+  // Le distracteur qui déforme une définition fait son rôle : pas de second regard pour lui.
+  assert.equal(calls.secondLook, 0, detail);
 });
