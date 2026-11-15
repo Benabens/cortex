@@ -32,7 +32,8 @@ export function cacheKey(providerName: string, req: CompleteRequest): string {
     system: req.system ?? null,
     model: req.model ?? "opus",
     maxTokens: req.maxTokens ?? null,
-    json: req.json ? { schema: req.json.schema, effort: req.json.effort ?? null } : null,
+    json: req.json ? { schema: req.json.schema } : null,
+    effort: req.effort ?? null,
     thinking: req.thinking ?? null,
     images: (req.images ?? []).map((i) => i.path
       ? `path:${i.path}`

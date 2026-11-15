@@ -126,6 +126,20 @@ test("performance : durées par phase, appels, réessais, tokens et coût API es
   assert.equal(p.estimated, true);
 });
 
+test("performance d'un run sur l'API : tokens et coût MESURÉS par llm_usage, échecs facturés compris", () => {
+  const call = { site: "generateQcmBatch", model: "opus", promptChars: 8000, systemChars: 4000, outputChars: 4000, ms: 30_000 };
+  const usage = [
+    { site: "qcm:generateQcmBatch", model: "claude-sonnet-5", tokensIn: 3000, tokensOut: 9000, attempt: 1, latencyMs: 30_000, cacheRead: 1000, cacheWrite: 0, costUsd: 0.0962 },
+    // Réponse coupée (TRUNCATED) : facturée quand même, elle compte.
+    { site: "qcm:generateQcmBatch", model: "claude-sonnet-5", tokensIn: 3000, tokensOut: 16000, attempt: 1, latencyMs: 60_000, cacheRead: 0, cacheWrite: 1000, costUsd: 0.1685 },
+  ];
+  const p = measureRun(run({ provider: "anthropic", calls: [call, call], usage })).perf;
+  // Entrée totale = non cachée + lue + écrite dans le cache (même sens que l'estimation).
+  assert.deepEqual([p.tokensIn, p.tokensOut, p.cacheReadTokens], [8000, 25000, 1000]);
+  assert.equal(Math.round(p.costUsd * 1e4), 2647);
+  assert.equal(p.estimated, false);
+});
+
 test("UX : avancement monotone sauf réessai annoncé ; erreur médiane du temps restant", () => {
   const log = [{ t: "2026-11-04T10:03:00.000Z", msg: "2 QCM manquant(s) → 1 lot(s) de comblement" }];
   const job = { id: 1, status: "done", error: null, log, createdAt: "2026-11-04 10:00:00", updatedAt: "2026-11-04 10:10:00", resultId: 7 };
