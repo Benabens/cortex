@@ -16,10 +16,27 @@ const ANTHROPIC_KEYS = new Set<string>(["ANTHROPIC_API_KEY", "LLM_API_KEY"]);
 /** Plafond le plus haut accepté pour UN run payant (le budget du chantier entier). */
 const PAID_RUN_MAX_USD = 15;
 
-export function assertBenchEnv(env: Record<string, string | undefined> = process.env): void {
+type Env = Record<string, string | undefined>;
+
+/** Mesure payante du moteur demandée (opt-in explicite). */
+export function isPaidBench(env: Env): boolean {
+  return env.CORTEX_BENCH_PAID === "anthropic";
+}
+
+/** L'environnement du juge : sur une mesure payante, la clé et l'opt-in retirés, provider codex-cli. */
+export function judgeEnv<E extends Env>(env: E): E {
+  if (!isPaidBench(env)) return env;
+  const out: Env = { ...env, LLM_PROVIDER: "codex-cli" };
+  for (const k of ["CORTEX_BENCH_PAID", "SPEND_CAP_USD", ...ANTHROPIC_KEYS]) delete out[k];
+  return out as E;
+}
+
+/** `judge` : le juge tourne toujours sur l'abonnement Codex, jamais sur l'API payante. */
+export function assertBenchEnv(env: Env = process.env, opts: { judge?: boolean } = {}): void {
   const problems: string[] = [];
-  const paid = env.CORTEX_BENCH_PAID === "anthropic";
-  if (paid) {
+  const paid = isPaidBench(env);
+  if (paid && opts.judge) problems.push("le juge ne tourne jamais sur l'API : retire CORTEX_BENCH_PAID (le juge passe par codex-cli)");
+  else if (paid) {
     if (env.LLM_PROVIDER !== "anthropic") problems.push(`une mesure payante (CORTEX_BENCH_PAID=anthropic) exige LLM_PROVIDER=anthropic (reçu : ${env.LLM_PROVIDER ?? "non posé"})`);
     const cap = Number(env.SPEND_CAP_USD);
     if (!(env.SPEND_CAP_USD ?? "").trim() || !Number.isFinite(cap) || cap <= 0 || cap > PAID_RUN_MAX_USD) {

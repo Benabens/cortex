@@ -64,6 +64,9 @@ test("coût : +5 % toléré (bruit du modèle), au-delà rouge ; sans référenc
   assert.deepEqual(failed(metrics({ perf: { ...ref.perf, costUsd: 0.52 } }), {}, ref), []);
   assert.deepEqual(failed(metrics({ perf: { ...ref.perf, costUsd: 0.53 } }), {}, ref), ["perf.cost"]);
   assert.equal(checkThresholds(metrics(), {}).find((v) => v.id === "perf.cost")?.pass, null);
+  // Un coût facturé (run sur l'API) ne se compare pas à une référence estimée (run codex-cli).
+  const billed = metrics({ perf: { ...ref.perf, costUsd: 3, estimated: false } });
+  assert.equal(checkThresholds(billed, {}, ref).find((v) => v.id === "perf.cost")?.pass, null);
 });
 
 test("rejeu : durée, coût et temps restant sans objet (réponses instantanées), le reste reste exigé", () => {
