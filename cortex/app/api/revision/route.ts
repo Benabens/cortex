@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
       plan: { stats: await planStats(), questions: await planQuestions() },
     });
   }
-  const json = loadRevisionJson(course);
+  const json = await loadRevisionJson(course);
   if (json) return NextResponse.json({ ...json, source: "json" });
   return NextResponse.json({ course, source: "empty", bank: { stats: { qcm: 0, open: 0, byTopic: [] }, qcm: [], open: [] }, plan: { stats: { qcm: 0, open: 0, topics: 0 }, questions: [] } });
 }

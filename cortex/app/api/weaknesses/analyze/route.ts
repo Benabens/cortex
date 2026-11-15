@@ -6,8 +6,8 @@ import { logLoopRoute } from "@/lib/req-log";
 import { currentCourse } from "@/db/client";
 import { courseLabel } from "@/lib/courses";
 import { uploadsDir } from "@/lib/paths";
-import fs from "node:fs";
 import path from "node:path";
+import { storage } from "@/lib/storage";
 import { NextRequest, NextResponse } from "next/server";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
@@ -75,9 +75,8 @@ async function handlePOST(req: NextRequest) {
   if (w.screenshot_path) {
     const abs = path.join(uploadsDir(), path.basename(w.screenshot_path));
     const ext = w.screenshot_path.split(".").pop()?.toLowerCase() ?? "png";
-    if (fs.existsSync(abs) && MEDIA[ext]) {
-      images.push({ mediaType: MEDIA[ext], base64: fs.readFileSync(abs).toString("base64") });
-    }
+    const buf = MEDIA[ext] ? await storage().read(abs) : null;
+    if (buf) images.push({ mediaType: MEDIA[ext], base64: buf.toString("base64") });
   }
 
   let parsed: { topic: string; concepts: string[]; explanation: string };

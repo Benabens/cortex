@@ -5,6 +5,7 @@ import { dataRoot } from "@/lib/courses";
 import { floatLimit, guardsActive, intLimit } from "@/lib/billing/env";
 import { log } from "@/lib/metrics";
 import { purgePageCache } from "@/lib/page-cache";
+import { storage } from "@/lib/storage";
 
 /**
  * QUOTA DE STOCKAGE PAR UTILISATEUR + GARDE D'ESPACE LIBRE DU VOLUME.
@@ -23,10 +24,13 @@ import { purgePageCache } from "@/lib/page-cache";
  *    et à STORAGE_ACCOUNT_MAX_VOLUME_PERCENT (défaut 20) % du volume par compte
  *    client : un payant ne remplit pas le disque de tous ;
  *  - jamais plus que la place utile du volume (hors marge d'espace libre).
- * Revenu illisible (base indisponible) : la base s'applique.
+ * Revenu illisible (base indisponible) : la base s'applique. En stockage objet
+ * (lib/storage, STORAGE_S3_BUCKET), les bornes liées au volume tombent : seuls la
+ * base, la croissance par le revenu et STORAGE_QUOTA_MAX_MB restent.
  *
- * Et quel que soit le compte, aucun envoi n'est accepté si le volume garde moins
- * de 10 % d'espace libre : un conteneur unique dont le disque est plein tombe
+ * Et quel que soit le compte, aucun envoi n'est accepté si le volume (en stockage
+ * objet : le disque local du conteneur, qui reçoit la copie de chaque envoi) garde
+ * moins de 10 % d'espace libre : un conteneur unique dont le disque est plein tombe
  * pour tout le monde. Avant de refuser, le cache des images de pages (régénérable,
  * lib/page-cache) est vidé et le volume mesuré de nouveau. Contrôlé AVANT de lire ou d'écrire, sur la taille
  * annoncée (Content-Length) — la lecture réelle reste bornée par
@@ -62,6 +66,7 @@ function diskSpace(p: string): { free: number; total: number } | null {
   } catch { return null; }
 }
 
+/** Disque du dossier de données : le volume, ou en stockage objet le disque local du conteneur (cache). */
 function volume(): { free: number; total: number } | null {
   const root = dataRoot();
   const disk = diskSpace(fs.existsSync(root) ? root : path.dirname(root));
@@ -80,7 +85,9 @@ function minFreeRatio(): number {
 export async function storageQuotaBytesFor(userId: string): Promise<number | null> {
   const base = storageQuotaBytes();
   if (base === null) return null;
-  const disk = volume();
+  // Stockage objet : les fichiers ne sont plus bornés par un volume, les parts
+  // « % du volume » ne s'appliquent plus (le disque local n'est qu'un cache).
+  const disk = storage().kind === "local" ? volume() : null;
   const usable = disk ? Math.floor((1 - minFreeRatio()) * disk.total) : Infinity;
   const maxMb = intLimit("STORAGE_QUOTA_MAX_MB", 3072);
   const max = maxMb === null ? Infinity : Math.max(base, maxMb * MiB);
@@ -107,21 +114,9 @@ export async function storageQuotaBytesFor(userId: string): Promise<number | nul
   return Number.isFinite(quota) ? quota : null;
 }
 
-/** Taille totale (octets) des fichiers d'un utilisateur sous data/u/<slug>/. */
+/** Taille totale (octets) des fichiers d'un utilisateur sous data/u/<slug>/ (disque ou seau). */
 export async function userStorageBytes(userId: string): Promise<number> {
-  const root = path.join(dataRoot(), "u", userSlug(userId));
-  let total = 0;
-  const walk = (dir: string) => {
-    let entries: fs.Dirent[];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.isFile()) { try { total += fs.statSync(p).size; } catch { /* disparu entre-temps */ } }
-    }
-  };
-  walk(root);
-  return total;
+  return storage().usageBytes(path.join(dataRoot(), "u", userSlug(userId)));
 }
 
 export type StorageRefusal = { status: 413; error: string };

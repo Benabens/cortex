@@ -3,7 +3,7 @@ import { servedFileHeaders } from "@/lib/security-headers";
 import { authEnabled } from "@/lib/auth";
 import { requireCourse } from "@/lib/req";
 import { q } from "@/db/q";
-import fs from "node:fs";
+import { storage } from "@/lib/storage";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -33,11 +33,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ file
   // Cours VALIDÉ par la garde, jamais le paramètre d'URL relu à part.
   const EXAM_DIR = coursePaths(course).examsDir;
   const abs = path.join(EXAM_DIR, file);
-  if (!abs.startsWith(EXAM_DIR + path.sep) || !fs.existsSync(abs))
-    return new NextResponse("Not found", { status: 404 });
+  if (!abs.startsWith(EXAM_DIR + path.sep)) return new NextResponse("Not found", { status: 404 });
   const ext = file.split(".").pop()!.toLowerCase();
-  const buf = fs.readFileSync(abs);
-  return new NextResponse(new Uint8Array(buf), {
+  const res = await storage().serve(abs, req, {
+    contentType: MIME[ext] ?? "application/octet-stream",
     headers: servedFileHeaders(MIME[ext] ?? "application/octet-stream", { "content-disposition": `inline; filename="${file}"` }),
   });
+  return res ?? new NextResponse("Not found", { status: 404 });
 }

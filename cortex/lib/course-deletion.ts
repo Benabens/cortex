@@ -12,6 +12,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { storage } from "@/lib/storage";
 import { authAll, authGet, authRun } from "@/db/auth-store";
 import { userSlug } from "@/db/context";
 import { dbDriverName, nowStr } from "@/db/q";
@@ -117,7 +118,7 @@ export async function deleteCourseWithData(userId: string, courseId: string, opt
   // Cours créé depuis l'interface : tout vit sous data/u/<slug>/<cours>/ (base sqlite comprise).
   const root = path.join(dataRoot(), "u", userSlug(userId), courseId);
   try {
-    if (fs.existsSync(root)) fs.rmSync(root, { recursive: true, force: true });
+    await storage().remove(root); // disque et, en stockage objet, seau
   } catch (e) {
     residues.push(`fichiers ${root} : ${e instanceof Error ? e.message : String(e)}`);
   }

@@ -8,6 +8,7 @@ import { killProcessGroup } from "@/lib/process-group";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { storage } from "@/lib/storage";
 
 /**
  * Jobs de génération en ARRIÈRE-PLAN, découplés de la requête HTTP.
@@ -308,10 +309,18 @@ const ACTIVE_STATES = "('queued','running','verifying','compiling')";
 const ZOMBIE_MSG = "Worker interrompu (process arrêté), la génération ne tournait plus. Relance.";
 /** Un worker vivant qui n'a plus de heartbeat depuis ce délai est considéré bloqué. */
 const STALL_MS = 15 * 60_000;
+/**
+ * Un battement plus récent que ce délai vaut preuve de vie, même si le PID est
+ * absent d'ici (battement toutes les 30 s ; marge pour un appel synchrone,
+ * pdftoppm jusqu'à 60 s, qui retient la boucle d'événements).
+ */
+const HEARTBEAT_FRESH_MS = 5 * 60_000;
 
 /**
  * ZÉRO JOB ZOMBIE, ZÉRO RUN PERDU : réconcilie les jobs « actifs » dont le worker
- * n'est plus vivant. Un job est zombie si (a) son PID est enregistré mais le process est mort,
+ * n'est plus vivant. Un battement de cœur de moins de HEARTBEAT_FRESH_MS prime sur
+ * tout le reste : le worker vit, peut-être sur un autre conteneur. Sinon, un job est
+ * zombie si (a) son PID est enregistré mais le process est mort,
  * (b) il est resté sans PID au-delà d'un délai franc (le worker n'a jamais démarré), ou
  * (c) son PID est « vivant » mais son heartbeat (posé toutes les 30 s par le worker) date de
  * plus de STALL_MS — worker suspendu, ou PID recyclé par l'OS.
@@ -329,11 +338,14 @@ export async function reconcileStaleJobs(): Promise<number> {
   let fixed = 0;
   for (const r of rows) {
     let zombie = false;
+    const hbAge = r.heartbeat_at ? Date.now() - new Date(r.heartbeat_at + "Z").getTime() : NaN;
+    // Battement récent : le worker vit, OÙ QU'IL TOURNE — son PID n'a de sens que
+    // sur son propre conteneur (déploiement sans volume, second réplica).
+    if (Number.isFinite(hbAge) && hbAge <= HEARTBEAT_FRESH_MS) continue;
     if (r.pid) {
-      if (!isPidAlive(r.pid)) zombie = true; // worker mort
+      if (!isPidAlive(r.pid)) zombie = true; // worker mort (ou ailleurs, mais muet depuis HEARTBEAT_FRESH_MS)
       else if (r.heartbeat_at) {
         // PID « vivant » mais plus aucun battement : worker suspendu ou PID recyclé.
-        const hbAge = Date.now() - new Date(r.heartbeat_at + "Z").getTime();
         if (Number.isFinite(hbAge) && hbAge > STALL_MS) zombie = true;
       }
     } else {
@@ -558,7 +570,7 @@ export async function cancelJob(id: number): Promise<Job | null> {
 /** Restes d'un job tué : checkpoint de génération + examen inséré mais jamais finalisé (compile interrompue). */
 async function cleanupPartial(job: Job): Promise<void> {
   if (job.type === "exam") {
-    try { fs.unlinkSync(path.join(examsDir(), ".gen-checkpoint.json")); } catch {}
+    try { await storage().remove(path.join(examsDir(), ".gen-checkpoint.json")); } catch {}
   }
   try { await saveJobCheckpoint(job.id, null); } catch {}
   try {
@@ -572,7 +584,7 @@ async function cleanupPartial(job: Job): Promise<void> {
       await q.run(`DELETE FROM exams WHERE id = ?`, examId);
       for (const suffix of ["", "-corrige"])
         for (const ext of ["tex", "pdf", "html", "log", "aux"]) {
-          try { fs.unlinkSync(path.join(examsDir(), `exam-${examId}${suffix}.${ext}`)); } catch {}
+          try { await storage().remove(path.join(examsDir(), `exam-${examId}${suffix}.${ext}`)); } catch {}
         }
     }
   } catch {}

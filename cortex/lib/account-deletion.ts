@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { storage } from "@/lib/storage";
 import { randomUUID } from "node:crypto";
 import { authAll, authGet, authRun } from "@/db/auth-store";
 import { dbDriverName } from "@/db/q";
@@ -161,7 +162,7 @@ export async function deleteAccount(userId: string, deps: DeletionDeps = {}): Pr
   let filesDeleted = false;
   const userDir = path.join(dataRoot(), "u", userSlug(userId));
   try {
-    if (fs.existsSync(userDir)) fs.rmSync(userDir, { recursive: true, force: true });
+    await storage().remove(userDir); // disque et, en stockage objet, seau
     filesDeleted = true;
   } catch (e) {
     errors.push(`rm ${userDir}: ${msg(e)} (orphelin d'un compte supprimé — à balayer)`);

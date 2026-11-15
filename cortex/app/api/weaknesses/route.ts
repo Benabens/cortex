@@ -2,8 +2,8 @@ import { createWeakness, deleteWeakness, listWeaknesses, weaknessesByTheme } fro
 import { useCourseOr404 } from "@/lib/req";
 import { UPLOAD_LIMITS, readFormData, withBodyLimit } from "@/lib/upload-limit";
 import { uploadsDir } from "@/lib/paths";
-import fs from "node:fs";
 import path from "node:path";
+import { storage } from "@/lib/storage";
 import { NextRequest, NextResponse } from "next/server";
 import { checkStorage, declaredBytes } from "@/lib/storage-quota";
 import { FIELD_LIMITS, fieldTooLong } from "@/lib/field-limits";
@@ -50,7 +50,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     const buf = new Uint8Array(await file.arrayBuffer());
     const kind = sniffAttachment(buf);
     if (!kind) return NextResponse.json({ error: `Format non pris en charge : ${ATTACHMENT_FORMATS_LABEL}.` }, { status: 415 });
-    screenshotPath = saveAttachment(buf, kind);
+    screenshotPath = await saveAttachment(buf, kind);
     source = kind === "pdf" ? "pdf" : "screenshot";
     // PDF : son texte rejoint la note (lisible dans la liste, relié au corpus, repris par l'analyse).
     if (kind === "pdf") {
@@ -70,8 +70,7 @@ export async function DELETE(req: NextRequest) {
   if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
   const screenshot = await deleteWeakness(id);
   if (screenshot) {
-    const p = path.join(uploadsDir(), path.basename(screenshot));
-    if (fs.existsSync(p)) fs.unlinkSync(p);
+    await storage().remove(path.join(uploadsDir(), path.basename(screenshot)));
   }
   return NextResponse.json({ ok: true });
 }

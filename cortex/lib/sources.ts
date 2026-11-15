@@ -4,11 +4,11 @@ import { indexItemForSearch, unindexSource } from "@/lib/search";
 import { sourceHref } from "@/lib/deeplink";
 import { refsDir } from "@/lib/paths";
 import * as cheerio from "cheerio";
-import fs from "node:fs";
 import path from "node:path";
 import { extractText, getDocumentProxy } from "unpdf";
 import { extractOfficeText } from "@/lib/office-documents";
 import { purgePdfPages } from "@/lib/page-cache";
+import { storage } from "@/lib/storage";
 
 /**
  * Examens de référence : le « format » à imiter pour la génération.
@@ -59,24 +59,25 @@ const INS_ITEM_SQL = `INSERT INTO items (source_id, type, lecture_id, title, tex
 async function parseRefFile(abs: string): Promise<{ title: string; pages: string[] }> {
   const ext = path.extname(abs).toLowerCase();
   const base = path.basename(abs);
+  const buf = await storage().read(abs);
+  if (!buf) throw new Error(`Fichier introuvable : ${base}`);
   if (ext === ".pdf") {
-    const buf = fs.readFileSync(abs);
     const pdf = await getDocumentProxy(new Uint8Array(buf));
     const { text } = await extractText(pdf, { mergePages: false });
     const pages = (Array.isArray(text) ? text : [text]).map(clean).filter((t) => t.length > 3);
     return { title: base.replace(/\.pdf$/i, ""), pages };
   }
   if (ext === ".html" || ext === ".htm") {
-    const $ = cheerio.load(fs.readFileSync(abs, "utf8"));
+    const $ = cheerio.load(buf.toString("utf8"));
     $("script, style").remove();
     const title = clean($("title").first().text()) || clean($("h1, h2").first().text()) || base;
     return { title, pages: [clean($("body").text())] };
   }
   if (ext === ".docx" || ext === ".pptx") {
-    return { title: base.replace(/\.[^.]+$/, ""), pages: [await extractOfficeText(fs.readFileSync(abs), ext)] };
+    return { title: base.replace(/\.[^.]+$/, ""), pages: [await extractOfficeText(buf, ext)] };
   }
   // .txt / .md / autres : texte brut
-  return { title: base.replace(/\.[^.]+$/, ""), pages: [clean(fs.readFileSync(abs, "utf8"))] };
+  return { title: base.replace(/\.[^.]+$/, ""), pages: [clean(buf.toString("utf8"))] };
 }
 
 /**
@@ -125,12 +126,12 @@ export async function ingestRefFile(relPath: string): Promise<number> {
 /** Réingère tous les fichiers de data/refs/ (appelé par scripts/ingest.ts). */
 export async function ingestAllRefs(): Promise<number> {
   const dir = REFS_DIR();
-  if (!fs.existsSync(dir)) return 0;
   // uniquement des FICHIERS d'examen (ignore les sous-dossiers figref/ img/ et les fichiers cachés)
-  const files = fs
-    .readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isFile() && !e.name.startsWith(".") && /\.(pdf|html?|txt|md|pptx|docx)$/i.test(e.name))
-    .map((e) => e.name);
+  const files = (await storage().list(dir))
+    .filter((e) => path.dirname(e.path) === path.resolve(dir))
+    .map((e) => path.basename(e.path))
+    .filter((name) => !name.startsWith(".") && /\.(pdf|html?|txt|md|pptx|docx)$/i.test(name))
+    .sort();
   for (const f of files) await ingestRefFile(`refs/${f}`);
   return files.length;
 }
@@ -261,16 +262,13 @@ function safeName(name: string): string {
 /** Enregistre un examen uploadé : fichier → data/refs/, indexation, marqué référence. */
 export async function addUploadedRef(buffer: Buffer, filename: string): Promise<ExamSource> {
   const dir = REFS_DIR();
-  fs.mkdirSync(dir, { recursive: true });
-  let name = safeName(filename);
-  let abs = path.join(dir, name);
-  let n = 1;
-  while (fs.existsSync(abs)) {
-    const ext = path.extname(name);
-    name = `${path.basename(name, ext)}-${n++}${ext}`;
-    abs = path.join(dir, name);
+  const base = safeName(filename);
+  let name = base;
+  // Écriture exclusive : deux envois du même nom ne s'écrasent jamais.
+  for (let n = 1; !(await storage().put(path.join(dir, name), buffer, { exclusive: true })); n++) {
+    const ext = path.extname(base);
+    name = `${path.basename(base, ext)}-${n}${ext}`;
   }
-  fs.writeFileSync(abs, buffer);
 
   const relPath = `refs/${name}`;
   await ingestRefFile(relPath);
@@ -297,8 +295,7 @@ export async function removeUploadedRef(srcPath: string): Promise<void> {
   }
   await q.run(`DELETE FROM exam_refs WHERE path = ?`, srcPath);
   if (row?.uploaded) {
-    const abs = path.join(REFS_DIR(), path.basename(srcPath));
-    if (fs.existsSync(abs)) fs.unlinkSync(abs);
+    await storage().remove(path.join(REFS_DIR(), path.basename(srcPath)));
   }
   // Ses images de pages (lib/page-cache) : rendues de nouveau à la demande si le PDF reste.
   purgePdfPages(currentCourse(), path.basename(srcPath));
