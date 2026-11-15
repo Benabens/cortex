@@ -207,9 +207,9 @@ test("dédoublonnage : un contrôle qui voit des doublons à chaque passe ne fai
   assert.equal(r.count, 15, JSON.stringify(calls));
   assert.ok(calls.dedup <= 10, `contrôles des doublons bornés : ${calls.dedup}`);
   // L'audit initial ne repasse que sur les remplaçants des doublons. La porte de livraison ajoute
-  // ensuite un unique regard sur l'examen réellement livré, sans ouvrir une nouvelle boucle.
-  assert.ok(calls.audit <= 3, `audit final : ${JSON.stringify(calls)}`);
+  // ensuite deux regards indépendants sur l'examen réellement livré, sans ouvrir une nouvelle boucle.
+  assert.ok(calls.audit <= 4, `audit final : ${JSON.stringify(calls)}`);
   const seen = auditedStems.flat();
   const counts = seen.reduce((m, stem) => m.set(stem, (m.get(stem) ?? 0) + 1), new Map<string, number>());
-  assert.ok([...counts.values()].every((n) => n <= 2), `une question auditée plus de deux fois : ${JSON.stringify(auditedStems)}`);
+  assert.ok([...counts.values()].every((n) => n <= 3), `une question auditée plus de trois fois : ${JSON.stringify(auditedStems)}`);
 });
