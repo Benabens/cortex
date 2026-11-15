@@ -37,6 +37,7 @@ function item(q: number, withExplanation: boolean) {
     topic: "Équité", type: "scq", stem: `Question ${q} : que dit le cours sur l'impact disparate ?`,
     options: ["Une affirmation juste, tirée du cours. (clé)", "Une affirmation inversée par rapport au cours.", "Une affirmation qui change une condition du cours.", "Une affirmation attribuée à la mauvaise étude."],
     correct: [0], misconceptions: ["", "[inversion] x", "[mauvaise condition] x", "[mauvaise attribution] x"],
+    source_fact: "Une affirmation juste sur l'impact disparate est tirée du cours fictif.",
     ...(withExplanation ? { explanation: "La bonne réponse reprend le cours ; les autres l'inversent ou le déforment." } : {}),
   };
 }
@@ -115,7 +116,7 @@ test("un QCM livré sans explication par le modèle est remplacé ; l'examen est
   await reloadCourses();
   const r = await runWithCourse(row.id, async () => {
     for (const t of ["sources", "items", "topics"]) await q.ensureTable(t);
-    const text = "Impact disparate, taux de faux positifs, équité des modèles.";
+    const text = "Impact disparate, taux de faux positifs, équité des modèles. Une affirmation juste sur l'impact disparate est tirée du cours fictif.";
     const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", "Séances", "course_pdf/s1", null, 1);
     const iid = await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", "Séances", text);
     await indexItemForSearch(iid, sid, "Séances", text);
