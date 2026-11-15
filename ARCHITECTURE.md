@@ -67,7 +67,14 @@ En développement, sans configuration, tout tourne sur SQLite en mono-utilisateu
 
 Le moteur privilégie un bac à sable noyau (Seatbelt sur macOS, espaces de noms `unshare -rn` sur Linux). Sur Railway, l'hôte refuse `unshare` : par défaut toute exécution reste **désactivée** et ces voies répondent `not_applicable`, jamais un faux « prouvé ».
 
-La vérification de programmes Python peut être activée explicitement avec `CORTEX_PYTHON_WASM=1`. Elle exécute Pyodide dans un worker WebAssembly jetable : aucun accès au réseau ni au système de fichiers hôte, pont JavaScript et capacités Python réseau/fichiers refusés avant exécution, pandas préchargé à la demande, worker tué au timeout et sortie tronquée. La mémoire du candidat est surveillée par `tracemalloc`, les grosses allocations usuelles sont refusées avant exécution et le tas JavaScript du worker est plafonné. `resourceLimits` ne plafonne toutefois pas à lui seul la mémoire linéaire WASM : le flag reste désactivé par défaut tant que le déploiement Railway n'a pas été validé en charge avec la limite mémoire du conteneur. Cette voie ne réactive ni C, ni SymPy, ni les figures. `/api/health` distingue `verification.mode: "python-wasm"` de l'isolation noyau.
+La vérification de programmes Python peut être activée explicitement avec `CORTEX_PYTHON_WASM=1`. Elle exécute Pyodide dans un worker WebAssembly jetable : aucun accès au réseau ni au système de fichiers hôte, pont JavaScript et capacités Python réseau/fichiers refusés avant exécution, worker tué au timeout et sortie tronquée. Elle sert les deux voies d'exécution Python (`runPython`, `lib/sandbox-exec.ts`) : les programmes « écris une fonction » (`verifyCode`) et les extraits des questions de lecture de code (`lib/blocks.ts`).
+
+- **Délais séparés** : le démarrage (worker, runtime, import de pandas) a son propre délai (60 s) ; les 10 s d'exécution courent à partir du runtime prêt. Compté dans ces 10 s, le démarrage pandas (2,5 s seul, 11 s à 32 en parallèle) faisait passer un extrait correct pour une boucle infinie.
+- **Mémoire** : le tas JavaScript est plafonné par `resourceLimits`, et la mémoire linéaire WebAssembly par un refus de croissance au-delà du tas du runtime + 256 Mo (le programme reçoit un `MemoryError`). `tracemalloc` reste en garde complémentaire, mais il ne voit une allocation C unique qu'après coup.
+- **Borne globale** : au plus `CORTEX_PYTHON_WASM_CONCURRENCY` vérifications (défaut 4) tous processus confondus, par fichiers-créneaux dans `/tmp` (chaque job est un processus) ; le créneau d'un processus mort est repris.
+- **Paquets** : les wheels pandas sont préchargés dans l'image (`scripts/pyodide-prefetch.ts`) ; la CI exécute pandas réseau coupé sur l'image construite.
+
+Mesures et méthode : `npm run pyodide:load` (scripts/pyodide-load.ts). Cette voie ne réactive ni C, ni SymPy, ni les figures. `/api/health` distingue `verification.mode: "python-wasm"` de l'isolation noyau.
 
 ## Coût et facturation
 

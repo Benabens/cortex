@@ -655,8 +655,11 @@ Rien n'est restauré. Code de sortie ≠ 0 = sauvegarde inutilisable.
 - **Isolation (décision)** : le runtime Railway refuse `unshare`, donc aucun
   bac à sable noyau n'est disponible et l'exécution reste désactivée par
   défaut. La vérification Python WebAssembly/Pyodide est prête derrière
-  `CORTEX_PYTHON_WASM=1`, mais ce flag ne doit être activé qu'après validation
-  en charge sur Railway. Elle ne réactive ni C, ni sympy, ni matplotlib.
+  `CORTEX_PYTHON_WASM=1` (banc de charge : `npm run pyodide:load`, borne
+  globale `CORTEX_PYTHON_WASM_CONCURRENCY`, défaut 4). Avant de l'activer,
+  vérifier dans les logs de build Railway la ligne « ✓ paquets Pyodide en
+  local » (sinon pandas serait téléchargé du CDN au premier usage). Elle ne
+  réactive ni C, ni sympy, ni matplotlib.
   `/api/health` (avec `METRICS_TOKEN`) expose alors `checks.pythonWasm: true` et
   `verification.mode: "python-wasm"` ; sans le flag le mode reste `disabled`.
 - Génération d'un examen complet : **10-20 min** (multi-passes + vérification)
