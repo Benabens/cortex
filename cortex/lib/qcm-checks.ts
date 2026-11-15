@@ -82,6 +82,15 @@ const GROUP_ANCHORS = [
   /\b(?:the\s+)?(?:other|wrong|incorrect)\s+(?:options|answers|choices|statements)\b/iu,
   /\b(?:the\s+)?distractors\b/iu,
   /\band\s+not\s+/iu,
+  // « contrairement aux hommes politiques, qui… » (job 28, Q1) : une seule notion absente, pas une
+  // liste, mais la même mécanique de découpage s'applique au texte qui suit l'amorce. L'article
+  // contracté (au/aux) n'est PAS consommé : c'est lui qui fait reconnaître le nom comme une notion
+  // nommée (`NAMES_SOMETHING`) une fois l'amorce retirée.
+  /\bcontrairement\s+(?=(?:à|au|aux)\b)/iu,
+  /\bà\s+la\s+différence\s+(?=(?:de|du|des|d['’]))/iu,
+  /\bau\s+contraire\s+(?=(?:de|du|des|d['’]))/iu,
+  /\bpar\s+opposition\s+(?=(?:à|au|aux)\b)/iu,
+  /\bunlike\b/iu,
 ];
 
 /** Une phrase consacrée à UNE option (« L'option qui… », « Celle qui… »). */
@@ -98,6 +107,13 @@ const LEADING = /^(?:(?:et|ou|ni|or|nor|and)\s+(?:encore\s+)?|soit\s+(?:parce\s+
 
 /** « confondent ce concept avec… » : la tournure qui précède le premier distracteur nommé. */
 const CONFUSES = /^(?:confond\p{L}*|assimil\p{L}*|mélang\p{L}*|rapproch\p{L}*|confus\p{L}*)\s+[^,()]{0,60}?\s+(?:avec|à|with)\s+/iu;
+
+/**
+ * « et non à cause de la revente des données… » (job 28, Q9) : l'amorce de groupe (`et non `) ne
+ * consomme pas la cause elle-même, qui reste en tête de l'élément sans déterminant reconnaissable
+ * par `NAMES_SOMETHING` ; la retirer ici fait réapparaître le nom qu'elle introduit.
+ */
+const CAUSAL_LEAD = /^(?:à\s+cause\s+|en\s+raison\s+|du\s+fait\s+|faute\s+)(?=de\b)/iu;
 
 /**
  * « évoquent l'automatisation… », « parlent d'une satire… » : un verbe de renvoi en tête d'un
@@ -121,7 +137,7 @@ export function refutedItems(explanation: string): string[] {
       const rest = s.slice(niMatches[0].index).replace(/[.!?]+$/u, "");
       const pieces = splitTopLevel(rest, /^(?:,\s*|;\s*|\s*\bni\s+)/iu);
       for (const raw of pieces) {
-        const lead = raw.replace(LEADING, "").replace(VERB_LEAD, "").trim();
+        const lead = raw.replace(LEADING, "").replace(VERB_LEAD, "").replace(CAUSAL_LEAD, "").trim();
         if (!lead || SUMMARY.test(lead) || contentRoots(lead).size < 1) continue;
         out.push(lead);
       }
@@ -146,8 +162,9 @@ export function refutedItems(explanation: string): string[] {
     for (const raw of pieces) {
       const lead = raw.replace(LEADING, "");
       // « confondent ce mécanisme avec le biais de négativité » : le distracteur suit « avec » ;
-      // « évoquent l'automatisation » : le verbe de renvoi ne désigne rien par lui-même.
-      const p = lead.replace(CONFUSES, "").replace(VERB_LEAD, "").trim();
+      // « évoquent l'automatisation » : le verbe de renvoi ne désigne rien par lui-même ;
+      // « à cause de la revente… » : la cause elle-même, pas l'amorce qui l'introduit.
+      const p = lead.replace(CONFUSES, "").replace(VERB_LEAD, "").replace(CAUSAL_LEAD, "").trim();
       if (!p || SUMMARY.test(p)) continue;
       // « …, ou que la définition exige… » : coordonné, c'est un nouvel élément même s'il commence par « que ».
       const coordinated = lead.length < raw.trim().length;
@@ -169,8 +186,13 @@ export function refutedItems(explanation: string): string[] {
 /** « supposent à tort que X », « ou que X » : l'élément réfute une affirmation, X. */
 const CLAIM = /^(?:(?:affirm|suppos|consid[eè]r|prét?end|croi|pens|soutien|laiss\p{L}*\s+entend|impliqu|sugg[eè]r|admett|pos|claim|assum|suggest|stat)\p{L}*\s+(?:à\s+tort\s+|faussement\s+|wrongly\s+)?)?(?:que\s+|qu['’]\s*|that\s+)/iu;
 
-/** Élément qui nomme une notion ou une affirmation (« le biais de négativité », « une analyse lente… »). */
-const NAMES_SOMETHING = /^(?:l['’]|le|la|les|un|une|des|du|de\s+la|de\s+l['’]|d['’]|ce|cette|celle|celui|the|an?)\b/iu;
+/**
+ * Élément qui nomme une notion ou une affirmation (« le biais de négativité », « une analyse
+ * lente… »). Les formes élidées (l'/d'/de l') n'exigent PAS de frontière `\b` après l'apostrophe :
+ * `\b` est toujours ASCII en JavaScript, donc une voyelle accentuée juste après (« l'éducation »,
+ * « l'évaluation ») n'en forme jamais une et la détection échouait (job 28, Q3).
+ */
+const NAMES_SOMETHING = /^(?:l['’]|d['’]|de\s+l['’])(?=\p{L})|^(?:le|la|les|un|une|des|du|de\s+la|au|aux|ce|cette|celle|celui|the|an?)\b/iu;
 /** Ce qui suit le nom réfuté : une relative, une cause, une parenthèse, une incise. */
 const ITEM_TAIL = /\s+(?:qui|que|qu['’]|dont|où|lequel|laquelle|car|parce|puisque|alors|tandis|mais|which|that|because|whereas)\b|,|\(|\s[—–]\s/iu;
 const itemHead = (item: string) => item.slice(0, ITEM_TAIL.exec(item)?.index ?? item.length);
@@ -211,7 +233,24 @@ export function explanationIssues(explanation: string, options: string[], correc
     // Rien de propre à l'élément (il ne fait que reprendre l'énoncé ou la clé) : on ne juge pas.
     if (!own.length) continue;
     const best = Math.max(...wrongRoots.map((rs) => own.filter((r) => rs.has(r)).length));
-    if (one ? best < 2 && best / own.length < 0.34 : best === 0) absent.push(item.slice(0, 120));
+    // « L'option qui… »/« affirme que… » (tournure individuelle) : seuil tolérant à la
+    // reformulation, qui laisse passer un seul mot commun sur beaucoup — une vraie paraphrase
+    // partage peu de racines (job 23, Q16 : « un mode de pensée censé produire un calcul exact »
+    // pour « Système 2… recalculerait avec exactitude »). Un élément COURT (≤ 2 mots propres,
+    // notamment ceux d'une liste groupée) exige que son PREMIER mot propre — la tête du groupe
+    // nominal (« biais » dans « biais cognitifs », « éducation » dans « éducation aux médias ») —
+    // se retrouve dans une même option, sur 4 lettres (la racine à 5 lettres distingue encore deux
+    // conjugaisons du même verbe : « soutenant »/« soutient » → « soute »/« souti », job 23 Q7) ;
+    // un second mot qui ne fait que qualifier (« cognitifs ») reste permis sans appui (Q17/Q18 :
+    // « les biais cognitifs » désigne bien l'option « Les biais… »), mais une tête absente ne l'est
+    // jamais par la seule coïncidence d'un second mot (job 28, Q3 : « éducation aux médias » n'est
+    // pas absent faute de mieux parce que « médias » apparaît, par hasard, dans un distracteur sur
+    // les « médias synthétiques », sans rapport).
+    const head4 = own[0]?.slice(0, 4);
+    const absentNow = own.length <= 2
+      ? !wrongRoots.some((rs) => [...rs].some((r) => r.slice(0, 4) === head4))
+      : one ? best < 2 && best / own.length < 0.34 : best === 0;
+    if (absentNow) absent.push(item.slice(0, 120));
   }
   const issue = { refuted: items.length, distractors: wrong.length, absent };
   return absent.length || items.length > wrong.length ? issue : null;
@@ -325,6 +364,22 @@ function overlapRatio(a: Set<string>, b: Set<string>): number {
  */
 export function sameProposition(a: Set<string>, b: Set<string>): boolean {
   return overlapRatio(a, b) >= 0.7;
+}
+
+/**
+ * Deux questions qui s'appuient sur le MÊME passage précis du cours — le même exemple, la même
+ * étude, le même fait concret (job 28, finition v6, Q1/Q7 : la même comparaison chiffrée d'un
+ * grand quotidien et d'une encyclopédie collaborative, l'une demandant les chiffres, l'autre ce
+ * qu'ils illustrent). Comparé au fait source LUI-MÊME, pas à la bonne réponse : deux questions sur
+ * le même passage peuvent avoir des bonnes réponses sans aucun mot en commun. Un recouvrement
+ * élevé, pas une égalité stricte (reformulation), et un minimum de mots propres de chaque côté
+ * pour ne pas rapprocher deux faits sources trop courts pour en juger.
+ */
+export function sameSourceFact(a?: string | null, b?: string | null): boolean {
+  const ra = contentRoots(a ?? "");
+  const rb = contentRoots(b ?? "");
+  if (ra.size < 4 || rb.size < 4) return false;
+  return overlapRatio(ra, rb) >= 0.6;
 }
 
 /**
