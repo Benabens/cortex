@@ -6,7 +6,7 @@ import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseNumbers, absentCourseTerms, corpusWindows, coursePassages, factNumbers, topicsInScope } from "@/lib/course-grounding";
 import { rewriteExplanations, rewriteExplanationsOnOptions, secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
-import { bestNotionMatch, capDrops, describeExplanationIssue, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, keyProposition, notionBase, notionCap, notionMismatch, optionHead, sameProposition, sameSourceFact } from "@/lib/qcm-checks";
+import { bestNotionMatch, capDrops, describeExplanationIssue, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, keyProposition, notionBase, notionCap, notionMismatch, optionHead, sameProposition, sameSourceFact, withoutRemovedOptionRefs } from "@/lib/qcm-checks";
 import { assignChapters, spreadOverChapters, variants } from "@/lib/coverage";
 import { normalize, tokenize } from "@/lib/text";
 import { courseRefImages } from "@/lib/course-vision";
@@ -90,6 +90,14 @@ export type QcmItem = {
  * perdue. Le délai suit la sortie : 16 000 tokens sortaient en moins de 5 min, 32 000 tiennent en 10.
  */
 const QCM_CALL_LIMITS = { maxTokens: LONG_OUTPUT_MAX_TOKENS, timeoutMs: 600_000 } as const;
+
+/**
+ * Vérification à l'aveugle : à l'effort par défaut, sa réflexion faisait 88 % de sa sortie (banc
+ * HUM-285 du 15/11 : 40 k tokens pour 5,7 k de réponse). Effort moyen. La revue finale garde
+ * l'effort par défaut : à effort moyen, elle signalait 5 à 9 doublons au lieu de 2, et la ronde de
+ * comblement qui suivait coûtait plus que l'économie (boucle moteur, itération 3).
+ */
+const QCM_VERIFY_LIMITS = { ...QCM_CALL_LIMITS, effort: "medium" } as const;
 
 const QCM_BATCH_SCHEMA = {
   type: "object",
@@ -662,7 +670,11 @@ async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, la
     // L'explication doit réfuter les options FINALES : l'ancienne réfute souvent les distracteurs
     // remplacés (job 23 : neuf explications sur vingt réfutaient des options absentes).
     const written = r.explanation && !citesOptionLabel(r.explanation, options.length) ? r.explanation : null;
-    const explanation = [written, it.explanation].find((e) => !!e && !explanationIssues(e, options, it.correct, it.stem)) ?? written ?? it.explanation;
+    // Boucle moteur, itération 4 (15/11) : l'une ou l'autre réfutait encore l'option retirée (« les
+    // vulnérabilités zero-day ») sans que la revérification le relève ; ces phrases sont retirées.
+    const removed = it.options.filter((o, j) => options[j] !== o);
+    const pruned = [written, it.explanation].map((e) => (e ? withoutRemovedOptionRefs(e, removed, options, it.correct, it.stem) : null));
+    const explanation = pruned.find((e) => !!e && !explanationIssues(e, options, it.correct, it.stem)) ?? pruned.find(Boolean) ?? written ?? it.explanation;
     return { ...it, options, misconceptions, explanation, verified: null, trivialDistractors: null, duplicateOptions: null, judgeIssue: null, judgeOk: null, discrimination: null, nameOnly: null } as QcmItem;
   });
   const sent = repaired.filter((x): x is QcmItem => !!x);
@@ -1090,7 +1102,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean; course_terms?: string[]; off_course?: string; off_course_terms?: string[]; off_course_key?: boolean; off_course_options?: number[]; off_matter?: string; trivial_distractors?: number[]; definition_mismatch?: string; definition_mismatch_key?: boolean }[] };
   try {
     res = await completeJson(
-      { system, prompt, model: "opus", ...QCM_CALL_LIMITS, addDirs: figDirs, json: { schema: VERIFY_SCHEMA } },
+      { system, prompt, model: "opus", ...QCM_VERIFY_LIMITS, addDirs: figDirs, json: { schema: VERIFY_SCHEMA } },
       { check: (v) => (Array.isArray((v as { results?: unknown })?.results) ? null : "le champ « results » manque") },
     );
   } catch { return items; } // fallback honnête : non vérifiés

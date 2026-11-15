@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { capDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, refutedItems, ultimateAuditActions } from "../lib/qcm-checks";
+import { capDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, refutedItems, ultimateAuditActions, withoutRemovedOptionRefs } from "../lib/qcm-checks";
 
 type Item = { n: number; topic: string; verified: 0 | 1 | null; stem: string; options: string[]; correct: number[]; explanation: string };
 const EXAM9: Item[] = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "qcm-job23-examen9.json"), "utf8")).items;
@@ -55,6 +55,31 @@ test("explication réduite à la justification de la clé quand la réécriture 
   assert.match(q6, /^Le cours présente la motivation comme le pendant direct du leadership/);
   assert.doesNotMatch(q6, /et non|effet secondaire|devenir leader/);
   for (const it of [q(9), q(6)]) assert.equal(explanationIssues(keyOnlyExplanation(it.explanation)!, it.options, it.correct, it.stem), null);
+});
+
+test("distracteur remplacé : les phrases de l'explication qui réfutent l'option retirée sont retirées, la justification de la clé reste", () => {
+  // Boucle moteur, itération 4 (15/11, hum-285-job14, paraphrasé) : « zero-day » et « distribution
+  // centralisée » réfutés après leur remplacement ; « La gamification est… » ne la nomme que par son nom.
+  const stem = "Pourquoi les médias synthétiques automatisés menacent-ils la réalité partagée ?";
+  const options = ["Parce qu'ils s'appuient sur une réputation numérique bâtie sur les réseaux sociaux.", "Parce qu'ils coûtent cher à produire, ce qui les réserve aux États.", "Parce qu'ils produisent de la désinformation à faible coût et avec peu d'effort.", "Parce qu'ils exploitent des biais cognitifs comme l'excès de confiance."];
+  const removed = ["Parce qu'ils exploitent des vulnérabilités zero-day pour infiltrer des infrastructures critiques."];
+  const explanation = "Le cours retient le faible coût et le faible effort de production des médias synthétiques. L'exploitation de vulnérabilités zero-day relève de la sécurité des systèmes, pas de la désinformation. L'excès de confiance est un biais individuel, distinct de cette menace structurelle.";
+  assert.equal(withoutRemovedOptionRefs(explanation, removed, options, [2], stem), "Le cours retient le faible coût et le faible effort de production des médias synthétiques. L'excès de confiance est un biais individuel, distinct de cette menace structurelle.");
+  // Le seul nom de l'option retirée suffit.
+  const organs = withoutRemovedOptionRefs(
+    "Dans les pays à consentement présumé, chacun est donneur par défaut et doit refuser activement. La gamification est un outil distinct, fondé sur le jeu.",
+    ["La gamification du don d'organes, qui récompense les inscrits par des badges et des classements."],
+    ["Le consentement présumé, qui fait de chacun un donneur par défaut.", "Le régime suisse, où personne n'est donneur par défaut.", "Le nudge qui rend un choix plus attractif sans changer le défaut.", "Une campagne d'information nationale."], [0], "Quel dispositif explique les taux de don d'organes plus élevés ?");
+  assert.equal(organs, "Dans les pays à consentement présumé, chacun est donneur par défaut et doit refuser activement.");
+  // Une phrase-bilan qui reprend des mots de la clé n'est protégée qu'en tête d'explication.
+  const eco = withoutRemovedOptionRefs(
+    "Les biens numériques combinent un coût fixe de production élevé et un coût variable quasiment nul. Les autres options décrivent à tort une distribution centralisée qui contrôle précisément les destinataires, ou une combinaison inversée de coûts fixes faibles et de coûts variables élevés.",
+    ["Ils reposent sur une distribution centralisée qui permet de contrôler précisément les destinataires."],
+    ["Un coût marginal qui croît avec le nombre de personnes servies.", "Un coût fixe faible et un coût variable élevé, qui limitent la diffusion.", "Un coût fixe de production élevé et un coût variable quasiment nul.", "Une production artisanale à l'unité."], [2], "Qu'est-ce qui caractérise les biens de la nouvelle économie ?");
+  assert.equal(eco, "Les biens numériques combinent un coût fixe de production élevé et un coût variable quasiment nul.");
+  // Rien à retirer : le texte revient tel quel ; rien qui reste : null.
+  assert.equal(withoutRemovedOptionRefs(explanation, ["Parce qu'ils sont trop chers à produire."], options, [2], stem), explanation);
+  assert.equal(withoutRemovedOptionRefs("Les vulnérabilités zero-day relèvent de la sécurité.", removed, options, [2], stem), null);
 });
 
 test("Q9 : deux options fausses sur la même notion sont relevées ; inversion, chiffre changé et bonne notion avec une mauvaise raison restent permis", () => {
