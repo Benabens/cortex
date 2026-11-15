@@ -111,21 +111,22 @@ test("rétention : supprime au-delà de BACKUP_KEEP_DAYS, garde le plus récent 
   // Un dossier INCOMPLET ancien (sans manifest) doit aussi partir.
   objects.set("cortex/cortex-backup-20260101-000000-tronque/data.tar.gz", { body: Buffer.from("x"), at: new Date("2026-01-01T00:00:00Z") });
 
-  // Rétention 2 j vue du 5 sept. 02:00 UTC : j3 (3 sept. 03:00) a 1,96 j → gardé ; j1, j2 → supprimés.
+  // Rétention 2 j vue du 5 sept. 02:00 UTC (limite : 3 sept. 02:00). Un état est gardé 2 j après
+  // avoir été REMPLACÉ : j2, remplacé par j3 le 3 sept. 03:00, est gardé ; j1, remplacé le 2 → supprimé.
   const now = new Date("2026-09-05T02:00:00Z");
   const before = await listRemoteBackups(store, cfg);
   assert.deepEqual(before.map((b) => [b.folder, b.complete]), [
     [folders[3], true], [folders[2], true], [folders[1], true], [folders[0], true], ["cortex-backup-20260101-000000-tronque", false],
   ]);
   const deleted = await pruneBackups(store, cfg, now, { log: () => {} });
-  assert.deepEqual(deleted.sort(), [folders[0], folders[1], "cortex-backup-20260101-000000-tronque"].sort());
+  assert.deepEqual(deleted.sort(), [folders[0], "cortex-backup-20260101-000000-tronque"].sort());
   const remaining = new Set([...objects.keys()].map((k) => k.split("/")[1]));
-  assert.deepEqual([...remaining].sort(), [folders[2], folders[3]].sort());
+  assert.deepEqual([...remaining].sort(), [folders[1], folders[2], folders[3]].sort());
 
   // Tout est vieux → le plus récent complet survit quand même.
   const later = new Date("2026-12-01T00:00:00Z");
   const deleted2 = await pruneBackups(store, cfg, later, { log: () => {} });
-  assert.deepEqual(deleted2, [folders[2]]);
+  assert.deepEqual(deleted2.sort(), [folders[1], folders[2]].sort());
   assert.ok([...objects.keys()].every((k) => k.startsWith(`cortex/${folders[3]}/`)));
 });
 

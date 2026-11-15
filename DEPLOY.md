@@ -114,9 +114,10 @@ plus que de cache (bases SQLite de dev, cache des images de pages, temporaires).
 
 Les PDF ouverts dans un onglet sont servis par une URL présignée (5 min) ; les
 aperçus intégrés passent par le serveur, en flux avec `Range` (CSP `'self'`).
-⚠ Railway Buckets n'a **ni versionnage ni corbeille** et la sauvegarde
-quotidienne n'archive plus les fichiers déjà dans le seau (§ 10) : une
-suppression y est définitive.
+Railway Buckets n'a **ni versionnage ni corbeille** : c'est la sauvegarde
+quotidienne hors site (§ 10, `BACKUP_S3_*`) qui en garde la copie, objet
+supprimé compris pendant 14 jours. Sans `BACKUP_S3_*`, une suppression dans le
+seau est définitive : pose les deux avant d'ouvrir.
 
 ## 4. Railway — variables d'environnement
 
@@ -615,7 +616,8 @@ sont posées, **le serveur lui-même** lance chaque jour (à partir de
 `BACKUP_HOUR_UTC`, défaut 3 h UTC) `npm run backup -- --push --prune --no-local` :
 dump `pg_dump` + archive du volume → bucket S3-compatible (Cloudflare R2 :
 10 Go gratuits, sans frais de sortie ; Backblaze B2 ; MinIO…), puis rétention
-`BACKUP_KEEP_DAYS` (défaut 14 ; **le dernier dossier complet n'est jamais
+`BACKUP_KEEP_DAYS` (défaut 14, comptés depuis qu'une sauvegarde a été
+**remplacée** par la suivante ; **le dernier dossier complet n'est jamais
 supprimé**). Un marqueur en base (`app_meta.backup:daily`) garantit **une seule
 exécution par jour** même avec deux instances pendant un redéploiement ; un
 échec rend le marqueur et le tick suivant (30 min) réessaie. Une configuration
@@ -655,11 +657,31 @@ Rien n'est restauré. Code de sortie ≠ 0 = sauvegarde inutilisable.
 ### Avec le stockage objet (§ 3 bis)
 
 Quand `STORAGE_S3_*` est posé, `data.tar.gz` ne contient plus que ce qui reste
-sur le disque (bases SQLite, fichiers hors seau) : les fichiers de cours sont
-dans le seau, et le manifeste le dit (`objectStore.location`). Une archive vide
-est alors valide. Une restauration rend la base et le disque, **pas** le seau :
-sa protection est celle du fournisseur (Railway Buckets : aucune ; R2 : réplique
-à configurer).
+sur le disque (bases SQLite, fichiers pas encore dans le seau) ; une archive vide
+est alors valide. Le seau, lui, est couvert par la sauvegarde **hors site**
+(`--push`, donc la quotidienne) :
+
+- chaque objet du seau est copié dans le bucket de sauvegarde, **une fois par
+  contenu** (`<BACKUP_S3_PREFIX>/_objets/<sha256[0:2]>/<sha256>`) : un objet inchangé n'est
+  ni relu ni renvoyé, la copie quotidienne est incrémentale ;
+- chaque sauvegarde porte l'index du seau à son instant (`objects.json`, clé →
+  empreinte, couvert par le manifeste) ;
+- **suppressions différées** : un objet supprimé du seau sort des index suivants
+  mais reste dans ceux des jours retenus. Il se restaure donc pendant
+  `BACKUP_KEEP_DAYS` (14 j) pleins après sa suppression ; son contenu est effacé
+  quand plus aucune sauvegarde retenue ne le cite. Seule limite : un objet créé
+  **et** supprimé entre deux sauvegardes quotidiennes n'a jamais été copié.
+
+```bash
+npm run backup:verify -- --latest --keep=/tmp/b   # + présence de chaque contenu indexé
+npm run backup:objects -- /tmp/b/<dossier> --to=/tmp/objets            # essai, empreintes vérifiées
+npm run backup:objects -- /tmp/b/<dossier> --to-bucket --yes [--force] # sinistre : remplit le seau STORAGE_S3_*
+```
+
+Un fichier supprimé par erreur : `npm run backup:verify -- --list`, puis
+`--remote=<dossier d'avant la suppression> --keep=…`, puis `backup:objects --to=…`
+et remets le fichier voulu. `bash scripts/restauration-ben.sh` restaure aussi les
+objets (étape 7) et échoue si un contenu manque ou si une empreinte diffère.
 
 ### Où et à quelle fréquence
 
