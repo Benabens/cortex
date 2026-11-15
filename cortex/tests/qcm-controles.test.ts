@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { capDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, refutedItems } from "../lib/qcm-checks";
+import { capDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, refutedItems, ultimateAuditActions } from "../lib/qcm-checks";
 
 type Item = { n: number; topic: string; verified: 0 | 1 | null; stem: string; options: string[]; correct: number[]; explanation: string };
 const EXAM9: Item[] = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "qcm-job23-examen9.json"), "utf8")).items;
@@ -23,6 +23,12 @@ const q = (n: number) => EXAM9.find((it) => it.n === n)!;
 test("examen #9 : les neuf explications qui réfutent des options absentes ou trop d'options sont relevées, les onze autres non", () => {
   const flagged = EXAM9.filter((it) => explanationIssues(it.explanation, it.options, it.correct, it.stem)).map((it) => it.n);
   assert.deepEqual(flagged, [1, 6, 9, 10, 11, 12, 13, 19, 20]);
+});
+
+test("audit ultime : retire une clé fausse et répare une question aux distracteurs triviaux", () => {
+  const initial = [{ stem: "Principe alpha", trivialDistractors: null }, { stem: "Méthode bêta", trivialDistractors: null }, { stem: "Condition gamma", trivialDistractors: null }];
+  const ultime = [{ ...initial[0] }, { ...initial[1], trivialDistractors: [2] }];
+  assert.deepEqual(ultimateAuditActions(initial, ultime), { drop: [2], repair: [1] });
 });
 
 test("explication : le défaut relevé est le bon (compte, puis notion ou affirmation absente)", () => {
