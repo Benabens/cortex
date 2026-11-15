@@ -219,3 +219,45 @@ test("Les paquets Pyodide absents du disque sont listés, dépendances comprises
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/** sandbox-exec mémorise l'isolation détectée : rechargé à neuf pour simuler la prod (sans unshare). */
+async function withoutNativeSandbox(wasm: boolean, fn: (m: typeof import("../lib/sandbox-exec")) => Promise<void>) {
+  process.env.CORTEX_SANDBOX = "none";
+  if (wasm) process.env.CORTEX_PYTHON_WASM = "1";
+  else delete process.env.CORTEX_PYTHON_WASM;
+  try {
+    delete require.cache[require.resolve("../lib/sandbox-exec")];
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    await fn(require("../lib/sandbox-exec") as typeof import("../lib/sandbox-exec"));
+  } finally {
+    delete process.env.CORTEX_SANDBOX;
+    delete process.env.CORTEX_PYTHON_WASM;
+    delete require.cache[require.resolve("../lib/sandbox-exec")];
+  }
+}
+
+test("Sans isolation noyau, un extrait de lecture de code s'exécute en WebAssembly quand le flag est actif", async () => {
+  await withoutNativeSandbox(true, async ({ runPython }) => {
+    const r = await runPython("likes = [2, 1]\nprint(sorted(likes))");
+    assert.deepEqual([r.ok, r.engine, r.stdout.trim()], [true, "wasm", "[1, 2]"], r.stderr);
+    const boom = await runPython("print(1 / 0)");
+    assert.deepEqual([boom.ok, boom.reason], [false, "error"]);
+    assert.match(boom.stderr, /ZeroDivisionError/);
+    const loop = await runPython("while True:\n    pass", { timeoutMs: 500 });
+    assert.deepEqual([loop.ok, loop.reason], [false, "timeout"]);
+  });
+});
+
+test("Une capacité refusée en WebAssembly n'est pas reprochée au code : l'exécution est indisponible", async () => {
+  await withoutNativeSandbox(true, async ({ runPython }) => {
+    const r = await runPython("import os\nprint(os.getcwd())");
+    assert.deepEqual([r.ok, r.reason], [false, "unavailable"]);
+  });
+});
+
+test("Sans isolation noyau ni flag WebAssembly, aucun Python n'est exécuté", async () => {
+  await withoutNativeSandbox(false, async ({ runPython }) => {
+    const r = await runPython("print(42)");
+    assert.deepEqual([r.ok, r.reason, r.engine, r.stdout], [false, "unavailable", null, ""]);
+  });
+});
