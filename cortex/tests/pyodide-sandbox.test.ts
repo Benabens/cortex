@@ -101,6 +101,17 @@ test("Le créneau d'un job tué (processus mort) est repris, il ne bloque pas le
   });
 });
 
+test("Un dossier de créneaux inutilisable rend la vérification indisponible au lieu de lever", async () => {
+  await withSlots(1, async (dir) => {
+    const file = path.join(dir, "fichier");
+    fs.writeFileSync(file, "");
+    process.env.CORTEX_PYTHON_WASM_SLOTS_DIR = path.join(file, "slots");
+    const r = await runPythonWasm("print(42)");
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, "disabled", r.stderr);
+  });
+});
+
 test("Une allocation numpy unique au-delà du budget mémoire est refusée, pas seulement constatée", async () => {
   process.env.CORTEX_PYTHON_WASM = "1";
   try {
