@@ -1,22 +1,112 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { Worker } from "node:worker_threads";
 
 export type PythonWasmResult = {
   ok: boolean;
-  reason?: "disabled" | "timeout" | "memory-limit" | "forbidden-capability" | "execution-error";
+  reason?: "disabled" | "startup-timeout" | "timeout" | "memory-limit" | "forbidden-capability" | "execution-error";
   stdout: string;
   stderr: string;
+  /** Démarrage du worker et du runtime (pandas compris), hors délai d'exécution. */
+  startupMs?: number;
+  /** Attente d'un créneau (CORTEX_PYTHON_WASM_CONCURRENCY), avant tout délai. */
+  queuedMs?: number;
 };
 
 export type PythonWasmOptions = {
   stdin?: string;
   args?: string[];
+  /** Délai d'exécution du programme, compté à partir du runtime prêt. */
   timeoutMs?: number;
+  /** Délai de démarrage du runtime (worker, Pyodide, pandas). */
+  startupTimeoutMs?: number;
   memoryMb?: number;
   maxOutputBytes?: number;
 };
 
 export function pythonWasmAvailable(): boolean {
   return process.env.CORTEX_PYTHON_WASM === "1";
+}
+
+/** Dossier du paquet npm pyodide, celui que le worker charge (require résolu depuis le cwd). */
+export function pyodidePackageDir(): string {
+  return path.join(process.cwd(), "node_modules", "pyodide");
+}
+
+/**
+ * Fichiers des paquets Python demandés, dépendances comprises, absents du disque. Le paquet npm
+ * n'embarque que le runtime : loadPackage télécharge le reste depuis le CDN jsDelivr au premier
+ * besoin (puis le garde dans ce dossier). En prod ce serait à chaque déploiement, dans le délai
+ * d'une vérification ; l'image Docker les précharge donc (scripts/pyodide-prefetch.ts).
+ */
+export function pyodidePackagesMissing(names: string[], dir = pyodidePackageDir()): string[] {
+  let packages: Record<string, { file_name: string; depends: string[] }>;
+  try {
+    packages = JSON.parse(fs.readFileSync(path.join(dir, "pyodide-lock.json"), "utf8")).packages;
+  } catch {
+    return ["pyodide-lock.json (illisible)"];
+  }
+  const missing: string[] = [];
+  const seen = new Set<string>();
+  const visit = (name: string) => {
+    if (seen.has(name)) return;
+    seen.add(name);
+    const pkg = packages[name];
+    if (!pkg) return void missing.push(`${name} (absent du lockfile)`);
+    if (!fs.existsSync(path.join(dir, pkg.file_name))) missing.push(pkg.file_name);
+    for (const dep of pkg.depends) visit(dep);
+  };
+  for (const name of names) visit(name);
+  return missing;
+}
+
+/**
+ * Vérifications simultanées, TOUS processus confondus (CORTEX_PYTHON_WASM_CONCURRENCY, défaut 4).
+ * Chaque job est un processus tsx distinct (lib/jobs.ts) : un sémaphore en mémoire ne bornerait
+ * qu'un job, et plusieurs examens en parallèle multiplieraient la charge. Mesuré (banc
+ * scripts/pyodide-load.ts) : un démarrage pandas occupe ~1,5 cœur ; au-delà de 8 en parallèle, les
+ * 8 vCPU du conteneur saturent et l'exécution s'allonge vers le délai de 10 s.
+ */
+export function pythonWasmConcurrency(): number {
+  const n = Number(process.env.CORTEX_PYTHON_WASM_CONCURRENCY);
+  return Number.isInteger(n) && n >= 1 ? n : 4;
+}
+
+const slotsDir = () => process.env.CORTEX_PYTHON_WASM_SLOTS_DIR || path.join(os.tmpdir(), "cortex-python-wasm-slots");
+
+/** Le détenteur d'un créneau est-il mort (job tué, conteneur redémarré sur le même /tmp) ? */
+function slotHolderDead(file: string): boolean {
+  try {
+    const pid = Number(fs.readFileSync(file, "utf8"));
+    // Créneau sans PID : son créateur est mort entre la création et l'écriture, ou l'écrit à l'instant.
+    if (!Number.isInteger(pid) || pid <= 0) return Date.now() - fs.statSync(file).mtimeMs > 5_000;
+    process.kill(pid, 0);
+    return false;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "ESRCH";
+  }
+}
+
+/** Prend un créneau (fichier slot-i créé en exclusif, PID dedans) ; renvoie de quoi le rendre. */
+async function acquireSlot(): Promise<() => void> {
+  const dir = slotsDir();
+  fs.mkdirSync(dir, { recursive: true });
+  for (;;) {
+    for (let i = 0; i < pythonWasmConcurrency(); i++) {
+      const file = path.join(dir, `slot-${i}`);
+      try {
+        fs.writeFileSync(file, String(process.pid), { flag: "wx" });
+        return () => fs.rmSync(file, { force: true });
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+        // Repris au tour suivant. Deux preneurs qui constatent le même mort peuvent, rarement,
+        // dépasser la borne d'un créneau le temps d'une vérification : jamais bloquer.
+        if (slotHolderDead(file)) fs.rmSync(file, { force: true });
+      }
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
 }
 
 const WORKER_SOURCE = String.raw`
@@ -29,6 +119,20 @@ const send = (value) => parentPort.postMessage(value);
   let stdout = "";
   let stderr = "";
   const append = (target, value) => (target + String(value) + "\n").slice(0, maxOutputBytes);
+  // Plafond de la mémoire linéaire WebAssembly, que resourceLimits ne couvre pas : tracemalloc ne
+  // voit une allocation C unique (np.ones(250_000_000) : 2 Go) qu'une fois faite. Emscripten grandit
+  // le tas par Memory.prototype.grow et traite un refus comme un malloc qui échoue : le programme
+  // reçoit un MemoryError. Armé au runtime prêt, le budget s'ajoute au tas du runtime (pandas compris).
+  let heapBudget = null;
+  let heapBase = 0;
+  const grow = WebAssembly.Memory.prototype.grow;
+  WebAssembly.Memory.prototype.grow = function (pages) {
+    if (heapBudget !== null) {
+      if (!heapBase) heapBase = this.buffer.byteLength;
+      if (this.buffer.byteLength + pages * 65536 > heapBase + heapBudget) throw new RangeError("CORTEX_MEMORY_LIMIT");
+    }
+    return grow.call(this, pages);
+  };
   const pyodide = await loadPyodide({
     // N'expose jamais globalThis (fetch, process, require) au pont Python-JavaScript.
     jsglobals: Object.freeze(Object.create(null)),
@@ -40,10 +144,17 @@ const send = (value) => parentPort.postMessage(value);
   // l'interprétation des antislashs et pouvait laisser l'import pandas sans paquet chargé.
   if (source.includes("pandas")) {
     await pyodide.loadPackage("pandas");
+    // loadPackage ne fait que déposer les fichiers : c'est l'import qui instancie les extensions
+    // WebAssembly de numpy et pandas. Fait ici, hors du traçage (settrace + tracemalloc) qui le
+    // rendait près de trois fois plus lent (7,5 s → 2,6 s mesurés) et hors du délai d'exécution ;
+    // le programme retrouve le module dans sys.modules.
+    await pyodide.runPythonAsync("import pandas");
     // Les messages de chargement appartiennent au runtime, pas au programme candidat.
     stdout = "";
     stderr = "";
   }
+  heapBudget = memoryMb * 1024 * 1024;
+  send({ type: "ready" });
   pyodide.globals.set("_cortex_source", source);
   pyodide.globals.set("_cortex_stdin", stdin);
   pyodide.globals.set("_cortex_args", args);
@@ -126,25 +237,52 @@ finally:
 export async function runPythonWasm(source: string, opts: PythonWasmOptions = {}): Promise<PythonWasmResult> {
   if (!pythonWasmAvailable()) return { ok: false, reason: "disabled", stdout: "", stderr: "" };
   const timeoutMs = Math.max(100, opts.timeoutMs ?? 10_000);
+  // Charger pandas coûte plusieurs secondes de CPU, bien plus sous charge : compté dans le délai
+  // d'exécution, il faisait passer un extrait correct pour une boucle infinie.
+  const startupTimeoutMs = Math.max(1, opts.startupTimeoutMs ?? 60_000);
   const memoryMb = Math.max(64, opts.memoryMb ?? 256);
   const maxOutputBytes = Math.max(1_024, opts.maxOutputBytes ?? 64 * 1_024);
 
-  return await new Promise((resolve) => {
-    const worker = new Worker(WORKER_SOURCE, {
-      eval: true,
-      workerData: { source, stdin: opts.stdin ?? "", args: opts.args ?? [], memoryMb, maxOutputBytes },
-      resourceLimits: { maxOldGenerationSizeMb: memoryMb, maxYoungGenerationSizeMb: Math.min(32, memoryMb / 4), stackSizeMb: 4 },
-    });
+  // Les délais courent une fois le créneau obtenu : attendre son tour n'est pas la faute du programme.
+  const queuedAt = performance.now();
+  let release: () => void;
+  try {
+    release = await acquireSlot();
+  } catch (error) {
+    // /tmp en lecture seule ou plein : l'exécution est indisponible, le code n'y est pour rien.
+    return { ok: false, reason: "disabled", stdout: "", stderr: `créneaux indisponibles : ${String(error)}`.slice(0, maxOutputBytes) };
+  }
+  const queuedMs = Math.round(performance.now() - queuedAt);
+  return await new Promise<PythonWasmResult>((resolve) => {
+    let worker: Worker;
+    try {
+      worker = new Worker(WORKER_SOURCE, {
+        eval: true,
+        workerData: { source, stdin: opts.stdin ?? "", args: opts.args ?? [], memoryMb, maxOutputBytes },
+        resourceLimits: { maxOldGenerationSizeMb: memoryMb, maxYoungGenerationSizeMb: Math.min(32, memoryMb / 4), stackSizeMb: 4 },
+      });
+    } catch (error) {
+      release();
+      return resolve({ ok: false, reason: "execution-error", stdout: "", stderr: String(error).slice(0, maxOutputBytes) });
+    }
     let settled = false;
+    const started = performance.now();
+    let startupMs: number | undefined;
     const finish = (result: PythonWasmResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      void worker.terminate();
-      resolve(result);
+      // Le créneau n'est rendu qu'une fois le thread fini : sa mémoire est alors libérée.
+      void worker.terminate().finally(release);
+      resolve({ ...result, startupMs, queuedMs });
     };
-    const timer = setTimeout(() => finish({ ok: false, reason: "timeout", stdout: "", stderr: "" }), timeoutMs);
-    worker.once("message", (message: PythonWasmResult) => finish(message));
+    let timer = setTimeout(() => finish({ ok: false, reason: "startup-timeout", stdout: "", stderr: "" }), startupTimeoutMs);
+    worker.on("message", (message: PythonWasmResult | { type: "ready" }) => {
+      if (!("type" in message)) return finish(message);
+      startupMs = Math.round(performance.now() - started);
+      clearTimeout(timer);
+      timer = setTimeout(() => finish({ ok: false, reason: "timeout", stdout: "", stderr: "" }), timeoutMs);
+    });
     worker.once("error", (error) => finish({
       ok: false,
       reason: /heap|memory|allocation/i.test(error.message) ? "memory-limit" : "execution-error",

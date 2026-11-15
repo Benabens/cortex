@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
-import { runPythonWasm, pythonWasmAvailable } from "../lib/pyodide-sandbox";
+import { runPythonWasm, pythonWasmAvailable, pyodidePackagesMissing } from "../lib/pyodide-sandbox";
 
 test("Pyodide reste désactivé sans flag", async () => {
   delete process.env.CORTEX_PYTHON_WASM;
@@ -17,6 +21,105 @@ test("Pyodide exécute Python et pandas quand le flag est actif", async () => {
     const r = await runPythonWasm("import pandas as pd\nprint(pd.Series([20, 22]).sum())", { timeoutMs: 60_000 });
     assert.equal(r.ok, true, r.stderr);
     assert.equal(r.stdout.trim(), "42");
+  } finally {
+    delete process.env.CORTEX_PYTHON_WASM;
+  }
+});
+
+test("Le délai d'exécution ne compte pas le démarrage du runtime, pandas compris", async () => {
+  process.env.CORTEX_PYTHON_WASM = "1";
+  try {
+    // Charger et importer pandas prend plusieurs secondes (2,5 s seul sur un Mac de développement,
+    // 11 s à 32 en parallèle) : un délai de 10 s qui l'inclut prend un extrait correct pour une
+    // boucle infinie.
+    const r = await runPythonWasm("import pandas as pd\nprint(pd.Series([20, 22]).sum())", { timeoutMs: 1_000 });
+    assert.equal(r.ok, true, `${r.reason} ${r.stderr}`);
+    assert.equal(r.stdout.trim(), "42");
+    assert.ok((r.startupMs ?? 0) > 1_000, `démarrage de ${r.startupMs} ms : le test ne prouve rien s'il tient dans le délai`);
+  } finally {
+    delete process.env.CORTEX_PYTHON_WASM;
+  }
+});
+
+test("Un runtime qui ne démarre pas dans son propre délai est signalé comme tel, pas comme un timeout du code", async () => {
+  process.env.CORTEX_PYTHON_WASM = "1";
+  try {
+    const r = await runPythonWasm("print(1)", { startupTimeoutMs: 1 });
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, "startup-timeout");
+  } finally {
+    delete process.env.CORTEX_PYTHON_WASM;
+  }
+});
+
+/** Créneaux de vérification dans un dossier propre au test (les fichiers de test tournent en parallèle). */
+async function withSlots(concurrency: number, fn: (dir: string) => Promise<void>) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-pywasm-slots-"));
+  process.env.CORTEX_PYTHON_WASM = "1";
+  process.env.CORTEX_PYTHON_WASM_CONCURRENCY = String(concurrency);
+  process.env.CORTEX_PYTHON_WASM_SLOTS_DIR = dir;
+  try {
+    await fn(dir);
+  } finally {
+    for (const k of ["CORTEX_PYTHON_WASM", "CORTEX_PYTHON_WASM_CONCURRENCY", "CORTEX_PYTHON_WASM_SLOTS_DIR"]) delete process.env[k];
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("Au-delà de CORTEX_PYTHON_WASM_CONCURRENCY, une vérification attend son tour sans entamer son délai", async () => {
+  await withSlots(1, async () => {
+    const start = Date.now();
+    const [a, b] = await Promise.all([1, 2].map(() => runPythonWasm("while True:\n    pass", { timeoutMs: 1_500 })));
+    const elapsed = Date.now() - start;
+    assert.deepEqual([a.reason, b.reason], ["timeout", "timeout"]);
+    // En série : deux démarrages et deux délais pleins. En parallèle, le tout tiendrait en un seul.
+    assert.ok(elapsed >= (a.startupMs ?? 0) + (b.startupMs ?? 0) + 2 * 1_500 - 50, `${elapsed} ms : les deux workers ont tourné ensemble`);
+  });
+});
+
+test("La borne vaut pour tous les processus : un créneau tenu par un autre job fait attendre", async () => {
+  await withSlots(1, async (dir) => {
+    // Chaque job est un processus distinct : le créneau est un fichier, ici tenu par un processus vivant.
+    fs.writeFileSync(path.join(dir, "slot-0"), String(process.ppid));
+    setTimeout(() => fs.rmSync(path.join(dir, "slot-0"), { force: true }), 1_000);
+    const start = Date.now();
+    const r = await runPythonWasm("print(42)");
+    assert.equal(r.stdout.trim(), "42", r.stderr);
+    assert.ok(Date.now() - start >= 1_000, "la vérification n'a pas attendu le créneau");
+  });
+});
+
+test("Le créneau d'un job tué (processus mort) est repris, il ne bloque pas les vérifications", async () => {
+  await withSlots(1, async (dir) => {
+    const dead = spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"]).stdout.toString();
+    fs.writeFileSync(path.join(dir, "slot-0"), dead);
+    const r = await runPythonWasm("print(42)", { timeoutMs: 5_000 });
+    assert.equal(r.stdout.trim(), "42", `${r.reason} ${r.stderr}`);
+    // Rendu à la fin du thread, juste après le résultat.
+    for (let i = 0; i < 40 && fs.existsSync(path.join(dir, "slot-0")); i++) await new Promise((res) => setTimeout(res, 50));
+    assert.equal(fs.existsSync(path.join(dir, "slot-0")), false, "le créneau est rendu après la vérification");
+  });
+});
+
+test("Un dossier de créneaux inutilisable rend la vérification indisponible au lieu de lever", async () => {
+  await withSlots(1, async (dir) => {
+    const file = path.join(dir, "fichier");
+    fs.writeFileSync(file, "");
+    process.env.CORTEX_PYTHON_WASM_SLOTS_DIR = path.join(file, "slots");
+    const r = await runPythonWasm("print(42)");
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, "disabled", r.stderr);
+  });
+});
+
+test("Une allocation numpy unique au-delà du budget mémoire est refusée, pas seulement constatée", async () => {
+  process.env.CORTEX_PYTHON_WASM = "1";
+  try {
+    // 800 Mo en un seul appel C : aucun événement de traçage entre deux, tracemalloc ne voit rien.
+    const r = await runPythonWasm("import pandas as pd\nimport numpy as np\na = np.ones(100_000_000)\nprint(a.sum())", { timeoutMs: 20_000, memoryMb: 256 });
+    assert.deepEqual([r.ok, r.reason], [false, "memory-limit"], r.stdout + r.stderr.slice(-300));
+    const fits = await runPythonWasm("import pandas as pd\nimport numpy as np\nprint(np.ones(10_000_000).sum())", { timeoutMs: 20_000, memoryMb: 256 });
+    assert.equal(fits.stdout.trim(), "10000000.0", "80 Mo restent permis");
   } finally {
     delete process.env.CORTEX_PYTHON_WASM;
   }
@@ -66,7 +169,8 @@ test("Pyodide tue une boucle infinie au timeout", async () => {
     const r = await runPythonWasm("while True: pass", { timeoutMs: 500 });
     assert.equal(r.ok, false);
     assert.equal(r.reason, "timeout");
-    assert.ok(Date.now() - start < 5_000);
+    // Le délai court à partir du runtime prêt.
+    assert.ok(Date.now() - start - (r.startupMs ?? 0) < 3_000);
   } finally {
     delete process.env.CORTEX_PYTHON_WASM;
   }
@@ -105,4 +209,66 @@ test("verifyCode utilise Pyodide sans isolation noyau", async () => {
     delete process.env.CORTEX_PYTHON_WASM;
     delete require.cache[require.resolve("../lib/sandbox-exec")];
   }
+});
+
+test("Les paquets Pyodide absents du disque sont listés, dépendances comprises", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-pyodide-pkg-"));
+  try {
+    const pkg = (file_name: string, depends: string[]) => ({ file_name, depends });
+    fs.writeFileSync(path.join(dir, "pyodide-lock.json"), JSON.stringify({ packages: {
+      pandas: pkg("pandas.whl", ["numpy", "python-dateutil"]),
+      numpy: pkg("numpy.whl", []),
+      "python-dateutil": pkg("dateutil.whl", ["six"]),
+      six: pkg("six.whl", []),
+    } }));
+    for (const f of ["pandas.whl", "numpy.whl"]) fs.writeFileSync(path.join(dir, f), "");
+    assert.deepEqual(pyodidePackagesMissing(["pandas"], dir).sort(), ["dateutil.whl", "six.whl"]);
+    for (const f of ["dateutil.whl", "six.whl"]) fs.writeFileSync(path.join(dir, f), "");
+    assert.deepEqual(pyodidePackagesMissing(["pandas"], dir), []);
+    assert.deepEqual(pyodidePackagesMissing(["inconnu"], dir), ["inconnu (absent du lockfile)"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** sandbox-exec mémorise l'isolation détectée : rechargé à neuf pour simuler la prod (sans unshare). */
+async function withoutNativeSandbox(wasm: boolean, fn: (m: typeof import("../lib/sandbox-exec")) => Promise<void>) {
+  process.env.CORTEX_SANDBOX = "none";
+  if (wasm) process.env.CORTEX_PYTHON_WASM = "1";
+  else delete process.env.CORTEX_PYTHON_WASM;
+  try {
+    delete require.cache[require.resolve("../lib/sandbox-exec")];
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    await fn(require("../lib/sandbox-exec") as typeof import("../lib/sandbox-exec"));
+  } finally {
+    delete process.env.CORTEX_SANDBOX;
+    delete process.env.CORTEX_PYTHON_WASM;
+    delete require.cache[require.resolve("../lib/sandbox-exec")];
+  }
+}
+
+test("Sans isolation noyau, un extrait de lecture de code s'exécute en WebAssembly quand le flag est actif", async () => {
+  await withoutNativeSandbox(true, async ({ runPython }) => {
+    const r = await runPython("likes = [2, 1]\nprint(sorted(likes))");
+    assert.deepEqual([r.ok, r.engine, r.stdout.trim()], [true, "wasm", "[1, 2]"], r.stderr);
+    const boom = await runPython("print(1 / 0)");
+    assert.deepEqual([boom.ok, boom.reason], [false, "error"]);
+    assert.match(boom.stderr, /ZeroDivisionError/);
+    const loop = await runPython("while True:\n    pass", { timeoutMs: 500 });
+    assert.deepEqual([loop.ok, loop.reason], [false, "timeout"]);
+  });
+});
+
+test("Une capacité refusée en WebAssembly n'est pas reprochée au code : l'exécution est indisponible", async () => {
+  await withoutNativeSandbox(true, async ({ runPython }) => {
+    const r = await runPython("import os\nprint(os.getcwd())");
+    assert.deepEqual([r.ok, r.reason], [false, "unavailable"]);
+  });
+});
+
+test("Sans isolation noyau ni flag WebAssembly, aucun Python n'est exécuté", async () => {
+  await withoutNativeSandbox(false, async ({ runPython }) => {
+    const r = await runPython("print(42)");
+    assert.deepEqual([r.ok, r.reason, r.engine, r.stdout], [false, "unavailable", null, ""]);
+  });
 });
