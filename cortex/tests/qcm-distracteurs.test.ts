@@ -41,7 +41,7 @@ function item(q: number) {
     options: ["Une affirmation juste, tirée du cours. (clé)", "Une affirmation inversée par rapport au cours.", third, "Une affirmation attribuée à la mauvaise étude."],
     correct: [0], misconceptions: ["", "[inversion] x", "[remplissage] x", "[mauvaise attribution] x"],
     explanation: "La bonne réponse reprend le cours ; l'inversion et la mauvaise attribution le déforment.",
-    source_fact: "Une affirmation juste est tirée du cours fictif.",
+    source_fact: "Une affirmation juste sur l'impact disparate est tirée du cours fictif.",
   };
 }
 
@@ -132,7 +132,7 @@ async function course(): Promise<string> {
   await runWithCourse(row.id, async () => {
     ensureFts();
     for (const t of ["sources", "items", "topics"]) await q.ensureTable(t);
-    const text = "Une affirmation juste est tirée du cours fictif. Équité des modèles, taux de faux positifs, impact disparate, modération de contenus.";
+    const text = "Équité des modèles, taux de faux positifs, impact disparate, modération de contenus. Une affirmation juste sur l'impact disparate est tirée du cours fictif.";
     const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", "Séances", "course_pdf/s1", null, 1);
     const iid = await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", "Séances", text);
     await indexItemForSearch(iid, sid, "Séances", text);
