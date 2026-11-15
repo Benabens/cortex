@@ -15,6 +15,8 @@
 /** Modèle logique. Les ids complets passent tels quels (mapping par provider/env). */
 export type LlmModel = "opus" | "sonnet" | "haiku" | (string & {});
 
+export type LlmEffort = "low" | "medium" | "high";
+
 export type LlmImage = {
   /** ex. "image/png" */
   mediaType: string;
@@ -44,7 +46,13 @@ export type CompleteRequest = {
    * response_format). Le provider claude-code l'IGNORE : les call sites
    * historiques dumpent le schéma dans le prompt et parsent via extractJson().
    */
-  json?: { schema: object; effort?: "low" | "medium" | "high" };
+  json?: { schema: object };
+  /**
+   * Profondeur de réflexion du site d'appel (anthropic : output_config.effort ; codex-cli :
+   * model_reasoning_effort). Absent : défaut du modèle — « high » sur Sonnet 5, dont la réflexion
+   * adaptive facturait 8 à 15 k tokens par appel en prod (13-14/11) pour 1 à 2,5 k de réponse.
+   */
+  effort?: LlmEffort;
   /** Mode de réflexion (providers Anthropic seulement). */
   thinking?: "adaptive";
   /**

@@ -101,7 +101,7 @@ test("le schéma envoyé est rendu compatible avec la sortie structurée", async
 
 test("un objet libre (sans propriétés) rend le schéma inutilisable : texte libre, effort gardé", async () => {
   const schema = { type: "object", properties: { spec: { type: "object", description: "libre" } }, required: [], additionalProperties: false };
-  await anthropicProvider.complete({ prompt: "p", model: "sonnet", json: { schema, effort: "high" } });
+  await anthropicProvider.complete({ prompt: "p", model: "sonnet", json: { schema }, effort: "high" });
   assert.deepEqual(bodies[0].output_config, { effort: "high" });
 });
 
