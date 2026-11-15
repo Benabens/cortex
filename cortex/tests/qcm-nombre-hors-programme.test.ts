@@ -224,7 +224,7 @@ test("réserve épuisée par les doublons : la notion restée sans question est 
   assert.ok(!designPrompts.some((p) => /thème déjà couvert/i.test(p)), "aucune notion déjà posée n'est reprise");
   assert.ok(designPrompts.slice(1).some((p) => subjects(p).includes("Biais de statu quo")), designPrompts.map((p) => subjects(p).join(" | ")).join("\n"));
   assert.ok(designPrompts.some((p) => subjects(p).includes("Cours 4 — souveraineté numérique")), "le titre du support sert d'abord de réserve");
-  assert.equal(dedupeCalls, 3, "le contrôle des doublons repasse sur le complément");
+  assert.equal(dedupeCalls, 4, "le contrôle des doublons repasse sur le complément et avant la livraison");
 });
 
 test("un remplacement encore en doublon déclenche une nouvelle ronde bornée", async () => {
@@ -238,7 +238,7 @@ test("un remplacement encore en doublon déclenche une nouvelle ronde bornée", 
   const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0, onStep: (s) => { steps.push(s); } }));
   assert.equal(r.count, 4, steps.join("\n"));
   assert.ok(steps.filter((s) => /en doublon retiré.*remplacement/.test(s)).length >= 3, steps.join("\n"));
-  assert.equal(dedupeCalls, 4, "chaque remplacement est contrôlé, puis remplacé dans le budget restant");
+  assert.equal(dedupeCalls, 5, "chaque remplacement est contrôlé, puis une dernière fois avant la livraison");
 });
 
 // ─── Job 14 de HUM-285 (13/11, après #78) : titres = noms de fichiers ─────────────────────────────
