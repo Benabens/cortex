@@ -8,7 +8,9 @@ import { LlmError } from "@/lib/llm/types";
 import { defaultProviderName } from "@/lib/llm/config";
 import { guardsActive, floatLimit } from "./env";
 import type { GateIssue } from "./guards";
+import { isOwner } from "./owner";
 import { ownerAlertBlocker } from "./owner-alert";
+import { currentJob } from "./usage-context";
 import { alertSpendThresholds, resetSpendAlerts } from "./spend-alerts";
 
 /**
@@ -298,7 +300,8 @@ export function spendCapUsd(): number | null {
  * déploiement gardé, un défaut s'applique même sans variable — un plafond
  * GLOBAL seul transformerait un abuseur en déni de service pour tous les autres
  * (l'audit). Défaut 15 $/user/jour : très au-dessus de l'usage réel le plus
- * lourd mesuré (~6,6 $/jour), backstop d'une boucle emballée.
+ * lourd mesuré (~6,6 $/jour), backstop d'une boucle emballée. Le compte
+ * propriétaire en est exempté (il reste soumis au fusible global du mois).
  */
 export function spendCapPerUserUsd(): number | null {
   return floatLimit("SPEND_CAP_PER_USER_USD", 15);
@@ -338,20 +341,19 @@ export async function assertSpendCap(provider: string): Promise<void> {
 }
 
 /**
- * Même garde qu'assertSpendCap, en VALEUR plutôt qu'en exception : à appeler
- * AVANT de créer un job (lib/generation.ts), pour refuser tout de suite plutôt
- * que de lancer un worker voué à l'échec 2 s après (constat prod du 14/11,
- * job 21 HUM-285 — l'étudiant voyait un job « en cours » puis en erreur).
- * N'écrit rien de plus que assertSpendCap (mêmes logs) ; ignore le provider CLI
- * local (toujours gratuit).
+ * Plafonds de dépense en VALEUR, à appeler AVANT de créer un job : refuser tout
+ * de suite plutôt que de lancer un worker voué à l'échec 2 s après (constat prod
+ * du 14/11, job 21 HUM-285). Délègue au verdict unique de lib/billing/limits
+ * (calcul du jour du compte et fusible du mois, coût attendu compris) ; ignore le
+ * provider CLI local (toujours gratuit). `spec` : défaut, un examen standard.
  */
-export async function spendCapGate(): Promise<GateIssue | null> {
+export async function spendCapGate(spec?: import("./limits").LaunchSpec): Promise<GateIssue | null> {
   if (!isPaidProvider(defaultProviderName())) return null;
   try {
-    await assertSpendCapUnchecked();
-    return null;
-  } catch (e) {
-    if (e instanceof LlmError) return { status: 429, error: e.message };
+    const { jobSpec, limitGate } = await import("./limits");
+    const { creditCost } = await import("./credits");
+    return await limitGate(spec ?? jobSpec("exam", creditCost("exam")), ["daily_compute", "monthly_capacity"]);
+  } catch {
     // Base injoignable : laissé à assertSpendCap au moment de l'appel réel (fail-closed là, pas ici).
     return null;
   }
@@ -381,13 +383,18 @@ async function assertSpendCapUnchecked(): Promise<void> {
     }
   }
 
-  // Vaut aussi pour le propriétaire (lib/billing/owner) : une boucle sur son compte
-  // épuiserait sinon le plafond global, donc la génération de tous les comptes.
+  // Le propriétaire (lib/billing/owner) en est EXEMPTÉ (décision de Ben, 15/11) : il
+  // reste borné par le fusible global du mois ci-dessus, qui protège les autres comptes.
   const perUserCap = spendCapPerUserUsd();
-  if (perUserCap !== null) {
+  if (perUserCap !== null && !(await isOwner())) {
     const spentUser = await spentTodayByUser();
-    if (spentUser >= perUserCap) {
-      log("warn", "spend_cap.per_user_hit", { spentUser, cap: perUserCap, userId: currentUser() });
+    // Un job a été admis au lancement SOUS ce plafond, son coût attendu compris
+    // (lib/billing/limits) : il n'est coupé que s'il dépasse nettement ce coût
+    // (boucle emballée), jamais par l'écart ordinaire d'un job plus cher que la moyenne.
+    const job = currentJob();
+    const slack = job ? (await import("./budget")).expectedJobCostUsd(job.type) : 0;
+    if (spentUser >= perUserCap + slack) {
+      log("warn", "spend_cap.per_user_hit", { spentUser, cap: perUserCap, slack, userId: currentUser() });
       throw new LlmError(PER_USER_SPEND_CAP_MESSAGE, "SPEND_CAP", false);
     }
   }

@@ -48,9 +48,9 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     formatSkipped = "Détection couverte par la préparation hermétique E2E";
     return NextResponse.json({ ok: true, files: saved, formatSkipped });
   }
-  const { generationGate } = await import("@/lib/billing/guards");
-  const { creditsGate } = await import("@/lib/billing/credits");
-  const gate = (await generationGate("gen")) ?? (await creditsGate("format"));
+  const { jobSpec, launchGate } = await import("@/lib/billing/limits");
+  const { costForJob } = await import("@/lib/jobs");
+  const gate = await launchGate(jobSpec("format", costForJob("format")));
   if (gate) {
     formatSkipped = gate.error;
   } else {

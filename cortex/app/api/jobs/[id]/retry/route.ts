@@ -1,6 +1,5 @@
-import { creditsGate } from "@/lib/billing/credits";
-import { generationGate } from "@/lib/billing/guards";
-import { ReservationRefused, getJob, retryJob } from "@/lib/jobs";
+import { jobSpec, launchGate } from "@/lib/billing/limits";
+import { ReservationRefused, costForJob, getJob, retryJob } from "@/lib/jobs";
 import { requireCourse } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -8,15 +7,15 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** Relance un job échoué/zombie : recrée un job de même type+target et redémarre le worker.
- * Un retry est une NOUVELLE génération → mêmes garde-fous
- * (quota/jour + solde de crédits) que les routes generate. */
+ * Un retry est une NOUVELLE génération → mêmes limites d'usage que les routes
+ * generate, au coût exact du job relancé (lib/billing/limits). */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { course, denied } = requireCourse(req);
   if (denied) return denied;
   const { id } = await params;
   const old = await getJob(Number(id));
   if (old && old.type !== "ingest") {
-    const gate = (await generationGate("gen")) ?? (await creditsGate(old.type));
+    const gate = await launchGate(jobSpec(old.type, costForJob(old.type, old.target)));
     if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
   }
   let job;

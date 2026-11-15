@@ -1,5 +1,6 @@
 import styles from "@/app/secondary.module.css";
 import { BillingPanel } from "./BillingPanel";
+import { UsagePanel } from "./UsagePanel";
 import { WithdrawalForm } from "./WithdrawalForm";
 import { DeleteAccount } from "./DeleteAccount";
 import { ExportData } from "./ExportData";
@@ -15,7 +16,7 @@ export function AccountContent({ email, enabled, connectedAppsEnabled }: {
     <div className={styles.page}>
       <div>
         <h1 className="text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">Mon compte</h1>
-        <p className="mt-2 max-w-2xl text-[0.95rem] text-ink-2">Ton abonnement, tes crédits et tes données.</p>
+        <p className="mt-2 max-w-2xl text-[0.95rem] text-ink-2">Ton abonnement, tes crédits, ton usage et tes données.</p>
       </div>
 
       {email && (
@@ -28,6 +29,7 @@ export function AccountContent({ email, enabled, connectedAppsEnabled }: {
       <AppearanceSetting />
 
       <BillingPanel />
+      <UsagePanel />
       <WithdrawalForm />
 
       {connectedAppsEnabled && <ConnectedApps />}

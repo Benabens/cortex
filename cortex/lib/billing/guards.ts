@@ -72,46 +72,18 @@ export async function usedToday(bucket: QuotaBucket, userId = currentUser()): Pr
 }
 
 /**
- * Débit du user sur les 60 dernières secondes, TOUS buckets confondus.
- * Compté dans `gen_events` (store global) → PAR UTILISATEUR et cross-instance
- * (contrairement au rate-limit in-memory de proxy.ts, qui est par processus).
- */
-export async function rateGate(): Promise<GateIssue | null> {
-  const cap = ratePerUserPerMin();
-  if (cap === null || !quotaTrackingActive()) return null;
-  const since = nowStr(-60_000);
-  const r = await authGet<{ n: number }>(
-    `SELECT count(*) n FROM gen_events WHERE user_id = ? AND created_at >= ?`,
-    currentUser(), since,
-  );
-  if (Number(r?.n ?? 0) >= cap) {
-    return { status: 429, error: `Trop de requêtes, patiente une minute (limite ${cap}/min par compte).` };
-  }
-  return null;
-}
-
-/**
  * Gate de quota : null = passe ; sinon {status: 429, error} à renvoyer tel quel.
- * À appeler AVANT de créer un job / lancer un appel inline. Enchaîne la limite
- * de débit par minute (burst) puis le quota quotidien.
+ * Enchaîne la limite de débit par minute (burst) puis le quota quotidien — le
+ * verdict de lib/billing/limits restreint à ces deux limites (mêmes messages).
+ * Pour un lancement, préférer `launchGate`, qui vérifie TOUTES les limites.
  */
 export async function generationGate(bucket: QuotaBucket): Promise<GateIssue | null> {
-  if (await isOwner()) return null;
-  const burst = await rateGate();
-  if (burst) return burst;
-  const cap = quotaFor(bucket);
-  if (cap === null) return null;
-  const used = await usedToday(bucket);
-  if (used >= cap) {
-    return {
-      status: 429,
-      error:
-        bucket === "gen"
-          ? `Quota quotidien de générations atteint (${used}/${cap}). Réessaie demain.`
-          : `Quota quotidien d'assistance atteint (${used}/${cap}). Réessaie demain.`,
-    };
-  }
-  return null;
+  const { limitGate } = await import("./limits");
+  const r = await limitGate(
+    { bucket, kind: bucket === "gen" ? "exam" : "assist", costCenti: 0, jobSlot: false },
+    ["rate", bucket === "gen" ? "daily_generations" : "daily_assistance"],
+  );
+  return r && { status: r.status, error: r.error };
 }
 
 /** Un compteur n'a de sens QUE si un garde-fou l'utilise (quota posé, ou

@@ -19,6 +19,9 @@ const ENV: Record<string, string> = {
   CORTEX_DATA_DIR: DATA_DIR, DB_DRIVER: "postgres", DATABASE_URL: "pglite://memory", MCP_ENABLED: "1", AUTH_URL: "https://cortex.test",
   BILLING_ENABLED: "1", SIGNUP_FREE_CREDITS: "20", DAILY_GEN_QUOTA: "unlimited", DAILY_ASSIST_QUOTA: "unlimited",
   RATE_LIMIT_PER_USER_MIN: "unlimited", MAX_ACTIVE_JOBS: "unlimited",
+  // Le devis applique le verdict de la réservation (lib/billing/limits), budget lié au revenu compris :
+  // ce compte n'a que des crédits offerts, on lève le budget pour tester le format du devis.
+  AI_BUDGET_MARGIN: "unlimited",
   LLM_PROVIDER: "openai-compatible", LLM_API_KEY: "test", LLM_BASE_URL: "http://127.0.0.1:9/v1", LLM_MODEL_OPUS: "claude-sonnet-5",
 };
 Object.assign(process.env, ENV);

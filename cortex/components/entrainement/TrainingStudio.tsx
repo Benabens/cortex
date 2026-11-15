@@ -28,6 +28,7 @@ import {
   type DrillListResp,
 } from "@/lib/ux/training";
 import { cn } from "@/lib/ux/cn";
+import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
 
 /**
  * Studio d'entraînement RÉEL — UNE seule zone (REFONTE ALLÉGÉE, plus de mode Drill/Architecte).
@@ -63,6 +64,10 @@ export function TrainingStudio() {
   const [fbError, setFbError] = useState<string | null>(null);
 
   const busy = drilling || jobRunning;
+  // Avec image : exercice (job) ; sinon : question d'entraînement (aide). Même verdict que la route visée.
+  const launch = useLaunchUsage(image ? "exercise" : "drill");
+  const { refresh: refreshUsage } = launch;
+  useEffect(() => { if (!busy) refreshUsage(); }, [busy, refreshUsage]);
 
   // Réinitialise l'ÉTAT RÉSULTAT au changement de cours. On ne touche PAS à input/image/prefillNote :
   // le cours initial se résout de cs-202 → ml via un effet (courseId change au montage) ; effacer
@@ -230,10 +235,11 @@ export function TrainingStudio() {
           </div>
         )}
 
-        <Button variant="primary" onClick={submit} loading={busy} className="mt-5 w-full">
+        <Button variant="primary" onClick={submit} loading={busy} disabled={!busy && !launch.allowed} className="mt-5 w-full">
           {!busy && <Sparkles className="size-4" strokeWidth={2.5} />}
           {busy ? "Génération…" : "Générer l’exercice"}
         </Button>
+        {!busy && <UsageLine usage={launch.usage} now={launch.now} className="mt-2" />}
 
         {error && (
           <div

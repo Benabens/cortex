@@ -9,6 +9,7 @@ import { Segmented } from "@/components/ui/Segmented";
 import { useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@/lib/ux/api";
 import { cn } from "@/lib/ux/cn";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
+import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
 import { FOLDER_EXTENSIONS, prepareCourseImport, type FolderImportRefusal } from "@/lib/folder-import";
 
 const ACCEPT = ".pdf,.html,.htm,.txt,.md,.zip";
@@ -51,6 +52,10 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   const [jobKind, setJobKind] = useState<"format" | "ingest" | "prepare" | null>(null);
   const job = useJob(jobId);
   const running = jobId != null && (!job || JOB_ACTIVE.includes(job.status));
+  // Même verdict que POST /api/prepare : le bouton est coupé avant le clic, raison à l'appui.
+  const launch = useLaunchUsage("prepare");
+  const { refresh: refreshUsage } = launch;
+  useEffect(() => { if (!running) refreshUsage(); }, [running, refreshUsage]);
   const notified = useRef(false);
 
   useEffect(() => {
@@ -304,10 +309,11 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
 
       {/* Préparer le cours (pipeline complet) */}
       <div className="border-t border-line pt-4">
-        <Button variant="primary" onClick={prepare} loading={running && jobKind === "prepare"} disabled={running && jobKind !== "prepare"} className="w-full">
+        <Button variant="primary" onClick={prepare} loading={running && jobKind === "prepare"} disabled={(running && jobKind !== "prepare") || (!running && !launch.allowed)} className="w-full">
           {!(running && jobKind === "prepare") && <Sparkles className="size-4" strokeWidth={2.5} />}
           Préparer le cours
         </Button>
+        {!running && <UsageLine usage={launch.usage} now={launch.now} className="mt-2" />}
         <p className="mt-2 text-[0.76rem] leading-relaxed text-ink-3">
           Cortex lit tes supports, reconnaît le format du final et organise les notions à travailler.
         </p>
