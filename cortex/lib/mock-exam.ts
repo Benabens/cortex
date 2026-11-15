@@ -20,7 +20,8 @@ export async function generateMockExam(opts: { count?: number; focus?: string; k
   step(`Format : ${format.summary}`, 3);
   if (plan.generator === "qcm") {
     const { generateQcmExam } = await import("@/lib/qcm");
-    const r = await generateQcmExam({ count: plan.qcmCount, openCount: plan.openCount, focus: opts.focus, onStep: step, onExamReady: opts.onExamReady, phaseMs: opts.phaseMs });
+    const checkpoint = typeof opts.jobId === "number" ? (await import("@/lib/jobs")).jobCheckpointStore(opts.jobId) : undefined;
+    const r = await generateQcmExam({ count: plan.qcmCount, openCount: plan.openCount, focus: opts.focus, onStep: step, onExamReady: opts.onExamReady, phaseMs: opts.phaseMs, checkpoint });
     return { id: r.id, url: `/mock/${r.id}`, texError: r.texError, produced: r.count + r.open, requested: r.requested + r.openRequested };
   }
   if (plan.generator === "blocks") {
