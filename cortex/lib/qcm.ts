@@ -6,7 +6,7 @@ import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseNumbers, absentCourseTerms, corpusWindows, coursePassages, factNumbers, topicsInScope } from "@/lib/course-grounding";
 import { rewriteExplanations, rewriteExplanationsOnOptions, secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
-import { bestNotionMatch, capDrops, describeExplanationIssue, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, keyProposition, notionBase, notionCap, notionMismatch, optionHead, sameProposition, ultimateAuditActions } from "@/lib/qcm-checks";
+import { bestNotionMatch, capDrops, describeExplanationIssue, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, keyProposition, notionBase, notionCap, notionMismatch, optionHead, sameProposition, sameSourceFact, ultimateAuditActions } from "@/lib/qcm-checks";
 import { assignChapters, spreadOverChapters, variants } from "@/lib/coverage";
 import { normalize, tokenize } from "@/lib/text";
 import { courseRefImages } from "@/lib/course-vision";
@@ -1246,11 +1246,14 @@ const DUP_SCHEMA = {
 /**
  * Paires à soumettre nommément au contrôle des doublons, repérées sans modèle : même notion du
  * programme, réponses croisées (la bonne réponse de chacune est une option de l'autre — job 23 :
- * « la réalité partagée » et « la confiance », clé de l'une et distracteur de l'autre), ou bonnes
+ * « la réalité partagée » et « la confiance », clé de l'une et distracteur de l'autre), bonnes
  * réponses qui affirment le même fait sous un autre libellé de notion (job 25 : Q10/Q15, Q17/Q20,
- * que `keyNotion` seul ne rapprochait pas). Au plus 30.
+ * que `keyNotion` seul ne rapprochait pas), ou même passage source (job 28, finition v6 : Q1/Q7,
+ * la même comparaison chiffrée interrogée une fois sur les chiffres, une fois sur ce qu'ils
+ * illustrent — `strict`, car quand le programme a MOINS de notions que de questions, réutiliser un
+ * même exemple sous deux angles peut rester inévitable). Au plus 30.
  */
-export function suspectPairs(items: Pick<QcmItem, "options" | "correct" | "notion" | "focusSlot" | "sourceFact">[]): [number, number][] {
+export function suspectPairs(items: Pick<QcmItem, "options" | "correct" | "notion" | "focusSlot" | "sourceFact">[], strict = true): [number, number][] {
   const heads = items.map((it) => new Set(it.options.map((o) => optionHead(o, it.options)).filter((h): h is string => !!h)));
   const keys = items.map((it) => keyNotion(it));
   const props = items.map((it) => keyProposition(it));
@@ -1262,7 +1265,8 @@ export function suspectPairs(items: Pick<QcmItem, "options" | "correct" | "notio
       // Croisées dans les deux sens : la même distinction posée d'un côté puis de l'autre.
       const crossed = !!keys[i] && !!keys[j] && heads[j].has(keys[i]!) && heads[i].has(keys[j]!);
       const sameFact = !!props[i] && !!props[j] && sameProposition(props[i]!, props[j]!);
-      if (sameNotion || crossed || sameFact) out.push([i, j]);
+      const sameSource = strict && sameSourceFact(items[i].sourceFact, items[j].sourceFact);
+      if (sameNotion || crossed || sameFact || sameSource) out.push([i, j]);
     }
   }
   return out;
@@ -1291,13 +1295,13 @@ async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previou
   // Job 23 (14/11) : trois questions dont la réponse était « le biais de disponibilité » sont
   // passées, le contrôle ne sachant pas quelle option était la bonne. Il voit désormais la RÉPONSE
   // LOGIQUE (la bonne réponse), et les paires suspectes repérées sans modèle lui sont soumises nommément.
-  const suspects = suspectPairs(items);
+  const suspects = suspectPairs(items, opts.strict);
   // Banc du 04/11 (CS-290) : 2 questions sur 15 reprenaient un examen précédent du cours ; le concepteur
   // les voit, mais seul ce contrôle peut les retirer.
   const previous = (opts.previous ?? []).slice(0, PREVIOUS_STEMS).map((stem, i) => `P${i}. ${sanitizeCorpus(stem).slice(0, 220)}`).join("\n");
   const criterion = opts.strict
-    ? `Le programme a au moins autant de notions que l'examen a de questions : UNE NOTION = UNE QUESTION. Deux questions sur la même notion (le biais de négativité, le nudge, la souveraineté des données…) sont des doublons même sous deux angles différents.`
-    : `L'examen a plus de questions que le programme n'a de notions : deux questions sur une même notion sont permises si elles testent des angles VRAIMENT distincts (un autre fait, une autre condition, une autre étude) ; sont des doublons celles qui testent le même fait, la même condition, le même scénario ou le même raisonnement, même si l'une transforme la réponse de l'autre en distracteur ou reformule la question. Un décor différent (livraison de repas, e-commerce…) habillant la MÊME règle, avec la même réponse logique, reste un doublon : seul le FOND compte, jamais l'habillage.`;
+    ? `Le programme a au moins autant de notions que l'examen a de questions : UNE NOTION = UNE QUESTION. Deux questions sur la même notion (le biais de négativité, le nudge, la souveraineté des données…) sont des doublons même sous deux angles différents. Deux questions qui s'appuient sur le MÊME exemple ou la MÊME étude du cours (même passage précis, même fait concret cité) sont aussi des doublons, même si l'une en demande les chiffres et l'autre ce qu'ils illustrent (finition v6, job 28 : la même comparaison chiffrée d'un grand quotidien et d'une encyclopédie collaborative) — ce n'est jamais un angle distinct, seulement l'habillage de la question qui change.`
+    : `L'examen a plus de questions que le programme n'a de notions : deux questions sur une même notion sont permises si elles testent des angles VRAIMENT distincts (un autre fait, une autre condition, une autre étude) ; sont des doublons celles qui testent le même fait, la même condition, le même scénario ou le même raisonnement, même si l'une transforme la réponse de l'autre en distracteur ou reformule la question. Un décor différent (livraison de repas, e-commerce…) habillant la MÊME règle, avec la même réponse logique, reste un doublon : seul le FOND compte, jamais l'habillage. Reprendre le même exemple ou la même étude sous un angle vraiment distinct reste permis ici : le programme n'a pas assez de notions pour l'exclure.`;
   const r = await completeJson<{ notions?: { index: number; notion: string; angle: string; regle?: string }[]; duplicates: { first: number; second: number }[]; repeats?: { index: number; previous: number }[] }>({
     prompt: [
       `Voici les QCM d'un même examen. Pour chacun, nomme la notion du cours qu'il teste (notion, le MÊME libellé exact pour deux questions sur la même notion, même formulées autrement ou dans deux langues), l'angle précis (angle), et la règle ou réponse logique exacte qu'il vérifie SANS le décor du scénario (regle, le MÊME libellé exact si deux questions vérifient la même règle sous un décor différent).`,
@@ -1308,7 +1312,9 @@ async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previou
       // commun en apparence (un wiki, un forum d'entraide) mais la même clé en substance (« le
       // succès du modèle bénévole… motivations non financières ») et deux notions différentes.
       // Le nommer explicitement évite que deux libellés de notion distincts masquent le doublon.
-      ...(suspects.length ? [`Paires à trancher en priorité (même notion du programme, réponses croisées, OU bonne réponse + fait source qui affirment la même chose même sous un énoncé ou une notion différente), à lister en doublon si elles testent la même chose : ${suspects.map(([a, b]) => `Q${a}–Q${b}`).join(", ")}.`] : []),
+      // Elle couvre aussi, en mode strict, le même PASSAGE SOURCE (lib/qcm-checks.sameSourceFact,
+      // job 28 : Q1/Q7 sur le même exemple chiffré, chiffres d'un côté, interprétation de l'autre).
+      ...(suspects.length ? [`Paires à trancher en priorité (même notion du programme, réponses croisées, bonne réponse + fait source qui affirment la même chose même sous un énoncé ou une notion différente, OU même exemple/étude source), à lister en doublon si elles testent la même chose : ${suspects.map(([a, b]) => `Q${a}–Q${b}`).join(", ")}.`] : []),
       ...(previous ? [`Liste aussi, dans "repeats", les QCM qui reprennent une question des EXAMENS PRÉCÉDENTS du cours (P…) : même fait, même règle ou même réponse logique, même si la notion, l'angle ou le décor sont reformulés.`] : []),
       ``,
       list,
@@ -1375,15 +1381,17 @@ const DEDUP_ROUNDS = 2;
 
 /**
  * Budget TEMPS de la phase finale (doublons, remplacements, complément, porte de sortie, ultime
- * passe) : QCM_FINAL_PHASE_BUDGET_MS, défaut 10 min. Job 26 (15/11/2026) : à 99 % dès 30 min, puis
- * 40 min de plus sur « un distracteur reste éliminable sans le cours », ronde après ronde de
- * remplacement (conception → vérification → réparation → revérification, jusqu'à 10 min d'appel
- * chacune depuis #95) ; seul un budget de LOTS (lateBudget, 10 pour 20 QCM) bornait la boucle. Une
- * ronde réelle dure 5 à 7 min : 10 min laissent un remplacement et la porte de sortie. Le budget
- * n'interrompt aucun appel : il empêche d'en lancer une nouvelle ronde, et chaque contrôle
- * obligatoire de la porte de sortie (audit, vérification, explications) passe quand même.
+ * passe) : QCM_FINAL_PHASE_BUDGET_MS, défaut 6 min (10 min jusqu'au job 28, finition v6 : examen
+ * livré en 42 min, phase finale à 14 min pour une seule ronde de réparation). Job 26 (15/11/2026) :
+ * à 99 % dès 30 min, puis 40 min de plus sur « un distracteur reste éliminable sans le cours »,
+ * ronde après ronde de remplacement (conception → vérification → réparation → revérification,
+ * jusqu'à 10 min d'appel chacune depuis #95) ; seul un budget de LOTS (lateBudget, 10 pour 20 QCM)
+ * bornait la boucle. Une ronde réelle dure 5 à 7 min : 6 min laissent encore un remplacement ET la
+ * porte de sortie (audit, vérification, explications — jamais bornés, cf. `finalPhaseExhausted`),
+ * sans les 3 à 4 min de marge inutilisées que laissait l'ancien budget de 10. Le budget n'interrompt
+ * aucun appel : il empêche d'en lancer une nouvelle ronde.
  */
-const FINAL_PHASE_DEFAULT_MS = 10 * 60_000;
+const FINAL_PHASE_DEFAULT_MS = 6 * 60_000;
 function finalPhaseBudgetMs(): number {
   const n = Number(process.env.QCM_FINAL_PHASE_BUDGET_MS);
   return Number.isFinite(n) && n > 0 ? n : FINAL_PHASE_DEFAULT_MS;
@@ -2004,7 +2012,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   let repairAfterDedup = false;
   /**
    * Budget TEMPS de TOUT ce qui suit la première vérification à l'aveugle du comblement principal
-   * (QCM_FINAL_PHASE_BUDGET_MS, défaut 10 min), partagé avec le budget d'appels (lateBudget). Job 26
+   * (QCM_FINAL_PHASE_BUDGET_MS, défaut 6 min), partagé avec le budget d'appels (lateBudget). Job 26
    * bis (15/11/2026, 20/20 en 50 min, cible ≤ 35 min) : la déclaration vivait plus bas, APRÈS l'audit
    * de sortie initial et sa réparation groupée des distracteurs — ces deux appels (jusqu'à `count`
    * questions réparées, puis réauditées) n'étaient bornés par rien. Elle couvre maintenant aussi cet
