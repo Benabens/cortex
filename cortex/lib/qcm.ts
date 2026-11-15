@@ -80,6 +80,14 @@ export type QcmItem = {
   notion?: string | null;
 };
 
+/**
+ * Sortie des appels du job QCM : au-dessus des 16 000 tokens par défaut, où la réflexion de Sonnet 5
+ * coupait la réponse en prod (13-14/11 : conception, vérification, audit final, remplacement de
+ * distracteurs et doublons y butaient ; réponse facturée, puis refaite ou perdue). Le délai suit :
+ * 16 000 tokens sortaient en moins de 5 min, 32 000 tiennent en 10.
+ */
+const QCM_OUTPUT = { maxTokens: 32_000, timeoutMs: 600_000 } as const;
+
 const QCM_BATCH_SCHEMA = {
   type: "object",
   properties: {
@@ -589,8 +597,7 @@ async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, la
     it.sourceFact ? `   Fait du cours testé : ${sanitizeCorpus(it.sourceFact).slice(0, 400)}` : "",
   ].filter(Boolean).join("\n")).join("\n\n");
   const out = await completeJson<{ replacements: { index: number; distractors: { option: number; text: string; misconception?: string }[]; explanation?: string }[] }>({
-    // Tâche bornée (énoncé et clé gardés), revérifiée à l'aveugle ensuite : effort bas.
-    model: "opus", timeoutMs: 300_000, effort: "low",
+    model: "opus", ...QCM_OUTPUT,
     prompt: [
       `Tu es l'équipe enseignante du cours. Dans chacun de ces QCM, les options marquées « À REMPLACER » se devinent fausses sans connaître le cours. Écris pour chacune UN nouveau distracteur, sans toucher à l'énoncé, à la bonne réponse ni aux autres options.`,
       ...DISTRACTOR_TAXONOMY,
@@ -670,7 +677,7 @@ async function finalQualityAudit(items: QcmItem[], step: StepCb): Promise<QcmIte
   // Audit illisible ou en échec : les QCM gardent le verdict de leur vérification à l'aveugle. Lever
   // ici perdait l'examen entier (« Aucun QCM généré ») alors que tout était déjà vérifié et payé.
   const out = await completeJson<{ verdicts: FinalQualityVerdict[] }>({
-    model: "opus", timeoutMs: 420_000, json: { schema: FINAL_QUALITY_SCHEMA }, effort: "medium",
+    model: "opus", ...QCM_OUTPUT, json: { schema: FINAL_QUALITY_SCHEMA },
     prompt: [
       `Tu es un examinateur exigeant. Pour chaque QCM, tranche selon les extraits du cours.`,
       `key : true seulement si la clé est juste et la seule défendable ; false si elle est fausse, si une autre option est au moins aussi défendable ou s'il manque une bonne réponse.`,
@@ -835,7 +842,7 @@ export async function generateQcmBatch(
   // est un objet libre, inexprimable → texte libre, lu par extractJson. Réponse illisible →
   // redemandée avec l'erreur (completeJson, 3 essais).
   const r = await completeJson<{ items: (QcmItem & { figure_spec?: FigureSpec })[] }>(
-    { system, prompt, model: "opus", timeoutMs: 480_000, json: { schema: batchSchema(mode, withFigures) }, effort: "medium" },
+    { system, prompt, model: "opus", ...QCM_OUTPUT, json: { schema: batchSchema(mode, withFigures) } },
     { check: (v) => (!Array.isArray(v?.items) ? "le champ « items » (tableau de QCM) manque" : v.items.length ? null : "« items » est vide") },
   );
   const items: QcmItem[] = [];
@@ -1038,7 +1045,7 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   let res: { results: { index: number; correct: number[]; ok: boolean; issue?: string; discrimination?: number; name_only?: boolean; course_terms?: string[]; off_course?: string; off_course_terms?: string[]; off_course_key?: boolean; off_course_options?: number[]; off_matter?: string; trivial_distractors?: number[]; definition_mismatch?: string }[] };
   try {
     res = await completeJson(
-      { system, prompt, model: "opus", timeoutMs: 420_000, addDirs: figDirs, json: { schema: VERIFY_SCHEMA }, effort: "medium" },
+      { system, prompt, model: "opus", ...QCM_OUTPUT, addDirs: figDirs, json: { schema: VERIFY_SCHEMA } },
       { check: (v) => (Array.isArray((v as { results?: unknown })?.results) ? null : "le champ « results » manque") },
     );
   } catch { return items; } // fallback honnête : non vérifiés
@@ -1274,13 +1281,11 @@ async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previou
       ``,
       `Réponds UNIQUEMENT avec {"notions": [{"index": i, "notion": "…", "angle": "…", "regle": "…"}], "duplicates": [{"first": i, "second": j, "reason": "…"}]${previous ? `, "repeats": [{"index": i, "previous": p}]` : ""}} (first < second ; listes vides s'il n'y a rien).`,
     ].join("\n"),
-    // 20 questions vues en entier (bonne réponse comprise) : 3 min ne suffisaient pas toujours.
+    // 20 questions vues en entier (bonne réponse comprise) : la réflexion seule atteignait les
+    // 16 000 tokens (prod du 14/11, 15 400 en moyenne), réponse coupée deux fois, contrôle perdu.
     model: "opus",
-    timeoutMs: 360_000,
+    ...QCM_OUTPUT,
     json: { schema: DUP_SCHEMA },
-    // Comparaison bornée de notions et d'angles : à l'effort par défaut, la réflexion seule
-    // atteignait la limite de 16 000 tokens (prod du 14/11, 15 400 en moyenne) et coupait la réponse.
-    effort: "low",
   }, { check: (v) => (Array.isArray(v?.duplicates) ? null : "le champ « duplicates » (tableau) manque") });
   const notions = items.map(() => "");
   const angles = items.map(() => "");
