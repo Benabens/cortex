@@ -37,7 +37,8 @@ const FIRST = [[1, 9, 14, 4], [10, 16, 17, 8]];
 const SPARE = [2, 3, 5, 15, 7, 11, 6, 12];
 let designCalls = 0;
 let spareNext = 0;
-const asItem = (it: Item) => ({ topic: it.topic, type: "scq", stem: it.stem, options: it.options, correct: it.correct, misconceptions: it.options.map((_, k) => (it.correct.includes(k) ? "" : "[notion voisine] x")), explanation: it.explanation, source_fact: "Le support présente les notions de biais, de confiance, de nudge et de souveraineté des données." });
+const proof = (it: Item) => `Le cours établit la réponse suivante : ${it.options[it.correct[0]]}`;
+const asItem = (it: Item) => ({ topic: it.topic, type: "scq", stem: it.stem, options: it.options, correct: it.correct, misconceptions: it.options.map((_, k) => (it.correct.includes(k) ? "" : "[notion voisine] x")), explanation: it.explanation, source_fact: proof(it) });
 function design(n: number) {
   designCalls++;
   const planned = FIRST[designCalls - 1];
@@ -137,7 +138,7 @@ async function course(): Promise<string> {
   await runWithCourse(row.id, async () => {
     ensureFts();
     for (const t of ["sources", "items", "topics"]) await db.ensureTable(t);
-    const text = "Le support présente les notions de biais, de confiance, de nudge et de souveraineté des données. Biais de disponibilité, biais de négativité, excès de confiance, réalité partagée, confiance, nudges, souveraineté des données.";
+    const text = `Le support présente les notions de biais, de confiance, de nudge et de souveraineté des données. ${[...new Set(EXAM9.map(proof))].join(" ")}`;
     const sid = await db.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", "Séances 1 à 6", "course_pdf/s1", null, 1);
     const iid = await db.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", "Séances 1 à 6", text);
     await indexItemForSearch(iid, sid, "Séances 1 à 6", text);
