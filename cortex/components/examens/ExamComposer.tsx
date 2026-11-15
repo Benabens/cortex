@@ -10,6 +10,7 @@ import { apiPost, useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@
 import type { PlanExam, PlanQcm } from "@/lib/ux/exams";
 import { cn } from "@/lib/ux/cn";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
+import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
 
 const V = "var(--color-accent)";
 
@@ -79,6 +80,10 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
   }, [job, onGenerated]);
 
   const running = launching || (job != null && JOB_ACTIVE.includes(job.status));
+  // Même verdict que la route de génération, pour la composition affichée.
+  const launch = useLaunchUsage(isQcm ? "qcm" : "exam", isQcm ? { count: nQcm, openCount: nOpen } : { count: nExos });
+  const { refresh: refreshUsage } = launch;
+  useEffect(() => { if (!running) refreshUsage(); }, [running, refreshUsage]);
 
   const generate = async () => {
     if (running) return;
@@ -198,7 +203,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
 
         {/* action unique */}
         <div className="mt-6 flex flex-wrap items-center gap-3">
-          <Button variant="primary" onClick={generate} loading={running}>
+          <Button variant="primary" onClick={generate} loading={running} disabled={!running && !launch.allowed}>
             {!running && <Play className="size-4" strokeWidth={2.5} fill="currentColor" />}
             {running ? "Génération…" : "Générer l’examen"}
           </Button>
@@ -208,6 +213,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
             </span>
           )}
         </div>
+        {!running && <UsageLine usage={launch.usage} now={launch.now} className="mt-3" />}
         {genError && (
           <div role="alert" className="mt-3 flex items-start gap-2.5 rounded-lg border border-[color-mix(in_oklch,var(--color-danger)_38%,transparent)] bg-[color-mix(in_oklch,var(--color-danger)_8%,transparent)] p-3 text-[0.84rem] leading-relaxed text-ink-2">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger-hi" strokeWidth={2} />

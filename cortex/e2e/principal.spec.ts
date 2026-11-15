@@ -169,11 +169,20 @@ test("nouveau compte à 0 crédit : import et consultation gratuits, préparatio
   expect(catalog.status).toBe(200); expect(catalog.body.courses.length).toBeGreaterThan(0);
 
   await page.goto(`/sources?course=${encodeURIComponent(created.body.course.id)}`);
-  await page.getByRole("button", { name: "Préparer le cours" }).click();
+  // Le bouton est coupé AVANT le clic, l'encart d'achat dit pourquoi (même verdict que la route).
+  await expect(page.getByRole("button", { name: "Préparer le cours" })).toBeDisabled();
   // Encart dans la page (pas une boîte modale) : annoncé comme statut.
   const paywall = page.getByRole("status").filter({ hasText: "Il te faut 2 crédits" });
   await expect(paywall).toBeVisible();
   await expect(paywall.getByRole("link", { name: "Acheter des crédits" })).toHaveAttribute("href", "/compte#credits");
+
+  // Mon usage : mêmes chiffres que le bouton (GET /api/usage), aucun montant en dollars.
+  await page.goto("/compte#usage");
+  const usage = page.locator("#usage");
+  await expect(usage.getByRole("heading", { name: "Mon usage" })).toBeVisible();
+  await expect(usage.locator('[data-kind="prepare"]')).toContainText("Il te faut 2 crédits");
+  await expect(usage.locator('[data-limit="credits"]')).toContainText("0 crédits");
+  await expect(usage).not.toContainText("$");
 
   const denied = await api<{ error: string }>(page, `/api/exams/generate?course=${encodeURIComponent(created.body.course.id)}`, { method: "POST", body: "{}" });
   expect(denied.status).toBe(402); expect(denied.body.error).toMatch(/2 crédit/i);

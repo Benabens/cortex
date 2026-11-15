@@ -3,6 +3,9 @@
 import { useId, useState } from "react";
 import { SafeHtml } from "@/components/ui/SafeHtml";
 import type { CheckResult } from "@/lib/check-solution";
+import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
+
+const nfCredits = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 });
 
 export function OpenResponse({ questionId, statement, courseId, graded, solution, part, onChecked }: {
   questionId: number;
@@ -21,6 +24,12 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
   const [error, setError] = useState<string | null>(null);
   const instanceId = useId();
   const textareaId = `open-response-${questionId}-${instanceId}`;
+  // Même verdict que POST /api/check-solution (aide) : bouton coupé avant le clic, raison affichée.
+  const launch = useLaunchUsage("check");
+  const { refresh: refreshUsage } = launch;
+  const cost = launch.usage?.costCredits ?? 0.1;
+  // Une ligne par question : on ne la montre que quand elle compte (bloqué, ou presque à court).
+  const showUsage = launch.usage && (!launch.allowed || (launch.usage.remaining !== null && launch.usage.remaining <= 5));
 
   async function verifyAnswer() {
     if (!answer.trim() || checking) return;
@@ -42,6 +51,7 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
       setError("La vérification n’a pas abouti. Réessaie.");
     } finally {
       setChecking(false);
+      refreshUsage();
     }
   }
 
@@ -66,12 +76,13 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
       />
       {(
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <button type="button" className="btn btn-quiet btn-sm" onClick={verifyAnswer} disabled={!answer.trim() || checking}>
-            {checking ? "Vérification…" : "Vérifier ma réponse · 0,1 crédit"}
+          <button type="button" className="btn btn-quiet btn-sm" onClick={verifyAnswer} disabled={!answer.trim() || checking || !launch.allowed}>
+            {checking ? "Vérification…" : cost > 0 ? `Vérifier ma réponse · ${nfCredits.format(cost)} crédit${cost >= 2 ? "s" : ""}` : "Vérifier ma réponse"}
           </button>
           <span className="text-[11.5px]" style={{ color: "var(--ink-3)" }}>Correction détaillée par critères</span>
         </div>
       )}
+      {showUsage && <UsageLine usage={launch.usage} now={launch.now} className="mt-2" />}
       {error && <p role="alert" className="mt-2 text-[12px]" style={{ color: "var(--red-ink)" }}>{error}</p>}
       {check && (
         <section className="inset mt-3 p-3" aria-label="Barème de la réponse">
