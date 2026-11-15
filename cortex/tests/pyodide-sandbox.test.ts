@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import { runPythonWasm, pythonWasmAvailable } from "../lib/pyodide-sandbox";
 
@@ -46,6 +50,55 @@ test("Un runtime qui ne démarre pas dans son propre délai est signalé comme t
   } finally {
     delete process.env.CORTEX_PYTHON_WASM;
   }
+});
+
+/** Créneaux de vérification dans un dossier propre au test (les fichiers de test tournent en parallèle). */
+async function withSlots(concurrency: number, fn: (dir: string) => Promise<void>) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-pywasm-slots-"));
+  process.env.CORTEX_PYTHON_WASM = "1";
+  process.env.CORTEX_PYTHON_WASM_CONCURRENCY = String(concurrency);
+  process.env.CORTEX_PYTHON_WASM_SLOTS_DIR = dir;
+  try {
+    await fn(dir);
+  } finally {
+    for (const k of ["CORTEX_PYTHON_WASM", "CORTEX_PYTHON_WASM_CONCURRENCY", "CORTEX_PYTHON_WASM_SLOTS_DIR"]) delete process.env[k];
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("Au-delà de CORTEX_PYTHON_WASM_CONCURRENCY, une vérification attend son tour sans entamer son délai", async () => {
+  await withSlots(1, async () => {
+    const start = Date.now();
+    const [a, b] = await Promise.all([1, 2].map(() => runPythonWasm("while True:\n    pass", { timeoutMs: 1_500 })));
+    const elapsed = Date.now() - start;
+    assert.deepEqual([a.reason, b.reason], ["timeout", "timeout"]);
+    // En série : deux démarrages et deux délais pleins. En parallèle, le tout tiendrait en un seul.
+    assert.ok(elapsed >= (a.startupMs ?? 0) + (b.startupMs ?? 0) + 2 * 1_500 - 50, `${elapsed} ms : les deux workers ont tourné ensemble`);
+  });
+});
+
+test("La borne vaut pour tous les processus : un créneau tenu par un autre job fait attendre", async () => {
+  await withSlots(1, async (dir) => {
+    // Chaque job est un processus distinct : le créneau est un fichier, ici tenu par un processus vivant.
+    fs.writeFileSync(path.join(dir, "slot-0"), String(process.ppid));
+    setTimeout(() => fs.rmSync(path.join(dir, "slot-0"), { force: true }), 1_000);
+    const start = Date.now();
+    const r = await runPythonWasm("print(42)");
+    assert.equal(r.stdout.trim(), "42", r.stderr);
+    assert.ok(Date.now() - start >= 1_000, "la vérification n'a pas attendu le créneau");
+  });
+});
+
+test("Le créneau d'un job tué (processus mort) est repris, il ne bloque pas les vérifications", async () => {
+  await withSlots(1, async (dir) => {
+    const dead = spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"]).stdout.toString();
+    fs.writeFileSync(path.join(dir, "slot-0"), dead);
+    const r = await runPythonWasm("print(42)", { timeoutMs: 5_000 });
+    assert.equal(r.stdout.trim(), "42", `${r.reason} ${r.stderr}`);
+    // Rendu à la fin du thread, juste après le résultat.
+    for (let i = 0; i < 40 && fs.existsSync(path.join(dir, "slot-0")); i++) await new Promise((res) => setTimeout(res, 50));
+    assert.equal(fs.existsSync(path.join(dir, "slot-0")), false, "le créneau est rendu après la vérification");
+  });
 });
 
 test("Une allocation numpy unique au-delà du budget mémoire est refusée, pas seulement constatée", async () => {
