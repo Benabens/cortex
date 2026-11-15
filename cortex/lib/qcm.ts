@@ -99,6 +99,9 @@ const QCM_CALL_LIMITS = { maxTokens: LONG_OUTPUT_MAX_TOKENS, timeoutMs: 600_000 
  */
 const QCM_VERIFY_LIMITS = { ...QCM_CALL_LIMITS, effort: "medium" } as const;
 
+/** Conception des lots : 83 % de réflexion dans sa sortie à l'effort par défaut (boucle moteur, itération 7). */
+const QCM_DESIGN_LIMITS = { ...QCM_CALL_LIMITS, effort: "medium" } as const;
+
 const QCM_BATCH_SCHEMA = {
   type: "object",
   properties: {
@@ -886,7 +889,7 @@ export async function generateQcmBatch(
   // est un objet libre, inexprimable → texte libre, lu par extractJson. Réponse illisible →
   // redemandée avec l'erreur (completeJson, 3 essais).
   const r = await completeJson<{ items: (QcmItem & { figure_spec?: FigureSpec })[] }>(
-    { system, prompt, model: "opus", ...QCM_CALL_LIMITS, json: { schema: batchSchema(mode, withFigures, withFacts) } },
+    { system, prompt, model: "opus", ...QCM_DESIGN_LIMITS, json: { schema: batchSchema(mode, withFigures, withFacts) } },
     { check: (v) => (!Array.isArray(v?.items) ? "le champ « items » (tableau de QCM) manque" : v.items.length ? null : "« items » est vide") },
   );
   const items: QcmItem[] = [];
