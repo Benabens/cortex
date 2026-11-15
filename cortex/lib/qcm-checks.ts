@@ -316,6 +316,52 @@ export function capDrops<T extends { options: string[]; correct: number[]; focus
 }
 
 /**
+ * Retraits décidés par l'audit sémantique des doublons. En mode strict, les notions du modèle
+ * restent descriptives : seul le sujet planifié est assez stable pour appliquer un plafond. Les
+ * paires explicitement reconnues comme le même fait ou la même règle restent toujours retirées.
+ * Hors mode strict, les libellés et règles du modèle servent aussi à rapprocher deux formulations.
+ */
+export function duplicateAuditDrops<T extends { focusSlot?: boolean }>(
+  items: T[],
+  audit: {
+    notions: string[];
+    angles: string[];
+    regles: string[];
+    duplicates: { first: number; second: number }[];
+  },
+  strict: boolean,
+): number[] {
+  const drop = new Set<number>();
+  const focusPair = (a: number, b: number) => !!items[a]?.focusSlot && !!items[b]?.focusSlot;
+  if (!strict) {
+    const first = new Map<string, number>();
+    const firstByRule = new Map<string, number>();
+    items.forEach((_, i) => {
+      const notion = normalize(audit.notions[i] ?? "");
+      const angle = normalize(audit.angles[i] ?? "");
+      const rule = normalize(audit.regles[i] ?? "");
+      if (notion && angle) {
+        const key = `${notion}\u0000${angle}`;
+        const holder = first.get(key);
+        if (holder === undefined) first.set(key, i);
+        else if (!focusPair(holder, i)) drop.add(i);
+      }
+      if (notion && rule) {
+        const key = `${notion}\u0000${rule}`;
+        const holder = firstByRule.get(key);
+        if (holder === undefined) firstByRule.set(key, i);
+        else if (!focusPair(holder, i)) drop.add(i);
+      }
+    });
+  }
+  for (const pair of audit.duplicates) {
+    const later = Math.max(pair.first, pair.second);
+    if (Number.isInteger(later) && later >= 0 && later < items.length && pair.first !== pair.second && !focusPair(pair.first, pair.second)) drop.add(later);
+  }
+  return [...drop].sort((a, b) => a - b);
+}
+
+/**
  * L'explication réduite à ce qu'elle dit de la bonne réponse : les phrases et fins de phrase qui
  * réfutent des distracteurs sont retirées (repli quand la réécriture sur les options réelles
  * échoue : une explication courte et juste vaut mieux qu'une qui réfute des options absentes).

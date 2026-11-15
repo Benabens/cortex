@@ -61,7 +61,9 @@ function dedupeReply(prompt: string): string {
   // Questions des examens précédents (P0, P1…) : une question qui en reprend une (même notion, même angle).
   const previous = [...prompt.matchAll(/^P(\d+)\. .*?\[notion:([^\]]+)\] \[angle:([^\]]*)\]/gm)];
   const repeats = lines.flatMap((m) => previous.filter((p) => p[2] === m[2] && p[3] === m[3]).map((p) => ({ index: Number(m[1]), previous: Number(p[1]) })));
-  return JSON.stringify({ notions: lines.map((m) => ({ index: Number(m[1]), notion: m[2], angle: m[3], regle: m[4] ?? "" })), duplicates: [], repeats });
+  const strict = /UNE NOTION = UNE QUESTION planifiée/i.test(prompt);
+  const duplicates = lines.flatMap((m, i) => lines.slice(0, i).filter((p) => p[2] === m[2] && ((!!p[3] && p[3] === m[3]) || (!!p[4] && p[4] === m[4]) || (strict && !p[4] && !m[4]))).map((p) => ({ first: Number(p[1]), second: Number(m[1]) })));
+  return JSON.stringify({ notions: lines.map((m) => ({ index: Number(m[1]), notion: m[2], angle: m[3], regle: m[4] ?? "" })), duplicates, repeats });
 }
 
 function verifyReply(prompt: string): string {
