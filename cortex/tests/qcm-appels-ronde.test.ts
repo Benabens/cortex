@@ -206,10 +206,10 @@ test("dédoublonnage : un contrôle qui voit des doublons à chaque passe ne fai
   t.diagnostic(`${r.count}/15 livrées · ${JSON.stringify(calls)} → ${total()} appels`);
   assert.equal(r.count, 15, JSON.stringify(calls));
   assert.ok(calls.dedup <= 10, `contrôles des doublons bornés : ${calls.dedup}`);
-  // Job 17 (14/11) : l'audit final repassait sur tout le pool même quand aucun distracteur n'avait
-  // été réparé (ici : 0). Une question n'est auditée qu'une fois : le second passage (job 23) ne
-  // porte que sur les remplaçants des doublons, arrivés après le premier.
-  assert.ok(calls.audit <= 2, `audit final : ${JSON.stringify(calls)}`);
+  // L'audit initial ne repasse que sur les remplaçants des doublons. La porte de livraison ajoute
+  // ensuite un unique regard sur l'examen réellement livré, sans ouvrir une nouvelle boucle.
+  assert.ok(calls.audit <= 3, `audit final : ${JSON.stringify(calls)}`);
   const seen = auditedStems.flat();
-  assert.equal(new Set(seen).size, seen.length, `une question auditée deux fois : ${JSON.stringify(auditedStems)}`);
+  const counts = seen.reduce((m, stem) => m.set(stem, (m.get(stem) ?? 0) + 1), new Map<string, number>());
+  assert.ok([...counts.values()].every((n) => n <= 2), `une question auditée plus de deux fois : ${JSON.stringify(auditedStems)}`);
 });

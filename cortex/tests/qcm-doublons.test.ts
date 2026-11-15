@@ -298,6 +298,7 @@ test("banc du 04/11 (CS-290) : une question qui reprend celle d'un examen préc�
   assert.equal(r.count, 4);
   assert.ok(!stems.some((s) => s.startsWith("Question 3 ")), `la reprise de l'examen précédent est retirée :\n${stems.join("\n")}`);
   assert.match(dedupePrompts[0], /^P\d+\. .*faux positifs des détecteurs/m, "le contrôle reçoit les questions des examens précédents");
+  assert.match(dedupePrompts[0], /même fait, même règle ou même réponse logique/, "une reformulation de notion ou d'angle reste une reprise");
 });
 
 test("modèle qui répète toujours la même notion : budget borné, aucun doublon connu réinjecté", async () => {
