@@ -1,6 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { coursePaths, DEFAULT_COURSE } from "@/lib/courses";
-import { findPdftoppm, renderPdfPages } from "@/lib/pdftoppm";
+import { cachedPdfPages, pageCacheDirFor } from "@/lib/page-cache";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -10,8 +10,12 @@ import path from "node:path";
  * générateur ET au vérificateur (« voici comment le prof pose CE type ; produis du neuf du même
  * niveau »). cs-202 garde son `lib/figrefs.ts` curé ; les AUTRES cours utilisent ce module.
  *
- * Les images sont rendues depuis les PDF de `data/<course>/refs/` vers `…/refs/figref/`.
+ * Les pages des PDF de `refs/` sont rendues dans le cache des pages (lib/page-cache) ; le
+ * dossier `refs/figref/` ne garde que les images posées à la main (et celles, curées, de cs-202).
  */
+
+/** Pages de chaque annale montrées au modèle comme étalon. */
+const VISION_PAGES = 3;
 
 function figrefDirFor(course: string): string {
   return path.join(coursePaths(course).refsDir, "figref");
@@ -28,54 +32,54 @@ function relToCwd(abs: string): string {
   return path.relative(process.cwd(), abs);
 }
 
-/**
- * Rend les premières pages de chaque PDF de référence du cours en PNG (étalon vision).
- * Idempotent (saute un PDF déjà rendu). Retourne le nombre d'images produites.
- * No-op pour cs-202 (il a ses figrefs curés) et si pdftoppm absent.
- */
-export function renderCourseRefImages(course: string, pagesPerRef = 3): number {
-  if (course === DEFAULT_COURSE) return 0;
-  const refsDir = coursePaths(course).refsDir;
-  if (!fs.existsSync(refsDir)) return 0;
-  const bin = findPdftoppm();
-  if (!bin) return 0;
-  const outDir = figrefDirFor(course);
-  fs.mkdirSync(outDir, { recursive: true });
-  let made = 0;
-  for (const f of fs.readdirSync(refsDir)) {
-    if (!/\.pdf$/i.test(f)) continue;
-    const base = f.replace(/\.pdf$/i, "");
-    const already = fs.readdirSync(outDir).some((x) => sourcePdfOf(x) === base);
-    if (already) continue;
-    try {
-      renderPdfPages(bin, path.join(refsDir, f), path.join(outDir, base), { lastPage: pagesPerRef });
-      made += fs.readdirSync(outDir).filter((x) => sourcePdfOf(x) === base).length;
-    } catch {
-      /* PDF illisible → on saute */
-    }
-  }
-  return made;
+/** PDF de référence du cours (dossier refs/), par nom de fichier. */
+function refPdfs(course: string): string[] {
+  try { return fs.readdirSync(coursePaths(course).refsDir).filter((f) => /\.pdf$/i.test(f)).sort(); } catch { return []; }
 }
 
 /**
- * Images-étalon disponibles pour le cours courant (chemins relatifs au cwd), triées. Une image
- * rendue d'une annale qui n'est plus là est écartée : retirer une annale (grille d'évaluation de
- * HUM-285, reclassée en consignes) laisse ses images sur le disque, jamais dans un prompt. Une
- * image posée à la main (sans le suffixe « -N » du rendu) reste.
+ * Rend les premières pages de chaque PDF de référence du cours en PNG (étalon vision), dans le
+ * cache des pages (lib/page-cache : un seul rendu, partagé avec l'index des annales, hors quota).
+ * Idempotent. Retourne le nombre d'images produites par cet appel.
+ * No-op pour cs-202 (il a ses figrefs curés) et si pdftoppm absent.
+ */
+export function renderCourseRefImages(course: string, pagesPerRef = VISION_PAGES): number {
+  if (course === DEFAULT_COURSE) return 0;
+  const pngs = () => {
+    try { return fs.readdirSync(pageCacheDirFor(course)).filter((x) => /\.png$/i.test(x)).length; } catch { return 0; }
+  };
+  const before = pngs();
+  for (const f of refPdfs(course)) cachedPdfPages(course, f, pagesPerRef);
+  return pngs() - before;
+}
+
+/**
+ * Images-étalon disponibles pour le cours courant (chemins relatifs au cwd), triées :
+ *  - les images posées à la main dans refs/figref (sans le suffixe « -N » du rendu), et pour le
+ *    cours historique ses images curées ; un rendu d'une annale qui n'est plus là est écarté —
+ *    retirer une annale (grille d'évaluation de HUM-285, reclassée en consignes) ne la laisse
+ *    jamais dans un prompt ;
+ *  - les premières pages de chaque annale, depuis le cache des pages, rendues à la demande si le
+ *    cache a été purgé.
  */
 export function courseRefImages(): string[] {
   const course = currentCourse();
+  const out: string[] = [];
+  // D'abord le cache : il retire au passage les rendus des anciennes versions de refs/figref.
+  if (course !== DEFAULT_COURSE) {
+    for (const f of refPdfs(course)) {
+      for (const p of cachedPdfPages(course, f, VISION_PAGES)) out.push(relToCwd(p.abs));
+    }
+  }
   const dir = figrefDirFor(course);
-  if (!fs.existsSync(dir)) return [];
-  const refs = new Set(fs.readdirSync(coursePaths(course).refsDir).filter((f) => /\.pdf$/i.test(f)).map((f) => f.replace(/\.pdf$/i, "")));
-  return fs
-    .readdirSync(dir)
-    .filter((x) => {
+  if (fs.existsSync(dir)) {
+    const refs = new Set(refPdfs(course).map((f) => f.replace(/\.pdf$/i, "")));
+    for (const x of fs.readdirSync(dir)) {
       const src = sourcePdfOf(x);
-      return /\.(png|jpe?g)$/i.test(x) && (src == null || refs.has(src));
-    })
-    .sort()
-    .map((x) => relToCwd(path.join(dir, x)));
+      if (/\.(png|jpe?g)$/i.test(x) && (src == null || refs.has(src))) out.push(relToCwd(path.join(dir, x)));
+    }
+  }
+  return out.sort();
 }
 
 /** Bloc d'ancrage vision pour le profil générique (vide s'il n'y a pas d'images). */

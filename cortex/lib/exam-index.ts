@@ -2,12 +2,10 @@ import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
 import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
-import { coursePaths } from "@/lib/courses";
 import { sourceHref } from "@/lib/deeplink";
 import { search } from "@/lib/search";
 import { MOLD_KINDS, moldTaxonomyBlock, normalizeMold, normalizeFigureKind } from "@/lib/molds";
-import { findPdftoppm, renderPdfPages } from "@/lib/pdftoppm";
-import fs from "node:fs";
+import { cachedPdfPages } from "@/lib/page-cache";
 import path from "node:path";
 import { listExamSourceRows } from "@/lib/sources";
 import { COURSE_MATTER_RULE } from "@/lib/course-grounding";
@@ -48,31 +46,12 @@ export async function ensureIndexSchema(): Promise<void> {
   await q.ensureColumns("exam_exercises", ["mold", "figure_kind"]);
 }
 
-/** Rend TOUTES les pages (jusqu'à maxPages) d'un PDF d'examen en PNG → {page, rel} (chemin rel au cwd). */
+/**
+ * Rend TOUTES les pages (jusqu'à maxPages) d'un PDF d'examen en PNG → {page, rel} (chemin rel au cwd).
+ * Images dans le cache des pages (lib/page-cache) : rendues une fois, hors quota, purgées avec l'annale.
+ */
 export function renderExamPages(course: string, refBasename: string, maxPages = 16): { page: number; rel: string }[] {
-  const bin = findPdftoppm();
-  if (!bin) return [];
-  const refsDir = coursePaths(course).refsDir;
-  const pdf = path.join(refsDir, refBasename);
-  if (!fs.existsSync(pdf)) return [];
-  const outDir = path.join(refsDir, "figref-full");
-  fs.mkdirSync(outDir, { recursive: true });
-  const base = refBasename.replace(/\.pdf$/i, "").replace(/[^a-zA-Z0-9._-]+/g, "_");
-  // (re)rend si pas déjà fait
-  const existing = fs.readdirSync(outDir).filter((x) => x.startsWith(base + "-") && /\.png$/i.test(x));
-  if (!existing.length) {
-    try {
-      renderPdfPages(bin, pdf, path.join(outDir, base), { lastPage: maxPages });
-    } catch { return []; }
-  }
-  return fs.readdirSync(outDir)
-    .filter((x) => x.startsWith(base + "-") && /\.png$/i.test(x))
-    .map((x) => {
-      const m = x.match(/-(\d+)\.png$/i);
-      return { page: m ? Number(m[1]) : 0, rel: path.relative(process.cwd(), path.join(outDir, x)) };
-    })
-    .filter((e) => e.page > 0)
-    .sort((a, b) => a.page - b.page);
+  return cachedPdfPages(course, refBasename, maxPages).map((p) => ({ page: p.page, rel: path.relative(process.cwd(), p.abs) }));
 }
 
 const EXO_SCHEMA = {

@@ -23,7 +23,8 @@ import { stillBilling } from "@/lib/billing/subscription-windows";
  *    moyen de se connecter ;
  *  - `courses` possédés, `tenants` (registre), `gen_events`, `credit_transactions`,
  *    `active_jobs` (réservations en cours), `stripe_purchases` (achats),
- *    `subscriptions` et `stripe_invoices` (abonnement Pro), `terms_acceptances`,
+ *    `subscriptions` et `stripe_invoices` (abonnement Pro), `stripe_payments`
+ *    (montants encaissés), `terms_acceptances`,
  *    `question_reports` (signalements de questions et leurs commentaires) ;
  *  - chaque schéma tenant `t_<user>_<cours>` (Postgres, DROP … CASCADE) — donc
  *    sources, items, examens, faiblesses, planning, jobs, banque… d'un coup ;
@@ -165,6 +166,13 @@ export async function deleteAccount(userId: string, deps: DeletionDeps = {}): Pr
   } catch (e) {
     errors.push(`rm ${userDir}: ${msg(e)} (orphelin d'un compte supprimé — à balayer)`);
   }
+  // Ses images de pages rendues (lib/page-cache) : un cache, sa perte ne bloque rien.
+  try {
+    const { userCacheDir } = await import("@/lib/page-cache");
+    fs.rmSync(userCacheDir(userId), { recursive: true, force: true });
+  } catch (e) {
+    errors.push(`rm cache des pages: ${msg(e)}`);
+  }
 
   // 5. Lignes globales : anonymiser l'usage, effacer le reste. La suppression de
   //    `users`/`accounts` rend le compte inaccessible quoi qu'il arrive plus haut.
@@ -186,6 +194,8 @@ export async function deleteAccount(userId: string, deps: DeletionDeps = {}): Pr
     // propriétaire depuis le tableau de bord (le portail n'est plus accessible sans compte).
     await authRun(`DELETE FROM subscriptions WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM stripe_invoices WHERE user_id = ?`, userId);
+    await authRun(`DELETE FROM stripe_payment_losses WHERE payment_intent IN (SELECT payment_intent FROM stripe_payments WHERE user_id = ?)`, userId);
+    await authRun(`DELETE FROM stripe_payments WHERE user_id = ?`, userId);
     const legalId = legalTombstone();
     const retainedUntil = new Date(Date.now() + 5 * 365.25 * 86400_000).toISOString().slice(0, 19).replace("T", " ");
     await authRun(`UPDATE terms_acceptances SET user_id = ?, retained_until = ? WHERE user_id = ?`, legalId, retainedUntil, userId);

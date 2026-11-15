@@ -29,6 +29,8 @@ const ENV: Record<string, string> = {
 const PATH_BEFORE = process.env.PATH;
 Object.assign(process.env, ENV);
 process.env.PATH = `${FAKE_BIN}${path.delimiter}${PATH_BEFORE}`;
+// Budget IA lié au revenu (testé dans ai-budget.test.ts) : ici, les comptes sont financés par des crédits offerts.
+process.env.AI_BUDGET_MARGIN = "unlimited";
 delete process.env.CORTEX_OWNER_USER_ID;
 delete process.env.MCP_ELICITATION_CLIENTS;
 
