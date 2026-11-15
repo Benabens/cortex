@@ -94,7 +94,8 @@ test("anthropic : stream + modèle par défaut + output_config + thinking + imag
 
 test("anthropic : l'effort d'un site d'appel part dans output_config, avec ou sans schéma", async () => {
   // Prod du 13-14/11 : sans effort, Sonnet 5 réfléchit au défaut « high » (8 à 15 k tokens
-  // facturés par appel pour 1 à 2,5 k de réponse visible) — l'effort se fixe par site.
+  // facturés par appel pour 1 à 2,5 k de réponse visible). Un site peut le fixer ; aucun ne le
+  // baisse tant qu'une mesure sur Sonnet n'a pas montré la qualité intacte (banc du 15/11).
   await anthropicProvider.complete({ prompt: "Doublons ?", model: "sonnet", effort: "low" });
   assert.deepEqual(captured!.output_config, { effort: "low" });
   assert.equal(captured!.thinking, undefined, "la réflexion adaptive reste celle du modèle");

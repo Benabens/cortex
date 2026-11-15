@@ -565,7 +565,7 @@ export function repairFrenchMacros(tex: string, line: number): string | null {
 }
 
 const TEXTTT = /\\texttt\{[^{}]*\}/g;
-const BARE_UNDERSCORE = /(?<!\\)_/g;
+const BARE_UNDERSCORE = /(?<!\\)_/;
 
 /**
  * Le document où les « _ » nus de \texttt{…} sont échappés, si la ligne fautive en contient un ;
@@ -574,8 +574,8 @@ const BARE_UNDERSCORE = /(?<!\\)_/g;
  */
 export function repairTextttUnderscores(tex: string, line: number): string | null {
   const codes = (tex.split("\n")[line - 1] ?? "").match(TEXTTT) ?? [];
-  if (!codes.some((c) => c.replace(BARE_UNDERSCORE, "\\_") !== c)) return null;
-  return tex.replace(TEXTTT, (c) => c.replace(BARE_UNDERSCORE, "\\_"));
+  if (!codes.some((c) => BARE_UNDERSCORE.test(c))) return null;
+  return tex.replace(TEXTTT, (c) => c.replace(new RegExp(BARE_UNDERSCORE, "g"), "\\_"));
 }
 
 /** Ligne fautive d'une compilation : « error: x.tex:648: … » (tectonic) ou « l.648 » (journal pdflatex). */

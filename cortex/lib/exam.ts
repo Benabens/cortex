@@ -3,7 +3,7 @@ import { nowStr, q } from "@/db/q";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import type { Archetype } from "@/lib/archetypes";
 import { profile, type Slot } from "@/lib/course-profile";
-import { HARD_STOP_CODES, completeJson, completeText, completeVia, extractJson, llmErrorCode } from "@/lib/llm";
+import { HARD_STOP_CODES, LONG_OUTPUT_MAX_TOKENS, completeJson, completeText, completeVia, extractJson, llmErrorCode } from "@/lib/llm";
 import { search } from "@/lib/search";
 import { difficultyBlockForExam } from "@/lib/difficulty";
 import { buildExamArtifact, buildExerciseArtifact } from "@/lib/exam-latex";
@@ -673,7 +673,7 @@ async function generateBatch(ctx: Ctx, slots: Slot[], opts: { retryTruncated?: b
     // de sortie (15 760 en moyenne) : lots coupés, facturés, puis refaits exercice par exercice.
     // L'effort reste celui par défaut (à effort moyen, banc du 15/11 : clés et explications moins
     // justes) ; la limite laisse au lot la place de finir.
-    maxTokens: 32_000,
+    maxTokens: LONG_OUTPUT_MAX_TOKENS,
   }, { check: (v) => (Array.isArray(v?.questions) ? null : "le champ « questions » (tableau) manque"), retryTruncated: opts.retryTruncated });
   const qs = Array.isArray(r.questions) ? r.questions : [];
   // réaligne catégorie/points sur les slots imposés

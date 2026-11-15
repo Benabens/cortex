@@ -1,8 +1,7 @@
 /**
- * EFFORT PAR SITE D'APPEL (prod du 13-14/11, HUM-285) : aucun appel ne fixait l'effort, donc
- * Sonnet 5 réfléchissait au défaut « high » partout. Les sorties facturées faisaient 8 à 15 k
- * tokens par appel pour 1 à 2,5 k de réponse visible (77 % du coût d'un QCM), et la réflexion
- * butait sur la limite de 16 000 tokens : réponse coupée, appel refait.
+ * SORTIE LONGUE DES QCM ET DES EXAMENS (prod du 13 au 15/11, HUM-285 et job 2 d'examen) : à l'effort
+ * par défaut, Sonnet 5 facture 8 à 15 k tokens de sortie par appel pour 1 à 2,5 k de réponse visible,
+ * et la réflexion butait sur la limite de 16 000 tokens : réponse coupée, facturée, refaite ou perdue.
  * Baisser l'effort a dégradé la justesse au banc du 15/11 (voir chaque test) : il reste au défaut.
  * Verrouillé, contre un faux /v1/messages Anthropic (aucune dépense) : les étapes d'un job QCM et
  * les lots d'un examen écrit ont la place de finir leur réponse au-delà de 16 000 tokens.
