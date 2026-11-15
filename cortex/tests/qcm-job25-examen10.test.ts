@@ -19,6 +19,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { bestNotionMatch, explanationIssues, keyProposition, notionMismatch, refutedItems, sameProposition } from "../lib/qcm-checks";
+import { suspectPairs } from "../lib/qcm";
 
 const SATIRE = {
   stem: "Pourquoi le site présenté dans l'étude de cas est-il considéré comme un vecteur de désinformation plutôt que de parodie ?",
@@ -108,6 +109,38 @@ test("Q10/Q15 et Q17/Q20 : deux clés qui affirment le même fait sous d'autres 
   // Deux faits réellement distincts, même thème : pas rapprochés.
   const AUTRE = { options: ["Le nudge impose une sanction financière en cas de refus de l'option recommandée.", "a", "b", "c"], correct: [0] };
   assert.equal(sameProposition(keyProposition(Q17)!, keyProposition(AUTRE)!), false);
+});
+
+test("finition v5, Q7/Q14 anonymisé : même fait source sous deux notions et deux énoncés différents, détecté via la bonne réponse + le fait source", () => {
+  // Pseudonymisé : deux décors (un wiki collaboratif, un forum d'entraide) habillent le MÊME fait
+  // de l'étude citée — contributions bénévoles qui se poursuivent sans rétribution financière —
+  // mais avec deux notions de programme différentes et des bonnes réponses au libellé disjoint :
+  // ni les libellés de notion (lib/qcm, dedup par libellé), ni le seul texte de l'option
+  // (keyProposition avant ce correctif) ne les rapprochent.
+  const Q7 = {
+    options: ["Les contributeurs persistent par plaisir personnel.", "x", "y", "z"],
+    correct: [0],
+    sourceFact: "Dans cette étude, les contributions se poursuivent malgré l'absence totale de toute rétribution financière directe pour les participants du wiki.",
+  };
+  const Q14 = {
+    options: ["Les membres restent actifs par curiosité propre.", "x", "y", "z"],
+    correct: [0],
+    sourceFact: "Dans cette étude, les contributions se poursuivent malgré l'absence totale de toute rétribution financière directe pour les participants du forum.",
+  };
+  // Avant ce correctif, keyProposition ne lisait que le texte de l'option : les deux clés, sans
+  // aucun mot en commun, ne se rapprochaient pas.
+  const optionOnly = (it: typeof Q7) => keyProposition({ options: it.options, correct: it.correct });
+  assert.equal(sameProposition(optionOnly(Q7)!, optionOnly(Q14)!), false, "sans le fait source, les deux options seules ne se ressemblent pas");
+  // Avec le fait source : la même preuve du cours établit les deux clés, le décor (wiki / forum) seul diffère.
+  const withFact = keyProposition(Q7), withFact2 = keyProposition(Q14);
+  assert.ok(withFact && withFact2, "proposition calculable des deux côtés");
+  assert.ok(sameProposition(withFact!, withFact2!), "la bonne réponse + le fait source révèlent le même fait sous un autre décor");
+  // Le contrôle des doublons les soumet donc en priorité au modèle, même sans notion ni angle partagés.
+  const pair = suspectPairs([
+    { ...Q7, notion: "Collaboration en ligne", focusSlot: false },
+    { ...Q14, notion: "Psychologie du bénévolat", focusSlot: false },
+  ] as never);
+  assert.deepEqual(pair, [[0, 1]], "la paire Q7/Q14 est soumise en priorité au contrôle des doublons");
 });
 
 test("Q5 : notion attribuée sans rapport avec le fait testé, recalée sur le libellé du programme le plus proche", () => {

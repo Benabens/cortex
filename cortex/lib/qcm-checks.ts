@@ -291,15 +291,21 @@ export function keyNotion(it: { options: string[]; correct: number[] }): string 
 }
 
 /**
- * Les racines de ce que la bonne réponse AFFIRME, texte entier (pas seulement sa tête de notion,
- * que `keyNotion` ne détecte pas toujours — job 25, Q17/Q20 : « Le nudge rend une option plus
- * attractive sans restreindre le choix », une phrase sans la ponctuation qu'exige `optionHead`).
- * null pour une MCQ ou une bonne réponse trop courte pour juger.
+ * Les racines de ce que la bonne réponse AFFIRME, texte de l'option PLUS le fait source qui
+ * l'établit (pas seulement sa tête de notion, que `keyNotion` ne détecte pas toujours — job 25,
+ * Q17/Q20 : « Le nudge rend une option plus attractive sans restreindre le choix », une phrase
+ * sans la ponctuation qu'exige `optionHead`). Deux questions dont l'énoncé de l'option diffère mais
+ * qui s'appuient sur le MÊME fait du cours (Q7/Q14, finition v5 : « le succès du modèle bénévole…
+ * montre l'importance de motivations non financières », une fois sur un wiki collaboratif, une fois
+ * sur un forum d'entraide) doivent rester détectables même quand seule l'option change. null pour
+ * une MCQ ou une bonne réponse (option + fait source) trop courte pour juger.
  */
-export function keyProposition(it: { options: string[]; correct: number[] }): Set<string> | null {
+export function keyProposition(it: { options: string[]; correct: number[]; sourceFact?: string | null }): Set<string> | null {
   if (it.correct.length !== 1) return null;
   const roots = contentRoots(it.options[it.correct[0]] ?? "");
-  return roots.size >= 3 ? roots : null;
+  const factRoots = contentRoots(it.sourceFact ?? "");
+  const merged = new Set([...roots, ...factRoots]);
+  return merged.size >= 3 ? merged : null;
 }
 
 /** Chevauchement de deux ensembles de racines, rapporté au plus petit : 1 si l'un couvre l'autre. */
