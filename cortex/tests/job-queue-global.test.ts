@@ -150,3 +150,28 @@ test("job terminé : sa place est rendue (setJob terminal)", async () => {
   });
   assert.deepEqual(await admitJob("carol", "algo", 1), { admitted: true });
 });
+
+test("startWorker sur un job déjà terminé : aucune place n'est prise (pas de ligne « en cours » orpheline)", async () => {
+  const jobs = await import("../lib/jobs");
+  const { authAll } = await import("../db/auth-store");
+  const { q } = await import("../db/q");
+  const { runWithCourse } = await import("../db/client");
+  let id = 0;
+  await runWithCourse("algo", async () => {
+    await jobs.ensureJobsSchema();
+    id = await q.insert(`INSERT INTO jobs (type, target, status, current_step, progress) VALUES ('exam', NULL, 'done', 'Terminé', 100)`);
+    await jobs.startWorker(id, "algo");
+  });
+  const rows = await authAll<{ job_id: number }>(`SELECT job_id FROM job_queue`);
+  assert.ok(!rows.some((r) => Number(r.job_id) === id), "la place du job terminé est rendue");
+});
+
+test("une entrée « en cours » dont le battement est vieux de plus de 48 h est purgée", async () => {
+  const { admitJob } = await import("../lib/job-queue");
+  const { authAll, authRun } = await import("../db/auth-store");
+  const { nowStr } = await import("../db/q");
+  await admitJob("alice", "algo", 1);
+  await authRun(`UPDATE job_queue SET heartbeat_at = ?, enqueued_at = ? WHERE user_id = ?`, nowStr(-49 * 3_600_000), nowStr(-49 * 3_600_000), "alice");
+  await admitJob("bob", "algo", 1);
+  assert.deepEqual((await authAll<{ user_id: string }>(`SELECT user_id FROM job_queue`)).map((r) => r.user_id), ["bob"]);
+});
