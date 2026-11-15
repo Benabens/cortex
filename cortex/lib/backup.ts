@@ -21,6 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { OBJECTS_FILE, type ObjectIndex, type ObjectIndexRef } from "./backup-objects";
 
 export type PgDumpEntry = {
   file: string; // nom relatif dans l'archive de backup
@@ -48,7 +49,11 @@ export type BackupManifest = {
    * Stockage objet (lib/storage) : les fichiers de cours vivent dans ce seau et ne
    * sont PAS dans l'archive du volume (seuls les fichiers locaux le sont).
    */
-  objectStore?: { location: string };
+  objectStore?: {
+    location: string;
+    /** Index des objets du seau copiés dans le stockage de sauvegarde (lib/backup-objects). */
+    index?: ObjectIndexRef;
+  };
   tools: { pgDump?: string; tar?: string; node: string };
 };
 
@@ -66,7 +71,12 @@ export type CreateBackupOptions = {
    * Stockage objet actif : les fichiers dont `inBucket(chemin relatif)` est vrai
    * ont déjà une copie à jour dans le seau `location` et ne sont pas archivés.
    */
-  objectStore?: { location: string; inBucket: (rel: string) => boolean };
+  objectStore?: {
+    location: string;
+    inBucket: (rel: string) => boolean;
+    /** Index du seau à cet instant (snapshotObjects) : écrit en objects.json, couvert par le manifeste. */
+    index?: ObjectIndex;
+  };
 };
 
 export type CreateBackupResult = { dir: string; manifest: BackupManifest };
@@ -294,7 +304,20 @@ export async function createBackup(opts: CreateBackupOptions): Promise<CreateBac
     );
   }
 
-  // ── 3) manifeste ────────────────────────────────────────────────────────
+  // ── 3) index des objets du seau ─────────────────────────────────────────
+  let objectIndex: ObjectIndexRef | undefined;
+  if (store?.index) {
+    const file = path.join(outDir, OBJECTS_FILE);
+    fs.writeFileSync(file, JSON.stringify(store.index) + "\n");
+    objectIndex = {
+      file: OBJECTS_FILE,
+      objects: store.index.objects.length,
+      bytes: store.index.objects.reduce((n, o) => n + o.size, 0),
+      sha256: sha256File(file),
+    };
+  }
+
+  // ── 4) manifeste ────────────────────────────────────────────────────────
   const manifest: BackupManifest = {
     version: 1,
     createdAt: now.toISOString(),
@@ -308,7 +331,7 @@ export async function createBackup(opts: CreateBackupOptions): Promise<CreateBac
       sha256: sha256File(dataArchive),
       excluded,
     },
-    ...(store ? { objectStore: { location: store.location } } : {}),
+    ...(store ? { objectStore: { location: store.location, ...(objectIndex ? { index: objectIndex } : {}) } } : {}),
     tools: {
       pgDump: toolVersion("pg_dump"),
       tar: toolVersion("tar"),
@@ -342,6 +365,7 @@ export function verifyChecksums(backupPath: string, m: BackupManifest): void {
   check(m.dataDir.archive, m.dataDir.sha256);
   if (m.postgres) check(m.postgres.file, m.postgres.sha256);
   if (m.pglite) check(m.pglite.file, m.pglite.sha256);
+  if (m.objectStore?.index) check(m.objectStore.index.file, m.objectStore.index.sha256);
 }
 
 /** true si la base Postgres cible contient déjà des schémas applicatifs. */

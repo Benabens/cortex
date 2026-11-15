@@ -11,6 +11,9 @@
  * complet (un envoi coupé laisse un dossier « incomplet », purgé à la
  * rétention). La rétention ne supprime JAMAIS le dossier complet le plus
  * récent, même expiré : mieux vaut une vieille sauvegarde qu'aucune.
+ * `<BACKUP_S3_PREFIX>_objets/` (réservé) range les contenus des objets du seau
+ * de fichiers par empreinte (lib/backup-objects) ; la rétention efface ceux
+ * qu'aucune sauvegarde retenue ne cite plus.
  *
  * Le client S3 est derrière l'interface `BackupStore` (sous-ensemble du port
  * lib/storage/bucket) : les tests utilisent un faux magasin en mémoire ;
@@ -20,6 +23,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { BLOBS_DIR, pruneBlobs } from "@/lib/backup-objects";
 import { sdkBucket, type PutBody, type S3Object } from "@/lib/storage/bucket";
 
 export type { PutBody, S3Object };
@@ -118,6 +122,7 @@ export async function listRemoteBackups(store: BackupStore, cfg: BackupS3Config)
     const slash = rel.indexOf("/");
     if (slash <= 0) continue;
     const folder = rel.slice(0, slash);
+    if (folder === BLOBS_DIR) continue; // contenus des objets du seau (lib/backup-objects), pas une sauvegarde
     const file = rel.slice(slash + 1);
     const cur = byFolder.get(folder) ?? { folder, createdAt: new Date(0), complete: false, bytes: 0, keys: [] };
     cur.keys.push(o.key);
@@ -130,8 +135,9 @@ export async function listRemoteBackups(store: BackupStore, cfg: BackupS3Config)
 }
 
 /**
- * Supprime les dossiers plus vieux que `keepDays` (et tout dossier incomplet
- * expiré). Le dossier complet le plus récent est TOUJOURS conservé.
+ * Supprime les dossiers complets remplacés depuis plus de `keepDays` (par une
+ * sauvegarde complète plus récente) et les dossiers incomplets plus vieux que
+ * `keepDays`. Le dossier complet le plus récent est TOUJOURS conservé.
  */
 export async function pruneBackups(store: BackupStore, cfg: BackupS3Config, now: Date = new Date(), opts: Log = {}): Promise<string[]> {
   const log = opts.log ?? console.log;
@@ -139,13 +145,21 @@ export async function pruneBackups(store: BackupStore, cfg: BackupS3Config, now:
   const newestComplete = all.find((b) => b.complete);
   const limit = now.getTime() - cfg.keepDays * 86_400_000;
   const deleted: string[] = [];
+  let newerComplete: RemoteBackup | null = null; // `all` va du plus récent au plus ancien
   for (const b of all) {
-    if (b === newestComplete) continue;
-    if (b.createdAt.getTime() >= limit) continue;
+    // Un état complet est gardé `keepDays` après avoir été REMPLACÉ par le suivant :
+    // un objet supprimé du seau juste avant une sauvegarde n'est cité que par la
+    // précédente, qui reste donc restaurable keepDays pleins après la suppression.
+    const since = b.complete ? newerComplete?.createdAt ?? null : b.createdAt;
+    if (b.complete) newerComplete = b;
+    if (b === newestComplete || !since) continue;
+    if (since.getTime() >= limit) continue;
     log(`[backup:s3] rétention ${cfg.keepDays} j : suppression de ${b.folder}${b.complete ? "" : " (incomplet)"}`);
     await store.remove(b.keys);
     deleted.push(b.folder);
   }
+  // Contenus des objets du seau qu'aucune sauvegarde retenue ne cite plus.
+  await pruneBlobs(store, cfg, all.filter((b) => !deleted.includes(b.folder)), now, opts);
   return deleted;
 }
 

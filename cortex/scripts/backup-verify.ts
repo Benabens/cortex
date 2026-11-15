@@ -9,6 +9,9 @@
  *   npm run backup:verify -- --list          # liste les sauvegardes distantes
  *   npm run backup:verify -- --latest --keep=<dossier>   # garde la copie rapatriée (essai de restauration)
  *
+ * Distante avec objets du seau de fichiers : vérifie aussi que chaque contenu
+ * indexé est présent (taille) dans le stockage de sauvegarde.
+ *
  * Code de sortie ≠ 0 si la sauvegarde est inutilisable. Rien n'est restauré.
  */
 import fs from "node:fs";
@@ -16,6 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import { backupS3Config, listRemoteBackups, pullBackup, s3Store } from "../lib/backup-s3";
 import { verifyBackup } from "../lib/backup-verify";
+import { readLocalIndex, verifyRemoteObjects } from "../lib/backup-objects";
 
 const args = process.argv.slice(2);
 const hasFlag = (f: string) => args.includes(f);
@@ -50,6 +54,14 @@ async function main(): Promise<void> {
 
   try {
     const r = await verifyBackup(dir);
+    // Sauvegarde distante avec objets du seau : chaque contenu indexé doit être là.
+    if (remote && r.manifest.objectStore?.index) {
+      const cfg = backupS3Config()!;
+      const index = readLocalIndex(dir, r.manifest.objectStore.index)!;
+      const { objects, missing } = await verifyRemoteObjects({ store: s3Store(cfg), cfg, index });
+      if (missing.length) throw new Error(`${missing.length}/${objects} objet(s) du seau sans contenu valide dans le stockage de sauvegarde (ex. ${missing[0]}).`);
+      console.log(`  objets : ${objects} objet(s) du seau, contenus présents`);
+    }
     console.log(`\n✓ Sauvegarde vérifiée : ${path.basename(dir)} (créée le ${r.manifest.createdAt})`);
     if (keep) console.log(`  copie  : ${dir}`);
     console.log(`  volume : ${r.dataEntries} entrées`);
