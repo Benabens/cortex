@@ -140,7 +140,7 @@ export const anthropicProvider: LlmProvider = {
     const strict = req.json ? structuredSchema(req.json.schema) : null;
     const outputConfig = {
       ...(strict ? { format: { type: "json_schema", schema: strict } } : {}),
-      ...(req.json?.effort ? { effort: req.json.effort } : {}),
+      ...(req.effort ? { effort: req.effort } : {}),
     };
     if (Object.keys(outputConfig).length) params.output_config = outputConfig;
 
