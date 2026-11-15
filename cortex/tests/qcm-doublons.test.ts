@@ -46,12 +46,20 @@ function item(stem: string) {
   return { topic: "HUM-285", type: "scq", stem, options, correct: [0], misconceptions: ["", "[inversion] x", "[mauvaise condition] x", "[mauvaise attribution] x"], explanation: "La bonne réponse reprend le cours ; les autres l'inversent ou le déforment." };
 }
 
-/** Lots initiaux : la question n de l'examen porte la notion de l'examen 4 ; les lots suivants, des notions neuves. */
-let design: (n: number, call: number) => ReturnType<typeof item>[] = (n, call) => Array.from({ length: n }, (_, i) => {
-  const q = (call - 1) * 4 + i + 1;
-  return call <= 5 ? item(`Question ${q} [notion:${notionOf(q)}] [angle:fait ${q}] : que dit le cours ?`) : item(`Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`);
+/**
+ * Contexte d'un lot conçu : `q0` = questions déjà conçues hors comblement (numérotation continue
+ * des lots de 8 et de la marge de réserve), `topUp` = n° du lot de comblement (repéré à sa consigne
+ * « NOTIONS DÉJÀ TESTÉES »), 0 sinon.
+ */
+type Lot = { q0: number; topUp: number };
+/** Lots initiaux : la question n de l'examen porte la notion de l'examen 4 ; les lots de comblement, des notions neuves. */
+let design: (n: number, call: number, lot: Lot) => ReturnType<typeof item>[] = (n, call, lot) => Array.from({ length: n }, (_, i) => {
+  const q = lot.q0 + i + 1;
+  return !lot.topUp ? item(`Question ${q} [notion:${notionOf(q)}] [angle:fait ${q}] : que dit le cours ?`) : item(`Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`);
 });
 let designCalls = 0;
+let designed = 0;
+let topUps = 0;
 const designPrompts: string[] = [];
 const dedupePrompts: string[] = [];
 
@@ -83,13 +91,16 @@ before(async () => {
       const parsed = JSON.parse(body) as { messages: { content: unknown }[] };
       const content = parsed.messages.map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))).join("\n");
       let text = "{}";
-      if (/"duplicates"/.test(content)) { dedupePrompts.push(content); text = dedupeReply(content); }
-      else if (/"offCourse"/.test(content)) text = JSON.stringify({ verdicts: [...content.matchAll(/^Q(\d+)\./gm)].map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })) });
+      // Revue finale : audit (verdicts) et doublons dans le même appel.
+      if (/"duplicates"/.test(content)) { dedupePrompts.push(content); text = JSON.stringify({ verdicts: [...content.matchAll(/^Q(\d+)\./gm)].map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })), ...JSON.parse(dedupeReply(content)) }); }
       else if (/"results"/.test(content)) text = verifyReply(content);
       else if (/"items"/.test(content)) {
         designCalls++;
         designPrompts.push(content);
-        text = JSON.stringify({ items: design(Number(/\((\d+) QCM\)/.exec(content)?.[1] ?? 1), designCalls) });
+        const n = Number(/\((\d+) QCM\)/.exec(content)?.[1] ?? 1);
+        const topUp = /NOTIONS DÉJÀ TESTÉES/.test(content) ? ++topUps : 0;
+        text = JSON.stringify({ items: design(n, designCalls, { q0: designed, topUp }) });
+        if (!topUp) designed += n;
       }
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ choices: [{ message: { content: text }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 10 } }));
@@ -104,7 +115,7 @@ before(async () => {
 });
 
 const defaultDesign = design;
-beforeEach(() => { designCalls = 0; designPrompts.length = 0; dedupePrompts.length = 0; design = defaultDesign; });
+beforeEach(() => { designCalls = 0; designed = 0; topUps = 0; designPrompts.length = 0; dedupePrompts.length = 0; design = defaultDesign; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -162,17 +173,19 @@ test("HUM-285 anonymisé : Q11, Q19, Q16, Q20 et Q14 sont remplacées, les premi
   assert.equal(new Set(notions).size, 20, `chaque notion une seule fois :\n${notions.join("\n")}`);
   for (const q of [2, 7, 8, 12]) assert.ok(stems.some((s) => s.startsWith(`Question ${q} `)), `Q${q} (première de son groupe) est gardée`);
   for (const q of [11, 14, 16, 19, 20]) assert.ok(!stems.some((s) => s.startsWith(`Question ${q} `)), `Q${q} est retirée`);
-  assert.equal(stems.filter((s) => s.startsWith("Remplacement")).length, 5);
+  // 23 conçues (20 + 15 % de réserve) : les trois de réserve et deux remplaçants prennent les cinq places.
+  for (const q of [21, 22, 23]) assert.ok(stems.some((s) => s.startsWith(`Question ${q} `)), `Q${q} (réserve) prend une place`);
+  assert.equal(stems.filter((s) => s.startsWith("Remplacement")).length, 2);
   assert.match(dedupePrompts[0], /une notion = une question/i, "le contrôle reçoit le critère strict");
-  assert.match(dedupePrompts[0], /Options :/, "le contrôle voit aussi les réponses et distracteurs recyclés");
-  assert.ok(steps.some((s) => /5 QCM en doublon/.test(s)), steps.filter((s) => /doublon/.test(s)).join("\n"));
+  assert.match(dedupePrompts[0], /^ +\(1\) Une affirmation inversée/m, "le contrôle voit aussi les réponses et distracteurs recyclés");
+  assert.ok(steps.some((s) => /5 doublon/.test(s)), steps.filter((s) => /doublon/.test(s)).join("\n"));
   assert.match(designPrompts[designPrompts.length - 1], /concept fictif alpha/, "le lot de remplacement sait quelles notions sont déjà posées");
 });
 
 test("un remplacement qui retombe sur une notion déjà posée est retiré à son tour", async () => {
   const id = await course(30);
   // Le 1ᵉʳ lot de remplacement repose encore une question sur le concept fictif gamma (déjà Q12).
-  design = (n, call) => (call === 6 ? Array.from({ length: n }, (_, i) => item(i === 0 ? `Remplacement 6.0 [notion:concept fictif gamma] [angle:autre] : que dit le cours ?` : `Remplacement 6.${i} [notion:neuve 6.${i}] [angle:a] : que dit le cours ?`)) : defaultDesign(n, call));
+  design = (n, call, lot) => (lot.topUp === 1 ? Array.from({ length: n }, (_, i) => item(i === 0 ? `Remplacement 6.0 [notion:concept fictif gamma] [angle:autre] : que dit le cours ?` : `Remplacement 6.${i} [notion:neuve 6.${i}] [angle:a] : que dit le cours ?`)) : defaultDesign(n, call, lot));
   const { r, stems } = await exam(id, 20);
   assert.equal(r.count, 20);
   assert.equal(new Set(stems.map(notionIn)).size, 20, stems.map(notionIn).join("\n"));
@@ -182,11 +195,12 @@ test("un remplacement qui retombe sur une notion déjà posée est retiré à so
 
 test("plus de questions que de notions : deux questions sur une notion restent, si leurs angles diffèrent", async () => {
   const id = await course(3);
-  // 6 questions, 3 notions : Q1/Q4 même notion, angles différents ; Q2/Q5 même notion, MÊME angle.
-  design = (n, call) => Array.from({ length: n }, (_, i) => {
-    const q = (call - 1) * 4 + i + 1;
-    const tags: Record<number, string> = { 1: "[notion:nudge] [angle:définition]", 4: "[notion:nudge] [angle:exemple de la cafétéria]", 2: "[notion:biais] [angle:Svenson]", 5: "[notion:biais] [angle:Svenson]", 3: "[notion:souveraineté] [angle:résidence]", 6: "[notion:souveraineté] [angle:extraterritorialité]" };
-    return item(call <= 2 ? `Question ${q} ${tags[q]} : que dit le cours ?` : `Remplacement ${call}.${i} [notion:biais] [angle:ancrage ${call}.${i}] : que dit le cours ?`);
+  // 6 questions, 3 notions : Q1/Q4 même notion, angles différents ; Q2/Q5 même notion, MÊME angle
+  // (Q7, la réserve, aussi : le comblement est nécessaire).
+  design = (n, call, lot) => Array.from({ length: n }, (_, i) => {
+    const q = lot.q0 + i + 1;
+    const tags: Record<number, string> = { 1: "[notion:nudge] [angle:définition]", 4: "[notion:nudge] [angle:exemple de la cafétéria]", 2: "[notion:biais] [angle:Svenson]", 5: "[notion:biais] [angle:Svenson]", 7: "[notion:biais] [angle:Svenson]", 3: "[notion:souveraineté] [angle:résidence]", 6: "[notion:souveraineté] [angle:extraterritorialité]" };
+    return item(!lot.topUp ? `Question ${q} ${tags[q]} : que dit le cours ?` : `Remplacement ${call}.${i} [notion:biais] [angle:ancrage ${call}.${i}] : que dit le cours ?`);
   });
   const { r, stems } = await exam(id, 6);
   assert.equal(r.count, 6);
@@ -204,8 +218,8 @@ test("job 17 anonymisé (14/11, HUM-285) : même règle sous un décor différen
   // Q1/Q4 : même notion (nudge), même règle logique, décors différents (angles différents) — le
   // doublon livré en prod (Q16/Q17 : livraison de repas vs e-commerce, même définition du nudge).
   // Q2/Q5 et Q3/Q6 : angle ET règle distincts, gardées comme avant.
-  design = (n, call) => Array.from({ length: n }, (_, i) => {
-    const q = (call - 1) * 4 + i + 1;
+  design = (n, call, lot) => Array.from({ length: n }, (_, i) => {
+    const q = lot.q0 + i + 1;
     const tags: Record<number, string> = {
       1: "[notion:nudge] [angle:livraison de repas] [regle:option par défaut gardée = nudge, supprimée = pas un nudge]",
       4: "[notion:nudge] [angle:e-commerce] [regle:option par défaut gardée = nudge, supprimée = pas un nudge]",
@@ -216,7 +230,7 @@ test("job 17 anonymisé (14/11, HUM-285) : même règle sous un décor différen
     };
     // Le remplaçant porte une autre notion : un troisième « biais » dépasserait le plafond de deux
     // questions par notion (job 23) et serait retiré à son tour.
-    return item(call <= 2 ? `Question ${q} ${tags[q]} : que dit le cours ?` : `Remplacement ${call}.${i} [notion:cadrage] [angle:ancrage ${call}.${i}] [regle:ancrage ${call}.${i}] : que dit le cours ?`);
+    return item(!lot.topUp ? `Question ${q} ${tags[q]} : que dit le cours ?` : `Remplacement ${call}.${i} [notion:cadrage] [angle:ancrage ${call}.${i}] [regle:ancrage ${call}.${i}] : que dit le cours ?`);
   });
   const { r, stems } = await exam(id, 6);
   assert.equal(r.count, 6);
@@ -230,10 +244,10 @@ test("accent demandé par l'étudiant : ses questions partagent un thème sans �
   const id = await course(30);
   // Q1 et Q2 : les deux questions de l'accent (nudges). Q4 : une question hors accent sur le nudge
   // (doublon d'une question de l'accent) ; Q5 et Q6 : même notion entre elles, hors accent.
-  design = (n, call) => Array.from({ length: n }, (_, i) => {
-    const q = (call - 1) * 4 + i + 1;
+  design = (n, call, lot) => Array.from({ length: n }, (_, i) => {
+    const q = lot.q0 + i + 1;
     const tag = q <= 2 ? `[notion:nudge] [angle:facette ${q}]` : q === 4 ? `[notion:nudge] [angle:facette 4]` : q === 6 ? `[notion:autre 5] [angle:b]` : `[notion:autre ${q}] [angle:a]`;
-    return item(call <= 2 ? `Question ${q} ${tag} : que dit le cours ?` : `Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`);
+    return item(!lot.topUp ? `Question ${q} ${tag} : que dit le cours ?` : `Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`);
   });
   const { r, stems } = await exam(id, 6, "les nudges");
   assert.equal(r.count, 6);
@@ -246,7 +260,7 @@ test("accent demandé par l'étudiant : ses questions partagent un thème sans �
 test("le dernier lot de remplacement est contrôlé lui aussi : une notion déjà posée n'y reste pas sous le même angle", async () => {
   const id = await course(30);
   // Chaque lot de remplacement repose une question sur le concept fictif gamma (déjà Q12).
-  design = (n, call) => (call >= 6 ? Array.from({ length: n }, (_, i) => item(i === 0 ? `Remplacement ${call}.0 [notion:concept fictif gamma] [angle:encore ${call}] : que dit le cours ?` : `Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`)) : defaultDesign(n, call));
+  design = (n, call, lot) => (lot.topUp ? Array.from({ length: n }, (_, i) => item(i === 0 ? `Remplacement ${call}.0 [notion:concept fictif gamma] [angle:encore ${call}] : que dit le cours ?` : `Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`)) : defaultDesign(n, call, lot));
   const { stems } = await exam(id, 20);
   const notions = stems.map(notionIn);
   // Les remplacements ont épuisé la réserve : le nombre acquis (20) est tenu, et la seule notion
@@ -260,9 +274,9 @@ test("le dernier lot de remplacement est contrôlé lui aussi : une notion déj�
 
 test("titres de supports ajoutés faute de notions : ils ne comptent pas comme notions pour décider du mode strict", async () => {
   const id = await course(3, 30);
-  design = (n, call) => Array.from({ length: n }, (_, i) => {
-    const q = (call - 1) * 4 + i + 1;
-    return item(call <= 2 ? `Question ${q} [notion:${q % 3}] [angle:fait ${q}] : que dit le cours ?` : `Remplacement ${call}.${i} [notion:0] [angle:autre ${call}.${i}] : que dit le cours ?`);
+  design = (n, call, lot) => Array.from({ length: n }, (_, i) => {
+    const q = lot.q0 + i + 1;
+    return item(!lot.topUp ? `Question ${q} [notion:${q % 3}] [angle:fait ${q}] : que dit le cours ?` : `Remplacement ${call}.${i} [notion:0] [angle:autre ${call}.${i}] : que dit le cours ?`);
   });
   await exam(id, 6);
   assert.doesNotMatch(dedupePrompts[0], /une notion = une question/i, "3 notions pour 6 questions : plusieurs questions par notion, sous des angles distincts");
@@ -270,8 +284,8 @@ test("titres de supports ajoutés faute de notions : ils ne comptent pas comme n
 
 test("plus de questions que de notions, angle non nommé par le modèle : pas de retrait sur la seule notion", async () => {
   const id = await course(3);
-  design = (n, call) => Array.from({ length: n }, (_, i) => {
-    const q = (call - 1) * 4 + i + 1;
+  design = (n, call, lot) => Array.from({ length: n }, (_, i) => {
+    const q = lot.q0 + i + 1;
     return item(`Question ${q} [notion:${q === 1 || q === 4 ? "nudge" : `autre ${q}`}] [angle:] : que dit le cours ?`);
   });
   const { stems } = await exam(id, 6);
@@ -288,9 +302,9 @@ test("banc du 04/11 (CS-290) : une question qui reprend celle d'un examen préc�
     await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified) VALUES (?,?,?,?,?,?,?,?,?,?)`,
       examId, 0, "HUM-285", "scq", "Ancienne [notion:faux positifs des détecteurs] [angle:fait 7] : que dit le cours ?", "[]", "[0]", "[]", "", 1);
   });
-  design = (n, call) => Array.from({ length: n }, (_, i) => {
-    const qn = (call - 1) * 4 + i + 1;
-    return call === 1 ? item(qn === 3 ? "Question 3 [notion:faux positifs des détecteurs] [angle:fait 7] : que dit le cours ?" : `Question ${qn} [notion:neuve ${qn}] [angle:a] : que dit le cours ?`) : item(`Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`);
+  design = (n, call, lot) => Array.from({ length: n }, (_, i) => {
+    const qn = lot.q0 + i + 1;
+    return !lot.topUp ? item(qn === 3 ? "Question 3 [notion:faux positifs des détecteurs] [angle:fait 7] : que dit le cours ?" : `Question ${qn} [notion:neuve ${qn}] [angle:a] : que dit le cours ?`) : item(`Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`);
   });
   const { r, stems } = await exam(id, 4);
   assert.equal(r.count, 4);

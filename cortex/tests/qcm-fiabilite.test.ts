@@ -125,8 +125,8 @@ before(async () => {
       // Architecte des questions ouvertes (conception → rédaction → audit), testé avant "items" :
       // le schéma de conception contient lui aussi des tableaux « "items" ».
       if (/"replacements"/.test(content)) { repairPrompts.push(content); text = repairReply(content); }
-      else if (/"duplicates"/.test(content)) { dedupePrompts.push(content); text = JSON.stringify({ duplicates: dedupe(content) }); }
-      else if (/"offCourse"/.test(content)) { finalAuditCalls++; text = finalAuditReply(content); }
+      // Revue finale : audit (verdicts) et doublons dans le même appel.
+      else if (/"offCourse"/.test(content)) { finalAuditCalls++; dedupePrompts.push(content); text = JSON.stringify({ ...JSON.parse(finalAuditReply(content)), duplicates: dedupe(content) }); }
       else if (/"hints"/.test(content)) { assistPrompts.push(content); text = drill(assistPrompts.length); }
       else if (/RÉPONSE DE L'ÉTUDIANT/.test(content)) { assistPrompts.push(content); text = JSON.stringify(VERDICT); }
       else if (/"edge_case"/.test(content)) text = JSON.stringify(DESIGN);
@@ -210,7 +210,7 @@ test("sorties problématiques du modèle → 7 QCM sur 7, code des énoncés int
   assert.doesNotMatch(exam!.verifySummary ?? "", /sur 7/, "un examen complet ne signale rien");
 });
 
-test("lot name_only sans indice trivial : une régénération maximum puis secours vérifié", async () => {
+test("lot name_only sans indice trivial : aucune régénération, les QCM vérifiés passent après les questions propres", async () => {
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam } = await import("../lib/qcm");
@@ -218,8 +218,10 @@ test("lot name_only sans indice trivial : une régénération maximum puis secou
   design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
   const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
   assert.equal(r.count, 4);
-  assert.equal(designCalls, 2, "une seule régénération ciblée est tentée");
-  assert.equal(verifyPrompts.length, 2, "le secours vérifié est conservé si le défaut persiste");
+  // Banc HUM-285 du 15/11 : une régénération coûtait une conception et une vérification pour un
+  // défaut que la marge de réserve absorbe ; faute de question propre, la vérifiée est livrée.
+  assert.equal(designCalls, 1, "aucune régénération");
+  assert.equal(verifyPrompts.length, 1, "une seule vérification groupée");
 });
 
 test("un candidat résiduel refusé tôt redevient admissible après l'arrivée de QCM propres", async () => {
@@ -286,34 +288,34 @@ test("lot name_only avec un distracteur trivial : répare l'option sans reconcev
   assert.equal(r.count, 4);
   assert.equal(designCalls, 1, "l'énoncé, la clé et la preuve sont conservés");
   assert.equal(repairPrompts.length, 1, "les seules mauvaises options sont réparées en lot");
-  assert.equal(verifyPrompts.length, 2, "le lot réparé est revérifié une fois");
+  assert.equal(verifyPrompts.length, 1, "la version réparée n'est pas revérifiée à part");
+  assert.match(dedupePrompts[0], /La médiane des revenus/, "la revue finale audite la version réparée");
 });
 
-test("le modèle ne rend qu'un QCM par lot : le complément borné atteint 7 sur 7", async () => {
+test("le modèle ne rend qu'un QCM par lot : une seule ronde de comblement, l'examen dit ce qui manque", async () => {
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
-  // Un seul QCM par lot : le budget tardif poursuit après le comblement principal.
+  // Un seul QCM par lot : 2 lots prévus (7 + 2 de réserve), puis une ronde de comblement.
   design = (_n, call) => JSON.stringify({ items: [item(call % 3)] });
   const r = await runWithCourse(id, () => generateQcmExam({ count: 7, openCount: 0 }));
-  assert.equal(r.count, 7, `count=${r.count}`);
   assert.equal(r.requested, 7);
-  // Budget borné : 2 lots prévus, 3 × 2 de comblement principal, puis 3 lots tardifs au plus.
-  assert.ok(designCalls <= 11, `budget de comblement borné (${designCalls} lots demandés pour 2 prévus)`);
+  assert.ok(r.count < 7, `count=${r.count}`);
+  assert.ok(designCalls <= 3, `budget de comblement borné à une ronde (${designCalls} lots demandés pour 2 prévus)`);
   const exam = await runWithCourse(id, () => getQcmExam(r.id));
-  assert.doesNotMatch(exam!.verifySummary ?? "", /sur 7/);
+  assert.match(exam!.verifySummary ?? "", /sur 7/, "l'examen incomplet le dit (et le job rembourse au prorata)");
 });
 
-test("plusieurs rondes de lots très incomplets finissent par livrer le total demandé", async () => {
+test("des lots très incomplets : une ronde de comblement livre le total demandé", async () => {
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam } = await import("../lib/qcm");
   design = (n, call) => JSON.stringify({
-    items: call <= 4 ? [item(call)] : Array.from({ length: n }, (_, i) => item(call * 10 + i)),
+    items: call <= 2 ? [item(call)] : Array.from({ length: n }, (_, i) => item(call * 10 + i)),
   });
   const r = await runWithCourse(id, () => generateQcmExam({ count: 7, openCount: 0 }));
   assert.equal(r.count, 7);
-  assert.ok(designCalls > 4 && designCalls <= 8, `rondes=${designCalls}`);
+  assert.equal(designCalls, 3, `2 lots prévus puis une ronde de comblement, reçu ${designCalls}`);
 });
 
 test("aucun lot lisible : erreur claire qui dit pourquoi, jamais « unknown »", async () => {
@@ -334,7 +336,8 @@ test("un item mal formé au milieu d'un lot : c'est SON sujet qui est comblé", 
   const { generateQcmExam } = await import("../lib/qcm");
   design = (n, call) => {
     const items = Array.from({ length: n }, (_, i) => item(call * 10 + i));
-    if (call === 1) items[1] = { ...items[1], options: [] }; // 2ᵉ QCM du 1ᵉʳ lot inutilisable
+    // 2ᵉ QCM du 1ᵉʳ lot inutilisable, et celui de la notion de réserve aussi : il manque une question.
+    if (call === 1) for (const k of [1, 3]) items[k] = { ...items[k], options: [] };
     return JSON.stringify({ items });
   };
   const r = await runWithCourse(id, () => generateQcmExam({ count: 3, openCount: 0 }));
@@ -342,29 +345,30 @@ test("un item mal formé au milieu d'un lot : c'est SON sujet qui est comblé", 
   const subjects = (p: string) => [...p.matchAll(/^ {2}(\d+)\) (.+?)(?: \[|$)/gm)].map((m) => m[2].trim());
   const first = subjects(designPrompts[0]);
   const topup = subjects(designPrompts[1]);
-  assert.deepEqual(topup, [first[1]], `comblé : ${topup.join(" | ")} ; lot : ${first.join(" | ")}`);
+  assert.equal(topup[0], first[1], `comblé : ${topup.join(" | ")} ; lot : ${first.join(" | ")}`);
 });
 
-test("un remplacement de doublons partiellement rejeté est recomblé jusqu'au total demandé", async () => {
+test("doublons au-delà de la réserve : une ronde de comblement, revue elle aussi, livre le total demandé", async () => {
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam } = await import("../lib/qcm");
   let dedupeCall = 0;
+  // 9 conçues (7 + 2 de réserve), trois doublons : il en manque une.
   dedupe = () => (++dedupeCall === 1 ? [
     { first: 0, second: 1, reason: "même notion" },
     { first: 2, second: 3, reason: "même notion" },
+    { first: 4, second: 5, reason: "même notion" },
   ] : []);
   design = (n, call) => {
     const items = Array.from({ length: n }, (_, i) => item(call * 10 + i));
-    // Le premier lot de remplacement perd un item au contrôle de forme. Le moteur doit
-    // recombler ce trou même si le contrôle suivant ne trouve plus aucun doublon.
+    // Le lot de comblement perd un item au contrôle de forme : sa marge tient le total.
     if (call === 3 && items[1]) items[1] = { ...items[1], options: [] };
     return JSON.stringify({ items });
   };
   const r = await runWithCourse(id, () => generateQcmExam({ count: 7, openCount: 0 }));
   assert.equal(r.count, 7);
-  assert.ok(designCalls >= 4, `un lot de recomblement final est attendu, appels=${designCalls}`);
-  assert.ok(dedupeCall >= 3, `le lot recomblé doit être recontrôlé, contrôles=${dedupeCall}`);
+  assert.equal(designCalls, 3, `2 lots prévus puis un lot de comblement, appels=${designCalls}`);
+  assert.equal(dedupeCall, 2, `le lot de comblement est revu lui aussi, revues=${dedupeCall}`);
 });
 
 test("une question ouverte qui échoue est relancée : 2 QCM + 3 ouvertes sur 2 + 3", async () => {
@@ -466,7 +470,8 @@ test("H — deux QCM sur la même notion : le second est retiré et remplacé pa
   assert.equal(r.count, 3);
   const stems = (await runWithCourse(id, () => getQcmExam(r.id)))!.items.map((x) => x.stem);
   assert.ok(!stems.some((x) => x.startsWith("Simpson 1.2")), stems.join(" | "));
-  assert.ok(stems.some((x) => x.startsWith("Simpson 2.")), "remplacé par un nouveau lot");
+  assert.ok(stems.some((x) => x.startsWith("Simpson 1.3")), "remplacé par la question de réserve, sans nouveau lot");
+  assert.equal(designCalls, 1);
   assert.ok(steps.some((x) => /doublon/.test(x)), "le retrait est dit");
 });
 
@@ -485,9 +490,10 @@ test("K — niveau examen réel par défaut ; un distracteur éliminable sans le
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
-  // Mock 4 de CS-290 (consigne neutre) : distracteurs « erreur d'arrondi », « TypeError ».
-  const easy = { ...item(0), options: ["La moyenne des revenus calculée séparément pour chaque modalité de sex.", "Une TypeError, car groupby ne s'applique pas à une colonne texte.", "Une erreur d'arrondi due aux nombres flottants de la colonne income.", "La somme des revenus calculée séparément pour chaque modalité de sex."] };
-  design = (n, call) => JSON.stringify({ items: call === 1 ? [easy, ...Array.from({ length: n - 1 }, (_, i) => item(1 + i))] : Array.from({ length: n }, (_, i) => item(10 * call + i)) });
+  // Mock 4 de CS-290 (consigne neutre) : distracteurs « erreur d'arrondi », « TypeError ». Toutes
+  // les questions le portent : une question propre passerait sinon devant, sans réparation.
+  const easy = (i: number) => ({ ...item(i), options: ["La moyenne des revenus calculée séparément pour chaque modalité de sex.", "Une TypeError, car groupby ne s'applique pas à une colonne texte.", "Une erreur d'arrondi due aux nombres flottants de la colonne income.", "La somme des revenus calculée séparément pour chaque modalité de sex."] });
+  design = (n, call) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => easy(10 * call + i)) });
   const r = await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 0 }));
   assert.equal(r.count, 2);
   assert.match(designPrompts[0], /NIVEAU EXAMEN RÉEL/, "la difficulté d'examen est le défaut, sans consigne");
@@ -502,8 +508,8 @@ test("K — un distracteur encore trivial après remplacement est réparé une s
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
-  const easy = { ...item(0), options: ["La moyenne des revenus calculée séparément pour chaque modalité de sex.", "Une TypeError, car groupby ne s'applique pas à une colonne texte.", "Le nombre de lignes de chaque modalité de sex, sans calcul de moyenne.", "La somme des revenus calculée séparément pour chaque modalité de sex."] };
-  design = (n, call) => JSON.stringify({ items: call === 1 ? [easy, ...Array.from({ length: n - 1 }, (_, i) => item(1 + i))] : Array.from({ length: n }, (_, i) => item(10 * call + i)) });
+  const easy = (i: number) => ({ ...item(i), options: ["La moyenne des revenus calculée séparément pour chaque modalité de sex.", "Une TypeError, car groupby ne s'applique pas à une colonne texte.", "Le nombre de lignes de chaque modalité de sex, sans calcul de moyenne.", "La somme des revenus calculée séparément pour chaque modalité de sex."] });
+  design = (n, call) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => easy(10 * call + i)) });
   let repairs = 0;
   repairReply = (prompt) => {
     repairs++;
@@ -515,27 +521,30 @@ test("K — un distracteur encore trivial après remplacement est réparé une s
 
   const r = await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 0 }));
 
-  // Au-delà du budget de triviaux, le défaut persistant après la réparation groupée de la ronde
-  // déclenche un recomblement ciblé sur le même sujet, son défaut à l'appui (même coût qu'une
-  // seconde réparation : un appel + sa vérification) ; le remplaçant propre passe devant lui.
-  assert.equal(repairPrompts.length, 1, "une seule réparation groupée pour la ronde");
-  assert.ok(designPrompts.some((p) => /À CORRIGER[\s\S]*TypeError/.test(p)), "le recomblement nomme le défaut persistant");
+  // Au-delà du budget de triviaux, le défaut que la revue relève encore après la réparation de la
+  // sélection déclenche UNE seconde réparation, revérifiée à l'aveugle ; aucune question reconçue.
+  assert.equal(repairPrompts.length, 2, "réparation de la sélection, puis une seconde");
+  assert.equal(designCalls, 1, "aucune question reconçue");
   const options = (await runWithCourse(id, () => getQcmExam(r.id)))!.items.flatMap((x) => x.options);
   assert.ok(!options.some((o) => /TypeError/.test(o)), options.join(" | "));
 });
 
-test("K — après deux réparations insuffisantes, la question est régénérée avant le comblement", async () => {
+test("K — après deux réparations insuffisantes, la question vérifiée est livrée sans nouvelle conception", async () => {
   const id = await codeCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam } = await import("../lib/qcm");
-  const easy = { ...item(0), options: ["La moyenne des revenus calculée séparément pour chaque modalité de sex.", "Une TypeError, car groupby ne s'applique pas à une colonne texte.", "Le nombre de lignes de chaque modalité de sex, sans calcul de moyenne.", "La somme des revenus calculée séparément pour chaque modalité de sex."] };
-  design = (n, call) => JSON.stringify({ items: call === 1 ? [easy, ...Array.from({ length: n - 1 }, (_, i) => item(1 + i))] : Array.from({ length: n }, (_, i) => item(10 * call + i)) });
+  const easy = (i: number) => ({ ...item(i), options: ["La moyenne des revenus calculée séparément pour chaque modalité de sex.", "Une TypeError, car groupby ne s'applique pas à une colonne texte.", "Le nombre de lignes de chaque modalité de sex, sans calcul de moyenne.", "La somme des revenus calculée séparément pour chaque modalité de sex."] });
+  design = (n, call) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => easy(10 * call + i)) });
   repairReply = (prompt) => defaultRepairReply(prompt).replace("La médiane des revenus calculée séparément pour chaque modalité de sex.", "Une TypeError provoquée par la modalité de sex.");
 
-  const r = await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 0 }));
+  const steps: string[] = [];
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 2, openCount: 0, onStep: (s) => { steps.push(s); } }));
 
+  // Une question imparfaite, vérifiée, vaut mieux qu'une place remboursée ; elle est comptée triviale.
   assert.equal(r.count, 2);
-  assert.ok(designPrompts.some((p) => /À CORRIGER/.test(p)), "régénération ciblée avant un lot générique de comblement");
+  assert.equal(repairPrompts.length, 2);
+  assert.equal(designCalls, 1, "aucune question reconçue");
+  assert.ok(steps.some((x) => /distracteurs encore éliminables .* 0 corrigé/.test(x)), steps.join("\n"));
 });
 
 test("K — la consigne de l'étudiant s'ajoute au niveau par défaut, sur chaque lot", async () => {
@@ -543,7 +552,8 @@ test("K — la consigne de l'étudiant s'ajoute au niveau par défaut, sur chaqu
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam } = await import("../lib/qcm");
   design = (n) => JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i)) });
-  await runWithCourse(id, () => generateQcmExam({ count: 6, openCount: 0, focus: "HARD : distinctions fines entre notions proches" }));
+  // 10 QCM + 2 de réserve : deux lots de 6.
+  await runWithCourse(id, () => generateQcmExam({ count: 10, openCount: 0, focus: "HARD : distinctions fines entre notions proches" }));
   const firsts = designPrompts.filter((p) => !/À CORRIGER/.test(p));
   assert.ok(firsts.length >= 2);
   for (const p of firsts) {
@@ -570,7 +580,7 @@ test("M — ouvertes en parallèle des QCM, QCM visibles avant les ouvertes, dur
   assert.ok(early, "l'examen est livré dès que ses QCM sont prêts");
   assert.deepEqual(early, { examId: r.id, items: 4, open: 0, status: "generating" }, "QCM visibles, ouvertes en cours");
   const firstOpen = steps.findIndex((x) => /Question ouverte 1\/2/.test(x));
-  const qcmDone = steps.findIndex((x) => /4\/4 QCM construits/.test(x));
+  const qcmDone = steps.findIndex((x) => /QCM construits \+ vérifiés pour 4 places/.test(x));
   assert.ok(firstOpen >= 0 && firstOpen < qcmDone, "les ouvertes démarrent avant la fin des QCM");
   for (const phase of [/⏱ QCM/, /⏱ Questions ouvertes/, /⏱ PDF/, /⏱ Total/]) assert.ok(steps.some((x) => phase.test(x)), String(phase));
   const final = await runWithCourse(id, () => getQcmExam(r.id));

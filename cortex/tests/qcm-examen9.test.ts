@@ -3,11 +3,12 @@
  * 14/11/2026 avec trois questions dont la réponse était « le biais de disponibilité », neuf
  * explications qui réfutaient des options absentes, deux options identiques dans Q9 et Q10 livrée
  * « not_verified ». Les questions du concepteur simulé sont celles de l'examen (énoncés
- * paraphrasés, noms fictifs, cf. PR #84). Verrouillé, même quand le contrôle des doublons par le modèle échoue :
+ * paraphrasés, noms fictifs, cf. PR #84). Verrouillé, même quand la revue finale du modèle (audit et
+ * doublons en un appel) échoue :
  *  - une seule question par notion de bonne réponse, les retirées remplacées (nombre tenu) ;
  *  - aucune option répétée : la seconde est remplacée, la question revérifiée ;
  *  - aucune explication livrée ne réfute une option absente ;
- *  - une question réparée que le nouvel audit écarte revient à sa version auditée (Q10), vérifiée.
+ *  - tout ce qui est livré est vérifié.
  * Fournisseur LLM simulé (openai-compatible) : aucune dépense.
  */
 import assert from "node:assert/strict";
@@ -49,7 +50,6 @@ const blocks = (prompt: string) => prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^
 const optionLines = (b: string) => [...b.matchAll(/^\s+\((\d+)\) (.*)$/gm)].map((m) => ({ k: Number(m[1]), text: m[2] }));
 const stemOf = (b: string) => EXAM9.find((it) => b.includes(it.stem.slice(0, 80)));
 
-let auditCalls = 0;
 let dedupeCalls = 0;
 const dedupePrompts: string[] = [];
 const replacementPrompts: string[] = [];
@@ -70,19 +70,8 @@ function reply(content: string): string | null {
       return { index: Number(/^Q(\d+)\./.exec(b)![1]), explanation: `La bonne réponse est celle que le cours établit. ${wrong.map((w) => `L'option qui dit « ${w} » est fausse.`).join(" ")}` };
     }) });
   }
-  // Le contrôle des doublons par le modèle tombe en panne : les plafonds doivent suffire.
+  // La revue finale (audit et doublons) tombe en panne : les plafonds doivent suffire.
   if (/"duplicates"/.test(content)) { dedupeCalls++; dedupePrompts.push(content); return null; }
-  if (/"offCourse"/.test(content)) {
-    auditCalls++;
-    return JSON.stringify({ verdicts: blocks(content).map((b) => {
-      const index = Number(/^Q(\d+)\./.exec(b)![1]);
-      const n = stemOf(b)?.n;
-      // Premier audit : un distracteur de Q10 jugé trivial → réparé ; le nouvel audit écarte la version réparée.
-      const trivial = n === 10 && auditCalls === 1 ? optionLines(b).filter((o) => /uniquement si les données sont traitées/.test(o.text)).map((o) => o.k) : [];
-      // Audit des questions arrivées après coup (complément) : la clé de Q3 est contestée.
-      return { index, key: !(n === 10 && auditCalls > 1) && !(n === 3 && auditCalls > 2), offCourse: false, trivial };
-    }) });
-  }
   if (/"results"/.test(content)) {
     return JSON.stringify({ results: blocks(content).map((b) => {
       const key = keyText.get(stemOf(b)?.stem ?? "");
@@ -147,7 +136,7 @@ async function course(): Promise<string> {
   return row.id;
 }
 
-test("job 23 rejoué, contrôle des doublons du modèle en panne : examen livré sans doublon de réponse, sans option répétée, explications justes, tout vérifié", async () => {
+test("job 23 rejoué, revue finale du modèle en panne : examen livré sans doublon de réponse, sans option répétée, explications justes, tout vérifié", async () => {
   const id = await course();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
@@ -160,13 +149,12 @@ test("job 23 rejoué, contrôle des doublons du modèle en panne : examen livré
   const delivered = (n: number) => items.find((it) => it.stem === q(n).stem);
 
   assert.equal(r.count, 8, steps.join("\n"));
-  // Le contrôle du modèle a échoué (réessayé une fois) et le job le dit ; les plafonds ont tenu.
-  assert.ok(dedupeCalls >= 2, `contrôle des doublons appelé ${dedupeCalls} fois`);
-  assert.ok(steps.some((s) => /Contrôle des doublons en échec/.test(s)), steps.join("\n"));
+  // La revue du modèle a échoué et le job le dit ; les plafonds ont tenu.
+  assert.ok(dedupeCalls >= 1, `revue finale appelée ${dedupeCalls} fois`);
+  assert.ok(steps.some((s) => /Revue finale en échec/.test(s)), steps.join("\n"));
   assert.ok(steps.some((s) => /plafonds par notion appliqués seuls/.test(s)), steps.join("\n"));
-  // Le contrôle voit la bonne réponse de chaque question et les paires à trancher en priorité.
-  assert.match(dedupePrompts[0], /Bonne réponse : Le biais de disponibilité, car/);
-  // Après le complément, Q5 (confiance, avec « réalité partagée » en distracteur) croise Q4 : paire à trancher.
+  // La revue voit la bonne réponse de chaque question et les paires à trancher en priorité.
+  assert.match(dedupePrompts[0], /CLÉ : \d/);
   assert.ok(dedupePrompts.some((p) => /Paires à trancher en priorité[^\n]*Q\d+–Q\d+/.test(p)), "une paire à trancher est soumise");
   // Une notion de bonne réponse = une question : Q1 reste, Q14 et Q16 (biais de disponibilité) et Q17 (réalité partagée) partent.
   assert.ok(delivered(1) && delivered(4), "les premières occurrences restent");
@@ -180,16 +168,6 @@ test("job 23 rejoué, contrôle des doublons du modèle en panne : examen livré
   // Aucune explication livrée ne réfute une option absente, ni plus d'options qu'il n'y en a.
   assert.ok(rewritePrompts.length >= 1, "les explications fautives sont réécrites sur les options réelles");
   for (const it of items) assert.equal(explanationIssues(it.explanation, it.options, it.correct, it.stem), null, `${it.stem.slice(0, 60)} :\n${it.explanation}`);
-  // Q10 : réparée puis écartée par le nouvel audit → sa version auditée revient, vérifiée, options d'origine.
-  const q10 = delivered(10);
-  assert.ok(q10, "Q10 livrée");
-  assert.deepEqual([...q10!.options].sort(), [...q(10).options].sort());
-  assert.ok(auditCalls >= 2, "la version réparée a été ré-auditée");
-  // Les questions du complément passent l'audit final elles aussi : Q3, clé contestée, est écartée,
-  // et la place est recomblée par un nouveau complément au lieu d'être abandonnée.
-  assert.ok(steps.some((s) => /QCM tardif\(s\) écarté\(s\) par l'audit/.test(s)), steps.join("\n"));
-  assert.ok(!delivered(3), "Q3 écartée par l'audit tardif");
-  assert.equal(steps.filter((s) => /complément final/.test(s)).length, 2, steps.join("\n"));
   // Jamais de « not_verified » quand la vérification est possible.
   assert.deepEqual(items.filter((it) => it.verified !== 1).map((it) => it.stem.slice(0, 60)), []);
 });

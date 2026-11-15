@@ -133,6 +133,8 @@ before(async () => {
       const content = parsed.messages.map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))).join("\n");
       let text = "{}";
       if (/"replacements"/.test(content)) { calls.repair++; text = repair(content); }
+      // Revue finale : audit et doublons rendus dans le même objet, en un appel.
+      else if (/"duplicates"/.test(content) && /"offCourse"/.test(content)) { calls.audit++; text = JSON.stringify({ ...JSON.parse(audit(content)), ...JSON.parse(dedup(content)) }); }
       else if (/"duplicates"/.test(content)) { calls.dedup++; text = dedup(content); }
       else if (/"offCourse"/.test(content)) { calls.audit++; text = audit(content); }
       else if (/"results"/.test(content)) { calls.verify++; text = verify(content); }
@@ -269,6 +271,9 @@ test("distracteur jamais réparé + reprises en série : le budget temps de la p
 
 test("job 26 : une question à 5 options dans un examen à réponse unique n'est jamais livrée", async (t) => {
   sim.fiveOptionsEvery = 5;
+  // Une seule ronde de comblement (pipeline sur-généré) : sans clés contestées en plus, pour que le
+  // test isole les questions à 5 options — 20 % de mal formées ET 11 % de clés contestées font 19/20.
+  sim.rejectEvery = 0;
   const { r, items, steps, detail } = await generate(await course(0));
   t.diagnostic(detail);
   assert.ok(steps.some((s) => /à 5 options écarté/.test(s)), `le contrôle a vu les questions à 5 options : ${detail}`);
