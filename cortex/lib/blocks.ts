@@ -14,8 +14,8 @@ import { examsDir } from "@/lib/paths";
 import { PhaseProgress, phaseLine } from "@/lib/progress";
 import { runSandboxed } from "@/lib/sandbox-exec";
 import { normalize, tokenize } from "@/lib/text";
-import fs from "node:fs";
 import path from "node:path";
+import { storage } from "@/lib/storage";
 
 /**
  * QUESTIONS COMPOSÉES — le format d'examen le plus courant à l'EPFL (mid-term de CS-290) :
@@ -510,9 +510,9 @@ export async function generateBlockExam(
 }
 
 /** Le corrigé PDF d'un examen, s'il a compilé. */
-export function solutionsPdf(htmlPath: string | null): string | null {
+export async function solutionsPdf(htmlPath: string | null): Promise<string | null> {
   const file = htmlPath && htmlPath.endsWith(".pdf") ? htmlPath.replace(/\.pdf$/, "-corrige.pdf") : "";
-  return file && fs.existsSync(path.join(examsDir(), path.basename(file))) ? file : null;
+  return file && (await storage().stat(path.join(examsDir(), path.basename(file)))) ? file : null;
 }
 
 async function ensureBlockSchema(): Promise<void> {
@@ -556,7 +556,7 @@ export async function getBlockExam(examId: number, withKeys = false): Promise<Bl
   const blocks = await q.all<{ id: number; idx: number; title: string; section: string | null; scenario: string; points: number }>(`SELECT id, idx, title, section, scenario, points FROM exam_blocks WHERE exam_id = ? ORDER BY idx`, examId);
   const parts = await q.all<PartRow>(`SELECT * FROM block_parts WHERE exam_id = ? ORDER BY block_id, idx`, examId);
   return {
-    kind: "blocks", id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: examSummaryLabel(e.verify_summary), pdf: e.html_path ?? null, solutions: solutionsPdf(e.html_path),
+    kind: "blocks", id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: examSummaryLabel(e.verify_summary), pdf: e.html_path ?? null, solutions: await solutionsPdf(e.html_path),
     blocks: blocks.map((b) => ({
       id: b.id, idx: b.idx, title: b.title, section: b.section, scenario: b.scenario, points: Number(b.points),
       parts: parts.filter((p) => p.block_id === b.id).map((p) => ({

@@ -1,7 +1,7 @@
 import { coursePaths } from "@/lib/courses";
 import { servedFileHeaders } from "@/lib/security-headers";
 import { requireCourse } from "@/lib/req";
-import fs from "node:fs";
+import { storage } from "@/lib/storage";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -25,26 +25,18 @@ const MIME: Record<string, string> = {
  * Repli anti-404 : si le chemin stocké ne résout pas (vieille ingestion, préfixe périmé
  * `lectures/` → `slides/`), on cherche le fichier par son BASENAME dans les dossiers du cours
  * (refs/ d'abord, puis content/**). Jamais de cul-de-sac silencieux quand le fichier existe ailleurs.
- * Walk borné : on saute les dossiers lourds/inutiles et on plafonne le nombre de fichiers scannés.
+ * Parcours borné : on saute les dossiers lourds/inutiles et on plafonne le nombre de fichiers examinés.
  */
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "figref", "img", "images"]);
-function findByBasename(roots: string[], basename: string): string | null {
+async function findByBasename(roots: string[], basename: string): Promise<string | null> {
   const target = basename.toLowerCase();
   let scanned = 0;
   for (const root of roots) {
-    if (!fs.existsSync(root)) continue;
-    const stack = [root];
-    while (stack.length) {
-      const dir = stack.pop()!;
-      let entries: fs.Dirent[];
-      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
-      for (const e of entries) {
-        if (e.name.startsWith(".")) continue;
-        const abs = path.join(dir, e.name);
-        if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) stack.push(abs); continue; }
-        if (++scanned > 4000) return null; // garde-fou : ne walk jamais indéfiniment
-        if (e.name.toLowerCase() === target) return abs;
-      }
+    for (const f of await storage().list(root)) {
+      const segs = path.relative(root, f.path).split(path.sep);
+      if (segs.some((x) => x.startsWith(".")) || segs.slice(0, -1).some((x) => SKIP_DIRS.has(x))) continue;
+      if (++scanned > 4000) return null; // garde-fou : ne parcourt jamais indéfiniment
+      if (segs[segs.length - 1].toLowerCase() === target) return f.path;
     }
   }
   return null;
@@ -65,21 +57,24 @@ export async function GET(req: NextRequest) {
   const rel = p.startsWith("refs/") ? p.slice("refs/".length) : p;
   const allowed = [cp.refsDir, cp.contentRoot].map((d) => path.resolve(d) + path.sep);
   let abs = path.resolve(base, rel);
-  const ok = (a: string) => allowed.some((d) => a.startsWith(d)) && fs.existsSync(a) && fs.statSync(a).isFile();
+  const ok = async (a: string) => allowed.some((d) => a.startsWith(d)) && !!(await storage().stat(a));
 
-  if (!ok(abs)) {
+  if (!(await ok(abs))) {
     // repli par basename : le fichier a peut-être bougé (slides/ vs lectures/) → on le retrouve.
-    const found = findByBasename([cp.refsDir, cp.contentRoot], path.basename(rel));
-    if (found && ok(found)) abs = found;
+    const found = await findByBasename([cp.refsDir, cp.contentRoot], path.basename(rel));
+    if (found && (await ok(found))) abs = found;
     else return new NextResponse("Not found", { status: 404 });
   }
 
+  // Aperçu d'une page (#page=N) : le PDF est diffusé par plages (ou depuis une
+  // URL présignée du seau), jamais lu en entier en mémoire.
   const ext = abs.split(".").pop()?.toLowerCase() ?? "";
-  const buf = fs.readFileSync(abs);
-  return new NextResponse(new Uint8Array(buf), {
+  const res = await storage().serve(abs, req, {
+    contentType: MIME[ext] ?? "application/octet-stream",
     headers: servedFileHeaders(MIME[ext] ?? "application/octet-stream", {
       "content-disposition": "inline",
       "cache-control": "private, max-age=3600",
     }),
   });
+  return res ?? new NextResponse("Not found", { status: 404 });
 }

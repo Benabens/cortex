@@ -1,8 +1,8 @@
 import { uploadsDir } from "@/lib/paths";
 import crypto from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
 import { extractText, getDocumentProxy } from "unpdf";
+import { storage } from "@/lib/storage";
 
 /**
  * PIÈCES JOINTES D'UNE FAIBLESSE — une seule zone de dépôt accepte une capture (PNG, JPG,
@@ -47,10 +47,8 @@ export async function pdfText(buf: Uint8Array, maxChars: number): Promise<string
 }
 
 /** Range la pièce jointe dans le dossier d'uploads du compte ; renvoie le nom de fichier stocké. */
-export function saveAttachment(buf: Uint8Array, kind: AttachmentKind): string {
-  const dir = uploadsDir();
-  fs.mkdirSync(dir, { recursive: true });
+export async function saveAttachment(buf: Uint8Array, kind: AttachmentKind): Promise<string> {
   const name = `${crypto.randomUUID()}.${kind}`;
-  fs.writeFileSync(path.join(dir, name), buf);
+  await storage().put(path.join(uploadsDir(), name), buf);
   return name;
 }

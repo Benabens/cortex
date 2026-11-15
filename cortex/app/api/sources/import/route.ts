@@ -7,8 +7,8 @@ import { extractOfficeText, OfficeDocumentError, type OfficeExtension } from "@/
 import { requireCourse } from "@/lib/req";
 import { checkStorage, declaredBytes, storageQuotaBytesFor } from "@/lib/storage-quota";
 import { readFormData, UPLOAD_LIMITS, withBodyLimit } from "@/lib/upload-limit";
-import fs from "node:fs";
 import path from "node:path";
+import { storage as fileStore } from "@/lib/storage";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -25,18 +25,6 @@ function safeRelPath(raw: string): string | null {
     .slice(-4);
   if (!parts.length || !ALLOWED.has(path.extname(parts.at(-1)!).toLowerCase())) return null;
   return parts.join("/");
-}
-
-function directoryBytes(dir: string): number {
-  let total = 0;
-  let entries: fs.Dirent[];
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return 0; }
-  for (const entry of entries) {
-    const child = path.join(dir, entry.name);
-    if (entry.isDirectory()) total += directoryBytes(child);
-    else if (entry.isFile()) { try { total += fs.statSync(child).size; } catch { /* disparu */ } }
-  }
-  return total;
 }
 
 export const POST = withBodyLimit(async function POST(req: NextRequest) {
@@ -85,7 +73,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
 
   const { refsDir, contentRoot } = coursePaths(course);
   const courseMax = await storageQuotaBytesFor(currentUser());
-  if (courseMax !== null && directoryBytes(refsDir) + directoryBytes(contentRoot) + file.size > courseMax) {
+  if (courseMax !== null && (await fileStore().usageBytes(refsDir)) + (await fileStore().usageBytes(contentRoot)) + file.size > courseMax) {
     return NextResponse.json({ error: `${file.name} : plafond de ${Math.round(courseMax / (1024 * 1024))} Mo atteint pour ce cours (quota de stockage configurable).` }, { status: 413 });
   }
   const { bucket } = classifyFile(rel);
@@ -93,11 +81,11 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const destDir = bucket === "refs" ? refsDir : path.join(contentRoot, bucket);
   const absolute = path.join(destDir, name);
   if (!absolute.startsWith(path.resolve(destDir) + path.sep)) return NextResponse.json({ error: `${file.name} : chemin refusé.` }, { status: 400 });
-  if (fs.existsSync(absolute)) {
-    if (fs.statSync(absolute).size === file.size) return NextResponse.json({ ok: true, duplicate: true, name, bucket });
+  const existing = await fileStore().stat(absolute);
+  if (existing) {
+    if (existing.size === file.size) return NextResponse.json({ ok: true, duplicate: true, name, bucket });
     return NextResponse.json({ error: `${file.name} : un fichier différent porte déjà ce nom.` }, { status: 409 });
   }
-  fs.mkdirSync(destDir, { recursive: true });
-  fs.writeFileSync(absolute, buffer ?? Buffer.from(await file.arrayBuffer()));
+  await fileStore().put(absolute, buffer ?? Buffer.from(await file.arrayBuffer()));
   return NextResponse.json({ ok: true, name, bucket });
 });

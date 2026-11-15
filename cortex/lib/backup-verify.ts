@@ -47,7 +47,8 @@ export async function verifyBackup(dir: string, opts: { log?: (m: string) => voi
   const tar = exec("tar", ["-tzf", path.join(backupPath, manifest.dataDir.archive)]);
   if (tar.status !== 0) throw new Error(`tar -t a échoué : ${tar.stderr.slice(0, 300)}`);
   const dataEntries = tar.stdout.split("\n").filter((l) => l.trim() && l.trim() !== "./").length;
-  if (dataEntries === 0) throw new Error("L'archive du volume est vide.");
+  // Stockage objet : les fichiers de cours sont dans le seau, l'archive peut ne rien contenir.
+  if (dataEntries === 0 && !manifest.objectStore) throw new Error("L'archive du volume est vide.");
 
   let pgToc: number | null = null;
   const pgSchemas: string[] = [];

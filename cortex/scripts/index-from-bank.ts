@@ -98,7 +98,7 @@ async function main(c: string) {
   }
   if (REGROUP) return regroup(c, log);
 
-  const rev = loadRevisionJson(c);
+  const rev = await loadRevisionJson(c);
   const bank = rev ? [...(rev.bank.qcm ?? []), ...(rev.bank.open ?? [])] : [];
   if (!bank.length) {
     console.error(`Aucune banque de révision pour « ${c} » (revision-${c}.json absent ou vide).`);

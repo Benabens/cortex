@@ -7,7 +7,8 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { enterCourse } from "../db/client";
-import { ensureCoursesLoaded } from "../lib/courses";
+import { coursePaths, ensureCoursesLoaded } from "../lib/courses";
+import { storage } from "../lib/storage";
 import { q } from "../db/q";
 import { llmAvailable, llmUnavailableReason } from "../lib/llm";
 import { generateTargetedExercise } from "../lib/exam";
@@ -28,6 +29,19 @@ enterCourse(COURSE);
 const hb = setInterval(() => { heartbeatJob(jobId).catch(() => {}); }, 30_000);
 hb.unref();
 heartbeatJob(jobId).catch(() => {});
+
+/**
+ * Fin du worker. Le travail tourne dans storage().withLocalDir (cf. le bas du
+ * fichier) : en stockage objet, ce que le job a écrit doit partir au seau AVANT
+ * la sortie du process. `finish` rend donc la main à withLocalDir, qui envoie
+ * puis sort ; le chemin qui l'appelle reste suspendu jusque-là. Hors de cette
+ * portée (échec au démarrage), elle sort tout de suite.
+ */
+let settle: (code: number) => void = (code) => process.exit(code);
+function finish(code: number): Promise<never> {
+  settle(code);
+  return new Promise<never>(() => {});
+}
 
 async function fail(msg: string): Promise<never> {
   // Annulé entre-temps par l'utilisateur : cancelJob a statué (remboursement compris), on n'écrase rien.
@@ -63,7 +77,7 @@ async function fail(msg: string): Promise<never> {
     const back = j ? await refundJobCredits(j, "failed") : 0;
     if (back > 0) await setJob(jobId, { error: `${msg} — ${fmtCreditsBack(back)}.` });
   } catch {}
-  process.exit(1);
+  return finish(1);
 }
 
 /** Job d'INGESTION : (re)construit le corpus du cours, en important un dossier si fourni. */
@@ -101,7 +115,7 @@ async function runIngestJob(target: string | null): Promise<void> {
 }
 
 async function main() {
-  if (!jobId) { console.error("usage: run-job <jobId> <course>"); process.exit(1); }
+  if (!jobId) { console.error("usage: run-job <jobId> <course>"); return finish(1); }
   // AVANT toute requête sur le tenant (getJob l'amorcerait) : le cours doit
   // exister, appartenir à CORTEX_USER et ne pas être en cours de suppression —
   // sinon un worker en retard recréerait un schéma vide pour un cours effacé.
@@ -111,18 +125,18 @@ async function main() {
     const { currentUser } = await import("../db/context");
     if (!ownsCourse(currentUser(), COURSE) || (await isCourseDeleting(currentUser(), COURSE))) {
       console.error(`cours « ${COURSE} » supprimé, en suppression ou inaccessible pour ${currentUser()} : job ${jobId} abandonné`);
-      process.exit(1);
+      return finish(1);
     }
   }
   const job = await getJob(jobId);
-  if (!job) { console.error("job introuvable: " + jobId); process.exit(1); }
+  if (!job) { console.error("job introuvable: " + jobId); return finish(1); }
   if (job.status === "canceled") process.exit(0);
   // Attribution des appels LLM de ce job (colonnes job_id/call_site de llm_usage).
   const reservation = await q.get<{ credit_ref: string | null }>(`SELECT credit_ref FROM jobs WHERE id = ?`, jobId);
   setCurrentJob(jobId, job.type, reservation?.credit_ref ?? null);
   // Le cours doit encore appartenir à l'utilisateur du job (CORTEX_USER) : sinon
   // erreur sans remboursement, et rien n'est généré (cf. lib/jobs).
-  if (!(await assertJobCourseOwned(jobId, COURSE))) process.exit(1);
+  if (!(await assertJobCourseOwned(jobId, COURSE))) return finish(1);
 
   // Format d'examen résolu une fois pour le process : les consignes des profils
   // génériques (langue, style des sujets) le lisent de façon synchrone (lib/exam-format).
@@ -136,7 +150,7 @@ async function main() {
       await runIngestJob(job.target);
       await setJob(jobId, { status: "done", progress: 100, currentStep: "Ingestion terminée ✓" });
       await logJob(jobId, "Ingestion terminée ✓");
-      process.exit(0);
+      return finish(0);
     } catch (e) {
       await fail((e as Error)?.message || String(e));
     }
@@ -155,11 +169,11 @@ async function main() {
       await setJob(jobId, { currentStep: `Corpus ingéré (refs : ${refsN})`, progress: 34 });
       if (COURSE === "cs-202") {
         await setJob(jobId, { status: "done", progress: 100, currentStep: `Cours prêt ✓ — refs ${refsN} (format/blueprint statiques)` });
-        process.exit(0);
+        return finish(0);
       }
       if (!llmAvailable()) {
         await setJob(jobId, { status: "done", progress: 100, currentStep: `Ingéré (refs ${refsN}). LLM absent → format+blueprint à relancer une fois connecté.` });
-        process.exit(0);
+        return finish(0);
       }
       const { detectFormat } = await import("../lib/format");
       await detectFormat({ onStep: async (s, p) => { await setJob(jobId, { currentStep: `Format : ${s}`, progress: 34 + Math.round(p * 0.33) }); } });
@@ -169,7 +183,7 @@ async function main() {
       const { rebuildBlueprintFromIndex } = await import("../lib/program");
       const r = await rebuildBlueprintFromIndex({ onStep: async (s, p) => { await setJob(jobId, { currentStep: `Blueprint : ${s}`, progress: 50 + Math.round(p * 0.48) }); } });
       await setJob(jobId, { status: "done", progress: 100, currentStep: `Cours prêt ✓ — refs ${refsN}, ${r.exercises} exos indexés (${r.exams} finals) → ${r.types} types` });
-      process.exit(0);
+      return finish(0);
     } catch (e) { await fail((e as Error)?.message || String(e)); }
     return;
   }
@@ -188,7 +202,7 @@ async function main() {
       };
       const f = await detectFormat({ onStep });
       await setJob(jobId, { status: "done", progress: 100, currentStep: `Format détecté : ${(f.format_summary || "").slice(0, 60)} ✓` });
-      process.exit(0);
+      return finish(0);
     } catch (e) { await fail((e as Error)?.message || String(e)); }
     return;
   }
@@ -228,7 +242,7 @@ async function main() {
       }
       await setJob(jobId, { status: "done", progress: 100, resultId: res.id, resultPath: `/mock/${res.id}`, currentStep: `Mock QCM #${res.id} — ${qcmExamSummary(res)}${notice ? ` ⚠ ${notice}` : " ✓"}` });
       await logJob(jobId, `Mock QCM #${res.id} prêt → /mock/${res.id}`);
-      process.exit(0);
+      return finish(0);
     } catch (e) {
       await fail((e as Error)?.message || String(e));
     }
@@ -253,7 +267,7 @@ async function main() {
       const res = await rebuildBlueprintFromIndex({ onStep });
       await setJob(jobId, { status: "done", progress: 100, resultId: res.types, currentStep: `Index : ${res.exercises} exos (${res.exams} finals) → ${res.types} types ✓` });
       await logJob(jobId, `Blueprint exhaustif → ${res.exercises} exos indexés, ${res.types} types.`);
-      process.exit(0);
+      return finish(0);
     } catch (e) {
       await fail((e as Error)?.message || String(e));
     }
@@ -310,7 +324,7 @@ async function main() {
       : null;
     await setJob(jobId, { status: "done", progress: 100, resultPath: res.url, resultId: res.id, currentStep: notice ? `Terminé ⚠ ${notice}` : "Terminé ✓" });
     await logJob(jobId, `${job.type === "exercise" ? "Exercice" : job.type === "lab-exercise" ? "Exercice Labs" : "Examen"} #${res.id} prêt → ${res.url}`);
-    process.exit(0);
+    return finish(0);
   } catch (e) {
     await fail((e as Error)?.message || String(e));
   }
@@ -324,4 +338,32 @@ async function main() {
   await initErrorTracking({ service: "worker" }).catch(() => {});
 })();
 
-ensureCoursesLoaded().then(main).catch((e) => fail((e as Error)?.message || String(e)));
+/**
+ * Les fichiers du cours (annales, contenu, examens, captures) sont sur le disque
+ * pendant tout le job : rapatriés depuis le seau en stockage objet, puis ce que
+ * le job a créé, modifié ou supprimé y est renvoyé — même en cas d'échec, pour
+ * qu'une reprise reparte de ses fichiers. Disque local : aucun effet.
+ */
+async function runWithCourseFiles(): Promise<void> {
+  const cp = coursePaths(COURSE);
+  let code: number;
+  try {
+    code = await storage().withLocalDir([cp.refsDir, cp.contentRoot, cp.examsDir, cp.uploadsDir], () => new Promise<number>((resolve) => {
+      settle = resolve;
+      // main ne se termine que si aucun chemin n'a appelé finish : sortie normale, comme avant.
+      main().then(() => resolve(0), (e) => fail((e as Error)?.message || String(e)));
+    }));
+  } catch (e) {
+    // Le job a fini mais ses fichiers ne sont pas tous dans le seau : ils restent
+    // servis depuis ce conteneur, et perdus à son remplacement. À voir tout de suite.
+    console.error(`[storage] job ${jobId} : envoi des fichiers au seau impossible : ${(e as Error)?.message ?? e}`);
+    try {
+      const { captureError } = await import("../lib/observability");
+      captureError(e instanceof Error ? e : new Error(String(e)), { service: "worker", job: String(jobId), step: "storage.flush" });
+    } catch {}
+    code = 1;
+  }
+  process.exit(code);
+}
+
+ensureCoursesLoaded().then(runWithCourseFiles).catch((e) => fail((e as Error)?.message || String(e)));

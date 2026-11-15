@@ -12,18 +12,17 @@
  * rétention). La rétention ne supprime JAMAIS le dossier complet le plus
  * récent, même expiré : mieux vaut une vieille sauvegarde qu'aucune.
  *
- * Le client S3 est derrière l'interface `BackupStore` : les tests utilisent un
- * faux magasin en mémoire ; `s3Store()` branche le vrai SDK.
+ * Le client S3 est derrière l'interface `BackupStore` (sous-ensemble du port
+ * lib/storage/bucket) : les tests utilisent un faux magasin en mémoire ;
+ * `s3Store()` branche le vrai SDK.
  *
  * SECRETS : la clé secrète n'est jamais loggée ; aucune URL de base non plus.
  */
 import fs from "node:fs";
 import path from "node:path";
+import { sdkBucket, type PutBody, type S3Object } from "@/lib/storage/bucket";
 
-export type S3Object = { key: string; lastModified: Date; size: number };
-
-/** Corps d'un envoi : un fichier (chemin + taille, envoyé en flux) ou un petit tampon. */
-export type PutBody = Buffer | { path: string; size: number };
+export type { PutBody, S3Object };
 
 export interface BackupStore {
   put(key: string, body: PutBody, contentType?: string): Promise<void>;
@@ -78,47 +77,7 @@ export function backupS3Config(env: Env = process.env): BackupS3Config | null {
 
 /** Vrai magasin S3 (SDK AWS v3, chemin « path-style » : compatible R2/B2/MinIO). */
 export function s3Store(cfg: BackupS3Config): BackupStore {
-  // Import paresseux : le SDK (~10 Mo) n'est chargé que si les sauvegardes S3 sont configurées.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const s3 = require("@aws-sdk/client-s3") as typeof import("@aws-sdk/client-s3");
-  const client = new s3.S3Client({
-    endpoint: cfg.endpoint,
-    region: cfg.region,
-    forcePathStyle: true,
-    credentials: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey },
-  });
-  return {
-    async put(key, body, contentType) {
-      // Flux : une archive de volume de plusieurs Go ne passe jamais en mémoire.
-      const Body = Buffer.isBuffer(body) ? body : fs.createReadStream(body.path);
-      const ContentLength = Buffer.isBuffer(body) ? body.length : body.size;
-      await client.send(new s3.PutObjectCommand({ Bucket: cfg.bucket, Key: key, Body, ContentType: contentType, ContentLength }));
-    },
-    async list(prefix) {
-      const out: S3Object[] = [];
-      let token: string | undefined;
-      do {
-        const r = await client.send(new s3.ListObjectsV2Command({ Bucket: cfg.bucket, Prefix: prefix, ContinuationToken: token }));
-        for (const o of r.Contents ?? []) {
-          if (o.Key) out.push({ key: o.Key, lastModified: o.LastModified ?? new Date(0), size: o.Size ?? 0 });
-        }
-        token = r.IsTruncated ? r.NextContinuationToken : undefined;
-      } while (token);
-      return out;
-    },
-    async remove(keys) {
-      for (let i = 0; i < keys.length; i += 1000) {
-        const chunk = keys.slice(i, i + 1000);
-        await client.send(new s3.DeleteObjectsCommand({ Bucket: cfg.bucket, Delete: { Objects: chunk.map((Key) => ({ Key })), Quiet: true } }));
-      }
-    },
-    async get(key) {
-      const r = await client.send(new s3.GetObjectCommand({ Bucket: cfg.bucket, Key: key }));
-      const bytes = await r.Body?.transformToByteArray();
-      if (!bytes) throw new Error(`Objet vide ou introuvable : ${key}`);
-      return Buffer.from(bytes);
-    },
-  };
+  return sdkBucket({ ...cfg, forcePathStyle: true });
 }
 
 type Log = { log?: (msg: string) => void };

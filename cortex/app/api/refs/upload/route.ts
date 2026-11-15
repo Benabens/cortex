@@ -3,11 +3,11 @@ import { createJobExclusive, ReservationRefused, startWorker } from "@/lib/jobs"
 import { requireCourse } from "@/lib/req";
 import { UPLOAD_LIMITS, readFormData, withBodyLimit } from "@/lib/upload-limit";
 import { ingestRefFile } from "@/lib/sources";
-import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { checkStorage, declaredBytes } from "@/lib/storage-quota";
 import { currentUser } from "@/db/context";
+import { storage as fileStore } from "@/lib/storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,13 +29,12 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (!files.length) return NextResponse.json({ error: "Aucun fichier." }, { status: 400 });
 
   const refsDir = coursePaths(course).refsDir;
-  fs.mkdirSync(refsDir, { recursive: true });
   const saved: string[] = [];
   for (const f of files) {
     if (f.size > 30 * 1024 * 1024) continue;
     const safe = path.basename(f.name).replace(/[^a-zA-Z0-9._-]/g, "_");
     if (!/\.(pdf|html?|txt|md)$/i.test(safe)) continue;
-    fs.writeFileSync(path.join(refsDir, safe), Buffer.from(await f.arrayBuffer()));
+    await fileStore().put(path.join(refsDir, safe), Buffer.from(await f.arrayBuffer()));
     try { await ingestRefFile(`refs/${safe}`); saved.push(safe); } catch (e) { /* fichier illisible */ }
   }
   if (!saved.length) return NextResponse.json({ error: "Aucun fichier exploitable (PDF/HTML/txt)." }, { status: 400 });

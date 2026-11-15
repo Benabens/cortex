@@ -24,8 +24,9 @@ process.env.DATABASE_URL = "pglite://memory";
 (process.env as Record<string, string>).NODE_ENV = "development";
 
 import { createBackup } from "../lib/backup";
-import { backupS3Config, pushBackup, pruneBackups, listRemoteBackups, pullBackup, type BackupStore, type S3Object } from "../lib/backup-s3";
+import { backupS3Config, pushBackup, pruneBackups, listRemoteBackups, pullBackup, type BackupStore } from "../lib/backup-s3";
 import { verifyBackup } from "../lib/backup-verify";
+import { fakeBucket } from "./helpers/fake-bucket";
 
 const tmps: string[] = [];
 function mkTmp(prefix: string): string {
@@ -40,28 +41,11 @@ after(async () => {
   for (const k of ["DB_DRIVER", "DATABASE_URL"]) delete process.env[k];
 });
 
-/** Faux S3 : une Map clé → {corps, date}. `clock` pilote LastModified. */
+/** Faux S3 partagé avec la couture de stockage (tests/helpers/fake-bucket). */
 function fakeStore(clock: { now: Date }) {
-  const objects = new Map<string, { body: Buffer; at: Date }>();
-  const puts: string[] = [];
-  const bodies: string[] = [];
-  const store: BackupStore = {
-    async put(key, body) {
-      // Un dossier de sauvegarde peut peser des Go : le magasin reçoit un fichier (chemin + taille), jamais un tampon entier.
-      bodies.push(Buffer.isBuffer(body) ? "buffer" : "file");
-      const bytes = Buffer.isBuffer(body) ? Buffer.from(body) : fs.readFileSync(body.path);
-      if (!Buffer.isBuffer(body)) assert.equal(bytes.length, body.size, "taille annoncée = taille réelle");
-      objects.set(key, { body: bytes, at: new Date(clock.now) }); puts.push(key);
-    },
-    async list(prefix) {
-      const out: S3Object[] = [];
-      for (const [key, v] of objects) if (key.startsWith(prefix)) out.push({ key, lastModified: v.at, size: v.body.length });
-      return out;
-    },
-    async remove(keys) { for (const k of keys) objects.delete(k); },
-    async get(key) { const v = objects.get(key); if (!v) throw new Error(`NoSuchKey: ${key}`); return v.body; },
-  };
-  return { store, objects, puts, bodies };
+  const f = fakeBucket(clock);
+  const puts = () => f.calls.filter((c) => c.startsWith("put ")).map((c) => c.slice(4));
+  return { store: f.bucket as BackupStore, objects: f.objects, puts, bodies: f.bodies };
 }
 
 const ENV_OK = {
@@ -107,7 +91,7 @@ test("envoi : fichiers sous <prefix>/<dossier>/, octets identiques, manifest en 
   for (const f of ["data.tar.gz", "manifest.json"]) {
     assert.ok(objects.get(`cortex/${res.folder}/${f}`)!.body.equals(fs.readFileSync(path.join(dir, f))), `${f} identique`);
   }
-  assert.equal(puts.at(-1), `cortex/${res.folder}/manifest.json`, "manifest.json envoyé en dernier");
+  assert.equal(puts().at(-1), `cortex/${res.folder}/manifest.json`, "manifest.json envoyé en dernier");
   // Rapatriement : le dossier redescend à l'identique.
   const dest = mkTmp("cortex-s3-pull-");
   await pullBackup(store, cfg, res.folder, dest, { log: () => {} });
@@ -231,3 +215,29 @@ test("vrai Postgres : pg_dump → verify (pg_restore -l) liste public + tenants"
 });
 
 before(() => { /* rien : PGlite s'initialise à la première requête du planificateur */ });
+
+test("stockage objet : l'archive du volume ne recopie pas les fichiers déjà dans le seau", async () => {
+  const { isObjectStored } = await import("../lib/storage");
+  const listTar = (archive: string) => spawnSync("tar", ["-tzf", archive], { encoding: "utf8" }).stdout.split("\n").filter(Boolean).sort();
+  const dataDir = mkTmp("cortex-obj-data-");
+  const backupDir = mkTmp("cortex-obj-out-");
+  fs.writeFileSync(path.join(dataDir, "auth.db"), crypto.randomBytes(512));
+  fs.mkdirSync(path.join(dataDir, "u/ben/ml/refs"), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, "u/ben/ml/refs/annale.pdf"), crypto.randomBytes(1024));
+  fs.writeFileSync(path.join(dataDir, "u/ben/ml/ml.db"), crypto.randomBytes(256));
+  fs.mkdirSync(path.join(dataDir, ".page-cache/u/ben/ml/refs"), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, ".page-cache/u/ben/ml/refs/annale-1.png"), crypto.randomBytes(64));
+  const objectStore = { location: "s3://cortex-files/", isObjectStored };
+  const { dir, manifest } = await createBackup({ dataDir, backupDir, dbDriver: "sqlite", objectStore, log: () => {} });
+  assert.deepEqual(listTar(path.join(dir, "data.tar.gz")), ["./auth.db", "./u/ben/ml/ml.db"], "bases locales seulement : ni annale (dans le seau), ni cache de pages");
+  assert.equal(manifest.objectStore?.location, "s3://cortex-files/");
+  assert.equal((await verifyBackup(dir, { log: () => {} })).dataEntries, 2);
+
+  // Rien de local à archiver (prod : base Postgres, fichiers dans le seau) : archive vide mais valide.
+  const onlyFiles = mkTmp("cortex-obj-only-");
+  fs.mkdirSync(path.join(onlyFiles, "u/ben/ml/exams"), { recursive: true });
+  fs.writeFileSync(path.join(onlyFiles, "u/ben/ml/exams/exam-1.pdf"), "%PDF");
+  const empty = await createBackup({ dataDir: onlyFiles, backupDir, dbDriver: "sqlite", objectStore, label: "vide", log: () => {} });
+  assert.deepEqual(listTar(path.join(empty.dir, "data.tar.gz")), []);
+  assert.equal((await verifyBackup(empty.dir, { log: () => {} })).dataEntries, 0, "vide mais valide : les fichiers sont dans le seau");
+});
