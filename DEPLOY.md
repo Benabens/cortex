@@ -82,6 +82,48 @@ ouvertes à tous, sauf lancement fermé (`INVITE_ONLY=1`, § 12).
    survivent aux redéploiements (le code le prouve : marqueur
    `.cortex-volume-initialise` + copie non-destructive au 1er boot).
 
+## 3 ter. Railway — laisser finir les jobs à chaque redéploiement
+
+Sans réglage, Railway envoie SIGTERM à l'ancien déploiement puis SIGKILL **0 s**
+plus tard : chaque fusion sur main tuait les générations en cours (constat du
+14-15/11/2026 : job 20 perdu à 99 %, jobs 23 et 25 refaits de zéro).
+
+Variable de service à poser (Settings → Variables, ou CLI) :
+
+```
+RAILWAY_DEPLOYMENT_DRAINING_SECONDS=1800
+```
+
+Ce que fait alors le conteneur (`cortex/lib/drain.ts`, activé par
+`NEXT_MANUAL_SIG_HANDLE=1` dans le Dockerfile) :
+
+1. au SIGTERM, il ne prend plus de job : un job créé ou repris pendant le drain
+   reste en file, « différé », et le conteneur suivant le démarre à son boot
+   (sa réservation de crédits est déjà faite) ;
+2. il laisse finir les jobs en cours et continue de répondre en HTTP ;
+3. 60 s avant l'échéance (`RAILWAY_DEPLOYMENT_DRAINING_SECONDS` − 60), il
+   arrête ceux qui tournent encore et les remet en file lui-même, sans
+   consommer de tentative ; la reprise part de leur point de reprise (un examen
+   QCM repart de ses QCM déjà vérifiés, `cortex/lib/qcm-checkpoint.ts`) ;
+4. il sort dès qu'il n'a plus de job, **tout de suite s'il n'en avait aucun**.
+
+Contreparties, à connaître :
+- **Volume** : Railway n'active jamais deux déploiements montés sur le même
+  volume. Le nouveau conteneur attend donc la sortie de l'ancien : un
+  déploiement qui tombe pendant une génération est retardé jusqu'à 30 min.
+- **Trafic pendant le drain : non vérifié.** La doc Railway ne dit pas si
+  l'ancien conteneur reçoit encore les requêtes après le SIGTERM quand un volume
+  bloque le nouveau. S'il ne les reçoit plus, le site est coupé pendant le
+  drain. À contrôler au premier déploiement qui tombe pendant un job :
+  `curl -s -o /dev/null -w '%{http_code}' https://app.cortexexam.com/api/health`
+  pendant que les logs montrent `[drain] … attente de leur fin`. 502 → redescendre
+  à `RAILWAY_DEPLOYMENT_DRAINING_SECONDS=300` : les points de reprise rattrapent
+  le reste.
+- La doc Railway ne donne pas de maximum (son schéma de configuration, `railway.schema.json`, impose
+  seulement ≥ 0).
+- `CORTEX_DRAIN_SECONDS` (optionnel) impose le délai d'attente du conteneur
+  indépendamment de Railway ; à ne poser que pour un test.
+
 ## 3 bis. Stockage objet des fichiers (optionnel, recommandé avant l'ouverture)
 
 Sans variable `STORAGE_S3_*`, les fichiers de cours (annales, uploads, examens

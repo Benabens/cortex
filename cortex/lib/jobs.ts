@@ -1,10 +1,11 @@
-import { currentCourse } from "@/db/client";
-import { currentUser } from "@/db/context";
+import { currentCourse, runWithCourse } from "@/db/client";
+import { currentUser, runWithUser } from "@/db/context";
 import { dbDriverName, q, nowStr } from "@/db/q";
 import { inc, log, observe } from "@/lib/metrics";
 import { examsDir } from "@/lib/paths";
 import { spawn } from "node:child_process";
 import { killProcessGroup } from "@/lib/process-group";
+import { isDraining, trackWorker, type TrackedWorker } from "@/lib/drain";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -119,11 +120,12 @@ async function releaseReservation(type: JobType, ref: string, user: string): Pro
  * conditionnel). Sans cela, deux startWorker concurrents sur un même job en
  * file — deux POST qui reçoivent le même « existing », la pompe et une route —
  * lançaient deux workers : double coût pour un seul paiement. Le worker pose
- * ensuite son PID réel dans worker_id ; une remise en file le remet à NULL.
+ * ensuite son PID réel dans worker_id ; une remise en file le remet à NULL, ou à
+ * DEFERRED quand elle attend le conteneur suivant (arrêt gracieux, lib/drain).
  */
 export async function claimJobStart(jobId: number): Promise<boolean> {
   const r = await q.run(
-    `UPDATE jobs SET worker_id = 'spawn', updated_at = ? WHERE id = ? AND status = 'queued' AND (worker_id IS NULL OR worker_id = '')`,
+    `UPDATE jobs SET worker_id = 'spawn', updated_at = ? WHERE id = ? AND status = 'queued' AND (worker_id IS NULL OR worker_id = '' OR worker_id = '${DEFERRED}')`,
     nowStr(), jobId,
   );
   return r.changes === 1;
@@ -209,6 +211,11 @@ export async function loadJobCheckpoint<T>(id: number): Promise<T | null> {
   const r = await q.get<{ checkpoint_json: string | null }>(`SELECT checkpoint_json FROM jobs WHERE id = ?`, id);
   if (!r?.checkpoint_json) return null;
   try { return JSON.parse(r.checkpoint_json) as T; } catch { return null; }
+}
+
+/** Le point de reprise d'un job, sous la forme que lisent les générateurs (lib/qcm-checkpoint). */
+export function jobCheckpointStore(id: number): { load(): Promise<unknown>; save(data: unknown): Promise<void> } {
+  return { load: () => loadJobCheckpoint<unknown>(id), save: (data) => saveJobCheckpoint(id, data) };
 }
 
 /** Battement de cœur du worker (posé toutes les ~30 s, cf. scripts/run-job.ts). */
@@ -306,6 +313,14 @@ function refIssuedTo(ref: string | null, user: string, course: string): boolean 
 }
 
 const ACTIVE_STATES = "('queued','running','verifying','compiling')";
+/**
+ * worker_id d'un job en file qui attend le conteneur suivant : créé ou repris pendant un arrêt
+ * gracieux, ou remis en file à son échéance. Sa réservation de crédits a déjà eu lieu ; la pompe le
+ * démarre au prochain boot, et la réconciliation ne le prend pas pour un spawn raté.
+ */
+const DEFERRED = "deferred";
+const DEFERRED_MSG = "Mise à jour du serveur : le job démarre dans quelques minutes.";
+const HANDOFF_MSG = "Mise à jour du serveur : reprise automatique dans quelques minutes, progression conservée.";
 const ZOMBIE_MSG = "Worker interrompu (process arrêté), la génération ne tournait plus. Relance.";
 /** Un worker vivant qui n'a plus de heartbeat depuis ce délai est considéré bloqué. */
 const STALL_MS = 15 * 60_000;
@@ -332,8 +347,8 @@ const HEARTBEAT_FRESH_MS = 5 * 60_000;
  */
 export async function reconcileStaleJobs(): Promise<number> {
   await ensureJobsSchema();
-  const rows = await q.all<{ id: number; type: string; pid: number | null; created_at: string; updated_at: string; heartbeat_at: string | null; attempts: number; max_attempts: number; credit_ref: string | null }>(
-    `SELECT id, type, pid, created_at, updated_at, heartbeat_at, attempts, max_attempts, credit_ref FROM jobs WHERE status IN ${ACTIVE_STATES}`,
+  const rows = await q.all<{ id: number; type: string; status: string; pid: number | null; created_at: string; updated_at: string; heartbeat_at: string | null; attempts: number; max_attempts: number; credit_ref: string | null; worker_id: string | null }>(
+    `SELECT id, type, status, pid, created_at, updated_at, heartbeat_at, attempts, max_attempts, credit_ref, worker_id FROM jobs WHERE status IN ${ACTIVE_STATES}`,
   );
   let fixed = 0;
   for (const r of rows) {
@@ -348,6 +363,9 @@ export async function reconcileStaleJobs(): Promise<number> {
         // PID « vivant » mais plus aucun battement : worker suspendu ou PID recyclé.
         if (Number.isFinite(hbAge) && hbAge > STALL_MS) zombie = true;
       }
+    } else if (r.status === "queued" && r.worker_id === DEFERRED) {
+      // Différé par un arrêt gracieux : il attend la pompe du conteneur suivant, ce n'est pas un spawn raté.
+      continue;
     } else {
       // sans PID : le worker n'a jamais démarré → zombie si plus vieux que 120 s (startWorker persiste
       // le PID immédiatement après le spawn ; 2 min sans PID = spawn échoué).
@@ -396,13 +414,15 @@ export async function reconcileStaleJobs(): Promise<number> {
  */
 export async function pumpQueuedJobs(): Promise<number> {
   await ensureJobsSchema();
-  const rows = await q.all<{ id: number; updated_at: string; created_at: string }>(
-    `SELECT id, updated_at, created_at FROM jobs WHERE status = 'queued' AND pid IS NULL AND attempts > 0`,
+  if (isDraining()) return 0; // arrêt gracieux : c'est le conteneur suivant qui reprend
+  const rows = await q.all<{ id: number; updated_at: string; created_at: string; worker_id: string | null }>(
+    `SELECT id, updated_at, created_at, worker_id FROM jobs WHERE status = 'queued' AND pid IS NULL AND (attempts > 0 OR worker_id = '${DEFERRED}')`,
   );
   let started = 0;
   for (const r of rows) {
     const ageMs = Date.now() - new Date((r.updated_at || r.created_at) + "Z").getTime();
-    if (!Number.isFinite(ageMs) || ageMs < 5_000) continue; // laisse le spawn initial se poser
+    // Laisse le spawn initial se poser ; un job différé, lui, n'attend plus que nous.
+    if (r.worker_id !== DEFERRED && (!Number.isFinite(ageMs) || ageMs < 5_000)) continue;
     await startWorker(r.id);
     started++;
   }
@@ -439,6 +459,15 @@ export async function retryJob(id: number, course?: string): Promise<Job | null>
 export async function startWorker(jobId: number, course?: string): Promise<void> {
   const cwd = process.cwd();
   const c = course ?? currentCourse();
+  // Arrêt gracieux en cours (lib/drain) : ce conteneur ne prend plus de job. La réservation est
+  // faite, le job reste en file, différé : le conteneur suivant le démarre à son boot.
+  if (isDraining()) {
+    await q.run(
+      `UPDATE jobs SET worker_id = '${DEFERRED}', current_step = ?, updated_at = ? WHERE id = ? AND status = 'queued' AND pid IS NULL AND (worker_id IS NULL OR worker_id = '')`,
+      DEFERRED_MSG, nowStr(), jobId,
+    );
+    return;
+  }
   // Un seul démarrage par job en file (cf. claimJobStart) : ni un job terminé,
   // ni un job déjà pris par un autre appelant ne lance de worker.
   if (!(await claimJobStart(jobId))) return;
@@ -452,9 +481,39 @@ export async function startWorker(jobId: number, course?: string): Promise<void>
   // sinon en Postgres multi-user il écrirait dans le tenant « owner ».
   const env = { ...process.env, CORTEX_COURSE: c, CORTEX_USER: currentUser() };
   const child = spawn(bin, args, { cwd, detached: true, stdio: "ignore", env });
+  // Suivi jusqu'à sa sortie : un arrêt gracieux attend ce worker (lib/drain).
+  trackWorker(child, { jobId, user: env.CORTEX_USER, course: c });
   // PID persisté tout de suite (le worker le ré-écrit au démarrage) → annulable même pendant le démarrage
   if (child.pid) await setJob(jobId, { pid: child.pid });
   child.unref();
+}
+
+/**
+ * ÉCHÉANCE D'UN ARRÊT GRACIEUX (lib/drain) : les workers de ce conteneur qui tournent encore sont
+ * arrêtés, et leurs jobs remis en file, différés, avant le SIGKILL de la plateforme. Remis par
+ * nous plutôt que découverts zombies par le conteneur suivant : sans ce passage, un battement de
+ * moins de 5 min les faisait croire vivants (HEARTBEAT_FRESH_MS), et un PID réattribué dans le
+ * nouveau conteneur pouvait les garder « running » à jamais. Aucune tentative consommée : un
+ * déploiement n'est pas un échec du job. La reprise part de son point de reprise (checkpoint_json).
+ */
+export async function handOffJobs(workers: TrackedWorker[]): Promise<number> {
+  let n = 0;
+  for (const w of workers) {
+    killProcessGroup(w.pid, { expectCommand: /run-job|tsx|node/, graceMs: 2_000 });
+    // Mort constatée avant la remise en file : une écriture en vol du worker ne la recouvre pas.
+    for (let t = 0; t < 30 && isPidAlive(w.pid); t++) await new Promise((r) => setTimeout(r, 100));
+    await runWithUser(w.user, () => runWithCourse(w.course, async () => {
+      const r = await q.run(
+        `UPDATE jobs SET status = 'queued', pid = NULL, heartbeat_at = NULL, worker_id = '${DEFERRED}', current_step = ?, updated_at = ? WHERE id = ? AND status IN ${ACTIVE_STATES}`,
+        HANDOFF_MSG, nowStr(), w.jobId,
+      );
+      if (r.changes === 1) {
+        n++;
+        await logJob(w.jobId, HANDOFF_MSG);
+      }
+    })).catch(() => { /* tenant illisible : la réconciliation du conteneur suivant tranchera */ });
+  }
+  return n;
 }
 
 /**
