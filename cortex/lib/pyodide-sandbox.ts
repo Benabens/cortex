@@ -2,15 +2,20 @@ import { Worker } from "node:worker_threads";
 
 export type PythonWasmResult = {
   ok: boolean;
-  reason?: "disabled" | "timeout" | "memory-limit" | "forbidden-capability" | "execution-error";
+  reason?: "disabled" | "startup-timeout" | "timeout" | "memory-limit" | "forbidden-capability" | "execution-error";
   stdout: string;
   stderr: string;
+  /** Démarrage du worker et du runtime (pandas compris), hors délai d'exécution. */
+  startupMs?: number;
 };
 
 export type PythonWasmOptions = {
   stdin?: string;
   args?: string[];
+  /** Délai d'exécution du programme, compté à partir du runtime prêt. */
   timeoutMs?: number;
+  /** Délai de démarrage du runtime (worker, Pyodide, pandas). */
+  startupTimeoutMs?: number;
   memoryMb?: number;
   maxOutputBytes?: number;
 };
@@ -40,10 +45,16 @@ const send = (value) => parentPort.postMessage(value);
   // l'interprétation des antislashs et pouvait laisser l'import pandas sans paquet chargé.
   if (source.includes("pandas")) {
     await pyodide.loadPackage("pandas");
+    // loadPackage ne fait que déposer les fichiers : c'est l'import qui instancie les extensions
+    // WebAssembly de numpy et pandas. Fait ici, hors du traçage (settrace + tracemalloc) qui le
+    // rendait près de trois fois plus lent (7,5 s → 2,6 s mesurés) et hors du délai d'exécution ;
+    // le programme retrouve le module dans sys.modules.
+    await pyodide.runPythonAsync("import pandas");
     // Les messages de chargement appartiennent au runtime, pas au programme candidat.
     stdout = "";
     stderr = "";
   }
+  send({ type: "ready" });
   pyodide.globals.set("_cortex_source", source);
   pyodide.globals.set("_cortex_stdin", stdin);
   pyodide.globals.set("_cortex_args", args);
@@ -126,25 +137,35 @@ finally:
 export async function runPythonWasm(source: string, opts: PythonWasmOptions = {}): Promise<PythonWasmResult> {
   if (!pythonWasmAvailable()) return { ok: false, reason: "disabled", stdout: "", stderr: "" };
   const timeoutMs = Math.max(100, opts.timeoutMs ?? 10_000);
+  // Charger pandas coûte plusieurs secondes de CPU, bien plus sous charge : compté dans le délai
+  // d'exécution, il faisait passer un extrait correct pour une boucle infinie.
+  const startupTimeoutMs = Math.max(1, opts.startupTimeoutMs ?? 60_000);
   const memoryMb = Math.max(64, opts.memoryMb ?? 256);
   const maxOutputBytes = Math.max(1_024, opts.maxOutputBytes ?? 64 * 1_024);
 
-  return await new Promise((resolve) => {
+  return await new Promise<PythonWasmResult>((resolve) => {
     const worker = new Worker(WORKER_SOURCE, {
       eval: true,
       workerData: { source, stdin: opts.stdin ?? "", args: opts.args ?? [], memoryMb, maxOutputBytes },
       resourceLimits: { maxOldGenerationSizeMb: memoryMb, maxYoungGenerationSizeMb: Math.min(32, memoryMb / 4), stackSizeMb: 4 },
     });
     let settled = false;
+    const started = performance.now();
+    let startupMs: number | undefined;
     const finish = (result: PythonWasmResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       void worker.terminate();
-      resolve(result);
+      resolve({ ...result, startupMs });
     };
-    const timer = setTimeout(() => finish({ ok: false, reason: "timeout", stdout: "", stderr: "" }), timeoutMs);
-    worker.once("message", (message: PythonWasmResult) => finish(message));
+    let timer = setTimeout(() => finish({ ok: false, reason: "startup-timeout", stdout: "", stderr: "" }), startupTimeoutMs);
+    worker.on("message", (message: PythonWasmResult | { type: "ready" }) => {
+      if (!("type" in message)) return finish(message);
+      startupMs = Math.round(performance.now() - started);
+      clearTimeout(timer);
+      timer = setTimeout(() => finish({ ok: false, reason: "timeout", stdout: "", stderr: "" }), timeoutMs);
+    });
     worker.once("error", (error) => finish({
       ok: false,
       reason: /heap|memory|allocation/i.test(error.message) ? "memory-limit" : "execution-error",
