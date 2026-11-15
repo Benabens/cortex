@@ -14,7 +14,7 @@ import { llmAvailable, llmUnavailableReason } from "../lib/llm";
 import { generateTargetedExercise } from "../lib/exam";
 import { generateMockExam } from "../lib/mock-exam";
 import { texAvailable } from "../lib/exam-latex";
-import { assertJobCourseOwned, getJob, heartbeatJob, logJob, phaseHistory, setJob, stepFields } from "../lib/jobs";
+import { assertJobCourseOwned, getJob, heartbeatJob, jobCheckpointStore, logJob, phaseHistory, saveJobCheckpoint, setJob, stepFields } from "../lib/jobs";
 import { setCurrentJob } from "../lib/billing/usage-context";
 import { generateLabExercise } from "../lib/labs";
 import { analyzeBlueprint } from "../lib/program";
@@ -231,7 +231,8 @@ async function main() {
       // Livraison progressive : le job pointe vers l'examen dès que ses QCM sont prêts.
       const onExamReady = async (examId: number) => { await setJob(jobId, { resultId: examId, resultPath: `/mock/${examId}` }); };
       // Poids de l'avancement par phase : durées mesurées des derniers examens QCM du cours.
-      const res = await generateQcmExam({ count, openCount, focus, onStep, onExamReady, phaseMs: await phaseHistory("qcm") });
+      // Point de reprise : un worker tué (redéploiement, crash) et repris repart de ce qui est acquis.
+      const res = await generateQcmExam({ count, openCount, focus, onStep, onExamReady, phaseMs: await phaseHistory("qcm"), checkpoint: jobCheckpointStore(jobId) });
       // Examen incomplet : dit et remboursé au prorata (lib/jobs settleShortfall).
       const { settleShortfall } = await import("../lib/jobs");
       const notice = await settleShortfall(job, res.count + res.open, res.requested + res.openRequested);
@@ -241,6 +242,7 @@ async function main() {
         await logJob(jobId, `⚠ Erreur LaTeX : ${res.texError.slice(0, 300)}`);
       }
       await setJob(jobId, { status: "done", progress: 100, resultId: res.id, resultPath: `/mock/${res.id}`, currentStep: `Mock QCM #${res.id} — ${qcmExamSummary(res)}${notice ? ` ⚠ ${notice}` : " ✓"}` });
+      await saveJobCheckpoint(jobId, null).catch(() => {}); // job livré : le point de reprise ne sert plus
       await logJob(jobId, `Mock QCM #${res.id} prêt → /mock/${res.id}`);
       return finish(0);
     } catch (e) {
