@@ -1,8 +1,8 @@
 /**
  * MODE PROPRIÉTAIRE — le compte de CORTEX_OWNER_EMAIL n'est jamais arrêté par
  * les crédits, les quotas du jour ni le plafond de générations simultanées :
- * rien n'est débité ni compté contre lui. Les plafonds de DÉPENSE (par compte et
- * global) restent actifs, et les autres comptes ne voient aucun changement.
+ * rien n'est débité ni compté contre lui. Le fusible de DÉPENSE global du mois reste
+ * actif (pas le plafond par compte), et les autres comptes ne voient aucun changement.
  * Postgres réel (PGlite), facturation active, limites serrées.
  */
 import assert from "node:assert/strict";
@@ -88,9 +88,10 @@ test("pré-contrôles des routes et du MCP : le propriétaire passe sans solde n
   assert.equal((await as("usr_broke_mode", () => creditsGate("exam")))?.status, 402);
 });
 
-test("dépense : les plafonds de dépense, par compte et global, arrêtent le propriétaire comme tout le monde ; ses coûts restent enregistrés", async () => {
-  // Une boucle d'agent ou un jeton volé sur le compte du propriétaire ne doit pas épuiser
-  // le plafond global du mois, qui couperait la génération de TOUS les comptes.
+test("dépense : le propriétaire est exempté du plafond par compte, pas du fusible global du mois ; ses coûts restent enregistrés", async () => {
+  // Décision de Ben (15/11) : le plafond du jour PAR COMPTE ne coupe plus le propriétaire
+  // (ses jobs du 14-15/11 échouaient après lancement) ; le fusible GLOBAL du mois reste
+  // actif pour lui : une boucle sur son compte ne doit pas couper la génération de tous.
   const usage = await import("../lib/billing/usage");
   const { authGet } = await import("../db/auth-store");
   process.env.SPEND_CAP_PER_USER_USD = "1";
@@ -105,7 +106,8 @@ test("dépense : les plafonds de dépense, par compte et global, arrêtent le pr
     }
     const logged = await authGet<{ n: number }>(`SELECT count(*) n FROM llm_usage WHERE user_id = ?`, OWNER);
     assert.equal(Number(logged?.n), 1, "le coût du propriétaire est enregistré comme d'habitude");
-    for (const user of [OWNER, OTHER]) await assert.rejects(() => as(user, () => usage.assertSpendCap("anthropic")), isSpendCap, user);
+    await as(OWNER, () => usage.assertSpendCap("anthropic"));
+    await assert.rejects(() => as(OTHER, () => usage.assertSpendCap("anthropic")), isSpendCap, "un autre compte reste borné à son plafond du jour");
 
     process.env.SPEND_CAP_PER_USER_USD = "unlimited";
     process.env.SPEND_CAP_USD = "3"; // 4 $ dépensés ce mois-ci au total

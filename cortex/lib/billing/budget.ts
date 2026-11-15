@@ -1,7 +1,7 @@
 import { authAll, type AuthTx } from "@/db/auth-store";
 import { nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
-import { creditCost, DELTA_CENTI, fmtCredits } from "./credits";
+import { creditCost, DELTA_CENTI } from "./credits";
 import { floatLimit } from "./env";
 import { ownerUserIds } from "./owner";
 import { accountRevenue, sinceDays, totalRevenue } from "./revenue";
@@ -33,10 +33,10 @@ import { accountRevenue, sinceDays, totalRevenue } from "./revenue";
  * cher que prévu sans faire passer le compte en perte. Elle ne peut dépasser 1.
  *
  * Plafond du jour par compte : min(SPEND_CAP_PER_USER_USD, max(plancher, ¼ B)),
- * vérifié AU LANCEMENT (429 « reviens demain », les crédits restent acquis). Le
- * plancher (8 $) est au-dessus du QCM le plus cher mesuré : un job lancé n'est
- * jamais coupé en route par ce plafond. SPEND_CAP_PER_USER_USD reste le fusible
- * vérifié à chaque appel (lib/billing/usage).
+ * vérifié AU LANCEMENT avec le coût attendu des jobs encore en cours (429 « reviens
+ * demain », les crédits restent acquis). Le plancher (8 $) est au-dessus du QCM le
+ * plus cher mesuré : un job lancé n'est jamais coupé en route par ce plafond.
+ * SPEND_CAP_PER_USER_USD reste le fusible vérifié à chaque appel (lib/billing/usage).
  *
  * Plafond global du mois lié au revenu (globalRevenueCapUsd) : vérifié au
  * lancement aussi, pour la seule dépense que les paiements ne couvrent pas.
@@ -117,22 +117,6 @@ export async function accountBudget(userId: string): Promise<AccountBudget | nul
   };
 }
 
-export type BudgetCheck = {
-  budget: AccountBudget;
-  expectedUsd: number;
-  /** Plafond global du mois lié au revenu et dépense des clients du mois ; null si levé. */
-  global: { capUsd: number; spentUsd: number } | null;
-};
-
-/** Ce qu'il faut lire AVANT la transaction de réservation (rien n'y dépend du verrou). */
-export async function budgetCheckFor(userId: string, kind: string, costCenti: number): Promise<BudgetCheck | null> {
-  const budget = await accountBudget(userId);
-  if (!budget) return null;
-  const cap = await globalRevenueCapUsd();
-  const global = cap === null ? null : { capUsd: cap, spentUsd: round4(await clientMonthSpendUsd()) };
-  return { budget, expectedUsd: expectedJobCostUsd(kind, costCenti), global };
-}
-
 /** Crédits ACHETÉS disponibles dans le ledger (tout sauf les crédits offerts, consommés en dernier), en centièmes. */
 export async function purchasedLedgerCenti(tx: AuthTx, userId: string, ledgerCenti: number): Promise<number> {
   const r = await tx.get<{ total: number | string | null }>(
@@ -141,51 +125,8 @@ export async function purchasedLedgerCenti(tx: AuthTx, userId: string, ledgerCen
   return Math.max(0, ledgerCenti - Math.max(0, Number(r?.total ?? 0)));
 }
 
-const BUY_URL = "https://app.cortexexam.com/compte#credits";
-
-/**
- * Verdict, dans la transaction verrouillée : null = passe. `paidCenti` = crédits
- * achetés disponibles (abonnement de la période + ledger hors cadeau).
- */
-export function budgetVerdict(
-  check: BudgetCheck, costCenti: number, paidCenti: number, ctx: { userId: string; kind: string },
-): { status: number; error: string } | null {
-  const { budget, expectedUsd, global } = check;
-  // Dépense que les paiements ne couvrent pas (crédits offerts) : bornée aussi par le plafond global du mois.
-  if (costCenti > paidCenti && global && global.spentUsd + expectedUsd > global.capUsd) {
-    log("warn", "billing.revenue_cap_refused", { user: ctx.userId, kind: ctx.kind, spentUsd: global.spentUsd, capUsd: global.capUsd, expectedUsd });
-    return {
-      status: 402,
-      error: "La capacité de génération offerte ce mois-ci est épuisée. Les crédits achetés restent toujours utilisables : "
-        + `achète un pack ou abonne-toi pour continuer, sinon elle rouvre le 1er du mois. ${BUY_URL}`,
-    };
-  }
-  if (budget.spentUsd + expectedUsd > budget.budgetUsd) {
-    if (costCenti <= paidCenti) {
-      // Crédits achetés : toujours servis. Le signal sert à corriger le PRIX.
-      log("warn", "billing.budget_exceeded_paid_credits", {
-        user: ctx.userId, kind: ctx.kind, spentUsd: budget.spentUsd, budgetUsd: budget.budgetUsd, expectedUsd, revenueUsd: budget.revenueUsd,
-      });
-    } else {
-      log("info", "billing.budget_refused", { user: ctx.userId, kind: ctx.kind, spentUsd: budget.spentUsd, budgetUsd: budget.budgetUsd, expectedUsd });
-      return {
-        status: 402,
-        error: `Cette génération dépasse ce que ton compte peut utiliser sans achat (il te reste ${fmtCredits(Math.max(0, paidCenti))} crédit(s) acheté(s), il en faut ${fmtCredits(costCenti)}). `
-          + `Les crédits achetés restent toujours utilisables : achète un pack ou abonne-toi pour continuer. ${BUY_URL}`,
-      };
-    }
-  }
-  const dayCap = dailySpendCapUsd(budget.budgetUsd);
-  // Le premier job du jour passe toujours : le plafond du jour ne bloque qu'un job de plus.
-  if (dayCap !== null && budget.spentTodayUsd > 0 && budget.spentTodayUsd + expectedUsd > dayCap) {
-    log("info", "billing.daily_cap_refused", { user: ctx.userId, kind: ctx.kind, spentTodayUsd: budget.spentTodayUsd, dayCapUsd: dayCap, expectedUsd });
-    return {
-      status: 429,
-      error: "Limite de calcul du jour atteinte pour ton compte. Tes crédits restent acquis : réessaie demain.",
-    };
-  }
-  return null;
-}
+// Le verdict (refus du budget, de la capacité offerte, du calcul du jour) vit dans
+// lib/billing/limits, partagé par l'affichage, les pré-contrôles et la réservation.
 
 // ─────────────────────── plafond global des comptes clients ───────────────────────
 

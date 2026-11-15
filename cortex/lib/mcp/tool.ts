@@ -62,6 +62,8 @@ export function codeForStatus(status: number): ToolErrorCode {
 export type Cost = {
   /** Compteur du quota du jour consommé : gros jobs ou assistance. */
   bucket: "gen" | "assist";
+  /** Ce qui est lancé (lib/billing/limits) : décide du job réservé et du coût de calcul attendu. */
+  kind: "exam" | "qcm" | "prepare" | "drill" | "check";
   /** Coût en centièmes de crédit (unité du ledger). */
   costCenti: number;
   /** Ce qui sera fait, en une phrase (affiché dans la confirmation). */

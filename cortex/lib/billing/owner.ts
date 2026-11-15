@@ -7,11 +7,12 @@ import { currentUser } from "@/db/context";
  * plafond de générations simultanées, ni par le budget IA lié au revenu (ni sa
  * dépense par le plafond global lié au revenu) : rien n'est débité ni compté
  * contre lui. Son quota de stockage est le plafond (STORAGE_QUOTA_MAX_MB).
- * Restent actifs pour lui comme pour tous : les plafonds de DÉPENSE réelle chez le
- * fournisseur (fusible SPEND_CAP_USD du mois et SPEND_CAP_PER_USER_USD du jour —
- * sans ce dernier, une boucle sur son compte couperait la génération de tous), la
- * limite par compte du point MCP, l'enregistrement des coûts dans llm_usage et la
- * borne de stockage du volume.
+ * Il n'est pas non plus arrêté par le fusible du jour par compte
+ * SPEND_CAP_PER_USER_USD (décision de Ben, 15/11 : ses propres jobs ne doivent plus
+ * échouer en route). Restent actifs pour lui comme pour tous : le fusible global
+ * de DÉPENSE réelle chez le fournisseur (SPEND_CAP_USD du mois, qui borne aussi une
+ * boucle sur son compte), la limite par compte du point MCP, l'enregistrement des
+ * coûts dans llm_usage et la borne de stockage du volume.
  *
  * OPT-IN : sans variable de propriétaire posée, personne n'est exempté — le repli
  * « owner » du mode mono-utilisateur (isOwnerAccount) ne vaut pas exemption.

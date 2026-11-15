@@ -1,11 +1,45 @@
 import * as z from "zod/v4";
 import { billingEnabled, creditCost, fromCenti, purchasedBalanceCenti, subscriptionCreditsCenti } from "@/lib/billing/credits";
 import { dailyLimit, usedToday } from "@/lib/billing/guards";
+import { getUsageLimits } from "@/lib/billing/limits";
+import { remainingLine } from "@/lib/billing/limits-text";
 import { isOwner } from "@/lib/billing/owner";
 import { costForJob } from "@/lib/jobs";
 import { defineTool } from "../tool";
 
 const quota = z.object({ used: z.number(), limit: z.number().nullable().describe("null = no daily limit on this instance.") });
+
+const generationLeft = z.object({
+  remaining: z.number().nullable().describe("How many more of this kind can be launched, under the most constraining limit; null = no limit."),
+  limited_by: z.string().nullable().describe("Which limit sets that number (credits, daily_generations, daily_assistance, daily_compute, monthly_capacity, free_budget, free_capacity, storage)."),
+  resets_at: z.string().nullable().describe("When that limit resets (ISO 8601, UTC); null for credits (they come back by buying or with the subscription)."),
+  can_launch_now: z.boolean(),
+  blocked_reason: z.string().nullable().describe("When can_launch_now is false: the exact message the app and the generation tools return. Tell it to the student as is."),
+  cost_credits: z.number(),
+  summary: z.string().nullable().describe("One line for the student, e.g. \"Il te reste 3 examens QCM aujourd'hui · remise à 0 demain à 01:00\"."),
+});
+
+// Même fonction que la page « Mon usage » de l'app et que les refus des outils payants
+// (lib/billing/limits) : un chiffre affiché ici est celui qu'une génération rencontrera.
+const usageLimits = z.object({
+  generations: z.object({
+    mock_exam: generationLeft.describe("Written mock exam, standard size."),
+    mcq_exam: generationLeft.describe("Multiple-choice mock exam, 20 questions + 3 open ones."),
+    exercise: generationLeft,
+    prepare_course: generationLeft,
+    check_answer: generationLeft,
+    drill: generationLeft,
+  }).loose(),
+  limits: z.array(z.object({
+    key: z.string(),
+    label: z.string(),
+    used: z.number().nullable(),
+    limit: z.number().nullable(),
+    remaining: z.number().nullable(),
+    unit: z.string().describe("credits, generations, %, MB… Spending caps are given as a percentage, never as an amount of money."),
+    resets_at: z.string().nullable(),
+  })),
+}).loose();
 
 const output = z.object({
   billing_enabled: z.boolean(),
@@ -33,6 +67,7 @@ const output = z.object({
     check_answer: z.number(),
   }).loose().describe("Credits per kind of generation, as charged on this instance (owner: nothing is charged)."),
   quotas: z.object({ generations: quota, assistance: quota }),
+  usage_limits: usageLimits.describe("Every limit that can stop a generation, and how many of each kind can still be launched. Check it before suggesting a paid action."),
   app_link: z.string(),
 });
 
@@ -43,7 +78,9 @@ export default defineTool({
     "Get the student's credit balance, what each kind of generation costs (written or multiple-choice mock exam, exercise, course preparation, " +
     "format detection, drill, answer check), and today's usage against the daily limits " +
     "(mock exams count as generations; drills and answer checks count as assistance). " +
-    "Use it before suggesting paid actions or when the student asks how many credits they have left. Read-only and free.",
+    "usage_limits gives every limit that can stop a generation (credits, daily quotas, daily compute, monthly capacity, storage) with its reset time, " +
+    "and how many of each kind the student can still launch — the same numbers the app shows and the paid tools enforce. " +
+    "Use it before suggesting paid actions or when the student asks how many credits or generations they have left. Read-only and free.",
   kind: "read",
   input: z.object({}),
   output,
@@ -52,6 +89,14 @@ export default defineTool({
     const owner = await isOwner(ctx.principal.userId);
     const purchased = on ? await purchasedBalanceCenti() : 0;
     const sub = on ? await subscriptionCreditsCenti() : 0;
+    const usage = await getUsageLimits(ctx.principal.userId);
+    const left = (k: keyof typeof usage.generations) => {
+      const g = usage.generations[k];
+      return {
+        remaining: g.remaining, limited_by: g.limitedBy, resets_at: g.resetAt, can_launch_now: g.allowed,
+        blocked_reason: g.reason, cost_credits: g.costCredits, summary: remainingLine(g, usage.now),
+      };
+    };
     return {
       billing_enabled: on,
       owner_mode: owner,
@@ -71,7 +116,14 @@ export default defineTool({
         generations: { used: await usedToday("gen"), limit: await dailyLimit("gen") },
         assistance: { used: await usedToday("assist"), limit: await dailyLimit("assist") },
       },
-      app_link: `${ctx.appOrigin}/compte`,
+      usage_limits: {
+        generations: {
+          mock_exam: left("exam"), mcq_exam: left("qcm"), exercise: left("exercise"),
+          prepare_course: left("prepare"), check_answer: left("check"), drill: left("drill"),
+        },
+        limits: usage.limits.map((l) => ({ key: l.key, label: l.label, used: l.used, limit: l.limit, remaining: l.remaining, unit: l.unit, resets_at: l.resetAt })),
+      },
+      app_link: `${ctx.appOrigin}/compte#usage`,
     };
   },
   summarize: (o) => (o.owner_mode
@@ -80,5 +132,6 @@ export default defineTool({
     ? `Solde : ${o.credits.balance} crédit(s). `
     : "Facturation désactivée sur cette instance. ") +
     `Aujourd'hui : ${o.quotas.generations.used}${o.quotas.generations.limit === null ? "" : `/${o.quotas.generations.limit}`} génération(s), ` +
-    `${o.quotas.assistance.used}${o.quotas.assistance.limit === null ? "" : `/${o.quotas.assistance.limit}`} assistance(s).`,
+    `${o.quotas.assistance.used}${o.quotas.assistance.limit === null ? "" : `/${o.quotas.assistance.limit}`} assistance(s).` +
+    (o.usage_limits.generations.mcq_exam.summary ? ` ${o.usage_limits.generations.mcq_exam.summary}.` : ""),
 });
