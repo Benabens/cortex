@@ -25,6 +25,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { storage } from "@/lib/storage";
+import { qcmCheckpointKey, readQcmCheckpoint, withFigurePresent, type QcmCheckpoint, type QcmCheckpointStore, type QcmMissingState, type QcmPlan, type QcmReserveState } from "@/lib/qcm-checkpoint";
 
 /**
  * ARCHITECTE QCM (générique). Génère des QCM de haut niveau au format détecté :
@@ -1385,35 +1386,13 @@ const EXTRA_BATCHES = 3;
 const DEFAULT_PHASE_MS: Record<string, number> = { QCM: 6 * 60_000, "Questions ouvertes": 6 * 60_000, PDF: 30_000 };
 
 
-/** Génère un examen QCM complet (N QCM + M ouvertes), vérifié, persisté, rendu en PDF.
- *  `count`/`openCount` : la COMPOSITION choisie par l'utilisateur (composeur). `focus` : « Mets l'accent
- *  sur… » (générique) — garantit ~2 QCM sur le thème sans monopoliser (count ≤ 2 → entièrement ciblé). */
-export async function generateQcmExam(opts: { count?: number; openCount?: number; focus?: string; onStep?: StepCb; onExamReady?: (examId: number) => void | Promise<void>; phaseMs?: Record<string, number> } = {}): Promise<QcmExamResult> {
-  await ensureQcmSchema();
-  const report = opts.onStep ?? (() => {});
-  // TEMPS RESTANT — avancement PAR PHASE (lib/progress) dès que les lots sont connus : les
-  // pourcentages des étapes sont ignorés. Lots et ouvertes en parallèle publiaient chacun les
-  // leurs (82 %, puis 30 %, puis 70 %) et le journal 0 % : le temps restant remontait.
-  let work: PhaseProgress | null = null;
-  const step: StepCb = (m, p) => report(m, work ? work.pct() : Math.min(p, 8));
-  // M — durée de chaque phase dans le journal du job (mesure avant/après).
-  const tStart = Date.now();
-  const logPhase = (label: string, since: number) => step(phaseLine(label, Date.now() - since), 0);
-  const fmt = await getFormatProfile();
-  const focus = (opts.focus ?? "").trim() || undefined;
-  const qcmShare = (fmt?.question_types ?? []).filter((t) => t.type === "scq" || t.type === "mcq").reduce((s, t) => s + (t.approx_count || 0), 0);
-  // count peut être 0 (drill « 0 QCM + 1 ouvert ») → on respecte le choix explicite ; sinon défaut détecté.
-  const count = Math.max(0, opts.count ?? Math.min(20, Math.max(8, qcmShare || 12)));
-  const openCount = Math.max(0, opts.openCount ?? Math.min(3, Math.max(0, (fmt?.question_types ?? []).find((t) => t.type === "open")?.approx_count ?? 2)));
-  if (count === 0 && openCount === 0) throw new Error("Composition vide : choisis au moins 1 QCM ou 1 question ouverte.");
-  // « Mets l'accent sur… » (focus générique) : garantit ~2 QCM sur le thème choisi SANS
-  // monopoliser — le reste couvre le programme. Petit count (≤2) → entièrement ciblé (drill).
-  // couverture LARGE (pickCoverage : tête + longue traîne) + MOULES échantillonnés
-  // proportionnellement à l'ADN détecté du cours (sans ADN → null = comportement d'avant).
-  const dna = await getExamDna().catch(() => null);
-  const nFocus = focus ? Math.min(2, Math.max(1, count)) : 0;
-  const needed = Math.max(1, count - nFocus);
-  let covAll = await coverageTopics();
+/**
+ * RÉPARTITION D'UN EXAMEN QCM : sujets des QCM, moules, et réserve de notions pour remplacer une
+ * question écartée. Calculée une fois par examen ; une reprise réutilise celle de son point de
+ * reprise (lib/qcm-checkpoint) : recalculée, elle éviterait les questions déjà enregistrées.
+ */
+async function planQcmExam({ count, openCount, focus, nFocus, needed, dna }: { count: number; openCount: number; focus?: string; nFocus: number; needed: number; dna: ExamDna | null }): Promise<QcmPlan> {
+  let covAll: CovTopic[] = await coverageTopics();
   // Notions réelles du programme, avant l'ajout des titres de supports (mode strict, plus bas).
   const notionCount = distinctNotions(covAll.map((t) => t.label));
   // Moins de notions que de questions (cours sans annale, 10 notions pour 20 QCM) : on les
@@ -1463,8 +1442,6 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // Un thème repris (plus de questions que de thèmes) doit tester un AUTRE fait.
     qcmTopics.push(spread || k < cov.length ? t : { label: t.label, method: REPEAT_METHOD });
   }
-  // Ouvertes : la suite de la répartition (les chapitres que les QCM n'ont pas pris d'abord).
-  const openTopic = (i: number) => (spread ? cov[(needed + i) % cov.length] : cov[(count + i) % cov.length]);
   // Réserve : les notions que la répartition n'a données ni aux QCM ni aux ouvertes ; sans
   // répartition, les notions non prises, puis les autres en reprise (un AUTRE fait).
   const used = new Set(qcmTopics.map((t) => t.label));
@@ -1472,6 +1449,47 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     ? cov.slice(needed + openCount)
     : [...covAll.filter((t) => !used.has(t.label)), ...covAll.map((t) => ({ label: t.label, method: REPEAT_METHOD }))];
   const qcmMolds = sampleMolds(dna, count);
+  return { notionCount, recent, spread: !!spread, covAll, cov, qcmTopics, spareTopics, qcmMolds };
+}
+
+/** Génère un examen QCM complet (N QCM + M ouvertes), vérifié, persisté, rendu en PDF.
+ *  `count`/`openCount` : la COMPOSITION choisie par l'utilisateur (composeur). `focus` : « Mets l'accent
+ *  sur… » (générique) — garantit ~2 QCM sur le thème sans monopoliser (count ≤ 2 → entièrement ciblé). */
+export async function generateQcmExam(opts: { count?: number; openCount?: number; focus?: string; onStep?: StepCb; onExamReady?: (examId: number) => void | Promise<void>; phaseMs?: Record<string, number>; checkpoint?: QcmCheckpointStore } = {}): Promise<QcmExamResult> {
+  await ensureQcmSchema();
+  const report = opts.onStep ?? (() => {});
+  // TEMPS RESTANT — avancement PAR PHASE (lib/progress) dès que les lots sont connus : les
+  // pourcentages des étapes sont ignorés. Lots et ouvertes en parallèle publiaient chacun les
+  // leurs (82 %, puis 30 %, puis 70 %) et le journal 0 % : le temps restant remontait.
+  let work: PhaseProgress | null = null;
+  const step: StepCb = (m, p) => report(m, work ? work.pct() : Math.min(p, 8));
+  // M — durée de chaque phase dans le journal du job (mesure avant/après).
+  const tStart = Date.now();
+  const logPhase = (label: string, since: number) => step(phaseLine(label, Date.now() - since), 0);
+  const fmt = await getFormatProfile();
+  const focus = (opts.focus ?? "").trim() || undefined;
+  const qcmShare = (fmt?.question_types ?? []).filter((t) => t.type === "scq" || t.type === "mcq").reduce((s, t) => s + (t.approx_count || 0), 0);
+  // count peut être 0 (drill « 0 QCM + 1 ouvert ») → on respecte le choix explicite ; sinon défaut détecté.
+  const count = Math.max(0, opts.count ?? Math.min(20, Math.max(8, qcmShare || 12)));
+  const openCount = Math.max(0, opts.openCount ?? Math.min(3, Math.max(0, (fmt?.question_types ?? []).find((t) => t.type === "open")?.approx_count ?? 2)));
+  if (count === 0 && openCount === 0) throw new Error("Composition vide : choisis au moins 1 QCM ou 1 question ouverte.");
+  // « Mets l'accent sur… » (focus générique) : garantit ~2 QCM sur le thème choisi SANS
+  // monopoliser — le reste couvre le programme. Petit count (≤2) → entièrement ciblé (drill).
+  // couverture LARGE (pickCoverage : tête + longue traîne) + MOULES échantillonnés
+  // proportionnellement à l'ADN détecté du cours (sans ADN → null = comportement d'avant).
+  const dna = await getExamDna().catch(() => null);
+  const nFocus = focus ? Math.min(2, Math.max(1, count)) : 0;
+  const needed = Math.max(1, count - nFocus);
+  // POINT DE REPRISE (lib/qcm-checkpoint) : un job repris après une coupure repart de ce qui est
+  // acquis. Absent, illisible ou d'une autre composition : départ à neuf, comme avant.
+  const ckKey = qcmCheckpointKey({ count, openCount, focus });
+  const ck = opts.checkpoint ? readQcmCheckpoint(await opts.checkpoint.load().catch(() => null), ckKey) : null;
+  const plan = ck?.plan ?? await planQcmExam({ count, openCount, focus, nFocus, needed, dna });
+  const { notionCount, recent, covAll, cov, qcmTopics, spareTopics, qcmMolds } = plan;
+  const caps = { perNotion: notionCap(notionCount, count), perKey: 1 };
+  // Ouvertes : la suite de la répartition (les chapitres que les QCM n'ont pas pris d'abord).
+  const openTopic = (i: number) => (plan.spread ? cov[(needed + i) % cov.length] : cov[(count + i) % cov.length]);
+  const used = new Set(qcmTopics.map((t) => t.label));
   // Format résolu : langue de l'examen ; sans annale, les exemples officiels donnent le style,
   // et les questions « classe ce cas » restent interdites (permises si les annales en ont le style).
   const format = await resolveExamFormat().catch(() => null);
@@ -1512,6 +1530,28 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     [{ name: "PDF", units: 1, ms: phaseMs.PDF }],
   ]);
   const progress = work;
+  // Ce que le point de reprise garde, étape par étape (lib/qcm-checkpoint) ; la plus avancée prime.
+  let ckLoop = ck?.loop;
+  let ckAudited = ck?.audited;
+  let ckFinal = ck?.final;
+  /** Copie figée : la suite modifie les QCM en place (explications réécrites, options remplacées). */
+  const frozen = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
+  let persistChain: Promise<void> = Promise.resolve();
+  /** Enregistre le point de reprise ; les écritures se suivent (la dernière porte l'état le plus récent). Un échec ne coûte que la reprise. */
+  const persist = (): Promise<void> => {
+    const store = opts.checkpoint;
+    if (!store) return persistChain;
+    persistChain = persistChain.then(async () => {
+      const stage = ckFinal ? { final: ckFinal } : ckAudited ? { audited: ckAudited } : ckLoop ? { loop: ckLoop } : {};
+      const data: QcmCheckpoint = { v: 1, key: ckKey, plan, open: [...openBySlot.entries()], ...stage };
+      try {
+        await store.save(data);
+      } catch (e) {
+        step(`Point de reprise non enregistré (${(e as Error).message.slice(0, 80)}) : la génération continue`, 0);
+      }
+    });
+    return persistChain;
+  };
   type BatchResult = { items: QcmItem[]; error: unknown; rejected: Set<number> };
   /** En-tête de la consigne d'une nouvelle conception sur des sujets dont la question était trop faible. */
   const TO_FIX = `À CORRIGER — ces questions étaient trop faibles ; écris-en de NOUVELLES sur les mêmes sujets, sans ces défauts (options = propositions complètes, distracteurs de la taxonomie, fait précis du cours) :`;
@@ -1626,7 +1666,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // M — lancée AVANT les lots QCM et en parallèle d'eux, plusieurs à la fois (job 9 de CS-290 :
   // 3 ouvertes en série, 16 min sur 27) ; le limiteur global des appels et le backoff du
   // fournisseur bornent la charge. Aucune passe de qualité n'est retirée.
-  const openBySlot = new Map<number, ExamQuestion>();
+  // Les questions ouvertes déjà construites avant une coupure sont reprises telles quelles.
+  const openBySlot = new Map<number, ExamQuestion>(ck?.open ?? []);
   let abandoned = false;
   const tOpen = Date.now();
   const openPhase = (async () => {
@@ -1640,7 +1681,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     });
     // NOMBRE GARANTI, comme pour les QCM : une ouverte échouée (job 8 de CS-290 : 2 sur 3, sans
     // un mot) est relancée UNE fois, sauf si la cause est une garde ; sinon l'écart est dit.
-    let pendingOpen = Array.from({ length: openCount }, (_, i) => i);
+    let pendingOpen = Array.from({ length: openCount }, (_, i) => i).filter((i) => !openBySlot.has(i));
+    if (openBySlot.size) progress.done("Questions ouvertes", openBySlot.size);
     for (let round = 0; pendingOpen.length && round < 2 && !abandoned; round++) {
       const failed: number[] = [];
       await runPool(pendingOpen, openConcurrency(), async (i) => {
@@ -1651,6 +1693,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
         try {
           const r = await architectQuestion(a, `${t.label}${t.subTheme ? ` — sous-thème imposé : ${t.subTheme}` : ""}${t.method ? ` — ${t.method}` : ""}`, 15, { maxRounds: 1, mold: openMolds[i] ?? null, onStep: (m) => step(`Ouverte ${i + 1} · ${m}`, 82 + i) });
           openBySlot.set(i, { ...r.q, points: 15 });
+          await persist();
         } catch (e) {
           lastError = e;
           failed.push(i);
@@ -1795,12 +1838,59 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const verifiedCandidates: QcmItem[] = [];
   let pending = batches;
   let extraBudget = EXTRA_BATCHES * batches.length;
-  for (let round = 0; pending.length; round++) {
-    const missing: { topic: QcmSlot; mold: MoldKind | null; rejected: boolean; why?: string }[] = [];
+  // REPRISE : les QCM acquis (construits + vérifiés) reviennent sans aucun appel, la réserve de
+  // notions déjà consommée ne resert pas, et la conception repart du groupe de lots suivant.
+  let firstRound = 0;
+  let resumeAt = 0;
+  let resumeMissing: QcmMissingState[] = [];
+  const restorePool = (candidates: QcmItem[], selected: string[]) => {
+    verifiedCandidates.splice(0, verifiedCandidates.length, ...withFigurePresent(candidates, examsDir()));
+    const byStem = new Map(verifiedCandidates.map((c) => [c.stem, c]));
+    all.splice(0, all.length, ...selected.flatMap((st) => byStem.get(st) ?? []));
+  };
+  const restoreReserve = (r: QcmReserveState) => {
+    nextSpare = r.nextSpare;
+    used.clear();
+    for (const label of r.used) used.add(label);
+  };
+  if (ckFinal) {
+    pending = [];
+    // Enregistré : ses figures portent déjà leur nom définitif. Sinon, une figure perdue écarte son QCM.
+    all.push(...(ckFinal.examId != null ? ckFinal.items : withFigurePresent(ckFinal.items, examsDir())));
+    progress.done("QCM", batches.length);
+  } else if (ckAudited) {
+    pending = [];
+    restorePool(ckAudited.candidates, ckAudited.selected);
+    restoreReserve(ckAudited);
+    qualityDropped = ckAudited.qualityDropped;
+    progress.done("QCM", batches.length);
+  } else if (ckLoop) {
+    pending = ckLoop.pending;
+    firstRound = ckLoop.round;
+    resumeAt = ckLoop.next;
+    resumeMissing = ckLoop.missing;
+    extraBudget = ckLoop.extraBudget;
+    qualityDropped = ckLoop.qualityDropped;
+    restorePool(ckLoop.candidates, ckLoop.selected);
+    restoreReserve(ckLoop);
+    if (firstRound > 0) {
+      progress.done("QCM", batches.length);
+      progress.add("QCM", pending.length);
+    }
+    progress.done("QCM", Math.min(resumeAt, pending.length));
+  }
+  if (ck) step(`Reprise après interruption : ${all.length} QCM déjà construits et vérifiés${openBySlot.size ? `, ${openBySlot.size} question(s) ouverte(s)` : ""} repris sans nouvel appel`, 8);
+  /** Point de reprise du comblement principal : prochain groupe `next` de la ronde `round`. */
+  const saveLoop = (round: number, next: number, missing: QcmMissingState[]) => {
+    ckLoop = frozen({ round, next, pending, missing, extraBudget, candidates: verifiedCandidates, selected: all.map((it) => it.stem), qualityDropped, nextSpare, used: [...used] });
+    return persist();
+  };
+  for (let round = firstRound; pending.length; round++) {
+    const missing: QcmMissingState[] = round === firstRound ? resumeMissing : [];
     // Lots QCM menés en même temps (QCM_BATCH_CONCURRENCY, défaut 8) ; le limiteur global des appels
     // (LLM_MAX_CONCURRENCY) reste la borne commune avec les questions ouvertes.
     const width = batchConcurrency();
-    for (let b = 0; b < pending.length; b += width) {
+    for (let b = round === firstRound ? resumeAt : 0; b < pending.length; b += width) {
       const group = pending.slice(b, b + width);
       const got = await runRound(group);
       const incoming = got.flatMap((g) => g.items);
@@ -1822,6 +1912,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
         }
       });
       step(`${all.length}/${count} QCM construits + vérifiés…`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
+      await saveLoop(round, b + width, missing);
     }
     // completeJson a déjà essayé trois fois chaque lot illisible. Si aucun lot n'a produit le
     // moindre item et qu'une erreur LLM existe, répéter trois rondes identiques multiplie seulement
@@ -1842,13 +1933,15 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     extraBudget -= pending.length;
     progress.add("QCM", pending.length); // réessai ajouté : le temps restant peut remonter
     step(`${count - all.length} QCM manquant(s) → ${pending.length} lot(s) de comblement${swaps.length ? ` (${swaps.length} sujet(s) écarté(s) remplacé(s) par une notion de réserve)` : ""}`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
+    await saveLoop(round + 1, 0, []);
   }
   // Audit de sortie unique, calqué sur la rubrique du banc. Il porte sur tout le pool déjà payé :
   // une clé fausse ou du hors-cours sont remplacés par un autre candidat sans nouvelle conception.
   // Ce qui arrive après (remplacements de doublons, complément) est audité à la porte de sortie.
-  const auditedStems = new Set<string>();
-  const auditRejected = new Set<string>();
-  if (verifiedCandidates.length) {
+  const auditedStems = new Set<string>(ckAudited?.auditedStems ?? []);
+  const auditRejected = new Set<string>(ckAudited?.auditRejected ?? []);
+  // Déjà audité avant une coupure : le pool repris porte ses verdicts.
+  if (verifiedCandidates.length && !ckAudited) {
     const auditPassed = await finalQualityAudit(verifiedCandidates, step);
     // Plafonds par notion dès la sélection : seules les questions qui peuvent rester sont réparées.
     const audited = cappedPool([], auditPassed, count);
@@ -1898,6 +1991,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       if (!passedByStem.has(c.stem)) auditRejected.add(c.stem);
     }
     verifiedCandidates.splice(0, verifiedCandidates.length, ...verifiedCandidates.map((c) => confirmedByStem.get(c.stem) ?? passedByStem.get(c.stem) ?? c));
+    ckAudited = frozen({ candidates: verifiedCandidates, selected: all.map((it) => it.stem), auditedStems: [...auditedStems], auditRejected: [...auditRejected], qualityDropped, nextSpare, used: [...used] });
+    await persist();
   }
   // count>0 mais 0 QCM produit = tous les lots ont échoué → erreur claire (sauf drill 0 QCM + ouvertes).
   // H — DOUBLONS À L'ÉCHELLE DE L'EXAMEN (mock 4 de CS-290 : deux QCM sur le paradoxe de Simpson,
@@ -1915,7 +2010,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // reste borné par la taille de l'examen et par la réserve de notions.
   const finalRoundBudget = Math.max(DEDUP_ROUNDS, Math.ceil(count / BATCH) + 2);
   let repairAfterDedup = false;
-  for (let round = 0; round <= finalRoundBudget && all.length >= 2; round++) {
+  // Un ensemble repris après la porte de sortie (`final`) l'a déjà franchie : ni doublons ni complément à refaire.
+  for (let round = 0; !ckFinal && round <= finalRoundBudget && all.length >= 2; round++) {
     const { drop, repeats, notions, angles } = await findDuplicates(all, strict);
     // Cette seconde enveloppe ne prolonge que les pertes qu'elle a elle-même causées. Un examen
     // déjà incomplet après le budget de comblement principal conserve sa borne historique.
@@ -2126,7 +2222,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       }
     }
   };
-  await complement();
+  if (!ckFinal) await complement();
   // Si un contrôle qualité autre que la déduplication a réduit le pool, on peut rétablir les
   // questions acquises et vérifiées. Une question explicitement reconnue comme doublon ne revient
   // jamais par ce filet : le banc de reproduction livrait ainsi 20/20 en réinjectant les répétitions
@@ -2147,10 +2243,11 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // le biais de disponibilité, neuf explications qui réfutaient des options absentes, deux options
   // « biais de disponibilité » dans une même question et une question « not_verified ». Rien n'est
   // enregistré sans passer ici, sur l'ensemble final, quel que soit le chemin suivi (rondes, audit,
-  // doublons, complément) ; un job QCM repris après une coupure refait l'examen en entier (aucun
-  // point de reprise), donc passe ici lui aussi. Une question retirée à la porte (audit tardif,
+  // doublons, complément) ; un job QCM repris après une coupure passe ici lui aussi, QCM repris
+  // compris — seul un ensemble qui l'a déjà franchie (point de reprise `final`) ne la repasse pas.
+  // Une question retirée à la porte (audit tardif,
   // revérification) est recomblée une fois, puis la porte repasse sur l'ensemble.
-  for (let pass = 0; all.length; pass++) {
+  for (let pass = 0; !ckFinal && all.length; pass++) {
     await exitGate();
     if (pass > 0 || all.length >= count || lateBudget <= 0 || hardStop()) break;
     await complement();
@@ -2195,27 +2292,38 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     throw new Error(`Aucun QCM généré : ${llmFailureReason(cause())}`);
   }
   logPhase("QCM", tQcm);
+  // L'ensemble a franchi la porte de sortie : une coupure à partir d'ici ne le refait plus.
+  if (!ckFinal) {
+    ckFinal = { items: frozen(all) };
+    await persist();
+  }
 
   // M — LIVRAISON PROGRESSIVE : l'examen et ses QCM vérifiés sont enregistrés tout de suite
   // (statut « generating ») et visibles dans /mock/N ; les ouvertes arrivent ensuite.
-  const examId = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','generating')`);
-  for (let i = 0; i < all.length; i++) {
-    const it = all[i];
-    if (it.figureFile) {
-      const finalName = `qcm-${examId}-fig${i}.png`;
-      try {
-        fs.renameSync(path.join(examsDir(), it.figureFile), path.join(examsDir(), finalName));
-        it.figureFile = finalName;
-      } catch { it.figureFile = null; it.figureSpec = null; } // figure perdue → item sans figure (honnête)
-    }
-  }
-  await q.tx(async () => {
+  // Déjà enregistré avant une coupure (point de reprise `final`) : le même examen est complété.
+  const reused = ckFinal.examId != null && !!(await q.get(`SELECT id FROM exams WHERE id = ?`, ckFinal.examId));
+  const examId = reused ? ckFinal.examId! : await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','generating')`);
+  if (!reused) {
     for (let i = 0; i < all.length; i++) {
       const it = all[i];
-      const figureJson = it.figureSpec ? JSON.stringify({ spec: it.figureSpec, file: it.figureFile, truth: it.figureTruth }) : null;
-      await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified, mold, figure_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, examId, i, it.topic, it.type, it.stem, JSON.stringify(it.options), JSON.stringify(it.correct), JSON.stringify(it.misconceptions), it.explanation, it.verified, it.mold ?? null, figureJson);
+      if (it.figureFile) {
+        const finalName = `qcm-${examId}-fig${i}.png`;
+        try {
+          fs.renameSync(path.join(examsDir(), it.figureFile), path.join(examsDir(), finalName));
+          it.figureFile = finalName;
+        } catch { it.figureFile = null; it.figureSpec = null; } // figure perdue → item sans figure (honnête)
+      }
     }
-  });
+    await q.tx(async () => {
+      for (let i = 0; i < all.length; i++) {
+        const it = all[i];
+        const figureJson = it.figureSpec ? JSON.stringify({ spec: it.figureSpec, file: it.figureFile, truth: it.figureTruth }) : null;
+        await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified, mold, figure_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, examId, i, it.topic, it.type, it.stem, JSON.stringify(it.options), JSON.stringify(it.correct), JSON.stringify(it.misconceptions), it.explanation, it.verified, it.mold ?? null, figureJson);
+      }
+    });
+    ckFinal = { items: frozen(all), examId };
+    await persist();
+  }
   const verified = all.filter((it) => it.verified === 1).length;
   if (openCount > 0 && all.length) {
     await q.run(`UPDATE exams SET verify_summary = ? WHERE id = ?`, `${qcmExamSummary({ count: all.length, requested: count, verified, open: 0, openRequested: 0 })}, questions ouvertes en cours`, examId);
@@ -2239,6 +2347,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
 
   // Les ouvertes rejoignent l'examen déjà enregistré ; il passe « prêt ».
   await q.tx(async () => {
+    // Examen repris : des ouvertes y ont peut-être déjà été jointes avant la coupure.
+    if (reused) await q.run(`DELETE FROM exam_questions WHERE exam_id = ?`, examId);
     for (const oq of openQs) {
       await q.run(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration) VALUES (?,?,?,?,?)`, examId, oq.concept, oq.statement_tex, oq.solution_tex, "qcm-open");
     }
