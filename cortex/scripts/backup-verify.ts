@@ -19,7 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import { backupS3Config, listRemoteBackups, pullBackup, s3Store } from "../lib/backup-s3";
 import { verifyBackup } from "../lib/backup-verify";
-import { verifyRemoteObjects, type ObjectIndex } from "../lib/backup-objects";
+import { readLocalIndex, verifyRemoteObjects } from "../lib/backup-objects";
 
 const args = process.argv.slice(2);
 const hasFlag = (f: string) => args.includes(f);
@@ -57,7 +57,7 @@ async function main(): Promise<void> {
     // Sauvegarde distante avec objets du seau : chaque contenu indexé doit être là.
     if (remote && r.manifest.objectStore?.index) {
       const cfg = backupS3Config()!;
-      const index = JSON.parse(fs.readFileSync(path.join(dir, r.manifest.objectStore.index.file), "utf8")) as ObjectIndex;
+      const index = readLocalIndex(dir, r.manifest.objectStore.index)!;
       const { objects, missing } = await verifyRemoteObjects({ store: s3Store(cfg), cfg, index });
       if (missing.length) throw new Error(`${missing.length}/${objects} objet(s) du seau sans contenu valide dans le stockage de sauvegarde (ex. ${missing[0]}).`);
       console.log(`  objets : ${objects} objet(s) du seau, contenus présents`);

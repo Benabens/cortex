@@ -82,6 +82,7 @@ else
   echo "téléchargé en $(( $(date +%s) - T1 )) s : $(du -sh "$DIR" | cut -f1)"
 fi
 [[ -f "$DIR/postgres.dump" ]] || { echo "postgres.dump absent de $DIR"; exit 1; }
+DIR="$(cd "$DIR" && pwd)"   # absolu : l'étape 7 s'exécute depuis cortex/
 
 step "3. Postgres 17 jetable sur 127.0.0.1:$PORT"
 LC_ALL=en_US.UTF-8 "$PG17/initdb" -D "$WORK/pg" -U postgres --auth=trust --locale=C -E UTF8 >/dev/null
@@ -122,15 +123,20 @@ echo "extraite en $(( $(date +%s) - T3 )) s : $(du -sh "$WORK/data" | cut -f1), 
 
 OBJ_OK=1
 OBJECTS=$(jq -r '.objectStore.index.objects // empty' "$DIR/manifest.json")
-if [[ -n "$OBJECTS" ]]; then
+if [[ -z "$OBJECTS" ]] && jq -e '.objectStore' "$DIR/manifest.json" >/dev/null; then
+  echo
+  echo "✗ Stockage objet actif mais aucun index des objets du seau dans cette sauvegarde (faite sans --push, ou copie du seau en échec ce jour-là)."
+  OBJ_OK=0
+elif [[ -n "$OBJECTS" ]]; then
   step "7. Objets du seau de fichiers ($OBJECTS indexés)"
   [[ -n "${BACKUP_S3_BUCKET:-}" ]] || load_backup_vars
   T4=$(date +%s)
+  mkdir -p "$WORK/objets"
   set +e
   (cd "$APP" && npx tsx scripts/backup-objects.ts "$DIR" --to="$WORK/objets")
   OBJ_RC=$?
   set -e
-  GOT=$(find "$WORK/objets" -type f 2>/dev/null | wc -l | tr -d ' ')
+  GOT=$(find "$WORK/objets" -type f | wc -l | tr -d ' ')
   echo "restaurés en $(( $(date +%s) - T4 )) s : $GOT fichier(s) sur $OBJECTS, $(du -sh "$WORK/objets" 2>/dev/null | cut -f1)"
   [[ "$OBJ_RC" -eq 0 && "$GOT" -eq "$OBJECTS" ]] || OBJ_OK=0
 else
@@ -141,12 +147,13 @@ fi
 TOTAL=$(( $(date +%s) - T0 ))
 echo
 if [[ "$OBJ_OK" -ne 1 ]]; then
-  echo "✗ Objets du seau INCOMPLETS : contenu manquant ou empreinte fausse (journal ci-dessus)."
-  exit 1
+  echo "✗ Objets du seau INCOMPLETS : index absent, contenu manquant ou empreinte fausse (journal ci-dessus)."
 fi
-if [[ "$RC" -eq 0 && "$ERRORS" -eq 0 ]]; then
+if [[ "$RC" -eq 0 && "$ERRORS" -eq 0 && "$OBJ_OK" -eq 1 ]]; then
   echo "✓ Restauration OK en $TOTAL s au total (dump : $RESTORE_S s). Objectif de la checklist : moins de 5 min."
 else
-  echo "✗ Restauration INCOMPLÈTE ($ERRORS erreur(s)) : journal $WORK/pg_restore.err (relance avec GARDER=1 pour le lire)."
+  if [[ "$RC" -ne 0 || "$ERRORS" -ne 0 ]]; then
+    echo "✗ Restauration Postgres INCOMPLÈTE ($ERRORS erreur(s)) : journal $WORK/pg_restore.err (relance avec GARDER=1 pour le lire)."
+  fi
   exit 1
 fi

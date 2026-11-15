@@ -21,7 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { OBJECTS_FILE, type ObjectIndex } from "./backup-objects";
+import { OBJECTS_FILE, type ObjectIndex, type ObjectIndexRef } from "./backup-objects";
 
 export type PgDumpEntry = {
   file: string; // nom relatif dans l'archive de backup
@@ -52,7 +52,7 @@ export type BackupManifest = {
   objectStore?: {
     location: string;
     /** Index des objets du seau copiés dans le stockage de sauvegarde (lib/backup-objects). */
-    index?: { file: string; objects: number; bytes: number; sha256: string };
+    index?: ObjectIndexRef;
   };
   tools: { pgDump?: string; tar?: string; node: string };
 };
@@ -305,7 +305,7 @@ export async function createBackup(opts: CreateBackupOptions): Promise<CreateBac
   }
 
   // ── 3) index des objets du seau ─────────────────────────────────────────
-  let objectIndex: NonNullable<BackupManifest["objectStore"]>["index"];
+  let objectIndex: ObjectIndexRef | undefined;
   if (store?.index) {
     const file = path.join(outDir, OBJECTS_FILE);
     fs.writeFileSync(file, JSON.stringify(store.index) + "\n");
