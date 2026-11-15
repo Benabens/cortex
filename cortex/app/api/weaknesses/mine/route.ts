@@ -52,7 +52,7 @@ async function handlePOST(req: NextRequest) {
     const extracted = await pdfText(buf, FIELD_LIMITS.text);
     if (extracted.length < 40) {
       const severity = Number(form.get("severity") ?? 2);
-      await createWeakness({ topic: "(à analyser)", description: note, severity, screenshotPath: saveAttachment(buf, "pdf"), source: "pdf" });
+      await createWeakness({ topic: "(à analyser)", description: note, severity, screenshotPath: await saveAttachment(buf, "pdf"), source: "pdf" });
       return NextResponse.json({
         created: 0,
         stored: true,

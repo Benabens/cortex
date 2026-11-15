@@ -23,6 +23,7 @@ import { examSummaryLabel, qcmSummaryText } from "@/lib/exam-summary";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { storage } from "@/lib/storage";
 
 /**
  * ARCHITECTE QCM (générique). Génère des QCM de haut niveau au format détecté :
@@ -1981,7 +1982,7 @@ export async function getQcmExam(examId: number, withKeys = false): Promise<QcmE
   return {
     id: e.id, createdAt: e.created_at, status: e.status ?? "ready", verifySummary: examSummaryLabel(e.verify_summary), pdf: e.html_path ?? null,
     // Corrigé : seulement s'il a compilé (J — examen 2 de CS-290 : « Énoncé » sans « Corrigé »).
-    solutions: e.html_path?.endsWith(".pdf") && fs.existsSync(path.join(examsDir(), path.basename(e.html_path).replace(/\.pdf$/, "-corrige.pdf"))) ? e.html_path.replace(/\.pdf$/, "-corrige.pdf") : null,
+    solutions: e.html_path?.endsWith(".pdf") && (await storage().stat(path.join(examsDir(), path.basename(e.html_path).replace(/\.pdf$/, "-corrige.pdf")))) ? e.html_path.replace(/\.pdf$/, "-corrige.pdf") : null,
     items: rows.map((r) => {
       let figure: string | null = null;
       try { figure = r.figure_json ? (JSON.parse(r.figure_json).file ?? null) : null; } catch {}

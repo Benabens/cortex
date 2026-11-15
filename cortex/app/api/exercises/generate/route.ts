@@ -5,8 +5,8 @@ import { requireCourse } from "@/lib/req";
 import { UPLOAD_LIMITS, readFormData, readJson, withBodyLimit } from "@/lib/upload-limit";
 import { fieldTooLong } from "@/lib/field-limits";
 import crypto from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
+import { storage as files } from "@/lib/storage";
 import { NextRequest, NextResponse } from "next/server";
 import { checkStorage, declaredBytes } from "@/lib/storage-quota";
 import { currentUser } from "@/db/context";
@@ -38,9 +38,8 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     if (file instanceof File && file.size > 0) {
       if (file.size > 12 * 1024 * 1024) return NextResponse.json({ error: "Image trop lourde (max 12 Mo)." }, { status: 400 });
       const dir = uploadsDir();
-      fs.mkdirSync(dir, { recursive: true });
       const name = `exo-${crypto.randomUUID()}.${IMG_EXT[file.type] ?? "png"}`;
-      fs.writeFileSync(path.join(dir, name), Buffer.from(await file.arrayBuffer()));
+      await files().put(path.join(dir, name), Buffer.from(await file.arrayBuffer()));
       imageRel = `${path.relative(process.cwd(), dir)}/${name}`;
     }
     payload = { target: target || undefined, note: note || undefined, imageRel };

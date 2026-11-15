@@ -22,6 +22,7 @@ import { createBackup } from "../lib/backup";
 import { backupS3Config, pruneBackups, pushBackup, s3Store } from "../lib/backup-s3";
 import { dataRoot } from "../lib/courses";
 import { dbDriverName } from "../db/q";
+import { isObjectStored, storageS3Config } from "../lib/storage";
 
 function argValue(flag: string): string | undefined {
   const hit = process.argv.slice(2).find((a) => a.startsWith(`${flag}=`));
@@ -41,7 +42,11 @@ async function main(): Promise<void> {
     ? path.resolve(process.env.BACKUP_DIR)
     : push ? path.join(os.tmpdir(), "cortex-backups") : path.join(process.cwd(), "backups");
 
+  // Stockage objet : les fichiers de cours sont déjà dans leur seau, ils ne sont
+  // pas recopiés chaque jour dans l'archive (seuls les fichiers locaux le sont).
+  const files = storageS3Config();
   const { dir, manifest } = await createBackup({
+    ...(files ? { objectStore: { location: `s3://${files.bucket}/${files.prefix}`, isObjectStored } } : {}),
     dataDir: dataRoot(),
     backupDir,
     databaseUrl: process.env.DATABASE_URL,
@@ -50,7 +55,7 @@ async function main(): Promise<void> {
   });
 
   console.log(`\n✓ Sauvegarde créée : ${dir}`);
-  console.log(`  volume   : ${manifest.dataDir.archive} (${(manifest.dataDir.bytes / 1024).toFixed(0)} Kio)`);
+  console.log(`  volume   : ${manifest.dataDir.archive} (${(manifest.dataDir.bytes / 1024).toFixed(0)} Kio)${manifest.objectStore ? `, fichiers de cours dans ${manifest.objectStore.location} (non archivés)` : ""}`);
   if (manifest.postgres) {
     console.log(`  postgres : ${manifest.postgres.file} (${(manifest.postgres.bytes / 1024).toFixed(0)} Kio)`);
   } else if (manifest.pglite) {

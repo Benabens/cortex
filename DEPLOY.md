@@ -82,6 +82,42 @@ ouvertes à tous, sauf lancement fermé (`INVITE_ONLY=1`, § 12).
    survivent aux redéploiements (le code le prouve : marqueur
    `.cortex-volume-initialise` + copie non-destructive au 1er boot).
 
+## 3 bis. Stockage objet des fichiers (optionnel, recommandé avant l'ouverture)
+
+Sans variable `STORAGE_S3_*`, les fichiers de cours (annales, uploads, examens
+générés) vivent sur le volume. Avec, ils vivent dans un seau S3-compatible
+(Railway Buckets, Cloudflare R2, MinIO) sous **la même arborescence**
+(`u/<compte>/<cours>/…`) : aucune ligne de base ne change. Le volume ne sert
+plus que de cache (bases SQLite de dev, cache des images de pages, temporaires).
+
+1. Projet Railway → **+ New** → **Bucket** (nommé `Bucket` ci-dessous).
+2. Service **cortex-app** → **Variables**, en références vers le seau :
+   ```env
+   STORAGE_S3_BUCKET=${{Bucket.BUCKET}}
+   STORAGE_S3_ENDPOINT=${{Bucket.ENDPOINT}}
+   STORAGE_S3_ACCESS_KEY_ID=${{Bucket.ACCESS_KEY_ID}}
+   STORAGE_S3_SECRET_ACCESS_KEY=${{Bucket.SECRET_ACCESS_KEY}}
+   STORAGE_S3_REGION=${{Bucket.REGION}}
+   # STORAGE_S3_PATH_STYLE=1   # seulement un seau ancien (adressage par chemin)
+   ```
+   Pose-les avec « skip deploys » : migre **avant** que l'app ne bascule.
+3. Copie le volume dans le seau (depuis le service, où `CORTEX_DATA_DIR` = `/data`) :
+   ```bash
+   railway ssh -s cortex-app -- "cd /app/cortex && npm run storage:migrate"              # à blanc : ce qui serait envoyé
+   railway ssh -s cortex-app -- "cd /app/cortex && npm run storage:migrate -- --write"   # envoie + vérifie les empreintes
+   railway ssh -s cortex-app -- "cd /app/cortex && npm run storage:migrate -- --verify"  # re-vérifie seule (SHA-256 objet par objet)
+   ```
+   Idempotent (relancé, n'envoie que ce qui manque ou a changé), ne supprime
+   rien, code de sortie 1 si une empreinte diffère. Puis redéploie.
+4. Le volume reste monté (cache, et tes fichiers d'avant la migration y sont
+   toujours) : ne le supprime qu'après quelques jours sans incident.
+
+Les PDF ouverts dans un onglet sont servis par une URL présignée (5 min) ; les
+aperçus intégrés passent par le serveur, en flux avec `Range` (CSP `'self'`).
+⚠ Railway Buckets n'a **ni versionnage ni corbeille** et la sauvegarde
+quotidienne n'archive plus les fichiers déjà dans le seau (§ 10) : une
+suppression y est définitive.
+
 ## 4. Railway — variables d'environnement
 
 Service **cortex-app** → **Variables** → **Raw Editor** → colle ce bloc, puis
@@ -615,6 +651,15 @@ Contrôles : empreintes SHA-256, listage de `data.tar.gz`, et `pg_restore -l`
 sur `postgres.dump` (la table des matières doit se lire et contenir au moins
 une table — un dump tronqué échoue **ici**, pas le jour de la restauration).
 Rien n'est restauré. Code de sortie ≠ 0 = sauvegarde inutilisable.
+
+### Avec le stockage objet (§ 3 bis)
+
+Quand `STORAGE_S3_*` est posé, `data.tar.gz` ne contient plus que ce qui reste
+sur le disque (bases SQLite, fichiers hors seau) : les fichiers de cours sont
+dans le seau, et le manifeste le dit (`objectStore.location`). Une archive vide
+est alors valide. Une restauration rend la base et le disque, **pas** le seau :
+sa protection est celle du fournisseur (Railway Buckets : aucune ; R2 : réplique
+à configurer).
 
 ### Où et à quelle fréquence
 

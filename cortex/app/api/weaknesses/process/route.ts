@@ -7,8 +7,8 @@ import { uploadsDir } from "@/lib/paths";
 import { LlmError, completeText, extractJson } from "@/lib/llm";
 import { isLlmModel } from "@/lib/llm/config";
 import { getWeakness, updateWeaknessAnalysis } from "@/lib/weaknesses";
-import fs from "node:fs";
 import path from "node:path";
+import { storage } from "@/lib/storage";
 import { NextRequest, NextResponse } from "next/server";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
@@ -67,21 +67,20 @@ async function handlePOST(req: NextRequest) {
 
   // Chemin image relatif au cwd (l'outil Read du provider CLI lit dans le projet).
   let imageRel: string | null = null;
-  if (row.screenshot_path) {
-    const abs = path.join(uploadsDir(), path.basename(row.screenshot_path));
-    if (fs.existsSync(abs)) imageRel = `${path.relative(process.cwd(), uploadsDir())}/${path.basename(row.screenshot_path)}`;
-  }
+  const image = row.screenshot_path ? path.join(uploadsDir(), path.basename(row.screenshot_path)) : null;
+  if (image && (await storage().stat(image))) imageRel = `${path.relative(process.cwd(), uploadsDir())}/${path.basename(image)}`;
 
   try {
     // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
     // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, rendu seulement si
     // l'appel n'est pas parti ou si la réponse est inutilisable (lib/billing/reserve).
     const { assistCall } = await import("@/lib/billing/reserve");
-    const text = await assistCall("weakness-process", () => completeText({
+    // L'image doit être sur le disque pour l'outil Read (stockage objet : rapatriée).
+    const text = await assistCall("weakness-process", () => storage().withLocalDir(imageRel && image ? [image] : [], () => completeText({
       prompt: buildPrompt({ topic: row.topic, description: row.description, imageRel }),
       model: chosenModel,
       timeoutMs: 190_000,
-    }));
+    })));
     const parsed = extractJson<Analysis>(text);
     if (!parsed?.topic || !Array.isArray(parsed.concepts)) {
       throw new Error("Réponse IA incomplète.");
