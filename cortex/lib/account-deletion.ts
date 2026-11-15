@@ -24,7 +24,8 @@ import { stillBilling } from "@/lib/billing/subscription-windows";
  *    moyen de se connecter ;
  *  - `courses` possédés, `tenants` (registre), `gen_events`, `credit_transactions`,
  *    `active_jobs` (réservations en cours), `stripe_purchases` (achats),
- *    `subscriptions` et `stripe_invoices` (abonnement Pro), `stripe_payments`
+ *    `subscriptions` et `stripe_invoices` (abonnement Pro), `stripe_customers`
+ *    et `checkout_locks` (client Stripe, checkout ouvert), `stripe_payments`
  *    (montants encaissés), `terms_acceptances`,
  *    `question_reports` (signalements de questions et leurs commentaires) ;
  *  - chaque schéma tenant `t_<user>_<cours>` (Postgres, DROP … CASCADE) — donc
@@ -195,6 +196,8 @@ export async function deleteAccount(userId: string, deps: DeletionDeps = {}): Pr
     // Abonnement et factures : l'abonnement Stripe lui-même est résilié par le
     // propriétaire depuis le tableau de bord (le portail n'est plus accessible sans compte).
     await authRun(`DELETE FROM subscriptions WHERE user_id = ?`, userId);
+    await authRun(`DELETE FROM stripe_customers WHERE user_id = ?`, userId);
+    await authRun(`DELETE FROM checkout_locks WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM stripe_invoices WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM stripe_payment_losses WHERE payment_intent IN (SELECT payment_intent FROM stripe_payments WHERE user_id = ?)`, userId);
     await authRun(`DELETE FROM stripe_payments WHERE user_id = ?`, userId);

@@ -3,7 +3,13 @@ import { PLANS, type PlanKey } from "./stripe-events";
 import { publicOrigin } from "@/lib/public-url";
 
 /** Paramètres de la session Checkout, testables sans réseau hors du module de route Next.js. */
-export function checkoutParams(o: { plan: PlanKey; priceId: string; userId: string; email?: string | null }): Stripe.Checkout.SessionCreateParams & { metadata: Record<string, string> } {
+export function checkoutParams(o: {
+  plan: PlanKey; priceId: string; userId: string; email?: string | null;
+  /** Client Stripe du compte (lib/billing/checkout-session) : exclusif de customer_email et customer_creation. */
+  customer?: string;
+  /** Expiration de la session (secondes Unix ; entre 30 min et 24 h chez Stripe). */
+  expiresAt?: number;
+}): Stripe.Checkout.SessionCreateParams & { metadata: Record<string, string> } {
   const origin = publicOrigin();
   if (!origin) throw new Error("AUTH_URL manquante");
   const spec = PLANS[o.plan];
@@ -20,7 +26,8 @@ export function checkoutParams(o: { plan: PlanKey; priceId: string; userId: stri
     allow_promotion_codes: true,
     success_url: `${origin}/compte?achat=ok`,
     cancel_url: `${origin}/compte?achat=annule`,
-    ...(o.email ? { customer_email: o.email } : {}),
+    ...(o.customer ? { customer: o.customer } : o.email ? { customer_email: o.email } : {}),
+    ...(o.expiresAt ? { expires_at: o.expiresAt } : {}),
     // Le webhook lit CES métadonnées pour attribuer au bon compte (source de vérité).
     metadata,
     ...(spec.mode === "payment"
@@ -28,7 +35,7 @@ export function checkoutParams(o: { plan: PlanKey; priceId: string; userId: stri
       // …et métadonnées sur le PaymentIntent : la charge d'un remboursement les porte, même si l'achat est inconnu en base.
       ? {
           invoice_creation: { enabled: true },
-          customer_creation: "always" as const,
+          ...(o.customer ? {} : { customer_creation: "always" as const }),
           payment_intent_data: { metadata, statement_descriptor_suffix: "CORTEX" },
         }
       // Abonnement : métadonnées aussi sur l'abonnement → une facture arrivée avant le checkout retrouve l'utilisateur.

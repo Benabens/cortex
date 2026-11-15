@@ -248,7 +248,10 @@ export async function getSubscription(userId = currentUser()): Promise<SubRow | 
 
 export async function resolveUserByCustomer(customerId: string): Promise<string | null> {
   const r = await authGet<{ user_id: string }>(`SELECT user_id FROM subscriptions WHERE customer_id = ?`, customerId);
-  return r?.user_id ?? null;
+  if (r) return r.user_id;
+  // Client créé par Cortex au checkout (lib/billing/checkout-session), avant tout abonnement.
+  const c = await authGet<{ user_id: string }>(`SELECT user_id FROM stripe_customers WHERE customer_id = ?`, customerId);
+  return c?.user_id ?? null;
 }
 
 /** L'abonnement fournit-il des crédits en ce moment ? (période PAYÉE en cours, en règle, non suspendu). */
