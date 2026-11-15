@@ -330,6 +330,23 @@ export function ultimateAuditActions<T extends { stem: string; trivialDistractor
   return { drop, repair };
 }
 
+type AuditVerdict = { index: number; key: boolean; offCourse: boolean; trivial: number[] };
+
+/** Consolide deux lectures indépendantes : union des défauts, hors-cours seulement par accord. */
+export function auditConsensus(first: AuditVerdict[], second: AuditVerdict[]): AuditVerdict[] {
+  const other = new Map(second.map((v) => [v.index, v]));
+  return first.map((a) => {
+    const b = other.get(a.index);
+    if (!b) return { ...a, key: false };
+    return {
+      index: a.index,
+      key: a.key && b.key,
+      offCourse: a.offCourse && b.offCourse,
+      trivial: [...new Set([...(a.trivial ?? []), ...(b.trivial ?? [])])].sort((x, y) => x - y),
+    };
+  });
+}
+
 /**
  * Retraits décidés par l'audit sémantique des doublons. En mode strict, les notions du modèle
  * restent descriptives : seul le sujet planifié est assez stable pour appliquer un plafond. Les

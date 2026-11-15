@@ -6,7 +6,7 @@ import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseNumbers, absentCourseTerms, corpusWindows, coursePassages, factNumbers, topicsInScope } from "@/lib/course-grounding";
 import { rewriteExplanations, rewriteExplanationsOnOptions, secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
-import { capDrops, describeExplanationIssue, duplicateAuditDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, optionHead, ultimateAuditActions } from "@/lib/qcm-checks";
+import { auditConsensus, capDrops, describeExplanationIssue, duplicateAuditDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, optionHead, ultimateAuditActions } from "@/lib/qcm-checks";
 import { assignChapters, spreadOverChapters, variants } from "@/lib/coverage";
 import { normalize, tokenize } from "@/lib/text";
 import { courseRefImages } from "@/lib/course-vision";
@@ -656,7 +656,7 @@ const FINAL_QUALITY_SCHEMA = {
 } as const;
 
 /** Une passe courte calquée sur la rubrique du banc, avec clé et explication visibles. */
-async function finalQualityAudit(items: QcmItem[], step: StepCb): Promise<QcmItem[]> {
+async function finalQualityAudit(items: QcmItem[], step: StepCb, readings = 1): Promise<QcmItem[]> {
   if (!items.length) return [];
   const passages = await coursePassages([...new Set(items.map((it) => it.topic).filter(Boolean))]).catch(() => []);
   const body = items.map((it, index) => [
@@ -667,7 +667,7 @@ async function finalQualityAudit(items: QcmItem[], step: StepCb): Promise<QcmIte
   ].join("\n")).join("\n\n");
   // Audit illisible ou en échec : les QCM gardent le verdict de leur vérification à l'aveugle. Lever
   // ici perdait l'examen entier (« Aucun QCM généré ») alors que tout était déjà vérifié et payé.
-  const out = await completeJson<{ verdicts: FinalQualityVerdict[] }>({
+  const read = () => completeJson<{ verdicts: FinalQualityVerdict[] }>({
     model: "opus", timeoutMs: 420_000, json: { schema: FINAL_QUALITY_SCHEMA },
     prompt: [
       `Tu es un examinateur exigeant. Pour chaque QCM, tranche selon les extraits du cours.`,
@@ -681,9 +681,12 @@ async function finalQualityAudit(items: QcmItem[], step: StepCb): Promise<QcmIte
     step(`Audit final ignoré (${(e as Error).message.slice(0, 60)}), verdicts de la vérification gardés`, 79);
     return null;
   });
-  if (!out) return items;
+  const first = await read();
+  if (!first) return items;
+  const second = readings > 1 ? await read() : null;
+  const verdicts = second ? auditConsensus(first.verdicts ?? [], second.verdicts ?? []) : first.verdicts ?? [];
   step(`Audit final : clés, hors-cours et distracteurs contrôlés en un lot`, 79);
-  return applyFinalQualityVerdicts(items, out.verdicts ?? []);
+  return applyFinalQualityVerdicts(items, verdicts);
 }
 
 /** Étiquette d'un thème déjà couvert par une autre question de l'examen. */
@@ -2107,7 +2110,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // puis un réaudit des seules questions modifiées. Aucun complément ni réinjection après ce point.
   if (all.length) {
     const before = all.slice();
-    const audited = await finalQualityAudit(before, step);
+    const audited = await finalQualityAudit(before, step, 2);
     const actions = ultimateAuditActions(before, audited);
     const byStem = new Map(audited.map((it) => [it.stem, it]));
     const repair = actions.repair.map((i) => audited.find((x) => x.stem === before[i].stem)!).filter(Boolean);
@@ -2124,7 +2127,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     if (repair.length) {
       const repaired = await replaceTrivialDistractorsBatch(repair, step, shared.language).catch(() => repair);
       const changed = repaired.filter((it, i) => it !== repair[i]);
-      const passed = new Map((await finalQualityAudit(changed, step)).filter((it) => !it.trivialDistractors?.length).map((it) => [it.stem, it]));
+      const passed = new Map((await finalQualityAudit(changed, step, 2)).filter((it) => !it.trivialDistractors?.length).map((it) => [it.stem, it]));
       for (const old of repair) {
         const i = all.findIndex((it) => it.stem === old.stem);
         if (i < 0) continue;

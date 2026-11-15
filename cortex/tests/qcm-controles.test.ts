@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { capDrops, duplicateAuditDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, refutedItems, ultimateAuditActions } from "../lib/qcm-checks";
+import { auditConsensus, capDrops, duplicateAuditDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, refutedItems, ultimateAuditActions } from "../lib/qcm-checks";
 
 type Item = { n: number; topic: string; verified: 0 | 1 | null; stem: string; options: string[]; correct: number[]; explanation: string };
 const EXAM9: Item[] = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "qcm-job23-examen9.json"), "utf8")).items;
@@ -29,6 +29,21 @@ test("audit ultime : retire une clé fausse et répare une question aux distract
   const initial = [{ stem: "Principe alpha", trivialDistractors: null }, { stem: "Méthode bêta", trivialDistractors: null }, { stem: "Condition gamma", trivialDistractors: null }];
   const ultime = [{ ...initial[0] }, { ...initial[1], trivialDistractors: [2] }];
   assert.deepEqual(ultimateAuditActions(initial, ultime), { drop: [2], repair: [1] });
+});
+
+test("audit ultime : deux lectures indépendantes cumulent les défauts sans créer un rejet hors cours isolé", () => {
+  const first = [
+    { index: 0, key: true, offCourse: true, trivial: [2] },
+    { index: 1, key: true, offCourse: false, trivial: [] },
+  ];
+  const second = [
+    { index: 0, key: true, offCourse: false, trivial: [3] },
+    { index: 1, key: false, offCourse: false, trivial: [] },
+  ];
+  assert.deepEqual(auditConsensus(first, second), [
+    { index: 0, key: true, offCourse: false, trivial: [2, 3] },
+    { index: 1, key: false, offCourse: false, trivial: [] },
+  ]);
 });
 
 test("explication : le défaut relevé est le bon (compte, puis notion ou affirmation absente)", () => {
