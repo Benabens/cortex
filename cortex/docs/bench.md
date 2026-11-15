@@ -15,7 +15,17 @@ npm run bench -- run --case rs-qcm15 --provider codex-cli
 - `mark-ref --run <dossier>` : ce run devient la référence de son cas. `report [--out f.md]` : tableau référence → actuel de tous les cas.
 - Postgres local jetable : `LC_ALL=C initdb -D <dir> -U cortex --auth=trust --locale=C`, puis `port`, `listen_addresses = 'localhost'` et `unix_socket_directories = ''` dans `postgresql.conf`. Chaque run crée sa base et la supprime à la fin.
 
-**Jamais l'API payante** : le banc refuse de démarrer si le provider n'est pas `codex-cli` ou si une clé Anthropic, OpenAI, Codex ou générique est chargée. Il refuse aussi une `DATABASE_URL` qui ne vise pas l'hôte local. Les providers `claude-code`, `anthropic` et `openai-compatible` sont donc explicitement interdits pour les vrais runs.
+**Jamais l'API payante par défaut** : le banc refuse de démarrer si le provider n'est pas `codex-cli` ou si une clé Anthropic, OpenAI, Codex ou générique est chargée. Il refuse aussi une `DATABASE_URL` qui ne vise pas l'hôte local. Les providers `claude-code`, `anthropic` et `openai-compatible` sont donc interdits pour les vrais runs.
+
+**Seule exception : une mesure du coût réel, sur opt-in** (chantier coût du 15/11, 15 $ au total). `CORTEX_BENCH_PAID=anthropic` laisse passer la clé Anthropic, et elle seule, avec `LLM_PROVIDER=anthropic` et `SPEND_CAP_USD` entre 0 et 15 $. Le modèle se fixe par `CORTEX_BENCH_ENGINE_MODEL=claude-sonnet-5` (sinon l'alias logique partirait tel quel à l'API). Le juge ne tourne jamais sur l'API : `judge` refuse l'environnement payant, et le run le lance sans la clé, sur codex-cli. Pour juger à part, garder la base (`--keep`) puis relancer sans l'opt-in. Le rapport donne alors les tokens et le coût **facturés** (`llm_usage`, échecs compris), comparés seulement à une référence facturée.
+
+```sh
+ANTHROPIC_API_KEY=… LLM_PROVIDER=anthropic CORTEX_BENCH_PAID=anthropic SPEND_CAP_USD=4 \
+CORTEX_BENCH_ENGINE_MODEL=claude-sonnet-5 … npm run bench -- run --case <id> --provider anthropic --no-judge --keep
+LLM_PROVIDER=codex-cli … npm run bench -- judge --run <dossier> && npm run bench -- score --run <dossier>
+```
+
+`SPEND_CAP_USD` plafonne **un** run (kill-switch de `lib/billing/usage`, compté sur sa base jetable). Les appels déjà partis en parallèle peuvent le dépasser de quelques appels. Le total du chantier se tient à la main, run par run.
 
 ## Cas
 
@@ -30,7 +40,7 @@ Les cas synthétiques (`lib/bench/cases.ts`, domaine inventé de `lib/bench/synt
 | Doublons, fidélité, distracteurs, hors cours | juge à l'aveugle (`lib/bench/judge`) ; code exécuté en bac à sable | juge |
 | Rendu | PDF énoncé et corrigé (pages, texte), page en ligne (`getQcmExam` / `getBlockExam`) | mesuré |
 | Durées, appels, réessais | journal du job, bande LLM, `llm_usage` | mesuré sur codex-cli, non représentatif de la prod |
-| Tokens d'entrée, cache de prompt, coût $ | taille des prompts (≈ 4 car./token), tarif API, cache = même système dans les 5 min | **estimé, non mesuré** |
+| Tokens d'entrée, cache de prompt, coût $ | taille des prompts (≈ 4 car./token), tarif API, cache = même système dans les 5 min ; sur un run payant : `llm_usage` | **estimé, non mesuré** (réflexion non comptée : en prod le 13/11, 1 à 2,5 k tokens visibles sur 8 à 15 k facturés par appel) ; **facturé** sur un run payant |
 | UX | relevés toutes les 2 s : avancement et temps restant affichés | mesuré |
 
 Écarts connus entre providers : codex-cli utilise la sortie structurée quand un schéma est fourni, mais lance un processus local à chaque appel et s'exécute avec l'abonnement Codex. Ses durées et l'estimation de coût du rapport ne sont pas celles du provider Anthropic de production.

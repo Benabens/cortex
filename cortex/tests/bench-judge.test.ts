@@ -134,3 +134,16 @@ test("une panne passagère du fournisseur pendant le jugement est réessayée, l
   assert.equal(failAdjudicate, 0, "la panne a bien eu lieu");
   assert.equal(v.items.length, 3);
 });
+
+test("exercice au long corrigé : l'arbitre le lit jusqu'au bout", async () => {
+  // Banc du 15/11/2026 (cs-202-ecrit) : corrigés de 3 500 à 6 600 caractères coupés à 2 500 pour
+  // l'arbitre, qui notait « corrigé tronqué après 1.3 » et une clé fausse sur un corrigé complet.
+  const { runWithCourse } = await import("../db/client");
+  const { judgeExam } = await import("../lib/bench/judge");
+  const solution = `${"\\subq{1.1}{Première partie} La réponse détaillée. ".repeat(140)}FIN-DU-CORRIGÉ-1.6`;
+  const written = { ...run, exam: { id: 2, kind: "exercises", items: [{ idx: 0, kind: "exercise", topic: "t", stem: "\\subq{1.1}{…}{4} … \\subq{1.6}{…}{4} …", solution }] }, rejected: [] } as unknown as BenchRun;
+  prompts.length = 0;
+  await runWithCourse("ml", () => judgeExam(written));
+  assert.ok(solution.length > 6000);
+  assert.match(prompts.find((p) => /examinateur exigeant/.test(p)) ?? "", /FIN-DU-CORRIGÉ-1\.6/);
+});

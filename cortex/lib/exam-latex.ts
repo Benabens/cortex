@@ -564,6 +564,20 @@ export function repairFrenchMacros(tex: string, line: number): string | null {
   return FRENCH_MACROS.reduce((t, [re, to]) => t.replace(re, to), tex);
 }
 
+const TEXTTT = /\\texttt\{[^{}]*\}/g;
+const BARE_UNDERSCORE = /(?<!\\)_/;
+
+/**
+ * Le document où les « _ » nus de \texttt{…} sont échappés, si la ligne fautive en contient un ;
+ * null sinon. Hors maths, « _ » arrête LaTeX (« Missing $ inserted ») : banc moteur du 15/11/2026
+ * (cs-202-ecrit), \texttt{lseek(fd2, -2, SEEK_CUR)}, cinq exercices livrés sans PDF.
+ */
+export function repairTextttUnderscores(tex: string, line: number): string | null {
+  const codes = (tex.split("\n")[line - 1] ?? "").match(TEXTTT) ?? [];
+  if (!codes.some((c) => BARE_UNDERSCORE.test(c))) return null;
+  return tex.replace(TEXTTT, (c) => c.replace(new RegExp(BARE_UNDERSCORE, "g"), "\\_"));
+}
+
 /** Ligne fautive d'une compilation : « error: x.tex:648: … » (tectonic) ou « l.648 » (journal pdflatex). */
 export function failingLine(text: string): number | null {
   // Les avertissements (« warning: x.tex:85: Underfull… ») précèdent l'erreur : seule la ligne « error: » compte.
@@ -573,7 +587,7 @@ export function failingLine(text: string): number | null {
 
 export async function compileExamPdf(base: string): Promise<string> {
   // Une figure générée qui ne compile pas est retirée (encadré), des macros de babel-french sont
-  // remplacées, puis on recompile (3 fois au plus).
+  // remplacées, les « _ » nus de \texttt échappés, puis on recompile (3 fois au plus).
   for (let attempt = 0; ; attempt++) {
     try {
       return await compileOnce(base);
@@ -581,7 +595,7 @@ export async function compileExamPdf(base: string): Promise<string> {
       const texAbs = path.join(examsDir(), `${base}.tex`);
       const line = failingLine(`${(e as { raw?: string }).raw ?? ""}\n${readLog(base)}`);
       const src = attempt < 3 && line && fs.existsSync(texAbs) ? fs.readFileSync(texAbs, "utf8") : null;
-      const fixed = src && line ? dropFailingFigure(src, line) ?? repairFrenchMacros(src, line) : null;
+      const fixed = src && line ? dropFailingFigure(src, line) ?? repairFrenchMacros(src, line) ?? repairTextttUnderscores(src, line) : null;
       if (!fixed) throw publicCompileError(base, e as Error & { detail?: string }, line);
       fs.writeFileSync(texAbs, fixed);
     }
