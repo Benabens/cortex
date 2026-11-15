@@ -1250,7 +1250,7 @@ const DUP_SCHEMA = {
  * réponses qui affirment le même fait sous un autre libellé de notion (job 25 : Q10/Q15, Q17/Q20,
  * que `keyNotion` seul ne rapprochait pas). Au plus 30.
  */
-export function suspectPairs(items: Pick<QcmItem, "options" | "correct" | "notion" | "focusSlot">[]): [number, number][] {
+export function suspectPairs(items: Pick<QcmItem, "options" | "correct" | "notion" | "focusSlot" | "sourceFact">[]): [number, number][] {
   const heads = items.map((it) => new Set(it.options.map((o) => optionHead(o, it.options)).filter((h): h is string => !!h)));
   const keys = items.map((it) => keyNotion(it));
   const props = items.map((it) => keyProposition(it));
@@ -1303,7 +1303,12 @@ async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previou
       `Voici les QCM d'un même examen. Pour chacun, nomme la notion du cours qu'il teste (notion, le MÊME libellé exact pour deux questions sur la même notion, même formulées autrement ou dans deux langues), l'angle précis (angle), et la règle ou réponse logique exacte qu'il vérifie SANS le décor du scénario (regle, le MÊME libellé exact si deux questions vérifient la même règle sous un décor différent).`,
       criterion,
       `Puis liste les paires en doublon selon ce critère. Compare d'abord les BONNES RÉPONSES : deux questions dont la bonne réponse est la même notion, ou qui se réussissent par le même raisonnement (la même règle, la même distinction posée dans un sens puis dans l'autre), sont des doublons ; partager des distracteurs ne suffit pas. Compare aussi l'énoncé, les options, le fait source et l'explication : recycler le même cas ou le même fait dans une autre option reste un doublon, de même que deux scénarios différents qui vérifient la même règle (regle identique). Deux notions voisines mais distinctes ne sont pas un doublon.`,
-      ...(suspects.length ? [`Paires à trancher en priorité (même notion du programme ou réponses croisées), à lister en doublon si elles testent la même chose : ${suspects.map(([a, b]) => `Q${a}–Q${b}`).join(", ")}.`] : []),
+      // `suspects` couvre aussi la même PROPOSITION de la clé (texte de la bonne option + fait
+      // source, lib/qcm-checks.keyProposition) — finition v5, Q7/Q14 : deux énoncés sans rien en
+      // commun en apparence (un wiki, un forum d'entraide) mais la même clé en substance (« le
+      // succès du modèle bénévole… motivations non financières ») et deux notions différentes.
+      // Le nommer explicitement évite que deux libellés de notion distincts masquent le doublon.
+      ...(suspects.length ? [`Paires à trancher en priorité (même notion du programme, réponses croisées, OU bonne réponse + fait source qui affirment la même chose même sous un énoncé ou une notion différente), à lister en doublon si elles testent la même chose : ${suspects.map(([a, b]) => `Q${a}–Q${b}`).join(", ")}.`] : []),
       ...(previous ? [`Liste aussi, dans "repeats", les QCM qui reprennent une question des EXAMENS PRÉCÉDENTS du cours (P…) : même fait, même règle ou même réponse logique, même si la notion, l'angle ou le décor sont reformulés.`] : []),
       ``,
       list,
@@ -1988,6 +1993,42 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     step(`${count - all.length} QCM manquant(s) → ${pending.length} lot(s) de comblement${swaps.length ? ` (${swaps.length} sujet(s) écarté(s) remplacé(s) par une notion de réserve)` : ""}`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
     await saveLoop(round + 1, 0, []);
   }
+  // Le comblement principal peut consommer toute sa réserve avant que les doublons, impossibles à
+  // connaître à l'échelle de l'examen, soient audités. Leur remplacement a donc son propre budget
+  // borné : au plus deux fois les lots prévus, partagé avec le complément final.
+  let lateBudget = Math.max(3, batches.length * 2);
+  // Une passe de remplacement peut elle-même perdre des items aux contrôles qualité. Il faut alors
+  // recombler même si l'audit suivant ne voit plus de doublon, puis auditer ce nouveau lot. Le budget
+  // reste borné par la taille de l'examen et par la réserve de notions.
+  const finalRoundBudget = Math.max(DEDUP_ROUNDS, Math.ceil(count / BATCH) + 2);
+  let repairAfterDedup = false;
+  /**
+   * Budget TEMPS de TOUT ce qui suit la première vérification à l'aveugle du comblement principal
+   * (QCM_FINAL_PHASE_BUDGET_MS, défaut 10 min), partagé avec le budget d'appels (lateBudget). Job 26
+   * bis (15/11/2026, 20/20 en 50 min, cible ≤ 35 min) : la déclaration vivait plus bas, APRÈS l'audit
+   * de sortie initial et sa réparation groupée des distracteurs — ces deux appels (jusqu'à `count`
+   * questions réparées, puis réauditées) n'étaient bornés par rien. Elle couvre maintenant aussi cet
+   * audit initial, et les étapes de la porte de sortie qui appellent le modèle (revérification à
+   * l'aveugle des questions sans verdict, réécriture des explications) sont désormais gardées par
+   * `finalPhaseExhausted()` elles aussi (plus bas) — seule la détection déterministe (plafonds par
+   * notion, nombre d'options, retrait d'un candidat déjà payé) reste inconditionnelle : elle ne coûte
+   * aucun appel et garantit qu'aucune question non vérifiée ni à clé fausse n'est jamais livrée, budget
+   * épuisé ou non. À épuisement, la meilleure version déjà vérifiée est gardée plutôt qu'une ronde de
+   * plus — le manque éventuel est remboursé au prorata (lib/jobs.ts, refundGeneration).
+   */
+  const finalPhaseDeadline = Date.now() + finalPhaseBudgetMs();
+  // Étape honnête : au-delà, l'avancement reste à 99 % (lib/progress) ; l'étudiant lit ce qui se passe
+  // et combien de temps cela peut encore prendre, au lieu de « moins d'une minute » pendant 40 min.
+  if (!ckFinal) step(`Dernière vérification de l'examen (doublons, clés, distracteurs) : au plus ${Math.ceil(finalPhaseBudgetMs() / 60_000)} min de plus`, 80);
+  let finalPhaseBudgetLogged = false;
+  const finalPhaseExhausted = (): boolean => {
+    const over = lateBudget <= 0 || Date.now() >= finalPhaseDeadline;
+    if (over && !finalPhaseBudgetLogged) {
+      finalPhaseBudgetLogged = true;
+      step(`Dernière vérification : budget de la phase finale atteint, les QCM déjà vérifiés sont gardés tels quels`, 85);
+    }
+    return over;
+  };
   // Audit de sortie unique, calqué sur la rubrique du banc. Il porte sur tout le pool déjà payé :
   // une clé fausse ou du hors-cours sont remplacés par un autre candidat sans nouvelle conception.
   // Ce qui arrive après (remplacements de doublons, complément) est audité à la porte de sortie.
@@ -2004,8 +2045,11 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // l'audit : job 17 (14/11, HUM-285, 20 QCM → 35 min) le refaisait sur tout le pool, déjà
     // audité une première fois juste au-dessus, même quand rien n'avait changé. Un item non
     // réparé garde le verdict déjà rendu : son contenu est identique, le ré-auditer n'apprend rien.
+    // Budget de la phase finale déjà épuisé (reprise tardive, cours très chargé) : la réparation,
+    // optimisation de qualité et non une garantie, cède la place — les items gardent leur version
+    // auditée, jamais fausse ni non vérifiée.
     let confirmed = audited;
-    if (flagged.length) {
+    if (flagged.length && !finalPhaseExhausted()) {
       // Réparation en échec : les QCM gardent leur version auditée (une réponse illisible ici
       // perdait l'examen entier).
       const repaired = await replaceTrivialDistractorsBatch(flagged, step, shared.language).catch((e) => {
@@ -2075,31 +2119,6 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       if (!intra.includes(i)) repeatFallback.set(it.stem, it);
     }
   };
-  // Le comblement principal peut consommer toute sa réserve avant que les doublons, impossibles à
-  // connaître à l'échelle de l'examen, soient audités. Leur remplacement a donc son propre budget
-  // borné : au plus deux fois les lots prévus, partagé avec le complément final.
-  let lateBudget = Math.max(3, batches.length * 2);
-  // Une passe de remplacement peut elle-même perdre des items aux contrôles qualité. Il faut alors
-  // recombler même si l'audit suivant ne voit plus de doublon, puis auditer ce nouveau lot. Le budget
-  // reste borné par la taille de l'examen et par la réserve de notions.
-  const finalRoundBudget = Math.max(DEDUP_ROUNDS, Math.ceil(count / BATCH) + 2);
-  let repairAfterDedup = false;
-  // Budget TEMPS de la phase finale, partagé avec le budget d'appels (lateBudget) : à épuisement de
-  // l'un ou l'autre, la meilleure version déjà vérifiée est gardée plutôt qu'une ronde de plus — le
-  // manque éventuel est remboursé au prorata comme toute place non comblée (lib/jobs.ts, refundGeneration).
-  const finalPhaseDeadline = Date.now() + finalPhaseBudgetMs();
-  // Étape honnête : au-delà, l'avancement reste à 99 % (lib/progress) ; l'étudiant lit ce qui se passe
-  // et combien de temps cela peut encore prendre, au lieu de « moins d'une minute » pendant 40 min.
-  if (!ckFinal) step(`Dernière vérification de l'examen (doublons, clés, distracteurs) : au plus ${Math.ceil(finalPhaseBudgetMs() / 60_000)} min de plus`, 80);
-  let finalPhaseBudgetLogged = false;
-  const finalPhaseExhausted = (): boolean => {
-    const over = lateBudget <= 0 || Date.now() >= finalPhaseDeadline;
-    if (over && !finalPhaseBudgetLogged) {
-      finalPhaseBudgetLogged = true;
-      step(`Dernière vérification : budget de la phase finale atteint, les QCM déjà vérifiés sont gardés tels quels`, 85);
-    }
-    return over;
-  };
   // Un ensemble repris après la porte de sortie (`final`) l'a déjà franchie : ni doublons ni complément à refaire.
   for (let round = 0; !ckFinal && round <= finalRoundBudget && all.length >= 2; round++) {
     const { drop, intra, repeats, notions, angles } = await findDuplicates(all, strict);
@@ -2168,7 +2187,12 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // une clé contestée ou du hors-cours cède sa place à un candidat payé déjà audité, ou part.
     const late = all.filter((it) => !auditedStems.has(it.stem));
     const lateTrivial = new Set<string>();
-    if (late.length) {
+    // Budget de la phase finale épuisé : cet audit supplémentaire (hors-cours, distracteurs
+    // éliminables) cède la place, les questions tardives gardent la vérification à l'aveugle
+    // déjà rendue — jamais de clé fausse, puisque rien d'audité ici ne change ce verdict.
+    if (late.length && finalPhaseExhausted()) {
+      for (const it of late) auditedStems.add(it.stem);
+    } else if (late.length) {
       const passed = new Map((await finalQualityAudit(late, step)).map((it) => [it.stem, it]));
       let out = 0;
       for (const it of late) {
@@ -2230,7 +2254,9 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // indisponible, elle reste, signalée non vérifiée.
     const unverified = all.filter((it) => it.verified !== 1 || !!it.rejected);
     if (unverified.length) {
-      await verifyGrouped(unverified.filter((it) => !it.rejected));
+      // Budget épuisé : jamais d'appel de plus, mais l'invariant reste — une question restée sans
+      // verdict est remplacée par un candidat déjà vérifié, ou retirée ; jamais gardée non vérifiée.
+      if (!finalPhaseExhausted()) await verifyGrouped(unverified.filter((it) => !it.rejected));
       let kept = 0;
       for (const it of unverified) {
         if (it.verified === 1 && !it.rejected) { kept++; continue; }
@@ -2240,7 +2266,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     }
     // 4. Explications : réfutent-elles exactement les options proposées ? Contrôle sans modèle, puis
     // réécriture sur les options réelles ; à défaut, l'explication est réduite à la justification de la clé.
-    const flagged = all.map((it) => ({ it, issue: explanationIssues(it.explanation ?? "", it.options, it.correct, it.stem) })).filter((x) => !!x.issue);
+    // Optimisation de qualité, pas une garantie : elle cède la place au budget de la phase finale.
+    const flagged = finalPhaseExhausted() ? [] : all.map((it) => ({ it, issue: explanationIssues(it.explanation ?? "", it.options, it.correct, it.stem) })).filter((x) => !!x.issue);
     if (flagged.length) {
       const passages = await coursePassages([...new Set(flagged.map((x) => x.it.topic).filter(Boolean))]).catch(() => []);
       const rewritten = await rewriteExplanationsOnOptions(
@@ -2265,6 +2292,13 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // 5. L'étiquette de notion a-t-elle un appui lexical dans ce que la question teste (fait source,
     // bonne réponse, explication) ? Sans appel au modèle : recalée sur le libellé du programme le
     // plus proche (job 25, Q5 : étiquetée hors sujet, les points faibles de l'étudiant en souffrent).
+    // S'applique à CHAQUE question de l'ensemble final, y compris celles arrivées par un
+    // remplacement de doublon ou le complément : cette passe tourne sur `all` dans son état le plus
+    // récent, après chaque appel à `exitGate` (finition v5 : vérifié, rien à changer ici — la
+    // relecture avait d'abord tenté de comparer un SCORE plutôt que `notionMismatch`, pour couvrir
+    // une étiquette qui partage un seul mot générique avec le contenu testé ; ça relabelisait aussi
+    // des questions correctement étiquetées dès qu'une autre notion du programme avait, par hasard,
+    // un mot de plus en commun — régression sur le job 23/examen 9, revenue en arrière).
     // L'accent demandé par l'étudiant garde son étiquette, choisie par lui, pas par le programme.
     const programmeLabels = [...new Set([...cov, ...covAll].map((t) => t.label))];
     let relabeled = 0;
