@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { Worker } from "node:worker_threads";
 
 export type PythonWasmResult = {
@@ -7,6 +10,8 @@ export type PythonWasmResult = {
   stderr: string;
   /** Démarrage du worker et du runtime (pandas compris), hors délai d'exécution. */
   startupMs?: number;
+  /** Attente d'un créneau (CORTEX_PYTHON_WASM_CONCURRENCY), avant tout délai. */
+  queuedMs?: number;
 };
 
 export type PythonWasmOptions = {
@@ -22,6 +27,54 @@ export type PythonWasmOptions = {
 
 export function pythonWasmAvailable(): boolean {
   return process.env.CORTEX_PYTHON_WASM === "1";
+}
+
+/**
+ * Vérifications simultanées, TOUS processus confondus (CORTEX_PYTHON_WASM_CONCURRENCY, défaut 4).
+ * Chaque job est un processus tsx distinct (lib/jobs.ts) : un sémaphore en mémoire ne bornerait
+ * qu'un job, et plusieurs examens en parallèle multiplieraient la charge. Mesuré (banc
+ * scripts/pyodide-load.ts) : un démarrage pandas occupe ~1,5 cœur ; au-delà de 8 en parallèle, les
+ * 8 vCPU du conteneur saturent et l'exécution s'allonge vers le délai de 10 s.
+ */
+export function pythonWasmConcurrency(): number {
+  const n = Number(process.env.CORTEX_PYTHON_WASM_CONCURRENCY);
+  return Number.isInteger(n) && n >= 1 ? n : 4;
+}
+
+const slotsDir = () => process.env.CORTEX_PYTHON_WASM_SLOTS_DIR || path.join(os.tmpdir(), "cortex-python-wasm-slots");
+
+/** Le détenteur d'un créneau est-il mort (job tué, conteneur redémarré sur le même /tmp) ? */
+function slotHolderDead(file: string): boolean {
+  try {
+    const pid = Number(fs.readFileSync(file, "utf8"));
+    // Créneau sans PID : son créateur est mort entre la création et l'écriture, ou l'écrit à l'instant.
+    if (!Number.isInteger(pid) || pid <= 0) return Date.now() - fs.statSync(file).mtimeMs > 5_000;
+    process.kill(pid, 0);
+    return false;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "ESRCH";
+  }
+}
+
+/** Prend un créneau (fichier slot-i créé en exclusif, PID dedans) ; renvoie de quoi le rendre. */
+async function acquireSlot(): Promise<() => void> {
+  const dir = slotsDir();
+  fs.mkdirSync(dir, { recursive: true });
+  for (;;) {
+    for (let i = 0; i < pythonWasmConcurrency(); i++) {
+      const file = path.join(dir, `slot-${i}`);
+      try {
+        fs.writeFileSync(file, String(process.pid), { flag: "wx" });
+        return () => fs.rmSync(file, { force: true });
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+        // Repris au tour suivant. Deux preneurs qui constatent le même mort peuvent, rarement,
+        // dépasser la borne d'un créneau le temps d'une vérification : jamais bloquer.
+        if (slotHolderDead(file)) fs.rmSync(file, { force: true });
+      }
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
 }
 
 const WORKER_SOURCE = String.raw`
@@ -158,12 +211,22 @@ export async function runPythonWasm(source: string, opts: PythonWasmOptions = {}
   const memoryMb = Math.max(64, opts.memoryMb ?? 256);
   const maxOutputBytes = Math.max(1_024, opts.maxOutputBytes ?? 64 * 1_024);
 
+  // Les délais courent une fois le créneau obtenu : attendre son tour n'est pas la faute du programme.
+  const queuedAt = performance.now();
+  const release = await acquireSlot();
+  const queuedMs = Math.round(performance.now() - queuedAt);
   return await new Promise<PythonWasmResult>((resolve) => {
-    const worker = new Worker(WORKER_SOURCE, {
-      eval: true,
-      workerData: { source, stdin: opts.stdin ?? "", args: opts.args ?? [], memoryMb, maxOutputBytes },
-      resourceLimits: { maxOldGenerationSizeMb: memoryMb, maxYoungGenerationSizeMb: Math.min(32, memoryMb / 4), stackSizeMb: 4 },
-    });
+    let worker: Worker;
+    try {
+      worker = new Worker(WORKER_SOURCE, {
+        eval: true,
+        workerData: { source, stdin: opts.stdin ?? "", args: opts.args ?? [], memoryMb, maxOutputBytes },
+        resourceLimits: { maxOldGenerationSizeMb: memoryMb, maxYoungGenerationSizeMb: Math.min(32, memoryMb / 4), stackSizeMb: 4 },
+      });
+    } catch (error) {
+      release();
+      return resolve({ ok: false, reason: "execution-error", stdout: "", stderr: String(error).slice(0, maxOutputBytes) });
+    }
     let settled = false;
     const started = performance.now();
     let startupMs: number | undefined;
@@ -171,8 +234,9 @@ export async function runPythonWasm(source: string, opts: PythonWasmOptions = {}
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      void worker.terminate();
-      resolve({ ...result, startupMs });
+      // Le créneau n'est rendu qu'une fois le thread fini : sa mémoire est alors libérée.
+      void worker.terminate().finally(release);
+      resolve({ ...result, startupMs, queuedMs });
     };
     let timer = setTimeout(() => finish({ ok: false, reason: "startup-timeout", stdout: "", stderr: "" }), startupTimeoutMs);
     worker.on("message", (message: PythonWasmResult | { type: "ready" }) => {
