@@ -84,6 +84,22 @@ export async function register() {
   } catch (e) {
     console.error("[instrumentation] réconciliation des jobs ignorée :", (e as Error)?.message);
   }
+  // ARRÊT GRACIEUX (lib/drain) : un redéploiement laisse finir les jobs en cours au lieu de les
+  // tuer. Seulement quand Next nous laisse les signaux (NEXT_MANUAL_SIG_HANDLE=1, posé par le
+  // Dockerfile) : sans elle, `next start` sort de lui-même au SIGTERM et `next dev` garde son Ctrl-C.
+  if (process.env.NEXT_MANUAL_SIG_HANDLE) {
+    try {
+      const { installGracefulShutdown } = await import("@/lib/drain");
+      const { handOffJobs } = await import("@/lib/jobs");
+      installGracefulShutdown({
+        handOff: async (workers) => { await handOffJobs(workers); },
+        // La pompe périodique s'arrête : un job repris maintenant mourrait avec le conteneur.
+        onDrainStart: () => { if (g.__cortexJobsPump) clearInterval(g.__cortexJobsPump); },
+      });
+    } catch (e) {
+      console.error("[instrumentation] arrêt gracieux non installé :", (e as Error)?.message);
+    }
+  }
   // Sauvegarde quotidienne hors site (BACKUP_S3_*) : marqueur en base, une
   // seule instance par jour même pendant un redéploiement chevauchant.
   // Indépendante de la réconciliation : un échec amont ne la prive pas de démarrer.
