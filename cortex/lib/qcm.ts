@@ -6,7 +6,7 @@ import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseNumbers, absentCourseTerms, corpusWindows, coursePassages, factNumbers, topicsInScope } from "@/lib/course-grounding";
 import { rewriteExplanations, rewriteExplanationsOnOptions, secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
-import { capDrops, describeExplanationIssue, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, optionHead } from "@/lib/qcm-checks";
+import { capDrops, describeExplanationIssue, duplicateAuditDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, optionHead } from "@/lib/qcm-checks";
 import { assignChapters, spreadOverChapters, variants } from "@/lib/coverage";
 import { normalize, tokenize } from "@/lib/text";
 import { courseRefImages } from "@/lib/course-vision";
@@ -1231,11 +1231,9 @@ export function suspectPairs(items: Pick<QcmItem, "options" | "correct" | "notio
 
 /**
  * Doublons d'un examen : les indices des QCM à retirer (le premier de chaque notion reste) et la
- * notion de chaque QCM. `strict` (au moins autant de notions au programme que de questions,
- * examen 4 de HUM-285 : biais de négativité ×3, nudge ×2…) : UNE NOTION = UNE QUESTION, quel que
- * soit l'angle. Sinon (plus de questions que de notions, ou un accent demandé) : plusieurs
- * questions sur une notion sous des angles vraiment distincts ; seul le même angle est un doublon.
- * Le modèle nomme la notion et l'angle de chaque question ; la décision, elle, est faite ici.
+ * notion de chaque QCM. Le plafond strict repose sur la notion planifiée, pas sur le libellé libre
+ * du modèle. Celui-ci rapproche les questions qui testent le même fait ou la même règle, y compris
+ * sous deux décors différents.
  */
 async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previous?: string[] }): Promise<{ drop: number[]; repeats: number[]; notions: string[]; angles: string[]; regles: string[] }> {
   // Le seul énoncé ne suffit pas à repérer deux questions qui exploitent le même fait : au job 16
@@ -1256,9 +1254,7 @@ async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previou
   // Banc du 04/11 (CS-290) : 2 questions sur 15 reprenaient un examen précédent du cours ; le concepteur
   // les voit, mais seul ce contrôle peut les retirer.
   const previous = (opts.previous ?? []).slice(0, 60).map((stem, i) => `P${i}. ${sanitizeCorpus(stem).slice(0, 220)}`).join("\n");
-  const criterion = opts.strict
-    ? `Le programme a au moins autant de notions que l'examen a de questions : UNE NOTION = UNE QUESTION. Deux questions sur la même notion (le biais de négativité, le nudge, la souveraineté des données…) sont des doublons même sous deux angles différents.`
-    : `L'examen a plus de questions que le programme n'a de notions : deux questions sur une même notion sont permises si elles testent des angles VRAIMENT distincts (un autre fait, une autre condition, une autre étude) ; sont des doublons celles qui testent le même fait, la même condition, le même scénario ou le même raisonnement, même si l'une transforme la réponse de l'autre en distracteur ou reformule la question. Un décor différent (livraison de repas, e-commerce…) habillant la MÊME règle, avec la même réponse logique, reste un doublon : seul le FOND compte, jamais l'habillage.`;
+  const criterion = `${opts.strict ? "Le programme a assez de sujets distincts : UNE NOTION = UNE QUESTION planifiée ; ce plafond est appliqué séparément." : "L'examen peut poser plusieurs questions sur une notion sous des angles distincts."} Deux questions rattachées par toi à une même notion-parapluie sont permises si leurs sujets planifiés et leurs règles sont distincts. Sont des doublons celles qui testent le même fait, la même condition, le même scénario ou le même raisonnement, même si l'une transforme la réponse de l'autre en distracteur ou reformule la question. Un décor différent habillant la MÊME règle, avec la même réponse logique, reste un doublon : seul le FOND compte, jamais l'habillage.`;
   const r = await completeJson<{ notions?: { index: number; notion: string; angle: string; regle?: string }[]; duplicates: { first: number; second: number }[]; repeats?: { index: number; previous: number }[] }>({
     prompt: [
       `Voici les QCM d'un même examen. Pour chacun, nomme la notion du cours qu'il teste (notion, le MÊME libellé exact pour deux questions sur la même notion, même formulées autrement ou dans deux langues), l'angle précis (angle), et la règle ou réponse logique exacte qu'il vérifie SANS le décor du scénario (regle, le MÊME libellé exact si deux questions vérifient la même règle sous un décor différent).`,
@@ -1292,36 +1288,7 @@ async function duplicateItems(items: QcmItem[], opts: { strict: boolean; previou
     drop.add(rp.index);
     repeats.add(rp.index);
   }
-  // Les questions de l'accent demandé par l'étudiant portent volontairement sur un même thème :
-  // elles ne sont pas des doublons ENTRE ELLES (une autre question sur ce thème, si).
-  const focusPair = (a: number, b: number) => !!items[a]?.focusSlot && !!items[b]?.focusSlot;
-  // Par libellé : la première question d'une notion (ou d'une notion et d'un angle) reste.
-  const first = new Map<string, number>();
-  items.forEach((_, i) => {
-    // Sans notion, ou (hors mode strict) sans angle : pas de décision par libellé, seules les paires comptent.
-    if (!notions[i] || (!opts.strict && !angles[i])) return;
-    const key = opts.strict ? normalize(notions[i]) : `${normalize(notions[i])}\u0000${normalize(angles[i])}`;
-    const holder = first.get(key);
-    if (holder === undefined) first.set(key, i);
-    else if (!focusPair(holder, i)) drop.add(i);
-  });
-  // Même règle logique sous un décor différent (livraison de repas / e-commerce…) : un doublon
-  // même si l'angle (le décor) diffère — seul le mode strict ignore déjà l'angle.
-  if (!opts.strict) {
-    const firstByRule = new Map<string, number>();
-    items.forEach((_, i) => {
-      if (!notions[i] || !regles[i]) return;
-      const key = `${normalize(notions[i])}\u0000${normalize(regles[i])}`;
-      const holder = firstByRule.get(key);
-      if (holder === undefined) firstByRule.set(key, i);
-      else if (!focusPair(holder, i)) drop.add(i);
-    });
-  }
-  // Les paires que le modèle signale en plus (sans libellé, ou libellés différents) : la seconde part.
-  for (const d of r.duplicates) {
-    const later = Math.max(d.first, d.second);
-    if (Number.isInteger(later) && later >= 0 && later < items.length && d.first !== d.second && !focusPair(d.first, d.second)) drop.add(later);
-  }
+  for (const i of duplicateAuditDrops(items, { notions, angles, regles, duplicates: r.duplicates }, opts.strict)) drop.add(i);
   return { drop: [...drop].sort((a, b) => a - b), repeats: [...repeats].sort((a, b) => a - b), notions, angles, regles };
 }
 
@@ -1769,7 +1736,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const notions = r?.notions ?? items.map(() => "");
     const llmDrop = new Set(r?.drop ?? []);
     const rest = items.map((_, i) => i).filter((i) => !llmDrop.has(i));
-    const capped = capDrops(rest.map((i) => items[i]), caps, (it, k) => [it.notion, notions[rest[k]]]).map((k) => rest[k]);
+    const capped = capDrops(rest.map((i) => items[i]), caps, (it) => [it.notion]).map((k) => rest[k]);
     if (!r) step(`Doublons : contrôle du modèle indisponible, plafonds par notion appliqués seuls (${capped.length} retrait(s))`, 80);
     else if (capped.length) step(`Doublons : ${capped.length} question(s) au-delà du plafond par notion (${caps.perNotion} par notion du programme, 1 par notion de bonne réponse)`, 80);
     return {

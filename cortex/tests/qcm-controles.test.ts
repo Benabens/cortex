@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { capDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, refutedItems } from "../lib/qcm-checks";
+import { capDrops, duplicateAuditDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, refutedItems } from "../lib/qcm-checks";
 
 type Item = { n: number; topic: string; verified: 0 | 1 | null; stem: string; options: string[]; correct: number[]; explanation: string };
 const EXAM9: Item[] = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "qcm-job23-examen9.json"), "utf8")).items;
@@ -104,4 +104,20 @@ test("plafonds : deux libellés d'une même question ne rapprochent pas les autr
   const items = [it("A", "nudge"), it("B", "biais"), it("C", "souveraineté"), it("D", "nudge"), it("B", "souveraineté"), it("E", "biais")];
   assert.deepEqual(capDrops(items, { perNotion: 2, perKey: 1 }, (x) => [x.notion, x.llm]), []);
   assert.deepEqual(capDrops([...items, it("F", "biais")], { perNotion: 2, perKey: 1 }, (x) => [x.notion, x.llm]), [6]);
+});
+
+test("doublons : une notion-parapluie du modèle ne retire pas trois notions planifiées distinctes", () => {
+  const items = [
+    { notion: "Principe alpha", focusSlot: false },
+    { notion: "Méthode bêta", focusSlot: false },
+    { notion: "Condition gamma", focusSlot: false },
+  ];
+  const audit = {
+    notions: ["Cadre fictif", "Cadre fictif", "Cadre fictif"],
+    angles: ["condition alpha", "condition bêta", "condition gamma"],
+    regles: ["règle alpha", "règle bêta", "règle gamma"],
+    duplicates: [] as { first: number; second: number }[],
+  };
+  assert.deepEqual(duplicateAuditDrops(items, audit, true), []);
+  assert.deepEqual(duplicateAuditDrops(items, { ...audit, duplicates: [{ first: 0, second: 2 }] }, true), [2], "une paire explicitement reconnue reste retirée");
 });
