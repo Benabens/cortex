@@ -116,6 +116,13 @@ export function truncatedError(maxTokens: number | undefined, usage?: LlmUsage):
 /** Budget de sortie par défaut des providers API. */
 export const DEFAULT_MAX_TOKENS = 16_000;
 
+/**
+ * Sortie d'un appel qui réfléchit longuement : à l'effort par défaut, la réflexion de Sonnet 5
+ * coupait la réponse à DEFAULT_MAX_TOKENS (prod du 13 au 15/11 : 19,7 % de la dépense des QCM
+ * de HUM-285 facturés sur des appels coupés ; 10 lots d'examen sur 11, job 2).
+ */
+export const LONG_OUTPUT_MAX_TOKENS = 32_000;
+
 export interface LlmProvider {
   readonly name: string;
   /** Le provider peut-il servir un appel maintenant ? (binaire présent / clé posée / URL posée) */
