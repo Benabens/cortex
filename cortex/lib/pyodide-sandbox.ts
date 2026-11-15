@@ -245,7 +245,13 @@ export async function runPythonWasm(source: string, opts: PythonWasmOptions = {}
 
   // Les délais courent une fois le créneau obtenu : attendre son tour n'est pas la faute du programme.
   const queuedAt = performance.now();
-  const release = await acquireSlot();
+  let release: () => void;
+  try {
+    release = await acquireSlot();
+  } catch (error) {
+    // /tmp en lecture seule ou plein : l'exécution est indisponible, le code n'y est pour rien.
+    return { ok: false, reason: "disabled", stdout: "", stderr: `créneaux indisponibles : ${String(error)}`.slice(0, maxOutputBytes) };
+  }
   const queuedMs = Math.round(performance.now() - queuedAt);
   return await new Promise<PythonWasmResult>((resolve) => {
     let worker: Worker;
