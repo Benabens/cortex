@@ -534,9 +534,9 @@ Ce que Sentry signale en plus des plantages (étiquette `area`) :
   libre, envois et générations sont refusés à tout le monde. Une alerte par
   heure au plus. Le quota d'un seul compte n'alerte pas.
 
-À poser aussi côté Stripe (Workbench → Webhooks → l'endpoint → alertes
-e-mail) : Stripe prévient lui-même quand un endpoint échoue de façon répétée,
-même si Cortex ne répond plus du tout.
+Complément côté Stripe : Stripe envoie lui-même un e-mail au compte quand un
+endpoint de webhook échoue de façon répétée, même si Cortex ne répond plus du
+tout. Vérifier que cette adresse est lue (Paramètres → Communications).
 
 À savoir avant de compter sur Sentry pour le rappel de reconduction : ses
 échecs (`renewal_reminder.missed`, `.not_sent`, `.disabled`) sont des lignes de
