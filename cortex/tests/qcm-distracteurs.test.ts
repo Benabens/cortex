@@ -51,6 +51,9 @@ let repairCalls = 0;
 let repairPrompts: string[] = [];
 /** Ce que le remplacement simulé propose : par défaut un distracteur de qualité. */
 let replacement = NEW_DISTRACTOR;
+const REPAIR_EXPLANATION = "La bonne réponse reprend le cours ; les autres changent une condition ou l'attribution.";
+/** L'explication réécrite par le remplacement simulé. */
+let repairExplanation = REPAIR_EXPLANATION;
 
 function verifyReply(prompt: string): string {
   const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
@@ -72,7 +75,7 @@ function verifyReply(prompt: string): string {
 function repairReply(prompt: string): string {
   const out = [...prompt.matchAll(/^Q(\d+)\..*?$([\s\S]*?)(?=^Q\d+\.|$(?![\s\S]))/gm)].map((m) => {
     const flagged = [...m[2].matchAll(/^\s+\((\d+)\) .* ← À REMPLACER/gm)].map((x) => Number(x[1]));
-    return { index: Number(m[1]), distractors: flagged.map((k) => ({ option: k, text: replacement, misconception: "[mauvaise condition] x" })), explanation: "La bonne réponse reprend le cours ; les autres changent une condition ou l'attribution." };
+    return { index: Number(m[1]), distractors: flagged.map((k) => ({ option: k, text: replacement, misconception: "[mauvaise condition] x" })), explanation: repairExplanation };
   });
   return JSON.stringify({ replacements: out });
 }
@@ -111,7 +114,7 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { designCalls = 0; designPrompts = []; repairCalls = 0; repairPrompts = []; replacement = NEW_DISTRACTOR; third = ABSURD; scalarKey = false; contestKey = false; nameOnly = false; });
+beforeEach(() => { designCalls = 0; designPrompts = []; repairCalls = 0; repairPrompts = []; replacement = NEW_DISTRACTOR; repairExplanation = REPAIR_EXPLANATION; third = ABSURD; scalarKey = false; contestKey = false; nameOnly = false; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -169,6 +172,15 @@ test("seul défaut = un distracteur trivial : l'option est remplacée, l'énonc�
   }
   assert.match(repairPrompts[0], /← À REMPLACER/);
   assert.doesNotMatch(repairPrompts[0], /"items"|"results"/, "le prompt de remplacement ne porte pas les marqueurs des autres appels");
+});
+
+test("l'explication réécrite réfute encore l'option remplacée : cette phrase est retirée, la justification de la clé reste", async () => {
+  // Boucle moteur, itération 4 (15/11) : « L'exploitation de vulnérabilités zero-day… » réfutait une
+  // option remplacée, et la revérification à effort moyen ne le relevait plus.
+  repairExplanation = `${REPAIR_EXPLANATION} Une option absurde que tout étudiant élimine ne relève pas du cours.`;
+  const { r, steps, items } = await exam(await course(), 4);
+  assert.equal(r.count, 4, steps.join("\n"));
+  for (const it of items) assert.equal(it.explanation, REPAIR_EXPLANATION);
 });
 
 test("le remplaçant reste trivial à la revérification : deux réparations groupées au plus, aucune question reconçue", async () => {
