@@ -364,3 +364,23 @@ export async function corpusWindows(queries: string[], opts: { perQuery?: number
   }
   return out;
 }
+
+/** Corpus pédagogique filtré pour un contrôle déterministe de citation, sans appel au modèle. */
+export async function courseEvidenceCorpus(): Promise<string> {
+  let rows: { sid: number; type: string; text: string | null }[] = [];
+  try {
+    rows = await q.all(`SELECT s.id sid, s.type, i.text FROM items i JOIN sources s ON s.id = i.source_id`);
+  } catch { return ""; }
+  const excluded = await excludedSourceIds();
+  const parts: string[] = [];
+  let total = 0;
+  for (const row of rows) {
+    if (NOT_COURSE_FACTS.has(row.type) || row.type === "exam_info" || excluded.has(Number(row.sid))) continue;
+    const text = courseMatter(row.text ?? "").replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    total += text.length;
+    if (total > MAX_CORPUS_CHARS) return "";
+    parts.push(text);
+  }
+  return parts.join("\n");
+}

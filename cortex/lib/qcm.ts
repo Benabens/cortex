@@ -4,7 +4,7 @@ import { HARD_STOP_CODES, LlmError, completeJson, llmErrorCode, llmFailureReason
 import { DEFAULT_ANSWER_MODE, courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFormat, type AnswerMode } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
-import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseNumbers, absentCourseTerms, corpusWindows, coursePassages, factNumbers, topicsInScope } from "@/lib/course-grounding";
+import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseNumbers, absentCourseTerms, corpusWindows, courseEvidenceCorpus, coursePassages, factNumbers, topicsInScope } from "@/lib/course-grounding";
 import { rewriteExplanations, rewriteExplanationsOnOptions, secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
 import { absentOptionCitations, auditConsensus, capDrops, describeExplanationIssue, duplicateAuditDrops, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, notionBase, notionCap, optionHead, ultimateAuditActions } from "@/lib/qcm-checks";
 import { assignChapters, spreadOverChapters, variants } from "@/lib/coverage";
@@ -946,6 +946,19 @@ function sourceFactSupported(sourceFact: string, passages: string): boolean {
   return overlap >= 4 && overlap / wanted.length >= 0.5;
 }
 
+/** Une clé possède une preuve précise si la citation déclarée, ou à défaut son texte, est dans le support. */
+function keyProofSupported(q: QcmItem, passages: string): boolean {
+  const keys = (q.correct ?? []).map((k) => q.options[k] ?? "").filter(Boolean);
+  const related = (fact: string) => {
+    const factTerms = new Set(tokenize(normalize(fact), 4).filter((t) => !PROOF_STOP_WORDS.has(t)));
+    const keyTerms = new Set(tokenize(normalize(keys.join(" ")), 4).filter((t) => !PROOF_STOP_WORDS.has(t)));
+    return [...factTerms].filter((t) => keyTerms.has(t)).length >= 2;
+  };
+  const declared = !!q.sourceFact?.trim() && related(q.sourceFact) && sourceFactSupported(q.sourceFact, passages);
+  const direct = !q.sourceFact?.trim() && keys.length > 0 && keys.every((key) => sourceFactSupported(key, passages));
+  return declared || direct;
+}
+
 const VERIFY_SCHEMA = {
   type: "object",
   properties: {
@@ -1014,9 +1027,16 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   // Autour du fait que teste chaque question, en fenêtres larges (banc HUM-285 du 02/11 : deux
   // extraits de 700 caractères par sujet, et 22 à 27 questions justes rejetées « hors cours »).
   const passages = await verifierPassages(candidates).catch(() => []);
-  const courseEvidence = passages.map((p) => p.text).join("\n");
+  // La preuve ne dépend pas du classement plein texte des extraits du correcteur : une recherche
+  // par racines parcourt aussi le corpus entier, sans appel au modèle.
+  const proofPassages = await corpusWindows(candidates.flatMap((q) => [
+    q.sourceFact ?? "",
+    ...(q.correct ?? []).map((k) => q.options[k] ?? ""),
+  ]).filter(Boolean), { perQuery: 2, cap: 1800, budget: Math.min(60_000, Math.max(12_000, candidates.length * 4_000)) }).catch(() => []);
+  const fullEvidence = await courseEvidenceCorpus().catch(() => "");
+  const courseEvidence = [fullEvidence, ...passages.map((p) => p.text), ...proofPassages.map((p) => p.text)].filter(Boolean).join("\n");
   for (const q of candidates) {
-    if (!sourceFactSupported(q.sourceFact ?? "", courseEvidence)) {
+    if (!keyProofSupported(q, courseEvidence)) {
       reject(q, "preuve précise du cours manquante pour la clé", "recopie un passage précis du support qui suffit à établir la bonne réponse");
     }
   }

@@ -24,7 +24,7 @@ process.env.LLM_MODEL_OPUS = "claude-sonnet-5";
 process.env.LLM_MAX_RETRIES = "0";
 process.env.MAX_COURSES_CREATED_PER_HOUR = "unlimited";
 
-type Raw = { topic: string; type: string; stem: string; options: string[]; correct: number[]; misconceptions: string[]; explanation: string };
+type Raw = { topic: string; type: string; stem: string; options: string[]; correct: number[]; misconceptions: string[]; explanation: string; source_fact: string };
 
 /** Une question sur les nudges ; `keys` = indices des bonnes options (marquées « (clé) » pour le faux juge). */
 function item(n: number, keys = [0], explanation?: string): Raw {
@@ -42,6 +42,7 @@ function item(n: number, keys = [0], explanation?: string): Raw {
     correct: keys,
     misconceptions: options.map((_, i) => (keys.includes(i) ? "" : "[quasi-synonyme] confond nudge et contrainte")),
     explanation: explanation ?? "Un nudge préserve la liberté de choix : il ne supprime aucune option et n'en change pas le coût, contrairement à une interdiction ou une taxe.",
+    source_fact: "Nudges numériques : un nudge est une incitation indirecte qui oriente un choix sans interdire aucune option ni en changer le coût (Thaler et Sunstein).",
   };
 }
 

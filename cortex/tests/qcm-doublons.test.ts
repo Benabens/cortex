@@ -43,7 +43,7 @@ function item(stem: string) {
     "Une affirmation qui change une condition du cours.",
     "Une affirmation attribuée à la mauvaise étude du cours.",
   ];
-  return { topic: "HUM-285", type: "scq", stem, options, correct: [0], misconceptions: ["", "[inversion] x", "[mauvaise condition] x", "[mauvaise attribution] x"], explanation: "La bonne réponse reprend le cours ; les autres l'inversent ou le déforment." };
+  return { topic: "HUM-285", type: "scq", stem: `${stem} [affirmation juste]`, options, correct: [0], misconceptions: ["", "[inversion] x", "[mauvaise condition] x", "[mauvaise attribution] x"], explanation: "La bonne réponse reprend le cours ; les autres l'inversent ou le déforment.", source_fact: "Une affirmation juste est tirée du cours fictif." };
 }
 
 /** Lots initiaux : la question n de l'examen porte la notion de l'examen 4 ; les lots suivants, des notions neuves. */
@@ -132,7 +132,7 @@ async function course(notions: number, supports = 1): Promise<string> {
   await runWithCourse(row.id, async () => {
     ensureFts();
     for (const t of ["sources", "items", "topics"]) await q.ensureTable(t);
-    const text = "Concepts fictifs alpha, bêta, gamma et delta.";
+    const text = "Concepts fictifs alpha, bêta, gamma et delta. Une affirmation juste est tirée du cours fictif.";
     for (let k = 1; k <= supports; k++) {
       const title = supports === 1 ? "Séances 1 à 6" : `Support ${k}`;
       const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "course_pdf", title, `course_pdf/s${k}`, null, 1);
@@ -302,7 +302,7 @@ test("banc du 04/11 (CS-290) : une question qui reprend celle d'un examen préc�
 });
 
 test("modèle qui répète toujours la même notion : budget borné, aucun doublon connu réinjecté", async () => {
-  const id = await course(4, 0);
+  const id = await course(4, 1);
   design = (n, call) => Array.from({ length: n }, (_, i) => item(`Question ${call}.${i} [notion:unique] [angle:${call}.${i}] : que dit le cours ?`));
   const { r, stems, steps } = await exam(id, 4);
   assert.equal(r.count, 1, steps.filter((s) => /doublon|remplacement/.test(s)).join("\n"));

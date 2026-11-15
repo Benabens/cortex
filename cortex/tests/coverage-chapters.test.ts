@@ -99,6 +99,7 @@ before(async () => {
           topic: "t", type: "scq", stem: `Question ${prompts.length}.${i} ?`,
           options: ["Une proposition complète de longueur moyenne.", "Une autre proposition de longueur moyenne.", "Une troisième proposition de longueur moyenne.", "Une quatrième proposition de longueur moyenne."],
           correct: [0], misconceptions: ["", "a", "b", "c"], explanation: "Parce que le cours le dit.",
+          source_fact: "Une proposition complète de longueur moyenne est établie par le support.",
         })) });
       }
       res.setHeader("content-type", "application/json");
@@ -133,7 +134,7 @@ test("programme à 5 chapitres, notions de Fairness 1 en tête : 7 questions tou
     ensureFts();
     for (const t of ["sources", "items", "topics"]) await q.ensureTable(t);
     for (const [title, labels] of Object.entries(CHAPTERS)) {
-      const text = `${title}. ${labels.map((l) => `${l}: the course explains ${l.toLowerCase()} in detail.`).join(" ")}`;
+      const text = `${title}. Une proposition complète de longueur moyenne est établie par le support. ${labels.map((l) => `${l}: the course explains ${l.toLowerCase()} in detail.`).join(" ")}`;
       const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "note", title, `note/${title}`, null, 1);
       const iid = await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "note", title, text);
       await indexItemForSearch(iid, sid, title, text);
@@ -220,7 +221,7 @@ test("A — le sous-thème choisi atteint le générateur : la méthode n'est pl
     const five = ["Introduction", "Safety 1", "Safety 2", "Fairness 2"];
     for (const [label, chapter, weight, method] of RS_SHAPE.filter(([, c]) => five.includes(c)).concat(RS_SHAPE.filter(([, c]) => c === F1).slice(0, 3))) {
       const title = `${chapter} - notes`;
-      const text = `${title}. ${label}: ${method ?? label}. The course explains ${label.toLowerCase()}.`;
+      const text = `${title}. Une proposition complète de longueur moyenne est établie par le support. ${label}: ${method ?? label}. The course explains ${label.toLowerCase()}.`;
       const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "note", `${title} ${label}`.slice(0, 80), `note/${label}`, null, 1);
       await q.run(`UPDATE sources SET title = ? WHERE id = ?`, title, sid);
       const iid = await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "note", title, text);

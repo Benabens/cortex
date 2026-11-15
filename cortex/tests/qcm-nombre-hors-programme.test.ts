@@ -28,6 +28,7 @@ Object.assign(process.env, ENV);
 const COURSE_TEXT = "Cours 4 : la souveraineté numérique désigne la capacité d'un État à maîtriser ses données ; df.groupby calcule une moyenne par groupe. Le nudge modifie l'architecture du choix sans interdire d'option. Le biais de statu quo pousse à garder l'option par défaut.";
 const ARCHIVE_TEXT = "Hors programme 2026 (Durand 2025) : le RGPD et la LPD encadrent le traitement des données personnelles ; rapports CNUCED sur l'économie numérique.";
 const POSTERS_TEXT = "Thèmes des posters 2024 : 1. surveillance algorithmique ; 2. économie de l'attention ; 3. cybersécurité des hôpitaux.";
+let proofFact = COURSE_TEXT;
 
 /** Sujets d'un prompt de conception : lignes « 1) sujet [méthode] ». */
 const subjects = (p: string) => [...p.matchAll(/^ {2}(\d+)\) (.+?)(?: \[|$)/gm)].map((m) => m[2].trim());
@@ -36,9 +37,9 @@ function item(topic: string, k: string) {
   return {
     topic,
     type: "scq",
-    stem: `Que dit le cours sur ${topic} ? (${k})`,
+    stem: `Que dit le cours sur ${topic} et ${proofFact.split(/[.:;]/, 1)[0]} ? (${k})`,
     options: [
-      "La moyenne des revenus calculée séparément pour chaque modalité de sex.",
+      proofFact,
       "La moyenne des revenus calculée sur toutes les lignes, sans regroupement.",
       "Le nombre de lignes de chaque modalité de sex, sans calcul de moyenne.",
       "La somme des revenus calculée séparément pour chaque modalité de sex.",
@@ -46,6 +47,7 @@ function item(topic: string, k: string) {
     correct: [0],
     misconceptions: ["", "[sur-généralisation] ignore le regroupement", "[notion voisine] confond mean et count", "[notion voisine] confond mean et sum"],
     explanation: "groupby regroupe par modalité, puis mean calcule la moyenne de chaque groupe.",
+    source_fact: proofFact,
   };
 }
 
@@ -63,7 +65,7 @@ function verifyReply(prompt: string): string {
   const blocks = prompt.split(/^(?=Q\d+\.)/m).filter((b) => /^Q\d+\./.test(b));
   const results = blocks.map((b) => {
     const i = Number(/^Q(\d+)\./.exec(b)![1]);
-    const opt = [...b.matchAll(/^\s+\((\d+)\) (.*)$/gm)].find((m) => /moyenne des revenus calculée séparément/.test(m[2]));
+    const opt = [...b.matchAll(/^\s+\((\d+)\) (.*)$/gm)].find((m) => m[2].includes(proofFact.slice(0, 80)));
     const offMatter = cursed && b.includes(cursed) ? "porte sur l'organisation du cours" : "";
     return { index: i, correct: [opt ? Number(opt[1]) : 0], ok: true, discrimination: 4, name_only: false, issue: "", course_terms: courseTerms, off_course: "", off_matter: offMatter, trivial_distractors: [], definition_mismatch: "" };
   });
@@ -100,7 +102,7 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { courseTerms = ["groupby"]; allPrompts.length = 0; designPrompts.length = 0; designCalls = 0; cursed = ""; dedupeCalls = 0; dedupe = () => []; });
+beforeEach(() => { proofFact = COURSE_TEXT; courseTerms = ["groupby"]; allPrompts.length = 0; designPrompts.length = 0; designCalls = 0; cursed = ""; dedupeCalls = 0; dedupe = () => []; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -307,6 +309,7 @@ test("job 14 rejoué : 20 QCM sur 20, sujets = notions du cours, rien des archiv
   // Le juge écarte toute question sur un fichier, un poster ou les enseignants (comme en prod : hors matière).
   cursed = ".md";
   courseTerms = [];
+  proofFact = MARTIN_TEXT;
   const r = await runWithCourse(id, () => generateQcmExam({ count: 20, openCount: 0 }));
   assert.equal(r.count, 20, `count=${r.count}`);
   const asked = designPrompts.flatMap(subjects);

@@ -176,17 +176,21 @@ test("le correcteur voit le passage où se trouve le fait testé, même loin des
   assert.match(verifyPrompts[0], /affirmation fausse/, "un distracteur faux par construction n'est pas « hors cours »");
 });
 
-test("une question sans passage précis prouvant sa clé est rejetée et remplacée", async () => {
+test("une question dont aucun passage précis ne prouve la clé est rejetée et remplacée", async () => {
   const id = await course();
   design = (n, call) => Array.from({ length: n }, (_, i) => {
     const it = svensonItem(call * 10 + i);
-    if (call === 1 && i === 0) delete it.source_fact;
+    if (call === 1 && i === 0) {
+      delete it.source_fact;
+      it.options[0] = "Un résultat fictif sans rapport avec le support établit cette réponse.";
+      it.explanation = "La bonne réponse découle d'un résultat qui n'apparaît pas dans le support.";
+    }
     return it;
   });
   const { r, steps, view } = await exam(id, 2);
   assert.equal(r.count, 2, steps.join("\n"));
   assert.ok(designCalls > 1, "la question sans preuve déclenche un remplacement");
-  assert.ok(view.items.every((it) => !/\(s10\)/.test(it.stem)), "la question sans preuve n'est jamais livrée");
+  assert.ok(view.items.every((it) => !/r[ée]sultat fictif/.test(it.options.join(" "))), "la question sans preuve n'est jamais livrée");
   assert.ok(steps.some((s) => /preuve précise du cours manquante/.test(s)), steps.join("\n"));
 });
 
