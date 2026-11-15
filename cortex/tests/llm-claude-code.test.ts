@@ -106,3 +106,41 @@ test("provider claude-code : abort → LlmError code ABORTED", async () => {
   setTimeout(() => ctl.abort(), 100);
   await assert.rejects(p, (e: unknown) => e instanceof LlmError && e.code === "ABORTED");
 });
+
+test("provider claude-code en mode banc (CORTEX_CLAUDE_CODE_LEAN=1) : harnais minimal, système à part, effort, usage cache compris", async () => {
+  // Banc du 15/11 : sans ce mode, `claude -p` ajoute ≈ 87 k tokens d'entrée par appel (prompt de
+  // Claude Code, CLAUDE.md, MCP), soit 0,28 $ au tarif API pour un « OK » : le coût mesuré ne disait
+  // plus rien du moteur. Le système du moteur passe à part (mis en cache comme en prod), l'effort
+  // du site aussi (défaut de l'API : high).
+  installFakeBin(
+    [
+      `: > "${argsFile}"`,
+      `for a in "$@"; do printf '%s\\036' "$a" >> "${argsFile}"; done`,
+      `printf '%s' '{"result":"ok","usage":{"input_tokens":5,"cache_creation_input_tokens":1200,"cache_read_input_tokens":3000,"output_tokens":900}}'`,
+    ].join("\n")
+  );
+  process.env.CORTEX_CLAUDE_CODE_LEAN = "1";
+  try {
+    const res = await claudeCodeProvider.complete({ system: "Contexte du cours", prompt: "Question", model: "opus", effort: "medium", addDirs: ["/tmp/dirA"] });
+    assert.deepEqual(res.usage, { inputTokens: 5, outputTokens: 900, cacheReadTokens: 3000, cacheWriteTokens: 1200 });
+    const argv = fs.readFileSync(argsFile, "utf8").split("\u001e").filter(Boolean);
+    assert.deepEqual(argv, [
+      "-p", "Question",
+      "--output-format", "json",
+      "--allowedTools", "Read",
+      "--model", "opus",
+      "--tools", "Read",
+      "--safe-mode", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
+      "--system-prompt", "Contexte du cours",
+      "--effort", "medium",
+      "--add-dir", "/tmp/dirA",
+    ]);
+
+    await claudeCodeProvider.complete({ prompt: "Question" });
+    const bare = fs.readFileSync(argsFile, "utf8").split("\u001e").filter(Boolean);
+    assert.equal(bare[bare.indexOf("--effort") + 1], "high", "effort absent : défaut de l'API");
+    assert.ok(bare[bare.indexOf("--system-prompt") + 1].length > 0, "système absent : un système minimal remplace celui de Claude Code");
+  } finally {
+    delete process.env.CORTEX_CLAUDE_CODE_LEAN;
+  }
+});

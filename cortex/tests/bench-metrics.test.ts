@@ -140,6 +140,27 @@ test("performance d'un run sur l'API : tokens et coût MESURÉS par llm_usage, �
   assert.equal(p.estimated, false);
 });
 
+test("performance d'un run sur claude-code : tokens MESURÉS (réflexion comprise), harnais retiré, cache simulé comme en prod", () => {
+  // Boucle moteur du 15/11 : claude-code rapporte les tokens réels ; son propre cache (1 h, entre
+  // runs) ne dit rien de la prod, donc le cache reste simulé sur 5 min par empreinte du système.
+  // Le harnais de `claude -p` en mode banc (≈ 2 400 tokens par appel) n'existe pas en prod.
+  const at = Date.parse("2026-11-04T10:00:00.000Z");
+  const base = { site: "generateQcmBatch", model: "opus", promptChars: 8000, systemChars: 4000, outputChars: 4000, ms: 30_000, systemHash: "s1", provider: "claude-code" };
+  const calls = [
+    { ...base, at, usage: { inputTokens: 10, cacheWriteTokens: 5390, cacheReadTokens: 0, outputTokens: 6000 } },
+    { ...base, at: at + 60_000, usage: { inputTokens: 10, cacheWriteTokens: 0, cacheReadTokens: 5390, outputTokens: 6000 } },
+    // Appel en échec (délai dépassé) : pas de compteur, estimé depuis la taille du prompt.
+    { site: "verifyQcmBatch", model: "opus", promptChars: 4000, systemChars: 0, outputChars: 2000, ms: 10_000, at: at + 120_000, provider: "claude-code", error: "TIMEOUT : délai" },
+  ];
+  const p = measureRun(run({ calls })).perf;
+  // Entrée du moteur : 5 400 − 2 400 = 3 000 par appel mesuré, dont 1 000 de système (même part que
+  // les caractères) ; troisième appel : 1 000 estimés. Sortie : 6 000 + 6 000 + 500.
+  assert.deepEqual([p.tokensIn, p.tokensOut, p.cacheReadTokens, p.measuredCalls], [7000, 12_500, 1000, 2]);
+  // 5 000 non cachés × 3 + 1 000 écrits × 3,75 + 1 000 lus × 0,3 + 12 500 en sortie × 15 (par million).
+  assert.equal(Math.round(p.costUsd * 1e6), 15_000 + 3750 + 300 + 187_500);
+  assert.equal(p.estimated, true, "rien n'est facturé : le coût reste un équivalent API");
+});
+
 test("UX : avancement monotone sauf réessai annoncé ; erreur médiane du temps restant", () => {
   const log = [{ t: "2026-11-04T10:03:00.000Z", msg: "2 QCM manquant(s) → 1 lot(s) de comblement" }];
   const job = { id: 1, status: "done", error: null, log, createdAt: "2026-11-04 10:00:00", updatedAt: "2026-11-04 10:10:00", resultId: 7 };
