@@ -247,11 +247,15 @@ const JCC_STYLE = [
   `  - Écrire une VRAIE fonction avec contrat d'erreur (retour -1/0, NULL checks, tailles) ET gestion mémoire (malloc/strdup/free, never leak).`,
 ];
 
-/** Style guide pertinent pour une catégorie d'exercice. */
+/**
+ * Style guide d'une catégorie d'exercice de cs-202. Aucun par défaut : une autre catégorie
+ * (« General », « Graphs », « Argumentation »…) n'hérite pas du phrasé d'une enseignante de CS-202.
+ */
 export function styleFor(category?: string): string[] {
   const c = (category ?? "").toLowerCase();
   if (c === "c" || c === "labs") return JCC_STYLE;
-  return KATERINA_STYLE; // Networking / OS / défaut
+  if (c === "networking" || c === "os") return KATERINA_STYLE;
+  return [];
 }
 
 // ───────────────────────── ACCÈS + BLOCS DE PROMPT ─────────────────────────

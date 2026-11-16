@@ -38,6 +38,13 @@ export type CourseProfile = {
   regenLead(category: string | undefined, concept: string, points: number | undefined, diagnostic: string, refImage: string | null): string[];
   /** Intro courte pour drilling / vérification / correction (« Tu es … »). */
   qaIntro(): string;
+  /** Niveau visé par un drill (« d'un vrai final EPFL » pour cs-202, les annales du cours sinon). */
+  drillLevel(): string;
+  /**
+   * Guide de style d'enseignant, seulement si le cours en DÉCLARE un (cs-202) : sans lui, style
+   * neutre, celui des annales du cours.
+   */
+  styleGuide?(category?: string): string[];
 };
 
 // Import paresseux des profils pour éviter tout cycle au chargement.
