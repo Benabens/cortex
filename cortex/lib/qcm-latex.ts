@@ -2,7 +2,8 @@ import { currentCourse } from "@/db/client";
 import { getCourse } from "@/lib/courses";
 import type { ExamQuestion } from "@/lib/exam";
 import { compileExamPdf, copyExamLogo, qrText, texEscape } from "@/lib/exam-latex";
-import { courseTemplate, courseWords, localDate, neutralChrome, neutralCoverTex, neutralDuration, pointsText, solutionColor } from "@/lib/exam-template";
+import { formatContextFor } from "@/lib/exam-format";
+import { courseTemplate, courseWords, coverWords, durationText, epflExamKind, epflLocalChrome, epflWords, localDate, neutralChrome, neutralCoverTex, neutralDuration, pointsText, solutionColor, type CoverWords } from "@/lib/exam-template";
 import { assertTexSafe } from "@/lib/tex-guard";
 import { getFormatProfile } from "@/lib/format";
 import { resolveExamFormat } from "@/lib/exam-format";
@@ -61,18 +62,29 @@ export function footDate(dateLabel: string): string {
   return `${months[+m[2] - 1]} ${+m[3]}, ${m[1]}`;
 }
 
-/** En-tête de la page de garde : logo, enseignant, cours, date et durée (si connue), anonymisation, nom et SCIPER. */
-export function coverHeader(dateLabel: string, durationMin: number | null): string[] {
+/** Date du pied de l'EPFL : le format historique en anglais, sinon celui de la langue de l'examen. */
+function epflDate(dateLabel: string): string {
+  const w = epflWords();
+  return w ? localDate(dateLabel, w) : footDate(dateLabel);
+}
+
+/**
+ * En-tête de la page de garde : logo, enseignant, cours, date et durée (si connue), anonymisation, nom et SCIPER.
+ * Hors anglais, libellés dans la langue de l'examen (`w`, cf. epflWords).
+ */
+export function coverHeader(dateLabel: string, durationMin: number | null, w: CoverWords | null = epflWords()): string[] {
   const c = getCourse(currentCourse());
   const code = texEscape(c.examCode).replace(/-/g, "--");
   const lecturer = c.profs[0] ?? "";
   return [
     String.raw`\thispagestyle{empty}`,
     String.raw`\noindent\begin{minipage}[t]{0.62\textwidth}\vspace{0pt}\epfllogo[26]\par\smallskip\footnotesize`,
-    lecturer ? `Lecturer: ${texEscape(lecturer)}\\\\` : "",
+    lecturer ? `${w?.lecturer ?? "Lecturer:"} ${texEscape(lecturer)}\\\\` : "",
     `\\textbf{${code}: ${texEscape(c.examName)}}\\\\`,
-    durationMin ? `${footDate(dateLabel)}\\quad Duration: ${durationMin} minutes` : footDate(dateLabel),
-    String.raw`\end{minipage}\hfill\begin{minipage}[t]{0.32\textwidth}\vspace{0pt}\raggedleft\footnotesize Anonymisation:\\ \textbf{\#0000}\end{minipage}`,
+    w
+      ? (durationMin ? `${localDate(dateLabel, w)}\\quad ${w.durationLabel} ${durationText(durationMin, w)}` : localDate(dateLabel, w))
+      : (durationMin ? `${footDate(dateLabel)}\\quad Duration: ${durationMin} minutes` : footDate(dateLabel)),
+    String.raw`\end{minipage}\hfill\begin{minipage}[t]{0.32\textwidth}\vspace{0pt}\raggedleft\footnotesize ${w?.anonymisation ?? "Anonymisation:"}\\ \textbf{\#0000}\end{minipage}`,
     String.raw`\vspace{6pt}\noindent\rule{\textwidth}{1pt}`,
     String.raw`\vspace{6pt}\noindent{\Large\textbf{Student One}}\hfill SCIPER: \textbf{111111}`,
   ];
@@ -89,6 +101,21 @@ async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts
       instructions: [w.contains(parts, totalPts), ...(nQcm ? [`${w.qcmConvention} ${w.tick}`] : []), w.onSheet],
     });
   }
+  // EPFL hors anglais : même garde, consignes dans la langue de l'examen.
+  const w = epflWords();
+  if (w) {
+    const parts = [nQcm ? w.qcmCount(nQcm) : "", nOpen ? w.openCount(nOpen) : ""].filter(Boolean).join(` ${w.and} `);
+    return [
+      ...coverHeader(dateLabel, durationMin, w),
+      String.raw`\vspace{0.4cm}\par\noindent{\large\textbf{${w.instructions}}}\par\smallskip\small`,
+      String.raw`\begin{enumerate}\setlength{\itemsep}{3pt}`,
+      String.raw`\item ${w.contains(parts, totalPts)}${durationMin ? ` ${w.duration(durationText(durationMin, w))}` : ""}`,
+      nQcm ? String.raw`\item ${w.qcmConvention} ${w.tick}` : "",
+      documentsItem(),
+      String.raw`\item ${w.onSheet}`,
+      String.raw`\end{enumerate}\vspace{0.3cm}`,
+    ].filter(Boolean).join("\n");
+  }
   const fmt = await getFormatProfile();
   const convention = fmt?.scq_vs_mcq_convention
     ? esc(fmt.scq_vs_mcq_convention)
@@ -102,10 +129,20 @@ async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts
       return `\\item This exam has ${parts.join(" and ")}, for a total of \\textbf{${totalPts} points}.${durationMin ? ` You have ${durationMin} minutes.` : ""}`;
     })(),
     nQcm ? `\\item ${convention} Tick the box(es) \\fbox{$\\checkmark$} you believe are correct.` : "",
-    String.raw`\item A one-page two-sided cheat sheet is allowed. No electronic device is permitted.`,
+    documentsItem(),
     String.raw`\item Answer directly on this exam sheet, in the space provided.`,
     String.raw`\end{enumerate}\vspace{0.3cm}`,
   ].filter(Boolean).join("\n");
+}
+
+/**
+ * Règle de documents de la garde : seulement celle que le cours déclare, dans la langue de
+ * l'examen ; rien sinon. Avant le 16/11/2026, chaque QCM de l'EPFL affirmait « A one-page
+ * two-sided cheat sheet is allowed. No electronic device is permitted. », règle inventée.
+ */
+export function documentsItem(): string {
+  const f = formatContextFor(currentCourse());
+  return f.documents ? String.raw`\item ${coverWords(f.language).documents[f.documents]}` : "";
 }
 
 /** Libellés d'un QCM : le texte historique de l'EPFL (byte-identique) ou ceux du gabarit neutre. */
@@ -127,8 +164,8 @@ type QcmLabels = {
 const EPFL_LABELS: QcmLabels = {
   question: (n) => `Question ${n}.`,
   tag: (type, points) => `${type === "mcq" ? "MCQ" : "SCQ"}, ${points} pt${points > 1 ? "s" : ""}`,
-  misconception: "idée fausse : ",
-  solution: "Solution :",
+  misconception: "misconception: ",
+  solution: "Solution:",
   openQuestion: (n) => `Open question ${n}`,
   points: (n) => `${n} points`,
   openSolution: "Solution.",
@@ -139,8 +176,10 @@ const EPFL_LABELS: QcmLabels = {
 };
 
 function qcmLabels(): QcmLabels {
-  if (courseTemplate() === "epfl") return EPFL_LABELS;
-  const w = courseWords();
+  const epfl = courseTemplate() === "epfl";
+  const w = epfl ? epflWords() : courseWords();
+  // EPFL en anglais : le texte historique ; hors anglais, ses mots, sur la mise en page de l'EPFL.
+  if (!w) return EPFL_LABELS;
   return {
     question: (n) => `${w.question} ${n}.`,
     tag: (type, points) => `${type === "mcq" ? w.multiple : w.single}, ${pointsText(points, w)}`,
@@ -149,10 +188,10 @@ function qcmLabels(): QcmLabels {
     openQuestion: (n) => `${w.openQuestion} ${n}`,
     points: (n) => pointsText(n, w),
     openSolution: `${w.solution}.`,
-    color: solutionColor("neutral"),
+    color: solutionColor(epfl ? "epfl" : "neutral"),
     qcmPart: (withOpen) => (withOpen ? `${w.part} 1 \\quad-- ${w.qcmPart}` : w.qcmPart),
     openPart: (withQcm) => (withQcm ? `${w.part} 2 \\quad-- ${w.openPart}` : w.openPart),
-    pageBeforeFirstOpen: false,
+    pageBeforeFirstOpen: epfl,
   };
 }
 
@@ -242,12 +281,13 @@ export function examDocument(body: string[], dateLabel: string): string {
   const footOverride = [
     String.raw`\fancyhead[L]{}`,
     `\\fancyhead[R]{\\qrcode[height=1.25cm]{${qrText(c.examCode)}-FINAL-EXAM}}`,
-    `\\fancyfoot[C]{\\small\\textbf{${code}, ${texEscape(c.examKind)}}${profsTex ? `\\\\[-2pt]\\small ${profsTex}` : ""}}`,
+    `\\fancyfoot[C]{\\small\\textbf{${code}, ${texEscape(epflExamKind(c))}}${profsTex ? `\\\\[-2pt]\\small ${profsTex}` : ""}}`,
+    ...epflLocalChrome(false),
   ].join("\n");
   return [
     preamble,
     footOverride,
-    String.raw`\newcommand{\FOOTDATE}{${footDate(dateLabel)}}`,
+    String.raw`\newcommand{\FOOTDATE}{${epflDate(dateLabel)}}`,
     String.raw`\begin{document}`,
     ...body,
     String.raw`\end{document}`,

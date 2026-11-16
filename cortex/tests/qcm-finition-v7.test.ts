@@ -159,10 +159,11 @@ test("corrigé PDF : notes « idée fausse » entières sous chaque option, aucu
   const tex = fs.readFileSync(path.join(dir, "qcm-7171-corrige.tex"), "utf8");
   assert.doesNotMatch(tex, /\\hfill\{\\footnotesize\\itshape/, "plus de note poussée à droite de l'option");
   const text = pdfText(path.join(dir, "qcm-7171-corrige.pdf"));
-  for (const m of misconceptions.filter(Boolean)) assert.ok(text.includes(`idée fausse : ${m}`), `note entière, d'un seul tenant : ${m}\n---\n${text}`);
+  // Cours en français : libellé du gabarit dans la langue de l'examen (« idée fausse -- », un tiret demi-cadratin en PDF).
+  for (const m of misconceptions.filter(Boolean)) assert.ok(text.includes(`idée fausse – ${m}`), `note entière, d'un seul tenant : ${m}\n---\n${text}`);
   // Chaque note suit son option, jamais l'inverse ni un mélange de deux options.
-  assert.ok(text.indexOf("Retirer les sodas de la vente.") < text.indexOf("idée fausse : [inversion]"));
-  assert.ok(text.indexOf("idée fausse : [inversion]") < text.indexOf("C. Taxer les sodas"));
+  assert.ok(text.indexOf("Retirer les sodas de la vente.") < text.indexOf("idée fausse – [inversion]"));
+  assert.ok(text.indexOf("idée fausse – [inversion]") < text.indexOf("C. Taxer les sodas"));
   assert.doesNotMatch(text, /\b0 minutes\b/);
   assert.doesNotMatch(pdfText(path.join(dir, "qcm-7171.pdf")), /idée fausse/i, "l'énoncé ne montre aucune note");
 });

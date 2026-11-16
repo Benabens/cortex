@@ -49,7 +49,7 @@ export type CourseConfig = {
   faculty: string;
   /** Enseignant·es. */
   profs: string[];
-  /** Langue de la matière (code ISO court). */
+  /** Langue de la matière (code ISO court) ; "" = pas encore détectée (cours créé sans langue). */
   language: string;
   /** Profil curaté (lib/profiles/…) ou null → profil générique dérivé de l'ADN. */
   profileId: string | null;
@@ -142,7 +142,8 @@ export function rowToConfig(r: CourseRow): CourseConfig {
     universityLines: parseList(r.university_lines, r.university ? [r.university] : []),
     faculty: r.faculty ?? "",
     profs: parseList(r.teachers, []),
-    language: r.language || "fr",
+    // "" = à détecter (cours créé sans langue, cf. lib/exam-format) ; absente (cours historique) = français.
+    language: r.language ?? "fr",
     profileId: r.profile_id ?? null,
     durationMin: r.duration_min ?? 180,
     examFormat: parseExamFormat(r.exam_format),

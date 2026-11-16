@@ -2,6 +2,8 @@ import { currentCourse } from "@/db/client";
 import { completeJson, extractJson } from "@/lib/llm";
 import { getCourse } from "@/lib/courses";
 import { coursePassages } from "@/lib/course-grounding";
+import { courseLanguage } from "@/lib/exam-format";
+import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
 
 export type CheckResult = {
@@ -30,22 +32,55 @@ function isLegacyResult(value: unknown): value is LegacyCheckResult {
     && typeof result.correct_solution === "string";
 }
 
-function fallbackResult(result: LegacyCheckResult): CheckResult {
+/** Barème de compatibilité, dans la langue de l'examen (repli : anglais). */
+const FALLBACK_WORDS: Record<string, { approach: string; approachYes: string; approachNo: string; answer: string; answerYes: string; answerNo: string }> = {
+  fr: {
+    approach: "La démarche répond au problème posé", approachYes: "La démarche utile est présente dans la réponse.", approachNo: "La démarche essentielle manque ou ne permet pas de conclure.",
+    answer: "La réponse est juste et complète", answerYes: "Le résultat et sa justification sont complets.", answerNo: "Le résultat ou sa justification reste incomplet ou incorrect.",
+  },
+  en: {
+    approach: "The approach addresses the problem", approachYes: "The answer contains the relevant approach.", approachNo: "The essential approach is missing or does not lead to a conclusion.",
+    answer: "The answer is correct and complete", answerYes: "The result and its justification are complete.", answerNo: "The result or its justification is incomplete or incorrect.",
+  },
+  de: {
+    approach: "Der Lösungsweg geht auf die Aufgabe ein", approachYes: "Die Antwort enthält den passenden Lösungsweg.", approachNo: "Der wesentliche Lösungsweg fehlt oder führt zu keinem Ergebnis.",
+    answer: "Die Antwort ist richtig und vollständig", answerYes: "Ergebnis und Begründung sind vollständig.", answerNo: "Ergebnis oder Begründung sind unvollständig oder falsch.",
+  },
+  it: {
+    approach: "Il procedimento risponde al problema posto", approachYes: "La risposta contiene il procedimento utile.", approachNo: "Il procedimento essenziale manca o non permette di concludere.",
+    answer: "La risposta è corretta e completa", answerYes: "Il risultato e la sua giustificazione sono completi.", answerNo: "Il risultato o la sua giustificazione sono incompleti o errati.",
+  },
+  es: {
+    approach: "El planteamiento responde al problema", approachYes: "La respuesta contiene el planteamiento adecuado.", approachNo: "Falta el planteamiento esencial o no permite concluir.",
+    answer: "La respuesta es correcta y completa", answerYes: "El resultado y su justificación están completos.", answerNo: "El resultado o su justificación están incompletos o son incorrectos.",
+  },
+  pt: {
+    approach: "A resolução responde ao problema", approachYes: "A resposta contém a resolução adequada.", approachNo: "Falta a resolução essencial ou não permite concluir.",
+    answer: "A resposta está correta e completa", answerYes: "O resultado e a sua justificação estão completos.", answerNo: "O resultado ou a sua justificação estão incompletos ou incorretos.",
+  },
+  nl: {
+    approach: "De aanpak beantwoordt het gestelde probleem", approachYes: "Het antwoord bevat de juiste aanpak.", approachNo: "De essentiële aanpak ontbreekt of leidt niet tot een conclusie.",
+    answer: "Het antwoord is juist en volledig", answerYes: "Het resultaat en de motivering zijn volledig.", answerNo: "Het resultaat of de motivering is onvolledig of onjuist.",
+  },
+};
+
+function fallbackResult(result: LegacyCheckResult, language: string): CheckResult {
   const achieved = result.verdict === "correct" ? 2 : result.verdict === "partial" ? 1 : 0;
+  const w = FALLBACK_WORDS[language] ?? FALLBACK_WORDS.en;
   const criteria: CheckCriterion[] = [
     {
-      label: "La démarche répond au problème posé",
+      label: w.approach,
       points: 1,
       achieved: achieved >= 1,
       essential: true,
-      justification: achieved >= 1 ? "La démarche utile est présente dans la réponse." : "La démarche essentielle manque ou ne permet pas de conclure.",
+      justification: achieved >= 1 ? w.approachYes : w.approachNo,
     },
     {
-      label: "La réponse est juste et complète",
+      label: w.answer,
       points: 1,
       achieved: achieved === 2,
       essential: false,
-      justification: achieved === 2 ? "Le résultat et sa justification sont complets." : "Le résultat ou sa justification reste incomplet ou incorrect.",
+      justification: achieved === 2 ? w.answerYes : w.answerNo,
     },
   ];
   return { ...result, criteria, score: { earned: achieved, total: 2 } };
@@ -78,24 +113,28 @@ const CHECK_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-/** Parse et valide la sortie du correcteur ; l'ancien contrat reçoit un barème de compatibilité. */
-export function parseCheckResult(text: string): CheckResult {
-  return checkResultFrom(extractJson<unknown>(text));
+/**
+ * Parse et valide la sortie du correcteur ; l'ancien contrat reçoit un barème de compatibilité,
+ * dans la langue de l'examen (`language`, code ISO court).
+ */
+export function parseCheckResult(text: string, language = "fr"): CheckResult {
+  return checkResultFrom(extractJson<unknown>(text), language);
 }
 
-function checkResultFrom(parsed: unknown): CheckResult {
+function checkResultFrom(parsed: unknown, language: string): CheckResult {
+  const fallback = (r: LegacyCheckResult) => fallbackResult(r, language);
   if (!isLegacyResult(parsed)) throw new Error("Réponse de correction invalide.");
   const candidate = parsed as LegacyCheckResult & { criteria?: unknown };
-  if (!Array.isArray(candidate.criteria) || candidate.criteria.length < 2 || candidate.criteria.length > 5) return fallbackResult(parsed);
+  if (!Array.isArray(candidate.criteria) || candidate.criteria.length < 2 || candidate.criteria.length > 5) return fallback(parsed);
   const criteria: CheckCriterion[] = [];
   for (const raw of candidate.criteria) {
-    if (!raw || typeof raw !== "object") return fallbackResult(parsed);
+    if (!raw || typeof raw !== "object") return fallback(parsed);
     const criterion = raw as Record<string, unknown>;
     if (typeof criterion.label !== "string" || !criterion.label.trim()
       || !Number.isInteger(criterion.points) || Number(criterion.points) <= 0
       || typeof criterion.achieved !== "boolean"
       || typeof criterion.essential !== "boolean"
-      || typeof criterion.justification !== "string" || !criterion.justification.trim()) return fallbackResult(parsed);
+      || typeof criterion.justification !== "string" || !criterion.justification.trim()) return fallback(parsed);
     criteria.push({
       label: criterion.label.trim(),
       points: Number(criterion.points),
@@ -111,7 +150,7 @@ function checkResultFrom(parsed: unknown): CheckResult {
     : parsed.verdict === "partial"
       ? earned > 0 && earned < total && criteria.filter((criterion) => criterion.essential).every((criterion) => criterion.achieved)
       : earned === 0 || criteria.some((criterion) => criterion.essential && !criterion.achieved);
-  return coherent ? { ...parsed, criteria, score: { earned, total } } : fallbackResult(parsed);
+  return coherent ? { ...parsed, criteria, score: { earned, total } } : fallback(parsed);
 }
 
 /**
@@ -140,10 +179,13 @@ function withRubric(parsed: unknown, rubric: { label: string; points: number }[]
  */
 export async function checkSolution(input: { statement: string; answer?: string; imageRel?: string | null; rubric?: { label: string; points: number }[]; reference?: string }): Promise<CheckResult> {
   const c = getCourse(currentCourse());
+  // Langue de l'examen : celle de la correction quand la réponse ne permet pas d'en juger.
+  const language = await courseLanguage();
   // Définitions DU COURS : la correction en dépend (une réponse conforme au cours est juste).
   const passages = await coursePassages([input.statement.slice(0, 300)], 3, 900).catch(() => []);
+  const matiere = [c.examCode, c.examName].filter(Boolean).join(" ") + (c.university.trim() ? ` (${c.university.trim()})` : "");
   const lines = [
-    `Tu es un correcteur rigoureux de ${c.examCode} ${c.examName} (${c.university}).`,
+    `Tu es un correcteur rigoureux de ${matiere}.`,
     `VOICI LA QUESTION D'EXAMEN :`,
     input.statement,
     ``,
@@ -166,8 +208,9 @@ export async function checkSolution(input: { statement: string; answer?: string;
     `   - "correct" : juste et complet.`,
     `   - "partial" : une partie des points est obtenue et tous les critères essentiels sont atteints.`,
     `   - "wrong" : aucun point ou au moins un critère essentiel manque.`,
-    `4) feedback : explication CIBLÉE et actionnable de l'erreur (OÙ et POURQUOI ça coince, ce qu'il faut revoir), en français. Pas de blabla.`,
+    `4) feedback : explication CIBLÉE et actionnable de l'erreur (OÙ et POURQUOI ça coince, ce qu'il faut revoir). Pas de blabla.`,
     `5) correct_solution : la bonne solution, concise mais complète.`,
+    `LANGUE : feedback, correct_solution et le texte des critères (label, justification) sont écrits dans la langue de la réponse de l'étudiant, sinon en ${languageName(language)[1]} (la langue de l'examen) si la réponse ne permet pas d'en juger (formules seules, image illisible).`,
     `Juge avec les DÉFINITIONS DU COURS${passages.length ? " (extraits ci-dessous)" : ""}, jamais avec celles d'une autre source : une réponse conforme au cours est juste, même si une autre source la formule autrement.`,
     ...(passages.length ? [DATA_RULE, dataBlock(`EXTRAITS DU COURS — les définitions qui font foi`, passages)] : []),
     `Réponds UNIQUEMENT avec un objet JSON {"verdict","feedback","correct_solution","criteria":[{"label","points","achieved","essential","justification"}]}. Aucune prose autour, aucune balise markdown.`
@@ -182,5 +225,5 @@ export async function checkSolution(input: { statement: string; answer?: string;
           : null,
     },
   );
-  return rubric ? withRubric(parsed, rubric) : checkResultFrom(parsed);
+  return rubric ? withRubric(parsed, rubric) : checkResultFrom(parsed, language);
 }
