@@ -23,7 +23,7 @@ function tar(entries: Record<string, string>): Buffer {
     header.write(`${data.length.toString(8).padStart(11, "0")}\0`, 124);
     header.write("00000000000\0", 136);
     header.write("        ", 148);
-    header.write("0", 156);
+    header.write(name === "pax_header" ? "x" : "0", 156);
     header.write("ustar\u000000", 257);
     const sum = [...header].reduce((a, b) => a + b, 0);
     header.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148);
@@ -75,4 +75,12 @@ test("anciens formats Office et autres : refusés avec la consigne de ré-enregi
   assert.equal(r.accepted.length, 0);
   for (const x of r.rejected) assert.equal(x.reason, LEGACY_REFUSAL, x.name);
   assert.match(LEGACY_REFUSAL, /docx.*pdf/i);
+});
+
+test("sauvegarde Moodle : les entrées tar de métadonnées comptent dans les bornes (taille totale, nom long)", async () => {
+  const big = "x".repeat(4096);
+  const archive = zlib.gzipSync(tar({ "files.xml": "<files/>", "pax_header": big }));
+  const r = await prepareCourseImport([asFile(archive, "bombe.mbz")], { maxTotalBytes: 2048 });
+  assert.equal(r.accepted.length, 0);
+  assert.match(r.rejected[0]?.reason ?? "", /taille décompressée totale/);
 });

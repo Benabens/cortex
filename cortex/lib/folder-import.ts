@@ -302,13 +302,15 @@ async function extractTarGz(file: File, limits: ZipImportLimits, budget: Extract
       if (!Number.isFinite(size) || size < 0) { fatal = "archive illisible : en-tête tar invalide"; break; }
       const kind = String.fromCharCode(h[156] || 48);
       const regular = kind === "0" || kind === "7";
+      // Toute entrée compte dans les bornes, métadonnées tar comprises (nom long L, en-têtes pax x/g).
+      budget.entries++;
+      budget.total += size;
+      if (budget.entries > limits.maxEntries) fatal = `archive refusée : trop de fichiers (${limits.maxEntries} maximum)`;
+      if (budget.total > limits.maxTotalBytes) fatal = `archive refusée : taille décompressée totale supérieure à ${Math.round(limits.maxTotalBytes / MiB)} Mo`;
+      if (file.size > 0 && budget.total / file.size > limits.maxRatio) fatal = `archive refusée : ratio de décompression supérieur à ${limits.maxRatio}`;
+      if (kind === "L" && size > 4096) fatal = "archive illisible : nom de fichier tar trop long";
       let keep = kind === "L";
       if (regular) {
-        budget.entries++;
-        budget.total += size;
-        if (budget.entries > limits.maxEntries) fatal = `archive refusée : trop de fichiers (${limits.maxEntries} maximum)`;
-        if (budget.total > limits.maxTotalBytes) fatal = `archive refusée : taille décompressée totale supérieure à ${Math.round(limits.maxTotalBytes / MiB)} Mo`;
-        if (file.size > 0 && budget.total / file.size > limits.maxRatio) fatal = `archive refusée : ratio de décompression supérieur à ${limits.maxRatio}`;
         const wanted = name === "files.xml" || name.startsWith("files/");
         if (wanted && size > limits.maxEntryBytes) rejected.push({ name: `${root}/${name}`, reason: `${limits.maxEntryBytes} octets maximum par fichier extrait` });
         keep = wanted && size <= limits.maxEntryBytes;
