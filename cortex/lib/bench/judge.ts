@@ -69,7 +69,7 @@ async function passagesFor(text: string, max = 3): Promise<Passage[]> {
   return out;
 }
 
-function renderItem(it: BenchItem, withKey: boolean): string {
+export function renderItemForJudge(it: BenchItem, withKey: boolean): string {
   const head = `Q${it.idx} [${it.kind}] ${sanitizeCorpus(it.stem)}`;
   if (it.options) {
     const opts = it.options.map((o, k) => `   (${k}) ${sanitizeCorpus(o)}`).join("\n");
@@ -83,8 +83,10 @@ function renderItem(it: BenchItem, withKey: boolean): string {
     }).join("\n");
     return `${head}\n${parts}`;
   }
-  return withKey ? `${head}\n   CORRIGÉ : ${sanitizeCorpus(it.solution ?? "").slice(0, 2500)}` : head;
+  return withKey ? `${head}\n   CORRIGÉ : ${sanitizeCorpus(it.solution ?? "").slice(0, 12_000)}` : head;
 }
+
+const renderItem = renderItemForJudge;
 
 const SOLVER_SCHEMA = { type: "object", properties: { answers: { type: "array", items: { type: "object", properties: { q: { type: "integer" }, chosen: { type: "array", items: { type: "integer" } } }, required: ["q", "chosen"] } } }, required: ["answers"] } as const;
 
