@@ -200,9 +200,11 @@ const LOGIN = /(?<!\p{L})(connexion|se connecter|sign[ -]?in|log[ -]?in|anmelden
  */
 function htmlPageProblem(html: string): string | null {
   const $ = cheerio.load(html);
+  const password = $("input[type=password]").length > 0;
   $("script, style, noscript, nav, header, footer").remove();
   const text = $("body").text().replace(/\s+/g, " ").trim();
-  if (text.length < 1500 && LOGIN.test(`${$("title").text()} ${text}`)) {
+  // Un champ mot de passe, ou presque rien d'autre que « Connexion » : « une connexion TCP » n'en est pas une.
+  if (password || (text.length < 200 && LOGIN.test(`${$("title").text()} ${text}`))) {
     return "Cette page demande une connexion : le document n’est pas public. Partage-le en accès public (« tous ceux qui ont le lien »), ou dépose le fichier directement.";
   }
   if (text.length < 200) return "Cette page n’a presque pas de texte (visionneuse ou page vide ?) : donne le lien du document lui-même, ou dépose le fichier directement.";
