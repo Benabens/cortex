@@ -11,7 +11,7 @@ import { planMockExam, requestedFormat, resolveExamFormat, type ExamKind } from 
 /** `produced` / `requested` : questions livrées sur questions demandées, quand le générateur les compte. */
 export type MockExamResult = { id: number; url: string; texError?: string; produced?: number; requested?: number };
 
-export async function generateMockExam(opts: { count?: number; focus?: string; kind?: ExamKind | null; onStep?: StepCb; jobId?: number; onExamReady?: (examId: number) => void | Promise<void>; phaseMs?: Record<string, number> } = {}): Promise<MockExamResult> {
+export async function generateMockExam(opts: { count?: number; focus?: string; kind?: ExamKind | null; onStep?: StepCb; jobId?: number; onExamReady?: (examId: number, order?: { requested: number }) => void | Promise<void>; phaseMs?: Record<string, number> } = {}): Promise<MockExamResult> {
   const step = opts.onStep ?? (() => {});
   // Un format demandé pour cet examen (cible du job) l'emporte sur celui du cours, sauf annales.
   const format = requestedFormat(await resolveExamFormat(), opts.kind);
