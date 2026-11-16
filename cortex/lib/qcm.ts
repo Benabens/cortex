@@ -84,6 +84,12 @@ export type QcmItem = {
   /** Fait testable du cours (lib/qcm-facts) que la question teste : jamais deux questions d'un examen sur le même. Persisté. */
   factId?: string | null;
   /**
+   * Notion du programme dont relève ce que la question teste (sa bonne réponse), nommée par la
+   * revue finale (appel déjà fait), non persistée : recale l'étiquette d'une question dont le fait
+   * a été rangé sous une autre notion à l'extraction (examen #16, Q8).
+   */
+  programmeNotion?: string | null;
+  /**
    * Justification structurée (lib/qcm-rationale) : la clé, et une raison par option, rangée comme
    * `misconceptions`. Présente, `explanation` en est l'assemblage (syncExplanation), jamais un
    * paragraphe libre. Absente (QCM_STRUCTURED_EXPLANATIONS=0, réponse sans justification) :
@@ -1373,8 +1379,9 @@ const DUP_SCHEMA = {
           notion: { type: "string", description: "La notion du cours que la question teste, nommée comme le cours ; EXACTEMENT le même libellé pour deux questions sur la même notion." },
           angle: { type: "string", description: "Le fait, la condition, l'étude ou le calcul précis qu'elle teste ; le même libellé pour deux questions au même angle." },
           regle: { type: "string", description: "La règle ou la réponse logique exacte que la question vérifie, SANS le décor du scénario (ex. « option par défaut gardée = nudge, supprimée = pas un nudge ») ; EXACTEMENT le même libellé pour deux questions qui vérifient la même règle, même sous un décor différent." },
+          programme: { type: "integer", description: "Le numéro (N…) de la notion du programme dont relève ce que la question teste (sa bonne réponse), pas son décor ; 0 si aucune ne convient ou sans liste." },
         },
-        required: ["index", "notion", "angle", "regle"],
+        required: ["index", "notion", "angle", "regle", "programme"],
         additionalProperties: false,
       },
     },
@@ -1432,8 +1439,8 @@ export function suspectPairs(items: Pick<QcmItem, "options" | "correct" | "notio
 }
 
 /** Doublons d'un examen : les QCM à retirer (`intra` : doublons dans l'examen), les reprises d'un examen précédent, et la notion, l'angle et la règle de chacun. */
-type DupResult = { drop: number[]; intra: number[]; repeats: number[]; notions: string[]; angles: string[]; regles: string[] };
-type DupAnswer = { notions?: { index: number; notion: string; angle: string; regle?: string }[]; duplicates: { first: number; second: number }[]; repeats?: { index: number; previous: number }[] };
+type DupResult = { drop: number[]; intra: number[]; repeats: number[]; notions: string[]; angles: string[]; regles: string[]; programme: (string | null)[] };
+type DupAnswer = { notions?: { index: number; notion: string; angle: string; regle?: string; programme?: number }[]; duplicates: { first: number; second: number }[]; repeats?: { index: number; previous: number }[] };
 
 /**
  * Consignes du contrôle des doublons. `strict` (au moins autant de notions au programme que de
@@ -1445,7 +1452,7 @@ type DupAnswer = { notions?: { index: number; notion: string; angle: string; reg
  * disponibilité » sont passées, le contrôle ne sachant pas quelle option était la bonne : il voit
  * la RÉPONSE LOGIQUE, et les paires suspectes repérées sans modèle lui sont soumises nommément.
  */
-function duplicateRules(items: QcmItem[], opts: { strict: boolean; previous?: string[] }): string[] {
+function duplicateRules(items: QcmItem[], opts: { strict: boolean; previous?: string[]; programme?: string[] }): string[] {
   const suspects = suspectPairs(items, opts.strict);
   const criterion = opts.strict
     ? `Le programme a au moins autant de notions que l'examen a de questions : UNE NOTION = UNE QUESTION. Deux questions sur la même notion (le biais de négativité, le nudge, la souveraineté des données…) sont des doublons même sous deux angles différents. Deux questions qui s'appuient sur le MÊME exemple ou la MÊME étude du cours (même passage précis, même fait concret cité) sont aussi des doublons, même si l'une en demande les chiffres et l'autre ce qu'ils illustrent (finition v6, job 28 : la même comparaison chiffrée d'un grand quotidien et d'une encyclopédie collaborative) — ce n'est jamais un angle distinct, seulement l'habillage de la question qui change.`
@@ -1465,19 +1472,24 @@ function duplicateRules(items: QcmItem[], opts: { strict: boolean; previous?: st
     // Banc du 04/11 (CS-290) : 2 questions sur 15 reprenaient un examen précédent du cours ; le
     // concepteur les voit, mais seul ce contrôle peut les retirer.
     ...(opts.previous?.length ? [`Liste aussi, dans "repeats", les QCM qui reprennent une question des EXAMENS PRÉCÉDENTS du cours (P…) : même fait, même règle ou même réponse logique, même si la notion, l'angle ou le décor sont reformulés.`] : []),
+    // Examen #16, Q8 : une définition d'une autre notion, étiquetée sous la notion où son fait avait
+    // été rangé à l'extraction. La revue dit de quelle notion du programme relève chaque question.
+    ...(opts.programme?.length ? [`Pour chaque QCM, "programme" : le numéro (N…) de la notion du PROGRAMME ci-dessous dont relève ce qu'il teste — sa bonne réponse, jamais son décor ni l'étiquette entre parenthèses ; 0 si aucune ne convient.`, `NOTIONS DU PROGRAMME :`, ...opts.programme.map((l, i) => `N${i + 1}. ${sanitizeCorpus(l).slice(0, 100)}`)] : []),
   ];
 }
 
 /** Doublons décidés à partir des libellés et des paires rendus par le modèle : le premier de chaque notion reste. */
-function decideDuplicates(items: QcmItem[], r: DupAnswer, opts: { strict: boolean; previousExams?: number }): DupResult {
+function decideDuplicates(items: QcmItem[], r: DupAnswer, opts: { strict: boolean; previousExams?: number; programme?: string[] }): DupResult {
   const notions = items.map(() => "");
   const angles = items.map(() => "");
   const regles = items.map(() => "");
+  const programme: (string | null)[] = items.map(() => null);
   for (const n of r.notions ?? []) {
     if (!Number.isInteger(n?.index) || n.index < 0 || n.index >= items.length) continue;
     notions[n.index] = typeof n.notion === "string" ? n.notion.trim() : "";
     angles[n.index] = typeof n.angle === "string" ? n.angle.trim() : "";
     regles[n.index] = typeof n.regle === "string" ? n.regle.trim() : "";
+    programme[n.index] = Number.isInteger(n.programme) && n.programme! >= 1 ? opts.programme?.[n.programme! - 1] ?? null : null;
   }
   // `drop` : doublons À L'INTÉRIEUR de l'examen ; les reprises d'un examen précédent (`repeats`)
   // sont rendues à part, l'appelant ne les retire que s'il a de quoi les remplacer.
@@ -1519,7 +1531,7 @@ function decideDuplicates(items: QcmItem[], r: DupAnswer, opts: { strict: boolea
     if (Number.isInteger(later) && later >= 0 && later < items.length && d.first !== d.second && !focusPair(d.first, d.second)) drop.add(later);
   }
   const intra = [...drop].sort((a, b) => a - b);
-  return { drop: [...new Set([...intra, ...repeats])].sort((a, b) => a - b), intra, repeats: [...repeats].sort((a, b) => a - b), notions, angles, regles };
+  return { drop: [...new Set([...intra, ...repeats])].sort((a, b) => a - b), intra, repeats: [...repeats].sort((a, b) => a - b), notions, angles, regles, programme };
 }
 
 const REVIEW_SCHEMA = {
@@ -1541,7 +1553,7 @@ const REVIEW_SCHEMA = {
  * vaut null si la revue est illisible, et les verdicts de la vérification à l'aveugle tiennent —,
  * et les doublons, null si le contrôle est indisponible : les plafonds par notion s'appliquent seuls.
  */
-async function finalReview(items: QcmItem[], opts: { strict: boolean; previous?: string[]; current?: string[]; step: StepCb; facts?: CourseFact[] }): Promise<{ audit: (QcmItem | null)[] | null; dup: DupResult | null }> {
+async function finalReview(items: QcmItem[], opts: { strict: boolean; previous?: string[]; current?: string[]; step: StepCb; facts?: CourseFact[]; programme?: string[] }): Promise<{ audit: (QcmItem | null)[] | null; dup: DupResult | null }> {
   if (!items.length) return { audit: [], dup: null };
   // #113 : cases de justification encore vides (raison oubliée par la conception, effacée par le
   // filet ou non rendue par un remplacement), écrites dans cet appel qui passe de toute façon sur
@@ -1572,6 +1584,7 @@ async function finalReview(items: QcmItem[], opts: { strict: boolean; previous?:
   const previousExams = Math.min(opts.previous?.length ?? 0, PREVIOUS_STEMS);
   const prior = [...(opts.previous ?? []).slice(0, PREVIOUS_STEMS), ...(opts.current ?? [])];
   const previous = prior.map((stem, i) => `P${i}. ${sanitizeCorpus(stem).slice(0, 220)}`).join("\n");
+  const programme = (opts.programme ?? []).slice(0, 60);
   const schema = toJustify
     ? { ...REVIEW_SCHEMA, properties: { ...REVIEW_SCHEMA.properties, justifications: AUDIT_JUSTIFICATIONS }, required: [...REVIEW_SCHEMA.required, "justifications"] }
     : REVIEW_SCHEMA;
@@ -1583,11 +1596,11 @@ async function finalReview(items: QcmItem[], opts: { strict: boolean; previous?:
       ...AUDIT_RULES,
       ...(toJustify ? [`justifications : pour chaque QCM qui a des cases « ← À JUSTIFIER », une entrée {index, key, distractors} — "key" (seulement si la clé est marquée, sinon vide) dit pourquoi elle est juste selon le cours ; "distractors" a une entrée par option marquée, et elles seules : "option_index" son numéro, "why_wrong" pourquoi CETTE option est fausse (le détail du cours qu'elle contredit), sans citer d'autre option, ni lettre, ni numéro.`] : []),
       `2. DOUBLONS (notions, duplicates, repeats).`,
-      ...duplicateRules(items, { strict: opts.strict, previous: prior }),
+      ...duplicateRules(items, { strict: opts.strict, previous: prior, programme }),
       DATA_RULE, passages.length ? dataBlock("EXTRAITS DU COURS", passages) : "", "", body,
       ...(previous ? ["", `QUESTIONS DES EXAMENS PRÉCÉDENTS :`, previous] : []),
       "",
-      `Réponds UNIQUEMENT avec {"verdicts": [{"index": 0, "key": true, "offCourse": false, "trivial": []}], "notions": [{"index": i, "notion": "…", "angle": "…", "regle": "…"}], "duplicates": [{"first": i, "second": j, "reason": "…"}], "repeats": [{"index": i, "previous": p}]${toJustify ? `, "justifications": [{"index": 0, "key": "", "distractors": [{"option_index": 1, "why_wrong": "…"}]}]` : ""}} : un verdict et une notion par QCM, first < second, listes vides s'il n'y a rien.`,
+      `Réponds UNIQUEMENT avec {"verdicts": [{"index": 0, "key": true, "offCourse": false, "trivial": []}], "notions": [{"index": i, "notion": "…", "angle": "…", "regle": "…", "programme": n}], "duplicates": [{"first": i, "second": j, "reason": "…"}], "repeats": [{"index": i, "previous": p}]${toJustify ? `, "justifications": [{"index": 0, "key": "", "distractors": [{"option_index": 1, "why_wrong": "…"}]}]` : ""}} : un verdict et une notion par QCM, first < second, listes vides s'il n'y a rien.`,
     ].join("\n"),
   }, { check: (v) => verdictsCheck(v, items.length) ?? (Array.isArray(v?.duplicates) ? null : "le champ « duplicates » (tableau) manque") }).catch((e) => {
     opts.step(`Revue finale en échec (${llmFailureReason(e).split(/\.\s/u)[0].slice(0, 80)}) : verdicts de la vérification gardés, plafonds par notion appliqués seuls`, 79);
@@ -1608,7 +1621,7 @@ async function finalReview(items: QcmItem[], opts: { strict: boolean; previous?:
   opts.step(`Revue finale : clés, hors-cours, distracteurs et doublons contrôlés en un appel${toJustify ? ` (${justified}/${toJustify} justification(s) complétée(s) au passage)` : ""}`, 79);
   const byIndex = new Map((out.verdicts ?? []).map((v) => [v.index, v]));
   const audit = items.map((it, i) => applyFinalQualityVerdicts([it], byIndex.has(i) ? [{ ...byIndex.get(i)!, index: 0 }] : [])[0] ?? null);
-  return { audit, dup: decideDuplicates(items, out, { strict: opts.strict, previousExams }) };
+  return { audit, dup: decideDuplicates(items, out, { strict: opts.strict, previousExams, programme }) };
 }
 
 /**
@@ -1848,6 +1861,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     if (n) { it.notion = n; it.topic = n; }
   };
   const caps = { perNotion: notionCap(notionCount, count), perKey: 1 };
+  /** Libellés des notions du programme : étiquettes possibles d'une question. */
+  const programmeLabels = [...new Set([...cov, ...covAll].map((t) => t.label))];
   // Ouvertes : la suite de la répartition (les chapitres que les QCM n'ont pas pris d'abord).
   const openTopic = (i: number) => (plan.spread ? cov[(needed + i) % cov.length] : cov[(count + i) % cov.length]);
   const used = new Set(qcmTopics.map((t) => t.label));
@@ -2200,8 +2215,9 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
    */
   const review = async (cands: QcmItem[], current: QcmItem[], strictMode = strict): Promise<QcmItem[]> => {
     if (!cands.length) return [];
-    const { audit, dup } = await finalReview(cands, { strict: strictMode, previous: recent.map((x) => x.stem), current: current.map((it) => it.stem), step, facts: shared.facts });
+    const { audit, dup } = await finalReview(cands, { strict: strictMode, previous: recent.map((x) => x.stem), current: current.map((it) => it.stem), step, facts: shared.facts, programme: programmeLabels });
     const out = cands.map((it, i) => (audit ? audit[i] : it));
+    dup?.programme.forEach((p, i) => { if (p && out[i]) out[i]!.programmeNotion = p; });
     cands.forEach((it, i) => { if (!out[i]) auditRejected.add(it.stem); });
     // Même fait testable (lib/qcm-facts) qu'une question déjà retenue ou qu'un candidat avant lui :
     // doublon certain, sans modèle ; le premier reste.
@@ -2327,10 +2343,15 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     }
     return back;
   };
-  /** Candidats vérifiés, déjà payés, absents de l'examen et jamais reconnus comme doublons. */
+  /**
+   * Candidats vérifiés, déjà payés, absents de l'examen et jamais reconnus comme doublons — ni
+   * d'un fait déjà testé par une question de l'examen (même fait, ou même notion sous le même
+   * scénario : examen #16, Q3/Q12), pour qu'un retrait de la phase finale ne ramène pas son jumeau.
+   */
   const spareCandidates = () => {
     const present = new Set(all.map((it) => it.stem));
-    return verifiedCandidates.filter((c) => c.verified === 1 && !c.rejected && !present.has(c.stem) && !auditDuplicates.has(c.stem) && !auditRejected.has(c.stem) && !historicalRepeats.has(c.stem) && !duplicateOptionIndices(c.options, c.correct).length && optionCountFits(c.type, c.options.length));
+    return verifiedCandidates.filter((c) => c.verified === 1 && !c.rejected && !present.has(c.stem) && !auditDuplicates.has(c.stem) && !auditRejected.has(c.stem) && !historicalRepeats.has(c.stem) && !duplicateOptionIndices(c.options, c.correct).length && optionCountFits(c.type, c.options.length) &&
+      !factDuplicates([...all, c]).includes(all.length));
   };
   /** Remplace `it` par un candidat déjà payé qui tient les plafonds ; sinon le retire si `drop`. Rend vrai si remplacé. */
   const swapOut = (it: QcmItem, drop: boolean): boolean => {
@@ -2455,12 +2476,20 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // des questions correctement étiquetées dès qu'une autre notion du programme avait, par hasard,
     // un mot de plus en commun — régression sur le job 23/examen 9, revenue en arrière).
     // L'accent demandé par l'étudiant garde son étiquette, choisie par lui, pas par le programme.
-    const programmeLabels = [...new Set([...cov, ...covAll].map((t) => t.label))];
     let relabeled = 0;
     for (const it of all) {
-      // Question bâtie sur un fait du cours : la notion de ce fait fait foi, sans heuristique.
+      // Question bâtie sur un fait du cours : la notion de ce fait fait foi, sans heuristique…
       labelFromFact(it);
-      if (it.focusSlot || !it.notion || factNotion(it.factId)) continue;
+      const fromFact = factNotion(it.factId);
+      // … sauf examen #16, Q8 : la définition d'une notion, étiquetée sous celle où son fait avait été
+      // rangé à l'extraction. La revue finale nomme une autre notion du programme, et ni la bonne
+      // réponse ni l'énoncé du fait ne contiennent un mot de l'étiquette : la notion nommée l'emporte.
+      if (fromFact && !it.focusSlot && it.programmeNotion && notionBase(it.programmeNotion) !== notionBase(fromFact)) {
+        const statement = shared.facts?.find((f) => f.id === it.factId)?.statement ?? "";
+        if (notionMismatch(fromFact, `${it.options[it.correct[0] ?? -1] ?? ""} ${statement}`, 1)) { it.notion = it.programmeNotion; it.topic = it.programmeNotion; relabeled++; }
+        continue;
+      }
+      if (it.focusSlot || !it.notion || fromFact) continue;
       const tested = [it.sourceFact, it.explanation, it.options[it.correct[0] ?? -1]].filter(Boolean).join(" ");
       if (!tested.trim() || !notionMismatch(it.notion, tested)) continue;
       const best = bestNotionMatch(tested, programmeLabels);
