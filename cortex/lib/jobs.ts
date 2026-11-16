@@ -37,7 +37,7 @@ export type Job = {
 export async function ensureJobsSchema(): Promise<void> {
   await q.ensureTable("jobs");
   // Colonnes de durabilité — rattrapage pour les DB existantes.
-  try { await q.ensureColumns("jobs", ["attempts", "max_attempts", "heartbeat_at", "checkpoint_json", "worker_id", "credit_ref"]); } catch {}
+  try { await q.ensureColumns("jobs", ["attempts", "max_attempts", "heartbeat_at", "checkpoint_json", "worker_id", "credit_ref", "ordered"]); } catch {}
 }
 // (pas d'appel top-level : la table jobs est créée à la demande dans la DB du cours courant)
 
@@ -231,8 +231,8 @@ export async function heartbeatJob(id: number): Promise<void> {
 
 const TERMINAL_STATES: readonly JobStatus[] = ["done", "error", "canceled"];
 
-export async function setJob(id: number, fields: Partial<{ status: JobStatus; currentStep: string; progress: number; resultPath: string; resultId: number; error: string; pid: number }>): Promise<void> {
-  const map: Record<string, string> = { status: "status", currentStep: "current_step", progress: "progress", resultPath: "result_path", resultId: "result_id", error: "error", pid: "pid" };
+export async function setJob(id: number, fields: Partial<{ status: JobStatus; currentStep: string; progress: number; resultPath: string; resultId: number; ordered: number; error: string; pid: number }>): Promise<void> {
+  const map: Record<string, string> = { status: "status", currentStep: "current_step", progress: "progress", resultPath: "result_path", resultId: "result_id", ordered: "ordered", error: "error", pid: "pid" };
   const sets: string[] = [];
   const vals: any[] = [];
   for (const [k, v] of Object.entries(fields)) {
@@ -580,16 +580,15 @@ async function jobCreditRef(jobId: number): Promise<string> {
 }
 
 /**
- * Ce qu'un QCM a déjà LIVRÉ : onExamReady pose result_id dès que les questions sont
- * visibles sur /mock/<id>. Questions fermées et ouvertes comptées ensemble, comme la
- * commande (même défaut que costForJob : 20 + 3). null : rien de livré.
+ * Ce qu'un examen QCM a déjà LIVRÉ : à la livraison progressive (onExamReady), le job reçoit
+ * result_id (questions visibles sur /mock/<id>) et `ordered`, la taille commandée telle que le
+ * générateur l'a résolue — format du cours compris, la cible n'en dit rien quand elle est vide.
+ * Questions fermées et ouvertes comptées ensemble. null : rien de livré, ou pas un QCM.
  */
 async function qcmDelivery(jobId: number): Promise<{ produced: number; requested: number } | null> {
-  const row = await q.get<{ result_id: number | null; target: string | null }>(`SELECT result_id, target FROM jobs WHERE id = ?`, jobId);
-  if (!row?.result_id) return null;
-  let t: { count?: unknown; openCount?: unknown } = {};
-  try { t = row.target ? JSON.parse(row.target) : {}; } catch { /* cible illisible : défauts */ }
-  const requested = (typeof t.count === "number" ? t.count : 20) + (typeof t.openCount === "number" ? t.openCount : 3);
+  const row = await q.get<{ result_id: number | null; ordered: number | null }>(`SELECT result_id, ordered FROM jobs WHERE id = ?`, jobId);
+  if (!row?.result_id || !row.ordered) return null;
+  const requested = Number(row.ordered);
   const closed = (await q.get<{ n: number }>(`SELECT count(*) n FROM qcm_items WHERE exam_id = ?`, row.result_id))?.n ?? 0;
   const open = (await q.get<{ n: number }>(`SELECT count(*) n FROM exam_questions WHERE exam_id = ? AND source_inspiration = 'qcm-open'`, row.result_id))?.n ?? 0;
   return { produced: Number(closed) + Number(open), requested };
@@ -602,9 +601,9 @@ async function qcmDelivery(jobId: number): Promise<{ produced: number; requested
  *    appels ont coûté — l'utilisateur n'a rien reçu, l'échec est le nôtre
  *    (réponse illisible, fournisseur en panne). L'abus reste borné : le quota
  *    quotidien de générations n'est pas rendu, et la dépense par compte et par
- *    jour est plafonnée en amont (lib/llm, assertSpendCap). Sauf un QCM déjà
- *    livré (worker mort ou exception après onExamReady) : seul le manque est
- *    rendu, au prorata des questions commandées, comme une livraison incomplète.
+ *    jour est plafonnée en amont (lib/llm, assertSpendCap). Sauf un examen QCM
+ *    déjà livré (worker mort ou exception après onExamReady) : seul le manque
+ *    est rendu, au prorata des questions commandées, comme une livraison incomplète.
  *  - "canceled" (annulation par l'utilisateur) : rendu SEULEMENT si le job n'a
  *    rien coûté au fournisseur — sinon générer à 95 %, annuler et recommencer
  *    offrirait des générations illimitées.
@@ -614,7 +613,7 @@ export async function refundJobCredits(job: Pick<Job, "id" | "type">, why: "fail
   try {
     const { billingEnabled, refundGeneration, fmtCreditsBack } = await import("@/lib/billing/credits");
     if (!billingEnabled()) return 0;
-    if (why === "failed" && job.type === "qcm") {
+    if (why === "failed" && (job.type === "qcm" || job.type === "exam")) {
       const delivered = await qcmDelivery(job.id);
       if (delivered && delivered.requested > 0) {
         const missing = Math.max(0, delivered.requested - delivered.produced);

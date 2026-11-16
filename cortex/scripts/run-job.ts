@@ -230,8 +230,9 @@ async function main() {
         await setJob(jobId, stepFields(s, p, (x) => (x >= 100 ? "done" : "running")));
         await logJob(jobId, s);
       };
-      // Livraison progressive : le job pointe vers l'examen dès que ses QCM sont prêts.
-      const onExamReady = async (examId: number) => { await setJob(jobId, { resultId: examId, resultPath: `/mock/${examId}` }); };
+      // Livraison progressive : le job pointe vers l'examen dès que ses QCM sont prêts, avec la
+      // taille commandée résolue (un échec ensuite ne rend que le manque, lib/jobs refundJobCredits).
+      const onExamReady = async (examId: number, order: { requested: number }) => { await setJob(jobId, { resultId: examId, resultPath: `/mock/${examId}`, ordered: order.requested }); };
       // Poids de l'avancement par phase : durées mesurées des derniers examens QCM du cours.
       // Point de reprise : un worker tué (redéploiement, crash) et repris repart de ce qui est acquis.
       const res = await generateQcmExam({ count, openCount, focus, onStep, onExamReady, phaseMs: await phaseHistory("qcm"), checkpoint: jobCheckpointStore(jobId) });
@@ -314,7 +315,7 @@ async function main() {
         : job.type === "lab-exercise"
           ? await generateLabExercise(job.target ?? "", { onStep })
           // Examen blanc : le format du cours choisit le générateur (QCM, exercices, essai…), cf. lib/mock-exam.
-          : await generateMockExam({ count: examCount, focus: examFocus, kind: examKind, onStep, jobId, phaseMs: await phaseHistory(job.type), onExamReady: async (examId: number) => { await setJob(jobId, { resultId: examId, resultPath: `/mock/${examId}` }); } });
+          : await generateMockExam({ count: examCount, focus: examFocus, kind: examKind, onStep, jobId, phaseMs: await phaseHistory(job.type), onExamReady: async (examId: number, order?: { requested: number }) => { await setJob(jobId, { resultId: examId, resultPath: `/mock/${examId}`, ordered: order?.requested }); } });
     if (res.texError) {
       // le résultat existe (HTML lisible) mais le PDF a échoué → erreur LaTeX gardée pour debug
       await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, repli HTML lisible. Détail : ${res.texError.slice(0, 500)}` });
