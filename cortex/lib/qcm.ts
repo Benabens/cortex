@@ -1759,6 +1759,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
    * doublon DANS l'examen, lui, ne revient jamais.
    */
   const repeatFallback = new Map<string, QcmItem>();
+  /** Reprises d'un fait déjà posé, mises de côté dès la vérification (vet) : pas encore revues. */
+  const heldUnreviewed = new Map<string, QcmItem>();
   /** Doublons du seul modèle entre faits distincts (revue finale) : repris faute de remplaçant. */
   const softFallback = new Map<string, QcmItem>();
   /** Notion et angle de chaque question retenue, nommés par la revue finale : le comblement sait ce que l'examen pose déjà. */
@@ -2010,7 +2012,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       return factMode && !!asked && !!it.factId && it.factId !== asked.id && askedBefore.has(it.factId) && !askedBefore.has(asked.id);
     };
     const held = new Set(group.flatMap((bt, k) => (done[k] ?? []).filter((it) => verified.includes(it) && reprised(bt, it))));
-    for (const it of held) repeatFallback.set(it.stem, it);
+    for (const it of held) { repeatFallback.set(it.stem, it); heldUnreviewed.set(it.stem, it); }
     const ok = verified.filter((it) => !held.has(it)).sort((a, b) => Number(weak(a)) - Number(weak(b)));
     const missing: QcmMissingState[] = [];
     group.forEach((bt, k) => {
@@ -2035,11 +2037,12 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
    * Revue finale de candidats en UN appel (finalReview : audit et doublons). `current` : les
    * questions déjà retenues et revues, données comme déjà posées — un candidat qui en reprend une
    * part. Clé refusée ou hors cours, doublon, reprise d'un examen précédent, notion au-delà de son
-   * plafond : écarté pour de bon. Rend les candidats qui restent, dans leur ordre.
+   * plafond : écarté pour de bon. Rend les candidats qui restent, dans leur ordre. `strictMode` :
+   * critère des doublons, relâché quand le comblement reprend des notions sous un autre angle.
    */
-  const review = async (cands: QcmItem[], current: QcmItem[]): Promise<QcmItem[]> => {
+  const review = async (cands: QcmItem[], current: QcmItem[], strictMode = strict): Promise<QcmItem[]> => {
     if (!cands.length) return [];
-    const { audit, dup } = await finalReview(cands, { strict, previous: recent.map((x) => x.stem), current: current.map((it) => it.stem), step, facts: shared.facts });
+    const { audit, dup } = await finalReview(cands, { strict: strictMode, previous: recent.map((x) => x.stem), current: current.map((it) => it.stem), step, facts: shared.facts });
     const out = cands.map((it, i) => (audit ? audit[i] : it));
     cands.forEach((it, i) => { if (!out[i]) auditRejected.add(it.stem); });
     // Même fait testable (lib/qcm-facts) qu'une question déjà retenue ou qu'un candidat avant lui :
@@ -2075,6 +2078,13 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     verifiedCandidates.splice(0, verifiedCandidates.length, ...verifiedCandidates.map((c) => byStem.get(c.stem) ?? c));
     return kept;
   };
+  /** Consigne d'un lot de comblement par faits : les faits que l'examen teste déjà. */
+  const factGuidance = (): string | undefined => {
+    const facts = all.flatMap((it) => (it.factId ? plan.facts?.filter((f) => f.id === it.factId) ?? [] : []));
+    return facts.length
+      ? `FAITS DÉJÀ TESTÉS par d'autres questions de cet examen — n'en teste AUCUN, même sous un autre scénario ou un autre décor :\n${facts.map((f) => `  · [${f.id}] ${sanitizeCorpus(f.statement).slice(0, 160)}`).join("\n")}`
+      : undefined;
+  };
   /**
    * COMBLEMENT, une ronde au plus — il manque des questions après la revue (lot en échec, rejets
    * au-delà de la marge, doublons). Un sujet de lot en échec est redemandé tel quel ; une question
@@ -2083,13 +2093,6 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
    * angle VRAIMENT distinct. En dessous malgré tout, l'examen le dit (requested) et le job
    * rembourse au prorata.
    */
-  /** Consigne d'un lot de comblement par faits : les faits que l'examen teste déjà. */
-  const factGuidance = (): string | undefined => {
-    const facts = all.flatMap((it) => (it.factId ? plan.facts?.filter((f) => f.id === it.factId) ?? [] : []));
-    return facts.length
-      ? `FAITS DÉJÀ TESTÉS par d'autres questions de cet examen — n'en teste AUCUN, même sous un autre scénario ou un autre décor :\n${facts.map((f) => `  · [${f.id}] ${sanitizeCorpus(f.statement).slice(0, 160)}`).join("\n")}`
-      : undefined;
-  };
   const topUp = async (missing: QcmMissingState[]) => {
     const short = count - all.length;
     if (short <= 0 || hardStop() || (!all.length && lastError)) return;
@@ -2114,7 +2117,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const { candidates } = await vet(extra, done, all);
     verifiedCandidates.push(...candidates);
     progress.done("QCM");
-    const passed = await review(candidates, all);
+    // Notions reprises sous un autre angle : le critère strict (une notion = une question) ne tient plus.
+    const passed = await review(candidates, all, strict && !angle);
     progress.done("QCM");
     all.splice(0, all.length, ...selectCapped(all, passed, count));
   };
@@ -2149,6 +2153,22 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   };
   /** Le fait de `it` est-il déjà testé par une question de l'examen ? */
   const factTaken = (it: QcmItem) => !!it.factId && all.some((x) => x !== it && x.factId === it.factId);
+  /**
+   * Remet dans un examen incomplet des questions déjà vérifiées et revues, écartées faute de mieux
+   * (`from`), tant qu'il manque des places : jamais une question présente, refusée par la revue,
+   * exclue par `skip`, au-delà d'un plafond par notion ou sur un fait déjà testé. Rend le nombre remis.
+   */
+  const restoreFallback = (from: Map<string, QcmItem>, skip: (it: QcmItem) => boolean = () => false): number => {
+    let back = 0;
+    for (const it of from.values()) {
+      if (all.length >= count) break;
+      if (all.some((x) => x.stem === it.stem) || auditRejected.has(it.stem) || skip(it)) continue;
+      if (capDrops([...all, it], caps, (x) => [x.notion]).includes(all.length) || factTaken(it)) continue;
+      all.push(it);
+      back++;
+    }
+    return back;
+  };
   /** Candidats vérifiés, déjà payés, absents de l'examen et jamais reconnus comme doublons. */
   const spareCandidates = () => {
     const present = new Set(all.map((it) => it.stem));
@@ -2311,34 +2331,20 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     if (!finalPhaseExhausted()) await topUp(missing);
     // Toujours en dessous du nombre demandé : les reprises d'un examen précédent, déjà vérifiées et
     // auditées, reprennent les places vides (plafonds par notion tenus) plutôt qu'un remboursement.
-    if (all.length < count && repeatFallback.size) {
-      const present = new Set(all.map((it) => it.stem));
-      let back = 0;
-      for (const it of repeatFallback.values()) {
-        if (all.length >= count) break;
-        if (present.has(it.stem) || auditDuplicates.has(it.stem) || auditRejected.has(it.stem)) continue;
-        if (capDrops([...all, it], caps, (x) => [x.notion]).includes(all.length) || factTaken(it)) continue;
-        all.push(it);
-        present.add(it.stem);
-        back++;
-      }
-      if (back) step(`${back} question(s) proche(s) d'un examen précédent gardée(s) faute de remplaçant : chaque notion du cours a déjà été posée`, 80);
+    // Une reprise mise de côté dès la vérification n'a pas vu la revue finale : revue maintenant, si
+    // elle doit servir et que le budget le permet ; sinon elle ne revient pas.
+    if (all.length < count && heldUnreviewed.size && !finalPhaseExhausted()) {
+      for (const it of await review([...heldUnreviewed.values()], all)) repeatFallback.set(it.stem, it);
+      heldUnreviewed.clear();
     }
+    const repeatsBack = restoreFallback(repeatFallback, (it) => auditDuplicates.has(it.stem) || heldUnreviewed.has(it.stem));
+    if (repeatsBack) step(`${repeatsBack} question(s) proche(s) d'un examen précédent gardée(s) faute de remplaçant : chaque notion du cours a déjà été posée`, 80);
     // Toujours en dessous : les questions que le seul contrôle du modèle avait retirées alors
     // qu'elles testent un fait distinct reprennent les places vides (plafonds tenus, jamais un fait
     // déjà testé). Le dédoublonnage par fait est structurel ; ce contrôle reste un filet qui
     // remplace, mais ne fait plus tomber le compte.
-    if (all.length < count && softFallback.size) {
-      let back = 0;
-      for (const it of softFallback.values()) {
-        if (all.length >= count) break;
-        if (all.some((x) => x.stem === it.stem) || auditRejected.has(it.stem)) continue;
-        if (capDrops([...all, it], caps, (x) => [x.notion]).includes(all.length) || factTaken(it)) continue;
-        all.push(it);
-        back++;
-      }
-      if (back) step(`${back} question(s) d'un fait distinct gardée(s) faute de remplaçant, malgré un rapprochement signalé par le contrôle des doublons`, 80);
-    }
+    const softBack = restoreFallback(softFallback);
+    if (softBack) step(`${softBack} question(s) d'un fait distinct gardée(s) faute de remplaçant, malgré un rapprochement signalé par le contrôle des doublons`, 80);
     // Une seule réparation, bornée ; optimisation de qualité et non une garantie, elle cède la
     // place au budget de la phase finale (#105), les QCM gardent leur version vérifiée.
     if (!finalPhaseExhausted()) await repairResidue();
