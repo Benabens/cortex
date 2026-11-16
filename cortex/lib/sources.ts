@@ -11,7 +11,7 @@ import { extractOfficeText } from "@/lib/office-documents";
 import { purgePdfPages } from "@/lib/page-cache";
 import { storage } from "@/lib/storage";
 import { failureStatus, readStatus, type IngestFileOutcome } from "@/lib/ingest-report";
-import { examKind, examYear } from "@/lib/exam-names";
+import { examKind, examYear, withoutSolutions } from "@/lib/exam-names";
 
 /**
  * Examens de référence : le « format » à imiter pour la génération.
@@ -196,10 +196,14 @@ export const EXAM_SOURCE_DEDUP = `id IN (SELECT min(id) FROM sources WHERE type 
  */
 export const EXAM_HAS_TEXT = `EXISTS (SELECT 1 FROM items i WHERE i.source_id = sources.id)`;
 
-/** Nombre d'annales (finals, partiels) lisibles ingérées dans le cours courant ; 0 pour un cours neuf. */
+/**
+ * Nombre d'annales (finals, partiels) lisibles ingérées dans le cours courant ; 0 pour un cours
+ * neuf. Un corrigé à côté de son énoncé ne compte pas comme une annale de plus.
+ */
 export async function pastExamCount(): Promise<number> {
   await q.ensureTable("sources");
-  return Number((await q.get<{ n: number }>(`SELECT count(*) n FROM sources WHERE type IN ('final','midterm') AND ${EXAM_SOURCE_DEDUP} AND ${EXAM_HAS_TEXT}`))?.n ?? 0);
+  const rows = await q.all<{ path: string; title: string }>(`SELECT path, title FROM sources WHERE type IN ('final','midterm') AND ${EXAM_SOURCE_DEDUP} AND ${EXAM_HAS_TEXT}`);
+  return withoutSolutions(rows, (r) => `${r.path} ${r.title}`).length;
 }
 
 /** Examens (finals/midterms) dédoublonnés par chemin, triés par année croissante (sans année en dernier). */

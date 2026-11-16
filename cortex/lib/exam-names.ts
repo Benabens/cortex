@@ -48,6 +48,15 @@ export function isSolutionName(s: string): boolean {
   return new RegExp(SOLUTION.source).test(norm(s));
 }
 
+/**
+ * Les énoncés d'une liste d'annales, sans les corrigés — sauf s'il n'y a que des corrigés (ils
+ * portent alors les seules questions connues). Sert au décompte des annales et à l'étalon visuel.
+ */
+export function withoutSolutions<R>(rows: R[], nameOf: (r: R) => string): R[] {
+  const statements = rows.filter((r) => !isSolutionName(nameOf(r)));
+  return statements.length ? statements : rows;
+}
+
 /** Radical d'un nom sans les mots de corrigé : « Final_Exam_Solutions » et « Final_Exam » se rejoignent. */
 const stemOf = (p: string) => norm(p.split("/").at(-1) ?? p).replace(/\.[a-z0-9]+$/, "").replace(SOLUTION, "").replace(/[-. ]+/g, "-").replace(/^-|-$/g, "");
 

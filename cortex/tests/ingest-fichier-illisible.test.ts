@@ -138,3 +138,15 @@ test("une annale scannée sans texte ne compte pas comme annale (elle ne peut se
   const { pastExamCount } = await import("../lib/sources");
   assert.equal(await runWithCourse(c.id, () => pastExamCount()), 1);
 });
+
+test("un corrigé ne compte pas comme une annale de plus, sauf s'il est seul", async () => {
+  const c = await newCourse("Orvelle corrigés");
+  fs.writeFileSync(path.join(c.refsDir, "final-2022.pdf"), textPdf("Final 2022, exercice 1"));
+  fs.writeFileSync(path.join(c.refsDir, "final-2022-Musterloesung.pdf"), textPdf("Lösung 1"));
+  assert.equal(ingest(c.id).status, 0);
+  const { runWithCourse } = await import("../db/client");
+  const { pastExamCount } = await import("../lib/sources");
+  assert.equal(await runWithCourse(c.id, () => pastExamCount()), 1);
+  const { withoutSolutions } = await import("../lib/exam-names");
+  assert.deepEqual(withoutSolutions(["final-2021-solution.pdf"], (n) => n), ["final-2021-solution.pdf"]);
+});
