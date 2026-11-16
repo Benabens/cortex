@@ -45,8 +45,7 @@ ouvertes à tous, sauf lancement fermé (`INVITE_ONLY=1`, § 12).
    healthcheck `/api/health` (timeout 300 s), redémarrage « On failure »
    (10 essais), **1 replica** (⚠ ne JAMAIS augmenter : la file de jobs est
    mono-conteneur par design — PID + heartbeat locaux). Ces réglages vivent
-   dans Railway : le dépôt n'a plus de `railway.json` (format abandonné par
-   Railway au 01/12/2026).
+   dans Railway et sont décrits dans `.railway/railway.ts` (§ 1 bis).
    **Image de base** : le Dockerfile part de `node:22-slim` tirée du miroir AWS
    des images officielles Docker (`public.ecr.aws/docker/library`) et non de
    Docker Hub, dont une panne a fait échouer deux builds le 9 octobre 2026.
@@ -68,6 +67,33 @@ ouvertes à tous, sauf lancement fermé (`INVITE_ONLY=1`, § 12).
    démarre très bien, mais SANS auth, SANS quota et SANS plafond de dépense —
    c'est-à-dire ouvert à tous. Enchaîne directement sur les étapes 2-4 avant de
    partager l'URL.
+
+## 1 bis. Railway — la config en code (`.railway/railway.ts`)
+
+Railway cesse de lire `railway.json` / `railway.toml` (Config as Code) le
+**2026-12-01**. Le projet est décrit dans `.railway/railway.ts` (Infrastructure
+as Code) : l'app (source, build Dockerfile, healthcheck, région, replica,
+domaine, volume `/data`, noms des variables), Postgres et son volume, les deux
+buckets. Les valeurs des variables restent sur Railway (`preserve()`).
+
+Ce fichier n'est lu **que par la CLI**, jamais pendant un déploiement : merger
+une PR qui le modifie ne change rien sur Railway tant que personne ne lance
+`railway config apply`. Le démarrage propre aux previews de PR, que faisait
+`railway.json`, est porté par l'image (`cortex/scripts/start.sh`).
+
+```bash
+cd .railway && npm ci && cd ..   # SDK railway épinglé, une fois
+railway link                     # projet wonderful-creativity, env production
+railway config plan              # aperçu, sans effet : « already up to date » attendu
+```
+
+⚠ **Le fichier est autoritaire.** À l'`apply`, ce qui n'y figure pas est
+supprimé : une ressource (la base, un volume, un bucket) comme une **variable**
+du service. Toute variable posée dans le tableau de bord ou par
+`railway variable set` (scripts `setup-fiabilite.sh`, consignes des PR) doit
+être ajoutée à `env` (`NOM: preserve()`) **avant** le prochain apply. Règle :
+lire le plan ; une ligne `Delete` ou « destructive » = on n'applique pas.
+`railway config pull --json` relit l'état réel pour comparer.
 
 ## 2. Railway — Postgres
 
@@ -620,8 +646,9 @@ une Postgres neuve, facturées à l'usage. Le filet gratuit reste la workflow
 `e2e` : les parcours Playwright sur chaque PR, contre un build local de la PR.
 
 Si tu les actives (`setup-fiabilite.sh --etape=4`, qui fait poser un plafond de
-dépense d'abord) : `railway.json` fait démarrer chaque preview par
-`cortex/scripts/preview-entrypoint.sh`, qui retire les secrets copiés de la
+dépense d'abord) : l'image démarre chaque preview par
+`cortex/scripts/preview-entrypoint.sh` (aiguillage de `scripts/start.sh`, CMD
+du Dockerfile, sur le nom d'environnement `…-pr-<n>`), qui retire les secrets copiés de la
 prod (clés LLM, Resend, S3, Google, Stripe live), régénère `AUTH_SECRET`, pose
 le LLM hermétique et l'auth persona E2E ; la garde de démarrage
 (`railwayPreviewViolations`) refuse de servir s'il reste un trou, et refuse

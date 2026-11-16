@@ -1,6 +1,6 @@
 /**
  * PREVIEW PAR PR — Railway crée l'environnement d'une PR en copiant les
- * variables de la PRODUCTION. Le démarrage propre aux PR (railway.json →
+ * variables de la PRODUCTION. Le démarrage propre aux PR (scripts/start.sh →
  * scripts/preview-entrypoint.sh) doit en faire une instance sans effet sur le
  * monde réel, que la garde de démarrage accepte ; ailleurs, il refuse de tourner.
  */
@@ -71,6 +71,14 @@ test("hors environnement de PR : refus de démarrer, l'app n'est jamais lancée"
     const r = run({ ...copiedFromProduction, RAILWAY_ENVIRONMENT: name, RAILWAY_ENVIRONMENT_NAME: name });
     assert.notEqual(r.status, 0, name);
     assert.equal(r.started, null, `${name || "(vide)"} : démarré quand même`);
+  }
+});
+
+test("reconnaissance d'une PR : la même que start.sh et la garde de démarrage (casse ignorée, espaces retirés)", async () => {
+  const { isPrEnvironment } = await import("../lib/railway-env");
+  for (const name of ["cortex-pr-66", "Cortex-PR-66", " cortex-pr-66 ", "production", "cortex-pr-", "cortex-pr-66x"]) {
+    const r = run({ ...copiedFromProduction, RAILWAY_ENVIRONMENT: name, RAILWAY_ENVIRONMENT_NAME: name });
+    assert.equal(r.status === 0, isPrEnvironment(name.trim()), `« ${name} » : ${r.stderr}`);
   }
 });
 
