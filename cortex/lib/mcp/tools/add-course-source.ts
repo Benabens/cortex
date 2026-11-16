@@ -1,5 +1,8 @@
 import * as z from "zod/v4";
+import { billingEnabled, fromCenti } from "@/lib/billing/credits";
+import { isOwner } from "@/lib/billing/owner";
 import { SOURCE_CATEGORIES, SourceError, addTextSource, addUrlSource } from "@/lib/course-source";
+import { costForJob } from "@/lib/jobs";
 import { courseArg, courseRef, courseRefOf } from "../schemas";
 import { ToolError, codeForStatus, defineTool } from "../tool";
 
@@ -51,9 +54,26 @@ export default defineTool({
         status: "added" as const,
         course: courseRefOf(c),
         source: { file: saved.name, folder: saved.folder, bytes: saved.bytes, content_type: saved.contentType },
-        next_steps: "Add the other materials the same way, then call prepare_course to (re)build the course.",
+        next_steps: saved.folder === "refs" ? await pastExamNextSteps() : "Add the other materials the same way, then call prepare_course to (re)build the course.",
       };
     });
   },
-  summarize: (o) => `Support ajouté à ${o.course.label} : ${o.source.file} (${o.source.folder}, ${Math.max(1, Math.round(o.source.bytes / 1024))} Ko). Lance prepare_course une fois tous les supports ajoutés.`,
+  summarize: (o) => `Support ajouté à ${o.course.label} : ${o.source.file} (${o.source.folder}, ${Math.max(1, Math.round(o.source.bytes / 1024))} Ko). ` +
+    (o.source.folder === "refs"
+      ? "Ajout gratuit : le format de cette annale sera relu par prepare_course, dont le coût est annoncé avant tout débit."
+      : "Lance prepare_course une fois tous les supports ajoutés."),
 });
+
+/**
+ * Une annale ne sert qu'une fois son format relu, par prepare_course : un job payant (crédits
+ * et une génération du jour). L'ajout, lui, est gratuit ; le coût de la suite est dit ici,
+ * avant que l'assistant ne le demande, puis devisé par prepare_course avant tout débit.
+ */
+async function pastExamNextSteps(): Promise<string> {
+  const centi = billingEnabled() && !(await isOwner()) ? costForJob("prepare") : 0;
+  const credits = fromCenti(centi);
+  const cost = centi > 0
+    ? `prepare_course reads its exam format: it costs ${credits} credit${credits >= 2 ? "s" : ""} and one daily generation, quoted before anything is charged.`
+    : "prepare_course reads its exam format (nothing is charged on this account).";
+  return `Past exam stored for free. ${cost} Add the other materials first, then call prepare_course once.`;
+}
