@@ -1,7 +1,7 @@
 import { currentCourse } from "@/db/client";
 import { q, nowStr } from "@/db/q";
 import { HARD_STOP_CODES, LONG_OUTPUT_MAX_TOKENS, LlmError, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
-import { DEFAULT_ANSWER_MODE, courseMaterialTitles, examLanguageFor, planMockExam, readStoredProfile, resolveExamFormat, type AnswerMode } from "@/lib/exam-format";
+import { DEFAULT_ANSWER_MODE, OPTIONS_MIN, QCM_DEFAULT, courseMaterialTitles, examLanguageFor, planMockExam, readStoredProfile, requestedFormat, resolveExamFormat, type AnswerMode } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseNumbers, absentCourseTerms, corpusWindows, coursePassages, factNumbers, topicsInScope } from "@/lib/course-grounding";
@@ -209,7 +209,16 @@ const SCQ_OPTIONS = 4;
 
 /** Le nombre d'options convient-il à l'attente du format (à défaut, au moins deux) ? */
 export function optionCountFits(n: number, expected: number | null | undefined): boolean {
-  return expected ? n === expected : n >= 2;
+  return expected ? n === expected : n >= OPTIONS_MIN;
+}
+
+/**
+ * Distracteurs à remplacer, réduits à ceux qui peuvent l'être : un vrai/faux n'en a aucun, son
+ * option fausse est la négation de la clé (la réécrire casserait la forme de l'annale).
+ */
+function replaceableDistractors(indices: number[], it: Pick<QcmItem, "options" | "correct">): number[] {
+  if (it.options.length <= 2) return [];
+  return [...new Set(indices.filter((k) => Number.isInteger(k) && k >= 0 && k < it.options.length && !(it.correct ?? []).includes(k)))];
 }
 
 /** Attente du format, avec quatre options par défaut pour une question à réponse unique. */
@@ -222,11 +231,11 @@ function optionCountRule(options: number): string {
   return `  - NOMBRE D'OPTIONS : EXACTEMENT ${options} options par question, comme dans les annales${options === 2 ? " (vrai/faux : une affirmation à juger, options « Vrai » et « Faux » dans la langue de l'examen)" : ""} ; jamais plus, jamais moins.`;
 }
 
-/** Un QCM exploitable : énoncé, options texte au nombre attendu, clé(s) valide(s). Sinon écarté (et comblé). */
-function wellFormed(raw: unknown, expected: number | null): boolean {
+/** Un QCM exploitable : énoncé, au moins deux options texte, clé(s) valide(s). Sinon écarté (et comblé). */
+function wellFormed(raw: unknown): boolean {
   const it = raw as Partial<QcmItem> | null;
   if (!it || typeof it.stem !== "string" || !it.stem.trim()) return false;
-  if (!Array.isArray(it.options) || !optionCountFits(it.options.length, expected) || !it.options.every((o) => typeof o === "string" && o.trim())) return false;
+  if (!Array.isArray(it.options) || it.options.length < OPTIONS_MIN || !it.options.every((o) => typeof o === "string" && o.trim())) return false;
   const n = it.options.length;
   // Sans explication, la clé n'est pas justifiée dans le corrigé (banc du 04/11 : un lot entier sans).
   const key = (raw as { justification?: { key?: unknown } } | null)?.justification?.key;
@@ -788,7 +797,7 @@ export function applyFinalQualityVerdicts<T extends Pick<QcmItem, "options" | "c
     const v = byIndex.get(index);
     if (!v || !v.key || v.offCourse) return [];
     // Les deux verdicts se cumulent : l'audit ne masque jamais un distracteur que la vérification a relevé.
-    const trivial = [...new Set([...(v.trivial ?? []), ...(it.trivialDistractors ?? [])].filter((k) => Number.isInteger(k) && k >= 0 && k < it.options.length && !it.correct.includes(k)))];
+    const trivial = replaceableDistractors([...(v.trivial ?? []), ...(it.trivialDistractors ?? [])], it);
     return [{ ...it, verified: 1, judgeOk: true, rejected: null, trivialDistractors: trivial.length ? trivial : null }];
   });
 }
@@ -1009,7 +1018,7 @@ export async function generateQcmBatch(
   const raws = r.items.slice(0, n);
   for (let i = 0; i < raws.length; i++) {
     const raw = raws[i];
-    if (!wellFormed(raw, options ?? (mode === "single" ? SCQ_OPTIONS : null))) continue;
+    if (!wellFormed(raw)) continue;
     const type = typeInMode(raw.correct, raw.type, mode);
     if (!type) {
       step(`QCM à plusieurs bonnes réponses écarté : l'examen est à réponse unique`, 30);
@@ -1299,11 +1308,11 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     q.nameOnly = typeof r.name_only === "boolean" ? r.name_only : null;
     q.judgeIssue = r.issue?.trim() ? r.issue.trim().slice(0, 240) : null;
     // Plausibilité de chaque distracteur (une bonne réponse n'en est jamais un).
-    const trivial = [...new Set([
-      ...(Array.isArray(r.trivial_distractors) ? r.trivial_distractors.filter((k) => Number.isInteger(k) && k >= 0 && k < q.options.length && !(q.correct ?? []).includes(k)) : []),
+    const trivial = replaceableDistractors([
+      ...(Array.isArray(r.trivial_distractors) ? r.trivial_distractors : []),
       ...(distractorOnly ? offOptions : []),
       ...(q.duplicateOptions ?? []),
-    ])];
+    ], q);
     q.trivialDistractors = trivial.length ? trivial : null;
     const keyMatch = JSON.stringify([...(q.correct ?? [])].sort()) === JSON.stringify([...(r.correct ?? [])].sort());
     // Une question à réponse unique que le juge résout avec 0 ou plusieurs réponses est ambiguë :
@@ -1716,10 +1725,6 @@ function spareMargin(count: number): number {
  */
 const DEFAULT_PHASE_MS: Record<string, number> = { QCM: 6 * 60_000, "Questions ouvertes": 6 * 60_000, PDF: 30_000 };
 
-/** QCM d'un examen demandé sans nombre pour un cours dont le format n'est pas à choix (historique). */
-const QCM_FALLBACK_COUNT = 12;
-
-
 /**
  * RÉPARTITION D'UN EXAMEN QCM : sujets des QCM, moules, et réserve de notions pour remplacer une
  * question écartée. Calculée une fois par examen ; une reprise réutilise celle de son point de
@@ -1850,8 +1855,10 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const format = await resolveExamFormat().catch(() => null);
   // count peut être 0 (drill « 0 QCM + 1 ouvert ») → on respecte le choix explicite ; sinon le plan
   // du format (lib/exam-format) : le nombre de l'annale, aucune ouverte inventée (audit 3, P0-4).
-  const mockPlan = format ? planMockExam(format, {}) : null;
-  const count = Math.max(0, opts.count ?? (mockPlan?.generator === "qcm" ? mockPlan.qcmCount : QCM_FALLBACK_COUNT));
+  // Un cours d'un autre format : le plan d'un QCM demandé pour cet examen (lib/exam-format).
+  const coursePlan = format ? planMockExam(format, {}) : null;
+  const mockPlan = coursePlan?.generator === "qcm" || !format ? coursePlan : planMockExam(requestedFormat(format, "qcm"), {});
+  const count = Math.max(0, opts.count ?? (mockPlan?.generator === "qcm" ? mockPlan.qcmCount : QCM_DEFAULT));
   const openCount = Math.max(0, opts.openCount ?? (mockPlan?.generator === "qcm" ? mockPlan.openCount : 0));
   if (count === 0 && openCount === 0) throw new Error("Composition vide : choisis au moins 1 QCM ou 1 question ouverte.");
   // « Mets l'accent sur… » (focus générique) : garantit ~2 QCM sur le thème choisi SANS

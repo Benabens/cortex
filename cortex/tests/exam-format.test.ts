@@ -369,6 +369,14 @@ test("la composition proposée suit le même plan : 60 QCM d'annale → 40, aucu
   assert.deepEqual({ kind: c.kind, qcm: c.qcm, open: c.open }, { kind: "qcm", qcm: 40, open: 0 });
 });
 
+test("annale mixte : ses exercices de calcul et de preuve restent des questions ouvertes", async () => {
+  const id = await newCourse({ language: "en" });
+  await addSource(id, "final", "Final 2025", ENGLISH_FINAL);
+  await saveProfile(id, allQcmProfile(10, { question_types: [{ type: "scq", approx_count: 10, share_pct: 50 }, { type: "calc", approx_count: 2, share_pct: 30 }, { type: "proof", approx_count: 1, share_pct: 20 }] }));
+  const f = await resolve(id);
+  assert.deepEqual({ kind: f.kind, n: f.questionCount, open: f.openCount }, { kind: "mixed", n: 10, open: 3 });
+});
+
 const SPANISH = "La probabilidad de que el evento ocurra depende de la distribución. En este capítulo se estudian las variables aleatorias y sus propiedades, que son la base del curso. Cuando la muestra es grande, la media se acerca al valor esperado, pero hay que comprobar las hipótesis del teorema.";
 
 test("langue : l'espagnol est reconnu, sans brouiller le français, l'italien ni le portugais", async () => {

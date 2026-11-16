@@ -1,7 +1,7 @@
 import { currentCourse } from "@/db/client";
 import { getCourse } from "@/lib/courses";
 import { getFormatProfile } from "@/lib/format";
-import { planMockExam, resolveExamFormat } from "@/lib/exam-format";
+import { durationOf, planMockExam, resolveExamFormat } from "@/lib/exam-format";
 import { profile } from "@/lib/course-profile";
 
 /**
@@ -53,7 +53,7 @@ export async function getComposition(): Promise<CompositionPlan> {
       course,
       kind: "qcm",
       summary: format.summary,
-      durationMin: format.durationMin || null,
+      durationMin: durationOf(format),
       totalPoints: null,
       qcm: plan.qcmCount,
       open: plan.openCount,
@@ -72,8 +72,8 @@ export async function getComposition(): Promise<CompositionPlan> {
     return {
       course,
       kind: "qcm",
-      summary: fmt.format_summary || `${c.examCode} : ~${plan.qcmCount} QCM (SCQ+MCQ) + ~${plan.openCount} ouvertes`,
-      durationMin: format.durationMin || null,
+      summary: fmt.format_summary || `${c.examCode} : ~${plan.qcmCount} QCM (SCQ+MCQ)${plan.openCount ? ` + ~${plan.openCount} ouvertes` : ""}`,
+      durationMin: durationOf(format),
       totalPoints: fmt.total_points ?? null,
       qcm: plan.qcmCount,
       open: plan.openCount,
@@ -88,7 +88,7 @@ export async function getComposition(): Promise<CompositionPlan> {
       course,
       kind: "exam",
       summary: format.summary,
-      durationMin: format.durationMin || null,
+      durationMin: durationOf(format),
       totalPoints: plan.totalPoints,
       exercises: plan.blockCount,
       categories: plan.sections.map((s) => s.name),
@@ -109,7 +109,7 @@ export async function getComposition(): Promise<CompositionPlan> {
     summary: format.basis === "annales"
       ? `${c.examCode} ${c.examName}, ${c.examKind} : ${slots.length} exercices (calcul/trace : ${categories.join(", ")}), ${format.durationMin ? `${format.durationMin} min, ` : ""}${totalPoints} pts`
       : format.summary,
-    durationMin: format.durationMin || null,
+    durationMin: durationOf(format),
     totalPoints,
     exercises,
     categories,

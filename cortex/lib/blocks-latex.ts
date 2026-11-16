@@ -102,7 +102,7 @@ async function cover(dateLabel: string, n: number, totalPts: number, durationMin
     const w = courseWords();
     return neutralCoverTex({
       course: getCourse(currentCourse()), w, dateTex: localDate(dateLabel, w), durationMin, totalPts,
-      instructions: [w.blocks(n, totalPts), w.blocksHow, w.onSheet],
+      instructions: [...(durationMin ? [w.duration(durationText(durationMin, w))] : []), w.blocks(n, totalPts), w.blocksHow, w.onSheet],
     });
   }
   // EPFL hors anglais : même garde, consignes dans la langue de l'examen.
