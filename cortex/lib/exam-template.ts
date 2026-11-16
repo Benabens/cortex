@@ -234,7 +234,7 @@ const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
     misconception: "misconception", answers: "Answers and justifications:",
   },
   fr: {
-    nameField: "Nom :", idField: "N° d'étudiant :", durationLabel: "Durée :", totalLabel: "Total :", finalExam: "Examen final",
+    nameField: "Nom :", idField: String.raw`N\textsuperscript{o} d'étudiant :`, durationLabel: "Durée :", totalLabel: "Total :", finalExam: "Examen final",
     point: "point", points: "points", question: "Question", openQuestion: "Question ouverte", part: "Partie",
     qcmPart: "Questions à choix multiple", openPart: "Questions ouvertes", single: "choix unique", multiple: "choix multiple",
     qcmConvention: "Une question à choix unique a exactement une bonne réponse ; une question à choix multiple en a une ou plusieurs.",
@@ -276,7 +276,7 @@ const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
     misconception: "idea sbagliata", answers: "Risposte e giustificazioni:",
   },
   es: {
-    nameField: "Nombre:", idField: "N.º de estudiante:", durationLabel: "Duración:", totalLabel: "Total:", finalExam: "Examen final",
+    nameField: "Nombre:", idField: String.raw`N.\textsuperscript{o} de estudiante:`, durationLabel: "Duración:", totalLabel: "Total:", finalExam: "Examen final",
     point: "punto", points: "puntos", question: "Pregunta", openQuestion: "Pregunta abierta", part: "Parte",
     qcmPart: "Preguntas de opción múltiple", openPart: "Preguntas abiertas", single: "opción única", multiple: "opción múltiple",
     qcmConvention: "Una pregunta de opción única tiene exactamente una respuesta correcta; una de opción múltiple, una o varias.",
@@ -290,7 +290,7 @@ const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
     misconception: "idea errónea", answers: "Respuestas y justificaciones:",
   },
   pt: {
-    nameField: "Nome:", idField: "N.º de estudante:", durationLabel: "Duração:", totalLabel: "Total:", finalExam: "Exame final",
+    nameField: "Nome:", idField: String.raw`N.\textsuperscript{o} de estudante:`, durationLabel: "Duração:", totalLabel: "Total:", finalExam: "Exame final",
     point: "ponto", points: "pontos", question: "Questão", openQuestion: "Questão aberta", part: "Parte",
     qcmPart: "Questões de escolha múltipla", openPart: "Questões abertas", single: "escolha única", multiple: "escolha múltipla",
     qcmConvention: "Uma questão de escolha única tem exatamente uma resposta correta; uma de escolha múltipla, uma ou mais.",
@@ -333,7 +333,7 @@ function examKindText(c: CourseConfig, w: CoverWords): string {
 
 /** Titre du cours sur une ligne : « CODE -- Nom » (le code est facultatif). */
 function courseTitle(c: CourseConfig): string {
-  return [texEscape(c.examCode).replace(/-/g, "--"), texEscape(c.examName)].filter(Boolean).join(String.raw` \quad-- `);
+  return [texEscape(c.examCode).replace(/-/g, "--"), texEscape(c.examName)].filter(Boolean).join(" -- ");
 }
 
 /**

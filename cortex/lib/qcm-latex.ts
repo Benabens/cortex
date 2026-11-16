@@ -127,6 +127,8 @@ type QcmLabels = {
   color: string;
   qcmPart: (withOpen: boolean) => string;
   openPart: (withQcm: boolean) => string;
+  /** Saut de page avant la PREMIÈRE question ouverte (l'EPFL laisse le titre de partie seul sur sa page). */
+  pageBeforeFirstOpen: boolean;
 };
 
 const EPFL_LABELS: QcmLabels = {
@@ -140,6 +142,7 @@ const EPFL_LABELS: QcmLabels = {
   color: solutionColor("epfl"),
   qcmPart: (withOpen) => (withOpen ? "First part \\quad-- Multiple-choice and single-choice questions" : "Multiple-choice and single-choice questions"),
   openPart: (withQcm) => (withQcm ? "Second part \\quad-- Open questions" : "Open questions"),
+  pageBeforeFirstOpen: true,
 };
 
 function qcmLabels(): QcmLabels {
@@ -156,6 +159,7 @@ function qcmLabels(): QcmLabels {
     color: solutionColor("neutral"),
     qcmPart: (withOpen) => (withOpen ? `${w.part} 1 \\quad-- ${w.qcmPart}` : w.qcmPart),
     openPart: (withQcm) => (withQcm ? `${w.part} 2 \\quad-- ${w.openPart}` : w.openPart),
+    pageBeforeFirstOpen: false,
   };
 }
 
@@ -199,7 +203,7 @@ function renderOpen(q: ExamQuestion, n: number, withSol: boolean, defaultPts: nu
   const stmt = alignTikzNodes((q.statement_tex ?? "").trim());
   const hasSpace = /\\rulelines|\\diskgrid|\\statesim|\\packetgrid|\\forwardgrid/.test(stmt);
   return [
-    String.raw`\clearpage\needspace{4\baselineskip}{\large\textbf{${L.openQuestion(n)} \quad-- ${esc(q.concept)} \hfill [${L.points(q.points ?? defaultPts)}]}}\par\vspace{4pt}\hrule\vspace{8pt}`,
+    String.raw`${n > 1 || L.pageBeforeFirstOpen ? String.raw`\clearpage` : String.raw`\par\vspace{8pt}`}\needspace{4\baselineskip}{\large\textbf{${L.openQuestion(n)} \quad-- ${esc(q.concept)} \hfill [${L.points(q.points ?? defaultPts)}]}}\par\vspace{4pt}\hrule\vspace{8pt}`,
     stmt,
     hasSpace ? "" : String.raw`\vspace{4pt}\rulelines{8}`,
     withSol ? String.raw`\par\medskip{\textbf{\color{${L.color}}${L.openSolution}}}\par\smallskip` + "\n" + alignTikzNodes(q.solution_tex ?? "") : "",
