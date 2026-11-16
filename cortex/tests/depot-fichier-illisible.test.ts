@@ -107,3 +107,32 @@ test("un fichier illisible déjà rangé (dépôt d'avant ce contrôle) se retir
   await del("../../dehors.pdf");
   assert.ok(fs.existsSync(path.join(tmp, "dehors.pdf")));
 });
+
+test("retirer un fichier : un chemin d'annale en sous-dossier ne supprime jamais l'annale du même nom", async () => {
+  const c = await theCourse();
+  fs.mkdirSync(c.refsDir, { recursive: true });
+  fs.writeFileSync(path.join(c.refsDir, "final-2017.pdf"), textPdf("Final 2017, exercice 1"));
+  const { runWithCourse } = await import("../db/client");
+  const { ingestRefFile } = await import("../lib/sources");
+  await runWithCourse(c.id, () => ingestRefFile("refs/final-2017.pdf"));
+  const mod = await import("../app/api/sources/route");
+  await mod.DELETE(new NextRequest(`http://cortex.test/api/sources?course=${c.id}&path=${encodeURIComponent("refs/x/final-2017.pdf")}`, { method: "DELETE" }));
+  assert.ok(storedFiles(c.refsDir).includes("final-2017.pdf"));
+});
+
+test("retirer un scan sans texte (contenu ou annale) supprime bien le fichier : il ne revient pas au rapport suivant", async () => {
+  const c = await theCourse();
+  fs.mkdirSync(path.join(c.contentRoot, "lectures"), { recursive: true });
+  fs.writeFileSync(path.join(c.contentRoot, "lectures", "scan.pdf"), textPdf(null));
+  fs.writeFileSync(path.join(c.refsDir, "final-2016.pdf"), textPdf(null));
+  const { ingest } = await import("./helpers/ingest-course");
+  const r = ingest(c.id);
+  assert.equal(r.files?.find((f) => f.path === "lectures/scan.pdf")?.status, "no_text", r.output);
+  assert.equal(r.files?.find((f) => f.path === "refs/final-2016.pdf")?.status, "no_text");
+  const mod = await import("../app/api/sources/route");
+  const del = async (p: string) => (await mod.DELETE(new NextRequest(`http://cortex.test/api/sources?course=${c.id}&path=${encodeURIComponent(p)}`, { method: "DELETE" }))).status;
+  assert.equal(await del("lectures/scan.pdf"), 200);
+  assert.equal(await del("refs/final-2016.pdf"), 200);
+  assert.ok(!storedFiles(c.contentRoot).includes("scan.pdf"));
+  assert.ok(!storedFiles(c.refsDir).includes("final-2016.pdf"));
+});

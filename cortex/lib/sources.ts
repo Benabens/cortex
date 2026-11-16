@@ -324,8 +324,9 @@ export async function addUploadedRef(buffer: Buffer, filename: string): Promise<
  */
 function unreadFileAbsolute(srcPath: string): string | null {
   const course = currentCourse();
-  if (srcPath.startsWith("refs/")) return path.join(REFS_DIR(), path.basename(srcPath));
   if (getCourse(course).paths?.contentRel === "..") return null;
+  // Les annales sont rangées à plat : « refs/x/final.pdf » ne désigne jamais « refs/final.pdf ».
+  if (srcPath.startsWith("refs/")) return srcPath === `refs/${path.basename(srcPath)}` ? path.join(REFS_DIR(), path.basename(srcPath)) : null;
   const root = path.resolve(contentRoot());
   const abs = path.resolve(root, srcPath);
   return abs.startsWith(root + path.sep) ? abs : null;
@@ -335,8 +336,12 @@ function unreadFileAbsolute(srcPath: string): string | null {
 export async function removeUploadedRef(srcPath: string): Promise<void> {
   await ensureRefsSchema();
   const row = await q.get<{ uploaded: number }>(`SELECT uploaded FROM exam_refs WHERE path = ?`, srcPath);
-  // purge corpus
   const srcs = await q.all<{ id: number }>(`SELECT id FROM sources WHERE path = ?`, srcPath);
+  // Non lu : jamais ingéré (abîmé, chiffré) ou ingéré sans aucun passage (scan sans texte).
+  const indexed = srcs.length
+    ? Number((await q.get<{ n: number }>(`SELECT count(*) n FROM items WHERE source_id IN (${srcs.map(() => "?").join(",")})`, ...srcs.map((s) => s.id)))?.n ?? 0)
+    : 0;
+  // purge corpus
   for (const { id } of srcs) {
     await unindexSource(id);
     await q.run(`DELETE FROM items WHERE source_id = ?`, id);
@@ -345,8 +350,8 @@ export async function removeUploadedRef(srcPath: string): Promise<void> {
   await q.run(`DELETE FROM exam_refs WHERE path = ?`, srcPath);
   if (row?.uploaded) {
     await storage().remove(path.join(REFS_DIR(), path.basename(srcPath)));
-  } else if (!row && !srcs.length) {
-    // Jamais lu : il ne compte nulle part, le retirer ne change rien au corpus.
+  } else if (!indexed) {
+    // Il ne compte nulle part : sans suppression du fichier, il reviendrait à l'ingestion suivante.
     const abs = unreadFileAbsolute(srcPath);
     if (abs) await storage().remove(abs);
   }
