@@ -241,7 +241,7 @@ test("origine de navigateur étrangère : 403", async () => {
 
 // ───────────────────────────── lecture ─────────────────────────────
 
-test("outils listés, annotés : lecture sans effet, génération ni destructive ni idempotente", async () => {
+test("outils listés, annotés : lecture sans effet ; génération payante destructive (dépense irréversible), non idempotente", async () => {
   const { access } = await tokenFor(ALICE);
   const { client } = await connect(access);
   const { tools } = await client.listTools();
@@ -254,11 +254,13 @@ test("outils listés, annotés : lecture sans effet, génération ni destructive
     assert.ok(t!.title, `${name} sans titre`);
     assert.ok(t!.outputSchema, `${name} sans outputSchema`);
   }
+  // Une dépense de crédits ne se défait pas : ChatGPT réserve destructiveHint false aux
+  // ajouts purs, Claude veut true pour ce qui modifie des données (docs/annuaires/).
   for (const name of ["generate_mock_exam", "generate_drill", "check_answer"]) {
     const t = byName.get(name);
     assert.ok(t, `${name} absent`);
     assert.equal(t!.annotations?.readOnlyHint, false, name);
-    assert.equal(t!.annotations?.destructiveHint, false, name);
+    assert.equal(t!.annotations?.destructiveHint, true, name);
     assert.equal(t!.annotations?.idempotentHint, false, name);
   }
   await client.close();
@@ -539,6 +541,10 @@ test("solde insuffisant : refusé dès le devis avec le solde, aucun appel au mo
     const r = await call(client, "generate_drill", { concept: "cinématique" });
     assert.equal(r.isError, true);
     assert.equal(errorCode(r), "insufficient_credits");
+    // Le constat sans lien d'achat : ChatGPT refuse qu'une app renvoie vers un paiement.
+    const msg = (r.content ?? []).map((c) => c.text ?? "").join("\n");
+    assert.match(msg, /Solde (insuffisant|épuisé)/);
+    assert.doesNotMatch(msg, /Acheter|https?:\/\//);
     assert.equal(llmCalls, calls);
     await client.close();
   } finally {

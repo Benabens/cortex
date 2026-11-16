@@ -5,7 +5,7 @@ import { getUsageLimits } from "@/lib/billing/limits";
 import { remainingLine } from "@/lib/billing/limits-text";
 import { isOwner } from "@/lib/billing/owner";
 import { costForJob } from "@/lib/jobs";
-import { defineTool } from "../tool";
+import { defineTool, READ_ONLY_HINTS } from "../tool";
 
 const quota = z.object({ used: z.number(), limit: z.number().nullable().describe("null = no daily limit on this instance.") });
 
@@ -82,6 +82,8 @@ export default defineTool({
     "and how many of each kind the student can still launch — the same numbers the app shows and the paid tools enforce. " +
     "Use it before suggesting paid actions or when the student asks how many credits or generations they have left. Read-only and free.",
   kind: "read",
+  annotations: READ_ONLY_HINTS,
+  userSummary: "Lit ton solde de crédits, les coûts et tes limites du jour.",
   input: z.object({}),
   output,
   async run(_args, ctx) {

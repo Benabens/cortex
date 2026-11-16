@@ -47,6 +47,20 @@ export class ToolError extends Error {
   }
 }
 
+/**
+ * Message d'erreur tel qu'il part vers l'assistant : sans lien d'achat. Les refus de
+ * l'app (solde insuffisant…) finissent par « Acheter : <lien vers les crédits> », utile
+ * dans l'app mais interdit dans un assistant : ChatGPT refuse qu'une app vende des
+ * crédits ou renvoie vers une page de paiement (plugin guidelines, 16/11/2026). Le
+ * constat reste (« Solde insuffisant… »), la personne recharge depuis Cortex.
+ */
+export function assistantSafeMessage(message: string): string {
+  return message
+    .replace(/\s*(?:Acheter|Recharger|Buy)\s*:\s*\S+/gi, "")
+    .replace(/\s*https?:\/\/\S*\/compte#(?:credits|abonnement|billing)\S*/gi, "")
+    .trim();
+}
+
 /** Statut HTTP d'un refus de l'app (réservation, pré-checks) → code d'outil. */
 export function codeForStatus(status: number): ToolErrorCode {
   if (status === 402) return "insufficient_credits";
@@ -120,15 +134,40 @@ export type ToolCtx = {
   progress(message: string): Promise<void>;
 };
 
+/**
+ * Indications publiées avec l'outil (ToolAnnotations de la spec MCP), TOUTES
+ * explicites : les annuaires (Claude, ChatGPT) refusent un outil qui en omet, et
+ * les valeurs par défaut de la spec (destructif, monde ouvert) seraient fausses
+ * pour la plupart des outils. Règles (tests/mcp-identity.test.ts) :
+ *  - readOnlyHint : ne change rien au compte (ni données, ni crédits, ni quota) ;
+ *  - destructiveHint : effet irréversible pour la personne — dépenser des crédits,
+ *    remplacer ou effacer une donnée. Un ajout pur (nouveau cours, nouveau
+ *    fichier jamais écrasé, signalement) reste à false ;
+ *  - idempotentHint : rappeler avec les mêmes arguments ne change plus rien ;
+ *  - openWorldHint : va chercher des données hors du compte Cortex (une URL).
+ */
+export type ToolHints = {
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  openWorldHint: boolean;
+};
+
+/** Lecture gratuite : le cas de tous les outils `read`. */
+export const READ_ONLY_HINTS: ToolHints = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+/** Dépense des crédits (et une unité de quota) : irréversible, jamais idempotent. */
+export const SPENDING_HINTS: ToolHints = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false };
+
 export type ToolDef<I extends z.ZodObject = z.ZodObject, O extends z.ZodObject = z.ZodObject> = {
   /** ^[a-z][a-z0-9_]*$ — anglais, lu par le modèle. */
   name: string;
   title: string;
   /** Écrite pour qu'un modèle choisisse le bon outil (anglais). */
   description: string;
+  /** Une ligne en français pour la personne (page « Connecter ton assistant »), sans jargon. */
+  userSummary: string;
   kind: ToolKind;
-  /** Va chercher des données hors de Cortex (annotation openWorldHint) — ex. une URL fournie. */
-  openWorld?: boolean;
+  annotations: ToolHints;
   /** Outil d'écriture qui dépense des crédits (préparation d'un cours) : exige aussi la portée cortex.generate. */
   spends?: boolean;
   input: I;

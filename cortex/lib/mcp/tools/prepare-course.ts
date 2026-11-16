@@ -5,7 +5,7 @@ import { log } from "@/lib/metrics";
 import { redactMessage } from "@/lib/observability";
 import { courseLabel } from "../courses";
 import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, quoteSchema, quoteSummary } from "../schemas";
-import { ToolError, codeForStatus, defineTool, pendingResult } from "../tool";
+import { codeForStatus, defineTool, pendingResult, SPENDING_HINTS, ToolError } from "../tool";
 
 const output = z.object({
   status: z.enum(["confirmation_required", "declined", "started", "already_running"]),
@@ -25,6 +25,8 @@ export default defineTool({
     "confirmation_token ONLY after they explicitly approved (nothing to confirm when nothing is charged). Then runs in the background for several minutes: track it with get_job_status. " +
     "Run it again after adding materials to an already prepared course.",
   kind: "write",
+  annotations: SPENDING_HINTS,
+  userSummary: "Prépare un cours depuis ses supports : format d’examen, puis plan.",
   spends: true,
   input: z.object({ course: courseArg, confirmation_token: confirmationTokenArg }),
   output,
