@@ -3,7 +3,7 @@
  * même rubrique. Toute retouche change son empreinte (tests/bench-rubric.test.ts) et impose
  * une nouvelle version : les runs jugés avant ne sont plus comparables à ceux d'après.
  */
-export const RUBRIC_VERSION = "v1";
+export const RUBRIC_VERSION = "v2";
 
 export const SOLVER_RULES = [
   "Tu es un étudiant excellent qui passe cet examen. Tu ne vois ni la clé ni l'explication.",
@@ -20,12 +20,14 @@ export const ITEM_RULES = [
   "distractors : nombre de mauvaises options ; trivial : indices des mauvaises options qu'un étudiant qui ne connaît PAS le cours élimine quand même (absurde, hors sujet, marqueur d'absolu évident, incohérence grammaticale, longueur qui trahit).",
   "chapter : l'identifiant du chapitre du plan dont relève la question (liste fournie), ou null si aucun ne convient. notion : la notion précise testée, en quelques mots.",
   "code : si la clé dépend de la SORTIE d'un programme montré dans la question, donne { language: \"python\" | \"c\", source: le programme complet exécutable, stdin: l'entrée (souvent vide), expected: la sortie que LA CLÉ affirme } ; sinon null.",
+  "evidence : pour CHAQUE verdict, cite la question via q et fournis au moins une preuve { criterion, option, source, passage }. option est l'indice examiné (la clé pour key/explanation ; le distracteur pour trivial), source le titre exact de l'extrait, passage une citation courte qui permet de vérifier le verdict. Si aucun extrait ne tranche, source vaut « connaissance générale » et passage explicite le raisonnement vérifiable.",
 ].join("\n");
 
 export const DUPLICATE_RULES = [
   "Deux questions sont des doublons si elles testent la même notion ou le même fait sans angle vraiment distinct (même définition demandée, même résultat, même condition).",
   "Exception : si le programme du cours compte moins de notions que l'examen n'a de questions, deux questions sur une même notion sont permises sous des angles vraiment différents.",
   "Une question reprend un examen précédent si elle pose la même question (même notion ET même angle) qu'une question déjà donnée dans un examen précédent du cours, même reformulée.",
+  "Chaque doublon rendu doit inclure une preuve courte qui nomme les deux questions ou la question antérieure et le fait précis identique.",
 ].join("\n");
 
 export const REJECTION_RULES = [
