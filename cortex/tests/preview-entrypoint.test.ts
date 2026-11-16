@@ -1,6 +1,6 @@
 /**
  * PREVIEW PAR PR — Railway crée l'environnement d'une PR en copiant les
- * variables de la PRODUCTION. Le démarrage propre aux PR (railway.json →
+ * variables de la PRODUCTION. Le démarrage propre aux PR (scripts/start.sh →
  * scripts/preview-entrypoint.sh) doit en faire une instance sans effet sur le
  * monde réel, que la garde de démarrage accepte ; ailleurs, il refuse de tourner.
  */

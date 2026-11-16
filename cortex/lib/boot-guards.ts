@@ -33,7 +33,7 @@ const LOOPBACK = ["localhost", "127.0.0.1", "::1"];
 /**
  * PREVIEW PAR PR. Railway crée l'environnement d'une PR en COPIANT les
  * variables de la prod : clé du vrai modèle, Resend, sauvegardes S3, secret de
- * session. scripts/preview-entrypoint.sh (démarrage propre aux PR, railway.json)
+ * session. scripts/preview-entrypoint.sh (démarrage propre aux PR, scripts/start.sh)
  * les neutralise ; on vérifie ici le résultat, sans le croire sur parole. Rend
  * les raisons pour lesquelles l'instance n'est PAS une preview assainie
  * ([] = c'en est une). Chaque critère ferme une fuite précise :

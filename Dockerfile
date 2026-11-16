@@ -178,4 +178,6 @@ EXPOSE 3000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=8 \
   CMD curl -fsS "http://localhost:${PORT}/api/health" || exit 1
 
-CMD ["bash", "scripts/docker-entrypoint.sh"]
+# start.sh aiguille : preview de PR Railway → preview-entrypoint.sh, sinon
+# docker-entrypoint.sh (ce que faisait railway.json, lu jusqu'au 2026-12-01).
+CMD ["bash", "scripts/start.sh"]

@@ -4,7 +4,7 @@
 # sont pas activés dans Railway (cortex/scripts/setup-fiabilite.sh, étape 3,
 # payante au-delà des 5 $ du plan Hobby).
 #
-# La preview démarre par cortex/scripts/preview-entrypoint.sh (railway.json) :
+# La preview démarre par cortex/scripts/preview-entrypoint.sh (cortex/scripts/start.sh) :
 # base Postgres vierge de la PR, LLM hermétique, aucun e-mail, Stripe test seul,
 # auth persona E2E autorisée par la garde de démarrage UNIQUEMENT là.
 #

@@ -385,7 +385,7 @@ step_previews() {
   fi
   browse "$RW_ENVIRONMENTS_PAGE"
   info "PR Environments : Enable · Base environment : production · PR des bots : non."
-  info "Le démarrage des previews est déjà prévu (railway.json → scripts/preview-entrypoint.sh) :"
+  info "Le démarrage des previews est déjà prévu (image : scripts/start.sh → scripts/preview-entrypoint.sh) :"
   info "secrets de la prod retirés, base vierge, LLM hermétique, Stripe test seul."
   wait_enter "Activé ?"
   DONE+=("4 Previews de PR activées (plafond de dépense posé)")
