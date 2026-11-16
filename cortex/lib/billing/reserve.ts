@@ -153,8 +153,8 @@ export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
     }
     if (tracking && !owner) {
       await tx.run(
-        `INSERT INTO gen_events (user_id, bucket, kind, course, day, created_at) VALUES (?,?,?,?,?,?)`,
-        userId, o.bucket, o.kind, course, day, t,
+        `INSERT INTO gen_events (user_id, bucket, kind, course, day, created_at, ref) VALUES (?,?,?,?,?,?,?)`,
+        userId, o.bucket, o.kind, course, day, t, o.ref,
       );
     }
     if (keepSlot) {
@@ -176,6 +176,20 @@ export async function releaseJobSlot(userId: string, ref: string): Promise<void>
     await authRun(`DELETE FROM active_jobs WHERE user_id = ? AND job_ref = ?`, userId, ref);
   } catch (e) {
     log("warn", "jobs.slot_release_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
+  }
+}
+
+/**
+ * Rend la génération qu'une réservation a comptée dans le quota du jour : seulement pour
+ * une réservation qui n'a servi à rien (création perdue au double clic). Un échec ou un
+ * remboursement garde sa place : le quota borne les relances. Best-effort.
+ */
+export async function releaseQuotaEvent(userId: string, ref: string): Promise<void> {
+  if (!quotaTrackingActive()) return;
+  try {
+    await authRun(`DELETE FROM gen_events WHERE user_id = ? AND ref = ?`, userId, ref);
+  } catch (e) {
+    log("warn", "billing.quota_release_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
   }
 }
 
