@@ -7,7 +7,7 @@ import { PublicFetchError, readPublicHttps, type PublicFetcher } from "@/lib/pub
 import { checkStorage } from "@/lib/storage-quota";
 import { storage as files } from "@/lib/storage";
 import { unreadableDocument } from "@/lib/document-check";
-import { directDownloadUrl } from "@/lib/share-links";
+import { directDownloadUrl, sharedRedirectTarget } from "@/lib/share-links";
 import * as cheerio from "cheerio";
 
 /**
@@ -164,9 +164,18 @@ export async function addUrlSource(
   }
   // Lien de partage Drive / Docs / Dropbox : lu à son adresse de téléchargement direct.
   const link = directDownloadUrl(a.url);
+  const opts = { maxBytes: SOURCE_MAX_BYTES, timeoutMs: FETCH_TIMEOUT_MS, accept: ACCEPT, userAgent: "Cortex-Sources/1.0" };
   let res;
   try {
-    res = await fetcher(link.url, { maxBytes: SOURCE_MAX_BYTES, timeoutMs: FETCH_TIMEOUT_MS, accept: ACCEPT, userAgent: "Cortex-Sources/1.0" });
+    // Google et Dropbox servent le fichier depuis leur hôte de téléchargement : deux sauts au plus.
+    let target = link.url;
+    for (let hop = 0; ; hop++) {
+      try { res = await fetcher(target, opts); break; } catch (e) {
+        const next = e instanceof PublicFetchError && e.reason === "redirect" && hop < 2 ? sharedRedirectTarget({ ...link, url: target }, e.location) : null;
+        if (!next) throw e;
+        target = next;
+      }
+    }
   } catch (e) {
     if (!(e instanceof PublicFetchError)) throw e;
     if (e.reason === "too_large") throw new SourceError(413, `Document trop volumineux (maximum ${SOURCE_MAX_BYTES / 1024 / 1024} Mo).`);
