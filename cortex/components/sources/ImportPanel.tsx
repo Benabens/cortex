@@ -10,16 +10,16 @@ import { useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@/lib/ux/a
 import { cn } from "@/lib/ux/cn";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
-import { FOLDER_EXTENSIONS, prepareCourseImport, type FolderImportRefusal } from "@/lib/folder-import";
+import { ARCHIVE_FILE, FOLDER_EXTENSIONS, prepareCourseImport, type FolderImportRefusal } from "@/lib/folder-import";
 import { ingestProblems, type IngestProblem } from "@/lib/ingest-report";
 import { apiDelete } from "@/lib/ux/write";
 
-const ACCEPT = ".pdf,.docx,.pptx,.html,.htm,.txt,.md,.zip";
+const ACCEPT = ".pdf,.docx,.pptx,.html,.htm,.txt,.md,.zip,.imscc,.mbz";
 /** Annales : Word et PowerPoint en plus (lus comme le reste du cours). Autres zones : formats de /api/sources/add. */
 const PAST_EXAM_FILES = /\.(pdf|docx|pptx|html?|txt|md)$/i;
 const OTHER_FILES = /\.(pdf|html?|txt|md)$/i;
 /** Un dossier de cours contient plus que des annales : slides, séries, images, notes. */
-const ACCEPT_FOLDER_ATTRIBUTE = [...FOLDER_EXTENSIONS.map((ext) => `.${ext}`), ".zip"].join(",");
+const ACCEPT_FOLDER_ATTRIBUTE = [...FOLDER_EXTENSIONS.map((ext) => `.${ext}`), ".zip", ".imscc", ".mbz"].join(",");
 
 /**
  * Ce que sont les fichiers déposés. Une annale décide du format ; sans annale, les
@@ -118,7 +118,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   };
 
   const upload = async (files: FileList | File[]) => {
-    if ([...files].some((file) => /\.zip$/i.test(file.name))) {
+    if ([...files].some((file) => ARCHIVE_FILE.test(file.name))) {
       await importFolder(files);
       return;
     }
@@ -342,8 +342,9 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
         <p className="mt-2 text-[0.76rem] leading-relaxed text-ink-3">
           Finals et midterms vont dans tes annales : ce sont eux qui fixent le format. Slides,
           séries, documents Word et notes rejoignent le reste du cours. 30 Mo maximum par
-          fichier, dans la limite de stockage de ton compte. Les ZIP sont décompressés dans ton
-          navigateur, même s’ils contiennent une autre archive.
+          fichier, dans la limite de stockage de ton compte. Les ZIP, exports Canvas (.imscc) et
+          sauvegardes Moodle (.mbz) sont décompressés dans ton navigateur, même s’ils contiennent
+          une autre archive.
         </p>
       </div>
 

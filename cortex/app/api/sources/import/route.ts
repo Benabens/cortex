@@ -1,6 +1,6 @@
 import { currentUser } from "@/db/context";
 import { coursePaths, getCourse } from "@/lib/courses";
-import { FOLDER_EXTENSIONS, IMAGE_FILE, IMAGE_REFUSAL, SOURCE_FILE_MAX_BYTES } from "@/lib/folder-import";
+import { FOLDER_EXTENSIONS, IMAGE_FILE, IMAGE_REFUSAL, LEGACY_FILE, LEGACY_REFUSAL, SOURCE_FILE_MAX_BYTES } from "@/lib/folder-import";
 import { classifyFile } from "@/lib/import-folder";
 import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { unreadableDocument } from "@/lib/document-check";
@@ -56,6 +56,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
 
   const file = files[0];
   if (IMAGE_FILE.test(file.name)) return NextResponse.json({ error: `${file.name} : ${IMAGE_REFUSAL}` }, { status: 415 });
+  if (LEGACY_FILE.test(file.name)) return NextResponse.json({ error: `${file.name} : ${LEGACY_REFUSAL}` }, { status: 415 });
   const rel = safeRelPath(String(form.get("relpath") ?? file.name));
   if (!rel) return NextResponse.json({ error: `${file.name} : fichier caché ou format non pris en charge.` }, { status: 415 });
   if (file.size > SOURCE_FILE_MAX_BYTES) {
