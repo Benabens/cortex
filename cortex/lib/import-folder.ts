@@ -1,5 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { coursePaths, DEFAULT_COURSE } from "@/lib/courses";
+import { examKind, examYear } from "@/lib/exam-names";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -38,11 +39,8 @@ export function classifyFile(rel: string): { bucket: "refs" | "lectures" | "seri
   const year = yearMatch ? +yearMatch[1] : null;
   // Une image n'est jamais lue : « exam_2023_p1.jpg » ne doit pas compter parmi les annales.
   if (/\.(png|jpe?g|webp)$/.test(f)) return { bucket: "images", type: "image", year };
-  const isExam = /\b(final|midterm|mid-?term|exam|partiel)\b/.test(f);
-  if (isExam && (year || /\bexam\b/.test(f))) {
-    const kind = /midterm|mid-?term|partiel/.test(f) ? "midterm" : "final";
-    return { bucket: "refs", type: kind, year };
-  }
+  const kind = examKind(rel);
+  if (kind) return { bucket: "refs", type: kind, year: examYear(rel) };
   if (/\/notes?\/|study.?guide|hints|scope|conventions?|checklist|\bplan\b|syllabus|formula|cheat/.test(f)) return { bucket: "notes", type: "note", year: null };
   if (/s[ée]rie|exercise|\bexo\b|tutorial|homework|pset|problem.?set|\btd\b|\btp\b|solution|corrig/.test(f)) return { bucket: "series", type: "serie", year: null };
   if (/lecture|cours|slides?|chapter|chapitre|\bweek\b|\bcm\b|handout/.test(f) || ext === ".pptx" || ext === ".docx") return { bucket: "lectures", type: "course_pdf", year: null };
