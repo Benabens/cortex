@@ -1812,7 +1812,7 @@ async function planFactsOf(labels: string[], count: number, step: StepCb, langua
 /** Génère un examen QCM complet (N QCM + M ouvertes), vérifié, persisté, rendu en PDF.
  *  `count`/`openCount` : la COMPOSITION choisie par l'utilisateur (composeur). `focus` : « Mets l'accent
  *  sur… » (générique) — garantit ~2 QCM sur le thème sans monopoliser (count ≤ 2 → entièrement ciblé). */
-export async function generateQcmExam(opts: { count?: number; openCount?: number; focus?: string; onStep?: StepCb; onExamReady?: (examId: number) => void | Promise<void>; phaseMs?: Record<string, number>; checkpoint?: QcmCheckpointStore } = {}): Promise<QcmExamResult> {
+export async function generateQcmExam(opts: { count?: number; openCount?: number; focus?: string; onStep?: StepCb; onExamReady?: (examId: number, order: { requested: number }) => void | Promise<void>; phaseMs?: Record<string, number>; checkpoint?: QcmCheckpointStore } = {}): Promise<QcmExamResult> {
   await ensureQcmSchema();
   const report = opts.onStep ?? (() => {});
   // TEMPS RESTANT — avancement PAR PHASE (lib/progress) dès que les lots sont connus : les
@@ -2630,7 +2630,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   if (openCount > 0 && all.length) {
     await q.run(`UPDATE exams SET verify_summary = ? WHERE id = ?`, `${qcmExamSummary({ count: all.length, requested: count, verified, open: 0, openRequested: 0 })}, questions ouvertes en cours`, examId);
     step(`${all.length} QCM visibles dans l'examen #${examId} : questions ouvertes en cours…`, 82);
-    await opts.onExamReady?.(examId);
+    await opts.onExamReady?.(examId, { requested: count + openCount });
   }
   await openPhase;
   if (openCount > 0) logPhase("Questions ouvertes", tOpen);

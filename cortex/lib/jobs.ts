@@ -40,7 +40,7 @@ export type Job = {
 export async function ensureJobsSchema(): Promise<void> {
   await q.ensureTable("jobs");
   // Colonnes de durabilité — rattrapage pour les DB existantes.
-  try { await q.ensureColumns("jobs", ["attempts", "max_attempts", "heartbeat_at", "checkpoint_json", "worker_id", "credit_ref", "report_json"]); } catch {}
+  try { await q.ensureColumns("jobs", ["attempts", "max_attempts", "heartbeat_at", "checkpoint_json", "worker_id", "credit_ref", "report_json", "ordered"]); } catch {}
 }
 // (pas d'appel top-level : la table jobs est créée à la demande dans la DB du cours courant)
 
@@ -56,13 +56,14 @@ export async function createJob(type: JobType, target?: string): Promise<number>
  * Création EXCLUSIVE (anti double-exécution) : re-vérifie le job actif du même
  * type DANS une transaction (le check `activeJob` des routes est un TOCTOU —
  * deux POST concurrents pouvaient spawner 2 workers). Renvoie le job existant
- * si un run du même type est déjà actif.
+ * si un run du même type est déjà actif. `costCenti` : ce que CETTE création a
+ * débité (0 pour un job existant réutilisé, le propriétaire ou sans facturation).
  */
-export async function createJobExclusive(type: JobType, target?: string): Promise<{ id: number; existing: boolean }> {
+export async function createJobExclusive(type: JobType, target?: string): Promise<{ id: number; existing: boolean; costCenti: number }> {
   await ensureJobsSchema();
   const activeSql = `SELECT id FROM jobs WHERE status IN ${ACTIVE_STATES} AND type = ? ORDER BY id DESC LIMIT 1`;
   const already = await q.get<{ id: number }>(activeSql, type);
-  if (already) return { id: already.id, existing: true };
+  if (already) return { id: already.id, existing: true, costCenti: 0 };
 
   // POINT UNIQUE de la comptabilité de génération : UNE réservation atomique —
   // rafale, quota du jour, places en cours, solde — AVANT que le job n'existe.
@@ -76,6 +77,7 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
   const { isCourseDeleting } = await import("@/lib/course-deletion");
   if (await isCourseDeleting(user, course)) throw new ReservationRefused(409, "Ce cours est en cours de suppression : aucune génération possible.");
   let ref: string | null = null;
+  let costCenti = 0;
   if (type !== "ingest") {
     const { reserveGeneration } = await import("@/lib/billing/reserve");
     ref = `job:${user}:${course}:${crypto.randomUUID()}`;
@@ -90,6 +92,7 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
       throw new ReservationRefused(503, "Facturation indisponible, réessaie dans un instant.");
     }
     if (!r.ok) throw new ReservationRefused(r.status, r.error);
+    costCenti = r.costCenti;
   }
 
   // Insertion EXCLUSIVE : le job actif du même type est re-vérifié DANS la
@@ -105,16 +108,17 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
     return { id, existing: false };
   });
   if (res.existing && ref) await releaseReservation(type, ref, user);
-  return res;
+  return { ...res, costCenti: res.existing ? 0 : costCenti };
 }
 
-/** Rend une réservation qui n'a finalement servi à rien (course perdue à l'insertion). */
+/** Rend une réservation qui n'a finalement servi à rien (course perdue à l'insertion) : crédit, place en cours et génération du jour. */
 async function releaseReservation(type: JobType, ref: string, user: string): Promise<void> {
   try {
     const { refundGeneration } = await import("@/lib/billing/credits");
-    const { releaseJobSlot } = await import("@/lib/billing/reserve");
+    const { releaseJobSlot, releaseQuotaEvent } = await import("@/lib/billing/reserve");
     await refundGeneration(type, ref, user);
     await releaseJobSlot(user, ref);
+    await releaseQuotaEvent(user, ref);
   } catch { /* best-effort */ }
 }
 
@@ -230,8 +234,8 @@ export async function heartbeatJob(id: number): Promise<void> {
 
 const TERMINAL_STATES: readonly JobStatus[] = ["done", "error", "canceled"];
 
-export async function setJob(id: number, fields: Partial<{ status: JobStatus; currentStep: string; progress: number; resultPath: string; resultId: number; error: string; pid: number }>): Promise<void> {
-  const map: Record<string, string> = { status: "status", currentStep: "current_step", progress: "progress", resultPath: "result_path", resultId: "result_id", error: "error", pid: "pid" };
+export async function setJob(id: number, fields: Partial<{ status: JobStatus; currentStep: string; progress: number; resultPath: string; resultId: number; ordered: number; error: string; pid: number }>): Promise<void> {
+  const map: Record<string, string> = { status: "status", currentStep: "current_step", progress: "progress", resultPath: "result_path", resultId: "result_id", ordered: "ordered", error: "error", pid: "pid" };
   const sets: string[] = [];
   const vals: any[] = [];
   for (const [k, v] of Object.entries(fields)) {
@@ -594,13 +598,30 @@ async function jobCreditRef(jobId: number): Promise<string> {
 }
 
 /**
+ * Ce qu'un examen QCM a déjà LIVRÉ : à la livraison progressive (onExamReady), le job reçoit
+ * result_id (questions visibles sur /mock/<id>) et `ordered`, la taille commandée telle que le
+ * générateur l'a résolue — format du cours compris, la cible n'en dit rien quand elle est vide.
+ * Questions fermées et ouvertes comptées ensemble. null : rien de livré, ou pas un QCM.
+ */
+async function qcmDelivery(jobId: number): Promise<{ produced: number; requested: number } | null> {
+  const row = await q.get<{ result_id: number | null; ordered: number | null }>(`SELECT result_id, ordered FROM jobs WHERE id = ?`, jobId);
+  if (!row?.result_id || !row.ordered) return null;
+  const requested = Number(row.ordered);
+  const closed = (await q.get<{ n: number }>(`SELECT count(*) n FROM qcm_items WHERE exam_id = ?`, row.result_id))?.n ?? 0;
+  const open = (await q.get<{ n: number }>(`SELECT count(*) n FROM exam_questions WHERE exam_id = ? AND source_inspiration = 'qcm-open'`, row.result_id))?.n ?? 0;
+  return { produced: Number(closed) + Number(open), requested };
+}
+
+/**
  * Rend les crédits d'un job qui ne produira RIEN. Idempotent et seulement-si-
  * débité (cf. credits.ts). No-op sans facturation. Rend les centièmes rendus.
  *  - "failed" (échec définitif, zombie épuisé) : rendu EN ENTIER, même si des
  *    appels ont coûté — l'utilisateur n'a rien reçu, l'échec est le nôtre
  *    (réponse illisible, fournisseur en panne). L'abus reste borné : le quota
  *    quotidien de générations n'est pas rendu, et la dépense par compte et par
- *    jour est plafonnée en amont (lib/llm, assertSpendCap).
+ *    jour est plafonnée en amont (lib/llm, assertSpendCap). Sauf un examen QCM
+ *    déjà livré (worker mort ou exception après onExamReady) : seul le manque
+ *    est rendu, au prorata des questions commandées, comme une livraison incomplète.
  *  - "canceled" (annulation par l'utilisateur) : rendu SEULEMENT si le job n'a
  *    rien coûté au fournisseur — sinon générer à 95 %, annuler et recommencer
  *    offrirait des générations illimitées.
@@ -610,6 +631,21 @@ export async function refundJobCredits(job: Pick<Job, "id" | "type">, why: "fail
   try {
     const { billingEnabled, refundGeneration, fmtCreditsBack } = await import("@/lib/billing/credits");
     if (!billingEnabled()) return 0;
+    if (why === "failed" && (job.type === "qcm" || job.type === "exam")) {
+      const delivered = await qcmDelivery(job.id);
+      if (delivered && delivered.requested > 0) {
+        const missing = Math.max(0, delivered.requested - delivered.produced);
+        if (!missing) {
+          await logJob(job.id, `Crédits conservés : les ${delivered.produced} questions commandées étaient livrées avant l'échec.`).catch(() => {});
+          return 0;
+        }
+        const back = await refundGeneration(job.type, await jobCreditRef(job.id), currentUser(), missing / delivered.requested);
+        if (back > 0) {
+          await logJob(job.id, `${fmtCreditsBack(back)} : ${delivered.produced} questions sur ${delivered.requested} livrées avant l'échec.`).catch(() => {});
+        }
+        return back;
+      }
+    }
     const spent = await jobLlmCostUsd(currentUser(), currentCourse(), job.id);
     if (why === "canceled" && spent > 0) {
       await logJob(job.id, `Crédits conservés : le job a déjà coûté ${spent.toFixed(3)} $ d'appels au modèle.`).catch(() => {});

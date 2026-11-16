@@ -304,6 +304,9 @@ export const TABLES: TableSpec[] = [
       { name: "worker_id", type: "text" },
       // Référence du débit de crédits réservé AVANT l'insertion (cf. lib/jobs createJobExclusive).
       { name: "credit_ref", type: "text" },
+      // Questions commandées, telles que le générateur QCM les a résolues (format du cours compris),
+      // posées à la livraison progressive (onExamReady) : un échec ensuite ne rend que le manque.
+      { name: "ordered", type: "int" },
       // Rapport par fichier d'une ingestion (lib/ingest-report) : fichiers lus, illisibles, sans texte.
       { name: "report_json", type: "text" },
     ],

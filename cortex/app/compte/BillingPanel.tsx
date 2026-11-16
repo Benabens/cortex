@@ -51,7 +51,7 @@ type Billing = {
   } | null;
   costs: {
     exam: number; qcm: number; exercise: number; assist: number;
-    /** Préparation d'un cours, et détection du format à chaque ajout d'annales. */
+    /** Préparation d'un cours, et relecture du format de ses annales (lancée à la demande, le dépôt est gratuit). */
     prepare?: number; format?: number;
   };
   /** Limites quotidiennes appliquées au compte (null : levée). */
@@ -80,15 +80,15 @@ const dateFr = (iso: string | null) => {
 /**
  * Ce qui borne l'usage, dit au-dessus des offres. « Autant de cours que tu
  * veux » parle du NOMBRE de cours, qui n'a pas de plafond : un cours coûte des
- * crédits (sa préparation, puis chaque ajout d'annales), ses générations aussi,
+ * crédits (sa préparation, puis la relecture du format de ses annales), ses générations aussi,
  * et le compte a des limites par jour et un espace de stockage. Seules les
  * limites citées ici sont nommées : la phrase ne se donne pas pour une liste complète.
  */
 function usageNote(data: Billing): string {
   const { prepare, format } = data.costs;
   const cost = prepare != null && format != null
-    ? `Préparer un cours coûte ${credits(prepare)}, chaque ajout d’annales ${credits(format)}, et chaque génération utilise des crédits.`
-    : "Préparer un cours, y ajouter des annales et chaque génération utilisent des crédits.";
+    ? `Préparer un cours coûte ${credits(prepare)}, relire le format de ses annales ${credits(format)}, et chaque génération utilise des crédits.`
+    : "Préparer un cours, relire le format de ses annales et chaque génération utilisent des crédits.";
   const count = (n: number | null | undefined, unit: string) => (n == null ? null : `${nf.format(n)} ${unit}${n >= 2 ? "s" : ""}`);
   const daily = [count(data.quotas?.gen, "génération"), count(data.quotas?.assist, "aide")].filter(Boolean).join(" et ");
   return [

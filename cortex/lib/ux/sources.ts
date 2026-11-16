@@ -2,7 +2,8 @@
  * Types Sources — formes réelles de GET /api/sources (500 sur cs-202) :
  * exams[] = annales/refs {path, title, year, kind, items, uploaded, isReference} ;
  * corpus[] = agrégats par type {type, sources, items}.
- * POST /api/refs/upload (multipart file[]) → {ok, files, formatJobId} ·
+ * POST /api/refs/upload (multipart file[]) → {ok, files, formatPending} (gratuit) ·
+ * POST /api/refs/format → JOB, {jobId, chargedCredits} (relire le format, payant) ·
  * POST /api/sources/import {path} → JOB (409 sur cs-202) · POST /api/prepare → JOB.
  * Choix des annales de référence : POST /api/sources {path, reference} (toggleReference) ·
  * DELETE /api/sources?path= (removeUploadedRef) — câblés en cases à cocher dans FileManager.

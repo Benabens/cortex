@@ -78,7 +78,7 @@ test("offre Pro : « Autant de cours que tu veux », avec au-dessus ce que coût
   assert.equal((html.match(/Autant de cours que tu veux · 20 crédits par mois, non reportables/g) ?? []).length, 2);
   assert.match(html, /10 crédits, sans date d’expiration/);
   // Une fois, sous « Recharger », avant la première offre : un cours n'est pas gratuit, et l'usage a des bornes.
-  const note = "Préparer un cours coûte 2 crédits, chaque ajout d’annales 1 crédit, et chaque génération utilise des crédits. Par jour et par compte : 3 générations et 20 aides. Stockage : 200 Mo de fichiers.";
+  const note = "Préparer un cours coûte 2 crédits, relire le format de ses annales 1 crédit, et chaque génération utilise des crédits. Par jour et par compte : 3 générations et 20 aides. Stockage : 200 Mo de fichiers.";
   assert.equal(html.split(note).length - 1, 1);
   assert.ok(html.indexOf("Recharger") < html.indexOf(note) && html.indexOf(note) < html.indexOf("Autant de cours que tu veux"));
   assert.ok(!/illimit/i.test(html), "aucune promesse d'illimité");
@@ -93,10 +93,10 @@ test("offre Pro : « Autant de cours que tu veux », avec au-dessus ce que coût
   const cut = await render(base({ costs, quotas: { gen: 0, assist: 0 }, storageQuotaMb: 0 }));
   assert.match(cut, /Par jour et par compte : 0 génération et 0 aide\. Stockage : 0 Mo de fichiers\./);
   // Tarifs réglés autrement (CREDITS_COST_JSON) : ce sont eux qui s'affichent.
-  assert.match(await render(base({ costs: { ...costs, prepare: 3, format: 0.5 } })), /Préparer un cours coûte 3 crédits, chaque ajout d’annales 0,5 crédit,/);
+  assert.match(await render(base({ costs: { ...costs, prepare: 3, format: 0.5 } })), /Préparer un cours coûte 3 crédits, relire le format de ses annales 0,5 crédit,/);
   // Réponse d'un serveur plus ancien (déploiement en cours) : la phrase reste vraie, sans chiffre.
   const old = await render(base());
-  assert.match(old, /Préparer un cours, y ajouter des annales et chaque génération utilisent des crédits\.<\/p>/);
+  assert.match(old, /Préparer un cours, relire le format de ses annales et chaque génération utilisent des crédits\.<\/p>/);
 });
 
 test("abonnement actif : reste / plafond, date de recharge, bouton Gérer, abonnements non re-souscriptibles", async () => {

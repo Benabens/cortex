@@ -295,6 +295,22 @@ test("add_course_source, texte collé : rangé selon la catégorie, jamais écra
   assert.equal(errorCode(await call(alice, "add_course_source", { course: "MATH-232", text: "x", url: "https://example.com/a.pdf" })), "invalid_input");
 });
 
+test("add_course_source, annale : gratuit, et annonce le coût de la relecture de son format par prepare_course avant tout débit", async () => {
+  const credits = await import("../lib/billing/credits");
+  const before = await credits.getBalanceCenti(ALICE);
+  const r = await call(alice, "add_course_source", { course: "MATH-232", text: "# Examen final fictif 2024\n\nExercice 1 : variance.", title: "Final 2024", category: "past_exam" });
+  assert.equal(r.isError, undefined, text(r));
+  const next = (r.structuredContent as { next_steps: string }).next_steps;
+  assert.match(next, /free/i);
+  assert.match(next, /prepare_course[^.]*2 credits and one daily generation/);
+  assert.match(next, /quoted before anything is charged/);
+  assert.match(text(r), /prepare_course/);
+  assert.match(text(r), /annonc/);
+  assert.equal(await credits.getBalanceCenti(ALICE), before, "le dépôt ne débite rien");
+  const notes = await call(alice, "add_course_source", { course: "MATH-232", text: "Notes fictives.", title: "Notes fictives" });
+  assert.doesNotMatch((notes.structuredContent as { next_steps: string }).next_steps, /credits/, "un support qui n'est pas une annale n'annonce rien");
+});
+
 test("add_course_source : questions d'exemple officielles et consignes d'examen ont leur propre rangement", async () => {
   const samples = await call(alice, "add_course_source", { course: "MATH-232", text: "Question 1. Une seule réponse correcte. A) … B) …", title: "Questions modeles", category: "sample_questions" });
   assert.equal(samples.isError, undefined, text(samples));

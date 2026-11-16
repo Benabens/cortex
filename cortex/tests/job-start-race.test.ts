@@ -59,7 +59,7 @@ test("deux créations simultanées avec de quoi payer UN examen → un seul job,
   const results = await runWithUser(user, () => runWithCourse("algo", () =>
     Promise.allSettled([jobs.createJobExclusive("exam"), jobs.createJobExclusive("exam")])
   ));
-  const ok = results.filter((r): r is PromiseFulfilledResult<{ id: number; existing: boolean }> => r.status === "fulfilled");
+  const ok = results.filter((r): r is PromiseFulfilledResult<{ id: number; existing: boolean; costCenti: number }> => r.status === "fulfilled");
   const ids = new Set(ok.map((r) => r.value.id));
   assert.equal(ids.size, 1, `jobs distincts créés : ${[...ids].join(",")}`);
   assert.equal(await credits.getBalanceCenti(user), 0, "un seul examen débité, pas deux");
