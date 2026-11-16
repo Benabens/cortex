@@ -76,7 +76,7 @@ test("zone Annales : chaque fichier écarté est nommé avec sa raison, et le PD
   assert.deepEqual(Object.keys(skipped).sort(), ["final-2019.pdf", "final-2020.pdf", "photo.png"]);
   assert.match(skipped["final-2019.pdf"], /abîmé/);
   assert.match(skipped["final-2020.pdf"], /mot de passe/);
-  assert.match(skipped["photo.png"], /format/i);
+  assert.match(skipped["photo.png"], /image/);
   assert.deepEqual(storedFiles(c.refsDir), ["final-2022.pdf"]);
 });
 

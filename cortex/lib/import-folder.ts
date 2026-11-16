@@ -36,12 +36,13 @@ export function classifyFile(rel: string): { bucket: "refs" | "lectures" | "seri
   const ext = path.extname(f);
   const yearMatch = f.match(/(20\d{2})/);
   const year = yearMatch ? +yearMatch[1] : null;
+  // Une image n'est jamais lue : « exam_2023_p1.jpg » ne doit pas compter parmi les annales.
+  if (/\.(png|jpe?g|webp)$/.test(f)) return { bucket: "images", type: "image", year };
   const isExam = /\b(final|midterm|mid-?term|exam|partiel)\b/.test(f);
   if (isExam && (year || /\bexam\b/.test(f))) {
     const kind = /midterm|mid-?term|partiel/.test(f) ? "midterm" : "final";
     return { bucket: "refs", type: kind, year };
   }
-  if (/\.(png|jpe?g|webp)$/.test(f)) return { bucket: "images", type: "image", year };
   if (/\/notes?\/|study.?guide|hints|scope|conventions?|checklist|\bplan\b|syllabus|formula|cheat/.test(f)) return { bucket: "notes", type: "note", year: null };
   if (/s[ée]rie|exercise|\bexo\b|tutorial|homework|pset|problem.?set|\btd\b|\btp\b|solution|corrig/.test(f)) return { bucket: "series", type: "serie", year: null };
   if (/lecture|cours|slides?|chapter|chapitre|\bweek\b|\bcm\b|handout/.test(f) || ext === ".pptx" || ext === ".docx") return { bucket: "lectures", type: "course_pdf", year: null };
