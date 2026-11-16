@@ -69,3 +69,34 @@ test("une page de connexion ou presque vide n'est pas rangée comme support", as
   const ok = await add(c.id, "https://cours.example.org/ondes.html", page, "text/html");
   assert.ok(!(ok.saved instanceof Error), (ok.saved as Error).message);
 });
+
+test("lien de partage : la redirection vers l'hôte de téléchargement du service est suivie, une autre non", async () => {
+  const c = await newCourse("Orvelle redirections");
+  const { addUrlSource } = await import("../lib/course-source");
+  const { PublicFetchError } = await import("../lib/public-https");
+  const pdf = textPdf("Chapitre 2 : les ondes");
+  const via = (target: string) => {
+    const asked: string[] = [];
+    const fetcher = async (u: string) => {
+      asked.push(u);
+      if (u.startsWith("https://docs.google.com/")) throw new PublicFetchError("redirect", "redirection (HTTP 307)", target);
+      return { body: pdf, contentType: "application/pdf", cacheControl: "" };
+    };
+    return { asked, run: () => addUrlSource(c.id, { url: "https://docs.google.com/document/d/1XyZ/edit", category: "lecture" }, fetcher).catch((e: Error) => e) };
+  };
+  const ok = via("https://doc-0s-4c-docs.googleusercontent.com/export/abc/def?format=pdf");
+  const saved = await ok.run();
+  assert.ok(!(saved instanceof Error), (saved as Error).message);
+  assert.deepEqual(ok.asked, ["https://docs.google.com/document/d/1XyZ/export?format=pdf", "https://doc-0s-4c-docs.googleusercontent.com/export/abc/def?format=pdf"]);
+
+  const bad = via("https://evil.example.org/x.pdf");
+  const refused = await bad.run();
+  assert.ok(refused instanceof Error && /redirige vers evil\.example\.org/.test(refused.message));
+  assert.equal(bad.asked.length, 1);
+  // Une adresse ordinaire qui redirige reste refusée, même vers un hôte Google.
+  const { saved: plain } = await (async () => {
+    const fetcher = async () => { throw new PublicFetchError("redirect", "redirection (HTTP 301)", "https://doc-0s-docs.googleusercontent.com/x"); };
+    return { saved: await addUrlSource(c.id, { url: "https://cours.example.org/poly.pdf", category: "lecture" }, fetcher).catch((e: Error) => e) };
+  })();
+  assert.ok(plain instanceof Error && /redirige/.test(plain.message));
+});
