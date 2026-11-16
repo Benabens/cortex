@@ -177,6 +177,35 @@ test("schéma de sortie de l'examen : la durée du cours, ni « 180 (3 heures) �
   assert.match(brief, /"description": "75 \(durée de l'examen, en minutes\)"/);
 });
 
+test("partage du barème : total exact, poids respectés, 180 points en 3 h comme avant", async () => {
+  const { splitPoints } = await import("../lib/profiles/generic");
+  const curated = [35, 35, 30, 30, 25, 25];
+  assert.deepEqual(splitPoints(180, curated), curated, "un final de 3 h garde ses créneaux historiques");
+  assert.deepEqual(splitPoints(180, [1, 1, 1, 1]), [45, 45, 45, 45]);
+  assert.deepEqual(splitPoints(75, [1, 1, 1, 1]), [20, 20, 20, 15]);
+  const small = splitPoints(75, curated);
+  assert.equal(small.reduce((a, b) => a + b, 0), 75, small.join(","));
+  assert.ok(small.every((x, i) => i === 0 || x <= small[i - 1]), `dégressif : ${small.join(",")}`);
+  assert.deepEqual(splitPoints(3, [1, 1, 1, 1]), [1, 1, 1, 0], "moins de points que de sujets : aucun total inventé");
+});
+
+test("barème d'un format à questions composées détecté sans annale : son total", async () => {
+  const id = await newCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { resolveExamFormat, examBudgetFor } = await import("../lib/exam-format");
+  const budget = await runWithCourse(id, async () => {
+    await q.ensureTable("format_profile");
+    await q.run(`INSERT INTO format_profile (json) VALUES (?)`, JSON.stringify({
+      basis: "sample_questions", exam_kind: "composite", format_summary: "2 questions composées, 3 sous-questions", duration_min: 45, total_points: 40,
+      has_mcq: true, question_types: [], sections: [{ name: "Q1", description: "scénario" }, { name: "Q2", description: "scénario" }], composite: { block_count: 2, parts_min: 3, parts_max: 3 },
+    }));
+    await resolveExamFormat();
+    return examBudgetFor(id);
+  });
+  assert.deepEqual(budget, { minutes: 45, points: 40 });
+});
+
 test("hors EPFL : ni le drill ni l'architecte ne visent un final EPFL ni le style d'une enseignante", async () => {
   const id = await newCourse();
   const { drill, design } = await drillAndDesignPrompts(id);

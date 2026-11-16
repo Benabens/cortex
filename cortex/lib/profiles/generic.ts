@@ -154,16 +154,24 @@ export function genericStyleFor(courseId: string): GenericStyle {
 const STYLE_SLOTS: Record<GenericStyle, number> = { problems: 4, humanities: 4, essay: 2, oral: 3 };
 
 /**
- * Partage un barème entre n sujets, par multiples de 5 quand il le permet : la somme est exactement
- * le total (180 en 4 sujets → 45 chacun, comme avant ; 75 en 4 → 20, 20, 20, 15).
+ * Partage un barème entre des sujets selon leurs poids, par multiples de 5 quand il le permet
+ * (plus fort reste, à égalité le premier) : la somme est exactement le total. 180 en 4 sujets égaux
+ * → 45 chacun, et 35, 35, 30, 30, 25, 25 restent tels quels, comme avant ; 75 en 4 → 20, 20, 20, 15.
  */
-export function splitPoints(total: number, n: number): number[] {
+export function splitPoints(total: number, weights: number[]): number[] {
+  const n = weights.length;
+  if (!n) return [];
+  const sum = weights.reduce((s, w) => s + w, 0);
   const unit = total >= 5 * n ? 5 : 1;
-  const out = Array.from({ length: n }, () => Math.floor(total / n / unit) * unit);
-  let rest = total - out.reduce((s, x) => s + x, 0);
-  for (let i = 0; rest >= unit; i = (i + 1) % n, rest -= unit) out[i] += unit;
-  out[0] += rest;
-  return out;
+  const units = Math.floor(total / unit);
+  const exact = weights.map((w) => (units * w) / sum);
+  const out = exact.map(Math.floor);
+  const order = exact.map((e, i) => ({ i, frac: e - Math.floor(e) })).sort((a, b) => b.frac - a.frac || a.i - b.i);
+  let rest = units - out.reduce((s, x) => s + x, 0);
+  for (let k = 0; rest > 0; k = (k + 1) % n, rest--) out[order[k].i]++;
+  const pts = out.map((u) => u * unit);
+  pts[0] += total - units * unit;
+  return pts;
 }
 
 /** Notions à couvrir, une par sujet : notions du programme, sinon titres des sources de cours. */
@@ -210,7 +218,7 @@ export function makeGenericProfile(courseId: string, archetypes: Archetype[], op
     const molds = sampleMolds(dna, n, {
       only: ["proof_analysis", "derivation", "design", "applied_scenario", "formula_computation", "code_trace", "table_fill", "figure_reading"],
     });
-    const pts = splitPoints(examBudgetFor(courseId).points, n);
+    const pts = splitPoints(examBudgetFor(courseId).points, Array(n).fill(1));
     return Array.from({ length: n }, (_, i) => {
       const a = archs[i % archs.length];
       const theme = labels.length ? labels[i % labels.length] : null;
@@ -246,8 +254,9 @@ export function makeGenericProfile(courseId: string, archetypes: Archetype[], op
     const boost = (a: Archetype) => (a.topics.some((t) => hay.includes(t)) ? 1.5 : 1);
     const sorted = [...archetypes].sort((a, b) => b.weight * boost(b) - a.weight * boost(a));
     const picks = sorted.slice(0, 6);
-    const scale = examBudgetFor(courseId).points / 180;
-    const pts = [35, 35, 30, 30, 25, 25].map((p) => Math.max(5, Math.round((p * scale) / 5) * 5));
+    // Poids des créneaux d'un final de 3 h : leur part du barème de l'examen (moins de 6 sujets : leur part seulement).
+    const weights = [35, 35, 30, 30, 25, 25].slice(0, picks.length);
+    const pts = splitPoints(Math.round((examBudgetFor(courseId).points * weights.reduce((s, w) => s + w, 0)) / 180), weights);
     // MOULES échantillonnés proportionnellement à l'ADN détecté du cours
     // (moules « ouverts » : un exam d'exercices n'a pas de statement_truefalse). Sans ADN → null.
     const dna = await getExamDna().catch(() => null);
@@ -305,10 +314,10 @@ export function makeGenericProfile(courseId: string, archetypes: Archetype[], op
       `PRINCIPE : ${principle()}`,
     ],
     promptIntroBatch: (n: number) => style() === "problems" ? [
-      `Tu es l'équipe enseignante de ${matiere()}. Tu rédiges ${n} exercices INÉDITS, EN ${LANG()}, d'un examen final indiscernable d'un vrai final de ${c().examName}.`,
+      `Tu es l'équipe enseignante de ${matiere()}. Tu rédiges ${n} exercices INÉDITS, EN ${LANG()}, d'un examen indiscernable d'un vrai examen de ${c().examName} (${budget().line.slice(1, -1)}).`,
       `PRINCIPE : chaque exercice = ${principle()}`,
     ] : [
-      `Tu es l'équipe enseignante de ${matiere()}. Tu rédiges ${n} ${kindLabel()} INÉDITS, EN ${LANG()}, d'un examen indiscernable d'un vrai examen de ${c().examName}.`,
+      `Tu es l'équipe enseignante de ${matiere()}. Tu rédiges ${n} ${kindLabel()} INÉDITS, EN ${LANG()}, d'un examen indiscernable d'un vrai examen de ${c().examName} (${budget().line.slice(1, -1)}).`,
       `PRINCIPE : chaque sujet = ${principle()}`,
     ],
     exerciseLead: (target: string, a: Archetype, pts: number, _refImage: string | null) => [
