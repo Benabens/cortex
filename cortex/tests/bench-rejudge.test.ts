@@ -3,7 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { prepareRejudgeOutput } from "../lib/bench/rejudge";
+import { prepareRejudgeOutput, rejudgeNeedsDatabase } from "../lib/bench/rejudge";
+
+test("rejuge : un run annulé sans examen se score sans restauration ni juge", () => {
+  assert.equal(rejudgeNeedsDatabase({}), false);
+  assert.equal(rejudgeNeedsDatabase({ exam: null }), false);
+  assert.equal(rejudgeNeedsDatabase({ exam: { id: 1 } }), true);
+});
 
 test("rejuge : copie seulement le run exporté dans un dossier de jugement distinct", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-rejuge-"));

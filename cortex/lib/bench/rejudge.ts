@@ -1,6 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 
+/** Un run sans examen n'a rien à soumettre au juge : ses métriques d'absence restent mesurables. */
+export function rejudgeNeedsDatabase(run: { exam?: unknown }): boolean {
+  return !!run.exam;
+}
+
 /** Prépare une sortie indépendante sans recopier les bandes ni les résultats de génération. */
 export function prepareRejudgeOutput(sourceDir: string, outputDir: string, db: string): string {
   const source = path.resolve(sourceDir);
