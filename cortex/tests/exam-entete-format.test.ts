@@ -18,6 +18,7 @@ process.env.CORTEX_DATA_DIR = tmp;
 
 let courseFr = "";
 let courseEn = "";
+let courseEpflFr = "";
 
 before(async () => {
   delete process.env.CORTEX_USER;
@@ -29,9 +30,12 @@ before(async () => {
   await insertCourse(fr);
   const en = buildCourseRow({ name: "Linear Algebra", code: "MATH-111", language: "en", examFormat: { kind: "exercises", durationMin: 90 } }, "owner");
   await insertCourse(en);
+  const epflFr = buildCourseRow({ name: "Calcul fictif", code: "TEST-EPFL", university: "EPFL", language: "fr", examFormat: { kind: "exercises", durationMin: 60, documents: "none" } }, "owner");
+  await insertCourse(epflFr);
   await reloadCourses();
   courseFr = fr.id;
   courseEn = en.id;
+  courseEpflFr = epflFr.id;
 });
 
 after(() => {
@@ -67,6 +71,16 @@ test("la garde suit le format déclaré du cours : durée, documents et langue",
   assert.match(tex, /2 exercices indépendants/);
   assert.match(tex, /13 novembre 2026/);
   for (const en of [/You have/, /Personal notes/, /closed book/, /INSTRUCTIONS \(please/, /LEAVE THIS EMPTY/, /November/]) assert.doesNotMatch(tex, en);
+});
+
+test("cours de l'EPFL : sa garde suit aussi le format déclaré (durée, documents, langue)", async () => {
+  const tex = await render(courseEpflFr);
+  assert.match(tex, /\\epfllogo\[30\]/);
+  assert.match(tex, /Vous disposez de 60 minutes/);
+  assert.match(tex, /Aucun document n'est autorisé/);
+  assert.match(tex, /2 exercices indépendants/);
+  assert.match(tex, /13 novembre 2026/);
+  for (const en of [/You have/, /Personal notes/, /closed book/, /INSTRUCTIONS \(please/, /November/]) assert.doesNotMatch(tex, en);
 });
 
 test("sans règle déclarée sur les documents, la garde n'en invente pas ; la langue du cours décide", async () => {

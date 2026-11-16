@@ -2,8 +2,7 @@ import { currentCourse } from "@/db/client";
 import { getCourse } from "@/lib/courses";
 import type { ExamQuestion } from "@/lib/exam";
 import { compileExamPdf, copyExamLogo, qrText, texEscape } from "@/lib/exam-latex";
-import { formatContextFor } from "@/lib/exam-format";
-import { courseTemplate, courseWords, localDate, neutralChrome, neutralCoverTex, pointsText, solutionColor } from "@/lib/exam-template";
+import { courseTemplate, courseWords, localDate, neutralChrome, neutralCoverTex, neutralDuration, pointsText, solutionColor } from "@/lib/exam-template";
 import { assertTexSafe } from "@/lib/tex-guard";
 import { getFormatProfile } from "@/lib/format";
 import { examsDir } from "@/lib/paths";
@@ -76,27 +75,18 @@ export function coverHeader(dateLabel: string, durationMin: number): string[] {
   ];
 }
 
-/**
- * Durée d'un examen QCM ou à questions composées. Hors EPFL, le format du cours (annales, puis
- * déclaration) passe avant le profil détecté ; le gabarit de l'EPFL garde son calcul (`epfl`).
- */
-export function examDuration(detected: number | undefined, epfl: number): number {
-  if (courseTemplate() === "epfl") return epfl;
-  return formatContextFor(currentCourse()).durationMin ?? detected ?? getCourse(currentCourse()).durationMin;
-}
-
 /** Page de garde course-aware (style CS-233 : lecturer, SCIPER, convention SCQ/MCQ détectée). */
 async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts: number, durationMin: number): Promise<string> {
-  const fmt = await getFormatProfile();
+  // Hors EPFL, convention traduite : la phrase détectée dans les annales est souvent en anglais.
   if (courseTemplate() === "neutral") {
     const w = courseWords();
     const parts = [nQcm ? w.qcmCount(nQcm) : "", nOpen ? w.openCount(nOpen) : ""].filter(Boolean).join(` ${w.and} `);
-    const convention = fmt?.scq_vs_mcq_convention ? esc(fmt.scq_vs_mcq_convention) : w.qcmConvention;
     return neutralCoverTex({
       course: getCourse(currentCourse()), w, dateTex: localDate(dateLabel, w), durationMin, totalPts,
-      instructions: [w.contains(parts, totalPts), ...(nQcm ? [`${convention} ${w.tick}`] : []), w.onSheet],
+      instructions: [w.contains(parts, totalPts), ...(nQcm ? [`${w.qcmConvention} ${w.tick}`] : []), w.onSheet],
     });
   }
+  const fmt = await getFormatProfile();
   const convention = fmt?.scq_vs_mcq_convention
     ? esc(fmt.scq_vs_mcq_convention)
     : "There are single-choice questions (SCQ) where exactly one box is correct, and multiple-choice questions (MCQ) where one or more boxes are correct.";
@@ -262,7 +252,7 @@ export { copyExamLogo };
 export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSolutions: boolean): Promise<string> {
 
   const fmt = await getFormatProfile();
-  const dur = examDuration(fmt?.duration_min, fmt?.duration_min ?? 180);
+  const dur = courseTemplate() === "epfl" ? fmt?.duration_min ?? 180 : neutralDuration(fmt?.duration_min);
   // Barème CALÉ sur le format détecté : chaque type (scq/mcq) vaut ses points_each réels
   // (ex. CS-233 : scq 3 pts, mcq 4 pts), les ouvertes leurs ~17 pts. Repli 2/15 si non détecté.
   const ptsOf = (t: "scq" | "mcq"): number => {

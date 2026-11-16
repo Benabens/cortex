@@ -4,8 +4,8 @@ import { getCourse } from "@/lib/courses";
 import { compileExamPdf } from "@/lib/exam-latex";
 import { getFormatProfile } from "@/lib/format";
 import { examsDir } from "@/lib/paths";
-import { courseTemplate, courseWords, localDate, neutralCoverTex, pointsText, solutionColor } from "@/lib/exam-template";
-import { copyExamLogo, coverHeader, esc, examDocument, examDuration } from "@/lib/qcm-latex";
+import { courseTemplate, courseWords, localDate, neutralCoverTex, neutralDuration, pointsText, solutionColor } from "@/lib/exam-template";
+import { copyExamLogo, coverHeader, esc, examDocument } from "@/lib/qcm-latex";
 import { assertTexSafe } from "@/lib/tex-guard";
 import fs from "node:fs";
 import path from "node:path";
@@ -118,7 +118,7 @@ async function cover(dateLabel: string, n: number, totalPts: number, durationMin
 /** Source .tex complet de l'examen à questions composées, corrigé optionnel. */
 export async function renderBlocksTex(blocks: ExamBlock[], dateLabel: string, withKey: boolean): Promise<string> {
   const fmt = await getFormatProfile();
-  const duration = examDuration(fmt?.duration_min || undefined, fmt?.duration_min || getCourse(currentCourse()).durationMin || 90);
+  const duration = courseTemplate() === "epfl" ? fmt?.duration_min || getCourse(currentCourse()).durationMin || 90 : neutralDuration(fmt?.duration_min);
   const total = blocks.reduce((s, b) => s + b.points, 0);
   const L = blockLabels();
   return examDocument([

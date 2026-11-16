@@ -1,5 +1,5 @@
 import { currentCourse } from "@/db/client";
-import { getCourse, type CourseConfig } from "@/lib/courses";
+import { DEFAULT_COURSE, getCourse, type CourseConfig } from "@/lib/courses";
 import { formatContextFor, LANGUAGES, type DocumentRule, type Language } from "@/lib/exam-format";
 import { texEscape } from "@/lib/tex-escape";
 
@@ -13,8 +13,10 @@ import { texEscape } from "@/lib/tex-escape";
  */
 export type ExamTemplate = "epfl" | "neutral";
 
-export function examTemplate(c: Pick<CourseConfig, "university">): ExamTemplate {
-  return c.university.trim().toUpperCase() === "EPFL" ? "epfl" : "neutral";
+export function examTemplate(c: Pick<CourseConfig, "id" | "university">): ExamTemplate {
+  // cs-202 est le cours de référence de l'EPFL (empreinte canonique) : jamais neutre, même si
+  // son établissement n'est pas renseigné en base.
+  return c.id === DEFAULT_COURSE || c.university.trim().toUpperCase() === "EPFL" ? "epfl" : "neutral";
 }
 
 /** Gabarit du cours courant. */
@@ -25,6 +27,14 @@ export function courseTemplate(): ExamTemplate {
 /** Libellés dans la langue de l'examen du cours courant. */
 export function courseWords(): CoverWords {
   return coverWords(formatContextFor(currentCourse()).language);
+}
+
+/**
+ * Durée affichée sur une garde neutre : le format du cours (annales, puis déclaration) passe avant
+ * la durée détectée ou demandée (0 = inconnue), puis celle saisie à la création du cours.
+ */
+export function neutralDuration(detected: number | undefined): number {
+  return formatContextFor(currentCourse()).durationMin ?? (detected || undefined) ?? getCourse(currentCourse()).durationMin;
 }
 
 /** Couleur des corrigés : le rouge historique pour l'EPFL, le bleu foncé de neutralChrome hors EPFL. */

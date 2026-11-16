@@ -58,3 +58,10 @@ test("repli HTML d'un cours EPFL : inchangé", async () => {
   const { WRITTEN_SPEC, DATE } = await import("./helpers/gabarits");
   assert.equal(sha(await inEpfl(() => htmlFallback(WRITTEN_SPEC as never, 1, DATE, "boom"))), "a251243848b08a75");
 });
+
+test("cs-202 garde le gabarit de l'EPFL même si son établissement n'est pas renseigné en base", async () => {
+  const { examTemplate } = await import("../lib/exam-template");
+  assert.equal(examTemplate({ id: "cs-202", university: "" }), "epfl");
+  assert.equal(examTemplate({ id: "fic-101", university: " epfl " }), "epfl");
+  assert.equal(examTemplate({ id: "img-210", university: "Testville University" }), "neutral");
+});
