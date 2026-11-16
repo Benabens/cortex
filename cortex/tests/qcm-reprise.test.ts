@@ -23,7 +23,7 @@ process.env.LLM_MODEL_OPUS = "claude-sonnet-5";
 process.env.LLM_MAX_RETRIES = "0";
 process.env.MAX_COURSES_CREATED_PER_HOUR = "unlimited";
 process.env.MAX_COURSES_PER_USER = "unlimited";
-// Un lot par groupe : un point de reprise après chaque lot conçu et vérifié.
+// Lots menés un par un : un point de reprise après chaque lot conçu.
 process.env.QCM_BATCH_CONCURRENCY = "1";
 
 const KEY = "Une affirmation juste, tirée du cours.";
@@ -77,12 +77,13 @@ before(async () => {
       const content = parsed.messages.map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))).join("\n");
       let text = "{}";
       if (/"replacements"/.test(content)) { calls.repair++; text = JSON.stringify({ replacements: [] }); }
-      else if (/"duplicates"/.test(content)) { calls.dedup++; text = JSON.stringify({ notions: [], duplicates: [] }); }
+      // Revue finale : audit (verdicts) et doublons dans le même appel.
       else if (/"offCourse"/.test(content)) {
         calls.audit++;
+        if (/"duplicates"/.test(content)) calls.dedup++;
         const bs = blocks(content);
         auditedStems.push(...bs.map((b) => b.body.split("\n")[0]));
-        text = JSON.stringify({ verdicts: bs.map(({ index }) => ({ index, key: true, offCourse: false, trivial: [] })) });
+        text = JSON.stringify({ verdicts: bs.map(({ index }) => ({ index, key: true, offCourse: false, trivial: [] })), notions: [], duplicates: [] });
       }
       else if (/"results"/.test(content)) { calls.verify++; text = verify(content); }
       else if (/"items"/.test(content)) { calls.design++; text = design(content); }
@@ -163,29 +164,29 @@ async function generate(courseId: string, opts: { count: number; openCount: numb
   });
 }
 
-test("coupure après le premier lot : la reprise ne reconçoit que les lots restants, les QCM acquis passent la porte de sortie", async () => {
+test("coupure après le premier lot : la reprise ne reconçoit que le lot restant, les QCM acquis passent la revue et la porte de sortie", async () => {
   const id = await course();
   const first = store();
   const run1 = await generate(id, { count: 12, openCount: 0, checkpoint: first });
   assert.equal(run1.r.count, 12);
-  assert.equal(calls.design, 3, "12 QCM = 3 lots");
-  const cut = first.saves.find((s) => s.loop && s.loop.round === 0 && s.loop.next === 1);
+  assert.equal(calls.design, 2, "12 QCM + 2 de réserve = 2 lots de 7");
+  const cut = first.saves.find((s) => s.designed && !s.verified && s.designed.items[0] && !s.designed.items[1]);
   assert.ok(cut, `point de reprise après le premier lot : ${JSON.stringify(first.saves.map((s) => Object.keys(s)))}`);
-  const acquired = cut.loop!.selected;
-  assert.equal(acquired.length, 4, "le premier lot : 4 QCM construits et vérifiés");
+  const acquired = cut.designed!.items[0]!.map((it) => it.stem);
+  assert.equal(acquired.length, 7, "le premier lot : 7 QCM conçus");
 
   resetCalls();
   const run2 = await generate(id, { count: 12, openCount: 0, checkpoint: store(cut) });
   const detail = `${JSON.stringify(calls)}\n${run2.steps.join("\n")}`;
   assert.equal(run2.r.count, 12, detail);
-  assert.equal(calls.design, 2, `seuls les 2 lots restants sont conçus : ${detail}`);
+  assert.equal(calls.design, 1, `seul le lot restant est conçu : ${detail}`);
   assert.ok(!designedStems.some((st) => acquired.includes(st)), "aucun QCM acquis n'est reconçu");
   const delivered = run2.exam.items.map((it) => it.stem);
   for (const st of acquired) assert.ok(delivered.includes(st), `QCM acquis livré : ${st}`);
   // #90 : dédoublonnage et audit de sortie portent sur l'ENSEMBLE, repris compris.
   assert.ok(calls.dedup >= 1, `dédoublonnage sur l'ensemble : ${detail}`);
   for (const st of acquired) assert.ok(auditedStems.some((a) => a.includes(st)), `QCM repris audité à la sortie : ${st}`);
-  assert.ok(run2.steps.some((s) => /Reprise après interruption : 4 QCM/.test(s)), detail);
+  assert.ok(run2.steps.some((s) => /Reprise après interruption : 7 QCM déjà conçus/.test(s)), detail);
 });
 
 test("coupure après l'enregistrement de l'examen : la reprise le complète sans un seul appel au modèle ni doublon en base", async () => {

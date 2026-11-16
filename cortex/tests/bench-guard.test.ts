@@ -13,10 +13,21 @@ test("environnement du banc conforme : accepté", () => {
   assert.doesNotThrow(() => assertBenchEnv({ ...ok, DATABASE_URL: "postgres://cortex@localhost:5432/banc" }));
 });
 
-test("tout provider autre que codex-cli, ou non posé : refusé", () => {
-  for (const provider of ["claude-code", "anthropic", "openai-compatible", undefined]) {
+test("tout provider autre que codex-cli ou claude-code, ou non posé : refusé", () => {
+  for (const provider of ["anthropic", "openai-compatible", undefined]) {
     assert.throws(() => assertBenchEnv({ ...ok, LLM_PROVIDER: provider }), /LLM_PROVIDER=codex-cli/);
   }
+});
+
+test("moteur sur claude-code (abonnement Max, sans clé) : accepté, et le juge reste sur codex-cli", () => {
+  // Boucle moteur du 15/11 : Ben mesure le coût sur claude-code (tokens réels, réflexion comprise,
+  // convertis au tarif API) ; le juge existant tourne toujours sur l'abonnement Codex.
+  const cc = { ...ok, LLM_PROVIDER: "claude-code" };
+  assert.doesNotThrow(() => assertBenchEnv(cc));
+  assert.throws(() => assertBenchEnv({ ...cc, ANTHROPIC_API_KEY: "sk-ant-xxx" }), /ANTHROPIC_API_KEY/);
+  const env = judgeEnv(cc);
+  assert.equal(env.LLM_PROVIDER, "codex-cli");
+  assert.doesNotThrow(() => assertBenchEnv(env, { judge: true }));
 });
 
 test("une clé API chargée dans l'environnement : refusé, même vide de sens pour codex-cli", () => {

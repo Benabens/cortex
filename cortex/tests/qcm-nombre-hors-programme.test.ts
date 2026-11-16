@@ -82,7 +82,8 @@ before(async () => {
       allPrompts.push(content);
       let text = "{}";
       if (/"replacements"/.test(content)) text = JSON.stringify({ replacements: [] });
-      else if (/"duplicates"/.test(content)) text = JSON.stringify({ duplicates: dedupe(++dedupeCalls) });
+      // Revue finale : audit (verdicts) et doublons dans le même appel.
+      else if (/"duplicates"/.test(content)) text = JSON.stringify({ verdicts: [...content.matchAll(/^Q(\d+)\./gm)].map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })), duplicates: dedupe(++dedupeCalls) });
       else if (/"results"/.test(content)) text = verifyReply(content);
       else if (/"items"/.test(content) && /\(\d+ QCM\)/.test(content)) {
         designCalls++;
@@ -216,7 +217,8 @@ test("réserve épuisée par les doublons : la notion restée sans question est 
   const id = await humCourse(NOTIONS.slice(0, 4));
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam } = await import("../lib/qcm");
-  dedupe = (n) => (n <= 2 ? [{ first: 0, second: 1, reason: "même notion" }] : []);
+  // 5 conçues (4 + le titre du support en réserve) ; la revue retire Q1 et la question de réserve.
+  dedupe = (n) => (n === 1 ? [{ first: 0, second: 1, reason: "même notion" }, { first: 0, second: 4, reason: "même notion" }] : []);
   const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
   assert.equal(r.count, 4, `count=${r.count}`);
   // Plafond dur (job 23) : une notion = une question. La notion dont la question a été retirée
@@ -224,21 +226,23 @@ test("réserve épuisée par les doublons : la notion restée sans question est 
   assert.ok(!designPrompts.some((p) => /thème déjà couvert/i.test(p)), "aucune notion déjà posée n'est reprise");
   assert.ok(designPrompts.slice(1).some((p) => subjects(p).includes("Biais de statu quo")), designPrompts.map((p) => subjects(p).join(" | ")).join("\n"));
   assert.ok(designPrompts.some((p) => subjects(p).includes("Cours 4 — souveraineté numérique")), "le titre du support sert d'abord de réserve");
-  assert.equal(dedupeCalls, 3, "le contrôle des doublons repasse sur le complément");
+  assert.equal(dedupeCalls, 2, "la revue repasse sur le complément");
 });
 
-test("un remplacement encore en doublon déclenche une nouvelle ronde bornée", async () => {
-  const id = await humCourse(NOTIONS.slice(0, 4));
+test("un remplacement encore en doublon : la marge du comblement le remplace, en une seule ronde", async () => {
+  // 7 notions pour 4 QCM : il reste des notions de réserve après la première marge.
+  const id = await humCourse(NOTIONS.slice(0, 7));
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam } = await import("../lib/qcm");
-  // Les deux audits de remplacement puis le premier complément trouvent encore le même fait.
-  // La quatrième passe accepte enfin la nouvelle question : l'ancien code s'arrêtait à la troisième.
-  dedupe = (n) => (n <= 3 ? [{ first: 0, second: n === 3 ? 3 : 1, reason: "même fait testé" }] : []);
+  // La revue retire deux questions (la réserve comprise), puis l'un des deux remplaçants teste
+  // encore le même fait que l'autre : la marge du lot de comblement tient le total.
+  dedupe = (n) => (n === 1 ? [{ first: 0, second: 1, reason: "même fait testé" }, { first: 2, second: 4, reason: "même fait testé" }] : n === 2 ? [{ first: 0, second: 1, reason: "même fait testé" }] : []);
   const steps: string[] = [];
   const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0, onStep: (s) => { steps.push(s); } }));
   assert.equal(r.count, 4, steps.join("\n"));
-  assert.ok(steps.filter((s) => /en doublon retiré.*remplacement/.test(s)).length >= 3, steps.join("\n"));
-  assert.equal(dedupeCalls, 4, "chaque remplacement est contrôlé, puis remplacé dans le budget restant");
+  assert.equal(steps.filter((s) => /Revue finale : \d+ QCM écarté.*\d+ doublon/.test(s)).length, 2, steps.join("\n"));
+  assert.equal(dedupeCalls, 2, "le comblement est revu une fois");
+  assert.equal(designCalls, 2, "un lot prévu, une ronde de comblement");
 });
 
 // ─── Job 14 de HUM-285 (13/11, après #78) : titres = noms de fichiers ─────────────────────────────

@@ -17,10 +17,13 @@ import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 
 type Question = { topic?: string | null; stem: string; options: string[]; correct: number[]; sourceFact?: string | null };
 
-/** Caractères d'extraits du correcteur : 6 000 par question, entre 24 000 (un lot de 4) et 60 000. */
+/**
+ * Caractères d'extraits du correcteur : 6 000 par question, entre 24 000 (un lot de 4) et 144 000
+ * (une vérification groupée de 24 questions, lib/qcm : un seul appel pour un examen de 20 QCM).
+ */
 const PASSAGES_PER_ITEM = 6_000;
 const PASSAGES_MIN = 24_000;
-const PASSAGES_MAX = 60_000;
+const PASSAGES_MAX = 144_000;
 
 /**
  * Extraits que voit le correcteur pour un lot : le fait de chaque question d'abord, ses mots
@@ -31,8 +34,8 @@ export async function verifierPassages(items: Question[]): Promise<{ src: string
   const facts = items.map((it) => it.sourceFact ?? "");
   const stems = items.map((it) => `${it.stem} ${it.options.join(" ")}`);
   const topics = [...new Set(items.map((it) => it.topic ?? "").filter(Boolean))];
-  // Le budget suit la taille du paquet : une vérification groupée de 8 questions garde, par
-  // question, les extraits d'un lot de 4 (moins d'extraits = plus de faux rejets « hors cours »).
+  // Le budget suit la taille du paquet : une vérification groupée garde, par question, les
+  // extraits d'un lot de 4 (moins d'extraits = plus de faux rejets « hors cours »).
   const budget = Math.min(PASSAGES_MAX, Math.max(PASSAGES_MIN, PASSAGES_PER_ITEM * items.length));
   return evidencePassages([...facts, ...stems, ...topics], { perQuery: 2, cap: 1800, budget });
 }

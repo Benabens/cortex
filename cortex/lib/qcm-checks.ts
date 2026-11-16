@@ -461,21 +461,6 @@ export function capDrops<T extends { options: string[]; correct: number[]; focus
   return [...drop].sort((a, b) => a - b);
 }
 
-/** Décisions d'une ultime passe : absent = clé/hors-cours rejeté, triviaux = une réparation. */
-export function ultimateAuditActions<T extends { stem: string; trivialDistractors?: number[] | null }>(
-  initial: T[], audited: T[],
-): { drop: number[]; repair: number[] } {
-  const byStem = new Map(audited.map((it) => [it.stem, it]));
-  const drop: number[] = [];
-  const repair: number[] = [];
-  initial.forEach((it, i) => {
-    const checked = byStem.get(it.stem);
-    if (!checked) drop.push(i);
-    else if (checked.trivialDistractors?.length) repair.push(i);
-  });
-  return { drop, repair };
-}
-
 /**
  * L'explication réduite à ce qu'elle dit de la bonne réponse : les phrases et fins de phrase qui
  * réfutent des distracteurs sont retirées (repli quand la réécriture sur les options réelles
@@ -491,6 +476,40 @@ export function keyOnlyExplanation(explanation: string): string | null {
     const head = s.slice(0, a.index).replace(/[\s,;:—–-]+$/u, "").trim();
     if (contentRoots(head).size >= 3) kept.push(/[.!?]$/u.test(head) ? head : `${head}.`);
   }
+  const out = kept.join(" ").trim();
+  return out.length >= 40 ? out : null;
+}
+
+/**
+ * L'explication sans les phrases qui parlent d'une option RETIRÉE (distracteur remplacé, énoncé et
+ * clé gardés). Mots propres à l'option retirée : absents de l'énoncé et des options finales. Une
+ * phrase en parle quand elle en reprend deux, ou le seul qu'elle ait, ou tous ceux de son nom (« La
+ * gamification du don d'organes, qui… » : « La gamification est un outil distinct »). La première
+ * phrase reste si elle reprend autant de mots propres à la clé : c'est la justification de la clé.
+ * Boucle moteur, itération 4 (15/11, hum-285-job14) : des explications réfutaient encore « les
+ * vulnérabilités zero-day » ou « une distribution centralisée », remplacées entre-temps, et la
+ * revérification à effort moyen ne les relevait plus. Le texte revient tel quel s'il ne cite aucune
+ * option retirée ; null s'il ne reste pas une vraie phrase.
+ */
+export function withoutRemovedOptionRefs(explanation: string, removed: string[], options: string[], correct: number[], stem = ""): string | null {
+  const known = new Set([...contentRoots(stem), ...options.flatMap((o) => [...contentRoots(o)])]);
+  const gone = removed
+    .map((o) => ({ own: [...contentRoots(withoutParens(o))].filter((r) => !known.has(r)), head: [...contentRoots(itemHead(withoutParens(o)))].filter((r) => !known.has(r)) }))
+    .filter((g) => g.own.length);
+  if (!gone.length) return explanation;
+  const stemRoots = contentRoots(stem);
+  const keyRoots = [...new Set(correct.flatMap((k) => [...contentRoots(options[k] ?? "")]))].filter((r) => !stemRoots.has(r));
+  const all = sentences(explanation);
+  const kept = all.filter((s, i) => {
+    const rs = contentRoots(s);
+    const keyHits = keyRoots.filter((r) => rs.has(r)).length;
+    return !gone.some(({ own, head }) => {
+      const hits = own.filter((r) => rs.has(r)).length;
+      const cites = hits >= 2 || (hits === 1 && own.length === 1) || (head.length > 0 && head.every((r) => rs.has(r)));
+      return cites && !(i === 0 && keyHits >= hits);
+    });
+  });
+  if (kept.length === all.length) return explanation;
   const out = kept.join(" ").trim();
   return out.length >= 40 ? out : null;
 }

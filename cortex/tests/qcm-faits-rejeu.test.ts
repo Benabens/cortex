@@ -10,7 +10,7 @@
  * des doublons du modèle le voit), une autre cite le passage d'un autre fait. Verrouillé :
  *  - 20/20, aucun fait partagé, au moins 10 notions, chaque proposition de l'examen #14 une seule fois ;
  *  - les deux dérives remplacées par des faits de réserve, sans faire tomber le compte ;
- *  - pas plus d'appels qu'une conception par notion (QCM_FACTS=0), extraction comprise ;
+ *  - pas plus d'appels qu'une conception par notion (QCM_FACTS=0) hors extraction, faite une fois par cours ;
  *  - faits gardés en base : l'examen suivant ne les ré-extrait pas, et préfère les faits jamais posés,
  *    y compris ceux d'examens d'avant les faits (rattachés par leur contenu) ;
  *  - extraction en échec : l'examen se conçoit par notion, comme avant, sans erreur.
@@ -184,7 +184,9 @@ function dedup(prompt: string): string {
   const first = new Map<string, number>();
   const duplicates: { first: number; second: number; reason: string }[] = [];
   for (const { index, body } of blocks(prompt)) {
-    const key = /^\s+Bonne réponse : (.*)$/m.exec(body)?.[1]?.trim() ?? "";
+    // Revue finale : la clé est donnée par son rang (« CLÉ : 0 »), le texte est celui de l'option.
+    const rank = /^\s+CLÉ : (\d+)/m.exec(body)?.[1];
+    const key = (rank != null ? new RegExp(`^\\s+\\(${rank}\\) (.*)$`, "m").exec(body)?.[1] : /^\s+Bonne réponse : (.*)$/m.exec(body)?.[1])?.trim() ?? "";
     if (!key) continue;
     if (first.has(key)) duplicates.push({ first: first.get(key)!, second: index, reason: "même règle" });
     else first.set(key, index);
@@ -204,6 +206,8 @@ before(async () => {
       let text = "{}";
       if (/\{"facts":/.test(content)) { calls.facts++; text = extract(content); }
       else if (/"replacements"/.test(content)) { calls.repair++; text = repair(content); }
+      // Revue finale : audit (verdicts) et doublons dans le même appel.
+      else if (/"duplicates"/.test(content) && /"offCourse"/.test(content)) { calls.dedup++; text = JSON.stringify({ ...JSON.parse(audit(content)), ...JSON.parse(dedup(content)) }); }
       else if (/"duplicates"/.test(content)) { calls.dedup++; text = dedup(content); }
       else if (/"offCourse"/.test(content)) { calls.audit++; text = audit(content); }
       else if (/"results"/.test(content)) { calls.verify++; text = verify(content); }
@@ -337,7 +341,9 @@ test("examen #14 rejoué : 20/20, aucun fait partagé, ≥ 10 notions, chaque pr
   const before = await generate(await course());
   t.diagnostic(`par notion : ${before.detail}`);
   t.diagnostic(`appels : par notion ${before.calls.total}, par faits ${after.calls.total} (dont ${after.calls.facts} d'extraction)`);
-  assert.ok(after.calls.total <= before.calls.total + 1, `pas d'explosion des appels : ${after.calls.total} contre ${before.calls.total}`);
+  // Conception en lots de 8 (neuf appels pour 20 QCM, par notion comme par faits) : l'extraction,
+  // faite une fois par cours puis lue en base, n'est plus absorbée par des rondes économisées.
+  assert.ok(after.calls.total - after.calls.facts <= before.calls.total, `pas plus d'appels hors extraction : ${after.calls.total - after.calls.facts} contre ${before.calls.total}`);
 });
 
 test("faits gardés en base : l'examen suivant ne ré-extrait rien et ne repose aucun fait déjà posé", async (t) => {
@@ -378,9 +384,9 @@ test("reprise après coupure : les faits du plan et ceux déjà donnés sont rep
   const first = store();
   const run1 = await generate(id, first);
   assert.equal(run1.r.count, 20, run1.detail);
-  const cut = first.saves.find((s) => s.loop && s.loop.round === 0 && s.loop.selected.length > 0 && s.loop.selected.length < 20);
-  assert.ok(cut, `point de reprise en cours de comblement : ${JSON.stringify(first.saves.map((s) => s.loop && [s.loop.round, s.loop.next, s.loop.selected.length]))}`);
-  assert.ok(cut.plan.facts?.length && cut.loop!.usedFacts?.length, "le plan garde ses faits, la réserve ceux déjà donnés");
+  const cut = first.saves.find((s) => s.designed && s.designed.items.some(Boolean) && s.designed.items.some((x) => !x));
+  assert.ok(cut, `point de reprise en cours de conception : ${JSON.stringify(first.saves.map((s) => s.designed?.items.map(Boolean)))}`);
+  assert.ok(cut.plan.facts?.length && cut.designed!.usedFacts?.length, "le plan garde ses faits, la réserve ceux déjà donnés");
   // La table des faits vidée : une reprise qui réextrairait se verrait.
   const { runWithCourse } = await import("../db/client");
   const { q } = await import("../db/q");

@@ -49,6 +49,8 @@ function item(i: number, regen = false) {
 }
 
 function reply(prompt: string): unknown {
+  // Revue finale : audit (verdicts) et doublons dans le même appel ; rien à signaler.
+  if (/"duplicates"/.test(prompt)) return { verdicts: [...prompt.matchAll(/^Q(\d+)\./gm)].map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })), notions: [], duplicates: [], repeats: [] };
   if (/"results"/.test(prompt)) {
     verifyCalls++;
     // Le juge résout chaque question d'après ses options (mélangées) : la bonne est celle de l'étude.
@@ -169,7 +171,7 @@ test("conception : taxonomie de distracteurs, langue, faits précis du cours, ex
   assert.match(gen, /classe[r]? ce cas|classification/i);
 });
 
-test("juge à l'aveugle : un item réussi avec les seuls noms des notions est régénéré, les autres gardés", async () => {
+test("juge à l'aveugle : un item réussi avec les seuls noms des notions passe après les questions propres, sans régénération", async () => {
   const id = await humCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
@@ -178,12 +180,11 @@ test("juge à l'aveugle : un item réussi avec les seuls noms des notions est r�
   const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
   const verify = prompts.find((p) => /"results"/.test(p))!;
   assert.match(verify, /noms des notions/i, "le juge mesure le pouvoir discriminant");
-  const regen = prompts.find((p) => /À CORRIGER/.test(p));
-  assert.ok(regen, "un lot de régénération a été demandé");
-  assert.match(regen!, /noms de notions, réussie sans connaître l'étude/);
+  assert.ok(!prompts.some((p) => /À CORRIGER/.test(p)), "aucune régénération : la question de réserve, propre, prend la place");
   const exam = await runWithCourse(id, () => getQcmExam(r.id, true));
   const stems = exam!.items.map((x) => x.stem);
-  assert.equal(stems.filter((s) => s.startsWith("REGEN")).length, 1, stems.join("\n"));
+  assert.equal(stems.length, 4);
+  assert.ok(!stems.some((s) => s.endsWith("(Q1)")), stems.join("\n"));
   for (const it of exam!.items as (NonNullable<typeof exam>["items"][number] & { correct: number[] })[]) {
     assert.match(it.options[it.correct[0]], /six fois plus vite que les vraies/, "la clé suit sa proposition après mélange");
   }
@@ -207,7 +208,7 @@ test("forme des options : celle des annales quand il y en a (valeurs courtes en 
   assert.match(prompts.find((p) => /"items"/.test(p))!, /PROPOSITIONS COMPLÈTES/);
 });
 
-test("une question à réponse unique que le juge résout avec deux réponses est faible : régénérée, jamais gardée avec deux clés", async () => {
+test("une question à réponse unique que le juge résout avec deux réponses est écartée, jamais gardée avec deux clés", async () => {
   const id = await humCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
@@ -216,9 +217,9 @@ test("une question à réponse unique que le juge résout avec deux réponses es
   twoKeys = true;
   try {
     const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
-    const regen = prompts.find((p) => /À CORRIGER/.test(p));
-    assert.match(regen ?? "", /plusieurs réponses défendables|deux réponses défendables/);
+    assert.equal(r.count, 4);
     const exam = await runWithCourse(id, () => getQcmExam(r.id, true));
+    assert.ok(!exam!.items.some((it) => it.stem.endsWith("(Q2)")), exam!.items.map((it) => it.stem).join("\n"));
     for (const it of exam!.items as (NonNullable<typeof exam>["items"][number] & { correct: number[] })[]) {
       if (it.type === "scq") assert.equal(it.correct.length, 1, it.stem);
     }

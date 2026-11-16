@@ -68,6 +68,8 @@ function runEnv(dataDir: string, url: string): void {
     BILLING_ENABLED: "1", SIGNUP_FREE_CREDITS: "100000", DAILY_GEN_QUOTA: "unlimited", DAILY_ASSIST_QUOTA: "unlimited",
     RATE_LIMIT_PER_USER_MIN: "unlimited", MAX_ACTIVE_JOBS: "unlimited", MAX_COURSES_PER_USER: "unlimited", MAX_COURSES_CREATED_PER_HOUR: "unlimited",
     CORTEX_TRACK_USAGE: "1",
+    // Provider claude-code : harnais minimal, système à part, effort du site, tokens réels (lib/claude-code).
+    CORTEX_CLAUDE_CODE_LEAN: "1",
     // Budget IA lié au revenu (PR #88) : la base jetable n'a aucun paiement, il refusait tout job
     // (« billing.budget_refused », budget 0 $). Le banc mesure le moteur, pas la politique de vente.
     AI_BUDGET_MARGIN: "unlimited",
@@ -353,7 +355,7 @@ async function runCase(c: BenchCase): Promise<string> {
     plan, previous,
     usage: followed.job ? await readUsage(followed.job.id, courseId) : [],
     calls: readJsonl<Omit<TapeCall, "error"> & { error?: { code?: string; message: string } }>(path.join(runDir, "run.tape.jsonl"))
-      .map((c) => ({ site: c.site, model: c.model, promptChars: c.promptChars, systemChars: c.systemChars, outputChars: c.outputChars, ms: c.ms, systemHash: c.systemHash, jsonRetry: c.jsonRetry, at: c.at, error: c.error ? `${c.error.code ?? "?"} : ${c.error.message.slice(0, 160)}` : undefined })),
+      .map((c) => ({ site: c.site, model: c.model, promptChars: c.promptChars, systemChars: c.systemChars, outputChars: c.outputChars, ms: c.ms, systemHash: c.systemHash, jsonRetry: c.jsonRetry, at: c.at, provider: c.provider, usage: c.usage, error: c.error ? `${c.error.code ?? "?"} : ${c.error.message.slice(0, 160)}` : undefined })),
     rates: await rates(),
     billing: await readBilling(followed.job?.creditRef ?? null),
     rejected: readJsonl<{ event: string; stem: string; options?: string[]; correct?: number[]; reason: string }>(path.join(runDir, "trace.jsonl"))
