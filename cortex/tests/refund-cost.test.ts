@@ -135,3 +135,19 @@ test("examen INCOMPLET → remboursé au prorata des questions manquantes, et le
   }));
 });
 
+test("aucune question livrée → remboursement interne total, même après des appels", async () => {
+  const credits = await import("../lib/billing/credits");
+  const { reserveGeneration } = await import("../lib/billing/reserve");
+  const jobs = await import("../lib/jobs");
+  const { runWithUser } = await import("../db/context");
+  const { runWithCourse } = await import("../db/client");
+  await runWithUser("hugo", () => runWithCourse("ml", async () => {
+    const start = await credits.getBalanceCenti("hugo");
+    assert.equal((await reserveGeneration({ bucket: "gen", kind: "qcm", ref: credits.jobRef("hugo", "ml", 9) })).ok, true);
+    await paidCall("hugo", "ml", 9, 0.42);
+    const notice = await jobs.settleShortfall({ id: 9, type: "qcm" }, 0, 23);
+    assert.equal(await credits.getBalanceCenti("hugo"), start);
+    assert.match(notice ?? "", /23 questions sur 23/);
+    assert.match(notice ?? "", /1 crédit rendu/);
+  }));
+});
