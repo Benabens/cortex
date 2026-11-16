@@ -47,3 +47,19 @@ test("le dossier de catégorie décide du type ; seules les vraies annales compt
   });
   assert.equal(await runWithCourse(c.id, () => pastExamCount()), 1);
 });
+
+test("sans dossier de catégorie, le même classifieur que l'import : un projet « final » n'est pas une annale", async () => {
+  const c = await newCourse("Orvelle sans catégorie");
+  fs.mkdirSync(path.join(c.contentRoot, "misc"), { recursive: true });
+  fs.writeFileSync(path.join(c.contentRoot, "misc", "final-project-2024.pdf"), textPdf("Consignes du projet"));
+  fs.writeFileSync(path.join(c.contentRoot, "misc", "Klausur_WS2023.pdf"), textPdf("Aufgabe 1"));
+  const r = ingest(c.id);
+  assert.equal(r.status, 0, r.output);
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const rows = await runWithCourse(c.id, () => q.all<{ path: string; type: string; year: number | null }>(`SELECT path, type, year FROM sources ORDER BY path`));
+  assert.deepEqual(rows.map((x) => [x.path, x.type, x.year]), [
+    ["misc/Klausur_WS2023.pdf", "final", 2023],
+    ["misc/final-project-2024.pdf", "exercise", null],
+  ]);
+});
