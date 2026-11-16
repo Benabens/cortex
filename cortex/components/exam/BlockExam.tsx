@@ -296,7 +296,7 @@ export function BlockExam({
           />
         )}
         {det && det.explanation && (
-          <p className="mt-2 text-[12.5px]" style={{ color: "var(--ink-2)" }}>
+          <p className="mt-2 text-[12.5px]" style={{ color: "var(--ink-2)", whiteSpace: "pre-line" }}>
             <strong style={{ color: "var(--ink)" }}>Pourquoi :</strong>{" "}
             {det.explanation}
           </p>

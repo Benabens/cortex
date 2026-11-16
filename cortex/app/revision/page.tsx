@@ -215,7 +215,7 @@ export default function RevisionPage() {
                               <div className="text-[13.5px]" style={{ color: "var(--ink)" }}>{q.statement}</div>
                               {q.options && <pre className="mt-1 text-[12.5px]" style={{ color: "var(--ink-2)", whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{q.options}</pre>}
                               {reveal[q.id]
-                                ? <div className="mt-1.5 text-[13px]" style={{ color: "var(--green-ink)" }}>{q.kind === "qcm" ? <><strong>Réponse :</strong> {q.correct}. {q.explanation}</> : <><strong>Corrigé :</strong> {q.solution}</>}</div>
+                                ? <div className="mt-1.5 text-[13px]" style={{ color: "var(--green-ink)", whiteSpace: "pre-line" }}>{q.kind === "qcm" ? <><strong>Réponse :</strong> {q.correct}. {q.explanation}</> : <><strong>Corrigé :</strong> {q.solution}</>}</div>
                                 : <button className="btn btn-quiet btn-sm mt-1" style={{ color: "var(--green-ink)" }} onClick={() => setReveal((r) => ({ ...r, [q.id]: true }))}>Révéler la réponse</button>}
                             </div>
                             );
