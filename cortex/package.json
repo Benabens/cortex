@@ -27,6 +27,7 @@
     "dna": "tsx scripts/exam-dna.ts",
     "cost:report": "tsx scripts/cost-report.ts",
     "billing:backfill": "tsx scripts/revenue-backfill.ts",
+    "course:delete": "tsx scripts/delete-course.ts",
     "e2e": "playwright test",
     "e2e:charge": "tsx e2e/load.ts",
     "e2e:google": "E2E_GOOGLE_ONLY=1 playwright test --project=google",
