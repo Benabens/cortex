@@ -94,3 +94,13 @@ test("le barème de repli est écrit dans la langue de l'examen", async () => {
   const de = await check("de", "4 oder 5");
   assert.deepEqual(de.result.criteria.map((c) => c.label), ["Der Lösungsweg geht auf die Aufgabe ein", "Die Antwort ist richtig und vollständig"]);
 });
+
+test("le barème de repli couvre toutes les langues d'examen, l'anglais sinon", async () => {
+  const { parseCheckResult } = await import("../lib/check-solution");
+  const legacy = JSON.stringify({ verdict: "partial", feedback: "x", correct_solution: "5" });
+  const { LANGUAGES } = await import("../lib/exam-format");
+  const english = parseCheckResult(legacy, "en").criteria[0].label;
+  for (const l of LANGUAGES.filter((x) => x !== "en")) assert.notEqual(parseCheckResult(legacy, l).criteria[0].label, english, l);
+  assert.equal(parseCheckResult(legacy, "xx").criteria[0].label, english);
+  assert.equal(parseCheckResult(legacy, "it").criteria[1].label, "La risposta è corretta e completa");
+});
