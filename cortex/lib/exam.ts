@@ -999,7 +999,8 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
     step(`⚠ Examen livré PARTIEL : ${allQuestions.length}/${qTotal} questions (${missing} ignorée(s) après timeout/échec), relance pour compléter`, 90);
   const spec: ExamSpec = {
     title: `${c.examCode} ${c.examName} : ${c.examKind}`,
-    duration_min: c.durationMin,
+    // La durée du budget (annales, déclaration, sinon le cours) : celle que le prompt a annoncée.
+    duration_min: examBudgetFor(currentCourse()).minutes,
     questions: allQuestions,
   };
   // fusion des rapports par lot (résultats ré-indexés sur l'ordre fusionné)

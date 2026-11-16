@@ -88,7 +88,7 @@ export type ExamFormat = {
   blocks?: BlockFormat | null;
   /** Questions à choix (QCM, mixte) : unique, multiples ou les deux ; null pour un autre type. */
   answerMode?: AnswerMode | null;
-  /** Total de points des annales, quand elles le disent (absent sinon). */
+  /** Total de points des annales, quand elles le disent (absent sinon ; un format à questions composées le porte dans `blocks`). */
   totalPoints?: number;
 };
 
@@ -515,7 +515,7 @@ export function formatContextFor(courseId: string): { kind: ExamKind | null; lan
   const c = getCourse(courseId);
   // Les documents permis ne viennent que de la déclaration : aucune source ne les détecte.
   const documents = c.examFormat?.documents ?? null;
-  if (known) return { kind: known.kind, language: known.language, discipline: known.discipline, durationMin: known.durationMin, documents, totalPoints: known.totalPoints ?? null };
+  if (known) return { kind: known.kind, language: known.language, discipline: known.discipline, durationMin: known.durationMin, documents, totalPoints: known.totalPoints ?? known.blocks?.totalPoints ?? null };
   return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || "fr", discipline: inferDiscipline({ code: c.examCode }), durationMin: c.examFormat?.durationMin ?? null, documents, totalPoints: null };
 }
 
