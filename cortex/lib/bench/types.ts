@@ -86,6 +86,8 @@ export type ItemVerdict = {
   offCourse: boolean;
   distractors: number;
   trivialDistractors: number;
+  /** Preuve textuelle retenue par le vote, avec l'option concernée. */
+  evidence?: { criterion: string; option: number | null; source: string; passage: string }[];
   /** Code exécuté pour vérifier la clé (lib/sandbox-exec) quand la réponse en dépend. */
   code?: { ran: boolean; ok: boolean; detail: string };
 };
@@ -98,6 +100,7 @@ export type Verdicts = {
   duplicatesIntra: [number, number][];
   /** Questions qui reprennent une question d'un examen précédent. */
   duplicatesPrevious: number[];
+  duplicateEvidence?: { kind: "intra" | "previous"; questions: number[]; source: string; passage: string }[];
   /** Items écartés « hors cours » par le moteur et pourtant dans le cours. */
   rejected: { idx: number; offCourseReject: boolean; falseRejection: boolean }[];
 };
