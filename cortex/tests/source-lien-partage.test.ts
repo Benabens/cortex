@@ -56,6 +56,15 @@ test("une page de connexion ou presque vide n'est pas rangée comme support", as
   assert.match(saved.message, /connexion|presque pas de texte/i);
   assert.ok(!fs.existsSync(path.join(c.contentRoot, "lectures")) || fs.readdirSync(path.join(c.contentRoot, "lectures")).length === 0);
 
+  // Une page courte qui parle de « connexion » (réseau) n'est pas une page de connexion.
+  const tcp = `<html><head><title>TCP</title></head><body><p>${"Une connexion TCP s’ouvre par une poignée de main en trois temps. ".repeat(6)}</p></body></html>`;
+  const net = await add(c.id, "https://cours.example.org/tcp.html", tcp, "text/html");
+  assert.ok(!(net.saved instanceof Error), (net.saved as Error).message);
+
+  const form = `<html><head><title>Moodle</title></head><body><form><input name="u"><input type="password" name="p"></form><p>${"Bienvenue sur la plateforme de cours de l’université. ".repeat(6)}</p></body></html>`;
+  const { saved: refused } = await add(c.id, "https://moodle.example.org/login/index.php", form, "text/html");
+  assert.ok(refused instanceof Error && /connexion/.test(refused.message));
+
   const page = `<html><body><main><h1>Ondes</h1><p>${"Une onde se propage dans un milieu élastique. ".repeat(20)}</p></main></body></html>`;
   const ok = await add(c.id, "https://cours.example.org/ondes.html", page, "text/html");
   assert.ok(!(ok.saved instanceof Error), (ok.saved as Error).message);
