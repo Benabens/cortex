@@ -782,16 +782,22 @@ export function renderExerciseLatex(q: ExamQuestion, dateLabel: string, includeS
   ].join("\n");
 }
 
+/** Copie le logo officiel à côté des .tex compilés (gabarit de l'EPFL seulement). */
+export function copyExamLogo(): void {
+  if (courseTemplate() === "neutral") return;
+  for (const ext of ["pdf", "png"]) {
+    const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
+    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
+  }
+}
+
 export type ArtifactResult = { file: string; kind: "pdf" | "html"; texError?: string };
 
 /** Construit l'artefact d'UN exercice ciblé : PDF énoncé (sans corrigé) + PDF corrigé, sans garde. */
 export async function buildExerciseArtifact(q: ExamQuestion, id: number, dateLabel: string): Promise<ArtifactResult> {
   fs.mkdirSync(examsDir(), { recursive: true });
   const base = `exam-${id}`;
-  for (const ext of ["pdf", "png"]) {
-    const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
-  }
+  copyExamLogo();
   // Garde AVANT toute écriture : un source piégé (\input d'un fichier du
   // conteneur…) n'est ni écrit ni compilé — l'exercice échoue.
   const texEnonce = renderExerciseLatex(q, dateLabel, false);
@@ -817,11 +823,7 @@ export async function buildExerciseArtifact(q: ExamQuestion, id: number, dateLab
 export async function buildExamArtifact(spec: ExamSpec, id: number, dateLabel: string): Promise<ArtifactResult> {
   fs.mkdirSync(examsDir(), { recursive: true });
   const base = `exam-${id}`;
-  // copie un éventuel logo officiel pour la compilation
-  for (const ext of ["pdf", "png"]) {
-    const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
-  }
+  copyExamLogo();
   // 1) examen seul (corrigé caché — mode mock) ; 2) version corrigée
   // Garde AVANT toute écriture (cf. lib/tex-guard) : le rendu lui-même est
   // inchangé — le garde lit, il ne réécrit pas.

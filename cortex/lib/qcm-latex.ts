@@ -1,7 +1,7 @@
 import { currentCourse } from "@/db/client";
 import { getCourse } from "@/lib/courses";
 import type { ExamQuestion } from "@/lib/exam";
-import { compileExamPdf, qrText, texEscape } from "@/lib/exam-latex";
+import { compileExamPdf, copyExamLogo, qrText, texEscape } from "@/lib/exam-latex";
 import { formatContextFor } from "@/lib/exam-format";
 import { courseTemplate, courseWords, localDate, neutralChrome, neutralCoverTex, pointsText, solutionColor } from "@/lib/exam-template";
 import { assertTexSafe } from "@/lib/tex-guard";
@@ -252,14 +252,7 @@ export function examDocument(body: string[], dateLabel: string): string {
   ].join("\n");
 }
 
-/** Copie le logo de la page de garde à côté des .tex compilés (gabarit de l'EPFL seulement). */
-export function copyExamLogo(): void {
-  if (courseTemplate() === "neutral") return;
-  for (const ext of ["pdf", "png"]) {
-    const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
-  }
-}
+export { copyExamLogo };
 
 /** Source .tex complet de l'examen QCM (+ ouvert), corrigé optionnel. */
 export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSolutions: boolean): Promise<string> {
