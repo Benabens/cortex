@@ -141,6 +141,13 @@ test("distracteurs triviaux : les marqueurs formels sont mesurés sans appel au 
   assert.deepEqual(deterministicTrivialOptions({ ...item, correct: [0, 1] }), [2], "une option correcte n'est jamais un distracteur");
 });
 
+test("question ouverte : le juge reçoit la fin d'un corrigé long", async () => {
+  const { renderItemForJudge } = await import("../lib/bench/judge");
+  const marker = "CONCLUSION_VERIFIABLE_EN_FIN_DE_CORRIGE";
+  const rendered = renderItemForJudge({ idx: 7, kind: "open", topic: "preuve", stem: "Démontrer.", solution: `${"étape ".repeat(600)}${marker}` }, true);
+  assert.match(rendered, new RegExp(marker));
+});
+
 test("une panne passagère du fournisseur pendant le jugement est réessayée, le jugement n'est pas perdu", async () => {
   failAdjudicate = 1;
   const { runWithCourse } = await import("../db/client");
