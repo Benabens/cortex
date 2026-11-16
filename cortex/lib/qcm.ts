@@ -656,7 +656,7 @@ const FINAL_QUALITY_SCHEMA = {
 } as const;
 
 /** Une passe courte calquée sur la rubrique du banc, avec clé et explication visibles. */
-async function finalQualityAudit(items: QcmItem[], step: StepCb, readings = 1): Promise<QcmItem[]> {
+async function finalQualityAudit(items: QcmItem[], step: StepCb, readings = 1, takeCall: () => boolean = () => true): Promise<QcmItem[]> {
   if (!items.length) return [];
   const passages = await coursePassages([...new Set(items.map((it) => it.topic).filter(Boolean))]).catch(() => []);
   const body = items.map((it, index) => [
@@ -667,7 +667,12 @@ async function finalQualityAudit(items: QcmItem[], step: StepCb, readings = 1): 
   ].join("\n")).join("\n\n");
   // Audit illisible ou en échec : les QCM gardent le verdict de leur vérification à l'aveugle. Lever
   // ici perdait l'examen entier (« Aucun QCM généré ») alors que tout était déjà vérifié et payé.
-  const read = () => completeJson<{ verdicts: FinalQualityVerdict[] }>({
+  const read = () => {
+    if (!takeCall()) {
+      step(`Budget d'audit épuisé : verdicts de la vérification gardés`, 79);
+      return Promise.resolve(null);
+    }
+    return completeJson<{ verdicts: FinalQualityVerdict[] }>({
     model: "opus", timeoutMs: 420_000, json: { schema: FINAL_QUALITY_SCHEMA },
     prompt: [
       `Tu es un examinateur exigeant. Pour chaque QCM, tranche selon les extraits du cours.`,
@@ -677,10 +682,11 @@ async function finalQualityAudit(items: QcmItem[], step: StepCb, readings = 1): 
       DATA_RULE, passages.length ? dataBlock("EXTRAITS DU COURS", passages) : "", "", body, "",
       `Réponds UNIQUEMENT avec {"verdicts":[{"index":0,"key":true,"offCourse":false,"trivial":[]}]}, un objet par QCM.`,
     ].join("\n"),
-  }, { check: (v) => (Array.isArray(v?.verdicts) && v.verdicts.length >= items.length && v.verdicts.every((x) => typeof x?.key === "boolean") ? null : "il faut un verdict par QCM") }).catch((e) => {
+    }, { check: (v) => (Array.isArray(v?.verdicts) && v.verdicts.length >= items.length && v.verdicts.every((x) => typeof x?.key === "boolean") ? null : "il faut un verdict par QCM") }).catch((e) => {
     step(`Audit final ignoré (${(e as Error).message.slice(0, 60)}), verdicts de la vérification gardés`, 79);
     return null;
-  });
+    });
+  };
   const first = await read();
   if (!first) return items;
   const second = readings > 1 ? await read() : null;
@@ -1347,6 +1353,20 @@ export function qcmTopupMissing(delivered: number, requested: number): number {
   return Math.max(0, requested - delivered);
 }
 
+export type QcmCallPhase = "comblement" | "audit" | "remplacement";
+
+/** Budgets indépendants : une phase épuisée ne peut jamais emprunter aux suivantes. */
+export class QcmPhaseCallBudget {
+  private readonly left: Record<QcmCallPhase, number>;
+  constructor(limits: Record<QcmCallPhase, number>) { this.left = { ...limits }; }
+  remaining(phase: QcmCallPhase): number { return this.left[phase]; }
+  take(phase: QcmCallPhase, wanted = 1): number {
+    const granted = Math.min(Math.max(0, wanted), this.left[phase]);
+    this.left[phase] -= granted;
+    return granted;
+  }
+}
+
 /**
  * Durée de chaque phase d'un examen QCM sans historique (banc de M : ~10 min à
  * LLM_MAX_CONCURRENCY=4, QCM et ouvertes en parallèle) ; sinon la médiane des journaux
@@ -1491,6 +1511,24 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     }
     batches.push({ topics: topicsSlice, molds: moldsSlice });
   }
+  const callBudget = new QcmPhaseCallBudget({
+    comblement: EXTRA_BATCHES * batches.length,
+    audit: Math.max(4, batches.length + 2),
+    remplacement: Math.max(3, batches.length * 2),
+  });
+  const auditWithinBudget = async (items: QcmItem[], readings = 1): Promise<QcmItem[]> => {
+    if (!items.length) return [];
+    const clean = items.filter((it) => !duplicateOptionIndices(it.options, it.correct).length);
+    if (clean.length < items.length) step(`Contrôle déterministe : ${items.length - clean.length} QCM à options dupliquées écarté(s) avant audit`, 78);
+    return finalQualityAudit(clean, step, readings, () => callBudget.take("audit") === 1);
+  };
+  const repairWithinBudget = async (items: QcmItem[]): Promise<QcmItem[]> => {
+    if (!items.length || !callBudget.take("remplacement")) {
+      if (items.length) step(`Budget de remplacement épuisé : aucun nouvel appel`, 81);
+      return items;
+    }
+    return replaceTrivialDistractorsBatch(items, step, shared.language);
+  };
   const phaseMs = { ...DEFAULT_PHASE_MS, ...(opts.phaseMs ?? {}) };
   work = new PhaseProgress(8, [
     [{ name: "QCM", units: batches.length, ms: phaseMs.QCM }, { name: "Questions ouvertes", units: openCount, ms: phaseMs["Questions ouvertes"] }],
@@ -1563,7 +1601,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const fixable = defects.filter((w) => w.it.verified === 1 && !w.it.rejected && !!w.it.trivialDistractors?.length);
     const weak = defects.filter((w) => !fixable.includes(w));
     const [repaired, regenerated] = await Promise.all([
-      Promise.all(chunked(fixable).map((c) => replaceTrivialDistractorsBatch(c.map((w) => w.it), step, shared.language).catch((e) => {
+      Promise.all(chunked(fixable).map((c) => repairWithinBudget(c.map((w) => w.it)).catch((e) => {
         step(`Remplacement des distracteurs ignoré (${(e as Error).message.slice(0, 50)})`, 0);
         return c.map((w) => w.it);
       }))).then((r) => r.flat()),
@@ -1748,6 +1786,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const findDuplicates = async (items: QcmItem[], strictMode: boolean) => {
     let r: Awaited<ReturnType<typeof duplicateItems>> | null = null;
     for (let attempt = 0; attempt < 2 && !r; attempt++) {
+      if (!callBudget.take("audit")) break;
       try {
         r = await duplicateItems(items, { strict: strictMode, previous: recent.map((x) => x.stem) });
       } catch (e) {
@@ -1779,7 +1818,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const all: QcmItem[] = [];
   const verifiedCandidates: QcmItem[] = [];
   let pending = batches;
-  let extraBudget = EXTRA_BATCHES * batches.length;
+  let extraBudget = callBudget.remaining("comblement");
   for (let round = 0; pending.length; round++) {
     const missing: { topic: QcmSlot; mold: MoldKind | null; rejected: boolean; why?: string }[] = [];
     // Lots QCM menés en même temps (QCM_BATCH_CONCURRENCY, défaut 8) ; le limiteur global des appels
@@ -1826,7 +1865,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       const guidance = fixes.length ? [TO_FIX, ...fixes].join("\n") : undefined;
       pending.push({ topics: slice.map((m) => m.topic), molds: slice.map((m) => m.mold), guidance });
     }
-    extraBudget -= pending.length;
+    callBudget.take("comblement", pending.length);
+    extraBudget = callBudget.remaining("comblement");
     progress.add("QCM", pending.length); // réessai ajouté : le temps restant peut remonter
     step(`${count - all.length} QCM manquant(s) → ${pending.length} lot(s) de comblement${swaps.length ? ` (${swaps.length} sujet(s) écarté(s) remplacé(s) par une notion de réserve)` : ""}`, 30 + Math.round((all.length / Math.max(1, count)) * 50));
   }
@@ -1836,8 +1876,14 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const auditedStems = new Set<string>();
   const auditRejected = new Set<string>();
   if (verifiedCandidates.length && !(shouldFinish() && finishNow())) {
-    const auditPassed = await finalQualityAudit(verifiedCandidates, step);
-    // Plafonds par notion dès la sélection : seules les questions qui peuvent rester sont réparées.
+    // Les contrôles gratuits précèdent toujours le juge : options dupliquées et plafonds réduisent
+    // d'abord le pool soumis à l'audit sémantique.
+    const invalidOptions = verifiedCandidates.filter((it) => duplicateOptionIndices(it.options, it.correct).length);
+    invalidOptions.forEach((it) => auditRejected.add(it.stem));
+    const cleanOptions = verifiedCandidates.filter((it) => !invalidOptions.includes(it));
+    const deterministicPool = cappedPool([], cleanOptions, cleanOptions.length);
+    step(`Contrôles déterministes : options et plafonds vérifiés sur ${deterministicPool.length} QCM`, 78);
+    const auditPassed = await auditWithinBudget(deterministicPool);
     const audited = cappedPool([], auditPassed, count);
     let selected = selectWithinTrivialBudget([], audited, count);
     const flagged = selected.filter((it) => !!it.trivialDistractors?.length);
@@ -1849,7 +1895,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     if (flagged.length) {
       // Réparation en échec : les QCM gardent leur version auditée (une réponse illisible ici
       // perdait l'examen entier).
-      const repaired = await replaceTrivialDistractorsBatch(flagged, step, shared.language).catch((e) => {
+      const repaired = await repairWithinBudget(flagged).catch((e) => {
         step(`Remplacement des distracteurs ignoré (${(e as Error).message.slice(0, 50)})`, 79);
         return flagged;
       });
@@ -1860,7 +1906,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       selected = selected.map((it) => byStem.get(it.stem) ?? it);
       if (changedStems.size) {
         const toReaudit = selected.filter((it) => changedStems.has(it.stem));
-        const reaudited = await finalQualityAudit(toReaudit, step);
+        const reaudited = await auditWithinBudget(toReaudit);
         const byReaudited = new Map(reaudited.map((it) => [it.stem, it]));
         const beforeRepair = new Map(audited.map((it) => [it.stem, it]));
         // Réparé mais écarté par le nouvel audit, ou resté sans verdict (audit en échec) : la version
@@ -1896,7 +1942,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // Le comblement principal peut consommer toute sa réserve avant que les doublons, impossibles à
   // connaître à l'échelle de l'examen, soient audités. Leur remplacement a donc son propre budget
   // borné : au plus deux fois les lots prévus, partagé avec le complément final.
-  let lateBudget = Math.max(3, batches.length * 2);
+  let lateBudget = callBudget.remaining("remplacement");
   // Une passe de remplacement peut elle-même perdre des items aux contrôles qualité. Il faut alors
   // recombler même si l'audit suivant ne voit plus de doublon, puis auditer ce nouveau lot. Le budget
   // reste borné par la taille de l'examen et par la réserve de notions.
@@ -1944,7 +1990,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       const slice = spare.slice(i, i + BATCH);
       replacement.push({ topics: slice, molds: slice.map(() => null), guidance });
     }
-    lateBudget -= replacement.length;
+    callBudget.take("remplacement", replacement.length);
+    lateBudget = callBudget.remaining("remplacement");
     for (const got of await runRound(replacement)) {
       if (got.error) lastError = got.error;
       all.splice(0, all.length, ...selectCapped(all, got.items, count));
@@ -1971,7 +2018,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const late = all.filter((it) => !auditedStems.has(it.stem));
     const lateTrivial = new Set<string>();
     if (late.length) {
-      const passed = new Map((await finalQualityAudit(late, step)).map((it) => [it.stem, it]));
+      const passed = new Map((await auditWithinBudget(late)).map((it) => [it.stem, it]));
       let out = 0;
       for (const it of late) {
         auditedStems.add(it.stem);
@@ -2006,7 +2053,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
           const d = duplicateOptionIndices(it.options, it.correct);
           return { ...it, duplicateOptions: d, trivialDistractors: [...new Set([...(it.trivialDistractors ?? []), ...d])] };
         });
-        const repaired = await replaceTrivialDistractorsBatch(sent, step, shared.language).catch(() => sent);
+        const repaired = await repairWithinBudget(sent).catch(() => sent);
         const changed = repaired.filter((r, k) => r !== sent[k]);
         if (changed.length) await verifyGrouped(changed);
         left = left.filter((it, k) => {
@@ -2079,7 +2126,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
         const slice = slots.slice(i, i + BATCH);
         fill.push({ topics: slice, molds: slice.map(() => null), guidance });
       }
-      lateBudget -= fill.length;
+      callBudget.take("remplacement", fill.length);
+      lateBudget = callBudget.remaining("remplacement");
       progress.add("QCM", fill.length);
       step(`${short} QCM manquant(s) → complément final, ${fill.length} lot(s)${angle ? " (notions reprises sous un autre angle)" : ""}`, 80);
       const before = all.length;
@@ -2132,7 +2180,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // puis un réaudit des seules questions modifiées. Aucun complément ni réinjection après ce point.
   if (all.length && !(shouldFinish() && finishNow())) {
     const before = all.slice();
-    const audited = await finalQualityAudit(before, step, 2);
+    const audited = await auditWithinBudget(before, 2);
     const actions = ultimateAuditActions(before, audited);
     const byStem = new Map(audited.map((it) => [it.stem, it]));
     const repair = actions.repair.map((i) => audited.find((x) => x.stem === before[i].stem)!).filter(Boolean);
@@ -2147,9 +2195,9 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       else swapOut(it, false);
     }
     if (repair.length) {
-      const repaired = await replaceTrivialDistractorsBatch(repair, step, shared.language).catch(() => repair);
+      const repaired = await repairWithinBudget(repair).catch(() => repair);
       const changed = repaired.filter((it, i) => it !== repair[i]);
-      const passed = new Map((await finalQualityAudit(changed, step, 2)).filter((it) => !it.trivialDistractors?.length).map((it) => [it.stem, it]));
+      const passed = new Map((await auditWithinBudget(changed, 2)).filter((it) => !it.trivialDistractors?.length).map((it) => [it.stem, it]));
       for (const old of repair) {
         const i = all.findIndex((it) => it.stem === old.stem);
         if (i < 0) continue;
