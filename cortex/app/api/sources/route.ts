@@ -5,6 +5,7 @@ import {
   listExamSources,
   removeUploadedRef,
   toggleReference,
+  unreadFiles,
 } from "@/lib/sources";
 import { useCourseOr404 } from "@/lib/req";
 import { UPLOAD_LIMITS, readFormData, readJson, withBodyLimit } from "@/lib/upload-limit";
@@ -22,6 +23,7 @@ export async function GET(req: NextRequest) {
     exams: await listExamSources(),
     corpus: await corpusSummary(),
     sources: await listCorpusSources(),
+    unread: await unreadFiles(),
   });
 }
 

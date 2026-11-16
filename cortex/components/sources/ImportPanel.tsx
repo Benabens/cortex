@@ -10,12 +10,17 @@ import { useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@/lib/ux/a
 import { cn } from "@/lib/ux/cn";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
-import { FOLDER_EXTENSIONS, prepareCourseImport, type FolderImportRefusal } from "@/lib/folder-import";
+import { ARCHIVE_FILE, FOLDER_EXTENSIONS, prepareCourseImport, type FolderImportRefusal } from "@/lib/folder-import";
 import { creditsPhrase, debitedPhrase } from "@/lib/billing/limits-text";
+import { ingestProblems, type IngestProblem } from "@/lib/ingest-report";
+import { apiDelete } from "@/lib/ux/write";
 
-const ACCEPT = ".pdf,.html,.htm,.txt,.md,.zip";
+const ACCEPT = ".pdf,.docx,.pptx,.html,.htm,.txt,.md,.zip,.imscc,.mbz";
+/** Annales : Word et PowerPoint en plus (lus comme le reste du cours). Autres zones : formats de /api/sources/add. */
+const PAST_EXAM_FILES = /\.(pdf|docx|pptx|html?|txt|md)$/i;
+const OTHER_FILES = /\.(pdf|html?|txt|md)$/i;
 /** Un dossier de cours contient plus que des annales : slides, séries, images, notes. */
-const ACCEPT_FOLDER_ATTRIBUTE = [...FOLDER_EXTENSIONS.map((ext) => `.${ext}`), ".zip"].join(",");
+const ACCEPT_FOLDER_ATTRIBUTE = [...FOLDER_EXTENSIONS.map((ext) => `.${ext}`), ".zip", ".imscc", ".mbz"].join(",");
 
 /**
  * Ce que sont les fichiers déposés. Une annale décide du format ; sans annale, les
@@ -37,7 +42,7 @@ const DROP_KINDS: { value: DropKind; label: string }[] = [
  *   (finals dans refs/, slides et séries dans content/) puis job « ingest » ;
  * puis « Préparer le cours » → POST /api/prepare → pipeline complet (ingestion → format → blueprint).
  */
-export function ImportPanel({ onChanged }: { onChanged: () => void }) {
+export function ImportPanel({ onChanged, unread }: { onChanged: () => void; unread?: IngestProblem[] }) {
   const { courseId } = useCourse();
   const fileRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
@@ -50,6 +55,14 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   const [paywall, setPaywall] = useState(false);
   const [folderProgress, setFolderProgress] = useState<{ done: number; total: number } | null>(null);
   const [folderRefusals, setFolderRefusals] = useState<FolderImportRefusal[]>([]);
+  // Fichiers déposés que l'ingestion n'a pas pu lire : nommés un par un, avec quoi faire.
+  const [unreadFiles, setUnreadFiles] = useState<IngestProblem[]>([]);
+  // La liste du serveur (dernier rapport, fichiers encore rangés) : elle survit au rechargement.
+  const [serverUnread, setServerUnread] = useState(unread);
+  if (unread !== serverUnread) {
+    setServerUnread(unread);
+    if (unread) setUnreadFiles(unread);
+  }
   const [jobId, setJobId] = useState<number | null>(null);
   const [jobKind, setJobKind] = useState<"format" | "ingest" | "prepare" | null>(null);
   const job = useJob(jobId);
@@ -78,6 +91,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
     setFolderRefusals([]);
     setFormatOffer(false);
     setFormatCharged(0);
+    setUnreadFiles([]);
     notified.current = false;
   }, [courseId]);
 
@@ -85,39 +99,61 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
     if (!job || JOB_ACTIVE.includes(job.status) || notified.current) return;
     notified.current = true;
     setJobId(null);
+    // Un job de format n'a pas de rapport : la liste en cours reste affichée.
+    const unread = ingestProblems(job.report);
+    if (job.report) setUnreadFiles(unread);
     if (job.status === "error" || job.status === "failed") {
       setError(asText(job.error) ?? "Le traitement a échoué. Réessaie.");
     } else {
+      const skipped = unread.length
+        ? ` ${unread.length} fichier${unread.length > 1 ? "s n’ont" : " n’a"} pas pu être lu${unread.length > 1 ? "s" : ""} : la liste est ci-dessous.`
+        : "";
       setUploadedMsg(
-        jobKind === "prepare"
+        (jobKind === "prepare"
           ? "Cours préparé : types d’exos et poids mis à jour."
           : jobKind === "ingest"
             ? "Dossier ingéré : le corpus est à jour."
-            : `Format re-détecté sur tes annales${formatCharged > 0 ? ` (${debitedPhrase(formatCharged)})` : ""}.`
+            : `Format re-détecté sur tes annales${formatCharged > 0 ? ` (${debitedPhrase(formatCharged)})` : ""}.`) + skipped
       );
       onChanged();
     }
     setJobKind(null);
   }, [job, jobKind, onChanged, formatCharged]);
 
+  /** Un fichier non lu ne compte nulle part : le retirer libère la place et allège la liste. */
+  const removeUnread = async (item: IngestProblem) => {
+    try {
+      await apiDelete(`/api/sources?path=${encodeURIComponent(item.path)}&course=${encodeURIComponent(courseId)}`);
+      setUnreadFiles((list) => list.filter((f) => f.path !== item.path));
+    } catch (e) {
+      setError(`${item.name} : retrait impossible (${(e as Error).message}).`);
+    }
+  };
+
   const startJob = (id: number, kind: "format" | "ingest" | "prepare") => {
     notified.current = false;
+    if (kind !== "format") setUnreadFiles([]);
     setJobId(id);
     setJobKind(kind);
   };
 
   const upload = async (files: FileList | File[]) => {
-    if ([...files].some((file) => /\.zip$/i.test(file.name))) {
+    if ([...files].some((file) => ARCHIVE_FILE.test(file.name))) {
       await importFolder(files);
       return;
     }
-    const list = [...files].filter((f) => /\.(pdf|html?|txt|md)$/i.test(f.name));
+    // Un glisser-déposer ignore l'attribut accept : les fichiers écartés ici sont nommés, pas perdus.
+    const allowed = dropKind === "past_exam" ? PAST_EXAM_FILES : OTHER_FILES;
+    const list = [...files].filter((f) => allowed.test(f.name));
+    const refusedHere = [...files].filter((f) => !allowed.test(f.name)).map((f) => ({ name: f.name, reason: "format non pris en charge dans cette zone" }));
+    setFolderRefusals(refusedHere);
     if (!list.length) {
-      setError("Formats acceptés : PDF, HTML, TXT, MD.");
+      setError(dropKind === "past_exam" ? "Formats acceptés : PDF, Word, PowerPoint, HTML, TXT, MD." : "Formats acceptés : PDF, HTML, TXT, MD.");
       return;
     }
     setError(null);
     setUploadedMsg(null);
+    setUnreadFiles([]);
     setUploading(true);
     try {
       const fd = new FormData();
@@ -127,14 +163,24 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
         const res = await fetch(`/api/sources/add?course=${encodeURIComponent(courseId)}&category=${dropKind}`, { method: "POST", body: fd });
         const d = await res.json().catch(() => null);
         if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
-        setUploadedMsg(`${d.files} fichier${d.files > 1 ? "s" : ""} déposé${d.files > 1 ? "s" : ""}${d.skipped?.length ? ` (${d.skipped.length} refusé${d.skipped.length > 1 ? "s" : ""} : ${d.skipped[0]})` : ""} : indexation… Relance « Préparer le cours » pour relire le format.`);
+        // « nom : raison », un par fichier refusé (cf. /api/sources/add).
+        const refusedThere = ((d.skipped ?? []) as string[]).map((line) => {
+          const at = line.indexOf(" : ");
+          return at > 0 ? { name: line.slice(0, at), reason: line.slice(at + 3) } : { name: line, reason: "refusé" };
+        });
+        setFolderRefusals([...refusedHere, ...refusedThere]);
+        setUploadedMsg(`${d.files} fichier${d.files > 1 ? "s" : ""} déposé${d.files > 1 ? "s" : ""}${refusedThere.length ? `, ${refusedThere.length} refusé${refusedThere.length > 1 ? "s" : ""}` : ""} : indexation… Relance « Préparer le cours » pour relire le format.`);
         startJob(d.jobId, "ingest");
         return;
       }
       const res = await fetch(`/api/refs/upload?course=${encodeURIComponent(courseId)}`, { method: "POST", body: fd });
       const d = await res.json().catch(() => null);
+      const refusedThere = ((d?.skipped ?? []) as { file: string; reason: string }[]).map((s) => ({ name: s.file, reason: s.reason }));
+      setFolderRefusals([...refusedHere, ...refusedThere]);
       if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
-      setUploadedMsg(`${d.files.length} fichier${d.files.length > 1 ? "s" : ""} ingéré${d.files.length > 1 ? "s" : ""}.`);
+      const unread = (d.unread ?? []) as IngestProblem[];
+      setUnreadFiles(unread);
+      setUploadedMsg(`${d.files.length} fichier${d.files.length > 1 ? "s" : ""} ingéré${d.files.length > 1 ? "s" : ""}${refusedThere.length ? `, ${refusedThere.length} écarté${refusedThere.length > 1 ? "s" : ""}` : ""}${unread.length ? `, ${unread.length} sans texte lisible (liste ci-dessous)` : ""}.`);
       onChanged();
       if (d.formatPending) setFormatOffer(true);
     } catch (e) {
@@ -165,6 +211,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
       setFolderProgress({ done: 0, total: selection.accepted.length });
       const refused = [...selection.rejected];
       let saved = 0;
+      let duplicates = 0;
       for (const [index, entry] of selection.accepted.entries()) {
         let failure = "";
         for (let attempt = 1; attempt <= 3; attempt++) {
@@ -179,7 +226,8 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
               if (res.status < 500) break;
               continue;
             }
-            saved++;
+            if (data?.duplicate) duplicates++;
+            else saved++;
             failure = "";
             break;
           } catch {
@@ -190,11 +238,12 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
         setFolderProgress({ done: index + 1, total: selection.accepted.length });
       }
       setFolderRefusals(refused);
-      if (!saved) throw { status: 400, message: "Aucun fichier n’a pu être importé. Consulte la liste des refus ci-dessous." } as ApiError;
+      if (!saved && !duplicates) throw { status: 400, message: "Aucun fichier n’a pu être importé. Consulte la liste des refus ci-dessous." } as ApiError;
       const res = await fetch(`/api/sources/import?course=${encodeURIComponent(courseId)}&action=finish`, { method: "POST" });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw { status: res.status, message: data?.error ?? `Erreur ${res.status}` } as ApiError;
-      setUploadedMsg(`${saved} fichier${saved > 1 ? "s" : ""} déposé${saved > 1 ? "s" : ""}${refused.length ? `, ${refused.length} refusé${refused.length > 1 ? "s" : ""}` : ""} : indexation…`);
+      const already = duplicates ? `, ${duplicates} déjà présent${duplicates > 1 ? "s" : ""} dans le cours (même contenu)` : "";
+      setUploadedMsg(`${saved} fichier${saved > 1 ? "s" : ""} déposé${saved > 1 ? "s" : ""}${already}${refused.length ? `, ${refused.length} refusé${refused.length > 1 ? "s" : ""}` : ""} : indexation…`);
       startJob(data.jobId, "ingest");
     } catch (e) {
       setError((e as ApiError).message || "L’import du dossier a échoué.");
@@ -301,7 +350,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           )}
         </div>
         <div className="flex flex-wrap justify-center gap-1.5">
-          {["PDF", "HTML", "TXT", "MD", "ZIP"].map((f) => (
+          {(dropKind === "past_exam" ? ["PDF", "Word", "PowerPoint", "HTML", "TXT", "MD", "ZIP"] : ["PDF", "HTML", "TXT", "MD", "ZIP"]).map((f) => (
             <span key={f} className="rounded-md border border-line bg-surface-1/60 px-2 py-0.5 font-data text-xs text-ink-3">{f}</span>
           ))}
         </div>
@@ -344,8 +393,9 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
         <p className="mt-2 text-[0.76rem] leading-relaxed text-ink-3">
           Finals et midterms vont dans tes annales : ce sont eux qui fixent le format. Slides,
           séries, documents Word et notes rejoignent le reste du cours. 30 Mo maximum par
-          fichier, dans la limite de stockage de ton compte. Les ZIP sont décompressés dans ton
-          navigateur, même s’ils contiennent une autre archive.
+          fichier, dans la limite de stockage de ton compte. Les ZIP, exports Canvas (.imscc) et
+          sauvegardes Moodle (.mbz) sont décompressés dans ton navigateur, même s’ils contiennent
+          une autre archive.
         </p>
       </div>
 
@@ -407,6 +457,22 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           <p className="font-semibold text-ink-2">Fichiers non importés</p>
           <ul className="mt-1.5 list-disc space-y-1 pl-4">
             {folderRefusals.map((item, index) => <li key={`${item.name}-${index}`}><span className="break-all">{item.name}</span> : {item.reason}</li>)}
+          </ul>
+        </div>
+      )}
+      {unreadFiles.length > 0 && (
+        <div className="rounded-lg border border-line bg-surface-2/30 px-3.5 py-3 text-[0.78rem] text-ink-3" role="status">
+          <p className="font-semibold text-ink-2">Fichiers non lus</p>
+          <p className="mt-0.5">Les autres fichiers du cours ont été lus normalement.</p>
+          <ul className="mt-1.5 list-disc space-y-1 pl-4">
+            {unreadFiles.map((item) => (
+              <li key={item.path}>
+                <span className="break-all font-medium text-ink-2">{item.name}</span> : {item.message}{" "}
+                <button type="button" onClick={() => removeUnread(item)} className="font-medium text-ink-2 underline underline-offset-2 hover:text-ink-1">
+                  Retirer du cours
+                </button>
+              </li>
+            ))}
           </ul>
         </div>
       )}

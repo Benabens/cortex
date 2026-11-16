@@ -6,7 +6,7 @@ import { examLanguageFor } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, corpusWindows, coursePassages, isExamLogistics } from "@/lib/course-grounding";
-import { contentRoots, notionBase, overlapRatio, sameSourceFact } from "@/lib/qcm-checks";
+import { commonStemRoots, contentRoots, notionBase, overlapRatio, sameNotionQuestion, sameSourceFact } from "@/lib/qcm-checks";
 import { normalize } from "@/lib/text";
 import type { StepCb } from "@/lib/exam";
 
@@ -27,8 +27,11 @@ import type { StepCb } from "@/lib/exam";
 
 export type CourseFact = { id: string; notion: string; statement: string; passage: string };
 
-/** Version de l'extraction : la changer invalide les faits gardés en base (empreinte). */
-const FACTS_VERSION = 1;
+/**
+ * Version de l'extraction : la changer invalide les faits gardés en base (empreinte). 2 : un fait
+ * rangé sous la notion dont il parle, pas sous celle dont les extraits le contenaient (examen #16).
+ */
+const FACTS_VERSION = 2;
 
 /** Faits demandés par notion : de quoi tenir deux fois un examen de 20 questions, entre 2 et 5. */
 export function factsPerNotion(notions: number, count: number): number {
@@ -55,6 +58,32 @@ export function sameFact(a: Pick<CourseFact, "statement" | "passage">, b: Pick<C
   return statements >= 0.5 && overlapRatio(contentRoots(a.passage), contentRoots(b.passage)) >= 0.4;
 }
 
+/** Le terme qu'un énoncé de fait définit (« Un nudge est… », « Le X désigne… »), en racines, ou null. */
+const DEFINES = /^(?:selon\s+[^,]{1,60},\s*)?(?:(?:un|une|le|la|les|des|the|an?)\s+|l['’]\s*)?(.{3,60}?)\s+(?:est|sont|désign\p{L}*|se\s+défini\p{L}*|consist\p{L}*|signifi\p{L}*|is|are|means?|refers?\s+to)\s/iu;
+export function definedTerm(statement: string): Set<string> | null {
+  const m = statement.trim().match(DEFINES);
+  const roots = m ? contentRoots(m[1]) : null;
+  return roots?.size ? roots : null;
+}
+
+/**
+ * Deux faits d'une MÊME notion trop proches pour deux questions d'un même examen (examen #16,
+ * Q3/Q12 : deux faits sur la définition du nudge — réorganiser sans retirer d'option — qui ne
+ * fusionnent pas, `sameFact` exigeant une même proposition) : la définition du même terme, ou des
+ * énoncés qui se recouvrent nettement (seuils plus bas qu'entre deux notions). Ils restent deux
+ * faits du cours, pour des examens différents : seule la répartition d'un examen les sépare.
+ */
+export function closeFacts(a: CourseFact, b: CourseFact): boolean {
+  if (notionBase(a.notion) !== notionBase(b.notion)) return false;
+  const ta = definedTerm(a.statement);
+  const tb = definedTerm(b.statement);
+  if (ta && tb && overlapRatio(ta, tb) >= 0.6) return true;
+  const sa = contentRoots(a.statement);
+  const sb = contentRoots(b.statement);
+  if (sa.size >= 3 && sb.size >= 3 && overlapRatio(sa, sb) >= 0.4) return true;
+  return overlapRatio(contentRoots(`${a.statement} ${a.passage}`), contentRoots(`${b.statement} ${b.passage}`)) >= 0.5;
+}
+
 /** Faits fusionnés : le premier d'une même proposition reste (sa notion, son passage). */
 export function mergeFacts(facts: CourseFact[]): CourseFact[] {
   const kept: CourseFact[] = [];
@@ -62,14 +91,28 @@ export function mergeFacts(facts: CourseFact[]): CourseFact[] {
   return kept;
 }
 
-/** Les indices des questions dont le fait est déjà testé par une question précédente. */
-export function factDuplicates(items: { factId?: string | null }[]): number[] {
+type TestedQuestion = { factId?: string | null; stem?: string; notion?: string | null; options?: string[]; correct?: number[]; focusSlot?: boolean };
+type FullQuestion = TestedQuestion & { stem: string; options: string[]; correct: number[] };
+const fullQuestion = (it: TestedQuestion): it is FullQuestion => typeof it.stem === "string" && Array.isArray(it.options) && Array.isArray(it.correct);
+
+/**
+ * Les indices des questions dont le fait est déjà testé par une question précédente : même
+ * identifiant de fait, ou — examen #16, Q3/Q12 : deux faits distincts qui disaient la même chose —
+ * deux questions bâties sur des faits, de même notion, au même scénario ou à la même bonne réponse
+ * reformulée (lib/qcm-checks.sameNotionQuestion). Comparée aux seules questions gardées ; deux
+ * questions de l'accent demandé ne se comparent pas. Sans faits (conception par notion), le
+ * contrôle des doublons du modèle et les plafonds par notion décident, comme avant.
+ */
+export function factDuplicates(items: TestedQuestion[]): number[] {
   const seen = new Set<string>();
+  const kept: FullQuestion[] = [];
   const out: number[] = [];
+  const common = commonStemRoots(items.filter(fullQuestion).map((it) => it.stem));
   items.forEach((it, i) => {
-    if (!it.factId) return;
-    if (seen.has(it.factId)) out.push(i);
-    else seen.add(it.factId);
+    const twin = fullQuestion(it) && !!it.factId && kept.some((k) => !!k.factId && !(k.focusSlot && it.focusSlot) && sameNotionQuestion(k, it, common));
+    if ((it.factId && seen.has(it.factId)) || twin) { out.push(i); return; }
+    if (it.factId) seen.add(it.factId);
+    if (fullQuestion(it)) kept.push(it);
   });
   return out;
 }
@@ -96,8 +139,10 @@ export function attributedFact(sourceFact: string | null | undefined, own: Cours
  * des chapitres) donne son meilleur fait pas encore pris, jusqu'au nombre demandé et au plus `cap`
  * questions par notion — le maximum de notions d'abord. Dans une notion, les faits jamais posés
  * aux examens précédents du cours passent avant les autres (`asked` : fait → dernier examen) ; à un
- * même rang, les notions dont le fait est neuf avant celles dont le fait a déjà été posé. La
- * réserve suit le même ordre : elle remplace une question écartée par un fait encore inutilisé.
+ * même rang, les notions dont le fait est neuf avant celles dont le fait a déjà été posé. Un fait
+ * trop proche d'un fait déjà retenu de sa notion (`closeFacts`) n'est pas posé dans le même examen :
+ * il passe en fin de réserve. La réserve suit le même ordre : elle remplace une question écartée
+ * par un fait encore inutilisé.
  */
 export function planFacts(
   facts: CourseFact[],
@@ -117,15 +162,22 @@ export function planFacts(
   const depth = Math.max(0, ...lists.map((l) => l.length));
   const rank = (row: CourseFact[]) => [...row.filter((f) => !asked.has(f.id)), ...row.filter((f) => asked.has(f.id))];
   const picked: CourseFact[] = [];
-  for (let r = 0; r < Math.min(opts.cap, depth) && picked.length < opts.count; r++) {
+  const close = new Set<string>();
+  const perNotion = new Map<string, number>();
+  for (let r = 0; r < depth && picked.length < opts.count; r++) {
     for (const f of rank(lists.map((l) => l[r]).filter(Boolean))) {
       if (picked.length >= opts.count) break;
+      const b = notionBase(f.notion);
+      if ((perNotion.get(b) ?? 0) >= opts.cap) continue;
+      if (picked.some((p) => closeFacts(p, f))) { close.add(f.id); continue; }
       picked.push(f);
+      perNotion.set(b, (perNotion.get(b) ?? 0) + 1);
     }
   }
   const taken = new Set(picked.map((f) => f.id));
   const reserve: CourseFact[] = [];
-  for (let r = 0; r < depth; r++) reserve.push(...rank(lists.map((l) => l[r]).filter((f) => f && !taken.has(f.id))));
+  for (let r = 0; r < depth; r++) reserve.push(...rank(lists.map((l) => l[r]).filter((f) => f && !taken.has(f.id) && !close.has(f.id))));
+  for (let r = 0; r < depth; r++) reserve.push(...lists.map((l) => l[r]).filter((f) => f && close.has(f.id)));
   return { picked, reserve };
 }
 
@@ -176,6 +228,10 @@ async function extractGroup(group: string[], others: string[], k: number, lang: 
     `RÈGLES :`,
     `  - statement : une phrase courte et autonome (30 mots au plus) qui dit la PROPOSITION elle-même, jamais un simple thème (« le cours dit que X entraîne Y », pas « X »).`,
     `  - passage : une citation courte (une ou deux phrases), VERBATIM, recopiée mot pour mot depuis les extraits de CETTE notion, qui établit le fait.`,
+    // Examen #16 (16/11) : la définition d'une composante d'un autre chapitre, présente dans les
+    // extraits d'une notion trouvés par un mot commun (« données »), rangée sous cette notion — la
+    // question qui la testait en portait l'étiquette.
+    `  - notion : celle dont le fait PARLE, pas celle dont les extraits le contiennent. Les extraits d'une notion débordent parfois sur un autre sujet du cours : un tel passage ne donne aucun fait à cette notion — il va sous la notion de ce groupe dont il parle, ou il n'est pas listé.`,
     `  - DEUX FAITS NE DISENT JAMAIS LA MÊME CHOSE : la même proposition sous deux formulations, ou le même exemple, la même étude vus sous deux angles (ses chiffres d'un côté, ce qu'ils illustrent de l'autre), c'est UN SEUL fait. Une proposition qui concerne deux notions n'est donnée qu'une fois, sous la plus proche.`,
     `  - Au plus ${k} faits par notion, du plus central au plus secondaire ; moins si les extraits n'en établissent pas autant. Jamais un fait absent des extraits, jamais une connaissance extérieure au cours.`,
     COURSE_MATTER_RULE,

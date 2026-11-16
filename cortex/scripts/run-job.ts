@@ -14,10 +14,14 @@ import { llmAvailable, llmUnavailableReason } from "../lib/llm";
 import { generateTargetedExercise } from "../lib/exam";
 import { generateMockExam } from "../lib/mock-exam";
 import { texAvailable } from "../lib/exam-latex";
-import { assertJobCourseOwned, getJob, heartbeatJob, jobCheckpointStore, logJob, phaseHistory, saveJobCheckpoint, setJob, stepFields } from "../lib/jobs";
+import { assertJobCourseOwned, getJob, heartbeatJob, jobCheckpointStore, logJob, phaseHistory, saveJobCheckpoint, setJob, setJobReport, stepFields } from "../lib/jobs";
 import { setCurrentJob } from "../lib/billing/usage-context";
 import { generateLabExercise } from "../lib/labs";
 import { analyzeBlueprint } from "../lib/program";
+import { INGEST_REPORT_ENV, ingestFailureMessage } from "../lib/ingest-report";
+import { readIngestReport } from "../lib/ingest-report-file";
+import fs from "node:fs";
+import os from "node:os";
 
 const jobId = Number(process.argv[2]);
 const COURSE = process.argv[3];
@@ -85,34 +89,69 @@ async function fail(msg: string): Promise<never> {
 /** Job d'INGESTION : (re)construit le corpus du cours, en important un dossier si fourni. */
 async function runIngestJob(target: string | null): Promise<void> {
   await setJob(jobId, { status: "running", pid: process.pid, currentStep: "Ingestion…", progress: 5 });
-  const tsxLocal = path.join(process.cwd(), "node_modules", ".bin", "tsx");
   const args = ["scripts/ingest.ts", "--course", COURSE ?? "cs-202"];
   if (target) args.push("--from", target);
   await logJob(jobId, `Lancement : ingest --course=${COURSE}${target ? ` --from ${target}` : ""}`);
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(tsxLocal, args, { cwd: process.cwd(), env: { ...process.env, CORTEX_COURSE: COURSE } });
-    let last = "";
+  // Le rapport par fichier passe par un fichier temporaire : une ligne de sortie serait coupée
+  // entre deux paquets du flux. Rangé sur le job même si l'ingestion échoue ensuite.
+  const reportFile = path.join(os.tmpdir(), `cortex-ingest-${process.pid}-${jobId}.json`);
+  try {
+    await runIngestProcess(args, reportFile);
+  } finally {
+    const report = readIngestReport(reportFile);
+    fs.rmSync(reportFile, { force: true });
+    if (report) await setJobReport(jobId, report).catch(() => {});
+  }
+}
+
+function runIngestProcess(args: string[], reportFile: string): Promise<void> {
+  const tsxLocal = path.join(process.cwd(), "node_modules", ".bin", "tsx");
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn(tsxLocal, args, { cwd: process.cwd(), env: { ...process.env, CORTEX_COURSE: COURSE, [INGEST_REPORT_ENV]: reportFile } });
+    const lines: string[] = [];
+    // Lignes complètes seulement : un paquet du flux peut couper une ligne en deux. Rangées
+    // AVANT toute attente, pour que la sortie entière soit connue à la fermeture.
+    const reader = () => {
+      let carry = "";
+      return {
+        take(d: Buffer): string[] {
+          const parts = (carry + d.toString()).split("\n");
+          carry = parts.pop() ?? "";
+          return parts;
+        },
+        rest: () => carry,
+      };
+    };
+    const out = reader();
+    const err = reader();
+    const collect = (raw: string[]) => {
+      const fresh = raw.map((l) => l.trim()).filter(Boolean);
+      lines.push(...fresh);
+      return fresh;
+    };
     // Gestionnaire ASYNC sur un flux : toute exception y devient un rejet non
     // géré, qui tue le worker en plein travail. Journaliser n'est pas critique —
     // on avale l'échec plutôt que de perdre le job.
-    const onData = async (d: Buffer) => {
+    const onLines = async (fresh: string[]) => {
       try {
-      for (const line of d.toString().split("\n")) {
-        const t = line.trim();
-        if (!t) continue;
-        last = t;
+      for (const t of fresh) {
         await logJob(jobId, t);
         if (/Import du dossier/.test(t)) await setJob(jobId, { currentStep: "Import du dossier…", progress: 20 });
+        else if (/Lecture des fichiers/.test(t)) await setJob(jobId, { currentStep: "Lecture des fichiers…", progress: 25 });
         else if (/Nettoyage/.test(t)) await setJob(jobId, { currentStep: "Indexation…", progress: 45 });
         else if (/vocabulaire/.test(t)) await setJob(jobId, { currentStep: "Vocabulaire…", progress: 80 });
         else if (/Compris pour/.test(t)) await setJob(jobId, { currentStep: "Récap…", progress: 95 });
       }
       } catch { /* journal indisponible (base occupée) — le job continue */ }
     };
-    child.stdout.on("data", onData);
-    child.stderr.on("data", onData);
+    child.stdout.on("data", (d: Buffer) => { void onLines(collect(out.take(d))); });
+    child.stderr.on("data", (d: Buffer) => { void onLines(collect(err.take(d))); });
     child.on("error", reject);
-    child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(last || `ingest a quitté (code ${code})`))));
+    child.on("close", (code) => {
+      void onLines(collect([out.rest(), err.rest()]));
+      if (code === 0) resolve();
+      else reject(new Error(ingestFailureMessage(lines, code)));
+    });
   });
 }
 

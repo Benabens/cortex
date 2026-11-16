@@ -19,6 +19,7 @@ import { q } from "@/db/q";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import { sanitizeCorpus } from "@/lib/prompt-safety";
 import { excludedSourceIds, materialLabel } from "@/lib/source-scope";
+import { EXAM_HAS_TEXT } from "@/lib/sources";
 import { languageName } from "@/lib/profiles/generic-directives";
 import type { FormatProfile } from "@/lib/format";
 
@@ -88,6 +89,8 @@ export type ExamFormat = {
   blocks?: BlockFormat | null;
   /** Questions à choix (QCM, mixte) : unique, multiples ou les deux ; null pour un autre type. */
   answerMode?: AnswerMode | null;
+  /** Total de points des annales, quand elles le disent (absent sinon ; un format à questions composées le porte dans `blocks`). */
+  totalPoints?: number;
 };
 
 /**
@@ -231,11 +234,13 @@ export function annalesAnswerMode(p: Pick<FormatProfile, "question_types">): Ans
 
 /** Mots-outils discriminants par langue (les plus fréquents, peu partagés). */
 const STOPWORDS: Record<Language, string[]> = {
-  fr: ["le", "les", "des", "est", "et", "une", "dans", "pour", "pas", "sur", "qui", "du", "au", "aux", "cette", "sont", "avec", "nous", "vous", "ce", "ces"],
+  fr: ["le", "la", "les", "des", "est", "et", "une", "dans", "pour", "pas", "sur", "qui", "du", "au", "aux", "cette", "sont", "avec", "nous", "vous", "ce", "ces", "leurs"],
   en: ["the", "and", "of", "to", "is", "in", "that", "for", "are", "with", "this", "be", "on", "as", "by", "which", "an", "it", "what", "each"],
   de: ["der", "die", "das", "und", "ist", "nicht", "mit", "sich", "den", "ein", "eine", "zu", "von", "auf", "für", "dem", "wird"],
   it: ["il", "gli", "di", "che", "è", "per", "non", "con", "sono", "della", "nel", "alla", "delle", "questo", "anche"],
-  es: ["el", "los", "las", "y", "por", "para", "del", "se", "como", "más", "es", "una", "su", "lo", "este"],
+  // « la », « que », « en » : parmi les plus fréquents de l'espagnol ; sans eux, « de » et « en »
+  // donnaient le néerlandais (audit ingestion du 16/11/2026).
+  es: ["el", "la", "los", "las", "y", "que", "en", "por", "para", "del", "se", "como", "más", "es", "una", "su", "lo", "este", "al", "sus", "entre", "pero", "cuando", "también", "hay", "está"],
   pt: ["o", "os", "as", "e", "do", "da", "dos", "das", "em", "não", "uma", "para", "com", "que", "ao"],
   nl: ["de", "het", "een", "en", "van", "is", "niet", "met", "op", "voor", "zijn", "dat", "die", "wordt"],
 };
@@ -260,9 +265,13 @@ export function detectLanguage(text: string): Language | null {
 
 // ───────────────────────────── discipline ─────────────────────────────
 
-/** Préfixes de code de cours sans ambiguïté (EPFL et usages courants). */
-const HUMANITIES_CODE = /^(HUM|SHS|MGT|DH|AR|LAW|PHIL|HIST|SOC|POL|LIT)\b/i;
-const STEM_CODE = /^(MATH|PHYS|CS|COM|EE|ME|CH|CHEM|BIO|BIOENG|MSE|CIVIL|ENV|MICRO|NX|STAT|FIN)\b/i;
+/**
+ * Préfixes de code de cours sans ambiguïté (EPFL et usages courants), suivis du numéro, collé ou
+ * non : « CS-202 », « MATH 221 », mais aussi « CS201 », « COMP0002 », « HIST0001 » (un `\b` collé au
+ * chiffre ratait ces derniers, et le cours d'histoire recevait les consignes de calcul).
+ */
+const HUMANITIES_CODE = /^(HUM|SHS|MGT|DH|AR|LAW|PHIL|HIST|SOC|POL|LIT)(?=[\s_-]*\d)/i;
+const STEM_CODE = /^(MATH|PHYS|CS|CSE|COM|COMP|COMPSCI|EE|ME|CH|CHEM|BIO|BIOENG|MSE|CIVIL|ENV|MICRO|NX|STAT|FIN)(?=[\s_-]*\d)/i;
 /** Symboles et motifs de calcul : leur densité sépare un polycopié de maths d'un cours de SHS. */
 const MATH_TOKEN = /[=^∑∫√≤≥≈∂∇λσμπθ±×÷]|\d(?:[.,]\d+)?\s*[-+*/]\s*\(?\d|\\(?:frac|sum|int|sqrt|alpha|beta|lambda|sigma|mathbb)\b/g;
 const MATH_PER_1000 = 4;
@@ -344,7 +353,7 @@ export async function readStoredProfile(): Promise<StoredProfile | null> {
 /** Annales ingérées (finals, partiels) : leur nombre, et un échantillon de leur texte pour la langue. */
 async function annales(cap = 8000): Promise<{ count: number; text: string }> {
   try {
-    const n = await q.get<{ n: number }>(`SELECT count(*) n FROM sources WHERE type IN ('final','midterm')`);
+    const n = await q.get<{ n: number }>(`SELECT count(*) n FROM sources WHERE type IN ('final','midterm') AND ${EXAM_HAS_TEXT}`);
     const count = Number(n?.n ?? 0);
     if (!count) return { count, text: "" };
     const rows = await q.all<{ text: string }>(
@@ -383,7 +392,7 @@ export function blocksOf(p: Pick<FormatProfile, "format_summary" | "sections" | 
 function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Discipline, declared: AnswerMode | undefined): ExamFormat {
   const types = p.question_types ?? [];
   const qcmShare = types.filter((t) => t.type === "scq" || t.type === "mcq").reduce((s, t) => s + (t.approx_count || 0), 0);
-  const base = { basis: "annales" as const, durationMin: p.duration_min || null, language, discipline, summary: p.format_summary || "", evidence: [] };
+  const base = { basis: "annales" as const, durationMin: p.duration_min || null, language, discipline, summary: p.format_summary || "", evidence: [], ...(positive(p.total_points) ? { totalPoints: p.total_points } : {}) };
   const composite = blocksOf(p);
   if (composite) {
     const { count, ...blocks } = composite;
@@ -433,7 +442,7 @@ const MEMO_MAX = 500;
  * Ordre de confiance : annales (format détecté) > format déclaré > annales au
  * format pas encore détecté (comportement historique : exercices) > questions
  * d'exemple officielles > infos de cours > inconnu. La langue est celle du
- * cours, sauf langue déclarée ou annales écrites dans une autre langue.
+ * cours, sauf langue déclarée, ou annales (à défaut, supports) écrits dans une autre langue.
  */
 export async function resolveExamFormat(): Promise<ExamFormat> {
   const courseId = currentCourse();
@@ -441,9 +450,14 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
   const declared = course.examFormat;
   const past = await annales();
   const hasAnnales = past.count > 0;
-  const language = declared?.language || (past.text ? detectLanguage(past.text) : null) || course.language || "fr";
+  // Langue : déclarée > celle des annales > celle du cours > celle des supports > fr. Le « fr » posé
+  // par défaut à la création ne vaut pas déclaration : les supports passent devant (un cours
+  // espagnol créé sans langue sortait ses examens en français).
+  const sample = await corpusSample();
+  const courseLanguage = course.language && course.language !== "fr" ? course.language : null;
+  const language = declared?.language || (past.text ? detectLanguage(past.text) : null) || courseLanguage || detectLanguage(sample) || course.language || "fr";
   const stored = await readStoredProfile();
-  const discipline = inferDiscipline({ code: course.examCode, sample: await corpusSample() });
+  const discipline = inferDiscipline({ code: course.examCode, sample });
   const basisOf = (p: StoredProfile) => p.basis ?? "annales";
 
   let format: ExamFormat;
@@ -504,13 +518,29 @@ export async function courseLanguageName(): Promise<string> {
  * résolution du cours dans ce process, sinon la déclaration, la langue et le
  * code du cours (discipline sans échantillon de corpus).
  */
-export function formatContextFor(courseId: string): { kind: ExamKind | null; language: string; discipline: Discipline; durationMin: number | null; documents: DocumentRule | null } {
+export function formatContextFor(courseId: string): { kind: ExamKind | null; language: string; discipline: Discipline; durationMin: number | null; documents: DocumentRule | null; totalPoints: number | null } {
   const known = memo.get(courseId);
   const c = getCourse(courseId);
   // Les documents permis ne viennent que de la déclaration : aucune source ne les détecte.
   const documents = c.examFormat?.documents ?? null;
-  if (known) return { kind: known.kind, language: known.language, discipline: known.discipline, durationMin: known.durationMin, documents };
-  return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || "fr", discipline: inferDiscipline({ code: c.examCode }), durationMin: c.examFormat?.durationMin ?? null, documents };
+  if (known) return { kind: known.kind, language: known.language, discipline: known.discipline, durationMin: known.durationMin, documents, totalPoints: known.totalPoints ?? known.blocks?.totalPoints ?? null };
+  return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || "fr", discipline: inferDiscipline({ code: c.examCode }), durationMin: c.examFormat?.durationMin ?? null, documents, totalPoints: null };
+}
+
+/**
+ * Barème et durée d'un examen généré : la durée du format résolu (annales, déclaration), sinon
+ * celle du cours ; le total des annales s'il est connu, sinon un point par minute (180 points en
+ * 3 h, le ratio historique). Plus jamais « ~180 points, 3 h » pour un midterm de 75 min.
+ */
+export function examBudgetFor(courseId: string): { minutes: number; points: number } {
+  const f = formatContextFor(courseId);
+  const minutes = f.durationMin ?? getCourse(courseId).durationMin;
+  return { minutes, points: f.totalPoints ?? minutes };
+}
+
+/** Durée lisible dans un prompt : « 3 h » en heures pleines, sinon « 75 min ». */
+export function durationLabel(min: number): string {
+  return min % 60 === 0 ? `${min / 60} h` : `${min} min`;
 }
 
 /**

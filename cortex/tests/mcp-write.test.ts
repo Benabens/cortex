@@ -19,6 +19,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { textPdf } from "./helpers/pdf";
 
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-mcp-write-"));
 process.env.CORTEX_DATA_DIR = DATA_DIR;
@@ -485,14 +486,16 @@ test("propriétaire : prepare_course lancé directement (coût nul : ni devis ni
 });
 
 /** Ajout par URL au nom de `user` dans `course`, avec un lecteur injecté qui compte ses appels. */
-async function addAs(user: string, course: string, url: string, fetched: { n: number }, body = "%PDF-1.7 ...", contentType = "application/pdf", category?: "past_exam") {
+/** Un vrai PDF d'une page : le dépôt vérifie qu'il s'ouvre (lib/document-check). */
+const PDF_BODY = textPdf("Final 2024, exercice 1");
+async function addAs(user: string, course: string, url: string, fetched: { n: number }, body: string | Buffer = PDF_BODY, contentType = "application/pdf", category?: "past_exam") {
   const { addUrlSource } = await import("../lib/course-source");
   const { runWithCourse } = await import("../db/client");
   const { runWithUser } = await import("../db/context");
   const fetcher = async () => { fetched.n++; return { body: Buffer.from(body), contentType, cacheControl: "" }; };
   return runWithUser(user, () => runWithCourse(course, () => addUrlSource(course, { url, category }, fetcher)));
 }
-const addAsAlice = (url: string, fetched: { n: number }, body?: string, contentType?: string, category?: "past_exam") =>
+const addAsAlice = (url: string, fetched: { n: number }, body?: string | Buffer, contentType?: string, category?: "past_exam") =>
   addAs(ALICE, courseId, url, fetched, body, contentType, category);
 
 test("support par URL (lecteur injecté) : PDF signé rangé, faux PDF et type inconnu refusés, redirection rapportée par son hôte seulement", async () => {
@@ -501,7 +504,7 @@ test("support par URL (lecteur injecté) : PDF signé rangé, faux PDF et type i
   const { runWithCourse } = await import("../db/client");
   const { runWithUser } = await import("../db/context");
   const n = { n: 0 };
-  const saved = await addAsAlice("https://www.epfl.ch/exams/final%202024.pdf", n, "%PDF-1.7 ...", "application/pdf", "past_exam");
+  const saved = await addAsAlice("https://www.epfl.ch/exams/final%202024.pdf", n, PDF_BODY, "application/pdf", "past_exam");
   assert.deepEqual([saved.name, saved.folder], ["final_2024.pdf", "refs"]);
   await assert.rejects(addAsAlice("https://example.com/fake.pdf", n, "<html>pas un pdf</html>"), { status: 415 });
   await assert.rejects(addAsAlice("https://example.com/a.zip", n, "PK", "application/zip"), { status: 415 });

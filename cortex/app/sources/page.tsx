@@ -51,7 +51,7 @@ export default function SourcesPage() {
         ) : (
           <FileManager data={data} onChanged={refetch} />
         )}
-        <ImportPanel onChanged={refetch} />
+        <ImportPanel onChanged={refetch} unread={data?.unread} />
       </div>
     </div>
   );
