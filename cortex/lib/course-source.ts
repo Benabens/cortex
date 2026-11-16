@@ -6,6 +6,7 @@ import { classifyFile } from "@/lib/import-folder";
 import { PublicFetchError, readPublicHttps, type PublicFetcher } from "@/lib/public-https";
 import { checkStorage } from "@/lib/storage-quota";
 import { storage as files } from "@/lib/storage";
+import { unreadableDocument } from "@/lib/document-check";
 
 /**
  * AJOUT D'UN SUPPORT À UN COURS sans passer par le navigateur : une adresse https
@@ -95,6 +96,8 @@ async function store(courseId: string, name: string, category: SourceCategory | 
   }
   const storage = await checkStorage(currentUser(), data.length);
   if (storage) throw new SourceError(storage.status, storage.error);
+  const problem = await unreadableDocument(data, path.extname(name));
+  if (problem) throw new SourceError(problem.status, problem.message);
 
   const { refsDir, contentRoot } = coursePaths(courseId);
   const dir = path.resolve(folder === "refs" ? refsDir : path.join(contentRoot, folder));

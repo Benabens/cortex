@@ -3,7 +3,7 @@ import { coursePaths, getCourse } from "@/lib/courses";
 import { FOLDER_EXTENSIONS, SOURCE_FILE_MAX_BYTES } from "@/lib/folder-import";
 import { classifyFile } from "@/lib/import-folder";
 import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
-import { extractOfficeText, OfficeDocumentError, type OfficeExtension } from "@/lib/office-documents";
+import { unreadableDocument } from "@/lib/document-check";
 import { requireCourse } from "@/lib/req";
 import { checkStorage, declaredBytes, storageQuotaBytesFor } from "@/lib/storage-quota";
 import { readFormData, UPLOAD_LIMITS, withBodyLimit } from "@/lib/upload-limit";
@@ -60,16 +60,10 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     return NextResponse.json({ error: `${file.name} : fichier trop volumineux (30 Mo maximum par fichier).` }, { status: 413 });
   }
 
-  let buffer: Buffer | null = null;
-  const extension = path.extname(file.name).toLowerCase();
-  if (extension === ".docx" || extension === ".pptx") {
-    buffer = Buffer.from(await file.arrayBuffer());
-    try { await extractOfficeText(buffer, extension as OfficeExtension); }
-    catch (error) {
-      if (error instanceof OfficeDocumentError) return NextResponse.json({ error: `${file.name} : ${error.message}` }, { status: error.status });
-      return NextResponse.json({ error: `${file.name} : document Office illisible.` }, { status: 422 });
-    }
-  }
+  // Un document qui ne s'ouvre pas est refusé ici, nommé, plutôt que rangé puis ignoré à l'ingestion.
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const problem = await unreadableDocument(buffer, path.extname(rel));
+  if (problem) return NextResponse.json({ error: `${file.name} : ${problem.message}` }, { status: problem.status });
 
   const { refsDir, contentRoot } = coursePaths(course);
   const courseMax = await storageQuotaBytesFor(currentUser());
@@ -86,6 +80,6 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     if (existing.size === file.size) return NextResponse.json({ ok: true, duplicate: true, name, bucket });
     return NextResponse.json({ error: `${file.name} : un fichier différent porte déjà ce nom.` }, { status: 409 });
   }
-  await fileStore().put(absolute, buffer ?? Buffer.from(await file.arrayBuffer()));
+  await fileStore().put(absolute, buffer);
   return NextResponse.json({ ok: true, name, bucket });
 });
