@@ -246,7 +246,9 @@ function genericCoverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string):
   const c = getCourse(currentCourse());
   const f = formatContextFor(currentCourse());
   const w = coverWords(f.language);
-  const dur = f.durationMin ?? spec.duration_min ?? c.durationMin;
+  // Durée du format (annale, déclaration) seulement : la spec du générateur et la fiche du cours
+  // portent un 180 par défaut (audit 3, P1-3). Inconnue → la consigne n'est pas écrite.
+  const dur = f.durationMin || null;
   const examCodeTex = texEscape(c.examCode).replace(/-/g, "--");
   const uniLines = c.universityLines.map(texEscape).join(String.raw`\\ `);
   const profsTex = c.profs.map(texEscape).join(", ");
@@ -265,7 +267,7 @@ function genericCoverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string):
     String.raw`\vspace{0.25cm}\noindent{\large\textbf{${w.instructions}}}\par\smallskip`,
     String.raw`\noindent ${w.important}`,
     String.raw`\begin{enumerate}\setlength{\itemsep}{2pt}`,
-    String.raw`\item ${w.duration(durationText(dur, w))}`,
+    ...(dur ? [String.raw`\item ${w.duration(durationText(dur, w))}`] : []),
     ...(f.documents ? [String.raw`\item ${w.documents[f.documents]}`] : []),
     String.raw`\item ${w.ink}`,
     String.raw`\item ${w.onSheet}`,
