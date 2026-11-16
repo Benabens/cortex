@@ -163,6 +163,12 @@ test("repli HTML hors EPFL : aucune mention de l'EPFL", async () => {
   assert.match(html, /Toy recurrence/);
   assert.match(html, /brew install tectonic/);
   assert.doesNotMatch(html, /epfl/i);
+  assert.match(html, /<summary>Solution<\/summary>/);
+  assert.match(html, /Question 1 – Toy recurrence <span class="pts">\[30 points\]/);
+  assert.doesNotMatch(html, /Corrigé/);
+  const fr = await inCourse(ids.neutralFr, () => htmlFallback(WRITTEN_SPEC as never, 1, DATE, "boom"));
+  assert.match(fr, /<summary>Solution<\/summary>/);
+  assert.match(fr, /Question 2 – Imaginary queue/);
 });
 
 test("PDF compilés hors EPFL : aucun texte de l'EPFL sur aucune page, aucun logo copié (sauté sans tectonic ni pdftotext)", async (t) => {
