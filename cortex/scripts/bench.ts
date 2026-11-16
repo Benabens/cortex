@@ -424,15 +424,23 @@ async function scoreRun(runDir: string, c: BenchCase): Promise<void> {
 async function rejudgeArchived(sourceDir: string): Promise<void> {
   const sourceRun = JSON.parse(fs.readFileSync(path.join(sourceDir, "run.json"), "utf8")) as BenchRun & { courseId: string };
   const c = findCase(sourceRun.caseId);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const requestedOut = arg("out");
+  const outputDir = requestedOut ? path.resolve(requestedOut) : path.join(sourceDir, "rejugements", stamp);
+  const { prepareRejudgeOutput, rejudgeNeedsDatabase } = await import("../lib/bench/rejudge");
+  // Un run annulé avant toute livraison n'a aucun examen à juger. Sa copie indépendante est
+  // scorée telle quelle : 0 livré reste une mesure, sans régénération, restauration ni appel LLM.
+  if (!rejudgeNeedsDatabase(sourceRun)) {
+    const out = prepareRejudgeOutput(sourceDir, outputDir, "aucune-base");
+    console.log(`▶ rejugement ${c.id} — aucun examen archivé, score sans juge → ${out}`);
+    await scoreRun(out, c);
+    return;
+  }
   if (c.source.kind !== "dump") throw new Error(`rejuge ne sait pas encore restaurer la source ${c.source.kind} du cas ${c.id}`);
   const db = `bench_rejuge_${c.id.replace(/[^a-z0-9]/gi, "_")}_${Date.now()}`.toLowerCase();
   await adminSql((sql) => sql.unsafe(`CREATE DATABASE "${db}" ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE template0`));
   createdDb = db;
   const url = dbUrl(need("CORTEX_BENCH_PG_URL"), db);
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const requestedOut = arg("out");
-  const outputDir = requestedOut ? path.resolve(requestedOut) : path.join(sourceDir, "rejugements", stamp);
-  const { prepareRejudgeOutput } = await import("../lib/bench/rejudge");
   const out = prepareRejudgeOutput(sourceDir, outputDir, db);
   runEnv(path.join(out, "data"), url);
   assertBenchEnv(process.env);
