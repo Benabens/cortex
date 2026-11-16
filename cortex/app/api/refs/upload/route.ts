@@ -9,6 +9,7 @@ import { checkStorage, declaredBytes } from "@/lib/storage-quota";
 import { currentUser } from "@/db/context";
 import { storage as fileStore } from "@/lib/storage";
 import { storedFileName, storeUnique } from "@/lib/stored-file";
+import { IMAGE_FILE, IMAGE_REFUSAL } from "@/lib/folder-import";
 import { unreadableDocument } from "@/lib/document-check";
 import { failureStatus, problemMessage } from "@/lib/ingest-report";
 
@@ -40,6 +41,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   for (const f of files) {
     const safe = storedFileName(path.basename(f.name));
     if (f.size > REF_MAX_BYTES) { skipped.push({ file: f.name, reason: "fichier trop volumineux (30 Mo maximum)." }); continue; }
+    if (IMAGE_FILE.test(safe)) { skipped.push({ file: f.name, reason: IMAGE_REFUSAL }); continue; }
     if (!REF_EXTENSIONS.test(safe)) { skipped.push({ file: f.name, reason: "format non pris en charge pour une annale : PDF, Word, PowerPoint, HTML ou texte." }); continue; }
     const data = Buffer.from(await f.arrayBuffer());
     const problem = await unreadableDocument(data, path.extname(safe));

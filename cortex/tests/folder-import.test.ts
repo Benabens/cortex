@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import JSZip from "jszip";
 import {
+  IMAGE_REFUSAL,
   SOURCE_FILE_MAX_BYTES,
   prepareCourseImport,
   prepareFolderImport,
@@ -25,12 +26,12 @@ test("l'import de dossier ignore les fichiers cachés et les formats inconnus ; 
   assert.deepEqual(result.accepted.map((entry) => entry.relativePath), [
     "Analyse 3/chapitre/cours.pdf",
     "Analyse 3/copie/cours.pdf",
-    "Analyse 3/scans/scan.png",
   ]);
   assert.deepEqual(result.rejected.map((entry) => entry.reason), [
     "fichier caché ignoré",
     "fichier caché ignoré",
     "format non pris en charge",
+    IMAGE_REFUSAL,
   ]);
 });
 

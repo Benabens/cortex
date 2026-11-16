@@ -7,11 +7,17 @@ export const ZIP_MAX_ENTRIES = 2_000;
 export const ZIP_MAX_RATIO = 200;
 
 export const FOLDER_EXTENSIONS = [
-  "pdf", "docx", "pptx", "txt", "md", "html", "htm",
-  "png", "jpg", "jpeg", "webp", "tex", "c", "h",
+  "pdf", "docx", "pptx", "txt", "md", "html", "htm", "tex", "c", "h",
 ] as const;
 
 const allowed = new RegExp(`\\.(${FOLDER_EXTENSIONS.join("|")})$`, "i");
+
+/**
+ * Photos et images : refusées avec une consigne. Cortex n'en lit pas le texte (pas d'OCR) ; elles
+ * étaient envoyées, comptées dans le quota, puis jamais lues (audit ingestion du 16/11/2026).
+ */
+export const IMAGE_FILE = /\.(png|jpe?g|webp|gif|heic|heif|bmp|tiff?)$/i;
+export const IMAGE_REFUSAL = "photo ou image : Cortex n’en lit pas le texte. Dépose le document d’origine, ou un PDF au texte sélectionnable (scan avec reconnaissance de texte).";
 
 export type FolderImportEntry = { file: File; relativePath: string };
 export type FolderImportRefusal = { name: string; reason: string };
@@ -50,6 +56,7 @@ export function prepareFolderImport(files: Iterable<File>): {
     const rel = relativePath(file);
     const reject = (reason: string) => rejected.push({ name: rel, reason });
     if (isHidden(rel)) { reject("fichier caché ignoré"); continue; }
+    if (IMAGE_FILE.test(file.name)) { reject(IMAGE_REFUSAL); continue; }
     if (!allowed.test(file.name)) { reject("format non pris en charge"); continue; }
     if (!file.size) { reject("fichier vide"); continue; }
     if (file.size > SOURCE_FILE_MAX_BYTES) { reject("30 Mo maximum par fichier"); continue; }
