@@ -43,9 +43,9 @@ export function ingestFailureMessage(lines: string[], code: number | null): stri
  * messages s'écrivent (interface et connecteur MCP) ; en français, la langue de l'interface.
  */
 const PROBLEM_MESSAGES: Record<Exclude<IngestFileStatus, "indexed">, string> = {
-  unreadable: "fichier abîmé ou format non reconnu, il n’a pas pu être lu. Ré-exporte-le en PDF, puis dépose-le de nouveau.",
+  unreadable: "fichier abîmé ou format non reconnu : il n’a pas pu être lu. Ré-exporte-le en PDF, puis dépose-le de nouveau.",
   encrypted: "PDF protégé par un mot de passe. Enregistre une copie sans protection, puis dépose-la de nouveau.",
-  no_text: "aucun texte lisible (document scanné ?), il n’entre pas dans le corpus. Dépose une version au texte sélectionnable.",
+  no_text: "aucun texte lisible (document scanné ?) : il n’entre pas dans le corpus. Dépose une version au texte sélectionnable.",
 };
 
 /** La même cause en quelques mots, pour un résumé d'une ligne (connecteur MCP). */
@@ -55,6 +55,10 @@ const PROBLEM_SHORT: Record<Exclude<IngestFileStatus, "indexed">, string> = {
   no_text: "sans texte, scanné ?",
 };
 
+export function problemMessage(status: Exclude<IngestFileStatus, "indexed">): string {
+  return PROBLEM_MESSAGES[status];
+}
+
 export type IngestProblem = { path: string; name: string; status: Exclude<IngestFileStatus, "indexed">; message: string; short: string };
 
 /** Les fichiers non lus d'un rapport, chacun avec sa consigne ; [] sans rapport. */
@@ -62,6 +66,6 @@ export function ingestProblems(report: IngestReport | null | undefined): IngestP
   return (report?.files ?? []).flatMap((f) =>
     f.status === "indexed"
       ? []
-      : [{ path: f.path, name: f.path.split("/").at(-1) ?? f.path, status: f.status, message: PROBLEM_MESSAGES[f.status], short: PROBLEM_SHORT[f.status] }],
+      : [{ path: f.path, name: f.path.split("/").at(-1) ?? f.path, status: f.status, message: problemMessage(f.status), short: PROBLEM_SHORT[f.status] }],
   );
 }
