@@ -323,11 +323,6 @@ export async function grantSubscriptionMonth(p: {
   return true;
 }
 
-/** Reprise d'une facture d'abonnement (remboursement, litige) : SUSPENDU jusqu'à la prochaine facture payée. */
-export async function suspendSubscription(userId: string): Promise<void> {
-  await authRun(`UPDATE subscriptions SET remaining = 0, suspended = 1, updated_at = ? WHERE user_id = ?`, nowStr(), userId);
-}
-
 /** Lie client Stripe → utilisateur (checkout abonnement) SANS attribuer : c'est invoice.paid qui attribue. */
 export async function linkSubscription(p: {
   userId: string; customerId?: string | null; subscriptionId?: string | null; plan?: string | null; at?: string | null;

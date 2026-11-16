@@ -149,7 +149,7 @@ abonnement mort.
 | `invoice.paid` | ouvre la période payée et remet le mois à 20 crédits |
 | `customer.subscription.updated` | suit le statut (en règle, retard de paiement, résiliation programmée) |
 | `customer.subscription.deleted` | fin de l'abonnement : crédits du mois à 0 |
-| `charge.refunded` | reprend les crédits d'un pack ou suspend l'abonnement remboursé |
+| `charge.refunded` | reprend la part remboursée d'un pack ou d'une facture d'abonnement (suspend seulement si la facture en cours est remboursée en entier) |
 | `charge.dispute.created` | même reprise pour un litige |
 
 N'ajoute **pas** `invoice.created` : si l'endpoint ne lui répond pas, Stripe
@@ -315,8 +315,18 @@ achat : à traiter à la main.
 - **Paiement en échec** : l'app affiche « paiement en échec » et renvoie vers le
   portail. L'abonné ne peut pas ouvrir un second abonnement tant que le premier
   n'est pas réglé ou annulé.
-- **Remboursement ou litige sur une facture** : abonnement suspendu jusqu'à la
-  prochaine facture payée ; ce qui a été consommé passe en dette.
+- **Remboursement ou litige sur une facture** : seule la part remboursée de
+  CETTE facture est reprise (1 € sur 14,90 € = 1,35 crédit). Elle est prise sur
+  ce qui reste de sa période (le solde du mois si c'est la facture en cours, le
+  reliquat expiré si elle est plus ancienne) ; seul le consommé passe en dette.
+  Les crédits du mois en cours ne paient jamais pour une ancienne facture.
+  Seuls un remboursement TOTAL ou un litige sur la facture en cours suspendent
+  l'abonnement, jusqu'à la prochaine facture payée.
+- **Compte Stripe partagé** (activité freelance, Payment Links) : un paiement
+  sans la marque Cortex (`metadata.app=cortex`, ou prix Cortex pour une facture)
+  est ignoré, même si son client ou son e-mail correspond à un compte Cortex.
+  L'e-mail ne sert jamais à retirer des crédits. Chaque décision est dans le
+  journal `stripe.reversal_decision` (montants, sans donnée personnelle).
 
 ## 12. Rappel de reconduction de l'abonnement annuel
 

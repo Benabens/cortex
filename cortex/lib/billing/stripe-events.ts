@@ -26,17 +26,20 @@ import { linkInvoicePaymentIntent, recordDispute, recordPayment, recordRefund } 
  * événements (completed puis async_payment_succeeded) ne crédite qu'une fois.
  *
  * REPRISES : charge.refunded et charge.dispute.created remontent au
- * payment_intent → achat (pack) ou facture (abonnement). Pack : tous les
- * crédits de l'achat sont retirés (solde négatif possible → tout est bloqué).
- * Facture : les crédits du mois encore présents sont retirés, et ce qui a déjà
- * été consommé passe en dette dans le ledger — le compte est bloqué jusqu'au
- * prochain achat. Une seule reprise par payment_intent (refund puis litige
- * sur le même achat ne reprennent pas deux fois). Unités : centièmes.
+ * payment_intent → achat (pack) ou facture (abonnement), au prorata de la part
+ * remboursée (cumul amount_refunded / montant ; un litige reprend tout). Pack :
+ * la part des crédits de l'achat est retirée (solde négatif possible → tout est
+ * bloqué). Facture : la part n'est prise que sur la période de CETTE facture
+ * (`reverseInvoice`) ; seul un remboursement total de la facture en cours
+ * suspend. Cumulatif et idempotent par payment_intent (refund puis litige sur
+ * le même achat ne reprennent pas deux fois). Chaque décision est journalisée
+ * (`stripe.reversal_decision`). Unités : centièmes.
  *
  * PAIEMENT INCONNU EN BASE (achat antérieur à `stripe_purchases`, ou événements
  * dans le désordre) : on remonte, dans l'ordre, à la session Checkout via l'API
- * Stripe (`lookup`), aux métadonnées de la charge (payment_intent_data), au
- * client/e-mail + montant converti en crédits au prix du pack. Sinon la reprise
+ * Stripe (`lookup`), puis, SEULEMENT si la charge porte la marque Cortex, à ses
+ * métadonnées (payment_intent_data) ou au client déjà lié + montant converti en
+ * crédits au prix du pack. Jamais à l'e-mail. Sinon la reprise
  * est MÉMORISÉE (`stripe_orphan_reversals`), signalée en erreur, et appliquée
  * dès que l'achat correspondant arrive. Jamais silencieux.
  *
@@ -45,8 +48,9 @@ import { linkInvoicePaymentIntent, recordDispute, recordPayment, recordRefund } 
  *
  * COMPTE STRIPE PARTAGÉ (autres applications : prix `kairo_*`, metadata app=kairo…) :
  * n'est traité que ce qui est À CORTEX — prix dont le lookup_key est un plan
- * Cortex, metadata app=cortex ou cortexUserId, plan Cortex, ou client/abonnement
- * déjà lié chez nous. Tout le reste répond 200 « ignored:foreign » : ni crédit,
+ * Cortex, metadata app=cortex ou cortexUserId, plan Cortex, ou abonnement Cortex
+ * déjà lié chez nous (pas le seul client : il peut payer autre chose sur ce
+ * compte). Tout le reste répond 200 « ignored:foreign » : ni crédit,
  * ni reprise mémorisée, ni retry (un 500 ferait rejouer Stripe pendant des jours
  * puis désactiver l'endpoint). Le retry 500 reste réservé à un événement Cortex
  * dont l'utilisateur n'est pas encore lié.
