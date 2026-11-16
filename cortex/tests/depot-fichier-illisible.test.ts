@@ -136,3 +136,20 @@ test("retirer un scan sans texte (contenu ou annale) supprime bien le fichier : 
   assert.ok(!storedFiles(c.contentRoot).includes("scan.pdf"));
   assert.ok(!storedFiles(c.refsDir).includes("final-2016.pdf"));
 });
+
+test("zone Annales : une annale scannée est gardée mais signalée comme non lue, avec sa consigne", async () => {
+  const c = await theCourse();
+  const r = await post("refs/upload", "", [
+    [textPdf("Final 2015, exercice 1"), "final-2015.pdf"],
+    [textPdf(null), "final-2014.pdf"],
+  ]);
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.deepEqual(r.json.files, ["final-2015.pdf", "final-2014.pdf"]);
+  assert.deepEqual((r.json.unread as { path: string; message: string }[]).map((u) => u.path), ["refs/final-2014.pdf"]);
+  assert.match(r.json.unread[0].message, /scann/);
+  assert.ok(storedFiles(c.refsDir).includes("final-2014.pdf"));
+  // Sans job d'ingestion derrière : la liste du panneau le garde aussi après rechargement.
+  const mod = await import("../app/api/sources/route");
+  const list = (await (await mod.GET(new NextRequest(`http://cortex.test/api/sources?course=${c.id}`))).json()).unread as { path: string }[];
+  assert.ok(list.some((u) => u.path === "refs/final-2014.pdf"), JSON.stringify(list));
+});

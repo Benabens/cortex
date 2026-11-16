@@ -11,7 +11,7 @@ import { storage as fileStore } from "@/lib/storage";
 import { storedFileName, storeUnique } from "@/lib/stored-file";
 import { IMAGE_FILE, IMAGE_REFUSAL } from "@/lib/folder-import";
 import { unreadableDocument } from "@/lib/document-check";
-import { failureStatus, problemMessage } from "@/lib/ingest-report";
+import { failureStatus, ingestProblems, problemMessage, readStatus, type IngestFileOutcome } from "@/lib/ingest-report";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,6 +37,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   // Chaque fichier écarté est nommé avec sa raison : un dépôt mélangé ne perd rien en silence.
   const refsDir = coursePaths(course).refsDir;
   const saved: string[] = [];
+  const outcomes: IngestFileOutcome[] = [];
   const skipped: { file: string; reason: string }[] = [];
   for (const f of files) {
     const safe = storedFileName(path.basename(f.name));
@@ -49,14 +50,17 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     const stored = await storeUnique(refsDir, safe, data);
     if (!stored) { skipped.push({ file: f.name, reason: "trop d’annales du même nom : renomme le fichier." }); continue; }
     try {
-      await ingestRefFile(`refs/${stored.name}`);
+      const { items } = await ingestRefFile(`refs/${stored.name}`);
       saved.push(stored.name);
+      outcomes.push({ path: `refs/${stored.name}`, status: readStatus(items), items });
     } catch (e) {
       // Rangé mais illisible pour l'ingestion : retiré, sinon il resterait dans les annales sans y figurer.
       if (!stored.duplicate) await fileStore().remove(path.join(refsDir, stored.name)).catch(() => {});
       skipped.push({ file: f.name, reason: problemMessage(failureStatus(e)) });
     }
   }
+  // Rangée mais sans texte (scan) : gardée, et signalée comme le fait le rapport d'ingestion.
+  const unread = ingestProblems({ files: outcomes });
   if (!saved.length) {
     const first = skipped[0];
     return NextResponse.json({ error: first ? `${first.file} : ${first.reason}` : "Aucun fichier exploitable.", skipped }, { status: 400 });
@@ -69,7 +73,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   let formatSkipped: string | undefined;
   if (process.env.E2E_TEST_AUTH === "1" && process.env.E2E_TEST_RUN === "1") {
     formatSkipped = "Détection couverte par la préparation hermétique E2E";
-    return NextResponse.json({ ok: true, files: saved, skipped, formatSkipped });
+    return NextResponse.json({ ok: true, files: saved, skipped, unread, formatSkipped });
   }
   const { jobSpec, launchGate } = await import("@/lib/billing/limits");
   const { costForJob } = await import("@/lib/jobs");
@@ -86,5 +90,5 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
       else throw e;
     }
   }
-  return NextResponse.json({ ok: true, files: saved, skipped, formatJobId, formatSkipped });
+  return NextResponse.json({ ok: true, files: saved, skipped, unread, formatJobId, formatSkipped });
 })

@@ -86,8 +86,9 @@ export function ImportPanel({ onChanged, unread }: { onChanged: () => void; unre
     if (!job || JOB_ACTIVE.includes(job.status) || notified.current) return;
     notified.current = true;
     setJobId(null);
+    // Un job de format n'a pas de rapport : la liste en cours reste affichée.
     const unread = ingestProblems(job.report);
-    setUnreadFiles(unread);
+    if (job.report) setUnreadFiles(unread);
     if (job.status === "error" || job.status === "failed") {
       setError(asText(job.error) ?? "Le traitement a échoué. Réessaie.");
     } else {
@@ -118,7 +119,7 @@ export function ImportPanel({ onChanged, unread }: { onChanged: () => void; unre
 
   const startJob = (id: number, kind: "format" | "ingest" | "prepare") => {
     notified.current = false;
-    setUnreadFiles([]);
+    if (kind !== "format") setUnreadFiles([]);
     setJobId(id);
     setJobKind(kind);
   };
@@ -164,7 +165,9 @@ export function ImportPanel({ onChanged, unread }: { onChanged: () => void; unre
       const refusedThere = ((d?.skipped ?? []) as { file: string; reason: string }[]).map((s) => ({ name: s.file, reason: s.reason }));
       setFolderRefusals([...refusedHere, ...refusedThere]);
       if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
-      setUploadedMsg(`${d.files.length} fichier${d.files.length > 1 ? "s" : ""} ingéré${d.files.length > 1 ? "s" : ""}${refusedThere.length ? `, ${refusedThere.length} écarté${refusedThere.length > 1 ? "s" : ""}` : ""}.`);
+      const unread = (d.unread ?? []) as IngestProblem[];
+      setUnreadFiles(unread);
+      setUploadedMsg(`${d.files.length} fichier${d.files.length > 1 ? "s" : ""} ingéré${d.files.length > 1 ? "s" : ""}${refusedThere.length ? `, ${refusedThere.length} écarté${refusedThere.length > 1 ? "s" : ""}` : ""}${unread.length ? `, ${unread.length} sans texte lisible (liste ci-dessous)` : ""}.`);
       onChanged();
       if (d.formatJobId) startJob(d.formatJobId, "format");
     } catch (e) {
