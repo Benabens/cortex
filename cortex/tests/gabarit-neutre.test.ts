@@ -92,3 +92,36 @@ test("examen écrit hors EPFL : garde neutre dans la langue de l'examen (frança
   assert.match(page, /Aucun document n'est autorisé/);
   for (const en of [/Duration/, /Name:/, /November/, /INSTRUCTIONS/]) assert.doesNotMatch(page, en);
 });
+
+test("QCM hors EPFL : garde neutre, libellés en anglais, corrigé en bleu foncé", async () => {
+  const { renderQcmExamTex } = await import("../lib/qcm-latex");
+  const { QCM_DATA, DATE } = await import("./helpers/gabarits");
+  for (const withKey of [false, true]) {
+    const tex = await inCourse(ids.neutralEn, () => renderQcmExamTex(QCM_DATA, DATE, withKey));
+    assertNeutral(tex);
+    const page = body(tex);
+    assert.match(page, /IMG--210/);
+    assert.match(page, /Name:/);
+    assert.match(page, /ID:/);
+    assert.match(page, /Duration:\}? 90 minutes/);
+    assert.match(page, /Total:\}? 14 points/);
+    assert.match(page, /single choice, 2 points/);
+    assert.match(page, /multiple choice, 2 points/);
+    assert.match(page, /Open question 1/);
+    assert.match(pageChrome(tex), /November 16, 2026/);
+    if (withKey) {
+      assert.match(page, /\\color\{solution\}/);
+      assert.match(page, /misconception/);
+    }
+  }
+});
+
+test("QCM hors EPFL : tout est dans la langue de l'examen (français)", async () => {
+  const { renderQcmExamTex } = await import("../lib/qcm-latex");
+  const { QCM_DATA, DATE } = await import("./helpers/gabarits");
+  const tex = await inCourse(ids.neutralFr, () => renderQcmExamTex(QCM_DATA, DATE, true));
+  assertNeutral(tex);
+  const page = body(tex);
+  for (const fr of [/Nom :/, /Durée :\}? 60 minutes/, /Partie 1/, /Questions à choix multiple/, /Question ouverte 1/, /choix unique, 2 points/, /Cochez/, /idée fausse/, /16 novembre 2026/]) assert.match(page + pageChrome(tex), fr);
+  for (const en of [/First part/, /Open question/, /Tick the box/, /Instructions\}/, /You have/, /November/, /SCQ|MCQ/]) assert.doesNotMatch(page + pageChrome(tex), en);
+});
