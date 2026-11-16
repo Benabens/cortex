@@ -5,6 +5,7 @@ import { compileExamPdf, copyExamLogo, qrText, texEscape } from "@/lib/exam-late
 import { courseTemplate, courseWords, localDate, neutralChrome, neutralCoverTex, neutralDuration, pointsText, solutionColor } from "@/lib/exam-template";
 import { assertTexSafe } from "@/lib/tex-guard";
 import { getFormatProfile } from "@/lib/format";
+import { resolveExamFormat } from "@/lib/exam-format";
 import { examsDir } from "@/lib/paths";
 import type { QcmItem } from "@/lib/qcm";
 import fs from "node:fs";
@@ -33,6 +34,8 @@ const UMATH: [RegExp, string][] = [
   [/[‖]/g, "\\ensuremath{\\|}"], [/[⟨]/g, "\\ensuremath{\\langle}"], [/[⟩]/g, "\\ensuremath{\\rangle}"], [/[∀]/g, "\\ensuremath{\\forall}"], [/[∃]/g, "\\ensuremath{\\exists}"],
   [/²/g, "\\textsuperscript{2}"], [/³/g, "\\textsuperscript{3}"], [/¹/g, "\\textsuperscript{1}"],
   [/½/g, "\\ensuremath{\\frac12}"], [/¼/g, "\\ensuremath{\\frac14}"], [/[⁻]/g, "\\ensuremath{^{-}}"], [/[ℝ]/g, "\\ensuremath{\\mathbb{R}}"], [/[ℓ]/g, "\\ensuremath{\\ell}"], [/[°]/g, "\\ensuremath{^\\circ}"],
+  // Ligatures du français, au-delà de Latin-1 : sans elles le filet ci-dessous coupait « cœur » en « c ur ».
+  [/œ/g, "\\oe{}"], [/Œ/g, "\\OE{}"],
   [/[−]/g, "\\ensuremath{-}"], [/[′]/g, "\\ensuremath{'}"], [/[″]/g, "\\ensuremath{''}"], [/[∼∿]/g, "\\ensuremath{\\sim}"], [/[∘]/g, "\\ensuremath{\\circ}"], [/[⊙]/g, "\\ensuremath{\\odot}"],
   [/[⊗]/g, "\\ensuremath{\\otimes}"], [/[⊕]/g, "\\ensuremath{\\oplus}"], [/[⊤]/g, "\\ensuremath{\\top}"], [/[⊥]/g, "\\ensuremath{\\perp}"], [/[…]/g, "\\ldots{}"], [/[•]/g, "\\ensuremath{\\bullet}"],
 ];
@@ -58,8 +61,8 @@ export function footDate(dateLabel: string): string {
   return `${months[+m[2] - 1]} ${+m[3]}, ${m[1]}`;
 }
 
-/** En-tête de la page de garde : logo, enseignant, cours, date et durée, anonymisation, nom et SCIPER. */
-export function coverHeader(dateLabel: string, durationMin: number): string[] {
+/** En-tête de la page de garde : logo, enseignant, cours, date et durée (si connue), anonymisation, nom et SCIPER. */
+export function coverHeader(dateLabel: string, durationMin: number | null): string[] {
   const c = getCourse(currentCourse());
   const code = texEscape(c.examCode).replace(/-/g, "--");
   const lecturer = c.profs[0] ?? "";
@@ -68,7 +71,7 @@ export function coverHeader(dateLabel: string, durationMin: number): string[] {
     String.raw`\noindent\begin{minipage}[t]{0.62\textwidth}\vspace{0pt}\epfllogo[26]\par\smallskip\footnotesize`,
     lecturer ? `Lecturer: ${texEscape(lecturer)}\\\\` : "",
     `\\textbf{${code}: ${texEscape(c.examName)}}\\\\`,
-    `${footDate(dateLabel)}\\quad Duration: ${durationMin} minutes`,
+    durationMin ? `${footDate(dateLabel)}\\quad Duration: ${durationMin} minutes` : footDate(dateLabel),
     String.raw`\end{minipage}\hfill\begin{minipage}[t]{0.32\textwidth}\vspace{0pt}\raggedleft\footnotesize Anonymisation:\\ \textbf{\#0000}\end{minipage}`,
     String.raw`\vspace{6pt}\noindent\rule{\textwidth}{1pt}`,
     String.raw`\vspace{6pt}\noindent{\Large\textbf{Student One}}\hfill SCIPER: \textbf{111111}`,
@@ -76,13 +79,13 @@ export function coverHeader(dateLabel: string, durationMin: number): string[] {
 }
 
 /** Page de garde course-aware (style CS-233 : lecturer, SCIPER, convention SCQ/MCQ détectée). */
-async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts: number, durationMin: number): Promise<string> {
+async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts: number, durationMin: number | null): Promise<string> {
   // Hors EPFL, convention traduite : la phrase détectée dans les annales est souvent en anglais.
   if (courseTemplate() === "neutral") {
     const w = courseWords();
     const parts = [nQcm ? w.qcmCount(nQcm) : "", nOpen ? w.openCount(nOpen) : ""].filter(Boolean).join(` ${w.and} `);
     return neutralCoverTex({
-      course: getCourse(currentCourse()), w, dateTex: localDate(dateLabel, w), durationMin, totalPts,
+      course: getCourse(currentCourse()), w, dateTex: localDate(dateLabel, w), durationMin: durationMin ?? neutralDuration(undefined), totalPts,
       instructions: [w.contains(parts, totalPts), ...(nQcm ? [`${w.qcmConvention} ${w.tick}`] : []), w.onSheet],
     });
   }
@@ -96,7 +99,7 @@ async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts
     String.raw`\begin{enumerate}\setlength{\itemsep}{3pt}`,
     (() => {
       const parts = [nQcm ? `\\textbf{${nQcm} multiple/single-choice questions}` : "", nOpen ? `\\textbf{${nOpen} open questions}` : ""].filter(Boolean);
-      return `\\item This exam has ${parts.join(" and ")}, for a total of \\textbf{${totalPts} points}. You have ${durationMin} minutes.`;
+      return `\\item This exam has ${parts.join(" and ")}, for a total of \\textbf{${totalPts} points}.${durationMin ? ` You have ${durationMin} minutes.` : ""}`;
     })(),
     nQcm ? `\\item ${convention} Tick the box(es) \\fbox{$\\checkmark$} you believe are correct.` : "",
     String.raw`\item A one-page two-sided cheat sheet is allowed. No electronic device is permitted.`,
@@ -157,8 +160,13 @@ function renderQcmItem(q: QcmItem, n: number, points: number, withKey: boolean, 
   const opts = q.options.map((o, k) => {
     const correct = withKey && (q.correct ?? []).includes(k);
     const box = correct ? String.raw`\ding{51}` : BOX; // ✓ dans le corrigé
-    const mis = withKey && !correct && q.misconceptions?.[k] ? ` \\hfill{\\footnotesize\\itshape\\color{gray} ${L.misconception}${esc(q.misconceptions[k])}}` : "";
-    return String.raw`\noindent${box}~\textbf{${LETTER[k]}.}~${esc(o)}${mis}\par\smallskip`;
+    // Corrigé : l'idée fausse visée, SOUS l'option, en retrait et en drapeau (examen #16, 16/11 :
+    // poussée à droite de l'option par \hfill, elle débordait ou se coupait en fragments entre
+    // deux lignes justifiées dès que l'option ou la note étaient longues).
+    const mis = withKey && !correct && q.misconceptions?.[k]?.trim()
+      ? String.raw`\nopagebreak{\raggedright\leftskip=1.7em\footnotesize\itshape\color{gray}${L.misconception}${esc(q.misconceptions[k].trim())}\par}`
+      : "";
+    return String.raw`\noindent${box}~\textbf{${LETTER[k]}.}~${esc(o)}\par${mis}\smallskip`;
   }).join("\n");
   // figure rendue (PNG déjà dans examsDir, à côté du .tex compilé).
   const fig = q.figureFile
@@ -248,11 +256,23 @@ export function examDocument(body: string[], dateLabel: string): string {
 
 export { copyExamLogo };
 
+/**
+ * Durée affichée d'un examen QCM, en minutes, ou null : celle des annales, sinon celle du format
+ * déclaré ou du cours (lib/exam-format). Examen #16 (16/11) : un profil sans durée l'enregistre à 0,
+ * que `?? 180` laissait passer — « Duration: 0 minutes », « You have 0 minutes ». Inconnue, la
+ * mention est retirée plutôt qu'inventée.
+ */
+export async function qcmDurationMin(detected: number | null | undefined): Promise<number | null> {
+  if (detected && detected > 0) return detected;
+  const declared = (await resolveExamFormat().catch(() => null))?.durationMin;
+  return declared && declared > 0 ? declared : null;
+}
+
 /** Source .tex complet de l'examen QCM (+ ouvert), corrigé optionnel. */
 export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSolutions: boolean): Promise<string> {
 
   const fmt = await getFormatProfile();
-  const dur = courseTemplate() === "epfl" ? fmt?.duration_min ?? 180 : neutralDuration(fmt?.duration_min);
+  const dur = courseTemplate() === "epfl" ? await qcmDurationMin(fmt?.duration_min) : neutralDuration(fmt?.duration_min);
   // Barème CALÉ sur le format détecté : chaque type (scq/mcq) vaut ses points_each réels
   // (ex. CS-233 : scq 3 pts, mcq 4 pts), les ouvertes leurs ~17 pts. Repli 2/15 si non détecté.
   const ptsOf = (t: "scq" | "mcq"): number => {

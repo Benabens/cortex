@@ -85,7 +85,13 @@ const DRIFT_KEY: [number, number] = [3, 1]; // reprend la clé du fait (3, 0) : 
 const DRIFT_SOURCE: [number, number] = [4, 1]; // cite le passage du fait (4, 0)
 
 // ---------- Le fournisseur simulé ----------
-const sim = { factsFail: false, rejectEvery: 9, split: false, offCourse: 0 };
+const sim = { factsFail: false, rejectEvery: 9, split: false, offCourse: 0, misfile: false };
+/**
+ * Examen #16 (16/11), Q8 : un fait d'une notion rangé sous une autre à l'extraction (son passage était
+ * dans les extraits de celle-ci). `sim.misfile` : le 3e fait de la notion 9 sort en tête de la notion 8,
+ * et le cours de la notion 8 contient son passage.
+ */
+const MISFILED = { from: 9, to: 8, fact: () => pseudo(9, 2) };
 let designed = 0;
 const calls = { facts: 0, design: 0, verify: 0, repair: 0, audit: 0, dedup: 0, other: 0 };
 const total = () => Object.values(calls).reduce((a, b) => a + b, 0);
@@ -94,7 +100,13 @@ function extract(prompt: string): string {
   if (sim.factsFail) return "pas du JSON";
   const k = Number(/Au plus (\d+) faits par notion/.exec(prompt)?.[1] ?? 4);
   const notions = [...prompt.matchAll(/^N(\d+)\. (.+)$/gm)].map((m) => ({ n: Number(m[1]), i: Array.from({ length: NOTIONS }, (_, i) => i).find((i) => label(i) === m[2].trim()) ?? -1 }));
-  return JSON.stringify({ facts: notions.filter((x) => x.i >= 0).flatMap(({ n, i }) => factsOf(i).slice(0, k).map((f) => ({ notion: n, statement: f.statement, passage: f.passage }))) });
+  const facts = notions.filter((x) => x.i >= 0).flatMap(({ n, i }) => factsOf(i).slice(0, k).map((f) => ({ notion: n, statement: f.statement, passage: f.passage })));
+  const to = notions.find((x) => x.i === MISFILED.to);
+  if (!sim.misfile || !to) return JSON.stringify({ facts });
+  const m = MISFILED.fact();
+  const rest = facts.filter((f) => f.statement !== m.statement);
+  const at = rest.findIndex((f) => f.notion === to.n);
+  return JSON.stringify({ facts: [...rest.slice(0, at), { notion: to.n, statement: m.statement, passage: m.passage }, ...rest.slice(at)] });
 }
 
 function design(prompt: string): string {
@@ -179,10 +191,15 @@ function audit(prompt: string): string {
   }) });
 }
 
-/** Contrôle des doublons du modèle : deux questions de même bonne réponse sont un doublon. */
+/**
+ * Contrôle des doublons du modèle : deux questions de même bonne réponse sont un doublon. Avec la
+ * liste du programme, il nomme la notion dont relève la clé (celle du fait qu'elle énonce).
+ */
 function dedup(prompt: string): string {
   const first = new Map<string, number>();
   const duplicates: { first: number; second: number; reason: string }[] = [];
+  const programme = new Map([...prompt.matchAll(/^N(\d+)\. (.+)$/gm)].map((m) => [m[2].trim(), Number(m[1])]));
+  const notions: { index: number; notion: string; angle: string; regle: string; programme: number }[] = [];
   for (const { index, body } of blocks(prompt)) {
     // Revue finale : la clé est donnée par son rang (« CLÉ : 0 »), le texte est celui de l'option.
     const rank = /^\s+CLÉ : (\d+)/m.exec(body)?.[1];
@@ -190,8 +207,10 @@ function dedup(prompt: string): string {
     if (!key) continue;
     if (first.has(key)) duplicates.push({ first: first.get(key)!, second: index, reason: "même règle" });
     else first.set(key, index);
+    const i = where.get(key.slice(KEY.length).trim())?.[0];
+    if (sim.misfile && i !== undefined) notions.push({ index, notion: "", angle: "", regle: "", programme: programme.get(label(i)) ?? 0 });
   }
-  return JSON.stringify({ notions: [], duplicates, repeats: [] });
+  return JSON.stringify({ notions, duplicates, repeats: [] });
 }
 
 let llm: http.Server;
@@ -224,7 +243,7 @@ before(async () => {
 });
 
 beforeEach(() => {
-  Object.assign(sim, { factsFail: false, rejectEvery: 9, split: false, offCourse: 0 });
+  Object.assign(sim, { factsFail: false, rejectEvery: 9, split: false, offCourse: 0, misfile: false });
   designed = 0;
   seenTopics.clear();
   process.env.QCM_FACTS = "1";
@@ -255,6 +274,7 @@ async function course(previous = false): Promise<string> {
     for (let i = 0; i < NOTIONS; i++) {
       // Découpé : un passage par fait, comme un vrai cours où une notion s'étale sur plusieurs pages.
       const texts = sim.split ? factsOf(i).map((f) => `${label(i)} : ${f.passage}`) : [textOf(i)];
+      if (sim.misfile && i === MISFILED.to) texts[0] += ` ${MISFILED.fact().passage}`;
       for (const [k, text] of texts.entries()) {
         const iid = await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "course_pdf", `Séance ${i + 1}.${k + 1}`, text);
         await indexItemForSearch(iid, sid, `Séance ${i + 1}.${k + 1}`, text);
@@ -409,4 +429,20 @@ test("notion étalée sur plusieurs pages : l'audit final voit la preuve du fait
   assertDeliverable(items, detail);
   assert.equal(sim.offCourse, 0, `aucune question jugée hors cours faute de sa preuve : ${detail}`);
   assert.ok(!steps.some((s) => /complément final/.test(s)), `pas de complément final : ${detail}`);
+});
+
+test("examen #16, Q8 : un fait rangé sous une autre notion à l'extraction — l'étiquette suit la notion que la question teste", async (t) => {
+  // Aucune clé contestée : la question du fait mal rangé ne doit pas tomber par hasard à la vérification.
+  Object.assign(sim, { misfile: true, rejectEvery: 0 });
+  const { r, rows, facts, steps, detail } = await generate(await course());
+  t.diagnostic(detail);
+  assert.equal(r.count, 20, detail);
+  const misfiled = facts.find((f) => f.statement === MISFILED.fact().statement);
+  assert.ok(misfiled, `le fait mal rangé est extrait : ${detail}`);
+  const row = rows.find((x) => x.fact_id === misfiled.id);
+  assert.ok(row, `une question teste le fait mal rangé (en tête de sa notion) : ${rows.map((x) => x.topic).join(", ")}`);
+  assert.equal(row.topic, label(MISFILED.from), "étiquette : la notion dont parle le fait, pas celle sous laquelle il était rangé");
+  assert.ok(steps.some((s) => /étiquette\(s\) de notion recalée/.test(s)), detail);
+  // Les autres questions gardent l'étiquette de leur fait.
+  assert.ok(rows.filter((x) => x !== row).every((x) => x.topic !== label(MISFILED.from) || facts.some((f) => f.id === x.fact_id)), detail);
 });
