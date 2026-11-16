@@ -1,4 +1,5 @@
 import { authBodyLimit } from "@/lib/auth-body-limit";
+import { clientIp } from "@/lib/client-ip";
 import { demoReadable } from "@/lib/demo-paths";
 import { MCP_CARD_PATHS, MCP_ICON_PATHS } from "@/lib/mcp/identity";
 import { legacyHostRedirect } from "@/lib/public-url";
@@ -72,29 +73,7 @@ function legacyPathBlocked(pathname: string): boolean {
 /** Rate-limit par IP (fenêtre fixe 60 s, in-process — conteneur unique).
  *  RATE_LIMIT_PER_MIN non posée → désactivé (dev). */
 const rlBuckets = new Map<string, { n: number; resetAt: number }>();
-/**
- * Clé de comptage du rate-limit.
- *
- * Les en-têtes `x-forwarded-for` / `x-real-ip` sont écrits par le CLIENT et
- * seulement complétés par le proxy : leur faire confiance sans savoir combien
- * de proxys nous précèdent rend la limite inutile (il suffit de varier
- * l'en-tête). On n'accepte donc XFF que derrière un proxy déclaré, en prenant
- * le N-ième élément EN PARTANT DE LA FIN, où N = TRUST_PROXY (nombre de hops
- * de confiance ; « 1 » = un proxy, cas Railway). Sans TRUST_PROXY : on ignore
- * totalement les en-têtes et on compte par IP de connexion (`req.ip` quand
- * disponible), quitte à regrouper — mieux vaut une limite grossière qu'une
- * limite contournable d'un `curl -H`.
- */
-function clientIp(req: NextRequest): string {
-  const hops = Number(process.env.TRUST_PROXY);
-  if (Number.isFinite(hops) && hops >= 1) {
-    const parts = (req.headers.get("x-forwarded-for") ?? "")
-      .split(",").map((s) => s.trim()).filter(Boolean);
-    // Le proxy le plus proche de nous ajoute en dernier : on remonte de `hops`.
-    if (parts.length) return parts[Math.max(0, parts.length - hops)];
-  }
-  return "direct";
-}
+// Clé de comptage : lib/client-ip (TRUST_PROXY, jamais l'en-tête brut du client).
 
 /** Plafond du rate-limit de bordure (par IP, par processus). FAIL-CLOSED : dans
  *  une vraie mise en ligne (AUTH ou BILLING), un défaut coarse s'applique même
@@ -112,7 +91,7 @@ function proxyRateCap(): number | null {
 function rateLimited(req: NextRequest): boolean {
   const cap = proxyRateCap();
   if (cap === null) return false;
-  const ip = clientIp(req);
+  const ip = clientIp(req.headers);
   const now = Date.now();
   const b = rlBuckets.get(ip);
   if (!b || now >= b.resetAt) {
