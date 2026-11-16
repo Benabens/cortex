@@ -133,7 +133,9 @@ export async function writeRef({ relPath, title, pages }: ParsedRef): Promise<nu
 
 /** Lit puis écrit UNE annale (dépôt depuis l'app) ; lève si elle ne se lit pas. */
 export async function ingestRefFile(relPath: string): Promise<{ items: number }> {
-  return { items: await writeRef(await readRefFile(relPath)) };
+  const parsed = await readRefFile(relPath);
+  // Lu hors transaction, réécrit d'un bloc : une erreur en route laisse l'annale d'avant intacte.
+  return { items: await q.tx(() => writeRef(parsed)) };
 }
 
 /**
