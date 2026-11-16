@@ -70,29 +70,37 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
 
   const email = authEnabled() ? (await auth())?.user?.email ?? null : null;
   const name = view.clientName ?? view.clientHost;
+  // Reconnu (client_id CIMD ou URL de retour https connue) : on nomme d'après l'identité, pas le nom déclaré.
+  // Nom qui imite un client connu : l'hôte de retour est accolé, le titre ne lui prête aucun crédit.
+  const shownName = view.recognized?.label ?? (view.impersonates ? `${name} (${view.redirectHost})` : name);
   const canGenerate = view.scopes.includes(SCOPE_GENERATE);
   const canWrite = view.scopes.includes(SCOPE_WRITE);
 
   return (
     <Shell>
       <h1 className="mt-8 text-center text-[1.3rem] font-semibold leading-snug tracking-tight">
-        {name} demande l’accès à ton compte Cortex
+        {shownName} demande l’accès à ton compte Cortex
       </h1>
 
       <dl className="mt-6 rounded-lg px-4 py-3 text-[0.85rem] leading-relaxed" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <div className="flex justify-between gap-4">
-          <dt style={{ color: C.muted }}>{view.verifiedDomain ? "Domaine vérifié" : "Nom déclaré par l’application"}</dt>
-          <dd className="text-right font-medium">{view.verifiedDomain ? view.clientHost : name}</dd>
+          <dt style={{ color: C.muted }}>{view.recognized ? "Application reconnue" : view.verifiedDomain ? "Domaine vérifié" : "Nom déclaré par l’application"}</dt>
+          <dd className="text-right font-medium">{view.recognized ? `${view.recognized.label} · ${view.recognized.domain}` : view.verifiedDomain ? view.clientHost : name}</dd>
         </div>
         <div className="mt-2 flex justify-between gap-4 border-t pt-2" style={{ borderColor: C.line }}>
           <dt style={{ color: C.muted }}>Retour vers</dt>
           <dd className="text-right font-medium">{view.localRedirect ? `cet ordinateur (${view.redirectHost})` : view.redirectHost}</dd>
         </div>
+        {view.impersonates && (
+          <p role="alert" className="mt-2 text-[0.78rem]" style={{ color: "var(--error-ink)" }}>
+            Cette application se présente comme « {name} », mais rien ne prouve qu’elle vient de {view.impersonates}. N’accepte pas si tu as un doute.
+          </p>
+        )}
         {view.localRedirect ? (
           <p className="mt-2 text-[0.78rem]" style={{ color: "var(--warn-ink)" }}>
-            La connexion revient vers un programme de cet ordinateur. N’accepte que si tu viens de la lancer toi-même (par exemple depuis Claude Code).
+            La connexion revient vers un programme de cet ordinateur. N’accepte que si tu viens de la lancer toi-même (depuis ton terminal ou ton éditeur de code, par exemple).
           </p>
-        ) : !view.verifiedDomain && (
+        ) : !view.verifiedDomain && !view.recognized && !view.impersonates && (
           <p className="mt-2 text-[0.78rem]" style={{ color: C.faint }}>
             Le nom « {name} » n’est pas vérifié. N’accepte que si tu viens d’ajouter cette application.
           </p>
@@ -140,6 +148,9 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
           <p className="mt-3 text-[0.8rem] leading-relaxed" style={{ color: C.faint }}>
             {canWrite ? "Jamais : supprimer tes cours ou tes documents, ni toucher à tes paiements." : "Jamais : modifier ou supprimer tes cours, ni toucher à tes paiements."}
             {" "}Tu peux couper cet accès à tout moment dans Mon compte → Applications connectées.
+          </p>
+          <p className="mt-2 text-[0.8rem]" style={{ color: C.faint }}>
+            <Link href="/compte/assistants" target="_blank" rel="noopener" className="underline underline-offset-4">Comment connecter un assistant à Cortex</Link>
           </p>
         </fieldset>
 
