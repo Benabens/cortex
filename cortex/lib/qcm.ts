@@ -114,9 +114,10 @@ const IMPOSED_TYPE: Record<AnswerMode, "scq" | "mcq" | null> = { single: "scq", 
  * Le schéma d'un lot pour un mode de réponse : le type imposé, s'il y en a un ; sans figure,
  * figure_spec (objet libre) est retiré, ce qui le rend exprimable en sortie structurée stricte.
  */
-function batchSchema(mode: AnswerMode, withFigures: boolean): object {
+function batchSchema(mode: AnswerMode, withFigures: boolean, options: number | null): object {
   const s = JSON.parse(JSON.stringify(QCM_BATCH_SCHEMA));
   const props = s.properties.items.items.properties;
+  if (options) props.options = { ...props.options, minItems: options, maxItems: options, description: `EXACTEMENT ${options} options, comme dans les annales : ${options === 2 ? "les deux réponses d'un vrai/faux" : "des PROPOSITIONS COMPLÈTES de longueurs COMPARABLES"}, pas d'« toutes les réponses ci-dessus ».` };
   const imposed = IMPOSED_TYPE[mode];
   if (imposed) props.type = { type: "string", enum: [imposed], description: imposed === "scq" ? "scq : l'examen est à réponse unique." : "mcq : l'examen est à réponses multiples." };
   if (imposed === "scq") props.correct.description = "Indice 0-based de LA bonne réponse : exactement un.";
@@ -142,11 +143,24 @@ function typeInMode(correct: number[], modelType: unknown, mode: AnswerMode): "s
   return imposed ?? (correct.length > 1 || modelType === "mcq" ? "mcq" : "scq");
 }
 
-/** Un QCM exploitable : énoncé, au moins 2 options texte, clé(s) valide(s). Sinon écarté (et comblé). */
-function wellFormed(raw: unknown): boolean {
+/**
+ * Le nombre d'options convient-il à l'examen ? Celui de l'annale quand il est connu (audit 3,
+ * P0-3 : A–E, vrai/faux à 2), sinon au moins 2.
+ */
+export function optionCountFits(n: number, expected: number | null | undefined): boolean {
+  return expected ? n === expected : n >= 2;
+}
+
+/** Consigne du nombre d'options, quand l'annale le fixe. */
+function optionCountRule(options: number): string {
+  return `  - NOMBRE D'OPTIONS : EXACTEMENT ${options} options par question, comme dans les annales${options === 2 ? " (vrai/faux : une affirmation à juger, options « Vrai » et « Faux » dans la langue de l'examen)" : ""} ; jamais plus, jamais moins.`;
+}
+
+/** Un QCM exploitable : énoncé, options texte au nombre de l'examen, clé(s) valide(s). Sinon écarté (et comblé). */
+function wellFormed(raw: unknown, options: number | null): boolean {
   const it = raw as Partial<QcmItem> | null;
   if (!it || typeof it.stem !== "string" || !it.stem.trim()) return false;
-  if (!Array.isArray(it.options) || it.options.length < 2 || !it.options.every((o) => typeof o === "string" && o.trim())) return false;
+  if (!Array.isArray(it.options) || !optionCountFits(it.options.length, options) || !it.options.every((o) => typeof o === "string" && o.trim())) return false;
   const n = it.options.length;
   // Sans explication, la clé n'est pas justifiée dans le corrigé (banc du 04/11 : un lot entier sans).
   if (typeof it.explanation !== "string" || !it.explanation.trim()) return false;
@@ -746,12 +760,17 @@ export async function generateQcmBatch(
     studentFocus?: string;
     /** Mode de réponse de l'examen ; absent → celui du format du cours, sinon réponse unique. */
     answerMode?: AnswerMode;
+    /** Options de chaque question, celui de l'annale ; null → libre (au moins 2) ; absent → celui du format du cours. */
+    optionsPerQuestion?: number | null;
     /** Résumé du format RÉSOLU (lib/exam-format), cohérent avec le mode ; absent → celui de la détection. */
     formatSummary?: string;
   } = {}
 ): Promise<QcmItem[]> {
   const fmt = await getFormatProfile();
-  const mode = opts.answerMode ?? (await resolveExamFormat().catch(() => null))?.answerMode ?? DEFAULT_ANSWER_MODE;
+  // Absents (révision) : ceux du format résolu du cours.
+  const resolved = opts.answerMode && opts.optionsPerQuestion !== undefined ? null : await resolveExamFormat().catch(() => null);
+  const mode = opts.answerMode ?? resolved?.answerMode ?? DEFAULT_ANSWER_MODE;
+  const options = opts.optionsPerQuestion !== undefined ? opts.optionsPerQuestion : resolved?.optionsPerQuestion ?? null;
   const imgs = courseRefImages().slice(0, 4);
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { profile } = require("@/lib/course-profile") as typeof import("@/lib/course-profile");
@@ -797,6 +816,7 @@ export async function generateQcmBatch(
     ``,
     ...ARCHITECT_QCM_RULES,
     answerModeRule(mode),
+    options ? optionCountRule(options) : ``,
     opts.withAnnales ? OPTIONS_WITH_ANNALES : OPTIONS_WITHOUT_ANNALES,
     ...OPTION_RULES,
     opts.withAnnales ? CLASSIFICATION_IF_ANNALES : NO_CLASSIFICATION,
@@ -811,7 +831,7 @@ export async function generateQcmBatch(
     examples.length ? `\n${DATA_RULE}` : null,
     examples.length ? dataBlock(`QUESTIONS D'EXEMPLE OFFICIELLES de l'enseignant — imite leur STYLE (forme des options, niveau de détail, pièges), ne les recopie JAMAIS`, examples) : null,
     `Format de réponse : UNIQUEMENT l'objet JSON { "items": [ … ] } conforme à ce schéma, aucun fichier.`,
-    JSON.stringify(batchSchema(mode, true), null, 2),
+    JSON.stringify(batchSchema(mode, true, options), null, 2),
   ].filter((l) => l != null && l !== "").join("\n");
   const prompt = [
     `Ce lot : ${n} QCM.`,
@@ -842,7 +862,7 @@ export async function generateQcmBatch(
   // est un objet libre, inexprimable → texte libre, lu par extractJson. Réponse illisible →
   // redemandée avec l'erreur (completeJson, 3 essais).
   const r = await completeJson<{ items: (QcmItem & { figure_spec?: FigureSpec })[] }>(
-    { system, prompt, model: "opus", timeoutMs: 480_000, json: { schema: batchSchema(mode, withFigures) } },
+    { system, prompt, model: "opus", timeoutMs: 480_000, json: { schema: batchSchema(mode, withFigures, options) } },
     { check: (v) => (!Array.isArray(v?.items) ? "le champ « items » (tableau de QCM) manque" : v.items.length ? null : "« items » est vide") },
   );
   const items: QcmItem[] = [];
@@ -850,7 +870,7 @@ export async function generateQcmBatch(
   const raws = r.items.slice(0, n);
   for (let i = 0; i < raws.length; i++) {
     const raw = raws[i];
-    if (!wellFormed(raw)) continue;
+    if (!wellFormed(raw, options)) continue;
     const type = typeInMode(raw.correct, raw.type, mode);
     if (!type) {
       step(`QCM à plusieurs bonnes réponses écarté : l'examen est à réponse unique`, 30);
@@ -1494,6 +1514,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     examples: withAnnales ? [] : await officialExamples().catch(() => []),
     // Avec annales, leur forme ; sinon le mode déclaré ou lu dans les sources, à défaut la réponse unique.
     answerMode: format?.answerMode ?? DEFAULT_ANSWER_MODE,
+    optionsPerQuestion: format?.optionsPerQuestion ?? null,
     // Le résumé du format du cours seulement s'il est à choix : un QCM demandé pour un cours
     // d'exercices ou à questions composées ne doit pas lire « Format du cours : exercices ».
     formatSummary: format?.answerMode ? format.summary : undefined,
