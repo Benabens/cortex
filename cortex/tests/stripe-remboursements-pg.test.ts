@@ -122,3 +122,21 @@ test("vrai Postgres : cumuls DIFFÉRENTS livrés ensemble (moitié puis total) �
     assert.equal(await credits.getBalance(user), 0);
   }
 });
+
+test("vrai Postgres : génération débitée PENDANT le remboursement total de la facture en cours → le consommé passe en dette, jamais perdu", { skip }, async () => {
+  const { handleStripeEvent } = await import("../lib/billing/stripe-events");
+  const credits = await import("../lib/billing/credits");
+  const reserve = await import("../lib/billing/reserve");
+  const { runWithUser } = await import("../db/context");
+  const { runWithCourse } = await import("../db/client");
+  for (let round = 0; round < 5; round++) {
+    const user = `course${round}`;
+    await handleStripeEvent(paid(user, "m1", -1, 29), { lookup: noStripe });
+    const [spent] = await Promise.all([
+      runWithUser(user, () => runWithCourse("ml", () => reserve.reserveGeneration({ bucket: "gen", kind: "exam", costCenti: 500, ref: `job:${user}:1` }))),
+      handleStripeEvent(refund(`evt_${user}_full`, `pi_${user}_m1`, 1490), { lookup: noStripe }),
+    ]);
+    // Débit avant la reprise : 5 consommés → dette de 5. Débit après : refusé (abonnement suspendu, solde 0).
+    assert.equal(await credits.getBalance(user), spent.ok ? -5 : 0, `${user} : ${JSON.stringify(spent)}`);
+  }
+});
