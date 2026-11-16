@@ -450,10 +450,12 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
   const declared = course.examFormat;
   const past = await annales();
   const hasAnnales = past.count > 0;
-  // Langue : déclarée > celle des annales > celle des supports > celle du cours (fr par défaut à la
-  // création : un cours espagnol créé sans langue sortait ses examens en français).
+  // Langue : déclarée > celle des annales > celle du cours > celle des supports > fr. Le « fr » posé
+  // par défaut à la création ne vaut pas déclaration : les supports passent devant (un cours
+  // espagnol créé sans langue sortait ses examens en français).
   const sample = await corpusSample();
-  const language = declared?.language || (past.text ? detectLanguage(past.text) : null) || detectLanguage(sample) || course.language || "fr";
+  const courseLanguage = course.language && course.language !== "fr" ? course.language : null;
+  const language = declared?.language || (past.text ? detectLanguage(past.text) : null) || courseLanguage || detectLanguage(sample) || course.language || "fr";
   const stored = await readStoredProfile();
   const discipline = inferDiscipline({ code: course.examCode, sample });
   const basisOf = (p: StoredProfile) => p.basis ?? "annales";
