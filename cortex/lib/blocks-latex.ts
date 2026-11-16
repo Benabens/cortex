@@ -4,7 +4,8 @@ import { getCourse } from "@/lib/courses";
 import { compileExamPdf } from "@/lib/exam-latex";
 import { getFormatProfile } from "@/lib/format";
 import { examsDir } from "@/lib/paths";
-import { copyExamLogo, coverHeader, esc, examDocument } from "@/lib/qcm-latex";
+import { courseTemplate, courseWords, localDate, neutralCoverTex, pointsText, solutionColor } from "@/lib/exam-template";
+import { copyExamLogo, coverHeader, esc, examDocument, examDuration } from "@/lib/qcm-latex";
 import { assertTexSafe } from "@/lib/tex-guard";
 import fs from "node:fs";
 import path from "node:path";
@@ -47,38 +48,61 @@ function paragraphs(s: string): string {
   return s.split(/\n\s*\n/).map((p) => esc(p.trim()).replace(/\n/g, String.raw`\\ `)).filter(Boolean).map((p) => String.raw`\noindent ${p}\par\smallskip`).join("\n");
 }
 
-const pts = (n: number) => `${n} pt${n > 1 ? "s" : ""}`;
+/** Libellés des questions composées : le texte historique de l'EPFL (byte-identique) ou ceux du gabarit neutre. */
+type BlockLabels = { question: string; pts: (n: number) => string; output: string; modelAnswer: string; grading: string; solution: string; color: string };
 
-function renderPart(p: BlockPart, i: number, withKey: boolean): string {
+const EPFL_LABELS: BlockLabels = {
+  question: "Question", pts: (n) => `${n} pt${n > 1 ? "s" : ""}`, output: "Output:", modelAnswer: "Model answer:",
+  grading: "Grading:", solution: "Solution:", color: solutionColor("epfl"),
+};
+
+function blockLabels(): BlockLabels {
+  if (courseTemplate() === "epfl") return EPFL_LABELS;
+  const w = courseWords();
+  return {
+    question: w.question, pts: (n) => pointsText(n, w), output: w.output, modelAnswer: w.modelAnswer,
+    grading: w.grading, solution: `${w.solution}.`, color: solutionColor("neutral"),
+  };
+}
+
+function renderPart(p: BlockPart, i: number, withKey: boolean, L: BlockLabels): string {
+  const { pts } = L;
   const head = String.raw`\par\medskip\needspace{4\baselineskip}\noindent\textbf{(${LETTER[i].toLowerCase()})}\quad{\footnotesize[${pts(p.points)}]}\quad ${esc(p.prompt)}\par\smallskip`;
   const body: string[] = [];
   if (p.kind === "scq") {
     body.push(...p.options.map((o, k) => String.raw`\noindent\hspace*{1em}${withKey && k === p.correct ? TICK : BOX}~\textbf{${LETTER[k]}.}~${esc(o)}\par\smallskip`));
   } else if (p.kind === "code_output") {
     body.push(codeTex(p.code));
-    body.push(withKey ? String.raw`\noindent{\color{epflred}\textbf{Output:}}` + "\n" + codeTex(p.answer) : String.raw`\noindent Output:\rulelines{3}`);
+    body.push(withKey ? String.raw`\noindent{\color{${L.color}}\textbf{${L.output}}}` + "\n" + codeTex(p.answer) : String.raw`\noindent ${L.output}\rulelines{3}`);
   } else {
     body.push(withKey
       ? [
-          String.raw`\noindent{\color{epflred}\textbf{Model answer:}} ${esc(p.answer)}\par\smallskip`,
-          String.raw`\noindent{\footnotesize\textbf{Grading:}}\par`,
+          String.raw`\noindent{\color{${L.color}}\textbf{${L.modelAnswer}}} ${esc(p.answer)}\par\smallskip`,
+          String.raw`\noindent{\footnotesize\textbf{${L.grading}}}\par`,
           ...p.criteria.map((c) => String.raw`\noindent\hspace*{1em}{\footnotesize --- ${esc(c.label)} (${pts(c.points)})}\par`),
         ].join("\n")
       : String.raw`\rulelines{4}`);
   }
-  if (withKey && p.explanation) body.push(String.raw`\par{\footnotesize\color{epflred}\textbf{Solution:} ${esc(p.explanation)}}\par`);
+  if (withKey && p.explanation) body.push(String.raw`\par{\footnotesize\color{${L.color}}\textbf{${L.solution}} ${esc(p.explanation)}}\par`);
   return [head, ...body].join("\n");
 }
 
-function renderBlock(b: ExamBlock, n: number, withKey: boolean): string {
+function renderBlock(b: ExamBlock, n: number, withKey: boolean, L: BlockLabels): string {
   return [
-    String.raw`\par\bigskip\needspace{8\baselineskip}\noindent{\large\textbf{Question ${n} \quad-- ${esc(b.title)}} \hfill [${pts(b.points)}]}\par\vspace{3pt}\hrule\vspace{8pt}`,
+    String.raw`\par\bigskip\needspace{8\baselineskip}\noindent{\large\textbf{${L.question} ${n} \quad-- ${esc(b.title)}} \hfill [${L.pts(b.points)}]}\par\vspace{3pt}\hrule\vspace{8pt}`,
     richTex(b.scenario),
-    ...b.parts.map((p, i) => renderPart(p, i, withKey)),
+    ...b.parts.map((p, i) => renderPart(p, i, withKey, L)),
   ].join("\n");
 }
 
 async function cover(dateLabel: string, n: number, totalPts: number, durationMin: number): Promise<string> {
+  if (courseTemplate() === "neutral") {
+    const w = courseWords();
+    return neutralCoverTex({
+      course: getCourse(currentCourse()), w, dateTex: localDate(dateLabel, w), durationMin, totalPts,
+      instructions: [w.blocks(n, totalPts), w.blocksHow, w.onSheet],
+    });
+  }
   return [
     ...coverHeader(dateLabel, durationMin),
     String.raw`\vspace{0.4cm}\par\noindent{\large\textbf{Instructions}}\par\smallskip\small`,
@@ -94,12 +118,13 @@ async function cover(dateLabel: string, n: number, totalPts: number, durationMin
 /** Source .tex complet de l'examen à questions composées, corrigé optionnel. */
 export async function renderBlocksTex(blocks: ExamBlock[], dateLabel: string, withKey: boolean): Promise<string> {
   const fmt = await getFormatProfile();
-  const duration = fmt?.duration_min || getCourse(currentCourse()).durationMin || 90;
+  const duration = examDuration(fmt?.duration_min || undefined, fmt?.duration_min || getCourse(currentCourse()).durationMin || 90);
   const total = blocks.reduce((s, b) => s + b.points, 0);
+  const L = blockLabels();
   return examDocument([
     await cover(dateLabel, blocks.length, total, duration),
     String.raw`\clearpage`,
-    ...blocks.map((b, i) => renderBlock(b, i + 1, withKey)),
+    ...blocks.map((b, i) => renderBlock(b, i + 1, withKey, L)),
   ], dateLabel);
 }
 
