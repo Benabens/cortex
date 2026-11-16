@@ -82,18 +82,25 @@ async function parseRefFile(abs: string): Promise<{ title: string; pages: string
   return { title: base.replace(/\.[^.]+$/, ""), pages: [clean(buf.toString("utf8"))] };
 }
 
-/**
- * Ingestion d'UN fichier de référence (data/refs/<file>) dans sources/items/fts.
- * Idempotent par chemin : purge l'ancienne source de même path avant de réinsérer.
- * Réutilisé par l'upload (immédiat) ET par scripts/ingest.ts (après wipe).
- */
-export async function ingestRefFile(relPath: string): Promise<{ sourceId: number; items: number }> {
-  ensureFts();
-  const filePath = path.join(REFS_DIR(), path.basename(relPath));
-  const { kind, year } = inferExamMeta(path.basename(relPath));
-  const { title, pages } = await parseRefFile(filePath);
+/** Une annale lue (titre, pages de texte), pas encore écrite dans le corpus. */
+export type ParsedRef = { relPath: string; title: string; pages: string[] };
 
-  // purge d'une éventuelle ingestion précédente du même chemin
+/** Passages indexables d'une annale lue : une page de moins de 3 caractères ne compte pas. */
+const refChunks = (pages: string[]) => (pages.length ? pages : [""]);
+const indexableCount = (pages: string[]) => refChunks(pages).filter((t) => t.length >= 3).length;
+
+async function readRefFile(relPath: string): Promise<ParsedRef> {
+  const { title, pages } = await parseRefFile(path.join(REFS_DIR(), path.basename(relPath)));
+  return { relPath, title, pages };
+}
+
+/**
+ * Écrit une annale lue dans sources/items/fts et exam_refs. Idempotent par chemin : purge
+ * l'ancienne source de même path avant de réinsérer. Rend le nombre de passages indexés.
+ */
+export async function writeRef({ relPath, title, pages }: ParsedRef): Promise<number> {
+  ensureFts();
+  const { kind, year } = inferExamMeta(path.basename(relPath));
   const old = await q.all<{ id: number }>(`SELECT id FROM sources WHERE path = ?`, relPath);
   for (const { id } of old) {
     await unindexSource(id);
@@ -102,11 +109,9 @@ export async function ingestRefFile(relPath: string): Promise<{ sourceId: number
   }
 
   const sid = await q.insert(INS_SOURCE_SQL, kind, title, relPath, year, recencyWeight(year));
-  const chunks = pages.length ? pages : [""];
-  let items = 0;
+  const chunks = refChunks(pages);
   for (const [i, text] of chunks.entries()) {
     if (text.length < 3) continue;
-    items++;
     const label = chunks.length > 1 ? `${title}, p. ${i + 1}` : title;
     const anchor = chunks.length > 1 ? `${relPath}#page=${i + 1}` : relPath;
     const itemId = await q.insert(
@@ -124,14 +129,20 @@ export async function ingestRefFile(relPath: string): Promise<{ sourceId: number
      ON CONFLICT(path) DO UPDATE SET title = excluded.title, year = excluded.year, kind = excluded.kind, uploaded = excluded.uploaded`,
     relPath, title, year, kind, wasUploaded
   );
-  return { sourceId: sid, items };
+  return indexableCount(pages);
+}
+
+/** Lit puis écrit UNE annale (dépôt depuis l'app) ; lève si elle ne se lit pas. */
+export async function ingestRefFile(relPath: string): Promise<{ items: number }> {
+  return { items: await writeRef(await readRefFile(relPath)) };
 }
 
 /**
- * Réingère tous les fichiers de data/refs/ (appelé par scripts/ingest.ts). Un fichier qui ne
- * se lit pas est isolé : les suivants sont lus quand même, et son issue figure dans le rapport.
+ * Lit toutes les annales de data/refs/ SANS rien écrire (scripts/ingest.ts écrit ensuite tout le
+ * corpus en une transaction). Un fichier qui ne se lit pas est isolé : les suivants sont lus
+ * quand même, et son issue figure dans le rapport.
  */
-export async function ingestAllRefs(): Promise<IngestFileOutcome[]> {
+export async function readAllRefs(): Promise<{ parsed: ParsedRef[]; outcomes: IngestFileOutcome[] }> {
   const dir = REFS_DIR();
   // uniquement des FICHIERS d'examen (ignore les sous-dossiers figref/ img/ et les fichiers cachés)
   const files = (await storage().list(dir))
@@ -139,17 +150,20 @@ export async function ingestAllRefs(): Promise<IngestFileOutcome[]> {
     .map((e) => path.basename(e.path))
     .filter((name) => !name.startsWith(".") && /\.(pdf|html?|txt|md|pptx|docx)$/i.test(name))
     .sort();
+  const parsed: ParsedRef[] = [];
   const outcomes: IngestFileOutcome[] = [];
   for (const f of files) {
     const relPath = `refs/${f}`;
     try {
-      const { items } = await ingestRefFile(relPath);
+      const ref = await readRefFile(relPath);
+      parsed.push(ref);
+      const items = indexableCount(ref.pages);
       outcomes.push({ path: relPath, status: readStatus(items), items });
     } catch (e) {
       outcomes.push({ path: relPath, status: failureStatus(e), items: 0 });
     }
   }
-  return outcomes;
+  return { parsed, outcomes };
 }
 
 // ---------------- Sélection « référence » ----------------

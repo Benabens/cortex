@@ -137,6 +137,7 @@ function runIngestProcess(args: string[], reportFile: string): Promise<void> {
       for (const t of fresh) {
         await logJob(jobId, t);
         if (/Import du dossier/.test(t)) await setJob(jobId, { currentStep: "Import du dossier…", progress: 20 });
+        else if (/Lecture des fichiers/.test(t)) await setJob(jobId, { currentStep: "Lecture des fichiers…", progress: 25 });
         else if (/Nettoyage/.test(t)) await setJob(jobId, { currentStep: "Indexation…", progress: 45 });
         else if (/vocabulaire/.test(t)) await setJob(jobId, { currentStep: "Vocabulaire…", progress: 80 });
         else if (/Compris pour/.test(t)) await setJob(jobId, { currentStep: "Récap…", progress: 95 });
