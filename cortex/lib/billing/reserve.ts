@@ -1,13 +1,13 @@
 import crypto from "node:crypto";
 import { currentCourse } from "@/db/client";
 import { currentUser } from "@/db/context";
-import { authRun, authTx, type AuthTx } from "@/db/auth-store";
+import { authRun, authTx } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
 import { BAD_OUTPUT_CODES, llmErrorCode } from "@/lib/llm/errors";
 import { log } from "@/lib/metrics";
 import { defaultProviderName } from "@/lib/llm/config";
 import { expectedJobCostUsd } from "./budget";
-import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits } from "./credits";
+import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, lockAccountInTx as lockUser } from "./credits";
 import { quotaTrackingActive, type GateIssue, type QuotaBucket } from "./guards";
 import { SLOT_MAX_AGE_MS, launchVerdict, maxActiveJobsLimit, readCounterState, readSpendState, type LaunchSpec, type LimitsState } from "./limits";
 import { isOwner } from "./owner";
@@ -65,11 +65,6 @@ export type ReserveOpts = {
 /** Plafond de générations simultanées par compte (défaut 2 en déploiement gardé ; « unlimited » pour lever). */
 export function maxActiveJobs(): number | null {
   return maxActiveJobsLimit();
-}
-
-/** Verrou transactionnel par utilisateur (Postgres) ; sqlite sérialise déjà les écritures. */
-async function lockUser(tx: AuthTx, userId: string): Promise<void> {
-  if (dbDriverName() === "postgres") await tx.run(`SELECT pg_advisory_xact_lock(hashtext(?))`, userId);
 }
 
 /**

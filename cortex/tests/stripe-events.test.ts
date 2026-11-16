@@ -256,10 +256,14 @@ test("2b-3 : sinon, métadonnées de la charge (payment_intent_data) + montant �
   assert.equal(await credits.getBalance("gina"), 5, "450 centimes remboursés = 5 crédits (9 € les 10)");
 });
 
-test("2b-3 : client Stripe connu (abonné) sans achat retrouvé → montant converti en crédits", async () => {
+test("2b-3 : client Stripe connu (abonné) sans achat retrouvé → montant converti en crédits, seulement si la charge est marquée Cortex", async () => {
   await handleStripeEvent(checkoutSub("evt_sub_h", "hugo", "cus_hugo", "sub_hugo"));
   await credits.addTransaction("hugo", 1000, "achat crédité par l'ancien code", "evt_old_style_hugo");
-  const r = await handleStripeEvent(ev("evt_refund_hugo", "charge.refunded", { payment_intent: "pi_hugo_pack", customer: "cus_hugo", amount: 900, amount_refunded: 900 }));
+  // Compte partagé : le même client peut payer autre chose (Payment Link freelance) → sans marque Cortex, rien.
+  const unmarked = await handleStripeEvent(ev("evt_refund_hugo_0", "charge.refunded", { payment_intent: "pi_hugo_other", customer: "cus_hugo", amount: 900, amount_refunded: 900 }));
+  assert.equal(unmarked.action, "ignored:foreign");
+  assert.equal(await credits.getBalance("hugo"), 10);
+  const r = await handleStripeEvent(ev("evt_refund_hugo", "charge.refunded", { payment_intent: "pi_hugo_pack", customer: "cus_hugo", amount: 900, amount_refunded: 900, metadata: { app: "cortex" } }));
   assert.equal(r.action, "pack-reversed-by-amount");
   assert.equal(await credits.getBalance("hugo"), 0);
 });

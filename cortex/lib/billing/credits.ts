@@ -1,6 +1,6 @@
 import { rechargeDue, standingOf } from "./subscription-windows";
 import { currentUser } from "@/db/context";
-import { authAll, authGet, authRun, authSqlite, authTx } from "@/db/auth-store";
+import { authAll, authGet, authRun, authSqlite, authTx, type AuthTx } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 
@@ -323,9 +323,25 @@ export async function grantSubscriptionMonth(p: {
   return true;
 }
 
-/** Reprise d'une facture d'abonnement (remboursement, litige) : SUSPENDU jusqu'à la prochaine facture payée. */
-export async function suspendSubscription(userId: string): Promise<void> {
-  await authRun(`UPDATE subscriptions SET remaining = 0, suspended = 1, updated_at = ? WHERE user_id = ?`, nowStr(), userId);
+/** Verrou transactionnel du compte (Postgres) : réservation et reprise d'abonnement s'y sérialisent ; sqlite sérialise déjà les écritures. */
+export async function lockAccountInTx(tx: AuthTx, userId: string): Promise<void> {
+  if (dbDriverName() === "postgres") await tx.run(`SELECT pg_advisory_xact_lock(hashtext(?))`, userId);
+}
+
+/**
+ * Reprise d'une facture d'abonnement (remboursement, litige), DANS la transaction
+ * de la reprise et sous le verrou du compte : retire au plus `maxCenti` du solde
+ * du mois, et, si `suspend`, SUSPEND l'abonnement jusqu'à la prochaine facture
+ * payée (solde à 0). Rend ce qui a été pris sur le solde.
+ */
+export async function withdrawSubscriptionInTx(tx: AuthTx, userId: string, maxCenti: number, suspend: boolean): Promise<number> {
+  await lockAccountInTx(tx, userId);
+  const s = await tx.get<{ remaining: number }>(`SELECT remaining FROM subscriptions WHERE user_id = ?`, userId);
+  const taken = Math.min(Math.max(0, maxCenti), Math.max(0, Number(s?.remaining) || 0));
+  const t = nowStr();
+  if (suspend) await tx.run(`UPDATE subscriptions SET remaining = 0, suspended = 1, updated_at = ? WHERE user_id = ?`, t, userId);
+  else if (taken > 0) await tx.run(`UPDATE subscriptions SET remaining = remaining - ?, updated_at = ? WHERE user_id = ?`, taken, t, userId);
+  return taken;
 }
 
 /** Lie client Stripe → utilisateur (checkout abonnement) SANS attribuer : c'est invoice.paid qui attribue. */
