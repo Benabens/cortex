@@ -1865,7 +1865,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // moindre item et qu'une erreur LLM existe, répéter trois rondes identiques multiplie seulement
     // les appels (12 au banc) ; les pertes de qualité, elles, n'ont pas `g.error` et restent comblées.
     // Une faiblesse de distracteur ne transforme jamais une place déjà validée en place manquante.
-    // HUM-285 avait ainsi lancé cinq puis trois lots alors que le journal disait « 0 QCM manquant ».
+    // Un run réel avait ainsi lancé plusieurs lots alors que le journal disait « 0 QCM manquant ».
     if ((!all.length && lastError) || !missing.length || qcmTopupMissing(all.length, count) === 0 || round >= TOPUP_ROUNDS || extraBudget <= 0 || hardStop() || (shouldFinish() && finishNow())) break;
     // Sujets écartés → notions de réserve ; l'accent demandé par l'étudiant reste le sien.
     const swappable = (m: (typeof missing)[number]) => m.rejected && m.topic.method !== FOCUS_METHOD;
