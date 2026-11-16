@@ -248,3 +248,81 @@ export async function rewriteExplanationsOnOptions(questions: { stem: string; op
   ].join("\n");
   return requestRewrites(prompt, questions.length);
 }
+
+const JUSTIFICATIONS_SCHEMA = {
+  type: "object",
+  properties: {
+    justifications: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          index: { type: "integer" },
+          key: { type: "string" },
+          distractors: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { option_index: { type: "integer" }, why_wrong: { type: "string" } },
+              required: ["option_index", "why_wrong"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["index", "key", "distractors"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["justifications"],
+  additionalProperties: false,
+} as const;
+
+/** Une question dont la justification structurée a des cases à écrire (`want`), avec celles déjà justes. */
+export type JustificationTarget = {
+  stem: string; options: string[]; correct: number[]; sourceFact?: string | null;
+  key: string; wrong: string[]; want: { key: boolean; options: number[] }; reason?: string;
+};
+export type JustificationReply = { key?: string; distractors?: { option_index: number; why_wrong: string }[] } | null;
+
+/**
+ * CASES DE JUSTIFICATION ÉCRITES SEULES (lib/qcm-rationale) : une option remplacée sans raison
+ * rendue, une raison effacée par le filet, ou une justification hors cours à refaire sur les
+ * passages du cours. Un seul appel groupé, et seules les cases marquées « À JUSTIFIER » sont
+ * demandées : les autres raisons et la question ne bougent pas. Rend, par question, la réponse
+ * brute (fusionnée par l'appelant, case par case) ou null (échec : les cases restent vides).
+ */
+export async function writeJustifications(targets: JustificationTarget[], language: string, passages: { src: string; text: string }[] = []): Promise<JustificationReply[]> {
+  if (!targets.length) return [];
+  const block = targets.map((t, i) => [
+    `Q${i}. ${sanitizeCorpus(t.stem)}`,
+    ...t.options.map((o, k) => {
+      const mark = t.correct.includes(k)
+        ? `  (bonne réponse)${t.want.key ? "  ← À JUSTIFIER (key)" : t.key ? ` [justification : ${sanitizeCorpus(t.key).slice(0, 300)}]` : ""}`
+        : t.want.options.includes(k) ? "  ← À JUSTIFIER (pourquoi elle est fausse)" : t.wrong[k] ? `  [fausse : ${sanitizeCorpus(t.wrong[k]).slice(0, 200)}]` : "";
+      return `   (${k}) ${sanitizeCorpus(o)}${mark}`;
+    }),
+    t.sourceFact ? `   Fait du cours testé : ${sanitizeCorpus(t.sourceFact).slice(0, 400)}` : "",
+    t.reason ? `   [défaut à corriger : ${sanitizeCorpus(t.reason).slice(0, 300)}]` : "",
+  ].filter(Boolean).join("\n")).join("\n\n");
+  const prompt = [
+    `Pour chacun de ces QCM, écris UNIQUEMENT les justifications marquées « À JUSTIFIER », sans toucher à l'énoncé, à la bonne réponse ni aux options.`,
+    `RÈGLES : "key" (seulement si la bonne réponse est marquée) dit pourquoi elle est juste, avec le fait du cours, sans parler des autres options ; sinon "key" vide. "distractors" : une entrée par option marquée, et elles seules — "option_index" son numéro, "why_wrong" pourquoi CETTE option est fausse selon le cours (le détail qu'elle contredit). Dans chaque raison, aucune autre option, aucune lettre, aucun numéro ni rang${passages.length ? ", et seulement les faits des passages du cours ci-dessous" : ""}. Une à deux phrases par raison, en ${language}.`,
+    ...(passages.length ? [``, DATA_RULE, dataBlock(`PASSAGES DU COURS`, passages)] : []),
+    ``,
+    `═══ QCM ═══`,
+    block,
+    ``,
+    `Réponds UNIQUEMENT avec l'objet JSON {"justifications": [{"index": i, "key": "…", "distractors": [{"option_index": k, "why_wrong": "…"}]}]}, une entrée par question.`,
+  ].join("\n");
+  try {
+    const r = await completeJson<{ justifications: { index: number; key?: string; distractors?: { option_index: number; why_wrong: string }[] }[] }>(
+      { prompt, model: "opus", timeoutMs: 300_000, json: { schema: JUSTIFICATIONS_SCHEMA } },
+      { check: (v) => (Array.isArray(v?.justifications) ? null : "le champ « justifications » (tableau) manque") },
+    );
+    const byIndex = new Map(r.justifications.filter((x) => Number.isInteger(x?.index)).map((x) => [x.index, x]));
+    return targets.map((_, i) => byIndex.get(i) ?? null);
+  } catch {
+    return targets.map(() => null);
+  }
+}

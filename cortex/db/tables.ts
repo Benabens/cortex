@@ -381,6 +381,9 @@ export const TABLES: TableSpec[] = [
       { name: "figure_json", type: "text" },
       // fait testable du cours (course_facts.id) que la question teste, additif.
       { name: "fact_id", type: "text" },
+      // justification structurée {lang, key, distractors:[{option_index, why_wrong}]} (lib/qcm-rationale), additive :
+      // l'explication affichée en est assemblée ; absente (examens d'avant), l'explication texte fait foi.
+      { name: "rationale_json", type: "text" },
     ],
   },
   {
