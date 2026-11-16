@@ -112,7 +112,7 @@ function renderQcmItem(q: QcmItem, n: number, points: number, withKey: boolean):
     fig,
     `\\noindent ${esc(q.stem).replace(/^\((SCQ|MCQ)\)\s*/i, "")}\\par\\smallskip`,
     opts,
-    withKey && q.explanation ? String.raw`\par{\footnotesize\color{epflred}\textbf{Solution :} ${esc(q.explanation)}}\par` : "",
+    withKey && q.explanation ? String.raw`\par{\footnotesize\color{epflred}\textbf{Solution :} ${esc(q.explanation).replace(/\n+/g, String.raw`\newline `)}}\par` : "",
   ].filter(Boolean).join("\n");
 }
 

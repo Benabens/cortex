@@ -380,7 +380,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
               {det && det.explanation && (
                 <p
                   className="mt-3 text-[12.5px]"
-                  style={{ color: "var(--ink-2)" }}
+                  style={{ color: "var(--ink-2)", whiteSpace: "pre-line" }}
                 >
                   <strong style={{ color: "var(--ink)" }}>Pourquoi :</strong>{" "}
                   {det.explanation}
