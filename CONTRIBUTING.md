@@ -51,6 +51,8 @@ Les quatre doivent passer. La CI les rejoue sur un clone neuf, avec en plus l'in
 
 `npm test` coupe les faits testables des examens QCM (`QCM_FACTS=0`) : les suites QCM écrites avant eux simulent un fournisseur qui ne connaît pas l'appel d'extraction. Les suites `tests/qcm-faits*.test.ts` les rallument elles-mêmes.
 
+Un changement du prompt d'extraction des faits (`lib/qcm-facts.ts`) incrémente `FACTS_VERSION` : les faits gardés en base sont alors réextraits une fois par cours. Deux questions d'un examen ne testent jamais le même fait, même porté par deux faits distincts (`factDuplicates` : même notion et même scénario ou même clé reformulée) ; l'étiquette d'une question est la notion de son fait, sauf quand le contrôle des doublons la range sous une autre notion du programme et que l'étiquette du fait n'a aucun appui dans la clé.
+
 L'explication d'un QCM n'est jamais un paragraphe libre du modèle : elle est assemblée par `lib/qcm-rationale.ts` depuis sa justification structurée (la clé, une raison par option fausse) et les options réelles, à chaque changement d'options et à la lecture (`qcm_items.rationale_json`). Toute opération qui modifie les options invalide seulement les raisons concernées. Une réponse simulée sans justification suit l'ancien chemin (paragraphe libre), comme `QCM_STRUCTURED_EXPLANATIONS=0`.
 
 ## Git
