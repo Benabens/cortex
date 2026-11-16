@@ -236,7 +236,11 @@ function foreign(kind: string, id: string | null | undefined, why: string): Hand
 
 /** Traite un événement Stripe DÉJÀ vérifié. Idempotent. Lève pour un échec RETRYABLE (la route répond 500). */
 export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions = {}): Promise<HandleResult> {
-  if (await isProcessed(event.id)) return { ok: true, action: "duplicate", duplicate: true, credited: false, reversed: false };
+  if (await isProcessed(event.id)) {
+    const dup: HandleResult = { ok: true, action: "duplicate", duplicate: true, credited: false, reversed: false };
+    logReversalDecision(event, dup);
+    return dup;
+  }
 
   // Date de l'événement CHEZ STRIPE : elle ordonne les changements de statut (cf. credits : ordre des événements).
   const at = unixToStr(event.created);
@@ -258,8 +262,7 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
     case "charge.refunded": {
       const charge = event.data.object as Stripe.Charge;
       res = await reverseByPaymentIntent(idOf(charge.payment_intent), "remboursement Stripe", {
-        amountCents: Number(charge.amount_refunded ?? charge.amount ?? 0) || null,
-        totalCents: Number(charge.amount ?? 0) || null,
+        ...reversalAmounts(event),
         metadata: charge.metadata ?? null, customerId: idOf(charge.customer), lookup: opts.lookup, livemode: event.livemode,
       });
       // Revenu : le remboursé cumulé s'impute au paiement (même s'il n'est pas encore arrivé chez nous).
@@ -274,7 +277,7 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
       const dispute = event.data.object as Stripe.Dispute;
       const charge = typeof dispute.charge === "object" && dispute.charge ? (dispute.charge as Stripe.Charge) : null;
       res = await reverseByPaymentIntent(idOf(dispute.payment_intent), "litige Stripe", {
-        amountCents: Number(dispute.amount ?? 0) || null,
+        ...reversalAmounts(event),
         metadata: charge?.metadata ?? null, customerId: idOf(charge?.customer), lookup: opts.lookup, livemode: event.livemode,
       });
       if (res.ok && res.action !== FOREIGN.action) {
@@ -289,7 +292,43 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
   }
   // Marqué APRÈS succès : un échec transitoire laisse Stripe réessayer.
   if (res.ok) await markProcessed(event.id);
+  logReversalDecision(event, res);
   return res;
+}
+
+/**
+ * Montants d'un remboursement (cumul `amount_refunded` sur le montant de la
+ * charge) ou d'un litige (montant contesté, sans total : tout est repris). null
+ * pour un autre événement.
+ */
+function reversalAmounts(event: Stripe.Event): { paymentIntent: string | null; amountCents: number | null; totalCents: number | null } | null {
+  if (event.type === "charge.refunded") {
+    const charge = event.data.object as Stripe.Charge;
+    return {
+      paymentIntent: idOf(charge.payment_intent),
+      amountCents: Number(charge.amount_refunded ?? charge.amount ?? 0) || null,
+      totalCents: Number(charge.amount ?? 0) || null,
+    };
+  }
+  if (event.type === "charge.dispute.created") {
+    const dispute = event.data.object as Stripe.Dispute;
+    return { paymentIntent: idOf(dispute.payment_intent), amountCents: Number(dispute.amount ?? 0) || null, totalCents: null };
+  }
+  return null;
+}
+
+/**
+ * Une ligne par décision de reprise (ignoré, doublon, retiré, mémorisé…), avec
+ * les montants. Identifiants Stripe du paiement et de l'événement seulement :
+ * ni utilisateur, ni client, ni e-mail.
+ */
+function logReversalDecision(event: Stripe.Event, res: HandleResult): void {
+  const amounts = reversalAmounts(event);
+  if (!amounts) return;
+  log("info", "stripe.reversal_decision", {
+    type: event.type, eventId: event.id, ...amounts, decision: res.action,
+    retiredCenti: res.retiredCenti ?? 0, debtCenti: res.debtCenti ?? 0, suspended: !!res.suspended, currentPeriod: res.currentPeriod ?? null,
+  });
 }
 
 /** Ids `promo_…` dont une session à 0 € crédite quand même le pack (STRIPE_FREE_PROMO_CODES, séparés par des virgules). */
@@ -412,7 +451,7 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: strin
       const take = amount > 0 ? Math.min(centi, creditsCentiForAmount(amount)) : centi;
       const reversed = await addTransaction(userId, -take, `${orphan.why} (reçu avant l'achat)`, `stripe:reversal:${pi}`);
       await authRun(`DELETE FROM stripe_orphan_reversals WHERE payment_intent = ?`, pi);
-      log("info", "stripe.orphan_reversal_applied", { paymentIntent: pi, user: userId });
+      log("info", "stripe.orphan_reversal_applied", { paymentIntent: pi, retiredCenti: reversed ? take : 0 });
       return { ok: true, action: "pack-credited-then-reversed", credited, reversed };
     }
   }
@@ -614,7 +653,7 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string,
       target = Math.min(full, Math.ceil((full / 100) * (ctx.amountCents / ctx.totalCents)) * 100);
     }
     await ensureLedgerUnit();
-    const reversed = await authTx(async (tx) => {
+    const retired = await authTx(async (tx) => {
       if (dbDriverName() === "postgres") await tx.run(`SELECT pg_advisory_xact_lock(hashtext(?))`, `reversal:${paymentIntent}`);
       const done = await tx.get<{ total: number | string | null }>(
         `SELECT coalesce(sum(-(${DELTA_CENTI})), 0) total FROM credit_transactions WHERE user_id = ? AND ref LIKE ?`,
@@ -622,18 +661,18 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string,
       );
       const already = Number(done?.total ?? 0);
       const take = target - already;
-      if (take <= 0) return false;
+      if (take <= 0) return 0;
       const stepRef = already === 0 && take === full ? ref : `${ref}:${target}`;
       await tx.run(
         `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, created_at) VALUES (?,?,?,?,'centi',?)`,
         purchase.user_id, -take, target < full ? `${why} (partiel : ${ctx.amountCents}/${ctx.totalCents} centimes)` : why, stepRef, nowStr(),
       );
-      return true;
+      return take;
     }).catch((e) => {
-      if (/unique|constraint/i.test(String(e))) return false; // course perdue sur le ref : l'autre a repris
+      if (/unique|constraint/i.test(String(e))) return 0; // course perdue sur le ref : l'autre a repris
       throw e;
     });
-    return { ok: true, action: reversed ? "pack-reversed" : "reversal-duplicate", reversed };
+    return { ok: true, action: retired ? "pack-reversed" : "reversal-duplicate", reversed: retired > 0, retiredCenti: retired };
   }
   if (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, ref)) {
     return { ok: true, action: "reversal-duplicate", reversed: false };
@@ -666,7 +705,7 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string,
         session.id, paymentIntent, session.userId, centi, ctx.livemode ? 1 : 0, nowStr(),
       );
       const reversed = await addTransaction(session.userId, -centi, `${why} (achat retrouvé via Stripe)`, ref);
-      return { ok: true, action: "pack-reversed", reversed };
+      return { ok: true, action: "pack-reversed", reversed, retiredCenti: reversed ? centi : 0 };
     }
   }
   // Compte partagé avec l'activité freelance (Payment Links, sans métadonnée) : une
@@ -683,8 +722,8 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string,
     const centi = creditsCentiForAmount(ctx.amountCents);
     const capped = metaCredits > 0 ? Math.min(centi, toCenti(metaCredits)) : centi;
     const reversed = await addTransaction(userId, -capped, `${why} (${ctx.amountCents} centimes → crédits)`, ref);
-    log("warn", "stripe.reversal_by_amount", { paymentIntent, user: userId, amountCents: ctx.amountCents, centi: capped });
-    return { ok: true, action: "pack-reversed-by-amount", reversed };
+    log("warn", "stripe.reversal_by_amount", { paymentIntent, amountCents: ctx.amountCents, centi: capped });
+    return { ok: true, action: "pack-reversed-by-amount", reversed, retiredCenti: reversed ? capped : 0 };
   }
   // 6) Rien d'exploitable sur une charge Cortex → on MÉMORISE (appliquée si l'achat
   // arrive ensuite) et on le dit fort.
@@ -692,6 +731,6 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string,
     `INSERT INTO stripe_orphan_reversals (payment_intent, why, amount_cents, created_at) VALUES (?,?,?,?) ON CONFLICT (payment_intent) DO NOTHING`,
     paymentIntent, why, ctx.amountCents ?? null, nowStr(),
   );
-  log("error", "stripe.reversal_unresolved", { paymentIntent, why, amountCents: ctx.amountCents ?? null, customer: ctx.customerId ?? null });
+  log("error", "stripe.reversal_unresolved", { paymentIntent, why, amountCents: ctx.amountCents ?? null });
   return { ok: true, action: "reversal-orphaned", reversed: false, error: `paiement inconnu (${paymentIntent}) : reprise mémorisée, à contrôler dans Stripe` };
 }

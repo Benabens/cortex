@@ -24,6 +24,9 @@ process.env.SIGNUP_FREE_CREDITS = "0";
 process.env.DAILY_GEN_QUOTA = "unlimited";
 process.env.RATE_LIMIT_PER_USER_MIN = "unlimited";
 process.env.MAX_ACTIVE_JOBS = "unlimited";
+// Route du webhook : clé et secret FICTIFS, jamais envoyés nulle part (signature calculée localement).
+process.env.STRIPE_SECRET_KEY = "sk_test_fictive_local_only";
+process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_fictive_local";
 
 let handleStripeEvent: typeof import("../lib/billing/stripe-events").handleStripeEvent;
 let credits: typeof import("../lib/billing/credits");
@@ -37,7 +40,7 @@ before(async () => {
 });
 
 after(() => {
-  for (const k of ["CORTEX_DATA_DIR", "BILLING_ENABLED", "SIGNUP_FREE_CREDITS", "DAILY_GEN_QUOTA", "RATE_LIMIT_PER_USER_MIN", "MAX_ACTIVE_JOBS"]) delete process.env[k];
+  for (const k of ["CORTEX_DATA_DIR", "BILLING_ENABLED", "SIGNUP_FREE_CREDITS", "DAILY_GEN_QUOTA", "RATE_LIMIT_PER_USER_MIN", "MAX_ACTIVE_JOBS", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]) delete process.env[k];
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -187,4 +190,67 @@ test("remboursement partiel d'une ANCIENNE facture consommée : prorata, absorb�
   assert.equal(await credits.getBalance("ancien3"), 5, "le reste (10) en dette : le reliquat est déjà absorbé");
   assert.equal(await credits.subscriptionCredits("ancien3"), 20, "mois en cours intact");
   assert.equal(await suspended("ancien3"), false, "une ancienne facture ne suspend jamais");
+});
+
+/** Lignes JSON du journal émises pendant `fn` (stdout et stderr). */
+async function captureLogs(fn: () => Promise<unknown>): Promise<Obj[]> {
+  const lines: string[] = [];
+  const [log, err] = [console.log, console.error];
+  console.log = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
+  console.error = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
+  try { await fn(); } finally { [console.log, console.error] = [log, err]; }
+  return lines.flatMap((l) => { try { return [JSON.parse(l) as Obj]; } catch { return []; } });
+}
+
+test("chaque décision de reprise est journalisée (ignoré, retiré, doublon, montants), sans donnée personnelle", async () => {
+  await authRun(`INSERT INTO users (id, email, name) VALUES (?,?,?)`, "journal", "journal@example.test", "Journal");
+  await oneMonth("journal");
+  const logs = await captureLogs(async () => {
+    await handleStripeEvent(benabensRefund("evt_journal_foreign", { id: "ch_journal_f", payment_intent: "pi_journal_foreign", customer: "cus_journal", billing_details: { email: "journal@example.test" } }), { lookup: noStripe });
+    await handleStripeEvent(invoiceRefund("evt_journal_partial", "pi_journal_m1", 745), { lookup: noStripe });
+    await handleStripeEvent(invoiceRefund("evt_journal_partial", "pi_journal_m1", 745), { lookup: noStripe }); // rejeu
+    await handleStripeEvent(invoiceRefund("evt_journal_same", "pi_journal_m1", 745), { lookup: noStripe }); // même cumul
+  });
+  const decisions = logs.filter((l) => l.evt === "stripe.reversal_decision");
+  const by = (pi: string, decision: string) => decisions.find((d) => d.paymentIntent === pi && d.decision === decision);
+  assert.ok(by("pi_journal_foreign", "ignored:foreign"), JSON.stringify(decisions));
+  const retired = by("pi_journal_m1", "invoice-reversed");
+  assert.ok(retired, JSON.stringify(decisions));
+  assert.deepEqual(
+    { amountCents: retired.amountCents, totalCents: retired.totalCents, retiredCenti: retired.retiredCenti, debtCenti: retired.debtCenti, suspended: retired.suspended, currentPeriod: retired.currentPeriod },
+    { amountCents: 745, totalCents: 1490, retiredCenti: 1000, debtCenti: 0, suspended: false, currentPeriod: true },
+  );
+  assert.ok(by("pi_journal_m1", "duplicate"), "rejeu du même événement journalisé");
+  assert.ok(by("pi_journal_m1", "reversal-duplicate"), "même cumul sous un autre événement journalisé");
+  const all = JSON.stringify(logs);
+  for (const personal of ["journal@example.test", "\"journal\"", "cus_journal", "Client Fictif"]) {
+    assert.ok(!all.includes(personal), `donnée personnelle dans le journal : ${personal}`);
+  }
+});
+
+test("route signée (signature de test) : remboursement partiel d'une facture connue → 200, prorata, pas de suspension ; signature fausse → 400", async () => {
+  const { NextRequest } = await import("next/server");
+  const { POST } = await import("../app/api/billing/webhook/route");
+  const Stripe = (await import("stripe")).default;
+  const stripe = new Stripe("sk_test_fictive_local_only");
+  const signed = (event: Obj, secret = "whsec_test_fictive_local") => {
+    const payload = JSON.stringify(event);
+    const sig = stripe.webhooks.generateTestHeaderString({ payload, secret });
+    return new NextRequest("http://localhost/api/billing/webhook", { method: "POST", body: payload, headers: { "stripe-signature": sig } });
+  };
+  // Facture connue chez nous : la charge s'y rattache par son payment_intent, sans rien demander à Stripe.
+  await oneMonth("route");
+  const forged = await POST(signed(invoiceRefund("evt_route_forged", "pi_route_m1", 1490), "whsec_autre_secret"));
+  assert.equal(forged.status, 400);
+  assert.equal(await credits.subscriptionCredits("route"), 20, "signature fausse : rien retiré");
+
+  const res = await POST(signed(invoiceRefund("evt_route_partial", "pi_route_m1", 298)));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.action, "invoice-reversed", JSON.stringify(body));
+  assert.equal(await credits.subscriptionCredits("route"), 16, "2,98 € sur 14,90 € = 1/5 → 4 crédits retirés");
+  assert.equal(await suspended("route"), false);
+  const again = await POST(signed(invoiceRefund("evt_route_partial", "pi_route_m1", 298)));
+  assert.equal((await again.json()).action, "duplicate");
+  assert.equal(await credits.subscriptionCredits("route"), 16);
 });
