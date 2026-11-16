@@ -13,7 +13,10 @@ import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
 import { FOLDER_EXTENSIONS, prepareCourseImport, type FolderImportRefusal } from "@/lib/folder-import";
 import { ingestProblems, type IngestProblem } from "@/lib/ingest-report";
 
-const ACCEPT = ".pdf,.html,.htm,.txt,.md,.zip";
+const ACCEPT = ".pdf,.docx,.pptx,.html,.htm,.txt,.md,.zip";
+/** Annales : Word et PowerPoint en plus (lus comme le reste du cours). Autres zones : formats de /api/sources/add. */
+const PAST_EXAM_FILES = /\.(pdf|docx|pptx|html?|txt|md)$/i;
+const OTHER_FILES = /\.(pdf|html?|txt|md)$/i;
 /** Un dossier de cours contient plus que des annales : slides, séries, images, notes. */
 const ACCEPT_FOLDER_ATTRIBUTE = [...FOLDER_EXTENSIONS.map((ext) => `.${ext}`), ".zip"].join(",");
 
@@ -108,13 +111,18 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
       await importFolder(files);
       return;
     }
-    const list = [...files].filter((f) => /\.(pdf|html?|txt|md)$/i.test(f.name));
+    // Un glisser-déposer ignore l'attribut accept : les fichiers écartés ici sont nommés, pas perdus.
+    const allowed = dropKind === "past_exam" ? PAST_EXAM_FILES : OTHER_FILES;
+    const list = [...files].filter((f) => allowed.test(f.name));
+    const refusedHere = [...files].filter((f) => !allowed.test(f.name)).map((f) => ({ name: f.name, reason: "format non pris en charge dans cette zone" }));
+    setFolderRefusals(refusedHere);
     if (!list.length) {
-      setError("Formats acceptés : PDF, HTML, TXT, MD.");
+      setError(dropKind === "past_exam" ? "Formats acceptés : PDF, Word, PowerPoint, HTML, TXT, MD." : "Formats acceptés : PDF, HTML, TXT, MD.");
       return;
     }
     setError(null);
     setUploadedMsg(null);
+    setUnreadFiles([]);
     setUploading(true);
     try {
       const fd = new FormData();
@@ -124,14 +132,22 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
         const res = await fetch(`/api/sources/add?course=${encodeURIComponent(courseId)}&category=${dropKind}`, { method: "POST", body: fd });
         const d = await res.json().catch(() => null);
         if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
-        setUploadedMsg(`${d.files} fichier${d.files > 1 ? "s" : ""} déposé${d.files > 1 ? "s" : ""}${d.skipped?.length ? ` (${d.skipped.length} refusé${d.skipped.length > 1 ? "s" : ""} : ${d.skipped[0]})` : ""} : indexation… Relance « Préparer le cours » pour relire le format.`);
+        // « nom : raison », un par fichier refusé (cf. /api/sources/add).
+        const refusedThere = ((d.skipped ?? []) as string[]).map((line) => {
+          const at = line.indexOf(" : ");
+          return at > 0 ? { name: line.slice(0, at), reason: line.slice(at + 3) } : { name: line, reason: "refusé" };
+        });
+        setFolderRefusals([...refusedHere, ...refusedThere]);
+        setUploadedMsg(`${d.files} fichier${d.files > 1 ? "s" : ""} déposé${d.files > 1 ? "s" : ""}${refusedThere.length ? `, ${refusedThere.length} refusé${refusedThere.length > 1 ? "s" : ""}` : ""} : indexation… Relance « Préparer le cours » pour relire le format.`);
         startJob(d.jobId, "ingest");
         return;
       }
       const res = await fetch(`/api/refs/upload?course=${encodeURIComponent(courseId)}`, { method: "POST", body: fd });
       const d = await res.json().catch(() => null);
+      const refusedThere = ((d?.skipped ?? []) as { file: string; reason: string }[]).map((s) => ({ name: s.file, reason: s.reason }));
+      setFolderRefusals([...refusedHere, ...refusedThere]);
       if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
-      setUploadedMsg(`${d.files.length} fichier${d.files.length > 1 ? "s" : ""} ingéré${d.files.length > 1 ? "s" : ""}.`);
+      setUploadedMsg(`${d.files.length} fichier${d.files.length > 1 ? "s" : ""} ingéré${d.files.length > 1 ? "s" : ""}${refusedThere.length ? `, ${refusedThere.length} écarté${refusedThere.length > 1 ? "s" : ""}` : ""}.`);
       onChanged();
       if (d.formatJobId) startJob(d.formatJobId, "format");
     } catch (e) {
@@ -269,7 +285,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           <p className="mt-0.5 text-[0.8rem] text-ink-3">ou clique pour parcourir</p>
         </div>
         <div className="flex flex-wrap justify-center gap-1.5">
-          {["PDF", "HTML", "TXT", "MD", "ZIP"].map((f) => (
+          {(dropKind === "past_exam" ? ["PDF", "Word", "PowerPoint", "HTML", "TXT", "MD", "ZIP"] : ["PDF", "HTML", "TXT", "MD", "ZIP"]).map((f) => (
             <span key={f} className="rounded-md border border-line bg-surface-1/60 px-2 py-0.5 font-data text-xs text-ink-3">{f}</span>
           ))}
         </div>

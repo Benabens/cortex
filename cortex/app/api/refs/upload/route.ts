@@ -8,6 +8,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { checkStorage, declaredBytes } from "@/lib/storage-quota";
 import { currentUser } from "@/db/context";
 import { storage as fileStore } from "@/lib/storage";
+import { unreadableDocument } from "@/lib/document-check";
+import { failureStatus, problemMessage } from "@/lib/ingest-report";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,8 +17,10 @@ export const dynamic = "force-dynamic";
 /**
  * Upload de finals récents : on les range dans data/<course>/refs/, on les ingère
  * (corpus + exam_refs), puis on relance la DÉTECTION DE FORMAT (job) → l'examen blanc se cale
- * sur ces finals. PDF/HTML/txt acceptés.
+ * sur ces finals. PDF, Word, PowerPoint, HTML et texte acceptés.
  */
+const REF_EXTENSIONS = /\.(pdf|html?|txt|md|docx|pptx)$/i;
+const REF_MAX_BYTES = 30 * 1024 * 1024;
 export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const { course, denied } = requireCourse(req);
   if (denied) return denied;
@@ -28,16 +32,32 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const files = form.getAll("file").filter((f): f is File => f instanceof File && f.size > 0);
   if (!files.length) return NextResponse.json({ error: "Aucun fichier." }, { status: 400 });
 
+  // Chaque fichier écarté est nommé avec sa raison : un dépôt mélangé ne perd rien en silence.
   const refsDir = coursePaths(course).refsDir;
   const saved: string[] = [];
+  const skipped: { file: string; reason: string }[] = [];
   for (const f of files) {
-    if (f.size > 30 * 1024 * 1024) continue;
     const safe = path.basename(f.name).replace(/[^a-zA-Z0-9._-]/g, "_");
-    if (!/\.(pdf|html?|txt|md)$/i.test(safe)) continue;
-    await fileStore().put(path.join(refsDir, safe), Buffer.from(await f.arrayBuffer()));
-    try { await ingestRefFile(`refs/${safe}`); saved.push(safe); } catch (e) { /* fichier illisible */ }
+    if (f.size > REF_MAX_BYTES) { skipped.push({ file: f.name, reason: "fichier trop volumineux (30 Mo maximum)." }); continue; }
+    if (!REF_EXTENSIONS.test(safe)) { skipped.push({ file: f.name, reason: "format non pris en charge pour une annale : PDF, Word, PowerPoint, HTML ou texte." }); continue; }
+    const data = Buffer.from(await f.arrayBuffer());
+    const problem = await unreadableDocument(data, path.extname(safe));
+    if (problem) { skipped.push({ file: f.name, reason: problem.message }); continue; }
+    const abs = path.join(refsDir, safe);
+    await fileStore().put(abs, data);
+    try {
+      await ingestRefFile(`refs/${safe}`);
+      saved.push(safe);
+    } catch (e) {
+      // Rangé mais illisible pour l'ingestion : retiré, sinon il resterait dans les annales sans y figurer.
+      await fileStore().remove(abs).catch(() => {});
+      skipped.push({ file: f.name, reason: problemMessage(failureStatus(e)) });
+    }
   }
-  if (!saved.length) return NextResponse.json({ error: "Aucun fichier exploitable (PDF/HTML/txt)." }, { status: 400 });
+  if (!saved.length) {
+    const first = skipped[0];
+    return NextResponse.json({ error: first ? `${first.file} : ${first.reason}` : "Aucun fichier exploitable.", skipped }, { status: 400 });
+  }
 
   // relance la détection de format en arrière-plan (se cale sur les annales, dont les nouvelles).
   // Ce job fait de la vision LLM → quota + crédits ; si le gate
@@ -46,7 +66,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   let formatSkipped: string | undefined;
   if (process.env.E2E_TEST_AUTH === "1" && process.env.E2E_TEST_RUN === "1") {
     formatSkipped = "Détection couverte par la préparation hermétique E2E";
-    return NextResponse.json({ ok: true, files: saved, formatSkipped });
+    return NextResponse.json({ ok: true, files: saved, skipped, formatSkipped });
   }
   const { jobSpec, launchGate } = await import("@/lib/billing/limits");
   const { costForJob } = await import("@/lib/jobs");
@@ -63,5 +83,5 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
       else throw e;
     }
   }
-  return NextResponse.json({ ok: true, files: saved, formatJobId, formatSkipped });
+  return NextResponse.json({ ok: true, files: saved, skipped, formatJobId, formatSkipped });
 })
