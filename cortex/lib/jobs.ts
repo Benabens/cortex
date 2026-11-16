@@ -537,10 +537,27 @@ export async function cancelJob(id: number): Promise<Job | null> {
   const job = await getJob(id);
   if (!job) return null;
   if (["done", "error", "canceled"].includes(job.status)) return job;
+  // Un QCM déjà rendu visible est une livraison, même si les ouvertes, les audits tardifs ou le
+  // PDF travaillent encore. L'annulation conserve cet acquis et rend seulement la part manquante.
+  if (job.type === "qcm" && job.resultId) {
+    const target = (() => { try { return JSON.parse(job.target ?? "{}"); } catch { return {}; } })() as { count?: number; openCount?: number };
+    const requested = Math.max(0, Number(target.count ?? 20)) + Math.max(0, Number(target.openCount ?? 3));
+    const qcm = (await q.get<{ n: number }>(`SELECT count(*) n FROM qcm_items WHERE exam_id = ?`, job.resultId))?.n ?? 0;
+    const open = (await q.get<{ n: number }>(`SELECT count(*) n FROM exam_questions WHERE exam_id = ? AND source_inspiration = 'qcm-open'`, job.resultId))?.n ?? 0;
+    const notice = await settleShortfall(job, qcm + open, requested);
+    await setJob(id, { status: "done", progress: 100, currentStep: notice ? `Livraison partielle ⚠ ${notice}` : "Terminé ✓" });
+    await logJob(id, `Échéance atteinte : ${qcm + open}/${requested} questions déjà validées conservées.`);
+    if (job.pid) killProcessGroup(job.pid, { expectCommand: /run-job|tsx|node/ });
+    return await getJob(id);
+  }
   await setJob(id, { status: "canceled", currentStep: "Annulé" });
   // Annulation AVANT tout travail facturé → crédits rendus. Au-delà, le
   // fournisseur a déjà été payé : pas de remboursement (cf. constante).
-  if (job.progress <= CANCEL_REFUND_MAX_PROGRESS) {
+  if (job.type === "qcm") {
+    // Zéro livraison : remboursement total par le grand livre interne, même si nos appels ont
+    // coûté. L'étudiant ne paie jamais un artefact absent.
+    await refundJobCredits(job, "failed");
+  } else if (job.progress <= CANCEL_REFUND_MAX_PROGRESS) {
     await refundJobCredits(job, "canceled");
   } else {
     await logJob(id, `Annulé à ${job.progress}%, la génération était déjà lancée, les crédits ne sont pas rendus.`);
