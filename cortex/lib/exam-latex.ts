@@ -8,7 +8,7 @@ import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
 import { examsDir } from "@/lib/paths";
 import { formatContextFor } from "@/lib/exam-format";
-import { courseTemplate, coverWords, durationText, examTemplate, localDate, neutralChrome, neutralCoverTex, pointsText } from "@/lib/exam-template";
+import { courseTemplate, courseWords, coverWords, durationText, examTemplate, localDate, neutralChrome, neutralCoverTex, neutralDuration, pointsText } from "@/lib/exam-template";
 import { qrText, texEscape } from "@/lib/tex-escape";
 
 const LATEX_DIR = path.join(process.cwd(), "latex");
@@ -94,7 +94,7 @@ function genericCoverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string):
   const uniLines = c.universityLines.map(texEscape).join(String.raw`\\ `);
   const profsTex = c.profs.map(texEscape).join(", ");
   const facultyLine = [c.faculty ? String.raw`\textbf{${texEscape(c.faculty)}}` : "", `${examCodeTex} ${texEscape(c.examName)}`, profsTex].filter(Boolean).join(String.raw`\\ `);
-  const logoTex = c.university === "EPFL" ? String.raw`\epfllogo[30]` : "";
+  const logoTex = examTemplate(c) === "epfl" ? String.raw`\epfllogo[30]` : "";
   return [
     String.raw`\thispagestyle{empty}`,
     String.raw`\noindent\begin{minipage}[t]{0.30\textwidth}\vspace{0pt}${logoTex}\end{minipage}\hfill`,
@@ -127,14 +127,14 @@ function neutralWrittenCoverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: s
   const f = formatContextFor(currentCourse());
   const w = coverWords(f.language);
   return neutralCoverTex({
-    course: c, w, dateTex: localDate(dateLabel, w), durationMin: f.durationMin ?? spec.duration_min ?? c.durationMin, totalPts: total,
+    course: c, w, dateTex: localDate(dateLabel, w), durationMin: neutralDuration(spec.duration_min), totalPts: total,
     instructions: [w.exercises(qs.length, total), ...(f.documents ? [w.documents[f.documents]] : []), w.onSheet, w.readCarefully],
   });
 }
 
 function coverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string): string {
   if (currentCourse() !== DEFAULT_COURSE) {
-    return examTemplate(getCourse(currentCourse())) === "epfl" ? genericCoverTex(spec, qs, dateLabel) : neutralWrittenCoverTex(spec, qs, dateLabel);
+    return courseTemplate() === "epfl" ? genericCoverTex(spec, qs, dateLabel) : neutralWrittenCoverTex(spec, qs, dateLabel);
   }
   const total = qs.reduce((s, q) => s + qPoints(q), 0);
   const dur = spec.duration_min ?? 180;
@@ -265,8 +265,8 @@ export function renderExamTex(spec: ExamSpec, dateLabel: string, includeSolution
     .join("\n\n");
 
   // Hors EPFL, les titres du corrigé suivent la langue de l'examen ; le texte de l'EPFL reste tel quel.
-  const neutral = examTemplate(getCourse(currentCourse())) === "neutral";
-  const w = coverWords(formatContextFor(currentCourse()).language);
+  const neutral = courseTemplate() === "neutral";
+  const w = courseWords();
   const solutions = [
     String.raw`\clearpage{\Large\textbf{${neutral ? w.solutions : "Corrigé"}}}\par\vspace{6pt}\hrule\medskip`,
     ...qs.map((q, i) =>
@@ -283,7 +283,7 @@ export function renderExamTex(spec: ExamSpec, dateLabel: string, includeSolution
     preamble,
     currentCourse() === DEFAULT_COURSE ? "" : genericPreamble(),
     courseHeaderOverride(),
-    String.raw`\newcommand{\FOOTDATE}{${currentCourse() === DEFAULT_COURSE ? footDate(dateLabel) : localDate(dateLabel, coverWords(formatContextFor(currentCourse()).language))}}`,
+    String.raw`\newcommand{\FOOTDATE}{${currentCourse() === DEFAULT_COURSE ? footDate(dateLabel) : localDate(dateLabel, courseWords())}}`,
     String.raw`\begin{document}`,
     coverTex(spec, qs, dateLabel),
     body,
