@@ -4,7 +4,7 @@ import { programOverview, type ProgramOverview } from "@/lib/program";
 import { scheduleStats } from "@/lib/schedule";
 import { clip, daysUntil } from "../content";
 import { courseArg, courseRef, courseRefOf } from "../schemas";
-import { defineTool } from "../tool";
+import { defineTool, READ_ONLY_HINTS } from "../tool";
 
 const topicOut = z.object({
   id: z.number(),
@@ -59,6 +59,8 @@ export default defineTool({
     "topics due for review, the course chapters, and the prioritised list of what to work on next. " +
     "Use it for \"where am I in my programme?\", \"what should I revise next?\" or before choosing a chapter for a mock exam. Read-only and free.",
   kind: "read",
+  annotations: READ_ONLY_HINTS,
+  userSummary: "Lit où tu en es dans le programme et ce qu’il faut réviser ensuite.",
   input: z.object({ course: courseArg }),
   output,
   async run({ course }, ctx) {

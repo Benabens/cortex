@@ -64,7 +64,7 @@ type Billing = {
 
 const nf = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 });
 const credits = (n: number) => `${nf.format(n)} crédit${Math.abs(n) >= 2 ? "s" : ""}`;
-/** Montant en français : « 14,90 € », « 119 € » (pas de décimales inutiles), « 9 € ». */
+/** Montant en français : « 14,90 € », « 149 € » (pas de décimales inutiles), « 9 € ». */
 export const money = (amount: number, currency: string) => {
   const cents = Math.round(amount * 100) % 100 !== 0;
   return new Intl.NumberFormat("fr-FR", { style: "currency", currency, minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: 2 }).format(amount);

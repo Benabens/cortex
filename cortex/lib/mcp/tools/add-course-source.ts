@@ -26,7 +26,9 @@ export default defineTool({
     "or exam_info (exam instructions: syllabus or course page describing the exam, e.g. \"MCQ, 45 min\"); when omitted it is guessed from the file name. " +
     "The file is only stored: call prepare_course once all materials are added.",
   kind: "write",
-  openWorld: true,
+  // Ajout pur (jamais d'écrasement : « -2 », « -3 »…) ; lit une URL hors de Cortex.
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  userSummary: "Ajoute un support à un cours (adresse web ou texte collé), gratuitement.",
   input: z.object({
     course: courseArg,
     url: z.string().url().max(2000).optional().describe("Public https URL of a PDF, web page or text file. Give either url or text."),

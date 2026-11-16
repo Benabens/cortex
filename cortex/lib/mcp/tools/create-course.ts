@@ -23,6 +23,9 @@ export default defineTool({
     "Pass exam_format when the student knows how the exam looks (type, number of questions, duration), especially without past exams: " +
     "Cortex never invents a format. Then add its materials with add_course_source and build it with prepare_course.",
   kind: "write",
+  // Ajout pur : un code déjà pris est refusé, rien n'est remplacé.
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  userSummary: "Crée un nouveau cours dans ton compte, gratuitement.",
   input: z.object({
     name: z.string().min(2).max(80).describe("Course name, e.g. \"Linear algebra\"."),
     code: z.string().min(1).max(24).optional().describe("Exam / course code, e.g. \"MATH-111\"."),

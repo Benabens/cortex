@@ -47,17 +47,17 @@ test("attribution d'un mois : 20 crédits d'abonnement, solde 20, poche achetée
   assert.equal(await credits.purchasedBalanceCenti("pro"), 0);
 });
 
-test("débit abonnement d'abord : un examen consomme 2 crédits d'abonnement, la poche achetée reste intacte", async () => {
+test("débit abonnement d'abord : un examen consomme 5 crédits d'abonnement, la poche achetée reste intacte", async () => {
   const credits = await import("../lib/billing/credits");
   const { reserveGeneration } = await import("../lib/billing/reserve");
   const { authGet } = await import("../db/auth-store");
   await credits.addTransaction("pro", 1000, "achat", "stripe:cs:pro_pack_1");
   const r = await inMl("pro", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:pro:ml:a" }));
   assert.equal(r.ok, true);
-  assert.equal(await credits.subscriptionCreditsCenti("pro"), 1800);
+  assert.equal(await credits.subscriptionCreditsCenti("pro"), 1500);
   assert.equal(await credits.purchasedBalanceCenti("pro"), 1000);
   const row = await authGet<{ delta: number; sub_amount: number }>(`SELECT delta, sub_amount FROM credit_transactions WHERE ref = ?`, "job:pro:ml:a");
-  assert.deepEqual([Number(row!.delta), Number(row!.sub_amount)], [0, 200], "la ligne du ledger mémorise la part abonnement");
+  assert.deepEqual([Number(row!.delta), Number(row!.sub_amount)], [0, 500], "la ligne du ledger mémorise la part abonnement");
 });
 
 test("débit mixte : le reste de l'abonnement puis les crédits achetés, dans la même transaction", async () => {
@@ -68,15 +68,15 @@ test("débit mixte : le reste de l'abonnement puis les crédits achetés, dans l
   const r = await inMl("pro", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:pro:ml:b" }));
   assert.equal(r.ok, true);
   assert.equal(await credits.subscriptionCreditsCenti("pro"), 0);
-  assert.equal(await credits.purchasedBalanceCenti("pro"), 900); // 1000 − (200 − 100)
+  assert.equal(await credits.purchasedBalanceCenti("pro"), 600); // 1000 − (500 − 100)
 });
 
-test("insuffisant : 1 crédit d'abo + 0,5 acheté < examen à 2 → 402, aucune poche touchée", async () => {
+test("insuffisant : 1 crédit d'abo + 0,5 acheté < examen à 5 → 402, aucune poche touchée", async () => {
   const credits = await import("../lib/billing/credits");
   const { reserveGeneration } = await import("../lib/billing/reserve");
   const { authRun } = await import("../db/auth-store");
   await authRun(`UPDATE subscriptions SET remaining = 100 WHERE user_id = ?`, "pro");
-  await credits.addTransaction("pro", -850, "test", "test:pro:down"); // achetés : 50
+  await credits.addTransaction("pro", -550, "test", "test:pro:down"); // achetés : 50
   const r = await inMl("pro", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:pro:ml:c" }));
   assert.equal(r.ok, false);
   assert.equal((r as { status: number }).status, 402);
@@ -88,15 +88,15 @@ test("insuffisant : 1 crédit d'abo + 0,5 acheté < examen à 2 → 402, aucune 
 test("remboursement dans la poche d'origine : même mois → l'abonnement récupère sa part ; mois suivant → part d'abo perdue", async () => {
   const credits = await import("../lib/billing/credits");
   const { authRun } = await import("../db/auth-store");
-  // job:pro:ml:b a débité 100 d'abo + 100 achetés.
+  // job:pro:ml:b a débité 100 d'abo + 400 achetés.
   await credits.refundGeneration("exam", "job:pro:ml:b", "pro");
   assert.equal(await credits.subscriptionCreditsCenti("pro"), 200);
-  assert.equal(await credits.purchasedBalanceCenti("pro"), 150);
-  // job:pro:ml:a (200 d'abo) : on fait comme si le mois avait tourné depuis le débit.
+  assert.equal(await credits.purchasedBalanceCenti("pro"), 450);
+  // job:pro:ml:a (500 d'abo) : on fait comme si le mois avait tourné depuis le débit.
   await authRun(`UPDATE credit_transactions SET created_at = ? WHERE ref = ?`, "2001-01-15 10:00:00", "job:pro:ml:a");
   await credits.refundGeneration("exam", "job:pro:ml:a", "pro");
   assert.equal(await credits.subscriptionCreditsCenti("pro"), 200, "la part d'abonnement d'un autre mois n'est pas reportée");
-  assert.equal(await credits.purchasedBalanceCenti("pro"), 150, "rien à rendre côté achetés");
+  assert.equal(await credits.purchasedBalanceCenti("pro"), 450, "rien à rendre côté achetés");
   // idempotent
   await credits.refundGeneration("exam", "job:pro:ml:b", "pro");
   assert.equal(await credits.subscriptionCreditsCenti("pro"), 200);
@@ -112,7 +112,7 @@ test("recharge de FENÊTRE dans la réservation (annuel : 20 par fenêtre mensue
   await authRun(`UPDATE subscriptions SET remaining = 300, window_anchor = ?, month_anchor = ? WHERE user_id = ?`, start, start.slice(0, 7), "yearly");
   const r = await inMl("yearly", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:yearly:ml:a" }));
   assert.equal(r.ok, true);
-  assert.equal(await credits.subscriptionCreditsCenti("yearly"), 1800, "20 rechargés puis 2 consommés (le reliquat de 3 est perdu)");
+  assert.equal(await credits.subscriptionCreditsCenti("yearly"), 1500, "20 rechargés puis 5 consommés (le reliquat de 3 est perdu)");
   const { authGet } = await import("../db/auth-store");
   const { addMonthsClamped } = await import("../lib/billing/subscription-windows");
   const s = await authGet<{ window_anchor: string }>(`SELECT window_anchor FROM subscriptions WHERE user_id = ?`, "yearly");
@@ -130,15 +130,15 @@ test("période terminée ou résiliée : plus de crédits d'abonnement, les ache
   assert.equal(await credits.subscriptionCreditsCenti("yearly"), 0);
   await credits.setSubscriptionStatus({ userId: "pro", status: "canceled", clearRemaining: true });
   assert.equal(await credits.subscriptionCreditsCenti("pro"), 0);
-  assert.equal(await credits.purchasedBalanceCenti("pro"), 150);
+  assert.equal(await credits.purchasedBalanceCenti("pro"), 450);
 });
 
-test("concurrence : 2 crédits d'abonnement, 0 acheté, 8 réservations parallèles → exactement 1", async () => {
+test("concurrence : 5 crédits d'abonnement, 0 acheté, 8 réservations parallèles → exactement 1", async () => {
   const credits = await import("../lib/billing/credits");
   const { reserveGeneration } = await import("../lib/billing/reserve");
   await credits.grantSubscriptionMonth({ userId: "race", customerId: "cus_r", subscriptionId: "sub_r", plan: "cortex_pro_monthly", periodEnd: future(30) });
   const { authRun } = await import("../db/auth-store");
-  await authRun(`UPDATE subscriptions SET remaining = 200 WHERE user_id = ?`, "race"); // de quoi payer UN examen
+  await authRun(`UPDATE subscriptions SET remaining = 500 WHERE user_id = ?`, "race"); // de quoi payer UN examen
   const results = await Promise.all(Array.from({ length: 8 }, (_, i) =>
     inMl("race", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: `job:race:ml:${i}` }))
   ));

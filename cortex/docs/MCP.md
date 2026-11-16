@@ -1,8 +1,9 @@
 # Serveur MCP de Cortex
 
-Le connecteur qui permet à n'importe quel compte Cortex de brancher Claude (claude.ai « Connecteurs
-personnalisés », Claude Desktop, Claude Code) sur ses propres données, avec l'URL
-`https://app.cortexexam.com/mcp`. On se connecte avec son compte Cortex habituel (Google via Auth.js),
+Le connecteur qui permet à n'importe quel compte Cortex de brancher son assistant (Claude, ChatGPT,
+Claude Code, Cursor, VS Code, Codex, Gemini CLI, tout client MCP distant) sur ses propres données, avec
+l'URL `https://app.cortexexam.com/mcp`. Marche à suivre par client dans l'app : `/compte/assistants`
+(section 8). On se connecte avec son compte Cortex habituel (Google via Auth.js),
 on accepte un écran de consentement, et c'est tout : aucune clé à copier.
 
 Rédigé le 26/10/2026. Spec lue ce jour-là sur modelcontextprotocol.io.
@@ -80,10 +81,23 @@ Noms et descriptions en anglais (lus par le modèle) ; les réponses gardent la 
 Tous les outils prennent un `course` facultatif : identifiant, code (« CS-233 ») ou nom du cours ;
 absent, le seul cours du compte est pris, sinon l'outil liste les cours et demande lequel.
 
-Annotations : lecture = `readOnlyHint: true, destructiveHint: false, idempotentHint: true,
-openWorldHint: false` ; génération et ajout = `readOnlyHint: false, destructiveHint: false,
-idempotentHint: false`, `openWorldHint: true` pour le seul `add_course_source` (il lit une URL fournie),
-`false` ailleurs. Seuls les outils d'ajout écrivent (créer un cours, y ranger un fichier, lancer sa
+Annotations (16/11/2026) : **les quatre indications sont explicites sur chaque outil** (`annotations`
+de `ToolDef`, obligatoire ; le registre refuse de démarrer sans elles). Les annuaires l'exigent
+(Claude : `title` + `readOnlyHint`/`destructiveHint` ; ChatGPT : les trois booléens), et les valeurs par
+défaut de la spec (destructif, monde ouvert) seraient fausses. Règles, vérifiées par
+`tests/mcp-identity.test.ts` :
+
+| Outils | readOnly | destructive | idempotent | openWorld | Pourquoi |
+|---|---|---|---|---|---|
+| lecture (`list_courses`, `get_*`, `search_course_materials`) | true | false | true | false | ne change rien, ni crédits ni quota |
+| payants (`generate_mock_exam`, `generate_drill`, `check_answer`, `prepare_course`) | false | **true** | false | false | dépense de crédits irréversible (ChatGPT : « effets potentiellement irréversibles ») |
+| `set_exam_format` | false | **true** | true | false | remplace ou efface le format déclaré |
+| `report_question` | false | **true** | false | false | retire la question des révisions de l'élève |
+| `create_course` | false | false | false | false | ajout pur (code déjà pris refusé) |
+| `add_course_source` | false | false | false | **true** | ajout pur (jamais d'écrasement) ; lit une URL fournie |
+
+Chaque outil porte aussi un `userSummary` (une phrase en français) affiché par la page Assistants.
+Seuls les outils d'ajout écrivent (créer un cours, y ranger un fichier, lancer sa
 préparation) ; aucun outil ne supprime un cours ou un document, ni ne touche au paiement.
 
 Schémas de sortie : chaque `outputSchema` est publié **tolérant aux champs en plus** (pas de
@@ -111,9 +125,9 @@ un objet imbriqué existant ; `tests/mcp-tools.test.ts` montre qu'un ajout dans 
 
 | Outil | Entrée | Coût | Sortie |
 |---|---|---|---|
-| `generate_mock_exam` | `course?`, `chapter?` (numéro ou titre du plan), `focus?` (≤ 400, un **thème**, jamais un format), `format?` (`written` / `mcq`, pour cet examen seulement), `exercise_count?` (écrit 1-12, QCM 1-40), `confirmation_token?` | `exam` = 2 crédits, +1 par tranche de 4 exercices au-delà de 8 ; QCM au tarif de `qcm` (`costForJob`) ; 1 génération du quota du jour (`DAILY_GEN_QUOTA`) | `job_id` → suivre avec `get_job_status` (10-20 min ; un QCM terminé y rend ses questions et options). Le format vient de `lib/exam-format` : annales > format déclaré (`set_exam_format`, `create_course`) > questions d'exemple officielles > consignes d'examen > **inconnu → refus `format_required` avant tout devis**, avec ce qu'il faut demander. `format` vaut déclaration pour cet examen, sauf face à des annales (leur format fait la règle, `note` le dit). Le focus ne change jamais le format (« ~20 QCM » dans le focus ne fait pas un QCM). `note` dit le format suivi et d'où il vient (pas de nouveau champ de sortie : un client en cache le rejetterait) |
-| `generate_drill` | `course?`, `concept?` (≤ 500 ; défaut : le point faible le plus grave), `confirmation_token?` | `assist` = 0,1 crédit ; 1 assistance du quota du jour (`DAILY_ASSIST_QUOTA`) | une question type examen, 5 indices progressifs, corrigé |
-| `check_answer` | `course?`, `statement` (≤ 8000), `answer` (≤ 8000), `confirmation_token?` | `assist` = 0,1 crédit ; 1 assistance du quota du jour | verdict, barème critère par critère, score, retour, solution |
+| `generate_mock_exam` | `course?`, `chapter?` (numéro ou titre du plan), `focus?` (≤ 400, un **thème**, jamais un format), `format?` (`written` / `mcq`, pour cet examen seulement), `exercise_count?` (écrit 1-12, QCM 1-40), `confirmation_token?` | `exam` = 5 crédits, +1 par tranche de 4 exercices au-delà de 8 ; QCM au tarif de `qcm` (`costForJob`) ; 1 génération du quota du jour (`DAILY_GEN_QUOTA`) | `job_id` → suivre avec `get_job_status` (10-20 min ; un QCM terminé y rend ses questions et options). Le format vient de `lib/exam-format` : annales > format déclaré (`set_exam_format`, `create_course`) > questions d'exemple officielles > consignes d'examen > **inconnu → refus `format_required` avant tout devis**, avec ce qu'il faut demander. `format` vaut déclaration pour cet examen, sauf face à des annales (leur format fait la règle, `note` le dit). Le focus ne change jamais le format (« ~20 QCM » dans le focus ne fait pas un QCM). `note` dit le format suivi et d'où il vient (pas de nouveau champ de sortie : un client en cache le rejetterait) |
+| `generate_drill` | `course?`, `concept?` (≤ 500 ; défaut : le point faible le plus grave), `confirmation_token?` | `assist` = 0,3 crédit ; 1 assistance du quota du jour (`DAILY_ASSIST_QUOTA`) | une question type examen, 5 indices progressifs, corrigé |
+| `check_answer` | `course?`, `statement` (≤ 8000), `answer` (≤ 8000), `confirmation_token?` | `assist` = 0,3 crédit ; 1 assistance du quota du jour | verdict, barème critère par critère, score, retour, solution |
 
 Les coûts viennent des mêmes fonctions que l'app (`creditCost`, `costForJob`, `CREDITS_COST_JSON`) :
 changer un tarif change le devis MCP. Un examen déjà en cours est réutilisé sans devis ni débit, comme
@@ -293,6 +307,16 @@ comptes, quota, devis/confirmation, jeton révoqué.
 - `tests/owner-mode.test.ts` — mode propriétaire côté facturation : réservation et pré-contrôles levés
   pour lui seul ; plafonds de dépense (par compte, global) maintenus ; limites affichées dans Mon compte ;
   autres comptes inchangés ; opt-in.
+- `tests/mcp-identity.test.ts` — `server.json` identique à `lib/mcp/identity` et conforme au schéma du
+  registre (copié dans `tests/fixtures/mcp-schemas`) ; carte du serveur conforme au schéma v1 de
+  SEP-2127, servie sans session aux deux adresses, 404 connecteur coupé ; icônes présentes aux tailles
+  annoncées, publiques au proxy, cache long ; annotations complètes et cohérentes (un outil sans
+  indication fait échouer le registre) ; descriptions sans consigne cachée ; instructions génériques.
+- `tests/mcp-oauth-clients.test.ts` — document CIMD réel de ChatGPT accepté, jeton par assertion JWT
+  seule, retours ChatGPT stable et par connecteur reconnus, contournements refusés (sous-domaine,
+  `@`, port, http, chemin), nom « ChatGPT » imité signalé ; DCR de Cursor (`cursor://` écarté) ;
+  métadonnées doc/politique ; origines admises ; aucune marque en dur au consentement.
+- `tests/mcp-install-guide.test.ts` — liens Cursor et VS Code décodés, commandes exactes, consigne.
 - Vérification réelle : inspecteur MCP (`npx @modelcontextprotocol/inspector`) contre le serveur local
   et `claude mcp add --transport http` dans un Claude Code de test (compte rendu dans la PR).
 
@@ -309,3 +333,57 @@ répond `403 insufficient_scope`. Un client qui gère ce 403 relance la connexio
 dans claude.ai → Paramètres → Connecteurs → Cortex → **Déconnecter**, puis **Connecter**, et laisser
 cochée « Ajouter des cours et des supports ». Vaut pour chaque utilisateur déjà connecté. Les outils
 apparaissent ensuite dans une nouvelle conversation.
+
+## 8. Distribution : identité, découverte, annuaires (16/11/2026)
+
+**Identité** (`lib/mcp/identity.ts`, source unique) : `serverInfo` = `name: "cortex"` (stable : des
+clients en font une clé), `title: "Cortex"`, `version` (1.1.0, celle de `server.json`), `description`
+(≤ 100 caractères), `websiteUrl: https://cortexexam.com/mcp` (page publique de la landing),
+`icons` absolues (PNG 512, 128, 64 puis SVG, `public/mcp-icon*` : tuile sombre du kit bleu, lisible
+sur fond clair comme sombre, cache 30 jours). Les instructions du serveur ne nomment aucun client.
+
+**Carte du serveur** (SEP-2127, statut Final) : `GET /mcp/server-card` (emplacement recommandé) et
+`/.well-known/mcp/server-card.json` (chemin des outils de découverte antérieurs), même document, sans
+session, CORS `*`, cache 1 h. Elle ne liste pas les outils (le SEP les exclut : `tools/list` après
+connexion) ; `_meta["com.cortexexam/connection"]` dit l'essentiel avant connexion (OAuth, CIMD/DCR,
+aucune clé, documentation, confidentialité). **Choix : elle suit `MCP_ENABLED`** (404 sinon), comme
+les métadonnées OAuth : une carte qui annonce un `/mcp` répondant 404 contredirait l'exigence de
+cohérence du SEP. Publique dès que le connecteur l'est.
+
+**Clients autres que Claude** (relevé le 16/11/2026) :
+- ChatGPT, CIMD `https://chatgpt.com/oauth/client.json` : son document déclare `private_key_jwt` comme
+  méthode préférée et `none` dans `token_endpoint_auth_methods_supported`. Il était **refusé** (on
+  n'acceptait que `none`) : un document qui liste `none` est maintenant accepté comme client public, et
+  une assertion JWT jointe au point de jeton sert seulement à lire le `client_id` (jamais vérifiée,
+  jamais suffisante : PKCE et le code lié au client et au retour font foi).
+- ChatGPT, retours : `https://chatgpt.com/connector_platform_oauth_redirect` (stable, utilisé parce que
+  l'AS annonce `authorization_response_iss_parameter_supported` et renvoie `iss`) ou
+  `/connector/oauth/{id}` en DCR : tous deux https, donc acceptés par la règle générale.
+- Cursor (DCR) : enregistre `http://localhost:8787/callback` ET `cursor://…` ; **tout le lot était refusé**.
+  Les URL inacceptables sont désormais écartées (RFC 7591 §3.2.1), la réponse ne rend que les retenues ;
+  aucune URL acceptable → refus comme avant.
+- Consentement : nom affiché d'après l'identité vérifiable (`lib/oauth/known-clients.ts` : client_id CIMD
+  publié par l'éditeur, ou URL de retour https exacte), jamais d'après le nom déclaré ; un nom qui imite
+  Claude ou ChatGPT sans cette identité est signalé. Plus aucune marque écrite en dur dans la page.
+- Origines admises (CORS, garde anti-rebinding) : la même table ajoute `chatgpt.com`, `vscode.dev`,
+  `insiders.vscode.dev`. Les clients serveur ou bureau (Claude Code, Codex, Gemini CLI, Cursor)
+  n'envoient pas d'Origin.
+- Métadonnées : `service_documentation`, `op_policy_uri`, `op_tos_uri` (RFC 8414) et
+  `resource_documentation`, `resource_policy_uri`, `resource_tos_uri` (RFC 9728).
+- **Aucun lien d'achat vers l'assistant** : ChatGPT interdit la vente de crédits et les liens vers un
+  paiement. `errorResult` passe tout message d'erreur d'outil par `assistantSafeMessage`
+  (`lib/mcp/tool.ts`), qui retire « Acheter : <lien> » des refus de l'app (solde insuffisant) ; l'app web
+  garde son lien. Un outil ne doit jamais renvoyer d'URL de paiement, dans une erreur comme dans un résultat.
+
+**Page `/compte/assistants`** : adresse + copie, marche à suivre par client (`lib/mcp/install-guide.ts`,
+sources en tête de fichier), message à coller dans n'importe quel assistant, outils lus dans le registre
+(payants marqués). Accès : carte en haut de Mon compte, lien dans « Applications connectées », lien sur
+l'écran de consentement.
+
+**Sonde** : `npx tsx scripts/oauth-probe.ts --base <url> [--preset chatgpt,cursor,…] [--no-register]`
+rejoue découverte, carte, icônes, CORS et enregistrement de chaque client sans compte ni jeton. Seule
+écriture : un client DCR « cortex-probe … » jamais autorisé, purgé en 7 jours.
+
+**Annuaires** : dossiers prêts à copier dans `docs/annuaires/` (`annuaire-claude.md`,
+`annuaire-chatgpt.md`, `registre-mcp.md`). `server.json` (racine de `cortex/`) se régénère par
+`npx tsx -e 'import("./lib/mcp/identity").then(m => console.log(JSON.stringify(m.registryServerJson(), null, 2)))' > server.json`.

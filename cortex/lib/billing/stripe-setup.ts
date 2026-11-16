@@ -33,7 +33,7 @@ const PRODUCTS: Record<ProductKey, { id: string; name: string; description: stri
 /** Les trois prix de l'offre, en centimes d'euro. Les lookup_keys sont celles que lit l'app (PLANS). */
 export const OFFERS: ReadonlyArray<{ lookupKey: string; product: ProductKey; unitAmount: number; interval: "month" | "year" | null; nickname: string }> = [
   { lookupKey: PLANS.pro_monthly.lookupKey, product: "pro", unitAmount: 1490, interval: "month", nickname: "Pro mensuel 14,90 €" },
-  { lookupKey: PLANS.pro_yearly.lookupKey, product: "pro", unitAmount: 11900, interval: "year", nickname: "Pro annuel 119 €" },
+  { lookupKey: PLANS.pro_yearly.lookupKey, product: "pro", unitAmount: 14900, interval: "year", nickname: "Pro annuel 149 €" },
   { lookupKey: PLANS.credits_10.lookupKey, product: "pack", unitAmount: 900, interval: null, nickname: "Pack de 10 crédits 9 €" },
 ];
 
