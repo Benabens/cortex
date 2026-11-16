@@ -116,7 +116,11 @@ export type MockExamPlan =
   | { generator: "exercises"; style: ExerciseStyle; exerciseCount: number | null }
   | { generator: "none"; reason: string };
 
-const QCM_DEFAULT = 20;
+export const QCM_DEFAULT = 20;
+/**
+ * Borne du nombre de QCM d'un examen blanc, annale comprise (une annale de 60 QCM en donne 40) :
+ * au-delà, un job dépasse l'échéance du worker (QCM_MAX_RUNTIME_MIN, 75 min) et son coût le prix.
+ */
 export const QCM_MAX = 40;
 const MIXED_OPEN_DEFAULT = 2;
 export const EXERCISES_MAX = 12;
@@ -407,8 +411,8 @@ function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Disc
   const types = p.question_types ?? [];
   const qcmShare = types.filter((t) => t.type === "scq" || t.type === "mcq").reduce((s, t) => s + (t.approx_count || 0), 0);
   const documents = (DOCUMENT_RULES as readonly string[]).includes(p.documents ?? "") ? (p.documents as DocumentRule) : null;
-  // Durée de l'annale, sinon celle déclarée ; une durée illisible (0) n'est jamais imprimée (audit 3, P1-3).
-  const base = { basis: "annales" as const, durationMin: p.duration_min || declared?.durationMin || null, language, discipline, summary: p.format_summary || "", evidence: [], documents, ...(positive(p.total_points) ? { totalPoints: p.total_points } : {}) };
+  // Durée déclarée (l'épreuve de cette année), sinon celle de l'annale ; illisible (0) = inconnue (audit 3, P1-3).
+  const base = { basis: "annales" as const, durationMin: declared?.durationMin || p.duration_min || null, language, discipline, summary: p.format_summary || "", evidence: [], documents, ...(positive(p.total_points) ? { totalPoints: p.total_points } : {}) };
   const composite = blocksOf(p);
   if (composite) {
     const { count, ...blocks } = composite;
@@ -418,8 +422,10 @@ function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Disc
   // Le nombre de l'annale, borné à QCM_MAX seulement (audit 3, P0-4 : une annale de 40 QCM
   // sortait en 20, un quiz de 5 en 8) ; inconnu → le défaut du plan.
   const questionCount = qcmShare > 0 ? clamp(qcmShare, 1, QCM_MAX) : null;
-  // Aucune question ouverte inventée : une annale sans type « open » donne un examen 100 % QCM.
-  const openCount = Math.min(3, Math.max(0, types.find((t) => t.type === "open")?.approx_count ?? 0));
+  // Les questions écrites de l'annale (ouvertes, calcul, preuve) deviennent des ouvertes ; aucune
+  // n'est inventée : une annale qui n'en a pas donne un examen 100 % QCM.
+  const written = types.filter((t) => t.type === "open" || t.type === "calc" || t.type === "proof").reduce((s, t) => s + (t.approx_count || 0), 0);
+  const openCount = Math.min(3, Math.max(0, written));
   const kind = openCount > 0 ? "mixed" : "qcm";
   const answerMode = annalesAnswerMode(p) ?? declared?.answerMode ?? "mixed";
   return { ...base, kind, questionCount, openCount, answerMode, optionsPerQuestion: optionsOf(p), summary: withAnswerMode(base.summary, answerMode) };
@@ -576,7 +582,9 @@ export function formatContextFor(courseId: string): { kind: ExamKind | null; lan
  */
 export function examBudgetFor(courseId: string): { minutes: number; points: number } {
   const f = formatContextFor(courseId);
-  const minutes = f.durationMin ?? getCourse(courseId).durationMin;
+  // Budget interne de génération seulement : les gardes lisent `durationOf` et n'affichent jamais
+  // ce repli historique quand la durée du format est inconnue.
+  const minutes = f.durationMin ?? getCourse(courseId).durationMin ?? 180;
   return { minutes, points: f.totalPoints ?? minutes };
 }
 
@@ -622,8 +630,12 @@ export function targetKind(target: string | null | undefined): ExamKind | null {
  */
 export async function examDurationMin(): Promise<number | null> {
   const known = await resolveExamFormat().catch(() => null);
-  const d = known ? known.durationMin : formatContextFor(currentCourse()).durationMin;
-  return positive(d) ? d : null;
+  return durationOf(known ?? formatContextFor(currentCourse()));
+}
+
+/** La durée d'un format, si elle est connue (0 ou absente : inconnue). */
+export function durationOf(f: { durationMin: number | null }): number | null {
+  return positive(f.durationMin) ? f.durationMin : null;
 }
 
 /** true si l'examen blanc du cours courant part au générateur QCM (QCM ou mixte). */

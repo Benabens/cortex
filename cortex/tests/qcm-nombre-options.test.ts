@@ -177,3 +177,12 @@ test("le nombre d'options détecté se lit dans le format résolu ; une valeur h
   assert.equal((await runWithCourse(await course(12), () => resolveExamFormat())).optionsPerQuestion, null);
   assert.equal((await runWithCourse(await course(), () => resolveExamFormat())).optionsPerQuestion, null);
 });
+
+test("vrai/faux : l'option fausse est la négation de la clé, jamais un distracteur « trivial » à réécrire", async () => {
+  const { applyFinalQualityVerdicts } = await import("../lib/qcm");
+  const tf = { options: ["True", "False"], correct: [0], trivialDistractors: [1] };
+  const [kept] = applyFinalQualityVerdicts([tf], [{ index: 0, key: true, offCourse: false, trivial: [1] }]);
+  assert.equal(kept.trivialDistractors, null);
+  const four = { options: STATEMENTS.slice(0, 4), correct: [0] };
+  assert.deepEqual(applyFinalQualityVerdicts([four], [{ index: 0, key: true, offCourse: false, trivial: [2] }])[0].trivialDistractors, [2]);
+});

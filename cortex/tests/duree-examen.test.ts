@@ -101,3 +101,17 @@ test("un cours créé sans durée n'en reçoit pas une cachée de 180 minutes", 
   const { getCourse } = await import("../lib/courses");
   assert.equal(getCourse(await newCourse({})).durationMin, null);
 });
+
+test("durée déclarée et durée d'annale : la déclaration (l'épreuve de cette année) l'emporte", async () => {
+  const id = await newCourse({ examFormat: { kind: "qcm", durationMin: 75 } });
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { resolveExamFormat } = await import("../lib/exam-format");
+  await runWithCourse(id, async () => {
+    for (const t of ["sources", "items", "format_profile"]) await q.ensureTable(t);
+    const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "final", "Final 2024", "final/2024", 2024, 1);
+    await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "exercise", "Final 2024", "Final exam. Choose the one correct answer for each question below.");
+    await q.run(`INSERT INTO format_profile (json) VALUES (?)`, JSON.stringify({ format_summary: "10 single-answer questions", duration_min: 120, total_points: 10, has_mcq: true, scq_vs_mcq_convention: "", question_types: [{ type: "scq", approx_count: 10, share_pct: 100 }], sections: [], topics_emphasis: [] }));
+  });
+  assert.equal((await runWithCourse(id, () => resolveExamFormat())).durationMin, 75);
+});
