@@ -20,6 +20,9 @@ export default defineTool({
     "Use it when generate_mock_exam answers format_required, or when the student tells you how the exam looks (e.g. \"a 20-question MCQ midterm, 45 min\"). " +
     "Free. Past exams of the course, when present and analysed, still take precedence; otherwise mock exams follow this format. clear=true removes the declaration.",
   kind: "write",
+  // Remplace (ou efface, clear) le format déclaré : destructif ; même appel, même état : idempotent.
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  userSummary: "Déclare le format d’examen d’un cours : type, durée, nombre de questions.",
   input: z.object({
     course: courseArg,
     kind: examFormatInput.kind.optional(),

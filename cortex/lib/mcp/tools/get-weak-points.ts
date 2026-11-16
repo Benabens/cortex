@@ -3,7 +3,7 @@ import { dueConcepts } from "@/lib/schedule";
 import { listWeaknesses, weaknessesByTheme } from "@/lib/weaknesses";
 import { clip } from "../content";
 import { courseArg, courseRef, courseRefOf } from "../schemas";
-import { defineTool } from "../tool";
+import { defineTool, READ_ONLY_HINTS } from "../tool";
 
 const output = z.object({
   course: courseRef,
@@ -31,6 +31,8 @@ export default defineTool({
     "grouped by theme, plus the concepts due for spaced-repetition review. Use it for questions like \"what are my weak points before the COMP 201 exam?\" " +
     "or to pick what a drill should target. Read-only and free.",
   kind: "read",
+  annotations: READ_ONLY_HINTS,
+  userSummary: "Lit tes points faibles, du plus grave au moins grave.",
   input: z.object({
     course: courseArg,
     limit: z.number().int().min(1).max(50).optional().describe("Maximum weak points returned (default 20)."),

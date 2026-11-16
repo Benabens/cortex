@@ -89,6 +89,15 @@ function httpsUrl(v: unknown): string | null {
   try { return new URL(s).protocol === "https:" ? s : null; } catch { return null; }
 }
 
+/**
+ * URL de retour retenues : celles qui sont acceptables, les autres sont ÉCARTÉES
+ * (RFC 7591 §3.2.1 : le serveur peut retirer une valeur, le client suit la réponse).
+ * Cursor enregistre par DCR son retour local http://localhost:8787/callback ET
+ * l'ancien cursor://anysphere.cursor-mcp/oauth/callback, refusé par la spec MCP
+ * (« localhost ou https ») : refuser tout le lot empêchait Cursor de se connecter.
+ * Une URL écartée n'est jamais utilisable (égalité exacte au moment de la demande).
+ * Aucune URL acceptable → refus, avec la raison de la première.
+ */
 function parseRedirectUris(v: unknown): string[] {
   if (!Array.isArray(v) || v.length === 0) {
     throw new ClientRegistrationError("invalid_redirect_uri", "redirect_uris : au moins une URL de retour est requise.");
@@ -96,11 +105,11 @@ function parseRedirectUris(v: unknown): string[] {
   if (v.length > MAX_REDIRECT_URIS) {
     throw new ClientRegistrationError("invalid_redirect_uri", `redirect_uris : ${MAX_REDIRECT_URIS} URL au maximum.`);
   }
-  return v.map((u) => {
-    const problem = redirectUriProblem(u);
-    if (problem) throw new ClientRegistrationError("invalid_redirect_uri", `redirect_uris : ${problem}.`);
-    return u as string;
-  });
+  const kept = v.filter((u) => redirectUriProblem(u) === null) as string[];
+  if (!kept.length) {
+    throw new ClientRegistrationError("invalid_redirect_uri", `redirect_uris : ${redirectUriProblem(v[0])}.`);
+  }
+  return [...new Set(kept)];
 }
 
 /**
@@ -200,9 +209,16 @@ export function parseCimdDocument(clientId: string, body: string): OAuthClient {
   if (!str(m.client_name, MAX_NAME_LENGTH)) throw new ClientRegistrationError("invalid_client_metadata", "client_name manquant dans le document");
   const redirectUris = parseRedirectUris(m.redirect_uris);
   assertGrantAndResponseTypes(m);
+  // Un document public ne peut pas porter de secret partagé, et private_key_jwt n'est pas servi :
+  // le client doit savoir se passer d'authentification au point de jeton (PKCE fait foi).
+  // ChatGPT publie « private_key_jwt » comme méthode préférée MAIS liste aussi « none » dans
+  // token_endpoint_auth_methods_supported : face à nos métadonnées (« none » seul), il suit le
+  // flux public (developers.openai.com/apps-sdk/build/auth). Le refuser cassait sa connexion.
   const method = m.token_endpoint_auth_method ?? "none";
-  // Un document public ne peut pas porter de secret partagé ; private_key_jwt n'est pas servi.
-  if (method !== "none") throw new ClientRegistrationError("invalid_client_metadata", "seuls les clients publics (token_endpoint_auth_method « none ») sont acceptés en CIMD");
+  const alsoSupported = Array.isArray(m.token_endpoint_auth_methods_supported) ? m.token_endpoint_auth_methods_supported : [];
+  if (method !== "none" && !alsoSupported.includes("none")) {
+    throw new ClientRegistrationError("invalid_client_metadata", "seuls les clients publics (token_endpoint_auth_method « none ») sont acceptés en CIMD");
+  }
   return { clientId, kind: "cimd", name: str(m.client_name, MAX_NAME_LENGTH), uri: httpsUrl(m.client_uri), redirectUris };
 }
 

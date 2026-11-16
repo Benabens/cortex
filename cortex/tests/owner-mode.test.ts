@@ -69,11 +69,11 @@ test("autre compte, mêmes réglages : solde, quota du jour et places simultané
   await credits.addTransaction(OTHER, 1000, "test", "test:other-topup");
   const first = await as(OTHER, () => reserveGeneration({ bucket: "gen", kind: "exam", ref: `job:${OTHER}:ml:2`, jobSlot: true }));
   assert.equal(first.ok, true);
-  assert.equal(first.ok && first.costCenti, 200, "un examen coûte 2 crédits");
+  assert.equal(first.ok && first.costCenti, 500, "un examen coûte 5 crédits");
   const second = await as(OTHER, () => reserveGeneration({ bucket: "gen", kind: "exam", ref: `job:${OTHER}:ml:3`, jobSlot: true }));
   assert.equal(second.ok, false);
   assert.equal(!second.ok && second.status, 429, "quota du jour (1) atteint");
-  assert.equal(await credits.getBalanceCenti(OTHER), 800);
+  assert.equal(await credits.getBalanceCenti(OTHER), 500);
 });
 
 test("pré-contrôles des routes et du MCP : le propriétaire passe sans solde ni quota restant, l'autre compte est refusé", async () => {

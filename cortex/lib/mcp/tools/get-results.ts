@@ -4,7 +4,7 @@ import { listExams } from "@/lib/exam";
 import { programOverview } from "@/lib/program";
 import { clip } from "../content";
 import { courseArg, courseRef, courseRefOf } from "../schemas";
-import { defineTool } from "../tool";
+import { defineTool, READ_ONLY_HINTS } from "../tool";
 
 const output = z.object({
   course: courseRef,
@@ -43,6 +43,8 @@ export default defineTool({
     "their practice scores per topic (last score, mastery, attempts, next review) and their graded feedback. " +
     "Use it to review progress or to decide what to practise next. Read-only and free.",
   kind: "read",
+  annotations: READ_ONLY_HINTS,
+  userSummary: "Lit tes examens blancs générés et tes scores par notion.",
   input: z.object({
     course: courseArg,
     limit: z.number().int().min(1).max(30).optional().describe("Maximum items per list (default 10)."),

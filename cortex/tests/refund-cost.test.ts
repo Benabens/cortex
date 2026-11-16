@@ -59,7 +59,7 @@ test("job annulé SANS appel payant → remboursé ; AVEC coût réel → pas re
       );
     }
     await jobs.refundJobCredits({ id: 42, type: "exam" }, "canceled");
-    assert.equal(await credits.getBalanceCenti("erin"), start - 200, "une annulation après des appels payants n'est pas remboursée");
+    assert.equal(await credits.getBalanceCenti("erin"), start - 500, "une annulation après des appels payants n'est pas remboursée");
 
     // Job 43 : appels du provider GRATUIT (claude-code, coût 0, estimated=1) → remboursé.
     assert.equal((await reserveGeneration({ bucket: "gen", kind: "qcm", ref: credits.jobRef("erin", "ml", 43) })).ok, true);
@@ -69,13 +69,13 @@ test("job annulé SANS appel payant → remboursé ; AVEC coût réel → pas re
       "erin", "ml", "claude-code", "opus", 1000, 500, 0, 1, "43", "qcm:generateQcmExam", "2026-09-26 10:00:00",
     );
     await jobs.refundJobCredits({ id: 43, type: "qcm" }, "canceled");
-    assert.equal(await credits.getBalanceCenti("erin"), start - 200);
+    assert.equal(await credits.getBalanceCenti("erin"), start - 500);
 
     // Le job 42 d'un AUTRE compte (même id, autre tenant) n'est pas confondu : ses lignes ne comptent pas.
     assert.equal((await reserveGeneration({ bucket: "gen", kind: "exam", ref: credits.jobRef("erin", "algo", 42) })).ok, true);
   }));
   await runWithUser("erin", () => runWithCourse("algo", () => jobs.refundJobCredits({ id: 42, type: "exam" }, "canceled")));
-  assert.equal(await credits.getBalanceCenti("erin"), 1000 - 200, "le job 42 du cours algo n'a rien coûté : remboursé");
+  assert.equal(await credits.getBalanceCenti("erin"), 1000 - 500, "le job 42 du cours algo n'a rien coûté : remboursé");
 });
 
 test("jobLlmCostUsd : somme des lignes rattachées (compte, cours, id)", async () => {
@@ -104,7 +104,7 @@ test("job ÉCHOUÉ après des appels payants (rien produit) → rendu en entier,
     const start = await credits.getBalanceCenti("fred");
     assert.equal((await reserveGeneration({ bucket: "gen", kind: "qcm", ref: credits.jobRef("fred", "ml", 6) })).ok, true);
     await paidCall("fred", "ml", 6, 0.31); // le job 6 de CS-290 : « le job a déjà coûté 0,31 $ »
-    assert.equal(await jobs.refundJobCredits({ id: 6, type: "qcm" }, "failed"), 100);
+    assert.equal(await jobs.refundJobCredits({ id: 6, type: "qcm" }, "failed"), 400);
     assert.equal(await credits.getBalanceCenti("fred"), start, "un échec qui n'a rien produit est rendu, coût à notre charge");
     assert.equal(await jobs.refundJobCredits({ id: 6, type: "qcm" }, "failed"), 0, "idempotent");
     assert.equal(await credits.getBalanceCenti("fred"), start);
@@ -119,19 +119,19 @@ test("examen INCOMPLET → remboursé au prorata des questions manquantes, et le
   const { runWithCourse } = await import("../db/client");
   await runWithUser("gina", () => runWithCourse("ml", async () => {
     const start = await credits.getBalanceCenti("gina");
-    // QCM à 1 crédit (100 centièmes), 7 QCM + 3 ouvertes demandés, 8 produits → 2/10 rendus.
+    // QCM à 4 crédits (400 centièmes), 7 QCM + 3 ouvertes demandés, 8 produits → 2/10 rendus.
     assert.equal((await reserveGeneration({ bucket: "gen", kind: "qcm", ref: credits.jobRef("gina", "ml", 2) })).ok, true);
     await paidCall("gina", "ml", 2, 0.2);
     const notice = await jobs.settleShortfall({ id: 2, type: "qcm" }, 8, 10);
-    assert.equal(await credits.getBalanceCenti("gina"), start - 100 + 20);
+    assert.equal(await credits.getBalanceCenti("gina"), start - 400 + 80);
     assert.match(notice ?? "", /2 questions sur 10 n'ont pas pu être générées/);
-    assert.match(notice ?? "", /0,2 crédit rendu/);
-    assert.equal(await jobs.settleShortfall({ id: 2, type: "qcm" }, 8, 10), notice?.replace(/ : 0,2 crédit rendu/, ""), "rejoué : rien de plus n'est rendu");
-    assert.equal(await credits.getBalanceCenti("gina"), start - 100 + 20);
-    // Au prorata ARRONDI en faveur de l'utilisateur : 2/7 de 100 → 29.
+    assert.match(notice ?? "", /0,8 crédit rendu/);
+    assert.equal(await jobs.settleShortfall({ id: 2, type: "qcm" }, 8, 10), notice?.replace(/ : 0,8 crédit rendu/, ""), "rejoué : rien de plus n'est rendu");
+    assert.equal(await credits.getBalanceCenti("gina"), start - 400 + 80);
+    // Au prorata ARRONDI en faveur de l'utilisateur : 2/7 de 400 → 115.
     assert.equal((await reserveGeneration({ bucket: "gen", kind: "qcm", ref: credits.jobRef("gina", "ml", 4) })).ok, true);
     await jobs.settleShortfall({ id: 4, type: "qcm" }, 5, 7);
-    assert.equal(await credits.getBalanceCenti("gina"), start - 100 + 20 - 100 + 29);
+    assert.equal(await credits.getBalanceCenti("gina"), start - 400 + 80 - 400 + 115);
     // Complet : rien à signaler, rien rendu.
     assert.equal(await jobs.settleShortfall({ id: 4, type: "qcm" }, 7, 7), null);
   }));

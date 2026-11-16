@@ -1,7 +1,7 @@
 /**
  * B5 — l'assistance n'est plus gratuite : chaque appel (drill, correction,
- * analyses) RÉSERVE 0,1 crédit avant d'appeler le modèle, atomiquement. Un
- * compte à 0,25 crédit obtient deux appels, pas trois ; en parallèle, un solde
+ * analyses) RÉSERVE 0,3 crédit avant d'appeler le modèle, atomiquement. Un
+ * compte à 0,65 crédit obtient deux appels, pas trois ; en parallèle, un solde
  * pour un seul appel n'en laisse passer qu'un.
  */
 import assert from "node:assert/strict";
@@ -18,7 +18,7 @@ process.env.CORTEX_DATA_DIR = tmp;
 // Budget IA lié au revenu (testé dans ai-budget.test.ts) : ici, les comptes sont financés par des crédits offerts.
 process.env.AI_BUDGET_MARGIN = "unlimited";
 process.env.BILLING_ENABLED = "1";
-process.env.SIGNUP_FREE_CREDITS = "0.25";
+process.env.SIGNUP_FREE_CREDITS = "0.65";
 process.env.DAILY_ASSIST_QUOTA = "unlimited";
 process.env.RATE_LIMIT_PER_USER_MIN = "unlimited";
 // Provider API pointé sur un faux endpoint local qui répond 500 : l'appel PART
@@ -52,18 +52,18 @@ const post = (body: unknown) =>
 test("drill : requête invalide → 400 SANS débit ; moteur indisponible → 503 SANS débit", async () => {
   const { POST } = await import("../app/api/drill/route");
   const credits = await import("../lib/billing/credits");
-  assert.equal(await credits.getBalanceCenti("owner"), 25);
+  assert.equal(await credits.getBalanceCenti("owner"), 65);
   assert.equal((await POST(post({}))).status, 400);
-  assert.equal(await credits.getBalanceCenti("owner"), 25, "un corps invalide ne doit rien débiter");
+  assert.equal(await credits.getBalanceCenti("owner"), 65, "un corps invalide ne doit rien débiter");
   const base = process.env.LLM_BASE_URL;
   delete process.env.LLM_BASE_URL; // moteur indisponible
   try {
     assert.equal((await POST(post({ concept: "inode" }))).status, 503);
-    assert.equal(await credits.getBalanceCenti("owner"), 25, "un moteur indisponible ne doit rien débiter");
+    assert.equal(await credits.getBalanceCenti("owner"), 65, "un moteur indisponible ne doit rien débiter");
   } finally { process.env.LLM_BASE_URL = base; }
 });
 
-test("drill : 0,25 crédit → deux appels débités (0,1 chacun), le troisième refusé en 402", async () => {
+test("drill : 0,65 crédit → deux appels débités (0,3 chacun), le troisième refusé en 402", async () => {
   const { POST } = await import("../app/api/drill/route");
   const credits = await import("../lib/billing/credits");
   const statuses: number[] = [];
@@ -71,16 +71,16 @@ test("drill : 0,25 crédit → deux appels débités (0,1 chacun), le troisième
   // Les deux premiers passent la réservation puis l'appel part et échoue (502) ;
   // le troisième est refusé AVANT tout appel.
   assert.deepEqual(statuses, [502, 502, 402]);
-  assert.equal(await credits.getBalanceCenti("owner"), 5); // 25 - 10 - 10
+  assert.equal(await credits.getBalanceCenti("owner"), 5); // 65 - 30 - 30
 });
 
 test("assistGate : solde pour UN appel, 5 réservations parallèles → exactement 1", async () => {
   const { assistGate } = await import("../lib/billing/reserve");
   const credits = await import("../lib/billing/credits");
   const { runWithUser } = await import("../db/context");
-  await credits.addTransaction("usr_par", 10, "test", "test:usr_par:+10"); // signup 25 + 10 = 35 → on ramène à 10
-  await credits.addTransaction("usr_par", -25, "test", "test:usr_par:-25");
-  assert.equal(await credits.getBalanceCenti("usr_par"), 10);
+  await credits.addTransaction("usr_par", 30, "test", "test:usr_par:+30"); // signup 65 + 30 = 95 → on ramène à 30
+  await credits.addTransaction("usr_par", -65, "test", "test:usr_par:-65");
+  assert.equal(await credits.getBalanceCenti("usr_par"), 30);
   const results = await Promise.all(Array.from({ length: 5 }, () => runWithUser("usr_par", () => assistGate("drill"))));
   assert.equal(results.filter((r) => r === null).length, 1, JSON.stringify(results));
   assert.equal(await credits.getBalanceCenti("usr_par"), 0);
