@@ -72,6 +72,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/yauzl": "^3.4.0",
+    "ajv": "^8.20.0",
     "autocannon": "^9.0.0",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",

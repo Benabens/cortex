@@ -1,0 +1,49 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "com.cortexexam/cortex",
+  "title": "Cortex",
+  "description": "Mock exams, practice questions and weak points from your own course materials in Cortex.",
+  "version": "1.1.0",
+  "websiteUrl": "https://cortexexam.com/mcp",
+  "repository": {
+    "url": "https://github.com/Benabens/cortex",
+    "source": "github",
+    "subfolder": "cortex"
+  },
+  "icons": [
+    {
+      "src": "https://app.cortexexam.com/mcp-icon-512.png",
+      "mimeType": "image/png",
+      "sizes": [
+        "512x512"
+      ]
+    },
+    {
+      "src": "https://app.cortexexam.com/mcp-icon-128.png",
+      "mimeType": "image/png",
+      "sizes": [
+        "128x128"
+      ]
+    },
+    {
+      "src": "https://app.cortexexam.com/mcp-icon-64.png",
+      "mimeType": "image/png",
+      "sizes": [
+        "64x64"
+      ]
+    },
+    {
+      "src": "https://app.cortexexam.com/mcp-icon.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": [
+        "any"
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://app.cortexexam.com/mcp"
+    }
+  ]
+}

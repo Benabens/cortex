@@ -75,7 +75,10 @@ test("MCP OAuth appelle chaque outil et lie les confirmations au bon compte", as
     const result = await alice.client.callTool({ name: tool.name, arguments: args[tool.name] }) as CallToolResult;
     results.set(tool.name, result); expect(result.content.length).toBeGreaterThan(0);
     if (result.isError && expectedBusinessErrors.has(tool.name)) {
-      expect(JSON.stringify(result.content)).toMatch(tool.name === "report_question" ? /n'a pas de question/i : /Solde insuffisant[\s\S]*Acheter[\s\S]*app\.cortexexam\.com\/compte/);
+      const body = JSON.stringify(result.content);
+      expect(body).toMatch(tool.name === "report_question" ? /n'a pas de question/i : /Solde insuffisant/);
+      // Jamais de lien d'achat vers l'assistant (règles ChatGPT) : l'app web garde le sien.
+      expect(body).not.toMatch(/Acheter|compte#credits/);
     } else expect(result.isError, `${tool.name}: ${JSON.stringify(result.content)}`).not.toBeTruthy();
   }
   expect(structured(results.get("generate_drill")!)).toBeUndefined();

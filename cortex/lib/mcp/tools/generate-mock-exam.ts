@@ -9,7 +9,7 @@ import { redactMessage } from "@/lib/observability";
 import { clip } from "../content";
 import { courseLabel } from "../courses";
 import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, generationStatus, quoteSchema, quoteSummary } from "../schemas";
-import { ToolError, codeForStatus, defineTool, pendingResult } from "../tool";
+import { codeForStatus, defineTool, pendingResult, SPENDING_HINTS, ToolError } from "../tool";
 
 const output = z.object({
   status: generationStatus,
@@ -53,6 +53,8 @@ export default defineTool({
     // remplacer) n'est pas mesuré sur plusieurs runs réels.
     "Generation then runs in the background for 10-35 minutes (longer for a large exam): track it with get_job_status.",
   kind: "generate",
+  annotations: SPENDING_HINTS,
+  userSummary: "Génère un examen blanc au format de ton vrai examen.",
   input: z.object({
     course: courseArg,
     chapter: z.union([z.number().int().positive(), z.string().min(1).max(160)]).optional()
