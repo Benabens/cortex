@@ -151,7 +151,7 @@ const IMPOSED_TYPE: Record<AnswerMode, "scq" | "mcq" | null> = { single: "scq", 
  * Le schéma d'un lot pour un mode de réponse : le type imposé, s'il y en a un ; sans figure,
  * figure_spec (objet libre) est retiré, ce qui le rend exprimable en sortie structurée stricte.
  */
-function batchSchema(mode: AnswerMode, withFigures: boolean, withFacts = false): object {
+function batchSchema(mode: AnswerMode, withFigures: boolean, options: number | null, withFacts = false): object {
   const s = JSON.parse(JSON.stringify(QCM_BATCH_SCHEMA));
   const props = s.properties.items.items.properties;
   if (withFacts) {
@@ -160,9 +160,10 @@ function batchSchema(mode: AnswerMode, withFigures: boolean, withFacts = false):
   }
   const imposed = IMPOSED_TYPE[mode];
   if (imposed) props.type = { type: "string", enum: [imposed], description: imposed === "scq" ? "scq : l'examen est à réponse unique." : "mcq : l'examen est à réponses multiples." };
+  const expected = options ?? (imposed === "scq" ? SCQ_OPTIONS : null);
+  if (expected) props.options = { ...props.options, minItems: expected, maxItems: expected, description: `EXACTEMENT ${expected} options${options ? ", comme dans les annales" : ""} : ${expected === 2 ? "les deux réponses d'un vrai/faux" : "des PROPOSITIONS COMPLÈTES de longueurs COMPARABLES"}, pas d'« toutes les réponses ci-dessus ».` };
   if (imposed === "scq") {
     props.correct.description = "Indice 0-based de LA bonne réponse : exactement un.";
-    props.options = { ...props.options, minItems: SCQ_OPTIONS, maxItems: SCQ_OPTIONS, description: `EXACTEMENT ${SCQ_OPTIONS} options : des PROPOSITIONS COMPLÈTES de longueurs COMPARABLES, pas d'« toutes les réponses ci-dessus ».` };
   }
   if (!withFigures) delete props.figure_spec;
   // Justification structurée À LA PLACE du paragraphe libre (même appel, une sortie plus courte).
@@ -206,16 +207,26 @@ const PREVIOUS_STEMS = 60;
  */
 const SCQ_OPTIONS = 4;
 
-/** Le nombre d'options convient-il au type de la question (réponse unique : exactement SCQ_OPTIONS) ? */
-export function optionCountFits(type: string | null | undefined, n: number): boolean {
-  return type === "scq" ? n === SCQ_OPTIONS : n >= 2;
+/** Le nombre d'options convient-il à l'attente du format (à défaut, au moins deux) ? */
+export function optionCountFits(n: number, expected: number | null | undefined): boolean {
+  return expected ? n === expected : n >= 2;
 }
 
-/** Un QCM exploitable : énoncé, au moins 2 options texte, clé(s) valide(s). Sinon écarté (et comblé). */
-function wellFormed(raw: unknown): boolean {
+/** Attente du format, avec quatre options par défaut pour une question à réponse unique. */
+function expectedOptionCount(type: string | null | undefined, optionsPerQuestion: number | null | undefined): number | null {
+  return optionsPerQuestion ?? (type === "scq" ? SCQ_OPTIONS : null);
+}
+
+/** Consigne du nombre d'options, quand l'annale le fixe. */
+function optionCountRule(options: number): string {
+  return `  - NOMBRE D'OPTIONS : EXACTEMENT ${options} options par question, comme dans les annales${options === 2 ? " (vrai/faux : une affirmation à juger, options « Vrai » et « Faux » dans la langue de l'examen)" : ""} ; jamais plus, jamais moins.`;
+}
+
+/** Un QCM exploitable : énoncé, options texte au nombre attendu, clé(s) valide(s). Sinon écarté (et comblé). */
+function wellFormed(raw: unknown, expected: number | null): boolean {
   const it = raw as Partial<QcmItem> | null;
   if (!it || typeof it.stem !== "string" || !it.stem.trim()) return false;
-  if (!Array.isArray(it.options) || it.options.length < 2 || !it.options.every((o) => typeof o === "string" && o.trim())) return false;
+  if (!Array.isArray(it.options) || !optionCountFits(it.options.length, expected) || !it.options.every((o) => typeof o === "string" && o.trim())) return false;
   const n = it.options.length;
   // Sans explication, la clé n'est pas justifiée dans le corrigé (banc du 04/11 : un lot entier sans).
   const key = (raw as { justification?: { key?: unknown } } | null)?.justification?.key;
@@ -867,6 +878,8 @@ export async function generateQcmBatch(
     studentFocus?: string;
     /** Mode de réponse de l'examen ; absent → celui du format du cours, sinon réponse unique. */
     answerMode?: AnswerMode;
+    /** Options de chaque question, celui de l'annale ; null → défaut de 4 pour une SCQ ; absent → celui du format du cours. */
+    optionsPerQuestion?: number | null;
     /** Résumé du format RÉSOLU (lib/exam-format), cohérent avec le mode ; absent → celui de la détection. */
     formatSummary?: string;
     /** Faits testés par les questions de l'examen (lib/qcm-facts) : un lot n'en teste aucun autre que les siens. */
@@ -876,7 +889,10 @@ export async function generateQcmBatch(
   } = {}
 ): Promise<QcmItem[]> {
   const fmt = await getFormatProfile();
-  const mode = opts.answerMode ?? (await resolveExamFormat().catch(() => null))?.answerMode ?? DEFAULT_ANSWER_MODE;
+  // Absents (révision) : ceux du format résolu du cours.
+  const resolved = opts.answerMode && opts.optionsPerQuestion !== undefined ? null : await resolveExamFormat().catch(() => null);
+  const mode = opts.answerMode ?? resolved?.answerMode ?? DEFAULT_ANSWER_MODE;
+  const options = opts.optionsPerQuestion !== undefined ? opts.optionsPerQuestion : resolved?.optionsPerQuestion ?? null;
   const imgs = courseRefImages().slice(0, 4);
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { profile } = require("@/lib/course-profile") as typeof import("@/lib/course-profile");
@@ -932,6 +948,7 @@ export async function generateQcmBatch(
     ``,
     ...ARCHITECT_QCM_RULES,
     answerModeRule(mode),
+    options ? optionCountRule(options) : ``,
     opts.withAnnales ? OPTIONS_WITH_ANNALES : OPTIONS_WITHOUT_ANNALES,
     ...OPTION_RULES,
     explanationRule(),
@@ -947,7 +964,7 @@ export async function generateQcmBatch(
     examples.length ? `\n${DATA_RULE}` : null,
     examples.length ? dataBlock(`QUESTIONS D'EXEMPLE OFFICIELLES de l'enseignant — imite leur STYLE (forme des options, niveau de détail, pièges), ne les recopie JAMAIS`, examples) : null,
     `Format de réponse : UNIQUEMENT l'objet JSON { "items": [ … ] } conforme à ce schéma, aucun fichier.`,
-    JSON.stringify(batchSchema(mode, true, withFacts), null, 2),
+    JSON.stringify(batchSchema(mode, true, options, withFacts), null, 2),
   ].filter((l) => l != null && l !== "").join("\n");
   const prompt = [
     `Ce lot : ${n} QCM.`,
@@ -984,7 +1001,7 @@ export async function generateQcmBatch(
   // est un objet libre, inexprimable → texte libre, lu par extractJson. Réponse illisible →
   // redemandée avec l'erreur (completeJson, 3 essais).
   const r = await completeJson<{ items: (QcmItem & { figure_spec?: FigureSpec })[] }>(
-    { system, prompt, model: "opus", ...QCM_DESIGN_LIMITS, json: { schema: batchSchema(mode, withFigures, withFacts) } },
+    { system, prompt, model: "opus", ...QCM_DESIGN_LIMITS, json: { schema: batchSchema(mode, withFigures, options, withFacts) } },
     { check: (v) => (!Array.isArray(v?.items) ? "le champ « items » (tableau de QCM) manque" : v.items.length ? null : "« items » est vide") },
   );
   const items: QcmItem[] = [];
@@ -992,14 +1009,15 @@ export async function generateQcmBatch(
   const raws = r.items.slice(0, n);
   for (let i = 0; i < raws.length; i++) {
     const raw = raws[i];
-    if (!wellFormed(raw)) continue;
+    if (!wellFormed(raw, options ?? (mode === "single" ? SCQ_OPTIONS : null))) continue;
     const type = typeInMode(raw.correct, raw.type, mode);
     if (!type) {
       step(`QCM à plusieurs bonnes réponses écarté : l'examen est à réponse unique`, 30);
       continue;
     }
-    if (!optionCountFits(type, raw.options.length)) {
-      step(`QCM à réponse unique à ${raw.options.length} options écarté (il en faut ${SCQ_OPTIONS}) : son sujet est comblé`, 30);
+    const expected = expectedOptionCount(type, options);
+    if (!optionCountFits(raw.options.length, expected)) {
+      step(`QCM à ${raw.options.length} options écarté (il en faut ${expected}) : son sujet est comblé`, 30);
       continue;
     }
     const imposed = molds[i] ?? null;
@@ -1880,6 +1898,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     examples: withAnnales ? [] : await officialExamples().catch(() => []),
     // Avec annales, leur forme ; sinon le mode déclaré ou lu dans les sources, à défaut la réponse unique.
     answerMode: format?.answerMode ?? DEFAULT_ANSWER_MODE,
+    optionsPerQuestion: format?.optionsPerQuestion ?? null,
     // Le résumé du format du cours seulement s'il est à choix : un QCM demandé pour un cours
     // d'exercices ou à questions composées ne doit pas lire « Format du cours : exercices ».
     formatSummary: format?.answerMode ? format.summary : undefined,
@@ -2353,7 +2372,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
    */
   const spareCandidates = () => {
     const present = new Set(all.map((it) => it.stem));
-    return verifiedCandidates.filter((c) => c.verified === 1 && !c.rejected && !present.has(c.stem) && !auditDuplicates.has(c.stem) && !auditRejected.has(c.stem) && !historicalRepeats.has(c.stem) && !duplicateOptionIndices(c.options, c.correct).length && optionCountFits(c.type, c.options.length) &&
+    return verifiedCandidates.filter((c) => c.verified === 1 && !c.rejected && !present.has(c.stem) && !auditDuplicates.has(c.stem) && !auditRejected.has(c.stem) && !historicalRepeats.has(c.stem) && !duplicateOptionIndices(c.options, c.correct).length && optionCountFits(c.options.length, expectedOptionCount(c.type, shared.optionsPerQuestion)) &&
       !factDuplicates([...all, c]).includes(all.length));
   };
   /** Remplace `it` par un candidat déjà payé qui tient les plafonds ; sinon le retire si `drop`. Rend vrai si remplacé. */
@@ -2384,12 +2403,12 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     return over;
   };
   const exitGate = async () => {
-    // 0. Nombre d'options, sans appel au modèle : une question à réponse unique a exactement
-    // SCQ_OPTIONS options, quel que soit son chemin (reprise d'un point de reprise compris).
-    const misshapen = all.filter((it) => !optionCountFits(it.type, it.options.length));
+    // 0. Nombre d'options, sans appel au modèle : celui de l'annale, ou quatre pour une SCQ quand
+    // il est inconnu, quel que soit son chemin (reprise d'un point de reprise compris).
+    const misshapen = all.filter((it) => !optionCountFits(it.options.length, expectedOptionCount(it.type, shared.optionsPerQuestion)));
     if (misshapen.length) {
       misshapen.forEach((it) => { auditRejected.add(it.stem); swapOut(it, true); });
-      step(`Contrôle final : ${misshapen.length} QCM à réponse unique sans ${SCQ_OPTIONS} options exactement → remplacé(s) ou retiré(s)`, 81);
+      step(`Contrôle final : ${misshapen.length} QCM sans le nombre d'options attendu → remplacé(s) ou retiré(s)`, 81);
     }
     // 1. Plafonds par notion sur l'ensemble final ; un retrait est remplacé par un candidat payé.
     const over = [...new Set([...capDrops(all, caps, (it) => [it.notion]), ...factDuplicates(all)])].map((i) => all[i]);
