@@ -8,7 +8,7 @@ import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
 import { examsDir } from "@/lib/paths";
 import { formatContextFor } from "@/lib/exam-format";
-import { coverWords, durationText, examTemplate, localDate, neutralChrome, neutralCoverTex, pointsText } from "@/lib/exam-template";
+import { courseTemplate, coverWords, durationText, examTemplate, localDate, neutralChrome, neutralCoverTex, pointsText } from "@/lib/exam-template";
 import { qrText, texEscape } from "@/lib/tex-escape";
 
 const LATEX_DIR = path.join(process.cwd(), "latex");
@@ -757,7 +757,7 @@ ul,ol{margin:6px 0 6px 22px}
 <h1>${escHtml(spec.title)}</h1>
 <p class="warn">⚠️ La compilation LaTeX (PDF) a échoué, rendu HTML lisible de secours (figures/grilles remplacées par des notes).${
     reason ? `<br><b>Erreur LaTeX :</b> <code>${escHtml(reason.slice(0, 300))}</code>` : ""
-  }<br>Pour le vrai PDF EPFL : <code>brew install tectonic</code>, redémarre l'app, régénère.</p>
+  }<br>Pour le vrai PDF${courseTemplate() === "epfl" ? " EPFL" : ""} : <code>brew install tectonic</code>, redémarre l'app, régénère.</p>
 ${blocks}`;
 }
 

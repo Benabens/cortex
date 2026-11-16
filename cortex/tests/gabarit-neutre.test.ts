@@ -154,3 +154,12 @@ test("questions composées hors EPFL : tout est dans la langue de l'examen (fran
   for (const fr of [/Nom :/, /Durée :\}? 60 minutes/, /mise en situation/, /Sortie :/, /Réponse type :/, /Barème :/, /\[3 points\]/]) assert.match(page, fr);
   for (const en of [/Output:/, /Model answer/, /Grading/, /This exam has/, /\bpts\b/]) assert.doesNotMatch(page, en);
 });
+
+test("repli HTML hors EPFL : aucune mention de l'EPFL", async () => {
+  const { htmlFallback } = await import("../lib/exam-latex");
+  const { WRITTEN_SPEC, DATE } = await import("./helpers/gabarits");
+  const html = await inCourse(ids.neutralEn, () => htmlFallback(WRITTEN_SPEC as never, 1, DATE, "boom"));
+  assert.match(html, /Toy recurrence/);
+  assert.match(html, /brew install tectonic/);
+  assert.doesNotMatch(html, /epfl/i);
+});
