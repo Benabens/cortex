@@ -7,22 +7,37 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 
-process.env.DB_DRIVER = "postgres";
-process.env.DATABASE_URL = "pglite://memory";
-process.env.AI_BUDGET_MARGIN = "unlimited";
-process.env.BILLING_ENABLED = "1";
-process.env.SIGNUP_FREE_CREDITS = "20";
-process.env.DAILY_GEN_QUOTA = "10";
-process.env.DAILY_ASSIST_QUOTA = "unlimited";
-process.env.RATE_LIMIT_PER_USER_MIN = "unlimited";
-process.env.MAX_ACTIVE_JOBS = "unlimited";
-process.env.MAX_GLOBAL_JOBS = "unlimited";
+const ENV: Record<string, string> = {
+  DB_DRIVER: "postgres",
+  DATABASE_URL: "pglite://memory",
+  AI_BUDGET_MARGIN: "unlimited",
+  BILLING_ENABLED: "1",
+  SIGNUP_FREE_CREDITS: "20",
+  DAILY_GEN_QUOTA: "10",
+  DAILY_ASSIST_QUOTA: "unlimited",
+  RATE_LIMIT_PER_USER_MIN: "unlimited",
+  MAX_ACTIVE_JOBS: "unlimited",
+  MAX_GLOBAL_JOBS: "unlimited",
+};
+
+/**
+ * Sous Node 22, `tsx --test` charge tous les fichiers dans UN process : les variables posées en
+ * tête de fichier par les autres suites (tarifs, propriétaire, plafonds) écrasent les nôtres.
+ * Elles sont donc reposées juste avant nos tests, et les surcharges étrangères effacées.
+ */
+const FOREIGN = ["CREDITS_COST_JSON", "AI_JOB_COST_USD_JSON", "CORTEX_OWNER_USER_ID", "CORTEX_OWNER_EMAIL", "SPEND_CAP_USD", "SPEND_CAP_BASE_USD", "SPEND_CAP_PER_USER_USD", "SPEND_CAP_PER_USER_FLOOR_USD", "AI_BUDGET_FREE_USD", "E2E_TEST_AUTH", "E2E_TEST_RUN"];
+function applyEnv(): void {
+  Object.assign(process.env, ENV);
+  for (const k of FOREIGN) delete process.env[k];
+}
+applyEnv();
 
 import { runWithCourse } from "../db/client";
 import { runWithUser } from "../db/context";
 import { q } from "../db/q";
 
 before(async () => {
+  applyEnv();
   delete process.env.CORTEX_USER;
   const { ensureCoursesLoaded } = await import("../lib/courses");
   await ensureCoursesLoaded();
@@ -31,7 +46,7 @@ before(async () => {
 after(async () => {
   const { closePostgres } = await import("../db/driver-postgres");
   await closePostgres();
-  for (const k of ["DB_DRIVER", "DATABASE_URL", "AI_BUDGET_MARGIN", "BILLING_ENABLED", "SIGNUP_FREE_CREDITS", "DAILY_GEN_QUOTA", "DAILY_ASSIST_QUOTA", "RATE_LIMIT_PER_USER_MIN", "MAX_ACTIVE_JOBS", "MAX_GLOBAL_JOBS"]) delete process.env[k];
+  for (const k of Object.keys(ENV)) delete process.env[k];
 });
 
 test("6 créations simultanées du même QCM : un job, un débit, une seule génération du quota du jour", async () => {
