@@ -2,13 +2,17 @@ import { ensureFts, currentCourse } from "@/db/client";
 import { q } from "@/db/q";
 import { indexItemForSearch, unindexSource } from "@/lib/search";
 import { sourceHref } from "@/lib/deeplink";
-import { refsDir } from "@/lib/paths";
+import { contentRoot, refsDir } from "@/lib/paths";
+import { getCourse } from "@/lib/courses";
 import * as cheerio from "cheerio";
 import path from "node:path";
 import { extractText, getDocumentProxy } from "unpdf";
 import { extractOfficeText } from "@/lib/office-documents";
 import { purgePdfPages } from "@/lib/page-cache";
 import { storage } from "@/lib/storage";
+import { failureStatus, ingestProblems, readStatus, type IngestFileOutcome, type IngestProblem } from "@/lib/ingest-report";
+import { lastIngestReport } from "@/lib/jobs";
+import { examKind, examYear, withoutSolutions } from "@/lib/exam-names";
 
 /**
  * Examens de référence : le « format » à imiter pour la génération.
@@ -43,10 +47,7 @@ function recencyWeight(year: number | null): number {
 
 /** Devine type d'examen + année depuis un nom de fichier. */
 export function inferExamMeta(filename: string): { kind: "final" | "midterm"; year: number | null } {
-  const f = filename.toLowerCase();
-  const kind = /midterm|mi[-_ ]?term/.test(f) ? "midterm" : "final";
-  const m = f.match(/(20\d{2})/);
-  return { kind, year: m ? +m[1] : null };
+  return { kind: examKind(filename) ?? "final", year: examYear(filename) };
 }
 
 // ---- insertion bas niveau (mêmes tables que l'ingestion) via la façade q,
@@ -80,18 +81,25 @@ async function parseRefFile(abs: string): Promise<{ title: string; pages: string
   return { title: base.replace(/\.[^.]+$/, ""), pages: [clean(buf.toString("utf8"))] };
 }
 
-/**
- * Ingestion d'UN fichier de référence (data/refs/<file>) dans sources/items/fts.
- * Idempotent par chemin : purge l'ancienne source de même path avant de réinsérer.
- * Réutilisé par l'upload (immédiat) ET par scripts/ingest.ts (après wipe).
- */
-export async function ingestRefFile(relPath: string): Promise<number> {
-  ensureFts();
-  const filePath = path.join(REFS_DIR(), path.basename(relPath));
-  const { kind, year } = inferExamMeta(path.basename(relPath));
-  const { title, pages } = await parseRefFile(filePath);
+/** Une annale lue (titre, pages de texte), pas encore écrite dans le corpus. */
+export type ParsedRef = { relPath: string; title: string; pages: string[] };
 
-  // purge d'une éventuelle ingestion précédente du même chemin
+/** Passages indexables d'une annale lue : une page de moins de 3 caractères ne compte pas. */
+const refChunks = (pages: string[]) => (pages.length ? pages : [""]);
+const indexableCount = (pages: string[]) => refChunks(pages).filter((t) => t.length >= 3).length;
+
+async function readRefFile(relPath: string): Promise<ParsedRef> {
+  const { title, pages } = await parseRefFile(path.join(REFS_DIR(), path.basename(relPath)));
+  return { relPath, title, pages };
+}
+
+/**
+ * Écrit une annale lue dans sources/items/fts et exam_refs. Idempotent par chemin : purge
+ * l'ancienne source de même path avant de réinsérer. Rend le nombre de passages indexés.
+ */
+export async function writeRef({ relPath, title, pages }: ParsedRef): Promise<number> {
+  ensureFts();
+  const { kind, year } = inferExamMeta(path.basename(relPath));
   const old = await q.all<{ id: number }>(`SELECT id FROM sources WHERE path = ?`, relPath);
   for (const { id } of old) {
     await unindexSource(id);
@@ -100,7 +108,7 @@ export async function ingestRefFile(relPath: string): Promise<number> {
   }
 
   const sid = await q.insert(INS_SOURCE_SQL, kind, title, relPath, year, recencyWeight(year));
-  const chunks = pages.length ? pages : [""];
+  const chunks = refChunks(pages);
   for (const [i, text] of chunks.entries()) {
     if (text.length < 3) continue;
     const label = chunks.length > 1 ? `${title}, p. ${i + 1}` : title;
@@ -120,11 +128,22 @@ export async function ingestRefFile(relPath: string): Promise<number> {
      ON CONFLICT(path) DO UPDATE SET title = excluded.title, year = excluded.year, kind = excluded.kind, uploaded = excluded.uploaded`,
     relPath, title, year, kind, wasUploaded
   );
-  return sid;
+  return indexableCount(pages);
 }
 
-/** Réingère tous les fichiers de data/refs/ (appelé par scripts/ingest.ts). */
-export async function ingestAllRefs(): Promise<number> {
+/** Lit puis écrit UNE annale (dépôt depuis l'app) ; lève si elle ne se lit pas. */
+export async function ingestRefFile(relPath: string): Promise<{ items: number }> {
+  const parsed = await readRefFile(relPath);
+  // Lu hors transaction, réécrit d'un bloc : une erreur en route laisse l'annale d'avant intacte.
+  return { items: await q.tx(() => writeRef(parsed)) };
+}
+
+/**
+ * Lit toutes les annales de data/refs/ SANS rien écrire (scripts/ingest.ts écrit ensuite tout le
+ * corpus en une transaction). Un fichier qui ne se lit pas est isolé : les suivants sont lus
+ * quand même, et son issue figure dans le rapport.
+ */
+export async function readAllRefs(): Promise<{ parsed: ParsedRef[]; outcomes: IngestFileOutcome[] }> {
   const dir = REFS_DIR();
   // uniquement des FICHIERS d'examen (ignore les sous-dossiers figref/ img/ et les fichiers cachés)
   const files = (await storage().list(dir))
@@ -132,8 +151,20 @@ export async function ingestAllRefs(): Promise<number> {
     .map((e) => path.basename(e.path))
     .filter((name) => !name.startsWith(".") && /\.(pdf|html?|txt|md|pptx|docx)$/i.test(name))
     .sort();
-  for (const f of files) await ingestRefFile(`refs/${f}`);
-  return files.length;
+  const parsed: ParsedRef[] = [];
+  const outcomes: IngestFileOutcome[] = [];
+  for (const f of files) {
+    const relPath = `refs/${f}`;
+    try {
+      const ref = await readRefFile(relPath);
+      parsed.push(ref);
+      const items = indexableCount(ref.pages);
+      outcomes.push({ path: relPath, status: readStatus(items), items });
+    } catch (e) {
+      outcomes.push({ path: relPath, status: failureStatus(e), items: 0 });
+    }
+  }
+  return { parsed, outcomes };
 }
 
 // ---------------- Sélection « référence » ----------------
@@ -161,10 +192,21 @@ export type ExamSource = {
  */
 export const EXAM_SOURCE_DEDUP = `id IN (SELECT min(id) FROM sources WHERE type IN ('final','midterm') GROUP BY path)`;
 
-/** Nombre d'annales (finals, partiels) ingérées dans le cours courant ; 0 pour un cours neuf. */
+/**
+ * Une annale ne compte que si elle a du texte : un scan sans couche texte (0 passage) ne peut
+ * pas servir de base au format, sinon il l'emportait sur les questions d'exemple et les
+ * consignes avec un texte d'annales vide (audit ingestion du 16/11/2026).
+ */
+export const EXAM_HAS_TEXT = `EXISTS (SELECT 1 FROM items i WHERE i.source_id = sources.id)`;
+
+/**
+ * Nombre d'annales (finals, partiels) lisibles ingérées dans le cours courant ; 0 pour un cours
+ * neuf. Un corrigé à côté de son énoncé ne compte pas comme une annale de plus.
+ */
 export async function pastExamCount(): Promise<number> {
   await q.ensureTable("sources");
-  return Number((await q.get<{ n: number }>(`SELECT count(*) n FROM sources WHERE type IN ('final','midterm') AND ${EXAM_SOURCE_DEDUP}`))?.n ?? 0);
+  const rows = await q.all<{ path: string; title: string }>(`SELECT path, title FROM sources WHERE type IN ('final','midterm') AND ${EXAM_SOURCE_DEDUP} AND ${EXAM_HAS_TEXT}`);
+  return withoutSolutions(rows, (r) => `${r.path} ${r.title}`).length;
 }
 
 /** Examens (finals/midterms) dédoublonnés par chemin, triés par année croissante (sans année en dernier). */
@@ -282,12 +324,50 @@ export async function addUploadedRef(buffer: Buffer, filename: string): Promise<
   return (await listExamSources()).find((e) => e.path === relPath)!;
 }
 
-/** Supprime un examen uploadé (fichier + source + sélection). */
+/**
+ * Fichier du cours que l'ingestion n'a jamais lu (abîmé, chiffré : rapport d'ingestion) : son
+ * chemin absolu, confiné au cours, ou null. Jamais dans un contenu en lecture seule (cs-202 lit
+ * la racine du dépôt).
+ */
+function unreadFileAbsolute(srcPath: string): string | null {
+  const course = currentCourse();
+  if (getCourse(course).paths?.contentRel === "..") return null;
+  // Les annales sont rangées à plat : « refs/x/final.pdf » ne désigne jamais « refs/final.pdf ».
+  if (srcPath.startsWith("refs/")) return srcPath === `refs/${path.basename(srcPath)}` ? path.join(REFS_DIR(), path.basename(srcPath)) : null;
+  const root = path.resolve(contentRoot());
+  const abs = path.resolve(root, srcPath);
+  return abs.startsWith(root + path.sep) ? abs : null;
+}
+
+/**
+ * Les fichiers que la dernière ingestion n'a pas pu lire et qui sont encore rangés dans le cours :
+ * la liste survit au rechargement de la page, et un fichier retiré n'y revient pas.
+ */
+export async function unreadFiles(): Promise<IngestProblem[]> {
+  const reported = ingestProblems(await lastIngestReport());
+  const stored = await Promise.all(reported.map(async (p) => {
+    const abs = unreadFileAbsolute(p.path);
+    return abs ? (await storage().stat(abs)) != null : false;
+  }));
+  const problems = reported.filter((_, i) => stored[i]);
+  // Rangés sans aucun passage (scans), y compris une annale déposée sans job d'ingestion derrière.
+  await q.ensureTable("sources");
+  const known = new Set(problems.map((p) => p.path));
+  const empty = (await q.all<{ path: string }>(`SELECT DISTINCT path FROM sources WHERE NOT ${EXAM_HAS_TEXT} ORDER BY path`))
+    .filter((r) => !known.has(r.path));
+  return [...problems, ...ingestProblems({ files: empty.map((r) => ({ path: r.path, status: "no_text", items: 0 })) })];
+}
+
+/** Supprime un examen uploadé (fichier + source + sélection), ou un fichier que l'ingestion n'a pas pu lire. */
 export async function removeUploadedRef(srcPath: string): Promise<void> {
   await ensureRefsSchema();
   const row = await q.get<{ uploaded: number }>(`SELECT uploaded FROM exam_refs WHERE path = ?`, srcPath);
-  // purge corpus
   const srcs = await q.all<{ id: number }>(`SELECT id FROM sources WHERE path = ?`, srcPath);
+  // Non lu : jamais ingéré (abîmé, chiffré) ou ingéré sans aucun passage (scan sans texte).
+  const indexed = srcs.length
+    ? Number((await q.get<{ n: number }>(`SELECT count(*) n FROM items WHERE source_id IN (${srcs.map(() => "?").join(",")})`, ...srcs.map((s) => s.id)))?.n ?? 0)
+    : 0;
+  // purge corpus
   for (const { id } of srcs) {
     await unindexSource(id);
     await q.run(`DELETE FROM items WHERE source_id = ?`, id);
@@ -296,6 +376,10 @@ export async function removeUploadedRef(srcPath: string): Promise<void> {
   await q.run(`DELETE FROM exam_refs WHERE path = ?`, srcPath);
   if (row?.uploaded) {
     await storage().remove(path.join(REFS_DIR(), path.basename(srcPath)));
+  } else if (!indexed) {
+    // Il ne compte nulle part : sans suppression du fichier, il reviendrait à l'ingestion suivante.
+    const abs = unreadFileAbsolute(srcPath);
+    if (abs) await storage().remove(abs);
   }
   // Ses images de pages (lib/page-cache) : rendues de nouveau à la demande si le PDF reste.
   purgePdfPages(currentCourse(), path.basename(srcPath));

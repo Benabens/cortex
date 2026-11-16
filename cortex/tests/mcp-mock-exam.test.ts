@@ -49,8 +49,11 @@ before(async () => {
   const { runWithCourse } = await import("../db/client");
   const { runWithUser } = await import("../db/context");
   const { q } = await import("../db/q");
-  await runWithUser(ALICE, () => runWithCourse(withExams, () =>
-    q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "final", "Final 2024", "refs/final-2024.pdf", 2024, 2.5)));
+  // Une annale lue (un passage au moins) : sans texte, elle ne compte pas comme annale.
+  await runWithUser(ALICE, () => runWithCourse(withExams, async () => {
+    const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "final", "Final 2024", "refs/final-2024.pdf", 2024, 2.5);
+    await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "exercise", "Exercice 1", "Étudier la convergence de la série de terme général 1/n².");
+  }));
 });
 
 after(async () => {

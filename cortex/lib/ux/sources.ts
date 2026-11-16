@@ -7,6 +7,7 @@
  * Choix des annales de référence : POST /api/sources {path, reference} (toggleReference) ·
  * DELETE /api/sources?path= (removeUploadedRef) — câblés en cases à cocher dans FileManager.
  */
+import type { IngestProblem } from "@/lib/ingest-report";
 
 export type SourceExam = {
   path: string;
@@ -30,7 +31,8 @@ export type CorpusSourceItem = {
   href: string | null;
 };
 
-export type SourcesResp = { exams: SourceExam[]; corpus: CorpusAgg[]; sources?: CorpusSourceItem[] };
+/** `unread` : les fichiers que la dernière ingestion n'a pas pu lire, encore rangés dans le cours. */
+export type SourcesResp = { exams: SourceExam[]; corpus: CorpusAgg[]; sources?: CorpusSourceItem[]; unread?: IngestProblem[] };
 
 export const CORPUS_LABEL: Record<string, string> = {
   course_pdf: "Cours (PDF)",

@@ -107,12 +107,17 @@ test("sans langue : la langue des annales passe avant celle des supports", async
   assert.equal(getCourse(id).language, "en", "la langue des annales est enregistrée sur le cours");
 });
 
-test("une langue déclarée n'est jamais remplacée par la détection", async () => {
-  const id = await newCourse({ language: "fr" });
-  await addSource(id, "lecture", "Vorlesung 1", GERMAN_NOTES);
-  assert.equal((await resolve(id)).language, "fr");
+test("une langue déclarée n'est jamais remplacée par la détection ; « fr » cède devant les supports", async () => {
   const { getCourse } = await import("../lib/courses");
-  assert.equal(getCourse(id).language, "fr");
+  const it = await newCourse({ language: "it" });
+  await addSource(it, "lecture", "Vorlesung 1", GERMAN_NOTES);
+  assert.equal((await resolve(it)).language, "it");
+  assert.equal(getCourse(it).language, "it");
+  // « fr » était le défaut de la création avant la détection (#123) : il ne vaut pas déclaration.
+  const fr = await newCourse({ language: "fr" });
+  await addSource(fr, "lecture", "Vorlesung 1", GERMAN_NOTES);
+  assert.equal((await resolve(fr)).language, "de");
+  assert.equal(getCourse(fr).language, "fr", "rien n'est réécrit sur un cours qui a une langue");
 });
 
 test("règle de documents : celle de l'annale, sauf déclaration ; rien si aucune ne la dit", async () => {

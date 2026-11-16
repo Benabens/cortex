@@ -304,6 +304,8 @@ export const TABLES: TableSpec[] = [
       { name: "worker_id", type: "text" },
       // Référence du débit de crédits réservé AVANT l'insertion (cf. lib/jobs createJobExclusive).
       { name: "credit_ref", type: "text" },
+      // Rapport par fichier d'une ingestion (lib/ingest-report) : fichiers lus, illisibles, sans texte.
+      { name: "report_json", type: "text" },
     ],
   },
   {

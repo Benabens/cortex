@@ -1,5 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { coursePaths, DEFAULT_COURSE } from "@/lib/courses";
+import { withoutSolutions } from "@/lib/exam-names";
 import { cachedPdfPages, pageCacheDirFor } from "@/lib/page-cache";
 import fs from "node:fs";
 import path from "node:path";
@@ -32,9 +33,11 @@ function relToCwd(abs: string): string {
   return path.relative(process.cwd(), abs);
 }
 
-/** PDF de référence du cours (dossier refs/), par nom de fichier. */
+/** PDF de référence du cours (dossier refs/), par nom de fichier ; les corrigés ne servent d'étalon que seuls. */
 function refPdfs(course: string): string[] {
-  try { return fs.readdirSync(coursePaths(course).refsDir).filter((f) => /\.pdf$/i.test(f)).sort(); } catch { return []; }
+  try {
+    return withoutSolutions(fs.readdirSync(coursePaths(course).refsDir).filter((f) => /\.pdf$/i.test(f)), (f) => f).sort();
+  } catch { return []; }
 }
 
 /**
