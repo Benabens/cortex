@@ -87,6 +87,8 @@ export type Perf = {
   costUsd: number;
   /** false : tokens et coût FACTURÉS (llm_usage d'un run sur l'API) ; true : estimés depuis la bande. */
   estimated: boolean;
+  /** Appels dont les tokens sont MESURÉS par claude-code (le reste : estimé depuis la taille du prompt). */
+  measuredCalls?: number;
 };
 
 export type Ux = {
@@ -193,7 +195,24 @@ const CACHE_TTL_MS = 5 * 60_000;
 
 const dbTime = (s: string) => Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s.replace(" ", "T") : `${s.replace(" ", "T")}Z`);
 
-type Spend = { tokensIn: number; tokensOut: number; cacheRead: number; cost: number };
+type Spend = { tokensIn: number; tokensOut: number; cacheRead: number; cost: number; measuredCalls?: number };
+
+/**
+ * Harnais de `claude -p` en mode banc (lib/claude-code, CORTEX_CLAUDE_CODE_LEAN) : ≈ 2 430 tokens
+ * par appel mesurés le 15/11 (identité, outil Read), absents de la prod. Arrondi par défaut.
+ */
+const CLAUDE_CODE_HARNESS_TOKENS = 2400;
+
+/** Tokens d'entrée et de sortie d'un appel : mesurés par claude-code, sinon estimés (≈ 4 car./token). */
+function callTokens(c: BenchRun["calls"][number]): { total: number; sys: number; out: number; measured: boolean } {
+  const u = c.provider === "claude-code" && !c.error ? c.usage : undefined;
+  const chars = c.promptChars + c.systemChars;
+  if (u?.outputTokens !== undefined) {
+    const total = Math.max(0, (u.inputTokens ?? 0) + (u.cacheReadTokens ?? 0) + (u.cacheWriteTokens ?? 0) - CLAUDE_CODE_HARNESS_TOKENS);
+    return { total, sys: chars ? Math.round((total * c.systemChars) / chars) : 0, out: u.outputTokens, measured: true };
+  }
+  return { total: Math.round(chars / CHARS_PER_TOKEN), sys: Math.round(c.systemChars / CHARS_PER_TOKEN), out: Math.round(c.outputChars / CHARS_PER_TOKEN), measured: false };
+}
 
 /** Tokens et coût FACTURÉS : seulement quand llm_usage a compté de l'argent (run sur l'API), échecs compris. */
 function billed(r: BenchRun): Spend | null {
@@ -205,15 +224,18 @@ function billed(r: BenchRun): Spend | null {
   };
 }
 
-/** Ce que le run aurait coûté sur l'API, estimé depuis la bande (réflexion non comptée). */
+/**
+ * Ce que le run aurait coûté sur l'API, depuis la bande : tokens mesurés par claude-code (réflexion
+ * comprise), sinon estimés depuis la taille du prompt (réflexion non comptée). Le cache de prompt
+ * est simulé comme en prod (même système dans les 5 min), quel que soit celui du CLI.
+ */
 function estimated(r: BenchRun): Spend {
-  const spend: Spend = { tokensIn: 0, tokensOut: 0, cacheRead: 0, cost: 0 };
+  const spend = { tokensIn: 0, tokensOut: 0, cacheRead: 0, cost: 0, measuredCalls: 0 };
   const lastWrite = new Map<string, number>();
   for (const c of r.calls) {
     const rate = r.rates[c.model] ?? r.rates.opus ?? { inPerM: 0, outPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0 };
-    const sys = Math.round(c.systemChars / CHARS_PER_TOKEN);
-    const total = Math.round((c.promptChars + c.systemChars) / CHARS_PER_TOKEN);
-    const out = Math.round(c.outputChars / CHARS_PER_TOKEN);
+    const { total, sys, out, measured } = callTokens(c);
+    if (measured) spend.measuredCalls += 1;
     let read = 0, write = 0;
     if (sys && c.systemHash) {
       const prev = lastWrite.get(c.systemHash);
@@ -242,6 +264,7 @@ function perf(r: BenchRun): Perf {
     dedupReplacements: log.filter((l) => DEDUP_LINE.test(l.msg)).length,
     tokensIn: s.tokensIn, tokensOut: s.tokensOut, cacheReadTokens: s.cacheRead, cacheRate: s.tokensIn ? s.cacheRead / s.tokensIn : 0,
     costUsd: s.cost, estimated: !measured,
+    ...(s.measuredCalls ? { measuredCalls: s.measuredCalls } : {}),
   };
 }
 

@@ -8,6 +8,10 @@
  * coût de prod, autorisée par Ben pour le chantier coût du 15/11 (15 $ au total). La clé
  * Anthropic passe alors, et elle seule ; SPEND_CAP_USD plafonne chaque run (kill-switch de
  * lib/billing/usage, compté sur la base jetable du run). Le juge reste sur codex-cli.
+ *
+ * Boucle moteur du 15/11 : le moteur peut aussi tourner sur claude-code (abonnement Max de Ben,
+ * sans clé), qui rapporte les tokens réels, réflexion comprise ; le banc les convertit au tarif
+ * API. Le juge, lui, reste sur l'abonnement Codex.
  */
 
 const API_KEYS = ["ANTHROPIC_API_KEY", "LLM_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY"] as const;
@@ -23,8 +27,12 @@ export function isPaidBench(env: Env): boolean {
   return env.CORTEX_BENCH_PAID === "anthropic";
 }
 
-/** L'environnement du juge : sur une mesure payante, la clé et l'opt-in retirés, provider codex-cli. */
+/** Providers d'abonnement acceptés pour le moteur (aucune clé, aucun coût marginal). */
+const SUBSCRIPTION_PROVIDERS = new Set(["codex-cli", "claude-code"]);
+
+/** L'environnement du juge : toujours codex-cli ; sur une mesure payante, la clé et l'opt-in retirés. */
 export function judgeEnv<E extends Env>(env: E): E {
+  if (env.LLM_PROVIDER === "claude-code") return { ...env, LLM_PROVIDER: "codex-cli" };
   if (!isPaidBench(env)) return env;
   const out: Env = { ...env, LLM_PROVIDER: "codex-cli" };
   for (const k of ["CORTEX_BENCH_PAID", "SPEND_CAP_USD", ...ANTHROPIC_KEYS]) delete out[k];
@@ -42,8 +50,10 @@ export function assertBenchEnv(env: Env = process.env, opts: { judge?: boolean }
     if (!(env.SPEND_CAP_USD ?? "").trim() || !Number.isFinite(cap) || cap <= 0 || cap > PAID_RUN_MAX_USD) {
       problems.push(`une mesure payante exige SPEND_CAP_USD entre 0 et ${PAID_RUN_MAX_USD} $ (reçu : ${env.SPEND_CAP_USD ?? "non posé"})`);
     }
-  } else if (env.LLM_PROVIDER !== "codex-cli") {
-    problems.push(`le banc exige LLM_PROVIDER=codex-cli (reçu : ${env.LLM_PROVIDER ?? "non posé"}) — aucun appel à l'API payante`);
+  } else if (!SUBSCRIPTION_PROVIDERS.has(env.LLM_PROVIDER ?? "")) {
+    problems.push(`le banc exige LLM_PROVIDER=codex-cli ou claude-code (reçu : ${env.LLM_PROVIDER ?? "non posé"}) — aucun appel à l'API payante`);
+  } else if (opts.judge && env.LLM_PROVIDER !== "codex-cli") {
+    problems.push("le juge tourne sur codex-cli (judgeEnv)");
   }
   for (const k of API_KEYS) {
     if (paid && ANTHROPIC_KEYS.has(k)) continue;

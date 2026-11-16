@@ -2,7 +2,8 @@
  * SORTIE LONGUE DES QCM ET DES EXAMENS (prod du 13 au 15/11, HUM-285 et job 2 d'examen) : à l'effort
  * par défaut, Sonnet 5 facture 8 à 15 k tokens de sortie par appel pour 1 à 2,5 k de réponse visible,
  * et la réflexion butait sur la limite de 16 000 tokens : réponse coupée, facturée, refaite ou perdue.
- * Baisser l'effort a dégradé la justesse au banc du 15/11 (voir chaque test) : il reste au défaut.
+ * Baisser l'effort partout a dégradé la justesse au banc du 15/11 (voir chaque test) : la conception
+ * d'examen le garde ; la vérification à l'aveugle et la conception des QCM passent à effort moyen.
  * Verrouillé, contre un faux /v1/messages Anthropic (aucune dépense) : les étapes d'un job QCM et
  * les lots d'un examen écrit ont la place de finir leur réponse au-delà de 16 000 tokens.
  */
@@ -57,9 +58,9 @@ function answer(text: string): { step: string; reply: string } {
       explanation: "groupby puis mean donne la moyenne par groupe ; la médiane et la somme sont d'autres agrégats.",
     })) }) };
   }
-  if (/"duplicates"/.test(text)) return { step: "doublons", reply: JSON.stringify({ duplicates: [] }) };
+  // Revue finale : audit (verdicts) et doublons dans le même appel.
   if (/"offCourse"/.test(text)) {
-    return { step: "audit final", reply: JSON.stringify({ verdicts: qcmBlocks(text).map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })) }) };
+    return { step: "revue finale", reply: JSON.stringify({ verdicts: qcmBlocks(text).map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })), duplicates: [] }) };
   }
   if (/"results"/.test(text)) {
     return { step: "vérification QCM", reply: JSON.stringify({ results: qcmBlocks(text).map((m) => ({
@@ -70,7 +71,8 @@ function answer(text: string): { step: string; reply: string } {
   if (/"items"/.test(text)) {
     const n = Number(/\((\d+) QCM\)/.exec(text)?.[1] ?? 1);
     designs++;
-    return { step: "conception QCM", reply: JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i, designs === 1 && i === 0)) }) };
+    // Tout le premier lot porte un distracteur trivial : une question propre passerait sinon devant, sans réparation.
+    return { step: "conception QCM", reply: JSON.stringify({ items: Array.from({ length: n }, (_, i) => item(i, designs === 1)) }) };
   }
   return { step: "autre", reply: "{}" };
 }
@@ -150,20 +152,24 @@ async function pandasCourse(): Promise<string> {
   return row.id;
 }
 
-test("job QCM : chaque étape réfléchit à l'effort par défaut, avec la place de finir sa réponse", async () => {
-  // Banc du 15/11 (hum-285-job14, codex-cli) : à effort moyen et bas, 3 clés fausses, 3 explications
-  // incohérentes et 2 doublons sur 20 QCM, contre 0, 0 et 0 à l'effort par défaut. L'effort reste
-  // entier ; la limite de sortie passe au-dessus des 16 000 tokens où la réflexion coupait la réponse.
+test("job QCM : vérification et conception à effort moyen, réparation et revue à l'effort par défaut, avec la place de finir", async () => {
+  // Banc du 15/11 (hum-285-job14, codex-cli) : à effort moyen et bas PARTOUT, 3 clés fausses, 3
+  // explications incohérentes et 2 doublons sur 20 QCM, contre 0, 0 et 0 à l'effort par défaut. La
+  // réparation et la revue finale le gardent (à effort moyen, la revue sur-signalait
+  // les doublons : boucle moteur, itération 3) ; la vérification, dont la réflexion faisait 88 % de
+  // la sortie, passe à effort moyen (itération 4), puis la conception, 83 % de réflexion (itération 7). La limite de sortie reste au-dessus des 16 000
+  // tokens où la réflexion coupait la réponse.
   const id = await pandasCourse();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam } = await import("../lib/qcm");
   const r = await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0 }));
   assert.equal(r.count, 4);
   assert.deepEqual(efforts.get("autre"), undefined, `appel non reconnu : ${[...efforts.keys()].join(", ")}`);
-  for (const step of ["conception QCM", "vérification QCM", "audit final", "remplacement de distracteurs", "doublons"]) {
+  const expected: Record<string, string | undefined> = { "conception QCM": "medium", "vérification QCM": "medium", "revue finale": undefined, "remplacement de distracteurs": undefined };
+  for (const [step, effort] of Object.entries(expected)) {
     const got = efforts.get(step);
     assert.ok(got?.length, `l'étape « ${step} » a tourné`);
-    assert.deepEqual([...new Set(got)], [undefined], `effort de « ${step} »`);
+    assert.deepEqual([...new Set(got)], [effort], `effort de « ${step} »`);
     assert.ok((maxTokens.get(step) ?? []).every((m) => (m ?? 0) >= 32_000), `max_tokens de « ${step} » : ${maxTokens.get(step)}`);
   }
 });

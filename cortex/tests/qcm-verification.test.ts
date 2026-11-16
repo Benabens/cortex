@@ -6,8 +6,9 @@
  * toujours l'ancienne réponse. L'étudiant lisait une clé et une explication
  * contradictoires, plus une note interne.
  * Verrouillé, avec un faux modèle (aucune dépense) :
- *  - un item dont la clé est contestée est régénéré, jamais gardé avec son explication ;
- *  - toujours contesté après régénération : écarté, et son sujet comblé ;
+ *  - un item dont la clé est contestée est écarté, jamais gardé avec son explication : la question
+ *    de réserve prend sa place (sur-générer puis filtrer, banc HUM-285 du 15/11) ;
+ *  - réserve insuffisante : une notion de réserve est comblée, pas le sujet écarté ;
  *  - aucune note interne de vérification dans une explication, y compris d'un examen déjà en base.
  * Et, même examen : ~6 questions portaient sur la grille d'évaluation de l'essai (D1/D2/D3),
  * la question ouverte finale ou la mise en forme de la bibliographie du poster. Une question
@@ -88,7 +89,9 @@ before(async () => {
       const parsed = JSON.parse(body) as { messages: { content: unknown }[] };
       const content = parsed.messages.map((m) => typeof m.content === "string" ? m.content : JSON.stringify(m.content)).join("\n");
       let text = "{}";
-      if (/"results"/.test(content)) { verifyPrompts.push(content); text = verifyReply(content); }
+      // Revue finale : audit (verdicts) et doublons dans le même appel ; rien à signaler.
+      if (/"duplicates"/.test(content)) text = JSON.stringify({ verdicts: [...content.matchAll(/^Q(\d+)\./gm)].map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })), notions: [], duplicates: [], repeats: [] });
+      else if (/"results"/.test(content)) { verifyPrompts.push(content); text = verifyReply(content); }
       else if (/"items"/.test(content)) {
         designCalls++;
         designPrompts.push(content);
@@ -146,36 +149,29 @@ function assertCoherent(items: { stem: string; options: string[]; correct?: numb
   }
 }
 
-test("clé contestée par le correcteur : l'item est régénéré, jamais gardé avec son explication d'origine", async () => {
+test("clé contestée par le correcteur : l'item est écarté, jamais gardé avec son explication d'origine ; la réserve prend sa place", async () => {
   const id = await course();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
-  // 1ᵉʳ lot : la Q19 contestée en tête ; régénération : une version que le correcteur confirme.
-  design = (n, call, prompt) => {
-    if (call === 1) return JSON.stringify({ items: [contested(1), ...Array.from({ length: n - 1 }, (_, i) => plain(i))] });
-    if (/À CORRIGER/.test(prompt)) return JSON.stringify({ items: [item("Que désigne l'alignement externe ? (r2)", ALIGN, 1)] });
-    return JSON.stringify({ items: Array.from({ length: n }, (_, i) => plain(call * 10 + i)) });
-  };
-  const r = await runWithCourse(id, () => generateQcmExam({ count: 3, openCount: 0 }));
+  // 1ᵉʳ lot : la Q19 contestée en tête ; 3 QCM + 1 de réserve.
+  design = (n, call) => JSON.stringify({ items: call === 1 ? [contested(1), ...Array.from({ length: n - 1 }, (_, i) => plain(i))] : Array.from({ length: n }, (_, i) => plain(call * 10 + i)) });
+  const steps: string[] = [];
+  const r = await runWithCourse(id, () => generateQcmExam({ count: 3, openCount: 0, onStep: (s) => { steps.push(s); } }));
   assert.equal(r.count, 3);
   const exam = await runWithCourse(id, () => getQcmExam(r.id, true));
   assert.ok(exam!.items.every((it) => !/\(v1\)/.test(it.stem)), "la version contestée n'est pas gardée");
-  assert.ok(exam!.items.some((it) => /\(r2\)/.test(it.stem)), "la version régénérée la remplace");
   assertCoherent(exam!.items);
-  const regen = designPrompts.find((p) => /À CORRIGER/.test(p));
-  assert.match(regen ?? "", /alignement externe/, "la régénération dit ce que le correcteur a trouvé");
+  assert.ok(steps.some((s) => /rejeté : clé contestée : le correcteur trouve « L'alignement externe/.test(s)), "le rejet dit ce que le correcteur a trouvé");
+  assert.equal(designCalls, 1, "la question de réserve prend la place : ni régénération ni comblement");
 });
 
-test("toujours contestée après régénération : la question est écartée et son sujet comblé", async () => {
+test("clé contestée au-delà de la réserve : la question est écartée, une autre notion comble sa place", async () => {
   const id = await course();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
-  // La conception défend toujours l'alignement interne pour ce sujet (v1, v2…), le correcteur jamais.
-  design = (n, call, prompt) => {
-    if (call === 1) return JSON.stringify({ items: [contested(1), ...Array.from({ length: n - 1 }, (_, i) => plain(i))] });
-    if (/À CORRIGER/.test(prompt)) return JSON.stringify({ items: [contested(call)] });
-    return JSON.stringify({ items: Array.from({ length: n }, (_, i) => plain(call * 10 + i)) });
-  };
+  // Deux questions contestées dans le premier lot (la réserve comprise) : il en manque une. Le
+  // sujet écarté n'est pas redemandé tel quel (HUM-285, job 12 du 13/11 : il rendait le même rejet).
+  design = (n, call) => JSON.stringify({ items: call === 1 ? [contested(1), plain(0), plain(1), contested(2)].slice(0, n) : Array.from({ length: n }, (_, i) => plain(call * 10 + i)) });
   const steps: string[] = [];
   const r = await runWithCourse(id, () => generateQcmExam({ count: 3, openCount: 0, onStep: (s) => { steps.push(s); } }));
   assert.equal(r.count, 3, steps.join("\n"));
@@ -183,11 +179,11 @@ test("toujours contestée après régénération : la question est écartée et 
   assert.ok(exam!.items.every((it) => !/\(v\d+\)/.test(it.stem)), "aucune version contestée n'est gardée");
   assertCoherent(exam!.items);
   assert.ok(steps.some((s) => /rejeté : clé contestée/.test(s)), "le rejet est dit");
-  const topup = designPrompts.find((p, i) => i > 0 && !/À CORRIGER/.test(p));
-  assert.match(topup ?? "", /Alignement interne et externe/, "le sujet de la question écartée est comblé");
+  assert.equal(designCalls, 2, "un lot prévu, une ronde de comblement");
+  assert.ok(!designPrompts.some((p) => /À CORRIGER/.test(p)), "aucune régénération");
 });
 
-test("clé confirmée mais défaut relevé (indice, ambiguïté) : aucune note ajoutée à l'explication", async () => {
+test("clé confirmée mais défaut relevé (indice, ambiguïté) : aucune note ajoutée à l'explication, aucune régénération", async () => {
   const id = await course();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
@@ -199,7 +195,9 @@ test("clé confirmée mais défaut relevé (indice, ambiguïté) : aucune note a
     const exam = await runWithCourse(id, () => getQcmExam(r.id, true));
     assert.equal(exam!.items.length, 2);
     assertCoherent(exam!.items);
-    assert.ok(designPrompts.some((p) => /À CORRIGER[\s\S]*seule à nuancer/.test(p)), "le défaut relevé déclenche une régénération");
+    // Une question faible passe après les questions propres ; faute de mieux, la vérifiée est livrée.
+    assert.equal(designCalls, 1, "aucune régénération");
+    assert.ok(exam!.items.every((it) => !/seule à nuancer/.test(it.explanation)), "le défaut relevé reste interne");
   } finally {
     judge = ok;
   }
@@ -275,23 +273,19 @@ test("banque de révision déjà en base avec une note de vérification : la not
   assert.ok(!(shown[0].explanation ?? "").includes(ALIGN[0]), "l'explication contredite n'est pas montrée");
 });
 
-test("clé contestée, version régénérée valide mais peu discriminante : elle remplace l'item rejeté, sans lot de comblement", async () => {
+test("clé contestée, question de réserve valide mais peu discriminante : elle remplace l'item rejeté, sans lot de comblement", async () => {
   const id = await course();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
-  design = (n, call, prompt) => {
-    if (call === 1) return JSON.stringify({ items: [contested(1), ...Array.from({ length: n - 1 }, (_, i) => plain(i))] });
-    if (/À CORRIGER/.test(prompt)) return JSON.stringify({ items: [item("Que désigne l'alignement externe ? (r2)", ALIGN, 1)] });
-    return JSON.stringify({ items: Array.from({ length: n }, (_, i) => plain(call * 10 + i)) });
-  };
+  design = (n, call) => JSON.stringify({ items: call === 1 ? [contested(1), plain(0), plain(1), item("Que désigne l'alignement externe ? (r2)", ALIGN, 1)].slice(0, n) : Array.from({ length: n }, (_, i) => plain(call * 10 + i)) });
   const ok = judge;
   judge = (b) => (/\(r2\)/.test(b) ? { answer: EXTERNAL, nameOnly: true } : ok(b));
   try {
     const r = await runWithCourse(id, () => generateQcmExam({ count: 3, openCount: 0 }));
     assert.equal(r.count, 3);
     const exam = await runWithCourse(id, () => getQcmExam(r.id, true));
-    assert.ok(exam!.items.some((it) => /\(r2\)/.test(it.stem)), "la version régénérée est gardée");
-    assert.equal(designCalls, 2, "conception + régénération, aucun comblement");
+    assert.ok(exam!.items.some((it) => /\(r2\)/.test(it.stem)), "la question de réserve, vérifiée, est gardée");
+    assert.equal(designCalls, 1, "aucune régénération ni comblement");
   } finally {
     judge = ok;
   }

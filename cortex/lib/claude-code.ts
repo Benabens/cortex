@@ -64,14 +64,35 @@ export type RunOpts = {
   timeoutMs?: number;
   /** Annulation coopérative (kill du sous-processus). */
   signal?: AbortSignal;
+  /** Mode banc seulement (CORTEX_CLAUDE_CODE_LEAN=1) : prompt système passé à part. */
+  system?: string;
+  /** Mode banc seulement : profondeur de réflexion du site (défaut de l'API : high). */
+  effort?: string;
 };
 
 export type RunResult = {
   /** Texte final (champ `result` du JSON du CLI). */
   text: string;
   /** Tokens consommés si le CLI les rapporte (métriques/cache). */
-  usage?: { inputTokens?: number; outputTokens?: number };
+  usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number };
 };
+
+/**
+ * Mode banc (CORTEX_CLAUDE_CODE_LEAN=1, posé par scripts/bench) : sans lui, `claude -p` ajoute
+ * ≈ 87 k tokens d'entrée par appel (prompt de Claude Code, CLAUDE.md, mémoire, MCP), soit 0,28 $
+ * au tarif API pour répondre « OK » (mesuré le 15/11) : le coût du banc ne mesurait plus le moteur.
+ * Ici le harnais tombe à ≈ 2,4 k tokens, le système du moteur passe en prompt système (mis en cache
+ * comme en prod) et l'effort du site est respecté comme par l'API.
+ */
+const LEAN_SYSTEM = "Suis exactement les consignes du message.";
+function leanArgs(opts: RunOpts): string[] {
+  return [
+    "--tools", "Read",
+    "--safe-mode", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
+    "--system-prompt", opts.system?.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ") || LEAN_SYSTEM,
+    "--effort", opts.effort ?? "high",
+  ];
+}
 
 /** Lance `claude -p` et renvoie le texte final (champ `result` du JSON). */
 export async function runClaudeCode(opts: RunOpts): Promise<string> {
@@ -89,6 +110,7 @@ export function runClaudeCodeRaw(opts: RunOpts): Promise<RunResult> {
     "--output-format", "json",
     "--allowedTools", "Read",
     "--model", model,
+    ...(process.env.CORTEX_CLAUDE_CODE_LEAN === "1" ? leanArgs(opts) : []),
   ];
   for (const d of addDirs) args.push("--add-dir", d);
 
@@ -149,7 +171,13 @@ export function runClaudeCodeRaw(opts: RunOpts): Promise<RunResult> {
         const j = JSON.parse(stdout);
         if (j.is_error) return done(() => reject(new ClaudeCodeError(String(j.result ?? "Erreur Claude Code"))));
         const usage = j.usage && typeof j.usage === "object"
-          ? { inputTokens: numberOrUndef(j.usage.input_tokens), outputTokens: numberOrUndef(j.usage.output_tokens) }
+          ? {
+            inputTokens: numberOrUndef(j.usage.input_tokens), outputTokens: numberOrUndef(j.usage.output_tokens),
+            // Cache de prompt : rapporté par le CLI, absent des vieilles versions. La réflexion est
+            // comprise dans output_tokens (facturée comme sortie).
+            ...(numberOrUndef(j.usage.cache_read_input_tokens) !== undefined ? { cacheReadTokens: j.usage.cache_read_input_tokens } : {}),
+            ...(numberOrUndef(j.usage.cache_creation_input_tokens) !== undefined ? { cacheWriteTokens: j.usage.cache_creation_input_tokens } : {}),
+          }
           : undefined;
         done(() => resolve({ text: String(j.result ?? ""), usage }));
       } catch {

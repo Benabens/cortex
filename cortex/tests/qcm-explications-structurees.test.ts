@@ -286,11 +286,13 @@ function justify(prompt: string): string {
   })) });
 }
 
-/** Audit final simulé : verdicts, et les cases « À JUSTIFIER » quand il y en a (même appel). */
+/** Audit final simulé : verdicts, et les cases « À JUSTIFIER » quand il y en a (même appel) ; la revue finale y joint les doublons. */
 function audit(prompt: string): string {
   const qs = blocks(prompt);
   return JSON.stringify({
     verdicts: qs.map(({ index, body }) => ({ index, key: true, offCourse: false, trivial: opts(body).filter((x) => x.text.startsWith("Une option absurde")).map((x) => x.k) })),
+    // Revue finale du pipeline à lots (audit et doublons en un appel) : sans doublon simulé.
+    ...(/"duplicates"/.test(prompt) ? { notions: [], duplicates: [], repeats: [] } : {}),
     ...(/"justifications"/.test(prompt) ? { justifications: JSON.parse(justify(prompt)).justifications.filter((j: { key: string; distractors: unknown[] }) => j.key || j.distractors.length) } : {}),
   });
 }
