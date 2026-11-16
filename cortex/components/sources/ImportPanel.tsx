@@ -11,6 +11,7 @@ import { cn } from "@/lib/ux/cn";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
 import { FOLDER_EXTENSIONS, prepareCourseImport, type FolderImportRefusal } from "@/lib/folder-import";
+import { ingestProblems, type IngestProblem } from "@/lib/ingest-report";
 
 const ACCEPT = ".pdf,.html,.htm,.txt,.md,.zip";
 /** Un dossier de cours contient plus que des annales : slides, séries, images, notes. */
@@ -48,6 +49,8 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   const [paywall, setPaywall] = useState(false);
   const [folderProgress, setFolderProgress] = useState<{ done: number; total: number } | null>(null);
   const [folderRefusals, setFolderRefusals] = useState<FolderImportRefusal[]>([]);
+  // Fichiers déposés que l'ingestion n'a pas pu lire : nommés un par un, avec quoi faire.
+  const [unreadFiles, setUnreadFiles] = useState<IngestProblem[]>([]);
   const [jobId, setJobId] = useState<number | null>(null);
   const [jobKind, setJobKind] = useState<"format" | "ingest" | "prepare" | null>(null);
   const job = useJob(jobId);
@@ -65,6 +68,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
     setUploadedMsg(null);
     setFolderProgress(null);
     setFolderRefusals([]);
+    setUnreadFiles([]);
     notified.current = false;
   }, [courseId]);
 
@@ -72,15 +76,20 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
     if (!job || JOB_ACTIVE.includes(job.status) || notified.current) return;
     notified.current = true;
     setJobId(null);
+    const unread = ingestProblems(job.report);
+    setUnreadFiles(unread);
     if (job.status === "error" || job.status === "failed") {
       setError(asText(job.error) ?? "Le traitement a échoué. Réessaie.");
     } else {
+      const skipped = unread.length
+        ? ` ${unread.length} fichier${unread.length > 1 ? "s n’ont" : " n’a"} pas pu être lu${unread.length > 1 ? "s" : ""} : la liste est ci-dessous.`
+        : "";
       setUploadedMsg(
-        jobKind === "prepare"
+        (jobKind === "prepare"
           ? "Cours préparé : types d’exos et poids mis à jour."
           : jobKind === "ingest"
             ? "Dossier ingéré : le corpus est à jour."
-            : "Format re-détecté sur tes annales."
+            : "Format re-détecté sur tes annales.") + skipped
       );
       onChanged();
     }
@@ -89,6 +98,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
 
   const startJob = (id: number, kind: "format" | "ingest" | "prepare") => {
     notified.current = false;
+    setUnreadFiles([]);
     setJobId(id);
     setJobKind(kind);
   };
@@ -351,6 +361,15 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           <p className="font-semibold text-ink-2">Fichiers non importés</p>
           <ul className="mt-1.5 list-disc space-y-1 pl-4">
             {folderRefusals.map((item, index) => <li key={`${item.name}-${index}`}><span className="break-all">{item.name}</span> : {item.reason}</li>)}
+          </ul>
+        </div>
+      )}
+      {unreadFiles.length > 0 && (
+        <div className="rounded-lg border border-line bg-surface-2/30 px-3.5 py-3 text-[0.78rem] text-ink-3" role="status">
+          <p className="font-semibold text-ink-2">Fichiers non lus</p>
+          <p className="mt-0.5">Les autres fichiers du cours ont été lus normalement.</p>
+          <ul className="mt-1.5 list-disc space-y-1 pl-4">
+            {unreadFiles.map((item) => <li key={item.path}><span className="break-all font-medium text-ink-2">{item.name}</span> : {item.message}</li>)}
           </ul>
         </div>
       )}
