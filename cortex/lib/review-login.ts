@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import { CredentialsSignin } from "next-auth";
 import { authGet, authRun } from "@/db/auth-store";
-import { isOwner } from "@/lib/billing/owner";
 import { clientIp } from "@/lib/client-ip";
 import { log } from "@/lib/metrics";
 
@@ -213,7 +212,9 @@ export async function authorizeReview(
     return null;
   }
   const user = await ensureReviewUser(cfg.email);
-  if (await isOwner(user.id, env)) {
+  // Même règle que lib/billing/owner (id explicite, sinon adresse, déjà exclue par la config), sans
+  // l'importer : il tire le moteur entier (jobs, LLM) dans le proxy, qui charge ce module.
+  if (user.id === env.CORTEX_OWNER_USER_ID?.trim()) {
     log("error", "auth.review_login_refused", { reason: "owner_account", ip });
     return null;
   }
