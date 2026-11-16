@@ -29,7 +29,7 @@ export default defineTool({
   input: z.object({
     name: z.string().min(2).max(80).describe("Course name, e.g. \"Linear algebra\"."),
     code: z.string().min(1).max(24).optional().describe("Exam / course code, e.g. \"COMP 201\"."),
-    university: z.string().min(1).max(80).optional().describe("University or school, e.g. \"University of Example\"."),
+    university: z.string().min(1).max(80).optional().describe("University or school, as the student names it (never assume one)."),
     language: z.enum(LANGUAGES).optional().describe("Language of the course materials and exams. Omit it to detect it from the past exams, then the materials (English until materials are added)."),
     exam_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Exam date, YYYY-MM-DD."),
     exam_format: z.object(examFormatInput).optional().describe("Real format of the exam, if known (can be changed later with set_exam_format)."),

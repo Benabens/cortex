@@ -38,7 +38,7 @@ export async function generateDrill(concept: string): Promise<Drill> {
     p.directivesBlock(),
     ``,
     `Génère UNE seule question d'entraînement ciblée sur : « ${concept} ».`,
-    `Elle doit être APPLIQUÉE (calculer / tracer / remplir / justifier), au format et niveau d'un vrai final EPFL, en respectant les CONTRAINTES DURES ci-dessus.`,
+    `Elle doit être APPLIQUÉE (calculer / tracer / remplir / justifier), au format et niveau ${p.drillLevel()}, en respectant les CONTRAINTES DURES ci-dessus.`,
     `Fournis aussi une ÉCHELLE DE 5 INDICES, du plus vague (juste nommer la technique/le concept à utiliser) au plus précis (presque la solution complète, étape par étape) — ils seront révélés un par un.`,
     `statement_html et solution_html en HTML SIMPLE (<p>,<ul>,<li>,<code>,<pre>,<table>,<strong>). Pas d'images, pas de LaTeX.`,
     COURSE_TERMS_RULE,

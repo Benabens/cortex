@@ -2,6 +2,7 @@ import { ARCHETYPES, type Archetype } from "@/lib/archetypes";
 import { buildBlueprint } from "@/lib/blueprint";
 import type { CourseProfile, Slot } from "@/lib/course-profile";
 import { directivesBlock, staffNotesText } from "@/lib/directives";
+import { styleFor } from "@/lib/difficulty";
 import { refImageFor, visionBlock } from "@/lib/figrefs";
 
 /**
@@ -83,4 +84,6 @@ export const cs202Profile: CourseProfile = {
     `Applique le PRINCIPE DE CONSTRUCTION : UN artefact concret creusé par des sous-questions \\subq{N.M}{...}{pts} en escalier qui testent les INTERACTIONS, avec AU MOINS UN VRAI PIÈGE et des NOMBRES NON RONDS, au niveau de la vraie page.`,
   ],
   qaIntro: () => `Tu es l'équipe enseignante de CS-202 Computer Systems (EPFL).`,
+  drillLevel: () => `d'un vrai final EPFL`,
+  styleGuide: styleFor,
 };

@@ -28,11 +28,11 @@ export function languageName(code: string): [upper: string, lower: string] {
 /** Style des sujets d'un cours générique : problèmes STEM, questions de SHS, essai, oral. */
 export type GenericStyle = "problems" | "humanities" | "essay" | "oral";
 
-export function genericDirectivesBlock(examCode: string, examName: string, language = "en", style: GenericStyle = "problems"): string {
+export function genericDirectivesBlock(course: string, language = "en", style: GenericStyle = "problems"): string {
   const [LANG, lang] = languageName(language);
   const head = [
     `═══════════════════════════════════════════════════════════════════════════`,
-    `CONTRAINTES DURES — ${examCode} ${examName}`,
+    `CONTRAINTES DURES — ${course}`,
     `═══════════════════════════════════════════════════════════════════════════`,
     ``,
     `🧩 FORMAT :`,
@@ -45,7 +45,7 @@ export function genericDirectivesBlock(examCode: string, examName: string, langu
       ...head,
       `  - PRINCIPE DE CONSTRUCTION : chaque grosse question part d'UN SEUL artefact concret et non-trivial (un problème, une instance, un jeu de données, un algorithme) creusé par 4-7 SOUS-QUESTIONS EN ESCALIER (difficulté croissante) qui testent les INTERACTIONS entre concepts, avec AU MOINS UN VRAI PIÈGE (cas-limite, frontière). Profondeur > largeur. Pas de questions déconnectées ni de simples vrai/faux.`,
       ``,
-      `📐 DIFFICULTÉ : niveau d'un vrai final EPFL — nombres NON RONDS, charge de calcul/raisonnement réelle, cas-limites. L'étudiant moyen doit transpirer.`,
+      `📐 DIFFICULTÉ : niveau des vrais examens du cours (ses annales) — nombres NON RONDS, charge de calcul/raisonnement réelle, cas-limites. L'étudiant moyen doit transpirer.`,
       `═══════════════════════════════════════════════════════════════════════════`,
     ].join("\n");
   }
