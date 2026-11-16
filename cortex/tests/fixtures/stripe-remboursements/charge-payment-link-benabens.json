@@ -1,0 +1,21 @@
+{
+  "id": "ch_test_benabens_1",
+  "object": "charge",
+  "amount": 5000,
+  "amount_captured": 5000,
+  "amount_refunded": 5000,
+  "billing_details": {
+    "email": "etudiante@example.test",
+    "name": "Client Fictif"
+  },
+  "currency": "eur",
+  "customer": "cus_test_benabens_1",
+  "description": "Prestation freelance (Payment Link)",
+  "livemode": false,
+  "metadata": {},
+  "paid": true,
+  "payment_intent": "pi_test_benabens_1",
+  "receipt_email": "etudiante@example.test",
+  "refunded": true,
+  "status": "succeeded"
+}
