@@ -1,6 +1,7 @@
 import { q } from "@/db/q";
 import { EXAM_SOURCE_TYPES } from "@/lib/exam-format";
 import { courseMatter, excludedSourceIds, isExcludedMaterial } from "@/lib/source-scope";
+import { readColumns } from "@/lib/slide-columns";
 import { normalize, tokenize } from "@/lib/text";
 
 /**
@@ -178,7 +179,7 @@ const NOT_COURSE_FACTS = new Set<string>(EXAM_SOURCE_TYPES);
 
 /** Fenêtre d'un texte autour du premier mot de la requête qu'il contient. */
 function windowAround(text: string, query: string, cap: number): string {
-  const t = text.replace(/\s+/g, " ").trim();
+  const t = readColumns(text).replace(/\s+/g, " ").trim();
   if (t.length <= cap) return t;
   const words = query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4);
   const lower = t.toLowerCase();
@@ -224,7 +225,7 @@ function queryWords(query: string): string[] {
  * sujet (Svenson (1981), à 3 500 caractères du titre d'un support de HUM-285, 02/11).
  */
 export function densestWindow(text: string, query: string, cap: number): string {
-  const t = text.replace(/\s+/g, " ").trim();
+  const t = readColumns(text).replace(/\s+/g, " ").trim();
   if (t.length <= cap) return t;
   const lower = t.toLowerCase();
   const positions = queryWords(query).map((w) => {
@@ -324,7 +325,7 @@ export async function corpusWindows(queries: string[], opts: { perQuery?: number
   let total = 0;
   for (const r of rows) {
     if (NOT_COURSE_FACTS.has(r.type) || r.type === "exam_info" || excluded.has(Number(r.sid))) continue;
-    const text = courseMatter(r.text ?? "").replace(/\s+/g, " ").trim();
+    const text = readColumns(courseMatter(r.text ?? "")).replace(/\s+/g, " ").trim();
     if (!text) continue;
     total += text.length;
     if (total > MAX_CORPUS_CHARS) return [];
