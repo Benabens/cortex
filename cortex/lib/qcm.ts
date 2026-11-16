@@ -1467,15 +1467,15 @@ async function finalReview(items: QcmItem[], opts: { strict: boolean; previous?:
 }
 
 /**
- * Budget TEMPS de la phase finale (revue, comblement, réparation, porte de sortie) :
+ * Budget TEMPS de la phase finale (après la revue : comblement, réparation, porte de sortie) :
  * QCM_FINAL_PHASE_BUDGET_MS, défaut 6 min (10 min jusqu'au job 28, finition v6 : examen livré en
  * 42 min, phase finale à 14 min pour une seule ronde de réparation). Job 26 (15/11/2026) : à 99 %
  * dès 30 min, puis 40 min de plus sur « un distracteur reste éliminable sans le cours », ronde après
  * ronde de remplacement (conception → vérification → réparation → revérification, jusqu'à 10 min
  * d'appel chacune depuis #95) ; seul un budget de lots (10 pour 20 QCM) bornait la boucle. Une
  * ronde réelle dure 5 à 7 min : 6 min laissent encore un remplacement et la porte de sortie, sans
- * les 3 à 4 min de marge inutilisées que laissait l'ancien budget de 10. Le budget n'interrompt aucun appel : il empêche d'en lancer une nouvelle ronde ; à épuisement, seuls les
- * contrôles déterministes de la porte de sortie passent encore, ses appels au modèle (revérification,
+ * les 3 à 4 min de marge inutilisées que laissait l'ancien budget de 10. Le budget n'interrompt
+ * aucun appel : il empêche d'en lancer une nouvelle ronde ; à épuisement, seuls les contrôles déterministes de la porte de sortie passent encore, ses appels au modèle (revérification,
  * réécriture des explications) cèdent la place (#105) sans jamais garder une question non vérifiée.
  */
 const FINAL_PHASE_DEFAULT_MS = 6 * 60_000;
@@ -2185,7 +2185,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     return false;
   };
   /**
-   * Budget TEMPS de la phase finale (finalPhaseBudgetMs), armé juste avant la revue finale : à
+   * Budget TEMPS de la phase finale (finalPhaseBudgetMs), armé juste après la revue finale : à
    * épuisement, plus de ronde de comblement ni de réparation, et la porte de sortie n'appelle plus
    * le modèle (revérification, explications) — la meilleure version déjà vérifiée est gardée, le
    * manque éventuel est remboursé au prorata (lib/jobs.ts, refundGeneration). Seuls les contrôles
@@ -2320,13 +2320,17 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       progress.done("QCM");
     }
     step(`${verifiedCandidates.length} QCM construits + vérifiés pour ${count} places → revue finale…`, 78);
-    // Le budget de la phase finale démarre ici, avant la revue finale (l'audit de tout le stock).
+    const passed = await review(verifiedCandidates, []);
+    progress.done("QCM");
+    // Le budget de la phase finale démarre ici, APRÈS la revue finale : la revue est un seul appel,
+    // toujours fait (≈ 5 min au banc HUM-285 du 16/11) ; armé avant elle, le budget de 6 min de
+    // #108 ne laissait plus rien à la porte de sortie, dont la réécriture des explications sautait
+    // (6 explications incohérentes livrées contre 0,3 avant le rebase). Il borne ce qui peut boucler :
+    // comblement, seconde réparation, appels au modèle de la porte de sortie.
     // Étape honnête : au-delà, l'avancement reste à 99 % (lib/progress) ; l'étudiant lit ce qui se
     // passe et combien de temps cela peut encore prendre, au lieu de « moins d'une minute » pendant 40 min.
     finalPhaseDeadline = Date.now() + finalPhaseBudgetMs();
     step(`Dernière vérification de l'examen (doublons, clés, distracteurs) : au plus ${Math.ceil(finalPhaseBudgetMs() / 60_000)} min de plus`, 78);
-    const passed = await review(verifiedCandidates, []);
-    progress.done("QCM");
     all.splice(0, all.length, ...selectCapped([], passed, count));
     if (!finalPhaseExhausted()) await topUp(missing);
     // Toujours en dessous du nombre demandé : les reprises d'un examen précédent, déjà vérifiées et
