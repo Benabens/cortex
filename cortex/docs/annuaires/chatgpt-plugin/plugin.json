@@ -1,0 +1,89 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "cortex",
+  "version": "1.1.0",
+  "description": "Mock exams, practice questions and weak points from your own course materials in Cortex.",
+  "author": { "name": "TODO: publisher legal name", "url": "https://cortexexam.com" },
+  "homepage": "https://cortexexam.com/mcp",
+  "repository": "https://github.com/Benabens/cortex",
+  "keywords": ["education", "exam preparation", "mock exams", "study plan"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Cortex",
+        "shortDescription": "Mock exams from your courses",
+        "longDescription": "Cortex prepares students for their exams from their own course materials: slides, exercise sets and, above all, past exams. This plugin lets ChatGPT work on the student's existing Cortex account.\n\nRead: courses and exam dates, study plan, weak points, results, full-text search in the uploaded materials, credit balance and daily limits.\nGenerate, on request: a mock exam in the course's real exam format (multiple choice, exercises, mixed, essay or oral), one practice question with progressive hints, or a graded review of an answer.\nOrganise: create a course, add materials (public URL or pasted text), declare the exam format, prepare the course, report a faulty generated question.\n\nGenerations use credits the student already has in their Cortex account. Every paid tool first returns its exact cost without spending anything, and runs only after the student agrees in the conversation. The plugin sells nothing and handles no payment.\n\nThe student signs in to Cortex and chooses what ChatGPT may do (read only, generate, add courses); access can be revoked at any time from the Cortex account page. Text from course documents is treated as data, never as instructions.",
+        "developerName": "TODO: publisher legal name",
+        "category": "Education",
+        "websiteURL": "https://cortexexam.com/mcp",
+        "supportURL": "https://cortexexam.com/mcp",
+        "privacyPolicyURL": "https://cortexexam.com/privacy-en",
+        "termsOfServiceURL": "https://cortexexam.com/terms-en",
+        "defaultPrompt": [
+          "What are my weak points before my next exam?",
+          "Where am I in my study plan, and what should I revise next?",
+          "Give me one practice question on my weakest topic, with hints."
+        ],
+        "brandColor": "#2764EC",
+        "brandColorDark": "#2764EC",
+        "logo": "./assets/logo.png"
+      },
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Lists the demo student's courses and exam dates.",
+              "prompt": "Which courses do I have in Cortex, and when are the exams?",
+              "tools_triggered": ["list_courses"],
+              "expected_behavior": "Lists the course DEMO-101 with its exam date and the number of days left. No credit is spent."
+            },
+            {
+              "description": "Explains where the student stands in the course programme.",
+              "prompt": "Where am I in DEMO-101 and what should I revise next?",
+              "tools_triggered": ["get_study_plan"],
+              "expected_behavior": "Gives the exam countdown, coverage and mastery, and the prioritised list of topics to work on. No credit is spent."
+            },
+            {
+              "description": "Finds where a topic appears in the student's own materials.",
+              "prompt": "Find where conditional expectation appears in my DEMO-101 materials.",
+              "tools_triggered": ["search_course_materials"],
+              "expected_behavior": "Returns short excerpts with their source document. No credit is spent."
+            },
+            {
+              "description": "Paid generation: the cost is announced first and nothing runs before the student agrees.",
+              "prompt": "Give me one practice question on discrete random variables.",
+              "tools_triggered": ["generate_drill"],
+              "expected_behavior": "First call returns the exact cost (0.1 credit by default) and a confirmation token without spending anything; ChatGPT asks the student; after an explicit yes, the second call returns one exam-style question with five progressive hints and a worked solution."
+            },
+            {
+              "description": "Credit balance and daily limits.",
+              "prompt": "How many credits and generations do I have left today?",
+              "tools_triggered": ["get_account_status"],
+              "expected_behavior": "Gives the credit balance, the cost of each kind of generation and today's usage against the daily limits. No credit is spent."
+            }
+          ],
+          "negative": [
+            {
+              "description": "General knowledge question unrelated to the student's courses.",
+              "prompt": "What is the capital of Australia?",
+              "reason": "Nothing in the student's Cortex account is needed; ChatGPT answers without calling Cortex."
+            },
+            {
+              "description": "Request to buy credits.",
+              "prompt": "Buy me 50 Cortex credits.",
+              "reason": "The plugin cannot sell credits or handle payments; no tool is called and ChatGPT explains that credits are managed in the Cortex app."
+            },
+            {
+              "description": "Request to delete a course.",
+              "prompt": "Delete my DEMO-101 course from Cortex.",
+              "reason": "No tool deletes a course; ChatGPT says it cannot do it from the plugin."
+            }
+          ]
+        },
+        "demo_recording_url": "TODO: URL of the demo video",
+        "commerce": false,
+        "commerce_description": "This plugin does not sell products or process payments. Some tools use credits the user already holds in their Cortex account; the cost is shown first and the tool runs only after the user agrees."
+      }
+    }
+  }
+}

@@ -6,7 +6,7 @@ import { runAssist } from "../assist";
 import { clip } from "../content";
 import { courseLabel } from "../courses";
 import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, generationStatus, quoteSchema, quoteSummary } from "../schemas";
-import { defineTool, pendingResult } from "../tool";
+import { defineTool, pendingResult, SPENDING_HINTS } from "../tool";
 
 const output = z.object({
   status: generationStatus,
@@ -33,6 +33,8 @@ export default defineTool({
     "Costs credits (0.1 by default) and one daily assistance: the first call returns the exact cost and a confirmation_token without spending anything; " +
     "ask the user in the conversation and call again with the same arguments plus confirmation_token ONLY after they explicitly approved (nothing to confirm when nothing is charged).",
   kind: "generate",
+  annotations: SPENDING_HINTS,
+  userSummary: "Corrige ta réponse à une question, critère par critère.",
   input: z.object({
     course: courseArg,
     statement: z.string().min(1).max(FIELD_LIMITS.statement).describe("The exact question / exercise statement."),

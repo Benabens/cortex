@@ -1,5 +1,6 @@
 import { authBodyLimit } from "@/lib/auth-body-limit";
 import { demoReadable } from "@/lib/demo-paths";
+import { MCP_CARD_PATHS, MCP_ICON_PATHS } from "@/lib/mcp/identity";
 import { legacyHostRedirect } from "@/lib/public-url";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
@@ -27,7 +28,7 @@ const PUBLIC_PREFIXES = ["/api/auth", "/api/e2e-llm", "/login", "/api/health", "
  *  public/brand/ ; l'image de partage est sous /login (déjà public). */
 // /robots.txt doit être lisible SANS session : redirigé vers /login, il n'atteindrait
 // jamais les moteurs et l'app resterait crawlable (cf. app/robots.ts, lib/seo).
-const PUBLIC_FILES = new Set(["/icon.svg", "/apple-icon.png", "/manifest.webmanifest", "/robots.txt"]);
+const PUBLIC_FILES = new Set(["/icon.svg", "/apple-icon.png", "/manifest.webmanifest", "/robots.txt", ...MCP_ICON_PATHS]);
 
 /**
  * CONNECTEUR MCP (docs/MCP.md) : un client MCP n'a pas de cookie de session. Le
@@ -40,6 +41,8 @@ const PUBLIC_FILES = new Set(["/icon.svg", "/apple-icon.png", "/manifest.webmani
  */
 const MCP_PUBLIC = new Set([
   "/mcp",
+  // Carte du serveur (SEP-2127) : lue avant toute connexion, par un annuaire ou un client.
+  ...MCP_CARD_PATHS,
   "/.well-known/oauth-protected-resource",
   "/.well-known/oauth-protected-resource/mcp",
   "/.well-known/oauth-authorization-server",

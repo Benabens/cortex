@@ -27,15 +27,20 @@ const ALL: ToolDef[] = [
   getResults, getStudyPlan, getWeakPoints, listCourses, prepareCourse, reportQuestion, searchCourseMaterials, setExamFormat,
 ] as unknown as ToolDef[];
 
-function validate(tools: ToolDef[]): ToolDef[] {
+export function validateTools(tools: readonly ToolDef[]): ToolDef[] {
   const seen = new Set<string>();
   for (const t of tools) {
     if (!/^[a-z][a-z0-9_]{0,63}$/.test(t.name)) throw new Error(`Outil MCP au nom invalide : ${t.name}`);
     if (seen.has(t.name)) throw new Error(`Outil MCP en double : ${t.name}`);
     if (!t.title || t.description.length < 40) throw new Error(`Outil MCP sans titre ou description : ${t.name}`);
+    if (!t.userSummary) throw new Error(`Outil MCP sans résumé pour la personne : ${t.name}`);
+    const hints = t.annotations as Record<string, unknown> | undefined;
+    for (const h of ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"]) {
+      if (typeof hints?.[h] !== "boolean") throw new Error(`Outil MCP sans annotation ${h} explicite : ${t.name}`);
+    }
     seen.add(t.name);
   }
   return [...tools].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export const TOOLS: readonly ToolDef[] = validate(ALL);
+export const TOOLS: readonly ToolDef[] = validateTools(ALL);

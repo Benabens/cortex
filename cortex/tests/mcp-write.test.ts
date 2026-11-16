@@ -213,17 +213,31 @@ async function filesOf(courseId: string): Promise<string[]> {
 }
 
 test("outils d'ajout listés pour tout compte et annotés ; les instructions du serveur décrivent le parcours", async () => {
-  type Listed = { name: string; annotations?: Record<string, unknown> };
+  type Listed = { name: string; title?: string; annotations?: Record<string, unknown> };
+  const { TOOLS } = await import("../lib/mcp/registry");
   const client = await mcp((await connectAs(ALICE, { generate: true })).access);
   const tools = (await client.listTools()).tools as Listed[];
+  // Publié = déclaré : les quatre indications et le titre, explicites (tests/mcp-identity.test.ts pour les règles).
+  for (const declared of TOOLS) {
+    const t = tools.find((x) => x.name === declared.name);
+    assert.ok(t, `${declared.name} listé`);
+    assert.deepEqual(t.annotations, { title: declared.title, ...declared.annotations }, declared.name);
+  }
   for (const name of WRITE_TOOLS) {
-    const t = tools.find((x) => x.name === name);
-    assert.ok(t, `${name} listé`);
+    const t = tools.find((x) => x.name === name)!;
     assert.equal(t.annotations?.readOnlyHint, false, name);
-    assert.equal(t.annotations?.destructiveHint, false, name);
+    // Destructif : dépense (prepare_course), remplace ou efface (set_exam_format), retire des révisions (report_question).
+    assert.equal(t.annotations?.destructiveHint, ["prepare_course", "set_exam_format", "report_question"].includes(name), name);
     assert.equal(t.annotations?.openWorldHint, name === "add_course_source", name);
   }
   assert.match(client.getInstructions() ?? "", /create_course/);
+  // Identité du serveur (Implementation) : titre, description, site public, icônes absolues.
+  const info = client.getServerVersion() as { name: string; title?: string; description?: string; websiteUrl?: string; icons?: { src: string; mimeType?: string; sizes?: string[] }[] };
+  assert.equal(info.name, "cortex");
+  assert.equal(info.title, "Cortex");
+  assert.equal(info.websiteUrl, "https://cortexexam.com/mcp");
+  assert.ok(info.description && info.description.length <= 100);
+  assert.ok(info.icons?.length && info.icons.every((i) => i.src.startsWith(`${ISSUER}/mcp-icon`) && i.mimeType && i.sizes?.length));
   await client.close();
 });
 
