@@ -3,7 +3,7 @@ import type { Archetype } from "@/lib/archetypes";
 import { genericRefImageFor, genericVisionBlock } from "@/lib/course-vision";
 import type { CourseProfile, Slot } from "@/lib/course-profile";
 import { getCourse } from "@/lib/courses";
-import { courseMaterialTitles, formatContextFor } from "@/lib/exam-format";
+import { courseMaterialTitles, durationLabel, examBudgetFor, formatContextFor } from "@/lib/exam-format";
 import { excludedSourceIds } from "@/lib/source-scope";
 import { genericDirectivesBlock, languageName, type GenericStyle } from "@/lib/profiles/generic-directives";
 import { getExamDna, pickCoverage, sampleMolds } from "@/lib/exam-dna";
@@ -153,6 +153,27 @@ export function genericStyleFor(courseId: string): GenericStyle {
 /** Nombre de sujets par défaut d'un examen à exercices générique (jamais un slot unique). */
 const STYLE_SLOTS: Record<GenericStyle, number> = { problems: 4, humanities: 4, essay: 2, oral: 3 };
 
+/**
+ * Partage un barème entre des sujets selon leurs poids, par multiples de 5 quand il le permet
+ * (plus fort reste, à égalité le premier) : la somme est exactement le total. 180 en 4 sujets égaux
+ * → 45 chacun, et 35, 35, 30, 30, 25, 25 restent tels quels, comme avant ; 75 en 4 → 20, 20, 20, 15.
+ */
+export function splitPoints(total: number, weights: number[]): number[] {
+  const n = weights.length;
+  if (!n) return [];
+  const sum = weights.reduce((s, w) => s + w, 0);
+  const unit = total >= 5 * n ? 5 : 1;
+  const units = Math.floor(total / unit);
+  const exact = weights.map((w) => (units * w) / sum);
+  const out = exact.map(Math.floor);
+  const order = exact.map((e, i) => ({ i, frac: e - Math.floor(e) })).sort((a, b) => b.frac - a.frac || a.i - b.i);
+  let rest = units - out.reduce((s, x) => s + x, 0);
+  for (let k = 0; rest > 0; k = (k + 1) % n, rest--) out[order[k].i]++;
+  const pts = out.map((u) => u * unit);
+  pts[0] += total - units * unit;
+  return pts;
+}
+
 /** Notions à couvrir, une par sujet : notions du programme, sinon titres des sources de cours. */
 async function coverageLabels(n: number): Promise<string[]> {
   let labels: string[] = [];
@@ -173,7 +194,8 @@ async function coverageLabels(n: number): Promise<string[]> {
  */
 export function makeGenericProfile(courseId: string, archetypes: Archetype[], opts: { adaptive?: boolean } = {}): CourseProfile {
   const c = () => getCourse(courseId);
-  const matiere = () => `${c().examCode} ${c().examName} (${c().university})`;
+  // Sans code ni établissement, « l'équipe enseignante de  Data Structures () » laissait le modèle combler le trou.
+  const matiere = () => [c().examCode, c().examName].map((x) => x.trim()).filter(Boolean).join(" ") + (c().university.trim() ? ` (${c().university.trim()})` : "");
   // Profil CURATÉ (algo, ml) : ses archétypes, et l'anglais de ses annales — inchangés.
   // Profil ADAPTATIF (cours créé sans profil) : langue et archétypes selon le format résolu.
   const adaptive = !!opts.adaptive;
@@ -196,13 +218,13 @@ export function makeGenericProfile(courseId: string, archetypes: Archetype[], op
     const molds = sampleMolds(dna, n, {
       only: ["proof_analysis", "derivation", "design", "applied_scenario", "formula_computation", "code_trace", "table_fill", "figure_reading"],
     });
-    const pts = Math.max(5, Math.round(180 / n / 5) * 5);
+    const pts = splitPoints(examBudgetFor(courseId).points, Array(n).fill(1));
     return Array.from({ length: n }, (_, i) => {
       const a = archs[i % archs.length];
       const theme = labels.length ? labels[i % labels.length] : null;
       return {
         category: a.category,
-        points: pts,
+        points: pts[i],
         mold: molds[i] ?? null,
         brief: [
           `ARCHÉTYPE « ${a.id} » — ${a.concept}.`,
@@ -219,7 +241,7 @@ export function makeGenericProfile(courseId: string, archetypes: Archetype[], op
   const slotsFromArchetypes = async (): Promise<Slot[]> => {
     if (adaptive) return adaptiveSlots();
     // 6 slots (ou moins) : archétypes triés par poids × boost faiblesses (boucle de rétroaction des faiblesses),
-    // points dégressifs ≈ 180 total.
+    // points dégressifs ≈ le barème de l'examen (180 pour un final de 3 h : 35, 35, 30, 30, 25, 25).
     let hay = "";
     try {
       hay = (await q.all<{ topic: string; description: string | null }>(
@@ -232,7 +254,9 @@ export function makeGenericProfile(courseId: string, archetypes: Archetype[], op
     const boost = (a: Archetype) => (a.topics.some((t) => hay.includes(t)) ? 1.5 : 1);
     const sorted = [...archetypes].sort((a, b) => b.weight * boost(b) - a.weight * boost(a));
     const picks = sorted.slice(0, 6);
-    const pts = [35, 35, 30, 30, 25, 25];
+    // Poids des créneaux d'un final de 3 h : leur part du barème de l'examen (moins de 6 sujets : leur part seulement).
+    const weights = [35, 35, 30, 30, 25, 25].slice(0, picks.length);
+    const pts = splitPoints(Math.round((examBudgetFor(courseId).points * weights.reduce((s, w) => s + w, 0)) / 180), weights);
     // MOULES échantillonnés proportionnellement à l'ADN détecté du cours
     // (moules « ouverts » : un exam d'exercices n'a pas de statement_truefalse). Sans ADN → null.
     const dna = await getExamDna().catch(() => null);
@@ -258,10 +282,15 @@ export function makeGenericProfile(courseId: string, archetypes: Archetype[], op
     style() === "problems"
       ? `UN artefact concret creusé par des sous-questions \\subq{N.M}{...}{pts} en escalier qui testent les INTERACTIONS, avec AU MOINS UN VRAI PIÈGE et des NOMBRES NON RONDS.`
       : `UN élément PRÉCIS du cours (notion et conditions de sa définition, résultat d'étude, tension entre acteurs) à MOBILISER pour justifier, nuancer ou critiquer — sous-questions \\subq{N.M}{...}{pts}, et une GRILLE de correction dans le corrigé.`;
+  /** Barème et durée de l'examen, et seuil d'une « grosse question » (25 points sur 180). */
+  const budget = () => {
+    const b = examBudgetFor(courseId);
+    return { ...b, line: `~${b.points} points au total, ${durationLabel(b.minutes)}.`, big: Math.max(5, Math.round((b.points * 25) / 180 / 5) * 5) };
+  };
   const kindLabel = () => ({ problems: "exercices", humanities: "questions", essay: "sujets d'essai", oral: "questions d'oral" })[style()];
 
   return {
-    directivesBlock: () => genericDirectivesBlock(c().examCode, c().examName, language(), style()),
+    directivesBlock: () => genericDirectivesBlock(matiere(), language(), style()),
     visionBlock: genericVisionBlock, // images-étalon rendues depuis les vrais examens du cours
     staffNotesText: genericStaffNotes,
     refImageFor: genericRefImageFor,
@@ -271,38 +300,39 @@ export function makeGenericProfile(courseId: string, archetypes: Archetype[], op
     buildBlueprint: slotsFromArchetypes,
     promptIntroFull: () => style() === "problems" ? [
       `Tu es l'équipe enseignante de ${matiere()}.`,
-      `Tu rédiges un examen final INÉDIT, EN ${LANG()}, indiscernable d'un vrai final EPFL de ${c().examName}. Les CONTRAINTES DURES ci-dessus priment sur tout.`,
+      `Tu rédiges un examen INÉDIT, EN ${LANG()}, indiscernable d'un vrai examen de ${c().examName} : même niveau et même format que ses annales. Les CONTRAINTES DURES ci-dessus priment sur tout.`,
       ``,
       `═══ STRUCTURE ═══`,
-      `Plusieurs exercices indépendants, notés séparément, ~180 points au total, 3 h.`,
-      `PRINCIPE : chaque grosse question (≥25 pts) = UN artefact concret (un problème, une instance, un jeu de données, un algorithme) creusé par 4-7 sous-questions \\subq{N.M}{...}{pts} EN ESCALIER (difficulté croissante) qui testent les INTERACTIONS entre concepts, avec AU MOINS UN VRAI PIÈGE (cas-limite) et des nombres NON RONDS. Profondeur > largeur.`,
+      `Plusieurs exercices indépendants, notés séparément, ${budget().line}`,
+      `PRINCIPE : chaque grosse question (≥${budget().big} pts) = UN artefact concret (un problème, une instance, un jeu de données, un algorithme) creusé par 4-7 sous-questions \\subq{N.M}{...}{pts} EN ESCALIER (difficulté croissante) qui testent les INTERACTIONS entre concepts, avec AU MOINS UN VRAI PIÈGE (cas-limite) et des nombres NON RONDS. Profondeur > largeur.`,
     ] : [
       `Tu es l'équipe enseignante de ${matiere()}.`,
       `Tu rédiges un examen INÉDIT, EN ${LANG()}, indiscernable d'un vrai examen de ${c().examName}. Les CONTRAINTES DURES ci-dessus priment sur tout.`,
       ``,
       `═══ STRUCTURE ═══`,
-      `Plusieurs ${kindLabel()} indépendants, chacun sur une notion différente du programme.`,
+      `Plusieurs ${kindLabel()} indépendants, chacun sur une notion différente du programme, ${budget().line}`,
       `PRINCIPE : ${principle()}`,
     ],
     promptIntroBatch: (n: number) => style() === "problems" ? [
-      `Tu es l'équipe enseignante de ${matiere()}. Tu rédiges ${n} exercices INÉDITS, EN ${LANG()}, d'un examen final indiscernable d'un vrai final de ${c().examName}.`,
+      `Tu es l'équipe enseignante de ${matiere()}. Tu rédiges ${n} exercices INÉDITS, EN ${LANG()}, d'un examen indiscernable d'un vrai examen de ${c().examName} (${budget().line.slice(1, -1)}).`,
       `PRINCIPE : chaque exercice = ${principle()}`,
     ] : [
-      `Tu es l'équipe enseignante de ${matiere()}. Tu rédiges ${n} ${kindLabel()} INÉDITS, EN ${LANG()}, d'un examen indiscernable d'un vrai examen de ${c().examName}.`,
+      `Tu es l'équipe enseignante de ${matiere()}. Tu rédiges ${n} ${kindLabel()} INÉDITS, EN ${LANG()}, d'un examen indiscernable d'un vrai examen de ${c().examName} (${budget().line.slice(1, -1)}).`,
       `PRINCIPE : chaque sujet = ${principle()}`,
     ],
     exerciseLead: (target: string, a: Archetype, pts: number, _refImage: string | null) => [
-      `Tu rédiges UN SEUL ${style() === "problems" ? `exercice de Final ${c().examCode}` : `sujet d'examen de ${c().examCode}`} EN ${LANG()}, qualité examen, CIBLÉ sur : « ${target} ».`,
+      `Tu rédiges UN SEUL ${style() === "problems" ? `exercice d'examen de ${matiere()}` : `sujet d'examen de ${matiere()}`} EN ${LANG()}, qualité examen, CIBLÉ sur : « ${target} ».`,
       `Archétype à RÉ-INSTANCIER (ne recopie pas) : ${a.concept}. Construction : ${a.structure} Grille de réponse : ${a.grid}. Figure : ${a.figure}. PIÈGE à inclure : ${a.trap}.`,
       style() === "problems"
         ? `Barème ~${pts} points. UN artefact concret creusé par des sous-questions \\subq{N.M}{...}{pts} en escalier, NOMBRES NON RONDS.`
         : `Barème ~${pts} points. ${principle()}`,
     ],
     regenLead: (category: string | undefined, concept: string, points: number | undefined, diagnostic: string, _refImage: string | null) => [
-      `Régénère UN SEUL ${style() === "problems" ? `exercice de Final ${c().examCode}` : `sujet d'examen de ${c().examCode}`} EN ${LANG()}, catégorie « ${category} », concept proche de « ${concept} », barème ${points} points.`,
+      `Régénère UN SEUL ${style() === "problems" ? `exercice d'examen de ${matiere()}` : `sujet d'examen de ${matiere()}`} EN ${LANG()}, catégorie « ${category} », concept proche de « ${concept} », barème ${points} points.`,
       `La version précédente a ce PROBLÈME à corriger : ${diagnostic}`,
       `Applique le PRINCIPE : ${principle()}`,
     ],
     qaIntro: () => `Tu es l'équipe enseignante de ${matiere()}.`,
+    drillLevel: () => `des vrais examens du cours (ses annales)`,
   };
 }

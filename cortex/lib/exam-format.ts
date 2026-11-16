@@ -91,6 +91,8 @@ export type ExamFormat = {
   answerMode?: AnswerMode | null;
   /** Documents permis que l'annale écrit (détection du format) ; absent : elle ne le dit pas. */
   documents?: DocumentRule | null;
+  /** Total de points des annales, quand elles le disent (absent sinon ; un format à questions composées le porte dans `blocks`). */
+  totalPoints?: number;
 };
 
 /**
@@ -263,9 +265,13 @@ export function detectLanguage(text: string): Language | null {
 
 // ───────────────────────────── discipline ─────────────────────────────
 
-/** Préfixes de code de cours sans ambiguïté (EPFL et usages courants). */
-const HUMANITIES_CODE = /^(HUM|SHS|MGT|DH|AR|LAW|PHIL|HIST|SOC|POL|LIT)\b/i;
-const STEM_CODE = /^(MATH|PHYS|CS|COM|EE|ME|CH|CHEM|BIO|BIOENG|MSE|CIVIL|ENV|MICRO|NX|STAT|FIN)\b/i;
+/**
+ * Préfixes de code de cours sans ambiguïté (EPFL et usages courants), suivis du numéro, collé ou
+ * non : « CS-202 », « MATH 221 », mais aussi « CS201 », « COMP0002 », « HIST0001 » (un `\b` collé au
+ * chiffre ratait ces derniers, et le cours d'histoire recevait les consignes de calcul).
+ */
+const HUMANITIES_CODE = /^(HUM|SHS|MGT|DH|AR|LAW|PHIL|HIST|SOC|POL|LIT)(?=[\s_-]*\d)/i;
+const STEM_CODE = /^(MATH|PHYS|CS|CSE|COM|COMP|COMPSCI|EE|ME|CH|CHEM|BIO|BIOENG|MSE|CIVIL|ENV|MICRO|NX|STAT|FIN)(?=[\s_-]*\d)/i;
 /** Symboles et motifs de calcul : leur densité sépare un polycopié de maths d'un cours de SHS. */
 const MATH_TOKEN = /[=^∑∫√≤≥≈∂∇λσμπθ±×÷]|\d(?:[.,]\d+)?\s*[-+*/]\s*\(?\d|\\(?:frac|sum|int|sqrt|alpha|beta|lambda|sigma|mathbb)\b/g;
 const MATH_PER_1000 = 4;
@@ -387,7 +393,7 @@ function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Disc
   const types = p.question_types ?? [];
   const qcmShare = types.filter((t) => t.type === "scq" || t.type === "mcq").reduce((s, t) => s + (t.approx_count || 0), 0);
   const documents = (DOCUMENT_RULES as readonly string[]).includes(p.documents ?? "") ? (p.documents as DocumentRule) : null;
-  const base = { basis: "annales" as const, durationMin: p.duration_min || null, language, discipline, summary: p.format_summary || "", evidence: [], documents };
+  const base = { basis: "annales" as const, durationMin: p.duration_min || null, language, discipline, summary: p.format_summary || "", evidence: [], documents, ...(positive(p.total_points) ? { totalPoints: p.total_points } : {}) };
   const composite = blocksOf(p);
   if (composite) {
     const { count, ...blocks } = composite;
@@ -538,13 +544,29 @@ export async function courseLanguage(): Promise<string> {
  * résolution du cours dans ce process, sinon la déclaration, la langue et le
  * code du cours (discipline sans échantillon de corpus).
  */
-export function formatContextFor(courseId: string): { kind: ExamKind | null; language: string; discipline: Discipline; durationMin: number | null; documents: DocumentRule | null } {
+export function formatContextFor(courseId: string): { kind: ExamKind | null; language: string; discipline: Discipline; durationMin: number | null; documents: DocumentRule | null; totalPoints: number | null } {
   const known = memo.get(courseId);
   const c = getCourse(courseId);
   // Documents permis : la déclaration, sinon ce que l'annale écrit ; jamais deviné.
   const documents = c.examFormat?.documents ?? known?.documents ?? null;
-  if (known) return { kind: known.kind, language: known.language, discipline: known.discipline, durationMin: known.durationMin, documents };
-  return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || FALLBACK_LANGUAGE, discipline: inferDiscipline({ code: c.examCode }), durationMin: c.examFormat?.durationMin ?? null, documents };
+  if (known) return { kind: known.kind, language: known.language, discipline: known.discipline, durationMin: known.durationMin, documents, totalPoints: known.totalPoints ?? known.blocks?.totalPoints ?? null };
+  return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || FALLBACK_LANGUAGE, discipline: inferDiscipline({ code: c.examCode }), durationMin: c.examFormat?.durationMin ?? null, documents, totalPoints: null };
+}
+
+/**
+ * Barème et durée d'un examen généré : la durée du format résolu (annales, déclaration), sinon
+ * celle du cours ; le total des annales s'il est connu, sinon un point par minute (180 points en
+ * 3 h, le ratio historique). Plus jamais « ~180 points, 3 h » pour un midterm de 75 min.
+ */
+export function examBudgetFor(courseId: string): { minutes: number; points: number } {
+  const f = formatContextFor(courseId);
+  const minutes = f.durationMin ?? getCourse(courseId).durationMin;
+  return { minutes, points: f.totalPoints ?? minutes };
+}
+
+/** Durée lisible dans un prompt : « 3 h » en heures pleines, sinon « 75 min ». */
+export function durationLabel(min: number): string {
+  return min % 60 === 0 ? `${min / 60} h` : `${min} min`;
 }
 
 /**
