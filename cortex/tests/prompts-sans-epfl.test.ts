@@ -111,6 +111,17 @@ test("hors EPFL : aucune consigne ne prend un final EPFL pour cible, l'examen r�
   assert.match(directives, /annales/, "le niveau est celui des annales du cours");
 });
 
+test("cours sans code ni établissement : le prompt nomme le cours, sans trou à combler", async () => {
+  const id = await newCourse({ code: "", university: "" });
+  const { p, intro } = await profileOf(id);
+  const { getCourse } = await import("../lib/courses");
+  const name = getCourse(id).examName;
+  assert.equal(p.qaIntro(), `Tu es l'équipe enseignante de ${name}.`);
+  const a = p.archetypes[0];
+  const leads = [intro, p.directivesBlock(), ...p.exerciseLead("arbres", a, 20, null), ...p.regenLead(a.category, "arbres", 20, "trop facile", null)].join("\n");
+  assert.doesNotMatch(leads, /\(\)|de {2}|— *$|\bFinal\b/m, leads);
+});
+
 test("barème et durée : ceux de l'examen déclaré (75 min), pas ~180 points en 3 h", async () => {
   const id = await newCourse({ examFormat: { kind: "exercises", durationMin: 75 } });
   const { intro, slots } = await profileOf(id);

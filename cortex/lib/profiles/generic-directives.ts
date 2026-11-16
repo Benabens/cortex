@@ -28,11 +28,11 @@ export function languageName(code: string): [upper: string, lower: string] {
 /** Style des sujets d'un cours générique : problèmes STEM, questions de SHS, essai, oral. */
 export type GenericStyle = "problems" | "humanities" | "essay" | "oral";
 
-export function genericDirectivesBlock(examCode: string, examName: string, language = "en", style: GenericStyle = "problems"): string {
+export function genericDirectivesBlock(course: string, language = "en", style: GenericStyle = "problems"): string {
   const [LANG, lang] = languageName(language);
   const head = [
     `═══════════════════════════════════════════════════════════════════════════`,
-    `CONTRAINTES DURES — ${examCode} ${examName}`,
+    `CONTRAINTES DURES — ${course}`,
     `═══════════════════════════════════════════════════════════════════════════`,
     ``,
     `🧩 FORMAT :`,
