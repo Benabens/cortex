@@ -1,5 +1,4 @@
 import { coursePaths } from "@/lib/courses";
-import { createJobExclusive, ReservationRefused, startWorker } from "@/lib/jobs";
 import { requireCourse } from "@/lib/req";
 import { UPLOAD_LIMITS, readFormData, withBodyLimit } from "@/lib/upload-limit";
 import { ingestRefFile } from "@/lib/sources";
@@ -13,9 +12,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Upload de finals récents : on les range dans data/<course>/refs/, on les ingère
- * (corpus + exam_refs), puis on relance la DÉTECTION DE FORMAT (job) → l'examen blanc se cale
- * sur ces finals. PDF/HTML/txt acceptés.
+ * Upload de finals récents : on les range dans data/<course>/refs/ et on les ingère
+ * (corpus + exam_refs). GRATUIT, comme tout dépôt : relire le format sur ces annales
+ * est une détection payante (vision LLM → crédit + génération du jour), lancée par
+ * l'étudiant lui-même via POST /api/refs/format, son coût affiché avant le clic
+ * (`formatPending` : l'écran la propose). PDF/HTML/txt acceptés.
  */
 export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const { course, denied } = requireCourse(req);
@@ -38,30 +39,5 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     try { await ingestRefFile(`refs/${safe}`); saved.push(safe); } catch (e) { /* fichier illisible */ }
   }
   if (!saved.length) return NextResponse.json({ error: "Aucun fichier exploitable (PDF/HTML/txt)." }, { status: 400 });
-
-  // relance la détection de format en arrière-plan (se cale sur les annales, dont les nouvelles).
-  // Ce job fait de la vision LLM → quota + crédits ; si le gate
-  // refuse, l'UPLOAD reste acquis (contenu), seul le job de format est différé.
-  let formatJobId: number | undefined;
-  let formatSkipped: string | undefined;
-  if (process.env.E2E_TEST_AUTH === "1" && process.env.E2E_TEST_RUN === "1") {
-    formatSkipped = "Détection couverte par la préparation hermétique E2E";
-    return NextResponse.json({ ok: true, files: saved, formatSkipped });
-  }
-  const { jobSpec, launchGate } = await import("@/lib/billing/limits");
-  const { costForJob } = await import("@/lib/jobs");
-  const gate = await launchGate(jobSpec("format", costForJob("format")));
-  if (gate) {
-    formatSkipped = gate.error;
-  } else {
-    try {
-      const r = await createJobExclusive("format", JSON.stringify({ reason: "upload", files: saved }));
-      formatJobId = r.id;
-      if (!r.existing) await startWorker(formatJobId, course);
-    } catch (e) {
-      if (e instanceof ReservationRefused) formatSkipped = e.message; // l'upload reste acquis
-      else throw e;
-    }
-  }
-  return NextResponse.json({ ok: true, files: saved, formatJobId, formatSkipped });
+  return NextResponse.json({ ok: true, files: saved, formatPending: true });
 })

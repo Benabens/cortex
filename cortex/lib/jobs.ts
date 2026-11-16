@@ -53,13 +53,14 @@ export async function createJob(type: JobType, target?: string): Promise<number>
  * Création EXCLUSIVE (anti double-exécution) : re-vérifie le job actif du même
  * type DANS une transaction (le check `activeJob` des routes est un TOCTOU —
  * deux POST concurrents pouvaient spawner 2 workers). Renvoie le job existant
- * si un run du même type est déjà actif.
+ * si un run du même type est déjà actif. `costCenti` : ce que CETTE création a
+ * débité (0 pour un job existant réutilisé, le propriétaire ou sans facturation).
  */
-export async function createJobExclusive(type: JobType, target?: string): Promise<{ id: number; existing: boolean }> {
+export async function createJobExclusive(type: JobType, target?: string): Promise<{ id: number; existing: boolean; costCenti: number }> {
   await ensureJobsSchema();
   const activeSql = `SELECT id FROM jobs WHERE status IN ${ACTIVE_STATES} AND type = ? ORDER BY id DESC LIMIT 1`;
   const already = await q.get<{ id: number }>(activeSql, type);
-  if (already) return { id: already.id, existing: true };
+  if (already) return { id: already.id, existing: true, costCenti: 0 };
 
   // POINT UNIQUE de la comptabilité de génération : UNE réservation atomique —
   // rafale, quota du jour, places en cours, solde — AVANT que le job n'existe.
@@ -73,6 +74,7 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
   const { isCourseDeleting } = await import("@/lib/course-deletion");
   if (await isCourseDeleting(user, course)) throw new ReservationRefused(409, "Ce cours est en cours de suppression : aucune génération possible.");
   let ref: string | null = null;
+  let costCenti = 0;
   if (type !== "ingest") {
     const { reserveGeneration } = await import("@/lib/billing/reserve");
     ref = `job:${user}:${course}:${crypto.randomUUID()}`;
@@ -87,6 +89,7 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
       throw new ReservationRefused(503, "Facturation indisponible, réessaie dans un instant.");
     }
     if (!r.ok) throw new ReservationRefused(r.status, r.error);
+    costCenti = r.costCenti;
   }
 
   // Insertion EXCLUSIVE : le job actif du même type est re-vérifié DANS la
@@ -102,7 +105,7 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
     return { id, existing: false };
   });
   if (res.existing && ref) await releaseReservation(type, ref, user);
-  return res;
+  return { ...res, costCenti: res.existing ? 0 : costCenti };
 }
 
 /** Rend une réservation qui n'a finalement servi à rien (course perdue à l'insertion) : crédit, place en cours et génération du jour. */

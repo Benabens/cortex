@@ -155,7 +155,7 @@ test("jobs : 8 createJobExclusive parallèles avec de quoi payer UN examen → u
   const credits = await import("../lib/billing/credits");
   const user = "pg_jobs";
   const results = await inCourse(user, "cs-202", () => Promise.allSettled(Array.from({ length: N }, () => jobs.createJobExclusive("exam"))));
-  const ok = results.filter((r): r is PromiseFulfilledResult<{ id: number; existing: boolean }> => r.status === "fulfilled");
+  const ok = results.filter((r): r is PromiseFulfilledResult<{ id: number; existing: boolean; costCenti: number }> => r.status === "fulfilled");
   const ids = new Set(ok.map((r) => r.value.id));
   assert.equal(ids.size, 1, `jobs distincts : ${[...ids].join(",")}`);
   assert.equal(await credits.getBalanceCenti(user), 0);
