@@ -11,6 +11,7 @@ import { cn } from "@/lib/ux/cn";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
 import { FOLDER_EXTENSIONS, prepareCourseImport, type FolderImportRefusal } from "@/lib/folder-import";
+import { creditsPhrase } from "@/lib/billing/limits-text";
 
 const ACCEPT = ".pdf,.html,.htm,.txt,.md,.zip";
 /** Un dossier de cours contient plus que des annales : slides, séries, images, notes. */
@@ -30,7 +31,8 @@ const DROP_KINDS: { value: DropKind; label: string }[] = [
 
 /**
  * Import UNIFIÉ — tout part du NAVIGATEUR, plus jamais d'un chemin sur le serveur :
- * — glisser des fichiers (annales, PDF) → POST /api/refs/upload (multipart) → ingestion + job « format » ;
+ * — glisser des fichiers (annales, PDF) → POST /api/refs/upload (multipart) → ingestion, gratuite ;
+ *   relire le format sur ces annales (payant) est proposé ensuite, coût affiché, → POST /api/refs/format ;
  * — OU choisir un DOSSIER → POST /api/sources/import (multipart) → classement
  *   (finals dans refs/, slides et séries dans content/) puis job « ingest » ;
  * puis « Préparer le cours » → POST /api/prepare → pipeline complet (ingestion → format → blueprint).
@@ -55,7 +57,13 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   // Même verdict que POST /api/prepare : le bouton est coupé avant le clic, raison à l'appui.
   const launch = useLaunchUsage("prepare");
   const { refresh: refreshUsage } = launch;
-  useEffect(() => { if (!running) refreshUsage(); }, [running, refreshUsage]);
+  // Relire le format est payant : son coût est dit AVANT le dépôt et sur le bouton, le débit après.
+  const formatLaunch = useLaunchUsage("format");
+  const { refresh: refreshFormatUsage } = formatLaunch;
+  const formatCost = formatLaunch.usage?.costCredits ?? 0;
+  const [formatOffer, setFormatOffer] = useState(false);
+  const [formatCharged, setFormatCharged] = useState(0);
+  useEffect(() => { if (!running) { refreshUsage(); refreshFormatUsage(); } }, [running, refreshUsage, refreshFormatUsage]);
   const notified = useRef(false);
 
   useEffect(() => {
@@ -65,6 +73,8 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
     setUploadedMsg(null);
     setFolderProgress(null);
     setFolderRefusals([]);
+    setFormatOffer(false);
+    setFormatCharged(0);
     notified.current = false;
   }, [courseId]);
 
@@ -80,12 +90,12 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           ? "Cours préparé : types d’exos et poids mis à jour."
           : jobKind === "ingest"
             ? "Dossier ingéré : le corpus est à jour."
-            : "Format re-détecté sur tes annales."
+            : `Format re-détecté sur tes annales${formatCharged > 0 ? ` (${creditsPhrase(formatCharged)} débité${formatCharged >= 2 ? "s" : ""})` : ""}.`
       );
       onChanged();
     }
     setJobKind(null);
-  }, [job, jobKind, onChanged]);
+  }, [job, jobKind, onChanged, formatCharged]);
 
   const startJob = (id: number, kind: "format" | "ingest" | "prepare") => {
     notified.current = false;
@@ -123,7 +133,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
       if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
       setUploadedMsg(`${d.files.length} fichier${d.files.length > 1 ? "s" : ""} ingéré${d.files.length > 1 ? "s" : ""}.`);
       onChanged();
-      if (d.formatJobId) startJob(d.formatJobId, "format");
+      if (d.formatPending) setFormatOffer(true);
     } catch (e) {
       setError((e as Error).message || "L’upload a échoué.");
     } finally {
@@ -188,6 +198,28 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
     } finally {
       setUploading(false);
       if (folderRef.current) folderRef.current.value = "";
+    }
+  };
+
+  /** Relire le format sur les annales déposées : lancé ici, jamais par le dépôt lui-même. */
+  const detectFormat = async () => {
+    if (running) return;
+    setError(null);
+    setPaywall(false);
+    setUploadedMsg(null);
+    try {
+      const res = await fetch(`/api/refs/format?course=${encodeURIComponent(courseId)}`, { method: "POST" });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) throw { status: res.status, message: d?.error ?? `Erreur ${res.status}` } as ApiError;
+      setFormatOffer(false);
+      const charged = Number(d.chargedCredits) || 0;
+      setFormatCharged(charged);
+      setUploadedMsg(charged > 0 ? `Détection du format lancée : ${creditsPhrase(charged)} débité${charged >= 2 ? "s" : ""}.` : "Détection du format lancée.");
+      if (d.jobId) startJob(d.jobId, "format");
+    } catch (e) {
+      const err = e as ApiError;
+      setPaywall(err.status === 402);
+      setError(err.message || "Impossible de lancer la détection du format.");
     }
   };
 
@@ -257,6 +289,13 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
                   : "Glisse les consignes d’examen (syllabus, page du cours)"}
           </p>
           <p className="mt-0.5 text-[0.8rem] text-ink-3">ou clique pour parcourir</p>
+          {dropKind === "past_exam" && (
+            <p data-testid="annale-cost" className="mt-1.5 text-[0.76rem] text-ink-3">
+              {formatCost > 0
+                ? `Le dépôt est gratuit. Relire le format sur tes annales coûte ensuite ${creditsPhrase(formatCost)}, à ta demande.`
+                : "Le dépôt est gratuit."}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap justify-center gap-1.5">
           {["PDF", "HTML", "TXT", "MD", "ZIP"].map((f) => (
@@ -306,6 +345,20 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           navigateur, même s’ils contiennent une autre archive.
         </p>
       </div>
+
+      {/* Relire le format sur les annales qu'on vient de déposer (payant, à la demande) */}
+      {formatOffer && !running && (
+        <div className="rounded-lg border border-line bg-surface-2/30 px-3.5 py-3">
+          <p className="text-[0.8rem] leading-relaxed text-ink-2">
+            Pour caler l’examen blanc sur ces annales, Cortex relit leur format : types d’exercices, barème, durée.
+            « Préparer le cours » le fait aussi.
+          </p>
+          <Button variant="secondary" size="md" onClick={detectFormat} disabled={!formatLaunch.allowed} className="mt-2.5 w-full">
+            {formatCost > 0 ? `Relire le format · ${creditsPhrase(formatCost)}` : "Relire le format"}
+          </Button>
+          <UsageLine usage={formatLaunch.usage} now={formatLaunch.now} className="mt-2" />
+        </div>
+      )}
 
       {/* Préparer le cours (pipeline complet) */}
       <div className="border-t border-line pt-4">
