@@ -157,13 +157,13 @@ async function course(): Promise<string> {
   return row.id;
 }
 
-async function exam(count: number) {
+async function exam(count: number, deadlineMs?: number) {
   const id = await course();
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
   const steps: string[] = [];
   return runWithCourse(id, async () => {
-    const r = await generateQcmExam({ count, openCount: 0, onStep: (s) => { steps.push(s); } });
+    const r = await generateQcmExam({ count, openCount: 0, deadlineMs, onStep: (s) => { steps.push(s); } });
     return { r, steps, items: (await getQcmExam(r.id, true))!.items };
   });
 }
@@ -187,6 +187,29 @@ test("audit final illisible : les QCM déjà vérifiés sont livrés, l'examen n
   auditUnreadable = true;
   const { r } = await exam(8);
   assert.equal(r.count, 8, JSON.stringify(calls));
+});
+
+test("20 QCM acquis : aucun comblement ni appel supplémentaire", async () => {
+  contestedEvery = 0;
+  trivialEvery = 1;
+  const { r, steps } = await exam(20);
+  assert.equal(r.count, 20);
+  assert.ok(!steps.some((s) => /lot\(s\) de comblement/.test(s)), steps.join("\n"));
+});
+
+test("les questions ouvertes ne contaminent pas le manque de QCM", async () => {
+  const { qcmTopupMissing } = await import("../lib/qcm");
+  assert.equal(qcmTopupMissing(20, 20), 0, "trois ouvertes restent une phase indépendante");
+  assert.equal(qcmTopupMissing(17, 20), 3);
+});
+
+test("échéance atteinte : les QCM validés sont livrés sans audits tardifs", async () => {
+  contestedEvery = 0; trivialEvery = 0;
+  const { r, steps } = await exam(4, 1);
+  assert.equal(r.count, 4);
+  assert.ok(steps.some((s) => /Échéance proche/.test(s)), steps.join("\n"));
+  assert.equal(calls.audit, 0);
+  assert.equal(calls.dedup, 0);
 });
 
 test("audit final : une clé jugée fausse est remplacée, la livraison reste 15/15", async (t) => {

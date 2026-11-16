@@ -1342,6 +1342,11 @@ const TOPUP_ROUNDS = 3;
 /** Lots supplémentaires permis, comblement et complément final compris (× lots prévus) : le budget borné. */
 const EXTRA_BATCHES = 3;
 
+/** Manque propre à la phase QCM : les ouvertes sont suivies et remboursées séparément. */
+export function qcmTopupMissing(delivered: number, requested: number): number {
+  return Math.max(0, requested - delivered);
+}
+
 /**
  * Durée de chaque phase d'un examen QCM sans historique (banc de M : ~10 min à
  * LLM_MAX_CONCURRENCY=4, QCM et ouvertes en parallèle) ; sinon la médiane des journaux
@@ -1353,7 +1358,7 @@ const DEFAULT_PHASE_MS: Record<string, number> = { QCM: 6 * 60_000, "Questions o
 /** Génère un examen QCM complet (N QCM + M ouvertes), vérifié, persisté, rendu en PDF.
  *  `count`/`openCount` : la COMPOSITION choisie par l'utilisateur (composeur). `focus` : « Mets l'accent
  *  sur… » (générique) — garantit ~2 QCM sur le thème sans monopoliser (count ≤ 2 → entièrement ciblé). */
-export async function generateQcmExam(opts: { count?: number; openCount?: number; focus?: string; onStep?: StepCb; onExamReady?: (examId: number) => void | Promise<void>; phaseMs?: Record<string, number> } = {}): Promise<QcmExamResult> {
+export async function generateQcmExam(opts: { count?: number; openCount?: number; focus?: string; onStep?: StepCb; onExamReady?: (examId: number) => void | Promise<void>; phaseMs?: Record<string, number>; deadlineMs?: number } = {}): Promise<QcmExamResult> {
   await ensureQcmSchema();
   const report = opts.onStep ?? (() => {});
   // TEMPS RESTANT — avancement PAR PHASE (lib/progress) dès que les lots sont connus : les
@@ -1363,6 +1368,21 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const step: StepCb = (m, p) => report(m, work ? work.pct() : Math.min(p, 8));
   // M — durée de chaque phase dans le journal du job (mesure avant/après).
   const tStart = Date.now();
+  // Le worker du banc et les gardes d'exploitation peuvent couper à 90 minutes. On cesse donc
+  // d'émettre des appels coûteux avant cette échéance et on livre les questions déjà validées.
+  // La marge couvre un appel lent, la persistance et le rendu. Une valeur explicite facilite les
+  // tests à horloge réelle sans modifier la politique de production.
+  const maxRuntimeMs = opts.deadlineMs ?? Math.max(60_000, Number(process.env.QCM_MAX_RUNTIME_MIN ?? 75) * 60_000);
+  const finishAt = tStart + maxRuntimeMs;
+  let deadlineReported = false;
+  const shouldFinish = () => Date.now() >= finishAt;
+  const finishNow = () => {
+    if (!deadlineReported) {
+      deadlineReported = true;
+      step("Échéance proche : arrêt des appels, livraison des questions déjà validées", 90);
+    }
+    return true;
+  };
   const logPhase = (label: string, since: number) => step(phaseLine(label, Date.now() - since), 0);
   const fmt = await getFormatProfile();
   const focus = (opts.focus ?? "").trim() || undefined;
@@ -1791,7 +1811,9 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // completeJson a déjà essayé trois fois chaque lot illisible. Si aucun lot n'a produit le
     // moindre item et qu'une erreur LLM existe, répéter trois rondes identiques multiplie seulement
     // les appels (12 au banc) ; les pertes de qualité, elles, n'ont pas `g.error` et restent comblées.
-    if ((!all.length && lastError) || !missing.length || (all.length >= count && !overTrivialBudget(all)) || round >= TOPUP_ROUNDS || extraBudget <= 0 || hardStop()) break;
+    // Une faiblesse de distracteur ne transforme jamais une place déjà validée en place manquante.
+    // HUM-285 avait ainsi lancé cinq puis trois lots alors que le journal disait « 0 QCM manquant ».
+    if ((!all.length && lastError) || !missing.length || qcmTopupMissing(all.length, count) === 0 || round >= TOPUP_ROUNDS || extraBudget <= 0 || hardStop() || (shouldFinish() && finishNow())) break;
     // Sujets écartés → notions de réserve ; l'accent demandé par l'étudiant reste le sien.
     const swappable = (m: (typeof missing)[number]) => m.rejected && m.topic.method !== FOCUS_METHOD;
     const swaps = takeSpare(Math.min(missing.filter(swappable).length, extraBudget * BATCH));
@@ -1813,7 +1835,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // Ce qui arrive après (remplacements de doublons, complément) est audité à la porte de sortie.
   const auditedStems = new Set<string>();
   const auditRejected = new Set<string>();
-  if (verifiedCandidates.length) {
+  if (verifiedCandidates.length && !(shouldFinish() && finishNow())) {
     const auditPassed = await finalQualityAudit(verifiedCandidates, step);
     // Plafonds par notion dès la sélection : seules les questions qui peuvent rester sont réparées.
     const audited = cappedPool([], auditPassed, count);
@@ -1880,7 +1902,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // reste borné par la taille de l'examen et par la réserve de notions.
   const finalRoundBudget = Math.max(DEDUP_ROUNDS, Math.ceil(count / BATCH) + 2);
   let repairAfterDedup = false;
-  for (let round = 0; round <= finalRoundBudget && all.length >= 2; round++) {
+  for (let round = 0; round <= finalRoundBudget && all.length >= 2 && !(shouldFinish() && finishNow()); round++) {
     const { drop, repeats, notions, angles } = await findDuplicates(all, strict);
     // Cette seconde enveloppe ne prolonge que les pertes qu'elle a elle-même causées. Un examen
     // déjà incomplet après le budget de comblement principal conserve sa borne historique.
@@ -2041,7 +2063,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // demandé est tenu plutôt que remboursé. Après chaque retrait tardif, le manque est redemandé :
   // le job 16 s'arrêtait après avoir retiré 3 questions de son unique complément et livrait 12/20.
   const complement = async () => {
-    while (count - all.length > 0 && all.length && lateBudget > 0 && !hardStop()) {
+    while (count - all.length > 0 && all.length && lateBudget > 0 && !hardStop() && !(shouldFinish() && finishNow())) {
       const short = count - all.length;
       const slots = takeSpare(short);
       const angle = slots.length < short;
@@ -2101,14 +2123,14 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // doublons, complément) ; un job QCM repris après une coupure refait l'examen en entier (aucun
   // point de reprise), donc passe ici lui aussi. Une question retirée à la porte (audit tardif,
   // revérification) est recomblée une fois, puis la porte repasse sur l'ensemble.
-  for (let pass = 0; all.length; pass++) {
+  for (let pass = 0; all.length && !(shouldFinish() && finishNow()); pass++) {
     await exitGate();
     if (pass > 0 || all.length >= count || lateBudget <= 0 || hardStop()) break;
     await complement();
   }
   // Ultime regard sur la version réellement livrée : une passe globale, une réparation au plus,
   // puis un réaudit des seules questions modifiées. Aucun complément ni réinjection après ce point.
-  if (all.length) {
+  if (all.length && !(shouldFinish() && finishNow())) {
     const before = all.slice();
     const audited = await finalQualityAudit(before, step, 2);
     const actions = ultimateAuditActions(before, audited);
