@@ -402,12 +402,13 @@ function optionsOf(p: Pick<FormatProfile, "options_per_question">): number | nul
   return typeof n === "number" && Number.isInteger(n) && n >= OPTIONS_MIN && n <= OPTIONS_MAX ? n : null;
 }
 
-/** Format lu dans des annales : mêmes défauts que le générateur QCM historique. `declared` : le mode déclaré, si les annales ne le disent pas. */
-function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Discipline, declared: AnswerMode | undefined): ExamFormat {
+/** Format lu dans des annales. `declared` : la déclaration du cours, pour ce que les annales ne disent pas (mode, durée). */
+function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Discipline, declared: DeclaredFormat | null): ExamFormat {
   const types = p.question_types ?? [];
   const qcmShare = types.filter((t) => t.type === "scq" || t.type === "mcq").reduce((s, t) => s + (t.approx_count || 0), 0);
   const documents = (DOCUMENT_RULES as readonly string[]).includes(p.documents ?? "") ? (p.documents as DocumentRule) : null;
-  const base = { basis: "annales" as const, durationMin: p.duration_min || null, language, discipline, summary: p.format_summary || "", evidence: [], documents, ...(positive(p.total_points) ? { totalPoints: p.total_points } : {}) };
+  // Durée de l'annale, sinon celle déclarée ; une durée illisible (0) n'est jamais imprimée (audit 3, P1-3).
+  const base = { basis: "annales" as const, durationMin: p.duration_min || declared?.durationMin || null, language, discipline, summary: p.format_summary || "", evidence: [], documents, ...(positive(p.total_points) ? { totalPoints: p.total_points } : {}) };
   const composite = blocksOf(p);
   if (composite) {
     const { count, ...blocks } = composite;
@@ -420,7 +421,7 @@ function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Disc
   // Aucune question ouverte inventée : une annale sans type « open » donne un examen 100 % QCM.
   const openCount = Math.min(3, Math.max(0, types.find((t) => t.type === "open")?.approx_count ?? 0));
   const kind = openCount > 0 ? "mixed" : "qcm";
-  const answerMode = annalesAnswerMode(p) ?? declared ?? "mixed";
+  const answerMode = annalesAnswerMode(p) ?? declared?.answerMode ?? "mixed";
   return { ...base, kind, questionCount, openCount, answerMode, optionsPerQuestion: optionsOf(p), summary: withAnswerMode(base.summary, answerMode) };
 }
 
@@ -488,7 +489,7 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
     // Format historique figé (calcul / trace / figures) : jamais re-détecté.
     format = make({ basis: "annales", kind: "exercises", questionCount: null, openCount: null, durationMin: course.durationMin, language, discipline: "stem", evidence: [] });
   } else if (hasAnnales && stored && basisOf(stored) === "annales") {
-    format = fromAnnalesProfile(stored, language, discipline, declared?.answerMode);
+    format = fromAnnalesProfile(stored, language, discipline, declared);
   } else if (declared) {
     // Mode non déclaré : celui que disent les sources (détection sans annale), sinon réponse unique.
     const fromSources = stored && basisOf(stored) !== "annales" ? stored.answer_mode : null;
@@ -612,6 +613,17 @@ export function targetKind(target: string | null | undefined): ExamKind | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Durée de l'épreuve du cours courant, en minutes : celle du format résolu (annale, sinon
+ * déclaration ; CS-202 : sa fiche). null = inconnue : la garde n'en écrit aucune, jamais de
+ * défaut (audit 3, P1-3 et P1-4 : « 180 minutes » pour un QCM déclaré de 75).
+ */
+export async function examDurationMin(): Promise<number | null> {
+  const known = await resolveExamFormat().catch(() => null);
+  const d = known ? known.durationMin : formatContextFor(currentCourse()).durationMin;
+  return positive(d) ? d : null;
 }
 
 /** true si l'examen blanc du cours courant part au générateur QCM (QCM ou mixte). */

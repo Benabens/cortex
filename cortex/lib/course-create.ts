@@ -135,10 +135,12 @@ export function buildCourseRow(input: CourseInput, ownerUserId: string): CourseR
   if (examDate && !/^\d{4}-\d{2}-\d{2}$/.test(examDate)) {
     throw new InvalidCourseError("La date d'examen doit être au format AAAA-MM-JJ.");
   }
+  // Non saisie → null : la durée de l'épreuve vient alors du format (annale, déclaration), jamais
+  // d'un 180 par défaut imprimé sur la garde (audit 3, P1-3).
   const durationMin = input.durationMin === undefined || input.durationMin === null || input.durationMin === ""
-    ? 180
+    ? null
     : Number(input.durationMin);
-  if (!Number.isFinite(durationMin) || durationMin < 15 || durationMin > 600) {
+  if (durationMin !== null && (!Number.isFinite(durationMin) || durationMin < 15 || durationMin > 600)) {
     throw new InvalidCourseError("La durée doit être comprise entre 15 et 600 minutes.");
   }
 
@@ -163,7 +165,7 @@ export function buildCourseRow(input: CourseInput, ownerUserId: string): CourseR
     // Aucun profil curaté : le moteur dérive le format de l'ADN des annales
     // importées (lib/profiles/generic) — c'est le chemin par défaut du produit.
     profile_id: null,
-    duration_min: Math.round(durationMin),
+    duration_min: durationMin === null ? null : Math.round(durationMin),
     exam_date: examDate || null,
     db_file: null,
     refs_rel: null,
