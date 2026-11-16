@@ -98,8 +98,8 @@ test("juge : arbitre, code exécuté, doublons et faux rejets ; la clé n'est ja
   assert.match(prompts.find((p) => /examinateur exigeant/.test(p)) ?? "", /SOLVEUR INDÉPENDANT : 1/);
 
   assert.equal(v.items[0].key, "wrong");
-  // L'indice 0 est la bonne réponse : jamais compté comme distracteur trivial.
-  assert.equal(v.items[0].trivialDistractors, 1);
+  // L'indice 0 est la bonne réponse et les autres options n'ont aucun marqueur formel déterministe.
+  assert.equal(v.items[0].trivialDistractors, 0);
   assert.equal(v.items[0].chapter, 1);
   assert.equal(v.items[1].chapter, null, "un chapitre hors du plan n'est pas retenu");
   if (sandboxAvailable()) {
@@ -132,6 +132,13 @@ test("vote du juge : une option n'est retenue que si au moins deux arbitres sur 
   assert.deepEqual(majorityOptions([[0], [1], [2]]), []);
   assert.equal(majorityValue(["right", "wrong", "wrong"]), "wrong");
   assert.equal(majorityValue(["right", "wrong", "unsure"]), "right", "égalité : verdict prudent et déterministe");
+});
+
+test("distracteurs triviaux : les marqueurs formels sont mesurés sans appel au modèle", async () => {
+  const { deterministicTrivialOptions } = await import("../lib/bench/judge");
+  const item = { options: ["Toujours, sans aucune exception", "Cela dépend de la condition", "Jamais", "Le cas étudié"], correct: [1] };
+  assert.deepEqual(deterministicTrivialOptions(item), [0, 2]);
+  assert.deepEqual(deterministicTrivialOptions({ ...item, correct: [0, 1] }), [2], "une option correcte n'est jamais un distracteur");
 });
 
 test("une panne passagère du fournisseur pendant le jugement est réessayée, le jugement n'est pas perdu", async () => {
