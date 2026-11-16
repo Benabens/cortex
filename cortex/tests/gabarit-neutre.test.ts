@@ -1,0 +1,196 @@
+/**
+ * GABARIT NEUTRE : un examen d'un cours hors EPFL ne porte aucune marque de l'EPFL (logo en garde
+ * ou en pied de page, SCIPER, « Anonymisation », marge « Do NOT write anything here! », rouge des
+ * corrigés, consignes propres à l'EPFL). Garde générique : cours, durée, total des points, champs
+ * Nom / Identifiant, le tout dans la langue de l'examen. Cours et examens FICTIFS
+ * (tests/helpers/gabarits.ts) ; le gabarit EPFL est verrouillé par gabarit-epfl-non-regression.
+ */
+import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { after, before, test } from "node:test";
+import type { GabaritCourses } from "./helpers/gabarits";
+
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-gabarit-neutre-"));
+process.env.CORTEX_DATA_DIR = tmp;
+
+let ids: GabaritCourses;
+
+before(async () => {
+  const { createGabaritCourses } = await import("./helpers/gabarits");
+  ids = await createGabaritCourses();
+});
+
+after(() => {
+  delete process.env.CORTEX_DATA_DIR;
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+async function inCourse<T>(course: string, fn: () => T | Promise<T>): Promise<T> {
+  const { runWithCourse } = await import("../db/client");
+  return runWithCourse(course, async () => fn());
+}
+
+/** Ce que l'étudiant voit : le corps du document (le préambule cite `\begin{document}` en commentaire). */
+function body(tex: string): string {
+  return tex.slice(tex.lastIndexOf(String.raw`\begin{document}`));
+}
+
+const RESET = String.raw`\pagestyle{fancy}\fancyhf{}`;
+
+/**
+ * En-têtes et pieds en vigueur : `\pagestyle{fancy}\fancyhf{}` efface tout, donc seules comptent
+ * les définitions qui suivent le dernier, jusqu'au début du document.
+ */
+function pageChrome(tex: string): string {
+  return tex.slice(tex.lastIndexOf(RESET), tex.lastIndexOf(String.raw`\begin{document}`));
+}
+
+const EPFL_MARKS = /epfl|SCIPER|Anonymi|Hanon Ymous|Do NOT write|cheat sheet|dark blue ink|qrcode/i;
+/** Les deux lignes qui neutralisent le logo et le rouge (une macro du modèle qui les citerait compile encore). */
+const NEUTRALIZED = [String.raw`\renewcommand{\epfllogo}[1][30]{}`, String.raw`\colorlet{epflred}{solution}`];
+
+/** Aucune marque EPFL, ni sur les pages ni dans leur en-tête et pied ; marge et logo neutralisés. */
+function assertNeutral(tex: string): void {
+  assert.doesNotMatch(body(tex), EPFL_MARKS);
+  assert.ok(tex.lastIndexOf(RESET) > tex.indexOf(String.raw`\fancyfoot[L]{\epfllogo[15]}`), "en-tête et pied du préambule EPFL encore en vigueur");
+  const chrome = pageChrome(tex);
+  for (const line of NEUTRALIZED) assert.ok(chrome.includes(line), `manque : ${line}`);
+  assert.doesNotMatch(NEUTRALIZED.reduce((c, line) => c.replace(line, ""), chrome), EPFL_MARKS);
+  assert.match(chrome, /\\examchromefalse/, "marge « Do NOT write anything here! » encore active");
+}
+
+test("examen écrit hors EPFL : garde neutre en anglais, sans aucune marque EPFL", async () => {
+  const { renderExamTex } = await import("../lib/exam-latex");
+  const { WRITTEN_SPEC, DATE } = await import("./helpers/gabarits");
+  for (const withSol of [false, true]) {
+    const tex = await inCourse(ids.neutralEn, () => renderExamTex(WRITTEN_SPEC as never, DATE, withSol));
+    assertNeutral(tex);
+    const page = body(tex);
+    assert.match(page, /IMG--210/);
+    assert.match(page, /Imaginary Networks/);
+    assert.match(page, /Testville University/);
+    assert.match(page, /November 16, 2026/);
+    assert.match(page, /Duration:\}? 90 minutes/);
+    assert.match(page, /Total:\}? 50 points/);
+    assert.match(page, /Name:/);
+    assert.match(page, /ID:/);
+  }
+});
+
+test("examen écrit hors EPFL : garde neutre dans la langue de l'examen (français)", async () => {
+  const { renderExamTex } = await import("../lib/exam-latex");
+  const { WRITTEN_SPEC, DATE } = await import("./helpers/gabarits");
+  const tex = await inCourse(ids.neutralFr, () => renderExamTex(WRITTEN_SPEC as never, DATE, true));
+  assertNeutral(tex);
+  const page = body(tex);
+  assert.match(page, /Durée :\}? 60 minutes/);
+  assert.match(page, /Total :\}? 50 points/);
+  assert.match(page, /Nom :/);
+  assert.match(page, /16 novembre 2026/);
+  assert.match(page, /Aucun document n'est autorisé/);
+  for (const en of [/Duration/, /Name:/, /November/, /INSTRUCTIONS/]) assert.doesNotMatch(page, en);
+});
+
+test("QCM hors EPFL : garde neutre, libellés en anglais, corrigé en bleu foncé", async () => {
+  const { renderQcmExamTex } = await import("../lib/qcm-latex");
+  const { QCM_DATA, DATE } = await import("./helpers/gabarits");
+  for (const withKey of [false, true]) {
+    const tex = await inCourse(ids.neutralEn, () => renderQcmExamTex(QCM_DATA, DATE, withKey));
+    assertNeutral(tex);
+    const page = body(tex);
+    assert.match(page, /IMG--210/);
+    assert.match(page, /Name:/);
+    assert.match(page, /ID:/);
+    assert.match(page, /Duration:\}? 90 minutes/);
+    assert.match(page, /Total:\}? 14 points/);
+    assert.match(page, /single choice, 2 points/);
+    assert.match(page, /multiple choice, 2 points/);
+    assert.match(page, /Open question 1/);
+    assert.match(pageChrome(tex), /November 16, 2026/);
+    if (withKey) {
+      assert.match(page, /\\color\{solution\}/);
+      assert.match(page, /misconception/);
+    }
+  }
+});
+
+test("QCM hors EPFL : tout est dans la langue de l'examen (français)", async () => {
+  const { renderQcmExamTex } = await import("../lib/qcm-latex");
+  const { QCM_DATA, DATE } = await import("./helpers/gabarits");
+  const tex = await inCourse(ids.neutralFr, () => renderQcmExamTex(QCM_DATA, DATE, true));
+  assertNeutral(tex);
+  const page = body(tex);
+  for (const fr of [/Nom :/, /Durée :\}? 60 minutes/, /Partie 1/, /Questions à choix multiple/, /Question ouverte 1/, /choix unique, 2 points/, /Cochez/, /idée fausse/, /16 novembre 2026/]) assert.match(page + pageChrome(tex), fr);
+  for (const en of [/First part/, /Open question/, /Tick the box/, /Instructions\}/, /You have/, /November/, /SCQ|MCQ/]) assert.doesNotMatch(page + pageChrome(tex), en);
+});
+
+test("questions composées hors EPFL : garde neutre, libellés en anglais, corrigé en bleu foncé", async () => {
+  const { renderBlocksTex } = await import("../lib/blocks-latex");
+  const { BLOCKS, DATE } = await import("./helpers/gabarits");
+  for (const withKey of [false, true]) {
+    const tex = await inCourse(ids.neutralEn, () => renderBlocksTex(BLOCKS, DATE, withKey));
+    assertNeutral(tex);
+    const page = body(tex);
+    assert.match(page, /Name:/);
+    assert.match(page, /Duration:\}? 90 minutes/);
+    assert.match(page, /Total:\}? 9 points/);
+    assert.match(page, /\[3 points\]/);
+    assert.match(page, /Output:/);
+    if (withKey) {
+      assert.match(page, /\\color\{solution\}/);
+      assert.match(page, /Model answer:/);
+    }
+  }
+});
+
+test("questions composées hors EPFL : tout est dans la langue de l'examen (français)", async () => {
+  const { renderBlocksTex } = await import("../lib/blocks-latex");
+  const { BLOCKS, DATE } = await import("./helpers/gabarits");
+  const tex = await inCourse(ids.neutralFr, () => renderBlocksTex(BLOCKS, DATE, true));
+  assertNeutral(tex);
+  const page = body(tex);
+  for (const fr of [/Nom :/, /Durée :\}? 60 minutes/, /mise en situation/, /Sortie :/, /Réponse type :/, /Barème :/, /\[3 points\]/]) assert.match(page, fr);
+  for (const en of [/Output:/, /Model answer/, /Grading/, /This exam has/, /\bpts\b/]) assert.doesNotMatch(page, en);
+});
+
+test("repli HTML hors EPFL : aucune mention de l'EPFL", async () => {
+  const { htmlFallback } = await import("../lib/exam-latex");
+  const { WRITTEN_SPEC, DATE } = await import("./helpers/gabarits");
+  const html = await inCourse(ids.neutralEn, () => htmlFallback(WRITTEN_SPEC as never, 1, DATE, "boom"));
+  assert.match(html, /Toy recurrence/);
+  assert.match(html, /brew install tectonic/);
+  assert.doesNotMatch(html, /epfl/i);
+  assert.match(html, /<summary>Solution<\/summary>/);
+  assert.match(html, /Question 1 – Toy recurrence <span class="pts">\[30 points\]/);
+  assert.doesNotMatch(html, /Corrigé/);
+  const fr = await inCourse(ids.neutralFr, () => htmlFallback(WRITTEN_SPEC as never, 1, DATE, "boom"));
+  assert.match(fr, /<summary>Solution<\/summary>/);
+  assert.match(fr, /Question 2 – Imaginary queue/);
+});
+
+test("PDF compilés hors EPFL : aucun texte de l'EPFL sur aucune page, aucun logo copié (sauté sans tectonic ni pdftotext)", async (t) => {
+  const { buildExamArtifact, texAvailable } = await import("../lib/exam-latex");
+  if (!texAvailable() || spawnSync("pdftotext", ["-v"]).error) return t.skip("tectonic/pdflatex ou pdftotext absent");
+  const { buildQcmArtifact } = await import("../lib/qcm-latex");
+  const { buildBlocksArtifact } = await import("../lib/blocks-latex");
+  const { examsDir } = await import("../lib/paths");
+  const { WRITTEN_SPEC, QCM_DATA, BLOCKS, DATE } = await import("./helpers/gabarits");
+  await inCourse(ids.neutralEn, async () => {
+    assert.equal((await buildExamArtifact(WRITTEN_SPEC as never, 901, DATE)).kind, "pdf");
+    const qcm = await buildQcmArtifact(902, QCM_DATA, DATE);
+    assert.equal(qcm.file, "qcm-902.pdf", qcm.texError);
+    assert.equal(qcm.texWarning, undefined);
+    assert.equal((await buildBlocksArtifact(903, BLOCKS, DATE)).file, "blocks-903.pdf");
+    for (const base of ["exam-901", "qcm-902", "blocks-903"]) {
+      for (const name of [base, `${base}-corrige`]) {
+        const text = execFileSync("pdftotext", [path.join(examsDir(), `${name}.pdf`), "-"]).toString();
+        assert.match(text, /Imaginary Networks/, name);
+        assert.doesNotMatch(text, /EPFL|SCIPER|Anonymi|Do NOT write/i, name);
+      }
+    }
+    assert.ok(!fs.existsSync(path.join(examsDir(), "epfl-logo.png")), "logo de l'EPFL copié à côté du .tex");
+  });
+});
