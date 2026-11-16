@@ -1,7 +1,7 @@
 import { currentCourse } from "@/db/client";
 import { q, nowStr } from "@/db/q";
 import { HARD_STOP_CODES, LONG_OUTPUT_MAX_TOKENS, LlmError, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
-import { DEFAULT_ANSWER_MODE, courseMaterialTitles, examLanguageFor, readStoredProfile, resolveExamFormat, type AnswerMode } from "@/lib/exam-format";
+import { DEFAULT_ANSWER_MODE, courseMaterialTitles, examLanguageFor, planMockExam, readStoredProfile, resolveExamFormat, type AnswerMode } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseNumbers, absentCourseTerms, corpusWindows, coursePassages, factNumbers, topicsInScope } from "@/lib/course-grounding";
@@ -1698,6 +1698,9 @@ function spareMargin(count: number): number {
  */
 const DEFAULT_PHASE_MS: Record<string, number> = { QCM: 6 * 60_000, "Questions ouvertes": 6 * 60_000, PDF: 30_000 };
 
+/** QCM d'un examen demandé sans nombre pour un cours dont le format n'est pas à choix (historique). */
+const QCM_FALLBACK_COUNT = 12;
+
 
 /**
  * RÉPARTITION D'UN EXAMEN QCM : sujets des QCM, moules, et réserve de notions pour remplacer une
@@ -1823,12 +1826,15 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // M — durée de chaque phase dans le journal du job (mesure avant/après).
   const tStart = Date.now();
   const logPhase = (label: string, since: number) => step(phaseLine(label, Date.now() - since), 0);
-  const fmt = await getFormatProfile();
   const focus = (opts.focus ?? "").trim() || undefined;
-  const qcmShare = (fmt?.question_types ?? []).filter((t) => t.type === "scq" || t.type === "mcq").reduce((s, t) => s + (t.approx_count || 0), 0);
-  // count peut être 0 (drill « 0 QCM + 1 ouvert ») → on respecte le choix explicite ; sinon défaut détecté.
-  const count = Math.max(0, opts.count ?? Math.min(20, Math.max(8, qcmShare || 12)));
-  const openCount = Math.max(0, opts.openCount ?? Math.min(3, Math.max(0, (fmt?.question_types ?? []).find((t) => t.type === "open")?.approx_count ?? 2)));
+  // Format résolu : langue, mode de réponse et nombre d'options de l'examen ; sans annale, les
+  // exemples officiels donnent le style (permis si les annales en ont le style).
+  const format = await resolveExamFormat().catch(() => null);
+  // count peut être 0 (drill « 0 QCM + 1 ouvert ») → on respecte le choix explicite ; sinon le plan
+  // du format (lib/exam-format) : le nombre de l'annale, aucune ouverte inventée (audit 3, P0-4).
+  const mockPlan = format ? planMockExam(format, {}) : null;
+  const count = Math.max(0, opts.count ?? (mockPlan?.generator === "qcm" ? mockPlan.qcmCount : QCM_FALLBACK_COUNT));
+  const openCount = Math.max(0, opts.openCount ?? (mockPlan?.generator === "qcm" ? mockPlan.openCount : 0));
   if (count === 0 && openCount === 0) throw new Error("Composition vide : choisis au moins 1 QCM ou 1 question ouverte.");
   // « Mets l'accent sur… » (focus générique) : garantit ~2 QCM sur le thème choisi SANS
   // monopoliser — le reste couvre le programme. Petit count (≤2) → entièrement ciblé (drill).
@@ -1841,9 +1847,6 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // acquis. Absent, illisible ou d'une autre composition : départ à neuf, comme avant.
   const ckKey = qcmCheckpointKey({ count, openCount, focus });
   const ck = opts.checkpoint ? readQcmCheckpoint(await opts.checkpoint.load().catch(() => null), ckKey) : null;
-  // Format résolu : langue de l'examen ; sans annale, les exemples officiels donnent le style,
-  // et les questions « classe ce cas » restent interdites (permises si les annales en ont le style).
-  const format = await resolveExamFormat().catch(() => null);
   const plan = ck?.plan ?? await planQcmExam({ count, openCount, focus, nFocus, needed, dna, step, language: format?.language });
   const { notionCount, recent, covAll, cov, qcmTopics, spareTopics, qcmMolds } = plan;
   /** Examen conçu par faits testables : chaque question (hors accent) teste un fait distinct. */
