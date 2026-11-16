@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { checkStorage, declaredBytes } from "@/lib/storage-quota";
 import { currentUser } from "@/db/context";
 import { storage as fileStore } from "@/lib/storage";
+import { storedFileName, storeUnique } from "@/lib/stored-file";
 import { unreadableDocument } from "@/lib/document-check";
 import { failureStatus, problemMessage } from "@/lib/ingest-report";
 
@@ -37,20 +38,20 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const saved: string[] = [];
   const skipped: { file: string; reason: string }[] = [];
   for (const f of files) {
-    const safe = path.basename(f.name).replace(/[^a-zA-Z0-9._-]/g, "_");
+    const safe = storedFileName(path.basename(f.name));
     if (f.size > REF_MAX_BYTES) { skipped.push({ file: f.name, reason: "fichier trop volumineux (30 Mo maximum)." }); continue; }
     if (!REF_EXTENSIONS.test(safe)) { skipped.push({ file: f.name, reason: "format non pris en charge pour une annale : PDF, Word, PowerPoint, HTML ou texte." }); continue; }
     const data = Buffer.from(await f.arrayBuffer());
     const problem = await unreadableDocument(data, path.extname(safe));
     if (problem) { skipped.push({ file: f.name, reason: problem.message }); continue; }
-    const abs = path.join(refsDir, safe);
-    await fileStore().put(abs, data);
+    const stored = await storeUnique(refsDir, safe, data);
+    if (!stored) { skipped.push({ file: f.name, reason: "trop d’annales du même nom : renomme le fichier." }); continue; }
     try {
-      await ingestRefFile(`refs/${safe}`);
-      saved.push(safe);
+      await ingestRefFile(`refs/${stored.name}`);
+      saved.push(stored.name);
     } catch (e) {
       // Rangé mais illisible pour l'ingestion : retiré, sinon il resterait dans les annales sans y figurer.
-      await fileStore().remove(abs).catch(() => {});
+      if (!stored.duplicate) await fileStore().remove(path.join(refsDir, stored.name)).catch(() => {});
       skipped.push({ file: f.name, reason: problemMessage(failureStatus(e)) });
     }
   }

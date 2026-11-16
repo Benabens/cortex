@@ -7,9 +7,9 @@ import { unreadableDocument } from "@/lib/document-check";
 import { requireCourse } from "@/lib/req";
 import { checkStorage, declaredBytes, storageQuotaBytesFor } from "@/lib/storage-quota";
 import { readFormData, UPLOAD_LIMITS, withBodyLimit } from "@/lib/upload-limit";
-import { createHash } from "node:crypto";
 import path from "node:path";
 import { storage as fileStore } from "@/lib/storage";
+import { storedFileName, storeUnique } from "@/lib/stored-file";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -22,7 +22,7 @@ function safeRelPath(raw: string): string | null {
   if (rawParts.some((part) => part.startsWith("."))) return null;
   const parts = rawParts
     .filter((part) => part !== "." && part !== "..")
-    .map((part) => part.replace(/[^a-zA-Z0-9._-]/g, "_"))
+    .map(storedFileName)
     .slice(-4);
   if (!parts.length || !ALLOWED.has(path.extname(parts.at(-1)!).toLowerCase())) return null;
   return parts.join("/");
@@ -72,30 +72,8 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     return NextResponse.json({ error: `${file.name} : plafond de ${Math.round(courseMax / (1024 * 1024))} Mo atteint pour ce cours (quota de stockage configurable).` }, { status: 413 });
   }
   const { bucket } = classifyFile(rel);
-  const destDir = path.resolve(bucket === "refs" ? refsDir : path.join(contentRoot, bucket));
+  const destDir = bucket === "refs" ? refsDir : path.join(contentRoot, bucket);
   const saved = await storeUnique(destDir, path.basename(rel), buffer);
   if (!saved) return NextResponse.json({ error: `${file.name} : trop de fichiers du même nom dans ce cours.` }, { status: 409 });
   return NextResponse.json({ ok: true, name: saved.name, bucket, ...(saved.duplicate ? { duplicate: true } : {}) });
 });
-
-const sha256 = (data: Buffer) => createHash("sha256").update(data).digest("hex");
-
-/**
- * Range le fichier sous son nom, ou `nom-2`, `nom-3`… si un fichier DIFFÉRENT le porte déjà
- * (export rangé par semaine : Week1/slides.pdf et Week3/slides.pdf). Seul un contenu identique
- * (empreinte sha256, jamais la taille) est un doublon : rien n'est écrit, son nom est rendu.
- */
-async function storeUnique(dir: string, name: string, data: Buffer): Promise<{ name: string; duplicate: boolean } | null> {
-  const ext = path.extname(name);
-  const stem = name.slice(0, name.length - ext.length);
-  const digest = sha256(data);
-  for (let n = 1; n <= 50; n++) {
-    const candidate = n === 1 ? name : `${stem}-${n}${ext}`;
-    const abs = path.join(dir, candidate);
-    if (!abs.startsWith(dir + path.sep)) return null;
-    if (await fileStore().put(abs, data, { exclusive: true })) return { name: candidate, duplicate: false };
-    const existing = await fileStore().read(abs);
-    if (existing && sha256(existing) === digest) return { name: candidate, duplicate: true };
-  }
-  return null;
-}
