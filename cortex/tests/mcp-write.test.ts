@@ -287,7 +287,7 @@ test("add_course_source, annale : gratuit, et annonce le coût de la relecture d
   assert.equal(r.isError, undefined, text(r));
   const next = (r.structuredContent as { next_steps: string }).next_steps;
   assert.match(next, /free/i);
-  assert.match(next, /prepare_course[^.]*2 credits/);
+  assert.match(next, /prepare_course[^.]*2 credits and one daily generation/);
   assert.match(next, /quoted before anything is charged/);
   assert.match(text(r), /prepare_course/);
   assert.match(text(r), /annonc/);

@@ -11,7 +11,7 @@ import { cn } from "@/lib/ux/cn";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
 import { FOLDER_EXTENSIONS, prepareCourseImport, type FolderImportRefusal } from "@/lib/folder-import";
-import { creditsPhrase } from "@/lib/billing/limits-text";
+import { creditsPhrase, debitedPhrase } from "@/lib/billing/limits-text";
 
 const ACCEPT = ".pdf,.html,.htm,.txt,.md,.zip";
 /** Un dossier de cours contient plus que des annales : slides, séries, images, notes. */
@@ -61,6 +61,9 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   const formatLaunch = useLaunchUsage("format");
   const { refresh: refreshFormatUsage } = formatLaunch;
   const formatCost = formatLaunch.usage?.costCredits ?? 0;
+  // remaining null : aucune limite du jour ne compte cette détection (propriétaire, instance sans quota).
+  const formatPrice = [formatCost > 0 ? creditsPhrase(formatCost) : null, formatLaunch.usage && formatLaunch.usage.remaining !== null ? "une génération du jour" : null]
+    .filter(Boolean).join(" et ");
   const [formatOffer, setFormatOffer] = useState(false);
   const [formatCharged, setFormatCharged] = useState(0);
   useEffect(() => { if (!running) { refreshUsage(); refreshFormatUsage(); } }, [running, refreshUsage, refreshFormatUsage]);
@@ -90,7 +93,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           ? "Cours préparé : types d’exos et poids mis à jour."
           : jobKind === "ingest"
             ? "Dossier ingéré : le corpus est à jour."
-            : `Format re-détecté sur tes annales${formatCharged > 0 ? ` (${creditsPhrase(formatCharged)} débité${formatCharged >= 2 ? "s" : ""})` : ""}.`
+            : `Format re-détecté sur tes annales${formatCharged > 0 ? ` (${debitedPhrase(formatCharged)})` : ""}.`
       );
       onChanged();
     }
@@ -214,7 +217,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
       setFormatOffer(false);
       const charged = Number(d.chargedCredits) || 0;
       setFormatCharged(charged);
-      setUploadedMsg(charged > 0 ? `Détection du format lancée : ${creditsPhrase(charged)} débité${charged >= 2 ? "s" : ""}.` : "Détection du format lancée.");
+      setUploadedMsg(charged > 0 ? `Détection du format lancée : ${debitedPhrase(charged)}.` : "Détection du format lancée.");
       if (d.jobId) startJob(d.jobId, "format");
     } catch (e) {
       const err = e as ApiError;
@@ -291,8 +294,8 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           <p className="mt-0.5 text-[0.8rem] text-ink-3">ou clique pour parcourir</p>
           {dropKind === "past_exam" && (
             <p data-testid="annale-cost" className="mt-1.5 text-[0.76rem] text-ink-3">
-              {formatCost > 0
-                ? `Le dépôt est gratuit. Relire le format sur tes annales coûte ensuite ${creditsPhrase(formatCost)}, à ta demande.`
+              {formatPrice
+                ? `Le dépôt est gratuit. Relire le format sur tes annales coûte ensuite ${formatPrice}, à ta demande.`
                 : "Le dépôt est gratuit."}
             </p>
           )}
