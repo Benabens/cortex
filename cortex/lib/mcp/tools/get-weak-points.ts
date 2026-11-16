@@ -28,7 +28,7 @@ export default defineTool({
   title: "Get my weak points",
   description:
     "Get the student's tracked weak points for a course, most serious first (topic, theme, severity, the note explaining the gap), " +
-    "grouped by theme, plus the concepts due for spaced-repetition review. Use it for questions like \"what are my weak points before the CS-233 exam?\" " +
+    "grouped by theme, plus the concepts due for spaced-repetition review. Use it for questions like \"what are my weak points before the COMP 201 exam?\" " +
     "or to pick what a drill should target. Read-only and free.",
   kind: "read",
   input: z.object({

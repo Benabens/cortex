@@ -18,16 +18,16 @@ export default defineTool({
   name: "create_course",
   title: "Create a course",
   description:
-    "Create a new course in the student's Cortex account (the same as \"New course\" in the app, free): name, optional exam code (e.g. \"MATH-111\"), " +
+    "Create a new course in the student's Cortex account (the same as \"New course\" in the app, free): name, optional exam code (e.g. \"COMP 201\"), " +
     "university, language of the course and exam date. Refuses a second course with the same exam code. " +
     "Pass exam_format when the student knows how the exam looks (type, number of questions, duration), especially without past exams: " +
     "Cortex never invents a format. Then add its materials with add_course_source and build it with prepare_course.",
   kind: "write",
   input: z.object({
     name: z.string().min(2).max(80).describe("Course name, e.g. \"Linear algebra\"."),
-    code: z.string().min(1).max(24).optional().describe("Exam / course code, e.g. \"MATH-111\"."),
-    university: z.string().min(1).max(80).optional().describe("University or school, e.g. \"EPFL\"."),
-    language: z.enum(LANGUAGES).optional().describe("Language of the course materials and exams (default fr)."),
+    code: z.string().min(1).max(24).optional().describe("Exam / course code, e.g. \"COMP 201\"."),
+    university: z.string().min(1).max(80).optional().describe("University or school, e.g. \"University of Example\"."),
+    language: z.enum(LANGUAGES).optional().describe("Language of the course materials and exams. Omit it to detect it from the past exams, then the materials (English until materials are added)."),
     exam_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Exam date, YYYY-MM-DD."),
     exam_format: z.object(examFormatInput).optional().describe("Real format of the exam, if known (can be changed later with set_exam_format)."),
   }),

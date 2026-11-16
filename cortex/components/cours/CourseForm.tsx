@@ -8,12 +8,16 @@ import { Button } from "@/components/ui/Button";
 import { useCourse } from "@/lib/ux/api";
 import { EMPTY_FORMAT, ExamFormatFields, formatPayload, type ExamFormatDraft } from "@/components/cours/ExamFormatFields";
 
+// « auto » : la langue se détecte sur les annales puis les supports importés (lib/exam-format).
 const LANGUES: { value: string; label: string }[] = [
+  { value: "auto", label: "Détecter d’après les supports" },
   { value: "fr", label: "Français" },
   { value: "en", label: "Anglais" },
   { value: "de", label: "Allemand" },
   { value: "it", label: "Italien" },
   { value: "es", label: "Espagnol" },
+  { value: "pt", label: "Portugais" },
+  { value: "nl", label: "Néerlandais" },
 ];
 
 const field =
@@ -34,7 +38,7 @@ export function CourseForm() {
     code: "",
     university: "",
     teachers: "",
-    language: "fr",
+    language: "auto",
     examDate: "",
   });
   const [format, setFormat] = useState<ExamFormatDraft>(EMPTY_FORMAT);
@@ -92,7 +96,7 @@ export function CourseForm() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
             <span className="text-[0.82rem] font-medium text-ink-2">Code</span>
-            <input value={form.code} onChange={set("code")} maxLength={24} placeholder="MATH-203" className={field} />
+            <input value={form.code} onChange={set("code")} maxLength={24} placeholder="MATH 201" className={field} />
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-[0.82rem] font-medium text-ink-2">Établissement</span>
@@ -100,7 +104,7 @@ export function CourseForm() {
               value={form.university}
               onChange={set("university")}
               maxLength={80}
-              placeholder="EPFL"
+              placeholder="Ton université ou école"
               className={field}
             />
           </label>
