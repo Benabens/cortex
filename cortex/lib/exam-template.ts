@@ -195,6 +195,8 @@ export function durationText(min: number, w: CoverWords): string {
 
 /** Libellés du gabarit neutre et des rendus QCM / questions composées hors EPFL. */
 type NeutralWords = {
+  /** Enseignant·e sur la garde des QCM et questions composées de l'EPFL. */
+  lecturer: string;
   nameField: string;
   idField: string;
   durationLabel: string;
@@ -230,7 +232,7 @@ const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
   en: {
-    nameField: "Name:", idField: "ID:", durationLabel: "Duration:", totalLabel: "Total:", finalExam: "Final exam",
+    lecturer: "Lecturer:", nameField: "Name:", idField: "ID:", durationLabel: "Duration:", totalLabel: "Total:", finalExam: "Final exam",
     point: "point", points: "points", question: "Question", openQuestion: "Open question", part: "Part",
     qcmPart: "Multiple-choice questions", openPart: "Open questions", single: "single choice", multiple: "multiple choice",
     qcmConvention: "Single-choice questions have exactly one correct answer; multiple-choice questions have one or more.",
@@ -244,7 +246,7 @@ const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
     misconception: "misconception", answers: "Answers and justifications:",
   },
   fr: {
-    nameField: "Nom :", idField: String.raw`N\textsuperscript{o} d'étudiant :`, durationLabel: "Durée :", totalLabel: "Total :", finalExam: "Examen final",
+    lecturer: "Responsable :", nameField: "Nom :", idField: String.raw`N\textsuperscript{o} d'étudiant :`, durationLabel: "Durée :", totalLabel: "Total :", finalExam: "Examen final",
     point: "point", points: "points", question: "Question", openQuestion: "Question ouverte", part: "Partie",
     qcmPart: "Questions à choix multiple", openPart: "Questions ouvertes", single: "choix unique", multiple: "choix multiple",
     qcmConvention: "Une question à choix unique a exactement une bonne réponse ; une question à choix multiple en a une ou plusieurs.",
@@ -258,7 +260,7 @@ const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
     misconception: "idée fausse", answers: "Réponses et justifications :",
   },
   de: {
-    nameField: "Name:", idField: "Matrikelnr.:", durationLabel: "Dauer:", totalLabel: "Gesamt:", finalExam: "Abschlussprüfung",
+    lecturer: "Lehrperson:", nameField: "Name:", idField: "Matrikelnr.:", durationLabel: "Dauer:", totalLabel: "Gesamt:", finalExam: "Abschlussprüfung",
     point: "Punkt", points: "Punkte", question: "Aufgabe", openQuestion: "Offene Frage", part: "Teil",
     qcmPart: "Multiple-Choice-Fragen", openPart: "Offene Fragen", single: "Einfachauswahl", multiple: "Mehrfachauswahl",
     qcmConvention: "Eine Einfachauswahlfrage hat genau eine richtige Antwort, eine Mehrfachauswahlfrage eine oder mehrere.",
@@ -272,7 +274,7 @@ const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
     misconception: "Fehlvorstellung", answers: "Antworten und Begründungen:",
   },
   it: {
-    nameField: "Nome:", idField: "Matricola:", durationLabel: "Durata:", totalLabel: "Totale:", finalExam: "Esame finale",
+    lecturer: "Docente:", nameField: "Nome:", idField: "Matricola:", durationLabel: "Durata:", totalLabel: "Totale:", finalExam: "Esame finale",
     point: "punto", points: "punti", question: "Domanda", openQuestion: "Domanda aperta", part: "Parte",
     qcmPart: "Domande a scelta multipla", openPart: "Domande aperte", single: "scelta singola", multiple: "scelta multipla",
     qcmConvention: "Una domanda a scelta singola ha esattamente una risposta corretta; una domanda a scelta multipla ne ha una o più.",
@@ -286,7 +288,7 @@ const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
     misconception: "idea sbagliata", answers: "Risposte e giustificazioni:",
   },
   es: {
-    nameField: "Nombre:", idField: String.raw`N.\textsuperscript{o} de estudiante:`, durationLabel: "Duración:", totalLabel: "Total:", finalExam: "Examen final",
+    lecturer: "Docente:", nameField: "Nombre:", idField: String.raw`N.\textsuperscript{o} de estudiante:`, durationLabel: "Duración:", totalLabel: "Total:", finalExam: "Examen final",
     point: "punto", points: "puntos", question: "Pregunta", openQuestion: "Pregunta abierta", part: "Parte",
     qcmPart: "Preguntas de opción múltiple", openPart: "Preguntas abiertas", single: "opción única", multiple: "opción múltiple",
     qcmConvention: "Una pregunta de opción única tiene exactamente una respuesta correcta; una de opción múltiple, una o varias.",
@@ -300,7 +302,7 @@ const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
     misconception: "idea errónea", answers: "Respuestas y justificaciones:",
   },
   pt: {
-    nameField: "Nome:", idField: String.raw`N.\textsuperscript{o} de estudante:`, durationLabel: "Duração:", totalLabel: "Total:", finalExam: "Exame final",
+    lecturer: "Docente:", nameField: "Nome:", idField: String.raw`N.\textsuperscript{o} de estudante:`, durationLabel: "Duração:", totalLabel: "Total:", finalExam: "Exame final",
     point: "ponto", points: "pontos", question: "Questão", openQuestion: "Questão aberta", part: "Parte",
     qcmPart: "Questões de escolha múltipla", openPart: "Questões abertas", single: "escolha única", multiple: "escolha múltipla",
     qcmConvention: "Uma questão de escolha única tem exatamente uma resposta correta; uma de escolha múltipla, uma ou mais.",
@@ -314,7 +316,7 @@ const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
     misconception: "conceção errada", answers: "Respostas e justificações:",
   },
   nl: {
-    nameField: "Naam:", idField: "Studentnr.:", durationLabel: "Duur:", totalLabel: "Totaal:", finalExam: "Eindexamen",
+    lecturer: "Docent:", nameField: "Naam:", idField: "Studentnr.:", durationLabel: "Duur:", totalLabel: "Totaal:", finalExam: "Eindexamen",
     point: "punt", points: "punten", question: "Vraag", openQuestion: "Open vraag", part: "Deel",
     qcmPart: "Meerkeuzevragen", openPart: "Open vragen", single: "één antwoord", multiple: "meerdere antwoorden",
     qcmConvention: "Een vraag met één antwoord heeft precies één juist antwoord; een vraag met meerdere antwoorden heeft er één of meer.",
@@ -336,9 +338,44 @@ export function pointsText(n: number, w: CoverWords): string {
   return `${n} ${plural(n, w.point, w.points)}`;
 }
 
+/** Le type d'examen par défaut (création d'un cours, ou cours historique sans type) : pas un libellé saisi. */
+const isDefaultKind = (kind: string) => kind === "Examen final" || kind === "Final Exam";
+
 /** Type d'examen affiché : le défaut de la création d'un cours (« Examen final ») suit la langue de l'examen. */
 function examKindText(c: CourseConfig, w: CoverWords): string {
-  return c.examKind === "Examen final" || c.examKind === "Final Exam" ? w.finalExam : c.examKind;
+  return isDefaultKind(c.examKind) ? w.finalExam : c.examKind;
+}
+
+/**
+ * GABARIT DE L'EPFL HORS CS-202, dans la langue de l'examen : la mise en page de l'EPFL (logo,
+ * SCIPER, QR, rouge des corrigés) reste, ses libellés fixes suivent la langue. null = examen en
+ * anglais (le texte historique, en anglais, reste tel quel) ou cs-202 (empreinte canonique).
+ */
+export function epflWords(): CoverWords | null {
+  if (currentCourse() === DEFAULT_COURSE) return null;
+  const language = formatContextFor(currentCourse()).language;
+  return language === "en" ? null : coverWords(language);
+}
+
+/** Type d'examen du pied et de la garde de l'EPFL : le défaut garde « Final Exam » en anglais, sinon il est traduit. */
+export function epflExamKind(c: CourseConfig): string {
+  if (!isDefaultKind(c.examKind)) return c.examKind;
+  return epflWords()?.finalExam ?? "Final Exam";
+}
+
+/**
+ * En-tête et marge de l'EPFL hors cs-202, à placer après le préambule commun (écrit pour cs-202) :
+ * « Anonymisation: » sans l'espace française d'un examen anglais, et hors anglais, titre de
+ * question et marge « Do NOT write anything here! » traduits.
+ */
+export function epflLocalChrome(questionHead: boolean): string[] {
+  const w = epflWords();
+  const words = w ?? coverWords("en");
+  return [
+    String.raw`\fancyhead[C]{\small ${words.anonymisation} \#0000\\[-2pt]p. \thepage}`,
+    ...(w && questionHead ? [String.raw`\fancyhead[L]{\small ${w.question} \theexq}`] : []),
+    ...(w ? [String.raw`\examchromefalse\AddToShipoutPictureFG{\put(\LenToUnit{\dimexpr\paperwidth-0.42cm},\LenToUnit{0.32\paperheight}){\rotatebox{90}{\scriptsize\textsf{${w.leaveEmpty}}}}}`] : []),
+  ];
 }
 
 /** Titre du cours sur une ligne : « CODE -- Nom » (le code est facultatif). */
