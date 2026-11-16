@@ -7,6 +7,7 @@ import { HARD_STOP_CODES, LONG_OUTPUT_MAX_TOKENS, completeJson, completeText, co
 import { search } from "@/lib/search";
 import { difficultyBlockForExam } from "@/lib/difficulty";
 import { buildExamArtifact, buildExerciseArtifact } from "@/lib/exam-latex";
+import { examBudgetFor } from "@/lib/exam-format";
 import { dueConcepts, markTested } from "@/lib/schedule";
 import { loadJobCheckpoint, saveJobCheckpoint } from "@/lib/jobs";
 import { examsDir } from "@/lib/paths";
@@ -146,6 +147,34 @@ const EXAM_SCHEMA = {
 } as const;
 
 /**
+ * Schéma de sortie de l'examen : celui de cs-202 à l'identique ; pour un autre cours, sans ses
+ * exemples (titre CS-202, « 180 (3 heures) », catégories Networking/OS/C), que le modèle recopiait.
+ */
+function examSchema() {
+  if (currentCourse() === DEFAULT_COURSE) return EXAM_SCHEMA;
+  const { questions } = EXAM_SCHEMA.properties;
+  return {
+    ...EXAM_SCHEMA,
+    properties: {
+      title: { type: "string", description: "code et nom du cours, puis le type d'examen" },
+      duration_min: { type: "integer", description: `${examBudgetFor(currentCourse()).minutes} (durée de l'examen, en minutes)` },
+      questions: {
+        ...questions,
+        items: {
+          ...questions.items,
+          properties: {
+            ...questions.items.properties,
+            category: { type: "string", description: "catégorie du sujet (celle de son créneau)" },
+            concept: { type: "string", description: "Titre court du sujet" },
+            points: { type: "integer", description: "Barème total du sujet" },
+          },
+        },
+      },
+    },
+  };
+}
+
+/**
  * Plafond du prompt de génération (prompt complet + prompt de lot, en
  * caractères). Il REMPLACE l'empreinte figée du prompt comme garde : une
  * empreinte change à chaque évolution légitime des consignes, donc elle finissait
@@ -217,7 +246,7 @@ async function callClaude(ctx: Ctx): Promise<ExamSpec> {
     model: "opus",
     maxTokens: 16000,
     thinking: "adaptive",
-    json: { schema: EXAM_SCHEMA as unknown as object },
+    json: { schema: examSchema() as unknown as object },
     effort: "high",
   });
   return JSON.parse(res.text || "{}") as ExamSpec;
@@ -326,7 +355,7 @@ export async function buildBrief(): Promise<string> {
     ``,
     `--- FORMAT DE SORTIE ATTENDU ---`,
     `Écris un JSON valide conforme exactement à ce schéma (clés en anglais, statement_tex/solution_tex en LaTeX) :`,
-    JSON.stringify(EXAM_SCHEMA, null, 2),
+    JSON.stringify(examSchema(), null, 2),
   ].join("\n");
 }
 
@@ -1018,7 +1047,7 @@ async function buildClaudeCodePrompt(ctx: Ctx): Promise<string> {
     `--- SORTIE ATTENDUE ---`,
     `Réponds UNIQUEMENT avec un objet JSON valide conforme EXACTEMENT à ce schéma (statement_tex/solution_tex = LaTeX compilable).`,
     `N'écris aucun fichier, n'utilise aucun outil, n'ajoute aucune prose ni balise markdown autour : juste l'objet JSON.`,
-    JSON.stringify(EXAM_SCHEMA, null, 2),
+    JSON.stringify(examSchema(), null, 2),
   ].join("\n");
 }
 

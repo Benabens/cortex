@@ -111,6 +111,46 @@ test("hors EPFL : aucune consigne ne prend un final EPFL pour cible, l'examen r�
   assert.match(directives, /annales/, "le niveau est celui des annales du cours");
 });
 
+test("barème et durée : ceux de l'examen déclaré (75 min), pas ~180 points en 3 h", async () => {
+  const id = await newCourse({ examFormat: { kind: "exercises", durationMin: 75 } });
+  const { intro, slots } = await profileOf(id);
+  assert.doesNotMatch(intro, /180 points|3 h\b/, intro);
+  assert.match(intro, /~75 points au total, 75 min\./, intro);
+  assert.equal(slots.reduce((s, x) => s + x.points, 0), 75, "les créneaux se partagent le barème de l'examen");
+});
+
+test("barème et durée : sans format déclaré, la durée du cours (90 min)", async () => {
+  const id = await newCourse({ durationMin: 90 });
+  const { intro, slots } = await profileOf(id);
+  assert.match(intro, /~90 points au total, 90 min\./, intro);
+  assert.equal(slots.reduce((s, x) => s + x.points, 0), 90);
+});
+
+test("barème et durée : ceux des annales quand elles les donnent (60 points, 50 min)", async () => {
+  const id = await newCourse();
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  await runWithCourse(id, async () => {
+    for (const t of ["sources", "items", "format_profile"]) await q.ensureTable(t);
+    const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "midterm", "Midterm fictif", "midterm/fictif", 2025, 1);
+    await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "midterm", "Midterm fictif", "Exercise 1. Insert the keys 7, 3, 9 into an empty binary search tree.");
+    await q.run(`INSERT INTO format_profile (json) VALUES (?)`, JSON.stringify({ basis: "annales", format_summary: "2 exercices", duration_min: 50, total_points: 60, has_mcq: false, question_types: [], sections: [] }));
+  });
+  const { intro, slots } = await profileOf(id);
+  assert.match(intro, /~60 points au total, 50 min\./, intro);
+  assert.equal(slots.reduce((s, x) => s + x.points, 0), 60);
+});
+
+test("schéma de sortie de l'examen : la durée du cours, ni « 180 (3 heures) » ni les catégories de CS-202", async () => {
+  const id = await newCourse({ examFormat: { kind: "exercises", durationMin: 75 } });
+  const { runWithCourse } = await import("../db/client");
+  const { resolveExamFormat } = await import("../lib/exam-format");
+  const { buildBrief } = await import("../lib/exam");
+  const brief = await runWithCourse(id, async () => { await resolveExamFormat(); return buildBrief(); });
+  assert.doesNotMatch(brief, /180 \(3 heures\)|Networking|CS-202/, brief.slice(-1500));
+  assert.match(brief, /"description": "75 \(durée de l'examen, en minutes\)"/);
+});
+
 test("hors EPFL : ni le drill ni l'architecte ne visent un final EPFL ni le style d'une enseignante", async () => {
   const id = await newCourse();
   const { drill, design } = await drillAndDesignPrompts(id);
