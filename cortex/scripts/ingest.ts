@@ -411,15 +411,23 @@ async function buildVocab(): Promise<number> {
 }
 
 // ---------- Ingestion GÉNÉRIQUE (cours ≠ cs-202) : tout le contenu de data/<id>/content ----------
+/**
+ * Dossier de catégorie du contenu (import, dépôt par catégorie, connecteur) → type d'ingestion.
+ * Il décide : « Final review 2023 » rangé en Cours reste un cours, jamais une annale (audit du
+ * 16/11/2026). Les annales vivent dans refs/, lues à part.
+ */
+const FOLDER_TYPES: Record<string, string> = { lectures: "course_pdf", series: "serie", notes: "note" };
+
 function inferGenericType(rel: string): { type: string; year: number | null } {
   // Dossier rangé par catégorie (questions d'exemple officielles, consignes d'examen) : il prime sur le nom.
-  const byFolder = sourceTypeForFolder(rel);
+  const byFolder = sourceTypeForFolder(rel) ?? FOLDER_TYPES[rel.replace(/\\/g, "/").split("/")[0].toLowerCase()];
   if (byFolder) return { type: byFolder, year: null };
+  // Sans dossier de catégorie (misc/, sites/, dépôt ancien) : le nom du fichier décide.
   const f = rel.toLowerCase();
   let m;
   if ((m = f.match(/final.*?(\d{4})|(\d{4}).*?final/))) return { type: "final", year: +(m[1] || m[2]) };
   if ((m = f.match(/midterm.*?(\d{4})|(\d{4}).*?midterm/))) return { type: "midterm", year: +(m[1] || m[2]) };
-  if (/\/notes?\/|study.?guide|hints|scope|checklist|\bplan\b/.test(f)) return { type: "note", year: null };
+  if (/(^|\/)notes?\/|study.?guide|hints|scope|checklist|\bplan\b/.test(f)) return { type: "note", year: null };
   if (/s[ée]rie|exercise|\bexo\b|tutorial|homework|pset|problem.?set|\/series?\//.test(f)) return { type: "serie", year: null };
   if (/cheat|formula|recap|summary/.test(f)) return { type: "cheatsheet", year: null };
   if (/lecture|cours|slides|chapter/.test(f) || /\.(pptx|docx)$/.test(f)) return { type: "course_pdf", year: null };
