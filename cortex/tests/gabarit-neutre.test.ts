@@ -6,6 +6,7 @@
  * (tests/helpers/gabarits.ts) ; le gabarit EPFL est verrouillé par gabarit-epfl-non-regression.
  */
 import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -162,4 +163,28 @@ test("repli HTML hors EPFL : aucune mention de l'EPFL", async () => {
   assert.match(html, /Toy recurrence/);
   assert.match(html, /brew install tectonic/);
   assert.doesNotMatch(html, /epfl/i);
+});
+
+test("PDF compilés hors EPFL : aucun texte de l'EPFL sur aucune page, aucun logo copié (sauté sans tectonic ni pdftotext)", async (t) => {
+  const { buildExamArtifact, texAvailable } = await import("../lib/exam-latex");
+  if (!texAvailable() || spawnSync("pdftotext", ["-v"]).error) return t.skip("tectonic/pdflatex ou pdftotext absent");
+  const { buildQcmArtifact } = await import("../lib/qcm-latex");
+  const { buildBlocksArtifact } = await import("../lib/blocks-latex");
+  const { examsDir } = await import("../lib/paths");
+  const { WRITTEN_SPEC, QCM_DATA, BLOCKS, DATE } = await import("./helpers/gabarits");
+  await inCourse(ids.neutralEn, async () => {
+    assert.equal((await buildExamArtifact(WRITTEN_SPEC as never, 901, DATE)).kind, "pdf");
+    const qcm = await buildQcmArtifact(902, QCM_DATA, DATE);
+    assert.equal(qcm.file, "qcm-902.pdf", qcm.texError);
+    assert.equal(qcm.texWarning, undefined);
+    assert.equal((await buildBlocksArtifact(903, BLOCKS, DATE)).file, "blocks-903.pdf");
+    for (const base of ["exam-901", "qcm-902", "blocks-903"]) {
+      for (const name of [base, `${base}-corrige`]) {
+        const text = execFileSync("pdftotext", [path.join(examsDir(), `${name}.pdf`), "-"]).toString();
+        assert.match(text, /Imaginary Networks/, name);
+        assert.doesNotMatch(text, /EPFL|SCIPER|Anonymi|Do NOT write/i, name);
+      }
+    }
+    assert.ok(!fs.existsSync(path.join(examsDir(), "epfl-logo.png")), "logo de l'EPFL copié à côté du .tex");
+  });
 });
