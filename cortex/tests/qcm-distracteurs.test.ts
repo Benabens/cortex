@@ -177,9 +177,9 @@ test("le remplaçant reste trivial à la revérification : une seule réparation
   assert.ok(designCalls > 1, "le défaut persistant déclenche une régénération ou un comblement");
   if (result.r) {
     assert.ok(result.steps.some((s) => /à régénérer après une réparation/.test(s)), result.steps.join("\n"));
-    // Chaque ronde de comblement a tenté de remplacer les QCM restés triviaux ; faute de mieux après
-    // tout le budget, ils sont livrés (la livraison complète prime, voir plus bas) et comptés triviaux.
-    assert.ok(designCalls > 1 + 2, `comblements ciblés tentés, reçu ${designCalls} conception(s)`);
+    // Une seule régénération ciblée remplace désormais les anciens comblements génériques répétés.
+    // Faute de mieux, l'acquis est livré et son défaut reste mesuré.
+    assert.equal(designCalls, 2, `une régénération ciblée attendue, reçu ${designCalls} conception(s)`);
   } else {
     assert.match(result.error, /contrôles de qualité/, result.error);
   }

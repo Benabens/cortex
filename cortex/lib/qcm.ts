@@ -1513,8 +1513,10 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   }
   const callBudget = new QcmPhaseCallBudget({
     comblement: EXTRA_BATCHES * batches.length,
-    audit: Math.max(4, batches.length + 2),
-    remplacement: Math.max(3, batches.length * 2),
+    // Chaque passe peut lire deux fois et le dédoublonnage réessaie une fois : la borne compte les
+    // appels réels, donc reste plus large que l'ancienne borne en « rondes ».
+    audit: Math.max(12, batches.length * 4),
+    remplacement: Math.max(12, batches.length * 6),
   });
   const auditWithinBudget = async (items: QcmItem[], readings = 1): Promise<QcmItem[]> => {
     if (!items.length) return [];
@@ -1609,6 +1611,12 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     ]);
     const changed = fixable.map((w, k) => (repaired[k] && repaired[k] !== w.it ? repaired[k] : null));
     await verifyGrouped([...changed.filter((n): n is QcmItem => !!n), ...regenerated.values()]);
+    const persistent = fixable.filter((w, k) => {
+      const n = changed[k];
+      return !!n && n.verified === 1 && !n.rejected && !!n.trivialDistractors?.length;
+    });
+    const regeneratedPersistent = await regenerateGrouped(group, persistent);
+    await verifyGrouped([...regeneratedPersistent.values()]);
     fixable.forEach((w, k) => {
       const n = changed[k];
       // Rendu tel quel (remplacement échoué) : l'item d'origine suit la règle commune.
@@ -1617,6 +1625,10 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       // le régénérer ajoutait conception + vérification, et une question absente coûte plus cher.
       if (!n.trivialDistractors?.length || onlyTrivialDistractors(n)) outs[w.b][w.i] = { ...n, slot: w.it.slot };
       if (n.trivialDistractors?.length && onlyTrivialDistractors(n)) step(`QCM à régénérer après une réparation : un distracteur reste éliminable sans le cours (gardé en réserve)`, 0);
+      const fresh = regeneratedPersistent.get(w);
+      if (fresh?.verified === 1 && !fresh.rejected && !fresh.trivialDistractors?.length) {
+        outs[w.b][w.i] = { ...fresh, slot: w.it.slot };
+      }
     });
     weak.forEach((w) => {
       const n = regenerated.get(w);
@@ -1942,7 +1954,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   // Le comblement principal peut consommer toute sa réserve avant que les doublons, impossibles à
   // connaître à l'échelle de l'examen, soient audités. Leur remplacement a donc son propre budget
   // borné : au plus deux fois les lots prévus, partagé avec le complément final.
-  let lateBudget = callBudget.remaining("remplacement");
+  let lateBudget = Math.max(3, batches.length * 2);
   // Une passe de remplacement peut elle-même perdre des items aux contrôles qualité. Il faut alors
   // recombler même si l'audit suivant ne voit plus de doublon, puis auditer ce nouveau lot. Le budget
   // reste borné par la taille de l'examen et par la réserve de notions.
@@ -1991,7 +2003,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       replacement.push({ topics: slice, molds: slice.map(() => null), guidance });
     }
     callBudget.take("remplacement", replacement.length);
-    lateBudget = callBudget.remaining("remplacement");
+    lateBudget -= replacement.length;
     for (const got of await runRound(replacement)) {
       if (got.error) lastError = got.error;
       all.splice(0, all.length, ...selectCapped(all, got.items, count));
@@ -2127,7 +2139,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
         fill.push({ topics: slice, molds: slice.map(() => null), guidance });
       }
       callBudget.take("remplacement", fill.length);
-      lateBudget = callBudget.remaining("remplacement");
+      lateBudget -= fill.length;
       progress.add("QCM", fill.length);
       step(`${short} QCM manquant(s) → complément final, ${fill.length} lot(s)${angle ? " (notions reprises sous un autre angle)" : ""}`, 80);
       const before = all.length;
