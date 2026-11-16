@@ -18,6 +18,7 @@ process.env.CORTEX_DATA_DIR = tmp;
 
 let courseFr = "";
 let courseEn = "";
+let courseEpflFr = "";
 
 before(async () => {
   delete process.env.CORTEX_USER;
@@ -29,9 +30,12 @@ before(async () => {
   await insertCourse(fr);
   const en = buildCourseRow({ name: "Linear Algebra", code: "MATH-111", language: "en", examFormat: { kind: "exercises", durationMin: 90 } }, "owner");
   await insertCourse(en);
+  const epflFr = buildCourseRow({ name: "Calcul fictif", code: "TEST-EPFL", university: "EPFL", language: "fr", examFormat: { kind: "exercises", durationMin: 60, documents: "none" } }, "owner");
+  await insertCourse(epflFr);
   await reloadCourses();
   courseFr = fr.id;
   courseEn = en.id;
+  courseEpflFr = epflFr.id;
 });
 
 after(() => {
@@ -61,7 +65,7 @@ async function render(course: string): Promise<string> {
 
 test("la garde suit le format déclaré du cours : durée, documents et langue", async () => {
   const tex = await render(courseFr);
-  assert.match(tex, /Vous disposez de 60 minutes/);
+  assert.match(tex, /Durée :\}? 60 minutes/);
   assert.match(tex, /Aucun document n'est autorisé/);
   assert.match(tex, /CONSIGNES/);
   assert.match(tex, /2 exercices indépendants/);
@@ -69,9 +73,19 @@ test("la garde suit le format déclaré du cours : durée, documents et langue",
   for (const en of [/You have/, /Personal notes/, /closed book/, /INSTRUCTIONS \(please/, /LEAVE THIS EMPTY/, /November/]) assert.doesNotMatch(tex, en);
 });
 
+test("cours de l'EPFL : sa garde suit aussi le format déclaré (durée, documents, langue)", async () => {
+  const tex = await render(courseEpflFr);
+  assert.match(tex, /\\epfllogo\[30\]/);
+  assert.match(tex, /Vous disposez de 60 minutes/);
+  assert.match(tex, /Aucun document n'est autorisé/);
+  assert.match(tex, /2 exercices indépendants/);
+  assert.match(tex, /13 novembre 2026/);
+  for (const en of [/You have/, /Personal notes/, /closed book/, /INSTRUCTIONS \(please/, /November/]) assert.doesNotMatch(tex, en);
+});
+
 test("sans règle déclarée sur les documents, la garde n'en invente pas ; la langue du cours décide", async () => {
   const tex = await render(courseEn);
-  assert.match(tex, /You have 90 minutes/);
+  assert.match(tex, /Duration:\}? 90 minutes/);
   assert.doesNotMatch(tex, /Personal notes|closed book|No documents/);
 });
 
@@ -91,7 +105,7 @@ test("les sous-questions portent le numéro de leur question, énoncé et corrig
   const doc = tex.slice(tex.indexOf("\n" + String.raw`\begin{document}` + "\n"));
   const q2 = doc.slice(doc.indexOf(String.raw`\examq{2}`), doc.indexOf("Corrigé"));
   assert.deepEqual([...q2.matchAll(/\\subq\{([\d.]+)\}/g)].map((m) => m[1]), ["2.1", "2.2"]);
-  const sol2 = doc.slice(doc.indexOf("Question 2 :"));
+  const sol2 = doc.slice(doc.indexOf(String.raw`Question 2 \quad--`));
   assert.deepEqual([...sol2.matchAll(/\\subq\{([\d.]+)\}/g)].map((m) => m[1]), ["2.1", "2.2"]);
   const q1 = doc.slice(doc.indexOf(String.raw`\examq{1}`), doc.indexOf(String.raw`\examq{2}`));
   assert.deepEqual([...q1.matchAll(/\\subq\{([\d.]+)\}/g)].map((m) => m[1]), ["1.1", "1.2"]);

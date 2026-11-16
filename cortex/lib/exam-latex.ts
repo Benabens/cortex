@@ -7,7 +7,9 @@ import { currentCourse } from "@/db/client";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
 import { examsDir } from "@/lib/paths";
-import { formatContextFor, type DocumentRule, type Language } from "@/lib/exam-format";
+import { formatContextFor } from "@/lib/exam-format";
+import { courseTemplate, courseWords, coverWords, durationText, examTemplate, localDate, neutralChrome, neutralCoverTex, neutralDuration, pointsText } from "@/lib/exam-template";
+import { qrText, texEscape } from "@/lib/tex-escape";
 
 const LATEX_DIR = path.join(process.cwd(), "latex");
 
@@ -18,17 +20,7 @@ const catRank = (c?: string) => {
 };
 const qPoints = (q: ExamQuestion) => q.points ?? 10;
 
-const TEX_SPECIAL: Record<string, string> = { "\\": "\\textbackslash{}", "~": "\\textasciitilde{}", "^": "\\textasciicircum{}" };
-/** Échappe le texte BRUT (titres, concepts, métadonnées du cours) pour LaTeX. NE PAS appliquer au LaTeX du modèle. */
-export function texEscape(s: string): string {
-  // Une seule passe : échapper « \ » puis « { } » à part donnait « \textbackslash\{\} » (« \{} » dans le PDF).
-  return (s ?? "").replace(/[\\&%$#_{}~^]/g, (ch) => TEX_SPECIAL[ch] ?? `\\${ch}`);
-}
-
-/** Contenu d'un QR code : le code du cours est saisi par l'utilisateur, seuls lettres, chiffres, « . » et « - » passent. */
-export function qrText(s: string): string {
-  return (s ?? "").replace(/[^A-Za-z0-9.-]/g, "");
-}
+export { qrText, texEscape };
 
 /**
  * \examinode et \examstates ouvrent déjà leur propre center+tikzpicture : si le
@@ -85,155 +77,6 @@ function gradingTableTex(qs: ExamQuestion[], leaveEmpty = "LEAVE THIS EMPTY"): s
   ].join("\n");
 }
 
-/** Textes de la garde d'un cours hors CS-202, dans la langue de l'examen (repli : anglais). */
-type CoverWords = {
-  months: string[];
-  date: (d: number, month: string, y: string) => string;
-  duration: (d: string) => string;
-  minutes: (n: number) => string;
-  hours: (n: number) => string;
-  documents: Record<DocumentRule, string>;
-  instructions: string;
-  important: string;
-  ink: string;
-  onSheet: string;
-  readCarefully: string;
-  exercises: (n: number, total: number) => string;
-  leaveEmpty: string;
-  name: string;
-  seat: string;
-  anonymisation: string;
-};
-
-const COVER_WORDS: Record<Language, CoverWords> = {
-  en: {
-    months: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
-    date: (d, m, y) => `${m} ${d}, ${y}`,
-    duration: (d) => `You have ${d} to complete this examination.`,
-    minutes: (n) => `${n} minutes`,
-    hours: (n) => `${n} hours`,
-    documents: { none: "No documents are allowed.", notes: "Personal notes are allowed.", open: "All documents are allowed." },
-    instructions: "INSTRUCTIONS (please read carefully)",
-    important: String.raw`\textbf{IMPORTANT!} Please strictly follow these instructions.`,
-    ink: String.raw`You must \textbf{use black or dark blue ink}, neither pencil nor any other color.`,
-    onSheet: String.raw`Answer the questions \textbf{directly on the exam sheet}, in the space provided.`,
-    readCarefully: String.raw`Carefully and \emph{completely} read each question so as to do only what is actually asked.`,
-    exercises: (n, t) => `The exam consists of ${n} independent exercises (points are indicated, the total is ${t} points).`,
-    leaveEmpty: "LEAVE THIS EMPTY",
-    name: "NAME:", seat: String.raw`Seat \#:`, anonymisation: "Anonymisation:",
-  },
-  fr: {
-    months: ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"],
-    date: (d, m, y) => `${d === 1 ? String.raw`1\textsuperscript{er}` : d} ${m} ${y}`,
-    duration: (d) => `Vous disposez de ${d} pour cet examen.`,
-    minutes: (n) => `${n} minutes`,
-    hours: (n) => `${n} heures`,
-    documents: { none: "Aucun document n'est autorisé.", notes: "Les notes personnelles sont autorisées.", open: "Tous les documents sont autorisés." },
-    instructions: "CONSIGNES (à lire attentivement)",
-    important: String.raw`\textbf{IMPORTANT !} Respectez strictement ces consignes.`,
-    ink: String.raw`Écrivez \textbf{à l'encre noire ou bleu foncé}, ni au crayon ni dans une autre couleur.`,
-    onSheet: String.raw`Répondez \textbf{directement sur la feuille d'examen}, dans l'espace prévu.`,
-    readCarefully: String.raw`Lisez chaque question attentivement et \emph{en entier}, pour ne faire que ce qui est demandé.`,
-    exercises: (n, t) => `L'examen comporte ${n} exercices indépendants (barème indiqué, total : ${t} points).`,
-    leaveEmpty: "NE RIEN ÉCRIRE ICI",
-    name: "NOM :", seat: String.raw`Place n\textsuperscript{o} :`, anonymisation: "Anonymisation :",
-  },
-  de: {
-    months: ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"],
-    date: (d, m, y) => `${d}. ${m} ${y}`,
-    duration: (d) => `Sie haben ${d} Zeit für diese Prüfung.`,
-    minutes: (n) => `${n} Minuten`,
-    hours: (n) => `${n} Stunden`,
-    documents: { none: "Es sind keine Unterlagen erlaubt.", notes: "Persönliche Notizen sind erlaubt.", open: "Alle Unterlagen sind erlaubt." },
-    instructions: "ANWEISUNGEN (bitte sorgfältig lesen)",
-    important: String.raw`\textbf{WICHTIG!} Befolgen Sie diese Anweisungen genau.`,
-    ink: String.raw`Schreiben Sie \textbf{mit schwarzer oder dunkelblauer Tinte}, weder mit Bleistift noch in einer anderen Farbe.`,
-    onSheet: String.raw`Beantworten Sie die Fragen \textbf{direkt auf dem Prüfungsblatt}, im vorgesehenen Platz.`,
-    readCarefully: String.raw`Lesen Sie jede Frage sorgfältig und \emph{vollständig}.`,
-    exercises: (n, t) => `Die Prüfung besteht aus ${n} unabhängigen Aufgaben (Punkte angegeben, insgesamt ${t} Punkte).`,
-    leaveEmpty: "BITTE LEER LASSEN",
-    name: "NAME:", seat: "Platz Nr.:", anonymisation: "Anonymisierung:",
-  },
-  it: {
-    months: ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"],
-    date: (d, m, y) => `${d} ${m} ${y}`,
-    duration: (d) => `Avete ${d} per completare questo esame.`,
-    minutes: (n) => `${n} minuti`,
-    hours: (n) => `${n} ore`,
-    documents: { none: "Nessun documento è ammesso.", notes: "Gli appunti personali sono ammessi.", open: "Tutti i documenti sono ammessi." },
-    instructions: "ISTRUZIONI (da leggere attentamente)",
-    important: String.raw`\textbf{IMPORTANTE!} Seguite rigorosamente queste istruzioni.`,
-    ink: String.raw`Scrivete \textbf{con inchiostro nero o blu scuro}, né a matita né in un altro colore.`,
-    onSheet: String.raw`Rispondete \textbf{direttamente sul foglio d'esame}, nello spazio previsto.`,
-    readCarefully: String.raw`Leggete ogni domanda attentamente e \emph{per intero}.`,
-    exercises: (n, t) => `L'esame comprende ${n} esercizi indipendenti (punti indicati, totale ${t} punti).`,
-    leaveEmpty: "NON SCRIVERE QUI",
-    name: "NOME:", seat: "Posto n.:", anonymisation: "Anonimizzazione:",
-  },
-  es: {
-    months: ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"],
-    date: (d, m, y) => `${d} de ${m} de ${y}`,
-    duration: (d) => `Dispone de ${d} para este examen.`,
-    minutes: (n) => `${n} minutos`,
-    hours: (n) => `${n} horas`,
-    documents: { none: "No se permite ningún documento.", notes: "Se permiten los apuntes personales.", open: "Se permiten todos los documentos." },
-    instructions: "INSTRUCCIONES (léalas con atención)",
-    important: String.raw`\textbf{¡IMPORTANTE!} Siga estrictamente estas instrucciones.`,
-    ink: String.raw`Escriba \textbf{con tinta negra o azul oscuro}, ni a lápiz ni en otro color.`,
-    onSheet: String.raw`Responda \textbf{directamente en la hoja de examen}, en el espacio previsto.`,
-    readCarefully: String.raw`Lea cada pregunta con atención y \emph{por completo}.`,
-    exercises: (n, t) => `El examen consta de ${n} ejercicios independientes (puntos indicados, total: ${t} puntos).`,
-    leaveEmpty: "NO ESCRIBA AQUÍ",
-    name: "NOMBRE:", seat: "Asiento n.º:", anonymisation: "Anonimización:",
-  },
-  pt: {
-    months: ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"],
-    date: (d, m, y) => `${d} de ${m} de ${y}`,
-    duration: (d) => `Dispõe de ${d} para este exame.`,
-    minutes: (n) => `${n} minutos`,
-    hours: (n) => `${n} horas`,
-    documents: { none: "Não é permitido nenhum documento.", notes: "São permitidas notas pessoais.", open: "São permitidos todos os documentos." },
-    instructions: "INSTRUÇÕES (leia com atenção)",
-    important: String.raw`\textbf{IMPORTANTE!} Siga rigorosamente estas instruções.`,
-    ink: String.raw`Escreva \textbf{a tinta preta ou azul-escura}, nem a lápis nem noutra cor.`,
-    onSheet: String.raw`Responda \textbf{diretamente na folha de exame}, no espaço previsto.`,
-    readCarefully: String.raw`Leia cada pergunta com atenção e \emph{por inteiro}.`,
-    exercises: (n, t) => `O exame tem ${n} exercícios independentes (pontuação indicada, total: ${t} pontos).`,
-    leaveEmpty: "NÃO ESCREVER AQUI",
-    name: "NOME:", seat: "Lugar n.º:", anonymisation: "Anonimização:",
-  },
-  nl: {
-    months: ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"],
-    date: (d, m, y) => `${d} ${m} ${y}`,
-    duration: (d) => `U hebt ${d} voor dit examen.`,
-    minutes: (n) => `${n} minuten`,
-    hours: (n) => `${n} uur`,
-    documents: { none: "Er zijn geen documenten toegestaan.", notes: "Persoonlijke aantekeningen zijn toegestaan.", open: "Alle documenten zijn toegestaan." },
-    instructions: "INSTRUCTIES (lees aandachtig)",
-    important: String.raw`\textbf{BELANGRIJK!} Volg deze instructies nauwgezet.`,
-    ink: String.raw`Schrijf \textbf{met zwarte of donkerblauwe inkt}, niet met potlood of in een andere kleur.`,
-    onSheet: String.raw`Beantwoord de vragen \textbf{rechtstreeks op het examenblad}, in de voorziene ruimte.`,
-    readCarefully: String.raw`Lees elke vraag aandachtig en \emph{volledig}.`,
-    exercises: (n, t) => `Het examen bestaat uit ${n} onafhankelijke oefeningen (punten aangegeven, totaal ${t} punten).`,
-    leaveEmpty: "HIER NIETS SCHRIJVEN",
-    name: "NAAM:", seat: "Plaats nr.:", anonymisation: "Anonimisering:",
-  },
-};
-
-function coverWords(language: string): CoverWords {
-  return COVER_WORDS[language as Language] ?? COVER_WORDS.en;
-}
-
-function localDate(dateLabel: string, w: CoverWords): string {
-  const m = dateLabel.match(/(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return texEscape(dateLabel);
-  return w.date(+m[3], w.months[+m[2] - 1] ?? "", m[1]);
-}
-
-/** Durée lisible : en heures à partir de 2 h pile (« 3 heures »), sinon en minutes (« 60 minutes », « 90 minutes »). */
-function durationText(min: number, w: CoverWords): string {
-  return min >= 120 && min % 60 === 0 ? w.hours(min / 60) : w.minutes(min);
-}
 
 /**
  * Garde d'un cours HORS CS-202 : durée, documents permis et langue viennent du format de
@@ -251,7 +94,7 @@ function genericCoverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string):
   const uniLines = c.universityLines.map(texEscape).join(String.raw`\\ `);
   const profsTex = c.profs.map(texEscape).join(", ");
   const facultyLine = [c.faculty ? String.raw`\textbf{${texEscape(c.faculty)}}` : "", `${examCodeTex} ${texEscape(c.examName)}`, profsTex].filter(Boolean).join(String.raw`\\ `);
-  const logoTex = c.university === "EPFL" ? String.raw`\epfllogo[30]` : "";
+  const logoTex = examTemplate(c) === "epfl" ? String.raw`\epfllogo[30]` : "";
   return [
     String.raw`\thispagestyle{empty}`,
     String.raw`\noindent\begin{minipage}[t]{0.30\textwidth}\vspace{0pt}${logoTex}\end{minipage}\hfill`,
@@ -277,8 +120,22 @@ function genericCoverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string):
   ].join("\n");
 }
 
+/** Garde du gabarit neutre (cours hors EPFL) : consignes génériques, aucune marque d'établissement. */
+function neutralWrittenCoverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string): string {
+  const total = qs.reduce((s, q) => s + qPoints(q), 0);
+  const c = getCourse(currentCourse());
+  const f = formatContextFor(currentCourse());
+  const w = coverWords(f.language);
+  return neutralCoverTex({
+    course: c, w, dateTex: localDate(dateLabel, w), durationMin: neutralDuration(spec.duration_min), totalPts: total,
+    instructions: [w.exercises(qs.length, total), ...(f.documents ? [w.documents[f.documents]] : []), w.onSheet, w.readCarefully],
+  });
+}
+
 function coverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string): string {
-  if (currentCourse() !== DEFAULT_COURSE) return genericCoverTex(spec, qs, dateLabel);
+  if (currentCourse() !== DEFAULT_COURSE) {
+    return courseTemplate() === "epfl" ? genericCoverTex(spec, qs, dateLabel) : neutralWrittenCoverTex(spec, qs, dateLabel);
+  }
   const total = qs.reduce((s, q) => s + qPoints(q), 0);
   const dur = spec.duration_min ?? 180;
   const hours = Math.round(dur / 60);
@@ -407,11 +264,16 @@ export function renderExamTex(spec: ExamSpec, dateLabel: string, includeSolution
     )
     .join("\n\n");
 
+  // Hors EPFL, les titres du corrigé suivent la langue de l'examen ; le texte de l'EPFL reste tel quel.
+  const neutral = courseTemplate() === "neutral";
+  const w = courseWords();
   const solutions = [
-    String.raw`\clearpage{\Large\textbf{Corrigé}}\par\vspace{6pt}\hrule\medskip`,
+    String.raw`\clearpage{\Large\textbf{${neutral ? w.solutions : "Corrigé"}}}\par\vspace{6pt}\hrule\medskip`,
     ...qs.map((q, i) =>
       [
-        String.raw`\par\medskip\needspace{4\baselineskip}{\large\textbf{Question ${i + 1} : ${texEscape(q.concept)} \hfill [${qPoints(q)} points]}}\par\smallskip`,
+        neutral
+          ? String.raw`\par\medskip\needspace{4\baselineskip}{\large\textbf{${w.question} ${i + 1} \quad-- ${texEscape(q.concept)} \hfill [${pointsText(qPoints(q), w)}]}}\par\smallskip`
+          : String.raw`\par\medskip\needspace{4\baselineskip}{\large\textbf{Question ${i + 1} : ${texEscape(q.concept)} \hfill [${qPoints(q)} points]}}\par\smallskip`,
         unwrapLockedFigures(courseTex((q as any).solution_tex ?? "", i + 1)),
       ].join("\n")
     ),
@@ -421,7 +283,7 @@ export function renderExamTex(spec: ExamSpec, dateLabel: string, includeSolution
     preamble,
     currentCourse() === DEFAULT_COURSE ? "" : genericPreamble(),
     courseHeaderOverride(),
-    String.raw`\newcommand{\FOOTDATE}{${currentCourse() === DEFAULT_COURSE ? footDate(dateLabel) : localDate(dateLabel, coverWords(formatContextFor(currentCourse()).language))}}`,
+    String.raw`\newcommand{\FOOTDATE}{${currentCourse() === DEFAULT_COURSE ? footDate(dateLabel) : localDate(dateLabel, courseWords())}}`,
     String.raw`\begin{document}`,
     coverTex(spec, qs, dateLabel),
     body,
@@ -440,6 +302,7 @@ function courseHeaderOverride(): string {
   const c = getCourse(id);
   if (id === DEFAULT_COURSE) return ""; // gabarit historique intact (hashé, byte-identique)
   if (c.id !== id) return ""; // hors registre → gabarit par défaut
+  if (examTemplate(c) === "neutral") return neutralChrome(c, coverWords(formatContextFor(id).language));
   const code = texEscape(c.examCode).replace(/-/g, "--");
   const profsTex = texEscape(c.profs.length ? c.profs.join(", ") : c.university);
   return [
@@ -865,12 +728,18 @@ function renderTex(tex: string, level: number): string {
 /** Repli HTML LISIBLE si la compilation LaTeX échoue : plus de LaTeX source brut. */
 export function htmlFallback(spec: ExamSpec, id: number, dateLabel: string, reason?: string): string {
   const qs = [...spec.questions].sort((a, b) => catRank(a.category) - catRank(b.category));
+  // Hors EPFL, titres de l'examen dans sa langue ; l'avertissement reste celui de l'application.
+  const w = courseTemplate() === "neutral" ? courseWords() : null;
+  const heading = (i: number, q: ExamQuestion) =>
+    w
+      ? `${escHtml(w.question)} ${i + 1} – ${escHtml(q.concept)} <span class="pts">[${escHtml(pointsText(qPoints(q), w))}]</span>`
+      : `Question ${i + 1} : ${escHtml(q.concept)} <span class="pts">[${qPoints(q)} points]</span>`;
   const blocks = qs
     .map(
       (q, i) => `<section>
-<h2>Question ${i + 1} : ${escHtml(q.concept)} <span class="pts">[${qPoints(q)} points]</span></h2>
+<h2>${heading(i, q)}</h2>
 <div class="stmt">${texToHtml((q as any).statement_tex ?? "")}</div>
-<details><summary>Corrigé</summary><div class="sol">${texToHtml((q as any).solution_tex ?? "")}</div></details>
+<details><summary>${w ? escHtml(w.solution) : "Corrigé"}</summary><div class="sol">${texToHtml((q as any).solution_tex ?? "")}</div></details>
 </section>`
     )
     .join("\n");
@@ -894,7 +763,7 @@ ul,ol{margin:6px 0 6px 22px}
 <h1>${escHtml(spec.title)}</h1>
 <p class="warn">⚠️ La compilation LaTeX (PDF) a échoué, rendu HTML lisible de secours (figures/grilles remplacées par des notes).${
     reason ? `<br><b>Erreur LaTeX :</b> <code>${escHtml(reason.slice(0, 300))}</code>` : ""
-  }<br>Pour le vrai PDF EPFL : <code>brew install tectonic</code>, redémarre l'app, régénère.</p>
+  }<br>Pour le vrai PDF${courseTemplate() === "epfl" ? " EPFL" : ""} : <code>brew install tectonic</code>, redémarre l'app, régénère.</p>
 ${blocks}`;
 }
 
@@ -919,16 +788,22 @@ export function renderExerciseLatex(q: ExamQuestion, dateLabel: string, includeS
   ].join("\n");
 }
 
+/** Copie le logo officiel à côté des .tex compilés (gabarit de l'EPFL seulement). */
+export function copyExamLogo(): void {
+  if (courseTemplate() === "neutral") return;
+  for (const ext of ["pdf", "png"]) {
+    const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
+    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
+  }
+}
+
 export type ArtifactResult = { file: string; kind: "pdf" | "html"; texError?: string };
 
 /** Construit l'artefact d'UN exercice ciblé : PDF énoncé (sans corrigé) + PDF corrigé, sans garde. */
 export async function buildExerciseArtifact(q: ExamQuestion, id: number, dateLabel: string): Promise<ArtifactResult> {
   fs.mkdirSync(examsDir(), { recursive: true });
   const base = `exam-${id}`;
-  for (const ext of ["pdf", "png"]) {
-    const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
-  }
+  copyExamLogo();
   // Garde AVANT toute écriture : un source piégé (\input d'un fichier du
   // conteneur…) n'est ni écrit ni compilé — l'exercice échoue.
   const texEnonce = renderExerciseLatex(q, dateLabel, false);
@@ -954,11 +829,7 @@ export async function buildExerciseArtifact(q: ExamQuestion, id: number, dateLab
 export async function buildExamArtifact(spec: ExamSpec, id: number, dateLabel: string): Promise<ArtifactResult> {
   fs.mkdirSync(examsDir(), { recursive: true });
   const base = `exam-${id}`;
-  // copie un éventuel logo officiel pour la compilation
-  for (const ext of ["pdf", "png"]) {
-    const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
-  }
+  copyExamLogo();
   // 1) examen seul (corrigé caché — mode mock) ; 2) version corrigée
   // Garde AVANT toute écriture (cf. lib/tex-guard) : le rendu lui-même est
   // inchangé — le garde lit, il ne réécrit pas.
