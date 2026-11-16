@@ -189,6 +189,7 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
       setFolderProgress({ done: 0, total: selection.accepted.length });
       const refused = [...selection.rejected];
       let saved = 0;
+      let duplicates = 0;
       for (const [index, entry] of selection.accepted.entries()) {
         let failure = "";
         for (let attempt = 1; attempt <= 3; attempt++) {
@@ -203,7 +204,8 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
               if (res.status < 500) break;
               continue;
             }
-            saved++;
+            if (data?.duplicate) duplicates++;
+            else saved++;
             failure = "";
             break;
           } catch {
@@ -214,11 +216,12 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
         setFolderProgress({ done: index + 1, total: selection.accepted.length });
       }
       setFolderRefusals(refused);
-      if (!saved) throw { status: 400, message: "Aucun fichier n’a pu être importé. Consulte la liste des refus ci-dessous." } as ApiError;
+      if (!saved && !duplicates) throw { status: 400, message: "Aucun fichier n’a pu être importé. Consulte la liste des refus ci-dessous." } as ApiError;
       const res = await fetch(`/api/sources/import?course=${encodeURIComponent(courseId)}&action=finish`, { method: "POST" });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw { status: res.status, message: data?.error ?? `Erreur ${res.status}` } as ApiError;
-      setUploadedMsg(`${saved} fichier${saved > 1 ? "s" : ""} déposé${saved > 1 ? "s" : ""}${refused.length ? `, ${refused.length} refusé${refused.length > 1 ? "s" : ""}` : ""} : indexation…`);
+      const already = duplicates ? `, ${duplicates} déjà présent${duplicates > 1 ? "s" : ""} dans le cours (même contenu)` : "";
+      setUploadedMsg(`${saved} fichier${saved > 1 ? "s" : ""} déposé${saved > 1 ? "s" : ""}${already}${refused.length ? `, ${refused.length} refusé${refused.length > 1 ? "s" : ""}` : ""} : indexation…`);
       startJob(data.jobId, "ingest");
     } catch (e) {
       setError((e as ApiError).message || "L’import du dossier a échoué.");
