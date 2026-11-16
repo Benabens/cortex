@@ -35,6 +35,7 @@ let designed = 0;
 /** Défauts des QCM conçus : distracteur trivial, clé contestée (le correcteur trouve une autre option). */
 let trivialEvery = 3;
 let contestedEvery = 5;
+let duplicateEvery = 0;
 /** Verdict « clé fausse » de l'audit final, par énoncé (vide : tout passe). */
 let auditRejects: (stem: string, call: number) => boolean = () => false;
 /** L'audit final répond hors format (aucun verdict lisible). */
@@ -44,6 +45,7 @@ let dedupe: (call: number, prompt: string) => { first: number; second: number; r
 const calls = { design: 0, verify: 0, repair: 0, audit: 0, dedup: 0, other: 0 };
 /** Énoncés soumis à chaque passage de l'audit final. */
 const auditedStems: string[][] = [];
+const auditedPrompts: string[] = [];
 
 function design(prompt: string): string {
   const subjects = [...prompt.matchAll(/^ {2}(\d+)\) (.+?)(?: \[|$)/gm)].map((m) => m[2].trim());
@@ -54,7 +56,7 @@ function design(prompt: string): string {
     return {
       topic: subjects[i] ?? `Notion ${g}`, type: "scq",
       stem: `Question ${g} : que dit le cours sur ${subjects[i] ?? "la notion"} ?${contested ? " (variante B)" : ""}`,
-      options: [KEY, "Une affirmation inversée par rapport au cours.", trivialEvery > 0 && g % trivialEvery === 0 ? TRIVIAL : GOOD, "Une affirmation attribuée à la mauvaise étude."],
+      options: [KEY, "Une affirmation inversée par rapport au cours.", duplicateEvery > 0 && g % duplicateEvery === 0 ? KEY : trivialEvery > 0 && g % trivialEvery === 0 ? TRIVIAL : GOOD, "Une affirmation attribuée à la mauvaise étude."],
       correct: [0], misconceptions: ["", "[inversion] x", "[mauvaise condition] x", "[mauvaise attribution] x"],
       explanation: "La bonne réponse reprend le cours ; l'inversion et la mauvaise attribution le déforment.",
       source_fact: "Équité des modèles, taux de faux positifs, impact disparate, modération de contenus.",
@@ -105,7 +107,7 @@ before(async () => {
       let text = "{}";
       if (/"replacements"/.test(content)) { calls.repair++; text = repair(content); }
       else if (/"duplicates"/.test(content)) { calls.dedup++; text = JSON.stringify({ notions: [], duplicates: dedupe(calls.dedup, content) }); }
-      else if (/"offCourse"/.test(content)) { calls.audit++; auditedStems.push(blocks(content).map((b) => b.body.split("\n")[0])); text = auditUnreadable ? JSON.stringify({ verdicts: "ok" }) : audit(content); }
+      else if (/"offCourse"/.test(content)) { calls.audit++; auditedPrompts.push(content); auditedStems.push(blocks(content).map((b) => b.body.split("\n")[0])); text = auditUnreadable ? JSON.stringify({ verdicts: "ok" }) : audit(content); }
       else if (/"results"/.test(content)) { calls.verify++; text = verify(content); }
       else if (/"items"/.test(content)) { calls.design++; text = design(content); }
       else calls.other++;
@@ -120,10 +122,11 @@ before(async () => {
 });
 
 beforeEach(() => {
-  designed = 0; trivialEvery = 3; contestedEvery = 5;
+  designed = 0; trivialEvery = 3; contestedEvery = 5; duplicateEvery = 0;
   auditRejects = () => false; auditUnreadable = false; dedupe = () => [];
   for (const k of Object.keys(calls) as (keyof typeof calls)[]) calls[k] = 0;
   auditedStems.length = 0;
+  auditedPrompts.length = 0;
 });
 
 after(async () => {
@@ -179,6 +182,7 @@ test("rs-qcm15 simulé : 15/15 livrées, réparations et vérifications regroup�
   assert.equal(r.count, 15, detail);
   assert.ok(calls.verify <= 4, `vérifications regroupées par ronde : ${detail}`);
   assert.ok(calls.repair <= 2, `réparations regroupées par ronde : ${detail}`);
+  assert.ok(calls.audit <= Math.max(4, Math.ceil(15 / 4) + 2), `budget réel d'appels d'audit : ${detail}`);
   assert.ok(perDelivered <= 1.2, `appels par question livrée : ${detail}`);
 });
 
@@ -201,6 +205,36 @@ test("les questions ouvertes ne contaminent pas le manque de QCM", async () => {
   const { qcmTopupMissing } = await import("../lib/qcm");
   assert.equal(qcmTopupMissing(20, 20), 0, "trois ouvertes restent une phase indépendante");
   assert.equal(qcmTopupMissing(17, 20), 3);
+});
+
+test("les budgets d'appels sont indépendants par phase", async () => {
+  const { QcmPhaseCallBudget } = await import("../lib/qcm");
+  const budget = new QcmPhaseCallBudget({ comblement: 2, audit: 1, remplacement: 3 });
+  assert.equal(budget.take("comblement", 9), 2);
+  assert.equal(budget.take("comblement"), 0);
+  assert.equal(budget.take("audit"), 1, "le comblement n'emprunte pas le budget d'audit");
+  assert.equal(budget.take("remplacement", 2), 2);
+  assert.equal(budget.remaining("remplacement"), 1);
+});
+
+test("les contrôles déterministes précèdent le premier audit LLM", async () => {
+  contestedEvery = 0; trivialEvery = 0;
+  const { steps } = await exam(4);
+  const deterministic = steps.findIndex((s) => /Contrôles déterministes/.test(s));
+  const semantic = steps.findIndex((s) => /Audit final/.test(s));
+  assert.ok(deterministic >= 0, steps.join("\n"));
+  assert.ok(semantic > deterministic, steps.join("\n"));
+});
+
+test("une option dupliquée est filtrée avant tout appel d'audit", async () => {
+  contestedEvery = 0; trivialEvery = 0; duplicateEvery = 1;
+  const { steps } = await exam(4);
+  assert.ok(steps.some((s) => /Contrôles déterministes/.test(s)), steps.join("\n"));
+  for (const prompt of auditedPrompts) {
+    for (const block of blocks(prompt)) {
+      assert.ok((block.body.match(new RegExp(KEY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? []).length <= 1, block.body);
+    }
+  }
 });
 
 test("échéance atteinte : les QCM validés sont livrés sans audits tardifs", async () => {
