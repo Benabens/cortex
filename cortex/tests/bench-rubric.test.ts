@@ -9,6 +9,7 @@ import { RUBRIC_VERSION, rubricFingerprint } from "../lib/bench/rubric";
 
 const PINNED: Record<string, string> = {
   v1: "702422ae9b740987927b3f501087b7c59dea755e405f3787b53f87203b8232f6",
+  v2: "e5d112d8e77018398f767cec47b0a48fbe76a80813b68dbcf99b951c755cc6ec",
 };
 
 test("rubrique du juge : le texte de la version courante n'a pas bougé", () => {
