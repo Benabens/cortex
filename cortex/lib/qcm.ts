@@ -5,7 +5,7 @@ import { DEFAULT_ANSWER_MODE, courseMaterialTitles, examLanguageFor, readStoredP
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseNumbers, absentCourseTerms, corpusWindows, coursePassages, factNumbers, topicsInScope } from "@/lib/course-grounding";
-import { rewriteExplanations, rewriteExplanationsOnOptions, secondLookOffCourse, verifierPassages, type OffCourseFlag } from "@/lib/qcm-evidence";
+import { rewriteExplanations, rewriteExplanationsOnOptions, secondLookOffCourse, verifierPassages, writeJustifications, type JustificationTarget, type OffCourseFlag } from "@/lib/qcm-evidence";
 import { bestNotionMatch, capDrops, describeExplanationIssue, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, keyProposition, notionBase, notionCap, notionMismatch, optionHead, sameProposition, sameSourceFact, withoutRemovedOptionRefs } from "@/lib/qcm-checks";
 import { assignChapters, spreadOverChapters, variants } from "@/lib/coverage";
 import { normalize, tokenize } from "@/lib/text";
@@ -26,6 +26,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { storage } from "@/lib/storage";
 import { askedFacts, attributedFact, courseFacts, factDuplicates, planFacts, type CourseFact } from "@/lib/qcm-facts";
+import { JUSTIFICATION_SCHEMA, assembleExplanation, distractorIndices, fillRationale, invalidateRationale, permuteRationale, rationaleCheck, rationaleFromModel, storedExplanation, structuredExplanationsEnabled, toStoredRationale, type QcmRationale } from "@/lib/qcm-rationale";
 import { qcmCheckpointKey, readQcmCheckpoint, withFigurePresent, type QcmBatchState, type QcmCheckpoint, type QcmCheckpointStore, type QcmMissingState, type QcmPlan, type QcmReserveState } from "@/lib/qcm-checkpoint";
 
 /**
@@ -82,6 +83,13 @@ export type QcmItem = {
   notion?: string | null;
   /** Fait testable du cours (lib/qcm-facts) que la question teste : jamais deux questions d'un examen sur le même. Persisté. */
   factId?: string | null;
+  /**
+   * Justification structurée (lib/qcm-rationale) : la clé, et une raison par option, rangée comme
+   * `misconceptions`. Présente, `explanation` en est l'assemblage (syncExplanation), jamais un
+   * paragraphe libre. Absente (QCM_STRUCTURED_EXPLANATIONS=0, réponse sans justification) :
+   * l'explication texte et ses contrôles lexicaux, comme avant. Persistée (rationale_json).
+   */
+  rationale?: QcmRationale | null;
 };
 
 /**
@@ -151,6 +159,12 @@ function batchSchema(mode: AnswerMode, withFigures: boolean, withFacts = false):
     props.options = { ...props.options, minItems: SCQ_OPTIONS, maxItems: SCQ_OPTIONS, description: `EXACTEMENT ${SCQ_OPTIONS} options : des PROPOSITIONS COMPLÈTES de longueurs COMPARABLES, pas d'« toutes les réponses ci-dessus ».` };
   }
   if (!withFigures) delete props.figure_spec;
+  // Justification structurée À LA PLACE du paragraphe libre (même appel, une sortie plus courte).
+  if (structuredExplanationsEnabled()) {
+    delete props.explanation;
+    props.justification = JUSTIFICATION_SCHEMA;
+    s.properties.items.items.required = s.properties.items.items.required.map((k: string) => (k === "explanation" ? "justification" : k));
+  }
   return s;
 }
 
@@ -198,7 +212,8 @@ function wellFormed(raw: unknown): boolean {
   if (!Array.isArray(it.options) || it.options.length < 2 || !it.options.every((o) => typeof o === "string" && o.trim())) return false;
   const n = it.options.length;
   // Sans explication, la clé n'est pas justifiée dans le corrigé (banc du 04/11 : un lot entier sans).
-  if (typeof it.explanation !== "string" || !it.explanation.trim()) return false;
+  const key = (raw as { justification?: { key?: unknown } } | null)?.justification?.key;
+  if ((typeof it.explanation !== "string" || !it.explanation.trim()) && !(structuredExplanationsEnabled() && typeof key === "string" && key.trim())) return false;
   return Array.isArray(it.correct) && it.correct.length > 0 && it.correct.every((k) => Number.isInteger(k) && k >= 0 && k < n);
 }
 
@@ -210,7 +225,7 @@ async function ensureQcmSchema(): Promise<void> {
   await q.ensureTable("exam_questions");
   await q.ensureTable("qcm_items");
   // moule + figure (spec/fichier/truth) par item, additif.
-  await q.ensureColumns("qcm_items", ["mold", "figure_json", "fact_id"]);
+  await q.ensureColumns("qcm_items", ["mold", "figure_json", "fact_id", "rationale_json"]);
 }
 
 /** Sujets à couvrir : blueprint (topics pondérés) si dispo, sinon archétypes du cours.
@@ -278,6 +293,13 @@ const OPTIONS_WITHOUT_ANNALES =
 const OPTIONS_WITH_ANNALES =
   `  - OPTIONS : même forme et même NOMBRE d'options que dans les annales du cours — une valeur ou une expression courte pour une question de calcul, une affirmation COMPLÈTE pour une question conceptuelle (jamais un nom de notion seul) ; longueurs comparables.`;
 
+/** Consigne de l'explication : paragraphe libre (QCM_STRUCTURED_EXPLANATIONS=0) ou justification structurée. */
+function explanationRule(): string {
+  return structuredExplanationsEnabled()
+    ? `  - JUSTIFICATION (structurée, pas de paragraphe) : "key" dit pourquoi la bonne réponse est juste, avec le fait du cours, sans parler des autres options ; "distractors" a EXACTEMENT une entrée par option fausse de TON tableau "options" — "option_index" son indice 0-based, "why_wrong" pourquoi CETTE option est fausse (le détail du cours qu'elle contredit). Jamais d'entrée pour une option absente du tableau, jamais deux pour la même ; dans chaque raison, aucune autre option, aucune lettre, aucun numéro ni rang : l'ordre des options est mélangé après coup, le corrigé est assemblé à partir de ces champs.`
+    : `  - EXPLICATION : désigne les options par leur CONTENU, jamais par leur lettre, leur numéro ni leur rang (« la première », « la deuxième », « la dernière ») : l'ordre des options est mélangé après coup.`;
+}
+
 const OPTION_RULES = [
   // K — mock 4 de CS-290 : avec une consigne neutre, « erreur d'arrondi » ou « TypeError » comme
   // distracteurs ; le niveau ne doit jamais dépendre de la consigne de l'étudiant.
@@ -287,7 +309,6 @@ const OPTION_RULES = [
   `  - CALCUL : les mauvaises valeurs viennent d'une erreur plausible à une ÉTAPE INTERMÉDIAIRE (formule voisine du cours, mauvais dénominateur, agrégation ou condition omise) ; elles gardent le même type, les mêmes unités et le même ordre de grandeur que la clé. Elles ne sont jamais incompatibles avec leurs propres données et ne se réfutent pas par un calcul élémentaire déjà entièrement donné dans l'énoncé.`,
   `  - CODE : chaque mauvaise sortie correspond à une exécution plausible du code avec UNE confusion réellement enseignée (ordre des filtres, masque, index, agrégation, sous-chaîne) ; aucun distracteur n'est une exception arbitraire. La bonne réponse exige d'appliquer au moins une règle du cours, pas seulement de recopier ou d'exécuter mécaniquement le code affiché.`,
   `  - TIGES INDÉPENDANTES : chaque question se comprend seule, sans scénario partagé avec une autre question, et ne donne pas la réponse d'une autre.`,
-  `  - EXPLICATION : désigne les options par leur CONTENU, jamais par leur lettre, leur numéro ni leur rang (« la première », « la deuxième », « la dernière ») : l'ordre des options est mélangé après coup.`,
   `  - ANCRAGE : chaque question teste un FAIT PRÉCIS des extraits du cours fournis (résultat d'étude avec auteurs et chiffres, condition d'une définition, mécanisme) ; "source_fact" est une CITATION courte, VERBATIM, recopiée MOT POUR MOT depuis ces extraits et suffit à établir la bonne réponse. La clé, son explication et les notions nommées par les distracteurs ne dépendent de RIEN hors de cette citation et des extraits.`,
   // Banc HUM-285 du 13/11 : 30 questions rejetées hors cours pour un détail ajouté (« cadre à quatre
   // capacités », « 14 % des tickets », « agrégation des paramètres »), vrai peut-être, absent du cours.
@@ -495,7 +516,7 @@ function rng(seed: number): () => number {
  * Mélange les options d'un QCM (graine déterministe) en gardant la clé et les idées
  * fausses alignées : un modèle place volontiers la bonne réponse en B ou C.
  */
-export function shuffleQcmOptions<T extends { options: string[]; correct: number[]; misconceptions: string[] }>(it: T, seed: number): T {
+export function shuffleQcmOptions<T extends { options: string[]; correct: number[]; misconceptions: string[]; rationale?: QcmRationale | null; explanation?: string }>(it: T, seed: number): T {
   const order = it.options.map((_, i) => i);
   const r = rng(seed);
   for (let i = order.length - 1; i > 0; i--) {
@@ -503,12 +524,37 @@ export function shuffleQcmOptions<T extends { options: string[]; correct: number
     [order[i], order[j]] = [order[j], order[i]];
   }
   const where = new Map(order.map((from, to) => [from, to]));
-  return {
+  const out = {
     ...it,
     options: order.map((from) => it.options[from]),
     misconceptions: order.map((from) => it.misconceptions?.[from] ?? ""),
     correct: it.correct.map((k) => where.get(k) ?? k).sort((a, b) => a - b),
   };
+  // La justification structurée suit les options, case par case, et l'explication est réassemblée.
+  if (it.rationale) {
+    out.rationale = permuteRationale(it.rationale, order);
+    out.explanation = assembleExplanation(out.rationale, out.options, out.correct);
+  }
+  return out;
+}
+
+/** Réassemble l'explication d'un QCM à justification structurée depuis ses options actuelles (sans effet sinon). */
+export function syncExplanation<T extends Pick<QcmItem, "options" | "correct" | "explanation"> & { rationale?: QcmRationale | null }>(it: T): T {
+  if (it.rationale) it.explanation = assembleExplanation(it.rationale, it.options, it.correct);
+  return it;
+}
+
+/**
+ * Filet sur les raisons rendues par le modèle (le mécanisme principal reste la structure) : une
+ * raison qui désigne une option par sa lettre ou son rang est réécrite d'après son contenu, dans
+ * l'ordre où le modèle voyait les options, sinon effacée (elle sera réécrite seule) ; une
+ * justification de la clé qui réfute aussi d'autres options est réduite à la clé.
+ */
+export function cleanRationale(r: QcmRationale, options: string[], correct: number[], stem = ""): QcmRationale {
+  const piece = (t: string) => (t && citesOptionLabel(t, options.length) ? repairOptionRefs(t, options, correct) ?? "" : t);
+  let key = piece(r.key);
+  if (key && explanationIssues(key, options, correct, stem)) key = keyOnlyExplanation(key) ?? key;
+  return { ...r, key, wrong: r.wrong.map((w, i) => (correct.includes(i) ? "" : piece(w))) };
 }
 
 const seedOf = (s: string) => [...s].reduce((h, ch) => (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0, 7);
@@ -622,6 +668,19 @@ export function updateVerifiedCandidates<T extends Pick<QcmItem, "stem" | "optio
 }
 
 const REPLACEMENTS_SCHEMA = `{ "replacements": [ { "index": <numéro Q>, "distractors": [ { "option": <numéro de l'option remplacée>, "text": "<nouvelle option>", "misconception": "[procédé] l'idée fausse visée" } ], "explanation": "<explication de la clé, mise à jour>" } ] }`;
+/** Sortie stricte du remplacement en justification structurée : la raison de chaque remplaçant est exigée. */
+const REPLACEMENTS_JSON_SCHEMA = {
+  type: "object",
+  properties: { replacements: { type: "array", items: { type: "object", properties: {
+    index: { type: "integer" },
+    distractors: { type: "array", items: { type: "object", properties: {
+      option: { type: "integer" }, text: { type: "string" }, misconception: { type: "string" }, why_wrong: { type: "string" },
+    }, required: ["option", "text", "misconception", "why_wrong"], additionalProperties: false } },
+  }, required: ["index", "distractors"], additionalProperties: false } } },
+  required: ["replacements"], additionalProperties: false,
+} as const;
+/** Justification structurée : chaque remplaçant porte sa raison, rien d'autre n'est réécrit (lib/qcm-rationale). */
+const REPLACEMENTS_SCHEMA_STRUCTURED = `{ "replacements": [ { "index": <numéro Q>, "distractors": [ { "option": <numéro de l'option remplacée>, "text": "<nouvelle option>", "misconception": "[procédé] l'idée fausse visée", "why_wrong": "<pourquoi CETTE nouvelle option est fausse selon le cours>" } ] } ] }`;
 
 /**
  * DISTRACTEURS TRIVIAUX REMPLACÉS, PAS LA QUESTION — banc moteur du 04/11/2026 (CS-290) : 41 QCM
@@ -635,23 +694,26 @@ async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, la
   // Banc du 04/11 : sans le cours sous les yeux, les remplaçants étaient eux aussi génériques et
   // re-signalés une fois sur deux ; ils se bâtissent sur des notions voisines des extraits.
   const passages = await coursePassages([...new Set(items.map((it) => it.topic).filter(Boolean))]).catch(() => []);
+  // Toutes justifiées par la structure : seules les raisons des remplaçants sont écrites (sortie
+  // plus courte) ; une seule à l'explication libre, et le paragraphe est redemandé comme avant.
+  const structured = items.every((it) => !!it.rationale);
   const body = items.map((it, k) => [
     `Q${k}. ${sanitizeCorpus(it.stem)}`,
     ...it.options.map((o, j) => `   (${j}) ${sanitizeCorpus(o)}${it.correct.includes(j) ? "  (bonne réponse — à garder)" : (it.duplicateOptions ?? []).includes(j) ? "  ← À REMPLACER : répète une autre option (même notion) ; le nouveau distracteur nomme une notion VOISINE du cours que les autres options ne nomment pas" : (it.trivialDistractors ?? []).includes(j) ? "  ← À REMPLACER : se devine fausse sans connaître le cours, ou nomme une notion que le cours ne présente pas" : ""}`),
     it.sourceFact ? `   Fait du cours testé : ${sanitizeCorpus(it.sourceFact).slice(0, 400)}` : "",
   ].filter(Boolean).join("\n")).join("\n\n");
-  const out = await completeJson<{ replacements: { index: number; distractors: { option: number; text: string; misconception?: string }[]; explanation?: string }[] }>({
-    model: "opus", ...QCM_CALL_LIMITS,
+  const out = await completeJson<{ replacements: { index: number; distractors: { option: number; text: string; misconception?: string; why_wrong?: string }[]; explanation?: string }[] }>({
+    model: "opus", ...QCM_CALL_LIMITS, ...(structured ? { json: { schema: REPLACEMENTS_JSON_SCHEMA } } : {}),
     prompt: [
       `Tu es l'équipe enseignante du cours. Dans chacun de ces QCM, les options marquées « À REMPLACER » se devinent fausses sans connaître le cours. Écris pour chacune UN nouveau distracteur, sans toucher à l'énoncé, à la bonne réponse ni aux autres options.`,
       ...DISTRACTOR_TAXONOMY,
-      `RÈGLES : hors question de calcul ou de code, chaque nouveau distracteur est un [quasi-synonyme] : une AUTRE notion, étude ou technique présente dans les extraits du cours ci-dessous, donnée comme réponse à l'énoncé dans SES termes (elle reprend ses données autant que la bonne réponse ; jamais une caractéristique de cette autre notion que l'énoncé contredit) — jamais l'option remplacée retouchée, ni la bonne réponse avec une réserve ajoutée ou un sens inversé ; il est FAUX selon le cours mais paraît juste à un étudiant qui connaît le thème sans le détail ; il applique les MÊMES critères que la bonne réponse et se trompe sur un détail du cours. Interdits : simple substitution d'étiquette manifestement incompatible, lecture directe de chiffres, contradiction avec un critère déjà donné dans l'énoncé. Même registre, même structure et longueur comparable (±30 %) que la bonne réponse ; il ne dit jamais pourquoi il est faux ; aucun marqueur d'absolu ; il ne répète aucune autre option. Réécris aussi l'explication de la clé pour qu'elle couvre les options finales, en désignant les options par leur CONTENU, jamais par leur lettre ni leur rang. Tout en ${lang}.`,
+      `RÈGLES : hors question de calcul ou de code, chaque nouveau distracteur est un [quasi-synonyme] : une AUTRE notion, étude ou technique présente dans les extraits du cours ci-dessous, donnée comme réponse à l'énoncé dans SES termes (elle reprend ses données autant que la bonne réponse ; jamais une caractéristique de cette autre notion que l'énoncé contredit) — jamais l'option remplacée retouchée, ni la bonne réponse avec une réserve ajoutée ou un sens inversé ; il est FAUX selon le cours mais paraît juste à un étudiant qui connaît le thème sans le détail ; il applique les MÊMES critères que la bonne réponse et se trompe sur un détail du cours. Interdits : simple substitution d'étiquette manifestement incompatible, lecture directe de chiffres, contradiction avec un critère déjà donné dans l'énoncé. Même registre, même structure et longueur comparable (±30 %) que la bonne réponse ; il ne dit jamais pourquoi il est faux ; aucun marqueur d'absolu ; il ne répète aucune autre option. ${structured ? `Pour chaque nouveau distracteur, "why_wrong" dit pourquoi IL est faux selon le cours (le détail qu'il contredit), sans citer d'autre option, ni lettre, ni rang.` : `Réécris aussi l'explication de la clé pour qu'elle couvre les options finales, en désignant les options par leur CONTENU, jamais par leur lettre ni leur rang.`} Tout en ${lang}.`,
       DATA_RULE,
       passages.length ? dataBlock("EXTRAITS DU COURS", passages) : "",
       "",
       body,
       "",
-      `Réponds UNIQUEMENT avec ce JSON : ${REPLACEMENTS_SCHEMA}`,
+      `Réponds UNIQUEMENT avec ce JSON : ${structured ? REPLACEMENTS_SCHEMA_STRUCTURED : REPLACEMENTS_SCHEMA}`,
     ].join("\n"),
   }, { check: (v) => (Array.isArray(v?.replacements) ? null : "il manque la liste replacements") });
   const repaired = items.map((it, k) => {
@@ -659,17 +721,29 @@ async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, la
     if (!r) return null;
     const options = it.options.slice();
     const misconceptions = it.misconceptions.slice();
+    const whys = new Map<number, string>();
     for (const d of r.distractors ?? []) {
       if (!(it.trivialDistractors ?? []).includes(d.option) || typeof d.text !== "string" || !d.text.trim()) continue;
       options[d.option] = d.text.trim();
       misconceptions[d.option] = d.misconception ?? misconceptions[d.option] ?? "";
+      whys.set(d.option, typeof d.why_wrong === "string" ? d.why_wrong.trim() : "");
     }
     // Job 23 (Q9) : un remplaçant qui nomme la même notion qu'une autre option donnait deux fois
     // « le biais de disponibilité » ; il est refusé, l'option d'avant reste (et reste signalée).
     for (const j of duplicateOptionIndices(options, it.correct)) {
-      if (options[j] !== it.options[j]) { options[j] = it.options[j]; misconceptions[j] = it.misconceptions[j] ?? ""; }
+      if (options[j] !== it.options[j]) { options[j] = it.options[j]; misconceptions[j] = it.misconceptions[j] ?? ""; whys.delete(j); }
     }
     if (options.every((o, j) => o === it.options[j])) return null;
+    const reset = { verified: null, trivialDistractors: null, duplicateOptions: null, judgeIssue: null, judgeOk: null, discrimination: null, nameOnly: null } as const;
+    // Justification structurée : la raison d'une option remplacée est invalidée et remplacée par
+    // celle du remplaçant (même appel) ; les autres cases ne bougent pas. Sans raison rendue, la case
+    // reste vide : la porte de sortie la fait écrire seule (jamais l'ancienne, qui visait l'option partie).
+    if (it.rationale) {
+      const changedIdx = options.map((o, j) => (o !== it.options[j] ? j : -1)).filter((j) => j >= 0);
+      let rationale = invalidateRationale(it.rationale, changedIdx);
+      rationale = cleanRationale({ ...rationale, wrong: rationale.wrong.map((w, j) => (changedIdx.includes(j) ? whys.get(j) ?? "" : w)) }, options, it.correct, it.stem);
+      return syncExplanation({ ...it, options, misconceptions, rationale, ...reset } as QcmItem);
+    }
     // L'explication doit réfuter les options FINALES : l'ancienne réfute souvent les distracteurs
     // remplacés (job 23 : neuf explications sur vingt réfutaient des options absentes).
     const written = r.explanation && !citesOptionLabel(r.explanation, options.length) ? r.explanation : null;
@@ -678,7 +752,7 @@ async function replaceTrivialDistractorsBatch(items: QcmItem[], step: StepCb, la
     const removed = it.options.filter((o, j) => options[j] !== o);
     const pruned = [written, it.explanation].map((e) => (e ? withoutRemovedOptionRefs(e, removed, options, it.correct, it.stem) : null));
     const explanation = pruned.find((e) => !!e && !explanationIssues(e, options, it.correct, it.stem)) ?? pruned.find(Boolean) ?? written ?? it.explanation;
-    return { ...it, options, misconceptions, explanation, verified: null, trivialDistractors: null, duplicateOptions: null, judgeIssue: null, judgeOk: null, discrimination: null, nameOnly: null } as QcmItem;
+    return { ...it, options, misconceptions, explanation, ...reset } as QcmItem;
   });
   const sent = repaired.filter((x): x is QcmItem => !!x);
   if (!sent.length) return items;
@@ -710,6 +784,19 @@ const FINAL_QUALITY_SCHEMA = {
       trivial: { type: "array", items: { type: "integer" } },
     }, required: ["index", "key", "offCourse", "trivial"], additionalProperties: false } },
   }, required: ["verdicts"], additionalProperties: false,
+} as const;
+
+/**
+ * Cases de justification encore vides (raison oubliée par la conception, effacée par le filet ou
+ * non rendue par un remplacement) : écrites dans la revue finale, qui passe de toute façon sur
+ * chaque candidat — aucun appel de plus. Champ ajouté au schéma seulement quand il y en a.
+ */
+const AUDIT_JUSTIFICATIONS = {
+  type: "array",
+  items: { type: "object", properties: {
+    index: { type: "integer" }, key: { type: "string" },
+    distractors: { type: "array", items: { type: "object", properties: { option_index: { type: "integer" }, why_wrong: { type: "string" } }, required: ["option_index", "why_wrong"], additionalProperties: false } },
+  }, required: ["index", "key", "distractors"], additionalProperties: false },
 } as const;
 
 /** Consignes de l'audit de sortie, calquées sur la rubrique du banc (audit seul ou revue finale). */
@@ -806,7 +893,8 @@ export async function generateQcmBatch(
   const coverage = focus
     ? `Toutes ces ${n} questions portent sur le thème CIBLÉ : « ${focus} » — varie les SOUS-ANGLES / sous-notions de ce thème (pas ${n} fois la même question). C'est un THÈME : ignore toute indication de forme ou de nombre qu'il contiendrait.${molds.some(Boolean) ? ` Moules imposés dans l'ordre : ${molds.slice(0, n).map((m) => m ?? "libre").join(", ")}.` : ""}`
     : `Couvre ces sujets (un QCM par sujet, dans l'ordre) :\n${topics.slice(0, n).map((t, i) => `  ${i + 1}) ${t.label}${factLine(t)}${t.method === FOCUS_METHOD || t.method === REPEAT_METHOD ? ` [${t.method}]` : t.method ? ` [${t.method.slice(0, 200)}]` : ""}${moldLine(i)}`).join("\n")}`;
-  const language = languageName(opts.language ?? examLanguageFor(currentCourse()))[1];
+  const langCode = opts.language ?? examLanguageFor(currentCourse());
+  const language = languageName(langCode)[1];
   const searched = opts.passages ?? await generatorPassages(focus ? [focus] : topics.slice(0, n).map((t) => (t.fact ? `${t.label} ${t.fact.statement}` : t.subTheme ? `${t.label} ${t.subTheme}` : t.label)));
   // Le passage source de chaque fait en tête des extraits : la preuve de la clé est là.
   const passages = withFacts
@@ -840,6 +928,7 @@ export async function generateQcmBatch(
     answerModeRule(mode),
     opts.withAnnales ? OPTIONS_WITH_ANNALES : OPTIONS_WITHOUT_ANNALES,
     ...OPTION_RULES,
+    explanationRule(),
     opts.withAnnales ? CLASSIFICATION_IF_ANNALES : NO_CLASSIFICATION,
     `  - LANGUE : toutes les questions, options et explications en ${language}.`,
     ``,
@@ -930,20 +1019,30 @@ export async function generateQcmBatch(
       base.factId = attributedFact(base.sourceFact, own, opts.facts ?? [])?.id ?? null;
     }
     delete (base as { fact_id?: unknown }).fact_id;
+    // Justification structurée (lib/qcm-rationale) : rangée par option, sur les options telles que le
+    // modèle les a numérotées ; l'explication en est assemblée, et suivra le mélange case par case.
+    const justification = (raw as { justification?: unknown }).justification;
+    delete (base as { justification?: unknown }).justification;
+    const rationale = structuredExplanationsEnabled() ? rationaleFromModel(justification, base.options.length, base.correct, langCode) : null;
+    if (rationale) {
+      base.rationale = cleanRationale(rationale, base.options, base.correct, base.stem);
+      syncExplanation(base);
+    }
+    // Paragraphe libre (interrupteur coupé, ou réponse sans justification) : les réparations d'avant.
     // Une explication qui renvoie à une option par son rang ou sa lettre est réécrite d'après son
     // contenu, AVANT le mélange (sinon rejetée puis régénérée à la vérification).
-    if (Array.isArray(base.options) && Array.isArray(base.correct) && citesOptionLabel(base.explanation ?? "", base.options.length)) {
+    if (!base.rationale && Array.isArray(base.options) && Array.isArray(base.correct) && citesOptionLabel(base.explanation ?? "", base.options.length)) {
       const fixed = repairOptionRefs(base.explanation ?? "", base.options, base.correct);
       if (fixed) base.explanation = fixed;
     }
     // Une explication qui réfute une affirmation absente des options (plus de distracteurs
     // réfutés qu'il n'y en a) est réécrite sur les options réelles, AVANT le mélange.
-    if (Array.isArray(base.options) && citesAbsentDistractor(base.explanation ?? "", base.options)) {
+    if (!base.rationale && Array.isArray(base.options) && citesAbsentDistractor(base.explanation ?? "", base.options)) {
       const fixed = repairAbsentDistractorRefs(base.explanation ?? "", base.options);
       if (fixed) base.explanation = fixed;
     }
     // Position de la bonne réponse mélangée (graine = l'énoncé : reproductible), jamais pour une question à figure.
-    const it = Array.isArray(base.options) && Array.isArray(base.correct) && !(raw as { figure_spec?: unknown }).figure_spec && !citesOptionLabel(base.explanation ?? "", base.options.length)
+    const it = Array.isArray(base.options) && Array.isArray(base.correct) && !(raw as { figure_spec?: unknown }).figure_spec && (!!base.rationale || !citesOptionLabel(base.explanation ?? "", base.options.length))
       ? shuffleQcmOptions(base, seedOf(base.stem ?? ""))
       : base;
     // figure : rendu SANDBOX immédiat (le vérifieur doit la VOIR). Échec de rendu →
@@ -1055,7 +1154,10 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     // comme un distracteur trivial (énoncé et clé gardés), que le correcteur la relève ou non.
     const dup = duplicateOptionIndices(q.options, q.correct ?? []);
     q.duplicateOptions = dup.length ? dup : null;
-    if (citesOptionLabel(q.explanation ?? "", q.options.length)) reject(q, "explication qui désigne une option par sa position ou sa lettre", "désigne chaque option par son contenu dans l'explication, jamais par son rang (« la première ») ni sa lettre");
+    // Justification structurée : l'explication est assemblée depuis les options réelles, ces deux
+    // contrôles de texte libre n'ont rien à y chercher ; une raison fautive est effacée et réécrite seule.
+    if (q.rationale) { q.rationale = cleanRationale(q.rationale, q.options, q.correct ?? [], q.stem); syncExplanation(q); }
+    else if (citesOptionLabel(q.explanation ?? "", q.options.length)) reject(q, "explication qui désigne une option par sa position ou sa lettre", "désigne chaque option par son contenu dans l'explication, jamais par son rang (« la première ») ni sa lettre");
     // Idem pour une explication qui réfute un distracteur absent (ex. replaceTrivialDistractorsBatch
     // réécrit l'explication sans repasser par la réparation faite à la conception) : réécrite sur
     // les options réelles quand c'est possible, sinon rejetée comme un défaut classique.
@@ -1208,14 +1310,34 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
     const confirmedOf = (i: number) => (verdicts[i].reason && !NO_FLAG.test(verdicts[i].reason) ? verdicts[i].reason : "");
     // Seule l'explication est hors cours : elle est réécrite sur les passages du cours, la question
     // (énoncé, clé confirmée à l'aveugle, options) est gardée. Réécriture en échec : rejet.
+    // Justification structurée : toutes ses cases sont réécrites sur les passages du cours, en un
+    // appel du même type que le paragraphe libre ; acceptée seulement complète (une raison par distracteur).
     const toRewrite = pending.map((a, i) => ({ a, i })).filter(({ i }) => confirmedOf(i) && verdicts[i].explanationOnly);
-    const rewritten = toRewrite.length
-      ? await rewriteExplanations(toRewrite.map(({ a, i }) => ({ ...a.q, reason: confirmedOf(i), passages: verdicts[i].passages })), languageName(examLanguageFor(currentCourse()))[1])
-      : [];
+    const lang = languageName(examLanguageFor(currentCourse()))[1];
+    const freeRewrite = toRewrite.filter(({ a }) => !a.q.rationale);
+    const structRewrite = toRewrite.filter(({ a }) => !!a.q.rationale);
+    const [rewrittenFree, rewrittenStruct] = await Promise.all([
+      freeRewrite.length ? rewriteExplanations(freeRewrite.map(({ a, i }) => ({ ...a.q, reason: confirmedOf(i), passages: verdicts[i].passages })), lang) : Promise.resolve([] as (string | null)[]),
+      structRewrite.length
+        ? writeJustifications(structRewrite.map(({ a, i }) => ({ ...a.q, key: a.q.rationale!.key, wrong: a.q.rationale!.wrong, want: { key: true, options: distractorIndices(a.q.options.length, a.q.correct) }, reason: `hors cours dans l'ancienne justification : ${confirmedOf(i)}` })), lang, [...new Set(structRewrite.flatMap(({ i }) => verdicts[i].passages))])
+        : Promise.resolve([] as Awaited<ReturnType<typeof writeJustifications>>),
+    ]);
     pending.forEach((a, i) => {
       const confirmed = confirmedOf(i);
-      const k = toRewrite.findIndex((x) => x.i === i);
-      const text = k >= 0 ? rewritten[k] : null;
+      const ks = structRewrite.findIndex((x) => x.i === i);
+      if (confirmed && ks >= 0) {
+        const all = { key: true, options: distractorIndices(a.q.options.length, a.q.correct) };
+        // Cases repartant de zéro : rien de l'ancienne justification hors cours ne reste.
+        const next = cleanRationale(fillRationale({ ...a.q.rationale!, key: "", wrong: a.q.rationale!.wrong.map(() => "") }, rewrittenStruct[ks], all, a.q.options.length, a.q.correct), a.q.options, a.q.correct, a.q.stem);
+        if (rationaleCheck(next, a.q.options.length, a.q.correct).ok) {
+          a.q.rationale = next;
+          syncExplanation(a.q);
+          step(`QCM gardé : justification réécrite sur le cours (${confirmed.slice(0, 100)})`, 70);
+          return;
+        }
+      }
+      const k = freeRewrite.findIndex((x) => x.i === i);
+      const text = k >= 0 ? rewrittenFree[k] : null;
       if (confirmed && text && !citesOptionLabel(text, a.q.options.length)) {
         a.q.explanation = text;
         step(`QCM gardé : explication réécrite sur le cours (${confirmed.slice(0, 100)})`, 70);
@@ -1421,6 +1543,14 @@ const REVIEW_SCHEMA = {
  */
 async function finalReview(items: QcmItem[], opts: { strict: boolean; previous?: string[]; current?: string[]; step: StepCb; facts?: CourseFact[] }): Promise<{ audit: (QcmItem | null)[] | null; dup: DupResult | null }> {
   if (!items.length) return { audit: [], dup: null };
+  // #113 : cases de justification encore vides (raison oubliée par la conception, effacée par le
+  // filet ou non rendue par un remplacement), écrites dans cet appel qui passe de toute façon sur
+  // chaque candidat : aucun appel de plus.
+  const wants = items.map((it) => {
+    const c = it.rationale ? rationaleCheck(it.rationale, it.options.length, it.correct) : null;
+    return c && !c.ok ? { key: !c.key, options: c.missing } : null;
+  });
+  const toJustify = wants.filter(Boolean).length;
   const topicPassages = await coursePassages([...new Set(items.map((it) => it.topic).filter(Boolean))]).catch(() => []);
   // Une question bâtie sur un fait du cours (lib/qcm-facts) a sa preuve dans le passage de ce fait,
   // souvent hors des deux extraits de sa notion : sans lui, l'audit la jugeait hors cours (banc
@@ -1432,8 +1562,8 @@ async function finalReview(items: QcmItem[], opts: { strict: boolean; previous?:
   const passages = [...topicPassages, ...factPassages.filter((p) => !topicPassages.some((x) => x.text === p.text))];
   const body = items.map((it, index) => [
     `Q${index}. (${sanitizeCorpus(it.topic ?? "").slice(0, 80)}) ${sanitizeCorpus(it.stem)}`,
-    ...it.options.map((o, k) => `   (${k}) ${sanitizeCorpus(o)}`),
-    `   CLÉ : ${it.correct.join(", ")}`,
+    ...it.options.map((o, k) => `   (${k}) ${sanitizeCorpus(o)}${wants[index]?.options.includes(k) ? "  ← À JUSTIFIER (pourquoi elle est fausse)" : ""}`),
+    `   CLÉ : ${it.correct.join(", ")}${wants[index]?.key ? "  ← À JUSTIFIER (key)" : ""}`,
     `   EXPLICATION : ${sanitizeCorpus(it.explanation ?? "")}`,
     `   FAIT SOURCE : ${sanitizeCorpus(it.sourceFact ?? "").slice(0, 300)}`,
   ].join("\n")).join("\n\n");
@@ -1442,25 +1572,40 @@ async function finalReview(items: QcmItem[], opts: { strict: boolean; previous?:
   const previousExams = Math.min(opts.previous?.length ?? 0, PREVIOUS_STEMS);
   const prior = [...(opts.previous ?? []).slice(0, PREVIOUS_STEMS), ...(opts.current ?? [])];
   const previous = prior.map((stem, i) => `P${i}. ${sanitizeCorpus(stem).slice(0, 220)}`).join("\n");
-  const out = await completeJson<{ verdicts: FinalQualityVerdict[] } & DupAnswer>({
-    model: "opus", ...QCM_CALL_LIMITS, json: { schema: REVIEW_SCHEMA },
+  const schema = toJustify
+    ? { ...REVIEW_SCHEMA, properties: { ...REVIEW_SCHEMA.properties, justifications: AUDIT_JUSTIFICATIONS }, required: [...REVIEW_SCHEMA.required, "justifications"] }
+    : REVIEW_SCHEMA;
+  const out = await completeJson<{ verdicts: FinalQualityVerdict[]; justifications?: { index: number; key?: string; distractors?: { option_index: number; why_wrong: string }[] }[] } & DupAnswer>({
+    model: "opus", ...QCM_CALL_LIMITS, json: { schema },
     prompt: [
       `Tu es un examinateur exigeant. Voici les QCM d'un même examen, avec leur clé, leur explication et le fait du cours qui les prouve. Deux contrôles, rendus dans le même objet JSON.`,
       `1. AUDIT (verdicts) : pour chaque QCM, tranche selon les extraits du cours.`,
       ...AUDIT_RULES,
+      ...(toJustify ? [`justifications : pour chaque QCM qui a des cases « ← À JUSTIFIER », une entrée {index, key, distractors} — "key" (seulement si la clé est marquée, sinon vide) dit pourquoi elle est juste selon le cours ; "distractors" a une entrée par option marquée, et elles seules : "option_index" son numéro, "why_wrong" pourquoi CETTE option est fausse (le détail du cours qu'elle contredit), sans citer d'autre option, ni lettre, ni numéro.`] : []),
       `2. DOUBLONS (notions, duplicates, repeats).`,
       ...duplicateRules(items, { strict: opts.strict, previous: prior }),
       DATA_RULE, passages.length ? dataBlock("EXTRAITS DU COURS", passages) : "", "", body,
       ...(previous ? ["", `QUESTIONS DES EXAMENS PRÉCÉDENTS :`, previous] : []),
       "",
-      `Réponds UNIQUEMENT avec {"verdicts": [{"index": 0, "key": true, "offCourse": false, "trivial": []}], "notions": [{"index": i, "notion": "…", "angle": "…", "regle": "…"}], "duplicates": [{"first": i, "second": j, "reason": "…"}], "repeats": [{"index": i, "previous": p}]} : un verdict et une notion par QCM, first < second, listes vides s'il n'y a rien.`,
+      `Réponds UNIQUEMENT avec {"verdicts": [{"index": 0, "key": true, "offCourse": false, "trivial": []}], "notions": [{"index": i, "notion": "…", "angle": "…", "regle": "…"}], "duplicates": [{"first": i, "second": j, "reason": "…"}], "repeats": [{"index": i, "previous": p}]${toJustify ? `, "justifications": [{"index": 0, "key": "", "distractors": [{"option_index": 1, "why_wrong": "…"}]}]` : ""}} : un verdict et une notion par QCM, first < second, listes vides s'il n'y a rien.`,
     ].join("\n"),
   }, { check: (v) => verdictsCheck(v, items.length) ?? (Array.isArray(v?.duplicates) ? null : "le champ « duplicates » (tableau) manque") }).catch((e) => {
     opts.step(`Revue finale en échec (${llmFailureReason(e).split(/\.\s/u)[0].slice(0, 80)}) : verdicts de la vérification gardés, plafonds par notion appliqués seuls`, 79);
     return null;
   });
   if (!out) return { audit: null, dup: null };
-  opts.step(`Revue finale : clés, hors-cours, distracteurs et doublons contrôlés en un appel`, 79);
+  let justified = 0;
+  if (toJustify) {
+    const given = new Map((Array.isArray(out.justifications) ? out.justifications : []).filter((x) => Number.isInteger(x?.index)).map((x) => [x.index, x]));
+    items.forEach((it, i) => {
+      const want = wants[i];
+      if (!want || !it.rationale) return;
+      it.rationale = cleanRationale(fillRationale(it.rationale, given.get(i), want, it.options.length, it.correct), it.options, it.correct, it.stem);
+      syncExplanation(it);
+      if (rationaleCheck(it.rationale, it.options.length, it.correct).ok) justified++;
+    });
+  }
+  opts.step(`Revue finale : clés, hors-cours, distracteurs et doublons contrôlés en un appel${toJustify ? ` (${justified}/${toJustify} justification(s) complétée(s) au passage)` : ""}`, 79);
   const byIndex = new Map((out.verdicts ?? []).map((v) => [v.index, v]));
   const audit = items.map((it, i) => applyFinalQualityVerdicts([it], byIndex.has(i) ? [{ ...byIndex.get(i)!, index: 0 }] : [])[0] ?? null);
   return { audit, dup: decideDuplicates(items, out, { strict: opts.strict, previousExams }) };
@@ -1690,6 +1835,18 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const { notionCount, recent, covAll, cov, qcmTopics, spareTopics, qcmMolds } = plan;
   /** Examen conçu par faits testables : chaque question (hors accent) teste un fait distinct. */
   const factMode = !!plan.facts?.length && qcmTopics.some((t) => !!t.fact);
+  /**
+   * Notion du fait testable qu'une question teste (lib/qcm-facts), ou null. C'est l'étiquette
+   * affichée : examen #15 (16/11, job 30), une question sur une notion précise portait l'étiquette
+   * d'une autre notion du programme, le sujet que le concepteur avait recopié, pas la notion du fait
+   * qu'elle teste ; les points faibles de l'étudiant se rangeaient sous la mauvaise notion.
+   */
+  const factNotion = (id: string | null | undefined): string | null => (factMode && id ? plan.facts?.find((f) => f.id === id)?.notion ?? null : null);
+  /** Aligne la notion et l'étiquette affichée (topic) d'une question sur le fait qu'elle teste. */
+  const labelFromFact = (it: QcmItem): void => {
+    const n = it.focusSlot ? null : factNotion(it.factId);
+    if (n) { it.notion = n; it.topic = n; }
+  };
   const caps = { perNotion: notionCap(notionCount, count), perKey: 1 };
   // Ouvertes : la suite de la répartition (les chapitres que les QCM n'ont pas pris d'abord).
   const openTopic = (i: number) => (plan.spread ? cov[(needed + i) % cov.length] : cov[(count + i) % cov.length]);
@@ -1965,6 +2122,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       const slot = bt.topics[it.slot ?? -1];
       if (slot?.method === FOCUS_METHOD) it.focusSlot = true;
       it.notion = slot?.label ?? it.notion ?? null;
+      labelFromFact(it);
     }
     return items;
   };
@@ -2242,7 +2400,29 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // 4. Explications : réfutent-elles exactement les options proposées ? Contrôle sans modèle, puis
     // réécriture sur les options réelles ; à défaut, l'explication est réduite à la justification de la clé.
     // Optimisation de qualité, pas une garantie : elle cède la place au budget de la phase finale.
-    const flagged = finalPhaseExhausted() ? [] : all.map((it) => ({ it, issue: explanationIssues(it.explanation ?? "", it.options, it.correct, it.stem) })).filter((x) => !!x.issue);
+    // Justification structurée (lib/qcm-rationale) : contrôle de la STRUCTURE, sans heuristique de
+    // texte — une raison par distracteur réel, aucune orpheline ; les seules cases vides (option
+    // remplacée sans raison rendue, raison effacée par le filet) sont écrites en UN appel groupé.
+    // L'explication est ensuite réassemblée depuis les options réelles : rien d'autre n'y entre.
+    const gaps = finalPhaseExhausted() ? [] : all.filter((it) => !!it.rationale && !rationaleCheck(it.rationale, it.options.length, it.correct).ok);
+    const filling = gaps.length
+      ? coursePassages([...new Set(gaps.map((it) => it.topic).filter(Boolean))]).catch(() => []).then((passages) => writeJustifications(gaps.map((it): JustificationTarget => {
+        const c = rationaleCheck(it.rationale, it.options.length, it.correct);
+        return { ...it, key: it.rationale!.key, wrong: it.rationale!.wrong, want: { key: !c.key, options: c.missing } };
+      }), languageName(shared.language ?? examLanguageFor(currentCourse()))[1], passages))
+      : Promise.resolve([]);
+    const flagged = finalPhaseExhausted() ? [] : all.filter((it) => !it.rationale).map((it) => ({ it, issue: explanationIssues(it.explanation ?? "", it.options, it.correct, it.stem) })).filter((x) => !!x.issue);
+    const filled = await filling;
+    if (gaps.length) {
+      let complete = 0;
+      gaps.forEach((it, k) => {
+        const c = rationaleCheck(it.rationale, it.options.length, it.correct);
+        it.rationale = cleanRationale(fillRationale(it.rationale!, filled[k], { key: !c.key, options: c.missing }, it.options.length, it.correct), it.options, it.correct, it.stem);
+        syncExplanation(it);
+        if (rationaleCheck(it.rationale, it.options.length, it.correct).ok) complete++;
+      });
+      step(`Contrôle final : ${gaps.length} justification(s) incomplète(s) → ${complete} complétée(s) case par case${complete < gaps.length ? `, ${gaps.length - complete} limitée(s) aux raisons écrites` : ""}`, 81);
+    }
     if (flagged.length) {
       const passages = await coursePassages([...new Set(flagged.map((x) => x.it.topic).filter(Boolean))]).catch(() => []);
       const rewritten = await rewriteExplanationsOnOptions(
@@ -2278,11 +2458,14 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     const programmeLabels = [...new Set([...cov, ...covAll].map((t) => t.label))];
     let relabeled = 0;
     for (const it of all) {
-      if (it.focusSlot || !it.notion) continue;
+      // Question bâtie sur un fait du cours : la notion de ce fait fait foi, sans heuristique.
+      labelFromFact(it);
+      if (it.focusSlot || !it.notion || factNotion(it.factId)) continue;
       const tested = [it.sourceFact, it.explanation, it.options[it.correct[0] ?? -1]].filter(Boolean).join(" ");
       if (!tested.trim() || !notionMismatch(it.notion, tested)) continue;
       const best = bestNotionMatch(tested, programmeLabels);
-      if (best && notionBase(best) !== notionBase(it.notion)) { it.notion = best; relabeled++; }
+      // L'étiquette AFFICHÉE suit (topic) : seule la notion interne changeait (job 25, Q5, resté affiché).
+      if (best && notionBase(best) !== notionBase(it.notion)) { it.notion = best; it.topic = best; relabeled++; }
     }
     if (relabeled) step(`Contrôle final : ${relabeled} étiquette(s) de notion recalée(s) sur le passage source de la clé`, 81);
   };
@@ -2385,6 +2568,14 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   const reused = ckFinal.examId != null && !!(await q.get(`SELECT id FROM exams WHERE id = ?`, ckFinal.examId));
   const examId = reused ? ckFinal.examId! : await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','generating')`);
   if (!reused) {
+    // CONTRÔLE DÉTERMINISTE FINAL des justifications structurées : une raison par distracteur réel,
+    // chaque raison sur une option qui existe, aucune orpheline ; l'explication enregistrée est
+    // réassemblée ici, sur les options telles qu'elles partent en base.
+    const structured = all.filter((it) => !!it.rationale);
+    if (structured.length) {
+      const complete = structured.filter((it) => rationaleCheck(syncExplanation(it).rationale, it.options.length, it.correct).ok).length;
+      step(`Explications assemblées depuis leur justification : ${complete}/${structured.length} complètes (une raison par distracteur)${structured.length < all.length ? `, ${all.length - structured.length} en texte libre` : ""}`, 81);
+    }
     for (let i = 0; i < all.length; i++) {
       const it = all[i];
       if (it.figureFile) {
@@ -2399,7 +2590,8 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       for (let i = 0; i < all.length; i++) {
         const it = all[i];
         const figureJson = it.figureSpec ? JSON.stringify({ spec: it.figureSpec, file: it.figureFile, truth: it.figureTruth }) : null;
-        await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified, mold, figure_json, fact_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, examId, i, it.topic, it.type, it.stem, JSON.stringify(it.options), JSON.stringify(it.correct), JSON.stringify(it.misconceptions), it.explanation, it.verified, it.mold ?? null, figureJson, it.factId ?? null);
+        const rationaleJson = it.rationale ? JSON.stringify(toStoredRationale(it.rationale, it.options.length, it.correct)) : null;
+        await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified, mold, figure_json, fact_id, rationale_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, examId, i, it.topic, it.type, it.stem, JSON.stringify(it.options), JSON.stringify(it.correct), JSON.stringify(it.misconceptions), it.explanation, it.verified, it.mold ?? null, figureJson, it.factId ?? null, rationaleJson);
       }
     });
     ckFinal = { items: frozen(all), examId };
@@ -2494,8 +2686,13 @@ type QcmExamRow = { id: number; created_at: string; verify_summary: string | nul
 type QcmItemRow = {
   id: number; idx: number; topic: string; type: "scq" | "mcq"; stem: string;
   options_json: string; correct_json: string; misconceptions_json: string; explanation: string;
-  verified: 0 | 1 | null; mold: MoldKind | null; figure_json: string | null;
+  verified: 0 | 1 | null; mold: MoldKind | null; figure_json: string | null; rationale_json?: string | null;
 };
+
+/** L'explication lue d'un QCM enregistré : assemblée depuis sa justification structurée s'il en a une, sinon le texte d'avant. */
+function rowExplanation(r: { rationale_json?: string | null; options_json: string; correct_json: string; explanation: string | null }): string {
+  return r.rationale_json ? storedExplanation(r, shownExplanation(r.explanation)) : shownExplanation(r.explanation);
+}
 type QcmOpenRow = { id: number; concept: string; statement_html: string | null; solution_html: string | null };
 
 /** Un examen QCM pour l'affichage (SANS les clés — l'auto-correction se fait via /api). */
@@ -2520,7 +2717,7 @@ export async function getQcmExam(examId: number, withKeys = false): Promise<QcmE
       try { figure = r.figure_json ? (JSON.parse(r.figure_json).file ?? null) : null; } catch {}
       return {
         id: r.id, idx: r.idx, topic: r.topic, type: r.type, stem: r.stem,
-        options: JSON.parse(r.options_json), explanation: withKeys ? shownExplanation(r.explanation) : "", verified: r.verified,
+        options: JSON.parse(r.options_json), explanation: withKeys ? rowExplanation(r) : "", verified: r.verified,
         mold: r.mold ?? null, figureFile: figure,
         ...(withKeys ? { correct: JSON.parse(r.correct_json), misconceptions: JSON.parse(r.misconceptions_json) } : {}),
       };
@@ -2544,7 +2741,7 @@ export async function recompileQcmPdf(examId: number): Promise<{ file: string; t
     try { fig = r.figure_json ? JSON.parse(r.figure_json) : {}; } catch {}
     return {
       topic: r.topic, type: r.type, stem: r.stem, options: JSON.parse(r.options_json), correct: JSON.parse(r.correct_json),
-      misconceptions: JSON.parse(r.misconceptions_json ?? "[]"), explanation: shownExplanation(r.explanation), verified: r.verified,
+      misconceptions: JSON.parse(r.misconceptions_json ?? "[]"), explanation: rowExplanation(r), verified: r.verified,
       mold: r.mold ?? null, figureSpec: fig.spec ?? null, figureFile: fig.file ?? null, figureTruth: fig.truth ?? null,
     };
   });
@@ -2597,19 +2794,20 @@ type QcmGradeRow = {
   correct_json: string;
   explanation: string;
   misconceptions_json: string;
+  rationale_json?: string | null;
 };
 
 /** Corrige des réponses {idx: number[]} contre la clé connue → score + détail. */
 export async function gradeQcm(examId: number, answers: Record<number, number[]>): Promise<{ score: number; total: number; detail: QcmGradeDetail[] }> {
   await ensureQcmSchema();
-  const rows = await q.all<QcmGradeRow>(`SELECT idx, options_json, correct_json, explanation, misconceptions_json FROM qcm_items WHERE exam_id = ? ORDER BY idx`, examId);
+  const rows = await q.all<QcmGradeRow>(`SELECT idx, options_json, correct_json, explanation, misconceptions_json, rationale_json FROM qcm_items WHERE exam_id = ? ORDER BY idx`, examId);
   const detail = rows.map((r) => {
     const correct: number[] = JSON.parse(r.correct_json);
     const optionCount = (JSON.parse(r.options_json) as unknown[]).length;
     const chosen = [...new Set((answers[r.idx] ?? []).filter((value) => Number.isInteger(value) && value >= 0 && value < optionCount))].sort((a, b) => a - b);
     const ok = JSON.stringify(correct.slice().sort()) === JSON.stringify(chosen);
     const points = scoreQcmAnswer(correct, chosen, optionCount);
-    return { idx: r.idx, correct, chosen, ok, points, explanation: shownExplanation(r.explanation), misconceptions: JSON.parse(r.misconceptions_json) };
+    return { idx: r.idx, correct, chosen, ok, points, explanation: rowExplanation(r), misconceptions: JSON.parse(r.misconceptions_json) };
   });
   return { score: detail.reduce((sum, item) => sum + item.points, 0), total: rows.length, detail };
 }
