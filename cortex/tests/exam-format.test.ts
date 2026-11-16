@@ -368,3 +368,11 @@ test("la composition proposée suit le même plan : 60 QCM d'annale → 40, aucu
   const c = await runWithCourse(id, () => getComposition());
   assert.deepEqual({ kind: c.kind, qcm: c.qcm, open: c.open }, { kind: "qcm", qcm: 40, open: 0 });
 });
+
+test("annale mixte : ses exercices de calcul et de preuve restent des questions ouvertes", async () => {
+  const id = await newCourse({ language: "en" });
+  await addSource(id, "final", "Final 2025", ENGLISH_FINAL);
+  await saveProfile(id, allQcmProfile(10, { question_types: [{ type: "scq", approx_count: 10, share_pct: 50 }, { type: "calc", approx_count: 2, share_pct: 30 }, { type: "proof", approx_count: 1, share_pct: 20 }] }));
+  const f = await resolve(id);
+  assert.deepEqual({ kind: f.kind, n: f.questionCount, open: f.openCount }, { kind: "mixed", n: 10, open: 3 });
+});
