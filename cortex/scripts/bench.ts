@@ -8,6 +8,7 @@
  *   npm run bench -- run --case synth-3p --replay tests/fixtures/bench/synth-3p \
  *     --baseline tests/fixtures/bench/synth-3p/metrics.json --strict                 # CI : rejeu, sans modèle
  *   npm run bench -- mark-ref --run <dossier du run>   # ce run devient la référence de son cas
+ *   npm run bench -- rejuge --run <run archivé> --out <dossier> --provider codex-cli
  *   npm run bench -- report [--out rapport.md]        # référence → actuel, tous les cas
  *   npm run bench -- list
  *
@@ -419,6 +420,30 @@ async function scoreRun(runDir: string, c: BenchCase): Promise<void> {
   if (blocking.length && flag("strict")) process.exitCode = 2;
 }
 
+/** Restaure le cours d'un run archivé dans une base jetable, sans exécuter le générateur. */
+async function rejudgeArchived(sourceDir: string): Promise<void> {
+  const sourceRun = JSON.parse(fs.readFileSync(path.join(sourceDir, "run.json"), "utf8")) as BenchRun & { courseId: string };
+  const c = findCase(sourceRun.caseId);
+  if (c.source.kind !== "dump") throw new Error(`rejuge ne sait pas encore restaurer la source ${c.source.kind} du cas ${c.id}`);
+  const db = `bench_rejuge_${c.id.replace(/[^a-z0-9]/gi, "_")}_${Date.now()}`.toLowerCase();
+  await adminSql((sql) => sql.unsafe(`CREATE DATABASE "${db}" ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE template0`));
+  createdDb = db;
+  const url = dbUrl(need("CORTEX_BENCH_PG_URL"), db);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const requestedOut = arg("out");
+  const outputDir = requestedOut ? path.resolve(requestedOut) : path.join(sourceDir, "rejugements", stamp);
+  const { prepareRejudgeOutput } = await import("../lib/bench/rejudge");
+  const out = prepareRejudgeOutput(sourceDir, outputDir, db);
+  runEnv(path.join(out, "data"), url);
+  assertBenchEnv(process.env);
+  const { tenantSchema } = await import("../db/context");
+  await restoreSchema(c.source.file, url, tenantSchema("owner", sourceRun.courseId), c.source.schema);
+  process.env.LLM_TAPE = `record:${path.join(out, "judge.tape.jsonl")}`;
+  console.log(`▶ rejugement ${c.id} — génération inchangée → ${out}`);
+  await judgeRun(out);
+  await scoreRun(out, c);
+}
+
 async function main(): Promise<void> {
   const cmd = process.argv[2];
   const provider = arg("provider");
@@ -434,6 +459,15 @@ async function main(): Promise<void> {
     if (!process.env.DATABASE_URL && process.env.CORTEX_BENCH_PG_URL) runEnv(path.join(runDir, "data"), dbUrl(process.env.CORTEX_BENCH_PG_URL, run.db));
     if (!process.env.LLM_TAPE) process.env.LLM_TAPE = `record:${path.join(runDir, "judge.tape.jsonl")}`;
     return judgeRun(runDir);
+  }
+  if (cmd === "rejuge") {
+    const runDir = path.resolve(arg("run") ?? ".");
+    try {
+      await rejudgeArchived(runDir);
+    } finally {
+      await dropCreatedDb();
+    }
+    return;
   }
   if (cmd === "mark-ref") {
     fs.writeFileSync(path.join(path.resolve(arg("run") ?? "."), "REFERENCE"), "");
@@ -470,7 +504,7 @@ async function main(): Promise<void> {
     }
     return;
   }
-  throw new Error("usage : bench run --case <id> --provider codex-cli [--replay <dossier>] [--ref <run>] [--prepare] [--keep] [--no-judge] | judge --run <dossier> | score --run <dossier> [--ref <run>] | mark-ref --run <dossier> | report [--out fichier.md] | list");
+  throw new Error("usage : bench run --case <id> --provider codex-cli [--replay <dossier>] [--ref <run>] [--prepare] [--keep] [--no-judge] | rejuge --run <run archivé> [--out <dossier>] --provider codex-cli | judge --run <dossier> | score --run <dossier> [--ref <run>] | mark-ref --run <dossier> | report [--out fichier.md] | list");
 }
 
 main().then(() => process.exit(process.exitCode ?? 0)).catch((e) => { console.error(`Banc : ${(e as Error).message}`); process.exit(1); });
