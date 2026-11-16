@@ -98,10 +98,10 @@ test("(a) ANNUEL hérité (month_anchor seul) : 20 par mois civil comme avant, u
     assert.equal(await credits.subscriptionCreditsCenti("yold"), 2000, "octobre : 20 sans nouvelle facture");
     assert.equal((await inMl("yold", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:yold:ml:1" }))).ok, true);
     at("2026-10-20T00:00:00Z");
-    assert.equal(await credits.subscriptionCreditsCenti("yold"), 1800, "pas de seconde recharge dans le même mois");
+    assert.equal(await credits.subscriptionCreditsCenti("yold"), 1500, "pas de seconde recharge dans le même mois");
     at("2026-11-01T00:00:00Z");
     assert.equal((await inMl("yold", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:yold:ml:2" }))).ok, true, "la réservation recharge dans sa transaction");
-    assert.equal(await credits.subscriptionCreditsCenti("yold"), 1800, "20 rechargés en novembre puis 2 consommés");
+    assert.equal(await credits.subscriptionCreditsCenti("yold"), 1500, "20 rechargés en novembre puis 5 consommés");
     at("2027-03-15T10:00:00Z");
     assert.equal(await credits.subscriptionCreditsCenti("yold"), 0, "fin de période : plus rien sans nouvelle facture");
   });
@@ -120,7 +120,7 @@ test("(a) ANNUEL hérité puis facture payée : les fenêtres passent sur la pé
     assert.equal(await credits.subscriptionCreditsCenti("yrenew"), 2000, "la facture payée ouvre 20");
     assert.equal((await inMl("yrenew", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:yrenew:ml:1" }))).ok, true);
     at("2027-04-01T00:00:00Z");
-    assert.equal(await credits.subscriptionCreditsCenti("yrenew"), 1800, "le 1er avril n'est plus une fenêtre : pas de double régime");
+    assert.equal(await credits.subscriptionCreditsCenti("yrenew"), 1500, "le 1er avril n'est plus une fenêtre : pas de double régime");
     at("2027-04-15T10:00:00Z");
     assert.equal(await credits.subscriptionCreditsCenti("yrenew"), 2000, "fenêtre du 15/04, ancrée sur la période facturée");
   });
@@ -133,7 +133,7 @@ test("(a) plan INCONNU, période d'un an : traité en annuel, 20 par fenêtre an
     await credits.grantSubscriptionMonth({ userId: "noplan-y", customerId: "cus_noplan-y", subscriptionId: "sub_noplan-y", plan: null, periodStart: "2026-05-10 09:00:00", periodEnd: "2027-05-10 09:00:00" });
     assert.equal((await inMl("noplan-y", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:noplan-y:ml:1" }))).ok, true);
     at("2026-06-01T00:00:00Z");
-    assert.equal(await credits.subscriptionCreditsCenti("noplan-y"), 1800, "le 1er juin n'est pas une fenêtre");
+    assert.equal(await credits.subscriptionCreditsCenti("noplan-y"), 1500, "le 1er juin n'est pas une fenêtre");
     at("2026-06-10T09:00:00Z");
     assert.equal(await credits.subscriptionCreditsCenti("noplan-y"), 2000, "fenêtre du 10/06 : la durée de la période suffit à reconnaître l'annuel");
   });
@@ -147,9 +147,9 @@ test("(a) plan INCONNU, période de 40 jours : traité en mensuel, aucune rechar
     await credits.grantSubscriptionMonth({ userId: "noplan-m", customerId: "cus_noplan-m", subscriptionId: "sub_noplan-m", plan: null, periodStart: "2026-05-10 09:00:00", periodEnd: "2026-06-19 09:00:00" });
     assert.equal((await inMl("noplan-m", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:noplan-m:ml:1" }))).ok, true);
     at("2026-06-01T00:00:00Z");
-    assert.equal(await credits.subscriptionCreditsCenti("noplan-m"), 1800, "pas de recharge au 1er");
+    assert.equal(await credits.subscriptionCreditsCenti("noplan-m"), 1500, "pas de recharge au 1er");
     at("2026-06-10T09:00:00Z");
-    assert.equal(await credits.subscriptionCreditsCenti("noplan-m"), 1800, "un mois après le début : pas de fenêtre pour un mensuel");
+    assert.equal(await credits.subscriptionCreditsCenti("noplan-m"), 1500, "un mois après le début : pas de fenêtre pour un mensuel");
     at("2026-06-19T09:00:00Z");
     assert.equal(await credits.subscriptionCreditsCenti("noplan-m"), 0, "période échue : seule une facture payée recrédite");
   });
@@ -162,7 +162,7 @@ test("(a) MENSUEL via la réservation : pas de recharge au changement de mois", 
   await authRun(`UPDATE subscriptions SET remaining = 500, month_anchor = ? WHERE user_id = ?`, "2000-01", "m");
   const r = await inMl("m", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:m:ml:1" }));
   assert.equal(r.ok, true);
-  assert.equal(await credits.subscriptionCreditsCenti("m"), 300, "5 − 2 = 3, aucune recharge à 20 dans la réservation");
+  assert.equal(await credits.subscriptionCreditsCenti("m"), 0, "5 − 5 = 0, aucune recharge à 20 dans la réservation");
 });
 
 // ─────────────── (b) la période annoncée par subscription.updated n'est jamais recopiée ───────────────

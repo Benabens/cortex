@@ -362,8 +362,8 @@ test("get_account_status : costs_by_type donne le coût de chaque type (QCM comp
   const { client } = await connect(access);
   type ByType = { mock_exam: number; mcq_exam: number; exercise: number; prepare_course: number; exam_format: number; drill: number; check_answer: number };
   const first = (await call(client, "get_account_status")).structuredContent!;
-  assert.deepEqual(first.costs, { mock_exam: 2, drill: 0.1, check_answer: 0.1 }, "costs inchangé");
-  assert.deepEqual(first.costs_by_type, { mock_exam: 2, mcq_exam: 1, exercise: 1, prepare_course: 2, exam_format: 1, drill: 0.1, check_answer: 0.1 });
+  assert.deepEqual(first.costs, { mock_exam: 5, drill: 0.3, check_answer: 0.3 }, "costs inchangé");
+  assert.deepEqual(first.costs_by_type, { mock_exam: 5, mcq_exam: 4, exercise: 1, prepare_course: 2, exam_format: 1, drill: 0.3, check_answer: 0.3 });
   process.env.CREDITS_COST_JSON = JSON.stringify({ qcm: 3, prepare: 4, assist: 0.2 });
   try {
     const r = await call(client, "get_account_status");
@@ -371,7 +371,7 @@ test("get_account_status : costs_by_type donne le coût de chaque type (QCM comp
     assert.equal(after.mcq_exam, 3);
     assert.equal(after.prepare_course, 4);
     assert.equal(after.drill, 0.2);
-    assert.equal(after.mock_exam, 2, "un type absent du JSON garde son défaut");
+    assert.equal(after.mock_exam, 5, "un type absent du JSON garde son défaut");
     // Schéma publié AVANT ce lot (sans costs_by_type), gardé en cache par un client (#52) : la réponse passe.
     const { AjvJsonSchemaValidator } = await import("@modelcontextprotocol/client/validators/ajv");
     const tool = (await client.listTools()).tools.find((t) => t.name === "get_account_status")!;
@@ -421,8 +421,8 @@ test("get_account_status : solde, coûts et quotas du compte", async () => {
   assert.equal(r.isError, undefined, text(r));
   const s = r.structuredContent as { credits: { balance: number }; costs: { mock_exam: number; drill: number }; quotas: { generations: { used: number } } };
   assert.equal(s.credits.balance, 5);
-  assert.equal(s.costs.mock_exam, 2);
-  assert.equal(s.costs.drill, 0.1);
+  assert.equal(s.costs.mock_exam, 5);
+  assert.equal(s.costs.drill, 0.3);
   assert.equal(s.quotas.generations.used, 0);
   await client.close();
 });
@@ -467,7 +467,7 @@ test("get_job_status : un examen terminé ne dit « prouvé » que pour une vér
 
 // ───────────────────────────── coûts : devis et confirmation ─────────────────────────────
 
-test("client 2025 : devis exact SANS débit ni appel au modèle, puis confirmation par le jeton → drill, 0,1 crédit", async () => {
+test("client 2025 : devis exact SANS débit ni appel au modèle, puis confirmation par le jeton → drill, 0,3 crédit", async () => {
   const { access } = await tokenFor(ALICE);
   const { client } = await connect(access);
   const before = await balance(ALICE);
@@ -476,7 +476,7 @@ test("client 2025 : devis exact SANS débit ni appel au modèle, puis confirmati
   assert.equal(quote.isError, undefined, text(quote));
   const sc = quote.structuredContent as { status: string; confirmation: { cost_credits: number; confirmation_token: string; daily_quota: { kind: string } } };
   assert.equal(sc.status, "confirmation_required");
-  assert.equal(sc.confirmation.cost_credits, 0.1);
+  assert.equal(sc.confirmation.cost_credits, 0.3);
   assert.equal(sc.confirmation.daily_quota.kind, "assistance");
   assert.equal(await balance(ALICE), before, "un devis ne débite rien");
   assert.equal(llmCalls, calls, "un devis n'appelle pas le modèle");
@@ -487,11 +487,11 @@ test("client 2025 : devis exact SANS débit ni appel au modèle, puis confirmati
   assert.equal(drill.status, "done");
   assert.equal(drill.drill.hints.length, 5);
   assert.equal(drill.drill.statement, "Diagonalise A.");
-  assert.equal(await balance(ALICE), before - 10);
+  assert.equal(await balance(ALICE), before - 30);
 
   const replay = await call(client, "generate_drill", { concept: "valeurs propres", confirmation_token: sc.confirmation.confirmation_token });
   assert.equal(errorCode(replay), "confirmation_invalid", "un jeton de devis ne sert qu'une fois");
-  assert.equal(await balance(ALICE), before - 10);
+  assert.equal(await balance(ALICE), before - 30);
   await client.close();
 });
 
@@ -552,14 +552,16 @@ test("solde insuffisant : refusé dès le devis avec le solde, aucun appel au mo
   }
 });
 
-test("examen blanc : devis au tarif de l'app (2 crédits, +1 au-delà de 8 exercices), confirmation soumise aux pré-checks", async () => {
+test("examen blanc : devis au tarif de l'app (5 crédits, +1 au-delà de 8 exercices), confirmation soumise aux pré-checks", async () => {
   const { access } = await tokenFor(CAROL);
   const { client } = await connect(access);
+  const credits = await import("../lib/billing/credits");
+  await credits.addTransaction(CAROL, 1000, "test", "t:carol:mock-exam-topup"); // de quoi couvrir un examen après les débits d'assistance des tests précédents
   const base = await call(client, "generate_mock_exam", {});
-  assert.equal((base.structuredContent as { confirmation: { cost_credits: number } }).confirmation.cost_credits, 2);
+  assert.equal((base.structuredContent as { confirmation: { cost_credits: number } }).confirmation.cost_credits, 5);
   const big = await call(client, "generate_mock_exam", { exercise_count: 12 });
   const conf = (big.structuredContent as { confirmation: { cost_credits: number; confirmation_token: string; daily_quota: { kind: string } } }).confirmation;
-  assert.equal(conf.cost_credits, 3);
+  assert.equal(conf.cost_credits, 6);
   assert.equal(conf.daily_quota.kind, "generations");
   const before = await balance(CAROL);
   // Cours sans corpus : le pré-check de l'app refuse AVANT toute réservation.
@@ -593,8 +595,8 @@ test("client 2026-07-28 avec élicitation : la personne confirme dans le client,
   assert.equal(r.isError, undefined, text(r));
   assert.equal((r.structuredContent as { status: string }).status, "done");
   assert.equal(asked.length, 1);
-  assert.match(asked[0], /0,1 crédit/);
-  assert.equal(await balance(ALICE), before - 10);
+  assert.match(asked[0], /0,3 crédit/);
+  assert.equal(await balance(ALICE), before - 30);
   await client.close();
 });
 
@@ -607,7 +609,7 @@ test("client 2026-07-28 : refus dans le client → rien n'est débité, rien n'e
   const sc = r.structuredContent as { status: string; declined: { action: string; cost_credits: number }; confirmation: unknown };
   assert.equal(sc.status, "declined");
   assert.equal(sc.declined.action, "decline");
-  assert.equal(sc.declined.cost_credits, 0.1, "le refus rappelle le coût annoncé");
+  assert.equal(sc.declined.cost_credits, 0.3, "le refus rappelle le coût annoncé");
   assert.equal(sc.confirmation, null, "aucun jeton après un refus");
   assert.match(text(r), /refusé/);
   assert.equal(await balance(ALICE), before);
@@ -699,11 +701,11 @@ test("client 2026-07-28 : une confirmation acceptée ne sert qu'une fois (rejoue
   const before = await balance(ALICE);
   const done = await modernCall(access, "generate_drill", retry);
   assert.equal((done.result?.structuredContent as { status: string }).status, "done");
-  assert.equal(await balance(ALICE), before - 10);
+  assert.equal(await balance(ALICE), before - 30);
   const replay = await modernCall(access, "generate_drill", retry);
   assert.equal(replay.result?.isError, true);
   assert.equal((replay.result?._meta?.["com.cortexexam/error"] as { code: string }).code, "confirmation_invalid");
-  assert.equal(await balance(ALICE), before - 10, "le rejeu n'a rien débité");
+  assert.equal(await balance(ALICE), before - 30, "le rejeu n'a rien débité");
 });
 
 // ───────────────────────────── portée et révocation ─────────────────────────────

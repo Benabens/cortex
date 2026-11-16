@@ -90,13 +90,13 @@ test("succès après un timeout : la tentative perdue est estimée, la réussie 
 
 test("prix proportionnel à la taille : mock standard = 1 unité, 8 exercices inclus", async () => {
   const { costForJob } = await import("../lib/jobs");
-  assert.equal(costForJob("qcm", undefined), 100);
-  assert.equal(costForJob("qcm", JSON.stringify({ count: 20, openCount: 3 })), 100); // le mock standard
-  assert.equal(costForJob("qcm", JSON.stringify({ count: 40, openCount: 0 })), 200);
-  assert.equal(costForJob("qcm", JSON.stringify({ count: 40, openCount: 3 })), 200);
-  assert.equal(costForJob("qcm", JSON.stringify({ count: 2, openCount: 0 })), 100); // drill : jamais moins que la base
-  assert.equal(costForJob("exam", undefined), 200);
-  assert.equal(costForJob("exam", JSON.stringify({ count: 8 })), 200);
-  assert.equal(costForJob("exam", JSON.stringify({ count: 12 })), 300);
+  assert.equal(costForJob("qcm", undefined), 400);
+  assert.equal(costForJob("qcm", JSON.stringify({ count: 20, openCount: 3 })), 400); // le mock standard
+  assert.equal(costForJob("qcm", JSON.stringify({ count: 40, openCount: 0 })), 800);
+  assert.equal(costForJob("qcm", JSON.stringify({ count: 40, openCount: 3 })), 800);
+  assert.equal(costForJob("qcm", JSON.stringify({ count: 2, openCount: 0 })), 400); // drill : jamais moins que la base
+  assert.equal(costForJob("exam", undefined), 500);
+  assert.equal(costForJob("exam", JSON.stringify({ count: 8 })), 500);
+  assert.equal(costForJob("exam", JSON.stringify({ count: 12 })), 600);
   assert.equal(costForJob("exercise", "pipelines"), 100);
 });

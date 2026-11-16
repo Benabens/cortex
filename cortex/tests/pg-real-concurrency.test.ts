@@ -22,7 +22,7 @@ if (ENABLED) {
   process.env.PG_AUTH_POOL_MAX = "8";
   process.env.PG_POOL_MAX = "8";
   process.env.BILLING_ENABLED = "1";
-  process.env.SIGNUP_FREE_CREDITS = "2";
+  process.env.SIGNUP_FREE_CREDITS = "5";
   // Budget IA lié au revenu (testé dans ai-budget.test.ts) : ici, les comptes sont financés par des crédits offerts.
   process.env.AI_BUDGET_MARGIN = "unlimited";
   process.env.DAILY_GEN_QUOTA = "unlimited";
@@ -70,7 +70,7 @@ test("réservation : solde pour UN examen, 8 réservations sur 8 connexions → 
   const { reserveGeneration } = await import("../lib/billing/reserve");
   const credits = await import("../lib/billing/credits");
   const user = "pg_parallel";
-  assert.equal(await credits.getBalanceCenti(user), 200);
+  assert.equal(await credits.getBalanceCenti(user), 500);
   const results = await Promise.all(Array.from({ length: N }, (_, i) =>
     inCourse(user, "ml", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: `job:${user}:ml:${i}` }))
   ));
@@ -90,7 +90,7 @@ test("quota du jour = 1 : 8 réservations parallèles → exactement 1 comptée"
     ));
     assert.equal(results.filter((r) => r.ok).length, 1);
     assert.equal(await guards.usedToday("gen", user), 1);
-  } finally { process.env.DAILY_GEN_QUOTA = "unlimited"; process.env.SIGNUP_FREE_CREDITS = "2"; }
+  } finally { process.env.DAILY_GEN_QUOTA = "unlimited"; process.env.SIGNUP_FREE_CREDITS = "5"; }
 });
 
 test("calcul du jour (lib/billing/limits) : 3 dépensés, fusible 10, 4 attendus par QCM → 8 lancements parallèles, exactement 1", { skip }, async () => {
@@ -125,7 +125,7 @@ test("assistance : solde pour UN appel, 8 assistGate parallèles → exactement 
   const credits = await import("../lib/billing/credits");
   const { runWithUser } = await import("../db/context");
   const user = "pg_assist";
-  await credits.addTransaction(user, -190, "test", `test:${user}:-190`); // 200 offerts → 10 = un appel
+  await credits.addTransaction(user, -470, "test", `test:${user}:-470`); // 500 offerts → 30 = un appel
   process.env.LLM_BASE_URL = "http://127.0.0.1:9/v1"; process.env.LLM_PROVIDER = "openai-compatible"; process.env.LLM_API_KEY = "x";
   try {
     const results = await Promise.all(Array.from({ length: N }, () => runWithUser(user, () => assistGate("drill"))));
@@ -134,14 +134,14 @@ test("assistance : solde pour UN appel, 8 assistGate parallèles → exactement 
   } finally { delete process.env.LLM_BASE_URL; process.env.LLM_PROVIDER = "anthropic"; delete process.env.LLM_API_KEY; }
 });
 
-test("abonnement : 2 crédits d'abonnement, 8 réservations parallèles → exactement 1 (deux poches sous verrou)", { skip }, async () => {
+test("abonnement : 5 crédits d'abonnement, 8 réservations parallèles → exactement 1 (deux poches sous verrou)", { skip }, async () => {
   const { reserveGeneration } = await import("../lib/billing/reserve");
   const credits = await import("../lib/billing/credits");
   const { authRun } = await import("../db/auth-store");
   const user = "pg_sub";
-  await credits.addTransaction(user, -200, "test", `test:${user}:vide`);
+  await credits.addTransaction(user, -500, "test", `test:${user}:vide`);
   await credits.grantSubscriptionMonth({ userId: user, customerId: "cus_pg", subscriptionId: "sub_pg", plan: "cortex_pro_monthly", periodEnd: "2099-01-01 00:00:00" });
-  await authRun(`UPDATE subscriptions SET remaining = 200 WHERE user_id = ?`, user);
+  await authRun(`UPDATE subscriptions SET remaining = 500 WHERE user_id = ?`, user);
   const results = await Promise.all(Array.from({ length: N }, (_, i) =>
     inCourse(user, "algo", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: `job:${user}:algo:${i}` }))
   ));
@@ -171,12 +171,12 @@ test("reprise Stripe : remboursement ET litige simultanés sur le même paiement
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ev = (id: string, type: string, object: unknown): any => ({ id, type, data: { object } });
   await handleStripeEvent(ev("evt_race_buy", "checkout.session.completed", { id: "cs_race", mode: "payment", payment_status: "paid", amount_total: 900, payment_intent: "pi_race", metadata: { cortexUserId: user, plan: "credits_10", credits: "10" } }));
-  assert.equal(await credits.getBalanceCenti(user), 1200);
+  assert.equal(await credits.getBalanceCenti(user), 1500);
   const results = await Promise.all(Array.from({ length: N }, (_, i) =>
     handleStripeEvent(i % 2 === 0
       ? ev(`evt_race_r${i}`, "charge.refunded", { payment_intent: "pi_race", amount: 900, amount_refunded: 900 })
       : ev(`evt_race_d${i}`, "charge.dispute.created", { payment_intent: "pi_race", amount: 900 })),
   ));
   assert.equal(results.filter((r) => r.reversed).length, 1, JSON.stringify(results.map((r) => r.action)));
-  assert.equal(await credits.getBalanceCenti(user), 200, "10 repris une seule fois");
+  assert.equal(await credits.getBalanceCenti(user), 500, "10 repris une seule fois");
 });
