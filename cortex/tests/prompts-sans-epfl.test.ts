@@ -131,6 +131,12 @@ test("discipline : les codes hors EPFL sont lus (CS201, COMPSCI 201, COMP0002, H
   for (const code of ["CSTUDIES", "MATHEMATICA"]) assert.equal(inferDiscipline({ code, sample: prose }), "humanities", `${code} : un mot, pas un préfixe de code`);
 });
 
+test("outil create_course du connecteur : aucun établissement suggéré à l'assistant", async () => {
+  const { default: tool } = await import("../lib/mcp/tools/create-course");
+  const texts = [tool.description, ...Object.values(tool.input.shape).map((f) => (f as { description?: string }).description ?? "")].join("\n");
+  assert.doesNotMatch(texts, /EPFL|MATH-111/, texts);
+});
+
 test("barème et durée : ceux de l'examen déclaré (75 min), pas ~180 points en 3 h", async () => {
   const id = await newCourse({ examFormat: { kind: "exercises", durationMin: 75 } });
   const { intro, slots } = await profileOf(id);
