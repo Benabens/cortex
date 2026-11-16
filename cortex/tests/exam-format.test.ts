@@ -326,3 +326,22 @@ test("C — un examen d'exercices à sous-questions, sans choix, reste un examen
   });
   assert.equal((await resolve(id)).kind, "exercises");
 });
+
+const SPANISH = "La probabilidad de que el evento ocurra depende de la distribución. En este capítulo se estudian las variables aleatorias y sus propiedades, que son la base del curso. Cuando la muestra es grande, la media se acerca al valor esperado, pero hay que comprobar las hipótesis del teorema.";
+
+test("langue : l'espagnol est reconnu, sans brouiller le français, l'italien ni le portugais", async () => {
+  const { detectLanguage } = await import("../lib/exam-format");
+  assert.equal(detectLanguage(SPANISH), "es");
+  // Les mots les plus fréquents de l'espagnol (de, la, que, en) : avant, le néerlandais l'emportait.
+  assert.equal(detectLanguage("En la teoría de la medida, la integral de la función que se define en el espacio de probabilidad es la esperanza de la variable. En la práctica, la convergencia de la serie que aparece en la prueba depende de la cota que se obtiene en la sección anterior."), "es");
+  assert.equal(detectLanguage("La probabilité que l'événement se produise dépend de la loi. Dans ce chapitre, nous étudions les variables aléatoires et leurs propriétés, qui sont la base du cours. Quand l'échantillon est grand, la moyenne se rapproche de l'espérance."), "fr");
+  assert.equal(detectLanguage("La probabilità che l'evento si verifichi dipende dalla distribuzione. In questo capitolo si studiano le variabili aleatorie e le loro proprietà, che sono la base del corso. Quando il campione è grande, la media si avvicina al valore atteso, ma non sempre."), "it");
+  assert.equal(detectLanguage("A probabilidade de que o evento ocorra depende da distribuição. Neste capítulo estudamos as variáveis aleatórias e as suas propriedades, que são a base do curso. Quando a amostra é grande, a média aproxima-se do valor esperado, mas não sempre."), "pt");
+});
+
+test("sans annale ni langue déclarée, la langue des supports l'emporte sur le français par défaut", async () => {
+  const id = await newCourse();
+  await addSource(id, "course_pdf", "Capítulo 1", SPANISH.repeat(3));
+  const f = await resolve(id);
+  assert.equal(f.language, "es");
+});

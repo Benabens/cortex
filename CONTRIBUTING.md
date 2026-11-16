@@ -8,7 +8,7 @@ Contexte technique : [ARCHITECTURE.md](ARCHITECTURE.md). Déploiement : [DEPLOY.
 
 ## Invariants
 
-1. **Non-régression du moteur.** Un cours de référence doit produire un `.tex` **byte-identique** à l'empreinte canonique : c'est le rendu, donc ce que l'étudiant reçoit. Sa dérive doit être comprise et justifiée avant de mettre à jour l'empreinte. Le prompt, lui, n'a pas d'empreinte figée — elle dépend de l'ADN détecté du cours, donc du corpus présent, et une empreinte qu'on met à jour à chaque évolution des consignes n'est plus une garde. Il est tenu par deux propriétés vérifiées en CI : il reste sous `PROMPT_MAX_CHARS` (l'enflure se paie à chaque génération) et il porte la consigne « donnée de cours » (cf. `lib/prompt-safety.ts`).
+1. **Non-régression du moteur.** Un cours de référence doit produire un `.tex` **byte-identique** à l'empreinte canonique : c'est le rendu, donc ce que l'étudiant reçoit. Sa dérive doit être comprise et justifiée avant de mettre à jour l'empreinte. Le prompt, lui, n'a pas d'empreinte figée — elle dépend de l'ADN détecté du cours, donc du corpus présent, et une empreinte qu'on met à jour à chaque évolution des consignes n'est plus une garde. Il est tenu par deux propriétés vérifiées en CI : il reste sous `PROMPT_MAX_CHARS` (l'enflure se paie à chaque génération) et il porte la consigne « donnée de cours » (cf. `lib/prompt-safety.ts`). Seule exception : les morceaux du prompt de cs-202 qui ne dépendent pas du corpus (intro, contraintes, style de l'enseignante, cible « final EPFL ») et ses prompts de drill et de conception sur un corpus vide sont figés par empreintes dans `tests/prompts-sans-epfl.test.ts` : ce qui est propre à l'EPFL y reste, et nulle part ailleurs.
 
 2. **Jamais de faux « prouvé ».** La vérification déterministe répond `not_applicable` en cas de doute plutôt que de valider. Un faux positif est un bug grave — plusieurs tests existent uniquement pour l'empêcher.
 
@@ -50,6 +50,8 @@ npm test             # tests unitaires
 Les quatre doivent passer. La CI les rejoue sur un clone neuf, avec en plus l'invariant de non-régression et un build Docker qui compile réellement du LaTeX.
 
 `npm test` coupe les faits testables des examens QCM (`QCM_FACTS=0`) : les suites QCM écrites avant eux simulent un fournisseur qui ne connaît pas l'appel d'extraction. Les suites `tests/qcm-faits*.test.ts` les rallument elles-mêmes.
+
+Un changement du prompt d'extraction des faits (`lib/qcm-facts.ts`) incrémente `FACTS_VERSION` : les faits gardés en base sont alors réextraits une fois par cours. Deux questions d'un examen ne testent jamais le même fait, même porté par deux faits distincts (`factDuplicates` : même notion et même scénario ou même clé reformulée) ; l'étiquette d'une question est la notion de son fait, sauf quand le contrôle des doublons la range sous une autre notion du programme et que l'étiquette du fait n'a aucun appui dans la clé.
 
 L'explication d'un QCM n'est jamais un paragraphe libre du modèle : elle est assemblée par `lib/qcm-rationale.ts` depuis sa justification structurée (la clé, une raison par option fausse) et les options réelles, à chaque changement d'options et à la lecture (`qcm_items.rationale_json`). Toute opération qui modifie les options invalide seulement les raisons concernées. Une réponse simulée sans justification suit l'ancien chemin (paragraphe libre), comme `QCM_STRUCTURED_EXPLANATIONS=0`.
 

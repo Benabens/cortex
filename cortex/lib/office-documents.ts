@@ -3,6 +3,7 @@ import mammoth from "mammoth";
 import path from "node:path";
 import yauzl from "yauzl";
 import JSZip from "jszip";
+import { ommlToLatex, topLevelMath } from "@/lib/omml";
 
 export const MAX_OFFICE_UNCOMPRESSED_BYTES = 100 * 1024 * 1024;
 const MAX_OFFICE_ENTRIES = 10_000;
@@ -71,6 +72,22 @@ function checkArchive(buffer: Buffer, maxUncompressedBytes: number): Promise<voi
   });
 }
 
+const escapeXml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** DOCX : chaque formule devient un passage de texte `$…$`, que mammoth lit ensuite à sa place. */
+async function docxWithMathAsText(buffer: Buffer): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(buffer);
+  const doc = zip.file("word/document.xml");
+  const xml = doc ? await doc.async("string") : "";
+  if (!xml.includes("m:oMath")) return buffer;
+  const $ = cheerio.load(xml, { xmlMode: true });
+  topLevelMath($).each((_, el) => {
+    $(el).replaceWith(`<w:r><w:t xml:space="preserve">${escapeXml(`$${ommlToLatex($, el)}$`)}</w:t></w:r>`);
+  });
+  zip.file("word/document.xml", $.xml());
+  return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+}
+
 async function extractPptx(buffer: Buffer): Promise<string> {
   const zip = await JSZip.loadAsync(buffer);
   const slides = Object.keys(zip.files)
@@ -80,7 +97,9 @@ async function extractPptx(buffer: Buffer): Promise<string> {
   for (const slide of slides) {
     const xml = await zip.file(slide)!.async("string");
     const $ = cheerio.load(xml, { xmlMode: true });
-    const text = $("a\\:t, t").map((_, node) => $(node).text()).get().join(" ").trim();
+    // Formules en LaTeX, à leur place ; la copie image de secours (mc:Fallback) n'est pas lue en double.
+    topLevelMath($).each((_, el) => { $(el).replaceWith(`<a:t>${escapeXml(`$${ommlToLatex($, el)}$`)}</a:t>`); });
+    const text = $("a\\:t, t").filter((_, node) => $(node).parents("mc\\:Fallback").length === 0).map((_, node) => $(node).text()).get().join(" ").trim();
     if (text) texts.push(text);
   }
   return texts.join("\n\n");
@@ -97,7 +116,7 @@ export async function extractOfficeText(
   try {
     await checkArchive(buffer, max);
     const text = ext === ".docx"
-      ? (await mammoth.extractRawText({ buffer })).value
+      ? (await mammoth.extractRawText({ buffer: await docxWithMathAsText(buffer) })).value
       : await extractPptx(buffer);
     const clean = text.replace(/\s+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
     if (!clean) throw new OfficeDocumentError("Document Office vide ou sans texte exploitable.", 422);
