@@ -49,6 +49,8 @@ npm test             # tests unitaires
 
 Les quatre doivent passer. La CI les rejoue sur un clone neuf, avec en plus l'invariant de non-régression et un build Docker qui compile réellement du LaTeX.
 
+`npm test` coupe les faits testables des examens QCM (`QCM_FACTS=0`) : les suites QCM écrites avant eux simulent un fournisseur qui ne connaît pas l'appel d'extraction. Les suites `tests/qcm-faits*.test.ts` les rallument elles-mêmes.
+
 ## Git
 
 - `main` est la seule branche permanente, et la seule qui déploie.

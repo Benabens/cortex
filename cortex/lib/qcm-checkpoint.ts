@@ -3,6 +3,7 @@ import path from "node:path";
 import type { ExamQuestion } from "@/lib/exam";
 import type { MoldKind } from "@/lib/molds";
 import type { CovTopic, QcmItem, QcmSlot } from "@/lib/qcm";
+import type { CourseFact } from "@/lib/qcm-facts";
 
 /**
  * POINT DE REPRISE D'UN EXAMEN QCM — constat prod du 14-15/11/2026 : un job QCM tué par un
@@ -35,13 +36,17 @@ export type QcmPlan = {
   qcmTopics: QcmSlot[];
   spareTopics: QcmSlot[];
   qcmMolds: (MoldKind | null)[];
+  /** Faits testables du cours (lib/qcm-facts) quand l'examen se conçoit par faits : ceux des questions et de la réserve. */
+  facts?: CourseFact[];
+  /** Faits déjà posés aux examens précédents du cours, au moment du plan. */
+  askedFacts?: string[];
 };
 
 export type QcmBatchState = { topics: QcmSlot[]; molds: (MoldKind | null)[]; guidance?: string };
 export type QcmMissingState = { topic: QcmSlot; mold: MoldKind | null; rejected: boolean; why?: string };
 
-/** Réserve de notions déjà consommée (takeSpare) : la reprise ne la redonne pas. */
-export type QcmReserveState = { nextSpare: number; used: string[] };
+/** Réserve de notions déjà consommée (takeSpare) : la reprise ne la redonne pas ; `usedFacts` : les faits déjà donnés. */
+export type QcmReserveState = { nextSpare: number; used: string[]; usedFacts?: string[] };
 
 export type QcmLoopState = QcmReserveState & {
   round: number;
