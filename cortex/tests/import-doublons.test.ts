@@ -55,3 +55,22 @@ test("le navigateur n'écarte plus deux fichiers de même nom et même taille ra
   const r = prepareFolderImport([file("slides.pdf", 12, "Cours/Week1/slides.pdf"), file("slides.pdf", 12, "Cours/Week2/slides.pdf")]);
   assert.deepEqual(r.accepted.map((e) => e.relativePath), ["Cours/Week1/slides.pdf", "Cours/Week2/slides.pdf"]);
 });
+
+test("zone Annales : deux noms qui ne diffèrent que par leurs lettres non latines ne s'écrasent plus", async () => {
+  process.env.E2E_TEST_AUTH = "1";
+  process.env.E2E_TEST_RUN = "1";
+  try {
+    const c = await newCourse("Orvelle annales unicode");
+    const r = await postForm("refs/upload", `course=${c.id}`, [
+      [textPdf("Final 2023, exercice 1"), "期末考试2023.pdf"],
+      [textPdf("Partiel 2023, exercice 1"), "期中考试2023.pdf"],
+      [textPdf("Prüfung 2022"), "Prüfung_2022.pdf"],
+    ]);
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual(r.json.files, ["____2023.pdf", "____2023-2.pdf", "Prufung_2022.pdf"]);
+    assert.deepEqual(fs.readdirSync(c.refsDir).filter((f) => f.endsWith(".pdf")).sort(), ["Prufung_2022.pdf", "____2023-2.pdf", "____2023.pdf"]);
+  } finally {
+    delete process.env.E2E_TEST_AUTH;
+    delete process.env.E2E_TEST_RUN;
+  }
+});
