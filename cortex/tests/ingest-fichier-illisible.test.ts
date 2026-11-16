@@ -135,3 +135,26 @@ test("l'interface reçoit, pour chaque fichier non lu, son nom et une consigne c
   assert.match(problems[2].message, /scann/);
   assert.deepEqual(ingestProblems(null), []);
 });
+
+test("une ingestion qui échoue en route laisse le corpus d'avant intact (réécriture en une transaction)", { skip: process.getuid?.() === 0 ? "root lit un dossier sans droits" : false }, async () => {
+  const c = await newCourse("Orvelle transaction");
+  const lectures = path.join(c.contentRoot, "lectures");
+  fs.writeFileSync(path.join(lectures, "chapitre-1.pdf"), textPdf("Les ondes de Orvelle"));
+  fs.writeFileSync(path.join(c.refsDir, "final-2022.pdf"), textPdf("Exercice 1 du final 2022"));
+  assert.equal(ingest(c.id).status, 0);
+  const before = await sourcePaths(c.id);
+  assert.deepEqual(before, ["lectures/chapitre-1.pdf", "refs/final-2022.pdf"]);
+
+  // Un sous-dossier illisible fait échouer le parcours du contenu, après le début de la réécriture.
+  const locked = path.join(lectures, "verrou");
+  fs.mkdirSync(locked);
+  fs.chmodSync(locked, 0o000);
+  try {
+    const r = ingest(c.id);
+    assert.notEqual(r.status, 0, r.output);
+    assert.match(r.output, /Échec ingestion : .*verrou/);
+  } finally {
+    fs.chmodSync(locked, 0o755);
+  }
+  assert.deepEqual(await sourcePaths(c.id), before);
+});
