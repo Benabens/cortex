@@ -105,13 +105,14 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
   return res;
 }
 
-/** Rend une réservation qui n'a finalement servi à rien (course perdue à l'insertion). */
+/** Rend une réservation qui n'a finalement servi à rien (course perdue à l'insertion) : crédit, place en cours et génération du jour. */
 async function releaseReservation(type: JobType, ref: string, user: string): Promise<void> {
   try {
     const { refundGeneration } = await import("@/lib/billing/credits");
-    const { releaseJobSlot } = await import("@/lib/billing/reserve");
+    const { releaseJobSlot, releaseQuotaEvent } = await import("@/lib/billing/reserve");
     await refundGeneration(type, ref, user);
     await releaseJobSlot(user, ref);
+    await releaseQuotaEvent(user, ref);
   } catch { /* best-effort */ }
 }
 

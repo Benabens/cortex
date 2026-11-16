@@ -759,6 +759,14 @@ const CREDIT_TX_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   // pas un remboursement) : la somme des parts d'un même débit ne dépasse jamais 1000.
   { name: "share_milli", sqlite: "INTEGER", pg: "integer" },
 ];
+/**
+ * Référence de la réservation qui a compté la génération (`job:…`, `assist:…`) : une
+ * réservation rendue sans avoir servi (double clic perdu, lib/jobs) rend aussi sa place
+ * dans le quota du jour. NULL : ligne d'avant, ou compteur sans réservation (guards).
+ */
+const GEN_EVENTS_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
+  { name: "ref", sqlite: "TEXT", pg: "text" },
+];
 const STRIPE_PURCHASE_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "livemode", sqlite: "INTEGER", pg: "integer" },
 ];
@@ -822,6 +830,12 @@ function sqliteAuth(): Database.Database {
     for (const c of COURSES_ADDED) {
       if (!haveCourses.has(c.name)) _sqliteAuth.exec(`ALTER TABLE courses ADD COLUMN ${c.name} ${c.sqlite}`);
     }
+    const haveGen = new Set(
+      (_sqliteAuth.prepare("PRAGMA table_info(gen_events)").all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    for (const c of GEN_EVENTS_ADDED) {
+      if (!haveGen.has(c.name)) _sqliteAuth.exec(`ALTER TABLE gen_events ADD COLUMN ${c.name} ${c.sqlite}`);
+    }
     const haveActive = new Set(
       (_sqliteAuth.prepare("PRAGMA table_info(active_jobs)").all() as Array<{ name: string }>).map((c) => c.name),
     );
@@ -876,6 +890,9 @@ async function pgExec(): Promise<{
     }
     for (const c of COURSES_ADDED) {
       await authPgQuery(`ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
+    }
+    for (const c of GEN_EVENTS_ADDED) {
+      await authPgQuery(`ALTER TABLE public.gen_events ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
     }
     for (const c of ACTIVE_JOBS_ADDED) {
       await authPgQuery(`ALTER TABLE public.active_jobs ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
