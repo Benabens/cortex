@@ -66,7 +66,7 @@ sombre ; SVG : `https://app.cortexexam.com/mcp-icon.svg`).
 
 **Use cases / example prompts** :
 ```
-What are my weak points before the CS-233 exam?
+What are my weak points before the COMP 201 exam?
 Where am I in my study plan, and what should I revise next?
 Generate a mock exam for my probability course, focused on chapter 3.
 Give me one practice question on conditional expectation, with hints.

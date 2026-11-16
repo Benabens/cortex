@@ -26,6 +26,8 @@ export type FormatProfile = {
   topics_emphasis: { topic: string; share_pct: number }[];
   /** Questions COMPOSÉES (scénario ou extrait de code + sous-questions mêlées) ; absent sinon. */
   composite?: { block_count: number; parts_min: number; parts_max: number } | null;
+  /** Documents permis que l'annale écrit (none, notes, open) ; "" ou absent : l'annale ne le dit pas. */
+  documents?: string;
 };
 
 const FORMAT_SCHEMA = {
@@ -64,6 +66,7 @@ const FORMAT_SCHEMA = {
       required: ["block_count", "parts_min", "parts_max"],
       additionalProperties: false,
     },
+    documents: { type: "string", enum: ["none", "notes", "open", ""], description: "Documents permis tels que l'énoncé de l'annale les écrit : none (aucun document), notes (notes personnelles, aide-mémoire, formulaire), open (tous documents) ; chaîne vide si l'annale ne le dit pas." },
   },
   required: ["format_summary", "has_mcq", "question_types"],
   additionalProperties: false,
@@ -112,7 +115,7 @@ export async function detectFormat(opts: { onStep?: (m: string, p: number) => vo
     dataBlock(`TEXTE DES EXAMENS PASSÉS (vérité terrain)`, [{ src: "annales", text }]),
     ``,
     `═══ TA TÂCHE ═══`,
-    `Décris le format d'UN examen type : structure (sections), TYPES de questions (scq = QCM à UNE seule réponse / mcq = QCM à PLUSIEURS réponses possibles / open / calc / proof), leur NOMBRE et leur PART en % des points, le BARÈME, la DURÉE, le total de points, et surtout la CONVENTION écrite qui distingue « exactement une bonne réponse » de « une ou plusieurs » (cite la formulation réelle). has_mcq=true s'il y a un bloc de QCM. Si chaque question est COMPOSÉE (un scénario ou un extrait de code suivi de sous-questions a, b, c… de types mêlés), remplis composite (nombre de questions, sous-questions min et max) et une section par question. Ajoute l'emphase par thème si visible.`,
+    `Décris le format d'UN examen type : structure (sections), TYPES de questions (scq = QCM à UNE seule réponse / mcq = QCM à PLUSIEURS réponses possibles / open / calc / proof), leur NOMBRE et leur PART en % des points, le BARÈME, la DURÉE, le total de points, et surtout la CONVENTION écrite qui distingue « exactement une bonne réponse » de « une ou plusieurs » (cite la formulation réelle). has_mcq=true s'il y a un bloc de QCM. Si chaque question est COMPOSÉE (un scénario ou un extrait de code suivi de sous-questions a, b, c… de types mêlés), remplis composite (nombre de questions, sous-questions min et max) et une section par question. Ajoute l'emphase par thème si visible. documents : seulement si l'annale écrit les documents permis, sinon chaîne vide (n'invente pas de règle).`,
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier écrit.`,
     JSON.stringify(FORMAT_SCHEMA, null, 2),
   ].filter(Boolean).join("\n");

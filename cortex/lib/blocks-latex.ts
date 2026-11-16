@@ -4,8 +4,8 @@ import { getCourse } from "@/lib/courses";
 import { compileExamPdf } from "@/lib/exam-latex";
 import { getFormatProfile } from "@/lib/format";
 import { examsDir } from "@/lib/paths";
-import { courseTemplate, courseWords, localDate, neutralCoverTex, neutralDuration, pointsText, solutionColor } from "@/lib/exam-template";
-import { copyExamLogo, coverHeader, esc, examDocument } from "@/lib/qcm-latex";
+import { courseTemplate, courseWords, durationText, epflWords, localDate, neutralCoverTex, neutralDuration, pointsText, solutionColor } from "@/lib/exam-template";
+import { copyExamLogo, coverHeader, documentsItem, esc, examDocument } from "@/lib/qcm-latex";
 import { assertTexSafe } from "@/lib/tex-guard";
 import fs from "node:fs";
 import path from "node:path";
@@ -57,11 +57,13 @@ const EPFL_LABELS: BlockLabels = {
 };
 
 function blockLabels(): BlockLabels {
-  if (courseTemplate() === "epfl") return EPFL_LABELS;
-  const w = courseWords();
+  const epfl = courseTemplate() === "epfl";
+  const w = epfl ? epflWords() : courseWords();
+  // EPFL en anglais : le texte historique ; hors anglais, ses mots, sur la mise en page de l'EPFL.
+  if (!w) return EPFL_LABELS;
   return {
     question: w.question, pts: (n) => pointsText(n, w), output: w.output, modelAnswer: w.modelAnswer,
-    grading: w.grading, solution: `${w.solution}.`, color: solutionColor("neutral"),
+    grading: w.grading, solution: `${w.solution}.`, color: solutionColor(epfl ? "epfl" : "neutral"),
   };
 }
 
@@ -103,13 +105,27 @@ async function cover(dateLabel: string, n: number, totalPts: number, durationMin
       instructions: [w.blocks(n, totalPts), w.blocksHow, w.onSheet],
     });
   }
+  // EPFL hors anglais : même garde, consignes dans la langue de l'examen.
+  const w = epflWords();
+  if (w) {
+    return [
+      ...coverHeader(dateLabel, durationMin, w),
+      String.raw`\vspace{0.4cm}\par\noindent{\large\textbf{${w.instructions}}}\par\smallskip\small`,
+      String.raw`\begin{enumerate}\setlength{\itemsep}{3pt}`,
+      String.raw`\item ${w.blocks(n, totalPts)} ${w.duration(durationText(durationMin, w))}`,
+      String.raw`\item ${w.blocksHow}`,
+      documentsItem(),
+      String.raw`\item ${w.onSheet}`,
+      String.raw`\end{enumerate}\vspace{0.3cm}`,
+    ].filter(Boolean).join("\n");
+  }
   return [
     ...coverHeader(dateLabel, durationMin),
     String.raw`\vspace{0.4cm}\par\noindent{\large\textbf{Instructions}}\par\smallskip\small`,
     String.raw`\begin{enumerate}\setlength{\itemsep}{3pt}`,
     `\\item This exam has \\textbf{${n} questions}, each made of a short scenario or code excerpt followed by sub-questions, for a total of \\textbf{${totalPts} points}. You have ${durationMin} minutes.`,
     String.raw`\item Single-choice sub-questions have exactly one correct answer: tick its box \fbox{$\checkmark$}. For code excerpts, write the exact output. Short answers take one to three sentences.`,
-    String.raw`\item A one-page two-sided cheat sheet is allowed. No electronic device is permitted.`,
+    documentsItem(),
     String.raw`\item Answer directly on this exam sheet, in the space provided.`,
     String.raw`\end{enumerate}\vspace{0.3cm}`,
   ].filter(Boolean).join("\n");

@@ -16,7 +16,8 @@
 
 import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
-import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
+import { updateCourseRow } from "@/db/courses-store";
+import { DEFAULT_COURSE, getCourse, reloadCourses } from "@/lib/courses";
 import { sanitizeCorpus } from "@/lib/prompt-safety";
 import { excludedSourceIds, materialLabel } from "@/lib/source-scope";
 import { EXAM_HAS_TEXT } from "@/lib/sources";
@@ -89,6 +90,8 @@ export type ExamFormat = {
   blocks?: BlockFormat | null;
   /** Questions à choix (QCM, mixte) : unique, multiples ou les deux ; null pour un autre type. */
   answerMode?: AnswerMode | null;
+  /** Documents permis que l'annale écrit (détection du format) ; absent : elle ne le dit pas. */
+  documents?: DocumentRule | null;
   /** Total de points des annales, quand elles le disent (absent sinon ; un format à questions composées le porte dans `blocks`). */
   totalPoints?: number;
 };
@@ -392,7 +395,8 @@ export function blocksOf(p: Pick<FormatProfile, "format_summary" | "sections" | 
 function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Discipline, declared: AnswerMode | undefined): ExamFormat {
   const types = p.question_types ?? [];
   const qcmShare = types.filter((t) => t.type === "scq" || t.type === "mcq").reduce((s, t) => s + (t.approx_count || 0), 0);
-  const base = { basis: "annales" as const, durationMin: p.duration_min || null, language, discipline, summary: p.format_summary || "", evidence: [], ...(positive(p.total_points) ? { totalPoints: p.total_points } : {}) };
+  const documents = (DOCUMENT_RULES as readonly string[]).includes(p.documents ?? "") ? (p.documents as DocumentRule) : null;
+  const base = { basis: "annales" as const, durationMin: p.duration_min || null, language, discipline, summary: p.format_summary || "", evidence: [], documents, ...(positive(p.total_points) ? { totalPoints: p.total_points } : {}) };
   const composite = blocksOf(p);
   if (composite) {
     const { count, ...blocks } = composite;
@@ -450,12 +454,17 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
   const declared = course.examFormat;
   const past = await annales();
   const hasAnnales = past.count > 0;
-  // Langue : déclarée > celle des annales > celle du cours > celle des supports > fr. Le « fr » posé
-  // par défaut à la création ne vaut pas déclaration : les supports passent devant (un cours
-  // espagnol créé sans langue sortait ses examens en français).
+  // Langue : déclarée > celle des annales > celle du cours > celle des supports > anglais. Un cours
+  // créé sans langue (« ») garde celle qu'on détecte. Le « fr » posé par défaut à la création avant
+  // cette détection ne vaut pas déclaration : les supports passent devant (un cours espagnol créé
+  // sans langue sortait ses examens en français).
   const sample = await corpusSample();
+  const fromAnnales = past.text ? detectLanguage(past.text) : null;
+  const fromMaterials = detectLanguage(sample);
+  const detected = fromAnnales || fromMaterials;
+  if (!course.language && detected) await keepCourseLanguage(courseId, detected);
   const courseLanguage = course.language && course.language !== "fr" ? course.language : null;
-  const language = declared?.language || (past.text ? detectLanguage(past.text) : null) || courseLanguage || detectLanguage(sample) || course.language || "fr";
+  const language = declared?.language || fromAnnales || courseLanguage || fromMaterials || course.language || FALLBACK_LANGUAGE;
   const stored = await readStoredProfile();
   const discipline = inferDiscipline({ code: course.examCode, sample });
   const basisOf = (p: StoredProfile) => p.basis ?? "annales";
@@ -494,6 +503,19 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
   return format;
 }
 
+/** Langue d'un cours qui n'en a pas (créé sans langue), sans annale qui la dise. */
+const FALLBACK_LANGUAGE = "en";
+
+/**
+ * Enregistre la langue détectée d'un cours créé sans langue (l'interface la montre, les rendus
+ * synchrones la lisent) ; un échec ne bloque pas la génération.
+ */
+async function keepCourseLanguage(courseId: string, language: string): Promise<void> {
+  await updateCourseRow(courseId, getCourse(courseId).ownerUserId, { language })
+    .then(() => reloadCourses())
+    .catch((e) => console.warn(`[exam-format] langue détectée (${language}) non enregistrée pour ${courseId} : ${(e as Error).message}`));
+}
+
 /**
  * Langue de l'examen, en SYNCHRONE, pour les consignes des profils (construites
  * de façon synchrone au cœur du moteur) : celle de la dernière résolution du
@@ -510,7 +532,12 @@ export function examLanguageFor(courseId: string): string {
  * lit que la dernière résolution de ce process ou la fiche du cours.
  */
 export async function courseLanguageName(): Promise<string> {
-  return languageName((await resolveExamFormat().catch(() => null))?.language ?? examLanguageFor(currentCourse()))[1];
+  return languageName(await courseLanguage())[1];
+}
+
+/** Code de la langue de l'examen RÉSOLU du cours courant (annales, déclaration, supports). */
+export async function courseLanguage(): Promise<string> {
+  return (await resolveExamFormat().catch(() => null))?.language ?? examLanguageFor(currentCourse());
 }
 
 /**
@@ -521,10 +548,10 @@ export async function courseLanguageName(): Promise<string> {
 export function formatContextFor(courseId: string): { kind: ExamKind | null; language: string; discipline: Discipline; durationMin: number | null; documents: DocumentRule | null; totalPoints: number | null } {
   const known = memo.get(courseId);
   const c = getCourse(courseId);
-  // Les documents permis ne viennent que de la déclaration : aucune source ne les détecte.
-  const documents = c.examFormat?.documents ?? null;
+  // Documents permis : la déclaration, sinon ce que l'annale écrit ; jamais deviné.
+  const documents = c.examFormat?.documents ?? known?.documents ?? null;
   if (known) return { kind: known.kind, language: known.language, discipline: known.discipline, durationMin: known.durationMin, documents, totalPoints: known.totalPoints ?? known.blocks?.totalPoints ?? null };
-  return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || "fr", discipline: inferDiscipline({ code: c.examCode }), durationMin: c.examFormat?.durationMin ?? null, documents, totalPoints: null };
+  return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || FALLBACK_LANGUAGE, discipline: inferDiscipline({ code: c.examCode }), durationMin: c.examFormat?.durationMin ?? null, documents, totalPoints: null };
 }
 
 /**

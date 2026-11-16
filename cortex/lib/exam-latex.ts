@@ -8,7 +8,7 @@ import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
 import { examsDir } from "@/lib/paths";
 import { formatContextFor } from "@/lib/exam-format";
-import { courseTemplate, courseWords, coverWords, durationText, examTemplate, localDate, neutralChrome, neutralCoverTex, neutralDuration, pointsText } from "@/lib/exam-template";
+import { courseTemplate, courseWords, coverWords, durationText, epflExamKind, epflLocalChrome, examTemplate, localDate, neutralChrome, neutralCoverTex, neutralDuration, pointsText } from "@/lib/exam-template";
 import { qrText, texEscape } from "@/lib/tex-escape";
 
 const LATEX_DIR = path.join(process.cwd(), "latex");
@@ -104,7 +104,7 @@ function genericCoverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string):
     String.raw`\noindent\begin{minipage}[t]{0.7\textwidth}\vspace{0pt}\footnotesize ${facultyLine}\end{minipage}\hfill`,
     String.raw`\begin{minipage}[t]{0.25\textwidth}\vspace{0pt}\raggedleft\footnotesize ${w.anonymisation}\\ \textbf{\#0000}\end{minipage}`,
     String.raw`\vspace{10pt}\noindent\normalsize ${w.name} Hanon Ymous \quad(000000)\hfill\textbf{${w.seat}} 0`,
-    String.raw`\vspace{0.5cm}\begin{center}{\Large\textbf{${examCodeTex} ${texEscape(c.examName.toUpperCase())}}}\\[6pt]{\large\textbf{${texEscape(c.examKind)}}}\\[5pt]${localDate(dateLabel, w)}\end{center}`,
+    String.raw`\vspace{0.5cm}\begin{center}{\Large\textbf{${examCodeTex} ${texEscape(c.examName.toUpperCase())}}}\\[6pt]{\large\textbf{${texEscape(epflExamKind(c))}}}\\[5pt]${localDate(dateLabel, w)}\end{center}`,
     String.raw`\vspace{0.25cm}\noindent{\large\textbf{${w.instructions}}}\par\smallskip`,
     String.raw`\noindent ${w.important}`,
     String.raw`\begin{enumerate}\setlength{\itemsep}{2pt}`,
@@ -264,14 +264,14 @@ export function renderExamTex(spec: ExamSpec, dateLabel: string, includeSolution
     )
     .join("\n\n");
 
-  // Hors EPFL, les titres du corrigé suivent la langue de l'examen ; le texte de l'EPFL reste tel quel.
-  const neutral = courseTemplate() === "neutral";
+  // Les titres du corrigé suivent la langue de l'examen ; seul cs-202 garde son texte (empreinte canonique).
+  const localized = currentCourse() !== DEFAULT_COURSE;
   const w = courseWords();
   const solutions = [
-    String.raw`\clearpage{\Large\textbf{${neutral ? w.solutions : "Corrigé"}}}\par\vspace{6pt}\hrule\medskip`,
+    String.raw`\clearpage{\Large\textbf{${localized ? w.solutions : "Corrigé"}}}\par\vspace{6pt}\hrule\medskip`,
     ...qs.map((q, i) =>
       [
-        neutral
+        localized
           ? String.raw`\par\medskip\needspace{4\baselineskip}{\large\textbf{${w.question} ${i + 1} \quad-- ${texEscape(q.concept)} \hfill [${pointsText(qPoints(q), w)}]}}\par\smallskip`
           : String.raw`\par\medskip\needspace{4\baselineskip}{\large\textbf{Question ${i + 1} : ${texEscape(q.concept)} \hfill [${qPoints(q)} points]}}\par\smallskip`,
         unwrapLockedFigures(courseTex((q as any).solution_tex ?? "", i + 1)),
@@ -307,7 +307,8 @@ function courseHeaderOverride(): string {
   const profsTex = texEscape(c.profs.length ? c.profs.join(", ") : c.university);
   return [
     `\\fancyhead[R]{\\qrcode[height=1.25cm]{${qrText(c.examCode)}-EXAM}}`,
-    `\\fancyfoot[C]{\\small\\textbf{${code}, ${texEscape(c.examKind)}}\\\\[-2pt]\\small ${profsTex}}`,
+    `\\fancyfoot[C]{\\small\\textbf{${code}, ${texEscape(epflExamKind(c))}}\\\\[-2pt]\\small ${profsTex}}`,
+    ...epflLocalChrome(true),
   ].join("\n");
 }
 
@@ -728,8 +729,8 @@ function renderTex(tex: string, level: number): string {
 /** Repli HTML LISIBLE si la compilation LaTeX échoue : plus de LaTeX source brut. */
 export function htmlFallback(spec: ExamSpec, id: number, dateLabel: string, reason?: string): string {
   const qs = [...spec.questions].sort((a, b) => catRank(a.category) - catRank(b.category));
-  // Hors EPFL, titres de l'examen dans sa langue ; l'avertissement reste celui de l'application.
-  const w = courseTemplate() === "neutral" ? courseWords() : null;
+  // Titres de l'examen dans sa langue (cs-202 garde son texte) ; l'avertissement reste celui de l'application.
+  const w = currentCourse() !== DEFAULT_COURSE ? courseWords() : null;
   const heading = (i: number, q: ExamQuestion) =>
     w
       ? `${escHtml(w.question)} ${i + 1} – ${escHtml(q.concept)} <span class="pts">[${escHtml(pointsText(qPoints(q), w))}]</span>`
@@ -773,15 +774,17 @@ export function renderExerciseLatex(q: ExamQuestion, dateLabel: string, includeS
   const figPath = path.join(LATEX_DIR, "figures.tex");
   if (fs.existsSync(figPath)) preamble += "\n" + fs.readFileSync(figPath, "utf8");
   const pts = qPoints(q);
+  // Titres dans la langue de l'examen ; cs-202 garde son texte historique.
+  const w = currentCourse() !== DEFAULT_COURSE ? courseWords() : null;
   const sol = includeSolutions
-    ? [String.raw`\clearpage{\large\textbf{Solution}}\par\vspace{6pt}\hrule\medskip`, unwrapLockedFigures((q as any).solution_tex ?? "")].join("\n")
+    ? [String.raw`\clearpage{\large\textbf{${w?.solution ?? "Solution"}}}\par\vspace{6pt}\hrule\medskip`, unwrapLockedFigures((q as any).solution_tex ?? "")].join("\n")
     : "";
   return [
     preamble,
     String.raw`\newcommand{\FOOTDATE}{${footDate(dateLabel)}}`,
     String.raw`\examchromefalse\pagestyle{empty}`,
     String.raw`\begin{document}`,
-    String.raw`\noindent{\large\textbf{Exercise \quad-- ${texEscape(q.concept)} \hfill [${pts} points]}}\par\vspace{4pt}\hrule\vspace{10pt}`,
+    String.raw`\noindent{\large\textbf{${w?.question ?? "Exercise"} \quad-- ${texEscape(q.concept)} \hfill [${w ? pointsText(pts, w) : `${pts} points`}]}}\par\vspace{4pt}\hrule\vspace{10pt}`,
     unwrapLockedFigures((q as any).statement_tex ?? ""),
     sol,
     String.raw`\end{document}`,
