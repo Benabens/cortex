@@ -11,6 +11,7 @@ import { extractOfficeText } from "@/lib/office-documents";
 import { purgePdfPages } from "@/lib/page-cache";
 import { storage } from "@/lib/storage";
 import { failureStatus, readStatus, type IngestFileOutcome } from "@/lib/ingest-report";
+import { examKind, examYear } from "@/lib/exam-names";
 
 /**
  * Examens de référence : le « format » à imiter pour la génération.
@@ -45,10 +46,7 @@ function recencyWeight(year: number | null): number {
 
 /** Devine type d'examen + année depuis un nom de fichier. */
 export function inferExamMeta(filename: string): { kind: "final" | "midterm"; year: number | null } {
-  const f = filename.toLowerCase();
-  const kind = /midterm|mi[-_ ]?term/.test(f) ? "midterm" : "final";
-  const m = f.match(/(20\d{2})/);
-  return { kind, year: m ? +m[1] : null };
+  return { kind: examKind(filename) ?? "final", year: examYear(filename) };
 }
 
 // ---- insertion bas niveau (mêmes tables que l'ingestion) via la façade q,
