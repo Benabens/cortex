@@ -141,7 +141,7 @@ test("cours neuf sans annale ni déclaration : format inconnu, langue du cours",
 });
 
 test("un format déclaré à la création est stocké sur le cours et pilote l'examen", async () => {
-  const id = await newCourse({ examFormat: { kind: "qcm", questionCount: 20, durationMin: 45 } });
+  const id = await newCourse({ language: "fr", examFormat: { kind: "qcm", questionCount: 20, durationMin: 45 } });
   const { getCourse } = await import("../lib/courses");
   assert.deepEqual(getCourse(id).examFormat, { kind: "qcm", questionCount: 20, durationMin: 45, language: null });
   const f = await resolve(id);
@@ -173,7 +173,7 @@ test("des annales au format détecté l'emportent sur la déclaration ; leur lan
 });
 
 test("des annales dont le format n'est pas encore détecté gardent le comportement historique (exercices)", async () => {
-  const id = await newCourse();
+  const id = await newCourse({ language: "fr" });
   await addSource(id, "final", "Final 2023", "Examen final. Exercice 1 : on considère la fonction f définie sur les réels et on étudie sa dérivée.");
   const f = await resolve(id);
   assert.equal(f.basis, "annales");

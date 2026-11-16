@@ -123,8 +123,13 @@ export function buildCourseRow(input: CourseInput, ownerUserId: string): CourseR
   const code = str(input.code, "code", { max: 24 });
   const university = str(input.university, "université", { max: 80 });
   const teachers = parseTeachers(input.teachers);
-  const language = str(input.language, "langue", { max: 5 }).toLowerCase() || "fr";
-  if (!LANGS.has(language)) throw new InvalidCourseError(`Langue non reconnue : « ${language} ».`);
+  // Langue absente ou « auto » : chaîne vide, la langue se détecte sur les annales puis les
+  // supports (lib/exam-format). Avant le 16/11/2026, un cours sans langue était en français.
+  const rawLanguage = str(input.language, "langue", { max: 5 }).toLowerCase();
+  const language = rawLanguage === "auto" ? "" : rawLanguage;
+  if (language && !LANGS.has(language)) {
+    throw new InvalidCourseError(`Langue non reconnue : « ${language} ». Langues prises en charge : ${LANGUAGES.join(", ")}.`);
+  }
 
   const examDate = str(input.examDate, "date d'examen", { max: 10 });
   if (examDate && !/^\d{4}-\d{2}-\d{2}$/.test(examDate)) {
