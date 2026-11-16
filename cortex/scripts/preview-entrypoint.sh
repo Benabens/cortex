@@ -13,8 +13,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Même reconnaissance que scripts/start.sh et lib/railway-env (isPrEnvironment).
 name="${RAILWAY_ENVIRONMENT_NAME:-${RAILWAY_ENVIRONMENT:-}}"
-if [[ "$name" == "production" || ! "$name" =~ (^|-)pr-[0-9]+$ ]]; then
+name="${name#"${name%%[![:space:]]*}"}"; name="${name%"${name##*[![:space:]]}"}"
+shopt -s nocasematch
+if [[ ! "$name" =~ (^|-)pr-[0-9]+$ ]]; then
   echo "[preview] refus : « ${name:-inconnu} » n'est pas un environnement de PR Railway" >&2
   exit 1
 fi
