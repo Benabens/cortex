@@ -1,0 +1,41 @@
+{
+  "id": "in_test_pro_1",
+  "object": "invoice",
+  "amount_paid": 1490,
+  "billing_reason": "subscription_cycle",
+  "currency": "eur",
+  "customer": "cus_test_pro_1",
+  "livemode": false,
+  "metadata": {},
+  "parent": {
+    "type": "subscription_details",
+    "subscription_details": {
+      "subscription": "sub_test_pro_1",
+      "metadata": { "app": "cortex", "cortexUserId": "pro-user", "plan": "pro_monthly" }
+    }
+  },
+  "lines": {
+    "object": "list",
+    "data": [
+      {
+        "id": "il_test_pro_1",
+        "object": "line_item",
+        "amount": 1490,
+        "currency": "eur",
+        "metadata": { "app": "cortex", "cortexUserId": "pro-user", "plan": "pro_monthly" },
+        "parent": {
+          "type": "subscription_item_details",
+          "subscription_item_details": { "proration": false, "subscription": "sub_test_pro_1", "subscription_item": "si_test_pro_1" }
+        },
+        "period": { "start": 0, "end": 0 },
+        "pricing": { "type": "price_details", "price_details": { "price": "price_test_pro_monthly", "product": "cortex_pro" } }
+      }
+    ]
+  },
+  "payments": {
+    "object": "list",
+    "data": [{ "payment": { "type": "payment_intent", "payment_intent": "pi_test_pro_1" } }]
+  },
+  "status": "paid",
+  "total": 1490
+}

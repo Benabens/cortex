@@ -1,0 +1,16 @@
+{
+  "id": "ch_test_pro_1",
+  "object": "charge",
+  "amount": 1490,
+  "amount_captured": 1490,
+  "amount_refunded": 1490,
+  "billing_details": { "email": "pro@example.test" },
+  "currency": "eur",
+  "customer": "cus_test_pro_1",
+  "livemode": false,
+  "metadata": {},
+  "paid": true,
+  "payment_intent": "pi_test_pro_1",
+  "refunded": true,
+  "status": "succeeded"
+}

@@ -3,8 +3,8 @@ import { authGet, authRun, authTx } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import {
-  DELTA_CENTI, addTransaction, ensureLedgerUnit, getSubscription, grantSubscriptionMonth, linkSubscription, resolveUserByCustomer,
-  setSubscriptionStatus, subscriptionCreditsCenti, subscriptionLive, subscriptionMonthlyCreditsCenti, suspendSubscription, toCenti,
+  DELTA_CENTI, addTransaction, ensureLedgerUnit, getSubscription, grantSubscriptionMonth, linkSubscription, resolveUserByCustomer, withdrawSubscriptionInTx,
+  setSubscriptionStatus, subscriptionCreditsCenti, subscriptionLive, subscriptionMonthlyCreditsCenti, toCenti,
 } from "./credits";
 import { linkInvoicePaymentIntent, recordDispute, recordPayment, recordRefund } from "./revenue";
 
@@ -26,17 +26,20 @@ import { linkInvoicePaymentIntent, recordDispute, recordPayment, recordRefund } 
  * événements (completed puis async_payment_succeeded) ne crédite qu'une fois.
  *
  * REPRISES : charge.refunded et charge.dispute.created remontent au
- * payment_intent → achat (pack) ou facture (abonnement). Pack : tous les
- * crédits de l'achat sont retirés (solde négatif possible → tout est bloqué).
- * Facture : les crédits du mois encore présents sont retirés, et ce qui a déjà
- * été consommé passe en dette dans le ledger — le compte est bloqué jusqu'au
- * prochain achat. Une seule reprise par payment_intent (refund puis litige
- * sur le même achat ne reprennent pas deux fois). Unités : centièmes.
+ * payment_intent → achat (pack) ou facture (abonnement), au prorata de la part
+ * remboursée (cumul amount_refunded / montant ; un litige reprend tout). Pack :
+ * la part des crédits de l'achat est retirée (solde négatif possible → tout est
+ * bloqué). Facture : la part n'est prise que sur la période de CETTE facture
+ * (`reverseInvoice`) ; seul un remboursement total de la facture en cours
+ * suspend. Cumulatif et idempotent par payment_intent (refund puis litige sur
+ * le même achat ne reprennent pas deux fois). Chaque décision est journalisée
+ * (`stripe.reversal_decision`). Unités : centièmes.
  *
  * PAIEMENT INCONNU EN BASE (achat antérieur à `stripe_purchases`, ou événements
  * dans le désordre) : on remonte, dans l'ordre, à la session Checkout via l'API
- * Stripe (`lookup`), aux métadonnées de la charge (payment_intent_data), au
- * client/e-mail + montant converti en crédits au prix du pack. Sinon la reprise
+ * Stripe (`lookup`), puis, SEULEMENT si la charge porte la marque Cortex, à ses
+ * métadonnées (payment_intent_data) ou au client déjà lié + montant converti en
+ * crédits au prix du pack. Jamais à l'e-mail. Sinon la reprise
  * est MÉMORISÉE (`stripe_orphan_reversals`), signalée en erreur, et appliquée
  * dès que l'achat correspondant arrive. Jamais silencieux.
  *
@@ -45,8 +48,9 @@ import { linkInvoicePaymentIntent, recordDispute, recordPayment, recordRefund } 
  *
  * COMPTE STRIPE PARTAGÉ (autres applications : prix `kairo_*`, metadata app=kairo…) :
  * n'est traité que ce qui est À CORTEX — prix dont le lookup_key est un plan
- * Cortex, metadata app=cortex ou cortexUserId, plan Cortex, ou client/abonnement
- * déjà lié chez nous. Tout le reste répond 200 « ignored:foreign » : ni crédit,
+ * Cortex, metadata app=cortex ou cortexUserId, plan Cortex, ou abonnement Cortex
+ * déjà lié chez nous (pas le seul client : il peut payer autre chose sur ce
+ * compte). Tout le reste répond 200 « ignored:foreign » : ni crédit,
  * ni reprise mémorisée, ni retry (un 500 ferait rejouer Stripe pendant des jours
  * puis désactiver l'endpoint). Le retry 500 reste réservé à un événement Cortex
  * dont l'utilisateur n'est pas encore lié.
@@ -208,6 +212,8 @@ async function markProcessed(eventId: string): Promise<void> {
 
 export type HandleResult = {
   ok: boolean; action: string; duplicate?: boolean; credited?: boolean; reversed?: boolean; error?: string;
+  /** Reprise : centièmes retirés par cet événement, dont `debtCenti` en dette ; abonnement suspendu ; facture de la période en cours. */
+  retiredCenti?: number; debtCenti?: number; suspended?: boolean; currentPeriod?: boolean;
 };
 
 // ─────────────────── appartenance d'un événement à Cortex ───────────────────
@@ -234,7 +240,11 @@ function foreign(kind: string, id: string | null | undefined, why: string): Hand
 
 /** Traite un événement Stripe DÉJÀ vérifié. Idempotent. Lève pour un échec RETRYABLE (la route répond 500). */
 export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions = {}): Promise<HandleResult> {
-  if (await isProcessed(event.id)) return { ok: true, action: "duplicate", duplicate: true, credited: false, reversed: false };
+  if (await isProcessed(event.id)) {
+    const dup: HandleResult = { ok: true, action: "duplicate", duplicate: true, credited: false, reversed: false };
+    logReversalDecision(event, dup);
+    return dup;
+  }
 
   // Date de l'événement CHEZ STRIPE : elle ordonne les changements de statut (cf. credits : ordre des événements).
   const at = unixToStr(event.created);
@@ -255,32 +265,29 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
       break;
     case "charge.refunded": {
       const charge = event.data.object as Stripe.Charge;
-      res = await reverseByPaymentIntent(idOf(charge.payment_intent), "remboursement Stripe", {
-        amountCents: Number(charge.amount_refunded ?? charge.amount ?? 0) || null,
-        totalCents: Number(charge.amount ?? 0) || null,
-        metadata: charge.metadata ?? null, customerId: idOf(charge.customer),
-        email: charge.billing_details?.email ?? charge.receipt_email ?? null, lookup: opts.lookup, livemode: event.livemode,
+      const { paymentIntent, amountCents, totalCents } = reversalAmounts(event)!;
+      res = await reverseByPaymentIntent(paymentIntent, "remboursement Stripe", {
+        amountCents, totalCents,
+        metadata: charge.metadata ?? null, customerId: idOf(charge.customer), lookup: opts.lookup, livemode: event.livemode,
       });
       // Revenu : le remboursé cumulé s'impute au paiement (même s'il n'est pas encore arrivé chez nous).
       if (res.ok && res.action !== FOREIGN.action) {
-        const pi = idOf(charge.payment_intent);
-        await linkInvoicePaymentIntent(pi);
-        await recordRefund(pi, Number(charge.amount_refunded ?? 0));
+        await linkInvoicePaymentIntent(paymentIntent);
+        await recordRefund(paymentIntent, Number(charge.amount_refunded ?? 0));
       }
       break;
     }
     case "charge.dispute.created": {
       const dispute = event.data.object as Stripe.Dispute;
       const charge = typeof dispute.charge === "object" && dispute.charge ? (dispute.charge as Stripe.Charge) : null;
-      res = await reverseByPaymentIntent(idOf(dispute.payment_intent), "litige Stripe", {
-        amountCents: Number(dispute.amount ?? 0) || null,
-        metadata: charge?.metadata ?? null, customerId: idOf(charge?.customer),
-        email: charge?.billing_details?.email ?? null, lookup: opts.lookup, livemode: event.livemode,
+      const { paymentIntent, amountCents } = reversalAmounts(event)!;
+      res = await reverseByPaymentIntent(paymentIntent, "litige Stripe", {
+        amountCents,
+        metadata: charge?.metadata ?? null, customerId: idOf(charge?.customer), lookup: opts.lookup, livemode: event.livemode,
       });
       if (res.ok && res.action !== FOREIGN.action) {
-        const pi = idOf(dispute.payment_intent);
-        await linkInvoicePaymentIntent(pi);
-        await recordDispute(pi, Number(dispute.amount ?? 0), disputeFeeCents(dispute));
+        await linkInvoicePaymentIntent(paymentIntent);
+        await recordDispute(paymentIntent, Number(dispute.amount ?? 0), disputeFeeCents(dispute));
       }
       break;
     }
@@ -289,7 +296,43 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
   }
   // Marqué APRÈS succès : un échec transitoire laisse Stripe réessayer.
   if (res.ok) await markProcessed(event.id);
+  logReversalDecision(event, res);
   return res;
+}
+
+/**
+ * Montants d'un remboursement (cumul `amount_refunded` sur le montant de la
+ * charge) ou d'un litige (montant contesté, sans total : tout est repris). null
+ * pour un autre événement.
+ */
+function reversalAmounts(event: Stripe.Event): { paymentIntent: string | null; amountCents: number | null; totalCents: number | null } | null {
+  if (event.type === "charge.refunded") {
+    const charge = event.data.object as Stripe.Charge;
+    return {
+      paymentIntent: idOf(charge.payment_intent),
+      amountCents: Number(charge.amount_refunded ?? charge.amount ?? 0) || null,
+      totalCents: Number(charge.amount ?? 0) || null,
+    };
+  }
+  if (event.type === "charge.dispute.created") {
+    const dispute = event.data.object as Stripe.Dispute;
+    return { paymentIntent: idOf(dispute.payment_intent), amountCents: Number(dispute.amount ?? 0) || null, totalCents: null };
+  }
+  return null;
+}
+
+/**
+ * Une ligne par décision de reprise (ignoré, doublon, retiré, mémorisé…), avec
+ * les montants. Identifiants Stripe du paiement et de l'événement seulement :
+ * ni utilisateur, ni client, ni e-mail.
+ */
+function logReversalDecision(event: Stripe.Event, res: HandleResult): void {
+  const amounts = reversalAmounts(event);
+  if (!amounts) return;
+  log("info", "stripe.reversal_decision", {
+    type: event.type, eventId: event.id, ...amounts, decision: res.action,
+    retiredCenti: res.retiredCenti ?? 0, debtCenti: res.debtCenti ?? 0, suspended: !!res.suspended, currentPeriod: res.currentPeriod ?? null,
+  });
 }
 
 /** Ids `promo_…` dont une session à 0 € crédite quand même le pack (STRIPE_FREE_PROMO_CODES, séparés par des virgules). */
@@ -412,7 +455,7 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: strin
       const take = amount > 0 ? Math.min(centi, creditsCentiForAmount(amount)) : centi;
       const reversed = await addTransaction(userId, -take, `${orphan.why} (reçu avant l'achat)`, `stripe:reversal:${pi}`);
       await authRun(`DELETE FROM stripe_orphan_reversals WHERE payment_intent = ?`, pi);
-      log("info", "stripe.orphan_reversal_applied", { paymentIntent: pi, user: userId });
+      log("info", "stripe.orphan_reversal_applied", { paymentIntent: pi, retiredCenti: reversed ? take : 0 });
       return { ok: true, action: "pack-credited-then-reversed", credited, reversed };
     }
   }
@@ -429,10 +472,10 @@ async function onInvoicePaid(invoice: Stripe.Invoice, lookup: StripeLookup | und
   const keys = await resolveLookupKeys(inv.lines, [inv.metadata as Meta, subMeta], lookup);
   const cortexPrice = keys.some((k) => CORTEX_LOOKUP_KEYS.has(k));
   if (!cortexPrice && !metaCortex(inv.metadata as Meta, subMeta)) {
-    // Ni prix Cortex ni métadonnée Cortex : seul un client/abonnement DÉJÀ lié chez nous rattache la facture.
-    const linked = (invCustomer && (await resolveUserByCustomer(invCustomer)))
-      || (await authGet<{ user_id: string }>(`SELECT user_id FROM subscriptions WHERE subscription_id = ?`, subId))?.user_id;
-    if (!linked) return foreign("invoice", inv.id, `prix ${(keys.length ? keys : priceIdsOf(inv.lines)).join(",") || "?"} inconnu, client non lié`);
+    // Ni prix Cortex ni métadonnée Cortex : seul l'abonnement Cortex DÉJÀ lié chez nous rattache la facture.
+    // Pas le client : sur le compte partagé, un abonné Cortex peut aussi être facturé pour autre chose.
+    const linked = (await authGet<{ user_id: string }>(`SELECT user_id FROM subscriptions WHERE subscription_id = ?`, subId))?.user_id;
+    if (!linked) return foreign("invoice", inv.id, `prix ${(keys.length ? keys : priceIdsOf(inv.lines)).join(",") || "?"} inconnu, abonnement non lié`);
   }
   // Idempotence par FACTURE : une facture n'attribue qu'un mois, quel que soit l'événement qui la porte.
   if (inv.id && (await authGet<{ invoice_id: string }>(`SELECT invoice_id FROM stripe_invoices WHERE invoice_id = ?`, inv.id))) {
@@ -448,7 +491,16 @@ async function onInvoicePaid(invoice: Stripe.Invoice, lookup: StripeLookup | und
   if (!periodEnd) throw new Error(`invoice.paid : période introuvable (sub ${subId}) — retry`);
   const lineKeys = await resolveLookupKeys({ data: [subscriptionLine(inv)].filter(Boolean) }, [], lookup);
   const plan = [...lineKeys, ...keys].find((k) => CORTEX_LOOKUP_KEYS.has(k)) ?? keys[0] ?? null;
+  const previous = await getSubscription(userId);
   const granted = await grantSubscriptionMonth({ userId, customerId, subscriptionId: subId, plan, periodEnd, periodStart: invoicePeriodStart(inv), at });
+  if (granted && previous?.period_end && previous.period_end !== periodEnd) {
+    // La période précédente est close : ce qu'il en reste expire sans servir (non reportable).
+    // Retenu sur SA facture : un remboursement ultérieur de celle-ci l'absorbe avant toute dette.
+    await authRun(
+      `UPDATE stripe_invoices SET unused_centi = ? WHERE user_id = ? AND period_end = ? AND unused_centi IS NULL`,
+      Math.max(0, Number(previous.remaining) || 0), userId, previous.period_end,
+    );
+  }
   if (inv.id) {
     // Montant encaissé : compté même si la facture n'accorde rien (période plus ancienne), l'argent est là.
     const paid = Number((inv as { amount_paid?: number }).amount_paid ?? 0);
@@ -476,10 +528,9 @@ async function subscriptionIsCortex(sub: Stripe.Subscription, lookup?: StripeLoo
   if (metaCortex(sub.metadata as Meta)) return false;
   const keys = await resolveLookupKeys(sub.items, [], lookup);
   if (keys.some((k) => CORTEX_LOOKUP_KEYS.has(k))) return false;
-  const customerId = idOf(sub.customer);
-  const linked = (customerId && (await resolveUserByCustomer(customerId)))
-    || (await authGet<{ user_id: string }>(`SELECT user_id FROM subscriptions WHERE subscription_id = ?`, sub.id))?.user_id;
-  return linked ? false : `prix ${(keys.length ? keys : priceIdsOf(sub.items)).join(",") || "?"} inconnu, client non lié`;
+  // L'abonnement Cortex déjà lié, pas le seul client : sur le compte partagé, un abonné peut en avoir un autre.
+  const linked = (await authGet<{ user_id: string }>(`SELECT user_id FROM subscriptions WHERE subscription_id = ?`, sub.id))?.user_id;
+  return linked ? false : `prix ${(keys.length ? keys : priceIdsOf(sub.items)).join(",") || "?"} inconnu, abonnement non lié`;
 }
 
 async function onSubscriptionUpdated(sub: Stripe.Subscription, lookup: StripeLookup | undefined, at: string | null): Promise<HandleResult> {
@@ -499,6 +550,17 @@ async function onSubscriptionUpdated(sub: Stripe.Subscription, lookup: StripeLoo
 async function onSubscriptionDeleted(sub: Stripe.Subscription, lookup: StripeLookup | undefined, at: string | null): Promise<HandleResult> {
   const why = await subscriptionIsCortex(sub, lookup);
   if (why) return foreign("subscription", sub.id, why);
+  // Le solde du mois va être effacé sans avoir servi : retenu sur la facture de la période,
+  // qu'un remboursement ultérieur absorbe avant toute dette (résilier puis rembourser).
+  const row = await authGet<{ user_id: string; remaining: number; period_end: string | null }>(
+    `SELECT user_id, remaining, period_end FROM subscriptions WHERE subscription_id = ?`, sub.id,
+  );
+  if (row?.period_end) {
+    await authRun(
+      `UPDATE stripe_invoices SET unused_centi = ? WHERE user_id = ? AND period_end = ? AND unused_centi IS NULL`,
+      Math.max(0, Number(row.remaining) || 0), row.user_id, row.period_end,
+    );
+  }
   await setSubscriptionStatus({ subscriptionId: sub.id, customerId: idOf(sub.customer), status: "canceled", at, cancelAtPeriodEnd: false, clearRemaining: true });
   log("info", "billing.subscription_deleted", { subscription: sub.id });
   return { ok: true, action: "subscription-deleted" };
@@ -511,15 +573,75 @@ type ReversalContext = {
   totalCents?: number | null;
   metadata?: Record<string, string> | null;
   customerId?: string | null;
-  email?: string | null;
   lookup?: StripeLookup;
   livemode?: boolean;
 };
 
-async function userByEmail(email: string | null | undefined): Promise<string | null> {
-  if (!email) return null;
-  const r = await authGet<{ id: string }>(`SELECT id FROM users WHERE lower(email) = lower(?)`, email.trim());
-  return r?.id ?? null;
+type InvoiceRow = {
+  invoice_id: string; user_id: string; granted_centi: number; period_end: string | null;
+  reversed_centi: number | null; unused_centi: number | null;
+};
+const INVOICE_COLS = `invoice_id, user_id, granted_centi, period_end, reversed_centi, unused_centi`;
+
+/**
+ * Reprise d'une facture d'ABONNEMENT (remboursement, litige), pour la seule
+ * période de CETTE facture et au prorata de la part remboursée : cumul Stripe
+ * `amount_refunded` / montant de la charge (un litige reprend tout). La part
+ * reprise absorbe d'abord ce qui reste des crédits de cette période : le solde
+ * du mois si c'est la facture en cours, le reliquat expiré inutilisé si elle est
+ * plus ancienne (les crédits du mois en cours, payé, n'y sont pour rien). Seul
+ * le consommé passe en dette dans le ledger. Seul un remboursement TOTAL de la
+ * facture en cours suspend l'abonnement, jusqu'à la prochaine facture payée.
+ * Cumul gardé sur la facture (`reversed_centi`), sous verrou du paiement : un
+ * rejeu, ou un autre événement au même cumul, ne reprend jamais deux fois.
+ * Hors période en règle (échéance passée, impayé), on lit le compteur de la
+ * ligne, qui garde ce qui n'a pas été dépensé.
+ */
+async function reverseInvoice(invoice: InvoiceRow, paymentIntent: string, why: string, ref: string, ctx: ReversalContext): Promise<HandleResult> {
+  const granted = Math.max(0, Number(invoice.granted_centi) || 0);
+  const partial = !!(ctx.amountCents && ctx.totalCents && ctx.amountCents < ctx.totalCents);
+  const target = partial ? Math.min(granted, Math.ceil((granted * ctx.amountCents!) / ctx.totalCents!)) : granted;
+  const sub = await getSubscription(invoice.user_id);
+  const current = !!sub && !!invoice.period_end && sub.period_end === invoice.period_end;
+  // Recharge paresseuse de l'annuel posée AVANT la transaction : `remaining` vaut alors le solde utilisable.
+  if (current && subscriptionLive(sub)) await subscriptionCreditsCenti(invoice.user_id);
+  await ensureLedgerUnit();
+  const step = await authTx(async (tx) => {
+    if (dbDriverName() === "postgres") await tx.run(`SELECT pg_advisory_xact_lock(hashtext(?))`, `reversal:${paymentIntent}`);
+    const row = await tx.get<{ reversed_centi: number | null; unused_centi: number | null }>(
+      `SELECT reversed_centi, unused_centi FROM stripe_invoices WHERE invoice_id = ?`, invoice.invoice_id,
+    );
+    const already = Math.max(0, Number(row?.reversed_centi) || 0);
+    const take = target - already;
+    if (take <= 0) return null;
+    const suspend = current && !partial && granted > 0;
+    // Ce qui reste de la période : le solde du mois (facture en cours), puis le reliquat
+    // retenu à sa clôture (renouvellement, résiliation). Seul le reste est du consommé.
+    const fromBalance = current ? await withdrawSubscriptionInTx(tx, invoice.user_id, take, suspend) : 0;
+    const unused = Math.max(0, Number(row?.unused_centi) || 0);
+    const fromUnused = Math.min(take - fromBalance, unused);
+    const debt = take - fromBalance - fromUnused;
+    await tx.run(
+      `UPDATE stripe_invoices SET reversed_centi = ?, unused_centi = ? WHERE invoice_id = ?`,
+      target, row?.unused_centi == null ? null : unused - fromUnused, invoice.invoice_id,
+    );
+    // Ligne du ledger à chaque étape (dette, 0 si tout a été absorbé) : trace lisible, et ref
+    // `stripe:reversal:<pi>` une fois tout repris d'un coup (les autres chemins s'y arrêtent).
+    await tx.run(
+      `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, created_at) VALUES (?,?,?,?,'centi',?)`,
+      invoice.user_id, debt > 0 ? -debt : 0, partial ? `${why} (abonnement, partiel : ${ctx.amountCents}/${ctx.totalCents} centimes)` : `${why} (abonnement)`,
+      already === 0 && target === granted ? ref : `${ref}:${target}`, nowStr(),
+    );
+    return { take, debt, suspend };
+  }).catch((e) => {
+    if (/unique|constraint/i.test(String(e))) return null; // course perdue sur le ref : l'autre a repris
+    throw e;
+  });
+  if (!step) return { ok: true, action: granted > 0 ? "reversal-duplicate" : "invoice-nothing-granted", reversed: false };
+  return {
+    ok: true, action: "invoice-reversed", reversed: true,
+    retiredCenti: step.take, debtCenti: step.debt, suspended: step.suspend, currentPeriod: current,
+  };
 }
 
 /** Reprise des crédits d'un paiement remboursé/contesté — pack OU facture d'abonnement, une seule fois. */
@@ -542,7 +664,7 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string,
       target = Math.min(full, Math.ceil((full / 100) * (ctx.amountCents / ctx.totalCents)) * 100);
     }
     await ensureLedgerUnit();
-    const reversed = await authTx(async (tx) => {
+    const retired = await authTx(async (tx) => {
       if (dbDriverName() === "postgres") await tx.run(`SELECT pg_advisory_xact_lock(hashtext(?))`, `reversal:${paymentIntent}`);
       const done = await tx.get<{ total: number | string | null }>(
         `SELECT coalesce(sum(-(${DELTA_CENTI})), 0) total FROM credit_transactions WHERE user_id = ? AND ref LIKE ?`,
@@ -550,25 +672,23 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string,
       );
       const already = Number(done?.total ?? 0);
       const take = target - already;
-      if (take <= 0) return false;
+      if (take <= 0) return 0;
       const stepRef = already === 0 && take === full ? ref : `${ref}:${target}`;
       await tx.run(
         `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, created_at) VALUES (?,?,?,?,'centi',?)`,
         purchase.user_id, -take, target < full ? `${why} (partiel : ${ctx.amountCents}/${ctx.totalCents} centimes)` : why, stepRef, nowStr(),
       );
-      return true;
+      return take;
     }).catch((e) => {
-      if (/unique|constraint/i.test(String(e))) return false; // course perdue sur le ref : l'autre a repris
+      if (/unique|constraint/i.test(String(e))) return 0; // course perdue sur le ref : l'autre a repris
       throw e;
     });
-    return { ok: true, action: reversed ? "pack-reversed" : "reversal-duplicate", reversed };
+    return { ok: true, action: retired ? "pack-reversed" : "reversal-duplicate", reversed: retired > 0, retiredCenti: retired };
   }
   if (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, ref)) {
     return { ok: true, action: "reversal-duplicate", reversed: false };
   }
-  let invoice = await authGet<{ user_id: string; granted_centi: number }>(
-    `SELECT user_id, granted_centi FROM stripe_invoices WHERE payment_intent = ?`, paymentIntent,
-  );
+  let invoice = await authGet<InvoiceRow>(`SELECT ${INVOICE_COLS} FROM stripe_invoices WHERE payment_intent = ?`, paymentIntent);
   if (!invoice && ctx.lookup?.invoiceByPaymentIntent) {
     // Format récent : la charge ne porte plus `invoice` et la facture n'avait pas
     // forcément de payment_intent à l'arrivée → Stripe sait quelle facture ce paiement règle.
@@ -576,28 +696,11 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string,
     try { found = await ctx.lookup.invoiceByPaymentIntent(paymentIntent); }
     catch (e) { throw new Error(`Stripe injoignable pour retrouver la facture de ${paymentIntent} — retry (${String(e).slice(0, 120)})`); }
     if (found) {
-      invoice = await authGet<{ user_id: string; granted_centi: number }>(
-        `SELECT user_id, granted_centi FROM stripe_invoices WHERE invoice_id = ?`, found.invoiceId,
-      );
+      invoice = await authGet<InvoiceRow>(`SELECT ${INVOICE_COLS} FROM stripe_invoices WHERE invoice_id = ?`, found.invoiceId);
       if (invoice) await authRun(`UPDATE stripe_invoices SET payment_intent = coalesce(payment_intent, ?) WHERE invoice_id = ?`, paymentIntent, found.invoiceId);
     }
   }
-  if (invoice) {
-    // Ce qui reste du mois est retiré de l'abonnement ; ce qui a déjà été
-    // consommé devient une dette dans le ledger (solde négatif → tout est bloqué).
-    // …et l'abonnement est SUSPENDU (plus de fenêtre, plus de crédit) jusqu'à la prochaine facture payée.
-    // Hors période en règle (échéance passée, impayé), les crédits utilisables valent 0 :
-    // tout le mois passerait pour consommé et la dette entamerait les crédits achetés.
-    // Le compteur de la ligne garde, lui, ce qui n'a pas été dépensé.
-    const sub = await getSubscription(invoice.user_id);
-    const remaining = subscriptionLive(sub) ? await subscriptionCreditsCenti(invoice.user_id) : Math.max(0, Number(sub?.remaining) || 0);
-    const granted = Number(invoice.granted_centi);
-    const take = Math.min(remaining, granted);
-    // Une facture qui n'a rien accordé (période plus ancienne que celle en cours) ne suspend rien.
-    if (sub && granted > 0) await suspendSubscription(invoice.user_id);
-    const reversed = await addTransaction(invoice.user_id, -(granted - take), `${why} (abonnement)`, ref);
-    return { ok: true, action: "invoice-reversed", reversed };
-  }
+  if (invoice) return reverseInvoice(invoice, paymentIntent, why, ref, ctx);
   // Compte partagé : au-delà des correspondances EXACTES ci-dessus (achat, facture
   // connus chez nous), une charge d'une autre application n'est pas à nous.
   if (metaForeign(ctx.metadata)) return foreign("charge", paymentIntent, `app=${ctx.metadata?.app}`);
@@ -613,31 +716,32 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string,
         session.id, paymentIntent, session.userId, centi, ctx.livemode ? 1 : 0, nowStr(),
       );
       const reversed = await addTransaction(session.userId, -centi, `${why} (achat retrouvé via Stripe)`, ref);
-      return { ok: true, action: "pack-reversed", reversed };
+      return { ok: true, action: "pack-reversed", reversed, retiredCenti: reversed ? centi : 0 };
     }
   }
-  // 4) Métadonnées portées par la charge (payment_intent_data) ; 5) client / e-mail connu. Montant → crédits au prix du pack.
+  // Compte partagé avec l'activité freelance (Payment Links, sans métadonnée) : une
+  // charge qui ne porte pas la marque Cortex n'est pas à nous, même si son client ou
+  // son e-mail correspond à un compte Cortex. Ni reprise, ni mémorisation.
+  if (!metaCortex(ctx.metadata)) return foreign("charge", paymentIntent, "aucune métadonnée Cortex, paiement inconnu");
+  // 4) Métadonnées portées par la charge (payment_intent_data) ; 5) client déjà lié. Montant → crédits au prix du pack.
+  // Jamais l'e-mail : il ne prouve pas que le paiement est un achat Cortex.
   const metaUser = ctx.metadata?.cortexUserId ?? null;
   const metaCredits = Number(ctx.metadata?.credits ?? 0);
-  const userId = metaUser
-    ?? (ctx.customerId ? await resolveUserByCustomer(ctx.customerId) : null)
-    ?? (await userByEmail(ctx.email));
+  const userId = metaUser ?? (ctx.customerId ? await resolveUserByCustomer(ctx.customerId) : null);
   if (userId && ctx.amountCents && ctx.amountCents > 0) {
     // Remboursement partiel : au prorata du montant ; sinon, crédits des métadonnées si le montant couvre tout.
     const centi = creditsCentiForAmount(ctx.amountCents);
     const capped = metaCredits > 0 ? Math.min(centi, toCenti(metaCredits)) : centi;
     const reversed = await addTransaction(userId, -capped, `${why} (${ctx.amountCents} centimes → crédits)`, ref);
-    log("warn", "stripe.reversal_by_amount", { paymentIntent, user: userId, amountCents: ctx.amountCents, centi: capped });
-    return { ok: true, action: "pack-reversed-by-amount", reversed };
+    log("warn", "stripe.reversal_by_amount", { paymentIntent, amountCents: ctx.amountCents, centi: capped });
+    return { ok: true, action: "pack-reversed-by-amount", reversed, retiredCenti: reversed ? capped : 0 };
   }
-  // 6) Rien d'exploitable. Charge SANS aucune métadonnée Cortex → autre application
-  // (ou paiement hors de notre boutique) : ignorée, sans trace. Charge Cortex → on
-  // MÉMORISE (appliquée si l'achat arrive ensuite) et on le dit fort.
-  if (!metaCortex(ctx.metadata)) return foreign("charge", paymentIntent, "aucune métadonnée Cortex, paiement inconnu");
+  // 6) Rien d'exploitable sur une charge Cortex → on MÉMORISE (appliquée si l'achat
+  // arrive ensuite) et on le dit fort.
   await authRun(
     `INSERT INTO stripe_orphan_reversals (payment_intent, why, amount_cents, created_at) VALUES (?,?,?,?) ON CONFLICT (payment_intent) DO NOTHING`,
     paymentIntent, why, ctx.amountCents ?? null, nowStr(),
   );
-  log("error", "stripe.reversal_unresolved", { paymentIntent, why, amountCents: ctx.amountCents ?? null, customer: ctx.customerId ?? null });
+  log("error", "stripe.reversal_unresolved", { paymentIntent, why, amountCents: ctx.amountCents ?? null });
   return { ok: true, action: "reversal-orphaned", reversed: false, error: `paiement inconnu (${paymentIntent}) : reprise mémorisée, à contrôler dans Stripe` };
 }

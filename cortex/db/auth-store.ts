@@ -202,7 +202,9 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       user_id TEXT NOT NULL,
       granted_centi INTEGER NOT NULL,
       period_end TEXT,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      reversed_centi INTEGER NOT NULL DEFAULT 0,
+      unused_centi INTEGER
     )`,
     `CREATE INDEX IF NOT EXISTS stripe_invoices_pi_idx ON stripe_invoices (payment_intent)`,
     // Argent RÉELLEMENT encaissé par paiement (pack ou facture), en unités mineures
@@ -542,7 +544,9 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       user_id text NOT NULL,
       granted_centi integer NOT NULL,
       period_end text,
-      created_at text NOT NULL
+      created_at text NOT NULL,
+      reversed_centi integer NOT NULL DEFAULT 0,
+      unused_centi integer
     )`,
     `CREATE INDEX IF NOT EXISTS stripe_invoices_pi_idx ON public.stripe_invoices (payment_intent)`,
     `CREATE TABLE IF NOT EXISTS public.stripe_payments (
@@ -770,6 +774,13 @@ const GEN_EVENTS_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
 const STRIPE_PURCHASE_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "livemode", sqlite: "INTEGER", pg: "integer" },
 ];
+const STRIPE_INVOICE_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
+  // Reprise CUMULÉE de la facture (remboursements partiels successifs, litige), en centièmes :
+  // un rejeu ou un nouvel événement au même cumul ne reprend jamais deux fois.
+  { name: "reversed_centi", sqlite: "INTEGER NOT NULL DEFAULT 0", pg: "integer NOT NULL DEFAULT 0" },
+  // Crédits de la période restés inutilisés à son terme (posé au renouvellement ; NULL : inconnu).
+  { name: "unused_centi", sqlite: "INTEGER", pg: "integer" },
+];
 /** Base déjà convertie ×100 (marqueur posé) AVANT l'arrivée de la colonne `unit` : ses lignes sont en centièmes. */
 const UNIT_BACKFILL_SQL = `UPDATE credit_transactions SET unit = 'centi' WHERE unit IS NULL AND EXISTS (SELECT 1 FROM app_meta WHERE key = 'credits_unit')`;
 
@@ -810,6 +821,12 @@ function sqliteAuth(): Database.Database {
     );
     for (const c of STRIPE_PURCHASE_ADDED) {
       if (!havePurchases.has(c.name)) _sqliteAuth.exec(`ALTER TABLE stripe_purchases ADD COLUMN ${c.name} ${c.sqlite}`);
+    }
+    const haveInvoices = new Set(
+      (_sqliteAuth.prepare("PRAGMA table_info(stripe_invoices)").all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    for (const c of STRIPE_INVOICE_ADDED) {
+      if (!haveInvoices.has(c.name)) _sqliteAuth.exec(`ALTER TABLE stripe_invoices ADD COLUMN ${c.name} ${c.sqlite}`);
     }
     ensureCreditRefUniqueSqlite(_sqliteAuth);
     const haveTerms = new Set(
@@ -881,6 +898,9 @@ async function pgExec(): Promise<{
     }
     for (const c of STRIPE_PURCHASE_ADDED) {
       await authPgQuery(`ALTER TABLE public.stripe_purchases ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
+    }
+    for (const c of STRIPE_INVOICE_ADDED) {
+      await authPgQuery(`ALTER TABLE public.stripe_invoices ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
     }
     for (const c of TERMS_ADDED) {
       await authPgQuery(`ALTER TABLE public.terms_acceptances ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
