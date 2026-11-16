@@ -7,7 +7,7 @@ import { currentCourse } from "@/db/client";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
 import { examsDir } from "@/lib/paths";
-import { formatContextFor, type DocumentRule, type Language } from "@/lib/exam-format";
+import { durationOf, formatContextFor, type DocumentRule, type Language } from "@/lib/exam-format";
 
 const LATEX_DIR = path.join(process.cwd(), "latex");
 
@@ -248,7 +248,7 @@ function genericCoverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string):
   const w = coverWords(f.language);
   // Durée du format (annale, déclaration) seulement : la spec du générateur et la fiche du cours
   // portent un 180 par défaut (audit 3, P1-3). Inconnue → la consigne n'est pas écrite.
-  const dur = f.durationMin || null;
+  const dur = durationOf(f);
   const examCodeTex = texEscape(c.examCode).replace(/-/g, "--");
   const uniLines = c.universityLines.map(texEscape).join(String.raw`\\ `);
   const profsTex = c.profs.map(texEscape).join(", ");
