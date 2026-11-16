@@ -3,6 +3,8 @@ import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
 import crypto from "node:crypto";
 import { authGet, authRun } from "@/db/auth-store";
+import { log } from "@/lib/metrics";
+import { REVIEW_PROVIDER_ID, authorizeReview, reviewLoginActive, reviewLoginDeclared } from "@/lib/review-login";
 
 /**
  * PROVIDERS D'AUTHENTIFICATION, dérivés de l'environnement.
@@ -13,6 +15,9 @@ import { authGet, authRun } from "@/db/auth-store";
  *    configuré. Actif par défaut, c'était une seconde voie d'inscription et une
  *    source de spam (n'importe qui pouvait déclencher des envois vers n'importe
  *    quelle adresse).
+ *  - Mot de passe du compte démo des relecteurs d'annuaires : seulement si
+ *    REVIEW_LOGIN_EMAIL et REVIEW_LOGIN_PASSWORD_HASH sont posées
+ *    (lib/review-login). Jamais une voie d'inscription : un seul compte.
  */
 /**
  * Le lien magique n'est proposé que si (1) il est ACTIVÉ explicitement
@@ -46,6 +51,11 @@ export function personaKeyAccepted(given: string | undefined, env: Partial<NodeJ
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+/** Connexion relecteur ouverte (page /login) ? Fermée aussi après REVIEW_LOGIN_UNTIL. */
+export function reviewLoginConfigured(env: Partial<NodeJS.ProcessEnv> = process.env): boolean {
+  return reviewLoginActive(env);
+}
+
 export function authProviders(env: Partial<NodeJS.ProcessEnv> = process.env): Provider[] {
   const providers: Provider[] = [];
   if (e2eTestLoginConfigured(env)) {
@@ -66,6 +76,18 @@ export function authProviders(env: Partial<NodeJS.ProcessEnv> = process.env): Pr
         }
         return user;
       },
+    }));
+  }
+  if ((env.REVIEW_LOGIN_EMAIL || env.REVIEW_LOGIN_PASSWORD_HASH) && !reviewLoginDeclared(env)) {
+    // Fermée faute d'une valeur valable : dit au démarrage, pas découvert par le relecteur.
+    log("error", "auth.review_login_misconfigured", { email: !!env.REVIEW_LOGIN_EMAIL, hash: !!env.REVIEW_LOGIN_PASSWORD_HASH });
+  }
+  if (reviewLoginDeclared(env)) {
+    providers.push(Credentials({
+      id: REVIEW_PROVIDER_ID,
+      name: "Accès relecteur",
+      credentials: { email: { label: "E-mail", type: "email" }, password: { label: "Mot de passe", type: "password" } },
+      authorize: (credentials, request) => authorizeReview(credentials, request, env),
     }));
   }
   if (emailLoginConfigured(env)) {
