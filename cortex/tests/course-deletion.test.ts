@@ -174,3 +174,15 @@ test("4b-5 : refus explicite des cours historiques (par id) et de tout cours du 
   assert.equal(!r2.ok && r2.status, 409);
   assert.match(!r2.ok ? r2.error : "", /propriétaire/i);
 });
+
+test("4b-6 : allowOwner contourne le refus propriétaire mais pas les cours historiques (scripts/delete-course.ts)", async () => {
+  const { reloadCourses, courseExists } = await import("../lib/courses");
+  const { deleteCourseWithData } = await import("../lib/course-deletion");
+  await ownedCourse("perso-owner-2", "owner"); await reloadCourses();
+  const historique = await deleteCourseWithData("owner", "ml", { allowOwner: true });
+  assert.equal(historique.ok, false);
+  assert.ok(!historique.ok && [404, 409].includes(historique.status));
+  const r = await deleteCourseWithData("owner", "perso-owner-2", { allowOwner: true });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(courseExists("perso-owner-2"), false);
+});
