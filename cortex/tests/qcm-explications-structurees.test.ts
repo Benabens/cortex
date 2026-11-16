@@ -450,3 +450,17 @@ test("interrupteur QCM_STRUCTURED_EXPLANATIONS=0 : schéma et explications d'ava
   assert.ok(run.rows.every((r) => !/\((?:juste|faux)\) — /.test(r.explanation)), "paragraphe libre, pas d'assemblage");
   assert.equal(run.calls.justify, 0);
 });
+
+test("options au même début : chacune est citée à partir de ce qui la distingue", async () => {
+  const { rationaleFromModel, assembleExplanation } = await import("../lib/qcm-rationale");
+  const options = [
+    "L'équipe doit évaluer la conception du module dans son contexte réel et ses effets d'ensemble.",
+    "L'équipe doit évaluer la conception du module selon ses seuls risques commerciaux.",
+    "L'équipe doit évaluer la conception du module hors de tout contexte d'usage.",
+  ];
+  const r = rationaleFromModel({ key: "k", distractors: [{ option_index: 1, why_wrong: "a" }, { option_index: 2, why_wrong: "b" }] }, 3, [0], "fr")!;
+  const lines = assembleExplanation(r, options, [0]).split("\n");
+  assert.match(lines[0], /^A \(juste\) — « …dans son contexte réel/);
+  assert.match(lines[1], /^B \(faux\) — « …selon ses seuls risques commerciaux » : a$/);
+  assert.match(lines[2], /^C \(faux\) — « …hors de tout contexte d'usage » : b$/);
+});
