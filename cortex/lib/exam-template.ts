@@ -1,5 +1,6 @@
-import type { CourseConfig } from "@/lib/courses";
-import { LANGUAGES, type DocumentRule, type Language } from "@/lib/exam-format";
+import { currentCourse } from "@/db/client";
+import { getCourse, type CourseConfig } from "@/lib/courses";
+import { formatContextFor, LANGUAGES, type DocumentRule, type Language } from "@/lib/exam-format";
 import { texEscape } from "@/lib/tex-escape";
 
 /**
@@ -14,6 +15,16 @@ export type ExamTemplate = "epfl" | "neutral";
 
 export function examTemplate(c: Pick<CourseConfig, "university">): ExamTemplate {
   return c.university.trim().toUpperCase() === "EPFL" ? "epfl" : "neutral";
+}
+
+/** Gabarit du cours courant. */
+export function courseTemplate(): ExamTemplate {
+  return examTemplate(getCourse(currentCourse()));
+}
+
+/** Libellés dans la langue de l'examen du cours courant. */
+export function courseWords(): CoverWords {
+  return coverWords(formatContextFor(currentCourse()).language);
 }
 
 /** Couleur des corrigés : le rouge historique pour l'EPFL, le bleu foncé de neutralChrome hors EPFL. */

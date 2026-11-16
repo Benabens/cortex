@@ -2,6 +2,8 @@ import { currentCourse } from "@/db/client";
 import { getCourse } from "@/lib/courses";
 import type { ExamQuestion } from "@/lib/exam";
 import { compileExamPdf, qrText, texEscape } from "@/lib/exam-latex";
+import { formatContextFor } from "@/lib/exam-format";
+import { courseTemplate, courseWords, localDate, neutralChrome, neutralCoverTex, pointsText, solutionColor } from "@/lib/exam-template";
 import { assertTexSafe } from "@/lib/tex-guard";
 import { getFormatProfile } from "@/lib/format";
 import { examsDir } from "@/lib/paths";
@@ -74,9 +76,27 @@ export function coverHeader(dateLabel: string, durationMin: number): string[] {
   ];
 }
 
+/**
+ * Durée d'un examen QCM ou à questions composées. Hors EPFL, le format du cours (annales, puis
+ * déclaration) passe avant le profil détecté ; le gabarit de l'EPFL garde son calcul (`epfl`).
+ */
+export function examDuration(detected: number | undefined, epfl: number): number {
+  if (courseTemplate() === "epfl") return epfl;
+  return formatContextFor(currentCourse()).durationMin ?? detected ?? getCourse(currentCourse()).durationMin;
+}
+
 /** Page de garde course-aware (style CS-233 : lecturer, SCIPER, convention SCQ/MCQ détectée). */
 async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts: number, durationMin: number): Promise<string> {
   const fmt = await getFormatProfile();
+  if (courseTemplate() === "neutral") {
+    const w = courseWords();
+    const parts = [nQcm ? w.qcmCount(nQcm) : "", nOpen ? w.openCount(nOpen) : ""].filter(Boolean).join(` ${w.and} `);
+    const convention = fmt?.scq_vs_mcq_convention ? esc(fmt.scq_vs_mcq_convention) : w.qcmConvention;
+    return neutralCoverTex({
+      course: getCourse(currentCourse()), w, dateTex: localDate(dateLabel, w), durationMin, totalPts,
+      instructions: [w.contains(parts, totalPts), ...(nQcm ? [`${convention} ${w.tick}`] : []), w.onSheet],
+    });
+  }
   const convention = fmt?.scq_vs_mcq_convention
     ? esc(fmt.scq_vs_mcq_convention)
     : "There are single-choice questions (SCQ) where exactly one box is correct, and multiple-choice questions (MCQ) where one or more boxes are correct.";
@@ -95,12 +115,55 @@ async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts
   ].filter(Boolean).join("\n");
 }
 
-function renderQcmItem(q: QcmItem, n: number, points: number, withKey: boolean): string {
-  const tag = q.type === "mcq" ? "MCQ" : "SCQ";
+/** Libellés d'un QCM : le texte historique de l'EPFL (byte-identique) ou ceux du gabarit neutre. */
+type QcmLabels = {
+  question: (n: number) => string;
+  tag: (type: QcmItem["type"], points: number) => string;
+  misconception: string;
+  solution: string;
+  openQuestion: (n: number) => string;
+  points: (n: number) => string;
+  openSolution: string;
+  color: string;
+  qcmPart: (withOpen: boolean) => string;
+  openPart: (withQcm: boolean) => string;
+};
+
+const EPFL_LABELS: QcmLabels = {
+  question: (n) => `Question ${n}.`,
+  tag: (type, points) => `${type === "mcq" ? "MCQ" : "SCQ"}, ${points} pt${points > 1 ? "s" : ""}`,
+  misconception: "idée fausse : ",
+  solution: "Solution :",
+  openQuestion: (n) => `Open question ${n}`,
+  points: (n) => `${n} points`,
+  openSolution: "Solution.",
+  color: solutionColor("epfl"),
+  qcmPart: (withOpen) => (withOpen ? "First part \\quad-- Multiple-choice and single-choice questions" : "Multiple-choice and single-choice questions"),
+  openPart: (withQcm) => (withQcm ? "Second part \\quad-- Open questions" : "Open questions"),
+};
+
+function qcmLabels(): QcmLabels {
+  if (courseTemplate() === "epfl") return EPFL_LABELS;
+  const w = courseWords();
+  return {
+    question: (n) => `${w.question} ${n}.`,
+    tag: (type, points) => `${type === "mcq" ? w.multiple : w.single}, ${pointsText(points, w)}`,
+    misconception: `${w.misconception} -- `,
+    solution: `${w.solution}.`,
+    openQuestion: (n) => `${w.openQuestion} ${n}`,
+    points: (n) => pointsText(n, w),
+    openSolution: `${w.solution}.`,
+    color: solutionColor("neutral"),
+    qcmPart: (withOpen) => (withOpen ? `${w.part} 1 \\quad-- ${w.qcmPart}` : w.qcmPart),
+    openPart: (withQcm) => (withQcm ? `${w.part} 2 \\quad-- ${w.openPart}` : w.openPart),
+  };
+}
+
+function renderQcmItem(q: QcmItem, n: number, points: number, withKey: boolean, L: QcmLabels): string {
   const opts = q.options.map((o, k) => {
     const correct = withKey && (q.correct ?? []).includes(k);
     const box = correct ? String.raw`\ding{51}` : BOX; // ✓ dans le corrigé
-    const mis = withKey && !correct && q.misconceptions?.[k] ? ` \\hfill{\\footnotesize\\itshape\\color{gray} idée fausse : ${esc(q.misconceptions[k])}}` : "";
+    const mis = withKey && !correct && q.misconceptions?.[k] ? ` \\hfill{\\footnotesize\\itshape\\color{gray} ${L.misconception}${esc(q.misconceptions[k])}}` : "";
     return String.raw`\noindent${box}~\textbf{${LETTER[k]}.}~${esc(o)}${mis}\par\smallskip`;
   }).join("\n");
   // figure rendue (PNG déjà dans examsDir, à côté du .tex compilé).
@@ -108,11 +171,11 @@ function renderQcmItem(q: QcmItem, n: number, points: number, withKey: boolean):
     ? String.raw`\begin{center}\includegraphics[width=0.52\linewidth]{${q.figureFile}}\end{center}`
     : "";
   return [
-    String.raw`\needspace{5\baselineskip}\par\medskip\noindent\textbf{Question ${n}.}\quad{\footnotesize[${tag}, ${points} pt${points > 1 ? "s" : ""}]}\quad\textbf{\textit{${esc(q.topic)}}}\par\smallskip`,
+    String.raw`\needspace{5\baselineskip}\par\medskip\noindent\textbf{${L.question(n)}}\quad{\footnotesize[${L.tag(q.type, points)}]}\quad\textbf{\textit{${esc(q.topic)}}}\par\smallskip`,
     fig,
     `\\noindent ${esc(q.stem).replace(/^\((SCQ|MCQ)\)\s*/i, "")}\\par\\smallskip`,
     opts,
-    withKey && q.explanation ? String.raw`\par{\footnotesize\color{epflred}\textbf{Solution :} ${esc(q.explanation).replace(/\n+/g, String.raw`\newline `)}}\par` : "",
+    withKey && q.explanation ? String.raw`\par{\footnotesize\color{${L.color}}\textbf{${L.solution}} ${esc(q.explanation).replace(/\n+/g, String.raw`\newline `)}}\par` : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -130,16 +193,16 @@ export function alignTikzNodes(tex: string): string {
   return tex.replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, inNode);
 }
 
-function renderOpen(q: ExamQuestion, n: number, withSol: boolean, defaultPts = 15): string {
+function renderOpen(q: ExamQuestion, n: number, withSol: boolean, defaultPts: number, L: QcmLabels): string {
   // les énoncés ouverts (architecte ML) sont déjà en LaTeX (corps) — on les insère tels quels,
   // précédés d'un en-tête. Si pas de \subq dedans, on ajoute un espace de réponse.
   const stmt = alignTikzNodes((q.statement_tex ?? "").trim());
   const hasSpace = /\\rulelines|\\diskgrid|\\statesim|\\packetgrid|\\forwardgrid/.test(stmt);
   return [
-    String.raw`\clearpage\needspace{4\baselineskip}{\large\textbf{Open question ${n} \quad-- ${esc(q.concept)} \hfill [${q.points ?? defaultPts} points]}}\par\vspace{4pt}\hrule\vspace{8pt}`,
+    String.raw`\clearpage\needspace{4\baselineskip}{\large\textbf{${L.openQuestion(n)} \quad-- ${esc(q.concept)} \hfill [${L.points(q.points ?? defaultPts)}]}}\par\vspace{4pt}\hrule\vspace{8pt}`,
     stmt,
     hasSpace ? "" : String.raw`\vspace{4pt}\rulelines{8}`,
-    withSol ? String.raw`\par\medskip{\textbf{\color{epflred}Solution.}}\par\smallskip` + "\n" + alignTikzNodes(q.solution_tex ?? "") : "",
+    withSol ? String.raw`\par\medskip{\textbf{\color{${L.color}}${L.openSolution}}}\par\smallskip` + "\n" + alignTikzNodes(q.solution_tex ?? "") : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -169,6 +232,11 @@ export function examDocument(body: string[], dateLabel: string): string {
   // pas esc : esc remplace tout caractère au-delà de Latin-1 par une espace (« Dvořák »).
   const code = texEscape(c.examCode).replace(/-/g, "--");
   const profsTex = c.profs.map(texEscape).join(", ");
+  // Hors EPFL : en-tête et pied neutres, date dans la langue de l'examen.
+  if (courseTemplate() === "neutral") {
+    const w = courseWords();
+    return [preamble, neutralChrome(c, w), String.raw`\newcommand{\FOOTDATE}{${localDate(dateLabel, w)}}`, String.raw`\begin{document}`, ...body, String.raw`\end{document}`].join("\n");
+  }
   const footOverride = [
     String.raw`\fancyhead[L]{}`,
     `\\fancyhead[R]{\\qrcode[height=1.25cm]{${qrText(c.examCode)}-FINAL-EXAM}}`,
@@ -184,8 +252,9 @@ export function examDocument(body: string[], dateLabel: string): string {
   ].join("\n");
 }
 
-/** Copie le logo de la page de garde à côté des .tex compilés. */
+/** Copie le logo de la page de garde à côté des .tex compilés (gabarit de l'EPFL seulement). */
 export function copyExamLogo(): void {
+  if (courseTemplate() === "neutral") return;
   for (const ext of ["pdf", "png"]) {
     const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
     if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
@@ -196,7 +265,7 @@ export function copyExamLogo(): void {
 export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSolutions: boolean): Promise<string> {
 
   const fmt = await getFormatProfile();
-  const dur = fmt?.duration_min ?? 180;
+  const dur = examDuration(fmt?.duration_min, fmt?.duration_min ?? 180);
   // Barème CALÉ sur le format détecté : chaque type (scq/mcq) vaut ses points_each réels
   // (ex. CS-233 : scq 3 pts, mcq 4 pts), les ouvertes leurs ~17 pts. Repli 2/15 si non détecté.
   const ptsOf = (t: "scq" | "mcq"): number => {
@@ -214,20 +283,19 @@ export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, inc
   // garde « First/Second part » ; sinon on n'affiche que la partie présente.
   const hasQcm = data.items.length > 0;
   const hasOpen = data.open.length > 0;
-  const qcmLabel = hasOpen ? "First part \\quad-- Multiple-choice and single-choice questions" : "Multiple-choice and single-choice questions";
-  const openLabel = hasQcm ? "Second part \\quad-- Open questions" : "Open questions";
+  const L = qcmLabels();
   const firstPart = hasQcm
     ? [
-        String.raw`\par\noindent{\large\textbf{${qcmLabel} \hfill [${qcmTotal} points]}}\par\vspace{3pt}\hrule\vspace{8pt}`,
-        ...data.items.map((q, i) => renderQcmItem(q, i + 1, itemPts[i], includeSolutions)),
+        String.raw`\par\noindent{\large\textbf{${L.qcmPart(hasOpen)} \hfill [${L.points(qcmTotal)}]}}\par\vspace{3pt}\hrule\vspace{8pt}`,
+        ...data.items.map((q, i) => renderQcmItem(q, i + 1, itemPts[i], includeSolutions, L)),
       ].join("\n")
     : "";
 
   const secondPart = hasOpen
     ? [
         hasQcm ? String.raw`\clearpage` : "",
-        String.raw`\par\noindent{\large\textbf{${openLabel} \hfill [${openPts} points]}}\par\vspace{3pt}\hrule`,
-        ...data.open.map((q, i) => renderOpen(q, i + 1, includeSolutions, openDefault)),
+        String.raw`\par\noindent{\large\textbf{${L.openPart(hasQcm)} \hfill [${L.points(openPts)}]}}\par\vspace{3pt}\hrule`,
+        ...data.open.map((q, i) => renderOpen(q, i + 1, includeSolutions, openDefault, L)),
       ].filter(Boolean).join("\n")
     : "";
 
