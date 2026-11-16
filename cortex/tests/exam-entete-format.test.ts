@@ -61,7 +61,7 @@ async function render(course: string): Promise<string> {
 
 test("la garde suit le format déclaré du cours : durée, documents et langue", async () => {
   const tex = await render(courseFr);
-  assert.match(tex, /Vous disposez de 60 minutes/);
+  assert.match(tex, /Durée :\}? 60 minutes/);
   assert.match(tex, /Aucun document n'est autorisé/);
   assert.match(tex, /CONSIGNES/);
   assert.match(tex, /2 exercices indépendants/);
@@ -71,7 +71,7 @@ test("la garde suit le format déclaré du cours : durée, documents et langue",
 
 test("sans règle déclarée sur les documents, la garde n'en invente pas ; la langue du cours décide", async () => {
   const tex = await render(courseEn);
-  assert.match(tex, /You have 90 minutes/);
+  assert.match(tex, /Duration:\}? 90 minutes/);
   assert.doesNotMatch(tex, /Personal notes|closed book|No documents/);
 });
 
@@ -91,7 +91,7 @@ test("les sous-questions portent le numéro de leur question, énoncé et corrig
   const doc = tex.slice(tex.indexOf("\n" + String.raw`\begin{document}` + "\n"));
   const q2 = doc.slice(doc.indexOf(String.raw`\examq{2}`), doc.indexOf("Corrigé"));
   assert.deepEqual([...q2.matchAll(/\\subq\{([\d.]+)\}/g)].map((m) => m[1]), ["2.1", "2.2"]);
-  const sol2 = doc.slice(doc.indexOf("Question 2 :"));
+  const sol2 = doc.slice(doc.indexOf(String.raw`Question 2 \quad--`));
   assert.deepEqual([...sol2.matchAll(/\\subq\{([\d.]+)\}/g)].map((m) => m[1]), ["2.1", "2.2"]);
   const q1 = doc.slice(doc.indexOf(String.raw`\examq{1}`), doc.indexOf(String.raw`\examq{2}`));
   assert.deepEqual([...q1.matchAll(/\\subq\{([\d.]+)\}/g)].map((m) => m[1]), ["1.1", "1.2"]);
