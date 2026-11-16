@@ -126,6 +126,19 @@ const WORDS: Record<string, { right: string; rights: string; wrong: string; open
   nl: { right: "juist", rights: "juist", wrong: "fout", open: "“", close: "”" },
 };
 
+/**
+ * Ce qui distingue chaque option des autres : des options qui commencent par les mêmes mots
+ * (« L'équipe doit évaluer la conception… » quatre fois, banc HUM-285 du 16/11) sont citées à
+ * partir du premier mot qui diffère, précédé de « … ».
+ */
+function distinctive(options: string[]): string[] {
+  const words = options.map((o) => o.trim().split(/\s+/));
+  if (words.length < 2) return options;
+  let common = 0;
+  while (words.every((w) => common < w.length - 1 && w[common].toLowerCase() === words[0][common].toLowerCase())) common++;
+  return common >= 3 ? words.map((w) => `…${w.slice(common).join(" ")}`) : options;
+}
+
 /** Début d'une option, coupé sur un mot : de quoi la reconnaître sans la recopier. */
 function head(option: string, max = 70): string {
   const s = option.trim().replace(/\s+/g, " ");
@@ -142,7 +155,8 @@ function head(option: string, max = 70): string {
  */
 export function assembleExplanation(r: QcmRationale, options: string[], correct: number[], lang = r.lang ?? "fr"): string {
   const w = WORDS[lang] ?? WORDS.en;
-  const quote = (k: number) => `${w.open}${head(options[k] ?? "")}${w.close}`;
+  const shown = distinctive(options);
+  const quote = (k: number) => `${w.open}${head(shown[k] ?? "")}${w.close}`;
   const keys = correct.filter((k) => k >= 0 && k < options.length).sort((a, b) => a - b);
   const sep = lang === "fr" ? " : " : ": ";
   const lines = [
