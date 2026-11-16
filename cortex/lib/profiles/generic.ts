@@ -186,7 +186,8 @@ async function coverageLabels(n: number): Promise<string[]> {
  */
 export function makeGenericProfile(courseId: string, archetypes: Archetype[], opts: { adaptive?: boolean } = {}): CourseProfile {
   const c = () => getCourse(courseId);
-  const matiere = () => `${c().examCode} ${c().examName} (${c().university})`;
+  // Sans code ni établissement, « l'équipe enseignante de  Data Structures () » laissait le modèle combler le trou.
+  const matiere = () => [c().examCode, c().examName].map((x) => x.trim()).filter(Boolean).join(" ") + (c().university.trim() ? ` (${c().university.trim()})` : "");
   // Profil CURATÉ (algo, ml) : ses archétypes, et l'anglais de ses annales — inchangés.
   // Profil ADAPTATIF (cours créé sans profil) : langue et archétypes selon le format résolu.
   const adaptive = !!opts.adaptive;
@@ -280,7 +281,7 @@ export function makeGenericProfile(courseId: string, archetypes: Archetype[], op
   const kindLabel = () => ({ problems: "exercices", humanities: "questions", essay: "sujets d'essai", oral: "questions d'oral" })[style()];
 
   return {
-    directivesBlock: () => genericDirectivesBlock(c().examCode, c().examName, language(), style()),
+    directivesBlock: () => genericDirectivesBlock(matiere(), language(), style()),
     visionBlock: genericVisionBlock, // images-étalon rendues depuis les vrais examens du cours
     staffNotesText: genericStaffNotes,
     refImageFor: genericRefImageFor,
@@ -311,14 +312,14 @@ export function makeGenericProfile(courseId: string, archetypes: Archetype[], op
       `PRINCIPE : chaque sujet = ${principle()}`,
     ],
     exerciseLead: (target: string, a: Archetype, pts: number, _refImage: string | null) => [
-      `Tu rédiges UN SEUL ${style() === "problems" ? `exercice de Final ${c().examCode}` : `sujet d'examen de ${c().examCode}`} EN ${LANG()}, qualité examen, CIBLÉ sur : « ${target} ».`,
+      `Tu rédiges UN SEUL ${style() === "problems" ? `exercice d'examen de ${matiere()}` : `sujet d'examen de ${matiere()}`} EN ${LANG()}, qualité examen, CIBLÉ sur : « ${target} ».`,
       `Archétype à RÉ-INSTANCIER (ne recopie pas) : ${a.concept}. Construction : ${a.structure} Grille de réponse : ${a.grid}. Figure : ${a.figure}. PIÈGE à inclure : ${a.trap}.`,
       style() === "problems"
         ? `Barème ~${pts} points. UN artefact concret creusé par des sous-questions \\subq{N.M}{...}{pts} en escalier, NOMBRES NON RONDS.`
         : `Barème ~${pts} points. ${principle()}`,
     ],
     regenLead: (category: string | undefined, concept: string, points: number | undefined, diagnostic: string, _refImage: string | null) => [
-      `Régénère UN SEUL ${style() === "problems" ? `exercice de Final ${c().examCode}` : `sujet d'examen de ${c().examCode}`} EN ${LANG()}, catégorie « ${category} », concept proche de « ${concept} », barème ${points} points.`,
+      `Régénère UN SEUL ${style() === "problems" ? `exercice d'examen de ${matiere()}` : `sujet d'examen de ${matiere()}`} EN ${LANG()}, catégorie « ${category} », concept proche de « ${concept} », barème ${points} points.`,
       `La version précédente a ce PROBLÈME à corriger : ${diagnostic}`,
       `Applique le PRINCIPE : ${principle()}`,
     ],
