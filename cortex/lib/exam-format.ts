@@ -403,8 +403,11 @@ function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Disc
     return { ...base, kind: "composite", questionCount: count, openCount: null, blocks };
   }
   if (!p.has_mcq) return { ...base, kind: "exercises", questionCount: null, openCount: null };
-  const questionCount = Math.min(20, Math.max(8, qcmShare || 12));
-  const openCount = Math.min(3, Math.max(0, types.find((t) => t.type === "open")?.approx_count ?? 2));
+  // Le nombre de l'annale, borné à QCM_MAX seulement (audit 3, P0-4 : une annale de 40 QCM
+  // sortait en 20, un quiz de 5 en 8) ; inconnu → le défaut du plan.
+  const questionCount = qcmShare > 0 ? clamp(qcmShare, 1, QCM_MAX) : null;
+  // Aucune question ouverte inventée : une annale sans type « open » donne un examen 100 % QCM.
+  const openCount = Math.min(3, Math.max(0, types.find((t) => t.type === "open")?.approx_count ?? 0));
   const kind = openCount > 0 ? "mixed" : "qcm";
   const answerMode = annalesAnswerMode(p) ?? declared ?? "mixed";
   return { ...base, kind, questionCount, openCount, answerMode, summary: withAnswerMode(base.summary, answerMode) };
