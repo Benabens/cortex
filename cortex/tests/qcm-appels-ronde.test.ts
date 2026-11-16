@@ -246,6 +246,16 @@ test("échéance atteinte : les QCM validés sont livrés sans audits tardifs", 
   assert.equal(calls.dedup, 0);
 });
 
+test("échéance atteinte pendant la vérification : aucune réparation ni régénération résiduelle ne démarre", async () => {
+  contestedEvery = 0; trivialEvery = 1;
+  const { r, steps } = await exam(4, 1);
+  assert.equal(r.count, 4);
+  assert.ok(steps.some((s) => /Échéance proche/.test(s)), steps.join("\n"));
+  assert.equal(calls.design, 1, "aucune régénération après l'échéance");
+  assert.equal(calls.repair, 0, "aucune réparation après l'échéance");
+  assert.equal(calls.verify, 1, "seule la vérification déjà nécessaire à l'acquis termine");
+});
+
 test("audit final : une clé jugée fausse est remplacée, la livraison reste 15/15", async (t) => {
   contestedEvery = 0;
   // Le premier audit écarte deux questions déjà vérifiées ; le ré-audit les confirme absentes.

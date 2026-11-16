@@ -1600,8 +1600,9 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // Arrêt anticipé : une clé confirmée sans rejet ni distracteur signalé est livrable.
     const defects: Weak[] = designed.flatMap((d, b) => d.items.map((it, i) => ({ b, it, i, why: defectOf(it) })))
       .filter((w): w is Weak => !!w.why);
-    const fixable = defects.filter((w) => w.it.verified === 1 && !w.it.rejected && !!w.it.trivialDistractors?.length);
-    const weak = defects.filter((w) => !fixable.includes(w));
+    const stopAfterVerification = shouldFinish() && finishNow();
+    const fixable = stopAfterVerification ? [] : defects.filter((w) => w.it.verified === 1 && !w.it.rejected && !!w.it.trivialDistractors?.length);
+    const weak = stopAfterVerification ? [] : defects.filter((w) => !fixable.includes(w));
     const [repaired, regenerated] = await Promise.all([
       Promise.all(chunked(fixable).map((c) => repairWithinBudget(c.map((w) => w.it)).catch((e) => {
         step(`Remplacement des distracteurs ignoré (${(e as Error).message.slice(0, 50)})`, 0);
@@ -1610,13 +1611,14 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
       regenerateGrouped(group, weak),
     ]);
     const changed = fixable.map((w, k) => (repaired[k] && repaired[k] !== w.it ? repaired[k] : null));
-    await verifyGrouped([...changed.filter((n): n is QcmItem => !!n), ...regenerated.values()]);
-    const persistent = fixable.filter((w, k) => {
+    const stopAfterRepair = shouldFinish() && finishNow();
+    if (!stopAfterRepair) await verifyGrouped([...changed.filter((n): n is QcmItem => !!n), ...regenerated.values()]);
+    const persistent = stopAfterRepair ? [] : fixable.filter((w, k) => {
       const n = changed[k];
       return !!n && n.verified === 1 && !n.rejected && !!n.trivialDistractors?.length;
     });
-    const regeneratedPersistent = await regenerateGrouped(group, persistent);
-    await verifyGrouped([...regeneratedPersistent.values()]);
+    const regeneratedPersistent = shouldFinish() && finishNow() ? new Map<Weak, QcmItem>() : await regenerateGrouped(group, persistent);
+    if (!(shouldFinish() && finishNow())) await verifyGrouped([...regeneratedPersistent.values()]);
     fixable.forEach((w, k) => {
       const n = changed[k];
       // Rendu tel quel (remplacement échoué) : l'item d'origine suit la règle commune.
