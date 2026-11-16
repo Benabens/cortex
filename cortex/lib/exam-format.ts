@@ -20,6 +20,7 @@ import { updateCourseRow } from "@/db/courses-store";
 import { DEFAULT_COURSE, getCourse, reloadCourses } from "@/lib/courses";
 import { sanitizeCorpus } from "@/lib/prompt-safety";
 import { excludedSourceIds, materialLabel } from "@/lib/source-scope";
+import { EXAM_HAS_TEXT } from "@/lib/sources";
 import { languageName } from "@/lib/profiles/generic-directives";
 import type { FormatProfile } from "@/lib/format";
 
@@ -236,11 +237,13 @@ export function annalesAnswerMode(p: Pick<FormatProfile, "question_types">): Ans
 
 /** Mots-outils discriminants par langue (les plus fréquents, peu partagés). */
 const STOPWORDS: Record<Language, string[]> = {
-  fr: ["le", "les", "des", "est", "et", "une", "dans", "pour", "pas", "sur", "qui", "du", "au", "aux", "cette", "sont", "avec", "nous", "vous", "ce", "ces"],
+  fr: ["le", "la", "les", "des", "est", "et", "une", "dans", "pour", "pas", "sur", "qui", "du", "au", "aux", "cette", "sont", "avec", "nous", "vous", "ce", "ces", "leurs"],
   en: ["the", "and", "of", "to", "is", "in", "that", "for", "are", "with", "this", "be", "on", "as", "by", "which", "an", "it", "what", "each"],
   de: ["der", "die", "das", "und", "ist", "nicht", "mit", "sich", "den", "ein", "eine", "zu", "von", "auf", "für", "dem", "wird"],
   it: ["il", "gli", "di", "che", "è", "per", "non", "con", "sono", "della", "nel", "alla", "delle", "questo", "anche"],
-  es: ["el", "los", "las", "y", "por", "para", "del", "se", "como", "más", "es", "una", "su", "lo", "este"],
+  // « la », « que », « en » : parmi les plus fréquents de l'espagnol ; sans eux, « de » et « en »
+  // donnaient le néerlandais (audit ingestion du 16/11/2026).
+  es: ["el", "la", "los", "las", "y", "que", "en", "por", "para", "del", "se", "como", "más", "es", "una", "su", "lo", "este", "al", "sus", "entre", "pero", "cuando", "también", "hay", "está"],
   pt: ["o", "os", "as", "e", "do", "da", "dos", "das", "em", "não", "uma", "para", "com", "que", "ao"],
   nl: ["de", "het", "een", "en", "van", "is", "niet", "met", "op", "voor", "zijn", "dat", "die", "wordt"],
 };
@@ -353,7 +356,7 @@ export async function readStoredProfile(): Promise<StoredProfile | null> {
 /** Annales ingérées (finals, partiels) : leur nombre, et un échantillon de leur texte pour la langue. */
 async function annales(cap = 8000): Promise<{ count: number; text: string }> {
   try {
-    const n = await q.get<{ n: number }>(`SELECT count(*) n FROM sources WHERE type IN ('final','midterm')`);
+    const n = await q.get<{ n: number }>(`SELECT count(*) n FROM sources WHERE type IN ('final','midterm') AND ${EXAM_HAS_TEXT}`);
     const count = Number(n?.n ?? 0);
     if (!count) return { count, text: "" };
     const rows = await q.all<{ text: string }>(
@@ -443,7 +446,7 @@ const MEMO_MAX = 500;
  * Ordre de confiance : annales (format détecté) > format déclaré > annales au
  * format pas encore détecté (comportement historique : exercices) > questions
  * d'exemple officielles > infos de cours > inconnu. La langue est celle du
- * cours, sauf langue déclarée ou annales écrites dans une autre langue.
+ * cours, sauf langue déclarée, ou annales (à défaut, supports) écrits dans une autre langue.
  */
 export async function resolveExamFormat(): Promise<ExamFormat> {
   const courseId = currentCourse();
@@ -451,12 +454,19 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
   const declared = course.examFormat;
   const past = await annales();
   const hasAnnales = past.count > 0;
+  // Langue : déclarée > celle des annales > celle du cours > celle des supports > anglais. Un cours
+  // créé sans langue (« ») garde celle qu'on détecte. Le « fr » posé par défaut à la création avant
+  // cette détection ne vaut pas déclaration : les supports passent devant (un cours espagnol créé
+  // sans langue sortait ses examens en français).
+  const sample = await corpusSample();
   const fromAnnales = past.text ? detectLanguage(past.text) : null;
-  // Cours créé sans langue : celle des annales, sinon celle des supports, gardée sur le cours.
-  if (!course.language && fromAnnales) await keepCourseLanguage(courseId, fromAnnales);
-  const language = declared?.language || fromAnnales || course.language || await detectedCourseLanguage(courseId);
+  const fromMaterials = detectLanguage(sample);
+  const detected = fromAnnales || fromMaterials;
+  if (!course.language && detected) await keepCourseLanguage(courseId, detected);
+  const courseLanguage = course.language && course.language !== "fr" ? course.language : null;
+  const language = declared?.language || fromAnnales || courseLanguage || fromMaterials || course.language || FALLBACK_LANGUAGE;
   const stored = await readStoredProfile();
-  const discipline = inferDiscipline({ code: course.examCode, sample: await corpusSample() });
+  const discipline = inferDiscipline({ code: course.examCode, sample });
   const basisOf = (p: StoredProfile) => p.basis ?? "annales";
 
   let format: ExamFormat;
@@ -497,18 +507,9 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
 const FALLBACK_LANGUAGE = "en";
 
 /**
- * Langue d'un cours créé sans langue, sans annale qui la dise : celle de ses supports, gardée
- * sur le cours dès qu'elle est sûre (l'interface la montre, les rendus synchrones la lisent),
- * sinon l'anglais en attendant des supports. Avant le 16/11/2026 : le français, toujours.
+ * Enregistre la langue détectée d'un cours créé sans langue (l'interface la montre, les rendus
+ * synchrones la lisent) ; un échec ne bloque pas la génération.
  */
-async function detectedCourseLanguage(courseId: string): Promise<string> {
-  const detected = detectLanguage(await corpusSample());
-  if (!detected) return FALLBACK_LANGUAGE;
-  await keepCourseLanguage(courseId, detected);
-  return detected;
-}
-
-/** Enregistre la langue détectée d'un cours qui n'en avait pas ; un échec ne bloque pas la génération. */
 async function keepCourseLanguage(courseId: string, language: string): Promise<void> {
   await updateCourseRow(courseId, getCourse(courseId).ownerUserId, { language })
     .then(() => reloadCourses())

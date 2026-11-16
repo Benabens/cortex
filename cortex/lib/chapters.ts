@@ -6,10 +6,24 @@
  * des premières pages et 12 questions sur 12 dans le chapitre 1. L'ingestion le découpe donc en un
  * support par chapitre — seulement sur des titres numérotés qui se suivent (1, 2, 3…), en
  * majuscule initiale, assez espacés pour qu'une table des matières ou un renvoi ne découpe rien.
+ * Mots-clés en français, anglais, allemand, espagnol, italien, portugais et néerlandais ; à défaut,
+ * un texte à vraies lignes (DOCX, Markdown) se découpe sur « 1 Introduction » / « 2. Méthodes » en
+ * début de ligne (audit ingestion du 16/11/2026 : « Kapitel 1 », « Tema 1 » restaient en un bloc).
  */
 
-const KEYWORDS = "Chapitre|Chapter|CHAPITRE|CHAPTER|Partie|PARTIE|Part|PART|Leçon|Lesson|Lecture|Séance|Semaine|Week|Module|Unité|Unit";
+const KEYWORDS = [
+  "Chapitre|Chapter|CHAPITRE|CHAPTER|Partie|PARTIE|Part|PART|Leçon|Lesson|Lecture|Séance|Semaine|Week|Module|Unité|Unit",
+  "Kapitel|KAPITEL|Vorlesung|Teil|TEIL|Lektion|Einheit",
+  "Capítulo|CAPÍTULO|Capitulo|Tema|TEMA|Lección|Leccion|Unidad|Clase",
+  "Capitolo|CAPITOLO|Lezione|Aula|AULA|Unidade",
+  "Hoofdstuk|HOOFDSTUK|College|Deel",
+].join("|");
 const HEADING = new RegExp(`(?:^|[^\\p{L}])(${KEYWORDS})\\s+(\\d{1,3})(?![\\d\\p{L}])`, "gu");
+/**
+ * « 1 Introduction », « 2. Méthodes » : un numéro en DÉBUT DE LIGNE suivi d'un mot à majuscule.
+ * Pas pour les pages d'un PDF : leur texte est aplati, et le motif y prendrait les numéros de page.
+ */
+const NUMBERED = /^()(\d{1,3})\.?[ \t]+(?=\p{Lu})/gmu;
 /** Pas de découpage sous ce volume (≈ 3 pages) ni sous trois chapitres. */
 const MIN_CHARS = 10_000;
 const MIN_CHAPTERS = 3;
@@ -19,10 +33,16 @@ const MIN_GAP = 1_000;
 export type ChapterPart = { title: string; text: string };
 
 /** Début (index) et titre de chaque chapitre, ou null si le texte n'en a pas assez. */
-function headings(text: string): { at: number; title: string }[] | null {
+function headings(text: string, lines = false): { at: number; title: string }[] | null {
   if (text.length < MIN_CHARS) return null;
-  const hits = [...text.matchAll(HEADING)].map((m) => {
-    const at = m.index! + m[0].indexOf(m[1]);
+  return sequence(text, HEADING) ?? (lines ? sequence(text, NUMBERED) : null);
+}
+
+/** Les titres numérotés 1, 2, 3… qui se suivent, assez espacés, pour un motif donné. */
+function sequence(text: string, pattern: RegExp): { at: number; title: string }[] | null {
+  const hits = [...text.matchAll(pattern)].map((m) => {
+    // Groupe 1 : le mot-clé (vide pour un titre seulement numéroté) ; groupe 2 : le numéro.
+    const at = m.index! + m[0].indexOf(m[1] || m[2]);
     return { at, n: Number(m[2]), lineStart: at === 0 || text[at - 1] === "\n" };
   });
   const found: { at: number; title: string }[] = [];
@@ -51,7 +71,7 @@ function titleAt(text: string, at: number): string {
 
 /** Un texte (DOCX, Markdown, texte) découpé en chapitres, ou null s'il ne s'y prête pas. */
 export function splitChapters(text: string): ChapterPart[] | null {
-  const hs = headings(text);
+  const hs = headings(text, true);
   if (!hs) return null;
   return hs.map((h, k) => ({ title: h.title, text: text.slice(k === 0 ? 0 : h.at, hs[k + 1]?.at ?? text.length).trim() }));
 }
