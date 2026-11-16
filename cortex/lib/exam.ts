@@ -962,7 +962,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
     step(`⚠ Examen livré PARTIEL : ${allQuestions.length}/${qTotal} questions (${missing} ignorée(s) après timeout/échec), relance pour compléter`, 90);
   const spec: ExamSpec = {
     title: `${c.examCode} ${c.examName} : ${c.examKind}`,
-    duration_min: c.durationMin,
+    duration_min: c.durationMin ?? undefined,
     questions: allQuestions,
   };
   // fusion des rapports par lot (résultats ré-indexés sur l'ordre fusionné)

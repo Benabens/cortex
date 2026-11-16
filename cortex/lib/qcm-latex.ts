@@ -3,6 +3,7 @@ import { getCourse } from "@/lib/courses";
 import type { ExamQuestion } from "@/lib/exam";
 import { compileExamPdf, qrText, texEscape } from "@/lib/exam-latex";
 import { assertTexSafe } from "@/lib/tex-guard";
+import { examDurationMin } from "@/lib/exam-format";
 import { getFormatProfile } from "@/lib/format";
 import { examsDir } from "@/lib/paths";
 import type { QcmItem } from "@/lib/qcm";
@@ -57,8 +58,8 @@ export function footDate(dateLabel: string): string {
   return `${months[+m[2] - 1]} ${+m[3]}, ${m[1]}`;
 }
 
-/** En-tête de la page de garde : logo, enseignant, cours, date et durée, anonymisation, nom et SCIPER. */
-export function coverHeader(dateLabel: string, durationMin: number): string[] {
+/** En-tête de la page de garde : logo, enseignant, cours, date et durée (si connue), anonymisation, nom et SCIPER. */
+export function coverHeader(dateLabel: string, durationMin: number | null): string[] {
   const c = getCourse(currentCourse());
   const code = texEscape(c.examCode).replace(/-/g, "--");
   const lecturer = c.profs[0] ?? "";
@@ -67,7 +68,7 @@ export function coverHeader(dateLabel: string, durationMin: number): string[] {
     String.raw`\noindent\begin{minipage}[t]{0.62\textwidth}\vspace{0pt}\epfllogo[26]\par\smallskip\footnotesize`,
     lecturer ? `Lecturer: ${texEscape(lecturer)}\\\\` : "",
     `\\textbf{${code}: ${texEscape(c.examName)}}\\\\`,
-    `${footDate(dateLabel)}\\quad Duration: ${durationMin} minutes`,
+    durationMin ? `${footDate(dateLabel)}\\quad Duration: ${durationMin} minutes` : footDate(dateLabel),
     String.raw`\end{minipage}\hfill\begin{minipage}[t]{0.32\textwidth}\vspace{0pt}\raggedleft\footnotesize Anonymisation:\\ \textbf{\#0000}\end{minipage}`,
     String.raw`\vspace{6pt}\noindent\rule{\textwidth}{1pt}`,
     String.raw`\vspace{6pt}\noindent{\Large\textbf{Student One}}\hfill SCIPER: \textbf{111111}`,
@@ -75,7 +76,7 @@ export function coverHeader(dateLabel: string, durationMin: number): string[] {
 }
 
 /** Page de garde course-aware (style CS-233 : lecturer, SCIPER, convention SCQ/MCQ détectée). */
-async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts: number, durationMin: number): Promise<string> {
+async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts: number, durationMin: number | null): Promise<string> {
   const fmt = await getFormatProfile();
   const convention = fmt?.scq_vs_mcq_convention
     ? esc(fmt.scq_vs_mcq_convention)
@@ -86,7 +87,7 @@ async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts
     String.raw`\begin{enumerate}\setlength{\itemsep}{3pt}`,
     (() => {
       const parts = [nQcm ? `\\textbf{${nQcm} multiple/single-choice questions}` : "", nOpen ? `\\textbf{${nOpen} open questions}` : ""].filter(Boolean);
-      return `\\item This exam has ${parts.join(" and ")}, for a total of \\textbf{${totalPts} points}. You have ${durationMin} minutes.`;
+      return `\\item This exam has ${parts.join(" and ")}, for a total of \\textbf{${totalPts} points}.${durationMin ? ` You have ${durationMin} minutes.` : ""}`;
     })(),
     nQcm ? `\\item ${convention} Tick the box(es) \\fbox{$\\checkmark$} you believe are correct.` : "",
     String.raw`\item A one-page two-sided cheat sheet is allowed. No electronic device is permitted.`,
@@ -196,7 +197,7 @@ export function copyExamLogo(): void {
 export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSolutions: boolean): Promise<string> {
 
   const fmt = await getFormatProfile();
-  const dur = fmt?.duration_min ?? 180;
+  const dur = await examDurationMin();
   // Barème CALÉ sur le format détecté : chaque type (scq/mcq) vaut ses points_each réels
   // (ex. CS-233 : scq 3 pts, mcq 4 pts), les ouvertes leurs ~17 pts. Repli 2/15 si non détecté.
   const ptsOf = (t: "scq" | "mcq"): number => {
