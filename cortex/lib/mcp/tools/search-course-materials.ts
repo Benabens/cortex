@@ -5,7 +5,7 @@ import { sourceHeads } from "@/lib/source-scope";
 import { clip, htmlToText } from "../content";
 import { EXCERPT_CHARS, contextExcerpt, isOffProgram } from "../excerpts";
 import { courseArg, courseRef, courseRefOf } from "../schemas";
-import { defineTool } from "../tool";
+import { defineTool, READ_ONLY_HINTS } from "../tool";
 
 const output = z.object({
   course: courseRef,
@@ -29,6 +29,8 @@ export default defineTool({
     "material marked as out of the syllabus (hors programme) comes after the course material. " +
     "Use it to ground an explanation in the student's own material or to find where a topic appears in past exams. Read-only and free.",
   kind: "read",
+  annotations: READ_ONLY_HINTS,
+  userSummary: "Cherche un passage dans tes supports de cours.",
   input: z.object({
     course: courseArg,
     query: z.string().min(2).max(200).describe("Words to look for, e.g. \"valeurs propres\" or \"page table\"."),

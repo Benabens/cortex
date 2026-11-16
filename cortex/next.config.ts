@@ -24,6 +24,9 @@ const nextConfig: NextConfig = {
       { source: GLOBAL_HEADERS_SOURCE, headers: SECURITY_HEADERS },
       // Après la règle globale : pour un même en-tête, la dernière règle gagne.
       { source: CONSENT_PATH, headers: [{ key: "Content-Security-Policy", value: CSP_CONSENT }] },
+      // Icônes du connecteur MCP (lib/mcp/identity) : adresses publiées dans les annuaires et chez les
+      // clients, donc stables ; 30 jours de cache, sans « immutable » pour qu'un logo revu finisse par passer.
+      { source: "/mcp-icon:variant(.*)", headers: [{ key: "Cache-Control", value: "public, max-age=2592000, stale-while-revalidate=86400" }] },
     ];
   },
 };
