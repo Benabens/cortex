@@ -379,6 +379,23 @@ export const TABLES: TableSpec[] = [
       // moule (ADN) + figure {spec, file, truth} (JSON), additifs.
       { name: "mold", type: "text" },
       { name: "figure_json", type: "text" },
+      // fait testable du cours (course_facts.id) que la question teste, additif.
+      { name: "fact_id", type: "text" },
+    ],
+  },
+  {
+    // FAITS TESTABLES d'un cours (lib/qcm-facts) : une affirmation vérifiable du cours et son
+    // passage source, extraits une fois par cours (empreinte : notions + corpus) ; un QCM teste un
+    // fait et deux questions d'un examen ne partagent jamais un fait.
+    name: "course_facts",
+    cols: [
+      { name: "id", type: "text", pk: true },
+      { name: "seq", type: "int", nn: true },
+      { name: "notion", type: "text", nn: true },
+      { name: "statement", type: "text", nn: true },
+      { name: "passage", type: "text" },
+      { name: "fingerprint", type: "text", nn: true },
+      { name: "created_at", type: "text", def: now },
     ],
   },
   {
