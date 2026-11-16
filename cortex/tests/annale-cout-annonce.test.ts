@@ -26,25 +26,15 @@ const ENV: Record<string, string> = {
   MAX_ACTIVE_JOBS: "unlimited",
   MAX_GLOBAL_JOBS: "unlimited",
   STORAGE_MIN_FREE_PERCENT: "0",
+  CREDITS_COST_JSON: JSON.stringify({ format: 1 }),
 };
 
-/**
- * Sous Node 22, `tsx --test` charge tous les fichiers dans UN process : les variables posées en
- * tête de fichier par les autres suites (tarifs, propriétaire, plafonds) écrasent les nôtres.
- * Elles sont donc reposées juste avant nos tests, et les surcharges étrangères effacées.
- */
-const FOREIGN = ["CREDITS_COST_JSON", "AI_JOB_COST_USD_JSON", "CORTEX_OWNER_USER_ID", "CORTEX_OWNER_EMAIL", "SPEND_CAP_USD", "SPEND_CAP_BASE_USD", "SPEND_CAP_PER_USER_USD", "SPEND_CAP_PER_USER_FLOOR_USD", "AI_BUDGET_FREE_USD", "E2E_TEST_AUTH", "E2E_TEST_RUN"];
-function applyEnv(): void {
-  Object.assign(process.env, ENV);
-  for (const k of FOREIGN) delete process.env[k];
-}
-applyEnv();
+Object.assign(process.env, ENV);
 
 /** Arrêt gracieux simulé : un job lancé reste en file, différé — aucun vrai worker n'est démarré. */
 const drainForTests = () => { (globalThis as { __cortexDrain?: unknown }).__cortexDrain = { draining: true, workers: new Map(), handler: null, signals: 0 }; };
 
 before(async () => {
-  applyEnv();
   drainForTests();
   delete process.env.CORTEX_USER;
   const { ensureCoursesLoaded } = await import("../lib/courses");

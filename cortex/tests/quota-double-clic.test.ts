@@ -18,26 +18,17 @@ const ENV: Record<string, string> = {
   RATE_LIMIT_PER_USER_MIN: "unlimited",
   MAX_ACTIVE_JOBS: "unlimited",
   MAX_GLOBAL_JOBS: "unlimited",
+  // Tarif figé ici : le test porte sur le quota, pas sur le prix courant d'un QCM.
+  CREDITS_COST_JSON: JSON.stringify({ qcm: 1 }),
 };
 
-/**
- * Sous Node 22, `tsx --test` charge tous les fichiers dans UN process : les variables posées en
- * tête de fichier par les autres suites (tarifs, propriétaire, plafonds) écrasent les nôtres.
- * Elles sont donc reposées juste avant nos tests, et les surcharges étrangères effacées.
- */
-const FOREIGN = ["CREDITS_COST_JSON", "AI_JOB_COST_USD_JSON", "CORTEX_OWNER_USER_ID", "CORTEX_OWNER_EMAIL", "SPEND_CAP_USD", "SPEND_CAP_BASE_USD", "SPEND_CAP_PER_USER_USD", "SPEND_CAP_PER_USER_FLOOR_USD", "AI_BUDGET_FREE_USD", "E2E_TEST_AUTH", "E2E_TEST_RUN"];
-function applyEnv(): void {
-  Object.assign(process.env, ENV);
-  for (const k of FOREIGN) delete process.env[k];
-}
-applyEnv();
+Object.assign(process.env, ENV);
 
 import { runWithCourse } from "../db/client";
 import { runWithUser } from "../db/context";
 import { q } from "../db/q";
 
 before(async () => {
-  applyEnv();
   delete process.env.CORTEX_USER;
   const { ensureCoursesLoaded } = await import("../lib/courses");
   await ensureCoursesLoaded();
