@@ -173,7 +173,7 @@ test("client qui annonce l'élicitation sans l'afficher (claude.ai, Cowork) : de
     assert.equal(llmCalls, calls, "un devis n'appelle pas le modèle");
     const done = await call(c, "generate_drill", { course: "ALI-1", concept: `intégrales ${name}`, confirmation_token: quoteOf(quote).confirmation_token });
     assert.equal(status(done), "done", text(done));
-    assert.equal(await balance(ALICE), before - 10);
+    assert.equal(await balance(ALICE), before - 30);
     await c.close();
   }
 });
@@ -186,7 +186,7 @@ test("Claude Code (affiche l'élicitation) : la personne confirme dans le dialog
   const r = await call(c, "generate_drill", { course: "ALI-1", concept: "séries entières" });
   assert.equal(status(r), "done", text(r));
   assert.equal(dialogs.length, 1);
-  assert.equal(await balance(ALICE), before - 10);
+  assert.equal(await balance(ALICE), before - 30);
   await c.close();
 });
 
@@ -238,7 +238,7 @@ test("parallèle, flux par défaut : deux appels → deux devis, rien de lancé 
   const runs = await Promise.all([1, 2, 3].map(() => call(c, "generate_drill", { course: "ALI-1", concept: "probabilités", confirmation_token: tok })));
   assert.equal(runs.filter((r) => status(r) === "done").length, 1, "un jeton, une seule exécution");
   assert.equal(runs.filter((r) => errorCode(r) === "confirmation_invalid").length, 2);
-  assert.equal(await balance(ALICE), before - 10);
+  assert.equal(await balance(ALICE), before - 30);
   await c.close();
 });
 

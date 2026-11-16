@@ -21,7 +21,7 @@ process.env.CORTEX_DATA_DIR = tmp;
 // Budget IA lié au revenu (testé dans ai-budget.test.ts) : ici, les comptes sont financés par des crédits offerts.
 process.env.AI_BUDGET_MARGIN = "unlimited";
 process.env.BILLING_ENABLED = "1";
-process.env.SIGNUP_FREE_CREDITS = "1";
+process.env.SIGNUP_FREE_CREDITS = "3";
 process.env.DAILY_ASSIST_QUOTA = "unlimited";
 process.env.RATE_LIMIT_PER_USER_MIN = "unlimited";
 process.env.LLM_PROVIDER = "openai-compatible";
@@ -137,6 +137,6 @@ test("connecteur MCP : chaque cause a son message et son code, jamais « unknown
   for (const [err, msg] of cases) {
     await assert.rejects(runAssist("drill", async () => { throw err; }), (e: unknown) => e instanceof ToolError && e.code === "unavailable" && e.reason === (err as InstanceType<typeof LlmError>).code && msg.test(e.message) && !/529|overloaded_error|timed out/.test(e.message));
   }
-  // BAD_OUTPUT rendu, pannes du fournisseur débitées (lot 2) : 2 appels de 0,1 crédit restent dus.
-  assert.equal(await credits.getBalanceCenti("owner"), before - 20);
+  // BAD_OUTPUT rendu, pannes du fournisseur débitées (lot 2) : 2 appels de 0,3 crédit restent dus.
+  assert.equal(await credits.getBalanceCenti("owner"), before - 60);
 });

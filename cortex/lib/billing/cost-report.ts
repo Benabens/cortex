@@ -68,10 +68,10 @@ const r2 = (x: number) => Math.round(x * 100) / 100;
 /** Arrondi au dixième de crédit SUPÉRIEUR : un prix minimal ne s'arrondit jamais vers la perte. */
 const up1 = (x: number) => Math.ceil(Math.round(x * 1e6) / 1e5) / 10;
 
-/** Revenu net d'un crédit (USD) : CREDIT_NET_USD, défaut 0,47 $ (Pro annuel : 119 € pour 240 crédits, frais Stripe estimés). */
+/** Revenu net d'un crédit (USD) : CREDIT_NET_USD, défaut 0,64 $ (Pro annuel : 149 € pour 240 crédits, frais Stripe estimés). */
 export function creditNetUsd(env: Partial<NodeJS.ProcessEnv> = process.env): number {
   const n = Number(env.CREDIT_NET_USD);
-  return Number.isFinite(n) && n > 0 ? n : 0.47;
+  return Number.isFinite(n) && n > 0 ? n : 0.64;
 }
 
 /** Marge du prix conseillé : AI_BUDGET_MARGIN bornée à 1 comme le budget ; levée ou invalide → 0,6 (un prix se conseille toujours). */

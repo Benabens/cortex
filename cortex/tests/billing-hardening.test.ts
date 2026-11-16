@@ -3,7 +3,7 @@
  * confirmé par la review adversariale :
  *  1. INVARIANT DEV €0 : sans aucune env, aucune écriture de comptage.
  *  2. Ref de débit scopée par UTILISATEUR (ids de jobs séquentiels par tenant).
- *  3. Gate de crédits au VRAI coût du type (exam = 2, pas 1).
+ *  3. Gate de crédits au VRAI coût du type (exam = 5, pas le minimum).
  *  4. Isolation disque des artefacts par utilisateur (fuite/écrasement inter-users).
  */
 import assert from "node:assert/strict";
@@ -61,27 +61,27 @@ test("ref de débit scopée par user : deux tenants avec le même id de job sont
 
   await ctx.runWithUser("alice", () => reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: refA }));
   await ctx.runWithUser("bob", () => reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: refB }));
-  assert.equal(await credits.getBalance("alice"), 3); // 5 - 2
-  assert.equal(await credits.getBalance("bob"), 3);   // 5 - 2, PAS sauté
+  assert.equal(await credits.getBalance("alice"), 0); // 5 - 5
+  assert.equal(await credits.getBalance("bob"), 0);   // 5 - 5, PAS sauté
 
   // Le remboursement d'alice ne touche pas bob.
   await ctx.runWithUser("alice", () => credits.refundGeneration("exam", refA, "alice"));
   assert.equal(await credits.getBalance("alice"), 5);
-  assert.equal(await credits.getBalance("bob"), 3);
+  assert.equal(await credits.getBalance("bob"), 0);
   delete process.env.SIGNUP_FREE_CREDITS;
 });
 
-test("gate de crédits : le coût du TYPE est exigé (exam = 2), pas le minimum", async () => {
+test("gate de crédits : le coût du TYPE est exigé (exam = 5), pas le minimum", async () => {
   process.env.BILLING_ENABLED = "1";
-  process.env.SIGNUP_FREE_CREDITS = "1";
-  const solde1 = await credits.getBalance("carol"); // 1 crédit
-  assert.equal(solde1, 1);
+  process.env.SIGNUP_FREE_CREDITS = "4";
+  const solde1 = await credits.getBalance("carol"); // 4 crédits
+  assert.equal(solde1, 4);
   await ctx.runWithUser("carol", async () => {
-    // Un examen coûte 2 : 1 crédit ne suffit PAS.
+    // Un examen coûte 5 : 4 crédits ne suffisent PAS.
     const gateExam = await credits.creditsGate("exam");
-    assert.ok(gateExam && gateExam.status === 402, "exam à 2 crédits doit être refusé avec 1 crédit");
-    assert.match(gateExam!.error, /génération à 2/);
-    // Un QCM coûte 1 : ça passe.
+    assert.ok(gateExam && gateExam.status === 402, "exam à 5 crédits doit être refusé avec 4 crédits");
+    assert.match(gateExam!.error, /génération à 5/);
+    // Un QCM coûte 4 : ça passe.
     assert.equal(await credits.creditsGate("qcm"), null);
   });
   delete process.env.SIGNUP_FREE_CREDITS;
@@ -140,16 +140,16 @@ test("annulation : remboursée AVANT travail, PAS après (sinon générations gr
     // (a) annulation immédiate (job en file, 0 % fait) → remboursé
     const refA = credits.jobRef("dave", "ml", 100);
     await reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: refA });
-    assert.equal(await credits.getBalance("dave"), solde0 - 2);
+    assert.equal(await credits.getBalance("dave"), solde0 - 5);
     await jobs.refundJobCredits({ id: 100, type: "exam" });
     assert.equal(await credits.getBalance("dave"), solde0);
 
     // (b) le remboursement rend le montant DÉBITÉ même si le tarif a changé
     const refB = credits.jobRef("dave", "ml", 101);
-    await reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: refB }); // -2 au tarif courant
+    await reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: refB }); // -5 au tarif courant
     process.env.CREDITS_COST_JSON = '{"exam":9}';           // hausse de tarif
     await credits.refundGeneration("exam", refB, "dave");
-    assert.equal(await credits.getBalance("dave"), solde0, "le remboursement doit rendre 2, pas 9");
+    assert.equal(await credits.getBalance("dave"), solde0, "le remboursement doit rendre 5, pas 9");
     delete process.env.CREDITS_COST_JSON;
   }));
   delete process.env.SIGNUP_FREE_CREDITS;
