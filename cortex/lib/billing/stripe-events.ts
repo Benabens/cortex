@@ -258,8 +258,7 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
       res = await reverseByPaymentIntent(idOf(charge.payment_intent), "remboursement Stripe", {
         amountCents: Number(charge.amount_refunded ?? charge.amount ?? 0) || null,
         totalCents: Number(charge.amount ?? 0) || null,
-        metadata: charge.metadata ?? null, customerId: idOf(charge.customer),
-        email: charge.billing_details?.email ?? charge.receipt_email ?? null, lookup: opts.lookup, livemode: event.livemode,
+        metadata: charge.metadata ?? null, customerId: idOf(charge.customer), lookup: opts.lookup, livemode: event.livemode,
       });
       // Revenu : le remboursé cumulé s'impute au paiement (même s'il n'est pas encore arrivé chez nous).
       if (res.ok && res.action !== FOREIGN.action) {
@@ -274,8 +273,7 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
       const charge = typeof dispute.charge === "object" && dispute.charge ? (dispute.charge as Stripe.Charge) : null;
       res = await reverseByPaymentIntent(idOf(dispute.payment_intent), "litige Stripe", {
         amountCents: Number(dispute.amount ?? 0) || null,
-        metadata: charge?.metadata ?? null, customerId: idOf(charge?.customer),
-        email: charge?.billing_details?.email ?? null, lookup: opts.lookup, livemode: event.livemode,
+        metadata: charge?.metadata ?? null, customerId: idOf(charge?.customer), lookup: opts.lookup, livemode: event.livemode,
       });
       if (res.ok && res.action !== FOREIGN.action) {
         const pi = idOf(dispute.payment_intent);
@@ -429,10 +427,10 @@ async function onInvoicePaid(invoice: Stripe.Invoice, lookup: StripeLookup | und
   const keys = await resolveLookupKeys(inv.lines, [inv.metadata as Meta, subMeta], lookup);
   const cortexPrice = keys.some((k) => CORTEX_LOOKUP_KEYS.has(k));
   if (!cortexPrice && !metaCortex(inv.metadata as Meta, subMeta)) {
-    // Ni prix Cortex ni métadonnée Cortex : seul un client/abonnement DÉJÀ lié chez nous rattache la facture.
-    const linked = (invCustomer && (await resolveUserByCustomer(invCustomer)))
-      || (await authGet<{ user_id: string }>(`SELECT user_id FROM subscriptions WHERE subscription_id = ?`, subId))?.user_id;
-    if (!linked) return foreign("invoice", inv.id, `prix ${(keys.length ? keys : priceIdsOf(inv.lines)).join(",") || "?"} inconnu, client non lié`);
+    // Ni prix Cortex ni métadonnée Cortex : seul l'abonnement Cortex DÉJÀ lié chez nous rattache la facture.
+    // Pas le client : sur le compte partagé, un abonné Cortex peut aussi être facturé pour autre chose.
+    const linked = (await authGet<{ user_id: string }>(`SELECT user_id FROM subscriptions WHERE subscription_id = ?`, subId))?.user_id;
+    if (!linked) return foreign("invoice", inv.id, `prix ${(keys.length ? keys : priceIdsOf(inv.lines)).join(",") || "?"} inconnu, abonnement non lié`);
   }
   // Idempotence par FACTURE : une facture n'attribue qu'un mois, quel que soit l'événement qui la porte.
   if (inv.id && (await authGet<{ invoice_id: string }>(`SELECT invoice_id FROM stripe_invoices WHERE invoice_id = ?`, inv.id))) {
@@ -511,16 +509,9 @@ type ReversalContext = {
   totalCents?: number | null;
   metadata?: Record<string, string> | null;
   customerId?: string | null;
-  email?: string | null;
   lookup?: StripeLookup;
   livemode?: boolean;
 };
-
-async function userByEmail(email: string | null | undefined): Promise<string | null> {
-  if (!email) return null;
-  const r = await authGet<{ id: string }>(`SELECT id FROM users WHERE lower(email) = lower(?)`, email.trim());
-  return r?.id ?? null;
-}
 
 /** Reprise des crédits d'un paiement remboursé/contesté — pack OU facture d'abonnement, une seule fois. */
 async function reverseByPaymentIntent(paymentIntent: string | null, why: string, ctx: ReversalContext = {}): Promise<HandleResult> {
@@ -616,12 +607,15 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string,
       return { ok: true, action: "pack-reversed", reversed };
     }
   }
-  // 4) Métadonnées portées par la charge (payment_intent_data) ; 5) client / e-mail connu. Montant → crédits au prix du pack.
+  // Compte partagé avec l'activité freelance (Payment Links, sans métadonnée) : une
+  // charge qui ne porte pas la marque Cortex n'est pas à nous, même si son client ou
+  // son e-mail correspond à un compte Cortex. Ni reprise, ni mémorisation.
+  if (!metaCortex(ctx.metadata)) return foreign("charge", paymentIntent, "aucune métadonnée Cortex, paiement inconnu");
+  // 4) Métadonnées portées par la charge (payment_intent_data) ; 5) client déjà lié. Montant → crédits au prix du pack.
+  // Jamais l'e-mail : il ne prouve pas que le paiement est un achat Cortex.
   const metaUser = ctx.metadata?.cortexUserId ?? null;
   const metaCredits = Number(ctx.metadata?.credits ?? 0);
-  const userId = metaUser
-    ?? (ctx.customerId ? await resolveUserByCustomer(ctx.customerId) : null)
-    ?? (await userByEmail(ctx.email));
+  const userId = metaUser ?? (ctx.customerId ? await resolveUserByCustomer(ctx.customerId) : null);
   if (userId && ctx.amountCents && ctx.amountCents > 0) {
     // Remboursement partiel : au prorata du montant ; sinon, crédits des métadonnées si le montant couvre tout.
     const centi = creditsCentiForAmount(ctx.amountCents);
@@ -630,10 +624,8 @@ async function reverseByPaymentIntent(paymentIntent: string | null, why: string,
     log("warn", "stripe.reversal_by_amount", { paymentIntent, user: userId, amountCents: ctx.amountCents, centi: capped });
     return { ok: true, action: "pack-reversed-by-amount", reversed };
   }
-  // 6) Rien d'exploitable. Charge SANS aucune métadonnée Cortex → autre application
-  // (ou paiement hors de notre boutique) : ignorée, sans trace. Charge Cortex → on
-  // MÉMORISE (appliquée si l'achat arrive ensuite) et on le dit fort.
-  if (!metaCortex(ctx.metadata)) return foreign("charge", paymentIntent, "aucune métadonnée Cortex, paiement inconnu");
+  // 6) Rien d'exploitable sur une charge Cortex → on MÉMORISE (appliquée si l'achat
+  // arrive ensuite) et on le dit fort.
   await authRun(
     `INSERT INTO stripe_orphan_reversals (payment_intent, why, amount_cents, created_at) VALUES (?,?,?,?) ON CONFLICT (payment_intent) DO NOTHING`,
     paymentIntent, why, ctx.amountCents ?? null, nowStr(),
