@@ -46,6 +46,22 @@ const FALLBACK_WORDS: Record<string, { approach: string; approachYes: string; ap
     approach: "Der Lösungsweg geht auf die Aufgabe ein", approachYes: "Die Antwort enthält den passenden Lösungsweg.", approachNo: "Der wesentliche Lösungsweg fehlt oder führt zu keinem Ergebnis.",
     answer: "Die Antwort ist richtig und vollständig", answerYes: "Ergebnis und Begründung sind vollständig.", answerNo: "Ergebnis oder Begründung sind unvollständig oder falsch.",
   },
+  it: {
+    approach: "Il procedimento risponde al problema posto", approachYes: "La risposta contiene il procedimento utile.", approachNo: "Il procedimento essenziale manca o non permette di concludere.",
+    answer: "La risposta è corretta e completa", answerYes: "Il risultato e la sua giustificazione sono completi.", answerNo: "Il risultato o la sua giustificazione sono incompleti o errati.",
+  },
+  es: {
+    approach: "El planteamiento responde al problema", approachYes: "La respuesta contiene el planteamiento adecuado.", approachNo: "Falta el planteamiento esencial o no permite concluir.",
+    answer: "La respuesta es correcta y completa", answerYes: "El resultado y su justificación están completos.", answerNo: "El resultado o su justificación están incompletos o son incorrectos.",
+  },
+  pt: {
+    approach: "A resolução responde ao problema", approachYes: "A resposta contém a resolução adequada.", approachNo: "Falta a resolução essencial ou não permite concluir.",
+    answer: "A resposta está correta e completa", answerYes: "O resultado e a sua justificação estão completos.", answerNo: "O resultado ou a sua justificação estão incompletos ou incorretos.",
+  },
+  nl: {
+    approach: "De aanpak beantwoordt het gestelde probleem", approachYes: "Het antwoord bevat de juiste aanpak.", approachNo: "De essentiële aanpak ontbreekt of leidt niet tot een conclusie.",
+    answer: "Het antwoord is juist en volledig", answerYes: "Het resultaat en de motivering zijn volledig.", answerNo: "Het resultaat of de motivering is onvolledig of onjuist.",
+  },
 };
 
 function fallbackResult(result: LegacyCheckResult, language: string): CheckResult {
