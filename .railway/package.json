@@ -1,0 +1,8 @@
+{
+  "name": "cortex-railway-iac",
+  "private": true,
+  "description": "SDK de l'Infrastructure as Code Railway : sert seulement à évaluer .railway/railway.ts (railway config plan / apply).",
+  "devDependencies": {
+    "railway": "3.17.0"
+  }
+}
