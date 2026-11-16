@@ -122,6 +122,15 @@ test("cours sans code ni établissement : le prompt nomme le cours, sans trou à
   assert.doesNotMatch(leads, /\(\)|de {2}|— *$|\bFinal\b/m, leads);
 });
 
+test("discipline : les codes hors EPFL sont lus (CS201, COMPSCI 201, COMP0002, HIST0001)", async () => {
+  const { inferDiscipline } = await import("../lib/exam-format");
+  // Corpus en prose : sans code reconnu, il ferait passer un cours d'informatique en SHS.
+  const prose = "Les structures de données organisent l'information pour qu'un programme la retrouve vite. ".repeat(6);
+  for (const code of ["CS201", "COMPSCI 201", "COMP0002", "CS-202", "MATH 221"]) assert.equal(inferDiscipline({ code, sample: prose }), "stem", code);
+  for (const code of ["HIST0001", "PHIL 101", "HUM-285"]) assert.equal(inferDiscipline({ code }), "humanities", code);
+  for (const code of ["CSTUDIES", "MATHEMATICA"]) assert.equal(inferDiscipline({ code, sample: prose }), "humanities", `${code} : un mot, pas un préfixe de code`);
+});
+
 test("barème et durée : ceux de l'examen déclaré (75 min), pas ~180 points en 3 h", async () => {
   const id = await newCourse({ examFormat: { kind: "exercises", durationMin: 75 } });
   const { intro, slots } = await profileOf(id);
