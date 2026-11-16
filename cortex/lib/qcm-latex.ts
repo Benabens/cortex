@@ -2,7 +2,7 @@ import { currentCourse } from "@/db/client";
 import { getCourse } from "@/lib/courses";
 import type { ExamQuestion } from "@/lib/exam";
 import { compileExamPdf, copyExamLogo, qrText, texEscape } from "@/lib/exam-latex";
-import { formatContextFor } from "@/lib/exam-format";
+import { examDurationMin, formatContextFor } from "@/lib/exam-format";
 import { courseTemplate, courseWords, coverWords, durationText, epflExamKind, epflLocalChrome, epflWords, localDate, neutralChrome, neutralCoverTex, neutralDuration, pointsText, solutionColor, type CoverWords } from "@/lib/exam-template";
 import { assertTexSafe } from "@/lib/tex-guard";
 import { getFormatProfile } from "@/lib/format";
@@ -312,7 +312,7 @@ export async function qcmDurationMin(detected: number | null | undefined): Promi
 export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSolutions: boolean): Promise<string> {
 
   const fmt = await getFormatProfile();
-  const dur = courseTemplate() === "epfl" ? await qcmDurationMin(fmt?.duration_min) : neutralDuration(fmt?.duration_min);
+  const dur = await examDurationMin();
   // Barème CALÉ sur le format détecté : chaque type (scq/mcq) vaut ses points_each réels
   // (ex. CS-233 : scq 3 pts, mcq 4 pts), les ouvertes leurs ~17 pts. Repli 2/15 si non détecté.
   const ptsOf = (t: "scq" | "mcq"): number => {

@@ -53,8 +53,8 @@ export type CourseConfig = {
   language: string;
   /** Profil curaté (lib/profiles/…) ou null → profil générique dérivé de l'ADN. */
   profileId: string | null;
-  /** Durée d'examen par défaut (minutes). */
-  durationMin: number;
+  /** Durée d'examen saisie sur la fiche (minutes) ; null = non saisie, jamais de défaut caché. */
+  durationMin: number | null;
   /** Date de l'examen (ISO, optionnel) — alimente le compte à rebours du dashboard. */
   examDate?: string;
   /** Format d'examen DÉCLARÉ par l'étudiant (null = rien de déclaré) — cf. lib/exam-format. */
@@ -151,7 +151,7 @@ export function rowToConfig(r: CourseRow): CourseConfig {
     // "" = à détecter (cours créé sans langue, cf. lib/exam-format) ; absente (cours historique) = français.
     language: r.language ?? "fr",
     profileId: r.profile_id ?? null,
-    durationMin: r.duration_min ?? 180,
+    durationMin: r.duration_min ?? null,
     examFormat: parseExamFormat(r.exam_format),
     createdAt: r.created_at,
   };
