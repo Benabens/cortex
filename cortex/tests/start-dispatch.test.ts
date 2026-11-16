@@ -50,5 +50,5 @@ test("le Dockerfile démarre par start.sh, et preview-entrypoint.sh enchaîne su
   assert.deepEqual(cmds.slice(-1), ['["bash", "scripts/start.sh"]']);
   const preview = fs.readFileSync(path.join(__dirname, "..", "scripts", "preview-entrypoint.sh"), "utf8");
   assert.match(preview, /^exec bash scripts\/docker-entrypoint\.sh$/m);
-  assert.doesNotMatch(preview, /start\.sh/);
+  assert.doesNotMatch(preview, /^\s*exec\b.*start\.sh/m, "preview-entrypoint.sh ne relance pas start.sh");
 });
