@@ -150,3 +150,24 @@ test("un corrigé ne compte pas comme une annale de plus, sauf s'il est seul", a
   const { withoutSolutions } = await import("../lib/exam-names");
   assert.deepEqual(withoutSolutions(["final-2021-solution.pdf"], (n) => n), ["final-2021-solution.pdf"]);
 });
+
+test("les fichiers non lus restent listés après un rechargement, jusqu'à leur retrait", async () => {
+  const c = await newCourse("Orvelle rechargement");
+  fs.writeFileSync(path.join(c.refsDir, "final-2022.pdf"), textPdf("Exercice 1 du final 2022"));
+  fs.writeFileSync(path.join(c.refsDir, "final-2023.pdf"), corruptPdf());
+  fs.writeFileSync(path.join(c.contentRoot, "lectures", "scan.pdf"), textPdf(null));
+  const { runWithCourse } = await import("../db/client");
+  const jobs = await import("../lib/jobs");
+  const { id } = await runWithCourse(c.id, () => jobs.createJobExclusive("ingest"));
+  const r = spawnSync(path.join(process.cwd(), "node_modules", ".bin", "tsx"), ["scripts/run-job.ts", String(id), c.id], {
+    env: { ...process.env, CORTEX_COURSE: c.id },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const { NextRequest } = await import("next/server");
+  const mod = await import("../app/api/sources/route");
+  const unread = async () => ((await (await mod.GET(new NextRequest(`http://cortex.test/api/sources?course=${c.id}`))).json()).unread as { path: string; message: string }[]).map((u) => u.path).sort();
+  assert.deepEqual(await unread(), ["lectures/scan.pdf", "refs/final-2023.pdf"]);
+  await mod.DELETE(new NextRequest(`http://cortex.test/api/sources?course=${c.id}&path=${encodeURIComponent("lectures/scan.pdf")}`, { method: "DELETE" }));
+  assert.deepEqual(await unread(), ["refs/final-2023.pdf"]);
+});

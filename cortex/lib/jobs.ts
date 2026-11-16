@@ -298,6 +298,13 @@ export async function reportJob(id: number, step: string, progress: number, stat
   await logJob(id, step);
 }
 
+/** Le rapport par fichier de la dernière ingestion du cours courant (job d'ingestion ou de préparation), ou null. */
+export async function lastIngestReport(): Promise<IngestReport | null> {
+  await ensureJobsSchema();
+  const row = await q.get<{ report_json: string }>(`SELECT report_json FROM jobs WHERE report_json IS NOT NULL ORDER BY id DESC LIMIT 1`);
+  try { return row ? (JSON.parse(row.report_json) as IngestReport) : null; } catch { return null; }
+}
+
 /** Range le rapport par fichier d'une ingestion sur son job (lu par l'interface et par MCP). */
 export async function setJobReport(id: number, report: IngestReport): Promise<void> {
   await ensureJobsSchema();
