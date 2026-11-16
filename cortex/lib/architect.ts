@@ -3,7 +3,7 @@ import { COURSE_MATTER_RULE, COURSE_TERMS_RULE } from "@/lib/course-grounding";
 import { profile } from "@/lib/course-profile";
 import type { Archetype } from "@/lib/archetypes";
 import { calibrationBlock } from "@/lib/calibration";
-import { rubricFor, styleFor, trapMenuBlock } from "@/lib/difficulty";
+import { rubricFor, trapMenuBlock } from "@/lib/difficulty";
 import {
   gatherTargetedContext,
   pickArchetype,
@@ -209,7 +209,7 @@ async function designTrap(a: Archetype, target: string, refImage: string | null,
     trapMenuBlock(a.id),
     ``,
     r ? `BARRE : ≥ ${r.subparts} sous-questions, la dure ≥ ${r.steps} étapes, bookkeeping = ${r.bookkeeping}, ${r.mustChain ? "au moins une sous-question enchaînée, " : ""}cas-limite obligatoire.` : ``,
-    ...styleFor(a.category),
+    ...(profile().styleGuide?.(a.category) ?? []),
     calBlock || null,
     ``,
     `NE RÉDIGE PAS encore la question. CONÇOIS-LA : choisis UN piège précis, le cas-limite qui le déclenche, la chaîne de raisonnement de l'étudiant fort, les NOMBRES NON RONDS, la grille de réponse, et la réponse erronée du pattern-matcher (ce qui discrimine). Plan des sous-questions en escalier.`,

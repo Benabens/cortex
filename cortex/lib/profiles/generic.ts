@@ -271,7 +271,7 @@ export function makeGenericProfile(courseId: string, archetypes: Archetype[], op
     buildBlueprint: slotsFromArchetypes,
     promptIntroFull: () => style() === "problems" ? [
       `Tu es l'équipe enseignante de ${matiere()}.`,
-      `Tu rédiges un examen final INÉDIT, EN ${LANG()}, indiscernable d'un vrai final EPFL de ${c().examName}. Les CONTRAINTES DURES ci-dessus priment sur tout.`,
+      `Tu rédiges un examen INÉDIT, EN ${LANG()}, indiscernable d'un vrai examen de ${c().examName} : même niveau et même format que ses annales. Les CONTRAINTES DURES ci-dessus priment sur tout.`,
       ``,
       `═══ STRUCTURE ═══`,
       `Plusieurs exercices indépendants, notés séparément, ~180 points au total, 3 h.`,
@@ -304,5 +304,6 @@ export function makeGenericProfile(courseId: string, archetypes: Archetype[], op
       `Applique le PRINCIPE : ${principle()}`,
     ],
     qaIntro: () => `Tu es l'équipe enseignante de ${matiere()}.`,
+    drillLevel: () => `des vrais examens du cours (ses annales)`,
   };
 }
