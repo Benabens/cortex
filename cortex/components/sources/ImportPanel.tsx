@@ -40,7 +40,7 @@ const DROP_KINDS: { value: DropKind; label: string }[] = [
  *   (finals dans refs/, slides et séries dans content/) puis job « ingest » ;
  * puis « Préparer le cours » → POST /api/prepare → pipeline complet (ingestion → format → blueprint).
  */
-export function ImportPanel({ onChanged }: { onChanged: () => void }) {
+export function ImportPanel({ onChanged, unread }: { onChanged: () => void; unread?: IngestProblem[] }) {
   const { courseId } = useCourse();
   const fileRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
@@ -55,6 +55,12 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
   const [folderRefusals, setFolderRefusals] = useState<FolderImportRefusal[]>([]);
   // Fichiers déposés que l'ingestion n'a pas pu lire : nommés un par un, avec quoi faire.
   const [unreadFiles, setUnreadFiles] = useState<IngestProblem[]>([]);
+  // La liste du serveur (dernier rapport, fichiers encore rangés) : elle survit au rechargement.
+  const [serverUnread, setServerUnread] = useState(unread);
+  if (unread !== serverUnread) {
+    setServerUnread(unread);
+    if (unread) setUnreadFiles(unread);
+  }
   const [jobId, setJobId] = useState<number | null>(null);
   const [jobKind, setJobKind] = useState<"format" | "ingest" | "prepare" | null>(null);
   const job = useJob(jobId);

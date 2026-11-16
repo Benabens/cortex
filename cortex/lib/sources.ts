@@ -10,7 +10,8 @@ import { extractText, getDocumentProxy } from "unpdf";
 import { extractOfficeText } from "@/lib/office-documents";
 import { purgePdfPages } from "@/lib/page-cache";
 import { storage } from "@/lib/storage";
-import { failureStatus, readStatus, type IngestFileOutcome } from "@/lib/ingest-report";
+import { failureStatus, ingestProblems, readStatus, type IngestFileOutcome, type IngestProblem } from "@/lib/ingest-report";
+import { lastIngestReport } from "@/lib/jobs";
 import { examKind, examYear, withoutSolutions } from "@/lib/exam-names";
 
 /**
@@ -334,6 +335,19 @@ function unreadFileAbsolute(srcPath: string): string | null {
   const root = path.resolve(contentRoot());
   const abs = path.resolve(root, srcPath);
   return abs.startsWith(root + path.sep) ? abs : null;
+}
+
+/**
+ * Les fichiers que la dernière ingestion n'a pas pu lire et qui sont encore rangés dans le cours :
+ * la liste survit au rechargement de la page, et un fichier retiré n'y revient pas.
+ */
+export async function unreadFiles(): Promise<IngestProblem[]> {
+  const problems = ingestProblems(await lastIngestReport());
+  const stored = await Promise.all(problems.map(async (p) => {
+    const abs = unreadFileAbsolute(p.path);
+    return abs ? (await storage().stat(abs)) != null : false;
+  }));
+  return problems.filter((_, i) => stored[i]);
 }
 
 /** Supprime un examen uploadé (fichier + source + sélection), ou un fichier que l'ingestion n'a pas pu lire. */
