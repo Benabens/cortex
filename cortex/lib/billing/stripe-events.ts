@@ -3,7 +3,7 @@ import { authGet, authRun, authTx } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import {
-  DELTA_CENTI, addTransaction, ensureLedgerUnit, getSubscription, grantSubscriptionMonth, linkSubscription, resolveUserByCustomer,
+  DELTA_CENTI, addTransaction, ensureLedgerUnit, getSubscription, grantSubscriptionMonth, linkSubscription, resolveUserByCustomer, withdrawSubscriptionInTx,
   setSubscriptionStatus, subscriptionCreditsCenti, subscriptionLive, subscriptionMonthlyCreditsCenti, toCenti,
 } from "./credits";
 import { linkInvoicePaymentIntent, recordDispute, recordPayment, recordRefund } from "./revenue";
@@ -265,29 +265,29 @@ export async function handleStripeEvent(event: Stripe.Event, opts: HandleOptions
       break;
     case "charge.refunded": {
       const charge = event.data.object as Stripe.Charge;
-      res = await reverseByPaymentIntent(idOf(charge.payment_intent), "remboursement Stripe", {
-        ...reversalAmounts(event),
+      const { paymentIntent, amountCents, totalCents } = reversalAmounts(event)!;
+      res = await reverseByPaymentIntent(paymentIntent, "remboursement Stripe", {
+        amountCents, totalCents,
         metadata: charge.metadata ?? null, customerId: idOf(charge.customer), lookup: opts.lookup, livemode: event.livemode,
       });
       // Revenu : le remboursé cumulé s'impute au paiement (même s'il n'est pas encore arrivé chez nous).
       if (res.ok && res.action !== FOREIGN.action) {
-        const pi = idOf(charge.payment_intent);
-        await linkInvoicePaymentIntent(pi);
-        await recordRefund(pi, Number(charge.amount_refunded ?? 0));
+        await linkInvoicePaymentIntent(paymentIntent);
+        await recordRefund(paymentIntent, Number(charge.amount_refunded ?? 0));
       }
       break;
     }
     case "charge.dispute.created": {
       const dispute = event.data.object as Stripe.Dispute;
       const charge = typeof dispute.charge === "object" && dispute.charge ? (dispute.charge as Stripe.Charge) : null;
-      res = await reverseByPaymentIntent(idOf(dispute.payment_intent), "litige Stripe", {
-        ...reversalAmounts(event),
+      const { paymentIntent, amountCents } = reversalAmounts(event)!;
+      res = await reverseByPaymentIntent(paymentIntent, "litige Stripe", {
+        amountCents,
         metadata: charge?.metadata ?? null, customerId: idOf(charge?.customer), lookup: opts.lookup, livemode: event.livemode,
       });
       if (res.ok && res.action !== FOREIGN.action) {
-        const pi = idOf(dispute.payment_intent);
-        await linkInvoicePaymentIntent(pi);
-        await recordDispute(pi, Number(dispute.amount ?? 0), disputeFeeCents(dispute));
+        await linkInvoicePaymentIntent(paymentIntent);
+        await recordDispute(paymentIntent, Number(dispute.amount ?? 0), disputeFeeCents(dispute));
       }
       break;
     }
@@ -528,10 +528,9 @@ async function subscriptionIsCortex(sub: Stripe.Subscription, lookup?: StripeLoo
   if (metaCortex(sub.metadata as Meta)) return false;
   const keys = await resolveLookupKeys(sub.items, [], lookup);
   if (keys.some((k) => CORTEX_LOOKUP_KEYS.has(k))) return false;
-  const customerId = idOf(sub.customer);
-  const linked = (customerId && (await resolveUserByCustomer(customerId)))
-    || (await authGet<{ user_id: string }>(`SELECT user_id FROM subscriptions WHERE subscription_id = ?`, sub.id))?.user_id;
-  return linked ? false : `prix ${(keys.length ? keys : priceIdsOf(sub.items)).join(",") || "?"} inconnu, client non lié`;
+  // L'abonnement Cortex déjà lié, pas le seul client : sur le compte partagé, un abonné peut en avoir un autre.
+  const linked = (await authGet<{ user_id: string }>(`SELECT user_id FROM subscriptions WHERE subscription_id = ?`, sub.id))?.user_id;
+  return linked ? false : `prix ${(keys.length ? keys : priceIdsOf(sub.items)).join(",") || "?"} inconnu, abonnement non lié`;
 }
 
 async function onSubscriptionUpdated(sub: Stripe.Subscription, lookup: StripeLookup | undefined, at: string | null): Promise<HandleResult> {
@@ -551,6 +550,17 @@ async function onSubscriptionUpdated(sub: Stripe.Subscription, lookup: StripeLoo
 async function onSubscriptionDeleted(sub: Stripe.Subscription, lookup: StripeLookup | undefined, at: string | null): Promise<HandleResult> {
   const why = await subscriptionIsCortex(sub, lookup);
   if (why) return foreign("subscription", sub.id, why);
+  // Le solde du mois va être effacé sans avoir servi : retenu sur la facture de la période,
+  // qu'un remboursement ultérieur absorbe avant toute dette (résilier puis rembourser).
+  const row = await authGet<{ user_id: string; remaining: number; period_end: string | null }>(
+    `SELECT user_id, remaining, period_end FROM subscriptions WHERE subscription_id = ?`, sub.id,
+  );
+  if (row?.period_end) {
+    await authRun(
+      `UPDATE stripe_invoices SET unused_centi = ? WHERE user_id = ? AND period_end = ? AND unused_centi IS NULL`,
+      Math.max(0, Number(row.remaining) || 0), row.user_id, row.period_end,
+    );
+  }
   await setSubscriptionStatus({ subscriptionId: sub.id, customerId: idOf(sub.customer), status: "canceled", at, cancelAtPeriodEnd: false, clearRemaining: true });
   log("info", "billing.subscription_deleted", { subscription: sub.id });
   return { ok: true, action: "subscription-deleted" };
@@ -604,33 +614,30 @@ async function reverseInvoice(invoice: InvoiceRow, paymentIntent: string, why: s
     const already = Math.max(0, Number(row?.reversed_centi) || 0);
     const take = target - already;
     if (take <= 0) return null;
-    const pool = current
-      ? Number((await tx.get<{ remaining: number }>(`SELECT remaining FROM subscriptions WHERE user_id = ?`, invoice.user_id))?.remaining) || 0
-      : Number(row?.unused_centi) || 0;
-    const fromPeriod = Math.min(take, Math.max(0, pool));
-    const debt = take - fromPeriod;
     const suspend = current && !partial && granted > 0;
-    const t = nowStr();
-    if (suspend) await tx.run(`UPDATE subscriptions SET remaining = 0, suspended = 1, updated_at = ? WHERE user_id = ?`, t, invoice.user_id);
-    else if (current) await tx.run(`UPDATE subscriptions SET remaining = remaining - ?, updated_at = ? WHERE user_id = ?`, fromPeriod, t, invoice.user_id);
-    // Période passée : le reliquat absorbé ne peut plus resservir à une reprise suivante.
+    // Ce qui reste de la période : le solde du mois (facture en cours), puis le reliquat
+    // retenu à sa clôture (renouvellement, résiliation). Seul le reste est du consommé.
+    const fromBalance = current ? await withdrawSubscriptionInTx(tx, invoice.user_id, take, suspend) : 0;
+    const unused = Math.max(0, Number(row?.unused_centi) || 0);
+    const fromUnused = Math.min(take - fromBalance, unused);
+    const debt = take - fromBalance - fromUnused;
     await tx.run(
       `UPDATE stripe_invoices SET reversed_centi = ?, unused_centi = ? WHERE invoice_id = ?`,
-      target, current ? row?.unused_centi ?? null : pool - fromPeriod, invoice.invoice_id,
+      target, row?.unused_centi == null ? null : unused - fromUnused, invoice.invoice_id,
     );
     // Ligne du ledger à chaque étape (dette, 0 si tout a été absorbé) : trace lisible, et ref
     // `stripe:reversal:<pi>` une fois tout repris d'un coup (les autres chemins s'y arrêtent).
     await tx.run(
       `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, created_at) VALUES (?,?,?,?,'centi',?)`,
-      invoice.user_id, -debt, partial ? `${why} (abonnement, partiel : ${ctx.amountCents}/${ctx.totalCents} centimes)` : `${why} (abonnement)`,
-      already === 0 && target === granted ? ref : `${ref}:${target}`, t,
+      invoice.user_id, debt > 0 ? -debt : 0, partial ? `${why} (abonnement, partiel : ${ctx.amountCents}/${ctx.totalCents} centimes)` : `${why} (abonnement)`,
+      already === 0 && target === granted ? ref : `${ref}:${target}`, nowStr(),
     );
     return { take, debt, suspend };
   }).catch((e) => {
     if (/unique|constraint/i.test(String(e))) return null; // course perdue sur le ref : l'autre a repris
     throw e;
   });
-  if (!step) return { ok: true, action: "reversal-duplicate", reversed: false };
+  if (!step) return { ok: true, action: granted > 0 ? "reversal-duplicate" : "invoice-nothing-granted", reversed: false };
   return {
     ok: true, action: "invoice-reversed", reversed: true,
     retiredCenti: step.take, debtCenti: step.debt, suspended: step.suspend, currentPeriod: current,

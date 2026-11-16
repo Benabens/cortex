@@ -1,5 +1,5 @@
 /**
- * REMBOURSEMENTS STRIPE JUSTES (audit axe 4, P1 #2 #3 #4). Événements FICTIFS
+ * REMBOURSEMENTS STRIPE JUSTES. Événements FICTIFS
  * (fixtures JSON de tests/fixtures/stripe-remboursements), traités par
  * handleStripeEvent ; aucun appel à l'API Stripe (les accès Stripe sont des
  * doublures qui répondent « rien trouvé »).
@@ -127,7 +127,7 @@ async function twoMonths(user: string, spentInM1: number) {
   assert.equal(await credits.subscriptionCredits(user), 20, "mois 2 : 20 crédits");
 }
 
-test("P1 n° 3 : rembourser l'ANCIENNE facture (crédits inutilisés, expirés) → mois en cours intact, rien en dette, pas de suspension", async () => {
+test("rembourser l'ANCIENNE facture (crédits inutilisés, expirés) → mois en cours intact, rien en dette, pas de suspension", async () => {
   await twoMonths("ancien", 0);
   const r = await handleStripeEvent(invoiceRefund("evt_ancien_ref", "pi_ancien_m1", 1490), { lookup: noStripe });
   assert.equal(r.ok, true, JSON.stringify(r));
@@ -136,7 +136,7 @@ test("P1 n° 3 : rembourser l'ANCIENNE facture (crédits inutilisés, expirés) 
   assert.equal(await suspended("ancien"), false);
 });
 
-test("P1 n° 3 : rembourser l'ANCIENNE facture déjà consommée de 15 → seuls les 15 consommés passent en dette, mois en cours intact", async () => {
+test("rembourser l'ANCIENNE facture déjà consommée de 15 → seuls les 15 consommés passent en dette, mois en cours intact", async () => {
   await twoMonths("ancien2", 1500);
   await handleStripeEvent(invoiceRefund("evt_ancien2_ref", "pi_ancien2_m1", 1490), { lookup: noStripe });
   assert.equal(await credits.subscriptionCredits("ancien2"), 20);
@@ -150,7 +150,7 @@ async function oneMonth(user: string) {
   assert.equal(await credits.subscriptionCredits(user), 20);
 }
 
-test("P1 n° 4 : geste commercial de 1 € sur 14,90 € (facture en cours) → 1,35 crédit retiré (prorata), pas de suspension", async () => {
+test("geste commercial de 1 € sur 14,90 € (facture en cours) → 1,35 crédit retiré (prorata), pas de suspension", async () => {
   await oneMonth("geste");
   const r = await handleStripeEvent(invoiceRefund("evt_geste_ref", "pi_geste_m1", 100), { lookup: noStripe });
   assert.equal(r.action, "invoice-reversed", JSON.stringify(r));
@@ -253,4 +253,22 @@ test("route signée (signature de test) : remboursement partiel d'une facture co
   const again = await POST(signed(invoiceRefund("evt_route_partial", "pi_route_m1", 298)));
   assert.equal((await again.json()).action, "duplicate");
   assert.equal(await credits.subscriptionCredits("route"), 16);
+});
+
+test("résiliation PUIS remboursement de la facture en cours (ordre habituel) : rien consommé → rien en dette, les crédits achetés restent", async () => {
+  await handleStripeEvent(packCheckout("evt_resil_pack", "resil", "cs_resil", "pi_resil_pack"), { lookup: noStripe });
+  await oneMonth("resil");
+  assert.equal(await credits.getBalance("resil"), 30);
+  await handleStripeEvent(ev("evt_resil_del", "customer.subscription.deleted", { id: "sub_resil", customer: "cus_resil", status: "canceled", metadata: { app: "cortex" } }), { lookup: noStripe });
+  const r = await handleStripeEvent(invoiceRefund("evt_resil_ref", "pi_resil_m1", 1490), { lookup: noStripe });
+  assert.equal(r.action, "invoice-reversed", JSON.stringify(r));
+  assert.equal(r.debtCenti, 0, JSON.stringify(r));
+  assert.equal(await credits.getBalance("resil"), 10, "les 10 crédits du pack, payés à part, ne paient pas un mois inutilisé");
+});
+
+test("abonnement freelance sur un client déjà lié, sans marque Cortex : sa résiliation ne touche pas l'abonnement Cortex", async () => {
+  await oneMonth("double");
+  const r = await handleStripeEvent(ev("evt_double_del", "customer.subscription.deleted", { id: "sub_freelance_double", customer: "cus_double", status: "canceled", metadata: {}, items: { data: [{ price: "price_freelance_retainer" }] } }), { lookup: noStripe });
+  assert.equal(r.action, "ignored:foreign", JSON.stringify(r));
+  assert.equal(await credits.subscriptionCredits("double"), 20);
 });
