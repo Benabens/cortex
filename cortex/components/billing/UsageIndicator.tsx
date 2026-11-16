@@ -16,7 +16,7 @@ import { PaywallNotice } from "./PaywallNotice";
  * Une lecture qui échoue ne bloque rien : le serveur reste le seul juge au clic.
  */
 
-export type UsageKind = "exam" | "qcm" | "exercise" | "lab-exercise" | "prepare" | "drill" | "check";
+export type UsageKind = "exam" | "qcm" | "exercise" | "lab-exercise" | "prepare" | "format" | "drill" | "check";
 
 export type LaunchUsage = {
   usage: KindUsage | null;

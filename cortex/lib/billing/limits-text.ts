@@ -99,6 +99,16 @@ function resetPhrase(u: KindUsage, now: string): string | null {
   return u.resetAt && u.limitedBy !== "credits" ? `remise à 0 ${formatReset(u.resetAt, now)}` : null;
 }
 
+/** « 1 crédit », « 0,5 crédit », « 2 crédits » (le pluriel commence à 2 en français). */
+export function creditsPhrase(credits: number): string {
+  return `${credits.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} crédit${credits >= 2 ? "s" : ""}`;
+}
+
+/** « 1 crédit débité », « 2 crédits débités ». */
+export function debitedPhrase(credits: number): string {
+  return `${creditsPhrase(credits)} débité${credits >= 2 ? "s" : ""}`;
+}
+
 /**
  * La ligne compacte affichée à côté d'un bouton de génération :
  * « Il te reste 3 examens QCM aujourd'hui · remise à 0 demain à 01:00 ».

@@ -142,11 +142,14 @@ test("annales de plus de 10 Mo puis de plus de 32 Mo en un envoi : passent le pr
   await page.getByRole("button", { name: "Créer le cours" }).click();
   await expect(page).toHaveURL(/\/sources/);
   const drop = page.locator('input[type="file"]').first();
+  // Déposer une annale est gratuit, dit avant le dépôt ; relire son format est proposé après, à la demande.
+  await expect(page.getByTestId("annale-cost")).toContainText("Le dépôt est gratuit");
 
   const single = page.waitForResponse((r) => r.url().includes("/api/refs/upload"));
   await drop.setInputFiles([annale("annale-12mo.txt", 12)]);
   expect((await single).status()).toBe(200);
   await expect(page.getByText("1 fichier ingéré.")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole("button", { name: /^Relire le format/ })).toBeVisible();
 
   const pair = page.waitForResponse((r) => r.url().includes("/api/refs/upload"));
   await drop.setInputFiles([annale("annale-2024.txt", 20), annale("annale-2025.txt", 20)]);

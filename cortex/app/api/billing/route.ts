@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
       : null,
     costs: {
       exam: fromCenti(creditCost("exam")), qcm: fromCenti(creditCost("qcm")), exercise: fromCenti(creditCost("exercise")), assist: fromCenti(creditCost("assist")),
-      // Ce que coûte un COURS : sa préparation, puis la détection du format à chaque ajout d'annales.
+      // Ce que coûte un COURS : sa préparation, puis la relecture du format de ses annales (à la demande).
       prepare: fromCenti(creditCost("prepare")), format: fromCenti(creditCost("format")),
     },
     usedToday: { gen: await usedToday("gen"), assist: await usedToday("assist") },
