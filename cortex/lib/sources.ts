@@ -9,6 +9,7 @@ import { extractText, getDocumentProxy } from "unpdf";
 import { extractOfficeText } from "@/lib/office-documents";
 import { purgePdfPages } from "@/lib/page-cache";
 import { storage } from "@/lib/storage";
+import { failureStatus, readStatus, type IngestFileOutcome } from "@/lib/ingest-report";
 
 /**
  * Examens de référence : le « format » à imiter pour la génération.
@@ -85,7 +86,7 @@ async function parseRefFile(abs: string): Promise<{ title: string; pages: string
  * Idempotent par chemin : purge l'ancienne source de même path avant de réinsérer.
  * Réutilisé par l'upload (immédiat) ET par scripts/ingest.ts (après wipe).
  */
-export async function ingestRefFile(relPath: string): Promise<number> {
+export async function ingestRefFile(relPath: string): Promise<{ sourceId: number; items: number }> {
   ensureFts();
   const filePath = path.join(REFS_DIR(), path.basename(relPath));
   const { kind, year } = inferExamMeta(path.basename(relPath));
@@ -101,8 +102,10 @@ export async function ingestRefFile(relPath: string): Promise<number> {
 
   const sid = await q.insert(INS_SOURCE_SQL, kind, title, relPath, year, recencyWeight(year));
   const chunks = pages.length ? pages : [""];
+  let items = 0;
   for (const [i, text] of chunks.entries()) {
     if (text.length < 3) continue;
+    items++;
     const label = chunks.length > 1 ? `${title}, p. ${i + 1}` : title;
     const anchor = chunks.length > 1 ? `${relPath}#page=${i + 1}` : relPath;
     const itemId = await q.insert(
@@ -120,11 +123,14 @@ export async function ingestRefFile(relPath: string): Promise<number> {
      ON CONFLICT(path) DO UPDATE SET title = excluded.title, year = excluded.year, kind = excluded.kind, uploaded = excluded.uploaded`,
     relPath, title, year, kind, wasUploaded
   );
-  return sid;
+  return { sourceId: sid, items };
 }
 
-/** Réingère tous les fichiers de data/refs/ (appelé par scripts/ingest.ts). */
-export async function ingestAllRefs(): Promise<number> {
+/**
+ * Réingère tous les fichiers de data/refs/ (appelé par scripts/ingest.ts). Un fichier qui ne
+ * se lit pas est isolé : les suivants sont lus quand même, et son issue figure dans le rapport.
+ */
+export async function ingestAllRefs(): Promise<IngestFileOutcome[]> {
   const dir = REFS_DIR();
   // uniquement des FICHIERS d'examen (ignore les sous-dossiers figref/ img/ et les fichiers cachés)
   const files = (await storage().list(dir))
@@ -132,8 +138,17 @@ export async function ingestAllRefs(): Promise<number> {
     .map((e) => path.basename(e.path))
     .filter((name) => !name.startsWith(".") && /\.(pdf|html?|txt|md|pptx|docx)$/i.test(name))
     .sort();
-  for (const f of files) await ingestRefFile(`refs/${f}`);
-  return files.length;
+  const outcomes: IngestFileOutcome[] = [];
+  for (const f of files) {
+    const relPath = `refs/${f}`;
+    try {
+      const { items } = await ingestRefFile(relPath);
+      outcomes.push({ path: relPath, status: readStatus(items), items });
+    } catch (e) {
+      outcomes.push({ path: relPath, status: failureStatus(e), items: 0 });
+    }
+  }
+  return outcomes;
 }
 
 // ---------------- Sélection « référence » ----------------
