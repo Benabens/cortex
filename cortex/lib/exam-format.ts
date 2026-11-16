@@ -16,7 +16,8 @@
 
 import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
-import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
+import { updateCourseRow } from "@/db/courses-store";
+import { DEFAULT_COURSE, getCourse, reloadCourses } from "@/lib/courses";
 import { sanitizeCorpus } from "@/lib/prompt-safety";
 import { excludedSourceIds, materialLabel } from "@/lib/source-scope";
 import { languageName } from "@/lib/profiles/generic-directives";
@@ -88,6 +89,8 @@ export type ExamFormat = {
   blocks?: BlockFormat | null;
   /** Questions à choix (QCM, mixte) : unique, multiples ou les deux ; null pour un autre type. */
   answerMode?: AnswerMode | null;
+  /** Documents permis que l'annale écrit (détection du format) ; absent : elle ne le dit pas. */
+  documents?: DocumentRule | null;
 };
 
 /**
@@ -383,7 +386,8 @@ export function blocksOf(p: Pick<FormatProfile, "format_summary" | "sections" | 
 function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Discipline, declared: AnswerMode | undefined): ExamFormat {
   const types = p.question_types ?? [];
   const qcmShare = types.filter((t) => t.type === "scq" || t.type === "mcq").reduce((s, t) => s + (t.approx_count || 0), 0);
-  const base = { basis: "annales" as const, durationMin: p.duration_min || null, language, discipline, summary: p.format_summary || "", evidence: [] };
+  const documents = (DOCUMENT_RULES as readonly string[]).includes(p.documents ?? "") ? (p.documents as DocumentRule) : null;
+  const base = { basis: "annales" as const, durationMin: p.duration_min || null, language, discipline, summary: p.format_summary || "", evidence: [], documents };
   const composite = blocksOf(p);
   if (composite) {
     const { count, ...blocks } = composite;
@@ -441,7 +445,10 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
   const declared = course.examFormat;
   const past = await annales();
   const hasAnnales = past.count > 0;
-  const language = declared?.language || (past.text ? detectLanguage(past.text) : null) || course.language || "fr";
+  const fromAnnales = past.text ? detectLanguage(past.text) : null;
+  // Cours créé sans langue : celle des annales, sinon celle des supports, gardée sur le cours.
+  if (!course.language && fromAnnales) await keepCourseLanguage(courseId, fromAnnales);
+  const language = declared?.language || fromAnnales || course.language || await detectedCourseLanguage(courseId);
   const stored = await readStoredProfile();
   const discipline = inferDiscipline({ code: course.examCode, sample: await corpusSample() });
   const basisOf = (p: StoredProfile) => p.basis ?? "annales";
@@ -480,6 +487,28 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
   return format;
 }
 
+/** Langue d'un cours qui n'en a pas (créé sans langue), sans annale qui la dise. */
+const FALLBACK_LANGUAGE = "en";
+
+/**
+ * Langue d'un cours créé sans langue, sans annale qui la dise : celle de ses supports, gardée
+ * sur le cours dès qu'elle est sûre (l'interface la montre, les rendus synchrones la lisent),
+ * sinon l'anglais en attendant des supports. Avant le 16/11/2026 : le français, toujours.
+ */
+async function detectedCourseLanguage(courseId: string): Promise<string> {
+  const detected = detectLanguage(await corpusSample());
+  if (!detected) return FALLBACK_LANGUAGE;
+  await keepCourseLanguage(courseId, detected);
+  return detected;
+}
+
+/** Enregistre la langue détectée d'un cours qui n'en avait pas ; un échec ne bloque pas la génération. */
+async function keepCourseLanguage(courseId: string, language: string): Promise<void> {
+  await updateCourseRow(courseId, getCourse(courseId).ownerUserId, { language })
+    .then(() => reloadCourses())
+    .catch((e) => console.warn(`[exam-format] langue détectée (${language}) non enregistrée pour ${courseId} : ${(e as Error).message}`));
+}
+
 /**
  * Langue de l'examen, en SYNCHRONE, pour les consignes des profils (construites
  * de façon synchrone au cœur du moteur) : celle de la dernière résolution du
@@ -512,10 +541,10 @@ export async function courseLanguage(): Promise<string> {
 export function formatContextFor(courseId: string): { kind: ExamKind | null; language: string; discipline: Discipline; durationMin: number | null; documents: DocumentRule | null } {
   const known = memo.get(courseId);
   const c = getCourse(courseId);
-  // Les documents permis ne viennent que de la déclaration : aucune source ne les détecte.
-  const documents = c.examFormat?.documents ?? null;
+  // Documents permis : la déclaration, sinon ce que l'annale écrit ; jamais deviné.
+  const documents = c.examFormat?.documents ?? known?.documents ?? null;
   if (known) return { kind: known.kind, language: known.language, discipline: known.discipline, durationMin: known.durationMin, documents };
-  return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || "fr", discipline: inferDiscipline({ code: c.examCode }), durationMin: c.examFormat?.durationMin ?? null, documents };
+  return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || FALLBACK_LANGUAGE, discipline: inferDiscipline({ code: c.examCode }), durationMin: c.examFormat?.durationMin ?? null, documents };
 }
 
 /**
