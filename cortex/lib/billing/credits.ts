@@ -59,17 +59,17 @@ export function fmtCreditsBack(centi: number): string {
 
 /** Coût EN CRÉDITS par type de génération. Surcharge : CREDITS_COST_JSON (décimales acceptées). */
 const DEFAULT_COSTS: Record<string, number> = {
-  exam: 2,
-  qcm: 1,
+  exam: 5,
+  qcm: 4,
   exercise: 1,
   "lab-exercise": 1,
   blueprint: 1,
   format: 1,
   prepare: 2,
   // Appels LLM courts et interactifs (drill, vérification de solution, analyse
-  // de faiblesse) : un dixième de crédit. Gratuits, ils offraient ~40 appels
+  // de faiblesse) : une fraction de crédit. Gratuits, ils offraient ~40 appels
   // payants par jour et par compte, indéfiniment (audit B5).
-  assist: 0.1,
+  assist: 0.3,
 };
 
 /** Coût en CENTIÈMES de crédit d'un type de génération. */

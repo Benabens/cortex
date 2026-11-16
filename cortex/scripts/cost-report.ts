@@ -5,7 +5,7 @@
  *   npm run cost:report                                  (store local)
  *   DATABASE_URL=<DATABASE_PUBLIC_URL> npm run cost:report   (prod, LECTURE SEULE)
  *   npm run cost:report -- --since=2026-11-13            (moteur récent seulement)
- * Variables : CREDIT_NET_USD (revenu net d'un crédit, défaut 0,47 $),
+ * Variables : CREDIT_NET_USD (revenu net d'un crédit, défaut 0,64 $),
  * AI_BUDGET_MARGIN (défaut 0,6), CREDITS_COST_JSON (tarif courant).
  * Aucune écriture, aucune migration : cf. lib/billing/report-source.
  */

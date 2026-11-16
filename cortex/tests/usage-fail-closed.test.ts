@@ -76,7 +76,7 @@ test("revue : l'assistance débitée puis refusée par NOTRE garde (fail-closed)
     const r = await POST(post());
     assert.equal(r.status, 503, JSON.stringify(await r.clone().json()));
   } finally { await authRun("ALTER TABLE llm_usage_off RENAME TO llm_usage"); }
-  assert.equal(await credits.getBalanceCenti("owner"), 100, "0,1 crédit rendu : rien n'est parti");
+  assert.equal(await credits.getBalanceCenti("owner"), 100, "0,3 crédit rendu : rien n'est parti");
   // 2) plafond de dépense atteint : refusé AU LANCEMENT (lib/billing/limits, même verdict que l'affichage),
   // avant tout débit — plus de débit suivi d'un remboursement.
   process.env.SPEND_CAP_USD = "0";
