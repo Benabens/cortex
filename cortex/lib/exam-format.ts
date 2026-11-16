@@ -234,11 +234,13 @@ export function annalesAnswerMode(p: Pick<FormatProfile, "question_types">): Ans
 
 /** Mots-outils discriminants par langue (les plus fréquents, peu partagés). */
 const STOPWORDS: Record<Language, string[]> = {
-  fr: ["le", "les", "des", "est", "et", "une", "dans", "pour", "pas", "sur", "qui", "du", "au", "aux", "cette", "sont", "avec", "nous", "vous", "ce", "ces"],
+  fr: ["le", "la", "les", "des", "est", "et", "une", "dans", "pour", "pas", "sur", "qui", "du", "au", "aux", "cette", "sont", "avec", "nous", "vous", "ce", "ces", "leurs"],
   en: ["the", "and", "of", "to", "is", "in", "that", "for", "are", "with", "this", "be", "on", "as", "by", "which", "an", "it", "what", "each"],
   de: ["der", "die", "das", "und", "ist", "nicht", "mit", "sich", "den", "ein", "eine", "zu", "von", "auf", "für", "dem", "wird"],
   it: ["il", "gli", "di", "che", "è", "per", "non", "con", "sono", "della", "nel", "alla", "delle", "questo", "anche"],
-  es: ["el", "los", "las", "y", "por", "para", "del", "se", "como", "más", "es", "una", "su", "lo", "este"],
+  // « la », « que », « en » : parmi les plus fréquents de l'espagnol ; sans eux, « de » et « en »
+  // donnaient le néerlandais (audit ingestion du 16/11/2026).
+  es: ["el", "la", "los", "las", "y", "que", "en", "por", "para", "del", "se", "como", "más", "es", "una", "su", "lo", "este", "al", "sus", "entre", "pero", "cuando", "también", "hay", "está"],
   pt: ["o", "os", "as", "e", "do", "da", "dos", "das", "em", "não", "uma", "para", "com", "que", "ao"],
   nl: ["de", "het", "een", "en", "van", "is", "niet", "met", "op", "voor", "zijn", "dat", "die", "wordt"],
 };
@@ -440,7 +442,7 @@ const MEMO_MAX = 500;
  * Ordre de confiance : annales (format détecté) > format déclaré > annales au
  * format pas encore détecté (comportement historique : exercices) > questions
  * d'exemple officielles > infos de cours > inconnu. La langue est celle du
- * cours, sauf langue déclarée ou annales écrites dans une autre langue.
+ * cours, sauf langue déclarée, ou annales (à défaut, supports) écrits dans une autre langue.
  */
 export async function resolveExamFormat(): Promise<ExamFormat> {
   const courseId = currentCourse();
@@ -448,9 +450,12 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
   const declared = course.examFormat;
   const past = await annales();
   const hasAnnales = past.count > 0;
-  const language = declared?.language || (past.text ? detectLanguage(past.text) : null) || course.language || "fr";
+  // Langue : déclarée > celle des annales > celle des supports > celle du cours (fr par défaut à la
+  // création : un cours espagnol créé sans langue sortait ses examens en français).
+  const sample = await corpusSample();
+  const language = declared?.language || (past.text ? detectLanguage(past.text) : null) || detectLanguage(sample) || course.language || "fr";
   const stored = await readStoredProfile();
-  const discipline = inferDiscipline({ code: course.examCode, sample: await corpusSample() });
+  const discipline = inferDiscipline({ code: course.examCode, sample });
   const basisOf = (p: StoredProfile) => p.basis ?? "annales";
 
   let format: ExamFormat;
