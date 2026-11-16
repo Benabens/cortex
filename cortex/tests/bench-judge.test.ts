@@ -31,9 +31,9 @@ function reply(prompt: string): unknown {
     return {
       items: [
         // Indices hors bornes, non entiers ou en chaîne (sortie non garantie) : jamais comptés.
-        { q: 0, key: "wrong", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [3, 0, 7, 1.5, "2"], chapter: 1, notion: "ordre des segments", code: null },
-        { q: 1, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 99, notion: "somme", code: { language: "python", source: "print(2 + 2)", stdin: "", expected: "5" } },
-        { q: 2, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 1, notion: "pandas", code: { language: "python", source: "import module_absent_du_banc\nprint(1)", stdin: "", expected: "1" } },
+        { q: 0, key: "wrong", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [3, 0, 7, 1.5, "2"], chapter: 1, notion: "ordre des segments", code: null, evidence: [{ criterion: "key", option: 0, source: "Cours", passage: "TCP ordonne" }] },
+        { q: 1, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 99, notion: "somme", code: { language: "python", source: "print(2 + 2)", stdin: "", expected: "5" }, evidence: [{ criterion: "key", option: 1, source: "Question", passage: "2 + 2" }] },
+        { q: 2, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 1, notion: "pandas", code: { language: "python", source: "import module_absent_du_banc\nprint(1)", stdin: "", expected: "1" }, evidence: [{ criterion: "key", option: 0, source: "Cours", passage: "première ligne" }] },
       ],
     };
   }
@@ -110,7 +110,7 @@ test("juge : arbitre, code exécuté, doublons et faux rejets ; la clé n'est ja
   assert.deepEqual(v.duplicatesIntra, [[0, 1]]);
   assert.deepEqual(v.duplicatesPrevious, [1]);
   assert.deepEqual(v.rejected, [{ idx: 0, offCourseReject: true, falseRejection: true }, { idx: 1, offCourseReject: false, falseRejection: false }]);
-  assert.match(v.rubric, /^v1:/);
+  assert.match(v.rubric, /^v2:/);
 });
 
 test("chapitre : un rang rendu à la place de l'identifiant est rattaché ; un plan d'un seul chapitre est attribué d'office", async () => {
@@ -124,6 +124,14 @@ test("chapitre : un rang rendu à la place de l'identifiant est rattaché ; un p
   // CS-290 au banc : le juge rendait l'identifiant en chaîne (« "1000028" »), aucune question rattachée.
   assert.equal(chapterOf("1000020" as unknown as number, plan), 1000020);
   assert.equal(chapterOf("2" as unknown as number, plan), 1000020);
+});
+
+test("vote du juge : une option n'est retenue que si au moins deux arbitres sur trois la signalent", async () => {
+  const { majorityOptions, majorityValue } = await import("../lib/bench/judge");
+  assert.deepEqual(majorityOptions([[0, 1], [1, 2], [1, 3]]), [1]);
+  assert.deepEqual(majorityOptions([[0], [1], [2]]), []);
+  assert.equal(majorityValue(["right", "wrong", "wrong"]), "wrong");
+  assert.equal(majorityValue(["right", "wrong", "unsure"]), "right", "égalité : verdict prudent et déterministe");
 });
 
 test("une panne passagère du fournisseur pendant le jugement est réessayée, le jugement n'est pas perdu", async () => {
