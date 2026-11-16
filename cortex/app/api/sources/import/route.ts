@@ -63,16 +63,17 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     return NextResponse.json({ error: `${file.name} : fichier trop volumineux (30 Mo maximum par fichier).` }, { status: 413 });
   }
 
-  // Un document qui ne s'ouvre pas est refusé ici, nommé, plutôt que rangé puis ignoré à l'ingestion.
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const problem = await unreadableDocument(buffer, path.extname(rel));
-  if (problem) return NextResponse.json({ error: `${file.name} : ${problem.message}` }, { status: problem.status });
-
   const { refsDir, contentRoot } = coursePaths(course);
   const courseMax = await storageQuotaBytesFor(currentUser());
   if (courseMax !== null && (await fileStore().usageBytes(refsDir)) + (await fileStore().usageBytes(contentRoot)) + file.size > courseMax) {
     return NextResponse.json({ error: `${file.name} : plafond de ${Math.round(courseMax / (1024 * 1024))} Mo atteint pour ce cours (quota de stockage configurable).` }, { status: 413 });
   }
+
+  // Un document qui ne s'ouvre pas est refusé ici, nommé, plutôt que rangé puis ignoré à l'ingestion.
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const problem = await unreadableDocument(buffer, path.extname(rel));
+  if (problem) return NextResponse.json({ error: `${file.name} : ${problem.message}` }, { status: problem.status });
+
   const { bucket } = classifyFile(rel);
   const destDir = bucket === "refs" ? refsDir : path.join(contentRoot, bucket);
   const saved = await storeUnique(destDir, path.basename(rel), buffer);
