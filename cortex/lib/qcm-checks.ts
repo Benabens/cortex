@@ -37,7 +37,7 @@ const STOP = new Set([
 const root = (w: string) => (w.length >= 5 ? w.slice(0, 5) : w);
 
 /** Racines des mots porteurs de sens d'un texte (4 lettres au moins, hors mots outils). */
-function contentRoots(text: string): Set<string> {
+export function contentRoots(text: string): Set<string> {
   return new Set(tokenize(text, 4).filter((t) => !STOP.has(t)).map(root));
 }
 
@@ -348,7 +348,7 @@ export function keyProposition(it: { options: string[]; correct: number[]; sourc
 }
 
 /** Chevauchement de deux ensembles de racines, rapporté au plus petit : 1 si l'un couvre l'autre. */
-function overlapRatio(a: Set<string>, b: Set<string>): number {
+export function overlapRatio(a: Set<string>, b: Set<string>): number {
   const [small, big] = a.size <= b.size ? [a, b] : [b, a];
   if (!small.size) return 0;
   let shared = 0;
