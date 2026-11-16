@@ -48,13 +48,16 @@ test("migration : un ledger hérité (crédits entiers) est converti ×100 une s
 test("nouvelles écritures en centièmes : palier gratuit, coûts, débit, remboursement", async () => {
   const credits = await import("../lib/billing/credits");
   assert.equal(await credits.getBalanceCenti("bob"), 200); // 2 crédits offerts = 200 centièmes
-  assert.equal(credits.creditCost("exam"), 200);
-  assert.equal(credits.creditCost("qcm"), 100);
-  assert.equal(credits.creditCost("assist"), 10); // 0,1 crédit : l'assistance n'est plus gratuite
+  assert.equal(credits.creditCost("exam"), 500);
+  assert.equal(credits.creditCost("qcm"), 400);
+  assert.equal(credits.creditCost("assist"), 30); // 0,3 crédit : l'assistance n'est plus gratuite
   process.env.CREDITS_COST_JSON = JSON.stringify({ assist: 0.25, exam: 3 });
   assert.equal(credits.creditCost("assist"), 25);
   assert.equal(credits.creditCost("exam"), 300);
-  delete process.env.CREDITS_COST_JSON;
+
+  // Le reste du test porte sur la mécanique de réservation/remboursement, pas sur le tarif courant :
+  // on fixe des coûts qui laissent le palier gratuit de bob (2 crédits) couvrir le scénario.
+  process.env.CREDITS_COST_JSON = JSON.stringify({ qcm: 1, exam: 2, assist: 0.1 });
 
   const { runWithUser } = await import("../db/context");
   const { reserveGeneration } = await import("../lib/billing/reserve");
@@ -68,6 +71,7 @@ test("nouvelles écritures en centièmes : palier gratuit, coûts, débit, rembo
   assert.equal(await credits.getBalance("bob"), 1.9);
   const gate = await runWithUser("bob", () => credits.creditsGate("exam"));
   assert.ok(gate && gate.status === 402 && /1,9/.test(gate.error), gate?.error);
+  delete process.env.CREDITS_COST_JSON;
 });
 
 test("2b-7 (sqlite) : conversion annulée par une transaction englobante → lectures toujours justes, conversion reprise ensuite", async () => {

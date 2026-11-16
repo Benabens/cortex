@@ -33,7 +33,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     if (tooLong) return tooLong;
     try {
       // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
-      // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, rendu seulement si
+      // l'appel au modèle, APRÈS validation de la demande : 0,3 crédit, rendu seulement si
       // l'appel n'est pas parti ou si la réponse est restée illisible (lib/billing/reserve).
       const { assistCall } = await import("@/lib/billing/reserve");
       const drill = await assistCall("drill", () => generateDrill(c));

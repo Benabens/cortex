@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 
 type App = { id: string; name: string | null; host: string | null; scopes: string[]; connectedAt: string; lastUsedAt: string | null };
@@ -19,7 +20,7 @@ const fmt = (s: string | null) => {
 };
 
 /**
- * Applications connectées au compte par le connecteur MCP (Claude…) : ce
+ * Applications connectées au compte par le connecteur MCP (tout assistant) : ce
  * qu'elles peuvent faire, depuis quand, dernière utilisation, et « Révoquer »
  * qui coupe immédiatement tous leurs jetons. Affiché seulement si le
  * connecteur est activé sur l'instance (MCP_ENABLED=1).
@@ -56,8 +57,8 @@ export function ConnectedApps() {
     <section className="d2-card p-5 sm:p-6" aria-labelledby="apps-title">
       <h2 id="apps-title" className="text-xl font-semibold text-ink-1">Applications connectées</h2>
       <p className="mt-1 max-w-2xl text-[0.9rem] text-ink-2">
-        Les assistants que tu as branchés sur ton compte (par exemple Claude, avec l’adresse <code className="text-ink-1">/mcp</code>).
-        Révoquer coupe leur accès immédiatement.
+        Les assistants que tu as branchés sur ton compte. Révoquer coupe leur accès immédiatement.{" "}
+        <Link href="/compte/assistants" className="text-ink-1 underline underline-offset-4">Connecter un assistant</Link>
       </p>
       {error && <p role="alert" className="mt-3 text-[0.85rem] text-[var(--error-ink)]">{error}</p>}
       {!apps && !error && <div className="skeleton mt-4 h-20 rounded-xl" role="status" aria-label="Chargement des applications connectées" aria-busy="true" />}

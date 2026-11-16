@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
+import { MCP_PRIVACY_URL, MCP_TERMS_URL, MCP_TITLE, MCP_WEBSITE_URL } from "@/lib/mcp/identity";
 import { log } from "@/lib/metrics";
 import { PayloadTooLarge, readJson, readText } from "@/lib/upload-limit";
 import { ClientRegistrationError, registerClient } from "./clients";
 import { SUPPORTED_SCOPES, issuerFor, resourceFor } from "./config";
 import { corsHeaders } from "./cors";
+import { impersonatedClient, recognizeClient } from "./known-clients";
 import { OAuthError, createConsentTicket, decideConsent, exchangeToken, revokeToken, validateAuthorizeRequest } from "./server";
 
 /**
@@ -62,7 +64,12 @@ export function authorizationServerMetadata(req: Request): NextResponse {
     revocation_endpoint_auth_methods_supported: ["none"],
     scopes_supported: [...SUPPORTED_SCOPES],
     client_id_metadata_document_supported: true,
+    // ChatGPT n'utilise son adresse de retour stable (et son client_id CIMD stable) que si l'émetteur
+    // est identifié : ce drapeau, et `iss` dans chaque réponse d'autorisation (succès comme erreur).
     authorization_response_iss_parameter_supported: true,
+    service_documentation: MCP_WEBSITE_URL,
+    op_policy_uri: MCP_PRIVACY_URL,
+    op_tos_uri: MCP_TERMS_URL,
   });
 }
 
@@ -75,7 +82,10 @@ export function protectedResourceMetadata(req: Request): NextResponse {
     authorization_servers: [issuer],
     scopes_supported: [...SUPPORTED_SCOPES],
     bearer_methods_supported: ["header"],
-    resource_name: "Cortex",
+    resource_name: MCP_TITLE,
+    resource_documentation: MCP_WEBSITE_URL,
+    resource_policy_uri: MCP_PRIVACY_URL,
+    resource_tos_uri: MCP_TERMS_URL,
   });
 }
 
@@ -202,6 +212,10 @@ export type ConsentView =
   | {
       kind: "consent"; ticket: string; clientName: string | null; clientHost: string; redirectHost: string;
       verifiedDomain: boolean; localRedirect: boolean; scopes: string[];
+      /** Client reconnu par son identité vérifiable (lib/oauth/known-clients) : nom et domaine qui le prouvent. */
+      recognized: { label: string; domain: string } | null;
+      /** Nom déclaré qui imite un client connu sans en avoir l'identité : le libellé imité. */
+      impersonates: string | null;
     };
 
 /**
@@ -217,10 +231,14 @@ export async function prepareConsent(req: Request, params: URLSearchParams, user
   if (!v.ok) return "redirect" in v ? { kind: "redirect", url: v.redirect } : { kind: "error", message: v.display };
   const ticket = await createConsentTicket(userId, v.request);
   const c = v.request.client;
+  const known = recognizeClient({ clientId: c.clientId, viaCimd: c.kind === "cimd", redirectUri: v.request.redirectUri });
+  const imitated = known ? null : impersonatedClient(c.name);
   return {
     kind: "consent",
     ticket,
     clientName: c.name,
+    recognized: known ? { label: known.label, domain: known.domain } : null,
+    impersonates: imitated?.label ?? null,
     // CIMD : l'identité du client est le domaine qui sert son document (son client_id) ;
     // DCR : seul l'hôte de l'URL de retour est vérifiable, le nom est déclaré.
     clientHost: c.kind === "cimd" ? new URL(c.clientId).host : new URL(v.request.redirectUri).host,

@@ -80,7 +80,7 @@ test("compte vide : produits, prix, portail et webhook sont créés, et le secre
   const byKey = Object.fromEntries(db.prices.map((p) => [String(p.lookup_key), p]));
   assert.deepEqual(Object.keys(byKey).sort(), ["cortex_credits_10", "cortex_pro_monthly", "cortex_pro_yearly"]);
   assert.deepEqual([byKey.cortex_pro_monthly.unit_amount, byKey.cortex_pro_monthly.currency, byKey.cortex_pro_monthly.recurring], [1490, "eur", { interval: "month" }]);
-  assert.deepEqual([byKey.cortex_pro_yearly.unit_amount, byKey.cortex_pro_yearly.recurring], [11900, { interval: "year" }]);
+  assert.deepEqual([byKey.cortex_pro_yearly.unit_amount, byKey.cortex_pro_yearly.recurring], [14900, { interval: "year" }]);
   assert.deepEqual([byKey.cortex_credits_10.unit_amount, byKey.cortex_credits_10.recurring], [900, undefined], "le pack est un paiement unique");
   assert.equal(byKey.cortex_pro_monthly.product, byKey.cortex_pro_yearly.product, "les deux prix Pro partagent un produit");
   assert.notEqual(byKey.cortex_credits_10.product, byKey.cortex_pro_monthly.product);

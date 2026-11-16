@@ -74,7 +74,7 @@ async function handlePOST(req: NextRequest) {
 
   try {
     // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
-    // l'appel au modèle, APRÈS validation de la demande : 0,1 crédit, rendu seulement si
+    // l'appel au modèle, APRÈS validation de la demande : 0,3 crédit, rendu seulement si
     // l'appel n'est pas parti ou si la réponse est restée illisible (lib/billing/reserve).
     const { assistCall } = await import("@/lib/billing/reserve");
     const result = await assistCall("check-solution", () => checkSolution({ statement, answer, imageRel, ...(rubric ? { rubric: rubric.rubric, reference: rubric.reference } : {}) }));

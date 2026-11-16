@@ -1,5 +1,5 @@
 /**
- * LOT 2b-2 — l'assistance est à PRIX FIXE (0,1 crédit) mais acceptait jusqu'à
+ * LOT 2b-2 — l'assistance est à PRIX FIXE (0,3 crédit) mais acceptait jusqu'à
  * 1 Mo de texte par champ : 200 000 tokens facturés au tarif d'un drill.
  * Chaque champ envoyé au modèle a un plafond strict ; au-delà → 413, sans débit.
  */
