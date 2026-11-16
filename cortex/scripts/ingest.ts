@@ -17,6 +17,7 @@ import { dbDriverName, q } from "../db/q";
 import { coursePaths, DEFAULT_COURSE, ensureCoursesLoaded } from "../lib/courses";
 import { importFolder } from "../lib/import-folder";
 import { readAllRefs, writeRef } from "../lib/sources";
+import { examKind, examYear } from "../lib/exam-names";
 import { sourceTypeForFolder } from "../lib/course-source";
 import { tokenize } from "../lib/text";
 import { extractOfficeText, type OfficeExtension } from "../lib/office-documents";
@@ -422,11 +423,11 @@ function inferGenericType(rel: string): { type: string; year: number | null } {
   // Dossier rangé par catégorie (questions d'exemple officielles, consignes d'examen) : il prime sur le nom.
   const byFolder = sourceTypeForFolder(rel) ?? FOLDER_TYPES[rel.replace(/\\/g, "/").split("/")[0].toLowerCase()];
   if (byFolder) return { type: byFolder, year: null };
-  // Sans dossier de catégorie (misc/, sites/, dépôt ancien) : le nom du fichier décide.
+  // Sans dossier de catégorie (misc/, sites/, dépôt ancien) : le nom du fichier décide, avec le
+  // classifieur d'annales de l'import (lib/exam-names).
   const f = rel.toLowerCase();
-  let m;
-  if ((m = f.match(/final.*?(\d{4})|(\d{4}).*?final/))) return { type: "final", year: +(m[1] || m[2]) };
-  if ((m = f.match(/midterm.*?(\d{4})|(\d{4}).*?midterm/))) return { type: "midterm", year: +(m[1] || m[2]) };
+  const kind = examKind(rel);
+  if (kind) return { type: kind, year: examYear(rel) };
   if (/(^|\/)notes?\/|study.?guide|hints|scope|checklist|\bplan\b/.test(f)) return { type: "note", year: null };
   if (/s[ée]rie|exercise|\bexo\b|tutorial|homework|pset|problem.?set|\/series?\//.test(f)) return { type: "serie", year: null };
   if (/cheat|formula|recap|summary/.test(f)) return { type: "cheatsheet", year: null };
