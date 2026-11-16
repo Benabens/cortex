@@ -38,7 +38,7 @@ test("/api/billing : limites effectives du compte (défauts du déploiement gard
   const read = async () => {
     const res = await billing.GET(new NextRequest("http://cortex.test/api/billing", { headers: { "x-cortex-user": "alice" } }) as never);
     const body = (await res.json()) as { quotas: unknown; storageQuotaMb: unknown; costs: { prepare: unknown; format: unknown } };
-    assert.deepEqual([body.costs.prepare, body.costs.format], [2, 1], "ce que coûte un cours : préparation, puis chaque ajout d'annales");
+    assert.deepEqual([body.costs.prepare, body.costs.format], [2, 1], "ce que coûte un cours : préparation, puis la relecture du format de ses annales");
     return { quotas: body.quotas, storageQuotaMb: body.storageQuotaMb };
   };
   for (const k of LIMITS) delete env[k];
