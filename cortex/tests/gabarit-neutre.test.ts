@@ -125,3 +125,32 @@ test("QCM hors EPFL : tout est dans la langue de l'examen (français)", async ()
   for (const fr of [/Nom :/, /Durée :\}? 60 minutes/, /Partie 1/, /Questions à choix multiple/, /Question ouverte 1/, /choix unique, 2 points/, /Cochez/, /idée fausse/, /16 novembre 2026/]) assert.match(page + pageChrome(tex), fr);
   for (const en of [/First part/, /Open question/, /Tick the box/, /Instructions\}/, /You have/, /November/, /SCQ|MCQ/]) assert.doesNotMatch(page + pageChrome(tex), en);
 });
+
+test("questions composées hors EPFL : garde neutre, libellés en anglais, corrigé en bleu foncé", async () => {
+  const { renderBlocksTex } = await import("../lib/blocks-latex");
+  const { BLOCKS, DATE } = await import("./helpers/gabarits");
+  for (const withKey of [false, true]) {
+    const tex = await inCourse(ids.neutralEn, () => renderBlocksTex(BLOCKS, DATE, withKey));
+    assertNeutral(tex);
+    const page = body(tex);
+    assert.match(page, /Name:/);
+    assert.match(page, /Duration:\}? 90 minutes/);
+    assert.match(page, /Total:\}? 9 points/);
+    assert.match(page, /\[3 points\]/);
+    assert.match(page, /Output:/);
+    if (withKey) {
+      assert.match(page, /\\color\{solution\}/);
+      assert.match(page, /Model answer:/);
+    }
+  }
+});
+
+test("questions composées hors EPFL : tout est dans la langue de l'examen (français)", async () => {
+  const { renderBlocksTex } = await import("../lib/blocks-latex");
+  const { BLOCKS, DATE } = await import("./helpers/gabarits");
+  const tex = await inCourse(ids.neutralFr, () => renderBlocksTex(BLOCKS, DATE, true));
+  assertNeutral(tex);
+  const page = body(tex);
+  for (const fr of [/Nom :/, /Durée :\}? 60 minutes/, /mise en situation/, /Sortie :/, /Réponse type :/, /Barème :/, /\[3 points\]/]) assert.match(page, fr);
+  for (const en of [/Output:/, /Model answer/, /Grading/, /This exam has/, /\bpts\b/]) assert.doesNotMatch(page, en);
+});
