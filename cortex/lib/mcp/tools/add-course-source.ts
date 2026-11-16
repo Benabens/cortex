@@ -1,8 +1,6 @@
 import * as z from "zod/v4";
-import { billingEnabled, fromCenti } from "@/lib/billing/credits";
-import { isOwner } from "@/lib/billing/owner";
+import { getUsageLimits } from "@/lib/billing/limits";
 import { SOURCE_CATEGORIES, SourceError, addTextSource, addUrlSource } from "@/lib/course-source";
-import { costForJob } from "@/lib/jobs";
 import { courseArg, courseRef, courseRefOf } from "../schemas";
 import { ToolError, codeForStatus, defineTool } from "../tool";
 
@@ -54,7 +52,7 @@ export default defineTool({
         status: "added" as const,
         course: courseRefOf(c),
         source: { file: saved.name, folder: saved.folder, bytes: saved.bytes, content_type: saved.contentType },
-        next_steps: saved.folder === "refs" ? await pastExamNextSteps() : "Add the other materials the same way, then call prepare_course to (re)build the course.",
+        next_steps: saved.folder === "refs" ? await pastExamNextSteps(ctx.principal.userId) : "Add the other materials the same way, then call prepare_course to (re)build the course.",
       };
     });
   },
@@ -69,11 +67,16 @@ export default defineTool({
  * et une génération du jour). L'ajout, lui, est gratuit ; le coût de la suite est dit ici,
  * avant que l'assistant ne le demande, puis devisé par prepare_course avant tout débit.
  */
-async function pastExamNextSteps(): Promise<string> {
-  const centi = billingEnabled() && !(await isOwner()) ? costForJob("prepare") : 0;
-  const credits = fromCenti(centi);
-  const cost = centi > 0
-    ? `prepare_course reads its exam format: it costs ${credits} credit${credits >= 2 ? "s" : ""} and one daily generation, quoted before anything is charged.`
-    : "prepare_course reads its exam format (nothing is charged on this account).";
+async function pastExamNextSteps(userId: string): Promise<string> {
+  // Même verdict que get_account_status et les devis : propriétaire et facturation coupée → 0 crédit ;
+  // remaining null → aucune limite du jour ne la compte.
+  const prepare = (await getUsageLimits(userId)).generations.prepare;
+  const price = [
+    prepare.costCredits > 0 ? `${prepare.costCredits} credit${prepare.costCredits === 1 ? "" : "s"}` : null,
+    prepare.remaining !== null ? "one daily generation" : null,
+  ].filter(Boolean).join(" and ");
+  const cost = price
+    ? `prepare_course reads its exam format: it costs ${price}, quoted before anything is charged.`
+    : "prepare_course reads its exam format (nothing is charged or counted on this account).";
   return `Past exam stored for free. ${cost} Add the other materials first, then call prepare_course once.`;
 }
