@@ -90,6 +90,8 @@ export type ExamFormat = {
   blocks?: BlockFormat | null;
   /** Questions à choix (QCM, mixte) : unique, multiples ou les deux ; null pour un autre type. */
   answerMode?: AnswerMode | null;
+  /** Options de chaque QCM, lues dans l'annale (2 pour un vrai/faux, 5 pour A–E) ; null = inconnu. */
+  optionsPerQuestion?: number | null;
   /** Documents permis que l'annale écrit (détection du format) ; absent : elle ne le dit pas. */
   documents?: DocumentRule | null;
   /** Total de points des annales, quand elles le disent (absent sinon ; un format à questions composées le porte dans `blocks`). */
@@ -121,6 +123,9 @@ export const EXERCISES_MAX = 12;
 export const BLOCKS_MAX = 10;
 const BLOCKS_DEFAULT = 5;
 const PARTS_DEFAULT = { partsMin: 3, partsMax: 6 };
+/** Options d'un QCM : de 2 (vrai/faux) à 8 (lettres A à H du rendu, lib/qcm-latex). */
+export const OPTIONS_MIN = 2;
+export const OPTIONS_MAX = 8;
 
 /** Types de sources qui parlent de l'EXAMEN (annales, exemples officiels, consignes), pas de la matière. */
 export const EXAM_SOURCE_TYPES = ["final", "midterm", "sample_questions", "exam_info"] as const;
@@ -391,6 +396,12 @@ export function blocksOf(p: Pick<FormatProfile, "format_summary" | "sections" | 
   return { count: Math.min(sections.length, BLOCKS_MAX), sections: sections.slice(0, BLOCKS_MAX), partsMin: lo, partsMax: clamp(Number(m[2]), lo, 8), totalPoints };
 }
 
+/** Nombre d'options d'un profil détecté, s'il est plausible ; sinon null (inconnu). */
+function optionsOf(p: Pick<FormatProfile, "options_per_question">): number | null {
+  const n = p.options_per_question;
+  return typeof n === "number" && Number.isInteger(n) && n >= OPTIONS_MIN && n <= OPTIONS_MAX ? n : null;
+}
+
 /** Format lu dans des annales : mêmes défauts que le générateur QCM historique. `declared` : le mode déclaré, si les annales ne le disent pas. */
 function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Discipline, declared: AnswerMode | undefined): ExamFormat {
   const types = p.question_types ?? [];
@@ -410,7 +421,7 @@ function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Disc
   const openCount = Math.min(3, Math.max(0, types.find((t) => t.type === "open")?.approx_count ?? 0));
   const kind = openCount > 0 ? "mixed" : "qcm";
   const answerMode = annalesAnswerMode(p) ?? declared ?? "mixed";
-  return { ...base, kind, questionCount, openCount, answerMode, summary: withAnswerMode(base.summary, answerMode) };
+  return { ...base, kind, questionCount, openCount, answerMode, optionsPerQuestion: optionsOf(p), summary: withAnswerMode(base.summary, answerMode) };
 }
 
 const ANSWER_LABEL: Record<AnswerMode, string> = { single: "à réponse unique", multiple: "à réponses multiples", mixed: "à réponse unique ou multiple" };
