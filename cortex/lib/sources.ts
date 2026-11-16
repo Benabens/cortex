@@ -342,12 +342,18 @@ function unreadFileAbsolute(srcPath: string): string | null {
  * la liste survit au rechargement de la page, et un fichier retiré n'y revient pas.
  */
 export async function unreadFiles(): Promise<IngestProblem[]> {
-  const problems = ingestProblems(await lastIngestReport());
-  const stored = await Promise.all(problems.map(async (p) => {
+  const reported = ingestProblems(await lastIngestReport());
+  const stored = await Promise.all(reported.map(async (p) => {
     const abs = unreadFileAbsolute(p.path);
     return abs ? (await storage().stat(abs)) != null : false;
   }));
-  return problems.filter((_, i) => stored[i]);
+  const problems = reported.filter((_, i) => stored[i]);
+  // Rangés sans aucun passage (scans), y compris une annale déposée sans job d'ingestion derrière.
+  await q.ensureTable("sources");
+  const known = new Set(problems.map((p) => p.path));
+  const empty = (await q.all<{ path: string }>(`SELECT DISTINCT path FROM sources WHERE NOT ${EXAM_HAS_TEXT} ORDER BY path`))
+    .filter((r) => !known.has(r.path));
+  return [...problems, ...ingestProblems({ files: empty.map((r) => ({ path: r.path, status: "no_text", items: 0 })) })];
 }
 
 /** Supprime un examen uploadé (fichier + source + sélection), ou un fichier que l'ingestion n'a pas pu lire. */
