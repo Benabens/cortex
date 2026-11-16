@@ -50,6 +50,12 @@ export function majorityOptions(votes: number[][]): number[] {
   return [...counts].filter(([, count]) => count >= 2).map(([option]) => option).sort((a, b) => a - b);
 }
 
+/** Signaux de forme vérifiables sans connaissance du cours ; volontairement conservateur. */
+export function deterministicTrivialOptions(item: Pick<BenchItem, "options" | "correct">): number[] {
+  const absolute = /\b(?:toujours|jamais|aucun(?:e)?|tous?|toutes?|impossible|nécessairement|exclusivement|always|never|none|all|impossible|necessarily|exclusively)\b/i;
+  return (item.options ?? []).flatMap((option, idx) => (!(item.correct ?? []).includes(idx) && absolute.test(option) ? [idx] : []));
+}
+
 type Passage = { src: string; text: string };
 
 async function passagesFor(text: string, max = 3): Promise<Passage[]> {
@@ -233,6 +239,7 @@ export async function judgeExam(run: BenchRun): Promise<Verdicts> {
       const v = votedVerdict(rounds.map((raw) => raw.find((x) => x.q === it.idx)).filter((x): x is RawVerdict => !!x));
       const code = v?.code?.source ? await runCode(v.code) : undefined;
       const distractors = it.options ? Math.max(0, it.options.length - (it.correct ?? []).length) : 0;
+      const deterministicTrivial = deterministicTrivialOptions(it);
       verdicts.push({
         idx: it.idx,
         chapter: chapterOf(v?.chapter, run.plan.chapters),
@@ -244,8 +251,8 @@ export async function judgeExam(run: BenchRun): Promise<Verdicts> {
         offCourse: !!v?.off_course,
         distractors,
         // Même règle que le correcteur du moteur (lib/qcm) : un indice d'option fausse, entier et dans les bornes.
-        trivialDistractors: Math.min(distractors, new Set((Array.isArray(v?.trivial) ? v.trivial : []).filter((k) => Number.isInteger(k) && k >= 0 && k < (it.options?.length ?? 0) && !(it.correct ?? []).includes(k))).size),
-        evidence: v?.evidence ?? [],
+        trivialDistractors: Math.min(distractors, deterministicTrivial.length),
+        evidence: [...(v?.evidence ?? []), ...deterministicTrivial.map((option) => ({ criterion: "trivial", option, source: `Q${it.idx}`, passage: it.options?.[option] ?? "" }))],
         ...(code ? { code } : {}),
       });
     }
