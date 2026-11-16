@@ -22,7 +22,7 @@ process.env.CORTEX_DATA_DIR = tmp;
 // Budget IA lié au revenu (testé dans ai-budget.test.ts) : ici, les comptes sont financés par des crédits offerts.
 process.env.AI_BUDGET_MARGIN = "unlimited";
 process.env.BILLING_ENABLED = "1";
-process.env.SIGNUP_FREE_CREDITS = "10";
+process.env.SIGNUP_FREE_CREDITS = "50";
 process.env.DAILY_GEN_QUOTA = "unlimited";
 process.env.RATE_LIMIT_PER_USER_MIN = "unlimited";
 process.env.MAX_ACTIVE_JOBS = "unlimited";

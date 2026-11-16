@@ -195,13 +195,32 @@ export type TokenResponse = {
 };
 
 /**
+ * client_id porté par une assertion JWT (RFC 7523 §3 : `sub` = client_id), sans la
+ * vérifier : elle ne sert qu'à nommer le client, exactement comme un client_id de
+ * formulaire, que n'importe qui peut écrire. La sécurité reste celle d'un client
+ * public : PKCE et le code lié au client et à l'URL de retour.
+ */
+function clientIdFromAssertion(form: URLSearchParams): string | null {
+  if (form.get("client_assertion_type") !== "urn:ietf:params:oauth:client-assertion-type:jwt-bearer") return null;
+  const payload = (form.get("client_assertion") ?? "").split(".")[1];
+  if (!payload || payload.length > 8192) return null;
+  try {
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { sub?: unknown; iss?: unknown };
+    const id = typeof claims.sub === "string" ? claims.sub : typeof claims.iss === "string" ? claims.iss : null;
+    return id && id.length <= 2000 ? id : null;
+  } catch { return null; }
+}
+
+/**
  * Identifie le client au point de jeton. Clients PUBLICS seulement (PKCE fait
- * foi) : le client_id vient du formulaire, ou d'un en-tête Basic que certains
- * clients envoient quand même (secret vide ou ignoré). Un en-tête illisible est
- * un refus d'authentification (401), jamais une erreur serveur.
+ * foi) : le client_id vient du formulaire, d'un en-tête Basic que certains
+ * clients envoient quand même (secret vide ou ignoré), ou d'une assertion
+ * private_key_jwt qu'un client à double méthode (ChatGPT) joindrait malgré nos
+ * métadonnées. Un en-tête illisible est un refus d'authentification (401),
+ * jamais une erreur serveur.
  */
 async function identifyClient(form: URLSearchParams, authorization: string | null, fetcher?: MetadataFetcher): Promise<OAuthClient> {
-  let clientId = form.get("client_id");
+  let clientId = form.get("client_id") ?? clientIdFromAssertion(form);
   const basic = authorization?.match(/^Basic\s+(.+)$/i);
   if (basic) {
     const decoded = Buffer.from(basic[1], "base64").toString("utf8");

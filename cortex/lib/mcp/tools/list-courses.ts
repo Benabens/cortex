@@ -1,7 +1,7 @@
 import * as z from "zod/v4";
 import { ensureCoursesLoaded, listCoursesOf } from "@/lib/courses";
 import { daysUntil } from "../content";
-import { defineTool } from "../tool";
+import { defineTool, READ_ONLY_HINTS } from "../tool";
 
 const output = z.object({
   courses: z.array(z.object({
@@ -24,6 +24,8 @@ export default defineTool({
     "Call this first when the student mentions a course you cannot match, or before any other tool when the account may have several courses. " +
     "Read-only and free.",
   kind: "read",
+  annotations: READ_ONLY_HINTS,
+  userSummary: "Liste tes cours et leurs dates d’examen.",
   input: z.object({}),
   output,
   async run(_args, ctx) {

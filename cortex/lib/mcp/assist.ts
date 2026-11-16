@@ -5,7 +5,7 @@ import { ToolError, codeForStatus } from "./tool";
 
 /**
  * Appel d'ASSISTANCE au nom du compte courant, exactement comme les routes de
- * l'app (drill, check-solution) : réservation atomique de 0,1 crédit (rafale,
+ * l'app (drill, check-solution) : réservation atomique de 0,3 crédit (rafale,
  * quota du jour, solde) AVANT l'appel, remboursée si nos propres gardes
  * l'arrêtent avant envoi ou si la réponse reste illisible (lib/billing/reserve
  * assistCall). Les refus et pannes deviennent des ToolError au message lisible

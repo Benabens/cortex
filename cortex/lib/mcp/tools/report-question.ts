@@ -21,6 +21,9 @@ export default defineTool({
     "The question leaves the student's revisions and is recorded for human review without a paid model call; a refund can follow after confirmation. " +
     "Use it to pass on a careful review of an exam, one call per faulty question, with the reason in comment.",
   kind: "write",
+  // Retire la question des révisions de l'élève (suppression) ; chaque appel enregistre un signalement.
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  userSummary: "Signale une question générée fausse, hors programme, en double ou ambiguë.",
   input: z.object({
     course: courseArg,
     exam_id: z.number().int().positive(),
