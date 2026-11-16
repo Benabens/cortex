@@ -496,7 +496,12 @@ export function examLanguageFor(courseId: string): string {
  * lit que la dernière résolution de ce process ou la fiche du cours.
  */
 export async function courseLanguageName(): Promise<string> {
-  return languageName((await resolveExamFormat().catch(() => null))?.language ?? examLanguageFor(currentCourse()))[1];
+  return languageName(await courseLanguage())[1];
+}
+
+/** Code de la langue de l'examen RÉSOLU du cours courant (annales, déclaration, supports). */
+export async function courseLanguage(): Promise<string> {
+  return (await resolveExamFormat().catch(() => null))?.language ?? examLanguageFor(currentCourse());
 }
 
 /**
