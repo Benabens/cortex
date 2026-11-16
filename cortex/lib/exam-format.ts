@@ -19,6 +19,7 @@ import { q } from "@/db/q";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import { sanitizeCorpus } from "@/lib/prompt-safety";
 import { excludedSourceIds, materialLabel } from "@/lib/source-scope";
+import { EXAM_HAS_TEXT } from "@/lib/sources";
 import { languageName } from "@/lib/profiles/generic-directives";
 import type { FormatProfile } from "@/lib/format";
 
@@ -350,7 +351,7 @@ export async function readStoredProfile(): Promise<StoredProfile | null> {
 /** Annales ingérées (finals, partiels) : leur nombre, et un échantillon de leur texte pour la langue. */
 async function annales(cap = 8000): Promise<{ count: number; text: string }> {
   try {
-    const n = await q.get<{ n: number }>(`SELECT count(*) n FROM sources WHERE type IN ('final','midterm')`);
+    const n = await q.get<{ n: number }>(`SELECT count(*) n FROM sources WHERE type IN ('final','midterm') AND ${EXAM_HAS_TEXT}`);
     const count = Number(n?.n ?? 0);
     if (!count) return { count, text: "" };
     const rows = await q.all<{ text: string }>(

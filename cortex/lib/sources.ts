@@ -191,10 +191,17 @@ export type ExamSource = {
  */
 export const EXAM_SOURCE_DEDUP = `id IN (SELECT min(id) FROM sources WHERE type IN ('final','midterm') GROUP BY path)`;
 
-/** Nombre d'annales (finals, partiels) ingérées dans le cours courant ; 0 pour un cours neuf. */
+/**
+ * Une annale ne compte que si elle a du texte : un scan sans couche texte (0 passage) ne peut
+ * pas servir de base au format, sinon il l'emportait sur les questions d'exemple et les
+ * consignes avec un texte d'annales vide (audit ingestion du 16/11/2026).
+ */
+export const EXAM_HAS_TEXT = `EXISTS (SELECT 1 FROM items i WHERE i.source_id = sources.id)`;
+
+/** Nombre d'annales (finals, partiels) lisibles ingérées dans le cours courant ; 0 pour un cours neuf. */
 export async function pastExamCount(): Promise<number> {
   await q.ensureTable("sources");
-  return Number((await q.get<{ n: number }>(`SELECT count(*) n FROM sources WHERE type IN ('final','midterm') AND ${EXAM_SOURCE_DEDUP}`))?.n ?? 0);
+  return Number((await q.get<{ n: number }>(`SELECT count(*) n FROM sources WHERE type IN ('final','midterm') AND ${EXAM_SOURCE_DEDUP} AND ${EXAM_HAS_TEXT}`))?.n ?? 0);
 }
 
 /** Examens (finals/midterms) dédoublonnés par chemin, triés par année croissante (sans année en dernier). */

@@ -11,6 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { corruptPdf, encryptedPdf, textPdf } from "./helpers/pdf";
+import { ingest, newCourse, sourcePaths } from "./helpers/ingest-course";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-ingest-illisible-"));
 process.env.CORTEX_DATA_DIR = tmp;
@@ -21,37 +22,6 @@ after(() => {
   delete process.env.MAX_COURSES_CREATED_PER_HOUR;
   fs.rmSync(tmp, { recursive: true, force: true });
 });
-
-async function newCourse(name: string): Promise<{ id: string; refsDir: string; contentRoot: string }> {
-  delete process.env.CORTEX_USER;
-  const { ensureCoursesLoaded, reloadCourses, coursePaths } = await import("../lib/courses");
-  await ensureCoursesLoaded();
-  const { buildCourseRow } = await import("../lib/course-create");
-  const { insertCourse } = await import("../db/courses-store");
-  const row = buildCourseRow({ name, language: "fr" }, "owner");
-  await insertCourse(row);
-  await reloadCourses();
-  const { refsDir, contentRoot } = coursePaths(row.id);
-  fs.mkdirSync(refsDir, { recursive: true });
-  fs.mkdirSync(path.join(contentRoot, "lectures"), { recursive: true });
-  return { id: row.id, refsDir, contentRoot };
-}
-
-function ingest(course: string) {
-  const report = path.join(tmp, `rapport-${course}.json`);
-  const r = spawnSync(path.join(process.cwd(), "node_modules", ".bin", "tsx"), ["scripts/ingest.ts", `--course=${course}`], {
-    env: { ...process.env, CORTEX_COURSE: course, CORTEX_INGEST_REPORT: report },
-    encoding: "utf8",
-  });
-  const files = fs.existsSync(report) ? (JSON.parse(fs.readFileSync(report, "utf8")).files as { path: string; status: string; items: number }[]) : null;
-  return { status: r.status, output: r.stdout + r.stderr, files };
-}
-
-async function sourcePaths(course: string): Promise<string[]> {
-  const { runWithCourse } = await import("../db/client");
-  const { q } = await import("../db/q");
-  return runWithCourse(course, async () => (await q.all<{ path: string }>(`SELECT DISTINCT path FROM sources ORDER BY path`)).map((s) => s.path));
-}
 
 test("une annale abîmée n'empêche pas les autres d'être lues, et le rapport la nomme", async () => {
   const c = await newCourse("Orvelle annales");
@@ -157,4 +127,14 @@ test("une ingestion qui échoue en route laisse le corpus d'avant intact (rééc
     fs.chmodSync(locked, 0o755);
   }
   assert.deepEqual(await sourcePaths(c.id), before);
+});
+
+test("une annale scannée sans texte ne compte pas comme annale (elle ne peut servir de base au format)", async () => {
+  const c = await newCourse("Orvelle scans");
+  fs.writeFileSync(path.join(c.refsDir, "final-2021.pdf"), textPdf(null));
+  fs.writeFileSync(path.join(c.refsDir, "final-2022.pdf"), textPdf("Final 2022, exercice 1"));
+  assert.equal(ingest(c.id).status, 0);
+  const { runWithCourse } = await import("../db/client");
+  const { pastExamCount } = await import("../lib/sources");
+  assert.equal(await runWithCourse(c.id, () => pastExamCount()), 1);
 });
