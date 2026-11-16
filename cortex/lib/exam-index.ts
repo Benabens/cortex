@@ -1,5 +1,6 @@
 import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
+import { pickEnonces } from "@/lib/exam-names";
 import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import { sourceHref } from "@/lib/deeplink";
@@ -166,34 +167,8 @@ async function indexOneExam(course: string, src: { path: string; title: string; 
   return out;
 }
 
-/** Garde UN énoncé par (type d'épreuve, année) — évite de compter énoncé + corrigé (doublons faux)
- *  et ne mélange plus finals et midterms d'une même année dans un seul bucket.
- *  Préfère une source SCANNABLE (PDF rendable en vision) à un extrait HTML : c'est générique
- *  (aucune matière) et ça permet l'index/scan là où un site et un PDF coexistent pour la même épreuve.
- *  Exporté : réutilisé par le scan de figures de lib/exam-dna.ts. */
-export function pickEnonces(rows: { path: string; title: string; year: number | null }[]): typeof rows {
-  const isSol = (s: string) => /solution|answer|grading|corrig|with\s+sol/i.test(s);
-  const isPdf = (s: string) => /\.pdf$/i.test(s);
-  const kindOf = (r: { path: string; title: string }) =>
-    /midterm|mi[-_ ]?term/i.test(r.path + " " + r.title) ? "midterm" : "final";
-  // score : énoncé (pas corrigé) avant tout, puis scannable (PDF) avant HTML.
-  const score = (r: { path: string; title: string }) =>
-    (isSol(r.path) || isSol(r.title) ? 0 : 2) + (isPdf(r.path) ? 1 : 0);
-  const byKey = new Map<string, typeof rows>();
-  const noYear: typeof rows = [];
-  for (const r of rows) {
-    if (r.year == null) { noYear.push(r); continue; }
-    const k = `${kindOf(r)}|${r.year}`;
-    if (!byKey.has(k)) byKey.set(k, []);
-    byKey.get(k)!.push(r);
-  }
-  const out: typeof rows = [];
-  for (const [, group] of byKey) {
-    out.push([...group].sort((a, b) => score(b) - score(a))[0]); // meilleur ; corrigé seul dispo = pris
-  }
-  out.push(...noYear);
-  return out.sort((a, b) => (a.year ?? 0) - (b.year ?? 0));
-}
+/** Exporté : réutilisé par le scan de figures de lib/exam-dna.ts. */
+export { pickEnonces };
 
 export type IndexResult = { exams: number; exercises: number };
 

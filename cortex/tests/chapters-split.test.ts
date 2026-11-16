@@ -40,3 +40,31 @@ test("pages d'un PDF : chaque page va au chapitre où elle commence", async () =
   assert.deepEqual(parts?.map((p) => p.pages), [[0, 1], [2, 3], [4]]);
   assert.match(parts![1].title, /^Chapitre 2 : Méthodes/);
 });
+
+test("titres en allemand, espagnol, italien, portugais et néerlandais : découpés comme en français", () => {
+  for (const keyword of ["Kapitel", "Vorlesung", "Teil", "Capítulo", "Tema", "Lección", "Capitolo", "Lezione", "Aula", "Hoofdstuk"]) {
+    const text = [1, 2, 3].map((n) => `${keyword} ${n} : Thema ${n}\n${body(n)}`).join("\n");
+    const parts = splitChapters(text);
+    assert.equal(parts?.length, 3, keyword);
+    assert.equal(parts![1].title, `${keyword} 2 : Thema 2`, keyword);
+  }
+});
+
+test("titres simplement numérotés en début de ligne (« 1 Introduction », « 2. Méthodes ») : découpés", () => {
+  for (const sep of [" ", ". "]) {
+    const text = ["Introduction", "Méthodes", "Résultats"].map((t, k) => `${k + 1}${sep}${t}\n${body(k + 1)}`).join("\n");
+    const parts = splitChapters(text);
+    assert.equal(parts?.length, 3, JSON.stringify(sep));
+    assert.equal(parts![2].title, `3${sep}Résultats`);
+  }
+});
+
+test("une liste numérotée courte ou une table des matières numérotée ne découpent pas à leur place", () => {
+  const list = "Étapes :\n1. Lire\n2. Écrire\n3. Relire\n";
+  assert.equal(splitChapters(list + body(1).repeat(4)), null);
+  const toc = "1 Introduction\n2 Méthodes\n3 Résultats\n";
+  const text = toc + ["Introduction", "Méthodes", "Résultats"].map((t, k) => `${k + 1} ${t}\n${body(k + 1)}`).join("\n");
+  const parts = splitChapters(text);
+  assert.equal(parts?.length, 3);
+  assert.ok(parts![1].text.startsWith("2 Méthodes\n Contenu du chapitre 2"), parts![1].text.slice(0, 40));
+});

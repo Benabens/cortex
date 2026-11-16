@@ -1,14 +1,15 @@
 import { currentUser } from "@/db/context";
 import { coursePaths, getCourse } from "@/lib/courses";
-import { FOLDER_EXTENSIONS, SOURCE_FILE_MAX_BYTES } from "@/lib/folder-import";
+import { FOLDER_EXTENSIONS, IMAGE_FILE, IMAGE_REFUSAL, LEGACY_FILE, LEGACY_REFUSAL, SOURCE_FILE_MAX_BYTES } from "@/lib/folder-import";
 import { classifyFile } from "@/lib/import-folder";
 import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
-import { extractOfficeText, OfficeDocumentError, type OfficeExtension } from "@/lib/office-documents";
+import { unreadableDocument } from "@/lib/document-check";
 import { requireCourse } from "@/lib/req";
 import { checkStorage, declaredBytes, storageQuotaBytesFor } from "@/lib/storage-quota";
 import { readFormData, UPLOAD_LIMITS, withBodyLimit } from "@/lib/upload-limit";
 import path from "node:path";
 import { storage as fileStore } from "@/lib/storage";
+import { storedFileName, storeUnique } from "@/lib/stored-file";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -21,7 +22,7 @@ function safeRelPath(raw: string): string | null {
   if (rawParts.some((part) => part.startsWith("."))) return null;
   const parts = rawParts
     .filter((part) => part !== "." && part !== "..")
-    .map((part) => part.replace(/[^a-zA-Z0-9._-]/g, "_"))
+    .map(storedFileName)
     .slice(-4);
   if (!parts.length || !ALLOWED.has(path.extname(parts.at(-1)!).toLowerCase())) return null;
   return parts.join("/");
@@ -54,21 +55,12 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (files.length !== 1) return NextResponse.json({ error: "Envoie un seul fichier par requête." }, { status: 400 });
 
   const file = files[0];
+  if (IMAGE_FILE.test(file.name)) return NextResponse.json({ error: `${file.name} : ${IMAGE_REFUSAL}` }, { status: 415 });
+  if (LEGACY_FILE.test(file.name)) return NextResponse.json({ error: `${file.name} : ${LEGACY_REFUSAL}` }, { status: 415 });
   const rel = safeRelPath(String(form.get("relpath") ?? file.name));
   if (!rel) return NextResponse.json({ error: `${file.name} : fichier caché ou format non pris en charge.` }, { status: 415 });
   if (file.size > SOURCE_FILE_MAX_BYTES) {
     return NextResponse.json({ error: `${file.name} : fichier trop volumineux (30 Mo maximum par fichier).` }, { status: 413 });
-  }
-
-  let buffer: Buffer | null = null;
-  const extension = path.extname(file.name).toLowerCase();
-  if (extension === ".docx" || extension === ".pptx") {
-    buffer = Buffer.from(await file.arrayBuffer());
-    try { await extractOfficeText(buffer, extension as OfficeExtension); }
-    catch (error) {
-      if (error instanceof OfficeDocumentError) return NextResponse.json({ error: `${file.name} : ${error.message}` }, { status: error.status });
-      return NextResponse.json({ error: `${file.name} : document Office illisible.` }, { status: 422 });
-    }
   }
 
   const { refsDir, contentRoot } = coursePaths(course);
@@ -76,16 +68,15 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (courseMax !== null && (await fileStore().usageBytes(refsDir)) + (await fileStore().usageBytes(contentRoot)) + file.size > courseMax) {
     return NextResponse.json({ error: `${file.name} : plafond de ${Math.round(courseMax / (1024 * 1024))} Mo atteint pour ce cours (quota de stockage configurable).` }, { status: 413 });
   }
+
+  // Un document qui ne s'ouvre pas est refusé ici, nommé, plutôt que rangé puis ignoré à l'ingestion.
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const problem = await unreadableDocument(buffer, path.extname(rel));
+  if (problem) return NextResponse.json({ error: `${file.name} : ${problem.message}` }, { status: problem.status });
+
   const { bucket } = classifyFile(rel);
-  const name = path.basename(rel);
   const destDir = bucket === "refs" ? refsDir : path.join(contentRoot, bucket);
-  const absolute = path.join(destDir, name);
-  if (!absolute.startsWith(path.resolve(destDir) + path.sep)) return NextResponse.json({ error: `${file.name} : chemin refusé.` }, { status: 400 });
-  const existing = await fileStore().stat(absolute);
-  if (existing) {
-    if (existing.size === file.size) return NextResponse.json({ ok: true, duplicate: true, name, bucket });
-    return NextResponse.json({ error: `${file.name} : un fichier différent porte déjà ce nom.` }, { status: 409 });
-  }
-  await fileStore().put(absolute, buffer ?? Buffer.from(await file.arrayBuffer()));
-  return NextResponse.json({ ok: true, name, bucket });
+  const saved = await storeUnique(destDir, path.basename(rel), buffer);
+  if (!saved) return NextResponse.json({ error: `${file.name} : trop de fichiers du même nom dans ce cours.` }, { status: 409 });
+  return NextResponse.json({ ok: true, name: saved.name, bucket, ...(saved.duplicate ? { duplicate: true } : {}) });
 });

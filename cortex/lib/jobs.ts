@@ -10,6 +10,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { storage } from "@/lib/storage";
+import type { IngestReport } from "@/lib/ingest-report";
 
 /**
  * Jobs de génération en ARRIÈRE-PLAN, découplés de la requête HTTP.
@@ -29,6 +30,8 @@ export type Job = {
   resultId: number | null;
   error: string | null;
   log: { t: string; msg: string }[];
+  /** Ingestion (ingest, prepare) : le sort de chaque fichier ; null pour les autres jobs. */
+  report: IngestReport | null;
   pid: number | null;
   createdAt: string;
   updatedAt: string;
@@ -37,7 +40,7 @@ export type Job = {
 export async function ensureJobsSchema(): Promise<void> {
   await q.ensureTable("jobs");
   // Colonnes de durabilité — rattrapage pour les DB existantes.
-  try { await q.ensureColumns("jobs", ["attempts", "max_attempts", "heartbeat_at", "checkpoint_json", "worker_id", "credit_ref"]); } catch {}
+  try { await q.ensureColumns("jobs", ["attempts", "max_attempts", "heartbeat_at", "checkpoint_json", "worker_id", "credit_ref", "report_json"]); } catch {}
 }
 // (pas d'appel top-level : la table jobs est créée à la demande dans la DB du cours courant)
 
@@ -295,13 +298,28 @@ export async function reportJob(id: number, step: string, progress: number, stat
   await logJob(id, step);
 }
 
+/** Le rapport par fichier de la dernière ingestion du cours courant (job d'ingestion ou de préparation), ou null. */
+export async function lastIngestReport(): Promise<IngestReport | null> {
+  await ensureJobsSchema();
+  const row = await q.get<{ report_json: string }>(`SELECT report_json FROM jobs WHERE report_json IS NOT NULL ORDER BY id DESC LIMIT 1`);
+  try { return row ? (JSON.parse(row.report_json) as IngestReport) : null; } catch { return null; }
+}
+
+/** Range le rapport par fichier d'une ingestion sur son job (lu par l'interface et par MCP). */
+export async function setJobReport(id: number, report: IngestReport): Promise<void> {
+  await ensureJobsSchema();
+  await q.run(`UPDATE jobs SET report_json = ?, updated_at = ? WHERE id = ?`, JSON.stringify(report), nowStr(), id);
+}
+
 function rowToJob(r: any): Job {
   let log: { t: string; msg: string }[] = [];
   try { log = JSON.parse(r.log_json ?? "[]"); } catch {}
+  let report: IngestReport | null = null;
+  try { report = r.report_json ? JSON.parse(r.report_json) : null; } catch {}
   return {
     id: r.id, type: r.type, target: r.target, status: r.status, currentStep: r.current_step,
     progress: r.progress, resultPath: r.result_path, resultId: r.result_id, error: r.error,
-    log, pid: r.pid, createdAt: r.created_at, updatedAt: r.updated_at,
+    log, report, pid: r.pid, createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
 

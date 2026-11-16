@@ -4,6 +4,7 @@ import { activeJob, getJob, jobEta, listJobs, type Job } from "@/lib/jobs";
 import { getBlockExam } from "@/lib/blocks";
 import { getQcmExam } from "@/lib/qcm";
 import { redactMessage } from "@/lib/observability";
+import { ingestProblems } from "@/lib/ingest-report";
 import { clip, htmlToText } from "../content";
 import { courseArg, courseRef, courseRefOf } from "../schemas";
 import { defineTool, READ_ONLY_HINTS, ToolError } from "../tool";
@@ -104,6 +105,18 @@ async function qcmView(examId: number, withSolutions: boolean): Promise<ExamOut 
   return { exam_id: examId, questions: [...qcm, ...open], truncated: items.length + exam.open.length > MAX_QCM };
 }
 
+/**
+ * Étape affichée : pour une ingestion, suivie des fichiers non lus (nom et cause). Pas de champ de
+ * sortie en plus : un client qui a mis le schéma en cache rejetterait la réponse (docs/MCP.md).
+ */
+function stepView(j: Job): string | null {
+  const unread = ingestProblems(j.report);
+  const step = j.currentStep ? clip(redactMessage(j.currentStep), 200) : null;
+  if (!unread.length) return step;
+  const list = clip(unread.map((p) => `${p.name} (${p.short})`).join(", "), 400);
+  return `${step ?? ""}${step ? " · " : ""}${unread.length} fichier(s) non lu(s) : ${list}`;
+}
+
 function jobView(j: Job, appOrigin: string, courseId: string): z.infer<typeof jobOut> {
   const path = j.resultPath;
   const link = !path ? null : path.includes("course=") ? `${appOrigin}${path}` : `${appOrigin}${path}${path.includes("?") ? "&" : "?"}course=${encodeURIComponent(courseId)}`;
@@ -112,7 +125,7 @@ function jobView(j: Job, appOrigin: string, courseId: string): z.infer<typeof jo
     type: j.type,
     status: j.status,
     progress_pct: Math.round(j.progress ?? 0),
-    step: j.currentStep ? clip(redactMessage(j.currentStep), 200) : null,
+    step: stepView(j),
     error: j.error ? clip(redactMessage(j.error), 300) : null,
     created_at: j.createdAt,
     updated_at: j.updatedAt,
@@ -175,7 +188,7 @@ export default defineTool({
   summarize: (o) => {
     if (!o.job) return o.active ? `Génération n° ${o.active.job_id} en cours (${o.active.progress_pct} %).` : "Aucune génération en cours.";
     const j = o.job;
-    if (j.status === "done") return `Génération n° ${j.job_id} terminée.${o.exam ? ` ${o.exam.questions.length} question(s).` : ""}`;
+    if (j.status === "done") return `Génération n° ${j.job_id} terminée.${o.exam ? ` ${o.exam.questions.length} question(s).` : ""}${(j.type === "ingest" || j.type === "prepare") && j.step ? ` ${j.step}` : ""}`;
     if (j.status === "error" || j.status === "canceled") return `Génération n° ${j.job_id} : ${j.status === "error" ? "échec" : "annulée"}.`;
     return `Génération n° ${j.job_id} : ${j.progress_pct} %${j.remaining ? `, ${j.remaining}` : ""}, repasse dans une minute.`;
   },
