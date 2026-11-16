@@ -64,18 +64,18 @@ export async function getComposition(): Promise<CompositionPlan> {
   if (plan.generator === "qcm" && fmt) {
     const types = fmt.question_types ?? [];
     const sum = (t: string) => types.filter((x) => x.type === t).reduce((s, x) => s + (x.approx_count || 0), 0);
-    const scq = sum("scq");
-    const mcq = sum("mcq");
-    const open = sum("open");
-    const qcm = scq + mcq;
+    // Nombres du plan (annale bornée à QCM_MAX, aucune ouverte inventée) ; la part SCQ/MCQ de l'annale, ramenée au nombre retenu.
+    const detected = sum("scq") + sum("mcq");
+    const scq = detected > 0 ? Math.round((sum("scq") * plan.qcmCount) / detected) : 0;
+    const mcq = detected > 0 ? plan.qcmCount - scq : 0;
     return {
       course,
       kind: "qcm",
-      summary: fmt.format_summary || `${c.examCode} : ~${qcm} QCM (SCQ+MCQ) + ~${open} ouvertes`,
+      summary: fmt.format_summary || `${c.examCode} : ~${plan.qcmCount} QCM (SCQ+MCQ) + ~${plan.openCount} ouvertes`,
       durationMin: fmt.duration_min || c.durationMin,
       totalPoints: fmt.total_points ?? null,
-      qcm: qcm || 12,
-      open,
+      qcm: plan.qcmCount,
+      open: plan.openCount,
       scq,
       mcq,
     };
