@@ -24,6 +24,8 @@ export type FormatProfile = {
   question_types: { type: QuestionType; approx_count: number; share_pct: number; points_each: number; note: string }[];
   sections: { name: string; description: string }[];
   topics_emphasis: { topic: string; share_pct: number }[];
+  /** Options de chaque QCM de l'annale (2 pour un vrai/faux, 5 pour A–E) ; absent ou null : inconnu ou variable. */
+  options_per_question?: number | null;
   /** Questions COMPOSÉES (scénario ou extrait de code + sous-questions mêlées) ; absent sinon. */
   composite?: { block_count: number; parts_min: number; parts_max: number } | null;
 };
@@ -51,6 +53,7 @@ const FORMAT_SCHEMA = {
         additionalProperties: false,
       },
     },
+    options_per_question: { type: ["integer", "null"], description: "Nombre d'options de chaque QCM (2 pour un vrai/faux, 5 pour A–E), s'il est le même pour tous ; null s'il varie ou sans QCM." },
     sections: { type: "array", items: { type: "object", properties: { name: { type: "string" }, description: { type: "string" } }, required: ["name"], additionalProperties: false } },
     topics_emphasis: { type: "array", items: { type: "object", properties: { topic: { type: "string" }, share_pct: { type: "number" } }, required: ["topic"], additionalProperties: false } },
     composite: {
@@ -112,7 +115,7 @@ export async function detectFormat(opts: { onStep?: (m: string, p: number) => vo
     dataBlock(`TEXTE DES EXAMENS PASSÉS (vérité terrain)`, [{ src: "annales", text }]),
     ``,
     `═══ TA TÂCHE ═══`,
-    `Décris le format d'UN examen type : structure (sections), TYPES de questions (scq = QCM à UNE seule réponse / mcq = QCM à PLUSIEURS réponses possibles / open / calc / proof), leur NOMBRE et leur PART en % des points, le BARÈME, la DURÉE, le total de points, et surtout la CONVENTION écrite qui distingue « exactement une bonne réponse » de « une ou plusieurs » (cite la formulation réelle). has_mcq=true s'il y a un bloc de QCM. Si chaque question est COMPOSÉE (un scénario ou un extrait de code suivi de sous-questions a, b, c… de types mêlés), remplis composite (nombre de questions, sous-questions min et max) et une section par question. Ajoute l'emphase par thème si visible.`,
+    `Décris le format d'UN examen type : structure (sections), TYPES de questions (scq = QCM à UNE seule réponse / mcq = QCM à PLUSIEURS réponses possibles / open / calc / proof), leur NOMBRE et leur PART en % des points, le BARÈME, la DURÉE, le total de points, le NOMBRE D'OPTIONS de chaque QCM (2 pour un vrai/faux, 5 pour A–E), et surtout la CONVENTION écrite qui distingue « exactement une bonne réponse » de « une ou plusieurs » (cite la formulation réelle). has_mcq=true s'il y a un bloc de QCM. Si chaque question est COMPOSÉE (un scénario ou un extrait de code suivi de sous-questions a, b, c… de types mêlés), remplis composite (nombre de questions, sous-questions min et max) et une section par question. Ajoute l'emphase par thème si visible.`,
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier écrit.`,
     JSON.stringify(FORMAT_SCHEMA, null, 2),
   ].filter(Boolean).join("\n");
