@@ -11,7 +11,7 @@ function file(name: string, size: number, relativePath = name): File {
   return { name, size, webkitRelativePath: relativePath } as File;
 }
 
-test("l'import de dossier ignore les fichiers cachés, les formats inconnus et les doublons", () => {
+test("l'import de dossier ignore les fichiers cachés et les formats inconnus ; un même nom dans deux dossiers reste deux fichiers", () => {
   const result = prepareFolderImport([
     file("cours.pdf", 12, "Analyse 3/chapitre/cours.pdf"),
     file("cours.pdf", 12, "Analyse 3/copie/cours.pdf"),
@@ -21,12 +21,13 @@ test("l'import de dossier ignore les fichiers cachés, les formats inconnus et l
     file("scan.png", 8, "Analyse 3/scans/scan.png"),
   ]);
 
+  // Le vrai doublon (même contenu) est reconnu par le serveur, à son empreinte.
   assert.deepEqual(result.accepted.map((entry) => entry.relativePath), [
     "Analyse 3/chapitre/cours.pdf",
+    "Analyse 3/copie/cours.pdf",
     "Analyse 3/scans/scan.png",
   ]);
   assert.deepEqual(result.rejected.map((entry) => entry.reason), [
-    "doublon ignoré",
     "fichier caché ignoré",
     "fichier caché ignoré",
     "format non pris en charge",
@@ -66,12 +67,12 @@ test("une archive est décompressée avec ses sous-dossiers et une archive imbri
   const result = await prepareCourseImport([moodle]);
   assert.deepEqual(result.accepted.map((entry) => entry.relativePath), [
     "moodle/Cours/chapitre.pdf",
+    "moodle/Cours/copie/chapitre.pdf",
     "moodle/Cours/series/semaine 1/serie.md",
   ]);
   assert.deepEqual(result.rejected.map((entry) => entry.reason), [
     "fichier caché ignoré",
     "fichier caché ignoré",
-    "doublon ignoré",
     "format non pris en charge",
   ]);
 });

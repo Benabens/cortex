@@ -53,7 +53,9 @@ export function prepareFolderImport(files: Iterable<File>): {
     if (!allowed.test(file.name)) { reject("format non pris en charge"); continue; }
     if (!file.size) { reject("fichier vide"); continue; }
     if (file.size > SOURCE_FILE_MAX_BYTES) { reject("30 Mo maximum par fichier"); continue; }
-    const signature = `${file.name.toLocaleLowerCase()}\0${file.size}`;
+    // Le même chemin deux fois (archive mal formée) ; un même nom dans deux dossiers reste deux
+    // fichiers, et le serveur reconnaît un vrai doublon à son contenu (empreinte).
+    const signature = rel.toLocaleLowerCase();
     if (seen.has(signature)) { reject("doublon ignoré"); continue; }
     seen.add(signature);
     accepted.push({ file, relativePath: rel });
