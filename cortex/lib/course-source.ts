@@ -6,6 +6,9 @@ import { classifyFile } from "@/lib/import-folder";
 import { PublicFetchError, readPublicHttps, type PublicFetcher } from "@/lib/public-https";
 import { checkStorage } from "@/lib/storage-quota";
 import { storage as files } from "@/lib/storage";
+import { unreadableDocument } from "@/lib/document-check";
+import { directDownloadUrl, sharedRedirectTarget } from "@/lib/share-links";
+import * as cheerio from "cheerio";
 
 /**
  * AJOUT D'UN SUPPORT À UN COURS sans passer par le navigateur : une adresse https
@@ -95,6 +98,8 @@ async function store(courseId: string, name: string, category: SourceCategory | 
   }
   const storage = await checkStorage(currentUser(), data.length);
   if (storage) throw new SourceError(storage.status, storage.error);
+  const problem = await unreadableDocument(data, path.extname(name));
+  if (problem) throw new SourceError(problem.status, problem.message);
 
   const { refsDir, contentRoot } = coursePaths(courseId);
   const dir = path.resolve(folder === "refs" ? refsDir : path.join(contentRoot, folder));
@@ -157,9 +162,20 @@ export async function addUrlSource(
   if (!takeFetchSlot(userId)) {
     throw new SourceError(429, "Trop d'adresses lues pour ce compte cette heure-ci : réessaie plus tard, ou colle le texte du document.");
   }
+  // Lien de partage Drive / Docs / Dropbox : lu à son adresse de téléchargement direct.
+  const link = directDownloadUrl(a.url);
+  const opts = { maxBytes: SOURCE_MAX_BYTES, timeoutMs: FETCH_TIMEOUT_MS, accept: ACCEPT, userAgent: "Cortex-Sources/1.0" };
   let res;
   try {
-    res = await fetcher(a.url, { maxBytes: SOURCE_MAX_BYTES, timeoutMs: FETCH_TIMEOUT_MS, accept: ACCEPT, userAgent: "Cortex-Sources/1.0" });
+    // Google et Dropbox servent le fichier depuis leur hôte de téléchargement : deux sauts au plus.
+    let target = link.url;
+    for (let hop = 0; ; hop++) {
+      try { res = await fetcher(target, opts); break; } catch (e) {
+        const next = e instanceof PublicFetchError && e.reason === "redirect" && hop < 2 ? sharedRedirectTarget({ ...link, url: target }, e.location) : null;
+        if (!next) throw e;
+        target = next;
+      }
+    }
   } catch (e) {
     if (!(e instanceof PublicFetchError)) throw e;
     if (e.reason === "too_large") throw new SourceError(413, `Document trop volumineux (maximum ${SOURCE_MAX_BYTES / 1024 / 1024} Mo).`);
@@ -178,5 +194,28 @@ export async function addUrlSource(
     throw new SourceError(415, `Type de document non pris en charge (${(res.contentType ?? "inconnu").slice(0, 60)}) : PDF, page web ou texte seulement.`);
   }
   if (!res.body.length) throw new SourceError(400, "Document vide.");
-  return store(courseId, fileName(a.title, a.url, ext), a.category, res.body, (res.contentType ?? "").split(";")[0].trim());
+  if (ext === ".html") {
+    const problem = htmlPageProblem(res.body.toString("utf8"));
+    if (problem) throw new SourceError(422, problem);
+  }
+  return store(courseId, fileName(a.title, link.named ? link.url : null, ext), a.category, res.body, (res.contentType ?? "").split(";")[0].trim());
+}
+
+const LOGIN = /(?<!\p{L})(connexion|se connecter|sign[ -]?in|log[ -]?in|anmelden|iniciar sesi[oó]n|accedi)(?!\p{L})/iu;
+
+/**
+ * Une page web qui n'apporte rien au corpus : page de connexion (lien privé, visionneuse d'un
+ * Drive), ou presque vide. Le message dit quoi faire ; null si la page a du contenu.
+ */
+function htmlPageProblem(html: string): string | null {
+  const $ = cheerio.load(html);
+  const password = $("input[type=password]").length > 0;
+  $("script, style, noscript, nav, header, footer").remove();
+  const text = $("body").text().replace(/\s+/g, " ").trim();
+  // Un champ mot de passe, ou presque rien d'autre que « Connexion » : « une connexion TCP » n'en est pas une.
+  if (password || (text.length < 200 && LOGIN.test(`${$("title").text()} ${text}`))) {
+    return "Cette page demande une connexion : le document n’est pas public. Partage-le en accès public (« tous ceux qui ont le lien »), ou dépose le fichier directement.";
+  }
+  if (text.length < 200) return "Cette page n’a presque pas de texte (visionneuse ou page vide ?) : donne le lien du document lui-même, ou dépose le fichier directement.";
+  return null;
 }

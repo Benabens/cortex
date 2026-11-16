@@ -16,11 +16,14 @@ import { indexItemForSearch } from "../lib/search";
 import { dbDriverName, q } from "../db/q";
 import { coursePaths, DEFAULT_COURSE, ensureCoursesLoaded } from "../lib/courses";
 import { importFolder } from "../lib/import-folder";
-import { ingestAllRefs } from "../lib/sources";
+import { readAllRefs, writeRef } from "../lib/sources";
+import { examKind, examYear } from "../lib/exam-names";
 import { sourceTypeForFolder } from "../lib/course-source";
 import { tokenize } from "../lib/text";
 import { extractOfficeText, type OfficeExtension } from "../lib/office-documents";
 import { splitChapters, splitPages } from "../lib/chapters";
+import { failureStatus, INGEST_FAILURE_PREFIX, readStatus, type IngestFileOutcome } from "../lib/ingest-report";
+import { writeIngestReport } from "../lib/ingest-report-file";
 
 // Args : `npm run ingest -- --course=algo --from "<dossier>"` (défaut cs-202, pas d'import).
 function argVal(name: string): string | undefined {
@@ -87,8 +90,10 @@ async function addSource(
     year,
     recencyWeight(year ?? undefined, type)
   );
+  let inserted = 0;
   for (const it of items) {
     if (!it.text || it.text.length < 3) continue;
+    inserted++;
     const itemId = await q.insert(
       `INSERT INTO items (source_id, type, lecture_id, title, text, html, images, tags, anchor)
        VALUES (?,?,?,?,?,?,?,?,?)`,
@@ -104,7 +109,7 @@ async function addSource(
     );
     await indexItemForSearch(itemId, sid, it.title ?? "", it.text, it.lectureId ?? "");
   }
-  return items.length;
+  return inserted;
 }
 
 const read = (rel: string) => fs.readFileSync(path.join(CONTENT_ROOT, rel), "utf8");
@@ -407,15 +412,23 @@ async function buildVocab(): Promise<number> {
 }
 
 // ---------- Ingestion GÉNÉRIQUE (cours ≠ cs-202) : tout le contenu de data/<id>/content ----------
+/**
+ * Dossier de catégorie du contenu (import, dépôt par catégorie, connecteur) → type d'ingestion.
+ * Il décide : « Final review 2023 » rangé en Cours reste un cours, jamais une annale (audit du
+ * 16/11/2026). Les annales vivent dans refs/, lues à part.
+ */
+const FOLDER_TYPES: Record<string, string> = { lectures: "course_pdf", series: "serie", notes: "note" };
+
 function inferGenericType(rel: string): { type: string; year: number | null } {
   // Dossier rangé par catégorie (questions d'exemple officielles, consignes d'examen) : il prime sur le nom.
-  const byFolder = sourceTypeForFolder(rel);
+  const byFolder = sourceTypeForFolder(rel) ?? FOLDER_TYPES[rel.replace(/\\/g, "/").split("/")[0].toLowerCase()];
   if (byFolder) return { type: byFolder, year: null };
+  // Sans dossier de catégorie (misc/, sites/, dépôt ancien) : le nom du fichier décide, avec le
+  // classifieur d'annales de l'import (lib/exam-names).
   const f = rel.toLowerCase();
-  let m;
-  if ((m = f.match(/final.*?(\d{4})|(\d{4}).*?final/))) return { type: "final", year: +(m[1] || m[2]) };
-  if ((m = f.match(/midterm.*?(\d{4})|(\d{4}).*?midterm/))) return { type: "midterm", year: +(m[1] || m[2]) };
-  if (/\/notes?\/|study.?guide|hints|scope|checklist|\bplan\b/.test(f)) return { type: "note", year: null };
+  const kind = examKind(rel);
+  if (kind) return { type: kind, year: examYear(rel) };
+  if (/(^|\/)notes?\/|study.?guide|hints|scope|checklist|\bplan\b/.test(f)) return { type: "note", year: null };
   if (/s[ée]rie|exercise|\bexo\b|tutorial|homework|pset|problem.?set|\/series?\//.test(f)) return { type: "serie", year: null };
   if (/cheat|formula|recap|summary/.test(f)) return { type: "cheatsheet", year: null };
   if (/lecture|cours|slides|chapter/.test(f) || /\.(pptx|docx)$/.test(f)) return { type: "course_pdf", year: null };
@@ -426,66 +439,85 @@ function inferGenericType(rel: string): { type: string; year: number | null } {
 /** Supports découpés par chapitre quand ce sont des polycopiés (jamais un examen : « Part 1/2/3 »). */
 const SPLITTABLE = new Set(["course_pdf", "note"]);
 
+/** Un support à écrire : ce qu'une lecture de fichier produit, avant toute écriture en base. */
+type SourcePlan = { type: string; title: string; path: string; year: number | null; items: ItemRec[] };
+
+const indexableItems = (plans: SourcePlan[]) => plans.reduce((n, p) => n + p.items.filter((it) => it.text && it.text.length >= 3).length, 0);
+
 /**
  * Un long support d'un seul fichier, découpé en un support par chapitre (lib/chapters) : plan du
- * cours, couverture et analyse se structurent par support. false si le document ne s'y prête pas.
+ * cours, couverture et analyse se structurent par support. null si le document ne s'y prête pas.
  */
-async function addChapteredSource(type: string, title: string, rel: string, year: number | null, pages: string[]): Promise<boolean> {
-  if (!SPLITTABLE.has(type)) return false;
+function chapteredPlans(type: string, title: string, rel: string, year: number | null, pages: string[]): SourcePlan[] | null {
+  if (!SPLITTABLE.has(type)) return null;
   const pdf = pages.length > 1;
   const parts: { title: string; pages: number[]; text?: string }[] | null | undefined = pdf
     ? splitPages(pages)
     : splitChapters(pages[0] ?? "")?.map((c) => ({ title: c.title, pages: [], text: c.text }));
-  if (!parts) return false;
-  for (const [k, part] of parts.entries()) {
+  if (!parts) return null;
+  console.log(`  ✂ ${rel} : ${parts.length} chapitres, un support chacun`);
+  return parts.map((part, k) => {
     const lectureId = `chapitre-${k + 1}`;
     const label = `${title} — ${part.title}`;
     const items: ItemRec[] = pdf
       ? part.pages.map((i) => ({ type, lectureId, title: `${label} — p.${i + 1}`, text: pages[i], anchor: `${rel}#page=${i + 1}` }))
       : [{ type, lectureId, title: label, text: part.text ?? "", anchor: rel }];
-    await addSource(type, label, rel, year, items);
-  }
-  console.log(`  ✂ ${rel} : ${parts.length} chapitres, un support chacun`);
-  return true;
+    return { type, title: label, path: rel, year, items };
+  });
 }
 
-async function ingestGenericContent(): Promise<void> {
+/** Lit un fichier du contenu : ses supports à écrire. Lève s'il ne se lit pas ; n'écrit rien. */
+async function planContentFile(rel: string): Promise<SourcePlan[]> {
+  const { type, year } = inferGenericType(rel);
+  const whole = (title: string, items: ItemRec[]): SourcePlan[] => [{ type, title, path: rel, year, items }];
+  const single = (title: string, text: string) => chapteredPlans(type, title, rel, year, [text]) ?? whole(title, [{ type, lectureId: null, title, text, anchor: rel }]);
+  if (rel.toLowerCase().endsWith(".pdf")) {
+    const buf = fs.readFileSync(path.join(CONTENT_ROOT, rel));
+    const pdf = await getDocumentProxy(new Uint8Array(buf));
+    const { text } = await extractText(pdf, { mergePages: false });
+    const pages = (Array.isArray(text) ? text : [text]).map(clean).filter((t) => t.length > 3);
+    const title = path.basename(rel, ".pdf");
+    return chapteredPlans(type, title, rel, year, pages)
+      ?? whole(title, pages.map((t, i) => ({ type, lectureId: null, title: `${title} — p.${i + 1}`, text: t, anchor: `${rel}#page=${i + 1}` })));
+  }
+  if (/\.(pptx|docx)$/i.test(rel)) {
+    const text = await extractOfficeText(fs.readFileSync(path.join(CONTENT_ROOT, rel)), path.extname(rel) as OfficeExtension);
+    return single(path.basename(rel, path.extname(rel)), text);
+  }
+  if (/\.html?$/.test(rel)) {
+    const { title, text } = htmlToText(rel);
+    return whole(title, [{ type, lectureId: null, title, text, anchor: rel }]);
+  }
+  return single(path.basename(rel), read(rel));
+}
+
+/** Lit tout le contenu du cours, fichier par fichier, sans rien écrire : un fichier illisible est isolé et figure au rapport. */
+async function readGenericContent(): Promise<{ plans: SourcePlan[]; outcomes: IngestFileOutcome[] }> {
   if (!fs.existsSync(CONTENT_ROOT)) {
     console.log(`⚠ Dossier de contenu absent : ${CONTENT_ROOT}. Dépose le matériel du cours là (sites/séries/notes/cours) puis relance.`);
-    return;
+    return { plans: [], outcomes: [] };
   }
-  let nSources = 0;
+  const plans: SourcePlan[] = [];
+  const outcomes: IngestFileOutcome[] = [];
   const files = listFiles(".", [".html", ".htm", ".md", ".txt", ".tex", ".c", ".h", ".pdf", ".pptx", ".docx"]);
   for (const rel of files) {
-    const { type, year } = inferGenericType(rel);
     try {
-      if (rel.toLowerCase().endsWith(".pdf")) {
-        const buf = fs.readFileSync(path.join(CONTENT_ROOT, rel));
-        const pdf = await getDocumentProxy(new Uint8Array(buf));
-        const { text } = await extractText(pdf, { mergePages: false });
-        const pages = (Array.isArray(text) ? text : [text]).map(clean).filter((t) => t.length > 3);
-        const title = path.basename(rel, ".pdf");
-        if (!(await addChapteredSource(type, title, rel, year, pages))) {
-          await addSource(type, title, rel, year, pages.map((t, i) => ({ type, lectureId: null, title: `${title} — p.${i + 1}`, text: t, anchor: `${rel}#page=${i + 1}` })));
-        }
-      } else if (/\.(pptx|docx)$/i.test(rel)) {
-        const title = path.basename(rel, path.extname(rel));
-        const text = await extractOfficeText(fs.readFileSync(path.join(CONTENT_ROOT, rel)), path.extname(rel) as OfficeExtension);
-        if (!(await addChapteredSource(type, title, rel, year, [text]))) await addSource(type, title, rel, year, [{ type, lectureId: null, title, text, anchor: rel }]);
-      } else if (/\.html?$/.test(rel)) {
-        const { title, text } = htmlToText(rel);
-        await addSource(type, title, rel, year, [{ type, lectureId: null, title, text, anchor: rel }]);
-      } else {
-        const title = path.basename(rel);
-        const text = read(rel);
-        if (!(await addChapteredSource(type, title, rel, year, [text]))) await addSource(type, title, rel, year, [{ type, lectureId: null, title, text, anchor: rel }]);
-      }
-      nSources++;
+      const filePlans = await planContentFile(rel);
+      plans.push(...filePlans);
+      const items = indexableItems(filePlans);
+      outcomes.push({ path: rel, status: readStatus(items), items });
     } catch (e) {
+      outcomes.push({ path: rel, status: failureStatus(e), items: 0 });
       console.log(`  ⚠ ${rel} ignoré : ${(e as Error).message}`);
     }
   }
-  console.log(`• contenu      : ${nSources} fichier(s) indexé(s) depuis ${CONTENT_ROOT}`);
+  return { plans, outcomes };
+}
+
+/** Vide les données dérivées du corpus (sources, items, index plein texte). */
+async function clearCorpus(): Promise<void> {
+  await q.exec("DELETE FROM items; DELETE FROM sources;");
+  if (q.dialect === "sqlite") await q.exec("DELETE FROM fts_items;");
 }
 
 async function main() {
@@ -504,12 +536,11 @@ async function main() {
     if (m.recentRefs.length) console.log(`  examens de référence récents : ${m.recentRefs.map((r) => r.name + (r.year ? ` (${r.year})` : "")).join(", ")}`);
   }
 
-  console.log("Nettoyage des données dérivées (sources/items/fts)…");
-  await q.exec("DELETE FROM items; DELETE FROM sources;");
-  if (q.dialect === "sqlite") await q.exec("DELETE FROM fts_items;");
-
+  const files: IngestFileOutcome[] = [];
   if (COURSE === DEFAULT_COURSE) {
     // ---- cs-202 : flux historique INCHANGÉ ----
+    console.log("Nettoyage des données dérivées (sources/items/fts)…");
+    await clearCorpus();
     await q.tx(async () => {
       console.log("• reviews.html :", await ingestReviews(), "cartes");
       console.log("• index.html   :", await ingestIndex(), "définitions/méthodes");
@@ -521,13 +552,29 @@ async function main() {
       console.log("• docs racine  :", await ingestRootDocs(), "HTML (finals/énoncés)");
     });
     console.log("• PDF cours    :", await ingestPdfs(), "pages");
+    const refs = await readAllRefs();
+    await q.tx(async () => { for (const ref of refs.parsed) await writeRef(ref); });
+    files.push(...refs.outcomes);
   } else {
-    // ---- autres cours : ingestion générique du dossier de contenu ----
-    await ingestGenericContent();
+    // ---- autres cours : TOUT est lu d'abord (contenu puis annales), puis le corpus est réécrit
+    // en UNE transaction. Une génération lancée pendant l'ingestion lit l'ancien corpus entier,
+    // et une ingestion qui échoue en route le laisse intact (avant : vidé puis rempli à moitié).
+    console.log("Lecture des fichiers du cours…");
+    const content = await readGenericContent();
+    const refs = await readAllRefs();
+    console.log("Nettoyage des données dérivées (sources/items/fts)…");
+    await q.tx(async () => {
+      await clearCorpus();
+      for (const plan of content.plans) await addSource(plan.type, plan.title, plan.path, plan.year, plan.items);
+      for (const ref of refs.parsed) await writeRef(ref);
+    });
+    files.push(...content.outcomes, ...refs.outcomes);
+    console.log(`• contenu      : ${content.outcomes.filter((o) => o.status === "indexed").length} fichier(s) indexé(s) depuis ${CONTENT_ROOT}`);
   }
-
-  // Examens de référence (data/<course>/refs/) : pour TOUS les cours.
-  console.log("• refs         :", await ingestAllRefs(), "examen(s) de référence");
+  const refOutcomes = files.filter((f) => f.path.startsWith("refs/"));
+  console.log("• refs         :", refOutcomes.filter((r) => r.status === "indexed").length, "examen(s) de référence");
+  for (const r of files) if (r.status !== "indexed") console.log(`  ⚠ ${r.path} non lu (${r.status})`);
+  writeIngestReport({ files });
 
   // Ancrage VISION : rend les pages des examens de réf PDF en images-étalon (cours ≠ cs-202).
   if (COURSE !== DEFAULT_COURSE) {
@@ -575,6 +622,9 @@ ensureCoursesLoaded()
     setTimeout(() => process.exit(0), 10_000).unref();
   })
   .catch((e) => {
-    console.error("Échec ingestion :", e);
+    // La pile pour les journaux, puis UNE ligne lisible en dernier : c'est elle que le worker
+    // affiche (un objet d'erreur imprimé tel quel finissait par « } », 16/11/2026).
+    console.error(e);
+    console.error(`${INGEST_FAILURE_PREFIX}${(e as Error)?.message?.split("\n")[0] || String(e)}`);
     process.exit(1);
   });
