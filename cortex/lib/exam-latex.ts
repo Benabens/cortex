@@ -728,12 +728,18 @@ function renderTex(tex: string, level: number): string {
 /** Repli HTML LISIBLE si la compilation LaTeX échoue : plus de LaTeX source brut. */
 export function htmlFallback(spec: ExamSpec, id: number, dateLabel: string, reason?: string): string {
   const qs = [...spec.questions].sort((a, b) => catRank(a.category) - catRank(b.category));
+  // Hors EPFL, titres de l'examen dans sa langue ; l'avertissement reste celui de l'application.
+  const w = courseTemplate() === "neutral" ? courseWords() : null;
+  const heading = (i: number, q: ExamQuestion) =>
+    w
+      ? `${escHtml(w.question)} ${i + 1} – ${escHtml(q.concept)} <span class="pts">[${escHtml(pointsText(qPoints(q), w))}]</span>`
+      : `Question ${i + 1} : ${escHtml(q.concept)} <span class="pts">[${qPoints(q)} points]</span>`;
   const blocks = qs
     .map(
       (q, i) => `<section>
-<h2>Question ${i + 1} : ${escHtml(q.concept)} <span class="pts">[${qPoints(q)} points]</span></h2>
+<h2>${heading(i, q)}</h2>
 <div class="stmt">${texToHtml((q as any).statement_tex ?? "")}</div>
-<details><summary>Corrigé</summary><div class="sol">${texToHtml((q as any).solution_tex ?? "")}</div></details>
+<details><summary>${w ? escHtml(w.solution) : "Corrigé"}</summary><div class="sol">${texToHtml((q as any).solution_tex ?? "")}</div></details>
 </section>`
     )
     .join("\n");
