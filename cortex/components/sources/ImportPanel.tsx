@@ -12,6 +12,7 @@ import { PaywallNotice } from "@/components/billing/PaywallNotice";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
 import { FOLDER_EXTENSIONS, prepareCourseImport, type FolderImportRefusal } from "@/lib/folder-import";
 import { ingestProblems, type IngestProblem } from "@/lib/ingest-report";
+import { apiDelete } from "@/lib/ux/write";
 
 const ACCEPT = ".pdf,.docx,.pptx,.html,.htm,.txt,.md,.zip";
 /** Annales : Word et PowerPoint en plus (lus comme le reste du cours). Autres zones : formats de /api/sources/add. */
@@ -98,6 +99,16 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
     }
     setJobKind(null);
   }, [job, jobKind, onChanged]);
+
+  /** Un fichier non lu ne compte nulle part : le retirer libère la place et allège la liste. */
+  const removeUnread = async (item: IngestProblem) => {
+    try {
+      await apiDelete(`/api/sources?path=${encodeURIComponent(item.path)}&course=${encodeURIComponent(courseId)}`);
+      setUnreadFiles((list) => list.filter((f) => f.path !== item.path));
+    } catch (e) {
+      setError(`${item.name} : retrait impossible (${(e as Error).message}).`);
+    }
+  };
 
   const startJob = (id: number, kind: "format" | "ingest" | "prepare") => {
     notified.current = false;
@@ -385,7 +396,14 @@ export function ImportPanel({ onChanged }: { onChanged: () => void }) {
           <p className="font-semibold text-ink-2">Fichiers non lus</p>
           <p className="mt-0.5">Les autres fichiers du cours ont été lus normalement.</p>
           <ul className="mt-1.5 list-disc space-y-1 pl-4">
-            {unreadFiles.map((item) => <li key={item.path}><span className="break-all font-medium text-ink-2">{item.name}</span> : {item.message}</li>)}
+            {unreadFiles.map((item) => (
+              <li key={item.path}>
+                <span className="break-all font-medium text-ink-2">{item.name}</span> : {item.message}{" "}
+                <button type="button" onClick={() => removeUnread(item)} className="font-medium text-ink-2 underline underline-offset-2 hover:text-ink-1">
+                  Retirer du cours
+                </button>
+              </li>
+            ))}
           </ul>
         </div>
       )}

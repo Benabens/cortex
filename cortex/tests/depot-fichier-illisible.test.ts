@@ -98,3 +98,21 @@ test("questions d'exemple, consignes et connecteur : le même refus pour un PDF 
   );
   assert.ok(!storedFiles(c.contentRoot).includes("exemples.pdf"));
 });
+
+test("un fichier illisible déjà rangé (dépôt d'avant ce contrôle) se retire depuis la liste des fichiers non lus", async () => {
+  const c = await theCourse();
+  fs.mkdirSync(path.join(c.contentRoot, "lectures"), { recursive: true });
+  fs.mkdirSync(c.refsDir, { recursive: true });
+  fs.writeFileSync(path.join(c.refsDir, "final-2018.pdf"), corruptPdf());
+  fs.writeFileSync(path.join(c.contentRoot, "lectures", "vieux.pdf"), corruptPdf());
+  const mod = await import("../app/api/sources/route");
+  const del = async (p: string) => (await mod.DELETE(new NextRequest(`http://cortex.test/api/sources?course=${c.id}&path=${encodeURIComponent(p)}`, { method: "DELETE" }))).status;
+  assert.equal(await del("refs/final-2018.pdf"), 200);
+  assert.equal(await del("lectures/vieux.pdf"), 200);
+  assert.ok(!storedFiles(c.refsDir).includes("final-2018.pdf"));
+  assert.ok(!storedFiles(c.contentRoot).includes("vieux.pdf"));
+  // Un chemin hors du cours ne touche à rien.
+  fs.writeFileSync(path.join(tmp, "dehors.pdf"), "x");
+  await del("../../dehors.pdf");
+  assert.ok(fs.existsSync(path.join(tmp, "dehors.pdf")));
+});

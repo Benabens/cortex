@@ -2,7 +2,8 @@ import { ensureFts, currentCourse } from "@/db/client";
 import { q } from "@/db/q";
 import { indexItemForSearch, unindexSource } from "@/lib/search";
 import { sourceHref } from "@/lib/deeplink";
-import { refsDir } from "@/lib/paths";
+import { contentRoot, refsDir } from "@/lib/paths";
+import { getCourse } from "@/lib/courses";
 import * as cheerio from "cheerio";
 import path from "node:path";
 import { extractText, getDocumentProxy } from "unpdf";
@@ -297,7 +298,21 @@ export async function addUploadedRef(buffer: Buffer, filename: string): Promise<
   return (await listExamSources()).find((e) => e.path === relPath)!;
 }
 
-/** Supprime un examen uploadé (fichier + source + sélection). */
+/**
+ * Fichier du cours que l'ingestion n'a jamais lu (abîmé, chiffré : rapport d'ingestion) : son
+ * chemin absolu, confiné au cours, ou null. Jamais dans un contenu en lecture seule (cs-202 lit
+ * la racine du dépôt).
+ */
+function unreadFileAbsolute(srcPath: string): string | null {
+  const course = currentCourse();
+  if (srcPath.startsWith("refs/")) return path.join(REFS_DIR(), path.basename(srcPath));
+  if (getCourse(course).paths?.contentRel === "..") return null;
+  const root = path.resolve(contentRoot());
+  const abs = path.resolve(root, srcPath);
+  return abs.startsWith(root + path.sep) ? abs : null;
+}
+
+/** Supprime un examen uploadé (fichier + source + sélection), ou un fichier que l'ingestion n'a pas pu lire. */
 export async function removeUploadedRef(srcPath: string): Promise<void> {
   await ensureRefsSchema();
   const row = await q.get<{ uploaded: number }>(`SELECT uploaded FROM exam_refs WHERE path = ?`, srcPath);
@@ -311,6 +326,10 @@ export async function removeUploadedRef(srcPath: string): Promise<void> {
   await q.run(`DELETE FROM exam_refs WHERE path = ?`, srcPath);
   if (row?.uploaded) {
     await storage().remove(path.join(REFS_DIR(), path.basename(srcPath)));
+  } else if (!row && !srcs.length) {
+    // Jamais lu : il ne compte nulle part, le retirer ne change rien au corpus.
+    const abs = unreadFileAbsolute(srcPath);
+    if (abs) await storage().remove(abs);
   }
   // Ses images de pages (lib/page-cache) : rendues de nouveau à la demande si le PDF reste.
   purgePdfPages(currentCourse(), path.basename(srcPath));
