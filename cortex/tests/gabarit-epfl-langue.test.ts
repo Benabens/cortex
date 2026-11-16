@@ -18,7 +18,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-gabarit-epfl-langue-")
 process.env.CORTEX_DATA_DIR = tmp;
 
 type Lang = "en" | "fr" | "de";
-const ids: Record<Lang | "enNotes", string> = { en: "", fr: "", de: "", enNotes: "" };
+const ids: Record<Lang | "enNotes" | "frNoDuration", string> = { en: "", fr: "", de: "", enNotes: "", frNoDuration: "" };
 
 before(async () => {
   delete process.env.CORTEX_USER;
@@ -28,8 +28,9 @@ before(async () => {
   const { insertCourse } = await import("../db/courses-store");
   const rows = {
     en: buildCourseRow({ name: "Fictional Circuits", code: "FIC-201", university: "EPFL", teachers: "Prof. A. Fictif", language: "en" }, "owner"),
-    fr: buildCourseRow({ name: "Analyse inventée", code: "FIC-202", university: "EPFL", teachers: "Prof. B. Exemple", language: "fr" }, "owner"),
-    de: buildCourseRow({ name: "Erfundene Logik", code: "FIC-203", university: "EPFL", teachers: "Prof. C. Muster", language: "de" }, "owner"),
+    fr: buildCourseRow({ name: "Analyse inventée", code: "FIC-202", university: "EPFL", teachers: "Prof. B. Exemple", language: "fr", examFormat: { kind: "exercises", durationMin: 120 } }, "owner"),
+    de: buildCourseRow({ name: "Erfundene Logik", code: "FIC-203", university: "EPFL", teachers: "Prof. C. Muster", language: "de", examFormat: { kind: "exercises", durationMin: 90 } }, "owner"),
+    frNoDuration: buildCourseRow({ name: "Analyse sans horaire", code: "FIC-205", university: "EPFL", language: "fr" }, "owner"),
     enNotes: buildCourseRow({ name: "Fictional Notes", code: "FIC-204", university: "EPFL", language: "en", examFormat: { kind: "qcm", documents: "notes" } }, "owner"),
   };
   for (const r of Object.values(rows)) await insertCourse(r);
@@ -110,6 +111,12 @@ test("QCM de l'EPFL en allemand : tout en allemand", async () => {
   assert.match(tex, /Teil 2 \\quad-- Offene Fragen/);
   assert.match(tex, /Fehlvorstellung -- off by one/);
   assert.match(tex, /FIC--203, Abschlussprüfung/);
+});
+
+test("QCM de l'EPFL en français sans durée connue : aucune durée écrite, ni inventée", async () => {
+  const tex = await qcm("frNoDuration");
+  assert.doesNotMatch(tex, /Durée|minutes|\d h\b/);
+  assert.match(tex, /16 novembre 2026\n/);
 });
 
 test("aucune consigne de documents inventée ; une règle déclarée est écrite", async () => {

@@ -48,8 +48,11 @@ test("examen écrit d'un cours EPFL : .tex inchangé, énoncé et corrigé", asy
 test("QCM d'un cours EPFL : .tex inchangé, énoncé et corrigé", async () => {
   const { renderQcmExamTex } = await import("../lib/qcm-latex");
   const { QCM_DATA, DATE } = await import("./helpers/gabarits");
-  assert.equal(sha(await inEpfl(() => renderQcmExamTex(QCM_DATA, DATE, false))), "f48564a42e7ae33e");
-  assert.equal(sha(await inEpfl(() => renderQcmExamTex(QCM_DATA, DATE, true))), "7df6ea2a60471c65");
+  // Finition v7 (examen #16), changements voulus : la durée du cours (120) au lieu des 180 minutes
+  // inventées faute de durée détectée, et chaque note « idée fausse » du corrigé sous son option ;
+  // puis les libellés de l'audit i18n (cf. l'en-tête de ce fichier).
+  assert.equal(sha(await inEpfl(() => renderQcmExamTex(QCM_DATA, DATE, false))), "e6d6d58c6a34121a");
+  assert.equal(sha(await inEpfl(() => renderQcmExamTex(QCM_DATA, DATE, true))), "1697eb665f7dbc1f");
 });
 
 test("questions composées d'un cours EPFL : .tex inchangé, énoncé et corrigé", async () => {

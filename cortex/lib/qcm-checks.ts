@@ -387,11 +387,12 @@ export function sameSourceFact(a?: string | null, b?: string | null): boolean {
  * la bonne réponse, le fait source et l'explication) : elle alimente les points faibles de
  * l'étudiant sur la mauvaise notion (job 25, Q5 : étiquetée « Économie de l'IA et concentration du
  * marché » pour une question sur la désinformation et la vérification). Une étiquette sans mot
- * propre (trop générale pour juger) n'est jamais signalée.
+ * propre (trop générale pour juger) n'est jamais signalée ; `minRoots` (mots propres exigés) :
+ * 1 quand un autre signal (le contrôle des doublons) désigne déjà une autre notion.
  */
-export function notionMismatch(notion: string, tested: string): boolean {
+export function notionMismatch(notion: string, tested: string, minRoots = 2): boolean {
   const own = contentRoots(notion);
-  if (own.size < 2) return false;
+  if (own.size < minRoots) return false;
   const tr = contentRoots(tested);
   return ![...own].some((r) => tr.has(r));
 }
@@ -412,6 +413,65 @@ export function bestNotionMatch(tested: string, candidates: string[]): string | 
     if (score > 0 && (!best || score > best.score)) best = { label, score };
   }
   return best?.label ?? null;
+}
+
+/**
+ * Tournures de la consigne, communes à tant d'énoncés qu'elles ne disent rien du scénario
+ * (« selon la définition … donnée dans le cours, laquelle des mesures suivantes … »).
+ */
+const FRAMING = new Set([
+  "suivant", "suivants", "suivante", "suivantes", "definition", "definitions", "donnee", "donne", "correctement", "precisement", "precis", "precise",
+  "mecanisme", "mecanismes", "decrit", "decrire", "explique", "expliquer", "constitue", "constituent", "situation", "situations", "exemple", "illustre",
+  "illustree", "concernant", "presentee", "mieux", "description", "descriptions", "distingue", "role", "exposee", "expose", "specifiquement", "deux",
+  "trois", "quatre", "quelle", "quels", "quelles", "parmi", "strict", "sens", "which", "following", "according", "best", "describes", "correctly",
+]);
+
+/** Racines du DÉCOR d'un énoncé : ses mots porteurs, hors consigne, hors libellé de la notion et hors `common`. */
+function decorRoots(stem: string, notion: string, common: Set<string>): Set<string> {
+  const label = contentRoots(notion);
+  return new Set(tokenize(stem, 4).filter((t) => !STOP.has(t) && !FRAMING.has(t)).map(root).filter((r) => !label.has(r) && !common.has(r)));
+}
+
+/**
+ * Racines qui reviennent dans une bonne part des énoncés d'un examen (au moins 3, et au moins un
+ * quart) : la tournure maison des questions, pas le décor de l'une d'elles.
+ */
+export function commonStemRoots(stems: string[]): Set<string> {
+  const df = new Map<string, number>();
+  for (const st of stems) for (const r of new Set(tokenize(st, 4).map(root))) df.set(r, (df.get(r) ?? 0) + 1);
+  const floor = Math.max(3, Math.ceil(stems.length / 4));
+  return new Set([...df].filter(([, n]) => n >= floor).map(([r]) => r));
+}
+
+/**
+ * Deux questions d'une MÊME notion qui testent en fait la même chose, sans modèle (examen #16,
+ * 16/11 : Q3/Q12, la définition du nudge appliquée deux fois à une cantine — « réorganiser sans
+ * retirer d'option » —, bâties sur deux faits distincts qui disaient la même chose, donc
+ * invisibles au contrôle par identifiant de fait) :
+ *  - le même scénario : le décor des deux énoncés (hors consigne, hors mots de la notion et hors
+ *    tournures communes à l'examen, `common`) partage au moins trois mots porteurs, qui en font
+ *    une part nette — le terme de la notion et un mot de passage ne suffisent pas ;
+ *  - la même bonne réponse reformulée : un recouvrement plus bas qu'entre deux notions
+ *    (`sameProposition`), la notion commune rendant la reformulation plus probable.
+ * Deux angles vraiment distincts d'une notion (l'origine des étiquettes / le rôle des humains ;
+ * la définition / l'efficacité dans la durée) ne partagent ni décor ni réponse.
+ */
+export function sameNotionQuestion(
+  a: { stem: string; notion?: string | null; options: string[]; correct: number[] },
+  b: { stem: string; notion?: string | null; options: string[]; correct: number[] },
+  common: Set<string> = new Set(),
+): boolean {
+  if (!a.notion || !b.notion || notionBase(a.notion) !== notionBase(b.notion)) return false;
+  const da = decorRoots(a.stem, a.notion, common);
+  const db = decorRoots(b.stem, b.notion, common);
+  const shared = [...da].filter((r) => db.has(r)).length;
+  if (shared >= 3 && overlapRatio(da, db) >= 0.25) return true;
+  if (a.correct.length !== 1 || b.correct.length !== 1) return false;
+  // Les mots de la notion, communs par construction, ne comptent pas.
+  const label = contentRoots(a.notion);
+  const ka = new Set([...contentRoots(a.options[a.correct[0]] ?? "")].filter((r) => !label.has(r)));
+  const kb = new Set([...contentRoots(b.options[b.correct[0]] ?? "")].filter((r) => !label.has(r)));
+  return ka.size >= 4 && kb.size >= 4 && overlapRatio(ka, kb) >= 0.6;
 }
 
 /**

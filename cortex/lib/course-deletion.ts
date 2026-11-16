@@ -33,7 +33,98 @@ export type CourseDeletion =
 export type CourseDeletionOptions = {
   /** (tests) remplace l'annulation des jobs. */
   cancelJobs?: (userId: string, courses: string[], errors: string[]) => Promise<void>;
+  /**
+   * Contourne UNIQUEMENT le refus « compte propriétaire » — jamais les cours
+   * historiques/partagés. Réservé à scripts/delete-course.ts (admin, CLI) ;
+   * jamais passée par une route HTTP.
+   */
+  allowOwner?: boolean;
 };
+
+type Rejection = { ok: false; status: 404 | 409; error: string };
+type Checked = {
+  tenant: { schema_name: string } | undefined;
+};
+
+/** Vérifications communes à la suppression et à son aperçu (dry-run). */
+async function checkDeletable(userId: string, courseId: string, allowOwner: boolean): Promise<Rejection | Checked> {
+  await ensureCoursesLoaded();
+  const course = listCoursesOf(userId).find((c) => c.id === courseId);
+  if (!course) return { ok: false, status: 404, error: "Cours introuvable." };
+  if (LEGACY_IDS.has(courseId) || course.paths) {
+    return {
+      ok: false, status: 409,
+      error: "Ce cours historique partage son corpus et ses annales avec l'instance (cours de référence) : ses données ne peuvent pas être supprimées depuis l'application.",
+    };
+  }
+  if (!allowOwner && (await isOwnerAccount(userId))) {
+    return {
+      ok: false, status: 409,
+      error: "Le compte propriétaire de l'instance ne supprime pas de cours depuis l'application : passe par les scripts d'administration.",
+    };
+  }
+  const pg = dbDriverName() === "postgres";
+  const tenant = pg
+    ? await authGet<{ schema_name: string }>(`SELECT schema_name FROM tenants WHERE user_id = ? AND course = ?`, userId, courseId)
+    : undefined;
+  if (tenant) {
+    const sharers = await authAll<{ user_id: string; course: string }>(`SELECT user_id, course FROM tenants WHERE schema_name = ?`, tenant.schema_name);
+    if (sharers.length > 1) {
+      log("error", "course.delete_shared_schema", { user: userId, course: courseId, schema: tenant.schema_name, sharers });
+      return {
+        ok: false, status: 409,
+        error: `Les données de ce cours sont partagées avec un autre cours (schéma commun) : suppression refusée. Écris à ${contactEmail()} pour la demander.`,
+      };
+    }
+  }
+  return { tenant };
+}
+
+export type CourseDeletionPreview =
+  | { ok: true; id: string; schema?: string; files: number; bytes: number }
+  | Rejection;
+
+/** Aperçu LECTURE SEULE de ce que deleteCourseWithData(…, { allowOwner: true }) supprimerait. */
+export async function previewCourseDeletion(userId: string, courseId: string): Promise<CourseDeletionPreview> {
+  const check = await checkDeletable(userId, courseId, true);
+  if ("ok" in check) return check;
+  const root = path.join(dataRoot(), "u", userSlug(userId), courseId);
+  const entries = await storage().list(root).catch(() => []);
+  return {
+    ok: true,
+    id: courseId,
+    schema: check.tenant?.schema_name,
+    files: entries.length,
+    bytes: entries.reduce((sum, e) => sum + e.size, 0),
+  };
+}
+
+/** Résout --user (scripts/delete-course.ts) : identifiant direct, sinon e-mail (insensible à la casse). */
+export async function resolveUserId(identifier: string): Promise<string | undefined> {
+  const byId = await authGet<{ id: string }>(`SELECT id FROM users WHERE id = ?`, identifier);
+  if (byId) return byId.id;
+  const byEmail = await authGet<{ id: string }>(`SELECT id FROM users WHERE lower(email) = lower(?)`, identifier);
+  return byEmail?.id;
+}
+
+/** Texte console de l'aperçu (dry-run) — cf. scripts/delete-course.ts. */
+export function describePreview(userId: string, p: CourseDeletionPreview): string {
+  if (!p.ok) return `Refusé : ${p.error}`;
+  return [
+    `Dry-run — rien n'est supprimé.`,
+    `  cours : ${p.id} (utilisateur ${userId})`,
+    p.schema ? `  schéma Postgres : ${p.schema}` : `  pas de schéma Postgres (sqlite, ou pas encore de tenant)`,
+    `  fichiers : ${p.files} (${p.bytes} octets)`,
+    `  ligne du registre (courses) : 1`,
+    `→ relancer avec --yes pour exécuter.`,
+  ].join("\n");
+}
+
+/** Texte console du résultat d'exécution — cf. scripts/delete-course.ts. */
+export function describeDeletion(r: CourseDeletion): string {
+  if (!r.ok) return `Échec : ${r.error}`;
+  return `Supprimé : ${r.id}${r.residues.length ? ` — résidus : ${r.residues.join("; ")}` : ""}`;
+}
 
 /** Marqueur partagé (base) : vu par toutes les instances et par les workers. */
 export async function markCourseDeleting(userId: string, courseId: string): Promise<void> {
@@ -54,35 +145,9 @@ export async function isCourseDeleting(userId: string, courseId: string): Promis
 }
 
 export async function deleteCourseWithData(userId: string, courseId: string, opts: CourseDeletionOptions = {}): Promise<CourseDeletion> {
-  await ensureCoursesLoaded();
-  const course = listCoursesOf(userId).find((c) => c.id === courseId);
-  if (!course) return { ok: false, status: 404, error: "Cours introuvable." };
-  if (LEGACY_IDS.has(courseId) || course.paths) {
-    return {
-      ok: false, status: 409,
-      error: "Ce cours historique partage son corpus et ses annales avec l'instance (cours de référence) : ses données ne peuvent pas être supprimées depuis l'application.",
-    };
-  }
-  if (await isOwnerAccount(userId)) {
-    return {
-      ok: false, status: 409,
-      error: "Le compte propriétaire de l'instance ne supprime pas de cours depuis l'application : passe par les scripts d'administration.",
-    };
-  }
-  const pg = dbDriverName() === "postgres";
-  const tenant = pg
-    ? await authGet<{ schema_name: string }>(`SELECT schema_name FROM tenants WHERE user_id = ? AND course = ?`, userId, courseId)
-    : undefined;
-  if (tenant) {
-    const sharers = await authAll<{ user_id: string; course: string }>(`SELECT user_id, course FROM tenants WHERE schema_name = ?`, tenant.schema_name);
-    if (sharers.length > 1) {
-      log("error", "course.delete_shared_schema", { user: userId, course: courseId, schema: tenant.schema_name, sharers });
-      return {
-        ok: false, status: 409,
-        error: `Les données de ce cours sont partagées avec un autre cours (schéma commun) : suppression refusée. Écris à ${contactEmail()} pour la demander.`,
-      };
-    }
-  }
+  const check = await checkDeletable(userId, courseId, opts.allowOwner ?? false);
+  if ("ok" in check) return check;
+  const { tenant } = check;
 
   await markCourseDeleting(userId, courseId);
   const residues: string[] = [];
