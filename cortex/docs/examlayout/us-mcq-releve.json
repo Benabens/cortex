@@ -22,6 +22,10 @@
     "mark": "bubble",
     "columns": 1
   },
+  "questions": {
+    "columns": 2,
+    "titles": false
+  },
   "points": "none",
   "language": "en",
   "cover": {

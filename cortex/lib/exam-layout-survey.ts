@@ -302,6 +302,20 @@ function columnsOf(pages: Page[]): 1 | 2 {
   return 1;
 }
 
+/** Questions sur deux colonnes : des numéros de question des deux côtés d'une même page. */
+function questionColumnsOf(pages: Page[]): 1 | 2 {
+  for (const p of pages) {
+    const heads = p.lines.filter((l) => numberingOf(l));
+    const right = heads.filter((l) => l.x0 > p.width * 0.45).length;
+    const left = heads.filter((l) => l.x0 < p.width * 0.3).length;
+    if (right >= 2 && left >= 2) return 2;
+  }
+  return 1;
+}
+
+/** Une annale qui annonce le type de chaque question (« single choice », « QCM »…) : Cortex garde ses étiquettes. */
+const TYPE_TAG = /\b(single|multiple)[- ]choice\b|\b(single|multiple)[- ]answer\b|\bchoix (unique|multiples?)\b|\b(SCQ|MCQ|QCU|QCM)\b|\bselect all\b|\bplusieurs réponses\b/i;
+
 /** Tableau des points sur la garde : une ligne « Question 1 2 3 … Total ». */
 function pointsTableOf(cover: Page): boolean {
   return cover.lines.some((l) => /\b(total|score|note)\b/i.test(l.text) && (l.text.match(/\b\d{1,2}\b/g) ?? []).length >= 3);
@@ -326,6 +340,9 @@ export function surveyPages(pages: Page[], fonts: string[]): SurveyedLayout {
   if (choices.filter((c) => c.letter === "C").length >= 1 && choices.length >= 6) {
     const pick = majority(choices, (c) => `${c.label}/${c.mark}`)!;
     out.choices = { label: pick.label, mark: pick.mark, columns: columnsOf(pages) };
+    // Les étiquettes se lisent sur la ligne de la question, pas dans les consignes (« the single best answer »).
+    const questionLines = pages.flatMap((p) => p.lines.filter((l) => numberingOf(l)));
+    out.questions = { columns: questionColumnsOf(pages), titles: questionLines.some((l) => TYPE_TAG.test(l.text)) };
   }
   const points = pointsOf(pages, heads.length);
   if (points) out.points = points;

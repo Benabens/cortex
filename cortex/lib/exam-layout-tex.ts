@@ -81,6 +81,14 @@ function pointsTex(place: ExamLayout["points"], pts: string): { inline: string; 
 /** Titre d'une question de QCM. `standard` : les points dans l'étiquette, entre crochets, après le numéro. */
 export function qcmHeadTex(layout: ExamLayout, L: QcmLabels, n: number, type: "scq" | "mcq", points: number, topic: string): string {
   const num = layout.numbering.prefix === null && layout.numbering.style === "arabic" ? L.question(n) : `${questionNumber(layout.numbering, n, L.questionWord)}.`;
+  if (!layout.questions.titles) {
+    // Comme l'annale : le numéro, puis l'énoncé sur la même ligne. Un choix multiple reste annoncé
+    // (sans, rien ne dit qu'il y a plusieurs réponses) ; des points à droite gardent leur ligne.
+    const p = pointsTex(layout.points === "standard" ? "margin" : layout.points, L.points(points));
+    const kind = type === "mcq" ? String.raw`{\footnotesize[${L.kind(type)}]}~` : "";
+    const head = String.raw`\needspace{5\baselineskip}\par\medskip\noindent\textbf{${num}}~${kind}${p.inline.trimStart()}`;
+    return p.right ? String.raw`${head}${p.right}\par\smallskip` : head;
+  }
   const start = String.raw`\needspace{5\baselineskip}\par\medskip\noindent\textbf{${num}}\quad`;
   if (layout.points === "standard") return String.raw`${start}{\footnotesize[${L.tag(type, points)}]}\quad\textbf{\textit{${topic}}}\par\smallskip`;
   const p = pointsTex(layout.points, L.points(points));
