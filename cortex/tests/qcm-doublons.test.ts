@@ -68,8 +68,12 @@ function dedupeReply(prompt: string): string {
   const lines = [...prompt.matchAll(/^Q(\d+)\. .*?\[notion:([^\]]+)\] \[angle:([^\]]*)\](?: \[regle:([^\]]*)\])?/gm)];
   // Questions des examens précédents (P0, P1…) : une question qui en reprend une (même notion, même angle).
   const previous = [...prompt.matchAll(/^P(\d+)\. .*?\[notion:([^\]]+)\] \[angle:([^\]]*)\]/gm)];
-  const repeats = lines.flatMap((m) => previous.filter((p) => p[2] === m[2] && p[3] === m[3]).map((p) => ({ index: Number(m[1]), previous: Number(p[1]) })));
-  return JSON.stringify({ notions: lines.map((m) => ({ index: Number(m[1]), notion: m[2], angle: m[3], regle: m[4] ?? "" })), duplicates: [], repeats });
+  // Paires et reprises signalées comme le ferait le modèle : même notion et même angle ou même règle ;
+  // en mode strict, deux questions sur une même notion sans règle distincte (une notion = une question).
+  const strict = /UNE NOTION = UNE QUESTION/.test(prompt);
+  const repeats = lines.flatMap((m) => previous.filter((p) => p[2] === m[2] && (p[3] === m[3] || (strict && !m[4]))).map((p) => ({ index: Number(m[1]), previous: Number(p[1]) })));
+  const duplicates = lines.flatMap((m, i) => lines.slice(0, i).filter((p) => p[2] === m[2] && ((!!p[3] && p[3] === m[3]) || (!!p[4] && p[4] === m[4]) || (strict && !p[4] && !m[4]))).map((p) => ({ first: Number(p[1]), second: Number(m[1]) })));
+  return JSON.stringify({ notions: lines.map((m) => ({ index: Number(m[1]), notion: m[2], angle: m[3], regle: m[4] ?? "" })), duplicates, repeats });
 }
 
 function verifyReply(prompt: string): string {
@@ -180,6 +184,32 @@ test("HUM-285 anonymisé : Q11, Q19, Q16, Q20 et Q14 sont remplacées, les premi
   assert.match(dedupePrompts[0], /^ +\(1\) Une affirmation inversée/m, "le contrôle voit aussi les réponses et distracteurs recyclés");
   assert.ok(steps.some((s) => /5 doublon/.test(s)), steps.filter((s) => /doublon/.test(s)).join("\n"));
   assert.match(designPrompts[designPrompts.length - 1], /concept fictif alpha/, "le lot de remplacement sait quelles notions sont déjà posées");
+});
+
+test("PR #94 : une notion-parapluie du modèle ne retire pas des questions sur des notions planifiées distinctes", async () => {
+  const id = await course(5);
+  // Le modèle range les quatre questions (3 + la réserve) sous un même libellé large, mais chacune
+  // vérifie une règle distincte et aucune paire n'est signalée comme doublon.
+  design = (n, call, lot) => Array.from({ length: n }, (_, i) => {
+    const q = lot.q0 + i + 1;
+    return item(!lot.topUp ? `Question ${q} [notion:Cadre fictif] [angle:condition ${q}] [regle:règle ${q}] : que dit le cours ?` : `Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`);
+  });
+  const { r, stems } = await exam(id, 3);
+  assert.equal(r.count, 3);
+  assert.deepEqual(stems.filter((s) => s.startsWith("Remplacement")), [], "aucun remplacement : rien n'était un doublon");
+  assert.equal(topUps, 0, "aucun lot de comblement");
+});
+
+test("PR #94 : deux questions signalées comme la même règle restent un doublon sous une notion-parapluie", async () => {
+  const id = await course(5);
+  design = (n, call, lot) => Array.from({ length: n }, (_, i) => {
+    const q = lot.q0 + i + 1;
+    return item(!lot.topUp ? `Question ${q} [notion:Cadre fictif] [angle:condition ${q}] [regle:${q === 2 ? "règle 1" : `règle ${q}`}] : que dit le cours ?` : `Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`);
+  });
+  const { r, stems } = await exam(id, 3);
+  assert.equal(r.count, 3);
+  assert.ok(stems.some((s) => s.startsWith("Question 1 ")), "la première reste");
+  assert.ok(!stems.some((s) => s.startsWith("Question 2 ")), "la même règle que Q1 part");
 });
 
 test("un remplacement qui retombe sur une notion déjà posée est retiré à son tour", async () => {
@@ -317,7 +347,9 @@ test("modèle qui répète toujours la même notion : budget borné, aucun doubl
   const id = await course(4, 0);
   design = (n, call) => Array.from({ length: n }, (_, i) => item(`Question ${call}.${i} [notion:unique] [angle:${call}.${i}] : que dit le cours ?`));
   const { r, stems, steps } = await exam(id, 4);
-  assert.equal(r.count, 1, steps.filter((s) => /doublon|remplacement/.test(s)).join("\n"));
-  assert.equal(stems.length, 1);
+  // Les trois doublons du premier lot (signalés en paire) ne reviennent jamais ; le comblement, sur
+  // des notions planifiées distinctes, n'est plus plafonné par le libellé libre du modèle (PR #94).
+  assert.deepEqual(stems.filter((s) => s.startsWith("Question 1.")), ["Question 1.0 [notion:unique] [angle:1.0] : que dit le cours ?"], steps.join("\n"));
+  assert.ok(r.count <= 4);
   assert.ok(designCalls <= 4, `conception initiale + budget tardif borné, reçu ${designCalls}`);
 });
