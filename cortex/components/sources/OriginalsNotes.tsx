@@ -66,3 +66,21 @@ export function CloudRetentionBanner({ originals }: { originals: OriginalsInfo }
     </div>
   );
 }
+
+/**
+ * Devenu Premium avec des fichiers restés sur l'ordinateur : les renvoyer les remet dans le cloud
+ * (même empreinte : l'index ne change pas). Un dossier réimporté les renvoie tous d'un coup.
+ */
+export function BackToCloudNote({ originals }: { originals: OriginalsInfo }) {
+  const n = originals.onComputer.length;
+  if (originals.home !== "cloud" || n === 0) return null;
+  return (
+    <div role="status" data-testid="originals-back-to-cloud" className="rounded-xl border border-line bg-surface-2/30 p-4 text-sm text-ink-1">
+      <p className="font-semibold">{n} fichier{n > 1 ? "s sont restés" : " est resté"} sur ton ordinateur</p>
+      <p className="mt-1 text-ink-2">
+        Tu es Premium : réimporte le dossier de ce cours pour {n > 1 ? "les" : "le"} remettre dans le cloud. Cortex
+        reconnaît chaque fichier à son empreinte, son index ne change pas.
+      </p>
+    </div>
+  );
+}
