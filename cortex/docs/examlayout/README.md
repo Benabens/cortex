@@ -21,8 +21,15 @@ npx tsx scripts/examlayout-captures.ts docs/examlayout
 
 Relevé : police sans empattements en 10 pt, cours en haut à gauche, « Page n of N » en bas au
 centre, questions numérotées sans mot (« 1. »), options « (A) » à bulles l'une sous l'autre, aucun
-barème par question, champs `Name:` / `NetID:` / `Signature:`, les trois consignes. La page 2
-de Cortex est la question ouverte de l'examen fictif, que l'annale n'a pas.
+barème par question, questions sur deux colonnes sans étiquette de type ni thème, champs
+`Name:` / `NetID:` / `Signature:`, les trois consignes. La page 2 de Cortex est la question
+ouverte de l'examen fictif, que l'annale n'a pas.
+
+Avant et après le suivi (annale, rendu de #144, rendu actuel) : QCM sur deux colonnes comme
+l'annale, plus d'étiquette « [single choice] » ni de thème (un choix multiple reste annoncé, sinon
+rien ne dit qu'il a plusieurs réponses), « Part 1 – » sans l'espace en trop.
+
+![](us-mcq-avant-apres.png)
 
 ## Examen anglais à rédaction
 
