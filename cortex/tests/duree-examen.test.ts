@@ -51,8 +51,9 @@ async function qcmTex(course: string): Promise<string> {
 
 test("QCM déclaré de 75 min : la garde dit 75 minutes, jamais 180", async () => {
   const tex = await qcmTex(await newCourse({ examFormat: { kind: "qcm", questionCount: 10, durationMin: 75 } }));
-  assert.match(tex, /Duration: 75 minutes/);
-  assert.match(tex, /You have 75 minutes/);
+  // Garde neutre de main (#116) : la durée est écrite une fois, dans l'en-tête.
+  assert.match(tex, /\\textbf\{Duration:\} 75 minutes/);
+  assert.equal(tex.match(/75 minutes/g)?.length, 1, "durée écrite une seule fois");
   assert.doesNotMatch(tex, /\b180 minutes/);
 });
 
@@ -76,7 +77,7 @@ test("annale sans durée lisible (0) : la durée déclarée du cours l'emporte s
   assert.equal(f.basis, "annales");
   assert.equal(f.durationMin, 50);
   const tex = await qcmTex(id);
-  assert.match(tex, /Duration: 50 minutes/);
+  assert.match(tex, /\\textbf\{Duration:\} 50 minutes/);
 });
 
 test("questions composées déclarées de 50 min : la garde dit 50 minutes", async () => {
@@ -84,7 +85,8 @@ test("questions composées déclarées de 50 min : la garde dit 50 minutes", asy
   const { runWithCourse } = await import("../db/client");
   const { renderBlocksTex } = await import("../lib/blocks-latex");
   const tex = await runWithCourse(id, () => renderBlocksTex([], "2026-11-16", false));
-  assert.match(tex, /You have 50 minutes/);
+  assert.match(tex, /\\textbf\{Duration:\} 50 minutes/);
+  assert.equal(tex.match(/50 minutes/g)?.length, 1, "durée écrite une seule fois");
   assert.doesNotMatch(tex, /\b180 minutes|\b90 minutes/);
 });
 

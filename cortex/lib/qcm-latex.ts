@@ -98,7 +98,7 @@ async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts
     const parts = [nQcm ? w.qcmCount(nQcm) : "", nOpen ? w.openCount(nOpen) : ""].filter(Boolean).join(` ${w.and} `);
     return neutralCoverTex({
       course: getCourse(currentCourse()), w, dateTex: localDate(dateLabel, w), durationMin, totalPts,
-      instructions: [...(durationMin ? [w.duration(durationText(durationMin, w))] : []), w.contains(parts, totalPts), ...(nQcm ? [`${w.qcmConvention} ${w.tick}`] : []), w.onSheet],
+      instructions: [w.contains(parts, totalPts), ...(nQcm ? [`${w.qcmConvention} ${w.tick}`] : []), w.onSheet],
     });
   }
   // EPFL hors anglais : même garde, consignes dans la langue de l'examen.

@@ -29,14 +29,6 @@ export function courseWords(): CoverWords {
   return coverWords(formatContextFor(currentCourse()).language);
 }
 
-/**
- * Durée affichée sur une garde neutre : le format du cours (annales, puis déclaration) passe avant
- * la durée détectée ou demandée (0 = inconnue), puis celle saisie à la création du cours.
- */
-export function neutralDuration(detected: number | undefined): number | null {
-  return formatContextFor(currentCourse()).durationMin ?? (detected || undefined) ?? getCourse(currentCourse()).durationMin;
-}
-
 /** Couleur des corrigés : le rouge historique pour l'EPFL, le bleu foncé de neutralChrome hors EPFL. */
 export function solutionColor(t: ExamTemplate): string {
   return t === "epfl" ? "epflred" : "solution";
@@ -424,7 +416,9 @@ export function neutralCoverTex(o: { course: CourseConfig; w: CoverWords; dateTe
     String.raw`\end{center}`,
     String.raw`\vspace{0.3cm}\noindent\rule{\textwidth}{0.6pt}\par\vspace{10pt}`,
     String.raw`\noindent ${w.nameField}~\makebox[0.5\textwidth]{\hrulefill}\hfill ${w.idField}~\makebox[0.22\textwidth]{\hrulefill}\par\vspace{10pt}`,
-    `\\noindent${o.durationMin ? `\\textbf{${w.durationLabel} ${durationText(o.durationMin, w)}}\\hfill` : ""}\\textbf{${w.totalLabel}} ${pointsText(o.totalPts, w)}\\par\\vspace{4pt}`,
+    o.durationMin
+      ? String.raw`\noindent\textbf{${w.durationLabel}} ${durationText(o.durationMin, w)}\hfill\textbf{${w.totalLabel}} ${pointsText(o.totalPts, w)}\par\vspace{4pt}`
+      : String.raw`\noindent\hfill\textbf{${w.totalLabel}} ${pointsText(o.totalPts, w)}\par\vspace{4pt}`,
     String.raw`\noindent\rule{\textwidth}{0.6pt}`,
     String.raw`\vspace{0.4cm}\par\noindent{\large\textbf{${w.instructions}}}\par\smallskip`,
     String.raw`\begin{enumerate}\setlength{\itemsep}{3pt}`,
