@@ -24,6 +24,10 @@ import { extractOfficeText, type OfficeExtension } from "../lib/office-documents
 import { splitChapters, splitPages } from "../lib/chapters";
 import { failureStatus, INGEST_FAILURE_PREFIX, readStatus, type IngestFileOutcome } from "../lib/ingest-report";
 import { writeIngestReport } from "../lib/ingest-report-file";
+import { readIndexOnlySources, writeIndexOnlySources } from "../lib/originals/index-only";
+import { settleOriginals } from "../lib/originals/intake";
+import { refreshIndexUsage } from "../lib/originals/index-quota";
+import { currentUser } from "../db/context";
 
 // Args : `npm run ingest -- --course=algo --from "<dossier>"` (défaut cs-202, pas d'import).
 function argVal(name: string): string | undefined {
@@ -562,14 +566,19 @@ async function main() {
     console.log("Lecture des fichiers du cours…");
     const content = await readGenericContent();
     const refs = await readAllRefs();
+    // Originaux restés sur l'ordinateur d'un compte gratuit (lib/originals) : leur index est relu
+    // AVANT l'effacement et réécrit tel quel, sinon la reconstruction depuis le disque le perdait.
+    const kept = await readIndexOnlySources(new Set([...content.outcomes, ...refs.outcomes].map((o) => o.path)));
     console.log("Nettoyage des données dérivées (sources/items/fts)…");
     await q.tx(async () => {
       await clearCorpus();
       for (const plan of content.plans) await addSource(plan.type, plan.title, plan.path, plan.year, plan.items);
       for (const ref of refs.parsed) await writeRef(ref);
+      await writeIndexOnlySources(kept);
     });
     files.push(...content.outcomes, ...refs.outcomes);
     console.log(`• contenu      : ${content.outcomes.filter((o) => o.status === "indexed").length} fichier(s) indexé(s) depuis ${CONTENT_ROOT}`);
+    if (kept.length) console.log(`• sur l'ordinateur : ${new Set(kept.map((k) => k.path)).size} support(s) gardé(s) depuis l'index (original non conservé)`);
   }
   const refOutcomes = files.filter((f) => f.path.startsWith("refs/"));
   console.log("• refs         :", refOutcomes.filter((r) => r.status === "indexed").length, "examen(s) de référence");
@@ -585,6 +594,14 @@ async function main() {
 
   // Vocabulaire (pour la recherche tolérante aux fautes)
   console.log("• vocabulaire  :", await buildVocab(), "termes");
+
+  // Compte gratuit : les originaux lus partent du serveur (les annales PDF après la préparation).
+  if (COURSE !== DEFAULT_COURSE) {
+    const settled = await settleOriginals({ after: "ingest", paths: files.map((f) => f.path) });
+    if (settled.purged || settled.dropped) console.log(`• originaux    : ${settled.purged + settled.dropped} retiré(s) du serveur (compte gratuit : ils restent sur l'ordinateur)`);
+    if (settled.promoted) console.log(`• originaux    : ${settled.promoted} rangé(s) dans le cloud (compte Premium)`);
+    await refreshIndexUsage(currentUser(), COURSE);
+  }
 
   const ftsCountSql = q.dialect === "postgres"
     ? "(SELECT count(*) FROM items WHERE text_norm IS NOT NULL)"

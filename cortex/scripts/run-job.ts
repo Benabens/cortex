@@ -9,7 +9,7 @@ import path from "node:path";
 import { enterCourse } from "../db/client";
 import { coursePaths, ensureCoursesLoaded } from "../lib/courses";
 import { storage } from "../lib/storage";
-import { q } from "../db/q";
+import { nowStr, q } from "../db/q";
 import { llmAvailable, llmUnavailableReason } from "../lib/llm";
 import { generateTargetedExercise } from "../lib/exam";
 import { generateMockExam } from "../lib/mock-exam";
@@ -95,13 +95,33 @@ async function runIngestJob(target: string | null): Promise<void> {
   // Le rapport par fichier passe par un fichier temporaire : une ligne de sortie serait coupée
   // entre deux paquets du flux. Rangé sur le job même si l'ingestion échoue ensuite.
   const reportFile = path.join(os.tmpdir(), `cortex-ingest-${process.pid}-${jobId}.json`);
-  try {
-    await runIngestProcess(args, reportFile);
-  } finally {
-    const report = readIngestReport(reportFile);
-    fs.rmSync(reportFile, { force: true });
-    if (report) await setJobReport(jobId, report).catch(() => {});
+  const { pendingTransit } = await import("../lib/originals/intake");
+  const since = nowStr();
+  for (let pass = 1; ; pass++) {
+    const read = new Set<string>();
+    try {
+      await runIngestProcess(args, reportFile);
+    } finally {
+      const report = readIngestReport(reportFile);
+      fs.rmSync(reportFile, { force: true });
+      if (report) await setJobReport(jobId, report).catch(() => {});
+      for (const f of report?.files ?? []) read.add(f.path);
+    }
+    // Compte gratuit : un fichier arrivé pendant la lecture n'a pas été lu, et son original ne reste
+    // pas sur le serveur. Une passe de plus le lit (le dossier importé, lui, l'a déjà été).
+    const late = await pendingTransit(since, read);
+    if (!late || pass >= 3) break;
+    await logJob(jobId, `${late} fichier(s) arrivé(s) pendant l'ingestion : nouvelle lecture`);
+    const from = args.indexOf("--from");
+    if (from >= 0) args.splice(from, 2);
   }
+}
+
+/** Compte gratuit : les annales PDF gardées pour la lecture des pages partent du serveur (lib/originals). */
+async function settleAfterPages(): Promise<void> {
+  const { settleOriginals } = await import("../lib/originals/intake");
+  const r = await settleOriginals({ after: "prepare" }).catch((e) => { console.error("originaux :", e); return null; });
+  if (r?.purged) await logJob(jobId, `${r.purged} annale(s) retirée(s) du serveur après lecture des pages (compte gratuit : elles restent sur ton ordinateur)`);
 }
 
 function runIngestProcess(args: string[], reportFile: string): Promise<void> {
@@ -223,6 +243,7 @@ async function main() {
       await setJob(jobId, { currentStep: "Format détecté — index exo-par-exo des finals…", progress: 50 });
       const { rebuildBlueprintFromIndex } = await import("../lib/program");
       const r = await rebuildBlueprintFromIndex({ onStep: async (s, p) => { await setJob(jobId, { currentStep: `Blueprint : ${s}`, progress: 50 + Math.round(p * 0.48) }); } });
+      await settleAfterPages();
       await setJob(jobId, { status: "done", progress: 100, currentStep: `Cours prêt ✓ — refs ${refsN}, ${r.exercises} exos indexés (${r.exams} finals) → ${r.types} types` });
       return finish(0);
     } catch (e) { await fail((e as Error)?.message || String(e)); }
@@ -242,6 +263,7 @@ async function main() {
         await logJob(jobId, s);
       };
       const f = await detectFormat({ onStep });
+      // Pas de départ ici : l'index exo par exo (préparation, blueprint) relit encore les pages.
       await setJob(jobId, { status: "done", progress: 100, currentStep: `Format détecté : ${(f.format_summary || "").slice(0, 60)} ✓` });
       return finish(0);
     } catch (e) { await fail((e as Error)?.message || String(e)); }
@@ -309,6 +331,7 @@ async function main() {
       };
       const { rebuildBlueprintFromIndex } = await import("../lib/program");
       const res = await rebuildBlueprintFromIndex({ onStep });
+      await settleAfterPages();
       await setJob(jobId, { status: "done", progress: 100, resultId: res.types, currentStep: `Index : ${res.exercises} exos (${res.exams} finals) → ${res.types} types ✓` });
       await logJob(jobId, `Blueprint exhaustif → ${res.exercises} exos indexés, ${res.types} types.`);
       return finish(0);
@@ -346,6 +369,8 @@ async function main() {
   }
   const { targetKind } = await import("../lib/exam-format");
   const examKind = job.type === "exam" ? targetKind(job.target) : null;
+  const offServer = await (await import("../lib/course-vision")).offServerRefsNote().catch(() => null);
+  if (offServer) await logJob(jobId, offServer);
 
   try {
     const res =

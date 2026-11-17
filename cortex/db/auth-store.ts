@@ -239,6 +239,15 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
       event_id TEXT PRIMARY KEY,
       created_at TEXT NOT NULL
     )`,
+    // Taille de l'index (texte extrait) de chaque cours d'un compte, relevée à chaque ingestion :
+    // borne le quota d'index d'un compte gratuit, dont les originaux ne restent pas (lib/originals).
+    `CREATE TABLE IF NOT EXISTS index_usage (
+      user_id TEXT NOT NULL,
+      course TEXT NOT NULL,
+      bytes INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, course)
+    )`,
     `CREATE TABLE IF NOT EXISTS terms_acceptances (
       user_id TEXT NOT NULL,
       version TEXT NOT NULL,
@@ -578,6 +587,13 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
     `CREATE TABLE IF NOT EXISTS public.processed_events (
       event_id text PRIMARY KEY,
       created_at text NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS public.index_usage (
+      user_id text NOT NULL,
+      course text NOT NULL,
+      bytes bigint NOT NULL DEFAULT 0,
+      updated_at text NOT NULL,
+      PRIMARY KEY (user_id, course)
     )`,
     `CREATE TABLE IF NOT EXISTS public.terms_acceptances (
       user_id text NOT NULL,

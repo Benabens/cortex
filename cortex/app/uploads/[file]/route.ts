@@ -34,5 +34,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ file
     contentType: MIME[ext] ?? "application/octet-stream",
     headers: servedFileHeaders(MIME[ext] ?? "application/octet-stream", { "cache-control": "private, max-age=3600" }),
   });
-  return res ?? new NextResponse("Not found", { status: 404 });
+  if (res) return res;
+  // Compte gratuit (lib/originals) : une pièce jointe ne reste que le temps de sa lecture.
+  const { originalsHomeFor, transitHours } = await import("@/lib/originals/intake");
+  if ((await originalsHomeFor(course)) === "local") {
+    return new NextResponse(
+      `Cette pièce jointe n'est plus sur les serveurs de Cortex : un compte gratuit ne les garde que ${transitHours()} h, le temps de les lire. Elle est restée sur ton appareil.`,
+      { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } },
+    );
+  }
+  return new NextResponse("Not found", { status: 404 });
 }

@@ -234,6 +234,59 @@ describe("S3Store — le seau fait foi", () => {
     assert.equal(fake.objects.get("u/ben/ml/exams/.gen-checkpoint.json")?.body.toString(), '{"batches":2}');
   });
 
+  test("transit (localOnly) : l'original d'un compte gratuit n'atteint jamais le seau, même à travers un job", async () => {
+    const { fake, make } = s3();
+    const { store, root } = make();
+    const course = path.join(root, "u/ana/ml");
+    const pdf = path.join(course, "refs/final-2024.pdf");
+    assert.equal(await store.put(pdf, "%PDF-annale", { exclusive: true, localOnly: true }), true);
+    assert.equal(await store.put(pdf, "%PDF-autre", { exclusive: true, localOnly: true }), false, "exclusif : un fichier existant n'est pas écrasé");
+    assert.equal((await store.read(pdf))?.toString(), "%PDF-annale");
+    assert.equal((await store.list(course)).length, 1);
+    // Un job (ingestion, préparation) qui lit le fichier sans le modifier ne l'envoie pas.
+    await store.withLocalDir([course], async () => {
+      assert.equal(fs.readFileSync(pdf, "utf8"), "%PDF-annale");
+      fs.mkdirSync(path.join(course, "exams"), { recursive: true });
+      fs.writeFileSync(path.join(course, "exams/exam-1.pdf"), "%PDF-exam");
+    });
+    assert.deepEqual([...fake.objects.keys()], ["u/ana/ml/exams/exam-1.pdf"], "l'examen généré part au seau, jamais l'original");
+    await store.remove(pdf);
+    assert.equal(fs.existsSync(pdf), false);
+    assert.equal(await store.read(pdf), null);
+  });
+
+  test("transit écrit PENDANT un job (envoi reçu par le serveur web) : jamais envoyé au seau à la fin du job", async () => {
+    const { fake, make } = s3();
+    const web = make();
+    const worker = new S3Store({ bucket: fake.bucket, root: web.root, prefix: "", presign: true }); // autre process, même disque
+    const course = path.join(web.root, "u/ana/ml");
+    const pdf = path.join(course, "refs/final-2025.pdf");
+    await worker.withLocalDir([course], async () => {
+      assert.equal(await web.store.put(pdf, "%PDF-gratuit", { exclusive: true, localOnly: true }), true);
+    });
+    assert.deepEqual([...fake.objects.keys()], [], "l'original d'un gratuit reste hors du seau");
+    // Devenu Premium : le même fichier renvoyé sans localOnly part au seau, puis suit les jobs.
+    await web.store.put(pdf, "%PDF-gratuit");
+    await worker.withLocalDir([course], async () => { fs.appendFileSync(pdf, "-v2"); });
+    assert.equal(fake.objects.get("u/ana/ml/refs/final-2025.pdf")?.body.toString(), "%PDF-gratuit-v2");
+    // Transit puis suppression : rien ne reste, ni fichier ni repère.
+    const att = path.join(course, "uploads/copie.png");
+    await web.store.put(att, "png", { localOnly: true });
+    await web.store.remove(att);
+    await worker.withLocalDir([course], async () => {});
+    assert.equal(fake.objects.has("u/ana/ml/uploads/copie.png"), false);
+    assert.equal(fs.existsSync(att), false);
+  });
+
+  test("transit : un nom déjà pris dans le seau n'est pas réutilisé (aucun écrasement d'un original Premium)", async () => {
+    const { make } = s3();
+    const a = make();
+    const f = (root: string) => path.join(root, "u/ana/ml/refs/final.pdf");
+    await a.store.put(f(a.root), "%PDF-cloud");
+    const b = make(); // autre conteneur : le fichier n'est que dans le seau
+    assert.equal(await b.store.put(f(b.root), "%PDF-transit", { exclusive: true, localOnly: true }), false);
+  });
+
   test("withLocalDir ne pousse jamais une base SQLite ni un temporaire", async () => {
     const { fake, make } = s3();
     const { store, root } = make();

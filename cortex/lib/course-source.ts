@@ -6,6 +6,10 @@ import { classifyFile } from "@/lib/import-folder";
 import { PublicFetchError, readPublicHttps, type PublicFetcher } from "@/lib/public-https";
 import { checkStorage } from "@/lib/storage-quota";
 import { storage as files } from "@/lib/storage";
+import { storeOriginal } from "@/lib/originals/intake";
+import { checkIndexQuota } from "@/lib/originals/index-quota";
+import type { OriginalsHome } from "@/lib/originals/policy";
+import type { OriginalOrigin } from "@/lib/originals/registry";
 import { unreadableDocument } from "@/lib/document-check";
 import { directDownloadUrl, sharedRedirectTarget } from "@/lib/share-links";
 import * as cheerio from "cheerio";
@@ -64,7 +68,8 @@ export class SourceError extends Error {
   }
 }
 
-export type SavedSource = { name: string; folder: string; bytes: number; contentType: string };
+/** `home` : « local » = compte gratuit, l'original part du serveur après l'indexation de son texte. */
+export type SavedSource = { name: string; folder: string; bytes: number; contentType: string; home: OriginalsHome };
 
 const ACCEPT = "application/pdf, text/html, application/xhtml+xml, text/markdown, text/plain;q=0.9";
 
@@ -101,7 +106,10 @@ export async function textSourceExists(courseId: string, a: { title: string; cat
 }
 
 /** Range `data` dans le dossier du cours, sans jamais écraser un fichier existant. */
-async function store(courseId: string, name: string, category: SourceCategory | undefined, data: Buffer, contentType: string): Promise<SavedSource> {
+async function store(
+  courseId: string, name: string, category: SourceCategory | undefined, data: Buffer, contentType: string,
+  origin: { originalName?: string; origin?: OriginalOrigin; url?: string | null } = {},
+): Promise<SavedSource> {
   const folder = category ? BUCKET[category] : classifyFile(name).bucket;
   // Un cours HISTORIQUE lit son contenu à la racine du dépôt, en lecture seule (comme l'import de l'app).
   if (folder !== "refs" && getCourse(courseId).paths?.contentRel === "..") {
@@ -109,18 +117,15 @@ async function store(courseId: string, name: string, category: SourceCategory | 
   }
   const storage = await checkStorage(currentUser(), data.length);
   if (storage) throw new SourceError(storage.status, storage.error);
+  const indexFull = await checkIndexQuota(currentUser());
+  if (indexFull) throw new SourceError(indexFull.status, indexFull.error);
   const problem = await unreadableDocument(data, path.extname(name));
   if (problem) throw new SourceError(problem.status, problem.message);
 
-  const dir = folderDir(courseId, folder);
-  const ext = path.extname(name);
-  const stem = name.slice(0, -ext.length);
-  for (let n = 1; n <= 50; n++) {
-    const candidate = n === 1 ? name : `${stem}-${n}${ext}`;
-    const abs = path.join(dir, candidate);
-    if (!abs.startsWith(dir + path.sep)) break;
-    if (await files().put(abs, data, { exclusive: true })) return { name: candidate, folder, bytes: data.length, contentType };
-  }
+  // Jamais d'écrasement (« -2 », « -3 »…). Premium : rangé dans le cloud ; gratuit : en transit,
+  // le temps que l'ingestion lise son texte (lib/originals).
+  const saved = await storeOriginal(courseId, folderDir(courseId, folder), name, data, { ...origin, dedupe: false });
+  if (saved) return { name: saved.name, folder, bytes: data.length, contentType, home: saved.home };
   throw new SourceError(409, "Trop de fichiers du même nom dans ce cours : donne un autre titre.");
 }
 
@@ -131,14 +136,14 @@ export async function addFileSource(courseId: string, a: { name: string; data: B
   const ext = path.extname(a.name).toLowerCase();
   if (![".pdf", ".md", ".txt", ".html", ".htm"].includes(ext)) throw new SourceError(415, "Formats acceptés : PDF, TXT, MD, HTML.");
   if (ext === ".pdf" && a.data.subarray(0, 5).toString("latin1") !== "%PDF-") throw new SourceError(415, "Ce fichier n'est pas un PDF valide.");
-  return store(courseId, fileName(path.basename(a.name, ext), null, ext === ".htm" ? ".html" : ext), a.category, a.data, a.contentType);
+  return store(courseId, fileName(path.basename(a.name, ext), null, ext === ".htm" ? ".html" : ext), a.category, a.data, a.contentType, { originalName: a.name, origin: "upload" });
 }
 
 export async function addTextSource(courseId: string, a: { text: string; title?: string; category?: SourceCategory }): Promise<SavedSource> {
   const data = Buffer.from(a.text, "utf8");
   if (!a.text.trim()) throw new SourceError(400, "Texte vide.");
   if (data.length > SOURCE_MAX_BYTES) throw new SourceError(413, "Texte trop volumineux.");
-  return store(courseId, fileName(a.title ?? "notes", null, ".md"), a.category, data, "text/markdown");
+  return store(courseId, fileName(a.title ?? "notes", null, ".md"), a.category, data, "text/markdown", { origin: "text" });
 }
 
 /** Lectures d'URL par compte sur l'heure glissante (conteneur unique, cf. ARCHITECTURE : en mémoire suffit). */
@@ -208,7 +213,7 @@ export async function addUrlSource(
     const problem = htmlPageProblem(res.body.toString("utf8"));
     if (problem) throw new SourceError(422, problem);
   }
-  return store(courseId, fileName(a.title, link.named ? link.url : null, ext), a.category, res.body, (res.contentType ?? "").split(";")[0].trim());
+  return store(courseId, fileName(a.title, link.named ? link.url : null, ext), a.category, res.body, (res.contentType ?? "").split(";")[0].trim(), { origin: "url", url: a.url });
 }
 
 const LOGIN = /(?<!\p{L})(connexion|se connecter|sign[ -]?in|log[ -]?in|anmelden|iniciar sesi[oó]n|accedi)(?!\p{L})/iu;

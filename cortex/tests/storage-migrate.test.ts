@@ -80,3 +80,18 @@ test("vérification : un objet altéré ou absent du seau est signalé", async (
   const v = await verifyBucket({ bucket, root, prefix: "", ...quiet });
   assert.deepEqual(v, { checked: 2, mismatched: ["u/ben/ml/exams/exam-1.pdf"], missing: ["u/ben/ml/refs/final 2024.pdf"] });
 });
+
+test("un original en transit (compte gratuit) n'est ni migré vers le seau ni compté comme à archiver", async () => {
+  const root = volume();
+  const { LocalFsStore } = await import("../lib/storage/local");
+  const { inBucketPredicate } = await import("../lib/storage/migrate");
+  const free = path.join(root, "u/ana/ml/refs/final-gratuit.pdf");
+  await new LocalFsStore(root).put(free, "%PDF-transit", { localOnly: true });
+  const { bucket, objects } = fakeBucket();
+  await migrateToBucket({ bucket, root, prefix: "", write: true, ...quiet });
+  assert.equal(objects.has("u/ana/ml/refs/final-gratuit.pdf"), false);
+  assert.equal([...objects.keys()].some((k) => k.startsWith(".transit")), false, "les repères restent sur le disque");
+  assert.equal((await inBucketPredicate({ bucket, root, prefix: "" }))("u/ana/ml/refs/final-gratuit.pdf"), true, "jamais archivé dans la sauvegarde");
+  await new LocalFsStore(root).remove(free);
+  assert.equal(fs.existsSync(path.join(root, ".transit/u/ana/ml/refs/final-gratuit.pdf")), false);
+});

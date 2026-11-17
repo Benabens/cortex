@@ -197,7 +197,11 @@ export async function writeAccountExport(userId: string, dir: string, budget: Bu
     }
   });
   if (skipped.length) log("warn", "export.symlinks_skipped", { user: userId, count: skipped.length });
-  write("manifest.json", { createdAt: new Date().toISOString(), userId, courses: courseIds, files, symlinksIgnored: skipped.length, bytes: budget.used });
+  write("manifest.json", {
+    createdAt: new Date().toISOString(), userId, courses: courseIds, files, symlinksIgnored: skipped.length, bytes: budget.used,
+    // Compte gratuit (lib/originals) : ses originaux sont restés sur son ordinateur, absents de fichiers/.
+    notes: ["cours/<id>/local_originals.json : fichiers restés sur ton ordinateur (Cortex n'en garde que l'index, dans items.json)."],
+  });
   return { courses: courseIds, files };
 }
 

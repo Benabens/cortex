@@ -8,6 +8,7 @@ import { apiPost, useCourse } from "@/lib/ux/api";
 import { corpusLabel, extOf, type SourcesResp, type SourceExam } from "@/lib/ux/sources";
 import { cn } from "@/lib/ux/cn";
 import { apiDelete } from "@/lib/ux/write";
+import { OnComputerBadge } from "@/components/sources/OriginalsNotes";
 
 const ANNALE_TYPES = new Set(["final", "midterm"]);
 /** Valeur de la facette par défaut (les annales regroupent plusieurs types de source). */
@@ -35,6 +36,8 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
   const setBusyFor = (path: string, on: boolean) =>
     setBusy((s) => { const n = new Set(s); on ? n.add(path) : n.delete(path); return n; });
 
+  // Originaux restés sur l'ordinateur d'un compte gratuit (lib/originals) : Cortex n'a que leur index.
+  const onComputer = useMemo(() => new Set(data.originals?.onComputer ?? []), [data.originals]);
   const hrefByPath = useMemo(() => {
     const m = new Map<string, string | null>();
     for (const s of data.sources ?? []) m.set(s.path, s.href);
@@ -136,6 +139,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
                     </div>
                     <div className="text-[0.72rem] text-ink-4">
                       <span className="font-data">{ext}</span>
+                      {onComputer.has(f.path) && <OnComputerBadge />}
                     </div>
                   </div>
 
@@ -189,6 +193,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
                     </div>
                     <div className="text-[0.72rem] text-ink-4">
                       <span className="font-data">{ext}</span>
+                      {onComputer.has(s.path) && <OnComputerBadge />}
                     </div>
                   </div>
                   {s.href && <SeeLink href={s.href} label={s.title} />}

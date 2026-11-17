@@ -85,6 +85,17 @@ export function courseRefImages(): string[] {
   return out.sort();
 }
 
+/**
+ * Compte gratuit (lib/originals) : annales restées sur l'ordinateur, dont les pages ne se montrent
+ * plus au modèle. null s'il n'y en a pas. Dit à l'étudiant sur quoi l'examen se cale.
+ */
+export async function offServerRefsNote(): Promise<string | null> {
+  const { pathsOnComputer } = await import("@/lib/originals/index-only");
+  const n = [...(await pathsOnComputer())].filter((p) => p.startsWith("refs/") && /\.pdf$/i.test(p)).length;
+  if (!n) return null;
+  return `${n} annale${n > 1 ? "s" : ""} sur ton ordinateur : l'examen se cale sur leur texte et leur index, sans revoir leurs pages en image.`;
+}
+
 /** Bloc d'ancrage vision pour le profil générique (vide s'il n'y a pas d'images). */
 export function genericVisionBlock(): string {
   const imgs = courseRefImages();

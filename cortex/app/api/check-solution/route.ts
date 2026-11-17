@@ -7,7 +7,8 @@ import { logLoopRoute } from "@/lib/req-log";
 import { uploadsDir } from "@/lib/paths";
 import crypto from "node:crypto";
 import path from "node:path";
-import { storage as files } from "@/lib/storage";
+import { putUpload } from "@/lib/originals/intake";
+import { currentCourse } from "@/db/client";
 import { NextRequest, NextResponse } from "next/server";
 import { checkStorage, declaredBytes } from "@/lib/storage-quota";
 import { currentUser } from "@/db/context";
@@ -49,7 +50,8 @@ async function handlePOST(req: NextRequest) {
       if (file.size > 12 * 1024 * 1024) return NextResponse.json({ error: "Image trop lourde (max 12 Mo)." }, { status: 400 });
       const name = `${crypto.randomUUID()}.${ext}`;
       // Écrit aussi sur le disque local (copie du seau en stockage objet) : l'outil Read du modèle l'y lit.
-      await files().put(path.join(uploadsDir(), name), Buffer.from(await file.arrayBuffer()));
+      // Compte gratuit : en transit seulement, jamais au seau (lib/originals).
+      await putUpload(currentCourse(), path.join(uploadsDir(), name), Buffer.from(await file.arrayBuffer()));
       // chemin RÉEL (scopé par utilisateur en multi-user), relatif au cwd
       imageRel = path.relative(process.cwd(), path.join(uploadsDir(), name));
     }
