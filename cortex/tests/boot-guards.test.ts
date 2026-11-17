@@ -102,6 +102,7 @@ test("preview de PR : refus maintenu en production, et dès qu'une variable copi
     ["LLM compatible mais distant", { LLM_BASE_URL: "https://api.openai.com/v1" }, /LLM/],
     ["e-mails réels", { RESEND_API_KEY: "re_x" }, /RESEND_API_KEY/],
     ["sauvegardes vers le vrai bucket", { BACKUP_S3_BUCKET: "cortex-backups" }, /BACKUP_S3_BUCKET/],
+    ["fichiers dans le seau de la prod", { STORAGE_S3_BUCKET: "bucket-prod-ab12" }, /STORAGE_S3_BUCKET/],
     ["clé Stripe live", { STRIPE_SECRET_KEY: "sk_live_x" }, /Stripe live/],
     ["clé Stripe restreinte live", { STRIPE_SECRET_KEY: "rk_live_x" }, /Stripe live/],
     ["hébergement hors Railway", { CORTEX_HOSTED: "1" }, /CORTEX_HOSTED/],
@@ -118,4 +119,39 @@ test("dry-run : ouvert dans une preview de PR assainie, toujours fermé en produ
   const { dryRunAllowed } = await import("../lib/boot-guards");
   assert.equal(await dryRunAllowed({ ...preview, AUTH_ENABLED: "1", BILLING_ENABLED: "1" }, "alice"), true);
   assert.equal(await dryRunAllowed({ ...preview, AUTH_ENABLED: "1", RAILWAY_ENVIRONMENT: "production", RAILWAY_ENVIRONMENT_NAME: "production" }, "alice"), false);
+});
+
+/**
+ * AUDIT FUITES I15 — Railway recopie les variables de la prod dans tout nouvel
+ * environnement (PR, staging) : STORAGE_S3_* comprises. Une instance hors
+ * production qui démarre avec ce seau lit les PDF des vrais comptes et peut y
+ * écrire ou y effacer. Refus au démarrage, quel que soit le chemin de démarrage.
+ */
+test("I15 — seau de fichiers hors production sur Railway → refus de démarrer", async () => {
+  const { assertStorageBucketIsolated } = await import("../lib/boot-guards");
+  const prodBucket = { STORAGE_S3_BUCKET: "bucket-prod-ab12", STORAGE_S3_ENDPOINT: "https://t3.storageapi.dev" };
+  for (const name of ["cortex-pr-66", "staging"]) {
+    assert.throws(
+      () => assertStorageBucketIsolated({ RAILWAY_PROJECT_ID: "p", RAILWAY_ENVIRONMENT_NAME: name, ...prodBucket }),
+      /STORAGE_S3_BUCKET/, name);
+  }
+  // Variables Railway sans nom d'environnement : on ne peut pas prouver que c'est la prod.
+  assert.throws(() => assertStorageBucketIsolated({ RAILWAY_PROJECT_ID: "p", ...prodBucket }), /STORAGE_S3_BUCKET/);
+  // Seau déclaré pour un AUTRE environnement que celui-ci (la valeur de la prod recopiée) : refus.
+  assert.throws(() => assertStorageBucketIsolated({ RAILWAY_ENVIRONMENT_NAME: "staging", STORAGE_S3_ENVIRONMENT: "production", ...prodBucket }), /STORAGE_S3_BUCKET/);
+});
+
+test("I15 — configurations légitimes : la prod et son seau, une PR sans seau, un poste de dev, un seau dédié déclaré", async () => {
+  const { assertStorageBucketIsolated } = await import("../lib/boot-guards");
+  const bucket = { STORAGE_S3_BUCKET: "bucket-ab12", STORAGE_S3_ENDPOINT: "https://t3.storageapi.dev" };
+  assert.doesNotThrow(() => assertStorageBucketIsolated({ RAILWAY_PROJECT_ID: "p", RAILWAY_ENVIRONMENT_NAME: "production", ...bucket }));
+  assert.doesNotThrow(() => assertStorageBucketIsolated({ RAILWAY_PROJECT_ID: "p", RAILWAY_ENVIRONMENT_NAME: "cortex-pr-66" }));
+  assert.doesNotThrow(() => assertStorageBucketIsolated({ ...bucket })); // MinIO local, CI
+  assert.doesNotThrow(() => assertStorageBucketIsolated({ RAILWAY_ENVIRONMENT_NAME: "staging", STORAGE_S3_ENVIRONMENT: "staging", ...bucket }));
+});
+
+test("I15 — prod-boot et instrumentation appellent la garde du seau", async () => {
+  const fs = await import("node:fs");
+  assert.match(fs.readFileSync("scripts/prod-boot.ts", "utf8"), /assertStorageBucketIsolated\(/);
+  assert.match(fs.readFileSync("instrumentation.ts", "utf8"), /assertStorageBucketIsolated\(/);
 });
