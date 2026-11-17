@@ -34,6 +34,9 @@ const copiedFromProduction: Record<string, string> = {
   DB_DRIVER: "postgres", DATABASE_URL: "postgresql://postgres:pw@postgres.railway.internal:5432/railway",
   LLM_PROVIDER: "anthropic", LLM_API_KEY: "sk-ant-vraie-cle", RESEND_API_KEY: "re_vraie_cle",
   BACKUP_S3_BUCKET: "cortex-backups", BACKUP_S3_ACCESS_KEY_ID: "k", BACKUP_S3_SECRET_ACCESS_KEY: "s", BACKUP_S3_ENDPOINT: "https://s3",
+  // Seau de fichiers de la prod (Railway Bucket, références ${{Bucket.*}} recopiées telles quelles).
+  STORAGE_S3_BUCKET: "bucket-prod-ab12", STORAGE_S3_ENDPOINT: "https://t3.storageapi.dev", STORAGE_S3_REGION: "auto",
+  STORAGE_S3_ACCESS_KEY_ID: "tid_prod", STORAGE_S3_SECRET_ACCESS_KEY: "tsec_prod", STORAGE_S3_PREFIX: "prod",
   GOOGLE_CLIENT_ID: "g.apps.googleusercontent.com", GOOGLE_CLIENT_SECRET: "gs", METRICS_TOKEN: "m",
   STRIPE_SECRET_KEY: "sk_live_vraie_cle", STRIPE_WEBHOOK_SECRET: "whsec_x", BILLING_ENABLED: "1",
   INVITE_ONLY: "1", INVITE_EMAILS: "ben@exemple.com", REDIRECT_FROM_HOSTS: "cortex-app-production-6a65.up.railway.app",
@@ -58,6 +61,14 @@ test("PR : les variables copiées de la prod sont neutralisées et la garde de d
   assert.equal(env.LLM_BASE_URL, "http://127.0.0.1:8080/api/e2e-llm", "le modèle hermétique, servi par l'app elle-même");
   assert.equal(env.SENTRY_ENVIRONMENT, "preview");
   assert.equal(env.DATABASE_URL, copiedFromProduction.DATABASE_URL, "la base privée de l'environnement de PR");
+});
+
+test("PR : le seau de fichiers de la prod est retiré, la preview range ses fichiers sur son propre volume", () => {
+  const r = run(copiedFromProduction);
+  assert.equal(r.status, 0, r.stderr);
+  for (const k of Object.keys(copiedFromProduction).filter((k) => k.startsWith("STORAGE_S3_"))) {
+    assert.equal(r.started![k], undefined, `${k} de la prod encore présent`);
+  }
 });
 
 test("PR : une clé Stripe de TEST reste utilisable", () => {

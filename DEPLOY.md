@@ -663,6 +663,16 @@ hexadécimaux, générée par l'étape 4, posée en variable Railway et en secre
 GitHub) ; sans elle, la preview refuse de démarrer. La workflow ne publie aucune
 trace Playwright (elle contiendrait la clé).
 
+**Seau de fichiers (audit fuites I15).** Railway recopie aussi `STORAGE_S3_*` :
+la preview pointerait sur le seau de la prod (PDF des vrais comptes, en lecture
+comme en écriture). `preview-entrypoint.sh` retire ces variables, la preview
+range ses fichiers sur son propre volume. Filet en code, sur tous les chemins de
+démarrage (`assertStorageBucketIsolated`, `prod-boot` et `instrumentation`) :
+sur Railway, hors de l'environnement `production`, un `STORAGE_S3_BUCKET` posé
+fait refuser le démarrage. Un environnement persistant (staging) qui aurait son
+propre seau le déclare avec `STORAGE_S3_ENVIRONMENT=<nom de l'environnement>` ;
+la valeur recopiée de la prod ne peut pas passer cette garde.
+
 ## 10. Sauvegardes et restauration
 
 Deux choses à sauvegarder, **indépendantes** : la **base** (comptes, crédits

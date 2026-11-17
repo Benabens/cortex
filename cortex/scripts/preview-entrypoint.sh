@@ -44,6 +44,12 @@ unset LLM_API_KEY ANTHROPIC_API_KEY OPENAI_API_KEY \
   GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET AUTH_GOOGLE_ID AUTH_GOOGLE_SECRET \
   METRICS_TOKEN INVITE_ONLY INVITE_EMAILS REDIRECT_FROM_HOSTS \
   CORTEX_SEED_COURSES CORTEX_SEED_USER SEED_NEW_TENANTS CORTEX_OWNER_USER_ID
+# Seau de fichiers de la prod (AUDIT FUITES I15) : une preview qui le lit lit
+# les PDF des vrais comptes, et une preview qui y écrit ou y efface touche la
+# prod. Sans STORAGE_S3_*, lib/storage range les fichiers sur le volume de la
+# PR (CORTEX_DATA_DIR), cloisonné par environnement comme la base.
+unset STORAGE_S3_BUCKET STORAGE_S3_ENDPOINT STORAGE_S3_REGION STORAGE_S3_PREFIX \
+  STORAGE_S3_ACCESS_KEY_ID STORAGE_S3_SECRET_ACCESS_KEY STORAGE_S3_PATH_STYLE STORAGE_S3_PRESIGN
 # Stripe : mode test seulement.
 case "${STRIPE_SECRET_KEY:-}" in
   sk_test_*) ;;
