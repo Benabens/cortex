@@ -150,3 +150,30 @@ test("4b-3 : un lien symbolique sous data/u/<slug>/ n'est pas suivi ; l'export n
     fs.rmSync(outside, { force: true });
   }
 });
+
+/**
+ * AUDIT FUITES DU 17/11, I6 — l'export se relançait sans fin : chaque archive (jusqu'à 2 Go)
+ * sort par le serveur, à payer. Désormais EXPORTS_PER_DAY exports par compte et par jour
+ * (défaut 3), comptés en base ; au-delà, 429 avec la remise à zéro. Un autre compte n'est pas touché.
+ */
+test("I6 : EXPORTS_PER_DAY exports par compte et par jour, puis 429 « demain » ; un autre compte garde les siens", async () => {
+  const { authRun } = await import("../db/auth-store");
+  await authRun(`DELETE FROM app_meta WHERE key LIKE 'export:%'`);
+  process.env.EXPORTS_PER_DAY = "2";
+  try {
+    const { GET } = await import("../app/api/account/export/route");
+    const exportAs = async (user: string) => {
+      const r = await GET(new NextRequest("http://cortex.test/api/account/export", { headers: { "x-cortex-user": user } }));
+      if (r.status === 200) { await r.arrayBuffer(); await new Promise((ok) => setTimeout(ok, 300)); }
+      return r;
+    };
+    assert.equal((await exportAs("bob")).status, 200);
+    assert.equal((await exportAs("bob")).status, 200);
+    const refused = await exportAs("bob");
+    assert.equal(refused.status, 429);
+    assert.match((await refused.json()).error, /2 exports aujourd.hui.*demain/i);
+    assert.equal((await exportAs("alice")).status, 200, "un autre compte n'est pas touché");
+  } finally {
+    delete process.env.EXPORTS_PER_DAY;
+  }
+});

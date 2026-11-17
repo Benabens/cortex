@@ -3,6 +3,7 @@ import { nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import { creditCost, DELTA_CENTI } from "./credits";
 import { floatLimit } from "./env";
+import { quotaFor } from "./guards";
 import { ownerUserIds } from "./owner";
 import { accountRevenue, sinceDays, totalRevenue } from "./revenue";
 
@@ -31,14 +32,15 @@ import { accountRevenue, sinceDays, totalRevenue } from "./revenue";
  * Les crédits d'abonnement de la période en cours sont achetés.
  *
  * Marge 0,6 par défaut : le coût réel d'un job varie du simple au triple
- * (QCM mesuré en prod du 13 au 14/11/2026 : médiane 4,48 $, maximum 6,01 $) et
+ * (QCM en prod : 4,48 $ de médiane au 14/11 avant #106, 2 à 2,9 $ au 17/11 après) et
  * deux jobs peuvent tourner en même temps ; 40 % de marge absorbent un job plus
  * cher que prévu sans faire passer le compte en perte. Elle ne peut dépasser 1.
  *
  * Plafond du jour par compte : min(SPEND_CAP_PER_USER_USD, max(plancher, ¼ B)),
  * vérifié AU LANCEMENT avec le coût attendu des jobs encore en cours (429 « reviens
- * demain », les crédits restent acquis). Le plancher (8 $) est au-dessus du QCM le
- * plus cher mesuré : un job lancé n'est jamais coupé en route par ce plafond.
+ * demain », les crédits restent acquis). Le plancher couvre DAILY_GEN_QUOTA générations
+ * au coût attendu le plus cher, et 8 $ au moins (audit fuites I10) : ce plafond ne refuse
+ * jamais avant les générations du jour annoncées, ni ne coupe un job lancé.
  * SPEND_CAP_PER_USER_USD reste le fusible vérifié à chaque appel (lib/billing/usage).
  *
  * Plafond global du mois lié au revenu (globalRevenueCapUsd) : vérifié au
@@ -60,11 +62,11 @@ export function aiBudgetFreeUsd(): number {
 }
 
 /**
- * Coût IA ATTENDU d'un job, en dollars, par unité de prix : moyenne mesurée en
- * prod (cost:report, moteur du 13/11/2026). Surcharge : AI_JOB_COST_USD_JSON.
+ * Coût IA ATTENDU d'un job, en dollars, par unité de prix : haut de la fourchette mesurée en
+ * prod (QCM 2 à 2,9 $ au 17/11/2026 après #106 ; examen 2,2 $). Surcharge : AI_JOB_COST_USD_JSON.
  * Inconnu → 1 $.
  */
-const DEFAULT_JOB_COST_USD: Record<string, number> = { qcm: 4.3, exam: 2.1, prepare: 0.15, assist: 0.1 };
+const DEFAULT_JOB_COST_USD: Record<string, number> = { qcm: 2.9, exam: 2.2, prepare: 0.15, assist: 0.1 };
 
 export function expectedJobCostUsd(kind: string, costCenti?: number): number {
   let table = DEFAULT_JOB_COST_USD;
@@ -84,11 +86,22 @@ export function expectedJobCostUsd(kind: string, costCenti?: number): number {
   return unit * units;
 }
 
+/**
+ * Plancher du plafond du jour : les générations du jour annoncées (DAILY_GEN_QUOTA) au coût
+ * attendu de la plus chère (un QCM de 40 questions vaut deux unités), 8 $ au moins. Le fusible
+ * SPEND_CAP_PER_USER_USD reste au-dessus de tout.
+ */
+function defaultDailyFloorUsd(): number {
+  const quota = quotaFor("gen");
+  const dearest = 2 * Math.max(expectedJobCostUsd("qcm"), expectedJobCostUsd("exam"));
+  return Math.max(8, quota === null ? 0 : quota * dearest);
+}
+
 /** Plafond de dépense du JOUR d'un compte, cohérent avec son budget. null : pas de plafond. */
 export function dailySpendCapUsd(budgetUsd: number): number | null {
   const fuse = floatLimit("SPEND_CAP_PER_USER_USD", 15);
   const floorRaw = Number(process.env.SPEND_CAP_PER_USER_FLOOR_USD);
-  const floor = Number.isFinite(floorRaw) && floorRaw >= 0 ? floorRaw : 8;
+  const floor = Number.isFinite(floorRaw) && floorRaw >= 0 ? floorRaw : defaultDailyFloorUsd();
   const v = Math.max(floor, 0.25 * Math.max(0, budgetUsd));
   return fuse === null ? v : Math.min(fuse, v);
 }

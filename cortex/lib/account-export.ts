@@ -27,11 +27,12 @@ import path from "node:path";
 import { storage } from "@/lib/storage";
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
-import { authAll, authGet } from "@/db/auth-store";
+import { authAll, authGet, authRun } from "@/db/auth-store";
 import { runWithCourse } from "@/db/client";
 import { runWithUser, userSlug } from "@/db/context";
 import { dbDriverName, q } from "@/db/q";
 import { DELTA_CENTI } from "@/lib/billing/credits";
+import { intLimit } from "@/lib/billing/env";
 import { courseDbPath, dataRoot, ensureCoursesLoaded, listCoursesOf } from "@/lib/courses";
 import { log } from "@/lib/metrics";
 import { userStorageBytes } from "@/lib/storage-quota";
@@ -47,6 +48,32 @@ export function exportMaxBytes(): number {
   const mb = Number(process.env.EXPORT_MAX_MB);
   return (Number.isFinite(mb) && mb >= 0 ? mb : 2048) * 1024 * 1024;
 }
+/** Exports par compte et par jour (EXPORTS_PER_DAY, défaut 3 en déploiement gardé ; « unlimited » pour lever). */
+export function exportsPerDay(): number | null {
+  return intLimit("EXPORTS_PER_DAY", 3);
+}
+
+/**
+ * Compte un export du jour pour ce compte (app_meta `export:<compte>:<jour>`, incrément atomique),
+ * ou ExportBusy au-delà d'EXPORTS_PER_DAY (audit fuites I6 : chaque archive sort par le serveur).
+ */
+async function takeDailyExport(userId: string): Promise<void> {
+  const cap = exportsPerDay();
+  if (cap === null) return;
+  const day = new Date().toISOString().slice(0, 10);
+  const key = `export:${userId}:${day}`;
+  const row = await authGet<{ value: string }>(
+    `INSERT INTO app_meta (key, value) VALUES (?, '1')
+     ON CONFLICT (key) DO UPDATE SET value = CAST(CAST(app_meta.value AS integer) + 1 AS text)
+     RETURNING value`, key,
+  );
+  // Les compteurs des jours passés ne servent plus.
+  await authRun(`DELETE FROM app_meta WHERE key LIKE 'export:%' AND key NOT LIKE ?`, `export:%:${day}`).catch(() => {});
+  if (Number(row?.value ?? 0) > cap) {
+    throw new ExportBusy(`Tu as fait ${cap} exports aujourd'hui, la limite du jour : réessaie demain (remise à zéro à minuit UTC).`);
+  }
+}
+
 export function exportMaxConcurrent(): number {
   const n = Number(process.env.EXPORT_MAX_CONCURRENT);
   return Number.isInteger(n) && n >= 0 ? n : 2;
@@ -216,6 +243,7 @@ export async function streamAccountExport(userId: string): Promise<{ body: Reada
   if (bytes > max) {
     throw new ExportTooLarge(`Tes fichiers pèsent ${(bytes / 1024 / 1024).toFixed(0)} Mo, au-delà de la limite d'export (${(max / 1024 / 1024).toFixed(0)} Mo). Supprime des annales ou des fichiers importés, puis réessaie.`);
   }
+  await takeDailyExport(userId);
   inFlight.add(userId);
   // Temporaire SUR LE VOLUME (liens durs possibles), hors data/u/ (jamais compté ni exporté).
   const tmpRoot = path.join(dataRoot(), ".export-tmp");

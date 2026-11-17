@@ -4,6 +4,8 @@ import { authEnabled } from "@/lib/auth";
 import { requireCourse } from "@/lib/req";
 import { q } from "@/db/q";
 import { storage } from "@/lib/storage";
+import { currentUser } from "@/db/context";
+import { serveCounted } from "@/lib/served-bytes";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -35,9 +37,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ file
   const abs = path.join(EXAM_DIR, file);
   if (!abs.startsWith(EXAM_DIR + path.sep)) return new NextResponse("Not found", { status: 404 });
   const ext = file.split(".").pop()!.toLowerCase();
-  const res = await storage().serve(abs, req, {
+  // Relayé par le serveur : borné par compte et par jour (audit fuites I6).
+  const res = await serveCounted(currentUser(), () => storage().serve(abs, req, {
     contentType: MIME[ext] ?? "application/octet-stream",
     headers: servedFileHeaders(MIME[ext] ?? "application/octet-stream", { "content-disposition": `inline; filename="${file}"` }),
-  });
+  }));
   return res ?? new NextResponse("Not found", { status: 404 });
 }

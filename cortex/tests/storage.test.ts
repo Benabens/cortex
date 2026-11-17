@@ -185,6 +185,18 @@ describe("S3Store — le seau fait foi", () => {
     assert.ok(!fake.calls.includes(`presign u/ben/ml/refs/page.html`));
   });
 
+  test("I6 : une image ouverte directement (navigation) part aussi du seau ; embarquée (<img>), elle reste relayée", async () => {
+    const { make } = s3();
+    const { store, root } = make();
+    const png = path.join(root, "u/ben/ml/uploads/capture.png");
+    await store.put(png, "PNG");
+    const nav = await store.serve(png, get({ "sec-fetch-dest": "document" }), { contentType: "image/png", headers: {} });
+    assert.equal(nav?.status, 302);
+    assert.equal(new URL(nav!.headers.get("location")!).searchParams.get("response-content-type"), "image/png");
+    const img = await store.serve(png, get({ "sec-fetch-dest": "image" }), { contentType: "image/png", headers: {} });
+    assert.equal(img?.status, 200, "img-src 'self' bloquerait le domaine du seau");
+  });
+
   test("STORAGE_S3_PRESIGN=0 : même un PDF est relayé par l'app", async () => {
     const { make } = s3({ presign: false });
     const { store, root } = make();

@@ -119,7 +119,7 @@ abonnement mort.
 |---|---|---|---|
 | Cortex : pack de 10 crédits | 9,00 EUR | paiement unique | `cortex_credits_10` |
 | Cortex Pro | 14,90 EUR | récurrent, mensuel | `cortex_pro_monthly` |
-| Cortex Pro | 119,00 EUR | récurrent, annuel | `cortex_pro_yearly` |
+| Cortex Pro | 149,00 EUR | récurrent, annuel | `cortex_pro_yearly` |
 
 - Les deux prix récurrents vont sur le **même** produit « Cortex Pro ».
 - Sur le produit « Cortex Pro », pose le **libellé de relevé** `BENABENS CORTEX`.
@@ -271,7 +271,7 @@ des paiements remboursés (ils ne sont pas rendus), soit moins d'un euro.
 **Pack**
 
 1. Page « Abonnement & crédits » : les trois offres affichent leur prix
-   (`9 €`, `14,90 € / mois`, `119 € / an`), aucun bandeau « ouvrent bientôt ».
+   (`9 €`, `14,90 € / mois`, `149 € / an`), aucun bandeau « ouvrent bientôt ».
 2. Accepter les CGV, cocher le consentement du pack, **Acheter**, payer.
 3. Vérifier :
    - retour sur l'app, solde **+10** en quelques secondes ;
