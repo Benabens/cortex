@@ -4,11 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import { assertTexSafe } from "@/lib/tex-guard";
 import { currentCourse } from "@/db/client";
-import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
+import { DEFAULT_COURSE } from "@/lib/courses";
 import type { ExamQuestion, ExamSpec } from "@/lib/exam";
 import { examsDir } from "@/lib/paths";
-import { durationOf, formatContextFor } from "@/lib/exam-format";
-import { courseTemplate, courseWords, coverWords, durationText, epflExamKind, epflLocalChrome, examTemplate, localDate, neutralChrome, neutralCoverTex, pointsText } from "@/lib/exam-template";
+import { examLayout, examPdf, type ExamLayout } from "@/lib/exam-layout";
+import { epflLongDate } from "@/lib/exam-layout-epfl";
+import { courseTemplate, courseWords, pointsText } from "@/lib/exam-template";
 import { qrText, texEscape } from "@/lib/tex-escape";
 
 const LATEX_DIR = path.join(process.cwd(), "latex");
@@ -43,142 +44,6 @@ function unwrapLockedFigures(t: string): string {
     .replace(/[✗✘✕]/g, String.raw`\ensuremath{\times}`);
 }
 
-function footDate(dateLabel: string): string {
-  const m = dateLabel.match(/(\d{4})-(\d{2})-(\d{2})/);
-  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-  if (!m) return texEscape(dateLabel);
-  const y = m[1], mo = months[+m[2] - 1] ?? "", d = +m[3];
-  return String.raw`${mo} ${d}\textsuperscript{th}, ${y}`;
-}
-
-function gradingTableTex(qs: ExamQuestion[], leaveEmpty = "LEAVE THIS EMPTY"): string {
-  const groups: { cat: string; span: number }[] = [];
-  for (const q of qs) {
-    const cat = q.category ?? "Autre";
-    const last = groups[groups.length - 1];
-    if (last && last.cat === cat) last.span++;
-    else groups.push({ cat, span: 1 });
-  }
-  const total = qs.reduce((s, q) => s + qPoints(q), 0);
-  const cols = "|" + "c|".repeat(qs.length + 1);
-  const groupRow = groups.map((g) => String.raw`\multicolumn{${g.span}}{c|}{\textbf{${texEscape(g.cat)}}}`).join(" & ");
-  const qRow = qs.map((_, i) => `Question ${i + 1}`).join(" & ");
-  const ptsRow = qs.map((q) => String(qPoints(q))).join(" & ");
-  const emptyRow = qs.map(() => "").join(" & ");
-  return [
-    String.raw`\begin{center}\renewcommand{\arraystretch}{1.4}\small`,
-    String.raw`\begin{tabular}{${cols}}\hline`,
-    String.raw`\multicolumn{${qs.length + 1}}{|c|}{\textbf{${leaveEmpty}}}\\\hline`,
-    String.raw`${groupRow} & \multirow{2}{*}{\textbf{TOTAL}}\\\cline{1-${qs.length}}`,
-    String.raw`${qRow} & \\\hline`,
-    String.raw`${ptsRow} & ${total}\\\hline`,
-    String.raw`${emptyRow} & \\[0.55cm]\hline`,
-    String.raw`\end{tabular}\end{center}`,
-  ].join("\n");
-}
-
-
-/**
- * Garde d'un cours HORS CS-202 : durée, documents permis et langue viennent du format de
- * l'examen (déclaré ou détecté), jamais du texte de CS-202 (prod du 13/11 : « You have 3 hours »,
- * notes autorisées, en anglais, pour un examen déclaré de 60 min sans documents en français).
- * Une règle inconnue (documents non déclarés) n'est pas écrite plutôt que devinée.
- */
-function genericCoverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string): string {
-  const total = qs.reduce((s, q) => s + qPoints(q), 0);
-  const c = getCourse(currentCourse());
-  const f = formatContextFor(currentCourse());
-  const w = coverWords(f.language);
-  // Durée du format (annale, déclaration) seulement : la spec du générateur et la fiche du cours
-  // portent un 180 par défaut (audit 3, P1-3). Inconnue → la consigne n'est pas écrite.
-  const dur = durationOf(f);
-  const examCodeTex = texEscape(c.examCode).replace(/-/g, "--");
-  const uniLines = c.universityLines.map(texEscape).join(String.raw`\\ `);
-  const profsTex = c.profs.map(texEscape).join(", ");
-  const facultyLine = [c.faculty ? String.raw`\textbf{${texEscape(c.faculty)}}` : "", `${examCodeTex} ${texEscape(c.examName)}`, profsTex].filter(Boolean).join(String.raw`\\ `);
-  const logoTex = examTemplate(c) === "epfl" ? String.raw`\epfllogo[30]` : "";
-  return [
-    String.raw`\thispagestyle{empty}`,
-    String.raw`\noindent\begin{minipage}[t]{0.30\textwidth}\vspace{0pt}${logoTex}\end{minipage}\hfill`,
-    String.raw`\begin{minipage}[t]{0.64\textwidth}\vspace{2pt}\raggedleft\footnotesize\scshape`,
-    String.raw`${uniLines}\end{minipage}`,
-    String.raw`\vspace{2pt}\noindent\rule{\textwidth}{1pt}`,
-    String.raw`\noindent\begin{minipage}[t]{0.7\textwidth}\vspace{0pt}\footnotesize ${facultyLine}\end{minipage}\hfill`,
-    String.raw`\begin{minipage}[t]{0.25\textwidth}\vspace{0pt}\raggedleft\footnotesize ${w.anonymisation}\\ \textbf{\#0000}\end{minipage}`,
-    String.raw`\vspace{10pt}\noindent\normalsize ${w.name} Hanon Ymous \quad(000000)\hfill\textbf{${w.seat}} 0`,
-    String.raw`\vspace{0.5cm}\begin{center}{\Large\textbf{${examCodeTex} ${texEscape(c.examName.toUpperCase())}}}\\[6pt]{\large\textbf{${texEscape(epflExamKind(c))}}}\\[5pt]${localDate(dateLabel, w)}\end{center}`,
-    String.raw`\vspace{0.25cm}\noindent{\large\textbf{${w.instructions}}}\par\smallskip`,
-    String.raw`\noindent ${w.important}`,
-    String.raw`\begin{enumerate}\setlength{\itemsep}{2pt}`,
-    ...(dur ? [String.raw`\item ${w.duration(durationText(dur, w))}`] : []),
-    ...(f.documents ? [String.raw`\item ${w.documents[f.documents]}`] : []),
-    String.raw`\item ${w.ink}`,
-    String.raw`\item ${w.onSheet}`,
-    String.raw`\item ${w.readCarefully}`,
-    String.raw`\item ${w.exercises(qs.length, total)}`,
-    String.raw`\end{enumerate}`,
-    String.raw`\vspace{0.25cm}`,
-    gradingTableTex(qs, w.leaveEmpty),
-  ].join("\n");
-}
-
-/** Garde du gabarit neutre (cours hors EPFL) : consignes génériques, aucune marque d'établissement. */
-function neutralWrittenCoverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string): string {
-  const total = qs.reduce((s, q) => s + qPoints(q), 0);
-  const c = getCourse(currentCourse());
-  const f = formatContextFor(currentCourse());
-  const w = coverWords(f.language);
-  return neutralCoverTex({
-    course: c, w, dateTex: localDate(dateLabel, w), durationMin: durationOf(f), totalPts: total,
-    instructions: [w.exercises(qs.length, total), ...(f.documents ? [w.documents[f.documents]] : []), w.onSheet, w.readCarefully],
-  });
-}
-
-function coverTex(spec: ExamSpec, qs: ExamQuestion[], dateLabel: string): string {
-  if (currentCourse() !== DEFAULT_COURSE) {
-    return courseTemplate() === "epfl" ? genericCoverTex(spec, qs, dateLabel) : neutralWrittenCoverTex(spec, qs, dateLabel);
-  }
-  const total = qs.reduce((s, q) => s + qPoints(q), 0);
-  const dur = spec.duration_min ?? 180;
-  const hours = Math.round(dur / 60);
-  // métadonnées du cours courant (cs-202 reproduit le texte historique à l'identique)
-  const c = getCourse(currentCourse());
-  // Toutes échappées (audit du 14/11/2026, 🔴 1) : sans caractère spécial, le texte est inchangé.
-  const examCodeTex = texEscape(c.examCode).replace(/-/g, "--"); // « CS-202 » → « CS--202 » (en-dash LaTeX)
-  const uniLines = c.universityLines.map(texEscape).join("\\\\ ");
-  const profs = c.profs.map(texEscape);
-  const profsTex = profs.length
-    ? profs.slice(0, -1).join(", ") + (profs.length > 1 ? " \\& " : "") + profs[profs.length - 1]
-    : "";
-  const facultyLine = [`\\textbf{${texEscape(c.faculty)}}`, `${examCodeTex} ${texEscape(c.examName)}`, profsTex].filter(Boolean).join("\\\\ ");
-  // Logo institutionnel : réservé à EPFL. Un cours hors EPFL ne doit produire
-  // AUCUNE marque EPFL. cs-202 (university="EPFL") reste
-  // byte-identique : la garde émet exactement `\epfllogo[30]` comme avant.
-  const logoTex = c.university === "EPFL" ? String.raw`\epfllogo[30]` : "";
-  return [
-    String.raw`\thispagestyle{empty}`,
-    `\\noindent\\begin{minipage}[t]{0.30\\textwidth}\\vspace{0pt}${logoTex}\\end{minipage}\\hfill`,
-    String.raw`\begin{minipage}[t]{0.64\textwidth}\vspace{2pt}\raggedleft\footnotesize\scshape`,
-    `${uniLines}\\end{minipage}`,
-    String.raw`\vspace{2pt}\noindent\rule{\textwidth}{1pt}`,
-    `\\noindent\\begin{minipage}[t]{0.7\\textwidth}\\vspace{0pt}\\footnotesize${facultyLine}\\end{minipage}\\hfill`,
-    String.raw`\begin{minipage}[t]{0.25\textwidth}\vspace{0pt}\raggedleft\footnotesize Anonymisation:\\ \textbf{\#0000}\end{minipage}`,
-    String.raw`\vspace{10pt}\noindent\normalsize NOM : Hanon Ymous \quad(000000)\hfill\textbf{Seat \#:} 0`,
-    `\\vspace{0.5cm}\\begin{center}{\\Large\\textbf{${examCodeTex} ${texEscape(c.examName.toUpperCase())}}}\\\\[6pt]{\\large\\textbf{${texEscape(c.examKind)}}}\\\\[5pt]${footDate(dateLabel)}\\end{center}`,
-    String.raw`\vspace{0.25cm}\noindent{\large\textbf{INSTRUCTIONS (please read carefully)}}\par\smallskip`,
-    String.raw`\noindent\textbf{IMPORTANT!} Please strictly follow these instructions, otherwise your exam may be canceled.`,
-    String.raw`\begin{enumerate}\setlength{\itemsep}{2pt}`,
-    String.raw`\item You have ${hours} hours to complete this examination.`,
-    String.raw`\item You must \textbf{use black or dark blue ink}, neither pencil nor any other color.`,
-    String.raw`\item This is a closed book exam. Personal notes, four times dual-sided A4 sheets (8 sides in total), are allowed. You may not use any personal computer, mobile phone or any other electronic equipment.`,
-    String.raw`\item Answer the questions \textbf{directly on the exam sheet}, in the space provided; do not use your own paper.`,
-    String.raw`\item Carefully and \emph{completely} read each question so as to do only what we actually ask for. If a statement seems unclear, ask one of the assistants for clarification.`,
-    String.raw`\item The exam consists of ${qs.length} independent exercises (points are indicated, the total is ${total} points); all exercises count for the final grade.`,
-    String.raw`\end{enumerate}`,
-    String.raw`\vspace{0.25cm}`,
-    gradingTableTex(qs),
-  ].join("\n");
-}
 
 /** Fin de l'argument `{…}` qui s'ouvre à `open` (accolades équilibrées, `\{` ignoré) ; -1 si non fermé. */
 function closingBrace(t: string, open: number): number {
@@ -222,12 +87,6 @@ function renumberSubquestions(t: string, question: number): string {
   return t.replace(/\\subq\{\s*\d+\s*\.\s*(\d+)\s*\}/g, (_m, sub: string) => String.raw`\subq{${question}.${sub}}`);
 }
 
-/** Compléments du préambule hors CS-202 (latex/generic.tex : indicatrice…). */
-function genericPreamble(): string {
-  const p = path.join(LATEX_DIR, "generic.tex");
-  return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "";
-}
-
 /**
  * Indicatrice écrite en `\indic` (défini par latex/generic.tex) : `\mathbb{1}` d'amssymb rend un
  * glyphe cassé (prod du 13/11 : 𝟙[z>0] affiché comme ⊮), `\mathbbm` exige un paquet absent et
@@ -250,9 +109,10 @@ function courseTex(t: string, question: number): string {
 }
 
 /** Construit le source .tex complet à partir d'un ExamSpec (corrigé en annexe optionnel). */
-export function renderExamTex(spec: ExamSpec, dateLabel: string, includeSolutions = true): string {
+export async function renderExamTex(spec: ExamSpec, dateLabel: string, includeSolutions = true, layout?: ExamLayout): Promise<string> {
+  const pdf = examPdf(layout ?? (await examLayout()));
   const qs = [...spec.questions].sort((a, b) => catRank(a.category) - catRank(b.category));
-  let preamble = fs.readFileSync(path.join(LATEX_DIR, "preamble.tex"), "utf8");
+  let preamble = pdf.preamble(fs.readFileSync(path.join(LATEX_DIR, "preamble.tex"), "utf8"));
   const figPath = path.join(LATEX_DIR, "figures.tex");
   if (fs.existsSync(figPath)) preamble += "\n" + fs.readFileSync(figPath, "utf8");
 
@@ -266,16 +126,11 @@ export function renderExamTex(spec: ExamSpec, dateLabel: string, includeSolution
     )
     .join("\n\n");
 
-  // Les titres du corrigé suivent la langue de l'examen ; seul cs-202 garde son texte (empreinte canonique).
-  const localized = currentCourse() !== DEFAULT_COURSE;
-  const w = courseWords();
   const solutions = [
-    String.raw`\clearpage{\Large\textbf{${localized ? w.solutions : "Corrigé"}}}\par\vspace{6pt}\hrule\medskip`,
+    String.raw`\clearpage{\Large\textbf{${pdf.written.solutionsTitle}}}\par\vspace{6pt}\hrule\medskip`,
     ...qs.map((q, i) =>
       [
-        localized
-          ? String.raw`\par\medskip\needspace{4\baselineskip}{\large\textbf{${w.question} ${i + 1} \quad-- ${texEscape(q.concept)} \hfill [${pointsText(qPoints(q), w)}]}}\par\smallskip`
-          : String.raw`\par\medskip\needspace{4\baselineskip}{\large\textbf{Question ${i + 1} : ${texEscape(q.concept)} \hfill [${qPoints(q)} points]}}\par\smallskip`,
+        pdf.written.solutionHead(i + 1, texEscape(q.concept), qPoints(q)),
         unwrapLockedFigures(courseTex((q as any).solution_tex ?? "", i + 1)),
       ].join("\n")
     ),
@@ -283,35 +138,13 @@ export function renderExamTex(spec: ExamSpec, dateLabel: string, includeSolution
 
   return [
     preamble,
-    currentCourse() === DEFAULT_COURSE ? "" : genericPreamble(),
-    courseHeaderOverride(),
-    String.raw`\newcommand{\FOOTDATE}{${currentCourse() === DEFAULT_COURSE ? footDate(dateLabel) : localDate(dateLabel, courseWords())}}`,
+    ...pdf.chrome("written", dateLabel),
     String.raw`\begin{document}`,
-    coverTex(spec, qs, dateLabel),
+    await pdf.cover({ form: "written", dateLabel, questions: qs, specDurationMin: spec.duration_min ?? null }),
     body,
     includeSolutions ? solutions : "",
     String.raw`\end{document}`,
   ].filter(Boolean).join("\n");
-}
-
-/**
- * En-tête/pied de page COURSE-AWARE : le preamble partagé porte le gabarit
- * historique du cours par défaut ; pour tout AUTRE cours on l'override avec l'identité du cours
- * (même mécanique que qcm-latex). Cours par défaut → chaîne vide → sortie BYTE-IDENTIQUE.
- */
-function courseHeaderOverride(): string {
-  const id = currentCourse();
-  const c = getCourse(id);
-  if (id === DEFAULT_COURSE) return ""; // gabarit historique intact (hashé, byte-identique)
-  if (c.id !== id) return ""; // hors registre → gabarit par défaut
-  if (examTemplate(c) === "neutral") return neutralChrome(c, coverWords(formatContextFor(id).language));
-  const code = texEscape(c.examCode).replace(/-/g, "--");
-  const profsTex = texEscape(c.profs.length ? c.profs.join(", ") : c.university);
-  return [
-    `\\fancyhead[R]{\\qrcode[height=1.25cm]{${qrText(c.examCode)}-EXAM}}`,
-    `\\fancyfoot[C]{\\small\\textbf{${code}, ${texEscape(epflExamKind(c))}}\\\\[-2pt]\\small ${profsTex}}`,
-    ...epflLocalChrome(true),
-  ].join("\n");
 }
 
 // ---------------- Compilation ----------------
@@ -783,7 +616,7 @@ export function renderExerciseLatex(q: ExamQuestion, dateLabel: string, includeS
     : "";
   return [
     preamble,
-    String.raw`\newcommand{\FOOTDATE}{${footDate(dateLabel)}}`,
+    String.raw`\newcommand{\FOOTDATE}{${epflLongDate(dateLabel)}}`,
     String.raw`\examchromefalse\pagestyle{empty}`,
     String.raw`\begin{document}`,
     String.raw`\noindent{\large\textbf{${w?.question ?? "Exercise"} \quad-- ${texEscape(q.concept)} \hfill [${w ? pointsText(pts, w) : `${pts} points`}]}}\par\vspace{4pt}\hrule\vspace{10pt}`,
@@ -793,9 +626,9 @@ export function renderExerciseLatex(q: ExamQuestion, dateLabel: string, includeS
   ].join("\n");
 }
 
-/** Copie le logo officiel à côté des .tex compilés (gabarit de l'EPFL seulement). */
-export function copyExamLogo(): void {
-  if (courseTemplate() === "neutral") return;
+/** Copie le logo officiel à côté des .tex compilés, quand la mise en page en porte un (`ExamPdf.logo`). */
+export function copyExamLogo(logo: boolean): void {
+  if (!logo) return;
   for (const ext of ["pdf", "png"]) {
     const src = path.join(LATEX_DIR, `epfl-logo.${ext}`);
     if (fs.existsSync(src)) fs.copyFileSync(src, path.join(examsDir(), `epfl-logo.${ext}`));
@@ -808,7 +641,7 @@ export type ArtifactResult = { file: string; kind: "pdf" | "html"; texError?: st
 export async function buildExerciseArtifact(q: ExamQuestion, id: number, dateLabel: string): Promise<ArtifactResult> {
   fs.mkdirSync(examsDir(), { recursive: true });
   const base = `exam-${id}`;
-  copyExamLogo();
+  copyExamLogo(courseTemplate() === "epfl");
   // Garde AVANT toute écriture : un source piégé (\input d'un fichier du
   // conteneur…) n'est ni écrit ni compilé — l'exercice échoue.
   const texEnonce = renderExerciseLatex(q, dateLabel, false);
@@ -834,12 +667,13 @@ export async function buildExerciseArtifact(q: ExamQuestion, id: number, dateLab
 export async function buildExamArtifact(spec: ExamSpec, id: number, dateLabel: string): Promise<ArtifactResult> {
   fs.mkdirSync(examsDir(), { recursive: true });
   const base = `exam-${id}`;
-  copyExamLogo();
+  const pdf = examPdf(await examLayout());
+  copyExamLogo(pdf.logo);
   // 1) examen seul (corrigé caché — mode mock) ; 2) version corrigée
   // Garde AVANT toute écriture (cf. lib/tex-guard) : le rendu lui-même est
   // inchangé — le garde lit, il ne réécrit pas.
-  const texEnonce = renderExamTex(spec, dateLabel, false);
-  const texCorrige = renderExamTex(spec, dateLabel, true);
+  const texEnonce = await renderExamTex(spec, dateLabel, false, pdf.layout);
+  const texCorrige = await renderExamTex(spec, dateLabel, true, pdf.layout);
   assertTexSafe(texEnonce);
   assertTexSafe(texCorrige);
   fs.writeFileSync(path.join(examsDir(), `${base}.tex`), texEnonce);

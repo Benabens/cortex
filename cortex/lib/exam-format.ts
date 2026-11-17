@@ -15,6 +15,7 @@
  */
 
 import { currentCourse } from "@/db/client";
+import type { SurveyedLayout } from "@/lib/exam-layout-survey";
 import { q } from "@/db/q";
 import { updateCourseRow } from "@/db/courses-store";
 import { DEFAULT_COURSE, getCourse, reloadCourses } from "@/lib/courses";
@@ -349,6 +350,8 @@ export type StoredProfile = FormatProfile & {
   examples?: string[];
   /** Mode de réponse que les sources disent (sans annale) ; absent ou null = elles ne le disent pas. */
   answer_mode?: AnswerMode | null;
+  /** Mise en page relevée dans l'annale à la préparation (lib/exam-layout-survey) ; absent = défaut neutre. */
+  layout?: SurveyedLayout;
 };
 
 /** Dernier profil détecté (lu ici plutôt que via lib/format, qui dépend de ce module). */
