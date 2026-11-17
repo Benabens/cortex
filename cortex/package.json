@@ -50,7 +50,7 @@
     "jszip": "^3.10.2",
     "lucide-react": "^1.24.0",
     "mammoth": "^1.13.0",
-    "next": "16.4.3",
+    "next": "16.4.6",
     "next-auth": "^5.0.0-beta.32",
     "postgres": "^3.4.9",
     "pyodide": "0.28.3",
@@ -77,7 +77,7 @@
     "autocannon": "^9.0.0",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
-    "eslint-config-next": "16.4.3",
+    "eslint-config-next": "16.4.6",
     "otplib": "^13.6.0",
     "tailwindcss": "^4",
     "typescript": "^5.9.3"
