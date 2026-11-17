@@ -129,3 +129,36 @@ test("la page de connexion explique le refus d'une adresse jetable", async () =>
   const card = fs.readFileSync("app/login/LoginCard.tsx", "utf8");
   assert.match(card, /case "EmailDisposable":\s*return "Les adresses e-mail jetables ne permettent pas d’ouvrir un compte\. Utilise ton adresse habituelle \(école, Gmail, Outlook…\)\.";/);
 });
+
+test("budget d'essai : un compte qui paie n'y touche pas (jamais plus que ce qu'il a payé) et ne prend pas de place d'offre", async () => {
+  const { accountBudget } = await import("../lib/billing/budget");
+  const { claimFreeOffer } = await import("../lib/billing/free-offer");
+  const { handleStripeEvent } = await import("../lib/billing/stripe-events");
+  await account("pia-paie", "pia@exemple.ch");
+  await handleStripeEvent({
+    id: "evt_pia", type: "checkout.session.completed", created: Math.floor(Date.now() / 1000), livemode: false,
+    data: { object: {
+      id: "cs_pia", mode: "payment", payment_status: "paid", payment_intent: "pi_pia", amount_total: 1000, currency: "usd",
+      metadata: { cortexUserId: "pia-paie", plan: "credits_10", credits: "10" },
+    } },
+  } as never, { lookup: { async sessionByPaymentIntent() { return null; }, async paymentDetails() { return { feeCents: 0 }; } } });
+  process.env.AI_BUDGET_FREE_USD = "3";
+  try {
+    assert.equal((await accountBudget("pia-paie"))?.budgetUsd, 6, "0,6 × 10 $ payés, sans l'essai");
+    await account("pia-essai", "pia+essai@exemple.ch");
+    assert.deepEqual(await claimFreeOffer("pia-essai"), { ok: true }, "la personne n'a pas encore utilisé son essai");
+  } finally {
+    delete process.env.AI_BUDGET_FREE_USD;
+  }
+});
+
+test("offres par IP en IPv6 : une connexion (/64) compte pour une seule IP", async () => {
+  const { claimFreeOffer } = await import("../lib/billing/free-offer");
+  const t0 = Date.parse("2026-11-18T10:00:00Z");
+  const ips = ["2001:db8:1:2::a", "2001:DB8:1:2:0:0:0:b", "2001:db8:1:2:ffff::1", "2001:db8:1:2::c"];
+  for (const i of [0, 1, 2, 3]) await account(`v6-${i}`, `v6-${i}@exemple.ch`);
+  for (const i of [0, 1, 2]) assert.deepEqual(await claimFreeOffer(`v6-${i}`, { ip: ips[i], now: t0 + i }), { ok: true });
+  assert.deepEqual(await claimFreeOffer("v6-3", { ip: ips[3], now: t0 + 3 }), { ok: false, reason: "ip_day" });
+  await account("v6-voisin", "v6-voisin@exemple.ch");
+  assert.deepEqual(await claimFreeOffer("v6-voisin", { ip: "2001:db8:1:3::a", now: t0 + 4 }), { ok: true }, "un autre /64");
+});

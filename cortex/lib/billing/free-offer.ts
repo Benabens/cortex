@@ -38,8 +38,26 @@ function perIpDay(): number | null {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 3;
 }
 
-/** Verdicts définitifs (détenteur ou non) : la question ne se repose plus dans ce process. */
-const settled = new Map<string, FreeOfferVerdict>();
+/**
+ * Une connexion IPv6 reçoit un /64 entier : en compter chaque adresse laisserait un seul
+ * abonné en changer à volonté. IPv4 : l'adresse telle quelle.
+ */
+function ipGroup(ip: string): string {
+  if (!ip.includes(":")) return ip;
+  const [head, tail = ""] = ip.toLowerCase().split("::");
+  const left = head ? head.split(":") : [];
+  const right = tail ? tail.split(":") : [];
+  const groups = ip.includes("::") ? [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill("0"), ...right] : left;
+  return groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, "")).join(":") + "::/64";
+}
+
+/**
+ * Verdicts mémorisés : définitifs (détenteur ou non) pour le process ; un refus par IP
+ * pour une heure seulement (le compte retente plus tard, sans reprendre le verrou à
+ * chaque requête d'ici là).
+ */
+const settled = new Map<string, { verdict: FreeOfferVerdict; until: number }>();
+const IP_RETRY_MS = 60 * 60_000;
 
 /** (tests) oublie les verdicts mémorisés. */
 export function resetFreeOfferCache(): void {
@@ -49,12 +67,14 @@ export function resetFreeOfferCache(): void {
 /**
  * Ce compte peut-il recevoir l'offre gratuite ? Réclame la place de sa personne si
  * elle est libre (écrite en base), sinon dit pourquoi non. `ip` vient de clientIp().
+ * Ouvre SA transaction : jamais depuis une autre authTx (en sqlite, attente sans fin) ;
+ * ses appelants (ensureSignupCredits, accountBudget) tournent avant le verrou de réservation.
  */
 export async function claimFreeOffer(userId: string, opts: { ip?: string; now?: number } = {}): Promise<FreeOfferVerdict> {
-  const known = settled.get(userId);
-  if (known) return known;
   const now = opts.now ?? Date.now();
-  const ipKey = opts.ip && opts.ip !== "direct" ? hash("ip", opts.ip) : null;
+  const known = settled.get(userId);
+  if (known && now < known.until) return known.verdict;
+  const ipKey = opts.ip && opts.ip !== "direct" ? hash("ip", ipGroup(opts.ip)) : null;
   const limit = perIpDay();
 
   const verdict = await authTx(async (tx): Promise<FreeOfferVerdict> => {
@@ -100,6 +120,6 @@ export async function claimFreeOffer(userId: string, opts: { ip?: string; now?: 
     return { ok: true };
   });
 
-  if (verdict.ok || verdict.reason !== "ip_day") settled.set(userId, verdict);
+  settled.set(userId, { verdict, until: !verdict.ok && verdict.reason === "ip_day" ? now + IP_RETRY_MS : Infinity });
   return verdict;
 }
