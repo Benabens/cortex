@@ -63,6 +63,17 @@ test("la règle globale couvre pages/API/assets mais PAS les routes de fichiers 
   assert.equal(html["x-frame-options"], "DENY");
 });
 
+test("PDF d'examen affiché dans la page (sortie PDF) : cadrable par Cortex seul, jamais par un autre site ; le HTML reste fermé", async () => {
+  const { servedFileHeaders, CSP_BASE } = await import("../lib/security-headers");
+  const pdf = servedFileHeaders("application/pdf", {}, { sameOriginFrame: true });
+  assert.match(pdf["content-security-policy"], /frame-ancestors 'self'(;|$)/);
+  assert.equal(pdf["content-security-policy"].replace("frame-ancestors 'self'", "frame-ancestors 'none'"), CSP_BASE, "seul frame-ancestors change");
+  assert.equal(pdf["x-frame-options"], "SAMEORIGIN");
+  const html = servedFileHeaders("text/html", {}, { sameOriginFrame: true });
+  assert.match(html["content-security-policy"], /frame-ancestors 'none'/);
+  assert.equal(html["x-frame-options"], "DENY");
+});
+
 test("X-Content-Type-Options, Referrer-Policy, X-Frame-Options, Permissions-Policy", async () => {
   const h = await allHeaders();
   assert.equal(h["x-content-type-options"], "nosniff");

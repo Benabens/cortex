@@ -62,6 +62,15 @@ export function choicesTex(layout: ExamLayout, opts: ChoiceTex[]): string {
   return rows.join("\n");
 }
 
+/**
+ * Numéro et séparateur d'un titre : « Question 3 -- Titre », mais « 3. Titre » quand l'annale
+ * numérote sans mot (« 3 -- Titre » se lisait comme une soustraction).
+ */
+export function headNumber(numbering: Numbering, n: number, word: string): { num: string; sep: string } {
+  const num = questionNumber(numbering, n, word);
+  return numbering.prefix === "" ? { num: `${num}.`, sep: "~" } : { num, sep: String.raw` \quad-- ` };
+}
+
 /** Points dans un titre : à droite (`margin`), entre parenthèses dans la ligne (`inline`), ou rien. */
 function pointsTex(place: ExamLayout["points"], pts: string): { inline: string; right: string } {
   if (place === "none") return { inline: "", right: "" };
@@ -80,17 +89,20 @@ export function qcmHeadTex(layout: ExamLayout, L: QcmLabels, n: number, type: "s
 
 /** Titre d'une question ouverte (sans le saut de page qui la précède). */
 export function openHeadTex(layout: ExamLayout, L: QcmLabels, n: number, concept: string, points: number): string {
-  const num = layout.numbering.prefix === null && layout.numbering.style === "arabic" ? L.openQuestion(n) : questionNumber(layout.numbering, n, L.openWord);
+  const { num, sep } = layout.numbering.prefix === null && layout.numbering.style === "arabic"
+    ? { num: L.openQuestion(n), sep: String.raw` \quad-- ` }
+    : headNumber(layout.numbering, n, L.openWord);
   const p = pointsTex(layout.points === "standard" ? "margin" : layout.points, L.points(points));
-  return String.raw`\needspace{4\baselineskip}{\large\textbf{${num} \quad-- ${concept}${p.inline}${p.right}}}\par\vspace{4pt}\hrule\vspace{8pt}`;
+  // Points dans la ligne : hors du gras, comme dans les annales qui les y mettent.
+  return String.raw`\needspace{4\baselineskip}{\large\textbf{${num}${sep}${concept}${p.right}}${p.inline}}\par\vspace{4pt}\hrule\vspace{8pt}`;
 }
 
 /** Titre d'une question composée. */
 export function blockHeadTex(layout: ExamLayout, L: BlockLabels, n: number, title: string, points: number): string {
-  const num = questionNumber(layout.numbering, n, L.question);
+  const { num, sep } = headNumber(layout.numbering, n, L.question);
   const place = layout.points === "standard" ? "margin" : layout.points;
   // Points hors du \textbf, à droite : la place historique des questions composées.
   const right = place === "margin" ? String.raw` \hfill [${L.pts(points)}]` : "";
   const inline = place === "inline" ? ` (${L.pts(points)})` : "";
-  return String.raw`\par\bigskip\needspace{8\baselineskip}\noindent{\large\textbf{${num} \quad-- ${title}${inline}}${right}}\par\vspace{3pt}\hrule\vspace{8pt}`;
+  return String.raw`\par\bigskip\needspace{8\baselineskip}\noindent{\large\textbf{${num}${sep}${title}}${inline}${right}}\par\vspace{3pt}\hrule\vspace{8pt}`;
 }

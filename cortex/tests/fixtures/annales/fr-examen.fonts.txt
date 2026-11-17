@@ -1,0 +1,11 @@
+name                                 type              encoding         emb sub uni object ID
+------------------------------------ ----------------- ---------------- --- --- --- ---------
+IHAIZV+LMRoman12-Regular             Type 1C           Custom           yes yes yes      4  0
+BZIVMZ+LMRoman12-Bold                Type 1C           Custom           yes yes yes      5  0
+IXFAWU+LMRoman10-Regular             Type 1C           Custom           yes yes yes      6  0
+TQTHRL+LMRoman10-Bold                Type 1C           Custom           yes yes yes      7  0
+YEUUOC+LMRoman10-Regular             Type 1C           Custom           yes yes yes      8  0
+AKHCZK+LMMathItalic10-Regular        Type 1C           WinAnsi          yes yes yes      9  0
+VDVGTR+LMRoman8-Regular              Type 1C           WinAnsi          yes yes yes     10  0
+CAFSZL+LMRoman10-Regular             Type 1C           WinAnsi          yes yes yes     11  0
+DDIEWW+LMMathItalic8-Regular         Type 1C           WinAnsi          yes yes yes     12  0
