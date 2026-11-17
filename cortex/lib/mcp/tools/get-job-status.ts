@@ -19,7 +19,7 @@ const jobOut = z.object({
   created_at: z.string(),
   updated_at: z.string(),
   result_link: z.string().nullable(),
-  remaining: z.string().nullable().optional().describe("Estimated time left for a running generation (from this course's past jobs), e.g. \"≈ 5 min restantes\"."),
+  remaining: z.string().nullable().optional().describe("Estimated time left for a running generation, based on this course’s past jobs, e.g. \"about 5 min left\"."),
 });
 
 const output = z.object({
@@ -66,7 +66,7 @@ async function blocksView(examId: number, withSolutions: boolean): Promise<ExamO
       concept: clip(`Question ${bi + 1}${String.fromCharCode(97 + pi)} : ${b.title}`, 200),
       statement: clip(`${b.scenario}\n\n(${String.fromCharCode(97 + pi)}) [${p.points} pt] ${p.prompt}${p.code ? `\n${p.code}` : ""}${p.options.length ? `\n${p.options.map((o, k) => `${LETTERS[k] ?? k + 1}) ${o}`).join("\n")}` : ""}`, 3000),
       solution: withSolutions
-        ? clip(p.kind === "scq" ? `${LETTERS[p.correct ?? -1] ?? "?"} : ${p.explanation ?? ""}` : `${p.answer ?? ""}${p.criteria?.length ? `\nBarème : ${p.criteria.map((c) => `${c.label} (${c.points} pt)`).join(" ; ")}` : ""}`, 3000) || null
+        ? clip(p.kind === "scq" ? `${LETTERS[p.correct ?? -1] ?? "?"}: ${p.explanation ?? ""}` : `${p.answer ?? ""}${p.criteria?.length ? `\nRubric: ${p.criteria.map((c) => `${c.label} (${c.points} pt)`).join("; ")}` : ""}`, 3000) || null
         : null,
       verification: "reviewed_by_model" as const,
     })),
@@ -88,7 +88,7 @@ async function qcmView(examId: number, withSolutions: boolean): Promise<ExamOut 
       concept: clip(it.topic, 200),
       statement: clip(`${it.stem}\n${(it.options as string[]).map((o, k) => `${LETTERS[k] ?? k + 1}) ${o}`).join("\n")}`, 1500),
       solution: withSolutions
-        ? clip(`Réponse${(it.correct ?? []).length > 1 ? "s" : ""} : ${(it.correct ?? []).map((k) => LETTERS[k] ?? String(k + 1)).join(", ")}. ${it.explanation ?? ""}`.trim(), 1500)
+        ? clip(`Answer${(it.correct ?? []).length > 1 ? "s" : ""}: ${(it.correct ?? []).map((k) => LETTERS[k] ?? String(k + 1)).join(", ")}. ${it.explanation ?? ""}`.trim(), 1500)
         : null,
       // Vérifié = relu par un modèle, jamais une preuve (invariant n° 2).
       verification: it.verified ? "reviewed_by_model" as const : "not_verified" as const,
@@ -114,7 +114,7 @@ function stepView(j: Job): string | null {
   const step = j.currentStep ? clip(redactMessage(j.currentStep), 200) : null;
   if (!unread.length) return step;
   const list = clip(unread.map((p) => `${p.name} (${p.short})`).join(", "), 400);
-  return `${step ?? ""}${step ? " · " : ""}${unread.length} fichier(s) non lu(s) : ${list}`;
+  return `${step ?? ""}${step ? " · " : ""}${unread.length} unread file(s): ${list}`;
 }
 
 function jobView(j: Job, appOrigin: string, courseId: string): z.infer<typeof jobOut> {
@@ -157,7 +157,7 @@ export default defineTool({
         return { ...base, active: active ? jobView(active, ctx.appOrigin, c.id) : null, recent: (await listJobs(5)).map((j) => jobView(j, ctx.appOrigin, c.id)) };
       }
       const job = await getJob(job_id);
-      if (!job) throw new ToolError("not_found", `Aucune génération n° ${job_id} dans ce cours.`);
+      if (!job) throw new ToolError("not_found", `No generation job ${job_id} exists in this course.`);
       let exam: z.infer<typeof output>["exam"] = null;
       // QCM : job « qcm », ou job « exam » aiguillé vers le générateur QCM par le format du cours (lib/mock-exam).
       const qcm = (job.type === "qcm" || job.type === "exam") && job.status === "done" && job.resultId ? await qcmView(job.resultId, !!include_solutions) : null;
@@ -182,14 +182,20 @@ export default defineTool({
         };
       }
       const eta = await jobEta(job).catch(() => null);
-      return { ...base, job: { ...jobView(job, ctx.appOrigin, c.id), remaining: eta?.label ?? null }, exam };
+      const remaining = eta
+        ? eta.late ? "Taking longer than usual; generation is still running"
+        : eta.remainingMs === null ? null
+        : job.status === "queued" ? `About ${Math.max(1, Math.round(eta.remainingMs / 60_000))} min once started`
+        : `About ${Math.max(1, Math.round(eta.remainingMs / 60_000))} min left`
+        : null;
+      return { ...base, job: { ...jobView(job, ctx.appOrigin, c.id), remaining }, exam };
     });
   },
   summarize: (o) => {
-    if (!o.job) return o.active ? `Génération n° ${o.active.job_id} en cours (${o.active.progress_pct} %).` : "Aucune génération en cours.";
+    if (!o.job) return o.active ? `Generation job ${o.active.job_id} is running (${o.active.progress_pct}%).` : "No generation is running.";
     const j = o.job;
-    if (j.status === "done") return `Génération n° ${j.job_id} terminée.${o.exam ? ` ${o.exam.questions.length} question(s).` : ""}${(j.type === "ingest" || j.type === "prepare") && j.step ? ` ${j.step}` : ""}`;
-    if (j.status === "error" || j.status === "canceled") return `Génération n° ${j.job_id} : ${j.status === "error" ? "échec" : "annulée"}.`;
-    return `Génération n° ${j.job_id} : ${j.progress_pct} %${j.remaining ? `, ${j.remaining}` : ""}, repasse dans une minute.`;
+    if (j.status === "done") return `Generation job ${j.job_id} is complete.${o.exam ? ` ${o.exam.questions.length} question(s).` : ""}${(j.type === "ingest" || j.type === "prepare") && j.step ? ` ${j.step}` : ""}`;
+    if (j.status === "error" || j.status === "canceled") return `Generation job ${j.job_id} ${j.status === "error" ? "failed" : "was canceled"}.`;
+    return `Generation job ${j.job_id}: ${j.progress_pct}%${j.remaining ? `, ${j.remaining}` : ""}. Check again in one minute.`;
   },
 });

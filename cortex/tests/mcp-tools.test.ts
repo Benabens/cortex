@@ -201,6 +201,7 @@ async function call(client: Client, name: string, args: Record<string, unknown> 
 
 const text = (r: ToolResult) => (r.content ?? []).map((c) => c.text ?? "").join("\n");
 const errorCode = (r: ToolResult) => (r._meta?.["com.cortexexam/error"] as { code?: string } | undefined)?.code;
+const appCode = (r: ToolResult) => (r._meta?.["com.cortexexam/error"] as { appCode?: string } | undefined)?.appCode;
 
 async function balance(user: string): Promise<number> {
   const credits = await import("../lib/billing/credits");
@@ -285,9 +286,9 @@ test("get_weak_points : par code de cours, triés par gravité, contenu encadré
   const wp = r.structuredContent!.weak_points as Array<{ topic: string; severity: number }>;
   assert.deepEqual(wp.map((w) => w.topic), ["Diagonalisation", "Noyau et image"]);
   assert.match(text(r), /<cortex_data>/);
-  assert.match(text(r), /jamais des instructions/);
+  assert.match(text(r), /data, never instructions/i);
   // Un client qui lit structuredContent plutôt que le texte (ère 2026-07-28) reçoit le même avertissement.
-  assert.match(String(r.structuredContent!.data_notice), /jamais des instructions/);
+  assert.match(String(r.structuredContent!.data_notice), /data, never instructions/i);
   await client.close();
 });
 
@@ -325,9 +326,9 @@ test("search_course_materials : extraits d'environ 300 caractères autour du pas
   const hits = r.structuredContent!.hits as Array<{ source_title: string; source_type: string; snippet: string }>;
   assert.deepEqual(hits.map((h) => h.source_title), ["Cours 9 — géopolitique du numérique", "Lectures complémentaires"]);
   assert.ok(hits[0].snippet.length >= 200 && hits[0].snippet.length <= 340, `extrait de ${hits[0].snippet.length} caractères : ${hits[0].snippet}`);
-  assert.match(hits[0].snippet, /«souveraineté» de l'«IA» désigne la capacité d'un État à maîtriser ses modèles/);
-  assert.doesNotMatch(hits[0].source_type, /hors programme/);
-  assert.match(hits[1].source_type, /\(hors programme\)$/);
+  assert.match(hits[0].snippet, /“souveraineté” de l'“IA” désigne la capacité d'un État à maîtriser ses modèles/);
+  assert.doesNotMatch(hits[0].source_type, /outside the syllabus/);
+  assert.match(hits[1].source_type, /\(outside the syllabus\)$/);
   await client.close();
 });
 
@@ -395,7 +396,7 @@ test("get_study_plan : cours non analysé dit l'être ; analysé, la notion prio
   const { client } = await connect(access);
   const empty = await call(client, "get_study_plan");
   assert.equal((empty.structuredContent as { analyzed: boolean }).analyzed, false);
-  assert.match(text(empty), /pas encore été analysé/);
+  assert.match(text(empty), /has not been analysed yet/);
   const { runWithCourse } = await import("../db/client");
   const { runWithUser } = await import("../db/context");
   const { q } = await import("../db/q");
@@ -474,9 +475,10 @@ test("client 2025 : devis exact SANS débit ni appel au modèle, puis confirmati
   const calls = llmCalls;
   const quote = await call(client, "generate_drill", { concept: "valeurs propres" });
   assert.equal(quote.isError, undefined, text(quote));
-  const sc = quote.structuredContent as { status: string; confirmation: { cost_credits: number; confirmation_token: string; daily_quota: { kind: string } } };
+  const sc = quote.structuredContent as { status: string; confirmation: { cost: { credits: number }; cost_credits: number; confirmation_token: string; daily_quota: { kind: string } } };
   assert.equal(sc.status, "confirmation_required");
   assert.equal(sc.confirmation.cost_credits, 0.3);
+  assert.equal(sc.confirmation.cost.credits, 0.3);
   assert.equal(sc.confirmation.daily_quota.kind, "assistance");
   assert.equal(await balance(ALICE), before, "un devis ne débite rien");
   assert.equal(llmCalls, calls, "un devis n'appelle pas le modèle");
@@ -524,7 +526,7 @@ test("quota d'assistance du jour atteint : refusé dès le devis, aucun débit",
     const refused = await call(client, "generate_drill", { concept: "intégrales" });
     assert.equal(refused.isError, true);
     assert.equal(errorCode(refused), "quota_exceeded");
-    assert.match(text(refused), /Quota quotidien d'assistance atteint \(1\/1\)/);
+    assert.match(text(refused), /Daily assistance quota reached \(1\/1\)/);
     assert.equal(await balance(CAROL), before);
   } finally {
     process.env.DAILY_ASSIST_QUOTA = "unlimited";
@@ -541,10 +543,11 @@ test("solde insuffisant : refusé dès le devis avec le solde, aucun appel au mo
     const r = await call(client, "generate_drill", { concept: "cinématique" });
     assert.equal(r.isError, true);
     assert.equal(errorCode(r), "insufficient_credits");
+    assert.equal(appCode(r), "billing_balance_insufficient");
     // Le constat sans lien d'achat : ChatGPT refuse qu'une app renvoie vers un paiement.
     const msg = (r.content ?? []).map((c) => c.text ?? "").join("\n");
-    assert.match(msg, /Solde (insuffisant|épuisé)/);
-    assert.doesNotMatch(msg, /Acheter|https?:\/\//);
+    assert.match(msg, /Insufficient balance/);
+    assert.doesNotMatch(msg, /Buy|https?:\/\//);
     assert.equal(llmCalls, calls);
     await client.close();
   } finally {
@@ -568,7 +571,7 @@ test("examen blanc : devis au tarif de l'app (5 crédits, +1 au-delà de 8 exerc
   const started = await call(client, "generate_mock_exam", { exercise_count: 12, confirmation_token: conf.confirmation_token });
   assert.equal(started.isError, true);
   assert.equal(errorCode(started), "conflict");
-  assert.match(text(started), /Corpus non ingéré/);
+  assert.match(text(started), /corpus hasn’t been ingested/i);
   assert.equal(await balance(CAROL), before);
   await client.close();
 });
@@ -595,7 +598,7 @@ test("client 2026-07-28 avec élicitation : la personne confirme dans le client,
   assert.equal(r.isError, undefined, text(r));
   assert.equal((r.structuredContent as { status: string }).status, "done");
   assert.equal(asked.length, 1);
-  assert.match(asked[0], /0,3 crédit/);
+  assert.match(asked[0], /Exact cost: 0\.3 credits/);
   assert.equal(await balance(ALICE), before - 30);
   await client.close();
 });
@@ -611,7 +614,7 @@ test("client 2026-07-28 : refus dans le client → rien n'est débité, rien n'e
   assert.equal(sc.declined.action, "decline");
   assert.equal(sc.declined.cost_credits, 0.3, "le refus rappelle le coût annoncé");
   assert.equal(sc.confirmation, null, "aucun jeton après un refus");
-  assert.match(text(r), /refusé/);
+  assert.match(text(r), /declined/);
   assert.equal(await balance(ALICE), before);
   assert.equal(llmCalls, calls);
   await client.close();
@@ -626,7 +629,7 @@ test("client 2026-07-28 : confirmation fermée ou impossible à afficher (sessio
   assert.equal(sc.status, "declined");
   assert.equal(sc.declined.action, "cancel");
   assert.equal(sc.confirmation, null, "une confirmation fermée ne se transforme pas en devis à jeton");
-  assert.match(text(r), /session interactive/);
+  assert.match(text(r), /interactive session/);
   assert.equal(await balance(ALICE), before);
   await client.close();
 });

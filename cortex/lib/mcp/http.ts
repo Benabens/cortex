@@ -6,6 +6,7 @@ import { log } from "@/lib/metrics";
 import { SCOPE_READ, SUPPORTED_SCOPES, issuerFor, resourceFor } from "@/lib/oauth/config";
 import { allowedOriginHosts, corsHeaders } from "@/lib/oauth/cors";
 import { touchGrant, verifyAccessToken } from "@/lib/oauth/server";
+import { runWithLocale } from "@/lib/i18n/context";
 import { buildServer } from "./server";
 
 /**
@@ -73,7 +74,8 @@ function handler(): McpHttpHandler {
   return _handler;
 }
 
-export async function handleMcp(req: Request): Promise<Response> {
+export function handleMcp(req: Request): Promise<Response> {
+  return runWithLocale("en", async () => {
   const issuer = issuerFor(req);
   if (!issuer) return new Response(JSON.stringify({ error: "not_found" }), { status: 404, headers: { "content-type": "application/json" } });
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(req, issuer, CORS_EXTRA) });
@@ -89,7 +91,7 @@ export async function handleMcp(req: Request): Promise<Response> {
       verifier: {
         async verifyAccessToken(token: string): Promise<AuthInfo> {
           const p = await verifyAccessToken(token, resource);
-          if (!p) throw new OAuthError(OAuthErrorCode.InvalidToken, "Jeton invalide, expiré ou révoqué.");
+          if (!p) throw new OAuthError(OAuthErrorCode.InvalidToken, "The access token is invalid, expired, or revoked.");
           return {
             token, clientId: p.clientId, scopes: p.scopes, expiresAt: p.expiresAt, resource: new URL(resource),
             extra: { userId: p.userId, grantId: p.grantId, appOrigin: issuer },
@@ -108,10 +110,11 @@ export async function handleMcp(req: Request): Promise<Response> {
   const { userId, grantId } = authInfo.extra as { userId: string; grantId: string };
   if (overRate(userId)) {
     return withCors(req, issuer, Response.json(
-      { jsonrpc: "2.0", id: null, error: { code: -32000, message: "Trop de requêtes MCP pour ce compte, réessaie dans une minute." } },
+      { jsonrpc: "2.0", id: null, error: { code: -32000, message: "Too many MCP requests for this account. Try again in one minute." } },
       { status: 429, headers: { "retry-after": "60" } },
     ));
   }
   void touchGrant(grantId).catch(() => {});
   return withCors(req, issuer, await handler().fetch(req, { authInfo }));
+  });
 }

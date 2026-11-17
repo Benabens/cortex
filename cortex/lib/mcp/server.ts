@@ -8,13 +8,14 @@ import { log } from "@/lib/metrics";
 import { captureError, redactMessage } from "@/lib/observability";
 import { SCOPE_GENERATE, SCOPE_READ, SCOPE_WRITE } from "@/lib/oauth/config";
 import type { Principal } from "@/lib/oauth/server";
+import { errorText, isUserError, UserFacingError } from "@/lib/i18n/user-error";
 import { clientNameOf, confirmCost, verifyRequestState } from "./confirm";
 import * as z from "zod/v4";
 import { DATA_NOTICE, MAX_RESULT_CHARS, renderData } from "./content";
 import { inCourseOf } from "./courses";
 import { MCP_SERVER_VERSION, serverInfo } from "./identity";
 import { TOOLS } from "./registry";
-import { assistantSafeMessage, ToolError, type Era, type ToolCtx, type ToolDef } from "./tool";
+import { assistantSafeMessage, codeForStatus, ToolError, type Era, type ToolCtx, type ToolDef } from "./tool";
 
 /**
  * SERVEUR MCP DE CORTEX — une instance par requête HTTP (createMcpHandler, sans
@@ -66,7 +67,7 @@ function errorResult(e: ToolError): CallToolResult {
   return {
     content: [{ type: "text", text: assistantSafeMessage(e.message) }],
     isError: true,
-    _meta: { [ERROR_META]: { code: e.code, retryable: e.code === "unavailable" || e.code === "quota_exceeded", ...(e.reason ? { reason: e.reason } : {}) } },
+    _meta: { [ERROR_META]: { code: e.code, ...(e.appCode ? { appCode: e.appCode } : {}), retryable: e.code === "unavailable" || e.code === "quota_exceeded", ...(e.reason ? { reason: e.reason } : {}) } },
   };
 }
 
@@ -74,14 +75,14 @@ function okResult(tool: ToolDef, out: unknown): CallToolResult {
   const parsed = tool.output.safeParse(out);
   if (!parsed.success) {
     log("error", "mcp.output_invalid", { tool: tool.name, issues: parsed.error.issues.slice(0, 5).map((i) => i.path.join(".")) });
-    throw new ToolError("internal", "Erreur interne de Cortex (résultat non conforme), réessaie dans un instant.");
+    throw new ToolError("internal", "Cortex returned an invalid result. Try again in a moment.");
   }
   const text = renderData(tool.summarize(parsed.data), parsed.data);
   // Un client 2026-07-28 peut donner au modèle structuredContent plutôt que le texte :
   // le même avertissement « données, pas instructions » y figure, et la taille est bornée aussi.
   const structured = { ...(parsed.data as Record<string, unknown>), data_notice: DATA_NOTICE };
   if (text.length > MAX_RESULT_CHARS || JSON.stringify(structured).length > MAX_RESULT_CHARS) {
-    throw new ToolError("too_large", "Résultat trop volumineux : réduis « limit » ou précise la demande.");
+    throw new ToolError("too_large", "The result is too large. Lower “limit” or narrow the request.");
   }
   return { content: [{ type: "text", text }], structuredContent: structured };
 }
@@ -114,7 +115,7 @@ function register(server: McpServer, tool: ToolDef, era: Era, appOrigin: string)
     (async (args: Record<string, unknown>, ctx: ServerContext): Promise<CallToolResult | InputRequiredResult> => {
       const t0 = Date.now();
       const principal = principalOf(ctx.http?.authInfo);
-      if (!principal) return errorResult(new ToolError("internal", "Requête non authentifiée."));
+      if (!principal) return errorResult(new ToolError("internal", "The request is not authenticated."));
       let outcome = "ok";
       // Heartbeat de progression pour les appels longs (le client peut s'en servir pour ne pas expirer).
       const progressToken = (ctx.mcpReq._meta as { progressToken?: string | number } | undefined)?.progressToken;
@@ -145,11 +146,17 @@ function register(server: McpServer, tool: ToolDef, era: Era, appOrigin: string)
           outcome = e.code;
           return errorResult(e);
         }
+        if (e instanceof UserFacingError || isUserError(e)) {
+          const refusalStatus = (e as { status?: unknown }).status;
+          const status = e instanceof UserFacingError ? e.status : typeof refusalStatus === "number" ? refusalStatus : 400;
+          outcome = codeForStatus(status);
+          return errorResult(new ToolError(codeForStatus(status), errorText("en", e), undefined, e.code));
+        }
         outcome = "internal";
         const err = e as Error;
         log("error", "mcp.tool_crash", { tool: tool.name, name: err?.name ?? "Error", message: redactMessage(String(err?.message ?? e)) });
         captureError(e, { area: "mcp", tool: tool.name });
-        return errorResult(new ToolError("internal", "Erreur interne de Cortex, réessaie dans un instant."));
+        return errorResult(new ToolError("internal", "Cortex encountered an internal problem. Try again in a moment."));
       } finally {
         // Nom du client : savoir QUI annonce l'élicitation sans l'afficher.
         log("info", "mcp.tool", { tool: tool.name, user: userTag(principal.userId), era, client: clientNameOf(ctx.mcpReq.envelope), ms: Date.now() - t0, outcome });
