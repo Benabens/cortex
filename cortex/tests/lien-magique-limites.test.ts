@@ -46,6 +46,8 @@ test("l'adresse est comptée sans casse ni espaces (Bob@… et bob@… sont la m
   const { takeMagicLinkSend } = await import("../lib/magic-link-limits");
   assert.deepEqual(await takeMagicLinkSend("Chloe@Exemple.ch", "4.4.4.4", T0), { ok: true });
   assert.deepEqual(await takeMagicLinkSend(" chloe@exemple.ch ", "4.4.4.5", T0 + 1000), { ok: false, reason: "address_minute" });
+  // chloe+1@, chloe+2@… arrivent dans la même boîte : l'étiquette ne donne pas de nouveaux liens.
+  assert.deepEqual(await takeMagicLinkSend("chloe+1@exemple.ch", "4.4.4.6", T0 + 2000), { ok: false, reason: "address_minute" });
 });
 
 test("même IP : 20 liens par heure, toutes adresses confondues ; une autre IP n'est pas touchée", async () => {
