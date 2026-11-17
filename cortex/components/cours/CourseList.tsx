@@ -7,14 +7,12 @@ import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { useCourse, type CourseInfo } from "@/lib/ux/api";
 import { ExamFormatFields, formatDraftOf, formatPayload, type ExamFormatDraft } from "@/components/cours/ExamFormatFields";
+import { useTranslations } from "use-intl/react";
+import { useFmt } from "@/lib/i18n/use-fmt";
 
 const field =
   "w-full rounded-lg border border-line-strong bg-surface-2/40 px-3 py-2 text-[0.85rem] text-ink-1 " +
   "placeholder:text-ink-4 focus:border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] focus:outline-none";
-
-/** "2027-01-18" → « 18 janvier 2027 ». */
-const longDay = (iso: string) =>
-  new Date(`${iso}T00:00:00`).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
 
 /**
  * MES COURS — renommer, dater le final, retirer. Le retrait ne supprime QUE la fiche : le
@@ -25,6 +23,8 @@ const longDay = (iso: string) =>
  * champ de la date du final ; une fois enregistrée, on revient à l'Accueil.
  */
 export function CourseList() {
+  const t = useTranslations("courses");
+  const f = useFmt();
   const { courses, courseId, refresh } = useCourse();
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState({ name: "", code: "", university: "", examDate: "" });
@@ -81,7 +81,7 @@ export function CourseList() {
           body: JSON.stringify(changes),
         });
         const d = await res.json().catch(() => null);
-        if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
+        if (!res.ok) throw new Error(d?.error ?? t("errorStatus", { status: res.status }));
         await refresh(courseId);
       }
       setEditing(null);
@@ -99,7 +99,7 @@ export function CourseList() {
     try {
       const res = await fetch(`/api/courses/${encodeURIComponent(id)}`, { method: "DELETE" });
       const d = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
+      if (!res.ok) throw new Error(d?.error ?? t("errorStatus", { status: res.status }));
       setConfirming(null);
       await refresh();
     } catch (e) {
@@ -113,9 +113,9 @@ export function CourseList() {
     return (
       <Panel className="flex flex-col items-center gap-3 rounded-xl px-6 py-12 text-center">
         <BookPlus className="size-6 text-accent-hi" strokeWidth={2} aria-hidden="true" />
-        <p className="text-[0.95rem] font-medium text-ink-1">Aucun cours pour l’instant</p>
+        <p className="text-[0.95rem] font-medium text-ink-1">{t("empty")}</p>
         <Button variant="primary" size="sm" href="/cours/nouveau">
-          Créer ma première matière
+          {t("createFirst")}
         </Button>
       </Panel>
     );
@@ -137,27 +137,27 @@ export function CourseList() {
               <input
                 value={draft.name}
                 onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-                aria-label="Nom du cours"
+                aria-label={t("courseName")}
                 className={field}
               />
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <input
                   value={draft.code}
                   onChange={(e) => setDraft((d) => ({ ...d, code: e.target.value }))}
-                  placeholder="Code"
-                  aria-label="Code du cours"
+                  placeholder={t("code")}
+                  aria-label={t("courseCode")}
                   className={field}
                 />
                 <input
                   value={draft.university}
                   onChange={(e) => setDraft((d) => ({ ...d, university: e.target.value }))}
-                  placeholder="Établissement"
-                  aria-label="Établissement"
+                  placeholder={t("institution")}
+                  aria-label={t("institution")}
                   className={field}
                 />
               </div>
               <label className="flex flex-col gap-1.5 sm:max-w-[calc(50%-0.375rem)]">
-                <span className="text-[0.8rem] font-medium text-ink-2">Date du final</span>
+                <span className="text-[0.8rem] font-medium text-ink-2">{t("finalDate")}</span>
                 <input
                   ref={dateField}
                   type="date"
@@ -166,17 +166,17 @@ export function CourseList() {
                   className={field}
                 />
                 <span className="text-[0.76rem] leading-relaxed text-ink-3">
-                  Elle sert au compte à rebours de l’Accueil. Laisse vide si tu ne la connais pas encore.
+                  {t("finalDateHint")}
                 </span>
               </label>
               <ExamFormatFields value={format} onChange={setFormat} fieldClass={field} />
               <div className="flex gap-2">
                 <Button size="sm" variant="primary" loading={busy} onClick={() => save(c.id)}>
                   <Check className="size-4" strokeWidth={2.5} />
-                  Enregistrer
+                  {t("save")}
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setEditing(null)} disabled={busy}>
-                  Annuler
+                  {t("cancel")}
                 </Button>
               </div>
             </div>
@@ -185,24 +185,24 @@ export function CourseList() {
               <div className="min-w-0 flex-1 basis-full sm:basis-0">
                 <p className="truncate text-[0.9rem] font-semibold text-ink-1">{c.name}</p>
                 <p className="mt-0.5 truncate text-[0.78rem] text-ink-3">
-                  {[c.code, c.university, c.examDate ? `final le ${longDay(c.examDate)}` : null].filter(Boolean).join(" · ") ||
-                    "Sans code ni établissement"}
+                  {[c.code, c.university, c.examDate ? t("finalOn", { date: f.date(c.examDate) }) : null].filter(Boolean).join(" · ") ||
+                    t("withoutDetails")}
                   <span className="text-ink-4"> · {c.id}</span>
                 </p>
               </div>
               <div className="flex shrink-0 gap-2">
-                <Button size="sm" variant="subtle" onClick={() => startEdit(c)} aria-label={`Modifier ${c.name}`}>
+                <Button size="sm" variant="subtle" onClick={() => startEdit(c)} aria-label={t("editCourse", { name: c.name })}>
                   <Pencil className="size-3.5" strokeWidth={2.25} />
-                  Modifier
+                  {t("edit")}
                 </Button>
                 <Button
                   size="sm"
                   variant="ghost"
                   onClick={() => { setError(null); setEditing(null); setConfirming(confirming === c.id ? null : c.id); }}
-                  aria-label={`Retirer ${c.name}`}
+                  aria-label={t("removeCourse", { name: c.name })}
                 >
                   {confirming === c.id ? <X className="size-3.5" strokeWidth={2.25} /> : <Trash2 className="size-3.5" strokeWidth={2.25} />}
-                  {confirming === c.id ? "Annuler" : "Retirer"}
+                  {confirming === c.id ? t("cancel") : t("remove")}
                 </Button>
               </div>
             </div>
@@ -211,13 +211,11 @@ export function CourseList() {
           {confirming === c.id && (
             <div className="mt-3 rounded-lg border border-line bg-surface-2/40 p-3">
               <p className="text-[0.82rem] leading-relaxed text-ink-2">
-                Supprimer <strong className="text-ink-1">{c.name}</strong> ? Ses données
-                (corpus importé, annales, examens générés, faiblesses) sont <strong>effacées définitivement</strong>.
-                Exporte-les d’abord depuis Mon compte si tu veux les garder.
+                {t.rich("deleteConfirm", { name: c.name, strong: (chunks) => <strong className="text-ink-1">{chunks}</strong> })}
               </p>
               <Button size="sm" variant="secondary" className="mt-3" loading={busy} onClick={() => remove(c.id)}>
                 <Trash2 className="size-3.5" strokeWidth={2.25} />
-                Supprimer le cours et ses données
+                {t("deleteAll")}
               </Button>
             </div>
           )}
