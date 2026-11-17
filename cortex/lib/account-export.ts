@@ -32,6 +32,7 @@ import { runWithCourse } from "@/db/client";
 import { runWithUser, userSlug } from "@/db/context";
 import { dbDriverName, q } from "@/db/q";
 import { DELTA_CENTI } from "@/lib/billing/credits";
+import { intLimit } from "@/lib/billing/env";
 import { courseDbPath, dataRoot, ensureCoursesLoaded, listCoursesOf } from "@/lib/courses";
 import { log } from "@/lib/metrics";
 import { userStorageBytes } from "@/lib/storage-quota";
@@ -47,12 +48,9 @@ export function exportMaxBytes(): number {
   const mb = Number(process.env.EXPORT_MAX_MB);
   return (Number.isFinite(mb) && mb >= 0 ? mb : 2048) * 1024 * 1024;
 }
-/** Exports par compte et par jour (EXPORTS_PER_DAY, défaut 3 ; « unlimited » pour lever). */
+/** Exports par compte et par jour (EXPORTS_PER_DAY, défaut 3 en déploiement gardé ; « unlimited » pour lever). */
 export function exportsPerDay(): number | null {
-  const raw = process.env.EXPORTS_PER_DAY?.trim();
-  if (raw && /^(unlimited|none|off|-1)$/i.test(raw)) return null;
-  const n = Number(raw);
-  return raw && Number.isInteger(n) && n >= 0 ? n : 3;
+  return intLimit("EXPORTS_PER_DAY", 3);
 }
 
 /**

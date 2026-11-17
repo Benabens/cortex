@@ -8,15 +8,14 @@
  * quand même. Une redirection vers le seau (302) ne compte pas : ses octets ne passent pas ici.
  */
 
+import { floatLimit } from "@/lib/billing/env";
+
 const MB = 1024 * 1024;
 const served = new Map<string, { day: string; bytes: number }>();
 
-/** Mo relayés par compte et par jour (FILES_SERVED_MB_PER_DAY, défaut 2048 ; « unlimited » pour lever). */
+/** Mo relayés par compte et par jour (FILES_SERVED_MB_PER_DAY, défaut 2048 en déploiement gardé ; « unlimited » pour lever). */
 export function filesServedMbPerDay(): number | null {
-  const raw = process.env.FILES_SERVED_MB_PER_DAY?.trim();
-  if (raw && /^(unlimited|none|off|-1)$/i.test(raw)) return null;
-  const n = Number(raw);
-  return raw && Number.isFinite(n) && n >= 0 ? n : 2048;
+  return floatLimit("FILES_SERVED_MB_PER_DAY", 2048);
 }
 
 /**
