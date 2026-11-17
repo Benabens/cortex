@@ -405,13 +405,13 @@ async function assertSpendCapUnchecked(): Promise<void> {
 
 /**
  * PLAFOND PAR RÉSERVATION (audit fuites B2) : un job ou une aide ne dépense jamais
- * plus que la valeur des crédits qu'il a débités. Valeur d'un crédit par défaut :
- * 0,66 $, celle de l'offre la moins chère (annuel : 149 € pour 240 crédits, net des
- * frais Stripe ≈ 0,61 €), soit environ 1,5 fois le coût moyen mesuré (QCM 1,80 $
- * pour 4 crédits). JOB_SPEND_CAP_USD_PER_CREDIT la règle, `unlimited` la lève.
+ * plus que crédits débités × valeur d'un crédit. Défaut 0,9 $ (décision de Ben, 17/11,
+ * posé tel quel en prod) : 0,66 $, la valeur nette d'un crédit de l'annuel, coupait des
+ * QCM réels mesurés à 2-2,9 $ pour 4 crédits (plafond 2,64 $) ; 3,6 $ les laisse finir
+ * et borne toujours la boucle. JOB_SPEND_CAP_USD_PER_CREDIT la règle, `unlimited` la lève.
  */
 export function spendCapUsdPerCredit(): number | null {
-  return floatLimit("JOB_SPEND_CAP_USD_PER_CREDIT", 0.66);
+  return floatLimit("JOB_SPEND_CAP_USD_PER_CREDIT", 0.9);
 }
 
 /** Plafond d'une réservation en $ : crédits débités × valeur d'un crédit. null : rien de débité (propriétaire, facturation coupée) ou plafond levé. */
