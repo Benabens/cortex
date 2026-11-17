@@ -120,3 +120,24 @@ test("Premium (facturation coupée) : rien ne change, l'original reste et aucune
     process.env.BILLING_ENABLED = "1";
   }
 });
+
+test("devenu Premium : réimporter le même fichier le remet dans le cloud, sans doublon ni nouvel index", async () => {
+  const c = await newCourse("Orvelle retour");
+  const lectures = path.join(c.contentRoot, "lectures");
+  const pdf = textPdf("Les modes propres de Orvelle");
+  await inCourse(c.id, () => intake.storeOriginal(c.id, lectures, "modes.pdf", pdf, {}));
+  assert.equal(ingest(c.id).status, 0);
+  assert.equal(fs.existsSync(path.join(lectures, "modes.pdf")), false);
+
+  process.env.BILLING_ENABLED = ""; // plus de compte gratuit : comme un Premium
+  try {
+    const other = await inCourse(c.id, () => intake.storeOriginal(c.id, lectures, "modes.pdf", textPdf("Autre chose"), {}));
+    assert.equal(other?.name, "modes-2.pdf", "un autre contenu ne prend pas la place de l'original resté en local");
+    const back = await inCourse(c.id, () => intake.storeOriginal(c.id, lectures, "modes.pdf", pdf, {}));
+    assert.deepEqual([back?.name, back?.restored, back?.home], ["modes.pdf", true, "cloud"]);
+    assert.equal(fs.existsSync(path.join(lectures, "modes.pdf")), true);
+    assert.equal(await inCourse(c.id, () => registry.localOriginal("lectures/modes.pdf")), null);
+  } finally {
+    process.env.BILLING_ENABLED = "1";
+  }
+});
