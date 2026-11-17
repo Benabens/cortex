@@ -7,6 +7,7 @@ import { pythonWasmAvailable } from "@/lib/pyodide-sandbox";
 import { texAvailable } from "@/lib/exam-latex";
 import { railwayEnvironmentName } from "@/lib/railway-env";
 import { hasMetricsToken } from "@/lib/metrics-token";
+import { BACKUP_FRESH_MAX_MS, lastBackupResult } from "@/lib/backup-schedule";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -43,6 +44,10 @@ export async function GET(req: Request) {
   if (!hasMetricsToken(req)) return NextResponse.json({ status, commit }, { status: code });
   const nativeSandbox = sandboxAvailable();
   const pythonWasm = pythonWasmAvailable();
+  // Dernière sauvegarde PROUVÉE (audit fuites I13). Dans le détail seulement : une sauvegarde
+  // en retard ne doit pas faire échouer la sonde, qui redémarrerait le site pour rien.
+  const backup = db ? await lastBackupResult().catch(() => null) : null;
+  const backupAgeMs = backup?.at ? Date.now() - Date.parse(backup.at) : null;
   const body = {
     status,
     commit,
@@ -55,6 +60,11 @@ export async function GET(req: Request) {
       sandbox: nativeSandbox,
       pythonWasm,
       latex: texAvailable(),
+      backup: {
+        lastDay: backup?.day ?? null,
+        ageHours: backupAgeMs === null ? null : Math.round(backupAgeMs / 360_000) / 10,
+        fresh: backupAgeMs !== null && backupAgeMs < BACKUP_FRESH_MAX_MS,
+      },
     },
     // Sans isolation noyau, seul Python peut être rouvert explicitement dans
     // Pyodide. C, sympy et matplotlib restent refusés. Cf. ARCHITECTURE.md § Isolation.

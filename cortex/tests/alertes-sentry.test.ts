@@ -109,6 +109,113 @@ test("webhook Stripe en erreur (500, Stripe réessaie) : Sentry est prévenu ave
   }
 });
 
+/**
+ * AUDIT FUITES DU 17/11, B5 — un webhook à signature invalide (secret tourné, mauvais endpoint)
+ * était refusé en 400 sans un mot : Stripe abandonne au bout de 3 jours, les clients ont payé
+ * sans crédits. Le refus reste un 400 (un tiers ne doit rien apprendre), mais Sentry est prévenu,
+ * une fois par heure et par cause au plus (un robot qui frappe l'URL ne vide pas le quota).
+ */
+async function postWebhook(payload: string, sig: string) {
+  const { POST } = await import("../app/api/billing/webhook/route");
+  const { NextRequest } = await import("next/server");
+  return POST(new NextRequest("http://localhost/api/billing/webhook", { method: "POST", body: payload, headers: { "stripe-signature": sig } }));
+}
+
+test("webhook Stripe à signature invalide : 400, et Sentry est prévenu une seule fois par heure", async () => {
+  process.env.STRIPE_SECRET_KEY = "sk_test_fake_key_local_only";
+  process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_local";
+  try {
+    const { resetErrorTrackingThrottleForTests } = await import("../lib/observability");
+    resetErrorTrackingThrottleForTests();
+    const Stripe = (await import("stripe")).default;
+    const stripe = new Stripe("sk_test_fake_key_local_only");
+    const payload = JSON.stringify({ id: "evt_sig_1", object: "event", livemode: false, type: "invoice.paid", data: { object: {} } });
+    const sig = stripe.webhooks.generateTestHeaderString({ payload, secret: "whsec_un_autre_secret" });
+    for (let i = 0; i < 3; i++) {
+      const res = await postWebhook(payload, sig);
+      assert.equal(res.status, 400);
+    }
+    const alerts = captured.filter((c) => c.tags.area === "billing");
+    assert.equal(alerts.length, 1, JSON.stringify(captured.map((c) => c.tags)));
+    assert.equal(alerts[0].tags.step, "webhook_signature");
+    assert.ok(!JSON.stringify(alerts[0]).includes("evt_sig_1"), "rien du corps non vérifié dans l'alerte");
+  } finally {
+    for (const k of ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]) delete process.env[k];
+  }
+});
+
+test("webhook frappé par un robot (en-tête qui n'a pas la forme de Stripe, ou périmé) : 400 sans alerte — l'alerte « secret ? » reste lisible", async () => {
+  process.env.STRIPE_SECRET_KEY = "sk_test_fake_key_local_only";
+  process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_local";
+  try {
+    const { resetErrorTrackingThrottleForTests } = await import("../lib/observability");
+    resetErrorTrackingThrottleForTests();
+    const payload = JSON.stringify({ id: "evt_robot", object: "event", type: "invoice.paid", data: { object: {} } });
+    const stale = `t=${Math.floor(Date.now() / 1000) - 3600},v1=${"a".repeat(64)}`;
+    for (const sig of ["abc", "t=1,v1=zz", stale]) assert.equal((await postWebhook(payload, sig)).status, 400);
+    assert.equal(captured.filter((c) => c.tags.area === "billing").length, 0, JSON.stringify(captured.map((c) => c.tags)));
+  } finally {
+    for (const k of ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]) delete process.env[k];
+  }
+});
+
+test("webhook Stripe de livemode incohérent avec la clé : 400, et Sentry est prévenu", async () => {
+  process.env.STRIPE_SECRET_KEY = "sk_test_fake_key_local_only";
+  process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_local";
+  try {
+    const { resetErrorTrackingThrottleForTests } = await import("../lib/observability");
+    resetErrorTrackingThrottleForTests();
+    const Stripe = (await import("stripe")).default;
+    const stripe = new Stripe("sk_test_fake_key_local_only");
+    // Événement LIVE signé avec le bon secret, alors que la clé est de test : mauvais branchement.
+    const payload = JSON.stringify({ id: "evt_live_1", object: "event", livemode: true, type: "invoice.paid", data: { object: {} } });
+    const sig = stripe.webhooks.generateTestHeaderString({ payload, secret: "whsec_test_local" });
+    const res = await postWebhook(payload, sig);
+    assert.equal(res.status, 400);
+    const alert = captured.find((c) => c.tags.area === "billing");
+    assert.ok(alert, JSON.stringify(captured.map((c) => c.tags)));
+    assert.equal(alert!.tags.step, "webhook_livemode");
+    assert.equal(alert!.tags.event_type, "invoice.paid");
+  } finally {
+    for (const k of ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]) delete process.env[k];
+  }
+});
+
+/**
+ * AUDIT FUITES DU 17/11, I14 — un lien magique qui ne partait pas (quota Resend atteint, clé
+ * révoquée) restait invisible : Auth.js avale l'erreur, l'étudiant lit « connexion indisponible ».
+ * L'échec d'envoi prévient Sentry (une fois par heure), sans l'adresse.
+ */
+test("lien magique non envoyé (transport en erreur) : l'échec remonte et Sentry est prévenu, sans l'adresse", async () => {
+  const http = await import("node:http");
+  const server = http.createServer((_req, res) => { res.statusCode = 503; res.end("quota atteint pour ana@exemple.ch"); });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as { port: number }).port;
+  const saved = { endpoint: process.env.AUTH_EMAIL_ENDPOINT, resend: process.env.RESEND_API_KEY };
+  delete process.env.RESEND_API_KEY;
+  process.env.AUTH_EMAIL_ENDPOINT = `http://127.0.0.1:${port}/send`;
+  try {
+    const { resetErrorTrackingThrottleForTests } = await import("../lib/observability");
+    resetErrorTrackingThrottleForTests();
+    const { authProviders } = await import("../lib/auth-providers");
+    const email = authProviders({ AUTH_EMAIL_ENABLED: "1", AUTH_EMAIL_ENDPOINT: process.env.AUTH_EMAIL_ENDPOINT })
+      .find((p) => (p as { id?: string }).id === "email") as unknown as { sendVerificationRequest: (p: { identifier: string; url: string }) => Promise<void> };
+    assert.ok(email, "fournisseur e-mail configuré");
+    for (let i = 0; i < 2; i++) {
+      await assert.rejects(email.sendVerificationRequest({ identifier: "ana@exemple.ch", url: "https://cortex.test/api/auth/callback/email?token=x" }));
+    }
+    const alerts = captured.filter((c) => c.tags.area === "auth");
+    assert.equal(alerts.length, 1, JSON.stringify(captured.map((c) => c.tags)));
+    assert.equal(alerts[0].tags.alert, "magic_link_send");
+    assert.ok(!JSON.stringify(alerts[0]).includes("ana@exemple.ch"), "aucune adresse dans l'alerte");
+    assert.ok(!String((alerts[0].e as Error).message).includes("token=x"), "aucun lien de connexion dans l'alerte");
+  } finally {
+    server.close();
+    if (saved.endpoint === undefined) delete process.env.AUTH_EMAIL_ENDPOINT; else process.env.AUTH_EMAIL_ENDPOINT = saved.endpoint;
+    if (saved.resend !== undefined) process.env.RESEND_API_KEY = saved.resend;
+  }
+});
+
 test("job abandonné par la réconciliation (worker mort, tentatives épuisées) : Sentry est prévenu", async () => {
   const jobs = await import("../lib/jobs");
   const { q, nowStr } = await import("../db/q");

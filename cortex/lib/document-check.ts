@@ -6,6 +6,7 @@
 import { getDocumentProxy } from "unpdf";
 import { extractOfficeText, OfficeDocumentError } from "@/lib/office-documents";
 import { failureStatus, problemMessage } from "@/lib/ingest-report";
+import { pdfMaxPages } from "@/lib/ingest-limits";
 
 export type DocumentProblem = { status: 413 | 422; message: string };
 
@@ -16,7 +17,11 @@ export async function unreadableDocument(data: Buffer, extension: string): Promi
     if (data.subarray(0, 5).toString("latin1") !== "%PDF-") return { status: 422, message: problemMessage("unreadable") };
     try {
       const pdf = await getDocumentProxy(new Uint8Array(data));
+      const pages = pdf.numPages;
       await pdf.destroy().catch(() => {});
+      // Audit fuites I9 : un PDF démesuré (ou piégé) tiendrait l'import, dans le conteneur du site.
+      const max = pdfMaxPages();
+      if (pages > max) return { status: 413, message: `Ce PDF a ${pages} pages, au-delà des ${max} permises : découpe-le (par chapitre, par exemple) avant de l'envoyer.` };
       return null;
     } catch (error) {
       return { status: 422, message: problemMessage(failureStatus(error)) };
