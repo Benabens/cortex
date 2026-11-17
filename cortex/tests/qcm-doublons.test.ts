@@ -337,6 +337,38 @@ test("banc rs-mixte du 17/11 : une question OUVERTE d'un examen précédent comp
   assert.doesNotMatch(line, /callout|textbf|FOR ALL STUDENTS/, "en texte, sans l'encadré de section ni les commandes LaTeX");
 });
 
+test("banc rs-mixte du 17/11 : un QCM qui reprend une question OUVERTE du même examen est retiré et remplacé", async () => {
+  const id = await course(30);
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  const { qcmCheckpointKey } = await import("../lib/qcm-checkpoint");
+  // Le plan d'un premier passage (sans le fait de l'ouverte), puis l'ouverte déjà construite (point de reprise).
+  design = (n, call) => Array.from({ length: n }, (_, i) => item(`Premier passage ${call}.${i} [notion:ancienne ${call}.${i}] [angle:a] : que dit le cours ?`));
+  const saves: { plan?: unknown }[] = [];
+  const keep = { load: async () => null, save: async (d: unknown) => { if (d) saves.push(JSON.parse(JSON.stringify(d)) as { plan?: unknown }); } };
+  await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0, checkpoint: keep }));
+  const cut = {
+    v: 2, key: qcmCheckpointKey({ count: 4, openCount: 1 }), plan: saves.find((x) => x.plan)!.plan,
+    open: [[0, { concept: "Résultat d'impossibilité", statement_tex: "Ouverte [notion:résultat d'impossibilité] [angle:fait 9] : explique ce que dit le cours.", solution_tex: "Corrigé fictif.", points: 15 }]],
+  };
+  let firstLot = true;
+  design = (n, call, lot) => {
+    const reprise = firstLot && !lot.topUp;
+    firstLot = false;
+    return Array.from({ length: n }, (_, i) => (reprise && i === 1
+      ? item("Reprise de l'ouverte [notion:résultat d'impossibilité] [angle:fait 9] : que dit le cours ?")
+      : item(`Question ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`)));
+  };
+  dedupePrompts.length = 0;
+  const stems = await runWithCourse(id, async () => {
+    const r = await generateQcmExam({ count: 4, openCount: 1, checkpoint: { load: async () => cut, save: async () => {} } });
+    assert.equal(r.count, 4);
+    return (await getQcmExam(r.id))!.items.map((x) => x.stem);
+  });
+  assert.ok(!stems.some((st) => st.startsWith("Reprise de l'ouverte")), `le QCM qui reprend l'ouverte est retiré :\n${stems.join("\n")}`);
+  assert.ok(dedupePrompts.some((pr) => /^P\d+\. .*Ouverte \[notion:résultat d'impossibilité\]/m.test(pr)), "le contrôle des doublons reçoit l'ouverte de l'examen");
+});
+
 test("modèle qui répète toujours la même notion : budget borné, aucun doublon connu réinjecté", async () => {
   const id = await course(4, 0);
   design = (n, call) => Array.from({ length: n }, (_, i) => item(`Question ${call}.${i} [notion:unique] [angle:${call}.${i}] : que dit le cours ?`));
