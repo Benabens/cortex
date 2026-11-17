@@ -165,7 +165,7 @@ export async function readCounterState(db: Db, userId: string, owner: boolean, b
   let rate: CounterState["rate"] = { used: 0, cap: rateCap, oldestAt: null };
   if (rateCap !== null) {
     const r = await db.get<{ n: number; oldest: string | null }>(
-      `SELECT count(*) n, min(created_at) oldest FROM gen_events WHERE user_id = ? AND created_at >= ?`, userId, isoOffset(now, -60_000),
+      `SELECT count(*) n, min(created_at) oldest FROM gen_events WHERE user_id = ? AND bucket <> 'ingest' AND created_at >= ?`, userId, isoOffset(now, -60_000),
     );
     rate = { used: Number(r?.n ?? 0), cap: rateCap, oldestAt: r?.oldest ?? null };
   }

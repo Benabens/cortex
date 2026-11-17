@@ -220,15 +220,6 @@ export async function reserveIngest(ref: string, userId = currentUser(), course 
   });
 }
 
-/** Rend l'import compté par une réservation qui n'a servi à rien (import déjà lancé entre-temps). Best-effort. */
-export async function releaseIngest(userId: string, ref: string): Promise<void> {
-  try {
-    await authRun(`DELETE FROM gen_events WHERE user_id = ? AND ref = ?`, userId, ref);
-  } catch (e) {
-    log("warn", "billing.quota_release_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
-  }
-}
-
 /**
  * Gate des appels d'ASSISTANCE (drill, correction, analyses) : une réservation
  * complète — rafale, quota du jour, solde — débitée AVANT l'appel au modèle.

@@ -122,8 +122,8 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
   });
   if (res.existing && ref) await releaseReservation(type, ref, user);
   if (res.existing && ingestRef) {
-    const { releaseIngest } = await import("@/lib/billing/reserve");
-    await releaseIngest(user, ingestRef);
+    const { releaseQuotaEvent } = await import("@/lib/billing/reserve");
+    await releaseQuotaEvent(user, ingestRef);
   }
   return { ...res, costCenti: res.existing ? 0 : costCenti };
 }

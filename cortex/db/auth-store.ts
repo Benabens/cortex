@@ -789,11 +789,11 @@ const SUBS_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
 const COURSES_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "exam_format", sqlite: "TEXT", pg: "text" },
 ];
-/** Coût de calcul ATTENDU d'un job admis, réservé jusqu'à sa fin (lib/billing/limits). */
 /** File des workers : la file de l'entrée (lib/job-queue, audit fuites B3) ; les anciennes sont des générations. */
 const JOB_QUEUE_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "pool", sqlite: "TEXT NOT NULL DEFAULT 'gen'", pg: "text NOT NULL DEFAULT 'gen'" },
 ];
+/** Coût de calcul ATTENDU d'un job admis, réservé jusqu'à sa fin (lib/billing/limits). */
 const ACTIVE_JOBS_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "kind", sqlite: "TEXT", pg: "text" },
   { name: "expected_usd", sqlite: "REAL NOT NULL DEFAULT 0", pg: "double precision NOT NULL DEFAULT 0" },

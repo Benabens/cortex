@@ -123,3 +123,16 @@ test("B3 : startWorker d'un import, file des imports pleine : il attend son tour
   });
   assert.deepEqual(await admitJob("z", "ml", 1), { admitted: true }, "la génération payée démarre");
 });
+
+test("B3 : un compte ne tient qu'une place d'import à la fois — relancer 20 cours ne bloque pas les autres", async () => {
+  const { admitJob, nextToStart, releaseJob } = await import("../lib/job-queue");
+  assert.deepEqual(await admitJob("f", "c1", 1, "ingest"), { admitted: true });
+  assert.equal((await admitJob("f", "c2", 1, "ingest")).admitted, false, "son second import attend, même avec une place libre");
+  assert.equal((await admitJob("f", "c3", 1, "ingest")).admitted, false);
+  assert.deepEqual(await admitJob("g", "c1", 1, "ingest"), { admitted: true }, "un autre compte prend la place libre");
+  assert.equal((await admitJob("i", "c1", 1, "ingest")).admitted, false);
+  await releaseJob("g", "c1", 1);
+  assert.deepEqual(await nextToStart(), [{ user: "i", course: "c1", jobId: 1 }], "la place libérée saute les imports du compte qui en tient déjà une");
+  await releaseJob("f", "c1", 1);
+  assert.deepEqual((await nextToStart()).map((e) => `${e.user}/${e.course}`), ["f/c2", "i/c1"]);
+});

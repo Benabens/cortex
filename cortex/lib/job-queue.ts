@@ -23,7 +23,9 @@ import { log } from "@/lib/metrics";
  * DEUX FILES (audit fuites B3) : les imports (« ingest », gratuits, CPU de pdftoppm et
  * d'extraction) ont leur propre plafond, MAX_GLOBAL_INGEST_JOBS (défaut 2), et ne prennent
  * jamais une place de MAX_GLOBAL_JOBS : une génération payée ne voit jamais d'import devant elle.
- * Chaque file a son FIFO et ses places ; une entrée sait la sienne (colonne `pool`).
+ * Chaque file a son FIFO et ses places ; une entrée sait la sienne (colonne `pool`). Dans la file
+ * des imports, un compte ne tient qu'UNE place à la fois : ses autres imports attendent, et ceux
+ * des autres comptes passent devant eux (20 cours relancés d'un coup ne bloquent personne).
  */
 
 export type QueuePool = "gen" | "ingest";
@@ -46,6 +48,28 @@ const capOf = (pool: QueuePool) => (pool === "ingest" ? maxGlobalIngestJobs() : 
 export const poolOfJobType = (type: string): QueuePool => (type === "ingest" ? "ingest" : "gen");
 /** Aucune des deux files n'a de plafond : rien n'est écrit (dev sans garde-fous). */
 const queueOff = () => POOLS.every((p) => capOf(p) === null);
+/** Places d'une file qu'un même compte tient à la fois (null : pas de borne, MAX_ACTIVE_JOBS borne déjà les générations). */
+const perUserCapOf = (pool: QueuePool): number | null => (pool === "ingest" ? 1 : null);
+
+type QueueRow = { user_id: string; course: string; job_id: number; pool: QueuePool; state: string; started_at: string | null; heartbeat_at: string | null };
+const sameEntry = (r: QueueRow, user: string, course: string, jobId: number) => r.user_id === user && r.course === course && Number(r.job_id) === jobId;
+const runningLive = (r: QueueRow, fresh: string) => r.state === "running" && (r.heartbeat_at ?? r.started_at ?? "") >= fresh;
+
+/**
+ * Qui démarre parmi `candidates` (dans l'ordre de la file) quand `free` places sont libres :
+ * les premiers, en sautant un compte qui tient déjà sa part de la file (`busy`, mis à jour).
+ */
+function eligibleHeads<T extends { user_id: string }>(candidates: T[], free: number, perUserCap: number | null, busy: Map<string, number>): T[] {
+  const out: T[] = [];
+  for (const c of candidates) {
+    if (out.length >= free) break;
+    const held = busy.get(c.user_id) ?? 0;
+    if (perUserCap !== null && held >= perUserCap) continue;
+    busy.set(c.user_id, held + 1);
+    out.push(c);
+  }
+  return out;
+}
 
 /** Un worker qui a battu (ou démarré) il y a moins de ça occupe sa place (battement toutes les 30 s). */
 const HEARTBEAT_FRESH_MS = 5 * 60_000;
@@ -58,7 +82,6 @@ function stamp(offsetMs = 0): string {
 }
 
 const ORDER = "ORDER BY enqueued_at, user_id, course, job_id";
-const RUNNING_FRESH = "state = 'running' AND coalesce(heartbeat_at, started_at) >= ?";
 
 /**
  * Le job peut-il démarrer maintenant ? Inscrit le job dans la file s'il n'y est pas (sa place
@@ -80,17 +103,18 @@ export async function admitJob(user: string, course: string, jobId: number, pool
       user, course, jobId, now, pool,
     );
     const mine = `user_id = ? AND course = ? AND job_id = ?`;
-    const running = Number((await tx.get<{ n: number }>(
-      `SELECT count(*) n FROM job_queue WHERE pool = ? AND ${RUNNING_FRESH} AND NOT (${mine})`, pool, fresh, user, course, jobId,
-    ))?.n ?? 0);
-    const free = Math.max(0, cap - running);
+    const rows = await tx.all<QueueRow>(
+      `SELECT user_id, course, job_id, pool, state, started_at, heartbeat_at FROM job_queue WHERE pool = ? OR (${mine}) ${ORDER}`, pool, user, course, jobId,
+    );
+    const others = rows.filter((r) => r.pool === pool && !sameEntry(r, user, course, jobId) && runningLive(r, fresh));
+    const busy = new Map<string, number>();
+    for (const r of others) busy.set(r.user_id, (busy.get(r.user_id) ?? 0) + 1);
+    const free = Math.max(0, cap - others.length);
     // Candidats : les entrées en attente, plus celles « en cours » dont le worker est mort
     // (repris par la pompe) — dans l'ordre d'arrivée d'origine.
-    const heads = await tx.all<{ user_id: string; course: string; job_id: number }>(
-      `SELECT user_id, course, job_id FROM job_queue WHERE (pool = ? AND state = 'waiting') OR (${mine}) ${ORDER}`, pool, user, course, jobId,
-    );
-    const at = heads.findIndex((h) => h.user_id === user && h.course === course && Number(h.job_id) === jobId);
-    if (at >= 0 && at < free) {
+    const heads = rows.filter((r) => sameEntry(r, user, course, jobId) || (r.pool === pool && r.state === "waiting"));
+    const at = heads.findIndex((h) => sameEntry(h, user, course, jobId));
+    if (eligibleHeads(heads, free, perUserCapOf(pool), busy).some((h) => sameEntry(h, user, course, jobId))) {
       await tx.run(`UPDATE job_queue SET state = 'running', started_at = ?, heartbeat_at = ? WHERE ${mine}`, now, now, user, course, jobId);
       return { admitted: true };
     }
@@ -123,16 +147,18 @@ export async function heartbeatQueuedJob(user: string, course: string, jobId: nu
 /** Les jobs en attente qui ont une place maintenant, file par file, chacune dans son ordre. */
 export async function nextToStart(): Promise<QueueEntry[]> {
   const out: QueueEntry[] = [];
+  const fresh = stamp(-HEARTBEAT_FRESH_MS);
   for (const pool of POOLS) {
     const cap = capOf(pool);
     if (cap === null) continue;
-    const running = await authAll<{ n: number }>(`SELECT count(*) n FROM job_queue WHERE pool = ? AND ${RUNNING_FRESH}`, pool, stamp(-HEARTBEAT_FRESH_MS));
-    const free = Math.max(0, cap - Number(running[0]?.n ?? 0));
+    const rows = await authAll<QueueRow>(`SELECT user_id, course, job_id, pool, state, started_at, heartbeat_at FROM job_queue WHERE pool = ? ${ORDER}`, pool);
+    const live = rows.filter((r) => runningLive(r, fresh));
+    const busy = new Map<string, number>();
+    for (const r of live) busy.set(r.user_id, (busy.get(r.user_id) ?? 0) + 1);
+    const free = Math.max(0, cap - live.length);
     if (!free) continue;
-    const rows = await authAll<{ user_id: string; course: string; job_id: number }>(
-      `SELECT user_id, course, job_id FROM job_queue WHERE pool = ? AND state = 'waiting' ${ORDER} LIMIT ?`, pool, free,
-    );
-    out.push(...rows.map((r) => ({ user: r.user_id, course: r.course, jobId: Number(r.job_id) })));
+    const heads = eligibleHeads(rows.filter((r) => r.state === "waiting"), free, perUserCapOf(pool), busy);
+    out.push(...heads.map((r) => ({ user: r.user_id, course: r.course, jobId: Number(r.job_id) })));
   }
   return out;
 }
