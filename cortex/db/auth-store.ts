@@ -790,6 +790,10 @@ const COURSES_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "exam_format", sqlite: "TEXT", pg: "text" },
 ];
 /** Coût de calcul ATTENDU d'un job admis, réservé jusqu'à sa fin (lib/billing/limits). */
+/** File des workers : la file de l'entrée (lib/job-queue, audit fuites B3) ; les anciennes sont des générations. */
+const JOB_QUEUE_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
+  { name: "pool", sqlite: "TEXT NOT NULL DEFAULT 'gen'", pg: "text NOT NULL DEFAULT 'gen'" },
+];
 const ACTIVE_JOBS_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "kind", sqlite: "TEXT", pg: "text" },
   { name: "expected_usd", sqlite: "REAL NOT NULL DEFAULT 0", pg: "double precision NOT NULL DEFAULT 0" },
@@ -904,6 +908,12 @@ function sqliteAuth(): Database.Database {
     for (const c of ACTIVE_JOBS_ADDED) {
       if (!haveActive.has(c.name)) _sqliteAuth.exec(`ALTER TABLE active_jobs ADD COLUMN ${c.name} ${c.sqlite}`);
     }
+    const haveQueue = new Set(
+      (_sqliteAuth.prepare("PRAGMA table_info(job_queue)").all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    for (const c of JOB_QUEUE_ADDED) {
+      if (!haveQueue.has(c.name)) _sqliteAuth.exec(`ALTER TABLE job_queue ADD COLUMN ${c.name} ${c.sqlite}`);
+    }
   }
   return _sqliteAuth;
 }
@@ -962,6 +972,9 @@ async function pgExec(): Promise<{
     }
     for (const c of ACTIVE_JOBS_ADDED) {
       await authPgQuery(`ALTER TABLE public.active_jobs ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
+    }
+    for (const c of JOB_QUEUE_ADDED) {
+      await authPgQuery(`ALTER TABLE public.job_queue ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
     }
     _pgReady = true;
     await ensureCreditRefUnique();

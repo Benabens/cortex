@@ -19,15 +19,33 @@ import { log } from "@/lib/metrics";
  *  - dès qu'un worker sort, et toutes les 60 s (instrumentation), dispatchQueue démarre les
  *    suivants. Un job repris (zombie, arrêt gracieux) garde sa place d'origine : il repasse devant.
  * « unlimited » (ou dev sans garde-fous) : aucune file, aucune écriture.
+ *
+ * DEUX FILES (audit fuites B3) : les imports (« ingest », gratuits, CPU de pdftoppm et
+ * d'extraction) ont leur propre plafond, MAX_GLOBAL_INGEST_JOBS (défaut 2), et ne prennent
+ * jamais une place de MAX_GLOBAL_JOBS : une génération payée ne voit jamais d'import devant elle.
+ * Chaque file a son FIFO et ses places ; une entrée sait la sienne (colonne `pool`).
  */
 
+export type QueuePool = "gen" | "ingest";
 export type QueueEntry = { user: string; course: string; jobId: number };
 export type Admission = { admitted: true } | { admitted: false; position: number };
 
-/** Workers simultanés pour toute l'instance (null = sans plafond). */
+/** Workers de génération simultanés pour toute l'instance (null = sans plafond). */
 export function maxGlobalJobs(): number | null {
   return intLimit("MAX_GLOBAL_JOBS", 4);
 }
+
+/** Imports simultanés pour toute l'instance, hors des places de génération (null = sans plafond). */
+export function maxGlobalIngestJobs(): number | null {
+  return intLimit("MAX_GLOBAL_INGEST_JOBS", 2);
+}
+
+const POOLS: QueuePool[] = ["gen", "ingest"];
+const capOf = (pool: QueuePool) => (pool === "ingest" ? maxGlobalIngestJobs() : maxGlobalJobs());
+/** File du type de job : l'import a la sienne, tout le reste (payé) partage l'autre. */
+export const poolOfJobType = (type: string): QueuePool => (type === "ingest" ? "ingest" : "gen");
+/** Aucune des deux files n'a de plafond : rien n'est écrit (dev sans garde-fous). */
+const queueOff = () => POOLS.every((p) => capOf(p) === null);
 
 /** Un worker qui a battu (ou démarré) il y a moins de ça occupe sa place (battement toutes les 30 s). */
 const HEARTBEAT_FRESH_MS = 5 * 60_000;
@@ -47,8 +65,8 @@ const RUNNING_FRESH = "state = 'running' AND coalesce(heartbeat_at, started_at) 
  * d'origine est gardée s'il y est déjà), puis le passe « en cours » si une place est libre et
  * qu'il est en tête. Sinon, sa position dans la file (1 = le prochain).
  */
-export async function admitJob(user: string, course: string, jobId: number): Promise<Admission> {
-  const cap = maxGlobalJobs();
+export async function admitJob(user: string, course: string, jobId: number, pool: QueuePool = "gen"): Promise<Admission> {
+  const cap = capOf(pool);
   if (cap === null) return { admitted: true };
   return authTx(async (tx): Promise<Admission> => {
     if (dbDriverName() === "postgres") await tx.run(`SELECT pg_advisory_xact_lock(hashtext('cortex:job_queue'))`);
@@ -58,18 +76,18 @@ export async function admitJob(user: string, course: string, jobId: number): Pro
     // plus, mais sans purge la table grossirait (job jamais terminé côté tenant, tenant supprimé).
     await tx.run(`DELETE FROM job_queue WHERE COALESCE(heartbeat_at, enqueued_at) < ?`, stamp(-STALE_ENTRY_MAX_AGE_MS));
     await tx.run(
-      `INSERT INTO job_queue (user_id, course, job_id, state, enqueued_at) VALUES (?,?,?,'waiting',?) ON CONFLICT (user_id, course, job_id) DO NOTHING`,
-      user, course, jobId, now,
+      `INSERT INTO job_queue (user_id, course, job_id, state, enqueued_at, pool) VALUES (?,?,?,'waiting',?,?) ON CONFLICT (user_id, course, job_id) DO NOTHING`,
+      user, course, jobId, now, pool,
     );
     const mine = `user_id = ? AND course = ? AND job_id = ?`;
     const running = Number((await tx.get<{ n: number }>(
-      `SELECT count(*) n FROM job_queue WHERE ${RUNNING_FRESH} AND NOT (${mine})`, fresh, user, course, jobId,
+      `SELECT count(*) n FROM job_queue WHERE pool = ? AND ${RUNNING_FRESH} AND NOT (${mine})`, pool, fresh, user, course, jobId,
     ))?.n ?? 0);
     const free = Math.max(0, cap - running);
     // Candidats : les entrées en attente, plus celles « en cours » dont le worker est mort
     // (repris par la pompe) — dans l'ordre d'arrivée d'origine.
     const heads = await tx.all<{ user_id: string; course: string; job_id: number }>(
-      `SELECT user_id, course, job_id FROM job_queue WHERE state = 'waiting' OR (${mine}) ${ORDER}`, user, course, jobId,
+      `SELECT user_id, course, job_id FROM job_queue WHERE (pool = ? AND state = 'waiting') OR (${mine}) ${ORDER}`, pool, user, course, jobId,
     );
     const at = heads.findIndex((h) => h.user_id === user && h.course === course && Number(h.job_id) === jobId);
     if (at >= 0 && at < free) {
@@ -83,36 +101,40 @@ export async function admitJob(user: string, course: string, jobId: number): Pro
 
 /** Rend la place du job (état terminal). Best-effort : à défaut, elle se libère au battement périmé. */
 export async function releaseJob(user: string, course: string, jobId: number): Promise<void> {
-  if (maxGlobalJobs() === null) return;
+  if (queueOff()) return;
   await authRun(`DELETE FROM job_queue WHERE user_id = ? AND course = ? AND job_id = ?`, user, course, jobId)
     .catch((e) => log("warn", "jobs.queue_release_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) }));
 }
 
 /** Job remis en file (reprise d'un zombie, arrêt gracieux) : sa place se libère, son rang d'arrivée reste. */
 export async function requeueJob(user: string, course: string, jobId: number): Promise<void> {
-  if (maxGlobalJobs() === null) return;
+  if (queueOff()) return;
   await authRun(`UPDATE job_queue SET state = 'waiting', heartbeat_at = NULL WHERE user_id = ? AND course = ? AND job_id = ?`, user, course, jobId)
     .catch(() => { /* best-effort : à défaut, la place se libère au battement périmé */ });
 }
 
 /** Battement du worker (scripts/run-job.ts, via heartbeatJob) : sa place reste occupée. */
 export async function heartbeatQueuedJob(user: string, course: string, jobId: number): Promise<void> {
-  if (maxGlobalJobs() === null) return;
+  if (queueOff()) return;
   await authRun(`UPDATE job_queue SET heartbeat_at = ? WHERE user_id = ? AND course = ? AND job_id = ? AND state = 'running'`, stamp(), user, course, jobId)
     .catch(() => { /* best-effort : un battement manqué sur cinq minutes ne coûte rien */ });
 }
 
-/** Les jobs en attente qui ont une place maintenant, dans l'ordre de la file. */
+/** Les jobs en attente qui ont une place maintenant, file par file, chacune dans son ordre. */
 export async function nextToStart(): Promise<QueueEntry[]> {
-  const cap = maxGlobalJobs();
-  if (cap === null) return [];
-  const running = await authAll<{ n: number }>(`SELECT count(*) n FROM job_queue WHERE ${RUNNING_FRESH}`, stamp(-HEARTBEAT_FRESH_MS));
-  const free = Math.max(0, cap - Number(running[0]?.n ?? 0));
-  if (!free) return [];
-  const rows = await authAll<{ user_id: string; course: string; job_id: number }>(
-    `SELECT user_id, course, job_id FROM job_queue WHERE state = 'waiting' ${ORDER} LIMIT ?`, free,
-  );
-  return rows.map((r) => ({ user: r.user_id, course: r.course, jobId: Number(r.job_id) }));
+  const out: QueueEntry[] = [];
+  for (const pool of POOLS) {
+    const cap = capOf(pool);
+    if (cap === null) continue;
+    const running = await authAll<{ n: number }>(`SELECT count(*) n FROM job_queue WHERE pool = ? AND ${RUNNING_FRESH}`, pool, stamp(-HEARTBEAT_FRESH_MS));
+    const free = Math.max(0, cap - Number(running[0]?.n ?? 0));
+    if (!free) continue;
+    const rows = await authAll<{ user_id: string; course: string; job_id: number }>(
+      `SELECT user_id, course, job_id FROM job_queue WHERE pool = ? AND state = 'waiting' ${ORDER} LIMIT ?`, pool, free,
+    );
+    out.push(...rows.map((r) => ({ user: r.user_id, course: r.course, jobId: Number(r.job_id) })));
+  }
+  return out;
 }
 
 /** Démarre un job de la file dans son tenant (startWorker ré-admet, et ne lance qu'une fois). */
@@ -142,7 +164,7 @@ async function stillQueued(e: QueueEntry): Promise<boolean> {
  * dans son tenant est retirée (sinon elle bloquerait tous les suivants). Rend le nombre démarré.
  */
 export async function dispatchQueue(start: (e: QueueEntry) => Promise<void> = startQueued): Promise<number> {
-  if (maxGlobalJobs() === null) return 0;
+  if (queueOff()) return 0;
   let started = 0;
   const seen = new Set<string>();
   for (let round = 0; round < 50; round++) {
