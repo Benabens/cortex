@@ -126,11 +126,11 @@ async function settleAfterPages(): Promise<void> {
 }
 
 function runIngestProcess(args: string[], reportFile: string): Promise<void> {
-  const tsxLocal = path.join(process.cwd(), "node_modules", ".bin", "tsx");
   return new Promise<void>((resolve, reject) => {
-    // Borné (audit fuites I9) : tas plafonné, et au délai le process est tué avec ses enfants.
+    // Borné (audit fuites I9) : tas plafonné, tué au délai, et dans le groupe du worker (une
+    // annulation l'atteint). node lui-même, pas le lanceur tsx qui relancerait un second node.
     const timeoutMs = ingestTimeoutMs();
-    const { child, done } = spawnBounded(tsxLocal, args, {
+    const { child, done } = spawnBounded(process.execPath, ["--import", "tsx", ...args], {
       cwd: process.cwd(),
       env: { ...process.env, CORTEX_COURSE: COURSE, [INGEST_REPORT_ENV]: reportFile },
       timeoutMs,

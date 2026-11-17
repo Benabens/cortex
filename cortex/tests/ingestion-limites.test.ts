@@ -4,7 +4,7 @@
  * pouvait tenir le CPU ou la mémoire jusqu'à faire tomber tout le monde. Désormais :
  *  - au dépôt, un PDF de plus de PDF_MAX_PAGES pages est refusé (413), avec quoi faire ;
  *  - le process d'import a un tas plafonné (INGEST_MAX_HEAP_MB) et un délai (INGEST_TIMEOUT_MS)
- *    au-delà duquel il est tué AVEC ses enfants (tsx relance node : tuer tsx seul laissait node).
+ *    au-delà duquel il est tué ; il reste dans le groupe du worker, qu'une annulation tue.
  *
  * Seams : lib/document-check unreadableDocument, lib/ingest-limits.
  */
@@ -41,25 +41,28 @@ test("I9 : un PDF au-delà de PDF_MAX_PAGES pages est refusé au dépôt (413), 
   assert.match(refused!.message, /découpe/i);
 });
 
-test("I9 : import qui ne finit pas — tué au bout du délai, ses enfants compris", async () => {
+test("I9 : import qui ne finit pas — tué au bout du délai", async () => {
   const { spawnBounded } = await import("../lib/ingest-limits");
-  // Le process lancé relance un enfant (comme tsx relance node), puis attend sans fin.
-  const script = `
-    const { spawn } = require("node:child_process");
-    const c = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
-    console.log("petit-enfant " + c.pid);
-    setInterval(() => {}, 1000);
-  `;
   const started = Date.now();
-  let grandchild = 0;
-  const run = spawnBounded(process.execPath, ["-e", script], { timeoutMs: 800, maxHeapMb: 256 });
-  run.child.stdout!.on("data", (d: Buffer) => { const m = /petit-enfant (\d+)/.exec(d.toString()); if (m) grandchild = Number(m[1]); });
+  const run = spawnBounded(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { timeoutMs: 800, maxHeapMb: 256 });
   const r = await run.done;
   assert.equal(r.timedOut, true);
-  assert.ok(Date.now() - started < 5000, "arrêté au délai, pas à la fin du monde");
-  assert.ok(grandchild > 0, "le petit-enfant a démarré");
-  await new Promise((res) => setTimeout(res, 200));
-  assert.equal(alive(grandchild), false, "le petit-enfant est tué avec le groupe");
+  assert.ok(Date.now() - started < 5000, "arrêté au délai");
+  assert.equal(alive(run.child.pid!), false);
+});
+
+test("I9 : l'import reste dans le groupe du worker — annuler le job (kill du groupe) l'arrête aussi", async () => {
+  const { spawnBounded } = await import("../lib/ingest-limits");
+  const { pgidOf } = await import("../lib/process-group");
+  const run = spawnBounded(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { timeoutMs: 10_000, maxHeapMb: 256 });
+  try {
+    const mine = pgidOf(process.pid);
+    assert.ok(mine !== null);
+    assert.equal(pgidOf(run.child.pid!), mine, "même groupe que le process qui l'a lancé");
+  } finally {
+    run.child.kill("SIGKILL");
+    await run.done;
+  }
 });
 
 test("I9 : le tas du process d'import est plafonné (INGEST_MAX_HEAP_MB)", async () => {
