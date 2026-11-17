@@ -419,11 +419,28 @@ export async function reservationCapUsd(ref: string): Promise<number | null> {
   const perCredit = spendCapUsdPerCredit();
   if (perCredit === null) return null;
   const debit = await authGet<{ delta: number | string; sub_amount: number | string | null }>(
-    `SELECT ${DELTA_CENTI} AS delta, sub_amount FROM credit_transactions WHERE ref = ? AND reason LIKE 'génération %'`, ref,
+    `SELECT ${DELTA_CENTI} AS delta, sub_amount FROM credit_transactions WHERE ref = ? AND ${GENERATION_DEBIT_SQL}`, ref,
   );
   if (!debit) return null;
   const centi = Math.max(0, -Number(debit.delta)) + Math.max(0, Number(debit.sub_amount ?? 0));
   return (centi / 100) * perCredit;
+}
+
+/** Ligne de débit d'une réservation de génération ou d'aide (reserve.ts) : la seule qui porte la preuve de paiement. */
+export const GENERATION_DEBIT_SQL = `reason LIKE 'génération %'`;
+
+/**
+ * Dépense IA déjà engagée sur une réservation (appels en vol comptés à leur maximum) :
+ * lib/llm écrit `credit_ref` sur chaque appel. `except` : lignes à ne pas compter (les
+ * appels en cours du processus, pour le plafond).
+ */
+export async function reservationSpendUsd(ref: string, except: ReadonlySet<number> = new Set()): Promise<number> {
+  const ids = [...except];
+  const r = await authGet<{ total: number | string | null }>(
+    `SELECT coalesce(sum(cost_usd), 0) total FROM llm_usage WHERE credit_ref = ?${ids.length ? ` AND id NOT IN (${ids.map(() => "?").join(",")})` : ""}`,
+    ref, ...ids,
+  );
+  return Number(r?.total ?? 0);
 }
 
 const RESERVATION_CAP_MESSAGE =
@@ -431,17 +448,17 @@ const RESERVATION_CAP_MESSAGE =
 
 /**
  * Vérifiée AVANT CHAQUE TENTATIVE d'appel payant (lib/llm) : la dépense déjà
- * engagée sur la réservation (appels en vol compris, comptés à leur maximum)
- * atteint le plafond → SPEND_CAP. Le générateur s'arrête alors proprement
- * (HARD_STOP_CODES) et livre ce qui est prêt ; le manque est rendu au prorata. Le
- * premier appel passe toujours : le dépassement est borné par une tentative.
+ * engagée sur la réservation atteint le plafond → SPEND_CAP. Les appels en cours
+ * du processus (`inFlight`) ne comptent pas encore : sinon des appels parallèles
+ * d'un même job, comptés à leur maximum, arrêteraient un QCM normal. Le générateur
+ * s'arrête alors proprement (HARD_STOP_CODES) et livre ce qui est prêt ; le manque
+ * est rendu au prorata. Le dépassement est borné par les appels simultanés.
  */
-export async function assertReservationCap(ref: string | null | undefined, provider: string): Promise<void> {
+export async function assertReservationCap(ref: string | null | undefined, provider: string, inFlight: ReadonlySet<number> = new Set()): Promise<void> {
   if (!ref || !isPaidProvider(provider)) return;
   const cap = await reservationCapUsd(ref);
   if (cap === null) return;
-  const r = await authGet<{ total: number | string | null }>(`SELECT coalesce(sum(cost_usd), 0) total FROM llm_usage WHERE credit_ref = ?`, ref);
-  const spent = Number(r?.total ?? 0);
+  const spent = await reservationSpendUsd(ref, inFlight);
   if (spent >= cap) {
     log("warn", "spend_cap.reservation_hit", { ref, spent: Math.round(spent * 1e4) / 1e4, cap: Math.round(cap * 1e4) / 1e4 });
     throw new LlmError(RESERVATION_CAP_MESSAGE, "SPEND_CAP", false);

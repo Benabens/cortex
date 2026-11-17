@@ -23,7 +23,7 @@ import { accountRevenue, sinceDays, totalRevenue } from "./revenue";
  * Le budget arrête donc les crédits OFFERTS (inscription) au-delà de B.
  *
  * Crédits achetés, dans la poche du ledger : tout sauf les crédits OFFERTS
- * (OFFERED_LINE : inscription, crédits rendus après une dépense, pack à 0 €),
+ * (OFFERED_CREDIT_SQL : inscription, crédits rendus après une dépense, pack à 0 €),
  * consommés EN DERNIER — le client qui a payé 10 crédits a toujours ses 10
  * générations ; ce qui reste au-delà vient du cadeau. Un job échoué après des
  * appels payants est remboursé en crédits offerts : sa dépense reste comptée et
@@ -126,12 +126,12 @@ export async function accountBudget(userId: string): Promise<AccountBudget | nul
  * colonne. Les crédits du relecteur (`review_grant:`) restent achetés : accordés à la
  * main, bornés par le script (scripts/review-account.ts).
  */
-export const OFFERED_LINE = `(offered = 1 OR ref LIKE 'signup:%')`;
+export const OFFERED_CREDIT_SQL = `(offered = 1 OR ref LIKE 'signup:%')`;
 
 /** Crédits ACHETÉS disponibles dans le ledger (tout sauf les crédits offerts, consommés en dernier), en centièmes. */
 export async function purchasedLedgerCenti(tx: AuthTx, userId: string, ledgerCenti: number): Promise<number> {
   const r = await tx.get<{ total: number | string | null }>(
-    `SELECT coalesce(sum(${DELTA_CENTI}), 0) total FROM credit_transactions WHERE user_id = ? AND ${DELTA_CENTI} > 0 AND ${OFFERED_LINE}`, userId,
+    `SELECT coalesce(sum(${DELTA_CENTI}), 0) total FROM credit_transactions WHERE user_id = ? AND ${DELTA_CENTI} > 0 AND ${OFFERED_CREDIT_SQL}`, userId,
   );
   return Math.max(0, ledgerCenti - Math.max(0, Number(r?.total ?? 0)));
 }

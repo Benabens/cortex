@@ -479,6 +479,7 @@ export async function refundGeneration(
   if (asked <= 0) return 0;
   try {
     if (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, marker)) return 0;
+    const { reservationSpendUsd } = await import("./usage");
     const offered = opts.afterSpend === true || (await reservationSpendUsd(ref)) > 0;
     const debited = await authGet<{ delta: number; user_id: string; sub_amount: number | null; created_at: string }>(
       `SELECT ${DELTA_CENTI} AS delta, user_id, sub_amount, created_at FROM credit_transactions WHERE ref = ?`, ref,
@@ -533,12 +534,6 @@ export async function refundGeneration(
     log("warn", "credits.refund_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
     return 0;
   }
-}
-
-/** Dépense IA déjà engagée sur une réservation : lib/llm écrit `credit_ref` sur chaque appel. */
-export async function reservationSpendUsd(ref: string): Promise<number> {
-  const r = await authGet<{ total: number | string | null }>(`SELECT coalesce(sum(cost_usd), 0) total FROM llm_usage WHERE credit_ref = ?`, ref);
-  return Number(r?.total ?? 0);
 }
 
 /** Historique (API /api/billing). */

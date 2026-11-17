@@ -724,6 +724,7 @@ const LLM_USAGE_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
 ];
 /** Index posé APRÈS la migration des colonnes (une base existante n'a pas encore credit_ref). */
 const LLM_USAGE_CREDIT_REF_IDX = `CREATE INDEX IF NOT EXISTS llm_usage_credit_ref_idx ON llm_usage (credit_ref)`;
+const LLM_USAGE_CREDIT_REF_IDX_PG = `CREATE INDEX IF NOT EXISTS llm_usage_credit_ref_idx ON public.llm_usage (credit_ref)`;
 
 /** Colonnes ajoutées à `credit_transactions` : part d'un débit financée par
  *  l'abonnement (centièmes), pour rendre chaque part dans sa poche. */
@@ -897,7 +898,7 @@ async function pgExec(): Promise<{
     for (const c of LLM_USAGE_ADDED) {
       await authPgQuery(`ALTER TABLE public.llm_usage ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
     }
-    await authPgQuery(LLM_USAGE_CREDIT_REF_IDX.replace("ON llm_usage", "ON public.llm_usage"), []);
+    await authPgQuery(LLM_USAGE_CREDIT_REF_IDX_PG, []);
     const txCols = new Set((await authPgQuery(
       `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'credit_transactions'`, [],
     )).map((r) => String(r.column_name)));
