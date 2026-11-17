@@ -80,7 +80,7 @@
             }
           ]
         },
-        "demo_recording_url": "TODO: URL of the demo video (to record before submission, see annuaire-chatgpt.md section 6)",
+        "demo_recording_url": "https://cortexexam.com/demo/chatgpt-demo.mp4",
         "commerce": false,
         "commerce_description": "This plugin does not sell products or process payments. Some tools use credits the user already holds in their Cortex account; the cost is shown first and the tool runs only after the user agrees."
       }
