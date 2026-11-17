@@ -1,7 +1,7 @@
 import { isGuardedDeployment } from "@/lib/boot-guards";
 import { currentCourse } from "@/db/client";
 import { currentUser } from "@/db/context";
-import { authAll, authInsert, authRun } from "@/db/auth-store";
+import { authAll, authGet, authInsert, authRun } from "@/db/auth-store";
 import { nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import { LlmError } from "@/lib/llm/types";
@@ -12,6 +12,7 @@ import { isOwner } from "./owner";
 import { ownerAlertBlocker } from "./owner-alert";
 import { currentJob } from "./usage-context";
 import { alertSpendThresholds, resetSpendAlerts } from "./spend-alerts";
+import { DELTA_CENTI } from "./credits";
 
 /**
  * COMPTAGE DE COÛT + KILL-SWITCH.
@@ -399,6 +400,51 @@ async function assertSpendCapUnchecked(): Promise<void> {
       log("warn", "spend_cap.per_user_hit", { spentUser, cap: perUserCap, slack, userId: currentUser() });
       throw new LlmError(PER_USER_SPEND_CAP_MESSAGE, "SPEND_CAP", false);
     }
+  }
+}
+
+/**
+ * PLAFOND PAR RÉSERVATION (audit fuites B2) : un job ou une aide ne dépense jamais
+ * plus que la valeur des crédits qu'il a débités. Valeur d'un crédit par défaut :
+ * 0,66 $, celle de l'offre la moins chère (annuel : 149 € pour 240 crédits, net des
+ * frais Stripe ≈ 0,61 €), soit environ 1,5 fois le coût moyen mesuré (QCM 1,80 $
+ * pour 4 crédits). JOB_SPEND_CAP_USD_PER_CREDIT la règle, `unlimited` la lève.
+ */
+export function spendCapUsdPerCredit(): number | null {
+  return floatLimit("JOB_SPEND_CAP_USD_PER_CREDIT", 0.66);
+}
+
+/** Plafond d'une réservation en $ : crédits débités × valeur d'un crédit. null : rien de débité (propriétaire, facturation coupée) ou plafond levé. */
+export async function reservationCapUsd(ref: string): Promise<number | null> {
+  const perCredit = spendCapUsdPerCredit();
+  if (perCredit === null) return null;
+  const debit = await authGet<{ delta: number | string; sub_amount: number | string | null }>(
+    `SELECT ${DELTA_CENTI} AS delta, sub_amount FROM credit_transactions WHERE ref = ? AND reason LIKE 'génération %'`, ref,
+  );
+  if (!debit) return null;
+  const centi = Math.max(0, -Number(debit.delta)) + Math.max(0, Number(debit.sub_amount ?? 0));
+  return (centi / 100) * perCredit;
+}
+
+const RESERVATION_CAP_MESSAGE =
+  "Cette génération a atteint son plafond de calcul : ce qui est déjà prêt est livré, le reste de tes crédits t'est rendu.";
+
+/**
+ * Vérifiée AVANT CHAQUE TENTATIVE d'appel payant (lib/llm) : la dépense déjà
+ * engagée sur la réservation (appels en vol compris, comptés à leur maximum)
+ * atteint le plafond → SPEND_CAP. Le générateur s'arrête alors proprement
+ * (HARD_STOP_CODES) et livre ce qui est prêt ; le manque est rendu au prorata. Le
+ * premier appel passe toujours : le dépassement est borné par une tentative.
+ */
+export async function assertReservationCap(ref: string | null | undefined, provider: string): Promise<void> {
+  if (!ref || !isPaidProvider(provider)) return;
+  const cap = await reservationCapUsd(ref);
+  if (cap === null) return;
+  const r = await authGet<{ total: number | string | null }>(`SELECT coalesce(sum(cost_usd), 0) total FROM llm_usage WHERE credit_ref = ?`, ref);
+  const spent = Number(r?.total ?? 0);
+  if (spent >= cap) {
+    log("warn", "spend_cap.reservation_hit", { ref, spent: Math.round(spent * 1e4) / 1e4, cap: Math.round(cap * 1e4) / 1e4 });
+    throw new LlmError(RESERVATION_CAP_MESSAGE, "SPEND_CAP", false);
   }
 }
 

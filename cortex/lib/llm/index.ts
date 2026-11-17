@@ -1,4 +1,4 @@
-import { assertSpendCap, closeUsage, discardUsage, openUsage } from "@/lib/billing/usage";
+import { assertReservationCap, assertSpendCap, closeUsage, discardUsage, isPaidProvider, openUsage } from "@/lib/billing/usage";
 import { callerSite, currentJob } from "@/lib/billing/usage-context";
 import { inc, log, observe } from "@/lib/metrics";
 import { cacheGet, cacheKey, cachePut, cacheable } from "./cache";
@@ -57,14 +57,26 @@ export function llmUnavailableReason(name?: ProviderName): string | null {
   return getProvider(name).unavailableReason();
 }
 
+/** Taille de réponse maximale d'une aide (drill, correction, analyses) sur un fournisseur payant. */
+function assistMaxTokens(): number {
+  const n = Number(process.env.ASSIST_MAX_TOKENS);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 6000;
+}
+
 async function completeWith(provider: LlmProvider, req: CompleteRequest): Promise<CompleteResult> {
-  const model = req.model ?? "opus";
-  const labels = { provider: provider.name, model };
   // Attribution (llm_usage) : site d'appel capturé AVANT tout await (pile sync),
   // job courant s'il y en a un (jobs = 1 par process).
   const callSite = callerSite();
   const job = currentJob();
   const proof = currentLlmProof();
+  // Aide à 0,3 crédit sur un fournisseur payant : jamais opus, réponse bornée — son
+  // plafond par réservation est petit et un remboursement ne la rejoue pas (audit fuites I5).
+  if (proof?.kind === "assist" && isPaidProvider(provider.name)) {
+    const max = assistMaxTokens();
+    req = { ...req, model: req.model === "haiku" ? "haiku" : "sonnet", maxTokens: Math.min(req.maxTokens ?? max, max) };
+  }
+  const model = req.model ?? "opus";
+  const labels = { provider: provider.name, model };
   await assertLlmAuthorized();
   // Banc (scripts/bench) : bande enregistrée ou rejouée ; rejeu = aucun appel, aucun compteur.
   const tape = tapeMode();
@@ -101,6 +113,8 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
   try {
     const res = await globalLimiter().run(() =>
       withRetry(async (a) => {
+        // Plafond de la réservation, avant CHAQUE tentative (réessais du fournisseur compris).
+        await assertReservationCap(proof?.ref, provider.name);
         const pending = await openUsage({
           provider: provider.name, model: modelId,
           tokensIn: tokensInEstimate, tokensOut: req.maxTokens ?? 16_000,
