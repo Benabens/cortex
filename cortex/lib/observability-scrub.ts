@@ -122,4 +122,4 @@ export type ClientErrorTrackingConfig = { dsn: string; environment: string; rele
  * déjà visé par EasyPrivacy (`/monitoring?o=`) ; un bloqueur qui coupe le tunnel coupe aussi la
  * configuration (GET), donc tout le suivi. Ni « sentry », ni « monitoring », ni « track » ici.
  */
-export const MONITORING_TUNNEL = "/api/relais";
+export const ERROR_TUNNEL = "/api/relais";

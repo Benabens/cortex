@@ -116,19 +116,18 @@ ENV HOME=/home/cortex \
 # AVANT la copie de l'app (audit fuites P2) : cette couche ne dépend que de tectonic
 # et des quatre fichiers LaTeX copiés ici, elle reste donc en cache d'un build à
 # l'autre ; placée après, chaque commit refaisait le téléchargement et la compilation.
-# Tourne en `cortex` : le cache de bundles lui appartient.
-COPY cortex/latex/preamble.tex cortex/latex/figures.tex cortex/latex/generic.tex cortex/latex/epfl-logo.png /tmp/tectonic-src/
+# Tourne en `cortex` : le cache de bundles lui appartient (--chown : les sources et
+# leur dossier aussi, pour que la même couche les efface).
+COPY --chown=cortex:cortex cortex/latex/preamble.tex cortex/latex/figures.tex cortex/latex/generic.tex cortex/latex/epfl-logo.png /tmp/tectonic-warm/
 USER cortex
 RUN set -eux; \
-    mkdir /tmp/tectonic-warm; cd /tmp/tectonic-warm; \
-    cp /tmp/tectonic-src/epfl-logo.png .; \
-    cat /tmp/tectonic-src/preamble.tex /tmp/tectonic-src/figures.tex /tmp/tectonic-src/generic.tex > warm.tex; \
+    cd /tmp/tectonic-warm; \
+    cat preamble.tex figures.tex generic.tex > warm.tex; \
     printf '\n\\newcommand{\\FOOTDATE}{Warm}\n\\begin{document}\nWarm-up.\n\\end{document}\n' >> warm.tex; \
     /usr/local/bin/tectonic --chatter minimal warm.tex \
       || echo "AVERTISSEMENT: warm-up tectonic incomplet (bundle téléchargé au 1er run)"; \
     cd /; rm -rf /tmp/tectonic-warm
 USER root
-RUN rm -rf /tmp/tectonic-src
 
 # Aucun contenu de cours n'est embarqué : annales, slides et supports
 # appartiennent à leur université et ne sont pas dans ce dépôt. Ce que

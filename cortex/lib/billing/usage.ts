@@ -132,6 +132,7 @@ export async function recordUsage(u: {
     _spendCache = null; // la dépense a bougé → invalide le cache du kill-switch
   } catch (e) {
     log("warn", "usage.record_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
+    return;
   }
   if (paid) await alertAccountHourSpend(currentUser());
 }

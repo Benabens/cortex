@@ -21,7 +21,7 @@
 import type { Instrumentation } from "next";
 import { log } from "@/lib/metrics";
 import {
-  MONITORING_TUNNEL, scrubEvent, scrubSpan, sentryEnvironment, sentryRelease,
+  ERROR_TUNNEL, scrubEvent, scrubSpan, sentryEnvironment, sentryRelease,
   type ClientErrorTrackingConfig, type MinimalEvent,
 } from "@/lib/observability-scrub";
 
@@ -141,7 +141,7 @@ export function clientErrorTrackingConfig(env: Partial<NodeJS.ProcessEnv> = proc
   const dsn = env.SENTRY_DSN?.trim();
   if (!dsn) return null;
   const release = sentryRelease(env);
-  return { dsn, environment: sentryEnvironment(env), ...(release ? { release } : {}), tunnel: MONITORING_TUNNEL };
+  return { dsn, environment: sentryEnvironment(env), ...(release ? { release } : {}), tunnel: ERROR_TUNNEL };
 }
 
 /** (tests) oublie le SDK chargé. */
