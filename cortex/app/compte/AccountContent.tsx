@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
-import { useTranslations } from "use-intl/react";
+import { getT } from "@/lib/i18n/server";
 import styles from "@/app/secondary.module.css";
 import { BillingPanel } from "./BillingPanel";
 import { UsagePanel } from "./UsagePanel";
@@ -11,12 +11,12 @@ import { ConnectedApps } from "./ConnectedApps";
 import { AppearanceSetting } from "./AppearanceSetting";
 import { LocaleSetting } from "./LocaleSetting";
 
-export function AccountContent({ email, enabled, connectedAppsEnabled }: {
+export async function AccountContent({ email, enabled, connectedAppsEnabled }: {
   email: string | null;
   enabled: boolean;
   connectedAppsEnabled: boolean;
 }) {
-  const t = useTranslations("account");
+  const t = await getT("account");
   return (
     <div className={styles.page}>
       <div>
