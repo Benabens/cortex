@@ -31,7 +31,7 @@ export default defineTool({
     "grouped by theme, plus the concepts due for spaced-repetition review. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
-  userSummary: "Lit tes points faibles, du plus grave au moins grave.",
+  userSummary: "getWeakPoints",
   input: z.object({
     course: courseArg,
     limit: z.number().int().min(1).max(50).optional().describe("Maximum weak points returned (default 20)."),

@@ -26,7 +26,7 @@ export default defineTool({
   kind: "write",
   // Ajout pur : un code déjà pris est refusé, rien n'est remplacé.
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  userSummary: "Crée un nouveau cours dans ton compte, gratuitement.",
+  userSummary: "createCourse",
   input: z.object({
     name: z.string().min(2).max(80).describe("Course name, e.g. \"Linear algebra\"."),
     code: z.string().min(1).max(24).optional().describe("Exam / course code, e.g. \"COMP 201\"."),
