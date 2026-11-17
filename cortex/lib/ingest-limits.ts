@@ -36,29 +36,26 @@ export function withHeapCap(env: Partial<NodeJS.ProcessEnv>, maxHeapMb: number):
 export type BoundedRun = { child: ChildProcess; done: Promise<{ code: number | null; timedOut: boolean }> };
 
 /**
- * Lance un process borné : tas plafonné, et au délai SIGKILL à tout son GROUPE. Le process est
- * détaché (chef de son groupe) parce que tsx relance node : tuer tsx seul laisserait node tourner.
- * `done` se résout à la fermeture (jamais rejeté : `timedOut` dit pourquoi elle a eu lieu).
+ * Lance un process borné : tas plafonné, et au délai SIGKILL. Il reste dans le GROUPE de
+ * l'appelant (pas détaché) : l'annulation d'un job tue le groupe du worker, l'import avec.
+ * Lancer node lui-même (`node --import tsx`), pas le lanceur tsx : tsx relance un node, que
+ * le SIGKILL du délai n'atteindrait pas. `done` se résout à la fermeture (jamais rejeté :
+ * `timedOut` dit pourquoi elle a eu lieu).
  */
 export function spawnBounded(
   cmd: string,
   args: string[],
-  o: { timeoutMs: number; maxHeapMb: number; env?: NodeJS.ProcessEnv } & Pick<SpawnOptions, "cwd">,
+  o: { timeoutMs: number; maxHeapMb: number; env?: Partial<NodeJS.ProcessEnv> } & Pick<SpawnOptions, "cwd">,
 ): BoundedRun {
-  const child = spawn(cmd, args, { cwd: o.cwd, env: withHeapCap(o.env ?? process.env, o.maxHeapMb), detached: true, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(cmd, args, { cwd: o.cwd, env: withHeapCap(o.env ?? process.env, o.maxHeapMb), stdio: ["ignore", "pipe", "pipe"] });
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    try { process.kill(-child.pid!, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch { /* déjà sorti */ } }
+    try { child.kill("SIGKILL"); } catch { /* déjà sorti */ }
   }, o.timeoutMs);
   const done = new Promise<{ code: number | null; timedOut: boolean }>((resolve) => {
     child.on("error", () => { clearTimeout(timer); resolve({ code: null, timedOut }); });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      // Un enfant resté dans le groupe après la sortie du chef ne survit pas à l'import.
-      try { process.kill(-child.pid!, "SIGKILL"); } catch { /* groupe déjà vide */ }
-      resolve({ code, timedOut });
-    });
+    child.on("close", (code) => { clearTimeout(timer); resolve({ code, timedOut }); });
   });
   return { child, done };
 }
