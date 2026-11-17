@@ -16,17 +16,6 @@ import { looksFrench, scanSource, uiFiles } from "./helpers/i18n-scan";
 const ROOT = path.resolve(__dirname, "..");
 
 const PENDING = new Set<string>([
-  "app/compte/AccountContent.tsx",
-  "app/compte/AppearanceSetting.tsx",
-  "app/compte/BillingPanel.tsx",
-  "app/compte/ConnectedApps.tsx",
-  "app/compte/DeleteAccount.tsx",
-  "app/compte/ExportData.tsx",
-  "app/compte/UsagePanel.tsx",
-  "app/compte/WithdrawalForm.tsx",
-  "app/compte/assistants/CopyButton.tsx",
-  "app/compte/assistants/page.tsx",
-  "app/oauth/authorize/page.tsx",
 ]);
 
 const files = uiFiles(ROOT);
