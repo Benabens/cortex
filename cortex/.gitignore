@@ -43,3 +43,6 @@ data/
 
 # Sauvegardes (npm run backup)
 backups/
+
+# Paquet de soumission ChatGPT (scripts/build-chatgpt-plugin.sh) : se reconstruit
+/cortex-chatgpt-plugin.zip

@@ -3,17 +3,17 @@
   "name": "cortex",
   "version": "1.2.0",
   "description": "Mock exams, practice questions and weak points from your own course materials in Cortex.",
-  "author": { "name": "TODO: publisher legal name", "url": "https://cortexexam.com" },
+  "author": { "name": "Benjamin Abensur EI (Benabens)", "url": "https://cortexexam.com" },
   "homepage": "https://cortexexam.com/mcp",
   "repository": "https://github.com/Benabens/cortex",
   "keywords": ["education", "exam preparation", "mock exams", "study plan"],
   "extensions": {
     "com.openai": {
       "interface": {
-        "displayName": "Cortex",
+        "displayName": "Cortex Exam",
         "shortDescription": "Mock exams from your courses",
         "longDescription": "Cortex prepares students for their exams from their own course materials: slides, exercise sets and, above all, past exams. This plugin lets ChatGPT work on the student's existing Cortex account.\n\nRead: courses and exam dates, study plan, weak points, results, full-text search in the uploaded materials, credit balance and daily limits.\nGenerate, on request: a mock exam in the course's real exam format (multiple choice, exercises, mixed, essay or oral), one practice question with progressive hints, or a graded review of an answer.\nOrganise: create a course, add materials (public URL or pasted text), declare the exam format, prepare the course, report a faulty generated question.\n\nGenerations use credits the student already has in their Cortex account. Every paid tool first returns its exact cost without spending anything, and runs only after the student agrees in the conversation. The plugin sells nothing and handles no payment.\n\nThe student signs in to Cortex and chooses what ChatGPT may do (read only, generate, add courses); access can be revoked at any time from the Cortex account page. Text from course documents is treated as data, never as instructions.",
-        "developerName": "TODO: publisher legal name",
+        "developerName": "Benjamin Abensur EI (Benabens)",
         "category": "Education",
         "websiteURL": "https://cortexexam.com/mcp",
         "supportURL": "https://cortexexam.com/mcp",
@@ -53,7 +53,7 @@
               "description": "Paid generation: the cost is announced first and nothing runs before the student agrees.",
               "prompt": "Give me one practice question on discrete random variables.",
               "tools_triggered": ["generate_drill"],
-              "expected_behavior": "First call returns the exact cost and a confirmation token without spending anything; ChatGPT asks the student; after an explicit yes, the second call returns one exam-style question with five progressive hints and a worked solution."
+              "expected_behavior": "The first call spends nothing and returns a confirmation token with the exact cost quoted by the first call; ChatGPT asks the student, quoting that cost; after an explicit yes, the second call returns one exam-style question with five progressive hints and a worked solution."
             },
             {
               "description": "Credit balance and daily limits.",
@@ -80,7 +80,7 @@
             }
           ]
         },
-        "demo_recording_url": "TODO: URL of the demo video",
+        "demo_recording_url": "TODO: URL of the demo video (to record before submission, see annuaire-chatgpt.md section 6)",
         "commerce": false,
         "commerce_description": "This plugin does not sell products or process payments. Some tools use credits the user already holds in their Cortex account; the cost is shown first and the tool runs only after the user agrees."
       }
