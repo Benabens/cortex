@@ -3,6 +3,8 @@ import { getCourse } from "@/lib/courses";
 import type { ExamQuestion } from "@/lib/exam";
 import { epflPdf } from "@/lib/exam-layout-epfl";
 import { layoutPdf } from "@/lib/exam-layout-pdf";
+import { formatContextFor, LANGUAGES, readStoredProfile, type Language } from "@/lib/exam-format";
+import type { SurveyedLayout } from "@/lib/exam-layout-survey";
 import { examTemplate } from "@/lib/exam-template";
 
 /**
@@ -64,9 +66,41 @@ export const NEUTRAL_LAYOUT: ExamLayout = {
 /** L'EPFL : son adaptateur ne lit que `source` ; garde, chrome et options restent les siens. */
 export const EPFL_LAYOUT: ExamLayout = { ...NEUTRAL_LAYOUT, source: "epfl" };
 
-/** Mise en page du cours courant : l'EPFL pour un cours de l'EPFL, le défaut neutre sinon. */
+/**
+ * Mise en page du cours courant : l'EPFL pour un cours de l'EPFL ; hors EPFL, celle relevée dans
+ * l'annale à la préparation du cours (stockée avec le profil de format), sinon le défaut neutre.
+ */
 export async function examLayout(): Promise<ExamLayout> {
-  return examTemplate(getCourse(currentCourse())) === "epfl" ? EPFL_LAYOUT : NEUTRAL_LAYOUT;
+  const id = currentCourse();
+  if (examTemplate(getCourse(id)) === "epfl") return EPFL_LAYOUT;
+  const surveyed = (await readStoredProfile())?.layout;
+  return surveyed ? annaleLayout(surveyed, examLanguage(id)) : NEUTRAL_LAYOUT;
+}
+
+/** Langue des libellés de l'examen (celle de courseWords : l'anglais quand elle n'est pas reconnue). */
+function examLanguage(id: string): Language {
+  const l = formatContextFor(id).language;
+  return (LANGUAGES as readonly string[]).includes(l) ? (l as Language) : "en";
+}
+
+/**
+ * La mise en page relevée, champ par champ sur le défaut neutre. Les consignes de l'annale ne
+ * s'impriment que sur un examen de leur langue (une garde française ne cite pas l'anglais).
+ */
+export function annaleLayout(s: SurveyedLayout, language: Language): ExamLayout {
+  const cover = { ...NEUTRAL_LAYOUT.cover, ...s.cover };
+  if (s.language !== language) cover.instructions = [];
+  return {
+    source: "annale",
+    cover,
+    header: s.header ?? NEUTRAL_LAYOUT.header,
+    footer: s.footer ?? NEUTRAL_LAYOUT.footer,
+    numbering: s.numbering ?? NEUTRAL_LAYOUT.numbering,
+    choices: s.choices ?? NEUTRAL_LAYOUT.choices,
+    points: s.points ?? NEUTRAL_LAYOUT.points,
+    font: s.font ?? NEUTRAL_LAYOUT.font,
+    answerSpace: s.answerSpace ?? NEUTRAL_LAYOUT.answerSpace,
+  };
 }
 
 export type ExamForm = "written" | "qcm" | "blocks";
