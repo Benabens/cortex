@@ -1,6 +1,6 @@
 import { runWithCourse } from "@/db/client";
 import { runWithUser } from "@/db/context";
-import { ensureCoursesLoaded, listCoursesOf, ownsCourse, type CourseConfig } from "@/lib/courses";
+import { ensureCoursesLoaded, listCoursesOf, ownsCourse, revalidateCourses, type CourseConfig } from "@/lib/courses";
 import { clip } from "./content";
 import { ToolError } from "./tool";
 
@@ -22,6 +22,18 @@ export function courseLabel(c: CourseConfig): string {
 
 export async function resolveCourse(userId: string, ref: string | undefined): Promise<CourseConfig> {
   await ensureCoursesLoaded();
+  try {
+    return findCourse(userId, ref);
+  } catch (e) {
+    if (!(e instanceof ToolError)) throw e;
+    // Cours inconnu ou compte vide : peut-être créé à l'instant par un autre
+    // processus (script, worker). On relit la base une fois avant de répondre.
+    await revalidateCourses(true);
+    return findCourse(userId, ref);
+  }
+}
+
+function findCourse(userId: string, ref: string | undefined): CourseConfig {
   const mine = listCoursesOf(userId);
   const wanted = ref?.trim();
   if (!wanted) {

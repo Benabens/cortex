@@ -1,4 +1,5 @@
 import { FAKE_COURSE_ID, LEGACY_COURSES, legacyCoursesFor, type LegacyCourse } from "../lib/courses-legacy";
+import crypto from "node:crypto";
 import { authAll, authRun, authSqlite, authGet, authTx, type AuthTx } from "./auth-store";
 import { dbDriverName, nowStr } from "./q";
 import { OWNER_USER } from "./context";
@@ -79,6 +80,36 @@ export function readCoursesSync(): CourseRow[] | null {
   return db.prepare(SELECT_ALL).all() as CourseRow[];
 }
 
+// ───────────────────────── version du catalogue ─────────────────────────
+
+/**
+ * Le cache de lib/courses vit dans CHAQUE processus (serveur web, worker, script).
+ * Un cours écrit ailleurs (scripts/review-account.ts dans le conteneur, un autre
+ * worker) doit y apparaître sans redémarrage : chaque écriture de ce module pose
+ * une nouvelle version, et lib/courses recharge quand l'empreinte change.
+ */
+const VERSION_KEY = "courses_version";
+
+/** Nouvelle version du catalogue (dans la transaction de l'écriture quand il y en a une). */
+export async function touchCourses(tx?: Pick<AuthTx, "run">): Promise<void> {
+  const sql = `INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`;
+  const value = `${Date.now()}-${crypto.randomUUID()}`;
+  if (tx) await tx.run(sql, VERSION_KEY, value);
+  else await authRun(sql, VERSION_KEY, value);
+}
+
+/**
+ * Empreinte du catalogue : version + nombre de cours + dernière création. Le
+ * nombre et la date rattrapent une écriture SQL directe qui oublierait la version
+ * (ajout ou suppression) ; la version porte les modifications.
+ */
+export async function coursesFingerprint(): Promise<string> {
+  const r = await authGet<{ v: string | null; n: number | string; m: string | null }>(
+    `SELECT (SELECT value FROM app_meta WHERE key = ?) v, count(*) n, max(created_at) m FROM courses`, VERSION_KEY,
+  );
+  return `${r?.v ?? ""}|${Number(r?.n ?? 0)}|${r?.m ?? ""}`;
+}
+
 // ───────────────────────────── écriture ─────────────────────────────
 
 function insertSql(): string {
@@ -152,6 +183,7 @@ export async function insertCourse(row: CourseRow): Promise<void> {
       `INSERT INTO course_creation_events (course_id, user_id, created_at) VALUES (?, ?, ?)`,
       row.id, row.owner_user_id, nowStr(),
     );
+    await touchCourses(tx);
   });
 }
 
@@ -179,6 +211,7 @@ export async function updateCourseRow(id: string, ownerUserId: string, patch: Co
     `UPDATE courses SET ${set} WHERE id = ? AND owner_user_id = ? RETURNING id`,
     ...params, id, ownerUserId,
   );
+  if (rows.length) await touchCourses();
   return rows.length;
 }
 
@@ -187,6 +220,7 @@ export async function deleteCourseRow(id: string, ownerUserId: string): Promise<
     `DELETE FROM courses WHERE id = ? AND owner_user_id = ? RETURNING id`,
     id, ownerUserId,
   );
+  if (rows.length) await touchCourses();
   return rows.length;
 }
 
@@ -320,6 +354,7 @@ export async function migrateLegacyCourses(): Promise<MigrationReport> {
     await insertCourseIfAbsent(legacyRow(c, await resolveOwner(c.id), at));
     report.created.push(c.id);
   }
+  if (report.created.length) await touchCourses();
   await authRun(
     `INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING`,
     MIGRATED_KEY, at,
@@ -417,6 +452,7 @@ export async function removeEmptyFakeCourse(opts: { countRows?: () => Promise<nu
   }
   if (items > 0) return { removed: false, reason: `${items} ligne(s) présente(s) : conservé` };
   await authRun(`DELETE FROM courses WHERE id = ?`, FAKE_COURSE_ID);
+  await touchCourses();
   if (tenant) {
     await authRun(`DROP SCHEMA IF EXISTS "${tenant.schema_name}" CASCADE`);
     await authRun(`DELETE FROM tenants WHERE user_id = ? AND course = ?`, fake.owner_user_id, FAKE_COURSE_ID);
