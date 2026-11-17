@@ -2,6 +2,7 @@ import { coursePaths } from "@/lib/courses";
 import { servedFileHeaders } from "@/lib/security-headers";
 import { requireCourse } from "@/lib/req";
 import { storage } from "@/lib/storage";
+import { localPreviewUrl } from "@/lib/originals/registry";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -64,7 +65,13 @@ export async function GET(req: NextRequest) {
     // repli par basename : le fichier a peut-être bougé (slides/ vs lectures/) → on le retrouve.
     const found = await findByBasename([cp.refsDir, cp.contentRoot], path.basename(rel));
     if (found && (await ok(found))) abs = found;
-    else return new NextResponse("Not found", { status: 404 });
+    else {
+      // Original resté sur l'ordinateur d'un compte gratuit (lib/originals) : la page qui l'ouvre
+      // en local. Le fragment #page=N suit la redirection (le navigateur le garde).
+      const local = await localPreviewUrl(course, p);
+      if (local) return new NextResponse(null, { status: 302, headers: { location: local, "cache-control": "private, no-store" } });
+      return new NextResponse("Not found", { status: 404 });
+    }
   }
 
   // Aperçu d'une page (#page=N) : le PDF est diffusé par plages (ou depuis une

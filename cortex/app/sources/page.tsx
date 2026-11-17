@@ -5,6 +5,7 @@ import { WifiOff, RotateCw, FolderOpen } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FileManager } from "@/components/sources/FileManager";
 import { ImportPanel } from "@/components/sources/ImportPanel";
+import { BackToCloudNote, CloudRetentionBanner } from "@/components/sources/OriginalsNotes";
 import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { useApi } from "@/lib/ux/api";
@@ -19,6 +20,8 @@ export default function SourcesPage() {
         title="Sources"
         description="Le corpus qui nourrit Cortex : tes annales, séries et slides. Importe, puis prépare le cours."
       />
+      {data?.originals && <CloudRetentionBanner originals={data.originals} />}
+      {data?.originals && <BackToCloudNote originals={data.originals} />}
       <div className={styles.split}>
         {/* Skeleton UNIQUEMENT au premier chargement : un refetch (ex. coche « Référence »)
             garde la liste montée → plus de saut/remontage (fix jank). */}
@@ -51,7 +54,7 @@ export default function SourcesPage() {
         ) : (
           <FileManager data={data} onChanged={refetch} />
         )}
-        <ImportPanel onChanged={refetch} unread={data?.unread} />
+        <ImportPanel onChanged={refetch} unread={data?.unread} originals={data?.originals} />
       </div>
     </div>
   );

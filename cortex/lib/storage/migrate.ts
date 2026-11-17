@@ -4,6 +4,7 @@ import path from "node:path";
 import { isNotFound, type ObjectBucket } from "@/lib/storage/bucket";
 import { isObjectStored, relativeToRoot } from "@/lib/storage/keys";
 import { walkFiles } from "@/lib/storage/local";
+import { transitFiles } from "@/lib/storage/transit";
 import { contentTypeOf } from "@/lib/storage/s3";
 
 /**
@@ -45,9 +46,10 @@ export type MigrateReport = {
 
 function courseFiles(root: string, only?: string): { rel: string; path: string; size: number; mtimeMs: number }[] {
   const base = only ? path.join(root, only) : root;
+  const transit = transitFiles(root); // originaux d'un gratuit : jamais au seau (lib/storage/transit)
   return walkFiles(base)
     .map((f) => ({ ...f, rel: relativeToRoot(root, f.path) }))
-    .filter((f): f is typeof f & { rel: string } => !!f.rel && isObjectStored(f.rel))
+    .filter((f): f is typeof f & { rel: string } => !!f.rel && isObjectStored(f.rel) && !transit.has(f.rel))
     .sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
 }
 
@@ -68,7 +70,8 @@ async function pendingFiles(opts: Omit<MigrateOptions, "write">) {
 /**
  * Prédicat pour la sauvegarde : vrai si le fichier (chemin relatif) est un fichier
  * de cours dont le seau a déjà une copie à jour. Un fichier resté local (envoi
- * d'un worker en échec, script lancé à la main) est faux : il reste archivé.
+ * d'un worker en échec, script lancé à la main) est faux : il reste archivé. Un fichier
+ * en transit (original d'un compte gratuit) est vrai : jamais archivé ni envoyé.
  */
 export async function inBucketPredicate(opts: Omit<MigrateOptions, "write" | "only">): Promise<(rel: string) => boolean> {
   const { pending } = await pendingFiles(opts);

@@ -11,6 +11,7 @@ import path from "node:path";
 import { listExamSourceRows } from "@/lib/sources";
 import { COURSE_MATTER_RULE } from "@/lib/course-grounding";
 import { courseLanguageName } from "@/lib/exam-format";
+import { pathsOnComputer } from "@/lib/originals/index-only";
 
 /**
  * INDEX EXHAUSTIF exo-par-exo des finals (remplace le résumé tronqué à 16 k).
@@ -179,14 +180,32 @@ export async function indexExamExercises(opts: { onStep?: (m: string, p: number)
   const course = currentCourse();
   const all = await listExamSourceRows();
   const exams = pickEnonces(all);
+  // Annale dont l'original est resté sur l'ordinateur d'un compte gratuit (lib/originals) : ses
+  // pages ne se relisent plus, son index exercice par exercice reste EN PLACE (jamais effacé puis
+  // réécrit : un job tué entre les deux le perdrait, sans original pour le refaire).
+  const onComputer = await pathsOnComputer();
+  const kept = new Map<string, number>();
+  for (const e of exams) {
+    if (onComputer.has(e.path)) kept.set(e.title, Number((await q.get<{ n: number | string }>(`SELECT count(*) n FROM exam_exercises WHERE exam_title = ?`, e.title))?.n ?? 0));
+  }
   // Index reconstruit à chaque passe, y compris quand il n'y a plus d'annale : une source
   // reclassée (grille d'évaluation de HUM-285, d'abord classée midterm) n'y laisse rien.
-  await q.exec(`DELETE FROM exam_exercises`);
+  const keptTitles = [...kept.keys()];
+  if (keptTitles.length) await q.run(`DELETE FROM exam_exercises WHERE exam_title NOT IN (${keptTitles.map(() => "?").join(",")})`, ...keptTitles);
+  else await q.exec(`DELETE FROM exam_exercises`);
   if (!exams.length) { step("Aucun final ingéré : index vide.", 100); return { exams: 0, exercises: 0 }; }
   const lang = await courseLanguageName();
   let total = 0;
   for (let i = 0; i < exams.length; i++) {
     const prog = 8 + Math.round((i / exams.length) * 82);
+    const previous = kept.get(exams[i].title);
+    if (previous !== undefined) {
+      step(previous
+        ? `${exams[i].title} : fichier sur ton ordinateur, index précédent gardé (${previous} exercices)`
+        : `${exams[i].title} : fichier sur ton ordinateur, pages non lues. Renvoie-le depuis Sources pour l'indexer exercice par exercice.`, prog);
+      total += previous;
+      continue;
+    }
     step(`Indexation ${i + 1}/${exams.length} : ${exams[i].title}…`, prog);
     let rows: Omit<ExamExercise, "id" | "topicId">[] = [];
     try { rows = await indexOneExam(course, exams[i], step, prog, lang); } catch (e) { step(`${exams[i].title} : ignoré (${(e as Error).message.slice(0, 50)})`, prog); }

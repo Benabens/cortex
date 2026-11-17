@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { CourseFiles, FileEntry, FileStat, ServeOptions } from "@/lib/storage";
+import type { CourseFiles, FileEntry, FileStat, PutOptions, ServeOptions } from "@/lib/storage";
 import { serveLocalFile } from "@/lib/storage/http";
+import { clearTransit, markTransit } from "@/lib/storage/transit";
 
 /** Fichiers sous `dir`, récursivement, sans suivre les liens symboliques. */
 /** Jamais des données de cours : un contenu de cours tiré d'un dépôt peut en contenir. */
@@ -48,8 +49,14 @@ export class LocalFsStore implements CourseFiles {
   readonly kind = "local" as const;
   constructor(readonly root: string) {}
 
-  async put(file: string, body: Buffer | Uint8Array | string, opts: { exclusive?: boolean } = {}) {
-    return writeLocal(file, body, opts.exclusive);
+  /**
+   * Sur le disque, `localOnly` ne change que le repère de transit (lib/storage/transit) : une
+   * migration du volume vers un seau, ou sa sauvegarde, saute ce fichier.
+   */
+  async put(file: string, body: Buffer | Uint8Array | string, opts: PutOptions = {}) {
+    const ok = writeLocal(file, body, opts.exclusive);
+    if (ok) (opts.localOnly ? markTransit : clearTransit)(this.root, file);
+    return ok;
   }
 
   async read(file: string) {
@@ -69,6 +76,7 @@ export class LocalFsStore implements CourseFiles {
 
   async remove(target: string) {
     fs.rmSync(target, { recursive: true, force: true });
+    clearTransit(this.root, target);
   }
 
   async serve(file: string, req: Request, opts: ServeOptions) {

@@ -299,6 +299,12 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
                   {canceling && sub.periodEnd && <span className="text-ink-3"> · se termine le {dateFr(sub.periodEnd)}</span>}
                   {!canceling && !sub.nextRechargeAt && sub.periodEnd && <span className="text-ink-3"> · jusqu’au {dateFr(sub.periodEnd)}</span>}
                   <div className="mt-2 text-xs leading-relaxed text-ink-3">Non reportables : ce qui n’est pas utilisé dans le mois est perdu. Consommés avant tes crédits achetés.</div>
+                  {canceling && (
+                    <div className="mt-1 text-xs leading-relaxed text-ink-3">
+                      À la fin de ton Premium, tes fichiers restent 30 jours dans le cloud, puis Cortex n’en garde que l’index :
+                      tes examens blancs ne changent pas.
+                    </div>
+                  )}
                 </>
               )}
               {standing === "renewing" && (
@@ -332,7 +338,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
             <Button variant="subtle" size="sm" onClick={onPortal} loading={busy === "portal"}>
               Gérer mon abonnement <ExternalLink className="size-3.5" strokeWidth={2.25} aria-hidden="true" />
             </Button>
-            <span className="ml-3 text-[0.78rem] text-ink-4">Changer de moyen de paiement, télécharger tes factures, résilier (effet en fin de période).</span>
+            <span className="ml-3 text-[0.78rem] text-ink-4">Changer de moyen de paiement, télécharger tes factures, résilier (effet en fin de période ; tes fichiers restent ensuite 30 jours dans le cloud).</span>
           </div>
         )}
       </Panel>

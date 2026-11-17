@@ -239,6 +239,30 @@ export async function accountRevenue(userId: string): Promise<Revenue> {
   return sumRevenue(rows);
 }
 
+/**
+ * Date du dernier paiement de ce compte resté net positif (ni remboursé, ni contesté en entier),
+ * jusqu'à `now`, ou null. Le net est lu dans la devise du paiement : un paiement
+ * dans une devise sans taux (FX_USD_JSON) compte quand même comme payé. Sert à la règle des
+ * originaux dans le cloud (lib/originals/policy).
+ */
+export async function lastNetPaymentAt(userId: string, now = new Date().toISOString().slice(0, 19).replace("T", " ")): Promise<string | null> {
+  const mode = livemodeFilter();
+  const rows = await authAll<Row & { paid_at: string }>(
+    `${SELECT_ROWS.replace("SELECT p.kind,", "SELECT p.paid_at, p.kind,")} WHERE p.user_id = ? AND p.paid_at <= ?${mode.sql}`,
+    userId, now, ...mode.params,
+  );
+  let last: string | null = null;
+  for (const r of rows) {
+    const net = netCents({
+      amount: Number(r.amount_cents), tax: Number(r.tax_cents), fee: Number(r.fee_cents),
+      refunded: Number(r.refunded_cents ?? 0), disputed: Number(r.disputed_cents ?? 0), disputeFee: Number(r.dispute_fee_cents ?? 0),
+    });
+    const paidAt = String(r.paid_at).slice(0, 19).replace("T", " ");
+    if (net > 0 && (!last || paidAt > last)) last = paidAt;
+  }
+  return last;
+}
+
 /** Revenu net de tous les comptes payé depuis `since` (12 mois par défaut), hors comptes exclus (propriétaire). */
 export async function totalRevenue(opts: { since?: string; excludeUserIds?: string[] } = {}): Promise<Revenue> {
   const excluded = (opts.excludeUserIds ?? []).filter(Boolean);

@@ -8,7 +8,7 @@ import path from "node:path";
 export function isObjectStored(rel: string): boolean {
   const parts = rel.split("/");
   if (parts.some((p) => p === "" || p === "." || p === "..")) return false;
-  if (parts[0] === ".page-cache" || parts[0] === ".export-tmp" || parts[0] === "backups") return false;
+  if (parts[0] === ".page-cache" || parts[0] === ".export-tmp" || parts[0] === ".transit" || parts[0] === "backups") return false;
   const name = parts[parts.length - 1];
   if (name === ".DS_Store" || name.includes(".cortex-dl-")) return false;
   return !/\.(db|sqlite3?)(-wal|-shm|-journal)?$/i.test(name);

@@ -303,17 +303,17 @@ function safeName(name: string): string {
 
 /** Enregistre un examen uploadé : fichier → data/refs/, indexation, marqué référence. */
 export async function addUploadedRef(buffer: Buffer, filename: string): Promise<ExamSource> {
-  const dir = REFS_DIR();
   const base = safeName(filename);
-  let name = base;
-  // Écriture exclusive : deux envois du même nom ne s'écrasent jamais.
-  for (let n = 1; !(await storage().put(path.join(dir, name), buffer, { exclusive: true })); n++) {
-    const ext = path.extname(base);
-    name = `${path.basename(base, ext)}-${n}${ext}`;
-  }
+  // Écriture exclusive : deux envois du même nom ne s'écrasent jamais. Compte gratuit : en transit
+  // le temps de l'indexation (lib/originals).
+  const { settleOriginals, storeOriginal } = await import("@/lib/originals/intake");
+  const stored = await storeOriginal(currentCourse(), REFS_DIR(), base, buffer, { originalName: filename, dedupe: false, firstSuffix: 1, maxTries: Infinity });
+  if (!stored) throw new Error("trop d'annales du même nom : renomme le fichier.");
+  const name = stored.name;
 
   const relPath = `refs/${name}`;
   await ingestRefFile(relPath);
+  if (stored.home === "local") await settleOriginals({ after: "ingest", paths: [relPath] });
   const { kind, year } = inferExamMeta(name);
   await q.run(
     `INSERT INTO exam_refs (path, title, year, kind, uploaded) VALUES (?,?,?,?,1)
@@ -383,4 +383,12 @@ export async function removeUploadedRef(srcPath: string): Promise<void> {
   }
   // Ses images de pages (lib/page-cache) : rendues de nouveau à la demande si le PDF reste.
   purgePdfPages(currentCourse(), path.basename(srcPath));
+  // Original d'un compte gratuit (lib/originals) : son transit part aussi, sinon l'ingestion
+  // suivante le relirait ; plus rien ne le rappelle, ni son index.
+  const { forgetOriginal, localOriginal } = await import("@/lib/originals/registry");
+  if (await localOriginal(srcPath)) {
+    const abs = unreadFileAbsolute(srcPath);
+    if (abs) await storage().remove(abs);
+    await forgetOriginal(srcPath);
+  }
 }
