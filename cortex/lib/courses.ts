@@ -92,6 +92,12 @@ export class UnknownCourseError extends Error {
 const CACHE = new Map<string, CourseConfig>();
 let loaded = false;
 let loading: Promise<void> | null = null;
+/** Empreinte du catalogue lue avec le contenu du cache (db/courses-store, coursesFingerprint). */
+let seenFingerprint: string | null = null;
+let checkedAt = 0;
+let checking: Promise<void> | null = null;
+/** Une relecture d'empreinte au plus par seconde depuis ensureCoursesLoaded. */
+const RECHECK_MS = 1000;
 
 function parseList(raw: string | null | undefined, fallback: string[]): string[] {
   if (!raw) return fallback;
@@ -192,9 +198,13 @@ function hydrateSync(): boolean {
   return true;
 }
 
-/** Charge (une fois) le cache depuis la base. À appeler au boot serveur/worker/script. */
+/**
+ * Charge le cache depuis la base au premier appel ; ensuite, le revalide (au
+ * plus une fois par seconde) : un cours créé, modifié ou supprimé par un AUTRE
+ * processus (script dans le conteneur, worker) apparaît sans redémarrage.
+ */
 export async function ensureCoursesLoaded(): Promise<void> {
-  if (loaded) return;
+  if (loaded) return revalidateCourses();
   if (!loading) loading = reloadCourses().finally(() => { loading = null; });
   return loading;
 }
@@ -205,13 +215,51 @@ export async function reloadCourses(): Promise<void> {
   // Migration du catalogue historique : idempotente et marquée en base (elle ne
   // s'exécute qu'une fois, cf. db/courses-store), donc sûre à appeler ici.
   await s.migrateLegacyCourses();
+  // Empreinte lue AVANT les lignes : une écriture entre les deux laisse une
+  // empreinte différente, donc un nouveau rechargement au contrôle suivant.
+  const fp = await s.coursesFingerprint().catch(() => null);
   fillCache(await s.readCourses());
+  seenFingerprint = fp;
+  checkedAt = Date.now();
+}
+
+/**
+ * Recharge le cache si le catalogue a changé en base depuis la dernière lecture.
+ * `force` ignore l'intervalle minimal (cours demandé mais inconnu). Une base
+ * illisible garde le cache tel quel : mieux vaut un cache un peu vieux qu'aucun.
+ */
+export async function revalidateCourses(force = false): Promise<void> {
+  if (!loaded) return ensureCoursesLoaded();
+  if (!force && Date.now() - checkedAt < RECHECK_MS) return;
+  if (checking) return checking;
+  checking = (async () => {
+    try {
+      const fp = await store().coursesFingerprint();
+      checkedAt = Date.now();
+      if (fp !== seenFingerprint) await reloadCourses();
+    } catch (e) {
+      console.warn(`[courses] revalidation impossible (${e instanceof Error ? e.message : String(e)}) : cache conservé`);
+    }
+  })().finally(() => { checking = null; });
+  return checking;
+}
+
+/**
+ * Serveur web : revalide en continu, pour les pages qui lisent le cache de façon
+ * synchrone (getCourse, listCoursesOf) sans passer par ensureCoursesLoaded.
+ */
+export function watchCourses(intervalMs = 5000): () => void {
+  const t = setInterval(() => { void revalidateCourses(true); }, intervalMs);
+  t.unref?.();
+  return () => clearInterval(t);
 }
 
 /** Vide le cache (tests, bascule de dialecte). */
 export function resetCoursesCache(): void {
   CACHE.clear();
   loaded = false;
+  seenFingerprint = null;
+  checkedAt = 0;
 }
 
 function cache(): Map<string, CourseConfig> {
