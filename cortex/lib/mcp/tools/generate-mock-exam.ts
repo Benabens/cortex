@@ -1,8 +1,8 @@
 import * as z from "zod/v4";
 import { getPlanChapters, type PlanChapter } from "@/lib/course-plan";
 import { FIELD_LIMITS } from "@/lib/field-limits";
-import { BLOCKS_MAX, EXERCISES_MAX as WRITTEN_MAX, QCM_MAX as MCQ_MAX, planMockExam, requestedFormat, resolveExamFormat } from "@/lib/exam-format";
-import { examTarget, startGenerationJob } from "@/lib/generation";
+import { BLOCKS_MAX, EXERCISES_MAX as WRITTEN_MAX, QCM_MAX as MCQ_MAX, resolveExamFormat } from "@/lib/exam-format";
+import { mockExamJob, startGenerationJob } from "@/lib/generation";
 import { activeJob, costForJob } from "@/lib/jobs";
 import { log } from "@/lib/metrics";
 import { redactMessage } from "@/lib/observability";
@@ -85,22 +85,16 @@ export default defineTool({
       // Un format demandé pour CET examen l'emporte, annales comprises : le format du cours n'est qu'un défaut.
       const course = await resolveExamFormat();
       const asked = args.format === "mcq" ? "qcm" as const : args.format === "written" ? "exercises" as const : args.format === "composite" ? "composite" as const : null;
-      const format = requestedFormat(course, asked);
+      // Même résolution que la route web (lib/generation mockExamJob) : même plan, même job, même prix.
       // Le worker et le pré-check relisent la demande dans la cible du job (sinon ils reviendraient au format du cours).
-      const askedKind = asked ?? undefined;
-      const plan = planMockExam(format, { count: args.exercise_count, focus });
+      const { format, plan, jobType, target, count } = await mockExamJob({ count: args.exercise_count, focus: focus ?? undefined, asked });
       if (plan.generator === "none") {
         throw new ToolError("format_required", `${plan.reason} Demande-le à la personne, puis enregistre-le avec set_exam_format (kind, question_count, duration_min, language), ou passe format pour cet examen seulement.`);
       }
       if (plan.generator === "exercises" && (args.exercise_count ?? 0) > WRITTEN_MAX) {
         throw new ToolError("invalid_input", `Un examen écrit compte au plus ${WRITTEN_MAX} exercices : réduis exercise_count${course.basis === "annales" ? "." : `, ou demande des QCM (format "mcq", jusqu'à ${MCQ_MAX}).`}`);
       }
-      const qcm = plan.generator === "qcm";
-      const jobType = qcm ? "qcm" as const : "exam" as const;
-      const count = plan.generator === "qcm" ? plan.qcmCount : plan.generator === "blocks" ? plan.blockCount : plan.exerciseCount;
-      const target = plan.generator === "qcm"
-        ? JSON.stringify({ count: plan.qcmCount, openCount: plan.openCount, focus: focus ?? undefined })
-        : examTarget(count ?? undefined, focus ?? undefined, askedKind);
+      const qcm = jobType === "qcm";
       const note = course.basis === "annales"
         // « format » vaut written pour des questions composées (schéma de sortie figé, clients en cache) : la note le précise.
         ? (asked ? `Format demandé pour cet examen : ${format.summary} ; celui des annales du cours reste le défaut.` : plan.generator === "blocks" ? `Format des annales : ${format.summary}.` : null)

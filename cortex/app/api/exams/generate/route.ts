@@ -1,6 +1,6 @@
 import { generateExam } from "@/lib/exam";
 import { requireCourse } from "@/lib/req";
-import { examCount, examTarget, startGenerationJob } from "@/lib/generation";
+import { examCount, mockExamJob, startGenerationJob } from "@/lib/generation";
 import { NextRequest, NextResponse } from "next/server";
 import { fieldTooLong } from "@/lib/field-limits";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
@@ -44,8 +44,10 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (tooLong) return tooLong;
   const focus = focusRaw || undefined;
 
+  // Même résolution que le connecteur MCP : un cours au format QCM lance un job qcm, à son prix (audit fuites I4).
   // Job actif réutilisé, pré-checks, réservation, worker : lib/generation (partagé avec le serveur MCP).
-  const started = await startGenerationJob("exam", examTarget(count, focus));
+  const job = await mockExamJob({ count, focus });
+  const started = await startGenerationJob(job.jobType, job.target);
   if (!started.ok) {
     const { status, error, command } = started;
     return NextResponse.json(command ? { error, command } : { error }, { status });

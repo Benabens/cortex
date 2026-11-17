@@ -14,7 +14,7 @@ import { llmAvailable, llmUnavailableReason } from "../lib/llm";
 import { generateTargetedExercise } from "../lib/exam";
 import { generateMockExam } from "../lib/mock-exam";
 import { texAvailable } from "../lib/exam-latex";
-import { assertJobCourseOwned, getJob, heartbeatJob, jobCheckpointStore, logJob, phaseHistory, saveJobCheckpoint, setJob, setJobReport, stepFields } from "../lib/jobs";
+import { assertJobCourseOwned, costForJob, getJob, heartbeatJob, jobCheckpointStore, logJob, phaseHistory, saveJobCheckpoint, setJob, setJobReport, stepFields } from "../lib/jobs";
 import { setCurrentJob } from "../lib/billing/usage-context";
 import { generateLabExercise } from "../lib/labs";
 import { analyzeBlueprint } from "../lib/program";
@@ -354,7 +354,7 @@ async function main() {
         : job.type === "lab-exercise"
           ? await generateLabExercise(job.target ?? "", { onStep })
           // Examen blanc : le format du cours choisit le générateur (QCM, exercices, essai…), cf. lib/mock-exam.
-          : await generateMockExam({ count: examCount, focus: examFocus, kind: examKind, onStep, jobId, phaseMs: await phaseHistory(job.type), onExamReady: async (examId: number, order?: { requested: number }) => { await setJob(jobId, { resultId: examId, resultPath: `/mock/${examId}`, ordered: order?.requested }); } });
+          : await generateMockExam({ count: examCount, focus: examFocus, kind: examKind, onStep, jobId, paidCenti: job.type === "exam" ? costForJob("exam", job.target) : undefined, phaseMs: await phaseHistory(job.type), onExamReady: async (examId: number, order?: { requested: number }) => { await setJob(jobId, { resultId: examId, resultPath: `/mock/${examId}`, ordered: order?.requested }); } });
     if (res.texError) {
       // le résultat existe (HTML lisible) mais le PDF a échoué → erreur LaTeX gardée pour debug
       await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, repli HTML lisible. Détail : ${res.texError.slice(0, 500)}` });
