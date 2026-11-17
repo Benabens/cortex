@@ -110,6 +110,26 @@ RUN groupadd --system --gid 10001 cortex \
 ENV HOME=/home/cortex \
     XDG_CACHE_HOME=/home/cortex/.cache
 
+# Préchauffe le cache de bundles tectonic ($XDG_CACHE_HOME/Tectonic) en compilant un
+# document avec le VRAI préambule — sinon la 1ʳᵉ génération en prod télécharge
+# ~100 Mo. Toléré en échec (réseau) : le runtime retéléchargera au besoin.
+# AVANT la copie de l'app (audit fuites P2) : cette couche ne dépend que de tectonic
+# et des quatre fichiers LaTeX copiés ici, elle reste donc en cache d'un build à
+# l'autre ; placée après, chaque commit refaisait le téléchargement et la compilation.
+# Tourne en `cortex` : le cache de bundles lui appartient.
+COPY cortex/latex/preamble.tex cortex/latex/figures.tex cortex/latex/generic.tex cortex/latex/epfl-logo.png /tmp/tectonic-src/
+USER cortex
+RUN set -eux; \
+    mkdir /tmp/tectonic-warm; cd /tmp/tectonic-warm; \
+    cp /tmp/tectonic-src/epfl-logo.png .; \
+    cat /tmp/tectonic-src/preamble.tex /tmp/tectonic-src/figures.tex /tmp/tectonic-src/generic.tex > warm.tex; \
+    printf '\n\\newcommand{\\FOOTDATE}{Warm}\n\\begin{document}\nWarm-up.\n\\end{document}\n' >> warm.tex; \
+    /usr/local/bin/tectonic --chatter minimal warm.tex \
+      || echo "AVERTISSEMENT: warm-up tectonic incomplet (bundle téléchargé au 1er run)"; \
+    cd /; rm -rf /tmp/tectonic-warm
+USER root
+RUN rm -rf /tmp/tectonic-src
+
 # Aucun contenu de cours n'est embarqué : annales, slides et supports
 # appartiennent à leur université et ne sont pas dans ce dépôt. Ce que
 # l'utilisateur importe via l'app vit sur le volume persistant
@@ -122,21 +142,8 @@ WORKDIR /app/cortex
 RUN mkdir -p .next/cache data backups \
     && chown -R cortex:cortex .next data backups
 
-# La suite (préchauffage tectonic, test de la sandbox) et le conteneur tournent
-# en `cortex` : le cache de bundles tectonic lui appartient.
+# La suite (test de la sandbox) et le conteneur tournent en `cortex`.
 USER cortex
-
-# Préchauffe le cache de bundles tectonic ($XDG_CACHE_HOME/Tectonic) en compilant un
-# document avec le VRAI préambule — sinon la 1ʳᵉ génération en prod télécharge
-# ~100 Mo. Toléré en échec (réseau) : le runtime retéléchargera au besoin.
-RUN set -eux; \
-    mkdir -p /tmp/tectonic-warm; \
-    cp latex/epfl-logo.png /tmp/tectonic-warm/ 2>/dev/null || true; \
-    cat latex/preamble.tex latex/figures.tex latex/generic.tex > /tmp/tectonic-warm/warm.tex; \
-    printf '\n\\newcommand{\\FOOTDATE}{Warm}\n\\begin{document}\nWarm-up.\n\\end{document}\n' >> /tmp/tectonic-warm/warm.tex; \
-    (cd /tmp/tectonic-warm && /usr/local/bin/tectonic --chatter minimal warm.tex) \
-      || echo "AVERTISSEMENT: warm-up tectonic incomplet (bundle téléchargé au 1er run)"; \
-    rm -rf /tmp/tectonic-warm
 
 #   CORTEX_SEED_COURSES : vide — aucun contenu de cours n'est committé, chaque
 #   utilisateur importe ses propres annales depuis l'app.
