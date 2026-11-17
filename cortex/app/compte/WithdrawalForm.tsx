@@ -49,11 +49,11 @@ export function WithdrawalForm({ initialPurchases = [], initialSelected = "", in
         <p className="mt-1 text-[0.85rem] text-ink-3">{t("hint")}</p>
         <select aria-label={t("purchaseLabel")} className="mt-3 min-h-11 w-full rounded-xl border border-line bg-surface-2 px-3 py-2 text-ink-1" value={selected} onChange={(e) => setSelected(e.target.value)}>
           <option value="">{t("choose")}</option>
-          {purchases.map((p) => <option key={`${p.type}:${p.id}`} value={`${p.type}:${p.id}`}>{t("option", { label: p.label, date: f.date(p.purchasedAt) })}</option>)}
+          {purchases.map((p) => <option key={`${p.type}:${p.id}`} value={`${p.type}:${p.id}`}>{t("option", { label: t(`purchaseType.${p.type}`), date: f.date(p.purchasedAt) })}</option>)}
         </select>
         <Button className="mt-3" size="sm" disabled={!chosen} onClick={() => setConfirming(true)}>{t("continue")}</Button>
       </> : <>
-        <p className="mt-2 text-[0.85rem] text-ink-2">{t("confirm", { label: chosen?.label ?? "" })}</p>
+        <p className="mt-2 text-[0.85rem] text-ink-2">{t("confirm", { label: chosen ? t(`purchaseType.${chosen.type}`) : "" })}</p>
         {locale === "en" && <><p className="mt-3 text-[0.8rem] text-ink-3">{t("binding")}</p><details lang="fr" className="mt-2 text-[0.8rem] text-ink-3"><summary>{t("frenchVersion")}</summary><p className="mt-2">{t("frenchLegal", { label: chosen!.label })}</p></details></>}
         <div className="mt-3 flex gap-2"><Button size="sm" loading={busy} onClick={() => void submit()}>{t("submit")}</Button><Button size="sm" variant="secondary" disabled={busy} onClick={() => setConfirming(false)}>{t("back")}</Button></div>
       </>}

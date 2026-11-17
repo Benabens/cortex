@@ -610,7 +610,11 @@
       "frenchVersion": "Version française",
       "frenchLegal": "Confirme ta rétractation pour « {label} ». Aucun remboursement n’est déclenché automatiquement.",
       "submit": "Confirmer ma rétractation",
-      "back": "Revenir"
+      "back": "Revenir",
+      "purchaseType": {
+        "pack": "Pack de 10 crédits",
+        "subscription": "Abonnement Pro"
+      }
     },
     "assistants": {
       "metadata": "Connecter ton assistant · Cortex",
@@ -729,7 +733,12 @@
       "legalNotice": "Mentions légales",
       "englishVersion": "English version",
       "contact": "Contact",
-      "consentBinding": "La version française fait foi :"
+      "consentBinding": "La version française fait foi :",
+      "plans": {
+        "pro_monthly": "Pro mensuel",
+        "pro_yearly": "Pro annuel",
+        "credits_10": "Pack de 10 crédits"
+      }
     },
     "usage": {
       "unlimited": "Sans limite",
@@ -752,7 +761,15 @@
       "description": "Combien de générations il te reste, et quand chaque limite se remet à zéro.",
       "refresh": "Actualiser mon usage",
       "failed": "Impossible de lire ton usage pour l’instant. Réessaie dans un instant.",
-      "loading": "Chargement de ton usage"
+      "loading": "Chargement de ton usage",
+      "kinds": {
+        "exam": "Examen écrit",
+        "qcm": "Examen QCM (20 questions)",
+        "exercise": "Exercice",
+        "prepare": "Préparation de cours",
+        "check": "Vérification de réponse",
+        "drill": "Question d’entraînement"
+      }
     },
     "connectedApps": {
       "accessRead": "Lecture seule",

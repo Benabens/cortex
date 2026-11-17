@@ -610,7 +610,11 @@
       "frenchVersion": "Version française",
       "frenchLegal": "Confirme ta rétractation pour « {label} ». Aucun remboursement n’est déclenché automatiquement.",
       "submit": "Confirm my withdrawal request",
-      "back": "Back"
+      "back": "Back",
+      "purchaseType": {
+        "pack": "10-credit pack",
+        "subscription": "Pro subscription"
+      }
     },
     "assistants": {
       "metadata": "Connect your assistant · Cortex",
@@ -729,7 +733,12 @@
       "legalNotice": "Legal notice",
       "englishVersion": "English version",
       "contact": "Contact",
-      "consentBinding": "The French version is legally binding:"
+      "consentBinding": "The French version is legally binding:",
+      "plans": {
+        "pro_monthly": "Pro monthly",
+        "pro_yearly": "Pro yearly",
+        "credits_10": "10-credit pack"
+      }
     },
     "usage": {
       "unlimited": "Unlimited",
@@ -752,7 +761,15 @@
       "description": "How many generations you have left and when each limit resets.",
       "refresh": "Refresh my usage",
       "failed": "Couldn’t load your usage. Try again shortly.",
-      "loading": "Loading your usage"
+      "loading": "Loading your usage",
+      "kinds": {
+        "exam": "Written exam",
+        "qcm": "Multiple-choice exam (20 questions)",
+        "exercise": "Exercise",
+        "prepare": "Course preparation",
+        "check": "Answer check",
+        "drill": "Practice question"
+      }
     },
     "connectedApps": {
       "accessRead": "Read only",

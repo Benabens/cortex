@@ -350,7 +350,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
             return (
               <li key={o.plan} className="flex min-w-0 flex-col gap-5 rounded-2xl border border-line bg-surface-2/40 p-5">
                 <div className="min-w-0">
-                  <div className="font-display text-xl font-semibold text-ink-1">{o.label}</div>
+                  <div className="font-display text-xl font-semibold text-ink-1">{t.has(`plans.${o.plan}`) ? t(`plans.${o.plan}`) : o.label}</div>
                   <div className="mt-2 text-sm leading-relaxed text-ink-2">
                     {isSub ? t("subscriptionOffer", { count: o.credits, formatted: f.number(o.credits) }) : t("packOffer", { count: o.credits, formatted: f.number(o.credits) })}
                     {isSub && hasSub && <span>{t("alreadySubscribed")}</span>}
