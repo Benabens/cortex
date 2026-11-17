@@ -2,7 +2,7 @@
 import { NextRequest } from "next/server";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function postForm(route: string, query: string, files: [Buffer, string][], fields: Record<string, string> = {}): Promise<{ status: number; json: any }> {
+export async function postForm(route: string, query: string, files: [Buffer, string][], fields: Record<string, string> = {}, acceptLanguage = "fr"): Promise<{ status: number; json: any }> {
   const mod = await import(`../../app/api/${route}/route`);
   const url = `http://cortex.test/api/${route}?${query}`;
   const form = new FormData();
@@ -12,7 +12,7 @@ export async function postForm(route: string, query: string, files: [Buffer, str
   const body = Buffer.from(await encoded.arrayBuffer());
   const headers = new Headers(encoded.headers);
   headers.set("content-length", String(body.length));
-  headers.set("accept-language", "fr");
+  headers.set("accept-language", acceptLanguage);
   const res: Response = await mod.POST(new NextRequest(url, { method: "POST", headers, body }));
   return { status: res.status, json: await res.json() };
 }

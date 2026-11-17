@@ -252,5 +252,15 @@
     "reference_image_refused": "photo ou image : Cortex n’en lit pas le texte. Dépose le document d’origine, ou un PDF au texte sélectionnable (scan avec reconnaissance de texte).",
     "reference_format_unsupported": "format non pris en charge pour une annale : PDF, Word, PowerPoint, HTML ou texte.",
     "reference_duplicate_name": "trop d’annales du même nom : renomme le fichier."
+  },
+  "ingestReport": {
+    "unreadable": "fichier abîmé ou format non reconnu : il n’a pas pu être lu. Ré-exporte-le en PDF, puis dépose-le de nouveau.",
+    "encrypted": "PDF protégé par un mot de passe. Enregistre une copie sans protection, puis dépose-la de nouveau.",
+    "noText": "aucun texte lisible (document scanné ?) : il n’entre pas dans le corpus. Dépose une version au texte sélectionnable.",
+    "short": {
+      "unreadable": "abîmé ou illisible",
+      "encrypted": "protégé par un mot de passe",
+      "noText": "sans texte, scanné ?"
+    }
   }
 }

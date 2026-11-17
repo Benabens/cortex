@@ -3,6 +3,7 @@
  * cours n'apprenait rien à personne, et une annale de ce genre faisait échouer chaque ingestion
  * suivante (audit ingestion du 16/11/2026). Même consigne que le rapport d'ingestion.
  */
+import { currentLocale } from "@/lib/i18n/current";
 import { getDocumentProxy } from "unpdf";
 import { extractOfficeText, OfficeDocumentError } from "@/lib/office-documents";
 import { failureStatus } from "@/lib/ingest-report";
@@ -12,7 +13,7 @@ import { errorText, userError, type UserError } from "@/lib/i18n/user-error";
 export type DocumentProblem = { status: 413 | 422; message: string; error: UserError };
 
 function documentProblem(status: 413 | 422, error: UserError): DocumentProblem {
-  return { status, error, message: errorText("fr", error) };
+  return { status, error, message: errorText(currentLocale(), error) };
 }
 
 function officeProblem(error: OfficeDocumentError): UserError {

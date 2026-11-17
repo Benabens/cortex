@@ -61,3 +61,10 @@ test("erreur d'un fichier : son nom en tête, ponctuation de la langue", async (
   assert.equal(en.code, "document_encrypted");
   assert.equal(en.params.file, "annale.pdf");
 });
+
+test("refus d'un fichier parmi d'autres (import partiel) : même phrase et même ponctuation qu'une erreur", async () => {
+  const { fileErrorText } = await import("../lib/i18n/api-error");
+  const e = { code: "document_encrypted" as const };
+  assert.match(fileErrorText(req({ "accept-language": "en" }), "exam.pdf", e), /^exam\.pdf: \S/);
+  assert.match(fileErrorText(req({ "accept-language": "fr" }), "annale.pdf", e), /^annale\.pdf : PDF protégé/);
+});
