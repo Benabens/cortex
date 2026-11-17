@@ -1,4 +1,5 @@
 import { apiError } from "@/lib/i18n/api-error";
+import { UserFacingError } from "@/lib/i18n/user-error";
 import { NextRequest, NextResponse } from "next/server";
 import { useUser } from "@/lib/req";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
@@ -58,17 +59,11 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
 
   const body = (await readJson(req, {})) as { confirm?: unknown };
   if (String(body?.confirm ?? "") !== CONFIRM_WORD) {
-    return NextResponse.json(
-      { error: `Confirmation manquante : tape « ${CONFIRM_WORD} » pour confirmer.` },
-      { status: 400 },
-    );
+    return apiError(req, { code: "account_delete_confirm_missing", params: { word: CONFIRM_WORD } }, 400);
   }
 
   if (await isOwnerAccount(userId)) {
-    return NextResponse.json(
-      { error: "Le compte propriétaire de l'instance ne peut pas être supprimé depuis l'application." },
-      { status: 403 },
-    );
+    return apiError(req, "account_delete_owner_refused", 403);
   }
 
   try {
@@ -77,9 +72,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     log("error", "account.delete_route_failed", { message: message.slice(0, 200) });
-    return NextResponse.json(
-      { error: message.startsWith("Suppression refusée :") ? message : `La suppression a échoué. Réessaie ; si le problème persiste, écris à ${contactEmail()}.` },
-      { status: 500 },
-    );
+    if (e instanceof UserFacingError) return apiError(req, e, 500);
+    return apiError(req, { code: "account_delete_failed", params: { contact: contactEmail() } }, 500);
   }
 });

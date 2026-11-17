@@ -251,7 +251,12 @@
     "reference_file_too_large": "file too large ({maxMb} MB maximum).",
     "reference_image_refused": "photo or image: Cortex can’t read its text. Upload the original document, or a PDF with selectable text (a scan with text recognition).",
     "reference_format_unsupported": "unsupported past-exam format: use PDF, Word, PowerPoint, HTML, or text.",
-    "reference_duplicate_name": "too many past exams have the same name; rename the file."
+    "reference_duplicate_name": "too many past exams have the same name; rename the file.",
+    "account_delete_confirm_missing": "Confirmation missing: type “{word}” to confirm.",
+    "account_delete_owner_refused": "The instance owner’s account can’t be deleted from the app.",
+    "account_delete_stripe_cancel_failed": "Deletion refused: the Stripe subscription couldn’t be cancelled ({detail}). Nothing was deleted.",
+    "account_delete_failed": "Deletion failed. Try again; if the problem persists, write to {contact}.",
+    "pdf_recompile_failed": "The PDF still won’t compile."
   },
   "ingestReport": {
     "unreadable": "damaged file or unrecognised format: it could not be read. Export it again as a PDF, then upload it again.",
