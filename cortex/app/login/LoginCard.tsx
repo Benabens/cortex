@@ -4,7 +4,7 @@ import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { Wordmark } from "@/components/shell/Logo";
 import { LocaleSwitcher } from "@/components/i18n/LocaleSwitcher";
-import { useTranslations } from "use-intl/react";
+import { useLocale, useTranslations } from "use-intl/react";
 
 /** Messages clairs par code d'erreur NextAuth (cause + quoi faire). */
 function errorMessage(code: string, t: ReturnType<typeof useTranslations<"login">>): string {
@@ -52,6 +52,7 @@ export function LoginCard({
   review = false,
   legal,
   landing,
+  english,
   contact,
 }: {
   error: string | null;
@@ -65,13 +66,17 @@ export function LoginCard({
   legal?: { terms: string | null; privacy: string | null; refund?: string | null; notice?: string | null };
   /** Origine de la vitrine, lue côté serveur à la requête (pas de variable figée au build). */
   landing: string;
+  /** Traduction anglaise des documents légaux sur la vitrine (elle renvoie aux autres documents en anglais). */
+  english: string;
   /** Adresse de contact (lib/contact). */
   contact: string;
 }) {
   const t = useTranslations("login");
-  const termsHref = legal?.terms ?? `${landing}/terms`;
-  const privacyHref = legal?.privacy ?? `${landing}/privacy`;
-  const noticeHref = legal?.notice ?? `${landing}/mentions-legales`;
+  // En anglais, les liens légaux mènent à leur traduction ; en français, aux documents qui font foi.
+  const inEnglish = useLocale() === "en";
+  const termsHref = inEnglish ? english : legal?.terms ?? `${landing}/terms`;
+  const privacyHref = inEnglish ? english : legal?.privacy ?? `${landing}/privacy`;
+  const noticeHref = inEnglish ? english : legal?.notice ?? `${landing}/mentions-legales`;
   const [busy, setBusy] = useState<null | "google" | "email" | "review">(null);
   const [addr, setAddr] = useState("");
   const [reviewOpen, setReviewOpen] = useState(false);

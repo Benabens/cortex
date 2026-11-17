@@ -27,7 +27,7 @@ const french = /\b(Connexion|Révise|conditions|Mentions|Créer|matière|Établi
 test("LoginCard se rend entièrement en anglais", () => {
   const html = renderIntl(withRouter(createElement(LoginCard, {
     error: "AccessDenied", callbackUrl: "/", google: true, email: true, e2eTest: false,
-    review: false, landing: "https://example.test", contact: "hello@example.test",
+    review: false, landing: "https://example.test", english: "https://example.test/terms-en", contact: "hello@example.test",
   })), "en");
   assert.match(html, /Sign in to Cortex/);
   assert.match(html, /Continue with Google/);
@@ -46,4 +46,18 @@ test("ImportPanel se rend entièrement en anglais", () => {
   assert.match(html, /Import/);
   assert.match(html, /Prepare course/);
   assert.doesNotMatch(html, french);
+});
+
+test("LoginCard : en anglais, les liens légaux mènent à leur traduction ; en français, aux documents qui font foi", () => {
+  const props = {
+    error: null, callbackUrl: "/", google: true, email: false, e2eTest: false, review: false,
+    legal: { terms: "https://example.test/terms", privacy: "https://example.test/privacy", notice: "https://example.test/mentions-legales" },
+    landing: "https://example.test", english: "https://example.test/terms-en", contact: "hello@example.test",
+  };
+  const en = renderIntl(withRouter(createElement(LoginCard, props)), "en");
+  const fr = renderIntl(withRouter(createElement(LoginCard, props)), "fr");
+  assert.match(en, /href="https:\/\/example\.test\/terms-en"/);
+  assert.doesNotMatch(en, /href="https:\/\/example\.test\/(terms|privacy|mentions-legales)"/);
+  assert.match(fr, /href="https:\/\/example\.test\/terms"/);
+  assert.doesNotMatch(fr, /terms-en/);
 });

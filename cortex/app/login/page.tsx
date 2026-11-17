@@ -1,6 +1,6 @@
 import { e2eTestLoginConfigured, emailLoginConfigured, googleLoginConfigured, reviewLoginConfigured } from "@/lib/auth";
 import { contactEmail } from "@/lib/contact";
-import { DEFAULT_LANDING_URL, landingOrigin, legalLinks } from "@/lib/legal";
+import { DEFAULT_LANDING_URL, LANDING_ENGLISH_PATH, landingOrigin, legalLinks } from "@/lib/legal";
 import { LoginCard } from "./LoginCard";
 
 // Inter pour l’interface, Funnel Display uniquement pour le logo.
@@ -32,6 +32,7 @@ export default async function LoginPage({
       review={reviewLoginConfigured()}
       legal={legalLinks()}
       landing={landingOrigin() ?? DEFAULT_LANDING_URL}
+      english={`${landingOrigin() ?? DEFAULT_LANDING_URL}${LANDING_ENGLISH_PATH}`}
       contact={contactEmail()}
     />
   );
