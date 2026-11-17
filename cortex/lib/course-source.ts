@@ -213,7 +213,7 @@ export async function addUrlSource(
   }
   const ext = extensionFor(res.contentType, res.body);
   if (!ext) {
-    throw new SourceError(415, userError("source_type_unsupported", { contentType: (res.contentType ?? "inconnu").slice(0, 60) }));
+    throw new SourceError(415, res.contentType ? userError("source_type_unsupported", { contentType: res.contentType.slice(0, 60) }) : userError("source_type_unknown"));
   }
   if (!res.body.length) throw new SourceError(400, userError("source_document_empty"));
   if (ext === ".html") {

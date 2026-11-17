@@ -32,8 +32,8 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
       const res = await generateExam({ dry: true });
       return NextResponse.json({ ok: true, ...res });
     } catch (e) {
-      if (e instanceof UserFacingError) return apiError(req, e);
-      if (e instanceof LlmError) return apiError(req, llmUserError(e), e.code === "UNAVAILABLE" || e.code === "SPEND_CAP" ? 503 : 502);
+      if (e instanceof UserFacingError) return apiError(req, e, 502);
+      if (e instanceof LlmError) return apiError(req, llmUserError(e), 502);
       const detail = e instanceof Error ? e.message : String(e);
       return apiError(req, { code: "exam_generation_failed", params: { detail } }, 502);
     }

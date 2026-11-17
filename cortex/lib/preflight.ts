@@ -32,7 +32,7 @@ export async function preflightGeneration(kind: string, target?: string | null):
   });
   if (storageIssue) return storageIssue;
   const engineIssue = llmUnavailableReason();
-  if (engineIssue) return refusal(503, "llm_engine_unavailable");
+  if (engineIssue) return refusal(503, "llm_engine_unavailable_reason", { reason: engineIssue });
   let items = 0;
   try {
     items = (await q.get<{ n: number }>(`SELECT count(*) n FROM items`))!.n;

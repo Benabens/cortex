@@ -93,8 +93,9 @@ async function handlePOST(req: NextRequest) {
   } catch (e) {
     const { AssistRefused } = await import("@/lib/billing/reserve");
     if (e instanceof AssistRefused) return apiError(req, e, e.status);
-    if (e instanceof UserFacingError) return apiError(req, e);
-    if (e instanceof LlmError) return apiError(req, llmUserError(e), e.code === "UNAVAILABLE" || e.code === "SPEND_CAP" ? 503 : 500);
+    if (e instanceof UserFacingError) return apiError(req, e, 500);
+    if (e instanceof LlmError && e.code === "UNAVAILABLE") return apiError(req, "llm_engine_unreachable_retry", 503);
+    if (e instanceof LlmError) return apiError(req, llmUserError(e), 500);
     const detail = e instanceof Error ? e.message : String(e);
     return apiError(req, { code: "weakness_mining_failed", params: { detail } }, 500);
   }

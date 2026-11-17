@@ -235,8 +235,11 @@ export async function assistGate(kind: string): Promise<GateIssue | null> {
 export async function assistReserve(kind: string): Promise<{ issue: GateIssue } | { ref: string }> {
   // Moteur indisponible : refus AVANT toute réservation — un débit non
   // remboursable ne doit jamais précéder un appel qui ne partira pas.
-  const { llmAvailable } = await import("@/lib/llm");
-  if (!llmAvailable()) return { issue: refusal(503, "llm_engine_unavailable") };
+  const { llmAvailable, llmUnavailableReason } = await import("@/lib/llm");
+  if (!llmAvailable()) {
+    const reason = llmUnavailableReason();
+    return { issue: reason ? refusal(503, "llm_engine_unavailable_reason", { reason }) : refusal(503, "llm_engine_unavailable") };
+  }
   // `kind` (drill, check-solution…) est le libellé du compteur ; le tarif est celui d'« assist ».
   const ref = `assist:${currentUser()}:${crypto.randomUUID()}`;
   const r = await reserveGeneration({ bucket: "assist", kind, costCenti: creditCost("assist"), ref });

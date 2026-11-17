@@ -28,7 +28,25 @@
     "credits_debited": "{count, plural, one {# credit charged} other {# credits charged}}",
     "remaining": "You have {count} left{reset}",
     "after": "After this one, you’ll have {count} left{reset}",
-    "in_a_minute": "in a minute"
+    "in_a_minute": "in a minute",
+    "label": {
+      "credits": "Credits",
+      "daily_generations": "Today’s generations",
+      "daily_assistance": "Today’s assistance",
+      "active_jobs": "Generations running",
+      "rate": "Requests per minute",
+      "daily_compute": "Today’s compute",
+      "monthly_capacity": "Cortex capacity this month",
+      "storage": "Storage"
+    },
+    "unit": {
+      "credits": "credits",
+      "generations": "generations",
+      "assistance": "assistance calls",
+      "concurrent": "at once",
+      "per_minute": "per minute",
+      "mb": "MB"
+    }
   },
   "errors": {
     "unauthenticated": "You’re not signed in.",
@@ -90,11 +108,11 @@
     "export_server_busy": "Too many exports are running on the server. Try again in a few minutes.",
     "account_export_auth_required": "You must sign in to export your account.",
     "account_export_failed": "The export failed. Try again; if it keeps failing, contact {email}.",
-    "course_field_required": "The “{field}” field is required.",
-    "course_field_must_be_text": "The “{field}” field must be text.",
-    "course_field_too_short": "The “{field}” field is too short.",
-    "course_field_too_long": "The “{field}” field exceeds {max} characters.",
-    "course_tex_command_forbidden": "{field} can’t contain a backslash (\\).",
+    "course_field_required": "The “{field, select, name {name} code {code} university {university} language {language} examDate {exam date} other {{field}}}” field is required.",
+    "course_field_must_be_text": "The “{field, select, name {name} code {code} university {university} language {language} examDate {exam date} other {{field}}}” field must be text.",
+    "course_field_too_short": "The “{field, select, name {name} code {code} university {university} language {language} examDate {exam date} other {{field}}}” field is too short.",
+    "course_field_too_long": "The “{field, select, name {name} code {code} university {university} language {language} examDate {exam date} other {{field}}}” field exceeds {max} characters.",
+    "course_tex_command_forbidden": "{field, select, teacher {A teacher name} other {The “{field, select, name {name} code {code} university {university} language {language} examDate {exam date} other {{field}}}” field}} can’t contain a backslash (\\).",
     "course_teacher_name_too_long": "A teacher name exceeds 60 characters.",
     "course_language_unknown": "Unknown language: “{language}”. Supported languages: {supported}.",
     "course_exam_date_invalid": "The exam date must use YYYY-MM-DD format.",
@@ -256,7 +274,10 @@
     "account_delete_owner_refused": "The instance owner’s account can’t be deleted from the app.",
     "account_delete_stripe_cancel_failed": "Deletion refused: the Stripe subscription couldn’t be cancelled ({detail}). Nothing was deleted.",
     "account_delete_failed": "Deletion failed. Try again; if the problem persists, write to {contact}.",
-    "pdf_recompile_failed": "The PDF still won’t compile."
+    "pdf_recompile_failed": "The PDF still won’t compile.",
+    "llm_engine_unreachable_retry": "The AI engine can’t be reached. Try again later.",
+    "llm_engine_unavailable_reason": "The AI engine is unavailable on this server: {reason}",
+    "source_type_unknown": "Unsupported document type (unknown): only PDF, web pages, or text are accepted."
   },
   "ingestReport": {
     "unreadable": "damaged file or unrecognised format: it could not be read. Export it again as a PDF, then upload it again.",

@@ -12,6 +12,7 @@ import { rechargeDue, nextRechargeDate } from "./subscription-windows";
 import { isPaidProvider, spendCapPerUserUsd, spendCapUsd, spendMonth } from "./usage";
 import { formatReset, type LimitKey, type LaunchKind, type UsageLimits, type UsageLimit, type KindUsage } from "./limits-text";
 import { currentLocale } from "@/lib/i18n/current";
+import type { Messages } from "@/lib/i18n/messages";
 import { translator } from "@/lib/i18n/translate";
 import { refusal, type Refusal, type UserError } from "@/lib/i18n/user-error";
 
@@ -466,29 +467,33 @@ export async function getUsageLimits(userId = currentUser(), extra?: { spec: Lau
 /** Les limites elles-mêmes, pour l'affichage. Les plafonds en dollars deviennent des pourcentages. */
 export function describeLimits(s: LimitsState): UsageLimit[] {
   const out: UsageLimit[] = [];
+  // Libellés dans la langue du lecteur : page Mon usage (requête) et connecteur MCP (anglais).
+  const t = translator(currentLocale());
+  const label = (k: keyof Messages["limits"]["label"]) => t(`limits.label.${k}`);
+  const unit = (k: keyof Messages["limits"]["unit"]) => t(`limits.unit.${k}`);
   const day = nextDayReset(s.now);
   const month = nextMonthReset(s.now);
   const pct = (used: number, cap: number) => (cap <= 0 ? 100 : Math.min(100, Math.round((100 * used) / cap)));
   if (s.billing && s.credits && !s.owner) {
     const bal = fromCenti(s.credits.balanceCenti);
-    out.push({ key: "credits", label: "Crédits", used: null, limit: null, remaining: bal, unit: "crédits", resetAt: s.credits.rechargeAt ? `${s.credits.rechargeAt}T00:00:00Z` : null });
+    out.push({ key: "credits", label: label("credits"), used: null, limit: null, remaining: bal, unit: unit("credits"), resetAt: s.credits.rechargeAt ? `${s.credits.rechargeAt}T00:00:00Z` : null });
   }
   for (const bucket of ["gen", "assist"] as const) {
     const q = s.quota[bucket];
     if (q.cap === null) continue;
     out.push({
       key: bucket === "gen" ? "daily_generations" : "daily_assistance",
-      label: bucket === "gen" ? "Générations du jour" : "Aides du jour",
+      label: label(bucket === "gen" ? "daily_generations" : "daily_assistance"),
       used: q.used, limit: q.cap, remaining: Math.max(0, q.cap - q.used),
-      unit: bucket === "gen" ? "générations" : "aides", resetAt: day,
+      unit: unit(bucket === "gen" ? "generations" : "assistance"), resetAt: day,
     });
   }
   if (s.slots.cap !== null) {
-    out.push({ key: "active_jobs", label: "Générations en cours", used: s.slots.used, limit: s.slots.cap, remaining: Math.max(0, s.slots.cap - s.slots.used), unit: "en même temps", resetAt: null });
+    out.push({ key: "active_jobs", label: label("active_jobs"), used: s.slots.used, limit: s.slots.cap, remaining: Math.max(0, s.slots.cap - s.slots.used), unit: unit("concurrent"), resetAt: null });
   }
   if (s.rate.cap !== null) {
     out.push({
-      key: "rate", label: "Demandes par minute", used: s.rate.used, limit: s.rate.cap, remaining: Math.max(0, s.rate.cap - s.rate.used), unit: "par minute",
+      key: "rate", label: label("rate"), used: s.rate.used, limit: s.rate.cap, remaining: Math.max(0, s.rate.cap - s.rate.used), unit: unit("per_minute"),
       resetAt: s.rate.oldestAt ? toIso(isoOffset(s.rate.oldestAt, 60_000)) : null,
     });
   }
@@ -497,17 +502,17 @@ export function describeLimits(s: LimitsState): UsageLimit[] {
     if (caps.length) {
       const cap = Math.min(...caps);
       const used = pct(Math.max(s.userSpentTodayUsd, s.budget?.spentTodayUsd ?? 0) + s.committedUserUsd, cap);
-      out.push({ key: "daily_compute", label: "Calcul du jour", used, limit: 100, remaining: 100 - used, unit: "%", resetAt: day });
+      out.push({ key: "daily_compute", label: label("daily_compute"), used, limit: 100, remaining: 100 - used, unit: "%", resetAt: day });
     }
   }
   if (s.paid && s.globalCapUsd !== null) {
     const used = pct(s.globalSpentUsd + s.committedGlobalUsd, s.globalCapUsd);
-    out.push({ key: "monthly_capacity", label: "Capacité de Cortex ce mois-ci", used, limit: 100, remaining: 100 - used, unit: "%", resetAt: month });
+    out.push({ key: "monthly_capacity", label: label("monthly_capacity"), used, limit: 100, remaining: 100 - used, unit: "%", resetAt: month });
   }
   if (s.storage) {
     const used = Math.round(s.storage.usedBytes / MiB);
     const limit = Math.floor(s.storage.quotaBytes / MiB);
-    out.push({ key: "storage", label: "Stockage", used, limit, remaining: Math.max(0, limit - used), unit: "Mo", resetAt: null });
+    out.push({ key: "storage", label: label("storage"), used, limit, remaining: Math.max(0, limit - used), unit: unit("mb"), resetAt: null });
   }
   return out;
 }
