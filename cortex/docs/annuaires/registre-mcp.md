@@ -44,19 +44,24 @@ echo "v=MCPv1; k=ed25519; p=${PUBLIC_KEY}" > mcp-registry-auth
 
 ## 3. Publier (Cowork, depuis la racine de l'app sur `main` à jour)
 
+**État** : `com.cortexexam/cortex` **1.1.0** est publié depuis le 16/11/2026.
+
 ```
 brew install mcp-publisher
 mcp-publisher validate server.json
 
-MCP_PRIVATE_KEY="$(openssl pkey -in /chemin/vers/key.pem -noout -text | sed -n '/priv:/,/pub:/p' | sed '1d;$d' | tr -d ' :\n')" \
-  mcp-publisher login http --domain cortexexam.com
-
+HEX="$(openssl pkey -in /chemin/vers/key.pem -noout -text | sed -n '/priv:/,/pub:/p' | sed '1d;$d' | tr -d ' :\n')"
+mcp-publisher login http --domain cortexexam.com --private-key "$HEX"
 mcp-publisher publish
+unset HEX
 ```
 
-- `MCP_PRIVATE_KEY` attend la clé privée en **hexadécimal** (64 caractères), d'où l'extraction ci-dessus ;
-  passer par la variable d'environnement la garde hors de la ligne de commande visible des autres processus.
-- `login` écrit un jeton dans `~/.config/mcp-publisher/token.json` ; `mcp-publisher logout` l'efface.
+- La clé privée se passe par le drapeau `--private-key`, en **hexadécimal** (64 caractères), d'où l'extraction
+  ci-dessus. La variable d'environnement `MCP_PRIVATE_KEY` ne marche pas avec mcp-publisher 1.8.9
+  (« ed25519 private key (hex) is required »). La clé reste dans une variable du shell, jamais tapée en clair ;
+  elle apparaît dans la ligne de commande le temps du `login` : le lancer sur le poste de l'éditeur.
+- Le jeton du `login` **expire en quelques minutes** : se reconnecter juste avant chaque `publish`.
+- `login` écrit ce jeton dans `~/.config/mcp-publisher/token.json` ; `mcp-publisher logout` l'efface.
 - Vérifier la fiche :
   `curl -sS "https://registry.modelcontextprotocol.io/v0/servers?search=com.cortexexam/cortex"`.
 - Retirer une version : `mcp-publisher status --status deprecated com.cortexexam/cortex <version>`.

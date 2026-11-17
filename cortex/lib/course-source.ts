@@ -89,6 +89,17 @@ function fileName(title: string | undefined, url: string | null, ext: string): s
   return `${base || "support"}${ext}`;
 }
 
+function folderDir(courseId: string, folder: string): string {
+  const { refsDir, contentRoot } = coursePaths(courseId);
+  return path.resolve(folder === "refs" ? refsDir : path.join(contentRoot, folder));
+}
+
+/** Un texte de ce titre a-t-il déjà été rangé dans cette catégorie ? (scripts idempotents : scripts/review-account.ts) */
+export async function textSourceExists(courseId: string, a: { title: string; category: SourceCategory }): Promise<boolean> {
+  const dir = folderDir(courseId, BUCKET[a.category]);
+  return (await files().stat(path.join(dir, fileName(a.title, null, ".md")))) !== null;
+}
+
 /** Range `data` dans le dossier du cours, sans jamais écraser un fichier existant. */
 async function store(courseId: string, name: string, category: SourceCategory | undefined, data: Buffer, contentType: string): Promise<SavedSource> {
   const folder = category ? BUCKET[category] : classifyFile(name).bucket;
@@ -101,8 +112,7 @@ async function store(courseId: string, name: string, category: SourceCategory | 
   const problem = await unreadableDocument(data, path.extname(name));
   if (problem) throw new SourceError(problem.status, problem.message);
 
-  const { refsDir, contentRoot } = coursePaths(courseId);
-  const dir = path.resolve(folder === "refs" ? refsDir : path.join(contentRoot, folder));
+  const dir = folderDir(courseId, folder);
   const ext = path.extname(name);
   const stem = name.slice(0, -ext.length);
   for (let n = 1; n <= 50; n++) {

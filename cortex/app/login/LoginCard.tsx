@@ -13,6 +13,10 @@ function errorMessage(code: string): string {
       return "Ce lien de connexion a expiré ou a déjà été utilisé. Reconnecte-toi pour en recevoir un nouveau.";
     case "OAuthAccountNotLinked":
       return "Cette adresse est déjà liée à une autre méthode de connexion. Utilise celle d’origine.";
+    case "CredentialsSignin":
+      return "E-mail ou mot de passe incorrect.";
+    case "rate_limited":
+      return "Trop d’essais. Réessaie dans 15 minutes.";
     case "Configuration":
       return "La connexion est momentanément indisponible. Réessaie dans un instant.";
     default:
@@ -37,6 +41,7 @@ export function LoginCard({
   google,
   email,
   e2eTest,
+  review = false,
   legal,
   landing,
   english,
@@ -47,6 +52,8 @@ export function LoginCard({
   google: boolean;
   email: boolean;
   e2eTest: boolean;
+  /** Connexion par mot de passe du compte démo des relecteurs d'annuaires (lib/review-login). */
+  review?: boolean;
   /** Liens légaux (LEGAL_*_URL ou vitrine déclarée) ; repli sur `landing` s'ils ne sont pas posés. */
   legal?: { terms: string | null; privacy: string | null; refund?: string | null; notice?: string | null };
   /** Origine de la vitrine, lue côté serveur à la requête (pas de variable figée au build). */
@@ -59,8 +66,10 @@ export function LoginCard({
   const termsHref = legal?.terms ?? `${landing}/terms`;
   const privacyHref = legal?.privacy ?? `${landing}/privacy`;
   const noticeHref = legal?.notice ?? `${landing}/mentions-legales`;
-  const [busy, setBusy] = useState<null | "google" | "email">(null);
+  const [busy, setBusy] = useState<null | "google" | "email" | "review">(null);
   const [addr, setAddr] = useState("");
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
 
   return (
     <main
@@ -161,7 +170,74 @@ export function LoginCard({
             </form>
           )}
 
-          {!google && !email && !e2eTest && (
+          {review && reviewOpen && (
+            <form
+              data-testid="review-login"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const form = new FormData(e.currentTarget);
+                setBusy("review");
+                setReviewError(null);
+                // Sans redirection : une faute de frappe garde la page et son callbackUrl
+                // (retour au consentement du connecteur MCP après la connexion).
+                const res = await signIn("review", {
+                  email: String(form.get("email") ?? "").trim(),
+                  password: String(form.get("password") ?? ""),
+                  redirect: false,
+                  callbackUrl,
+                });
+                if (res?.ok && !res.error) {
+                  window.location.assign(res.url ?? callbackUrl);
+                  return;
+                }
+                setReviewError(errorMessage(res?.code === "rate_limited" ? "rate_limited" : "CredentialsSignin"));
+                setBusy(null);
+              }}
+              className="mt-1 flex flex-col gap-2"
+            >
+              <label className="text-[0.75rem] font-medium" style={{ color: "var(--bare-muted)" }} htmlFor="review-email">
+                E-mail
+              </label>
+              <input
+                id="review-email"
+                name="email"
+                type="email"
+                required
+                // Ouvert par un clic sur « Accès relecteur » : le focus suit, au clavier aussi.
+                autoFocus
+                autoComplete="username"
+                className="h-12 w-full rounded-lg border px-3.5 text-[0.9rem] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hi"
+                style={{ background: "var(--bare-surface)", color: "var(--bare-ink)", borderColor: "var(--bare-field-line)" }}
+              />
+              <label className="mt-1 text-[0.75rem] font-medium" style={{ color: "var(--bare-muted)" }} htmlFor="review-password">
+                Mot de passe
+              </label>
+              <input
+                id="review-password"
+                name="password"
+                type="password"
+                required
+                autoComplete="current-password"
+                className="h-12 w-full rounded-lg border px-3.5 text-[0.9rem] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hi"
+                style={{ background: "var(--bare-surface)", color: "var(--bare-ink)", borderColor: "var(--bare-field-line)" }}
+              />
+              {reviewError && (
+                <p role="alert" className="text-[0.8rem]" style={{ color: "var(--error-ink)" }}>
+                  {reviewError}
+                </p>
+              )}
+              <button
+                type="submit"
+                disabled={busy !== null}
+                className="mt-1 inline-flex h-12 w-full items-center justify-center rounded-full border text-[0.92rem] font-medium transition-[background,opacity] duration-150 disabled:opacity-60"
+                style={{ background: "var(--bare-surface)", color: "var(--bare-ink)", borderColor: "var(--bare-field-line)" }}
+              >
+                {busy === "review" ? "Connexion…" : "Se connecter"}
+              </button>
+            </form>
+          )}
+
+          {!google && !email && !e2eTest && !review && (
             <p className="text-center text-[0.83rem]" style={{ color: "var(--bare-muted)" }}>
               Aucune méthode de connexion n’est configurée. Réessaie plus tard.
             </p>
@@ -189,6 +265,17 @@ export function LoginCard({
           <a href={english} hrefLang="en" lang="en" className="underline underline-offset-2" style={{ color: "var(--bare-muted)" }}>
             English version
           </a>
+          {/* Discret : seuls les relecteurs des annuaires de connecteurs en ont l'usage. */}
+          {review && !reviewOpen && (
+            <button
+              type="button"
+              onClick={() => setReviewOpen(true)}
+              className="underline underline-offset-2"
+              style={{ color: "var(--bare-muted)" }}
+            >
+              Accès relecteur
+            </button>
+          )}
         </p>
       </div>
     </main>

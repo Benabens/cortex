@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { baseURL, googleBaseURL, localPort as port, remoteBaseURL, smokeBaseURL } from "./e2e/base-url";
+import { REVIEW_E2E_EMAIL, reviewE2eHash } from "./e2e/review-credentials";
 
 const e2eDatabaseUrl = process.env.E2E_DATABASE_URL;
 // Tests visant un site DÉJÀ en ligne — vrai Google et smoke de la prod, ou preview d'une PR
@@ -30,6 +31,8 @@ export default defineConfig({
       MCP_ENABLED: "1", BILLING_ENABLED: "1", SIGNUP_FREE_CREDITS: "0",
       AUTH_EMAIL_ENABLED: "1", AUTH_EMAIL_ENDPOINT: "http://127.0.0.1:3211/capture",
       CORTEX_OWNER_EMAIL: "owner@e2e.cortex.test", RATE_LIMIT_PER_MIN: "unlimited",
+      // Connexion relecteur (e2e/review-login.spec.ts) : identifiants inventés pour le banc.
+      REVIEW_LOGIN_EMAIL: REVIEW_E2E_EMAIL, REVIEW_LOGIN_PASSWORD_HASH: reviewE2eHash(),
     },
   }, {
     command: "tsx e2e/mail-receiver.ts", url: "http://127.0.0.1:3211/health",
