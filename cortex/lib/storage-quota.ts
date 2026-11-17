@@ -144,8 +144,8 @@ export function resetVolumeAlertForTests(): void { lastVolumeAlert = 0; }
  * corrigé, figures). La règle des 10 % convient à un ENVOI — on refuse d'ajouter
  * un gros fichier sur un volume qui se remplit — mais l'appliquer à la
  * génération bloquerait tout le monde, y compris un compte qui vient de payer,
- * dès que le volume est rempli par l'usage normal (5 Go / 200 Mo par compte =
- * une vingtaine de comptes suffisent). Ici : refuser seulement quand il n'y a
+ * dès que le volume est rempli par l'usage normal (5 Go / 150 Mo par compte =
+ * une trentaine de comptes suffisent). Ici : refuser seulement quand il n'y a
  * vraiment plus de place pour écrire.
  */
 export const GENERATION_MIN_FREE_BYTES = 64 * 1024 * 1024;
