@@ -1455,7 +1455,7 @@ type DupAnswer = { notions?: { index: number; notion: string; angle: string; reg
 function duplicateRules(items: QcmItem[], opts: { strict: boolean; previous?: string[]; programme?: string[] }): string[] {
   const suspects = suspectPairs(items, opts.strict);
   const criterion = opts.strict
-    ? `Le programme a au moins autant de notions que l'examen a de questions : UNE NOTION = UNE QUESTION. Deux questions sur la même notion (le biais de négativité, le nudge, la souveraineté des données…) sont des doublons même sous deux angles différents. Deux questions qui s'appuient sur le MÊME exemple ou la MÊME étude du cours (même passage précis, même fait concret cité) sont aussi des doublons, même si l'une en demande les chiffres et l'autre ce qu'ils illustrent (finition v6, job 28 : la même comparaison chiffrée d'un grand quotidien et d'une encyclopédie collaborative) — ce n'est jamais un angle distinct, seulement l'habillage de la question qui change.`
+    ? `Le programme a au moins autant de notions que l'examen a de questions : UNE NOTION = UNE QUESTION. Deux questions sur la même notion (le biais de négativité, le nudge, la souveraineté des données…) sont des doublons même sous deux angles différents : liste-les en paire. Un même libellé large (une notion-parapluie qui regroupe plusieurs notions du programme) ne fait pas à lui seul un doublon : deux questions rangées dessous qui testent des notions du programme ou des règles distinctes restent toutes les deux. Deux questions qui s'appuient sur le MÊME exemple ou la MÊME étude du cours (même passage précis, même fait concret cité) sont aussi des doublons, même si l'une en demande les chiffres et l'autre ce qu'ils illustrent (finition v6, job 28 : la même comparaison chiffrée d'un grand quotidien et d'une encyclopédie collaborative) — ce n'est jamais un angle distinct, seulement l'habillage de la question qui change.`
     : `L'examen a plus de questions que le programme n'a de notions : deux questions sur une même notion sont permises si elles testent des angles VRAIMENT distincts (un autre fait, une autre condition, une autre étude) ; sont des doublons celles qui testent le même fait, la même condition, le même scénario ou le même raisonnement, même si l'une transforme la réponse de l'autre en distracteur ou reformule la question. Un décor différent (livraison de repas, e-commerce…) habillant la MÊME règle, avec la même réponse logique, reste un doublon : seul le FOND compte, jamais l'habillage. Reprendre le même exemple ou la même étude sous un angle vraiment distinct reste permis ici : le programme n'a pas assez de notions pour l'exclure.`;
   return [
     `Pour chaque QCM, nomme la notion du cours qu'il teste (notion, le MÊME libellé exact pour deux questions sur la même notion, même formulées autrement ou dans deux langues), l'angle précis (angle), et la règle ou réponse logique exacte qu'il vérifie SANS le décor du scénario (regle, le MÊME libellé exact si deux questions vérifient la même règle sous un décor différent).`,
@@ -1503,19 +1503,21 @@ function decideDuplicates(items: QcmItem[], r: DupAnswer, opts: { strict: boolea
   // Les questions de l'accent demandé par l'étudiant portent volontairement sur un même thème :
   // elles ne sont pas des doublons ENTRE ELLES (une autre question sur ce thème, si).
   const focusPair = (a: number, b: number) => !!items[a]?.focusSlot && !!items[b]?.focusSlot;
-  // Par libellé : la première question d'une notion (ou d'une notion et d'un angle) reste.
-  const first = new Map<string, number>();
-  items.forEach((_, i) => {
-    // Sans notion, ou (hors mode strict) sans angle : pas de décision par libellé, seules les paires comptent.
-    if (!notions[i] || (!opts.strict && !angles[i])) return;
-    const key = opts.strict ? normalize(notions[i]) : `${normalize(notions[i])}\u0000${normalize(angles[i])}`;
-    const holder = first.get(key);
-    if (holder === undefined) first.set(key, i);
-    else if (!focusPair(holder, i)) drop.add(i);
-  });
-  // Même règle logique sous un décor différent (livraison de repas / e-commerce…) : un doublon
-  // même si l'angle (le décor) diffère — seul le mode strict ignore déjà l'angle.
+  // Par libellé (hors mode strict) : la première question d'une notion et d'un angle reste. En mode
+  // strict, le libellé libre du modèle ne décide rien (PR #94 : une notion-parapluie retirait des
+  // questions sur des notions planifiées distinctes, régénérées en boucle jusqu'au budget) ; une
+  // notion = une question tient par le plafond sur la notion planifiée et par les paires signalées.
   if (!opts.strict) {
+    const first = new Map<string, number>();
+    items.forEach((_, i) => {
+      if (!notions[i] || !angles[i]) return;
+      const key = `${normalize(notions[i])}\u0000${normalize(angles[i])}`;
+      const holder = first.get(key);
+      if (holder === undefined) first.set(key, i);
+      else if (!focusPair(holder, i)) drop.add(i);
+    });
+    // Même règle logique sous un décor différent (livraison de repas / e-commerce…) : un doublon
+    // même si l'angle (le décor) diffère.
     const firstByRule = new Map<string, number>();
     items.forEach((_, i) => {
       if (!notions[i] || !regles[i]) return;
@@ -2233,11 +2235,11 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     if (factMode) for (const i of intra) if (cands[i].factId && !sameFact.has(i) && out[i]) softFallback.set(cands[i].stem, out[i]!);
     const dropped = new Set([...(dup?.drop ?? []), ...sameFact]);
     for (const i of [...intra, ...sameFact]) auditDuplicates.add(cands[i].stem);
-    // Plafonds par notion sur l'ensemble (questions déjà retenues d'abord) : notion du programme
-    // (sujet du lot) et notion nommée par la revue — celle de leur propre revue pour les questions
-    // déjà retenues —, puis notion de la bonne réponse.
+    // Plafonds par notion sur l'ensemble (questions déjà retenues d'abord) : notion planifiée (sujet
+    // du lot), jamais le libellé libre de la revue (PR #94 : notion-parapluie), puis notion de la
+    // bonne réponse.
     const rest = cands.map((_, i) => i).filter((i) => out[i] && !dropped.has(i));
-    const capped = capDrops([...current, ...rest.map((i) => out[i]!)], caps, (it, k) => [it.notion, k >= current.length ? dup?.notions[rest[k - current.length]] : reviewed.get(it.stem)?.notion])
+    const capped = capDrops([...current, ...rest.map((i) => out[i]!)], caps, (it) => [it.notion])
       .filter((k) => k >= current.length).map((k) => rest[k - current.length]);
     for (const i of capped) { auditDuplicates.add(cands[i].stem); softFallback.delete(cands[i].stem); }
     if (!dup) step(`Doublons : revue finale indisponible, plafonds par notion appliqués seuls (${capped.length} retrait(s))`, 80);
