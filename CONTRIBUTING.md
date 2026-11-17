@@ -67,6 +67,7 @@ Décrire ce qui a été testé, et ce qui ne l'a pas été. Un changement qui n'
 
 ## Style
 
-- Interface et messages utilisateur en français.
+- Interface en français et en anglais : tout texte visible passe par `cortex/messages/fr.json` et `cortex/messages/en.json` (`useTranslations` dans un Client Component, `await getT()` dans un Server Component, `translator(locale)` hors React). Une clé absente casse `tsc` ; `tests/i18n-messages.test.ts` vérifie la parité des deux langues et `tests/i18n-hardcoded.test.ts` refuse tout texte écrit en dur dans `app/`, `components/` et `lib/ux/`. Langue : celle du compte, sinon du sélecteur (cookie `cortex_locale`), sinon du navigateur, sinon l'anglais (`lib/i18n/locale.ts`). Nombres, prix et dates : `fmt(locale)` / `useFmt()` (`lib/i18n/format.ts`), jamais de `fr-FR` en dur.
+- Le contenu d'un cours (énoncés, extraits, corrigés) garde **sa** langue : son conteneur porte `lang={course.language}`.
 - Thème sombre partout, y compris sur les pages d'erreur.
 - Les commentaires expliquent les décisions non évidentes et les pièges, pas la syntaxe.
