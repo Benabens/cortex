@@ -87,13 +87,6 @@ export function toStatus(status: string, mastery: number | null): Status {
 export function toSeverity(level: number): Severity {
   if (level >= 3) return "GROS";
   if (level === 2) return "MOYEN";
+  // i18n-allow: code de sévérité stable du back, jamais affiché
   return "LÉGER";
-}
-
-/** "2026-06-24 21:30:34" → "24 juin" (fr, sans heure). Retourne null si illisible. */
-export function formatDay(sql: string | null | undefined): string | null {
-  if (!sql || typeof sql !== "string") return null;
-  const d = new Date(sql.replace(" ", "T"));
-  if (isNaN(d.getTime())) return null;
-  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
 }
