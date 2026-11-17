@@ -3,6 +3,8 @@
 import { useEffect } from "react";
 import { Wordmark } from "@/components/shell/Logo";
 import { captureClientError } from "@/lib/observability-browser";
+import { useTranslations } from "use-intl/react";
+import Link from "next/link";
 
 /**
  * Erreur de segment (route sous le layout racine), aux jetons de l'app : sombre
@@ -16,6 +18,7 @@ export default function Error({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const t = useTranslations("errorPage");
   useEffect(() => {
     console.error(error);
     // Rattrapée par cette frontière, l'erreur n'atteint jamais window.onerror : on la signale ici.
@@ -49,14 +52,13 @@ export default function Error({
         <div style={{ display: "flex", justifyContent: "center" }}>
           <Wordmark markSize={24} textSize="1.15rem" />
         </div>
-        <h1 style={{ fontSize: 22, fontWeight: 700, margin: "14px 0 8px" }}>Une erreur est survenue</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 700, margin: "14px 0 8px" }}>{t("title")}</h1>
         <p style={{ fontSize: 14, lineHeight: 1.55, color: "var(--color-ink-2, #bfc1c9)", margin: 0 }}>
-          Quelque chose s’est mal passé de notre côté. Tu peux réessayer. Si ça
-          persiste, reviens à l’accueil et relance ton action.
+          {t("description")}
         </p>
         {error?.digest && (
           <p style={{ fontSize: 12, color: "var(--color-ink-3, #9295a0)", marginTop: 12, fontVariantNumeric: "tabular-nums" }}>
-            réf. {error.digest}
+            {t("reference", { digest: error.digest })}
           </p>
         )}
         <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 22, flexWrap: "wrap" }}>
@@ -74,9 +76,9 @@ export default function Error({
               background: "var(--color-primary, #ececee)",
             }}
           >
-            Réessayer
+            {t("retry")}
           </button>
-          <a
+          <Link
             href="/"
             style={{
               display: "inline-flex",
@@ -90,8 +92,8 @@ export default function Error({
               textDecoration: "none",
             }}
           >
-            Retour à l’accueil
-          </a>
+            {t("home")}
+          </Link>
         </div>
       </div>
     </div>
