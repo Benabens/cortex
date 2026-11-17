@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
+import { useLocale } from "use-intl/react";
 import { remainingLine, type KindUsage, type UsageLimits } from "@/lib/billing/limits-text";
 import { watchPageRestore } from "@/lib/ux/bfcache";
 import { cn } from "@/lib/ux/cn";
@@ -85,6 +86,8 @@ export function useLaunchUsage(kind: UsageKind, target?: Record<string, unknown>
  * c'est le solde). Rien quand rien ne limite.
  */
 export function UsageLine({ usage, now, className }: { usage: KindUsage | null; now: string; className?: string }) {
+  // Langue de l'écran passée explicitement : côté client, currentLocale() n'a pas de requête.
+  const locale = useLocale();
   if (!usage) return null;
   // Solde trop bas : l'encart d'achat dit le prix et mène à l'achat, au lieu du message brut avec son lien.
   if (!usage.allowed && usage.blockedBy === "credits") {
@@ -98,7 +101,7 @@ export function UsageLine({ usage, now, className }: { usage: KindUsage | null; 
       </p>
     );
   }
-  const line = remainingLine(usage, now);
+  const line = remainingLine(usage, now, locale);
   if (!line) return null;
   return <p data-testid="usage-remaining" className={cn("text-[0.8rem] text-ink-3", className)}>{line}</p>;
 }
