@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { useLocale, useTranslations } from "use-intl/react";
 import { Segmented, type SegmentedOption } from "@/components/ui/Segmented";
-import { LOCALE_COOKIE, LOCALE_NAMES, LOCALES, type Locale } from "@/lib/i18n/locale";
+import { LOCALE_NAMES, LOCALES, localeCookie, type Locale } from "@/lib/i18n/locale";
 
 const OPTIONS: SegmentedOption<Locale>[] = LOCALES.map((l) => ({ value: l, label: LOCALE_NAMES[l], lang: l }));
 
@@ -22,13 +22,15 @@ export function LocaleSwitcher({ persist, className }: { persist: boolean; class
   async function choose(next: Locale) {
     if (next === locale) return;
     setFailed(false);
-    document.cookie = `${LOCALE_COOKIE}=${next}; path=/; max-age=31536000; samesite=lax`;
     if (persist) {
+      // La route enregistre le compte ET pose le cookie : en cas d'échec, rien ne change
+      // (cookie compris), sinon le cookie dirait une langue que l'écran n'affiche pas.
       const res = await fetch("/api/account/locale", {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ locale: next }),
       }).catch(() => null);
-      // La langue du compte prime sur le cookie : sans enregistrement, rien ne changerait.
       if (!res?.ok) { setFailed(true); return; }
+    } else {
+      document.cookie = localeCookie(next);
     }
     startTransition(() => router.refresh());
   }

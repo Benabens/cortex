@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { IntlProvider as UseIntlProvider } from "use-intl/react";
-import { LOCALE_COOKIE, type Locale } from "@/lib/i18n/locale";
+import { LOCALE_COOKIE, localeCookie, type Locale } from "@/lib/i18n/locale";
 import { APP_TIME_ZONE, type Messages } from "@/lib/i18n/messages";
 
 /**
@@ -20,7 +20,7 @@ export function IntlProvider({ locale, messages, syncCookie, children }: {
   useEffect(() => {
     if (!syncCookie) return;
     if (document.cookie.split("; ").includes(`${LOCALE_COOKIE}=${locale}`)) return;
-    document.cookie = `${LOCALE_COOKIE}=${locale}; path=/; max-age=31536000; samesite=lax`;
+    document.cookie = localeCookie(locale);
   }, [locale, syncCookie]);
   return (
     <UseIntlProvider locale={locale} messages={messages} timeZone={APP_TIME_ZONE}>
