@@ -1,5 +1,6 @@
 // Infrastructure Railway de Cortex (projet « wonderful-creativity »), décrite en
-// code. Remplace railway.json, que Railway cesse de lire le 2026-12-01.
+// code. Remplace railway.json (supprimé) ; Railway cesse de lire ce format le
+// 2026-12-01.
 //
 // Ce fichier n'est lu que par la CLI : `railway config plan` (aperçu, sans
 // effet) et `railway config apply` (applique). Un déploiement ne le lit jamais.
