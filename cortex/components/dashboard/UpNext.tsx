@@ -2,6 +2,7 @@ import Link from "next/link";
 import { asText } from "@/lib/ux/api";
 import { rowFacts, rowFactsSpoken, trainHref } from "@/lib/ux/next-up";
 import type { DashNext } from "@/lib/ux/types";
+import { useTranslations } from "use-intl/react";
 
 /**
  * « Ensuite » : les notions qui suivent par priorité, en liste à filets. Le nom à gauche, les
@@ -9,6 +10,7 @@ import type { DashNext } from "@/lib/ux/types";
  * sur sa notion. Liste vide (une seule notion au programme) → rien n'est rendu.
  */
 export function UpNext({ topics }: { topics: DashNext[] }) {
+  const t = useTranslations("dashboard");
   const rows = topics
     .map((t) => ({ t, label: asText(t.label) }))
     .filter((r): r is { t: DashNext; label: string } => !!r.label);
@@ -17,7 +19,7 @@ export function UpNext({ topics }: { topics: DashNext[] }) {
   return (
     <section className="d2-card p-5 sm:p-7" aria-labelledby="upnext-title">
       <h2 id="upnext-title" className="mb-3 text-lg font-semibold text-ink-1">
-        Ensuite
+        {t("upNext")}
       </h2>
       <ul className="divide-y divide-line">
         {rows.map(({ t, label }) => {

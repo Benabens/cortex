@@ -1,6 +1,7 @@
 import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { StepList } from "./StepList";
+import { useTranslations } from "use-intl/react";
 
 /**
  * PREMIER LANCEMENT — un compte sans AUCUN cours. On ne montre ni tableau de
@@ -9,18 +10,19 @@ import { StepList } from "./StepList";
  * (qui, lui, s'adresse à un cours existant mais pas encore préparé).
  */
 export function FirstRunHero() {
+  const t = useTranslations("dashboard");
   const steps = [
     {
-      title: "Crée ta matière",
-      desc: "Son nom, son code, son établissement. Une minute.",
+      title: t("firstStep1Title"),
+      desc: t("firstStep1Description"),
     },
     {
-      title: "Dépose tes annales",
-      desc: "Les vrais examens passés du cours (PDF, HTML…).",
+      title: t("firstStep2Title"),
+      desc: t("firstStep2Description"),
     },
     {
-      title: "Cortex apprend le format",
-      desc: "Types d’exercices, barème réel, pièges récurrents.",
+      title: t("firstStep3Title"),
+      desc: t("firstStep3Description"),
     },
   ];
 
@@ -28,18 +30,17 @@ export function FirstRunHero() {
     <section className="d2-card relative overflow-hidden" aria-labelledby="firstrun-title">
       <div className="relative p-5 sm:p-7">
         <h2 id="firstrun-title" className="max-w-xl text-[1.75rem] font-semibold leading-[1.1] sm:text-[2.15rem]">
-          Commence par créer ta première matière.
+          {t("firstTitle")}
         </h2>
         <p className="mt-3 max-w-xl text-[0.95rem] leading-relaxed text-ink-2">
-          Cortex apprend le format d’un examen à partir de ses annales, puis génère des
-          sujets d’entraînement qui lui ressemblent vraiment. Tout part d’un cours : le tien.
+          {t("firstDescription")}
         </p>
 
         <StepList steps={steps} />
 
         <div className="mt-6">
           <Button variant="primary" size="lg" href="/cours/nouveau">
-            Créer ma matière
+            {t("firstCreate")}
             <ArrowRight className="size-4" strokeWidth={2.5} />
           </Button>
         </div>
