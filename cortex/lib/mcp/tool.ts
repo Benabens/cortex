@@ -2,6 +2,7 @@ import type { InputRequiredResult } from "@modelcontextprotocol/server";
 import type * as z from "zod/v4";
 import type { CourseConfig } from "@/lib/courses";
 import type { Principal } from "@/lib/oauth/server";
+import type { ErrorCode } from "@/lib/i18n/user-error";
 
 /**
  * CONTRAT D'UN OUTIL MCP — une capacité = un fichier de lib/mcp/tools/, déclaré
@@ -46,14 +47,14 @@ export type ToolErrorCode =
   | "internal";
 
 /**
- * Erreur attendue d'un outil : son message va TEL QUEL au client (français,
+ * Erreur attendue d'un outil : son message va TEL QUEL au client (anglais,
  * sans contenu de cours, sans détail technique). Toute autre exception devient
  * « internal » avec un message générique.
  */
 export class ToolError extends Error {
   /** Cause précise côté moteur (BAD_OUTPUT, OVERLOADED, TIMEOUT…), exposée avec le code. */
   readonly reason?: string;
-  constructor(readonly code: ToolErrorCode, message: string, reason?: string) {
+  constructor(readonly code: ToolErrorCode, message: string, reason?: string, readonly appCode?: ErrorCode) {
     super(message);
     this.name = "ToolError";
     if (reason) this.reason = reason;
@@ -65,11 +66,11 @@ export class ToolError extends Error {
  * l'app (solde insuffisant…) finissent par « Acheter : <lien vers les crédits> », utile
  * dans l'app mais interdit dans un assistant : ChatGPT refuse qu'une app vende des
  * crédits ou renvoie vers une page de paiement (plugin guidelines, 16/11/2026). Le
- * constat reste (« Solde insuffisant… »), la personne recharge depuis Cortex.
+ * constat reste (« Insufficient balance… »), la personne recharge depuis Cortex.
  */
 export function assistantSafeMessage(message: string): string {
   return message
-    .replace(/\s*(?:Acheter|Recharger|Buy)\s*:\s*\S+/gi, "")
+    .replace(/\s*(?:Acheter|Recharger|Buy(?: credits?)?)\s*:\s*\S*/gi, "")
     .replace(/\s*https?:\/\/\S*\/compte#(?:credits|abonnement|billing)\S*/gi, "")
     .trim();
 }
@@ -110,10 +111,17 @@ export type Confirmation =
  * interactive). Jamais de jeton de repli : une confirmation ratée ne se
  * transforme pas en devis que le modèle pourrait confirmer seul.
  */
-export type DeclinedView = { action: "decline" | "cancel"; cost_credits: number | null; summary: string };
+export type PaymentFields = {
+  cost: { credits: number; centi: number };
+  balance: { credits: number } | null;
+  remaining?: number;
+  resetAt?: string;
+};
+
+export type DeclinedView = PaymentFields & { action: "decline" | "cancel"; cost_credits: number | null; summary: string };
 
 /** Devis rendu au client qui ne gère pas l'élicitation (second appel avec le jeton). */
-export type QuoteView = {
+export type QuoteView = PaymentFields & {
   cost_credits: number | null;
   balance_credits: number | null;
   balance_after_credits: number | null;
@@ -177,7 +185,7 @@ export type ToolDef<I extends z.ZodObject = z.ZodObject, O extends z.ZodObject =
   title: string;
   /** Écrite pour qu'un modèle choisisse le bon outil (anglais). */
   description: string;
-  /** Une ligne en français pour la personne (page « Connecter ton assistant »), sans jargon. */
+  /** Une ligne en français pour la personne (page « Connecter ton assistant »), sans jargon ; traduite avec l'interface. */
   userSummary: string;
   kind: ToolKind;
   annotations: ToolHints;
@@ -191,12 +199,12 @@ export type ToolDef<I extends z.ZodObject = z.ZodObject, O extends z.ZodObject =
    * (élicitation) via ctx.confirm.
    */
   run(args: z.infer<I>, ctx: ToolCtx): Promise<z.infer<O> | InputRequiredResult>;
-  /** Résumé lisible (français) placé avant le bloc de données. */
+  /** Résumé lisible (anglais) placé avant le bloc de données. */
   summarize(out: z.infer<O>): string;
 };
 
-/** Libellé français d'un compteur du jour (devis, refus). */
-export const QUOTA_LABEL: Record<QuoteView["daily_quota"]["kind"], string> = { generations: "générations", assistance: "assistances" };
+/** Libellé anglais d'un compteur du jour (devis, refus). */
+export const QUOTA_LABEL: Record<QuoteView["daily_quota"]["kind"], string> = { generations: "generations", assistance: "assistance calls" };
 
 /**
  * Issue d'une confirmation qui N'AUTORISE PAS encore la dépense : la question au

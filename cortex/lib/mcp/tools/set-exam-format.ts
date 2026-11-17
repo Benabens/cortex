@@ -5,6 +5,7 @@ import { reloadCourses } from "@/lib/courses";
 import { resolveExamFormat } from "@/lib/exam-format";
 import { courseArg, courseRef, courseRefOf, examFormatInput, examFormatOf, examFormatSchema } from "../schemas";
 import { ToolError, defineTool } from "../tool";
+import { errorText } from "@/lib/i18n/user-error";
 
 const output = z.object({
   status: z.enum(["updated"]),
@@ -36,21 +37,21 @@ export default defineTool({
   }),
   output,
   async run(args, ctx) {
-    if (!args.clear && !args.kind) throw new ToolError("invalid_input", "Donne « kind » (qcm, exercises, mixed, composite, essay ou oral), ou clear=true pour effacer le format déclaré.");
+    if (!args.clear && !args.kind) throw new ToolError("invalid_input", "Provide “kind” (qcm, exercises, mixed, composite, essay, or oral), or use clear=true to remove the declared format.");
     return ctx.inCourse(args.course, async (c) => {
       let column: string | null = null;
       if (!args.clear) {
         try {
           column = declaredFormatColumn({ kind: args.kind, questionCount: args.question_count, durationMin: args.duration_min, language: args.language, answerMode: args.answer_mode, documents: args.documents });
         } catch (e) {
-          if (e instanceof InvalidCourseError) throw new ToolError("invalid_input", e.message);
+          if (e instanceof InvalidCourseError) throw new ToolError("invalid_input", errorText("en", e), undefined, e.code);
           throw e;
         }
       }
-      if (!(await updateCourseRow(c.id, ctx.principal.userId, { exam_format: column }))) throw new ToolError("not_found", "Cours introuvable.");
+      if (!(await updateCourseRow(c.id, ctx.principal.userId, { exam_format: column }))) throw new ToolError("not_found", "Course not found.");
       await reloadCourses();
       return { status: "updated" as const, course: courseRefOf(c), exam_format: examFormatOf(await resolveExamFormat()) };
     });
   },
-  summarize: (o) => `Format d'examen de ${o.course.label} : ${o.exam_format.kind ? o.exam_format.summary : "inconnu (rien de déclaré)"}.`,
+  summarize: (o) => `${o.course.label} exam format: ${o.exam_format.kind ? o.exam_format.summary : "unknown (nothing declared)"}.`,
 });

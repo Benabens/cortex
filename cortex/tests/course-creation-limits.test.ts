@@ -166,7 +166,8 @@ test("l'outil MCP transforme le refus commun en conflit lisible", async () => {
   await assert.rejects(tool.run({ name: "Cours MCP" }, ctx), (error: unknown) => {
     assert.ok(error instanceof ToolError);
     assert.equal(error.code, "conflict");
-    assert.equal(error.message, "Tu as atteint la limite de 0 cours. Supprime un cours pour en créer un nouveau.");
+    assert.equal(error.message, "You have reached the limit of 0 courses. Delete a course before creating a new one.");
+    assert.equal(error.appCode, "course_count_limit");
     return true;
   });
 });

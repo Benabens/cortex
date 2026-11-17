@@ -130,9 +130,9 @@ test("connecteur MCP : chaque cause a son message et son code, jamais « unknown
   const credits = await import("../lib/billing/credits");
   const before = await credits.getBalanceCenti("owner");
   const cases: [Error, RegExp][] = [
-    [new LlmError("Le modèle a renvoyé une réponse illisible 3 fois de suite (x).", "BAD_OUTPUT"), /illisible[\s\S]*Rien n'a été débité/],
-    [new LlmError("529 overloaded_error", "OVERLOADED", true), /surchargé ou injoignable/],
-    [new LlmError("Request timed out", "TIMEOUT", true), /trop de temps/],
+    [new LlmError("Le modèle a renvoyé une réponse illisible 3 fois de suite (x).", "BAD_OUTPUT"), /unreadable[\s\S]*Nothing was charged/],
+    [new LlmError("529 overloaded_error", "OVERLOADED", true), /overloaded or unreachable/],
+    [new LlmError("Request timed out", "TIMEOUT", true), /too long to respond/],
   ];
   for (const [err, msg] of cases) {
     await assert.rejects(runAssist("drill", async () => { throw err; }), (e: unknown) => e instanceof ToolError && e.code === "unavailable" && e.reason === (err as InstanceType<typeof LlmError>).code && msg.test(e.message) && !/529|overloaded_error|timed out/.test(e.message));

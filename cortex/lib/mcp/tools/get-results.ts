@@ -85,5 +85,5 @@ export default defineTool({
       };
     });
   },
-  summarize: (o) => `${o.course.label} : ${o.mock_exams.length} examen(s) blanc(s) récent(s), ${o.practice_scores.length} notion(s) déjà travaillée(s).`,
+  summarize: (o) => `${o.course.label}: ${o.mock_exams.length} recent mock exam(s), ${o.practice_scores.length} practised topic(s).`,
 });

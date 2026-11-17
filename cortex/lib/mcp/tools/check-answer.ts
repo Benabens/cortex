@@ -47,13 +47,13 @@ export default defineTool({
       const statement = args.statement.trim();
       const answer = args.answer.trim();
       const decision = await ctx.confirm(
-        { bucket: "assist", kind: "check", costCenti: creditCost("assist"), summary: `Corriger une réponse avec le barème de ${courseLabel(c)}.` },
+        { bucket: "assist", kind: "check", costCenti: creditCost("assist"), summary: `Grade an answer using ${courseLabel(c)}’s rubric.` },
         { course: c.id, statement, answer },
         args.confirmation_token,
       );
       const pending = pendingResult(decision, base);
       if (pending) return pending;
-      await ctx.progress("Correction en cours…");
+      await ctx.progress("Grading the answer…");
       const r = await runAssist("check-solution", () => checkSolution({ statement, answer, imageRel: null }));
       return {
         ...base,
@@ -71,6 +71,6 @@ export default defineTool({
   summarize: (o) => {
     if (o.status === "confirmation_required" && o.confirmation) return quoteSummary(o.confirmation);
     if (o.status === "declined" && o.declined) return declinedSummary(o.declined);
-    return o.result ? `Correction : ${o.result.verdict}, ${o.result.score.earned}/${o.result.score.total}.` : "Correction terminée.";
+    return o.result ? `Grading result: ${o.result.verdict}, ${o.result.score.earned}/${o.result.score.total}.` : "Grading complete.";
   },
 });

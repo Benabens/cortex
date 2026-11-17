@@ -4,7 +4,7 @@ import {
   type RequestStateCodec, type ServerContext,
 } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
-import { billingEnabled, fmtCredits, fromCenti, getBalanceCenti } from "@/lib/billing/credits";
+import { billingEnabled, fromCenti, getBalanceCenti } from "@/lib/billing/credits";
 import { dailyLimit, usedToday } from "@/lib/billing/guards";
 import { LAUNCH_KINDS, kindUsage, launchVerdict, readLimitsState, type LaunchSpec } from "@/lib/billing/limits";
 import { afterLine, type KindUsage } from "@/lib/billing/limits-text";
@@ -12,6 +12,7 @@ import { isOwner } from "@/lib/billing/owner";
 import { llmUnavailableReason } from "@/lib/llm";
 import { log } from "@/lib/metrics";
 import type { Principal } from "@/lib/oauth/server";
+import { errorText } from "@/lib/i18n/user-error";
 import { QUOTE_TTL_S, argsHash, burnOpenQuotes, hasUnansweredQuote, issueQuote, quoteRef, redeemQuote, redeemQuoteRef } from "./quotes";
 import { QUOTA_LABEL, ToolError, codeForStatus, type Confirmation, type Cost, type Era } from "./tool";
 
@@ -86,7 +87,7 @@ export async function verifyRequestState(state: string, ctx: ServerContext): Pro
   }
 }
 
-const confirmSchema = z.object({ confirm: z.boolean().meta({ title: "Confirmer" }) });
+const confirmSchema = z.object({ confirm: z.boolean().meta({ title: "Confirm" }) });
 
 function bucketLabel(bucket: Cost["bucket"]): "generations" | "assistance" {
   return bucket === "gen" ? "generations" : "assistance";
@@ -109,9 +110,9 @@ async function precheck(cost: Cost): Promise<KindUsage> {
   const state = await readLimitsState();
   const spec = specOfCost(cost);
   const refusal = launchVerdict(state, spec);
-  if (refusal) throw new ToolError(codeForStatus(refusal.status), refusal.error);
+  if (refusal) throw new ToolError(codeForStatus(refusal.status), errorText("en", refusal), undefined, refusal.code);
   const engine = llmUnavailableReason();
-  if (engine) throw new ToolError("unavailable", engine);
+  if (engine) throw new ToolError("unavailable", errorText("en", { code: "llm_engine_unavailable" }), undefined, "llm_engine_unavailable");
   const k = LAUNCH_KINDS[cost.kind];
   return kindUsage(state, spec, cost.kind, k.label, k.plural);
 }
@@ -136,9 +137,9 @@ function showsElicitation(clientName: string | null): boolean {
 const ELICITATION_FALLBACK_S = 30;
 
 function costPhrase(costCenti: number, billing: boolean, owner: boolean): string {
-  if (!billing) return "sans crédit (facturation désactivée sur cette instance)";
-  if (owner) return "sans crédit (compte propriétaire)";
-  return `${fmtCredits(costCenti)} crédit${costCenti > 100 ? "s" : ""}`;
+  if (!billing) return "0 credits (billing is disabled on this instance)";
+  if (owner) return "0 credits (owner account)";
+  return `${fromCenti(costCenti)} credit${costCenti === 100 ? "" : "s"}`;
 }
 
 export async function confirmCost(
@@ -161,17 +162,23 @@ export async function confirmCost(
     const outcome = await redeemQuote(token, binding);
     if (outcome === "ok") return { kind: "confirmed" };
     throw new ToolError("confirmation_invalid", outcome === "cost_changed"
-      ? "Le tarif a changé depuis le devis : rien n'a été débité. Redemande un devis (appel sans confirmation_token)."
-      : "Jeton de confirmation invalide, expiré, déjà utilisé ou donné pour d'autres arguments : rien n'a été débité. Redemande un devis (appel sans confirmation_token).");
+      ? "The price has changed since the quote. Nothing was charged. Request a new quote by calling without confirmation_token."
+      : "The confirmation token is invalid, expired, already used, or tied to different arguments. Nothing was charged. Request a new quote by calling without confirmation_token.");
   }
 
   const used = await usedToday(cost.bucket);
   const limit = await dailyLimit(cost.bucket);
   const balance = billing ? await getBalanceCenti() : null;
-  const quotaText = limit === null ? "quota du jour non limité" : `${QUOTA_LABEL[bucketLabel(cost.bucket)]} aujourd'hui : ${used}/${limit}`;
-  const message = `${cost.summary} Coût : ${costPhrase(costCenti, billing, owner)}` +
-    (balance !== null ? ` (solde ${fmtCredits(balance)} → ${fmtCredits(balance - costCenti)})` : "") + `, ${quotaText}.` +
-    (afterLine(usage) ? ` ${afterLine(usage)}.` : "") + " Confirmer ?";
+  const quotaText = limit === null ? "no daily quota" : `${QUOTA_LABEL[bucketLabel(cost.bucket)]} today: ${used}/${limit}`;
+  const message = `${cost.summary} Exact cost: ${costPhrase(costCenti, billing, owner)}` +
+    (balance !== null ? ` (balance ${fromCenti(balance)} → ${fromCenti(balance - costCenti)})` : "") + `; ${quotaText}.` +
+    (afterLine(usage) ? ` ${afterLine(usage)}.` : "") + " Confirm?";
+  const payment = {
+    cost: { credits: fromCenti(costCenti), centi: costCenti },
+    balance: balance === null ? null : { credits: fromCenti(balance) },
+    ...(usage.remaining !== null ? { remaining: Math.max(0, usage.remaining - 1) } : {}),
+    ...(usage.resetAt ? { resetAt: usage.resetAt } : {}),
+  };
 
   // Capacités déclarées PAR REQUÊTE (ère 2026-07-28). Le type d'enveloppe du SDK est vide : lecture explicite.
   const envelope = p.mcpReq.envelope as Record<string, unknown> | undefined;
@@ -183,7 +190,7 @@ export async function confirmCost(
   if (elicit) {
     const declined = (action: "decline" | "cancel"): Confirmation => ({
       kind: "declined",
-      declined: { action, cost_credits: billing ? fromCenti(costCenti) : null, summary: cost.summary },
+      declined: { action, cost_credits: billing ? fromCenti(costCenti) : null, summary: cost.summary, ...payment },
     });
     const raw = p.mcpReq.requestState<StatePayload | Stale>();
     const stale = !!raw && "stale" in raw;
@@ -198,7 +205,7 @@ export async function confirmCost(
     const accepted = acceptedContent(p.mcpReq.inputResponses, "confirm", confirmSchema);
     if (accepted?.confirm === true && bound) {
       if ((await redeemQuoteRef(state.n, binding)) === "ok") return { kind: "confirmed" };
-      throw new ToolError("confirmation_invalid", "Cette confirmation a déjà servi ou a expiré : rien n'a été débité. Relance la demande pour une nouvelle confirmation.");
+      throw new ToolError("confirmation_invalid", "This confirmation has already been used or has expired. Nothing was charged. Start the request again for a new confirmation.");
     }
     if (accepted && accepted.confirm !== true) {
       if (bound) await burnOpenQuotes(binding);
@@ -206,15 +213,18 @@ export async function confirmCost(
     }
     return {
       kind: "input_required",
-      result: inputRequired({
+      result: {
+        ...inputRequired({
         inputRequests: {
           confirm: inputRequired.elicit({
-            message: stale ? `La confirmation précédente a expiré ou n'est plus valable : rien n'a été lancé ni débité. ${message}` : message,
+            message: stale ? `The previous confirmation expired or is no longer valid. Nothing was started or charged. ${message}` : message,
             requestedSchema: confirmSchema,
           }),
         },
         requestState: await requestStateCodec().mint({ u: binding.userId, g: binding.grantId, t: p.tool, h, c: costCenti, n: quoteRef(await issueQuote(binding)) }),
-      }),
+        }),
+        ...payment,
+      },
     };
   }
 
@@ -226,6 +236,7 @@ export async function confirmCost(
       balance_credits: balance === null ? null : fromCenti(balance),
       balance_after_credits: balance === null ? null : fromCenti(balance - costCenti),
       daily_quota: { kind: bucketLabel(cost.bucket), used, limit },
+      ...payment,
       summary: message,
       confirmation_token: quoteToken,
       expires_in_seconds: QUOTE_TTL_S,

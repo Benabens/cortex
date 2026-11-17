@@ -6,6 +6,7 @@ import { courseLabel } from "../courses";
 import { LANGUAGES } from "@/lib/exam-format";
 import { courseRef, courseRefOf, examFormatInput } from "../schemas";
 import { ToolError, defineTool } from "../tool";
+import { errorText } from "@/lib/i18n/user-error";
 
 
 const output = z.object({
@@ -40,29 +41,29 @@ export default defineTool({
     await ensureCoursesLoaded();
     const code = args.code?.trim();
     const twin = code ? listCoursesOf(userId).find((c) => c.examCode?.toLowerCase() === code.toLowerCase()) : undefined;
-    if (twin) throw new ToolError("conflict", `Un cours porte déjà le code ${code} : ${courseLabel(twin)} (id ${twin.id}).`);
+    if (twin) throw new ToolError("conflict", `A course already uses code ${code}: ${courseLabel(twin)} (id ${twin.id}).`);
     let row;
     try {
       row = buildCourseRow({ name: args.name, code, university: args.university, language: args.language, examDate: args.exam_date, examFormat: args.exam_format }, userId);
     } catch (e) {
-      if (e instanceof InvalidCourseError) throw new ToolError("invalid_input", e.message);
+      if (e instanceof InvalidCourseError) throw new ToolError("invalid_input", errorText("en", e), undefined, e.code);
       throw e;
     }
     try {
       await insertCourse(row);
     } catch (e) {
-      if (e instanceof CourseCreationLimitError) throw new ToolError("conflict", e.message);
+      if (e instanceof CourseCreationLimitError) throw new ToolError("conflict", errorText("en", e), undefined, e.code);
       throw e;
     }
     // Le cache est la source de lecture du moteur et de list_courses : il doit voir le cours neuf.
     await reloadCourses();
     const created = listCoursesOf(userId).find((c) => c.id === row.id);
-    if (!created) throw new ToolError("internal", "Le cours a été enregistré mais n'est pas encore visible : réessaie list_courses dans un instant.");
+    if (!created) throw new ToolError("internal", "The course was saved but is not visible yet. Try list_courses again in a moment.");
     return {
       status: "created" as const,
       course: courseRefOf(created),
       next_steps: `Add materials with add_course_source (course="${created.id}"), then call prepare_course.`,
     };
   },
-  summarize: (o) => `Cours créé : ${o.course.label} (id ${o.course.id}). Ajoute ses supports avec add_course_source, puis lance prepare_course.`,
+  summarize: (o) => `Course created: ${o.course.label} (id ${o.course.id}). Add its materials with add_course_source, then call prepare_course.`,
 });

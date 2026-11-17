@@ -90,7 +90,7 @@ function assertStudentSafe(text: string) {
   assert.doesNotMatch(text, /\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b/, `pas de nom de variable : ${text}`);
 }
 
-test("trois chemins, un verdict : route, réservation et MCP refusent le même lancement avec le même message", async () => {
+test("trois chemins, un verdict : route et réservation gardent la langue de l’app, MCP rend le même code en anglais", async () => {
   await payingAccount("alice");
   await spend("alice", 9); // 9 + 4 attendus pour un QCM > 10 : refusé avant le lancement
   const cost = (await import("../lib/jobs")).costForJob("qcm", QCM_TARGET);
@@ -105,15 +105,18 @@ test("trois chemins, un verdict : route, réservation et MCP refusent le même l
   const route = await inMl("alice", () => preflightGeneration("qcm", QCM_TARGET));
   const reserved = await inMl("alice", () => reserve.reserveGeneration({ bucket: "gen", kind: "qcm", costCenti: cost, ref: `job:alice:ml:${++n}`, jobSlot: true }));
   const { confirmCost } = await import("../lib/mcp/confirm");
-  const mcp = await inMl("alice", () => confirmCost(
+  const { runWithLocale } = await import("../lib/i18n/context");
+  const english = await runWithLocale("en", () => inMl("alice", () => preflightGeneration("qcm", QCM_TARGET)));
+  const mcp = await runWithLocale("en", () => inMl("alice", () => confirmCost(
     { principal: { userId: "alice" } as never, era: "legacy" as never, mcpReq: {} as never, tool: "generate_mock_exam" },
-    { bucket: "gen", kind: "qcm", costCenti: cost, summary: "Examen QCM." }, {}, undefined,
-  ).then(() => null, (e: Error) => e.message));
+    { bucket: "gen", kind: "qcm", costCenti: cost, summary: "MCQ exam." }, {}, undefined,
+  ).then(() => null, (e: import("../lib/mcp/tool").ToolError) => e)));
 
-  assert.ok(route && !reserved.ok && mcp, "les trois chemins refusent");
+  assert.ok(route && english && !reserved.ok && mcp, "les trois chemins refusent");
   assert.equal(route.error, shown.check?.reason);
   assert.equal(!reserved.ok && reserved.error, shown.check?.reason);
-  assert.equal(mcp, shown.check?.reason);
+  assert.equal(mcp.message, english.error);
+  assert.equal(mcp.appCode, english.code);
   assert.equal(route.status, !reserved.ok ? reserved.status : -1);
   assertStudentSafe(route.error);
   assert.equal(await credits.getBalanceCenti("alice"), 5000, "rien n'est débité");

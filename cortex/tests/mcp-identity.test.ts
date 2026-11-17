@@ -177,7 +177,7 @@ test("annotations : un outil sans indication explicite fait échouer le registre
     delete partial[h];
     assert.throws(() => validateTools([{ ...base, annotations: partial } as unknown as typeof base]), new RegExp(h));
   }
-  assert.throws(() => validateTools([{ ...base, userSummary: "" }]), /résumé/);
+  assert.throws(() => validateTools([{ ...base, userSummary: "" }]), /summary/);
 });
 
 test("descriptions : sobres, dans les limites des annuaires, sans consigne cachée", async () => {

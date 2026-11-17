@@ -42,6 +42,6 @@ export default defineTool({
     return { courses };
   },
   summarize: (o) => o.courses.length
-    ? `${o.courses.length} cours : ${o.courses.map((c) => (c.code && c.code !== c.name ? `${c.code} (${c.name})` : c.name)).join(", ")}.`
-    : "Aucun cours sur ce compte.",
+    ? `${o.courses.length} course(s): ${o.courses.map((c) => (c.code && c.code !== c.name ? `${c.code} (${c.name})` : c.name)).join(", ")}.`
+    : "This account has no courses.",
 });

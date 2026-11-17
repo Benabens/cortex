@@ -6,9 +6,10 @@ import { mockExamJob, startGenerationJob } from "@/lib/generation";
 import { activeJob, costForJob } from "@/lib/jobs";
 import { log } from "@/lib/metrics";
 import { redactMessage } from "@/lib/observability";
+import { errorText } from "@/lib/i18n/user-error";
 import { clip } from "../content";
 import { courseLabel } from "../courses";
-import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, generationStatus, quoteSchema, quoteSummary } from "../schemas";
+import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, examFormatOf, generationStatus, quoteSchema, quoteSummary } from "../schemas";
 import { codeForStatus, defineTool, pendingResult, SPENDING_HINTS, ToolError, paidCall } from "../tool";
 
 const output = z.object({
@@ -73,13 +74,13 @@ export default defineTool({
       if (args.chapter !== undefined) {
         const ref = String(args.chapter);
         const ch = findChapter(await getPlanChapters().catch(() => []), ref);
-        if (!ch) throw new ToolError("not_found", `Chapitre « ${clip(ref, 60)} » introuvable dans le plan de ce cours : get_study_plan liste les chapitres disponibles.`);
-        chapterFocus = clip(`Chapitre ${ch.lectureNo ?? ch.seq} : ${ch.title}${ch.subtitle ? ` (${ch.subtitle})` : ""}`, 220);
+        if (!ch) throw new ToolError("not_found", `Chapter “${clip(ref, 60)}” was not found in this course plan. get_study_plan lists the available chapters.`);
+        chapterFocus = clip(`Chapter ${ch.lectureNo ?? ch.seq}: ${ch.title}${ch.subtitle ? ` (${ch.subtitle})` : ""}`, 220);
       }
       const focus = [chapterFocus, args.focus?.trim()].filter(Boolean).join(", ") || null;
       // Même règle que la route : un sujet trop long est refusé, jamais tronqué en silence.
       if (focus && focus.length > FIELD_LIMITS.focus) {
-        throw new ToolError("invalid_input", `Le sujet demandé dépasse ${FIELD_LIMITS.focus} caractères : raccourcis « focus ».`);
+        throw new ToolError("invalid_input", `The requested focus exceeds ${FIELD_LIMITS.focus} characters. Shorten “focus”.`);
       }
       // Format du cours (annales > déclaré > exemples officiels > infos de cours), jamais déduit du focus.
       // Un format demandé pour CET examen l'emporte, annales comprises : le format du cours n'est qu'un défaut.
@@ -89,16 +90,17 @@ export default defineTool({
       // Le worker et le pré-check relisent la demande dans la cible du job (sinon ils reviendraient au format du cours).
       const { format, plan, jobType, target, count } = await mockExamJob({ count: args.exercise_count, focus: focus ?? undefined, asked });
       if (plan.generator === "none") {
-        throw new ToolError("format_required", `${plan.reason} Demande-le à la personne, puis enregistre-le avec set_exam_format (kind, question_count, duration_min, language), ou passe format pour cet examen seulement.`);
+        throw new ToolError("format_required", "The course materials do not specify the exam format. Ask the student whether it uses multiple-choice questions, exercises, an essay, or an oral exam, then record it with set_exam_format (kind, question_count, duration_min, language), or pass “format” for this exam only.");
       }
       if (plan.generator === "exercises" && (args.exercise_count ?? 0) > WRITTEN_MAX) {
-        throw new ToolError("invalid_input", `Un examen écrit compte au plus ${WRITTEN_MAX} exercices : réduis exercise_count${course.basis === "annales" ? "." : `, ou demande des QCM (format "mcq", jusqu'à ${MCQ_MAX}).`}`);
+        throw new ToolError("invalid_input", `A written exam can contain at most ${WRITTEN_MAX} exercises. Lower exercise_count${course.basis === "annales" ? "." : ` or request multiple-choice questions with format “mcq”, up to ${MCQ_MAX}.`}`);
       }
       const qcm = jobType === "qcm";
+      const formatSummary = examFormatOf(format).summary;
       const note = course.basis === "annales"
         // « format » vaut written pour des questions composées (schéma de sortie figé, clients en cache) : la note le précise.
-        ? (asked ? `Format demandé pour cet examen : ${format.summary} ; celui des annales du cours reste le défaut.` : plan.generator === "blocks" ? `Format des annales : ${format.summary}.` : null)
-        : `Ce cours n'a pas d'annales : format ${format.summary}.`;
+        ? (asked ? `Format requested for this exam: ${formatSummary}; the course’s past-exam format remains the default.` : plan.generator === "blocks" ? `Past-exam format: ${formatSummary}.` : null)
+        : `This course has no past exams. Format: ${formatSummary}.`;
       const base = { course: courseRefOf(c), focus, format: qcm ? "mcq" as const : "written" as const, exercise_count: count, note, confirmation: null, declined: null, job: null };
       const track = (jobId: number) => ({ job_id: jobId, estimated_minutes: "10-35", track_with: `get_job_status with job_id=${jobId}` });
 
@@ -107,16 +109,16 @@ export default defineTool({
       if (running) return { ...base, status: "already_running" as const, job: track(running.id) };
 
       const what = plan.generator === "qcm"
-        ? `un examen blanc de ${plan.qcmCount} QCM${plan.openCount ? ` + ${plan.openCount} question(s) ouverte(s)` : ""}`
+        ? `a mock exam with ${plan.qcmCount} multiple-choice questions${plan.openCount ? ` and ${plan.openCount} open question(s)` : ""}`
         : plan.generator === "blocks"
-          ? `un examen blanc de ${plan.blockCount} questions composées (scénario + ${plan.partsMin} à ${plan.partsMax} sous-questions)`
-          : `un examen blanc${count ? ` de ${count} ${plan.style === "essay" ? "sujet(s) d'essai" : plan.style === "oral" ? "question(s) d'oral" : "exercices"}` : " au format des annales"}`;
+          ? `a mock exam with ${plan.blockCount} composite questions (scenario and ${plan.partsMin}–${plan.partsMax} sub-questions)`
+          : `a mock exam${count ? ` with ${count} ${plan.style === "essay" ? "essay prompt(s)" : plan.style === "oral" ? "oral question(s)" : "exercises"}` : " in the past-exam format"}`;
       const decision = await ctx.confirm(
         {
           bucket: "gen",
           kind: jobType,
           costCenti: costForJob(jobType, target),
-          summary: `Générer ${what}${focus ? " avec l'accent demandé" : ""}, ${courseLabel(c)} (10-35 min).`,
+          summary: `Generate ${what}${focus ? " with the requested thematic emphasis" : ""} for ${courseLabel(c)} (10–35 min).`,
         },
         // Le jeton est lié à la composition EXACTE du job : si elle change (annales ajoutées entre-temps), il faut un nouveau devis.
         { course: c.id, focus, format: base.format, count, target: target ?? null },
@@ -132,9 +134,8 @@ export default defineTool({
       if (!started.ok) {
         if (started.status === 500) {
           log("error", "mcp.worker_start_failed", { message: redactMessage(started.error) });
-          throw new ToolError("internal", "Le lancement de la génération a échoué côté serveur. Elle a peut-être été mise en file : vérifie avec get_job_status (sans job_id) avant de relancer.");
         }
-        throw new ToolError(codeForStatus(started.status), `${started.error} Rien n'a été débité.`);
+        throw new ToolError(codeForStatus(started.status), errorText("en", started), undefined, started.code);
       }
       return { ...base, status: started.existing ? "already_running" as const : "started" as const, job: track(started.jobId) };
     });
@@ -143,7 +144,7 @@ export default defineTool({
     const note = o.note ? ` ${o.note}` : "";
     if (o.status === "confirmation_required" && o.confirmation) return `${quoteSummary(o.confirmation)}${note}`;
     if (o.status === "declined" && o.declined) return declinedSummary(o.declined);
-    if (o.job) return `${o.status === "started" ? "Examen blanc lancé" : "Un examen blanc est déjà en cours"} (job ${o.job.job_id}, 10-35 min) : suis-le avec get_job_status.${note}`;
-    return `Examen blanc.${note}`;
+    if (o.job) return `${o.status === "started" ? "Mock exam generation started" : "A mock exam is already being generated"} (job ${o.job.job_id}, 10–35 min). Track it with get_job_status.${note}`;
+    return `Mock exam.${note}`;
   },
 });
