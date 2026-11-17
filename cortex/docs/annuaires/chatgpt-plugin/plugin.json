@@ -3,10 +3,18 @@
   "name": "cortex",
   "version": "1.2.0",
   "description": "Mock exams, practice questions and weak points from your own course materials in Cortex.",
-  "author": { "name": "Benjamin Abensur EI (Benabens)", "url": "https://cortexexam.com" },
+  "author": {
+    "name": "Benjamin Abensur EI (Benabens)",
+    "url": "https://cortexexam.com"
+  },
   "homepage": "https://cortexexam.com/mcp",
   "repository": "https://github.com/Benabens/cortex",
-  "keywords": ["education", "exam preparation", "mock exams", "study plan"],
+  "keywords": [
+    "education",
+    "exam preparation",
+    "mock exams",
+    "study plan"
+  ],
   "extensions": {
     "com.openai": {
       "interface": {
@@ -34,31 +42,31 @@
             {
               "description": "Lists the demo student's courses and exam dates.",
               "prompt": "Which courses do I have in Cortex, and when are the exams?",
-              "tools_triggered": ["list_courses"],
+              "tools_triggered": "list_courses",
               "expected_behavior": "Lists the course DEMO-101 with its exam date and the number of days left. No credit is spent."
             },
             {
               "description": "Explains where the student stands in the course programme.",
               "prompt": "Where am I in DEMO-101 and what should I revise next?",
-              "tools_triggered": ["get_study_plan"],
+              "tools_triggered": "get_study_plan",
               "expected_behavior": "Gives the exam countdown, coverage and mastery, and the prioritised list of topics to work on. No credit is spent."
             },
             {
               "description": "Finds where a topic appears in the student's own materials.",
               "prompt": "Find where conditional expectation appears in my DEMO-101 materials.",
-              "tools_triggered": ["search_course_materials"],
+              "tools_triggered": "search_course_materials",
               "expected_behavior": "Returns short excerpts with their source document. No credit is spent."
             },
             {
               "description": "Paid generation: the cost is announced first and nothing runs before the student agrees.",
               "prompt": "Give me one practice question on discrete random variables.",
-              "tools_triggered": ["generate_drill"],
+              "tools_triggered": "generate_drill",
               "expected_behavior": "The first call spends nothing and returns a confirmation token with the exact cost quoted by the first call; ChatGPT asks the student, quoting that cost; after an explicit yes, the second call returns one exam-style question with five progressive hints and a worked solution."
             },
             {
               "description": "Credit balance and daily limits.",
               "prompt": "How many credits and generations do I have left today?",
-              "tools_triggered": ["get_account_status"],
+              "tools_triggered": "get_account_status",
               "expected_behavior": "Gives the credit balance, the cost of each kind of generation and today's usage against the daily limits. No credit is spent."
             }
           ],
@@ -66,17 +74,17 @@
             {
               "description": "General knowledge question unrelated to the student's courses.",
               "prompt": "What is the capital of Australia?",
-              "reason": "Nothing in the student's Cortex account is needed; ChatGPT answers without calling Cortex."
+              "expected_behavior": "Nothing in the student's Cortex account is needed; ChatGPT answers without calling Cortex."
             },
             {
               "description": "Request to buy credits.",
               "prompt": "Buy me 50 Cortex credits.",
-              "reason": "The plugin cannot sell credits or handle payments; no tool is called and ChatGPT explains that credits are managed in the Cortex app."
+              "expected_behavior": "The plugin cannot sell credits or handle payments; no tool is called and ChatGPT explains that credits are managed in the Cortex app."
             },
             {
               "description": "Request to delete a course.",
               "prompt": "Delete my DEMO-101 course from Cortex.",
-              "reason": "No tool deletes a course; ChatGPT says it cannot do it from the plugin."
+              "expected_behavior": "No tool deletes a course; ChatGPT says it cannot do it from the plugin."
             }
           ]
         },

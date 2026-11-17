@@ -49,7 +49,7 @@ test("plugin.json : aucun coût chiffré (le coût exact vient du premier appel)
     assert.doesNotMatch(s, /\d+(?:[.,]\d+)?\s*credits?\b|\bby default\b/i, at);
   }
   const drill = plugin.extensions["com.openai"].review.test_cases.positive.find(
-    (c: { tools_triggered: string[] }) => c.tools_triggered.includes("generate_drill"),
+    (c: { tools_triggered: string }) => c.tools_triggered.includes("generate_drill"),
   );
   assert.match(drill.expected_behavior, /the exact cost quoted by the first call/);
 });
