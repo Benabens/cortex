@@ -15,7 +15,7 @@ import { ARCHIVE_FILE, FOLDER_EXTENSIONS, prepareCourseImport, type FolderImport
 import { ingestProblems, type IngestProblem } from "@/lib/ingest-report";
 import { apiDelete } from "@/lib/ux/write";
 import type { OriginalsInfo } from "@/lib/ux/sources";
-import { useTranslations } from "use-intl/react";
+import { useLocale, useTranslations } from "use-intl/react";
 
 const ACCEPT = ".pdf,.docx,.pptx,.html,.htm,.txt,.md,.zip,.imscc,.mbz";
 /** Annales : Word et PowerPoint en plus (lus comme le reste du cours). Autres zones : formats de /api/sources/add. */
@@ -40,6 +40,7 @@ type DropKind = "past_exam" | "sample_questions" | "exam_info";
  */
 export function ImportPanel({ onChanged, unread, originals }: { onChanged: () => void; unread?: IngestProblem[]; originals?: OriginalsInfo | null }) {
   const t = useTranslations("import");
+  const locale = useLocale();
   const dropKinds: { value: DropKind; label: string }[] = [
     { value: "past_exam", label: t("pastExams") },
     { value: "sample_questions", label: t("sampleQuestions") },
@@ -104,7 +105,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
     notified.current = true;
     setJobId(null);
     // Un job de format n'a pas de rapport : la liste en cours reste affichée.
-    const unread = ingestProblems(job.report);
+    const unread = ingestProblems(job.report, locale);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- la fin du job publie son rapport dans l'état du panneau
     if (job.report) setUnreadFiles(unread);
     if (job.status === "error" || job.status === "failed") {
@@ -121,7 +122,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
       onChanged();
     }
     setJobKind(null);
-  }, [job, jobKind, onChanged, formatCharged, t]);
+  }, [job, jobKind, onChanged, formatCharged, t, locale]);
 
   /** Un fichier non lu ne compte nulle part : le retirer libère la place et allège la liste. */
   const removeUnread = async (item: IngestProblem) => {
