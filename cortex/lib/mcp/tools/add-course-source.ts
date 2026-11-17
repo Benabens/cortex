@@ -24,7 +24,8 @@ export default defineTool({
     "pass the final URL) or from pasted text. category tells Cortex what it is: past_exam (an exam from a previous year, used to learn the exam format), " +
     "lecture, exercises, notes, sample_questions (official example questions published by the teacher: their style is imitated when there are no past exams) " +
     "or exam_info (exam instructions: syllabus or course page describing the exam, e.g. \"MCQ, 45 min\"); when omitted it is guessed from the file name. " +
-    "The file is only stored: call prepare_course once all materials are added.",
+    "The file is only stored: call prepare_course once all materials are added. On a free account Cortex keeps only the text index of the material, " +
+    "not the file (Premium keeps originals in the cloud): its indexing starts right away, at no cost.",
   kind: "write",
   // Ajout pur (jamais d'écrasement : « -2 », « -3 »…) ; lit une URL hors de Cortex.
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -50,11 +51,15 @@ export default defineTool({
         if (e instanceof SourceError) throw new ToolError(codeForStatus(e.status), e.message);
         throw e;
       }
+      // Compte gratuit : l'original ne reste pas sur le serveur (lib/originals). Son texte est lu
+      // tout de suite par une ingestion gratuite, sinon il partirait sans index.
+      const local = saved.home === "local" ? await startFreeIngest(c.id) : null;
+      const steps = saved.folder === "refs" ? await pastExamNextSteps(ctx.principal.userId) : "Add the other materials the same way, then call prepare_course to (re)build the course.";
       return {
         status: "added" as const,
         course: courseRefOf(c),
         source: { file: saved.name, folder: saved.folder, bytes: saved.bytes, content_type: saved.contentType },
-        next_steps: saved.folder === "refs" ? await pastExamNextSteps(ctx.principal.userId) : "Add the other materials the same way, then call prepare_course to (re)build the course.",
+        next_steps: local ? `${local} ${steps}` : steps,
       };
     });
   },
@@ -81,4 +86,22 @@ async function pastExamNextSteps(userId: string): Promise<string> {
     ? `prepare_course reads its exam format: it costs ${price}, quoted before anything is charged.`
     : "prepare_course reads its exam format (nothing is charged or counted on this account).";
   return `Past exam stored for free. ${cost} Add the other materials first, then call prepare_course once.`;
+}
+
+/**
+ * Compte gratuit : lance l'ingestion (gratuite) du support qui vient d'arriver ; une ingestion déjà
+ * en cours le lira aussi (scripts/run-job relit les fichiers arrivés pendant). Rend la phrase dite
+ * à l'assistant.
+ */
+async function startFreeIngest(courseId: string): Promise<string> {
+  const note = "Free account: Cortex keeps only the text index of this material, not the file (Premium keeps originals in the cloud).";
+  const { activeJob, createJobExclusive, startWorker } = await import("@/lib/jobs");
+  if (await activeJob("ingest")) return `${note} It will be indexed by the ingestion already running.`;
+  try {
+    const { id } = await createJobExclusive("ingest");
+    await startWorker(id, courseId);
+    return `${note} Its indexing has started (free).`;
+  } catch {
+    return `${note} Indexing could not start now: call prepare_course within 24 hours, or the material will have to be added again.`;
+  }
 }

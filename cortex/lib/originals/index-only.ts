@@ -13,6 +13,11 @@ import { indexItemForSearch } from "@/lib/search";
 type ItemRow = { type: string; lecture_id: string | null; title: string | null; text: string; html: string | null; images: string | null; tags: string | null; anchor: string | null };
 export type KeptSource = { type: string; title: string; path: string; year: number | null; recency_weight: number; items: ItemRow[] };
 
+/** Chemins du cours dont l'original n'est plus sur le serveur : il est resté sur l'ordinateur. */
+export async function pathsOnComputer(): Promise<Set<string>> {
+  return new Set((await localOriginals("local")).map((o) => o.path));
+}
+
 /** Sources inscrites au registre des originaux que cette ingestion n'a pas relues sur le disque. */
 export async function readIndexOnlySources(readPaths: Set<string>): Promise<KeptSource[]> {
   const paths = (await localOriginals()).map((o) => o.path).filter((p) => !readPaths.has(p));
