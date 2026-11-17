@@ -34,6 +34,7 @@ function reply(prompt: string): unknown {
         { q: 0, key: "wrong", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [3, 0, 7, 1.5, "2"], chapter: 1, notion: "ordre des segments", code: null, evidence: [{ criterion: "key", option: 0, source: "Cours", passage: "TCP ordonne" }] },
         { q: 1, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 99, notion: "somme", code: { language: "python", source: "print(2 + 2)", stdin: "", expected: "5" }, evidence: [{ criterion: "key", option: 1, source: "Question", passage: "2 + 2" }] },
         { q: 2, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 1, notion: "pandas", code: { language: "python", source: "import module_absent_du_banc\nprint(1)", stdin: "", expected: "1" }, evidence: [{ criterion: "key", option: 0, source: "Cours", passage: "première ligne" }] },
+        { q: 3, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 1, notion: "randint", code: { language: "python", source: "import random\nstop = random.randint(2, 4)\nprint(list(range(2, stop)) + [stop])", stdin: "", expected: "[2], [2, 3], [2, 3, 4]" }, evidence: [{ criterion: "key", option: 3, source: "Question", passage: "randint inclut 4" }] },
       ],
     };
   }
@@ -77,6 +78,7 @@ const run = {
       { idx: 0, kind: "qcm", topic: "t", stem: "Quel protocole numérote les segments ?", options: ["TCP", "UDP", "IP", "ICMP"], correct: [0], explanation: "TCP numérote." },
       { idx: 1, kind: "qcm", topic: "t", stem: "Que vaut la sortie de print(2 + 2) ?", options: ["4", "5", "22", "Erreur"], correct: [1], explanation: "Elle affiche 5." },
       { idx: 2, kind: "qcm", topic: "t", stem: "Que vaut df.iloc[0] ?", options: ["1", "2", "3", "4"], correct: [0], explanation: "La première ligne vaut 1." },
+      { idx: 3, kind: "qcm", topic: "t", stem: "Quelles listes finales sont possibles ?", options: ["[2, 2]", "[2]", "[2, 2], [2, 3, 3]", "[2], [2, 3], [2, 3, 4]"], correct: [3], explanation: "randint inclut 4, range exclut stop." },
     ],
   },
   plan: { chapters: [{ id: 1, seq: 1, title: "Transport" }, { id: 2, seq: 2, title: "Réseau" }], topicChapter: {} },
@@ -106,6 +108,9 @@ test("juge : arbitre, code exécuté, doublons et faux rejets ; la clé n'est ja
     assert.deepEqual([v.items[1].code?.ran, v.items[1].code?.ok, v.items[1].key], [true, false, "wrong"], "la sortie réelle (4) contredit la clé (5)");
     // Un programme qui ne tourne pas ici (module absent) ne prouve rien contre la clé.
     assert.deepEqual([v.items[2].code?.ran, v.items[2].key], [false, "right"]);
+    // Banc rs-mixte du 17/11 : un tirage aléatoire sans graine donne UNE sortie, pas l'ensemble des
+    // sorties possibles que la clé énumère ; une seule exécution ne prouve rien contre elle.
+    assert.deepEqual([v.items[3].code?.ran, v.items[3].key], [false, "right"]);
   }
   assert.deepEqual(v.duplicatesIntra, [[0, 1]]);
   assert.deepEqual(v.duplicatesPrevious, [1]);
@@ -147,7 +152,7 @@ test("une panne passagère du fournisseur pendant le jugement est réessayée, l
   const { judgeExam } = await import("../lib/bench/judge");
   const v = await runWithCourse("ml", () => judgeExam(run));
   assert.equal(failAdjudicate, 0, "la panne a bien eu lieu");
-  assert.equal(v.items.length, 3);
+  assert.equal(v.items.length, run.exam.items.length);
 });
 
 test("exercice au long corrigé : l'arbitre le lit jusqu'au bout", async () => {

@@ -155,8 +155,19 @@ function votedVerdict(votes: RawVerdict[]): RawVerdict | undefined {
   };
 }
 
+/**
+ * Tirage pseudo-aléatoire sans graine fixée : une exécution montre UNE sortie, alors que la clé peut
+ * énumérer toutes les sorties possibles (banc rs-mixte du 17/11, `random.randint(2, 4)`).
+ */
+function unseededRandom(c: NonNullable<RawVerdict["code"]>): boolean {
+  const src = c.source;
+  if (c.language === "python") return /^\s*(?:import\s+random\b|from\s+random\s+import\b)|\b(?:np|numpy)\.random\b/m.test(src) && !/\bseed\s*\(\s*\d|default_rng\s*\(\s*\d/.test(src);
+  return /\brand\s*\(/.test(src) && !/\bsrand\s*\(\s*\d+\s*\)/.test(src);
+}
+
 async function runCode(c: NonNullable<RawVerdict["code"]>): Promise<ItemVerdict["code"]> {
   if (c.language !== "python" && c.language !== "c") return { ran: false, ok: true, detail: `langage ${c.language} non exécuté` };
+  if (unseededRandom(c)) return { ran: false, ok: true, detail: "tirage aléatoire sans graine : une exécution ne tranche pas" };
   const r = await verifyCode(c.language, c.source, [{ stdin: c.stdin ?? "", expect: c.expected }]);
   // Seule une exécution qui ABOUTIT tranche : un programme qui plante ici (module absent, extrait
   // incomplet) ne prouve rien contre la clé.
