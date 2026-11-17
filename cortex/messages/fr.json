@@ -46,7 +46,9 @@
       "concurrent": "en même temps",
       "per_minute": "par minute",
       "mb": "Mo"
-    }
+    },
+    "kind_format": "{count, plural, one {# détection du format} other {# détections du format}}",
+    "kind_lab_exercise": "{count, plural, one {# exercice de lab} other {# exercices de lab}}"
   },
   "errors": {
     "unauthenticated": "Non authentifié.",
@@ -614,7 +616,9 @@
       "purchaseType": {
         "pack": "Pack de 10 crédits",
         "subscription": "Abonnement Pro"
-      }
+      },
+      "cancelUnconfigured": "Demande reçue, mais Stripe n’est pas configuré pour programmer la résiliation. L’éditeur la traitera manuellement.",
+      "cancelFailed": "Demande reçue, mais la résiliation automatique a échoué. L’éditeur la traitera manuellement."
     },
     "assistants": {
       "metadata": "Connecter ton assistant · Cortex",
@@ -948,7 +952,8 @@
     "backTitle": "{count, plural, one {# fichier est resté sur ton ordinateur} other {# fichiers sont restés sur ton ordinateur}}",
     "backHint": "Tu es Premium : réimporte le dossier de ce cours pour {replacement} dans le cloud. Cortex reconnaît chaque fichier à son empreinte, son index ne change pas.",
     "backOne": "le remettre",
-    "backMany": "les remettre"
+    "backMany": "les remettre",
+    "attachmentGone": "Cette pièce jointe n’est plus sur les serveurs de Cortex : un compte gratuit ne les garde que {hours} h, le temps de les lire. Elle est restée sur ton appareil."
   },
   "localSource": {
     "titleNamed": "{name} est sur ton ordinateur",
@@ -1175,7 +1180,9 @@
     "severity": "Sévérité",
     "adding": "Ajout…",
     "add": "Ajouter",
-    "mined": "{count, plural, one {# lacune extraite et suivie} other {# lacunes extraites et suivies}}"
+    "mined": "{count, plural, one {# lacune extraite et suivie} other {# lacunes extraites et suivies}}",
+    "pdfNoText": "Ce PDF ne contient pas de texte lisible (scan ?) : il est ajouté au suivi tel quel.",
+    "noneInDiscussion": "Aucune faiblesse claire détectée dans cette discussion."
   },
   "weaknessBase": {
     "filterAll": "Toutes",
@@ -1202,7 +1209,8 @@
     "image": "image",
     "trainOn": "S'entraîner sur : {topic}",
     "train": "S’entraîner",
-    "remove": "Retirer du suivi : {topic}"
+    "remove": "Retirer du suivi : {topic}",
+    "pendingTopic": "(à analyser)"
   },
   "weaknessesPage": {
     "title": "Faiblesses",
@@ -1567,5 +1575,10 @@
     "unread": "Fichiers non lus",
     "unreadHint": "Les autres fichiers du cours ont été lus normalement.",
     "removeFromCourse": "Retirer du cours"
+  },
+  "sourceViewer": {
+    "found": "⟵ Cortex · trouvé ici",
+    "clear": "enlever surlignage",
+    "notFound": "Fichier introuvable"
   }
 }

@@ -44,7 +44,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (!topic && !description && !file) {
     return apiError(req, "weakness_content_required", 400);
   }
-  if (!topic) topic = "(à analyser)";
+  if (!topic) topic = "(à analyser)"; // i18n-allow: sentinelle stockée en base, traduite à l’affichage (WeaknessBase)
   if (file) {
     if (file.size > ATTACHMENT_MAX_BYTES)
       return apiError(req, { code: "file_too_large", params: { maxMb: 12 } }, 413);
