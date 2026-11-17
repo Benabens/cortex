@@ -8,7 +8,8 @@
  *  - toute chaîne littérale qui ressemble à du français (accents, mots outils), où qu'elle
  *    soit : attribut, variable, message d'erreur, libellé d'option.
  * Ne comptent pas : les commentaires, les imports, les classes CSS, les clés passées à
- * `t(...)`, et une ligne précédée de `// i18n-allow: <raison>` (contenu de cours, nom propre).
+ * `t(...)`, une ligne précédée de `// i18n-allow: <raison>` (contenu de cours, nom propre), et
+ * un fichier ouvert par `// i18n-allow-file: <raison>` (données fictives jamais affichées).
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -61,6 +62,7 @@ function ignoredContext(node: ts.Node): boolean {
 }
 
 export function scanSource(file: string, source: string): Hit[] {
+  if (/^\/\/ i18n-allow-file: \S/.test(source)) return [];
   const kind = file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, kind);
   const hits: Hit[] = [];
