@@ -2,7 +2,7 @@ import { jobSpec, launchGate } from "@/lib/billing/limits";
 import { ReservationRefused, activeJob, costForJob, createJobExclusive, startWorker, type JobType } from "@/lib/jobs";
 import { log } from "@/lib/metrics";
 import { preflightGeneration } from "@/lib/preflight";
-import { planMockExam, requestedFormat, resolveExamFormat, targetKind, type ExamKind } from "@/lib/exam-format";
+import { planMockExam, requestedFormat, resolveExamFormat, targetKind, type ExamFormat, type ExamKind, type MockExamPlan } from "@/lib/exam-format";
 
 /**
  * LANCEMENT D'UNE GÉNÉRATION PAR JOB, pour l'utilisateur et le cours COURANTS
@@ -87,6 +87,23 @@ async function startJob(type: JobType, target: string | undefined, precheck: () 
     return { ok: false, status: 500, error: "Impossible de démarrer la génération. Réessaie dans un instant." };
   }
   return { ok: true, jobId: created.id, existing: created.existing };
+}
+
+/**
+ * EXAMEN BLANC → JOB, une seule résolution pour la route web, le connecteur MCP
+ * et le devis (audit fuites I4) : le format du cours (ou celui demandé pour cet
+ * examen) choisit le générateur ; un plan QCM devient un job qcm, tarifé comme
+ * tel (sa taille réelle), jamais le forfait « exam ». Pour le contexte de cours COURANT.
+ */
+export type MockExamJob = { format: ExamFormat; plan: MockExamPlan; jobType: "qcm" | "exam"; target?: string; count: number | null };
+export async function mockExamJob(req: { count?: number; focus?: string; asked?: ExamKind | null }): Promise<MockExamJob> {
+  const format = requestedFormat(await resolveExamFormat(), req.asked ?? null);
+  const plan = planMockExam(format, { count: req.count, focus: req.focus });
+  if (plan.generator === "qcm") {
+    return { format, plan, jobType: "qcm", count: plan.qcmCount, target: JSON.stringify({ count: plan.qcmCount, openCount: plan.openCount, focus: req.focus }) };
+  }
+  const count = plan.generator === "blocks" ? plan.blockCount : plan.generator === "exercises" ? plan.exerciseCount : null;
+  return { format, plan, jobType: "exam", count, target: examTarget(count ?? undefined, req.focus, req.asked ?? undefined) };
 }
 
 /** Nombre d'exercices demandé pour un examen : entier 1-12, sinon défaut du moteur (blueprint). */

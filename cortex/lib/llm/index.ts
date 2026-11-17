@@ -1,4 +1,4 @@
-import { assertSpendCap, closeUsage, discardUsage, openUsage } from "@/lib/billing/usage";
+import { assertReservationCap, assertSpendCap, closeUsage, discardUsage, isPaidProvider, openUsage } from "@/lib/billing/usage";
 import { callerSite, currentJob } from "@/lib/billing/usage-context";
 import { inc, log, observe } from "@/lib/metrics";
 import { cacheGet, cacheKey, cachePut, cacheable } from "./cache";
@@ -12,7 +12,7 @@ import { withRetry } from "./retry";
 import { nextRank, recordCall, replayCall, tapeMode } from "./tape";
 import { extractJson, JsonOutputError } from "./json";
 import { LlmError, type CompleteRequest, type CompleteResult, type LlmProvider } from "./types";
-import { assertLlmAuthorized } from "./authorization";
+import { assertLlmAuthorized, currentLlmProof } from "./authorization";
 
 /**
  * Point d'entrée UNIQUE des appels LLM de l'app.
@@ -57,13 +57,34 @@ export function llmUnavailableReason(name?: ProviderName): string | null {
   return getProvider(name).unavailableReason();
 }
 
+/**
+ * Lignes d'usage des appels EN COURS dans ce processus : le plafond de la réservation
+ * ne les compte pas à leur maximum (des appels parallèles d'un même job feraient sinon
+ * tomber le plafond avant la dépense réelle). Une ligne refermée, timeout compris,
+ * compte de nouveau : le dépassement reste borné par les appels simultanés.
+ */
+const IN_FLIGHT_USAGE = new Set<number>();
+
+/** Taille de réponse maximale d'une aide (drill, correction, analyses) sur un fournisseur payant. */
+function assistMaxTokens(): number {
+  const n = Number(process.env.ASSIST_MAX_TOKENS);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 6000;
+}
+
 async function completeWith(provider: LlmProvider, req: CompleteRequest): Promise<CompleteResult> {
-  const model = req.model ?? "opus";
-  const labels = { provider: provider.name, model };
   // Attribution (llm_usage) : site d'appel capturé AVANT tout await (pile sync),
   // job courant s'il y en a un (jobs = 1 par process).
   const callSite = callerSite();
   const job = currentJob();
+  const proof = currentLlmProof();
+  // Aide à 0,3 crédit sur un fournisseur payant : jamais opus, réponse bornée — son
+  // plafond par réservation est petit et un remboursement ne la rejoue pas (audit fuites I5).
+  if (proof?.kind === "assist" && isPaidProvider(provider.name)) {
+    const max = assistMaxTokens();
+    req = { ...req, model: req.model === "haiku" ? "haiku" : "sonnet", maxTokens: Math.min(req.maxTokens ?? max, max) };
+  }
+  const model = req.model ?? "opus";
+  const labels = { provider: provider.name, model };
   await assertLlmAuthorized();
   // Banc (scripts/bench) : bande enregistrée ou rejouée ; rejeu = aucun appel, aucun compteur.
   const tape = tapeMode();
@@ -100,11 +121,14 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
   try {
     const res = await globalLimiter().run(() =>
       withRetry(async (a) => {
+        // Plafond de la réservation, avant CHAQUE tentative (réessais du fournisseur compris).
+        await assertReservationCap(proof?.ref, provider.name, IN_FLIGHT_USAGE);
         const pending = await openUsage({
           provider: provider.name, model: modelId,
           tokensIn: tokensInEstimate, tokensOut: req.maxTokens ?? 16_000,
-          callSite: siteLabel, jobId: job?.id ?? null, attempt: a,
+          callSite: siteLabel, jobId: job?.id ?? null, attempt: a, creditRef: proof?.ref ?? null,
         });
+        if (pending !== null) IN_FLIGHT_USAGE.add(pending);
         const tCall = Date.now();
         try {
           const r = await provider.complete(req);
@@ -133,6 +157,8 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
             });
           }
           throw e;
+        } finally {
+          if (pending !== null) IN_FLIGHT_USAGE.delete(pending);
         }
       }, {
         retries,

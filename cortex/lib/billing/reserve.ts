@@ -7,7 +7,7 @@ import { BAD_OUTPUT_CODES, llmErrorCode } from "@/lib/llm/errors";
 import { log } from "@/lib/metrics";
 import { defaultProviderName } from "@/lib/llm/config";
 import { expectedJobCostUsd } from "./budget";
-import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, lockAccountInTx as lockUser } from "./credits";
+import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, lockAccountInTx as lockUser, openSubscriptionWindowInTx } from "./credits";
 import { quotaTrackingActive, type GateIssue, type QuotaBucket } from "./guards";
 import { SLOT_MAX_AGE_MS, launchVerdict, maxActiveJobsLimit, readCounterState, readSpendState, type LaunchSpec, type LimitsState } from "./limits";
 import { isOwner } from "./owner";
@@ -132,9 +132,7 @@ export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
       // comprise, annuel seulement) d'abord, puis crédits achetés — décidés et
       // écrits dans la même transaction, aucune course entre les deux.
       const { subCenti, rechargeWindow } = counters.credits;
-      if (rechargeWindow) {
-        await tx.run(`UPDATE subscriptions SET remaining = monthly_credits, window_anchor = ?, month_anchor = ?, updated_at = ? WHERE user_id = ?`, rechargeWindow, rechargeWindow.slice(0, 7), t, userId);
-      }
+      if (rechargeWindow) await openSubscriptionWindowInTx(tx, userId, rechargeWindow, t);
       if (cost > 0) {
         const usedSub = Math.min(cost, subCenti);
         await tx.run(
@@ -218,9 +216,12 @@ export class AssistRefused extends Error {
 
 /**
  * Réservation RENDUE : nos gardes ont arrêté l'appel avant envoi (comptage en
- * vol fail-closed, plafond de dépense), ou le modèle n'a renvoyé qu'une réponse
- * inutilisable (BAD_OUTPUT_CODES : illisible, coupée) — notre défaut,
- * l'utilisateur n'a rien reçu ; le connecteur l'annonce sur la même table. Un échec du fournisseur lui-même (429, 5xx, réseau) reste débité,
+ * vol fail-closed, plafond de dépense, plafond de la réservation), ou le modèle
+ * n'a renvoyé qu'une réponse inutilisable (BAD_OUTPUT_CODES : illisible, coupée)
+ * — notre défaut, l'utilisateur n'a rien reçu ; le connecteur l'annonce sur la
+ * même table. Après une dépense réelle, le crédit revient OFFERT (credits.ts,
+ * audit fuites B1/I5) : rejouer une aide qui échoue ne fait pas tourner l'IA sans
+ * paiement. Un échec du fournisseur lui-même (429, 5xx, réseau) reste débité,
  * comme décidé au lot 2 : l'appel est parti.
  */
 const REFUNDED_CODES = new Set(["UNAVAILABLE", "SPEND_CAP", ...BAD_OUTPUT_CODES]);
