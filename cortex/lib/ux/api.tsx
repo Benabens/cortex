@@ -285,8 +285,9 @@ export function useApi<T>(path: string | null): ApiState<T> {
 export async function apiPost<T>(
   path: string,
   courseId: string,
-  body?: unknown,
-  fallback: (status: number) => string = (status) => `HTTP ${status}`,
+  body: unknown,
+  /** Message d'un échec sans corps exploitable, dans la langue de l'écran (« Erreur 500 »). */
+  fallback: (status: number) => string,
 ): Promise<T> {
   const res = await fetch(withCourse(path, courseId), {
     method: "POST",

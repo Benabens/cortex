@@ -44,6 +44,7 @@ import { useTranslations } from "use-intl/react";
 export function TrainingStudio() {
   const t = useTranslations("trainingStudio");
   const apiT = useTranslations("api");
+  const commonT = useTranslations("common");
   const { courseId, course } = useCourse();
   const language = course?.language || undefined; // "" = langue pas encore détectée : pas de lang vide
   const list = useApi<DrillListResp>("/api/drill");
@@ -103,7 +104,7 @@ export function TrainingStudio() {
     setShownHints(0); setShowSolution(false);
     setDrilling(true);
     try {
-      const d = await apiPost<{ ok: boolean; drill: Drill }>("/api/drill", courseId, { concept: chosen });
+      const d = await apiPost<{ ok: boolean; drill: Drill }>("/api/drill", courseId, { concept: chosen }, (status) => apiT("httpError", { status }));
       setDrill(d.drill);
     } catch (e) {
       const err = e as ApiError;
@@ -163,7 +164,7 @@ export function TrainingStudio() {
         examId: jobDone ? (job as { resultId?: number }).resultId : undefined,
         topic: drill?.concept ?? (input.trim() || undefined),
         verdict,
-      });
+      }, (status) => apiT("httpError", { status }));
       setFbSent(verdict);
     } catch (error) {
       setFbError((error as ApiError).message || t("feedbackFailed"));
@@ -317,7 +318,7 @@ export function TrainingStudio() {
             <p className="text-[0.9rem] font-medium text-ink-1">{job.status === "queued" ? t("queued") : t("generatingExercise")}</p>
             {asText(job.currentStep) && <p className="text-[0.82rem] text-ink-3">{asText(job.currentStep)}</p>}
             <WeightBar pct={job.status === "queued" ? 4 : job.progress} height={6} />
-            <p className="font-data text-[0.82rem] font-semibold text-ink-2">{job.status === "queued" ? "" : `${job.progress} %`}</p>
+            <p className="font-data text-[0.82rem] font-semibold text-ink-2">{job.status === "queued" ? "" : commonT("percent", { value: job.progress })}</p>
           </div>
         ) : jobDone ? (
           <>
