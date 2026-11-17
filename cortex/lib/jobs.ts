@@ -733,7 +733,6 @@ export async function cancelJob(id: number): Promise<Job | null> {
   return await getJob(id);
 }
 
-/** Restes d'un job tué : checkpoint de génération + examen inséré mais jamais finalisé (compile interrompue). */
 /** Examen QCM arrêté en cours de livraison : prêt tel qu'il est, résumé recompté sur la base. */
 async function closeQcmExam(job: Job, delivered: { produced: number; requested: number }): Promise<void> {
   const target = (() => { try { return JSON.parse(job.target ?? "{}") as { openCount?: number }; } catch { return {}; } })();
@@ -745,6 +744,7 @@ async function closeQcmExam(job: Job, delivered: { produced: number; requested: 
   await q.run(`UPDATE exams SET status = 'ready', verify_summary = ? WHERE id = ?`, summary, job.resultId);
 }
 
+/** Restes d'un job tué : checkpoint de génération + examen inséré mais jamais finalisé (compile interrompue). */
 async function cleanupPartial(job: Job): Promise<void> {
   if (job.type === "exam") {
     try { await storage().remove(path.join(examsDir(), ".gen-checkpoint.json")); } catch {}
