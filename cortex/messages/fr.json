@@ -1,0 +1,12 @@
+{
+  "meta": {
+    "title": "cortex · révise ce qui tombe vraiment",
+    "description": "Cortex : apprentissage par répétition espacée. Sais toujours quoi réviser ensuite."
+  },
+  "locale": {
+    "title": "Langue",
+    "hint": "La langue des écrans et des e-mails de Cortex. Un examen garde la langue de son cours.",
+    "label": "Langue de l’interface",
+    "error": "Impossible d’enregistrer la langue. Réessaie."
+  }
+}

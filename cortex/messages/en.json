@@ -1,0 +1,12 @@
+{
+  "meta": {
+    "title": "cortex · study what actually comes up",
+    "description": "Cortex: spaced-repetition learning. Always know what to review next."
+  },
+  "locale": {
+    "title": "Language",
+    "hint": "The language of Cortex’s screens and emails. An exam keeps the language of its course.",
+    "label": "Interface language",
+    "error": "Couldn’t save the language. Try again."
+  }
+}
