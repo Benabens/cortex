@@ -174,8 +174,7 @@ function isCompleteCorrection(corrected: string, statement: string): boolean {
 
 /**
  * Vérifie CHAQUE exercice à l'aveugle (1 appel/exo, parallélisme borné), puis DURCIT :
- * un corrigé faux est d'abord remplacé par la correction complète du vérificateur, revérifiée ;
- * un exo ambigu/hors-scope/trop-facile (ou toujours rejeté) est régénéré (via `regenerate`) + re-vérifié,
+ * un exo faux/ambigu/hors-scope/trop-facile est régénéré (via `regenerate`) + re-vérifié,
  * jusqu'à N=maxAttempts. S'il reste invalide → retiré. Fallback honnête : jamais de faux "ok".
  */
 export async function verifyAndHarden(
@@ -190,22 +189,9 @@ export async function verifyAndHarden(
   const processed = await mapPool(spec.questions, 3, async (q0) => {
     let q = q0;
     let attempts = 0;
-    let regens = 0;
-    /** Le corrigé livré est-il celui du vérificateur (réparation revérifiée) ? */
-    let repaired = false;
     let res = await verifyOne(q, opts);
     while (isInvalid(res) && attempts < maxAttempts) {
       const r = res!;
-      // Rejet LOCAL : corrigé faux d'un énoncé bien posé, au niveau. La correction complète du
-      // vérificateur le remplace puis est revérifiée à l'aveugle, une fois ; un nouveau rejet
-      // renvoie à la régénération (banc e0 du 17/11 : chaque rejet portait sur UNE sous-question).
-      if (!repaired && r.verdict === "wrong" && !r.too_easy && !r.violates_exclusion && r.corrected_solution_tex && isCompleteCorrection(r.corrected_solution_tex, q.statement_tex)) {
-        q = { ...q, solution_tex: r.corrected_solution_tex };
-        repaired = true;
-        attempts++;
-        res = await verifyOne(q, opts);
-        continue;
-      }
       const diag = [
         r.issue ?? "",
         r.too_easy ? "TROP FACILE vs la vraie page de référence : ajoute un VRAI piège (cas-limite / multi-saut / frontière direct-indirect / égalité longest-prefix), augmente la charge de calcul, et utilise des NOMBRES NON RONDS." : "",
@@ -216,16 +202,14 @@ export async function verifyAndHarden(
       try { ng = await regenerate(q, diag); } catch { ng = null; }
       if (!ng) break;
       q = ng;
-      repaired = false;
       attempts++;
-      regens++;
       res = await verifyOne(q, opts);
     }
     let verified: 1 | 0 | null;
     let dropped = false;
     let fixedSol = false;
     if (!res) verified = null;
-    else if (res.verdict === "ok" && !res.violates_exclusion && !res.too_easy) { verified = 1; fixedSol = repaired; }
+    else if (res.verdict === "ok" && !res.violates_exclusion && !res.too_easy) verified = 1;
     else if (res.verdict === "wrong" && res.corrected_solution_tex && res.corrected_solution_tex.length > 10 && isCompleteCorrection(res.corrected_solution_tex, q.statement_tex)) {
       q.solution_tex = res.corrected_solution_tex;
       verified = 1;
@@ -240,8 +224,8 @@ export async function verifyAndHarden(
     }
     done++;
     const tag = !res ? "non vérifié" : verified === 1 ? (fixedSol ? "corrigé" : "ok") : dropped ? "retiré" : "gardé (faible)";
-    onProgress?.(`Vérif ${done}/${total} — « ${q.concept.slice(0, 48)} » : ${tag}${regens ? ` (durci ×${regens})` : ""}`);
-    return { q, res, verified, dropped, regenerated: regens > 0, fixedSol };
+    onProgress?.(`Vérif ${done}/${total} — « ${q.concept.slice(0, 48)} » : ${tag}${attempts ? ` (durci ×${attempts})` : ""}`);
+    return { q, res, verified, dropped, regenerated: attempts > 0, fixedSol };
   });
 
   const kept = processed.filter((p) => !p.dropped);

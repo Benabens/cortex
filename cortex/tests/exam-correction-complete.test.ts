@@ -38,8 +38,6 @@ const COMPLETE = String.raw`\subq{1.1}{Délai d'un paquet}{3} $T_1 = 3 \times 1{
 
 /** Correction que renvoie le faux vérificateur pour le test en cours. */
 let correction = PARTIAL;
-/** La revérification d'un corrigé déjà corrigé l'accepte-t-elle ? (sinon le faux vérificateur rejette toujours) */
-let reverifyAgrees = false;
 /** Temps que met le faux modèle à rendre une régénération. */
 const REGEN_DELAY_MS = 1500;
 let llm: http.Server;
@@ -66,11 +64,6 @@ before(async () => {
         setTimeout(() => { if (!res.destroyed) sse(res, JSON.stringify({ category: "Réseaux", concept: "Store-and-forward", statement_tex: STATEMENT, solution_tex: COMPLETE, points: 10 })); }, REGEN_DELAY_MS);
         return;
       }
-      // Le corrigé proposé est celui du concepteur tant qu'il garde sa formule fausse « (N-1) L_P/R ».
-      if (reverifyAgrees && !raw.includes("L_P/R")) {
-        sse(res, JSON.stringify({ my_solution: "T = 8,7 ms.", verdict: "ok", issue: "", violates_exclusion: false, too_easy: false }));
-        return;
-      }
       sse(res, JSON.stringify({
       my_solution: "En 1.3, le premier paquet (le plus gros) est le goulot : T = 8,7 ms.",
       verdict: "wrong",
@@ -87,7 +80,7 @@ before(async () => {
   await ensureCoursesLoaded();
 });
 
-beforeEach(() => { correction = PARTIAL; reverifyAgrees = false; });
+beforeEach(() => { correction = PARTIAL; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -117,21 +110,6 @@ test("une correction complète du vérificateur remplace le corrigé faux, et l'
   assert.equal(spec.questions[0].solution_tex, COMPLETE);
   assert.equal(report.results[0].verified, 1);
   assert.equal(report.fixed, 1);
-});
-
-test("un corrigé jugé faux est réparé par la correction complète du vérificateur, revérifiée, sans exercice régénéré", async () => {
-  // Banc e0 (17/11) : chaque rejet porte sur UNE sous-question d'un énoncé bien posé ; la régénération
-  // refaisait un exercice entier sans voir l'énoncé (0,35-0,45 $, puis sa propre revérification).
-  correction = COMPLETE;
-  reverifyAgrees = true;
-  const regenerated = { category: "Réseaux", concept: "Exercice régénéré", statement_tex: String.raw`\subq{1.1}{Autre}{10} Autre énoncé.`, solution_tex: "Autre corrigé.", points: 10 };
-  const { runWithCourse } = await import("../db/client");
-  const { verifyAndHarden } = await import("../lib/verify");
-  const { spec, report } = await runWithCourse("ml", () => verifyAndHarden({ title: "", questions: [exercise()] }, async () => regenerated, 2));
-  assert.equal(spec.questions[0].statement_tex, STATEMENT, "l'énoncé conçu est gardé");
-  assert.equal(spec.questions[0].solution_tex, COMPLETE, "le corrigé est celui du vérificateur");
-  assert.equal(report.results[0].verified, 1, "le corrigé réparé a été revérifié et accepté");
-  assert.equal(report.regenerated, 0);
 });
 
 test("une régénération a le même délai que la conception d'un exercice (CORTEX_BATCH_TIMEOUT_MS)", async () => {
