@@ -1,7 +1,7 @@
 /**
  * SUIVI D'ERREURS DANS LE NAVIGATEUR — démarré par components/ErrorTracking
  * (layout racine) avec la configuration servie au runtime par
- * GET /api/monitoring : sans SENTRY_DSN, la réponse est vide et
+ * GET /api/relais : sans SENTRY_DSN, la réponse est vide et
  * `@sentry/browser` n'est jamais téléchargé (morceau chargé à la demande).
  *
  * Ce qui part : type, message nettoyé et pile de l'erreur, URL sans paramètres,

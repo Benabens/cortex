@@ -49,12 +49,12 @@ test("navigateur : avec SENTRY_DSN, passe par le tunnel, sans données perso, sa
   const { clientErrorTrackingConfig } = await import("../lib/observability");
   const { startClientErrorTracking } = await import("../lib/observability-browser");
   const config = clientErrorTrackingConfig({ SENTRY_DSN: DSN, RAILWAY_GIT_COMMIT_SHA: SHA, RAILWAY_ENVIRONMENT_NAME: "production" });
-  assert.deepEqual(config, { dsn: DSN, environment: "production", release: SHA, tunnel: "/api/monitoring" });
+  assert.deepEqual(config, { dsn: DSN, environment: "production", release: SHA, tunnel: "/api/relais" });
   let o: Record<string, unknown> = {};
   assert.equal(await startClientErrorTracking(config, async () => ({ init: (opts: Record<string, unknown>) => { o = opts; } })), "enabled");
   assert.equal(o.sendDefaultPii, false);
   assert.equal(o.tracesSampleRate, 0);
-  assert.equal(o.tunnel, "/api/monitoring");
+  assert.equal(o.tunnel, "/api/relais");
   assert.equal(o.release, SHA);
   const kept = (o.integrations as (d: Array<{ name: string }>) => Array<{ name: string }>)(
     ["Breadcrumbs", "BrowserSession", "GlobalHandlers", "LinkedErrors"].map((name) => ({ name })),
@@ -67,13 +67,13 @@ test("navigateur : avec SENTRY_DSN, passe par le tunnel, sans données perso, sa
   assert.deepEqual(scrubbed.request, { url: "https://app.cortexexam.com/cours/x" });
 });
 
-test("navigateur : la configuration vient de /api/monitoring ; 204, réponse invalide ou réseau coupé = suivi éteint", async () => {
+test("navigateur : la configuration vient de /api/relais ; 204, réponse invalide ou réseau coupé = suivi éteint", async () => {
   const { loadClientErrorTrackingConfig } = await import("../lib/observability-browser");
-  const config = { dsn: DSN, environment: "production", release: SHA, tunnel: "/api/monitoring" };
+  const config = { dsn: DSN, environment: "production", release: SHA, tunnel: "/api/relais" };
   const urls: string[] = [];
   const answer = (r: () => Response) => (async (url: string) => { urls.push(String(url)); return r(); }) as unknown as typeof fetch;
   assert.deepEqual(await loadClientErrorTrackingConfig(answer(() => Response.json(config))), config);
-  assert.deepEqual(urls, ["/api/monitoring"]);
+  assert.deepEqual(urls, ["/api/relais"]);
   assert.equal(await loadClientErrorTrackingConfig(answer(() => new Response(null, { status: 204 }))), null);
   assert.equal(await loadClientErrorTrackingConfig(answer(() => Response.json({ dsn: 42 }))), null);
   assert.equal(await loadClientErrorTrackingConfig(answer(() => Response.json({ ...config, tunnel: "https://o0.ingest.sentry.io" }))), null, "jamais un envoi direct hors de l'origine");
