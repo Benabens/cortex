@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { CourseFiles, FileEntry, FileStat, ServeOptions } from "@/lib/storage";
+import type { CourseFiles, FileEntry, FileStat, PutOptions, ServeOptions } from "@/lib/storage";
 import { serveLocalFile } from "@/lib/storage/http";
 
 /** Fichiers sous `dir`, récursivement, sans suivre les liens symboliques. */
@@ -48,7 +48,8 @@ export class LocalFsStore implements CourseFiles {
   readonly kind = "local" as const;
   constructor(readonly root: string) {}
 
-  async put(file: string, body: Buffer | Uint8Array | string, opts: { exclusive?: boolean } = {}) {
+  /** Sur le disque, `localOnly` ne change rien : il n'y a pas de seau. */
+  async put(file: string, body: Buffer | Uint8Array | string, opts: PutOptions = {}) {
     return writeLocal(file, body, opts.exclusive);
   }
 
