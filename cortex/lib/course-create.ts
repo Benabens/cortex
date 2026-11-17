@@ -42,14 +42,17 @@ export function declaredFormatColumn(input: unknown): string | null {
 /** Identifiants réservés : ils serviraient de segment d'URL ou de dossier. */
 const RESERVED = new Set(["new", "nouveau", "api", "admin", "cours", "u", "data", "refs", "exams", "uploads"]);
 
-function str(v: unknown, field: string, { max, required = false }: { max: number; required?: boolean }): string {
+/** Champ d'un cours, nommé dans la langue du lecteur par le dictionnaire (errors.course_field_*). */
+export type CourseField = "name" | "code" | "university" | "language" | "examDate";
+
+function str(v: unknown, field: CourseField, { max, required = false }: { max: number; required?: boolean }): string {
   if (v === undefined || v === null) {
     if (required) throw new InvalidCourseError({ code: "course_field_required", params: { field } });
     return "";
   }
   if (typeof v !== "string") throw new InvalidCourseError({ code: "course_field_must_be_text", params: { field } });
   const s = v.trim().replace(/\s+/g, " ");
-  noTexCommand(s, `Le champ « ${field} »`);
+  noTexCommand(s, field);
   if (required && s.length < 2) throw new InvalidCourseError({ code: "course_field_too_short", params: { field } });
   if (s.length > max) throw new InvalidCourseError({ code: "course_field_too_long", params: { field, max } });
   return s;
@@ -61,8 +64,8 @@ function str(v: unknown, field: string, { max, required = false }: { max: number
  * seconde barrière (audit du 14/11/2026, 🔴 1). Rien n'est échappé ici : la valeur stockée
  * est aussi celle que l'app affiche.
  */
-export function noTexCommand(s: string, what: string): void {
-  if (s.includes("\\")) throw new InvalidCourseError({ code: "course_tex_command_forbidden", params: { field: what } });
+export function noTexCommand(s: string, field: CourseField | "teacher"): void {
+  if (s.includes("\\")) throw new InvalidCourseError({ code: "course_tex_command_forbidden", params: { field } });
 }
 
 /** Liste d'enseignant·es : tableau JSON ou saisie libre séparée par des virgules. */
@@ -71,7 +74,7 @@ export function parseTeachers(v: unknown): string[] {
   const out = raw.map((s) => s.trim().replace(/\s+/g, " ")).filter(Boolean).slice(0, 12);
   for (const t of out) {
     if (t.length > 60) throw new InvalidCourseError({ code: "course_teacher_name_too_long" });
-    noTexCommand(t, "Un nom d'enseignant·e");
+    noTexCommand(t, "teacher");
   }
   return out;
 }
@@ -122,19 +125,19 @@ function shortLabel(name: string, code: string): string {
  * jamais dans un dossier partagé.
  */
 export function buildCourseRow(input: CourseInput, ownerUserId: string): CourseRow {
-  const name = str(input.name, "nom", { max: 80, required: true });
+  const name = str(input.name, "name", { max: 80, required: true });
   const code = str(input.code, "code", { max: 24 });
-  const university = str(input.university, "université", { max: 80 });
+  const university = str(input.university, "university", { max: 80 });
   const teachers = parseTeachers(input.teachers);
   // Langue absente ou « auto » : chaîne vide, la langue se détecte sur les annales puis les
   // supports (lib/exam-format). Avant le 16/11/2026, un cours sans langue était en français.
-  const rawLanguage = str(input.language, "langue", { max: 5 }).toLowerCase();
+  const rawLanguage = str(input.language, "language", { max: 5 }).toLowerCase();
   const language = rawLanguage === "auto" ? "" : rawLanguage;
   if (language && !LANGS.has(language)) {
     throw new InvalidCourseError({ code: "course_language_unknown", params: { language, supported: LANGUAGES.join(", ") } });
   }
 
-  const examDate = str(input.examDate, "date d'examen", { max: 10 });
+  const examDate = str(input.examDate, "examDate", { max: 10 });
   if (examDate && !/^\d{4}-\d{2}-\d{2}$/.test(examDate)) {
     throw new InvalidCourseError({ code: "course_exam_date_invalid" });
   }
