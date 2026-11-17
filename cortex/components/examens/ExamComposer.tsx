@@ -11,8 +11,23 @@ import type { PlanExam, PlanQcm } from "@/lib/ux/exams";
 import { cn } from "@/lib/ux/cn";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
+import { Segmented } from "@/components/ui/Segmented";
+import { examOutputOptions, useExamOutput, type ExamOutput } from "@/lib/ux/exam-output";
 
 const V = "var(--color-accent)";
+
+const OUTPUTS = examOutputOptions("PDF de l’annale");
+
+/**
+ * Où ouvrir l'examen fini : QCM et questions composées (`/mock/N`) dans la sortie choisie ; un
+ * examen écrit (resultPath = son fichier, scripts/run-job) n'a que son PDF, ouvert tel quel.
+ */
+function examHref(resultPath: string | null, output: ExamOutput, courseId: string | null): string | null {
+  if (!resultPath) return null;
+  if (!resultPath.startsWith("/mock/")) return resultPath;
+  const qs = new URLSearchParams({ course: courseId ?? "", ...(output === "pdf" ? { sortie: "pdf" } : {}) });
+  return `${resultPath}?${qs}`;
+}
 
 /**
  * Compositeur RÉEL (REFONTE ALLÉGÉE) : la PROPOSITION par défaut (format réel du final) suffit —
@@ -38,6 +53,9 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
   const [launching, setLaunching] = useState(false);
   const [genError, setGenError] = useState<{ message: string; command?: string; paywall?: boolean } | null>(null);
   const [doneMsg, setDoneMsg] = useState<string | null>(null);
+  const [doneHref, setDoneHref] = useState<string | null>(null);
+  // Sur le site ou en PDF : le même examen, au même prix (le PDF est compilé à la génération).
+  const [output, chooseOutput] = useExamOutput();
   const job = useJob(jobId);
   const notified = useRef(false);
 
@@ -57,6 +75,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
     setJobId(null);
     setGenError(null);
     setDoneMsg(null);
+    setDoneHref(null);
     notified.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId, plan.kind]);
@@ -75,9 +94,10 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
       setDoneMsg(shortfall
         ? `Examen généré, incomplet : ${shortfall}. Il apparaît dans « Examens prêts » ci-dessous.`
         : "Examen généré : il apparaît dans « Examens prêts » ci-dessous.");
+      setDoneHref(examHref(job.resultPath, output, courseId));
       onGenerated();
     }
-  }, [job, onGenerated]);
+  }, [job, onGenerated, output, courseId]);
 
   const running = launching || (job != null && JOB_ACTIVE.includes(job.status));
   // Même verdict que la route de génération, pour la composition affichée.
@@ -89,6 +109,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
     if (running) return;
     setGenError(null);
     setDoneMsg(null);
+    setDoneHref(null);
     notified.current = false;
     if (isQcm && nQcm === 0 && nOpen === 0) {
       setGenError({ message: "Composition vide : choisis au moins 1 QCM ou 1 question ouverte." });
@@ -190,6 +211,17 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
           )}
         </div>
 
+        {/* sortie : sur le site ou en PDF, au même prix */}
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+          <span className="text-[0.82rem] text-ink-2">Sortie</span>
+          <Segmented label="Sortie de l’examen" options={OUTPUTS} value={output} onChange={chooseOutput} size="sm" />
+        </div>
+        <p className="mt-1.5 text-[0.74rem] leading-relaxed text-ink-4">
+          {output === "pdf"
+            ? "Le PDF reprend la mise en page de ton annale, relevée à la préparation du cours. Même examen, même prix."
+            : "Réponds en ligne, Cortex te corrige. Le PDF reste à un clic, même prix."}
+        </p>
+
         {/* progression du job */}
         {running && job && (
           <div className="mt-4 rounded-lg border border-line bg-surface-2/30 px-4 py-3" aria-live="polite">
@@ -210,6 +242,11 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
           {doneMsg && (
             <span className="inline-flex items-center gap-1.5 text-[0.82rem] text-emerald-hi" aria-live="polite">
               <Check className="size-4" strokeWidth={2.5} /> {doneMsg}
+              {doneHref && (
+                <a href={doneHref} className="ml-1 font-medium text-ink-1 underline underline-offset-2">
+                  {output === "pdf" || !doneHref.startsWith("/mock/") ? "Ouvrir le PDF" : "Ouvrir l’examen"}
+                </a>
+              )}
             </span>
           )}
         </div>
