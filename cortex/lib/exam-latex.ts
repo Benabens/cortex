@@ -112,7 +112,7 @@ function courseTex(t: string, question: number): string {
 export async function renderExamTex(spec: ExamSpec, dateLabel: string, includeSolutions = true, layout?: ExamLayout): Promise<string> {
   const pdf = examPdf(layout ?? (await examLayout()));
   const qs = [...spec.questions].sort((a, b) => catRank(a.category) - catRank(b.category));
-  let preamble = fs.readFileSync(path.join(LATEX_DIR, "preamble.tex"), "utf8");
+  let preamble = pdf.preamble(fs.readFileSync(path.join(LATEX_DIR, "preamble.tex"), "utf8"));
   const figPath = path.join(LATEX_DIR, "figures.tex");
   if (fs.existsSync(figPath)) preamble += "\n" + fs.readFileSync(figPath, "utf8");
 

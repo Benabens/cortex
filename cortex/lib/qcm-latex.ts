@@ -1,7 +1,8 @@
 import type { ExamQuestion } from "@/lib/exam";
 import { compileExamPdf, copyExamLogo } from "@/lib/exam-latex";
 import { examDurationMin } from "@/lib/exam-format";
-import { examLayout, examPdf, type ExamLayout, type ExamPdf, type QcmLabels } from "@/lib/exam-layout";
+import { examLayout, examPdf, type ExamLayout, type ExamPdf } from "@/lib/exam-layout";
+import { choicesTex, openHeadTex, qcmHeadTex } from "@/lib/exam-layout-tex";
 import { esc } from "@/lib/tex-escape";
 import { assertTexSafe } from "@/lib/tex-guard";
 import { getFormatProfile } from "@/lib/format";
@@ -19,30 +20,27 @@ import path from "node:path";
  */
 const LATEX_DIR = path.join(process.cwd(), "latex");
 
-const LETTER = "ABCDEFGH".split("");
-const BOX = String.raw`\ding{113}`; // □ (pifont) — comme les annales CS-233
-
-function renderQcmItem(q: QcmItem, n: number, points: number, withKey: boolean, L: QcmLabels): string {
+function renderQcmItem(q: QcmItem, n: number, points: number, withKey: boolean, pdf: ExamPdf): string {
+  const L = pdf.qcm;
   const opts = q.options.map((o, k) => {
     const correct = withKey && (q.correct ?? []).includes(k);
-    const box = correct ? String.raw`\ding{51}` : BOX; // ✓ dans le corrigé
     // Corrigé : l'idée fausse visée, SOUS l'option, en retrait et en drapeau (examen #16, 16/11 :
     // poussée à droite de l'option par \hfill, elle débordait ou se coupait en fragments entre
     // deux lignes justifiées dès que l'option ou la note étaient longues).
-    const mis = withKey && !correct && q.misconceptions?.[k]?.trim()
+    const note = withKey && !correct && q.misconceptions?.[k]?.trim()
       ? String.raw`\nopagebreak{\raggedright\leftskip=1.7em\footnotesize\itshape\color{gray}${L.misconception}${esc(q.misconceptions[k].trim())}\par}`
       : "";
-    return String.raw`\noindent${box}~\textbf{${LETTER[k]}.}~${esc(o)}\par${mis}\smallskip`;
-  }).join("\n");
+    return { text: esc(o), correct, note };
+  });
   // figure rendue (PNG déjà dans examsDir, à côté du .tex compilé).
   const fig = q.figureFile
     ? String.raw`\begin{center}\includegraphics[width=0.52\linewidth]{${q.figureFile}}\end{center}`
     : "";
   return [
-    String.raw`\needspace{5\baselineskip}\par\medskip\noindent\textbf{${L.question(n)}}\quad{\footnotesize[${L.tag(q.type, points)}]}\quad\textbf{\textit{${esc(q.topic)}}}\par\smallskip`,
+    qcmHeadTex(pdf.layout, L, n, q.type, points, esc(q.topic)),
     fig,
     `\\noindent ${esc(q.stem).replace(/^\((SCQ|MCQ)\)\s*/i, "")}\\par\\smallskip`,
-    opts,
+    choicesTex(pdf.layout, opts),
     withKey && q.explanation ? String.raw`\par{\footnotesize\color{${L.color}}\textbf{${L.solution}} ${esc(q.explanation).replace(/\n+/g, String.raw`\newline `)}}\par` : "",
   ].filter(Boolean).join("\n");
 }
@@ -61,13 +59,14 @@ export function alignTikzNodes(tex: string): string {
   return tex.replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, inNode);
 }
 
-function renderOpen(q: ExamQuestion, n: number, withSol: boolean, defaultPts: number, L: QcmLabels): string {
+function renderOpen(q: ExamQuestion, n: number, withSol: boolean, defaultPts: number, pdf: ExamPdf): string {
+  const L = pdf.qcm;
   // les énoncés ouverts (architecte ML) sont déjà en LaTeX (corps) — on les insère tels quels,
   // précédés d'un en-tête. Si pas de \subq dedans, on ajoute un espace de réponse.
   const stmt = alignTikzNodes((q.statement_tex ?? "").trim());
   const hasSpace = /\\rulelines|\\diskgrid|\\statesim|\\packetgrid|\\forwardgrid/.test(stmt);
   return [
-    String.raw`${n > 1 || L.pageBeforeFirstOpen ? String.raw`\clearpage` : String.raw`\par\vspace{8pt}`}\needspace{4\baselineskip}{\large\textbf{${L.openQuestion(n)} \quad-- ${esc(q.concept)} \hfill [${L.points(q.points ?? defaultPts)}]}}\par\vspace{4pt}\hrule\vspace{8pt}`,
+    (n > 1 || L.pageBeforeFirstOpen ? String.raw`\clearpage` : String.raw`\par\vspace{8pt}`) + openHeadTex(pdf.layout, L, n, esc(q.concept), q.points ?? defaultPts),
     stmt,
     hasSpace ? "" : String.raw`\vspace{4pt}\rulelines{8}`,
     withSol ? String.raw`\par\medskip{\textbf{\color{${L.color}}${L.openSolution}}}\par\smallskip` + "\n" + alignTikzNodes(q.solution_tex ?? "") : "",
@@ -91,7 +90,7 @@ const OPEN_TEX_COMPAT = String.raw`\providecommand{\captionof}[2]{\par\smallskip
  * des ouvertes, puis l'en-tête et le pied de la mise en page (le préambule est écrit pour CS-202).
  */
 export function examDocument(body: string[], dateLabel: string, pdf: ExamPdf): string {
-  let preamble = fs.readFileSync(path.join(LATEX_DIR, "preamble.tex"), "utf8");
+  let preamble = pdf.preamble(fs.readFileSync(path.join(LATEX_DIR, "preamble.tex"), "utf8"));
   const figPath = path.join(LATEX_DIR, "figures.tex");
   if (fs.existsSync(figPath)) preamble += "\n" + fs.readFileSync(figPath, "utf8");
   preamble += "\n" + OPEN_TEX_COMPAT;
@@ -139,7 +138,7 @@ export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, inc
   const firstPart = hasQcm
     ? [
         String.raw`\par\noindent{\large\textbf{${L.qcmPart(hasOpen)} \hfill [${L.points(qcmTotal)}]}}\par\vspace{3pt}\hrule\vspace{8pt}`,
-        ...data.items.map((q, i) => renderQcmItem(q, i + 1, itemPts[i], includeSolutions, L)),
+        ...data.items.map((q, i) => renderQcmItem(q, i + 1, itemPts[i], includeSolutions, pdf)),
       ].join("\n")
     : "";
 
@@ -147,11 +146,11 @@ export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, inc
     ? [
         hasQcm ? String.raw`\clearpage` : "",
         String.raw`\par\noindent{\large\textbf{${L.openPart(hasQcm)} \hfill [${L.points(openPts)}]}}\par\vspace{3pt}\hrule`,
-        ...data.open.map((q, i) => renderOpen(q, i + 1, includeSolutions, openDefault, L)),
+        ...data.open.map((q, i) => renderOpen(q, i + 1, includeSolutions, openDefault, pdf)),
       ].filter(Boolean).join("\n")
     : "";
 
-  const cover = await pdf.cover({ form: "qcm", dateLabel, nQcm: data.items.length, nOpen: data.open.length, totalPts, durationMin: dur });
+  const cover = await pdf.cover({ form: "qcm", dateLabel, nQcm: data.items.length, nOpen: data.open.length, totalPts, durationMin: dur, points: [...itemPts, ...data.open.map((q) => q.points ?? openDefault)] });
   return examDocument([cover, firstPart, secondPart], dateLabel, pdf);
 }
 

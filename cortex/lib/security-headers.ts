@@ -79,11 +79,21 @@ export function isServedFilePath(pathname: string): boolean {
  * En-têtes d'une réponse FICHIER : le jeu de sécurité complet, avec la CSP
  * remplacée par le bac à sable quand le contenu est du HTML.
  */
-export function servedFileHeaders(contentType: string, extra: Record<string, string> = {}): Record<string, string> {
+export function servedFileHeaders(
+  contentType: string,
+  extra: Record<string, string> = {},
+  opts: { sameOriginFrame?: boolean } = {},
+): Record<string, string> {
   const headers: Record<string, string> = { "content-type": contentType, ...extra };
   const html = /^text\/html\b/i.test(contentType);
   for (const h of SECURITY_HEADERS) {
     headers[h.key.toLowerCase()] = h.key === "Content-Security-Policy" && html ? CSP_SANDBOXED_HTML : h.value;
+  }
+  // PDF d'examen montré dans la page de l'examen (sortie « PDF ») : Cortex peut le cadrer,
+  // aucun autre site. Jamais pour du HTML (importé, donc non fiable).
+  if (opts.sameOriginFrame && !html) {
+    headers["content-security-policy"] = CSP_BASE.replace("frame-ancestors 'none'", "frame-ancestors 'self'");
+    headers["x-frame-options"] = "SAMEORIGIN";
   }
   return headers;
 }

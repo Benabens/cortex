@@ -1,6 +1,7 @@
 import { q } from "@/db/q";
 import { completeText, extractJson } from "@/lib/llm";
-import { courseRefImages } from "@/lib/course-vision";
+import { courseRefImages, courseRefPdfs } from "@/lib/course-vision";
+import { surveyAnnalePdfs } from "@/lib/exam-layout-survey";
 import { DATA_RULE, dataBlock } from "@/lib/prompt-safety";
 import { ANSWER_MODES, EXAM_KINDS, type AnswerMode, type ExamKind, type StoredProfile } from "@/lib/exam-format";
 
@@ -123,10 +124,24 @@ export async function detectFormat(opts: { onStep?: (m: string, p: number) => vo
     JSON.stringify(FORMAT_SCHEMA, null, 2),
   ].filter(Boolean).join("\n");
   const profile = extractJson<FormatProfile>(await completeText({ prompt, model: "opus", timeoutMs: 300_000 }));
+  // Mise en page de l'annale (garde, en-tête, numérotation, options…), relevée une fois ici, sans
+  // appel au modèle, tant que ses PDF sont là : lib/exam-layout-survey.
+  step("Relevé de la mise en page de l'annale…", 85);
+  const layout = surveyLayout();
   step("Enregistrement du profil de format…", 90);
-  await saveProfile({ ...profile, basis: "annales" });
+  await saveProfile({ ...profile, basis: "annales", ...(layout ? { layout } : {}) });
   step("Format détecté ✓", 100);
   return profile;
+}
+
+/** Relevé déterministe de la mise en page des annales ; null s'il n'y a rien à lire (ou sans poppler). */
+function surveyLayout(): StoredProfile["layout"] | null {
+  try {
+    return surveyAnnalePdfs(courseRefPdfs());
+  } catch (e) {
+    console.warn(`[format] relevé de la mise en page impossible : ${(e as Error).message}`);
+    return null;
+  }
 }
 
 async function saveProfile(p: StoredProfile): Promise<void> {

@@ -40,6 +40,13 @@ function refPdfs(course: string): string[] {
   } catch { return []; }
 }
 
+/** PDF de référence (annales, sans les corrigés) du cours courant, en chemins absolus ; aucun pour cs-202 (figrefs curés). */
+export function courseRefPdfs(): string[] {
+  const course = currentCourse();
+  if (course === DEFAULT_COURSE) return [];
+  return refPdfs(course).map((f) => path.join(coursePaths(course).refsDir, f));
+}
+
 /**
  * Rend les premières pages de chaque PDF de référence du cours en PNG (étalon vision), dans le
  * cache des pages (lib/page-cache : un seul rendu, partagé avec l'index des annales, hors quota).
