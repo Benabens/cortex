@@ -600,9 +600,9 @@ testé).
 
 Comment c'est branché : `@sentry/node` côté serveur (plus le crochet
 `onRequestError` de Next pour les erreurs de rendu et de route non gérées) et
-`@sentry/browser` côté navigateur, chargé seulement si `GET /api/monitoring`
+`@sentry/browser` côté navigateur, chargé seulement si `GET /api/relais`
 renvoie une configuration (204 sans DSN). Le navigateur envoie ses erreurs à
-`/api/monitoring` (même origine), qui ne relaie qu'au projet du DSN configuré :
+`/api/relais` (même origine), qui ne relaie qu'au projet du DSN configuré :
 la CSP garde `connect-src 'self'`. Pas de `@sentry/nextjs` : il tire webpack et
 le binaire sentry-cli (~100 Mo dans l'image) pour des source maps qu'on
 n'envoie pas.

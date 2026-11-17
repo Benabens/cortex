@@ -133,7 +133,7 @@ export function captureRequestError(e: unknown, context: RequestErrorContext): v
 }
 
 /**
- * Servi au RUNTIME par GET /api/monitoring, que le navigateur interroge au
+ * Servi au RUNTIME par GET /api/relais, que le navigateur interroge au
  * chargement : le DSN n'est jamais figé dans le build (pas de NEXT_PUBLIC_), ni
  * dans les pages prérendues au build, qui n'ont pas les variables de la prod.
  */
