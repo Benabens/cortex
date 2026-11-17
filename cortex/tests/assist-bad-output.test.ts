@@ -64,7 +64,7 @@ after(async () => {
 
 const post = (route: string, body: unknown) =>
   new NextRequest(`http://cortex.test/api/${route}?course=cs-202`, {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    method: "POST", headers: { "content-type": "application/json", "accept-language": "fr" }, body: JSON.stringify(body),
   });
 
 test("drill (app) : un énoncé avec bloc de code dans du ```json est lu, en sortie structurée", async () => {
@@ -87,7 +87,7 @@ test("drill (app) : 3 réponses illisibles → 502 au message clair, appel rembo
   const res = await POST(post("drill", { concept: "groupby" }));
   assert.equal(res.status, 502);
   const out = (await res.json()) as { error: string; code: string };
-  assert.equal(out.code, "BAD_OUTPUT");
+  assert.equal(out.code, "llm_bad_output");
   assert.match(out.error, /illisible/);
   assert.equal(calls, 3, "redemandé avec l'erreur, 3 essais");
   assert.equal(await credits.getBalanceCenti("owner"), before, "notre défaut : rien ne reste débité");
@@ -118,7 +118,7 @@ test("panne du fournisseur (app) : message clair, sans le texte brut du fourniss
   const res = await POST(post("drill", { concept: "groupby" }));
   assert.equal(res.status, 502);
   const out = (await res.json()) as { error: string; code: string };
-  assert.equal(out.code, "UPSTREAM");
+  assert.equal(out.code, "llm_provider_unreachable");
   assert.match(out.error, /surchargé ou injoignable/);
   assert.doesNotMatch(out.error, /boom|HTTP 503/);
 });

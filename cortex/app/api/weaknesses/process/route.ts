@@ -1,10 +1,11 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { q } from "@/db/q";
 import { useCourseOr404 } from "@/lib/req";
 import { logLoopRoute } from "@/lib/req-log";
 import { currentCourse } from "@/db/client";
 import { courseLabel } from "@/lib/courses";
 import { uploadsDir } from "@/lib/paths";
-import { LlmError, completeText, extractJson } from "@/lib/llm";
+import { LlmError, completeText, extractJson, llmUserError } from "@/lib/llm";
 import { isLlmModel } from "@/lib/llm/config";
 import { getWeakness, updateWeaknessAnalysis } from "@/lib/weaknesses";
 import path from "node:path";
@@ -51,11 +52,11 @@ async function handlePOST(req: NextRequest) {
   const denied = useCourseOr404(req);
   if (denied) return denied;
   const { id, model } = await readJson(req, ({ id: null }));
-  if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
+  if (!id) return apiError(req, "id_missing", 400);
   // Le client ne choisit qu'un ALIAS de la liste blanche (le serveur décide de
   // l'id réel et de son prix) ; un id complet contournerait LLM_ALLOW_OPUS.
   if (model !== undefined && model !== null && model !== "" && !isLlmModel(model)) {
-    return NextResponse.json({ error: "Modèle inconnu : choisis opus, sonnet ou haiku." }, { status: 400 });
+    return apiError(req, "llm_model_unknown", 400);
   }
   const chosenModel = isLlmModel(model) ? model : "opus";
 
@@ -63,7 +64,7 @@ async function handlePOST(req: NextRequest) {
     "SELECT topic, description, screenshot_path FROM weaknesses WHERE id = ?",
     Number(id)
   );
-  if (!row) return NextResponse.json({ error: "faiblesse introuvable" }, { status: 404 });
+  if (!row) return apiError(req, "weakness_not_found", 404);
 
   // Chemin image relatif au cwd (l'outil Read du provider CLI lit dans le projet).
   let imageRel: string | null = null;
@@ -90,9 +91,9 @@ async function handlePOST(req: NextRequest) {
     return NextResponse.json({ ok: true, weakness: await getWeakness(Number(id)) });
   } catch (e: unknown) {
     const { AssistRefused } = await import("@/lib/billing/reserve");
-    if (e instanceof AssistRefused) return NextResponse.json({ error: e.message }, { status: e.status });
+    if (e instanceof AssistRefused) return apiError(req, e, e.status);
     const err = e as LlmError;
     const status = err.code === "UNAVAILABLE" || err.code === "SPEND_CAP" || err.code === "QUOTA" || err.code === "CREDITS" ? 503 : 502;
-    return NextResponse.json({ error: err.message ?? String(e), code: err.code }, { status });
+    return apiError(req, llmUserError(e), status, { llmCode: err.code });
   }
 }
