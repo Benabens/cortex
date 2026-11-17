@@ -8,6 +8,10 @@ Prêt à copier dans le portail de soumission. Rédigé le 16/11/2026 d'après :
 
 Les champs de l'annuaire sont en anglais (public international) ; les consignes sont en français.
 
+> **État (17/11/2026) : soumis**, sous le nom **« Cortex Exam »** (slug `cortex-exam`) : le nom « Cortex » était
+> déjà pris par une autre fiche de l'annuaire. En attente de la revue. Le même nom affiché est repris pour ChatGPT
+> (`annuaire-chatgpt.md`).
+
 ---
 
 ## 0. Avant de soumettre (bloquant)
@@ -24,9 +28,9 @@ Les champs de l'annuaire sont en anglais (public international) ; les consignes 
 
 ## 1. Champs du formulaire
 
-**Name** (≤ 100) :
+**Name** (≤ 100) : « Cortex » était déjà pris dans l'annuaire, la fiche est soumise sous :
 ```
-Cortex
+Cortex Exam
 ```
 
 **One-liner** (≤ 200) :
@@ -197,7 +201,7 @@ crédits.
 
 ## 6. Ce que l'éditeur doit faire lui-même
 
-1. Choisir la raison sociale à afficher (support : `support@cortexexam.com`, décidé).
-2. Choisir le mot de passe du compte démo et l'adresse `REVIEW_LOGIN_EMAIL` (§ 4) ; Cowork active le reste.
-3. Soumettre dans https://claude.ai/directory/manage (compte Claude de l'éditeur) et cocher les engagements.
+1. ~~Choisir la raison sociale à afficher~~ : « Benjamin Abensur EI (Benabens) » ; support : `support@cortexexam.com`.
+2. ~~Choisir le mot de passe du compte démo et l'adresse `REVIEW_LOGIN_EMAIL` (§ 4)~~ : compte démo actif (17/11).
+3. ~~Soumettre dans https://claude.ai/directory/manage~~ : **soumis le 17/11/2026** sous « Cortex Exam » (slug `cortex-exam`).
 4. Répondre au relecteur si une escalade « Verified » arrive.

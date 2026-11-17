@@ -53,15 +53,15 @@ prod depuis ce chantier.
 Le paquet est prêt dans `docs/annuaires/chatgpt-plugin/` (`plugin.json`, `mcp.json`), d'après le format
 documenté ; `plugin.json` et `mcp.json` validés contre les schémas agent-plugins 1.0.0, à l'exception du bloc
 `extensions["com.openai"].auth` de `mcp.json` que la doc d'OpenAI place dans le serveur alors que le schéma
-générique ne le prévoit pas (la doc d'OpenAI fait foi pour ChatGPT). Restent à remplir les `TODO` (raison
-sociale, vidéo).
+générique ne le prévoit pas (la doc d'OpenAI fait foi pour ChatGPT). Reste un seul `TODO` : la vidéo
+de démo (`demo_recording_url`).
 
 | Champ | Limite | Valeur |
 |---|---|---|
-| Display Name | 30 | `Cortex` |
+| Display Name | 30 | `Cortex Exam` (11) : même nom que la fiche Claude, où « Cortex » était déjà pris |
 | Short Description | 30 | `Mock exams from your courses` (28) |
 | Long Description | 4000 | dans `plugin.json` (≈ 1 200 caractères) |
-| Developer Name | 80 | raison sociale de l'éditeur |
+| Developer Name | 80 | `Benjamin Abensur EI (Benabens)` |
 | Category | | Education |
 | Website / Support | https | `https://cortexexam.com/mcp` ; contact support : `support@cortexexam.com` (décision de l'éditeur, 16/11) |
 | Privacy / Terms | https | `https://cortexexam.com/privacy-en`, `https://cortexexam.com/terms-en` |
@@ -73,16 +73,20 @@ sociale, vidéo).
 | Pays | | à choisir (la France et la Suisse au minimum) |
 | Traductions | | fr-FR possible plus tard : la page et l'app sont en français |
 
-Construire le ZIP (fichiers à la racine de l'archive) :
+Construire le ZIP (fichiers à la racine de l'archive, logo copié depuis `public/mcp-icon-512.png`) :
 
 ```
-cd docs/annuaires/chatgpt-plugin
-mkdir -p assets && cp ../../../public/mcp-icon-512.png assets/logo.png
-zip -r ../cortex-chatgpt-plugin.zip plugin.json mcp.json assets
+cd cortex && bash scripts/build-chatgpt-plugin.sh
 ```
+
+L'archive `cortex/cortex-chatgpt-plugin.zip` est ignorée par git (elle se reconstruit). Le script refuse un
+manifeste illisible, une limite du formulaire dépassée, une version différente de `MCP_SERVER_VERSION` ou un
+`TODO` ailleurs que dans `demo_recording_url` (simple avertissement pour celui-là). Il est reproductible : mêmes
+sources, même archive ; l'empreinte sha256 affichée à la fin identifie ce qui a été téléversé.
+
 
 Les cas de test supposent le compte démo du § 5 (cours `DEMO-101`). Le cas « generate_drill » montre le devis
-(0,1 crédit par défaut) puis la question après un « oui ».
+(le coût exact annoncé par le premier appel) puis la question après un « oui ».
 
 ## 5. Compte de démo : connexion par mot de passe réservée à la revue (voie retenue)
 
@@ -102,16 +106,22 @@ paquet ni dans le dépôt.
 
 ## 6. Ce que l'éditeur doit faire lui-même
 
+État au 17/11/2026 : fiche Claude soumise sous « Cortex Exam » ; paquet ChatGPT prêt sauf la vidéo.
+
 1. Faire vérifier l'organisation OpenAI (individuelle ou entreprise, au nom de l'éditeur) ; soumettre depuis le
    compte propriétaire ou un membre avec « Apps Management Write ».
-2. Choisir le mot de passe du compte démo (§ 5) ; Cowork pose les variables et lance `scripts/review-account.ts`
-   (identifiants saisis à part, jamais dans le paquet ni dans le dépôt).
-3. Enregistrer une **vidéo de démo** (connexion, consentement, liste des cours, devis puis génération) et mettre
-   son URL dans `demo_recording_url`.
-4. Remplir les `TODO` de `plugin.json` (raison sociale), relire la politique de confidentialité, choisir les
-   pays.
-5. Construire le ZIP (§ 4), le téléverser sur platform.openai.com/plugins, remplir les identifiants relecteur.
-6. Savoir qu'OpenAI rescanne le serveur chaque jour : un outil ajouté ou une description changée se relit.
+2. ~~Compte démo~~ : actif depuis le 17/11 (`scripts/review-account.ts` lancé en prod), **mêmes identifiants que
+   pour la revue Claude** ; ils se saisissent dans le formulaire, jamais dans le paquet ni dans le dépôt. Vérifier
+   avant de soumettre que `REVIEW_LOGIN_UNTIL` couvre aussi la revue ChatGPT, souvent plus longue.
+3. **Vidéo de démo** (seul `TODO` restant) : connexion par « Accès relecteur », consentement, liste des cours,
+   devis puis génération, contre la prod. Mettre son URL dans `demo_recording_url` de `plugin.json` (PR), puis
+   reconstruire le ZIP.
+4. ~~Raison sociale~~ : « Benjamin Abensur EI (Benabens) » (`author.name`, `developerName`), nom affiché
+   « Cortex Exam ». Restent : relire la politique de confidentialité, choisir les pays (France et Suisse au minimum).
+5. Construire le ZIP (`cd cortex && bash scripts/build-chatgpt-plugin.sh`, § 4), noter l'empreinte sha256 affichée,
+   le téléverser sur platform.openai.com/plugins et remplir les identifiants relecteur.
+6. Savoir qu'OpenAI rescanne le serveur chaque jour : un outil ajouté ou une description changée se relit (la
+   1.2.0 a retiré tout coût chiffré des descriptions, PR #130).
 
 Non vérifié : la page du format de manifeste citée en premier par OpenAI (`/plugins/build/manifest`) renvoyait
 404 le 16/11 ; le format ci-dessus vient de `/plugins/build/plugins`. Vérifier au moment de soumettre.
