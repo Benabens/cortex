@@ -359,7 +359,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
       </label>
 
       {/* Compte gratuit : le fichier ne reste pas sur le serveur (lib/originals) */}
-      {originals?.home === "local" && <LocalImportNote />}
+      {originals?.home === "local" && <LocalImportNote transitHours={originals.transitHours} />}
 
       {/* OU un dossier complet, choisi dans le navigateur */}
       <div>

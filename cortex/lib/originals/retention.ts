@@ -1,15 +1,14 @@
-import { createHash } from "node:crypto";
 import path from "node:path";
 import { authGet, authRun } from "@/db/auth-store";
 import { runWithCourse } from "@/db/client";
 import { runWithUser } from "@/db/context";
 import { nowStr, q } from "@/db/q";
-import { coursePaths, getCourse, listCourses } from "@/lib/courses";
+import { coursePaths, ensureCoursesLoaded, getCourse, listCourses } from "@/lib/courses";
 import { log } from "@/lib/metrics";
 import { purgePdfPages } from "@/lib/page-cache";
-import { coursePathOf, settleOriginals } from "@/lib/originals/intake";
+import { coursePathOf, settleOriginals, sha256, transitHours } from "@/lib/originals/intake";
 import { originalsPolicy, originalsRuleActive, type OriginalsPolicy } from "@/lib/originals/policy";
-import { localOriginals, recordLocal } from "@/lib/originals/registry";
+import { isIndexed, localOriginals, recordLocal } from "@/lib/originals/registry";
 import { storage } from "@/lib/storage";
 
 /**
@@ -21,6 +20,10 @@ import { storage } from "@/lib/storage";
  * `originals_rule_since`, posé au premier passage). Les examens générés par Cortex ne sont pas
  * des originaux : ils restent. Le passage est horaire, sur chaque instance (le transit est sur
  * son disque) ; il est idempotent, et saute un cours dont un job tourne.
+ *
+ * La suppression des fichiers déjà dans le cloud est armée à part (ORIGINALS_PURGE=1) : sans elle,
+ * rien n'est annoncé ni supprimé, et le délai de 30 jours ne court qu'à partir de l'armement. Le
+ * transit des nouveaux envois d'un gratuit, lui, suit la règle (lib/originals/policy).
  */
 
 export const RETENTION_DAYS = 30;
@@ -31,9 +34,14 @@ const TICK_MS = 3600_000;
 const parse = (s: string) => Date.parse(`${s.slice(0, 19).replace(" ", "T")}Z`);
 const stamp = (ms: number) => new Date(ms).toISOString().slice(0, 19).replace("T", " ");
 
-/** Date d'entrée en vigueur de la règle (posée une fois, au premier appel avec la règle active). */
+/** Suppression des originaux déjà dans le cloud des comptes gratuits armée (ORIGINALS_PURGE=1). */
+export function cloudPurgeArmed(env: Partial<NodeJS.ProcessEnv> = process.env): boolean {
+  return env.ORIGINALS_PURGE?.trim() === "1" && originalsRuleActive(env);
+}
+
+/** Date d'entrée en vigueur de la purge (posée une fois, au premier appel une fois armée). */
 export async function ruleSince(now: string = nowStr()): Promise<string | null> {
-  if (!originalsRuleActive()) return null;
+  if (!cloudPurgeArmed()) return null;
   await authRun(`INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING`, RULE_KEY, now);
   return (await authGet<{ value: string }>(`SELECT value FROM app_meta WHERE key = ?`, RULE_KEY))?.value ?? now;
 }
@@ -46,12 +54,16 @@ export function purgeDate(policy: OriginalsPolicy, since: string | null): string
 }
 
 /** Ce que l'interface annonce à un compte : où vont ses originaux, et jusqu'à quand le cloud les garde. */
-export type OriginalsNotice = { home: OriginalsPolicy["home"]; reason: OriginalsPolicy["reason"]; wasPremium: boolean; purgeOn: string | null };
+export type OriginalsNotice = {
+  home: OriginalsPolicy["home"]; reason: OriginalsPolicy["reason"]; wasPremium: boolean; purgeOn: string | null;
+  /** Heures de transit au plus d'un original de compte gratuit (FREE_TRANSIT_HOURS). */
+  transitHours: number;
+};
 
 export async function originalsNotice(userId: string): Promise<OriginalsNotice> {
   const policy = await originalsPolicy(userId);
   const purgeOn = policy.home === "local" ? purgeDate(policy, await ruleSince().catch(() => null)) : null;
-  return { home: policy.home, reason: policy.reason, wasPremium: !!policy.cloudUntil, purgeOn };
+  return { home: policy.home, reason: policy.reason, wasPremium: !!policy.cloudUntil, purgeOn, transitHours: transitHours() };
 }
 
 /**
@@ -77,18 +89,17 @@ type CourseReport = { transitPurged: number; cloudPurged: number };
 async function purgeCloudOriginals(courseId: string): Promise<number> {
   const { refsDir, contentRoot, uploadsDir } = coursePaths(courseId);
   const inTransit = new Set((await localOriginals("transit")).map((o) => o.path));
-  await q.ensureTable("sources");
   let n = 0;
   for (const dir of [refsDir, contentRoot, uploadsDir]) {
     for (const f of await storage().list(dir)) {
       const coursePath = coursePathOf(courseId, f.path);
       if (coursePath && inTransit.has(coursePath)) continue;
       if (coursePath && !coursePath.startsWith("uploads/")) {
-        const indexed = await q.get(`SELECT 1 AS one FROM sources WHERE path = ? LIMIT 1`, coursePath);
+        const indexed = await isIndexed(coursePath);
         const data = indexed ? await storage().read(f.path) : null;
         if (data) {
           await recordLocal({
-            path: coursePath, name: path.basename(f.path), sha256: createHash("sha256").update(data).digest("hex"),
+            path: coursePath, name: path.basename(f.path), sha256: sha256(data),
             size: data.length, origin: "purge",
           });
         }
@@ -124,6 +135,7 @@ export async function sweepAccount(userId: string, now: string = nowStr()): Prom
 export async function sweepOriginals(now: string = nowStr()): Promise<CourseReport> {
   const out: CourseReport = { transitPurged: 0, cloudPurged: 0 };
   if (!originalsRuleActive()) return out;
+  await ensureCoursesLoaded(); // catalogue revalidé : un cours créé par un autre processus compte
   for (const userId of new Set(listCourses().filter((c) => !c.paths).map((c) => c.ownerUserId))) {
     try {
       const r = await sweepAccount(userId, now);

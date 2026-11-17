@@ -7,7 +7,10 @@ import styles from "@/app/secondary.module.css";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
+import { PREMIUM_HREF } from "@/components/sources/OriginalsNotes";
 import { useApi, useCourse } from "@/lib/ux/api";
+import type { LocalOriginal } from "@/lib/originals/registry";
+import type { OriginalsNotice } from "@/lib/originals/retention";
 import {
   findLocalFile, folderAccess, localFilesSupported, pickFolder, saveFolder, savedFolder, viewableType,
   type DirHandle, type WantedFile,
@@ -22,8 +25,8 @@ import {
  * le temps d'une préparation sinon.
  */
 
-type Original = WantedFile & { origin: "upload" | "url" | "text" | "purge"; url: string | null; state: "transit" | "local" };
-type Resp = { original: Original; plan: { home: "cloud" | "local"; reason: string } };
+type Original = WantedFile & Pick<LocalOriginal, "origin" | "url" | "state">;
+type Resp = { original: Original; plan: OriginalsNotice };
 
 type Step =
   | { s: "checking" }
@@ -35,7 +38,6 @@ type Step =
   | { s: "changed"; where: string; dir: string }
   | { s: "missing"; dir: string };
 
-const PREMIUM_HREF = "/compte#credits";
 const kb = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1).replace(".", ",")} Mo` : `${Math.max(1, Math.round(n / 1024))} Ko`);
 
 const noSubscribe = () => () => {};
@@ -148,7 +150,7 @@ function LocalOriginal() {
             </Panel>
 
             {original.origin !== "text" && (
-              <SendBack courseId={courseId} original={original} local={local} found={step.s === "found" ? step.file : null} />
+              <SendBack courseId={courseId} original={original} local={local} hours={data?.plan.transitHours ?? 24} found={step.s === "found" ? step.file : null} />
             )}
 
             {local && (
@@ -249,7 +251,7 @@ function StepView({ step, original, page, onChoose, onAllow, onOpen }: {
 }
 
 /** Renvoyer le même fichier : au cloud (Premium), ou le temps d'une préparation (gratuit). */
-function SendBack({ courseId, original, local, found }: { courseId: string; original: Original; local: boolean; found: File | null }) {
+function SendBack({ courseId, original, local, hours, found }: { courseId: string; original: Original; local: boolean; hours: number; found: File | null }) {
   const input = useRef<HTMLInputElement>(null);
   const [state, setState] = useState<{ busy: boolean; ok?: string; error?: string }>({ busy: false });
   const send = async (file: File) => {
@@ -264,7 +266,7 @@ function SendBack({ courseId, original, local, found }: { courseId: string; orig
         busy: false,
         ok: body.home === "cloud"
           ? "Reçu : il est maintenant dans le cloud, tu peux l’ouvrir partout."
-          : "Reçu. Lance « Préparer le cours » dans les 24 h : Cortex relira ses pages, puis le retirera de ses serveurs.",
+          : `Reçu. Lance « Préparer le cours » dans les ${hours} h : Cortex relira ses pages, puis le retirera de ses serveurs.`,
       });
     } catch {
       setState({ busy: false, error: "Envoi interrompu. Vérifie ta connexion, puis réessaie." });

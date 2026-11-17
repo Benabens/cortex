@@ -18,10 +18,11 @@ process.env.CORTEX_DATA_DIR = tmp;
 process.env.MAX_COURSES_CREATED_PER_HOUR = "unlimited";
 process.env.BILLING_ENABLED = "1";
 process.env.STORAGE_QUOTA_MB = "unlimited";
+process.env.ORIGINALS_PURGE = "1";
 delete process.env.CORTEX_OWNER_EMAIL;
 delete process.env.CORTEX_OWNER_USER_ID;
 
-const KEYS = ["CORTEX_DATA_DIR", "MAX_COURSES_CREATED_PER_HOUR", "BILLING_ENABLED", "STORAGE_QUOTA_MB", "INDEX_QUOTA_MB"];
+const KEYS = ["CORTEX_DATA_DIR", "MAX_COURSES_CREATED_PER_HOUR", "BILLING_ENABLED", "STORAGE_QUOTA_MB", "INDEX_QUOTA_MB", "ORIGINALS_PURGE"];
 after(() => {
   for (const k of KEYS) delete process.env[k];
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -61,6 +62,22 @@ async function cloudSource(name: string): Promise<{ id: string; file: string }> 
   assert.equal(r.status, 0, r.output);
   return { id: c.id, file };
 }
+
+test("purge non armée (sans ORIGINALS_PURGE=1) : rien n'est annoncé ni supprimé du cloud", async () => {
+  await pay("unarmed", at(400)); // Premium fini depuis 35 jours
+  const { file } = await cloudSource("unarmed");
+  delete process.env.ORIGINALS_PURGE;
+  try {
+    assert.equal((await retention.originalsNotice(USER)).purgeOn, null);
+    const r = await retention.sweepAccount(USER);
+    assert.equal(r.cloudPurged, 0);
+    assert.equal(fs.existsSync(file), true);
+  } finally {
+    process.env.ORIGINALS_PURGE = "1";
+    const { authRun } = await import("../db/auth-store");
+    await authRun(`DELETE FROM stripe_payments WHERE user_id = ?`, USER);
+  }
+});
 
 test("Premium fini depuis moins de 30 jours : les originaux restent, la date de suppression est annoncée", async () => {
   await pay("recent", at(380)); // Premium jusqu'à il y a 15 jours

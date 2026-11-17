@@ -141,3 +141,36 @@ test("devenu Premium : réimporter le même fichier le remet dans le cloud, sans
     process.env.BILLING_ENABLED = "1";
   }
 });
+
+test("gratuit : un fichier arrivé pendant une préparation, pas encore lu, n'est pas supprimé à sa fin", async () => {
+  const c = await newCourse("Orvelle tardif");
+  const late = await inCourse(c.id, () => intake.storeOriginal(c.id, c.refsDir, "tardive.pdf", textPdf("Annale tardive de Orvelle"), {}));
+  const out = await inCourse(c.id, () => intake.settleOriginals({ after: "prepare" }));
+  assert.deepEqual(out, { purged: 0, promoted: 0, dropped: 0 });
+  assert.equal(fs.existsSync(path.join(c.refsDir, late!.name)), true, "la prochaine ingestion doit pouvoir le lire");
+  assert.equal((await inCourse(c.id, () => registry.localOriginal(`refs/${late!.name}`)))?.state, "transit");
+});
+
+test("gratuit : l'index exo par exo d'une annale restée sur l'ordinateur reste en place quand l'index est refait", async () => {
+  const c = await newCourse("Orvelle index");
+  await inCourse(c.id, () => intake.storeOriginal(c.id, c.refsDir, "Final_2024.pdf", textPdf("Exercice 1 du final 2024"), {}));
+  assert.equal(ingest(c.id).status, 0);
+  await inCourse(c.id, () => intake.settleOriginals({ after: "prepare" }));
+  const { q } = await import("../db/q");
+  const { indexExamExercises, ensureIndexSchema } = await import("../lib/exam-index");
+  const { listExamSourceRows } = await import("../lib/sources");
+  const ids = await inCourse(c.id, async () => {
+    await ensureIndexSchema();
+    const [exam] = await listExamSourceRows();
+    assert.ok(exam, "l'annale est au corpus");
+    for (const n of [1, 2]) await q.run(`INSERT INTO exam_exercises (exam_title, topic, statement) VALUES (?, ?, ?)`, exam.title, "ondes", `Exercice ${n}`);
+    await q.run(`INSERT INTO exam_exercises (exam_title, topic, statement) VALUES (?, ?, ?)`, "Annale retirée", "ondes", "vieux");
+    const steps: string[] = [];
+    const r = await indexExamExercises({ onStep: (m) => steps.push(m) }); // aucune page à lire : aucun appel au modèle
+    assert.deepEqual(r, { exams: 1, exercises: 2 });
+    assert.ok(steps.some((m) => m.includes("fichier sur ton ordinateur, index précédent gardé (2 exercices)")), steps.join("\n"));
+    return (await q.all<{ id: number; exam_title: string }>(`SELECT id, exam_title FROM exam_exercises ORDER BY id`));
+  });
+  assert.equal(ids.length, 2, "l'annale retirée n'y laisse rien");
+  assert.deepEqual(ids.map((r) => r.id), [1, 2], "mêmes lignes, jamais effacées puis réécrites");
+});

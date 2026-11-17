@@ -31,6 +31,9 @@ export type LocalOriginal = {
   purgedAt: string | null;
 };
 
+/** Ce qu'on relève d'un original à son arrivée : de quoi le retrouver sur l'ordinateur. */
+export type OriginalFacts = { path: string; name: string; rel?: string | null; sha256: string; size: number; origin: OriginalOrigin; url?: string | null };
+
 type Row = { path: string; name: string; rel: string | null; sha256: string; size: number | string; origin: string; url: string | null; state: string; arrived_at: string | null; purged_at: string | null };
 
 const fromRow = (r: Row): LocalOriginal => ({
@@ -43,8 +46,14 @@ export async function ensureOriginalsSchema(): Promise<void> {
   await q.ensureTable("local_originals");
 }
 
+/** Le corpus du cours courant a-t-il une source à ce chemin (texte extrait, découpage) ? */
+export async function isIndexed(coursePath: string): Promise<boolean> {
+  await q.ensureTable("sources");
+  return !!(await q.get(`SELECT 1 AS one FROM sources WHERE path = ? LIMIT 1`, coursePath));
+}
+
 /** Un original vient d'arriver en transit (ou revient : renvoyé depuis l'ordinateur). */
-export async function recordTransit(o: { path: string; name: string; rel?: string | null; sha256: string; size: number; origin: OriginalOrigin; url?: string | null }): Promise<void> {
+export async function recordTransit(o: OriginalFacts): Promise<void> {
   await ensureOriginalsSchema();
   await q.run(
     `INSERT INTO local_originals (path, name, rel, sha256, size, origin, url, state, arrived_at, purged_at) VALUES (?,?,?,?,?,?,?,'transit',?,NULL)
@@ -55,7 +64,7 @@ export async function recordTransit(o: { path: string; name: string; rel?: strin
 }
 
 /** Original retiré du serveur : il ne reste que sur l'ordinateur (et son index chez Cortex). */
-export async function recordLocal(o: { path: string; name: string; rel?: string | null; sha256: string; size: number; origin: OriginalOrigin; url?: string | null }): Promise<void> {
+export async function recordLocal(o: OriginalFacts): Promise<void> {
   await ensureOriginalsSchema();
   const now = nowStr();
   await q.run(

@@ -7,6 +7,7 @@ import { isNotFound, type ObjectBucket, type S3Object } from "@/lib/storage/buck
 import { parseRange, rangedResponse, serveLocalFile } from "@/lib/storage/http";
 import { isObjectStored, relativeToRoot } from "@/lib/storage/keys";
 import { statLocal, walkFiles, writeLocal } from "@/lib/storage/local";
+import { clearTransit, inTransit, markTransit, transitFiles } from "@/lib/storage/transit";
 
 /**
  * ADAPTATEUR SEAU : le seau fait foi, le dossier de données local en est le cache.
@@ -104,7 +105,12 @@ export class S3Store implements CourseFiles {
     if (opts.localOnly) {
       // Transit : jamais au seau. Un nom déjà pris dans le seau reste pris (pas d'écrasement Premium).
       if (opts.exclusive && (await this.bucket.head(key))) return false;
-      return writeLocal(file, body, opts.exclusive);
+      // Repère AVANT le fichier : aucun job en cours ne le voit sans repère (lib/storage/transit).
+      const fresh = !inTransit(this.root, file);
+      markTransit(this.root, file);
+      const ok = writeLocal(file, body, opts.exclusive);
+      if (!ok && fresh) clearTransit(this.root, file);
+      return ok;
     }
     if (opts.exclusive) {
       if (await this.bucket.head(key)) return false;
@@ -117,10 +123,12 @@ export class S3Store implements CourseFiles {
         throw e;
       }
       this.touch(file);
+      clearTransit(this.root, file);
       return true;
     }
     await this.bucket.put(key, Buffer.from(body), contentTypeOf(file));
     writeLocal(file, body);
+    clearTransit(this.root, file); // renvoyé hors transit (devenu Premium) : suit désormais le seau
     return true;
   }
 
@@ -169,6 +177,7 @@ export class S3Store implements CourseFiles {
       if (keys.length) await this.bucket.remove(keys);
     }
     fs.rmSync(target, { recursive: true, force: true });
+    clearTransit(this.root, target);
   }
 
   async serve(file: string, req: Request, opts: ServeOptions): Promise<Response | null> {
@@ -252,13 +261,16 @@ export class S3Store implements CourseFiles {
     });
   }
 
+  /** Fichiers de cours sous `abs`, hors transit (jamais au seau, même écrits pendant le job). */
   private snapshot(abs: string[]): Map<string, FileStat> {
     const out = new Map<string, FileStat>();
+    const transit = transitFiles(this.root);
     for (const a of abs) {
       const one = statLocal(a);
       const files = one ? [{ path: a, ...one }] : walkFiles(a);
       for (const f of files) {
-        if (this.keyOf(f.path)) out.set(f.path, { size: f.size, mtimeMs: f.mtimeMs });
+        const key = this.keyOf(f.path);
+        if (key && !transit.has(key.slice(this.prefix.length))) out.set(f.path, { size: f.size, mtimeMs: f.mtimeMs });
       }
     }
     return out;

@@ -307,7 +307,7 @@ export async function addUploadedRef(buffer: Buffer, filename: string): Promise<
   // Écriture exclusive : deux envois du même nom ne s'écrasent jamais. Compte gratuit : en transit
   // le temps de l'indexation (lib/originals).
   const { settleOriginals, storeOriginal } = await import("@/lib/originals/intake");
-  const stored = await storeOriginal(currentCourse(), REFS_DIR(), base, buffer, { originalName: filename, dedupe: false });
+  const stored = await storeOriginal(currentCourse(), REFS_DIR(), base, buffer, { originalName: filename, dedupe: false, firstSuffix: 1, maxTries: Infinity });
   if (!stored) throw new Error("trop d'annales du même nom : renomme le fichier.");
   const name = stored.name;
 

@@ -2,12 +2,12 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { currentCourse } from "@/db/client";
 import { currentUser } from "@/db/context";
-import { nowStr, q } from "@/db/q";
+import { nowStr } from "@/db/q";
 import { coursePaths, getCourse } from "@/lib/courses";
 import { log } from "@/lib/metrics";
 import { purgePdfPages } from "@/lib/page-cache";
 import { originalsPolicy, type OriginalsHome } from "@/lib/originals/policy";
-import { forgetOriginal, localOriginal, localOriginals, markLocal, recordTransit, type OriginalOrigin } from "@/lib/originals/registry";
+import { forgetOriginal, isIndexed, localOriginal, localOriginals, markLocal, recordTransit, type OriginalOrigin } from "@/lib/originals/registry";
 import { storage } from "@/lib/storage";
 
 /**
@@ -27,7 +27,7 @@ import { storage } from "@/lib/storage";
 
 export type StoredOriginal = { name: string; duplicate: boolean; home: OriginalsHome; restored: boolean };
 
-const sha256 = (data: Buffer) => createHash("sha256").update(data).digest("hex");
+export const sha256 = (data: Buffer) => createHash("sha256").update(data).digest("hex");
 const HOUR_MS = 3600_000;
 
 /** Où vont les originaux de ce cours : un cours historique (contenu du dépôt) reste dans le cloud. */
@@ -89,7 +89,11 @@ export function absoluteOf(courseId: string, coursePath: string): string | null 
  */
 export async function storeOriginal(
   courseId: string, dir: string, name: string, data: Buffer,
-  meta: { originalName?: string; rel?: string | null; origin?: OriginalOrigin; url?: string | null; dedupe?: boolean } = {},
+  meta: {
+    originalName?: string; rel?: string | null; origin?: OriginalOrigin; url?: string | null; dedupe?: boolean;
+    /** Numérotation des noms pris : `nom-2`… jusqu'à 50 essais par défaut (storeUnique). */
+    firstSuffix?: number; maxTries?: number;
+  } = {},
 ): Promise<StoredOriginal | null> {
   const home = await originalsHomeFor(courseId);
   const root = path.resolve(dir);
@@ -97,8 +101,10 @@ export async function storeOriginal(
   const stem = name.slice(0, name.length - ext.length);
   const digest = sha256(data);
   const dedupe = meta.dedupe ?? true;
-  for (let n = 1; n <= 50; n++) {
-    const candidate = n === 1 ? name : `${stem}-${n}${ext}`;
+  const first = meta.firstSuffix ?? 2;
+  const tries = meta.maxTries ?? 50;
+  for (let i = 0; i < tries; i++) {
+    const candidate = i === 0 ? name : `${stem}-${first + i - 1}${ext}`;
     const abs = path.join(root, candidate);
     if (!abs.startsWith(root + path.sep)) return null;
     const coursePath = coursePathOf(courseId, abs);
@@ -127,11 +133,10 @@ export async function storeOriginal(
 /**
  * Pièce jointe d'un exercice (photo de copie, capture d'une faiblesse) : rangée comme avant pour un
  * compte Premium ; pour un gratuit, en transit, le temps que le modèle la lise, puis supprimée par
- * le balayage (FREE_TRANSIT_HOURS) — y compris sur un cours historique, ses pièces jointes sont
- * celles du compte.
+ * le balayage (FREE_TRANSIT_HOURS). Cours historique (celui du propriétaire) : comme avant.
  */
 export async function putUpload(courseId: string, abs: string, data: Uint8Array): Promise<void> {
-  const home = (await originalsPolicy(currentUser())).home;
+  const home = await originalsHomeFor(courseId);
   await storage().put(abs, data, { localOnly: home === "local" });
   const coursePath = home === "local" ? coursePathOf(courseId, abs) : null;
   if (coursePath) {
@@ -183,16 +188,15 @@ export async function discardOriginal(courseId: string, abs: string): Promise<vo
 export async function pendingTransit(since: string, read: Set<string> = new Set()): Promise<number> {
   const rows = (await localOriginals("transit")).filter((r) => r.arrivedAt >= since && !read.has(r.path));
   if (!rows.length) return 0;
-  await q.ensureTable("sources");
   let n = 0;
-  for (const r of rows) if (!(await q.get(`SELECT 1 AS one FROM sources WHERE path = ? LIMIT 1`, r.path))) n++;
+  for (const r of rows) if (!(await isIndexed(r.path))) n++;
   return n;
 }
 
 /**
  * Départ des originaux en transit du cours courant, après une étape :
  *  - `ingest`  : ceux que cette ingestion a lus (`paths`), sauf les annales PDF (pages à lire) ;
- *  - `prepare` : tous (la préparation a lu les pages) ;
+ *  - `prepare` : tous ceux déjà indexés (la préparation a lu les pages) ;
  *  - `expiry`  : ceux arrivés depuis plus de FREE_TRANSIT_HOURS.
  * Indexé → supprimé du serveur, gardé au registre (`local`) ; jamais indexé → supprimé et oublié
  * (il ne comptait nulle part). Compte devenu Premium : l'original part au cloud.
@@ -203,10 +207,12 @@ export async function settleOriginals(opts: { after: "ingest" | "prepare" | "exp
   if (!transit.length) return out;
   const courseId = currentCourse();
   const wanted = opts.paths ? new Set(opts.paths) : null;
-  const home = await originalsHomeFor(courseId);
+  const policy = getCourse(courseId).paths ? null : await originalsPolicy(currentUser());
+  // Règle illisible (base des comptes indisponible) : rien ne bouge, ni suppression ni envoi au cloud.
+  if (policy?.reason === "unknown") return out;
+  const home: OriginalsHome = policy?.home ?? "cloud";
   const now = Date.parse(`${(opts.now ?? nowStr()).replace(" ", "T")}Z`);
   const ttlMs = transitHours() * HOUR_MS;
-  await q.ensureTable("sources");
   for (const row of transit) {
     if (wanted && !wanted.has(row.path)) continue;
     // Une pièce jointe sert à un exercice en cours : elle ne part qu'à l'échéance du transit.
@@ -228,10 +234,13 @@ export async function settleOriginals(opts: { after: "ingest" | "prepare" | "exp
     }
     if (opts.after === "expiry" && !expired) continue;
     if (opts.after === "ingest" && needsPages(row.path) && !expired) continue;
+    const indexed = await isIndexed(row.path);
+    // Arrivé pendant le job, pas encore lu (seule une ingestion qui l'a lu peut le déclarer illisible) :
+    // il attend la prochaine ingestion, ou l'échéance.
+    if (!indexed && !expired && !(opts.after === "ingest" && wanted)) continue;
     await storage().remove(abs);
     // Les pages rendues d'une annale en sont une copie : elles partent avec elle.
     if (row.path.startsWith("refs/")) purgePdfPages(courseId, path.basename(abs));
-    const indexed = await q.get(`SELECT 1 AS one FROM sources WHERE path = ? LIMIT 1`, row.path);
     if (indexed) {
       await markLocal(row.path);
       out.purged++;

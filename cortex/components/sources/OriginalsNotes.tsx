@@ -8,20 +8,21 @@ import type { OriginalsInfo } from "@/lib/ux/sources";
  * ordinateur », « index », « Premium » (abonnement en cours, ou achat dans l'année).
  */
 
-const PREMIUM_HREF = "/compte#credits";
+export const PREMIUM_HREF = "/compte#credits";
 
 const day = (s: string) =>
   new Date(`${s.slice(0, 10)}T12:00:00Z`).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
 
 /** Sous la zone d'import : ce que devient le fichier déposé. */
-export function LocalImportNote() {
+export function LocalImportNote({ transitHours }: { transitHours: number }) {
   return (
     <div data-testid="originals-local-note" className="flex gap-3 rounded-lg border border-line bg-surface-2/30 px-3.5 py-3">
       <HardDrive className="mt-0.5 size-4 shrink-0 text-ink-3" strokeWidth={2} aria-hidden="true" />
       <div className="text-[0.8rem] leading-relaxed text-ink-2">
         <p>
-          Ton fichier reste sur ton ordinateur : Cortex lit son texte, puis le retire de ses serveurs. Seul
-          l’index est gardé, pour la recherche et tes examens blancs.
+          Ton fichier reste sur ton ordinateur : Cortex lit son texte (et les pages d’une annale, le temps de
+          préparer le cours), puis le retire de ses serveurs, au plus tard sous {transitHours} h. Seul l’index est
+          gardé, pour la recherche et tes examens blancs.
         </p>
         <p className="mt-1 text-ink-3">
           <a href={PREMIUM_HREF} className="font-medium text-accent-hi underline underline-offset-4">Passe Premium</a>{" "}
