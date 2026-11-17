@@ -50,7 +50,7 @@ const output = z.object({
     subscription_this_month: z.number(),
   }).nullable(),
   costs: z.object({
-    mock_exam: z.number().describe("Credits for a standard mock exam (up to 8 exercises; +1 per 4 more)."),
+    mock_exam: z.number().describe("Credits for a standard mock exam (up to 8 exercises; a longer one costs more)."),
     drill: z.number(),
     check_answer: z.number(),
   }),
@@ -75,12 +75,11 @@ export default defineTool({
   name: "get_account_status",
   title: "Get my credits and limits",
   description:
-    "Get the student's credit balance, what each kind of generation costs (written or multiple-choice mock exam, exercise, course preparation, " +
+    "Returns the student's credit balance, the cost of each kind of generation (written or multiple-choice mock exam, exercise, course preparation, " +
     "format detection, drill, answer check), and today's usage against the daily limits " +
     "(mock exams count as generations; drills and answer checks count as assistance). " +
     "usage_limits gives every limit that can stop a generation (credits, daily quotas, daily compute, monthly capacity, storage) with its reset time, " +
-    "and how many of each kind the student can still launch — the same numbers the app shows and the paid tools enforce. " +
-    "Use it before suggesting paid actions or when the student asks how many credits or generations they have left. Read-only and free.",
+    "and how many of each kind the student can still launch: the same numbers the app shows and the paid tools enforce. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
   userSummary: "Lit ton solde de crédits, les coûts et tes limites du jour.",

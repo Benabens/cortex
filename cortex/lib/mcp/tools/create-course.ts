@@ -18,10 +18,10 @@ export default defineTool({
   name: "create_course",
   title: "Create a course",
   description:
-    "Create a new course in the student's Cortex account (the same as \"New course\" in the app, free): name, optional exam code (e.g. \"COMP 201\"), " +
-    "university, language of the course and exam date. Refuses a second course with the same exam code. " +
-    "Pass exam_format when the student knows how the exam looks (type, number of questions, duration), especially without past exams: " +
-    "Cortex never invents a format. Then add its materials with add_course_source and build it with prepare_course.",
+    "Creates a new course in the student's Cortex account, like \"New course\" in the app. Free. Fields: name, optional exam code (e.g. \"COMP 201\"), " +
+    "university, course language, exam date and, optionally, exam_format (type, number of questions, duration), used when the course has no past exams: " +
+    "Cortex never invents a format. A second course with the same exam code is refused. " +
+    "The course starts empty: materials are added with add_course_source and the course is built by prepare_course.",
   kind: "write",
   // Ajout pur : un code déjà pris est refusé, rien n'est remplacé.
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },

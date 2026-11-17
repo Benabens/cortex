@@ -55,9 +55,8 @@ export default defineTool({
   name: "get_study_plan",
   title: "Get my study plan",
   description:
-    "Get where the student stands in a course's programme: exam countdown, coverage and mastery weighted by how often each topic appears in past exams, " +
-    "topics due for review, the course chapters, and the prioritised list of what to work on next. " +
-    "Use it for \"where am I in my programme?\", \"what should I revise next?\" or before choosing a chapter for a mock exam. Read-only and free.",
+    "Returns where the student stands in a course's programme: exam countdown, coverage and mastery weighted by how often each topic appears in past exams, " +
+    "topics due for review, the course chapters (usable as chapter in generate_mock_exam) and a prioritised list of what to work on next. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
   userSummary: "Lit où tu en es dans le programme et ce qu’il faut réviser ensuite.",

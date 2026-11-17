@@ -20,12 +20,12 @@ export default defineTool({
   name: "add_course_source",
   title: "Add a course material",
   description:
-    "Add one material to a course (free; counts toward the account's storage quota), either from a public https URL (PDF, web page or plain text, 30 MB max; redirects are not followed, " +
-    "pass the final URL) or from pasted text. category tells Cortex what it is: past_exam (an exam from a previous year, used to learn the exam format), " +
-    "lecture, exercises, notes, sample_questions (official example questions published by the teacher: their style is imitated when there are no past exams) " +
-    "or exam_info (exam instructions: syllabus or course page describing the exam, e.g. \"MCQ, 45 min\"); when omitted it is guessed from the file name. " +
-    "The file is only stored: call prepare_course once all materials are added. On a free account Cortex keeps only the text index of the material, " +
-    "not the file (Premium keeps originals in the cloud): its indexing starts right away, at no cost.",
+    "Adds one material to a course, from a public https URL (PDF, web page or plain text, 30 MB max; redirects are not followed, so the URL must be the final one) " +
+    "or from pasted text. Free; the file counts toward the account's storage quota. category says what the material is: past_exam (an exam from a previous year; " +
+    "Cortex learns the exam format from it), lecture, exercises, notes, sample_questions (official example questions published by the teacher, whose style is imitated " +
+    "when there are no past exams) or exam_info (exam instructions such as a syllabus or course page, e.g. \"MCQ, 45 min\"); when omitted, it is guessed from the file name. " +
+    "The material is only stored: it is ingested when the course is prepared (prepare_course). On a free account, Cortex keeps only the material's text index, " +
+    "not the file (Premium keeps originals in the cloud), and its indexing starts right away, at no cost.",
   kind: "write",
   // Ajout pur (jamais d'écrasement : « -2 », « -3 »…) ; lit une URL hors de Cortex.
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },

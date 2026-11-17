@@ -20,9 +20,8 @@ export default defineTool({
   name: "list_courses",
   title: "List my courses",
   description:
-    "List the courses in the signed-in student's Cortex account (code, name, exam date, days left). " +
-    "Call this first when the student mentions a course you cannot match, or before any other tool when the account may have several courses. " +
-    "Read-only and free.",
+    "Lists the courses in the signed-in student's Cortex account: id, code, name, exam date and days left. " +
+    "A course's id or code identifies it in the other tools. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
   userSummary: "Liste tes cours et leurs dates d’examen.",

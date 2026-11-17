@@ -137,16 +137,16 @@ export default defineTool({
   name: "get_job_status",
   title: "Track a generation",
   description:
-    "Track a long-running job started with generate_mock_exam (typically 10-35 minutes, longer for a large exam) or prepare_course: status, progress and current step. " +
-    "When the mock exam (written or multiple-choice) is done, returns its questions (and the solutions if include_solutions is true) plus a link to it in Cortex. " +
-    "Without job_id, returns the generation currently running and the latest ones. Poll at most every 30-60 seconds. Read-only and free.",
+    "Returns the status, progress and current step of a long-running job started by generate_mock_exam (typically 10-35 minutes, longer for a large exam) or prepare_course. " +
+    "When a mock exam (written or multiple-choice) is done, it also returns its questions, the solutions when include_solutions is true, and a link to the exam in Cortex. " +
+    "Without job_id, it returns the generation currently running and the latest ones. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
   userSummary: "Suit une génération ou une préparation en cours, puis en rend le résultat.",
   input: z.object({
     course: courseArg,
     job_id: z.number().int().positive().optional().describe("The job_id returned by generate_mock_exam."),
-    include_solutions: z.boolean().optional().describe("Include the worked solutions of a finished mock exam (default false: let the student try first)."),
+    include_solutions: z.boolean().optional().describe("Include the worked solutions of a finished mock exam (default false, so that the student can try first)."),
   }),
   output,
   async run({ course, job_id, include_solutions }, ctx) {
