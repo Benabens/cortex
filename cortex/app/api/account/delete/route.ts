@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { useUser } from "@/lib/req";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
@@ -29,11 +30,11 @@ const CONFIRM_WORD = "SUPPRIMER";
  */
 export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (!authEnabled()) {
-    return NextResponse.json({ error: "La suppression de compte requiert l'authentification." }, { status: 403 });
+    return apiError(req, "account_delete_auth_required", 403);
   }
   const headerUser = req.headers.get("x-cortex-user");
   if (!headerUser) {
-    return NextResponse.json({ error: "Non authentifié." }, { status: 401 });
+    return apiError(req, "unauthenticated", 401);
   }
   // CSRF : n'accepter que le même origine (le cookie de session est SameSite ;
   // on refuse en plus toute Origin croisée si l'en-tête est présent).
@@ -46,7 +47,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
       sameOrigin = false;
     }
     if (!sameOrigin) {
-      return NextResponse.json({ error: "Origine non autorisée." }, { status: 403 });
+      return apiError(req, "origin_forbidden", 403);
     }
   }
 

@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { log } from "@/lib/metrics";
 import { listConnectedApps, revokeConnectedApp } from "@/lib/oauth/server";
@@ -20,7 +21,7 @@ export async function DELETE(req: NextRequest) {
   const userId = useUser(req);
   const id = req.nextUrl.searchParams.get("id") ?? "";
   if (!id || !(await revokeConnectedApp(userId, id))) {
-    return NextResponse.json({ error: "Application introuvable." }, { status: 404 });
+    return apiError(req, "connected_app_not_found", 404);
   }
   log("info", "oauth.grant_revoked_by_user", {});
   return NextResponse.json({ ok: true });

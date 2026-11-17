@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { generateExam } from "@/lib/exam";
 import { requireCourse } from "@/lib/req";
 import { examCount, mockExamJob, startGenerationJob } from "@/lib/generation";
@@ -6,6 +7,8 @@ import { fieldTooLong } from "@/lib/field-limits";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
 import { dryRunAllowed } from "@/lib/boot-guards";
 import { currentUser } from "@/db/context";
+import { LlmError, llmUserError } from "@/lib/llm";
+import { UserFacingError } from "@/lib/i18n/user-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,14 +25,17 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   // dryRunAllowed) — il écrirait un examen et lancerait tectonic sans débit.
   const dry = req.nextUrl.searchParams.get("dry") === "1";
   if (dry && !(await dryRunAllowed(process.env, currentUser()))) {
-    return NextResponse.json({ error: "Route inconnue." }, { status: 404 });
+    return apiError(req, "route_unknown", 404);
   }
   if (dry) {
     try {
       const res = await generateExam({ dry: true });
       return NextResponse.json({ ok: true, ...res });
-    } catch (e: any) {
-      return NextResponse.json({ error: String(e?.message ?? e) }, { status: 502 });
+    } catch (e) {
+      if (e instanceof UserFacingError) return apiError(req, e);
+      if (e instanceof LlmError) return apiError(req, llmUserError(e), e.code === "UNAVAILABLE" || e.code === "SPEND_CAP" ? 503 : 502);
+      const detail = e instanceof Error ? e.message : String(e);
+      return apiError(req, { code: "exam_generation_failed", params: { detail } }, 502);
     }
   }
 
@@ -37,10 +43,10 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   // Focus = « Mets l'accent sur… » (générique, supporté PARTOUT) — 1-2 exos ciblés.
   // Validé AVANT tout travail : un sujet trop long est refusé, jamais tronqué en
   // silence — sinon l'étudiant paie une génération à l'intention amputée.
-  const body = await readJson(req, ({} as any));
+  const body = await readJson(req, {});
   const count = examCount(body?.count);
   const focusRaw = typeof body?.focus === "string" ? body.focus.trim() : "";
-  const tooLong = fieldTooLong("focus", focusRaw);
+  const tooLong = fieldTooLong(req, "focus", focusRaw);
   if (tooLong) return tooLong;
   const focus = focusRaw || undefined;
 
@@ -49,8 +55,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const job = await mockExamJob({ count, focus });
   const started = await startGenerationJob(job.jobType, job.target);
   if (!started.ok) {
-    const { status, error, command } = started;
-    return NextResponse.json(command ? { error, command } : { error }, { status });
+    return apiError(req, started, started.status, started.command ? { command: started.command } : undefined);
   }
   return NextResponse.json(started.existing ? { ok: true, jobId: started.jobId, existing: true } : { ok: true, jobId: started.jobId });
 })

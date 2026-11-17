@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { cancelJob } from "@/lib/jobs";
 import { useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
@@ -11,6 +12,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (denied) return denied;
   const { id } = await params;
   const job = await cancelJob(Number(id));
-  if (!job) return NextResponse.json({ error: "job introuvable" }, { status: 404 });
+  if (!job) return apiError(req, "job_not_found", 404);
   return NextResponse.json({ ok: true, job });
 }

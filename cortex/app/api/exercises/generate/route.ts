@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { uploadsDir } from "@/lib/paths";
 import { preflightGeneration } from "@/lib/preflight";
@@ -30,14 +31,14 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (ct.includes("multipart/form-data")) {
     // Quota de stockage du compte + espace libre du volume, AVANT de lire l'envoi.
     const storage = await checkStorage(currentUser(), declaredBytes(req));
-    if (storage) return NextResponse.json({ error: storage.error }, { status: storage.status });
+    if (storage) return apiError(req, storage, storage.status);
     const form = await readFormData(req, UPLOAD_LIMITS.image);
     const target = String(form.get("target") ?? "").trim();
     const note = String(form.get("note") ?? "").trim();
     const file = form.get("image");
     let imageRel: string | undefined;
     if (file instanceof File && file.size > 0) {
-      if (file.size > 12 * 1024 * 1024) return NextResponse.json({ error: "Image trop lourde (max 12 Mo)." }, { status: 400 });
+      if (file.size > 12 * 1024 * 1024) return apiError(req, { code: "image_too_large", params: { maxMb: 12 } }, 400);
       const dir = uploadsDir();
       const name = `exo-${crypto.randomUUID()}.${IMG_EXT[file.type] ?? "png"}`;
       // Compte gratuit : en transit seulement, jamais au seau (lib/originals).
@@ -50,10 +51,10 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     payload = { target: String(target ?? "").trim() || undefined };
   }
 
-  const tooLong = fieldTooLong("target", payload.target ?? "") ?? fieldTooLong("note", payload.note ?? "");
+  const tooLong = fieldTooLong(req, "target", payload.target ?? "") ?? fieldTooLong(req, "note", payload.note ?? "");
   if (tooLong) return tooLong;
   if (!payload.target && !payload.imageRel) {
-    return NextResponse.json({ error: "Donne un sujet OU une image d'exercice." }, { status: 400 });
+    return apiError(req, "exercise_topic_or_image_required", 400);
   }
 
   const existing = await activeJob("exercise");
@@ -63,18 +64,19 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const jobTarget = payload.imageRel || payload.note ? JSON.stringify(payload) : (payload.target ?? "");
   // pré-checks AVANT de lancer le worker : limites d'usage, fournisseur LLM, corpus, moteur LaTeX
   const issue = await preflightGeneration("exercise", jobTarget);
-  if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
+  if (issue) return apiError(req, issue, issue.status, { command: issue.command });
   let jobId: number;
   try {
     ({ id: jobId } = await createJobExclusive("exercise", jobTarget));
   } catch (e) {
-    if (e instanceof ReservationRefused) return NextResponse.json({ error: e.message }, { status: e.status });
+    if (e instanceof ReservationRefused) return apiError(req, e, e.status);
     throw e;
   }
   try {
     await startWorker(jobId, course);
-  } catch (e: any) {
-    return NextResponse.json({ error: `Impossible de lancer le worker : ${e?.message ?? e}` }, { status: 500 });
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    return apiError(req, { code: "worker_start_failed", params: { detail } }, 500);
   }
   return NextResponse.json({ ok: true, jobId });
 })

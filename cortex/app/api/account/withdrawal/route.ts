@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { authGet } from "@/db/auth-store";
 import { currentUser } from "@/db/context";
@@ -32,7 +33,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const userId = currentUser();
   const body = await readJson(req, {}) as { type?: unknown; purchaseId?: unknown; confirm?: unknown };
   if (body.confirm !== true || (body.type !== "pack" && body.type !== "subscription") || !String(body.purchaseId ?? "")) {
-    return NextResponse.json({ error: "Choisis un achat puis confirme explicitement ta demande." }, { status: 400 });
+    return apiError(req, "withdrawal_purchase_and_confirmation_required", 400);
   }
   try {
     const type = body.type as PurchaseType;
@@ -60,7 +61,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
       log("warn", "withdrawal.email_failed", { message: error instanceof Error ? error.message.slice(0, 160) : String(error) }),
     );
     return NextResponse.json({ ...result, warning: cancellationWarning }, { status: 201 });
-  } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Demande impossible." }, { status: 400 });
+  } catch {
+    return apiError(req, "withdrawal_request_failed", 400);
   }
 });

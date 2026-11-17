@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { storage } from "@/lib/storage";
 import type { IngestReport } from "@/lib/ingest-report";
+import { UserFacingError, userError, type UserError } from "@/lib/i18n/user-error";
 
 /**
  * Jobs de génération en ARRIÈRE-PLAN, découplés de la requête HTTP.
@@ -75,7 +76,7 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
   const course = currentCourse();
   // Cours en cours de suppression : rien ne démarre (le worker recréerait un schéma vide).
   const { isCourseDeleting } = await import("@/lib/course-deletion");
-  if (await isCourseDeleting(user, course)) throw new ReservationRefused(409, "Ce cours est en cours de suppression : aucune génération possible.");
+  if (await isCourseDeleting(user, course)) throw new ReservationRefused(409, userError("course_deleting_generation_refused"));
   let ref: string | null = null;
   let ingestRef: string | null = null;
   let costCenti = 0;
@@ -88,9 +89,9 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
       r = await reserveIngest(ingestRef);
     } catch (e) {
       log("error", "jobs.reservation_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
-      throw new ReservationRefused(503, "Import momentanément indisponible, réessaie dans un instant.");
+      throw new ReservationRefused(503, userError("ingest_reservation_unavailable"));
     }
-    if (!r.ok) throw new ReservationRefused(r.status, r.error);
+    if (!r.ok) throw new ReservationRefused(r.status, r);
   } else {
     const { reserveGeneration } = await import("@/lib/billing/reserve");
     ref = `job:${user}:${course}:${crypto.randomUUID()}`;
@@ -102,9 +103,9 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
       // Détail (requête, chemin du store) dans les logs seulement — jamais à l'étudiant.
       const msg = e instanceof Error ? e.message.slice(0, 200) : String(e);
       log("error", "jobs.reservation_failed", { message: msg });
-      throw new ReservationRefused(503, "Facturation indisponible, réessaie dans un instant.");
+      throw new ReservationRefused(503, userError("billing_reservation_unavailable"));
     }
-    if (!r.ok) throw new ReservationRefused(r.status, r.error);
+    if (!r.ok) throw new ReservationRefused(r.status, r);
     costCenti = r.costCenti;
   }
 
@@ -184,12 +185,10 @@ export async function assertJobCourseOwned(jobId: number, course: string): Promi
 }
 
 /** Refus de réservation (solde, quota, places) — la route le rend tel quel (402/429). */
-export class ReservationRefused extends Error {
-  readonly status: number;
-  constructor(status: number, message: string) {
-    super(message);
+export class ReservationRefused extends UserFacingError {
+  constructor(status: number, error: UserError) {
+    super(error, status);
     this.name = "ReservationRefused";
-    this.status = status;
   }
 }
 
@@ -271,7 +270,7 @@ const TERMINAL_STATES: readonly JobStatus[] = ["done", "error", "canceled"];
 export async function setJob(id: number, fields: Partial<{ status: JobStatus; currentStep: string; progress: number; resultPath: string; resultId: number; ordered: number; error: string; pid: number }>): Promise<void> {
   const map: Record<string, string> = { status: "status", currentStep: "current_step", progress: "progress", resultPath: "result_path", resultId: "result_id", ordered: "ordered", error: "error", pid: "pid" };
   const sets: string[] = [];
-  const vals: any[] = [];
+  const vals: (string | number | null)[] = [];
   for (const [k, v] of Object.entries(fields)) {
     if (v === undefined) continue;
     sets.push(`${map[k]} = ?`);
@@ -349,7 +348,13 @@ export async function setJobReport(id: number, report: IngestReport): Promise<vo
   await q.run(`UPDATE jobs SET report_json = ?, updated_at = ? WHERE id = ?`, JSON.stringify(report), nowStr(), id);
 }
 
-function rowToJob(r: any): Job {
+type JobRow = {
+  id: number; type: JobType; target: string | null; status: JobStatus; current_step: string | null;
+  progress: number; result_path: string | null; result_id: number | null; error: string | null;
+  log_json: string | null; report_json: string | null; pid: number | null; created_at: string; updated_at: string;
+};
+
+function rowToJob(r: JobRow): Job {
   let log: { t: string; msg: string }[] = [];
   try { log = JSON.parse(r.log_json ?? "[]"); } catch {}
   let report: IngestReport | null = null;
@@ -363,7 +368,7 @@ function rowToJob(r: any): Job {
 
 /** Le process `pid` est-il encore vivant ? (signal 0 = test d'existence, ne tue rien). */
 function isPidAlive(pid: number): boolean {
-  try { process.kill(pid, 0); return true; } catch (e: any) { return e?.code === "EPERM"; }
+  try { process.kill(pid, 0); return true; } catch (e: unknown) { return (e as NodeJS.ErrnoException)?.code === "EPERM"; }
 }
 
 /** La référence de débit a été émise pour ce compte et ce cours (createJobExclusive : job:<user>:<course>:<uuid>). */
@@ -504,14 +509,14 @@ export async function pumpQueuedJobs(): Promise<number> {
 export async function getJob(id: number): Promise<Job | null> {
   await ensureJobsSchema();
   await reconcileStaleJobs();
-  const r = await q.get(`SELECT * FROM jobs WHERE id = ?`, id);
+  const r = await q.get<JobRow>(`SELECT * FROM jobs WHERE id = ?`, id);
   return r ? rowToJob(r) : null;
 }
 
 export async function listJobs(limit = 10): Promise<Job[]> {
   await ensureJobsSchema();
   await reconcileStaleJobs();
-  return (await q.all<any>(`SELECT * FROM jobs ORDER BY id DESC LIMIT ?`, limit)).map(rowToJob);
+  return (await q.all<JobRow>(`SELECT * FROM jobs ORDER BY id DESC LIMIT ?`, limit)).map(rowToJob);
 }
 
 /** Relance un job échoué/annulé : recrée un job de MÊME type+target et redémarre un worker.
@@ -861,6 +866,6 @@ export async function activeJob(type?: JobType): Promise<Job | null> {
   await ensureJobsSchema();
   await reconcileStaleJobs();
   const where = type ? `AND type = '${type}'` : "";
-  const r = await q.get(`SELECT * FROM jobs WHERE status IN ('queued','running','verifying','compiling') ${where} ORDER BY id DESC LIMIT 1`);
+  const r = await q.get<JobRow>(`SELECT * FROM jobs WHERE status IN ('queued','running','verifying','compiling') ${where} ORDER BY id DESC LIMIT 1`);
   return r ? rowToJob(r) : null;
 }
