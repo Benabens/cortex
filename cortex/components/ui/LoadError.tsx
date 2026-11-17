@@ -1,6 +1,7 @@
 import { RotateCw, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Panel } from "@/components/ui/primitives";
+import { useTranslations } from "use-intl/react";
 
 /**
  * ÉTAT D'ERREUR DE CHARGEMENT, partagé par les écrans de données : un écran qui
@@ -9,6 +10,7 @@ import { Panel } from "@/components/ui/primitives";
  * Sans `onRetry` (erreur définitive), le message reste, sans bouton.
  */
 export function LoadError({ title, hint, onRetry }: { title: string; hint?: string; onRetry?: () => void }) {
+  const t = useTranslations("common");
   return (
     <Panel className="flex flex-col items-center gap-3 rounded-xl px-6 py-12 text-center" role="alert">
       <WifiOff className="size-6 text-danger-hi" strokeWidth={2} aria-hidden="true" />
@@ -17,7 +19,7 @@ export function LoadError({ title, hint, onRetry }: { title: string; hint?: stri
       {onRetry && (
         <Button variant="secondary" size="sm" onClick={onRetry}>
           <RotateCw className="size-4" strokeWidth={2.25} aria-hidden="true" />
-          Réessayer
+          {t("retry")}
         </Button>
       )}
     </Panel>
