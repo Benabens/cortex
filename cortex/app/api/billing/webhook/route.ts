@@ -19,6 +19,12 @@ function livemodeMatchesKey(event: Stripe.Event, key: string): boolean {
   return Boolean(event.livemode) === /^(sk|rk)_live_/.test(key); // clés secrètes et restreintes
 }
 
+/** En-tête de la forme de Stripe (`t=<horodatage récent>,v1=<64 hex>`) : un envoi réel, pas un robot. */
+function looksSentByStripe(sig: string): boolean {
+  const t = Number(/(?:^|,)t=(\d+)/.exec(sig)?.[1]);
+  return /(?:^|,)v1=[0-9a-f]{64}(?:,|$)/.test(sig) && Math.abs(Date.now() / 1000 - t) <= 300;
+}
+
 export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   const key = process.env.STRIPE_SECRET_KEY;
@@ -34,8 +40,11 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     event = stripe.webhooks.constructEvent(payload, sig, secret);
   } catch {
     // Secret tourné ou mauvais endpoint : Stripe réessaie 3 jours puis abandonne, les paiements
-    // ne créditent plus. Rien du corps (non vérifié) dans l'alerte ; une par heure au plus.
-    captureErrorThrottled("billing.webhook_signature", new Error("Webhook Stripe : signature invalide (STRIPE_WEBHOOK_SECRET ?)"), { area: "billing", step: "webhook_signature" });
+    // ne créditent plus. Rien du corps (non vérifié) dans l'alerte ; une par heure au plus, et
+    // seulement pour un en-tête qui a la forme d'un envoi de Stripe (un robot ne la noie pas).
+    if (looksSentByStripe(sig)) {
+      captureErrorThrottled("billing.webhook_signature", new Error("Webhook Stripe : signature invalide (STRIPE_WEBHOOK_SECRET ?)"), { area: "billing", step: "webhook_signature" });
+    }
     return NextResponse.json({ error: "Signature invalide." }, { status: 400 });
   }
   if (!livemodeMatchesKey(event, key)) {
