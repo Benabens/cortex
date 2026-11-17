@@ -622,12 +622,6 @@ const ONE_EX_SCHEMA = {
 /** Délai d'un appel qui conçoit des exercices (lot ou régénération) : un lot de 3 << un appel de 6 ;
  *  surchargeable (P3 : « augmente le timeout par lot »). */
 const exerciseTimeoutMs = () => Number(process.env.CORTEX_BATCH_TIMEOUT_MS) || 600_000;
-/** Sortie maximale de Sonnet 5 (en flux). */
-const MODEL_MAX_OUTPUT_TOKENS = 128_000;
-/** Délai et limite de sortie d'un lot de n exercices, proportionnels à n (banc du 17/11 : ≈ 12 k tokens
- *  fixes + ≈ 13,3 k par exercice à 95 tok/s ; un lot de 2 a le délai de base et 64 k). */
-const lotTimeoutMs = (n: number) => exerciseTimeoutMs() * Math.max(1, n / 2);
-const lotMaxTokens = (n: number) => Math.min(MODEL_MAX_OUTPUT_TOKENS, Math.max(EXAM_OUTPUT_MAX_TOKENS, 32_000 * n));
 
 /** Régénère UN exercice ciblé (même catégorie/barème) en corrigeant le diagnostic — boucle de durcissement. */
 export async function regenerateExercise(q: ExamQuestion, diagnostic: string): Promise<ExamQuestion> {
@@ -708,13 +702,13 @@ async function generateBatch(ctx: Ctx, slots: Slot[], opts: { retryTruncated?: b
   const r = await completeJson<{ questions: ExamQuestion[] }>({
     prompt: buildBatchPrompt(ctx, slots as any),
     model: "opus",
-    timeoutMs: lotTimeoutMs(slots.length),
+    timeoutMs: exerciseTimeoutMs(),
     json: { schema: BATCH_SCHEMA },
     // Prod du 13/11 (job 2) : la réflexion d'un lot de 2 exercices remplissait les 16 000 tokens
     // de sortie (15 760 en moyenne) : lots coupés, facturés, puis refaits exercice par exercice.
     // L'effort reste celui par défaut (à effort moyen, banc du 15/11 : clés et explications moins
-    // justes) ; la limite laisse au lot la place de finir (banc du 17/11 : jusqu'à 62 k tokens pour 2).
-    maxTokens: lotMaxTokens(slots.length),
+    // justes) ; la limite laisse au lot la place de finir (banc du 17/11 : jusqu'à 62 k tokens).
+    maxTokens: EXAM_OUTPUT_MAX_TOKENS,
   }, { check: (v) => (Array.isArray(v?.questions) ? null : "le champ « questions » (tableau) manque"), retryTruncated: opts.retryTruncated });
   const qs = Array.isArray(r.questions) ? r.questions : [];
   // réaligne catégorie/points sur les slots imposés
@@ -806,10 +800,9 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
   // (concevoir le piège → rédiger → audit adversarial → réviser), en parallèle borné.
   const useArchitect = currentCourse() === DEFAULT_COURSE;
   // RÉSILIENCE : on découpe TOUS les slots en lots (longueur réelle, pas plafonnée à 6).
-  // Cours sans architecte (one-shot) : lots de 5 au plus — un appel de conception paie ≈ 12 k tokens
-  // fixes (banc du 17/11), que [2,2,1] payait trois fois, et voit tout l'examen (pas de doublon de
-  // thème entre lots) ; délai et limite suivent la taille du lot. cs-202 (architecte) reste [3,3].
-  const BATCH = useArchitect ? 3 : 5;
+  // Lots plus petits pour les cours sans architecte (one-shot) → plus parallèles, plus robustes
+  // au timeout. cs-202 (architecte, 6 slots, BATCH=3) reste [3,3] — comportement INCHANGÉ.
+  const BATCH = useArchitect ? 3 : 2;
   const chunk = <T,>(arr: T[], n: number): T[][] => { const o: T[][] = []; for (let i = 0; i < arr.length; i += n) o.push(arr.slice(i, i + n)); return o; };
   const batches = chunk(slots, BATCH).filter((b) => b.length);
   const nBatches = batches.length;
