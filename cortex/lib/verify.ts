@@ -179,7 +179,7 @@ function isCompleteCorrection(corrected: string, statement: string): boolean {
  */
 export async function verifyAndHarden(
   spec: ExamSpec,
-  regenerate: (q: ExamQuestion, diagnostic: string) => Promise<ExamQuestion>,
+  regenerate: (q: ExamQuestion, diagnostic: string, opts?: { fresh?: boolean }) => Promise<ExamQuestion>,
   maxAttempts = 3,
   onProgress?: (msg: string) => void,
   opts?: VerifyOpts
@@ -199,7 +199,7 @@ export async function verifyAndHarden(
         r.verdict === "ambiguous" ? "ÉNONCÉ MAL POSÉ : rends-le résoluble et non ambigu, cohérent avec son barème." : "",
       ].filter(Boolean).join(" ");
       let ng: ExamQuestion | null = null;
-      try { ng = await regenerate(q, diag); } catch { ng = null; }
+      try { ng = await regenerate(q, diag, { fresh: !!r.violates_exclusion }); } catch { ng = null; }
       if (!ng) break;
       q = ng;
       attempts++;
