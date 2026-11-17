@@ -1,0 +1,43 @@
+{
+  "font": {
+    "family": "serif",
+    "size": 11
+  },
+  "header": {
+    "left": "course",
+    "center": "none",
+    "right": "examKind"
+  },
+  "footer": {
+    "left": "none",
+    "center": "none",
+    "right": "pageOfTotal"
+  },
+  "numbering": {
+    "prefix": "Exercice",
+    "style": "roman"
+  },
+  "points": "inline",
+  "language": "fr",
+  "cover": {
+    "idFields": [
+      {
+        "kind": "name",
+        "label": "Nom :"
+      },
+      {
+        "kind": "firstName",
+        "label": "Prénom :"
+      },
+      {
+        "kind": "studentId",
+        "label": "Numéro d'étudiant :"
+      }
+    ],
+    "instructions": [
+      "Aucun document n'est autorisé.",
+      "Les calculatrices sont interdites.",
+      "La qualité de la rédaction sera prise en compte."
+    ]
+  }
+}

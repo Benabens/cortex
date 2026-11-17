@@ -337,7 +337,7 @@ export function pointsText(n: number, w: CoverWords): string {
 const isDefaultKind = (kind: string) => kind === "Examen final" || kind === "Final Exam";
 
 /** Type d'examen affiché : le défaut de la création d'un cours (« Examen final ») suit la langue de l'examen. */
-function examKindText(c: CourseConfig, w: CoverWords): string {
+export function examKindText(c: CourseConfig, w: CoverWords): string {
   return isDefaultKind(c.examKind) ? w.finalExam : c.examKind;
 }
 
@@ -374,60 +374,8 @@ export function epflLocalChrome(questionHead: boolean): string[] {
 }
 
 /** Titre du cours sur une ligne : « CODE -- Nom » (le code est facultatif). */
-function courseTitle(c: CourseConfig): string {
+export function courseTitle(c: CourseConfig): string {
   return [texEscape(c.examCode).replace(/-/g, "--"), texEscape(c.examName)].filter(Boolean).join(" -- ");
-}
-
-/**
- * En-tête, pied de page et macros du gabarit neutre, à placer APRÈS le préambule commun (qui porte
- * le gabarit de cs-202) : il efface son en-tête et son pied (`\fancyhf{}` en tête du bloc), coupe la marge, rend le logo vide et
- * le rouge des corrigés bleu foncé (une macro du modèle qui les citerait compile encore), et
- * traduit les titres de question.
- */
-export function neutralChrome(c: CourseConfig, w: CoverWords): string {
-  return [
-    String.raw`\pagestyle{fancy}\fancyhf{}`,
-    String.raw`\examchromefalse`,
-    String.raw`\renewcommand{\epfllogo}[1][30]{}`,
-    String.raw`\definecolor{solution}{HTML}{1F4E9A}`,
-    String.raw`\colorlet{epflred}{solution}`,
-    String.raw`\renewcommand{\examq}[3]{\clearpage\setcounter{exq}{#1}\needspace{3\baselineskip}{\large\textbf{${w.question} #1 \quad-- #2 \hfill [#3 ${w.points}]}}\par\vspace{4pt}\hrule\vspace{10pt}}`,
-    String.raw`\renewcommand{\subq}[3]{\par\medskip\needspace{3\baselineskip}{\textbf{#1 \quad-- #2 \hfill [#3 ${w.points}]}}\par\smallskip}`,
-    String.raw`\renewcommand{\ansspace}[1]{\par\medskip\noindent\textbf{${w.answers}}\par\vspace*{#1}}`,
-    String.raw`\renewcommand{\headrulewidth}{0.4pt}\renewcommand{\footrulewidth}{0pt}`,
-    String.raw`\fancyhead[L]{\small ${courseTitle(c)}}`,
-    String.raw`\fancyhead[R]{\small\thepage}`,
-    String.raw`\fancyfoot[C]{\small ${texEscape(examKindText(c, w))}}`,
-    String.raw`\fancyfoot[R]{\small\FOOTDATE}`,
-  ].join("\n");
-}
-
-/**
- * Garde du gabarit neutre : le cours, son établissement s'il est saisi, la date, des champs Nom et
- * Identifiant à remplir, la durée et le total des points, puis les consignes (`instructions`, déjà
- * en LaTeX et dans la langue de l'examen).
- */
-export function neutralCoverTex(o: { course: CourseConfig; w: CoverWords; dateTex: string; durationMin: number | null; totalPts: number; instructions: string[] }): string {
-  const { course: c, w } = o;
-  return [
-    String.raw`\thispagestyle{empty}`,
-    String.raw`\begin{center}`,
-    String.raw`{\Large\textbf{${courseTitle(c)}}}\\[6pt]`,
-    String.raw`{\large ${texEscape(examKindText(c, w))}}\\[4pt]`,
-    ...c.universityLines.map((u) => String.raw`{\small ${texEscape(u)}}\\[2pt]`),
-    o.dateTex,
-    String.raw`\end{center}`,
-    String.raw`\vspace{0.3cm}\noindent\rule{\textwidth}{0.6pt}\par\vspace{10pt}`,
-    String.raw`\noindent ${w.nameField}~\makebox[0.5\textwidth]{\hrulefill}\hfill ${w.idField}~\makebox[0.22\textwidth]{\hrulefill}\par\vspace{10pt}`,
-    o.durationMin
-      ? String.raw`\noindent\textbf{${w.durationLabel}} ${durationText(o.durationMin, w)}\hfill\textbf{${w.totalLabel}} ${pointsText(o.totalPts, w)}\par\vspace{4pt}`
-      : String.raw`\noindent\hfill\textbf{${w.totalLabel}} ${pointsText(o.totalPts, w)}\par\vspace{4pt}`,
-    String.raw`\noindent\rule{\textwidth}{0.6pt}`,
-    String.raw`\vspace{0.4cm}\par\noindent{\large\textbf{${w.instructions}}}\par\smallskip`,
-    String.raw`\begin{enumerate}\setlength{\itemsep}{3pt}`,
-    ...o.instructions.map((i) => String.raw`\item ${i}`),
-    String.raw`\end{enumerate}\vspace{0.3cm}`,
-  ].join("\n");
 }
 
 /** Compléments du préambule hors CS-202 (latex/generic.tex : indicatrice…). */
@@ -439,8 +387,11 @@ export function genericPreamble(): string {
 /** Libellés d'un QCM dans la langue de l'examen (gabarit neutre, ou EPFL hors anglais). */
 export function localQcmLabels(w: CoverWords, color: string, pageBeforeFirstOpen: boolean): QcmLabels {
   return {
+    questionWord: w.question,
+    openWord: w.openQuestion,
     question: (n) => `${w.question} ${n}.`,
     tag: (type, points) => `${type === "mcq" ? w.multiple : w.single}, ${pointsText(points, w)}`,
+    kind: (type) => (type === "mcq" ? w.multiple : w.single),
     misconception: `${w.misconception} -- `,
     solution: `${w.solution}.`,
     openQuestion: (n) => `${w.openQuestion} ${n}`,
@@ -461,10 +412,10 @@ export function localBlockLabels(w: CoverWords, color: string): BlockLabels {
   };
 }
 
-/** Titres du corrigé d'un examen écrit dans la langue de l'examen. */
-export function localWrittenLabels(w: CoverWords): WrittenLabels {
+/** Titres du corrigé d'un examen écrit dans la langue de l'examen ; `num` : le numéro de la question (« Question 3 »). */
+export function localWrittenLabels(w: CoverWords, num: (n: number) => string = (n) => `${w.question} ${n}`): WrittenLabels {
   return {
     solutionsTitle: w.solutions,
-    solutionHead: (n, concept, points) => String.raw`\par\medskip\needspace{4\baselineskip}{\large\textbf{${w.question} ${n} \quad-- ${concept} \hfill [${pointsText(points, w)}]}}\par\smallskip`,
+    solutionHead: (n, concept, points) => String.raw`\par\medskip\needspace{4\baselineskip}{\large\textbf{${num(n)} \quad-- ${concept} \hfill [${pointsText(points, w)}]}}\par\smallskip`,
   };
 }

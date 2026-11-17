@@ -2,6 +2,7 @@ import type { ExamBlock, BlockPart } from "@/lib/blocks";
 import { compileExamPdf, copyExamLogo } from "@/lib/exam-latex";
 import { examDurationMin } from "@/lib/exam-format";
 import { examLayout, examPdf, type BlockLabels, type ExamLayout } from "@/lib/exam-layout";
+import { blockHeadTex } from "@/lib/exam-layout-tex";
 import { examsDir } from "@/lib/paths";
 import { examDocument } from "@/lib/qcm-latex";
 import { esc } from "@/lib/tex-escape";
@@ -69,9 +70,9 @@ function renderPart(p: BlockPart, i: number, withKey: boolean, L: BlockLabels): 
   return [head, ...body].join("\n");
 }
 
-function renderBlock(b: ExamBlock, n: number, withKey: boolean, L: BlockLabels): string {
+function renderBlock(b: ExamBlock, n: number, withKey: boolean, L: BlockLabels, layout: ExamLayout): string {
   return [
-    String.raw`\par\bigskip\needspace{8\baselineskip}\noindent{\large\textbf{${L.question} ${n} \quad-- ${esc(b.title)}} \hfill [${L.pts(b.points)}]}\par\vspace{3pt}\hrule\vspace{8pt}`,
+    blockHeadTex(layout, L, n, esc(b.title), b.points),
     richTex(b.scenario),
     ...b.parts.map((p, i) => renderPart(p, i, withKey, L)),
   ].join("\n");
@@ -83,9 +84,9 @@ export async function renderBlocksTex(blocks: ExamBlock[], dateLabel: string, wi
   const duration = await examDurationMin();
   const total = blocks.reduce((s, b) => s + b.points, 0);
   return examDocument([
-    await pdf.cover({ form: "blocks", dateLabel, n: blocks.length, totalPts: total, durationMin: duration }),
+    await pdf.cover({ form: "blocks", dateLabel, n: blocks.length, totalPts: total, durationMin: duration, points: blocks.map((b) => b.points) }),
     String.raw`\clearpage`,
-    ...blocks.map((b, i) => renderBlock(b, i + 1, withKey, pdf.blocks)),
+    ...blocks.map((b, i) => renderBlock(b, i + 1, withKey, pdf.blocks, pdf.layout)),
   ], dateLabel, pdf);
 }
 
