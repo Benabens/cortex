@@ -58,8 +58,10 @@ test("QCM d'un cours EPFL : .tex inchangé, énoncé et corrigé", async () => {
 test("questions composées d'un cours EPFL : .tex inchangé, énoncé et corrigé", async () => {
   const { renderBlocksTex } = await import("../lib/blocks-latex");
   const { BLOCKS, DATE } = await import("./helpers/gabarits");
-  assert.equal(sha(await inEpfl(() => renderBlocksTex(BLOCKS, DATE, false))), "5bb4b8f7ef8300ef");
-  assert.equal(sha(await inEpfl(() => renderBlocksTex(BLOCKS, DATE, true))), "a43650362d95305a");
+  // Portage de #120, changement voulu : la durée déclarée du cours (120) au lieu du repli de la
+  // fiche ou des 90 minutes par défaut (audit 3, P1-3).
+  assert.equal(sha(await inEpfl(() => renderBlocksTex(BLOCKS, DATE, false))), "ede8d1069f75f360");
+  assert.equal(sha(await inEpfl(() => renderBlocksTex(BLOCKS, DATE, true))), "84762cbb54dfb50b");
 });
 
 test("repli HTML d'un cours EPFL : inchangé", async () => {
