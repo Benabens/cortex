@@ -39,7 +39,7 @@ export default defineTool({
     "material marked as outside the syllabus comes after the course material. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
-  userSummary: "Cherche un passage dans tes supports de cours.",
+  userSummary: "searchCourseMaterials",
   input: z.object({
     course: courseArg,
     query: z.string().min(2).max(200).describe("Words to look for, e.g. \"valeurs propres\" or \"page table\"."),
