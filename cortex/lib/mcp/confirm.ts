@@ -87,6 +87,9 @@ export async function verifyRequestState(state: string, ctx: ServerContext): Pro
   }
 }
 
+/** Clé `_meta` des montants d'une confirmation interactive (coût, solde, ce qui reste, remise à zéro). */
+export const PAYMENT_META = "com.cortexexam/payment";
+
 const confirmSchema = z.object({ confirm: z.boolean().meta({ title: "Confirm" }) });
 
 function bucketLabel(bucket: Cost["bucket"]): "generations" | "assistance" {
@@ -223,7 +226,8 @@ export async function confirmCost(
         },
         requestState: await requestStateCodec().mint({ u: binding.userId, g: binding.grantId, t: p.tool, h, c: costCenti, n: quoteRef(await issueQuote(binding)) }),
         }),
-        ...payment,
+        // Montants en données (#14, #15, #17) : là où le protocole range les extensions, pas au premier niveau.
+        _meta: { [PAYMENT_META]: payment },
       },
     };
   }
