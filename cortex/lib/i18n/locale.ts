@@ -73,3 +73,8 @@ export function cookieValue(header: string | null | undefined, name: string): st
 /** Nom de chaque langue DANS cette langue (« English » reste « English » dans une interface
  *  française) : c'est ce qu'on cherche du regard quand on ne lit pas la langue affichée. */
 export const LOCALE_NAMES: Record<Locale, string> = { fr: "Français", en: "English" };
+
+/** Cookie de langue écrit par le navigateur (sélecteur, recopie de la langue du compte). */
+export function localeCookie(locale: Locale): string {
+  return `${LOCALE_COOKIE}=${locale}; path=/; max-age=31536000; samesite=lax`;
+}
