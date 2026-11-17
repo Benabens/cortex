@@ -88,6 +88,24 @@ export function captureError(e: unknown, tags: Record<string, string> = {}): voi
   }
 }
 
+const _lastAlertAt = new Map<string, number>();
+
+/**
+ * captureError au plus une fois par `everyMs` et par `key`, dans ce process : une panne qui
+ * se répète à chaque requête (signature refusée, e-mail qui ne part pas) prévient sans vider
+ * le quota Sentry. Rend true quand l'alerte est partie.
+ */
+export function captureErrorThrottled(key: string, e: unknown, tags: Record<string, string> = {}, everyMs = 3600_000): boolean {
+  const now = Date.now();
+  if (now - (_lastAlertAt.get(key) ?? -Infinity) < everyMs) return false;
+  _lastAlertAt.set(key, now);
+  captureError(e, tags);
+  return true;
+}
+
+/** (tests) réarme toutes les alertes bridées. */
+export function resetErrorTrackingThrottleForTests(): void { _lastAlertAt.clear(); }
+
 /**
  * Attend l'envoi des erreurs en file (au plus `timeoutMs`). L'envoi du SDK est
  * asynchrone : un worker qui appelle process.exit juste après captureError

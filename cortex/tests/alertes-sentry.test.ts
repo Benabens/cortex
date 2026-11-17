@@ -109,6 +109,63 @@ test("webhook Stripe en erreur (500, Stripe réessaie) : Sentry est prévenu ave
   }
 });
 
+/**
+ * AUDIT FUITES DU 17/11, B5 — un webhook à signature invalide (secret tourné, mauvais endpoint)
+ * était refusé en 400 sans un mot : Stripe abandonne au bout de 3 jours, les clients ont payé
+ * sans crédits. Le refus reste un 400 (un tiers ne doit rien apprendre), mais Sentry est prévenu,
+ * une fois par heure et par cause au plus (un robot qui frappe l'URL ne vide pas le quota).
+ */
+async function postWebhook(payload: string, sig: string) {
+  const { POST } = await import("../app/api/billing/webhook/route");
+  const { NextRequest } = await import("next/server");
+  return POST(new NextRequest("http://localhost/api/billing/webhook", { method: "POST", body: payload, headers: { "stripe-signature": sig } }));
+}
+
+test("webhook Stripe à signature invalide : 400, et Sentry est prévenu une seule fois par heure", async () => {
+  process.env.STRIPE_SECRET_KEY = "sk_test_fake_key_local_only";
+  process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_local";
+  try {
+    const { resetErrorTrackingThrottleForTests } = await import("../lib/observability");
+    resetErrorTrackingThrottleForTests();
+    const Stripe = (await import("stripe")).default;
+    const stripe = new Stripe("sk_test_fake_key_local_only");
+    const payload = JSON.stringify({ id: "evt_sig_1", object: "event", livemode: false, type: "invoice.paid", data: { object: {} } });
+    const sig = stripe.webhooks.generateTestHeaderString({ payload, secret: "whsec_un_autre_secret" });
+    for (let i = 0; i < 3; i++) {
+      const res = await postWebhook(payload, sig);
+      assert.equal(res.status, 400);
+    }
+    const alerts = captured.filter((c) => c.tags.area === "billing");
+    assert.equal(alerts.length, 1, JSON.stringify(captured.map((c) => c.tags)));
+    assert.equal(alerts[0].tags.step, "webhook_signature");
+    assert.ok(!JSON.stringify(alerts[0]).includes("evt_sig_1"), "rien du corps non vérifié dans l'alerte");
+  } finally {
+    for (const k of ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]) delete process.env[k];
+  }
+});
+
+test("webhook Stripe de livemode incohérent avec la clé : 400, et Sentry est prévenu", async () => {
+  process.env.STRIPE_SECRET_KEY = "sk_test_fake_key_local_only";
+  process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_local";
+  try {
+    const { resetErrorTrackingThrottleForTests } = await import("../lib/observability");
+    resetErrorTrackingThrottleForTests();
+    const Stripe = (await import("stripe")).default;
+    const stripe = new Stripe("sk_test_fake_key_local_only");
+    // Événement LIVE signé avec le bon secret, alors que la clé est de test : mauvais branchement.
+    const payload = JSON.stringify({ id: "evt_live_1", object: "event", livemode: true, type: "invoice.paid", data: { object: {} } });
+    const sig = stripe.webhooks.generateTestHeaderString({ payload, secret: "whsec_test_local" });
+    const res = await postWebhook(payload, sig);
+    assert.equal(res.status, 400);
+    const alert = captured.find((c) => c.tags.area === "billing");
+    assert.ok(alert, JSON.stringify(captured.map((c) => c.tags)));
+    assert.equal(alert!.tags.step, "webhook_livemode");
+    assert.equal(alert!.tags.event_type, "invoice.paid");
+  } finally {
+    for (const k of ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]) delete process.env[k];
+  }
+});
+
 test("job abandonné par la réconciliation (worker mort, tentatives épuisées) : Sentry est prévenu", async () => {
   const jobs = await import("../lib/jobs");
   const { q, nowStr } = await import("../db/q");
