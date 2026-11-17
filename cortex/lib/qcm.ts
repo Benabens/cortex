@@ -1358,45 +1358,38 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
   return items;
 }
 
-/** Énoncés et thèmes des QCM des derniers examens de ce cours (base du tenant : ceux de l'utilisateur). */
+/**
+ * Énoncés et thèmes des questions des derniers examens de ce cours (base du tenant : ceux de
+ * l'utilisateur), QCM et OUVERTES : banc rs-mixte du 17/11, trois QCM reprenaient deux ouvertes
+ * d'un examen précédent, invisibles ici. Les ouvertes d'un examen passent avant ses QCM : la borne
+ * ne les coupe pas les premières.
+ */
 async function recentQuestions(limit = PREVIOUS_STEMS): Promise<{ topic: string; stem: string }[]> {
   const qcm = await q.all<{ exam_id: number; topic: string; stem: string }>(`SELECT exam_id, topic, stem FROM qcm_items ORDER BY exam_id DESC, idx LIMIT ?`, limit).catch(() => []);
-  // Les questions OUVERTES déjà posées comptent aussi (banc rs-mixte du 17/11 : trois QCM reprenaient
-  // deux ouvertes d'un examen précédent, invisibles ici). Leur notion en tête : le décor vient après.
   const open = await q.all<{ exam_id: number; concept: string | null; statement_html: string | null }>(
     `SELECT exam_id, concept, statement_html FROM exam_questions ORDER BY exam_id DESC, id LIMIT ?`, limit,
   ).catch(() => []);
   return [
-    ...qcm,
-    ...open.map((o) => {
-      const text = plainStatement(o.statement_html ?? "");
-      return { exam_id: o.exam_id, topic: o.concept ?? "", stem: o.concept ? `[question ouverte : ${o.concept}] ${text}` : text };
-    }).filter((o) => o.stem),
-  ].sort((a, b) => Number(b.exam_id) - Number(a.exam_id)).slice(0, limit).map(({ topic, stem }) => ({ topic, stem }));
+    ...open.map((o) => ({ exam_id: Number(o.exam_id), open: 0, topic: o.concept ?? "", stem: openAsStem(o.concept, o.statement_html ?? "") })).filter((o) => o.stem),
+    ...qcm.map((x) => ({ exam_id: Number(x.exam_id), open: 1, topic: x.topic, stem: x.stem })),
+  ].sort((a, b) => b.exam_id - a.exam_id || a.open - b.open).slice(0, limit).map(({ topic, stem }) => ({ topic, stem }));
 }
 
 /**
- * Énoncé d'une question ouverte en texte (LaTeX ou HTML enregistré) : sans l'encadré de section
- * « FOR ALL STUDENTS », sans commandes ni balises. Il ne sert qu'à reconnaître une reprise.
+ * Une question ouverte en énoncé comparable à un QCM : sa notion en tête (une borne de longueur
+ * coupe le décor, jamais elle), puis l'énoncé en texte — sans l'encadré de section « FOR ALL
+ * STUDENTS », ni balises, ni commandes LaTeX. Il ne sert qu'à reconnaître une reprise.
  */
-export function plainStatement(tex: string): string {
-  let t = tex;
-  for (let at = t.indexOf("\\callout{"); at >= 0; at = t.indexOf("\\callout{", at + 1)) {
-    let depth = 0;
-    let end = -1;
-    for (let i = at + "\\callout".length; i < t.length; i++) {
-      if (t[i] === "{") depth++;
-      else if (t[i] === "}" && --depth === 0) { end = i; break; }
-    }
-    if (end < 0) break;
-    if (/FOR\s+ALL\s+STUDENTS/i.test(t.slice(at, end))) t = t.slice(0, at) + t.slice(end + 1);
-  }
-  return t
-    .replace(/<[^>]+>/g, " ")
+function openAsStem(concept: string | null, tex: string): string {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { dropSectionCallouts } = require("@/lib/exam-latex") as typeof import("@/lib/exam-latex");
+  const text = dropSectionCallouts(tex)
+    .replace(/<\/?[a-zA-Z][^>]*>/g, " ")
     .replace(/\\[a-zA-Z]+\*?/g, " ")
     .replace(/[{}$\\]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+  return concept ? `[question ouverte : ${concept}] ${text}` : text;
 }
 
 const DUP_SCHEMA = {
@@ -2131,6 +2124,10 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     });
     // NOMBRE GARANTI, comme pour les QCM : une ouverte échouée (job 8 de CS-290 : 2 sur 3, sans
     // un mot) est relancée UNE fois, sauf si la cause est une garde ; sinon l'écart est dit.
+    // Ce que l'ouverte ne doit pas reprendre (banc rs-mixte du 17/11 : une ouverte reprenait celle
+    // d'un examen précédent, et un QCM de l'examen) : les questions déjà posées, puis les sujets
+    // des QCM prévus — connus dès le plan, l'ouverte n'attend pas leur rédaction.
+    const openAsked = [...recent.map((r) => r.stem), ...qcmTopics.map((t) => t.fact?.statement ?? t.label)];
     let pendingOpen = Array.from({ length: openCount }, (_, i) => i).filter((i) => !openBySlot.has(i));
     if (openBySlot.size) progress.done("Questions ouvertes", openBySlot.size);
     for (let round = 0; pendingOpen.length && round < 2 && !abandoned; round++) {
@@ -2141,7 +2138,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
         const a = archs[i % archs.length];
         step(`Question ouverte ${i + 1}/${openCount} (architecte${round ? ", nouvel essai" : ""}) : ${t.label}…`, 82 + i);
         try {
-          const r = await architectQuestion(a, `${t.label}${t.subTheme ? ` — sous-thème imposé : ${t.subTheme}` : ""}${t.method ? ` — ${t.method}` : ""}`, 15, { maxRounds: 1, mold: openMolds[i] ?? null, onStep: (m) => step(`Ouverte ${i + 1} · ${m}`, 82 + i) });
+          const r = await architectQuestion(a, `${t.label}${t.subTheme ? ` — sous-thème imposé : ${t.subTheme}` : ""}${t.method ? ` — ${t.method}` : ""}`, 15, { maxRounds: 1, mold: openMolds[i] ?? null, asked: openAsked, onStep: (m) => step(`Ouverte ${i + 1} · ${m}`, 82 + i) });
           openBySlot.set(i, { ...r.q, points: 15 });
           await persist();
         } catch (e) {
@@ -2249,7 +2246,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     if (!cands.length) return [];
     // Les ouvertes déjà construites comptent comme posées (banc rs-mixte du 17/11 : un QCM et
     // une ouverte sur le même résultat d'impossibilité) : un QCM qui en reprend une part.
-    const openStems = [...openBySlot.values()].map((oq) => plainStatement(oq.statement_tex ?? "")).filter(Boolean);
+    const openStems = [...openBySlot.values()].map((oq) => openAsStem(oq.concept, oq.statement_tex ?? "")).filter(Boolean);
     const { audit, dup } = await finalReview(cands, { strict: strictMode, previous: recent.map((x) => x.stem), current: [...current.map((it) => it.stem), ...openStems], step, facts: shared.facts, programme: programmeLabels });
     const out = cands.map((it, i) => (audit ? audit[i] : it));
     dup?.programme.forEach((p, i) => { if (p && out[i]) out[i]!.programmeNotion = p; });

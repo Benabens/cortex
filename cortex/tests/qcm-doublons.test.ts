@@ -62,6 +62,8 @@ let designed = 0;
 let topUps = 0;
 const designPrompts: string[] = [];
 const dedupePrompts: string[] = [];
+/** Conception des questions ouvertes (P1 de l'architecte) : le simulateur n'y répond pas, l'ouverte est ignorée. */
+const architectPrompts: string[] = [];
 
 /** Le contrôle de fin d'examen simulé : il lit la notion, l'angle (et la règle, si présente) de chaque question dans son énoncé. */
 function dedupeReply(prompt: string): string {
@@ -92,7 +94,8 @@ before(async () => {
       const content = parsed.messages.map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))).join("\n");
       let text = "{}";
       // Revue finale : audit (verdicts) et doublons dans le même appel.
-      if (/"duplicates"/.test(content)) { dedupePrompts.push(content); text = JSON.stringify({ verdicts: [...content.matchAll(/^Q(\d+)\./gm)].map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })), ...JSON.parse(dedupeReply(content)) }); }
+      if (/CONÇOIS une question d'examen/.test(content)) architectPrompts.push(content);
+      else if (/"duplicates"/.test(content)) { dedupePrompts.push(content); text = JSON.stringify({ verdicts: [...content.matchAll(/^Q(\d+)\./gm)].map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })), ...JSON.parse(dedupeReply(content)) }); }
       else if (/"results"/.test(content)) text = verifyReply(content);
       else if (/"items"/.test(content)) {
         designCalls++;
@@ -115,7 +118,7 @@ before(async () => {
 });
 
 const defaultDesign = design;
-beforeEach(() => { designCalls = 0; designed = 0; topUps = 0; designPrompts.length = 0; dedupePrompts.length = 0; design = defaultDesign; });
+beforeEach(() => { designCalls = 0; designed = 0; topUps = 0; designPrompts.length = 0; dedupePrompts.length = 0; architectPrompts.length = 0; design = defaultDesign; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -367,6 +370,27 @@ test("banc rs-mixte du 17/11 : un QCM qui reprend une question OUVERTE du même 
   });
   assert.ok(!stems.some((st) => st.startsWith("Reprise de l'ouverte")), `le QCM qui reprend l'ouverte est retiré :\n${stems.join("\n")}`);
   assert.ok(dedupePrompts.some((pr) => /^P\d+\. .*Ouverte \[notion:résultat d'impossibilité\]/m.test(pr)), "le contrôle des doublons reçoit l'ouverte de l'examen");
+});
+
+test("banc rs-mixte du 17/11 : l'architecte d'une ouverte reçoit les questions déjà posées et les QCM de l'examen", async () => {
+  const id = await course(30);
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  await runWithCourse(id, async () => {
+    for (const t of ["exams", "exam_questions"]) await q.ensureTable(t);
+    const examId = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','ready')`);
+    await q.run(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration) VALUES (?,?,?,?,?)`,
+      examId, "Résultat d'impossibilité", String.raw`\callout{This question is \textbf{\large FOR ALL STUDENTS.}}\callout{FOR ALL STUDENTS}Ouverte précédente : si $x < y$ et $y > z$, que dit le cours ?`, "", "qcm-open");
+  });
+  design = (n, call) => Array.from({ length: n }, (_, i) => item(`QCM de l'examen ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`));
+  const { runWithCourse: inCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  await inCourse(id, () => generateQcmExam({ count: 4, openCount: 1 }));
+  const prompt = architectPrompts[0] ?? "";
+  assert.ok(prompt, "l'architecte de l'ouverte est appelé");
+  assert.match(prompt, /\[question ouverte : Résultat d'impossibilité\] Ouverte précédente : si x < y et y > z/, "l'ouverte précédente, en texte, sans encadré, inégalités gardées");
+  assert.doesNotMatch(prompt, /FOR ALL STUDENTS/);
+  for (const label of ["Ancrage", "Bulles filtrantes"]) assert.match(prompt, new RegExp(`· ${label}`), `les QCM prévus de l'examen (${label}) sont donnés comme déjà couverts`);
 });
 
 test("modèle qui répète toujours la même notion : budget borné, aucun doublon connu réinjecté", async () => {
