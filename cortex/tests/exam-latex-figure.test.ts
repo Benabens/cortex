@@ -81,3 +81,65 @@ test("compileExamPdf : un _ nu dans \\texttt (SEEK_CUR) ne fait plus tomber le P
   ].join("\n"));
   assert.equal(await compileExamPdf("souligne"), "souligne.pdf");
 });
+
+test("compileExamPdf : un % nu dans \\texttt (printf) ne fait plus tomber le PDF", { skip: hasTectonic ? false : "tectonic absent" }, async () => {
+  // Banc exam-cout du 17/11/2026 (cs-202-ecrit) : \texttt{printf("%s", p17->msg);} — le « % » met la fin de
+  // la ligne en commentaire, \texttt ne se ferme plus (« File ended while scanning use of \texttt ») : examen sans PDF.
+  const { compileExamPdf } = await import("../lib/exam-latex");
+  const { examsDir } = await import("../lib/paths");
+  fs.writeFileSync(path.join(examsDir(), "pourcent.tex"), [
+    "\\documentclass{article}", "\\usepackage[T1]{fontenc}", "\\begin{document}",
+    "\\begin{itemize}", "\\item $T_{mon}$ (plus tard) : \\texttt{printf(\"%s\", p17->msg);}", "\\item Taux : 37 \\% des requêtes.", "\\end{itemize}",
+    "\\end{document}", "",
+  ].join("\n"));
+  assert.equal(await compileExamPdf("pourcent"), "pourcent.pdf");
+});
+
+test("compileExamPdf : l'écriture inclusive en \\cdot hors maths (étudiant\\cdot es) ne fait plus tomber le PDF", { skip: hasTectonic ? false : "tectonic absent" }, async () => {
+  // Banc exam-cout du 17/11/2026 (cs-202-ecrit) : « trois étudiant\cdot es », « chacun\cdot e » hors maths :
+  // « Missing $ inserted », examen sans PDF. Le produit des maths ($p \cdot e$) reste tel quel.
+  const { compileExamPdf } = await import("../lib/exam-latex");
+  const { examsDir } = await import("../lib/paths");
+  const tex = [
+    "\\documentclass{article}", "\\usepackage[T1]{fontenc}", "\\begin{document}",
+    "Pendant un lab, trois étudiant\\cdot es développent un serveur ; on calcule $p \\cdot e$.",
+    "A, B, C soumettent chacun\\cdot e une review.",
+    "\\end{document}", "",
+  ].join("\n");
+  fs.writeFileSync(path.join(examsDir(), "inclusif.tex"), tex);
+  assert.equal(await compileExamPdf("inclusif"), "inclusif.pdf");
+  assert.match(fs.readFileSync(path.join(examsDir(), "inclusif.tex"), "utf8"), /\$p \\cdot e\$/);
+});
+
+test("compileExamPdf : les « \\n » littéraux (double échappement JSON) deviennent des retours à la ligne", { skip: hasTectonic ? false : "tectonic absent" }, async () => {
+  // Banc exam-cout du 17/11/2026 (cs-202-ecrit, 3 examens sur 8 livrés sans PDF) : « avec \texttt{P}.\n\nÉtat
+  // mémoire… » — un « \n » tapé deux fois échappé dans le JSON arrive en macro inconnue. Le code reste du code :
+  // dans \texttt, « \n » s'écrit, et un listing n'est pas touché.
+  const { compileExamPdf } = await import("../lib/exam-latex");
+  const { examsDir } = await import("../lib/paths");
+  fs.writeFileSync(path.join(examsDir(), "retours.tex"), [
+    "\\documentclass{article}", "\\usepackage[T1]{fontenc}", "\\usepackage{listings}", "\\usepackage{tikz}", "\\newcommand{\\nrows}{3}", "\\begin{document}",
+    "\\begin{tikzpicture}\\node (a) {A};\\end{tikzpicture} sur \\nrows{} lignes.",
+    "Le processus \\texttt{R} se partage le CPU avec \\texttt{P}.\\n\\nÉtat mémoire courant : \\texttt{printf(\"ok\\n\")}.\\nIl reste \\noindent 3 pages, $\\nu \\neq 0$.\\na) Suite.",
+    "\\begin{lstlisting}", "printf(\"%d\\n\", x);", "\\end{lstlisting}",
+    "\\end{document}", "",
+  ].join("\n"));
+  assert.equal(await compileExamPdf("retours"), "retours.pdf");
+  const out = fs.readFileSync(path.join(examsDir(), "retours.tex"), "utf8");
+  assert.match(out, /avec \\texttt\{P\}\.\n\nÉtat/);
+  assert.match(out, /printf\("%d\\n", x\);/, "le listing garde son \\n");
+  assert.match(out, /\\node \(a\) \{A\};\\end\{tikzpicture\} sur \\nrows\{\}/, "\\node (TikZ) et une macro du document restent des macros");
+  assert.match(out, /\.\nIl reste \\noindent 3 pages, \$\\nu \\neq 0\$\.\na\) Suite/, "« \\nIl », « \\na) » : des retours ; \\noindent, \\nu, \\neq : des macros");
+});
+
+test("compileExamPdf : \\xcancel sans le paquet cancel ne fait plus tomber le PDF", { skip: hasTectonic ? false : "tectonic absent" }, async () => {
+  // Banc exam-cout du 17/11/2026 (cs-202-ecrit) : « 6 & \multicolumn{7}{c}{\xcancel{non utilisée}} » dans un corrigé.
+  const { compileExamPdf } = await import("../lib/exam-latex");
+  const { examsDir } = await import("../lib/paths");
+  fs.writeFileSync(path.join(examsDir(), "barre.tex"), [
+    "% le corps est injecté après \\begin{document}).", "\\documentclass{article}", "\\usepackage[T1]{fontenc}", "\\begin{document}",
+    "\\begin{tabular}{c|ccccccc}", "5 & 1 & 2 & 3 & 4 & 5 & 6 & 7 \\\\", "6 & \\multicolumn{7}{c}{\\xcancel{non utilisée}} \\\\", "\\end{tabular}",
+    "\\end{document}", "",
+  ].join("\n"));
+  assert.equal(await compileExamPdf("barre"), "barre.pdf");
+});

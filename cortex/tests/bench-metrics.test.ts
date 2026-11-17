@@ -149,16 +149,32 @@ test("performance d'un run sur claude-code : tokens MESURÉS (réflexion compris
   const calls = [
     { ...base, at, usage: { inputTokens: 10, cacheWriteTokens: 5390, cacheReadTokens: 0, outputTokens: 6000 } },
     { ...base, at: at + 60_000, usage: { inputTokens: 10, cacheWriteTokens: 0, cacheReadTokens: 5390, outputTokens: 6000 } },
-    // Appel en échec (délai dépassé) : pas de compteur, estimé depuis la taille du prompt.
+    // Appel en échec (délai dépassé) : pas de compteur, entrée estimée depuis la taille du prompt,
+    // sortie facturée jusqu'à la coupure (10 s à 95 tok/s, cf. test suivant).
     { site: "verifyQcmBatch", model: "opus", promptChars: 4000, systemChars: 0, outputChars: 2000, ms: 10_000, at: at + 120_000, provider: "claude-code", error: "TIMEOUT : délai" },
   ];
   const p = measureRun(run({ calls })).perf;
   // Entrée du moteur : 5 400 − 2 400 = 3 000 par appel mesuré, dont 1 000 de système (même part que
-  // les caractères) ; troisième appel : 1 000 estimés. Sortie : 6 000 + 6 000 + 500.
-  assert.deepEqual([p.tokensIn, p.tokensOut, p.cacheReadTokens, p.measuredCalls], [7000, 12_500, 1000, 2]);
-  // 5 000 non cachés × 3 + 1 000 écrits × 3,75 + 1 000 lus × 0,3 + 12 500 en sortie × 15 (par million).
-  assert.equal(Math.round(p.costUsd * 1e6), 15_000 + 3750 + 300 + 187_500);
+  // les caractères) ; troisième appel : 1 000 estimés. Sortie : 6 000 + 6 000 + 950.
+  assert.deepEqual([p.tokensIn, p.tokensOut, p.cacheReadTokens, p.measuredCalls], [7000, 12_950, 1000, 2]);
+  // 5 000 non cachés × 3 + 1 000 écrits × 3,75 + 1 000 lus × 0,3 + 12 950 en sortie × 15 (par million).
+  assert.equal(Math.round(p.costUsd * 1e6), 15_000 + 3750 + 300 + 194_250);
   assert.equal(p.estimated, true, "rien n'est facturé : le coût reste un équivalent API");
+});
+
+test("performance d'un run sur claude-code : un appel coupé au délai est facturé comme en prod (sortie produite jusqu'à la coupure)", () => {
+  // Banc cs-202-ecrit du 17/11 : un lot ou une régénération coupé à 600 s ne rend aucun compteur
+  // (sortie 0) puis est refait ; en prod, l'API en flux facture ce qui a été produit avant la coupure
+  // (≈ 57 k tokens à 95 tok/s, débit mesuré au banc). Sans cela, le banc récompense les délais dépassés.
+  const at = Date.parse("2026-11-17T18:00:00.000Z");
+  const calls = [
+    // Enregistrement réel de la bande (run du 17/11 18-51-45) : un appel en échec n'a ni provider ni compteur.
+    { site: "generateBatch", model: "opus", promptChars: 4000, systemChars: 0, outputChars: 0, ms: 600_000, at, error: "TIMEOUT : Claude Code a mis trop de temps (timeout)." },
+  ];
+  const p = measureRun(run({ calls })).perf;
+  assert.equal(p.tokensOut, 57_000);
+  // 1 000 tokens d'entrée × 3 + 57 000 en sortie × 15 (par million).
+  assert.equal(Math.round(p.costUsd * 1e6), 3000 + 855_000);
 });
 
 test("UX : avancement monotone sauf réessai annoncé ; erreur médiane du temps restant", () => {

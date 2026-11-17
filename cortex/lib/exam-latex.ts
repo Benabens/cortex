@@ -277,6 +277,81 @@ export function repairTextttUnderscores(tex: string, line: number): string | nul
   return tex.replace(TEXTTT, (c) => c.replace(new RegExp(BARE_UNDERSCORE, "g"), "\\_"));
 }
 
+const BARE_PERCENT = /(?<!\\)%/;
+
+/**
+ * Le document où les « % » nus de \texttt{…} sont échappés, s'il y en a ; null sinon. Le « % » met la
+ * fin de la ligne en commentaire, \texttt ne se ferme plus et l'erreur tombe en fin de fichier (« File
+ * ended while scanning use of \texttt ») : la ligne fautive ne le désigne pas. Banc exam-cout du
+ * 17/11/2026 (cs-202-ecrit), \texttt{printf("%s", p17->msg);} : examen livré sans PDF.
+ */
+export function repairTextttPercents(tex: string): string | null {
+  if (!(tex.match(TEXTTT) ?? []).some((c) => BARE_PERCENT.test(c))) return null;
+  return tex.replace(TEXTTT, (c) => c.replace(new RegExp(BARE_PERCENT, "g"), "\\%"));
+}
+
+/** Point médian d'écriture inclusive tapé en \cdot (mode maths) : « étudiant\cdot es », « chacun\cdot e ». */
+const INCLUSIVE_CDOT = /(?<=\p{L})\\cdot\s*(?=(?:e|es|ne|nes|le|les|rice|rices|euse|euses|s)(?!\p{L}))/gu;
+const INLINE_MATH = /(\$[^$]*\$)/;
+
+/**
+ * Le document où l'écriture inclusive en \cdot hors maths devient un point médian de texte, si la ligne
+ * fautive en contient ; null sinon (« Missing $ inserted »). Les maths en ligne ($p \cdot e$) restent
+ * telles quelles. Banc exam-cout du 17/11/2026 (cs-202-ecrit) : « trois étudiant\cdot es », examen sans PDF.
+ */
+export function repairInclusiveCdot(tex: string, line: number): string | null {
+  const outsideMath = (l: string) => l.split(INLINE_MATH).filter((_, i) => i % 2 === 0).join(" ");
+  if (!new RegExp(INCLUSIVE_CDOT).test(outsideMath(tex.split("\n")[line - 1] ?? ""))) return null;
+  return tex.split("\n").map((l) => l.split(INLINE_MATH).map((part, i) => (i % 2 ? part : part.replace(INCLUSIVE_CDOT, "\\textperiodcentered{}"))).join("")).join("\n");
+}
+
+/** Code verbatim (listings, verbatim, \verb, \lstinline) : un « \n » y est du code, jamais touché. */
+const VERBATIM = /(\\begin\{(lstlisting|verbatim|Verbatim|minted)\}[\s\S]*?\\end\{\2\}|\\(?:verb|lstinline)(\S)[\s\S]*?\3)/;
+/** Les vraies macros en \n… (LaTeX, amssymb) : tout autre « \n » suivi de lettres est un retour à la ligne tapé. */
+const N_MACROS = new Set(("newline newpage noindent nobreak nolinebreak nopagebreak normalsize normalfont normalcolor nonumber " +
+  "null number numexpr numberwithin newcommand newenvironment newtheorem newlength newcounter newblock nocite nolimits " +
+  "nointerlineskip nonfrenchspacing nameref nu ne neq neg not notin ni nmid nabla natural nearrow nwarrow nexists " +
+  "nleq ngeq nless ngtr nsim ncong nsubset nsubseteq nsupseteq nparallel nvdash nleftarrow nrightarrow nleftrightarrow " +
+  "node needspace newif newsavebox newcolumntype newgeometry nobreakspace nolinkurl nopar numberline nicefrac nombre " +
+  "num numlist numrange").split(" "));
+/** Macros en \n… que le document définit lui-même (préambule partagé : \nrowsnum, \nrowsblank…). */
+const definedNMacros = (tex: string) => new Set([...tex.matchAll(/\\(?:(?:re)?newcommand\*?\{?|def|let|newlength\{?|newif)\\(n[A-Za-z]+)/g)].map((m) => m[1]));
+/** « \n » littéral (le nom de macro qui suit n'en est pas une : « \nIl », « \na) », « \n\n »). */
+const LITERAL_NEWLINE = /\\n([A-Za-z]*)/g;
+const newlineOrMacroIn = (defined: Set<string>) => (m: string, name: string) => (name && (N_MACROS.has(`n${name}`) || defined.has(`n${name}`)) ? m : `\n${name}`);
+
+/**
+ * Le document où les « \n » littéraux deviennent des retours à la ligne (dans \texttt : « \n » écrit), si la
+ * ligne fautive en contient ; null sinon. Un « \n » échappé deux fois dans le JSON arrive en macro inconnue
+ * (« Undefined control sequence ») : banc exam-cout du 17/11/2026 (cs-202-ecrit), 3 examens sur 8 sans PDF.
+ */
+export function repairLiteralNewlines(tex: string, line: number): string | null {
+  const newlineOrMacro = newlineOrMacroIn(definedNMacros(tex));
+  const literal = [...(tex.split("\n")[line - 1] ?? "").matchAll(LITERAL_NEWLINE)].some(([m, name]) => newlineOrMacro(m, name) !== m);
+  if (!literal) return null;
+  const parts = tex.split(VERBATIM);
+  // split avec groupes : [texte, bloc, nom d'environnement, délimiteur, texte, …]
+  return parts.map((part, i) => {
+    if (i % 4 !== 0 || part === undefined) return i % 4 === 1 ? part : "";
+    return part
+      .replace(TEXTTT, (c) => c.replace(LITERAL_NEWLINE, (m, name: string) => (newlineOrMacro(m, name) === m ? m : `\\textbackslash{}n${name}`)))
+      .replace(LITERAL_NEWLINE, newlineOrMacro);
+  }).join("");
+}
+
+const CANCEL = /\\(?:x|b)?cancel(?:to)?\{/;
+
+/**
+ * Le document avec le paquet cancel chargé, s'il emploie \cancel, \xcancel, \bcancel ou \cancelto sans
+ * lui ; null sinon. Banc exam-cout du 17/11/2026 (cs-202-ecrit) : \xcancel{non utilisée} dans un tableau.
+ */
+export function repairCancelPackage(tex: string): string | null {
+  // \begin{document} en début de ligne : le préambule partagé le cite aussi dans un commentaire.
+  const BEGIN = /^\\begin\{document\}/m;
+  if (!CANCEL.test(tex) || /\\usepackage(\[[^\]]*\])?\{[^}]*\bcancel\b[^}]*\}/.test(tex) || !BEGIN.test(tex)) return null;
+  return tex.replace(BEGIN, "\\usepackage{cancel}\n\\begin{document}");
+}
+
 /** Ligne fautive d'une compilation : « error: x.tex:648: … » (tectonic) ou « l.648 » (journal pdflatex). */
 export function failingLine(text: string): number | null {
   // Les avertissements (« warning: x.tex:85: Underfull… ») précèdent l'erreur : seule la ligne « error: » compte.
@@ -286,15 +361,20 @@ export function failingLine(text: string): number | null {
 
 export async function compileExamPdf(base: string): Promise<string> {
   // Une figure générée qui ne compile pas est retirée (encadré), des macros de babel-french sont
-  // remplacées, les « _ » nus de \texttt échappés, puis on recompile (3 fois au plus).
+  // remplacées, les « _ » et « % » nus de \texttt échappés, l'écriture inclusive en \cdot hors maths
+  // remise en texte, les « \n » littéraux remis en retours à la ligne, le paquet cancel chargé, puis on
+  // recompile (6 fois au plus : un même examen cumule plusieurs de ces défauts).
   for (let attempt = 0; ; attempt++) {
     try {
       return await compileOnce(base);
     } catch (e) {
       const texAbs = path.join(examsDir(), `${base}.tex`);
       const line = failingLine(`${(e as { raw?: string }).raw ?? ""}\n${readLog(base)}`);
-      const src = attempt < 3 && line && fs.existsSync(texAbs) ? fs.readFileSync(texAbs, "utf8") : null;
-      const fixed = src && line ? dropFailingFigure(src, line) ?? repairFrenchMacros(src, line) ?? repairTextttUnderscores(src, line) : null;
+      const src = attempt < 6 && fs.existsSync(texAbs) ? fs.readFileSync(texAbs, "utf8") : null;
+      const atLine = src && line ? dropFailingFigure(src, line) ?? repairFrenchMacros(src, line) ?? repairTextttUnderscores(src, line) ?? repairInclusiveCdot(src, line) ?? repairLiteralNewlines(src, line) : null;
+      // « % » nu dans \texttt (l'erreur tombe en fin de fichier) et paquet cancel manquant (l'erreur
+      // est signalée dans la macro qui l'emploie) : la ligne fautive ne les désigne pas.
+      const fixed = atLine ?? (src ? repairTextttPercents(src) ?? repairCancelPackage(src) : null);
       if (!fixed) throw publicCompileError(base, e as Error & { detail?: string }, line);
       fs.writeFileSync(texAbs, fixed);
     }
