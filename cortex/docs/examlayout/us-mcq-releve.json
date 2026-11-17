@@ -1,0 +1,48 @@
+{
+  "font": {
+    "family": "sans",
+    "size": 10
+  },
+  "header": {
+    "left": "course",
+    "center": "none",
+    "right": "none"
+  },
+  "footer": {
+    "left": "none",
+    "center": "pageOfTotal",
+    "right": "none"
+  },
+  "numbering": {
+    "prefix": "",
+    "style": "arabic"
+  },
+  "choices": {
+    "label": "(A)",
+    "mark": "bubble",
+    "columns": 1
+  },
+  "points": "none",
+  "language": "en",
+  "cover": {
+    "idFields": [
+      {
+        "kind": "name",
+        "label": "Name:"
+      },
+      {
+        "kind": "studentId",
+        "label": "NetID:"
+      },
+      {
+        "kind": "signature",
+        "label": "Signature:"
+      }
+    ],
+    "instructions": [
+      "Fill in the bubble of the single best answer for each question.",
+      "Calculators are permitted; phones must be turned off.",
+      "There is no penalty for guessing."
+    ]
+  }
+}
