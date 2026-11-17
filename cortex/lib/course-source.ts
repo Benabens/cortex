@@ -1,4 +1,5 @@
 import path from "node:path";
+import { currentLocale } from "@/lib/i18n/current";
 import { currentUser } from "@/db/context";
 import { intLimit } from "@/lib/billing/env";
 import { coursePaths, getCourse } from "@/lib/courses";
@@ -67,7 +68,7 @@ export class SourceError extends Error implements UserError {
   readonly params?: ErrorParams;
 
   constructor(readonly status: number, error: UserError) {
-    super(errorText("fr", error));
+    super(errorText(currentLocale(), error));
     this.name = "SourceError";
     this.code = error.code;
     if (error.params) this.params = error.params;

@@ -1,4 +1,4 @@
-import { apiError } from "@/lib/i18n/api-error";
+import { apiError, requestLocale } from "@/lib/i18n/api-error";
 import { coursePaths } from "@/lib/courses";
 import { requireCourse } from "@/lib/req";
 import { UPLOAD_LIMITS, readFormData, withBodyLimit } from "@/lib/upload-limit";
@@ -46,7 +46,8 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const saved: string[] = [];
   const outcomes: IngestFileOutcome[] = [];
   const skipped: { file: string; reason: string; userError: UserError }[] = [];
-  const skip = (file: string, error: UserError) => skipped.push({ file, reason: errorText("fr", error), userError: error });
+  const locale = requestLocale(req);
+  const skip = (file: string, error: UserError) => skipped.push({ file, reason: errorText(locale, error), userError: error });
   let local = false;
   for (const f of files) {
     const safe = storedFileName(path.basename(f.name));
@@ -84,5 +85,5 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     const first = skipped[0];
     return apiError(req, first ? errorForFile(first.userError, first.file) : "no_usable_file", 400, { skipped: skipped.map(({ file, reason }) => ({ file, reason })) });
   }
-  return NextResponse.json({ ok: true, files: saved, skipped, unread, formatPending: true, originals: local ? "local" : "cloud" });
+  return NextResponse.json({ ok: true, files: saved, skipped: skipped.map(({ file, reason, userError: e }) => ({ file, reason, code: e.code })), unread, formatPending: true, originals: local ? "local" : "cloud" });
 })

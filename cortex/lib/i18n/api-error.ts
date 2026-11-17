@@ -23,7 +23,17 @@ export function apiError(req: Request, e: ErrorCode | UserError, status?: number
   const locale = requestLocale(req);
   const message = errorText(locale, err);
   const params = file ? { ...err.params, file } : err.params;
-  // « annale.pdf : illisible » / "exam.pdf: unreadable" : l'espace avant les deux-points est français.
-  const text = file ? `${file}${locale === "fr" ? " : " : ": "}${message}` : message;
+  const text = file ? withFile(locale, file, message) : message;
   return NextResponse.json({ ...extra, error: text, code: err.code, ...(params ? { params } : {}) }, { status: resolvedStatus });
+}
+
+/** « annale.pdf : illisible » / "exam.pdf: unreadable" : l'espace avant les deux-points est français. */
+function withFile(locale: Locale, file: string, message: string): string {
+  return `${file}${locale === "fr" ? " : " : ": "}${message}`;
+}
+
+/** Refus d'un fichier parmi d'autres (import partiel réussi), dans la langue de la requête. */
+export function fileErrorText(req: Request, file: string, e: UserError): string {
+  const locale = requestLocale(req);
+  return withFile(locale, file, errorText(locale, e));
 }

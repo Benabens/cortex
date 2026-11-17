@@ -1,4 +1,4 @@
-import { apiError } from "@/lib/i18n/api-error";
+import { apiError, fileErrorText } from "@/lib/i18n/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/db/context";
 import { SOURCE_CATEGORIES, SourceError, addFileSource, type SourceCategory } from "@/lib/course-source";
@@ -42,21 +42,21 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
 
   // Un fichier refusé n'empêche pas d'indexer ceux qui sont déjà rangés.
   const saved: string[] = [];
-  const refused: { file: string; error: string; userError: UserError; status: number }[] = [];
+  const refused: { file: string; userError: UserError; status: number }[] = [];
   for (const f of files) {
     try {
       const s = await addFileSource(course, { name: f.name, data: Buffer.from(await f.arrayBuffer()), category: category as SourceCategory, contentType: f.type || "application/octet-stream" });
       saved.push(s.name);
     } catch (e) {
       if (!(e instanceof SourceError)) throw e;
-      refused.push({ file: f.name, error: e.message, userError: e, status: e.status });
+      refused.push({ file: f.name, userError: e, status: e.status });
     }
   }
   if (!saved.length) {
     const first = refused[0];
     return apiError(req, errorForFile(first.userError, first.file), first.status);
   }
-  const skipped = refused.map((r) => `${r.file} : ${r.error}`);
+  const skipped = refused.map((r) => fileErrorText(req, r.file, r.userError));
 
   const existing = await activeJob("ingest");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true, files: saved.length, skipped });

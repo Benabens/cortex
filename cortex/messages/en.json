@@ -252,5 +252,15 @@
     "reference_image_refused": "photo or image: Cortex can’t read its text. Upload the original document, or a PDF with selectable text (a scan with text recognition).",
     "reference_format_unsupported": "unsupported past-exam format: use PDF, Word, PowerPoint, HTML, or text.",
     "reference_duplicate_name": "too many past exams have the same name; rename the file."
+  },
+  "ingestReport": {
+    "unreadable": "damaged file or unrecognised format: it could not be read. Export it again as a PDF, then upload it again.",
+    "encrypted": "password-protected PDF. Save a copy without protection, then upload that copy.",
+    "noText": "no readable text (scanned document?): it is not part of the course materials. Upload a version with selectable text.",
+    "short": {
+      "unreadable": "damaged or unreadable",
+      "encrypted": "password-protected",
+      "noText": "no text, scanned?"
+    }
   }
 }
