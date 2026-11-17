@@ -8,14 +8,13 @@ export type NextUpKey =
   | "final" | "addDate" | "past" | "updateDate" | "today" | "tomorrow" | "inDays"
   | "effortNever" | "effortDue" | "effortReview" | "effortHeld" | "notFallen"
   | "fallenLead" | "fallenStrong" | "fallenRestWithShare" | "fallenRest"
-  | "chapterNumber" | "chapter" | "fallenRow" | "inSyllabus" | "lectureSpoken" | "shareSpoken";
+  | "chapterNumber" | "chapter" | "fallenRow" | "inSyllabus" | "lectureSpoken" | "shareSpoken" | "share";
 export type NextUpT = (key: NextUpKey, values?: Record<string, string | number>) => string;
 
 /** "2027-01-18" → « 18 janv. » (null si la date est illisible). */
 export function shortDay(iso: string, f: Fmt): string | null {
-  const d = new Date(`${iso}T00:00:00`);
-  if (isNaN(d.getTime())) return null;
-  return f.date(d, "short");
+  if (isNaN(new Date(`${iso}T00:00:00`).getTime())) return null;
+  return f.date(iso, "short"); // jour seul lu à midi UTC : pas de recul d'un jour à l'est de Zurich
 }
 
 export type ExamLine =
@@ -95,7 +94,7 @@ export function rowFacts(n: Pick<NotionFacts, "count" | "examWeight" | "chapter"
   return [
     n.chapter?.lectureNo != null ? `L${n.chapter.lectureNo}` : null,
     has(n.count) ? t("fallenRow", { count: n.count }) : t("inSyllabus"),
-    has(n.count) && has(n.examWeight) ? `${f.number(n.examWeight, 1)} %` : null,
+    has(n.count) && has(n.examWeight) ? t("share", { share: f.number(n.examWeight, 1) }) : null,
   ]
     .filter(Boolean)
     .join(" · ");
