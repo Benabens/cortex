@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { createWeakness, deleteWeakness, listWeaknesses, weaknessesByTheme } from "@/lib/weaknesses";
 import { useCourseOr404 } from "@/lib/req";
 import { UPLOAD_LIMITS, readFormData, withBodyLimit } from "@/lib/upload-limit";
@@ -24,13 +25,13 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (denied) return denied;
   // Quota de stockage du compte + espace libre du volume, AVANT de lire l'envoi.
   const storage = await checkStorage(currentUser(), declaredBytes(req));
-  if (storage) return NextResponse.json({ error: storage.error }, { status: storage.status });
+  if (storage) return apiError(req, storage, storage.status);
   const form = await readFormData(req, UPLOAD_LIMITS.image);
   let topic = String(form.get("topic") ?? "").trim();
   const description = String(form.get("description") ?? "").trim();
   const severity = Number(form.get("severity") ?? 2);
   // Ces champs repartent tels quels vers le modèle (weaknesses/process, prix fixe) : plafonnés ici.
-  const tooLong = fieldTooLong("topic", topic) ?? fieldTooLong("description", description);
+  const tooLong = fieldTooLong(req, "topic", topic) ?? fieldTooLong(req, "description", description);
   if (tooLong) return tooLong;
 
   let screenshotPath: string | null = null;
@@ -41,15 +42,15 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const file = raw instanceof File && raw.size > 0 ? raw : null;
   // Sujet optionnel : l'IA le déduira. Il faut au moins une pièce jointe OU une note.
   if (!topic && !description && !file) {
-    return NextResponse.json({ error: "Colle un texte, une capture ou ajoute un fichier." }, { status: 400 });
+    return apiError(req, "weakness_content_required", 400);
   }
   if (!topic) topic = "(à analyser)";
   if (file) {
     if (file.size > ATTACHMENT_MAX_BYTES)
-      return NextResponse.json({ error: "Fichier trop lourd (12 Mo au maximum)." }, { status: 413 });
+      return apiError(req, { code: "file_too_large", params: { maxMb: 12 } }, 413);
     const buf = new Uint8Array(await file.arrayBuffer());
     const kind = sniffAttachment(buf);
-    if (!kind) return NextResponse.json({ error: `Format non pris en charge : ${ATTACHMENT_FORMATS_LABEL}.` }, { status: 415 });
+    if (!kind) return apiError(req, { code: "attachment_format_unsupported", params: { formats: ATTACHMENT_FORMATS_LABEL } }, 415);
     screenshotPath = await saveAttachment(buf, kind);
     source = kind === "pdf" ? "pdf" : "screenshot";
     // PDF : son texte rejoint la note (lisible dans la liste, relié au corpus, repris par l'analyse).
@@ -67,7 +68,7 @@ export async function DELETE(req: NextRequest) {
   const denied = useCourseOr404(req);
   if (denied) return denied;
   const id = Number(req.nextUrl.searchParams.get("id"));
-  if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
+  if (!id) return apiError(req, "id_missing", 400);
   const screenshot = await deleteWeakness(id);
   if (screenshot) {
     await storage().remove(path.join(uploadsDir(), path.basename(screenshot)));

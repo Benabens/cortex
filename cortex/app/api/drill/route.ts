@@ -1,4 +1,5 @@
-import { LlmError, OWN_LLM_CODES, llmUserMessage } from "@/lib/llm";
+import { apiError } from "@/lib/i18n/api-error";
+import { LlmError, OWN_LLM_CODES, llmUserError } from "@/lib/llm";
 import { generateDrill } from "@/lib/drill";
 import { useCourseOr404 } from "@/lib/req";
 import { logLoopRoute } from "@/lib/req-log";
@@ -28,8 +29,8 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   try {
     const { concept } = await readJson(req, ({ concept: "" }));
     const c = String(concept ?? "").trim();
-    if (!c) return NextResponse.json({ error: "concept manquant" }, { status: 400 });
-    const tooLong = fieldTooLong("concept", c);
+    if (!c) return apiError(req, "concept_missing", 400);
+    const tooLong = fieldTooLong(req, "concept", c);
     if (tooLong) return tooLong;
     try {
       // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
@@ -40,11 +41,11 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, drill });
     } catch (e: unknown) {
       const { AssistRefused } = await import("@/lib/billing/reserve");
-      if (e instanceof AssistRefused) return NextResponse.json({ error: e.message }, { status: e.status });
+      if (e instanceof AssistRefused) return apiError(req, e, e.status);
       const err = e as LlmError;
       const status = err.code && OWN_LLM_CODES.has(err.code) ? 503 : 502;
       // Jamais le texte brut du fournisseur : une cause lisible (lib/llm/errors).
-      return NextResponse.json({ error: llmUserMessage(e), code: err.code }, { status });
+      return apiError(req, llmUserError(e), status, { llmCode: err.code });
     }
   } finally {
     logLoopRoute(req, "drill", t0);

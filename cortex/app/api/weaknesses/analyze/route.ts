@@ -1,5 +1,7 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { q } from "@/db/q";
-import { completeVia, type LlmImage } from "@/lib/llm";
+import { completeVia, LlmError, llmUserError, type LlmImage } from "@/lib/llm";
+import { UserFacingError } from "@/lib/i18n/user-error";
 import { updateWeaknessAnalysis } from "@/lib/weaknesses";
 import { useCourseOr404 } from "@/lib/req";
 import { logLoopRoute } from "@/lib/req-log";
@@ -54,13 +56,13 @@ async function handlePOST(req: NextRequest) {
   const denied = useCourseOr404(req);
   if (denied) return denied;
   const { id } = await readJson(req, ({ id: null }));
-  if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
+  if (!id) return apiError(req, "id_missing", 400);
 
   const w = await q.get<{ topic: string; description: string | null; screenshot_path: string | null }>(
     "SELECT topic, description, screenshot_path FROM weaknesses WHERE id = ?",
     Number(id)
   );
-  if (!w) return NextResponse.json({ error: "faiblesse introuvable" }, { status: 404 });
+  if (!w) return apiError(req, "weakness_not_found", 404);
 
   // Construit le message (texte + image éventuelle) — le cours est dérivé du
   // cours ACTIF (useCourse ci-dessus), jamais codé en dur.
@@ -95,12 +97,15 @@ async function handlePOST(req: NextRequest) {
       json: { schema: SCHEMA as unknown as object },
     }));
     parsed = JSON.parse(res.text || "{}");
-  } catch (e: any) {
+  } catch (e: unknown) {
     const { AssistRefused } = await import("@/lib/billing/reserve");
-    if (e instanceof AssistRefused) return NextResponse.json({ error: e.message }, { status: e.status });
-    const msg = String(e?.message ?? e);
-    const status = e?.code === "UNAVAILABLE" || e?.code === "SPEND_CAP" ? 503 : msg.includes("ANTHROPIC_API_KEY") ? 400 : 502;
-    return NextResponse.json({ error: msg }, { status });
+    if (e instanceof AssistRefused) return apiError(req, e, e.status);
+    if (e instanceof UserFacingError) return apiError(req, e);
+    const err = e as { message?: unknown; code?: unknown };
+    const msg = String(err.message ?? e);
+    const status = err.code === "UNAVAILABLE" || err.code === "SPEND_CAP" ? 503 : msg.includes("ANTHROPIC_API_KEY") ? 400 : 502;
+    if (e instanceof LlmError) return apiError(req, llmUserError(e), status);
+    return apiError(req, { code: "weakness_analysis_failed", params: { detail: msg } }, status);
   }
 
   const description = `${parsed.explanation}\n\nConcepts clés : ${parsed.concepts.join(" · ")}`;
