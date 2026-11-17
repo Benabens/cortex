@@ -313,6 +313,30 @@ test("banc du 04/11 (CS-290) : une question qui reprend celle d'un examen préc�
   assert.match(dedupePrompts[0], /même fait, même règle ou même réponse logique/, "une reformulation de notion ou d'angle reste une reprise");
 });
 
+test("banc rs-mixte du 17/11 : une question OUVERTE d'un examen précédent compte comme déjà posée", async () => {
+  const id = await course(30);
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  await runWithCourse(id, async () => {
+    // L'examen précédent n'a posé ce fait qu'en question ouverte (exam_questions), sous l'encadré de section.
+    for (const t of ["exams", "exam_questions"]) await q.ensureTable(t);
+    const examId = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','ready')`);
+    await q.run(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration) VALUES (?,?,?,?,?)`,
+      examId, "Faux positifs des détecteurs", String.raw`\callout{This question is \textbf{\large FOR ALL STUDENTS.}} \textbf{Setting.} Ancienne [notion:faux positifs des détecteurs] [angle:fait 7] : explique ce que dit le cours.`, "", "qcm-open");
+  });
+  dedupePrompts.length = 0;
+  design = (n, call, lot) => Array.from({ length: n }, (_, i) => {
+    const qn = lot.q0 + i + 1;
+    return !lot.topUp ? item(qn === 3 ? "Question 3 [notion:faux positifs des détecteurs] [angle:fait 7] : que dit le cours ?" : `Question ${qn} [notion:neuve ${qn}] [angle:a] : que dit le cours ?`) : item(`Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`);
+  });
+  const { r, stems } = await exam(id, 4);
+  assert.equal(r.count, 4);
+  assert.ok(!stems.some((s) => s.startsWith("Question 3 ")), `la reprise de la question ouverte précédente est retirée :\n${stems.join("\n")}`);
+  const line = /^P\d+\. .*faux positifs des détecteurs.*$/m.exec(dedupePrompts[0] ?? "")?.[0] ?? "";
+  assert.ok(line, "le contrôle reçoit la question ouverte précédente");
+  assert.doesNotMatch(line, /callout|textbf|FOR ALL STUDENTS/, "en texte, sans l'encadré de section ni les commandes LaTeX");
+});
+
 test("modèle qui répète toujours la même notion : budget borné, aucun doublon connu réinjecté", async () => {
   const id = await course(4, 0);
   design = (n, call) => Array.from({ length: n }, (_, i) => item(`Question ${call}.${i} [notion:unique] [angle:${call}.${i}] : que dit le cours ?`));

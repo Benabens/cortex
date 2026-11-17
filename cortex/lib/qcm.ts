@@ -1360,11 +1360,43 @@ export async function verifyQcmBatch(items: QcmItem[], step: StepCb): Promise<Qc
 
 /** Énoncés et thèmes des QCM des derniers examens de ce cours (base du tenant : ceux de l'utilisateur). */
 async function recentQuestions(limit = PREVIOUS_STEMS): Promise<{ topic: string; stem: string }[]> {
-  try {
-    return await q.all<{ topic: string; stem: string }>(`SELECT topic, stem FROM qcm_items ORDER BY exam_id DESC, idx LIMIT ?`, limit);
-  } catch {
-    return [];
+  const qcm = await q.all<{ exam_id: number; topic: string; stem: string }>(`SELECT exam_id, topic, stem FROM qcm_items ORDER BY exam_id DESC, idx LIMIT ?`, limit).catch(() => []);
+  // Les questions OUVERTES déjà posées comptent aussi (banc rs-mixte du 17/11 : trois QCM reprenaient
+  // deux ouvertes d'un examen précédent, invisibles ici). Leur notion en tête : le décor vient après.
+  const open = await q.all<{ exam_id: number; concept: string | null; statement_html: string | null }>(
+    `SELECT exam_id, concept, statement_html FROM exam_questions ORDER BY exam_id DESC, id LIMIT ?`, limit,
+  ).catch(() => []);
+  return [
+    ...qcm,
+    ...open.map((o) => {
+      const text = plainStatement(o.statement_html ?? "");
+      return { exam_id: o.exam_id, topic: o.concept ?? "", stem: o.concept ? `[question ouverte : ${o.concept}] ${text}` : text };
+    }).filter((o) => o.stem),
+  ].sort((a, b) => Number(b.exam_id) - Number(a.exam_id)).slice(0, limit).map(({ topic, stem }) => ({ topic, stem }));
+}
+
+/**
+ * Énoncé d'une question ouverte en texte (LaTeX ou HTML enregistré) : sans l'encadré de section
+ * « FOR ALL STUDENTS », sans commandes ni balises. Il ne sert qu'à reconnaître une reprise.
+ */
+export function plainStatement(tex: string): string {
+  let t = tex;
+  for (let at = t.indexOf("\\callout{"); at >= 0; at = t.indexOf("\\callout{", at + 1)) {
+    let depth = 0;
+    let end = -1;
+    for (let i = at + "\\callout".length; i < t.length; i++) {
+      if (t[i] === "{") depth++;
+      else if (t[i] === "}" && --depth === 0) { end = i; break; }
+    }
+    if (end < 0) break;
+    if (/FOR\s+ALL\s+STUDENTS/i.test(t.slice(at, end))) t = t.slice(0, at) + t.slice(end + 1);
   }
+  return t
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\\[a-zA-Z]+\*?/g, " ")
+    .replace(/[{}$\\]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 const DUP_SCHEMA = {
