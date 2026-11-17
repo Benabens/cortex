@@ -42,7 +42,7 @@ export function UsageView({ data }: { data: UsageLimits }) {
           {kinds.map((u) => (
             <li key={u.kind} data-kind={u.kind} className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 py-2.5 text-[0.85rem]">
               <span className="text-ink-1">
-                {capitalize(u.label)}
+                {ORDER.includes(u.kind as LaunchKind) ? t(`kinds.${u.kind as LaunchKind}`) : capitalize(u.label)}
                 {u.costCredits > 0 && <span className="text-ink-3">{t("cost", { count: u.costCredits, formatted: f.number(u.costCredits) })}</span>}
               </span>
               {u.allowed ? (
