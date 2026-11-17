@@ -12,6 +12,9 @@ import type {
   PartKind,
   PartView,
 } from "@/lib/blocks";
+import { useTranslations } from "use-intl/react";
+import { useFmt } from "@/lib/i18n/use-fmt";
+import { useCourse } from "@/lib/ux/api";
 
 type Graded = {
   score: number;
@@ -21,13 +24,11 @@ type Graded = {
 };
 
 const LETTER = "ABCDEFGH".split("");
-const KIND_LABEL: Record<PartKind, string> = {
-  scq: "Choix unique",
-  short: "Réponse courte",
-  code_output: "Lecture de code",
+const KIND_LABEL: Record<PartKind, "kindScq" | "kindShort" | "kindCode"> = {
+  scq: "kindScq",
+  short: "kindShort",
+  code_output: "kindCode",
 };
-const formatPoints = (value: number) =>
-  new Intl.NumberFormat("fr-CH", { maximumFractionDigits: 2 }).format(value);
 const codeStyle: CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontSize: 12.5,
@@ -44,7 +45,7 @@ const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** Texte du scénario : paragraphes, blocs ```…``` en code. */
-function Rich({ text }: { text: string }) {
+function Rich({ text, language }: { text: string; language?: string }) {
   const chunks: { code: boolean; body: string }[] = [];
   let last = 0;
   for (const m of text.matchAll(/```[\w+-]*\n?([\s\S]*?)```/g)) {
@@ -60,12 +61,13 @@ function Rich({ text }: { text: string }) {
         .filter((c) => c.body.trim())
         .map((c, i) =>
           c.code ? (
-            <pre key={i} style={codeStyle}>
+            <pre key={i} style={codeStyle} lang={language}>
               {c.body}
             </pre>
           ) : (
             <p
               key={i}
+              lang={language}
               className="text-[14px]"
               style={{
                 color: "var(--ink)",
@@ -95,6 +97,10 @@ export function BlockExam({
   courseId: string;
   qs: string;
 }) {
+  const t = useTranslations("blockExam");
+  const f = useFmt();
+  const { course } = useCourse();
+  const language = course?.language || undefined; // "" = langue pas encore détectée : pas de lang vide
   const reducedMotion = useReducedMotion();
   const [answers, setAnswers] = useState<Record<number, number | string>>({});
   const [graded, setGraded] = useState<Graded | null>(null);
@@ -132,7 +138,7 @@ export function BlockExam({
         window.scrollTo({ top: 0, behavior: reducedMotion ? "auto" : "smooth" });
       }
     } catch {
-      setErr("Correction impossible.");
+      setErr(t("correctionFailed"));
     } finally {
       setBusy(false);
     }
@@ -152,18 +158,19 @@ export function BlockExam({
       >
         <div className="flex items-center justify-between gap-2 mb-1.5">
           <span className="text-[12.5px]" style={{ color: "var(--ink-3)" }}>
-            ({LETTER[k].toLowerCase()}) · {KIND_LABEL[p.kind]} ·{" "}
-            {formatPoints(p.points)} pt{p.points > 1 ? "s" : ""}
+            ({LETTER[k].toLowerCase()}) · {t(KIND_LABEL[p.kind])} ·{" "}
+            {t("points", { points: p.points })}
           </span>
           {det && det.ok !== null && (
             <span className={`tag ${det.ok ? "tag-green" : "tag-red"}`}>
-              {formatPoints(det.points)} / {formatPoints(det.max)}
+              {f.number(det.points)} / {f.number(det.max)}
               {det.ok ? " ✓" : ""}
             </span>
           )}
         </div>
         <div
           className="text-[14px] mb-2"
+          lang={language}
           style={{ color: "var(--ink)", whiteSpace: "pre-wrap" }}
         >
           {p.prompt}
@@ -229,6 +236,7 @@ export function BlockExam({
                     {LETTER[i]}
                   </span>
                   <span
+                    lang={language}
                     style={{ fontSize: 13.5, color: "var(--ink)", flex: 1 }}
                   >
                     {o}
@@ -248,13 +256,13 @@ export function BlockExam({
         )}
         {p.kind === "code_output" && (
           <>
-            <pre style={codeStyle}>{p.code}</pre>
+            <pre style={codeStyle} lang={language}>{p.code}</pre>
             <label
               className="mb-1 block text-[12.5px]"
               style={{ color: "var(--ink-2)" }}
               htmlFor={`out-${p.id}`}
             >
-              Sortie affichée
+              {t("outputLabel")}
             </label>
             <textarea
               id={`out-${p.id}`}
@@ -266,15 +274,15 @@ export function BlockExam({
               onChange={(e) =>
                 setAnswers((a) => ({ ...a, [p.id]: e.target.value }))
               }
-              placeholder="Ce que le code affiche, ligne pour ligne"
+              placeholder={t("outputPlaceholder")}
             />
             {det && !det.ok && (
               <div
                 className="mt-2 text-[12.5px]"
                 style={{ color: "var(--ink-2)" }}
               >
-                <strong style={{ color: "var(--ink)" }}>Sortie exacte :</strong>
-                <pre style={codeStyle}>{det.answer}</pre>
+                <strong style={{ color: "var(--ink)" }}>{t("exactOutput")}</strong>
+                <pre style={codeStyle} lang={language}>{det.answer}</pre>
               </div>
             )}
           </>
@@ -287,18 +295,19 @@ export function BlockExam({
             courseId={courseId}
             graded={!!graded}
             part={{ examId: exam.id, partId: p.id }}
+            language={language}
             onChecked={(score) => setChecked((c) => ({ ...c, [p.id]: score }))}
             solution={
               det
-                ? `<p>${escapeHtml(det.answer)}</p><p><strong>Barème</strong></p><ul>${det.criteria.map((c) => `<li>${escapeHtml(c.label)} (${c.points} pt${c.points > 1 ? "s" : ""})</li>`).join("")}</ul>`
+                ? `<p>${escapeHtml(det.answer)}</p><p><strong>${escapeHtml(t("rubric"))}</strong></p><ul>${det.criteria.map((c) => `<li>${escapeHtml(c.label)} (${escapeHtml(t("points", { points: c.points }))})</li>`).join("")}</ul>`
                 : null
             }
           />
         )}
         {det && det.explanation && (
           <p className="mt-2 text-[12.5px]" style={{ color: "var(--ink-2)", whiteSpace: "pre-line" }}>
-            <strong style={{ color: "var(--ink)" }}>Pourquoi :</strong>{" "}
-            {det.explanation}
+            <strong style={{ color: "var(--ink)" }}>{t("why")}</strong>{" "}
+            <span lang={language}>{det.explanation}</span>
           </p>
         )}
         <ReportButton
@@ -314,7 +323,7 @@ export function BlockExam({
   return (
     <ExamFrame
       id={exam.id}
-      description={`${exam.blocks.length} question${exam.blocks.length > 1 ? "s" : ""} composée${exam.blocks.length > 1 ? "s" : ""} : un scénario, puis ses sous-questions. Le choix unique et la lecture de code se corrigent d’un coup ; une réponse courte se vérifie critère par critère.`}
+      description={t("description", { count: exam.blocks.length })}
       pdf={exam.pdf}
       solutions={exam.solutions}
       qs={qs}
@@ -359,16 +368,13 @@ export function BlockExam({
             </div>
             <div>
               <div className="stat-value">
-                {formatPoints(graded.score)} / {formatPoints(graded.total)}
+                {f.number(graded.score)} / {f.number(graded.total)}
               </div>
               <div className="stat-label">
-                Choix unique et lecture de code
-                {shortScore.total
-                  ? ` · réponses courtes vérifiées : ${formatPoints(shortScore.earned)} / ${formatPoints(shortScore.total)}`
-                  : ""}
-                {graded.pending > shortScore.total
-                  ? ` · ${formatPoints(graded.pending - shortScore.total)} pts de réponses courtes à vérifier ci-dessous`
-                  : ""}
+                {t("scoreLabel", {
+                  short: shortScore.total ? `${f.number(shortScore.earned)} / ${f.number(shortScore.total)}` : "none",
+                  pending: graded.pending > shortScore.total ? f.number(graded.pending - shortScore.total) : "none",
+                })}
               </div>
             </div>
           </div>
@@ -380,23 +386,24 @@ export function BlockExam({
           <section key={b.id} id={`block-${b.id}`} className="card card-pad">
             <div className="flex items-center justify-between gap-2 mb-2">
               <span className="text-[12.5px]" style={{ color: "var(--ink-3)" }}>
-                Question {i + 1}
-                {b.section ? ` · ${b.section}` : ""}
+                {t("question", { number: i + 1 })}
+                {b.section ? <> · <span lang={language}>{b.section}</span></> : ""}
               </span>
               <span
                 className="text-[12.5px] font-data"
                 style={{ color: "var(--ink-2)" }}
               >
-                {formatPoints(b.points)} pts
+                {t("points", { points: b.points })}
               </span>
             </div>
             <h2
               className="text-[16px] font-semibold mb-1"
+              lang={language}
               style={{ color: "var(--ink)" }}
             >
               {b.title}
             </h2>
-            <Rich text={b.scenario} />
+            <Rich text={b.scenario} language={language} />
             {b.parts.map(renderPart)}
           </section>
         ))}
@@ -412,16 +419,16 @@ export function BlockExam({
             onClick={submit}
             disabled={busy || answered === 0}
           >
-            {busy ? "Correction…" : "Corriger mon examen"}
+            {busy ? t("correcting") : t("correct")}
           </button>
           <span className="text-[12.5px]" style={{ color: "var(--ink-3)" }}>
-            {answered}/{autoParts.length} répondues (hors réponses courtes)
+            {t("answered", { answered, total: autoParts.length })}
           </span>
         </div>
       ) : (
         <div id="exam-submit" className="mt-6">
           <a href={`/examens${qs}`} className="btn btn-ghost">
-            ← retour aux examens
+            {t("back")}
           </a>
         </div>
       )}
