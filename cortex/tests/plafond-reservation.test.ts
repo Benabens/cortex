@@ -1,7 +1,7 @@
 /**
  * PLAFOND DE DÉPENSE PAR RÉSERVATION (audit fuites B2, I5) : un job ou une aide
  * ne dépense jamais plus que la valeur des crédits débités (crédits × valeur
- * nette d'un crédit, 0,66 $ par défaut). Vérifié avant chaque tentative d'appel
+ * d'un crédit, 0,9 $ par défaut). Vérifié avant chaque tentative d'appel
  * payant : au-delà, SPEND_CAP (arrêt propre, le générateur livre ce qui est prêt).
  * Les aides sont bornées en modèle (jamais opus) et en taille de réponse.
  *
@@ -83,7 +83,7 @@ const inMl = async <T,>(user: string, fn: () => Promise<T>) => {
 };
 const isSpendCap = (e: Error & { code?: string }) => e.code === "SPEND_CAP" && /plafond/i.test(e.message);
 
-test("B2 : un QCM à 4 crédits s'arrête net quand sa dépense atteint 4 × 0,66 $ (arrêt propre, code SPEND_CAP)", async () => {
+test("B2 : un QCM à 4 crédits s'arrête net quand sa dépense atteint 4 × 0,9 $ (arrêt propre, code SPEND_CAP)", async () => {
   const { reserveGeneration } = await import("../lib/billing/reserve");
   const { setCurrentJob, clearCurrentJob } = await import("../lib/billing/usage-context");
   const { complete } = await import("../lib/llm");
@@ -93,13 +93,14 @@ test("B2 : un QCM à 4 crédits s'arrête net quand sa dépense atteint 4 × 0,6
     setCurrentJob(501, "qcm", ref);
     try {
       await complete({ prompt: "a", model: "sonnet" });     // 0 $ engagé
-      await complete({ prompt: "b", model: "sonnet" });     // 1,5 $ < 2,64 $
-      await assert.rejects(complete({ prompt: "c", model: "sonnet" }), isSpendCap);  // 3 $ ≥ 2,64 $
+      await complete({ prompt: "b", model: "sonnet" });     // 1,5 $ < 3,6 $
+      await complete({ prompt: "c", model: "sonnet" });     // 3 $ < 3,6 $ : un QCM réel à 2-2,9 $ finit
+      await assert.rejects(complete({ prompt: "d", model: "sonnet" }), isSpendCap);  // 4,5 $ ≥ 3,6 $
     } finally {
       clearCurrentJob();
     }
   });
-  assert.equal(hits, 2, "le troisième appel ne part pas chez le fournisseur");
+  assert.equal(hits, 3, "le quatrième appel ne part pas chez le fournisseur");
 });
 
 test("B2 : le plafond suit le prix payé (8 crédits → deux fois plus de calcul)", async () => {
@@ -111,13 +112,13 @@ test("B2 : le plafond suit le prix payé (8 crédits → deux fois plus de calcu
     assert.equal((await reserveGeneration({ bucket: "gen", kind: "qcm", costCenti: 800, ref, jobSlot: true })).ok, true);
     setCurrentJob(502, "qcm", ref);
     try {
-      for (let i = 0; i < 4; i++) await complete({ prompt: `p${i}`, model: "sonnet" }); // jusqu'à 4,5 $ < 5,28 $
-      await assert.rejects(complete({ prompt: "p4", model: "sonnet" }), isSpendCap);
+      for (let i = 0; i < 5; i++) await complete({ prompt: `p${i}`, model: "sonnet" }); // jusqu'à 6 $ < 7,2 $
+      await assert.rejects(complete({ prompt: "p5", model: "sonnet" }), isSpendCap);
     } finally {
       clearCurrentJob();
     }
   });
-  assert.equal(hits, 4);
+  assert.equal(hits, 5);
 });
 
 test("B2 : des appels parallèles du même job ne font pas tomber le plafond tant qu'ils sont en vol", async () => {
@@ -129,13 +130,14 @@ test("B2 : des appels parallèles du même job ne font pas tomber le plafond tan
     assert.equal((await reserveGeneration({ bucket: "gen", kind: "qcm", costCenti: 400, ref, jobSlot: true })).ok, true);
     setCurrentJob(503, "qcm", ref);
     try {
-      // En vol : estimé à 300 000 jetons de sortie (≈ 3 $), au-delà des 2,64 $ du plafond.
-      const long = complete({ prompt: "HANG", model: "sonnet", maxTokens: 300_000 });
+      // En vol : estimé à 400 000 jetons de sortie (≈ 4 $), au-delà des 3,6 $ du plafond.
+      const long = complete({ prompt: "HANG", model: "sonnet", maxTokens: 400_000 });
       while (held.length === 0) await new Promise((r) => setTimeout(r, 10));
       await complete({ prompt: "parallèle", model: "sonnet" });   // passe : l'appel en vol ne compte pas encore
       reply(held.shift()!, 1000);                                  // il se termine à 0,01 $
       await long;
-      await complete({ prompt: "suite", model: "sonnet" });       // 1,5 + 0,01 $ < 2,64 $
+      await complete({ prompt: "suite", model: "sonnet" });       // 1,5 + 0,01 $ < 3,6 $
+      await complete({ prompt: "encore", model: "sonnet" });      // 3,01 $ < 3,6 $
       await assert.rejects(complete({ prompt: "de trop", model: "sonnet" }), isSpendCap);
     } finally {
       clearCurrentJob();
@@ -160,7 +162,7 @@ test("I5 : une aide (0,3 crédit) : modèle borné à sonnet, réponse bornée, 
   await inMl("helper", async () => {
     await assert.rejects(assistCall("drill", async () => {
       await complete({ prompt: "x", model: "opus", maxTokens: 64_000 });
-      return complete({ prompt: "y", model: "opus" });     // 1,5 $ ≥ 0,3 × 0,66 $
+      return complete({ prompt: "y", model: "opus" });     // 1,5 $ ≥ 0,3 × 0,9 $
     }), isSpendCap);
   });
   assert.equal(hits, 1);

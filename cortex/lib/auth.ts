@@ -3,7 +3,11 @@ import type { Adapter, AdapterAccount, AdapterUser, VerificationToken } from "ne
 import crypto from "node:crypto";
 import { authGet, authRun } from "@/db/auth-store";
 import { authProviders } from "@/lib/auth-providers";
+import { clientIp } from "@/lib/client-ip";
 import { inviteAllows } from "@/lib/invite";
+import { MAGIC_LINK_REFUSAL_CODE, takeMagicLinkSend } from "@/lib/magic-link-limits";
+import { log } from "@/lib/metrics";
+import { redactMessage } from "@/lib/observability-scrub";
 import { REVIEW_PROVIDER_ID, reviewLoginActive } from "@/lib/review-login";
 
 /**
@@ -109,6 +113,16 @@ function cortexAdapter(): Adapter {
 /** Disponibilité des méthodes de connexion (page /login) — source unique : lib/auth-providers. */
 export { e2eTestLoginConfigured, emailLoginConfigured, googleLoginConfigured, reviewLoginConfigured } from "@/lib/auth-providers";
 
+/** IP de la requête en cours (TRUST_PROXY) ; hors requête (tests, scripts) : « direct », jamais bornée. */
+async function requestIp(): Promise<string> {
+  try {
+    const { headers } = await import("next/headers");
+    return clientIp(await headers());
+  } catch {
+    return "direct";
+  }
+}
+
 /** Rappels Auth.js (exportés pour les tests : invitation, coupure de la connexion relecteur). */
 export const authCallbacks = {
   /**
@@ -117,10 +131,21 @@ export const authCallbacks = {
    * callback est appelé dès la DEMANDE de lien → un non-invité ne reçoit même
    * pas d'e-mail. Le compte démo des relecteurs (lib/review-login) passe : les
    * variables qui l'ouvrent valent invitation, et ce chemin ne crée que lui.
+   *
+   * Demande de lien (audit fuites B4) : comptée et bornée par adresse et par IP AVANT
+   * l'envoi (lib/magic-link-limits) ; un refus renvoie vers /login avec son code.
    */
-  signIn({ user, profile, account }) {
+  async signIn({ user, profile, account, email }) {
     if (account?.provider === REVIEW_PROVIDER_ID) return true;
-    return inviteAllows(user?.email ?? (profile?.email as string | undefined));
+    if (!inviteAllows(user?.email ?? (profile?.email as string | undefined))) return false;
+    if (email?.verificationRequest) {
+      const verdict = await takeMagicLinkSend(user?.email ?? "", await requestIp());
+      if (!verdict.ok) {
+        log("warn", "auth.magic_link_limited", { reason: verdict.reason });
+        return `/login?error=${MAGIC_LINK_REFUSAL_CODE[verdict.reason]}`;
+      }
+    }
+    return true;
   },
   jwt({ token, user, account }) {
     if (user?.id) token.uid = user.id;
@@ -144,4 +169,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   pages: { signIn: "/login", error: "/login" },
   providers: authProviders(),
   callbacks: authCallbacks,
+  // Erreurs d'Auth.js dans le journal structuré (audit fuites I14) : sans logger, elles
+  // n'allaient qu'à console.error, sans type. Message nettoyé (adresses, chemins).
+  logger: {
+    error(error) {
+      log("warn", "auth.error", { type: (error as { type?: string }).type ?? error.name, message: redactMessage(error.message ?? "").slice(0, 300) });
+    },
+  },
 });
