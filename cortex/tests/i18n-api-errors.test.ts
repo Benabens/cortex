@@ -38,3 +38,14 @@ test("UserFacingError : message français (journaux), code et statut portés", a
   assert.equal(errorText("en", e), "This language isn’t available.");
   assert.deepEqual(await apiError(req(), e, e.status).json(), { error: "This language isn’t available.", code: "locale_unsupported" });
 });
+
+test("la langue de la requête suit la chaîne async (useUser), français sans requête", async () => {
+  const { currentLocale, runWithLocale } = await import("../lib/i18n/context");
+  const { useUser } = await import("../lib/req");
+  assert.equal(currentLocale(), "fr", "scripts, worker : comportement historique");
+  await runWithLocale("fr", async () => {
+    useUser(req({ "accept-language": "en-GB" }));
+    await Promise.resolve();
+    assert.equal(currentLocale(), "en");
+  });
+});

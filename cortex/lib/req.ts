@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { enterCourse } from "@/db/client";
 import { enterUser } from "@/db/context";
 import { courseExists, DEFAULT_COURSE, ownsCourse } from "@/lib/courses";
-import { apiError } from "@/lib/i18n/api-error";
+import { apiError, requestLocale } from "@/lib/i18n/api-error";
+import { enterLocale } from "@/lib/i18n/context";
 import { UserFacingError } from "@/lib/i18n/user-error";
 
 /**
@@ -25,6 +26,8 @@ export function courseOf(req: Request): string {
  * posé par proxy.ts uniquement ; sans auth → « owner ».
  */
 export function useUser(req: Request): string {
+  // Langue du lecteur pour les gardes de lib/ qui composent une phrase (lib/i18n/context).
+  enterLocale(requestLocale(req));
   return enterUser(req.headers?.get?.("x-cortex-user") ?? null);
 }
 
