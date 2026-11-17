@@ -1,9 +1,10 @@
-import NextAuth from "next-auth";
+import NextAuth, { type NextAuthConfig } from "next-auth";
 import type { Adapter, AdapterAccount, AdapterUser, VerificationToken } from "next-auth/adapters";
 import crypto from "node:crypto";
 import { authGet, authRun } from "@/db/auth-store";
 import { authProviders } from "@/lib/auth-providers";
 import { inviteAllows } from "@/lib/invite";
+import { REVIEW_PROVIDER_ID, reviewLoginActive } from "@/lib/review-login";
 
 /**
  * AUTH — Auth.js v5 (NextAuth), OPT-IN par AUTH_ENABLED=1.
@@ -106,7 +107,34 @@ function cortexAdapter(): Adapter {
 }
 
 /** Disponibilité des méthodes de connexion (page /login) — source unique : lib/auth-providers. */
-export { e2eTestLoginConfigured, emailLoginConfigured, googleLoginConfigured } from "@/lib/auth-providers";
+export { e2eTestLoginConfigured, emailLoginConfigured, googleLoginConfigured, reviewLoginConfigured } from "@/lib/auth-providers";
+
+/** Rappels Auth.js (exportés pour les tests : invitation, coupure de la connexion relecteur). */
+export const authCallbacks = {
+  /**
+   * Inscriptions ouvertes à tous, sauf lancement fermé (INVITE_ONLY=1 : seules
+   * les adresses d'INVITE_EMAILS passent — cf. lib/invite). Magic-link : le
+   * callback est appelé dès la DEMANDE de lien → un non-invité ne reçoit même
+   * pas d'e-mail. Le compte démo des relecteurs (lib/review-login) passe : les
+   * variables qui l'ouvrent valent invitation, et ce chemin ne crée que lui.
+   */
+  signIn({ user, profile, account }) {
+    if (account?.provider === REVIEW_PROVIDER_ID) return true;
+    return inviteAllows(user?.email ?? (profile?.email as string | undefined));
+  },
+  jwt({ token, user, account }) {
+    if (user?.id) token.uid = user.id;
+    if (account?.provider === REVIEW_PROVIDER_ID) token.review = true;
+    // Connexion relecteur coupée (variables retirées, REVIEW_LOGIN_UNTIL passée) :
+    // les sessions ouvertes par elle tombent aussi, sans attendre leurs 30 jours.
+    if (token.review && !reviewLoginActive()) return null;
+    return token;
+  },
+  session({ session, token }) {
+    if (token.uid && session.user) session.user.id = String(token.uid);
+    return session;
+  },
+} satisfies NextAuthConfig["callbacks"];
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: cortexAdapter(),
@@ -115,23 +143,5 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // Pages sur mesure (DA sombre de la landing) au lieu des pages NextAuth par défaut.
   pages: { signIn: "/login", error: "/login" },
   providers: authProviders(),
-  callbacks: {
-    /**
-     * Inscriptions ouvertes à tous, sauf lancement fermé (INVITE_ONLY=1 : seules
-     * les adresses d'INVITE_EMAILS passent — cf. lib/invite). Magic-link : le
-     * callback est appelé dès la DEMANDE de lien → un non-invité ne reçoit même
-     * pas d'e-mail.
-     */
-    signIn({ user, profile }) {
-      return inviteAllows(user?.email ?? (profile?.email as string | undefined));
-    },
-    jwt({ token, user }) {
-      if (user?.id) token.uid = user.id;
-      return token;
-    },
-    session({ session, token }) {
-      if (token.uid && session.user) session.user.id = String(token.uid);
-      return session;
-    },
-  },
+  callbacks: authCallbacks,
 });

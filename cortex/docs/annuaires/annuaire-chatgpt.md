@@ -46,7 +46,7 @@ prod depuis ce chantier.
 | Pas de lien direct vers un paiement | ✓ voir § 2 ; reste `get_account_status` qui renvoie un lien vers `/compte#usage` (page d'usage, pas de paiement : à expliquer si le relecteur demande) |
 | Politique de confidentialité : catégories, finalités, destinataires, durées | `https://cortexexam.com/privacy-en` : catégories, finalités, sous-traitants (dont Anthropic) et durées présents ; à relire par l'éditeur avant soumission |
 | Convenable pour les 13-17 ans | ✓ outil d'étude, aucun contenu sensible |
-| Compte de démo complet, **identifiant + mot de passe**, sans inscription, sans 2FA, sans lien magique | ✗ **bloquant** : Cortex se connecte par Google (ou lien e-mail). Voir § 5 |
+| Compte de démo complet, **identifiant + mot de passe**, sans inscription, sans 2FA, sans lien magique | ✓ connexion relecteur (PR « connexion-relecteur ») : à activer après fusion, voir § 5 |
 
 ## 4. Champs de soumission (platform.openai.com/plugins)
 
@@ -63,7 +63,7 @@ sociale, vidéo).
 | Long Description | 4000 | dans `plugin.json` (≈ 1 200 caractères) |
 | Developer Name | 80 | raison sociale de l'éditeur |
 | Category | | Education |
-| Website / Support | https | `https://cortexexam.com/mcp` (support : page publique avec l'adresse de contact) |
+| Website / Support | https | `https://cortexexam.com/mcp` ; contact support : `support@cortexexam.com` (décision de l'éditeur, 16/11) |
 | Privacy / Terms | https | `https://cortexexam.com/privacy-en`, `https://cortexexam.com/terms-en` |
 | Logo | carré ≥ 48 px | `public/mcp-icon-512.png` copié en `assets/logo.png` |
 | Couleur | | `#2764EC` (accent de l'app) |
@@ -84,24 +84,28 @@ zip -r ../cortex-chatgpt-plugin.zip plugin.json mcp.json assets
 Les cas de test supposent le compte démo du § 5 (cours `DEMO-101`). Le cas « generate_drill » montre le devis
 (0,1 crédit par défaut) puis la question après un « oui ».
 
-## 5. Compte de démo : l'écart à trancher (l'éditeur)
+## 5. Compte de démo : connexion par mot de passe réservée à la revue (voie retenue)
 
 La revue ChatGPT exige un identifiant et un mot de passe utilisables tels quels : **pas de lien magique, pas de
-code par e-mail, pas de 2FA, pas d'inscription**. La connexion Google d'un compte dédié peut passer, mais Google
-défie souvent une connexion depuis un appareil inconnu (code sur téléphone), ce qui ferait échouer la revue.
+code par e-mail, pas de 2FA, pas d'inscription**. Un compte Google dédié a été écarté (Google défie souvent une
+connexion depuis un appareil inconnu, ce qui ferait échouer la revue).
 
-Recommandation : une **connexion par mot de passe réservée à la revue**, dans une PR séparée (changement
-d'authentification, audit `prelaunch`) : fournisseur « Credentials » activé seulement si
-`REVIEW_LOGIN_EMAIL` et `REVIEW_LOGIN_PASSWORD_HASH` sont posées, valable pour ce seul compte, limité en débit,
-retiré après la revue. Cours et crédits du compte : comme pour Claude (`annuaire-claude.md`, § 4), même compte
-pour les deux revues. **Non créé dans cette PR**, comme demandé.
+Voie retenue (décision de l'éditeur, 16/11) : la **connexion relecteur** (`lib/review-login`), commune aux deux
+annuaires. Sur `/login`, un lien discret « Accès relecteur » ouvre un formulaire e-mail + mot de passe ; elle
+n'existe que si `REVIEW_LOGIN_EMAIL` et `REVIEW_LOGIN_PASSWORD_HASH` sont posées, n'ouvre que ce compte, jamais
+propriétaire, limitée en débit, et se coupe à `REVIEW_LOGIN_UNTIL` avec les sessions ouvertes par elle. Le
+consentement OAuth du plugin passe par elle (`/oauth/authorize` → `/login` → retour, `e2e/review-login.spec.ts`).
+
+**Activer, préparer le compte (20 crédits, cours DEMO-101) et couper après la revue** : `annuaire-claude.md`, § 4
+(mêmes commandes, même compte). Les identifiants se saisissent dans le formulaire de soumission, jamais dans le
+paquet ni dans le dépôt.
 
 ## 6. Ce que l'éditeur doit faire lui-même
 
 1. Faire vérifier l'organisation OpenAI (individuelle ou entreprise, au nom de l'éditeur) ; soumettre depuis le
    compte propriétaire ou un membre avec « Apps Management Write ».
-2. Trancher la connexion du relecteur (§ 5), puis créer le compte démo (identifiants saisis à part, jamais dans
-   le paquet ni dans le dépôt).
+2. Choisir le mot de passe du compte démo (§ 5) ; Cowork pose les variables et lance `scripts/review-account.ts`
+   (identifiants saisis à part, jamais dans le paquet ni dans le dépôt).
 3. Enregistrer une **vidéo de démo** (connexion, consentement, liste des cours, devis puis génération) et mettre
    son URL dans `demo_recording_url`.
 4. Remplir les `TODO` de `plugin.json` (raison sociale), relire la politique de confidentialité, choisir les
