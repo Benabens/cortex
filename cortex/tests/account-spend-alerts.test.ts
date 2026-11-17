@@ -18,7 +18,7 @@ process.env.DB_DRIVER = "postgres";
 process.env.DATABASE_URL = "pglite://memory";
 (process.env as Record<string, string>).NODE_ENV = "development";
 
-const ENV_KEYS = ["SPEND_ALERT_PER_USER_HOUR_USD", "SPEND_CAP_USD", "SPEND_CAP_PER_USER_USD", "AUTH_ENABLED", "BILLING_ENABLED", "CORTEX_OWNER_EMAIL", "CORTEX_OWNER_USER_ID"];
+const ENV_KEYS = ["RESEND_API_KEY", "SPEND_ALERT_PER_USER_HOUR_USD", "SPEND_CAP_USD", "SPEND_CAP_PER_USER_USD", "AUTH_ENABLED", "BILLING_ENABLED", "CORTEX_OWNER_EMAIL", "CORTEX_OWNER_USER_ID"];
 
 let usage: typeof import("../lib/billing/usage");
 let alerts: typeof import("../lib/billing/account-spend-alerts");
@@ -86,6 +86,24 @@ test("une alerte par compte et par heure, même pour un process neuf ; l'heure s
   t.mock.timers.setTime(Date.UTC(2027, 0, 10, 13, 0, 1));
   assert.deepEqual(await hourAlerts(() => spend(4)), [], "heure neuve : la dépense repart de zéro");
   assert.equal((await hourAlerts(() => spend(1.5))).length, 1, "heure neuve : nouvelle alerte");
+});
+
+test("e-mail au propriétaire : un par compte et par heure, avec le compte et le montant", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2027, 2, 10, 8, 0, 0) });
+  const mails: Array<{ to: string; subject: string; text: string }> = [];
+  t.mock.method(globalThis, "fetch", async (_input: unknown, init?: RequestInit) => {
+    mails.push(JSON.parse(String(init?.body)) as { to: string; subject: string; text: string });
+    return new Response("{}", { status: 200 });
+  });
+  process.env.SPEND_ALERT_PER_USER_HOUR_USD = "2";
+  process.env.RESEND_API_KEY = "re_test";
+  process.env.CORTEX_OWNER_EMAIL = "ben@exemple.test";
+  await spend(3);
+  await spend(3);
+  assert.equal(mails.length, 1);
+  assert.equal(mails[0].to, "ben@exemple.test");
+  assert.equal(mails[0].subject, "Cortex : un compte a dépensé 3 $ d'IA dans l'heure");
+  assert.ok(mails[0].text.includes(`Le compte ${currentUser()} a dépensé 3 $`));
 });
 
 test("le propriétaire n'est pas suivi (exempté du fusible par compte)", async (t) => {

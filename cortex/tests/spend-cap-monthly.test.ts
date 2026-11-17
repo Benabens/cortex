@@ -33,12 +33,15 @@ before(async () => {
 after(async () => {
   const { closePostgres } = await import("../db/driver-postgres");
   await closePostgres();
-  for (const k of [...ENV_KEYS, "DB_DRIVER", "DATABASE_URL", "CORTEX_DATA_DIR"]) delete process.env[k];
+  for (const k of [...ENV_KEYS, "SPEND_ALERT_PER_USER_HOUR_USD", "DB_DRIVER", "DATABASE_URL", "CORTEX_DATA_DIR"]) delete process.env[k];
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
 beforeEach(() => {
   for (const k of ENV_KEYS) delete process.env[k];
+  // L'alerte par compte et par heure écrit aussi au propriétaire (tests/account-spend-alerts) : ici, seules
+  // celles du mois sont comptées.
+  process.env.SPEND_ALERT_PER_USER_HOUR_USD = "unlimited";
   usage.resetSpendCache();
 });
 
