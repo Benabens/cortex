@@ -2,6 +2,8 @@ import { coursePaths } from "@/lib/courses";
 import { servedFileHeaders } from "@/lib/security-headers";
 import { requireCourse } from "@/lib/req";
 import { storage } from "@/lib/storage";
+import { currentUser } from "@/db/context";
+import { serveCounted } from "@/lib/served-bytes";
 import { localPreviewUrl } from "@/lib/originals/registry";
 import path from "node:path";
 import { NextResponse } from "next/server";
@@ -32,10 +34,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ file: st
   const abs = path.join(REFS_DIR, file);
   if (!abs.startsWith(REFS_DIR + path.sep)) return new NextResponse("Not found", { status: 404 });
   const ext = file.split(".").pop()?.toLowerCase() ?? "";
-  const res = await storage().serve(abs, req, {
+  // Relayé par le serveur : borné par compte et par jour (audit fuites I6).
+  const res = await serveCounted(currentUser(), () => storage().serve(abs, req, {
     contentType: MIME[ext] ?? "application/octet-stream",
     headers: servedFileHeaders(MIME[ext] ?? "application/octet-stream", { "cache-control": "private, max-age=3600" }),
-  });
+  }));
   if (res) return res;
   // Annale restée sur l'ordinateur d'un compte gratuit (lib/originals) : la page qui l'ouvre en local.
   const local = await localPreviewUrl(course, `refs/${file}`);

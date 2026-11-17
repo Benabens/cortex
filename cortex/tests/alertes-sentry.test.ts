@@ -56,6 +56,27 @@ test("volume presque plein : l'envoi est refusé ET Sentry est prévenu (« l'é
   setStatfsForTests(null);
 });
 
+test("I7 : volume sous 20 % libres — l'envoi passe encore, mais Sentry prévient avant le mur des 10 % (une fois)", async () => {
+  const { checkStorage, setStatfsForTests, resetVolumeAlertForTests } = await import("../lib/storage-quota");
+  resetVolumeAlertForTests();
+  captured.length = 0;
+  setStatfsForTests(() => ({ free: 15 * 1024 * MiB, total: 100 * 1024 * MiB }));
+  try {
+    assert.equal(await checkStorage("owner", 10), null, "15 % libres : l'envoi passe");
+    assert.equal(await checkStorage("owner", 10), null);
+    const low = captured.filter((c) => c.tags.alert === "volume_low");
+    assert.equal(low.length, 1, JSON.stringify(captured.map((c) => c.tags)));
+    assert.match(String((low[0].e as Error).message), /15 %/);
+    captured.length = 0;
+    setStatfsForTests(() => ({ free: 50 * 1024 * MiB, total: 100 * 1024 * MiB }));
+    resetVolumeAlertForTests();
+    assert.equal(await checkStorage("owner", 10), null);
+    assert.equal(captured.length, 0, "50 % libres : rien");
+  } finally {
+    setStatfsForTests(null);
+  }
+});
+
 test("volume plein : une alerte par heure et par process, pas une par envoi refusé", async () => {
   const { checkStorage, setStatfsForTests, resetVolumeAlertForTests } = await import("../lib/storage-quota");
   resetVolumeAlertForTests();

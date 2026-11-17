@@ -188,12 +188,12 @@ export class S3Store implements CourseFiles {
       const s = statLocal(file);
       return s ? serveLocalFile(file, s.size, req, headers) : null;
     }
-    // Navigation vers un PDF : le navigateur va le chercher dans le seau (plages
-    // comprises), le serveur ne le lit plus. Jamais pour un contenu embarqué
+    // Navigation vers un PDF ou une image : le navigateur va le chercher dans le seau
+    // (plages comprises), le serveur ne le lit plus. Jamais pour un contenu embarqué
     // (<iframe>, <img>…) : la CSP (default-src 'self') bloquerait le domaine du
     // seau ; jamais pour du HTML, qui doit garder sa CSP « sandbox ».
-    const isPdf = /^application\/pdf\b/i.test(opts.contentType);
-    if (this.presign && isPdf && req.method === "GET" && req.headers.get("sec-fetch-dest") === "document") {
+    const fromBucket = /^(application\/pdf|image\/(png|jpeg|gif|webp))\b/i.test(opts.contentType);
+    if (this.presign && fromBucket && req.method === "GET" && req.headers.get("sec-fetch-dest") === "document") {
       const url = await this.bucket.presign(key, {
         expiresInSec: PRESIGN_TTL_SEC,
         contentType: opts.contentType,

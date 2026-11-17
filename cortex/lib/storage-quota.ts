@@ -136,16 +136,31 @@ function alertVolumeFull(d: { free: number; total: number }, incomingBytes: numb
   const pct = Math.round((d.free / d.total) * 1000) / 10;
   captureError(new Error(`Volume presque plein : ${pct} % libre, envois et générations refusés`), { area: "storage", alert: "volume_full" });
 }
-/** (tests) réarme l'alerte de volume plein. */
-export function resetVolumeAlertForTests(): void { lastVolumeAlert = 0; }
+/**
+ * Volume sous le DOUBLE de la marge (20 % libres par défaut) : rien n'est encore refusé, mais
+ * Sentry prévient (une alerte par 6 h) pour agrandir le volume avant que les envois soient
+ * refusés à tout le monde, payants compris (audit fuites I7).
+ */
+let lastVolumeLowAlert = 0;
+function warnVolumeLow(d: { free: number; total: number }): void {
+  if (d.free / d.total >= 2 * minFreeRatio()) return;
+  const now = Date.now();
+  if (now - lastVolumeLowAlert < 6 * 3600_000) return;
+  lastVolumeLowAlert = now;
+  const pct = Math.round((d.free / d.total) * 1000) / 10;
+  captureError(new Error(`Volume à ${pct} % libre : agrandir le volume avant ${Math.round(minFreeRatio() * 100)} %, où les envois seront refusés`), { area: "storage", alert: "volume_low" });
+}
+
+/** (tests) réarme les alertes de volume (plein, bas). */
+export function resetVolumeAlertForTests(): void { lastVolumeAlert = 0; lastVolumeLowAlert = 0; }
 
 /**
  * Marge absolue exigée pour une GÉNÉRATION (quelques artefacts : PDF d'examen,
  * corrigé, figures). La règle des 10 % convient à un ENVOI — on refuse d'ajouter
  * un gros fichier sur un volume qui se remplit — mais l'appliquer à la
  * génération bloquerait tout le monde, y compris un compte qui vient de payer,
- * dès que le volume est rempli par l'usage normal (5 Go / 200 Mo par compte =
- * une vingtaine de comptes suffisent). Ici : refuser seulement quand il n'y a
+ * dès que le volume est rempli par l'usage normal (5 Go / 150 Mo par compte =
+ * une trentaine de comptes suffisent). Ici : refuser seulement quand il n'y a
  * vraiment plus de place pour écrire.
  */
 export const GENERATION_MIN_FREE_BYTES = 64 * 1024 * 1024;
@@ -183,6 +198,7 @@ export async function checkStorage(
         error: `Espace disque insuffisant sur le serveur pour ${opts.what ?? "accepter ce fichier"}. Réessaie plus tard ; l'équipe est prévenue.`,
       };
     }
+    warnVolumeLow(disk);
   }
   const quota = await storageQuotaBytesFor(userId);
   if (quota !== null) {
