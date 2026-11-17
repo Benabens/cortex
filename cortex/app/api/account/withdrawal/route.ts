@@ -1,4 +1,4 @@
-import { apiError } from "@/lib/i18n/api-error";
+import { apiError, requestLocale } from "@/lib/i18n/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { authGet } from "@/db/auth-store";
 import { currentUser } from "@/db/context";
@@ -8,6 +8,9 @@ import { log } from "@/lib/metrics";
 import { useUser } from "@/lib/req";
 import { stripeClient } from "@/lib/billing/stripe-client";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
+import { accountLocale } from "@/lib/i18n/account-locale";
+import { translator } from "@/lib/i18n/translate";
+import type { Locale } from "@/lib/i18n/locale";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,13 +20,14 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ purchases: await eligibleWithdrawals(currentUser()) });
 }
 
-async function sendReceipt(to: string | null, requestedAt: string, purchaseId: string): Promise<void> {
+export async function sendReceipt(to: string | null, requestedAt: string, purchaseId: string, locale: Locale): Promise<void> {
   if (!process.env.RESEND_API_KEY) { log("info", "withdrawal.email_skipped", { purchaseId, reason: "RESEND_API_KEY absente" }); return; }
-  const text = `Nous accusons réception de votre demande de rétractation du ${requestedAt} pour l’achat ${purchaseId}. Elle sera traitée manuellement dans Stripe.`;
+  const t = translator(locale);
+  const text = t("withdrawalEmail.text", { requestedAt, purchaseId }) + (locale === "en" ? `\n\n${t("withdrawalEmail.binding")}` : "");
   const publisher = process.env.PUBLISHER_EMAIL?.trim() || null;
   const recipients = [...new Set([to, publisher].filter((recipient): recipient is string => !!recipient))];
   for (const recipient of recipients) {
-    const sent = await sendEmail({ to: recipient, subject: "Demande de rétractation reçue", text });
+    const sent = await sendEmail({ to: recipient, subject: t("withdrawalEmail.subject"), text });
     if (!sent.ok) log("warn", "withdrawal.email_failed", { recipient, reason: sent.reason });
   }
 }
@@ -57,7 +61,8 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
       }
     }
     const user = await authGet<{ email: string | null }>(`SELECT email FROM users WHERE id = ?`, userId);
-    await sendReceipt(user?.email ?? null, result.requestedAt, purchaseId).catch((error) =>
+    const locale = await accountLocale(userId).catch(() => null) ?? requestLocale(req);
+    await sendReceipt(user?.email ?? null, result.requestedAt, purchaseId, locale).catch((error) =>
       log("warn", "withdrawal.email_failed", { message: error instanceof Error ? error.message.slice(0, 160) : String(error) }),
     );
     return NextResponse.json({ ...result, warning: cancellationWarning }, { status: 201 });
