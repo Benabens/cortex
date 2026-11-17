@@ -30,7 +30,8 @@ after(() => {
 test("un lot d'exercices échoué est relancé : 4 exercices sur 4", async () => {
   const { runWithCourse } = await import("../db/client");
   const { generateExamViaClaudeCode, examQuestions } = await import("../lib/exam");
-  process.env.CORTEX_TEST_FAIL_BATCHES = "1";
+  // Lots de 5 au plus (banc du 17/11) : les 4 exercices forment un seul lot, le n° 0.
+  process.env.CORTEX_TEST_FAIL_BATCHES = "0";
   const steps: string[] = [];
   const r = await runWithCourse("ml", () => generateExamViaClaudeCode({ count: 4, verify: false, onStep: (s) => { steps.push(s); } }));
   assert.equal(r.requested, 4);
