@@ -10,12 +10,7 @@ import { SeverityMeter } from "@/components/viz/SeverityMeter";
 import { apiPost, useCourse, type ApiError } from "@/lib/ux/api";
 import { sevOf, type MineResp, type MinedItem } from "@/lib/ux/weaknesses";
 import { cn } from "@/lib/ux/cn";
-
-/** Les trois niveaux de sévérité (1 à 3), dans l'ordre du back. */
-const SEVERITY_LEVELS: SegmentedOption<string>[] = [1, 2, 3].map((lv) => ({
-  value: String(lv),
-  label: SEVERITY[sevOf(lv)].label,
-}));
+import { useTranslations } from "use-intl/react";
 
 const MIN_MINE_CHARS = 40; // au-delà = « discussion » à miner (seuil back = mine/route.ts)
 const MAX_FILE_BYTES = 12 * 1024 * 1024; // même plafond que le back (lib/weakness-files)
@@ -37,6 +32,11 @@ const sizeLabel = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixe
  * (clavier, lecteur d'écran, mobile). La sévérité reste, en petit texte discret à côté du bouton.
  */
 export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
+  const labelsT = useTranslations("labels");
+  /** Les trois niveaux de sévérité (1 à 3), dans l'ordre du back. */
+  const severityLevels: SegmentedOption<string>[] = [1, 2, 3].map((lv) => ({
+    value: String(lv), label: labelsT(SEVERITY[sevOf(lv)].labelKey),
+  }));
   const { courseId } = useCourse();
   const inputId = useId();
   const statusId = useId();
@@ -246,7 +246,7 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
         <Segmented
           variant="line"
           label="Sévérité"
-          options={SEVERITY_LEVELS}
+          options={severityLevels}
           value={String(sev)}
           onChange={(v) => setSev(Number(v))}
         />
@@ -297,7 +297,7 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
                         <span className="mt-2 inline-block rounded-full border border-line bg-surface-1/60 px-2 py-0.5 text-[0.7rem] text-ink-3">{m.theme}</span>
                       )}
                     </div>
-                    <Badge tone={sevm.tone} Icon={sevm.Icon} size="xs">{sevm.label}</Badge>
+                    <Badge tone={sevm.tone} Icon={sevm.Icon} size="xs">{labelsT(sevm.labelKey)}</Badge>
                   </div>
                 </div>
               );

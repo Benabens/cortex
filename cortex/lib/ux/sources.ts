@@ -44,19 +44,22 @@ export type OriginalsInfo = OriginalsNotice & { onComputer: string[]; cloudFiles
 
 export type SourcesResp = { exams: SourceExam[]; corpus: CorpusAgg[]; sources?: CorpusSourceItem[]; unread?: IngestProblem[]; originals?: OriginalsInfo | null };
 
-export const CORPUS_LABEL: Record<string, string> = {
-  course_pdf: "Cours (PDF)",
-  lecture: "Cours",
-  final: "Finals",
-  midterm: "Midterms",
-  serie: "Séries",
-  exercise: "Exercices",
-  cheatsheet: "Cheat sheets",
-  review: "Reviews",
+export const CORPUS_LABEL: Record<string, CorpusLabelKey> = {
+  course_pdf: "corpusCoursePdf",
+  lecture: "corpusLecture",
+  final: "corpusFinal",
+  midterm: "corpusMidterm",
+  serie: "corpusSerie",
+  exercise: "corpusExercise",
+  cheatsheet: "corpusCheatsheet",
+  review: "corpusReview",
 };
 
-export function corpusLabel(type: string): string {
-  return CORPUS_LABEL[type] ?? type;
+export type CorpusLabelKey = "corpusCoursePdf" | "corpusLecture" | "corpusFinal" | "corpusMidterm" | "corpusSerie" | "corpusExercise" | "corpusCheatsheet" | "corpusReview";
+
+export function corpusLabel(type: string, t: (key: CorpusLabelKey) => string): string {
+  const key = CORPUS_LABEL[type];
+  return key ? t(key) : type;
 }
 
 export function extOf(path: string): string {

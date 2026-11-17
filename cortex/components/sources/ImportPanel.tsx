@@ -12,10 +12,10 @@ import { LocalImportNote } from "@/components/sources/OriginalsNotes";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
 import { ARCHIVE_FILE, FOLDER_EXTENSIONS, prepareCourseImport, type FolderImportRefusal } from "@/lib/folder-import";
-import { creditsPhrase, debitedPhrase } from "@/lib/billing/limits-text";
 import { ingestProblems, type IngestProblem } from "@/lib/ingest-report";
 import { apiDelete } from "@/lib/ux/write";
 import type { OriginalsInfo } from "@/lib/ux/sources";
+import { useTranslations } from "use-intl/react";
 
 const ACCEPT = ".pdf,.docx,.pptx,.html,.htm,.txt,.md,.zip,.imscc,.mbz";
 /** Annales : Word et PowerPoint en plus (lus comme le reste du cours). Autres zones : formats de /api/sources/add. */
@@ -30,12 +30,6 @@ const ACCEPT_FOLDER_ATTRIBUTE = [...FOLDER_EXTENSIONS.map((ext) => `.${ext}`), "
  * consignes d'examen (syllabus, page Moodle) le format — lus à la préparation.
  */
 type DropKind = "past_exam" | "sample_questions" | "exam_info";
-const DROP_KINDS: { value: DropKind; label: string }[] = [
-  { value: "past_exam", label: "Annales" },
-  { value: "sample_questions", label: "Questions d’exemple" },
-  { value: "exam_info", label: "Consignes d’examen" },
-];
-
 /**
  * Import UNIFIÉ — tout part du NAVIGATEUR, plus jamais d'un chemin sur le serveur :
  * — glisser des fichiers (annales, PDF) → POST /api/refs/upload (multipart) → ingestion, gratuite ;
@@ -45,6 +39,12 @@ const DROP_KINDS: { value: DropKind; label: string }[] = [
  * puis « Préparer le cours » → POST /api/prepare → pipeline complet (ingestion → format → blueprint).
  */
 export function ImportPanel({ onChanged, unread, originals }: { onChanged: () => void; unread?: IngestProblem[]; originals?: OriginalsInfo | null }) {
+  const t = useTranslations("import");
+  const dropKinds: { value: DropKind; label: string }[] = [
+    { value: "past_exam", label: t("pastExams") },
+    { value: "sample_questions", label: t("sampleQuestions") },
+    { value: "exam_info", label: t("examInstructions") },
+  ];
   const { courseId } = useCourse();
   const fileRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
@@ -77,14 +77,16 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
   const { refresh: refreshFormatUsage } = formatLaunch;
   const formatCost = formatLaunch.usage?.costCredits ?? 0;
   // remaining null : aucune limite du jour ne compte cette détection (propriétaire, instance sans quota).
-  const formatPrice = [formatCost > 0 ? creditsPhrase(formatCost) : null, formatLaunch.usage && formatLaunch.usage.remaining !== null ? "une génération du jour" : null]
-    .filter(Boolean).join(" et ");
+  const creditCost = formatCost > 0 ? t("creditCost", { count: formatCost }) : null;
+  const dailyQuota = formatLaunch.usage && formatLaunch.usage.remaining !== null ? t("dailyGeneration") : null;
+  const formatPrice = creditCost && dailyQuota ? t("costAndQuota", { cost: creditCost, quota: dailyQuota }) : creditCost ?? dailyQuota;
   const [formatOffer, setFormatOffer] = useState(false);
   const [formatCharged, setFormatCharged] = useState(0);
   useEffect(() => { if (!running) { refreshUsage(); refreshFormatUsage(); } }, [running, refreshUsage, refreshFormatUsage]);
   const notified = useRef(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- changer de cours réinitialise atomiquement ce panneau local
     setJobId(null);
     setJobKind(null);
     setError(null);
@@ -103,24 +105,23 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
     setJobId(null);
     // Un job de format n'a pas de rapport : la liste en cours reste affichée.
     const unread = ingestProblems(job.report);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- la fin du job publie son rapport dans l'état du panneau
     if (job.report) setUnreadFiles(unread);
     if (job.status === "error" || job.status === "failed") {
-      setError(asText(job.error) ?? "Le traitement a échoué. Réessaie.");
+      setError(asText(job.error) ?? t("jobFailed"));
     } else {
-      const skipped = unread.length
-        ? ` ${unread.length} fichier${unread.length > 1 ? "s n’ont" : " n’a"} pas pu être lu${unread.length > 1 ? "s" : ""} : la liste est ci-dessous.`
-        : "";
+      const skipped = unread.length ? t("unreadSuffix", { count: unread.length }) : "";
       setUploadedMsg(
         (jobKind === "prepare"
-          ? "Cours préparé : types d’exos et poids mis à jour."
+          ? t("prepared")
           : jobKind === "ingest"
-            ? "Dossier ingéré : le corpus est à jour."
-            : `Format re-détecté sur tes annales${formatCharged > 0 ? ` (${debitedPhrase(formatCharged)})` : ""}.`) + skipped
+            ? t("folderIngested")
+            : t("formatDetected", { charged: formatCharged > 0 ? ` (${t("debited", { count: formatCharged })})` : "" })) + skipped
       );
       onChanged();
     }
     setJobKind(null);
-  }, [job, jobKind, onChanged, formatCharged]);
+  }, [job, jobKind, onChanged, formatCharged, t]);
 
   /** Un fichier non lu ne compte nulle part : le retirer libère la place et allège la liste. */
   const removeUnread = async (item: IngestProblem) => {
@@ -128,7 +129,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
       await apiDelete(`/api/sources?path=${encodeURIComponent(item.path)}&course=${encodeURIComponent(courseId)}`);
       setUnreadFiles((list) => list.filter((f) => f.path !== item.path));
     } catch (e) {
-      setError(`${item.name} : retrait impossible (${(e as Error).message}).`);
+      setError(t("removeUnreadFailed", { name: item.name, error: (e as Error).message }));
     }
   };
 
@@ -147,10 +148,10 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
     // Un glisser-déposer ignore l'attribut accept : les fichiers écartés ici sont nommés, pas perdus.
     const allowed = dropKind === "past_exam" ? PAST_EXAM_FILES : OTHER_FILES;
     const list = [...files].filter((f) => allowed.test(f.name));
-    const refusedHere = [...files].filter((f) => !allowed.test(f.name)).map((f) => ({ name: f.name, reason: "format non pris en charge dans cette zone" }));
+    const refusedHere = [...files].filter((f) => !allowed.test(f.name)).map((f) => ({ name: f.name, reason: t("unsupportedHere") }));
     setFolderRefusals(refusedHere);
     if (!list.length) {
-      setError(dropKind === "past_exam" ? "Formats acceptés : PDF, Word, PowerPoint, HTML, TXT, MD." : "Formats acceptés : PDF, HTML, TXT, MD.");
+      setError(dropKind === "past_exam" ? t("acceptedPastExams") : t("acceptedOthers"));
       return;
     }
     setError(null);
@@ -164,14 +165,14 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
         // Questions d'exemple / consignes : rangées à part, puis ingérées avec le reste du cours.
         const res = await fetch(`/api/sources/add?course=${encodeURIComponent(courseId)}&category=${dropKind}`, { method: "POST", body: fd });
         const d = await res.json().catch(() => null);
-        if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
+        if (!res.ok) throw new Error(d?.error ?? t("errorStatus", { status: res.status }));
         // « nom : raison », un par fichier refusé (cf. /api/sources/add).
         const refusedThere = ((d.skipped ?? []) as string[]).map((line) => {
           const at = line.indexOf(" : ");
-          return at > 0 ? { name: line.slice(0, at), reason: line.slice(at + 3) } : { name: line, reason: "refusé" };
+          return at > 0 ? { name: line.slice(0, at), reason: line.slice(at + 3) } : { name: line, reason: t("refused") };
         });
         setFolderRefusals([...refusedHere, ...refusedThere]);
-        setUploadedMsg(`${d.files} fichier${d.files > 1 ? "s" : ""} déposé${d.files > 1 ? "s" : ""}${refusedThere.length ? `, ${refusedThere.length} refusé${refusedThere.length > 1 ? "s" : ""}` : ""} : indexation… Relance « Préparer le cours » pour relire le format.`);
+        setUploadedMsg(t("filesAdded", { count: d.files, refused: refusedThere.length ? t("refusedSuffix", { count: refusedThere.length }) : "" }));
         startJob(d.jobId, "ingest");
         return;
       }
@@ -179,14 +180,18 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
       const d = await res.json().catch(() => null);
       const refusedThere = ((d?.skipped ?? []) as { file: string; reason: string }[]).map((s) => ({ name: s.file, reason: s.reason }));
       setFolderRefusals([...refusedHere, ...refusedThere]);
-      if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
+      if (!res.ok) throw new Error(d?.error ?? t("errorStatus", { status: res.status }));
       const unread = (d.unread ?? []) as IngestProblem[];
       setUnreadFiles(unread);
-      setUploadedMsg(`${d.files.length} fichier${d.files.length > 1 ? "s" : ""} ingéré${d.files.length > 1 ? "s" : ""}${refusedThere.length ? `, ${refusedThere.length} écarté${refusedThere.length > 1 ? "s" : ""}` : ""}${unread.length ? `, ${unread.length} sans texte lisible (liste ci-dessous)` : ""}.`);
+      setUploadedMsg(t("filesIngested", {
+        count: d.files.length,
+        refused: refusedThere.length ? t("skippedSuffix", { count: refusedThere.length }) : "",
+        unread: unread.length ? t("unreadListSuffix", { count: unread.length }) : "",
+      }));
       onChanged();
       if (d.formatPending) setFormatOffer(true);
     } catch (e) {
-      setError((e as Error).message || "L’upload a échoué.");
+      setError((e as Error).message || t("uploadFailed"));
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -208,7 +213,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
       const selection = await prepareCourseImport(files);
       setFolderRefusals(selection.rejected);
       if (!selection.accepted.length) {
-        throw { status: 400, message: "Aucun fichier exploitable dans cette sélection. Vérifie les formats et les limites indiquées." } as ApiError;
+        throw { status: 400, message: t("noUsableFile") } as ApiError;
       }
       setFolderProgress({ done: 0, total: selection.accepted.length });
       const refused = [...selection.rejected];
@@ -224,7 +229,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
             const res = await fetch(`/api/sources/import?course=${encodeURIComponent(courseId)}`, { method: "POST", body: fd });
             const data = await res.json().catch(() => null);
             if (!res.ok) {
-              failure = data?.error ?? (res.status === 413 ? "fichier ou quota trop volumineux" : `erreur ${res.status}`);
+              failure = data?.error ?? (res.status === 413 ? t("tooLarge") : t("lowerErrorStatus", { status: res.status }));
               if (res.status < 500) break;
               continue;
             }
@@ -233,22 +238,22 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
             failure = "";
             break;
           } catch {
-            failure = "connexion interrompue après 3 tentatives";
+            failure = t("connectionInterrupted");
           }
         }
         if (failure) refused.push({ name: entry.relativePath, reason: failure });
         setFolderProgress({ done: index + 1, total: selection.accepted.length });
       }
       setFolderRefusals(refused);
-      if (!saved && !duplicates) throw { status: 400, message: "Aucun fichier n’a pu être importé. Consulte la liste des refus ci-dessous." } as ApiError;
+      if (!saved && !duplicates) throw { status: 400, message: t("noImportedFile") } as ApiError;
       const res = await fetch(`/api/sources/import?course=${encodeURIComponent(courseId)}&action=finish`, { method: "POST" });
       const data = await res.json().catch(() => null);
-      if (!res.ok) throw { status: res.status, message: data?.error ?? `Erreur ${res.status}` } as ApiError;
-      const already = duplicates ? `, ${duplicates} déjà présent${duplicates > 1 ? "s" : ""} dans le cours (même contenu)` : "";
-      setUploadedMsg(`${saved} fichier${saved > 1 ? "s" : ""} déposé${saved > 1 ? "s" : ""}${already}${refused.length ? `, ${refused.length} refusé${refused.length > 1 ? "s" : ""}` : ""} : indexation…`);
+      if (!res.ok) throw { status: res.status, message: data?.error ?? t("errorStatus", { status: res.status }) } as ApiError;
+      const already = duplicates ? t("duplicateSuffix", { count: duplicates }) : "";
+      setUploadedMsg(t("filesUploaded", { count: saved, duplicates: already, refused: refused.length ? t("refusedSuffix", { count: refused.length }) : "" }));
       startJob(data.jobId, "ingest");
     } catch (e) {
-      setError((e as ApiError).message || "L’import du dossier a échoué.");
+      setError((e as ApiError).message || t("folderImportFailed"));
     } finally {
       setUploading(false);
       if (folderRef.current) folderRef.current.value = "";
@@ -264,16 +269,16 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
     try {
       const res = await fetch(`/api/refs/format?course=${encodeURIComponent(courseId)}`, { method: "POST" });
       const d = await res.json().catch(() => null);
-      if (!res.ok) throw { status: res.status, message: d?.error ?? `Erreur ${res.status}` } as ApiError;
+      if (!res.ok) throw { status: res.status, message: d?.error ?? t("errorStatus", { status: res.status }) } as ApiError;
       setFormatOffer(false);
       const charged = Number(d.chargedCredits) || 0;
       setFormatCharged(charged);
-      setUploadedMsg(charged > 0 ? `Détection du format lancée : ${debitedPhrase(charged)}.` : "Détection du format lancée.");
+      setUploadedMsg(t("formatStarted", { charged: charged > 0 ? ` : ${t("debited", { count: charged })}` : "" }));
       if (d.jobId) startJob(d.jobId, "format");
     } catch (e) {
       const err = e as ApiError;
       setPaywall(err.status === 402);
-      setError(err.message || "Impossible de lancer la détection du format.");
+      setError(err.message || t("formatStartFailed"));
     }
   };
 
@@ -285,23 +290,23 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
     try {
       const res = await fetch(`/api/prepare?course=${encodeURIComponent(courseId)}`, { method: "POST" });
       const d = await res.json().catch(() => null);
-      if (!res.ok) throw { status: res.status, message: d?.error ?? `Erreur ${res.status}` } as ApiError;
+      if (!res.ok) throw { status: res.status, message: d?.error ?? t("errorStatus", { status: res.status }) } as ApiError;
       startJob(d.jobId, "prepare");
     } catch (e) {
       const err = e as ApiError;
       setPaywall(err.status === 402);
-      setError(err.message || "Impossible de lancer la préparation.");
+      setError(err.message || t("prepareFailed"));
     }
   };
 
   return (
     <Panel className="flex flex-col gap-5 p-6">
-      <h2 className="text-xl font-semibold text-ink-1">Importer</h2>
+      <h2 className="text-xl font-semibold text-ink-1">{t("title")}</h2>
 
       <Segmented
         size="sm"
-        label="Ces fichiers sont"
-        options={DROP_KINDS}
+        label={t("fileKind")}
+        options={dropKinds}
         value={dropKind}
         onChange={setDropKind}
       />
@@ -335,19 +340,19 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
         <div>
           <p className="text-[0.92rem] font-semibold text-ink-1">
             {uploading
-              ? "Téléversement en cours…"
+              ? t("uploading")
               : dropKind === "past_exam"
-                ? "Glisse un examen, un cours, un PDF"
+                ? t("dropPastExam")
                 : dropKind === "sample_questions"
-                  ? "Glisse les questions d’exemple de l’enseignant"
-                  : "Glisse les consignes d’examen (syllabus, page du cours)"}
+                  ? t("dropSampleQuestions")
+                  : t("dropInstructions")}
           </p>
-          <p className="mt-0.5 text-[0.8rem] text-ink-3">ou clique pour parcourir</p>
+          <p className="mt-0.5 text-[0.8rem] text-ink-3">{t("browse")}</p>
           {dropKind === "past_exam" && (
             <p data-testid="annale-cost" className="mt-1.5 text-[0.76rem] text-ink-3">
               {formatPrice
-                ? `Le dépôt est gratuit. Relire le format sur tes annales coûte ensuite ${formatPrice}, à ta demande.`
-                : "Le dépôt est gratuit."}
+                ? t("freeDepositWithCost", { price: formatPrice })
+                : t("freeDeposit")}
             </p>
           )}
         </div>
@@ -365,7 +370,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
       <div>
         <div className="mb-2 flex items-center gap-2">
           <span className="h-px flex-1 bg-line" />
-          <span className="text-[0.72rem] text-ink-4">ou un dossier complet</span>
+          <span className="text-[0.72rem] text-ink-4">{t("orFolder")}</span>
           <span className="h-px flex-1 bg-line" />
         </div>
         <input
@@ -376,7 +381,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
           // Sélection d'un dossier entier : attribut non standard mais supporté par
           // tous les navigateurs de bureau ; React exige la casse DOM exacte.
           {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
-          aria-label="Dossier de cours à importer"
+          aria-label={t("folderLabel")}
           tabIndex={-1}
           className="sr-only"
           onChange={(e) => e.target.files && importFolder(e.target.files)}
@@ -388,19 +393,15 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
           disabled={uploading || running}
         >
           <FolderInput className="size-4" strokeWidth={2.25} />
-          Choisir un dossier de cours
+          {t("chooseFolder")}
         </Button>
         {uploading && folderProgress && (
           <p className="mt-2 text-[0.8rem] font-medium text-ink-2" aria-live="polite">
-            Envoi de {folderProgress.done}/{folderProgress.total} fichiers…
+            {t("sendingFiles", { done: folderProgress.done, total: folderProgress.total })}
           </p>
         )}
         <p className="mt-2 text-[0.76rem] leading-relaxed text-ink-3">
-          Finals et midterms vont dans tes annales : ce sont eux qui fixent le format. Slides,
-          séries, documents Word et notes rejoignent le reste du cours. 30 Mo maximum par
-          fichier, dans la limite de stockage de ton compte. Les ZIP, exports Canvas (.imscc) et
-          sauvegardes Moodle (.mbz) sont décompressés dans ton navigateur, même s’ils contiennent
-          une autre archive.
+          {t("folderHint")}
         </p>
       </div>
 
@@ -408,11 +409,10 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
       {formatOffer && !running && (
         <div className="rounded-lg border border-line bg-surface-2/30 px-3.5 py-3">
           <p className="text-[0.8rem] leading-relaxed text-ink-2">
-            Pour caler l’examen blanc sur ces annales, Cortex relit leur format : types d’exercices, barème, durée.
-            « Préparer le cours » le fait aussi.
+            {t("formatOffer")}
           </p>
           <Button variant="secondary" size="md" onClick={detectFormat} disabled={!formatLaunch.allowed} className="mt-2.5 w-full">
-            {formatCost > 0 ? `Relire le format · ${creditsPhrase(formatCost)}` : "Relire le format"}
+            {formatCost > 0 ? t("detectFormatWithCost", { cost: t("creditCost", { count: formatCost }) }) : t("detectFormat")}
           </Button>
           <UsageLine usage={formatLaunch.usage} now={formatLaunch.now} className="mt-2" />
         </div>
@@ -422,11 +422,11 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
       <div className="border-t border-line pt-4">
         <Button variant="primary" onClick={prepare} loading={running && jobKind === "prepare"} disabled={(running && jobKind !== "prepare") || (!running && !launch.allowed)} className="w-full">
           {!(running && jobKind === "prepare") && <Sparkles className="size-4" strokeWidth={2.5} />}
-          Préparer le cours
+          {t("prepare")}
         </Button>
         {!running && <UsageLine usage={launch.usage} now={launch.now} className="mt-2" />}
         <p className="mt-2 text-[0.76rem] leading-relaxed text-ink-3">
-          Cortex lit tes supports, reconnaît le format du final et organise les notions à travailler.
+          {t("prepareHint")}
         </p>
       </div>
 
@@ -437,7 +437,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
           <div className="mb-2 flex items-center justify-between text-[0.78rem]">
             <span className="text-ink-2">
               {asText(job.currentStep) ??
-                (jobKind === "prepare" ? "Préparation du cours…" : jobKind === "ingest" ? "Ingestion du dossier…" : "Détection du format…")}
+                (jobKind === "prepare" ? t("preparing") : jobKind === "ingest" ? t("ingesting") : t("detecting"))}
             </span>
             <span className="font-data font-semibold text-ink-1">{job.status === "queued" ? "" : `${job.progress} %`}</span>
           </div>
@@ -459,7 +459,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
       )}
       {folderRefusals.length > 0 && (
         <div className="rounded-lg border border-line bg-surface-2/30 px-3.5 py-3 text-[0.78rem] text-ink-3">
-          <p className="font-semibold text-ink-2">Fichiers non importés</p>
+          <p className="font-semibold text-ink-2">{t("notImported")}</p>
           <ul className="mt-1.5 list-disc space-y-1 pl-4">
             {folderRefusals.map((item, index) => <li key={`${item.name}-${index}`}><span className="break-all">{item.name}</span> : {item.reason}</li>)}
           </ul>
@@ -467,14 +467,14 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
       )}
       {unreadFiles.length > 0 && (
         <div className="rounded-lg border border-line bg-surface-2/30 px-3.5 py-3 text-[0.78rem] text-ink-3" role="status">
-          <p className="font-semibold text-ink-2">Fichiers non lus</p>
-          <p className="mt-0.5">Les autres fichiers du cours ont été lus normalement.</p>
+          <p className="font-semibold text-ink-2">{t("unread")}</p>
+          <p className="mt-0.5">{t("unreadHint")}</p>
           <ul className="mt-1.5 list-disc space-y-1 pl-4">
             {unreadFiles.map((item) => (
               <li key={item.path}>
                 <span className="break-all font-medium text-ink-2">{item.name}</span> : {item.message}{" "}
                 <button type="button" onClick={() => removeUnread(item)} className="font-medium text-ink-2 underline underline-offset-2 hover:text-ink-1">
-                  Retirer du cours
+                  {t("removeFromCourse")}
                 </button>
               </li>
             ))}

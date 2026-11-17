@@ -24,11 +24,11 @@ export type Status = "JAMAIS_VU" | "EN_COURS" | "SOLIDE";
 
 export const STATUS: Record<
   Status,
-  { label: string; tone: Tone; Icon: LucideIcon }
+  { labelKey: "statusNeverSeen" | "statusInProgress" | "statusSolid"; tone: Tone; Icon: LucideIcon }
 > = {
-  JAMAIS_VU: { label: "Jamais vu", tone: "neutral", Icon: CircleDashed },
-  EN_COURS: { label: "En cours", tone: "info", Icon: CircleDot },
-  SOLIDE: { label: "Solide", tone: "success", Icon: CheckCircle2 },
+  JAMAIS_VU: { labelKey: "statusNeverSeen", tone: "neutral", Icon: CircleDashed },
+  EN_COURS: { labelKey: "statusInProgress", tone: "info", Icon: CircleDot },
+  SOLIDE: { labelKey: "statusSolid", tone: "success", Icon: CheckCircle2 },
 };
 
 /* ---- Weakness severity (GROS · MOYEN · LÉGER) ---- */
@@ -39,20 +39,20 @@ export type Severity = "GROS" | "MOYEN" | "LÉGER";
 // libellé → colorblind-safe. MOYEN (ambre) et LÉGER (cyan) inchangés.
 export const SEVERITY: Record<
   Severity,
-  { label: string; tone: Tone; level: 1 | 2 | 3; Icon: LucideIcon }
+  { labelKey: "severityHigh" | "severityMedium" | "severityLow"; tone: Tone; level: 1 | 2 | 3; Icon: LucideIcon }
 > = {
-  GROS: { label: "Sévère", tone: "accent", level: 3, Icon: ShieldAlert },
-  MOYEN: { label: "Moyen", tone: "warning", level: 2, Icon: AlertTriangle },
-  LÉGER: { label: "Léger", tone: "info", level: 1, Icon: Info },
+  GROS: { labelKey: "severityHigh", tone: "accent", level: 3, Icon: ShieldAlert },
+  MOYEN: { labelKey: "severityMedium", tone: "warning", level: 2, Icon: AlertTriangle },
+  LÉGER: { labelKey: "severityLow", tone: "info", level: 1, Icon: Info },
 };
 
 /* ---- Weakness state (RATÉE · EN_COURS · VUE) ---- */
 export type WState = "RATÉE" | "EN_COURS" | "VUE";
 
-export const WSTATE: Record<WState, { label: string; tone: Tone; Icon: LucideIcon }> = {
-  RATÉE: { label: "Ratée", tone: "danger", Icon: XCircle },
-  EN_COURS: { label: "En cours", tone: "info", Icon: Loader },
-  VUE: { label: "Revue", tone: "success", Icon: Eye },
+export const WSTATE: Record<WState, { labelKey: "weaknessFailed" | "weaknessInProgress" | "weaknessReviewed"; tone: Tone; Icon: LucideIcon }> = {
+  RATÉE: { labelKey: "weaknessFailed", tone: "danger", Icon: XCircle },
+  EN_COURS: { labelKey: "weaknessInProgress", tone: "info", Icon: Loader },
+  VUE: { labelKey: "weaknessReviewed", tone: "success", Icon: Eye },
 };
 
 /** Tone → foreground text color (used for pills, icons, accents). */
