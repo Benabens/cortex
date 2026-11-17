@@ -85,7 +85,8 @@ const DRIFT_KEY: [number, number] = [3, 1]; // reprend la clé du fait (3, 0) : 
 const DRIFT_SOURCE: [number, number] = [4, 1]; // cite le passage du fait (4, 0)
 
 // ---------- Le fournisseur simulé ----------
-const sim = { factsFail: false, rejectEvery: 9, split: false, offCourse: 0, misfile: false };
+/** `perNotion` : faits rendus par notion à l'extraction (0 = ce que demande le prompt). */
+const sim = { factsFail: false, rejectEvery: 9, split: false, offCourse: 0, misfile: false, perNotion: 0 };
 /**
  * Examen #16 (16/11), Q8 : un fait d'une notion rangé sous une autre à l'extraction (son passage était
  * dans les extraits de celle-ci). `sim.misfile` : le 3e fait de la notion 9 sort en tête de la notion 8,
@@ -98,7 +99,7 @@ const total = () => Object.values(calls).reduce((a, b) => a + b, 0);
 
 function extract(prompt: string): string {
   if (sim.factsFail) return "pas du JSON";
-  const k = Number(/Au plus (\d+) faits par notion/.exec(prompt)?.[1] ?? 4);
+  const k = sim.perNotion || Number(/Au plus (\d+) faits par notion/.exec(prompt)?.[1] ?? 4);
   const notions = [...prompt.matchAll(/^N(\d+)\. (.+)$/gm)].map((m) => ({ n: Number(m[1]), i: Array.from({ length: NOTIONS }, (_, i) => i).find((i) => label(i) === m[2].trim()) ?? -1 }));
   const facts = notions.filter((x) => x.i >= 0).flatMap(({ n, i }) => factsOf(i).slice(0, k).map((f) => ({ notion: n, statement: f.statement, passage: f.passage })));
   const to = notions.find((x) => x.i === MISFILED.to);
@@ -243,7 +244,7 @@ before(async () => {
 });
 
 beforeEach(() => {
-  Object.assign(sim, { factsFail: false, rejectEvery: 9, split: false, offCourse: 0, misfile: false });
+  Object.assign(sim, { factsFail: false, rejectEvery: 9, split: false, offCourse: 0, misfile: false, perNotion: 0 });
   designed = 0;
   seenTopics.clear();
   process.env.QCM_FACTS = "1";
@@ -397,6 +398,21 @@ test("extraction en échec : l'examen se conçoit par notion, comme avant, sans 
   assertDeliverable(items, detail);
   assert.ok(rows.every((row) => !row.fact_id), "aucun fait");
   assert.ok(steps.some((s) => /conception par notion/.test(s)), detail);
+});
+
+test("hum-285 du 17/11 : moins de faits que de questions — les faits servent quand même, la conception par notion ne comble que le manque", async (t) => {
+  // Un fait par notion : 15 faits (dont des rappels proches) pour 20 questions. Avant : tout
+  // l'examen repassait par notion (11 paires de doublons au banc, 15/20 livrées).
+  sim.perNotion = 1;
+  const { r, rows, steps, detail } = await generate(await course());
+  t.diagnostic(detail);
+  assert.equal(r.count, 20, detail);
+  assert.ok(!steps.some((s) => /trop peu → conception par notion/.test(s)), detail);
+  // 15 faits, dont 3 rappels trop proches d'un autre : 12 faits au plan, 8 places par notion.
+  assert.ok(steps.some((s) => /12 faits distincts .*8 question\(s\) conçue\(s\) par notion/.test(s)), detail);
+  const withFact = rows.filter((row) => row.fact_id);
+  assert.ok(withFact.length >= 10, `les faits du plan sont posés (${withFact.length}) : ${detail}`);
+  assert.equal(new Set(withFact.map((row) => row.fact_id)).size, withFact.length, `aucun fait partagé : ${detail}`);
 });
 
 test("reprise après coupure : les faits du plan et ceux déjà donnés sont repris, sans nouvelle extraction ni fait partagé", async (t) => {
