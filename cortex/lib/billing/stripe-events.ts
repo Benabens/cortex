@@ -493,10 +493,12 @@ async function onInvoicePaid(invoice: Stripe.Invoice, lookup: StripeLookup | und
   const lineKeys = await resolveLookupKeys({ data: [subscriptionLine(inv)].filter(Boolean) }, [], lookup);
   const plan = [...lineKeys, ...keys].find((k) => CORTEX_LOOKUP_KEYS.has(k)) ?? keys[0] ?? null;
   const previous = await getSubscription(userId);
-  // Facture payée 0 € (code promo à 100 %) : la période est en règle, mais elle n'accorde
-  // aucun crédit, ni maintenant ni aux fenêtres de l'annuel (audit fuites I2).
+  // Facture à 0 € (code promo à 100 %) : la période est en règle, mais elle n'accorde aucun
+  // crédit, ni maintenant ni aux fenêtres de l'annuel (audit fuites I2). Lu sur `total`
+  // (après remises, avant le solde client : une facture réglée par le solde a été payée).
   const amountPaid = (inv as { amount_paid?: number }).amount_paid;
-  const free = typeof amountPaid === "number" && amountPaid <= 0;
+  const total = (inv as { total?: number }).total;
+  const free = typeof total === "number" ? total <= 0 : typeof amountPaid === "number" && amountPaid <= 0;
   const monthly = free ? 0 : subscriptionMonthlyCreditsCenti();
   if (free) log("info", "stripe.invoice_free", { invoice: inv.id ?? null });
   const granted = await grantSubscriptionMonth({ userId, customerId, subscriptionId: subId, plan, periodEnd, periodStart: invoicePeriodStart(inv), at, credits: monthly });

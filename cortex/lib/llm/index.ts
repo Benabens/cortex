@@ -57,6 +57,14 @@ export function llmUnavailableReason(name?: ProviderName): string | null {
   return getProvider(name).unavailableReason();
 }
 
+/**
+ * Lignes d'usage des appels EN COURS dans ce processus : le plafond de la réservation
+ * ne les compte pas à leur maximum (des appels parallèles d'un même job feraient sinon
+ * tomber le plafond avant la dépense réelle). Une ligne refermée, timeout compris,
+ * compte de nouveau : le dépassement reste borné par les appels simultanés.
+ */
+const IN_FLIGHT_USAGE = new Set<number>();
+
 /** Taille de réponse maximale d'une aide (drill, correction, analyses) sur un fournisseur payant. */
 function assistMaxTokens(): number {
   const n = Number(process.env.ASSIST_MAX_TOKENS);
@@ -114,12 +122,13 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
     const res = await globalLimiter().run(() =>
       withRetry(async (a) => {
         // Plafond de la réservation, avant CHAQUE tentative (réessais du fournisseur compris).
-        await assertReservationCap(proof?.ref, provider.name);
+        await assertReservationCap(proof?.ref, provider.name, IN_FLIGHT_USAGE);
         const pending = await openUsage({
           provider: provider.name, model: modelId,
           tokensIn: tokensInEstimate, tokensOut: req.maxTokens ?? 16_000,
           callSite: siteLabel, jobId: job?.id ?? null, attempt: a, creditRef: proof?.ref ?? null,
         });
+        if (pending !== null) IN_FLIGHT_USAGE.add(pending);
         const tCall = Date.now();
         try {
           const r = await provider.complete(req);
@@ -148,6 +157,8 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
             });
           }
           throw e;
+        } finally {
+          if (pending !== null) IN_FLIGHT_USAGE.delete(pending);
         }
       }, {
         retries,

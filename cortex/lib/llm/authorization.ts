@@ -4,6 +4,7 @@ import { currentUser } from "@/db/context";
 import { billingEnabled } from "@/lib/billing/credits";
 import { isOwner } from "@/lib/billing/owner";
 import { currentJob } from "@/lib/billing/usage-context";
+import { GENERATION_DEBIT_SQL } from "@/lib/billing/usage";
 import { LlmError } from "./types";
 
 export type LlmAuthorization = {
@@ -30,7 +31,7 @@ export async function reservationExists(ref: string | null | undefined, userId =
   if (!ref) return false;
   if (!billingEnabled()) return true;
   const row = await authGet<{ user_id: string }>(
-    `SELECT user_id FROM credit_transactions WHERE ref = ? AND reason LIKE 'génération %'`,
+    `SELECT user_id FROM credit_transactions WHERE ref = ? AND ${GENERATION_DEBIT_SQL}`,
     ref,
   );
   return row?.user_id === userId;

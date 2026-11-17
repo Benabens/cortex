@@ -56,7 +56,7 @@ const noStripe = {
 };
 
 /** Facture payée d'un abonné : annuel par défaut (149 €, période d'un an commencée il y a `startDays`). */
-function invoice(evt: string, user: string, o: { startDays: number; endDays: number; amount?: number; plan?: "pro_yearly" | "pro_monthly" }) {
+function invoice(evt: string, user: string, o: { startDays: number; endDays: number; amount?: number; paid?: number; plan?: "pro_yearly" | "pro_monthly" }) {
   const inv = fixture("invoice-pro-monthly");
   const plan = o.plan ?? "pro_yearly";
   const day = (d: number) => Math.floor((Date.now() + d * 86400_000) / 1000);
@@ -71,7 +71,7 @@ function invoice(evt: string, user: string, o: { startDays: number; endDays: num
   inv.lines.data[0].period = { start: day(o.startDays), end: day(o.endDays) };
   inv.payments.data[0].payment.payment_intent = `pi_${evt}`;
   const amount = o.amount ?? (plan === "pro_yearly" ? 14900 : 1490);
-  inv.amount_paid = amount; inv.total = amount; inv.lines.data[0].amount = amount;
+  inv.amount_paid = o.paid ?? amount; inv.total = amount; inv.lines.data[0].amount = amount;
   return ev(evt, "invoice.paid", inv);
 }
 const refund = (evt: string, pi: string, refunded: number, amount = 14900) =>
@@ -135,4 +135,9 @@ test("I2 : facture d'abonnement payée 0 € → période enregistrée, aucun cr
   // Une facture payée ensuite rend les crédits.
   await handleStripeEvent(invoice("m_paid", "gratuit", { startDays: 0, endDays: 30, plan: "pro_monthly" }), { lookup: noStripe });
   assert.equal(await credits.subscriptionCredits("gratuit"), 20);
+});
+
+test("I2 : facture réglée par le solde client Stripe (total 14,90 €, rien prélevé) → crédits accordés, elle a été payée", async () => {
+  await handleStripeEvent(invoice("m_balance", "solde", { startDays: -1, endDays: 29, plan: "pro_monthly", paid: 0 }), { lookup: noStripe });
+  assert.equal(await credits.subscriptionCredits("solde"), 20);
 });

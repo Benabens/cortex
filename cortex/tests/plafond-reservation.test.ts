@@ -43,6 +43,12 @@ delete process.env.JOB_SPEND_CAP_USD_PER_CREDIT;
 let server: http.Server;
 let hits = 0;
 let seen: Array<{ model: string; max_tokens: number | undefined }> = [];
+/** Requête dont le prompt contient HANG : retenue jusqu'à release() (appel en vol). */
+const held: http.ServerResponse[] = [];
+const reply = (res: http.ServerResponse, out = OUT_TOKENS) => {
+  res.setHeader("content-type", "application/json");
+  res.end(JSON.stringify({ choices: [{ message: { content: "{\"ok\":true}" } }], usage: { prompt_tokens: 1000, completion_tokens: out } }));
+};
 /** Chaque appel coûte ≈ 1,5 $ (150 000 jetons de sortie au tarif Sonnet). */
 const OUT_TOKENS = 150_000;
 
@@ -54,8 +60,8 @@ before(async () => {
       hits++;
       const j = JSON.parse(body || "{}");
       seen.push({ model: j.model, max_tokens: j.max_tokens ?? j.max_completion_tokens });
-      res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify({ choices: [{ message: { content: "{\"ok\":true}" } }], usage: { prompt_tokens: 1000, completion_tokens: OUT_TOKENS } }));
+      if (JSON.stringify(j.messages ?? "").includes("HANG")) { held.push(res); return; }
+      reply(res);
     });
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -63,6 +69,7 @@ before(async () => {
 });
 beforeEach(() => { hits = 0; seen = []; });
 after(async () => {
+  for (const r of held) r.destroy();
   server.closeAllConnections?.();
   await new Promise((r) => server.close(r));
   for (const k of [...Object.keys(ENV), "LLM_BASE_URL", "JOB_SPEND_CAP_USD_PER_CREDIT"]) delete process.env[k];
@@ -111,6 +118,29 @@ test("B2 : le plafond suit le prix payé (8 crédits → deux fois plus de calcu
     }
   });
   assert.equal(hits, 4);
+});
+
+test("B2 : des appels parallèles du même job ne font pas tomber le plafond tant qu'ils sont en vol", async () => {
+  const { reserveGeneration } = await import("../lib/billing/reserve");
+  const { setCurrentJob, clearCurrentJob } = await import("../lib/billing/usage-context");
+  const { complete } = await import("../lib/llm");
+  const ref = "job:para:ml:503";
+  await inMl("para", async () => {
+    assert.equal((await reserveGeneration({ bucket: "gen", kind: "qcm", costCenti: 400, ref, jobSlot: true })).ok, true);
+    setCurrentJob(503, "qcm", ref);
+    try {
+      // En vol : estimé à 300 000 jetons de sortie (≈ 3 $), au-delà des 2,64 $ du plafond.
+      const long = complete({ prompt: "HANG", model: "sonnet", maxTokens: 300_000 });
+      while (held.length === 0) await new Promise((r) => setTimeout(r, 10));
+      await complete({ prompt: "parallèle", model: "sonnet" });   // passe : l'appel en vol ne compte pas encore
+      reply(held.shift()!, 1000);                                  // il se termine à 0,01 $
+      await long;
+      await complete({ prompt: "suite", model: "sonnet" });       // 1,5 + 0,01 $ < 2,64 $
+      await assert.rejects(complete({ prompt: "de trop", model: "sonnet" }), isSpendCap);
+    } finally {
+      clearCurrentJob();
+    }
+  });
 });
 
 test("B2 : réservation sans débit (propriétaire, facturation coupée) : rien à borner, pas de plafond", async () => {
