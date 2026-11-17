@@ -4,6 +4,9 @@ import "./globals.css";
 import "./legacy-compat.css";
 import { AppShell } from "@/components/shell/AppShell";
 import { ErrorTracking } from "@/components/ErrorTracking";
+import { IntlProvider } from "@/components/i18n/IntlProvider";
+import { MESSAGES } from "@/lib/i18n/messages";
+import { getRequestLocale, getT } from "@/lib/i18n/server";
 import { contactEmail } from "@/lib/contact";
 import { legalEnglishUrl, legalLinks } from "@/lib/legal";
 import { NOINDEX } from "@/lib/seo";
@@ -17,13 +20,11 @@ const funnelDisplay = Funnel_Display({
   display: "swap",
 });
 
-export const metadata: Metadata = {
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT("meta");
   // Surface privée : aucune page authentifiée ne doit être indexée (cf. lib/seo).
-  ...NOINDEX,
-  title: "cortex · révise ce qui tombe vraiment",
-  description:
-    "Cortex : apprentissage par répétition espacée. Sais toujours quoi réviser ensuite.",
-};
+  return { ...NOINDEX, title: t("title"), description: t("description") };
+}
 
 export const viewport: Viewport = {
   // Couleur de la barre du navigateur selon le système ; un choix explicite (Compte, barre du
@@ -36,12 +37,15 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  // Langue du compte, sinon du sélecteur, sinon du navigateur (lib/i18n/locale) : `lang` fait
+  // lire l'interface avec la bonne voix ; le contenu d'un cours porte la sienne (WCAG 3.1.2).
+  const { locale, fromAccount } = await getRequestLocale();
   return (
     <html
-      lang="fr"
+      lang={locale}
       className={`${funnelDisplay.variable} h-full antialiased`}
       // data-theme est posé par le script ci-dessous avant l'hydratation : React ne doit pas s'en offusquer.
       suppressHydrationWarning
@@ -53,7 +57,9 @@ export default function RootLayout({
       <body className="min-h-full">
         {/* Suivi d'erreurs du navigateur : sans SENTRY_DSN, rien n'est téléchargé. */}
         <ErrorTracking />
-        <AppShell legal={legalLinks()} legalEnglish={legalEnglishUrl()} contact={contactEmail()}>{children}</AppShell>
+        <IntlProvider locale={locale} messages={MESSAGES[locale]} syncCookie={fromAccount}>
+          <AppShell legal={legalLinks()} legalEnglish={legalEnglishUrl()} contact={contactEmail()}>{children}</AppShell>
+        </IntlProvider>
       </body>
     </html>
   );
