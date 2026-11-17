@@ -33,6 +33,7 @@ import { SeverityMeter } from "@/components/viz/SeverityMeter";
 import { Sparkline } from "@/components/viz/Sparkline";
 import { ForgettingCurve } from "@/components/viz/ForgettingCurve";
 import { cn } from "@/lib/ux/cn";
+import { useTranslations } from "use-intl/react";
 
 function QA({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -48,6 +49,7 @@ function Label({ children }: { children: React.ReactNode }) {
 }
 
 export function QaHarness() {
+  const t = useTranslations("qa");
   const [t1, setT1] = useState(false);
   const [t2, setT2] = useState(true);
   const [t3, setT3] = useState(true);
@@ -62,75 +64,75 @@ export function QaHarness() {
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <h1 className="text-[1.9rem] font-semibold leading-tight">QA : composants & états</h1>
+        <h1 className="text-[1.9rem] font-semibold leading-tight">{t("title")}</h1>
         <p className="mt-1 text-[0.9rem] text-ink-2">
-          Chaque primitive, chaque état, plusieurs valeurs. Page d’audit, hors nav.
+          {t("description")}
         </p>
       </div>
 
       {/* BUTTONS */}
-      <QA title="Button : variants × tailles × états">
+      <QA title={t("buttonsTitle")}>
         <div className="space-y-4">
           {(["primary", "secondary", "ghost", "subtle"] as const).map((v) => (
             <div key={v} className="flex flex-wrap items-center gap-3">
               <span className="w-20 shrink-0 text-[0.72rem] text-ink-4">{v}</span>
-              <Button variant={v} size="sm">Petit</Button>
-              <Button variant={v} size="md">Moyen</Button>
-              <Button variant={v} size="lg">Grand</Button>
-              <Button variant={v} size="md" disabled>Désactivé</Button>
-              <Button variant={v} size="md" loading>Chargement…</Button>
+              <Button variant={v} size="sm">{t("small")}</Button>
+              <Button variant={v} size="md">{t("medium")}</Button>
+              <Button variant={v} size="lg">{t("large")}</Button>
+              <Button variant={v} size="md" disabled>{t("disabled")}</Button>
+              <Button variant={v} size="md" loading>{t("loading")}</Button>
             </div>
           ))}
           <div className="flex flex-wrap items-center gap-3">
-            <span className="w-20 shrink-0 text-[0.72rem] text-ink-4">icônes</span>
-            <Button variant="primary"><Play className="size-4" fill="currentColor" />Lancer</Button>
-            <Button variant="secondary"><Sparkles className="size-4" />Générer</Button>
+            <span className="w-20 shrink-0 text-[0.72rem] text-ink-4">{t("icons")}</span>
+            <Button variant="primary"><Play className="size-4" fill="currentColor" />{t("launch")}</Button>
+            <Button variant="secondary"><Sparkles className="size-4" />{t("generate")}</Button>
           </div>
         </div>
       </QA>
 
       {/* SEGMENTED — le seul contrôle « une option parmi N » : glisse, s'étire, rebondit, se comprime à l'appui */}
-      <QA title="Segmented : rail (md · sm) · pastilles · puces">
+      <QA title={t("segmentedTitle")}>
         <div className="flex flex-col items-start gap-4">
           <Segmented
-            label="Démo rail"
+            label={t("railDemo")}
             options={[
-              { value: "section", label: "Par section", Icon: Folder },
-              { value: "priority", label: "Par priorité", Icon: Sparkles },
+              { value: "section", label: t("bySection"), Icon: Folder },
+              { value: "priority", label: t("byPriority"), Icon: Sparkles },
             ]}
             value={seg}
             onChange={setSeg}
           />
           <Segmented
             size="sm"
-            label="Démo rail compact"
+            label={t("compactRailDemo")}
             options={[
-              { value: "list", label: "Liste" },
-              { value: "chapter", label: "Par chapitre" },
-              { value: "date", label: "Par date d’ajout" },
+              { value: "list", label: t("list") },
+              { value: "chapter", label: t("byChapter") },
+              { value: "date", label: t("byDate") },
             ]}
             value={segSm}
             onChange={setSegSm}
           />
           <Segmented
             variant="pills"
-            label="Démo pastilles"
+            label={t("pillsDemo")}
             options={[
-              { value: "all", label: "Toutes", count: 12 },
-              { value: "high", label: "Sévères", count: 4 },
-              { value: "mid", label: "Moyennes", count: 6 },
-              { value: "low", label: "Légères", count: 2 },
+              { value: "all", label: t("all"), count: 12 },
+              { value: "high", label: t("severe"), count: 4 },
+              { value: "mid", label: t("average"), count: 6 },
+              { value: "low", label: t("light"), count: 2 },
             ]}
             value={pill}
             onChange={setPill}
           />
           <Segmented
             variant="chips"
-            label="Démo puces"
+            label={t("chipsDemo")}
             options={[
-              { value: "annales", label: "Annales", count: 9 },
-              { value: "cours", label: "Cours (PDF)", count: 14 },
-              { value: "series", label: "Séries", count: 6 },
+              { value: "annales", label: t("pastExams"), count: 9 },
+              { value: "cours", label: t("coursesPdf"), count: 14 },
+              { value: "series", label: t("series"), count: 6 },
             ]}
             value={chip}
             onChange={setChip}
@@ -139,13 +141,13 @@ export function QaHarness() {
       </QA>
 
       {/* TOGGLES + CHECKBOX */}
-      <QA title="Switch / Toggle & Checkbox : off · on · focus · disabled">
+      <QA title={t("togglesTitle")}>
         <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
-          <div className="flex items-center gap-2"><Toggle checked={t1} onChange={setT1} label="Off" /><Label>off</Label></div>
-          <div className="flex items-center gap-2"><Toggle checked={t2} onChange={setT2} label="On" /><Label>on</Label></div>
-          <div className="flex items-center gap-2"><Toggle checked={t3} onChange={setT3} label="Focus" autoFocus /><Label>focus (autofocus)</Label></div>
-          <div className="flex items-center gap-2"><Toggle checked={false} onChange={() => {}} label="Disabled off" disabled /><Label>disabled off</Label></div>
-          <div className="flex items-center gap-2"><Toggle checked={true} onChange={() => {}} label="Disabled on" disabled /><Label>disabled on</Label></div>
+          <div className="flex items-center gap-2"><Toggle checked={t1} onChange={setT1} label={t("off")} /><Label>{t("off").toLowerCase()}</Label></div>
+          <div className="flex items-center gap-2"><Toggle checked={t2} onChange={setT2} label={t("on")} /><Label>{t("on").toLowerCase()}</Label></div>
+          <div className="flex items-center gap-2"><Toggle checked={t3} onChange={setT3} label={t("focus")} autoFocus /><Label>{t("focusAutofocus")}</Label></div>
+          <div className="flex items-center gap-2"><Toggle checked={false} onChange={() => {}} label={t("disabledOff")} disabled /><Label>{t("disabledOff").toLowerCase()}</Label></div>
+          <div className="flex items-center gap-2"><Toggle checked={true} onChange={() => {}} label={t("disabledOn")} disabled /><Label>{t("disabledOn").toLowerCase()}</Label></div>
         </div>
         <div className="mt-5 flex flex-wrap items-center gap-x-8 gap-y-4 border-t border-line pt-4">
           {[{ v: c1, set: setC1, l: "off" }, { v: c2, set: setC2, l: "on" }].map(({ v, set, l }) => (
@@ -163,87 +165,87 @@ export function QaHarness() {
               )}>
                 {v && <Check className="size-3.5" strokeWidth={3} />}
               </span>
-              <Label>checkbox {l}</Label>
+              <Label>{t("checkbox", { state: l })}</Label>
             </button>
           ))}
           <span className="flex items-center gap-2.5 opacity-45">
             <span className="grid size-5 place-items-center rounded-[5px] border border-line-strong bg-surface-2" />
-            <Label>checkbox disabled</Label>
+            <Label>{t("checkboxDisabled")}</Label>
           </span>
         </div>
       </QA>
 
       {/* BADGES */}
-      <QA title="Badge : tous les tons × tailles × emphase">
+      <QA title={t("badgesTitle")}>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge tone="neutral" Icon={CircleDashed}>Neutral</Badge>
-          <Badge tone="accent" Icon={Repeat2}>Accent</Badge>
-          <Badge tone="info" Icon={CircleDot}>Info</Badge>
-          <Badge tone="success" Icon={CheckCircle2}>Success</Badge>
-          <Badge tone="warning" Icon={AlertTriangle}>Warning</Badge>
-          <Badge tone="danger" Icon={ShieldAlert}>Danger</Badge>
+          <Badge tone="neutral" Icon={CircleDashed}>{t("neutral")}</Badge>
+          <Badge tone="accent" Icon={Repeat2}>{t("accent")}</Badge>
+          <Badge tone="info" Icon={CircleDot}>{t("info")}</Badge>
+          <Badge tone="success" Icon={CheckCircle2}>{t("success")}</Badge>
+          <Badge tone="warning" Icon={AlertTriangle}>{t("warning")}</Badge>
+          <Badge tone="danger" Icon={ShieldAlert}>{t("danger")}</Badge>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Badge tone="accent" Icon={Info} size="xs">Taille xs</Badge>
-          <Badge tone="success" Icon={Check} size="sm">Taille sm</Badge>
-          <Badge tone="danger" Icon={ShieldAlert} emphasis>Emphase</Badge>
+          <Badge tone="accent" Icon={Info} size="xs">{t("sizeXs")}</Badge>
+          <Badge tone="success" Icon={Check} size="sm">{t("sizeSm")}</Badge>
+          <Badge tone="danger" Icon={ShieldAlert} emphasis>{t("emphasis")}</Badge>
         </div>
       </QA>
 
       {/* INPUTS */}
-      <QA title="Inputs : vide · rempli · focus · erreur (hauteur ≥ 44px)">
+      <QA title={t("inputsTitle")}>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="space-y-1.5">
-            <Label>vide (placeholder)</Label>
-            <input type="text" placeholder="Rechercher un thème…" aria-label="Démo vide"
+            <Label>{t("emptyPlaceholder")}</Label>
+            <input type="text" placeholder={t("searchTheme")} aria-label={t("emptyDemo")}
               className="h-11 w-full rounded-lg border border-line-strong bg-surface-2/40 px-3.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:outline-none focus:border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-accent)_28%,transparent)]" />
           </div>
           <div className="space-y-1.5">
-            <Label>rempli</Label>
-            <input type="text" defaultValue="Descente de gradient" aria-label="Démo remplie"
+            <Label>{t("filled")}</Label>
+            <input type="text" defaultValue={t("filledValue")} aria-label={t("filledDemo")}
               className="h-11 w-full rounded-lg border border-line-strong bg-surface-2/40 px-3.5 text-[0.9rem] text-ink-1 focus:outline-none focus:border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-accent)_28%,transparent)]" />
           </div>
           <div className="space-y-1.5">
-            <Label>focus (simulé)</Label>
-            <input type="text" defaultValue="SVM & kernels" aria-label="Démo focus"
+            <Label>{t("simulatedFocus")}</Label>
+            <input type="text" defaultValue={t("focusValue")} aria-label={t("focusDemo")}
               className="h-11 w-full rounded-lg border bg-surface-2/40 px-3.5 text-[0.9rem] text-ink-1 border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] ring-2 ring-[color-mix(in_oklch,var(--color-accent)_28%,transparent)] focus:outline-none" />
           </div>
           <div className="space-y-1.5">
-            <Label>erreur</Label>
-            <input type="text" defaultValue="???" aria-invalid="true" aria-describedby="qa-err" aria-label="Démo erreur"
+            <Label>{t("error")}</Label>
+            <input type="text" defaultValue="???" aria-invalid="true" aria-describedby="qa-err" aria-label={t("errorDemo")}
               className="h-11 w-full rounded-lg border bg-surface-2/40 px-3.5 text-[0.9rem] text-ink-1 border-[color-mix(in_oklch,var(--color-danger)_55%,transparent)] ring-2 ring-[color-mix(in_oklch,var(--color-danger)_25%,transparent)] focus:outline-none" />
-            <p id="qa-err" className="text-[0.78rem] text-danger-hi">Thème introuvable : essaie « SVM » ou « MLP ».</p>
+            <p id="qa-err" className="text-[0.78rem] text-danger-hi">{t("themeNotFound")}</p>
           </div>
         </div>
         <div className="mt-4 space-y-1.5">
-          <Label>textarea</Label>
-          <textarea rows={2} placeholder="Colle une discussion…" aria-label="Démo textarea"
+          <Label>{t("textarea")}</Label>
+          <textarea rows={2} placeholder={t("pasteDiscussion")} aria-label={t("textareaDemo")}
             className="w-full resize-none rounded-lg border border-line-strong bg-surface-2/40 p-3.5 text-[0.9rem] text-ink-1 placeholder:text-ink-4 focus:outline-none focus:border-[color-mix(in_oklch,var(--color-accent)_50%,transparent)] focus:ring-2 focus:ring-[color-mix(in_oklch,var(--color-accent)_28%,transparent)]" />
         </div>
       </QA>
 
       {/* SLIDER + STEPPER */}
-      <QA title="Slider (0 · 50 · 100) & Stepper">
+      <QA title={t("sliderTitle")}>
         <div className="space-y-4">
           {[0, 50, 100].map((v) => (
             <div key={v} className="flex items-center gap-4">
               <span className="w-10 shrink-0 text-right font-data text-[0.85rem] tabular text-ink-2">{v}</span>
-              <input type="range" min={0} max={100} defaultValue={v} aria-label={`Slider à ${v}`}
+              <input type="range" min={0} max={100} defaultValue={v} aria-label={t("sliderAt", { value: v })}
                 className="slider" style={{ ["--fill" as string]: `${v}%` }} />
             </div>
           ))}
           <div className="flex items-center gap-4">
             <span className="w-10 shrink-0 text-right font-data text-[0.85rem] tabular text-ink-2">{sl}</span>
             <input type="range" min={0} max={100} value={sl} onChange={(e) => setSl(Number(e.target.value))}
-              aria-label="Slider interactif" className="slider" style={{ ["--fill" as string]: `${sl}%` }} />
+              aria-label={t("interactiveSlider")} className="slider" style={{ ["--fill" as string]: `${sl}%` }} />
           </div>
           <div className="flex items-center gap-3 border-t border-line pt-4">
-            <Label>stepper</Label>
+            <Label>{t("stepper")}</Label>
             <div className="w-44 rounded-lg border border-line bg-surface-2/30 p-3">
               <div className="flex items-center justify-between">
-                <button type="button" aria-label="Diminuer" className="grid size-9 place-items-center rounded-md border border-line bg-surface-2 text-ink-2 hover:bg-surface-3">−</button>
+                <button type="button" aria-label={t("decrease")} className="grid size-9 place-items-center rounded-md border border-line bg-surface-2 text-ink-2 hover:bg-surface-3">−</button>
                 <span className="font-data text-[1.4rem] font-semibold tabular text-ink-1">4</span>
-                <button type="button" aria-label="Augmenter" className="grid size-9 place-items-center rounded-md border border-line bg-surface-2 text-ink-2 hover:bg-surface-3">+</button>
+                <button type="button" aria-label={t("increase")} className="grid size-9 place-items-center rounded-md border border-line bg-surface-2 text-ink-2 hover:bg-surface-3">+</button>
               </div>
             </div>
           </div>
@@ -251,43 +253,43 @@ export function QaHarness() {
       </QA>
 
       {/* CHIPS / KBD / ROWS */}
-      <QA title="Chips · Rangées (default / hover simulé / focus)">
+      <QA title={t("rowsTitle")}>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" aria-pressed="true" className="inline-flex h-9 items-center gap-2 rounded-full border border-[color-mix(in_oklch,var(--color-accent)_45%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_14%,transparent)] px-3 text-[0.82rem] font-medium text-ink-1">
-            Chip actif <span className="font-data text-[0.72rem] tabular text-ink-4">12</span>
+            {t("activeChip")} <span className="font-data text-[0.72rem] tabular text-ink-4">12</span>
           </button>
           <button type="button" aria-pressed="false" className="inline-flex h-9 items-center gap-2 rounded-full border border-line bg-surface-1/60 px-3 text-[0.82rem] font-medium text-ink-2 hover:bg-surface-2">
-            Chip inactif <span className="font-data text-[0.72rem] tabular text-ink-4">4</span>
+            {t("inactiveChip")} <span className="font-data text-[0.72rem] tabular text-ink-4">4</span>
           </button>
           <button type="button" className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-surface-1/60 px-2.5 text-[0.8rem] font-medium text-ink-2">
-            <Folder className="size-3.5" /> Dossier <span className="font-data text-[0.72rem] tabular text-ink-4">6</span>
+            <Folder className="size-3.5" /> {t("folder")} <span className="font-data text-[0.72rem] tabular text-ink-4">6</span>
           </button>
 
         </div>
         <div className="mt-4 overflow-hidden rounded-lg border border-line">
           <div className="flex items-center gap-3 px-3 py-2.5">
-            <Search className="size-4 text-ink-3" /><span className="flex-1 text-[0.88rem] text-ink-1">Rangée default</span><Label>—</Label>
+            <Search className="size-4 text-ink-3" /><span className="flex-1 text-[0.88rem] text-ink-1">{t("defaultRow")}</span><Label>—</Label>
           </div>
           <div className="flex items-center gap-3 border-t border-line bg-surface-2/60 px-3 py-2.5">
-            <Search className="size-4 text-ink-2" /><span className="flex-1 text-[0.88rem] text-ink-1">Rangée hover (simulée)</span><Label>bg-surface-2</Label>
+            <Search className="size-4 text-ink-2" /><span className="flex-1 text-[0.88rem] text-ink-1">{t("hoverRow")}</span><Label>{t("surfaceToken")}</Label>
           </div>
           <div className="flex items-center gap-3 border-t border-line bg-surface-2 px-3 py-2.5 ring-1 ring-inset ring-[color-mix(in_oklch,var(--color-accent)_35%,transparent)]">
-            <Search className="size-4 text-accent-hi" /><span className="flex-1 text-[0.88rem] text-ink-1">Rangée sélectionnée</span><Label>anneau accent</Label>
+            <Search className="size-4 text-accent-hi" /><span className="flex-1 text-[0.88rem] text-ink-1">{t("selectedRow")}</span><Label>{t("accentRing")}</Label>
           </div>
         </div>
         <div className="mt-4 w-56 overflow-hidden rounded-lg border border-line p-3">
-          <p className="truncate text-[0.88rem] text-ink-1">Troncature : un titre beaucoup trop long pour tenir ici</p>
-          <Label>truncate 224px</Label>
+          <p className="truncate text-[0.88rem] text-ink-1">{t("truncation")}</p>
+          <Label>{t("truncateToken")}</Label>
         </div>
       </QA>
 
       {/* EMPTY + SKELETON */}
-      <QA title="Empty state & Skeleton">
+      <QA title={t("emptyTitle")}>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="grid place-items-center rounded-lg border border-line px-6 py-10 text-center">
             <Search className="size-7 text-ink-4" strokeWidth={1.75} />
-            <p className="mt-3 text-[0.95rem] font-medium text-ink-1">Aucun résultat</p>
-            <p className="mt-1 max-w-xs text-[0.85rem] text-ink-3">Essaie un autre terme, ou retire un filtre.</p>
+            <p className="mt-3 text-[0.95rem] font-medium text-ink-1">{t("noResult")}</p>
+            <p className="mt-1 max-w-xs text-[0.85rem] text-ink-3">{t("noResultHint")}</p>
           </div>
           <div className="space-y-3 rounded-lg border border-line p-4">
             <div className="skeleton h-5 w-2/3" />
@@ -302,11 +304,11 @@ export function QaHarness() {
       </QA>
 
       {/* DATA-VIZ */}
-      <QA title="Data-viz : RadialGauge · WaffleGrid (0 % · 50 % · 100 %)">
+      <QA title={t("gaugeTitle")}>
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
           {[0, 47, 100].map((v) => (
             <div key={v} className="grid place-items-center rounded-lg border border-line p-4">
-              <RadialGauge value={v} label="Maîtrise" sublabel={`valeur ${v} %`} size={140} />
+              <RadialGauge value={v} label={t("mastery")} sublabel={t("valuePercent", { value: v })} size={140} />
             </div>
           ))}
         </div>
@@ -314,13 +316,13 @@ export function QaHarness() {
           {[{ f: 0 }, { f: 18 }, { f: 36 }].map(({ f }) => (
             <div key={f} className="rounded-lg border border-line p-4">
               <Label>{f}/36</Label>
-              <div className="mt-2"><WaffleGrid total={36} filled={f} columns={9} label={`Waffle ${f}/36`} /></div>
+              <div className="mt-2"><WaffleGrid total={36} filled={f} columns={9} label={t("waffle", { filled: f })} /></div>
             </div>
           ))}
         </div>
       </QA>
 
-      <QA title="Data-viz : WeightBar · OpportunityBar · SeverityMeter · Sparkline · ForgettingCurve">
+      <QA title={t("vizTitle")}>
         <div className="space-y-3">
           {[0, 50, 100].map((v) => (
             <div key={v} className="flex items-center gap-3">
@@ -332,29 +334,29 @@ export function QaHarness() {
         <div className="mt-5 space-y-3 border-t border-line pt-4">
           {[{ w: 16, m: 0 }, { w: 8, m: 50 }, { w: 4, m: 100 }].map(({ w, m }) => (
             <div key={`${w}-${m}`} className="flex items-center gap-3">
-              <span className="w-24 shrink-0 text-right text-[0.72rem] text-ink-4">poids {w} · maîtrise {m}</span>
+              <span className="w-24 shrink-0 text-right text-[0.72rem] text-ink-4">{t("weightMastery", { weight: w, mastery: m })}</span>
               <OpportunityBar weightPct={w} masteryPct={m} maxWeight={16} />
             </div>
           ))}
         </div>
         <div className="mt-5 flex flex-wrap items-center gap-8 border-t border-line pt-4">
-          <div className="flex items-center gap-3"><SeverityMeter level={1} tone="info" /><Label>léger</Label></div>
-          <div className="flex items-center gap-3"><SeverityMeter level={2} tone="warning" /><Label>moyen</Label></div>
-          <div className="flex items-center gap-3"><SeverityMeter level={3} tone="danger" /><Label>sévère</Label></div>
+          <div className="flex items-center gap-3"><SeverityMeter level={1} tone="info" /><Label>{t("severityLight")}</Label></div>
+          <div className="flex items-center gap-3"><SeverityMeter level={2} tone="warning" /><Label>{t("severityMedium")}</Label></div>
+          <div className="flex items-center gap-3"><SeverityMeter level={3} tone="danger" /><Label>{t("severityHigh")}</Label></div>
         </div>
         <div className="mt-5 flex flex-wrap items-end gap-8 border-t border-line pt-4">
-          <div><Label>sparkline montante</Label><div className="mt-1"><Sparkline values={[40, 41, 43, 42, 45, 47]} /></div></div>
-          <div><Label>sparkline plate</Label><div className="mt-1"><Sparkline values={[50, 50, 50, 50, 50]} /></div></div>
-          <div><Label>courbe de l’oubli</Label><div className="mt-1"><ForgettingCurve width={220} height={80} /></div></div>
+          <div><Label>{t("risingSparkline")}</Label><div className="mt-1"><Sparkline values={[40, 41, 43, 42, 45, 47]} /></div></div>
+          <div><Label>{t("flatSparkline")}</Label><div className="mt-1"><Sparkline values={[50, 50, 50, 50, 50]} /></div></div>
+          <div><Label>{t("forgettingCurve")}</Label><div className="mt-1"><ForgettingCurve width={220} height={80} /></div></div>
         </div>
       </QA>
 
       {/* PANEL + FOCUS CLIPPING */}
-      <QA title="Panel interactif & focus-ring près d’un bord overflow-hidden">
+      <QA title={t("panelTitle")}>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Panel interactive className="p-4">
-            <SectionHeader title="Panel interactif" hint="hover : lift + bordure bleue" action={{ label: "Action", href: "/qa" }} />
-            <p className="text-[0.85rem] text-ink-2">Contenu…</p>
+            <SectionHeader title={t("interactivePanel")} hint={t("panelHint")} action={{ label: t("action"), href: "/qa" }} />
+            <p className="text-[0.85rem] text-ink-2">{t("content")}</p>
           </Panel>
           <div className="panel overflow-hidden rounded-xl p-1.5">
             <div className="rounded-lg p-2">
@@ -362,7 +364,7 @@ export function QaHarness() {
                 className="inline-flex rounded-md"
                 style={{ outline: "2px solid var(--color-accent)", outlineOffset: 2 }}
               >
-                <Button variant="secondary" size="sm">Ring simulé près du bord (clippé ?)</Button>
+                <Button variant="secondary" size="sm">{t("simulatedRing")}</Button>
               </span>
             </div>
           </div>
