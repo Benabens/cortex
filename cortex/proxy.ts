@@ -3,6 +3,7 @@ import { clientIp } from "@/lib/client-ip";
 import { demoReadable } from "@/lib/demo-paths";
 import { MCP_CARD_PATHS, MCP_ICON_PATHS } from "@/lib/mcp/identity";
 import { legacyHostRedirect } from "@/lib/public-url";
+import { apiError } from "@/lib/i18n/api-error";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -124,7 +125,7 @@ async function guarded(req: NextRequest): Promise<NextResponse> {
   }
   if (!userId) {
     if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+      return apiError(req, "unauthenticated", 401);
     }
     const signin = new URL("/login", req.url);
     signin.searchParams.set("callbackUrl", req.nextUrl.pathname + req.nextUrl.search);
@@ -158,9 +159,9 @@ export default function proxy(req: NextRequest) {
   if (moved) return NextResponse.redirect(moved, 308);
   // /api/auth/* est public et lu par NextAuth sans borne : on refuse ici un corps trop grand.
   const authBody = authBodyLimit({ method: req.method, pathname, headers: req.headers });
-  if (authBody) return NextResponse.json({ error: authBody.error }, { status: authBody.status });
+  if (authBody) return apiError(req, authBody, authBody.status);
   if (!RL_EXEMPT.some((p) => pathname.startsWith(p)) && rateLimited(req)) {
-    return NextResponse.json({ error: "Trop de requêtes — réessaie dans une minute." }, { status: 429 });
+    return apiError(req, "rate_limited", 429);
   }
   return AUTH_ON ? guarded(req) : passThrough(req);
 }

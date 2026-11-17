@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { setAccountLocale } from "@/lib/i18n/account-locale";
+import { apiError } from "@/lib/i18n/api-error";
 import { isLocale, LOCALE_COOKIE } from "@/lib/i18n/locale";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
 
@@ -14,7 +15,7 @@ export const dynamic = "force-dynamic";
 export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const body = ((await readJson(req, {})) ?? {}) as { locale?: unknown };
   if (!isLocale(body.locale)) {
-    return NextResponse.json({ error: "Langue non disponible.", code: "locale_unsupported" }, { status: 400 });
+    return apiError(req, "locale_unsupported", 400);
   }
   const userId = req.headers.get("x-cortex-user");
   if (userId) await setAccountLocale(userId, body.locale);

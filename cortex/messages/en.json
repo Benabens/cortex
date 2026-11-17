@@ -8,5 +8,14 @@
     "hint": "The language of Cortex’s screens and emails. An exam keeps the language of its course.",
     "label": "Interface language",
     "error": "Couldn’t save the language. Try again."
+  },
+  "errors": {
+    "unauthenticated": "You’re not signed in.",
+    "rate_limited": "Too many requests. Try again in a minute.",
+    "locale_unsupported": "This language isn’t available.",
+    "body_length_required": "The request needs a Content-Length.",
+    "content_length_invalid": "Invalid Content-Length header.",
+    "auth_body_too_large": "Request body too large for sign-in (max {maxKib} KiB).",
+    "course_unknown": "Unknown course: “{course}”."
   }
 }
