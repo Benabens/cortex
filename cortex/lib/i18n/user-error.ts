@@ -1,4 +1,4 @@
-import { currentLocale } from "./context";
+import { currentLocale } from "./current";
 import type { Locale } from "./locale";
 import { MESSAGES, type Messages } from "./messages";
 import { translator } from "./translate";
@@ -13,6 +13,7 @@ import { translator } from "./translate";
 export type ErrorCode = keyof Messages["errors"];
 export type ErrorParams = Record<string, string | number>;
 export type UserError = { code: ErrorCode; params?: ErrorParams };
+export type FileUserError = UserError & { file: string };
 
 export function userError(code: ErrorCode, params?: ErrorParams): UserError {
   return params ? { code, params } : { code };
@@ -56,4 +57,14 @@ export type Refusal<S extends number = number> = UserError & { status: S; error:
 export function refusal<S extends number>(status: S, code: ErrorCode, params?: ErrorParams): Refusal<S> {
   const e = userError(code, params);
   return { status, ...e, error: errorText(currentLocale(), e) };
+}
+
+/** Transforme une exception montrable en refus rendu, sans perdre son code ni ses paramètres. */
+export function refusalFrom(e: UserFacingError): Refusal {
+  return { status: e.status, code: e.code, ...(e.params ? { params: e.params } : {}), error: e.message };
+}
+
+/** Ajoute le nom du fichier aux erreurs dont le message ICU prévoit le paramètre `file`. */
+export function errorForFile(e: UserError, file: string): FileUserError {
+  return { code: e.code, ...(e.params ? { params: e.params } : {}), file };
 }

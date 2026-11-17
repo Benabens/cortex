@@ -49,3 +49,15 @@ test("la langue de la requête suit la chaîne async (useUser), français sans r
     assert.equal(currentLocale(), "en");
   });
 });
+
+test("erreur d'un fichier : son nom en tête, ponctuation de la langue", async () => {
+  const { apiError } = await import("../lib/i18n/api-error");
+  const { errorForFile } = await import("../lib/i18n/user-error");
+  const e = errorForFile({ code: "document_encrypted" }, "annale.pdf");
+  const fr = await apiError(req({ "accept-language": "fr" }), e, 422).json();
+  const en = await apiError(req({ "accept-language": "en" }), e, 422).json();
+  assert.match(fr.error, /^annale\.pdf : PDF protégé/);
+  assert.match(en.error, /^annale\.pdf: \S/);
+  assert.equal(en.code, "document_encrypted");
+  assert.equal(en.params.file, "annale.pdf");
+});
