@@ -1,11 +1,10 @@
-import { currentCourse } from "@/db/client";
 import type { ExamBlock, BlockPart } from "@/lib/blocks";
-import { getCourse } from "@/lib/courses";
-import { compileExamPdf } from "@/lib/exam-latex";
+import { compileExamPdf, copyExamLogo } from "@/lib/exam-latex";
 import { examDurationMin } from "@/lib/exam-format";
+import { examLayout, examPdf, type BlockLabels, type ExamLayout } from "@/lib/exam-layout";
 import { examsDir } from "@/lib/paths";
-import { courseTemplate, courseWords, durationText, epflWords, localDate, neutralCoverTex, pointsText, solutionColor } from "@/lib/exam-template";
-import { copyExamLogo, coverHeader, documentsItem, esc, examDocument } from "@/lib/qcm-latex";
+import { examDocument } from "@/lib/qcm-latex";
+import { esc } from "@/lib/tex-escape";
 import { assertTexSafe } from "@/lib/tex-guard";
 import fs from "node:fs";
 import path from "node:path";
@@ -48,25 +47,6 @@ function paragraphs(s: string): string {
   return s.split(/\n\s*\n/).map((p) => esc(p.trim()).replace(/\n/g, String.raw`\\ `)).filter(Boolean).map((p) => String.raw`\noindent ${p}\par\smallskip`).join("\n");
 }
 
-/** Libellés des questions composées : le texte historique de l'EPFL (byte-identique) ou ceux du gabarit neutre. */
-type BlockLabels = { question: string; pts: (n: number) => string; output: string; modelAnswer: string; grading: string; solution: string; color: string };
-
-const EPFL_LABELS: BlockLabels = {
-  question: "Question", pts: (n) => `${n} pt${n > 1 ? "s" : ""}`, output: "Output:", modelAnswer: "Model answer:",
-  grading: "Grading:", solution: "Solution:", color: solutionColor("epfl"),
-};
-
-function blockLabels(): BlockLabels {
-  const epfl = courseTemplate() === "epfl";
-  const w = epfl ? epflWords() : courseWords();
-  // EPFL en anglais : le texte historique ; hors anglais, ses mots, sur la mise en page de l'EPFL.
-  if (!w) return EPFL_LABELS;
-  return {
-    question: w.question, pts: (n) => pointsText(n, w), output: w.output, modelAnswer: w.modelAnswer,
-    grading: w.grading, solution: `${w.solution}.`, color: solutionColor(epfl ? "epfl" : "neutral"),
-  };
-}
-
 function renderPart(p: BlockPart, i: number, withKey: boolean, L: BlockLabels): string {
   const { pts } = L;
   const head = String.raw`\par\medskip\needspace{4\baselineskip}\noindent\textbf{(${LETTER[i].toLowerCase()})}\quad{\footnotesize[${pts(p.points)}]}\quad ${esc(p.prompt)}\par\smallskip`;
@@ -97,50 +77,16 @@ function renderBlock(b: ExamBlock, n: number, withKey: boolean, L: BlockLabels):
   ].join("\n");
 }
 
-async function cover(dateLabel: string, n: number, totalPts: number, durationMin: number | null): Promise<string> {
-  if (courseTemplate() === "neutral") {
-    const w = courseWords();
-    return neutralCoverTex({
-      course: getCourse(currentCourse()), w, dateTex: localDate(dateLabel, w), durationMin, totalPts,
-      instructions: [w.blocks(n, totalPts), w.blocksHow, w.onSheet],
-    });
-  }
-  // EPFL hors anglais : même garde, consignes dans la langue de l'examen.
-  const w = epflWords();
-  if (w) {
-    return [
-      ...coverHeader(dateLabel, durationMin, w),
-      String.raw`\vspace{0.4cm}\par\noindent{\large\textbf{${w.instructions}}}\par\smallskip\small`,
-      String.raw`\begin{enumerate}\setlength{\itemsep}{3pt}`,
-      String.raw`\item ${w.blocks(n, totalPts)}${durationMin ? ` ${w.duration(durationText(durationMin, w))}` : ""}`,
-      String.raw`\item ${w.blocksHow}`,
-      documentsItem(),
-      String.raw`\item ${w.onSheet}`,
-      String.raw`\end{enumerate}\vspace{0.3cm}`,
-    ].filter(Boolean).join("\n");
-  }
-  return [
-    ...coverHeader(dateLabel, durationMin),
-    String.raw`\vspace{0.4cm}\par\noindent{\large\textbf{Instructions}}\par\smallskip\small`,
-    String.raw`\begin{enumerate}\setlength{\itemsep}{3pt}`,
-    `\\item This exam has \\textbf{${n} questions}, each made of a short scenario or code excerpt followed by sub-questions, for a total of \\textbf{${totalPts} points}.${durationMin ? ` You have ${durationMin} minutes.` : ""}`,
-    String.raw`\item Single-choice sub-questions have exactly one correct answer: tick its box \fbox{$\checkmark$}. For code excerpts, write the exact output. Short answers take one to three sentences.`,
-    documentsItem(),
-    String.raw`\item Answer directly on this exam sheet, in the space provided.`,
-    String.raw`\end{enumerate}\vspace{0.3cm}`,
-  ].filter(Boolean).join("\n");
-}
-
 /** Source .tex complet de l'examen à questions composées, corrigé optionnel. */
-export async function renderBlocksTex(blocks: ExamBlock[], dateLabel: string, withKey: boolean): Promise<string> {
+export async function renderBlocksTex(blocks: ExamBlock[], dateLabel: string, withKey: boolean, layout?: ExamLayout): Promise<string> {
+  const pdf = examPdf(layout ?? (await examLayout()));
   const duration = await examDurationMin();
   const total = blocks.reduce((s, b) => s + b.points, 0);
-  const L = blockLabels();
   return examDocument([
-    await cover(dateLabel, blocks.length, total, duration),
+    await pdf.cover({ form: "blocks", dateLabel, n: blocks.length, totalPts: total, durationMin: duration }),
     String.raw`\clearpage`,
-    ...blocks.map((b, i) => renderBlock(b, i + 1, withKey, L)),
-  ], dateLabel);
+    ...blocks.map((b, i) => renderBlock(b, i + 1, withKey, pdf.blocks)),
+  ], dateLabel, pdf);
 }
 
 /**
@@ -150,7 +96,7 @@ export async function renderBlocksTex(blocks: ExamBlock[], dateLabel: string, wi
  */
 export async function buildBlocksArtifact(examId: number, blocks: ExamBlock[], dateLabel: string): Promise<{ file: string; texError?: string; texWarning?: string }> {
   fs.mkdirSync(examsDir(), { recursive: true });
-  copyExamLogo();
+  copyExamLogo(examPdf(await examLayout()).logo);
   const base = `blocks-${examId}`;
   const write = async (withKey: boolean): Promise<string> => {
     const tex = await renderBlocksTex(blocks, dateLabel, withKey);

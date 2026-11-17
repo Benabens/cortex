@@ -1,9 +1,8 @@
-import { currentCourse } from "@/db/client";
-import { getCourse } from "@/lib/courses";
 import type { ExamQuestion } from "@/lib/exam";
-import { compileExamPdf, copyExamLogo, qrText, texEscape } from "@/lib/exam-latex";
-import { examDurationMin, formatContextFor } from "@/lib/exam-format";
-import { courseTemplate, courseWords, coverWords, durationText, epflExamKind, epflLocalChrome, epflWords, localDate, neutralChrome, neutralCoverTex, pointsText, solutionColor, type CoverWords } from "@/lib/exam-template";
+import { compileExamPdf, copyExamLogo } from "@/lib/exam-latex";
+import { examDurationMin } from "@/lib/exam-format";
+import { examLayout, examPdf, type ExamLayout, type ExamPdf, type QcmLabels } from "@/lib/exam-layout";
+import { esc } from "@/lib/tex-escape";
 import { assertTexSafe } from "@/lib/tex-guard";
 import { getFormatProfile } from "@/lib/format";
 import { resolveExamFormat } from "@/lib/exam-format";
@@ -20,180 +19,8 @@ import path from "node:path";
  */
 const LATEX_DIR = path.join(process.cwd(), "latex");
 
-// Unicode math → LaTeX (pdflatex ne gère pas l'UTF-8 math ; tectonic oui mais absent ici).
-const UMATH: [RegExp, string][] = [
-  [/[α]/g, "\\ensuremath{\\alpha}"], [/[β]/g, "\\ensuremath{\\beta}"], [/[γ]/g, "\\ensuremath{\\gamma}"], [/[δ]/g, "\\ensuremath{\\delta}"], [/[Δ]/g, "\\ensuremath{\\Delta}"],
-  [/[ε]/g, "\\ensuremath{\\epsilon}"], [/[ζ]/g, "\\ensuremath{\\zeta}"], [/[η]/g, "\\ensuremath{\\eta}"], [/[θ]/g, "\\ensuremath{\\theta}"], [/[λ]/g, "\\ensuremath{\\lambda}"],
-  [/[μ]/g, "\\ensuremath{\\mu}"], [/[ν]/g, "\\ensuremath{\\nu}"], [/[ξ]/g, "\\ensuremath{\\xi}"], [/[π]/g, "\\ensuremath{\\pi}"], [/[ρ]/g, "\\ensuremath{\\rho}"],
-  [/[σ]/g, "\\ensuremath{\\sigma}"], [/[Σ]/g, "\\ensuremath{\\Sigma}"], [/[τ]/g, "\\ensuremath{\\tau}"], [/[φ]/g, "\\ensuremath{\\phi}"], [/[Φ]/g, "\\ensuremath{\\Phi}"],
-  [/[χ]/g, "\\ensuremath{\\chi}"], [/[ψ]/g, "\\ensuremath{\\psi}"], [/[ω]/g, "\\ensuremath{\\omega}"], [/[Ω]/g, "\\ensuremath{\\Omega}"],
-  [/[∂]/g, "\\ensuremath{\\partial}"], [/[∇]/g, "\\ensuremath{\\nabla}"], [/[∞]/g, "\\ensuremath{\\infty}"], [/[√]/g, "\\ensuremath{\\sqrt{\\ }}"],
-  [/[∑]/g, "\\ensuremath{\\sum}"], [/[∏]/g, "\\ensuremath{\\prod}"], [/[∈]/g, "\\ensuremath{\\in}"], [/[∉]/g, "\\ensuremath{\\notin}"], [/[∩]/g, "\\ensuremath{\\cap}"], [/[∪]/g, "\\ensuremath{\\cup}"],
-  [/[≤]/g, "\\ensuremath{\\le}"], [/[≥]/g, "\\ensuremath{\\ge}"], [/[≠]/g, "\\ensuremath{\\neq}"], [/[≈]/g, "\\ensuremath{\\approx}"], [/[≡]/g, "\\ensuremath{\\equiv}"],
-  [/[×]/g, "\\ensuremath{\\times}"], [/[÷]/g, "\\ensuremath{\\div}"], [/[·∙]/g, "\\ensuremath{\\cdot}"], [/[±]/g, "\\ensuremath{\\pm}"], [/[∝]/g, "\\ensuremath{\\propto}"],
-  [/[→]/g, "\\ensuremath{\\to}"], [/[⇒]/g, "\\ensuremath{\\Rightarrow}"], [/[←]/g, "\\ensuremath{\\leftarrow}"], [/[↦]/g, "\\ensuremath{\\mapsto}"],
-  [/[‖]/g, "\\ensuremath{\\|}"], [/[⟨]/g, "\\ensuremath{\\langle}"], [/[⟩]/g, "\\ensuremath{\\rangle}"], [/[∀]/g, "\\ensuremath{\\forall}"], [/[∃]/g, "\\ensuremath{\\exists}"],
-  [/²/g, "\\textsuperscript{2}"], [/³/g, "\\textsuperscript{3}"], [/¹/g, "\\textsuperscript{1}"],
-  [/½/g, "\\ensuremath{\\frac12}"], [/¼/g, "\\ensuremath{\\frac14}"], [/[⁻]/g, "\\ensuremath{^{-}}"], [/[ℝ]/g, "\\ensuremath{\\mathbb{R}}"], [/[ℓ]/g, "\\ensuremath{\\ell}"], [/[°]/g, "\\ensuremath{^\\circ}"],
-  // Ligatures du français, au-delà de Latin-1 : sans elles le filet ci-dessous coupait « cœur » en « c ur ».
-  [/œ/g, "\\oe{}"], [/Œ/g, "\\OE{}"],
-  [/[−]/g, "\\ensuremath{-}"], [/[′]/g, "\\ensuremath{'}"], [/[″]/g, "\\ensuremath{''}"], [/[∼∿]/g, "\\ensuremath{\\sim}"], [/[∘]/g, "\\ensuremath{\\circ}"], [/[⊙]/g, "\\ensuremath{\\odot}"],
-  [/[⊗]/g, "\\ensuremath{\\otimes}"], [/[⊕]/g, "\\ensuremath{\\oplus}"], [/[⊤]/g, "\\ensuremath{\\top}"], [/[⊥]/g, "\\ensuremath{\\perp}"], [/[…]/g, "\\ldots{}"], [/[•]/g, "\\ensuremath{\\bullet}"],
-];
-
-export function esc(s: string): string {
-  let t = texEscape(s)
-    .replace(/[‘’]/g, "'").replace(/[“”]/g, '"')
-    .replace(/–/g, "--").replace(/—/g, "---")
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
-  for (const [re, rep] of UMATH) t = t.replace(re, rep);
-  // filet de sécurité : tout caractère exotique restant (> Latin-1) → espace, pour garantir la
-  // compilation pdflatex (les symboles math fréquents sont déjà traités ci-dessus).
-  t = t.replace(/[Ā-￿]/g, " ");
-  return t;
-}
 const LETTER = "ABCDEFGH".split("");
 const BOX = String.raw`\ding{113}`; // □ (pifont) — comme les annales CS-233
-
-export function footDate(dateLabel: string): string {
-  const m = dateLabel.match(/(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return dateLabel;
-  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-  return `${months[+m[2] - 1]} ${+m[3]}, ${m[1]}`;
-}
-
-/** Date du pied de l'EPFL : le format historique en anglais, sinon celui de la langue de l'examen. */
-function epflDate(dateLabel: string): string {
-  const w = epflWords();
-  return w ? localDate(dateLabel, w) : footDate(dateLabel);
-}
-
-/**
- * En-tête de la page de garde : logo, enseignant, cours, date et durée (si connue), anonymisation, nom et SCIPER.
- * Hors anglais, libellés dans la langue de l'examen (`w`, cf. epflWords).
- */
-export function coverHeader(dateLabel: string, durationMin: number | null, w: CoverWords | null = epflWords()): string[] {
-  const c = getCourse(currentCourse());
-  const code = texEscape(c.examCode).replace(/-/g, "--");
-  const lecturer = c.profs[0] ?? "";
-  return [
-    String.raw`\thispagestyle{empty}`,
-    String.raw`\noindent\begin{minipage}[t]{0.62\textwidth}\vspace{0pt}\epfllogo[26]\par\smallskip\footnotesize`,
-    lecturer ? `${w?.lecturer ?? "Lecturer:"} ${texEscape(lecturer)}\\\\` : "",
-    `\\textbf{${code}: ${texEscape(c.examName)}}\\\\`,
-    w
-      ? (durationMin ? `${localDate(dateLabel, w)}\\quad ${w.durationLabel} ${durationText(durationMin, w)}` : localDate(dateLabel, w))
-      : (durationMin ? `${footDate(dateLabel)}\\quad Duration: ${durationMin} minutes` : footDate(dateLabel)),
-    String.raw`\end{minipage}\hfill\begin{minipage}[t]{0.32\textwidth}\vspace{0pt}\raggedleft\footnotesize ${w?.anonymisation ?? "Anonymisation:"}\\ \textbf{\#0000}\end{minipage}`,
-    String.raw`\vspace{6pt}\noindent\rule{\textwidth}{1pt}`,
-    String.raw`\vspace{6pt}\noindent{\Large\textbf{Student One}}\hfill SCIPER: \textbf{111111}`,
-  ];
-}
-
-/** Page de garde course-aware (style CS-233 : lecturer, SCIPER, convention SCQ/MCQ détectée). */
-async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts: number, durationMin: number | null): Promise<string> {
-  // Hors EPFL, convention traduite : la phrase détectée dans les annales est souvent en anglais.
-  if (courseTemplate() === "neutral") {
-    const w = courseWords();
-    const parts = [nQcm ? w.qcmCount(nQcm) : "", nOpen ? w.openCount(nOpen) : ""].filter(Boolean).join(` ${w.and} `);
-    return neutralCoverTex({
-      course: getCourse(currentCourse()), w, dateTex: localDate(dateLabel, w), durationMin, totalPts,
-      instructions: [w.contains(parts, totalPts), ...(nQcm ? [`${w.qcmConvention} ${w.tick}`] : []), w.onSheet],
-    });
-  }
-  // EPFL hors anglais : même garde, consignes dans la langue de l'examen.
-  const w = epflWords();
-  if (w) {
-    const parts = [nQcm ? w.qcmCount(nQcm) : "", nOpen ? w.openCount(nOpen) : ""].filter(Boolean).join(` ${w.and} `);
-    return [
-      ...coverHeader(dateLabel, durationMin, w),
-      String.raw`\vspace{0.4cm}\par\noindent{\large\textbf{${w.instructions}}}\par\smallskip\small`,
-      String.raw`\begin{enumerate}\setlength{\itemsep}{3pt}`,
-      String.raw`\item ${w.contains(parts, totalPts)}${durationMin ? ` ${w.duration(durationText(durationMin, w))}` : ""}`,
-      nQcm ? String.raw`\item ${w.qcmConvention} ${w.tick}` : "",
-      documentsItem(),
-      String.raw`\item ${w.onSheet}`,
-      String.raw`\end{enumerate}\vspace{0.3cm}`,
-    ].filter(Boolean).join("\n");
-  }
-  const fmt = await getFormatProfile();
-  const convention = fmt?.scq_vs_mcq_convention
-    ? esc(fmt.scq_vs_mcq_convention)
-    : "There are single-choice questions (SCQ) where exactly one box is correct, and multiple-choice questions (MCQ) where one or more boxes are correct.";
-  return [
-    ...coverHeader(dateLabel, durationMin),
-    String.raw`\vspace{0.4cm}\par\noindent{\large\textbf{Instructions}}\par\smallskip\small`,
-    String.raw`\begin{enumerate}\setlength{\itemsep}{3pt}`,
-    (() => {
-      const parts = [nQcm ? `\\textbf{${nQcm} multiple/single-choice questions}` : "", nOpen ? `\\textbf{${nOpen} open questions}` : ""].filter(Boolean);
-      return `\\item This exam has ${parts.join(" and ")}, for a total of \\textbf{${totalPts} points}.${durationMin ? ` You have ${durationMin} minutes.` : ""}`;
-    })(),
-    nQcm ? `\\item ${convention} Tick the box(es) \\fbox{$\\checkmark$} you believe are correct.` : "",
-    documentsItem(),
-    String.raw`\item Answer directly on this exam sheet, in the space provided.`,
-    String.raw`\end{enumerate}\vspace{0.3cm}`,
-  ].filter(Boolean).join("\n");
-}
-
-/**
- * Règle de documents de la garde : seulement celle que le cours déclare, dans la langue de
- * l'examen ; rien sinon. Avant le 16/11/2026, chaque QCM de l'EPFL affirmait « A one-page
- * two-sided cheat sheet is allowed. No electronic device is permitted. », règle inventée.
- */
-export function documentsItem(): string {
-  const f = formatContextFor(currentCourse());
-  return f.documents ? String.raw`\item ${coverWords(f.language).documents[f.documents]}` : "";
-}
-
-/** Libellés d'un QCM : le texte historique de l'EPFL (byte-identique) ou ceux du gabarit neutre. */
-type QcmLabels = {
-  question: (n: number) => string;
-  tag: (type: QcmItem["type"], points: number) => string;
-  misconception: string;
-  solution: string;
-  openQuestion: (n: number) => string;
-  points: (n: number) => string;
-  openSolution: string;
-  color: string;
-  qcmPart: (withOpen: boolean) => string;
-  openPart: (withQcm: boolean) => string;
-  /** Saut de page avant la PREMIÈRE question ouverte (l'EPFL laisse le titre de partie seul sur sa page). */
-  pageBeforeFirstOpen: boolean;
-};
-
-const EPFL_LABELS: QcmLabels = {
-  question: (n) => `Question ${n}.`,
-  tag: (type, points) => `${type === "mcq" ? "MCQ" : "SCQ"}, ${points} pt${points > 1 ? "s" : ""}`,
-  misconception: "misconception: ",
-  solution: "Solution:",
-  openQuestion: (n) => `Open question ${n}`,
-  points: (n) => `${n} points`,
-  openSolution: "Solution.",
-  color: solutionColor("epfl"),
-  qcmPart: (withOpen) => (withOpen ? "First part \\quad-- Multiple-choice and single-choice questions" : "Multiple-choice and single-choice questions"),
-  openPart: (withQcm) => (withQcm ? "Second part \\quad-- Open questions" : "Open questions"),
-  pageBeforeFirstOpen: true,
-};
-
-function qcmLabels(): QcmLabels {
-  const epfl = courseTemplate() === "epfl";
-  const w = epfl ? epflWords() : courseWords();
-  // EPFL en anglais : le texte historique ; hors anglais, ses mots, sur la mise en page de l'EPFL.
-  if (!w) return EPFL_LABELS;
-  return {
-    question: (n) => `${w.question} ${n}.`,
-    tag: (type, points) => `${type === "mcq" ? w.multiple : w.single}, ${pointsText(points, w)}`,
-    misconception: `${w.misconception} -- `,
-    solution: `${w.solution}.`,
-    openQuestion: (n) => `${w.openQuestion} ${n}`,
-    points: (n) => pointsText(n, w),
-    openSolution: `${w.solution}.`,
-    color: solutionColor(epfl ? "epfl" : "neutral"),
-    qcmPart: (withOpen) => (withOpen ? `${w.part} 1 \\quad-- ${w.qcmPart}` : w.qcmPart),
-    openPart: (withQcm) => (withQcm ? `${w.part} 2 \\quad-- ${w.openPart}` : w.openPart),
-    pageBeforeFirstOpen: epfl,
-  };
-}
 
 function renderQcmItem(q: QcmItem, n: number, points: number, withKey: boolean, L: QcmLabels): string {
   const opts = q.options.map((o, k) => {
@@ -261,40 +88,17 @@ const OPEN_TEX_COMPAT = String.raw`\providecommand{\captionof}[2]{\par\smallskip
 
 /**
  * Document complet autour de `body` : préambule commun (figé par CS-202) + figures et compat
- * des ouvertes, en-tête et pied de page du cours (le préambule est écrit pour CS-202).
+ * des ouvertes, puis l'en-tête et le pied de la mise en page (le préambule est écrit pour CS-202).
  */
-export function examDocument(body: string[], dateLabel: string): string {
+export function examDocument(body: string[], dateLabel: string, pdf: ExamPdf): string {
   let preamble = fs.readFileSync(path.join(LATEX_DIR, "preamble.tex"), "utf8");
   const figPath = path.join(LATEX_DIR, "figures.tex");
   if (fs.existsSync(figPath)) preamble += "\n" + fs.readFileSync(figPath, "utf8");
   preamble += "\n" + OPEN_TEX_COMPAT;
-  const c = getCourse(currentCourse());
-  // Métadonnées saisies à la création du cours : échappées (audit du 14/11/2026, 🔴 1). texEscape,
-  // pas esc : esc remplace tout caractère au-delà de Latin-1 par une espace (« Dvořák »).
-  const code = texEscape(c.examCode).replace(/-/g, "--");
-  const profsTex = c.profs.map(texEscape).join(", ");
-  // Hors EPFL : en-tête et pied neutres, date dans la langue de l'examen.
-  if (courseTemplate() === "neutral") {
-    const w = courseWords();
-    return [preamble, neutralChrome(c, w), String.raw`\newcommand{\FOOTDATE}{${localDate(dateLabel, w)}}`, String.raw`\begin{document}`, ...body, String.raw`\end{document}`].join("\n");
-  }
-  const footOverride = [
-    String.raw`\fancyhead[L]{}`,
-    `\\fancyhead[R]{\\qrcode[height=1.25cm]{${qrText(c.examCode)}-FINAL-EXAM}}`,
-    `\\fancyfoot[C]{\\small\\textbf{${code}, ${texEscape(epflExamKind(c))}}${profsTex ? `\\\\[-2pt]\\small ${profsTex}` : ""}}`,
-    ...epflLocalChrome(false),
-  ].join("\n");
-  return [
-    preamble,
-    footOverride,
-    String.raw`\newcommand{\FOOTDATE}{${epflDate(dateLabel)}}`,
-    String.raw`\begin{document}`,
-    ...body,
-    String.raw`\end{document}`,
-  ].join("\n");
+  return [preamble, ...pdf.chrome("qcm", dateLabel), String.raw`\begin{document}`, ...body, String.raw`\end{document}`].join("\n");
 }
 
-export { copyExamLogo };
+export { copyExamLogo, esc };
 
 /**
  * Durée affichée d'un examen QCM, en minutes, ou null : celle des annales, sinon celle du format
@@ -309,7 +113,8 @@ export async function qcmDurationMin(detected: number | null | undefined): Promi
 }
 
 /** Source .tex complet de l'examen QCM (+ ouvert), corrigé optionnel. */
-export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSolutions: boolean): Promise<string> {
+export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSolutions: boolean, layout?: ExamLayout): Promise<string> {
+  const pdf = examPdf(layout ?? (await examLayout()));
 
   const fmt = await getFormatProfile();
   const dur = await examDurationMin();
@@ -330,7 +135,7 @@ export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, inc
   // garde « First/Second part » ; sinon on n'affiche que la partie présente.
   const hasQcm = data.items.length > 0;
   const hasOpen = data.open.length > 0;
-  const L = qcmLabels();
+  const L = pdf.qcm;
   const firstPart = hasQcm
     ? [
         String.raw`\par\noindent{\large\textbf{${L.qcmPart(hasOpen)} \hfill [${L.points(qcmTotal)}]}}\par\vspace{3pt}\hrule\vspace{8pt}`,
@@ -346,7 +151,8 @@ export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, inc
       ].filter(Boolean).join("\n")
     : "";
 
-  return examDocument([await qcmCover(dateLabel, data.items.length, data.open.length, totalPts, dur), firstPart, secondPart], dateLabel);
+  const cover = await pdf.cover({ form: "qcm", dateLabel, nQcm: data.items.length, nOpen: data.open.length, totalPts, durationMin: dur });
+  return examDocument([cover, firstPart, secondPart], dateLabel, pdf);
 }
 
 /**
@@ -376,7 +182,7 @@ export function plainOpenTex(tex: string): string {
 export async function buildQcmArtifact(examId: number, data: QcmExamData, dateLabel: string): Promise<{ file: string; texError?: string; texWarning?: string }> {
   fs.mkdirSync(examsDir(), { recursive: true });
   const base = `qcm-${examId}`;
-  copyExamLogo();
+  copyExamLogo(examPdf(await examLayout()).logo);
   const plain: QcmExamData = { ...data, open: data.open.map((q) => ({ ...q, statement_tex: plainOpenTex(q.statement_tex), solution_tex: plainOpenTex(q.solution_tex) })) };
   const write = async (d: QcmExamData, solutions: boolean): Promise<string> => {
     const tex = await renderQcmExamTex(d, dateLabel, solutions);

@@ -1,7 +1,10 @@
 import { currentCourse } from "@/db/client";
 import { DEFAULT_COURSE, getCourse, type CourseConfig } from "@/lib/courses";
 import { formatContextFor, LANGUAGES, type DocumentRule, type Language } from "@/lib/exam-format";
+import type { BlockLabels, QcmLabels, WrittenLabels } from "@/lib/exam-layout";
 import { texEscape } from "@/lib/tex-escape";
+import fs from "node:fs";
+import path from "node:path";
 
 /**
  * GABARITS D'EXAMEN. Un cours de l'EPFL garde le gabarit historique (logo, anonymisation,
@@ -425,4 +428,43 @@ export function neutralCoverTex(o: { course: CourseConfig; w: CoverWords; dateTe
     ...o.instructions.map((i) => String.raw`\item ${i}`),
     String.raw`\end{enumerate}\vspace{0.3cm}`,
   ].join("\n");
+}
+
+/** Compléments du préambule hors CS-202 (latex/generic.tex : indicatrice…). */
+export function genericPreamble(): string {
+  const p = path.join(process.cwd(), "latex", "generic.tex");
+  return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "";
+}
+
+/** Libellés d'un QCM dans la langue de l'examen (gabarit neutre, ou EPFL hors anglais). */
+export function localQcmLabels(w: CoverWords, color: string, pageBeforeFirstOpen: boolean): QcmLabels {
+  return {
+    question: (n) => `${w.question} ${n}.`,
+    tag: (type, points) => `${type === "mcq" ? w.multiple : w.single}, ${pointsText(points, w)}`,
+    misconception: `${w.misconception} -- `,
+    solution: `${w.solution}.`,
+    openQuestion: (n) => `${w.openQuestion} ${n}`,
+    points: (n) => pointsText(n, w),
+    openSolution: `${w.solution}.`,
+    color,
+    qcmPart: (withOpen) => (withOpen ? `${w.part} 1 \\quad-- ${w.qcmPart}` : w.qcmPart),
+    openPart: (withQcm) => (withQcm ? `${w.part} 2 \\quad-- ${w.openPart}` : w.openPart),
+    pageBeforeFirstOpen,
+  };
+}
+
+/** Libellés des questions composées dans la langue de l'examen. */
+export function localBlockLabels(w: CoverWords, color: string): BlockLabels {
+  return {
+    question: w.question, pts: (n) => pointsText(n, w), output: w.output, modelAnswer: w.modelAnswer,
+    grading: w.grading, solution: `${w.solution}.`, color,
+  };
+}
+
+/** Titres du corrigé d'un examen écrit dans la langue de l'examen. */
+export function localWrittenLabels(w: CoverWords): WrittenLabels {
+  return {
+    solutionsTitle: w.solutions,
+    solutionHead: (n, concept, points) => String.raw`\par\medskip\needspace{4\baselineskip}{\large\textbf{${w.question} ${n} \quad-- ${concept} \hfill [${pointsText(points, w)}]}}\par\smallskip`,
+  };
 }

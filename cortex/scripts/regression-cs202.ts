@@ -36,7 +36,7 @@ const SPEC: any = {
 
 ensureCoursesLoaded().then(() => runWithCourse("cs-202", async () => {
   const prompt = (await buildPrompt(FIXED)) + "\n========\n" + buildBatchPrompt(FIXED, await profile().examSlots());
-  const tex = renderExamTex(SPEC, "2026-06-11", true);
+  const tex = await renderExamTex(SPEC, "2026-06-11", true);
   fs.writeFileSync(`${out}.prompt.txt`, prompt);
   fs.writeFileSync(`${out}.tex`, tex);
   const sha = (s: string) => crypto.createHash("sha256").update(s).digest("hex").slice(0, 16);
