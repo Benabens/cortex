@@ -12,6 +12,7 @@ npm run bench -- run --case rs-qcm15 --provider codex-cli
 ```
 
 - `list` : les cas. `run --case <id>` : un run complet (préparation ou instantané, génération, juge, métriques, seuils). Options : `--ref <dossier d'un run>` (compare le coût), `--prepare` (refait la préparation au lieu de l'instantané), `--keep` (garde la base), `--no-judge`, `--replay <dossier>` (rejoue des bandes, sans modèle).
+- `rejuge --run <dossier> [--out <dossier>] --provider codex-cli` : restaure dans une base jetable le cours d'un run archivé issu d'un dump, puis relance seulement le juge et le calcul des métriques. Le run source et ses bandes de génération restent inchangés.
 - `mark-ref --run <dossier>` : ce run devient la référence de son cas. `report [--out f.md]` : tableau référence → actuel de tous les cas.
 - Postgres local jetable : `LC_ALL=C initdb -D <dir> -U cortex --auth=trust --locale=C`, puis `port`, `listen_addresses = 'localhost'` et `unix_socket_directories = ''` dans `postgresql.conf`. Chaque run crée sa base et la supprime à la fin.
 

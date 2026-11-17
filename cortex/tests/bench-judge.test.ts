@@ -31,9 +31,10 @@ function reply(prompt: string): unknown {
     return {
       items: [
         // Indices hors bornes, non entiers ou en chaîne (sortie non garantie) : jamais comptés.
-        { q: 0, key: "wrong", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [3, 0, 7, 1.5, "2"], chapter: 1, notion: "ordre des segments", code: null },
-        { q: 1, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 99, notion: "somme", code: { language: "python", source: "print(2 + 2)", stdin: "", expected: "5" } },
-        { q: 2, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 1, notion: "pandas", code: { language: "python", source: "import module_absent_du_banc\nprint(1)", stdin: "", expected: "1" } },
+        { q: 0, key: "wrong", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [3, 0, 7, 1.5, "2"], chapter: 1, notion: "ordre des segments", code: null, evidence: [{ criterion: "key", option: 0, source: "Cours", passage: "TCP ordonne" }] },
+        { q: 1, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 99, notion: "somme", code: { language: "python", source: "print(2 + 2)", stdin: "", expected: "5" }, evidence: [{ criterion: "key", option: 1, source: "Question", passage: "2 + 2" }] },
+        { q: 2, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 1, notion: "pandas", code: { language: "python", source: "import module_absent_du_banc\nprint(1)", stdin: "", expected: "1" }, evidence: [{ criterion: "key", option: 0, source: "Cours", passage: "première ligne" }] },
+        { q: 3, key: "right", explanation: "consistent", definition: "na", off_course: false, distractors: 3, trivial: [], chapter: 1, notion: "randint", code: { language: "python", source: "import random\nstop = random.randint(2, 4)\nprint(list(range(2, stop)) + [stop])", stdin: "", expected: "[2], [2, 3], [2, 3, 4]" }, evidence: [{ criterion: "key", option: 3, source: "Question", passage: "randint inclut 4" }] },
       ],
     };
   }
@@ -77,6 +78,7 @@ const run = {
       { idx: 0, kind: "qcm", topic: "t", stem: "Quel protocole numérote les segments ?", options: ["TCP", "UDP", "IP", "ICMP"], correct: [0], explanation: "TCP numérote." },
       { idx: 1, kind: "qcm", topic: "t", stem: "Que vaut la sortie de print(2 + 2) ?", options: ["4", "5", "22", "Erreur"], correct: [1], explanation: "Elle affiche 5." },
       { idx: 2, kind: "qcm", topic: "t", stem: "Que vaut df.iloc[0] ?", options: ["1", "2", "3", "4"], correct: [0], explanation: "La première ligne vaut 1." },
+      { idx: 3, kind: "qcm", topic: "t", stem: "Quelles listes finales sont possibles ?", options: ["[2, 2]", "[2]", "[2, 2], [2, 3, 3]", "[2], [2, 3], [2, 3, 4]"], correct: [3], explanation: "randint inclut 4, range exclut stop." },
     ],
   },
   plan: { chapters: [{ id: 1, seq: 1, title: "Transport" }, { id: 2, seq: 2, title: "Réseau" }], topicChapter: {} },
@@ -98,19 +100,22 @@ test("juge : arbitre, code exécuté, doublons et faux rejets ; la clé n'est ja
   assert.match(prompts.find((p) => /examinateur exigeant/.test(p)) ?? "", /SOLVEUR INDÉPENDANT : 1/);
 
   assert.equal(v.items[0].key, "wrong");
-  // L'indice 0 est la bonne réponse : jamais compté comme distracteur trivial.
-  assert.equal(v.items[0].trivialDistractors, 1);
+  // L'indice 0 est la bonne réponse et les autres options n'ont aucun marqueur formel déterministe.
+  assert.equal(v.items[0].trivialDistractors, 0);
   assert.equal(v.items[0].chapter, 1);
   assert.equal(v.items[1].chapter, null, "un chapitre hors du plan n'est pas retenu");
   if (sandboxAvailable()) {
     assert.deepEqual([v.items[1].code?.ran, v.items[1].code?.ok, v.items[1].key], [true, false, "wrong"], "la sortie réelle (4) contredit la clé (5)");
     // Un programme qui ne tourne pas ici (module absent) ne prouve rien contre la clé.
     assert.deepEqual([v.items[2].code?.ran, v.items[2].key], [false, "right"]);
+    // Banc rs-mixte du 17/11 : un tirage aléatoire sans graine donne UNE sortie, pas l'ensemble des
+    // sorties possibles que la clé énumère ; une seule exécution ne prouve rien contre elle.
+    assert.deepEqual([v.items[3].code?.ran, v.items[3].key], [false, "right"]);
   }
   assert.deepEqual(v.duplicatesIntra, [[0, 1]]);
   assert.deepEqual(v.duplicatesPrevious, [1]);
   assert.deepEqual(v.rejected, [{ idx: 0, offCourseReject: true, falseRejection: true }, { idx: 1, offCourseReject: false, falseRejection: false }]);
-  assert.match(v.rubric, /^v1:/);
+  assert.match(v.rubric, /^v2:/);
 });
 
 test("chapitre : un rang rendu à la place de l'identifiant est rattaché ; un plan d'un seul chapitre est attribué d'office", async () => {
@@ -126,13 +131,28 @@ test("chapitre : un rang rendu à la place de l'identifiant est rattaché ; un p
   assert.equal(chapterOf("2" as unknown as number, plan), 1000020);
 });
 
+test("vote du juge : une option n'est retenue que si au moins deux arbitres sur trois la signalent", async () => {
+  const { majorityOptions, majorityValue } = await import("../lib/bench/judge");
+  assert.deepEqual(majorityOptions([[0, 1], [1, 2], [1, 3]]), [1]);
+  assert.deepEqual(majorityOptions([[0], [1], [2]]), []);
+  assert.equal(majorityValue(["right", "wrong", "wrong"]), "wrong");
+  assert.equal(majorityValue(["right", "wrong", "unsure"]), "right", "égalité : verdict prudent et déterministe");
+});
+
+test("distracteurs triviaux : les marqueurs formels sont mesurés sans appel au modèle", async () => {
+  const { deterministicTrivialOptions } = await import("../lib/bench/judge");
+  const item = { options: ["Toujours, sans aucune exception", "Cela dépend de la condition", "Jamais", "Le cas étudié"], correct: [1] };
+  assert.deepEqual(deterministicTrivialOptions(item), [0, 2]);
+  assert.deepEqual(deterministicTrivialOptions({ ...item, correct: [0, 1] }), [2], "une option correcte n'est jamais un distracteur");
+});
+
 test("une panne passagère du fournisseur pendant le jugement est réessayée, le jugement n'est pas perdu", async () => {
   failAdjudicate = 1;
   const { runWithCourse } = await import("../db/client");
   const { judgeExam } = await import("../lib/bench/judge");
   const v = await runWithCourse("ml", () => judgeExam(run));
   assert.equal(failAdjudicate, 0, "la panne a bien eu lieu");
-  assert.equal(v.items.length, 3);
+  assert.equal(v.items.length, run.exam?.items.length);
 });
 
 test("exercice au long corrigé : l'arbitre le lit jusqu'au bout", async () => {
