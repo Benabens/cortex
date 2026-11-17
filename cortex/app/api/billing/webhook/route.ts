@@ -3,7 +3,7 @@ import { readText, withBodyLimit } from "@/lib/upload-limit";
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { stripeClient } from "@/lib/billing/stripe-client";
-import { captureError } from "@/lib/observability";
+import { captureError, captureErrorThrottled } from "@/lib/observability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,9 +33,13 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   try {
     event = stripe.webhooks.constructEvent(payload, sig, secret);
   } catch {
+    // Secret tourné ou mauvais endpoint : Stripe réessaie 3 jours puis abandonne, les paiements
+    // ne créditent plus. Rien du corps (non vérifié) dans l'alerte ; une par heure au plus.
+    captureErrorThrottled("billing.webhook_signature", new Error("Webhook Stripe : signature invalide (STRIPE_WEBHOOK_SECRET ?)"), { area: "billing", step: "webhook_signature" });
     return NextResponse.json({ error: "Signature invalide." }, { status: 400 });
   }
   if (!livemodeMatchesKey(event, key)) {
+    captureErrorThrottled("billing.webhook_livemode", new Error("Webhook Stripe : livemode de l'événement incohérent avec la clé"), { area: "billing", step: "webhook_livemode", event_type: event.type });
     return NextResponse.json({ error: "livemode de l'événement incohérent avec la clé." }, { status: 400 });
   }
 
