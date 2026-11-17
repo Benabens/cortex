@@ -76,6 +76,7 @@
     "@types/yauzl": "^3.4.0",
     "ajv": "^8.20.0",
     "autocannon": "^9.0.0",
+    "axe-core": "^4.14.1",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.4.3",
