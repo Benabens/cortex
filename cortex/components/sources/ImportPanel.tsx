@@ -8,12 +8,14 @@ import { WeightBar } from "@/components/viz/WeightBar";
 import { Segmented } from "@/components/ui/Segmented";
 import { useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@/lib/ux/api";
 import { cn } from "@/lib/ux/cn";
+import { LocalImportNote } from "@/components/sources/OriginalsNotes";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
 import { ARCHIVE_FILE, FOLDER_EXTENSIONS, prepareCourseImport, type FolderImportRefusal } from "@/lib/folder-import";
 import { creditsPhrase, debitedPhrase } from "@/lib/billing/limits-text";
 import { ingestProblems, type IngestProblem } from "@/lib/ingest-report";
 import { apiDelete } from "@/lib/ux/write";
+import type { OriginalsInfo } from "@/lib/ux/sources";
 
 const ACCEPT = ".pdf,.docx,.pptx,.html,.htm,.txt,.md,.zip,.imscc,.mbz";
 /** Annales : Word et PowerPoint en plus (lus comme le reste du cours). Autres zones : formats de /api/sources/add. */
@@ -42,7 +44,7 @@ const DROP_KINDS: { value: DropKind; label: string }[] = [
  *   (finals dans refs/, slides et séries dans content/) puis job « ingest » ;
  * puis « Préparer le cours » → POST /api/prepare → pipeline complet (ingestion → format → blueprint).
  */
-export function ImportPanel({ onChanged, unread }: { onChanged: () => void; unread?: IngestProblem[] }) {
+export function ImportPanel({ onChanged, unread, originals }: { onChanged: () => void; unread?: IngestProblem[]; originals?: OriginalsInfo | null }) {
   const { courseId } = useCourse();
   const fileRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
@@ -355,6 +357,9 @@ export function ImportPanel({ onChanged, unread }: { onChanged: () => void; unre
           ))}
         </div>
       </label>
+
+      {/* Compte gratuit : le fichier ne reste pas sur le serveur (lib/originals) */}
+      {originals?.home === "local" && <LocalImportNote />}
 
       {/* OU un dossier complet, choisi dans le navigateur */}
       <div>

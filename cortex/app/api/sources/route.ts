@@ -12,6 +12,7 @@ import { UPLOAD_LIMITS, readFormData, readJson, withBodyLimit } from "@/lib/uplo
 import { NextRequest, NextResponse } from "next/server";
 import { checkIndexQuota, refreshIndexUsage } from "@/lib/originals/index-quota";
 import { currentCourse } from "@/db/client";
+import { courseOriginals } from "@/lib/originals/retention";
 import { checkStorage, declaredBytes } from "@/lib/storage-quota";
 import { currentUser } from "@/db/context";
 
@@ -26,6 +27,8 @@ export async function GET(req: NextRequest) {
     corpus: await corpusSummary(),
     sources: await listCorpusSources(),
     unread: await unreadFiles(),
+    // Compte gratuit : fichiers restés sur l'ordinateur, et fin du Premium annoncée (lib/originals).
+    originals: await courseOriginals(currentUser(), currentCourse()).catch(() => null),
   });
 }
 

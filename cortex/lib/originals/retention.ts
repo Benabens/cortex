@@ -4,7 +4,7 @@ import { authGet, authRun } from "@/db/auth-store";
 import { runWithCourse } from "@/db/client";
 import { runWithUser } from "@/db/context";
 import { nowStr, q } from "@/db/q";
-import { coursePaths, listCourses } from "@/lib/courses";
+import { coursePaths, getCourse, listCourses } from "@/lib/courses";
 import { log } from "@/lib/metrics";
 import { purgePdfPages } from "@/lib/page-cache";
 import { coursePathOf, settleOriginals } from "@/lib/originals/intake";
@@ -46,10 +46,29 @@ export function purgeDate(policy: OriginalsPolicy, since: string | null): string
 }
 
 /** Ce que l'interface annonce à un compte : où vont ses originaux, et jusqu'à quand le cloud les garde. */
-export async function originalsNotice(userId: string): Promise<{ home: OriginalsPolicy["home"]; reason: OriginalsPolicy["reason"]; purgeOn: string | null }> {
+export type OriginalsNotice = { home: OriginalsPolicy["home"]; reason: OriginalsPolicy["reason"]; wasPremium: boolean; purgeOn: string | null };
+
+export async function originalsNotice(userId: string): Promise<OriginalsNotice> {
   const policy = await originalsPolicy(userId);
   const purgeOn = policy.home === "local" ? purgeDate(policy, await ruleSince().catch(() => null)) : null;
-  return { home: policy.home, reason: policy.reason, purgeOn };
+  return { home: policy.home, reason: policy.reason, wasPremium: !!policy.cloudUntil, purgeOn };
+}
+
+/**
+ * État des originaux du cours courant pour la page Sources : où vont les nouveaux fichiers, ceux
+ * restés sur l'ordinateur, et combien attendent encore leur suppression du cloud (fin du Premium).
+ */
+export async function courseOriginals(userId: string, courseId: string): Promise<OriginalsNotice & { onComputer: string[]; cloudFiles: number }> {
+  const notice = await originalsNotice(userId);
+  const rows = await localOriginals();
+  const onComputer = rows.filter((o) => o.state === "local").map((o) => o.path);
+  let cloudFiles = 0;
+  if (notice.home === "local" && notice.purgeOn && !getCourse(courseId).paths) {
+    const known = new Set(rows.map((o) => o.path));
+    await q.ensureTable("sources");
+    cloudFiles = (await q.all<{ path: string }>(`SELECT DISTINCT path FROM sources`)).filter((r) => !known.has(r.path)).length;
+  }
+  return { ...notice, onComputer, cloudFiles };
 }
 
 type CourseReport = { transitPurged: number; cloudPurged: number };
