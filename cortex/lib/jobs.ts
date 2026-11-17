@@ -205,6 +205,23 @@ export function costForJob(type: JobType, target?: string | null): number {
   return base;
 }
 
+/**
+ * Composition QCM couverte par `paidCenti` (audit fuites I4) : un job « exam »
+ * qui tombe sur un format QCM (format changé après le devis, ancien job) ne
+ * produit pas plus que son prix — au moins une unité, les ouvertes gardées
+ * d'abord (elles portent le format), puis autant de QCM que la place le permet.
+ */
+export function qcmCompositionFor(paidCenti: number, count: number, open: number): { count: number; open: number } {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { creditCost } = require("@/lib/billing/credits") as typeof import("@/lib/billing/credits");
+  const unit = creditCost("qcm");
+  if (!(unit > 0)) return { count, open };
+  const max = Math.max(1, Math.floor(paidCenti / unit)) * QCM_UNIT_EQUIV;
+  if (count + 2 * open <= max) return { count, open };
+  const o = Math.min(open, Math.floor((max - 1) / 2));
+  return { count: Math.max(1, Math.min(count, max - 2 * o)), open: o };
+}
+
 // ─────────────── Checkpointing durable ───────────────
 // Un job long persiste sa progression PAR UNITÉ (lot/thème/question) en DB :
 // après un crash/redémarrage, la reprise repart du dernier point, sans doublon.

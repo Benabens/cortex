@@ -11,7 +11,12 @@ import { planMockExam, requestedFormat, resolveExamFormat, type ExamKind } from 
 /** `produced` / `requested` : questions livrées sur questions demandées, quand le générateur les compte. */
 export type MockExamResult = { id: number; url: string; texError?: string; produced?: number; requested?: number };
 
-export async function generateMockExam(opts: { count?: number; focus?: string; kind?: ExamKind | null; onStep?: StepCb; jobId?: number; onExamReady?: (examId: number, order?: { requested: number }) => void | Promise<void>; phaseMs?: Record<string, number> } = {}): Promise<MockExamResult> {
+export async function generateMockExam(opts: {
+  count?: number; focus?: string; kind?: ExamKind | null; onStep?: StepCb; jobId?: number;
+  onExamReady?: (examId: number, order?: { requested: number }) => void | Promise<void>; phaseMs?: Record<string, number>;
+  /** Prix payé pour ce job (centièmes) : un format QCM n'en produit pas plus que ce qu'il couvre (audit fuites I4). */
+  paidCenti?: number;
+} = {}): Promise<MockExamResult> {
   const step = opts.onStep ?? (() => {});
   // Un format demandé pour cet examen (cible du job) l'emporte sur celui du cours, sauf annales.
   const format = requestedFormat(await resolveExamFormat(), opts.kind);
@@ -20,8 +25,13 @@ export async function generateMockExam(opts: { count?: number; focus?: string; k
   step(`Format : ${format.summary}`, 3);
   if (plan.generator === "qcm") {
     const { generateQcmExam } = await import("@/lib/qcm");
-    const checkpoint = typeof opts.jobId === "number" ? (await import("@/lib/jobs")).jobCheckpointStore(opts.jobId) : undefined;
-    const r = await generateQcmExam({ count: plan.qcmCount, openCount: plan.openCount, focus: opts.focus, onStep: step, onExamReady: opts.onExamReady, phaseMs: opts.phaseMs, checkpoint });
+    const { jobCheckpointStore, qcmCompositionFor } = await import("@/lib/jobs");
+    const checkpoint = typeof opts.jobId === "number" ? jobCheckpointStore(opts.jobId) : undefined;
+    // Job « exam » tarifé au forfait : la route et le connecteur lancent un job qcm pour un format QCM ;
+    // ce cas reste pour un format changé après le devis, ramené à ce que le prix payé couvre.
+    const fit = opts.paidCenti === undefined ? { count: plan.qcmCount, open: plan.openCount } : qcmCompositionFor(opts.paidCenti, plan.qcmCount, plan.openCount);
+    if (fit.count !== plan.qcmCount || fit.open !== plan.openCount) step(`Composition ramenée au prix de l'examen : ${fit.count} QCM${fit.open ? ` + ${fit.open} ouverte(s)` : ""}`, 3);
+    const r = await generateQcmExam({ count: fit.count, openCount: fit.open, focus: opts.focus, onStep: step, onExamReady: opts.onExamReady, phaseMs: opts.phaseMs, checkpoint });
     return { id: r.id, url: `/mock/${r.id}`, texError: r.texError, produced: r.count + r.open, requested: r.requested + r.openRequested };
   }
   if (plan.generator === "blocks") {
