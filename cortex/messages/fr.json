@@ -251,7 +251,12 @@
     "reference_file_too_large": "fichier trop volumineux ({maxMb} Mo maximum).",
     "reference_image_refused": "photo ou image : Cortex n’en lit pas le texte. Dépose le document d’origine, ou un PDF au texte sélectionnable (scan avec reconnaissance de texte).",
     "reference_format_unsupported": "format non pris en charge pour une annale : PDF, Word, PowerPoint, HTML ou texte.",
-    "reference_duplicate_name": "trop d’annales du même nom : renomme le fichier."
+    "reference_duplicate_name": "trop d’annales du même nom : renomme le fichier.",
+    "account_delete_confirm_missing": "Confirmation manquante : tape « {word} » pour confirmer.",
+    "account_delete_owner_refused": "Le compte propriétaire de l'instance ne peut pas être supprimé depuis l'application.",
+    "account_delete_stripe_cancel_failed": "Suppression refusée : impossible de résilier l’abonnement Stripe ({detail}). Rien n’a été effacé.",
+    "account_delete_failed": "La suppression a échoué. Réessaie ; si le problème persiste, écris à {contact}.",
+    "pdf_recompile_failed": "Le PDF ne compile toujours pas."
   },
   "ingestReport": {
     "unreadable": "fichier abîmé ou format non reconnu : il n’a pas pu être lu. Ré-exporte-le en PDF, puis dépose-le de nouveau.",

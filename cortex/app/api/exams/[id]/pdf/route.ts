@@ -32,8 +32,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const ok = out.file.endsWith(".pdf");
   // Rien de la sortie du compilateur vers le client (audit du 14/11/2026, 🔴 1) : le détail va aux logs.
   if (!ok) console.error(`[pdf] examen #${examId} non recompilé :`, out.texError ?? "");
-  return NextResponse.json(
-    { ok, file: out.file || null, recompiled: true, warning: out.texWarning ?? null, error: ok ? null : "Le PDF ne compile toujours pas." },
-    { status: ok ? 200 : 500 },
-  );
+  const view = { ok, file: out.file || null, recompiled: true, warning: out.texWarning ?? null };
+  if (!ok) return apiError(req, "pdf_recompile_failed", 500, view);
+  return NextResponse.json(view);
 }
