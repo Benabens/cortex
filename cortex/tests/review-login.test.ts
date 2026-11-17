@@ -141,14 +141,14 @@ test("session : la connexion relecteur coupée invalide les sessions ouvertes pa
     process.env.REVIEW_LOGIN_PASSWORD_HASH = HASH;
     const { authCallbacks } = await import("../lib/auth");
     const jwt = authCallbacks.jwt as unknown as (p: Record<string, unknown>) => Record<string, unknown> | null;
-    const signIn = authCallbacks.signIn as unknown as (p: Record<string, unknown>) => boolean;
+    const signIn = authCallbacks.signIn as unknown as (p: Record<string, unknown>) => Promise<boolean | string>;
     const opened = jwt({ token: {}, user: { id: "u1" }, account: { provider: "review" } });
     assert.equal(opened?.review, true);
     assert.ok(jwt({ token: { ...opened } }), "ouverte : la session reste");
     // Lancement fermé : le compte démo passe quand même (ses variables valent invitation).
     process.env.INVITE_ONLY = "1";
-    assert.equal(signIn({ user: { email: EMAIL }, account: { provider: "review" } }), true);
-    assert.equal(signIn({ user: { email: EMAIL }, account: { provider: "google" } }), false);
+    assert.equal(await signIn({ user: { email: EMAIL }, account: { provider: "review" } }), true);
+    assert.equal(await signIn({ user: { email: EMAIL }, account: { provider: "google" } }), false);
     delete process.env.INVITE_ONLY;
     delete process.env.REVIEW_LOGIN_PASSWORD_HASH;
     assert.equal(jwt({ token: { ...opened } }), null, "coupée : la session tombe");

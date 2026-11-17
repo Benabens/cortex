@@ -33,6 +33,9 @@ if [[ "${#persona_key}" -lt 32 ]]; then
   exit 1
 fi
 
+# Derrière le proxy de Railway comme la prod : sans TRUST_PROXY, l'app refuse de démarrer (lib/boot-guards).
+export TRUST_PROXY="${TRUST_PROXY:-1}"
+
 # Monde réel : modèle payant, e-mails, sauvegardes vers le vrai bucket, Google,
 # métriques, lancement fermé et amorçage de la prod.
 unset LLM_API_KEY ANTHROPIC_API_KEY OPENAI_API_KEY \

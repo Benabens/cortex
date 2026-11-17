@@ -118,6 +118,23 @@ export function assertAuthRequiredHosted(env: Partial<NodeJS.ProcessEnv> = proce
 }
 
 /**
+ * AUDIT FUITES B4 — une instance hébergée est derrière le proxy de l'hébergeur : sans
+ * TRUST_PROXY (nombre de proxys de confiance, « 1 » chez Railway), lib/client-ip donne la
+ * même clé « direct » à tous les visiteurs, et chaque limite par IP (proxy.ts, connexion
+ * relecteur, lien magique) devient une limite commune au site entier. On refuse de servir.
+ */
+export function assertTrustProxyHosted(env: Partial<NodeJS.ProcessEnv> = process.env): void {
+  if (!hostedInstance(env)) return;
+  const hops = Number(env.TRUST_PROXY);
+  if (Number.isInteger(hops) && hops >= 1) return;
+  throw new Error(
+    "Configuration dangereuse : instance hébergée (Railway / CORTEX_HOSTED=1) sans TRUST_PROXY. " +
+    "Toutes les requêtes partageraient une seule IP : les limites par IP bloqueraient le site entier. " +
+    "Pose TRUST_PROXY=1 (un proxy devant l'app, cas Railway)."
+  );
+}
+
+/**
  * DÉPLOIEMENT GARDÉ = instance qui sert d'autres gens que son propriétaire ou
  * qui encaisse : AUTH_ENABLED=1, BILLING_ENABLED=1, hébergeur (Railway) ou
  * CORTEX_HOSTED=1. Les gardes « fail-closed » ne s'appliquent que là.
