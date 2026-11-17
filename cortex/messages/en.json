@@ -46,7 +46,9 @@
       "concurrent": "at once",
       "per_minute": "per minute",
       "mb": "MB"
-    }
+    },
+    "kind_format": "{count, plural, one {# format detection} other {# format detections}}",
+    "kind_lab_exercise": "{count, plural, one {# lab exercise} other {# lab exercises}}"
   },
   "errors": {
     "unauthenticated": "You’re not signed in.",
@@ -607,14 +609,16 @@
       "continue": "Continue",
       "confirm": "Confirm your withdrawal request for “{label}”. No refund is triggered automatically.",
       "binding": "The French version is legally binding.",
-      "frenchVersion": "Version française",
+      "frenchVersion": "French version (legally binding)",
       "frenchLegal": "Confirme ta rétractation pour « {label} ». Aucun remboursement n’est déclenché automatiquement.",
       "submit": "Confirm my withdrawal request",
       "back": "Back",
       "purchaseType": {
         "pack": "10-credit pack",
         "subscription": "Pro subscription"
-      }
+      },
+      "cancelUnconfigured": "Request received, but Stripe is not set up to schedule the cancellation. The publisher will handle it manually.",
+      "cancelFailed": "Request received, but the automatic cancellation failed. The publisher will handle it manually."
     },
     "assistants": {
       "metadata": "Connect your assistant · Cortex",
@@ -948,7 +952,8 @@
     "backTitle": "{count, plural, one {# file stayed on your computer} other {# files stayed on your computer}}",
     "backHint": "You’re Premium: import this course’s folder again to put {replacement} in the cloud. Cortex recognises each file by its fingerprint, so its index won’t change.",
     "backOne": "it",
-    "backMany": "them"
+    "backMany": "them",
+    "attachmentGone": "This attachment is no longer on Cortex’s servers: a free account only keeps attachments for {hours} h, long enough to read them. It stayed on your device."
   },
   "localSource": {
     "titleNamed": "{name} is on your computer",
@@ -1175,7 +1180,9 @@
     "severity": "Severity",
     "adding": "Adding…",
     "add": "Add",
-    "mined": "{count, plural, one {# weak point extracted and tracked} other {# weak points extracted and tracked}}"
+    "mined": "{count, plural, one {# weak point extracted and tracked} other {# weak points extracted and tracked}}",
+    "pdfNoText": "This PDF has no readable text (a scan?): it is added to your tracker as is.",
+    "noneInDiscussion": "No clear weakness found in this conversation."
   },
   "weaknessBase": {
     "filterAll": "All",
@@ -1202,7 +1209,8 @@
     "image": "image",
     "trainOn": "Practise: {topic}",
     "train": "Practise",
-    "remove": "Stop tracking: {topic}"
+    "remove": "Stop tracking: {topic}",
+    "pendingTopic": "(to be analysed)"
   },
   "weaknessesPage": {
     "title": "Weak points",
@@ -1567,5 +1575,10 @@
     "unread": "Unread files",
     "unreadHint": "The other course files were read normally.",
     "removeFromCourse": "Remove from course"
+  },
+  "sourceViewer": {
+    "found": "⟵ Cortex · found here",
+    "clear": "clear highlighting",
+    "notFound": "File not found"
   }
 }

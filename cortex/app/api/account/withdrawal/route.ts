@@ -44,7 +44,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     const purchaseId = String(body.purchaseId);
     const eligible = await eligibleWithdrawals(userId);
     if (!eligible.some((purchase) => purchase.type === type && purchase.id === purchaseId)) {
-      throw new Error("Cet achat n’est plus éligible à la rétractation en ligne.");
+      throw new Error("purchase no longer eligible"); // message interne : la réponse est withdrawal_request_failed
     }
     const result = await createWithdrawalRequest(userId, type, purchaseId);
     let cancellationWarning: string | null = null;
@@ -52,10 +52,10 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
       const sub = await authGet<{ subscription_id: string | null }>(`SELECT subscription_id FROM subscriptions WHERE user_id = ? AND status IN ('active','trialing')`, userId);
       if (sub?.subscription_id) {
         const key = process.env.STRIPE_SECRET_KEY;
-        if (!key) cancellationWarning = "Demande reçue, mais Stripe n’est pas configuré pour programmer la résiliation. L’éditeur la traitera manuellement.";
+        if (!key) cancellationWarning = translator(requestLocale(req))("account.withdrawal.cancelUnconfigured");
         else try { await stripeClient(key).subscriptions.update(sub.subscription_id, { cancel_at_period_end: true }); }
         catch (error) {
-          cancellationWarning = "Demande reçue, mais la résiliation automatique a échoué. L’éditeur la traitera manuellement.";
+          cancellationWarning = translator(requestLocale(req))("account.withdrawal.cancelFailed");
           log("error", "withdrawal.subscription_cancel_failed", { subscription: sub.subscription_id, message: error instanceof Error ? error.message.slice(0, 160) : String(error) });
         }
       }
