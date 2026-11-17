@@ -70,16 +70,18 @@ ouvertes à tous, sauf lancement fermé (`INVITE_ONLY=1`, § 12).
 
 ## 1 bis. Railway — la config en code (`.railway/railway.ts`)
 
-Railway cesse de lire `railway.json` / `railway.toml` (Config as Code) le
+Railway cessera de lire `railway.json` / `railway.toml` (Config as Code) le
 **2026-12-01**. Le projet est décrit dans `.railway/railway.ts` (Infrastructure
 as Code) : l'app (source, build Dockerfile, healthcheck, région, replica,
 domaine, volume `/data`, noms des variables), Postgres et son volume, les deux
 buckets. Les valeurs des variables restent sur Railway (`preserve()`).
+`railway.json` a été supprimé (aucun chemin Config File n'était stocké sur le
+service, donc rien ne le cherchait) : le démarrage propre aux previews de PR,
+qu'il portait, est maintenant dans l'image (`cortex/scripts/start.sh`).
 
 Ce fichier n'est lu **que par la CLI**, jamais pendant un déploiement : merger
 une PR qui le modifie ne change rien sur Railway tant que personne ne lance
-`railway config apply`. Le démarrage propre aux previews de PR, que faisait
-`railway.json`, est porté par l'image (`cortex/scripts/start.sh`).
+`railway config apply`.
 
 ```bash
 cd .railway && npm ci && cd ..   # SDK railway épinglé, une fois
