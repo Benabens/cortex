@@ -2,6 +2,8 @@ import { coursePaths } from "@/lib/courses";
 import { servedFileHeaders } from "@/lib/security-headers";
 import { requireCourse } from "@/lib/req";
 import { storage } from "@/lib/storage";
+import { currentUser } from "@/db/context";
+import { serveCounted } from "@/lib/served-bytes";
 import { localPreviewUrl } from "@/lib/originals/registry";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
@@ -77,12 +79,13 @@ export async function GET(req: NextRequest) {
   // Aperçu d'une page (#page=N) : le PDF est diffusé par plages (ou depuis une
   // URL présignée du seau), jamais lu en entier en mémoire.
   const ext = abs.split(".").pop()?.toLowerCase() ?? "";
-  const res = await storage().serve(abs, req, {
+  // Relayé par le serveur : borné par compte et par jour (audit fuites I6).
+  const res = await serveCounted(currentUser(), () => storage().serve(abs, req, {
     contentType: MIME[ext] ?? "application/octet-stream",
     headers: servedFileHeaders(MIME[ext] ?? "application/octet-stream", {
       "content-disposition": "inline",
       "cache-control": "private, max-age=3600",
     }),
-  });
+  }));
   return res ?? new NextResponse("Not found", { status: 404 });
 }

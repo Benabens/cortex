@@ -39,7 +39,9 @@ export async function serveCounted(userId: string, run: () => Promise<Response |
   const res = await run();
   if (res?.body && (res.status === 200 || res.status === 206)) {
     const bytes = Number(res.headers.get("content-length"));
-    if (Number.isFinite(bytes) && bytes > 0) served.set(userId, { day, bytes: used + bytes });
+    // Relu après l'attente : des requêtes parallèles s'additionnent toutes.
+    const now2 = served.get(userId);
+    if (Number.isFinite(bytes) && bytes > 0) served.set(userId, { day, bytes: (now2?.day === day ? now2.bytes : 0) + bytes });
   }
   return res;
 }
