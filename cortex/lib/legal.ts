@@ -67,9 +67,13 @@ export function legalReady(env: Partial<NodeJS.ProcessEnv> = process.env): boole
   return !!(l.terms && l.privacy && l.refund && l.notice);
 }
 
-/** Version courante des CGV (chaîne libre : date de publication). */
+/**
+ * Version courante des CGV (chaîne libre : date de publication). Le défaut suit
+ * VERSION de la vitrine (cortex-landing, work/build-legal.py) ; en production,
+ * LEGAL_TERMS_VERSION prime et doit être changée le jour de la publication.
+ */
 export function termsVersion(env: Partial<NodeJS.ProcessEnv> = process.env): string {
-  return env.LEGAL_TERMS_VERSION?.trim() || "2026-10";
+  return env.LEGAL_TERMS_VERSION?.trim() || "2026-11-17";
 }
 
 export function stripeConfigured(env: Partial<NodeJS.ProcessEnv> = process.env): boolean {
