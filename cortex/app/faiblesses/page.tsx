@@ -8,22 +8,24 @@ import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { useApi, useCourse } from "@/lib/ux/api";
 import type { WeaknessesResp } from "@/lib/ux/weaknesses";
+import { useTranslations } from "use-intl/react";
 
 export default function FaiblessesPage() {
-  const { courseId } = useCourse();
+  const t = useTranslations("weaknessesPage");
+  const { courseId, course } = useCourse();
   const { data, loading, error, refetch } = useApi<WeaknessesResp>("/api/weaknesses");
 
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
-        title="Faiblesses"
-        description="Transforme tes erreurs en plan de révision. Cortex extrait tes lacunes et les garde à l’œil."
+        title={t("title")}
+        description={t("description")}
       />
 
       <WeaknessInbox key={`inbox-${courseId}`} onAdded={refetch} />
 
       {loading ? (
-        <div aria-busy="true" aria-label="Chargement des faiblesses">
+        <div aria-busy="true" aria-label={t("loading")}>
           <div className="skeleton mb-3 h-9 w-72 rounded-full" />
           <div className="panel space-y-2 rounded-xl p-3">
             {[0, 1, 2].map((i) => (
@@ -42,18 +44,18 @@ export default function FaiblessesPage() {
         <Panel className="flex flex-col items-center gap-3 rounded-xl px-6 py-12 text-center">
           <WifiOff className="size-6 text-danger-hi" strokeWidth={2} />
           <p className="text-[0.95rem] font-medium text-ink-1">
-            Impossible de charger tes faiblesses
+            {t("loadFailed")}
           </p>
           <p className="max-w-xs text-[0.85rem] text-ink-3">
-            Le moteur ne répond pas pour ce cours. Réessaie dans un instant.
+            {t("loadHint")}
           </p>
           <Button variant="secondary" size="sm" onClick={refetch}>
             <RotateCw className="size-4" strokeWidth={2.25} aria-hidden="true" />
-            Réessayer
+            {t("retry")}
           </Button>
         </Panel>
       ) : (
-        <WeaknessBase key={`base-${courseId}`} weaknesses={data.weaknesses} onChanged={refetch} />
+        <WeaknessBase key={`base-${courseId}`} weaknesses={data.weaknesses} onChanged={refetch} language={course?.language} />
       )}
     </div>
   );
