@@ -134,11 +134,12 @@ test("un échec de compilation ne renvoie pas le journal LaTeX : message génér
   // Le journal cite la ligne fautive : c'est par là que le texte d'un fichier lu ressortait.
   const MARK = "CONTENU_DU_JOURNAL_7f3a";
   fs.mkdirSync(examsDir(), { recursive: true });
-  fs.writeFileSync(path.join(examsDir(), "fuite-1.tex"), `\\documentclass{article}\n\\begin{document}\n\\nonDefinie ${MARK}\n\\end{document}\n`);
+  // Macro inconnue qui ne commence pas par « \n » : un « \n » suivi de lettres est réparé en retour à la ligne (lib/exam-latex).
+  fs.writeFileSync(path.join(examsDir(), "fuite-1.tex"), `\\documentclass{article}\n\\begin{document}\n\\macroNonDefinie ${MARK}\n\\end{document}\n`);
   const logged = t.mock.method(console, "error", () => {});
   const err = await compileExamPdf("fuite-1").then(() => null, (e: Error) => e);
   assert.ok(err, "la compilation devait échouer");
   assert.match(err.message, /^Échec compilation LaTeX/);
-  assert.doesNotMatch(err.message, new RegExp(`${MARK}|nonDefinie|Undefined`), err.message);
+  assert.doesNotMatch(err.message, new RegExp(`${MARK}|NonDefinie|Undefined`), err.message);
   assert.ok(logged.mock.calls.some((c) => c.arguments.map(String).join(" ").includes("Undefined control sequence")), "le détail doit rester dans les logs serveur");
 });
