@@ -32,10 +32,13 @@ export async function register() {
   try {
     const { runWithCourse } = await import("@/db/client");
     const { runWithUser } = await import("@/db/context");
-    const { ensureCoursesLoaded, listCourses } = await import("@/lib/courses");
+    const { ensureCoursesLoaded, listCourses, watchCourses } = await import("@/lib/courses");
     // Les cours vivent en base : en postgres, rien ne peut les lire de
     // façon synchrone → on remplit le cache ICI, avant la première requête.
     await ensureCoursesLoaded();
+    // Puis on le garde à jour : un cours écrit par un autre processus (script lancé
+    // dans le conteneur, worker) apparaît dans les pages sans redémarrage.
+    watchCourses();
     const { reconcileStaleJobs, pumpQueuedJobs } = await import("@/lib/jobs");
     const { dbDriverName } = await import("@/db/q");
 
