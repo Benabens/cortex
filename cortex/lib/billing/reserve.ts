@@ -7,7 +7,7 @@ import { BAD_OUTPUT_CODES, llmErrorCode } from "@/lib/llm/errors";
 import { log } from "@/lib/metrics";
 import { defaultProviderName } from "@/lib/llm/config";
 import { expectedJobCostUsd } from "./budget";
-import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, lockAccountInTx as lockUser } from "./credits";
+import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, lockAccountInTx as lockUser, openSubscriptionWindowInTx } from "./credits";
 import { quotaTrackingActive, type GateIssue, type QuotaBucket } from "./guards";
 import { SLOT_MAX_AGE_MS, launchVerdict, maxActiveJobsLimit, readCounterState, readSpendState, type LaunchSpec, type LimitsState } from "./limits";
 import { isOwner } from "./owner";
@@ -132,9 +132,7 @@ export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
       // comprise, annuel seulement) d'abord, puis crédits achetés — décidés et
       // écrits dans la même transaction, aucune course entre les deux.
       const { subCenti, rechargeWindow } = counters.credits;
-      if (rechargeWindow) {
-        await tx.run(`UPDATE subscriptions SET remaining = monthly_credits, window_anchor = ?, month_anchor = ?, updated_at = ? WHERE user_id = ?`, rechargeWindow, rechargeWindow.slice(0, 7), t, userId);
-      }
+      if (rechargeWindow) await openSubscriptionWindowInTx(tx, userId, rechargeWindow, t);
       if (cost > 0) {
         const usedSub = Math.min(cost, subCenti);
         await tx.run(

@@ -38,9 +38,7 @@ const ENV: Record<string, string> = {
 };
 Object.assign(process.env, ENV);
 delete process.env.JOB_SPEND_CAP_USD_PER_CREDIT;
-
-import { runWithCourse } from "../db/client";
-import { runWithUser } from "../db/context";
+// Aucun import statique du store : il lirait CORTEX_DATA_DIR avant l'affectation ci-dessus (imports remontés).
 
 let server: http.Server;
 let hits = 0;
@@ -71,7 +69,11 @@ after(async () => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-const inMl = <T,>(user: string, fn: () => Promise<T>) => runWithUser(user, () => runWithCourse("ml", fn));
+const inMl = async <T,>(user: string, fn: () => Promise<T>) => {
+  const { runWithUser } = await import("../db/context");
+  const { runWithCourse } = await import("../db/client");
+  return runWithUser(user, () => runWithCourse("ml", fn));
+};
 const isSpendCap = (e: Error & { code?: string }) => e.code === "SPEND_CAP" && /plafond/i.test(e.message);
 
 test("B2 : un QCM à 4 crédits s'arrête net quand sa dépense atteint 4 × 0,66 $ (arrêt propre, code SPEND_CAP)", async () => {
