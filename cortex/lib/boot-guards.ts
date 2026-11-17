@@ -44,7 +44,8 @@ const LOOPBACK = ["localhost", "127.0.0.1", "::1"];
  * - Postgres joint par le réseau PRIVÉ, cloisonné par environnement chez
  *   Railway : c'est forcément la base vierge de la preview ;
  * - LLM hermétique en bouclage (/api/e2e-llm), jamais un modèle payant ;
- * - ni e-mails réels, ni sauvegardes vers le vrai bucket, ni clé Stripe live ;
+ * - ni e-mails réels, ni sauvegardes vers le vrai bucket, ni seau de fichiers
+ *   de la prod (STORAGE_S3_*), ni clé Stripe live ;
  * - connexion persona fermée par E2E_PERSONA_KEY : l'URL de la preview est
  *   publiée sur un dépôt public.
  */
@@ -66,6 +67,7 @@ export function railwayPreviewViolations(env: Partial<NodeJS.ProcessEnv> = proce
   if ((env.E2E_PERSONA_KEY ?? "").length < 32) why.push("E2E_PERSONA_KEY absente ou trop courte (connexion persona ouverte à qui trouve l'URL)");
   if (env.RESEND_API_KEY) why.push("RESEND_API_KEY posé (e-mails réels)");
   if (env.BACKUP_S3_BUCKET) why.push("BACKUP_S3_BUCKET posé (sauvegardes vers le vrai bucket)");
+  if (env.STORAGE_S3_BUCKET) why.push("STORAGE_S3_BUCKET posé (fichiers lus et écrits dans le seau de la prod)");
   return why;
 }
 
@@ -131,6 +133,33 @@ export function assertTrustProxyHosted(env: Partial<NodeJS.ProcessEnv> = process
     "Configuration dangereuse : instance hébergée (Railway / CORTEX_HOSTED=1) sans TRUST_PROXY. " +
     "Toutes les requêtes partageraient une seule IP : les limites par IP bloqueraient le site entier. " +
     "Pose TRUST_PROXY=1 (un proxy devant l'app, cas Railway)."
+  );
+}
+
+/**
+ * AUDIT FUITES I15 — SEAU DE FICHIERS DE LA PROD HORS PRODUCTION. Railway crée
+ * tout nouvel environnement (preview de PR, staging) en recopiant les variables
+ * de la prod, STORAGE_S3_* comprises : l'instance lirait les PDF des vrais
+ * comptes et pourrait y écrire ou y effacer. scripts/preview-entrypoint.sh les
+ * retire ; on refuse ici tout autre cas, quel que soit le chemin de démarrage.
+ * Le nom du seau de la prod n'est pas connu du code : sur Railway hors de
+ * l'environnement « production », un seau est tenu pour celui de la prod, sauf
+ * s'il est déclaré propre à CET environnement (STORAGE_S3_ENVIRONMENT = son
+ * nom). La valeur recopiée de la prod ne peut pas le déclarer : elle porte le
+ * nom de la prod, ou rien. Hors Railway (poste de dev, MinIO, CI) : rien à
+ * vérifier, il n'y a pas de prod recopiée.
+ */
+export function assertStorageBucketIsolated(env: Partial<NodeJS.ProcessEnv> = process.env): void {
+  if (!(env.STORAGE_S3_BUCKET ?? "").trim()) return;
+  const name = railwayEnvironmentName(env);
+  if (!name && !env.RAILWAY_PROJECT_ID) return;
+  if (name === "production") return;
+  if (name && (env.STORAGE_S3_ENVIRONMENT ?? "").trim() === name) return;
+  throw new Error(
+    `Configuration dangereuse : STORAGE_S3_BUCKET posé dans l'environnement Railway « ${name || "inconnu"} », ` +
+    "qui n'est pas la production. Railway recopie les variables de la prod : ce serait le seau des vrais comptes. " +
+    "Retire STORAGE_S3_* de cet environnement (les fichiers iront sur son volume) — ou, pour un seau qui lui est " +
+    `propre, pose STORAGE_S3_ENVIRONMENT=${name || "<nom de l'environnement>"}.`
   );
 }
 
