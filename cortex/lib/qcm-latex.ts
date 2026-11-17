@@ -20,6 +20,11 @@ import path from "node:path";
  */
 const LATEX_DIR = path.join(process.cwd(), "latex");
 
+/** Les QCM de l'énoncé sur deux colonnes, comme l'annale ; le corrigé (explications) garde la pleine largeur. */
+function inColumns(items: string[], two: boolean): string[] {
+  return two ? [String.raw`\begin{multicols}{2}`, ...items, String.raw`\end{multicols}`] : items;
+}
+
 function renderQcmItem(q: QcmItem, n: number, points: number, withKey: boolean, pdf: ExamPdf): string {
   const L = pdf.qcm;
   const opts = q.options.map((o, k) => {
@@ -138,7 +143,7 @@ export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, inc
   const firstPart = hasQcm
     ? [
         String.raw`\par\noindent{\large\textbf{${L.qcmPart(hasOpen)} \hfill [${L.points(qcmTotal)}]}}\par\vspace{3pt}\hrule\vspace{8pt}`,
-        ...data.items.map((q, i) => renderQcmItem(q, i + 1, itemPts[i], includeSolutions, pdf)),
+        ...inColumns(data.items.map((q, i) => renderQcmItem(q, i + 1, itemPts[i], includeSolutions, pdf)), pdf.layout.questions.columns === 2 && !includeSolutions),
       ].join("\n")
     : "";
 
