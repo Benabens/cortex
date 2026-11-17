@@ -29,6 +29,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const storage = await checkStorage(currentUser(), declaredBytes(req));
   if (storage) return NextResponse.json({ error: storage.error }, { status: storage.status });
   // Compte gratuit : ses originaux ne restent pas, c'est son index qui est borné (lib/originals).
+  // Refus avant de lire le corps ; addFileSource revérifie (même règle que l'outil MCP).
   const indexFull = await checkIndexQuota(currentUser());
   if (indexFull) return NextResponse.json({ error: indexFull.error }, { status: indexFull.status });
   const form = await readFormData(req, UPLOAD_LIMITS.source);

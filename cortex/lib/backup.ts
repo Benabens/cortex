@@ -159,10 +159,10 @@ function tarDir(srcDir: string, outFile: string, exclude: string[], keep?: (rel:
 /**
  * Fichiers qui n'ont rien à faire dans une sauvegarde et peuvent disparaître pendant
  * l'archivage (tar échoue sur un fichier listé puis absent) : cache des pages,
- * exports en cours, téléchargements temporaires du stockage objet.
+ * exports en cours, repères de transit, téléchargements temporaires du stockage objet.
  */
 function isTransient(rel: string): boolean {
-  return rel.startsWith(".page-cache/") || rel.startsWith(".export-tmp/") || /\.cortex-dl-[0-9a-f]+$/.test(rel);
+  return rel.startsWith(".page-cache/") || rel.startsWith(".export-tmp/") || rel.startsWith(".transit/") || /\.cortex-dl-[0-9a-f]+$/.test(rel);
 }
 
 /** Fichiers sous `dir` (chemins relatifs, séparateur `/`), sans suivre les liens symboliques. */
@@ -231,7 +231,7 @@ export async function createBackup(opts: CreateBackupOptions): Promise<CreateBac
   // écritures récentes non encore fusionnées dans le .db — les exclure perdrait
   // des données. Exclus : le dossier de backup lui-même (anti-récursion) et le
   // cache des images de pages (lib/page-cache : rendu de nouveau à la demande).
-  const excluded: string[] = ["./.page-cache"]; // = PAGE_CACHE_DIR, littéral : ce module n'importe que node:*
+  const excluded: string[] = ["./.page-cache", "./.transit"]; // = PAGE_CACHE_DIR, TRANSIT_DIR, littéraux : ce module n'importe que node:*
   if (isInside(dataDir, opts.backupDir)) {
     excluded.push(`./${path.relative(dataDir, path.resolve(opts.backupDir))}`);
   }
@@ -239,11 +239,18 @@ export async function createBackup(opts: CreateBackupOptions): Promise<CreateBac
   // (qui n'en est que le cache) — ne restent à archiver que les fichiers locaux.
   const store = opts.objectStore;
   if (store) excluded.push(`fichiers de cours (dans ${store.location})`);
+  // Originaux d'un compte gratuit en transit (repères sous .transit/, lib/storage/transit) : jamais
+  // sauvegardés, ils quittent le serveur sous 24 h (décision de Ben du 17/11/2026).
+  // Sans seau, motifs tar littéraux seulement : un nom à caractère joker reste archivé plutôt que
+  // de risquer d'exclure un autre fichier.
+  const transit = new Set(listFiles(path.join(dataDir, ".transit")));
+  const transitPatterns = [...transit].filter((rel) => !/[*?[\\]/.test(rel)).map((rel) => `./${rel}`);
+  if (transit.size) excluded.push(`${transit.size} original(aux) en transit (comptes gratuits)`);
   const dataArchive = path.join(outDir, "data.tar.gz");
   log(`[backup] archive du volume ${dataDir}${store ? ` (hors fichiers de ${store.location})` : ""}…`);
   const backupRel = isInside(dataDir, opts.backupDir) ? path.relative(dataDir, path.resolve(opts.backupDir)).split(path.sep).join("/") : null;
-  tarDir(dataDir, dataArchive, store ? [] : excluded, store
-    ? (rel) => !store.inBucket(rel) && !isTransient(rel) && !(backupRel && (rel === backupRel || rel.startsWith(`${backupRel}/`)))
+  tarDir(dataDir, dataArchive, store ? [] : [...excluded.filter((e) => e.startsWith("./")), ...transitPatterns], store
+    ? (rel) => !store.inBucket(rel) && !isTransient(rel) && !transit.has(rel) && !(backupRel && (rel === backupRel || rel.startsWith(`${backupRel}/`)))
     : undefined);
 
   // ── 2) base ───────────────────────────────────────────────────────────────

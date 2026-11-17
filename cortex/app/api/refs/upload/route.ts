@@ -4,7 +4,7 @@ import { UPLOAD_LIMITS, readFormData, withBodyLimit } from "@/lib/upload-limit";
 import { ingestRefFile } from "@/lib/sources";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
-import { checkIndexQuota } from "@/lib/originals/index-quota";
+import { checkIndexQuota, refreshIndexUsage } from "@/lib/originals/index-quota";
 import { checkStorage, declaredBytes } from "@/lib/storage-quota";
 import { currentUser } from "@/db/context";
 import { storedFileName } from "@/lib/stored-file";
@@ -68,8 +68,12 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     }
   }
   // Gratuit : une annale Word, HTML ou texte part tout de suite ; une annale PDF attend la
-  // préparation du cours (lecture des pages en image), 24 h au plus.
-  if (local) await settleOriginals({ after: "ingest", paths: outcomes.map((o) => o.path) });
+  // préparation du cours (lecture des pages en image), FREE_TRANSIT_HOURS au plus. Le relevé de
+  // l'index suit l'envoi : le quota d'un gratuit se juge sur son texte indexé à jour.
+  if (local) {
+    await settleOriginals({ after: "ingest", paths: outcomes.map((o) => o.path) });
+    await refreshIndexUsage(currentUser(), course).catch(() => {});
+  }
   // Rangée mais sans texte (scan) : gardée, et signalée comme le fait le rapport d'ingestion.
   const unread = ingestProblems({ files: outcomes });
   if (!saved.length) {

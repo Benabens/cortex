@@ -263,7 +263,7 @@ async function main() {
         await logJob(jobId, s);
       };
       const f = await detectFormat({ onStep });
-      await settleAfterPages();
+      // Pas de départ ici : l'index exo par exo (préparation, blueprint) relit encore les pages.
       await setJob(jobId, { status: "done", progress: 100, currentStep: `Format détecté : ${(f.format_summary || "").slice(0, 60)} ✓` });
       return finish(0);
     } catch (e) { await fail((e as Error)?.message || String(e)); }
@@ -369,6 +369,8 @@ async function main() {
   }
   const { targetKind } = await import("../lib/exam-format");
   const examKind = job.type === "exam" ? targetKind(job.target) : null;
+  const offServer = await (await import("../lib/course-vision")).offServerRefsNote().catch(() => null);
+  if (offServer) await logJob(jobId, offServer);
 
   try {
     const res =

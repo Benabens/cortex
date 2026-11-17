@@ -96,12 +96,13 @@ async function pastExamNextSteps(userId: string): Promise<string> {
 async function startFreeIngest(courseId: string): Promise<string> {
   const note = "Free account: Cortex keeps only the text index of this material, not the file (Premium keeps originals in the cloud).";
   const { activeJob, createJobExclusive, startWorker } = await import("@/lib/jobs");
+  const { transitHours } = await import("@/lib/originals/intake");
   if (await activeJob("ingest")) return `${note} It will be indexed by the ingestion already running.`;
   try {
     const { id } = await createJobExclusive("ingest");
     await startWorker(id, courseId);
     return `${note} Its indexing has started (free).`;
   } catch {
-    return `${note} Indexing could not start now: call prepare_course within 24 hours, or the material will have to be added again.`;
+    return `${note} Indexing could not start now: call prepare_course within ${transitHours()} hours, or the material will have to be added again.`;
   }
 }

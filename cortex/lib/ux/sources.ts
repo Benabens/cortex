@@ -9,6 +9,7 @@
  * DELETE /api/sources?path= (removeUploadedRef) — câblés en cases à cocher dans FileManager.
  */
 import type { IngestProblem } from "@/lib/ingest-report";
+import type { OriginalsNotice } from "@/lib/originals/retention";
 
 export type SourceExam = {
   path: string;
@@ -38,14 +39,8 @@ export type CorpusSourceItem = {
  * son ordinateur ; `onComputer` = chemins dont Cortex ne garde que l'index ; `purgeOn` + `cloudFiles`
  * = fichiers encore dans le cloud après la fin du Premium, et le jour de leur suppression.
  */
-export type OriginalsInfo = {
-  home: "cloud" | "local";
-  reason: string;
-  wasPremium: boolean;
-  purgeOn: string | null;
-  onComputer: string[];
-  cloudFiles: number;
-};
+/** Originaux du cours (GET /api/sources, lib/originals/retention courseOriginals). */
+export type OriginalsInfo = OriginalsNotice & { onComputer: string[]; cloudFiles: number };
 
 export type SourcesResp = { exams: SourceExam[]; corpus: CorpusAgg[]; sources?: CorpusSourceItem[]; unread?: IngestProblem[]; originals?: OriginalsInfo | null };
 
