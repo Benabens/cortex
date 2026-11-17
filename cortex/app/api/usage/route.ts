@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { LAUNCH_KINDS, assistSpec, getUsageLimits, jobSpec } from "@/lib/billing/limits";
 import { costForJob, type JobType } from "@/lib/jobs";
 import { useUser } from "@/lib/req";
@@ -24,8 +25,8 @@ export async function GET(req: NextRequest) {
   useUser(req);
   const kind = req.nextUrl.searchParams.get("kind");
   const target = req.nextUrl.searchParams.get("target");
-  if (kind && !CHECKABLE.has(kind)) return NextResponse.json({ error: "Type de génération inconnu." }, { status: 400 });
-  if (target && target.length > 2000) return NextResponse.json({ error: "Composition trop longue." }, { status: 400 });
+  if (kind && !CHECKABLE.has(kind)) return apiError(req, "generation_type_unknown", 400);
+  if (target && target.length > 2000) return apiError(req, "composition_too_long", 400);
   let extra: Parameters<typeof getUsageLimits>[1];
   if (kind) {
     const known = (Object.values(LAUNCH_KINDS) as Array<(typeof LAUNCH_KINDS)[keyof typeof LAUNCH_KINDS]>).find((k) => k.jobType === kind)

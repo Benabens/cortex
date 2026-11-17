@@ -4,13 +4,16 @@ import { nowStr } from "@/db/q";
 import { defaultProviderName } from "@/lib/llm/config";
 import { MiB, storageQuotaBytesFor, userStorageBytes } from "@/lib/storage-quota";
 import { accountBudget, aiBudgetMargin, clientMonthSpendUsd, dailySpendCapUsd, expectedJobCostUsd, globalRevenueCapUsd, purchasedLedgerCenti } from "./budget";
-import { DELTA_CENTI, billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, fmtCredits, fromCenti, insufficient, subscriptionLive, type SubRow } from "./credits";
-import { quotaFor, quotaTrackingActive, ratePerUserPerMin, type GateIssue, type QuotaBucket } from "./guards";
+import { DELTA_CENTI, billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, fromCenti, insufficient, subscriptionLive, type SubRow } from "./credits";
+import { quotaFor, quotaTrackingActive, ratePerUserPerMin, type QuotaBucket } from "./guards";
 import { intLimit } from "./env";
 import { isOwner } from "./owner";
 import { rechargeDue, nextRechargeDate } from "./subscription-windows";
 import { isPaidProvider, spendCapPerUserUsd, spendCapUsd, spendMonth } from "./usage";
 import { formatReset, type LimitKey, type LaunchKind, type UsageLimits, type UsageLimit, type KindUsage } from "./limits-text";
+import { currentLocale } from "@/lib/i18n/current";
+import { translator } from "@/lib/i18n/translate";
+import { refusal, type Refusal, type UserError } from "@/lib/i18n/user-error";
 
 export type { LimitKey, LaunchKind, UsageLimits, UsageLimit, KindUsage } from "./limits-text";
 
@@ -274,7 +277,7 @@ type Evaluated = {
   transient: boolean;
   status: number;
   resetAt: string | null;
-  message: (when: string | null) => string;
+  userError: (when: string | null) => UserError;
 };
 
 /**
@@ -296,7 +299,7 @@ export function evaluateLimits(s: LimitsState, spec: LaunchSpec): Evaluated[] {
       const reset = s.rate.oldestAt ? toIso(isoOffset(s.rate.oldestAt, 60_000)) : null;
       out.push({
         key: "rate", capacity: Math.max(0, cap - s.rate.used), transient: true, status: 429, resetAt: reset,
-        message: (when) => `Trop de requêtes en une minute (${cap} au maximum par compte) : réessaie ${when ?? "dans une minute"}.`,
+        userError: (when) => ({ code: "billing_rate_limit", params: { max: cap, when: when ?? translator(currentLocale())("limits.in_a_minute") } }),
       });
     }
     const q = s.quota[spec.bucket];
@@ -305,14 +308,14 @@ export function evaluateLimits(s: LimitsState, spec: LaunchSpec): Evaluated[] {
       out.push({
         key: spec.bucket === "gen" ? "daily_generations" : "daily_assistance",
         capacity: Math.max(0, cap - used), transient: false, status: 429, resetAt: day,
-        message: (when) => `${spec.bucket === "gen" ? "Quota quotidien de générations" : "Quota quotidien d'assistance"} atteint (${used}/${cap}) : remise à zéro ${when}.`,
+        userError: (when) => ({ code: spec.bucket === "gen" ? "billing_daily_generation_quota" : "billing_daily_assistance_quota", params: { used, max: cap, when: when ?? "" } }),
       });
     }
     if (spec.jobSlot && s.slots.cap !== null) {
       const cap = s.slots.cap;
       out.push({
         key: "active_jobs", capacity: Math.max(0, cap - s.slots.used), transient: true, status: 429, resetAt: null,
-        message: () => `Trop de générations en cours (${cap} au maximum par compte) : attends la fin de l'une d'elles.`,
+        userError: () => ({ code: "billing_active_jobs_limit", params: { max: cap } }),
       });
     }
     if (s.billing && s.credits) {
@@ -322,7 +325,7 @@ export function evaluateLimits(s: LimitsState, spec: LaunchSpec): Evaluated[] {
         key: "credits",
         capacity: cost > 0 ? Math.max(0, Math.floor(c.balanceCenti / cost + EPS)) : c.balanceCenti > 0 ? INF : 0,
         transient: false, status: 402, resetAt: c.rechargeAt ? `${c.rechargeAt}T00:00:00Z` : null,
-        message: () => refusal?.error ?? insufficient(0, Math.max(cost, 1))!.error,
+        userError: () => refusal ?? insufficient(0, Math.max(cost, 1))!,
       });
       if (cost > 0 && s.budget) {
         const paidCount = Math.floor(c.paidCenti / cost + EPS);
@@ -332,8 +335,7 @@ export function evaluateLimits(s: LimitsState, spec: LaunchSpec): Evaluated[] {
             key: "free_capacity",
             capacity: paidCount + Math.max(0, Math.floor((fm.capUsd - fm.spentUsd - s.committedGlobalUsd) / expected + EPS)),
             transient: false, status: 402, resetAt: month,
-            message: (when) => "La capacité de génération offerte ce mois-ci est épuisée. Les crédits achetés restent toujours utilisables : "
-              + `achète un pack ou abonne-toi pour continuer, sinon elle rouvre ${when}. ${BUY_URL}`,
+            userError: (when) => ({ code: "billing_free_capacity_exhausted", params: { when: when ?? "" } }),
           });
         }
         const b = s.budget;
@@ -341,8 +343,7 @@ export function evaluateLimits(s: LimitsState, spec: LaunchSpec): Evaluated[] {
           key: "free_budget",
           capacity: paidCount + Math.max(0, Math.floor((b.budgetUsd - b.spentUsd - s.committedUserUsd) / expected + EPS)),
           transient: false, status: 402, resetAt: null,
-          message: () => `Cette génération dépasse ce que ton compte peut utiliser sans achat (il te reste ${fmtCredits(Math.max(0, c.paidCenti))} crédit(s) acheté(s), il en faut ${fmtCredits(cost)}). `
-            + `Les crédits achetés restent toujours utilisables : achète un pack ou abonne-toi pour continuer. ${BUY_URL}`,
+          userError: () => ({ code: "billing_free_budget_exceeded", params: { balance: fromCenti(Math.max(0, c.paidCenti)), cost: fromCenti(cost) } }),
         });
       }
     }
@@ -357,7 +358,7 @@ export function evaluateLimits(s: LimitsState, spec: LaunchSpec): Evaluated[] {
           key: "daily_compute",
           capacity: cap <= 0 ? 0 : fit(cap - engaged, expected, engaged <= EPS),
           transient: false, status: 429, resetAt: day,
-          message: (when) => `Limite de calcul du jour atteinte pour ton compte : remise à zéro ${when}. Tes crédits restent acquis.`,
+          userError: (when) => ({ code: "billing_daily_compute_limit", params: { when: when ?? "" } }),
         });
       }
     }
@@ -369,7 +370,7 @@ export function evaluateLimits(s: LimitsState, spec: LaunchSpec): Evaluated[] {
       key: "monthly_capacity",
       capacity: cap <= 0 ? 0 : fit(cap - engaged, expected, engaged <= EPS),
       transient: false, status: 429, resetAt: month,
-      message: (when) => `Limite de génération atteinte pour tout Cortex ce mois-ci : la génération rouvre ${when}. Le reste du site fonctionne normalement.`,
+      userError: (when) => ({ code: "billing_monthly_capacity_limit", params: { when: when ?? "" } }),
     });
   }
   if (spec.bucket === "gen" && s.storage) {
@@ -377,19 +378,19 @@ export function evaluateLimits(s: LimitsState, spec: LaunchSpec): Evaluated[] {
     const mb = (n: number) => Math.round(n / MiB);
     out.push({
       key: "storage", capacity: usedBytes > quotaBytes ? 0 : INF, transient: false, status: 413, resetAt: null,
-      message: () => `Quota de stockage atteint : ${mb(usedBytes)} Mo utilisés sur ${mb(quotaBytes)} Mo. Supprime des annales ou des fichiers importés (page Sources) pour libérer de la place ; le quota grandit aussi avec tes achats.`,
+      userError: () => ({ code: "storage_quota_reached", params: { usedMb: mb(usedBytes), quotaMb: mb(quotaBytes) } }),
     });
   }
   return out;
 }
 
-const BUY_URL = "https://app.cortexexam.com/compte#credits";
-
-export type LaunchRefusal = GateIssue & { key: LimitKey; resetAt: string | null };
+export type LaunchRefusal = Refusal & { key: LimitKey; resetAt: string | null };
 
 function refusalOf(hit: Evaluated | undefined, now: string): LaunchRefusal | null {
   if (!hit) return null;
-  return { key: hit.key, status: hit.status, resetAt: hit.resetAt, error: hit.message(hit.resetAt ? formatReset(hit.resetAt, now) : null) };
+  const error = hit.userError(hit.resetAt ? formatReset(hit.resetAt, now) : null);
+  const rejected = refusal(hit.status, error.code, error.params);
+  return { ...rejected, key: hit.key, resetAt: hit.resetAt };
 }
 
 /** Verdict de lancement : null = permis ; sinon le premier refus, avec sa date de remise à zéro. */

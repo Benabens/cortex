@@ -37,7 +37,7 @@ after(() => {
 });
 
 const post = (url: string, body: unknown, user = "alice") =>
-  new NextRequest(url, { method: "POST", headers: { "content-type": "application/json", "x-cortex-user": user }, body: JSON.stringify(body) });
+  new NextRequest(url, { method: "POST", headers: { "content-type": "application/json", "x-cortex-user": user, "accept-language": "fr" }, body: JSON.stringify(body) });
 
 test("legalLinks / purchasesAllowed : liens depuis l'env ; en production sans les quatre liens, achat fermé", async () => {
   const legal = await import("../lib/legal");

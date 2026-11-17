@@ -28,7 +28,7 @@ test("production ouverte au public + clé de test : achats fermés, avec une rai
 test("production + clé live : achats ouverts", async () => {
   const { purchasesAllowed } = await import("../lib/legal");
   for (const key of ["sk_live_abc", "rk_live_abc"]) {
-    assert.deepEqual(purchasesAllowed(env({ STRIPE_SECRET_KEY: key })), { enabled: true, reason: null }, key);
+    assert.deepEqual(purchasesAllowed(env({ STRIPE_SECRET_KEY: key })), { enabled: true, reason: null, error: null }, key);
   }
 });
 

@@ -13,6 +13,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { nextRechargeDate, secondSubscriptionRefusal, standingOf, type WindowedSub } from "../lib/billing/subscription-windows";
+import { errorText } from "../lib/i18n/user-error";
 
 const NOW = "2026-10-28 11:00:00";
 const sub = (over: Partial<WindowedSub> = {}): WindowedSub => ({
@@ -65,10 +66,10 @@ test("standingOf : en règle mais période payée échue → renewing pendant tr
 
 test("second abonnement : refusé tant que Stripe tient le premier pour vivant, avec la marche à suivre", () => {
   assert.equal(secondSubscriptionRefusal("none"), null);
-  assert.match(secondSubscriptionRefusal("live") ?? "", /déjà un abonnement/);
-  assert.match(secondSubscriptionRefusal("renewing") ?? "", /renouvellement/);
-  assert.match(secondSubscriptionRefusal("unpaid") ?? "", /moyen de paiement/);
-  assert.match(secondSubscriptionRefusal("suspended") ?? "", /suspendu/);
+  assert.match(errorText("fr", secondSubscriptionRefusal("live")!), /déjà un abonnement/);
+  assert.match(errorText("fr", secondSubscriptionRefusal("renewing")!), /renouvellement/);
+  assert.match(errorText("fr", secondSubscriptionRefusal("unpaid")!), /moyen de paiement/);
+  assert.match(errorText("fr", secondSubscriptionRefusal("suspended")!), /suspendu/);
 });
 
 test("prochaine recharge affichée : aucune pour un mensuel dont la résiliation est programmée ; l'annuel garde ses fenêtres payées", () => {
