@@ -74,3 +74,25 @@ test("I13 : /api/health avec jeton donne l'âge de la dernière sauvegarde ; san
   const pub = await (await GET(new Request("http://localhost/api/health"))).json();
   assert.deepEqual(Object.keys(pub).sort(), ["commit", "status"]);
 });
+
+test("I13 : dernière sauvegarde prouvée de plus de 36 h (tick qui plante, sauvegarde figée) → Sentry, même sans code d'échec", async () => {
+  const { recordBackupResult, checkBackupFreshness } = await import("../lib/backup-schedule");
+  await recordBackupResult("2026-11-13", { postgres: true, folder: "cortex-backup-13" });
+  assert.equal(await checkBackupFreshness(new Date(Date.now() + 3600_000)), true, "une heure après : à jour");
+  assert.equal(captured.length, 0);
+  assert.equal(await checkBackupFreshness(new Date(Date.now() + 40 * 3600_000)), false, "40 h après : en retard");
+  assert.equal(await checkBackupFreshness(new Date(Date.now() + 41 * 3600_000)), false);
+  const alerts = captured.filter((c) => c.tags.alert === "backup_stale");
+  assert.equal(alerts.length, 1, "une alerte pour plusieurs vérifications");
+  assert.match(String((alerts[0].e as Error).message), /2026-11-13/);
+});
+
+test("I13 : aucune sauvegarde prouvée — rien juste après le démarrage, une alerte au-delà de 36 h de service", async () => {
+  const { authRun } = await import("../db/auth-store");
+  await authRun(`DELETE FROM app_meta WHERE key = 'backup:daily_result'`);
+  const { checkBackupFreshness } = await import("../lib/backup-schedule");
+  const now = new Date();
+  assert.equal(await checkBackupFreshness(now, now.getTime() - 3600_000), true, "démarré il y a une heure");
+  assert.equal(await checkBackupFreshness(now, now.getTime() - 37 * 3600_000), false, "en service depuis 37 h sans sauvegarde");
+  assert.equal(captured.filter((c) => c.tags.alert === "backup_stale").length, 1);
+});

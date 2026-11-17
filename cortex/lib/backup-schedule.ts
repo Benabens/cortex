@@ -132,6 +132,20 @@ export async function dailyBackupTick(opts: {
   return "failed";
 }
 
+/**
+ * La dernière sauvegarde PROUVÉE a-t-elle moins de 36 h ? Sinon Sentry (une alerte par 6 h).
+ * Indépendant du tick : couvre aussi le tick qui plante avant d'arriver à un code d'échec et la
+ * sauvegarde figée. Sans aucune sauvegarde prouvée, le compte part du démarrage du process.
+ */
+export async function checkBackupFreshness(now = new Date(), upSinceMs = Date.now() - process.uptime() * 1000): Promise<boolean> {
+  const last = await lastBackupResult();
+  const since = last?.at ? Date.parse(last.at) : upSinceMs;
+  if (now.getTime() - since <= BACKUP_FRESH_MAX_MS) return true;
+  const what = last ? `Dernière sauvegarde prouvée : le ${last.day}, il y a plus de 36 h` : "Aucune sauvegarde prouvée depuis plus de 36 h de service";
+  captureErrorThrottled("backup.stale", new Error(what), { area: "backup", alert: "backup_stale" }, BACKUP_ALERT_EVERY_MS);
+  return false;
+}
+
 /** Lance `scripts/backup.ts --push --prune --no-local` dans un process enfant ; résout avec le code de sortie. */
 export function runBackupChild(): Promise<number> {
   return new Promise((resolve) => {
@@ -166,7 +180,13 @@ export function startBackupScheduler(): NodeJS.Timeout | null {
     return null;
   }
   if (g.__cortexBackupTimer) clearInterval(g.__cortexBackupTimer);
-  const tick = () => dailyBackupTick({ run: runBackupChild }).catch((e) => console.error("[backup] tick :", (e as Error).message));
+  const tick = () => {
+    checkBackupFreshness().catch((e) => console.error("[backup] fraîcheur :", (e as Error).message));
+    dailyBackupTick({ run: runBackupChild }).catch((e) => {
+      console.error("[backup] tick :", (e as Error).message);
+      captureErrorThrottled("backup.tick", e, { area: "backup", alert: "backup_tick" }, BACKUP_ALERT_EVERY_MS);
+    });
+  };
   // Premier passage différé d'une minute : laisser la base et les jobs démarrer.
   setTimeout(tick, 60_000).unref?.();
   g.__cortexBackupTimer = setInterval(tick, BACKUP_TICK_MS);
