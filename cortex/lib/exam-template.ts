@@ -384,8 +384,8 @@ export function genericPreamble(): string {
   return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "";
 }
 
-/** Libellés d'un QCM dans la langue de l'examen (gabarit neutre, ou EPFL hors anglais). */
-export function localQcmLabels(w: CoverWords, color: string, pageBeforeFirstOpen: boolean): QcmLabels {
+/** Libellés d'un QCM dans la langue de l'examen (gabarit neutre, ou EPFL hors anglais). `partSep` : entre « Part 1 » et son titre. */
+export function localQcmLabels(w: CoverWords, color: string, pageBeforeFirstOpen: boolean, partSep = String.raw` \quad-- `): QcmLabels {
   return {
     questionWord: w.question,
     openWord: w.openQuestion,
@@ -398,8 +398,8 @@ export function localQcmLabels(w: CoverWords, color: string, pageBeforeFirstOpen
     points: (n) => pointsText(n, w),
     openSolution: `${w.solution}.`,
     color,
-    qcmPart: (withOpen) => (withOpen ? `${w.part} 1 \\quad-- ${w.qcmPart}` : w.qcmPart),
-    openPart: (withQcm) => (withQcm ? `${w.part} 2 \\quad-- ${w.openPart}` : w.openPart),
+    qcmPart: (withOpen) => (withOpen ? `${w.part} 1${partSep}${w.qcmPart}` : w.qcmPart),
+    openPart: (withQcm) => (withQcm ? `${w.part} 2${partSep}${w.openPart}` : w.openPart),
     pageBeforeFirstOpen,
   };
 }

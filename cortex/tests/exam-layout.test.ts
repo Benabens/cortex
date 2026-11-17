@@ -53,16 +53,26 @@ async function renders(course: string): Promise<string[]> {
   ]);
 }
 
+/**
+ * Seul changement voulu depuis #116 : le titre de partie des QCM, « Part 1 -- … » au lieu de
+ * « Part 1 \quad-- … » (espace en trop). Remis à l'ancienne, les .tex retrouvent leurs empreintes d'avant.
+ */
+const beforePartFix = (tex: string) => tex.replace(/(\S+ [12]) -- /g, String.raw`$1 \quad-- `);
+
 test("gabarit neutre sans mise en page relevée : .tex inchangés (anglais)", async () => {
-  assert.deepEqual((await renders(ids.neutralEn)).map(sha), [
-    "c2ac315e925f5e13", "c0d1a895d9f5d995", "0acf19cd2a88cf9b", "f827be5064180cb2", "4f0fd87e16a2c553", "9572e53640d5202d",
+  const tex = await renders(ids.neutralEn);
+  assert.deepEqual(tex.map(sha), [
+    "c2ac315e925f5e13", "c0d1a895d9f5d995", "d0836e1917f9710b", "eee73c9711b45ed0", "4f0fd87e16a2c553", "9572e53640d5202d",
   ]);
+  assert.deepEqual(tex.map(beforePartFix).map(sha).slice(2, 4), ["0acf19cd2a88cf9b", "f827be5064180cb2"]);
 });
 
 test("gabarit neutre sans mise en page relevée : .tex inchangés (français)", async () => {
-  assert.deepEqual((await renders(ids.neutralFr)).map(sha), [
-    "f644538b622efba4", "c0a66c94191855a4", "1fe88c95b586f296", "afc72736584f0e94", "49695dd5549cfe2d", "bd4415ba0161f212",
+  const tex = await renders(ids.neutralFr);
+  assert.deepEqual(tex.map(sha), [
+    "f644538b622efba4", "c0a66c94191855a4", "fd5c4fb497c5ce50", "1371d4da41bc675b", "49695dd5549cfe2d", "bd4415ba0161f212",
   ]);
+  assert.deepEqual(tex.map(beforePartFix).map(sha).slice(2, 4), ["1fe88c95b586f296", "afc72736584f0e94"]);
 });
 
 test("la mise en page du cours : EPFL explicite pour un cours de l'EPFL, neutre sinon", async () => {

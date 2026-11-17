@@ -112,7 +112,7 @@ ENV HOME=/home/cortex \
 
 # Préchauffe le cache de bundles tectonic ($XDG_CACHE_HOME/Tectonic) en compilant un
 # document avec le VRAI préambule — sinon la 1ʳᵉ génération en prod télécharge
-# ~100 Mo. Toléré en échec (réseau) : le runtime retéléchargera au besoin.
+# ~100 Mo. multicol en plus : les QCM sur deux colonnes d'une annale (lib/exam-layout-pdf). Toléré en échec (réseau) : le runtime retéléchargera au besoin.
 # AVANT la copie de l'app (audit fuites P2) : cette couche ne dépend que de tectonic
 # et des quatre fichiers LaTeX copiés ici, elle reste donc en cache d'un build à
 # l'autre ; placée après, chaque commit refaisait le téléchargement et la compilation.
@@ -123,7 +123,7 @@ USER cortex
 RUN set -eux; \
     cd /tmp/tectonic-warm; \
     cat preamble.tex figures.tex generic.tex > warm.tex; \
-    printf '\n\\newcommand{\\FOOTDATE}{Warm}\n\\begin{document}\nWarm-up.\n\\end{document}\n' >> warm.tex; \
+    printf '\n\\usepackage{multicol}\n\\newcommand{\\FOOTDATE}{Warm}\n\\begin{document}\nWarm-up.\n\\end{document}\n' >> warm.tex; \
     /usr/local/bin/tectonic --chatter minimal warm.tex \
       || echo "AVERTISSEMENT: warm-up tectonic incomplet (bundle téléchargé au 1er run)"; \
     cd /; rm -rf /tmp/tectonic-warm

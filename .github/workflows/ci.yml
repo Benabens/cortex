@@ -300,7 +300,7 @@ jobs:
             cp /app/cortex/latex/epfl-logo.png . 2>/dev/null || true
             # Mêmes fichiers que le préchauffage du Dockerfile : seul ce document est garanti en cache.
             cat /app/cortex/latex/preamble.tex /app/cortex/latex/figures.tex /app/cortex/latex/generic.tex > doc.tex
-            printf "\n\\\\newcommand{\\\\FOOTDATE}{Smoke}\n\\\\begin{document}\nHors ligne.\n\\\\end{document}\n" >> doc.tex
+            printf "\n\\\\usepackage{multicol}\n\\\\newcommand{\\\\FOOTDATE}{Smoke}\n\\\\begin{document}\nHors ligne.\n\\\\end{document}\n" >> doc.tex
             /usr/local/bin/tectonic --chatter minimal --only-cached doc.tex
             pdftoppm -png -r 50 -f 1 -l 1 doc.pdf page
             ls page*.png && echo "✓ tectonic (cache hors ligne) et pdftoppm en $(id -un)"

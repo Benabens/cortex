@@ -42,6 +42,11 @@ export type ExamLayout = {
   numbering: Numbering;
   /** Options de QCM : lettre, marque à cocher, une ou deux colonnes (énoncé seulement). */
   choices: { label: ChoiceLabel; mark: ChoiceMark; columns: 1 | 2 };
+  /**
+   * Questions de QCM : sur une ou deux colonnes (énoncé seulement) ; `titles` : l'étiquette de type
+   * et le thème avant l'énoncé (sans, l'énoncé suit le numéro ; un choix multiple reste annoncé).
+   */
+  questions: { columns: 1 | 2; titles: boolean };
   /** standard : la place historique de chaque moteur ; margin : à droite du titre ; inline : entre parenthèses ; none : absents. */
   points: "standard" | "margin" | "inline" | "none";
   /** Police du corps (Latin Modern, avec ou sans empattements) et taille de la classe, en points. */
@@ -58,6 +63,7 @@ export const NEUTRAL_LAYOUT: ExamLayout = {
   footer: { left: "none", center: "examKind", right: "date" },
   numbering: { prefix: null, style: "arabic" },
   choices: { label: "A.", mark: "box", columns: 1 },
+  questions: { columns: 1, titles: true },
   points: "standard",
   font: { family: "serif", size: 11 },
   answerSpace: "lines",
@@ -97,6 +103,7 @@ export function annaleLayout(s: SurveyedLayout, language: Language): ExamLayout 
     footer: s.footer ?? NEUTRAL_LAYOUT.footer,
     numbering: s.numbering ?? NEUTRAL_LAYOUT.numbering,
     choices: s.choices ?? NEUTRAL_LAYOUT.choices,
+    questions: s.questions ?? NEUTRAL_LAYOUT.questions,
     points: s.points ?? NEUTRAL_LAYOUT.points,
     font: s.font ?? NEUTRAL_LAYOUT.font,
     answerSpace: s.answerSpace ?? NEUTRAL_LAYOUT.answerSpace,
