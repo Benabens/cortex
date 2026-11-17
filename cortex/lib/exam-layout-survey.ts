@@ -26,7 +26,12 @@ export type SurveyedLayout = Partial<Omit<ExamLayout, "source" | "cover">> & { c
 // ─────────────────────────── lecture du PDF (adaptateur) ───────────────────────────
 
 const num = (s: string) => Number.parseFloat(s);
-const decode = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+/**
+ * Entités du XHTML, puis guillemets et apostrophes typographiques en ASCII : la police T1 du
+ * préambule n'a pas « ’ » sous tectonic (« Numéro d’étudiant » s'imprimait « Numéro détudiant »).
+ */
+const decode = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&#39;/g, "'").replace(/&amp;/g, "&")
+  .replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, "\"");
 
 /** Pages, lignes et mots du XHTML de `pdftotext -bbox-layout`. */
 export function parseBboxXhtml(xhtml: string): Page[] {
@@ -285,15 +290,14 @@ function answerSpaceOf(pages: Page[]): ExamLayout["answerSpace"] | null {
   return rules >= 3 ? "lines" : gaps >= 2 ? "blank" : null;
 }
 
-/** Deux colonnes : deux options sur une ligne, ou des questions numérotées des deux côtés de la page. */
+/**
+ * Options sur deux colonnes : deux options sur une même ligne. Une page dont les QUESTIONS sont
+ * sur deux colonnes garde ses options l'une sous l'autre (première capture du QCM américain).
+ */
 function columnsOf(pages: Page[]): 1 | 2 {
   for (const p of pages) {
     const paired = p.lines.filter((l) => wordGroups(l, p.width).filter((g) => /^\(?[A-Ha-h][.)]\s/.test(`${g.text} `)).length >= 2);
     if (paired.length >= 2) return 2;
-    const heads = p.lines.filter((l) => numberingOf(l));
-    const right = heads.filter((l) => l.x0 > p.width * 0.45).length;
-    const left = heads.filter((l) => l.x0 < p.width * 0.3).length;
-    if (right >= 2 && left >= 2) return 2;
   }
   return 1;
 }
@@ -322,8 +326,6 @@ export function surveyPages(pages: Page[], fonts: string[]): SurveyedLayout {
   if (choices.filter((c) => c.letter === "C").length >= 1 && choices.length >= 6) {
     const pick = majority(choices, (c) => `${c.label}/${c.mark}`)!;
     out.choices = { label: pick.label, mark: pick.mark, columns: columnsOf(pages) };
-  } else if (columnsOf(pages) === 2) {
-    out.choices = { label: "A.", mark: "box", columns: 2 };
   }
   const points = pointsOf(pages, heads.length);
   if (points) out.points = points;

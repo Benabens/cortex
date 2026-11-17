@@ -91,7 +91,7 @@ test("préparation : la mise en page de l'annale est relevée et stockée, sans 
   assert.equal(calls, 1, "le relevé ne coûte aucun appel");
   await runWithCourse(id, async () => {
     const stored = await readStoredProfile();
-    assert.deepEqual(stored?.layout?.choices, { label: "(A)", mark: "bubble", columns: 2 });
+    assert.deepEqual(stored?.layout?.choices, { label: "(A)", mark: "bubble", columns: 1 });
     const layout = await examLayout();
     assert.equal(layout.source, "annale");
     assert.deepEqual(layout.cover.idFields.map((f) => f.label), ["Name:", "NetID:", "Signature:"]);

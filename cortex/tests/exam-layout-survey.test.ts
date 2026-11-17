@@ -17,10 +17,10 @@ const DIR = path.join(__dirname, "fixtures", "annales");
 const read = (name: string, ext: string) => fs.readFileSync(path.join(DIR, `${name}.${ext}`), "utf8");
 const survey = (name: string) => surveyPages(parseBboxXhtml(read(name, "bbox.html")), parsePdffonts(read(name, "fonts.txt")));
 
-test("QCM américain : sans empattements en 10 pt, « (A) » et bulles sur deux colonnes, page n sur total, pas de barème par question", () => {
+test("QCM américain : sans empattements en 10 pt, « (A) » et bulles l'une sous l'autre (la page, elle, est sur deux colonnes), page n sur total, pas de barème par question", () => {
   const s = survey("us-mcq");
   assert.deepEqual(s.font, { family: "sans", size: 10 });
-  assert.deepEqual(s.choices, { label: "(A)", mark: "bubble", columns: 2 });
+  assert.deepEqual(s.choices, { label: "(A)", mark: "bubble", columns: 1 });
   assert.deepEqual(s.header, { left: "course", center: "none", right: "none" });
   assert.deepEqual(s.footer, { left: "none", center: "pageOfTotal", right: "none" });
   assert.deepEqual(s.numbering, { prefix: "", style: "arabic" });
@@ -54,9 +54,14 @@ test("examen français : « Exercice » en chiffres romains, barème dans la lig
   assert.equal(s.points, "inline");
   assert.deepEqual(s.header, { left: "course", center: "none", right: "examKind" });
   assert.deepEqual(s.footer, { left: "none", center: "none", right: "pageOfTotal" });
-  assert.deepEqual(s.cover?.idFields?.map((f) => f.label), ["Nom :", "Prénom :", "Numéro d’étudiant :"]);
-  assert.deepEqual(s.cover?.instructions, ["Aucun document n’est autorisé.", "Les calculatrices sont interdites.", "La qualité de la rédaction sera prise en compte."]);
+  assert.deepEqual(s.cover?.idFields?.map((f) => f.label), ["Nom :", "Prénom :", "Numéro d'étudiant :"]);
+  assert.deepEqual(s.cover?.instructions, ["Aucun document n'est autorisé.", "Les calculatrices sont interdites.", "La qualité de la rédaction sera prise en compte."]);
   assert.equal(s.language, "fr");
+});
+
+test("apostrophes et guillemets typographiques en ASCII (la police du préambule n'a pas « ’ »)", () => {
+  const [page] = parseBboxXhtml(`<page width="595" height="842"><line xMin="1" yMin="1" xMax="9" yMax="9"><word xMin="1" yMin="1" xMax="9" yMax="9">d’étudiant</word><word xMin="1" yMin="1" xMax="9" yMax="9">“x”</word></line></page>`);
+  assert.equal(page.lines[0].text, "d'étudiant \"x\"");
 });
 
 test("rien de lisible : aucun champ relevé (le défaut neutre s'applique)", () => {
