@@ -1,3 +1,4 @@
+import { currentLocale } from "./context";
 import type { Locale } from "./locale";
 import { MESSAGES, type Messages } from "./messages";
 import { translator } from "./translate";
@@ -28,15 +29,16 @@ export function errorText(locale: Locale, e: UserError): string {
 }
 
 /**
- * Exception qui porte une erreur à montrer et son statut HTTP. Son `message` est la phrase
- * française (journaux, anciens appelants) ; la route la renvoie dans la langue du lecteur.
+ * Exception qui porte une erreur à montrer et son statut HTTP. Son `message` est la phrase dans
+ * la langue du contexte (lib/i18n/context : celle de la requête, français hors requête) ; la
+ * route la renvoie par apiError, dans la langue du lecteur.
  */
 export class UserFacingError extends Error implements UserError {
   readonly code: ErrorCode;
   readonly params?: ErrorParams;
   readonly status: number;
   constructor(e: UserError, status = 400) {
-    super(errorText("fr", e));
+    super(errorText(currentLocale(), e));
     this.name = "UserFacingError";
     this.code = e.code;
     if (e.params) this.params = e.params;
@@ -46,12 +48,12 @@ export class UserFacingError extends Error implements UserError {
 
 /**
  * Refus rendu (pas jeté) par une garde de lib/ : statut HTTP, code, paramètres, et `error`, la
- * phrase française gardée pour les journaux et les appelants d'avant les codes. Une route le
- * passe tel quel à `apiError(req, r, r.status)`.
+ * phrase dans la langue du contexte, gardée pour les journaux et les appelants d'avant les
+ * codes. Une route le passe tel quel à `apiError(req, r, r.status)`.
  */
 export type Refusal<S extends number = number> = UserError & { status: S; error: string };
 
 export function refusal<S extends number>(status: S, code: ErrorCode, params?: ErrorParams): Refusal<S> {
   const e = userError(code, params);
-  return { status, ...e, error: errorText("fr", e) };
+  return { status, ...e, error: errorText(currentLocale(), e) };
 }
