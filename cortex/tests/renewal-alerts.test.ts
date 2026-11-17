@@ -54,8 +54,8 @@ function resend(t: TestContext, respond: (to: string) => Response | Promise<Resp
   return { mails, toOwner: () => mails.filter((m) => m.to === OWNER) };
 }
 
-/** Stripe confirme ce que dit la base : reconduction prévue, 119 € par an. */
-const stripe = async (): Promise<RenewalFacts | null> => ({ renews: true, yearly: true, periodEnd: null, amount: 119, currency: "EUR", discounted: false });
+/** Stripe confirme ce que dit la base : reconduction prévue, 149 € par an. */
+const stripe = async (): Promise<RenewalFacts | null> => ({ renews: true, yearly: true, periodEnd: null, amount: 149, currency: "EUR", discounted: false });
 
 async function subscriber(user: string, end = END) {
   await authRun(`INSERT INTO users (id, email) VALUES (?,?) ON CONFLICT (id) DO NOTHING`, user, `${user}@exemple.test`);

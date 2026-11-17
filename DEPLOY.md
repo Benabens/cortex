@@ -371,7 +371,7 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
    | Produit / prix | Suggestion | lookup_key |
    |---|---|---|
    | Cortex Pro — mensuel (récurrent) | 14,90 €/mois | `cortex_pro_monthly` |
-   | Cortex Pro — annuel (récurrent) | 119 €/an | `cortex_pro_yearly` |
+   | Cortex Pro — annuel (récurrent) | 149 €/an | `cortex_pro_yearly` |
    | Pack de 10 crédits (paiement unique) | 9 € | `cortex_credits_10` |
    Pro = 20 crédits par mois, non reportables (`SUBSCRIPTION_MONTHLY_CREDITS`),
    consommés avant les crédits achetés ; le pack est permanent. Active aussi le
@@ -600,9 +600,9 @@ testé).
 
 Comment c'est branché : `@sentry/node` côté serveur (plus le crochet
 `onRequestError` de Next pour les erreurs de rendu et de route non gérées) et
-`@sentry/browser` côté navigateur, chargé seulement si `GET /api/monitoring`
+`@sentry/browser` côté navigateur, chargé seulement si `GET /api/relais`
 renvoie une configuration (204 sans DSN). Le navigateur envoie ses erreurs à
-`/api/monitoring` (même origine), qui ne relaie qu'au projet du DSN configuré :
+`/api/relais` (même origine), qui ne relaie qu'au projet du DSN configuré :
 la CSP garde `connect-src 'self'`. Pas de `@sentry/nextjs` : il tire webpack et
 le binaire sentry-cli (~100 Mo dans l'image) pour des source maps qu'on
 n'envoie pas.
@@ -909,6 +909,12 @@ quotidiens (`DAILY_GEN_QUOTA`, `DAILY_ASSIST_QUOTA`).
       reste soumis au fusible global `SPEND_CAP_USD`. Les étudiants voient leurs
       limites dans **Mon compte › Mon usage** et à côté de chaque bouton de
       génération (`GET /api/usage`), jamais en dollars.
+- [ ] Alerte par compte et par heure : `SPEND_ALERT_PER_USER_HOUR_USD` absente (5 $ par
+      défaut) ou sous `SPEND_CAP_PER_USER_USD` ; posée, la déclarer aussi dans
+      `.railway/railway.ts` (sinon l'apply la supprime). Elle écrit au propriétaire (même
+      destinataire que les alertes du mois, ci-dessous) et lève un événement Sentry
+      `alert=account_spend_hour` ; le compte est dans l'e-mail et le journal
+      `spend_alert.account_hour`, jamais chez Sentry.
 - [ ] `RESEND_API_KEY` posée, et `CORTEX_OWNER_EMAIL` ou `PUBLISHER_EMAIL` :
       sans elles, ni les alertes de dépense à 80 % et 100 %, ni celles du rappel
       de reconduction ne partent. Au démarrage, les logs ne doivent montrer ni
