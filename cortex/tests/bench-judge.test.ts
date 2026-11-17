@@ -152,7 +152,7 @@ test("une panne passagère du fournisseur pendant le jugement est réessayée, l
   const { judgeExam } = await import("../lib/bench/judge");
   const v = await runWithCourse("ml", () => judgeExam(run));
   assert.equal(failAdjudicate, 0, "la panne a bien eu lieu");
-  assert.equal(v.items.length, run.exam.items.length);
+  assert.equal(v.items.length, run.exam?.items.length);
 });
 
 test("exercice au long corrigé : l'arbitre le lit jusqu'au bout", async () => {
