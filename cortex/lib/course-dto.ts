@@ -11,7 +11,7 @@ export type CourseDto = {
   teachers: string[];
   language: string;
   examDate: string | null;
-  durationMin: number;
+  durationMin: number | null;
   /** Format d'examen déclaré (null = rien de déclaré). */
   examFormat: DeclaredFormat | null;
   createdAt: string;

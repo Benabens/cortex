@@ -11,7 +11,7 @@ export type PlanQcm = {
   course: string;
   kind: "qcm";
   summary: string;
-  durationMin: number;
+  durationMin: number | null;
   totalPoints: number;
   qcm: number;
   open: number;
@@ -23,7 +23,7 @@ export type PlanExam = {
   course: string;
   kind: "exam";
   summary: string;
-  durationMin: number;
+  durationMin: number | null;
   totalPoints: number;
   exercises: number;
   categories: string[];
@@ -38,7 +38,7 @@ export type PlanUnknown = {
   course: string;
   kind: "unknown";
   summary: string;
-  durationMin: number;
+  durationMin: number | null;
   totalPoints: null;
 };
 
