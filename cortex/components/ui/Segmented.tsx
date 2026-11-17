@@ -217,6 +217,7 @@ export function Segmented<V extends string>({
             type="button"
             role="radio"
             aria-checked={checked}
+            lang={o.lang}
             // Un seul arrêt de tabulation : l'option choisie (la première si aucune ne l'est).
             tabIndex={checked || (activeIndex < 0 && i === 0) ? 0 : -1}
             data-pressed={pressed === o.value ? "" : undefined}
@@ -238,7 +239,7 @@ export function Segmented<V extends string>({
           >
             <span className={cn("seg-label", size === "sm" && variant === "track" ? "gap-1.5" : "gap-2")}>
               {o.Icon && <o.Icon className={size === "sm" || variant !== "track" ? "size-3.5" : "size-4"} strokeWidth={2} />}
-              <span lang={o.lang} style={checked && o.tone ? { color: o.tone } : undefined}>{o.label}</span>
+              <span style={checked && o.tone ? { color: o.tone } : undefined}>{o.label}</span>
               {o.count != null && <span className={cn("font-data text-xs tabular", checked ? "text-ink-2" : "text-ink-3")}>{o.count}</span>}
             </span>
           </button>
