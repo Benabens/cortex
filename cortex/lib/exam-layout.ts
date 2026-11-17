@@ -14,13 +14,55 @@ import { examTemplate } from "@/lib/exam-template";
  * Avant le 17/11/2026, chaque moteur décidait seul (gabarit, langue, cs-202) : le test « aucune
  * marque de l'EPFL hors EPFL » devait être écrit trois fois, et une garde oubliée en laissait passer.
  */
+/** Un champ à remplir de la garde ; `label` : le libellé de l'annale (texte brut), null = celui de la langue de l'examen. */
+export type IdKind = "name" | "firstName" | "studentId" | "signature" | "seat";
+export type IdField = { kind: IdKind; label: string | null };
+/** Contenu d'une case d'en-tête ou de pied de page. */
+export type PageSlot = "course" | "examKind" | "page" | "pageOfTotal" | "date" | "none";
+export type Slots = { left: PageSlot; center: PageSlot; right: PageSlot };
+/** `prefix` : le mot de l'annale (« Exercice », « Problem », « Q ») ; "" = le numéro seul ; null = « Question » dans la langue de l'examen. */
+export type Numbering = { prefix: string | null; style: "arabic" | "roman" };
+export type ChoiceLabel = "A." | "A)" | "(A)" | "a." | "a)" | "(a)";
+export type ChoiceMark = "box" | "bubble" | "none";
+
 export type ExamLayout = {
-  /** epfl : la mise en page historique de l'EPFL ; neutral : la garde générique, sans marque. */
-  source: "epfl" | "neutral";
+  /** epfl : la mise en page historique de l'EPFL ; neutral : la garde générique, sans marque ; annale : relevée dans l'annale du cours. */
+  source: "epfl" | "neutral" | "annale";
+  cover: {
+    idFields: IdField[];
+    /** Consignes de l'annale (texte brut), après la ligne qui dit ce que contient l'examen ; vide = les consignes génériques. */
+    instructions: string[];
+    /** Tableau des points par question, à remplir par le correcteur. */
+    pointsTable: boolean;
+  };
+  header: Slots;
+  footer: Slots;
+  numbering: Numbering;
+  /** Options de QCM : lettre, marque à cocher, une ou deux colonnes (énoncé seulement). */
+  choices: { label: ChoiceLabel; mark: ChoiceMark; columns: 1 | 2 };
+  /** standard : la place historique de chaque moteur ; margin : à droite du titre ; inline : entre parenthèses ; none : absents. */
+  points: "standard" | "margin" | "inline" | "none";
+  /** Police du corps (Latin Modern, avec ou sans empattements) et taille de la classe, en points. */
+  font: { family: "serif" | "sans"; size: 10 | 11 | 12 };
+  /** Espace de réponse des questions ouvertes : lignes, cadre, ou blanc de même hauteur. */
+  answerSpace: "lines" | "box" | "blank";
 };
 
-export const NEUTRAL_LAYOUT: ExamLayout = { source: "neutral" };
-export const EPFL_LAYOUT: ExamLayout = { source: "epfl" };
+/** Le défaut : le gabarit neutre de #116, à l'octet près (empreintes de tests/exam-layout). */
+export const NEUTRAL_LAYOUT: ExamLayout = {
+  source: "neutral",
+  cover: { idFields: [{ kind: "name", label: null }, { kind: "studentId", label: null }], instructions: [], pointsTable: false },
+  header: { left: "course", center: "none", right: "page" },
+  footer: { left: "none", center: "examKind", right: "date" },
+  numbering: { prefix: null, style: "arabic" },
+  choices: { label: "A.", mark: "box", columns: 1 },
+  points: "standard",
+  font: { family: "serif", size: 11 },
+  answerSpace: "lines",
+};
+
+/** L'EPFL : son adaptateur ne lit que `source` ; garde, chrome et options restent les siens. */
+export const EPFL_LAYOUT: ExamLayout = { ...NEUTRAL_LAYOUT, source: "epfl" };
 
 /** Mise en page du cours courant : l'EPFL pour un cours de l'EPFL, le défaut neutre sinon. */
 export async function examLayout(): Promise<ExamLayout> {
@@ -29,17 +71,22 @@ export async function examLayout(): Promise<ExamLayout> {
 
 export type ExamForm = "written" | "qcm" | "blocks";
 
-/** Ce que la garde doit dire de l'examen ; la mise en page décide comment. */
+/** Ce que la garde doit dire de l'examen ; la mise en page décide comment. `points` : ceux de chaque question, dans l'ordre. */
 export type CoverFacts =
-  | { form: "qcm"; dateLabel: string; nQcm: number; nOpen: number; totalPts: number; durationMin: number | null }
-  | { form: "blocks"; dateLabel: string; n: number; totalPts: number; durationMin: number | null }
+  | { form: "qcm"; dateLabel: string; nQcm: number; nOpen: number; totalPts: number; durationMin: number | null; points: number[] }
+  | { form: "blocks"; dateLabel: string; n: number; totalPts: number; durationMin: number | null; points: number[] }
   /** `specDurationMin` : la durée écrite par le générateur, que seul cs-202 lit (texte historique). */
   | { form: "written"; dateLabel: string; questions: ExamQuestion[]; specDurationMin: number | null };
 
 /** Libellés d'un QCM et de sa partie ouverte. */
 export type QcmLabels = {
+  /** Le mot des titres (« Question », « Open question »), quand la numérotation de l'annale en change le numéro. */
+  questionWord: string;
+  openWord: string;
   question: (n: number) => string;
   tag: (type: "scq" | "mcq", points: number) => string;
+  /** Le type seul (« single choice »), quand les points ne sont pas dans l'étiquette. */
+  kind: (type: "scq" | "mcq") => string;
   misconception: string;
   solution: string;
   openQuestion: (n: number) => string;
@@ -65,6 +112,8 @@ export type WrittenLabels = { solutionsTitle: string; solutionHead: (n: number, 
  */
 export type ExamPdf = {
   layout: ExamLayout;
+  /** Le préambule commun (latex/preamble.tex) adapté : taille de la classe. */
+  preamble(src: string): string;
   /** Lignes entre le préambule commun et `\begin{document}` : en-tête, pied, macros, `\FOOTDATE`. */
   chrome(form: ExamForm, dateLabel: string): string[];
   cover(facts: CoverFacts): Promise<string>;

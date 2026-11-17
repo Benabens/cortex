@@ -284,8 +284,11 @@ function qcmChrome(dateLabel: string): string[] {
 }
 
 const EPFL_QCM_LABELS: QcmLabels = {
+  questionWord: "Question",
+  openWord: "Open question",
   question: (n) => `Question ${n}.`,
   tag: (type, points) => `${type === "mcq" ? "MCQ" : "SCQ"}, ${points} pt${points > 1 ? "s" : ""}`,
+  kind: (type) => (type === "mcq" ? "MCQ" : "SCQ"),
   misconception: "misconception: ",
   solution: "Solution:",
   openQuestion: (n) => `Open question ${n}`,
@@ -314,6 +317,7 @@ export function epflPdf(layout: ExamLayout): ExamPdf {
   const color = solutionColor("epfl");
   return {
     layout,
+    preamble: (src) => src,
     chrome: (form: ExamForm, dateLabel: string) => (form === "written" ? writtenChrome(dateLabel) : qcmChrome(dateLabel)),
     cover: async (f: CoverFacts) => {
       if (f.form === "qcm") return qcmCover(f.dateLabel, f.nQcm, f.nOpen, f.totalPts, f.durationMin);
