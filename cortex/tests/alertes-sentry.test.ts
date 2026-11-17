@@ -144,6 +144,21 @@ test("webhook Stripe à signature invalide : 400, et Sentry est prévenu une seu
   }
 });
 
+test("webhook frappé par un robot (en-tête qui n'a pas la forme de Stripe, ou périmé) : 400 sans alerte — l'alerte « secret ? » reste lisible", async () => {
+  process.env.STRIPE_SECRET_KEY = "sk_test_fake_key_local_only";
+  process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_local";
+  try {
+    const { resetErrorTrackingThrottleForTests } = await import("../lib/observability");
+    resetErrorTrackingThrottleForTests();
+    const payload = JSON.stringify({ id: "evt_robot", object: "event", type: "invoice.paid", data: { object: {} } });
+    const stale = `t=${Math.floor(Date.now() / 1000) - 3600},v1=${"a".repeat(64)}`;
+    for (const sig of ["abc", "t=1,v1=zz", stale]) assert.equal((await postWebhook(payload, sig)).status, 400);
+    assert.equal(captured.filter((c) => c.tags.area === "billing").length, 0, JSON.stringify(captured.map((c) => c.tags)));
+  } finally {
+    for (const k of ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]) delete process.env[k];
+  }
+});
+
 test("webhook Stripe de livemode incohérent avec la clé : 400, et Sentry est prévenu", async () => {
   process.env.STRIPE_SECRET_KEY = "sk_test_fake_key_local_only";
   process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_local";
