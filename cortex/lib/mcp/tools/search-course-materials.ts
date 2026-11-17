@@ -26,8 +26,7 @@ export default defineTool({
   description:
     "Full-text search in the documents the student uploaded for a course (slides, past exams, exercise sets, notes). " +
     "Accent- and typo-tolerant; all words must match. Returns excerpts of about 300 characters with their source; " +
-    "material marked as out of the syllabus (hors programme) comes after the course material. " +
-    "Use it to ground an explanation in the student's own material or to find where a topic appears in past exams. Read-only and free.",
+    "material marked as out of the syllabus (hors programme) comes after the course material. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
   userSummary: "Cherche un passage dans tes supports de cours.",

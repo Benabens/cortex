@@ -6,7 +6,7 @@ import { runAssist } from "../assist";
 import { clip } from "../content";
 import { courseLabel } from "../courses";
 import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, generationStatus, quoteSchema, quoteSummary } from "../schemas";
-import { defineTool, pendingResult, SPENDING_HINTS } from "../tool";
+import { defineTool, pendingResult, SPENDING_HINTS, paidCall } from "../tool";
 
 const output = z.object({
   status: generationStatus,
@@ -28,10 +28,9 @@ export default defineTool({
   name: "check_answer",
   title: "Grade my answer",
   description:
-    "Grade the student's answer to an exam question like the course's examiner would: verdict, rubric criterion by criterion, score, feedback and a correct solution. " +
-    "Use it when the student wants feedback on an answer they wrote (paste the exact question and their answer). " +
-    "Costs credits (0.1 by default) and one daily assistance: the first call returns the exact cost and a confirmation_token without spending anything; " +
-    "ask the user in the conversation and call again with the same arguments plus confirmation_token ONLY after they explicitly approved (nothing to confirm when nothing is charged).",
+    "Grades the student's answer to an exam question the way the course's examiner would: verdict, rubric criterion by criterion, score, feedback and a correct solution. " +
+    "Input: the exact question and the student's answer. " +
+    paidCall("assistance"),
   kind: "generate",
   annotations: SPENDING_HINTS,
   userSummary: "Corrige ta réponse à une question, critère par critère.",

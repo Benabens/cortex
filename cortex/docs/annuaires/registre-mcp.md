@@ -44,7 +44,7 @@ echo "v=MCPv1; k=ed25519; p=${PUBLIC_KEY}" > mcp-registry-auth
 
 ## 3. Publier (Cowork, depuis la racine de l'app sur `main` à jour)
 
-**État** : `com.cortexexam/cortex` **1.1.0** est publié depuis le 16/11/2026.
+**État** : `com.cortexexam/cortex` **1.1.0** est publié depuis le 16/11/2026. La **1.2.0** (descriptions d'outils sans coût codé en dur, 17/11) est prête dans le code : à publier après fusion et déploiement.
 
 ```
 brew install mcp-publisher

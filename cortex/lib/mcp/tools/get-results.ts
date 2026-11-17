@@ -39,9 +39,8 @@ export default defineTool({
   name: "get_results",
   title: "Get my exam and practice results",
   description:
-    "Get the student's results for a course: the mock exams Cortex generated (date, status, number of questions, verification summary, links), " +
-    "their practice scores per topic (last score, mastery, attempts, next review) and their graded feedback. " +
-    "Use it to review progress or to decide what to practise next. Read-only and free.",
+    "Returns the student's results for a course: the mock exams Cortex generated (date, status, number of questions, verification summary, links), " +
+    "practice scores per topic (last score, mastery, attempts, next review) and graded feedback. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
   userSummary: "Lit tes examens blancs générés et tes scores par notion.",
