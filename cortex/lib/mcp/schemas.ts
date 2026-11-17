@@ -11,7 +11,7 @@ export const courseArg = z.string().min(1).max(120).optional()
   .describe("Course to use: its code (e.g. \"COMP 201\"), its name, or its id from list_courses. Optional when the account has a single course.");
 
 export const confirmationTokenArg = z.string().min(10).max(200).optional()
-  .describe("Only after the user explicitly approved the quoted cost: the confirmation_token returned by the previous call with the same arguments.");
+  .describe("The confirmation_token returned by the previous call with the same arguments; with it, the call runs and spends the quoted cost.");
 
 export const courseRef = z.object({ id: z.string(), label: z.string() });
 export function courseRefOf(c: CourseConfig): z.infer<typeof courseRef> {

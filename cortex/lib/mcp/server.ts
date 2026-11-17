@@ -43,7 +43,11 @@ export const SERVER_INSTRUCTIONS = [
     "Tell the student that cost in the conversation and wait for their explicit yes; only then call the same tool again with the same arguments plus confirmation_token. " +
     "Never confirm on their behalf. When nothing is charged (the owner of this Cortex instance), the tool runs directly. " +
     "If a confirmation dialog shown by your client never comes back (the call times out), call the same tool again: you will get the cost and a confirmation_token to ask about in the conversation.",
+  "Costs and what is left: get_account_status gives the cost of each kind of generation and the remaining limits; check it before suggesting a paid action, and quote the exact cost returned by the first call.",
   "To add a course: create_course, then add_course_source for each material (past exams matter most), then prepare_course (costs credits, confirmed like a generation) and follow the job with get_job_status.",
+  "If generate_mock_exam answers format_required, ask the student how the exam looks (type, number of questions, duration), then record it with set_exam_format or pass format for this exam only.",
+  "Long jobs (generate_mock_exam, prepare_course): poll get_job_status at most every 30-60 seconds.",
+  "When the course the student mentions is unclear, list_courses gives the account's courses; to report several faulty questions of an exam, call report_question once per question with the reason in comment.",
   "Answer in the student's language; course content keeps its own language.",
 ].join("\n");
 
