@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
-import type { CourseFiles, FileEntry, FileStat, ServeOptions } from "@/lib/storage";
+import type { CourseFiles, FileEntry, FileStat, PutOptions, ServeOptions } from "@/lib/storage";
 import { isNotFound, type ObjectBucket, type S3Object } from "@/lib/storage/bucket";
 import { parseRange, rangedResponse, serveLocalFile } from "@/lib/storage/http";
 import { isObjectStored, relativeToRoot } from "@/lib/storage/keys";
@@ -98,9 +98,14 @@ export class S3Store implements CourseFiles {
     try { fs.utimesSync(file, now, now); } catch { /* disparu entre-temps */ }
   }
 
-  async put(file: string, body: Buffer | Uint8Array | string, opts: { exclusive?: boolean } = {}) {
+  async put(file: string, body: Buffer | Uint8Array | string, opts: PutOptions = {}) {
     const key = this.keyOf(file);
     if (!key) return writeLocal(file, body, opts.exclusive);
+    if (opts.localOnly) {
+      // Transit : jamais au seau. Un nom déjà pris dans le seau reste pris (pas d'écrasement Premium).
+      if (opts.exclusive && (await this.bucket.head(key))) return false;
+      return writeLocal(file, body, opts.exclusive);
+    }
     if (opts.exclusive) {
       if (await this.bucket.head(key)) return false;
       // Le disque tranche entre deux écritures concurrentes du même conteneur (O_EXCL).

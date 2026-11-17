@@ -39,10 +39,21 @@ export type ServeOptions = {
   headers: Record<string, string>;
 };
 
+export type PutOptions = {
+  /** false s'il existait déjà (sur le disque ou dans le seau), rien n'est écrit. */
+  exclusive?: boolean;
+  /**
+   * TRANSIT : le fichier reste sur le disque de ce conteneur et n'atteint jamais le seau, même à
+   * travers withLocalDir tant qu'il n'est pas modifié. C'est l'original d'un compte gratuit, le
+   * temps de son indexation : lib/originals le supprime ensuite (décision de Ben du 17/11/2026).
+   */
+  localOnly?: boolean;
+};
+
 export interface CourseFiles {
   readonly kind: "local" | "s3";
-  /** Écrit un fichier (dossiers créés au besoin). `exclusive` : false s'il existait déjà, rien n'est écrit. */
-  put(file: string, body: Buffer | Uint8Array | string, opts?: { exclusive?: boolean }): Promise<boolean>;
+  /** Écrit un fichier (dossiers créés au besoin). Cf. PutOptions. */
+  put(file: string, body: Buffer | Uint8Array | string, opts?: PutOptions): Promise<boolean>;
   /** Contenu d'un fichier ; null s'il n'existe pas. */
   read(file: string): Promise<Buffer | null>;
   /** Taille et date d'un FICHIER ; null s'il n'existe pas (un dossier n'est pas un fichier). */
