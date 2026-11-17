@@ -38,6 +38,24 @@ async function ask<T>(...args: Parameters<typeof completeJson<T>>): Promise<T> {
 const JUDGE_MODEL = "opus";
 const L = "ABCDEFGH";
 
+export function majorityValue<T>(values: T[]): T {
+  const counts = new Map<T, number>();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  return values.reduce((best, value) => (counts.get(value)! > counts.get(best)! ? value : best), values[0]);
+}
+
+export function majorityOptions(votes: number[][]): number[] {
+  const counts = new Map<number, number>();
+  for (const vote of votes) for (const option of new Set(vote)) counts.set(option, (counts.get(option) ?? 0) + 1);
+  return [...counts].filter(([, count]) => count >= 2).map(([option]) => option).sort((a, b) => a - b);
+}
+
+/** Signaux de forme vérifiables sans connaissance du cours ; volontairement conservateur. */
+export function deterministicTrivialOptions(item: Pick<BenchItem, "options" | "correct">): number[] {
+  const absolute = /\b(?:toujours|jamais|aucun(?:e)?|tous?|toutes?|impossible|nécessairement|exclusivement|always|never|none|all|impossible|necessarily|exclusively)\b/i;
+  return (item.options ?? []).flatMap((option, idx) => (!(item.correct ?? []).includes(idx) && absolute.test(option) ? [idx] : []));
+}
+
 type Passage = { src: string; text: string };
 
 async function passagesFor(text: string, max = 3): Promise<Passage[]> {
@@ -86,6 +104,7 @@ type RawVerdict = {
   q: number; key: ItemVerdict["key"]; explanation: ItemVerdict["explanation"]; definition: ItemVerdict["definition"];
   off_course: boolean; distractors: number; trivial: number[]; chapter: number | null; notion: string;
   code: null | { language: string; source: string; stdin?: string; expected: string };
+  evidence: NonNullable<ItemVerdict["evidence"]>;
 };
 
 const ITEM_SCHEMA = {
@@ -100,8 +119,9 @@ const ITEM_SCHEMA = {
           definition: { type: "string", enum: ["conform", "mismatch", "na"] }, off_course: { type: "boolean" }, distractors: { type: "integer" },
           trivial: { type: "array", items: { type: "integer" } }, chapter: { type: ["integer", "null"] }, notion: { type: "string" },
           code: { type: ["object", "null"], properties: { language: { type: "string" }, source: { type: "string" }, stdin: { type: "string" }, expected: { type: "string" } } },
+          evidence: { type: "array", items: { type: "object", properties: { criterion: { type: "string" }, option: { type: ["integer", "null"] }, source: { type: "string" }, passage: { type: "string" } }, required: ["criterion", "option", "source", "passage"] } },
         },
-        required: ["q", "key", "explanation", "definition", "off_course", "distractors", "trivial", "chapter", "notion", "code"],
+        required: ["q", "key", "explanation", "definition", "off_course", "distractors", "trivial", "chapter", "notion", "code", "evidence"],
       },
     },
   },
@@ -114,13 +134,40 @@ async function adjudicate(batch: BenchItem[], passages: Passage[], solver: Map<n
   const out = await ask<{ items: RawVerdict[] }>({
     model: JUDGE_MODEL, timeoutMs: 600_000, json: { schema: ITEM_SCHEMA },
     prompt: [ITEM_RULES, DATA_RULE, dataBlock("EXTRAITS DU COURS", passages), "", "═══ PLAN DU COURS (id : titre) ═══", plan, "", "═══ QUESTIONS À JUGER ═══", body, "",
-      `Réponds UNIQUEMENT avec l'objet JSON { "items": [ un objet par question, avec q, key, explanation, definition, off_course, distractors, trivial, chapter, notion, code ] }.`].join("\n"),
+      `Réponds UNIQUEMENT avec l'objet JSON { "items": [ un objet par question, avec q, key, explanation, definition, off_course, distractors, trivial, chapter, notion, code, evidence ] }.`].join("\n"),
   }, { check: (v) => (Array.isArray(v?.items) && v.items.length >= batch.length ? null : `il faut un verdict pour chacune des ${batch.length} questions`) });
   return out.items;
 }
 
+function votedVerdict(votes: RawVerdict[]): RawVerdict | undefined {
+  if (!votes.length) return undefined;
+  const key = majorityValue(votes.map((v) => v.key));
+  const explanation = majorityValue(votes.map((v) => v.explanation));
+  const definition = majorityValue(votes.map((v) => v.definition));
+  const trivial = majorityOptions(votes.map((v) => v.trivial ?? []));
+  const supporting = votes.find((v) => v.key === key && v.explanation === explanation) ?? votes[0];
+  return {
+    ...supporting, key, explanation, definition, trivial,
+    off_course: majorityValue(votes.map((v) => v.off_course)),
+    chapter: majorityValue(votes.map((v) => v.chapter)),
+    notion: majorityValue(votes.map((v) => v.notion)),
+    evidence: votes.flatMap((v) => v.evidence ?? []).filter((e, i, all) => all.findIndex((x) => JSON.stringify(x) === JSON.stringify(e)) === i),
+  };
+}
+
+/**
+ * Tirage pseudo-aléatoire sans graine fixée : une exécution montre UNE sortie, alors que la clé peut
+ * énumérer toutes les sorties possibles (banc rs-mixte du 17/11, `random.randint(2, 4)`).
+ */
+function unseededRandom(c: NonNullable<RawVerdict["code"]>): boolean {
+  const src = c.source;
+  if (c.language === "python") return /^\s*(?:import\s+random\b|from\s+random\s+import\b)|\b(?:np|numpy)\.random\b/m.test(src) && !/\bseed\s*\(\s*\d|default_rng\s*\(\s*\d/.test(src);
+  return /\brand\s*\(/.test(src) && !/\bsrand\s*\(\s*\d+\s*\)/.test(src);
+}
+
 async function runCode(c: NonNullable<RawVerdict["code"]>): Promise<ItemVerdict["code"]> {
   if (c.language !== "python" && c.language !== "c") return { ran: false, ok: true, detail: `langage ${c.language} non exécuté` };
+  if (unseededRandom(c)) return { ran: false, ok: true, detail: "tirage aléatoire sans graine : une exécution ne tranche pas" };
   const r = await verifyCode(c.language, c.source, [{ stdin: c.stdin ?? "", expect: c.expected }]);
   // Seule une exécution qui ABOUTIT tranche : un programme qui plante ici (module absent, extrait
   // incomplet) ne prouve rien contre la clé.
@@ -136,14 +183,22 @@ async function duplicates(items: BenchItem[], verdicts: ItemVerdict[], previous:
   const byIdx = new Map(verdicts.map((v) => [v.idx, v.notion]));
   const exam = items.map((it) => `Q${it.idx} [notion : ${sanitizeCorpus(byIdx.get(it.idx) ?? "?")}] ${sanitizeCorpus(it.stem).slice(0, 400)}`).join("\n");
   const prev = previous.slice(-150).map((p, i) => `P${i}. ${sanitizeCorpus(p.stem).slice(0, 220)}`).join("\n") || "(aucun examen précédent)";
-  const out = await ask<{ intra: number[][]; previous: number[] }>({
-    model: JUDGE_MODEL, timeoutMs: 600_000, json: { schema: DUP_SCHEMA },
-    prompt: [DUPLICATE_RULES, `Le programme du cours compte ${notions} notions ; l'examen a ${items.length} questions.`, DATA_RULE, "", "═══ EXAMEN ═══", exam, "", "═══ QUESTIONS DES EXAMENS PRÉCÉDENTS ═══", prev, "",
-      `Réponds UNIQUEMENT avec l'objet JSON { "intra": [[a, b], …] (paires de numéros Q, la seconde est le doublon), "previous": [numéros Q qui reprennent un examen précédent] }.`].join("\n"),
-  });
+  const prompt = [DUPLICATE_RULES, `Le programme du cours compte ${notions} notions ; l'examen a ${items.length} questions.`, DATA_RULE, "", "═══ EXAMEN ═══", exam, "", "═══ QUESTIONS DES EXAMENS PRÉCÉDENTS ═══", prev, "",
+    `Réponds UNIQUEMENT avec l'objet JSON { "intra": [[a, b], …] (paires de numéros Q, la seconde est le doublon), "previous": [numéros Q qui reprennent un examen précédent] }.`].join("\n");
+  const rounds = await Promise.all([0, 1, 2].map(() => ask<{ intra: number[][]; previous: number[] }>({ model: JUDGE_MODEL, timeoutMs: 600_000, json: { schema: DUP_SCHEMA }, prompt })));
+  const pairCounts = new Map<string, number>();
+  const previousCounts = new Map<number, number>();
+  for (const out of rounds) {
+    for (const pair of out.intra ?? []) {
+      if (!Array.isArray(pair) || pair.length !== 2 || pair[0] === pair[1]) continue;
+      const key = `${pair[0]}:${pair[1]}`;
+      pairCounts.set(key, (pairCounts.get(key) ?? 0) + 1);
+    }
+    for (const n of new Set(out.previous ?? [])) if (Number.isInteger(n)) previousCounts.set(n, (previousCounts.get(n) ?? 0) + 1);
+  }
   return {
-    intra: (out.intra ?? []).filter((p) => Array.isArray(p) && p.length === 2 && p[0] !== p[1]).map(([a, b]) => [a, b] as [number, number]),
-    previous: (out.previous ?? []).filter((n) => Number.isInteger(n)),
+    intra: [...pairCounts].filter(([, count]) => count >= 2).map(([pair]) => pair.split(":").map(Number) as [number, number]),
+    previous: [...previousCounts].filter(([, count]) => count >= 2).map(([n]) => n),
   };
 }
 
@@ -192,11 +247,12 @@ export async function judgeExam(run: BenchRun): Promise<Verdicts> {
     const passages: Passage[] = [];
     for (const it of batch) passages.push(...(await passagesFor(`${it.stem} ${(it.options ?? []).join(" ")}`)));
     const solver = await solve(batch, passages);
-    const raw = await adjudicate(batch, passages, solver, run.plan.chapters);
+    const rounds = await Promise.all([0, 1, 2].map(() => adjudicate(batch, passages, solver, run.plan.chapters)));
     for (const it of batch) {
-      const v = raw.find((x) => x.q === it.idx);
+      const v = votedVerdict(rounds.map((raw) => raw.find((x) => x.q === it.idx)).filter((x): x is RawVerdict => !!x));
       const code = v?.code?.source ? await runCode(v.code) : undefined;
       const distractors = it.options ? Math.max(0, it.options.length - (it.correct ?? []).length) : 0;
+      const deterministicTrivial = deterministicTrivialOptions(it);
       verdicts.push({
         idx: it.idx,
         chapter: chapterOf(v?.chapter, run.plan.chapters),
@@ -208,7 +264,8 @@ export async function judgeExam(run: BenchRun): Promise<Verdicts> {
         offCourse: !!v?.off_course,
         distractors,
         // Même règle que le correcteur du moteur (lib/qcm) : un indice d'option fausse, entier et dans les bornes.
-        trivialDistractors: Math.min(distractors, new Set((Array.isArray(v?.trivial) ? v.trivial : []).filter((k) => Number.isInteger(k) && k >= 0 && k < (it.options?.length ?? 0) && !(it.correct ?? []).includes(k))).size),
+        trivialDistractors: Math.min(distractors, deterministicTrivial.length),
+        evidence: [...(v?.evidence ?? []), ...deterministicTrivial.map((option) => ({ criterion: "trivial", option, source: `Q${it.idx}`, passage: it.options?.[option] ?? "" }))],
         ...(code ? { code } : {}),
       });
     }
