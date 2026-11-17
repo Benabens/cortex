@@ -12,6 +12,7 @@ export async function postForm(route: string, query: string, files: [Buffer, str
   const body = Buffer.from(await encoded.arrayBuffer());
   const headers = new Headers(encoded.headers);
   headers.set("content-length", String(body.length));
+  headers.set("accept-language", "fr");
   const res: Response = await mod.POST(new NextRequest(url, { method: "POST", headers, body }));
   return { status: res.status, json: await res.json() };
 }

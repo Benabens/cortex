@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { startPrepareJob } from "@/lib/generation";
 import { requireCourse } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
@@ -14,6 +15,6 @@ export async function POST(req: NextRequest) {
   const { denied } = requireCourse(req);
   if (denied) return denied;
   const started = await startPrepareJob();
-  if (!started.ok) return NextResponse.json({ error: started.error }, { status: started.status });
+  if (!started.ok) return apiError(req, started, started.status, { command: started.command });
   return NextResponse.json(started.existing ? { ok: true, jobId: started.jobId, existing: true } : { ok: true, jobId: started.jobId });
 }
