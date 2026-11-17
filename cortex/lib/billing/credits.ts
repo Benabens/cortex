@@ -269,13 +269,39 @@ export async function subscriptionCreditsCenti(userId = currentUser()): Promise<
   const now = nowStr();
   const win = rechargeDue(s!, now);
   if (win) {
-    await authRun(
-      `UPDATE subscriptions SET remaining = monthly_credits, window_anchor = ?, month_anchor = ?, updated_at = ? WHERE user_id = ? AND coalesce(window_anchor, '') < ?`,
-      win, win.slice(0, 7), now, userId, win,
-    );
+    await authTx(async (tx) => {
+      await lockAccountInTx(tx, userId);
+      await openSubscriptionWindowInTx(tx, userId, win, now);
+    });
     return Number(s!.monthly_credits) || 0;
   }
   return Math.max(0, Number(s!.remaining) || 0);
+}
+
+/**
+ * Ouvre la fenêtre mensuelle `win` d'un annuel (sous le verrou du compte) : solde
+ * remis au mensuel, une seule fois par fenêtre. La facture de la période en garde
+ * la trace (audit fuites I1) : le mois s'ajoute à ce qu'elle a accordé, le reliquat
+ * de la fenêtre close à son inutilisé. Un remboursement ou un litige de l'annuel
+ * reprend ainsi tout ce qui a été accordé, pas un seul mois. Rend false si la
+ * fenêtre était déjà ouverte.
+ */
+export async function openSubscriptionWindowInTx(tx: AuthTx, userId: string, win: string, now: string): Promise<boolean> {
+  const s = await tx.get<{ remaining: number; monthly_credits: number; window_anchor: string | null; period_end: string | null }>(
+    `SELECT remaining, monthly_credits, window_anchor, period_end FROM subscriptions WHERE user_id = ?`, userId,
+  );
+  if (!s || String(s.window_anchor ?? "") >= win) return false;
+  await tx.run(
+    `UPDATE subscriptions SET remaining = monthly_credits, window_anchor = ?, month_anchor = ?, updated_at = ? WHERE user_id = ?`,
+    win, win.slice(0, 7), now, userId,
+  );
+  if (s.period_end) {
+    await tx.run(
+      `UPDATE stripe_invoices SET granted_centi = granted_centi + ?, unused_centi = coalesce(unused_centi, 0) + ? WHERE user_id = ? AND period_end = ?`,
+      Math.max(0, Number(s.monthly_credits) || 0), Math.max(0, Number(s.remaining) || 0), userId, s.period_end,
+    );
+  }
+  return true;
 }
 
 /** Même chose en crédits (affichage). */
@@ -294,8 +320,10 @@ export async function subscriptionCredits(userId = currentUser()): Promise<numbe
 export async function grantSubscriptionMonth(p: {
   userId: string; customerId?: string | null; subscriptionId?: string | null; plan?: string | null;
   periodEnd: string; periodStart?: string | null; at?: string | null;
+  /** Crédits par fenêtre (centièmes). 0 : facture payée 0 € (code promo à 100 %), période en règle sans crédit (audit fuites I2). */
+  credits?: number;
 }): Promise<boolean> {
-  const credits = subscriptionMonthlyCreditsCenti();
+  const credits = p.credits ?? subscriptionMonthlyCreditsCenti();
   const now = nowStr();
   const at = p.at ?? now;
   const start = p.periodStart ?? now;

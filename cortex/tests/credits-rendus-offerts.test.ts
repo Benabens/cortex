@@ -32,9 +32,7 @@ const ENV: Record<string, string> = {
   CORTEX_OWNER_USER_ID: "boss",
 };
 Object.assign(process.env, ENV);
-
-import { runWithCourse } from "../db/client";
-import { runWithUser } from "../db/context";
+// Aucun import statique du store : il lirait l'environnement avant l'affectation ci-dessus (imports remontés).
 
 let reserve: typeof import("../lib/billing/reserve");
 let credits: typeof import("../lib/billing/credits");
@@ -60,7 +58,11 @@ after(async () => {
   for (const k of Object.keys(ENV)) delete process.env[k];
 });
 
-const inMl = <T,>(user: string, fn: () => Promise<T>) => runWithUser(user, () => runWithCourse("ml", fn));
+const inMl = async <T,>(user: string, fn: () => Promise<T>) => {
+  const { runWithUser } = await import("../db/context");
+  const { runWithCourse } = await import("../db/client");
+  return runWithUser(user, () => runWithCourse("ml", fn));
+};
 let n = 0;
 const reserveQcm = async (user: string) => {
   const ref = `job:${user}:ml:${++n}`;
