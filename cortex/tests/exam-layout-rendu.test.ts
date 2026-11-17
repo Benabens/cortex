@@ -114,6 +114,33 @@ test("barème absent : aucun point dans les titres, le total reste sur la garde"
   assert.match(body(r.qcm), /Total:/);
 });
 
+test("questions sur deux colonnes : les QCM de l'énoncé dans multicols, le préambule charge multicol ; corrigé et ouvertes sur une colonne", async () => {
+  const r = await renders(variant({ questions: { columns: 2, titles: true } }));
+  assert.match(r.qcm, /\\usepackage\{multicol\}/);
+  const cols = body(r.qcm).match(/\\begin\{multicols\}\{2\}([\s\S]*?)\\end\{multicols\}/);
+  assert.ok(cols, "QCM dans multicols");
+  assert.match(cols![1], /What is 2 \+ 3\?/);
+  assert.doesNotMatch(cols![1], /next term/, "la question ouverte reste hors des colonnes");
+  assert.doesNotMatch(r.qcmKey, /multicols/, "corrigé sur une colonne");
+  const plain = await renders(variant({}));
+  assert.doesNotMatch(plain.qcm, /multicol/, "une colonne : préambule inchangé");
+});
+
+test("questions sans titre : ni étiquette de type ni thème, l'énoncé suit le numéro ; un choix multiple reste annoncé", async () => {
+  const r = await renders(variant({ questions: { columns: 1, titles: false }, numbering: { prefix: "", style: "arabic" }, points: "none" }));
+  const b = body(r.qcm);
+  assert.doesNotMatch(b, /single choice/);
+  assert.doesNotMatch(b, /Toy arithmetic|Toy parity/);
+  assert.match(b, /\\textbf\{1\.\}~\n\\noindent What is 2 \+ 3\?/);
+  assert.match(b, /\\textbf\{2\.\}~\{\\footnotesize\[multiple choice\]\}~\n\\noindent Which numbers are even\?/);
+});
+
+test("titre de partie : « Part 1 -- … » sans l'espace d'un \\quad", async () => {
+  const r = await renders(variant({}));
+  assert.match(body(r.qcm), /\\textbf\{Part 1 -- Multiple-choice questions/);
+  assert.doesNotMatch(r.qcm, /Part \d \\quad--/);
+});
+
 test("police : sans empattements et 12 pt", async () => {
   const r = await renders(variant({ font: { family: "sans", size: 12 } }));
   for (const tex of [r.written, r.qcm, r.blocks]) {
@@ -167,7 +194,7 @@ test("compile : la mise en page la plus éloignée du défaut, dans les trois mo
   if (!texAvailable() || spawnSync("pdftotext", ["-v"]).error) return t.skip("tectonic/pdflatex ou pdftotext absent");
   const { examsDir } = await import("../lib/paths");
   const r = await renders(variant({
-    numbering: { prefix: "", style: "roman" }, choices: { label: "(a)", mark: "bubble", columns: 2 }, points: "inline",
+    numbering: { prefix: "", style: "roman" }, choices: { label: "(a)", mark: "bubble", columns: 2 }, points: "inline", questions: { columns: 2, titles: false },
     font: { family: "sans", size: 12 }, answerSpace: "box",
     header: { left: "none", center: "course", right: "none" }, footer: { left: "none", center: "none", right: "pageOfTotal" },
     cover: { idFields: [{ kind: "studentId", label: "Candidate number:" }], instructions: ["Phones off."], pointsTable: true },

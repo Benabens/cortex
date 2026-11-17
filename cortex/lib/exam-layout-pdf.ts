@@ -186,9 +186,16 @@ function chrome(layout: ExamLayout) {
   };
 }
 
-/** Taille de la classe : le préambule commun est en 11 pt. */
+/**
+ * Le préambule commun (en 11 pt) à la taille de la mise en page ; multicol seulement pour des
+ * questions sur deux colonnes (préchauffé dans l'image : Dockerfile, contrôle hors ligne de la CI).
+ */
 function preamble(layout: ExamLayout) {
-  return (src: string) => (layout.font.size === 11 ? src : src.replace(/\\documentclass\[11pt/, String.raw`\documentclass[${layout.font.size}pt`));
+  return (src: string) => {
+    let out = layout.font.size === 11 ? src : src.replace(/\\documentclass\[11pt/, String.raw`\documentclass[${layout.font.size}pt`);
+    if (layout.questions.columns === 2) out = out.replace(/\\usepackage\{needspace\}/, String.raw`\usepackage{needspace}` + "\n" + String.raw`\usepackage{multicol}`);
+    return out;
+  };
 }
 
 /** Le PDF de la mise en page paramétrique `layout`, pour le cours courant. */
@@ -200,7 +207,8 @@ export function layoutPdf(layout: ExamLayout): ExamPdf {
     preamble: preamble(layout),
     chrome: chrome(layout),
     cover: async (f) => cover(layout, f),
-    qcm: localQcmLabels(w, color, false),
+    // « Part 1 -- … » : l'espace d'un \quad de l'EPFL se lisait comme un trou (« Part 1    – »).
+    qcm: localQcmLabels(w, color, false, " -- "),
     blocks: localBlockLabels(w, color),
     written: localWrittenLabels(w, (n) => headNumber(layout.numbering, n, w.question).num),
     logo: false,

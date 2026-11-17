@@ -21,6 +21,7 @@ test("QCM américain : sans empattements en 10 pt, « (A) » et bulles l'une sou
   const s = survey("us-mcq");
   assert.deepEqual(s.font, { family: "sans", size: 10 });
   assert.deepEqual(s.choices, { label: "(A)", mark: "bubble", columns: 1 });
+  assert.deepEqual(s.questions, { columns: 2, titles: false }, "questions sur deux colonnes, sans étiquette de type ni thème");
   assert.deepEqual(s.header, { left: "course", center: "none", right: "none" });
   assert.deepEqual(s.footer, { left: "none", center: "pageOfTotal", right: "none" });
   assert.deepEqual(s.numbering, { prefix: "", style: "arabic" });
@@ -62,6 +63,21 @@ test("examen français : « Exercice » en chiffres romains, barème dans la lig
 test("apostrophes et guillemets typographiques en ASCII (la police du préambule n'a pas « ’ »)", () => {
   const [page] = parseBboxXhtml(`<page width="595" height="842"><line xMin="1" yMin="1" xMax="9" yMax="9"><word xMin="1" yMin="1" xMax="9" yMax="9">d’étudiant</word><word xMin="1" yMin="1" xMax="9" yMax="9">“x”</word></line></page>`);
   assert.equal(page.lines[0].text, "d'étudiant \"x\"");
+});
+
+test("annale sans QCM : rien de relevé sur les questions (le défaut décide)", () => {
+  assert.equal(survey("uk-essay").questions, undefined);
+  assert.equal(survey("fr-examen").questions, undefined);
+});
+
+test("QCM qui annonce le type de chaque question : les étiquettes restent", () => {
+  const line = (y: number, x: number, text: string) => `<line xMin="${x}" yMin="${y}" xMax="${x + 200}" yMax="${y + 10}">${text.split(" ").map((w) => `<word xMin="${x}" yMin="${y}" xMax="${x + 20}" yMax="${y + 10}">${w}</word>`).join("")}</line>`;
+  const body = [1, 2].flatMap((q) => [
+    line(100 + q * 120, 60, `${q}. (single choice) Which toy value?`),
+    ...["A", "B", "C", "D"].map((l, k) => line(115 + q * 120 + k * 15, 70, `${l}. ${k}`)),
+  ]).join("");
+  const s = surveyPages(parseBboxXhtml(`<page width="595" height="842">${body}</page>`), []);
+  assert.deepEqual(s.questions, { columns: 1, titles: true });
 });
 
 test("rien de lisible : aucun champ relevé (le défaut neutre s'applique)", () => {
