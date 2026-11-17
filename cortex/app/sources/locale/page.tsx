@@ -117,7 +117,7 @@ function LocalOriginal() {
         title={original ? `${name} est sur ton ordinateur` : "Fichier sur ton ordinateur"}
         description="Cortex n’en garde que l’index : la recherche et tes examens blancs fonctionnent sans le fichier."
       />
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
+      <div className="flex w-full max-w-2xl flex-col gap-4">
         {loading && !data ? (
           <div className="skeleton h-48 rounded-lg" role="status" aria-busy="true" aria-label="Chargement" />
         ) : error || !original ? (
@@ -134,7 +134,7 @@ function LocalOriginal() {
                 <div className="min-w-0">
                   <p className="truncate font-medium text-ink-1" title={name}>{name}</p>
                   <p className="text-[0.8rem] text-ink-3">
-                    {original.rel && original.rel !== name ? <>importé depuis <span className="font-data">{original.rel}</span> · </> : null}
+                    {original.rel && original.rel !== name ? <>importé depuis <span className="font-data break-all">{original.rel}</span> · </> : null}
                     {kb(original.size)}{page ? ` · ${page.replace("#page=", "page ")}` : ""}
                   </p>
                 </div>
@@ -186,7 +186,7 @@ function StepView({ step, original, page, onChoose, onAllow, onOpen }: {
     case "unsupported":
       return (
         <p className="text-[0.88rem] leading-relaxed text-ink-2">
-          Ouvre-le depuis ton ordinateur : <span className="font-data text-ink-1">{where}</span>
+          Ouvre-le depuis ton ordinateur : <span className="font-data break-all text-ink-1">{where}</span>
           {page ? `, ${page.replace("#page=", "page ")}` : ""}. Ce navigateur ne laisse pas Cortex le retrouver ; Chrome
           et Edge sur ordinateur le permettent.
         </p>
@@ -218,7 +218,7 @@ function StepView({ step, original, page, onChoose, onAllow, onOpen }: {
       return (
         <div className="flex flex-col gap-3">
           <p className="text-[0.88rem] text-ink-2">
-            Trouvé dans « {step.dir} » : <span className="font-data text-ink-1">{step.where}</span>
+            Trouvé dans « {step.dir} » : <span className="font-data break-all text-ink-1">{step.where}</span>
           </p>
           {step.viewable ? (
             <Button variant="primary" onClick={() => onOpen(step.file)} className="self-start">Ouvrir {original.name}</Button>
@@ -231,7 +231,7 @@ function StepView({ step, original, page, onChoose, onAllow, onOpen }: {
       return (
         <div className="flex flex-col gap-3">
           <p className="text-[0.88rem] leading-relaxed text-ink-2">
-            « {step.dir} » contient un fichier {original.name} (<span className="font-data">{step.where}</span>), mais il a
+            « {step.dir} » contient un fichier {original.name} (<span className="font-data break-all">{step.where}</span>), mais il a
             changé depuis l’import. Ouvre-le depuis ton ordinateur, ou dépose cette nouvelle version comme un nouveau support.
           </p>
           <Button variant="ghost" onClick={onChoose} className="self-start">Choisir un autre dossier</Button>
@@ -242,7 +242,7 @@ function StepView({ step, original, page, onChoose, onAllow, onOpen }: {
         <div className="flex flex-col gap-3">
           <p className="text-[0.88rem] leading-relaxed text-ink-2">
             {original.name} n’est pas dans « {step.dir} », ni dans ses sous-dossiers. Choisis le dossier où il se trouve,
-            ou ouvre-le depuis ton ordinateur : <span className="font-data text-ink-1">{where}</span>.
+            ou ouvre-le depuis ton ordinateur : <span className="font-data break-all text-ink-1">{where}</span>.
           </p>
           <Button variant="secondary" onClick={onChoose} className="self-start">Choisir un autre dossier</Button>
         </div>
