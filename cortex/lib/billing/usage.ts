@@ -12,6 +12,7 @@ import { isOwner } from "./owner";
 import { ownerAlertBlocker } from "./owner-alert";
 import { currentJob } from "./usage-context";
 import { alertSpendThresholds, resetSpendAlerts } from "./spend-alerts";
+import { alertAccountHourSpend, resetAccountSpendAlerts } from "./account-spend-alerts";
 import { DELTA_CENTI } from "./credits";
 
 /**
@@ -132,6 +133,7 @@ export async function recordUsage(u: {
   } catch (e) {
     log("warn", "usage.record_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
   }
+  if (paid) await alertAccountHourSpend(currentUser());
 }
 
 export type UsageEstimate = {
@@ -205,7 +207,10 @@ export async function closeUsage(id: number | null, u: {
     log("warn", "usage.close_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
   }
   // La dépense vient de bouger : c'est ici qu'un seuil se franchit.
-  if (paid) await alertOnSpend();
+  if (paid) {
+    await alertOnSpend();
+    await alertAccountHourSpend(currentUser());
+  }
 }
 
 /** Retire la ligne provisoire : le fournisseur a refusé avant de traiter (rien facturé). */
@@ -254,6 +259,7 @@ export async function monthSpendUsd(): Promise<number> {
 export function resetSpendCache(): void {
   _spendCache = null;
   resetSpendAlerts();
+  resetAccountSpendAlerts();
 }
 
 /**
