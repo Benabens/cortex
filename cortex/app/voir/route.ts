@@ -4,6 +4,8 @@ import { useCourseOr404 } from "@/lib/req";
 import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
+import { requestLocale } from "@/lib/i18n/api-error";
+import { translator } from "@/lib/i18n/translate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,8 +13,9 @@ export const dynamic = "force-dynamic";
 const CONTENT_ROOT = path.resolve(process.cwd(), "..");
 
 /** Script injecté côté client : déplie la bonne carte, scrolle, entoure, surligne. */
-function injectedScript(targetTitle: string, terms: string[]): string {
-  const payload = JSON.stringify({ targetTitle, terms });
+function injectedScript(targetTitle: string, terms: string[], labels: { found: string; clear: string }): string {
+  const payload = JSON.stringify({ targetTitle, terms, labels });
+  // i18n-allow: gabarit CSS et script seulement ; les libellés arrivent par P.labels
   return `
 <style>
   .cortex-hl { background: rgba(197,138,79,.28); color: inherit; border-radius: 3px; padding: 0 1px; }
@@ -132,7 +135,8 @@ function injectedScript(targetTitle: string, terms: string[]): string {
       if(first){ openAncestors(first); first.scrollIntoView({behavior:'smooth', block:'center'}); }
     }
     var b=document.createElement('div'); b.className='cortex-banner';
-    b.innerHTML='⟵ Cortex · trouvé ici<a id="cortex-clear">enlever surlignage</a>';
+    var clear=document.createElement('a'); clear.id='cortex-clear'; clear.textContent=P.labels.clear;
+    b.append(P.labels.found, clear);
     document.body.appendChild(b);
     b.querySelector('#cortex-clear').addEventListener('click', function(){
       document.querySelectorAll('.cortex-hl').forEach(function(m){ m.replaceWith(document.createTextNode(m.textContent)); });
@@ -153,6 +157,7 @@ export async function GET(req: NextRequest) {
   if (process.env.NODE_ENV === "production") return new NextResponse("Not found", { status: 404 });
   const denied = useCourseOr404(req);
   if (denied) return denied;
+  const t = (k: "found" | "clear" | "notFound") => translator(requestLocale(req))(`sourceViewer.${k}`);
   const sp = req.nextUrl.searchParams;
   const src = sp.get("src") ?? "";
   const q = sp.get("q") ?? "";
@@ -161,7 +166,7 @@ export async function GET(req: NextRequest) {
   // Sécurité : chemin sous CONTENT_ROOT, .html uniquement, pas de traversal.
   const abs = path.resolve(CONTENT_ROOT, src);
   if (!abs.startsWith(CONTENT_ROOT + path.sep) || !abs.endsWith(".html") || !fs.existsSync(abs)) {
-    return new NextResponse("Fichier introuvable", { status: 404 });
+    return new NextResponse(t("notFound"), { status: 404 });
   }
 
   let title = "";
@@ -180,7 +185,7 @@ export async function GET(req: NextRequest) {
   if (/<head[^>]*>/i.test(html)) html = html.replace(/<head[^>]*>/i, (m) => m + baseTag);
   else html = baseTag + html;
 
-  const inj = injectedScript(title, terms);
+  const inj = injectedScript(title, terms, { found: t("found"), clear: t("clear") });
   if (/<\/body>/i.test(html)) html = html.replace(/<\/body>/i, inj + "</body>");
   else html = html + inj;
 
