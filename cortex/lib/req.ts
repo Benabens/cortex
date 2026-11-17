@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { enterCourse } from "@/db/client";
 import { enterUser } from "@/db/context";
 import { courseExists, DEFAULT_COURSE, ownsCourse } from "@/lib/courses";
+import { apiError } from "@/lib/i18n/api-error";
+import { UserFacingError } from "@/lib/i18n/user-error";
 
 /**
  * Cours demandé par la requête : query `?course=` puis header `x-cortex-course`,
@@ -30,11 +32,10 @@ export function useUser(req: Request): string {
  *  révéler « ce cours existe mais n'est pas à toi » énumérerait les matières
  *  des autres). Portée par `useCourse` pour qu'AUCUNE route ne puisse installer
  *  le contexte d'un cours non possédé, même par oubli de garde. */
-export class CourseAccessError extends Error {
-  readonly status = 404;
+export class CourseAccessError extends UserFacingError {
   readonly courseId: string;
   constructor(courseId: string) {
-    super(`Cours inconnu : « ${courseId} ».`);
+    super({ code: "course_unknown", params: { course: courseId } }, 404);
     this.name = "CourseAccessError";
     this.courseId = courseId;
   }
@@ -67,8 +68,8 @@ export function useCourse(req: Request): string {
   return enterCourse(course);
 }
 
-function deniedResponse(e: CourseAccessError): NextResponse {
-  return NextResponse.json({ error: e.message }, { status: e.status });
+function deniedResponse(req: Request, e: CourseAccessError): NextResponse {
+  return apiError(req, e, e.status);
 }
 
 /**
@@ -83,7 +84,7 @@ export function useCourseOr404(req: Request): NextResponse | null {
     useCourse(req);
     return null;
   } catch (e) {
-    if (e instanceof CourseAccessError) return deniedResponse(e);
+    if (e instanceof CourseAccessError) return deniedResponse(req, e);
     throw e;
   }
 }
@@ -98,7 +99,7 @@ export function requireCourse(req: Request): { course: string; denied: null } | 
   try {
     return { course: useCourse(req), denied: null };
   } catch (e) {
-    if (e instanceof CourseAccessError) return { course: null, denied: deniedResponse(e) };
+    if (e instanceof CourseAccessError) return { course: null, denied: deniedResponse(req, e) };
     throw e;
   }
 }

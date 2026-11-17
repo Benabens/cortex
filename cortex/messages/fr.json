@@ -8,5 +8,14 @@
     "hint": "La langue des écrans et des e-mails de Cortex. Un examen garde la langue de son cours.",
     "label": "Langue de l’interface",
     "error": "Impossible d’enregistrer la langue. Réessaie."
+  },
+  "errors": {
+    "unauthenticated": "Non authentifié.",
+    "rate_limited": "Trop de requêtes — réessaie dans une minute.",
+    "locale_unsupported": "Langue non disponible.",
+    "body_length_required": "Longueur du corps requise.",
+    "content_length_invalid": "En-tête Content-Length invalide.",
+    "auth_body_too_large": "Corps trop volumineux pour l’authentification (max {maxKib} Kio).",
+    "course_unknown": "Cours inconnu : « {course} »."
   }
 }
