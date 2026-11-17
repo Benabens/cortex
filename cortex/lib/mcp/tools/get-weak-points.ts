@@ -27,9 +27,8 @@ export default defineTool({
   name: "get_weak_points",
   title: "Get my weak points",
   description:
-    "Get the student's tracked weak points for a course, most serious first (topic, theme, severity, the note explaining the gap), " +
-    "grouped by theme, plus the concepts due for spaced-repetition review. Use it for questions like \"what are my weak points before the COMP 201 exam?\" " +
-    "or to pick what a drill should target. Read-only and free.",
+    "Returns the student's tracked weak points for a course, most serious first (topic, theme, severity, the note explaining the gap), " +
+    "grouped by theme, plus the concepts due for spaced-repetition review. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
   userSummary: "Lit tes points faibles, du plus grave au moins grave.",

@@ -19,6 +19,19 @@ export type Era = "legacy" | "modern";
  */
 export type ToolKind = "read" | "generate" | "write";
 
+/**
+ * Phrase des outils payants, partagée : le COMPORTEMENT de l'outil (devis, jeton,
+ * exécution), jamais un chiffre ni une consigne au modèle. Aucun coût ici : claude.ai
+ * garde la liste d'outils en cache, un prix écrit dans une description redevient faux
+ * au premier changement de CREDITS_COST_JSON. Le coût exact vient du premier appel,
+ * le tarif de get_account_status ; demander l'accord est dans les instructions du serveur.
+ */
+export function paidCall(quota: "generation" | "assistance"): string {
+  return `Costs credits and counts toward the daily ${quota} quota. The first call spends nothing: it returns the exact cost and a confirmation_token. ` +
+    "Calling again with the same arguments plus that confirmation_token runs the tool and spends the quoted credits; the token is single-use and expires. " +
+    "Costs per kind of generation are listed by get_account_status. When the account is not charged, the first call runs directly.";
+}
+
 /** Codes d'erreur d'outil, lisibles par le modèle dans `_meta["com.cortexexam/error"]`. */
 export type ToolErrorCode =
   | "invalid_input"

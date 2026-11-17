@@ -3,7 +3,7 @@
   "name": "com.cortexexam/cortex",
   "title": "Cortex",
   "description": "Mock exams, practice questions and weak points from your own course materials in Cortex.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "websiteUrl": "https://cortexexam.com/mcp",
   "repository": {
     "url": "https://github.com/Benabens/cortex",

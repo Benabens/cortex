@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "cortex",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Mock exams, practice questions and weak points from your own course materials in Cortex.",
   "author": { "name": "TODO: publisher legal name", "url": "https://cortexexam.com" },
   "homepage": "https://cortexexam.com/mcp",
@@ -53,7 +53,7 @@
               "description": "Paid generation: the cost is announced first and nothing runs before the student agrees.",
               "prompt": "Give me one practice question on discrete random variables.",
               "tools_triggered": ["generate_drill"],
-              "expected_behavior": "First call returns the exact cost (0.1 credit by default) and a confirmation token without spending anything; ChatGPT asks the student; after an explicit yes, the second call returns one exam-style question with five progressive hints and a worked solution."
+              "expected_behavior": "First call returns the exact cost and a confirmation token without spending anything; ChatGPT asks the student; after an explicit yes, the second call returns one exam-style question with five progressive hints and a worked solution."
             },
             {
               "description": "Credit balance and daily limits.",
