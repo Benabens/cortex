@@ -106,7 +106,7 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
     if (d.created > 0 || d.stored) { setText(""); clearFile(); onAdded(); }
   };
 
-  const mineText = async (content: string) => showMined(await apiPost<MineResp>("/api/weaknesses/mine", courseId, { text: content }));
+  const mineText = async (content: string) => showMined(await apiPost<MineResp>("/api/weaknesses/mine", courseId, { text: content }, (status) => t("httpError", { status })));
 
   const minePdf = async (pdf: File, content: string) => {
     const form = new FormData();
