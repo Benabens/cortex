@@ -10,6 +10,8 @@ import {
 import { useCourseOr404 } from "@/lib/req";
 import { UPLOAD_LIMITS, readFormData, readJson, withBodyLimit } from "@/lib/upload-limit";
 import { NextRequest, NextResponse } from "next/server";
+import { checkIndexQuota, refreshIndexUsage } from "@/lib/originals/index-quota";
+import { currentCourse } from "@/db/client";
 import { checkStorage, declaredBytes } from "@/lib/storage-quota";
 import { currentUser } from "@/db/context";
 
@@ -37,6 +39,8 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     // Quota de stockage du compte + espace libre du volume, AVANT de lire l'envoi.
     const storage = await checkStorage(currentUser(), declaredBytes(req));
     if (storage) return NextResponse.json({ error: storage.error }, { status: storage.status });
+    const indexFull = await checkIndexQuota(currentUser());
+    if (indexFull) return NextResponse.json({ error: indexFull.error }, { status: indexFull.status });
     const form = await readFormData(req, UPLOAD_LIMITS.source);
     const file = form.get("file");
     if (!(file instanceof File) || file.size === 0) {
@@ -71,5 +75,6 @@ export async function DELETE(req: NextRequest) {
   const srcPath = req.nextUrl.searchParams.get("path");
   if (!srcPath) return NextResponse.json({ error: "path manquant" }, { status: 400 });
   await removeUploadedRef(srcPath);
+  await refreshIndexUsage(currentUser(), currentCourse());
   return NextResponse.json({ ok: true });
 }

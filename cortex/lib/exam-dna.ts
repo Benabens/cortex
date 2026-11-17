@@ -13,6 +13,7 @@ import {
 } from "@/lib/molds";
 import path from "node:path";
 import { listExamSourceRows } from "@/lib/sources";
+import { pathsOnComputer } from "@/lib/originals/index-only";
 
 /**
  * « ADN D'EXAMEN » détecté PAR COURS, depuis SES annales. 100 % générique :
@@ -233,11 +234,18 @@ export async function scanFigures(step: Step = () => {}): Promise<ExamDna> {
   if (!exams.length) { step("Figures : aucune annale, scan vide.", 100); return dna; }
   const p = profile();
   const todo = exams.filter((e) => !(e.title in dna.figures.scanned));
+  const onComputer = await pathsOnComputer();
   let i = 0;
   for (const exam of todo) {
     i++;
     const pct = Math.round((i / Math.max(1, todo.length)) * 100);
     const pages = renderExamPages(course, path.basename(exam.path));
+    if (!pages.length && onComputer.has(exam.path)) {
+      // Original resté sur l'ordinateur (lib/originals) : pas compté comme scanné, un renvoi du
+      // fichier le fera scanner au prochain passage.
+      step(`Figures : ${exam.title}, fichier sur ton ordinateur, pages non lues`, pct);
+      continue;
+    }
     if (!pages.length) {
       // non scannable (HTML / pdftoppm absent) → compté honnêtement à 0 page, jamais inventé.
       dna.figures.scanned[exam.title] = { pages: 0, figures: [] };

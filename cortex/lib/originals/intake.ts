@@ -5,6 +5,7 @@ import { currentUser } from "@/db/context";
 import { nowStr, q } from "@/db/q";
 import { coursePaths, getCourse } from "@/lib/courses";
 import { log } from "@/lib/metrics";
+import { purgePdfPages } from "@/lib/page-cache";
 import { originalsPolicy, type OriginalsHome } from "@/lib/originals/policy";
 import { forgetOriginal, localOriginal, localOriginals, markLocal, recordTransit, type OriginalOrigin } from "@/lib/originals/registry";
 import { storage } from "@/lib/storage";
@@ -45,24 +46,34 @@ export function transitHours(env: Partial<NodeJS.ProcessEnv> = process.env): num
 /** Une annale PDF : la préparation lit ses pages en image, son original attend la fin de la préparation. */
 export const needsPages = (coursePath: string) => coursePath.startsWith("refs/") && /\.pdf$/i.test(coursePath);
 
-/** Chemin d'un fichier dans le cours, celui de `sources.path` : `refs/<f>` ou `<dossier>/…/<f>` sous le contenu. */
+/**
+ * Chemin d'un fichier dans le cours, celui de `sources.path` : `refs/<f>` ou `<dossier>/…/<f>` sous
+ * le contenu ; `uploads/<f>` pour une pièce jointe (photo de copie, capture d'une faiblesse).
+ */
 export function coursePathOf(courseId: string, abs: string): string | null {
-  const { refsDir, contentRoot } = coursePaths(courseId);
+  const { refsDir, contentRoot, uploadsDir } = coursePaths(courseId);
   const under = (dir: string) => {
     const rel = path.relative(path.resolve(dir), path.resolve(abs));
     return rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel.split(path.sep).join("/") : null;
   };
-  const inRefs = under(refsDir);
-  if (inRefs) return inRefs.includes("/") ? null : `refs/${inRefs}`;
+  const flat = (dir: string, prefix: string) => {
+    const rel = under(dir);
+    return rel === null ? undefined : rel.includes("/") ? null : `${prefix}/${rel}`;
+  };
+  const inRefs = flat(refsDir, "refs");
+  if (inRefs !== undefined) return inRefs;
+  const inUploads = flat(uploadsDir, "uploads");
+  if (inUploads !== undefined) return inUploads;
   return under(contentRoot);
 }
 
 /** Chemin absolu d'un chemin du cours (inverse de coursePathOf), ou null s'il sortirait du cours. */
 export function absoluteOf(courseId: string, coursePath: string): string | null {
-  const { refsDir, contentRoot } = coursePaths(courseId);
-  if (coursePath.startsWith("refs/")) {
-    const f = coursePath.slice(5);
-    return f && !f.includes("/") && f !== ".." ? path.join(refsDir, f) : null;
+  const { refsDir, contentRoot, uploadsDir } = coursePaths(courseId);
+  for (const [prefix, dir] of [["refs/", refsDir], ["uploads/", uploadsDir]] as const) {
+    if (!coursePath.startsWith(prefix)) continue;
+    const f = coursePath.slice(prefix.length);
+    return f && !f.includes("/") && f !== ".." ? path.join(dir, f) : null;
   }
   const root = path.resolve(contentRoot);
   const abs = path.resolve(root, coursePath);
@@ -113,6 +124,21 @@ export async function storeOriginal(
   return null;
 }
 
+/**
+ * Pièce jointe d'un exercice (photo de copie, capture d'une faiblesse) : rangée comme avant pour un
+ * compte Premium ; pour un gratuit, en transit, le temps que le modèle la lise, puis supprimée par
+ * le balayage (FREE_TRANSIT_HOURS) — y compris sur un cours historique, ses pièces jointes sont
+ * celles du compte.
+ */
+export async function putUpload(courseId: string, abs: string, data: Uint8Array): Promise<void> {
+  const home = (await originalsPolicy(currentUser())).home;
+  await storage().put(abs, data, { localOnly: home === "local" });
+  const coursePath = home === "local" ? coursePathOf(courseId, abs) : null;
+  if (coursePath) {
+    await recordTransit({ path: coursePath, name: path.basename(abs), sha256: sha256(Buffer.from(data)), size: data.byteLength, origin: "upload" });
+  }
+}
+
 /** L'original d'un fichier resté sur l'ordinateur revient : au cloud (Premium) ou en transit (gratuit). */
 async function bringBack(abs: string, data: Buffer, home: OriginalsHome, coursePath: string): Promise<void> {
   if (home === "cloud") {
@@ -143,6 +169,26 @@ export async function returnOriginal(courseId: string, coursePath: string, data:
   return { ok: true, home };
 }
 
+/** Retire un fichier déposé qui ne sert à rien (illisible) : du serveur et du registre. */
+export async function discardOriginal(courseId: string, abs: string): Promise<void> {
+  await storage().remove(abs);
+  const coursePath = coursePathOf(courseId, abs);
+  if (coursePath) await forgetOriginal(coursePath);
+}
+
+/**
+ * Originaux arrivés en transit pendant une ingestion qui ne les a pas lus (arrivés depuis `since`,
+ * absents de `read` et du corpus) : une ingestion de plus les lira, sinon ils partiraient sans index.
+ */
+export async function pendingTransit(since: string, read: Set<string> = new Set()): Promise<number> {
+  const rows = (await localOriginals("transit")).filter((r) => r.arrivedAt >= since && !read.has(r.path));
+  if (!rows.length) return 0;
+  await q.ensureTable("sources");
+  let n = 0;
+  for (const r of rows) if (!(await q.get(`SELECT 1 AS one FROM sources WHERE path = ? LIMIT 1`, r.path))) n++;
+  return n;
+}
+
 /**
  * Départ des originaux en transit du cours courant, après une étape :
  *  - `ingest`  : ceux que cette ingestion a lus (`paths`), sauf les annales PDF (pages à lire) ;
@@ -163,11 +209,14 @@ export async function settleOriginals(opts: { after: "ingest" | "prepare" | "exp
   await q.ensureTable("sources");
   for (const row of transit) {
     if (wanted && !wanted.has(row.path)) continue;
+    // Une pièce jointe sert à un exercice en cours : elle ne part qu'à l'échéance du transit.
+    const attachment = row.path.startsWith("uploads/");
+    if (attachment && opts.after !== "expiry") continue;
     const abs = absoluteOf(courseId, row.path);
     if (!abs) { await forgetOriginal(row.path); continue; }
     const arrived = Date.parse(`${row.arrivedAt.replace(" ", "T")}Z`);
     const expired = !Number.isFinite(arrived) || now - arrived >= ttlMs;
-    if (home === "cloud") {
+    if (home === "cloud" && !attachment) {
       // Devenu Premium pendant le transit : l'original rejoint le cloud au lieu d'être supprimé.
       const data = await storage().read(abs);
       if (data) {
@@ -180,6 +229,8 @@ export async function settleOriginals(opts: { after: "ingest" | "prepare" | "exp
     if (opts.after === "expiry" && !expired) continue;
     if (opts.after === "ingest" && needsPages(row.path) && !expired) continue;
     await storage().remove(abs);
+    // Les pages rendues d'une annale en sont une copie : elles partent avec elle.
+    if (row.path.startsWith("refs/")) purgePdfPages(courseId, path.basename(abs));
     const indexed = await q.get(`SELECT 1 AS one FROM sources WHERE path = ? LIMIT 1`, row.path);
     if (indexed) {
       await markLocal(row.path);
@@ -187,7 +238,7 @@ export async function settleOriginals(opts: { after: "ingest" | "prepare" | "exp
     } else {
       await forgetOriginal(row.path);
       out.dropped++;
-      log("warn", "originals.dropped_unindexed", { course: courseId, path: row.path, after: opts.after });
+      if (!attachment) log("warn", "originals.dropped_unindexed", { course: courseId, path: row.path, after: opts.after });
     }
   }
   return out;

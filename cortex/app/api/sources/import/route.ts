@@ -5,11 +5,13 @@ import { classifyFile } from "@/lib/import-folder";
 import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { unreadableDocument } from "@/lib/document-check";
 import { requireCourse } from "@/lib/req";
+import { checkIndexQuota } from "@/lib/originals/index-quota";
 import { checkStorage, declaredBytes, storageQuotaBytesFor } from "@/lib/storage-quota";
 import { readFormData, UPLOAD_LIMITS, withBodyLimit } from "@/lib/upload-limit";
 import path from "node:path";
 import { storage as fileStore } from "@/lib/storage";
-import { storedFileName, storeUnique } from "@/lib/stored-file";
+import { storedFileName } from "@/lib/stored-file";
+import { storeOriginal } from "@/lib/originals/intake";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -50,6 +52,9 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
 
   const storage = await checkStorage(currentUser(), declaredBytes(req));
   if (storage) return NextResponse.json({ error: storage.error }, { status: storage.status });
+  // Compte gratuit : ses originaux ne restent pas, c'est son index qui est borné (lib/originals).
+  const indexFull = await checkIndexQuota(currentUser());
+  if (indexFull) return NextResponse.json({ error: indexFull.error }, { status: indexFull.status });
   const form = await readFormData(req, UPLOAD_LIMITS.folderFile);
   const files = form.getAll("file").filter((value): value is File => value instanceof File && value.size > 0);
   if (files.length !== 1) return NextResponse.json({ error: "Envoie un seul fichier par requête." }, { status: 400 });
@@ -57,7 +62,8 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const file = files[0];
   if (IMAGE_FILE.test(file.name)) return NextResponse.json({ error: `${file.name} : ${IMAGE_REFUSAL}` }, { status: 415 });
   if (LEGACY_FILE.test(file.name)) return NextResponse.json({ error: `${file.name} : ${LEGACY_REFUSAL}` }, { status: 415 });
-  const rel = safeRelPath(String(form.get("relpath") ?? file.name));
+  const rawRel = String(form.get("relpath") ?? file.name);
+  const rel = safeRelPath(rawRel);
   if (!rel) return NextResponse.json({ error: `${file.name} : fichier caché ou format non pris en charge.` }, { status: 415 });
   if (file.size > SOURCE_FILE_MAX_BYTES) {
     return NextResponse.json({ error: `${file.name} : fichier trop volumineux (30 Mo maximum par fichier).` }, { status: 413 });
@@ -76,7 +82,9 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
 
   const { bucket } = classifyFile(rel);
   const destDir = bucket === "refs" ? refsDir : path.join(contentRoot, bucket);
-  const saved = await storeUnique(destDir, path.basename(rel), buffer);
+  // Premium : rangé dans le cloud ; gratuit : en transit, le temps que l'ingestion lise son texte
+  // (lib/originals) — le nom et le chemin d'origine permettent de le retrouver sur l'ordinateur.
+  const saved = await storeOriginal(course, destDir, path.basename(rel), buffer, { originalName: file.name, rel: rawRel.slice(0, 400) });
   if (!saved) return NextResponse.json({ error: `${file.name} : trop de fichiers du même nom dans ce cours.` }, { status: 409 });
-  return NextResponse.json({ ok: true, name: saved.name, bucket, ...(saved.duplicate ? { duplicate: true } : {}) });
+  return NextResponse.json({ ok: true, name: saved.name, bucket, originals: saved.home, ...(saved.duplicate ? { duplicate: true } : {}) });
 });

@@ -26,6 +26,8 @@ import { failureStatus, INGEST_FAILURE_PREFIX, readStatus, type IngestFileOutcom
 import { writeIngestReport } from "../lib/ingest-report-file";
 import { readIndexOnlySources, writeIndexOnlySources } from "../lib/originals/index-only";
 import { settleOriginals } from "../lib/originals/intake";
+import { refreshIndexUsage } from "../lib/originals/index-quota";
+import { currentUser } from "../db/context";
 
 // Args : `npm run ingest -- --course=algo --from "<dossier>"` (défaut cs-202, pas d'import).
 function argVal(name: string): string | undefined {
@@ -598,6 +600,7 @@ async function main() {
     const settled = await settleOriginals({ after: "ingest", paths: files.map((f) => f.path) });
     if (settled.purged || settled.dropped) console.log(`• originaux    : ${settled.purged + settled.dropped} retiré(s) du serveur (compte gratuit : ils restent sur l'ordinateur)`);
     if (settled.promoted) console.log(`• originaux    : ${settled.promoted} rangé(s) dans le cloud (compte Premium)`);
+    await refreshIndexUsage(currentUser(), COURSE);
   }
 
   const ftsCountSql = q.dialect === "postgres"

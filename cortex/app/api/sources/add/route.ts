@@ -3,6 +3,7 @@ import { currentUser } from "@/db/context";
 import { SOURCE_CATEGORIES, SourceError, addFileSource, type SourceCategory } from "@/lib/course-source";
 import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { requireCourse } from "@/lib/req";
+import { checkIndexQuota } from "@/lib/originals/index-quota";
 import { checkStorage, declaredBytes } from "@/lib/storage-quota";
 import { UPLOAD_LIMITS, readFormData, withBodyLimit } from "@/lib/upload-limit";
 
@@ -27,6 +28,9 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   }
   const storage = await checkStorage(currentUser(), declaredBytes(req));
   if (storage) return NextResponse.json({ error: storage.error }, { status: storage.status });
+  // Compte gratuit : ses originaux ne restent pas, c'est son index qui est borné (lib/originals).
+  const indexFull = await checkIndexQuota(currentUser());
+  if (indexFull) return NextResponse.json({ error: indexFull.error }, { status: indexFull.status });
   const form = await readFormData(req, UPLOAD_LIMITS.source);
   if (!form) return NextResponse.json({ error: "Envoi multipart attendu." }, { status: 400 });
   const files = form.getAll("file").filter((f): f is File => f instanceof File && f.size > 0);

@@ -1,5 +1,5 @@
 import { currentCourse } from "@/db/client";
-import { q } from "@/db/q";
+import { q, type SqlParam } from "@/db/q";
 import { pickEnonces } from "@/lib/exam-names";
 import { completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
@@ -11,6 +11,7 @@ import path from "node:path";
 import { listExamSourceRows } from "@/lib/sources";
 import { COURSE_MATTER_RULE } from "@/lib/course-grounding";
 import { courseLanguageName } from "@/lib/exam-format";
+import { pathsOnComputer } from "@/lib/originals/index-only";
 
 /**
  * INDEX EXHAUSTIF exo-par-exo des finals (remplace le résumé tronqué à 16 k).
@@ -172,6 +173,9 @@ export { pickEnonces };
 
 export type IndexResult = { exams: number; exercises: number };
 
+/** Colonnes d'un exercice indexé recopiées telles quelles (annale restée sur l'ordinateur). */
+const KEPT_COLS = "exam_title, exam_year, exam_page, topic, method, exo_type, trap, archetype, statement, points, exam_href, course_href, mold, figure_kind";
+
 /** Indexe TOUS les finals/midterms du cours (un énoncé/an), exo par exo. Résilient. */
 export async function indexExamExercises(opts: { onStep?: (m: string, p: number) => void } = {}): Promise<IndexResult> {
   await ensureIndexSchema();
@@ -179,6 +183,13 @@ export async function indexExamExercises(opts: { onStep?: (m: string, p: number)
   const course = currentCourse();
   const all = await listExamSourceRows();
   const exams = pickEnonces(all);
+  // Annale dont l'original est resté sur l'ordinateur d'un compte gratuit (lib/originals) : ses
+  // pages ne se relisent plus, son index exercice par exercice est gardé tel quel.
+  const onComputer = await pathsOnComputer();
+  const kept = new Map<string, Record<string, SqlParam>[]>();
+  for (const e of exams) {
+    if (onComputer.has(e.path)) kept.set(e.title, await q.all<Record<string, SqlParam>>(`SELECT ${KEPT_COLS} FROM exam_exercises WHERE exam_title = ? ORDER BY id`, e.title));
+  }
   // Index reconstruit à chaque passe, y compris quand il n'y a plus d'annale : une source
   // reclassée (grille d'évaluation de HUM-285, d'abord classée midterm) n'y laisse rien.
   await q.exec(`DELETE FROM exam_exercises`);
@@ -187,6 +198,17 @@ export async function indexExamExercises(opts: { onStep?: (m: string, p: number)
   let total = 0;
   for (let i = 0; i < exams.length; i++) {
     const prog = 8 + Math.round((i / exams.length) * 82);
+    const previous = kept.get(exams[i].title);
+    if (previous) {
+      step(previous.length
+        ? `${exams[i].title} : fichier sur ton ordinateur, index précédent gardé (${previous.length} exercices)`
+        : `${exams[i].title} : fichier sur ton ordinateur, pages non lues. Renvoie-le depuis Sources pour l'indexer exercice par exercice.`, prog);
+      await q.tx(async () => {
+        for (const r of previous) await q.run(`INSERT INTO exam_exercises (${KEPT_COLS}) VALUES (${KEPT_COLS.split(",").map(() => "?").join(",")})`, ...KEPT_COLS.split(",").map((c) => r[c.trim()] ?? null));
+      });
+      total += previous.length;
+      continue;
+    }
     step(`Indexation ${i + 1}/${exams.length} : ${exams[i].title}…`, prog);
     let rows: Omit<ExamExercise, "id" | "topicId">[] = [];
     try { rows = await indexOneExam(course, exams[i], step, prog, lang); } catch (e) { step(`${exams[i].title} : ignoré (${(e as Error).message.slice(0, 50)})`, prog); }

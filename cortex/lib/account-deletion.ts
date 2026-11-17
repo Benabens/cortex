@@ -201,6 +201,7 @@ export async function deleteAccount(userId: string, deps: DeletionDeps = {}): Pr
     await authRun(`DELETE FROM stripe_invoices WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM stripe_payment_losses WHERE payment_intent IN (SELECT payment_intent FROM stripe_payments WHERE user_id = ?)`, userId);
     await authRun(`DELETE FROM stripe_payments WHERE user_id = ?`, userId);
+    await authRun(`DELETE FROM index_usage WHERE user_id = ?`, userId);
     const legalId = legalTombstone();
     const retainedUntil = new Date(Date.now() + 5 * 365.25 * 86400_000).toISOString().slice(0, 19).replace("T", " ");
     await authRun(`UPDATE terms_acceptances SET user_id = ?, retained_until = ? WHERE user_id = ?`, legalId, retainedUntil, userId);
