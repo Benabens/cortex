@@ -3,7 +3,7 @@ import { nowStr, q } from "@/db/q";
 import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import type { Archetype } from "@/lib/archetypes";
 import { profile, type Slot } from "@/lib/course-profile";
-import { HARD_STOP_CODES, LONG_OUTPUT_MAX_TOKENS, completeJson, completeText, completeVia, extractJson, llmErrorCode } from "@/lib/llm";
+import { EXAM_OUTPUT_MAX_TOKENS, HARD_STOP_CODES, completeJson, completeText, completeVia, extractJson, llmErrorCode } from "@/lib/llm";
 import { search } from "@/lib/search";
 import { difficultyBlockForExam } from "@/lib/difficulty";
 import { buildExamArtifact, buildExerciseArtifact } from "@/lib/exam-latex";
@@ -638,7 +638,8 @@ export async function regenerateExercise(q: ExamQuestion, diagnostic: string): P
   ].join("\n");
   // Le délai de la conception d'un exercice : à 420 s, 2 régénérations sur 3 expiraient au banc du
   // 16/11 (ex9 ; la réussie a pris 305 s), et l'exercice gardait son corrigé jugé faux.
-  const text = await completeText({ prompt, model: "opus", timeoutMs: exerciseTimeoutMs() });
+  // Sortie mesurée au banc (17/11) : 30 k tokens en moyenne, jamais sous la limite par défaut de 16 000.
+  const text = await completeText({ prompt, model: "opus", timeoutMs: exerciseTimeoutMs(), maxTokens: EXAM_OUTPUT_MAX_TOKENS });
   const r = extractJson<ExamQuestion>(text);
   return { ...r, category: q.category, points: q.points };
 }
@@ -706,8 +707,8 @@ async function generateBatch(ctx: Ctx, slots: Slot[], opts: { retryTruncated?: b
     // Prod du 13/11 (job 2) : la réflexion d'un lot de 2 exercices remplissait les 16 000 tokens
     // de sortie (15 760 en moyenne) : lots coupés, facturés, puis refaits exercice par exercice.
     // L'effort reste celui par défaut (à effort moyen, banc du 15/11 : clés et explications moins
-    // justes) ; la limite laisse au lot la place de finir.
-    maxTokens: LONG_OUTPUT_MAX_TOKENS,
+    // justes) ; la limite laisse au lot la place de finir (banc du 17/11 : jusqu'à 62 k tokens).
+    maxTokens: EXAM_OUTPUT_MAX_TOKENS,
   }, { check: (v) => (Array.isArray(v?.questions) ? null : "le champ « questions » (tableau) manque"), retryTruncated: opts.retryTruncated });
   const qs = Array.isArray(r.questions) ? r.questions : [];
   // réaligne catégorie/points sur les slots imposés
