@@ -98,13 +98,32 @@ export function authProviders(env: Partial<NodeJS.ProcessEnv> = process.env): Pr
       from: env.AUTH_EMAIL_FROM ?? "cortex@localhost",
       maxAge: 24 * 3600,
       options: {},
-      sendVerificationRequest: ({ identifier, url }) => sendMagicLink({ identifier, url }),
+      sendVerificationRequest: ({ identifier, url }) => sendMagicLinkReported({ identifier, url }),
     });
   }
   if (googleLoginConfigured(env)) {
     providers.push(Google({ clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET }));
   }
   return providers;
+}
+
+/**
+ * Envoi du lien, et son échec rendu VISIBLE (audit fuites I14) : Auth.js avale l'erreur et
+ * l'étudiant ne lit que « connexion indisponible » ; un quota Resend atteint coupait les
+ * connexions par e-mail sans alerte. Journal + Sentry (une fois par heure), sans l'adresse ni
+ * le lien ; l'erreur remonte ensuite à Auth.js comme avant.
+ */
+async function sendMagicLinkReported(p: { identifier: string; url: string }): Promise<void> {
+  try {
+    await sendMagicLink(p);
+  } catch (e) {
+    const { captureErrorThrottled, redactMessage } = await import("@/lib/observability");
+    const raw = e instanceof Error ? e.message : String(e);
+    const message = redactMessage(raw.split(p.identifier).join("<e-mail>").split(p.url).join("<lien>")).slice(0, 300);
+    log("error", "auth.magic_link_send_failed", { message });
+    captureErrorThrottled("auth.magic_link_send", new Error(`Lien magique non envoyé : ${message}`), { area: "auth", alert: "magic_link_send" });
+    throw e;
+  }
 }
 
 /** Envoi du magic-link : Resend natif (RESEND_API_KEY), sinon endpoint HTTP

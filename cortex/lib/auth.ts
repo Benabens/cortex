@@ -7,6 +7,7 @@ import { clientIp } from "@/lib/client-ip";
 import { inviteAllows } from "@/lib/invite";
 import { MAGIC_LINK_REFUSAL_CODE, takeMagicLinkSend } from "@/lib/magic-link-limits";
 import { log } from "@/lib/metrics";
+import { redactMessage } from "@/lib/observability-scrub";
 import { REVIEW_PROVIDER_ID, reviewLoginActive } from "@/lib/review-login";
 
 /**
@@ -168,4 +169,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   pages: { signIn: "/login", error: "/login" },
   providers: authProviders(),
   callbacks: authCallbacks,
+  // Erreurs d'Auth.js dans le journal structuré (audit fuites I14) : sans logger, elles
+  // n'allaient qu'à console.error, sans type. Message nettoyé (adresses, chemins).
+  logger: {
+    error(error) {
+      log("warn", "auth.error", { type: (error as { type?: string }).type ?? error.name, message: redactMessage(error.message ?? "").slice(0, 300) });
+    },
+  },
 });

@@ -166,6 +166,41 @@ test("webhook Stripe de livemode incohérent avec la clé : 400, et Sentry est p
   }
 });
 
+/**
+ * AUDIT FUITES DU 17/11, I14 — un lien magique qui ne partait pas (quota Resend atteint, clé
+ * révoquée) restait invisible : Auth.js avale l'erreur, l'étudiant lit « connexion indisponible ».
+ * L'échec d'envoi prévient Sentry (une fois par heure), sans l'adresse.
+ */
+test("lien magique non envoyé (transport en erreur) : l'échec remonte et Sentry est prévenu, sans l'adresse", async () => {
+  const http = await import("node:http");
+  const server = http.createServer((_req, res) => { res.statusCode = 503; res.end("quota atteint pour ana@exemple.ch"); });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as { port: number }).port;
+  const saved = { endpoint: process.env.AUTH_EMAIL_ENDPOINT, resend: process.env.RESEND_API_KEY };
+  delete process.env.RESEND_API_KEY;
+  process.env.AUTH_EMAIL_ENDPOINT = `http://127.0.0.1:${port}/send`;
+  try {
+    const { resetErrorTrackingThrottleForTests } = await import("../lib/observability");
+    resetErrorTrackingThrottleForTests();
+    const { authProviders } = await import("../lib/auth-providers");
+    const email = authProviders({ AUTH_EMAIL_ENABLED: "1", AUTH_EMAIL_ENDPOINT: process.env.AUTH_EMAIL_ENDPOINT })
+      .find((p) => (p as { id?: string }).id === "email") as unknown as { sendVerificationRequest: (p: { identifier: string; url: string }) => Promise<void> };
+    assert.ok(email, "fournisseur e-mail configuré");
+    for (let i = 0; i < 2; i++) {
+      await assert.rejects(email.sendVerificationRequest({ identifier: "ana@exemple.ch", url: "https://cortex.test/api/auth/callback/email?token=x" }));
+    }
+    const alerts = captured.filter((c) => c.tags.area === "auth");
+    assert.equal(alerts.length, 1, JSON.stringify(captured.map((c) => c.tags)));
+    assert.equal(alerts[0].tags.alert, "magic_link_send");
+    assert.ok(!JSON.stringify(alerts[0]).includes("ana@exemple.ch"), "aucune adresse dans l'alerte");
+    assert.ok(!String((alerts[0].e as Error).message).includes("token=x"), "aucun lien de connexion dans l'alerte");
+  } finally {
+    server.close();
+    if (saved.endpoint === undefined) delete process.env.AUTH_EMAIL_ENDPOINT; else process.env.AUTH_EMAIL_ENDPOINT = saved.endpoint;
+    if (saved.resend !== undefined) process.env.RESEND_API_KEY = saved.resend;
+  }
+});
+
 test("job abandonné par la réconciliation (worker mort, tentatives épuisées) : Sentry est prévenu", async () => {
   const jobs = await import("../lib/jobs");
   const { q, nowStr } = await import("../db/q");
