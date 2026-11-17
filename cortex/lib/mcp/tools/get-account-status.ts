@@ -5,7 +5,7 @@ import { getUsageLimits } from "@/lib/billing/limits";
 import { remainingLine } from "@/lib/billing/limits-text";
 import { isOwner } from "@/lib/billing/owner";
 import { costForJob } from "@/lib/jobs";
-import { defineTool, READ_ONLY_HINTS } from "../tool";
+import { assistantSafeMessage, defineTool, READ_ONLY_HINTS } from "../tool";
 
 const quota = z.object({ used: z.number(), limit: z.number().nullable().describe("null = no daily limit on this instance.") });
 
@@ -95,7 +95,7 @@ export default defineTool({
       const g = usage.generations[k];
       return {
         remaining: g.remaining, limited_by: g.limitedBy, resets_at: g.resetAt, can_launch_now: g.allowed,
-        blocked_reason: g.reason, cost_credits: g.costCredits, summary: remainingLine(g, usage.now),
+        blocked_reason: g.reason === null ? null : assistantSafeMessage(g.reason), cost_credits: g.costCredits, summary: remainingLine(g, usage.now),
       };
     };
     return {

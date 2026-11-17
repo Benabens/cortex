@@ -134,8 +134,10 @@ export default defineTool({
       if (!started.ok) {
         if (started.status === 500) {
           log("error", "mcp.worker_start_failed", { message: redactMessage(started.error) });
+          // Débité et peut-être en file : relancer sans regarder lancerait (et débiterait) deux fois.
+          throw new ToolError("internal", "Starting the generation failed on the server. It may have been queued: check with get_job_status (without job_id) before trying again.", undefined, started.code);
         }
-        throw new ToolError(codeForStatus(started.status), errorText("en", started), undefined, started.code);
+        throw new ToolError(codeForStatus(started.status), `${errorText("en", started)} Nothing was charged.`, undefined, started.code);
       }
       return { ...base, status: started.existing ? "already_running" as const : "started" as const, job: track(started.jobId) };
     });
