@@ -23,12 +23,13 @@ import { dataRoot, ensureCoursesLoaded, listCoursesOf, reloadCourses } from "@/l
 import { deleteCourseRow } from "@/db/courses-store";
 import { log } from "@/lib/metrics";
 import { ownedCourseCacheDir } from "@/lib/page-cache";
+import { refusal, type Refusal } from "@/lib/i18n/user-error";
 
 const LEGACY_IDS = new Set(LEGACY_COURSES.map((c) => c.id));
 
 export type CourseDeletion =
   | { ok: true; id: string; residues: string[] }
-  | { ok: false; status: 404 | 409; error: string };
+  | ({ ok: false } & Refusal<404 | 409>);
 
 export type CourseDeletionOptions = {
   /** (tests) remplace l'annulation des jobs. */
@@ -41,7 +42,8 @@ export type CourseDeletionOptions = {
   allowOwner?: boolean;
 };
 
-type Rejection = { ok: false; status: 404 | 409; error: string };
+type Rejection = { ok: false } & Refusal<404 | 409>;
+const rejection = <S extends 404 | 409>(status: S, code: Parameters<typeof refusal<S>>[1], params?: Parameters<typeof refusal<S>>[2]): Rejection => ({ ok: false, ...refusal(status, code, params) });
 type Checked = {
   tenant: { schema_name: string } | undefined;
 };
@@ -50,18 +52,12 @@ type Checked = {
 async function checkDeletable(userId: string, courseId: string, allowOwner: boolean): Promise<Rejection | Checked> {
   await ensureCoursesLoaded();
   const course = listCoursesOf(userId).find((c) => c.id === courseId);
-  if (!course) return { ok: false, status: 404, error: "Cours introuvable." };
+  if (!course) return rejection(404, "course_not_found");
   if (LEGACY_IDS.has(courseId) || course.paths) {
-    return {
-      ok: false, status: 409,
-      error: "Ce cours historique partage son corpus et ses annales avec l'instance (cours de référence) : ses données ne peuvent pas être supprimées depuis l'application.",
-    };
+    return rejection(409, "course_historical_deletion_forbidden");
   }
   if (!allowOwner && (await isOwnerAccount(userId))) {
-    return {
-      ok: false, status: 409,
-      error: "Le compte propriétaire de l'instance ne supprime pas de cours depuis l'application : passe par les scripts d'administration.",
-    };
+    return rejection(409, "owner_course_deletion_forbidden");
   }
   const pg = dbDriverName() === "postgres";
   const tenant = pg
@@ -71,10 +67,7 @@ async function checkDeletable(userId: string, courseId: string, allowOwner: bool
     const sharers = await authAll<{ user_id: string; course: string }>(`SELECT user_id, course FROM tenants WHERE schema_name = ?`, tenant.schema_name);
     if (sharers.length > 1) {
       log("error", "course.delete_shared_schema", { user: userId, course: courseId, schema: tenant.schema_name, sharers });
-      return {
-        ok: false, status: 409,
-        error: `Les données de ce cours sont partagées avec un autre cours (schéma commun) : suppression refusée. Écris à ${contactEmail()} pour la demander.`,
-      };
+      return rejection(409, "course_shared_schema_deletion_forbidden", { email: contactEmail() });
     }
   }
   return { tenant };
@@ -158,7 +151,7 @@ export async function deleteCourseWithData(userId: string, courseId: string, opt
   if (stuck.length) {
     await unmarkCourseDeleting(userId, courseId);
     log("warn", "course.delete_jobs_stuck", { user: userId, course: courseId, stuck });
-    return { ok: false, status: 409, error: "Une génération en cours n'a pas pu être arrêtée : réessaie dans un instant." };
+    return rejection(409, "course_active_generation_stop_failed");
   }
   residues.push(...cancelErrors);
 
@@ -196,7 +189,7 @@ export async function deleteCourseWithData(userId: string, courseId: string, opt
   const n = await deleteCourseRow(courseId, userId);
   await reloadCourses();
   await unmarkCourseDeleting(userId, courseId);
-  if (!n) return { ok: false, status: 404, error: "Cours introuvable." };
+  if (!n) return rejection(404, "course_not_found");
   if (residues.length) log("warn", "course.delete_residue", { user: userId, course: courseId, residues });
   log("info", "course.deleted", { user: userId, course: courseId });
   return { ok: true, id: courseId, residues };

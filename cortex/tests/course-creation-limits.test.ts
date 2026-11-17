@@ -145,7 +145,7 @@ test("l'API renvoie le refus en 409 avec le message affichable par le formulaire
   const { POST } = await import("../app/api/courses/route");
   const request = new NextRequest("http://cortex.test/api/courses", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-cortex-user": USER },
+    headers: { "content-type": "application/json", "x-cortex-user": USER, "accept-language": "fr" },
     body: JSON.stringify({ name: "Cours refusé" }),
   });
 
@@ -153,6 +153,8 @@ test("l'API renvoie le refus en 409 avec le message affichable par le formulaire
   assert.equal(response.status, 409);
   assert.deepEqual(await response.json(), {
     error: "Tu as atteint la limite de 0 cours. Supprime un cours pour en créer un nouveau.",
+    code: "course_count_limit",
+    params: { max: 0 },
   });
 });
 

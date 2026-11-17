@@ -2,6 +2,7 @@ import { listCourses } from "@/lib/courses";
 import type { CourseRow } from "@/db/courses-store";
 import { nowStr } from "@/db/q";
 import { InvalidFormatError, LANGUAGES, parseDeclaredFormat, type DeclaredFormat } from "@/lib/exam-format";
+import { UserFacingError, type UserError } from "@/lib/i18n/user-error";
 
 /**
  * CRÉATION D'UN COURS depuis l'interface — validation des champs et fabrication
@@ -20,7 +21,9 @@ export type CourseInput = {
   examFormat?: unknown;
 };
 
-export class InvalidCourseError extends Error {}
+export class InvalidCourseError extends UserFacingError {
+  constructor(error: UserError) { super(error, 400); this.name = "InvalidCourseError"; }
+}
 
 const LANGS = new Set<string>(LANGUAGES);
 
@@ -30,7 +33,7 @@ export function declaredFormatColumn(input: unknown): string | null {
   try {
     f = parseDeclaredFormat(input);
   } catch (e) {
-    if (e instanceof InvalidFormatError) throw new InvalidCourseError(e.message);
+    if (e instanceof InvalidFormatError) throw new InvalidCourseError(e);
     throw e;
   }
   return f ? JSON.stringify(f) : null;
@@ -41,14 +44,14 @@ const RESERVED = new Set(["new", "nouveau", "api", "admin", "cours", "u", "data"
 
 function str(v: unknown, field: string, { max, required = false }: { max: number; required?: boolean }): string {
   if (v === undefined || v === null) {
-    if (required) throw new InvalidCourseError(`Le champ « ${field} » est obligatoire.`);
+    if (required) throw new InvalidCourseError({ code: "course_field_required", params: { field } });
     return "";
   }
-  if (typeof v !== "string") throw new InvalidCourseError(`Le champ « ${field} » doit être du texte.`);
+  if (typeof v !== "string") throw new InvalidCourseError({ code: "course_field_must_be_text", params: { field } });
   const s = v.trim().replace(/\s+/g, " ");
   noTexCommand(s, `Le champ « ${field} »`);
-  if (required && s.length < 2) throw new InvalidCourseError(`Le champ « ${field} » est trop court.`);
-  if (s.length > max) throw new InvalidCourseError(`Le champ « ${field} » dépasse ${max} caractères.`);
+  if (required && s.length < 2) throw new InvalidCourseError({ code: "course_field_too_short", params: { field } });
+  if (s.length > max) throw new InvalidCourseError({ code: "course_field_too_long", params: { field, max } });
   return s;
 }
 
@@ -59,7 +62,7 @@ function str(v: unknown, field: string, { max, required = false }: { max: number
  * est aussi celle que l'app affiche.
  */
 export function noTexCommand(s: string, what: string): void {
-  if (s.includes("\\")) throw new InvalidCourseError(`${what} ne peut pas contenir d'antislash (\\).`);
+  if (s.includes("\\")) throw new InvalidCourseError({ code: "course_tex_command_forbidden", params: { field: what } });
 }
 
 /** Liste d'enseignant·es : tableau JSON ou saisie libre séparée par des virgules. */
@@ -67,7 +70,7 @@ export function parseTeachers(v: unknown): string[] {
   const raw = Array.isArray(v) ? v.map((x) => String(x)) : typeof v === "string" ? v.split(",") : [];
   const out = raw.map((s) => s.trim().replace(/\s+/g, " ")).filter(Boolean).slice(0, 12);
   for (const t of out) {
-    if (t.length > 60) throw new InvalidCourseError("Un nom d'enseignant·e dépasse 60 caractères.");
+    if (t.length > 60) throw new InvalidCourseError({ code: "course_teacher_name_too_long" });
     noTexCommand(t, "Un nom d'enseignant·e");
   }
   return out;
@@ -128,12 +131,12 @@ export function buildCourseRow(input: CourseInput, ownerUserId: string): CourseR
   const rawLanguage = str(input.language, "langue", { max: 5 }).toLowerCase();
   const language = rawLanguage === "auto" ? "" : rawLanguage;
   if (language && !LANGS.has(language)) {
-    throw new InvalidCourseError(`Langue non reconnue : « ${language} ». Langues prises en charge : ${LANGUAGES.join(", ")}.`);
+    throw new InvalidCourseError({ code: "course_language_unknown", params: { language, supported: LANGUAGES.join(", ") } });
   }
 
   const examDate = str(input.examDate, "date d'examen", { max: 10 });
   if (examDate && !/^\d{4}-\d{2}-\d{2}$/.test(examDate)) {
-    throw new InvalidCourseError("La date d'examen doit être au format AAAA-MM-JJ.");
+    throw new InvalidCourseError({ code: "course_exam_date_invalid" });
   }
   // Non saisie → null : la durée de l'épreuve vient alors du format (annale, déclaration), jamais
   // d'un 180 par défaut imprimé sur la garde (audit 3, P1-3).
@@ -141,7 +144,7 @@ export function buildCourseRow(input: CourseInput, ownerUserId: string): CourseR
     ? null
     : Number(input.durationMin);
   if (durationMin !== null && (!Number.isFinite(durationMin) || durationMin < 15 || durationMin > 600)) {
-    throw new InvalidCourseError("La durée doit être comprise entre 15 et 600 minutes.");
+    throw new InvalidCourseError({ code: "course_duration_invalid" });
   }
 
   const taken = new Set(listCourses().map((c) => c.id));
