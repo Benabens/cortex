@@ -1,8 +1,10 @@
 import { authAll, type AuthTx } from "@/db/auth-store";
 import { nowStr } from "@/db/q";
+import { requestIp } from "@/lib/client-ip";
 import { log } from "@/lib/metrics";
 import { creditCost, DELTA_CENTI } from "./credits";
 import { floatLimit } from "./env";
+import { claimFreeOffer } from "./free-offer";
 import { quotaFor } from "./guards";
 import { ownerUserIds } from "./owner";
 import { accountRevenue, sinceDays, totalRevenue } from "./revenue";
@@ -124,8 +126,12 @@ export async function accountBudget(userId: string): Promise<AccountBudget | nul
   const rev = await accountRevenue(userId);
   const spent = await sumSpend(userId, sinceDays(365));
   const today = await sumSpend(userId, `${nowStr().slice(0, 10)} 00:00:00`);
+  // Budget d'essai : aux seuls comptes qui n'ont rien payé (un payant, jamais plus que ce
+  // qu'il a payé), et à un seul compte par personne (lib/billing/free-offer).
+  const freeUsd = aiBudgetFreeUsd() > 0 && rev.netUsd <= 0 && (await claimFreeOffer(userId, { ip: await requestIp() })).ok
+    ? aiBudgetFreeUsd() : 0;
   return {
-    budgetUsd: round4(aiBudgetFreeUsd() + margin * Math.max(0, rev.netUsd)),
+    budgetUsd: round4(freeUsd + margin * Math.max(0, rev.netUsd)),
     spentUsd: round4(spent),
     spentTodayUsd: round4(today),
     revenueUsd: rev.netUsd,
