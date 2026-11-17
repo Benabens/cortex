@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/db/context";
 import { SOURCE_CATEGORIES, SourceError, addFileSource, type SourceCategory } from "@/lib/course-source";
@@ -6,6 +7,7 @@ import { requireCourse } from "@/lib/req";
 import { checkIndexQuota } from "@/lib/originals/index-quota";
 import { checkStorage, declaredBytes } from "@/lib/storage-quota";
 import { UPLOAD_LIMITS, readFormData, withBodyLimit } from "@/lib/upload-limit";
+import { errorForFile, type UserError } from "@/lib/i18n/user-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,35 +26,35 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (denied) return denied;
   const category = req.nextUrl.searchParams.get("category") ?? "";
   if (!(SOURCE_CATEGORIES as readonly string[]).includes(category)) {
-    return NextResponse.json({ error: "Catégorie de document inconnue." }, { status: 400 });
+    return apiError(req, "source_category_unknown", 400);
   }
   const storage = await checkStorage(currentUser(), declaredBytes(req));
-  if (storage) return NextResponse.json({ error: storage.error }, { status: storage.status });
+  if (storage) return apiError(req, storage, storage.status);
   // Compte gratuit : ses originaux ne restent pas, c'est son index qui est borné (lib/originals).
   // Refus avant de lire le corps ; addFileSource revérifie (même règle que l'outil MCP).
   const indexFull = await checkIndexQuota(currentUser());
-  if (indexFull) return NextResponse.json({ error: indexFull.error }, { status: indexFull.status });
+  if (indexFull) return apiError(req, indexFull, indexFull.status);
   const form = await readFormData(req, UPLOAD_LIMITS.source);
-  if (!form) return NextResponse.json({ error: "Envoi multipart attendu." }, { status: 400 });
+  if (!form) return apiError(req, "multipart_expected", 400);
   const files = form.getAll("file").filter((f): f is File => f instanceof File && f.size > 0);
-  if (!files.length) return NextResponse.json({ error: "Aucun fichier." }, { status: 400 });
-  if (files.length > MAX_FILES) return NextResponse.json({ error: `Trop de fichiers (${files.length}, maximum ${MAX_FILES}).` }, { status: 400 });
+  if (!files.length) return apiError(req, "no_file", 400);
+  if (files.length > MAX_FILES) return apiError(req, { code: "too_many_files", params: { count: files.length, max: MAX_FILES } }, 400);
 
   // Un fichier refusé n'empêche pas d'indexer ceux qui sont déjà rangés.
   const saved: string[] = [];
-  const refused: { file: string; error: string; status: number }[] = [];
+  const refused: { file: string; error: string; userError: UserError; status: number }[] = [];
   for (const f of files) {
     try {
       const s = await addFileSource(course, { name: f.name, data: Buffer.from(await f.arrayBuffer()), category: category as SourceCategory, contentType: f.type || "application/octet-stream" });
       saved.push(s.name);
     } catch (e) {
       if (!(e instanceof SourceError)) throw e;
-      refused.push({ file: f.name, error: e.message, status: e.status });
+      refused.push({ file: f.name, error: e.message, userError: e, status: e.status });
     }
   }
   if (!saved.length) {
     const first = refused[0];
-    return NextResponse.json({ error: `${first.file} : ${first.error}` }, { status: first.status });
+    return apiError(req, errorForFile(first.userError, first.file), first.status);
   }
   const skipped = refused.map((r) => `${r.file} : ${r.error}`);
 
@@ -62,7 +64,8 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   try {
     await startWorker(jobId, course);
   } catch (e) {
-    return NextResponse.json({ error: `Impossible de lancer le worker : ${(e as Error)?.message ?? e}` }, { status: 500 });
+    const detail = e instanceof Error ? e.message : String(e);
+    return apiError(req, { code: "worker_start_failed", params: { detail } }, 500);
   }
   return NextResponse.json({ ok: true, jobId, files: saved.length, skipped });
 })
