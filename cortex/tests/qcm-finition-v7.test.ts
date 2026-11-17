@@ -15,7 +15,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
-import { closeFacts, definedTerm, factDuplicates, factId, planFacts, type CourseFact } from "../lib/qcm-facts";
+import { closeFacts, definedTerm, factDuplicates, factId, planFacts, sameFact, type CourseFact } from "../lib/qcm-facts";
 import { commonStemRoots, sameNotionQuestion } from "../lib/qcm-checks";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-qcm-v7-"));
@@ -113,6 +113,20 @@ test("plan : deux faits qui définissent le même terme ne sont pas posés dans 
   const { picked, reserve } = planFacts([a, b, c, other(1), other(2)], { order: [NOTION, "Notion 1", "Notion 2"], count: 4, cap: 2 });
   assert.deepEqual(picked.map((f) => f.id), [a.id, other(1).id, other(2).id, c.id], "la notion garde deux questions, sur deux faits distincts");
   assert.deepEqual(reserve.map((f) => f.id), [b.id], "le fait trop proche reste en réserve, en dernier");
+});
+
+test("synth-40qcm du 17/11 : deux faits sur un même moule mais à des nombres différents restent distincts", () => {
+  // Le corpus formulé sur un moule (« X est stable si son indice < k ») : 19 faits extraits, 5
+  // gardés, et l'examen de 40 repassait par notion (17/40 livrées).
+  const a = fact("Stabilité", "Une Belvane est stable exactement lorsque son indice vérifie m < 0,66.", "La stabilité d'une Belvane équivaut exactement à m < 0,66, une inégalité stricte.");
+  const b = fact("Stabilité", "Une Corvine est stable exactement lorsque son indice vérifie k < 0,38.", "La stabilité d'une Corvine équivaut exactement à k < 0,38, une inégalité stricte.");
+  const c = fact("Stabilité", "Une Belvane est stable dès que son indice vérifie m < 0,66.", "Rappel : la Belvane est stable pour m < 0,66.");
+  const d = fact("Histoire", "La définition du Dravel retenue dans le cours est due à Ostrin en 1993.", "La définition du Dravel retenue ici est due à Ostrin (1993).");
+  const e = fact("Histoire", "La définition du Fennic retenue dans le cours est due à Ulmar en 1929.", "La définition du Fennic retenue ici est due à Ulmar (1929).");
+  assert.ok(!closeFacts(a, b), "seuils différents : deux propositions");
+  assert.ok(!closeFacts(d, e), "années différentes : deux propositions");
+  assert.ok(closeFacts(a, c), "même seuil, même objet : toujours le même fait");
+  assert.ok(!sameFact(a, b) && !sameFact(d, e), "ni fusionnés à l'extraction");
 });
 
 test("durée de l'examen : un profil sans durée (0) ne s'affiche plus « 0 minutes »", async () => {

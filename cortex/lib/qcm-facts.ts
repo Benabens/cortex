@@ -45,12 +45,25 @@ export function factId(statement: string): string {
 }
 
 /**
+ * Deux énoncés qui posent chacun des nombres, mais pas les mêmes (un seuil, une année), sont deux
+ * propositions même sur un même moule (synth-40qcm, 17/11 : « X est stable si son indice < k »,
+ * 19 faits extraits, 5 gardés, l'examen de 40 repassé par notion). Décimales comprises (0,66 = 0.66).
+ */
+function otherNumbers(a: string, b: string): boolean {
+  const numbers = (t: string) => [...new Set([...t.matchAll(/\d+(?:[.,]\d+)?/g)].map((m) => m[0].replace(",", ".")))].sort().join(" ");
+  const na = numbers(a);
+  const nb = numbers(b);
+  return !!na && !!nb && na !== nb;
+}
+
+/**
  * Deux faits disent-ils la même chose ? Même proposition reformulée (recouvrement des mots
  * porteurs de l'énoncé), même passage source (le même exemple vu sous deux angles), ou énoncés
  * voisins appuyés sur des passages voisins. Seuils bas à dessein : fusionner deux faits proches
  * coûte un fait de réserve, en laisser deux coûte une paire de questions en doublon.
  */
 export function sameFact(a: Pick<CourseFact, "statement" | "passage">, b: Pick<CourseFact, "statement" | "passage">): boolean {
+  if (otherNumbers(a.statement, b.statement)) return false;
   const sa = contentRoots(a.statement);
   const sb = contentRoots(b.statement);
   const statements = sa.size >= 3 && sb.size >= 3 ? overlapRatio(sa, sb) : 0;
@@ -75,6 +88,7 @@ export function definedTerm(statement: string): Set<string> | null {
  */
 export function closeFacts(a: CourseFact, b: CourseFact): boolean {
   if (notionBase(a.notion) !== notionBase(b.notion)) return false;
+  if (otherNumbers(a.statement, b.statement)) return false;
   const ta = definedTerm(a.statement);
   const tb = definedTerm(b.statement);
   if (ta && tb && overlapRatio(ta, tb) >= 0.6) return true;
