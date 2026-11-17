@@ -425,9 +425,10 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: strin
   // échec lève (rien de crédité, 500 → Stripe rejoue) ; le ref UNIQUE tranche une course.
   const credited = await authTx(async (tx) => {
     if (await tx.get<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, ref)) return false;
+    // Pack à 0 € (code promo de la liste blanche) : crédits OFFERTS, soumis au budget lié au revenu.
     await tx.run(
-      `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, created_at) VALUES (?,?,?,?,'centi',?)`,
-      userId, centi, `achat ${plan ?? "pack"}`, ref, nowStr(),
+      `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, offered, created_at) VALUES (?,?,?,?,'centi',?,?)`,
+      userId, centi, `achat ${plan ?? "pack"}`, ref, free ? 1 : null, nowStr(),
     );
     await tx.run(
       `INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, livemode, created_at) VALUES (?,?,?,?,?,?)
@@ -492,18 +493,27 @@ async function onInvoicePaid(invoice: Stripe.Invoice, lookup: StripeLookup | und
   const lineKeys = await resolveLookupKeys({ data: [subscriptionLine(inv)].filter(Boolean) }, [], lookup);
   const plan = [...lineKeys, ...keys].find((k) => CORTEX_LOOKUP_KEYS.has(k)) ?? keys[0] ?? null;
   const previous = await getSubscription(userId);
-  const granted = await grantSubscriptionMonth({ userId, customerId, subscriptionId: subId, plan, periodEnd, periodStart: invoicePeriodStart(inv), at });
+  // Facture à 0 € (code promo à 100 %) : la période est en règle, mais elle n'accorde aucun
+  // crédit, ni maintenant ni aux fenêtres de l'annuel (audit fuites I2). Lu sur `total`
+  // (après remises, avant le solde client : une facture réglée par le solde a été payée).
+  const amountPaid = (inv as { amount_paid?: number }).amount_paid;
+  const total = (inv as { total?: number }).total;
+  const free = typeof total === "number" ? total <= 0 : typeof amountPaid === "number" && amountPaid <= 0;
+  const monthly = free ? 0 : subscriptionMonthlyCreditsCenti();
+  if (free) log("info", "stripe.invoice_free", { invoice: inv.id ?? null });
+  const granted = await grantSubscriptionMonth({ userId, customerId, subscriptionId: subId, plan, periodEnd, periodStart: invoicePeriodStart(inv), at, credits: monthly });
   if (granted && previous?.period_end && previous.period_end !== periodEnd) {
     // La période précédente est close : ce qu'il en reste expire sans servir (non reportable).
-    // Retenu sur SA facture : un remboursement ultérieur de celle-ci l'absorbe avant toute dette.
+    // Retenu sur SA facture, en plus des fenêtres de l'annuel déjà closes : un remboursement
+    // ultérieur de celle-ci l'absorbe avant toute dette.
     await authRun(
-      `UPDATE stripe_invoices SET unused_centi = ? WHERE user_id = ? AND period_end = ? AND unused_centi IS NULL`,
+      `UPDATE stripe_invoices SET unused_centi = coalesce(unused_centi, 0) + ? WHERE user_id = ? AND period_end = ?`,
       Math.max(0, Number(previous.remaining) || 0), userId, previous.period_end,
     );
   }
   if (inv.id) {
     // Montant encaissé : compté même si la facture n'accorde rien (période plus ancienne), l'argent est là.
-    const paid = Number((inv as { amount_paid?: number }).amount_paid ?? 0);
+    const paid = Number(amountPaid ?? 0);
     const invPi = invoicePaymentIntent(inv);
     if (paid > 0) {
       await recordPayment({
@@ -516,7 +526,7 @@ async function onInvoicePaid(invoice: Stripe.Invoice, lookup: StripeLookup | und
       `INSERT INTO stripe_invoices (invoice_id, subscription_id, customer_id, payment_intent, user_id, granted_centi, period_end, created_at)
        VALUES (?,?,?,?,?,?,?,?) ON CONFLICT (invoice_id) DO NOTHING`,
       inv.id, subId, customerId, invoicePaymentIntent(inv), userId,
-      granted ? subscriptionMonthlyCreditsCenti() : 0, periodEnd, nowStr(),
+      granted ? monthly : 0, periodEnd, nowStr(),
     );
   }
   return { ok: true, action: granted ? "subscription-granted" : "invoice-older-period" };
@@ -557,7 +567,7 @@ async function onSubscriptionDeleted(sub: Stripe.Subscription, lookup: StripeLoo
   );
   if (row?.period_end) {
     await authRun(
-      `UPDATE stripe_invoices SET unused_centi = ? WHERE user_id = ? AND period_end = ? AND unused_centi IS NULL`,
+      `UPDATE stripe_invoices SET unused_centi = coalesce(unused_centi, 0) + ? WHERE user_id = ? AND period_end = ?`,
       Math.max(0, Number(row.remaining) || 0), row.user_id, row.period_end,
     );
   }
@@ -598,19 +608,24 @@ const INVOICE_COLS = `invoice_id, user_id, granted_centi, period_end, reversed_c
  * ligne, qui garde ce qui n'a pas été dépensé.
  */
 async function reverseInvoice(invoice: InvoiceRow, paymentIntent: string, why: string, ref: string, ctx: ReversalContext): Promise<HandleResult> {
-  const granted = Math.max(0, Number(invoice.granted_centi) || 0);
   const partial = !!(ctx.amountCents && ctx.totalCents && ctx.amountCents < ctx.totalCents);
-  const target = partial ? Math.min(granted, Math.ceil((granted * ctx.amountCents!) / ctx.totalCents!)) : granted;
   const sub = await getSubscription(invoice.user_id);
   const current = !!sub && !!invoice.period_end && sub.period_end === invoice.period_end;
   // Recharge paresseuse de l'annuel posée AVANT la transaction : `remaining` vaut alors le solde utilisable.
   if (current && subscriptionLive(sub)) await subscriptionCreditsCenti(invoice.user_id);
   await ensureLedgerUnit();
+  let granted = 0;
+  let target = 0;
   const step = await authTx(async (tx) => {
     if (dbDriverName() === "postgres") await tx.run(`SELECT pg_advisory_xact_lock(hashtext(?))`, `reversal:${paymentIntent}`);
-    const row = await tx.get<{ reversed_centi: number | null; unused_centi: number | null }>(
-      `SELECT reversed_centi, unused_centi FROM stripe_invoices WHERE invoice_id = ?`, invoice.invoice_id,
+    const row = await tx.get<{ reversed_centi: number | null; unused_centi: number | null; granted_centi: number | null }>(
+      `SELECT reversed_centi, unused_centi, granted_centi FROM stripe_invoices WHERE invoice_id = ?`, invoice.invoice_id,
     );
+    // Accordé RELU ici : un annuel l'augmente à chaque fenêtre ouverte (credits.openSubscriptionWindowInTx).
+    // Un remboursement partiel en reprend la part sur ce qui a été accordé jusque-là ; les fenêtres
+    // suivantes ne sont pas réduites (geste commercial manuel : à compléter à la main si besoin).
+    granted = Math.max(0, Number(row?.granted_centi ?? invoice.granted_centi) || 0);
+    target = partial ? Math.min(granted, Math.ceil((granted * ctx.amountCents!) / ctx.totalCents!)) : granted;
     const already = Math.max(0, Number(row?.reversed_centi) || 0);
     const take = target - already;
     if (take <= 0) return null;

@@ -734,7 +734,13 @@ const LLM_USAGE_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "call_site", sqlite: "TEXT", pg: "text" },
   { name: "attempt", sqlite: "INTEGER", pg: "integer" },
   { name: "latency_ms", sqlite: "INTEGER", pg: "integer" },
+  // Réservation débitée que l'appel consomme (`job:…`, `assist:…`) : plafond de dépense par
+  // réservation et crédits rendus après dépense (lib/billing). NULL : propriétaire, ligne d'avant.
+  { name: "credit_ref", sqlite: "TEXT", pg: "text" },
 ];
+/** Index posé APRÈS la migration des colonnes (une base existante n'a pas encore credit_ref). */
+const LLM_USAGE_CREDIT_REF_IDX = `CREATE INDEX IF NOT EXISTS llm_usage_credit_ref_idx ON llm_usage (credit_ref)`;
+const LLM_USAGE_CREDIT_REF_IDX_PG = `CREATE INDEX IF NOT EXISTS llm_usage_credit_ref_idx ON public.llm_usage (credit_ref)`;
 
 /** Colonnes ajoutées à `credit_transactions` : part d'un débit financée par
  *  l'abonnement (centièmes), pour rendre chaque part dans sa poche. */
@@ -778,6 +784,9 @@ const CREDIT_TX_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   // Part d'un débit qu'une ligne de remboursement rend, en millièmes (NULL : ligne d'avant, ou
   // pas un remboursement) : la somme des parts d'un même débit ne dépasse jamais 1000.
   { name: "share_milli", sqlite: "INTEGER", pg: "integer" },
+  // 1 = crédits OFFERTS, qu'aucun paiement ne couvre (inscription, crédits rendus après une
+  // dépense, pack à 0 €) : le budget lié au revenu s'applique à eux (lib/billing/budget).
+  { name: "offered", sqlite: "INTEGER", pg: "integer" },
 ];
 /**
  * Référence de la réservation qui a compté la génération (`job:…`, `assist:…`) : une
@@ -823,6 +832,7 @@ function sqliteAuth(): Database.Database {
     for (const c of LLM_USAGE_ADDED) {
       if (!have.has(c.name)) _sqliteAuth.exec(`ALTER TABLE llm_usage ADD COLUMN ${c.name} ${c.sqlite}`);
     }
+    _sqliteAuth.exec(LLM_USAGE_CREDIT_REF_IDX);
     const haveTx = new Set(
       (_sqliteAuth.prepare("PRAGMA table_info(credit_transactions)").all() as Array<{ name: string }>).map((c) => c.name),
     );
@@ -904,6 +914,7 @@ async function pgExec(): Promise<{
     for (const c of LLM_USAGE_ADDED) {
       await authPgQuery(`ALTER TABLE public.llm_usage ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
     }
+    await authPgQuery(LLM_USAGE_CREDIT_REF_IDX_PG, []);
     const txCols = new Set((await authPgQuery(
       `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'credit_transactions'`, [],
     )).map((r) => String(r.column_name)));

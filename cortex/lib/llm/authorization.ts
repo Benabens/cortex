@@ -4,6 +4,7 @@ import { currentUser } from "@/db/context";
 import { billingEnabled } from "@/lib/billing/credits";
 import { isOwner } from "@/lib/billing/owner";
 import { currentJob } from "@/lib/billing/usage-context";
+import { GENERATION_DEBIT_SQL } from "@/lib/billing/usage";
 import { LlmError } from "./types";
 
 export type LlmAuthorization = {
@@ -30,10 +31,19 @@ export async function reservationExists(ref: string | null | undefined, userId =
   if (!ref) return false;
   if (!billingEnabled()) return true;
   const row = await authGet<{ user_id: string }>(
-    `SELECT user_id FROM credit_transactions WHERE ref = ? AND reason LIKE 'génération %'`,
+    `SELECT user_id FROM credit_transactions WHERE ref = ? AND ${GENERATION_DEBIT_SQL}`,
     ref,
   );
   return row?.user_id === userId;
+}
+
+/**
+ * Réservation que l'appel en cours consomme : celle d'une aide (assistCall) ou le
+ * débit du job courant. null : propriétaire hors réservation, ou appel sans débit.
+ */
+export function currentLlmProof(): LlmAuthorization | null {
+  const job = currentJob();
+  return authorization.getStore() ?? (job?.creditRef ? { kind: "job", ref: job.creditRef } : null);
 }
 
 /** Défense ultime, exécutée avant cache, compteur de dépense et provider. */
@@ -45,8 +55,6 @@ export async function assertLlmAuthorized(): Promise<void> {
   const user = currentUser();
   if (await isOwner(user)) return;
 
-  const explicit = authorization.getStore();
-  const job = currentJob();
-  const proof = explicit ?? (job?.creditRef ? { kind: "job" as const, ref: job.creditRef } : null);
+  const proof = currentLlmProof();
   if (!proof || !(await reservationExists(proof.ref, user))) throw new LlmPaymentRequiredError();
 }

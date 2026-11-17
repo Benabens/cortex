@@ -144,7 +144,7 @@ export function jobRef(userId: string, course: string, jobId: number): string {
 
 /** Écrit une transaction idempotente (ref UNIQUE), `deltaCenti` en centièmes. true = écrite, false = déjà vue. */
 export async function addTransaction(
-  userId: string, deltaCenti: number, reason: string, ref?: string,
+  userId: string, deltaCenti: number, reason: string, ref?: string, opts: { offered?: boolean } = {},
 ): Promise<boolean> {
   await ensureLedgerUnit();
   const delta = Math.round(deltaCenti);
@@ -154,8 +154,8 @@ export async function addTransaction(
   }
   try {
     await authRun(
-      `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, created_at) VALUES (?,?,?,?,'centi',?)`,
-      userId, delta, reason, ref ?? null, nowStr(),
+      `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, offered, created_at) VALUES (?,?,?,?,'centi',?,?)`,
+      userId, delta, reason, ref ?? null, opts.offered ? 1 : null, nowStr(),
     );
     return true;
   } catch (e) {
@@ -170,7 +170,7 @@ const signupSeen = new Set<string>();
 export async function ensureSignupCredits(userId: string): Promise<void> {
   if (!billingEnabled() || signupSeen.has(userId)) return;
   const free = toCenti(envNum("SIGNUP_FREE_CREDITS", 0));
-  if (free > 0) await addTransaction(userId, free, "signup", `signup:${userId}`);
+  if (free > 0) await addTransaction(userId, free, "signup", `signup:${userId}`, { offered: true });
   signupSeen.add(userId);
 }
 
@@ -269,13 +269,39 @@ export async function subscriptionCreditsCenti(userId = currentUser()): Promise<
   const now = nowStr();
   const win = rechargeDue(s!, now);
   if (win) {
-    await authRun(
-      `UPDATE subscriptions SET remaining = monthly_credits, window_anchor = ?, month_anchor = ?, updated_at = ? WHERE user_id = ? AND coalesce(window_anchor, '') < ?`,
-      win, win.slice(0, 7), now, userId, win,
-    );
+    await authTx(async (tx) => {
+      await lockAccountInTx(tx, userId);
+      await openSubscriptionWindowInTx(tx, userId, win, now);
+    });
     return Number(s!.monthly_credits) || 0;
   }
   return Math.max(0, Number(s!.remaining) || 0);
+}
+
+/**
+ * Ouvre la fenêtre mensuelle `win` d'un annuel (sous le verrou du compte) : solde
+ * remis au mensuel, une seule fois par fenêtre. La facture de la période en garde
+ * la trace (audit fuites I1) : le mois s'ajoute à ce qu'elle a accordé, le reliquat
+ * de la fenêtre close à son inutilisé. Un remboursement ou un litige de l'annuel
+ * reprend ainsi tout ce qui a été accordé, pas un seul mois. Rend false si la
+ * fenêtre était déjà ouverte.
+ */
+export async function openSubscriptionWindowInTx(tx: AuthTx, userId: string, win: string, now: string): Promise<boolean> {
+  const s = await tx.get<{ remaining: number; monthly_credits: number; window_anchor: string | null; period_end: string | null }>(
+    `SELECT remaining, monthly_credits, window_anchor, period_end FROM subscriptions WHERE user_id = ?`, userId,
+  );
+  if (!s || String(s.window_anchor ?? "") >= win) return false;
+  await tx.run(
+    `UPDATE subscriptions SET remaining = monthly_credits, window_anchor = ?, month_anchor = ?, updated_at = ? WHERE user_id = ?`,
+    win, win.slice(0, 7), now, userId,
+  );
+  if (s.period_end) {
+    await tx.run(
+      `UPDATE stripe_invoices SET granted_centi = granted_centi + ?, unused_centi = coalesce(unused_centi, 0) + ? WHERE user_id = ? AND period_end = ?`,
+      Math.max(0, Number(s.monthly_credits) || 0), Math.max(0, Number(s.remaining) || 0), userId, s.period_end,
+    );
+  }
+  return true;
 }
 
 /** Même chose en crédits (affichage). */
@@ -294,8 +320,10 @@ export async function subscriptionCredits(userId = currentUser()): Promise<numbe
 export async function grantSubscriptionMonth(p: {
   userId: string; customerId?: string | null; subscriptionId?: string | null; plan?: string | null;
   periodEnd: string; periodStart?: string | null; at?: string | null;
+  /** Crédits par fenêtre (centièmes). 0 : facture payée 0 € (code promo à 100 %), période en règle sans crédit (audit fuites I2). */
+  credits?: number;
 }): Promise<boolean> {
-  const credits = subscriptionMonthlyCreditsCenti();
+  const credits = p.credits ?? subscriptionMonthlyCreditsCenti();
   const now = nowStr();
   const at = p.at ?? now;
   const start = p.periodStart ?? now;
@@ -435,13 +463,24 @@ export function insufficient(balanceCenti: number, costCenti: number, subCenti =
  * chaque part, arrondi au centième SUPÉRIEUR (en faveur de l'utilisateur).
  * Un seul remboursement par débit et par `marker` (défaut : refund:<ref>) — une question
  * signalée a le sien (lib/question-reports). Rend les centièmes rendus.
+ *
+ * APRÈS DÉPENSE (des appels au modèle ont coûté sur cette réservation, ou l'appelant
+ * le sait : `afterSpend`) : tout ce qui est rendu devient des crédits OFFERTS, au
+ * ledger (`offered = 1`), part d'abonnement comprise (ligne `offered:<marker>`, le
+ * solde du mois n'est pas rechargé). Le budget lié au revenu s'applique alors à eux
+ * (lib/billing/budget) : un échec reste remboursé, mais ne rachète plus de calcul
+ * au-delà de ce que le compte a payé (audit fuites B1).
  */
-export async function refundGeneration(kind: string, ref: string, userId = currentUser(), fraction = 1, marker = `refund:${ref}`): Promise<number> {
+export async function refundGeneration(
+  kind: string, ref: string, userId = currentUser(), fraction = 1, marker = `refund:${ref}`, opts: { afterSpend?: boolean } = {},
+): Promise<number> {
   if (!billingEnabled()) return 0;
   const asked = Math.min(1000, Math.max(0, Math.round(fraction * 1000)));
   if (asked <= 0) return 0;
   try {
     if (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, marker)) return 0;
+    const { reservationSpendUsd } = await import("./usage");
+    const offered = opts.afterSpend === true || (await reservationSpendUsd(ref)) > 0;
     const debited = await authGet<{ delta: number; user_id: string; sub_amount: number | null; created_at: string }>(
       `SELECT ${DELTA_CENTI} AS delta, user_id, sub_amount, created_at FROM credit_transactions WHERE ref = ?`, ref,
     );
@@ -474,13 +513,21 @@ export async function refundGeneration(kind: string, ref: string, userId = curre
       const part = (centi: number) => Math.min(centi, Math.ceil(centi * share - 1e-9));
       const purchasedBack = Math.min(part(purchasedDebit), Math.max(0, purchasedDebit - prior.reduce((s, r) => s + Math.max(0, Number(r.delta)), 0)));
       const subBack = part(subDebit);
-      const label = share < 1 ? `remboursement partiel ${kind}` : `remboursement ${kind}`;
+      const label = `${share < 1 ? `remboursement partiel ${kind}` : `remboursement ${kind}`}${offered ? " (crédits offerts)" : ""}`;
       const t = nowStr();
       await tx.run(
-        `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, share_milli, created_at) VALUES (?,?,?,?,'centi',?,?)`,
-        u, purchasedBack, label, marker, Math.round(share * 1000), t,
+        `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, share_milli, offered, created_at) VALUES (?,?,?,?,'centi',?,?,?)`,
+        u, purchasedBack, label, marker, Math.round(share * 1000), offered ? 1 : null, t,
       );
-      if (subOk) await tx.run(`UPDATE subscriptions SET remaining = remaining + ?, updated_at = ? WHERE user_id = ?`, subBack, t, u);
+      if (subOk && offered && subBack > 0) {
+        // Hors de l'espace `refund:` : les parts et plafonds d'un débit ne lisent que la ligne marqueur.
+        await tx.run(
+          `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, offered, created_at) VALUES (?,?,?,?,'centi',1,?)`,
+          u, subBack, `${label}, part d'abonnement`, `offered:${marker}`, t,
+        );
+      } else if (subOk) {
+        await tx.run(`UPDATE subscriptions SET remaining = remaining + ?, updated_at = ? WHERE user_id = ?`, subBack, t, u);
+      }
       return purchasedBack + (subOk ? subBack : 0);
     });
   } catch (e) {
