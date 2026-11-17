@@ -4,7 +4,6 @@
  * et au rechargement de page. Écrit l'avancement dans la table `jobs`.
  * Lancer : tsx scripts/run-job.ts <jobId>
  */
-import { spawn } from "node:child_process";
 import path from "node:path";
 import { enterCourse } from "../db/client";
 import { coursePaths, ensureCoursesLoaded } from "../lib/courses";
@@ -20,6 +19,7 @@ import { generateLabExercise } from "../lib/labs";
 import { analyzeBlueprint } from "../lib/program";
 import { INGEST_REPORT_ENV, ingestFailureMessage } from "../lib/ingest-report";
 import { readIngestReport } from "../lib/ingest-report-file";
+import { ingestMaxHeapMb, ingestTimeoutMs, spawnBounded } from "../lib/ingest-limits";
 import fs from "node:fs";
 import os from "node:os";
 
@@ -128,7 +128,14 @@ async function settleAfterPages(): Promise<void> {
 function runIngestProcess(args: string[], reportFile: string): Promise<void> {
   const tsxLocal = path.join(process.cwd(), "node_modules", ".bin", "tsx");
   return new Promise<void>((resolve, reject) => {
-    const child = spawn(tsxLocal, args, { cwd: process.cwd(), env: { ...process.env, CORTEX_COURSE: COURSE, [INGEST_REPORT_ENV]: reportFile } });
+    // Borné (audit fuites I9) : tas plafonné, et au délai le process est tué avec ses enfants.
+    const timeoutMs = ingestTimeoutMs();
+    const { child, done } = spawnBounded(tsxLocal, args, {
+      cwd: process.cwd(),
+      env: { ...process.env, CORTEX_COURSE: COURSE, [INGEST_REPORT_ENV]: reportFile },
+      timeoutMs,
+      maxHeapMb: ingestMaxHeapMb(),
+    });
     const lines: string[] = [];
     // Lignes complètes seulement : un paquet du flux peut couper une ligne en deux. Rangées
     // AVANT toute attente, pour que la sortie entière soit connue à la fermeture.
@@ -165,12 +172,13 @@ function runIngestProcess(args: string[], reportFile: string): Promise<void> {
       }
       } catch { /* journal indisponible (base occupée) — le job continue */ }
     };
-    child.stdout.on("data", (d: Buffer) => { void onLines(collect(out.take(d))); });
-    child.stderr.on("data", (d: Buffer) => { void onLines(collect(err.take(d))); });
+    child.stdout!.on("data", (d: Buffer) => { void onLines(collect(out.take(d))); });
+    child.stderr!.on("data", (d: Buffer) => { void onLines(collect(err.take(d))); });
     child.on("error", reject);
-    child.on("close", (code) => {
+    void done.then(({ code, timedOut }) => {
       void onLines(collect([out.rest(), err.rest()]));
-      if (code === 0) resolve();
+      if (timedOut) reject(new Error(`Import arrêté au bout de ${Math.round(timeoutMs / 60_000)} min : un fichier est sans doute trop lourd ou abîmé. Retire le dernier ajouté, puis relance l'import.`));
+      else if (code === 0) resolve();
       else reject(new Error(ingestFailureMessage(lines, code)));
     });
   });
