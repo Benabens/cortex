@@ -46,11 +46,11 @@ export function accountHourAlertUsd(): number | null {
   return dayCap !== null && dayCap > 0 ? Math.min(threshold, dayCap) : threshold;
 }
 
-/** Dépense d'un compte dans l'heure UTC `hour` (« AAAA-MM-JJ HH »). */
+/** Dépense d'un compte dans l'heure UTC `hour` (« AAAA-MM-JJ HH ») : une plage sur created_at, comme les autres sommes. */
 async function spentInHour(userId: string, hour: string): Promise<number> {
   const rows = await authAll<{ total: number | string | null }>(
-    `SELECT coalesce(sum(cost_usd), 0) AS total FROM llm_usage WHERE user_id = ? AND substr(created_at, 1, 13) = ?`,
-    userId, hour,
+    `SELECT coalesce(sum(cost_usd), 0) AS total FROM llm_usage WHERE user_id = ? AND created_at >= ? AND created_at <= ?`,
+    userId, `${hour}:00:00`, `${hour}:59:59`,
   );
   return Number(rows[0]?.total ?? 0);
 }
@@ -80,6 +80,7 @@ export async function alertAccountHourSpend(userId: string): Promise<void> {
       ? { ok: false as const, reason: blocker }
       : await sendEmail({
           to: ownerAlertRecipient()!,
+          // La chaîne de claimOnce, comme les alertes du mois ; ici sans reprise, elle reste unique par réclamation.
           idempotencyKey: `${key}:${claimed.chain}`,
           subject: `Cortex : un compte a dépensé ${context.spent} $ d'IA dans l'heure`,
           text: `Le compte ${userId} a dépensé ${context.spent} $ d'IA entre ${hour}:00 et ${hour}:59 (UTC), au-dessus du seuil d'alerte de ${threshold} $ (SPEND_ALERT_PER_USER_HOUR_USD).\n\nRien n'est coupé à ce seuil : le fusible du jour par compte (SPEND_CAP_PER_USER_USD) coupe plus haut. Détail des appels : table llm_usage, user_id = ${userId}.`,

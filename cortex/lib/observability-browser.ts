@@ -11,7 +11,7 @@
  * envois passent par le tunnel de l'app (même origine) : la CSP garde
  * connect-src 'self'.
  */
-import { MONITORING_TUNNEL, scrubEvent, type ClientErrorTrackingConfig, type MinimalEvent } from "@/lib/observability-scrub";
+import { ERROR_TUNNEL, scrubEvent, type ClientErrorTrackingConfig, type MinimalEvent } from "@/lib/observability-scrub";
 
 type BrowserSentryLike = {
   init: (options: Record<string, unknown>) => void;
@@ -27,10 +27,10 @@ let _sentry: BrowserSentryLike | null = null;
 /** Configuration servie par l'app ; null (suivi éteint) sur 204, réponse inattendue ou réseau coupé. */
 export async function loadClientErrorTrackingConfig(fetchImpl: typeof fetch = fetch): Promise<ClientErrorTrackingConfig | null> {
   try {
-    const r = await fetchImpl(MONITORING_TUNNEL, { cache: "no-store", credentials: "omit" });
+    const r = await fetchImpl(ERROR_TUNNEL, { cache: "no-store", credentials: "omit" });
     if (r.status !== 200) return null;
     const c = (await r.json()) as Partial<ClientErrorTrackingConfig>;
-    if (typeof c.dsn !== "string" || typeof c.environment !== "string" || c.tunnel !== MONITORING_TUNNEL) return null;
+    if (typeof c.dsn !== "string" || typeof c.environment !== "string" || c.tunnel !== ERROR_TUNNEL) return null;
     return { dsn: c.dsn, environment: c.environment, ...(typeof c.release === "string" ? { release: c.release } : {}), tunnel: c.tunnel };
   } catch {
     return null;

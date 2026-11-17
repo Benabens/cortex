@@ -1,6 +1,6 @@
 /**
- * L'ADRESSE D'ALERTE DU PROPRIÉTAIRE, commune aux alertes de dépense
- * (./spend-alerts) et à celles du rappel de reconduction (./renewal-alerts) :
+ * L'ADRESSE D'ALERTE DU PROPRIÉTAIRE, commune aux alertes de dépense (./spend-alerts,
+ * ./account-spend-alerts) et à celles du rappel de reconduction (./renewal-alerts) :
  * CORTEX_OWNER_EMAIL, à défaut PUBLISHER_EMAIL. L'envoi passe par Resend.
  */
 export function ownerAlertRecipient(env: NodeJS.ProcessEnv = process.env): string | null {

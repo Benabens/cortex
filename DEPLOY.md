@@ -900,8 +900,11 @@ quotidiens (`DAILY_GEN_QUOTA`, `DAILY_ASSIST_QUOTA`).
       limites dans **Mon compte › Mon usage** et à côté de chaque bouton de
       génération (`GET /api/usage`), jamais en dollars.
 - [ ] Alerte par compte et par heure : `SPEND_ALERT_PER_USER_HOUR_USD` absente (5 $ par
-      défaut) ou sous `SPEND_CAP_PER_USER_USD`. Elle lève un événement Sentry
-      `alert=account_spend_hour` ; le compte est dans le journal `spend_alert.account_hour`.
+      défaut) ou sous `SPEND_CAP_PER_USER_USD` ; posée, la déclarer aussi dans
+      `.railway/railway.ts` (sinon l'apply la supprime). Elle écrit au propriétaire (même
+      destinataire que les alertes du mois, ci-dessous) et lève un événement Sentry
+      `alert=account_spend_hour` ; le compte est dans l'e-mail et le journal
+      `spend_alert.account_hour`, jamais chez Sentry.
 - [ ] `RESEND_API_KEY` posée, et `CORTEX_OWNER_EMAIL` ou `PUBLISHER_EMAIL` :
       sans elles, ni les alertes de dépense à 80 % et 100 %, ni celles du rappel
       de reconduction ne partent. Au démarrage, les logs ne doivent montrer ni
