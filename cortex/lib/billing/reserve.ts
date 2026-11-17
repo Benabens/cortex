@@ -216,9 +216,12 @@ export class AssistRefused extends Error {
 
 /**
  * Réservation RENDUE : nos gardes ont arrêté l'appel avant envoi (comptage en
- * vol fail-closed, plafond de dépense), ou le modèle n'a renvoyé qu'une réponse
- * inutilisable (BAD_OUTPUT_CODES : illisible, coupée) — notre défaut,
- * l'utilisateur n'a rien reçu ; le connecteur l'annonce sur la même table. Un échec du fournisseur lui-même (429, 5xx, réseau) reste débité,
+ * vol fail-closed, plafond de dépense, plafond de la réservation), ou le modèle
+ * n'a renvoyé qu'une réponse inutilisable (BAD_OUTPUT_CODES : illisible, coupée)
+ * — notre défaut, l'utilisateur n'a rien reçu ; le connecteur l'annonce sur la
+ * même table. Après une dépense réelle, le crédit revient OFFERT (credits.ts,
+ * audit fuites B1/I5) : rejouer une aide qui échoue ne fait pas tourner l'IA sans
+ * paiement. Un échec du fournisseur lui-même (429, 5xx, réseau) reste débité,
  * comme décidé au lot 2 : l'appel est parti.
  */
 const REFUNDED_CODES = new Set(["UNAVAILABLE", "SPEND_CAP", ...BAD_OUTPUT_CODES]);
