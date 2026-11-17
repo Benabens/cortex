@@ -13,6 +13,7 @@ import type { OriginalOrigin } from "@/lib/originals/registry";
 import { unreadableDocument } from "@/lib/document-check";
 import { directDownloadUrl, sharedRedirectTarget } from "@/lib/share-links";
 import * as cheerio from "cheerio";
+import { errorText, userError, type ErrorParams, type UserError } from "@/lib/i18n/user-error";
 
 /**
  * AJOUT D'UN SUPPORT À UN COURS sans passer par le navigateur : une adresse https
@@ -61,10 +62,15 @@ export const SOURCE_CATEGORY_LABEL: Record<SourceCategory, string> = {
 export const SOURCE_MAX_BYTES = 30 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 30_000;
 
-export class SourceError extends Error {
-  constructor(readonly status: number, message: string) {
-    super(message);
+export class SourceError extends Error implements UserError {
+  readonly code: UserError["code"];
+  readonly params?: ErrorParams;
+
+  constructor(readonly status: number, error: UserError) {
+    super(errorText("fr", error));
     this.name = "SourceError";
+    this.code = error.code;
+    if (error.params) this.params = error.params;
   }
 }
 
@@ -113,36 +119,36 @@ async function store(
   const folder = category ? BUCKET[category] : classifyFile(name).bucket;
   // Un cours HISTORIQUE lit son contenu à la racine du dépôt, en lecture seule (comme l'import de l'app).
   if (folder !== "refs" && getCourse(courseId).paths?.contentRel === "..") {
-    throw new SourceError(409, "Le contenu de ce cours est en lecture seule : seules des annales (category past_exam) peuvent y être ajoutées.");
+    throw new SourceError(409, userError("source_course_read_only"));
   }
   const storage = await checkStorage(currentUser(), data.length);
-  if (storage) throw new SourceError(storage.status, storage.error);
+  if (storage) throw new SourceError(storage.status, storage);
   const indexFull = await checkIndexQuota(currentUser());
-  if (indexFull) throw new SourceError(indexFull.status, indexFull.error);
+  if (indexFull) throw new SourceError(indexFull.status, indexFull);
   const problem = await unreadableDocument(data, path.extname(name));
-  if (problem) throw new SourceError(problem.status, problem.message);
+  if (problem) throw new SourceError(problem.status, problem.error);
 
   // Jamais d'écrasement (« -2 », « -3 »…). Premium : rangé dans le cloud ; gratuit : en transit,
   // le temps que l'ingestion lise son texte (lib/originals).
   const saved = await storeOriginal(courseId, folderDir(courseId, folder), name, data, { ...origin, dedupe: false });
   if (saved) return { name: saved.name, folder, bytes: data.length, contentType, home: saved.home };
-  throw new SourceError(409, "Trop de fichiers du même nom dans ce cours : donne un autre titre.");
+  throw new SourceError(409, userError("source_duplicate_title"));
 }
 
 /** Fichier déposé depuis l'app (multipart) : mêmes gardes que le connecteur, catégorie imposée. */
 export async function addFileSource(courseId: string, a: { name: string; data: Buffer; category: SourceCategory; contentType: string }): Promise<SavedSource> {
-  if (!a.data.length) throw new SourceError(400, "Fichier vide.");
-  if (a.data.length > SOURCE_MAX_BYTES) throw new SourceError(413, `Fichier trop volumineux (maximum ${SOURCE_MAX_BYTES / 1024 / 1024} Mo).`);
+  if (!a.data.length) throw new SourceError(400, userError("source_file_empty"));
+  if (a.data.length > SOURCE_MAX_BYTES) throw new SourceError(413, userError("source_file_too_large_plain", { maxMb: SOURCE_MAX_BYTES / 1024 / 1024 }));
   const ext = path.extname(a.name).toLowerCase();
-  if (![".pdf", ".md", ".txt", ".html", ".htm"].includes(ext)) throw new SourceError(415, "Formats acceptés : PDF, TXT, MD, HTML.");
-  if (ext === ".pdf" && a.data.subarray(0, 5).toString("latin1") !== "%PDF-") throw new SourceError(415, "Ce fichier n'est pas un PDF valide.");
+  if (![".pdf", ".md", ".txt", ".html", ".htm"].includes(ext)) throw new SourceError(415, userError("source_file_formats_accepted"));
+  if (ext === ".pdf" && a.data.subarray(0, 5).toString("latin1") !== "%PDF-") throw new SourceError(415, userError("source_pdf_invalid"));
   return store(courseId, fileName(path.basename(a.name, ext), null, ext === ".htm" ? ".html" : ext), a.category, a.data, a.contentType, { originalName: a.name, origin: "upload" });
 }
 
 export async function addTextSource(courseId: string, a: { text: string; title?: string; category?: SourceCategory }): Promise<SavedSource> {
   const data = Buffer.from(a.text, "utf8");
-  if (!a.text.trim()) throw new SourceError(400, "Texte vide.");
-  if (data.length > SOURCE_MAX_BYTES) throw new SourceError(413, "Texte trop volumineux.");
+  if (!a.text.trim()) throw new SourceError(400, userError("source_text_empty"));
+  if (data.length > SOURCE_MAX_BYTES) throw new SourceError(413, userError("source_text_too_large"));
   return store(courseId, fileName(a.title ?? "notes", null, ".md"), a.category, data, "text/markdown", { origin: "text" });
 }
 
@@ -173,9 +179,9 @@ export async function addUrlSource(
   const userId = currentUser();
   // Compte déjà plein : refuser avant de télécharger quoi que ce soit (et sans consommer de lecture).
   const full = await checkStorage(userId, 1);
-  if (full) throw new SourceError(full.status, full.error);
+  if (full) throw new SourceError(full.status, full);
   if (!takeFetchSlot(userId)) {
-    throw new SourceError(429, "Trop d'adresses lues pour ce compte cette heure-ci : réessaie plus tard, ou colle le texte du document.");
+    throw new SourceError(429, userError("source_url_rate_limit"));
   }
   // Lien de partage Drive / Docs / Dropbox : lu à son adresse de téléchargement direct.
   const link = directDownloadUrl(a.url);
@@ -193,22 +199,22 @@ export async function addUrlSource(
     }
   } catch (e) {
     if (!(e instanceof PublicFetchError)) throw e;
-    if (e.reason === "too_large") throw new SourceError(413, `Document trop volumineux (maximum ${SOURCE_MAX_BYTES / 1024 / 1024} Mo).`);
+    if (e.reason === "too_large") throw new SourceError(413, userError("source_document_too_large", { maxMb: SOURCE_MAX_BYTES / 1024 / 1024 }));
     if (e.reason === "redirect") {
       // L'hôte seulement : le reste de l'en-tête Location vient du serveur distant et irait tel quel au modèle.
       const host = (() => { try { return e.location ? new URL(e.location, a.url).host : null; } catch { return null; } })();
-      throw new SourceError(400, `Cette adresse redirige${host ? ` vers ${host}` : ""} : redonne directement l'adresse finale (https).`);
+      throw new SourceError(400, host ? userError("source_url_redirect_host", { host }) : userError("source_url_redirect"));
     }
     if (e.reason === "blocked" || e.reason === "invalid_url") {
-      throw new SourceError(400, "Adresse refusée : seules les adresses https publiques sont lues (pas de réseau interne ni d'adresse locale).");
+      throw new SourceError(400, userError("source_url_private"));
     }
-    throw new SourceError(400, `Lecture impossible (${e.message}).`);
+    throw new SourceError(400, userError("source_read_failed", { detail: e.message }));
   }
   const ext = extensionFor(res.contentType, res.body);
   if (!ext) {
-    throw new SourceError(415, `Type de document non pris en charge (${(res.contentType ?? "inconnu").slice(0, 60)}) : PDF, page web ou texte seulement.`);
+    throw new SourceError(415, userError("source_type_unsupported", { contentType: (res.contentType ?? "inconnu").slice(0, 60) }));
   }
-  if (!res.body.length) throw new SourceError(400, "Document vide.");
+  if (!res.body.length) throw new SourceError(400, userError("source_document_empty"));
   if (ext === ".html") {
     const problem = htmlPageProblem(res.body.toString("utf8"));
     if (problem) throw new SourceError(422, problem);
@@ -222,15 +228,15 @@ const LOGIN = /(?<!\p{L})(connexion|se connecter|sign[ -]?in|log[ -]?in|anmelden
  * Une page web qui n'apporte rien au corpus : page de connexion (lien privé, visionneuse d'un
  * Drive), ou presque vide. Le message dit quoi faire ; null si la page a du contenu.
  */
-function htmlPageProblem(html: string): string | null {
+function htmlPageProblem(html: string): UserError | null {
   const $ = cheerio.load(html);
   const password = $("input[type=password]").length > 0;
   $("script, style, noscript, nav, header, footer").remove();
   const text = $("body").text().replace(/\s+/g, " ").trim();
   // Un champ mot de passe, ou presque rien d'autre que « Connexion » : « une connexion TCP » n'en est pas une.
   if (password || (text.length < 200 && LOGIN.test(`${$("title").text()} ${text}`))) {
-    return "Cette page demande une connexion : le document n’est pas public. Partage-le en accès public (« tous ceux qui ont le lien »), ou dépose le fichier directement.";
+    return userError("source_page_login_required");
   }
-  if (text.length < 200) return "Cette page n’a presque pas de texte (visionneuse ou page vide ?) : donne le lien du document lui-même, ou dépose le fichier directement.";
+  if (text.length < 200) return userError("source_page_almost_empty");
   return null;
 }

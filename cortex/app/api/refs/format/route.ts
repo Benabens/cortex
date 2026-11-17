@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { jobSpec, launchGate } from "@/lib/billing/limits";
 import { fromCenti } from "@/lib/billing/credits";
 import { ReservationRefused, activeJob, costForJob, createJobExclusive, startWorker } from "@/lib/jobs";
@@ -30,19 +31,19 @@ export async function POST(req: NextRequest) {
   }
 
   const gate = await launchGate(jobSpec("format", costForJob("format")));
-  if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
+  if (gate) return apiError(req, gate, gate.status);
   let created: Awaited<ReturnType<typeof createJobExclusive>>;
   try {
     created = await createJobExclusive("format", JSON.stringify({ reason: "upload" }));
   } catch (e) {
-    if (e instanceof ReservationRefused) return NextResponse.json({ error: e.message }, { status: e.status });
+    if (e instanceof ReservationRefused) return apiError(req, e, e.status);
     throw e;
   }
   if (!created.existing) {
     try {
       await startWorker(created.id, course);
     } catch {
-      return NextResponse.json({ error: "Impossible de lancer la détection du format. Réessaie dans un instant." }, { status: 500 });
+      return apiError(req, "format_detection_start_failed", 500);
     }
   }
   return NextResponse.json({ ok: true, jobId: created.id, existing: created.existing, chargedCredits: fromCenti(created.costCenti) });
