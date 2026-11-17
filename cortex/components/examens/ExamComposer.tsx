@@ -3,7 +3,7 @@
 /* eslint-disable react-hooks/set-state-in-effect -- le compositeur se recale sur le plan et l’état du job externes */
 
 import styles from "@/app/secondary.module.css";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Play, Check, AlertTriangle, Clock3, SlidersHorizontal, Target, ChevronDown } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
@@ -27,10 +27,13 @@ const V = "var(--color-accent)";
 export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; onGenerated: () => void }) {
   const t = useTranslations("examComposer");
   const apiT = useTranslations("api");
+  const commonT = useTranslations("common");
   const { courseId, course } = useCourse();
   const isQcm = plan.kind === "qcm";
   const q = plan as PlanQcm;
   const unit = plan.kind === "exam" ? plan.unit ?? "exercice" : "exercice";
+  // Le chiffre garde le style du total, le mot celui de l'unité (comme avant la traduction).
+  const unitSpan = (c: ReactNode) => <span className="text-[0.78rem] font-normal text-ink-3">{c}</span>;
   const unitKey = unit === "sujet" ? "unitTopic" : unit === "question" ? "unitQuestion" : "unitExercise";
   const unitsLabel = t(unit === "sujet" ? "unitTopics" : unit === "question" ? "unitQuestions" : "unitExercises");
 
@@ -131,9 +134,9 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
             <span className="text-[0.82rem] text-ink-2">{t("composition")}</span>
             <span className="font-data text-[1.02rem] font-semibold tabular text-ink-1">
               {isQcm ? (
-                <>{nQcm} <span className="text-[0.78rem] font-normal text-ink-3">{t("qcm")} ·</span> <span className="text-[0.78rem] font-normal text-ink-3">{t("openCount", { count: nOpen })}</span></>
+                <>{nQcm} <span className="text-[0.78rem] font-normal text-ink-3">{t("qcm")} ·</span> {t.rich("openCount", { count: nOpen, unit: unitSpan })}</>
               ) : (
-                <span className="text-[0.78rem] font-normal text-ink-3">{t(unitKey, { count: nExos })}</span>
+                <>{t.rich(unitKey, { count: nExos, unit: unitSpan })}</>
               )}
             </span>
           </div>
@@ -204,7 +207,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
           <div className="mt-4 rounded-lg border border-line bg-surface-2/30 px-4 py-3" aria-live="polite">
             <div className="mb-2 flex items-center justify-between text-[0.8rem]">
               <span className="text-ink-2">{job.status === "queued" ? t("queued") : asText(job.currentStep) ?? t("running")}</span>
-              <span className="font-data font-semibold text-ink-1">{job.status === "queued" ? "" : `${job.progress} %`}</span>
+              <span className="font-data font-semibold text-ink-1">{job.status === "queued" ? "" : commonT("percent", { value: job.progress })}</span>
             </div>
             <WeightBar pct={job.status === "queued" ? 4 : job.progress} height={6} />
           </div>
