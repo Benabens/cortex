@@ -40,7 +40,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ file
   // Relayé par le serveur : borné par compte et par jour (audit fuites I6).
   const res = await serveCounted(currentUser(), () => storage().serve(abs, req, {
     contentType: MIME[ext] ?? "application/octet-stream",
-    headers: servedFileHeaders(MIME[ext] ?? "application/octet-stream", { "content-disposition": `inline; filename="${file}"` }),
+    // Le PDF s'affiche dans la page de l'examen (sortie « PDF », components/exam/ExamFrame).
+    headers: servedFileHeaders(MIME[ext] ?? "application/octet-stream", { "content-disposition": `inline; filename="${file}"` }, { sameOriginFrame: ext === "pdf" }),
   }));
   return res ?? new NextResponse("Not found", { status: 404 });
 }
