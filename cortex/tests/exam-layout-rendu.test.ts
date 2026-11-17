@@ -63,6 +63,18 @@ test("numérotation de l'annale : « Exercice » en chiffres romains, dans les t
   assert.match(body(r.blocks), /\\textbf\{Exercice I \\quad-- /);
 });
 
+test("numéro seul : « 1. Titre », sans le tiret qui se lirait comme une soustraction", async () => {
+  const r = await renders(variant({ numbering: { prefix: "", style: "arabic" } }));
+  assert.match(r.written, /\\textbf\{#1\.~#2 \\hfill/);
+  assert.match(body(r.blocks), /\\textbf\{1\.~/);
+});
+
+test("champs aux libellés longs : un par ligne", async () => {
+  const r = await renders(variant({ cover: { idFields: [{ kind: "studentId", label: "Candidate number:" }, { kind: "seat", label: "Desk number:" }] } }));
+  assert.match(body(r.qcm), /\\noindent Candidate number:~\\makebox\[0\.6\\textwidth\]/);
+  assert.match(body(r.qcm), /\\noindent Desk number:~\\makebox\[0\.6\\textwidth\]/);
+});
+
 test("numéro seul et préfixe d'une lettre : « 3. » et « Q3. »", async () => {
   assert.match(body((await renders(variant({ numbering: { prefix: "", style: "arabic" } }))).qcm), /\\noindent\\textbf\{2\.\}\\quad/);
   assert.match(body((await renders(variant({ numbering: { prefix: "Q", style: "arabic" } }))).qcm), /\\noindent\\textbf\{Q2\.\}\\quad/);
@@ -90,9 +102,9 @@ test("options sur deux colonnes : deux par ligne dans l'énoncé, une colonne da
 
 test("barème dans la ligne : entre parenthèses, plus à droite", async () => {
   const r = await renders(variant({ points: "inline" }));
-  assert.match(r.written, /#2 \(#3 points\)\}\}/);
+  assert.match(r.written, /\\textbf\{Question #1 \\quad-- #2\} \(#3 points\)\}/, "points hors du gras");
   assert.match(body(r.qcm), /\\footnotesize\[single choice\]\}\\quad\\textbf\{\\textit\{[^}]*\}\} \(\d+ points?\)\\par/);
-  assert.match(body(r.blocks), /\(\d+ points?\)\}\}\\par\\vspace\{3pt\}/);
+  assert.match(body(r.blocks), /\} \(\d+ points?\)\}\\par\\vspace\{3pt\}/);
 });
 
 test("barème absent : aucun point dans les titres, le total reste sur la garde", async () => {

@@ -3,7 +3,7 @@ import { getCourse, type CourseConfig } from "@/lib/courses";
 import type { ExamQuestion } from "@/lib/exam";
 import { durationOf, formatContextFor } from "@/lib/exam-format";
 import type { CoverFacts, ExamForm, ExamLayout, ExamPdf, IdField, PageSlot, Slots } from "@/lib/exam-layout";
-import { questionNumber } from "@/lib/exam-layout-tex";
+import { headNumber } from "@/lib/exam-layout-tex";
 import { courseTitle, courseWords, durationText, examKindText, genericPreamble, localBlockLabels, localDate, localQcmLabels, localWrittenLabels, pointsText, solutionColor, type CoverWords } from "@/lib/exam-template";
 import { texEscape } from "@/lib/tex-escape";
 
@@ -43,11 +43,11 @@ function answerSpaceTex(layout: ExamLayout): string[] {
   return [];
 }
 
-/** Points dans un titre d'exercice écrit (`#3`) : à droite par défaut. */
-function headPoints(layout: ExamLayout, w: CoverWords): string {
-  if (layout.points === "none") return "";
-  if (layout.points === "inline") return ` (#3 ${w.points})`;
-  return String.raw` \hfill [#3 ${w.points}]`;
+/** Points dans un titre d'exercice écrit (`#3`) : à droite par défaut ; dans la ligne, hors du gras. */
+function headPoints(layout: ExamLayout, w: CoverWords): { right: string; inline: string } {
+  if (layout.points === "none") return { right: "", inline: "" };
+  if (layout.points === "inline") return { right: "", inline: ` (#3 ${w.points})` };
+  return { right: String.raw` \hfill [#3 ${w.points}]`, inline: "" };
 }
 
 /**
@@ -60,7 +60,8 @@ function headPoints(layout: ExamLayout, w: CoverWords): string {
 export function layoutChrome(layout: ExamLayout, c: CourseConfig, w: CoverWords): string {
   const n = layout.numbering.style === "roman" ? String.raw`\Roman{exq}` : "#1";
   const prefix = layout.numbering.prefix ?? w.question;
-  const num = !prefix ? n : prefix.length === 1 ? `${prefix}${n}` : `${prefix} ${n}`;
+  // Sans mot : « 3. Titre » (« 3 -- Titre » se lisait comme une soustraction), cf. headNumber.
+  const head = !prefix ? `${n}.~` : `${prefix.length === 1 ? `${prefix}${n}` : `${prefix} ${n}`}${String.raw` \quad-- `}`;
   const pts = headPoints(layout, w);
   const usesLastPage = [layout.header, layout.footer].some((s) => [s.left, s.center, s.right].includes("pageOfTotal"));
   return [
@@ -70,8 +71,8 @@ export function layoutChrome(layout: ExamLayout, c: CourseConfig, w: CoverWords)
     String.raw`\definecolor{solution}{HTML}{1F4E9A}`,
     String.raw`\colorlet{epflred}{solution}`,
     ...(layout.font.family === "sans" ? [String.raw`\renewcommand{\familydefault}{\sfdefault}`] : []),
-    String.raw`\renewcommand{\examq}[3]{\clearpage\setcounter{exq}{#1}\needspace{3\baselineskip}{\large\textbf{${num} \quad-- #2${pts}}}\par\vspace{4pt}\hrule\vspace{10pt}}`,
-    String.raw`\renewcommand{\subq}[3]{\par\medskip\needspace{3\baselineskip}{\textbf{#1 \quad-- #2${pts}}}\par\smallskip}`,
+    String.raw`\renewcommand{\examq}[3]{\clearpage\setcounter{exq}{#1}\needspace{3\baselineskip}{\large\textbf{${head}#2${pts.right}}${pts.inline}}\par\vspace{4pt}\hrule\vspace{10pt}}`,
+    String.raw`\renewcommand{\subq}[3]{\par\medskip\needspace{3\baselineskip}{\textbf{#1 \quad-- #2${pts.right}}${pts.inline}}\par\smallskip}`,
     String.raw`\renewcommand{\ansspace}[1]{\par\medskip\noindent\textbf{${w.answers}}\par\vspace*{#1}}`,
     ...answerSpaceTex(layout),
     String.raw`\renewcommand{\headrulewidth}{0.4pt}\renewcommand{\footrulewidth}{0pt}`,
@@ -90,8 +91,12 @@ function fieldLabel(f: IdField, w: CoverWords): string {
 /** Champs à remplir de la garde, deux par ligne (le premier large, le second court). */
 function idFieldsTex(fields: IdField[], w: CoverWords): string[] {
   const rows: string[] = [];
-  for (let i = 0; i < fields.length; i += 2) {
-    const [a, b] = [fields[i], fields[i + 1]];
+  // Deux par ligne si les libellés sont courts ; « Candidate number: » et « Desk number: » se
+  // coupaient dans la case de droite : un par ligne.
+  const short = (f: IdField) => (f.label ?? "").length <= 12;
+  for (let i = 0; i < fields.length; i += 1) {
+    const [a, b] = [fields[i], short(fields[i]) && fields[i + 1] && short(fields[i + 1]) ? fields[i + 1] : undefined];
+    if (b) i += 1;
     rows.push(b
       ? String.raw`\noindent ${fieldLabel(a, w)}~\makebox[0.5\textwidth]{\hrulefill}\hfill ${fieldLabel(b, w)}~\makebox[0.22\textwidth]{\hrulefill}\par\vspace{10pt}`
       : String.raw`\noindent ${fieldLabel(a, w)}~\makebox[0.6\textwidth]{\hrulefill}\par\vspace{10pt}`);
@@ -197,7 +202,7 @@ export function layoutPdf(layout: ExamLayout): ExamPdf {
     cover: async (f) => cover(layout, f),
     qcm: localQcmLabels(w, color, false),
     blocks: localBlockLabels(w, color),
-    written: localWrittenLabels(w, (n) => questionNumber(layout.numbering, n, w.question)),
+    written: localWrittenLabels(w, (n) => headNumber(layout.numbering, n, w.question).num),
     logo: false,
   };
 }
