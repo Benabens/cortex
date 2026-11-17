@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { chapterLine, reason, themeHref, trainHref, type NotionFacts } from "@/lib/ux/next-up";
 import { useTranslations } from "use-intl/react";
+import { useFmt } from "@/lib/i18n/use-fmt";
 
 /**
  * « Next up » de l'Accueil dans la carte héros D2 : la notion en titre géant, la raison en une
@@ -10,8 +11,10 @@ import { useTranslations } from "use-intl/react";
  */
 export function PriorityHero({ title, facts }: { title: string; facts: NotionFacts }) {
   const t = useTranslations("dashboard");
-  const why = reason(facts);
-  const chapter = chapterLine(facts.chapter);
+  const nextT = useTranslations("nextUp");
+  const f = useFmt();
+  const why = reason(facts, nextT, f);
+  const chapter = chapterLine(facts.chapter, nextT);
   return (
     <section className="d2-hero p-6 sm:p-9 lg:p-11" aria-labelledby="priority-title">
       <p className="text-[0.8125rem] font-medium text-on-hero-2">{t("priority")}</p>
