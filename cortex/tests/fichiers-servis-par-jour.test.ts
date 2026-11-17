@@ -48,3 +48,13 @@ test("I6 : une requête HEAD (taille sans corps) ne compte pas", async () => {
   assert.equal((await serveCounted("ana", head, now))?.status, 200);
   assert.equal((await serveCounted("ana", file(1), now))?.status, 200);
 });
+
+test("I6 : des requêtes parallèles s'additionnent toutes (pas de mise à jour perdue)", async () => {
+  process.env.FILES_SERVED_MB_PER_DAY = "3";
+  const { serveCounted, resetServedBytesForTests } = await import("../lib/served-bytes");
+  resetServedBytesForTests();
+  const now = Date.parse("2026-11-17T10:00:00Z");
+  const slow = async () => { await new Promise((ok) => setTimeout(ok, 20)); return file(1024 * 1024)(); };
+  await Promise.all(Array.from({ length: 4 }, () => serveCounted("ana", slow, now)));
+  assert.equal((await serveCounted("ana", file(1), now))?.status, 429, "4 Mo servis en parallèle > 3 Mo");
+});

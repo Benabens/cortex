@@ -86,10 +86,14 @@ export function expectedJobCostUsd(kind: string, costCenti?: number): number {
   return unit * units;
 }
 
-/** Plancher du plafond du jour : les générations du jour annoncées (DAILY_GEN_QUOTA) au coût attendu le plus cher, 8 $ au moins. */
+/**
+ * Plancher du plafond du jour : les générations du jour annoncées (DAILY_GEN_QUOTA) au coût
+ * attendu de la plus chère (un QCM de 40 questions vaut deux unités), 8 $ au moins. Le fusible
+ * SPEND_CAP_PER_USER_USD reste au-dessus de tout.
+ */
 function defaultDailyFloorUsd(): number {
   const quota = quotaFor("gen");
-  const dearest = Math.max(expectedJobCostUsd("qcm"), expectedJobCostUsd("exam"));
+  const dearest = 2 * Math.max(expectedJobCostUsd("qcm"), expectedJobCostUsd("exam"));
   return Math.max(8, quota === null ? 0 : quota * dearest);
 }
 
