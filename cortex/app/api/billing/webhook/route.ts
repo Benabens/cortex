@@ -49,6 +49,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     return apiError(req, "stripe_signature_invalid", 400);
   }
   if (!livemodeMatchesKey(event, key)) {
+    // i18n-allow: message d’erreur pour Sentry, jamais montré
     captureErrorThrottled("billing.webhook_livemode", new Error("Webhook Stripe : livemode de l'événement incohérent avec la clé"), { area: "billing", step: "webhook_livemode", event_type: event.type });
     return apiError(req, "stripe_livemode_mismatch", 400);
   }

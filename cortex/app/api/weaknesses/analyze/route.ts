@@ -1,3 +1,4 @@
+// i18n-allow-file: consignes et schéma envoyés au modèle (le texte destiné à l’étudiant vient de messages/*.json)
 import { apiError } from "@/lib/i18n/api-error";
 import { q } from "@/db/q";
 import { completeVia, LlmError, llmUserError, type LlmImage } from "@/lib/llm";
