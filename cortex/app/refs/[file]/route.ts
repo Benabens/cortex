@@ -2,6 +2,7 @@ import { coursePaths } from "@/lib/courses";
 import { servedFileHeaders } from "@/lib/security-headers";
 import { requireCourse } from "@/lib/req";
 import { storage } from "@/lib/storage";
+import { localPreviewUrl } from "@/lib/originals/registry";
 import path from "node:path";
 import { NextResponse } from "next/server";
 
@@ -35,5 +36,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ file: st
     contentType: MIME[ext] ?? "application/octet-stream",
     headers: servedFileHeaders(MIME[ext] ?? "application/octet-stream", { "cache-control": "private, max-age=3600" }),
   });
-  return res ?? new NextResponse("Not found", { status: 404 });
+  if (res) return res;
+  // Annale restée sur l'ordinateur d'un compte gratuit (lib/originals) : la page qui l'ouvre en local.
+  const local = await localPreviewUrl(course, `refs/${file}`);
+  if (local) return new NextResponse(null, { status: 302, headers: { location: local, "cache-control": "private, no-store" } });
+  return new NextResponse("Not found", { status: 404 });
 }

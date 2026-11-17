@@ -89,3 +89,18 @@ export async function forgetOriginal(path: string): Promise<void> {
   await ensureOriginalsSchema();
   await q.run(`DELETE FROM local_originals WHERE path = ?`, path);
 }
+
+/**
+ * Lien vers un aperçu dont le fichier n'est plus sur le serveur : la page qui l'ouvre depuis
+ * l'ordinateur (app/sources/locale), ou null si ce n'est pas un original resté en local. Un lien
+ * ancien au préfixe périmé (`slides/` pour `lectures/`) est retrouvé par son nom, comme /csrc.
+ */
+export async function localPreviewUrl(course: string, coursePath: string): Promise<string | null> {
+  let row = await localOriginal(coursePath);
+  if (!row) {
+    const base = coursePath.split("/").pop()?.toLowerCase();
+    row = (await localOriginals("local")).find((o) => o.path.split("/").pop()?.toLowerCase() === base) ?? null;
+  }
+  if (!row || row.state !== "local") return null;
+  return `/sources/locale?course=${encodeURIComponent(course)}&p=${encodeURIComponent(row.path)}`;
+}
