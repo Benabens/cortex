@@ -1,16 +1,22 @@
 import styles from "@/app/secondary.module.css";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { CourseForm } from "@/components/cours/CourseForm";
+import { getT } from "@/lib/i18n/server";
+import type { Metadata } from "next";
 
-export const metadata = { title: "Créer un cours · cortex" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT("courses");
+  return { title: t("newMetaTitle") };
+}
 
-export default function NouveauCoursPage() {
+export default async function NouveauCoursPage() {
+  const t = await getT("courses");
   return (
     <div className={styles.page}>
       <PageHeader
         context={false}
-        title="Créer un cours"
-        description="Une matière, ses annales, et Cortex apprend à générer ses examens."
+        title={t("newTitle")}
+        description={t("newDescription")}
       />
       <div className="w-full max-w-4xl">
         <CourseForm />
