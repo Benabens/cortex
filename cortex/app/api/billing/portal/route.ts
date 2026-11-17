@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { billingEnabled, getSubscription } from "@/lib/billing/credits";
 import { useUser } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
@@ -15,14 +16,14 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: NextRequest) {
   useUser(req);
-  if (!billingEnabled()) return NextResponse.json({ error: "Facturation désactivée (BILLING_ENABLED)." }, { status: 501 });
+  if (!billingEnabled()) return apiError(req, "billing_disabled", 501);
   const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) return NextResponse.json({ error: "STRIPE_SECRET_KEY manquante." }, { status: 501 });
+  if (!key) return apiError(req, "stripe_secret_key_missing", 501);
   const origin = publicOrigin();
-  if (!origin) return NextResponse.json({ error: "AUTH_URL manquante." }, { status: 500 });
+  if (!origin) return apiError(req, "auth_url_missing", 500);
 
   const sub = await getSubscription();
-  if (!sub?.customer_id) return NextResponse.json({ error: "Aucun abonnement à gérer." }, { status: 400 });
+  if (!sub?.customer_id) return apiError(req, "no_subscription", 400);
   const stripe = stripeClient(key);
   // La configuration de portail PROPRE à Cortex si elle existe (compte Stripe
   // partagé : celle par défaut du compte n'est pas forcément la nôtre, et peut

@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { handleStripeEvent } from "@/lib/billing/stripe-events";
 import { readText, withBodyLimit } from "@/lib/upload-limit";
 import { NextRequest, NextResponse } from "next/server";
@@ -28,11 +29,11 @@ function looksSentByStripe(sig: string): boolean {
 export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   const key = process.env.STRIPE_SECRET_KEY;
-  if (!secret || !key) return NextResponse.json({ error: "Stripe non configuré." }, { status: 501 });
+  if (!secret || !key) return apiError(req, "stripe_not_configured", 501);
 
   const payload = await readText(req); // corps BRUT — indispensable à la vérification
   const sig = req.headers.get("stripe-signature");
-  if (!sig) return NextResponse.json({ error: "Signature absente." }, { status: 400 });
+  if (!sig) return apiError(req, "stripe_signature_missing", 400);
 
   let event: Stripe.Event;
   const stripe = stripeClient(key);
@@ -45,11 +46,11 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     if (looksSentByStripe(sig)) {
       captureErrorThrottled("billing.webhook_signature", new Error("Webhook Stripe : signature invalide (STRIPE_WEBHOOK_SECRET ?)"), { area: "billing", step: "webhook_signature" });
     }
-    return NextResponse.json({ error: "Signature invalide." }, { status: 400 });
+    return apiError(req, "stripe_signature_invalid", 400);
   }
   if (!livemodeMatchesKey(event, key)) {
     captureErrorThrottled("billing.webhook_livemode", new Error("Webhook Stripe : livemode de l'événement incohérent avec la clé"), { area: "billing", step: "webhook_livemode", event_type: event.type });
-    return NextResponse.json({ error: "livemode de l'événement incohérent avec la clé." }, { status: 400 });
+    return apiError(req, "stripe_livemode_mismatch", 400);
   }
 
   try {
@@ -89,6 +90,6 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     // Stripe réessaie pendant 3 jours, puis abandonne : un paiement non crédité doit se voir
     // avant. Étiquettes techniques seulement ; un id Stripe cité par le message est masqué (redactMessage).
     captureError(e, { area: "billing", step: "webhook", event_type: event.type });
-    return NextResponse.json({ error: e instanceof Error ? e.message.slice(0, 200) : "Erreur de traitement." }, { status: 500 });
+    return apiError(req, "stripe_webhook_processing_failed", 500);
   }
 });

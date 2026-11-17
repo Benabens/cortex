@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { authRun } from "@/db/auth-store";
 import { currentUser } from "@/db/context";
 import { nowStr } from "@/db/q";
@@ -24,7 +25,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const body = (await readJson(req, {})) as { version?: unknown };
   const version = String(body.version ?? "").trim();
   if (!version || version !== termsVersion()) {
-    return NextResponse.json({ error: `Version des conditions inattendue (courante : ${termsVersion()}).` }, { status: 400 });
+    return apiError(req, { code: "terms_version_unexpected", params: { version: termsVersion() } }, 400);
   }
   const t = nowStr();
   await authRun(
