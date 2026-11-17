@@ -12,6 +12,9 @@ import type { BenchItem, BenchRun, PdfCheck } from "./types";
  */
 
 const strip = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+/** LaTeX brut (exam_questions.statement_html d'un examen écrit) : rien à dé-baliser — un « < » de code
+ *  ou d'inégalité n'ouvre pas une balise (banc du 17/11 : sous-questions entières emportées). */
+const flat = (tex: string) => tex.replace(/\s+/g, " ").trim();
 
 /** Identifiants des « chapitres » tirés des supports (cours sans plan) : hors de portée des vrais plan_chapters.id. */
 const SOURCE_CHAPTER = 1_000_000;
@@ -93,7 +96,7 @@ export async function readExam(examId: number): Promise<{ exam: BenchRun["exam"]
   const rows = await q.all<{ statement_html: string; solution_html: string; concept: string | null }>(`SELECT statement_html, solution_html, concept FROM exam_questions WHERE exam_id = ? ORDER BY id`, examId).catch(() => []);
   const file = row?.html_path ? path.join(examsDir(), path.basename(row.html_path)) : null;
   return {
-    exam: { id: examId, kind: "exercises", items: rows.map((r, i) => ({ idx: i, kind: "exercise" as const, topic: r.concept, stem: strip(r.statement_html ?? ""), solution: strip(r.solution_html ?? "") })) },
+    exam: { id: examId, kind: "exercises", items: rows.map((r, i) => ({ idx: i, kind: "exercise" as const, topic: r.concept, stem: flat(r.statement_html ?? ""), solution: flat(r.solution_html ?? "") })) },
     render: {
       statement: await pdfCheck(row?.html_path), corrige: await pdfCheck(corrige(row?.html_path)),
       web: { ok: !!file && fs.existsSync(file) && fs.statSync(file).size > 0, items: rows.length },
