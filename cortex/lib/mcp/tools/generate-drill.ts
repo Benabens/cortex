@@ -8,7 +8,7 @@ import { runAssist } from "../assist";
 import { clip, htmlToText } from "../content";
 import { courseLabel } from "../courses";
 import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, generationStatus, quoteSchema, quoteSummary } from "../schemas";
-import { defineTool, pendingResult, SPENDING_HINTS, ToolError } from "../tool";
+import { defineTool, pendingResult, SPENDING_HINTS, ToolError, paidCall } from "../tool";
 
 const output = z.object({
   status: generationStatus,
@@ -36,10 +36,9 @@ export default defineTool({
   name: "generate_drill",
   title: "Generate a practice question",
   description:
-    "Generate ONE exam-style practice question on a concept, with five progressive hints and a worked solution, in the style of the course's real exams. " +
-    "Without a concept it targets the student's most serious weak point. Costs credits (0.1 by default) and one daily assistance: " +
-    "the first call returns the exact cost and a confirmation_token without spending anything; " +
-    "ask the user in the conversation and call again with the same arguments plus confirmation_token ONLY after they explicitly approved (nothing to confirm when nothing is charged). Takes up to a few minutes.",
+    "Generates ONE exam-style practice question on a concept, in the style of the course's real exams, with five progressive hints and a worked solution. " +
+    "Without a concept, it targets the student's most serious weak point. Takes up to a few minutes. " +
+    paidCall("assistance"),
   kind: "generate",
   annotations: SPENDING_HINTS,
   userSummary: "Génère une question d’entraînement, avec indices et corrigé.",
