@@ -371,7 +371,7 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
    | Produit / prix | Suggestion | lookup_key |
    |---|---|---|
    | Cortex Pro — mensuel (récurrent) | 14,90 €/mois | `cortex_pro_monthly` |
-   | Cortex Pro — annuel (récurrent) | 119 €/an | `cortex_pro_yearly` |
+   | Cortex Pro — annuel (récurrent) | 149 €/an | `cortex_pro_yearly` |
    | Pack de 10 crédits (paiement unique) | 9 € | `cortex_credits_10` |
    Pro = 20 crédits par mois, non reportables (`SUBSCRIPTION_MONTHLY_CREDITS`),
    consommés avant les crédits achetés ; le pack est permanent. Active aussi le

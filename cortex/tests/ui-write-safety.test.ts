@@ -53,7 +53,7 @@ const base = {
   quotas: { gen: null, assist: null }, transactions: [],
   offers: [
     { plan: "pro_monthly", kind: "subscription", label: "Pro — mensuel", credits: 20, interval: "month", price: { amount: 14.9, currency: "EUR" } },
-    { plan: "pro_yearly", kind: "subscription", label: "Pro — annuel", credits: 20, interval: "year", price: { amount: 119, currency: "EUR" } },
+    { plan: "pro_yearly", kind: "subscription", label: "Pro — annuel", credits: 20, interval: "year", price: { amount: 149, currency: "EUR" } },
     { plan: "credits_10", kind: "pack", label: "Pack de 10 crédits", credits: 10, interval: null, price: { amount: 9, currency: "EUR" } },
   ],
 };

@@ -27,7 +27,7 @@ const base = (over: Partial<Props["data"]> = {}): Props["data"] => ({
   ],
   offers: [
     { plan: "pro_monthly", kind: "subscription", label: "Pro — mensuel", credits: 20, interval: "month", price: { amount: 14.9, currency: "EUR" } },
-    { plan: "pro_yearly", kind: "subscription", label: "Pro — annuel", credits: 20, interval: "year", price: { amount: 119, currency: "EUR" } },
+    { plan: "pro_yearly", kind: "subscription", label: "Pro — annuel", credits: 20, interval: "year", price: { amount: 149, currency: "EUR" } },
     { plan: "credits_10", kind: "pack", label: "Pack de 10 crédits", credits: 10, interval: null, price: { amount: 9, currency: "EUR" } },
   ],
   ...over,
@@ -53,8 +53,8 @@ test("compte sans abonnement, CGV acceptées : consentement par offre avant acti
   assert.match(html, /Aucun abonnement/);
   // fr-FR : virgule décimale, pas de décimales inutiles, espace insécable avant €.
   assert.match(html, /14,90\u00a0€ \/ mois/);
-  assert.ok(!/14\.90|119[.,]00|(?<![0-9])9[.,]00/.test(html), "aucun format anglo-saxon ni décimales inutiles");
-  assert.match(html, /119\u00a0€ \/ an/);
+  assert.ok(!/14\.90|149[.,]00|(?<![0-9])9[.,]00/.test(html), "aucun format anglo-saxon ni décimales inutiles");
+  assert.match(html, /149\u00a0€ \/ an/);
   assert.match(html, /(?<![0-9,])9\u00a0€/);
   assert.equal(buttons(html).filter(isDisabled).length, 3, "chaque achat attend son consentement propre");
   assert.match(html, /perdre mon droit de rétractation dès leur première utilisation/);
