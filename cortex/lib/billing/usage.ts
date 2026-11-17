@@ -141,6 +141,8 @@ export type UsageEstimate = {
   callSite?: string | null;
   jobId?: string | null;
   attempt?: number;
+  /** Réservation débitée que l'appel consomme (plafond par réservation, crédits rendus après dépense). */
+  creditRef?: string | null;
 };
 
 /**
@@ -161,10 +163,10 @@ export async function openUsage(u: UsageEstimate): Promise<number | null> {
     const cost = paid ? estimateCostUsd(u.model, u.tokensIn, u.tokensOut) : 0;
     const id = await authInsert(
       `INSERT INTO llm_usage
-         (user_id, course, provider, model, tokens_in, tokens_out, cost_usd, rate_in_per_m, rate_out_per_m, estimated, job_id, call_site, attempt, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         (user_id, course, provider, model, tokens_in, tokens_out, cost_usd, rate_in_per_m, rate_out_per_m, estimated, job_id, call_site, attempt, credit_ref, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       currentUser(), currentCourse(), u.provider, u.model, u.tokensIn, u.tokensOut,
-      cost, rate.inPerM, rate.outPerM, 1, u.jobId ?? null, u.callSite ?? null, u.attempt ?? null, nowStr(),
+      cost, rate.inPerM, rate.outPerM, 1, u.jobId ?? null, u.callSite ?? null, u.attempt ?? null, u.creditRef ?? null, nowStr(),
     );
     _spendCache = null;
     return id || null;

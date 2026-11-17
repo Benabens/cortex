@@ -73,9 +73,9 @@ async function fail(msg: string): Promise<never> {
     // L'envoi est asynchrone et le worker sort juste après : sans attente, l'erreur partait avec lui.
     await flushErrorTracking();
   } catch {}
-  // Un job en ÉCHEC n'a rien livré : REMBOURSÉ en entier, même après des appels
-  // payants (idempotent — ref refund:job:…, et seulement si le débit a eu lieu).
-  // No-op sans BILLING_ENABLED.
+  // Un job en ÉCHEC n'a rien livré : REMBOURSÉ en entier (idempotent — ref
+  // refund:job:…, et seulement si le débit a eu lieu) ; après des appels payants,
+  // en crédits offerts, que le budget lié au revenu borne. No-op sans BILLING_ENABLED.
   try {
     const { refundJobCredits } = await import("../lib/jobs");
     const { fmtCreditsBack } = await import("../lib/billing/credits");

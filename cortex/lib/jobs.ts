@@ -615,11 +615,11 @@ async function qcmDelivery(jobId: number): Promise<{ produced: number; requested
 /**
  * Rend les crédits d'un job qui ne produira RIEN. Idempotent et seulement-si-
  * débité (cf. credits.ts). No-op sans facturation. Rend les centièmes rendus.
- *  - "failed" (échec définitif, zombie épuisé) : rendu EN ENTIER, même si des
- *    appels ont coûté — l'utilisateur n'a rien reçu, l'échec est le nôtre
- *    (réponse illisible, fournisseur en panne). L'abus reste borné : le quota
- *    quotidien de générations n'est pas rendu, et la dépense par compte et par
- *    jour est plafonnée en amont (lib/llm, assertSpendCap). Sauf un examen QCM
+ *  - "failed" (échec définitif, zombie épuisé) : rendu EN ENTIER — l'utilisateur
+ *    n'a rien reçu, l'échec est le nôtre (réponse illisible, fournisseur en panne).
+ *    Si des appels ont déjà coûté, les crédits reviennent OFFERTS (credits.ts) :
+ *    la dépense reste comptée et le budget lié au revenu borne la boucle « échec
+ *    → remboursement → relance » (audit fuites B1). Sauf un examen QCM
  *    déjà livré (worker mort ou exception après onExamReady) : seul le manque
  *    est rendu, au prorata des questions commandées, comme une livraison incomplète.
  *  - "canceled" (annulation par l'utilisateur) : rendu SEULEMENT si le job n'a
@@ -631,6 +631,8 @@ export async function refundJobCredits(job: Pick<Job, "id" | "type">, why: "fail
   try {
     const { billingEnabled, refundGeneration, fmtCreditsBack } = await import("@/lib/billing/credits");
     if (!billingEnabled()) return 0;
+    // Dépense par id de job : couvre aussi un job d'avant `llm_usage.credit_ref`.
+    const spent = await jobLlmCostUsd(currentUser(), currentCourse(), job.id);
     if (why === "failed" && (job.type === "qcm" || job.type === "exam")) {
       const delivered = await qcmDelivery(job.id);
       if (delivered && delivered.requested > 0) {
@@ -639,21 +641,20 @@ export async function refundJobCredits(job: Pick<Job, "id" | "type">, why: "fail
           await logJob(job.id, `Crédits conservés : les ${delivered.produced} questions commandées étaient livrées avant l'échec.`).catch(() => {});
           return 0;
         }
-        const back = await refundGeneration(job.type, await jobCreditRef(job.id), currentUser(), missing / delivered.requested);
+        const back = await refundGeneration(job.type, await jobCreditRef(job.id), currentUser(), missing / delivered.requested, undefined, { afterSpend: spent > 0 });
         if (back > 0) {
           await logJob(job.id, `${fmtCreditsBack(back)} : ${delivered.produced} questions sur ${delivered.requested} livrées avant l'échec.`).catch(() => {});
         }
         return back;
       }
     }
-    const spent = await jobLlmCostUsd(currentUser(), currentCourse(), job.id);
     if (why === "canceled" && spent > 0) {
       await logJob(job.id, `Crédits conservés : le job a déjà coûté ${spent.toFixed(3)} $ d'appels au modèle.`).catch(() => {});
       return 0;
     }
-    const back = await refundGeneration(job.type, await jobCreditRef(job.id));
+    const back = await refundGeneration(job.type, await jobCreditRef(job.id), currentUser(), 1, undefined, { afterSpend: spent > 0 });
     if (back > 0) {
-      await logJob(job.id, `${fmtCreditsBack(back)} : le job n'a rien produit${spent > 0 ? `, les ${spent.toFixed(3)} $ d'appels au modèle sont à notre charge` : ""}.`).catch(() => {});
+      await logJob(job.id, `${fmtCreditsBack(back)} : le job n'a rien produit${spent > 0 ? ` après ${spent.toFixed(3)} $ d'appels au modèle, crédits rendus offerts` : ""}.`).catch(() => {});
     }
     return back;
   } catch { return 0; /* best-effort : jamais bloquant */ }
@@ -674,7 +675,8 @@ export async function settleShortfall(job: Pick<Job, "id" | "type">, produced: n
   let notice = what;
   try {
     const { billingEnabled, refundGeneration, fmtCreditsBack } = await import("@/lib/billing/credits");
-    const back = billingEnabled() ? await refundGeneration(job.type, await jobCreditRef(job.id), currentUser(), missing / requested) : 0;
+    // Livré en partie : le modèle a travaillé, la part rendue est offerte (credits.ts).
+    const back = billingEnabled() ? await refundGeneration(job.type, await jobCreditRef(job.id), currentUser(), missing / requested, undefined, { afterSpend: true }) : 0;
     if (back > 0) notice = `${what} : ${fmtCreditsBack(back)}`;
   } catch { /* best-effort : le message reste dû */ }
   await logJob(job.id, `⚠ ${notice}.`).catch(() => {});
@@ -687,7 +689,7 @@ export async function settleShortfall(job: Pick<Job, "id" | "type">, produced: n
  * et un remboursement inconditionnel offrirait des générations illimitées
  * (générer à 95 %, annuler, recommencer). Filet supplémentaire : quel que soit
  * l'avancement, refundJobCredits ne rend rien d'une annulation si le job a déjà
- * coûté au fournisseur (un ÉCHEC, lui, est rendu : rien n'a été livré).
+ * coûté au fournisseur (un ÉCHEC, lui, est rendu, en crédits offerts après dépense).
  */
 const CANCEL_REFUND_MAX_PROGRESS = 10;
 

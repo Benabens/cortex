@@ -36,6 +36,15 @@ export async function reservationExists(ref: string | null | undefined, userId =
   return row?.user_id === userId;
 }
 
+/**
+ * Réservation que l'appel en cours consomme : celle d'une aide (assistCall) ou le
+ * débit du job courant. null : propriétaire hors réservation, ou appel sans débit.
+ */
+export function currentLlmProof(): LlmAuthorization | null {
+  const job = currentJob();
+  return authorization.getStore() ?? (job?.creditRef ? { kind: "job", ref: job.creditRef } : null);
+}
+
 /** Défense ultime, exécutée avant cache, compteur de dépense et provider. */
 export async function assertLlmAuthorized(): Promise<void> {
   // Les tests de moteur appellent volontairement le point d'entrée directement
@@ -45,8 +54,6 @@ export async function assertLlmAuthorized(): Promise<void> {
   const user = currentUser();
   if (await isOwner(user)) return;
 
-  const explicit = authorization.getStore();
-  const job = currentJob();
-  const proof = explicit ?? (job?.creditRef ? { kind: "job" as const, ref: job.creditRef } : null);
+  const proof = currentLlmProof();
   if (!proof || !(await reservationExists(proof.ref, user))) throw new LlmPaymentRequiredError();
 }
