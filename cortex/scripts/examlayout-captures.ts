@@ -20,6 +20,16 @@ process.env.CORTEX_DATA_DIR = path.join(work, "data");
 
 const DPI = "60";
 
+/** L'examen écrit fictif des tests, en français : l'annale française se compare à un énoncé de sa langue. */
+const WRITTEN_FR = {
+  title: "Examen fictif",
+  duration_min: 120,
+  questions: [
+    { category: "General", concept: "Suite récurrente", points: 30, statement_tex: String.raw`\subq{1.1}{Forme close}{30} Résoudre $u_{n+1} = 2u_n + 1$, $u_0 = 0$.\rulelines{4}`, solution_tex: String.raw`$u_n = 2^n - 1$.` },
+    { category: "General", concept: "File d'attente imaginaire", points: 20, statement_tex: String.raw`\subq{2.1}{Débit}{20} Une file sert 3 tâches par seconde. Combien en 7 s ?\rulelines{3}`, solution_tex: String.raw`21 tâches.` },
+  ],
+};
+
 function png(pdf: string, prefix: string): void {
   execFileSync("pdftoppm", ["-png", "-r", DPI, "-f", "1", "-l", "2", pdf, prefix]);
 }
@@ -35,9 +45,9 @@ async function main(): Promise<void> {
   const ids = await createGabaritCourses();
   fs.mkdirSync(out, { recursive: true });
   const cases = [
-    { name: "us-mcq", course: ids.neutralEn, language: "en" as const, form: "qcm" as const },
-    { name: "uk-essay", course: ids.neutralEn, language: "en" as const, form: "written" as const },
-    { name: "fr-examen", course: ids.neutralFr, language: "fr" as const, form: "written" as const },
+    { name: "us-mcq", course: ids.neutralEn, language: "en" as const, form: "qcm" as const, spec: WRITTEN_SPEC },
+    { name: "uk-essay", course: ids.neutralEn, language: "en" as const, form: "written" as const, spec: WRITTEN_SPEC },
+    { name: "fr-examen", course: ids.neutralFr, language: "fr" as const, form: "written" as const, spec: WRITTEN_FR },
   ];
   for (const c of cases) {
     const tex = path.join(__dirname, "..", "tests", "fixtures", "annales", `${c.name}.tex`);
@@ -49,7 +59,7 @@ async function main(): Promise<void> {
     fs.writeFileSync(path.join(out, `${c.name}-releve.json`), `${JSON.stringify(surveyed, null, 2)}\n`);
     await runWithCourse(c.course, async () => {
       const layout = annaleLayout(surveyed, c.language);
-      const src = c.form === "qcm" ? await renderQcmExamTex(QCM_DATA, DATE, false, layout) : await renderExamTex(WRITTEN_SPEC as never, DATE, false, layout);
+      const src = c.form === "qcm" ? await renderQcmExamTex(QCM_DATA, DATE, false, layout) : await renderExamTex(c.spec as never, DATE, false, layout);
       const base = `cortex-${c.name}`;
       fs.mkdirSync(examsDir(), { recursive: true });
       fs.writeFileSync(path.join(examsDir(), `${base}.tex`), src);

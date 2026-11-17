@@ -1,14 +1,11 @@
 "use client";
 
-import { FileText, Globe } from "lucide-react";
+import { FileText } from "lucide-react";
 import { Segmented } from "@/components/ui/Segmented";
-import { useExamOutput } from "@/lib/ux/exam-output";
+import { examOutputOptions, useExamOutput } from "@/lib/ux/exam-output";
 import styles from "./exam.module.css";
 
-const OUTPUTS = [
-  { value: "site" as const, label: "Sur le site", Icon: Globe },
-  { value: "pdf" as const, label: "PDF", Icon: FileText },
-];
+const OUTPUTS = examOutputOptions();
 
 /**
  * Présentation D2 de l’examen existant, sans ajouter de parcours ni de bilan. Avec un PDF, la

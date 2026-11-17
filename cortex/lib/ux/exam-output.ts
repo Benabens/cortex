@@ -1,3 +1,4 @@
+import { FileText, Globe } from "lucide-react";
 import { useCallback, useSyncExternalStore } from "react";
 
 /**
@@ -9,6 +10,16 @@ import { useCallback, useSyncExternalStore } from "react";
 export type ExamOutput = "site" | "pdf";
 
 const KEY = "cortex.examOutput";
+/** Changement dans cet onglet (l'événement « storage » ne prévient que les autres), comme lib/ux/use-theme. */
+const CHANGE = "cortex:exam-output";
+
+/** Les deux sorties, pour un Segmented ; `pdfLabel` : « PDF » dans l'en-tête de l'examen, plus explicite au compositeur. */
+export function examOutputOptions(pdfLabel = "PDF") {
+  return [
+    { value: "site" as const, label: "Sur le site", Icon: Globe },
+    { value: "pdf" as const, label: pdfLabel, Icon: FileText },
+  ];
+}
 
 /** Le choix retenu (« site » par défaut, ou si le navigateur refuse le stockage). */
 export function readExamOutput(): ExamOutput {
@@ -27,14 +38,12 @@ export function writeExamOutput(o: ExamOutput): void {
   }
 }
 
-const listeners = new Set<() => void>();
-
-function subscribe(cb: () => void): () => void {
-  listeners.add(cb);
-  window.addEventListener("storage", cb);
+function subscribe(onChange: () => void): () => void {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(CHANGE, onChange);
   return () => {
-    listeners.delete(cb);
-    window.removeEventListener("storage", cb);
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(CHANGE, onChange);
   };
 }
 
@@ -62,7 +71,7 @@ export function useExamOutput(fromUrl = false): [ExamOutput, (o: ExamOutput) => 
         window.history.replaceState(window.history.state, "", url);
       }
     }
-    listeners.forEach((l) => l());
+    window.dispatchEvent(new Event(CHANGE));
   }, [fromUrl]);
   return [output, choose];
 }

@@ -2,7 +2,7 @@
 
 import styles from "@/app/secondary.module.css";
 import { useEffect, useRef, useState } from "react";
-import { Play, Check, AlertTriangle, Clock3, SlidersHorizontal, Target, ChevronDown, FileText, Globe } from "lucide-react";
+import { Play, Check, AlertTriangle, Clock3, SlidersHorizontal, Target, ChevronDown } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { WeightBar } from "@/components/viz/WeightBar";
@@ -12,16 +12,16 @@ import { cn } from "@/lib/ux/cn";
 import { PaywallNotice } from "@/components/billing/PaywallNotice";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
 import { Segmented } from "@/components/ui/Segmented";
-import { useExamOutput, type ExamOutput } from "@/lib/ux/exam-output";
+import { examOutputOptions, useExamOutput, type ExamOutput } from "@/lib/ux/exam-output";
 
 const V = "var(--color-accent)";
 
-const OUTPUTS = [
-  { value: "site" as const, label: "Sur le site", Icon: Globe },
-  { value: "pdf" as const, label: "PDF de l’annale", Icon: FileText },
-];
+const OUTPUTS = examOutputOptions("PDF de l’annale");
 
-/** Où ouvrir l'examen fini : sa page en ligne, ou son PDF (même page, sortie PDF ; un écrit n'a que son PDF). */
+/**
+ * Où ouvrir l'examen fini : QCM et questions composées (`/mock/N`) dans la sortie choisie ; un
+ * examen écrit (resultPath = son fichier, scripts/run-job) n'a que son PDF, ouvert tel quel.
+ */
 function examHref(resultPath: string | null, output: ExamOutput, courseId: string | null): string | null {
   if (!resultPath) return null;
   if (!resultPath.startsWith("/mock/")) return resultPath;
@@ -244,7 +244,7 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
               <Check className="size-4" strokeWidth={2.5} /> {doneMsg}
               {doneHref && (
                 <a href={doneHref} className="ml-1 font-medium text-ink-1 underline underline-offset-2">
-                  {output === "pdf" ? "Ouvrir le PDF" : "Ouvrir l’examen"}
+                  {output === "pdf" || !doneHref.startsWith("/mock/") ? "Ouvrir le PDF" : "Ouvrir l’examen"}
                 </a>
               )}
             </span>
