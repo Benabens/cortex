@@ -3,6 +3,8 @@ import { currentUser } from "@/db/context";
 import { authAll, authGet, authRun, authSqlite, authTx, type AuthTx } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
+import { requestIp } from "@/lib/client-ip";
+import { claimFreeOffer } from "./free-offer";
 
 /**
  * CRÉDITS (modèle payant).
@@ -165,12 +167,20 @@ export async function addTransaction(
   }
 }
 
-/** Crédit d'inscription optionnel — crédité UNE fois (idempotent par ref). */
+/**
+ * Crédit d'inscription optionnel — crédité UNE fois (idempotent par ref), et à un
+ * seul compte par personne (lib/billing/free-offer : alias, adresse jetable, IP).
+ */
 const signupSeen = new Set<string>();
 export async function ensureSignupCredits(userId: string): Promise<void> {
   if (!billingEnabled() || signupSeen.has(userId)) return;
   const free = toCenti(envNum("SIGNUP_FREE_CREDITS", 0));
-  if (free > 0) await addTransaction(userId, free, "signup", `signup:${userId}`, { offered: true });
+  if (free > 0) {
+    const offer = await claimFreeOffer(userId, { ip: await requestIp() });
+    if (offer.ok) await addTransaction(userId, free, "signup", `signup:${userId}`, { offered: true });
+    // Refus par IP : pas définitif, la question se repose à la prochaine visite.
+    else if (offer.reason === "ip_day") return;
+  }
   signupSeen.add(userId);
 }
 

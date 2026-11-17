@@ -3,7 +3,8 @@ import type { Adapter, AdapterAccount, AdapterUser, VerificationToken } from "ne
 import crypto from "node:crypto";
 import { authGet, authRun } from "@/db/auth-store";
 import { authProviders } from "@/lib/auth-providers";
-import { clientIp } from "@/lib/client-ip";
+import { isDisposableEmail } from "@/lib/email-identity";
+import { requestIp } from "@/lib/client-ip";
 import { inviteAllows } from "@/lib/invite";
 import { MAGIC_LINK_REFUSAL_CODE, takeMagicLinkSend } from "@/lib/magic-link-limits";
 import { log } from "@/lib/metrics";
@@ -113,14 +114,20 @@ function cortexAdapter(): Adapter {
 /** Disponibilité des méthodes de connexion (page /login) — source unique : lib/auth-providers. */
 export { e2eTestLoginConfigured, emailLoginConfigured, googleLoginConfigured, reviewLoginConfigured } from "@/lib/auth-providers";
 
-/** IP de la requête en cours (TRUST_PROXY) ; hors requête (tests, scripts) : « direct », jamais bornée. */
-async function requestIp(): Promise<string> {
-  try {
-    const { headers } = await import("next/headers");
-    return clientIp(await headers());
-  } catch {
-    return "direct";
-  }
+
+/** Code d'erreur de /login pour une inscription avec une adresse jetable (message dans app/login/LoginCard). */
+const DISPOSABLE_REFUSAL_CODE = "EmailDisposable";
+
+/**
+ * AUDIT FUITES I8 — une adresse jetable ne crée pas de compte : chaque nouvelle
+ * boîte serait une nouvelle personne pour l'offre gratuite (lib/billing/free-offer).
+ * Un compte qui existe déjà avec une telle adresse se connecte toujours (refuser
+ * l'enfermerait dehors avec ses crédits) ; il ne reçoit simplement pas l'offre.
+ */
+async function disposableSignup(address: string): Promise<boolean> {
+  if (!address || !(await isDisposableEmail(address))) return false;
+  const existing = await authGet<{ id: string }>(`SELECT id FROM users WHERE lower(email) = lower(?)`, address.trim());
+  return !existing;
 }
 
 /** Rappels Auth.js (exportés pour les tests : invitation, coupure de la connexion relecteur). */
@@ -137,7 +144,12 @@ export const authCallbacks = {
    */
   async signIn({ user, profile, account, email }) {
     if (account?.provider === REVIEW_PROVIDER_ID) return true;
-    if (!inviteAllows(user?.email ?? (profile?.email as string | undefined))) return false;
+    const address = user?.email ?? (profile?.email as string | undefined) ?? "";
+    if (!inviteAllows(address)) return false;
+    if (await disposableSignup(address)) {
+      log("info", "auth.disposable_refused", {});
+      return `/login?error=${DISPOSABLE_REFUSAL_CODE}`;
+    }
     if (email?.verificationRequest) {
       const verdict = await takeMagicLinkSend(user?.email ?? "", await requestIp());
       if (!verdict.ok) {

@@ -23,6 +23,8 @@ function errorMessage(code: string): string {
       return "Cette adresse a reçu tous ses liens du jour. Utilise le dernier reçu, ou réessaie demain.";
     case "EmailIp":
       return "Trop de liens demandés depuis ce réseau. Réessaie dans une heure.";
+    case "EmailDisposable":
+      return "Les adresses e-mail jetables ne permettent pas d’ouvrir un compte. Utilise ton adresse habituelle (école, Gmail, Outlook…).";
     case "Configuration":
       return "La connexion est momentanément indisponible. Réessaie dans un instant.";
     default:
