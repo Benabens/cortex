@@ -1,0 +1,37 @@
+{
+  "font": {
+    "family": "serif",
+    "size": 12
+  },
+  "header": {
+    "left": "none",
+    "center": "none",
+    "right": "course"
+  },
+  "footer": {
+    "left": "none",
+    "center": "page",
+    "right": "none"
+  },
+  "numbering": {
+    "prefix": "",
+    "style": "arabic"
+  },
+  "points": "margin",
+  "language": "en",
+  "cover": {
+    "idFields": [
+      {
+        "kind": "studentId",
+        "label": "Candidate number:"
+      },
+      {
+        "kind": "seat",
+        "label": "Desk number:"
+      }
+    ],
+    "instructions": [
+      "Do not turn over this page until instructed to do so."
+    ]
+  }
+}
