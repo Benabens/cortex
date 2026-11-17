@@ -86,12 +86,13 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
       {showUsage && <UsageLine usage={launch.usage} now={launch.now} className="mt-2" />}
       {error && <p role="alert" className="mt-2 text-[12px]" style={{ color: "var(--red-ink)" }}>{error}</p>}
       {check && (
-        <section className="inset mt-3 p-3" aria-label={t("rubricLabel")} lang={language}>
+        <section className="inset mt-3 p-3" aria-label={t("rubricLabel")}>
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <strong className="text-[14px]" style={{ color: "var(--ink)" }}>{t("rubric")}</strong>
             <span className="font-data text-[14px] font-semibold" style={{ color: "var(--accent-ink)" }}>{t("score", { earned: check.score.earned, total: check.score.total })}</span>
           </div>
-          <ul className="mt-3 flex flex-col gap-2">
+          {/* Critères et retour : écrits par la correction dans la langue du cours ; le reste est l'interface. */}
+          <ul className="mt-3 flex flex-col gap-2" lang={language}>
             {check.criteria.map((criterion, index) => (
               <li key={`${criterion.label}-${index}`} className="flex items-start gap-2 text-[12.5px]">
                 <span aria-hidden="true" className="mt-0.5 shrink-0 font-bold" style={{ color: criterion.achieved ? "var(--green-ink)" : "var(--red-ink)" }}>{criterion.achieved ? "✓" : "✗"}</span>
@@ -105,7 +106,7 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
               </li>
             ))}
           </ul>
-          <p className="mt-3 text-[12.5px]" style={{ color: "var(--ink-2)" }}>{check.feedback}</p>
+          <p className="mt-3 text-[12.5px]" style={{ color: "var(--ink-2)" }} lang={language}>{check.feedback}</p>
         </section>
       )}
       {graded && solution && (
