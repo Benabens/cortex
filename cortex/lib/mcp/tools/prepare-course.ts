@@ -5,7 +5,7 @@ import { log } from "@/lib/metrics";
 import { redactMessage } from "@/lib/observability";
 import { courseLabel } from "../courses";
 import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, quoteSchema, quoteSummary } from "../schemas";
-import { codeForStatus, defineTool, pendingResult, SPENDING_HINTS, ToolError } from "../tool";
+import { codeForStatus, defineTool, pendingResult, SPENDING_HINTS, ToolError, paidCall } from "../tool";
 
 const output = z.object({
   status: z.enum(["confirmation_required", "declined", "started", "already_running"]),
@@ -19,11 +19,10 @@ export default defineTool({
   name: "prepare_course",
   title: "Prepare a course",
   description:
-    "Build a course from its materials, like \"Prepare\" in the app: ingests every material, learns the exam format from the past exams, " +
-    "then builds the course plan. Costs credits (2 by default) and one daily generation, like in the app. The first call returns the exact cost and a " +
-    "confirmation_token without spending anything; ask the user in the conversation and call again with the same arguments plus " +
-    "confirmation_token ONLY after they explicitly approved (nothing to confirm when nothing is charged). Then runs in the background for several minutes: track it with get_job_status. " +
-    "Run it again after adding materials to an already prepared course.",
+    "Builds a course from its materials, like \"Prepare\" in the app: ingests every material, learns the exam format from the past exams, " +
+    "then builds the course plan. Running it again after adding materials updates an already prepared course. " +
+    paidCall("generation") +
+    " After confirmation, it runs in the background for several minutes; its progress is read with get_job_status.",
   kind: "write",
   annotations: SPENDING_HINTS,
   userSummary: "Prépare un cours depuis ses supports : format d’examen, puis plan.",

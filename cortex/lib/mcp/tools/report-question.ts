@@ -16,10 +16,10 @@ export default defineTool({
   name: "report_question",
   title: "Report a problem with a generated question",
   description:
-    "Report one question of a mock exam Cortex generated: wrong_answer, off_course (not in the syllabus, or a definition that differs from the course), duplicate, or ambiguous. " +
-    "Identify it by exam_id and the question number shown by get_job_status (multiple-choice questions first, then open ones). Free. " +
-    "The question leaves the student's revisions and is recorded for human review without a paid model call; a refund can follow after confirmation. " +
-    "Use it to pass on a careful review of an exam, one call per faulty question, with the reason in comment.",
+    "Reports one question of a mock exam Cortex generated, with a reason: wrong_answer, off_course (not in the syllabus, or a definition that differs from the course), " +
+    "duplicate or ambiguous, and an optional comment. The question is identified by exam_id and its number as shown by get_job_status " +
+    "(multiple-choice questions first, then open ones); one call reports one question. Free: the question leaves the student's revisions and is recorded " +
+    "for human review, without any paid model call; a refund can follow once the error is confirmed.",
   kind: "write",
   // Retire la question des révisions de l'élève (suppression) ; chaque appel enregistre un signalement.
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },

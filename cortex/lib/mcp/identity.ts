@@ -13,7 +13,7 @@ export const MCP_SERVER_NAME = "cortex";
 export const MCP_REGISTRY_NAME = "com.cortexexam/cortex";
 export const MCP_TITLE = "Cortex";
 /** Version de l'interface publique du connecteur (outils, identité) ; suivie par server.json. */
-export const MCP_SERVER_VERSION = "1.1.0";
+export const MCP_SERVER_VERSION = "1.2.0";
 /** ≤ 100 caractères : plafond du registre officiel et de la carte du serveur. */
 export const MCP_DESCRIPTION = "Mock exams, practice questions and weak points from your own course materials in Cortex.";
 /** Page publique (landing) : à quoi sert le connecteur, comment le brancher. */

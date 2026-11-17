@@ -9,7 +9,7 @@ import { redactMessage } from "@/lib/observability";
 import { clip } from "../content";
 import { courseLabel } from "../courses";
 import { confirmationTokenArg, courseArg, courseRef, courseRefOf, declinedSchema, declinedSummary, generationStatus, quoteSchema, quoteSummary } from "../schemas";
-import { codeForStatus, defineTool, pendingResult, SPENDING_HINTS, ToolError } from "../tool";
+import { codeForStatus, defineTool, pendingResult, SPENDING_HINTS, ToolError, paidCall } from "../tool";
 
 const output = z.object({
   status: generationStatus,
@@ -41,17 +41,17 @@ export default defineTool({
   name: "generate_mock_exam",
   title: "Generate a mock exam",
   description:
-    "Generate a full mock exam in the course's real exam format — multiple choice, exercises, mixed, composite questions (scenario + sub-questions), essay or oral — taken from its past exams, " +
-    "else from the format the student declared (set_exam_format), else from official sample questions or exam instructions found in its materials. " +
-    "If nothing says what the exam looks like, the call fails with format_required: ask the student (type, number of questions, duration) and record it with set_exam_format, " +
-    "or pass format for this exam only. When the student asks for a type for THIS exam (e.g. multiple-choice only), pass format (mcq = multiple-choice questions only): it wins over the course's format, which is only the default. Optionally emphasise a chapter of the course plan (e.g. chapter \"3\") or a free focus: a THEME, never a format " +
-    "(\"20 MCQ\" in focus does not make a multiple-choice exam); 1-2 questions target it, the rest keeps the exam's balance. " +
-    "Costs credits (as in the app: a written exam 2 by default, +1 per 4 exercises beyond 8; a multiple-choice exam by its number of questions) and one daily generation. The first call returns the exact cost and a confirmation_token " +
-    "without spending anything; ask the user in the conversation and call again with the same arguments plus confirmation_token ONLY after they explicitly approved (nothing to confirm when nothing is charged). " +
+    "Generates a full mock exam in the course's real exam format: multiple choice, exercises, mixed, composite questions (scenario + sub-questions), essay or oral. " +
+    "The format comes from the course's past exams, else from the format declared with set_exam_format, else from official sample questions or exam instructions found in its materials; " +
+    "when none of these says what the exam looks like, the call fails with format_required and spends nothing. " +
+    "format sets the type for THIS exam only (mcq = multiple-choice questions only) and takes precedence over the course's format, which is only the default. " +
+    "chapter (from the course plan, e.g. \"3\") or focus adds an emphasis on a THEME, never a format (\"20 MCQ\" in focus does not make a multiple-choice exam): " +
+    "1-2 questions target it, the rest keeps the exam's balance. " +
+    paidCall("generation") +
     // Job 17 (14/11/2026, HUM-285) : 20 QCM ont pris 35 min, hors de l'ancienne annonce (10-20) —
     // élargie plutôt que resserrée tant qu'un examen chargé (beaucoup de questions, doublons à
     // remplacer) n'est pas mesuré sur plusieurs runs réels.
-    "Generation then runs in the background for 10-35 minutes (longer for a large exam): track it with get_job_status.",
+    " After confirmation, the generation runs in the background for 10-35 minutes (longer for a large exam); its progress is read with get_job_status.",
   kind: "generate",
   annotations: SPENDING_HINTS,
   userSummary: "Génère un examen blanc au format de ton vrai examen.",
