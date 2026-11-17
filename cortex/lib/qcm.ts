@@ -2247,7 +2247,10 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
    */
   const review = async (cands: QcmItem[], current: QcmItem[], strictMode = strict): Promise<QcmItem[]> => {
     if (!cands.length) return [];
-    const { audit, dup } = await finalReview(cands, { strict: strictMode, previous: recent.map((x) => x.stem), current: current.map((it) => it.stem), step, facts: shared.facts, programme: programmeLabels });
+    // Les ouvertes déjà construites comptent comme posées (banc rs-mixte du 17/11 : un QCM et
+    // une ouverte sur le même résultat d'impossibilité) : un QCM qui en reprend une part.
+    const openStems = [...openBySlot.values()].map((oq) => plainStatement(oq.statement_tex ?? "")).filter(Boolean);
+    const { audit, dup } = await finalReview(cands, { strict: strictMode, previous: recent.map((x) => x.stem), current: [...current.map((it) => it.stem), ...openStems], step, facts: shared.facts, programme: programmeLabels });
     const out = cands.map((it, i) => (audit ? audit[i] : it));
     dup?.programme.forEach((p, i) => { if (p && out[i]) out[i]!.programmeNotion = p; });
     cands.forEach((it, i) => { if (!out[i]) auditRejected.add(it.stem); });
