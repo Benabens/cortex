@@ -278,7 +278,7 @@ export function SearchExperience() {
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="break-words text-[0.92rem] font-medium text-ink-1">
-                          <span className="sr-only">{t(meta.labelKey)} : </span>
+                          <span className="sr-only">{t("srType", { type: t(meta.labelKey) })}</span>
                           <span lang={language}>{h.title.replace(/\s+—\s+p\.(\d+)$/, ", p. $1")}</span>
                         </div>
                         <div className="line-clamp-2 text-[0.78rem] text-ink-3" lang={language}>

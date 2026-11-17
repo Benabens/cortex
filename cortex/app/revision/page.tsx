@@ -144,7 +144,7 @@ export default function RevisionPage() {
           <div className={styles.toolbar}>
             <Toggle checked={hideDone} onChange={toggleHide} label={t("hideDone")} labelVisible />
             <span style={{ color: "var(--ink-4)" }}>·</span>
-            <span>{t("markedDone", { count: doneTotal })}</span>
+            <span>{t.rich("markedDone", { count: doneTotal, strong: (c) => <strong style={{ color: "var(--ink-2)" }}>{c}</strong> })}</span>
             {doneTotal > 0 && <button className="btn btn-quiet btn-sm" onClick={resetDone}>{t("reset")}</button>}
           </div>
 
@@ -211,7 +211,7 @@ export default function RevisionPage() {
                             <div key={q.id} className={styles.question} style={{ opacity: done[dk] ? 0.7 : 1, transition: "opacity .15s" }}>
                               <div className="flex items-center gap-2 flex-wrap text-[12px] mb-1">
                                 {doneBtn(dk)}
-                                <span className={`tag ${q.kind === "qcm" ? "tag-blue" : "tag-amber"}`}>{q.kind === "qcm" ? "QCM" : t("openKind")}</span>
+                                <span className={`tag ${q.kind === "qcm" ? "tag-blue" : "tag-amber"}`}>{q.kind === "qcm" ? t("qcmKind") : t("openKind")}</span>
                                 {q.verifyMethod === "deterministic" && <span className="tag tag-green" title={t("provedTitle")}>{t("proved")}</span>}
                                 {q.verified === 1 && q.verifyMethod !== "deterministic" && <span className="tag" title={t("verifiedTitle")}>{t("verified")}</span>}
                               </div>

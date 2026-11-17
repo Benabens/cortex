@@ -300,7 +300,8 @@
     "cancel": "Cancel",
     "close": "Close",
     "loading": "Loading",
-    "errorStatus": "Error {status}"
+    "errorStatus": "Error {status}",
+    "percent": "{value}%"
   },
   "login": {
     "title": "Sign in to Cortex",
@@ -463,15 +464,16 @@
     "effortHeld": "you have it at {mastery}/10",
     "notFallen": "In the syllabus, not yet seen in finals, and {state}.",
     "fallenLead": "Appeared ",
-    "fallenStrong": "{count} times",
+    "fallenStrong": "{count, plural, one {# time} other {# times}}",
     "fallenRestWithShare": " in finals, {share}% of questions, and {state}.",
     "fallenRest": " in finals and {state}.",
     "chapterNumber": "Chapter L{number}: {title}.",
     "chapter": "Chapter: {title}.",
-    "fallenRow": "appeared {count} times",
+    "fallenRow": "appeared {count, plural, one {# time} other {# times}}",
     "inSyllabus": "in the syllabus",
     "lectureSpoken": "lecture {number}",
-    "shareSpoken": "{share}% of questions"
+    "shareSpoken": "{share}% of questions",
+    "share": "{share}%"
   },
   "dashboard": {
     "firstTitle": "Start by creating your first subject.",
@@ -924,7 +926,8 @@
     "typeExercise": "Exercises",
     "typeCheatSheet": "Cheat sheets",
     "typeCode": "Code",
-    "typeOther": "Document"
+    "typeOther": "Document",
+    "srType": "{type}: "
   },
   "searchPage": {
     "title": "Search",
@@ -988,10 +991,10 @@
     "title": "Exam composer",
     "composition": "Composition",
     "qcm": "Multiple-choice",
-    "openCount": "{count, plural, one {# open question} other {# open questions}}",
-    "unitExercise": "{count, plural, one {# exercise} other {# exercises}}",
-    "unitTopic": "{count, plural, one {# topic} other {# topics}}",
-    "unitQuestion": "{count, plural, one {# question} other {# questions}}",
+    "openCount": "{count} <unit>{count, plural, one {open question} other {open questions}}</unit>",
+    "unitExercise": "{count} <unit>{count, plural, one {exercise} other {exercises}}</unit>",
+    "unitTopic": "{count} <unit>{count, plural, one {topic} other {topics}}</unit>",
+    "unitQuestion": "{count} <unit>{count, plural, one {question} other {questions}}</unit>",
     "adjust": "Adjust composition",
     "openQuestions": "Open questions",
     "proposed": "suggested: {count}",
@@ -1070,7 +1073,7 @@
     "openBank": "Open-question bank",
     "generatedPlan": "Generated route",
     "hideDone": "Hide completed questions",
-    "markedDone": "{count, plural, one {# question marked done} other {# questions marked done}}",
+    "markedDone": "<strong>{count}</strong> {count, plural, one {question marked done} other {questions marked done}}",
     "reset": "Reset",
     "groupDone": "{done}/{total} done · {state}",
     "openPdf": "Open PDF →",
@@ -1085,7 +1088,8 @@
     "verifiedTitle": "verified (reviewed)",
     "verified": "verified",
     "answer": "Answer:",
-    "solution": "Solution:"
+    "solution": "Solution:",
+    "qcmKind": "MCQ"
   },
   "mockPage": {
     "loadingCourse": "Loading course",

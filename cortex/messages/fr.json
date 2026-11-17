@@ -300,7 +300,8 @@
     "cancel": "Annuler",
     "close": "Fermer",
     "loading": "Chargement",
-    "errorStatus": "Erreur {status}"
+    "errorStatus": "Erreur {status}",
+    "percent": "{value} %"
   },
   "login": {
     "title": "Connexion à Cortex",
@@ -471,7 +472,8 @@
     "fallenRow": "tombé {count} fois",
     "inSyllabus": "au programme",
     "lectureSpoken": "lecture {number}",
-    "shareSpoken": "{share} % des questions"
+    "shareSpoken": "{share} % des questions",
+    "share": "{share} %"
   },
   "dashboard": {
     "firstTitle": "Commence par créer ta première matière.",
@@ -924,7 +926,8 @@
     "typeExercise": "Exercices",
     "typeCheatSheet": "Cheat sheets",
     "typeCode": "Code",
-    "typeOther": "Document"
+    "typeOther": "Document",
+    "srType": "{type} : "
   },
   "searchPage": {
     "title": "Recherche",
@@ -988,10 +991,10 @@
     "title": "Compositeur d’examen",
     "composition": "Composition",
     "qcm": "QCM",
-    "openCount": "{count, plural, one {# ouverte} other {# ouvertes}}",
-    "unitExercise": "{count, plural, one {# exercice} other {# exercices}}",
-    "unitTopic": "{count, plural, one {# sujet} other {# sujets}}",
-    "unitQuestion": "{count, plural, one {# question} other {# questions}}",
+    "openCount": "{count} <unit>{count, plural, one {ouverte} other {ouvertes}}</unit>",
+    "unitExercise": "{count} <unit>{count, plural, one {exercice} other {exercices}}</unit>",
+    "unitTopic": "{count} <unit>{count, plural, one {sujet} other {sujets}}</unit>",
+    "unitQuestion": "{count} <unit>{count, plural, one {question} other {questions}}</unit>",
     "adjust": "Ajuster la composition",
     "openQuestions": "Questions ouvertes",
     "proposed": "proposé : {count}",
@@ -1070,7 +1073,7 @@
     "openBank": "Banque ouvertes",
     "generatedPlan": "Parcours généré",
     "hideDone": "Masquer les questions faites",
-    "markedDone": "{count, plural, one {# question marquée faite} other {# questions marquées faites}}",
+    "markedDone": "<strong>{count}</strong> {count, plural, one {question marquée faite} other {questions marquées faites}}",
     "reset": "Réinitialiser",
     "groupDone": "{done}/{total} faites · {state}",
     "openPdf": "Ouvrir le PDF →",
@@ -1085,7 +1088,8 @@
     "verifiedTitle": "vérifié (relecture)",
     "verified": "vérifié",
     "answer": "Réponse :",
-    "solution": "Corrigé :"
+    "solution": "Corrigé :",
+    "qcmKind": "QCM"
   },
   "mockPage": {
     "loadingCourse": "Chargement du cours",
