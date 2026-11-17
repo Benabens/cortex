@@ -323,6 +323,23 @@ export const TABLES: TableSpec[] = [
     ],
   },
   {
+    // Originaux restés sur l'ordinateur d'un compte gratuit (lib/originals/registry) : de quoi
+    // retrouver le fichier (nom, chemin d'origine, empreinte) et garder son index sans lui.
+    name: "local_originals",
+    cols: [
+      { name: "path", type: "text", pk: true },
+      { name: "name", type: "text", nn: true },
+      { name: "rel", type: "text" },
+      { name: "sha256", type: "text", nn: true },
+      { name: "size", type: "int", nn: true, def: 0 },
+      { name: "origin", type: "text", nn: true, def: "'upload'" },
+      { name: "url", type: "text" },
+      { name: "state", type: "text", nn: true, def: "'transit'" },
+      { name: "arrived_at", type: "text", def: now },
+      { name: "purged_at", type: "text" },
+    ],
+  },
+  {
     name: "format_profile",
     cols: [
       { name: "id", type: "int", pk: true, ai: true },
