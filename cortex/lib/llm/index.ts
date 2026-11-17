@@ -12,7 +12,7 @@ import { withRetry } from "./retry";
 import { nextRank, recordCall, replayCall, tapeMode } from "./tape";
 import { extractJson, JsonOutputError } from "./json";
 import { LlmError, type CompleteRequest, type CompleteResult, type LlmProvider } from "./types";
-import { assertLlmAuthorized } from "./authorization";
+import { assertLlmAuthorized, currentLlmProof } from "./authorization";
 
 /**
  * Point d'entrée UNIQUE des appels LLM de l'app.
@@ -64,6 +64,7 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
   // job courant s'il y en a un (jobs = 1 par process).
   const callSite = callerSite();
   const job = currentJob();
+  const proof = currentLlmProof();
   await assertLlmAuthorized();
   // Banc (scripts/bench) : bande enregistrée ou rejouée ; rejeu = aucun appel, aucun compteur.
   const tape = tapeMode();
@@ -103,7 +104,7 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
         const pending = await openUsage({
           provider: provider.name, model: modelId,
           tokensIn: tokensInEstimate, tokensOut: req.maxTokens ?? 16_000,
-          callSite: siteLabel, jobId: job?.id ?? null, attempt: a,
+          callSite: siteLabel, jobId: job?.id ?? null, attempt: a, creditRef: proof?.ref ?? null,
         });
         const tCall = Date.now();
         try {

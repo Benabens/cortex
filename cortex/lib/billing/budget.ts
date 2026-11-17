@@ -22,9 +22,12 @@ import { accountRevenue, sinceDays, totalRevenue } from "./revenue";
  * (c'est alors le prix qu'il faut corriger, pas le crédit qu'il faut bloquer).
  * Le budget arrête donc les crédits OFFERTS (inscription) au-delà de B.
  *
- * Crédits achetés, dans la poche du ledger : tout sauf les crédits offerts à
- * l'inscription (`signup:*`), consommés EN DERNIER — le client qui a payé 10
- * crédits a toujours ses 10 générations ; ce qui reste au-delà vient du cadeau.
+ * Crédits achetés, dans la poche du ledger : tout sauf les crédits OFFERTS
+ * (OFFERED_LINE : inscription, crédits rendus après une dépense, pack à 0 €),
+ * consommés EN DERNIER — le client qui a payé 10 crédits a toujours ses 10
+ * générations ; ce qui reste au-delà vient du cadeau. Un job échoué après des
+ * appels payants est remboursé en crédits offerts : sa dépense reste comptée et
+ * le budget borne la boucle « échec → remboursement → relance » (audit B1).
  * Les crédits d'abonnement de la période en cours sont achetés.
  *
  * Marge 0,6 par défaut : le coût réel d'un job varie du simple au triple
@@ -117,10 +120,18 @@ export async function accountBudget(userId: string): Promise<AccountBudget | nul
   };
 }
 
+/**
+ * Ligne du ledger qui crédite des crédits OFFERTS : marquée `offered` à l'écriture
+ * (crédits rendus après dépense, pack à 0 €, inscription), ou inscription d'avant la
+ * colonne. Les crédits du relecteur (`review_grant:`) restent achetés : accordés à la
+ * main, bornés par le script (scripts/review-account.ts).
+ */
+export const OFFERED_LINE = `(offered = 1 OR ref LIKE 'signup:%')`;
+
 /** Crédits ACHETÉS disponibles dans le ledger (tout sauf les crédits offerts, consommés en dernier), en centièmes. */
 export async function purchasedLedgerCenti(tx: AuthTx, userId: string, ledgerCenti: number): Promise<number> {
   const r = await tx.get<{ total: number | string | null }>(
-    `SELECT coalesce(sum(${DELTA_CENTI}), 0) total FROM credit_transactions WHERE user_id = ? AND ref LIKE 'signup:%'`, userId,
+    `SELECT coalesce(sum(${DELTA_CENTI}), 0) total FROM credit_transactions WHERE user_id = ? AND ${DELTA_CENTI} > 0 AND ${OFFERED_LINE}`, userId,
   );
   return Math.max(0, ledgerCenti - Math.max(0, Number(r?.total ?? 0)));
 }

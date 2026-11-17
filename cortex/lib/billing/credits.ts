@@ -144,7 +144,7 @@ export function jobRef(userId: string, course: string, jobId: number): string {
 
 /** Écrit une transaction idempotente (ref UNIQUE), `deltaCenti` en centièmes. true = écrite, false = déjà vue. */
 export async function addTransaction(
-  userId: string, deltaCenti: number, reason: string, ref?: string,
+  userId: string, deltaCenti: number, reason: string, ref?: string, opts: { offered?: boolean } = {},
 ): Promise<boolean> {
   await ensureLedgerUnit();
   const delta = Math.round(deltaCenti);
@@ -154,8 +154,8 @@ export async function addTransaction(
   }
   try {
     await authRun(
-      `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, created_at) VALUES (?,?,?,?,'centi',?)`,
-      userId, delta, reason, ref ?? null, nowStr(),
+      `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, offered, created_at) VALUES (?,?,?,?,'centi',?,?)`,
+      userId, delta, reason, ref ?? null, opts.offered ? 1 : null, nowStr(),
     );
     return true;
   } catch (e) {
@@ -170,7 +170,7 @@ const signupSeen = new Set<string>();
 export async function ensureSignupCredits(userId: string): Promise<void> {
   if (!billingEnabled() || signupSeen.has(userId)) return;
   const free = toCenti(envNum("SIGNUP_FREE_CREDITS", 0));
-  if (free > 0) await addTransaction(userId, free, "signup", `signup:${userId}`);
+  if (free > 0) await addTransaction(userId, free, "signup", `signup:${userId}`, { offered: true });
   signupSeen.add(userId);
 }
 
@@ -435,13 +435,23 @@ export function insufficient(balanceCenti: number, costCenti: number, subCenti =
  * chaque part, arrondi au centième SUPÉRIEUR (en faveur de l'utilisateur).
  * Un seul remboursement par débit et par `marker` (défaut : refund:<ref>) — une question
  * signalée a le sien (lib/question-reports). Rend les centièmes rendus.
+ *
+ * APRÈS DÉPENSE (des appels au modèle ont coûté sur cette réservation, ou l'appelant
+ * le sait : `afterSpend`) : tout ce qui est rendu devient des crédits OFFERTS, au
+ * ledger (`offered = 1`), part d'abonnement comprise (ligne `offered:<marker>`, le
+ * solde du mois n'est pas rechargé). Le budget lié au revenu s'applique alors à eux
+ * (lib/billing/budget) : un échec reste remboursé, mais ne rachète plus de calcul
+ * au-delà de ce que le compte a payé (audit fuites B1).
  */
-export async function refundGeneration(kind: string, ref: string, userId = currentUser(), fraction = 1, marker = `refund:${ref}`): Promise<number> {
+export async function refundGeneration(
+  kind: string, ref: string, userId = currentUser(), fraction = 1, marker = `refund:${ref}`, opts: { afterSpend?: boolean } = {},
+): Promise<number> {
   if (!billingEnabled()) return 0;
   const asked = Math.min(1000, Math.max(0, Math.round(fraction * 1000)));
   if (asked <= 0) return 0;
   try {
     if (await authGet<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, marker)) return 0;
+    const offered = opts.afterSpend === true || (await reservationSpendUsd(ref)) > 0;
     const debited = await authGet<{ delta: number; user_id: string; sub_amount: number | null; created_at: string }>(
       `SELECT ${DELTA_CENTI} AS delta, user_id, sub_amount, created_at FROM credit_transactions WHERE ref = ?`, ref,
     );
@@ -474,19 +484,33 @@ export async function refundGeneration(kind: string, ref: string, userId = curre
       const part = (centi: number) => Math.min(centi, Math.ceil(centi * share - 1e-9));
       const purchasedBack = Math.min(part(purchasedDebit), Math.max(0, purchasedDebit - prior.reduce((s, r) => s + Math.max(0, Number(r.delta)), 0)));
       const subBack = part(subDebit);
-      const label = share < 1 ? `remboursement partiel ${kind}` : `remboursement ${kind}`;
+      const label = `${share < 1 ? `remboursement partiel ${kind}` : `remboursement ${kind}`}${offered ? " (crédits offerts)" : ""}`;
       const t = nowStr();
       await tx.run(
-        `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, share_milli, created_at) VALUES (?,?,?,?,'centi',?,?)`,
-        u, purchasedBack, label, marker, Math.round(share * 1000), t,
+        `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, share_milli, offered, created_at) VALUES (?,?,?,?,'centi',?,?,?)`,
+        u, purchasedBack, label, marker, Math.round(share * 1000), offered ? 1 : null, t,
       );
-      if (subOk) await tx.run(`UPDATE subscriptions SET remaining = remaining + ?, updated_at = ? WHERE user_id = ?`, subBack, t, u);
+      if (subOk && offered && subBack > 0) {
+        // Hors de l'espace `refund:` : les parts et plafonds d'un débit ne lisent que la ligne marqueur.
+        await tx.run(
+          `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, offered, created_at) VALUES (?,?,?,?,'centi',1,?)`,
+          u, subBack, `${label}, part d'abonnement`, `offered:${marker}`, t,
+        );
+      } else if (subOk) {
+        await tx.run(`UPDATE subscriptions SET remaining = remaining + ?, updated_at = ? WHERE user_id = ?`, subBack, t, u);
+      }
       return purchasedBack + (subOk ? subBack : 0);
     });
   } catch (e) {
     log("warn", "credits.refund_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
     return 0;
   }
+}
+
+/** Dépense IA déjà engagée sur une réservation : lib/llm écrit `credit_ref` sur chaque appel. */
+export async function reservationSpendUsd(ref: string): Promise<number> {
+  const r = await authGet<{ total: number | string | null }>(`SELECT coalesce(sum(cost_usd), 0) total FROM llm_usage WHERE credit_ref = ?`, ref);
+  return Number(r?.total ?? 0);
 }
 
 /** Historique (API /api/billing). */

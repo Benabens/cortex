@@ -425,9 +425,10 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: strin
   // échec lève (rien de crédité, 500 → Stripe rejoue) ; le ref UNIQUE tranche une course.
   const credited = await authTx(async (tx) => {
     if (await tx.get<{ id: number }>(`SELECT id FROM credit_transactions WHERE ref = ?`, ref)) return false;
+    // Pack à 0 € (code promo de la liste blanche) : crédits OFFERTS, soumis au budget lié au revenu.
     await tx.run(
-      `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, created_at) VALUES (?,?,?,?,'centi',?)`,
-      userId, centi, `achat ${plan ?? "pack"}`, ref, nowStr(),
+      `INSERT INTO credit_transactions (user_id, delta, reason, ref, unit, offered, created_at) VALUES (?,?,?,?,'centi',?,?)`,
+      userId, centi, `achat ${plan ?? "pack"}`, ref, free ? 1 : null, nowStr(),
     );
     await tx.run(
       `INSERT INTO stripe_purchases (session_id, payment_intent, user_id, credits_centi, livemode, created_at) VALUES (?,?,?,?,?,?)
