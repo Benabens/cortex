@@ -26,41 +26,7 @@ const PENDING = new Set<string>([
   "app/compte/WithdrawalForm.tsx",
   "app/compte/assistants/CopyButton.tsx",
   "app/compte/assistants/page.tsx",
-  "app/entrainement/page.tsx",
-  "app/examens/page.tsx",
-  "app/faiblesses/page.tsx",
-  "app/mock/[id]/page.tsx",
   "app/oauth/authorize/page.tsx",
-  "app/programme/page.tsx",
-  "app/qa/QaHarness.tsx",
-  "app/recherche/page.tsx",
-  "app/revision/page.tsx",
-  "app/signalements/page.tsx",
-  "components/entrainement/LabsSeries.tsx",
-  "components/entrainement/TrainingStudio.tsx",
-  "components/exam/BlockExam.tsx",
-  "components/exam/ExamFrame.tsx",
-  "components/exam/OpenResponse.tsx",
-  "components/exam/ReportButton.tsx",
-  "components/examens/ExamComposer.tsx",
-  "components/faiblesses/WeaknessBase.tsx",
-  "components/faiblesses/WeaknessInbox.tsx",
-  "components/programme/ChapterAccordion.tsx",
-  "components/programme/NotionRow.tsx",
-  "components/programme/ProgramExplorer.tsx",
-  "components/programme/ReanalyzeButton.tsx",
-  "components/recherche/SearchExperience.tsx",
-  "components/viz/ForgettingCurve.tsx",
-  "components/viz/Sparkline.tsx",
-  "components/viz/WaffleGrid.tsx",
-  "lib/ux/api.tsx",
-  "lib/ux/mock.ts",
-  "lib/ux/next-up.ts",
-  "lib/ux/program.ts",
-  "lib/ux/search.ts",
-  "lib/ux/training.ts",
-  "lib/ux/types.ts",
-  "lib/ux/weaknesses.ts",
 ]);
 
 const files = uiFiles(ROOT);
@@ -89,6 +55,9 @@ test("le détecteur voit le texte en dur et laisse passer le code", () => {
   ].join("\n"));
   // Un libellé d'attribut lu à l'écran est pris en toute langue ; du code ({label}, "") passe.
   assert.deepEqual(hits.map((h) => h.text), ["Créer le cours", "Fermer la fenêtre", "Bonjour", "Search", "Delete course"]);
+  // Exemption de fichier entier : seulement en première ligne, raison donnée.
+  assert.deepEqual(scanSource("m.ts", "// i18n-allow-file: maquette\nconst a = \"Créer le cours\";"), []);
+  assert.equal(scanSource("m.ts", "const z = 1;\n// i18n-allow-file: maquette\nconst a = \"Créer le cours\";").length, 1);
   assert.ok(looksFrench("Tu as 3 crédits"));
   assert.ok(looksFrench("Pour le cours de demain"));
   assert.ok(!looksFrench("Create the course"));
