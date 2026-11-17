@@ -194,7 +194,7 @@ function contextBlock(ctx: Awaited<ReturnType<typeof gatherTargetedContext>>): s
 
 /** P0+P1 — étudier la vraie page la plus dure + concevoir le piège (avant de rédiger).
  *  Persona du cours + MOULE imposé (ADN) : le piège se conçoit DANS le moule. */
-async function designTrap(a: Archetype, target: string, refImage: string | null, step: StepCb, image?: string | null, note?: string | null, statement?: string | null, mold?: MoldKind | null): Promise<DesignBrief> {
+async function designTrap(a: Archetype, target: string, refImage: string | null, step: StepCb, image?: string | null, note?: string | null, statement?: string | null, mold?: MoldKind | null, asked?: string[]): Promise<DesignBrief> {
   const r = rubricFor(a.id);
   const imgBlock = derivedSourceBlock({ image, note, statement });
   const calBlock = await calibrationBlock(a.id); // async — awaité AVANT le template (sinon "[object Promise]" dans le prompt)
@@ -205,6 +205,7 @@ async function designTrap(a: Archetype, target: string, refImage: string | null,
     ``,
     `Type : ${a.concept} (archétype « ${a.id} », catégorie ${a.category}). Sujet ciblé : « ${target} ».`,
     mold ? `MOULE IMPOSÉ : ${mold} — ${MOLD_DEFS[mold]}. Conçois le piège DANS ce moule (le format de la question doit être celui du moule).` : ``,
+    asked?.length ? `Déjà posé dans ce cours ou dans les QCM de cet examen (ne reprends ni l'énoncé, ni le fait, ni le résultat testé ; un autre fait du sujet ciblé) :\n${asked.map((x) => `  · ${sanitizeCorpus(x).slice(0, 160)}`).join("\n")}` : ``,
     ``,
     trapMenuBlock(a.id),
     ``,
@@ -365,11 +366,11 @@ export async function architectQuestion(
   a: Archetype,
   target: string,
   pts: number,
-  opts: { onStep?: StepCb; maxRounds?: number; image?: string | null; note?: string | null; statement?: string | null; mold?: MoldKind | null } = {}
+  opts: { onStep?: StepCb; maxRounds?: number; image?: string | null; note?: string | null; statement?: string | null; mold?: MoldKind | null; asked?: string[] } = {}
 ): Promise<{ q: ExamQuestion; auditLog: Audit[] }> {
   const step = opts.onStep ?? (() => {});
   const maxRounds = opts.maxRounds ?? 2;
-  const { image, note, statement, mold } = opts;
+  const { image, note, statement, mold, asked } = opts;
   const p = profile();
   const refImage = p.refImageFor(a.category, target || a.concept);
   const ctx = await gatherTargetedContext(target || a.concept);
@@ -379,7 +380,7 @@ export async function architectQuestion(
 
   step(`P0, étude : archétype « ${a.id} » (${a.category}), vraie page ${refImage ?? "—"}${mold ? ` · moule ${mold}` : ""}`, 12);
   // P1 — concevoir le piège (en s'appuyant sur l'image / la consigne si fournie)
-  const design = await designTrap(a, target, refImage, step, image, note, statement, mold);
+  const design = await designTrap(a, target, refImage, step, image, note, statement, mold, asked);
   // P2 — rédiger (avec le contexte corpus pour ancrer le contenu)
   let q = await writeFromDesign(a, target, pts, design, ctx, refImage, step, image, note, statement, mold, withFigures);
 
