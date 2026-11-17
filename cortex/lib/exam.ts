@@ -624,24 +624,12 @@ const ONE_EX_SCHEMA = {
 const exerciseTimeoutMs = () => Number(process.env.CORTEX_BATCH_TIMEOUT_MS) || 600_000;
 
 /** Régénère UN exercice ciblé (même catégorie/barème) en corrigeant le diagnostic — boucle de durcissement. */
-export async function regenerateExercise(q: ExamQuestion, diagnostic: string, opts?: { fresh?: boolean }): Promise<ExamQuestion> {
+export async function regenerateExercise(q: ExamQuestion, diagnostic: string): Promise<ExamQuestion> {
   const p = profile();
-  // Réviser l'exercice rejeté plutôt qu'en concevoir un autre (banc e0 du 17/11 : le diagnostic
-  // arrivait sans l'exercice qu'il décrit, et l'exercice neuf avait ses propres erreurs). Un exercice
-  // hors programme (fresh) est, lui, remplacé.
-  const previous = opts?.fresh ? [] : [
-    ``,
-    `VERSION PRÉCÉDENTE (rejetée) — RÉVISE-LA au lieu d'en écrire une autre : garde ce qui est juste, corrige le PROBLÈME là où il est (dans l'énoncé s'il y est : donnée manquante, prémisse fausse, ambiguïté, barème), puis rends l'énoncé révisé ENTIER et un corrigé COMPLET de toutes les sous-questions.`,
-    `ÉNONCÉ PRÉCÉDENT :`,
-    q.statement_tex,
-    `CORRIGÉ PRÉCÉDENT :`,
-    q.solution_tex,
-  ];
   const prompt = [
     p.directivesBlock(),
     ``,
     ...p.regenLead(q.category, q.concept, q.points, diagnostic, p.refImageFor(q.category, q.concept)),
-    ...previous,
     ``,
     p.latexContract(),
     ``,
