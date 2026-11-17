@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { updateCourseRow, type CoursePatch } from "@/db/courses-store";
 import { InvalidCourseError, declaredFormatColumn, noTexCommand, parseTeachers } from "@/lib/course-create";
@@ -19,22 +20,22 @@ export const dynamic = "force-dynamic";
 async function guard(req: NextRequest, id: string): Promise<{ user: string } | NextResponse> {
   const u = useUser(req);
   await ensureCoursesLoaded();
-  if (!ownsCourse(u, id)) return NextResponse.json({ error: "Cours introuvable." }, { status: 404 });
+  if (!ownsCourse(u, id)) return apiError(req, "course_not_found", 404);
   return { user: u };
 }
 
 function patchOf(body: Record<string, unknown>): CoursePatch {
   const patch: CoursePatch = {};
   const text = (v: unknown, max: number, field: string): string => {
-    if (typeof v !== "string") throw new InvalidCourseError(`Le champ « ${field} » doit être du texte.`);
+    if (typeof v !== "string") throw new InvalidCourseError({ code: "course_field_must_be_text", params: { field } });
     const s = v.trim().replace(/\s+/g, " ");
     noTexCommand(s, `Le champ « ${field} »`);
-    if (s.length > max) throw new InvalidCourseError(`Le champ « ${field} » dépasse ${max} caractères.`);
+    if (s.length > max) throw new InvalidCourseError({ code: "course_field_too_long", params: { field, max } });
     return s;
   };
   if (body.name !== undefined) {
     const name = text(body.name, 80, "nom");
-    if (name.length < 2) throw new InvalidCourseError("Le nom est trop court.");
+    if (name.length < 2) throw new InvalidCourseError({ code: "course_name_too_short" });
     patch.name = name;
     patch.exam_name = name;
   }
@@ -51,14 +52,14 @@ function patchOf(body: Record<string, unknown>): CoursePatch {
   if (body.teachers !== undefined) patch.teachers = JSON.stringify(parseTeachers(body.teachers));
   if (body.examDate !== undefined) {
     const d = text(body.examDate, 10, "date d'examen");
-    if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new InvalidCourseError("Date au format AAAA-MM-JJ attendue.");
+    if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new InvalidCourseError({ code: "course_exam_date_expected" });
     patch.exam_date = d || null;
   }
   // Format d'examen déclaré : objet {kind, questionCount, durationMin, language}, ou null pour l'effacer.
   if (body.examFormat !== undefined) patch.exam_format = declaredFormatColumn(body.examFormat);
   if (body.durationMin !== undefined) {
     const n = Number(body.durationMin);
-    if (!Number.isFinite(n) || n < 15 || n > 600) throw new InvalidCourseError("Durée attendue entre 15 et 600 minutes.");
+    if (!Number.isFinite(n) || n < 15 || n > 600) throw new InvalidCourseError({ code: "course_duration_expected" });
     patch.duration_min = Math.round(n);
   }
   return patch;
@@ -69,17 +70,17 @@ export const PATCH = withBodyLimit(async function PATCH(req: NextRequest, { para
   const g = await guard(req, id);
   if (g instanceof NextResponse) return g;
   const body = await readJson(req, null);
-  if (!body || typeof body !== "object") return NextResponse.json({ error: "Corps JSON attendu." }, { status: 400 });
+  if (!body || typeof body !== "object") return apiError(req, "json_body_expected", 400);
   let patch: CoursePatch;
   try {
     patch = patchOf(body as Record<string, unknown>);
   } catch (e) {
-    if (e instanceof InvalidCourseError) return NextResponse.json({ error: e.message }, { status: 400 });
+    if (e instanceof InvalidCourseError) return apiError(req, e, e.status);
     throw e;
   }
-  if (!Object.keys(patch).length) return NextResponse.json({ error: "Rien à modifier." }, { status: 400 });
+  if (!Object.keys(patch).length) return apiError(req, "nothing_to_update", 400);
   const n = await updateCourseRow(id, g.user, patch);
-  if (!n) return NextResponse.json({ error: "Cours introuvable." }, { status: 404 });
+  if (!n) return apiError(req, "course_not_found", 404);
   await reloadCourses();
   const updated = listCoursesOf(g.user).find((c) => c.id === id);
   return NextResponse.json({ course: updated ? toDto(updated) : null });
@@ -96,6 +97,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (g instanceof NextResponse) return g;
   const { deleteCourseWithData } = await import("@/lib/course-deletion");
   const r = await deleteCourseWithData(g.user, id);
-  if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
+  if (!r.ok) return apiError(req, r, r.status);
   return NextResponse.json({ ok: true, id, dataDeleted: true, residues: r.residues.length });
 }
