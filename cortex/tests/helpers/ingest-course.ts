@@ -21,10 +21,11 @@ export async function newCourse(name: string): Promise<{ id: string; refsDir: st
   return { id: row.id, refsDir, contentRoot };
 }
 
-export function ingest(course: string) {
+export function ingest(course: string, env: Record<string, string> = {}) {
   const report = path.join(process.env.CORTEX_DATA_DIR!, `rapport-${course}.json`);
+  fs.rmSync(report, { force: true });
   const r = spawnSync(path.join(process.cwd(), "node_modules", ".bin", "tsx"), ["scripts/ingest.ts", `--course=${course}`], {
-    env: { ...process.env, CORTEX_COURSE: course, CORTEX_INGEST_REPORT: report },
+    env: { ...process.env, ...env, CORTEX_COURSE: course, CORTEX_INGEST_REPORT: report },
     encoding: "utf8",
   });
   const files = fs.existsSync(report) ? (JSON.parse(fs.readFileSync(report, "utf8")).files as { path: string; status: string; items: number }[]) : null;
