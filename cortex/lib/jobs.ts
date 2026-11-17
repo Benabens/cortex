@@ -700,6 +700,21 @@ export async function cancelJob(id: number): Promise<Job | null> {
   const job = await getJob(id);
   if (!job) return null;
   if (["done", "error", "canceled"].includes(job.status)) return job;
+  // Examen QCM déjà visible (livraison progressive, onExamReady) : c'est une livraison, pas une
+  // annulation. Banc HUM-285 du 16/11 : 20 QCM vérifiés et visibles, coupure à 90 min, examen
+  // effacé par cleanupPartial et aucun crédit rendu. Le worker est arrêté d'abord (il n'écrit
+  // plus), puis l'examen passe prêt avec ce qu'il contient et seul le manque est rendu.
+  if (job.type === "qcm" && job.resultId) {
+    if (job.pid) killProcessGroup(job.pid, { expectCommand: /run-job|tsx|node/ });
+    const delivered = await qcmDelivery(id);
+    if (delivered && delivered.produced > 0) {
+      await closeQcmExam(job, delivered);
+      const notice = await settleShortfall(job, delivered.produced, delivered.requested);
+      await setJob(id, { status: "done", progress: 100, currentStep: notice ? `Terminé ⚠ ${notice}` : "Terminé ✓" });
+      await logJob(id, `Annulé après livraison : ${delivered.produced}/${delivered.requested} questions déjà visibles conservées, worker tué.`);
+      return await getJob(id);
+    }
+  }
   await setJob(id, { status: "canceled", currentStep: "Annulé" });
   // Annulation AVANT tout travail facturé → crédits rendus. Au-delà, le
   // fournisseur a déjà été payé : pas de remboursement (cf. constante).
@@ -719,6 +734,17 @@ export async function cancelJob(id: number): Promise<Job | null> {
 }
 
 /** Restes d'un job tué : checkpoint de génération + examen inséré mais jamais finalisé (compile interrompue). */
+/** Examen QCM arrêté en cours de livraison : prêt tel qu'il est, résumé recompté sur la base. */
+async function closeQcmExam(job: Job, delivered: { produced: number; requested: number }): Promise<void> {
+  const target = (() => { try { return JSON.parse(job.target ?? "{}") as { openCount?: number }; } catch { return {}; } })();
+  const openRequested = Math.max(0, Math.min(delivered.requested, Number(target.openCount ?? 0) || 0));
+  const qcm = await q.get<{ n: number; v: number }>(`SELECT count(*) n, coalesce(sum(CASE WHEN verified = 1 THEN 1 ELSE 0 END), 0) v FROM qcm_items WHERE exam_id = ?`, job.resultId);
+  const count = Number(qcm?.n ?? 0);
+  const { qcmSummaryText } = await import("@/lib/exam-summary");
+  const summary = qcmSummaryText({ count, requested: delivered.requested - openRequested, verified: Number(qcm?.v ?? 0), open: delivered.produced - count, openRequested });
+  await q.run(`UPDATE exams SET status = 'ready', verify_summary = ? WHERE id = ?`, summary, job.resultId);
+}
+
 async function cleanupPartial(job: Job): Promise<void> {
   if (job.type === "exam") {
     try { await storage().remove(path.join(examsDir(), ".gen-checkpoint.json")); } catch {}

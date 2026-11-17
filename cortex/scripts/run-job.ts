@@ -49,7 +49,8 @@ function finish(code: number): Promise<never> {
 
 async function fail(msg: string): Promise<never> {
   // Annulé entre-temps par l'utilisateur : cancelJob a statué (remboursement compris), on n'écrase rien.
-  try { if ((await getJob(jobId))?.status === "canceled") process.exit(0); } catch {}
+  // « done » aussi : un QCM annulé après livraison est clos par cancelJob avec ce qu'il contenait.
+  try { if (["canceled", "done"].includes((await getJob(jobId))?.status ?? "")) process.exit(0); } catch {}
   try {
     // « exam »/« qcm » SEULEMENT : leur progression PAR PHASE (lib/progress) peut afficher
     // un pourcentage très avancé pour un échec immédiat — un lot QCM qui échoue vaut « son
