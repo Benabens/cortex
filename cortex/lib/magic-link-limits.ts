@@ -22,7 +22,10 @@ const DAY = 24 * 60 * MIN;
 /** Lignes plus vieilles que la plus longue fenêtre (un jour), avec de la marge. */
 const PURGE_AFTER_MS = 2 * DAY;
 
-/** Absente → la valeur par défaut, même en local (le lien magique n'existe qu'hébergé) ; `unlimited` la lève. */
+/**
+ * Absente → la valeur par défaut, même sans AUTH_ENABLED (pas `intLimit`, qui n'en met qu'en
+ * déploiement gardé : une limite d'envoi qui saute en silence coûterait le quota Resend).
+ */
 function limit(name: string, def: number): number | null {
   const raw = process.env[name]?.trim();
   if (!raw) return def;
@@ -34,8 +37,12 @@ function limit(name: string, def: number): number | null {
 const at = (ms: number) => new Date(ms).toISOString().slice(0, 19).replace("T", " ");
 const key = (kind: string, value: string) => createHash("sha256").update(`${kind}:${value}`).digest("hex").slice(0, 32);
 
-/** Même normalisation qu'Auth.js (minuscules, sans espaces autour) : Bob@… et bob@… sont une seule boîte. */
-const normalizeAddress = (email: string) => email.trim().toLowerCase();
+/**
+ * Une boîte = une clé : minuscules sans espaces (comme Auth.js), et sans étiquette « +… » avant
+ * l'arobase (chloe+1@ et chloe+2@ arrivent chez chloe@). Ne sert qu'à compter : le compte garde
+ * l'adresse telle quelle.
+ */
+const normalizeAddress = (email: string) => email.trim().toLowerCase().replace(/\+[^@]*@/, "@");
 
 /**
  * Décide ET compte un envoi : `ok` réserve la place (la ligne est écrite), un refus n'écrit rien.

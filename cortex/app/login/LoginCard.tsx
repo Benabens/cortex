@@ -20,7 +20,7 @@ function errorMessage(code: string): string {
     case "EmailWait":
       return "Un lien vient de partir vers cette adresse. Regarde ta boîte (et les spams) ; tu pourras en demander un autre dans une minute.";
     case "EmailDay":
-      return "Cette adresse a reçu 5 liens aujourd’hui. Utilise le dernier reçu, ou réessaie demain.";
+      return "Cette adresse a reçu tous ses liens du jour. Utilise le dernier reçu, ou réessaie demain.";
     case "EmailIp":
       return "Trop de liens demandés depuis ce réseau. Réessaie dans une heure.";
     case "Configuration":
