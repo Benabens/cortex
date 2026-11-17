@@ -1,3 +1,4 @@
+import { assertStorageBucketIsolated } from "@/lib/boot-guards";
 import { dataRoot } from "@/lib/courses";
 import { sdkBucket, type BucketConfig } from "@/lib/storage/bucket";
 import { LocalFsStore } from "@/lib/storage/local";
@@ -89,10 +90,16 @@ export type StorageS3Config = BucketConfig & {
 
 const REQUIRED = ["STORAGE_S3_BUCKET", "STORAGE_S3_ENDPOINT", "STORAGE_S3_ACCESS_KEY_ID", "STORAGE_S3_SECRET_ACCESS_KEY"] as const;
 
-/** Aucune variable → null (disque local). Partielle → erreur nommant ce qui manque. */
+/**
+ * Aucune variable → null (disque local). Partielle → erreur nommant ce qui manque.
+ * Seau recopié de la prod dans un autre environnement Railway → refus (audit fuites I15) :
+ * vérifié ici, au seul point d'entrée vers le seau, pour l'app comme pour les scripts
+ * lancés par `railway run` (backup-objects, storage-migrate), qui ne passent pas par le boot.
+ */
 export function storageS3Config(env: Env = process.env): StorageS3Config | null {
   const present = REQUIRED.filter((k) => (env[k] ?? "").trim() !== "");
   if (present.length === 0) return null;
+  assertStorageBucketIsolated(env);
   const missing = REQUIRED.filter((k) => !present.includes(k));
   if (missing.length) throw new Error(`Stockage objet : configuration incomplète, variables manquantes : ${missing.join(", ")}`);
   const rawPrefix = (env.STORAGE_S3_PREFIX ?? "").trim().replace(/^\/+/, "").replace(/\/+$/, "");

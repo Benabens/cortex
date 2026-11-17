@@ -365,3 +365,13 @@ test("configuration : aucune variable = disque local ; partielle = refus nommé 
     region: "auto", forcePathStyle: false, prefix: "prod/", presign: true,
   });
 });
+
+test("I15 — le seau recopié de la prod est refusé à la lecture de la config, hors production Railway (scripts lancés par railway run compris)", async () => {
+  const { storageS3Config } = await import("../lib/storage");
+  const prodBucket = {
+    STORAGE_S3_BUCKET: "bucket-prod-ab12", STORAGE_S3_ENDPOINT: "https://t3.storageapi.dev",
+    STORAGE_S3_ACCESS_KEY_ID: "k", STORAGE_S3_SECRET_ACCESS_KEY: "s",
+  };
+  assert.throws(() => storageS3Config({ ...prodBucket, RAILWAY_ENVIRONMENT_NAME: "cortex-pr-66" }), /STORAGE_S3_BUCKET/);
+  assert.equal(storageS3Config({ ...prodBucket, RAILWAY_ENVIRONMENT_NAME: "production" })?.bucket, "bucket-prod-ab12");
+});
