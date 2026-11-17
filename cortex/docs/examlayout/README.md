@@ -17,10 +17,12 @@ npx tsx scripts/examlayout-captures.ts docs/examlayout
 | Annale | Cortex |
 |---|---|
 | ![](us-mcq-annale-1.png) | ![](us-mcq-cortex-1.png) |
+| (une seule page) | ![](us-mcq-cortex-2.png) |
 
 Relevé : police sans empattements en 10 pt, cours en haut à gauche, « Page n of N » en bas au
 centre, questions numérotées sans mot (« 1. »), options « (A) » à bulles l'une sous l'autre, aucun
-barème par question, champs `Name:` / `NetID:` / `Signature:`, les trois consignes.
+barème par question, champs `Name:` / `NetID:` / `Signature:`, les trois consignes. La page 2
+de Cortex est la question ouverte de l'examen fictif, que l'annale n'a pas.
 
 ## Examen anglais à rédaction
 
