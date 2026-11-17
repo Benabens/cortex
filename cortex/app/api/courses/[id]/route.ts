@@ -1,7 +1,7 @@
 import { apiError } from "@/lib/i18n/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { updateCourseRow, type CoursePatch } from "@/db/courses-store";
-import { InvalidCourseError, declaredFormatColumn, noTexCommand, parseTeachers } from "@/lib/course-create";
+import { InvalidCourseError, declaredFormatColumn, noTexCommand, parseTeachers, type CourseField } from "@/lib/course-create";
 import { ensureCoursesLoaded, listCoursesOf, ownsCourse, reloadCourses } from "@/lib/courses";
 import { toDto } from "@/lib/course-dto";
 import { useUser } from "@/lib/req";
@@ -26,15 +26,15 @@ async function guard(req: NextRequest, id: string): Promise<{ user: string } | N
 
 function patchOf(body: Record<string, unknown>): CoursePatch {
   const patch: CoursePatch = {};
-  const text = (v: unknown, max: number, field: string): string => {
+  const text = (v: unknown, max: number, field: CourseField): string => {
     if (typeof v !== "string") throw new InvalidCourseError({ code: "course_field_must_be_text", params: { field } });
     const s = v.trim().replace(/\s+/g, " ");
-    noTexCommand(s, `Le champ « ${field} »`);
+    noTexCommand(s, field);
     if (s.length > max) throw new InvalidCourseError({ code: "course_field_too_long", params: { field, max } });
     return s;
   };
   if (body.name !== undefined) {
-    const name = text(body.name, 80, "nom");
+    const name = text(body.name, 80, "name");
     if (name.length < 2) throw new InvalidCourseError({ code: "course_name_too_short" });
     patch.name = name;
     patch.exam_name = name;
@@ -45,13 +45,13 @@ function patchOf(body: Record<string, unknown>): CoursePatch {
     patch.short = code || undefined;
   }
   if (body.university !== undefined) {
-    const uni = text(body.university, 80, "université");
+    const uni = text(body.university, 80, "university");
     patch.university = uni || null;
     patch.university_lines = JSON.stringify(uni ? [uni] : []);
   }
   if (body.teachers !== undefined) patch.teachers = JSON.stringify(parseTeachers(body.teachers));
   if (body.examDate !== undefined) {
-    const d = text(body.examDate, 10, "date d'examen");
+    const d = text(body.examDate, 10, "examDate");
     if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new InvalidCourseError({ code: "course_exam_date_expected" });
     patch.exam_date = d || null;
   }

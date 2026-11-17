@@ -68,3 +68,10 @@ test("refus d'un fichier parmi d'autres (import partiel) : même phrase et même
   assert.match(fileErrorText(req({ "accept-language": "en" }), "exam.pdf", e), /^exam\.pdf: \S/);
   assert.match(fileErrorText(req({ "accept-language": "fr" }), "annale.pdf", e), /^annale\.pdf : PDF protégé/);
 });
+
+test("champ d'un cours : nommé dans la langue du lecteur, jamais le nom français dans une phrase anglaise", async () => {
+  const { errorText } = await import("../lib/i18n/user-error");
+  assert.equal(errorText("en", { code: "course_field_required", params: { field: "examDate" } }), "The “exam date” field is required.");
+  assert.equal(errorText("fr", { code: "course_field_required", params: { field: "examDate" } }), "Le champ « date d'examen » est obligatoire.");
+  assert.equal(errorText("en", { code: "course_tex_command_forbidden", params: { field: "teacher" } }), "A teacher name can’t contain a backslash (\\).");
+});
