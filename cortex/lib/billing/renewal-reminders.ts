@@ -49,6 +49,8 @@ import { log } from "@/lib/metrics";
 import { publicOrigin } from "@/lib/public-url";
 import { alertReminderProblems, alertRemindersDisabled, noteMissedReminder, warnIfReminderAlertsBlocked, type RefusedReminder } from "./renewal-alerts";
 import { isYearly, stillBilling } from "./subscription-windows";
+import { accountLocale } from "@/lib/i18n/account-locale";
+import type { Locale } from "@/lib/i18n/locale";
 
 const DAY_MS = 86_400_000;
 /** Envoi visé : 60 jours avant l'échéance (la loi autorise de 3 mois à 1 mois avant). */
@@ -181,8 +183,9 @@ export function renewalReminderEmail(o: {
   /** Une remise s'applique : le montant annoncé est un maximum, pas une promesse. */
   discounted?: boolean;
   /** Page Compte de l'app : c'est là qu'on ouvre le portail Stripe. */
-  accountUrl: string; contact: string; termsUrl?: string | null;
+  accountUrl: string; contact: string; termsUrl?: string | null; locale?: Locale;
 }): ReminderMail {
+  if (o.locale === "en") return renewalReminderEmailEnglish(o);
   const { due, last } = renewalDays(o.renewsAt);
   const fr = { due: longDate(due, "fr-FR"), last: longDate(last, "fr-FR"), price: money(o.amount, o.currency, "fr-FR") };
   const en = { due: longDate(due, "en-GB"), last: longDate(last, "en-GB"), price: money(o.amount, o.currency, "en-GB") };
@@ -229,6 +232,37 @@ export function renewalReminderEmail(o: {
     + p("L'équipe Cortex")
     + `<p lang="en" style="margin:18px 0 0;padding-top:14px;border-top:1px solid #2b2640;color:#a9a4bd;font-size:13px">${esc(english)}</p>`
     + `</div></body></html>`;
+  return { subject, text, html };
+}
+
+function renewalReminderEmailEnglish(o: { renewsAt: string; amount: number; currency: string; discounted?: boolean; accountUrl: string; contact: string; termsUrl?: string | null }): ReminderMail {
+  const { due, last } = renewalDays(o.renewsAt);
+  const date = longDate(due, "en-GB");
+  const deadline = longDate(last, "en-GB");
+  const price = money(o.amount, o.currency, "en-GB");
+  const subject = `Cortex Pro: your annual subscription renews on ${date}`;
+  const intro = `Your annual Cortex Pro subscription expires on ${date}.`;
+  const charge = o.discounted ? `up to ${price} will be charged to your payment method (a discount applies to your subscription; the exact amount will appear on your invoice).` : `${price} will be charged to your payment method.`;
+  const tacit = `This contract renews automatically: unless you take action, it will renew on that date for another year, and ${charge}`;
+  const boxLabel = "Deadline to decline renewal";
+  const how = `You can decline this renewal free of charge and without giving a reason until ${deadline}, inclusive:`;
+  const step1 = "Open your Account page";
+  const step2 = "Click “Manage my subscription” (the secure Stripe portal), then cancel the subscription.";
+  const effect = `Cancellation takes effect at the end of the period you have already paid for: you keep Cortex Pro and your monthly credits until ${date}, and nothing else is charged afterwards.`;
+  const byMail = `You can also write to ${o.contact}: we will record your cancellation.`;
+  const keep = "If you want to continue, you don’t need to do anything.";
+  const why = "Why this message? Article L215-1 of the French Consumer Code requires us to tell you, between three months and one month before this deadline, that you may decline to renew a contract containing an automatic-renewal clause. The renewal terms are set out in Article 7 of our terms of sale";
+  const binding = "The French version is legally binding.";
+  const rule = "+" + "-".repeat(62) + "+";
+  const text = ["Hello,", intro, tacit, `${rule}\n  ${boxLabel.toUpperCase()}: ${deadline}\n${rule}`, `${how}\n\n1. ${step1}: ${o.accountUrl}\n2. ${step2}`, effect, byMail, keep, `${why}${o.termsUrl ? `: ${o.termsUrl}` : ""}`, "The Cortex team", binding].join("\n\n");
+  const p = (body: string, style = "") => `<p style="margin:0 0 14px;${style}">${body}</p>`;
+  const link = (href: string, label: string) => `<a href="${esc(href)}" style="color:#c4b5fd">${esc(label)}</a>`;
+  const html = `<!doctype html><html lang="en"><body style="margin:0;padding:24px 12px;background:#0d0b14;color:#e7e5ef;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55">`
+    + `<div style="max-width:560px;margin:0 auto;padding:28px;background:#15121f;border:1px solid #2b2640;border-radius:12px">` + p("cortex.", "font-size:19px;font-weight:600;color:#ffffff")
+    + p("Hello,") + p(esc(intro)) + p(esc(tacit)) + `<div style="margin:20px 0;padding:16px 18px;border:2px solid #f5b544;border-radius:10px;background:#1c1830"><div style="color:#f5b544;font-size:14px">${esc(boxLabel)}</div><div style="margin-top:4px;color:#ffffff;font-size:21px;font-weight:700">${esc(deadline)}</div></div>`
+    + p(esc(how)) + `<ol style="margin:0 0 14px;padding-left:22px"><li style="margin-bottom:6px">${link(o.accountUrl, step1)}</li><li>${esc(step2)}</li></ol>` + p(esc(effect))
+    + p(`You can also write to ${link(`mailto:${o.contact}`, o.contact)}: we will record your cancellation.`) + p(esc(keep))
+    + p(`${esc(why)}${o.termsUrl ? ` (${link(o.termsUrl, "read the terms")})` : ""}.`, "color:#a9a4bd;font-size:13px") + p("The Cortex team") + p(binding, "color:#a9a4bd;font-size:13px") + `</div></body></html>`;
   return { subject, text, html };
 }
 
@@ -341,6 +375,7 @@ async function remindOne(row: Row, now: string, accountUrl: string, lookup: Look
   const mail = renewalReminderEmail({
     renewsAt: periodEnd, amount: facts.amount, currency: facts.currency, discounted: facts.discounted,
     accountUrl, contact: contactEmail(), termsUrl: legalLinks().terms,
+    locale: await accountLocale(row.user_id).catch(() => null) ?? "fr",
   });
   const outcome = await sendEmail({ to: row.email, ...mail, idempotencyKey: `${key}:${claimed.chain}` });
   if (outcome.ok) {
