@@ -1,10 +1,10 @@
 /**
  * DÉMARRAGE DU CONTENEUR — scripts/start.sh (CMD du Dockerfile) aiguille les
  * previews de PR Railway vers preview-entrypoint.sh et tout le reste vers
- * docker-entrypoint.sh. railway.json le faisait jusqu'ici ; Railway cesse de le
- * lire le 2026-12-01, et sans cet aiguillage une preview démarrerait avec les
- * secrets copiés de la prod. La reconnaissance d'une PR doit être celle de la
- * garde de démarrage (lib/railway-env), au caractère près.
+ * docker-entrypoint.sh. railway.json le faisait avant d'être supprimé (Railway
+ * cesse de le lire le 2026-12-01) ; sans cet aiguillage une preview démarrerait
+ * avec les secrets copiés de la prod. La reconnaissance d'une PR doit être
+ * celle de la garde de démarrage (lib/railway-env), au caractère près.
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
