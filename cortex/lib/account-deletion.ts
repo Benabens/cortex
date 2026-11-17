@@ -215,6 +215,8 @@ export async function deleteAccount(userId: string, deps: DeletionDeps = {}): Pr
       await authRun(`DELETE FROM ${table} WHERE user_id = ?`, userId);
     }
     await authRun(`DELETE FROM courses WHERE owner_user_id = ?`, userId);
+    const { touchCourses } = await import("@/db/courses-store");
+    await touchCourses();
     await authRun(`DELETE FROM tenants WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM users WHERE id = ?`, userId);
   } catch (e) {
