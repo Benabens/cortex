@@ -109,7 +109,8 @@ export class LlmError extends Error {
     this.retryable = retryable;
     if (usage) this.usage = usage;
     if (userError) this.userError = userError;
-    else if (code === "UNAVAILABLE") this.userError = { code: "llm_engine_unavailable" };
+    // La raison précise (clé manquante, CLI introuvable…) : c'est elle que l'exploitant doit lire.
+    else if (code === "UNAVAILABLE") this.userError = message ? { code: "llm_engine_unavailable_reason", params: { reason: message } } : { code: "llm_engine_unavailable" };
     else if (code === "SPEND_CAP") this.userError = { code: "llm_spend_cap" };
     else if (code === "QUOTA") this.userError = { code: "llm_quota_reached" };
     else if (code === "CREDITS") this.userError = { code: "billing_balance_empty" };

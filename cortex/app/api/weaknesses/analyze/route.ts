@@ -100,10 +100,10 @@ async function handlePOST(req: NextRequest) {
   } catch (e: unknown) {
     const { AssistRefused } = await import("@/lib/billing/reserve");
     if (e instanceof AssistRefused) return apiError(req, e, e.status);
-    if (e instanceof UserFacingError) return apiError(req, e);
     const err = e as { message?: unknown; code?: unknown };
     const msg = String(err.message ?? e);
     const status = err.code === "UNAVAILABLE" || err.code === "SPEND_CAP" ? 503 : msg.includes("ANTHROPIC_API_KEY") ? 400 : 502;
+    if (e instanceof UserFacingError) return apiError(req, e, status);
     if (e instanceof LlmError) return apiError(req, llmUserError(e), status);
     return apiError(req, { code: "weakness_analysis_failed", params: { detail: msg } }, status);
   }

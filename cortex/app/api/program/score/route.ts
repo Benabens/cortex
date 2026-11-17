@@ -25,7 +25,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     const res = await recordScore(topicId, score, body.examId ? Number(body.examId) : undefined);
     return NextResponse.json({ ok: true, ...res });
   } catch (e) {
-    if (e instanceof UserFacingError) return apiError(req, e);
+    if (e instanceof UserFacingError) return apiError(req, e, 400);
     if (e instanceof LlmError) return apiError(req, llmUserError(e), 400);
     const detail = e instanceof Error ? e.message : String(e);
     return apiError(req, { code: "score_record_failed", params: { detail } }, 400);

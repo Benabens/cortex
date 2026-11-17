@@ -28,7 +28,25 @@
     "credits_debited": "{count, plural, one {# crédit débité} other {# crédits débités}}",
     "remaining": "Il te reste {count}{reset}",
     "after": "Après celle-ci, il te restera {count}{reset}",
-    "in_a_minute": "dans une minute"
+    "in_a_minute": "dans une minute",
+    "label": {
+      "credits": "Crédits",
+      "daily_generations": "Générations du jour",
+      "daily_assistance": "Aides du jour",
+      "active_jobs": "Générations en cours",
+      "rate": "Demandes par minute",
+      "daily_compute": "Calcul du jour",
+      "monthly_capacity": "Capacité de Cortex ce mois-ci",
+      "storage": "Stockage"
+    },
+    "unit": {
+      "credits": "crédits",
+      "generations": "générations",
+      "assistance": "aides",
+      "concurrent": "en même temps",
+      "per_minute": "par minute",
+      "mb": "Mo"
+    }
   },
   "errors": {
     "unauthenticated": "Non authentifié.",
@@ -90,11 +108,11 @@
     "export_server_busy": "Trop d’exports en cours sur le serveur : réessaie dans quelques minutes.",
     "account_export_auth_required": "L’export de compte requiert l’authentification.",
     "account_export_failed": "L’export a échoué. Réessaie ; si le problème persiste, écris à {email}.",
-    "course_field_required": "Le champ « {field} » est obligatoire.",
-    "course_field_must_be_text": "Le champ « {field} » doit être du texte.",
-    "course_field_too_short": "Le champ « {field} » est trop court.",
-    "course_field_too_long": "Le champ « {field} » dépasse {max} caractères.",
-    "course_tex_command_forbidden": "{field} ne peut pas contenir d’antislash (\\).",
+    "course_field_required": "Le champ « {field, select, name {nom} code {code} university {université} language {langue} examDate {date d'examen} other {{field}}} » est obligatoire.",
+    "course_field_must_be_text": "Le champ « {field, select, name {nom} code {code} university {université} language {langue} examDate {date d'examen} other {{field}}} » doit être du texte.",
+    "course_field_too_short": "Le champ « {field, select, name {nom} code {code} university {université} language {langue} examDate {date d'examen} other {{field}}} » est trop court.",
+    "course_field_too_long": "Le champ « {field, select, name {nom} code {code} university {université} language {langue} examDate {date d'examen} other {{field}}} » dépasse {max} caractères.",
+    "course_tex_command_forbidden": "{field, select, teacher {Un nom d'enseignant·e} other {Le champ « {field, select, name {nom} code {code} university {université} language {langue} examDate {date d'examen} other {{field}}} »}} ne peut pas contenir d’antislash (\\).",
     "course_teacher_name_too_long": "Un nom d’enseignant·e dépasse 60 caractères.",
     "course_language_unknown": "Langue non reconnue : « {language} ». Langues prises en charge : {supported}.",
     "course_exam_date_invalid": "La date d’examen doit être au format AAAA-MM-JJ.",
@@ -256,7 +274,10 @@
     "account_delete_owner_refused": "Le compte propriétaire de l'instance ne peut pas être supprimé depuis l'application.",
     "account_delete_stripe_cancel_failed": "Suppression refusée : impossible de résilier l’abonnement Stripe ({detail}). Rien n’a été effacé.",
     "account_delete_failed": "La suppression a échoué. Réessaie ; si le problème persiste, écris à {contact}.",
-    "pdf_recompile_failed": "Le PDF ne compile toujours pas."
+    "pdf_recompile_failed": "Le PDF ne compile toujours pas.",
+    "llm_engine_unreachable_retry": "Le moteur LLM est injoignable : réessaie plus tard.",
+    "llm_engine_unavailable_reason": "{reason}",
+    "source_type_unknown": "Type de document non pris en charge (inconnu) : PDF, page web ou texte seulement."
   },
   "ingestReport": {
     "unreadable": "fichier abîmé ou format non reconnu : il n’a pas pu être lu. Ré-exporte-le en PDF, puis dépose-le de nouveau.",
