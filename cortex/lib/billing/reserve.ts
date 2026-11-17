@@ -5,6 +5,7 @@ import { authRun, authTx } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
 import { BAD_OUTPUT_CODES, llmErrorCode } from "@/lib/llm/errors";
 import { log } from "@/lib/metrics";
+import { intLimit } from "./env";
 import { defaultProviderName } from "@/lib/llm/config";
 import { expectedJobCostUsd } from "./budget";
 import { billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, lockAccountInTx as lockUser, openSubscriptionWindowInTx } from "./credits";
@@ -179,6 +180,48 @@ export async function releaseJobSlot(userId: string, ref: string): Promise<void>
  */
 export async function releaseQuotaEvent(userId: string, ref: string): Promise<void> {
   if (!quotaTrackingActive()) return;
+  try {
+    await authRun(`DELETE FROM gen_events WHERE user_id = ? AND ref = ?`, userId, ref);
+  } catch (e) {
+    log("warn", "billing.quota_release_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
+  }
+}
+
+/** Imports (ingestions) par compte et par jour (défaut 20 en déploiement gardé ; « unlimited » pour lever). */
+export function dailyIngestQuota(): number | null {
+  return intLimit("DAILY_INGEST_QUOTA", 20);
+}
+
+/**
+ * RÉSERVATION D'UN IMPORT (audit fuites B3) : l'ingestion ne coûte aucun crédit ni aucun appel
+ * au modèle, mais du CPU (pdftoppm, extraction). Elle ne passe donc pas par le verdict de
+ * lancement (budget, solde) : seulement par DAILY_INGEST_QUOTA par compte et par jour, compté
+ * dans gen_events (bucket « ingest »), sous le verrou du compte. Le propriétaire n'est pas compté.
+ */
+export async function reserveIngest(ref: string, userId = currentUser(), course = currentCourse()): Promise<Reservation> {
+  const cap = dailyIngestQuota();
+  if (cap === null || (await isOwner(userId))) return { ok: true, ref, costCenti: 0 };
+  const t = nowStr();
+  const day = t.slice(0, 10);
+  return authTx(async (tx): Promise<Reservation> => {
+    await lockUser(tx, userId);
+    const used = Number((await tx.get<{ n: number }>(
+      `SELECT count(*) n FROM gen_events WHERE user_id = ? AND bucket = 'ingest' AND day = ?`, userId, day,
+    ))?.n ?? 0);
+    if (used >= cap) {
+      log("info", "billing.launch_refused", { user: userId, kind: "ingest", limit: "daily_ingests" });
+      return { ok: false, status: 429, error: `Tu as lancé ${cap} imports aujourd'hui, la limite du jour : réessaie demain (remise à zéro à minuit UTC).` };
+    }
+    await tx.run(
+      `INSERT INTO gen_events (user_id, bucket, kind, course, day, created_at, ref) VALUES (?,?,?,?,?,?,?)`,
+      userId, "ingest", "ingest", course, day, t, ref,
+    );
+    return { ok: true, ref, costCenti: 0 };
+  });
+}
+
+/** Rend l'import compté par une réservation qui n'a servi à rien (import déjà lancé entre-temps). Best-effort. */
+export async function releaseIngest(userId: string, ref: string): Promise<void> {
   try {
     await authRun(`DELETE FROM gen_events WHERE user_id = ? AND ref = ?`, userId, ref);
   } catch (e) {

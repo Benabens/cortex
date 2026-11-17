@@ -77,8 +77,21 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
   const { isCourseDeleting } = await import("@/lib/course-deletion");
   if (await isCourseDeleting(user, course)) throw new ReservationRefused(409, "Ce cours est en cours de suppression : aucune génération possible.");
   let ref: string | null = null;
+  let ingestRef: string | null = null;
   let costCenti = 0;
-  if (type !== "ingest") {
+  if (type === "ingest") {
+    // Import : gratuit, mais borné par jour et par compte (audit fuites B3) ; sa file est à part.
+    const { reserveIngest } = await import("@/lib/billing/reserve");
+    ingestRef = `ingest:${user}:${course}:${crypto.randomUUID()}`;
+    let r: Awaited<ReturnType<typeof reserveIngest>>;
+    try {
+      r = await reserveIngest(ingestRef);
+    } catch (e) {
+      log("error", "jobs.reservation_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
+      throw new ReservationRefused(503, "Import momentanément indisponible, réessaie dans un instant.");
+    }
+    if (!r.ok) throw new ReservationRefused(r.status, r.error);
+  } else {
     const { reserveGeneration } = await import("@/lib/billing/reserve");
     ref = `job:${user}:${course}:${crypto.randomUUID()}`;
     let r: Awaited<ReturnType<typeof reserveGeneration>>;
@@ -108,6 +121,10 @@ export async function createJobExclusive(type: JobType, target?: string): Promis
     return { id, existing: false };
   });
   if (res.existing && ref) await releaseReservation(type, ref, user);
+  if (res.existing && ingestRef) {
+    const { releaseIngest } = await import("@/lib/billing/reserve");
+    await releaseIngest(user, ingestRef);
+  }
   return { ...res, costCenti: res.existing ? 0 : costCenti };
 }
 
@@ -525,12 +542,15 @@ export async function startWorker(jobId: number, course?: string): Promise<void>
   }
   // PLAFOND DE L'INSTANCE (lib/job-queue) : sans place libre, ou s'il n'est pas en tête de file,
   // le job attend son tour, en file. Il est démarré par la distribution quand une place se libère.
-  const { admitJob, dispatchQueue, releaseJob } = await import("@/lib/job-queue");
-  const admission = await admitJob(currentUser(), c, jobId);
+  // Les imports ont leur propre file (audit fuites B3) : ils ne prennent jamais la place d'une génération.
+  const { admitJob, dispatchQueue, poolOfJobType, releaseJob } = await import("@/lib/job-queue");
+  const pool = poolOfJobType((await q.get<{ type: string }>(`SELECT type FROM jobs WHERE id = ?`, jobId))?.type ?? "");
+  const admission = await admitJob(currentUser(), c, jobId, pool);
   if (!admission.admitted) {
+    const what = pool === "ingest" ? "ton import démarre" : "ta génération démarre";
     await q.run(
       `UPDATE jobs SET worker_id = '${WAITING}', current_step = ?, updated_at = ? WHERE id = ? AND status = 'queued' AND pid IS NULL AND (worker_id IS NULL OR worker_id IN ('', '${DEFERRED}', '${WAITING}'))`,
-      `En file d'attente (position ${admission.position}) : le serveur est à pleine charge, ta génération démarre dès qu'une place se libère.`,
+      `En file d'attente (position ${admission.position}) : le serveur est à pleine charge, ${what} dès qu'une place se libère.`,
       nowStr(), jobId,
     );
     return;
