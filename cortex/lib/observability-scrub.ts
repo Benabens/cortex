@@ -116,5 +116,10 @@ export function sentryRelease(env: Partial<NodeJS.ProcessEnv>): string | undefin
 /** Ce que le navigateur reçoit pour démarrer son suivi d'erreurs (rien sans SENTRY_DSN). */
 export type ClientErrorTrackingConfig = { dsn: string; environment: string; release?: string; tunnel: string };
 
-/** Chemin du tunnel (app/api/monitoring) : le navigateur n'écrit qu'à sa propre origine (CSP connect-src 'self'). */
-export const MONITORING_TUNNEL = "/api/monitoring";
+/**
+ * Chemin du tunnel (app/api/relais) : le navigateur n'écrit qu'à sa propre origine (CSP connect-src 'self').
+ * Nom neutre (audit fuites P3) : `/monitoring`, le chemin par défaut du SDK Next de Sentry, est
+ * déjà visé par EasyPrivacy (`/monitoring?o=`) ; un bloqueur qui coupe le tunnel coupe aussi la
+ * configuration (GET), donc tout le suivi. Ni « sentry », ni « monitoring », ni « track » ici.
+ */
+export const ERROR_TUNNEL = "/api/relais";

@@ -78,11 +78,12 @@ const dateFr = (iso: string | null) => {
 };
 
 /**
- * Ce qui borne l'usage, dit au-dessus des offres. « Autant de cours que tu
- * veux » parle du NOMBRE de cours, qui n'a pas de plafond : un cours coûte des
- * crédits (sa préparation, puis la relecture du format de ses annales), ses générations aussi,
- * et le compte a des limites par jour et un espace de stockage. Seules les
- * limites citées ici sont nommées : la phrase ne se donne pas pour une liste complète.
+ * Ce qui borne l'usage, dit au-dessus des offres : un cours coûte des crédits (sa
+ * préparation, puis la relecture du format de ses annales), ses générations aussi, et le
+ * compte a des limites par jour et un espace de stockage. Seules les limites citées ici sont
+ * nommées : la phrase ne se donne pas pour une liste complète. Chaque offre dit ce qu'elle
+ * ouvre en plus des crédits : le cloud pour les fichiers importés (lib/originals/policy,
+ * Premium = abonnement en règle ou achat des 12 derniers mois), pas un nombre de cours.
  */
 function usageNote(data: Billing): string {
   const { prepare, format } = data.costs;
@@ -363,7 +364,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
                 <div className="min-w-0">
                   <div className="font-display text-xl font-semibold text-ink-1">{o.label}</div>
                   <div className="mt-2 text-sm leading-relaxed text-ink-2">
-                    {isSub ? `Autant de cours que tu veux · ${nf.format(o.credits)} crédits par mois, non reportables` : `${nf.format(o.credits)} crédits, sans date d’expiration`}
+                    {isSub ? `Tes fichiers dans le cloud · ${nf.format(o.credits)} crédits par mois, non reportables` : `${nf.format(o.credits)} crédits, sans date d’expiration · tes fichiers dans le cloud pendant 12 mois`}
                     {isSub && hasSub && <span> · tu as déjà un abonnement</span>}
                   </div>
                   {/* Conditions de reconduction, à côté du bouton et AVANT tout achat :

@@ -40,7 +40,7 @@ test("fenêtre et encadré comptent depuis la même date : la veille de l'éché
   ];
   for (const [end, limit, lastOk, firstLate, why] of cases) {
     const yearly = sub({ period_start: null, plan: "cortex_pro_yearly", period_end: end });
-    const mail = renewalReminderEmail({ renewsAt: end, amount: 119, currency: "EUR", accountUrl: "https://x.test/compte", contact: "c@x.test" });
+    const mail = renewalReminderEmail({ renewsAt: end, amount: 149, currency: "EUR", accountUrl: "https://x.test/compte", contact: "c@x.test" });
     assert.ok(mail.text.includes(`DATE LIMITE POUR REFUSER LA RECONDUCTION : ${limit}`), `${end} : encadré « ${limit} »`);
     assert.equal(reminderVerdict(yearly, lastOk), "due", why);
     assert.equal(reminderVerdict(yearly, firstLate), "too-late", why);
