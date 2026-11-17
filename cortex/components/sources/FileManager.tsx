@@ -9,6 +9,7 @@ import { corpusLabel, extOf, type SourcesResp, type SourceExam } from "@/lib/ux/
 import { cn } from "@/lib/ux/cn";
 import { apiDelete } from "@/lib/ux/write";
 import { OnComputerBadge } from "@/components/sources/OriginalsNotes";
+import { useTranslations } from "use-intl/react";
 
 const ANNALE_TYPES = new Set(["final", "midterm"]);
 /** Valeur de la facette par défaut (les annales regroupent plusieurs types de source). */
@@ -23,6 +24,7 @@ const FACET_ORDER = ["course_pdf", "lecture", "serie", "exercise", "cheatsheet",
  * se cale sur les annales cochées. Bascule « Référence » optimiste → aucun saut de ligne.
  */
 export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged: () => void }) {
+  const t = useTranslations("fileManager");
   const { courseId } = useCourse();
   const [facet, setFacet] = useState<string | null>(null); // null = Annales (défaut)
   const [pending, setPending] = useState<Record<string, boolean>>({}); // path → isReference optimiste
@@ -30,11 +32,14 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
   const [removeError, setRemoveError] = useState<string | null>(null);
 
   // données fraîches (après un vrai refetch, ex. upload/suppression) → on efface les surcharges.
-  useEffect(() => setPending({}), [data]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- une réponse fraîche invalide les surcharges optimistes
+    setPending({});
+  }, [data]);
 
   const isRef = (f: SourceExam) => pending[f.path] ?? f.isReference;
   const setBusyFor = (path: string, on: boolean) =>
-    setBusy((s) => { const n = new Set(s); on ? n.add(path) : n.delete(path); return n; });
+    setBusy((s) => { const n = new Set(s); if (on) n.add(path); else n.delete(path); return n; });
 
   // Originaux restés sur l'ordinateur d'un compte gratuit (lib/originals) : Cortex n'a que leur index.
   const onComputer = useMemo(() => new Set(data.originals?.onComputer ?? []), [data.originals]);
@@ -60,7 +65,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
   };
 
   const remove = async (f: SourceExam) => {
-    if (!window.confirm(`Retirer « ${f.title} » du corpus ? (fichier ajouté depuis l'app)`)) return;
+    if (!window.confirm(t("removeConfirm", { title: f.title }))) return;
     setBusyFor(f.path, true);
     setRemoveError(null);
     try {
@@ -88,24 +93,22 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
     <Panel className="overflow-hidden p-0">
       {removeError && (
         <p role="alert" className="border-b border-line px-4 py-2.5 text-[0.82rem] text-danger-hi">
-          Retrait impossible : {removeError}
+          {t("removeFailed", { error: removeError })}
         </p>
       )}
       {/* résumé + FACETTES cliquables */}
       <div className="border-b border-line px-6 py-5">
         <div className="flex items-center gap-2 text-[0.76rem] text-ink-3">
           <Layers className="size-3.5" strokeWidth={2} />
-          <span>
-            <span className="font-data font-semibold text-ink-2">{totalFiles}</span> fichier{totalFiles > 1 ? "s" : ""} dans le corpus
-          </span>
+          <span>{t("fileCount", { count: totalFiles })}</span>
         </div>
         <Segmented
           variant="chips"
           className="mt-3"
-          label="Type de fichiers"
+          label={t("fileTypes")}
           options={[
-            { value: ANNALES, label: "Annales", count: annaleCount },
-            ...nonAnnaleTypes.map((c) => ({ value: c.type, label: corpusLabel(c.type), count: c.sources })),
+            { value: ANNALES, label: t("pastExams"), count: annaleCount },
+            ...nonAnnaleTypes.map((c) => ({ value: c.type, label: corpusLabel(c.type, t), count: c.sources })),
           ]}
           value={facet ?? ANNALES}
           onChange={(v) => setFacet(v === ANNALES ? null : v)}
@@ -117,8 +120,8 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
           {/* en-tête table annales (desktop) */}
           <div className="hidden items-center gap-3 border-b border-line px-4 py-2 text-xs font-medium text-ink-4 md:flex">
             <span className="w-8" />
-            <span className="flex-1">Annale</span>
-            <span className="pr-14 text-right">Voir · Référence</span>
+            <span className="flex-1">{t("pastExam")}</span>
+            <span className="pr-14 text-right">{t("viewReference")}</span>
           </div>
 
           <div className="divide-y divide-line px-1.5">
@@ -153,7 +156,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
                         type="button"
                         onClick={() => remove(f)}
                         disabled={isBusy}
-                        aria-label={`Retirer ${f.title}`}
+                        aria-label={t("remove", { title: f.title })}
                         className="grid size-11 shrink-0 place-items-center rounded-full text-ink-3 transition-colors hover:bg-surface-2 hover:text-danger-hi focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:opacity-40"
                       >
                         <Trash2 className="size-4" strokeWidth={2} />
@@ -168,15 +171,14 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
           </div>
 
           <div className="flex items-center gap-2 border-t border-line px-4 py-2.5 text-[0.78rem] text-ink-3">
-            <span className="font-data font-semibold text-ink-1">{refCount}</span>
-            annale{refCount > 1 ? "s" : ""} de référence cochée{refCount > 1 ? "s" : ""} : le format des blancs se cale dessus
+            {t("referenceCount", { count: refCount })}
           </div>
         </>
       ) : (
         // Vue « browse » d'un type de corpus : chaque item ouvrable via « Voir ».
         <div className="divide-y divide-line px-1.5">
           {browseRows.length === 0 ? (
-            <p className="px-4 py-8 text-center text-[0.85rem] text-ink-3">Aucun élément de ce type dans le corpus.</p>
+            <p className="px-4 py-8 text-center text-[0.85rem] text-ink-3">{t("empty")}</p>
           ) : (
             browseRows.map((s) => {
               const ext = extOf(s.path);
@@ -209,15 +211,16 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
 
 /** Lien « voir » : ouvre la source (cours / série / exercice / annale) à sa page. */
 function SeeLink({ href, label }: { href: string; label: string }) {
+  const t = useTranslations("fileManager");
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      aria-label={`Voir ${label} (nouvel onglet)`}
+      aria-label={t("viewNewTab", { title: label })}
       className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-md border border-line bg-surface-2/40 px-2.5 text-[0.78rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-accent)_40%,transparent)] hover:text-accent-hi focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
     >
-      Voir
+      {t("view")}
       <ArrowUpRight className="size-3.5" strokeWidth={2.25} />
     </a>
   );
@@ -225,12 +228,13 @@ function SeeLink({ href, label }: { href: string; label: string }) {
 
 /** Case à cocher accessible « annale de référence ». */
 function RefCheckbox({ checked, busy, onToggle, label }: { checked: boolean; busy: boolean; onToggle: () => void; label: string }) {
+  const t = useTranslations("fileManager");
   return (
     <button
       type="button"
       role="checkbox"
       aria-checked={checked}
-      aria-label={`Utiliser « ${label} » comme annale de référence`}
+      aria-label={t("useAsReference", { title: label })}
       disabled={busy}
       onClick={onToggle}
       className={cn(
@@ -247,7 +251,7 @@ function RefCheckbox({ checked, busy, onToggle, label }: { checked: boolean; bus
       >
         {checked && <Check className="size-3" strokeWidth={3} />}
       </span>
-      Référence
+      {t("reference")}
     </button>
   );
 }
