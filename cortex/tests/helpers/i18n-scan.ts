@@ -3,6 +3,8 @@
  * (analyse syntaxique TypeScript) :
  *  - tout texte JSX qui contient des lettres (`<p>Bonjour</p>`, en français ou en anglais :
  *    un texte visible passe par les dictionnaires) ;
+ *  - tout libellé écrit en dur dans un attribut lu à l'écran ou par un lecteur d'écran
+ *    (`aria-label="Delete"`, `placeholder`, `title`, `alt`), quelle que soit la langue ;
  *  - toute chaîne littérale qui ressemble à du français (accents, mots outils), où qu'elle
  *    soit : attribut, variable, message d'erreur, libellé d'option.
  * Ne comptent pas : les commentaires, les imports, les classes CSS, les clés passées à
@@ -26,6 +28,8 @@ export function looksFrench(s: string): boolean {
 }
 
 const IGNORED_ATTRS = new Set(["className", "id", "href", "src", "key", "type", "name", "htmlFor", "role", "rel", "target", "method", "autoComplete", "inputMode", "lang", "hrefLang", "dir", "style", "viewBox", "d", "fill", "stroke", "xmlns", "variant", "size", "tone", "as", "accept", "pattern"]);
+// Attributs lus à l'écran ou à voix haute : un littéral y est un texte d'interface, en toute langue.
+const VISIBLE_ATTRS = new Set(["aria-label", "aria-description", "aria-placeholder", "aria-roledescription", "aria-valuetext", "placeholder", "title", "alt", "label"]);
 const TRANSLATE_CALLS = new Set(["t", "useTranslations", "getT", "rich", "markup", "raw", "has"]);
 
 function allowed(sf: ts.SourceFile, node: ts.Node): boolean {
@@ -65,6 +69,13 @@ export function scanSource(file: string, source: string): Hit[] {
     hits.push({ file, line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1, text: text.trim().slice(0, 80) });
   };
   const visit = (node: ts.Node) => {
+    if (ts.isJsxAttribute(node) && VISIBLE_ATTRS.has(node.name.getText(sf)) && node.initializer) {
+      const init = node.initializer;
+      const lit = ts.isStringLiteral(init) ? init
+        : ts.isJsxExpression(init) && init.expression && (ts.isStringLiteral(init.expression) || ts.isNoSubstitutionTemplateLiteral(init.expression)) ? init.expression
+        : null;
+      if (lit && /\p{L}{2}/u.test(lit.text) && !looksFrench(lit.text)) push(lit, lit.text);
+    }
     if (ts.isJsxText(node)) {
       const text = node.getText(sf);
       if (/\p{L}{2}/u.test(text)) push(node, text);

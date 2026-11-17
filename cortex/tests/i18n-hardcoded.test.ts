@@ -75,6 +75,7 @@ const PENDING = new Set<string>([
   "components/shell/AppShell.tsx",
   "components/shell/CourseSelector.tsx",
   "components/shell/Logo.tsx",
+  "components/shell/NavList.tsx",
   "components/shell/MobileNav.tsx",
   "components/shell/Sidebar.tsx",
   "components/shell/ThemeToggle.tsx",
@@ -113,7 +114,7 @@ test("la liste des fichiers à migrer ne fait que rétrécir", () => {
   assert.deepEqual(clean, [], "fichiers migrés (ou supprimés) à retirer de PENDING");
 });
 
-test("le détecteur voit le français en dur et laisse passer le code", () => {
+test("le détecteur voit le texte en dur et laisse passer le code", () => {
   const hits = scanSource("x.tsx", [
     "import { a } from \"./où\";",
     "const L = { ok: \"Créer le cours\" };",
@@ -121,9 +122,11 @@ test("le détecteur voit le français en dur et laisse passer le code", () => {
     "  {t(\"common.close\")} Bonjour",
     "  {/* i18n-allow: marque */}",
     "  <b>cortex</b>",
+    "  <input placeholder=\"Search\" title={\"Delete course\"} alt=\"\" aria-label={label} />",
     "</p>;",
   ].join("\n"));
-  assert.deepEqual(hits.map((h) => h.text), ["Créer le cours", "Fermer la fenêtre", "Bonjour"]);
+  // Un libellé d'attribut lu à l'écran est pris en toute langue ; du code ({label}, "") passe.
+  assert.deepEqual(hits.map((h) => h.text), ["Créer le cours", "Fermer la fenêtre", "Bonjour", "Search", "Delete course"]);
   assert.ok(looksFrench("Tu as 3 crédits"));
   assert.ok(looksFrench("Pour le cours de demain"));
   assert.ok(!looksFrench("Create the course"));
