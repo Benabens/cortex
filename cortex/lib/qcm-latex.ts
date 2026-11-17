@@ -2,8 +2,8 @@ import { currentCourse } from "@/db/client";
 import { getCourse } from "@/lib/courses";
 import type { ExamQuestion } from "@/lib/exam";
 import { compileExamPdf, copyExamLogo, qrText, texEscape } from "@/lib/exam-latex";
-import { formatContextFor } from "@/lib/exam-format";
-import { courseTemplate, courseWords, coverWords, durationText, epflExamKind, epflLocalChrome, epflWords, localDate, neutralChrome, neutralCoverTex, neutralDuration, pointsText, solutionColor, type CoverWords } from "@/lib/exam-template";
+import { examDurationMin, formatContextFor } from "@/lib/exam-format";
+import { courseTemplate, courseWords, coverWords, durationText, epflExamKind, epflLocalChrome, epflWords, localDate, neutralChrome, neutralCoverTex, pointsText, solutionColor, type CoverWords } from "@/lib/exam-template";
 import { assertTexSafe } from "@/lib/tex-guard";
 import { getFormatProfile } from "@/lib/format";
 import { resolveExamFormat } from "@/lib/exam-format";
@@ -97,7 +97,7 @@ async function qcmCover(dateLabel: string, nQcm: number, nOpen: number, totalPts
     const w = courseWords();
     const parts = [nQcm ? w.qcmCount(nQcm) : "", nOpen ? w.openCount(nOpen) : ""].filter(Boolean).join(` ${w.and} `);
     return neutralCoverTex({
-      course: getCourse(currentCourse()), w, dateTex: localDate(dateLabel, w), durationMin: durationMin ?? neutralDuration(undefined), totalPts,
+      course: getCourse(currentCourse()), w, dateTex: localDate(dateLabel, w), durationMin, totalPts,
       instructions: [w.contains(parts, totalPts), ...(nQcm ? [`${w.qcmConvention} ${w.tick}`] : []), w.onSheet],
     });
   }
@@ -312,7 +312,7 @@ export async function qcmDurationMin(detected: number | null | undefined): Promi
 export async function renderQcmExamTex(data: QcmExamData, dateLabel: string, includeSolutions: boolean): Promise<string> {
 
   const fmt = await getFormatProfile();
-  const dur = courseTemplate() === "epfl" ? await qcmDurationMin(fmt?.duration_min) : neutralDuration(fmt?.duration_min);
+  const dur = await examDurationMin();
   // Barème CALÉ sur le format détecté : chaque type (scq/mcq) vaut ses points_each réels
   // (ex. CS-233 : scq 3 pts, mcq 4 pts), les ouvertes leurs ~17 pts. Repli 2/15 si non détecté.
   const ptsOf = (t: "scq" | "mcq"): number => {

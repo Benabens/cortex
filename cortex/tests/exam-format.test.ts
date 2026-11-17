@@ -327,6 +327,56 @@ test("C — un examen d'exercices à sous-questions, sans choix, reste un examen
   assert.equal((await resolve(id)).kind, "exercises");
 });
 
+// ─────────────── fidélité au format de l'annale (audit 3, P0-3 / P0-4) ───────────────
+
+/** Annale fictive 100 % QCM : `n` questions à réponse unique, aucune question ouverte. */
+function allQcmProfile(n: number, over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    format_summary: `${n} single-answer multiple-choice questions`, duration_min: 0, total_points: n, has_mcq: true, scq_vs_mcq_convention: "",
+    question_types: [{ type: "scq", approx_count: n, share_pct: 100 }], sections: [], topics_emphasis: [], ...over,
+  };
+}
+
+test("une annale 100 % QCM de 40 questions donne un examen 100 % QCM de 40 questions, sans ouverte inventée", async () => {
+  const id = await newCourse({ language: "en" });
+  await addSource(id, "final", "Final 2025", ENGLISH_FINAL);
+  await saveProfile(id, allQcmProfile(40));
+  const f = await resolve(id);
+  assert.deepEqual({ kind: f.kind, n: f.questionCount, open: f.openCount }, { kind: "qcm", n: 40, open: 0 });
+  assert.deepEqual(planMockExam(f, {}), { generator: "qcm", qcmCount: 40, openCount: 0 });
+});
+
+test("un quiz de 5 QCM reste à 5 questions ; au-delà de QCM_MAX (40), l'annale est bornée à 40", async () => {
+  const quiz = await newCourse({ language: "en" });
+  await addSource(quiz, "midterm", "Quiz 1", ENGLISH_FINAL);
+  await saveProfile(quiz, allQcmProfile(5));
+  assert.equal((await resolve(quiz)).questionCount, 5);
+  const long = await newCourse({ language: "en" });
+  await addSource(long, "final", "Final 2025", ENGLISH_FINAL);
+  await saveProfile(long, allQcmProfile(60));
+  const f = await resolve(long);
+  assert.equal(f.questionCount, 40);
+  assert.deepEqual(planMockExam(f, {}), { generator: "qcm", qcmCount: 40, openCount: 0 });
+});
+
+test("la composition proposée suit le même plan : 60 QCM d'annale → 40, aucune ouverte", async () => {
+  const id = await newCourse({ language: "en" });
+  await addSource(id, "final", "Final 2025", ENGLISH_FINAL);
+  await saveProfile(id, allQcmProfile(60));
+  const { runWithCourse } = await import("../db/client");
+  const { getComposition } = await import("../lib/composer");
+  const c = await runWithCourse(id, () => getComposition());
+  assert.deepEqual({ kind: c.kind, qcm: c.qcm, open: c.open }, { kind: "qcm", qcm: 40, open: 0 });
+});
+
+test("annale mixte : ses exercices de calcul et de preuve restent des questions ouvertes", async () => {
+  const id = await newCourse({ language: "en" });
+  await addSource(id, "final", "Final 2025", ENGLISH_FINAL);
+  await saveProfile(id, allQcmProfile(10, { question_types: [{ type: "scq", approx_count: 10, share_pct: 50 }, { type: "calc", approx_count: 2, share_pct: 30 }, { type: "proof", approx_count: 1, share_pct: 20 }] }));
+  const f = await resolve(id);
+  assert.deepEqual({ kind: f.kind, n: f.questionCount, open: f.openCount }, { kind: "mixed", n: 10, open: 3 });
+});
+
 const SPANISH = "La probabilidad de que el evento ocurra depende de la distribución. En este capítulo se estudian las variables aleatorias y sus propiedades, que son la base del curso. Cuando la muestra es grande, la media se acerca al valor esperado, pero hay que comprobar las hipótesis del teorema.";
 
 test("langue : l'espagnol est reconnu, sans brouiller le français, l'italien ni le portugais", async () => {

@@ -238,7 +238,9 @@ export function ExamComposer({ plan, onGenerated }: { plan: PlanQcm | PlanExam; 
           <div className="mt-4 space-y-2 border-t border-line pt-4">
             <div className="flex items-center justify-between text-[0.82rem]">
               <span className="inline-flex items-center gap-2 text-ink-2"><Clock3 className="size-3.5 text-ink-3" strokeWidth={2.25} /> Durée</span>
-              <span className="font-data tabular text-ink-1">{plan.durationMin} <span className="text-ink-3">min</span></span>
+              {plan.durationMin
+                ? <span className="font-data tabular text-ink-1">{plan.durationMin} <span className="text-ink-3">min</span></span>
+                : <span className="text-ink-3">non précisée</span>}
             </div>
             <div className="flex items-center justify-between text-[0.82rem]">
               <span className="text-ink-2">Total</span>

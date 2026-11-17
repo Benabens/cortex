@@ -200,7 +200,7 @@ export async function bankQuestions(kind?: Kind): Promise<BankQuestion[]> {
 
 // ─────────────────────── Parcours généré (couverture 100 % à la bonne proportion) ───────────────────────
 
-const LETTERS = ["A", "B", "C", "D", "E", "F"];
+const LETTERS = ["A", "B", "C", "D", "E", "F", "G", "H"];
 
 /**
  * Génère un PARCOURS de questions NEUVES couvrant TOUT le programme (chaque sujet ≥ 1 QCM) à la

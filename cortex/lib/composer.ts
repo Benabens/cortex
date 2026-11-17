@@ -1,7 +1,7 @@
 import { currentCourse } from "@/db/client";
 import { getCourse } from "@/lib/courses";
 import { getFormatProfile } from "@/lib/format";
-import { planMockExam, resolveExamFormat } from "@/lib/exam-format";
+import { durationOf, planMockExam, resolveExamFormat } from "@/lib/exam-format";
 import { profile } from "@/lib/course-profile";
 
 /**
@@ -19,7 +19,8 @@ export type CompositionPlan = {
   kind: "qcm" | "exam" | "unknown";
   /** Phrase de transparence : ce qui a été détecté. */
   summary: string;
-  durationMin: number;
+  /** Durée de l'épreuve (format résolu : annale, déclaration) ; null = inconnue. */
+  durationMin: number | null;
   totalPoints: number | null;
   // kind === "qcm"
   qcm?: number;   // défaut = nb de SCQ+MCQ détectés
@@ -42,7 +43,7 @@ export async function getComposition(): Promise<CompositionPlan> {
   const format = await resolveExamFormat();
   const plan = planMockExam(format, {});
   if (plan.generator === "none") {
-    return { course, kind: "unknown", summary: plan.reason, durationMin: c.durationMin, totalPoints: null };
+    return { course, kind: "unknown", summary: plan.reason, durationMin: null, totalPoints: null };
   }
 
   const fmt = format.basis === "annales" ? await getFormatProfile() : null;
@@ -52,7 +53,7 @@ export async function getComposition(): Promise<CompositionPlan> {
       course,
       kind: "qcm",
       summary: format.summary,
-      durationMin: format.durationMin || c.durationMin,
+      durationMin: durationOf(format),
       totalPoints: null,
       qcm: plan.qcmCount,
       open: plan.openCount,
@@ -64,18 +65,18 @@ export async function getComposition(): Promise<CompositionPlan> {
   if (plan.generator === "qcm" && fmt) {
     const types = fmt.question_types ?? [];
     const sum = (t: string) => types.filter((x) => x.type === t).reduce((s, x) => s + (x.approx_count || 0), 0);
-    const scq = sum("scq");
-    const mcq = sum("mcq");
-    const open = sum("open");
-    const qcm = scq + mcq;
+    // Nombres du plan (annale bornée à QCM_MAX, aucune ouverte inventée) ; la part SCQ/MCQ de l'annale, ramenée au nombre retenu.
+    const detected = sum("scq") + sum("mcq");
+    const scq = detected > 0 ? Math.round((sum("scq") * plan.qcmCount) / detected) : 0;
+    const mcq = detected > 0 ? plan.qcmCount - scq : 0;
     return {
       course,
       kind: "qcm",
-      summary: fmt.format_summary || `${c.examCode} : ~${qcm} QCM (SCQ+MCQ) + ~${open} ouvertes`,
-      durationMin: fmt.duration_min || c.durationMin,
+      summary: fmt.format_summary || `${c.examCode} : ~${plan.qcmCount} QCM (SCQ+MCQ)${plan.openCount ? ` + ~${plan.openCount} ouvertes` : ""}`,
+      durationMin: durationOf(format),
       totalPoints: fmt.total_points ?? null,
-      qcm: qcm || 12,
-      open,
+      qcm: plan.qcmCount,
+      open: plan.openCount,
       scq,
       mcq,
     };
@@ -87,7 +88,7 @@ export async function getComposition(): Promise<CompositionPlan> {
       course,
       kind: "exam",
       summary: format.summary,
-      durationMin: format.durationMin || c.durationMin,
+      durationMin: durationOf(format),
       totalPoints: plan.totalPoints,
       exercises: plan.blockCount,
       categories: plan.sections.map((s) => s.name),
@@ -106,9 +107,9 @@ export async function getComposition(): Promise<CompositionPlan> {
     course,
     kind: "exam",
     summary: format.basis === "annales"
-      ? `${c.examCode} ${c.examName}, ${c.examKind} : ${slots.length} exercices (calcul/trace : ${categories.join(", ")}), ${c.durationMin} min, ${totalPoints} pts`
+      ? `${c.examCode} ${c.examName}, ${c.examKind} : ${slots.length} exercices (calcul/trace : ${categories.join(", ")}), ${format.durationMin ? `${format.durationMin} min, ` : ""}${totalPoints} pts`
       : format.summary,
-    durationMin: format.durationMin || c.durationMin,
+    durationMin: durationOf(format),
     totalPoints,
     exercises,
     categories,
