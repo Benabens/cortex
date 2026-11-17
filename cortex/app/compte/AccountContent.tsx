@@ -8,6 +8,7 @@ import { DeleteAccount } from "./DeleteAccount";
 import { ExportData } from "./ExportData";
 import { ConnectedApps } from "./ConnectedApps";
 import { AppearanceSetting } from "./AppearanceSetting";
+import { LocaleSetting } from "./LocaleSetting";
 
 export function AccountContent({ email, enabled, connectedAppsEnabled }: {
   email: string | null;
@@ -41,6 +42,7 @@ export function AccountContent({ email, enabled, connectedAppsEnabled }: {
         </Link>
       )}
 
+      <LocaleSetting persist={enabled} />
       <AppearanceSetting />
 
       <BillingPanel />

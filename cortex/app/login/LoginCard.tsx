@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { Wordmark } from "@/components/shell/Logo";
+import { LocaleSwitcher } from "@/components/i18n/LocaleSwitcher";
 
 /** Messages clairs par code d'erreur NextAuth (cause + quoi faire). */
 function errorMessage(code: string): string {
@@ -283,6 +284,8 @@ export function LoginCard({
             </button>
           )}
         </p>
+        {/* Avant connexion, le choix vit dans un cookie ; il est copié sur le compte à la première visite. */}
+        <LocaleSwitcher persist={false} className="mt-5 flex flex-col items-center" />
       </div>
     </main>
   );
