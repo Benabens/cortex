@@ -12,11 +12,16 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { authAll, authGet, authRun } from "@/db/auth-store";
 import { backupS3Config, type Env } from "./backup-s3";
+import { captureError, captureErrorThrottled } from "./observability";
+import { railwayEnvironmentName } from "./railway-env";
 
 const KEY = "backup:daily";
 /** Compte rendu de la dernière sauvegarde réussie : {day, folder, postgres}. */
 const RESULT_KEY = "backup:daily_result";
 export const BACKUP_TICK_MS = 30 * 60_000;
+const BACKUP_ALERT_EVERY_MS = 6 * 3600_000;
+/** Au-delà, la dernière sauvegarde prouvée est en retard (un jour plus la marge d'un essai raté). */
+export const BACKUP_FRESH_MAX_MS = 36 * 3600_000;
 
 export type BackupResult = { day: string; folder: string; postgres: boolean; at?: string };
 
@@ -121,6 +126,9 @@ export async function dailyBackupTick(opts: {
   }
   await releaseDailyBackup(day);
   log(`[backup] sauvegarde quotidienne du ${day} : ÉCHEC (code ${code}) — nouvel essai au prochain tick`);
+  // Audit fuites I13 : sans alerte, on découvrait l'absence de sauvegarde le jour de la restauration.
+  // Le tick retente toutes les 30 min : une alerte par 6 h au plus tant que ça échoue.
+  captureErrorThrottled("backup.failed", new Error(`Sauvegarde quotidienne du ${day} en échec (code ${code})`), { area: "backup", alert: "backup_failed" }, BACKUP_ALERT_EVERY_MS);
   return "failed";
 }
 
@@ -146,9 +154,17 @@ export function startBackupScheduler(): NodeJS.Timeout | null {
     cfg = backupS3Config();
   } catch (e) {
     console.error(`[backup] ${(e as Error).message} — sauvegardes hors site DÉSACTIVÉES`);
+    captureError(e, { area: "backup", alert: "backup_config" });
     return null;
   }
-  if (!cfg) return null;
+  if (!cfg) {
+    // La prod sans BACKUP_S3_* ne sauvegarde rien hors site : ça se dit (les previews n'en ont pas, exprès).
+    if (railwayEnvironmentName() === "production") {
+      console.error("[backup] BACKUP_S3_* absents en production — sauvegardes hors site DÉSACTIVÉES");
+      captureError(new Error("Sauvegardes hors site désactivées en production (BACKUP_S3_* absents)"), { area: "backup", alert: "backup_disabled" });
+    }
+    return null;
+  }
   if (g.__cortexBackupTimer) clearInterval(g.__cortexBackupTimer);
   const tick = () => dailyBackupTick({ run: runBackupChild }).catch((e) => console.error("[backup] tick :", (e as Error).message));
   // Premier passage différé d'une minute : laisser la base et les jobs démarrer.
