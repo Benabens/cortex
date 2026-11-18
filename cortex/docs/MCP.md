@@ -78,6 +78,7 @@ l'app appellent déjà. La seule extraction (`lib/generation.ts`) remplace le co
 ## 3. Outils exposés
 
 Noms et descriptions en anglais (lus par le modèle) ; les réponses gardent la langue des contenus.
+Suivi d'un job (`get_job_status`) : l'erreur et l'étape sont en anglais quand le worker a rangé leur forme sans langue (code d'erreur, fin d'examen, reprise, file d'attente) ; sinon la phrase française d'origine, que le modèle reformule pour l'étudiant (`localizeJob`, repli « raw »).
 Tous les outils prennent un `course` facultatif : identifiant, code (« COMP 201 ») ou nom du cours ;
 absent, le seul cours du compte est pris, sinon l'outil liste les cours et demande lequel.
 
