@@ -5,9 +5,10 @@ import { getCourse } from "@/lib/courses";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, coursePassages } from "@/lib/course-grounding";
 import { assignChapters, spreadOverChapters } from "@/lib/coverage";
 import type { StepCb } from "@/lib/exam";
-import { examLanguageFor, type BlockFormat } from "@/lib/exam-format";
+import { BLOCK_PART_KINDS, examLanguageFor, type BlockFormat, type BlockPartKind, type PartShape } from "@/lib/exam-format";
 import { HARD_STOP_CODES, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
 import { languageName } from "@/lib/profiles/generic-directives";
+import { untypesetChars } from "@/lib/tex-escape";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { NO_FLAG, coverageTopics, runPool } from "@/lib/qcm";
 import { examsDir } from "@/lib/paths";
@@ -34,8 +35,8 @@ import { storage } from "@/lib/storage";
  * les reproches du juge ; le nombre demandé est tenu, ou le manque est dit et compté.
  */
 
-export type PartKind = "scq" | "short" | "code_output";
-export const PART_KINDS: readonly PartKind[] = ["scq", "short", "code_output"];
+export type PartKind = BlockPartKind;
+export const PART_KINDS: readonly PartKind[] = BLOCK_PART_KINDS;
 export type Criterion = { label: string; points: number };
 
 export type BlockPart = {
@@ -62,7 +63,7 @@ export type ExamBlock = { title: string; section: string | null; scenario: strin
 /** Ce qu'un bloc couvre : une section de l'annale modèle, ou une notion du cours. */
 type BlockSlot = { theme: string; section: string | null; query: string[]; notions: string[] };
 
-export type BlockPlan = { blockCount: number; partsMin: number; partsMax: number; sections: BlockFormat["sections"]; totalPoints: number | null };
+export type BlockPlan = { blockCount: number; partsMin: number; partsMax: number; sections: BlockFormat["sections"]; totalPoints: number | null } & PartShape;
 
 const BLOCK_SCHEMA = {
   type: "object",
@@ -76,8 +77,8 @@ const BLOCK_SCHEMA = {
         properties: {
           kind: { type: "string", enum: ["scq", "short", "code_output"] },
           prompt: { type: "string" },
-          code: { type: "string", description: "code_output : l'extrait Python autonome ; vide sinon." },
-          options: { type: "array", items: { type: "string" }, description: "scq : exactement 4 options ; vide sinon." },
+          code: { type: "string", description: "code_output : l'extrait autonome, dans le langage de la consigne ; vide sinon." },
+          options: { type: "array", items: { type: "string" }, description: "scq : le nombre d'options de la consigne ; vide sinon." },
           correct: { type: "integer", description: "scq : indice de la bonne option ; -1 sinon." },
           answer: { type: "string", description: "short : réponse modèle ; code_output : sortie exacte ; scq : vide." },
           criteria: {
@@ -139,7 +140,7 @@ const isInt = (n: unknown): n is number => typeof n === "number" && Number.isInt
 const text = (s: unknown) => (typeof s === "string" ? s.trim() : "");
 
 /** Ce qui manque à un bloc rendu par le modèle (renvoyé tel quel au modèle), null s'il est conforme. */
-export function blockIssue(v: unknown, min: number, max: number): string | null {
+export function blockIssue(v: unknown, min: number, max: number, shape: PartShape = {}): string | null {
   const b = v as { scenario?: unknown; parts?: unknown };
   if (!text(b?.scenario)) return "le champ « scenario » (le scénario commun) est vide";
   if (!Array.isArray(b.parts) || b.parts.length < min || b.parts.length > max) {
@@ -148,12 +149,18 @@ export function blockIssue(v: unknown, min: number, max: number): string | null 
   const parts = b.parts as Partial<BlockPart>[];
   for (const [i, p] of parts.entries()) {
     const at = `sous-question ${LETTER[i].toLowerCase()}`;
-    if (!PART_KINDS.includes(p?.kind as PartKind)) return `${at} : « kind » doit valoir scq, short ou code_output`;
+    const kinds = shape.kinds ?? PART_KINDS;
+    if (!kinds.includes(p?.kind as PartKind)) return shape.kinds && PART_KINDS.includes(p?.kind as PartKind)
+      ? `${at} : « ${p.kind} » n'est pas un type de l'annale, emploie seulement ${kinds.join(", ")}`
+      : `${at} : « kind » doit valoir ${kinds.slice(0, -1).join(", ")}${kinds.length > 1 ? " ou " : ""}${kinds.at(-1)}`;
     if (!text(p.prompt)) return `${at} : « prompt » est vide`;
     if (!isInt(p.points) || p.points < 1) return `${at} : « points » doit être un entier ≥ 1`;
+    const scale = shape.points?.[p.kind as PartKind];
+    if (scale && p.points !== scale) return `${at} (${p.kind}) : ${scale} points, comme dans le barème de l'annale (reçu ${p.points})`;
     if (p.kind === "scq") {
       const opts = Array.isArray(p.options) ? p.options : [];
-      if (opts.length < 3 || opts.length > 6 || opts.some((o) => !text(o))) return `${at} (scq) : 3 à 6 options non vides (4 de préférence)`;
+      const empty = opts.some((o) => !text(o));
+      if (shape.options ? opts.length !== shape.options || empty : opts.length < 3 || opts.length > 6 || empty) return `${at} (scq) : ${shape.options ? `exactement ${shape.options} options non vides, comme l'annale` : "3 à 6 options non vides (4 de préférence)"}`;
       if (!isInt(p.correct) || p.correct < 0 || p.correct >= opts.length) return `${at} (scq) : « correct » doit être l'indice de la bonne option`;
     } else if (p.kind === "short") {
       const crit = Array.isArray(p.criteria) ? p.criteria : [];
@@ -165,7 +172,13 @@ export function blockIssue(v: unknown, min: number, max: number): string | null 
       if (!text(p.answer)) return `${at} (code_output) : « answer » (la sortie exacte) est vide`;
     }
   }
-  if (!parts.some((p) => p.kind === "scq") || !parts.some((p) => p.kind === "short")) return "mêle les types : au moins un choix unique (scq) et au moins une réponse courte (short)";
+  // Tout texte du bloc passe par esc dans le PDF : un caractère qu'il ne sait pas écrire y deviendrait une espace.
+  const unprintable = untypesetChars(b);
+  if (unprintable.length) return `${unprintable.join(" ")} ne s'imprime pas dans le PDF : écris-le autrement (en toutes lettres)`;
+  // Le mélange imposé n'est que le défaut : l'annale dit ses types quand elle les montre.
+  if (shape.kinds) {
+    if (shape.kinds.length > 1 && new Set(parts.map((p) => p.kind)).size < 2) return `mêle les types de l'annale (${shape.kinds.join(", ")}) : au moins deux d'entre eux`;
+  } else if (!parts.some((p) => p.kind === "scq") || !parts.some((p) => p.kind === "short")) return "mêle les types : au moins un choix unique (scq) et au moins une réponse courte (short)";
   return null;
 }
 
@@ -188,7 +201,8 @@ function seedOf(s: string): number {
 
 /** Position de la bonne option mélangée (graine = l'énoncé : reproductible). */
 function shuffleOptions(p: BlockPart): BlockPart {
-  if (p.kind !== "scq" || /\b(?:option|answer|réponse)\s+[A-D]\b/.test(p.explanation)) return p;
+  // Jusqu'à H : l'annale peut avoir 5 options ou plus (P1-12).
+  if (p.kind !== "scq" || /\b(?:option|answer|réponse)\s+[A-H]\b/.test(p.explanation)) return p;
   const rnd = seeded(seedOf(p.prompt));
   const order = p.options.map((_, i) => i);
   for (let i = order.length - 1; i > 0; i--) {
@@ -271,20 +285,38 @@ async function recentBlockPrompts(limit = 30): Promise<string[]> {
   }
 }
 
+const BAREME: [PartKind, string][] = [["scq", "1 point par choix unique"], ["short", "1 à 3 points par réponse courte"], ["code_output", "1 à 2 points par lecture de code"]];
+const PART_NAME: Record<PartKind, string> = { scq: "choix unique", short: "réponse courte", code_output: "lecture de code" };
+
+/** Barème du prompt : celui de l'annale pour un type qu'elle note pareil partout, le défaut sinon. */
+const baremeText = (k: PartKind, def: string, points: PartShape["points"]) => {
+  const n = points?.[k];
+  return n ? `${n} point${n > 1 ? "s" : ""} par ${PART_NAME[k]} (barème de l'annale)` : def;
+};
+
+/** Les extraits sont du Python sauf si l'annale en montre d'un autre langage. */
+const isPython = (language: string | undefined) => !language || /^(?:python\d?|py)$/.test(language);
+const codeName = (language: string) => ({ c: "C", "c++": "C++", cpp: "C++", "c#": "C#", csharp: "C#", java: "Java", javascript: "JavaScript", js: "JavaScript", typescript: "TypeScript", ocaml: "OCaml", scala: "Scala", rust: "Rust", go: "Go", r: "R", matlab: "MATLAB", sql: "SQL", haskell: "Haskell" } as Record<string, string>)[language] ?? language;
+
 function systemPrompt(plan: BlockPlan, n: number, counterExamples: string): string {
   const c = getCourse(currentCourse());
   const language = languageName(examLanguageFor(currentCourse()))[1];
-  const perBlock = plan.totalPoints ? Math.max(3, Math.round(plan.totalPoints / Math.max(1, n))) : null;
+  // Le barème de l'annale fixe déjà les points de chaque sous-question : un total visé le contredirait.
+  const perBlock = plan.totalPoints && !plan.points ? Math.max(3, Math.round(plan.totalPoints / Math.max(1, n))) : null;
+  const allows = (k: PartKind) => !plan.kinds || plan.kinds.includes(k);
+  const python = isPython(plan.codeLanguage);
   return [
     `Tu es l'équipe enseignante de ${c.examCode} ${c.examName}. Tu rédiges UNE question d'examen COMPOSÉE, au format réel du cours : un court scénario (situation concrète, petites données, ou extrait de code), suivi de ${plan.partsMin} à ${plan.partsMax} sous-questions qui portent toutes sur ce scénario.`,
-    `TYPES DE SOUS-QUESTIONS (mêle-les : au moins un choix unique et au moins une réponse courte ; une lecture de code quand le thème s'y prête) :`,
-    `  - "scq" — choix unique : exactement 4 options, UNE seule juste ("correct" = son indice). Chaque distracteur est une notion, une définition, une valeur ou une sortie RÉELLEMENT présente dans le cours, légèrement déformée et proche de la bonne réponse — jamais une option générique, absurde ou réfutable par le bon sens. Aucune phrase commune répétée en tête des options. L'explication désigne les options par leur contenu, jamais par leur lettre.`,
-    `  - "short" — réponse courte (1 à 3 phrases) : "answer" = la réponse modèle, conforme au cours ; "criteria" = 1 à 3 critères OBSERVABLES dans une copie (ce que la réponse doit nommer ou justifier), chacun avec ses points entiers, leur somme = "points".`,
-    `  - "code_output" — lecture de code : "code" = un extrait Python AUTONOME et court (bibliothèque standard ; pandas seulement si le cours l'emploie ; ni fichier, ni réseau, ni hasard, ni horloge), "prompt" demande ce qu'il affiche, "answer" = sa sortie EXACTE, ligne pour ligne. Jamais d'écriture de code.`,
+    plan.kinds
+      ? `TYPES DE SOUS-QUESTIONS (ceux de l'annale, aucun autre${plan.kinds.length > 1 ? " ; mêle-les : au moins deux d'entre eux" : ""}) :`
+      : `TYPES DE SOUS-QUESTIONS (mêle-les : au moins un choix unique et au moins une réponse courte ; une lecture de code quand le thème s'y prête) :`,
+    allows("scq") && `  - "scq" — choix unique : exactement ${plan.options ?? 4} options, UNE seule juste ("correct" = son indice). Chaque distracteur est une notion, une définition, une valeur ou une sortie RÉELLEMENT présente dans le cours, légèrement déformée et proche de la bonne réponse — jamais une option générique, absurde ou réfutable par le bon sens. Aucune phrase commune répétée en tête des options. L'explication désigne les options par leur contenu, jamais par leur lettre.`,
+    allows("short") && `  - "short" — réponse courte (1 à 3 phrases) : "answer" = la réponse modèle, conforme au cours ; "criteria" = 1 à 3 critères OBSERVABLES dans une copie (ce que la réponse doit nommer ou justifier), chacun avec ses points entiers, leur somme = "points".`,
+    allows("code_output") && `  - "code_output" — lecture de code : "code" = un extrait ${python ? "Python" : codeName(plan.codeLanguage!)} AUTONOME et court (bibliothèque standard${python ? " ; pandas seulement si le cours l'emploie" : ""} ; ni fichier, ni réseau, ni hasard, ni horloge), "prompt" demande ce qu'il affiche, "answer" = sa sortie EXACTE, ligne pour ligne. Jamais d'écriture de code.`,
     `  - Chaque sous-question se répond seule à partir du scénario : aucune ne dépend de la réponse d'une autre, aucune ne donne la réponse d'une autre.`,
     COURSE_TERMS_RULE,
     COURSE_MATTER_RULE,
-    `  - Barème : 1 point par choix unique, 1 à 3 points par réponse courte, 1 à 2 points par lecture de code${perBlock ? ` ; environ ${perBlock} points pour la question entière` : ""}.`,
+    `  - Barème : ${BAREME.filter(([k]) => allows(k)).map(([k, t]) => baremeText(k, t, plan.points)).join(", ")}${perBlock ? ` ; environ ${perBlock} points pour la question entière` : ""}.`,
     `Langue de l'examen : ${language} (énoncés, options, réponses et critères).`,
     counterExamples,
     `Réponds UNIQUEMENT avec un objet JSON {"title","scenario","parts":[{"kind","prompt","code","options","correct","answer","criteria":[{"label","points"}],"points","explanation"}]}. Aucune prose autour, aucune balise markdown autour du JSON.`,
@@ -304,7 +336,7 @@ async function generateBlock(slot: BlockSlot, i: number, n: number, plan: BlockP
   ].filter(Boolean).join("\n\n");
   const raw = await completeJson<{ title?: string; scenario?: string; parts?: Partial<BlockPart>[] }>(
     { system: ctx.system, prompt, model: "opus", timeoutMs: 300_000, json: { schema: BLOCK_SCHEMA } },
-    { check: (v) => blockIssue(v, plan.partsMin, plan.partsMax) },
+    { check: (v) => blockIssue(v, plan.partsMin, plan.partsMax, plan) },
   );
   const parts = (raw.parts ?? []).map(cleanPart).map(shuffleOptions);
   return { title: text(raw.title) || slot.section || "Question", section: slot.section, scenario: String(raw.scenario ?? "").trim(), parts, points: parts.reduce((s, p) => s + p.points, 0), verified: null };
@@ -316,8 +348,10 @@ async function generateBlock(slot: BlockSlot, i: number, n: number, plan: BlockP
  * module absents : la prédiction reste, le juge la vérifie. Un extrait qui plante est une
  * erreur du bloc.
  */
-async function runCodeParts(b: ExamBlock): Promise<string[]> {
+async function runCodeParts(b: ExamBlock, language: string | undefined): Promise<string[]> {
   const issues: string[] = [];
+  // Seul Python s'exécute ici : la sortie d'un autre langage reste celle du modèle, que le juge vérifie.
+  if (!isPython(language)) return issues;
   for (const [i, p] of b.parts.entries()) {
     if (p.kind !== "code_output" || !p.code) continue;
     const r = await runPython(p.code, { timeoutMs: 10_000, cpuSeconds: 5, maxOutputBytes: 8_000 });
@@ -334,10 +368,10 @@ async function runCodeParts(b: ExamBlock): Promise<string[]> {
 }
 
 /** Juge à l'aveugle (sans clé ni barème) : ce qu'il reproche au bloc, vide s'il passe. null : juge indisponible. */
-async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[]): Promise<string[] | null> {
+async function judgeBlock(b: ExamBlock, passages: { src: string; text: string }[], language: string | undefined): Promise<string[] | null> {
   const body = b.parts.map((p, i) => [
     `(${LETTER[i].toLowerCase()}) [${p.kind}] ${p.prompt}`,
-    p.kind === "code_output" ? "```python\n" + p.code + "\n```" : "",
+    p.kind === "code_output" ? "```" + (language ?? "python") + "\n" + p.code + "\n```" : "",
     ...p.options.map((o, k) => `  ${LETTER[k]}. ${o}`),
   ].filter(Boolean).join("\n")).join("\n\n");
   const system = [
@@ -420,8 +454,8 @@ async function buildBlock(slot: BlockSlot, i: number, n: number, plan: BlockPlan
       step(`Question composée ${i + 1}, version ${attempt} inutilisable : ${why.slice(0, 140)}`, 0);
       continue;
     }
-    const issues = [...await runCodeParts(b)];
-    const judged = await judgeBlock(b, passages);
+    const issues = [...await runCodeParts(b, plan.codeLanguage)];
+    const judged = await judgeBlock(b, passages, plan.codeLanguage);
     if (judged) issues.push(...judged);
     if (!issues.length) {
       work.done(BLOCKS_PHASE);

@@ -1,0 +1,8 @@
+% Écritures au-delà du latin (cyrillique, grec, vietnamien...) : chargé par lib/exam-latex
+% juste avant \begin{document}, seulement quand le source en contient. tectonic est un moteur
+% XeTeX : fontspec y passe en codage Unicode, et Computer Modern Unicode (CMU, paquet
+% cm-unicode du bundle) garde le dessin de Latin Modern tout en couvrant ces écritures.
+\usepackage{fontspec}
+\setmainfont{cmunrm.otf}[BoldFont=cmunbx.otf,ItalicFont=cmunti.otf,BoldItalicFont=cmunbi.otf]
+\setsansfont{cmunss.otf}[BoldFont=cmunsx.otf,ItalicFont=cmunsi.otf,BoldItalicFont=cmunso.otf]
+\setmonofont{cmuntt.otf}[BoldFont=cmuntb.otf,ItalicFont=cmunit.otf,BoldItalicFont=cmuntx.otf]
