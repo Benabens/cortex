@@ -279,7 +279,14 @@
     "pdf_recompile_failed": "The PDF still won’t compile.",
     "llm_engine_unreachable_retry": "The AI engine can’t be reached. Try again later.",
     "llm_engine_unavailable_reason": "The AI engine is unavailable on this server: {reason}",
-    "source_type_unknown": "Unsupported document type (unknown): only PDF, web pages, or text are accepted."
+    "source_type_unknown": "Unsupported document type (unknown): only PDF, web pages, or text are accepted.",
+    "job_failed": "The operation failed. Try again.",
+    "job_worker_lost": "The generation stopped (worker interrupted) and is no longer running. Start it again.",
+    "job_reservation_invalid": "The generation couldn’t resume: its credit reservation is missing or no longer valid.",
+    "job_course_unavailable": "This course is no longer available to your account (deleted or transferred); the generation was canceled.",
+    "job_corpus_missing": "The course materials haven’t been processed yet. Add materials and prepare the course first.",
+    "job_pdf_failed": "The PDF couldn’t be compiled; the exam stays readable in the app.",
+    "job_qcm_all_dropped": "No multiple-choice question was generated: the {dropped} questions designed were all discarded by the quality checks (off-syllabus, disputed key, distractors too easy). Try again; report it if it keeps happening for this course."
   },
   "ingestReport": {
     "unreadable": "damaged file or unrecognised format: it could not be read. Export it again as a PDF, then upload it again.",
@@ -1596,5 +1603,23 @@
     "openExam": "Open the exam",
     "frameTitle": "Mock exam #{id}, PDF",
     "pdfNote": "Your past exam’s layout, read when the course was prepared (a plain layout if Cortex couldn’t read it). Print it, write your answers on paper, then come back to the site to mark them."
+  },
+  "jobText": {
+    "etaQueued": "Queued: about {minutes} min once started",
+    "etaRemaining": "{minutes, plural, =0 {less than a minute left} other {≈ # min left}}",
+    "etaResumed": "{minutes, plural, =0 {less than a minute left} other {≈ # min left}} (resumed)",
+    "etaLate": "Taking longer than usual; the generation continues",
+    "etaNoHistory": "{eta} (estimate without history)",
+    "stepQueued": "Queued…",
+    "stepRunning": "{type, select, qcm {Generating the multiple-choice exam…} exam {Generating the mock exam…} exercise {Generating the exercise…} lab {Generating the exercise…} ingest {Reading your files…} prepare {Preparing the course…} format {Reading the exam format…} blueprint {Analysing the course syllabus…} other {Working…}}",
+    "stepResumed": "Worker interrupted, resuming automatically (attempt {attempt}/{max}), progress kept.",
+    "stepWaiting": "In line (position {position}): the server is at full capacity; your {what, select, ingest {import} other {generation}} starts as soon as a slot frees up.",
+    "stepDone": "Done ✓",
+    "stepDoneIncomplete": "Done ⚠ {shortfall}",
+    "stepCanceled": "Canceled",
+    "stepFailed": "Failed",
+    "shortfall": "{missing, plural, one {# question of {requested} couldn’t be generated} other {# questions of {requested} couldn’t be generated}}",
+    "shortfallBack": "{shortfall}: {credits} {back, plural, one {credit returned} other {credits returned}}",
+    "errorBack": "{error} ({credits} {back, plural, one {credit returned} other {credits returned}})."
   }
 }

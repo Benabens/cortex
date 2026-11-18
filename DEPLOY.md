@@ -270,7 +270,7 @@ SUBSCRIPTION_MONTHLY_CREDITS=20
 # Un LEGAL_TERMS_URL / _PRIVACY_ / _REFUND_ / _NOTICE_URL explicite prime.
 LANDING_URL=https://⟨landing⟩
 # Version des CGV tracée à l'acceptation (change-la à chaque révision des CGV).
-LEGAL_TERMS_VERSION=2026-11-17
+LEGAL_TERMS_VERSION=2026-11-18
 # Adresse de contact affichée dans l'app (défaut : celle de l'éditeur).
 # CONTACT_EMAIL=support@⟨ton-domaine⟩
 # Adresse qui reçoit les demandes de rétractation (et, à défaut de

@@ -18,6 +18,8 @@ import { setCurrentJob } from "../lib/billing/usage-context";
 import { generateLabExercise } from "../lib/labs";
 import { analyzeBlueprint } from "../lib/program";
 import { INGEST_REPORT_ENV, ingestFailureMessage } from "../lib/ingest-report";
+import { jobErrorOf } from "../lib/i18n/job-text";
+import { userError, type UserError } from "../lib/i18n/user-error";
 import { readIngestReport } from "../lib/ingest-report-file";
 import { ingestMaxHeapMb, ingestTimeoutMs, spawnBounded } from "../lib/ingest-limits";
 import fs from "node:fs";
@@ -47,7 +49,11 @@ function finish(code: number): Promise<never> {
   return new Promise<never>(() => {});
 }
 
-async function fail(msg: string): Promise<never> {
+/**
+ * `info` : l'erreur sans langue (lib/i18n/job-text) ; `msg` reste la phrase française du journal
+ * et du lecteur français.
+ */
+async function fail(msg: string, info: UserError = userError("job_failed")): Promise<never> {
   // Annulé entre-temps par l'utilisateur : cancelJob a statué (remboursement compris), on n'écrase rien.
   // « done » aussi : un QCM annulé après livraison est clos par cancelJob avec ce qu'il contenait.
   try { if (["canceled", "done"].includes((await getJob(jobId))?.status ?? "")) process.exit(0); } catch {}
@@ -63,7 +69,7 @@ async function fail(msg: string): Promise<never> {
     // du 14/11 : un prepare_course qui échoue après une ingestion réussie retombait à 0 %).
     const current = await getJob(jobId);
     const resetProgress = current && (current.type === "exam" || current.type === "qcm") && !current.resultId;
-    await setJob(jobId, { status: "error", error: msg, ...(resetProgress ? { progress: 0 } : {}) });
+    await setJob(jobId, { status: "error", error: msg, errorInfo: info, ...(resetProgress ? { progress: 0 } : {}) });
     await logJob(jobId, "ERREUR : " + msg);
   } catch {}
   // Suivi d'erreurs optionnel : un job qui échoue de nuit doit être visible.
@@ -82,9 +88,14 @@ async function fail(msg: string): Promise<never> {
     const { fmtCreditsBack } = await import("../lib/billing/credits");
     const j = await getJob(jobId);
     const back = j ? await refundJobCredits(j, "failed") : 0;
-    if (back > 0) await setJob(jobId, { error: `${msg} — ${fmtCreditsBack(back)}.` });
+    if (back > 0) await setJob(jobId, { error: `${msg} — ${fmtCreditsBack(back)}.`, errorInfo: { ...info, creditsBackCenti: back } });
   } catch {}
   return finish(1);
+}
+
+/** Échec sur une exception : sa phrase pour le journal, son code pour les autres lecteurs. */
+function failWith(e: unknown): Promise<never> {
+  return fail((e as Error)?.message || String(e), jobErrorOf(e));
 }
 
 /** Job d'INGESTION : (re)construit le corpus du cours, en important un dossier si fourni. */
@@ -222,7 +233,7 @@ async function main() {
       await logJob(jobId, "Ingestion terminée ✓");
       return finish(0);
     } catch (e) {
-      await fail((e as Error)?.message || String(e));
+      await failWith(e);
     }
     return;
   }
@@ -255,14 +266,14 @@ async function main() {
       await settleAfterPages();
       await setJob(jobId, { status: "done", progress: 100, currentStep: `Cours prêt ✓ — refs ${refsN}, ${r.exercises} exos indexés (${r.exams} finals) → ${r.types} types` });
       return finish(0);
-    } catch (e) { await fail((e as Error)?.message || String(e)); }
+    } catch (e) { await failWith(e); }
     return;
   }
 
   // (re)détection du format d'examen depuis les annales (après upload de finals).
   if (job.type === "format") {
     await setJob(jobId, { status: "running", pid: process.pid, currentStep: "Détection du format…", progress: 4 });
-    if (!llmAvailable()) await fail(llmUnavailableReason()!);
+    if (!llmAvailable()) await fail(llmUnavailableReason()!, userError("llm_engine_unavailable"));
     try {
       const { detectFormat } = await import("../lib/format");
       const onStep = async (s: string, p: number) => {
@@ -275,7 +286,7 @@ async function main() {
       // Pas de départ ici : l'index exo par exo (préparation, blueprint) relit encore les pages.
       await setJob(jobId, { status: "done", progress: 100, currentStep: `Format détecté : ${(f.format_summary || "").slice(0, 60)} ✓` });
       return finish(0);
-    } catch (e) { await fail((e as Error)?.message || String(e)); }
+    } catch (e) { await failWith(e); }
     return;
   }
 
@@ -283,7 +294,7 @@ async function main() {
   if (job.type === "qcm") {
     await setJob(jobId, { status: "running", pid: process.pid, currentStep: "Architecte QCM…", progress: 4 });
     await logJob(jobId, `Worker démarré (PID ${process.pid})`);
-    if (!llmAvailable()) await fail(llmUnavailableReason()!);
+    if (!llmAvailable()) await fail(llmUnavailableReason()!, userError("llm_engine_unavailable"));
     try {
       const { generateQcmExam, qcmExamSummary } = await import("../lib/qcm");
       // composeur : {count, openCount, focus} ; count/openCount peuvent valoir 0 (respectés).
@@ -307,19 +318,19 @@ async function main() {
       // Point de reprise : un worker tué (redéploiement, crash) et repris repart de ce qui est acquis.
       const res = await generateQcmExam({ count, openCount, focus, onStep, onExamReady, phaseMs: await phaseHistory("qcm"), checkpoint: jobCheckpointStore(jobId) });
       // Examen incomplet : dit et remboursé au prorata (lib/jobs settleShortfall).
-      const { settleShortfall } = await import("../lib/jobs");
-      const notice = await settleShortfall(job, res.count + res.open, res.requested + res.openRequested);
+      const { doneStep, settleShortfallDetail } = await import("../lib/jobs");
+      const shortfall = await settleShortfallDetail(job, res.count + res.open, res.requested + res.openRequested);
       // PDF non compilé : dit, comme pour l'examen écrit (avant : silencieux, seul le .tex existait).
       if (res.texError) {
-        await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, l'examen reste lisible dans l'app. Détail : ${res.texError.slice(0, 500)}` });
+        await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, l'examen reste lisible dans l'app. Détail : ${res.texError.slice(0, 500)}`, errorInfo: userError("job_pdf_failed") });
         await logJob(jobId, `⚠ Erreur LaTeX : ${res.texError.slice(0, 300)}`);
       }
-      await setJob(jobId, { status: "done", progress: 100, resultId: res.id, resultPath: `/mock/${res.id}`, currentStep: `Mock QCM #${res.id} — ${qcmExamSummary(res)}${notice ? ` ⚠ ${notice}` : " ✓"}` });
+      await setJob(jobId, { status: "done", progress: 100, resultId: res.id, resultPath: `/mock/${res.id}`, ...doneStep(shortfall, `Mock QCM #${res.id} — ${qcmExamSummary(res)}`) });
       await saveJobCheckpoint(jobId, null).catch(() => {}); // job livré : le point de reprise ne sert plus
       await logJob(jobId, `Mock QCM #${res.id} prêt → /mock/${res.id}`);
       return finish(0);
     } catch (e) {
-      await fail((e as Error)?.message || String(e));
+      await failWith(e);
     }
     return;
   }
@@ -328,9 +339,9 @@ async function main() {
   if (job.type === "blueprint") {
     await setJob(jobId, { status: "running", pid: process.pid, currentStep: "Analyse du programme…", progress: 4 });
     await logJob(jobId, `Worker démarré (PID ${process.pid})`);
-    if (!llmAvailable()) await fail(llmUnavailableReason()!);
+    if (!llmAvailable()) await fail(llmUnavailableReason()!, userError("llm_engine_unavailable"));
     const n = (await q.get<{ n: number }>("SELECT count(*) n FROM items"))?.n ?? 0;
-    if (!n) await fail("Corpus non ingéré. Lance « npm run ingest » d'abord.");
+    if (!n) await fail("Corpus non ingéré. Lance « npm run ingest » d'abord.", userError("job_corpus_missing"));
     try {
       const onStep = async (s: string, p: number) => {
         const j = await getJob(jobId);
@@ -345,7 +356,7 @@ async function main() {
       await logJob(jobId, `Blueprint exhaustif → ${res.exercises} exos indexés, ${res.types} types.`);
       return finish(0);
     } catch (e) {
-      await fail((e as Error)?.message || String(e));
+      await failWith(e);
     }
     return;
   }
@@ -354,9 +365,9 @@ async function main() {
   await logJob(jobId, `Worker démarré (PID ${process.pid})`);
 
   // ---- Pré-checks : échec clair AVANT 20 min de travail ----
-  if (!llmAvailable()) await fail(llmUnavailableReason()!);
+  if (!llmAvailable()) await fail(llmUnavailableReason()!, userError("llm_engine_unavailable"));
   const items = (await q.get<{ n: number }>("SELECT count(*) n FROM items"))?.n ?? 0;
-  if (!items) await fail("Corpus non ingéré. Lance « npm run ingest » d'abord.");
+  if (!items) await fail("Corpus non ingéré. Lance « npm run ingest » d'abord.", userError("job_corpus_missing"));
   if (!texAvailable()) await logJob(jobId, "⚠ tectonic/pdflatex absent → repli HTML. Installe tectonic (brew install tectonic) pour le vrai PDF.");
   await logJob(jobId, "Pré-checks OK");
 
@@ -391,20 +402,20 @@ async function main() {
           : await generateMockExam({ count: examCount, focus: examFocus, kind: examKind, onStep, jobId, paidCenti: job.type === "exam" ? costForJob("exam", job.target) : undefined, phaseMs: await phaseHistory(job.type), onExamReady: async (examId: number, order?: { requested: number }) => { await setJob(jobId, { resultId: examId, resultPath: `/mock/${examId}`, ordered: order?.requested }); } });
     if (res.texError) {
       // le résultat existe (HTML lisible) mais le PDF a échoué → erreur LaTeX gardée pour debug
-      await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, repli HTML lisible. Détail : ${res.texError.slice(0, 500)}` });
+      await setJob(jobId, { error: `Compilation LaTeX échouée — PDF indisponible, repli HTML lisible. Détail : ${res.texError.slice(0, 500)}`, errorInfo: userError("job_pdf_failed") });
       await logJob(jobId, `⚠ Erreur LaTeX : ${res.texError.slice(0, 300)}`);
     }
-    const { settleShortfall } = await import("../lib/jobs");
+    const { doneStep, settleShortfallDetail } = await import("../lib/jobs");
     // Seul l'examen blanc compte ses questions (MockExamResult) ; exercices et labs n'en ont qu'une.
     const counts = res as { produced?: number; requested?: number };
-    const notice = counts.produced != null && counts.requested != null
-      ? await settleShortfall(job, counts.produced, counts.requested)
+    const shortfall = counts.produced != null && counts.requested != null
+      ? await settleShortfallDetail(job, counts.produced, counts.requested)
       : null;
-    await setJob(jobId, { status: "done", progress: 100, resultPath: res.url, resultId: res.id, currentStep: notice ? `Terminé ⚠ ${notice}` : "Terminé ✓" });
+    await setJob(jobId, { status: "done", progress: 100, resultPath: res.url, resultId: res.id, ...doneStep(shortfall) });
     await logJob(jobId, `${job.type === "exercise" ? "Exercice" : job.type === "lab-exercise" ? "Exercice Labs" : "Examen"} #${res.id} prêt → ${res.url}`);
     return finish(0);
   } catch (e) {
-    await fail((e as Error)?.message || String(e));
+    await failWith(e);
   }
 }
 
@@ -429,7 +440,7 @@ async function runWithCourseFiles(): Promise<void> {
     code = await storage().withLocalDir([cp.refsDir, cp.contentRoot, cp.examsDir, cp.uploadsDir], () => new Promise<number>((resolve) => {
       settle = resolve;
       // main ne se termine que si aucun chemin n'a appelé finish : sortie normale, comme avant.
-      main().then(() => resolve(0), (e) => fail((e as Error)?.message || String(e)));
+      main().then(() => resolve(0), failWith);
     }));
   } catch (e) {
     // Le job a fini mais ses fichiers ne sont pas tous dans le seau : ils restent
@@ -445,4 +456,4 @@ async function runWithCourseFiles(): Promise<void> {
   process.exit(code);
 }
 
-ensureCoursesLoaded().then(runWithCourseFiles).catch((e) => fail((e as Error)?.message || String(e)));
+ensureCoursesLoaded().then(runWithCourseFiles).catch(failWith);

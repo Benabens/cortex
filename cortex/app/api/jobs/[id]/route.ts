@@ -1,4 +1,5 @@
-import { apiError } from "@/lib/i18n/api-error";
+import { apiError, requestLocale } from "@/lib/i18n/api-error";
+import { localizeJob } from "@/lib/i18n/job-text";
 import { cancelJob, getJob, jobEta } from "@/lib/jobs";
 import { redactMessage } from "@/lib/observability";
 import { useCourseOr404 } from "@/lib/req";
@@ -18,12 +19,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // Même nettoyage que le connecteur MCP (lib/mcp/tools/get-job-status) : error ET
   // currentStep sont affichés tels quels par l'app (JobBanner, ExamComposer…), et une
   // cause brute (fournisseur, journal tectonic) peut citer un chemin ou un identifiant.
-  return NextResponse.json({
+  // Étape, temps restant et erreur dans la langue du lecteur (lib/i18n/job-text).
+  const redacted = {
     ...job,
     error: job.error ? redactMessage(job.error) : job.error,
     currentStep: job.currentStep ? redactMessage(job.currentStep) : job.currentStep,
-    eta: eta?.label ?? null,
-  });
+  };
+  return NextResponse.json({ ...redacted, ...localizeJob(redacted, eta, requestLocale(req)) });
 }
 
 /** Annulation (alias historique de /cancel) : tue réellement le worker et ses enfants. */
