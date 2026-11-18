@@ -73,3 +73,23 @@ test("un choix unique a le nombre d'options de l'annale", () => {
   assert.equal(blockIssue({ scenario: "S", parts: [scq(5), short(), short("How?")] }, 3, 4, { options: 5 }), null);
   assert.match(blockIssue({ scenario: "S", parts: [scq(4), short(), short("How?")] }, 3, 4, { options: 5 }) ?? "", /5 options/);
 });
+
+// Le barème de l'annale (audit 3, P1-12, dernier point) : 1 point par choix unique, 1 à 3 par
+// réponse courte, 1 à 2 par lecture de code était fixe. Une annale qui note chaque réponse courte
+// 4 points et chaque choix 2 points ne se reproduisait pas.
+test("le barème de chaque type de sous-question est lu dans l'annale, s'il est le même partout", () => {
+  const b = blocksOf(profile({ part_kinds: ["scq", "short"], part_points: [{ kind: "short", points: 4 }, { kind: "scq", points: 2 }, { kind: "bogus", points: 9 }, { kind: "code_output", points: 0 }] }));
+  assert.deepEqual(b?.points, { short: 4, scq: 2 });
+  assert.equal(blocksOf(profile({ part_kinds: ["scq", "short"] }))?.points, undefined);
+  const plan = planMockExam({ basis: "annales", kind: "composite", questionCount: 3, openCount: null, durationMin: null, language: "en", discipline: "stem", summary: "", evidence: [], blocks: { sections: [], partsMin: 3, partsMax: 4, totalPoints: null, points: { short: 4 } } }, {});
+  assert.deepEqual(plan.generator === "blocks" ? plan.points : null, { short: 4 });
+});
+
+test("une sous-question qui ne suit pas le barème de l'annale est renvoyée au modèle", () => {
+  const four = { ...short(), criteria: [{ label: "Names it", points: 2 }, { label: "Justifies", points: 2 }], points: 4 };
+  const shape = { kinds: ["scq", "short"] as ("scq" | "short")[], points: { short: 4, scq: 2 } };
+  assert.equal(blockIssue({ scenario: "S", parts: [{ ...scq(4), points: 2 }, four, { ...four, prompt: "How?" }] }, 3, 4, shape), null);
+  assert.match(blockIssue({ scenario: "S", parts: [{ ...scq(4), points: 2 }, short(), four] }, 3, 4, shape) ?? "", /4 points/);
+  // Rien de déclaré : les points restent libres.
+  assert.equal(blockIssue({ scenario: "S", parts: [scq(4), short(), four] }, 3, 4), null);
+});

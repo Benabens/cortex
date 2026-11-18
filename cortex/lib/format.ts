@@ -28,7 +28,7 @@ export type FormatProfile = {
   /** Options de chaque QCM de l'annale (2 pour un vrai/faux, 5 pour A–E) ; absent ou null : inconnu ou variable. */
   options_per_question?: number | null;
   /** Questions COMPOSÉES (scénario ou extrait de code + sous-questions mêlées) ; absent sinon. */
-  composite?: { block_count: number; parts_min: number; parts_max: number; part_kinds?: string[]; code_language?: string; scq_options?: number | null } | null;
+  composite?: { block_count: number; parts_min: number; parts_max: number; part_kinds?: string[]; code_language?: string; scq_options?: number | null; part_points?: { kind: string; points: number }[] } | null;
   /** Documents permis que l'annale écrit (none, notes, open) ; "" ou absent : l'annale ne le dit pas. */
   documents?: string;
 };
@@ -73,6 +73,11 @@ const FORMAT_SCHEMA = {
         },
         code_language: { type: "string", description: "Langage des extraits de code (python, java, c…) ; chaîne vide sans code." },
         scq_options: { type: ["integer", "null"], description: "Nombre d'options des choix uniques DANS les questions composées, s'il est le même partout ; null sinon." },
+        part_points: {
+          type: "array",
+          items: { type: "object", properties: { kind: { type: "string", enum: ["scq", "short", "code_output"] }, points: { type: "integer" } }, required: ["kind", "points"], additionalProperties: false },
+          description: "Barème de l'annale : les points d'une sous-question de chaque type, seulement pour un type noté pareil partout (vide sinon).",
+        },
       },
       required: ["block_count", "parts_min", "parts_max"],
       additionalProperties: false,
