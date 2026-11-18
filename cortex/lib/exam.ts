@@ -19,6 +19,7 @@ import path from "node:path";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { excludedSourceIds } from "@/lib/source-scope";
 import { examSummaryLabel } from "@/lib/exam-summary";
+import { examKindLabel } from "@/lib/exam-template";
 
 const EXAM_DIR = () => examsDir();
 
@@ -1004,7 +1005,7 @@ export async function generateExamViaClaudeCode(opts: { verify?: boolean; count?
   if (missing > 0)
     step(`⚠ Examen livré PARTIEL : ${allQuestions.length}/${qTotal} questions (${missing} ignorée(s) après timeout/échec), relance pour compléter`, 90);
   const spec: ExamSpec = {
-    title: `${c.examCode} ${c.examName} : ${c.examKind}`,
+    title: `${c.examCode} ${c.examName} : ${examKindLabel(c)}`,
     // La durée du budget (annales, déclaration, sinon le cours) : celle que le prompt a annoncée.
     duration_min: examBudgetFor(currentCourse()).minutes,
     questions: allQuestions,
