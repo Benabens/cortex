@@ -23,7 +23,16 @@ export type EtaInput = {
   units?: number | null;
 };
 
-export type Eta = { remainingMs: number | null; late: boolean; basis: "history" | "default"; label: string };
+/**
+ * `label` : la phrase française d'origine (journal, lecteur français). `kind` et `minutes` la
+ * décrivent sans langue : lib/i18n/job-text en refait la phrase dans la langue du lecteur.
+ */
+export type Eta = {
+  remainingMs: number | null; late: boolean; basis: "history" | "default"; label: string;
+  kind: "queued" | "resumed" | "late" | "remaining";
+  /** Minutes arrondies annoncées (durée totale une fois lancé, en file) ; 0 = moins d'une minute ; null si en retard. */
+  minutes: number | null;
+};
 
 const MIN = 60_000;
 /** Sans historique : ordres de grandeur mesurés (banc du job 9 de CS-290 pour un examen QCM). */
@@ -64,21 +73,22 @@ export function estimateRemaining(i: EtaInput): Eta {
   const progress = Math.min(100, Math.max(0, i.progress));
 
   if (i.status === "queued") {
-    return { remainingMs: expected, late: false, basis, label: `En file : environ ${Math.max(1, Math.round(expected / MIN))} min une fois lancé${suffix}` };
+    const minutes = Math.max(1, Math.round(expected / MIN));
+    return { remainingMs: expected, late: false, basis, label: `En file : environ ${minutes} min une fois lancé${suffix}`, kind: "queued", minutes };
   }
   // Repris après une coupure : le temps écoulé depuis le PREMIER départ ne dit plus rien ; la
   // reprise repart du dernier point sauvegardé, il reste la part non faite.
   if (i.attempts > 0) {
     const remaining = expected * (1 - progress / 100);
-    return { remainingMs: remaining, late: false, basis, label: `${minutes(remaining)} (reprise)${suffix}` };
+    return { remainingMs: remaining, late: false, basis, label: `${minutes(remaining)} (reprise)${suffix}`, kind: "resumed", minutes: Math.round(remaining / MIN) };
   }
   if (i.elapsedMs > expected * LATE_FACTOR && progress < 95) {
-    return { remainingMs: null, late: true, basis, label: "Plus long que d'habitude, la génération continue" };
+    return { remainingMs: null, late: true, basis, label: "Plus long que d'habitude, la génération continue", kind: "late", minutes: null };
   }
   // L'avancement peut être provisoirement haut avant que les contrôles ajoutent leurs lots de
   // reprise. Il ne doit donc jamais annoncer moins que le simple compte à rebours historique.
   // Les deux bornes décroissent à état constant ; seule l'ajout explicite d'un réessai peut faire
   // remonter la composante liée à l'avancement (lib/progress).
   const remaining = Math.max(expected * (1 - progress / 100), expected - i.elapsedMs, 0);
-  return { remainingMs: remaining, late: false, basis, label: `${minutes(remaining)}${suffix}` };
+  return { remainingMs: remaining, late: false, basis, label: `${minutes(remaining)}${suffix}`, kind: "remaining", minutes: Math.round(remaining / MIN) };
 }
