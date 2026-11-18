@@ -309,6 +309,10 @@ export const TABLES: TableSpec[] = [
       { name: "ordered", type: "int" },
       // Rapport par fichier d'une ingestion (lib/ingest-report) : fichiers lus, illisibles, sans texte.
       { name: "report_json", type: "text" },
+      // Erreur et étape sans langue (lib/i18n/job-text) : la phrase française reste dans error /
+      // current_step, ces deux colonnes permettent de la refaire dans la langue du lecteur.
+      { name: "error_json", type: "text" },
+      { name: "step_json", type: "text" },
     ],
   },
   {

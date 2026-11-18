@@ -13,7 +13,7 @@ process.env.DB_DRIVER = "postgres";
 process.env.AI_BUDGET_MARGIN = "unlimited";
 process.env.DATABASE_URL = "pglite://memory";
 process.env.BILLING_ENABLED = "1";
-process.env.SIGNUP_FREE_CREDITS = "5";
+process.env.SIGNUP_FREE_CREDITS = "6";
 process.env.DAILY_GEN_QUOTA = "unlimited";
 process.env.DAILY_ASSIST_QUOTA = "unlimited";
 process.env.RATE_LIMIT_PER_USER_MIN = "unlimited";
@@ -41,7 +41,7 @@ test("B7 — solde pour UN examen, 8 réservations parallèles → exactement 1 
   const { reserveGeneration } = await import("../lib/billing/reserve");
   const credits = await import("../lib/billing/credits");
   const user = "usr_parallel";
-  assert.equal(await credits.getBalanceCenti(user), 500); // 5 crédits offerts = 1 examen
+  assert.equal(await credits.getBalanceCenti(user), 600); // 6 crédits offerts = 1 examen
   const results = await Promise.all(
     Array.from({ length: N }, (_, i) =>
       runWithUser(user, () => runWithCourse("ml", () =>
@@ -74,7 +74,7 @@ test("I6 — quota du jour = 1, 5 demandes parallèles → exactement 1 comptée
     assert.equal(await guards.usedToday("gen", user), 1);
   } finally {
     process.env.DAILY_GEN_QUOTA = "unlimited";
-    process.env.SIGNUP_FREE_CREDITS = "5";
+    process.env.SIGNUP_FREE_CREDITS = "6";
   }
 });
 
@@ -112,7 +112,7 @@ test("I8 bis — réservation refusée : aucun job n'est créé, rien ne peut d�
   await runWithUser(user, () => runWithCourse("algo", async () => {
     await jobs.ensureJobsSchema();
     // Vide le solde offert.
-    await credits.addTransaction(user, -500, "test", `test:${user}:vide`);
+    await credits.addTransaction(user, -600, "test", `test:${user}:vide`);
     const before = Number((await q.get<{ n: number }>(`SELECT count(*) n FROM jobs`))?.n ?? 0);
     await assert.rejects(
       () => jobs.createJobExclusive("exam"),

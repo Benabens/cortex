@@ -55,7 +55,7 @@ test("deux créations simultanées avec de quoi payer UN examen → un seul job,
   const jobs = await import("../lib/jobs");
   const credits = await import("../lib/billing/credits");
   const user = "usr_double";
-  await credits.addTransaction(user, 300, "test", `test:${user}:topup`); // signup 200 + 300 = 500 : de quoi payer UN examen à 5 crédits
+  await credits.addTransaction(user, 400, "test", `test:${user}:topup`); // signup 200 + 400 = 600 : de quoi payer UN examen à 6 crédits
   const results = await runWithUser(user, () => runWithCourse("algo", () =>
     Promise.allSettled([jobs.createJobExclusive("exam"), jobs.createJobExclusive("exam")])
   ));
@@ -90,7 +90,7 @@ test("le remboursement retrouve la référence de réservation portée par le jo
   const jobs = await import("../lib/jobs");
   const credits = await import("../lib/billing/credits");
   const user = "usr_refund_ref";
-  process.env.SIGNUP_FREE_CREDITS = "5";
+  process.env.SIGNUP_FREE_CREDITS = "6";
   try {
     await runWithUser(user, () => runWithCourse("ml", async () => {
       const { id } = await jobs.createJobExclusive("exam");
@@ -98,7 +98,7 @@ test("le remboursement retrouve la référence de réservation portée par le jo
       const row = await q.get<{ credit_ref: string | null }>(`SELECT credit_ref FROM jobs WHERE id = ?`, id);
       assert.ok(row?.credit_ref, "le job doit porter sa référence de débit");
       await jobs.refundJobCredits({ id, type: "exam" });
-      assert.equal(await credits.getBalanceCenti(user), 500);
+      assert.equal(await credits.getBalanceCenti(user), 600);
     }));
   } finally { process.env.SIGNUP_FREE_CREDITS = "2"; }
 });

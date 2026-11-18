@@ -18,7 +18,7 @@ process.env.CORTEX_DATA_DIR = tmp;
 // Budget IA lié au revenu (testé dans ai-budget.test.ts) : ici, les comptes sont financés par des crédits offerts.
 process.env.AI_BUDGET_MARGIN = "unlimited";
 process.env.BILLING_ENABLED = "1";
-process.env.SIGNUP_FREE_CREDITS = "10";
+process.env.SIGNUP_FREE_CREDITS = "12";
 process.env.DAILY_GEN_QUOTA = "unlimited";
 process.env.RATE_LIMIT_PER_USER_MIN = "unlimited";
 process.env.MAX_ACTIVE_JOBS = "unlimited";
@@ -59,7 +59,7 @@ test("job annulé SANS appel payant → remboursé ; AVEC coût réel → pas re
       );
     }
     await jobs.refundJobCredits({ id: 42, type: "exam" }, "canceled");
-    assert.equal(await credits.getBalanceCenti("erin"), start - 500, "une annulation après des appels payants n'est pas remboursée");
+    assert.equal(await credits.getBalanceCenti("erin"), start - 600, "une annulation après des appels payants n'est pas remboursée");
 
     // Job 43 : appels du provider GRATUIT (claude-code, coût 0, estimated=1) → remboursé.
     assert.equal((await reserveGeneration({ bucket: "gen", kind: "qcm", ref: credits.jobRef("erin", "ml", 43) })).ok, true);
@@ -69,13 +69,13 @@ test("job annulé SANS appel payant → remboursé ; AVEC coût réel → pas re
       "erin", "ml", "claude-code", "opus", 1000, 500, 0, 1, "43", "qcm:generateQcmExam", "2026-09-26 10:00:00",
     );
     await jobs.refundJobCredits({ id: 43, type: "qcm" }, "canceled");
-    assert.equal(await credits.getBalanceCenti("erin"), start - 500);
+    assert.equal(await credits.getBalanceCenti("erin"), start - 600);
 
     // Le job 42 d'un AUTRE compte (même id, autre tenant) n'est pas confondu : ses lignes ne comptent pas.
     assert.equal((await reserveGeneration({ bucket: "gen", kind: "exam", ref: credits.jobRef("erin", "algo", 42) })).ok, true);
   }));
   await runWithUser("erin", () => runWithCourse("algo", () => jobs.refundJobCredits({ id: 42, type: "exam" }, "canceled")));
-  assert.equal(await credits.getBalanceCenti("erin"), 1000 - 500, "le job 42 du cours algo n'a rien coûté : remboursé");
+  assert.equal(await credits.getBalanceCenti("erin"), 1200 - 600, "le job 42 du cours algo n'a rien coûté : remboursé");
 });
 
 test("jobLlmCostUsd : somme des lignes rattachées (compte, cours, id)", async () => {
