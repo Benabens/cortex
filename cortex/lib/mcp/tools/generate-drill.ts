@@ -41,7 +41,7 @@ export default defineTool({
     paidCall("assistance"),
   kind: "generate",
   annotations: SPENDING_HINTS,
-  userSummary: "Génère une question d’entraînement, avec indices et corrigé.",
+  userSummary: "generateDrill",
   input: z.object({
     course: courseArg,
     concept: z.string().min(1).max(FIELD_LIMITS.concept).optional().describe("Concept to practise, e.g. \"diagonalisation\". Defaults to the most serious weak point."),

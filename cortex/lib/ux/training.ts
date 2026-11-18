@@ -24,10 +24,10 @@ export type LabEntry = {
 export type LabsResp = { series: LabEntry[] };
 
 export const FEEDBACK_OPTIONS = [
-  { verdict: "good", label: "Au niveau" },
-  { verdict: "too_easy", label: "Trop facile" },
-  { verdict: "not_prof_style", label: "Pas le style du prof" },
-  { verdict: "wrong", label: "Faux" },
+  { verdict: "good", labelKey: "feedbackGood" },
+  { verdict: "too_easy", labelKey: "feedbackTooEasy" },
+  { verdict: "not_prof_style", labelKey: "feedbackNotTeacherStyle" },
+  { verdict: "wrong", labelKey: "feedbackWrong" },
 ] as const;
 
 /** resultPath d'un job (chemin serveur) → lien /exam/<fichier> si c'est un PDF connu. */

@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
   const weaknesses = (await q.all<{ topic: string }>(`SELECT topic FROM weaknesses ORDER BY severity DESC LIMIT 12`))
     .map((w) => w.topic)
-    .filter((t) => t && t !== "(à analyser)");
+    .filter((t) => t && t !== "(à analyser)"); // i18n-allow: sentinelle stockée en base
   return NextResponse.json({ due: await dueConcepts(15), weaknesses });
 }
 

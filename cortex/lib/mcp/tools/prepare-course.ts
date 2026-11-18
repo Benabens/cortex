@@ -26,7 +26,7 @@ export default defineTool({
     " After confirmation, it runs in the background for several minutes; its progress is read with get_job_status.",
   kind: "write",
   annotations: SPENDING_HINTS,
-  userSummary: "Prépare un cours depuis ses supports : format d’examen, puis plan.",
+  userSummary: "prepareCourse",
   spends: true,
   input: z.object({ course: courseArg, confirmation_token: confirmationTokenArg }),
   output,

@@ -97,9 +97,10 @@ const DAILY: ReadonlySet<LimitKey> = new Set(["daily_generations", "daily_assist
 /** « 3 examens QCM aujourd'hui », « 1 vérification avec ton solde » : un nombre, ce qu'il compte, sur quelle période. */
 function countPhrase(n: number, u: KindUsage, locale: Locale): string {
   const t = translator(locale) as unknown as (key: string, values?: Record<string, string | number>) => string;
-  const known = new Set<LaunchKind>(["exam", "qcm", "exercise", "prepare", "check", "drill"]);
-  const counted = known.has(u.kind as LaunchKind)
-    ? t(`limits.kind_${u.kind}`, { count: n })
+  const known = new Set<string>(["exam", "qcm", "exercise", "prepare", "check", "drill", "format", "lab_exercise"]);
+  const key = u.kind.replace(/-/g, "_");
+  const counted = known.has(key)
+    ? t(`limits.kind_${key}`, { count: n })
     : `${n.toLocaleString(locale === "fr" ? "fr-FR" : "en-GB")} ${n >= 2 ? u.plural : u.label.replace(/ \(.*\)$/, "")}`;
   const suffix = DAILY.has(u.limitedBy as LimitKey) ? t("limits.today")
     : u.limitedBy === "credits" ? t("limits.with_balance")

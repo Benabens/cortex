@@ -1,6 +1,7 @@
 "use client";
 
 import { useId } from "react";
+import { useTranslations } from "use-intl/react";
 
 type Props = {
   values: number[];
@@ -22,6 +23,7 @@ export function Sparkline({
   className,
   ariaLabel,
 }: Props) {
+  const t = useTranslations("sparkline");
   const id = useId().replace(/:/g, "");
   const pad = 3;
   const min = Math.min(...values);
@@ -48,7 +50,7 @@ export function Sparkline({
       viewBox={`0 0 ${width} ${height}`}
       className={className}
       role="img"
-      aria-label={ariaLabel ?? "Tendance récente"}
+      aria-label={ariaLabel ?? t("ariaLabel")}
     >
       <defs>
         <linearGradient id={`sp-fill-${id}`} x1="0" y1="0" x2="0" y2="1">

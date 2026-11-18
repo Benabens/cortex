@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
   const existing = await activeJob("format");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true, chargedCredits: 0 });
   if (process.env.E2E_TEST_AUTH === "1" && process.env.E2E_TEST_RUN === "1") {
+    // i18n-allow: drapeau des E2E hermétiques, jamais affiché
     return NextResponse.json({ ok: true, skipped: "Détection couverte par la préparation hermétique E2E", chargedCredits: 0 });
   }
 

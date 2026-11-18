@@ -1,4 +1,5 @@
-import { apiError } from "@/lib/i18n/api-error";
+import { apiError, requestLocale } from "@/lib/i18n/api-error";
+import { translator } from "@/lib/i18n/translate";
 import { LlmError, llmUserError } from "@/lib/llm";
 import { UserFacingError } from "@/lib/i18n/user-error";
 import { mineConversation } from "@/lib/conversation-mining";
@@ -54,12 +55,13 @@ async function handlePOST(req: NextRequest) {
     const extracted = await pdfText(buf, FIELD_LIMITS.text);
     if (extracted.length < 40) {
       const severity = Number(form.get("severity") ?? 2);
+      // i18n-allow: sentinelle stockée en base, traduite à l’affichage (WeaknessBase)
       await createWeakness({ topic: "(à analyser)", description: note, severity, screenshotPath: await saveAttachment(buf, "pdf"), source: "pdf" });
       return NextResponse.json({
         created: 0,
         stored: true,
         weaknesses: await listWeaknesses(),
-        note: "Ce PDF ne contient pas de texte lisible (scan ?) : il est ajouté au suivi tel quel.",
+        note: translator(requestLocale(req))("weaknessInbox.pdfNoText"),
       });
     }
     // Note + texte du PDF, dans la limite analysée d'un texte collé (le PDF n'est pas conservé).
@@ -78,7 +80,7 @@ async function handlePOST(req: NextRequest) {
     // l'appel n'est pas parti ou si la réponse est inutilisable (lib/billing/reserve).
     const { assistCall } = await import("@/lib/billing/reserve");
     const mined = await assistCall("weakness-mine", () => mineConversation(t));
-    if (!mined.length) return NextResponse.json({ created: 0, weaknesses: await listWeaknesses(), note: "Aucune faiblesse claire détectée dans cette discussion." });
+    if (!mined.length) return NextResponse.json({ created: 0, weaknesses: await listWeaknesses(), note: translator(requestLocale(req))("weaknessInbox.noneInDiscussion") });
     for (const m of mined) {
       await createWeakness({
         topic: m.topic,

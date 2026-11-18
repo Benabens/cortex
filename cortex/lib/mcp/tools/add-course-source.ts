@@ -30,7 +30,7 @@ export default defineTool({
   kind: "write",
   // Ajout pur (jamais d'écrasement : « -2 », « -3 »…) ; lit une URL hors de Cortex.
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  userSummary: "Ajoute un support à un cours (adresse web ou texte collé), gratuitement.",
+  userSummary: "addCourseSource",
   input: z.object({
     course: courseArg,
     url: z.string().url().max(2000).optional().describe("Public https URL of a PDF, web page or text file. Give either url or text."),

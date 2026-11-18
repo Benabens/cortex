@@ -45,22 +45,25 @@ export type MineResp = {
 export function sevOf(level: number): Severity {
   if (level >= 3) return "GROS";
   if (level === 2) return "MOYEN";
+  // i18n-allow: code de sévérité stable du back, jamais affiché
   return "LÉGER";
 }
 
-/** Libellé de provenance lisible. */
-export function sourceLabel(source: string): string {
+export type WeaknessSourceKey = "sourceConversation" | "sourceManual" | "sourceScreenshot" | "sourcePdf";
+
+/** Clé de libellé de provenance, ou valeur brute si le back en ajoute une. */
+export function sourceLabelKey(source: string): WeaknessSourceKey | null {
   switch (source) {
     case "conversation":
-      return "Discussion importée";
+      return "sourceConversation";
     case "manual":
-      return "Ajout manuel";
+      return "sourceManual";
     case "screenshot":
-      return "Capture";
+      return "sourceScreenshot";
     case "pdf":
-      return "PDF";
+      return "sourcePdf";
     default:
-      return source;
+      return null;
   }
 }
 
