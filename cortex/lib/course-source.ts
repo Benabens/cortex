@@ -129,9 +129,11 @@ async function store(
   const problem = await unreadableDocument(data, path.extname(name));
   if (problem) throw new SourceError(problem.status, problem.error);
 
-  // Jamais d'écrasement (« -2 », « -3 »…). Premium : rangé dans le cloud ; gratuit : en transit,
-  // le temps que l'ingestion lise son texte (lib/originals).
-  const saved = await storeOriginal(courseId, folderDir(courseId, folder), name, data, { ...origin, dedupe: false });
+  // Jamais d'écrasement (« -2 », « -3 »…) ; le MÊME contenu (empreinte sha256) déjà rangé sous ce
+  // nom est rendu tel quel, sans seconde copie : indexé deux fois, il pesait double (couverture,
+  // analyse). Premium : rangé dans le cloud ; gratuit : en transit, le temps que l'ingestion lise son
+  // texte (lib/originals).
+  const saved = await storeOriginal(courseId, folderDir(courseId, folder), name, data, { ...origin, dedupe: true });
   if (saved) return { name: saved.name, folder, bytes: data.length, contentType, home: saved.home };
   throw new SourceError(409, userError("source_duplicate_title"));
 }
