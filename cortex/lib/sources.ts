@@ -3,11 +3,12 @@ import { q } from "@/db/q";
 import { indexItemForSearch, unindexSource } from "@/lib/search";
 import { sourceHref } from "@/lib/deeplink";
 import { contentRoot, refsDir } from "@/lib/paths";
-import { getCourse } from "@/lib/courses";
+import { DEFAULT_COURSE, getCourse } from "@/lib/courses";
 import * as cheerio from "cheerio";
 import path from "node:path";
 import { extractText, getDocumentProxy } from "unpdf";
 import { extractOfficeText } from "@/lib/office-documents";
+import { htmlPageText } from "@/lib/html-text";
 import { purgePdfPages } from "@/lib/page-cache";
 import { storage } from "@/lib/storage";
 import { failureStatus, ingestProblems, readStatus, type IngestFileOutcome, type IngestProblem } from "@/lib/ingest-report";
@@ -67,6 +68,11 @@ async function parseRefFile(abs: string): Promise<{ title: string; pages: string
     const { text } = await extractText(pdf, { mergePages: false });
     const pages = (Array.isArray(text) ? text : [text]).map(clean).filter((t) => t.length > 3);
     return { title: base.replace(/\.pdf$/i, ""), pages };
+  }
+  if ((ext === ".html" || ext === ".htm") && currentCourse() !== DEFAULT_COURSE) {
+    // Page d'examen enregistrée d'une plateforme : sans sa navigation (cs-202 garde sa lecture figée).
+    const { title, text } = htmlPageText(buf.toString("utf8"), base);
+    return { title, pages: [text] };
   }
   if (ext === ".html" || ext === ".htm") {
     const $ = cheerio.load(buf.toString("utf8"));
