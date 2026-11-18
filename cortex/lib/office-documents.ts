@@ -114,8 +114,11 @@ async function slideOrder(zip: JSZip): Promise<string[]> {
   if (presentation) {
     const rels = await partRels(zip, "ppt/presentation.xml");
     const $ = cheerio.load(await presentation.async("string"), { xmlMode: true });
-    const ordered = $("p\\:sldIdLst > p\\:sldId").map((_, el) => rels.get($(el).attr("r:id") ?? "")).get()
-      .filter((rel) => rel.type === "slide" && zip.file(rel.target)).map((rel) => rel.target);
+    // Une entrée sans relation, ou vers une partie absente (paquet abîmé), est sautée.
+    const ordered = $("p\\:sldIdLst > p\\:sldId").toArray().flatMap((el) => {
+      const rel = rels.get($(el).attr("r:id") ?? "");
+      return rel?.type === "slide" && zip.file(rel.target) ? [rel.target] : [];
+    });
     if (ordered.length) return [...new Set(ordered)];
   }
   return Object.keys(zip.files)
@@ -123,16 +126,16 @@ async function slideOrder(zip: JSZip): Promise<string[]> {
     .sort((a, b) => Number(a.match(/(\d+)\.xml$/)?.[1]) - Number(b.match(/(\d+)\.xml$/)?.[1]));
 }
 
-/**
- * Texte d'une partie PowerPoint. `notesBody` : seulement le corps des notes de l'orateur (pas
- * l'aperçu de la diapositive ni le numéro de page, autres formes de la page de notes).
- */
-function pptxText(xml: string, notesBody = false): string {
+/** Formes d'une page de notes qui ne sont pas les notes : aperçu de la diapositive, numéro, en-tête, pied, date. */
+const NOTES_FURNITURE = new Set(["sldImg", "sldNum", "hdr", "ftr", "dt"]);
+
+/** Texte d'une partie PowerPoint. `notesOnly` : sans les formes annexes d'une page de notes. */
+function pptxText(xml: string, notesOnly = false): string {
   const $ = cheerio.load(xml, { xmlMode: true });
   // Formules en LaTeX, à leur place ; la copie image de secours (mc:Fallback) n'est pas lue en double.
   topLevelMath($).each((_, el) => { $(el).replaceWith(`<a:t>${escapeXml(`$${ommlToLatex($, el)}$`)}</a:t>`); });
   let nodes = $("a\\:t, t").filter((_, node) => $(node).parents("mc\\:Fallback").length === 0);
-  if (notesBody) nodes = nodes.filter((_, node) => $(node).closest("p\\:sp").find("p\\:nvPr > p\\:ph").attr("type") === "body");
+  if (notesOnly) nodes = nodes.filter((_, node) => !NOTES_FURNITURE.has($(node).closest("p\\:sp").find("p\\:nvPr > p\\:ph").attr("type") ?? ""));
   return nodes.map((_, node) => $(node).text()).get().join(" ").trim();
 }
 

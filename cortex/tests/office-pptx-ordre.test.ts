@@ -14,11 +14,11 @@ const shape = (text: string, ph = "") => `<p:sp><p:nvSpPr><p:cNvPr id="2" name="
 const rels = (items: { id: string; type: string; target: string }[]) =>
   `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${items.map((r) => `<Relationship Id="${r.id}" Type="${REL}/${r.type}" Target="${r.target}"/>`).join("")}</Relationships>`;
 
-/** slide1 = « Conclusion », slide2 = « Method », slide3 = « Intro », montrées dans l'ordre 3, 2, 1. */
+/** slide1 = « Conclusion », slide2 = « Method », slide3 = « Intro », montrées dans l'ordre 3, 2, 1 ; rId99 n'a pas de relation. */
 async function reorderedDeck(): Promise<Buffer> {
   const zip = new JSZip();
   zip.file("[Content_Types].xml", `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/></Types>`);
-  zip.file("ppt/presentation.xml", `<?xml version="1.0"?><p:presentation ${NS}><p:sldIdLst><p:sldId id="256" r:id="rId7"/><p:sldId id="257" r:id="rId5"/><p:sldId id="258" r:id="rId6"/></p:sldIdLst></p:presentation>`);
+  zip.file("ppt/presentation.xml", `<?xml version="1.0"?><p:presentation ${NS}><p:sldIdLst><p:sldId id="256" r:id="rId7"/><p:sldId id="257" r:id="rId5"/><p:sldId id="258" r:id="rId6"/><p:sldId id="259" r:id="rId99"/></p:sldIdLst></p:presentation>`);
   zip.file("ppt/_rels/presentation.xml.rels", rels([
     { id: "rId6", type: "slide", target: "slides/slide1.xml" },
     { id: "rId5", type: "slide", target: "slides/slide2.xml" },
@@ -30,8 +30,9 @@ async function reorderedDeck(): Promise<Buffer> {
   zip.file("ppt/slides/slide2.xml", slide("Method"));
   zip.file("ppt/slides/slide3.xml", slide("Intro"));
   zip.file("ppt/slides/_rels/slide2.xml.rels", rels([{ id: "rId2", type: "notesSlide", target: "../notesSlides/notesSlide1.xml" }]));
-  // Notes : l'aperçu de la diapositive (sldImg) et le numéro de page ne sont pas du texte de l'enseignant.
-  zip.file("ppt/notesSlides/notesSlide1.xml", `<?xml version="1.0"?><p:notes ${NS}><p:cSld><p:spTree>${shape("", '<p:ph type="sldImg"/>')}${shape("Key exam trap: the base case is n = 0", '<p:ph type="body" idx="1"/>')}${shape("2", '<p:ph type="sldNum" idx="12"/>')}</p:spTree></p:cSld></p:notes>`);
+  // Notes : l'aperçu de la diapositive (sldImg) et le numéro de page ne sont pas du texte de l'enseignant ;
+  // le corps des notes peut n'avoir aucun type (placeholder « obj » par défaut).
+  zip.file("ppt/notesSlides/notesSlide1.xml", `<?xml version="1.0"?><p:notes ${NS}><p:cSld><p:spTree>${shape("", '<p:ph type="sldImg"/>')}${shape("Key exam trap: the base case is n = 0", '<p:ph idx="1"/>')}${shape("2", '<p:ph type="sldNum" idx="12"/>')}</p:spTree></p:cSld></p:notes>`);
   return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
 }
 
