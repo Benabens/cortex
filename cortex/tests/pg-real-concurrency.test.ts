@@ -171,12 +171,12 @@ test("reprise Stripe : remboursement ET litige simultanés sur le même paiement
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ev = (id: string, type: string, object: unknown): any => ({ id, type, data: { object } });
   await handleStripeEvent(ev("evt_race_buy", "checkout.session.completed", { id: "cs_race", mode: "payment", payment_status: "paid", amount_total: 900, payment_intent: "pi_race", metadata: { cortexUserId: user, plan: "credits_10", credits: "10" } }));
-  assert.equal(await credits.getBalanceCenti(user), 1500);
+  assert.equal(await credits.getBalanceCenti(user), 1600);
   const results = await Promise.all(Array.from({ length: N }, (_, i) =>
     handleStripeEvent(i % 2 === 0
       ? ev(`evt_race_r${i}`, "charge.refunded", { payment_intent: "pi_race", amount: 900, amount_refunded: 900 })
       : ev(`evt_race_d${i}`, "charge.dispute.created", { payment_intent: "pi_race", amount: 900 })),
   ));
   assert.equal(results.filter((r) => r.reversed).length, 1, JSON.stringify(results.map((r) => r.action)));
-  assert.equal(await credits.getBalanceCenti(user), 500, "10 repris une seule fois");
+  assert.equal(await credits.getBalanceCenti(user), 600, "10 repris une seule fois");
 });
