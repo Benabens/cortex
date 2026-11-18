@@ -59,7 +59,7 @@ export default defineTool({
     "topics due for review, the course chapters (usable as chapter in generate_mock_exam) and a prioritised list of what to work on next. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
-  userSummary: "Lit où tu en es dans le programme et ce qu’il faut réviser ensuite.",
+  userSummary: "getStudyPlan",
   input: z.object({ course: courseArg }),
   output,
   async run({ course }, ctx) {

@@ -24,7 +24,7 @@ export default defineTool({
   kind: "write",
   // Remplace (ou efface, clear) le format déclaré : destructif ; même appel, même état : idempotent.
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  userSummary: "Déclare le format d’examen d’un cours : type, durée, nombre de questions.",
+  userSummary: "setExamFormat",
   input: z.object({
     course: courseArg,
     kind: examFormatInput.kind.optional(),

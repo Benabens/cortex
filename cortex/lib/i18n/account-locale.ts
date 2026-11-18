@@ -11,6 +11,12 @@ export async function accountLocale(userId: string): Promise<Locale | null> {
   return isLocale(row?.locale) ? row.locale : null;
 }
 
+/** Même langue retrouvée par l'adresse : l'e-mail de connexion part avant toute session. */
+export async function accountLocaleByEmail(email: string): Promise<Locale | null> {
+  const row = await authGet<{ locale: string | null }>(`SELECT locale FROM users WHERE lower(email) = lower(?)`, email);
+  return isLocale(row?.locale) ? row.locale : null;
+}
+
 export async function setAccountLocale(userId: string, locale: Locale): Promise<void> {
   await authRun(`UPDATE users SET locale = ? WHERE id = ?`, locale, userId);
 }

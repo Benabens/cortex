@@ -55,7 +55,7 @@ export default defineTool({
     " After confirmation, the generation runs in the background for 10-35 minutes (longer for a large exam); its progress is read with get_job_status.",
   kind: "generate",
   annotations: SPENDING_HINTS,
-  userSummary: "Génère un examen blanc au format de ton vrai examen.",
+  userSummary: "generateMockExam",
   input: z.object({
     course: courseArg,
     chapter: z.union([z.number().int().positive(), z.string().min(1).max(160)]).optional()

@@ -2,19 +2,25 @@ import styles from "@/app/secondary.module.css";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { CourseList } from "@/components/cours/CourseList";
 import { Button } from "@/components/ui/Button";
+import { getT } from "@/lib/i18n/server";
+import type { Metadata } from "next";
 
-export const metadata = { title: "Mes cours · cortex" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT("courses");
+  return { title: t("metaTitle") };
+}
 
-export default function CoursPage() {
+export default async function CoursPage() {
+  const t = await getT("courses");
   return (
     <div className={styles.page}>
       <PageHeader
         context={false}
-        title="Mes cours"
-        description="Les matières de ton compte. Personne d’autre ne les voit."
+        title={t("title")}
+        description={t("description")}
       >
         <Button variant="primary" href="/cours/nouveau">
-          + Ajouter un cours
+          {t("add")}
         </Button>
       </PageHeader>
       <div className="w-full max-w-4xl">

@@ -1,3 +1,4 @@
+// i18n-allow-file: consignes envoyées au modèle (le texte destiné à l’étudiant vient de messages/*.json)
 import { apiError } from "@/lib/i18n/api-error";
 import { q } from "@/db/q";
 import { useCourseOr404 } from "@/lib/req";

@@ -1,3 +1,4 @@
+// i18n-allow-file: réponses fictives du moteur pour les E2E, jamais servies hors test
 import { NextResponse } from "next/server";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
 

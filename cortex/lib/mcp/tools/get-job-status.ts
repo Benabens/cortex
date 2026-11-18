@@ -142,7 +142,7 @@ export default defineTool({
     "Without job_id, it returns the generation currently running and the latest ones. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
-  userSummary: "Suit une génération ou une préparation en cours, puis en rend le résultat.",
+  userSummary: "getJobStatus",
   input: z.object({
     course: courseArg,
     job_id: z.number().int().positive().optional().describe("The job_id returned by generate_mock_exam."),

@@ -9,6 +9,7 @@
  */
 
 import type { AnswerMode, DocumentRule } from "@/lib/exam-format";
+import { useTranslations } from "use-intl/react";
 
 export type ExamFormatDraft = { kind: string; questionCount: string; durationMin: string; language: string; answerMode: string; documents: string };
 
@@ -16,42 +17,7 @@ export type DeclaredFormatDto = { kind: string; questionCount: number | null; du
 
 export const EMPTY_FORMAT: ExamFormatDraft = { kind: "", questionCount: "", durationMin: "", language: "", answerMode: "", documents: "" };
 
-const KINDS: { value: string; label: string }[] = [
-  { value: "", label: "Je ne sais pas encore" },
-  { value: "qcm", label: "QCM" },
-  { value: "exercises", label: "Exercices / problèmes" },
-  { value: "mixed", label: "QCM + questions ouvertes" },
-  { value: "composite", label: "Questions composées (scénario + sous-questions)" },
-  { value: "essay", label: "Essai / dissertation" },
-  { value: "oral", label: "Oral" },
-];
-
-/** Réponse unique ou multiple (lib/exam-format, ANSWER_MODES) : sans précision, ce que disent les sources, sinon une seule. */
-const REPONSES: { value: "" | AnswerMode; label: string }[] = [
-  { value: "", label: "Non précisé : selon les sources, sinon une seule" },
-  { value: "single", label: "Une seule bonne réponse" },
-  { value: "multiple", label: "Une ou plusieurs bonnes réponses" },
-  { value: "mixed", label: "Selon la question" },
-];
-
-/** Documents permis (lib/exam-format, DOCUMENT_RULES) : imprimés sur la garde de l'examen blanc ; rien si non précisé. */
-const DOCUMENTS: { value: "" | DocumentRule; label: string }[] = [
-  { value: "", label: "Non précisé" },
-  { value: "none", label: "Aucun document" },
-  { value: "notes", label: "Notes personnelles" },
-  { value: "open", label: "Tous les documents" },
-];
-
 const hasChoices = (kind: string) => kind === "qcm" || kind === "mixed";
-
-const LANGUES: { value: string; label: string }[] = [
-  { value: "", label: "Celle du cours" },
-  { value: "fr", label: "Français" },
-  { value: "en", label: "Anglais" },
-  { value: "de", label: "Allemand" },
-  { value: "it", label: "Italien" },
-  { value: "es", label: "Espagnol" },
-];
 
 export function formatDraftOf(f: DeclaredFormatDto | null | undefined): ExamFormatDraft {
   if (!f) return EMPTY_FORMAT;
@@ -85,24 +51,44 @@ export function ExamFormatFields({
   onChange: (next: ExamFormatDraft) => void;
   fieldClass: string;
 }) {
+  const t = useTranslations("examFormat");
+  const kinds = [
+    { value: "", label: t("kindUnknown") }, { value: "qcm", label: t("kindQcm") },
+    { value: "exercises", label: t("kindExercises") }, { value: "mixed", label: t("kindMixed") },
+    { value: "composite", label: t("kindComposite") }, { value: "essay", label: t("kindEssay") },
+    { value: "oral", label: t("kindOral") },
+  ];
+  const answers: { value: "" | AnswerMode; label: string }[] = [
+    { value: "", label: t("answerUnknown") }, { value: "single", label: t("answerSingle") },
+    { value: "multiple", label: t("answerMultiple") }, { value: "mixed", label: t("answerMixed") },
+  ];
+  const documents: { value: "" | DocumentRule; label: string }[] = [
+    { value: "", label: t("documentsUnknown") }, { value: "none", label: t("documentsNone") },
+    { value: "notes", label: t("documentsNotes") }, { value: "open", label: t("documentsOpen") },
+  ];
+  const languages = [
+    { value: "", label: t("languageCourse") }, { value: "fr", label: t("languageFr") },
+    { value: "en", label: t("languageEn") }, { value: "de", label: t("languageDe") },
+    { value: "it", label: t("languageIt") }, { value: "es", label: t("languageEs") },
+  ];
   const set = (k: keyof ExamFormatDraft) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     onChange({ ...value, [k]: e.target.value });
   const choices = hasChoices(value.kind);
 
   return (
     <fieldset className="flex flex-col gap-3">
-      <legend className="mb-1 text-[0.82rem] font-medium text-ink-2">Format de l’épreuve</legend>
+      <legend className="mb-1 text-[0.82rem] font-medium text-ink-2">{t("legend")}</legend>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1.5">
-          <span className="text-[0.78rem] text-ink-3">Type</span>
+          <span className="text-[0.78rem] text-ink-3">{t("type")}</span>
           <select value={value.kind} onChange={set("kind")} className={fieldClass}>
-            {KINDS.map((k) => (
+            {kinds.map((k) => (
               <option key={k.value} value={k.value}>{k.label}</option>
             ))}
           </select>
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-[0.78rem] text-ink-3">{choices ? "Nombre de questions" : "Nombre d’exercices ou de sujets"}</span>
+          <span className="text-[0.78rem] text-ink-3">{choices ? t("questionCount") : t("subjectCount")}</span>
           <input
             type="number"
             inputMode="numeric"
@@ -116,7 +102,7 @@ export function ExamFormatFields({
           />
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-[0.78rem] text-ink-3">Durée (minutes)</span>
+          <span className="text-[0.78rem] text-ink-3">{t("duration")}</span>
           <input
             type="number"
             inputMode="numeric"
@@ -130,26 +116,26 @@ export function ExamFormatFields({
           />
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-[0.78rem] text-ink-3">Langue de l’examen</span>
+          <span className="text-[0.78rem] text-ink-3">{t("language")}</span>
           <select value={value.language} onChange={set("language")} disabled={!value.kind} className={fieldClass}>
-            {LANGUES.map((l) => (
+            {languages.map((l) => (
               <option key={l.value} value={l.value}>{l.label}</option>
             ))}
           </select>
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-[0.78rem] text-ink-3">Documents autorisés</span>
+          <span className="text-[0.78rem] text-ink-3">{t("documents")}</span>
           <select value={value.documents} onChange={set("documents")} disabled={!value.kind} className={fieldClass}>
-            {DOCUMENTS.map((d) => (
+            {documents.map((d) => (
               <option key={d.value} value={d.value}>{d.label}</option>
             ))}
           </select>
         </label>
         {choices && (
           <label className="flex flex-col gap-1.5">
-            <span className="text-[0.78rem] text-ink-3">Bonnes réponses par question</span>
+            <span className="text-[0.78rem] text-ink-3">{t("answers")}</span>
             <select value={value.answerMode} onChange={set("answerMode")} className={fieldClass}>
-              {REPONSES.map((r) => (
+              {answers.map((r) => (
                 <option key={r.value} value={r.value}>{r.label}</option>
               ))}
             </select>
@@ -157,9 +143,7 @@ export function ExamFormatFields({
         )}
       </div>
       <p className="text-[0.76rem] leading-relaxed text-ink-3">
-        Sans annale, c’est ce format que suivent tes examens blancs. Des annales importées, elles, priment.
-        Si tu ne le connais pas, Cortex le cherche dans tes sources (questions d’exemple, consignes) et te le
-        demandera plutôt que de l’inventer.
+        {t("hint")}
       </p>
     </fieldset>
   );

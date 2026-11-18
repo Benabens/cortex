@@ -193,6 +193,13 @@ test("route : refuse sans session (401) et ne supprime QUE le compte de la sessi
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM users WHERE id = ?`, "carol"))!.n, 0, "carol supprimée");
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM users WHERE id = ?`, "dave"))!.n, 1, "dave (ciblé dans le corps) est INTACT");
 
+  // Les deux mots localisés sont acceptés quelle que soit la langue de la requête.
+  await seedUser("elena", "elena@example.com", "ml");
+  await authRun(`UPDATE subscriptions SET status = 'canceled' WHERE user_id = ?`, "elena");
+  const rDelete = await POST(mk({ "x-cortex-user": "elena", origin: "http://localhost", "accept-language": "fr" }, { confirm: "DELETE" }));
+  assert.equal(rDelete.status, 200, "DELETE accepté même pour une requête française");
+  assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM users WHERE id = ?`, "elena"))!.n, 0);
+
   // Corps démesuré (Content-Length menteur) → 413 par la garde commune, rien supprimé.
   const huge = new NextRequest("http://localhost/api/account/delete", {
     method: "POST",
@@ -203,8 +210,8 @@ test("route : refuse sans session (401) et ne supprime QUE le compte de la sessi
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM users WHERE id = ?`, "dave"))!.n, 1, "dave intact après le 413");
 
   // Confirmation manquante → 400 (pas de suppression en un clic).
-  const r400 = await POST(mk({ "x-cortex-user": "dave", origin: "http://localhost" }, {}));
-  assert.equal(r400.status, 400, "sans le mot de confirmation → 400");
+  const r400 = await POST(mk({ "x-cortex-user": "dave", origin: "http://localhost" }, { confirm: "AUTRE" }));
+  assert.equal(r400.status, 400, "un autre mot de confirmation → 400");
   assert.equal((await authGet<{ n: number }>(`SELECT count(*) n FROM users WHERE id = ?`, "dave"))!.n, 1, "dave toujours là");
   delete process.env.AUTH_ENABLED;
 });

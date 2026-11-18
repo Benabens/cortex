@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { chapterLine, reason, themeHref, trainHref, type NotionFacts } from "@/lib/ux/next-up";
+import { useTranslations } from "use-intl/react";
+import { useFmt } from "@/lib/i18n/use-fmt";
 
 /**
  * « Next up » de l'Accueil dans la carte héros D2 : la notion en titre géant, la raison en une
@@ -8,11 +10,14 @@ import { chapterLine, reason, themeHref, trainHref, type NotionFacts } from "@/l
  * jetons --color-on-hero* (texte) et --color-hero-btn* (bouton blanc cassé).
  */
 export function PriorityHero({ title, facts }: { title: string; facts: NotionFacts }) {
-  const why = reason(facts);
-  const chapter = chapterLine(facts.chapter);
+  const t = useTranslations("dashboard");
+  const nextT = useTranslations("nextUp");
+  const f = useFmt();
+  const why = reason(facts, nextT, f);
+  const chapter = chapterLine(facts.chapter, nextT);
   return (
     <section className="d2-hero p-6 sm:p-9 lg:p-11" aria-labelledby="priority-title">
-      <p className="text-[0.8125rem] font-medium text-on-hero-2">À travailler maintenant</p>
+      <p className="text-[0.8125rem] font-medium text-on-hero-2">{t("priority")}</p>
       <h1
         id="priority-title"
         className="mt-2.5 break-words text-[2.1rem] font-semibold leading-[1.04] text-on-hero [text-wrap:balance] sm:text-[2.75rem] lg:text-[3.5rem] lg:leading-[1.02]"
@@ -30,14 +35,14 @@ export function PriorityHero({ title, facts }: { title: string; facts: NotionFac
           href={trainHref(title)}
           className="inline-flex h-11 items-center gap-2 rounded-full bg-hero-btn px-5 text-[0.9rem] font-semibold text-on-hero-btn transition-colors duration-150 hover:bg-hero-btn-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white active:translate-y-px"
         >
-          M’entraîner
+          {t("practice")}
           <ArrowRight className="size-4" strokeWidth={2.5} aria-hidden="true" />
         </Link>
         <Link
           href={themeHref(facts.chapter)}
           className="inline-flex min-h-11 items-center rounded-sm text-[0.875rem] text-on-hero underline decoration-white/35 decoration-1 underline-offset-[5px] transition-colors hover:decoration-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
         >
-          Voir dans le programme
+          {t("viewSyllabus")}
         </Link>
       </div>
     </section>

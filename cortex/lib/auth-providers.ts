@@ -3,6 +3,9 @@ import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
 import crypto from "node:crypto";
 import { authGet, authRun } from "@/db/auth-store";
+import { accountLocaleByEmail } from "@/lib/i18n/account-locale";
+import { cookieValue, LOCALE_COOKIE, resolveLocale, type Locale } from "@/lib/i18n/locale";
+import { magicLinkMail } from "@/lib/magic-link-mail";
 import { log } from "@/lib/metrics";
 import { REVIEW_PROVIDER_ID, authorizeReview, reviewLoginActive, reviewLoginDeclared } from "@/lib/review-login";
 
@@ -126,9 +129,28 @@ async function sendMagicLinkReported(p: { identifier: string; url: string }): Pr
   }
 }
 
+/**
+ * Langue de l'e-mail de connexion : celle du compte s'il existe déjà, sinon celle de la page
+ * d'où part la demande (cookie du sélecteur, puis Accept-Language), sinon l'anglais. Hors
+ * requête (script) ou base indisponible : on n'échoue pas l'envoi pour une langue.
+ */
+async function magicLinkLocale(email: string): Promise<Locale> {
+  const account = await accountLocaleByEmail(email).catch(() => null);
+  let cookie: string | null = null;
+  let acceptLanguage: string | null = null;
+  try {
+    const { headers } = await import("next/headers");
+    const h = await headers();
+    cookie = cookieValue(h.get("cookie"), LOCALE_COOKIE);
+    acceptLanguage = h.get("accept-language");
+  } catch {}
+  return resolveLocale({ account, cookie, acceptLanguage });
+}
+
 /** Envoi du magic-link : Resend natif (RESEND_API_KEY), sinon endpoint HTTP
  *  générique (AUTH_EMAIL_ENDPOINT), sinon LOG console (dev €0). */
 export async function sendMagicLink({ identifier, url }: { identifier: string; url: string }) {
+  const mail = magicLinkMail(await magicLinkLocale(identifier), url);
   const resendKey = process.env.RESEND_API_KEY;
   if (resendKey) {
     const res = await fetch("https://api.resend.com/emails", {
@@ -137,8 +159,8 @@ export async function sendMagicLink({ identifier, url }: { identifier: string; u
       body: JSON.stringify({
         from: process.env.AUTH_EMAIL_FROM ?? "Cortex <onboarding@resend.dev>",
         to: [identifier],
-        subject: "Connexion à Cortex",
-        html: `<p>Clique pour te connecter à Cortex :</p><p><a href="${url}">Se connecter</a></p><p style="color:#888">Si tu n'es pas à l'origine de cette demande, ignore ce message.</p>`,
+        subject: mail.subject,
+        html: mail.html,
       }),
     });
     if (!res.ok) throw new Error(`Envoi Resend échoué (HTTP ${res.status}) : ${(await res.text()).slice(0, 300)}`);
@@ -153,7 +175,7 @@ export async function sendMagicLink({ identifier, url }: { identifier: string; u
         "content-type": "application/json",
         ...(process.env.AUTH_EMAIL_TOKEN ? { authorization: `Bearer ${process.env.AUTH_EMAIL_TOKEN}` } : {}),
       },
-      body: JSON.stringify({ to: identifier, url, subject: "Connexion à Cortex" }),
+      body: JSON.stringify({ to: identifier, url, subject: mail.subject }),
     });
     if (!res.ok) throw new Error(`Envoi du magic-link échoué (HTTP ${res.status})`);
     return;

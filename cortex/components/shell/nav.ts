@@ -12,7 +12,7 @@ import {
 
 export type NavItem = {
   href: string;
-  label: string;
+  labelKey: "home" | "search" | "syllabus" | "weakPoints" | "exams" | "practice" | "sources" | "account";
   Icon: LucideIcon;
 };
 
@@ -24,14 +24,14 @@ export type NavItem = {
  * doublait la métaphore arbre de Programme et lisait « deux dossiers »).
  */
 export const NAV: NavItem[] = [
-  { href: "/", label: "Accueil", Icon: LayoutDashboard },
-  { href: "/recherche", label: "Recherche", Icon: Search },
-  { href: "/programme", label: "Programme", Icon: ListTree },
-  { href: "/faiblesses", label: "Faiblesses", Icon: Target },
-  { href: "/examens", label: "Examens", Icon: ClipboardList },
-  { href: "/entrainement", label: "Entraînement", Icon: Dumbbell },
-  { href: "/sources", label: "Sources", Icon: Folder },
-  { href: "/compte", label: "Compte", Icon: UserRound },
+  { href: "/", labelKey: "home", Icon: LayoutDashboard },
+  { href: "/recherche", labelKey: "search", Icon: Search },
+  { href: "/programme", labelKey: "syllabus", Icon: ListTree },
+  { href: "/faiblesses", labelKey: "weakPoints", Icon: Target },
+  { href: "/examens", labelKey: "exams", Icon: ClipboardList },
+  { href: "/entrainement", labelKey: "practice", Icon: Dumbbell },
+  { href: "/sources", labelKey: "sources", Icon: Folder },
+  { href: "/compte", labelKey: "account", Icon: UserRound },
 ];
 
 export function isActive(pathname: string, href: string) {

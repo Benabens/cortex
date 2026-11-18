@@ -10,15 +10,17 @@ import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { useApi } from "@/lib/ux/api";
 import type { SourcesResp } from "@/lib/ux/sources";
+import { useTranslations } from "use-intl/react";
 
 export default function SourcesPage() {
+  const t = useTranslations("sources");
   const { data, loading, error, refetch } = useApi<SourcesResp>("/api/sources");
 
   return (
     <div className={styles.page}>
       <PageHeader
-        title="Sources"
-        description="Le corpus qui nourrit Cortex : tes annales, séries et slides. Importe, puis prépare le cours."
+        title={t("title")}
+        description={t("description")}
       />
       {data?.originals && <CloudRetentionBanner originals={data.originals} />}
       {data?.originals && <BackToCloudNote originals={data.originals} />}
@@ -26,18 +28,17 @@ export default function SourcesPage() {
         {/* Skeleton UNIQUEMENT au premier chargement : un refetch (ex. coche « Référence »)
             garde la liste montée → plus de saut/remontage (fix jank). */}
         {loading && !data ? (
-          <div className="skeleton h-[28rem] rounded-lg" role="status" aria-busy="true" aria-label="Chargement du corpus" />
+          <div className="skeleton h-[28rem] rounded-lg" role="status" aria-busy="true" aria-label={t("loading")} />
         ) : error ? (
           <Panel className="flex flex-col items-center justify-center gap-3 rounded-xl px-6 py-16 text-center">
             <WifiOff className="size-6 text-danger-hi" strokeWidth={2} aria-hidden="true" />
-            <p className="text-[0.95rem] font-medium text-ink-1">Impossible de charger tes sources</p>
+            <p className="text-[0.95rem] font-medium text-ink-1">{t("loadTitle")}</p>
             <p className="max-w-sm text-[0.85rem] leading-relaxed text-ink-3">
-              Réessaie dans un instant. Si ça persiste, ce cours n’a peut-être encore aucun
-              document importé.
+              {t("loadHint")}
             </p>
             <Button variant="secondary" size="sm" onClick={refetch}>
               <RotateCw className="size-4" strokeWidth={2.25} aria-hidden="true" />
-              Réessayer
+              {t("retry")}
             </Button>
           </Panel>
         ) : !data || (data.exams.length === 0 && data.corpus.length === 0) ? (
@@ -45,10 +46,9 @@ export default function SourcesPage() {
             <span className="grid size-11 place-items-center rounded-lg border border-line bg-surface-2/60 text-ink-3">
               <FolderOpen className="size-5" strokeWidth={2} />
             </span>
-            <p className="text-[0.95rem] font-medium text-ink-1">Aucune annale importée</p>
+            <p className="text-[0.95rem] font-medium text-ink-1">{t("emptyTitle")}</p>
             <p className="max-w-sm text-[0.85rem] leading-relaxed text-ink-3">
-              Dépose tes examens des dernières années dans la zone d’import : ils deviennent
-              les gabarits sur lesquels Cortex cale le format de tes blancs.
+              {t("emptyHint")}
             </p>
           </Panel>
         ) : (

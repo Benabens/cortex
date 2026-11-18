@@ -4,12 +4,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/ux/cn";
 import { NAV, isActive } from "./nav";
+import { useTranslations } from "use-intl/react";
 
 export function NavList({ onNavigate }: { onNavigate?: () => void }) {
+  const t = useTranslations("nav");
+  const shellT = useTranslations("shell");
   const pathname = usePathname();
   return (
-    <nav aria-label="Navigation principale" className="flex flex-col gap-1">
-      {NAV.map(({ href, label, Icon }) => {
+    <nav aria-label={shellT("mainNavigation")} className="flex flex-col gap-1">
+      {NAV.map(({ href, labelKey, Icon }) => {
         const active = isActive(pathname, href);
         return (
           <Link
@@ -41,7 +44,7 @@ export function NavList({ onNavigate }: { onNavigate?: () => void }) {
               strokeWidth={2}
               aria-hidden="true"
             />
-            <span>{label}</span>
+            <span>{t(labelKey)}</span>
           </Link>
         );
       })}
