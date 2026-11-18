@@ -4,15 +4,18 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { signOut } from "next-auth/react";
 import { Button } from "@/components/ui/Button";
-
-const CONFIRM_WORD = "SUPPRIMER";
+import { useTranslations } from "use-intl/react";
 
 /**
  * Zone de danger : suppression de compte. Confirmation forte (retaper un mot),
  * pas de suppression en un clic. Après succès : déconnexion + retour à l'accueil.
  * Copie sobre (skill ux-copy), sans dramatiser.
  */
+const CONFIRM_WORDS = new Set(["SUPPRIMER", "DELETE"]);
+
 export function DeleteAccount() {
+  const t = useTranslations("account.delete");
+  const confirmWord = t("confirmWord");
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState("");
   const [state, setState] = useState<"idle" | "deleting" | "done">("idle");
@@ -21,7 +24,8 @@ export function DeleteAccount() {
   const dialogRef = useRef<HTMLDivElement>(null);
   const triggerWrapRef = useRef<HTMLDivElement>(null);
 
-  const canDelete = typed.trim() === CONFIRM_WORD && state === "idle";
+  // Le mot affiché suit la langue ; les deux sont acceptés (comme par la route), quelle qu'elle soit.
+  const canDelete = CONFIRM_WORDS.has(typed.trim()) && state === "idle";
 
   useEffect(() => {
     if (open) {
@@ -90,11 +94,11 @@ export function DeleteAccount() {
       const res = await fetch("/api/account/delete", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ confirm: CONFIRM_WORD }),
+        body: JSON.stringify({ confirm: typed.trim() }),
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
-        setError(data.error ?? "La suppression a échoué. Réessaie dans un instant.");
+        setError(data.error ?? t("failed"));
         setState("idle");
         return;
       }
@@ -102,22 +106,20 @@ export function DeleteAccount() {
       // Déconnexion puis retour à l'accueil (le compte n'existe plus).
       await signOut({ callbackUrl: "/" });
     } catch {
-      setError("Connexion impossible. Vérifie ta connexion et réessaie.");
+      setError(t("connectionFailed"));
       setState("idle");
     }
   }
 
   return (
     <section className="rounded-[18px] border border-[color-mix(in_oklch,var(--color-danger)_35%,var(--color-line))] bg-[color-mix(in_oklch,var(--color-danger)_6%,transparent)] p-5">
-      <h2 className="text-xl font-semibold text-ink-1">Supprimer mon compte</h2>
+      <h2 className="text-xl font-semibold text-ink-1">{t("title")}</h2>
       <p className="mt-1.5 max-w-2xl text-[0.85rem] leading-relaxed text-ink-2">
-        Efface définitivement ton compte et toutes tes données : cours, annales,
-        examens générés, faiblesses, planning, fichiers et crédits. Cette action est
-        irréversible.
+        {t("description")}
       </p>
       <div ref={triggerWrapRef} className="mt-4">
         <Button variant="secondary" onClick={() => setOpen(true)}>
-          Supprimer mon compte
+          {t("title")}
         </Button>
       </div>
 
@@ -140,23 +142,22 @@ export function DeleteAccount() {
             className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-xl border border-line-strong bg-surface-1 p-6 shadow-[var(--shadow-pop)]"
           >
             <h3 id="del-title" className="text-[1.05rem] font-semibold text-ink-1">
-              Supprimer ton compte ?
+              {t("dialogTitle")}
             </h3>
             <div className="mt-3 space-y-2 text-[0.85rem] leading-relaxed text-ink-2">
-              <p>Cette action est définitive. Seront effacés :</p>
+              <p>{t("definitive")}</p>
               <ul className="list-disc space-y-1 pl-5">
-                <li>ton compte et tes connexions ;</li>
-                <li>tous tes cours et leur contenu (annales, examens, faiblesses, planning) ;</li>
-                <li>tes fichiers et tes crédits.</li>
+                <li>{t("itemAccount")}</li>
+                <li>{t("itemCourses")}</li>
+                <li>{t("itemFiles")}</li>
               </ul>
               <p className="text-ink-3">
-                Tes données d’usage sont anonymisées, sans lien avec toi.
-                L’effacement de nos sauvegardes se termine sous 30 jours.
+                {t("anonymized")}
               </p>
             </div>
 
             <label htmlFor="del-confirm" className="mt-4 block text-[0.82rem] text-ink-2">
-              Pour confirmer, tapez <span className="font-semibold text-ink-1">{CONFIRM_WORD}</span> :
+              {t.rich("confirm", { word: () => <span className="font-semibold text-ink-1">{confirmWord}</span> })}
             </label>
             <input
               id="del-confirm"
@@ -168,7 +169,7 @@ export function DeleteAccount() {
               onChange={(e) => setTyped(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && canDelete) confirmDelete(); }}
               className="mt-1.5 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-sm text-ink-1 outline-none focus:border-[color-mix(in_oklch,var(--color-danger)_55%,transparent)]"
-              placeholder={CONFIRM_WORD}
+              placeholder={confirmWord}
             />
 
             {error && (
@@ -177,12 +178,12 @@ export function DeleteAccount() {
               </p>
             )}
             {state === "done" && (
-              <p className="mt-3 text-[0.82rem] text-ink-2">Compte supprimé. Déconnexion…</p>
+              <p className="mt-3 text-[0.82rem] text-ink-2">{t("done")}</p>
             )}
 
             <div className="mt-5 flex justify-end gap-2.5">
               <Button variant="ghost" onClick={() => setOpen(false)} disabled={state === "deleting" || state === "done"}>
-                Annuler
+                {t("cancel")}
               </Button>
               <button
                 type="button"
@@ -192,7 +193,7 @@ export function DeleteAccount() {
                 // Couleurs en classes : un `style` inline l'emporterait sur le survol.
                 className="inline-flex h-11 items-center justify-center rounded-full border border-transparent bg-danger px-4 text-sm font-semibold text-on-danger transition-[background-color,opacity] duration-150 enabled:hover:bg-danger-hi disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {state === "deleting" ? "Suppression…" : "Supprimer définitivement"}
+                {state === "deleting" ? t("deleting") : t("deleteForever")}
               </button>
             </div>
           </div>

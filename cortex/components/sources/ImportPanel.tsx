@@ -167,10 +167,10 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
         const res = await fetch(`/api/sources/add?course=${encodeURIComponent(courseId)}&category=${dropKind}`, { method: "POST", body: fd });
         const d = await res.json().catch(() => null);
         if (!res.ok) throw new Error(d?.error ?? t("errorStatus", { status: res.status }));
-        // « nom : raison », un par fichier refusé (cf. /api/sources/add).
+        // « nom : raison » (français) ou "name: reason" (anglais), un par fichier refusé (cf. fileErrorText).
         const refusedThere = ((d.skipped ?? []) as string[]).map((line) => {
-          const at = line.indexOf(" : ");
-          return at > 0 ? { name: line.slice(0, at), reason: line.slice(at + 3) } : { name: line, reason: t("refused") };
+          const at = line.indexOf(": ");
+          return at > 0 ? { name: line.slice(0, at).trimEnd(), reason: line.slice(at + 2) } : { name: line, reason: t("refused") };
         });
         setFolderRefusals([...refusedHere, ...refusedThere]);
         setUploadedMsg(t("filesAdded", { count: d.files, refused: refusedThere.length ? t("refusedSuffix", { count: refusedThere.length }) : "" }));
@@ -274,7 +274,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
       setFormatOffer(false);
       const charged = Number(d.chargedCredits) || 0;
       setFormatCharged(charged);
-      setUploadedMsg(t("formatStarted", { charged: charged > 0 ? ` : ${t("debited", { count: charged })}` : "" }));
+      setUploadedMsg(t("formatStarted", { charged: charged > 0 ? t("debitedSuffix", { debited: t("debited", { count: charged }) }) : "" }));
       if (d.jobId) startJob(d.jobId, "format");
     } catch (e) {
       const err = e as ApiError;
@@ -462,7 +462,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
         <div className="rounded-lg border border-line bg-surface-2/30 px-3.5 py-3 text-[0.78rem] text-ink-3">
           <p className="font-semibold text-ink-2">{t("notImported")}</p>
           <ul className="mt-1.5 list-disc space-y-1 pl-4">
-            {folderRefusals.map((item, index) => <li key={`${item.name}-${index}`}><span className="break-all">{item.name}</span> : {item.reason}</li>)}
+            {folderRefusals.map((item, index) => <li key={`${item.name}-${index}`}>{t.rich("refusedItem", { name: (chunks) => <span className="break-all">{chunks}</span>, reason: item.reason, fileName: item.name })}</li>)}
           </ul>
         </div>
       )}
@@ -473,7 +473,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
           <ul className="mt-1.5 list-disc space-y-1 pl-4">
             {unreadFiles.map((item) => (
               <li key={item.path}>
-                <span className="break-all font-medium text-ink-2">{item.name}</span> : {item.message}{" "}
+                {t.rich("refusedItem", { name: (chunks) => <span className="break-all font-medium text-ink-2">{chunks}</span>, fileName: item.name, reason: item.message })}{" "}
                 <button type="button" onClick={() => removeUnread(item)} className="font-medium text-ink-2 underline underline-offset-2 hover:text-ink-1">
                   {t("removeFromCourse")}
                 </button>

@@ -43,7 +43,7 @@ export default defineTool({
     "practice scores per topic (last score, mastery, attempts, next review) and graded feedback. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
-  userSummary: "Lit tes examens blancs générés et tes scores par notion.",
+  userSummary: "getResults",
   input: z.object({
     course: courseArg,
     limit: z.number().int().min(1).max(30).optional().describe("Maximum items per list (default 10)."),

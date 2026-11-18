@@ -1,4 +1,5 @@
 import { apiError } from "@/lib/i18n/api-error";
+import { requestLocale } from "@/lib/i18n/api-error";
 import { UserFacingError } from "@/lib/i18n/user-error";
 import { NextRequest, NextResponse } from "next/server";
 import { useUser } from "@/lib/req";
@@ -13,7 +14,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** Mot de confirmation attendu dans le corps (saisi par l'utilisateur). */
-const CONFIRM_WORD = "SUPPRIMER";
+const CONFIRM_WORDS = new Set(["SUPPRIMER", "DELETE"]);
 
 /**
  * POST /api/account/delete — supprime le compte de l'UTILISATEUR AUTHENTIFIÉ.
@@ -58,8 +59,9 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const userId = currentUser();
 
   const body = (await readJson(req, {})) as { confirm?: unknown };
-  if (String(body?.confirm ?? "") !== CONFIRM_WORD) {
-    return apiError(req, { code: "account_delete_confirm_missing", params: { word: CONFIRM_WORD } }, 400);
+  if (!CONFIRM_WORDS.has(String(body?.confirm ?? ""))) {
+    const word = requestLocale(req) === "fr" ? "SUPPRIMER" : "DELETE";
+    return apiError(req, { code: "account_delete_confirm_missing", params: { word } }, 400);
   }
 
   if (await isOwnerAccount(userId)) {

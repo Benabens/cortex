@@ -9,8 +9,11 @@ export const dynamic = "force-dynamic";
 
 /** Ce qu'un écran peut vouloir vérifier à sa taille exacte : un type de job, ou une aide (drill, check). */
 const CHECKABLE: ReadonlySet<string> = new Set(["exam", "qcm", "exercise", "lab-exercise", "prepare", "format", "drill", "check"]);
+// Libellés internes de repli : la phrase affichée vient de limits.kind_* (lib/billing/limits-text).
 const NAMES: Record<string, { label: string; plural: string }> = {
+  // i18n-allow: repli interne, traduit par limits.kind_lab_exercise
   "lab-exercise": { label: "exercice de lab", plural: "exercices de lab" },
+  // i18n-allow: repli interne, traduit par limits.kind_format
   format: { label: "détection du format", plural: "détections du format" },
 };
 

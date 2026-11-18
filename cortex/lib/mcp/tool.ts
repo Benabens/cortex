@@ -185,7 +185,7 @@ export type ToolDef<I extends z.ZodObject = z.ZodObject, O extends z.ZodObject =
   title: string;
   /** Écrite pour qu'un modèle choisisse le bon outil (anglais). */
   description: string;
-  /** Une ligne en français pour la personne (page « Connecter ton assistant »), sans jargon ; traduite avec l'interface. */
+  /** Clé du namespace mcpTools pour la page « Connecter ton assistant ». */
   userSummary: string;
   kind: ToolKind;
   annotations: ToolHints;

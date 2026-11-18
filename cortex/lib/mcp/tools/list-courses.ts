@@ -24,7 +24,7 @@ export default defineTool({
     "A course's id or code identifies it in the other tools. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
-  userSummary: "Liste tes cours et leurs dates d’examen.",
+  userSummary: "listCourses",
   input: z.object({}),
   output,
   async run(_args, ctx) {

@@ -8,9 +8,13 @@ import { auth, authEnabled } from "@/lib/auth";
 import { SCOPE_GENERATE, SCOPE_WRITE } from "@/lib/oauth/config";
 import { prepareConsent } from "@/lib/oauth/routes";
 import { NOINDEX } from "@/lib/seo";
+import { getT } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { ...NOINDEX, title: "Connecter une application · cortex" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT("oauthAuthorize");
+  return { ...NOINDEX, title: t("metadata") };
+}
 
 /**
  * ÉCRAN DE CONSENTEMENT du connecteur MCP (docs/MCP.md, § Flux OAuth). Derrière
@@ -42,6 +46,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 }
 
 export default async function AuthorizePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const t = await getT("oauthAuthorize");
   const sp = await searchParams;
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(sp)) if (typeof v === "string") params.set(k, v);
@@ -56,13 +61,13 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
   if (view.kind === "error") {
     return (
       <Shell>
-        <h1 className="mt-8 text-center text-[1.25rem] font-semibold tracking-tight">Connexion impossible</h1>
+        <h1 className="mt-8 text-center text-[1.25rem] font-semibold tracking-tight">{t("failed")}</h1>
         <p role="alert" className="mt-5 rounded-lg px-4 py-3 text-[0.88rem] leading-relaxed"
           style={{ background: "var(--bare-error-bg)", border: "1px solid var(--bare-error-line)", color: "var(--error-ink)" }}>
           {view.message}
         </p>
         <p className="mt-6 text-center text-[0.85rem]" style={{ color: C.muted }}>
-          <Link href="/" className="underline underline-offset-4">Retour à Cortex</Link>
+          <Link href="/" className="underline underline-offset-4">{t("back")}</Link>
         </p>
       </Shell>
     );
@@ -79,35 +84,35 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
   return (
     <Shell>
       <h1 className="mt-8 text-center text-[1.3rem] font-semibold leading-snug tracking-tight">
-        {shownName} demande l’accès à ton compte Cortex
+        {t("requestTitle", { name: shownName })}
       </h1>
 
       <dl className="mt-6 rounded-lg px-4 py-3 text-[0.85rem] leading-relaxed" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <div className="flex justify-between gap-4">
-          <dt style={{ color: C.muted }}>{view.recognized ? "Application reconnue" : view.verifiedDomain ? "Domaine vérifié" : "Nom déclaré par l’application"}</dt>
+          <dt style={{ color: C.muted }}>{view.recognized ? t("recognized") : view.verifiedDomain ? t("verifiedDomain") : t("declaredName")}</dt>
           <dd className="text-right font-medium">{view.recognized ? `${view.recognized.label} · ${view.recognized.domain}` : view.verifiedDomain ? view.clientHost : name}</dd>
         </div>
         <div className="mt-2 flex justify-between gap-4 border-t pt-2" style={{ borderColor: C.line }}>
-          <dt style={{ color: C.muted }}>Retour vers</dt>
-          <dd className="text-right font-medium">{view.localRedirect ? `cet ordinateur (${view.redirectHost})` : view.redirectHost}</dd>
+          <dt style={{ color: C.muted }}>{t("redirectTo")}</dt>
+          <dd className="text-right font-medium">{view.localRedirect ? t("thisComputer", { host: view.redirectHost }) : view.redirectHost}</dd>
         </div>
         {view.impersonates && (
           <p role="alert" className="mt-2 text-[0.78rem]" style={{ color: "var(--error-ink)" }}>
-            Cette application se présente comme « {name} », mais rien ne prouve qu’elle vient de {view.impersonates}. N’accepte pas si tu as un doute.
+            {t("impersonates", { name, domain: view.impersonates })}
           </p>
         )}
         {view.localRedirect ? (
           <p className="mt-2 text-[0.78rem]" style={{ color: "var(--warn-ink)" }}>
-            La connexion revient vers un programme de cet ordinateur. N’accepte que si tu viens de la lancer toi-même (depuis ton terminal ou ton éditeur de code, par exemple).
+            {t("localWarning")}
           </p>
         ) : !view.verifiedDomain && !view.recognized && !view.impersonates && (
           <p className="mt-2 text-[0.78rem]" style={{ color: C.faint }}>
-            Le nom « {name} » n’est pas vérifié. N’accepte que si tu viens d’ajouter cette application.
+            {t("unverified", { name })}
           </p>
         )}
         {email && (
           <div className="mt-2 flex justify-between gap-4 border-t pt-2" style={{ borderColor: C.line }}>
-            <dt style={{ color: C.muted }}>Compte</dt>
+            <dt style={{ color: C.muted }}>{t("account")}</dt>
             <dd className="text-right font-medium">{email}</dd>
           </div>
         )}
@@ -116,19 +121,19 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
       <form method="post" action="/oauth/authorize/decision" className="mt-6">
         <input type="hidden" name="ticket" value={view.ticket} />
         <fieldset>
-          <legend className="text-[0.9rem] font-semibold">Elle pourra :</legend>
+          <legend className="text-[0.9rem] font-semibold">{t("can")}</legend>
           <ul className="mt-3 flex flex-col gap-3 text-[0.86rem] leading-relaxed">
             <li className="rounded-lg px-4 py-3" style={{ border: `1px solid ${C.line}` }}>
-              <span className="font-medium">Lire</span>
-              <span style={{ color: C.muted }}> tes cours, ton programme, tes points faibles, tes résultats, tes documents de cours et ton solde.</span>
+              <span className="font-medium">{t("read")}</span>
+              <span style={{ color: C.muted }}>{t("readScope")}</span>
             </li>
             {canGenerate && (
               <li className="rounded-lg px-4 py-3" style={{ border: `1px solid ${C.line}` }}>
                 <label className="flex cursor-pointer items-start gap-3">
                   <input type="checkbox" name="generate" defaultChecked className="mt-1 size-4 accent-accent" />
                   <span>
-                    <span className="font-medium">Générer</span>
-                    <span style={{ color: C.muted }}> des examens blancs, des questions d’entraînement et des corrections. Ces actions coûtent des crédits : chacune t’annonce son coût et attend ton accord.</span>
+                    <span className="font-medium">{t("generate")}</span>
+                    <span style={{ color: C.muted }}>{t("generateScope")}</span>
                   </span>
                 </label>
               </li>
@@ -138,31 +143,30 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
                 <label className="flex cursor-pointer items-start gap-3">
                   <input type="checkbox" name="write" defaultChecked className="mt-1 size-4 accent-accent" />
                   <span>
-                    <span className="font-medium">Ajouter des cours et des supports</span>
-                    <span style={{ color: C.muted }}> : créer un cours et y ranger un document (adresse web ou texte), gratuitement. Le préparer coûte des crédits : il faut aussi « Générer », et son coût t’est annoncé avant ton accord.</span>
+                    <span className="font-medium">{t("write")}</span>
+                    <span style={{ color: C.muted }}>{t("writeScope")}</span>
                   </span>
                 </label>
               </li>
             )}
           </ul>
           <p className="mt-3 text-[0.8rem] leading-relaxed" style={{ color: C.faint }}>
-            {canWrite ? "Jamais : supprimer tes cours ou tes documents, ni toucher à tes paiements." : "Jamais : modifier ou supprimer tes cours, ni toucher à tes paiements."}
-            {" "}Tu peux couper cet accès à tout moment dans Mon compte → Applications connectées.
+            {t(canWrite ? "neverWrite" : "neverRead")} {t("revoke")}
           </p>
           <p className="mt-2 text-[0.8rem]" style={{ color: C.faint }}>
-            <Link href="/compte/assistants" target="_blank" rel="noopener" className="underline underline-offset-4">Comment connecter un assistant à Cortex</Link>
+            <Link href="/compte/assistants" target="_blank" rel="noopener" className="underline underline-offset-4">{t("howTo")}</Link>
           </p>
         </fieldset>
 
         <div className="mt-6 flex flex-col gap-3">
           <button type="submit" name="decision" value="approve"
             className="inline-flex h-12 w-full items-center justify-center rounded-full bg-primary text-[0.92rem] font-semibold text-on-primary transition-colors duration-150 hover:bg-primary-hover active:bg-primary-active">
-            Autoriser
+            {t("approve")}
           </button>
           <button type="submit" name="decision" value="deny"
             // Couleurs en classes : un `style` inline l'emporterait sur le survol.
             className="inline-flex h-12 w-full items-center justify-center rounded-full border border-[var(--bare-field-line)] bg-[var(--bare-surface)] text-[0.92rem] font-medium text-[var(--bare-ink)] transition-colors duration-150 hover:bg-[var(--bare-surface-hover)]">
-            Refuser
+            {t("deny")}
           </button>
         </div>
       </form>
