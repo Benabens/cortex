@@ -21,6 +21,7 @@ import { examKind, examYear } from "../lib/exam-names";
 import { sourceTypeForFolder } from "../lib/course-source";
 import { tokenize } from "../lib/text";
 import { extractOfficeText, type OfficeExtension } from "../lib/office-documents";
+import { htmlPageText } from "../lib/html-text";
 import { splitChapters, splitPages } from "../lib/chapters";
 import { failureStatus, INGEST_FAILURE_PREFIX, readStatus, type IngestFileOutcome } from "../lib/ingest-report";
 import { writeIngestReport } from "../lib/ingest-report-file";
@@ -489,7 +490,8 @@ async function planContentFile(rel: string): Promise<SourcePlan[]> {
     return single(path.basename(rel, path.extname(rel)), text);
   }
   if (/\.html?$/.test(rel)) {
-    const { title, text } = htmlToText(rel);
+    // Page enregistrée d'une plateforme : sans sa navigation (htmlToText reste celui de cs-202).
+    const { title, text } = htmlPageText(read(rel), path.basename(rel));
     return whole(title, [{ type, lectureId: null, title, text, anchor: rel }]);
   }
   return single(path.basename(rel), read(rel));
