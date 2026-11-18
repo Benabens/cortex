@@ -62,6 +62,8 @@ let designed = 0;
 let topUps = 0;
 const designPrompts: string[] = [];
 const dedupePrompts: string[] = [];
+/** Conception des questions ouvertes (P1 de l'architecte) : le simulateur n'y répond pas, l'ouverte est ignorée. */
+const architectPrompts: string[] = [];
 
 /** Le contrôle de fin d'examen simulé : il lit la notion, l'angle (et la règle, si présente) de chaque question dans son énoncé. */
 function dedupeReply(prompt: string): string {
@@ -96,7 +98,8 @@ before(async () => {
       const content = parsed.messages.map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))).join("\n");
       let text = "{}";
       // Revue finale : audit (verdicts) et doublons dans le même appel.
-      if (/"duplicates"/.test(content)) { dedupePrompts.push(content); text = JSON.stringify({ verdicts: [...content.matchAll(/^Q(\d+)\./gm)].map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })), ...JSON.parse(dedupeReply(content)) }); }
+      if (/CONÇOIS une question d'examen/.test(content)) architectPrompts.push(content);
+      else if (/"duplicates"/.test(content)) { dedupePrompts.push(content); text = JSON.stringify({ verdicts: [...content.matchAll(/^Q(\d+)\./gm)].map((m) => ({ index: Number(m[1]), key: true, offCourse: false, trivial: [] })), ...JSON.parse(dedupeReply(content)) }); }
       else if (/"results"/.test(content)) text = verifyReply(content);
       else if (/"items"/.test(content)) {
         designCalls++;
@@ -119,7 +122,7 @@ before(async () => {
 });
 
 const defaultDesign = design;
-beforeEach(() => { designCalls = 0; designed = 0; topUps = 0; designPrompts.length = 0; dedupePrompts.length = 0; design = defaultDesign; });
+beforeEach(() => { designCalls = 0; designed = 0; topUps = 0; designPrompts.length = 0; dedupePrompts.length = 0; architectPrompts.length = 0; design = defaultDesign; });
 
 after(async () => {
   await new Promise((r) => llm.close(r));
@@ -341,6 +344,83 @@ test("banc du 04/11 (CS-290) : une question qui reprend celle d'un examen préc�
   assert.ok(!stems.some((s) => s.startsWith("Question 3 ")), `la reprise de l'examen précédent est retirée :\n${stems.join("\n")}`);
   assert.match(dedupePrompts[0], /^P\d+\. .*faux positifs des détecteurs/m, "le contrôle reçoit les questions des examens précédents");
   assert.match(dedupePrompts[0], /même fait, même règle ou même réponse logique/, "une reformulation de notion ou d'angle reste une reprise");
+});
+
+test("banc rs-mixte du 17/11 : une question OUVERTE d'un examen précédent compte comme déjà posée", async () => {
+  const id = await course(30);
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  await runWithCourse(id, async () => {
+    // L'examen précédent n'a posé ce fait qu'en question ouverte (exam_questions), sous l'encadré de section.
+    for (const t of ["exams", "exam_questions"]) await q.ensureTable(t);
+    const examId = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','ready')`);
+    await q.run(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration) VALUES (?,?,?,?,?)`,
+      examId, "Faux positifs des détecteurs", String.raw`\callout{This question is \textbf{\large FOR ALL STUDENTS.}} \textbf{Setting.} Ancienne [notion:faux positifs des détecteurs] [angle:fait 7] : explique ce que dit le cours.`, "", "qcm-open");
+  });
+  dedupePrompts.length = 0;
+  design = (n, call, lot) => Array.from({ length: n }, (_, i) => {
+    const qn = lot.q0 + i + 1;
+    return !lot.topUp ? item(qn === 3 ? "Question 3 [notion:faux positifs des détecteurs] [angle:fait 7] : que dit le cours ?" : `Question ${qn} [notion:neuve ${qn}] [angle:a] : que dit le cours ?`) : item(`Remplacement ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`);
+  });
+  const { r, stems } = await exam(id, 4);
+  assert.equal(r.count, 4);
+  assert.ok(!stems.some((s) => s.startsWith("Question 3 ")), `la reprise de la question ouverte précédente est retirée :\n${stems.join("\n")}`);
+  const line = /^P\d+\. .*faux positifs des détecteurs.*$/m.exec(dedupePrompts[0] ?? "")?.[0] ?? "";
+  assert.ok(line, "le contrôle reçoit la question ouverte précédente");
+  assert.doesNotMatch(line, /callout|textbf|FOR ALL STUDENTS/, "en texte, sans l'encadré de section ni les commandes LaTeX");
+});
+
+test("banc rs-mixte du 17/11 : un QCM qui reprend une question OUVERTE du même examen est retiré et remplacé", async () => {
+  const id = await course(30);
+  const { runWithCourse } = await import("../db/client");
+  const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
+  const { qcmCheckpointKey } = await import("../lib/qcm-checkpoint");
+  // Le plan d'un premier passage (sans le fait de l'ouverte), puis l'ouverte déjà construite (point de reprise).
+  design = (n, call) => Array.from({ length: n }, (_, i) => item(`Premier passage ${call}.${i} [notion:ancienne ${call}.${i}] [angle:a] : que dit le cours ?`));
+  const saves: { plan?: unknown }[] = [];
+  const keep = { load: async () => null, save: async (d: unknown) => { if (d) saves.push(JSON.parse(JSON.stringify(d)) as { plan?: unknown }); } };
+  await runWithCourse(id, () => generateQcmExam({ count: 4, openCount: 0, checkpoint: keep }));
+  const cut = {
+    v: 2, key: qcmCheckpointKey({ count: 4, openCount: 1 }), plan: saves.find((x) => x.plan)!.plan,
+    open: [[0, { concept: "Résultat d'impossibilité", statement_tex: "Ouverte [notion:résultat d'impossibilité] [angle:fait 9] : explique ce que dit le cours.", solution_tex: "Corrigé fictif.", points: 15 }]],
+  };
+  let firstLot = true;
+  design = (n, call, lot) => {
+    const reprise = firstLot && !lot.topUp;
+    firstLot = false;
+    return Array.from({ length: n }, (_, i) => (reprise && i === 1
+      ? item("Reprise de l'ouverte [notion:résultat d'impossibilité] [angle:fait 9] : que dit le cours ?")
+      : item(`Question ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`)));
+  };
+  dedupePrompts.length = 0;
+  const stems = await runWithCourse(id, async () => {
+    const r = await generateQcmExam({ count: 4, openCount: 1, checkpoint: { load: async () => cut, save: async () => {} } });
+    assert.equal(r.count, 4);
+    return (await getQcmExam(r.id))!.items.map((x) => x.stem);
+  });
+  assert.ok(!stems.some((st) => st.startsWith("Reprise de l'ouverte")), `le QCM qui reprend l'ouverte est retiré :\n${stems.join("\n")}`);
+  assert.ok(dedupePrompts.some((pr) => /^P\d+\. .*Ouverte \[notion:résultat d'impossibilité\]/m.test(pr)), "le contrôle des doublons reçoit l'ouverte de l'examen");
+});
+
+test("banc rs-mixte du 17/11 : l'architecte d'une ouverte reçoit les questions déjà posées et les QCM de l'examen", async () => {
+  const id = await course(30);
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  await runWithCourse(id, async () => {
+    for (const t of ["exams", "exam_questions"]) await q.ensureTable(t);
+    const examId = await q.insert(`INSERT INTO exams (format_template, status) VALUES ('qcm','ready')`);
+    await q.run(`INSERT INTO exam_questions (exam_id, concept, statement_html, solution_html, source_inspiration) VALUES (?,?,?,?,?)`,
+      examId, "Résultat d'impossibilité", String.raw`\callout{This question is \textbf{\large FOR ALL STUDENTS.}}\callout{FOR ALL STUDENTS}Ouverte précédente : si $x < y$ et $y > z$, que dit le cours ?`, "", "qcm-open");
+  });
+  design = (n, call) => Array.from({ length: n }, (_, i) => item(`QCM de l'examen ${call}.${i} [notion:neuve ${call}.${i}] [angle:a] : que dit le cours ?`));
+  const { runWithCourse: inCourse } = await import("../db/client");
+  const { generateQcmExam } = await import("../lib/qcm");
+  await inCourse(id, () => generateQcmExam({ count: 4, openCount: 1 }));
+  const prompt = architectPrompts[0] ?? "";
+  assert.ok(prompt, "l'architecte de l'ouverte est appelé");
+  assert.match(prompt, /\[question ouverte : Résultat d'impossibilité\] Ouverte précédente : si x < y et y > z/, "l'ouverte précédente, en texte, sans encadré, inégalités gardées");
+  assert.doesNotMatch(prompt, /FOR ALL STUDENTS/);
+  for (const label of ["Ancrage", "Bulles filtrantes"]) assert.match(prompt, new RegExp(`· ${label}`), `les QCM prévus de l'examen (${label}) sont donnés comme déjà couverts`);
 });
 
 test("modèle qui répète toujours la même notion : budget borné, aucun doublon connu réinjecté", async () => {

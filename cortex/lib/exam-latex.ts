@@ -61,7 +61,7 @@ function closingBrace(t: string, open: number): number {
  * Retire l'encadré `\callout{… FOR ALL STUDENTS …}` : il distingue les sections IN et SC de
  * CS-202 et n'a aucun sens ailleurs (prod du 13/11 : en anglais dans un examen en français).
  */
-function dropSectionCallouts(t: string): string {
+export function dropSectionCallouts(t: string): string {
   let out = "";
   let from = 0;
   for (let at = t.indexOf(String.raw`\callout{`); at >= 0; at = t.indexOf(String.raw`\callout{`, from)) {
