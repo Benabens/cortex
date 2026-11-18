@@ -12,7 +12,8 @@ const norm = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCas
 /** Un mot entier, mais collé à un chiffre accepté (« exam1 », « Final2023 »). */
 const word = (alternatives: string) => new RegExp(`(?<![a-z])(?:${alternatives})(?![a-z])`);
 
-const MIDTERM = word("mid-?terms?|partiels?|parcial(?:es)?|zwischenpr(?:u|ue)fung|quiz+e?s?");
+// « Prelim » : le partiel de Cornell et d'autres universités américaines (audit 3, P1-9 : il était pris pour un final).
+const MIDTERM = word("mid-?terms?|partiels?|parcial(?:es)?|zwischenpr(?:u|ue)fung|quiz+e?s?|prelim(?:inary)?s?");
 const FINAL = word("finals?");
 /** Une annale sans année reste reconnue sur ces mots (« exam1 ») ; « final » seul exige une année. */
 const STRONG = word("exams?|examens?|examinations?|klausur(?:en)?|pr(?:u|ue)fung(?:en)?|esam[ei]|tentamens?|past-?papers?");
@@ -35,7 +36,7 @@ export function examKind(rel: string): "final" | "midterm" | null {
   const base = f.split("/").at(-1) ?? f;
   const folders = f.split("/").slice(0, -1);
   if (NOT_AN_EXAM.test(base)) return null;
-  const midterm = MIDTERM.test(base) || folders.some((d) => /mid-?terms?|partiels?/.test(d));
+  const midterm = MIDTERM.test(base) || folders.some((d) => /mid-?terms?|partiels?|prelims?/.test(d));
   const named = STRONG.test(base) || MIDTERM.test(base) || (FINAL.test(base) && examYear(base) != null);
   if (named || folders.some((d) => EXAM_FOLDER.test(d))) return midterm ? "midterm" : "final";
   return null;
@@ -60,8 +61,19 @@ export function withoutSolutions<R>(rows: R[], nameOf: (r: R) => string): R[] {
 /** Radical d'un nom sans les mots de corrigé : « Final_Exam_Solutions » et « Final_Exam » se rejoignent. */
 const stemOf = (p: string) => norm(p.split("/").at(-1) ?? p).replace(/\.[a-z0-9]+$/, "").replace(SOLUTION, "").replace(/[-. ]+/g, "-").replace(/^-|-$/g, "");
 
-/** Garde UN énoncé par (type d'épreuve, année) — évite de compter énoncé + corrigé (doublons faux)
- *  et ne mélange plus finals et midterms d'une même année dans un seul bucket.
+/** Numéro d'une épreuve dans l'année : « Midterm 2 », « prelim1 », « Quiz_3 » ; null sans numéro. */
+const NUMBERED = /(?<![a-z])(?:mid-?terms?|partiels?|parcial(?:es)?|prelims?|quiz+e?s?|tests?|exams?|examens?|klausur(?:en)?)[- ]?(\d{1,2})(?!\d)/;
+function examNumber(...names: string[]): number | null {
+  for (const n of names) {
+    const m = norm(n).match(NUMBERED);
+    if (m) return +m[1];
+  }
+  return null;
+}
+
+/** Garde UN énoncé par (type d'épreuve, année, numéro) — évite de compter énoncé + corrigé (doublons faux)
+ *  et ne mélange plus finals et midterms d'une même année dans un seul bucket, ni « Midterm 1 » et
+ *  « Midterm 2 » (audit 3, P1-9 : le second disparaissait de l'index).
  *  Préfère une source SCANNABLE (PDF rendable en vision) à un extrait HTML : c'est générique
  *  (aucune matière) et ça permet l'index/scan là où un site et un PDF coexistent pour la même épreuve.
  *  Sans année, un corrigé est écarté quand son énoncé (même radical) est là. */
@@ -75,7 +87,7 @@ export function pickEnonces<R extends { path: string; title: string; year: numbe
   const noYear: R[] = [];
   for (const r of rows) {
     if (r.year == null) { noYear.push(r); continue; }
-    const k = `${kindOf(r)}|${r.year}`;
+    const k = `${kindOf(r)}|${r.year}|${examNumber(r.title, r.path) ?? ""}`;
     if (!byKey.has(k)) byKey.set(k, []);
     byKey.get(k)!.push(r);
   }
