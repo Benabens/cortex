@@ -301,7 +301,8 @@ const codeName = (language: string) => ({ c: "C", "c++": "C++", cpp: "C++", "c#"
 function systemPrompt(plan: BlockPlan, n: number, counterExamples: string): string {
   const c = getCourse(currentCourse());
   const language = languageName(examLanguageFor(currentCourse()))[1];
-  const perBlock = plan.totalPoints ? Math.max(3, Math.round(plan.totalPoints / Math.max(1, n))) : null;
+  // Le barème de l'annale fixe déjà les points de chaque sous-question : un total visé le contredirait.
+  const perBlock = plan.totalPoints && !plan.points ? Math.max(3, Math.round(plan.totalPoints / Math.max(1, n))) : null;
   const allows = (k: PartKind) => !plan.kinds || plan.kinds.includes(k);
   const python = isPython(plan.codeLanguage);
   return [
