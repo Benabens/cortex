@@ -197,3 +197,17 @@ test("une question dont un caractère ne s'imprime pas (filet de lib/tex-escape)
   assert.equal(r.count, 3, "le sujet de la question illisible est comblé");
   assert.ok(!view.items.some((it) => /\(q10\)/.test(it.stem)), "la question au caractère effacé n'entre pas dans l'examen");
 });
+
+test("un caractère non imprimable dans l'explication ou une idée fausse écarte aussi la question", async () => {
+  const id = await course(4);
+  design = (n, call) => Array.from({ length: n }, (_, i) => {
+    const it = item(call * 10 + i, 4);
+    if (call !== 1) return it;
+    if (i === 0) return { ...it, explanation: `${it.explanation} ⌘` };
+    if (i === 1) return { ...it, misconceptions: it.misconceptions.map((m, k) => (k === 2 ? `${m} ⌘` : m)) };
+    return it;
+  });
+  const { r, view } = await exam(id, 3);
+  assert.equal(r.count, 3, "les sujets écartés sont comblés");
+  assert.ok(!view.items.some((it) => /\(q1[01]\)/.test(it.stem)), "ni l'explication ni l'idée fausse illisible n'entrent dans l'examen");
+});

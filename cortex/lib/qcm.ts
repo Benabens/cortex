@@ -1030,8 +1030,9 @@ export async function generateQcmBatch(
       step(`QCM à ${raw.options.length} options écarté (il en faut ${expected}) : son sujet est comblé`, 30);
       continue;
     }
-    // Un caractère que le PDF ne sait pas écrire y deviendrait une espace (« A ⊆ B » → « A   B »).
-    const unprintable = untypesetChars(raw.stem, ...raw.options);
+    // Un caractère que le PDF ne sait pas écrire y deviendrait une espace (« A ⊆ B » → « A   B »),
+    // dans l'énoncé, une option ou le corrigé (explication, idées fausses).
+    const unprintable = untypesetChars(raw.stem, raw.options, raw.explanation, raw.misconceptions, (raw as { justification?: unknown }).justification);
     if (unprintable.length) {
       step(`QCM écarté : ${unprintable.join(" ")} ne s'imprime pas dans le PDF, son sujet est comblé`, 30);
       continue;

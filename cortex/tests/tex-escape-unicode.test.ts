@@ -83,3 +83,16 @@ test("un QCM qui porte ces symboles et ces lettres compile en PDF", async (t) =>
   assert.equal(out.texError, undefined, out.texError);
   assert.match(out.file, /\.pdf$/);
 });
+
+test("untypesetChars lit toutes les chaînes d'une valeur imbriquée (options, justification, bloc)", () => {
+  assert.deepEqual(untypesetChars({ stem: "ok", options: ["a", "b ⌘"], justification: { key: "k", distractors: [{ option_index: 1, why_wrong: "漢" }] }, points: 3 }), ["⌘", "漢"]);
+  assert.deepEqual(untypesetChars(["A ⊆ B"], null, undefined, 4), []);
+});
+
+test("une question composée dont un texte ne s'imprimerait pas est renvoyée au modèle", async () => {
+  const { blockIssue } = await import("../lib/blocks");
+  const short = { kind: "short", prompt: "Explain.", code: "", options: [], correct: -1, answer: "a", criteria: [{ label: "x", points: 1 }], points: 1, explanation: "" };
+  const scq = (o: string) => ({ kind: "scq", prompt: "Pick.", code: "", options: ["a", "b", o, "d"], correct: 0, answer: "", criteria: [], points: 1, explanation: "" });
+  assert.equal(blockIssue({ scenario: "S", parts: [scq("c"), short] }, 2, 6), null);
+  assert.match(blockIssue({ scenario: "S", parts: [scq("c ⌘"), short] }, 2, 6) ?? "", /⌘/);
+});

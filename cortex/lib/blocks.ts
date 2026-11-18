@@ -8,6 +8,7 @@ import type { StepCb } from "@/lib/exam";
 import { examLanguageFor, type BlockFormat } from "@/lib/exam-format";
 import { HARD_STOP_CODES, completeJson, llmErrorCode, llmFailureReason } from "@/lib/llm";
 import { languageName } from "@/lib/profiles/generic-directives";
+import { untypesetChars } from "@/lib/tex-escape";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
 import { NO_FLAG, coverageTopics, runPool } from "@/lib/qcm";
 import { examsDir } from "@/lib/paths";
@@ -165,6 +166,9 @@ export function blockIssue(v: unknown, min: number, max: number): string | null 
       if (!text(p.answer)) return `${at} (code_output) : « answer » (la sortie exacte) est vide`;
     }
   }
+  // Tout texte du bloc passe par esc dans le PDF : un caractère qu'il ne sait pas écrire y deviendrait une espace.
+  const unprintable = untypesetChars(b);
+  if (unprintable.length) return `${unprintable.join(" ")} ne s'imprime pas dans le PDF : écris-le autrement (en toutes lettres)`;
   if (!parts.some((p) => p.kind === "scq") || !parts.some((p) => p.kind === "short")) return "mêle les types : au moins un choix unique (scq) et au moins une réponse courte (short)";
   return null;
 }
