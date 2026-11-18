@@ -21,3 +21,13 @@ export function clientIp(headers: Pick<Headers, "get">, env: Partial<NodeJS.Proc
   }
   return "direct";
 }
+
+/** IP de la requête en cours (TRUST_PROXY) ; hors requête (tests, scripts, worker) : « direct », jamais bornée. */
+export async function requestIp(): Promise<string> {
+  try {
+    const { headers } = await import("next/headers");
+    return clientIp(await headers());
+  } catch {
+    return "direct";
+  }
+}

@@ -3,10 +3,10 @@
 #   - environnement de PR Railway (« …-pr-<n> ») → preview-entrypoint.sh, qui
 #     neutralise les variables copiées de la prod puis lance docker-entrypoint.sh ;
 #   - partout ailleurs (production, docker run local, CI) → docker-entrypoint.sh.
-# Cet aiguillage était fait par railway.json (environments.pr.deploy.startCommand),
-# que Railway cesse de lire le 2026-12-01, et que l'Infrastructure as Code ne peut
-# pas remplacer : .railway/railway.ts n'est appliqué qu'à la main, jamais aux
-# environnements de PR que Railway crée tout seul. Ici, la règle voyage avec l'image.
+# Cet aiguillage était fait par railway.json (environments.pr.deploy.startCommand,
+# supprimé depuis), et l'Infrastructure as Code ne peut pas le remplacer :
+# .railway/railway.ts n'est appliqué qu'à la main, jamais aux environnements de
+# PR que Railway crée tout seul. Ici, la règle voyage avec l'image.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

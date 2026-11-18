@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { authTx } from "@/db/auth-store";
 import { dbDriverName } from "@/db/q";
+import { personKey } from "@/lib/email-identity";
 
 /**
  * Limites d'envoi du lien magique (audit fuites B4). Chaque envoi coûte un e-mail Resend :
@@ -37,19 +38,14 @@ function limit(name: string, def: number): number | null {
 const at = (ms: number) => new Date(ms).toISOString().slice(0, 19).replace("T", " ");
 const key = (kind: string, value: string) => createHash("sha256").update(`${kind}:${value}`).digest("hex").slice(0, 32);
 
-/**
- * Une boîte = une clé : minuscules sans espaces (comme Auth.js), et sans étiquette « +… » avant
- * l'arobase (chloe+1@ et chloe+2@ arrivent chez chloe@). Ne sert qu'à compter : le compte garde
- * l'adresse telle quelle.
- */
-const normalizeAddress = (email: string) => email.trim().toLowerCase().replace(/\+[^@]*@/, "@");
 
 /**
  * Décide ET compte un envoi : `ok` réserve la place (la ligne est écrite), un refus n'écrit rien.
  * `ip` vient de clientIp() ; « direct » (pas de TRUST_PROXY) n'est jamais borné par IP.
  */
 export async function takeMagicLinkSend(email: string, ip: string, now = Date.now()): Promise<MagicLinkVerdict> {
-  const addressKey = key("address", normalizeAddress(email));
+  // Une boîte = une clé (lib/email-identity) : « +étiquette » et points Gmail ne font pas de nouvelle adresse.
+  const addressKey = key("address", personKey(email));
   const ipKey = ip && ip !== "direct" ? key("ip", ip) : null;
   const perMinute = limit("MAGIC_LINK_PER_MINUTE", 1);
   const perDay = limit("MAGIC_LINK_PER_DAY", 5);

@@ -335,7 +335,8 @@
     "errorConfiguration": "La connexion est momentanément indisponible. Réessaie dans un instant.",
     "errorDefault": "La connexion a échoué. Réessaie ; si le problème persiste, reviens plus tard.",
     "shareTitle": "Cortex : révise ce qui tombe vraiment",
-    "shareDescription": "Cortex lit tes annales et tes slides, repère ce qui revient, et t’entraîne dessus avant le jour J."
+    "shareDescription": "Cortex lit tes annales et tes slides, repère ce qui revient, et t’entraîne dessus avant le jour J.",
+    "errorEmailDisposable": "Les adresses e-mail jetables ne permettent pas d’ouvrir un compte. Utilise ton adresse habituelle (école, Gmail, Outlook…)."
   },
   "errorPage": {
     "title": "Une erreur est survenue",
@@ -704,8 +705,8 @@
       "manageSubscription": "Gérer mon abonnement",
       "manageHint": "Changer de moyen de paiement, télécharger tes factures, résilier (effet en fin de période ; tes fichiers restent ensuite 30 jours dans le cloud).",
       "topUp": "Recharger",
-      "subscriptionOffer": "Autant de cours que tu veux · {count, plural, one {{formatted} crédit} other {{formatted} crédits}} par mois, non reportables",
-      "packOffer": "{count, plural, one {{formatted} crédit} other {{formatted} crédits}}, sans date d’expiration",
+      "subscriptionOffer": "Tes fichiers dans le cloud · {count, plural, one {{formatted} crédit} other {{formatted} crédits}} par mois, non reportables",
+      "packOffer": "{count, plural, one {{formatted} crédit} other {{formatted} crédits}}, sans date d’expiration · tes fichiers dans le cloud pendant 12 mois",
       "alreadySubscribed": " · tu as déjà un abonnement",
       "yearlyRenewal": "Renouvellement automatique chaque année · résiliable à tout moment depuis Mon compte, effet en fin de période.",
       "monthlyRenewal": "Renouvellement automatique chaque mois · résiliable à tout moment depuis Mon compte, effet en fin de période.",
@@ -1582,5 +1583,18 @@
     "found": "⟵ Cortex · trouvé ici",
     "clear": "enlever surlignage",
     "notFound": "Fichier introuvable"
+  },
+  "examOutput": {
+    "site": "Sur le site",
+    "pdf": "PDF",
+    "pdfFromPastExam": "PDF de l’annale",
+    "label": "Sortie de l’examen",
+    "output": "Sortie",
+    "pdfHint": "Le PDF reprend la mise en page de ton annale, relevée à la préparation du cours. Même examen, même prix.",
+    "siteHint": "Réponds en ligne, Cortex te corrige. Le PDF reste à un clic, même prix.",
+    "openPdf": "Ouvrir le PDF",
+    "openExam": "Ouvrir l’examen",
+    "frameTitle": "Examen blanc #{id}, PDF",
+    "pdfNote": "La mise en page de ton annale, relevée à la préparation du cours (une mise en page sobre si Cortex n’a pas pu la lire). Imprime-le, compose sur papier, puis reviens sur le site pour te corriger."
   }
 }

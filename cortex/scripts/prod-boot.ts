@@ -25,7 +25,7 @@ import { runWithUser } from "../db/context";
 import { authAll, authRun } from "../db/auth-store";
 import { dbDriverName, nowStr, q } from "../db/q";
 import { TABLES } from "../db/tables";
-import { assertAuthRequired, assertE2ETestAuthAllowed, assertLlmProviderAllowed } from "../lib/boot-guards";
+import { assertAuthRequired, assertE2ETestAuthAllowed, assertLlmProviderAllowed, assertStorageBucketIsolated } from "../lib/boot-guards";
 import { dataRoot, ensureCoursesLoaded, normalizeCourse } from "../lib/courses";
 
 const log = (msg: string) => console.log(`[prod-boot] ${msg}`);
@@ -200,6 +200,7 @@ async function main(): Promise<void> {
   assertAuthRequired();
   assertE2ETestAuthAllowed();
   assertLlmProviderAllowed();
+  assertStorageBucketIsolated();
   assertIsolationSane();
   initVolume();
   await migrateCourses();

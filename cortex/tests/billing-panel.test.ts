@@ -27,7 +27,7 @@ const base = (over: Partial<Props["data"]> = {}): Props["data"] => ({
   ],
   offers: [
     { plan: "pro_monthly", kind: "subscription", label: "Pro — mensuel", credits: 20, interval: "month", price: { amount: 14.9, currency: "EUR" } },
-    { plan: "pro_yearly", kind: "subscription", label: "Pro — annuel", credits: 20, interval: "year", price: { amount: 119, currency: "EUR" } },
+    { plan: "pro_yearly", kind: "subscription", label: "Pro — annuel", credits: 20, interval: "year", price: { amount: 149, currency: "EUR" } },
     { plan: "credits_10", kind: "pack", label: "Pack de 10 crédits", credits: 10, interval: null, price: { amount: 9, currency: "EUR" } },
   ],
   ...over,
@@ -53,8 +53,8 @@ test("compte sans abonnement, CGV acceptées : consentement par offre avant acti
   assert.match(html, /Aucun abonnement/);
   // fr-FR : virgule décimale, pas de décimales inutiles, espace insécable avant €.
   assert.match(html, /14,90\u00a0€ \/ mois/);
-  assert.ok(!/14\.90|119[.,]00|(?<![0-9])9[.,]00/.test(html), "aucun format anglo-saxon ni décimales inutiles");
-  assert.match(html, /119\u00a0€ \/ an/);
+  assert.ok(!/14\.90|149[.,]00|(?<![0-9])9[.,]00/.test(html), "aucun format anglo-saxon ni décimales inutiles");
+  assert.match(html, /149\u00a0€ \/ an/);
   assert.match(html, /(?<![0-9,])9\u00a0€/);
   assert.equal(buttons(html).filter(isDisabled).length, 3, "chaque achat attend son consentement propre");
   assert.match(html, /perdre mon droit de rétractation dès leur première utilisation/);
@@ -71,16 +71,17 @@ test("compte sans mouvement : indique comment acheter sans promettre de crédits
   assert.ok(!/crédits? offerts?/i.test(html));
 });
 
-test("offre Pro : « Autant de cours que tu veux », avec au-dessus ce que coûte un cours et ce qui borne l'usage", async () => {
+test("offres : ce qu'elles ouvrent en plus des crédits (le cloud des fichiers), avec au-dessus ce que coûte un cours et ce qui borne l'usage", async () => {
   const costs = { exam: 2, qcm: 1, exercise: 1, assist: 0.1, prepare: 2, format: 1 };
   const html = await render(base({ costs, quotas: { gen: 3, assist: 20 }, storageQuotaMb: 200 }));
-  // Les deux offres Pro (mensuelle, annuelle) la portent ; le pack, non.
-  assert.equal((html.match(/Autant de cours que tu veux · 20 crédits par mois, non reportables/g) ?? []).length, 2);
-  assert.match(html, /10 crédits, sans date d’expiration/);
+  // Les deux offres Pro (mensuelle, annuelle) et le pack ouvrent le cloud (Premium) ; aucune ne promet un nombre de cours.
+  assert.equal((html.match(/Tes fichiers dans le cloud · 20 crédits par mois, non reportables/g) ?? []).length, 2);
+  assert.match(html, /10 crédits, sans date d’expiration · tes fichiers dans le cloud pendant 12 mois/);
+  assert.ok(!/Autant de cours/.test(html), "plus de promesse sur le nombre de cours");
   // Une fois, sous « Recharger », avant la première offre : un cours n'est pas gratuit, et l'usage a des bornes.
   const note = "Préparer un cours coûte 2 crédits, relire le format de ses annales 1 crédit, et chaque génération utilise des crédits. Par jour et par compte : 3 générations et 20 aides. Stockage : 200 Mo de fichiers.";
   assert.equal(html.split(note).length - 1, 1);
-  assert.ok(html.indexOf("Recharger") < html.indexOf(note) && html.indexOf(note) < html.indexOf("Autant de cours que tu veux"));
+  assert.ok(html.indexOf("Recharger") < html.indexOf(note) && html.indexOf(note) < html.indexOf("Tes fichiers dans le cloud"));
   assert.ok(!/illimit/i.test(html), "aucune promesse d'illimité");
   assert.ok(!/Limites par compte/.test(html), "la phrase ne se donne pas pour la liste complète des limites");
   // Limites levées ou inconnues : l'écran n'invente aucun chiffre.

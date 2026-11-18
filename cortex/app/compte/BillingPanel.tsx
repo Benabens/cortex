@@ -70,11 +70,12 @@ type Billing = {
 export const money = (amount: number, currency: string) => fmt("fr").price(amount, currency);
 
 /**
- * Ce qui borne l'usage, dit au-dessus des offres. « Autant de cours que tu
- * veux » parle du NOMBRE de cours, qui n'a pas de plafond : un cours coûte des
- * crédits (sa préparation, puis la relecture du format de ses annales), ses générations aussi,
- * et le compte a des limites par jour et un espace de stockage. Seules les
- * limites citées ici sont nommées : la phrase ne se donne pas pour une liste complète.
+ * Ce qui borne l'usage, dit au-dessus des offres : un cours coûte des crédits (sa
+ * préparation, puis la relecture du format de ses annales), ses générations aussi, et le
+ * compte a des limites par jour et un espace de stockage. Seules les limites citées ici sont
+ * nommées : la phrase ne se donne pas pour une liste complète. Chaque offre dit ce qu'elle
+ * ouvre en plus des crédits : le cloud pour les fichiers importés (lib/originals/policy,
+ * Premium = abonnement en règle ou achat des 12 derniers mois), pas un nombre de cours.
  */
 /** Chargement : pur, sans état — testable et réutilisable par le bouton « actualiser ». */
 async function fetchBilling(): Promise<Billing> {

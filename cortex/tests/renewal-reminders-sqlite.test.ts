@@ -46,7 +46,7 @@ test("sqlite : un passage par jour, un e-mail par abonnement et par période, ho
   };
   await subscriber("lea", "2027-10-07 12:00:00");
   await subscriber("oublie", "2027-08-29 12:00:00"); // à 20 jours de l'échéance, sans rappel
-  const lookup = async () => ({ renews: true, yearly: true, periodEnd: null, amount: 119, currency: "EUR", discounted: false });
+  const lookup = async () => ({ renews: true, yearly: true, periodEnd: null, amount: 149, currency: "EUR", discounted: false });
   const run = (now: Date) => sendRenewalReminders({ now, lookup });
 
   assert.equal(await renewalReminderTick({ now: at("2027-08-09 07:00:00"), run }), "ok");
@@ -83,7 +83,7 @@ test("sqlite : rappel hors délai et refus persistant signalés au propriétaire
   };
   await subscriber("tard", "tard@exemple.test", "2027-08-29 12:00:00"); // à 20 jours de l'échéance, sans rappel
   await subscriber("muet", null, "2027-10-07 12:00:00"); // dans la fenêtre, sans adresse
-  const lookup = async () => ({ renews: true, yearly: true, periodEnd: null, amount: 119, currency: "EUR", discounted: false });
+  const lookup = async () => ({ renews: true, yearly: true, periodEnd: null, amount: 149, currency: "EUR", discounted: false });
 
   await sendRenewalReminders({ now: at("2027-08-09 07:00:00"), lookup });
   await sendRenewalReminders({ now: at("2027-08-09 07:30:00"), lookup });

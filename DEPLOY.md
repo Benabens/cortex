@@ -70,16 +70,18 @@ ouvertes à tous, sauf lancement fermé (`INVITE_ONLY=1`, § 12).
 
 ## 1 bis. Railway — la config en code (`.railway/railway.ts`)
 
-Railway cesse de lire `railway.json` / `railway.toml` (Config as Code) le
+Railway cessera de lire `railway.json` / `railway.toml` (Config as Code) le
 **2026-12-01**. Le projet est décrit dans `.railway/railway.ts` (Infrastructure
 as Code) : l'app (source, build Dockerfile, healthcheck, région, replica,
 domaine, volume `/data`, noms des variables), Postgres et son volume, les deux
 buckets. Les valeurs des variables restent sur Railway (`preserve()`).
+`railway.json` a été supprimé (aucun chemin Config File n'était stocké sur le
+service, donc rien ne le cherchait) : le démarrage propre aux previews de PR,
+qu'il portait, est maintenant dans l'image (`cortex/scripts/start.sh`).
 
 Ce fichier n'est lu **que par la CLI**, jamais pendant un déploiement : merger
 une PR qui le modifie ne change rien sur Railway tant que personne ne lance
-`railway config apply`. Le démarrage propre aux previews de PR, que faisait
-`railway.json`, est porté par l'image (`cortex/scripts/start.sh`).
+`railway config apply`.
 
 ```bash
 cd .railway && npm ci && cd ..   # SDK railway épinglé, une fois
@@ -268,7 +270,7 @@ SUBSCRIPTION_MONTHLY_CREDITS=20
 # Un LEGAL_TERMS_URL / _PRIVACY_ / _REFUND_ / _NOTICE_URL explicite prime.
 LANDING_URL=https://⟨landing⟩
 # Version des CGV tracée à l'acceptation (change-la à chaque révision des CGV).
-LEGAL_TERMS_VERSION=2026-10
+LEGAL_TERMS_VERSION=2026-11-17
 # Adresse de contact affichée dans l'app (défaut : celle de l'éditeur).
 # CONTACT_EMAIL=support@⟨ton-domaine⟩
 # Adresse qui reçoit les demandes de rétractation (et, à défaut de
@@ -369,7 +371,7 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
    | Produit / prix | Suggestion | lookup_key |
    |---|---|---|
    | Cortex Pro — mensuel (récurrent) | 14,90 €/mois | `cortex_pro_monthly` |
-   | Cortex Pro — annuel (récurrent) | 119 €/an | `cortex_pro_yearly` |
+   | Cortex Pro — annuel (récurrent) | 149 €/an | `cortex_pro_yearly` |
    | Pack de 10 crédits (paiement unique) | 9 € | `cortex_credits_10` |
    Pro = 20 crédits par mois, non reportables (`SUBSCRIPTION_MONTHLY_CREDITS`),
    consommés avant les crédits achetés ; le pack est permanent. Active aussi le
@@ -598,9 +600,9 @@ testé).
 
 Comment c'est branché : `@sentry/node` côté serveur (plus le crochet
 `onRequestError` de Next pour les erreurs de rendu et de route non gérées) et
-`@sentry/browser` côté navigateur, chargé seulement si `GET /api/monitoring`
+`@sentry/browser` côté navigateur, chargé seulement si `GET /api/relais`
 renvoie une configuration (204 sans DSN). Le navigateur envoie ses erreurs à
-`/api/monitoring` (même origine), qui ne relaie qu'au projet du DSN configuré :
+`/api/relais` (même origine), qui ne relaie qu'au projet du DSN configuré :
 la CSP garde `connect-src 'self'`. Pas de `@sentry/nextjs` : il tire webpack et
 le binaire sentry-cli (~100 Mo dans l'image) pour des source maps qu'on
 n'envoie pas.
@@ -660,6 +662,16 @@ bot Railway). La connexion persona y exige donc `E2E_PERSONA_KEY` (64 caractère
 hexadécimaux, générée par l'étape 4, posée en variable Railway et en secret
 GitHub) ; sans elle, la preview refuse de démarrer. La workflow ne publie aucune
 trace Playwright (elle contiendrait la clé).
+
+**Seau de fichiers (audit fuites I15).** Railway recopie aussi `STORAGE_S3_*` :
+la preview pointerait sur le seau de la prod (PDF des vrais comptes, en lecture
+comme en écriture). `preview-entrypoint.sh` retire ces variables, la preview
+range ses fichiers sur son propre volume. Filet en code, sur tous les chemins de
+démarrage (`assertStorageBucketIsolated`, `prod-boot` et `instrumentation`) :
+sur Railway, hors de l'environnement `production`, un `STORAGE_S3_BUCKET` posé
+fait refuser le démarrage. Un environnement persistant (staging) qui aurait son
+propre seau le déclare avec `STORAGE_S3_ENVIRONMENT=<nom de l'environnement>` ;
+la valeur recopiée de la prod ne peut pas passer cette garde.
 
 ## 10. Sauvegardes et restauration
 
@@ -897,6 +909,12 @@ quotidiens (`DAILY_GEN_QUOTA`, `DAILY_ASSIST_QUOTA`).
       reste soumis au fusible global `SPEND_CAP_USD`. Les étudiants voient leurs
       limites dans **Mon compte › Mon usage** et à côté de chaque bouton de
       génération (`GET /api/usage`), jamais en dollars.
+- [ ] Alerte par compte et par heure : `SPEND_ALERT_PER_USER_HOUR_USD` absente (5 $ par
+      défaut) ou sous `SPEND_CAP_PER_USER_USD` ; posée, la déclarer aussi dans
+      `.railway/railway.ts` (sinon l'apply la supprime). Elle écrit au propriétaire (même
+      destinataire que les alertes du mois, ci-dessous) et lève un événement Sentry
+      `alert=account_spend_hour` ; le compte est dans l'e-mail et le journal
+      `spend_alert.account_hour`, jamais chez Sentry.
 - [ ] `RESEND_API_KEY` posée, et `CORTEX_OWNER_EMAIL` ou `PUBLISHER_EMAIL` :
       sans elles, ni les alertes de dépense à 80 % et 100 %, ni celles du rappel
       de reconduction ne partent. Au démarrage, les logs ne doivent montrer ni
