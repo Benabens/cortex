@@ -73,6 +73,8 @@ export type FormatBasis = "annales" | "declared" | "sample_questions" | "course_
 
 export type ExamFormat = {
   basis: FormatBasis;
+  /** « midterm » quand les annales du cours ne sont que des partiels ; absent sinon (un final). */
+  genre?: "midterm";
   /** null ⇔ format inconnu (basis « unknown »). */
   kind: ExamKind | null;
   /** Nombre de questions (QCM) ou d'exercices ; null = inconnu. */
@@ -367,17 +369,18 @@ export async function readStoredProfile(): Promise<StoredProfile | null> {
 }
 
 /** Annales ingérées (finals, partiels) : leur nombre, et un échantillon de leur texte pour la langue. */
-async function annales(cap = 8000): Promise<{ count: number; text: string }> {
+async function annales(cap = 8000): Promise<{ count: number; finals: number; text: string }> {
   try {
-    const n = await q.get<{ n: number }>(`SELECT count(*) n FROM sources WHERE type IN ('final','midterm') AND ${EXAM_HAS_TEXT}`);
+    const n = await q.get<{ n: number; finals: number }>(`SELECT count(*) n, SUM(CASE WHEN type = 'final' THEN 1 ELSE 0 END) finals FROM sources WHERE type IN ('final','midterm') AND ${EXAM_HAS_TEXT}`);
     const count = Number(n?.n ?? 0);
-    if (!count) return { count, text: "" };
+    const finals = Number(n?.finals ?? 0);
+    if (!count) return { count, finals, text: "" };
     const rows = await q.all<{ text: string }>(
       `SELECT i.text FROM items i JOIN sources s ON s.id = i.source_id WHERE s.type IN ('final','midterm') ORDER BY s.id, i.id LIMIT 40`,
     );
-    return { count, text: rows.map((r) => r.text).join("\n").slice(0, cap) };
+    return { count, finals, text: rows.map((r) => r.text).join("\n").slice(0, cap) };
   } catch {
-    return { count: 0, text: "" };
+    return { count: 0, finals: 0, text: "" };
   }
 }
 
@@ -523,6 +526,8 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
     format = make({ basis: "unknown", kind: null, questionCount: null, openCount: null, durationMin: null, language, discipline, evidence: [] }, "Format inconnu");
   }
   memo.delete(courseId);
+  // Annales toutes partielles : l'examen blanc est un partiel (« Midterm exam »), pas un final (audit 1, P1-8).
+  if (courseId !== DEFAULT_COURSE && hasAnnales && past.finals === 0) format = { ...format, genre: "midterm" };
   memo.set(courseId, format);
   if (memo.size > MEMO_MAX) memo.delete(memo.keys().next().value!);
   return format;
@@ -570,12 +575,12 @@ export async function courseLanguage(): Promise<string> {
  * résolution du cours dans ce process, sinon la déclaration, la langue et le
  * code du cours (discipline sans échantillon de corpus).
  */
-export function formatContextFor(courseId: string): { kind: ExamKind | null; language: string; discipline: Discipline; durationMin: number | null; documents: DocumentRule | null; totalPoints: number | null } {
+export function formatContextFor(courseId: string): { kind: ExamKind | null; language: string; discipline: Discipline; durationMin: number | null; documents: DocumentRule | null; totalPoints: number | null; genre?: "midterm" } {
   const known = memo.get(courseId);
   const c = getCourse(courseId);
   // Documents permis : la déclaration, sinon ce que l'annale écrit ; jamais deviné.
   const documents = c.examFormat?.documents ?? known?.documents ?? null;
-  if (known) return { kind: known.kind, language: known.language, discipline: known.discipline, durationMin: known.durationMin, documents, totalPoints: known.totalPoints ?? known.blocks?.totalPoints ?? null };
+  if (known) return { kind: known.kind, language: known.language, discipline: known.discipline, durationMin: known.durationMin, documents, totalPoints: known.totalPoints ?? known.blocks?.totalPoints ?? null, ...(known.genre ? { genre: known.genre } : {}) };
   return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || FALLBACK_LANGUAGE, discipline: inferDiscipline({ code: c.examCode }), durationMin: c.examFormat?.durationMin ?? null, documents, totalPoints: null };
 }
 
