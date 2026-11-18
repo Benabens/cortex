@@ -1574,7 +1574,9 @@
     "notImported": "Fichiers non importés",
     "unread": "Fichiers non lus",
     "unreadHint": "Les autres fichiers du cours ont été lus normalement.",
-    "removeFromCourse": "Retirer du cours"
+    "removeFromCourse": "Retirer du cours",
+    "refusedItem": "<name>{fileName}</name> : {reason}",
+    "debitedSuffix": " : {debited}"
   },
   "sourceViewer": {
     "found": "⟵ Cortex · trouvé ici",

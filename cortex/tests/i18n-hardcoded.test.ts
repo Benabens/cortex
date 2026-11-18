@@ -48,6 +48,9 @@ test("le détecteur voit le texte en dur et laisse passer le code", () => {
   // Exemption de fichier entier : seulement en première ligne, raison donnée.
   assert.deepEqual(scanSource("m.ts", "// i18n-allow-file: maquette\nconst a = \"Créer le cours\";"), []);
   assert.equal(scanSource("m.ts", "const z = 1;\n// i18n-allow-file: maquette\nconst a = \"Créer le cours\";").length, 1);
+  // Séparateur « : » écrit en dur entre deux valeurs (typographie française dans l'anglais).
+  assert.equal(scanSource("s.tsx", "const x = <li><b>{name}</b> : {reason}</li>;").length, 1);
+  assert.equal(scanSource("s.tsx", "const x = <li>{t.rich(\"item\", { name })}</li>;").length, 0);
   assert.ok(looksFrench("Tu as 3 crédits"));
   assert.ok(looksFrench("Pour le cours de demain"));
   assert.ok(!looksFrench("Create the course"));
