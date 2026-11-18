@@ -375,6 +375,27 @@ test("set_exam_format et create_course : réponse unique ou multiple se déclare
   await owner.close();
 });
 
+test("get_job_status : l'échec d'un job en anglais quand son code est connu, la phrase d'origine sinon", async () => {
+  const { listCoursesOf } = await import("../lib/courses");
+  const { runWithUser } = await import("../db/context");
+  const { runWithCourse } = await import("../db/client");
+  const jobs = await import("../lib/jobs");
+  const hum = listCoursesOf(OWNER).find((c) => c.examCode === "HUM-285")!;
+  const [coded, uncoded] = await runWithUser(OWNER, () => runWithCourse(hum.id, async () => {
+    const coded = await jobs.createJob("qcm");
+    await jobs.setJob(coded, { status: "error", error: "Aucun QCM généré : le fournisseur d'IA est surchargé — 4 crédits rendus.", errorInfo: { code: "llm_provider_unreachable", creditsBackCenti: 400 } });
+    const uncoded = await jobs.createJob("prepare");
+    await jobs.setJob(uncoded, { status: "error", error: "Programme introuvable dans les supports.", errorInfo: { code: "job_failed" } });
+    return [coded, uncoded];
+  }));
+  const owner = await mcp((await connectAs(OWNER, { generate: true })).access);
+  type Out = { job: { error: string | null } };
+  const a = (await call(owner, "get_job_status", { course: "HUM-285", job_id: coded })).structuredContent as Out;
+  assert.equal(a.job.error, "The AI provider is overloaded or unreachable after several retries. Try again in a few minutes (4 credits returned).");
+  const b = (await call(owner, "get_job_status", { course: "HUM-285", job_id: uncoded })).structuredContent as Out;
+  assert.equal(b.job.error, "Programme introuvable dans les supports.", "sans code, le modèle reformule la phrase d'origine");
+});
+
 test("get_job_status : un examen blanc devenu QCM rend ses questions et leurs options (corrigé seulement sur demande)", async () => {
   const { listCoursesOf } = await import("../lib/courses");
   const { runWithUser } = await import("../db/context");
