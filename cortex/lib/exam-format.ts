@@ -113,7 +113,7 @@ export type BlockPartKind = (typeof BLOCK_PART_KINDS)[number];
  * par choix unique, le langage de ses extraits de code. Absente : le générateur mêle choix unique à
  * 4 options et réponse courte, avec du Python (le format de CS-290).
  */
-export type PartShape = { kinds?: BlockPartKind[]; options?: number; codeLanguage?: string };
+export type PartShape = { kinds?: BlockPartKind[]; options?: number; codeLanguage?: string; points?: Partial<Record<BlockPartKind, number>> };
 export type BlockFormat = { sections: { name: string; description: string }[]; partsMin: number; partsMax: number; totalPoints: number | null } & PartShape;
 
 export type MockExamRequest = { count?: number | null; focus?: string | null };
@@ -431,11 +431,14 @@ function partShapeOf(p: Pick<FormatProfile, "composite">): PartShape {
   const c = p.composite;
   const kinds = [...new Set(c?.part_kinds ?? [])].filter((k): k is BlockPartKind => (BLOCK_PART_KINDS as readonly string[]).includes(k));
   const codeLanguage = String(c?.code_language ?? "").trim().toLowerCase().replace(/[^a-z0-9+#]/g, "").slice(0, 20);
-  return shapeOf({ kinds: kinds.length ? kinds : undefined, options: optionsOf({ options_per_question: c?.scq_options }) ?? undefined, codeLanguage: codeLanguage || undefined });
+  const points = Object.fromEntries((c?.part_points ?? [])
+    .filter((pp) => (BLOCK_PART_KINDS as readonly string[]).includes(pp?.kind) && Number.isInteger(pp?.points) && pp.points >= 1 && pp.points <= 50)
+    .map((pp) => [pp.kind, pp.points]));
+  return shapeOf({ kinds: kinds.length ? kinds : undefined, options: optionsOf({ options_per_question: c?.scq_options }) ?? undefined, codeLanguage: codeLanguage || undefined, points: Object.keys(points).length ? points : undefined });
 }
 
 /** La forme des sous-questions d'un format à questions composées, sans le reste. */
-const shapeOf = ({ kinds, options, codeLanguage }: PartShape): PartShape => ({ ...(kinds ? { kinds } : {}), ...(options ? { options } : {}), ...(codeLanguage ? { codeLanguage } : {}) });
+const shapeOf = ({ kinds, options, codeLanguage, points }: PartShape): PartShape => ({ ...(kinds ? { kinds } : {}), ...(options ? { options } : {}), ...(codeLanguage ? { codeLanguage } : {}), ...(points ? { points } : {}) });
 
 /** Nombre d'options d'un profil détecté, s'il est plausible ; sinon null (inconnu). */
 function optionsOf(p: Pick<FormatProfile, "options_per_question">): number | null {

@@ -155,6 +155,8 @@ export function blockIssue(v: unknown, min: number, max: number, shape: PartShap
       : `${at} : « kind » doit valoir ${kinds.slice(0, -1).join(", ")}${kinds.length > 1 ? " ou " : ""}${kinds.at(-1)}`;
     if (!text(p.prompt)) return `${at} : « prompt » est vide`;
     if (!isInt(p.points) || p.points < 1) return `${at} : « points » doit être un entier ≥ 1`;
+    const scale = shape.points?.[p.kind as PartKind];
+    if (scale && p.points !== scale) return `${at} (${p.kind}) : ${scale} points, comme dans le barème de l'annale (reçu ${p.points})`;
     if (p.kind === "scq") {
       const opts = Array.isArray(p.options) ? p.options : [];
       const empty = opts.some((o) => !text(o));
@@ -284,6 +286,13 @@ async function recentBlockPrompts(limit = 30): Promise<string[]> {
 }
 
 const BAREME: [PartKind, string][] = [["scq", "1 point par choix unique"], ["short", "1 à 3 points par réponse courte"], ["code_output", "1 à 2 points par lecture de code"]];
+const PART_NAME: Record<PartKind, string> = { scq: "choix unique", short: "réponse courte", code_output: "lecture de code" };
+
+/** Barème du prompt : celui de l'annale pour un type qu'elle note pareil partout, le défaut sinon. */
+const baremeText = (k: PartKind, def: string, points: PartShape["points"]) => {
+  const n = points?.[k];
+  return n ? `${n} point${n > 1 ? "s" : ""} par ${PART_NAME[k]} (barème de l'annale)` : def;
+};
 
 /** Les extraits sont du Python sauf si l'annale en montre d'un autre langage. */
 const isPython = (language: string | undefined) => !language || /^(?:python\d?|py)$/.test(language);
@@ -306,7 +315,7 @@ function systemPrompt(plan: BlockPlan, n: number, counterExamples: string): stri
     `  - Chaque sous-question se répond seule à partir du scénario : aucune ne dépend de la réponse d'une autre, aucune ne donne la réponse d'une autre.`,
     COURSE_TERMS_RULE,
     COURSE_MATTER_RULE,
-    `  - Barème : ${BAREME.filter(([k]) => allows(k)).map(([, t]) => t).join(", ")}${perBlock ? ` ; environ ${perBlock} points pour la question entière` : ""}.`,
+    `  - Barème : ${BAREME.filter(([k]) => allows(k)).map(([k, t]) => baremeText(k, t, plan.points)).join(", ")}${perBlock ? ` ; environ ${perBlock} points pour la question entière` : ""}.`,
     `Langue de l'examen : ${language} (énoncés, options, réponses et critères).`,
     counterExamples,
     `Réponds UNIQUEMENT avec un objet JSON {"title","scenario","parts":[{"kind","prompt","code","options","correct","answer","criteria":[{"label","points"}],"points","explanation"}]}. Aucune prose autour, aucune balise markdown autour du JSON.`,
