@@ -256,7 +256,7 @@ const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
     misconception: "idée fausse", answers: "Réponses et justifications :",
   },
   de: {
-    lecturer: "Lehrperson:", nameField: "Name:", idField: "Matrikelnr.:", durationLabel: "Dauer:", totalLabel: "Gesamt:", finalExam: "Abschlussprüfung", midtermExam: "Zwischenprüfung",
+    lecturer: "Lehrperson:", nameField: "Name:", idField: "Matrikelnr.:", durationLabel: "Dauer:", totalLabel: "Gesamt:", finalExam: "Abschlussprüfung", midtermExam: "Zwischenklausur",
     point: "Punkt", points: "Punkte", question: "Aufgabe", openQuestion: "Offene Frage", part: "Teil",
     qcmPart: "Multiple-Choice-Fragen", openPart: "Offene Fragen", single: "Einfachauswahl", multiple: "Mehrfachauswahl",
     qcmConvention: "Eine Einfachauswahlfrage hat genau eine richtige Antwort, eine Mehrfachauswahlfrage eine oder mehrere.",
