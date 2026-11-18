@@ -31,6 +31,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!out) return apiError(req, "qcm_exam_not_found", 404);
   const ok = out.file.endsWith(".pdf");
   // Rien de la sortie du compilateur vers le client (audit du 14/11/2026, 🔴 1) : le détail va aux logs.
+  // i18n-allow: journal serveur
   if (!ok) console.error(`[pdf] examen #${examId} non recompilé :`, out.texError ?? "");
   const view = { ok, file: out.file || null, recompiled: true, warning: out.texWarning ?? null };
   if (!ok) return apiError(req, "pdf_recompile_failed", 500, view);

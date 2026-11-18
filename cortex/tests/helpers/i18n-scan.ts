@@ -80,7 +80,8 @@ export function scanSource(file: string, source: string): Hit[] {
     }
     if (ts.isJsxText(node)) {
       const text = node.getText(sf);
-      if (/\p{L}{2}/u.test(text)) push(node, text);
+      // « nom : raison » : l'espace avant les deux-points est française, la phrase va au dictionnaire.
+      if (/\p{L}{2}/u.test(text) || /^[ \t]+:/.test(node.text)) push(node, text);
     } else if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
       if (!ignoredContext(node) && looksFrench(node.text)) push(node, node.text);
     } else if (ts.isTemplateExpression(node)) {
@@ -100,7 +101,9 @@ export function uiFiles(root: string): string[] {
     for (const e of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
       const rel = path.join(dir, e.name);
       if (e.isDirectory()) walk(rel);
-      else if (rel.endsWith(".tsx") || (dir.startsWith(path.join("lib", "ux")) && rel.endsWith(".ts"))) out.push(rel.split(path.sep).join("/"));
+      // Tout .tsx, et tout .ts d'app/ (routes et pages servies : leurs réponses s'affichent),
+      // de components/ et de lib/ux. Les .d.ts ne portent pas de texte.
+      else if (rel.endsWith(".tsx") || (rel.endsWith(".ts") && !rel.endsWith(".d.ts"))) out.push(rel.split(path.sep).join("/"));
     }
   };
   for (const d of ["app", "components", path.join("lib", "ux")]) walk(d);

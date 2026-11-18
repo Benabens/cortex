@@ -10,7 +10,8 @@ import { renderIntl } from "./helpers/intl";
 
 function visibleText(html: string): string {
   return html
-    .replace(/<details lang="fr"[\s\S]*?<\/details>/g, "")
+    // Texte juridique français, déclaré comme tel (version qui fait foi).
+    .replace(/<(p|q)[^>]*lang="fr"[^>]*>[\s\S]*?<\/\1>/g, "")
     .replace(/<script[\s\S]*?<\/script>/g, "")
     .replace(/<style[\s\S]*?<\/style>/g, "")
     .replace(/<[^>]+>/g, " ")
@@ -30,6 +31,6 @@ test("/compte rend ses panneaux en anglais sans texte français visible hors de 
   assert.match(html, /Loading your usage/);
   assert.match(html, /Delete my account/);
   assert.match(html, /The French version is legally binding/);
-  assert.match(html, /<details lang="fr"/);
+  assert.match(html, /<summary>French version \(legally binding\)<\/summary><p[^>]*lang="fr"/);
   assert.equal(looksFrench(visibleText(html)), false, visibleText(html));
 });

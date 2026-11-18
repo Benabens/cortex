@@ -21,6 +21,9 @@ const FILTERS: { key: Severity | "ALL"; labelKey: "filterAll" | "filterHigh" | "
   { key: "LÉGER", labelKey: "filterLow" },
 ];
 
+// i18n-allow: sentinelle posée par l’API pour une capture pas encore analysée (app/api/weaknesses)
+const PENDING_TOPIC = "(à analyser)";
+
 const NO_THEME = "￿"; // clé de tri pour « sans chapitre » (en fin)
 
 /** Base RÉELLE des faiblesses suivies (GET /api/weaknesses) + suppression. */
@@ -51,7 +54,7 @@ export function WeaknessBase({
 
   const remove = async (w: Weakness) => {
     if (deleting) return;
-    if (!window.confirm(t("removeConfirm", { topic: w.topic }))) return;
+    if (!window.confirm(t("removeConfirm", { topic: w.topic === PENDING_TOPIC ? t("pendingTopic") : w.topic }))) return;
     setDeleting(w.id);
     setDeleteError(null);
     try {
@@ -181,6 +184,8 @@ function WeaknessRow({
   const chips = relatedChips(w.related);
   const day = w.loggedAt ? f.date(w.loggedAt, "short") : null;
   const sourceKey = sourceLabelKey(w.source);
+  const pending = w.topic === PENDING_TOPIC;
+  const topic = pending ? t("pendingTopic") : w.topic;
   return (
     <div
       className={cn(
@@ -192,7 +197,7 @@ function WeaknessRow({
         <SeverityMeter level={sev.level} tone={sev.tone} className="mt-1 shrink-0" />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <Title className="text-[0.95rem] font-medium text-ink-1" lang={language}>{w.topic}</Title>
+            <Title className="text-[0.95rem] font-medium text-ink-1" lang={pending ? undefined : language}>{topic}</Title>
             {/* Pastille « Analysée » retirée (série 3) : seule l'exception reste signalée. */}
             {!w.analyzed && (
               <Badge tone="warning" size="xs">
@@ -243,7 +248,7 @@ function WeaknessRow({
       <div className="flex shrink-0 items-center gap-2">
         <a
           href={`/entrainement?prefill=${encodeURIComponent(w.topic)}`}
-          aria-label={t("trainOn", { topic: w.topic })}
+          aria-label={t("trainOn", { topic })}
           className="inline-flex min-h-11 items-center justify-center gap-1 rounded-full border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-accent)_38%,transparent)] hover:text-ink-1"
         >
           {t("train")}
@@ -253,7 +258,7 @@ function WeaknessRow({
           type="button"
           onClick={() => onRemove(w)}
           disabled={deleting !== null}
-          aria-label={t("remove", { topic: w.topic })}
+          aria-label={t("remove", { topic })}
           className="grid size-11 place-items-center rounded-full border border-transparent text-ink-4 transition-colors hover:border-[color-mix(in_oklch,var(--color-danger)_35%,transparent)] hover:text-danger-hi disabled:opacity-50"
         >
           <Trash2 className="size-4" strokeWidth={2} />
