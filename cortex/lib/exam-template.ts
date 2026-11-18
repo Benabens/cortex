@@ -197,6 +197,7 @@ type NeutralWords = {
   durationLabel: string;
   totalLabel: string;
   finalExam: string;
+  midtermExam: string;
   point: string;
   points: string;
   question: string;
@@ -227,7 +228,7 @@ const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
   en: {
-    lecturer: "Lecturer:", nameField: "Name:", idField: "ID:", durationLabel: "Duration:", totalLabel: "Total:", finalExam: "Final exam",
+    lecturer: "Lecturer:", nameField: "Name:", idField: "ID:", durationLabel: "Duration:", totalLabel: "Total:", finalExam: "Final exam", midtermExam: "Midterm exam",
     point: "point", points: "points", question: "Question", openQuestion: "Open question", part: "Part",
     qcmPart: "Multiple-choice questions", openPart: "Open questions", single: "single choice", multiple: "multiple choice",
     qcmConvention: "Single-choice questions have exactly one correct answer; multiple-choice questions have one or more.",
@@ -241,7 +242,7 @@ const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
     misconception: "misconception", answers: "Answers and justifications:",
   },
   fr: {
-    lecturer: "Responsable :", nameField: "Nom :", idField: String.raw`N\textsuperscript{o} d'étudiant :`, durationLabel: "Durée :", totalLabel: "Total :", finalExam: "Examen final",
+    lecturer: "Responsable :", nameField: "Nom :", idField: String.raw`N\textsuperscript{o} d'étudiant :`, durationLabel: "Durée :", totalLabel: "Total :", finalExam: "Examen final", midtermExam: "Examen partiel",
     point: "point", points: "points", question: "Question", openQuestion: "Question ouverte", part: "Partie",
     qcmPart: "Questions à choix multiple", openPart: "Questions ouvertes", single: "choix unique", multiple: "choix multiple",
     qcmConvention: "Une question à choix unique a exactement une bonne réponse ; une question à choix multiple en a une ou plusieurs.",
@@ -255,7 +256,7 @@ const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
     misconception: "idée fausse", answers: "Réponses et justifications :",
   },
   de: {
-    lecturer: "Lehrperson:", nameField: "Name:", idField: "Matrikelnr.:", durationLabel: "Dauer:", totalLabel: "Gesamt:", finalExam: "Abschlussprüfung",
+    lecturer: "Lehrperson:", nameField: "Name:", idField: "Matrikelnr.:", durationLabel: "Dauer:", totalLabel: "Gesamt:", finalExam: "Abschlussprüfung", midtermExam: "Zwischenklausur",
     point: "Punkt", points: "Punkte", question: "Aufgabe", openQuestion: "Offene Frage", part: "Teil",
     qcmPart: "Multiple-Choice-Fragen", openPart: "Offene Fragen", single: "Einfachauswahl", multiple: "Mehrfachauswahl",
     qcmConvention: "Eine Einfachauswahlfrage hat genau eine richtige Antwort, eine Mehrfachauswahlfrage eine oder mehrere.",
@@ -269,7 +270,7 @@ const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
     misconception: "Fehlvorstellung", answers: "Antworten und Begründungen:",
   },
   it: {
-    lecturer: "Docente:", nameField: "Nome:", idField: "Matricola:", durationLabel: "Durata:", totalLabel: "Totale:", finalExam: "Esame finale",
+    lecturer: "Docente:", nameField: "Nome:", idField: "Matricola:", durationLabel: "Durata:", totalLabel: "Totale:", finalExam: "Esame finale", midtermExam: "Esame intermedio",
     point: "punto", points: "punti", question: "Domanda", openQuestion: "Domanda aperta", part: "Parte",
     qcmPart: "Domande a scelta multipla", openPart: "Domande aperte", single: "scelta singola", multiple: "scelta multipla",
     qcmConvention: "Una domanda a scelta singola ha esattamente una risposta corretta; una domanda a scelta multipla ne ha una o più.",
@@ -283,7 +284,7 @@ const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
     misconception: "idea sbagliata", answers: "Risposte e giustificazioni:",
   },
   es: {
-    lecturer: "Docente:", nameField: "Nombre:", idField: String.raw`N.\textsuperscript{o} de estudiante:`, durationLabel: "Duración:", totalLabel: "Total:", finalExam: "Examen final",
+    lecturer: "Docente:", nameField: "Nombre:", idField: String.raw`N.\textsuperscript{o} de estudiante:`, durationLabel: "Duración:", totalLabel: "Total:", finalExam: "Examen final", midtermExam: "Examen parcial",
     point: "punto", points: "puntos", question: "Pregunta", openQuestion: "Pregunta abierta", part: "Parte",
     qcmPart: "Preguntas de opción múltiple", openPart: "Preguntas abiertas", single: "opción única", multiple: "opción múltiple",
     qcmConvention: "Una pregunta de opción única tiene exactamente una respuesta correcta; una de opción múltiple, una o varias.",
@@ -297,7 +298,7 @@ const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
     misconception: "idea errónea", answers: "Respuestas y justificaciones:",
   },
   pt: {
-    lecturer: "Docente:", nameField: "Nome:", idField: String.raw`N.\textsuperscript{o} de estudante:`, durationLabel: "Duração:", totalLabel: "Total:", finalExam: "Exame final",
+    lecturer: "Docente:", nameField: "Nome:", idField: String.raw`N.\textsuperscript{o} de estudante:`, durationLabel: "Duração:", totalLabel: "Total:", finalExam: "Exame final", midtermExam: "Exame intercalar",
     point: "ponto", points: "pontos", question: "Questão", openQuestion: "Questão aberta", part: "Parte",
     qcmPart: "Questões de escolha múltipla", openPart: "Questões abertas", single: "escolha única", multiple: "escolha múltipla",
     qcmConvention: "Uma questão de escolha única tem exatamente uma resposta correta; uma de escolha múltipla, uma ou mais.",
@@ -311,7 +312,7 @@ const NEUTRAL_WORDS: Record<Language, NeutralWords> = {
     misconception: "conceção errada", answers: "Respostas e justificações:",
   },
   nl: {
-    lecturer: "Docent:", nameField: "Naam:", idField: "Studentnr.:", durationLabel: "Duur:", totalLabel: "Totaal:", finalExam: "Eindexamen",
+    lecturer: "Docent:", nameField: "Naam:", idField: "Studentnr.:", durationLabel: "Duur:", totalLabel: "Totaal:", finalExam: "Eindexamen", midtermExam: "Tussentoets",
     point: "punt", points: "punten", question: "Vraag", openQuestion: "Open vraag", part: "Deel",
     qcmPart: "Meerkeuzevragen", openPart: "Open vragen", single: "één antwoord", multiple: "meerdere antwoorden",
     qcmConvention: "Een vraag met één antwoord heeft precies één juist antwoord; een vraag met meerdere antwoorden heeft er één of meer.",
@@ -336,9 +337,16 @@ export function pointsText(n: number, w: CoverWords): string {
 /** Le type d'examen par défaut (création d'un cours, ou cours historique sans type) : pas un libellé saisi. */
 const isDefaultKind = (kind: string) => kind === "Examen final" || kind === "Final Exam";
 
-/** Type d'examen affiché : le défaut de la création d'un cours (« Examen final ») suit la langue de l'examen. */
+/** Les annales du cours ne sont que des partiels (format résolu) : l'examen blanc en est un. */
+const isMidterm = (c: CourseConfig) => formatContextFor(c.id).genre === "midterm";
+
+/**
+ * Type d'examen affiché : le défaut de la création d'un cours (« Examen final ») suit la langue de
+ * l'examen, et le genre des annales (un partiel quand elles ne sont que des partiels).
+ */
 export function examKindText(c: CourseConfig, w: CoverWords): string {
-  return isDefaultKind(c.examKind) ? w.finalExam : c.examKind;
+  if (!isDefaultKind(c.examKind)) return c.examKind;
+  return isMidterm(c) ? w.midtermExam : w.finalExam;
 }
 
 /**
@@ -355,7 +363,15 @@ export function epflWords(): CoverWords | null {
 /** Type d'examen du pied et de la garde de l'EPFL : le défaut garde « Final Exam » en anglais, sinon il est traduit. */
 export function epflExamKind(c: CourseConfig): string {
   if (!isDefaultKind(c.examKind)) return c.examKind;
-  return epflWords()?.finalExam ?? "Final Exam";
+  const w = epflWords();
+  if (isMidterm(c)) return w?.midtermExam ?? "Midterm Exam";
+  return w?.finalExam ?? "Final Exam";
+}
+
+/** Type d'examen d'un titre (examen généré, résumé du plan) : celui que porte son gabarit ; CS-202 garde le sien. */
+export function examKindLabel(c: CourseConfig): string {
+  if (c.id === DEFAULT_COURSE) return c.examKind;
+  return examTemplate(c) === "epfl" ? epflExamKind(c) : examKindText(c, coverWords(formatContextFor(c.id).language));
 }
 
 /**
