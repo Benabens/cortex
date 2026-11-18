@@ -88,19 +88,65 @@ async function docxWithMathAsText(buffer: Buffer): Promise<Buffer> {
   return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
 }
 
-async function extractPptx(buffer: Buffer): Promise<string> {
-  const zip = await JSZip.loadAsync(buffer);
-  const slides = Object.keys(zip.files)
+/** Relations d'une partie OPC : identifiant → { type (fin de l'URI), cible résolue dans le paquet }. */
+async function partRels(zip: JSZip, part: string): Promise<Map<string, { type: string; target: string }>> {
+  const out = new Map<string, { type: string; target: string }>();
+  const file = zip.file(path.posix.join(path.posix.dirname(part), "_rels", `${path.posix.basename(part)}.rels`));
+  if (!file) return out;
+  const $ = cheerio.load(await file.async("string"), { xmlMode: true });
+  $("Relationship").each((_, el) => {
+    const id = $(el).attr("Id");
+    const target = $(el).attr("Target");
+    if (!id || !target || $(el).attr("TargetMode") === "External") return;
+    const resolved = target.startsWith("/") ? target.slice(1) : path.posix.normalize(path.posix.join(path.posix.dirname(part), target));
+    out.set(id, { type: ($(el).attr("Type") ?? "").split("/").at(-1) ?? "", target: resolved });
+  });
+  return out;
+}
+
+/**
+ * Diapositives dans l'ordre de la présentation (p:sldIdLst de presentation.xml) : l'ordre des
+ * fichiers internes (slideN.xml) est celui de leur création, pas celui où on les montre.
+ * Sans liste lisible, repli sur l'ordre des numéros de fichier.
+ */
+async function slideOrder(zip: JSZip): Promise<string[]> {
+  const presentation = zip.file("ppt/presentation.xml");
+  if (presentation) {
+    const rels = await partRels(zip, "ppt/presentation.xml");
+    const $ = cheerio.load(await presentation.async("string"), { xmlMode: true });
+    const ordered = $("p\\:sldIdLst > p\\:sldId").map((_, el) => rels.get($(el).attr("r:id") ?? "")).get()
+      .filter((rel) => rel.type === "slide" && zip.file(rel.target)).map((rel) => rel.target);
+    if (ordered.length) return [...new Set(ordered)];
+  }
+  return Object.keys(zip.files)
     .filter((name) => /^ppt\/slides\/slide\d+\.xml$/i.test(name))
     .sort((a, b) => Number(a.match(/(\d+)\.xml$/)?.[1]) - Number(b.match(/(\d+)\.xml$/)?.[1]));
+}
+
+/**
+ * Texte d'une partie PowerPoint. `notesBody` : seulement le corps des notes de l'orateur (pas
+ * l'aperçu de la diapositive ni le numéro de page, autres formes de la page de notes).
+ */
+function pptxText(xml: string, notesBody = false): string {
+  const $ = cheerio.load(xml, { xmlMode: true });
+  // Formules en LaTeX, à leur place ; la copie image de secours (mc:Fallback) n'est pas lue en double.
+  topLevelMath($).each((_, el) => { $(el).replaceWith(`<a:t>${escapeXml(`$${ommlToLatex($, el)}$`)}</a:t>`); });
+  let nodes = $("a\\:t, t").filter((_, node) => $(node).parents("mc\\:Fallback").length === 0);
+  if (notesBody) nodes = nodes.filter((_, node) => $(node).closest("p\\:sp").find("p\\:nvPr > p\\:ph").attr("type") === "body");
+  return nodes.map((_, node) => $(node).text()).get().join(" ").trim();
+}
+
+async function extractPptx(buffer: Buffer): Promise<string> {
+  const zip = await JSZip.loadAsync(buffer);
   const texts: string[] = [];
-  for (const slide of slides) {
-    const xml = await zip.file(slide)!.async("string");
-    const $ = cheerio.load(xml, { xmlMode: true });
-    // Formules en LaTeX, à leur place ; la copie image de secours (mc:Fallback) n'est pas lue en double.
-    topLevelMath($).each((_, el) => { $(el).replaceWith(`<a:t>${escapeXml(`$${ommlToLatex($, el)}$`)}</a:t>`); });
-    const text = $("a\\:t, t").filter((_, node) => $(node).parents("mc\\:Fallback").length === 0).map((_, node) => $(node).text()).get().join(" ").trim();
-    if (text) texts.push(text);
+  for (const slide of await slideOrder(zip)) {
+    const text = pptxText(await zip.file(slide)!.async("string"));
+    // Les notes portent souvent l'explication de l'enseignant : elles suivent leur diapositive.
+    const notesPart = [...(await partRels(zip, slide)).values()].find((rel) => rel.type === "notesSlide")?.target;
+    const notesFile = notesPart ? zip.file(notesPart) : null;
+    const notes = notesFile ? pptxText(await notesFile.async("string"), true) : "";
+    const block = [text, notes && `Notes: ${notes}`].filter(Boolean).join("\n");
+    if (block) texts.push(block);
   }
   return texts.join("\n\n");
 }
