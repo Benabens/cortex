@@ -105,7 +105,16 @@ export type ExamFormat = {
  * chaque question est un scénario ou un extrait de code suivi de sous-questions mêlées.
  * `sections` : une par question de l'annale modèle (vide : la couverture des chapitres décide).
  */
-export type BlockFormat = { sections: { name: string; description: string }[]; partsMin: number; partsMax: number; totalPoints: number | null };
+/** Types de sous-questions d'une question composée (lib/blocks). */
+export const BLOCK_PART_KINDS = ["scq", "short", "code_output"] as const;
+export type BlockPartKind = (typeof BLOCK_PART_KINDS)[number];
+/**
+ * Forme des sous-questions que l'annale montre (audit 3, P1-12) : ses types, son nombre d'options
+ * par choix unique, le langage de ses extraits de code. Absente : le générateur mêle choix unique à
+ * 4 options et réponse courte, avec du Python (le format de CS-290).
+ */
+export type PartShape = { kinds?: BlockPartKind[]; options?: number; codeLanguage?: string };
+export type BlockFormat = { sections: { name: string; description: string }[]; partsMin: number; partsMax: number; totalPoints: number | null } & PartShape;
 
 export type MockExamRequest = { count?: number | null; focus?: string | null };
 
@@ -114,7 +123,7 @@ export type ExerciseStyle = "problems" | "essay" | "oral";
 
 export type MockExamPlan =
   | { generator: "qcm"; qcmCount: number; openCount: number }
-  | { generator: "blocks"; blockCount: number; partsMin: number; partsMax: number; sections: BlockFormat["sections"]; totalPoints: number | null }
+  | ({ generator: "blocks"; blockCount: number; partsMin: number; partsMax: number; sections: BlockFormat["sections"]; totalPoints: number | null } & PartShape)
   | { generator: "exercises"; style: ExerciseStyle; exerciseCount: number | null }
   | { generator: "none"; reason: string };
 
@@ -163,7 +172,7 @@ export function planMockExam(format: ExamFormat, req: MockExamRequest): MockExam
     case "composite": {
       const b = format.blocks ?? { sections: [], ...PARTS_DEFAULT, totalPoints: null };
       const blockCount = clamp(asked ?? (positive(format.questionCount) ? format.questionCount : b.sections.length || BLOCKS_DEFAULT), 1, BLOCKS_MAX);
-      return { generator: "blocks", blockCount, partsMin: b.partsMin, partsMax: b.partsMax, sections: b.sections, totalPoints: b.totalPoints };
+      return { generator: "blocks", blockCount, partsMin: b.partsMin, partsMax: b.partsMax, sections: b.sections, totalPoints: b.totalPoints, ...shapeOf(b) };
     }
     case "exercises": {
       const n = asked ?? (positive(format.questionCount) ? format.questionCount : null);
@@ -384,25 +393,36 @@ async function annales(cap = 8000): Promise<{ count: number; text: string }> {
 /**
  * Questions composées lues dans un profil : le champ de la détection, sinon (profils détectés
  * avant lui, CS-290 du 01/11) des sections et un résumé qui annonce « 3 à 6 sous-questions ».
- * Seulement avec des questions à choix : le générateur de blocs mêle choix unique, réponse
- * courte et lecture de code ; un problème de calcul ou de preuve à sous-questions (STEM)
- * reste un exercice.
+ * Seulement avec des questions à choix, ou des lectures de code : un problème de calcul ou de
+ * preuve à sous-questions (STEM) reste un exercice.
  */
-export function blocksOf(p: Pick<FormatProfile, "format_summary" | "sections" | "total_points" | "composite" | "has_mcq">): (BlockFormat & { count: number }) | null {
-  if (!p.has_mcq) return null;
+export function blocksOf(p: Pick<FormatProfile, "format_summary" | "sections" | "total_points" | "composite" | "has_mcq" | "options_per_question">): (BlockFormat & { count: number }) | null {
+  const shape = partShapeOf(p);
+  if (!p.has_mcq && !shape.kinds?.includes("code_output")) return null;
   const sections = (p.sections ?? []).filter((s) => s?.name).map((s) => ({ name: String(s.name), description: String(s.description ?? "") }));
   const totalPoints = positive(p.total_points) ? p.total_points : null;
   const c = p.composite;
   if (c && positive(c.block_count)) {
     const lo = clamp(positive(c.parts_min) ? c.parts_min : PARTS_DEFAULT.partsMin, 2, 8);
-    return { count: clamp(c.block_count, 1, BLOCKS_MAX), sections: sections.slice(0, BLOCKS_MAX), partsMin: lo, partsMax: clamp(positive(c.parts_max) ? c.parts_max : lo, lo, 8), totalPoints };
+    return { count: clamp(c.block_count, 1, BLOCKS_MAX), sections: sections.slice(0, BLOCKS_MAX), partsMin: lo, partsMax: clamp(positive(c.parts_max) ? c.parts_max : lo, lo, 8), totalPoints, ...shape };
   }
   const text = [p.format_summary, ...sections.map((s) => s.description)].join(" ");
   const m = /(\d)\s*(?:à|a|-|–|to)\s*(\d)\s*(?:sous-questions|sub-?questions)/i.exec(text);
   if (!m || sections.length < 2) return null;
   const lo = clamp(Number(m[1]), 2, 8);
-  return { count: Math.min(sections.length, BLOCKS_MAX), sections: sections.slice(0, BLOCKS_MAX), partsMin: lo, partsMax: clamp(Number(m[2]), lo, 8), totalPoints };
+  return { count: Math.min(sections.length, BLOCKS_MAX), sections: sections.slice(0, BLOCKS_MAX), partsMin: lo, partsMax: clamp(Number(m[2]), lo, 8), totalPoints, ...shape };
 }
+
+/** Forme des sous-questions lue dans le profil ; seuls les champs lisibles sont posés. */
+function partShapeOf(p: Pick<FormatProfile, "composite" | "options_per_question">): PartShape {
+  const kinds = [...new Set(p.composite?.part_kinds ?? [])].filter((k): k is BlockPartKind => (BLOCK_PART_KINDS as readonly string[]).includes(k));
+  const codeLanguage = String(p.composite?.code_language ?? "").trim().toLowerCase().replace(/[^a-z0-9+#]/g, "").slice(0, 20);
+  const options = optionsOf(p);
+  return { ...(kinds.length ? { kinds } : {}), ...(options ? { options } : {}), ...(codeLanguage ? { codeLanguage } : {}) };
+}
+
+/** La forme des sous-questions d'un format à questions composées, sans le reste. */
+const shapeOf = ({ kinds, options, codeLanguage }: PartShape): PartShape => ({ ...(kinds ? { kinds } : {}), ...(options ? { options } : {}), ...(codeLanguage ? { codeLanguage } : {}) });
 
 /** Nombre d'options d'un profil détecté, s'il est plausible ; sinon null (inconnu). */
 function optionsOf(p: Pick<FormatProfile, "options_per_question">): number | null {
@@ -516,7 +536,7 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
     format = make({
       basis: basisOf(stored), kind: stored.exam_kind, questionCount: stored.question_count ?? blocks?.count ?? null, openCount: stored.open_count ?? null,
       durationMin: stored.duration_min || null, language, discipline, evidence: stored.evidence ?? [],
-      ...(stored.exam_kind === "composite" ? { blocks: blocks ? { sections: blocks.sections, partsMin: blocks.partsMin, partsMax: blocks.partsMax, totalPoints: blocks.totalPoints } : { sections: [], ...PARTS_DEFAULT, totalPoints: null } } : {}),
+      ...(stored.exam_kind === "composite" ? { blocks: blocks ? { sections: blocks.sections, partsMin: blocks.partsMin, partsMax: blocks.partsMax, totalPoints: blocks.totalPoints, ...shapeOf(blocks) } : { sections: [], ...PARTS_DEFAULT, totalPoints: null } } : {}),
       answerMode: hasChoices(stored.exam_kind) ? stored.answer_mode ?? DEFAULT_ANSWER_MODE : null,
     });
   } else {
