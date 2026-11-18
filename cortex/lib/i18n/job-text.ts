@@ -112,7 +112,8 @@ export function jobErrorOf(e: unknown): UserError {
     const own = (x as { userError?: unknown }).userError;
     if (isUserError(own)) return own.params ? userError(own.code, own.params) : userError(own.code);
     if (isUserError(x)) return x.params ? userError(x.code, x.params) : userError(x.code);
-    if (llmErrorCode(x)) return llmUserError(x);
+    // Seule une erreur du modèle : un `code` système (ENOENT, erreur Postgres) n'en est pas une.
+    if (x instanceof Error && x.name === "LlmError" && llmErrorCode(x)) return llmUserError(x);
     x = (x as { cause?: unknown }).cause;
   }
   return userError("job_failed");
