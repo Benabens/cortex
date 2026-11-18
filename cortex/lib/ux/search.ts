@@ -36,25 +36,28 @@ export type SearchResp = { groups: Group[]; total: number };
 /** Suggestions COURSE-AWARE — reprises de l'écran validé de l'app. */
 export const SUGGEST: Record<string, string[]> = {
   "cs-202": ["memory image", "fork", "TCP slow start", "inode", "page fault", "longest prefix", "scheduling"],
+  // i18n-allow: notions de cours proposées dans la langue du cours ML
   ml: ["overfitting", "SVM", "K-means", "gradient descent", "backprop", "PCA", "régularisation"],
+  // i18n-allow: notions de cours proposées dans la langue du cours Algo
   algo: ["Master Theorem", "Dijkstra", "dynamic programming", "BFS / DFS", "greedy", "SCC", "complexité"],
 };
 
 /** Méta d'affichage par sourceType RÉEL (fallback générique pour l'inconnu). */
-export const TYPE_META: Record<string, { Icon: LucideIcon; tone: Tone }> = {
-  review: { Icon: Repeat2, tone: "accent" },
-  course_pdf: { Icon: Presentation, tone: "neutral" },
-  lecture: { Icon: BookOpen, tone: "neutral" },
-  final: { Icon: GraduationCap, tone: "warning" },
-  midterm: { Icon: GraduationCap, tone: "warning" },
-  serie: { Icon: PenLine, tone: "info" },
-  exercise: { Icon: PenLine, tone: "info" },
-  cheatsheet: { Icon: ScrollText, tone: "success" },
-  code: { Icon: Code2, tone: "accent" },
+export type SearchTypeLabelKey = "typeReview" | "typeCoursePdf" | "typeLecture" | "typeFinal" | "typeMidterm" | "typeSeries" | "typeExercise" | "typeCheatSheet" | "typeCode" | "typeOther";
+export const TYPE_META: Record<string, { Icon: LucideIcon; tone: Tone; labelKey: SearchTypeLabelKey }> = {
+  review: { Icon: Repeat2, tone: "accent", labelKey: "typeReview" },
+  course_pdf: { Icon: Presentation, tone: "neutral", labelKey: "typeCoursePdf" },
+  lecture: { Icon: BookOpen, tone: "neutral", labelKey: "typeLecture" },
+  final: { Icon: GraduationCap, tone: "warning", labelKey: "typeFinal" },
+  midterm: { Icon: GraduationCap, tone: "warning", labelKey: "typeMidterm" },
+  serie: { Icon: PenLine, tone: "info", labelKey: "typeSeries" },
+  exercise: { Icon: PenLine, tone: "info", labelKey: "typeExercise" },
+  cheatsheet: { Icon: ScrollText, tone: "success", labelKey: "typeCheatSheet" },
+  code: { Icon: Code2, tone: "accent", labelKey: "typeCode" },
 };
 
 export function metaFor(sourceType: string) {
-  return TYPE_META[sourceType] ?? { Icon: FileText, tone: "neutral" as Tone };
+  return TYPE_META[sourceType] ?? { Icon: FileText, tone: "neutral" as Tone, labelKey: "typeOther" as const };
 }
 
 /**

@@ -1,9 +1,12 @@
 "use client";
 
+/* eslint-disable react-hooks/set-state-in-effect -- les effets reprennent et clôturent un job d’analyse externe */
+
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw, Check, ScanLine, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/ux/cn";
-import { apiPost, useCourse, useJob, JOB_ACTIVE, asText } from "@/lib/ux/api";
+import { apiPost, useCourse, useJob, JOB_ACTIVE, asText, engineDown } from "@/lib/ux/api";
+import { useTranslations } from "use-intl/react";
 
 type Phase = "idle" | "running" | "done" | "error";
 
@@ -13,6 +16,8 @@ type Phase = "idle" | "running" | "done" | "error";
  * Erreur 412/503 (moteur LLM absent, corpus non ingéré) affichée clairement.
  */
 export function ReanalyzeButton({ onDone }: { onDone: () => void }) {
+  const t = useTranslations("reanalyzeButton");
+  const apiT = useTranslations("api");
   const { courseId } = useCourse();
   const [phase, setPhase] = useState<Phase>("idle");
   const [jobId, setJobId] = useState<number | null>(null);
@@ -48,13 +53,13 @@ export function ReanalyzeButton({ onDone }: { onDone: () => void }) {
     notified.current = true;
     if (job.status === "error" || job.status === "failed") {
       setPhase("error");
-      setErrMsg(asText(job.error) ?? "L’analyse a échoué. Réessaie.");
+      setErrMsg(asText(job.error) ?? t("failed"));
     } else {
       setPhase("done");
       onDone();
       setTimeout(() => setPhase("idle"), 4000);
     }
-  }, [job, onDone]);
+  }, [job, onDone, t]);
 
   const run = async () => {
     if (phase === "running") return;
@@ -62,15 +67,15 @@ export function ReanalyzeButton({ onDone }: { onDone: () => void }) {
     setPhase("running");
     notified.current = false;
     try {
-      const d = await apiPost<{ ok: boolean; jobId: number }>("/api/program/analyze", courseId);
+      const d = await apiPost<{ ok: boolean; jobId: number }>("/api/program/analyze", courseId, undefined, (status) => apiT("httpError", { status }));
       setJobId(d.jobId);
     } catch (e) {
-      const err = e as { status: number | null; message: string };
+      const err = e as { status: number | null; message: string; code: string | null };
       setPhase("error");
       setErrMsg(
-        err.status === 503 || err.status === 412
-          ? `Impossible de lancer l’analyse : ${err.message}`
-          : err.message || "Impossible de lancer l’analyse."
+        engineDown(err) || err.code === "corpus_not_ingested"
+          ? t("startFailedWithReason", { reason: err.message })
+          : err.message || t("startFailed")
       );
     }
   };
@@ -98,10 +103,10 @@ export function ReanalyzeButton({ onDone }: { onDone: () => void }) {
         {phase === "done" && <Check className="size-4" strokeWidth={2.5} />}
         {phase === "error" && <AlertTriangle className="size-4" strokeWidth={2.25} />}
         <span aria-live="polite">
-          {phase === "idle" && "Ré-analyser les annales"}
-          {phase === "running" && (job ? `Analyse… ${job.progress} %` : "Analyse des annales…")}
-          {phase === "done" && "Programme à jour"}
-          {phase === "error" && "Analyse impossible"}
+          {phase === "idle" && t("idle")}
+          {phase === "running" && (job ? t("running", { progress: job.progress }) : t("starting"))}
+          {phase === "done" && t("done")}
+          {phase === "error" && t("error")}
         </span>
       </button>
       {(step || errMsg) && (

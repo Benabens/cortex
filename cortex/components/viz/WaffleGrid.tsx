@@ -1,4 +1,5 @@
 import { cn } from "@/lib/ux/cn";
+import { useTranslations } from "use-intl/react";
 
 type Props = {
   total: number;
@@ -13,6 +14,7 @@ type Props = {
  * so the metric cluster reads as "signed data-viz", not a template of rings.
  */
 export function WaffleGrid({ total, filled, columns = 9, label, className }: Props) {
+  const t = useTranslations("waffleGrid");
   const dots = Array.from({ length: total });
   const rows = Math.ceil(total / columns);
 
@@ -20,7 +22,7 @@ export function WaffleGrid({ total, filled, columns = 9, label, className }: Pro
     <div
       className={cn("w-full", className)}
       role="img"
-      aria-label={`${label} : ${filled} sur ${total}`}
+      aria-label={t("label", { label, filled, total })}
     >
       <div
         className="grid w-full gap-[7px]"
@@ -54,7 +56,7 @@ export function WaffleGrid({ total, filled, columns = 9, label, className }: Pro
         })}
       </div>
       <span className="sr-only">
-        {rows} rangées, {filled} points remplis.
+        {t("details", { rows, filled })}
       </span>
     </div>
   );

@@ -1,8 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { priorityOf, rankTopics, toNextUp, upNext } from "../lib/next-up";
-import { chapterLine, examLine, reason, rowFacts, rowFactsSpoken, themeHref, trainHref } from "../lib/ux/next-up";
+import { chapterLine as translatedChapterLine, examLine as translatedExamLine, reason as translatedReason, rowFacts as translatedRowFacts, rowFactsSpoken as translatedRowFactsSpoken, themeHref, trainHref, type NextUpT } from "../lib/ux/next-up";
 import type { ProgramOverview, TopicView } from "../lib/program";
+import { translator } from "../lib/i18n/translate";
+import { fmt } from "../lib/i18n/format";
+
+const rawT = translator("fr");
+const nextT: NextUpT = (key, values) => rawT(`nextUp.${key}` as never, values as never);
+const frenchFmt = fmt("fr");
+const examLine = (countdown: Parameters<typeof translatedExamLine>[0]) => translatedExamLine(countdown, nextT, frenchFmt);
+const reason = (facts: Parameters<typeof translatedReason>[0]) => translatedReason(facts, nextT, frenchFmt);
+const chapterLine = (chapter: Parameters<typeof translatedChapterLine>[0]) => translatedChapterLine(chapter, nextT);
+const rowFacts = (facts: Parameters<typeof translatedRowFacts>[0]) => translatedRowFacts(facts, nextT, frenchFmt);
+const rowFactsSpoken = (facts: Parameters<typeof translatedRowFactsSpoken>[0]) => translatedRowFactsSpoken(facts, nextT, frenchFmt);
 
 /** Accueil « Next up » : le classement des notions suivantes, et des phrases qui n'inventent rien. */
 

@@ -82,7 +82,7 @@ export default defineTool({
     "and how many of each kind the student can still launch: the same numbers the app shows and the paid tools enforce. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
-  userSummary: "Lit ton solde de crédits, les coûts et tes limites du jour.",
+  userSummary: "getAccountStatus",
   input: z.object({}),
   output,
   async run(_args, ctx) {

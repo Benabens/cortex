@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderIntl } from "./helpers/intl";
 
 type Props = import("../app/compte/BillingPanel").BillingViewProps;
 const noop = () => {};
@@ -34,7 +34,7 @@ const base = (over: Partial<Props["data"]> = {}): Props["data"] => ({
 });
 async function render(data: Props["data"], extra: Partial<Props> = {}): Promise<string> {
   const { BillingView } = await import("../app/compte/BillingPanel");
-  return renderToStaticMarkup(createElement(BillingView, { data, busy: null, actionError: null, retour: null, onRefresh: noop, onAcceptTerms: noop, onCheckout: noop, onPortal: noop, ...extra }));
+  return renderIntl(createElement(BillingView, { data, busy: null, actionError: null, retour: null, onRefresh: noop, onAcceptTerms: noop, onCheckout: noop, onPortal: noop, ...extra }));
 }
 const buttons = (html: string) => [...html.matchAll(/<button[^>]*>/g)].map((m) => m[0]);
 /** Attribut HTML `disabled` (pas la classe utilitaire `disabled:` de Tailwind). */

@@ -28,6 +28,7 @@ export function Wordmark({
         className="font-brand inline-flex items-baseline leading-none text-ink-1"
         style={{ fontSize: textSize, fontWeight: 700, letterSpacing: "-0.04em" }}
       >
+        {/* i18n-allow: nom de marque */}
         cortex
         <span
           aria-hidden="true"

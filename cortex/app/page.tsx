@@ -11,11 +11,13 @@ import { QuietDoors } from "@/components/dashboard/QuietDoors";
 import { JobBanner } from "@/components/dashboard/JobBanner";
 import { Button } from "@/components/ui/Button";
 import { Panel } from "@/components/ui/primitives";
+import { useTranslations } from "use-intl/react";
 
 /** Même priorité et mêmes portes que l’accueil de production, habillées en D2. */
 const column = "w-full max-w-[64rem] mx-auto";
 
 export default function DashboardPage() {
+  const t = useTranslations("home");
   const { data, loading, error, refetch } = useApi<Dash>("/api/dashboard");
 
   if (loading) return <DashboardSkeleton />;
@@ -25,13 +27,13 @@ export default function DashboardPage() {
     return (
       <Panel className="flex flex-col items-center gap-3 rounded-xl px-6 py-12 text-center">
         <WifiOff className="size-6 text-danger-hi" strokeWidth={2} aria-hidden="true" />
-        <h1 className="text-[0.95rem] font-medium tracking-normal text-ink-1">Impossible de charger ta priorité</h1>
+        <h1 className="text-[0.95rem] font-medium tracking-normal text-ink-1">{t("loadTitle")}</h1>
         <p className="max-w-xs text-[0.85rem] leading-relaxed text-ink-3">
-          Cortex ne répond pas pour l’instant. Réessaie dans un moment.
+          {t("loadHint")}
         </p>
         <Button variant="secondary" size="sm" onClick={refetch}>
           <RotateCw className="size-4" strokeWidth={2.25} aria-hidden="true" />
-          Réessayer
+          {t("retry")}
         </Button>
       </Panel>
     );
@@ -88,8 +90,9 @@ export default function DashboardPage() {
 
 /** Squelette structurel : la page garde sa forme (ligne, titre, phrase, bouton, liste) pendant le chargement. */
 function DashboardSkeleton() {
+  const t = useTranslations("home");
   return (
-    <div className={column} aria-busy="true" aria-label="Chargement de ta priorité du jour">
+    <div className={column} aria-busy="true" aria-label={t("loadingLabel")}>
       <div className="skeleton h-3.5 w-56" />
       <div className="skeleton mt-[1.875rem] h-3.5 w-40" />
       <div className="skeleton mt-3 h-11 w-[26rem] max-w-full sm:h-14 lg:h-16" />

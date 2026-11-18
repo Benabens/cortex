@@ -5,16 +5,18 @@ import { ChevronRight, FileText, BookOpen } from "lucide-react";
 import { cn } from "@/lib/ux/cn";
 import { DeepLink } from "./DeepLink";
 import type { UiType } from "@/lib/ux/program";
+import { useTranslations } from "use-intl/react";
 
 /**
  * Ligne « notion » de l'accordéon (niveau 2). Repliée : la notion + sa méthode + « tombé N fois ».
  * Dépliée : TOUTES ses occurrences réelles (chaque final + page → deep-link) + le passage de cours.
  * Complétude au niveau le plus profond → aucun débordement tant que c'est replié. Zéro point affiché.
  */
-export function NotionRow({ t }: { t: UiType }) {
+export function NotionRow({ t: notion, language }: { t: UiType; language?: string }) {
+  const t = useTranslations("notionRow");
   const [open, setOpen] = useState(false);
-  const hasDetail = t.occurrences.length > 0 || !!t.courseHref;
-  const panelId = `notion-${t.key}`;
+  const hasDetail = notion.occurrences.length > 0 || !!notion.courseHref;
+  const panelId = `notion-${notion.key}`;
 
   return (
     <div>
@@ -40,31 +42,31 @@ export function NotionRow({ t }: { t: UiType }) {
           aria-hidden="true"
         />
         <span className="min-w-[8rem] flex-1">
-          <span className="block text-[0.9rem] font-medium text-ink-1">{t.title}</span>
-          {t.desc && <span className="mt-1 block text-[0.8rem] leading-relaxed text-ink-3">{t.desc}</span>}
+          <span className="block text-[0.9rem] font-medium text-ink-1" lang={language}>{notion.title}</span>
+          {notion.desc && <span className="mt-1 block text-[0.8rem] leading-relaxed text-ink-3" lang={language}>{notion.desc}</span>}
         </span>
         <span className="ml-7 shrink-0 pt-0.5 text-[0.78rem] text-ink-3 sm:ml-0">
-          {t.count > 0 ? (
-            <span className="whitespace-nowrap" aria-label={`tombé ${t.count} fois aux finals`}>
-              Tombé <span className="font-data font-semibold text-ink-1 tabular">{t.count}</span> fois
+          {notion.count > 0 ? (
+            <span className="whitespace-nowrap" aria-label={t("fallenLabel", { count: notion.count })}>
+              {t.rich("fallen", { count: notion.count, num: (v) => <span className="font-data font-semibold text-ink-1 tabular">{v}</span> })}
             </span>
           ) : (
-            <span className="whitespace-nowrap text-ink-4">au programme</span>
+            <span className="whitespace-nowrap text-ink-4">{t("inSyllabus")}</span>
           )}
         </span>
       </button>
 
       {hasDetail && open && (
         <div id={panelId} className="rise-in mx-3 mb-3 rounded-xl border border-line bg-bg/40 p-4 sm:ml-10">
-          {t.occurrences.length > 0 && (
+          {notion.occurrences.length > 0 && (
             <div>
               {/* Pas d'intitulé en capitales : les chips (final + page) se lisent seules,
                   le compte est déjà dans « Tombé N fois ». */}
               <div className="flex flex-wrap gap-1.5">
-                {t.occurrences.map((o) =>
+                {notion.occurrences.map((o) =>
                   o.examHref ? (
                     <DeepLink key={o.key} href={o.examHref} Icon={FileText}>
-                      {o.label}
+                      <span lang={language}>{o.label}</span>
                     </DeepLink>
                   ) : (
                     <span
@@ -72,17 +74,17 @@ export function NotionRow({ t }: { t: UiType }) {
                       className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface-2/30 px-2 py-1 text-[0.74rem] text-ink-3"
                     >
                       <FileText className="size-3.5 shrink-0" strokeWidth={2} aria-hidden="true" />
-                      {o.label}
+                      <span lang={language}>{o.label}</span>
                     </span>
                   )
                 )}
               </div>
             </div>
           )}
-          {t.courseHref && (
+          {notion.courseHref && (
             <div className="mt-2.5">
-              <DeepLink href={t.courseHref} Icon={BookOpen}>
-                Passage de cours
+              <DeepLink href={notion.courseHref} Icon={BookOpen}>
+                {t("coursePassage")}
               </DeepLink>
             </div>
           )}

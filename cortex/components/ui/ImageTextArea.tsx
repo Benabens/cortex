@@ -3,6 +3,7 @@
 import { useEffect, useId, useState } from "react";
 import { X, ImagePlus } from "lucide-react";
 import { cn } from "@/lib/ux/cn";
+import { useTranslations } from "use-intl/react";
 
 /**
  * P-B — Saisie texte AVEC image INLINE. On colle (⌘V) ou on glisse-dépose une image DANS la zone
@@ -36,12 +37,14 @@ export function ImageTextArea({
   onEnter?: () => void;
   className?: string;
 }) {
+  const t = useTranslations("imageTextArea");
   const [dragOver, setDragOver] = useState(false);
   const [url, setUrl] = useState<string | null>(null);
   const hintId = useId();
 
   // Aperçu : object URL révoqué à chaque changement d'image (pas de fuite mémoire).
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- l'URL dépend de la durée de vie du File reçu
     if (!image) { setUrl(null); return; }
     const u = URL.createObjectURL(image);
     setUrl(u);
@@ -90,11 +93,11 @@ export function ImageTextArea({
         <div className="flex flex-wrap items-center gap-2 px-3 pt-3">
           <div className="relative">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={url} alt="Aperçu de l’image jointe" className="h-16 w-16 rounded-lg border border-line object-cover" />
+            <img src={url} alt={t("previewAlt")} className="h-16 w-16 rounded-lg border border-line object-cover" />
             <button
               type="button"
               onClick={() => onImageChange(null)}
-              aria-label="Retirer l’image"
+              aria-label={t("remove")}
               className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-line-strong bg-surface-3 text-ink-2 shadow-[var(--shadow-pop)] transition-colors hover:text-ink-1 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
             >
               <X className="size-3" strokeWidth={2.5} />
@@ -113,6 +116,7 @@ export function ImageTextArea({
         aria-describedby={hintId}
         rows={rows}
         disabled={disabled}
+        autoFocus={autoFocus}
         data-focus-parent
         className="w-full resize-none bg-transparent px-3.5 py-3 text-[0.9rem] leading-relaxed text-ink-1 placeholder:text-ink-4 focus:outline-none"
       />
@@ -120,7 +124,7 @@ export function ImageTextArea({
           image » est annoncée aux lecteurs d'écran via aria-describedby, pas seulement visible. */}
       <div id={hintId} className={cn("pointer-events-none flex items-center gap-1.5 px-3.5 pb-2.5 text-[0.72rem] text-ink-4", image && "sr-only")}>
         <ImagePlus className="size-3.5 shrink-0" strokeWidth={2} aria-hidden="true" />
-        Colle ou glisse une image dans la zone pour la joindre.
+        {t("hint")}
       </div>
     </div>
   );

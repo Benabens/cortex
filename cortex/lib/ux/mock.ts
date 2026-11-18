@@ -1,3 +1,4 @@
+// i18n-allow-file: maquette de conception importée nulle part, données fictives jamais affichées.
 // Données MOCK réalistes — AUCUN back-end. Conçois l'UI contre CES formes de données.
 // (Tu peux enrichir/ajouter des entrées pour peupler joliment les écrans.)
 

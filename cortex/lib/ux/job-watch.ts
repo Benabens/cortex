@@ -114,7 +114,7 @@ async function poll(key: string, w: Watch): Promise<void> {
       return;
     }
     if (++w.failures < JOB_MAX_FAILURES) schedule(key, w, JOB_RETRY_MS);
-    else failWatch(key, w, "Traitement introuvable. Actualise la page avant de le relancer.");
+    else failWatch(key, w, "jobNotFound");
   } catch (e) {
     // 404/403 : le job n'existe pas ou n'est pas le nôtre — inutile d'insister.
     const status = (e as { status?: number } | null)?.status;
@@ -124,8 +124,8 @@ async function poll(key: string, w: Watch): Promise<void> {
       key,
       w,
       status === 404 || status === 403
-        ? "Traitement introuvable. Actualise la page avant de le relancer."
-        : "Connexion perdue pendant le suivi du traitement. Actualise la page pour vérifier son état.",
+        ? "jobNotFound"
+        : "jobConnectionLost",
     );
   } finally {
     w.polling = false;
