@@ -349,3 +349,23 @@ test("C — un verdict du juge mal typé (options en chaîne) rejette le bloc sa
   assert.deepEqual([r.produced, r.requested], [3, 3], steps.join("\n"));
   assert.ok(steps.some((s) => /distracteurs éliminables sans le cours : A, B/.test(s)), steps.join("\n"));
 });
+
+test("C × forme de l'annale — lectures de code Java et réponses courtes : ni choix unique imposé, ni Python (audit 3, P1-12)", async () => {
+  const id = await compositeCourse(1);
+  const java = (tag: string): Part => ({ ...code("[1, 2]"), code: `int[] likes = {2, 1};\nArrays.sort(likes);\nSystem.out.println(Arrays.toString(likes)); // ${tag}` });
+  script = { "Ethical theories": [block("J", [short("J"), java("J"), short("J2")])], "Keyword filtering": [block("K", [short("K"), java("K"), short("K2")])], "Feedback loops": [block("L", [short("L"), java("L"), short("L2")])] };
+  const { runWithCourse } = await import("../db/client");
+  const { generateBlockExam, getBlockExam } = await import("../lib/blocks");
+  const steps: string[] = [];
+  prompts.length = 0;
+  const plan = { blockCount: 1, partsMin: 3, partsMax: 3, sections: [], totalPoints: null, kinds: ["short", "code_output"] as ("short" | "code_output")[], codeLanguage: "java" };
+  const r = await runWithCourse(id, () => generateBlockExam(plan, { onStep: (s) => { steps.push(s); } }));
+  assert.equal(r.count, 1, steps.join("\n"));
+  const p = prompts[0];
+  assert.match(p, /extrait Java AUTONOME/);
+  assert.doesNotMatch(p, /"scq" — choix unique|Python|pandas/);
+  assert.match(p, /ceux de l'annale/);
+  const exam = (await runWithCourse(id, () => getBlockExam(r.id, true)))!;
+  assert.deepEqual(exam.blocks[0].parts.map((x) => x.kind), ["short", "code_output", "short"]);
+  assert.equal(exam.blocks[0].parts[1].answer, "[1, 2]", "la sortie d'un extrait Java reste celle que le juge a vérifiée");
+});

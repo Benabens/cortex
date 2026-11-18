@@ -28,7 +28,7 @@ export type FormatProfile = {
   /** Options de chaque QCM de l'annale (2 pour un vrai/faux, 5 pour A–E) ; absent ou null : inconnu ou variable. */
   options_per_question?: number | null;
   /** Questions COMPOSÉES (scénario ou extrait de code + sous-questions mêlées) ; absent sinon. */
-  composite?: { block_count: number; parts_min: number; parts_max: number } | null;
+  composite?: { block_count: number; parts_min: number; parts_max: number; part_kinds?: string[]; code_language?: string; scq_options?: number | null; part_points?: { kind: string; points: number }[] } | null;
   /** Documents permis que l'annale écrit (none, notes, open) ; "" ou absent : l'annale ne le dit pas. */
   documents?: string;
 };
@@ -66,6 +66,18 @@ const FORMAT_SCHEMA = {
         block_count: { type: "integer", description: "Nombre de questions composées dans un examen." },
         parts_min: { type: "integer", description: "Nombre minimal de sous-questions par question." },
         parts_max: { type: "integer", description: "Nombre maximal de sous-questions par question." },
+        part_kinds: {
+          type: "array",
+          items: { type: "string", enum: ["scq", "short", "code_output"] },
+          description: "Types de sous-questions que montre l'annale : scq (choix à une seule réponse), short (réponse courte rédigée), code_output (donner la sortie d'un extrait de code).",
+        },
+        code_language: { type: "string", description: "Langage des extraits de code (python, java, c…) ; chaîne vide sans code." },
+        scq_options: { type: ["integer", "null"], description: "Nombre d'options des choix uniques DANS les questions composées, s'il est le même partout ; null sinon." },
+        part_points: {
+          type: "array",
+          items: { type: "object", properties: { kind: { type: "string", enum: ["scq", "short", "code_output"] }, points: { type: "integer" } }, required: ["kind", "points"], additionalProperties: false },
+          description: "Barème de l'annale : les points d'une sous-question de chaque type, seulement pour un type noté pareil partout (vide sinon).",
+        },
       },
       required: ["block_count", "parts_min", "parts_max"],
       additionalProperties: false,
@@ -119,7 +131,7 @@ export async function detectFormat(opts: { onStep?: (m: string, p: number) => vo
     dataBlock(`TEXTE DES EXAMENS PASSÉS (vérité terrain)`, [{ src: "annales", text }]),
     ``,
     `═══ TA TÂCHE ═══`,
-    `Décris le format d'UN examen type : structure (sections), TYPES de questions (scq = QCM à UNE seule réponse / mcq = QCM à PLUSIEURS réponses possibles / open / calc / proof), leur NOMBRE et leur PART en % des points, le BARÈME, la DURÉE, le total de points, le NOMBRE D'OPTIONS de chaque QCM (2 pour un vrai/faux, 5 pour A–E), et surtout la CONVENTION écrite qui distingue « exactement une bonne réponse » de « une ou plusieurs » (cite la formulation réelle). has_mcq=true s'il y a un bloc de QCM. Si chaque question est COMPOSÉE (un scénario ou un extrait de code suivi de sous-questions a, b, c… de types mêlés), remplis composite (nombre de questions, sous-questions min et max) et une section par question. Ajoute l'emphase par thème si visible. documents : seulement si l'annale écrit les documents permis, sinon chaîne vide (n'invente pas de règle).`,
+    `Décris le format d'UN examen type : structure (sections), TYPES de questions (scq = QCM à UNE seule réponse / mcq = QCM à PLUSIEURS réponses possibles / open / calc / proof), leur NOMBRE et leur PART en % des points, le BARÈME, la DURÉE, le total de points, le NOMBRE D'OPTIONS de chaque QCM (2 pour un vrai/faux, 5 pour A–E), et surtout la CONVENTION écrite qui distingue « exactement une bonne réponse » de « une ou plusieurs » (cite la formulation réelle). has_mcq=true s'il y a un bloc de QCM. Si chaque question est COMPOSÉE (un scénario ou un extrait de code suivi de sous-questions a, b, c… de types mêlés), remplis composite (nombre de questions, sous-questions min et max, types de sous-questions présents, langage du code) et une section par question. Ajoute l'emphase par thème si visible. documents : seulement si l'annale écrit les documents permis, sinon chaîne vide (n'invente pas de règle).`,
     `Réponds UNIQUEMENT avec l'objet JSON conforme. Aucun fichier écrit.`,
     JSON.stringify(FORMAT_SCHEMA, null, 2),
   ].filter(Boolean).join("\n");
