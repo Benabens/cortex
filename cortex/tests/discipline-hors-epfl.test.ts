@@ -39,3 +39,10 @@ test("le code reste prioritaire sur le nom, et un mot n'est pas un préfixe de c
   assert.equal(inferDiscipline({ code: "MATH 250", name: "Philosophy of Mathematics" }), "stem");
   assert.equal(inferDiscipline({ code: "ENGLISH", name: "", sample: MATHS }), "stem", "ENGLISH n'est pas ENGL suivi d'un numéro");
 });
+
+test("chaque préfixe connu donne sa famille, aucun n'en masque un autre (ARTH ≠ AR, CHE ≠ CH, MAT ≠ MATH)", () => {
+  const humanities = "HUM SHS MGT DH AR LAW PHIL HIST SOC SOCI POL POLS POLI LIT ENGL LING ANTH PSYC PSYCH REL RELS RELI CLAS CLASS MUS MUSI ARTH ARTS THEA EDUC FREN GERM SPAN ITAL LATN HUMN HUMS AMST GEND".split(" ");
+  const stem = "MATH MAT MTH AMATH APMA PHYS PHY CS CSC CSCI CPSC CMSC CSE CIS COM COMP COMPSCI EE ECE EECS ELEC ME MECH MAE AERO ENGR CH CHE CHM CHEM BIO BIOL BIOENG MSE CIVIL ENV MICRO NX STA STAT STATS ORIE IEOR ASTR GEOL FIN".split(" ");
+  for (const p of humanities) assert.equal(inferDiscipline({ code: `${p} 101`, sample: MATHS }), "humanities", p);
+  for (const p of stem) assert.equal(inferDiscipline({ code: `${p}-101`, sample: PROSE }), "stem", p);
+});
