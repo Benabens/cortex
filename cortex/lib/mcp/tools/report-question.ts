@@ -24,7 +24,7 @@ export default defineTool({
   kind: "write",
   // Retire la question des révisions de l'élève (suppression) ; chaque appel enregistre un signalement.
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-  userSummary: "Signale une question générée fausse, hors programme, en double ou ambiguë.",
+  userSummary: "reportQuestion",
   input: z.object({
     course: courseArg,
     exam_id: z.number().int().positive(),

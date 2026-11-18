@@ -6,6 +6,8 @@ import { currentUser } from "@/db/context";
 import { serveCounted } from "@/lib/served-bytes";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
+import { requestLocale } from "@/lib/i18n/api-error";
+import { translator } from "@/lib/i18n/translate";
 
 export const runtime = "nodejs";
 
@@ -42,7 +44,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ file
   const { originalsHomeFor, transitHours } = await import("@/lib/originals/intake");
   if ((await originalsHomeFor(course)) === "local") {
     return new NextResponse(
-      `Cette pièce jointe n'est plus sur les serveurs de Cortex : un compte gratuit ne les garde que ${transitHours()} h, le temps de les lire. Elle est restée sur ton appareil.`,
+      translator(requestLocale(req))("originals.attachmentGone", { hours: transitHours() }),
       { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } },
     );
   }
