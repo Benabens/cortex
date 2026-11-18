@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { gradeBlocks } from "@/lib/blocks";
 import { getQcmExam, gradeQcm } from "@/lib/qcm";
 import { recordFeedback } from "@/lib/calibration";
@@ -20,12 +21,12 @@ export const POST = withBodyLimit(async function POST(req: NextRequest, { params
   const body = await readJson(req, ({}));
   if (body?.blockAnswers && typeof body.blockAnswers === "object") {
     const graded = await gradeBlocks(Number(id), body.blockAnswers as Record<string, unknown>);
-    if (!graded) return NextResponse.json({ error: "Examen introuvable." }, { status: 404 });
+    if (!graded) return apiError(req, "exam_not_found", 404);
     return NextResponse.json(graded);
   }
   const answers: Record<number, number[]> = body?.answers ?? {};
   const res = await gradeQcm(Number(id), answers);
-  if (!res.total) return NextResponse.json({ error: "Mock introuvable ou vide." }, { status: 404 });
+  if (!res.total) return apiError(req, "mock_not_found_or_empty", 404);
   // boucle d'apprentissage : un score global bas/haut sur ce mock = signal de calibration léger.
   try {
     const verdict = res.score / res.total >= 0.85 ? "too_easy" : res.score / res.total <= 0.4 ? "wrong" : "good";

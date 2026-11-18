@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { exercisesForTopic } from "@/lib/exam-index";
 import { useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
@@ -10,6 +11,6 @@ export async function GET(req: NextRequest) {
   const denied = useCourseOr404(req);
   if (denied) return denied;
   const id = Number(req.nextUrl.searchParams.get("topic"));
-  if (!id) return NextResponse.json({ error: "topic manquant" }, { status: 400 });
+  if (!id) return apiError(req, "topic_missing", 400);
   return NextResponse.json({ exercises: await exercisesForTopic(id) });
 }

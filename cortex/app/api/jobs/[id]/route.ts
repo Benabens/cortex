@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { cancelJob, getJob, jobEta } from "@/lib/jobs";
 import { redactMessage } from "@/lib/observability";
 import { useCourseOr404 } from "@/lib/req";
@@ -11,7 +12,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (denied) return denied;
   const { id } = await params;
   const job = await getJob(Number(id));
-  if (!job) return NextResponse.json({ error: "job introuvable" }, { status: 404 });
+  if (!job) return apiError(req, "job_not_found", 404);
   // Temps restant estimé (lib/eta) : affiché par le suivi, jamais bloquant.
   const eta = await jobEta(job).catch(() => null);
   // Même nettoyage que le connecteur MCP (lib/mcp/tools/get-job-status) : error ET
@@ -31,6 +32,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (denied) return denied;
   const { id } = await params;
   const job = await cancelJob(Number(id));
-  if (!job) return NextResponse.json({ error: "job introuvable" }, { status: 404 });
+  if (!job) return apiError(req, "job_not_found", 404);
   return NextResponse.json({ ok: true });
 }

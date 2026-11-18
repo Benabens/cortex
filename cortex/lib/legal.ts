@@ -1,4 +1,5 @@
 import { billingEnabled } from "./billing/credits";
+import { userError, type ErrorCode, type UserError } from "./i18n/user-error";
 
 /**
  * DOCUMENTS LÉGAUX ET OUVERTURE DES ACHATS.
@@ -85,23 +86,31 @@ export function stripeLiveKey(env: Partial<NodeJS.ProcessEnv> = process.env): bo
   return /^(sk|rk)_live_/.test(env.STRIPE_SECRET_KEY ?? "");
 }
 
+export type PurchasesAllowed =
+  | { enabled: true; reason: null; error: null }
+  | { enabled: false; reason: string; error: UserError };
+
+function purchasesRefused(reason: string, code: ErrorCode): PurchasesAllowed {
+  return { enabled: false, reason, error: userError(code) };
+}
+
 /** L'achat est-il ouvert ? Sinon, la raison à afficher (jamais un bouton mort sans explication). */
-export function purchasesAllowed(env: Partial<NodeJS.ProcessEnv> = process.env): { enabled: boolean; reason: string | null } {
-  if (!billingEnabled()) return { enabled: false, reason: "La facturation n'est pas activée sur cette instance." };
-  if (!stripeConfigured(env)) return { enabled: false, reason: "Les achats ne sont pas encore ouverts : configuration du paiement incomplète." };
+export function purchasesAllowed(env: Partial<NodeJS.ProcessEnv> = process.env): PurchasesAllowed {
+  if (!billingEnabled()) return purchasesRefused("La facturation n'est pas activée sur cette instance.", "purchases_billing_disabled");
+  if (!stripeConfigured(env)) return purchasesRefused("Les achats ne sont pas encore ouverts : configuration du paiement incomplète.", "purchases_payment_incomplete");
   // NODE_ENV=production est voulu ici (et non isGuardedDeployment) : `next start`
   // le force toujours, donc TOUTE instance servie sans les documents ferme la
   // vente ; seul `next dev` (poste de dev) peut tester un paiement sans liens.
   if (env.NODE_ENV === "production" && !legalReady(env)) {
-    return { enabled: false, reason: "Les achats sont suspendus : les documents légaux (CGV, confidentialité, remboursement, mentions) ne sont pas publiés." };
+    return purchasesRefused("Les achats sont suspendus : les documents légaux (CGV, confidentialité, remboursement, mentions) ne sont pas publiés.", "purchases_legal_documents_missing");
   }
   // Une clé de TEST accepte les cartes de test : en production ouverte à tous,
   // chacun s'offrirait de vrais crédits. La vente publique attend la clé live ;
   // la clé de test reste utilisable en lancement fermé (INVITE_ONLY=1) et hors production.
   if (env.NODE_ENV === "production" && !stripeLiveKey(env) && env.INVITE_ONLY !== "1") {
-    return { enabled: false, reason: "Les achats ouvrent bientôt : le paiement n'est pas encore activé." };
+    return purchasesRefused("Les achats ouvrent bientôt : le paiement n'est pas encore activé.", "purchases_test_payment_inactive");
   }
-  return { enabled: true, reason: null };
+  return { enabled: true, reason: null, error: null };
 }
 
 export type TermsState = {

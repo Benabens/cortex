@@ -1,4 +1,6 @@
 import { MCP_SERVER_NAME } from "./identity";
+import { translator } from "@/lib/i18n/translate";
+import type { Locale } from "@/lib/i18n/locale";
 
 /**
  * MARCHE À SUIVRE PAR CLIENT — page « Connecter ton assistant » (/compte/assistants).
@@ -38,101 +40,103 @@ export function vscodeInstallLink(mcpUrl: string): string {
 }
 
 /** Consigne à coller dans n'importe quel assistant : tout ce qu'il faut pour se brancher seul. */
-export function assistantPrompt(mcpUrl: string): string {
+export function assistantPrompt(mcpUrl: string, locale: Locale = "fr"): string {
+  const t = translator(locale);
   return [
-    "Connecte-toi à mon compte Cortex (mon application de révision d’examens).",
-    `C’est un serveur MCP distant : adresse ${mcpUrl}, transport Streamable HTTP, connexion OAuth 2.1 (je me connecterai à Cortex dans le navigateur et j’autoriserai l’accès ; il n’y a aucune clé d’API à saisir).`,
-    `Si tu peux ajouter un serveur MCP toi-même, ajoute-le sous le nom « ${MCP_SERVER_NAME} ». Sinon, dis-moi précisément où l’ajouter dans ton application.`,
-    "Une fois connecté, appelle l’outil list_courses pour vérifier que tu vois mes cours.",
-    "Avant tout outil payant (examen blanc, question d’entraînement, correction, préparation d’un cours), annonce-moi son coût en crédits et attends mon accord.",
+    t("mcpInstall.prompt1"),
+    t("mcpInstall.prompt2", { url: mcpUrl }),
+    t("mcpInstall.prompt3", { name: MCP_SERVER_NAME }),
+    t("mcpInstall.prompt4"),
+    t("mcpInstall.prompt5"),
   ].join("\n");
 }
 
-export function clientGuides(mcpUrl: string): ClientGuide[] {
+export function clientGuides(mcpUrl: string, locale: Locale = "fr"): ClientGuide[] {
+  const t = translator(locale);
   const mcpServers = json({ mcpServers: { [MCP_SERVER_NAME]: { url: mcpUrl } } });
   return [
     {
       id: "claude",
       name: "Claude",
-      where: "claude.ai, application ordinateur et mobile",
+      where: t("mcpInstall.claudeWhere"),
       steps: [
-        { text: "Dans Claude (web ou application ordinateur), ouvre Paramètres → Connecteurs, puis « Ajouter un connecteur personnalisé ».", link: { href: "https://claude.ai/settings/connectors", label: "Ouvrir les connecteurs de Claude" } },
-        { text: "Nom : Cortex. URL du serveur :", code: mcpUrl },
-        { text: "Laisse vides les champs d’identifiant OAuth (Client ID, Client Secret) : Claude s’enregistre seul." },
-        { text: "Clique sur « Se connecter » : la page Cortex s’ouvre. Choisis ce que Claude peut faire, puis « Autoriser »." },
+        { text: t("mcpInstall.claude1"), link: { href: "https://claude.ai/settings/connectors", label: t("mcpInstall.claudeLink") } },
+        { text: t("mcpInstall.serverUrl"), code: mcpUrl },
+        { text: t("mcpInstall.claude3") },
+        { text: t("mcpInstall.claude4") },
       ],
-      note: "Sur mobile, ajoute d’abord le connecteur depuis le web ou l’ordinateur : il apparaît ensuite dans l’application. Offres Team et Enterprise : un administrateur l’ajoute dans les paramètres de l’organisation.",
+      note: t("mcpInstall.claudeNote"),
     },
     {
       id: "chatgpt",
       name: "ChatGPT",
-      where: "chatgpt.com et applications",
+      where: t("mcpInstall.chatgptWhere"),
       steps: [
-        { text: "Ouvre la page des plugins de ChatGPT, bouton +, puis « Add custom MCP server ».", link: { href: "https://chatgpt.com/plugins", label: "Ouvrir chatgpt.com/plugins" } },
-        { text: "Nom : Cortex. Dans Connection, colle l’URL du serveur MCP :", code: mcpUrl },
-        { text: "Authentification : OAuth. Lis l’avertissement, « I understand and want to continue », puis « Create as a plugin »." },
-        { text: "ChatGPT ouvre la page Cortex : choisis ce qu’il peut faire, puis « Autoriser »." },
+        { text: t("mcpInstall.chatgpt1"), link: { href: "https://chatgpt.com/plugins", label: t("mcpInstall.chatgptLink") } },
+        { text: t("mcpInstall.chatgpt2"), code: mcpUrl },
+        { text: t("mcpInstall.chatgpt3") },
+        { text: t("mcpInstall.chatgpt4") },
       ],
-      note: "Selon ton offre ChatGPT et les règles de ton espace de travail, l’ajout d’un serveur MCP personnalisé peut ne pas être proposé.",
+      note: t("mcpInstall.chatgptNote"),
     },
     {
       id: "claude-code",
       name: "Claude Code",
-      where: "terminal",
+      where: t("mcpInstall.terminal"),
       steps: [
-        { text: "Dans un terminal :", code: `claude mcp add --transport http ${MCP_SERVER_NAME} ${mcpUrl}` },
-        { text: "Puis, dans Claude Code, tape /mcp, choisis cortex et « Authenticate » : le navigateur ouvre la page Cortex." },
+        { text: t("mcpInstall.inTerminal"), code: `claude mcp add --transport http ${MCP_SERVER_NAME} ${mcpUrl}` },
+        { text: t("mcpInstall.claudeCode2") },
       ],
     },
     {
       id: "cursor",
       name: "Cursor",
-      where: "éditeur de code",
+      where: t("mcpInstall.codeEditor"),
       steps: [
-        { text: "Installe en un clic (Cursor doit être installé) :", link: { href: cursorInstallLink(mcpUrl), label: "Ajouter à Cursor" } },
-        { text: "Ou ajoute à ~/.cursor/mcp.json :", code: mcpServers },
-        { text: "Au premier usage, Cursor ouvre la page Cortex dans ton navigateur : autorise l’accès." },
+        { text: t("mcpInstall.cursor1"), link: { href: cursorInstallLink(mcpUrl), label: t("mcpInstall.addCursor") } },
+        { text: t("mcpInstall.cursor2"), code: mcpServers },
+        { text: t("mcpInstall.cursor3") },
       ],
     },
     {
       id: "vscode",
       name: "VS Code",
-      where: "GitHub Copilot, mode agent",
+      where: t("mcpInstall.vscodeWhere"),
       steps: [
-        { text: "Installe en un clic :", link: { href: vscodeInstallLink(mcpUrl), label: "Ajouter à VS Code" } },
-        { text: "Ou, dans la palette de commandes : « MCP: Add Server » → HTTP, puis colle l’adresse. En ligne de commande :", code: `code --add-mcp '${json({ name: MCP_SERVER_NAME, type: "http", url: mcpUrl })}'` },
-        { text: "VS Code te demande de te connecter à Cortex au démarrage du serveur : autorise l’accès." },
+        { text: t("mcpInstall.oneClick"), link: { href: vscodeInstallLink(mcpUrl), label: t("mcpInstall.addVscode") } },
+        { text: t("mcpInstall.vscode2"), code: `code --add-mcp '${json({ name: MCP_SERVER_NAME, type: "http", url: mcpUrl })}'` },
+        { text: t("mcpInstall.vscode3") },
       ],
     },
     {
       id: "codex",
       name: "Codex CLI",
-      where: "terminal",
+      where: t("mcpInstall.terminal"),
       steps: [
-        { text: "Dans un terminal :", code: `codex mcp add ${MCP_SERVER_NAME} --url ${mcpUrl}` },
-        { text: "Puis connecte-toi (le navigateur ouvre la page Cortex) :", code: `codex mcp login ${MCP_SERVER_NAME}` },
+        { text: t("mcpInstall.inTerminal"), code: `codex mcp add ${MCP_SERVER_NAME} --url ${mcpUrl}` },
+        { text: t("mcpInstall.thenLogin"), code: `codex mcp login ${MCP_SERVER_NAME}` },
       ],
     },
     {
       id: "gemini-cli",
       name: "Gemini CLI",
-      where: "terminal",
+      where: t("mcpInstall.terminal"),
       steps: [
-        { text: "Dans un terminal :", code: `gemini mcp add --transport http ${MCP_SERVER_NAME} ${mcpUrl}` },
-        { text: "Puis, dans Gemini CLI, connecte-toi :", code: `/mcp auth ${MCP_SERVER_NAME}` },
+        { text: t("mcpInstall.inTerminal"), code: `gemini mcp add --transport http ${MCP_SERVER_NAME} ${mcpUrl}` },
+        { text: t("mcpInstall.gemini2"), code: `/mcp auth ${MCP_SERVER_NAME}` },
       ],
-      note: "Google ne documente pas l’ajout d’un serveur MCP personnalisé dans l’application Gemini grand public : passe par Gemini CLI.",
+      note: t("mcpInstall.geminiNote"),
     },
     {
       id: "other",
-      name: "Autre client MCP",
+      name: t("mcpInstall.otherName"),
       where: "Windsurf, Zed, LM Studio…",
       steps: [
-        { text: "Ajoute un serveur distant (HTTP, « Streamable HTTP ») avec l’adresse :", code: mcpUrl },
-        { text: "Authentification : OAuth, sans clé ni identifiant à saisir : le client s’enregistre seul auprès de Cortex." },
-        { text: "Format de configuration le plus courant (le nom du champ d’adresse varie : url, serverUrl ou httpUrl) :", code: mcpServers },
+        { text: t("mcpInstall.other1"), code: mcpUrl },
+        { text: t("mcpInstall.other2") },
+        { text: t("mcpInstall.other3"), code: mcpServers },
       ],
-      note: "Un client qui ne gère que les serveurs locaux (stdio) ne peut pas se brancher directement sur Cortex.",
+      note: t("mcpInstall.otherNote"),
     },
   ];
 }

@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { NextResponse } from "next/server";
 import { clientErrorTrackingConfig } from "@/lib/observability";
 import { readBodyBounded, withBodyLimit } from "@/lib/upload-limit";
@@ -49,11 +50,11 @@ export const POST = withBodyLimit(async function POST(req: Request) {
   try {
     header = JSON.parse(eol < 0 ? body : body.slice(0, eol)) as { dsn?: string };
   } catch {
-    return NextResponse.json({ error: "enveloppe illisible" }, { status: 400 });
+    return apiError(req, "monitoring_envelope_unreadable", 400);
   }
   const sent = parseDsn(header.dsn);
   if (!sent || sent.host !== target.host || sent.project !== target.project || sent.key !== target.key) {
-    return NextResponse.json({ error: "projet inconnu" }, { status: 400 });
+    return apiError(req, "monitoring_project_unknown", 400);
   }
   try {
     const upstream = await fetch(`https://${target.host}/api/${target.project}/envelope/`, {

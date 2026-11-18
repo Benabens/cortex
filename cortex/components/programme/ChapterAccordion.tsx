@@ -6,13 +6,15 @@ import { cn } from "@/lib/ux/cn";
 import { NotionRow } from "./NotionRow";
 import { DeepLink } from "./DeepLink";
 import type { PlanChapterUi } from "@/lib/ux/program";
+import { useTranslations } from "use-intl/react";
 
 /**
  * Chapitre du plan de cours (niveau 1 de l'accordéon). Replié par défaut : titre du prof + n° de
  * lecture + tête légère (nb notions / nb tombées). Déplié : ses notions (chacune dépliable →
  * occurrences). Un chapitre sans notion tombée reste listé (complétude du plan), tête « aucune ».
  */
-export function ChapterAccordion({ c, defaultOpen = false }: { c: PlanChapterUi; defaultOpen?: boolean }) {
+export function ChapterAccordion({ c, defaultOpen = false, language }: { c: PlanChapterUi; defaultOpen?: boolean; language?: string }) {
+  const t = useTranslations("chapterAccordion");
   const [open, setOpen] = useState(defaultOpen);
   const panelId = `chapter-${c.id ?? "orphan"}`;
   const n = c.notions.length;
@@ -48,23 +50,11 @@ export function ChapterAccordion({ c, defaultOpen = false }: { c: PlanChapterUi;
           <span className="size-10 shrink-0" aria-hidden="true" />
         )}
         <span className="min-w-[8rem] flex-1">
-          <span className="block text-base font-semibold text-ink-1">{c.title}</span>
+          <span className="block text-base font-semibold text-ink-1" lang={language}>{c.title}</span>
         </span>
         {/* Tête légère : nb notions / nb tombées — jamais de débordement (complet au dépli). */}
         <span className="ml-7 shrink-0 whitespace-nowrap text-xs text-ink-3 sm:ml-0">
-          {n === 0 ? (
-            "aucune notion"
-          ) : c.fallenCount > 0 ? (
-            <>
-              <span className="font-data tabular text-ink-2">{n}</span> notion{n > 1 ? "s" : ""}
-              <span className="mx-1 text-ink-4/60">·</span>
-              <span className="font-data tabular text-ink-2">{c.fallenCount}</span> tombée{c.fallenCount > 1 ? "s" : ""}
-            </>
-          ) : (
-            <>
-              <span className="font-data tabular text-ink-2">{n}</span> notion{n > 1 ? "s" : ""} · aucune tombée
-            </>
-          )}
+          {n === 0 ? t("noNotion") : t.rich("summary", { count: n, fallen: c.fallenCount, num: (v) => <span className="font-data tabular text-ink-2">{v}</span>, sep: (v) => <span className="mx-1 text-ink-4/60">{v}</span> })}
         </span>
       </button>
 
@@ -73,18 +63,18 @@ export function ChapterAccordion({ c, defaultOpen = false }: { c: PlanChapterUi;
           {n === 0 ? (
             <div className="flex flex-col items-start gap-2 px-3 py-4">
               <p className="text-[0.82rem] text-ink-3">
-                Aucune notion de ce chapitre n’est encore tombée dans les annales indexées.
+                {t("empty")}
               </p>
               {c.sourceHref && (
                 <DeepLink href={c.sourceHref} Icon={BookOpen}>
-                  Ouvrir la lecture
+                  {t("openLecture")}
                 </DeepLink>
               )}
             </div>
           ) : (
             c.notions.map((t, i) => (
               <div key={t.key} className={cn(i > 0 && "border-t border-line")}>
-                <NotionRow t={t} />
+                <NotionRow t={t} language={language} />
               </div>
             ))
           )}

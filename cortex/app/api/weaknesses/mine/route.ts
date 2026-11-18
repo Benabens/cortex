@@ -1,4 +1,7 @@
-import { LlmError } from "@/lib/llm";
+import { apiError, requestLocale } from "@/lib/i18n/api-error";
+import { translator } from "@/lib/i18n/translate";
+import { LlmError, llmUserError } from "@/lib/llm";
+import { UserFacingError } from "@/lib/i18n/user-error";
 import { mineConversation } from "@/lib/conversation-mining";
 import { useCourseOr404 } from "@/lib/req";
 import { logLoopRoute } from "@/lib/req-log";
@@ -39,25 +42,26 @@ async function handlePOST(req: NextRequest) {
   if ((req.headers.get("content-type") ?? "").startsWith("multipart/form-data")) {
     // Quota vérifié AVANT de lire l'envoi : un scan sans texte est stocké.
     const storage = await checkStorage(currentUser(), declaredBytes(req));
-    if (storage) return NextResponse.json({ error: storage.error }, { status: storage.status });
+    if (storage) return apiError(req, storage, storage.status);
     const form = await readFormData(req, UPLOAD_LIMITS.image);
     const note = String(form.get("text") ?? "").trim();
-    const noteTooLong = fieldTooLong("text", note);
+    const noteTooLong = fieldTooLong(req, "text", note);
     if (noteTooLong) return noteTooLong;
     const raw = form.get("file");
-    if (!(raw instanceof File) || raw.size === 0) return NextResponse.json({ error: "Aucun fichier reçu." }, { status: 400 });
-    if (raw.size > ATTACHMENT_MAX_BYTES) return NextResponse.json({ error: "Fichier trop lourd (12 Mo au maximum)." }, { status: 413 });
+    if (!(raw instanceof File) || raw.size === 0) return apiError(req, "no_file_received", 400);
+    if (raw.size > ATTACHMENT_MAX_BYTES) return apiError(req, { code: "file_too_large", params: { maxMb: 12 } }, 413);
     const buf = new Uint8Array(await raw.arrayBuffer());
-    if (sniffAttachment(buf) !== "pdf") return NextResponse.json({ error: "Ce fichier n'est pas un PDF." }, { status: 415 });
+    if (sniffAttachment(buf) !== "pdf") return apiError(req, "file_not_pdf", 415);
     const extracted = await pdfText(buf, FIELD_LIMITS.text);
     if (extracted.length < 40) {
       const severity = Number(form.get("severity") ?? 2);
+      // i18n-allow: sentinelle stockée en base, traduite à l’affichage (WeaknessBase)
       await createWeakness({ topic: "(à analyser)", description: note, severity, screenshotPath: await saveAttachment(buf, "pdf"), source: "pdf" });
       return NextResponse.json({
         created: 0,
         stored: true,
         weaknesses: await listWeaknesses(),
-        note: "Ce PDF ne contient pas de texte lisible (scan ?) : il est ajouté au suivi tel quel.",
+        note: translator(requestLocale(req))("weaknessInbox.pdfNoText"),
       });
     }
     // Note + texte du PDF, dans la limite analysée d'un texte collé (le PDF n'est pas conservé).
@@ -65,8 +69,8 @@ async function handlePOST(req: NextRequest) {
   } else {
     const { text } = await readJson(req, ({ text: "" }));
     t = String(text ?? "").trim();
-    if (t.length < 40) return NextResponse.json({ error: "Colle une discussion (au moins quelques échanges)." }, { status: 400 });
-    const tooLong = fieldTooLong("text", t);
+    if (t.length < 40) return apiError(req, "conversation_too_short", 400);
+    const tooLong = fieldTooLong(req, "text", t);
     if (tooLong) return tooLong;
   }
 
@@ -76,7 +80,7 @@ async function handlePOST(req: NextRequest) {
     // l'appel n'est pas parti ou si la réponse est inutilisable (lib/billing/reserve).
     const { assistCall } = await import("@/lib/billing/reserve");
     const mined = await assistCall("weakness-mine", () => mineConversation(t));
-    if (!mined.length) return NextResponse.json({ created: 0, weaknesses: await listWeaknesses(), note: "Aucune faiblesse claire détectée dans cette discussion." });
+    if (!mined.length) return NextResponse.json({ created: 0, weaknesses: await listWeaknesses(), note: translator(requestLocale(req))("weaknessInbox.noneInDiscussion") });
     for (const m of mined) {
       await createWeakness({
         topic: m.topic,
@@ -90,10 +94,11 @@ async function handlePOST(req: NextRequest) {
     return NextResponse.json({ created: mined.length, mined, weaknesses: await listWeaknesses() });
   } catch (e) {
     const { AssistRefused } = await import("@/lib/billing/reserve");
-    if (e instanceof AssistRefused) return NextResponse.json({ error: e.message }, { status: e.status });
-    if (e instanceof LlmError && e.code === "UNAVAILABLE") {
-      return NextResponse.json({ error: "Le moteur LLM est injoignable : réessaie plus tard." }, { status: 503 });
-    }
-    return NextResponse.json({ error: String((e as Error)?.message ?? e) }, { status: 500 });
+    if (e instanceof AssistRefused) return apiError(req, e, e.status);
+    if (e instanceof UserFacingError) return apiError(req, e, 500);
+    if (e instanceof LlmError && e.code === "UNAVAILABLE") return apiError(req, "llm_engine_unreachable_retry", 503);
+    if (e instanceof LlmError) return apiError(req, llmUserError(e), 500);
+    const detail = e instanceof Error ? e.message : String(e);
+    return apiError(req, { code: "weakness_mining_failed", params: { detail } }, 500);
   }
 }

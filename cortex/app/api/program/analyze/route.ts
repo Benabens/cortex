@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { preflightGeneration } from "@/lib/preflight";
 import { requireCourse, useCourseOr404 } from "@/lib/req";
@@ -22,19 +23,20 @@ export async function POST(req: NextRequest) {
 
   // mêmes pré-checks que la génération : fournisseur LLM + corpus ingéré (le moteur LaTeX n'est pas requis ici).
   const issue = await preflightGeneration("blueprint");
-  if (issue && issue.status !== 412) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
+  if (issue && issue.status !== 412) return apiError(req, issue, issue.status, { command: issue.command });
 
   let jobId: number;
   try {
     ({ id: jobId } = await createJobExclusive("blueprint"));
   } catch (e) {
-    if (e instanceof ReservationRefused) return NextResponse.json({ error: e.message }, { status: e.status });
+    if (e instanceof ReservationRefused) return apiError(req, e, e.status);
     throw e;
   }
   try {
     await startWorker(jobId, course);
-  } catch (e: any) {
-    return NextResponse.json({ error: `Impossible de lancer le worker : ${e?.message ?? e}` }, { status: 500 });
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    return apiError(req, { code: "worker_start_failed", params: { detail } }, 500);
   }
   return NextResponse.json({ ok: true, jobId });
 }

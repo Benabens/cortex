@@ -36,7 +36,8 @@ test("relecteur : /oauth/authorize → /login → mot de passe → consentement 
   await page.getByRole("button", { name: "Accès relecteur" }).click();
 
   // Faute de frappe : message, on reste sur la page avec le même retour.
-  await page.getByLabel("E-mail").fill(REVIEW_E2E_EMAIL);
+  // /login a aussi son champ e-mail (lien magique) : on vise celui du formulaire relecteur.
+  await page.getByTestId("review-login").getByLabel("E-mail").fill(REVIEW_E2E_EMAIL);
   await page.getByLabel("Mot de passe").fill("pas-le-bon-mot-de-passe");
   await page.getByRole("button", { name: "Se connecter" }).click();
   await expect(page.getByTestId("review-login").getByRole("alert")).toContainText("E-mail ou mot de passe incorrect");

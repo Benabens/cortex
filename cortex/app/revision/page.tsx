@@ -7,6 +7,7 @@ import { useApi, useCourse } from "@/lib/ux/api";
 import { LoadError } from "@/components/ui/LoadError";
 import { Segmented } from "@/components/ui/Segmented";
 import { Toggle } from "@/components/ui/Toggle";
+import { useTranslations } from "use-intl/react";
 
 type BQ = { id: number; topic: string; lectureRank: number | null; statement: string; options: string | null; officialAnswer: string | null; sourceExam: string; examYear: number | null; examPage: number | null; examHref: string | null };
 type PQ = { id: number; kind: "qcm" | "open"; topic: string; lectureRank: number | null; statement: string; options: string | null; correct: string | null; explanation: string | null; solution: string | null; verified: number | null; verifyMethod: string | null };
@@ -25,7 +26,9 @@ function groupByTopic<T extends { topic: string; lectureRank: number | null }>(a
 }
 
 export default function RevisionPage() {
-  const { courseId, ready } = useCourse();
+  const t = useTranslations("revisionPage");
+  const { courseId, ready, course } = useCourse();
+  const language = course?.language || undefined; // "" = langue pas encore détectée : pas de lang vide
   // Données via le crochet commun : il expose l'ERREUR et une reprise — avant,
   // un catch muet laissait l'écran en squelette pour toujours.
   const { data: loaded, loading: fetching, error, refetch } = useApi<Data>("/api/revision");
@@ -64,10 +67,10 @@ export default function RevisionPage() {
   });
   const resetDone = () => { setDone({}); try { localStorage.removeItem(`cortex:revision:done:${d?.course}`); } catch {} };
   const doneBtn = (k: string) => (
-    <button type="button" onClick={() => toggleDone(k)} aria-pressed={!!done[k]} title={done[k] ? "Fait : cliquer pour annuler" : "Marquer comme fait"}
+    <button type="button" onClick={() => toggleDone(k)} aria-pressed={!!done[k]} title={done[k] ? t("doneTitle") : t("todoTitle")}
       style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", borderRadius: "var(--r-sm)", padding: "9px 12px", fontSize: 12, lineHeight: 1.4, border: `1px solid ${done[k] ? "var(--green)" : "var(--line-strong)"}`, color: done[k] ? "var(--green-ink)" : "var(--ink-3)", background: done[k] ? "var(--green-wash)" : "transparent" }}>
       <span style={{ width: 14, height: 14, borderRadius: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, border: `1.5px solid ${done[k] ? "var(--green)" : "var(--ink-3)"}`, color: "var(--green-ink)" }}>{done[k] ? "✓" : ""}</span>
-      {done[k] ? "Fait" : "À faire"}
+      {done[k] ? t("done") : t("todo")}
     </button>
   );
 
@@ -80,14 +83,14 @@ export default function RevisionPage() {
   return (
     <div className={styles.page}>
       <PageHeader
-        title="Révision"
-        description="Toutes les questions des finals, QCM et ouvertes, triées par sujet dans l’ordre du cours, et un parcours généré qui couvre tout le programme dans les bonnes proportions."
+        title={t("title")}
+        description={t("description")}
       />
 
       {!loading && error && (
         <LoadError
-          title="Impossible de charger la révision"
-          hint="Le moteur ne répond pas pour ce cours. Réessaie, ou change de cours."
+          title={t("loadFailed")}
+          hint={t("loadHint")}
           onRetry={refetch}
         />
       )}
@@ -96,8 +99,8 @@ export default function RevisionPage() {
 
       {!loading && !error && totBank === 0 && (d?.plan.stats.qcm ?? 0) === 0 && (
         <div className="card card-pad empty">
-          <div className="empty-title">Banque de questions pas encore prête</div>
-          <div className="empty-sub">Les questions des finals de ce cours n’ont pas encore été rassemblées. En attendant, entraîne-toi depuis l’onglet Entraînement.</div>
+          <div className="empty-title">{t("emptyTitle")}</div>
+          <div className="empty-sub">{t("emptyHint")}</div>
         </div>
       )}
 
@@ -106,18 +109,18 @@ export default function RevisionPage() {
           {/* récap proportions par sujet (ordre du cours) */}
           <section className={styles.guide}>
             <div className="flex flex-wrap items-center gap-2 mb-2">
-              <h2 className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>Couverture des finals par sujet (ordre du cours)</h2>
-              <span className="tag tag-blue">{d.bank.stats.qcm} QCM · {d.bank.stats.open} {d.bank.stats.open > 1 ? "ouvertes" : "ouverte"}</span>
+              <h2 className="text-[15px] font-semibold" style={{ color: "var(--ink)" }}>{t("coverage")}</h2>
+              <span className="tag tag-blue">{t("types", { qcm: d.bank.stats.qcm, open: d.bank.stats.open })}</span>
             </div>
             <div className={styles.coverage}>
-              {d.bank.stats.byTopic.map((t) => {
-                const tot = t.qcm + t.open; const pct = Math.round((tot / Math.max(1, totBank)) * 100);
+              {d.bank.stats.byTopic.map((topic) => {
+                const tot = topic.qcm + topic.open; const pct = Math.round((tot / Math.max(1, totBank)) * 100);
                 return (
-                  <div key={t.topic} className={styles.coverageRow}>
-                    <span className="tag">{lr(t.lectureRank)}</span>
-                    <div className="min-w-0"><span className="text-ink-1">{t.topic}</span><div className="mt-1 text-xs text-ink-3">{t.qcm} QCM · {t.open} {t.open > 1 ? "ouvertes" : "ouverte"}</div></div>
-                    <span className="tabular-nums text-accent-hi">{pct} %</span>
-                    <div className={styles.track} role="img" aria-label={`${pct} % des questions`}><div style={{ width: `${pct}%` }} /></div>
+                  <div key={topic.topic} className={styles.coverageRow}>
+                    <span className="tag">{lr(topic.lectureRank)}</span>
+                    <div className="min-w-0"><span className="text-ink-1" lang={language}>{topic.topic}</span><div className="mt-1 text-xs text-ink-3">{t("types", { qcm: topic.qcm, open: topic.open })}</div></div>
+                    <span className="tabular-nums text-accent-hi">{t("percent", { value: pct })}</span>
+                    <div className={styles.track} role="img" aria-label={t("percentLabel", { value: pct })}><div style={{ width: `${pct}%` }} /></div>
                   </div>
                 );
               })}
@@ -128,21 +131,21 @@ export default function RevisionPage() {
           <Segmented
             size="sm"
             className="mb-3"
-            label="Contenu affiché"
+            label={t("displayed")}
             options={[
-              { value: "qcm", label: "Banque QCM", count: d.bank.stats.qcm },
-              { value: "open", label: "Banque ouvertes", count: d.bank.stats.open },
-              { value: "plan", label: "Parcours généré", count: d.plan.stats.qcm + d.plan.stats.open },
+              { value: "qcm", label: t("qcmBank"), count: d.bank.stats.qcm },
+              { value: "open", label: t("openBank"), count: d.bank.stats.open },
+              { value: "plan", label: t("generatedPlan"), count: d.plan.stats.qcm + d.plan.stats.open },
             ]}
             value={tab}
             onChange={setTab}
           />
 
           <div className={styles.toolbar}>
-            <Toggle checked={hideDone} onChange={toggleHide} label="Masquer les questions faites" labelVisible />
+            <Toggle checked={hideDone} onChange={toggleHide} label={t("hideDone")} labelVisible />
             <span style={{ color: "var(--ink-4)" }}>·</span>
-            <span><strong style={{ color: "var(--ink-2)" }}>{doneTotal}</strong> question{doneTotal > 1 ? "s" : ""} marquée{doneTotal > 1 ? "s" : ""} faite{doneTotal > 1 ? "s" : ""}</span>
-            {doneTotal > 0 && <button className="btn btn-quiet btn-sm" onClick={resetDone}>Réinitialiser</button>}
+            <span>{t.rich("markedDone", { count: doneTotal, strong: (c) => <strong style={{ color: "var(--ink-2)" }}>{c}</strong> })}</span>
+            {doneTotal > 0 && <button className="btn btn-quiet btn-sm" onClick={resetDone}>{t("reset")}</button>}
           </div>
 
           {tab !== "plan" && (qcmGroups.length || openGroups.length) ? (
@@ -153,8 +156,8 @@ export default function RevisionPage() {
                   <div key={key} className={styles.questionGroup}>
                     <button className={styles.questionToggle} aria-expanded={!!open[key]} onClick={() => setOpen((o) => ({ ...o, [key]: !o[key] }))}>
                       <span className="tag" style={{ minWidth: 42, justifyContent: "center" }}>{lr(g.lectureRank)}</span>
-                      <span className="font-medium" style={{ color: "var(--ink)" }}>{g.topic}</span>
-                      <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>{g.items.filter((x) => done[`${tab}-${x.id}`]).length}/{g.items.length} faites · {open[key] ? "▾" : "▸"}</span>
+                      <span className="font-medium" style={{ color: "var(--ink)" }} lang={language}>{g.topic}</span>
+                      <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>{t("groupDone", { done: g.items.filter((x) => done[`${tab}-${x.id}`]).length, total: g.items.length, state: open[key] ? "▾" : "▸" })}</span>
                     </button>
                     {open[key] && (
                       <div className="px-4 pb-3 space-y-2">
@@ -165,15 +168,15 @@ export default function RevisionPage() {
                           <div key={q.id} className={styles.question} style={{ opacity: done[dk] ? 0.7 : 1, transition: "opacity .15s" }}>
                             <div className="flex items-center gap-2 flex-wrap text-[12px] mb-1">
                               {doneBtn(dk)}
-                              <span className="tag tag-blue">{q.sourceExam?.replace(/_/g, " ").slice(0, 28)}{q.examYear ? ` ${q.examYear}` : ""}{q.examPage ? ` · p.${q.examPage}` : ""}</span>
-                              {q.examHref && <a className="btn btn-quiet btn-sm" style={{ color: "var(--accent-ink)" }} href={q.examHref} target="_blank" rel="noopener">Ouvrir le PDF →</a>}
+                              <span className="tag tag-blue" lang={language}>{q.sourceExam?.replace(/_/g, " ").slice(0, 28)}{q.examYear ? ` ${q.examYear}` : ""}{q.examPage ? ` · p.${q.examPage}` : ""}</span>
+                              {q.examHref && <a className="btn btn-quiet btn-sm" style={{ color: "var(--accent-ink)" }} href={q.examHref} target="_blank" rel="noopener">{t("openPdf")}</a>}
                             </div>
-                            <div className="text-[13.5px]" style={{ color: "var(--ink)" }}>{q.statement}</div>
-                            {q.options && <pre className="mt-1 text-[12.5px]" style={{ color: "var(--ink-2)", whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{q.options}</pre>}
+                            <div className="text-[13.5px]" style={{ color: "var(--ink)" }} lang={language}>{q.statement}</div>
+                            {q.options && <pre className="mt-1 text-[12.5px]" style={{ color: "var(--ink-2)", whiteSpace: "pre-wrap", fontFamily: "inherit" }} lang={language}>{q.options}</pre>}
                             {q.officialAnswer && (
                               reveal[q.id]
-                                ? <div className="mt-1.5 text-[13px]" style={{ color: "var(--green-ink)" }}><strong>Réponse officielle :</strong> {q.officialAnswer}</div>
-                                : <button className="btn btn-quiet btn-sm mt-1" style={{ color: "var(--green-ink)" }} onClick={() => setReveal((r) => ({ ...r, [q.id]: true }))}>Révéler la réponse</button>
+                                ? <div className="mt-1.5 text-[13px]" style={{ color: "var(--green-ink)" }}><strong>{t("officialAnswer")}</strong> <span lang={language}>{q.officialAnswer}</span></div>
+                                : <button className="btn btn-quiet btn-sm mt-1" style={{ color: "var(--green-ink)" }} onClick={() => setReveal((r) => ({ ...r, [q.id]: true }))}>{t("reveal")}</button>
                             )}
                           </div>
                           );
@@ -188,7 +191,7 @@ export default function RevisionPage() {
 
           {tab === "plan" && (
             (d.plan.questions.length === 0)
-              ? <div className="card card-pad empty"><div className="empty-title">Parcours pas encore généré</div><div className="empty-sub">Le parcours de ce cours n’a pas encore été généré. Les questions des finals restent disponibles dans les deux autres onglets.</div></div>
+              ? <div className="card card-pad empty"><div className="empty-title">{t("planEmptyTitle")}</div><div className="empty-sub">{t("planEmptyHint")}</div></div>
               : <div className="space-y-2">
                 {planGroups.map((g) => {
                   const key = `plan:${g.topic}`;
@@ -196,8 +199,8 @@ export default function RevisionPage() {
                     <div key={key} className={styles.questionGroup}>
                       <button className={styles.questionToggle} aria-expanded={!!open[key]} onClick={() => setOpen((o) => ({ ...o, [key]: !o[key] }))}>
                         <span className="tag" style={{ minWidth: 42, justifyContent: "center" }}>{lr(g.lectureRank)}</span>
-                        <span className="font-medium" style={{ color: "var(--ink)" }}>{g.topic}</span>
-                        <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>{g.items.filter((x) => done[`plan-${x.id}`]).length}/{g.items.length} faites · {g.items.filter((x) => x.kind === "qcm").length} QCM · {open[key] ? "▾" : "▸"}</span>
+                        <span className="font-medium" style={{ color: "var(--ink)" }} lang={language}>{g.topic}</span>
+                        <span className="text-[12px]" style={{ color: "var(--ink-3)" }}>{t("planGroup", { done: g.items.filter((x) => done[`plan-${x.id}`]).length, total: g.items.length, qcm: g.items.filter((x) => x.kind === "qcm").length, state: open[key] ? "▾" : "▸" })}</span>
                       </button>
                       {open[key] && (
                         <div className="px-4 pb-3 space-y-2">
@@ -208,15 +211,15 @@ export default function RevisionPage() {
                             <div key={q.id} className={styles.question} style={{ opacity: done[dk] ? 0.7 : 1, transition: "opacity .15s" }}>
                               <div className="flex items-center gap-2 flex-wrap text-[12px] mb-1">
                                 {doneBtn(dk)}
-                                <span className={`tag ${q.kind === "qcm" ? "tag-blue" : "tag-amber"}`}>{q.kind === "qcm" ? "QCM" : "ouverte"}</span>
-                                {q.verifyMethod === "deterministic" && <span className="tag tag-green" title="réponse prouvée">✓ prouvé</span>}
-                                {q.verified === 1 && q.verifyMethod !== "deterministic" && <span className="tag" title="vérifié (relecture)">vérifié</span>}
+                                <span className={`tag ${q.kind === "qcm" ? "tag-blue" : "tag-amber"}`}>{q.kind === "qcm" ? t("qcmKind") : t("openKind")}</span>
+                                {q.verifyMethod === "deterministic" && <span className="tag tag-green" title={t("provedTitle")}>{t("proved")}</span>}
+                                {q.verified === 1 && q.verifyMethod !== "deterministic" && <span className="tag" title={t("verifiedTitle")}>{t("verified")}</span>}
                               </div>
-                              <div className="text-[13.5px]" style={{ color: "var(--ink)" }}>{q.statement}</div>
-                              {q.options && <pre className="mt-1 text-[12.5px]" style={{ color: "var(--ink-2)", whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{q.options}</pre>}
+                              <div className="text-[13.5px]" style={{ color: "var(--ink)" }} lang={language}>{q.statement}</div>
+                              {q.options && <pre className="mt-1 text-[12.5px]" style={{ color: "var(--ink-2)", whiteSpace: "pre-wrap", fontFamily: "inherit" }} lang={language}>{q.options}</pre>}
                               {reveal[q.id]
-                                ? <div className="mt-1.5 text-[13px]" style={{ color: "var(--green-ink)", whiteSpace: "pre-line" }}>{q.kind === "qcm" ? <><strong>Réponse :</strong> {q.correct}. {q.explanation}</> : <><strong>Corrigé :</strong> {q.solution}</>}</div>
-                                : <button className="btn btn-quiet btn-sm mt-1" style={{ color: "var(--green-ink)" }} onClick={() => setReveal((r) => ({ ...r, [q.id]: true }))}>Révéler la réponse</button>}
+                                ? <div className="mt-1.5 text-[13px]" style={{ color: "var(--green-ink)", whiteSpace: "pre-line" }}>{q.kind === "qcm" ? <><strong>{t("answer")}</strong> <span lang={language}>{q.correct}. {q.explanation}</span></> : <><strong>{t("solution")}</strong> <span lang={language}>{q.solution}</span></>}</div>
+                                : <button className="btn btn-quiet btn-sm mt-1" style={{ color: "var(--green-ink)" }} onClick={() => setReveal((r) => ({ ...r, [q.id]: true }))}>{t("reveal")}</button>}
                             </div>
                             );
                           })}

@@ -1,20 +1,25 @@
 "use client";
 
+/* eslint-disable react-hooks/set-state-in-effect -- un changement d’état du job clôt explicitement la génération */
+
 import { useEffect, useRef, useState } from "react";
 import { FlaskConical, Sparkles, ExternalLink, AlertTriangle, RotateCw } from "lucide-react";
 import { Panel, SectionHeader } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { WeightBar } from "@/components/viz/WeightBar";
-import { useApi, useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@/lib/ux/api";
+import { useApi, useCourse, useJob, JOB_ACTIVE, asText, type ApiError, engineDown } from "@/lib/ux/api";
 import { examLinkFromResultPath, type LabsResp } from "@/lib/ux/training";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
+import { useTranslations } from "use-intl/react";
 
 /**
  * Série Labs (spécifique CS-202 — le moule « Q6 2025 » sur le vrai code des labs).
  * GET /api/labs/generate → série ; POST {lab} → JOB de génération d'un exo neuf.
  */
 export function LabsSeries() {
-  const { courseId } = useCourse();
+  const t = useTranslations("labsSeries");
+  const apiT = useTranslations("api");
+  const { courseId, course } = useCourse();
   const { data, loading, error, refetch } = useApi<LabsResp>("/api/labs/generate");
 
   const [activeLab, setActiveLab] = useState<string | null>(null);
@@ -32,13 +37,13 @@ export function LabsSeries() {
     if (!job || JOB_ACTIVE.includes(job.status) || notified.current) return;
     notified.current = true;
     if (job.status === "error" || job.status === "failed") {
-      setGenError(asText(job.error) ?? "La génération de l’exo Labs a échoué.");
+      setGenError(asText(job.error) ?? t("jobFailed"));
       setJobId(null);
       setActiveLab(null);
     } else {
       refetch();
     }
-  }, [job, refetch]);
+  }, [job, refetch, t]);
 
   const generate = async (labId: string) => {
     if (running) return;
@@ -53,16 +58,16 @@ export function LabsSeries() {
       });
       const d = await res.json().catch(() => null);
       if (!res.ok) {
-        const err: ApiError = { status: res.status, message: d?.error ?? `Erreur ${res.status}` };
+        const err: ApiError = { status: res.status, message: d?.error ?? apiT("httpError", { status: res.status }), code: typeof d?.code === "string" ? d.code : null, params: d?.params };
         throw err;
       }
       setJobId(d.jobId);
     } catch (e) {
       const err = e as ApiError;
       setGenError(
-        err.status === 503
-          ? "Le moteur LLM est injoignable : impossible de générer un exo Labs pour l’instant."
-          : err.message || "Impossible de lancer la génération."
+        engineDown(err)
+          ? t("llmUnavailable")
+          : err.message || t("startFailed")
       );
       setActiveLab(null);
     }
@@ -73,14 +78,14 @@ export function LabsSeries() {
   return (
     <section>
       <SectionHeader
-        title="Série Labs"
-        hint="Les 8 % Labs du final : un exo neuf au moule Q6 2025, sur le vrai code de tes labs."
+        title={t("title")}
+        hint={t("hint")}
       />
       {loading ? (
         <div
           className="grid grid-cols-1 gap-3 md:grid-cols-2"
           aria-busy="true"
-          aria-label="Chargement de la série Labs"
+          aria-label={t("loading")}
         >
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className="skeleton h-20 rounded-lg" />
@@ -89,10 +94,10 @@ export function LabsSeries() {
       ) : error || !data ? (
         <Panel className="flex flex-col items-center gap-3 rounded-xl px-6 py-8 text-center">
           <AlertTriangle className="size-5 text-danger-hi" strokeWidth={2} />
-          <p className="text-[0.9rem] text-ink-2">La série Labs ne répond pas.</p>
+          <p className="text-[0.9rem] text-ink-2">{t("loadFailed")}</p>
           <Button variant="secondary" size="sm" onClick={refetch}>
             <RotateCw className="size-4" strokeWidth={2.25} aria-hidden="true" />
-            Réessayer
+            {t("retry")}
           </Button>
         </Panel>
       ) : (
@@ -108,11 +113,11 @@ export function LabsSeries() {
                     <FlaskConical className="size-[1.1rem]" strokeWidth={2} />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <h3 className="text-base font-semibold text-ink-1">{lab.label}</h3>
+                    <h3 className="text-base font-semibold text-ink-1" lang={course?.language || undefined}>{lab.label}</h3>
                     <p className="text-sm text-ink-3">
                       {exams.length > 0
-                        ? `${exams.length} exo${exams.length > 1 ? "s" : ""} généré${exams.length > 1 ? "s" : ""}`
-                        : "Aucun exo généré pour l’instant"}
+                        ? t("generated", { count: exams.length })
+                        : t("none")}
                     </p>
                   </div>
                   <Button
@@ -123,7 +128,7 @@ export function LabsSeries() {
                     disabled={(running && !isActive) || (!running && !launch.allowed)}
                   >
                     {!(isActive && running) && <Sparkles className="size-3.5" strokeWidth={2.25} />}
-                    Générer
+                    {t("generate")}
                   </Button>
                 </div>
                 {isActive && running && job && (
@@ -141,7 +146,7 @@ export function LabsSeries() {
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 text-[0.82rem] font-medium text-emerald-hi hover:underline"
                   >
-                    Exo prêt : ouvrir le PDF
+                    {t("openPdf")}
                     <ExternalLink className="size-3.5" aria-hidden="true" />
                   </a>
                 )}

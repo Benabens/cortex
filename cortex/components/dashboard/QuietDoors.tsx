@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { useTranslations } from "use-intl/react";
 
 /**
  * Les « portes » calmes : au plus deux liens texte vers les écrans qui ont vraiment quelque
@@ -14,24 +15,25 @@ export function QuietDoors({
   weaknessCount: number;
   reviewsDue: number;
 }) {
+  const t = useTranslations("dashboard");
   const doors: { href: string; label: string }[] = [];
 
   if (weaknessCount > 0) {
     doors.push({
       href: "/faiblesses",
-      label: `${weaknessCount} faiblesse${weaknessCount > 1 ? "s" : ""} à traiter`,
+      label: t("weaknesses", { count: weaknessCount }),
     });
   }
   if (reviewsDue > 0) {
     doors.push({
       href: "/entrainement",
-      label: `${reviewsDue} révision${reviewsDue > 1 ? "s" : ""} due${reviewsDue > 1 ? "s" : ""}`,
+      label: t("reviews", { count: reviewsDue }),
     });
   }
   if (doors.length === 0) return null;
 
   return (
-    <nav aria-label="En attente ailleurs" className="flex flex-wrap items-center gap-x-2.5 text-[0.84rem] text-ink-3">
+    <nav aria-label={t("otherPending")} className="flex flex-wrap items-center gap-x-2.5 text-[0.84rem] text-ink-3">
       {doors.map((d, i) => (
         <span key={d.href} className="inline-flex items-center gap-x-2.5">
           {i > 0 && <span aria-hidden="true">·</span>}

@@ -4,13 +4,17 @@ import { nowStr } from "@/db/q";
 import { defaultProviderName } from "@/lib/llm/config";
 import { MiB, storageQuotaBytesFor, userStorageBytes } from "@/lib/storage-quota";
 import { accountBudget, aiBudgetMargin, clientMonthSpendUsd, dailySpendCapUsd, expectedJobCostUsd, globalRevenueCapUsd, purchasedLedgerCenti } from "./budget";
-import { DELTA_CENTI, billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, fmtCredits, fromCenti, insufficient, subscriptionLive, type SubRow } from "./credits";
-import { quotaFor, quotaTrackingActive, ratePerUserPerMin, type GateIssue, type QuotaBucket } from "./guards";
+import { DELTA_CENTI, billingEnabled, creditCost, ensureLedgerUnit, ensureSignupCredits, fromCenti, insufficient, subscriptionLive, type SubRow } from "./credits";
+import { quotaFor, quotaTrackingActive, ratePerUserPerMin, type QuotaBucket } from "./guards";
 import { intLimit } from "./env";
 import { isOwner } from "./owner";
 import { rechargeDue, nextRechargeDate } from "./subscription-windows";
 import { isPaidProvider, spendCapPerUserUsd, spendCapUsd, spendMonth } from "./usage";
 import { formatReset, type LimitKey, type LaunchKind, type UsageLimits, type UsageLimit, type KindUsage } from "./limits-text";
+import { currentLocale } from "@/lib/i18n/current";
+import type { Messages } from "@/lib/i18n/messages";
+import { translator } from "@/lib/i18n/translate";
+import { refusal, type Refusal, type UserError } from "@/lib/i18n/user-error";
 
 export type { LimitKey, LaunchKind, UsageLimits, UsageLimit, KindUsage } from "./limits-text";
 
@@ -274,7 +278,7 @@ type Evaluated = {
   transient: boolean;
   status: number;
   resetAt: string | null;
-  message: (when: string | null) => string;
+  userError: (when: string | null) => UserError;
 };
 
 /**
@@ -296,7 +300,7 @@ export function evaluateLimits(s: LimitsState, spec: LaunchSpec): Evaluated[] {
       const reset = s.rate.oldestAt ? toIso(isoOffset(s.rate.oldestAt, 60_000)) : null;
       out.push({
         key: "rate", capacity: Math.max(0, cap - s.rate.used), transient: true, status: 429, resetAt: reset,
-        message: (when) => `Trop de requêtes en une minute (${cap} au maximum par compte) : réessaie ${when ?? "dans une minute"}.`,
+        userError: (when) => ({ code: "billing_rate_limit", params: { max: cap, when: when ?? translator(currentLocale())("limits.in_a_minute") } }),
       });
     }
     const q = s.quota[spec.bucket];
@@ -305,14 +309,14 @@ export function evaluateLimits(s: LimitsState, spec: LaunchSpec): Evaluated[] {
       out.push({
         key: spec.bucket === "gen" ? "daily_generations" : "daily_assistance",
         capacity: Math.max(0, cap - used), transient: false, status: 429, resetAt: day,
-        message: (when) => `${spec.bucket === "gen" ? "Quota quotidien de générations" : "Quota quotidien d'assistance"} atteint (${used}/${cap}) : remise à zéro ${when}.`,
+        userError: (when) => ({ code: spec.bucket === "gen" ? "billing_daily_generation_quota" : "billing_daily_assistance_quota", params: { used, max: cap, when: when ?? "" } }),
       });
     }
     if (spec.jobSlot && s.slots.cap !== null) {
       const cap = s.slots.cap;
       out.push({
         key: "active_jobs", capacity: Math.max(0, cap - s.slots.used), transient: true, status: 429, resetAt: null,
-        message: () => `Trop de générations en cours (${cap} au maximum par compte) : attends la fin de l'une d'elles.`,
+        userError: () => ({ code: "billing_active_jobs_limit", params: { max: cap } }),
       });
     }
     if (s.billing && s.credits) {
@@ -322,7 +326,7 @@ export function evaluateLimits(s: LimitsState, spec: LaunchSpec): Evaluated[] {
         key: "credits",
         capacity: cost > 0 ? Math.max(0, Math.floor(c.balanceCenti / cost + EPS)) : c.balanceCenti > 0 ? INF : 0,
         transient: false, status: 402, resetAt: c.rechargeAt ? `${c.rechargeAt}T00:00:00Z` : null,
-        message: () => refusal?.error ?? insufficient(0, Math.max(cost, 1))!.error,
+        userError: () => refusal ?? insufficient(0, Math.max(cost, 1))!,
       });
       if (cost > 0 && s.budget) {
         const paidCount = Math.floor(c.paidCenti / cost + EPS);
@@ -332,8 +336,7 @@ export function evaluateLimits(s: LimitsState, spec: LaunchSpec): Evaluated[] {
             key: "free_capacity",
             capacity: paidCount + Math.max(0, Math.floor((fm.capUsd - fm.spentUsd - s.committedGlobalUsd) / expected + EPS)),
             transient: false, status: 402, resetAt: month,
-            message: (when) => "La capacité de génération offerte ce mois-ci est épuisée. Les crédits achetés restent toujours utilisables : "
-              + `achète un pack ou abonne-toi pour continuer, sinon elle rouvre ${when}. ${BUY_URL}`,
+            userError: (when) => ({ code: "billing_free_capacity_exhausted", params: { when: when ?? "" } }),
           });
         }
         const b = s.budget;
@@ -341,8 +344,7 @@ export function evaluateLimits(s: LimitsState, spec: LaunchSpec): Evaluated[] {
           key: "free_budget",
           capacity: paidCount + Math.max(0, Math.floor((b.budgetUsd - b.spentUsd - s.committedUserUsd) / expected + EPS)),
           transient: false, status: 402, resetAt: null,
-          message: () => `Cette génération dépasse ce que ton compte peut utiliser sans achat (il te reste ${fmtCredits(Math.max(0, c.paidCenti))} crédit(s) acheté(s), il en faut ${fmtCredits(cost)}). `
-            + `Les crédits achetés restent toujours utilisables : achète un pack ou abonne-toi pour continuer. ${BUY_URL}`,
+          userError: () => ({ code: "billing_free_budget_exceeded", params: { balance: fromCenti(Math.max(0, c.paidCenti)), cost: fromCenti(cost) } }),
         });
       }
     }
@@ -357,7 +359,7 @@ export function evaluateLimits(s: LimitsState, spec: LaunchSpec): Evaluated[] {
           key: "daily_compute",
           capacity: cap <= 0 ? 0 : fit(cap - engaged, expected, engaged <= EPS),
           transient: false, status: 429, resetAt: day,
-          message: (when) => `Limite de calcul du jour atteinte pour ton compte : remise à zéro ${when}. Tes crédits restent acquis.`,
+          userError: (when) => ({ code: "billing_daily_compute_limit", params: { when: when ?? "" } }),
         });
       }
     }
@@ -369,7 +371,7 @@ export function evaluateLimits(s: LimitsState, spec: LaunchSpec): Evaluated[] {
       key: "monthly_capacity",
       capacity: cap <= 0 ? 0 : fit(cap - engaged, expected, engaged <= EPS),
       transient: false, status: 429, resetAt: month,
-      message: (when) => `Limite de génération atteinte pour tout Cortex ce mois-ci : la génération rouvre ${when}. Le reste du site fonctionne normalement.`,
+      userError: (when) => ({ code: "billing_monthly_capacity_limit", params: { when: when ?? "" } }),
     });
   }
   if (spec.bucket === "gen" && s.storage) {
@@ -377,19 +379,19 @@ export function evaluateLimits(s: LimitsState, spec: LaunchSpec): Evaluated[] {
     const mb = (n: number) => Math.round(n / MiB);
     out.push({
       key: "storage", capacity: usedBytes > quotaBytes ? 0 : INF, transient: false, status: 413, resetAt: null,
-      message: () => `Quota de stockage atteint : ${mb(usedBytes)} Mo utilisés sur ${mb(quotaBytes)} Mo. Supprime des annales ou des fichiers importés (page Sources) pour libérer de la place ; le quota grandit aussi avec tes achats.`,
+      userError: () => ({ code: "storage_quota_reached", params: { usedMb: mb(usedBytes), quotaMb: mb(quotaBytes) } }),
     });
   }
   return out;
 }
 
-const BUY_URL = "https://app.cortexexam.com/compte#credits";
-
-export type LaunchRefusal = GateIssue & { key: LimitKey; resetAt: string | null };
+export type LaunchRefusal = Refusal & { key: LimitKey; resetAt: string | null };
 
 function refusalOf(hit: Evaluated | undefined, now: string): LaunchRefusal | null {
   if (!hit) return null;
-  return { key: hit.key, status: hit.status, resetAt: hit.resetAt, error: hit.message(hit.resetAt ? formatReset(hit.resetAt, now) : null) };
+  const error = hit.userError(hit.resetAt ? formatReset(hit.resetAt, now) : null);
+  const rejected = refusal(hit.status, error.code, error.params);
+  return { ...rejected, key: hit.key, resetAt: hit.resetAt };
 }
 
 /** Verdict de lancement : null = permis ; sinon le premier refus, avec sa date de remise à zéro. */
@@ -465,29 +467,33 @@ export async function getUsageLimits(userId = currentUser(), extra?: { spec: Lau
 /** Les limites elles-mêmes, pour l'affichage. Les plafonds en dollars deviennent des pourcentages. */
 export function describeLimits(s: LimitsState): UsageLimit[] {
   const out: UsageLimit[] = [];
+  // Libellés dans la langue du lecteur : page Mon usage (requête) et connecteur MCP (anglais).
+  const t = translator(currentLocale());
+  const label = (k: keyof Messages["limits"]["label"]) => t(`limits.label.${k}`);
+  const unit = (k: keyof Messages["limits"]["unit"]) => t(`limits.unit.${k}`);
   const day = nextDayReset(s.now);
   const month = nextMonthReset(s.now);
   const pct = (used: number, cap: number) => (cap <= 0 ? 100 : Math.min(100, Math.round((100 * used) / cap)));
   if (s.billing && s.credits && !s.owner) {
     const bal = fromCenti(s.credits.balanceCenti);
-    out.push({ key: "credits", label: "Crédits", used: null, limit: null, remaining: bal, unit: "crédits", resetAt: s.credits.rechargeAt ? `${s.credits.rechargeAt}T00:00:00Z` : null });
+    out.push({ key: "credits", label: label("credits"), used: null, limit: null, remaining: bal, unit: unit("credits"), resetAt: s.credits.rechargeAt ? `${s.credits.rechargeAt}T00:00:00Z` : null });
   }
   for (const bucket of ["gen", "assist"] as const) {
     const q = s.quota[bucket];
     if (q.cap === null) continue;
     out.push({
       key: bucket === "gen" ? "daily_generations" : "daily_assistance",
-      label: bucket === "gen" ? "Générations du jour" : "Aides du jour",
+      label: label(bucket === "gen" ? "daily_generations" : "daily_assistance"),
       used: q.used, limit: q.cap, remaining: Math.max(0, q.cap - q.used),
-      unit: bucket === "gen" ? "générations" : "aides", resetAt: day,
+      unit: unit(bucket === "gen" ? "generations" : "assistance"), resetAt: day,
     });
   }
   if (s.slots.cap !== null) {
-    out.push({ key: "active_jobs", label: "Générations en cours", used: s.slots.used, limit: s.slots.cap, remaining: Math.max(0, s.slots.cap - s.slots.used), unit: "en même temps", resetAt: null });
+    out.push({ key: "active_jobs", label: label("active_jobs"), used: s.slots.used, limit: s.slots.cap, remaining: Math.max(0, s.slots.cap - s.slots.used), unit: unit("concurrent"), resetAt: null });
   }
   if (s.rate.cap !== null) {
     out.push({
-      key: "rate", label: "Demandes par minute", used: s.rate.used, limit: s.rate.cap, remaining: Math.max(0, s.rate.cap - s.rate.used), unit: "par minute",
+      key: "rate", label: label("rate"), used: s.rate.used, limit: s.rate.cap, remaining: Math.max(0, s.rate.cap - s.rate.used), unit: unit("per_minute"),
       resetAt: s.rate.oldestAt ? toIso(isoOffset(s.rate.oldestAt, 60_000)) : null,
     });
   }
@@ -496,17 +502,17 @@ export function describeLimits(s: LimitsState): UsageLimit[] {
     if (caps.length) {
       const cap = Math.min(...caps);
       const used = pct(Math.max(s.userSpentTodayUsd, s.budget?.spentTodayUsd ?? 0) + s.committedUserUsd, cap);
-      out.push({ key: "daily_compute", label: "Calcul du jour", used, limit: 100, remaining: 100 - used, unit: "%", resetAt: day });
+      out.push({ key: "daily_compute", label: label("daily_compute"), used, limit: 100, remaining: 100 - used, unit: "%", resetAt: day });
     }
   }
   if (s.paid && s.globalCapUsd !== null) {
     const used = pct(s.globalSpentUsd + s.committedGlobalUsd, s.globalCapUsd);
-    out.push({ key: "monthly_capacity", label: "Capacité de Cortex ce mois-ci", used, limit: 100, remaining: 100 - used, unit: "%", resetAt: month });
+    out.push({ key: "monthly_capacity", label: label("monthly_capacity"), used, limit: 100, remaining: 100 - used, unit: "%", resetAt: month });
   }
   if (s.storage) {
     const used = Math.round(s.storage.usedBytes / MiB);
     const limit = Math.floor(s.storage.quotaBytes / MiB);
-    out.push({ key: "storage", label: "Stockage", used, limit, remaining: Math.max(0, limit - used), unit: "Mo", resetAt: null });
+    out.push({ key: "storage", label: label("storage"), used, limit, remaining: Math.max(0, limit - used), unit: unit("mb"), resetAt: null });
   }
   return out;
 }

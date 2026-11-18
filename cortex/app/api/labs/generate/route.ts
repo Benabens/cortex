@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { labSeries, resolveLab } from "@/lib/labs";
 import { preflightGeneration } from "@/lib/preflight";
@@ -28,10 +29,10 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const topicStr = String(topic ?? "").trim();
   // Ce sujet part dans le prompt pour UNE réservation : borné comme le « focus »
   // des routes sœurs, sinon 1 crédit achète des centaines de milliers de tokens.
-  const tooLong = fieldTooLong("focus", topicStr);
+  const tooLong = fieldTooLong(req, "focus", topicStr);
   if (tooLong) return tooLong;
   if (!labStr && !topicStr) {
-    return NextResponse.json({ error: "Choisis un lab OU donne un sujet (ex. « direntv6 », « multi-threading »)." }, { status: 400 });
+    return apiError(req, "lab_or_topic_required", 400);
   }
 
   const existing = await activeJob("lab-exercise");
@@ -41,19 +42,20 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const jobTarget = JSON.stringify({ lab: resolved.id, topic: topicStr || undefined });
   // pré-checks AVANT de lancer le worker : limites d'usage, fournisseur LLM, corpus, moteur LaTeX
   const issue = await preflightGeneration("lab-exercise", jobTarget);
-  if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
+  if (issue) return apiError(req, issue, issue.status, { command: issue.command });
 
   let jobId: number;
   try {
     ({ id: jobId } = await createJobExclusive("lab-exercise", jobTarget));
   } catch (e) {
-    if (e instanceof ReservationRefused) return NextResponse.json({ error: e.message }, { status: e.status });
+    if (e instanceof ReservationRefused) return apiError(req, e, e.status);
     throw e;
   }
   try {
     await startWorker(jobId, course);
-  } catch (e: any) {
-    return NextResponse.json({ error: `Impossible de lancer le worker : ${e?.message ?? e}` }, { status: 500 });
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    return apiError(req, { code: "worker_start_failed", params: { detail } }, 500);
   }
   return NextResponse.json({ ok: true, jobId, lab: resolved.id, labLabel: resolved.label });
 })

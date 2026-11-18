@@ -36,13 +36,18 @@ import { intLimit } from "@/lib/billing/env";
 import { courseDbPath, dataRoot, ensureCoursesLoaded, listCoursesOf } from "@/lib/courses";
 import { log } from "@/lib/metrics";
 import { userStorageBytes } from "@/lib/storage-quota";
+import { UserFacingError } from "@/lib/i18n/user-error";
 
 const PAGE = 500;
 /** Tables techniques sans valeur pour la personne : exclues. */
 const SKIP_TABLES = new Set(["llm_cache"]);
 
-export class ExportTooLarge extends Error { readonly status = 413; }
-export class ExportBusy extends Error { readonly status = 429; }
+export class ExportTooLarge extends UserFacingError {
+  constructor(code: "export_limit_exceeded" | "export_files_too_large", params: Record<string, string | number>) { super({ code, params }, 413); }
+}
+export class ExportBusy extends UserFacingError {
+  constructor(code: "export_daily_limit" | "export_already_running" | "export_server_busy", params?: Record<string, string | number>) { super({ code, params }, 429); }
+}
 
 export function exportMaxBytes(): number {
   const mb = Number(process.env.EXPORT_MAX_MB);
@@ -70,7 +75,7 @@ async function takeDailyExport(userId: string): Promise<void> {
   // Les compteurs des jours passés ne servent plus.
   await authRun(`DELETE FROM app_meta WHERE key LIKE 'export:%' AND key NOT LIKE ?`, `export:%:${day}`).catch(() => {});
   if (Number(row?.value ?? 0) > cap) {
-    throw new ExportBusy(`Tu as fait ${cap} exports aujourd'hui, la limite du jour : réessaie demain (remise à zéro à minuit UTC).`);
+    throw new ExportBusy("export_daily_limit", { count: cap });
   }
 }
 
@@ -86,7 +91,7 @@ class Budget {
   add(n: number): void {
     this.used += n;
     if (this.used > this.max) {
-      throw new ExportTooLarge(`L'export dépasse la limite (${(this.max / 1024 / 1024).toFixed(0)} Mo). Supprime des annales ou des fichiers importés, puis réessaie.`);
+      throw new ExportTooLarge("export_limit_exceeded", { maxMb: (this.max / 1024 / 1024).toFixed(0) });
     }
   }
 }
@@ -236,12 +241,12 @@ const inFlight = new Set<string>();
 
 /** Prépare l'archive et renvoie un flux web (la route le passe tel quel à la réponse). */
 export async function streamAccountExport(userId: string): Promise<{ body: ReadableStream<Uint8Array>; filename: string }> {
-  if (inFlight.has(userId)) throw new ExportBusy("Un export est déjà en cours pour ce compte : attends qu'il se termine.");
-  if (inFlight.size >= exportMaxConcurrent()) throw new ExportBusy("Trop d'exports en cours sur le serveur : réessaie dans quelques minutes.");
+  if (inFlight.has(userId)) throw new ExportBusy("export_already_running");
+  if (inFlight.size >= exportMaxConcurrent()) throw new ExportBusy("export_server_busy");
   const bytes = await userStorageBytes(userId);
   const max = exportMaxBytes();
   if (bytes > max) {
-    throw new ExportTooLarge(`Tes fichiers pèsent ${(bytes / 1024 / 1024).toFixed(0)} Mo, au-delà de la limite d'export (${(max / 1024 / 1024).toFixed(0)} Mo). Supprime des annales ou des fichiers importés, puis réessaie.`);
+    throw new ExportTooLarge("export_files_too_large", { sizeMb: (bytes / 1024 / 1024).toFixed(0), maxMb: (max / 1024 / 1024).toFixed(0) });
   }
   await takeDailyExport(userId);
   inFlight.add(userId);

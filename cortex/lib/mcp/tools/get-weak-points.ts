@@ -31,7 +31,7 @@ export default defineTool({
     "grouped by theme, plus the concepts due for spaced-repetition review. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
-  userSummary: "Lit tes points faibles, du plus grave au moins grave.",
+  userSummary: "getWeakPoints",
   input: z.object({
     course: courseArg,
     limit: z.number().int().min(1).max(50).optional().describe("Maximum weak points returned (default 20)."),
@@ -39,7 +39,7 @@ export default defineTool({
   output,
   async run({ course, limit }, ctx) {
     return ctx.inCourse(course, async (c) => {
-      const all = (await listWeaknesses()).filter((w) => w.topic && w.topic !== "(à analyser)");
+      const all = (await listWeaknesses()).filter((w) => w.topic && w.topic !== "(\u00e0 analyser)");
       const sorted = [...all].sort((a, b) => b.severity - a.severity || (b.timesSeen ?? 0) - (a.timesSeen ?? 0) || String(b.loggedAt ?? "").localeCompare(String(a.loggedAt ?? "")));
       return {
         course: courseRefOf(c),
@@ -61,6 +61,6 @@ export default defineTool({
     });
   },
   summarize: (o) => o.total
-    ? `${o.course.label} : ${o.total} point(s) faible(s) suivi(s), dont ${o.weak_points.filter((w) => w.severity >= 3).length} grave(s).`
-    : `${o.course.label} : aucun point faible enregistré pour l'instant.`,
+    ? `${o.course.label}: ${o.total} tracked weak point(s), including ${o.weak_points.filter((w) => w.severity >= 3).length} serious one(s).`
+    : `${o.course.label}: no weak points are tracked yet.`,
 });

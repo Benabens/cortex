@@ -1,16 +1,20 @@
 import type { MetadataRoute } from "next";
+import { getLocale, getT } from "@/lib/i18n/server";
 
 /**
  * Manifest (écran d'accueil Android / Chrome). Les icônes vivent dans
  * public/brand/ ; les couleurs reprennent le fond de l'app (--color-bg), la même
  * valeur que `themeColor` du layout. Servi sans session : voir PUBLIC_FILES du proxy.
  */
-export default function manifest(): MetadataRoute.Manifest {
+export default async function manifest(): Promise<MetadataRoute.Manifest> {
+  const locale = await getLocale();
+  const t = await getT("manifest");
   return {
+    // i18n-allow: nom de marque
     name: "Cortex",
-    short_name: "Cortex",
-    description: "Révise ce qui tombe vraiment.",
-    lang: "fr",
+    short_name: t("shortName"),
+    description: t("description"),
+    lang: locale,
     start_url: "/",
     display: "standalone",
     background_color: "#080c14",

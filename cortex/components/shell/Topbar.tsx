@@ -6,10 +6,12 @@ import { Wordmark } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
 
 import { useApi } from "@/lib/ux/api";
+import { useTranslations } from "use-intl/react";
 
 type DashCountdown = { countdown: { date: string; days: number } | null };
 
 export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
+  const t = useTranslations("shell");
   // Compte à rebours RÉEL (même requête que l'Accueil : dédupliquée par le cache).
   // Masqué si absent ou si l'examen est déjà passé (days < 0).
   const { data } = useApi<DashCountdown>("/api/dashboard");
@@ -23,7 +25,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
         <Link
           href="/"
           className="mr-1 flex items-center lg:hidden"
-          aria-label="Cortex : accueil"
+          aria-label={t("home")}
         >
           <Wordmark markSize={26} />
         </Link>
@@ -35,7 +37,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
         >
           <Search className="size-4 shrink-0" strokeWidth={2} />
           <span className="flex-1 truncate text-[0.85rem]">
-            Rechercher un cours, une série, un final…
+            {t("searchPlaceholder")}
           </span>
         </Link>
 
@@ -44,17 +46,17 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           {showCountdown && (
             <span
               className="hidden items-center gap-2 rounded-full border border-line bg-surface-2/50 px-3 py-1.5 text-[0.78rem] md:inline-flex"
-              title="Prochain examen"
+              title={t("nextExam")}
             >
               <CalendarClock className="size-3.5 text-ink-3" strokeWidth={2.25} />
-              <span className="text-ink-3">Final dans</span>
-              <span className="font-data font-semibold text-ink-1">{days} j</span>
+              <span className="text-ink-3">{t("finalIn")}</span>
+              <span className="font-data font-semibold text-ink-1">{t("days", { count: days })}</span>
             </span>
           )}
 
           <Link
             href="/recherche"
-            aria-label="Rechercher"
+            aria-label={t("search")}
             className="grid size-11 place-items-center rounded-lg border border-line bg-surface-2/50 text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink-1 sm:hidden"
           >
             <Search className="size-[1.15rem]" strokeWidth={2} />
@@ -64,7 +66,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
 
           <Link
             href="/compte"
-            aria-label="Mon compte"
+            aria-label={t("account")}
             className="hidden size-11 min-[360px]:grid place-items-center rounded-lg border border-line bg-surface-2/50 text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink-1"
           >
             <UserRound className="size-[1.15rem]" strokeWidth={2} />
@@ -73,7 +75,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           <button
             type="button"
             onClick={onOpenMenu}
-            aria-label="Ouvrir le menu"
+            aria-label={t("openMenu")}
             className="grid size-11 place-items-center rounded-lg border border-line bg-surface-2/50 text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink-1 lg:hidden"
           >
             <Menu className="size-[1.15rem]" strokeWidth={2} />

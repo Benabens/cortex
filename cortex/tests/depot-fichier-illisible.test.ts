@@ -39,9 +39,9 @@ async function theCourse() {
   return course;
 }
 
-async function post(route: string, query: string, files: [Buffer, string][], fields: Record<string, string> = {}) {
+async function post(route: string, query: string, files: [Buffer, string][], fields: Record<string, string> = {}, acceptLanguage = "fr") {
   const c = await theCourse();
-  return postForm(route, `course=${c.id}${query}`, files, fields);
+  return postForm(route, `course=${c.id}${query}`, files, fields, acceptLanguage);
 }
 
 function storedFiles(dir: string): string[] {
@@ -78,6 +78,25 @@ test("zone Annales : chaque fichier écarté est nommé avec sa raison, et le PD
   assert.match(skipped["final-2020.pdf"], /mot de passe/);
   assert.match(skipped["photo.png"], /image/);
   assert.deepEqual(storedFiles(c.refsDir), ["final-2022.pdf"]);
+});
+
+test("étudiant anglophone : les fichiers écartés d'un dépôt partiel sont expliqués en anglais, avec leur code", async () => {
+  const r = await post("refs/upload", "", [
+    [textPdf("Final 2021, exercise 1"), "final-2021.pdf"],
+    [encryptedPdf(), "final-2018.pdf"],
+    [Buffer.from("PNG"), "scan.png"],
+  ], {}, "en");
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  const skipped = r.json.skipped as { file: string; reason: string; code: string }[];
+  assert.deepEqual(skipped.map((s) => s.file).sort(), ["final-2018.pdf", "scan.png"]);
+  for (const s of skipped) assert.doesNotMatch(s.reason, /[àâçéèêîôûù]|\b(le|la|les|une|des)\b/i, s.reason);
+  assert.equal(skipped.find((s) => s.file === "final-2018.pdf")?.code, "document_encrypted");
+  assert.ok(!("userError" in skipped[0]), "seuls le fichier, la raison et le code sortent");
+
+  const { ingestProblems } = await import("../lib/ingest-report");
+  const [problem] = ingestProblems({ files: [{ path: "refs/scan.pdf", status: "no_text", items: 0 }] }, "en");
+  assert.match(problem.message, /no readable text/);
+  assert.equal(problem.short, "no text, scanned?");
 });
 
 test("questions d'exemple, consignes et connecteur : le même refus pour un PDF abîmé", async () => {

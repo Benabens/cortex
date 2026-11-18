@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { asText, useJob, useCourse, JOB_ACTIVE, type Job } from "@/lib/ux/api";
 import { JobProgress } from "@/components/dashboard/JobProgress";
+import { useTranslations } from "use-intl/react";
 
 /**
  * Bannière « génération en cours » — poll GET /api/jobs/[id] jusqu'au statut
@@ -15,6 +16,7 @@ export function JobBanner({
   initial: { id: number; type: unknown; status: string; progress: number; currentStep: unknown };
   onDone: () => void;
 }) {
+  const t = useTranslations("dashboard");
   const job = useJob(initial.id);
   const { courseId } = useCourse();
   const current: Pick<Job, "status" | "progress"> & { type: unknown; currentStep: unknown } =
@@ -40,7 +42,8 @@ export function JobBanner({
   if (terminal && !failed) return null;
 
   if (failed) {
-    const errMsg = asText(job!.error) ?? "La génération a échoué.";
+    const rawError = asText(job!.error);
+    const errMsg = rawError === "jobNotFound" ? t("jobNotFound") : rawError === "jobConnectionLost" ? t("jobConnectionLost") : rawError ?? t("generationFailedDefault");
     const retry = async () => {
       setRetrying(true);
       try {
@@ -58,7 +61,7 @@ export function JobBanner({
       <section
         className="panel flex flex-col gap-2.5 p-4 sm:p-5"
         role="alert"
-        aria-label="Échec de génération"
+        aria-label={t("generationFailedLabel")}
         style={{ borderColor: "color-mix(in oklch, var(--color-danger) 45%, var(--color-line))" }}
       >
         <div className="flex items-center justify-between gap-3">
@@ -67,7 +70,7 @@ export function JobBanner({
             style={{ color: "var(--color-danger)" }}
           >
             <span aria-hidden>⚠</span>
-            Génération échouée{asText(current.type) ? ` · ${asText(current.type)}` : ""}
+            {t("generationFailed", { type: asText(current.type) ?? "empty" })}
           </span>
           <div className="flex items-center gap-2">
             <button
@@ -76,14 +79,14 @@ export function JobBanner({
               disabled={retrying}
               className="rounded-full border border-line-strong px-3 py-1 text-[0.8rem] font-semibold text-ink-1 disabled:opacity-50"
             >
-              {retrying ? "Relance…" : "Réessayer"}
+              {retrying ? t("retrying") : t("retry")}
             </button>
             <button
               type="button"
               onClick={() => setDismissed(true)}
               className="rounded-full px-3 py-1 text-[0.8rem] font-medium text-ink-3 hover:text-ink-1"
             >
-              Fermer
+              {t("close")}
             </button>
           </div>
         </div>

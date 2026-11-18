@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { Wordmark } from "@/components/shell/Logo";
+import { getT } from "@/lib/i18n/server";
 
 /**
  * 404 — page introuvable, aux jetons de l'app (sombre ou clair selon le thème ;
  * replis littéraux du sombre si le CSS global manque). Server Component.
  */
-export default function NotFound() {
+export default async function NotFound() {
+  const t = await getT("notFound");
   return (
     <div
       style={{
@@ -34,10 +36,9 @@ export default function NotFound() {
           <Wordmark markSize={24} textSize="1.15rem" />
         </div>
         <h1 style={{ fontSize: 44, fontWeight: 700, margin: "12px 0 4px", lineHeight: 1 }}>404</h1>
-        <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px" }}>Page introuvable</h2>
+        <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px" }}>{t("title")}</h2>
         <p style={{ fontSize: 14, lineHeight: 1.55, color: "var(--color-ink-2, #bfc1c9)", margin: 0 }}>
-          Cette page n’existe pas (ou plus). Vérifie l’adresse, ou reviens à
-          l’accueil.
+          {t("description")}
         </p>
         <div style={{ marginTop: 22 }}>
           <Link
@@ -54,7 +55,7 @@ export default function NotFound() {
               background: "var(--color-primary, #ececee)",
             }}
           >
-            Retour à l’accueil
+            {t("home")}
           </Link>
         </div>
       </div>

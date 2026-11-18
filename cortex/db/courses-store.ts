@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { authAll, authRun, authSqlite, authGet, authTx, type AuthTx } from "./auth-store";
 import { dbDriverName, nowStr } from "./q";
 import { OWNER_USER } from "./context";
+import { UserFacingError, userError } from "../lib/i18n/user-error";
 
 /**
  * STORE DES COURS — table `courses` du store GLOBAL (pas par tenant).
@@ -48,11 +49,9 @@ export type CourseRow = {
   exam_format?: string | null;
 };
 
-export class CourseCreationLimitError extends Error {
-  readonly status = 409;
-
-  constructor(message: string) {
-    super(message);
+export class CourseCreationLimitError extends UserFacingError {
+  constructor(error: ReturnType<typeof userError>) {
+    super(error, 409);
     this.name = "CourseCreationLimitError";
   }
 }
@@ -158,9 +157,7 @@ export async function insertCourse(row: CourseRow): Promise<void> {
           `SELECT count(*) n FROM courses WHERE owner_user_id = ?`, row.owner_user_id,
         );
         if (Number(current?.n ?? 0) >= maxCourses) {
-          throw new CourseCreationLimitError(
-            `Tu as atteint la limite de ${maxCourses} cours. Supprime un cours pour en créer un nouveau.`,
-          );
+          throw new CourseCreationLimitError(userError("course_count_limit", { max: maxCourses }));
         }
       }
 
@@ -171,9 +168,7 @@ export async function insertCourse(row: CourseRow): Promise<void> {
           row.owner_user_id, nowStr(-3_600_000),
         );
         if (Number(recent?.n ?? 0) >= hourly) {
-          throw new CourseCreationLimitError(
-            `Tu as atteint la limite de ${hourly} cours par heure. Réessaie plus tard.`,
-          );
+          throw new CourseCreationLimitError(userError("course_hourly_creation_limit", { max: hourly }));
         }
       }
     }

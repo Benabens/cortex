@@ -1,3 +1,5 @@
+import type { UserError } from "@/lib/i18n/user-error";
+
 /**
  * Interface provider LLM unique.
  *
@@ -99,12 +101,19 @@ export class LlmError extends Error {
   retryable: boolean;
   /** Compteurs réels quand le fournisseur a répondu (et facturé) une réponse inutilisable. */
   usage?: LlmUsage;
-  constructor(message: string, code?: string, retryable = false, usage?: LlmUsage) {
+  userError?: UserError;
+  constructor(message: string, code?: string, retryable = false, usage?: LlmUsage, userError?: UserError) {
     super(message);
     this.name = "LlmError";
     this.code = code;
     this.retryable = retryable;
     if (usage) this.usage = usage;
+    if (userError) this.userError = userError;
+    // La raison précise (clé manquante, CLI introuvable…) : c'est elle que l'exploitant doit lire.
+    else if (code === "UNAVAILABLE") this.userError = message ? { code: "llm_engine_unavailable_reason", params: { reason: message } } : { code: "llm_engine_unavailable" };
+    else if (code === "SPEND_CAP") this.userError = { code: "llm_spend_cap" };
+    else if (code === "QUOTA") this.userError = { code: "llm_quota_reached" };
+    else if (code === "CREDITS") this.userError = { code: "billing_balance_empty" };
   }
 }
 

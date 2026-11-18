@@ -1,5 +1,6 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { checkSolution } from "@/lib/check-solution";
-import { LlmError, OWN_LLM_CODES, llmUserMessage } from "@/lib/llm";
+import { LlmError, OWN_LLM_CODES, llmUserError } from "@/lib/llm";
 import { useCourseOr404 } from "@/lib/req";
 import { UPLOAD_LIMITS, readFormData, readJson, withBodyLimit } from "@/lib/upload-limit";
 import { fieldTooLong } from "@/lib/field-limits";
@@ -40,14 +41,14 @@ async function handlePOST(req: NextRequest) {
   if (ct.includes("multipart/form-data")) {
     // Quota de stockage du compte + espace libre du volume, AVANT de lire l'envoi.
     const storage = await checkStorage(currentUser(), declaredBytes(req));
-    if (storage) return NextResponse.json({ error: storage.error }, { status: storage.status });
+    if (storage) return apiError(req, storage, storage.status);
     const form = await readFormData(req, UPLOAD_LIMITS.image);
     statement = String(form.get("statement") ?? "").trim();
     answer = String(form.get("answer") ?? "").trim();
     const file = form.get("image");
     if (file instanceof File && file.size > 0) {
       const ext = EXT[file.type] ?? "png";
-      if (file.size > 12 * 1024 * 1024) return NextResponse.json({ error: "Image trop lourde (max 12 Mo)." }, { status: 400 });
+      if (file.size > 12 * 1024 * 1024) return apiError(req, { code: "image_too_large", params: { maxMb: 12 } }, 400);
       const name = `${crypto.randomUUID()}.${ext}`;
       // Écrit aussi sur le disque local (copie du seau en stockage objet) : l'outil Read du modèle l'y lit.
       // Compte gratuit : en transit seulement, jamais au seau (lib/originals).
@@ -63,16 +64,16 @@ async function handlePOST(req: NextRequest) {
     if (body.partId !== undefined) {
       const { shortPartForCheck } = await import("@/lib/blocks");
       const part = await shortPartForCheck(Number(body.examId), Number(body.partId));
-      if (!part) return NextResponse.json({ error: "Sous-question introuvable dans cet examen." }, { status: 404 });
+      if (!part) return apiError(req, "exam_part_not_found", 404);
       ({ statement } = part);
       rubric = part;
     }
   }
 
-  if (!statement) return NextResponse.json({ error: "Énoncé manquant." }, { status: 400 });
-  const tooLong = fieldTooLong("statement", statement) ?? fieldTooLong("answer", answer);
+  if (!statement) return apiError(req, "statement_missing", 400);
+  const tooLong = fieldTooLong(req, "statement", statement) ?? fieldTooLong(req, "answer", answer);
   if (tooLong) return tooLong;
-  if (!answer && !imageRel) return NextResponse.json({ error: "Donne ta réponse (texte ou photo)." }, { status: 400 });
+  if (!answer && !imageRel) return apiError(req, "answer_required", 400);
 
   try {
     // Réservation atomique (rafale, quota du jour, solde) DÉBITÉE juste avant
@@ -83,10 +84,10 @@ async function handlePOST(req: NextRequest) {
     return NextResponse.json({ ok: true, result });
   } catch (e: unknown) {
     const { AssistRefused } = await import("@/lib/billing/reserve");
-    if (e instanceof AssistRefused) return NextResponse.json({ error: e.message }, { status: e.status });
+    if (e instanceof AssistRefused) return apiError(req, e, e.status);
     const err = e as LlmError;
     const status = err.code && OWN_LLM_CODES.has(err.code) ? 503 : 502;
     // Jamais le texte brut du fournisseur : une cause lisible (lib/llm/errors).
-    return NextResponse.json({ error: llmUserMessage(e), code: err.code }, { status });
+    return apiError(req, llmUserError(e), status, { llmCode: err.code });
   }
 }

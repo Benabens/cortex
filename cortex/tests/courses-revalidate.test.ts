@@ -88,5 +88,5 @@ test("catalogue inchangé : pas de rechargement", async () => {
 
 test("cours d'un autre compte : toujours introuvable après relecture", async () => {
   await insertCourse({ ...row("autre-201"), owner_user_id: "usr_autre" });
-  await assert.rejects(resolveCourse(USER, "autre-201"), /introuvable/);
+  await assert.rejects(resolveCourse(USER, "autre-201"), /No course named/);
 });
