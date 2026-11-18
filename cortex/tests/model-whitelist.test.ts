@@ -51,7 +51,7 @@ test("tarif inconnu → tarif le plus cher de la grille (jamais sous-compté)", 
 test("weaknesses/process : `model` hors liste blanche → 400 avant toute lecture ou débit", async () => {
   const { POST } = await import("../app/api/weaknesses/process/route");
   const post = (body: unknown) => new NextRequest("http://cortex.test/api/weaknesses/process?course=cs-202", {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    method: "POST", headers: { "content-type": "application/json", "accept-language": "fr" }, body: JSON.stringify(body),
   });
   const r = await POST(post({ id: 1, model: "claude-opus-4-8" }));
   assert.equal(r.status, 400);

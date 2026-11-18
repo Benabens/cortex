@@ -153,7 +153,12 @@ async function modernRaw(token: string, clientName: string, params: Record<strin
   }));
   const raw = await res.text();
   return JSON.parse(raw.includes("data:") ? raw.split("data:").pop()!.trim() : raw) as {
-    result?: { resultType?: string; structuredContent?: Record<string, unknown> }; error?: { message: string };
+    result?: {
+      resultType?: string;
+      structuredContent?: Record<string, unknown>;
+      _meta?: Record<string, { cost?: { credits: number; centi: number }; balance?: { credits: number } | null; remaining?: number; resetAt?: string }>;
+    };
+    error?: { message: string };
   };
 }
 
@@ -197,6 +202,8 @@ test("Claude Code qui ne répond pas : moins de 30 s → nouvelle demande ; au-d
   const args = { name: "generate_drill", arguments: { course: "ALI-1", concept: "équations différentielles" } };
   const first = await modernRaw(token, "claude-code", args);
   assert.equal(first.result?.resultType, "input_required", JSON.stringify(first).slice(0, 300));
+  assert.deepEqual(first.result?._meta?.["com.cortexexam/payment"]?.cost, { credits: 0.3, centi: 30 });
+  assert.equal(first.result?._meta?.["com.cortexexam/payment"]?.balance?.credits, before / 100);
   const soon = await modernRaw(token, "claude-code", args);
   assert.equal(soon.result?.resultType, "input_required", "dialogue encore en cours");
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() + 31_000 });

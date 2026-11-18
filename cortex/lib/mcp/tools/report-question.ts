@@ -3,6 +3,7 @@ import { q } from "@/db/q";
 import { REPORT_REASONS, ReportError, reportQuestion } from "@/lib/question-reports";
 import { courseArg, courseRef, courseRefOf } from "../schemas";
 import { ToolError, defineTool } from "../tool";
+import { errorText } from "@/lib/i18n/user-error";
 
 const output = z.object({
   course: courseRef,
@@ -23,7 +24,7 @@ export default defineTool({
   kind: "write",
   // Retire la question des révisions de l'élève (suppression) ; chaque appel enregistre un signalement.
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-  userSummary: "Signale une question générée fausse, hors programme, en double ou ambiguë.",
+  userSummary: "reportQuestion",
   input: z.object({
     course: courseArg,
     exam_id: z.number().int().positive(),
@@ -47,15 +48,15 @@ export default defineTool({
         : n <= qcm.length
           ? { kind: "qcm" as const, itemId: Number(qcm[n - 1].id) }
           : n - qcm.length <= open.length ? { kind: "open" as const, itemId: Number(open[n - qcm.length - 1].id) } : null;
-      if (!target) throw new ToolError("not_found", `L'examen n° ${args.exam_id} n'a pas de question ${n} dans ce cours.`);
+      if (!target) throw new ToolError("not_found", `Exam ${args.exam_id} has no question ${n} in this course.`);
       try {
         const r = await reportQuestion({ examId: args.exam_id, ...target, reason: args.reason, comment: args.comment ?? null });
         return { course: courseRefOf(c), report_id: r.id, status: r.status, refunded_credits: r.refundedCenti / 100, removed_from_revision: r.removedFromRevision > 0 };
       } catch (e) {
-        if (e instanceof ReportError) throw new ToolError(e.status === 404 ? "not_found" : "invalid_input", e.message);
+        if (e instanceof ReportError) throw new ToolError(e.status === 404 ? "not_found" : "invalid_input", errorText("en", e), undefined, e.code);
         throw e;
       }
     });
   },
-  summarize: (o) => `Signalement n° ${o.report_id} enregistré${o.status === "confirmed" ? " : erreur confirmée" : o.status === "not_confirmed" ? " : la re-vérification ne trouve pas d'erreur" : ""}${o.refunded_credits ? `, ${o.refunded_credits} crédit rendu` : ""}.`,
+  summarize: (o) => `Report ${o.report_id} recorded${o.status === "confirmed" ? ": issue confirmed" : o.status === "not_confirmed" ? ": re-check found no issue" : ""}${o.refunded_credits ? `, ${o.refunded_credits} credits refunded` : ""}.`,
 });

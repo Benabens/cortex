@@ -9,6 +9,7 @@ import { CourseProvider, useCourse } from "@/lib/ux/api";
 import { FirstRunHero } from "@/components/dashboard/FirstRunHero";
 import { LegalLine } from "@/app/compte/BillingPanel";
 import type { LegalLinks } from "@/lib/legal";
+import { useTranslations } from "use-intl/react";
 
 /**
  * PREMIER LANCEMENT — un compte sans aucun cours n'a rien à voir sur les sept
@@ -41,6 +42,7 @@ const BARE_ROUTES = ["/login", "/oauth"];
 export function AppShell({ children, legal, legalEnglish, contact }: {
   children: React.ReactNode; legal?: LegalLinks; legalEnglish?: string | null; contact?: string;
 }) {
+  const t = useTranslations("shell");
   const [menuOpen, setMenuOpen] = useState(false);
   const router = useRouter();
   const shellPathname = usePathname();
@@ -69,7 +71,7 @@ export function AppShell({ children, legal, legalEnglish, contact }: {
   return (
     <CourseProvider>
       <div className="relative min-h-dvh overflow-x-clip">
-        <a href="#main-content" className="sr-only fixed left-4 top-4 z-50 rounded-full bg-ink-1 px-5 py-3 text-bg focus:not-sr-only">Aller au contenu</a>
+        <a href="#main-content" className="sr-only fixed left-4 top-4 z-50 rounded-full bg-ink-1 px-5 py-3 text-bg focus:not-sr-only">{t("skip")}</a>
         <Sidebar />
         <MobileNav open={menuOpen} onClose={() => setMenuOpen(false)} />
 

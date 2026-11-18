@@ -30,13 +30,13 @@ const ALL: ToolDef[] = [
 export function validateTools(tools: readonly ToolDef[]): ToolDef[] {
   const seen = new Set<string>();
   for (const t of tools) {
-    if (!/^[a-z][a-z0-9_]{0,63}$/.test(t.name)) throw new Error(`Outil MCP au nom invalide : ${t.name}`);
-    if (seen.has(t.name)) throw new Error(`Outil MCP en double : ${t.name}`);
-    if (!t.title || t.description.length < 40) throw new Error(`Outil MCP sans titre ou description : ${t.name}`);
-    if (!t.userSummary) throw new Error(`Outil MCP sans résumé pour la personne : ${t.name}`);
+    if (!/^[a-z][a-z0-9_]{0,63}$/.test(t.name)) throw new Error(`Invalid MCP tool name: ${t.name}`);
+    if (seen.has(t.name)) throw new Error(`Duplicate MCP tool: ${t.name}`);
+    if (!t.title || t.description.length < 40) throw new Error(`MCP tool without a title or description: ${t.name}`);
+    if (!t.userSummary) throw new Error(`MCP tool without a student-facing summary: ${t.name}`);
     const hints = t.annotations as Record<string, unknown> | undefined;
     for (const h of ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"]) {
-      if (typeof hints?.[h] !== "boolean") throw new Error(`Outil MCP sans annotation ${h} explicite : ${t.name}`);
+      if (typeof hints?.[h] !== "boolean") throw new Error(`MCP tool without an explicit ${h} annotation: ${t.name}`);
     }
     seen.add(t.name);
   }

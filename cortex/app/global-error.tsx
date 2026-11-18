@@ -1,9 +1,11 @@
 "use client"; // Obligatoire (error boundary). global-error REMPLACE le layout racine.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import "./typography.css";
 import { THEME_STORAGE_KEY, LIGHT_QUERY, parseThemePref, resolveTheme } from "@/lib/ux/theme";
 import { captureClientError } from "@/lib/observability-browser";
+import { cookieValue, isLocale, LOCALE_COOKIE, negotiateLocale, type Locale } from "@/lib/i18n/locale";
+import { MESSAGES } from "@/lib/i18n/messages";
 
 // Palette autonome des deux thèmes (le CSS global peut être la cause du crash). Rendue comme
 // enfant texte de <style> : aucun caractère que React échapperait (& < > " ').
@@ -24,6 +26,16 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  // Le premier rendu reste identique serveur/client ; la préférence du navigateur prend
+  // ensuite le relais sans dépendre du provider du layout, absent dans global-error.
+  const [locale, setLocale] = useState<Locale>("en");
+  const t = MESSAGES[locale].globalError;
+  useEffect(() => {
+    const cookie = cookieValue(document.cookie, LOCALE_COOKIE);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- global-error n'a pas de contexte serveur pour cette préférence client
+    setLocale(isLocale(cookie) ? cookie : negotiateLocale(navigator.languages.join(",")) ?? "en");
+  }, []);
+
   useEffect(() => {
     console.error(error);
     captureClientError(error);
@@ -40,7 +52,7 @@ export default function GlobalError({
   }, []);
 
   return (
-    <html lang="fr">
+    <html lang={locale}>
       <head>
         <style>{PALETTE}</style>
       </head>
@@ -80,20 +92,20 @@ export default function GlobalError({
                 lineHeight: 1,
               }}
             >
+              {/* i18n-allow: nom de marque */}
               cortex
               <span
                 aria-hidden="true"
                 style={{ display: "inline-block", width: "0.17em", height: "0.17em", marginLeft: "0.035em", borderRadius: "50%", background: "#2764ec" }}
               />
             </div>
-            <h1 style={{ fontSize: 22, fontWeight: 700, margin: "14px 0 8px" }}>Erreur critique</h1>
+            <h1 style={{ fontSize: 22, fontWeight: 700, margin: "14px 0 8px" }}>{t.title}</h1>
             <p style={{ fontSize: 14, lineHeight: 1.55, color: "var(--ge-muted)", margin: 0 }}>
-              L’application n’a pas pu s’afficher. Recharge la page. Si le
-              problème persiste, réessaie dans un instant.
+              {t.description}
             </p>
             {error?.digest && (
               <p style={{ fontSize: 12, color: "var(--ge-faint)", marginTop: 12, fontVariantNumeric: "tabular-nums" }}>
-                réf. {error.digest}
+                {t.reference.replace("{digest}", error.digest)}
               </p>
             )}
             <div style={{ marginTop: 22 }}>
@@ -112,7 +124,7 @@ export default function GlobalError({
                   background: "var(--ge-cta)",
                 }}
               >
-                Recharger
+                {t.reload}
               </button>
             </div>
           </div>

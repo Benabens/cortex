@@ -2,6 +2,7 @@ import { authAll, authRun } from "@/db/auth-store";
 import { nowStr, q } from "@/db/q";
 import { intLimit } from "@/lib/billing/env";
 import { originalsPolicy } from "@/lib/originals/policy";
+import { refusal, type Refusal } from "@/lib/i18n/user-error";
 
 /**
  * QUOTA D'INDEX D'UN COMPTE GRATUIT. Ses originaux ne restent pas sur le serveur (lib/originals) :
@@ -47,15 +48,12 @@ export async function refreshIndexUsage(userId: string, course: string): Promise
 }
 
 /** Refus 413 quand un compte gratuit a rempli son index ; null = l'envoi peut passer. */
-export async function checkIndexQuota(userId: string): Promise<{ status: 413; error: string } | null> {
+export async function checkIndexQuota(userId: string): Promise<Refusal<413> | null> {
   const quota = indexQuotaBytes();
   if (quota === null) return null;
   if ((await originalsPolicy(userId)).home !== "local") return null;
   const used = await accountIndexBytes(userId).catch(() => 0);
   if (used < quota) return null;
   const mb = (n: number) => Math.max(1, Math.round(n / MiB));
-  return {
-    status: 413,
-    error: `Index plein : ${mb(used)} Mo de texte indexé sur ${mb(quota)} Mo (compte gratuit). Retire des supports dont tu n'as plus besoin (page Sources), ou passe Premium pour en ajouter.`,
-  };
+  return refusal(413, "index_quota_reached", { usedMb: mb(used), quotaMb: mb(quota) });
 }

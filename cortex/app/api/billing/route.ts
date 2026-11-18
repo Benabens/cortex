@@ -1,9 +1,12 @@
 import { nextRechargeDate, standingOf } from "@/lib/billing/subscription-windows";
+import { requestLocale } from "@/lib/i18n/api-error";
+import { errorText } from "@/lib/i18n/user-error";
+import type { Locale } from "@/lib/i18n/locale";
 import { billingEnabled, creditCost, fromCenti, getSubscription, listTransactions, purchasedBalanceCenti, subscriptionCreditsCenti } from "@/lib/billing/credits";
 import { dailyLimit, usedToday } from "@/lib/billing/guards";
 import { listOffers } from "@/lib/billing/offers";
 import { contactEmail } from "@/lib/contact";
-import { legalEnglishUrl, legalLinks, purchasesAllowed, stripeConfigured as stripeReady, termsState } from "@/lib/legal";
+import { legalEnglishUrl, legalLinks, purchasesAllowed, type PurchasesAllowed, stripeConfigured as stripeReady, termsState } from "@/lib/legal";
 import { MiB, storageQuotaBytesFor } from "@/lib/storage-quota";
 import { useUser } from "@/lib/req";
 import { currentUser } from "@/db/context";
@@ -39,7 +42,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     billing: on,
     stripeConfigured,
-    purchase: purchasesAllowed(),
+    purchase: localizedPurchase(purchasesAllowed(), requestLocale(req)),
     legal: legalLinks(),
     legalEnglish: legalEnglishUrl(),
     contact: contactEmail(),
@@ -80,4 +83,9 @@ export async function GET(req: NextRequest) {
       : [],
     offers: on ? await listOffers() : [],
   });
+}
+
+/** La raison d'une vente fermée, dans la langue de la requête (le code reste stable). */
+function localizedPurchase(p: PurchasesAllowed, locale: Locale): PurchasesAllowed {
+  return p.enabled ? p : { ...p, reason: errorText(locale, p.error) };
 }

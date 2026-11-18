@@ -164,7 +164,7 @@ test("le propriétaire voit les signalements de tous les comptes ; une saisie in
 test("route POST /api/questions/report : motif inconnu → 400 au message lisible ; question absente → 404", async () => {
   const { NextRequest } = await import("next/server");
   const { POST } = await import("../app/api/questions/report/route");
-  const post = (body: unknown) => new NextRequest("http://cortex.test/api/questions/report?course=ml", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const post = (body: unknown) => new NextRequest("http://cortex.test/api/questions/report?course=ml", { method: "POST", headers: { "content-type": "application/json", "accept-language": "fr" }, body: JSON.stringify(body) });
   const bad = await POST(post({ examId: 1, kind: "qcm", itemId: 1, reason: "spam" }));
   assert.equal(bad.status, 400);
   assert.match(((await bad.json()) as { error: string }).error, /Motif de signalement inconnu/);

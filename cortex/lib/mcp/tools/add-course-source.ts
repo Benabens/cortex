@@ -1,6 +1,7 @@
 import * as z from "zod/v4";
 import { getUsageLimits } from "@/lib/billing/limits";
 import { SOURCE_CATEGORIES, SourceError, addTextSource, addUrlSource } from "@/lib/course-source";
+import { errorText } from "@/lib/i18n/user-error";
 import { courseArg, courseRef, courseRefOf } from "../schemas";
 import { ToolError, codeForStatus, defineTool } from "../tool";
 
@@ -29,7 +30,7 @@ export default defineTool({
   kind: "write",
   // Ajout pur (jamais d'écrasement : « -2 », « -3 »…) ; lit une URL hors de Cortex.
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  userSummary: "Ajoute un support à un cours (adresse web ou texte collé), gratuitement.",
+  userSummary: "addCourseSource",
   input: z.object({
     course: courseArg,
     url: z.string().url().max(2000).optional().describe("Public https URL of a PDF, web page or text file. Give either url or text."),
@@ -40,7 +41,7 @@ export default defineTool({
   output,
   async run(args, ctx) {
     const given = [args.url, args.text].filter((v) => v !== undefined).length;
-    if (given !== 1) throw new ToolError("invalid_input", "Donne soit « url », soit « text » (exactement l'un des deux).");
+    if (given !== 1) throw new ToolError("invalid_input", "Provide exactly one of “url” or “text”.");
     return ctx.inCourse(args.course, async (c) => {
       let saved;
       try {
@@ -48,7 +49,7 @@ export default defineTool({
           ? await addUrlSource(c.id, { url: args.url, title: args.title, category: args.category })
           : await addTextSource(c.id, { text: args.text!, title: args.title, category: args.category });
       } catch (e) {
-        if (e instanceof SourceError) throw new ToolError(codeForStatus(e.status), e.message);
+        if (e instanceof SourceError) throw new ToolError(codeForStatus(e.status), errorText("en", e), undefined, e.code);
         throw e;
       }
       // Compte gratuit : l'original ne reste pas sur le serveur (lib/originals). Son texte est lu
@@ -63,10 +64,10 @@ export default defineTool({
       };
     });
   },
-  summarize: (o) => `Support ajouté à ${o.course.label} : ${o.source.file} (${o.source.folder}, ${Math.max(1, Math.round(o.source.bytes / 1024))} Ko). ` +
+  summarize: (o) => `Material added to ${o.course.label}: ${o.source.file} (${o.source.folder}, ${Math.max(1, Math.round(o.source.bytes / 1024))} KB). ` +
     (o.source.folder === "refs"
-      ? "Ajout gratuit : le format de cette annale sera relu par prepare_course, dont le coût est annoncé avant tout débit."
-      : "Lance prepare_course une fois tous les supports ajoutés."),
+      ? "The material was added for free. prepare_course will read this past exam’s format and quote its cost before any charge."
+      : "Call prepare_course after adding all materials."),
 });
 
 /**

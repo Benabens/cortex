@@ -305,7 +305,7 @@ test("add_course_source, annale : gratuit, et annonce le coût de la relecture d
   assert.match(next, /prepare_course[^.]*2 credits and one daily generation/);
   assert.match(next, /quoted before anything is charged/);
   assert.match(text(r), /prepare_course/);
-  assert.match(text(r), /annonc/);
+  assert.match(text(r), /quoted/);
   assert.equal(await credits.getBalanceCenti(ALICE), before, "le dépôt ne débite rien");
   const notes = await call(alice, "add_course_source", { course: "MATH-232", text: "Notes fictives.", title: "Notes fictives" });
   assert.doesNotMatch((notes.structuredContent as { next_steps: string }).next_steps, /credits/, "un support qui n'est pas une annale n'annonce rien");
@@ -328,7 +328,7 @@ test("examen blanc sans annale ni format déclaré : refusé AVANT tout devis, a
   assert.equal(r.isError, true);
   assert.equal(errorCode(r), "format_required");
   assert.match(text(r), /set_exam_format/);
-  assert.match(text(r), /QCM[\s\S]*exercices[\s\S]*essai/);
+  assert.match(text(r), /multiple-choice[\s\S]*exercises[\s\S]*essay/);
   assert.equal(await credits.getBalanceCenti(ALICE), before);
 });
 
@@ -351,7 +351,7 @@ test("set_exam_format : déclare puis efface le format d'un cours ; create_cours
   // Le format déclaré passe la porte du format ; c'est le pré-check suivant de l'app (corpus vide) qui refuse ici.
   const gen = await call(owner, "generate_mock_exam", { course: "HUM-285" });
   assert.equal(errorCode(gen), "conflict", text(gen));
-  assert.match(text(gen), /Corpus non ingéré/);
+  assert.match(text(gen), /corpus hasn’t been ingested/i);
   await owner.close();
 });
 
@@ -361,10 +361,10 @@ test("set_exam_format et create_course : réponse unique ou multiple se déclare
   // Pas de nouveau champ de sortie (un client qui a mis le schéma en cache le rejetterait) : le résumé le dit.
   const out = set.structuredContent as { exam_format: Record<string, unknown> & { summary: string } };
   assert.equal("answer_mode" in out.exam_format, false);
-  assert.match(out.exam_format.summary, /réponses multiples/);
+  assert.match(out.exam_format.summary, /multiple correct answers/);
   assert.equal((await call(alice, "set_exam_format", { course: "MATH-232", kind: "qcm", answer_mode: "plusieurs" })).isError, true, "mode inconnu refusé par le schéma");
   const plain = await call(alice, "set_exam_format", { course: "MATH-232", kind: "qcm" });
-  assert.match((plain.structuredContent as { exam_format: { summary: string } }).exam_format.summary, /réponse unique/);
+  assert.match((plain.structuredContent as { exam_format: { summary: string } }).exam_format.summary, /one correct answer/);
   await call(alice, "set_exam_format", { course: "MATH-232", clear: true });
 
   const owner = await mcp((await connectAs(OWNER, { generate: true, write: true })).access);
@@ -401,7 +401,7 @@ test("get_job_status : un examen blanc devenu QCM rend ses questions et leurs op
   assert.equal(plain.exam!.questions[0].verification, "reviewed_by_model", "une résolution à l'aveugle par le modèle n'est pas une preuve");
   assert.match(plain.job.result_link ?? "", /\/mock\//);
   const solved = (await call(owner, "get_job_status", { course: "HUM-285", job_id: jobId, include_solutions: true })).structuredContent as Out;
-  assert.match(solved.exam!.questions[0].solution ?? "", /Réponse : B\b[\s\S]*liberté de choix/);
+  assert.match(solved.exam!.questions[0].solution ?? "", /Answer: B\b[\s\S]*liberté de choix/);
   await owner.close();
 });
 
@@ -429,7 +429,7 @@ test("add_course_source, SSRF : adresse locale, privée, de métadonnées cloud,
     const r = await call(alice, "add_course_source", { course: "MATH-232", url });
     assert.equal(errorCode(r), "invalid_input", `${url} : ${text(r)}`);
     // Refusée par le contrôle d'adresse, pas par un hasard du réseau (rien n'écoute en local, une connexion échouerait aussi).
-    assert.match(text(r), /Adresse refusée/, url);
+    assert.match(text(r), /Address refused/, url);
   }
   assert.deepEqual(await filesOf(courseId), before);
 });
@@ -733,7 +733,7 @@ test("confirmation expirée (10 min) ou falsifiée : rien n'est lancé ni débit
   }
   assert.equal(late.error, undefined, `pas d'erreur opaque : ${JSON.stringify(late).slice(0, 300)}`);
   assert.equal(late.result?.resultType, "input_required");
-  assert.match(JSON.stringify(late.result?.inputRequests), /expir/);
+  assert.match(JSON.stringify(late.result?.inputRequests), /expired/);
   // Signature falsifiée : même traitement, une nouvelle demande et rien de lancé.
   const st = first.result!.requestState!;
   const forged = await modernRaw(access, {

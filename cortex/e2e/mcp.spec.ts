@@ -76,9 +76,10 @@ test("MCP OAuth appelle chaque outil et lie les confirmations au bon compte", as
     results.set(tool.name, result); expect(result.content.length).toBeGreaterThan(0);
     if (result.isError && expectedBusinessErrors.has(tool.name)) {
       const body = JSON.stringify(result.content);
-      expect(body).toMatch(tool.name === "report_question" ? /n'a pas de question/i : /Solde insuffisant/);
+      // Le connecteur répond en anglais (le modèle traduit pour l'étudiant).
+      expect(body).toMatch(tool.name === "report_question" ? /has no question/i : /Insufficient balance/);
       // Jamais de lien d'achat vers l'assistant (règles ChatGPT) : l'app web garde le sien.
-      expect(body).not.toMatch(/Acheter|compte#credits/);
+      expect(body).not.toMatch(/Acheter|\bBuy\b|compte#credits/);
     } else expect(result.isError, `${tool.name}: ${JSON.stringify(result.content)}`).not.toBeTruthy();
   }
   expect(structured(results.get("generate_drill")!)).toBeUndefined();

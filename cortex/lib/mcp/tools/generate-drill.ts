@@ -41,7 +41,7 @@ export default defineTool({
     paidCall("assistance"),
   kind: "generate",
   annotations: SPENDING_HINTS,
-  userSummary: "Génère une question d’entraînement, avec indices et corrigé.",
+  userSummary: "generateDrill",
   input: z.object({
     course: courseArg,
     concept: z.string().min(1).max(FIELD_LIMITS.concept).optional().describe("Concept to practise, e.g. \"diagonalisation\". Defaults to the most serious weak point."),
@@ -51,16 +51,16 @@ export default defineTool({
   async run(args, ctx) {
     return ctx.inCourse(args.course, async (c) => {
       const concept = args.concept?.trim() || (await defaultConcept());
-      if (!concept) throw new ToolError("invalid_input", "Aucun point faible ni concept à revoir sur ce cours : précise le concept à travailler (concept).");
+      if (!concept) throw new ToolError("invalid_input", "This course has no tracked weak point or concept due for review. Specify the concept to practise with “concept”.");
       const base = { course: courseRefOf(c), concept: clip(concept, FIELD_LIMITS.concept), confirmation: null, declined: null, drill: null };
       const decision = await ctx.confirm(
-        { bucket: "assist", kind: "drill", costCenti: creditCost("assist"), summary: `Générer une question d'entraînement (5 indices + corrigé) sur « ${clip(concept, 80)} », ${courseLabel(c)}.` },
+        { bucket: "assist", kind: "drill", costCenti: creditCost("assist"), summary: `Generate one practice question with five hints and a worked solution on “${clip(concept, 80)}” for ${courseLabel(c)}.` },
         { course: c.id, concept },
         args.confirmation_token,
       );
       const pending = pendingResult(decision, base);
       if (pending) return pending;
-      await ctx.progress("Rédaction de la question…");
+      await ctx.progress("Writing the practice question…");
       const d = await runAssist("drill", () => generateDrill(concept));
       return {
         ...base,
@@ -76,6 +76,6 @@ export default defineTool({
   summarize: (o) => {
     if (o.status === "confirmation_required" && o.confirmation) return quoteSummary(o.confirmation);
     if (o.status === "declined" && o.declined) return declinedSummary(o.declined);
-    return "Question d'entraînement prête : propose les indices un par un avant de montrer le corrigé.";
+    return "The practice question is ready. Offer the hints one at a time before showing the worked solution.";
   },
 });

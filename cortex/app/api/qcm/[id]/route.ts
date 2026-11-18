@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { getBlockExam } from "@/lib/blocks";
 import { getQcmExam } from "@/lib/qcm";
 import { useCourseOr404 } from "@/lib/req";
@@ -12,6 +13,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (denied) return denied;
   const { id } = await params;
   const exam = (await getQcmExam(Number(id), false)) ?? (await getBlockExam(Number(id), false));
-  if (!exam) return NextResponse.json({ error: "Mock introuvable." }, { status: 404 });
+  if (!exam) return apiError(req, "mock_not_found", 404);
   return NextResponse.json(exam);
 }

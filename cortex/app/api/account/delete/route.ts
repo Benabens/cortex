@@ -1,3 +1,6 @@
+import { apiError } from "@/lib/i18n/api-error";
+import { requestLocale } from "@/lib/i18n/api-error";
+import { UserFacingError } from "@/lib/i18n/user-error";
 import { NextRequest, NextResponse } from "next/server";
 import { useUser } from "@/lib/req";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
@@ -11,7 +14,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** Mot de confirmation attendu dans le corps (saisi par l'utilisateur). */
-const CONFIRM_WORD = "SUPPRIMER";
+const CONFIRM_WORDS = new Set(["SUPPRIMER", "DELETE"]);
 
 /**
  * POST /api/account/delete — supprime le compte de l'UTILISATEUR AUTHENTIFIÉ.
@@ -29,11 +32,11 @@ const CONFIRM_WORD = "SUPPRIMER";
  */
 export const POST = withBodyLimit(async function POST(req: NextRequest) {
   if (!authEnabled()) {
-    return NextResponse.json({ error: "La suppression de compte requiert l'authentification." }, { status: 403 });
+    return apiError(req, "account_delete_auth_required", 403);
   }
   const headerUser = req.headers.get("x-cortex-user");
   if (!headerUser) {
-    return NextResponse.json({ error: "Non authentifié." }, { status: 401 });
+    return apiError(req, "unauthenticated", 401);
   }
   // CSRF : n'accepter que le même origine (le cookie de session est SameSite ;
   // on refuse en plus toute Origin croisée si l'en-tête est présent).
@@ -46,7 +49,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
       sameOrigin = false;
     }
     if (!sameOrigin) {
-      return NextResponse.json({ error: "Origine non autorisée." }, { status: 403 });
+      return apiError(req, "origin_forbidden", 403);
     }
   }
 
@@ -56,18 +59,13 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const userId = currentUser();
 
   const body = (await readJson(req, {})) as { confirm?: unknown };
-  if (String(body?.confirm ?? "") !== CONFIRM_WORD) {
-    return NextResponse.json(
-      { error: `Confirmation manquante : tape « ${CONFIRM_WORD} » pour confirmer.` },
-      { status: 400 },
-    );
+  if (!CONFIRM_WORDS.has(String(body?.confirm ?? ""))) {
+    const word = requestLocale(req) === "fr" ? "SUPPRIMER" : "DELETE";
+    return apiError(req, { code: "account_delete_confirm_missing", params: { word } }, 400);
   }
 
   if (await isOwnerAccount(userId)) {
-    return NextResponse.json(
-      { error: "Le compte propriétaire de l'instance ne peut pas être supprimé depuis l'application." },
-      { status: 403 },
-    );
+    return apiError(req, "account_delete_owner_refused", 403);
   }
 
   try {
@@ -76,9 +74,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     log("error", "account.delete_route_failed", { message: message.slice(0, 200) });
-    return NextResponse.json(
-      { error: message.startsWith("Suppression refusée :") ? message : `La suppression a échoué. Réessaie ; si le problème persiste, écris à ${contactEmail()}.` },
-      { status: 500 },
-    );
+    if (e instanceof UserFacingError) return apiError(req, e, 500);
+    return apiError(req, { code: "account_delete_failed", params: { contact: contactEmail() } }, 500);
   }
 });

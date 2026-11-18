@@ -64,7 +64,7 @@ after(async () => {
 
 const post = (route: string, body: unknown) =>
   new NextRequest(`http://cortex.test/api/${route}?course=cs-202`, {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    method: "POST", headers: { "content-type": "application/json", "accept-language": "fr" }, body: JSON.stringify(body),
   });
 
 test("drill (app) : un énoncé avec bloc de code dans du ```json est lu, en sortie structurée", async () => {
@@ -87,7 +87,7 @@ test("drill (app) : 3 réponses illisibles → 502 au message clair, appel rembo
   const res = await POST(post("drill", { concept: "groupby" }));
   assert.equal(res.status, 502);
   const out = (await res.json()) as { error: string; code: string };
-  assert.equal(out.code, "BAD_OUTPUT");
+  assert.equal(out.code, "llm_bad_output");
   assert.match(out.error, /illisible/);
   assert.equal(calls, 3, "redemandé avec l'erreur, 3 essais");
   assert.equal(await credits.getBalanceCenti("owner"), before, "notre défaut : rien ne reste débité");
@@ -118,7 +118,7 @@ test("panne du fournisseur (app) : message clair, sans le texte brut du fourniss
   const res = await POST(post("drill", { concept: "groupby" }));
   assert.equal(res.status, 502);
   const out = (await res.json()) as { error: string; code: string };
-  assert.equal(out.code, "UPSTREAM");
+  assert.equal(out.code, "llm_provider_unreachable");
   assert.match(out.error, /surchargé ou injoignable/);
   assert.doesNotMatch(out.error, /boom|HTTP 503/);
 });
@@ -130,9 +130,9 @@ test("connecteur MCP : chaque cause a son message et son code, jamais « unknown
   const credits = await import("../lib/billing/credits");
   const before = await credits.getBalanceCenti("owner");
   const cases: [Error, RegExp][] = [
-    [new LlmError("Le modèle a renvoyé une réponse illisible 3 fois de suite (x).", "BAD_OUTPUT"), /illisible[\s\S]*Rien n'a été débité/],
-    [new LlmError("529 overloaded_error", "OVERLOADED", true), /surchargé ou injoignable/],
-    [new LlmError("Request timed out", "TIMEOUT", true), /trop de temps/],
+    [new LlmError("Le modèle a renvoyé une réponse illisible 3 fois de suite (x).", "BAD_OUTPUT"), /unreadable[\s\S]*Nothing was charged/],
+    [new LlmError("529 overloaded_error", "OVERLOADED", true), /overloaded or unreachable/],
+    [new LlmError("Request timed out", "TIMEOUT", true), /too long to respond/],
   ];
   for (const [err, msg] of cases) {
     await assert.rejects(runAssist("drill", async () => { throw err; }), (e: unknown) => e instanceof ToolError && e.code === "unavailable" && e.reason === (err as InstanceType<typeof LlmError>).code && msg.test(e.message) && !/529|overloaded_error|timed out/.test(e.message));

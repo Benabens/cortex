@@ -68,7 +68,7 @@ test("revue : l'assistance débitée puis refusée par NOTRE garde (fail-closed)
   await ensureCoursesLoaded();
   const { POST } = await import("../app/api/drill/route");
   const credits = await import("../lib/billing/credits");
-  const post = () => new NextRequest("http://cortex.test/api/drill?course=cs-202", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ concept: "inode" }) });
+  const post = () => new NextRequest("http://cortex.test/api/drill?course=cs-202", { method: "POST", headers: { "content-type": "application/json", "accept-language": "fr" }, body: JSON.stringify({ concept: "inode" }) });
   assert.equal(await credits.getBalanceCenti("owner"), 100);
   // 1) comptage en vol impossible (fail-closed) : l'appel ne part pas → remboursé.
   await authRun("ALTER TABLE llm_usage RENAME TO llm_usage_off");

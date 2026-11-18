@@ -18,6 +18,8 @@ import { ReportButton } from "@/components/exam/ReportButton";
 import { BlockExam } from "@/components/exam/BlockExam";
 import type { BlockExamView } from "@/lib/blocks";
 import type { QcmGradeDetail } from "@/lib/qcm";
+import { useTranslations } from "use-intl/react";
+import { useFmt } from "@/lib/i18n/use-fmt";
 
 type Item = {
   id: number;
@@ -51,27 +53,29 @@ type Graded = {
 };
 
 const LETTER = "ABCDEFGH".split("");
-const formatPoints = (value: number) =>
-  new Intl.NumberFormat("fr-CH", { maximumFractionDigits: 2 }).format(value);
-
 export default function MockPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const t = useTranslations("mockPage");
   const { courseId, ready } = useCourse();
   if (!ready || !courseId)
     return (
       <div
         className="skeleton h-48 rounded-xl"
-        aria-label="Chargement du cours"
+        aria-label={t("loadingCourse")}
       />
     );
   return <MockExam key={`${courseId}:${id}`} id={id} courseId={courseId} />;
 }
 
 function MockExam({ id, courseId }: { id: string; courseId: string }) {
+  const t = useTranslations("mockPage");
+  const f = useFmt();
+  const { course } = useCourse();
+  const language = course?.language || undefined; // "" = langue pas encore détectée : pas de lang vide
   const reducedMotion = useReducedMotion();
   const qs = `?course=${encodeURIComponent(courseId ?? "")}`;
   const [retry, setRetry] = useState(0);
@@ -91,7 +95,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
       try {
         const response = await fetch(`/api/qcm/${id}${qs}`);
         const d = await response.json();
-        if (!response.ok && !d.error) d.error = "Chargement impossible.";
+        if (!response.ok && !d.error) d.error = t("loadingFailed");
         if (stop) return;
         if (d.error) setErr(d.error);
         else if (d.kind === "blocks") setBlocks(d);
@@ -100,7 +104,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
         if (!d.error && d.status === "generating")
           timer = setTimeout(load, 15_000);
       } catch {
-        if (!stop) setErr("Chargement impossible.");
+        if (!stop) setErr(t("loadingFailed"));
       }
     };
     load();
@@ -108,7 +112,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
       stop = true;
       if (timer) clearTimeout(timer);
     };
-  }, [id, courseId, qs, retry]);
+  }, [id, courseId, qs, retry, t]);
 
   const toggle = useCallback(
     (it: Item, k: number) => {
@@ -142,7 +146,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
         window.scrollTo({ top: 0, behavior: reducedMotion ? "auto" : "smooth" });
       }
     } catch {
-      setErr("Correction impossible.");
+      setErr(t("correctionFailed"));
     } finally {
       setBusy(false);
     }
@@ -168,7 +172,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
               setRetry((value) => value + 1);
             }}
           >
-            Réessayer
+            {t("retry")}
           </button>
         </div>
       </div>
@@ -183,7 +187,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
   return (
     <ExamFrame
       id={exam.id}
-      description={`${exam.items.length} questions à choix${exam.open.length ? ` et ${exam.open.length} question${exam.open.length > 1 ? "s" : ""} à rédiger` : ""} : réponds, puis corrige-toi.`}
+      description={t("description", { choices: exam.items.length, open: exam.open.length })}
       pdf={exam.pdf}
       solutions={exam.solutions}
       qs={qs}
@@ -228,11 +232,10 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
             </div>
             <div>
               <div className="stat-value">
-                {formatPoints(graded.score)} / {graded.total}
+                {f.number(graded.score)} / {f.number(graded.total)}
               </div>
               <div className="stat-label">
-                Points obtenus · la correction détaille chaque idée fausse
-                ci-dessous
+                {t("scoreHint")}
               </div>
             </div>
           </div>
@@ -259,22 +262,23 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
                   className="text-[12.5px]"
                   style={{ color: "var(--ink-3)" }}
                 >
-                  Q{it.idx + 1} · {it.topic} ·{" "}
+                  Q{it.idx + 1} · <span lang={language}>{it.topic}</span> ·{" "}
                   {/* Un seul accent : il signale le cas qui change la façon de répondre (plusieurs cases). */}
                   <span style={it.type === "mcq" ? { color: "var(--accent-ink)" } : undefined}>
-                    {it.type === "mcq" ? "plusieurs réponses" : "une réponse"}
+                    {it.type === "mcq" ? t("multipleAnswers") : t("singleAnswer")}
                   </span>
                 </span>
                 {det && (
                   <span
                     className={`tag ${det.ok ? "tag-green" : det.points > 0 ? "tag-amber" : "tag-red"}`}
                   >
-                    {formatPoints(det.points)} / 1{det.ok ? " ✓" : ""}
+                    {f.number(det.points)} / 1{det.ok ? " ✓" : ""}
                   </span>
                 )}
               </div>
               <div
                 className="text-[14.5px] mb-3"
+                lang={language}
                 style={{ color: "var(--ink)", whiteSpace: "pre-wrap" }}
               >
                 {it.stem}
@@ -284,8 +288,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
                   className="mb-3 text-[12px]"
                   style={{ color: "var(--ink-3)" }}
                 >
-                  Plusieurs réponses possibles. Chaque mauvaise case retire des
-                  points, sans score négatif.
+                  {t("multipleHint")}
                 </p>
               )}
               <div className="flex flex-col gap-1.5">
@@ -346,6 +349,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
                         {LETTER[k]}
                       </span>
                       <span
+                        lang={language}
                         style={{ fontSize: 13.5, color: "var(--ink)", flex: 1 }}
                       >
                         {o}
@@ -368,7 +372,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
                               maxWidth: 220,
                             }}
                           >
-                            ⚠ {det.misconceptions[k]}
+                            ⚠ <span lang={language}>{det.misconceptions[k]}</span>
                           </span>
                         ) : (
                           <span style={{ color: "var(--red-ink)" }}>✗</span>
@@ -382,8 +386,8 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
                   className="mt-3 text-[12.5px]"
                   style={{ color: "var(--ink-2)", whiteSpace: "pre-line" }}
                 >
-                  <strong style={{ color: "var(--ink)" }}>Pourquoi :</strong>{" "}
-                  {det.explanation}
+                  <strong style={{ color: "var(--ink)" }}>{t("why")}</strong>{" "}
+                  <span lang={language}>{det.explanation}</span>
                 </p>
               )}
               <ReportButton
@@ -399,15 +403,14 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
 
       {exam.status === "generating" && (
         <p className="mt-7 text-[13px]" style={{ color: "var(--ink-3)" }}>
-          Questions ouvertes en cours de génération : elles apparaîtront ici (la
-          page se met à jour toute seule).
+          {t("openGenerating")}
         </p>
       )}
       {exam.open.length > 0 && (
         <div className="mt-7">
           <div className="section-head">
             <h2 className="section-title">
-              Partie ouverte : {exam.open.length} question{exam.open.length > 1 ? "s" : ""} à rédiger
+              {t("openPart", { count: exam.open.length })}
             </h2>
           </div>
           <div className="flex flex-col gap-4">
@@ -419,13 +422,13 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
                     className="text-[12.5px] mb-2"
                     style={{ color: "var(--ink-3)" }}
                   >
-                    Question ouverte {i + 1} · {o.concept}
+                    {t("openQuestion", { number: i + 1 })} · <span lang={language}>{o.concept}</span>
                   </div>
-                  <SafeHtml
-                    className="prose-exam text-[13.5px]"
-                    style={{ color: "var(--ink)" }}
-                    html={o.statement}
-                  />
+                  <div lang={language}><SafeHtml
+                      className="prose-exam text-[13.5px]"
+                      style={{ color: "var(--ink)" }}
+                      html={o.statement}
+                    /></div>
                   <OpenResponse
                     key={`${courseId}:${id}:${o.id}`}
                     questionId={o.id}
@@ -433,6 +436,7 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
                     courseId={courseId ?? ""}
                     graded={!!graded}
                     solution={sol?.solution ?? null}
+                    language={language}
                   />
                   <ReportButton
                     courseId={courseId ?? ""}
@@ -461,20 +465,19 @@ function MockExam({ id, courseId }: { id: string; courseId: string }) {
                 .length === 0
             }
           >
-            {busy ? "Correction…" : "Corriger mon examen"}
+            {busy ? t("correcting") : t("correct")}
           </button>
           <span className="text-[12.5px]" style={{ color: "var(--ink-3)" }}>
-            {
-              exam.items.filter((item) => (answers[item.idx]?.length ?? 0) > 0)
-                .length
-            }
-            /{exam.items.length} répondues
+            {t("answered", {
+              answered: exam.items.filter((item) => (answers[item.idx]?.length ?? 0) > 0).length,
+              total: exam.items.length,
+            })}
           </span>
         </div>
       ) : (
         <div id="exam-submit" className="mt-6">
           <a href={`/examens${qs}`} className="btn btn-ghost">
-            ← retour aux examens
+            {t("back")}
           </a>
         </div>
       )}

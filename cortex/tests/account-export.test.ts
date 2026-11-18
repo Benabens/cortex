@@ -163,7 +163,7 @@ test("I6 : EXPORTS_PER_DAY exports par compte et par jour, puis 429 « demain »
   try {
     const { GET } = await import("../app/api/account/export/route");
     const exportAs = async (user: string) => {
-      const r = await GET(new NextRequest("http://cortex.test/api/account/export", { headers: { "x-cortex-user": user } }));
+      const r = await GET(new NextRequest("http://cortex.test/api/account/export", { headers: { "x-cortex-user": user, "accept-language": "fr" } }));
       if (r.status === 200) { await r.arrayBuffer(); await new Promise((ok) => setTimeout(ok, 300)); }
       return r;
     };

@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { billingEnabled, getSubscription } from "@/lib/billing/credits";
 import { isPlanKey, PLANS } from "@/lib/billing/stripe-events";
 import { secondSubscriptionRefusal, standingOf } from "@/lib/billing/subscription-windows";
@@ -25,25 +26,23 @@ export const dynamic = "force-dynamic";
 export const POST = withBodyLimit(async function POST(req: NextRequest) {
   useUser(req);
   if (!billingEnabled()) {
-    return NextResponse.json({ error: "Facturation désactivée (BILLING_ENABLED)." }, { status: 501 });
+    return apiError(req, "billing_disabled", 501);
   }
   const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) return NextResponse.json({ error: "STRIPE_SECRET_KEY manquante." }, { status: 501 });
-  if (!publicOrigin()) return NextResponse.json({ error: "AUTH_URL manquante : impossible de construire les URLs de retour." }, { status: 500 });
+  if (!key) return apiError(req, "stripe_secret_key_missing", 501);
+  if (!publicOrigin()) return apiError(req, "auth_url_missing_checkout", 500);
   // On n'encaisse pas sans documents légaux publiés ni sans CGV acceptées (version courante).
   const gate = purchasesAllowed();
-  if (!gate.enabled) return NextResponse.json({ error: gate.reason }, { status: 503 });
+  if (!gate.enabled) return apiError(req, gate.error, 503);
   const terms = await termsState(currentUser());
   if (!terms.accepted) {
-    return NextResponse.json({ error: "Accepte d'abord les conditions générales de vente (version courante) pour acheter." }, { status: 403 });
+    return apiError(req, "terms_acceptance_required", 403);
   }
   const { plan, consent } = (await readJson(req, {})) as { plan?: unknown; consent?: unknown };
-  if (!isPlanKey(plan)) return NextResponse.json({ error: `Offre inconnue : « ${String(plan ?? "")} ».` }, { status: 400 });
+  if (!isPlanKey(plan)) return apiError(req, { code: "plan_unknown", params: { plan: String(plan ?? "") } }, 400);
   if (consent !== true) {
     const kind = consentForPlan(plan).type;
-    return NextResponse.json({ error: kind === "pack"
-      ? "Confirme l’accès immédiat aux crédits et la perte du droit de rétractation dès leur première utilisation."
-      : "Confirme le démarrage immédiat de l’abonnement et le paiement proportionnel du service fourni en cas de rétractation." }, { status: 400 });
+    return apiError(req, kind === "pack" ? "pack_consent_required" : "subscription_consent_required", 400);
   }
   const spec = PLANS[plan];
 
@@ -57,19 +56,19 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const userId = currentUser();
   if (spec.mode === "subscription") {
     const refusal = secondSubscriptionRefusal(standingOf(await getSubscription(userId), nowStr()));
-    if (refusal) return NextResponse.json({ error: refusal }, { status: 409 });
+    if (refusal) return apiError(req, refusal, 409);
   }
 
   const stripe = stripeClient(key);
   const prices = await stripe.prices.list({ lookup_keys: [spec.lookupKey], active: true, limit: 1 });
   const price = prices.data[0];
   if (!price) {
-    return NextResponse.json({ error: `Prix introuvable pour « ${spec.lookupKey} » (crée-le dans Stripe).` }, { status: 400 });
+    return apiError(req, { code: "stripe_price_not_found", params: { lookupKey: spec.lookupKey } }, 400);
   }
   const email = (await authGet<{ email: string | null }>(`SELECT email FROM users WHERE id = ?`, userId).catch(() => undefined))?.email ?? null;
   // Client Stripe unique, un seul Checkout d'abonnement ouvert, état réel chez Stripe (lib/billing/checkout-session).
   const session = await openCheckout({ stripe, userId, plan, priceId: price.id, email });
-  if (!session.ok) return NextResponse.json({ error: session.error }, { status: session.status });
+  if (!session.ok) return apiError(req, session, session.status);
   try {
     await recordPurchaseConsent({ userId, plan, termsVersion: terms.version, stripeSessionId: session.sessionId });
   } catch (error) {

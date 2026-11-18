@@ -4,30 +4,31 @@ import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { Wordmark } from "@/components/shell/Logo";
 import { LocaleSwitcher } from "@/components/i18n/LocaleSwitcher";
+import { useLocale, useTranslations } from "use-intl/react";
 
 /** Messages clairs par code d'erreur NextAuth (cause + quoi faire). */
-function errorMessage(code: string): string {
+function errorMessage(code: string, t: ReturnType<typeof useTranslations<"login">>): string {
   switch (code) {
     case "AccessDenied":
-      return "Accès refusé. Ce compte n’est pas autorisé à se connecter pour l’instant.";
+      return t("errorAccessDenied");
     case "Verification":
-      return "Ce lien de connexion a expiré ou a déjà été utilisé. Reconnecte-toi pour en recevoir un nouveau.";
+      return t("errorVerification");
     case "OAuthAccountNotLinked":
-      return "Cette adresse est déjà liée à une autre méthode de connexion. Utilise celle d’origine.";
+      return t("errorOAuthAccountNotLinked");
     case "CredentialsSignin":
-      return "E-mail ou mot de passe incorrect.";
+      return t("errorCredentialsSignin");
     case "rate_limited":
-      return "Trop d’essais. Réessaie dans 15 minutes.";
+      return t("errorRateLimited");
     case "EmailWait":
-      return "Un lien vient de partir vers cette adresse. Regarde ta boîte (et les spams) ; tu pourras en demander un autre dans une minute.";
+      return t("errorEmailWait");
     case "EmailDay":
-      return "Cette adresse a reçu tous ses liens du jour. Utilise le dernier reçu, ou réessaie demain.";
+      return t("errorEmailDay");
     case "EmailIp":
-      return "Trop de liens demandés depuis ce réseau. Réessaie dans une heure.";
+      return t("errorEmailIp");
     case "Configuration":
-      return "La connexion est momentanément indisponible. Réessaie dans un instant.";
+      return t("errorConfiguration");
     default:
-      return "La connexion a échoué. Réessaie ; si le problème persiste, reviens plus tard.";
+      return t("errorDefault");
   }
 }
 
@@ -65,14 +66,17 @@ export function LoginCard({
   legal?: { terms: string | null; privacy: string | null; refund?: string | null; notice?: string | null };
   /** Origine de la vitrine, lue côté serveur à la requête (pas de variable figée au build). */
   landing: string;
-  /** Version anglaise des documents légaux, sur la vitrine. */
+  /** Traduction anglaise des documents légaux sur la vitrine (elle renvoie aux autres documents en anglais). */
   english: string;
   /** Adresse de contact (lib/contact). */
   contact: string;
 }) {
-  const termsHref = legal?.terms ?? `${landing}/terms`;
-  const privacyHref = legal?.privacy ?? `${landing}/privacy`;
-  const noticeHref = legal?.notice ?? `${landing}/mentions-legales`;
+  const t = useTranslations("login");
+  // En anglais, les liens légaux mènent à leur traduction ; en français, aux documents qui font foi.
+  const inEnglish = useLocale() === "en";
+  const termsHref = inEnglish ? english : legal?.terms ?? `${landing}/terms`;
+  const privacyHref = inEnglish ? english : legal?.privacy ?? `${landing}/privacy`;
+  const noticeHref = inEnglish ? english : legal?.notice ?? `${landing}/mentions-legales`;
   const [busy, setBusy] = useState<null | "google" | "email" | "review">(null);
   const [addr, setAddr] = useState("");
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -89,10 +93,10 @@ export function LoginCard({
         </div>
 
         <h1 className="mt-8 text-center text-[1.8rem] font-semibold tracking-tight">
-          Connexion à Cortex
+          {t("title")}
         </h1>
         <p className="mt-2 text-center text-[0.88rem] leading-relaxed" style={{ color: "var(--bare-muted)" }}>
-          Révise ce qui tombe vraiment.
+          {t("tagline")}
         </p>
 
         {error && (
@@ -101,7 +105,7 @@ export function LoginCard({
             className="mt-6 rounded-lg px-4 py-3 text-[0.83rem] leading-relaxed"
             style={{ background: "var(--bare-error-bg)", border: "1px solid var(--bare-error-line)", color: "var(--error-ink)" }}
           >
-            {errorMessage(error)}
+            {errorMessage(error, t)}
           </div>
         )}
 
@@ -120,7 +124,7 @@ export function LoginCard({
               }}
               className="inline-flex h-12 w-full items-center justify-center rounded-full border border-dashed text-[0.92rem] font-semibold"
             >
-              Connexion persona E2E
+              {t("e2eLogin")}
             </button>
           )}
           {google && (
@@ -136,7 +140,7 @@ export function LoginCard({
               className="inline-flex h-12 w-full items-center justify-center gap-3 rounded-full border border-[var(--bare-cta-line)] bg-[var(--bare-cta)] text-[0.92rem] font-semibold text-[var(--bare-cta-ink)] transition-[background-color,opacity] duration-150 enabled:hover:bg-[var(--bare-cta-hover)] enabled:active:bg-[var(--bare-cta-active)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               <GoogleGlyph />
-              {busy === "google" ? "Redirection…" : "Continuer avec Google"}
+              {busy === "google" ? t("redirecting") : t("continueGoogle")}
             </button>
           )}
 
@@ -152,16 +156,20 @@ export function LoginCard({
             >
               <div className="my-1 flex items-center gap-3 text-[0.72rem]" style={{ color: "var(--bare-faint)" }}>
                 <span className="h-px flex-1" style={{ background: "var(--bare-line)" }} />
-                ou
+                {t("or")}
                 <span className="h-px flex-1" style={{ background: "var(--bare-line)" }} />
               </div>
+              <label htmlFor="login-email" className="text-[0.75rem] font-medium" style={{ color: "var(--bare-muted)" }}>
+                {t("emailLabel")}
+              </label>
               <input
+                id="login-email"
                 type="email"
                 required
                 autoComplete="email"
                 value={addr}
                 onChange={(e) => setAddr(e.target.value)}
-                placeholder="ton@email.com"
+                placeholder={t("emailPlaceholder")}
                 className="h-12 w-full rounded-lg border px-3.5 text-[0.9rem] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hi"
                 style={{ background: "var(--bare-surface)", color: "var(--bare-ink)", borderColor: "var(--bare-field-line)" }}
               />
@@ -172,7 +180,7 @@ export function LoginCard({
                 className="inline-flex h-12 w-full items-center justify-center rounded-full border text-[0.92rem] font-medium transition-[background,opacity] duration-150 disabled:opacity-60"
                 style={{ background: "var(--bare-surface)", color: "var(--bare-ink)", borderColor: "var(--bare-field-line)" }}
               >
-                {busy === "email" ? "Envoi…" : "Recevoir un lien de connexion"}
+                {busy === "email" ? t("sending") : t("sendLink")}
               </button>
             </form>
           )}
@@ -197,13 +205,13 @@ export function LoginCard({
                   window.location.assign(res.url ?? callbackUrl);
                   return;
                 }
-                setReviewError(errorMessage(res?.code === "rate_limited" ? "rate_limited" : "CredentialsSignin"));
+                setReviewError(errorMessage(res?.code === "rate_limited" ? "rate_limited" : "CredentialsSignin", t));
                 setBusy(null);
               }}
               className="mt-1 flex flex-col gap-2"
             >
               <label className="text-[0.75rem] font-medium" style={{ color: "var(--bare-muted)" }} htmlFor="review-email">
-                E-mail
+                {t("emailLabel")}
               </label>
               <input
                 id="review-email"
@@ -217,7 +225,7 @@ export function LoginCard({
                 style={{ background: "var(--bare-surface)", color: "var(--bare-ink)", borderColor: "var(--bare-field-line)" }}
               />
               <label className="mt-1 text-[0.75rem] font-medium" style={{ color: "var(--bare-muted)" }} htmlFor="review-password">
-                Mot de passe
+                {t("passwordLabel")}
               </label>
               <input
                 id="review-password"
@@ -239,38 +247,30 @@ export function LoginCard({
                 className="mt-1 inline-flex h-12 w-full items-center justify-center rounded-full border text-[0.92rem] font-medium transition-[background,opacity] duration-150 disabled:opacity-60"
                 style={{ background: "var(--bare-surface)", color: "var(--bare-ink)", borderColor: "var(--bare-field-line)" }}
               >
-                {busy === "review" ? "Connexion…" : "Se connecter"}
+                {busy === "review" ? t("signingIn") : t("signIn")}
               </button>
             </form>
           )}
 
           {!google && !email && !e2eTest && !review && (
             <p className="text-center text-[0.83rem]" style={{ color: "var(--bare-muted)" }}>
-              Aucune méthode de connexion n’est configurée. Réessaie plus tard.
+              {t("noMethod")}
             </p>
           )}
         </div>
 
         <p className="mt-8 text-center text-[0.75rem] leading-relaxed" style={{ color: "var(--bare-faint)" }}>
-          En continuant, tu acceptes nos{" "}
-          <a href={termsHref} className="underline underline-offset-2" style={{ color: "var(--bare-muted)" }}>
-            conditions
-          </a>{" "}
-          et notre{" "}
-          <a href={privacyHref} className="underline underline-offset-2" style={{ color: "var(--bare-muted)" }}>
-            politique de confidentialité
-          </a>
-          .
+          {t.rich("legal", {
+            terms: (chunks) => <a href={termsHref} className="underline underline-offset-2" style={{ color: "var(--bare-muted)" }}>{chunks}</a>,
+            privacy: (chunks) => <a href={privacyHref} className="underline underline-offset-2" style={{ color: "var(--bare-muted)" }}>{chunks}</a>,
+          })}
         </p>
         <p className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-1 text-center text-[0.75rem]">
           <a href={noticeHref} className="underline underline-offset-2" style={{ color: "var(--bare-muted)" }}>
-            Mentions légales
+            {t("legalNotice")}
           </a>
           <a href={`mailto:${contact}`} className="underline underline-offset-2" style={{ color: "var(--bare-muted)" }}>
-            Contact
-          </a>
-          <a href={english} hrefLang="en" lang="en" className="underline underline-offset-2" style={{ color: "var(--bare-muted)" }}>
-            English version
+            {t("contact")}
           </a>
           {/* Discret : seuls les relecteurs des annuaires de connecteurs en ont l'usage. */}
           {review && !reviewOpen && (
@@ -280,7 +280,7 @@ export function LoginCard({
               className="underline underline-offset-2"
               style={{ color: "var(--bare-muted)" }}
             >
-              Accès relecteur
+              {t("reviewerAccess")}
             </button>
           )}
         </p>

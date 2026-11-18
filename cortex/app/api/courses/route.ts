@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { CourseCreationLimitError, insertCourse } from "@/db/courses-store";
 import { buildCourseRow, InvalidCourseError } from "@/lib/course-create";
@@ -35,20 +36,20 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   const u = await user(req);
   const body = await readJson(req, null);
   if (!body || typeof body !== "object") {
-    return NextResponse.json({ error: "Corps JSON attendu." }, { status: 400 });
+    return apiError(req, "json_body_expected", 400);
   }
   let row;
   try {
     row = buildCourseRow(body, u);
   } catch (e) {
-    if (e instanceof InvalidCourseError) return NextResponse.json({ error: e.message }, { status: 400 });
+    if (e instanceof InvalidCourseError) return apiError(req, e, e.status);
     throw e;
   }
   try {
     await insertCourse(row);
   } catch (e) {
     if (e instanceof CourseCreationLimitError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return apiError(req, e, e.status);
     }
     throw e;
   }

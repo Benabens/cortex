@@ -22,10 +22,39 @@ function flatten(tree: Tree, prefix = ""): Map<string, string> {
   return out;
 }
 
-/** Noms des arguments ICU d'un message, y compris ceux d'un pluriel ou d'un select. */
+/**
+ * Noms des arguments ICU d'un message, y compris ceux d'un pluriel ou d'un select. Lecture par
+ * accolades : le corps d'une branche (`one {…}`, `name {nom}`) est du texte, pas un argument.
+ */
 function icuArgs(msg: string): string[] {
   const names = new Set<string>();
-  for (const m of msg.matchAll(/\{\s*([A-Za-z_][\w]*)\s*(?:,\s*(?:plural|select|selectordinal|number|date|time)\b)?/g)) names.add(m[1]);
+  let i = 0;
+  const ws = () => { while (/\s/.test(msg[i] ?? "")) i++; };
+  const word = () => { const m = /^[=\w]+/.exec(msg.slice(i)); i += m ? m[0].length : 0; return m?.[0] ?? ""; };
+  // Texte jusqu'à l'accolade fermante de ce niveau (ou la fin), arguments compris.
+  const text = (): void => {
+    while (i < msg.length && msg[i] !== "}") {
+      if (msg[i] === "{") { i++; arg(); } else i++;
+    }
+  };
+  const arg = (): void => {
+    ws(); names.add(word()); ws();
+    if (msg[i] === ",") {
+      i++; ws(); const type = word(); ws();
+      if (["plural", "select", "selectordinal"].includes(type) && msg[i] === ",") {
+        i++;
+        for (;;) {
+          ws();
+          if (msg[i] !== "}" && word() === "offset" && msg[i] === ":") { i++; ws(); word(); continue; }
+          ws();
+          if (msg[i] !== "{") break;
+          i++; text(); i++; // corps de la branche
+        }
+      } else while (i < msg.length && msg[i] !== "}") i++; // {n, number, …}
+    }
+    i++; // accolade fermante de l'argument
+  };
+  text();
   // Balises riches <b>…</b> : même jeu des deux côtés.
   for (const m of msg.matchAll(/<([A-Za-z][\w]*)>/g)) names.add(`<${m[1]}>`);
   return [...names].sort();
@@ -39,6 +68,11 @@ test("mêmes clés en français et en anglais", () => {
   const onlyEn = [...EN.keys()].filter((k) => !FR.has(k));
   assert.deepEqual(onlyFr, [], "clés sans traduction anglaise");
   assert.deepEqual(onlyEn, [], "clés anglaises sans original français");
+});
+
+test("lecture des arguments : corps de branche ignoré, argument imbriqué vu", () => {
+  assert.deepEqual(icuArgs("{field, select, name {nom} code {code} other {{field}}}"), ["field"]);
+  assert.deepEqual(icuArgs("{count, plural, offset:1 =0 {aucun} one {# de {name}} other {#}} <b>{n, number}</b>"), ["<b>", "count", "n", "name"]);
 });
 
 test("mêmes arguments ICU des deux côtés, aucun message vide", () => {

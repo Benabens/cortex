@@ -2,12 +2,14 @@ import Link from "next/link";
 import { Wordmark } from "./Logo";
 import { CourseSelector } from "./CourseSelector";
 import { NavList } from "./NavList";
+import { useTranslations } from "use-intl/react";
 
 /**
  * Rail gauche. Volontairement SANS footer profil/streak : le back ne fournit
  * ni profil ni série de jours — on n'affiche que ce qui est nourri (honnêteté).
  */
 export function Sidebar() {
+  const t = useTranslations("shell");
   return (
     <aside
       className="fixed inset-y-0 left-0 z-30 hidden w-rail flex-col border-r border-line lg:flex"
@@ -29,7 +31,7 @@ export function Sidebar() {
           href="/cours"
           className="mt-1.5 inline-flex min-h-9 items-center rounded px-2 text-[0.75rem] text-ink-3 transition-colors hover:text-accent-hi focus-visible:text-accent-hi"
         >
-          Gérer mes cours
+          {t("manageCourses")}
         </Link>
       </div>
 

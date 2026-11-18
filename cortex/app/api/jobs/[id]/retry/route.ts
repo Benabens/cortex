@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { jobSpec, launchGate } from "@/lib/billing/limits";
 import { ReservationRefused, costForJob, getJob, retryJob } from "@/lib/jobs";
 import { requireCourse } from "@/lib/req";
@@ -16,15 +17,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const old = await getJob(Number(id));
   if (old && old.type !== "ingest") {
     const gate = await launchGate(jobSpec(old.type, costForJob(old.type, old.target)));
-    if (gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
+    if (gate) return apiError(req, gate, gate.status);
   }
   let job;
   try {
     job = await retryJob(Number(id), course);
   } catch (e) {
-    if (e instanceof ReservationRefused) return NextResponse.json({ error: e.message }, { status: e.status });
+    if (e instanceof ReservationRefused) return apiError(req, e, e.status);
     throw e;
   }
-  if (!job) return NextResponse.json({ error: "job introuvable" }, { status: 404 });
+  if (!job) return apiError(req, "job_not_found", 404);
   return NextResponse.json({ ok: true, jobId: job.id, job });
 }
