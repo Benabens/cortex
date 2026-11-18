@@ -105,12 +105,12 @@ test("MENSUEL renouvelé sans paiement : le reliquat du mois précédent ne rede
   await withClock("2026-09-28T10:00:00Z", async (at) => {
     await handleStripeEvent(invoicePaid("m1", "munpaid", "cortex_pro_monthly", "2026-09-28T10:00:00Z", "2026-10-28T10:00:00Z"));
     assert.equal((await inMl("munpaid", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:munpaid:ml:1" }))).ok, true);
-    assert.equal(await credits.subscriptionCreditsCenti("munpaid"), 1500, "20 − 5");
+    assert.equal(await credits.subscriptionCreditsCenti("munpaid"), 1400, "20 − 6");
 
     at("2026-10-28T10:00:00Z");
     await handleStripeEvent(subUpdated("m1_pastdue", "munpaid", "past_due", "2026-10-28T11:05:00Z", { start: "2026-10-28T10:00:00Z", end: "2026-11-28T10:00:00Z" }));
     at("2026-10-28T11:06:00Z");
-    assert.equal(await credits.subscriptionCreditsCenti("munpaid"), 0, "les 15 crédits restants du mois payé ne sont pas reportés sur un mois impayé");
+    assert.equal(await credits.subscriptionCreditsCenti("munpaid"), 0, "les 14 crédits restants du mois payé ne sont pas reportés sur un mois impayé");
     assert.equal(await credits.getBalanceCenti("munpaid"), 0);
   });
 });
@@ -134,7 +134,7 @@ test("renouvellement ANNONCÉ mais pas encore encaissé (statut encore active) :
       const paidAt = new Date(new Date(end).getTime() + 3600_000).toISOString();
       at(paidAt);
       await handleStripeEvent(invoicePaid(`${user}_2`, user, plan, end, next, paidAt));
-      assert.equal(await credits.subscriptionCreditsCenti(user), 2000, `${user} : remis à 20, le reliquat de 15 est perdu`);
+      assert.equal(await credits.subscriptionCreditsCenti(user), 2000, `${user} : remis à 20, le reliquat de 14 est perdu`);
     }
   });
 });
@@ -175,7 +175,7 @@ test("abonnement plus en règle PENDANT une période payée : aucun crédit ni f
       at("2026-04-15T10:00:01Z");
       assert.equal(await credits.subscriptionCreditsCenti("ystanding"), 0, `${status} : pas de fenêtre`);
       assert.equal((await inMl("ystanding", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: `job:ystanding:ml:${status}` }))).ok, false);
-      assert.equal((await credits.getSubscription("ystanding"))?.remaining, 1500, `${status} : la réservation refusée n'a rien rechargé`);
+      assert.equal((await credits.getSubscription("ystanding"))?.remaining, 1400, `${status} : la réservation refusée n'a rien rechargé`);
     }
     await handleStripeEvent(subUpdated("ys_back", "ystanding", "active", "2026-04-15T11:00:00Z"));
     at("2026-04-15T11:00:01Z");
@@ -223,7 +223,7 @@ test("crédits achetés et crédits offerts : acquis, quel que soit l'état de l
     assert.equal(await credits.purchasedBalanceCenti("packs"), 1200, "2 offerts + 10 achetés : intacts");
     const r = await inMl("packs", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:packs:ml:1" }));
     assert.equal(r.ok, true, "une génération reste payable avec les crédits achetés");
-    assert.equal(await credits.purchasedBalanceCenti("packs"), 700);
+    assert.equal(await credits.purchasedBalanceCenti("packs"), 600);
   });
 });
 
@@ -250,7 +250,7 @@ test("facture remboursée pendant un impayé : seuls les crédits réellement co
       at("2026-10-28T11:05:00Z");
       await handleStripeEvent(subUpdated(`${user}_pastdue`, user, "past_due", "2026-10-28T11:05:00Z", { start: "2026-10-28T10:00:00Z", end: "2026-11-28T10:00:00Z" }));
       await handleStripeEvent(refunded(`${user}_1`, user, "2026-10-29T09:00:00Z"));
-      const consumed = exams * 500;
+      const consumed = exams * 600;
       assert.equal(await credits.purchasedBalanceCenti(user), 1000 - consumed, `${user} : dette = ${consumed} centièmes consommés, pas les 2000 du mois`);
       assert.equal(await credits.subscriptionCreditsCenti(user), 0);
     }
@@ -300,7 +300,7 @@ test("facture ANCIENNE payée après une plus récente : la période payée ne r
     await handleStripeEvent(invoicePaid("old2", "catchup", "cortex_pro_monthly", "2026-10-28T10:00:00Z", "2026-11-28T10:00:00Z", "2026-11-28T12:00:05Z"));
     const s = await credits.getSubscription("catchup");
     assert.equal(s?.period_end, "2026-12-28 10:00:00", "la période reste celle de la facture la plus récente");
-    assert.equal(await credits.subscriptionCreditsCenti("catchup"), 1500, "ni remise à 20, ni perte du mois en cours");
+    assert.equal(await credits.subscriptionCreditsCenti("catchup"), 1400, "ni remise à 20, ni perte du mois en cours");
     assert.ok(await authGet(`SELECT invoice_id FROM stripe_invoices WHERE invoice_id = ?`, "in_old2"), "la facture ancienne reste enregistrée (reprise possible en cas de remboursement)");
   });
 });

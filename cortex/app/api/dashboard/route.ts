@@ -2,6 +2,8 @@ import { currentCourse } from "@/db/client";
 import { q } from "@/db/q";
 import { getCourse } from "@/lib/courses";
 import { listExams } from "@/lib/exam";
+import { requestLocale } from "@/lib/i18n/api-error";
+import { localizeJob } from "@/lib/i18n/job-text";
 import { activeJob } from "@/lib/jobs";
 import { coverageNext, nextTopic, programOverview } from "@/lib/program";
 import { toNextUp, upNext } from "@/lib/next-up";
@@ -75,6 +77,6 @@ export async function GET(req: NextRequest) {
     exams: exams.slice(0, 4),
     weaknesses: { count: weaknessCount, top: topWeaknesses },
     countdown,
-    job: job ? { id: job.id, type: job.type, status: job.status, progress: job.progress, currentStep: job.currentStep, resultPath: job.resultPath } : null,
+    job: job ? { id: job.id, type: job.type, status: job.status, progress: job.progress, currentStep: localizeJob(job, null, requestLocale(req)).currentStep, resultPath: job.resultPath } : null,
   });
 }
