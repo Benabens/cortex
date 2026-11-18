@@ -52,7 +52,8 @@ function sourceFiles(dir: string): string[] {
 
 test("chaque code d'erreur du dictionnaire est renvoyé quelque part (pas de code mort ni mal recopié)", () => {
   const fr = JSON.parse(fs.readFileSync(path.join(ROOT, "messages/fr.json"), "utf8")) as { errors: Record<string, string> };
-  const src = ["app", "lib", "db", "components"].flatMap(sourceFiles).concat("proxy.ts").map((f) => fs.readFileSync(path.join(ROOT, f), "utf8")).join("\n");
+  // scripts/ : le worker (run-job.ts) range le code d'échec d'un job, relu par localizeJob.
+  const src = ["app", "lib", "db", "components", "scripts"].flatMap(sourceFiles).concat("proxy.ts").map((f) => fs.readFileSync(path.join(ROOT, f), "utf8")).join("\n");
   const unused = Object.keys(fr.errors).filter((k) => !new RegExp(`["'\`]${k}["'\`]`).test(src));
   assert.deepEqual(unused, []);
 });
