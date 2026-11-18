@@ -26,6 +26,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { storage } from "@/lib/storage";
+import { untypesetChars } from "@/lib/tex-escape";
 import { askedFacts, attributedFact, courseFacts, factDuplicates, planFacts, type CourseFact } from "@/lib/qcm-facts";
 import { JUSTIFICATION_SCHEMA, assembleExplanation, distractorIndices, fillRationale, invalidateRationale, permuteRationale, rationaleCheck, rationaleFromModel, storedExplanation, structuredExplanationsEnabled, toStoredRationale, type QcmRationale } from "@/lib/qcm-rationale";
 import { qcmCheckpointKey, readQcmCheckpoint, withFigurePresent, type QcmBatchState, type QcmCheckpoint, type QcmCheckpointStore, type QcmMissingState, type QcmPlan, type QcmReserveState } from "@/lib/qcm-checkpoint";
@@ -1028,6 +1029,13 @@ export async function generateQcmBatch(
     const expected = expectedOptionCount(type, options);
     if (!optionCountFits(raw.options.length, expected)) {
       step(`QCM à ${raw.options.length} options écarté (il en faut ${expected}) : son sujet est comblé`, 30);
+      continue;
+    }
+    // Un caractère que le PDF ne sait pas écrire y deviendrait une espace (« A ⊆ B » → « A   B »),
+    // dans l'énoncé, une option ou le corrigé (explication, idées fausses).
+    const unprintable = untypesetChars(raw.stem, raw.options, raw.explanation, raw.misconceptions, (raw as { justification?: unknown }).justification);
+    if (unprintable.length) {
+      step(`QCM écarté : ${unprintable.join(" ")} ne s'imprime pas dans le PDF, son sujet est comblé`, 30);
       continue;
     }
     const imposed = molds[i] ?? null;
