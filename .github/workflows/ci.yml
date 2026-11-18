@@ -314,7 +314,8 @@ jobs:
             set -e
             mkdir -p /tmp/u && cd /tmp/u
             cp /app/cortex/latex/epfl-logo.png . 2>/dev/null || true
-            cd /app/cortex/latex && cat preamble.tex figures.tex generic.tex unicode-fonts.tex cjk-fonts.tex > /tmp/u/doc.tex && cd /tmp/u
+            L=/app/cortex/latex
+            cat $L/preamble.tex $L/figures.tex $L/generic.tex $L/unicode-fonts.tex $L/cjk-fonts.tex > doc.tex
             printf "\n\\\\newcommand{\\\\FOOTDATE}{Smoke}\n\\\\begin{document}\nКакая функция? \\\\textbf{Ποια συνάρτηση;} 哪个函数\n\\\\end{document}\n" >> doc.tex
             /usr/local/bin/tectonic --chatter minimal --only-cached doc.tex
             text=$(pdftotext -enc UTF-8 doc.pdf -)

@@ -150,6 +150,9 @@ test("police Unicode chargée seulement quand le source imprime une écriture au
   assert.doesNotMatch(ru, /xeCJK/);
   assert.match(withUnicodeFonts(doc("哪个函数")), /\\usepackage\{xeCJK\}/);
   assert.equal(withUnicodeFonts(ru), ru, "déjà chargée : rien de plus");
+  // pdflatex (sans tectonic) ne lit pas fontspec : il reçoit le source d'origine.
+  const { withoutUnicodeFonts } = await import("../lib/exam-latex");
+  assert.equal(withoutUnicodeFonts(withUnicodeFonts(doc("哪个 Какая"))), doc("哪个 Какая"));
 });
 
 test("une question composée en russe n'est pas renvoyée au modèle pour son écriture", async () => {
