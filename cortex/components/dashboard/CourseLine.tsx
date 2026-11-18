@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { examLine } from "@/lib/ux/next-up";
+import { useTranslations } from "use-intl/react";
+import { useFmt } from "@/lib/i18n/use-fmt";
 
 /**
  * En-tête de l'Accueil : une ligne, le code du cours puis ce qu'on sait du final.
@@ -14,7 +16,9 @@ export function CourseLine({
   code: string;
   countdown: { date: string; days: number } | null;
 }) {
-  const exam = examLine(countdown);
+  const t = useTranslations("nextUp");
+  const f = useFmt();
+  const exam = examLine(countdown, t, f);
   return (
     <p className="flex flex-wrap items-center gap-x-[1ch] text-[0.78rem] font-medium leading-[1.4] text-ink-3">
       {code && (

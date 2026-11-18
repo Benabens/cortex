@@ -3,6 +3,7 @@ import { asText } from "@/lib/ux/api";
 import { rowFacts, rowFactsSpoken, trainHref } from "@/lib/ux/next-up";
 import type { DashNext } from "@/lib/ux/types";
 import { useTranslations } from "use-intl/react";
+import { useFmt } from "@/lib/i18n/use-fmt";
 
 /**
  * « Ensuite » : les notions qui suivent par priorité, en liste à filets. Le nom à gauche, les
@@ -11,6 +12,8 @@ import { useTranslations } from "use-intl/react";
  */
 export function UpNext({ topics }: { topics: DashNext[] }) {
   const t = useTranslations("dashboard");
+  const nextT = useTranslations("nextUp");
+  const f = useFmt();
   const rows = topics
     .map((t) => ({ t, label: asText(t.label) }))
     .filter((r): r is { t: DashNext; label: string } => !!r.label);
@@ -40,9 +43,9 @@ export function UpNext({ topics }: { topics: DashNext[] }) {
                 aria-hidden="true"
                 className="shrink-0 font-data text-[0.78rem] text-ink-3 transition-colors duration-150 group-hover:text-ink-2"
               >
-                {rowFacts(facts)}
+                {rowFacts(facts, nextT, f)}
               </span>
-              <span className="sr-only">, {rowFactsSpoken(facts)}</span>
+              <span className="sr-only">, {rowFactsSpoken(facts, nextT, f)}</span>
             </Link>
           </li>
           );

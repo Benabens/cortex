@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable react-hooks/set-state-in-effect -- cette couche synchronise explicitement l’état React avec les réponses réseau */
+
 /**
  * Couche d'accès aux VRAIES routes /api/* pour la nouvelle UX.
  * - CourseProvider : cours du compte, chargés depuis /api/courses ; cours courant
@@ -18,12 +20,12 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import { watchJob } from "./job-watch";
 import type { Job } from "./job-status";
 import type { AnswerMode, DocumentRule } from "@/lib/exam-format";
+import { useTranslations } from "use-intl/react";
 
 /* ---------------------------------------------------------------- courses */
 
@@ -79,6 +81,7 @@ type CourseCtx = {
 const Ctx = createContext<CourseCtx | null>(null);
 
 export function CourseProvider({ children }: { children: React.ReactNode }) {
+  const t = useTranslations("api");
   const [courses, setCourses] = useState<CourseInfo[]>([]);
   const [courseId, setId] = useState("");
   const [ready, setReady] = useState(false);
@@ -97,7 +100,7 @@ export function CourseProvider({ children }: { children: React.ReactNode }) {
     async (select?: string): Promise<CourseInfo[]> => {
       try {
         const res = await fetch("/api/courses");
-        if (!res.ok) throw new Error(`Erreur ${res.status}`);
+        if (!res.ok) throw new Error(t("httpError", { status: res.status }));
         const data = (await res.json()) as { courses?: CourseInfo[] };
         const list = data.courses ?? [];
         setCourses(list);
@@ -110,13 +113,13 @@ export function CourseProvider({ children }: { children: React.ReactNode }) {
         } catch {}
         return list;
       } catch (e) {
-        setError((e as Error).message || "Impossible de charger tes cours.");
+        setError((e as Error).message || t("loadCourses"));
         return [];
       } finally {
         setReady(true);
       }
     },
-    [pick]
+    [pick, t]
   );
 
   useEffect(() => {
@@ -156,13 +159,42 @@ export function CourseProvider({ children }: { children: React.ReactNode }) {
 
 export function useCourse(): CourseCtx {
   const v = useContext(Ctx);
-  if (!v) throw new Error("useCourse doit être utilisé sous <CourseProvider>");
+  if (!v) throw new Error("useCourse must be used within CourseProvider");
   return v;
 }
 
 /* ------------------------------------------------------------------ fetch */
 
-export type ApiError = { status: number | null; message: string };
+export type ApiError = {
+  status: number | null;
+  message: string;
+  code: string | null;
+  params?: Record<string, unknown>;
+};
+
+type ApiErrorBody = { error?: unknown; code?: unknown; params?: unknown };
+
+/** Codes d'un moteur LLM absent ou injoignable (lib/llm, lib/preflight) : leur message est déjà une phrase complète. */
+const ENGINE_DOWN = new Set(["llm_engine_unavailable", "llm_engine_unavailable_reason", "llm_engine_unreachable_retry"]);
+
+/** Le code dit-il que le moteur manque ? Son message se suffit alors (pas de préfixe à ajouter). */
+export function engineCode(code: string | null): boolean {
+  return code !== null && ENGINE_DOWN.has(code);
+}
+
+/** Le moteur LLM est-il en cause ? Code de l'API, ou tout 503 (comme avant les codes). */
+export function engineDown(err: Pick<ApiError, "code" | "status">): boolean {
+  return engineCode(err.code) || err.status === 503;
+}
+
+function apiErrorFromBody(status: number, fallback: string, body: ApiErrorBody | null): ApiError {
+  return {
+    status,
+    message: typeof body?.error === "string" ? body.error : fallback,
+    code: typeof body?.code === "string" ? body.code : null,
+    ...(body?.params && typeof body.params === "object" ? { params: body.params as Record<string, unknown> } : {}),
+  };
+}
 
 function withCourse(path: string, courseId: string): string {
   return `${path}${path.includes("?") ? "&" : "?"}course=${encodeURIComponent(courseId)}`;
@@ -172,20 +204,18 @@ function withCourse(path: string, courseId: string): string {
 const cache = new Map<string, unknown>();
 const inflight = new Map<string, Promise<unknown>>();
 
-async function fetchJson<T>(url: string, force = false): Promise<T> {
+async function fetchJson<T>(url: string, fallback: (status: number) => string, force = false): Promise<T> {
   if (!force && cache.has(url)) return cache.get(url) as T;
   const existing = inflight.get(url);
   if (existing) return existing as Promise<T>;
   const p = (async () => {
     const res = await fetch(url);
     if (!res.ok) {
-      let message = `Erreur ${res.status}`;
+      let body: ApiErrorBody | null = null;
       try {
-        const body = await res.json();
-        if (typeof body?.error === "string") message = body.error;
+        body = await res.json();
       } catch {}
-      const err: ApiError = { status: res.status, message };
-      throw err;
+      throw apiErrorFromBody(res.status, fallback(res.status), body);
     }
     const data = (await res.json()) as T;
     cache.set(url, data);
@@ -204,6 +234,7 @@ export type ApiState<T> = {
 
 /** GET une route /api/* pour le cours courant. Attend l'init du cours, relance quand il change. */
 export function useApi<T>(path: string | null): ApiState<T> {
+  const t = useTranslations("api");
   const { courseId, ready } = useCourse();
   // Sans cours (compte neuf), aucune route de données n'a de sens : on n'appelle
   // rien plutôt que d'aller chercher un tenant vide et d'afficher une erreur.
@@ -226,18 +257,18 @@ export function useApi<T>(path: string | null): ApiState<T> {
       error: null,
       loading: true,
     });
-    fetchJson<T>(url, tick > 0)
+    fetchJson<T>(url, (status) => t("httpError", { status }), tick > 0)
       .then((data) => {
         if (!cancelled) setState({ request, data, error: null, loading: false });
       })
       .catch((e: ApiError) => {
         if (!cancelled) setState({
           request, data: null, loading: false,
-          error: e?.message ? e : { status: null, message: "Connexion impossible" },
+          error: e?.message ? e : { status: null, message: t("connection"), code: null },
         });
       });
     return () => { cancelled = true; };
-  }, [url, tick, request]);
+  }, [url, tick, request, t]);
 
   const refetch = useCallback(() => setTick((t) => t + 1), []);
   // Masque l'ancien cours dès le rendu, avant l'exécution des effets.
@@ -254,7 +285,9 @@ export function useApi<T>(path: string | null): ApiState<T> {
 export async function apiPost<T>(
   path: string,
   courseId: string,
-  body?: unknown
+  body: unknown,
+  /** Message d'un échec sans corps exploitable, dans la langue de l'écran (« Erreur 500 »). */
+  fallback: (status: number) => string,
 ): Promise<T> {
   const res = await fetch(withCourse(path, courseId), {
     method: "POST",
@@ -262,13 +295,11 @@ export async function apiPost<T>(
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) {
-    let message = `Erreur ${res.status}`;
+    let errorBody: ApiErrorBody | null = null;
     try {
-      const data = await res.json();
-      if (typeof data?.error === "string") message = data.error;
+      errorBody = await res.json();
     } catch {}
-    const err: ApiError = { status: res.status, message };
-    throw err;
+    throw apiErrorFromBody(res.status, fallback(res.status), errorBody);
   }
   const data = (await res.json()) as T;
   cache.clear();

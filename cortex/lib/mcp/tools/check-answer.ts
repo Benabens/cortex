@@ -33,7 +33,7 @@ export default defineTool({
     paidCall("assistance"),
   kind: "generate",
   annotations: SPENDING_HINTS,
-  userSummary: "Corrige ta réponse à une question, critère par critère.",
+  userSummary: "checkAnswer",
   input: z.object({
     course: courseArg,
     statement: z.string().min(1).max(FIELD_LIMITS.statement).describe("The exact question / exercise statement."),

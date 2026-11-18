@@ -7,10 +7,11 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Segmented, type SegmentedOption } from "@/components/ui/Segmented";
 import { SeverityMeter } from "@/components/viz/SeverityMeter";
-import { apiPost, useCourse, type ApiError } from "@/lib/ux/api";
+import { apiPost, useCourse, type ApiError, engineDown } from "@/lib/ux/api";
 import { sevOf, type MineResp, type MinedItem } from "@/lib/ux/weaknesses";
 import { cn } from "@/lib/ux/cn";
 import { useTranslations } from "use-intl/react";
+import { useFmt } from "@/lib/i18n/use-fmt";
 
 const MIN_MINE_CHARS = 40; // au-delà = « discussion » à miner (seuil back = mine/route.ts)
 const MAX_FILE_BYTES = 12 * 1024 * 1024; // même plafond que le back (lib/weakness-files)
@@ -19,8 +20,6 @@ const ACCEPT = ".pdf,application/pdf,image/png,image/jpeg,image/gif,image/webp";
 
 const isPdf = (f: File) => f.type === "application/pdf" || /\.pdf$/i.test(f.name);
 const isAccepted = (f: File) => isPdf(f) || IMAGE_TYPES.includes(f.type);
-const sizeLabel = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1).replace(".", ",")} Mo` : `${Math.max(1, Math.round(n / 1024))} Ko`);
-
 /**
  * « Ajoute ce qui t'a piégé » : UNE seule zone qui accepte tout (décision du 28/09, série 3).
  *  — texte collé : énoncé ou discussion (≥ 40 car.) → POST /api/weaknesses/mine (le moteur extrait les lacunes) ;
@@ -32,12 +31,18 @@ const sizeLabel = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixe
  * (clavier, lecteur d'écran, mobile). La sévérité reste, en petit texte discret à côté du bouton.
  */
 export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
+  const t = useTranslations("weaknessInbox");
   const labelsT = useTranslations("labels");
+  const f = useFmt();
   /** Les trois niveaux de sévérité (1 à 3), dans l'ordre du back. */
   const severityLevels: SegmentedOption<string>[] = [1, 2, 3].map((lv) => ({
     value: String(lv), label: labelsT(SEVERITY[sevOf(lv)].labelKey),
   }));
-  const { courseId } = useCourse();
+  const { courseId, course } = useCourse();
+  const language = course?.language || undefined; // "" = langue pas encore détectée : pas de lang vide
+  const sizeLabel = (n: number) => n >= 1024 * 1024
+    ? t("sizeMb", { size: f.number(n / 1024 / 1024, 1) })
+    : t("sizeKb", { size: f.number(Math.max(1, Math.round(n / 1024))) });
   const inputId = useId();
   const statusId = useId();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -62,11 +67,11 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
   const attach = (f: File | null | undefined): boolean => {
     if (!f) return false;
     if (!isAccepted(f)) {
-      setError({ offline: false, message: "Format non pris en charge : PDF, PNG, JPG, GIF ou WEBP." });
+      setError({ offline: false, message: t("unsupportedFormat") });
       return false;
     }
     if (f.size > MAX_FILE_BYTES) {
-      setError({ offline: false, message: "Fichier trop lourd (12 Mo au maximum)." });
+      setError({ offline: false, message: t("tooLarge") });
       return false;
     }
     setError(null);
@@ -87,55 +92,55 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
     const res = await fetch(`/api/weaknesses?course=${encodeURIComponent(courseId)}`, { method: "POST", body: form });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      throw { status: res.status, message: body?.error ?? `Erreur ${res.status}` } as ApiError;
+      throw { status: res.status, message: body?.error ?? t("httpError", { status: res.status }), code: typeof body?.code === "string" ? body.code : null, params: body?.params } as ApiError;
     }
     setText("");
     clearFile();
-    setSavedMsg("Ajouté au suivi : Cortex l’analysera pour le relier au cours.");
+    setSavedMsg(t("saved"));
     onAdded();
   };
 
   const showMined = (d: MineResp) => {
     setMined(d.mined ?? []);
-    if (d.created === 0) setNote(d.note ?? "Aucune lacune claire détectée.");
+    if (d.created === 0) setNote(d.note ?? t("noneDetected"));
     if (d.created > 0 || d.stored) { setText(""); clearFile(); onAdded(); }
   };
 
-  const mineText = async (t: string) => showMined(await apiPost<MineResp>("/api/weaknesses/mine", courseId, { text: t }));
+  const mineText = async (content: string) => showMined(await apiPost<MineResp>("/api/weaknesses/mine", courseId, { text: content }, (status) => t("httpError", { status })));
 
-  const minePdf = async (pdf: File, t: string) => {
+  const minePdf = async (pdf: File, content: string) => {
     const form = new FormData();
     form.append("file", pdf);
-    if (t) form.append("text", t);
+    if (content) form.append("text", content);
     form.append("severity", String(sev));
     const res = await fetch(`/api/weaknesses/mine?course=${encodeURIComponent(courseId)}`, { method: "POST", body: form });
     const body = await res.json().catch(() => null);
-    if (!res.ok) throw { status: res.status, message: body?.error ?? `Erreur ${res.status}` } as ApiError;
+    if (!res.ok) throw { status: res.status, message: body?.error ?? t("httpError", { status: res.status }), code: typeof body?.code === "string" ? body.code : null, params: body?.params } as ApiError;
     showMined(body as MineResp);
   };
 
   const submit = async () => {
     if (busy) return;
     reset();
-    const t = text.trim();
-    if (!file && !t) {
-      setError({ offline: false, message: "Colle un texte, une capture, ou ajoute un fichier PDF, PNG ou JPG." });
+    const content = text.trim();
+    if (!file && !content) {
+      setError({ offline: false, message: t("inputRequired") });
       return;
     }
     setBusy(true);
     try {
-      if (file && isPdf(file)) await minePdf(file, t); // PDF → texte extrait puis analysé
-      else if (file) await saveWeakness(t); // capture / image (+ note) → ajout direct, hors-ligne OK
-      else if (t.length >= MIN_MINE_CHARS) await mineText(t); // énoncé ou discussion → extraction
-      else await saveWeakness(t); // note courte → ajout manuel
+      if (file && isPdf(file)) await minePdf(file, content); // PDF → texte extrait puis analysé
+      else if (file) await saveWeakness(content); // capture / image (+ note) → ajout direct, hors-ligne OK
+      else if (content.length >= MIN_MINE_CHARS) await mineText(content); // énoncé ou discussion → extraction
+      else await saveWeakness(content); // note courte → ajout manuel
     } catch (e) {
       const err = e as ApiError;
       setError({
-        offline: err.status === 503,
+        offline: engineDown(err),
         message:
-          err.status === 503
-            ? "Le moteur LLM est injoignable : réessaie plus tard, ton contenu reste dans la zone."
-            : err.message || "L’ajout a échoué. Réessaie.",
+          engineDown(err)
+            ? t("llmUnavailable")
+            : err.message || t("addFailed"),
       });
     } finally {
       setBusy(false);
@@ -153,7 +158,7 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
   return (
     <section className="d2-card relative overflow-hidden p-5 sm:p-7" aria-labelledby="inbox-title">
       <h2 id="inbox-title" className="text-xl font-semibold text-ink-1">
-        <label htmlFor={inputId}>Ajoute ce qui t’a piégé</label>
+        <label htmlFor={inputId}>{t("title")}</label>
       </h2>
 
       {/* Zone de dépôt unique : texte, capture collée, PDF ou image glissés. */}
@@ -179,22 +184,22 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
           <div className="flex items-center gap-3 px-3.5 pt-3.5">
             {preview ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={preview} alt="Aperçu de la capture jointe" className="size-14 rounded-lg border border-line object-cover" />
+              <img src={preview} alt={t("previewAlt")} className="size-14 rounded-lg border border-line object-cover" />
             ) : (
               <span className="grid size-14 place-items-center rounded-lg border border-line bg-surface-2 text-ink-2" aria-hidden="true">
                 <FileText className="size-6" strokeWidth={1.75} />
               </span>
             )}
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[0.85rem] text-ink-1">{file.name || "Capture collée"}</span>
+              <span className="block truncate text-[0.85rem] text-ink-1">{file.name || t("pastedCapture")}</span>
               <span className="block text-[0.75rem] text-ink-3">
-                {isPdf(file) ? "PDF" : "Image"} · {sizeLabel(file.size)}
+                {isPdf(file) ? "PDF" : t("image")} · {sizeLabel(file.size)}
               </span>
             </span>
             <button
               type="button"
               onClick={clearFile}
-              aria-label={`Retirer ${file.name || "la capture"}`}
+              aria-label={t("removeFile", { name: file.name || t("capture") })}
               className="grid size-11 shrink-0 place-items-center rounded-md text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink-1"
             >
               <X className="size-4" strokeWidth={2.25} />
@@ -208,7 +213,7 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
           onChange={(e) => setText(e.target.value)}
           onPaste={onPaste}
           onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submit(); } }}
-          placeholder="Colle un énoncé, une discussion ChatGPT ou une capture, ou glisse ici un PDF, PNG, JPG"
+          placeholder={t("placeholder")}
           aria-describedby={statusId}
           rows={4}
           data-focus-parent
@@ -231,28 +236,28 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
             className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-1.5 text-[0.8rem] text-ink-3 transition-colors hover:text-ink-1"
           >
             <Paperclip className="size-3.5" strokeWidth={2.25} aria-hidden="true" />
-            Choisir un fichier
+            {t("chooseFile")}
           </button>
         </div>
       </div>
 
       {/* Annonce de la pièce jointe pour les lecteurs d'écran. */}
       <p id={statusId} className="sr-only" aria-live="polite">
-        {file ? `Fichier joint : ${file.name || "capture"}.` : ""}
+        {file ? t("attached", { name: file.name || t("capture") }) : ""}
       </p>
 
       {/* sévérité discrète (texte seul) + action */}
       <div className="mt-4 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
         <Segmented
           variant="line"
-          label="Sévérité"
+          label={t("severity")}
           options={severityLevels}
           value={String(sev)}
           onChange={(v) => setSev(Number(v))}
         />
 
         <Button variant="primary" onClick={submit} loading={busy}>
-          {busy ? "Ajout…" : "Ajouter"}
+          {busy ? t("adding") : t("add")}
         </Button>
       </div>
 
@@ -281,7 +286,7 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
       {mined && mined.length > 0 && (
         <div className="mt-4 border-t border-line pt-4">
           <div className="mb-3 text-[0.8rem] font-medium text-ink-2">
-            {mined.length} lacune{mined.length > 1 ? "s" : ""} extraite{mined.length > 1 ? "s" : ""} et suivie{mined.length > 1 ? "s" : ""}
+            {t("mined", { count: mined.length })}
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {mined.map((m, i) => {
@@ -291,10 +296,10 @@ export function WeaknessInbox({ onAdded }: { onAdded: () => void }) {
                   <div className="flex items-start gap-3">
                     <SeverityMeter level={sevm.level} tone={sevm.tone} className="mt-1 shrink-0" />
                     <div className="min-w-0 flex-1">
-                      <h3 className="text-[0.92rem] font-semibold text-ink-1">{m.topic}</h3>
-                      <p className="mt-0.5 text-[0.8rem] text-ink-3">{m.concept}</p>
+                      <h3 className="text-[0.92rem] font-semibold text-ink-1" lang={language}>{m.topic}</h3>
+                      <p className="mt-0.5 text-[0.8rem] text-ink-3" lang={language}>{m.concept}</p>
                       {m.theme && (
-                        <span className="mt-2 inline-block rounded-full border border-line bg-surface-1/60 px-2 py-0.5 text-[0.7rem] text-ink-3">{m.theme}</span>
+                        <span className="mt-2 inline-block rounded-full border border-line bg-surface-1/60 px-2 py-0.5 text-[0.7rem] text-ink-3" lang={language}>{m.theme}</span>
                       )}
                     </div>
                     <Badge tone={sevm.tone} Icon={sevm.Icon} size="xs">{labelsT(sevm.labelKey)}</Badge>

@@ -8,21 +8,21 @@ import { SeverityMeter } from "@/components/viz/SeverityMeter";
 import { SectionHeader } from "@/components/ui/primitives";
 import { Segmented, type SegmentedOption } from "@/components/ui/Segmented";
 import { useCourse } from "@/lib/ux/api";
-import { sevOf, sourceLabel, relatedChips, type Weakness } from "@/lib/ux/weaknesses";
-import { formatDay } from "@/lib/ux/types";
+import { sevOf, sourceLabelKey, relatedChips, type Weakness } from "@/lib/ux/weaknesses";
 import { cn } from "@/lib/ux/cn";
+import { useTranslations } from "use-intl/react";
+import { useFmt } from "@/lib/i18n/use-fmt";
 
-const FILTERS: { key: Severity | "ALL"; label: string }[] = [
-  { key: "ALL", label: "Toutes" },
-  { key: "GROS", label: "Sévères" },
-  { key: "MOYEN", label: "Moyennes" },
-  { key: "LÉGER", label: "Légères" },
+const FILTERS: { key: Severity | "ALL"; labelKey: "filterAll" | "filterHigh" | "filterMedium" | "filterLow" }[] = [
+  { key: "ALL", labelKey: "filterAll" },
+  { key: "GROS", labelKey: "filterHigh" },
+  { key: "MOYEN", labelKey: "filterMedium" },
+  // i18n-allow: code de sévérité stable du back, jamais affiché
+  { key: "LÉGER", labelKey: "filterLow" },
 ];
 
-const GROUPINGS: SegmentedOption<"list" | "chapter">[] = [
-  { value: "list", label: "Liste", Icon: LayoutList },
-  { value: "chapter", label: "Par chapitre", Icon: ListTree },
-];
+// i18n-allow: sentinelle posée par l’API pour une capture pas encore analysée (app/api/weaknesses)
+const PENDING_TOPIC = "(à analyser)";
 
 const NO_THEME = "￿"; // clé de tri pour « sans chapitre » (en fin)
 
@@ -30,10 +30,17 @@ const NO_THEME = "￿"; // clé de tri pour « sans chapitre » (en fin)
 export function WeaknessBase({
   weaknesses,
   onChanged,
+  language,
 }: {
   weaknesses: Weakness[];
   onChanged: () => void;
+  language?: string;
 }) {
+  const t = useTranslations("weaknessBase");
+  const groupings: SegmentedOption<"list" | "chapter">[] = [
+    { value: "list", label: t("list"), Icon: LayoutList },
+    { value: "chapter", label: t("byChapter"), Icon: ListTree },
+  ];
   const { courseId } = useCourse();
   const [filter, setFilter] = useState<Severity | "ALL">("ALL");
   const [grouped, setGrouped] = useState(false); // P-C : grouper par chapitre (thème du plan)
@@ -47,7 +54,7 @@ export function WeaknessBase({
 
   const remove = async (w: Weakness) => {
     if (deleting) return;
-    if (!window.confirm(`Retirer « ${w.topic} » du suivi ? Cette action est définitive.`)) return;
+    if (!window.confirm(t("removeConfirm", { topic: w.topic === PENDING_TOPIC ? t("pendingTopic") : w.topic }))) return;
     setDeleting(w.id);
     setDeleteError(null);
     try {
@@ -56,11 +63,11 @@ export function WeaknessBase({
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        throw new Error(body?.error ?? "Le retrait a échoué. Réessaie.");
+        throw new Error(body?.error ?? t("removeFailed"));
       }
       onChanged();
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "Le retrait a échoué. Réessaie.");
+      setDeleteError(error instanceof Error ? error.message : t("removeFailed"));
     } finally {
       setDeleting(null);
     }
@@ -85,7 +92,7 @@ export function WeaknessBase({
 
   return (
     <section>
-      <SectionHeader title="Base des faiblesses" />
+      <SectionHeader title={t("title")} />
       {deleteError && <p role="alert" className="mb-3 rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger-hi">{deleteError}</p>}
 
       {weaknesses.length === 0 ? (
@@ -93,10 +100,9 @@ export function WeaknessBase({
           <span className="grid size-12 place-items-center rounded-2xl border border-accent/25 bg-accent/10 text-accent-hi">
             <Target className="size-5" strokeWidth={2} />
           </span>
-          <p className="text-[0.95rem] font-medium text-ink-1">Aucune faiblesse suivie</p>
+          <p className="text-[0.95rem] font-medium text-ink-1">{t("emptyTitle")}</p>
           <p className="max-w-sm text-[0.85rem] leading-relaxed text-ink-3">
-            Ajoute ta première lacune ci-dessus : colle une discussion ou dépose un exo raté,
-            et Cortex la gardera à l’œil pour tes séances d’entraînement.
+            {t("emptyHint")}
           </p>
         </div>
       ) : (
@@ -104,8 +110,8 @@ export function WeaknessBase({
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <Segmented
               variant="pills"
-              label="Filtrer par sévérité"
-              options={FILTERS.map((f) => ({ value: f.key, label: f.label, count: count(f.key) }))}
+              label={t("filterLabel")}
+              options={FILTERS.map((f) => ({ value: f.key, label: t(f.labelKey), count: count(f.key) }))}
               value={filter}
               onChange={setFilter}
             />
@@ -113,8 +119,8 @@ export function WeaknessBase({
             {/* P-C — grouper par chapitre du plan (thème), en plus du filtre sévérité */}
             <Segmented
               size="sm"
-              label="Organiser la base"
-              options={GROUPINGS}
+              label={t("organize")}
+              options={groupings}
               value={grouped ? "chapter" : "list"}
               onChange={(v) => setGrouped(v === "chapter")}
             />
@@ -123,7 +129,7 @@ export function WeaknessBase({
           {rows.length === 0 ? (
             <div className="d2-card rounded-xl p-1.5">
               <p className="px-4 py-8 text-center text-[0.85rem] text-ink-3">
-                Aucune lacune {FILTERS.find((f) => f.key === filter)?.label.toLowerCase()} : retire le filtre pour tout voir.
+                {t("filteredEmpty", { filter: t(FILTERS.find((f) => f.key === filter)?.labelKey ?? "filterAll").toLowerCase() })}
               </p>
             </div>
           ) : grouped ? (
@@ -131,12 +137,12 @@ export function WeaknessBase({
               {groups.map((g, gi) => (
                 <div key={g.theme ?? `__none-${gi}`} className="d2-card overflow-hidden rounded-xl p-0">
                   <div className="flex items-center justify-between gap-2 border-b border-line bg-surface-2/30 px-4 py-2.5">
-                    <h3 className="text-[0.88rem] font-semibold text-ink-1">{g.theme ?? "Sans chapitre"}</h3>
+                    <h3 className="text-[0.88rem] font-semibold text-ink-1" lang={g.theme ? language : undefined}>{g.theme ?? t("noChapter")}</h3>
                     <span className="font-data text-[0.72rem] tabular text-ink-4">{g.rows.length}</span>
                   </div>
                   <div className="p-1.5">
                     {g.rows.map((w, i) => (
-                      <WeaknessRow key={w.id} w={w} i={i} level="h4" deleting={deleting} onRemove={remove} />
+                      <WeaknessRow key={w.id} w={w} i={i} level="h4" deleting={deleting} onRemove={remove} language={language} />
                     ))}
                   </div>
                 </div>
@@ -145,7 +151,7 @@ export function WeaknessBase({
           ) : (
             <div className="d2-card overflow-hidden rounded-xl p-1.5">
               {rows.slice().sort(bySeverity).map((w, i) => (
-                <WeaknessRow key={w.id} w={w} i={i} level="h3" deleting={deleting} onRemove={remove} />
+                <WeaknessRow key={w.id} w={w} i={i} level="h3" deleting={deleting} onRemove={remove} language={language} />
               ))}
             </div>
           )}
@@ -162,6 +168,7 @@ function WeaknessRow({
   level: Title,
   deleting,
   onRemove,
+  language,
 }: {
   w: Weakness;
   i: number;
@@ -169,10 +176,16 @@ function WeaknessRow({
   level: "h3" | "h4";
   deleting: number | null;
   onRemove: (w: Weakness) => void;
+  language?: string;
 }) {
+  const t = useTranslations("weaknessBase");
+  const f = useFmt();
   const sev = SEVERITY[sevOf(w.severity)];
   const chips = relatedChips(w.related);
-  const day = formatDay(w.loggedAt);
+  const day = w.loggedAt ? f.date(w.loggedAt, "short") : null;
+  const sourceKey = sourceLabelKey(w.source);
+  const pending = w.topic === PENDING_TOPIC;
+  const topic = pending ? t("pendingTopic") : w.topic;
   return (
     <div
       className={cn(
@@ -184,21 +197,21 @@ function WeaknessRow({
         <SeverityMeter level={sev.level} tone={sev.tone} className="mt-1 shrink-0" />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <Title className="text-[0.95rem] font-medium text-ink-1">{w.topic}</Title>
+            <Title className="text-[0.95rem] font-medium text-ink-1" lang={pending ? undefined : language}>{topic}</Title>
             {/* Pastille « Analysée » retirée (série 3) : seule l'exception reste signalée. */}
             {!w.analyzed && (
               <Badge tone="warning" size="xs">
-                À analyser
+                {t("toAnalyze")}
               </Badge>
             )}
           </div>
           {w.description && (
-            <p className="mt-0.5 max-w-2xl text-[0.8rem] text-ink-3">{w.description}</p>
+            <p className="mt-0.5 max-w-2xl text-[0.8rem] text-ink-3" lang={language}>{w.description}</p>
           )}
           <p className="mt-1 text-[0.74rem] text-ink-3">
-            {sourceLabel(w.source)}
+            {sourceKey ? t(sourceKey) : w.source}
             {day ? ` · ${day}` : ""}
-            {w.timesSeen > 1 ? ` · vue ${w.timesSeen} fois` : ""}
+            {w.timesSeen > 1 ? ` · ${t("seen", { count: w.timesSeen })}` : ""}
             {w.screenshotUrl && (
               <>
                 {" · "}
@@ -213,7 +226,7 @@ function WeaknessRow({
                   ) : (
                     <ImageIcon className="size-3" strokeWidth={2} />
                   )}
-                  {/\.pdf$/i.test(w.screenshotUrl) ? "PDF" : "image"}
+                  {/\.pdf$/i.test(w.screenshotUrl) ? t("sourcePdf") : t("image")}
                 </a>
               </>
             )}
@@ -224,10 +237,10 @@ function WeaknessRow({
       {(chips.length > 0 || w.theme) && (
         <div className="flex flex-wrap items-center gap-1.5 lg:max-w-[140px] lg:shrink-0">
           {w.theme && (
-            <span className="rounded-full border border-line bg-surface-1/60 px-2 py-0.5 text-[0.7rem] text-ink-3">{w.theme}</span>
+            <span className="rounded-full border border-line bg-surface-1/60 px-2 py-0.5 text-[0.7rem] text-ink-3" lang={language}>{w.theme}</span>
           )}
           {chips.map((c) => (
-            <span key={c} className="rounded-full border border-line bg-surface-1/60 px-2 py-0.5 text-[0.7rem] text-ink-3">{c}</span>
+            <span key={c} className="rounded-full border border-line bg-surface-1/60 px-2 py-0.5 text-[0.7rem] text-ink-3" lang={language}>{c}</span>
           ))}
         </div>
       )}
@@ -235,17 +248,17 @@ function WeaknessRow({
       <div className="flex shrink-0 items-center gap-2">
         <a
           href={`/entrainement?prefill=${encodeURIComponent(w.topic)}`}
-          aria-label={`S'entraîner sur : ${w.topic}`}
+          aria-label={t("trainOn", { topic })}
           className="inline-flex min-h-11 items-center justify-center gap-1 rounded-full border border-line bg-surface-2/60 px-3 text-[0.8rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-accent)_38%,transparent)] hover:text-ink-1"
         >
-          S’entraîner
+          {t("train")}
           <ArrowUpRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
         </a>
         <button
           type="button"
           onClick={() => onRemove(w)}
           disabled={deleting !== null}
-          aria-label={`Retirer du suivi : ${w.topic}`}
+          aria-label={t("remove", { topic })}
           className="grid size-11 place-items-center rounded-full border border-transparent text-ink-4 transition-colors hover:border-[color-mix(in_oklch,var(--color-danger)_35%,transparent)] hover:text-danger-hi disabled:opacity-50"
         >
           <Trash2 className="size-4" strokeWidth={2} />

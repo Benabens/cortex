@@ -4,10 +4,9 @@ import { useId, useState } from "react";
 import { SafeHtml } from "@/components/ui/SafeHtml";
 import type { CheckResult } from "@/lib/check-solution";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
+import { useTranslations } from "use-intl/react";
 
-const nfCredits = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 });
-
-export function OpenResponse({ questionId, statement, courseId, graded, solution, part, onChecked }: {
+export function OpenResponse({ questionId, statement, courseId, graded, solution, part, onChecked, language }: {
   questionId: number;
   statement: string;
   courseId: string;
@@ -17,7 +16,9 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
   part?: { examId: number; partId: number };
   /** Points obtenus à la vérification (score de l'examen à questions composées). */
   onChecked?: (score: { earned: number; total: number }) => void;
+  language?: string;
 }) {
+  const t = useTranslations("openResponse");
   const [answer, setAnswer] = useState("");
   const [check, setCheck] = useState<CheckResult | null>(null);
   const [checking, setChecking] = useState(false);
@@ -42,13 +43,13 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
         body: JSON.stringify(part ? { examId: part.examId, partId: part.partId, answer } : { statement, answer }),
       });
       const data = await response.json();
-      if (!response.ok || data.error) setError(data.error ?? "La vérification n’a pas abouti. Réessaie.");
+      if (!response.ok || data.error) setError(data.error ?? t("failed"));
       else {
         setCheck(data.result);
         onChecked?.(data.result.score);
       }
     } catch {
-      setError("La vérification n’a pas abouti. Réessaie.");
+      setError(t("failed"));
     } finally {
       setChecking(false);
       refreshUsage();
@@ -58,13 +59,13 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
   return (
     <div className="mt-3">
       <label htmlFor={textareaId} className="mb-1 block text-[12.5px]" style={{ color: "var(--ink-2)" }}>
-        Ta réponse
+        {t("label")}
       </label>
       <textarea
         id={textareaId}
         className="textarea w-full"
         rows={4}
-        placeholder="Ta réponse (auto-évaluée : le corrigé s’affiche après correction)…"
+        placeholder={t("placeholder")}
         style={{ fontSize: 13 }}
         value={answer}
         onChange={(e) => {
@@ -77,20 +78,21 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
       {(
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <button type="button" className="btn btn-quiet btn-sm" onClick={verifyAnswer} disabled={!answer.trim() || checking || !launch.allowed}>
-            {checking ? "Vérification…" : cost > 0 ? `Vérifier ma réponse · ${nfCredits.format(cost)} crédit${cost >= 2 ? "s" : ""}` : "Vérifier ma réponse"}
+            {checking ? t("checking") : cost > 0 ? t("checkWithCost", { credits: cost }) : t("check")}
           </button>
-          <span className="text-[11.5px]" style={{ color: "var(--ink-3)" }}>Correction détaillée par critères</span>
+          <span className="text-[11.5px]" style={{ color: "var(--ink-3)" }}>{t("criteriaHint")}</span>
         </div>
       )}
       {showUsage && <UsageLine usage={launch.usage} now={launch.now} className="mt-2" />}
       {error && <p role="alert" className="mt-2 text-[12px]" style={{ color: "var(--red-ink)" }}>{error}</p>}
       {check && (
-        <section className="inset mt-3 p-3" aria-label="Barème de la réponse">
+        <section className="inset mt-3 p-3" aria-label={t("rubricLabel")}>
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <strong className="text-[14px]" style={{ color: "var(--ink)" }}>Barème</strong>
-            <span className="font-data text-[14px] font-semibold" style={{ color: "var(--accent-ink)" }}>{check.score.earned} / {check.score.total} points</span>
+            <strong className="text-[14px]" style={{ color: "var(--ink)" }}>{t("rubric")}</strong>
+            <span className="font-data text-[14px] font-semibold" style={{ color: "var(--accent-ink)" }}>{t("score", { earned: check.score.earned, total: check.score.total })}</span>
           </div>
-          <ul className="mt-3 flex flex-col gap-2">
+          {/* Critères et retour : écrits par la correction dans la langue du cours ; le reste est l'interface. */}
+          <ul className="mt-3 flex flex-col gap-2" lang={language}>
             {check.criteria.map((criterion, index) => (
               <li key={`${criterion.label}-${index}`} className="flex items-start gap-2 text-[12.5px]">
                 <span aria-hidden="true" className="mt-0.5 shrink-0 font-bold" style={{ color: criterion.achieved ? "var(--green-ink)" : "var(--red-ink)" }}>{criterion.achieved ? "✓" : "✗"}</span>
@@ -104,13 +106,13 @@ export function OpenResponse({ questionId, statement, courseId, graded, solution
               </li>
             ))}
           </ul>
-          <p className="mt-3 text-[12.5px]" style={{ color: "var(--ink-2)" }}>{check.feedback}</p>
+          <p className="mt-3 text-[12.5px]" style={{ color: "var(--ink-2)" }} lang={language}>{check.feedback}</p>
         </section>
       )}
       {graded && solution && (
         <details className="mt-3" open>
-          <summary className="text-[12.5px] cursor-pointer" style={{ color: "var(--green-ink)" }}>Corrigé</summary>
-          <SafeHtml className="prose-exam text-[13px] mt-2" style={{ color: "var(--ink-2)" }} html={solution} />
+          <summary className="text-[12.5px] cursor-pointer" style={{ color: "var(--green-ink)" }}>{t("solution")}</summary>
+          <div lang={language}><SafeHtml className="prose-exam text-[13px] mt-2" style={{ color: "var(--ink-2)" }} html={solution} /></div>
         </details>
       )}
     </div>

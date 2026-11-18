@@ -1,6 +1,7 @@
 "use client";
 
 import { useId } from "react";
+import { useTranslations } from "use-intl/react";
 
 type Props = {
   width?: number;
@@ -20,6 +21,7 @@ export function ForgettingCurve({
   reviewAt = 0.58,
   className,
 }: Props) {
+  const t = useTranslations("forgettingCurve");
   const id = useId().replace(/:/g, "");
   const padX = 4;
   const padTop = 8;
@@ -51,7 +53,7 @@ export function ForgettingCurve({
       viewBox={`0 0 ${width} ${height}`}
       className={className}
       role="img"
-      aria-label="Courbe de l'oubli : la rétention décroît avec le temps ; Cortex planifie le rappel avant que ça décroche."
+      aria-label={t("ariaLabel")}
     >
       <defs>
         <linearGradient id={`fc-fill-${id}`} x1="0" y1="0" x2="0" y2="1">

@@ -56,7 +56,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
     try {
       // On NE refetch PAS : l'état optimiste fait foi côté UI, le POST persiste côté serveur.
       // → la liste ne se remonte plus, la ligne ne saute plus (fix jank).
-      await apiPost("/api/sources", courseId, { path: f.path, reference: next });
+      await apiPost("/api/sources", courseId, { path: f.path, reference: next }, (status) => String(status)); // message jamais affiché : rollback seul
     } catch {
       setPending((p) => ({ ...p, [f.path]: !next })); // rollback
     } finally {

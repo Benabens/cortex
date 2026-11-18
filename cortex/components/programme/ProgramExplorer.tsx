@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ListTree, Flame } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
 import { Segmented, type SegmentedOption } from "@/components/ui/Segmented";
@@ -8,13 +8,9 @@ import { ChapterAccordion } from "./ChapterAccordion";
 import { NotionRow } from "./NotionRow";
 import { buildPlan, byPriority, sectionBlocks, typesMeta, type UiType, type ProgramChapter } from "@/lib/ux/program";
 import { cn } from "@/lib/ux/cn";
+import { useTranslations } from "use-intl/react";
 
 type Mode = "section" | "priority";
-
-const MODES: SegmentedOption<Mode>[] = [
-  { value: "section", label: "Par chapitre", Icon: ListTree },
-  { value: "priority", label: "Par priorité", Icon: Flame },
-];
 
 /**
  * Explorateur des notions, RUN v2. « Par section » = le PLAN DE COURS DU PROF en accordéon
@@ -22,15 +18,27 @@ const MODES: SegmentedOption<Mode>[] = [
  * d'abord (liste plate, dépliable jusqu'aux occurrences). Repli honnête « par category » si le
  * plan n'a pas pu être dérivé pour ce cours.
  */
+/** Chiffres et séparateur du résumé : mêmes styles qu'avant la traduction. */
+const num = (v: ReactNode) => <span className="font-data tabular text-ink-3">{v}</span>;
+const sep = (v: ReactNode) => <span className="mx-1 text-ink-4/60">{v}</span>;
+
 export function ProgramExplorer({
   types,
   chapters,
   planOk,
+  language,
 }: {
   types: UiType[];
   chapters: ProgramChapter[];
   planOk: boolean;
+  language?: string;
 }) {
+  const t = useTranslations("programExplorer");
+  const programT = useTranslations("programPage");
+  const modes: SegmentedOption<Mode>[] = [
+    { value: "section", label: t("byChapter"), Icon: ListTree },
+    { value: "priority", label: t("byPriority"), Icon: Flame },
+  ];
   const [mode, setMode] = useState<Mode>("section");
   // Lien profond ?chapitre=<n° de lecture> : ouvre ce chapitre. Lu à l'initialisation : ce composant
   // n'est rendu que côté client, une fois les données chargées (aucun écart d'hydratation).
@@ -38,26 +46,19 @@ export function ProgramExplorer({
     typeof window === "undefined" ? null : Number(new URLSearchParams(window.location.search).get("chapitre")) || null
   );
   const meta = typesMeta(types);
-  const plan = buildPlan(types, chapters);
+  const plan = buildPlan(types, chapters, programT);
   const flat = byPriority(types);
   const hasPlan = planOk && chapters.length > 0;
 
   return (
     <div>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface-1 px-4 py-3">
-        <Segmented label="Organiser les notions" options={MODES} value={mode} onChange={setMode} />
+        <Segmented label={t("organize")} options={modes} value={mode} onChange={setMode} />
         <p className="text-[0.8rem] text-ink-3">
           {mode === "section" && hasPlan ? (
-            <>
-              <span className="font-data tabular text-ink-3">{plan.filter((c) => c.id != null).length}</span> chapitres
-              <span className="mx-1 text-ink-4/60">·</span>
-              <span className="font-data tabular text-ink-3">{meta.total}</span> notions
-            </>
+            t.rich("chaptersAndNotions", { chapters: plan.filter((c) => c.id != null).length, notions: meta.total, num, sep })
           ) : (
-            <>
-              <span className="font-data tabular text-ink-3">{meta.total}</span> notion{meta.total > 1 ? "s" : ""}
-              {mode === "priority" ? " · les plus tombées d’abord" : " · ordre indicatif"}
-            </>
+            t.rich(mode === "priority" ? "notionsPriority" : "notionsIndicative", { count: meta.total, num })
           )}
         </p>
       </div>
@@ -66,18 +67,18 @@ export function ProgramExplorer({
         hasPlan ? (
           <div className="space-y-3">
             {plan.map((c) => (
-              <ChapterAccordion key={c.id ?? "orphan"} c={c} defaultOpen={focusLecture != null && c.lectureNo === focusLecture} />
+              <ChapterAccordion key={c.id ?? "orphan"} c={c} defaultOpen={focusLecture != null && c.lectureNo === focusLecture} language={language} />
             ))}
           </div>
         ) : (
           // Repli honnête : le plan de cours n'a pas pu être dérivé → regroupement par thème (category).
-          <FallbackSections types={types} />
+          <FallbackSections types={types} language={language} />
         )
       ) : (
         <Panel className="p-1.5 sm:p-2">
           {flat.map((t, i) => (
             <div key={t.key} className={cn(i > 0 && "border-t border-line")}>
-              <NotionRow t={t} />
+              <NotionRow t={t} language={language} />
             </div>
           ))}
         </Panel>
@@ -87,26 +88,26 @@ export function ProgramExplorer({
 }
 
 /** Repli quand aucun plan de cours n'est dérivable : blocs par thème (category), sans rien inventer. */
-function FallbackSections({ types }: { types: UiType[] }) {
+function FallbackSections({ types, language }: { types: UiType[]; language?: string }) {
+  const t = useTranslations("programExplorer");
   const blocks = sectionBlocks(types);
   return (
     <div className="space-y-3">
       <p className="text-[0.8rem] text-ink-3">
-        Le plan de cours du prof n’a pas pu être dérivé pour ce cours : les notions sont regroupées par
-        thème, dans l’ordre indicatif du cours.
+        {t("fallback")}
       </p>
       {blocks.map((b, i) => (
         <Panel key={b.section ?? `__none-${i}`} className="overflow-hidden p-0">
           {b.section && (
             <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-b border-line bg-surface-2/30 px-4 py-3">
-              <h2 className="text-[0.95rem] font-semibold text-ink-1">{b.section}</h2>
-              {b.approx && <span className="text-[0.7rem] text-ink-4">ordre approximatif</span>}
+              <h2 className="text-[0.95rem] font-semibold text-ink-1" lang={language}>{b.section}</h2>
+              {b.approx && <span className="text-[0.7rem] text-ink-4">{t("approximateOrder")}</span>}
             </div>
           )}
           <div className="p-1.5 sm:p-2">
             {b.types.map((t, j) => (
               <div key={t.key} className={cn(j > 0 && "border-t border-line")}>
-                <NotionRow t={t} />
+                <NotionRow t={t} language={language} />
               </div>
             ))}
           </div>
