@@ -83,12 +83,21 @@ function escapeKnown(s: string): string {
   return t.replace(/[\u0100-\u024F\u1E00-\u1EFF]/g, (ch) => latinLetterTex(ch) ?? ch);
 }
 
+/** Toutes les chaînes d'une valeur (texte, liste, objet imbriqué). */
+function stringsOf(v: unknown): string[] {
+  if (typeof v === "string") return [v];
+  if (Array.isArray(v)) return v.flatMap(stringsOf);
+  if (v && typeof v === "object") return Object.values(v).flatMap(stringsOf);
+  return [];
+}
+
 /**
- * Caractères qu'`esc` ne sait pas écrire (il les remplace par une espace) : une question qui en
- * contient s'imprimerait fausse, le générateur l'écarte plutôt (lib/qcm.ts).
+ * Caractères qu'`esc` ne sait pas écrire (il les remplace par une espace), dans toutes les chaînes
+ * des valeurs reçues : une question qui en contient s'imprimerait fausse, le générateur l'écarte
+ * (lib/qcm.ts) ou la renvoie au modèle (lib/blocks.ts) plutôt.
  */
-export function untypesetChars(...texts: string[]): string[] {
-  return [...new Set(texts.flatMap((s) => escapeKnown(s ?? "").match(/[^\x00-\xFF]/gu) ?? []))];
+export function untypesetChars(...values: unknown[]): string[] {
+  return [...new Set(values.flatMap(stringsOf).flatMap((s) => escapeKnown(s).match(/[^\x00-\xFF]/gu) ?? []))];
 }
 
 /** Texte du modèle (énoncés, options) vers LaTeX : `texEscape`, typographie, symboles mathématiques. */
