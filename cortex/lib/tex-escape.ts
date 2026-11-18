@@ -74,7 +74,7 @@ function latinLetterTex(ch: string): string | null {
 }
 
 /** Une lettre grecque de la table : symbole mathématique isolé, mais texte dans une phrase grecque. */
-const isGreekLetter = (re: RegExp) => /\p{Script=Greek}/u.test(re.source);
+const isGreekRule = (re: RegExp) => /\p{Script=Greek}/u.test(re.source);
 
 /** `esc` sans le filet final : ce qui reste au-delà de Latin-1 n'a aucune commande LaTeX connue. */
 function escapeKnown(s: string): string {
@@ -84,8 +84,8 @@ function escapeKnown(s: string): string {
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
   // Un mot grec (deux lettres de suite) : le texte est en grec, ses lettres restent du texte
   // (« η » article, pas η en italique mathématique) ; la police Unicode les imprime.
-  const greekText = /\p{Script=Greek}{2}/u.test(t);
-  for (const [re, rep] of UMATH) if (!(greekText && isGreekLetter(re))) t = t.replace(re, rep);
+  const greekText = /\p{Script=Greek}\p{M}*\p{Script=Greek}/u.test(t);
+  for (const [re, rep] of UMATH) if (!(greekText && isGreekRule(re))) t = t.replace(re, rep);
   return t.replace(/[\u0100-\u024F\u1E00-\u1EFF]/g, (ch) => latinLetterTex(ch) ?? ch);
 }
 
