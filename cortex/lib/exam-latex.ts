@@ -352,6 +352,24 @@ export function repairCancelPackage(tex: string): string | null {
   return tex.replace(BEGIN, "\\usepackage{cancel}\n\\begin{document}");
 }
 
+/** Caractères que les polices CJK du bundle couvrent (chinois, kana japonais, ponctuation pleine chasse). */
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303F\uFF00-\uFFEF]/u;
+
+/**
+ * Le document avec une police Unicode s'il imprime une écriture au-delà de Latin-1 (cyrillique, grec,
+ * chinois…) : le préambule (T1 + Latin Modern) n'en a pas les glyphes, ils sortaient blancs ou étaient
+ * effacés en amont. Seul tectonic (XeTeX) sait charger ces polices ; un document en Latin-1 ne change
+ * pas (empreintes des PDF existants, CS-202 compris).
+ */
+export function withUnicodeFonts(tex: string): string {
+  const BEGIN = /^\\begin\{document\}/m;
+  if (/\\usepackage(\[[^\]]*\])?\{fontspec\}/.test(tex) || !BEGIN.test(tex)) return tex;
+  const printed = tex.replace(/(^|[^\\])%.*$/gm, "$1"); // les commentaires ne s'impriment pas
+  if (!/[^\x00-\xFF]/u.test(printed)) return tex;
+  const blocks = ["unicode-fonts.tex", ...(CJK.test(printed) ? ["cjk-fonts.tex"] : [])].map((f) => fs.readFileSync(path.join(LATEX_DIR, f), "utf8"));
+  return tex.replace(BEGIN, () => `${blocks.join("")}\\begin{document}`);
+}
+
 /** Ligne fautive d'une compilation : « error: x.tex:648: … » (tectonic) ou « l.648 » (journal pdflatex). */
 export function failingLine(text: string): number | null {
   // Les avertissements (« warning: x.tex:85: Underfull… ») précèdent l'erreur : seule la ligne « error: » compte.
@@ -403,6 +421,10 @@ async function compileOnce(base: string): Promise<string> {
   for (const { bin, kind } of texCandidates()) {
     try {
       if (kind === "tectonic") {
+        const texAbs = path.join(examsDir(), tex);
+        const src = fs.existsSync(texAbs) ? fs.readFileSync(texAbs, "utf8") : null;
+        const unicode = src === null ? null : withUnicodeFonts(src);
+        if (unicode !== null && unicode !== src) fs.writeFileSync(texAbs, unicode);
         const r = await spawnP(bin, tectonicArgs(tex, { untrustedSupported: tectonicSupportsUntrusted(bin) }), examsDir(), 240_000);
         if (r.code === 0 && fs.existsSync(pdfAbs)) return pdf;
         raw = r.err ?? "";

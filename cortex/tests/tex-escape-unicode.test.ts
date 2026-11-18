@@ -96,3 +96,15 @@ test("une question composée dont un texte ne s'imprimerait pas est renvoyée au
   assert.equal(blockIssue({ scenario: "S", parts: [scq("c"), short] }, 2, 6), null);
   assert.match(blockIssue({ scenario: "S", parts: [scq("c ⌘"), short] }, 2, 6) ?? "", /⌘/);
 });
+
+test("police Unicode chargée seulement quand le source imprime une écriture au-delà de Latin-1", async () => {
+  const { withUnicodeFonts } = await import("../lib/exam-latex");
+  const doc = (body: string) => `\\documentclass{article}\n% commentaire : Какая\n\\begin{document}\n${body}\n\\end{document}\n`;
+  // Latin-1 (CS-202, tous les examens existants) : le source ne change pas, même avec un commentaire cyrillique.
+  assert.equal(withUnicodeFonts(doc("Énoncé : coût")), doc("Énoncé : coût"));
+  const ru = withUnicodeFonts(doc("Какая функция"));
+  assert.match(ru, /\\usepackage\{fontspec\}[\s\S]*\\begin\{document\}/);
+  assert.doesNotMatch(ru, /xeCJK/);
+  assert.match(withUnicodeFonts(doc("哪个函数")), /\\usepackage\{xeCJK\}/);
+  assert.equal(withUnicodeFonts(ru), ru, "déjà chargée : rien de plus");
+});

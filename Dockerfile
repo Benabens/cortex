@@ -118,7 +118,9 @@ ENV HOME=/home/cortex \
 # l'autre ; placée après, chaque commit refaisait le téléchargement et la compilation.
 # Tourne en `cortex` : le cache de bundles lui appartient (--chown : les sources et
 # leur dossier aussi, pour que la même couche les efface).
-COPY --chown=cortex:cortex cortex/latex/preamble.tex cortex/latex/figures.tex cortex/latex/generic.tex cortex/latex/epfl-logo.png /tmp/tectonic-warm/
+# Second document : les polices Unicode (cyrillique, grec, CJK) que lib/exam-latex ajoute quand
+# un examen imprime une écriture au-delà de Latin-1 ; elles sont alors en cache, hors ligne.
+COPY --chown=cortex:cortex cortex/latex/preamble.tex cortex/latex/figures.tex cortex/latex/generic.tex cortex/latex/unicode-fonts.tex cortex/latex/cjk-fonts.tex cortex/latex/epfl-logo.png /tmp/tectonic-warm/
 USER cortex
 RUN set -eux; \
     cd /tmp/tectonic-warm; \
@@ -126,6 +128,10 @@ RUN set -eux; \
     printf '\n\\usepackage{multicol}\n\\newcommand{\\FOOTDATE}{Warm}\n\\begin{document}\nWarm-up.\n\\end{document}\n' >> warm.tex; \
     /usr/local/bin/tectonic --chatter minimal warm.tex \
       || echo "AVERTISSEMENT: warm-up tectonic incomplet (bundle téléchargé au 1er run)"; \
+    cat preamble.tex figures.tex generic.tex unicode-fonts.tex cjk-fonts.tex > warm-unicode.tex; \
+    printf '\n\\newcommand{\\FOOTDATE}{Warm}\n\\begin{document}\nЖα中 \\textbf{Жα中} \\textit{Жα} \\textbf{\\textit{Жα}} \\textsf{Жα中 \\textbf{Жα中} \\textit{Жα} \\textbf{\\textit{Жα}}} \\texttt{Жα中 \\textbf{Жα} \\textit{Жα} \\textbf{\\textit{Жα}}}\n\\end{document}\n' >> warm-unicode.tex; \
+    /usr/local/bin/tectonic --chatter minimal warm-unicode.tex \
+      || echo "AVERTISSEMENT: warm-up des polices Unicode incomplet (téléchargées au 1er examen concerné)"; \
     cd /; rm -rf /tmp/tectonic-warm
 USER root
 
