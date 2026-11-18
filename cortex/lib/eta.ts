@@ -73,8 +73,8 @@ export function estimateRemaining(i: EtaInput): Eta {
   const progress = Math.min(100, Math.max(0, i.progress));
 
   if (i.status === "queued") {
-    const minutes = Math.max(1, Math.round(expected / MIN));
-    return { remainingMs: expected, late: false, basis, label: `En file : environ ${minutes} min une fois lancé${suffix}`, kind: "queued", minutes };
+    const once = Math.max(1, Math.round(expected / MIN));
+    return { remainingMs: expected, late: false, basis, label: `En file : environ ${once} min une fois lancé${suffix}`, kind: "queued", minutes: once };
   }
   // Repris après une coupure : le temps écoulé depuis le PREMIER départ ne dit plus rien ; la
   // reprise repart du dernier point sauvegardé, il reste la part non faite.
