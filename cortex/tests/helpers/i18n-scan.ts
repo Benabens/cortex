@@ -80,7 +80,8 @@ export function scanSource(file: string, source: string): Hit[] {
     }
     if (ts.isJsxText(node)) {
       const text = node.getText(sf);
-      if (/\p{L}{2}/u.test(text)) push(node, text);
+      // « nom : raison » : l'espace avant les deux-points est française, la phrase va au dictionnaire.
+      if (/\p{L}{2}/u.test(text) || /^[ \t]+:/.test(node.text)) push(node, text);
     } else if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
       if (!ignoredContext(node) && looksFrench(node.text)) push(node, node.text);
     } else if (ts.isTemplateExpression(node)) {
