@@ -3,6 +3,7 @@ import { getCourse } from "@/lib/courses";
 import { getFormatProfile } from "@/lib/format";
 import { durationOf, planMockExam, resolveExamFormat } from "@/lib/exam-format";
 import { profile } from "@/lib/course-profile";
+import { examKindLabel } from "@/lib/exam-template";
 
 /**
  * COMPOSEUR : à partir du FORMAT réel détecté du cours (`format_profile`), propose une
@@ -107,7 +108,7 @@ export async function getComposition(): Promise<CompositionPlan> {
     course,
     kind: "exam",
     summary: format.basis === "annales"
-      ? `${c.examCode} ${c.examName}, ${c.examKind} : ${slots.length} exercices (calcul/trace : ${categories.join(", ")}), ${format.durationMin ? `${format.durationMin} min, ` : ""}${totalPoints} pts`
+      ? `${c.examCode} ${c.examName}, ${examKindLabel(c)} : ${slots.length} exercices (calcul/trace : ${categories.join(", ")}), ${format.durationMin ? `${format.durationMin} min, ` : ""}${totalPoints} pts`
       : format.summary,
     durationMin: durationOf(format),
     totalPoints,
