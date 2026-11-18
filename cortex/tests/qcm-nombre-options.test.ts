@@ -186,3 +186,14 @@ test("vrai/faux : l'option fausse est la négation de la clé, jamais un distrac
   const four = { options: STATEMENTS.slice(0, 4), correct: [0] };
   assert.deepEqual(applyFinalQualityVerdicts([four], [{ index: 0, key: true, offCourse: false, trivial: [2] }])[0].trivialDistractors, [2]);
 });
+
+test("une question dont un caractère ne s'imprime pas (filet de lib/tex-escape) est écartée et comblée", async () => {
+  const id = await course(4);
+  design = (n, call) => Array.from({ length: n }, (_, i) => {
+    const it = item(call * 10 + i, 4);
+    return call === 1 && i === 0 ? { ...it, options: it.options.map((o, k) => (k === 1 ? `${o} ⌘` : o)) } : it;
+  });
+  const { r, view } = await exam(id, 3);
+  assert.equal(r.count, 3, "le sujet de la question illisible est comblé");
+  assert.ok(!view.items.some((it) => /\(q10\)/.test(it.stem)), "la question au caractère effacé n'entre pas dans l'examen");
+});
