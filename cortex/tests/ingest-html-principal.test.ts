@@ -63,3 +63,14 @@ test("page sans zone principale balisée : le corps reste lu, sans la navigation
   assert.match(text, /Orvelle transform maps every bounded wave/);
   assert.ok(!text.includes("My courses"), text);
 });
+
+test("annale HTML enregistrée d'une plateforme : sans sa navigation", async () => {
+  const c = await newCourse("Orvelle annale page");
+  fs.writeFileSync(path.join(c.refsDir, "final-2024.html"), platformPage(`<div role="main"><h2>Final 2024</h2><p>Question 1. ${LESSON}</p></div>`));
+
+  const r = ingest(c.id);
+  assert.equal(r.status, 0, r.output);
+  const text = await itemTexts(c.id, "refs/final-2024.html");
+  assert.match(text, /Question 1\. The Orvelle transform/);
+  for (const noise of ["Dashboard", "You are not logged in"]) assert.ok(!text.includes(noise), `« ${noise} » ne devrait pas être indexé : ${text}`);
+});
