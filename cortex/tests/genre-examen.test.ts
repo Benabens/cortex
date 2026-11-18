@@ -77,3 +77,38 @@ test("titre de l'examen : le type dans la langue de l'examen, plus « Examen fin
   assert.equal(await withAnnales(ids.neutralEn, ["midterm"], () => examKindLabel(getCourse(ids.neutralEn))), "Midterm exam");
   assert.equal(await withAnnales(ids.neutralFr, [], () => examKindLabel(getCourse(ids.neutralFr))), "Examen final");
 });
+
+test("PDF recompilé dans un processus neuf : le format est résolu avant, le partiel reste un partiel", async (t) => {
+  const { execFileSync } = await import("node:child_process");
+  if (!["tectonic", "pdflatex"].some((b) => { try { execFileSync("which", [b], { stdio: "ignore" }); return true; } catch { return false; } })) return t.skip("tectonic/pdflatex absent");
+  const { buildCourseRow } = await import("../lib/course-create");
+  const { insertCourse } = await import("../db/courses-store");
+  const { reloadCourses } = await import("../lib/courses");
+  const { runWithCourse } = await import("../db/client");
+  const { q } = await import("../db/q");
+  const { getQcmExam, recompileQcmPdf } = await import("../lib/qcm");
+  const { examsDir } = await import("../lib/paths");
+  // Cours jamais résolu dans ce processus (mémoire du format vide), annales toutes partielles : la
+  // recompilation d'un PDF (app/api/exams/[id]/pdf) ne passe pas par la génération.
+  const row = buildCourseRow({ name: "Cold Fictional Course", code: "CLD-110", university: "Testville University", language: "en", examFormat: { kind: "qcm", durationMin: 50 } }, "owner");
+  await insertCourse(row);
+  await reloadCourses();
+  const tex = await runWithCourse(row.id, async () => {
+    for (const tbl of ["sources", "items"]) await q.ensureTable(tbl);
+    const sid = await q.insert(`INSERT INTO sources (type, title, path, year, recency_weight) VALUES (?,?,?,?,?)`, "midterm", "midterm 2025", "refs/midterm-2025.pdf", 2025, 1);
+    await q.insert(`INSERT INTO items (source_id, type, title, text) VALUES (?,?,?,?)`, sid, "exam", "midterm 2025", "Question 1. Pick the fictional answer.");
+    // Questions composées d'abord (mémoire encore vide) : leur rendu résout le format (par la durée) avant la garde.
+    const { renderBlocksTex } = await import("../lib/blocks-latex");
+    const { BLOCKS, DATE } = await import("./helpers/gabarits");
+    const blocks = await renderBlocksTex(BLOCKS, DATE, false);
+    const { formatContextFor } = await import("../lib/exam-format");
+    assert.equal(formatContextFor(row.id).genre, "midterm");
+    await getQcmExam(0);
+    const id = await q.insert(`INSERT INTO exams (format_template, status, html_path) VALUES ('qcm','ready','')`);
+    await q.run(`INSERT INTO qcm_items (exam_id, idx, topic, type, stem, options_json, correct_json, misconceptions_json, explanation, verified) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      id, 0, "Fiction", "scq", "Which answer is fictional?", JSON.stringify(["This one", "That one"]), "[0]", "[]", "This one is fictional.", 1);
+    await recompileQcmPdf(id);
+    return [blocks, fs.readFileSync(path.join(examsDir(), `qcm-${id}.tex`), "utf8")];
+  });
+  for (const x of tex) assert.match(x, /Midterm exam/);
+});
