@@ -1,3 +1,4 @@
+// i18n-allow-file: diagnostic technique pour la supervision, aucun écran ne l’affiche
 import { q } from "@/db/q";
 import { authGet } from "@/db/auth-store";
 import { ensureCoursesLoaded, listCourses } from "@/lib/courses";
