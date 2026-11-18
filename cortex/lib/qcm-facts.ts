@@ -345,16 +345,34 @@ export async function courseFacts(labels: string[], opts: { count: number; step?
 /**
  * Faits déjà posés aux examens précédents du cours : fait → dernier examen qui l'a posé. Une
  * question d'avant les faits (sans fact_id) est rattachée au fait dont l'énoncé recouvre le plus
- * ce qu'elle teste (bonne réponse, explication), s'il le recouvre nettement.
+ * ce qu'elle teste (bonne réponse, explication), s'il le recouvre nettement ; celles qui restent,
+ * ouvertes comprises, sont rattachées par le modèle, en un appel (banc rs-qcm15 du 17/11 : le
+ * paradoxe de Simpson posé sous un décor d'embauche ne partageait pas assez de mots avec son fait,
+ * cru jamais posé, et la reprise revenait au comblement). Modèle indisponible : les mots seuls.
  */
 export async function askedFacts(facts: CourseFact[]): Promise<Map<string, number>> {
   const rows = await q.all<{ exam_id: number | string; stem: string; options_json: string | null; correct_json: string | null; explanation: string | null; fact_id: string | null }>(
     `SELECT exam_id, stem, options_json, correct_json, explanation, fact_id FROM qcm_items ORDER BY exam_id DESC, idx LIMIT 400`,
   ).catch(() => []);
+  const open = await q.all<{ exam_id: number | string; concept: string | null; statement_html: string | null }>(
+    `SELECT exam_id, concept, statement_html FROM exam_questions ORDER BY exam_id DESC, id LIMIT 100`,
+  ).catch(() => []);
   const known = new Set(facts.map((f) => f.id));
   const roots = facts.map((f) => ({ f, r: contentRoots(f.statement) }));
   const out = new Map<string, number>();
   const mark = (id: string, exam: number) => { if (!out.has(id) || out.get(id)! < exam) out.set(id, exam); };
+  const unmatched: { exam: number; text: string }[] = [];
+  const byWords = (exam: number, text: string) => {
+    const tested = contentRoots(text);
+    let best: { id: string; score: number } | null = null;
+    for (const { f, r } of roots) {
+      if (r.size < 3) continue;
+      const score = [...r].filter((x) => tested.has(x)).length / r.size;
+      if (score >= 0.6 && (!best || score > best.score)) best = { id: f.id, score };
+    }
+    if (best) mark(best.id, exam);
+    else unmatched.push({ exam, text });
+  };
   for (const row of rows) {
     const exam = Number(row.exam_id);
     if (row.fact_id) { if (known.has(row.fact_id)) mark(row.fact_id, exam); continue; }
@@ -363,14 +381,42 @@ export async function askedFacts(facts: CourseFact[]): Promise<Map<string, numbe
       const options = JSON.parse(row.options_json ?? "[]") as string[];
       key = (JSON.parse(row.correct_json ?? "[]") as number[]).map((k) => options[k] ?? "").join(" ");
     } catch { /* question illisible : l'énoncé seul */ }
-    const tested = contentRoots(`${row.stem} ${key} ${row.explanation ?? ""}`);
-    let best: { id: string; score: number } | null = null;
-    for (const { f, r } of roots) {
-      if (r.size < 3) continue;
-      const score = [...r].filter((x) => tested.has(x)).length / r.size;
-      if (score >= 0.6 && (!best || score > best.score)) best = { id: f.id, score };
+    byWords(exam, `${row.stem} ${key} ${row.explanation ?? ""}`);
+  }
+  if (open.length) {
+    const { dropSectionCallouts } = await import("@/lib/exam-latex");
+    for (const o of open) {
+      const text = dropSectionCallouts(o.statement_html ?? "").replace(/<\/?[a-zA-Z][^>]*>/g, " ").replace(/\\[a-zA-Z]+\*?/g, " ").replace(/[{}$\\]/g, "").replace(/\s+/g, " ").trim();
+      if (text) byWords(Number(o.exam_id), `${o.concept ? `${o.concept} : ` : ""}${text}`);
     }
-    if (best) mark(best.id, exam);
+  }
+  if (unmatched.length && facts.length) {
+    // Les plus récentes d'abord, bornées : un seul appel, de taille connue.
+    const asked = unmatched.sort((a, b) => b.exam - a.exam).slice(0, ASKED_BY_MODEL);
+    try {
+      for (const [i, f] of await factsTestedBy(facts, asked.map((a) => a.text))) mark(facts[f].id, asked[i].exam);
+    } catch { /* modèle indisponible : les rattachements par les mots seuls */ }
   }
   return out;
+}
+
+/** Questions précédentes non rattachées par leurs mots que le modèle relit, au plus. */
+const ASKED_BY_MODEL = 60;
+
+/** Pour chaque question (son rang), le rang du fait qu'elle teste, si le modèle en nomme un. */
+async function factsTestedBy(facts: CourseFact[], questions: string[]): Promise<[number, number][]> {
+  const out = await completeJson<{ matches: { question: number; fact: number }[] }>({
+    model: "opus", timeoutMs: 300_000,
+    json: { schema: { type: "object", properties: { matches: { type: "array", items: { type: "object", properties: { question: { type: "integer" }, fact: { type: "integer" } }, required: ["question", "fact"], additionalProperties: false } } }, required: ["matches"], additionalProperties: false } },
+    prompt: [
+      `Voici les FAITS du cours (F0, F1…) et des questions déjà posées aux examens précédents (Q0, Q1…). Pour chaque question, donne le fait qu'elle teste : la même proposition, la même règle ou le même résultat, même sous un autre décor, d'autres chiffres ou une autre langue. -1 si elle n'en teste aucun nettement.`,
+      DATA_RULE,
+      dataBlock("FAITS", facts.map((f, i) => ({ src: `F${i}`, text: f.statement.slice(0, 240) }))),
+      dataBlock("QUESTIONS DÉJÀ POSÉES", questions.map((t, i) => ({ src: `Q${i}`, text: t.replace(/\s+/g, " ").slice(0, 400) }))),
+      `Réponds UNIQUEMENT avec {"matches":[{"question":0,"fact":2}]}.`,
+    ].join("\n"),
+  }, { check: (v) => (Array.isArray(v?.matches) ? null : "le champ « matches » (tableau) manque") });
+  return out.matches
+    .filter((m) => Number.isInteger(m?.question) && Number.isInteger(m?.fact) && m.question >= 0 && m.question < questions.length && m.fact >= 0 && m.fact < facts.length)
+    .map((m) => [m.question, m.fact]);
 }
