@@ -157,8 +157,8 @@ export function blockIssue(v: unknown, min: number, max: number, shape: PartShap
     if (!isInt(p.points) || p.points < 1) return `${at} : « points » doit être un entier ≥ 1`;
     if (p.kind === "scq") {
       const opts = Array.isArray(p.options) ? p.options : [];
-      if (shape.options ? opts.length !== shape.options : opts.length < 3 || opts.length > 6) return `${at} (scq) : ${shape.options ? `exactement ${shape.options} options, comme l'annale` : "3 à 6 options non vides (4 de préférence)"}`;
-      if (opts.some((o) => !text(o))) return `${at} (scq) : une option est vide`;
+      const empty = opts.some((o) => !text(o));
+      if (shape.options ? opts.length !== shape.options || empty : opts.length < 3 || opts.length > 6 || empty) return `${at} (scq) : ${shape.options ? `exactement ${shape.options} options non vides, comme l'annale` : "3 à 6 options non vides (4 de préférence)"}`;
       if (!isInt(p.correct) || p.correct < 0 || p.correct >= opts.length) return `${at} (scq) : « correct » doit être l'indice de la bonne option`;
     } else if (p.kind === "short") {
       const crit = Array.isArray(p.criteria) ? p.criteria : [];
@@ -199,7 +199,8 @@ function seedOf(s: string): number {
 
 /** Position de la bonne option mélangée (graine = l'énoncé : reproductible). */
 function shuffleOptions(p: BlockPart): BlockPart {
-  if (p.kind !== "scq" || /\b(?:option|answer|réponse)\s+[A-D]\b/.test(p.explanation)) return p;
+  // Jusqu'à H : l'annale peut avoir 5 options ou plus (P1-12).
+  if (p.kind !== "scq" || /\b(?:option|answer|réponse)\s+[A-H]\b/.test(p.explanation)) return p;
   const rnd = seeded(seedOf(p.prompt));
   const order = p.options.map((_, i) => i);
   for (let i = order.length - 1; i > 0; i--) {

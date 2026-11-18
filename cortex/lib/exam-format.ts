@@ -396,7 +396,7 @@ async function annales(cap = 8000): Promise<{ count: number; text: string }> {
  * Seulement avec des questions à choix, ou des lectures de code : un problème de calcul ou de
  * preuve à sous-questions (STEM) reste un exercice.
  */
-export function blocksOf(p: Pick<FormatProfile, "format_summary" | "sections" | "total_points" | "composite" | "has_mcq" | "options_per_question">): (BlockFormat & { count: number }) | null {
+export function blocksOf(p: Pick<FormatProfile, "format_summary" | "sections" | "total_points" | "composite" | "has_mcq">): (BlockFormat & { count: number }) | null {
   const shape = partShapeOf(p);
   if (!p.has_mcq && !shape.kinds?.includes("code_output")) return null;
   const sections = (p.sections ?? []).filter((s) => s?.name).map((s) => ({ name: String(s.name), description: String(s.description ?? "") }));
@@ -413,12 +413,16 @@ export function blocksOf(p: Pick<FormatProfile, "format_summary" | "sections" | 
   return { count: Math.min(sections.length, BLOCKS_MAX), sections: sections.slice(0, BLOCKS_MAX), partsMin: lo, partsMax: clamp(Number(m[2]), lo, 8), totalPoints, ...shape };
 }
 
-/** Forme des sous-questions lue dans le profil ; seuls les champs lisibles sont posés. */
-function partShapeOf(p: Pick<FormatProfile, "composite" | "options_per_question">): PartShape {
-  const kinds = [...new Set(p.composite?.part_kinds ?? [])].filter((k): k is BlockPartKind => (BLOCK_PART_KINDS as readonly string[]).includes(k));
-  const codeLanguage = String(p.composite?.code_language ?? "").trim().toLowerCase().replace(/[^a-z0-9+#]/g, "").slice(0, 20);
-  const options = optionsOf(p);
-  return { ...(kinds.length ? { kinds } : {}), ...(options ? { options } : {}), ...(codeLanguage ? { codeLanguage } : {}) };
+/**
+ * Forme des sous-questions lue dans le profil ; seuls les champs lisibles sont posés. Le nombre
+ * d'options est celui des choix uniques DES questions composées : une section de QCM vrai/faux à
+ * côté ne l'impose pas aux blocs.
+ */
+function partShapeOf(p: Pick<FormatProfile, "composite">): PartShape {
+  const c = p.composite;
+  const kinds = [...new Set(c?.part_kinds ?? [])].filter((k): k is BlockPartKind => (BLOCK_PART_KINDS as readonly string[]).includes(k));
+  const codeLanguage = String(c?.code_language ?? "").trim().toLowerCase().replace(/[^a-z0-9+#]/g, "").slice(0, 20);
+  return shapeOf({ kinds: kinds.length ? kinds : undefined, options: optionsOf({ options_per_question: c?.scq_options }) ?? undefined, codeLanguage: codeLanguage || undefined });
 }
 
 /** La forme des sous-questions d'un format à questions composées, sans le reste. */

@@ -34,8 +34,10 @@ const code = { kind: "code_output", prompt: "What does it print?", code: "System
 const scq = (n: number) => ({ kind: "scq", prompt: "Which one?", code: "", options: Array.from({ length: n }, (_, i) => `option ${i}`), correct: 0, answer: "", criteria: [], points: 1, explanation: "" });
 
 test("le profil de l'annale porte ses types de sous-questions, son langage de code et son nombre d'options", () => {
-  const b = blocksOf(profile({ part_kinds: ["short", "code_output", "bogus"], code_language: " Java " }, { options_per_question: 5 }));
+  const b = blocksOf(profile({ part_kinds: ["short", "code_output", "bogus"], code_language: " Java ", scq_options: 5 }));
   assert.deepEqual([b?.kinds, b?.codeLanguage, b?.options], [["short", "code_output"], "java", 5]);
+  // Une section de vrai/faux à côté des blocs (2 options par QCM) ne s'impose pas aux choix des blocs.
+  assert.equal(blocksOf(profile({ part_kinds: ["scq", "short"] }, { options_per_question: 2 }))?.options, undefined);
   // Sans ces champs (profils détectés avant) : rien de déclaré, le générateur garde son mélange par défaut.
   const old = blocksOf(profile({}));
   assert.deepEqual([old?.kinds, old?.codeLanguage, old?.options], [undefined, undefined, undefined]);
