@@ -554,7 +554,7 @@ export async function startWorker(jobId: number, course?: string): Promise<void>
   // faite, le job reste en file, différé : le conteneur suivant le démarre à son boot.
   if (isDraining()) {
     await q.run(
-      `UPDATE jobs SET worker_id = '${DEFERRED}', current_step = ?, updated_at = ? WHERE id = ? AND status = 'queued' AND pid IS NULL AND (worker_id IS NULL OR worker_id = '' OR worker_id = '${WAITING}')`,
+      `UPDATE jobs SET worker_id = '${DEFERRED}', current_step = ?, step_json = NULL, updated_at = ? WHERE id = ? AND status = 'queued' AND pid IS NULL AND (worker_id IS NULL OR worker_id = '' OR worker_id = '${WAITING}')`,
       DEFERRED_MSG, nowStr(), jobId,
     );
     return;
@@ -567,10 +567,11 @@ export async function startWorker(jobId: number, course?: string): Promise<void>
   const admission = await admitJob(currentUser(), c, jobId, pool);
   if (!admission.admitted) {
     const what = pool === "ingest" ? "ton import démarre" : "ta génération démarre";
+    const stepInfo: JobStepInfo = { key: "waiting", position: admission.position, ingest: pool === "ingest" };
     await q.run(
-      `UPDATE jobs SET worker_id = '${WAITING}', current_step = ?, updated_at = ? WHERE id = ? AND status = 'queued' AND pid IS NULL AND (worker_id IS NULL OR worker_id IN ('', '${DEFERRED}', '${WAITING}'))`,
+      `UPDATE jobs SET worker_id = '${WAITING}', current_step = ?, step_json = ?, updated_at = ? WHERE id = ? AND status = 'queued' AND pid IS NULL AND (worker_id IS NULL OR worker_id IN ('', '${DEFERRED}', '${WAITING}'))`,
       `En file d'attente (position ${admission.position}) : le serveur est à pleine charge, ${what} dès qu'une place se libère.`,
-      nowStr(), jobId,
+      JSON.stringify(stepInfo), nowStr(), jobId,
     );
     return;
   }
@@ -618,7 +619,7 @@ export async function handOffJobs(workers: TrackedWorker[]): Promise<number> {
     for (let t = 0; t < 30 && isPidAlive(w.pid); t++) await new Promise((r) => setTimeout(r, 100));
     await runWithUser(w.user, () => runWithCourse(w.course, async () => {
       const r = await q.run(
-        `UPDATE jobs SET status = 'queued', pid = NULL, heartbeat_at = NULL, worker_id = '${DEFERRED}', current_step = ?, updated_at = ? WHERE id = ? AND status IN ${ACTIVE_STATES}`,
+        `UPDATE jobs SET status = 'queued', pid = NULL, heartbeat_at = NULL, worker_id = '${DEFERRED}', current_step = ?, step_json = NULL, updated_at = ? WHERE id = ? AND status IN ${ACTIVE_STATES}`,
         HANDOFF_MSG, nowStr(), w.jobId,
       );
       if (r.changes === 1) {

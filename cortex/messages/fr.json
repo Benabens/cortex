@@ -1613,6 +1613,7 @@
     "stepQueued": "En file…",
     "stepRunning": "{type, select, qcm {Génération de l’examen QCM…} exam {Génération de l’examen…} exercise {Génération de l’exercice…} lab {Génération de l’exercice…} ingest {Lecture de tes fichiers…} prepare {Préparation du cours…} format {Lecture du format d’examen…} blueprint {Analyse du programme…} other {En cours…}}",
     "stepResumed": "Worker interrompu, reprise automatique (tentative {attempt}/{max}), progression conservée.",
+    "stepWaiting": "En file d’attente (position {position}) : le serveur est à pleine charge, {what, select, ingest {ton import démarre} other {ta génération démarre}} dès qu’une place se libère.",
     "stepDone": "Terminé ✓",
     "stepDoneIncomplete": "Terminé ⚠ {shortfall}",
     "stepCanceled": "Annulé",
