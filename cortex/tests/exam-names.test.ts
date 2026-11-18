@@ -62,3 +62,15 @@ test("plusieurs partiels d'une même année restent distincts : Midterm 1, Midte
   assert.deepEqual(pickEnonces(titled([["midterm2-2024-solutions.pdf", "Midterm 2 solutions", 2024], ["midterm2-2024.pdf", "Midterm 2", 2024]])).map((r) => r.path), ["midterm2-2024.pdf"]);
   assert.equal(examKindOf("Prelim_2_2023.pdf"), "midterm");
 });
+
+test("relecture : ni des notes « preliminary », ni un dossier qui contient « prelims » dans un mot, ni une année collée ne trompent l'index", () => {
+  const titled = (list: [string, string, number][]) => list.map(([path, title, year]) => ({ path, title, year }));
+  assert.equal(examKindOf("preliminary_notes.pdf"), null, "des notes préliminaires ne sont pas une annale");
+  assert.equal(examKindOf("nonprelims-archive/Exam_2024.pdf"), "final");
+  // « Midterm23 » : l'année courte, pas le partiel n° 23 ; il rejoint la version 2 du même partiel.
+  assert.equal(pickEnonces(titled([["Midterm23.pdf", "Midterm23", 2023], ["Midterm_2023_v2.pdf", "Midterm 2023 v2", 2023]])).length, 1);
+  // Un extrait sans numéro rejoint l'unique partiel numéroté de son année, au lieu d'en faire un de plus.
+  assert.deepEqual(pickEnonces(titled([["extract-page-193.html", "Midterm Exam - Course Website", 2024], ["Midterm2_2024.pdf", "Midterm 2", 2024]])).map((r) => r.path), ["Midterm2_2024.pdf"]);
+  // Deux partiels numérotés : l'extrait sans numéro reste à part (on ne sait pas lequel il est).
+  assert.equal(pickEnonces(titled([["page.html", "Midterm", 2024], ["m1-2024.pdf", "Midterm 1", 2024], ["m2-2024.pdf", "Midterm 2", 2024]])).length, 3);
+});
