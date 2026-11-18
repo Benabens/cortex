@@ -125,3 +125,23 @@ test("la notification éditeur utilise PUBLISHER_EMAIL et est omise sans configu
     delete process.env.PUBLISHER_EMAIL;
   }
 });
+
+test("l’accusé de rétractation anglais rappelle que la version française fait foi", async () => {
+  const { sendReceipt } = await import("../app/api/account/withdrawal/route");
+  const originalFetch = globalThis.fetch;
+  let payload: { subject?: string; text?: string } = {};
+  globalThis.fetch = async (_input, init) => {
+    payload = JSON.parse(String(init?.body)) as typeof payload;
+    return new Response("{}", { status: 200 });
+  };
+  process.env.RESEND_API_KEY = "re_test";
+  try {
+    await sendReceipt("student@example.com", "2026-11-17 10:00:00", "cs_test", "en");
+    assert.equal(payload.subject, "Withdrawal request received");
+    assert.match(payload.text ?? "", /The French version is legally binding\./);
+    assert.doesNotMatch(payload.text ?? "", /Nous accusons réception/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.RESEND_API_KEY;
+  }
+});

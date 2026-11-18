@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/i18n/api-error";
+import type { ErrorCode } from "@/lib/i18n/user-error";
 
 /**
  * PLAFONDS PAR CHAMP des routes d'assistance (prix FIXE : 0,3 crédit l'appel).
@@ -36,18 +38,16 @@ export const FIELD_LIMITS = {
 
 export type LimitedField = keyof typeof FIELD_LIMITS;
 
-const LABELS: Record<LimitedField, string> = {
-  concept: "Le concept", statement: "L’énoncé", answer: "La réponse", target: "La cible", note: "La note", text: "Le texte",
-  focus: "Le sujet à travailler", feedbackNote: "La remarque",
-  topic: "Le sujet", description: "La note",
+const CODES: Record<LimitedField, ErrorCode> = {
+  concept: "field_too_long_concept", statement: "field_too_long_statement", answer: "field_too_long_answer",
+  target: "field_too_long_target", note: "field_too_long_note", text: "field_too_long_text",
+  focus: "field_too_long_focus", feedbackNote: "field_too_long_feedback_note",
+  topic: "field_too_long_topic", description: "field_too_long_note",
 };
 
 /** Réponse 413 si `value` dépasse le plafond du champ, sinon null. */
-export function fieldTooLong(field: LimitedField, value: string): NextResponse | null {
+export function fieldTooLong(req: Request, field: LimitedField, value: string): NextResponse | null {
   const max = FIELD_LIMITS[field];
   if (value.length <= max) return null;
-  return NextResponse.json(
-    { error: `${LABELS[field]} dépasse ${max.toLocaleString("fr-FR")} caractères (${value.length.toLocaleString("fr-FR")} reçus). Raccourcis-le : l’assistance travaille sur un extrait, pas sur un document entier.`, field, max },
-    { status: 413 },
-  );
+  return apiError(req, { code: CODES[field], params: { max, count: value.length } }, 413, { field, max });
 }

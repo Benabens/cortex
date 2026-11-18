@@ -7,11 +7,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderIntl } from "./helpers/intl";
 
 const render = async (props: Record<string, unknown>) => {
   const { LoadError } = await import("../components/ui/LoadError");
-  return renderToStaticMarkup(createElement(LoadError, props as never));
+  return renderIntl(createElement(LoadError, props as never));
 };
 
 test("LoadError : titre, explication, bouton Réessayer actif", async () => {

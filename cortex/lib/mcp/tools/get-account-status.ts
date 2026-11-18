@@ -5,7 +5,7 @@ import { getUsageLimits } from "@/lib/billing/limits";
 import { remainingLine } from "@/lib/billing/limits-text";
 import { isOwner } from "@/lib/billing/owner";
 import { costForJob } from "@/lib/jobs";
-import { defineTool, READ_ONLY_HINTS } from "../tool";
+import { assistantSafeMessage, defineTool, READ_ONLY_HINTS } from "../tool";
 
 const quota = z.object({ used: z.number(), limit: z.number().nullable().describe("null = no daily limit on this instance.") });
 
@@ -16,7 +16,7 @@ const generationLeft = z.object({
   can_launch_now: z.boolean(),
   blocked_reason: z.string().nullable().describe("When can_launch_now is false: the exact message the app and the generation tools return. Tell it to the student as is."),
   cost_credits: z.number(),
-  summary: z.string().nullable().describe("One line for the student, e.g. \"Il te reste 3 examens QCM aujourd'hui · remise à 0 demain à 01:00\"."),
+  summary: z.string().nullable().describe("One line for the student, e.g. \"You have 3 MCQ exams left today · resets tomorrow at 01:00\"."),
 });
 
 // Même fonction que la page « Mon usage » de l'app et que les refus des outils payants
@@ -82,7 +82,7 @@ export default defineTool({
     "and how many of each kind the student can still launch: the same numbers the app shows and the paid tools enforce. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
-  userSummary: "Lit ton solde de crédits, les coûts et tes limites du jour.",
+  userSummary: "getAccountStatus",
   input: z.object({}),
   output,
   async run(_args, ctx) {
@@ -95,7 +95,7 @@ export default defineTool({
       const g = usage.generations[k];
       return {
         remaining: g.remaining, limited_by: g.limitedBy, resets_at: g.resetAt, can_launch_now: g.allowed,
-        blocked_reason: g.reason, cost_credits: g.costCredits, summary: remainingLine(g, usage.now),
+        blocked_reason: g.reason === null ? null : assistantSafeMessage(g.reason), cost_credits: g.costCredits, summary: remainingLine(g, usage.now),
       };
     };
     return {
@@ -128,11 +128,11 @@ export default defineTool({
     };
   },
   summarize: (o) => (o.owner_mode
-    ? "Compte propriétaire : rien n'est débité ni compté. "
+    ? "Owner account: nothing is charged or counted. "
     : o.credits
-    ? `Solde : ${o.credits.balance} crédit(s). `
-    : "Facturation désactivée sur cette instance. ") +
-    `Aujourd'hui : ${o.quotas.generations.used}${o.quotas.generations.limit === null ? "" : `/${o.quotas.generations.limit}`} génération(s), ` +
-    `${o.quotas.assistance.used}${o.quotas.assistance.limit === null ? "" : `/${o.quotas.assistance.limit}`} assistance(s).` +
+    ? `Balance: ${o.credits.balance} credits. `
+    : "Billing is disabled on this instance. ") +
+    `Today: ${o.quotas.generations.used}${o.quotas.generations.limit === null ? "" : `/${o.quotas.generations.limit}`} generations, ` +
+    `${o.quotas.assistance.used}${o.quotas.assistance.limit === null ? "" : `/${o.quotas.assistance.limit}`} assistance calls.` +
     (o.usage_limits.generations.mcq_exam.summary ? ` ${o.usage_limits.generations.mcq_exam.summary}.` : ""),
 });

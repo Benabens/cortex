@@ -9,6 +9,7 @@ import { purgePdfPages } from "@/lib/page-cache";
 import { originalsPolicy, type OriginalsHome } from "@/lib/originals/policy";
 import { forgetOriginal, isIndexed, localOriginal, localOriginals, markLocal, recordTransit, type OriginalOrigin } from "@/lib/originals/registry";
 import { storage } from "@/lib/storage";
+import { refusal, type Refusal } from "@/lib/i18n/user-error";
 
 /**
  * ARRIVÉE ET DÉPART D'UN ORIGINAL — le seul endroit qui décide où un fichier déposé est écrit.
@@ -161,14 +162,14 @@ async function bringBack(abs: string, data: Buffer, home: OriginalsHome, courseP
  * préparation qui relit les pages). L'empreinte doit être celle du registre : sinon ce n'est pas
  * le même fichier, et l'index du cours n'en vient pas.
  */
-export async function returnOriginal(courseId: string, coursePath: string, data: Buffer): Promise<{ ok: true; home: OriginalsHome } | { ok: false; status: number; error: string }> {
+export async function returnOriginal(courseId: string, coursePath: string, data: Buffer): Promise<{ ok: true; home: OriginalsHome } | ({ ok: false } & Refusal)> {
   const row = await localOriginal(coursePath);
-  if (!row) return { ok: false, status: 404, error: "Ce fichier n'est pas un original resté sur ton ordinateur." };
+  if (!row) return { ok: false, ...refusal(404, "original_not_local") };
   if (sha256(data) !== row.sha256) {
-    return { ok: false, status: 409, error: `Ce n'est pas le même fichier que « ${row.name} » (contenu différent) : dépose-le comme un nouveau support.` };
+    return { ok: false, ...refusal(409, "original_content_mismatch", { name: row.name }) };
   }
   const abs = absoluteOf(courseId, coursePath);
-  if (!abs) return { ok: false, status: 400, error: "Chemin invalide." };
+  if (!abs) return { ok: false, ...refusal(400, "path_invalid") };
   const home = await originalsHomeFor(courseId);
   await bringBack(abs, data, home, coursePath);
   return { ok: true, home };

@@ -7,18 +7,7 @@ import { Panel } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/Button";
 import { useCourse } from "@/lib/ux/api";
 import { EMPTY_FORMAT, ExamFormatFields, formatPayload, type ExamFormatDraft } from "@/components/cours/ExamFormatFields";
-
-// « auto » : la langue se détecte sur les annales puis les supports importés (lib/exam-format).
-const LANGUES: { value: string; label: string }[] = [
-  { value: "auto", label: "Détecter d’après les supports" },
-  { value: "fr", label: "Français" },
-  { value: "en", label: "Anglais" },
-  { value: "de", label: "Allemand" },
-  { value: "it", label: "Italien" },
-  { value: "es", label: "Espagnol" },
-  { value: "pt", label: "Portugais" },
-  { value: "nl", label: "Néerlandais" },
-];
+import { useTranslations } from "use-intl/react";
 
 const field =
   "w-full rounded-lg border border-line-strong bg-surface-2/40 px-3 py-2.5 text-[0.88rem] text-ink-1 " +
@@ -31,6 +20,18 @@ const field =
  * ici (type, nombre de questions, durée, langue) est le seul que Cortex suit.
  */
 export function CourseForm() {
+  const t = useTranslations("courseForm");
+  // « auto » : la langue se détecte sur les annales puis les supports importés (lib/exam-format).
+  const languages = [
+    { value: "auto", label: t("languageAuto") },
+    { value: "fr", label: t("languageFr") },
+    { value: "en", label: t("languageEn") },
+    { value: "de", label: t("languageDe") },
+    { value: "it", label: t("languageIt") },
+    { value: "es", label: t("languageEs") },
+    { value: "pt", label: t("languagePt") },
+    { value: "nl", label: t("languageNl") },
+  ];
   const router = useRouter();
   const { refresh } = useCourse();
   const [form, setForm] = useState({
@@ -61,14 +62,14 @@ export function CourseForm() {
         body: JSON.stringify({ ...form, examFormat: formatPayload(format) }),
       });
       const d = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(d?.error ?? `Erreur ${res.status}`);
+      if (!res.ok) throw new Error(d?.error ?? t("errorStatus", { status: res.status }));
       setDone(true);
       // Recharge la liste ET bascule sur le cours neuf : l'utilisateur atterrit
       // sur Sources, l'écran depuis lequel il dépose ses annales.
       await refresh(d?.course?.id);
       router.push("/sources");
     } catch (err) {
-      setError((err as Error).message || "La création a échoué.");
+      setError((err as Error).message || t("createFailed"));
       setBusy(false);
     }
   };
@@ -76,11 +77,11 @@ export function CourseForm() {
   return (
     <Panel className="max-w-[40rem] p-5 sm:p-6">
       <form onSubmit={submit} className="flex flex-col gap-4">
-        <h2 className="text-[0.95rem] font-semibold text-ink-1">La matière</h2>
+        <h2 className="text-[0.95rem] font-semibold text-ink-1">{t("section")}</h2>
 
         <label className="flex flex-col gap-1.5">
           <span className="text-[0.82rem] font-medium text-ink-2">
-            Nom du cours <span className="text-danger-hi">*</span>
+            {t("name")} <span className="text-danger-hi">*</span>
           </span>
           <input
             value={form.name}
@@ -88,43 +89,43 @@ export function CourseForm() {
             required
             maxLength={80}
             autoFocus
-            placeholder="Analyse 3"
+            placeholder={t("namePlaceholder")}
             className={field}
           />
         </label>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
-            <span className="text-[0.82rem] font-medium text-ink-2">Code</span>
-            <input value={form.code} onChange={set("code")} maxLength={24} placeholder="MATH 201" className={field} />
+            <span className="text-[0.82rem] font-medium text-ink-2">{t("code")}</span>
+            <input value={form.code} onChange={set("code")} maxLength={24} placeholder={t("codePlaceholder")} className={field} />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-[0.82rem] font-medium text-ink-2">Établissement</span>
+            <span className="text-[0.82rem] font-medium text-ink-2">{t("institution")}</span>
             <input
               value={form.university}
               onChange={set("university")}
               maxLength={80}
-              placeholder="Ton université ou école"
+              placeholder={t("institutionPlaceholder")}
               className={field}
             />
           </label>
         </div>
 
         <label className="flex flex-col gap-1.5">
-          <span className="text-[0.82rem] font-medium text-ink-2">Enseignant·es</span>
+          <span className="text-[0.82rem] font-medium text-ink-2">{t("teachers")}</span>
           <input
             value={form.teachers}
             onChange={set("teachers")}
-            placeholder="Séparés par des virgules"
+            placeholder={t("teachersPlaceholder")}
             className={field}
           />
         </label>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
-            <span className="text-[0.82rem] font-medium text-ink-2">Langue</span>
+            <span className="text-[0.82rem] font-medium text-ink-2">{t("language")}</span>
             <select value={form.language} onChange={set("language")} className={field}>
-              {LANGUES.map((l) => (
+              {languages.map((l) => (
                 <option key={l.value} value={l.value}>
                   {l.label}
                 </option>
@@ -132,13 +133,13 @@ export function CourseForm() {
             </select>
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-[0.82rem] font-medium text-ink-2">Date de l’examen</span>
+            <span className="text-[0.82rem] font-medium text-ink-2">{t("examDate")}</span>
             <input type="date" value={form.examDate} onChange={set("examDate")} className={field} />
           </label>
         </div>
 
         <p className="text-[0.78rem] leading-relaxed text-ink-3">
-          Ces informations habillent la page de garde des sujets générés.
+          {t("coverHint")}
         </p>
 
         <ExamFormatFields value={format} onChange={setFormat} fieldClass={field} />
@@ -152,16 +153,16 @@ export function CourseForm() {
         {done && !error && (
           <p className="inline-flex items-center gap-1.5 text-[0.8rem] text-emerald-hi" aria-live="polite">
             <Check className="size-4" strokeWidth={2.5} />
-            Cours créé : direction l’import des annales.
+            {t("created")}
           </p>
         )}
 
         <div className="flex flex-wrap gap-2.5 border-t border-line pt-4">
           <Button type="submit" variant="primary" loading={busy} disabled={!form.name.trim()}>
-            Créer le cours
+            {t("create")}
           </Button>
           <Button type="button" variant="ghost" onClick={() => router.back()} disabled={busy}>
-            Annuler
+            {t("cancel")}
           </Button>
         </div>
       </form>

@@ -3,12 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@/lib/ux/cn";
+import { useTranslations } from "use-intl/react";
 
 /**
  * Copie `text` dans le presse-papiers. Sans API presse-papiers (page non sécurisée,
  * navigateur ancien), sélectionne le bloc ciblé par `selectId` pour un copier manuel.
  */
 export function CopyButton({ text, label, selectId, className }: { text: string; label: string; selectId?: string; className?: string }) {
+  const t = useTranslations("account.assistants.copy");
   const [state, setState] = useState<"idle" | "done" | "manual">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
@@ -42,10 +44,10 @@ export function CopyButton({ text, label, selectId, className }: { text: string;
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
         className,
       )}
-      aria-label={state === "done" ? `${label} : copié` : label}
+      aria-label={state === "done" ? t("doneLabel", { label }) : label}
     >
       {state === "done" ? <Check className="size-3.5" strokeWidth={2.25} aria-hidden="true" /> : <Copy className="size-3.5" strokeWidth={2.25} aria-hidden="true" />}
-      <span aria-live="polite">{state === "done" ? "Copié" : state === "manual" ? "Sélectionné : ⌘C" : "Copier"}</span>
+      <span aria-live="polite">{state === "done" ? t("done") : state === "manual" ? t("manual") : t("copy")}</span>
     </button>
   );
 }

@@ -3,6 +3,7 @@ import { ReservationRefused, activeJob, costForJob, createJobExclusive, startWor
 import { log } from "@/lib/metrics";
 import { preflightGeneration } from "@/lib/preflight";
 import { planMockExam, requestedFormat, resolveExamFormat, targetKind, type ExamFormat, type ExamKind, type MockExamPlan } from "@/lib/exam-format";
+import { refusal, refusalFrom, type Refusal } from "@/lib/i18n/user-error";
 
 /**
  * LANCEMENT D'UNE GÉNÉRATION PAR JOB, pour l'utilisateur et le cours COURANTS
@@ -21,7 +22,7 @@ import { planMockExam, requestedFormat, resolveExamFormat, targetKind, type Exam
  * exception : la route le rend tel quel, le serveur MCP le traduit en erreur d'outil.
  */
 export type StartedJob = { ok: true; jobId: number; existing: boolean };
-export type StartRefused = { ok: false; status: number; error: string; command?: string };
+export type StartRefused = { ok: false } & Refusal & { command?: string };
 
 export async function startGenerationJob(type: JobType, target?: string): Promise<StartedJob | StartRefused> {
   return startJob(type, target, async () => {
@@ -29,14 +30,14 @@ export async function startGenerationJob(type: JobType, target?: string): Promis
     // tentative de génération doit expliquer le coût et proposer l'achat,
     // même si le cours n'est pas encore prêt ou son format encore inconnu.
     const billingIssue = await launchGate(jobSpec(type, costForJob(type, target)));
-    if (billingIssue) return { ok: false, status: billingIssue.status, error: billingIssue.error };
+    if (billingIssue) return { ok: false, ...billingIssue };
     // Un examen blanc suit le format du cours ; inconnu, il n'est jamais inventé (lib/exam-format).
     if (type === "exam") {
       const plan = planMockExam(requestedFormat(await resolveExamFormat(), targetKind(target)), {});
-      if (plan.generator === "none") return { ok: false, status: 409, error: plan.reason };
+      if (plan.generator === "none") return { ok: false, ...refusal(409, "course_exam_format_missing") };
     }
     const issue = await preflightGeneration(type, target);
-    return issue && { ok: false, status: issue.status, error: issue.error, command: issue.command };
+    return issue && { ok: false, ...issue };
   });
 }
 
@@ -52,7 +53,7 @@ export async function startPrepareJob(): Promise<StartedJob | StartRefused> {
     const existing = await activeJob("prepare");
     if (existing) return { ok: true, jobId: existing.id, existing: true };
     const gate = await launchGate(jobSpec("prepare", costForJob("prepare")));
-    if (gate) return { ok: false, status: gate.status, error: gate.error };
+    if (gate) return { ok: false, ...gate };
     const created = await createJobExclusive("prepare");
     const { setJob } = await import("@/lib/jobs");
     await setJob(created.id, { status: "done", progress: 100, currentStep: "Préparation hermétique E2E terminée" });
@@ -61,7 +62,7 @@ export async function startPrepareJob(): Promise<StartedJob | StartRefused> {
   return startJob("prepare", undefined, async () => {
     // La préparation fait de la vision LLM sur les annales (coûteux) → quota + crédits comme toute génération.
     const gate = await launchGate(jobSpec("prepare", costForJob("prepare")));
-    return gate && { ok: false, status: gate.status, error: gate.error };
+    return gate && { ok: false, ...gate };
   });
 }
 
@@ -77,14 +78,14 @@ async function startJob(type: JobType, target: string | undefined, precheck: () 
   try {
     created = await createJobExclusive(type, target);
   } catch (e) {
-    if (e instanceof ReservationRefused) return { ok: false, status: e.status, error: e.message };
+    if (e instanceof ReservationRefused) return { ok: false, ...refusalFrom(e) };
     throw e;
   }
   try {
     await startWorker(created.id, undefined);
   } catch (e) {
     log("error", "generation.start_worker_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
-    return { ok: false, status: 500, error: "Impossible de démarrer la génération. Réessaie dans un instant." };
+    return { ok: false, ...refusal(500, "generation_start_refused") };
   }
   return { ok: true, jobId: created.id, existing: created.existing };
 }

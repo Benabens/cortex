@@ -1,6 +1,7 @@
 /**
  * GARDE-FOU : aucun texte d'interface écrit en dur ne réapparaît dans les composants, les
- * pages et lib/ux (tout texte visible passe par messages/fr.json et messages/en.json).
+ * pages, les routes (app/, réponses d'API comprises) et lib/ux (tout texte visible passe par
+ * messages/fr.json et messages/en.json).
  *
  * Cliquet : PENDING liste les fichiers pas encore migrés. Un fichier hors de la liste doit
  * être propre ; un fichier de la liste qui devient propre DOIT en sortir (la liste ne fait
@@ -16,89 +17,6 @@ import { looksFrench, scanSource, uiFiles } from "./helpers/i18n-scan";
 const ROOT = path.resolve(__dirname, "..");
 
 const PENDING = new Set<string>([
-  "app/compte/AccountContent.tsx",
-  "app/compte/AppearanceSetting.tsx",
-  "app/compte/BillingPanel.tsx",
-  "app/compte/ConnectedApps.tsx",
-  "app/compte/DeleteAccount.tsx",
-  "app/compte/ExportData.tsx",
-  "app/compte/UsagePanel.tsx",
-  "app/compte/WithdrawalForm.tsx",
-  "app/compte/assistants/CopyButton.tsx",
-  "app/compte/assistants/page.tsx",
-  "app/cours/nouveau/page.tsx",
-  "app/cours/page.tsx",
-  "app/entrainement/page.tsx",
-  "app/error.tsx",
-  "app/examens/page.tsx",
-  "app/faiblesses/page.tsx",
-  "app/global-error.tsx",
-  "app/login/LoginCard.tsx",
-  "app/login/layout.tsx",
-  "app/mock/[id]/page.tsx",
-  "app/not-found.tsx",
-  "app/oauth/authorize/page.tsx",
-  "app/page.tsx",
-  "app/programme/page.tsx",
-  "app/qa/QaHarness.tsx",
-  "app/recherche/page.tsx",
-  "app/revision/page.tsx",
-  "app/signalements/page.tsx",
-  "app/sources/locale/page.tsx",
-  "app/sources/page.tsx",
-  "components/billing/PaywallNotice.tsx",
-  "components/cours/CourseForm.tsx",
-  "components/cours/CourseList.tsx",
-  "components/cours/ExamFormatFields.tsx",
-  "components/dashboard/FirstRunHero.tsx",
-  "components/dashboard/JobBanner.tsx",
-  "components/dashboard/JobProgress.tsx",
-  "components/dashboard/OnboardingHero.tsx",
-  "components/dashboard/PriorityHero.tsx",
-  "components/dashboard/QuietDoors.tsx",
-  "components/dashboard/StepList.tsx",
-  "components/dashboard/UpNext.tsx",
-  "components/entrainement/LabsSeries.tsx",
-  "components/entrainement/TrainingStudio.tsx",
-  "components/exam/BlockExam.tsx",
-  "components/exam/ExamFrame.tsx",
-  "components/exam/OpenResponse.tsx",
-  "components/exam/ReportButton.tsx",
-  "components/examens/ExamComposer.tsx",
-  "components/faiblesses/WeaknessBase.tsx",
-  "components/faiblesses/WeaknessInbox.tsx",
-  "components/programme/ChapterAccordion.tsx",
-  "components/programme/NotionRow.tsx",
-  "components/programme/ProgramExplorer.tsx",
-  "components/programme/ReanalyzeButton.tsx",
-  "components/recherche/SearchExperience.tsx",
-  "components/shell/AppShell.tsx",
-  "components/shell/CourseSelector.tsx",
-  "components/shell/Logo.tsx",
-  "components/shell/NavList.tsx",
-  "components/shell/MobileNav.tsx",
-  "components/shell/Sidebar.tsx",
-  "components/shell/ThemeToggle.tsx",
-  "components/shell/Topbar.tsx",
-  "components/sources/FileManager.tsx",
-  "components/sources/ImportPanel.tsx",
-  "components/sources/OriginalsNotes.tsx",
-  "components/ui/ImageTextArea.tsx",
-  "components/ui/LoadError.tsx",
-  "components/viz/ForgettingCurve.tsx",
-  "components/viz/Sparkline.tsx",
-  "components/viz/WaffleGrid.tsx",
-  "lib/ux/api.tsx",
-  "lib/ux/job-watch.ts",
-  "lib/ux/labels.tsx",
-  "lib/ux/mock.ts",
-  "lib/ux/next-up.ts",
-  "lib/ux/program.ts",
-  "lib/ux/search.ts",
-  "lib/ux/sources.ts",
-  "lib/ux/training.ts",
-  "lib/ux/types.ts",
-  "lib/ux/weaknesses.ts",
 ]);
 
 const files = uiFiles(ROOT);
@@ -127,8 +45,21 @@ test("le détecteur voit le texte en dur et laisse passer le code", () => {
   ].join("\n"));
   // Un libellé d'attribut lu à l'écran est pris en toute langue ; du code ({label}, "") passe.
   assert.deepEqual(hits.map((h) => h.text), ["Créer le cours", "Fermer la fenêtre", "Bonjour", "Search", "Delete course"]);
+  // Exemption de fichier entier : seulement en première ligne, raison donnée.
+  assert.deepEqual(scanSource("m.ts", "// i18n-allow-file: maquette\nconst a = \"Créer le cours\";"), []);
+  assert.equal(scanSource("m.ts", "const z = 1;\n// i18n-allow-file: maquette\nconst a = \"Créer le cours\";").length, 1);
+  // Séparateur « : » écrit en dur entre deux valeurs (typographie française dans l'anglais).
+  assert.equal(scanSource("s.tsx", "const x = <li><b>{name}</b> : {reason}</li>;").length, 1);
+  assert.equal(scanSource("s.tsx", "const x = <li>{t.rich(\"item\", { name })}</li>;").length, 0);
   assert.ok(looksFrench("Tu as 3 crédits"));
   assert.ok(looksFrench("Pour le cours de demain"));
   assert.ok(!looksFrench("Create the course"));
   assert.ok(!looksFrench("h-10 rounded-md px-3"));
+});
+
+test("le périmètre couvre les routes d'API et les modules .ts des composants", () => {
+  assert.ok(files.includes("app/api/usage/route.ts"), "routes d'API scannées");
+  assert.ok(files.includes("app/uploads/[file]/route.ts"), "routes servies hors API scannées");
+  assert.ok(files.some((f) => f.startsWith("lib/ux/") && f.endsWith(".ts")), "lib/ux scanné");
+  assert.ok(!files.some((f) => f.endsWith(".d.ts")), "déclarations de types ignorées");
 });

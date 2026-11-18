@@ -38,9 +38,9 @@ function findCourse(userId: string, ref: string | undefined): CourseConfig {
   const wanted = ref?.trim();
   if (!wanted) {
     if (mine.length === 1) return mine[0];
-    if (!mine.length) throw new ToolError("not_found", "Aucun cours sur ce compte : crée un cours dans Cortex et importe tes documents.");
+    if (!mine.length) throw new ToolError("not_found", "This account has no courses. Create a course in Cortex and import the student’s materials.");
     throw new ToolError("invalid_input",
-      `Ce compte a ${mine.length} cours : précise lequel avec « course ». ${mine.map((c) => `${courseLabel(c)} (id ${c.id})`).join(" ; ")}.`);
+      `This account has ${mine.length} courses. Specify one with “course”: ${mine.map((c) => `${courseLabel(c)} (id ${c.id})`).join("; ")}.`);
   }
   const r = norm(wanted);
   const hit = mine.find((c) => c.id === wanted)
@@ -48,7 +48,7 @@ function findCourse(userId: string, ref: string | undefined): CourseConfig {
     ?? mine.find((c) => norm(c.name) === r);
   // Défense en profondeur : la liste est déjà celle du compte.
   if (!hit || !ownsCourse(userId, hit.id)) {
-    throw new ToolError("not_found", `Cours introuvable sur ce compte : « ${clip(wanted, 80)} ». La liste des cours est donnée par list_courses.`);
+    throw new ToolError("not_found", `No course named “${clip(wanted, 80)}” was found in this account. Use list_courses to see the available courses.`);
   }
   return hit;
 }

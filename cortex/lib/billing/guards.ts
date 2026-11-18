@@ -5,6 +5,7 @@ import { nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import { guardsActive, intLimit } from "./env";
 import { isOwner } from "./owner";
+import type { Refusal } from "@/lib/i18n/user-error";
 
 /**
  * GARDE-FOUS PAR UTILISATEUR :
@@ -35,7 +36,7 @@ import { isOwner } from "./owner";
  * en CHF au-dessus de ces compteurs de clics.
  */
 
-export type GateIssue = { status: number; error: string };
+export type GateIssue = Refusal;
 export type QuotaBucket = "gen" | "assist";
 
 const QUOTA_DEFAULT: Record<QuotaBucket, number> = { gen: 10, assist: 40 };
@@ -83,7 +84,7 @@ export async function generationGate(bucket: QuotaBucket): Promise<GateIssue | n
     { bucket, kind: bucket === "gen" ? "exam" : "assist", costCenti: 0, jobSlot: false },
     ["rate", bucket === "gen" ? "daily_generations" : "daily_assistance"],
   );
-  return r && { status: r.status, error: r.error };
+  return r;
 }
 
 /** Un compteur n'a de sens QUE si un garde-fou l'utilise (quota posé, ou

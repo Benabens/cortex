@@ -177,7 +177,7 @@ test("annotations : un outil sans indication explicite fait échouer le registre
     delete partial[h];
     assert.throws(() => validateTools([{ ...base, annotations: partial } as unknown as typeof base]), new RegExp(h));
   }
-  assert.throws(() => validateTools([{ ...base, userSummary: "" }]), /résumé/);
+  assert.throws(() => validateTools([{ ...base, userSummary: "" }]), /summary/);
 });
 
 test("descriptions : sobres, dans les limites des annuaires, sans consigne cachée", async () => {
@@ -186,8 +186,7 @@ test("descriptions : sobres, dans les limites des annuaires, sans consigne cach�
     assert.ok(t.name.length <= 64, t.name);
     assert.ok(t.description.length <= 2000, `${t.name} : ${t.description.length} caractères`);
     assert.doesNotMatch(t.description, /ignore (all |any )?(previous|prior)|system prompt|<\/?[a-z]+>|do not (tell|mention|reveal)|always (use|call|prefer) (this|cortex)|best|revolutionary|#1|world-class/i, t.name);
-    assert.ok(t.userSummary.length <= 100 && /\.$/.test(t.userSummary), `${t.name} : résumé d'une phrase`);
-    assert.doesNotMatch(t.userSummary, /[A-Za-z]+_[a-z]+/, `${t.name} : pas de nom d'outil dans le résumé`);
+    assert.match(t.userSummary, /^[a-z][A-Za-z]+$/, `${t.name} : clé de traduction du résumé`);
   }
 });
 

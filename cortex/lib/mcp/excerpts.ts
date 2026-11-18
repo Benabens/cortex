@@ -70,7 +70,7 @@ export function contextExcerpt(text: string, query: string, size = EXCERPT_CHARS
         if (!marks.some(([x, y]) => a < y && b > x)) marks.push([a, b]);
       }
     }
-    for (const [a, b] of marks.sort((x, y) => y[0] - x[0])) out = `${out.slice(0, a)}«${out.slice(a, b)}»${out.slice(b)}`;
+    for (const [a, b] of marks.sort((x, y) => y[0] - x[0])) out = `${out.slice(0, a)}“${out.slice(a, b)}”${out.slice(b)}`;
   }
   return `${start > 0 ? "… " : ""}${out}${end < flat.length ? " …" : ""}`;
 }

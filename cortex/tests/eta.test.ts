@@ -11,7 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderIntl } from "./helpers/intl";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-eta-"));
 process.env.CORTEX_DATA_DIR = tmp;
@@ -56,12 +56,12 @@ test("réessai après une coupure : estimé sur ce qui reste à faire, pas sur l
 
 test("rendu du suivi : avancement, étape et temps restant", async () => {
   const { JobProgress } = await import("../components/dashboard/JobProgress");
-  const html = renderToStaticMarkup(createElement(JobProgress, { label: "qcm", progress: 50, queued: false, step: "Vérification à l'aveugle…", eta: "≈ 5 min restantes" }));
+  const html = renderIntl(createElement(JobProgress, { label: "qcm", progress: 50, queued: false, step: "Vérification à l'aveugle…", eta: "≈ 5 min restantes" }));
   assert.match(html, /Génération en cours · qcm/);
   assert.match(html, /50 %/);
   assert.match(html, /≈ 5 min restantes/);
   assert.match(html, /Vérification à l&#x27;aveugle…/);
-  const noEta = renderToStaticMarkup(createElement(JobProgress, { label: "qcm", progress: 0, queued: true, step: null, eta: null }));
+  const noEta = renderIntl(createElement(JobProgress, { label: "qcm", progress: 0, queued: true, step: null, eta: null }));
   assert.match(noEta, /En file/);
 });
 

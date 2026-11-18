@@ -3,6 +3,7 @@ import { currentUser } from "@/db/context";
 import { authAll, authInsert } from "@/db/auth-store";
 import { nowStr, q } from "@/db/q";
 import { sanitizeCorpus } from "@/lib/prompt-safety";
+import { UserFacingError, type UserError } from "@/lib/i18n/user-error";
 
 /**
  * BOUCLE DE RELECTURE — un étudiant (ou un agent, par le connecteur) signale une
@@ -29,9 +30,9 @@ export type ReportKind = "qcm" | "open" | "part";
 export type ReportStatus = "open" | "confirmed" | "not_confirmed";
 
 /** Refus montrable tel quel (message en français), avec son statut HTTP. */
-export class ReportError extends Error {
-  constructor(readonly status: number, message: string) {
-    super(message);
+export class ReportError extends UserFacingError {
+  constructor(status: number, error: UserError) {
+    super(error, status);
     this.name = "ReportError";
   }
 }
@@ -42,25 +43,25 @@ export type ReportResult = { id: number; status: ReportStatus; refundedCenti: nu
 type QcmRow = { topic: string; type: "scq" | "mcq"; stem: string; options_json: string; correct_json: string; misconceptions_json: string | null; explanation: string | null };
 
 export async function reportQuestion(input: ReportInput): Promise<ReportResult> {
-  if (!(REPORT_REASONS as readonly string[]).includes(input.reason)) throw new ReportError(400, "Motif de signalement inconnu.");
-  if (input.kind !== "qcm" && input.kind !== "open" && input.kind !== "part") throw new ReportError(400, "Type de question inconnu (qcm, open ou part).");
-  if (!Number.isInteger(input.examId) || !Number.isInteger(input.itemId)) throw new ReportError(400, "Examen ou question invalide.");
+  if (!(REPORT_REASONS as readonly string[]).includes(input.reason)) throw new ReportError(400, { code: "report_reason_unknown" });
+  if (input.kind !== "qcm" && input.kind !== "open" && input.kind !== "part") throw new ReportError(400, { code: "report_question_type_unknown" });
+  if (!Number.isInteger(input.examId) || !Number.isInteger(input.itemId)) throw new ReportError(400, { code: "report_exam_or_question_invalid" });
   const comment = (input.comment ?? "").trim().slice(0, 1000) || null;
 
   let stem: string;
   if (input.kind === "qcm") {
     const row = await q.get<QcmRow>(`SELECT topic, type, stem, options_json, correct_json, misconceptions_json, explanation FROM qcm_items WHERE id = ? AND exam_id = ?`, input.itemId, input.examId).catch(() => undefined);
-    if (!row) throw new ReportError(404, "Question introuvable dans cet examen.");
+    if (!row) throw new ReportError(404, { code: "question_not_found_in_exam" });
     stem = row.stem;
   } else if (input.kind === "part") {
     const row = await q.get<{ kind: string; prompt: string; options_json: string | null; correct: number | null; explanation: string | null; scenario: string; title: string }>(
       `SELECT p.kind, p.prompt, p.options_json, p.correct, p.explanation, b.scenario, b.title FROM block_parts p JOIN exam_blocks b ON b.id = p.block_id WHERE p.id = ? AND p.exam_id = ?`, input.itemId, input.examId,
     ).catch(() => undefined);
-    if (!row) throw new ReportError(404, "Question introuvable dans cet examen.");
+    if (!row) throw new ReportError(404, { code: "question_not_found_in_exam" });
     stem = `${row.title} : ${row.prompt}`;
   } else {
     const row = await q.get<{ concept: string; statement_html: string }>(`SELECT concept, statement_html FROM exam_questions WHERE id = ? AND exam_id = ?`, input.itemId, input.examId).catch(() => undefined);
-    if (!row) throw new ReportError(404, "Question introuvable dans cet examen.");
+    if (!row) throw new ReportError(404, { code: "question_not_found_in_exam" });
     stem = `${row.concept} : ${row.statement_html}`;
   }
 

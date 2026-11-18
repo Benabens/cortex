@@ -1,15 +1,16 @@
 "use client";
 
 import { useId, useState } from "react";
+import { useTranslations } from "use-intl/react";
 
 const REASONS = [
-  { id: "wrong_answer", label: "Réponse fausse" },
+  { id: "wrong_answer", labelKey: "reasonWrong" },
   {
     id: "off_course",
-    label: "Hors programme / définition différente du cours",
+    labelKey: "reasonOffCourse",
   },
-  { id: "duplicate", label: "Doublon" },
-  { id: "ambiguous", label: "Énoncé ambigu" },
+  { id: "duplicate", labelKey: "reasonDuplicate" },
+  { id: "ambiguous", labelKey: "reasonAmbiguous" },
 ] as const;
 
 /**
@@ -28,6 +29,7 @@ export function ReportButton({
   kind: "qcm" | "open" | "part";
   itemId: number;
 }) {
+  const t = useTranslations("reportButton");
   const commentId = useId();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState<string>("");
@@ -61,7 +63,7 @@ export function ReportButton({
           textDecoration: "underline",
         }}
       >
-        Signaler
+        {t("report")}
       </button>
     );
   }
@@ -80,24 +82,24 @@ export function ReportButton({
       );
       const d = await res.json();
       if (!res.ok) {
-        setError(d.error ?? "Signalement impossible.");
+        setError(d.error ?? t("failed"));
         return;
       }
       const refund =
         d.refundedCenti > 0
-          ? ` ${(d.refundedCenti / 100).toLocaleString("fr-CH")} crédit rendu.`
+          ? t("refund", { credits: d.refundedCenti / 100 })
           : "";
       const verdict =
         d.status === "confirmed"
-          ? " Erreur confirmée à la re-vérification."
+          ? t("confirmed")
           : d.status === "not_confirmed"
-            ? " La re-vérification ne trouve pas d'erreur : le signalement est gardé pour relecture."
+            ? t("notConfirmed")
             : "";
       setDone(
-        `Merci, c'est noté : la question sort de tes révisions et sert de contre-exemple aux prochains examens de ce cours.${verdict}${refund}`,
+        [t("thanks"), verdict, refund].filter(Boolean).join(" "),
       );
     } catch {
-      setError("Signalement impossible. Réessaie dans un instant.");
+      setError(t("failedRetry"));
     } finally {
       setSending(false);
     }
@@ -127,12 +129,12 @@ export function ReportButton({
               checked={reason === r.id}
               onChange={() => setReason(r.id)}
             />
-            {r.label}
+            {t(r.labelKey)}
           </label>
         ))}
       </div>
       <label htmlFor={commentId} className="mt-3 block text-sm text-ink-2">
-        Précisions facultatives
+        {t("details")}
       </label>
       <textarea
         id={commentId}
@@ -140,7 +142,7 @@ export function ReportButton({
         onChange={(e) => setComment(e.target.value)}
         maxLength={1000}
         rows={2}
-        placeholder="Ce qui ne va pas (facultatif)"
+        placeholder={t("placeholder")}
         className="mt-2 w-full text-[12.5px]"
         style={{
           background: "var(--surface-inset)",
@@ -174,7 +176,7 @@ export function ReportButton({
             fontWeight: 600,
           }}
         >
-          {sending ? "Envoi…" : "Envoyer"}
+          {sending ? t("sending") : t("send")}
         </button>
         <button
           type="button"
@@ -188,7 +190,7 @@ export function ReportButton({
             cursor: "pointer",
           }}
         >
-          Annuler
+          {t("cancel")}
         </button>
       </div>
     </div>
