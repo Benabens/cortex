@@ -24,7 +24,7 @@ export default defineTool({
     "A course's id or code identifies it in the other tools. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
-  userSummary: "Liste tes cours et leurs dates d’examen.",
+  userSummary: "listCourses",
   input: z.object({}),
   output,
   async run(_args, ctx) {
@@ -42,6 +42,6 @@ export default defineTool({
     return { courses };
   },
   summarize: (o) => o.courses.length
-    ? `${o.courses.length} cours : ${o.courses.map((c) => (c.code && c.code !== c.name ? `${c.code} (${c.name})` : c.name)).join(", ")}.`
-    : "Aucun cours sur ce compte.",
+    ? `${o.courses.length} course(s): ${o.courses.map((c) => (c.code && c.code !== c.name ? `${c.code} (${c.name})` : c.name)).join(", ")}.`
+    : "This account has no courses.",
 });

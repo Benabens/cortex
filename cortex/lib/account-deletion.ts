@@ -8,6 +8,7 @@ import { OWNER_USER, userSlug, runWithUser } from "@/db/context";
 import { runWithCourse } from "@/db/client";
 import { dataRoot } from "@/lib/courses";
 import { log } from "@/lib/metrics";
+import { UserFacingError } from "@/lib/i18n/user-error";
 import { stripeClient } from "@/lib/billing/stripe-client";
 import { stillBilling } from "@/lib/billing/subscription-windows";
 
@@ -132,7 +133,7 @@ export async function deleteAccount(userId: string, deps: DeletionDeps = {}): Pr
       // Abonnement inconnu de Stripe (déjà résilié, ou créé avec d'autres clés) :
       // il n'y a rien à résilier, et le droit à l'effacement ne doit pas en dépendre.
       if ((e as { code?: string } | null)?.code !== "resource_missing") {
-        throw new Error(`Suppression refusée : impossible de résilier l’abonnement Stripe (${msg(e)}). Rien n’a été effacé.`);
+        throw new UserFacingError({ code: "account_delete_stripe_cancel_failed", params: { detail: msg(e) } }, 500);
       }
       log("warn", "account.delete_subscription_unknown", { subscription: subscription.subscription_id });
     }

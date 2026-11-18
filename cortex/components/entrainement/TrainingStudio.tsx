@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable react-hooks/set-state-in-effect -- les effets réinitialisent le studio au changement de cours et lisent le lien profond */
+
 import styles from "@/app/secondary.module.css";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -20,7 +22,7 @@ import { Button } from "@/components/ui/Button";
 import { ImageTextArea } from "@/components/ui/ImageTextArea";
 import { SafeHtml } from "@/components/ui/SafeHtml";
 import { WeightBar } from "@/components/viz/WeightBar";
-import { apiPost, useApi, useCourse, useJob, JOB_ACTIVE, asText, type ApiError } from "@/lib/ux/api";
+import { apiPost, useApi, useCourse, useJob, JOB_ACTIVE, asText, type ApiError, engineDown } from "@/lib/ux/api";
 import {
   FEEDBACK_OPTIONS,
   examLinkFromResultPath,
@@ -29,6 +31,7 @@ import {
 } from "@/lib/ux/training";
 import { cn } from "@/lib/ux/cn";
 import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
+import { useTranslations } from "use-intl/react";
 
 /**
  * Studio d'entraînement RÉEL — UNE seule zone (REFONTE ALLÉGÉE, plus de mode Drill/Architecte).
@@ -39,7 +42,11 @@ import { UsageLine, useLaunchUsage } from "@/components/billing/UsageIndicator";
  * Retour difficulté → POST /api/feedback (recalibre la difficulté).
  */
 export function TrainingStudio() {
-  const { courseId } = useCourse();
+  const t = useTranslations("trainingStudio");
+  const apiT = useTranslations("api");
+  const commonT = useTranslations("common");
+  const { courseId, course } = useCourse();
+  const language = course?.language || undefined; // "" = langue pas encore détectée : pas de lang vide
   const list = useApi<DrillListResp>("/api/drill");
 
   const [input, setInput] = useState("");
@@ -97,15 +104,15 @@ export function TrainingStudio() {
     setShownHints(0); setShowSolution(false);
     setDrilling(true);
     try {
-      const d = await apiPost<{ ok: boolean; drill: Drill }>("/api/drill", courseId, { concept: chosen });
+      const d = await apiPost<{ ok: boolean; drill: Drill }>("/api/drill", courseId, { concept: chosen }, (status) => apiT("httpError", { status }));
       setDrill(d.drill);
     } catch (e) {
       const err = e as ApiError;
       setError({
-        offline: err.status === 503,
-        message: err.status === 503
-          ? "Le moteur LLM est injoignable : réessaie plus tard."
-          : err.message || "La génération a échoué. Réessaie.",
+        offline: engineDown(err),
+        message: engineDown(err)
+          ? t("llmUnavailable")
+          : err.message || t("generationFailed"),
       });
     } finally {
       setDrilling(false);
@@ -122,15 +129,15 @@ export function TrainingStudio() {
       if (image) fd.append("image", image);
       const res = await fetch(`/api/exercises/generate?course=${encodeURIComponent(courseId)}`, { method: "POST", body: fd });
       const d = await res.json().catch(() => null);
-      if (!res.ok) throw { status: res.status, message: d?.error ?? `Erreur ${res.status}` } as ApiError;
+      if (!res.ok) throw { status: res.status, message: d?.error ?? apiT("httpError", { status: res.status }), code: typeof d?.code === "string" ? d.code : null, params: d?.params } as ApiError;
       setJobId(d.jobId);
     } catch (e) {
       const err = e as ApiError;
       setError({
-        offline: err.status === 503,
-        message: err.status === 503
-          ? "Le moteur LLM est injoignable : impossible de générer pour l’instant."
-          : err.message || "Impossible de lancer la génération.",
+        offline: engineDown(err),
+        message: engineDown(err)
+          ? t("llmGenerationUnavailable")
+          : err.message || t("startFailed"),
       });
     } finally {
       setLaunching(false);
@@ -140,7 +147,7 @@ export function TrainingStudio() {
   const submit = () => {
     if (busy) return;
     if (!input.trim() && !image) {
-      setError({ offline: false, message: "Donne un concept, une consigne, ou une image d’exercice." });
+      setError({ offline: false, message: t("inputRequired") });
       return;
     }
     // avec image → pipeline architecte (PDF) ; sinon → drill (énoncé + indices progressifs).
@@ -157,10 +164,10 @@ export function TrainingStudio() {
         examId: jobDone ? (job as { resultId?: number }).resultId : undefined,
         topic: drill?.concept ?? (input.trim() || undefined),
         verdict,
-      });
+      }, (status) => apiT("httpError", { status }));
       setFbSent(verdict);
     } catch (error) {
-      setFbError((error as ApiError).message || "Ton retour n’a pas pu être enregistré. Réessaie.");
+      setFbError((error as ApiError).message || t("feedbackFailed"));
     } finally {
       setFbBusy(false);
     }
@@ -187,19 +194,19 @@ export function TrainingStudio() {
     <div className={styles.split}>
       {/* ── Zone unique d'entrée ── */}
       <Panel className="p-6 sm:p-8">
-        <h2 className="font-display text-[1.5rem] font-semibold leading-tight text-ink-1">Génère un exo à travailler</h2>
+        <h2 className="font-display text-[1.5rem] font-semibold leading-tight text-ink-1">{t("title")}</h2>
 
         {/* pré-remplissage depuis Faiblesses : bandeau éditable + × pour vider */}
         {prefillNote && input === prefillNote && (
           <div className="mt-4 flex items-center justify-between gap-2 rounded-lg border border-[color-mix(in_oklch,var(--color-accent)_35%,transparent)] bg-[color-mix(in_oklch,var(--color-accent)_9%,transparent)] px-3 py-2 text-[0.78rem] text-ink-2">
             <span className="inline-flex min-w-0 items-center gap-1.5">
               <Target className="size-3.5 shrink-0 text-accent-hi" strokeWidth={2.25} />
-              <span className="truncate">Pré-rempli : modifie-le ou lance tel quel.</span>
+              <span className="truncate">{t("prefilled")}</span>
             </span>
             <button
               type="button"
               onClick={() => { setInput(""); setPrefillNote(null); }}
-              aria-label="Vider le pré-remplissage"
+              aria-label={t("clearPrefill")}
               className="grid size-6 shrink-0 place-items-center rounded text-ink-3 transition-colors hover:text-ink-1 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
             >
               <X className="size-3.5" strokeWidth={2.5} />
@@ -215,29 +222,29 @@ export function TrainingStudio() {
             image={image}
             onImageChange={setImage}
             rows={5}
-            ariaLabel="Concept, consigne ou énoncé à travailler (image collable)"
-            placeholder="Ex. « rétropropagation », « max-flow avec une coupe », ou colle une consigne / un énoncé…"
+            ariaLabel={t("inputLabel")}
+            placeholder={t("inputPlaceholder")}
             onEnter={submit}
           />
         </div>
 
         {list.error && (
           <div className="mt-4 rounded-xl border border-line p-3 text-sm text-ink-3">
-            <p>Les suggestions de révision ne sont pas disponibles.</p>
-            <Button className="mt-2" size="sm" onClick={list.refetch}>Recharger les suggestions</Button>
+            <p>{t("suggestionsUnavailable")}</p>
+            <Button className="mt-2" size="sm" onClick={list.refetch}>{t("reloadSuggestions")}</Button>
           </div>
         )}
         {/* puces : dus / faiblesses réels */}
         {!list.loading && !list.error && (dueChips.length > 0 || weakChips.length > 0) && (
           <div className="mt-4 space-y-3">
-            {dueChips.length > 0 && <ChipGroup label="À réviser (dus)" chips={dueChips} onPick={setInput} selected={input} />}
-            {weakChips.length > 0 && <ChipGroup label="Tes faiblesses" chips={weakChips} onPick={setInput} selected={input} />}
+            {dueChips.length > 0 && <ChipGroup label={t("due")} chips={dueChips} onPick={setInput} selected={input} language={language} />}
+            {weakChips.length > 0 && <ChipGroup label={t("weaknesses")} chips={weakChips} onPick={setInput} selected={input} language={language} />}
           </div>
         )}
 
         <Button variant="primary" onClick={submit} loading={busy} disabled={!busy && !launch.allowed} className="mt-5 w-full">
           {!busy && <Sparkles className="size-4" strokeWidth={2.5} />}
-          {busy ? "Génération…" : "Générer l’exercice"}
+          {busy ? t("generating") : t("generate")}
         </Button>
         {!busy && <UsageLine usage={launch.usage} now={launch.now} className="mt-2" />}
 
@@ -264,25 +271,25 @@ export function TrainingStudio() {
           <>
             <div className="flex items-center justify-between">
               <span className="inline-flex items-center gap-1.5 text-[0.72rem] font-medium text-emerald-hi">
-                <span className="inline-block size-1.5 rounded-full bg-emerald" /> Exo prêt
+                <span className="inline-block size-1.5 rounded-full bg-emerald" /> {t("readyShort")}
               </span>
-              <span className="text-[0.76rem] text-ink-4">au format du final</span>
+              <span className="text-[0.76rem] text-ink-4">{t("finalFormat")}</span>
             </div>
-            <h2 className="mt-3 text-[1.05rem] font-semibold text-ink-1">{drill.concept}</h2>
-            <SafeHtml className="prose-exam mt-3 text-[0.9rem] leading-relaxed text-ink-1" html={drill.statement_html} />
+            <h2 className="mt-3 text-[1.05rem] font-semibold text-ink-1" lang={language}>{drill.concept}</h2>
+            <div lang={language}><SafeHtml className="prose-exam mt-3 text-[0.9rem] leading-relaxed text-ink-1" html={drill.statement_html} /></div>
 
             {drill.hints.length > 0 && (
               <div className="mt-4 space-y-2">
                 {drill.hints.slice(0, shownHints).map((h, i) => (
                   <div key={i} className="rise-in flex items-start gap-2.5 rounded-lg border border-line bg-surface-2/40 p-3 text-[0.84rem] text-ink-2">
                     <Lightbulb className="mt-0.5 size-4 shrink-0 text-warning" strokeWidth={2} />
-                    <span><span className="mr-1.5 font-data text-[0.72rem] font-semibold text-ink-3">{i + 1}/{drill.hints.length}</span>{h}</span>
+                    <span lang={language}><span className="mr-1.5 font-data text-[0.72rem] font-semibold text-ink-3">{i + 1}/{drill.hints.length}</span>{h}</span>
                   </div>
                 ))}
                 {shownHints < drill.hints.length && (
                   <Button variant="subtle" size="sm" onClick={() => setShownHints((n) => n + 1)}>
                     <Lightbulb className="size-3.5" strokeWidth={2.25} />
-                    Indice suivant ({shownHints}/{drill.hints.length})
+                    {t("nextHint", { shown: shownHints, total: drill.hints.length })}
                   </Button>
                 )}
               </div>
@@ -290,10 +297,10 @@ export function TrainingStudio() {
 
             <div className="mt-4 border-t border-line pt-4">
               {showSolution ? (
-                <SafeHtml className="prose-exam text-[0.88rem] leading-relaxed text-ink-2" html={drill.solution_html} />
+                <div lang={language}><SafeHtml className="prose-exam text-[0.88rem] leading-relaxed text-ink-2" html={drill.solution_html} /></div>
               ) : (
                 <Button variant="secondary" size="sm" onClick={() => setShowSolution(true)}>
-                  <Eye className="size-3.5" strokeWidth={2.25} /> Voir la solution
+                  <Eye className="size-3.5" strokeWidth={2.25} /> {t("showSolution")}
                 </Button>
               )}
             </div>
@@ -301,32 +308,32 @@ export function TrainingStudio() {
           </>
         ) : waiting ? (
           <div className="flex flex-1 flex-col justify-center gap-3" aria-live="polite">
-            <p className="text-[0.9rem] font-medium text-ink-1">Génération de l’exercice…</p>
+            <p className="text-[0.9rem] font-medium text-ink-1">{t("generatingExercise")}</p>
             <div className="skeleton h-4 w-11/12" />
             <div className="skeleton h-4 w-4/5" />
             <div className="skeleton h-4 w-2/3" />
           </div>
         ) : jobRunning && job ? (
           <div className="flex flex-1 flex-col justify-center gap-3" aria-live="polite">
-            <p className="text-[0.9rem] font-medium text-ink-1">{job.status === "queued" ? "En file d’attente…" : "Génération de l’exercice…"}</p>
+            <p className="text-[0.9rem] font-medium text-ink-1">{job.status === "queued" ? t("queued") : t("generatingExercise")}</p>
             {asText(job.currentStep) && <p className="text-[0.82rem] text-ink-3">{asText(job.currentStep)}</p>}
             <WeightBar pct={job.status === "queued" ? 4 : job.progress} height={6} />
-            <p className="font-data text-[0.82rem] font-semibold text-ink-2">{job.status === "queued" ? "" : `${job.progress} %`}</p>
+            <p className="font-data text-[0.82rem] font-semibold text-ink-2">{job.status === "queued" ? "" : commonT("percent", { value: job.progress })}</p>
           </div>
         ) : jobDone ? (
           <>
             <span className="inline-flex items-center gap-1.5 text-[0.72rem] font-medium text-emerald-hi">
-              <Check className="size-3.5" strokeWidth={2.5} /> Exercice prêt
+              <Check className="size-3.5" strokeWidth={2.5} /> {t("ready")}
             </span>
-            <h2 className="mt-3 text-[1.05rem] font-semibold text-ink-1">{input.trim() || "Exercice sur mesure"}</h2>
+            <h2 className="mt-3 text-[1.05rem] font-semibold text-ink-1" lang={input.trim() ? language : undefined}>{input.trim() || t("customExercise")}</h2>
             <div className="mt-4 grid grid-cols-2 gap-3">
               <a href={resultLink ?? "/examens"} target={resultLink ? "_blank" : undefined} rel="noopener noreferrer" className="flex items-center gap-3 rounded-lg border border-line bg-surface-2/40 p-3 transition-colors hover:border-[color-mix(in_oklch,var(--color-accent)_34%,transparent)]">
                 <FileText className="size-5 text-ink-3" strokeWidth={2} />
-                <span className="text-[0.82rem] font-medium text-ink-1">{resultLink ? "Énoncé PDF" : "Voir dans Examens"}</span>
+                <span className="text-[0.82rem] font-medium text-ink-1">{resultLink ? t("questionPdf") : t("viewInExams")}</span>
               </a>
               <a href="/examens" className="flex items-center gap-3 rounded-lg border border-line bg-surface-2/40 p-3 transition-colors hover:border-[color-mix(in_oklch,var(--color-accent)_34%,transparent)]">
                 <CheckSquare className="size-5 text-ink-3" strokeWidth={2} />
-                <span className="text-[0.82rem] font-medium text-ink-1">Corrigé</span>
+                <span className="text-[0.82rem] font-medium text-ink-1">{t("solution")}</span>
               </a>
             </div>
             <FeedbackBar onSend={sendFeedback} sent={fbSent} busy={fbBusy} error={fbError} />
@@ -334,9 +341,9 @@ export function TrainingStudio() {
         ) : jobFailed ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
             <AlertTriangle className="size-6 text-danger-hi" strokeWidth={2} />
-            <p className="text-[0.9rem] font-medium text-ink-1">La génération a échoué</p>
-            <p role="alert" className="max-w-xs text-sm text-ink-3">{asText(job?.error) ?? "L’exercice n’a pas pu être terminé. Ta consigne est conservée."}</p>
-            <Button variant="secondary" onClick={submit}>Réessayer la génération</Button>
+            <p className="text-[0.9rem] font-medium text-ink-1">{t("failedTitle")}</p>
+            <p role="alert" className="max-w-xs text-sm text-ink-3">{asText(job?.error) ?? t("failedHint")}</p>
+            <Button variant="secondary" onClick={submit}>{t("retryGeneration")}</Button>
           </div>
         ) : null}
       </Panel>
@@ -346,11 +353,12 @@ export function TrainingStudio() {
 }
 
 function FeedbackBar({ onSend, sent, busy, error }: { onSend: (verdict: string) => void; sent: string | null; busy: boolean; error: string | null }) {
+  const t = useTranslations("trainingStudio");
   return (
     <div className="mt-auto border-t border-line pt-4">
       <div className="mb-2.5 flex items-center gap-2 text-[0.82rem] text-ink-2">
         <Gauge className="size-4 text-ink-3" strokeWidth={2.25} />
-        Au niveau d’un vrai final ?
+        {t("feedbackQuestion")}
       </div>
       <div className="flex flex-wrap gap-2">
         {FEEDBACK_OPTIONS.map((o) => (
@@ -367,17 +375,17 @@ function FeedbackBar({ onSend, sent, busy, error }: { onSend: (verdict: string) 
                 : "border-line bg-surface-2/40 text-ink-2 hover:bg-surface-2 hover:text-ink-1"
             )}
           >
-            {o.label}
+            {t(o.labelKey)}
           </button>
         ))}
       </div>
       {error && <p role="alert" className="mt-2 text-sm text-danger-hi">{error}</p>}
-      {sent && <p className="mt-2 text-[0.78rem] text-emerald-hi" aria-live="polite">Merci : Cortex recalibre la difficulté des prochains exos.</p>}
+      {sent && <p className="mt-2 text-[0.78rem] text-emerald-hi" aria-live="polite">{t("feedbackThanks")}</p>}
     </div>
   );
 }
 
-function ChipGroup({ label, chips, onPick, selected }: { label: string; chips: string[]; onPick: (c: string) => void; selected: string }) {
+function ChipGroup({ label, chips, onPick, selected, language }: { label: string; chips: string[]; onPick: (c: string) => void; selected: string; language?: string }) {
   return (
     <div>
       <div className="mb-2 text-xs font-medium text-ink-4">{label}</div>
@@ -396,7 +404,7 @@ function ChipGroup({ label, chips, onPick, selected }: { label: string; chips: s
                 : "border-line bg-surface-1/60 text-ink-2 hover:bg-surface-2 hover:text-ink-1"
             )}
           >
-            <span className="truncate">{c}</span>
+            <span className="truncate" lang={language}>{c}</span>
           </button>
         ))}
       </div>

@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { deleteExam, listExams } from "@/lib/exam";
 import { useCourseOr404 } from "@/lib/req";
 import { scheduleStats } from "@/lib/schedule";
@@ -16,7 +17,7 @@ export async function DELETE(req: NextRequest) {
   const denied = useCourseOr404(req);
   if (denied) return denied;
   const id = Number(req.nextUrl.searchParams.get("id"));
-  if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
+  if (!id) return apiError(req, "id_missing", 400);
   await deleteExam(id);
   return NextResponse.json({ ok: true });
 }

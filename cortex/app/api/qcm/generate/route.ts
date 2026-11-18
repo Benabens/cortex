@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { ReservationRefused, activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 import { getFormatProfile } from "@/lib/format";
 import { isQcmCourse } from "@/lib/exam-format";
@@ -24,31 +25,34 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   // composeur : count = N QCM, openCount = M ouvertes, focus = thème ciblé (exercice ciblé).
   // Bornes de champ d'abord — elles ne coûtent rien : un sujet trop long est
   // refusé, jamais tronqué en silence (l'étudiant paierait une intention amputée).
-  const body = await readJson(req, ({} as any));
-  const num = (v: any) => (v === 0 || v === "0" ? 0 : Number(v) > 0 ? Math.min(40, Math.floor(Number(v))) : undefined);
+  const body = await readJson(req, {});
+  const num = (v: unknown) => (v === 0 || v === "0" ? 0 : Number(v) > 0 ? Math.min(40, Math.floor(Number(v))) : undefined);
   const c = num(body.count);
   const oc = num(body.openCount);
-  if (c === 0 && oc === 0) return NextResponse.json({ error: "Composition vide : choisis au moins 1 QCM ou 1 question ouverte." }, { status: 400 });
+  if (c === 0 && oc === 0) return apiError(req, "qcm_composition_empty", 400);
   const focusRaw = typeof body.focus === "string" ? body.focus.trim() : "";
-  const tooLong = fieldTooLong("focus", focusRaw);
+  const tooLong = fieldTooLong(req, "focus", focusRaw);
   if (tooLong) return tooLong;
   const target = JSON.stringify({ count: c, openCount: oc, focus: focusRaw || undefined });
 
   // Même aiguillage que le reste (lib/exam-format) : annales, format déclaré, exemples officiels, infos de cours.
-  if (!(await isQcmCourse())) return NextResponse.json({ error: "Ce cours ne s'examine pas en QCM (ou son format est inconnu) : déclare le format de l'épreuve dans la fiche du cours." }, { status: 400 });
+  if (!(await isQcmCourse())) return apiError(req, "course_not_qcm", 400);
 
   const existing = await activeJob("qcm");
   if (existing) return NextResponse.json({ ok: true, jobId: existing.id, existing: true });
   const issue = await preflightGeneration("qcm", target);
-  if (issue) return NextResponse.json({ error: issue.error, command: issue.command }, { status: issue.status });
+  if (issue) return apiError(req, issue, issue.status, { command: issue.command });
   let jobId: number;
   try {
     ({ id: jobId } = await createJobExclusive("qcm", target));
   } catch (e) {
-    if (e instanceof ReservationRefused) return NextResponse.json({ error: e.message }, { status: e.status });
+    if (e instanceof ReservationRefused) return apiError(req, e, e.status);
     throw e;
   }
   try { await startWorker(jobId, course); }
-  catch (e: any) { return NextResponse.json({ error: `worker : ${e?.message ?? e}` }, { status: 500 }); }
+  catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    return apiError(req, { code: "worker_failed", params: { detail } }, 500);
+  }
   return NextResponse.json({ ok: true, jobId });
 })

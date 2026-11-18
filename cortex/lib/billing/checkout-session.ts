@@ -4,6 +4,7 @@ import { dbDriverName, nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
 import { checkoutParams } from "./checkout-params";
 import { PLANS, type PlanKey } from "./stripe-events";
+import { refusal, type Refusal } from "@/lib/i18n/user-error";
 
 /**
  * OUVERTURE D'UN CHECKOUT STRIPE — un seul abonnement par compte, même avant le webhook.
@@ -38,7 +39,7 @@ export type CheckoutStripe = {
 
 export type CheckoutOutcome =
   | { ok: true; url: string; sessionId: string }
-  | { ok: false; status: 409; error: string };
+  | ({ ok: false } & Refusal<409>);
 
 /** Statuts d'un abonnement Stripe qui facture encore, ou va facturer. */
 const BILLING_STATUSES = new Set(["active", "trialing", "past_due", "unpaid", "incomplete", "paused"]);
@@ -46,9 +47,6 @@ const BILLING_STATUSES = new Set(["active", "trialing", "past_due", "unpaid", "i
 const SESSION_TTL_S = 31 * 60;
 /** Un verrou « en cours d'ouverture » plus vieux que ça vient d'une requête morte : il ne bloque plus. */
 const OPENING_STALE_MS = 2 * 60_000;
-
-const ALREADY_SUBSCRIBED = "Tu as déjà un abonnement chez Stripe (paiement peut-être en cours de confirmation). Gère-le depuis Mon compte plutôt que d'en ouvrir un second.";
-const OPENING = "Un paiement d'abonnement est déjà en cours d'ouverture (autre onglet ?). Réessaie dans un instant.";
 
 /** Prend le verrou de checkout du compte. Rend la session précédente à expirer, ou un refus. */
 async function claimLock(userId: string): Promise<{ ok: true; previous: string | null } | { ok: false }> {
@@ -106,7 +104,7 @@ export async function openCheckout(o: { stripe: CheckoutStripe; userId: string; 
   }
 
   const lock = await claimLock(o.userId);
-  if (!lock.ok) return { ok: false, status: 409, error: OPENING };
+  if (!lock.ok) return { ok: false, ...refusal(409, "checkout_subscription_opening") };
   let created: string | null = null;
   try {
     // L'onglet précédent ne doit plus pouvoir payer. Déjà payé ou expiré : expire échoue, c'est
@@ -123,7 +121,7 @@ export async function openCheckout(o: { stripe: CheckoutStripe; userId: string; 
     const existing = customer ? (await o.stripe.subscriptions.list({ customer, status: "all", limit: 20 })).data : [];
     if (existing.some((s) => BILLING_STATUSES.has(s.status))) {
       await releaseLock(o.userId);
-      return { ok: false, status: 409, error: ALREADY_SUBSCRIBED };
+      return { ok: false, ...refusal(409, "checkout_subscription_exists") };
     }
     const s = await o.stripe.checkout.sessions.create(checkoutParams({
       plan: o.plan, priceId: o.priceId, userId: o.userId, email: o.email, customer: customer ?? undefined, expiresAt: Math.floor(Date.now() / 1000) + SESSION_TTL_S,

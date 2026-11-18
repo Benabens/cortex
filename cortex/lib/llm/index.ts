@@ -254,7 +254,7 @@ function retryNote(reason: string, n: number, attempts: number): string {
 }
 
 export { extractJson, JsonOutputError } from "./json";
-export { BAD_OUTPUT_CODES, HARD_STOP_CODES, OWN_LLM_CODES, PROVIDER_DOWN_CODES, llmErrorCode, llmFailureReason, llmUserMessage } from "./errors";
+export { BAD_OUTPUT_CODES, HARD_STOP_CODES, OWN_LLM_CODES, PROVIDER_DOWN_CODES, llmErrorCode, llmFailureReason, llmUserError, llmUserMessage } from "./errors";
 export { PROVIDER_NAMES, type ProviderName } from "./config";
 export { EXAM_OUTPUT_MAX_TOKENS, LONG_OUTPUT_MAX_TOKENS, LlmError } from "./types";
 export type { CompleteRequest, CompleteResult, LlmImage, LlmModel, LlmProvider, LlmUsage } from "./types";

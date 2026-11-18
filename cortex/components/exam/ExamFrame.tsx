@@ -4,8 +4,7 @@ import { FileText } from "lucide-react";
 import { Segmented } from "@/components/ui/Segmented";
 import { examOutputOptions, useExamOutput } from "@/lib/ux/exam-output";
 import styles from "./exam.module.css";
-
-const OUTPUTS = examOutputOptions();
+import { useTranslations } from "use-intl/react";
 
 /**
  * Présentation D2 de l’examen existant, sans ajouter de parcours ni de bilan. Avec un PDF, la
@@ -27,6 +26,8 @@ export function ExamFrame({
   qs: string;
   children: React.ReactNode;
 }) {
+  const t = useTranslations("examFrame");
+  const to = useTranslations("examOutput");
   const hasPdf = pdf?.endsWith(".pdf") ?? false;
   const [output, choose] = useExamOutput(true);
   const showPdf = hasPdf && output === "pdf";
@@ -35,20 +36,20 @@ export function ExamFrame({
     <div className={styles.exam}>
       <header className={styles.header}>
         <div>
-          <h1>Examen blanc #{id}</h1>
+          <h1>{t("title", { id })}</h1>
           <p className={styles.description}>{description}</p>
         </div>
         {hasPdf && (
           <div className={styles.documents}>
-            <Segmented label="Sortie de l’examen" options={OUTPUTS} value={output} onChange={choose} />
+            <Segmented label={to("label")} options={examOutputOptions({ site: to("site"), pdf: to("pdf") })} value={output} onChange={choose} />
             <a href={`/exam/${pdf}${qs}`} target="_blank" rel="noopener">
               <FileText size={16} aria-hidden="true" />
-              PDF énoncé
+              {t("questionPdf")}
             </a>
             {solutions && (
               <a href={`/exam/${solutions}${qs}`} target="_blank" rel="noopener">
                 <FileText size={16} aria-hidden="true" />
-                PDF corrigé
+                {t("solutionPdf")}
               </a>
             )}
           </div>
@@ -56,9 +57,9 @@ export function ExamFrame({
       </header>
       {showPdf ? (
         <div className={styles.pdfView}>
-          <iframe src={`/exam/${pdf}${qs}`} title={`Examen blanc #${id}, PDF`} className={styles.pdfFrame} />
+          <iframe src={`/exam/${pdf}${qs}`} title={to("frameTitle", { id })} className={styles.pdfFrame} />
           <p className={styles.pdfNote}>
-            La mise en page de ton annale, relevée à la préparation du cours (une mise en page sobre si Cortex n’a pas pu la lire). Imprime-le, compose sur papier, puis reviens sur le site pour te corriger.
+            {to("pdfNote")}
           </p>
         </div>
       ) : (

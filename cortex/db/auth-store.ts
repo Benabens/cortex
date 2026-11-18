@@ -802,6 +802,10 @@ const SUBS_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
  * DÉCLARÉ par l'étudiant (JSON : type, nombre de questions, durée, langue) —
  * seule source de format d'un cours sans annale (lib/exam-format).
  */
+/** Langue de l'interface choisie par le compte (lib/i18n/account-locale) ; NULL = pas choisie. */
+const USERS_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
+  { name: "locale", sqlite: "TEXT", pg: "text" },
+];
 const COURSES_ADDED: Array<{ name: string; sqlite: string; pg: string }> = [
   { name: "exam_format", sqlite: "TEXT", pg: "text" },
 ];
@@ -906,6 +910,12 @@ function sqliteAuth(): Database.Database {
     for (const c of SUBS_ADDED) {
       if (!haveSubs.has(c.name)) _sqliteAuth.exec(`ALTER TABLE subscriptions ADD COLUMN ${c.name} ${c.sqlite}`);
     }
+    const haveUsers = new Set(
+      (_sqliteAuth.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    for (const c of USERS_ADDED) {
+      if (!haveUsers.has(c.name)) _sqliteAuth.exec(`ALTER TABLE users ADD COLUMN ${c.name} ${c.sqlite}`);
+    }
     const haveCourses = new Set(
       (_sqliteAuth.prepare("PRAGMA table_info(courses)").all() as Array<{ name: string }>).map((c) => c.name),
     );
@@ -979,6 +989,9 @@ async function pgExec(): Promise<{
     }
     for (const c of SUBS_ADDED) {
       await authPgQuery(`ALTER TABLE public.subscriptions ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
+    }
+    for (const c of USERS_ADDED) {
+      await authPgQuery(`ALTER TABLE public.users ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);
     }
     for (const c of COURSES_ADDED) {
       await authPgQuery(`ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS ${c.name} ${c.pg}`, []);

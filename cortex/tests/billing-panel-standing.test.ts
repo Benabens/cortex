@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderIntl } from "./helpers/intl";
 
 type Props = import("../app/compte/BillingPanel").BillingViewProps;
 type Sub = NonNullable<Props["data"]["subscription"]>;
@@ -36,7 +36,7 @@ const data = (subscription: Sub): Props["data"] => ({
 });
 async function render(subscription: Sub): Promise<string> {
   const { BillingView } = await import("../app/compte/BillingPanel");
-  return renderToStaticMarkup(createElement(BillingView, { data: data(subscription), busy: null, actionError: null, retour: null, onRefresh: noop, onAcceptTerms: noop, onCheckout: noop, onPortal: noop }));
+  return renderIntl(createElement(BillingView, { data: data(subscription), busy: null, actionError: null, retour: null, onRefresh: noop, onAcceptTerms: noop, onCheckout: noop, onPortal: noop }));
 }
 /** Boutons « S’abonner » (balise ouvrante) : désactivés tant qu'un abonnement existe chez Stripe. */
 const subscribeButtons = (html: string) => [...html.matchAll(/<button[^>]*>(?:(?!<\/button>).)*S’abonner/g)].map((m) => m[0]);

@@ -124,6 +124,15 @@ test("annuel à 60 jours de l'échéance : un e-mail dédié, au client, avec to
   assert.match(mail.text, /renews automatically on 7 October 2027 for €149\. To opt out, cancel by 6 October 2027/);
 });
 
+test("le rappel envoyé suit la langue enregistrée du compte", async (t) => {
+  const { mails } = resend(t);
+  await subscriber("english");
+  await authRun(`UPDATE users SET locale = 'en' WHERE id = ?`, "english");
+  assert.equal((await sendRenewalReminders({ now: at(J60), lookup: stripeSays().lookup })).sent, 1);
+  assert.match(mails[0].subject, /your annual subscription renews/);
+  assert.match(mails[0].text, /The French version is legally binding\./);
+});
+
 test("un seul e-mail par abonnement et par période, quel que soit le nombre de passages ; la période suivante a le sien", async (t) => {
   const { mails } = resend(t);
   const stripe = stripeSays();
@@ -379,6 +388,15 @@ test("e-mail : les dates sont celles que lit le client (heure de Paris), la limi
   // Rien d'interprétable ne passe dans le HTML.
   const odd = renewalReminderEmail({ renewsAt: END, amount: 149, currency: "EUR", accountUrl: "https://x.test/compte?a=1&b=<2>", contact: "c@x.test" });
   assert.doesNotMatch(odd.html, /<2>/);
+});
+
+test("e-mail anglais : sujet, texte et HTML sont anglais et rappellent que le français fait foi", () => {
+  const mail = renewalReminderEmail({ renewsAt: END, amount: 119, currency: "EUR", accountUrl: "https://app.cortexexam.com/compte", contact: "contact@cortexexam.com", locale: "en" });
+  assert.equal(mail.subject, "Cortex Pro: your annual subscription renews on 7 October 2027");
+  assert.match(mail.text, /Deadline to decline renewal/i);
+  assert.match(mail.text, /The French version is legally binding\./);
+  assert.match(mail.html, /<html lang="en">/);
+  assert.doesNotMatch(mail.text, /Votre abonnement|Bonjour|Gérer mon abonnement/);
 });
 
 test("lecture d'un abonnement Stripe : période sur l'item (format récent) ou sur l'abonnement (ancien), résiliation programmée", () => {

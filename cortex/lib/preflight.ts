@@ -4,8 +4,9 @@ import { llmUnavailableReason } from "@/lib/llm";
 import { texAvailable } from "@/lib/exam-latex";
 import { GENERATION_MIN_FREE_BYTES, checkStorage } from "@/lib/storage-quota";
 import { currentUser } from "@/db/context";
+import { refusal, type Refusal } from "@/lib/i18n/user-error";
 
-export type PreflightIssue = { error: string; command?: string; status: number };
+export type PreflightIssue = Refusal & { command?: string };
 
 /**
  * Pré-checks AVANT de lancer un worker de génération (examen ou exercice) :
@@ -20,32 +21,30 @@ export async function preflightGeneration(kind: string, target?: string | null):
   // le verdict de lib/billing/limits, celui que la réservation rendra.
   const { costForJob } = await import("@/lib/jobs");
   const limitIssue = await launchGate(jobSpec(kind, costForJob(kind as never, target)));
-  if (limitIssue) return { status: limitIssue.status, error: limitIssue.error };
+  if (limitIssue) return limitIssue;
   // PLACE DISQUE : une génération produit des artefacts (PDF d'examen, figures)
   // qui comptent dans le quota du compte comme les fichiers importés — et un
   // volume presque plein casse aussi bien la compilation que l'ingestion. Vérifié
   // avant le corpus : sans place, le conseil « lance l'ingestion » serait faux.
   const storageIssue = await checkStorage(currentUser(), 0, {
     minFreeBytes: GENERATION_MIN_FREE_BYTES,
-    what: "produire l'examen",
+    what: "produce_exam",
   });
   if (storageIssue) return storageIssue;
   const engineIssue = llmUnavailableReason();
-  if (engineIssue) return { status: 503, error: engineIssue };
+  if (engineIssue) return refusal(503, "llm_engine_unavailable_reason", { reason: engineIssue });
   let items = 0;
   try {
     items = (await q.get<{ n: number }>(`SELECT count(*) n FROM items`))!.n;
   } catch {}
   if (!items)
     return {
-      status: 409,
-      error: "Corpus non ingéré : la génération n'aurait aucune matière. Lance l'ingestion puis réessaie.",
+      ...refusal(409, "corpus_not_ingested"),
       command: "npm run ingest",
     };
   if (!texAvailable())
     return {
-      status: 412,
-      error: "Aucun moteur LaTeX détecté : impossible de produire le PDF d'examen. Installe tectonic, puis redémarre l'app.",
+      ...refusal(412, "latex_engine_missing"),
       command: "brew install tectonic",
     };
   return null;

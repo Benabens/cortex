@@ -1,3 +1,7 @@
+import { currentLocale } from "@/lib/i18n/current";
+import type { Locale } from "@/lib/i18n/locale";
+import { translator } from "@/lib/i18n/translate";
+
 /**
  * LIMITES D'USAGE — types et phrases, sans dépendance serveur : partagés par
  * lib/billing/limits (serveur, MCP) et par l'interface (page compte, indicateur
@@ -61,52 +65,66 @@ function dayKey(d: Date): string {
 }
 
 /** « 01:00 » à l'heure de Lausanne. */
-export function formatHour(iso: string): string {
-  return new Intl.DateTimeFormat("fr-CH", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso));
+export function formatHour(iso: string, locale: Locale = currentLocale()): string {
+  return new Intl.DateTimeFormat(locale === "fr" ? "fr-CH" : "en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso));
 }
 
 /**
  * Quand une limite se remet à zéro, dit comme à quelqu'un : « à 14:32 »,
  * « demain à 01:00 », « le 1er décembre ». `now` : « AAAA-MM-JJ HH:MM:SS » UTC ou ISO.
  */
-export function formatReset(resetIso: string, now: string): string {
+export function formatReset(resetIso: string, now: string, locale: Locale = currentLocale()): string {
+  const t = translator(locale) as unknown as (key: string, values?: Record<string, string | number>) => string;
   const at = new Date(resetIso);
   const ref = new Date(now.includes("T") ? now : `${now.replace(" ", "T")}Z`);
-  if (Number.isNaN(at.getTime())) return "bientôt";
+  if (Number.isNaN(at.getTime())) return t("limits.soon");
   const today = dayKey(ref);
   const target = dayKey(at);
   const tomorrow = dayKey(new Date(ref.getTime() + 86_400_000));
-  if (target === today) return `à ${formatHour(resetIso)}`;
-  if (target === tomorrow) return `demain à ${formatHour(resetIso)}`;
+  if (target === today) return t("limits.at_time", { time: formatHour(resetIso, locale) });
+  if (target === tomorrow) return t("limits.tomorrow_at", { time: formatHour(resetIso, locale) });
+  if (locale === "en") {
+    const date = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, day: "numeric", month: "long" }).format(at);
+    return t("limits.on_date", { date });
+  }
   const day = Number(new Intl.DateTimeFormat("fr-CH", { timeZone: TZ, day: "numeric" }).format(at));
   const month = new Intl.DateTimeFormat("fr-CH", { timeZone: TZ, month: "long" }).format(at);
-  return `le ${day === 1 ? "1er" : day} ${month}`;
+  return t("limits.on_date", { date: `${day === 1 ? "1er" : day} ${month}` });
 }
 
 const DAILY: ReadonlySet<LimitKey> = new Set(["daily_generations", "daily_assistance", "daily_compute"]);
 
 /** « 3 examens QCM aujourd'hui », « 1 vérification avec ton solde » : un nombre, ce qu'il compte, sur quelle période. */
-function countPhrase(n: number, u: KindUsage): string {
-  const what = n >= 2 ? u.plural : u.label.replace(/ \(.*\)$/, "");
-  const when = DAILY.has(u.limitedBy as LimitKey) ? " aujourd'hui"
-    : u.limitedBy === "credits" ? " avec ton solde"
-    : u.limitedBy === "monthly_capacity" ? " ce mois-ci" : "";
-  return `${n} ${what}${when}`;
+function countPhrase(n: number, u: KindUsage, locale: Locale): string {
+  const t = translator(locale) as unknown as (key: string, values?: Record<string, string | number>) => string;
+  const known = new Set<string>(["exam", "qcm", "exercise", "prepare", "check", "drill", "format", "lab_exercise"]);
+  const key = u.kind.replace(/-/g, "_");
+  const counted = known.has(key)
+    ? t(`limits.kind_${key}`, { count: n })
+    : `${n.toLocaleString(locale === "fr" ? "fr-FR" : "en-GB")} ${n >= 2 ? u.plural : u.label.replace(/ \(.*\)$/, "")}`;
+  const suffix = DAILY.has(u.limitedBy as LimitKey) ? t("limits.today")
+    : u.limitedBy === "credits" ? t("limits.with_balance")
+    : u.limitedBy === "monthly_capacity" ? t("limits.this_month") : "";
+  return `${counted}${suffix}`;
 }
 
 /** Remise à zéro de la limite qui borne (aucune pour un solde : il se recharge en achetant). */
-function resetPhrase(u: KindUsage, now: string): string | null {
-  return u.resetAt && u.limitedBy !== "credits" ? `remise à 0 ${formatReset(u.resetAt, now)}` : null;
+function resetPhrase(u: KindUsage, now: string, locale: Locale): string | null {
+  if (!u.resetAt || u.limitedBy === "credits") return null;
+  const t = translator(locale) as unknown as (key: string, values?: Record<string, string | number>) => string;
+  return t("limits.reset", { when: formatReset(u.resetAt, now, locale) });
 }
 
 /** « 1 crédit », « 0,5 crédit », « 2 crédits » (le pluriel commence à 2 en français). */
-export function creditsPhrase(credits: number): string {
-  return `${credits.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} crédit${credits >= 2 ? "s" : ""}`;
+export function creditsPhrase(credits: number, locale: Locale = currentLocale()): string {
+  const t = translator(locale) as unknown as (key: string, values?: Record<string, string | number>) => string;
+  return t("limits.credits", { count: credits });
 }
 
 /** « 1 crédit débité », « 2 crédits débités ». */
-export function debitedPhrase(credits: number): string {
-  return `${creditsPhrase(credits)} débité${credits >= 2 ? "s" : ""}`;
+export function debitedPhrase(credits: number, locale: Locale = currentLocale()): string {
+  const t = translator(locale) as unknown as (key: string, values?: Record<string, string | number>) => string;
+  return t("limits.credits_debited", { count: credits });
 }
 
 /**
@@ -114,18 +132,20 @@ export function debitedPhrase(credits: number): string {
  * « Il te reste 3 examens QCM aujourd'hui · remise à 0 demain à 01:00 ».
  * null quand rien ne limite (propriétaire, instance sans limites).
  */
-export function remainingLine(u: KindUsage, now: string): string | null {
+export function remainingLine(u: KindUsage, now: string, locale: Locale = currentLocale()): string | null {
   if (u.remaining === null) return null;
-  const reset = resetPhrase(u, now);
-  return `Il te reste ${countPhrase(u.remaining, u)}${reset ? ` · ${reset}` : ""}`;
+  const reset = resetPhrase(u, now, locale);
+  const t = translator(locale) as unknown as (key: string, values?: Record<string, string | number>) => string;
+  return t("limits.remaining", { count: countPhrase(u.remaining, u, locale), reset: reset ? ` · ${reset}` : "" });
 }
 
 /**
  * Ce qu'il restera APRÈS le lancement qu'on s'apprête à confirmer (devis MCP) :
  * « Après celle-ci, il te restera 2 examens QCM aujourd'hui (remise à 0 demain à 01:00) ».
  */
-export function afterLine(u: KindUsage, now: string = new Date().toISOString()): string | null {
+export function afterLine(u: KindUsage, now: string = new Date().toISOString(), locale: Locale = currentLocale()): string | null {
   if (u.remaining === null) return null;
-  const reset = resetPhrase(u, now);
-  return `Après celle-ci, il te restera ${countPhrase(Math.max(0, u.remaining - 1), u)}${reset ? ` (${reset})` : ""}`;
+  const reset = resetPhrase(u, now, locale);
+  const t = translator(locale) as unknown as (key: string, values?: Record<string, string | number>) => string;
+  return t("limits.after", { count: countPhrase(Math.max(0, u.remaining - 1), u, locale), reset: reset ? ` (${reset})` : "" });
 }

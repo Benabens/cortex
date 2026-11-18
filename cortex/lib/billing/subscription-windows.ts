@@ -77,13 +77,13 @@ export function standingOf(
  * vivant il continue de facturer : en ouvrir un autre ferait payer deux fois
  * (et la ligne `subscriptions`, une par compte, ne suivrait que le dernier).
  */
-export function secondSubscriptionRefusal(standing: Standing): string | null {
+export function secondSubscriptionRefusal(standing: Standing): UserError | null {
   switch (standing) {
     case "none": return null;
-    case "live": return "Tu as déjà un abonnement en cours. Gère-le depuis Mon compte (moyen de paiement, résiliation) plutôt que d'en ouvrir un second.";
-    case "renewing": return "Le paiement de ton abonnement est en cours de confirmation : tes crédits arrivent dès qu'il est validé, jusqu'à une heure lors d'un renouvellement. Inutile d'en ouvrir un second.";
-    case "unpaid": return "Le dernier paiement de ton abonnement n'est pas passé. Mets à jour ton moyen de paiement depuis « Gérer mon abonnement » plutôt que d'en ouvrir un second.";
-    case "suspended": return "Ton abonnement est suspendu après un remboursement ou une contestation de paiement. Gère-le depuis « Gérer mon abonnement » plutôt que d'en ouvrir un second.";
+    case "live": return userError("subscription_already_active");
+    case "renewing": return userError("subscription_payment_pending");
+    case "unpaid": return userError("subscription_payment_failed");
+    case "suspended": return userError("subscription_suspended");
   }
 }
 
@@ -167,3 +167,4 @@ export function nextRechargeDate(sub: WindowedSub, now: string): string | null {
   const next = nextWindowStart(anchor, now, sub.period_end);
   return (next ?? nextInvoice)?.slice(0, 10) ?? null;
 }
+import { userError, type UserError } from "@/lib/i18n/user-error";

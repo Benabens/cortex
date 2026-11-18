@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable react-hooks/set-state-in-effect -- les facettes et la sélection se réinitialisent avec la requête courante */
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, X, ExternalLink, WifiOff, RotateCw } from "lucide-react";
 import { useApi, useCourse } from "@/lib/ux/api";
@@ -9,6 +11,7 @@ import { toneVar } from "@/lib/ux/labels";
 import { Button } from "@/components/ui/Button";
 import { Segmented } from "@/components/ui/Segmented";
 import { cn } from "@/lib/ux/cn";
+import { useTranslations } from "use-intl/react";
 
 const MIN_CHARS = 2;
 /** Valeur de l'option « Tous » (aucun type de source ne peut s'appeler ainsi). */
@@ -37,7 +40,9 @@ function Snippet({ text }: { text: string }) {
 
 /** Recherche full-text RÉELLE sur tout le corpus du cours (GET /api/search?q=). */
 export function SearchExperience() {
-  const { courseId } = useCourse();
+  const t = useTranslations("searchExperience");
+  const { courseId, course } = useCourse();
+  const language = course?.language || undefined; // "" = langue pas encore détectée : pas de lang vide
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -129,8 +134,8 @@ export function SearchExperience() {
             type="text"
             role="searchbox"
             data-focus-parent
-            aria-label="Rechercher dans tout ton corpus"
-            placeholder="Rechercher un cours, une série, un final…"
+            aria-label={t("label")}
+            placeholder={t("placeholder")}
             className="h-14 min-w-0 flex-1 truncate bg-transparent text-[1rem] text-ink-1 placeholder:text-ink-4 focus:outline-none focus-visible:outline-none"
           />
           {query && (
@@ -140,7 +145,7 @@ export function SearchExperience() {
                 setQuery("");
                 inputRef.current?.focus();
               }}
-              aria-label="Effacer la recherche"
+              aria-label={t("clear")}
               className="grid size-11 place-items-center rounded-full text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink-1"
             >
               <X className="size-4" />
@@ -152,7 +157,7 @@ export function SearchExperience() {
       {/* État vide INTENTIONNEL (P0.3) : compact, utile — les suggestions SONT le contenu.
           Sans intitulé en capitales : des chips sous une barre de recherche se lisent seules. */}
       {!active && (
-        <section aria-label="Suggestions de recherche" className="flex flex-col gap-2.5">
+        <section aria-label={t("suggestions")} className="flex flex-col gap-2.5">
           <div className="flex flex-wrap gap-2">
             {suggestions.map((s) => (
               <button
@@ -164,7 +169,7 @@ export function SearchExperience() {
                 }}
                 className="inline-flex min-h-10 items-center rounded-full border border-line bg-surface-1/70 px-3.5 text-[0.85rem] text-ink-2 transition-colors duration-150 hover:border-[color-mix(in_oklch,var(--color-accent)_38%,transparent)] hover:bg-surface-2 hover:text-ink-1"
               >
-                {s}
+                <span lang={language}>{s}</span>
               </button>
             ))}
           </div>
@@ -176,27 +181,26 @@ export function SearchExperience() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Segmented
             variant="pills"
-            label="Filtrer par type de source"
+            label={t("filter")}
             options={[
-              { value: ALL_TYPES, label: "Tous", count: data.total },
+              { value: ALL_TYPES, label: t("all"), count: data.total },
               ...data.groups.map((g) => {
                 const meta = metaFor(g.sourceType);
-                return { value: g.sourceType, label: g.label, count: g.hits.length, tone: toneVar[meta.tone], Icon: meta.Icon };
+                return { value: g.sourceType, label: t(meta.labelKey), count: g.hits.length, tone: toneVar[meta.tone], Icon: meta.Icon };
               }),
             ]}
             value={activeType ?? ALL_TYPES}
             onChange={(v) => setActiveType(v === ALL_TYPES ? null : v)}
           />
           <span className="text-[0.8rem] text-ink-3" aria-live="polite">
-            <span className="font-data font-semibold text-ink-1">{shownCount}</span> résultat
-            {shownCount > 1 ? "s" : ""} pour «&nbsp;{debounced}&nbsp;»
+            {t.rich("results", { count: shownCount, query: debounced, num: (v) => <span className="font-data font-semibold text-ink-1">{v}</span> })}
           </span>
         </div>
       )}
 
       {/* Résultats — rien à afficher tant que la requête est trop courte (l'état vide vit au-dessus) */}
       {!active ? null : loading ? (
-        <div className="d2-card space-y-2 rounded-xl p-3" aria-busy="true" aria-label="Recherche en cours">
+        <div className="d2-card space-y-2 rounded-xl p-3" aria-busy="true" aria-label={t("loading")}>
           {[0, 1, 2, 3, 4].map((i) => (
             <div key={i} className="flex items-center gap-3 px-2 py-1.5">
               <div className="skeleton size-9 rounded-lg" />
@@ -210,27 +214,27 @@ export function SearchExperience() {
       ) : error ? (
         <div className="d2-card flex flex-col items-center gap-3 rounded-xl px-6 py-12 text-center">
           <WifiOff className="size-6 text-danger-hi" strokeWidth={2} />
-          <p className="text-[0.95rem] font-medium text-ink-1">La recherche ne répond pas</p>
-          <p className="max-w-xs text-[0.85rem] text-ink-3">Réessaie dans un instant.</p>
+          <p className="text-[0.95rem] font-medium text-ink-1">{t("failed")}</p>
+          <p className="max-w-xs text-[0.85rem] text-ink-3">{t("failedHint")}</p>
           <Button variant="secondary" size="sm" onClick={refetch}>
             <RotateCw className="size-4" strokeWidth={2.25} aria-hidden="true" />
-            Réessayer
+            {t("retry")}
           </Button>
         </div>
       ) : flat.length === 0 ? (
         <div className="d2-card grid place-items-center rounded-xl px-6 py-16 text-center">
           <Search className="size-7 text-ink-4" strokeWidth={1.75} />
           <p className="mt-3 text-[0.95rem] font-medium text-ink-1">
-            Aucun résultat pour «&nbsp;{debounced}&nbsp;»
+            {t("empty", { query: debounced })}
           </p>
           <p className="mt-1 max-w-xs text-[0.85rem] text-ink-3">
             {activeType
-              ? "Retire le filtre de type, ou essaie un autre terme."
-              : "Essaie un autre terme. Tes annales sont peut-être à importer dans Sources."}
+              ? t("emptyFiltered")
+              : t("emptyHint")}
           </p>
           {activeType && (
             <Button variant="secondary" size="sm" className="mt-3" onClick={() => setActiveType(null)}>
-              Retirer le filtre
+              {t("removeFilter")}
             </Button>
           )}
         </div>
@@ -242,7 +246,7 @@ export function SearchExperience() {
               <div key={g.sourceType}>
                 {/* Titre de groupe (liste groupée, façon Linear) : casse normale, petit, gris. */}
                 <div className="flex items-center gap-2 px-3 pb-1 pt-3 text-[0.76rem] font-medium text-ink-3">
-                  {g.label}
+                  {t(metaFor(g.sourceType).labelKey)}
                   <span className="font-data text-ink-4">{g.hits.length}</span>
                 </div>
                 {g.hits.map((h) => {
@@ -274,10 +278,10 @@ export function SearchExperience() {
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="break-words text-[0.92rem] font-medium text-ink-1">
-                          <span className="sr-only">{g.label} : </span>
-                          {h.title.replace(/\s+—\s+p\.(\d+)$/, ", p. $1")}
+                          <span className="sr-only">{t("srType", { type: t(meta.labelKey) })}</span>
+                          <span lang={language}>{h.title.replace(/\s+—\s+p\.(\d+)$/, ", p. $1")}</span>
                         </div>
-                        <div className="line-clamp-2 text-[0.78rem] text-ink-3">
+                        <div className="line-clamp-2 text-[0.78rem] text-ink-3" lang={language}>
                           <Snippet text={h.snippet} />
                         </div>
                       </div>
@@ -287,8 +291,8 @@ export function SearchExperience() {
                           isSel ? "hidden md:flex" : "hidden md:group-hover:flex"
                         )}
                       >
-                        Ouvrir <ExternalLink className="size-3.5" strokeWidth={2.25} aria-hidden="true" />
-                        <span className="sr-only">(nouvel onglet)</span>
+                        {t("open")} <ExternalLink className="size-3.5" strokeWidth={2.25} aria-hidden="true" />
+                        <span className="sr-only">{t("newTab")}</span>
                       </span>
                     </a>
                   );

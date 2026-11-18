@@ -13,11 +13,11 @@ const KEY = "cortex.examOutput";
 /** Changement dans cet onglet (l'événement « storage » ne prévient que les autres), comme lib/ux/use-theme. */
 const CHANGE = "cortex:exam-output";
 
-/** Les deux sorties, pour un Segmented ; `pdfLabel` : « PDF » dans l'en-tête de l'examen, plus explicite au compositeur. */
-export function examOutputOptions(pdfLabel = "PDF") {
+/** Les deux sorties, pour un Segmented ; libellés traduits (namespace examOutput) : « PDF » dans l'en-tête de l'examen, plus explicite au compositeur. */
+export function examOutputOptions(labels: { site: string; pdf: string }) {
   return [
-    { value: "site" as const, label: "Sur le site", Icon: Globe },
-    { value: "pdf" as const, label: pdfLabel, Icon: FileText },
+    { value: "site" as const, label: labels.site, Icon: Globe },
+    { value: "pdf" as const, label: labels.pdf, Icon: FileText },
   ];
 }
 

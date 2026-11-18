@@ -3,6 +3,7 @@ import { currentUser } from "@/db/context";
 import { authAll, authGet, authRun, authSqlite, authTx, type AuthTx } from "@/db/auth-store";
 import { dbDriverName, nowStr } from "@/db/q";
 import { log } from "@/lib/metrics";
+import { refusal, type Refusal } from "@/lib/i18n/user-error";
 import { requestIp } from "@/lib/client-ip";
 import { claimFreeOffer } from "./free-offer";
 
@@ -434,30 +435,24 @@ export async function setSubscriptionStatus(p: {
  * {status: 402, error claire}. `kind` inconnu au moment du preflight → on
  * exige le coût MINIMUM d'une génération (1 crédit).
  */
-export async function creditsGate(kind?: string, costCenti?: number): Promise<{ status: number; error: string } | null> {
+export async function creditsGate(kind?: string, costCenti?: number): Promise<Refusal | null> {
   if (!billingEnabled()) return null;
   const cost = costCenti ?? (kind ? creditCost(kind) : CENTI);
   const { limitGate } = await import("./limits");
   const r = await limitGate({ bucket: "gen", kind: kind ?? "exam", costCenti: cost, jobSlot: false }, ["credits"]);
-  return r && { status: r.status, error: r.error };
+  return r;
 }
 
 /** Verdict de solde (partagé avec la réservation atomique) : null = passe. */
-export function insufficient(balanceCenti: number, costCenti: number, subCenti = 0): { status: number; error: string } | null {
+export function insufficient(balanceCenti: number, costCenti: number, subCenti = 0): Refusal<402> | null {
   // Un coût nul exige tout de même un solde positif : sinon un compte à sec —
   // ou passé en négatif par un remboursement Stripe — continuerait d'appeler le modèle.
   if (costCenti === 0) {
-    return balanceCenti > 0 ? null : {
-      status: 402,
-      error: "Solde épuisé. Il te faut des crédits pour cette action. Acheter : https://app.cortexexam.com/compte#credits",
-    };
+    return balanceCenti > 0 ? null : refusal(402, "billing_balance_empty");
   }
   if (balanceCenti < costCenti) {
-    const dont = subCenti > 0 ? ` (dont ${fmtCredits(subCenti)} d'abonnement ce mois-ci)` : "";
-    return {
-      status: 402,
-      error: `Solde insuffisant : il te faut ${fmtCredits(costCenti)} crédit(s), génération à ${fmtCredits(costCenti)}, solde ${fmtCredits(balanceCenti)}${dont}. Acheter : https://app.cortexexam.com/compte#credits`,
-    };
+    const code = subCenti > 0 ? "billing_balance_insufficient_with_subscription" : "billing_balance_insufficient";
+    return refusal(402, code, { cost: fromCenti(costCenti), balance: fromCenti(balanceCenti), subscription: fromCenti(subCenti) });
   }
   return null;
 }

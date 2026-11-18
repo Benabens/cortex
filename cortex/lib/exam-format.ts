@@ -24,6 +24,7 @@ import { excludedSourceIds, materialLabel } from "@/lib/source-scope";
 import { EXAM_HAS_TEXT } from "@/lib/sources";
 import { languageName } from "@/lib/profiles/generic-directives";
 import type { FormatProfile } from "@/lib/format";
+import { UserFacingError, userError, type UserError } from "@/lib/i18n/user-error";
 
 export const EXAM_KINDS = ["qcm", "exercises", "mixed", "composite", "essay", "oral"] as const;
 export type ExamKind = (typeof EXAM_KINDS)[number];
@@ -57,9 +58,9 @@ export type DeclaredFormat = {
   documents?: DocumentRule;
 };
 
-export class InvalidFormatError extends Error {
-  constructor(message: string) {
-    super(message);
+export class InvalidFormatError extends UserFacingError {
+  constructor(error: UserError) {
+    super(error, 400);
     this.name = "InvalidFormatError";
   }
 }
@@ -188,39 +189,39 @@ const KIND_LABEL: Record<ExamKind, string> = { qcm: "QCM", exercises: "exercices
  */
 export function parseDeclaredFormat(input: unknown): DeclaredFormat | null {
   if (input === undefined || input === null || input === "") return null;
-  if (typeof input !== "object" || Array.isArray(input)) throw new InvalidFormatError("Le format d'examen doit être un objet (type, nombre de questions, durée, langue).");
+  if (typeof input !== "object" || Array.isArray(input)) throw new InvalidFormatError(userError("exam_format_object_required"));
   const o = input as Record<string, unknown>;
   const kind = typeof o.kind === "string" ? o.kind.trim().toLowerCase() : "";
   if (!(EXAM_KINDS as readonly string[]).includes(kind)) {
-    throw new InvalidFormatError(`Type d'examen non reconnu : « ${String(o.kind ?? "")} » (attendu : QCM, exercices, mixte, composite, essai ou oral).`);
+    throw new InvalidFormatError(userError("exam_format_kind_unknown", { kind: String(o.kind ?? "") }));
   }
-  const int = (raw: unknown, label: string, lo: number, hi: number): number | null => {
+  const int = (raw: unknown, code: "exam_format_question_count_invalid" | "exam_format_duration_invalid", lo: number, hi: number): number | null => {
     if (raw === undefined || raw === null || raw === "") return null;
     const n = Number(raw);
-    if (!Number.isInteger(n) || n < lo || n > hi) throw new InvalidFormatError(`Le ${label} doit être un entier entre ${lo} et ${hi}.`);
+    if (!Number.isInteger(n) || n < lo || n > hi) throw new InvalidFormatError(userError(code, { lo, hi }));
     return n;
   };
-  const questionCount = int(o.questionCount ?? o.question_count, "nombre de questions", 1, 200);
-  const durationMin = int(o.durationMin ?? o.duration_min, "durée (minutes)", 5, 600);
+  const questionCount = int(o.questionCount ?? o.question_count, "exam_format_question_count_invalid", 1, 200);
+  const durationMin = int(o.durationMin ?? o.duration_min, "exam_format_duration_invalid", 5, 600);
   const rawLang = o.language;
   let language: string | null = null;
   if (rawLang !== undefined && rawLang !== null && rawLang !== "") {
     const l = String(rawLang).trim().toLowerCase();
-    if (!(LANGUAGES as readonly string[]).includes(l)) throw new InvalidFormatError(`Langue d'examen non reconnue : « ${String(rawLang)} ».`);
+    if (!(LANGUAGES as readonly string[]).includes(l)) throw new InvalidFormatError(userError("exam_format_language_unknown", { language: String(rawLang) }));
     language = l;
   }
   const rawMode = o.answerMode ?? o.answer_mode;
   let answerMode: AnswerMode | null = null;
   if (rawMode !== undefined && rawMode !== null && rawMode !== "") {
     const m = String(rawMode).trim().toLowerCase();
-    if (!(ANSWER_MODES as readonly string[]).includes(m)) throw new InvalidFormatError(`Mode de réponse non reconnu : « ${String(rawMode)} » (attendu : réponse unique, réponses multiples ou mixte).`);
+    if (!(ANSWER_MODES as readonly string[]).includes(m)) throw new InvalidFormatError(userError("exam_format_answer_mode_unknown", { mode: String(rawMode) }));
     answerMode = m as AnswerMode;
   }
   const rawDocs = o.documents;
   let documents: DocumentRule | null = null;
   if (rawDocs !== undefined && rawDocs !== null && rawDocs !== "") {
     const d = String(rawDocs).trim().toLowerCase();
-    if (!(DOCUMENT_RULES as readonly string[]).includes(d)) throw new InvalidFormatError(`Règle de documents non reconnue : « ${String(rawDocs)} » (attendu : aucun, notes personnelles ou tous).`);
+    if (!(DOCUMENT_RULES as readonly string[]).includes(d)) throw new InvalidFormatError(userError("exam_format_documents_unknown", { documents: String(rawDocs) }));
     documents = d as DocumentRule;
   }
   return { kind: kind as ExamKind, questionCount, durationMin, language, ...(answerMode ? { answerMode } : {}), ...(documents ? { documents } : {}) };

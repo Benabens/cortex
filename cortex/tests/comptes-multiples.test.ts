@@ -127,7 +127,10 @@ test("inscription avec une adresse jetable : refusée avec un message clair ; un
 test("la page de connexion explique le refus d'une adresse jetable", async () => {
   const fs = await import("node:fs");
   const card = fs.readFileSync("app/login/LoginCard.tsx", "utf8");
-  assert.match(card, /case "EmailDisposable":\s*return "Les adresses e-mail jetables ne permettent pas d’ouvrir un compte\. Utilise ton adresse habituelle \(école, Gmail, Outlook…\)\.";/);
+  assert.match(card, /case "EmailDisposable":\s*return t\("errorEmailDisposable"\);/);
+  const messages = (lang: string) => JSON.parse(fs.readFileSync(`messages/${lang}.json`, "utf8")).login.errorEmailDisposable as string;
+  assert.equal(messages("fr"), "Les adresses e-mail jetables ne permettent pas d’ouvrir un compte. Utilise ton adresse habituelle (école, Gmail, Outlook…).");
+  assert.match(messages("en"), /Disposable email addresses/);
 });
 
 test("budget d'essai : un compte qui paie n'y touche pas (jamais plus que ce qu'il a payé) et ne prend pas de place d'offre", async () => {

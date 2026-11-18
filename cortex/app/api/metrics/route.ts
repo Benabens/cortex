@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { renderPrometheus, snapshot } from "@/lib/metrics";
 import { hasMetricsToken } from "@/lib/metrics-token";
 import { NextRequest, NextResponse } from "next/server";
@@ -14,7 +15,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: NextRequest) {
   if (!hasMetricsToken(req)) {
-    return NextResponse.json({ error: "métriques protégées (METRICS_TOKEN requis)" }, { status: 401 });
+    return apiError(req, "metrics_token_required", 401);
   }
   if (req.nextUrl.searchParams.get("format") === "json") {
     return NextResponse.json(snapshot());

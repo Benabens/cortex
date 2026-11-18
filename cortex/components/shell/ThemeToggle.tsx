@@ -2,6 +2,7 @@
 
 import { Moon, Sun } from "lucide-react";
 import { useTheme } from "@/lib/ux/use-theme";
+import { useTranslations } from "use-intl/react";
 
 /**
  * Bascule rapide clair / sombre de la barre du haut. Fixe un choix explicite (le retour à
@@ -10,6 +11,7 @@ import { useTheme } from "@/lib/ux/use-theme";
  * sans attendre l'hydratation.
  */
 export function ThemeToggle() {
+  const t = useTranslations("shell");
   const { theme, setPref } = useTheme();
   const light = theme === "light";
 
@@ -17,9 +19,9 @@ export function ThemeToggle() {
     <button
       type="button"
       onClick={() => setPref(light ? "dark" : "light")}
-      aria-label="Thème clair"
+      aria-label={t("lightTheme")}
       aria-pressed={light}
-      title={light ? "Passer en thème sombre" : "Passer en thème clair"}
+      title={light ? t("switchDark") : t("switchLight")}
       className="grid size-11 place-items-center rounded-lg border border-line bg-surface-2/50 text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink-1"
     >
       <Moon className="theme-icon-moon size-[1.15rem]" strokeWidth={2} aria-hidden="true" />

@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/i18n/api-error";
+import { UserFacingError, type UserError } from "@/lib/i18n/user-error";
 
 /**
  * BORNE DES CORPS DE REQUÊTE.
@@ -16,10 +18,9 @@ import { NextResponse } from "next/server";
  */
 
 /** Corps au-delà du plafond, détecté PENDANT la lecture. */
-export class PayloadTooLarge extends Error {
-  readonly status = 413;
+export class PayloadTooLarge extends UserFacingError {
   constructor(maxBytes: number) {
-    super(`Corps de requête trop volumineux (maximum ${Math.round(maxBytes / 1e6)} Mo).`);
+    super({ code: "request_body_too_large", params: { maxMb: Math.round(maxBytes / 1e6) } }, 413);
     this.name = "PayloadTooLarge";
   }
 }
@@ -35,18 +36,15 @@ export { MiB, UPLOAD_LIMITS } from "./body-size-limits";
 export function rejectOversizedBody(req: Request, maxBytes: number): NextResponse | null {
   const raw = req.headers.get("content-length");
   if (raw == null || raw === "") {
-    return NextResponse.json({ error: "Content-Length requis pour un envoi de fichier." }, { status: 411 });
+    return apiError(req, "upload_content_length_required", 411);
   }
   // Entier décimal strict : Number() accepterait « 1e3 », « 0x10 » ou des espaces.
   if (!/^\d{1,15}$/.test(raw.trim())) {
-    return NextResponse.json({ error: "Content-Length invalide." }, { status: 400 });
+    return apiError(req, "content_length_invalid", 400);
   }
   const declared = Number(raw.trim());
   if (declared > maxBytes) {
-    return NextResponse.json(
-      { error: `Envoi trop volumineux (${Math.round(declared / 1e6)} Mo, maximum ${Math.round(maxBytes / 1e6)} Mo).` },
-      { status: 413 },
-    );
+    return apiError(req, { code: "upload_too_large", params: { sizeMb: Math.round(declared / 1e6), maxMb: Math.round(maxBytes / 1e6) } }, 413);
   }
   return null;
 }
@@ -87,13 +85,16 @@ export async function readBodyBounded(req: Request, maxBytes: number): Promise<U
 /** Multipart borné : pré-contrôle Content-Length (411/413) puis octets réels, puis parsing. */
 export async function readFormData(req: Request, maxBytes: number): Promise<FormData> {
   const early = rejectOversizedBody(req, maxBytes);
-  if (early) throw new EarlyReject(early);
+  if (early) {
+    const body = await early.json() as UserError;
+    throw new EarlyReject(body, early.status);
+  }
   const bytes = await readBodyBounded(req, maxBytes);
   const body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   try {
     return await new Request(req.url, { method: req.method, headers: req.headers, body }).formData();
   } catch {
-    throw new EarlyReject(NextResponse.json({ error: "Envoi multipart attendu." }, { status: 400 }));
+    throw new EarlyReject("multipart_expected", 400);
   }
 }
 
@@ -112,9 +113,11 @@ export async function readText(req: Request, maxBytes = JSON_MAX_BYTES): Promise
 }
 
 /** Refus du pré-contrôle (411/413/400) porté comme exception jusqu'à withBodyLimit. */
-export class EarlyReject extends Error {
-  readonly response: NextResponse;
-  constructor(response: NextResponse) { super("corps refusé"); this.name = "EarlyReject"; this.response = response; }
+export class EarlyReject extends UserFacingError {
+  constructor(error: UserError | UserError["code"], status: number) {
+    super(typeof error === "string" ? { code: error } : error, status);
+    this.name = "EarlyReject";
+  }
 }
 
 type Handler<R extends Request, A extends unknown[]> = (req: R, ...args: A) => Promise<Response>;
@@ -125,8 +128,7 @@ export function withBodyLimit<R extends Request, A extends unknown[]>(handler: H
     try {
       return await handler(req, ...args);
     } catch (e) {
-      if (e instanceof PayloadTooLarge) return NextResponse.json({ error: e.message }, { status: 413 });
-      if (e instanceof EarlyReject) return e.response;
+      if (e instanceof PayloadTooLarge || e instanceof EarlyReject) return apiError(req, e, e.status);
       throw e;
     }
   };

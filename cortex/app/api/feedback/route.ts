@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { calibrationSummary, recordFeedback, resolveExamMeta } from "@/lib/calibration";
 import { useCourseOr404 } from "@/lib/req";
 import { NextRequest, NextResponse } from "next/server";
@@ -26,15 +27,15 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
   // dans son énumération, textes bornés, identifiant entier — sinon un retour
   // libre devient une consigne injectée dans toutes les générations suivantes.
   if (!VERDICTS.includes(String(b?.verdict))) {
-    return NextResponse.json({ error: `verdict requis (${VERDICTS.join("|")}).` }, { status: 400 });
+    return apiError(req, { code: "feedback_verdict_required", params: { verdicts: VERDICTS.join("|") } }, 400);
   }
-  const tooLong = fieldTooLong("feedbackNote", String(b.note ?? ""))
-    ?? fieldTooLong("topic", String(b.topic ?? ""))
-    ?? fieldTooLong("topic", String(b.archetype ?? ""));
+  const tooLong = fieldTooLong(req, "feedbackNote", String(b.note ?? ""))
+    ?? fieldTooLong(req, "topic", String(b.topic ?? ""))
+    ?? fieldTooLong(req, "topic", String(b.archetype ?? ""));
   if (tooLong) return tooLong;
   const examId = b.examId == null || b.examId === "" ? null : Number(b.examId);
   if (examId !== null && (!Number.isSafeInteger(examId) || examId <= 0)) {
-    return NextResponse.json({ error: "examId doit être un identifiant entier." }, { status: 400 });
+    return apiError(req, "feedback_exam_id_invalid", 400);
   }
   // archétype/topic non fournis → les résoudre depuis l'exo généré (tag architect:<id>).
   let archetype = b.archetype ?? null;

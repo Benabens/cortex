@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/i18n/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { useCourseOr404 } from "@/lib/req";
 import { readJson, withBodyLimit } from "@/lib/upload-limit";
@@ -19,7 +20,7 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     });
     return NextResponse.json({ ok: true, ...r });
   } catch (e) {
-    if (e instanceof ReportError) return NextResponse.json({ error: e.message }, { status: e.status });
-    return NextResponse.json({ error: "Signalement impossible pour le moment. Réessaie dans un instant." }, { status: 500 });
+    if (e instanceof ReportError) return apiError(req, e, e.status);
+    return apiError(req, "report_temporarily_unavailable", 500);
   }
 });

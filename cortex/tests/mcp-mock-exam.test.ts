@@ -113,7 +113,7 @@ test("format demandé pour CET examen : QCM au nombre voulu et au tarif du QCM ;
   const sc = r.structuredContent as { status: string; format: string; exercise_count: number; note: string | null; confirmation: { cost_credits: number } };
   assert.deepEqual([sc.status, sc.format, sc.exercise_count], ["confirmation_required", "mcq", 15]);
   assert.equal(sc.confirmation.cost_credits, fromCenti(costForJob("qcm", JSON.stringify({ count: 15, openCount: 0, focus: "Galilée" }))));
-  assert.match(sc.note ?? "", /annales/);
+  assert.match(sc.note ?? "", /past exams/);
   const tooMany = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "HUM-285", format: "written", exercise_count: 20 } })) as ToolResult;
   assert.equal(errorCode(tooMany), "invalid_input");
   // « written » sur un cours au format inconnu : devis d'un écrit, et la demande voyage dans la cible du job
@@ -139,17 +139,17 @@ test("HUM-285 au format déclaré (QCM, 20 questions) : devis pour 20 QCM au tar
   assert.equal(r.isError, undefined, text(r));
   const sc = r.structuredContent as { status: string; format: string; exercise_count: number; note: string | null; confirmation: { cost_credits: number } };
   assert.deepEqual([sc.status, sc.format, sc.exercise_count], ["confirmation_required", "mcq", 20]);
-  assert.match(sc.note ?? "", /annales/);
-  assert.match(sc.note ?? "", /déclaré/, "la note dit d'où vient le format");
+  assert.match(sc.note ?? "", /no past exams/);
+  assert.match(sc.note ?? "", /declared by the student/, "la note dit d'où vient le format");
   const target = JSON.stringify({ count: 20, openCount: 0, focus: "moitié Martin, moitié Leroy" });
   assert.equal(sc.confirmation.cost_credits, fromCenti(costForJob("qcm", target)));
-  assert.match(text(r), /annales/, "le résumé lu par le modèle le dit aussi");
+  assert.match(text(r), /past exams/, "le résumé lu par le modèle le dit aussi");
 
   // Avec des annales : la demande explicite l'emporte, leur format n'est qu'un défaut — et c'est dit.
   const exam = (await c.callTool({ name: "generate_mock_exam", arguments: { course: "MATH-101", focus: "les séries", format: "mcq", exercise_count: 12 } })) as ToolResult;
   const ex = exam.structuredContent as { format: string; exercise_count: number | null; note: string | null; confirmation: { cost_credits: number } };
   assert.deepEqual([ex.format, ex.exercise_count], ["mcq", 12], "QCM demandés : QCM, même avec des annales");
-  assert.match(ex.note ?? "", /annales[\s\S]*défaut/);
+  assert.match(ex.note ?? "", /past-exam[\s\S]*default/);
   assert.equal(ex.confirmation.cost_credits, fromCenti(costForJob("qcm", JSON.stringify({ count: 12, openCount: 0, focus: "les séries" }))), "aucune question ouverte");
   await c.close();
 });
@@ -252,7 +252,7 @@ test("C — questions composées au connecteur : une entrée par sous-question (
   const sc = ((await c.callTool({ name: "get_job_status", arguments: { course: "HUM-285", job_id: jobId, include_solutions: true } })) as ToolResult).structuredContent as Status;
   assert.deepEqual(sc.exam?.questions.map((x) => x.kind), ["single_choice", "written"]);
   assert.match(sc.exam!.questions[1].statement, /Inquisition[\s\S]*\(b\)[\s\S]*Pourquoi le livre/);
-  assert.match(sc.exam!.questions[1].solution ?? "", /héliocentrisme[\s\S]*Barème/);
+  assert.match(sc.exam!.questions[1].solution ?? "", /héliocentrisme[\s\S]*Rubric/);
   const r = (await c.callTool({ name: "report_question", arguments: { course: "HUM-285", exam_id: examId, question_number: 2, reason: "ambiguous" } })) as ToolResult;
   assert.ok(!r.isError, text(r));
   const { listReports } = await import("../lib/question-reports");

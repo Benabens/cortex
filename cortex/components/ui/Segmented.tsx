@@ -14,6 +14,8 @@ export type SegmentedOption<V extends string> = {
   count?: number;
   /** Couleur du libellé quand l'option est choisie (facettes de la recherche). */
   tone?: string;
+  /** Langue du libellé quand elle diffère de l'interface (sélecteur de langue : « English »). */
+  lang?: string;
 };
 
 /**
@@ -215,6 +217,7 @@ export function Segmented<V extends string>({
             type="button"
             role="radio"
             aria-checked={checked}
+            lang={o.lang}
             // Un seul arrêt de tabulation : l'option choisie (la première si aucune ne l'est).
             tabIndex={checked || (activeIndex < 0 && i === 0) ? 0 : -1}
             data-pressed={pressed === o.value ? "" : undefined}

@@ -13,6 +13,7 @@ import { quotaTrackingActive, type GateIssue, type QuotaBucket } from "./guards"
 import { SLOT_MAX_AGE_MS, launchVerdict, maxActiveJobsLimit, readCounterState, readSpendState, type LaunchSpec, type LimitsState } from "./limits";
 import { isOwner } from "./owner";
 import { isPaidProvider, spendCapUsd } from "./usage";
+import { refusal, UserFacingError, type Refusal } from "@/lib/i18n/user-error";
 
 /**
  * RÉSERVATION — la décision UNIQUE et ATOMIQUE qui autorise une dépense LLM.
@@ -104,7 +105,7 @@ export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
   } catch (e) {
     // Budget invérifiable : refusé comme un plafond invérifiable (fail-closed), rien n'est débité.
     log("error", "billing.budget_check_failed", { message: e instanceof Error ? e.message.slice(0, 200) : String(e) });
-    return { ok: false, status: 503, error: "Budget de calcul invérifiable (base indisponible) : réessaie dans un instant." };
+    return { ok: false, ...refusal(503, "billing_budget_unavailable") };
   }
   const expectedUsd = expectedJobCostUsd(o.bucket === "assist" ? "assist" : o.kind, cost);
   const keepSlot = !!o.jobSlot && (maxActiveJobs() !== null || spend.paid);
@@ -125,7 +126,7 @@ export async function reserveGeneration(o: ReserveOpts): Promise<Reservation> {
     const refusal = launchVerdict(state, spec);
     if (refusal) {
       log("info", "billing.launch_refused", { user: userId, kind: o.kind, limit: refusal.key });
-      return { ok: false, status: refusal.status, error: refusal.error };
+      return { ok: false, ...refusal };
     }
 
     if (billing && !owner && !seen && counters.credits) {
@@ -210,7 +211,7 @@ export async function reserveIngest(ref: string, userId = currentUser(), course 
     ))?.n ?? 0);
     if (used >= cap) {
       log("info", "billing.launch_refused", { user: userId, kind: "ingest", limit: "daily_ingests" });
-      return { ok: false, status: 429, error: `Tu as lancé ${cap} imports aujourd'hui, la limite du jour : réessaie demain (remise à zéro à minuit UTC).` };
+      return { ok: false, ...refusal(429, "daily_ingest_limit", { count: cap }) };
     }
     await tx.run(
       `INSERT INTO gen_events (user_id, bucket, kind, course, day, created_at, ref) VALUES (?,?,?,?,?,?,?)`,
@@ -235,17 +236,23 @@ export async function assistReserve(kind: string): Promise<{ issue: GateIssue } 
   // Moteur indisponible : refus AVANT toute réservation — un débit non
   // remboursable ne doit jamais précéder un appel qui ne partira pas.
   const { llmAvailable, llmUnavailableReason } = await import("@/lib/llm");
-  if (!llmAvailable()) return { issue: { status: 503, error: llmUnavailableReason() ?? "Moteur LLM indisponible." } };
+  if (!llmAvailable()) {
+    const reason = llmUnavailableReason();
+    return { issue: reason ? refusal(503, "llm_engine_unavailable_reason", { reason }) : refusal(503, "llm_engine_unavailable") };
+  }
   // `kind` (drill, check-solution…) est le libellé du compteur ; le tarif est celui d'« assist ».
   const ref = `assist:${currentUser()}:${crypto.randomUUID()}`;
   const r = await reserveGeneration({ bucket: "assist", kind, costCenti: creditCost("assist"), ref });
   if (r.ok) return { ref };
-  return { issue: { status: r.status, error: r.error } };
+  return { issue: r };
 }
 
 /** Refus d'un appel d'assistance par la réservation (rafale, quota, solde, moteur absent). */
-export class AssistRefused extends Error {
-  constructor(readonly status: number, message: string) { super(message); this.name = "AssistRefused"; }
+export class AssistRefused extends UserFacingError {
+  constructor(issue: Refusal) {
+    super(issue, issue.status);
+    this.name = "AssistRefused";
+  }
 }
 
 /**
@@ -267,7 +274,7 @@ const REFUNDED_CODES = new Set(["UNAVAILABLE", "SPEND_CAP", ...BAD_OUTPUT_CODES]
  */
 export async function assistCall<T>(kind: string, fn: () => Promise<T>): Promise<T> {
   const r = await assistReserve(kind);
-  if ("issue" in r) throw new AssistRefused(r.issue.status, r.issue.error);
+  if ("issue" in r) throw new AssistRefused(r.issue);
   try {
     const { runWithLlmAuthorization } = await import("@/lib/llm/authorization");
     return await runWithLlmAuthorization({ kind: "assist", ref: r.ref }, fn);

@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderIntl } from "./helpers/intl";
 
 // ── apiDelete : une suppression refusée doit LEVER, avec le message du serveur ──
 const withFetch = async <T,>(impl: typeof fetch, fn: () => Promise<T>): Promise<T> => {
@@ -63,7 +63,7 @@ const isDisabled = (tag: string) => /\sdisabled(?:=""|(?=[\s>]))/.test(tag);
 
 test("pendant un départ vers Stripe, TOUTES les offres sont désactivées", async () => {
   const { BillingView } = await import("../app/compte/BillingPanel");
-  const html = renderToStaticMarkup(createElement(BillingView, {
+  const html = renderIntl(createElement(BillingView, {
     data: base as never, busy: "checkout:credits_10", actionError: null, retour: null,
     onRefresh: noop, onAcceptTerms: noop, onCheckout: noop, onPortal: noop,
   }));

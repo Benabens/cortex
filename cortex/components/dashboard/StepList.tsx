@@ -1,5 +1,10 @@
+"use client";
+
+import { useTranslations } from "use-intl/react";
+
 /** Étapes numérotées d'un premier pas (premier lancement, cours pas encore préparé) : une liste à filets, sans cartes. */
 export function StepList({ steps }: { steps: { title: string; desc: string }[] }) {
+  const t = useTranslations("dashboard");
   return (
     <ol className="mt-6 max-w-xl divide-y divide-line border-y border-line">
       {steps.map(({ title, desc }, i) => (
@@ -9,7 +14,7 @@ export function StepList({ steps }: { steps: { title: string; desc: string }[] }
           </span>
           <div>
             <p className="text-[0.9rem] font-medium text-ink-1">
-              <span className="sr-only">Étape {i + 1} : </span>
+              <span className="sr-only">{t("step", { count: i + 1 })}</span>
               {title}
             </p>
             <p className="mt-0.5 text-[0.82rem] leading-snug text-ink-3">{desc}</p>

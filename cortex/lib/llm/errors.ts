@@ -1,3 +1,5 @@
+import type { UserError } from "@/lib/i18n/user-error";
+
 /**
  * Message À MONTRER à l'utilisateur pour un échec d'appel au modèle. Le texte
  * brut d'un fournisseur (« 529 overloaded_error… ») ne sort jamais tel quel :
@@ -40,4 +42,17 @@ export function llmFailureReason(e: unknown): string {
 export function llmUserMessage(e: unknown): string {
   const r = llmFailureReason(e);
   return r.charAt(0).toUpperCase() + r.slice(1);
+}
+
+/** Erreur LLM stable et traduisible pour les routes d’API. */
+export function llmUserError(e: unknown): UserError {
+  const own = (e as { userError?: UserError } | null)?.userError;
+  if (own) return own;
+  const code = llmErrorCode(e);
+  if (code && PROVIDER_DOWN_CODES.has(code)) return { code: "llm_provider_unreachable" };
+  if (code === "TIMEOUT") return { code: "llm_timeout" };
+  if (code && BAD_OUTPUT_CODES.has(code)) return { code: "llm_bad_output" };
+  if (code === "REFUSAL") return { code: "llm_refusal" };
+  if (code === "ABORTED") return { code: "llm_aborted" };
+  return { code: "llm_unexpected" };
 }

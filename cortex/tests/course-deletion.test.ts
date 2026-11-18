@@ -28,7 +28,7 @@ async function ownedCourse(id: string, owner: string) {
 }
 const del = async (id: string, user: string) => {
   const { DELETE } = await import("../app/api/courses/[id]/route");
-  return DELETE(new NextRequest(`http://cortex.test/api/courses/${id}`, { method: "DELETE", headers: { "x-cortex-user": user } }), { params: Promise.resolve({ id }) });
+  return DELETE(new NextRequest(`http://cortex.test/api/courses/${id}`, { method: "DELETE", headers: { "x-cortex-user": user, "accept-language": "fr" } }), { params: Promise.resolve({ id }) });
 };
 
 before(async () => {

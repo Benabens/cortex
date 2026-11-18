@@ -158,5 +158,5 @@ test("réseau durablement en panne : le sondage renonce après quelques essais",
   await new Promise((r) => setImmediate(r));
   assert.equal(essais, JOB_MAX_FAILURES, `${essais} essais au lieu de ${JOB_MAX_FAILURES}`);
   assert.equal(h.pending(), 0, "plus aucun tour en attente");
-  assert.deepEqual(statuses, ["failed:Connexion perdue pendant le suivi du traitement. Actualise la page pour vérifier son état."]);
+  assert.deepEqual(statuses, ["failed:jobConnectionLost"]);
 });

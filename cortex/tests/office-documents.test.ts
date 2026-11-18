@@ -45,6 +45,7 @@ async function importRequest(file: File): Promise<Response> {
   const body = Buffer.from(await encoded.arrayBuffer());
   const headers = new Headers(encoded.headers);
   headers.set("content-length", String(body.length));
+  headers.set("accept-language", "fr");
   return POST(new NextRequest(url, { method: "POST", headers, body }));
 }
 

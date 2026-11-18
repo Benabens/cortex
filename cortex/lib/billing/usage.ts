@@ -14,6 +14,7 @@ import { currentJob } from "./usage-context";
 import { alertSpendThresholds, resetSpendAlerts } from "./spend-alerts";
 import { alertAccountHourSpend, resetAccountSpendAlerts } from "./account-spend-alerts";
 import { DELTA_CENTI } from "./credits";
+import { userError } from "@/lib/i18n/user-error";
 
 /**
  * COMPTAGE DE COÛT + KILL-SWITCH.
@@ -181,7 +182,7 @@ export async function openUsage(u: UsageEstimate): Promise<number | null> {
     // payant ne part pas (503 côté route). En dev, on laisse passer.
     if (paid && isGuardedDeployment()) {
       log("error", "usage.open_failed_closed", { message });
-      throw new LlmError("Comptage des coûts indisponible : appel au modèle refusé. Réessaie dans un instant.", "UNAVAILABLE");
+      throw new LlmError("Comptage des coûts indisponible : appel au modèle refusé. Réessaie dans un instant.", "UNAVAILABLE", false, undefined, userError("llm_cost_accounting_unavailable"));
     }
     log("warn", "usage.open_failed", { message });
     return null;
@@ -344,7 +345,7 @@ export async function assertSpendCap(provider: string): Promise<void> {
     const message = e instanceof Error ? e.message.slice(0, 200) : String(e);
     if (isGuardedDeployment()) {
       log("error", "spend_cap.check_failed_closed", { message });
-      throw new LlmError("Plafond de dépense invérifiable (base indisponible) : appel au modèle refusé. Réessaie dans un instant.", "UNAVAILABLE");
+      throw new LlmError("Plafond de dépense invérifiable (base indisponible) : appel au modèle refusé. Réessaie dans un instant.", "UNAVAILABLE", false, undefined, userError("llm_spend_cap_unverifiable"));
     }
     log("warn", "spend_cap.check_failed", { message });
   }
@@ -389,7 +390,7 @@ async function assertSpendCapUnchecked(): Promise<void> {
     await alertOnSpend(spend);
     if (spent >= globalCap) {
       log("warn", "spend_cap.global_hit", { spent, cap: globalCap, month: spend.month });
-      throw new LlmError(GLOBAL_SPEND_CAP_MESSAGE, "SPEND_CAP", false);
+      throw new LlmError(GLOBAL_SPEND_CAP_MESSAGE, "SPEND_CAP", false, undefined, userError("llm_global_spend_cap"));
     }
   }
 
@@ -405,7 +406,7 @@ async function assertSpendCapUnchecked(): Promise<void> {
     const slack = job ? (await import("./budget")).expectedJobCostUsd(job.type) : 0;
     if (spentUser >= perUserCap + slack) {
       log("warn", "spend_cap.per_user_hit", { spentUser, cap: perUserCap, slack, userId: currentUser() });
-      throw new LlmError(PER_USER_SPEND_CAP_MESSAGE, "SPEND_CAP", false);
+      throw new LlmError(PER_USER_SPEND_CAP_MESSAGE, "SPEND_CAP", false, undefined, userError("llm_user_spend_cap"));
     }
   }
 }
@@ -468,7 +469,7 @@ export async function assertReservationCap(ref: string | null | undefined, provi
   const spent = await reservationSpendUsd(ref, inFlight);
   if (spent >= cap) {
     log("warn", "spend_cap.reservation_hit", { ref, spent: Math.round(spent * 1e4) / 1e4, cap: Math.round(cap * 1e4) / 1e4 });
-    throw new LlmError(RESERVATION_CAP_MESSAGE, "SPEND_CAP", false);
+    throw new LlmError(RESERVATION_CAP_MESSAGE, "SPEND_CAP", false, undefined, userError("llm_reservation_spend_cap"));
   }
 }
 

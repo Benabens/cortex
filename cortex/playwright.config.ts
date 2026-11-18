@@ -16,7 +16,9 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   retries: process.env.CI ? 1 : 0,
   reporter: [["html", { open: "never" }], ["list"]],
-  use: { baseURL, trace: "retain-on-failure", screenshot: "only-on-failure" },
+  // Langue du navigateur : français, comme les libellés que cherchent les parcours (l'app suit
+  // Accept-Language). e2e/i18n.spec.ts change de langue lui-même.
+  use: { baseURL, locale: "fr-FR", trace: "retain-on-failure", screenshot: "only-on-failure" },
   webServer: external ? undefined : [{
     command: `tsx e2e/reset-runtime.ts && npm run build && npm run start -- --hostname 127.0.0.1 --port ${port}`,
     url: `http://localhost:${port}/api/health`, reuseExistingServer: !process.env.CI, timeout: 300_000,

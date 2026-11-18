@@ -5,6 +5,7 @@ import { dataRoot } from "@/lib/courses";
 import { floatLimit, guardsActive, intLimit } from "@/lib/billing/env";
 import { log } from "@/lib/metrics";
 import { captureError } from "@/lib/observability";
+import { refusal, type Refusal } from "@/lib/i18n/user-error";
 import { purgePageCache } from "@/lib/page-cache";
 import { storage } from "@/lib/storage";
 
@@ -120,7 +121,7 @@ export async function userStorageBytes(userId: string): Promise<number> {
   return storage().usageBytes(path.join(dataRoot(), "u", userSlug(userId)));
 }
 
-export type StorageRefusal = { status: 413; error: string };
+export type StorageRefusal = Refusal<413>;
 
 /**
  * Volume plein = panne pour tout le monde : Sentry est prévenu, une fois par heure et par
@@ -172,7 +173,7 @@ export const GENERATION_MIN_FREE_BYTES = 64 * 1024 * 1024;
 export async function checkStorage(
   userId: string,
   incomingBytes: number,
-  opts: { minFreeBytes?: number; what?: string } = {},
+  opts: { minFreeBytes?: number; what?: "produce_exam" } = {},
 ): Promise<StorageRefusal | null> {
   // Envoi : 10 % du volume (on protège la marge). Génération : une marge
   // ABSOLUE (cf. GENERATION_MIN_FREE_BYTES) — sinon un volume rempli par
@@ -193,10 +194,7 @@ export async function checkStorage(
   if (disk) {
     if (tooFull(disk)) {
       alertVolumeFull(disk, incomingBytes);
-      return {
-        status: 413,
-        error: `Espace disque insuffisant sur le serveur pour ${opts.what ?? "accepter ce fichier"}. Réessaie plus tard ; l'équipe est prévenue.`,
-      };
+      return refusal(413, opts.what === "produce_exam" ? "storage_server_full_exam" : "storage_server_full_upload");
     }
     warnVolumeLow(disk);
   }
@@ -205,10 +203,7 @@ export async function checkStorage(
     const used = await userStorageBytes(userId);
     if (used + Math.max(0, incomingBytes) > quota) {
       const mb = (n: number) => Math.round(n / MiB);
-      return {
-        status: 413,
-        error: `Quota de stockage atteint : ${mb(used)} Mo utilisés sur ${mb(quota)} Mo. Supprime des annales ou des fichiers importés (page Sources) pour libérer de la place ; le quota grandit aussi avec tes achats.`,
-      };
+      return refusal(413, "storage_quota_reached", { usedMb: mb(used), quotaMb: mb(quota) });
     }
   }
   return null;

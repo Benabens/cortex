@@ -7,6 +7,9 @@
  * CORTEX_INGEST_REPORT (lib/ingest-report-file) ; le worker le range dans `jobs.report_json`.
  * Module sans dépendance serveur : l'interface lit les mêmes types et les mêmes messages.
  */
+import { currentLocale } from "@/lib/i18n/current";
+import type { Locale } from "@/lib/i18n/locale";
+import { translator } from "@/lib/i18n/translate";
 
 /** indexed : lu ; unreadable : abîmé ou format faux ; encrypted : protégé par mot de passe ; no_text : aucun texte (scan). */
 export type IngestFileStatus = "indexed" | "unreadable" | "encrypted" | "no_text";
@@ -39,33 +42,28 @@ export function ingestFailureMessage(lines: string[], code: number | null): stri
 }
 
 /**
- * Ce que l'étudiant lit pour un fichier non lu : la cause et quoi faire. Seul endroit où ces
- * messages s'écrivent (interface et connecteur MCP) ; en français, la langue de l'interface.
+ * Ce que l'étudiant lit pour un fichier non lu : la cause et quoi faire (dictionnaire
+ * `ingestReport`, interface et connecteur MCP). Dans le navigateur, l'appelant passe la langue
+ * de useLocale() ; côté serveur, celle de la requête.
  */
-const PROBLEM_MESSAGES: Record<Exclude<IngestFileStatus, "indexed">, string> = {
-  unreadable: "fichier abîmé ou format non reconnu : il n’a pas pu être lu. Ré-exporte-le en PDF, puis dépose-le de nouveau.",
-  encrypted: "PDF protégé par un mot de passe. Enregistre une copie sans protection, puis dépose-la de nouveau.",
-  no_text: "aucun texte lisible (document scanné ?) : il n’entre pas dans le corpus. Dépose une version au texte sélectionnable.",
-};
+const PROBLEM_KEY = { unreadable: "unreadable", encrypted: "encrypted", no_text: "noText" } as const;
+
+export function problemMessage(status: Exclude<IngestFileStatus, "indexed">, locale: Locale = currentLocale()): string {
+  return translator(locale)(`ingestReport.${PROBLEM_KEY[status]}`);
+}
 
 /** La même cause en quelques mots, pour un résumé d'une ligne (connecteur MCP). */
-const PROBLEM_SHORT: Record<Exclude<IngestFileStatus, "indexed">, string> = {
-  unreadable: "abîmé ou illisible",
-  encrypted: "protégé par un mot de passe",
-  no_text: "sans texte, scanné ?",
-};
-
-export function problemMessage(status: Exclude<IngestFileStatus, "indexed">): string {
-  return PROBLEM_MESSAGES[status];
+function problemShort(status: Exclude<IngestFileStatus, "indexed">, locale: Locale): string {
+  return translator(locale)(`ingestReport.short.${PROBLEM_KEY[status]}`);
 }
 
 export type IngestProblem = { path: string; name: string; status: Exclude<IngestFileStatus, "indexed">; message: string; short: string };
 
 /** Les fichiers non lus d'un rapport, chacun avec sa consigne ; [] sans rapport. */
-export function ingestProblems(report: IngestReport | null | undefined): IngestProblem[] {
+export function ingestProblems(report: IngestReport | null | undefined, locale: Locale = currentLocale()): IngestProblem[] {
   return (report?.files ?? []).flatMap((f) =>
     f.status === "indexed"
       ? []
-      : [{ path: f.path, name: f.path.split("/").at(-1) ?? f.path, status: f.status, message: problemMessage(f.status), short: PROBLEM_SHORT[f.status] }],
+      : [{ path: f.path, name: f.path.split("/").at(-1) ?? f.path, status: f.status, message: problemMessage(f.status, locale), short: problemShort(f.status, locale) }],
   );
 }

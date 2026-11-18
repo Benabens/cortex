@@ -1,6 +1,6 @@
 # Plan : interface de Cortex en plusieurs langues (i18n étape 2)
 
-Statut : **plan seulement, aucun code**. Étape 1 (PR `langue-examens-correction`) : la sortie
+Statut : **en cours** (lancé le 17/11/2026, six PR empilées, voir « Écarts » en bas). Étape 1 (PR `langue-examens-correction`) : la sortie
 d'examen (PDF, corrigés, correction) suit déjà la langue de l'examen. Reste l'interface, toute
 en français (audit du 16/11/2026, `audit5-parcours-i18n.md`, #3, #13-#18, #26-#32).
 
@@ -74,3 +74,21 @@ des PR 2-4 est mécanique : bon candidat pour `codex exec`, avec relecture compl
   par langue une fois les dictionnaires stables.
 - La landing `cortexexam.com` (projet Vercel séparé).
 - La langue des examens et des corrigés : déjà traitée en étape 1 (7 langues).
+
+## Écarts décidés au lancement (17/11/2026)
+
+- **Repli anglais**, pas français (décision de Ben) : compte > cookie `cortex_locale` >
+  `Accept-Language` > `en`. Ben a tranché la question de CONTRIBUTING : l'interface est bilingue.
+- **`use-intl`** (le cœur de next-intl, même API `useTranslations` / ICU / typage `AppConfig`)
+  au lieu de `next-intl` : le plugin de next-intl 4.15 tire `@swc/core` et `@parcel/watcher`
+  (binaires natifs dans l'image Docker) pour son extracteur, et sa `getRequestConfig` ne nous
+  épargne rien puisque la langue du compte se lit en base. La résolution vit dans
+  `lib/i18n/server.ts` (Server Components, `await getT(ns)`) et `lib/i18n/translate.ts` (hors
+  React). L'en-tête `Accept-Language` est négocié par `lib/i18n/locale.ts` (20 lignes testées)
+  plutôt que par `negotiator` : pas de dépendance transitive dont on dépendrait sans la déclarer.
+- **`en` = en-GB** pour les formats (jour avant le mois, 24 h) ; toutes les heures à Zurich.
+- **Ordre des PR** : socle d'abord (1), puis codes d'erreur (0), puis 2, 3, 4, 5.
+- **Garde-fou dès la PR 1**, en cliquet : `tests/i18n-hardcoded.test.ts` liste les fichiers pas
+  encore migrés ; chaque PR en retire, la dernière vide la liste.
+- Les E2E existants tournent en `fr-FR` (`playwright.config.ts`) : ils cherchent des libellés
+  français, et l'app suit désormais la langue du navigateur.

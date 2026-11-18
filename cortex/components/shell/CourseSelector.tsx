@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { ChevronsUpDown, Plus } from "lucide-react";
 import { useCourse } from "@/lib/ux/api";
 import { cn } from "@/lib/ux/cn";
+import { useTranslations } from "use-intl/react";
 
 const ADD = "__add__";
 
@@ -14,12 +15,13 @@ const ADD = "__add__";
  * Select natif superposé = clavier + lecteur d'écran natifs.
  */
 export function CourseSelector({ className }: { className?: string }) {
+  const t = useTranslations("shell");
   const { courseId, course, courses, ready, setCourseId } = useCourse();
   const router = useRouter();
 
   const initials = (course?.short ?? "").replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase() || "+";
-  const title = course?.name ?? (ready ? "Aucun cours" : "Chargement…");
-  const subtitle = course?.short ?? (ready ? "Crée ta première matière" : "…");
+  const title = course?.name ?? (ready ? t("noCourse") : t("loading"));
+  const subtitle = course?.short ?? (ready ? t("createFirst") : "…");
 
   // Pas encore de cours : un bouton franc plutôt qu'un select vide.
   if (ready && !course) {
@@ -38,8 +40,8 @@ export function CourseSelector({ className }: { className?: string }) {
           <Plus className="size-4" strokeWidth={2.5} aria-hidden="true" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[0.82rem] font-semibold text-ink-1">Ajouter un cours</span>
-          <span className="block truncate text-[0.72rem] text-ink-3">Aucune matière pour l’instant</span>
+          <span className="block truncate text-[0.82rem] font-semibold text-ink-1">{t("addCourse")}</span>
+          <span className="block truncate text-[0.72rem] text-ink-3">{t("noneYet")}</span>
         </span>
       </button>
     );
@@ -74,7 +76,7 @@ export function CourseSelector({ className }: { className?: string }) {
           if (v === ADD) router.push("/cours/nouveau");
           else setCourseId(v);
         }}
-        aria-label="Changer de cours"
+        aria-label={t("changeCourse")}
         className="absolute inset-0 size-full cursor-pointer appearance-none opacity-0"
       >
         {courses.map((c) => (
@@ -82,7 +84,7 @@ export function CourseSelector({ className }: { className?: string }) {
             {c.short} · {c.name}
           </option>
         ))}
-        <option value={ADD}>+ Ajouter un cours…</option>
+        <option value={ADD}>{t("addCourseOption")}</option>
       </select>
     </div>
   );
