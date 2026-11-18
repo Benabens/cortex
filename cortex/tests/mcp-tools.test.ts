@@ -363,8 +363,8 @@ test("get_account_status : costs_by_type donne le coût de chaque type (QCM comp
   const { client } = await connect(access);
   type ByType = { mock_exam: number; mcq_exam: number; exercise: number; prepare_course: number; exam_format: number; drill: number; check_answer: number };
   const first = (await call(client, "get_account_status")).structuredContent!;
-  assert.deepEqual(first.costs, { mock_exam: 5, drill: 0.3, check_answer: 0.3 }, "costs inchangé");
-  assert.deepEqual(first.costs_by_type, { mock_exam: 5, mcq_exam: 4, exercise: 1, prepare_course: 2, exam_format: 1, drill: 0.3, check_answer: 0.3 });
+  assert.deepEqual(first.costs, { mock_exam: 6, drill: 0.3, check_answer: 0.3 }, "costs inchangé");
+  assert.deepEqual(first.costs_by_type, { mock_exam: 6, mcq_exam: 4, exercise: 1, prepare_course: 2, exam_format: 1, drill: 0.3, check_answer: 0.3 });
   process.env.CREDITS_COST_JSON = JSON.stringify({ qcm: 3, prepare: 4, assist: 0.2 });
   try {
     const r = await call(client, "get_account_status");
@@ -372,7 +372,7 @@ test("get_account_status : costs_by_type donne le coût de chaque type (QCM comp
     assert.equal(after.mcq_exam, 3);
     assert.equal(after.prepare_course, 4);
     assert.equal(after.drill, 0.2);
-    assert.equal(after.mock_exam, 5, "un type absent du JSON garde son défaut");
+    assert.equal(after.mock_exam, 6, "un type absent du JSON garde son défaut");
     // Schéma publié AVANT ce lot (sans costs_by_type), gardé en cache par un client (#52) : la réponse passe.
     const { AjvJsonSchemaValidator } = await import("@modelcontextprotocol/client/validators/ajv");
     const tool = (await client.listTools()).tools.find((t) => t.name === "get_account_status")!;
@@ -422,7 +422,7 @@ test("get_account_status : solde, coûts et quotas du compte", async () => {
   assert.equal(r.isError, undefined, text(r));
   const s = r.structuredContent as { credits: { balance: number }; costs: { mock_exam: number; drill: number }; quotas: { generations: { used: number } } };
   assert.equal(s.credits.balance, 5);
-  assert.equal(s.costs.mock_exam, 5);
+  assert.equal(s.costs.mock_exam, 6);
   assert.equal(s.costs.drill, 0.3);
   assert.equal(s.quotas.generations.used, 0);
   await client.close();
@@ -555,16 +555,16 @@ test("solde insuffisant : refusé dès le devis avec le solde, aucun appel au mo
   }
 });
 
-test("examen blanc : devis au tarif de l'app (5 crédits, +1 au-delà de 8 exercices), confirmation soumise aux pré-checks", async () => {
+test("examen blanc : devis au tarif de l'app (6 crédits, +1 au-delà de 8 exercices), confirmation soumise aux pré-checks", async () => {
   const { access } = await tokenFor(CAROL);
   const { client } = await connect(access);
   const credits = await import("../lib/billing/credits");
   await credits.addTransaction(CAROL, 1000, "test", "t:carol:mock-exam-topup"); // de quoi couvrir un examen après les débits d'assistance des tests précédents
   const base = await call(client, "generate_mock_exam", {});
-  assert.equal((base.structuredContent as { confirmation: { cost_credits: number } }).confirmation.cost_credits, 5);
+  assert.equal((base.structuredContent as { confirmation: { cost_credits: number } }).confirmation.cost_credits, 6);
   const big = await call(client, "generate_mock_exam", { exercise_count: 12 });
   const conf = (big.structuredContent as { confirmation: { cost_credits: number; confirmation_token: string; daily_quota: { kind: string } } }).confirmation;
-  assert.equal(conf.cost_credits, 6);
+  assert.equal(conf.cost_credits, 7);
   assert.equal(conf.daily_quota.kind, "generations");
   const before = await balance(CAROL);
   // Cours sans corpus : le pré-check de l'app refuse AVANT toute réservation.

@@ -19,7 +19,7 @@ process.env.CORTEX_DATA_DIR = tmp;
 // Budget IA lié au revenu (testé dans ai-budget.test.ts) : ici, les comptes sont financés par des crédits offerts.
 process.env.AI_BUDGET_MARGIN = "unlimited";
 process.env.BILLING_ENABLED = "1";
-process.env.SIGNUP_FREE_CREDITS = "5";
+process.env.SIGNUP_FREE_CREDITS = "6";
 process.env.STRIPE_SECRET_KEY = "sk_test_fake_key_local_only";
 process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_local";
 
@@ -43,12 +43,12 @@ after(() => {
 });
 
 test("palier gratuit : crédité UNE fois (idempotent), solde = somme des transactions", async () => {
-  assert.equal(await credits.getBalance("owner"), 5);
-  assert.equal(await credits.getBalance("owner"), 5); // 2e lecture : pas re-crédité
+  assert.equal(await credits.getBalance("owner"), 6);
+  assert.equal(await credits.getBalance("owner"), 6); // 2e lecture : pas re-crédité
 });
 
 test("débit / remboursement : idempotents, remboursement seulement si débit", async () => {
-  const r1 = await reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:ml:1" }); // exam = 5 crédits
+  const r1 = await reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:ml:1" }); // exam = 6 crédits
   assert.equal(r1.ok, true);
   assert.equal(await credits.getBalance("owner"), 0);
   const r2 = await reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:ml:1" }); // rejoué → même ref, pas de second débit
@@ -56,16 +56,16 @@ test("débit / remboursement : idempotents, remboursement seulement si débit", 
   assert.equal(await credits.getBalance("owner"), 0);
 
   await credits.refundGeneration("exam", "job:ml:1", "owner");
-  assert.equal(await credits.getBalance("owner"), 5);
+  assert.equal(await credits.getBalance("owner"), 6);
   await credits.refundGeneration("exam", "job:ml:1", "owner"); // rejoué → no-op
-  assert.equal(await credits.getBalance("owner"), 5);
+  assert.equal(await credits.getBalance("owner"), 6);
   // remboursement d'un job JAMAIS débité → no-op
   await credits.refundGeneration("exam", "job:ml:999", "owner");
-  assert.equal(await credits.getBalance("owner"), 5);
+  assert.equal(await credits.getBalance("owner"), 6);
 });
 
 test("creditsGate : passe avec solde, 402 clair sans solde ; billing off → no-op", async () => {
-  assert.equal(await credits.creditsGate("qcm"), null); // solde 5 ≥ 4
+  assert.equal(await credits.creditsGate("qcm"), null); // solde 6 ≥ 4
   assert.equal((await reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:ml:2" })).ok, true); // → 0
   const gate = await credits.creditsGate("exam");
   assert.ok(gate && gate.status === 402 && /Solde insuffisant/.test(gate.error));
@@ -108,7 +108,7 @@ test("webhook Stripe : crédit au 1er passage, PAS de double crédit au rejeu, s
       method: "POST", body, headers: { "stripe-signature": signature },
     });
 
-  const before5 = await credits.getBalance("alice"); // 5 (signup)
+  const before5 = await credits.getBalance("alice"); // 6 (signup)
   const res1 = await webhookPOST(mk(payload, sig));
   assert.equal(res1.status, 200);
   assert.equal((await res1.json()).credited, true);
@@ -129,12 +129,12 @@ test("remboursements partiels d'un même débit (manque, puis questions signalé
   const { runWithUser } = await import("../db/context");
   await runWithUser("capper", async () => {
     const start = await credits.getBalanceCenti("capper");
-    assert.equal((await reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:cap:1" })).ok, true); // exam = 5 crédits
-    assert.equal(await credits.getBalanceCenti("capper"), start - 500);
+    assert.equal((await reserve.reserveGeneration({ bucket: "gen", kind: "exam", ref: "job:cap:1" })).ok, true); // exam = 6 crédits
+    assert.equal(await credits.getBalanceCenti("capper"), start - 600);
     const shortfall = await credits.refundGeneration("exam", "job:cap:1", "capper", 0.5); // la moitié n'a pas été livrée
     const q1 = await credits.refundGeneration("question signalée", "job:cap:1", "capper", 0.5, "refund:job:cap:1:qcm:1");
     const q2 = await credits.refundGeneration("question signalée", "job:cap:1", "capper", 0.5, "refund:job:cap:1:qcm:2");
-    assert.deepEqual([shortfall, q1, q2], [250, 250, 0], "le second signalement ne rend plus rien : tout est rendu");
+    assert.deepEqual([shortfall, q1, q2], [300, 300, 0], "le second signalement ne rend plus rien : tout est rendu");
     assert.equal(await credits.getBalanceCenti("capper"), start);
     assert.equal(await credits.refundGeneration("exam", "job:cap:1", "capper"), 0, "un échec après coup ne rend rien de plus");
   });

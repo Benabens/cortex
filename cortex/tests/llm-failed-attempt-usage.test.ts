@@ -95,8 +95,8 @@ test("prix proportionnel à la taille : mock standard = 1 unité, 8 exercices in
   assert.equal(costForJob("qcm", JSON.stringify({ count: 40, openCount: 0 })), 800);
   assert.equal(costForJob("qcm", JSON.stringify({ count: 40, openCount: 3 })), 800);
   assert.equal(costForJob("qcm", JSON.stringify({ count: 2, openCount: 0 })), 400); // drill : jamais moins que la base
-  assert.equal(costForJob("exam", undefined), 500);
-  assert.equal(costForJob("exam", JSON.stringify({ count: 8 })), 500);
-  assert.equal(costForJob("exam", JSON.stringify({ count: 12 })), 600);
+  assert.equal(costForJob("exam", undefined), 600);
+  assert.equal(costForJob("exam", JSON.stringify({ count: 8 })), 600);
+  assert.equal(costForJob("exam", JSON.stringify({ count: 12 })), 700);
   assert.equal(costForJob("exercise", "pipelines"), 100);
 });

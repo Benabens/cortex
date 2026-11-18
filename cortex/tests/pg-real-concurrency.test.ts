@@ -22,7 +22,7 @@ if (ENABLED) {
   process.env.PG_AUTH_POOL_MAX = "8";
   process.env.PG_POOL_MAX = "8";
   process.env.BILLING_ENABLED = "1";
-  process.env.SIGNUP_FREE_CREDITS = "5";
+  process.env.SIGNUP_FREE_CREDITS = "6";
   // Budget IA lié au revenu (testé dans ai-budget.test.ts) : ici, les comptes sont financés par des crédits offerts.
   process.env.AI_BUDGET_MARGIN = "unlimited";
   process.env.DAILY_GEN_QUOTA = "unlimited";
@@ -70,7 +70,7 @@ test("réservation : solde pour UN examen, 8 réservations sur 8 connexions → 
   const { reserveGeneration } = await import("../lib/billing/reserve");
   const credits = await import("../lib/billing/credits");
   const user = "pg_parallel";
-  assert.equal(await credits.getBalanceCenti(user), 500);
+  assert.equal(await credits.getBalanceCenti(user), 600);
   const results = await Promise.all(Array.from({ length: N }, (_, i) =>
     inCourse(user, "ml", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: `job:${user}:ml:${i}` }))
   ));
@@ -90,7 +90,7 @@ test("quota du jour = 1 : 8 réservations parallèles → exactement 1 comptée"
     ));
     assert.equal(results.filter((r) => r.ok).length, 1);
     assert.equal(await guards.usedToday("gen", user), 1);
-  } finally { process.env.DAILY_GEN_QUOTA = "unlimited"; process.env.SIGNUP_FREE_CREDITS = "5"; }
+  } finally { process.env.DAILY_GEN_QUOTA = "unlimited"; process.env.SIGNUP_FREE_CREDITS = "6"; }
 });
 
 test("calcul du jour (lib/billing/limits) : 3 dépensés, fusible 10, 4 attendus par QCM → 8 lancements parallèles, exactement 1", { skip }, async () => {
@@ -125,7 +125,7 @@ test("assistance : solde pour UN appel, 8 assistGate parallèles → exactement 
   const credits = await import("../lib/billing/credits");
   const { runWithUser } = await import("../db/context");
   const user = "pg_assist";
-  await credits.addTransaction(user, -470, "test", `test:${user}:-470`); // 500 offerts → 30 = un appel
+  await credits.addTransaction(user, -570, "test", `test:${user}:-570`); // 600 offerts → 30 = un appel
   process.env.LLM_BASE_URL = "http://127.0.0.1:9/v1"; process.env.LLM_PROVIDER = "openai-compatible"; process.env.LLM_API_KEY = "x";
   try {
     const results = await Promise.all(Array.from({ length: N }, () => runWithUser(user, () => assistGate("drill"))));
@@ -134,14 +134,14 @@ test("assistance : solde pour UN appel, 8 assistGate parallèles → exactement 
   } finally { delete process.env.LLM_BASE_URL; process.env.LLM_PROVIDER = "anthropic"; delete process.env.LLM_API_KEY; }
 });
 
-test("abonnement : 5 crédits d'abonnement, 8 réservations parallèles → exactement 1 (deux poches sous verrou)", { skip }, async () => {
+test("abonnement : 6 crédits d'abonnement, 8 réservations parallèles → exactement 1 (deux poches sous verrou)", { skip }, async () => {
   const { reserveGeneration } = await import("../lib/billing/reserve");
   const credits = await import("../lib/billing/credits");
   const { authRun } = await import("../db/auth-store");
   const user = "pg_sub";
-  await credits.addTransaction(user, -500, "test", `test:${user}:vide`);
+  await credits.addTransaction(user, -600, "test", `test:${user}:vide`);
   await credits.grantSubscriptionMonth({ userId: user, customerId: "cus_pg", subscriptionId: "sub_pg", plan: "cortex_pro_monthly", periodEnd: "2099-01-01 00:00:00" });
-  await authRun(`UPDATE subscriptions SET remaining = 500 WHERE user_id = ?`, user);
+  await authRun(`UPDATE subscriptions SET remaining = 600 WHERE user_id = ?`, user);
   const results = await Promise.all(Array.from({ length: N }, (_, i) =>
     inCourse(user, "algo", () => reserveGeneration({ bucket: "gen", kind: "exam", ref: `job:${user}:algo:${i}` }))
   ));

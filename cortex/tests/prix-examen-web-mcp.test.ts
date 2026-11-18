@@ -2,7 +2,7 @@
  * MÊME EXAMEN, MÊME PRIX (audit fuites I4). La route web, le connecteur MCP et
  * la page d'usage résolvent un examen blanc par la même fonction (mockExamJob) :
  * sur un cours au format QCM, c'est un job qcm au tarif du QCM, jamais le
- * forfait « exam » de 5 crédits pour 40 questions. Un job « exam » qui tombe
+ * forfait « exam » de 6 crédits pour 40 questions. Un job « exam » qui tombe
  * quand même sur un format QCM (format changé après le devis, ancien job) ne
  * produit pas plus que ce que son prix couvre.
  *
@@ -17,7 +17,7 @@ import { after, before, test } from "node:test";
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-prix-exam-"));
 const ENV: Record<string, string> = {
   CORTEX_DATA_DIR: DATA_DIR, DB_DRIVER: "postgres", DATABASE_URL: "pglite://memory",
-  BILLING_ENABLED: "1", CREDITS_COST_JSON: JSON.stringify({ qcm: 4, exam: 5 }),
+  BILLING_ENABLED: "1", CREDITS_COST_JSON: JSON.stringify({ qcm: 4, exam: 6 }),
 };
 Object.assign(process.env, ENV);
 const ALICE = "usr_alice_prix";
@@ -53,7 +53,7 @@ test("I4 : cours au format QCM (40 questions) → job qcm, 8 crédits, quel que 
   const web = await inCourse(() => mockExamJob({}));                      // POST /api/exams/generate {}
   assert.equal(web.jobType, "qcm");
   assert.deepEqual(JSON.parse(web.target!), { count: 40, openCount: 0 });
-  assert.equal(costForJob(web.jobType, web.target), 800, "40 QCM = 2 unités de 4 crédits, pas le forfait de 5");
+  assert.equal(costForJob(web.jobType, web.target), 800, "40 QCM = 2 unités de 4 crédits, pas le forfait de 6");
   const mcp = await inCourse(() => mockExamJob({ count: 40, asked: "qcm" })); // generate_mock_exam format=mcq
   assert.equal(costForJob(mcp.jobType, mcp.target), costForJob(web.jobType, web.target), "même examen, même prix");
 });
@@ -64,10 +64,10 @@ test("I4 : le focus reste dans la cible, le nombre demandé l'emporte sur celui 
   assert.deepEqual(JSON.parse(r.target!), { count: 12, openCount: 0, focus: "Galilée" });
 });
 
-test("I4 : un job « exam » (5 crédits) qui tombe sur un format QCM est ramené à ce que son prix couvre", async () => {
+test("I4 : un job « exam » (6 crédits) qui tombe sur un format QCM est ramené à ce que son prix couvre", async () => {
   const { qcmCompositionFor, costForJob } = await import("../lib/jobs");
   const paid = costForJob("exam", undefined);
-  assert.equal(paid, 500);
+  assert.equal(paid, 600);
   const c = qcmCompositionFor(paid, 40, 6);
   assert.ok(costForJob("qcm", JSON.stringify({ count: c.count, openCount: c.open })) <= paid, JSON.stringify(c));
   assert.deepEqual(c, { count: 14, open: 6 }, "une unité (26 équivalents) : les 6 ouvertes gardées, 14 QCM");
