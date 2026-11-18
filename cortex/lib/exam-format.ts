@@ -431,7 +431,15 @@ function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Disc
     const { count, ...blocks } = composite;
     return { ...base, kind: "composite", questionCount: count, openCount: null, blocks };
   }
-  if (!p.has_mcq) return { ...base, kind: "exercises", questionCount: null, openCount: null };
+  if (!p.has_mcq) {
+    // Le nombre de questions de l'annale, et sa forme : 1 à 3 sujets tout ouverts dans un cours de
+    // sciences humaines sont des dissertations. Avant, ce chemin ne lisait pas les types : 6 problèmes
+    // sortaient en 4, 2 dissertations en problèmes à sous-questions (audit 3, P1-6 et P1-7).
+    const written = types.filter((t) => t.type !== "scq" && t.type !== "mcq");
+    const count = written.reduce((s, t) => s + (t.approx_count || 0), 0);
+    const essay = count > 0 && count <= 3 && discipline === "humanities" && written.every((t) => t.type === "open");
+    return { ...base, kind: essay ? "essay" : "exercises", questionCount: count > 0 ? clamp(count, 1, EXERCISES_MAX) : null, openCount: null };
+  }
   // Le nombre de l'annale, borné à QCM_MAX seulement (audit 3, P0-4 : une annale de 40 QCM
   // sortait en 20, un quiz de 5 en 8) ; inconnu → le défaut du plan.
   const questionCount = qcmShare > 0 ? clamp(qcmShare, 1, QCM_MAX) : null;
