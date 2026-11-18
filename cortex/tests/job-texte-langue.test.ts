@@ -100,6 +100,8 @@ test("échec du modèle dans le worker : code de la cause enveloppée, crédits 
 test("une exception sans code : message générique en anglais, jamais la phrase française", async () => {
   const { jobErrorOf } = await import("../lib/i18n/job-text");
   assert.equal(jobErrorOf(new Error("Corpus vide : rien à lire")).code, "job_failed");
+  // Un code système n'est pas une erreur du modèle : jamais « The AI engine failed unexpectedly ».
+  assert.equal(jobErrorOf(Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" })).code, "job_failed");
   assert.equal(jobErrorOf(Object.assign(new Error("x"), { userError: { code: "job_qcm_all_dropped", params: { dropped: 12 } } })).code, "job_qcm_all_dropped");
 });
 
