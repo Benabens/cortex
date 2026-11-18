@@ -134,8 +134,9 @@ async function exam(id: string, count: number) {
   const { runWithCourse } = await import("../db/client");
   const { generateQcmExam, getQcmExam } = await import("../lib/qcm");
   return runWithCourse(id, async () => {
-    const r = await generateQcmExam({ count, openCount: 0 });
-    return { r, view: (await getQcmExam(r.id, true))! };
+    const steps: string[] = [];
+    const r = await generateQcmExam({ count, openCount: 0, onStep: (s) => steps.push(s) });
+    return { r, view: (await getQcmExam(r.id, true))!, steps };
   });
 }
 
@@ -211,3 +212,24 @@ test("un caractère non imprimable dans l'explication ou une idée fausse écart
   assert.equal(r.count, 3, "les sujets écartés sont comblés");
   assert.ok(!view.items.some((it) => /\(q1[01]\)/.test(it.stem)), "ni l'explication ni l'idée fausse illisible n'entrent dans l'examen");
 });
+
+// Retour de relecture sur #165 : le filet ne vise qu'un symbole isolé, jamais l'écriture du cours.
+// Un cours en russe, en grec ou en chinois écartait chacun de ses QCM.
+const SCRIPTS: Record<string, { stem: string; options: string[] }> = {
+  ru: { stem: "Какая функция непрерывна на всей прямой?", options: ["Синус", "Тангенс", "Функция 1/x", "Логарифм"] },
+  el: { stem: "Ποια συνάρτηση είναι συνεχής σε όλο το ℝ;", options: ["Το ημίτονο", "Η εφαπτομένη", "Η συνάρτηση 1/x", "Ο λογάριθμος"] },
+  zh: { stem: "哪个函数在整个实数轴上是连续的？", options: ["正弦函数", "正切函数", "函数 1/x", "对数函数"] },
+};
+for (const [lang, s] of Object.entries(SCRIPTS)) {
+  test(`un cours écrit en ${lang} garde tous ses QCM : son écriture n'est jamais un motif d'écart`, async () => {
+    const id = await course(4);
+    // Une bonne réponse différente par question (la première option, marquée pour le faux juge).
+    design = (n, call) => Array.from({ length: n }, (_, i) => {
+      const options = [...s.options.slice(i % 4), ...s.options.slice(0, i % 4)].map((o, k) => (k === 0 ? `${o} (key)` : o));
+      return { ...item(call * 10 + i, 4), stem: `${s.stem} (q${call * 10 + i})`, options, misconceptions: options.map((o, k) => (k === 0 ? "" : o)), explanation: options[0] };
+    });
+    const { r, steps } = await exam(id, 3);
+    assert.equal(r.count, 3);
+    assert.deepEqual(steps.filter((st) => /écarté :/.test(st)), [], "aucune question écartée pour son écriture");
+  });
+}
