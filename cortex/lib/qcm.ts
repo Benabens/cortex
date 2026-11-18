@@ -1799,20 +1799,49 @@ async function planQcmExam({ count, openCount, focus, nFocus, needed, dna, step,
   if (facts.length) {
     const asked = await askedFacts(facts);
     const { picked, reserve } = planFacts(facts, { order: [...spreadCov.map((t) => t.label), ...covAll.map((t) => t.label)], count: needed, cap: caps.perNotion, asked });
-    if (picked.length >= needed) {
+    // hum-285 (17/11) : 18 faits pour 20 questions faisaient repasser TOUT l'examen par notion
+    // (11 paires de doublons à la revue, 15/20 livrées). Assez de faits pour un examen par faits :
+    // chacun sert, et seules les places sans fait sont conçues par notion — les notions les moins
+    // servies d'abord, sous le plafond, un AUTRE fait que ceux de l'examen.
+    if (picked.length >= Math.min(needed, FACTS_MIN_QUESTIONS)) {
       const methodOf = (label: string) => covAll.find((t) => notionBase(t.label) === notionBase(label))?.method ?? null;
       const slot = (f: CourseFact): QcmSlot => ({ label: f.notion, method: methodOf(f.notion), fact: f });
+      const byNotion = notionSlotsBeside(picked, [...spreadCov, ...covAll], needed - picked.length, caps.perNotion);
       const fresh = picked.filter((f) => !asked.has(f.id)).length;
-      step(`Faits testables : ${picked.length} faits distincts sur ${new Set(picked.map((f) => notionBase(f.notion))).size} notions (${fresh} jamais posés), ${reserve.length} en réserve`, 8);
+      step(`Faits testables : ${picked.length} faits distincts sur ${new Set(picked.map((f) => notionBase(f.notion))).size} notions (${fresh} jamais posés), ${reserve.length} en réserve${byNotion.length ? `, ${byNotion.length} question(s) conçue(s) par notion faute de faits` : ""}`, 8);
       return {
         notionCount, recent, spread: !!spread, covAll, cov, qcmMolds, facts, askedFacts: [...asked.keys()],
-        qcmTopics: [...qcmTopics.slice(0, nFocus), ...picked.map(slot)],
+        qcmTopics: [...qcmTopics.slice(0, nFocus), ...picked.map(slot), ...byNotion],
         spareTopics: reserve.map(slot),
       };
     }
     step(`Faits testables : ${picked.length} pour ${needed} questions, trop peu → conception par notion`, 8);
   }
   return { notionCount, recent, spread: !!spread, covAll, cov, qcmTopics, spareTopics, qcmMolds };
+}
+
+/**
+ * Places d'un examen par faits que les faits ne couvrent pas : `n` sujets par notion, les notions
+ * sans fait retenu d'abord (dans l'ordre de la répartition), puis les moins servies, sous `cap`
+ * questions par notion. Une notion qui a déjà un fait est reprise pour un AUTRE fait.
+ */
+function notionSlotsBeside(picked: CourseFact[], order: { label: string; method: string | null }[], n: number, cap: number): QcmSlot[] {
+  const counts = new Map<string, number>();
+  for (const f of picked) counts.set(notionBase(f.notion), (counts.get(notionBase(f.notion)) ?? 0) + 1);
+  const notions = [...new Map(order.filter((t) => t.method !== FOCUS_METHOD).map((t) => [notionBase(t.label), t])).values()];
+  const out: QcmSlot[] = [];
+  for (let grew = true; out.length < n && grew;) {
+    grew = false;
+    for (const t of [...notions].sort((a, b) => (counts.get(notionBase(a.label)) ?? 0) - (counts.get(notionBase(b.label)) ?? 0))) {
+      if (out.length >= n) break;
+      const k = counts.get(notionBase(t.label)) ?? 0;
+      if (k >= cap) continue;
+      counts.set(notionBase(t.label), k + 1);
+      grew = true;
+      out.push(k === 0 ? { label: t.label, method: t.method === REPEAT_METHOD ? null : t.method } : { label: t.label, method: REPEAT_METHOD });
+    }
+  }
+  return out;
 }
 
 /** Questions (hors accent demandé) à partir desquelles l'examen se conçoit par faits testables. */
