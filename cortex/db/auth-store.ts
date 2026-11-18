@@ -130,6 +130,15 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
     `CREATE INDEX IF NOT EXISTS magic_link_sends_address_idx ON magic_link_sends (address_key, created_at)`,
     `CREATE INDEX IF NOT EXISTS magic_link_sends_ip_idx ON magic_link_sends (ip_key, created_at)`,
     `CREATE INDEX IF NOT EXISTS magic_link_sends_time_idx ON magic_link_sends (created_at)`,
+    // Offre gratuite une fois par personne (lib/billing/free-offer) : boîte et IP HACHÉES,
+    // gardées après suppression du compte (sinon recréer le compte rouvrirait l'offre).
+    `CREATE TABLE IF NOT EXISTS free_offers (
+      person_key TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      ip_key TEXT,
+      created_at TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS free_offers_ip_idx ON free_offers (ip_key, created_at)`,
     `CREATE TABLE IF NOT EXISTS app_meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -493,6 +502,13 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
     `CREATE INDEX IF NOT EXISTS magic_link_sends_address_idx ON public.magic_link_sends (address_key, created_at)`,
     `CREATE INDEX IF NOT EXISTS magic_link_sends_ip_idx ON public.magic_link_sends (ip_key, created_at)`,
     `CREATE INDEX IF NOT EXISTS magic_link_sends_time_idx ON public.magic_link_sends (created_at)`,
+    `CREATE TABLE IF NOT EXISTS public.free_offers (
+      person_key text PRIMARY KEY,
+      user_id text NOT NULL,
+      ip_key text,
+      created_at text NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS free_offers_ip_idx ON public.free_offers (ip_key, created_at)`,
     `CREATE TABLE IF NOT EXISTS public.app_meta (
       key text PRIMARY KEY,
       value text NOT NULL

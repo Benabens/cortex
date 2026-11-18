@@ -1,5 +1,6 @@
 // Infrastructure Railway de Cortex (projet « wonderful-creativity »), décrite en
-// code. Remplace railway.json, que Railway cesse de lire le 2026-12-01.
+// code. Remplace railway.json (supprimé) ; Railway cesse de lire ce format le
+// 2026-12-01.
 //
 // Ce fichier n'est lu que par la CLI : `railway config plan` (aperçu, sans
 // effet) et `railway config apply` (applique). Un déploiement ne le lit jamais.
@@ -77,6 +78,7 @@ export default defineRailway(() => {
       GOOGLE_CLIENT_ID: preserve(),
       GOOGLE_CLIENT_SECRET: preserve(),
       INVITE_EMAILS: preserve(),
+      JOB_SPEND_CAP_USD_PER_CREDIT: preserve(),
       LANDING_URL: preserve(),
       LEGAL_NOTICE_URL: preserve(),
       LEGAL_PRIVACY_URL: preserve(),
@@ -90,12 +92,16 @@ export default defineRailway(() => {
       LOG_LEVEL: preserve(),
       MCP_ENABLED: preserve(),
       METRICS_TOKEN: preserve(),
+      ORIGINALS_PURGE: preserve(),
       PUBLISHER_EMAIL: preserve(),
       RAILWAY_DEPLOYMENT_DRAINING_SECONDS: preserve(),
       RAILWAY_RUN_UID: preserve(),
       RATE_LIMIT_PER_MIN: preserve(),
       REDIRECT_FROM_HOSTS: preserve(),
       RESEND_API_KEY: preserve(),
+      REVIEW_LOGIN_EMAIL: preserve(),
+      REVIEW_LOGIN_PASSWORD_HASH: preserve(),
+      REVIEW_LOGIN_UNTIL: preserve(),
       SEED_NEW_TENANTS: preserve(),
       SENTRY_DSN: preserve(),
       SENTRY_ENVIRONMENT: preserve(),

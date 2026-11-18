@@ -60,12 +60,12 @@ function resend(t: TestContext, respond: (to: string) => Response | Promise<Resp
   return { mails, attempts };
 }
 
-/** État chez Stripe : par défaut, celui que décrit la base (reconduction prévue, 119 € par an). */
+/** État chez Stripe : par défaut, celui que décrit la base (reconduction prévue, 149 € par an). */
 const stripeSays = (over: Partial<RenewalFacts> = {}) => {
   const calls: string[] = [];
   const lookup = async (id: string): Promise<RenewalFacts | null> => {
     calls.push(id);
-    return { renews: true, yearly: true, periodEnd: null, amount: 119, currency: "EUR", discounted: false, ...over };
+    return { renews: true, yearly: true, periodEnd: null, amount: 149, currency: "EUR", discounted: false, ...over };
   };
   return { lookup, calls };
 };
@@ -107,7 +107,7 @@ test("annuel à 60 jours de l'échéance : un e-mail dédié, au client, avec to
   assert.equal(mail.to, "lea@exemple.test");
   assert.equal(mail.subject, "Cortex Pro : votre abonnement annuel se renouvelle le 7 octobre 2027");
   assert.match(mail.text, /arrive à échéance le 7 octobre 2027/, "date d'échéance");
-  assert.match(mail.text, /119\s€ seront prélevés/, "montant");
+  assert.match(mail.text, /149\s€ seront prélevés/, "montant");
   assert.match(mail.text, /reconduction tacite : sans action de votre part, il sera renouvelé automatiquement/, "reconduction tacite");
   assert.match(mail.text, /DATE LIMITE POUR REFUSER LA RECONDUCTION : 6 octobre 2027/, "date limite, dans l'encadré");
   assert.match(mail.text, /vous opposer à ce renouvellement, sans frais/);
@@ -121,7 +121,7 @@ test("annuel à 60 jours de l'échéance : un e-mail dédié, au client, avec to
   assert.match(mail.html, /<div style="[^"]*border:2px solid[^"]*">\s*<div[^>]*>Date limite pour refuser la reconduction<\/div>\s*<div[^>]*>6 octobre 2027<\/div>/);
   assert.match(mail.html, /href="https:\/\/app\.cortexexam\.com\/compte"/);
   // Résumé en anglais (la langue du client n'est pas connue de l'app).
-  assert.match(mail.text, /renews automatically on 7 October 2027 for €119\. To opt out, cancel by 6 October 2027/);
+  assert.match(mail.text, /renews automatically on 7 October 2027 for €149\. To opt out, cancel by 6 October 2027/);
 });
 
 test("le rappel envoyé suit la langue enregistrée du compte", async (t) => {
@@ -324,7 +324,7 @@ test("Stripe fait foi : le montant est celui de l'abonnement, la date celle de S
   // Abonné resté à un ancien tarif.
   await sendRenewalReminders({ now: at(J60), lookup: stripeSays({ amount: 99 }).lookup });
   assert.match(mails[0].text, /99\s€ seront prélevés/);
-  assert.doesNotMatch(mails[0].text, /119/);
+  assert.doesNotMatch(mails[0].text, /149/);
 
   // Échéance repoussée chez Stripe sans que la base le sache : aucun e-mail avec une date fausse.
   await subscriber("repousse");
@@ -355,14 +355,14 @@ test("remise lue chez Stripe : l'e-mail envoyé annonce le montant « au plus »
   const { mails } = resend(t);
   await subscriber("remise");
   assert.equal((await sendRenewalReminders({ now: at(J60), lookup: stripeSays({ discounted: true }).lookup })).sent, 1);
-  assert.match(mails[0].text, /119\s€ au plus seront prélevés/);
+  assert.match(mails[0].text, /149\s€ au plus seront prélevés/);
 });
 
 test("remise posée sur l'abonnement : le montant annoncé est un maximum, pas une promesse", () => {
-  const mail = renewalReminderEmail({ renewsAt: END, amount: 119, currency: "EUR", discounted: true, accountUrl: "https://app.cortexexam.com/compte", contact: "contact@cortexexam.com" });
-  assert.match(mail.text, /119\s€ au plus seront prélevés sur votre moyen de paiement \(une remise s'applique à votre abonnement : le montant exact figurera sur votre facture\)/);
-  assert.match(mail.text, /for up to €119 \(a discount applies\)/);
-  assert.match(mail.html, /119\s€ au plus seront prélevés/);
+  const mail = renewalReminderEmail({ renewsAt: END, amount: 149, currency: "EUR", discounted: true, accountUrl: "https://app.cortexexam.com/compte", contact: "contact@cortexexam.com" });
+  assert.match(mail.text, /149\s€ au plus seront prélevés sur votre moyen de paiement \(une remise s'applique à votre abonnement : le montant exact figurera sur votre facture\)/);
+  assert.match(mail.text, /for up to €149 \(a discount applies\)/);
+  assert.match(mail.html, /149\s€ au plus seront prélevés/);
 });
 
 test("compte sans adresse e-mail : rien ne part, c'est une erreur à traiter", async (t) => {
@@ -377,7 +377,7 @@ test("compte sans adresse e-mail : rien ne part, c'est une erreur à traiter", a
 
 test("e-mail : les dates sont celles que lit le client (heure de Paris), la limite est la veille de l'échéance", () => {
   // 22 h 30 UTC le 7 octobre = 0 h 30 le 8 à Paris.
-  const mail = renewalReminderEmail({ renewsAt: "2027-10-07 22:30:00", amount: 119, currency: "EUR", accountUrl: "https://app.cortexexam.com/compte", contact: "contact@cortexexam.com" });
+  const mail = renewalReminderEmail({ renewsAt: "2027-10-07 22:30:00", amount: 149, currency: "EUR", accountUrl: "https://app.cortexexam.com/compte", contact: "contact@cortexexam.com" });
   assert.match(mail.text, /arrive à échéance le 8 octobre 2027/);
   assert.match(mail.text, /DATE LIMITE POUR REFUSER LA RECONDUCTION : 7 octobre 2027/);
   assert.match(mail.text, /jusqu'au 7 octobre 2027 inclus/);
@@ -386,7 +386,7 @@ test("e-mail : les dates sont celles que lit le client (heure de Paris), la limi
   assert.match(first.text, /DATE LIMITE POUR REFUSER LA RECONDUCTION : 29 février 2028/);
   assert.match(first.text, /14,90\s€/);
   // Rien d'interprétable ne passe dans le HTML.
-  const odd = renewalReminderEmail({ renewsAt: END, amount: 119, currency: "EUR", accountUrl: "https://x.test/compte?a=1&b=<2>", contact: "c@x.test" });
+  const odd = renewalReminderEmail({ renewsAt: END, amount: 149, currency: "EUR", accountUrl: "https://x.test/compte?a=1&b=<2>", contact: "c@x.test" });
   assert.doesNotMatch(odd.html, /<2>/);
 });
 
@@ -401,12 +401,12 @@ test("e-mail anglais : sujet, texte et HTML sont anglais et rappellent que le fr
 
 test("lecture d'un abonnement Stripe : période sur l'item (format récent) ou sur l'abonnement (ancien), résiliation programmée", () => {
   const unix = (iso: string) => Math.floor(at(iso).getTime() / 1000);
-  const price = { unit_amount: 11900, currency: "eur", recurring: { interval: "year" } };
+  const price = { unit_amount: 14900, currency: "eur", recurring: { interval: "year" } };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const facts = (sub: unknown) => renewalFactsOf(sub as any);
   assert.deepEqual(
     facts({ status: "active", cancel_at_period_end: false, cancel_at: null, items: { data: [{ quantity: 1, price, current_period_end: unix(END) }] } }),
-    { renews: true, yearly: true, periodEnd: END, amount: 119, currency: "EUR", discounted: false },
+    { renews: true, yearly: true, periodEnd: END, amount: 149, currency: "EUR", discounted: false },
   );
   assert.equal(facts({ status: "active", discounts: ["di_1"], items: { data: [{ price }] } }).discounted, true, "remise (format récent)");
   assert.equal(facts({ status: "active", discount: { id: "di_1" }, items: { data: [{ price }] } }).discounted, true, "remise (ancien format)");

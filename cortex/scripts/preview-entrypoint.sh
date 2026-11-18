@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Démarrage des PREVIEWS DE PR : scripts/start.sh (CMD du Dockerfile) l'appelle
-# dans les seuls environnements éphémères de PR (avant le 2026-12-01,
-# railway.json → environments.pr le faisait aussi).
+# dans les seuls environnements éphémères de PR (railway.json →
+# environments.pr le faisait avant d'être supprimé).
 #
 # Railway crée l'environnement d'une PR en COPIANT les variables de la prod :
 # clé du vrai modèle, Resend, sauvegardes S3, Google, Stripe, secret de session.
@@ -44,6 +44,12 @@ unset LLM_API_KEY ANTHROPIC_API_KEY OPENAI_API_KEY \
   GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET AUTH_GOOGLE_ID AUTH_GOOGLE_SECRET \
   METRICS_TOKEN INVITE_ONLY INVITE_EMAILS REDIRECT_FROM_HOSTS \
   CORTEX_SEED_COURSES CORTEX_SEED_USER SEED_NEW_TENANTS CORTEX_OWNER_USER_ID
+# Seau de fichiers de la prod (AUDIT FUITES I15) : une preview qui le lit lit
+# les PDF des vrais comptes, et une preview qui y écrit ou y efface touche la
+# prod. Sans STORAGE_S3_*, lib/storage range les fichiers sur le volume de la
+# PR (CORTEX_DATA_DIR), cloisonné par environnement comme la base.
+unset STORAGE_S3_BUCKET STORAGE_S3_ENDPOINT STORAGE_S3_REGION STORAGE_S3_PREFIX \
+  STORAGE_S3_ACCESS_KEY_ID STORAGE_S3_SECRET_ACCESS_KEY STORAGE_S3_PATH_STYLE STORAGE_S3_PRESIGN
 # Stripe : mode test seulement.
 case "${STRIPE_SECRET_KEY:-}" in
   sk_test_*) ;;

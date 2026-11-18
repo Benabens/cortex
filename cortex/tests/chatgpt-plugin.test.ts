@@ -39,9 +39,9 @@ test("plugin.json : nom affiché, éditeur, version et limites du formulaire", (
   for (const p of ui.defaultPrompt) assert.ok(p.length <= 128, p);
 });
 
-test("plugin.json : seul demo_recording_url reste en TODO", () => {
+test("plugin.json : aucun TODO, vidéo de démo renseignée", () => {
   const todos = strings(plugin).filter(([, s]) => /\bTODO\b/.test(s)).map(([at]) => at);
-  assert.deepEqual(todos, ["plugin.extensions.com.openai.review.demo_recording_url"]);
+  assert.deepEqual(todos, []);
 });
 
 test("plugin.json : aucun coût chiffré (le coût exact vient du premier appel)", () => {
@@ -49,7 +49,7 @@ test("plugin.json : aucun coût chiffré (le coût exact vient du premier appel)
     assert.doesNotMatch(s, /\d+(?:[.,]\d+)?\s*credits?\b|\bby default\b/i, at);
   }
   const drill = plugin.extensions["com.openai"].review.test_cases.positive.find(
-    (c: { tools_triggered: string[] }) => c.tools_triggered.includes("generate_drill"),
+    (c: { tools_triggered: string }) => c.tools_triggered.includes("generate_drill"),
   );
   assert.match(drill.expected_behavior, /the exact cost quoted by the first call/);
 });
@@ -67,7 +67,7 @@ test("archive : plugin.json, mcp.json et le logo à la racine, identique d'une c
     assert.deepEqual(names, ["plugin.json", "mcp.json", "assets/logo.png"]);
     const logo = execFileSync("unzip", ["-p", path.join(dir, "a.zip"), "assets/logo.png"]);
     assert.ok(logo.equals(fs.readFileSync(path.join(ROOT, "public", "mcp-icon-512.png"))));
-    assert.match(a.stderr, /demo_recording_url est encore un TODO/);
+    assert.doesNotMatch(a.stderr, /encore un TODO/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

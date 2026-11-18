@@ -335,7 +335,8 @@
     "errorConfiguration": "Sign-in is temporarily unavailable. Try again shortly.",
     "errorDefault": "Sign-in failed. Try again; if the problem continues, come back later.",
     "shareTitle": "Cortex: study what actually comes up",
-    "shareDescription": "Cortex reads your past exams and slides, spots recurring topics, and helps you practise them before exam day."
+    "shareDescription": "Cortex reads your past exams and slides, spots recurring topics, and helps you practise them before exam day.",
+    "errorEmailDisposable": "Disposable email addresses can’t be used to open an account. Use your usual address (school, Gmail, Outlook…)."
   },
   "errorPage": {
     "title": "Something went wrong",
@@ -704,8 +705,8 @@
       "manageSubscription": "Manage my subscription",
       "manageHint": "Change your payment method, download invoices or cancel (at the end of the period; your files then remain in the cloud for 30 days).",
       "topUp": "Top up",
-      "subscriptionOffer": "As many courses as you want · {count, plural, one {{formatted} credit} other {{formatted} credits}} per month, no rollover",
-      "packOffer": "{count, plural, one {{formatted} credit} other {{formatted} credits}}, no expiry date",
+      "subscriptionOffer": "Your files in the cloud · {count, plural, one {{formatted} credit} other {{formatted} credits}} per month, no rollover",
+      "packOffer": "{count, plural, one {{formatted} credit} other {{formatted} credits}}, no expiry date · your files in the cloud for 12 months",
       "alreadySubscribed": " · you already have a subscription",
       "yearlyRenewal": "Renews automatically every year · cancel any time from My account, effective at the end of the period.",
       "monthlyRenewal": "Renews automatically every month · cancel any time from My account, effective at the end of the period.",
@@ -1582,5 +1583,18 @@
     "found": "⟵ Cortex · found here",
     "clear": "clear highlighting",
     "notFound": "File not found"
+  },
+  "examOutput": {
+    "site": "On the site",
+    "pdf": "PDF",
+    "pdfFromPastExam": "Past-exam PDF",
+    "label": "Exam output",
+    "output": "Output",
+    "pdfHint": "The PDF follows your past exam’s layout, read when the course was prepared. Same exam, same price.",
+    "siteHint": "Answer online and Cortex marks you. The PDF is one click away, same price.",
+    "openPdf": "Open the PDF",
+    "openExam": "Open the exam",
+    "frameTitle": "Mock exam #{id}, PDF",
+    "pdfNote": "Your past exam’s layout, read when the course was prepared (a plain layout if Cortex couldn’t read it). Print it, write your answers on paper, then come back to the site to mark them."
   }
 }

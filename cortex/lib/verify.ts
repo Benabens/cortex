@@ -1,5 +1,5 @@
 import { currentCourse } from "@/db/client";
-import { completeText, extractJson } from "@/lib/llm";
+import { EXAM_OUTPUT_MAX_TOKENS, completeText, extractJson } from "@/lib/llm";
 import { profile } from "@/lib/course-profile";
 import { getCourse } from "@/lib/courses";
 import { verifyDeterministic } from "@/lib/verify-deterministic";
@@ -41,7 +41,7 @@ const ONE_SCHEMA = {
     my_solution: { type: "string", description: "TA solution complète, résolue de zéro (avant de regarder le corrigé proposé)." },
     verdict: { type: "string", description: "ok | wrong | ambiguous" },
     issue: { type: "string", description: "Court : ce qui ne va pas / ce qui manque (piège, interaction, nombres). Vide si ok." },
-    corrected_solution_tex: { type: "string", description: "Corrigé LaTeX correct, UNIQUEMENT si verdict=wrong." },
+    corrected_solution_tex: { type: "string", description: "UNIQUEMENT si verdict=wrong : le corrigé LaTeX COMPLET et correct, toutes les sous-questions réécrites en entier (les justes recopiées), jamais « inchangé » ni renvoi au corrigé proposé." },
     violates_exclusion: { type: "boolean", description: "true si l'énoncé porte sur un sujet EXCLU." },
     too_easy: { type: "boolean", description: "true si, comparé à la vraie page de référence : pas de piège / nombres ronds / faible charge / pas de cas-limite / snippet déconnecté." },
   },
@@ -82,7 +82,7 @@ async function verifyOne(q: ExamQuestion, opts?: VerifyOpts): Promise<VerifyResu
     q.solution_tex,
     ``,
     `- "ok" : énoncé bien posé, corrigé proposé correct et complet, ET difficulté/richesse/piège au niveau de la vraie page de référence.`,
-    `- "wrong" : corrigé proposé FAUX ou incomplet → fournis corrected_solution_tex (le BON corrigé en LaTeX).`,
+    `- "wrong" : corrigé proposé FAUX ou incomplet → fournis corrected_solution_tex : le BON corrigé COMPLET en LaTeX, toutes les sous-questions réécrites en entier (il remplace le corrigé proposé tel quel).`,
     `- "ambiguous" : énoncé mal posé / non résoluble / ambigu / incohérent avec son barème.`,
     `too_easy=true si, COMPARÉ à la vraie page : pas de vrai piège, nombres ronds, faible charge de calcul/bookkeeping, pas de cas-limite/frontière, ou simple snippet déconnecté au lieu d'un artefact creusé. Dans issue, dis QUOI ajouter.`,
     `violates_exclusion=true si l'énoncé porte sur un sujet EXCLU par les directives.`,
@@ -93,7 +93,9 @@ async function verifyOne(q: ExamQuestion, opts?: VerifyOpts): Promise<VerifyResu
     // 9 min : la re-résolution à l'aveugle d'un exo DENSE de l'architecte (6 sous-questions +
     // comparaison au corrigé) frôlait les 340 s → timeout → « non vérifié » systématique. Mesuré :
     // une re-résolution complète prend ~4–6 min ; on laisse de la marge.
-    const text = await completeText({ prompt, model: "opus", timeoutMs: 540_000, ...(figPath ? { addDirs: [examsDir()] } : {}) });
+    // Sans limite propre, l'API coupait à 16 000 tokens la vérification qui trouve l'erreur et
+    // réécrit le corrigé (banc du 17/11 : 65 % d'entre elles) → exercice livré « non vérifié ».
+    const text = await completeText({ prompt, model: "opus", timeoutMs: 540_000, maxTokens: EXAM_OUTPUT_MAX_TOKENS, ...(figPath ? { addDirs: [examsDir()] } : {}) });
     const r = extractJson<VerifyResult>(text);
     if (!r || !r.verdict) return null;
     // ADDITIF — vérif DÉTERMINISTE de la réponse finale (re-solve à l'aveugle vs corrigé proposé) :
@@ -160,6 +162,17 @@ const isInvalid = (r: VerifyResult | null) =>
   !!r && (r.verdict === "wrong" || r.verdict === "ambiguous" || !!r.violates_exclusion || !!r.too_easy);
 
 /**
+ * Une correction du vérificateur ne remplace le corrigé que si elle est COMPLÈTE : chaque
+ * sous-question de l'énoncé y figure et rien ne renvoie à des parties « inchangées » du corrigé
+ * proposé. Banc du 16/11 (ex9) : correction partielle substituée → corrigé livré réduit à 3.4.
+ */
+function isCompleteCorrection(corrected: string, statement: string): boolean {
+  if (/inchang|unchanged|sans changement|identiques? (?:au|à|to)|cf\.? (?:le )?corrigé/i.test(corrected)) return false;
+  const labels = [...statement.matchAll(/\\subq\{([^}]+)\}/g)].map((m) => m[1].trim());
+  return labels.every((l) => new RegExp(`(?<![\\d.])${l.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`).test(corrected));
+}
+
+/**
  * Vérifie CHAQUE exercice à l'aveugle (1 appel/exo, parallélisme borné), puis DURCIT :
  * un exo faux/ambigu/hors-scope/trop-facile est régénéré (via `regenerate`) + re-vérifié,
  * jusqu'à N=maxAttempts. S'il reste invalide → retiré. Fallback honnête : jamais de faux "ok".
@@ -197,7 +210,7 @@ export async function verifyAndHarden(
     let fixedSol = false;
     if (!res) verified = null;
     else if (res.verdict === "ok" && !res.violates_exclusion && !res.too_easy) verified = 1;
-    else if (res.verdict === "wrong" && res.corrected_solution_tex && res.corrected_solution_tex.length > 10) {
+    else if (res.verdict === "wrong" && res.corrected_solution_tex && res.corrected_solution_tex.length > 10 && isCompleteCorrection(res.corrected_solution_tex, q.statement_tex)) {
       q.solution_tex = res.corrected_solution_tex;
       verified = 1;
       fixedSol = true;

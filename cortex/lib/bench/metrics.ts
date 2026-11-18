@@ -203,6 +203,13 @@ type Spend = { tokensIn: number; tokensOut: number; cacheRead: number; cost: num
  */
 const CLAUDE_CODE_HARNESS_TOKENS = 2400;
 
+/**
+ * Débit de sortie de Sonnet 5 à l'effort par défaut, mesuré au banc (cs-202-ecrit, 16-17/11, 156
+ * appels : 95 tok/s). Un appel claude-code coupé au délai ne rend aucun compteur ; en prod, l'API
+ * en flux facture la sortie produite jusqu'à la coupure : estimée à ce débit.
+ */
+const OUTPUT_TOKENS_PER_S = 95;
+
 /** Tokens d'entrée et de sortie d'un appel : mesurés par claude-code, sinon estimés (≈ 4 car./token). */
 function callTokens(c: BenchRun["calls"][number]): { total: number; sys: number; out: number; measured: boolean } {
   const u = c.provider === "claude-code" && !c.error ? c.usage : undefined;
@@ -211,7 +218,11 @@ function callTokens(c: BenchRun["calls"][number]): { total: number; sys: number;
     const total = Math.max(0, (u.inputTokens ?? 0) + (u.cacheReadTokens ?? 0) + (u.cacheWriteTokens ?? 0) - CLAUDE_CODE_HARNESS_TOKENS);
     return { total, sys: chars ? Math.round((total * c.systemChars) / chars) : 0, out: u.outputTokens, measured: true };
   }
-  return { total: Math.round(chars / CHARS_PER_TOKEN), sys: Math.round(c.systemChars / CHARS_PER_TOKEN), out: Math.round(c.outputChars / CHARS_PER_TOKEN), measured: false };
+  // (la bande n'enregistre pas le provider d'un appel en échec ; un run estimé tourne sur une CLI)
+  const out = /TIMEOUT/.test(c.error ?? "")
+    ? Math.max(Math.round(c.outputChars / CHARS_PER_TOKEN), Math.round((c.ms / 1000) * OUTPUT_TOKENS_PER_S))
+    : Math.round(c.outputChars / CHARS_PER_TOKEN);
+  return { total: Math.round(chars / CHARS_PER_TOKEN), sys: Math.round(c.systemChars / CHARS_PER_TOKEN), out, measured: false };
 }
 
 /** Tokens et coût FACTURÉS : seulement quand llm_usage a compté de l'argent (run sur l'API), échecs compris. */

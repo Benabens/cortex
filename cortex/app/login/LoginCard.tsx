@@ -25,6 +25,8 @@ function errorMessage(code: string, t: ReturnType<typeof useTranslations<"login"
       return t("errorEmailDay");
     case "EmailIp":
       return t("errorEmailIp");
+    case "EmailDisposable":
+      return t("errorEmailDisposable");
     case "Configuration":
       return t("errorConfiguration");
     default:

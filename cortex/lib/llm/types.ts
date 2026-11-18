@@ -132,6 +132,15 @@ export const DEFAULT_MAX_TOKENS = 16_000;
  */
 export const LONG_OUTPUT_MAX_TOKENS = 32_000;
 
+/**
+ * Sortie d'un appel d'examen écrit qui conçoit, régénère ou revérifie un exercice entier (lib/exam,
+ * lib/verify). Banc cs-202-ecrit du 16 au 17/11 (claude-code, qui ignore la limite) : un lot jusqu'à
+ * 62 k tokens (57 % au-dessus de 32 k), une régénération 30 k en moyenne (toutes au-dessus de 16 k),
+ * une vérification qui réécrit le corrigé 19 k en moyenne (65 % au-dessus de 16 k). Une limite
+ * plus haute ne coûte rien de plus : seule la sortie produite est facturée, pas la limite.
+ */
+export const EXAM_OUTPUT_MAX_TOKENS = 64_000;
+
 export interface LlmProvider {
   readonly name: string;
   /** Le provider peut-il servir un appel maintenant ? (binaire présent / clé posée / URL posée) */
