@@ -306,6 +306,23 @@ jobs:
             ls page*.png && echo "✓ tectonic (cache hors ligne) et pdftoppm en $(id -un)"
           '
 
+      # Un examen en russe, en grec ou en chinois charge latex/unicode-fonts.tex et cjk-fonts.tex
+      # (lib/exam-latex) : leurs polices sont préchauffées au build, la compilation se fait sans réseau.
+      - name: Écritures hors latin — cyrillique, grec, CJK compilés hors ligne
+        run: |
+          docker run --rm --network none --entrypoint bash cortex-app -c '
+            set -e
+            mkdir -p /tmp/u && cd /tmp/u
+            cp /app/cortex/latex/epfl-logo.png . 2>/dev/null || true
+            L=/app/cortex/latex
+            cat $L/preamble.tex $L/figures.tex $L/generic.tex $L/unicode-fonts.tex $L/cjk-fonts.tex > doc.tex
+            printf "\n\\\\newcommand{\\\\FOOTDATE}{Smoke}\n\\\\begin{document}\nКакая функция? \\\\textbf{Ποια συνάρτηση;} 哪个函数\n\\\\end{document}\n" >> doc.tex
+            /usr/local/bin/tectonic --chatter minimal --only-cached doc.tex
+            text=$(pdftotext -enc UTF-8 doc.pdf -)
+            for s in "Какая функция" "Ποια συνάρτηση" "哪个函数"; do echo "$text" | grep -q "$s" || { echo "::error::$s absent du PDF"; exit 1; }; done
+            echo "✓ cyrillique, grec et chinois imprimés hors ligne"
+          '
+
       # Volume Railway : monté en root, conteneur lancé en root par RAILWAY_RUN_UID=0.
       - name: Volume monté en root — chown à l'entrypoint, app en cortex, sauvegarde du volume
         run: |

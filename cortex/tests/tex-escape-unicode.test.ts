@@ -63,7 +63,7 @@ test("Latin-1 et les symboles déjà connus ne changent pas (empreintes des PDF 
 });
 
 test("un caractère qu'aucune commande ne rend est signalé (et reste remplacé pour compiler)", () => {
-  assert.deepEqual(untypesetChars("Le symbole ⌘ et 漢"), ["⌘", "漢"]);
+  assert.deepEqual(untypesetChars("Le symbole ⌘ et 漢"), ["⌘"]);
   assert.equal(esc("a ⌘ b"), "a   b");
 });
 
@@ -85,7 +85,7 @@ test("un QCM qui porte ces symboles et ces lettres compile en PDF", async (t) =>
 });
 
 test("untypesetChars lit toutes les chaînes d'une valeur imbriquée (options, justification, bloc)", () => {
-  assert.deepEqual(untypesetChars({ stem: "ok", options: ["a", "b ⌘"], justification: { key: "k", distractors: [{ option_index: 1, why_wrong: "漢" }] }, points: 3 }), ["⌘", "漢"]);
+  assert.deepEqual(untypesetChars({ stem: "ok", options: ["a", "b ⌘"], justification: { key: "k", distractors: [{ option_index: 1, why_wrong: "⌥" }] }, points: 3 }), ["⌘", "⌥"]);
   assert.deepEqual(untypesetChars(["A ⊆ B"], null, undefined, 4), []);
 });
 
@@ -95,4 +95,69 @@ test("une question composée dont un texte ne s'imprimerait pas est renvoyée au
   const scq = (o: string) => ({ kind: "scq", prompt: "Pick.", code: "", options: ["a", "b", o, "d"], correct: 0, answer: "", criteria: [], points: 1, explanation: "" });
   assert.equal(blockIssue({ scenario: "S", parts: [scq("c"), short] }, 2, 6), null);
   assert.match(blockIssue({ scenario: "S", parts: [scq("c ⌘"), short] }, 2, 6) ?? "", /⌘/);
+});
+
+// Retour de relecture sur #165 : une écriture n'est jamais un motif d'écart. Seul un symbole
+// isolé sans rendu l'est ; les lettres de toute écriture s'impriment (polices Unicode).
+const RU = "Какая функция непрерывна?";
+const EL = "Ποια συνάρτηση είναι συνεχής; ἀλήθεια";
+const ZH = "哪个函数是连续的？";
+
+test("les lettres de toute écriture ne sont jamais signalées, ni effacées", () => {
+  for (const s of [RU, EL, ZH, "ひらがな カタカナ", "한국어", "עברית", "العربية", "Tiếng Việt"]) {
+    assert.deepEqual(untypesetChars(s), [], s);
+    if (s !== "Tiếng Việt") assert.equal(esc(s), s, s); // le vietnamien passe par ses accents LaTeX
+  }
+});
+
+test("le grec d'une phrase grecque reste du texte ; une lettre grecque isolée reste un symbole mathématique", () => {
+  assert.equal(esc("Η τιμή α = 0,05"), "Η τιμή α = 0,05");
+  assert.equal(esc("Le seuil α = 0,05"), String.raw`Le seuil \ensuremath{\alpha} = 0,05`);
+});
+
+test("un QCM en russe, en grec et en chinois s'imprime dans le PDF avec son texte", async (t) => {
+  const { texAvailable } = await import("../lib/exam-latex");
+  if (!texAvailable()) return t.skip("tectonic/pdflatex absent");
+  const { spawnSync } = await import("node:child_process");
+  if (spawnSync("pdftotext", ["-v"]).error) return t.skip("pdftotext absent");
+  const { ensureCoursesLoaded } = await import("../lib/courses");
+  await ensureCoursesLoaded();
+  const { runWithCourse } = await import("../db/client");
+  const { buildQcmArtifact } = await import("../lib/qcm-latex");
+  const { examsDir } = await import("../lib/paths");
+  const q = (stem: string, options: string[]) => ({ topic: "T", type: "scq" as const, stem, options, correct: [0], misconceptions: ["", "", "", ""], explanation: options[0], verified: 1 as const });
+  const items = [
+    q(RU, ["Синус", "Тангенс", "Функция 1/x", "Логарифм"]),
+    q(EL, ["Το ημίτονο", "Η εφαπτομένη", "Η συνάρτηση 1/x", "Ο λογάριθμος"]),
+    q(ZH, ["正弦函数", "正切函数", "函数 1/x", "对数函数"]),
+  ];
+  const { out, pdf } = await runWithCourse("ml", async () => {
+    const out = await buildQcmArtifact(4244, { items, open: [] }, "2026-11-18");
+    return { out, pdf: path.join(examsDir(), out.file) };
+  });
+  assert.equal(out.texError, undefined, out.texError);
+  const text = spawnSync("pdftotext", ["-enc", "UTF-8", pdf, "-"], { encoding: "utf8" }).stdout.replace(/\s+/g, " ");
+  for (const s of ["Какая функция непрерывна", "Логарифм", "Ποια συνάρτηση είναι συνεχής", "ἀλήθεια", "εφαπτομένη", "哪个函数是连续的", "对数函数"]) assert.ok(text.includes(s), `${s} absent du PDF`);
+});
+
+test("police Unicode chargée seulement quand le source imprime une écriture au-delà de Latin-1", async () => {
+  const { withUnicodeFonts } = await import("../lib/exam-latex");
+  const doc = (body: string) => `\\documentclass{article}\n% commentaire : Какая\n\\begin{document}\n${body}\n\\end{document}\n`;
+  // Latin-1 (CS-202, tous les examens existants) : le source ne change pas, même avec un commentaire cyrillique.
+  assert.equal(withUnicodeFonts(doc("Énoncé : coût")), doc("Énoncé : coût"));
+  const ru = withUnicodeFonts(doc("Какая функция"));
+  assert.match(ru, /\\usepackage\{fontspec\}[\s\S]*\\begin\{document\}/);
+  assert.doesNotMatch(ru, /xeCJK/);
+  assert.match(withUnicodeFonts(doc("哪个函数")), /\\usepackage\{xeCJK\}/);
+  assert.equal(withUnicodeFonts(ru), ru, "déjà chargée : rien de plus");
+  // pdflatex (sans tectonic) ne lit pas fontspec : il reçoit le source d'origine.
+  const { withoutUnicodeFonts } = await import("../lib/exam-latex");
+  assert.equal(withoutUnicodeFonts(withUnicodeFonts(doc("哪个 Какая"))), doc("哪个 Какая"));
+});
+
+test("une question composée en russe n'est pas renvoyée au modèle pour son écriture", async () => {
+  const { blockIssue } = await import("../lib/blocks");
+  const short = { kind: "short", prompt: "Объясните.", code: "", options: [], correct: -1, answer: "Потому что.", criteria: [{ label: "Называет", points: 1 }], points: 1, explanation: "" };
+  const scq = { kind: "scq", prompt: "Выберите.", code: "", options: ["Синус", "Тангенс", "Логарифм", "Экспонента"], correct: 0, answer: "", criteria: [], points: 1, explanation: "" };
+  assert.equal(blockIssue({ scenario: "Сценарий", parts: [scq, short] }, 2, 6), null);
 });

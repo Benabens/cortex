@@ -12,7 +12,12 @@ const norm = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCas
 /** Un mot entier, mais collé à un chiffre accepté (« exam1 », « Final2023 »). */
 const word = (alternatives: string) => new RegExp(`(?<![a-z])(?:${alternatives})(?![a-z])`);
 
-const MIDTERM = word("mid-?terms?|partiels?|parcial(?:es)?|zwischenpr(?:u|ue)fung|quiz+e?s?");
+// « Prelim » : le partiel de Cornell et d'autres universités américaines (audit 3, P1-9 : il était pris pour un final).
+// Pas « preliminary » : des notes ou des résultats préliminaires ne sont pas une annale.
+const MIDTERM_WORDS = "mid-?terms?|partiels?|parcial(?:es)?|zwischenpr(?:u|ue)fung|quiz+e?s?|prelims?";
+const MIDTERM = word(MIDTERM_WORDS);
+/** Dossier de partiels : un mot entier (« nonprelims-archive » n'en est pas un). */
+const MIDTERM_FOLDER = word("mid-?terms?|partiels?|prelims?");
 const FINAL = word("finals?");
 /** Une annale sans année reste reconnue sur ces mots (« exam1 ») ; « final » seul exige une année. */
 const STRONG = word("exams?|examens?|examinations?|klausur(?:en)?|pr(?:u|ue)fung(?:en)?|esam[ei]|tentamens?|past-?papers?");
@@ -35,7 +40,7 @@ export function examKind(rel: string): "final" | "midterm" | null {
   const base = f.split("/").at(-1) ?? f;
   const folders = f.split("/").slice(0, -1);
   if (NOT_AN_EXAM.test(base)) return null;
-  const midterm = MIDTERM.test(base) || folders.some((d) => /mid-?terms?|partiels?/.test(d));
+  const midterm = MIDTERM.test(base) || folders.some((d) => MIDTERM_FOLDER.test(d));
   const named = STRONG.test(base) || MIDTERM.test(base) || (FINAL.test(base) && examYear(base) != null);
   if (named || folders.some((d) => EXAM_FOLDER.test(d))) return midterm ? "midterm" : "final";
   return null;
@@ -60,8 +65,20 @@ export function withoutSolutions<R>(rows: R[], nameOf: (r: R) => string): R[] {
 /** Radical d'un nom sans les mots de corrigé : « Final_Exam_Solutions » et « Final_Exam » se rejoignent. */
 const stemOf = (p: string) => norm(p.split("/").at(-1) ?? p).replace(/\.[a-z0-9]+$/, "").replace(SOLUTION, "").replace(/[-. ]+/g, "-").replace(/^-|-$/g, "");
 
-/** Garde UN énoncé par (type d'épreuve, année) — évite de compter énoncé + corrigé (doublons faux)
- *  et ne mélange plus finals et midterms d'une même année dans un seul bucket.
+/** Numéro d'une épreuve dans l'année : « Midterm 2 », « prelim1 », « Quiz_3 » ; null sans numéro. */
+const NUMBERED = new RegExp(`(?<![a-z])(?:${MIDTERM_WORDS}|tests?|exams?|examens?|klausur(?:en)?)[- ]?(\\d{1,2})(?!\\d)`);
+function examNumber(year: number | null, ...names: string[]): number | null {
+  for (const n of names) {
+    const m = norm(n).match(NUMBERED);
+    // « Midterm23 » de 2023 : l'année courte collée au mot, pas un numéro.
+    if (m && 2000 + +m[1] !== year) return +m[1];
+  }
+  return null;
+}
+
+/** Garde UN énoncé par (type d'épreuve, année, numéro) — évite de compter énoncé + corrigé (doublons faux)
+ *  et ne mélange plus finals et midterms d'une même année dans un seul bucket, ni « Midterm 1 » et
+ *  « Midterm 2 » (audit 3, P1-9 : le second disparaissait de l'index).
  *  Préfère une source SCANNABLE (PDF rendable en vision) à un extrait HTML : c'est générique
  *  (aucune matière) et ça permet l'index/scan là où un site et un PDF coexistent pour la même épreuve.
  *  Sans année, un corrigé est écarté quand son énoncé (même radical) est là. */
@@ -73,11 +90,23 @@ export function pickEnonces<R extends { path: string; title: string; year: numbe
   const score = (r: R) => (isSol(r) ? 0 : 2) + (isPdf(r.path) ? 1 : 0);
   const byKey = new Map<string, R[]>();
   const noYear: R[] = [];
+  const unnumbered: [string, R][] = [];
   for (const r of rows) {
     if (r.year == null) { noYear.push(r); continue; }
-    const k = `${kindOf(r)}|${r.year}`;
+    const n = examNumber(r.year, r.title, r.path);
+    const k = `${kindOf(r)}|${r.year}|${n ?? ""}`;
+    if (n == null) unnumbered.push([k, r]);
     if (!byKey.has(k)) byKey.set(k, []);
     byKey.get(k)!.push(r);
+  }
+  // Une épreuve sans numéro (un extrait HTML « Midterm Exam ») rejoint l'unique épreuve numérotée de
+  // son type et de son année ; s'il y en a plusieurs, on ne sait pas laquelle elle est : elle reste à part.
+  for (const [k, r] of unnumbered) {
+    const numbered = [...byKey.keys()].filter((o) => o !== k && o.startsWith(k));
+    if (numbered.length !== 1) continue;
+    byKey.get(numbered[0])!.push(r);
+    const rest = byKey.get(k)!.filter((x) => x !== r);
+    if (rest.length) byKey.set(k, rest); else byKey.delete(k);
   }
   const out: R[] = [];
   for (const [, group] of byKey) {

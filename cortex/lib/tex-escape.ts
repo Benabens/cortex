@@ -11,7 +11,7 @@ export function qrText(s: string): string {
   return (s ?? "").replace(/[^A-Za-z0-9.-]/g, "");
 }
 
-// Unicode math → LaTeX (pdflatex ne gère pas l'UTF-8 math ; tectonic oui mais absent ici).
+// Unicode math → LaTeX : la police du texte n'a pas ces symboles, le mode mathématique si.
 const UMATH: [RegExp, string][] = [
   [/[α]/g, "\\ensuremath{\\alpha}"], [/[β]/g, "\\ensuremath{\\beta}"], [/[γ]/g, "\\ensuremath{\\gamma}"], [/[δ]/g, "\\ensuremath{\\delta}"], [/[Δ]/g, "\\ensuremath{\\Delta}"],
   [/[ε]/g, "\\ensuremath{\\epsilon}"], [/[ζ]/g, "\\ensuremath{\\zeta}"], [/[η]/g, "\\ensuremath{\\eta}"], [/[θ]/g, "\\ensuremath{\\theta}"], [/[λ]/g, "\\ensuremath{\\lambda}"],
@@ -73,15 +73,28 @@ function latinLetterTex(ch: string): string | null {
   return out;
 }
 
-/** `esc` sans le filet final : ce qui reste au-delà de Latin-1 n'a aucune écriture LaTeX connue. */
+/** Une lettre grecque de la table : symbole mathématique isolé, mais texte dans une phrase grecque. */
+const isGreekRule = (re: RegExp) => /\p{Script=Greek}/u.test(re.source);
+
+/** `esc` sans le filet final : ce qui reste au-delà de Latin-1 n'a aucune commande LaTeX connue. */
 function escapeKnown(s: string): string {
   let t = texEscape(s)
     .replace(/[‘’]/g, "'").replace(/[“”]/g, '"')
     .replace(/–/g, "--").replace(/—/g, "---")
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
-  for (const [re, rep] of UMATH) t = t.replace(re, rep);
+  // Un mot grec (deux lettres de suite) : le texte est en grec, ses lettres restent du texte
+  // (« η » article, pas η en italique mathématique) ; la police Unicode les imprime.
+  const greekText = /\p{Script=Greek}\p{M}*\p{Script=Greek}/u.test(t);
+  for (const [re, rep] of UMATH) if (!(greekText && isGreekRule(re))) t = t.replace(re, rep);
   return t.replace(/[\u0100-\u024F\u1E00-\u1EFF]/g, (ch) => latinLetterTex(ch) ?? ch);
 }
+
+/**
+ * Ce qui reste au-delà de Latin-1 après `escapeKnown` et que le PDF ne sait pas écrire : un symbole
+ * sans commande (⌘). Les lettres, chiffres, accents et ponctuations de toute écriture (cyrillique,
+ * grec, chinois…) s'impriment tels quels, en police Unicode (latex/unicode-fonts.tex).
+ */
+const UNTYPESET = /(?![\p{L}\p{M}\p{N}\p{P}\p{Zs}])[^\x00-\xFF]/gu;
 
 /** Toutes les chaînes d'une valeur (texte, liste, objet imbriqué). */
 function stringsOf(v: unknown): string[] {
@@ -92,17 +105,18 @@ function stringsOf(v: unknown): string[] {
 }
 
 /**
- * Caractères qu'`esc` ne sait pas écrire (il les remplace par une espace), dans toutes les chaînes
+ * Symboles qu'`esc` ne sait pas écrire (il les remplace par une espace), dans toutes les chaînes
  * des valeurs reçues : une question qui en contient s'imprimerait fausse, le générateur l'écarte
- * (lib/qcm.ts) ou la renvoie au modèle (lib/blocks.ts) plutôt.
+ * (lib/qcm.ts) ou la renvoie au modèle (lib/blocks.ts) plutôt. Jamais une lettre : l'écriture du
+ * cours, quelle qu'elle soit, n'est pas un motif d'écart.
  */
 export function untypesetChars(...values: unknown[]): string[] {
-  return [...new Set(values.flatMap(stringsOf).flatMap((s) => escapeKnown(s).match(/[^\x00-\xFF]/gu) ?? []))];
+  return [...new Set(values.flatMap(stringsOf).flatMap((s) => escapeKnown(s).match(UNTYPESET) ?? []))];
 }
 
 /** Texte du modèle (énoncés, options) vers LaTeX : `texEscape`, typographie, symboles mathématiques. */
 export function esc(s: string): string {
-  // filet de sécurité : tout caractère exotique restant (> Latin-1) → espace, pour garantir la
-  // compilation pdflatex (symboles et lettres connus déjà traités ; cf. untypesetChars).
-  return escapeKnown(s).replace(/[Ā-￿]/g, " ");
+  // filet de sécurité : un symbole sans commande connue → espace (cf. untypesetChars) ; les
+  // lettres de toute écriture restent, lib/exam-latex charge alors une police Unicode.
+  return escapeKnown(s).replace(UNTYPESET, " ");
 }

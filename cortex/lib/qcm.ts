@@ -4,6 +4,7 @@ import { HARD_STOP_CODES, LONG_OUTPUT_MAX_TOKENS, LlmError, completeJson, llmErr
 import { DEFAULT_ANSWER_MODE, OPTIONS_MIN, QCM_DEFAULT, courseMaterialTitles, examLanguageFor, planMockExam, readStoredProfile, requestedFormat, resolveExamFormat, type AnswerMode } from "@/lib/exam-format";
 import { languageName } from "@/lib/profiles/generic-directives";
 import { DATA_RULE, dataBlock, sanitizeCorpus } from "@/lib/prompt-safety";
+import { userError } from "@/lib/i18n/user-error";
 import { COURSE_MATTER_RULE, COURSE_TERMS_RULE, absentCourseNumbers, absentCourseTerms, corpusWindows, coursePassages, factNumbers, topicsInScope } from "@/lib/course-grounding";
 import { rewriteExplanations, rewriteExplanationsOnOptions, secondLookOffCourse, verifierPassages, writeJustifications, type JustificationTarget, type OffCourseFlag } from "@/lib/qcm-evidence";
 import { bestNotionMatch, capDrops, describeExplanationIssue, duplicateOptionIndices, explanationIssues, keyNotion, keyOnlyExplanation, keyProposition, notionBase, notionCap, notionMismatch, optionHead, sameProposition, sameSourceFact, withoutRemovedOptionRefs } from "@/lib/qcm-checks";
@@ -2680,9 +2681,10 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
     // toutes ses questions avaient été écartées par les contrôles — la cause doit être exacte.
     if (!lastError && (qualityDropped > 0 || verifiedCandidates.length > 0)) {
       const dropped = Math.max(qualityDropped, verifiedCandidates.length);
-      throw new Error(`Aucun QCM généré : les ${dropped} questions conçues ont toutes été écartées par les contrôles de qualité (hors cours, clé contestée, distracteurs trop faciles). Réessaie ; si ça se reproduit sur ce cours, signale-le.`);
+      throw Object.assign(new Error(`Aucun QCM généré : les ${dropped} questions conçues ont toutes été écartées par les contrôles de qualité (hors cours, clé contestée, distracteurs trop faciles). Réessaie ; si ça se reproduit sur ce cours, signale-le.`), { userError: userError("job_qcm_all_dropped", { dropped }) });
     }
-    throw new Error(`Aucun QCM généré : ${llmFailureReason(cause())}`);
+    // `cause` : l'erreur du modèle, d'où le suivi du job tire son code (lib/i18n/job-text).
+    throw new Error(`Aucun QCM généré : ${llmFailureReason(cause())}`, { cause: cause() });
   }
   logPhase("QCM", tQcm);
   // L'ensemble a franchi la porte de sortie : une coupure à partir d'ici ne le refait plus.
@@ -2744,7 +2746,7 @@ export async function generateQcmExam(opts: { count?: number; openCount?: number
   if (!all.length && !openQs.length) {
     // L'examen a été enregistré tôt (livraison progressive) : vide, il ne reste pas en liste.
     await q.run(`DELETE FROM exams WHERE id = ?`, examId);
-    throw new Error(`Rien n'a pu être généré (lots QCM et questions ouvertes échoués) : ${llmFailureReason(cause())}`);
+    throw new Error(`Rien n'a pu être généré (lots QCM et questions ouvertes échoués) : ${llmFailureReason(cause())}`, { cause: cause() });
   }
 
   // Les ouvertes rejoignent l'examen déjà enregistré ; il passe « prêt ».
