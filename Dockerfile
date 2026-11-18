@@ -65,7 +65,7 @@ FROM ${NODE_IMAGE} AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash curl ca-certificates gnupg \
     python3 python3-matplotlib python3-numpy python3-sympy \
-    sqlite3 poppler-utils procps util-linux gcc libc6-dev \
+    sqlite3 poppler-utils poppler-data procps util-linux gcc libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Outils client PostgreSQL (pg_dump / pg_restore / psql) pour les sauvegardes
@@ -120,6 +120,8 @@ ENV HOME=/home/cortex \
 # leur dossier aussi, pour que la même couche les efface).
 # Second document : les polices Unicode (cyrillique, grec, CJK) que lib/exam-latex ajoute quand
 # un examen imprime une écriture au-delà de Latin-1 ; elles sont alors en cache, hors ligne.
+# poppler-data (étape runtime) donne à poppler les tables CJK (Adobe-GB1…) : sans elles, pdftotext
+# et pdftoppm ne lisent pas le chinois d'un PDF, généré (Fandol) ou déposé.
 COPY --chown=cortex:cortex cortex/latex/preamble.tex cortex/latex/figures.tex cortex/latex/generic.tex cortex/latex/unicode-fonts.tex cortex/latex/cjk-fonts.tex cortex/latex/epfl-logo.png /tmp/tectonic-warm/
 USER cortex
 RUN set -eux; \
