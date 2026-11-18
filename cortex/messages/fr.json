@@ -279,7 +279,14 @@
     "pdf_recompile_failed": "Le PDF ne compile toujours pas.",
     "llm_engine_unreachable_retry": "Le moteur LLM est injoignable : réessaie plus tard.",
     "llm_engine_unavailable_reason": "{reason}",
-    "source_type_unknown": "Type de document non pris en charge (inconnu) : PDF, page web ou texte seulement."
+    "source_type_unknown": "Type de document non pris en charge (inconnu) : PDF, page web ou texte seulement.",
+    "job_failed": "La génération a échoué. Réessaie.",
+    "job_worker_lost": "Worker interrompu (process arrêté), la génération ne tournait plus. Relance.",
+    "job_reservation_invalid": "Reprise annulée : la réservation de crédits est absente ou n’est plus valide.",
+    "job_course_unavailable": "Ce cours n’est plus accessible depuis ton compte (supprimé ou transféré) : génération annulée.",
+    "job_corpus_missing": "Les supports du cours n’ont pas encore été lus. Ajoute des supports et prépare le cours d’abord.",
+    "job_pdf_failed": "Compilation LaTeX échouée : PDF indisponible, l’examen reste lisible dans l’app.",
+    "job_qcm_all_dropped": "Aucun QCM généré : les {dropped} questions conçues ont toutes été écartées par les contrôles de qualité (hors cours, clé contestée, distracteurs trop faciles). Réessaie ; si ça se reproduit sur ce cours, signale-le."
   },
   "ingestReport": {
     "unreadable": "fichier abîmé ou format non reconnu : il n’a pas pu être lu. Ré-exporte-le en PDF, puis dépose-le de nouveau.",
@@ -1596,5 +1603,23 @@
     "openExam": "Ouvrir l’examen",
     "frameTitle": "Examen blanc #{id}, PDF",
     "pdfNote": "La mise en page de ton annale, relevée à la préparation du cours (une mise en page sobre si Cortex n’a pas pu la lire). Imprime-le, compose sur papier, puis reviens sur le site pour te corriger."
+  },
+  "jobText": {
+    "etaQueued": "En file : environ {minutes} min une fois lancé",
+    "etaRemaining": "{minutes, plural, =0 {moins d’une minute} other {≈ # min restantes}}",
+    "etaResumed": "{minutes, plural, =0 {moins d’une minute} other {≈ # min restantes}} (reprise)",
+    "etaLate": "Plus long que d’habitude, la génération continue",
+    "etaNoHistory": "{eta} (estimation sans historique)",
+    "stepQueued": "En file…",
+    "stepRunning": "{type, select, qcm {Génération de l’examen QCM…} exam {Génération de l’examen…} exercise {Génération de l’exercice…} lab {Génération de l’exercice…} ingest {Lecture de tes fichiers…} prepare {Préparation du cours…} format {Lecture du format d’examen…} blueprint {Analyse du programme…} other {En cours…}}",
+    "stepResumed": "Worker interrompu, reprise automatique (tentative {attempt}/{max}), progression conservée.",
+    "stepWaiting": "En file d’attente (position {position}) : le serveur est à pleine charge, {what, select, ingest {ton import démarre} other {ta génération démarre}} dès qu’une place se libère.",
+    "stepDone": "Terminé ✓",
+    "stepDoneIncomplete": "Terminé ⚠ {shortfall}",
+    "stepCanceled": "Annulé",
+    "stepFailed": "Échec",
+    "shortfall": "{missing, plural, one {# question sur {requested} n’a pas pu être générée} other {# questions sur {requested} n’ont pas pu être générées}}",
+    "shortfallBack": "{shortfall} : {credits} {back, plural, one {crédit rendu} other {crédits rendus}}",
+    "errorBack": "{error} ({credits} {back, plural, one {crédit rendu} other {crédits rendus}})."
   }
 }

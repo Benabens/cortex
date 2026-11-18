@@ -1,5 +1,6 @@
 import * as z from "zod/v4";
 import { examQuestions } from "@/lib/exam";
+import { localizeJob } from "@/lib/i18n/job-text";
 import { activeJob, getJob, jobEta, listJobs, type Job } from "@/lib/jobs";
 import { getBlockExam } from "@/lib/blocks";
 import { getQcmExam } from "@/lib/qcm";
@@ -109,9 +110,9 @@ async function qcmView(examId: number, withSolutions: boolean): Promise<ExamOut 
  * Étape affichée : pour une ingestion, suivie des fichiers non lus (nom et cause). Pas de champ de
  * sortie en plus : un client qui a mis le schéma en cache rejetterait la réponse (docs/MCP.md).
  */
-function stepView(j: Job): string | null {
+function stepView(j: Job, currentStep: string | null): string | null {
   const unread = ingestProblems(j.report);
-  const step = j.currentStep ? clip(redactMessage(j.currentStep), 200) : null;
+  const step = currentStep ? clip(currentStep, 200) : null;
   if (!unread.length) return step;
   const list = clip(unread.map((p) => `${p.name} (${p.short})`).join(", "), 400);
   return `${step ?? ""}${step ? " · " : ""}${unread.length} unread file(s): ${list}`;
@@ -120,13 +121,20 @@ function stepView(j: Job): string | null {
 function jobView(j: Job, appOrigin: string, courseId: string): z.infer<typeof jobOut> {
   const path = j.resultPath;
   const link = !path ? null : path.includes("course=") ? `${appOrigin}${path}` : `${appOrigin}${path}${path.includes("?") ? "&" : "?"}course=${encodeURIComponent(courseId)}`;
+  // En anglais quand le worker a rangé l'erreur ou l'étape sans langue ; sinon la phrase d'origine,
+  // que le modèle reformule pour l'étudiant (lib/i18n/job-text, repli « raw »).
+  const text = localizeJob({
+    ...j,
+    currentStep: j.currentStep ? redactMessage(j.currentStep) : null,
+    error: j.error ? redactMessage(j.error) : null,
+  }, null, "en", { fallback: "raw" });
   return {
     job_id: j.id,
     type: j.type,
     status: j.status,
     progress_pct: Math.round(j.progress ?? 0),
-    step: stepView(j),
-    error: j.error ? clip(redactMessage(j.error), 300) : null,
+    step: stepView(j, text.currentStep),
+    error: text.error ? clip(text.error, 300) : null,
     created_at: j.createdAt,
     updated_at: j.updatedAt,
     result_link: j.status === "done" && link && /^\/(exam|mock)\//.test(j.resultPath ?? "") ? link : null,
