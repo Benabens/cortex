@@ -110,6 +110,25 @@ test("startWorker plafond atteint : le job reste en file, l'étudiant voit sa pl
   });
 });
 
+test("file d'attente après une reprise : un lecteur anglais lit sa place, pas l'ancienne reprise", async () => {
+  const jobs = await import("../lib/jobs");
+  const { localizeJob } = await import("../lib/i18n/job-text");
+  const { admitJob } = await import("../lib/job-queue");
+  const { q } = await import("../db/q");
+  const { runWithCourse } = await import("../db/client");
+  await admitJob("alice", "algo", 1);
+  await admitJob("bob", "algo", 1);
+  await runWithCourse("algo", async () => {
+    await jobs.ensureJobsSchema();
+    // Reprise posée par la réconciliation (lib/jobs reconcileStaleJobs), puis remise en file pleine.
+    const id = await q.insert(`INSERT INTO jobs (type, target, status, current_step, progress, step_json) VALUES ('exam', NULL, 'queued', 'Worker interrompu, reprise automatique (tentative 2/2), progression conservée.', 40, '{"key":"resumed","attempt":2,"max":2}')`);
+    await jobs.startWorker(id, "algo");
+    const job = (await jobs.getJob(id))!;
+    assert.match(job.currentStep ?? "", /file d'attente \(position 1\)/);
+    assert.equal(localizeJob(job, null, "en").currentStep, "In line (position 1): the server is at full capacity; your generation starts as soon as a slot frees up.");
+  });
+});
+
 test("distribution : un job en tête de file déjà terminé (annulé) est retiré, il ne bloque pas les suivants", async () => {
   const jobs = await import("../lib/jobs");
   const { admitJob, dispatchQueue, releaseJob } = await import("../lib/job-queue");

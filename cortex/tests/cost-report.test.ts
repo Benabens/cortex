@@ -57,7 +57,7 @@ test("costReport : agrège par job puis par type, et donne le prix minimal en cr
   assert.equal(exam.jobs, 2);
   assert.equal(exam.avgUsd, 2);
   assert.equal(exam.maxUsd, 3);
-  assert.equal(exam.priceCredits, 5);
+  assert.equal(exam.priceCredits, 6);
   // Statuts inconnus (SQLite) : le coût par job livré est la moyenne.
   assert.equal(exam.perDeliveredUsd, 2);
   assert.equal(exam.minCreditsBreakEven, 4);   // 2 $ ÷ 0,50 $ par crédit

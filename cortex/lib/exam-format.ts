@@ -289,25 +289,34 @@ export function detectLanguage(text: string): Language | null {
 // ───────────────────────────── discipline ─────────────────────────────
 
 /**
- * Préfixes de code de cours sans ambiguïté (EPFL et usages courants), suivis du numéro, collé ou
- * non : « CS-202 », « MATH 221 », mais aussi « CS201 », « COMP0002 », « HIST0001 » (un `\b` collé au
- * chiffre ratait ces derniers, et le cours d'histoire recevait les consignes de calcul).
+ * Préfixes de code de cours sans ambiguïté (EPFL et usages courants des universités américaines,
+ * britanniques et françaises), suivis du numéro, collé ou non : « CS-202 », « MATH 221 », « CS201 »,
+ * « COMP0002 », « HIST0001 », « ENGL 101 ». Avant le 18/11/2026, ENGL, PSYC ou LING tombaient en
+ * « stem » sans corpus pour trancher (audit du 16/11, P1-8). ECON reste au corpus : selon le cours,
+ * c'est de la prose ou du calcul.
  */
-const HUMANITIES_CODE = /^(HUM|SHS|MGT|DH|AR|LAW|PHIL|HIST|SOC|POL|LIT)(?=[\s_-]*\d)/i;
-const STEM_CODE = /^(MATH|PHYS|CS|CSE|COM|COMP|COMPSCI|EE|ME|CH|CHEM|BIO|BIOENG|MSE|CIVIL|ENV|MICRO|NX|STAT|FIN)(?=[\s_-]*\d)/i;
+const HUMANITIES_CODE = /^(HUM|SHS|MGT|DH|AR|LAW|PHIL|HIST|SOC|SOCI|POL|POLS|POLI|LIT|ENGL|LING|ANTH|PSYC|PSYCH|REL|RELS|RELI|CLAS|CLASS|MUS|MUSI|ARTH|ARTS|THEA|EDUC|FREN|GERM|SPAN|ITAL|LATN|HUMN|HUMS|AMST|GEND)(?=[\s_-]*\d)/i;
+const STEM_CODE = /^(MATH|MAT|MTH|AMATH|APMA|PHYS|PHY|CS|CSC|CSCI|CPSC|CMSC|CSE|CIS|COM|COMP|COMPSCI|EE|ECE|EECS|ELEC|ME|MECH|MAE|AERO|ENGR|CH|CHE|CHM|CHEM|BIO|BIOL|BIOENG|MSE|CIVIL|ENV|MICRO|NX|STA|STAT|STATS|ORIE|IEOR|ASTR|GEOL|FIN)(?=[\s_-]*\d)/i;
 /** Symboles et motifs de calcul : leur densité sépare un polycopié de maths d'un cours de SHS. */
 const MATH_TOKEN = /[=^∑∫√≤≥≈∂∇λσμπθ±×÷]|\d(?:[.,]\d+)?\s*[-+*/]\s*\(?\d|\\(?:frac|sum|int|sqrt|alpha|beta|lambda|sigma|mathbb)\b/g;
 const MATH_PER_1000 = 4;
+/** Début d'un mot du nom du cours (`\b` ignore les lettres accentuées : « Électronique »). */
+const nameWord = (stems: string) => new RegExp(`(?<!\\p{L})(?:${stems})`, "iu");
+const HUMANITIES_NAME = nameWord("histor|histoire|geschicht|storia|literat|littérat|philosoph|sociolog|psycholog|anthropolog|linguisti|politi|droit|law\\b|theolog|théolog|religio|ethic|éthique|musi|art history|histoire de l'art|classics|humanit");
+const STEM_NAME = nameWord("math|calcul|algebr|algèbr|geometr|géométr|probabil|statisti|physi|chemi|chimi|biolog|informati|comput|programm|algorith|data|machine learning|electron|électron|circuit|signal|mechani|mécani|engineer|ingénier|thermodynam|optimi|numeric|numériq|crypto");
 
 /**
- * Famille de matière d'un cours : le code tranche quand il est clair, sinon la
- * densité de notation mathématique de son corpus. Sans rien pour trancher :
- * STEM, le comportement historique du moteur.
+ * Famille de matière d'un cours : le code tranche quand il est clair, puis le nom du cours quand il
+ * ne relève que d'une famille, puis la densité de notation mathématique de son corpus. Sans rien
+ * pour trancher : STEM, le comportement historique du moteur.
  */
-export function inferDiscipline(c: { code?: string | null; sample?: string | null }): Discipline {
+export function inferDiscipline(c: { code?: string | null; name?: string | null; sample?: string | null }): Discipline {
   const code = (c.code ?? "").trim();
   if (HUMANITIES_CODE.test(code)) return "humanities";
   if (STEM_CODE.test(code)) return "stem";
+  const name = c.name ?? "";
+  const humanitiesName = HUMANITIES_NAME.test(name);
+  if (humanitiesName !== STEM_NAME.test(name)) return humanitiesName ? "humanities" : "stem";
   const text = c.sample ?? "";
   if (text.length < 300) return "stem";
   const density = (text.match(MATH_TOKEN)?.length ?? 0) / (text.length / 1000);
@@ -446,7 +455,15 @@ function fromAnnalesProfile(p: FormatProfile, language: string, discipline: Disc
     const { count, ...blocks } = composite;
     return { ...base, kind: "composite", questionCount: count, openCount: null, blocks };
   }
-  if (!p.has_mcq) return { ...base, kind: "exercises", questionCount: null, openCount: null };
+  if (!p.has_mcq) {
+    // Le nombre de questions de l'annale, et sa forme : 1 à 3 sujets tout ouverts dans un cours de
+    // sciences humaines sont des dissertations. Avant, ce chemin ne lisait pas les types : 6 problèmes
+    // sortaient en 4, 2 dissertations en problèmes à sous-questions (audit 3, P1-6 et P1-7).
+    const written = types.filter((t) => t.type !== "scq" && t.type !== "mcq");
+    const count = written.reduce((s, t) => s + (t.approx_count || 0), 0);
+    const essay = count > 0 && count <= 3 && discipline === "humanities" && written.every((t) => t.type === "open");
+    return { ...base, kind: essay ? "essay" : "exercises", questionCount: count > 0 ? clamp(count, 1, EXERCISES_MAX) : null, openCount: null };
+  }
   // Le nombre de l'annale, borné à QCM_MAX seulement (audit 3, P0-4 : une annale de 40 QCM
   // sortait en 20, un quiz de 5 en 8) ; inconnu → le défaut du plan.
   const questionCount = qcmShare > 0 ? clamp(qcmShare, 1, QCM_MAX) : null;
@@ -515,7 +532,7 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
   const courseLanguage = course.language && course.language !== "fr" ? course.language : null;
   const language = declared?.language || fromAnnales || courseLanguage || fromMaterials || course.language || FALLBACK_LANGUAGE;
   const stored = await readStoredProfile();
-  const discipline = inferDiscipline({ code: course.examCode, sample });
+  const discipline = inferDiscipline({ code: course.examCode, name: course.examName, sample });
   const basisOf = (p: StoredProfile) => p.basis ?? "annales";
 
   let format: ExamFormat;
@@ -600,7 +617,7 @@ export function formatContextFor(courseId: string): { kind: ExamKind | null; lan
   // Documents permis : la déclaration, sinon ce que l'annale écrit ; jamais deviné.
   const documents = c.examFormat?.documents ?? known?.documents ?? null;
   if (known) return { kind: known.kind, language: known.language, discipline: known.discipline, durationMin: known.durationMin, documents, totalPoints: known.totalPoints ?? known.blocks?.totalPoints ?? null };
-  return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || FALLBACK_LANGUAGE, discipline: inferDiscipline({ code: c.examCode }), durationMin: c.examFormat?.durationMin ?? null, documents, totalPoints: null };
+  return { kind: c.examFormat?.kind ?? null, language: c.examFormat?.language || c.language || FALLBACK_LANGUAGE, discipline: inferDiscipline({ code: c.examCode, name: c.examName }), durationMin: c.examFormat?.durationMin ?? null, documents, totalPoints: null };
 }
 
 /**

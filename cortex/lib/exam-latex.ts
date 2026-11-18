@@ -346,10 +346,37 @@ const CANCEL = /\\(?:x|b)?cancel(?:to)?\{/;
  * lui ; null sinon. Banc exam-cout du 17/11/2026 (cs-202-ecrit) : \xcancel{non utilisée} dans un tableau.
  */
 export function repairCancelPackage(tex: string): string | null {
-  // \begin{document} en début de ligne : le préambule partagé le cite aussi dans un commentaire.
-  const BEGIN = /^\\begin\{document\}/m;
-  if (!CANCEL.test(tex) || /\\usepackage(\[[^\]]*\])?\{[^}]*\bcancel\b[^}]*\}/.test(tex) || !BEGIN.test(tex)) return null;
-  return tex.replace(BEGIN, "\\usepackage{cancel}\n\\begin{document}");
+  if (!CANCEL.test(tex) || /\\usepackage(\[[^\]]*\])?\{[^}]*\bcancel\b[^}]*\}/.test(tex) || !BEGIN_DOCUMENT.test(tex)) return null;
+  return tex.replace(BEGIN_DOCUMENT, "\\usepackage{cancel}\n\\begin{document}");
+}
+
+/** \begin{document} en début de ligne : le préambule partagé le cite aussi dans un commentaire. */
+const BEGIN_DOCUMENT = /^\\begin\{document\}/m;
+/** Police Unicode déjà chargée (withUnicodeFonts, ou un repli d'une compilation précédente). */
+const FONTSPEC = /\\usepackage(\[[^\]]*\])?\{fontspec\}/;
+
+/** Caractères que les polices CJK du bundle couvrent (chinois, kana japonais, ponctuation pleine chasse). */
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303F\uFF00-\uFFEF]/u;
+
+/**
+ * Le document avec une police Unicode s'il imprime une écriture au-delà de Latin-1 (cyrillique, grec,
+ * chinois…) : le préambule (T1 + Latin Modern) n'en a pas les glyphes, ils sortaient blancs ou étaient
+ * effacés en amont. Seul tectonic (XeTeX) sait charger ces polices ; un document en Latin-1 ne change
+ * pas (empreintes des PDF existants, CS-202 compris).
+ */
+export function withUnicodeFonts(tex: string): string {
+  if (FONTSPEC.test(tex) || !BEGIN_DOCUMENT.test(tex)) return tex;
+  const printed = tex.replace(/(^|[^\\])%.*$/gm, "$1"); // les commentaires ne s'impriment pas
+  if (!/[^\x00-\xFF]/u.test(printed)) return tex;
+  const blocks = ["unicode-fonts.tex", ...(CJK.test(printed) ? ["cjk-fonts.tex"] : [])].map(fontBlock);
+  return tex.replace(BEGIN_DOCUMENT, () => `${blocks.join("")}\\begin{document}`);
+}
+
+const fontBlock = (f: string) => fs.readFileSync(path.join(LATEX_DIR, f), "utf8");
+
+/** Le source sans les polices de `withUnicodeFonts` : pdflatex ne les lit pas (il imprime ces lettres en blanc). */
+export function withoutUnicodeFonts(tex: string): string {
+  return ["cjk-fonts.tex", "unicode-fonts.tex"].map(fontBlock).reduce((t, b) => t.split(b).join(""), tex);
 }
 
 /** Ligne fautive d'une compilation : « error: x.tex:648: … » (tectonic) ou « l.648 » (journal pdflatex). */
@@ -402,6 +429,11 @@ async function compileOnce(base: string): Promise<string> {
   let detail = ""; // journal ou stderr du moteur : jamais dans le message (cf. publicCompileError)
   for (const { bin, kind } of texCandidates()) {
     try {
+      // Le source de ce moteur : polices Unicode pour tectonic, aucune pour pdflatex.
+      const texAbs = path.join(examsDir(), tex);
+      const src = fs.existsSync(texAbs) ? fs.readFileSync(texAbs, "utf8") : null;
+      const forEngine = src === null ? null : kind === "tectonic" ? withUnicodeFonts(src) : withoutUnicodeFonts(src);
+      if (forEngine !== null && forEngine !== src) fs.writeFileSync(texAbs, forEngine);
       if (kind === "tectonic") {
         const r = await spawnP(bin, tectonicArgs(tex, { untrustedSupported: tectonicSupportsUntrusted(bin) }), examsDir(), 240_000);
         if (r.code === 0 && fs.existsSync(pdfAbs)) return pdf;
