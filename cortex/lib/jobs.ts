@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { storage } from "@/lib/storage";
 import type { IngestReport } from "@/lib/ingest-report";
+import type { JobError, JobStepInfo } from "@/lib/i18n/job-text";
 import { UserFacingError, userError, type UserError } from "@/lib/i18n/user-error";
 
 /**
@@ -30,6 +31,10 @@ export type Job = {
   resultPath: string | null;
   resultId: number | null;
   error: string | null;
+  /** L'erreur sans langue (code stable), quand le worker la connaît ; cf. lib/i18n/job-text. */
+  errorInfo: JobError | null;
+  /** L'étape sans langue, quand elle porte une information (fin incomplète, reprise). */
+  stepInfo: JobStepInfo | null;
   log: { t: string; msg: string }[];
   /** Ingestion (ingest, prepare) : le sort de chaque fichier ; null pour les autres jobs. */
   report: IngestReport | null;
@@ -41,7 +46,7 @@ export type Job = {
 export async function ensureJobsSchema(): Promise<void> {
   await q.ensureTable("jobs");
   // Colonnes de durabilité — rattrapage pour les DB existantes.
-  try { await q.ensureColumns("jobs", ["attempts", "max_attempts", "heartbeat_at", "checkpoint_json", "worker_id", "credit_ref", "report_json", "ordered"]); } catch {}
+  try { await q.ensureColumns("jobs", ["attempts", "max_attempts", "heartbeat_at", "checkpoint_json", "worker_id", "credit_ref", "report_json", "ordered", "error_json", "step_json"]); } catch {}
 }
 // (pas d'appel top-level : la table jobs est créée à la demande dans la DB du cours courant)
 
@@ -178,7 +183,7 @@ export async function assertJobCourseOwned(jobId: number, course: string): Promi
     return false;
   }
   try {
-    await setJob(jobId, { status: "error", error: msg });
+    await setJob(jobId, { status: "error", error: msg, errorInfo: userError("job_course_unavailable") });
     await logJob(jobId, msg);
   } catch { /* la base du cours peut avoir disparu avec lui */ }
   return false;
@@ -267,14 +272,16 @@ export async function heartbeatJob(id: number): Promise<void> {
 
 const TERMINAL_STATES: readonly JobStatus[] = ["done", "error", "canceled"];
 
-export async function setJob(id: number, fields: Partial<{ status: JobStatus; currentStep: string; progress: number; resultPath: string; resultId: number; ordered: number; error: string; pid: number }>): Promise<void> {
-  const map: Record<string, string> = { status: "status", currentStep: "current_step", progress: "progress", resultPath: "result_path", resultId: "result_id", ordered: "ordered", error: "error", pid: "pid" };
+export async function setJob(id: number, fields: Partial<{ status: JobStatus; currentStep: string; progress: number; resultPath: string; resultId: number; ordered: number; error: string; pid: number; errorInfo: JobError; stepInfo: JobStepInfo | null }>): Promise<void> {
+  const map: Record<string, string> = { status: "status", currentStep: "current_step", progress: "progress", resultPath: "result_path", resultId: "result_id", ordered: "ordered", error: "error", pid: "pid", errorInfo: "error_json", stepInfo: "step_json" };
+  // Une étape écrite sans sa forme sans langue efface la précédente : elle ne la décrit plus.
+  const fieldsWithStep = fields.currentStep !== undefined && !("stepInfo" in fields) ? { ...fields, stepInfo: null } : fields;
   const sets: string[] = [];
   const vals: (string | number | null)[] = [];
-  for (const [k, v] of Object.entries(fields)) {
+  for (const [k, v] of Object.entries(fieldsWithStep)) {
     if (v === undefined) continue;
     sets.push(`${map[k]} = ?`);
-    vals.push(v);
+    vals.push(v !== null && typeof v === "object" ? JSON.stringify(v) : v);
   }
   if (!sets.length) return;
   sets.push(`updated_at = ?`);
@@ -352,7 +359,12 @@ type JobRow = {
   id: number; type: JobType; target: string | null; status: JobStatus; current_step: string | null;
   progress: number; result_path: string | null; result_id: number | null; error: string | null;
   log_json: string | null; report_json: string | null; pid: number | null; created_at: string; updated_at: string;
+  error_json?: string | null; step_json?: string | null;
 };
+
+function parsed<T>(json: string | null | undefined): T | null {
+  try { return json ? (JSON.parse(json) as T) : null; } catch { return null; }
+}
 
 function rowToJob(r: JobRow): Job {
   let log: { t: string; msg: string }[] = [];
@@ -362,6 +374,7 @@ function rowToJob(r: JobRow): Job {
   return {
     id: r.id, type: r.type, target: r.target, status: r.status, currentStep: r.current_step,
     progress: r.progress, resultPath: r.result_path, resultId: r.result_id, error: r.error,
+    errorInfo: parsed<JobError>(r.error_json), stepInfo: parsed<JobStepInfo>(r.step_json),
     log, report, pid: r.pid, createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
@@ -459,16 +472,17 @@ export async function reconcileStaleJobs(): Promise<number> {
       || await (await import("@/lib/llm/authorization")).reservationExists(r.credit_ref);
     if (attempts < maxAttempts && !neverStarted && reservationValid) {
       const msg = `Worker interrompu, reprise automatique (tentative ${attempts + 1}/${maxAttempts}), progression conservée.`;
+      const stepInfo: JobStepInfo = { key: "resumed", attempt: attempts + 1, max: maxAttempts };
       await q.run(
-        `UPDATE jobs SET status = 'queued', pid = NULL, heartbeat_at = NULL, worker_id = NULL, attempts = ?, current_step = ?, updated_at = ? WHERE id = ?`,
-        attempts + 1, msg, nowStr(), r.id,
+        `UPDATE jobs SET status = 'queued', pid = NULL, heartbeat_at = NULL, worker_id = NULL, attempts = ?, current_step = ?, step_json = ?, updated_at = ? WHERE id = ?`,
+        attempts + 1, msg, JSON.stringify(stepInfo), nowStr(), r.id,
       );
       await logJob(r.id, msg);
       const { requeueJob } = await import("@/lib/job-queue");
       await requeueJob(currentUser(), currentCourse(), r.id);
     } else {
       const error = reservationValid ? ZOMBIE_MSG : "Reprise annulée : la réservation de crédits est absente ou n’est plus valide.";
-      await setJob(r.id, { status: "error", error });
+      await setJob(r.id, { status: "error", error, errorInfo: userError(reservationValid ? "job_worker_lost" : "job_reservation_invalid") });
       await logJob(r.id, error);
       // Le worker est mort sans passer par fail() : personne d'autre ne le signalera.
       const { captureError } = await import("@/lib/observability");
@@ -709,20 +723,39 @@ export async function refundJobCredits(job: Pick<Job, "id" | "type">, why: "fail
  * QCM et ouvertes confondues : c'est ce que l'utilisateur a commandé.
  */
 export async function settleShortfall(job: Pick<Job, "id" | "type">, produced: number, requested: number): Promise<string | null> {
+  return (await settleShortfallDetail(job, produced, requested))?.text ?? null;
+}
+
+/** Manque d'un examen livré : la phrase française, et ce qu'elle dit sans langue (lib/i18n/job-text). */
+export type Shortfall = { text: string; missing: number; requested: number; backCenti: number };
+
+/** settleShortfall, avec le manque et les crédits rendus en nombres. */
+export async function settleShortfallDetail(job: Pick<Job, "id" | "type">, produced: number, requested: number): Promise<Shortfall | null> {
   const missing = Math.max(0, requested - produced);
   if (!missing || requested <= 0) return null;
   const what = missing === 1
     ? `1 question sur ${requested} n'a pas pu être générée`
     : `${missing} questions sur ${requested} n'ont pas pu être générées`;
   let notice = what;
+  let backCenti = 0;
   try {
     const { billingEnabled, refundGeneration, fmtCreditsBack } = await import("@/lib/billing/credits");
     // Livré en partie : le modèle a travaillé, la part rendue est offerte (credits.ts).
     const back = billingEnabled() ? await refundGeneration(job.type, await jobCreditRef(job.id), currentUser(), missing / requested, undefined, { afterSpend: true }) : 0;
-    if (back > 0) notice = `${what} : ${fmtCreditsBack(back)}`;
+    if (back > 0) {
+      notice = `${what} : ${fmtCreditsBack(back)}`;
+      backCenti = back;
+    }
   } catch { /* best-effort : le message reste dû */ }
   await logJob(job.id, `⚠ ${notice}.`).catch(() => {});
-  return notice;
+  return { text: notice, missing, requested, backCenti };
+}
+
+/** Fin d'un examen : l'étape française d'origine et sa forme sans langue (manque éventuel). */
+export function doneStep(shortfall: Shortfall | null, prefix = "Terminé"): { currentStep: string; stepInfo: JobStepInfo } {
+  return shortfall
+    ? { currentStep: `${prefix} ⚠ ${shortfall.text}`, stepInfo: { key: "doneIncomplete", missing: shortfall.missing, requested: shortfall.requested, backCenti: shortfall.backCenti } }
+    : { currentStep: `${prefix} ✓`, stepInfo: { key: "done" } };
 }
 
 /**
@@ -753,8 +786,8 @@ export async function cancelJob(id: number): Promise<Job | null> {
     const delivered = await qcmDelivery(id);
     if (delivered && delivered.produced > 0) {
       await closeQcmExam(job, delivered);
-      const notice = await settleShortfall(job, delivered.produced, delivered.requested);
-      await setJob(id, { status: "done", progress: 100, currentStep: notice ? `Terminé ⚠ ${notice}` : "Terminé ✓" });
+      const shortfall = await settleShortfallDetail(job, delivered.produced, delivered.requested);
+      await setJob(id, { status: "done", progress: 100, ...doneStep(shortfall) });
       await logJob(id, `Annulé après livraison : ${delivered.produced}/${delivered.requested} questions déjà visibles conservées, worker tué.`);
       return await getJob(id);
     }
