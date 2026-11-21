@@ -161,9 +161,11 @@ test("un examen écrit en hébreu (listes, gras, formules, pied de page) compile
   const body = "\\begin{enumerate}\n\\item הוכיחו כי \\textbf{הפונקציה} $f(x)=x^2$ רציפה.\n\\item חשבו את הגבול\n\\end{enumerate}";
   const text = await runWithCourse(courses.he, async () => {
     fs.mkdirSync(examsDir(), { recursive: true });
-    // Le pied de page vient du préambule (layoutChrome y pose le nom du cours), hors du corps.
-    const chrome = `\\usepackage{fancyhdr}\\pagestyle{fancy}\\fancyfoot[C]{${NAMES.he}}\n`;
-    fs.writeFileSync(path.join(examsDir(), "ecrit-he.tex"), doc(body).replace("\\begin{document}", `${chrome}\\begin{document}`));
+    // Le vrai préambule d'un examen écrit (ses polices sont celles que l'image a en cache), et le
+    // pied de page posé après lui, comme layoutChrome y pose le nom du cours, hors du corps.
+    const preamble = ["preamble.tex", "figures.tex", "generic.tex"].map((f) => fs.readFileSync(path.join("latex", f), "utf8")).join("");
+    const chrome = `\\newcommand{\\FOOTDATE}{2024}\n\\fancyfoot[C]{${NAMES.he}}\n`;
+    fs.writeFileSync(path.join(examsDir(), "ecrit-he.tex"), `${preamble}\n${chrome}\\begin{document}\n${body}\n\\end{document}\n`);
     const pdf = await compileExamPdf("ecrit-he");
     return spawnSync("pdftotext", ["-enc", "UTF-8", path.join(examsDir(), pdf), "-"], { encoding: "utf8" }).stdout.replace(BIDI_MARKS, "");
   });

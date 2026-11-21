@@ -352,7 +352,10 @@ jobs:
       # l'image (tectonic 0.15 et poppler de Debian) : la CI des tests unitaires n'a pas tectonic.
       - name: Coréen, hébreu, arabe — tests du PDF dans l'image
         run: |
-          out=$(docker run --rm --network none --entrypoint bash -e NODE_ENV= -e CORTEX_CLAUDE_BIN=/usr/bin/false cortex-app -c 'node --import tsx --test tests/pdf-rtl-hangul.test.ts 2>&1') || { echo "$out"; exit 1; }
+          # Proxy mort : un fichier absent du cache échoue tout de suite (sans lui, chaque requête
+          # attend le DNS d'un réseau coupé, 25 min pour un QCM).
+          out=$(timeout 600 docker run --rm --network none --entrypoint bash -e NODE_ENV= -e CORTEX_CLAUDE_BIN=/usr/bin/false -e HTTPS_PROXY=http://127.0.0.1:9 -e https_proxy=http://127.0.0.1:9 cortex-app -c 'node --import tsx --test tests/pdf-rtl-hangul.test.ts 2>&1') || { echo "$out"; exit 1; }
+          if echo "$out" | grep -q "from network"; then echo "$out" | grep "from network" | sort -u | head; echo "::error::fichiers LaTeX absents du cache de l'image"; exit 1; fi
           echo "$out" | tail -12
           echo "$out" | grep -q "skipped 0" || { echo "::error::tests du PDF sautés (tectonic ou pdftotext absent ?)"; exit 1; }
 
