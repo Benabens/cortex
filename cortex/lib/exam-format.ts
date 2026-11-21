@@ -307,22 +307,44 @@ const nameWord = (stems: string) => new RegExp(`(?<!\\p{L})(?:${stems})`, "iu");
 const HUMANITIES_NAME = nameWord("histor|histoire|geschicht|storia|literat|littérat|philosoph|sociolog|psycholog|anthropolog|linguisti|politi|droit|law\\b|theolog|théolog|religio|ethic|éthique|musi|art history|histoire de l'art|classics|humanit");
 const STEM_NAME = nameWord("math|calcul|algebr|algèbr|geometr|géométr|probabil|statisti|physi|chemi|chimi|biolog|informati|comput|programm|algorith|data|machine learning|electron|électron|circuit|signal|mechani|mécani|engineer|ingénier|thermodynam|optimi|numeric|numériq|crypto");
 
+/** En dessous, un échantillon de supports ne dit rien de leur notation. */
+const MIN_SAMPLE_CHARS = 300;
+/** En dessous, un texte d'annale est surtout son en-tête (dates, pages, barèmes) : trop peu pour trancher. */
+const MIN_ANNALES_CHARS = 1000;
+/** Chiffres d'un en-tête d'annale que MATH_TOKEN prendrait pour des calculs : dates, pages, barèmes. */
+const EXAM_HEADER_NUMBERS = /\b\d{1,2}[/.]\d{1,2}[/.]\d{2,4}\b|\b\d{4}\s*[-/–]\s*\d{2,4}\b|\b(?:page|p\.)\s*\d+\s*\/\s*\d+|\(\s*\d+(?:[.,]\d+)?\s*\/\s*\d+\s*(?:pts?|points?)?\s*\)/gi;
+
 /**
  * Famille de matière d'un cours : le code tranche quand il est clair, puis le nom du cours quand il
- * ne relève que d'une famille, puis la densité de notation mathématique de son corpus. Sans rien
- * pour trancher : STEM, le comportement historique du moteur.
+ * ne relève que d'une famille, puis la densité de notation mathématique de son corpus. Supports trop
+ * courts (cours créé avec ses seules annales) : la même mesure sur le texte des annales, en-têtes
+ * retirés (audit du 16/11, a1-P1-10 / a3-P1-8), sauf si l'annale a des calculs ou des preuves
+ * (`annaleTypes`, relevés par la détection du format) : des formules restées dans les images ne
+ * font pas d'un examen de maths une dissertation. Sans rien pour trancher : STEM, le comportement
+ * historique du moteur.
+ *
+ * Écarté comme signal positif : le type « open » de l'annale. Il couvre aussi bien une dissertation
+ * qu'un problème de physique rédigé ; #166 s'en sert déjà pour la forme de l'examen, avec la
+ * discipline pour garde, pas l'inverse. Et des supports de 300 caractères ou plus restent seuls juges,
+ * même proches du seuil : les annales n'y sont pas un second avis plus sûr (en-têtes, formules en image).
  */
-export function inferDiscipline(c: { code?: string | null; name?: string | null; sample?: string | null }): Discipline {
+export function inferDiscipline(c: { code?: string | null; name?: string | null; sample?: string | null; annales?: string | null; annaleTypes?: string[] }): Discipline {
   const code = (c.code ?? "").trim();
   if (HUMANITIES_CODE.test(code)) return "humanities";
   if (STEM_CODE.test(code)) return "stem";
   const name = c.name ?? "";
   const humanitiesName = HUMANITIES_NAME.test(name);
   if (humanitiesName !== STEM_NAME.test(name)) return humanitiesName ? "humanities" : "stem";
-  const text = c.sample ?? "";
-  if (text.length < 300) return "stem";
-  const density = (text.match(MATH_TOKEN)?.length ?? 0) / (text.length / 1000);
-  return density >= MATH_PER_1000 ? "stem" : "humanities";
+  const sample = c.sample ?? "";
+  if (sample.length >= MIN_SAMPLE_CHARS) return mathDensity(sample) >= MATH_PER_1000 ? "stem" : "humanities";
+  const annales = (c.annales ?? "").replace(EXAM_HEADER_NUMBERS, " ");
+  if (annales.length < MIN_ANNALES_CHARS || (c.annaleTypes ?? []).some((t) => t === "calc" || t === "proof")) return "stem";
+  return mathDensity(`${sample}\n${annales}`) >= MATH_PER_1000 ? "stem" : "humanities";
+}
+
+/** Symboles et motifs de calcul pour 1000 caractères. */
+function mathDensity(text: string): number {
+  return (text.match(MATH_TOKEN)?.length ?? 0) / (text.length / 1000);
 }
 
 /**
@@ -538,7 +560,7 @@ export async function resolveExamFormat(): Promise<ExamFormat> {
   const courseLanguage = course.language && course.language !== "fr" ? course.language : null;
   const language = declared?.language || fromAnnales || courseLanguage || fromMaterials || course.language || FALLBACK_LANGUAGE;
   const stored = await readStoredProfile();
-  const discipline = inferDiscipline({ code: course.examCode, name: course.examName, sample });
+  const discipline = inferDiscipline({ code: course.examCode, name: course.examName, sample, annales: past.text, annaleTypes: stored?.question_types?.map((t) => t.type) });
   const basisOf = (p: StoredProfile) => p.basis ?? "annales";
 
   let format: ExamFormat;
