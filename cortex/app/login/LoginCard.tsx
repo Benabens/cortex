@@ -1,38 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { Wordmark } from "@/components/shell/Logo";
 import { LocaleSwitcher } from "@/components/i18n/LocaleSwitcher";
+import { loginErrorMessage } from "@/lib/i18n/login-errors";
 import { useLocale, useTranslations } from "use-intl/react";
-
-/** Messages clairs par code d'erreur NextAuth (cause + quoi faire). */
-function errorMessage(code: string, t: ReturnType<typeof useTranslations<"login">>): string {
-  switch (code) {
-    case "AccessDenied":
-      return t("errorAccessDenied");
-    case "Verification":
-      return t("errorVerification");
-    case "OAuthAccountNotLinked":
-      return t("errorOAuthAccountNotLinked");
-    case "CredentialsSignin":
-      return t("errorCredentialsSignin");
-    case "rate_limited":
-      return t("errorRateLimited");
-    case "EmailWait":
-      return t("errorEmailWait");
-    case "EmailDay":
-      return t("errorEmailDay");
-    case "EmailIp":
-      return t("errorEmailIp");
-    case "EmailDisposable":
-      return t("errorEmailDisposable");
-    case "Configuration":
-      return t("errorConfiguration");
-    default:
-      return t("errorDefault");
-  }
-}
 
 function GoogleGlyph() {
   return (
@@ -74,6 +48,7 @@ export function LoginCard({
   contact: string;
 }) {
   const t = useTranslations("login");
+  const router = useRouter();
   // En anglais, les liens légaux mènent à leur traduction ; en français, aux documents qui font foi.
   const inEnglish = useLocale() === "en";
   const termsHref = inEnglish ? english : legal?.terms ?? `${landing}/terms`;
@@ -81,6 +56,7 @@ export function LoginCard({
   const noticeHref = inEnglish ? english : legal?.notice ?? `${landing}/mentions-legales`;
   const [busy, setBusy] = useState<null | "google" | "email" | "review">(null);
   const [addr, setAddr] = useState("");
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
 
@@ -107,7 +83,7 @@ export function LoginCard({
             className="mt-6 rounded-lg px-4 py-3 text-[0.83rem] leading-relaxed"
             style={{ background: "var(--bare-error-bg)", border: "1px solid var(--bare-error-line)", color: "var(--error-ink)" }}
           >
-            {errorMessage(error, t)}
+            {loginErrorMessage(error, t)}
           </div>
         )}
 
@@ -148,11 +124,21 @@ export function LoginCard({
 
           {email && (
             <form
-              onSubmit={(e) => {
+              onSubmit={async (e) => {
                 e.preventDefault();
-                if (!addr.trim()) return;
+                const address = addr.trim();
+                if (!address) return;
                 setBusy("email");
-                void signIn("email", { email: addr.trim(), callbackUrl });
+                setEmailError(null);
+                // Sans redirection : on choisit nous-mêmes la page d'arrivée (/verify-request,
+                // avec l'adresse en query) plutôt que celle, sans adresse, que NextAuth calculerait.
+                const res = await signIn("email", { email: address, callbackUrl, redirect: false }).catch(() => null);
+                if (res?.ok && !res.error) {
+                  router.push(`/verify-request?email=${encodeURIComponent(address)}`);
+                  return;
+                }
+                setEmailError(loginErrorMessage(res?.error ?? "unknown", t));
+                setBusy(null);
               }}
               className="flex flex-col gap-2"
             >
@@ -175,6 +161,11 @@ export function LoginCard({
                 className="h-12 w-full rounded-lg border px-3.5 text-[0.9rem] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hi"
                 style={{ background: "var(--bare-surface)", color: "var(--bare-ink)", borderColor: "var(--bare-field-line)" }}
               />
+              {emailError && (
+                <p role="alert" className="text-[0.8rem]" style={{ color: "var(--error-ink)" }}>
+                  {emailError}
+                </p>
+              )}
               {/* Chemin secondaire : surface neutre bordée (le bouton clair reste Google, l'action principale). */}
               <button
                 type="submit"
@@ -207,7 +198,7 @@ export function LoginCard({
                   window.location.assign(res.url ?? callbackUrl);
                   return;
                 }
-                setReviewError(errorMessage(res?.code === "rate_limited" ? "rate_limited" : "CredentialsSignin", t));
+                setReviewError(loginErrorMessage(res?.code === "rate_limited" ? "rate_limited" : "CredentialsSignin", t));
                 setBusy(null);
               }}
               className="mt-1 flex flex-col gap-2"

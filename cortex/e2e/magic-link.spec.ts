@@ -9,7 +9,9 @@ test("compte Cortex seul par lien magique capturé localement", async ({ page, r
   await page.goto("/login");
   await page.getByPlaceholder("ton@email.com").fill(email);
   await page.getByRole("button", { name: "Recevoir un lien de connexion" }).click();
-  await expect(page).toHaveURL(/\/api\/auth\/verify-request/);
+  // DA de /login (pas la page NextAuth par défaut) : adresse affichée, pas de /api/auth/*.
+  await expect(page).toHaveURL(`/verify-request?email=${encodeURIComponent(email)}`);
+  await expect(page.getByText(email)).toBeVisible();
   let url = "";
   await expect.poll(async () => {
     const response = await request.get(`http://127.0.0.1:3211/latest?to=${encodeURIComponent(email)}`);
