@@ -1,5 +1,6 @@
 /**
  * CRÉDITS RENDUS APRÈS DÉPENSE = CRÉDITS OFFERTS (audit fuites B1, I3).
+ * Pack offert par un code promo de la liste blanche : utilisable, borné par le plafond par crédit (21/11).
  *
  * Un job qui échoue est remboursé, mais si ses appels au modèle ont déjà coûté,
  * les crédits rendus ne sont plus « achetés » : le budget lié au revenu
@@ -144,21 +145,82 @@ test("B1 : part d'abonnement rendue après dépense → crédits offerts au regi
   assert.equal(await credits.getBalanceCenti("sub1"), sub0);
 });
 
-test("I3 : un pack à 0 € (code promo de la liste blanche) donne des crédits offerts, soumis au budget", async () => {
+/** Pack de 10 crédits payé 0 € avec un code promo (liste blanche ou non). */
+async function promoPack(user: string, id: string, promo: string) {
+  return handleStripeEvent({
+    id: `evt_${id}`, type: "checkout.session.completed", created: Math.floor(Date.now() / 1000), livemode: false,
+    data: { object: {
+      id: `cs_${id}`, mode: "payment", payment_status: "no_payment_required", payment_intent: null, amount_total: 0, currency: "eur",
+      discounts: [{ promotion_code: promo }],
+      metadata: { cortexUserId: user, plan: "credits_10", credits: "10" },
+    } },
+  } as never, { lookup: { async sessionByPaymentIntent() { return null; }, async paymentDetails() { return { feeCents: 0 }; } } });
+}
+
+test("pack offert par un code de la liste blanche : la préparation passe et débite le solde", async () => {
   process.env.STRIPE_FREE_PROMO_CODES = "promo_free";
   try {
-    await handleStripeEvent({
-      id: "evt_free0", type: "checkout.session.completed", created: Math.floor(Date.now() / 1000), livemode: false,
-      data: { object: {
-        id: "cs_free0", mode: "payment", payment_status: "no_payment_required", payment_intent: null, amount_total: 0, currency: "eur",
-        discounts: [{ promotion_code: "promo_free" }],
-        metadata: { cortexUserId: "promo", plan: "credits_10", credits: "10" },
-      } },
-    } as never, { lookup: { async sessionByPaymentIntent() { return null; }, async paymentDetails() { return { feeCents: 0 }; } } });
+    await promoPack("promo", "free0", "promo_free");
     assert.equal(await credits.getBalanceCenti("promo"), 1000, "le pack promo est crédité");
-    const { r } = await reserveQcm("promo");
-    assert.equal(r.ok, false, "sans revenu, des crédits offerts ne lancent rien");
-    assert.equal(!r.ok && r.status, 402);
+    const ref = `job:promo:ml:prep`;
+    const r = await inMl("promo", () => reserve.reserveGeneration({ bucket: "gen", kind: "prepare", costCenti: 200, ref, jobSlot: true }));
+    assert.equal(r.ok, true, `préparation refusée : ${JSON.stringify(r)}`);
+    assert.equal(await credits.getBalanceCenti("promo"), 800, "2 crédits débités");
+    // Tout le pack se dépense : 4 QCM de 2 crédits après la préparation.
+    for (let i = 0; i < 4; i++) assert.equal((await reserveQcm("promo")).r.ok, true, `QCM ${i + 1}`);
+    assert.equal(await credits.getBalanceCenti("promo"), 0);
+  } finally {
+    delete process.env.STRIPE_FREE_PROMO_CODES;
+  }
+});
+
+test("pack offert : la boucle « échec après dépense → remboursement → relance » coûte au plus crédits × plafond par crédit", async () => {
+  process.env.STRIPE_FREE_PROMO_CODES = "promo_free";
+  process.env.SPEND_CAP_PER_USER_FLOOR_USD = "1000";        // plafond du jour écarté : la borne par crédit tient seule
+  try {
+    await promoPack("promo-loop", "free1", "promo_free");
+    const perCredit = usage.spendCapUsdPerCredit()!;
+    let launched = 0;
+    for (let i = 0; i < 20; i++) {
+      const { ref, r } = await reserveQcm("promo-loop");
+      if (!r.ok) { assert.equal(r.status, 402); break; }
+      launched++;
+      const cap = (await usage.reservationCapUsd(ref))!;
+      await spendOn("promo-loop", ref, cap);                 // le job dépense tout son plafond puis échoue
+      await inMl("promo-loop", () => credits.refundGeneration("qcm", ref));
+    }
+    assert.equal(launched, 5, "10 crédits offerts = 5 QCM, pas un de plus");
+    const spent = Number((await authGet<{ s: number }>(`SELECT sum(cost_usd) s FROM llm_usage WHERE user_id = ?`, "promo-loop"))?.s);
+    assert.ok(spent <= 10 * perCredit + 1e-9, `dépense ${spent} $ ≤ 10 × ${perCredit} $`);
+  } finally {
+    delete process.env.STRIPE_FREE_PROMO_CODES;
+    delete process.env.SPEND_CAP_PER_USER_FLOOR_USD;
+  }
+});
+
+test("pack offert, plafond par crédit levé (JOB_SPEND_CAP_USD_PER_CREDIT=unlimited) : plus de borne, il redevient soumis au budget", async () => {
+  process.env.STRIPE_FREE_PROMO_CODES = "promo_free";
+  try {
+    await promoPack("promo-nocap", "free3", "promo_free");
+    process.env.JOB_SPEND_CAP_USD_PER_CREDIT = "unlimited";
+    const { r } = await reserveQcm("promo-nocap");
+    assert.equal(r.ok, false, "sans plafond par crédit, le cadeau ne serait plus borné");
+    assert.ok(!r.ok && ["billing_free_capacity_exhausted", "billing_free_budget_exceeded"].includes(r.code), `refusé comme crédit offert : ${!r.ok && r.code}`);
+    delete process.env.JOB_SPEND_CAP_USD_PER_CREDIT;
+    assert.equal((await reserveQcm("promo-nocap")).r.ok, true, "plafond rétabli : utilisable");
+  } finally {
+    delete process.env.STRIPE_FREE_PROMO_CODES;
+    delete process.env.JOB_SPEND_CAP_USD_PER_CREDIT;
+  }
+});
+
+test("pack à 0 € avec un code HORS liste blanche : toujours aucun crédit", async () => {
+  process.env.STRIPE_FREE_PROMO_CODES = "promo_free";
+  try {
+    const res = await promoPack("promo-out", "free2", "promo_autre");
+    assert.equal(res.credited, false);
+    assert.equal(await credits.getBalanceCenti("promo-out"), 0);
+    assert.equal((await reserveQcm("promo-out")).r.ok, false);
   } finally {
     delete process.env.STRIPE_FREE_PROMO_CODES;
   }

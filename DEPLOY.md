@@ -421,7 +421,14 @@ argument. Banc d'essai, sans rien de réel : `bash scripts/resend-ben.test.sh`.
    0 € : l'abonnement est crédité par `invoice.paid` comme d'habitude, le pack
    **seulement** si l'id `promo_…` du code figure dans
    `STRIPE_FREE_PROMO_CODES` (liste séparée par des virgules, vide par
-   défaut). Sert à vérifier la chaîne live sans frais Stripe : crée un code à
+   défaut). Ces crédits sont un **cadeau** utilisable comme des crédits achetés
+   (le budget lié au revenu, nul sans paiement, ne les bloque pas) tant que
+   `JOB_SPEND_CAP_USD_PER_CREDIT` est posé : coût IA max d'un pack de N crédits
+   = N × ce plafond (0,9 $ → 9 $ pour 10 crédits), plus les appels déjà en vol.
+   Plafond levé (`unlimited`) : ils retombent sous le budget, donc bloqués.
+   Borne le total avec `max_redemptions` sur le code. Leur dépense compte, comme
+   celle de tout client, dans la capacité du mois et le fusible `SPEND_CAP_USD`.
+   Sert aussi à vérifier la chaîne live sans frais Stripe : crée un code à
    100 % limité à 1 utilisation, pose son id, fais l'achat, puis retire l'id et
    désactive le code.
 6. **Bascule LIVE plus tard** : [docs/STRIPE-LIVE.md](docs/STRIPE-LIVE.md)

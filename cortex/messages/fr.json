@@ -199,8 +199,8 @@
     "billing_daily_generation_quota": "Quota quotidien de générations atteint ({used}/{max}) : remise à zéro {when}.",
     "billing_daily_assistance_quota": "Quota quotidien d'assistance atteint ({used}/{max}) : remise à zéro {when}.",
     "billing_active_jobs_limit": "Trop de générations en cours ({max} au maximum par compte) : attends la fin de l’une d’elles.",
-    "billing_free_capacity_exhausted": "La capacité de génération offerte ce mois-ci est épuisée. Les crédits achetés restent toujours utilisables : achète un pack ou abonne-toi pour continuer, sinon elle rouvre {when}. https://app.cortexexam.com/compte#credits",
-    "billing_free_budget_exceeded": "Cette génération dépasse ce que ton compte peut utiliser sans achat (il te reste {balance, number} crédit(s) acheté(s), il en faut {cost, number}). Les crédits achetés restent toujours utilisables : achète un pack ou abonne-toi pour continuer. https://app.cortexexam.com/compte#credits",
+    "billing_free_capacity_exhausted": "La capacité de génération offerte ce mois-ci est épuisée. Les crédits achetés restent utilisables : recharge ton compte pour continuer, sinon elle rouvre {when}.",
+    "billing_free_budget_exceeded": "Limite des crédits offerts atteinte : sur ton solde de {balance, plural, one {# crédit} other {# crédits}}, {paid, plural, =0 {aucun n’est acheté} one {# seul est acheté} other {# seulement sont achetés}}, et cette génération demande {cost, plural, one {# crédit acheté} other {# crédits achetés}}. Recharge ton compte pour continuer.",
     "billing_daily_compute_limit": "Limite de calcul du jour atteinte pour ton compte : remise à zéro {when}. Tes crédits restent acquis.",
     "billing_monthly_capacity_limit": "Limite de génération atteinte pour tout Cortex ce mois-ci : la génération rouvre {when}. Le reste du site fonctionne normalement.",
     "billing_budget_unavailable": "Budget de calcul invérifiable (base indisponible) : réessaie dans un instant.",
@@ -787,6 +787,10 @@
       "withBalance": " avec ton solde",
       "resetSuffix": " · remise à 0 {when}",
       "needed": "Il te faut {count, plural, one {{formatted} crédit} other {{formatted} crédits}} · <link>Recharger</link>",
+      "purchasedNeeded": "Il te faut {count, plural, one {{formatted} crédit acheté} other {{formatted} crédits achetés}} · <link>Recharger</link>",
+      "freeCapacity": "Capacité offerte du mois épuisée, elle rouvre {when} · <link>Recharger</link>",
+      "freeBudgetNote": "Ton solde contient des crédits offerts, et la limite d’usage de ces crédits est atteinte sur ton compte : seuls des crédits achetés lancent encore une génération. Tes crédits restent à ton solde.",
+      "freeCapacityNote": "La capacité réservée aux crédits offerts est épuisée pour ce mois-ci. Les crédits achetés restent utilisables.",
       "limitsTitle": "Tes limites",
       "dailyCompute": "Le calcul du jour borne la génération par compte et par jour ; il n’entame pas tes crédits. ",
       "timezone": "Les heures sont à l’heure de Lausanne.",
@@ -919,8 +923,10 @@
   },
   "billing": {
     "creditsNeeded": "Il te faut {count, plural, one {{formatted} crédit} other {{formatted} crédits}}",
+    "purchasedCreditsNeeded": "Il te faut {count, plural, one {{formatted} crédit acheté} other {{formatted} crédits achetés}}",
     "paidEngine": "Cette action utilise le moteur payant de Cortex.",
-    "buyCredits": "Acheter des crédits"
+    "buyCredits": "Acheter des crédits",
+    "topUp": "Recharger"
   },
   "labels": {
     "statusNeverSeen": "Jamais vu",

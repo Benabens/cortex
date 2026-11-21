@@ -57,7 +57,8 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
   const [uploading, setUploading] = useState(false);
   const [uploadedMsg, setUploadedMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [paywall, setPaywall] = useState(false);
+  // Refus 402 et son code (la limite des crédits offerts n'est pas un solde vide) ; null : pas de refus.
+  const [paywall, setPaywall] = useState<{ code: string | null } | null>(null);
   const [folderProgress, setFolderProgress] = useState<{ done: number; total: number } | null>(null);
   const [folderRefusals, setFolderRefusals] = useState<FolderImportRefusal[]>([]);
   // Fichiers déposés que l'ingestion n'a pas pu lire : nommés un par un, avec quoi faire.
@@ -278,12 +279,12 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
   const detectFormat = async () => {
     if (running) return;
     setError(null);
-    setPaywall(false);
+    setPaywall(null);
     setUploadedMsg(null);
     try {
       const res = await fetch(`/api/refs/format?course=${encodeURIComponent(courseId)}`, { method: "POST" });
       const d = await res.json().catch(() => null);
-      if (!res.ok) throw { status: res.status, message: d?.error ?? t("errorStatus", { status: res.status }) } as ApiError;
+      if (!res.ok) throw { status: res.status, message: d?.error ?? t("errorStatus", { status: res.status }), code: d?.code ?? null } as ApiError;
       setFormatOffer(false);
       const charged = Number(d.chargedCredits) || 0;
       setFormatCharged(charged);
@@ -291,7 +292,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
       if (d.jobId) startJob(d.jobId, "format");
     } catch (e) {
       const err = e as ApiError;
-      setPaywall(err.status === 402);
+      setPaywall(err.status === 402 ? { code: err.code } : null);
       setError(err.message || t("formatStartFailed"));
     }
   };
@@ -299,16 +300,16 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
   const prepare = async () => {
     if (running) return;
     setError(null);
-    setPaywall(false);
+    setPaywall(null);
     setUploadedMsg(null);
     try {
       const res = await fetch(`/api/prepare?course=${encodeURIComponent(courseId)}`, { method: "POST" });
       const d = await res.json().catch(() => null);
-      if (!res.ok) throw { status: res.status, message: d?.error ?? t("errorStatus", { status: res.status }) } as ApiError;
+      if (!res.ok) throw { status: res.status, message: d?.error ?? t("errorStatus", { status: res.status }), code: d?.code ?? null } as ApiError;
       startJob(d.jobId, "prepare");
     } catch (e) {
       const err = e as ApiError;
-      setPaywall(err.status === 402);
+      setPaywall(err.status === 402 ? { code: err.code } : null);
       setError(err.message || t("prepareFailed"));
     }
   };
@@ -445,7 +446,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
       </div>
 
       {/* progression de job (format / ingest / prepare) */}
-      {paywall && <PaywallNotice credits={2} />}
+      {paywall && <PaywallNotice credits={2} code={paywall.code} />}
       {running && job && (
         <div className="rounded-lg border border-line bg-surface-2/30 px-3.5 py-3" aria-live="polite">
           <div className="mb-2 flex items-center justify-between text-[0.78rem]">

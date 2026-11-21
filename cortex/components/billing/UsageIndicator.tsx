@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
-import { useLocale } from "use-intl/react";
+import { useLocale, useTranslations } from "use-intl/react";
 import { remainingLine, type KindUsage, type UsageLimits } from "@/lib/billing/limits-text";
 import { watchPageRestore } from "@/lib/ux/bfcache";
 import { cn } from "@/lib/ux/cn";
@@ -88,6 +88,7 @@ export function useLaunchUsage(kind: UsageKind, target?: Record<string, unknown>
 export function UsageLine({ usage, now, className }: { usage: KindUsage | null; now: string; className?: string }) {
   // Langue de l'écran passée explicitement : côté client, currentLocale() n'a pas de requête.
   const locale = useLocale();
+  const t = useTranslations("billing");
   if (!usage) return null;
   // Solde trop bas : l'encart d'achat dit le prix et mène à l'achat, au lieu du message brut avec son lien.
   if (!usage.allowed && usage.blockedBy === "credits") {
@@ -97,7 +98,13 @@ export function UsageLine({ usage, now, className }: { usage: KindUsage | null; 
     return (
       <p role="status" data-testid="usage-blocked" className={cn("flex items-start gap-2 text-[0.82rem] leading-relaxed text-warning", className)}>
         <AlertTriangle className="mt-0.5 size-4 shrink-0" strokeWidth={2} aria-hidden="true" />
-        <span>{usage.reason}</span>
+        <span>
+          {usage.reason}
+          {/* Limite des crédits offerts : le solde n'est pas vide, il faut des crédits achetés. */}
+          {(usage.blockedBy === "free_budget" || usage.blockedBy === "free_capacity") && (
+            <> <a href="/compte#credits" className="font-medium text-ink-1 underline underline-offset-2">{t("topUp")}</a></>
+          )}
+        </span>
       </p>
     );
   }
