@@ -126,3 +126,33 @@ test("sans CORTEX_OCR=1 (hors de l'image), l'OCR reste éteint : le scan reste s
   assert.equal(r.status, 0, r.output);
   assert.equal(r.files?.find((f) => f.path === "refs/final-2021.pdf")?.status, "no_text");
 });
+
+test("zone Annales : une annale scannée déposée lance le job d'ingestion, qui la lit par OCR et la compte", { skip }, async () => {
+  const c = await newCourse("Orvelle scan déposé");
+  const { postForm } = await import("./helpers/route");
+  const r = await postForm("refs/upload", `course=${c.id}`, [[scannedPdf([SCAN]), "final-2021.pdf"]]);
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.deepEqual(r.json.files, ["final-2021.pdf"]);
+  // La requête ne fait pas l'OCR : le scan est encore sans texte, et le job est lancé.
+  assert.equal(typeof r.json.jobId, "number", JSON.stringify(r.json));
+  const { runWithCourse } = await import("../db/client");
+  const jobs = await import("../lib/jobs");
+  const { pastExamCount } = await import("../lib/sources");
+  let job = null;
+  for (let t = 0; t < 120; t++) {
+    job = await runWithCourse(c.id, () => jobs.getJob(r.json.jobId));
+    if (job && !["queued", "running", "verifying", "compiling"].includes(job.status)) break;
+    await new Promise((res) => setTimeout(res, 250));
+  }
+  assert.equal(job?.status, "done", JSON.stringify(job));
+  assert.deepEqual(job?.report?.files.map((f) => [f.path, f.status]), [["refs/final-2021.pdf", "indexed"]]);
+  assert.equal(await runWithCourse(c.id, () => pastExamCount()), 1);
+});
+
+test("zone Annales : une annale au texte lisible ne lance aucun job", async () => {
+  const c = await newCourse("Orvelle texte déposé");
+  const { postForm } = await import("./helpers/route");
+  const r = await postForm("refs/upload", `course=${c.id}`, [[textPdf("Final 2022, exercice 1"), "final-2022.pdf"]]);
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.equal(r.json.jobId, undefined);
+});
