@@ -1654,5 +1654,56 @@
     "shortfall": "{missing, plural, one {# question sur {requested} n’a pas pu être générée} other {# questions sur {requested} n’ont pas pu être générées}}",
     "shortfallBack": "{shortfall} : {credits} {back, plural, one {crédit rendu} other {crédits rendus}}",
     "errorBack": "{error} ({credits} {back, plural, one {crédit rendu} other {crédits rendus}})."
+  },
+  "order": {
+    "product": {
+      "credits_10": "Pack de 10 crédits",
+      "pro_monthly": "Cortex Pro mensuel",
+      "pro_yearly": "Cortex Pro annuel"
+    },
+    "discount": "Réduction",
+    "discountNamed": "Réduction « {name} »"
+  },
+  "receipt": {
+    "subject": {
+      "credits_10": "Votre reçu Cortex : pack de 10 crédits",
+      "pro_monthly": "Votre reçu Cortex : abonnement Pro mensuel",
+      "pro_yearly": "Votre reçu Cortex : abonnement Pro annuel"
+    },
+    "title": "Paiement reçu",
+    "leadPack": "Merci pour votre achat : vos 10 crédits sont sur votre compte Cortex.",
+    "leadSubscription": "Merci : le paiement de votre abonnement Cortex Pro est bien reçu.",
+    "product": "Produit",
+    "period": "Période",
+    "periodValue": "du {start} au {end}",
+    "price": "Prix",
+    "paid": "Montant payé",
+    "date": "Date",
+    "number": "N° de commande",
+    "row": "{label} : {value}",
+    "invoice": "Télécharger la facture (PDF)",
+    "account": "Voir mon compte",
+    "accountHint": "Vos paiements et vos factures restent disponibles sur la page Compte.",
+    "help": "Une question sur ce paiement ? Écrivez-nous à {email}.",
+    "sign": "L’équipe Cortex"
+  },
+  "invoicePdf": {
+    "title": "Facture",
+    "filename": "facture",
+    "number": "N° {number}",
+    "issued": "Date d’émission : {date}",
+    "sale": "Date de la vente : {date}",
+    "seller": "Vendeur",
+    "customer": "Client",
+    "item": "Désignation",
+    "qty": "Qté",
+    "unit": "Prix unitaire HT",
+    "amount": "Montant HT",
+    "subtotal": "Sous-total HT",
+    "total": "Total HT",
+    "paid": "Net payé",
+    "paidOn": "Payée le {date}.",
+    "vat": "{note}",
+    "period": "Période du {start} au {end}"
   }
 }

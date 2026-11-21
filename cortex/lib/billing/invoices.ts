@@ -1,6 +1,7 @@
 import { authAll, authGet } from "@/db/auth-store";
 import type { Locale } from "@/lib/i18n/locale";
-import { invoicePdf, invoiceSeller } from "./invoice-pdf";
+import { invoiceFilename, invoicePdf, invoiceSeller } from "./invoice-pdf";
+import type { OrderKind } from "./orders";
 import { loadOrder, type ReceiptStripe } from "./receipts";
 
 /**
@@ -11,14 +12,17 @@ import { loadOrder, type ReceiptStripe } from "./receipts";
  * répond comme un id inconnu (introuvable, sans dire qu'il existe).
  */
 
-export type AccountPayment = { id: string; kind: "pack" | "subscription"; amountCents: number; currency: string; paidAt: string };
+export type AccountPayment = { id: string; kind: OrderKind; amountCents: number; currency: string; paidAt: string };
+
+/** `stripe_payments.kind` → genre de commande (une valeur inconnue est un pack, le seul autre paiement). */
+const kindOf = (kind: string): OrderKind => (kind === "subscription" ? "subscription" : "pack");
 
 export async function accountInvoices(userId: string): Promise<AccountPayment[]> {
   const rows = await authAll<{ source_id: string; kind: string; amount_cents: number | string; currency: string; paid_at: string }>(
     `SELECT source_id, kind, amount_cents, currency, paid_at FROM stripe_payments WHERE user_id = ? AND amount_cents > 0 ORDER BY paid_at DESC LIMIT 100`,
     userId,
   );
-  return rows.map((r) => ({ id: r.source_id, kind: r.kind === "subscription" ? "subscription" : "pack", amountCents: Number(r.amount_cents), currency: r.currency, paidAt: r.paid_at }));
+  return rows.map((r) => ({ id: r.source_id, kind: kindOf(r.kind), amountCents: Number(r.amount_cents), currency: r.currency, paidAt: r.paid_at }));
 }
 
 export type InvoicePdfResult =
@@ -35,12 +39,10 @@ export async function accountInvoicePdf(p: { userId: string; id: string; locale:
   const known = await authGet<{ invoice_id: string | null; plan: string | null }>(`SELECT invoice_id, plan FROM stripe_receipts WHERE source_id = ?`, p.id);
   let loaded: Awaited<ReturnType<typeof loadOrder>>;
   try {
-    loaded = await loadOrder(p.stripe, { sourceId: p.id, kind: row.kind === "subscription" ? "subscription" : "pack", invoiceId: known?.invoice_id ?? null, plan: known?.plan ?? null });
+    loaded = await loadOrder(p.stripe, { sourceId: p.id, kind: kindOf(row.kind), invoiceId: known?.invoice_id ?? null, plan: known?.plan ?? null });
   } catch (e) {
     return { state: "unavailable", reason: `Stripe : ${e instanceof Error ? e.message : String(e)}` };
   }
   if (!loaded) return { state: "unavailable", reason: "facture Stripe absente ou pas encore finalisée" };
-  const number = (loaded.order.number ?? p.id).replace(/[^A-Za-z0-9-]/g, "");
-  const filename = `${p.locale === "en" ? "invoice" : "facture"}-cortex-${number}.pdf`;
-  return { state: "ok", pdf: invoicePdf(loaded.order, seller.seller, p.locale), filename };
+  return { state: "ok", pdf: invoicePdf(loaded.order, seller.seller, p.locale), filename: invoiceFilename(loaded.order, p.id, p.locale) };
 }

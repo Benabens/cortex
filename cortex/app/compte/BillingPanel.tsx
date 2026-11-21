@@ -12,7 +12,7 @@ import { useLocale, useTranslations } from "use-intl/react";
 import { translator } from "@/lib/i18n/translate";
 import { useFmt } from "@/lib/i18n/use-fmt";
 import { fmt } from "@/lib/i18n/format";
-import { orderMoney } from "@/lib/billing/receipt-email";
+import type { AccountPayment } from "@/lib/billing/invoices";
 
 /**
  * ABONNEMENT & CRÉDITS — un seul écran pour comprendre son solde et payer :
@@ -65,16 +65,9 @@ type Billing = {
   storageQuotaMb?: number | null;
   transactions: Tx[];
   /** Paiements encaissés du compte (lib/billing/invoices), facture PDF de chacun à la demande. */
-  payments?: Payment[];
+  payments?: AccountPayment[];
   offers: Offer[];
 };
-
-export type Payment = { id: string; kind: "pack" | "subscription"; amountCents: number; currency: string; paidAt: string };
-
-/** Montant d'un paiement, au centime comme sur la facture : « 6,30 € », « €14.90 ». */
-function paymentAmount(p: Payment, locale: string): string {
-  return orderMoney(p.amountCents, p.currency, locale === "en" ? "en" : "fr");
-}
 
 /** Montant en français : « 14,90 € », « 149 € » (pas de décimales inutiles), « 9 € ». */
 export const money = (amount: number, currency: string) => fmt("fr").price(amount, currency);
@@ -472,7 +465,7 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
                   <tr key={p.id} className="text-ink-2">
                     <td className="whitespace-nowrap px-5 py-3 tabular-nums text-ink-3">{f.date(p.paidAt)}</td>
                     <td className="px-2 py-3">{t(p.kind === "subscription" ? "paymentSubscription" : "paymentPack")}</td>
-                    <td className="whitespace-nowrap px-2 py-3 text-right tabular-nums text-ink-1">{paymentAmount(p, locale)}</td>
+                    <td className="whitespace-nowrap px-2 py-3 text-right tabular-nums text-ink-1">{f.money(p.amountCents, p.currency)}</td>
                     <td className="px-5 py-3 text-right">
                       <a href={`/api/billing/invoices/${encodeURIComponent(p.id)}`} download aria-label={t("invoiceFor", { date: f.date(p.paidAt) })}
                         className="rounded-sm text-accent-hi underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">

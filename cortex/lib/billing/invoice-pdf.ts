@@ -1,7 +1,7 @@
 import { fmt } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/locale";
-import type { Order } from "./orders";
-import { orderMoney, productName } from "./receipt-email";
+import { translator } from "@/lib/i18n/translate";
+import { discountLabel, productName, type Order } from "./orders";
 import { PdfPage, A4, textWidth, type Rgb } from "./pdf-doc";
 
 /**
@@ -21,6 +21,7 @@ import { PdfPage, A4, textWidth, type Rgb } from "./pdf-doc";
  *
  * Vendeur lu dans l'environnement (INVOICE_SELLER_*) : sans nom avec la mention EI,
  * adresse ou SIRET valides, aucune facture n'est émise (refus, pas un document incomplet).
+ * Textes : messages/*.json (`invoicePdf.*`, `order.*`) ; la mention de TVA reste en français.
  */
 
 export type InvoiceSeller = { name: string; address: string[]; siret: string; registration: string | null; vatNote: string };
@@ -42,29 +43,15 @@ export function invoiceSeller(env: Partial<NodeJS.ProcessEnv> = process.env): { 
   };
 }
 
-const L = {
-  fr: {
-    title: "Facture", number: "N°", issued: "Date d'émission", sale: "Date de la vente", seller: "Vendeur", customer: "Client",
-    item: "Désignation", qty: "Qté", unit: "Prix unitaire HT", amount: "Montant HT", subtotal: "Sous-total HT", discount: "Réduction",
-    total: "Total HT", paid: "Net payé", paidOn: (d: string) => `Payée le ${d}.`, vat: (note: string) => note,
-    period: (a: string, b: string) => `Période du ${a} au ${b}`, idLabel: (digits: string) => (digits.length === 9 ? "SIREN" : "SIRET"),
-    sep: " : ", quote: (s: string) => `« ${s} »`,
-  },
-  en: {
-    title: "Invoice", number: "No.", issued: "Issue date", sale: "Date of sale", seller: "Seller", customer: "Customer",
-    item: "Description", qty: "Qty", unit: "Unit price", amount: "Amount", subtotal: "Subtotal", discount: "Discount",
-    total: "Total", paid: "Amount paid", paidOn: (d: string) => `Paid on ${d}.`, vat: (note: string) => `${note} (VAT not applicable)`,
-    period: (a: string, b: string) => `Period ${a} to ${b}`, idLabel: (digits: string) => (digits.length === 9 ? "SIREN" : "SIRET"),
-    sep: ": ", quote: (s: string) => `“${s}”`,
-  },
-} as const;
+/** SIREN (9 chiffres) ou SIRET (14) : le libellé suit le numéro, dans les deux langues. */
+const idLabel = (siret: string) => (siret.replace(/\s/g, "").length === 9 ? "SIREN" : "SIRET");
 
 const INK: Rgb = [20, 21, 24];
 const MUTED: Rgb = [88, 94, 108];
 const RULE: Rgb = [222, 225, 231];
 const ACCENT: Rgb = [39, 100, 236];
-const M = 56; // marge
-const RIGHT = A4.width - M;
+const MARGIN = 56;
+const RIGHT = A4.width - MARGIN;
 
 /** Symbole « Dissolution v2 » (viewBox 256) : anneau ouvert en polygone, nœud bleu, deux points. */
 function drawMark(page: PdfPage, x: number, y: number, size: number): void {
@@ -88,21 +75,22 @@ function drawMark(page: PdfPage, x: number, y: number, size: number): void {
 }
 
 export function invoicePdf(o: Order, seller: InvoiceSeller, locale: Locale): Buffer {
-  const t = L[locale];
+  const t = translator(locale);
   const f = fmt(locale);
-  const money = (cents: number) => orderMoney(cents, o.currency, locale);
+  const money = (cents: number) => f.money(cents, o.currency);
   const day = (unix: number) => f.date(unix * 1000);
   const page = new PdfPage();
+  const M = MARGIN;
 
   // En-tête : marque à gauche, titre et références à droite.
   drawMark(page, M, 52, 30);
   // Wordmark « cortex. » : le point final est bleu, comme le nœud (lockup v2).
   page.text(M + 38, 74, "cortex", { size: 20, font: "bold", color: INK });
   page.text(M + 38 + textWidth("cortex", 20, "bold"), 74, ".", { size: 20, font: "bold", color: ACCENT });
-  page.text(RIGHT, 70, t.title, { size: 22, font: "bold", align: "right", color: INK });
-  page.text(RIGHT, 90, `${t.number} ${o.number ?? "—"}`, { size: 10, align: "right", color: INK });
-  page.text(RIGHT, 105, `${t.issued}${t.sep}${day(o.issuedAt)}`, { size: 9, align: "right", color: MUTED });
-  page.text(RIGHT, 118, `${t.sale}${t.sep}${day(o.paidAt)}`, { size: 9, align: "right", color: MUTED });
+  page.text(RIGHT, 70, t("invoicePdf.title"), { size: 22, font: "bold", align: "right", color: INK });
+  page.text(RIGHT, 90, t("invoicePdf.number", { number: o.number ?? "—" }), { size: 10, align: "right", color: INK });
+  page.text(RIGHT, 105, t("invoicePdf.issued", { date: day(o.issuedAt) }), { size: 9, align: "right", color: MUTED });
+  page.text(RIGHT, 118, t("invoicePdf.sale", { date: day(o.paidAt) }), { size: 9, align: "right", color: MUTED });
 
   // Vendeur et client.
   const top = 160;
@@ -110,27 +98,27 @@ export function invoicePdf(o: Order, seller: InvoiceSeller, locale: Locale): Buf
     page.text(x, top, label, { size: 8.5, font: "bold", color: MUTED });
     lines.forEach(([line, strong], i) => page.text(x, top + 17 + i * 13.5, line, { size: 10, font: strong ? "bold" : "regular", color: INK }));
   };
-  const idDigits = seller.siret.replace(/\s/g, "");
-  block(M, t.seller, [
+  const sellerId = `${idLabel(seller.siret)} ${seller.siret}`;
+  block(M, t("invoicePdf.seller"), [
     [seller.name, true], ...seller.address.map((l) => [l] as [string]),
-    [`${t.idLabel(idDigits)} ${seller.siret}`], ...(seller.registration ? [[seller.registration] as [string]] : []),
+    [sellerId], ...(seller.registration ? [[seller.registration] as [string]] : []),
   ]);
   const c = o.customer;
-  block(A4.width / 2 + 20, t.customer, [
+  block(A4.width / 2 + 20, t("invoicePdf.customer"), [
     [c.name ?? c.email ?? "—", true], ...(c.name && c.email ? [[c.email] as [string]] : []), ...c.address.map((l) => [l] as [string]),
   ]);
 
   // Lignes.
   let y = 300;
   const colQty = 360, colUnit = 455;
-  page.text(M, y, t.item, { size: 8.5, font: "bold", color: MUTED });
-  page.text(colQty, y, t.qty, { size: 8.5, font: "bold", color: MUTED, align: "right" });
-  page.text(colUnit, y, t.unit, { size: 8.5, font: "bold", color: MUTED, align: "right" });
-  page.text(RIGHT, y, t.amount, { size: 8.5, font: "bold", color: MUTED, align: "right" });
+  page.text(M, y, t("invoicePdf.item"), { size: 8.5, font: "bold", color: MUTED });
+  page.text(colQty, y, t("invoicePdf.qty"), { size: 8.5, font: "bold", color: MUTED, align: "right" });
+  page.text(colUnit, y, t("invoicePdf.unit"), { size: 8.5, font: "bold", color: MUTED, align: "right" });
+  page.text(RIGHT, y, t("invoicePdf.amount"), { size: 8.5, font: "bold", color: MUTED, align: "right" });
   page.line(M, y + 8, RIGHT, y + 8, RULE);
   y += 26;
   page.text(M, y, productName(o.plan, locale), { size: 10.5, font: "bold", color: INK });
-  if (o.period) page.text(M, y + 14, t.period(day(o.period.start), day(o.period.end)), { size: 9, color: MUTED });
+  if (o.period) page.text(M, y + 14, t("invoicePdf.period", { start: day(o.period.start), end: day(o.period.end) }), { size: 9, color: MUTED });
   page.text(colQty, y, "1", { size: 10.5, align: "right", color: INK });
   page.text(colUnit, y, money(o.subtotal), { size: 10.5, align: "right", color: INK });
   page.text(RIGHT, y, money(o.subtotal), { size: 10.5, align: "right", color: INK });
@@ -138,27 +126,32 @@ export function invoicePdf(o: Order, seller: InvoiceSeller, locale: Locale): Buf
   page.line(M, y, RIGHT, y, RULE);
 
   // Totaux, alignés à droite.
-  const labelX = colUnit;
   const row = (label: string, value: string, strong = false) => {
     y += strong ? 22 : 18;
-    page.text(labelX, y, label, { size: strong ? 11 : 10, font: strong ? "bold" : "regular", color: strong ? INK : MUTED, align: "right" });
+    page.text(colUnit, y, label, { size: strong ? 11 : 10, font: strong ? "bold" : "regular", color: strong ? INK : MUTED, align: "right" });
     page.text(RIGHT, y, value, { size: strong ? 11 : 10, font: strong ? "bold" : "regular", color: INK, align: "right" });
   };
   if (o.discounts.length) {
-    row(t.subtotal, money(o.subtotal));
-    for (const d of o.discounts) row(d.name ? `${t.discount} ${t.quote(d.name)}` : t.discount, `-${money(d.amount)}`);
+    row(t("invoicePdf.subtotal"), money(o.subtotal));
+    for (const d of o.discounts) row(discountLabel(d.name, locale), `-${money(d.amount)}`);
   }
-  row(t.total, money(o.total));
-  row(t.paid, money(o.amountPaid), true);
+  row(t("invoicePdf.total"), money(o.total));
+  row(t("invoicePdf.paid"), money(o.amountPaid), true);
   y += 26;
-  page.text(M, y, t.paidOn(day(o.paidAt)), { size: 9.5, color: INK });
-  page.text(M, y + 15, t.vat(seller.vatNote), { size: 9.5, color: INK });
+  page.text(M, y, t("invoicePdf.paidOn", { date: day(o.paidAt) }), { size: 9.5, color: INK });
+  page.text(M, y + 15, t("invoicePdf.vat", { note: seller.vatNote }), { size: 9.5, color: INK });
 
   // Pied : identité légale, rappelée en petit.
   const foot = A4.height - 48;
   page.line(M, foot - 14, RIGHT, foot - 14, RULE);
-  page.text(M, foot, [seller.name, `${t.idLabel(idDigits)} ${seller.siret}`, seller.vatNote].join("  ·  "), { size: 7.5, color: MUTED });
+  page.text(M, foot, [seller.name, sellerId, seller.vatNote].join("  ·  "), { size: 7.5, color: MUTED });
   page.text(RIGHT, foot, "Cortex", { size: 7.5, font: "bold", color: MUTED, align: "right" });
 
-  return page.toPdf({ title: `${t.title} ${o.number ?? ""}`.trim(), author: "Cortex" });
+  return page.toPdf({ title: `${t("invoicePdf.title")} ${o.number ?? ""}`.trim(), author: "Cortex" });
+}
+
+/** Nom du fichier téléchargé : « facture-cortex-B3A1C2D4-0042.pdf ». */
+export function invoiceFilename(o: Order, fallback: string, locale: Locale): string {
+  const number = (o.number ?? fallback).replace(/[^A-Za-z0-9-]/g, "");
+  return `${translator(locale)("invoicePdf.filename")}-cortex-${number}.pdf`;
 }

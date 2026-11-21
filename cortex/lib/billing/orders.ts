@@ -1,4 +1,6 @@
 import type Stripe from "stripe";
+import type { Locale } from "@/lib/i18n/locale";
+import { translator } from "@/lib/i18n/translate";
 import type { PlanKey } from "./stripe-events";
 
 /**
@@ -87,4 +89,15 @@ export function orderFromInvoice(inv: InvoiceLike, o: { kind: OrderKind; plan?: 
       address: [a?.line1, a?.line2, cityLine, a?.state, a?.country].filter((x): x is string => !!x && !!x.trim()),
     },
   };
+}
+
+/** Nom du produit acheté, tel que l'impriment le reçu et la facture. */
+export function productName(plan: PlanKey, locale: Locale): string {
+  return translator(locale)(`order.product.${plan}`);
+}
+
+/** « Réduction « Bienvenue -30 % » », ou « Réduction » quand la remise n'a pas de nom. */
+export function discountLabel(name: string | null, locale: Locale): string {
+  const t = translator(locale);
+  return name ? t("order.discountNamed", { name }) : t("order.discount");
 }

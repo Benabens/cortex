@@ -7,7 +7,7 @@ import {
   setSubscriptionStatus, subscriptionCreditsCenti, subscriptionLive, subscriptionMonthlyCreditsCenti, toCenti,
 } from "./credits";
 import { linkInvoicePaymentIntent, recordDispute, recordPayment, recordRefund } from "./revenue";
-import { queueReceipt } from "./receipts";
+import { dropReceipt, queueReceipt } from "./receipts";
 
 /**
  * TRAITEMENT DES ÉVÉNEMENTS STRIPE (webhook). Séparé de la route pour être
@@ -462,12 +462,15 @@ async function onCheckout(s: Stripe.Checkout.Session, eventId: string, at: strin
     const orphan = await authGet<{ why: string; amount_cents: number | null }>(`SELECT why, amount_cents FROM stripe_orphan_reversals WHERE payment_intent = ?`, pi);
     if (orphan) {
       // Remboursement partiel mémorisé : au prorata du montant, jamais plus que l'achat.
-      const amount = Number(orphan.amount_cents ?? 0);
-      const take = amount > 0 ? Math.min(centi, creditsCentiForAmount(amount)) : centi;
+      const refunded = Number(orphan.amount_cents ?? 0);
+      const take = refunded > 0 ? Math.min(centi, creditsCentiForAmount(refunded)) : centi;
       const reversed = await addTransaction(userId, -take, `${orphan.why} (reçu avant l'achat)`, `stripe:reversal:${pi}`);
       await authRun(`DELETE FROM stripe_orphan_reversals WHERE payment_intent = ?`, pi);
       log("info", "stripe.orphan_reversal_applied", { paymentIntent: pi, retiredCenti: reversed ? take : 0 });
-      return { ok: true, action: "pack-credited-then-reversed", credited, reversed, ...(credited && amount ? { receipt: s.id } : {}) };
+      // Rendu EN ENTIER avant même d'être crédité : pas de reçu « paiement reçu ». Partiel : le reçu part.
+      const whole = refunded <= 0 || (amount != null && refunded >= amount);
+      if (whole) await dropReceipt(s.id);
+      return { ok: true, action: "pack-credited-then-reversed", credited, reversed, ...(!whole && amount ? { receipt: s.id } : {}) };
     }
   }
   return { ok: true, action: "pack-credited", credited, ...(credited && amount ? { receipt: s.id } : {}) };
@@ -521,6 +524,7 @@ async function onInvoicePaid(invoice: Stripe.Invoice, lookup: StripeLookup | und
       Math.max(0, Number(previous.remaining) || 0), userId, previous.period_end,
     );
   }
+  let receipt: { receipt?: string } = {};
   if (inv.id) {
     // Montant encaissé : compté même si la facture n'accorde rien (période plus ancienne), l'argent est là.
     const paid = Number(amountPaid ?? 0);
@@ -531,6 +535,7 @@ async function onInvoicePaid(invoice: Stripe.Invoice, lookup: StripeLookup | und
         taxCents: invoiceTaxCents(inv), feeCents: await realFeeCents(lookup, invPi), livemode: !!inv.livemode, paidAt: at,
       });
       await queueReceipt({ sourceId: inv.id, kind: "subscription", userId, invoiceId: inv.id, plan: planOfLookupKey(plan) });
+      receipt = { receipt: inv.id };
     }
     // Enregistrée même si elle n'accorde rien (période plus ancienne) : idempotence et reprise s'y rattachent.
     await authRun(
@@ -540,7 +545,6 @@ async function onInvoicePaid(invoice: Stripe.Invoice, lookup: StripeLookup | und
       granted ? monthly : 0, periodEnd, nowStr(),
     );
   }
-  const receipt = inv.id && Number(amountPaid ?? 0) > 0 ? { receipt: inv.id } : {};
   return { ok: true, action: granted ? "subscription-granted" : "invoice-older-period", ...receipt };
 }
 

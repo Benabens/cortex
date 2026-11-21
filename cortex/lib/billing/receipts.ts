@@ -2,14 +2,14 @@ import type Stripe from "stripe";
 import { authAll, authGet, authRun, type AuthTx } from "@/db/auth-store";
 import { nowStr } from "@/db/q";
 import { claimOnce, releaseClaim, SENT, settleClaim } from "@/lib/claim-once";
-import { contactEmail } from "@/lib/contact";
+import { configuredContactEmail } from "@/lib/contact";
 import { sendEmail, type EmailOutcome } from "@/lib/email";
 import { accountLocale } from "@/lib/i18n/account-locale";
 import { log } from "@/lib/metrics";
 import { publicOrigin } from "@/lib/public-url";
 import { ORDER_INVOICE_EXPAND, orderFromInvoice, type Order, type OrderKind } from "./orders";
 import { receiptEmail } from "./receipt-email";
-import type { PlanKey } from "./stripe-events";
+import { idOf, isPlanKey, type PlanKey } from "./stripe-events";
 
 /**
  * REÇU CORTEX APRÈS PAIEMENT. Stripe envoie ses reçus avec la marque du COMPTE
@@ -19,7 +19,10 @@ import type { PlanKey } from "./stripe-events";
  *
  * FILE : le webhook (./stripe-events) pose une ligne `stripe_receipts` par paiement
  * ENCAISSÉ (pack payé, facture d'abonnement payée ; pas un pack offert à 0 €, pas
- * une autre application du compte), dans la transaction qui crédite. La route du
+ * une autre application du compte) : pour un pack, dans la transaction qui le
+ * crédite ; pour un abonnement, juste après l'enregistrement du paiement (un webhook
+ * rejoué la repose, ON CONFLICT). Un pack remboursé avant d'être crédité retire la
+ * sienne (dropReceipt) : pas de « paiement reçu » pour un argent déjà rendu. La route du
  * webhook l'envoie juste après sa réponse ; un passage toutes les 5 minutes
  * (instrumentation.ts) reprend ce qui n'est pas parti.
  *
@@ -32,6 +35,9 @@ import type { PlanKey } from "./stripe-events";
  * (lib/claim-once). Issue inconnue chez Resend : la réclamation reste et la reprise
  * garde la même clé d'idempotence ; refus net : clé rendue, nouvel essai sous une
  * nouvelle clé, abandon après 5 refus ou un refus qui ne passera pas tout seul (4xx).
+ *
+ * Le reçu ne porte une adresse de contact que si elle est CONFIGURÉE (PUBLIC_CONTACT_EMAIL) :
+ * jamais l'adresse personnelle par défaut de l'éditeur.
  *
  * CORTEX_RECEIPTS=0 coupe l'envoi (la file se remplit quand même).
  */
@@ -50,6 +56,11 @@ const WINDOW_MS = 7 * 86_400_000;
 const MAX_REFUSALS = 5;
 export const RECEIPT_TICK_MS = 5 * 60_000;
 
+/** Retire un reçu pas encore parti (paiement rendu avant même d'être crédité). */
+export async function dropReceipt(sourceId: string): Promise<void> {
+  await authRun(`DELETE FROM stripe_receipts WHERE source_id = ? AND sent_at IS NULL`, sourceId);
+}
+
 export async function queueReceipt(r: { sourceId: string; kind: OrderKind; userId: string; invoiceId: string | null; plan: PlanKey | null }, tx?: AuthTx): Promise<void> {
   const sql = `INSERT INTO stripe_receipts (source_id, kind, user_id, invoice_id, plan, created_at) VALUES (?,?,?,?,?,?) ON CONFLICT (source_id) DO NOTHING`;
   const args = [r.sourceId, r.kind, r.userId, r.invoiceId, r.plan, nowStr()];
@@ -57,9 +68,8 @@ export async function queueReceipt(r: { sourceId: string; kind: OrderKind; userI
   else await authRun(sql, ...args);
 }
 
-const idOf = (v: string | { id: string } | null | undefined) => (typeof v === "string" ? v : v?.id ?? null);
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 200);
-const isPlan = (v: string | null): v is PlanKey => v === "credits_10" || v === "pro_monthly" || v === "pro_yearly";
+/** Message d'erreur tronqué pour la base et les journaux. */
+const shortError = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 200);
 
 /**
  * La facture Stripe d'un paiement de Cortex : celle de la facture d'abonnement (in_…), ou
@@ -79,13 +89,12 @@ export async function loadOrder(stripe: ReceiptStripe, p: { sourceId: string; ki
   if (!invoiceId) return null;
   const inv = await stripe.invoices.retrieve(invoiceId, { expand: ORDER_INVOICE_EXPAND });
   if (inv.status !== "paid" || !inv.number) return null;
-  return { order: orderFromInvoice(inv, { kind: p.kind, plan: isPlan(p.plan) ? p.plan : null }), invoiceId };
+  return { order: orderFromInvoice(inv, { kind: p.kind, plan: isPlanKey(p.plan) ? p.plan : null }), invoiceId };
 }
 
-export async function sendPendingReceipts(o: { stripe: ReceiptStripe; send?: Send; only?: string; now?: Date }): Promise<ReceiptReport> {
+export async function sendPendingReceipts(o: { stripe: ReceiptStripe; send?: Send; only?: string }): Promise<ReceiptReport> {
   const report: ReceiptReport = { sent: 0, pending: 0, failed: 0 };
-  const now = o.now ?? new Date();
-  const cutoff = new Date(now.getTime() - WINDOW_MS).toISOString().slice(0, 19).replace("T", " ");
+  const cutoff = nowStr(-WINDOW_MS);
   // Trop vieux pour partir encore : abandonné, et dit une fois.
   const stale = await authAll<{ source_id: string }>(`SELECT source_id FROM stripe_receipts WHERE sent_at IS NULL AND failed_at IS NULL AND created_at < ?`, cutoff);
   for (const r of stale) {
@@ -129,7 +138,7 @@ async function sendOne(row: Row, stripe: ReceiptStripe, send: Send, report: Rece
   try {
     loaded = await loadOrder(stripe, { sourceId: row.source_id, kind: row.kind, invoiceId: row.invoice_id, plan: row.plan });
   } catch (e) {
-    return later(`Stripe : ${message(e)}`);
+    return later(`Stripe : ${shortError(e)}`);
   }
   if (!loaded) return later("facture Stripe pas encore finalisée");
   if (!row.invoice_id) await authRun(`UPDATE stripe_receipts SET invoice_id = ? WHERE source_id = ?`, loaded.invoiceId, row.source_id);
@@ -140,7 +149,7 @@ async function sendOne(row: Row, stripe: ReceiptStripe, send: Send, report: Rece
     locale: (await accountLocale(row.user_id).catch(() => null)) ?? "fr",
     accountUrl: `${origin}/compte`,
     invoiceUrl: `${origin}/api/billing/invoices/${encodeURIComponent(row.source_id)}`,
-    contact: contactEmail(),
+    contact: configuredContactEmail(),
   });
   const outcome = await send({ to: email, ...mail, idempotencyKey: `${key}:${claim.chain}` });
   if (outcome.ok) {
@@ -176,7 +185,7 @@ export function receiptsBlocker(env: Partial<NodeJS.ProcessEnv> = process.env): 
 /** Envoi juste après le webhook : ne lève jamais (la file reprend au passage suivant). */
 export async function sendReceiptSoon(stripe: ReceiptStripe, sourceId: string): Promise<void> {
   if (receiptsBlocker()) return;
-  await sendPendingReceipts({ stripe, only: sourceId }).catch((e) => log("warn", "receipt.not_sent", { source: sourceId, reason: message(e) }));
+  await sendPendingReceipts({ stripe, only: sourceId }).catch((e) => log("warn", "receipt.not_sent", { source: sourceId, reason: shortError(e) }));
 }
 
 /** Passage périodique (une minuterie par process, hot-reload safe). null si l'envoi est coupé ou impossible. */
@@ -190,7 +199,7 @@ export function startReceiptScheduler(stripe: () => ReceiptStripe): NodeJS.Timeo
   }
   const tick = () => sendPendingReceipts({ stripe: stripe() })
     .then((r) => { if (r.sent || r.failed) log("info", "receipt.sweep", r); })
-    .catch((e) => log("error", "receipt.sweep_failed", { message: message(e) }));
+    .catch((e) => log("error", "receipt.sweep_failed", { message: shortError(e) }));
   g.__cortexReceiptTimer = setInterval(tick, RECEIPT_TICK_MS);
   g.__cortexReceiptTimer.unref?.();
   return g.__cortexReceiptTimer;

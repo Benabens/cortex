@@ -185,6 +185,7 @@ test("pack payé : un reçu Cortex à l'adresse du compte, dans sa langue, une s
   assert.match(box.sent[0].text, /Bienvenue -30 %/);
   assert.match(box.sent[0].text, /https:\/\/app\.cortexexam\.com\/api\/billing\/invoices\/cs_p1/);
   assert.ok(stripe.calls[0].expand?.includes("total_discount_amounts.discount.source.coupon"), "le nom des réductions est déployé");
+  assert.doesNotMatch(box.sent[0].text, /@gmail\.com|Écrivez-nous/, "sans PUBLIC_CONTACT_EMAIL : pas de ligne de contact, jamais l'adresse personnelle par défaut");
   // Rejeu Stripe du même événement, nouveau passage : rien de plus.
   await handleStripeEvent(paidPack("p1", "rc-fr"));
   assert.deepEqual(await sendPendingReceipts({ stripe, send: box.send }), { sent: 0, pending: 0, failed: 0 });
@@ -340,4 +341,34 @@ test("factures du compte : liste des paiements encaissés, PDF pour le propriét
   assert.equal((await accountInvoicePdf({ userId: "inv-a", id: "cs_inv3", locale: "fr", stripe, env: SELLER_ENV })).state, "not_found", "paiement d'un autre compte");
   assert.equal((await accountInvoicePdf({ userId: "inv-a", id: "cs_nope", locale: "fr", stripe, env: SELLER_ENV })).state, "not_found");
   assert.equal((await accountInvoicePdf({ userId: "inv-a", id: "cs_inv1", locale: "fr", stripe, env: {} })).state, "unavailable", "vendeur non configuré");
+});
+
+test("reçu : la ligne de contact n'apparaît qu'avec une adresse de support configurée", async () => {
+  const { orderFromInvoice } = await import("../lib/billing/orders");
+  const { receiptEmail } = await import("../lib/billing/receipt-email");
+  const order = orderFromInvoice(fakeInvoice(), { kind: "pack" });
+  const urls = { accountUrl: "https://app.cortexexam.com/compte", invoiceUrl: "https://app.cortexexam.com/api/billing/invoices/cs_1" };
+  const none = receiptEmail(order, { locale: "fr", ...urls, contact: null });
+  assert.doesNotMatch(none.text + none.html, /Écrivez-nous|mailto:/);
+  assert.match(none.text, /L’équipe Cortex/);
+  const withContact = receiptEmail(order, { locale: "fr", ...urls, contact: "support@cortexexam.com" });
+  assert.match(withContact.html, /href="mailto:support@cortexexam\.com"/);
+});
+
+test("pack remboursé en entier avant d'être crédité : aucun reçu « paiement reçu » ; partiellement : le reçu part", async () => {
+  const { authRun } = await import("../db/auth-store");
+  const { handleStripeEvent } = await import("../lib/billing/stripe-events");
+  const { sendPendingReceipts } = await import("../lib/billing/receipts");
+  await user("rc-rev", "fr");
+  await authRun(`INSERT INTO stripe_orphan_reversals (payment_intent, why, amount_cents, created_at) VALUES (?,?,?,?)`, "pi_rev1", "remboursement", null, "2026-11-01 00:00:00");
+  await authRun(`INSERT INTO stripe_orphan_reversals (payment_intent, why, amount_cents, created_at) VALUES (?,?,?,?)`, "pi_rev2", "remboursement", 200, "2026-11-01 00:00:00");
+  const whole = await handleStripeEvent(paidPack("rev1", "rc-rev"));
+  assert.equal(whole.action, "pack-credited-then-reversed");
+  const partial = await handleStripeEvent(paidPack("rev2", "rc-rev"));
+  assert.equal(partial.receipt, "cs_rev2");
+  const stripe = fakeStripe({ in_rev1: fakeInvoice({ id: "in_rev1" }), in_rev2: fakeInvoice({ id: "in_rev2" }) });
+  const box = mailbox();
+  assert.deepEqual(await sendPendingReceipts({ stripe, send: box.send, only: "cs_rev1" }), { sent: 0, pending: 0, failed: 0 });
+  assert.deepEqual(await sendPendingReceipts({ stripe, send: box.send, only: "cs_rev2" }), { sent: 1, pending: 0, failed: 0 });
+  assert.equal(box.sent.length, 1);
 });
