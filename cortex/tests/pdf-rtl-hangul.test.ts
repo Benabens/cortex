@@ -98,6 +98,23 @@ test("le libellé d'une option et la mise en forme ne décident pas du sens d'un
   assert.match(out, /\\newfontfamily\\CortexArabic/);
 });
 
+test("crochets d'argument, parenthèses et espaces en macro restent à leur place", async () => {
+  const { withUnicodeFonts } = await import("../lib/exam-latex");
+  const cases: [string, string][] = [
+    // Le « ] » d'un argument optionnel reste hors du passage : l'argument se ferme.
+    ["\\item[א.] שאלה", "\\item[\\CortexRL{\\CortexHe{א.}}] \\CortexRL{\\CortexHe{שאלה}}"],
+    // Les deux parenthèses dans le passage, que la police retourne ensemble.
+    ["(שלום) עולם", "\\CortexRL{\\CortexHe{(שלום) עולם}}"],
+    // Un mot cité : ses parenthèses le suivent, la virgule reste à la phrase française.
+    ["Le mot (שלום), puis עולם, enfin.", "Le mot \\CortexRL{\\CortexHe{(שלום)}}, puis \\CortexRL{\\CortexHe{עולם}}, enfin."],
+    // « \quad » ne coupe pas la phrase, la formule qui le suit en fait partie.
+    ["נתון\\quad$x>0$ כאן", "\\CortexRL{\\CortexHe{נתון}\\quad\\CortexLR{$x>0$} \\CortexHe{כאן}}"],
+    // \lstinline{…} est du code, même entre accolades.
+    ["\\lstinline{a[i]} שלום {b}", "\\lstinline{a[i]} \\CortexRL{\\CortexHe{שלום}} {b}"],
+  ];
+  for (const [body, want] of cases) assert.ok(withUnicodeFonts(doc(body)).includes(`\n${want}\n`), body);
+});
+
 test("code et commentaires en hébreu ne sont pas balisés", async () => {
   const { withUnicodeFonts } = await import("../lib/exam-latex");
   const code = "\\begin{lstlisting}\nprint('שלום')\n\\end{lstlisting}";
