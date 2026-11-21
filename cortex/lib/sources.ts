@@ -14,6 +14,7 @@ import { storage } from "@/lib/storage";
 import { failureStatus, ingestProblems, readStatus, type IngestFileOutcome, type IngestProblem } from "@/lib/ingest-report";
 import { lastIngestReport } from "@/lib/jobs";
 import { examKind, examYear, withoutSolutions } from "@/lib/exam-names";
+import { readablePages } from "@/lib/ocr";
 
 /**
  * Examens de référence : le « format » à imiter pour la génération.
@@ -57,8 +58,12 @@ const INS_SOURCE_SQL = `INSERT INTO sources (type, title, path, year, recency_we
 const INS_ITEM_SQL = `INSERT INTO items (source_id, type, lecture_id, title, text, html, images, tags, anchor)
      VALUES (?,?,?,?,?,?,?,?,?)`;
 
-/** Lit un fichier de référence et en extrait un titre + des pages de texte. */
-async function parseRefFile(abs: string): Promise<{ title: string; pages: string[] }> {
+/**
+ * Lit un fichier de référence et en extrait un titre + des pages de texte. `ocr` : les pages
+ * scannées d'un PDF passent par l'OCR (lib/ocr) — seulement depuis le processus d'ingestion,
+ * jamais dans une requête HTTP.
+ */
+async function parseRefFile(abs: string, opts: { ocr?: boolean } = {}): Promise<{ title: string; pages: string[]; ocr?: boolean[] }> {
   const ext = path.extname(abs).toLowerCase();
   const base = path.basename(abs);
   const buf = await storage().read(abs);
@@ -66,8 +71,9 @@ async function parseRefFile(abs: string): Promise<{ title: string; pages: string
   if (ext === ".pdf") {
     const pdf = await getDocumentProxy(new Uint8Array(buf));
     const { text } = await extractText(pdf, { mergePages: false });
-    const pages = (Array.isArray(text) ? text : [text]).map(clean).filter((t) => t.length > 3);
-    return { title: base.replace(/\.pdf$/i, ""), pages };
+    const kept = await readablePages(pdf, buf, Array.isArray(text) ? text : [text], clean, opts.ocr ? { language: getCourse(currentCourse()).language, label: `refs/${base}` } : null);
+    const title = base.replace(/\.pdf$/i, "");
+    return kept.some((p) => p.ocr) ? { title, pages: kept.map((p) => p.text), ocr: kept.map((p) => p.ocr) } : { title, pages: kept.map((p) => p.text) };
   }
   if ((ext === ".html" || ext === ".htm") && currentCourse() !== DEFAULT_COURSE) {
     // Page d'examen enregistrée d'une plateforme : sans sa navigation (cs-202 garde sa lecture figée).
@@ -87,23 +93,22 @@ async function parseRefFile(abs: string): Promise<{ title: string; pages: string
   return { title: base.replace(/\.[^.]+$/, ""), pages: [clean(buf.toString("utf8"))] };
 }
 
-/** Une annale lue (titre, pages de texte), pas encore écrite dans le corpus. */
-export type ParsedRef = { relPath: string; title: string; pages: string[] };
+/** Une annale lue (titre, pages de texte), pas encore écrite dans le corpus. `ocr[i]` : page i lue par OCR. */
+export type ParsedRef = { relPath: string; title: string; pages: string[]; ocr?: boolean[] };
 
 /** Passages indexables d'une annale lue : une page de moins de 3 caractères ne compte pas. */
 const refChunks = (pages: string[]) => (pages.length ? pages : [""]);
 const indexableCount = (pages: string[]) => refChunks(pages).filter((t) => t.length >= 3).length;
 
-async function readRefFile(relPath: string): Promise<ParsedRef> {
-  const { title, pages } = await parseRefFile(path.join(REFS_DIR(), path.basename(relPath)));
-  return { relPath, title, pages };
+async function readRefFile(relPath: string, opts: { ocr?: boolean } = {}): Promise<ParsedRef> {
+  return { relPath, ...(await parseRefFile(path.join(REFS_DIR(), path.basename(relPath)), opts)) };
 }
 
 /**
  * Écrit une annale lue dans sources/items/fts et exam_refs. Idempotent par chemin : purge
  * l'ancienne source de même path avant de réinsérer. Rend le nombre de passages indexés.
  */
-export async function writeRef({ relPath, title, pages }: ParsedRef): Promise<number> {
+export async function writeRef({ relPath, title, pages, ocr }: ParsedRef): Promise<number> {
   ensureFts();
   const { kind, year } = inferExamMeta(path.basename(relPath));
   const old = await q.all<{ id: number }>(`SELECT id FROM sources WHERE path = ?`, relPath);
@@ -121,7 +126,7 @@ export async function writeRef({ relPath, title, pages }: ParsedRef): Promise<nu
     const anchor = chunks.length > 1 ? `${relPath}#page=${i + 1}` : relPath;
     const itemId = await q.insert(
       INS_ITEM_SQL,
-      sid, "exercise", null, label, text, null, null, null, anchor
+      sid, "exercise", null, label, text, null, null, ocr?.[i] ? JSON.stringify(["ocr"]) : null, anchor
     );
     await indexItemForSearch(itemId, sid, label, text);
   }
@@ -149,7 +154,7 @@ export async function ingestRefFile(relPath: string): Promise<{ items: number }>
  * corpus en une transaction). Un fichier qui ne se lit pas est isolé : les suivants sont lus
  * quand même, et son issue figure dans le rapport.
  */
-export async function readAllRefs(): Promise<{ parsed: ParsedRef[]; outcomes: IngestFileOutcome[] }> {
+export async function readAllRefs(opts: { ocr?: boolean } = {}): Promise<{ parsed: ParsedRef[]; outcomes: IngestFileOutcome[] }> {
   const dir = REFS_DIR();
   // uniquement des FICHIERS d'examen (ignore les sous-dossiers figref/ img/ et les fichiers cachés)
   const files = (await storage().list(dir))
@@ -162,7 +167,7 @@ export async function readAllRefs(): Promise<{ parsed: ParsedRef[]; outcomes: In
   for (const f of files) {
     const relPath = `refs/${f}`;
     try {
-      const ref = await readRefFile(relPath);
+      const ref = await readRefFile(relPath, opts);
       parsed.push(ref);
       const items = indexableCount(ref.pages);
       outcomes.push({ path: relPath, status: readStatus(items), items });

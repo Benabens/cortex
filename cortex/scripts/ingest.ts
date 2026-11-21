@@ -14,7 +14,8 @@ import { extractText, getDocumentProxy } from "unpdf";
 import { currentCourse, enterCourse, ensureFts } from "../db/client";
 import { indexItemForSearch } from "../lib/search";
 import { dbDriverName, q } from "../db/q";
-import { coursePaths, DEFAULT_COURSE, ensureCoursesLoaded } from "../lib/courses";
+import { coursePaths, DEFAULT_COURSE, ensureCoursesLoaded, getCourse } from "../lib/courses";
+import { readablePages } from "../lib/ocr";
 import { importFolder } from "../lib/import-folder";
 import { readAllRefs, writeRef } from "../lib/sources";
 import { examKind, examYear } from "../lib/exam-names";
@@ -76,6 +77,7 @@ type ItemRec = {
   text: string;
   html?: string | null;
   images?: string[];
+  /** ["ocr"] : passage lu par OCR sur une page scannée (lib/ocr). */
   tags?: string[];
   anchor: string;
 };
@@ -453,7 +455,7 @@ const indexableItems = (plans: SourcePlan[]) => plans.reduce((n, p) => n + p.ite
  * Un long support d'un seul fichier, découpé en un support par chapitre (lib/chapters) : plan du
  * cours, couverture et analyse se structurent par support. null si le document ne s'y prête pas.
  */
-function chapteredPlans(type: string, title: string, rel: string, year: number | null, pages: string[]): SourcePlan[] | null {
+function chapteredPlans(type: string, title: string, rel: string, year: number | null, pages: string[], ocr: boolean[] = []): SourcePlan[] | null {
   if (!SPLITTABLE.has(type)) return null;
   const pdf = pages.length > 1;
   const parts: { title: string; pages: number[]; text?: string }[] | null | undefined = pdf
@@ -465,11 +467,13 @@ function chapteredPlans(type: string, title: string, rel: string, year: number |
     const lectureId = `chapitre-${k + 1}`;
     const label = `${title} — ${part.title}`;
     const items: ItemRec[] = pdf
-      ? part.pages.map((i) => ({ type, lectureId, title: `${label} — p.${i + 1}`, text: pages[i], anchor: `${rel}#page=${i + 1}` }))
+      ? part.pages.map((i) => ({ type, lectureId, title: `${label} — p.${i + 1}`, text: pages[i], anchor: `${rel}#page=${i + 1}`, ...ocrTag(ocr[i]) }))
       : [{ type, lectureId, title: label, text: part.text ?? "", anchor: rel }];
     return { type, title: label, path: rel, year, items };
   });
 }
+
+const ocrTag = (ocr: boolean | undefined) => (ocr ? { tags: ["ocr"] } : {});
 
 /** Lit un fichier du contenu : ses supports à écrire. Lève s'il ne se lit pas ; n'écrit rien. */
 async function planContentFile(rel: string): Promise<SourcePlan[]> {
@@ -480,10 +484,13 @@ async function planContentFile(rel: string): Promise<SourcePlan[]> {
     const buf = fs.readFileSync(path.join(CONTENT_ROOT, rel));
     const pdf = await getDocumentProxy(new Uint8Array(buf));
     const { text } = await extractText(pdf, { mergePages: false });
-    const pages = (Array.isArray(text) ? text : [text]).map(clean).filter((t) => t.length > 3);
+    // Pages scannées (sans couche texte) : lues par OCR, dans ce processus d'ingestion seulement.
+    const kept = await readablePages(pdf, buf, Array.isArray(text) ? text : [text], clean, { language: getCourse(COURSE).language, label: rel });
+    const pages = kept.map((p) => p.text);
+    const ocr = kept.map((p) => p.ocr);
     const title = path.basename(rel, ".pdf");
-    return chapteredPlans(type, title, rel, year, pages)
-      ?? whole(title, pages.map((t, i) => ({ type, lectureId: null, title: `${title} — p.${i + 1}`, text: t, anchor: `${rel}#page=${i + 1}` })));
+    return chapteredPlans(type, title, rel, year, pages, ocr)
+      ?? whole(title, pages.map((t, i) => ({ type, lectureId: null, title: `${title} — p.${i + 1}`, text: t, anchor: `${rel}#page=${i + 1}`, ...ocrTag(ocr[i]) })));
   }
   if (/\.(pptx|docx)$/i.test(rel)) {
     const text = await extractOfficeText(fs.readFileSync(path.join(CONTENT_ROOT, rel)), path.extname(rel) as OfficeExtension);
@@ -567,7 +574,7 @@ async function main() {
     // et une ingestion qui échoue en route le laisse intact (avant : vidé puis rempli à moitié).
     console.log("Lecture des fichiers du cours…");
     const content = await readGenericContent();
-    const refs = await readAllRefs();
+    const refs = await readAllRefs({ ocr: true });
     // Originaux restés sur l'ordinateur d'un compte gratuit (lib/originals) : leur index est relu
     // AVANT l'effacement et réécrit tel quel, sinon la reconstruction depuis le disque le perdait.
     const kept = await readIndexOnlySources(new Set([...content.outcomes, ...refs.outcomes].map((o) => o.path)));
