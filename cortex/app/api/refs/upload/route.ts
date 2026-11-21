@@ -14,6 +14,9 @@ import { IMAGE_FILE } from "@/lib/folder-import";
 import { unreadableDocument } from "@/lib/document-check";
 import { failureStatus, ingestProblems, readStatus, type IngestFileOutcome } from "@/lib/ingest-report";
 import { errorForFile, errorText, userError, type UserError } from "@/lib/i18n/user-error";
+import { ocrAvailable } from "@/lib/ocr";
+import { log } from "@/lib/metrics";
+import { activeJob, createJobExclusive, startWorker } from "@/lib/jobs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,5 +88,26 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
     const first = skipped[0];
     return apiError(req, first ? errorForFile(first.userError, first.file) : "no_usable_file", 400, { skipped: skipped.map(({ file, reason }) => ({ file, reason })) });
   }
-  return NextResponse.json({ ok: true, files: saved, skipped: skipped.map(({ file, reason, userError: e }) => ({ file, reason, code: e.code })), unread, formatPending: true, originals: local ? "local" : "cloud" });
-})
+  const jobId = unread.some((p) => p.status === "no_text" && /\.pdf$/i.test(p.path)) ? await ocrJob(course) : null;
+  return NextResponse.json({ ok: true, files: saved, skipped: skipped.map(({ file, reason, userError: e }) => ({ file, reason, code: e.code })), unread, formatPending: true, originals: local ? "local" : "cloud", ...(jobId != null ? { jobId } : {}) });
+});
+
+/**
+ * Annale PDF scannée : l'OCR (lib/ocr) ne tourne jamais dans la requête — une page peut prendre
+ * 20 s. Le job d'ingestion du cours, gratuit, la relit et la compte. Sans OCR sur cette instance,
+ * ou si le job ne peut pas partir (quota d'imports du jour), le scan reste signalé et le dépôt
+ * réussit quand même.
+ */
+async function ocrJob(course: string): Promise<number | null> {
+  if (!ocrAvailable()) return null;
+  try {
+    const existing = await activeJob("ingest");
+    if (existing) return existing.id;
+    const { id } = await createJobExclusive("ingest");
+    await startWorker(id, course);
+    return id;
+  } catch (e) {
+    log("warn", "refs.ocr_job_not_started", { course, error: (e as Error).message });
+    return null;
+  }
+}

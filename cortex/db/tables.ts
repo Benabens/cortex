@@ -327,6 +327,17 @@ export const TABLES: TableSpec[] = [
     ],
   },
   {
+    // Année et type d'épreuve choisis par l'étudiant en reclassant un fichier (lib/reclassify) :
+    // ils priment sur ce que le nom du fichier laisse deviner, à chaque ingestion (writeRef).
+    name: "exam_labels",
+    cols: [
+      { name: "path", type: "text", pk: true },
+      { name: "kind", type: "text", nn: true },
+      { name: "year", type: "int" },
+      { name: "updated_at", type: "text", def: now },
+    ],
+  },
+  {
     // Originaux restés sur l'ordinateur d'un compte gratuit (lib/originals/registry) : de quoi
     // retrouver le fichier (nom, chemin d'origine, empreinte) et garder son index sans lui.
     name: "local_originals",

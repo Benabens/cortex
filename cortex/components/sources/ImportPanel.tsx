@@ -30,6 +30,8 @@ const ACCEPT_FOLDER_ATTRIBUTE = [...FOLDER_EXTENSIONS.map((ext) => `.${ext}`), "
  * consignes d'examen (syllabus, page Moodle) le format — lus à la préparation.
  */
 type DropKind = "past_exam" | "sample_questions" | "exam_info";
+/** « scan » : l'ingestion lancée par un dépôt d'annale scannée, qui la lit par OCR. */
+type JobKind = "format" | "ingest" | "prepare" | "scan";
 /**
  * Import UNIFIÉ — tout part du NAVIGATEUR, plus jamais d'un chemin sur le serveur :
  * — glisser des fichiers (annales, PDF) → POST /api/refs/upload (multipart) → ingestion, gratuite ;
@@ -67,7 +69,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
     if (unread) setUnreadFiles(unread);
   }
   const [jobId, setJobId] = useState<number | null>(null);
-  const [jobKind, setJobKind] = useState<"format" | "ingest" | "prepare" | null>(null);
+  const [jobKind, setJobKind] = useState<JobKind | null>(null);
   const job = useJob(jobId);
   const running = jobId != null && (!job || JOB_ACTIVE.includes(job.status));
   // Même verdict que POST /api/prepare : le bouton est coupé avant le clic, raison à l'appui.
@@ -117,6 +119,8 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
           ? t("prepared")
           : jobKind === "ingest"
             ? t("folderIngested")
+            : jobKind === "scan"
+              ? t("scansRead")
             : t("formatDetected", { charged: formatCharged > 0 ? ` (${t("debited", { count: formatCharged })})` : "" })) + skipped
       );
       onChanged();
@@ -134,7 +138,7 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
     }
   };
 
-  const startJob = (id: number, kind: "format" | "ingest" | "prepare") => {
+  const startJob = (id: number, kind: JobKind) => {
     notified.current = false;
     if (kind !== "format") setUnreadFiles([]);
     setJobId(id);
@@ -182,11 +186,20 @@ export function ImportPanel({ onChanged, unread, originals }: { onChanged: () =>
       const refusedThere = ((d?.skipped ?? []) as { file: string; reason: string }[]).map((s) => ({ name: s.file, reason: s.reason }));
       setFolderRefusals([...refusedHere, ...refusedThere]);
       if (!res.ok) throw new Error(d?.error ?? t("errorStatus", { status: res.status }));
+      const refusedSuffix = refusedThere.length ? t("skippedSuffix", { count: refusedThere.length }) : "";
+      if (typeof d.jobId === "number") {
+        // Annale scannée : le job d'ingestion la lit par OCR, son rapport dira ce qui reste illisible.
+        startJob(d.jobId, "scan");
+        setUploadedMsg(t("filesIngestedOcr", { count: d.files.length, refused: refusedSuffix }));
+        onChanged();
+        if (d.formatPending) setFormatOffer(true);
+        return;
+      }
       const unread = (d.unread ?? []) as IngestProblem[];
       setUnreadFiles(unread);
       setUploadedMsg(t("filesIngested", {
         count: d.files.length,
-        refused: refusedThere.length ? t("skippedSuffix", { count: refusedThere.length }) : "",
+        refused: refusedSuffix,
         unread: unread.length ? t("unreadListSuffix", { count: unread.length }) : "",
       }));
       onChanged();

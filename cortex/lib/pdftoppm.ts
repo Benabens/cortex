@@ -17,18 +17,25 @@ import fs from "node:fs";
 export const PAGE_MAX_PX = 1400;
 const TIMEOUT_MS = 60_000;
 
-/** Un binaire pdftoppm est-il disponible ? */
-export function findPdftoppm(): string | null {
-  for (const bin of ["pdftoppm", "/usr/bin/pdftoppm", "/opt/homebrew/bin/pdftoppm", "/usr/local/bin/pdftoppm"]) {
+/**
+ * Le premier binaire de `names` qui répond à `versionArgs`, ou null. Un binaire qui sort en erreur
+ * sur sa version (pdftoppm -v sur certaines versions) compte s'il existe à ce chemin absolu.
+ */
+export function findBinary(names: string[], versionArgs: string[]): string | null {
+  for (const bin of names) {
     try {
-      execFileSync(bin, ["-v"], { stdio: "ignore", timeout: 10_000 });
+      execFileSync(bin, versionArgs, { stdio: "ignore", timeout: 10_000 });
       return bin;
     } catch {
-      // -v renvoie un code non-zéro sur certaines versions mais le binaire existe → tester existence
       if (bin.includes("/") && fs.existsSync(bin)) return bin;
     }
   }
   return null;
+}
+
+/** Un binaire pdftoppm est-il disponible ? */
+export function findPdftoppm(): string | null {
+  return findBinary(["pdftoppm", "/usr/bin/pdftoppm", "/opt/homebrew/bin/pdftoppm", "/usr/local/bin/pdftoppm"], ["-v"]);
 }
 
 /** Rend les pages `firstPage` (1 par défaut) à `lastPage` de `pdf` en `<outPrefix>-<n>.png`. Lève si pdftoppm échoue ou dépasse le délai. */
