@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { FileText, FileCode2, Layers, Check, Trash2, ArrowUpRight } from "lucide-react";
 import { Panel } from "@/components/ui/primitives";
+import { Button } from "@/components/ui/Button";
 import { Segmented } from "@/components/ui/Segmented";
-import { apiPost, useCourse } from "@/lib/ux/api";
+import { apiPost, useCourse, useJob } from "@/lib/ux/api";
 import { corpusLabel, extOf, type SourcesResp, type SourceExam } from "@/lib/ux/sources";
 import { cn } from "@/lib/ux/cn";
 import { apiDelete } from "@/lib/ux/write";
@@ -16,6 +17,49 @@ const ANNALE_TYPES = new Set(["final", "midterm"]);
 const ANNALES = "__annales__";
 // ordre d'affichage préféré des facettes non-annales
 const FACET_ORDER = ["course_pdf", "lecture", "serie", "exercise", "cheatsheet", "review", "note", "code", "lab", "doc"];
+const JOB_RUNNING = new Set(["queued", "running", "verifying", "compiling"]);
+
+type ExamKind = "final" | "midterm";
+/** Fichier en cours de reclassement : son chemin, son titre, et ce que le formulaire propose. */
+type Classifying = { path: string; title: string; kind: ExamKind; year: number | null; edit: boolean };
+
+/**
+ * Suivi d'un reclassement : le message annoncé et le job d'ingestion qui réindexe le corpus. Tenu
+ * par la page, pas par la liste : le rechargement de la liste la démonte le temps de la requête.
+ */
+export type Reindex = { notice: string | null; running: boolean; start: (notice: string, jobId: number | null) => void };
+
+export function useReindex(refetch: () => void): Reindex {
+  const t = useTranslations("fileManager");
+  const [notice, setNotice] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<number | null>(null);
+  const job = useJob(jobId);
+
+  // Fin du job : la liste se recharge depuis le corpus refait.
+  useEffect(() => {
+    if (!job || JOB_RUNNING.has(job.status)) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- la fin du job (état externe) ferme le suivi
+    setJobId(null);
+    setNotice(job.status === "done" ? t("classifyDone") : null);
+    refetch();
+  }, [job, refetch, t]);
+
+  const start = useCallback((msg: string, id: number | null) => {
+    setNotice(msg);
+    setJobId(id);
+    if (id == null) refetch();
+  }, [refetch]);
+  return { notice, running: jobId != null, start };
+}
+
+/** Type et année d'une annale devinés du titre, à corriger par l'étudiant. */
+function guessExam(title: string): { kind: ExamKind; year: number | null } {
+  const year = title.match(/\b(19|20)\d{2}\b/)?.[0];
+  return { kind: /midterm|partiel|mid-?term|interm/i.test(title) ? "midterm" : "final", year: year ? Number(year) : null };
+}
+
+const ACTION_BTN =
+  "inline-flex min-h-11 shrink-0 items-center rounded-md border border-line px-2.5 text-[0.78rem] font-medium text-ink-2 transition-colors hover:border-[color-mix(in_oklch,var(--color-accent)_40%,transparent)] hover:text-accent-hi focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:opacity-40";
 
 /**
  * Corpus RÉEL du cours. Les FACETTES sont cliquables (RUN v2) : « Annales » (défaut, avec cases
@@ -23,13 +67,18 @@ const FACET_ORDER = ["course_pdf", "lecture", "serie", "exercise", "cheatsheet",
  * FILTRE la liste et permet d'OUVRIR chaque item via le deep-link « voir ». Le format des blancs
  * se cale sur les annales cochées. Bascule « Référence » optimiste → aucun saut de ligne.
  */
-export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged: () => void }) {
+export function FileManager({ data, onChanged, reindex }: { data: SourcesResp; onChanged: () => void; reindex: Reindex }) {
   const t = useTranslations("fileManager");
   const { courseId } = useCourse();
   const [facet, setFacet] = useState<string | null>(null); // null = Annales (défaut)
   const [pending, setPending] = useState<Record<string, boolean>>({}); // path → isReference optimiste
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [removeError, setRemoveError] = useState<string | null>(null);
+  // Reclassement (annale ↔ support) : formulaire ouvert et erreur ; le suivi du job est dans `reindex`.
+  const [classifying, setClassifying] = useState<Classifying | null>(null);
+  const [classifyError, setClassifyError] = useState<string | null>(null);
+  const triggers = useRef(new Map<string, HTMLButtonElement | null>());
+  const reindexing = reindex.running;
 
   // données fraîches (après un vrai refetch, ex. upload/suppression) → on efface les surcharges.
   useEffect(() => {
@@ -78,6 +127,41 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
     }
   };
 
+  const closeForm = (path: string) => {
+    setClassifying(null);
+    // Le focus revient au bouton qui a ouvert le formulaire (WCAG 2.4.3).
+    requestAnimationFrame(() => triggers.current.get(path)?.focus());
+  };
+
+  const classify = async (path: string, title: string, body: { as: "support" } | { as: "exam"; kind: ExamKind; year: number | null }) => {
+    setBusyFor(path, true);
+    setClassifyError(null);
+    try {
+      const r = await apiPost<{ jobId: number | null }>("/api/sources/classify", courseId, { path, ...body }, (status) => String(status));
+      setClassifying(null);
+      reindex.start(t(body.as === "exam" ? "classifiedExam" : "classifiedSupport", { title }), r.jobId);
+    } catch (e) {
+      setClassifyError(t("classifyFailed", { error: (e as Error).message }));
+    } finally {
+      setBusyFor(path, false);
+    }
+  };
+
+  const openForm = (c: Classifying) => {
+    setClassifyError(null);
+    setClassifying(c);
+  };
+  const triggerRef = (path: string) => (el: HTMLButtonElement | null) => { triggers.current.set(path, el); };
+  /** Le formulaire de type et d'année, sous le fichier dont il est ouvert. */
+  const formFor = (path: string, title: string) => classifying?.path === path && (
+    <ClassifyForm
+      initial={classifying}
+      busy={busy.has(path)}
+      onCancel={() => closeForm(path)}
+      onSubmit={(kind, year) => classify(path, title, { as: "exam", kind, year })}
+    />
+  );
+
   // Facettes : « Annales » + types de corpus non-annales présents (dans l'ordre préféré).
   const nonAnnaleTypes = (data.corpus ?? [])
     .filter((c) => !ANNALE_TYPES.has(c.type))
@@ -91,6 +175,11 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
 
   return (
     <Panel className="overflow-hidden p-0">
+      {classifyError && (
+        <p role="alert" className="border-b border-line px-4 py-2.5 text-[0.82rem] text-danger-hi">
+          {classifyError}
+        </p>
+      )}
       {removeError && (
         <p role="alert" className="border-b border-line px-4 py-2.5 text-[0.82rem] text-danger-hi">
           {t("removeFailed", { error: removeError })}
@@ -148,8 +237,28 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
 
                   {/* Ouvrir (voir) + Référence + emplacement RÉSERVÉ pour la poubelle → aucun décalage.
                       Sur mobile, le bloc passe sous le titre au lieu de l'écraser. */}
-                  <div className="flex w-full shrink-0 items-center justify-end gap-1.5 sm:w-auto">
+                  <div className="flex w-full shrink-0 flex-wrap items-center justify-end gap-1.5 sm:w-auto">
                     {href && <SeeLink href={href} label={f.title} />}
+                    <button
+                      type="button"
+                      ref={triggerRef(f.path)}
+                      onClick={() => openForm({ path: f.path, title: f.title, kind: f.kind === "midterm" ? "midterm" : "final", year: f.year, edit: true })}
+                      disabled={isBusy || reindexing}
+                      aria-label={t("editExamLabelFor", { title: f.title })}
+                      aria-expanded={classifying?.path === f.path}
+                      className={ACTION_BTN}
+                    >
+                      {t("editExamLabel")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => classify(f.path, f.title, { as: "support" })}
+                      disabled={isBusy || reindexing}
+                      aria-label={t("classifyAsSupportFor", { title: f.title })}
+                      className={ACTION_BTN}
+                    >
+                      {t("classifyAsSupport")}
+                    </button>
                     <RefCheckbox checked={isRef(f)} busy={isBusy} onToggle={() => toggleRef(f)} label={f.title} />
                     {f.uploaded ? (
                       <button
@@ -165,6 +274,7 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
                       <span className="size-11 shrink-0" aria-hidden="true" />
                     )}
                   </div>
+                  {formFor(f.path, f.title)}
                 </div>
               );
             })}
@@ -183,8 +293,9 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
             browseRows.map((s) => {
               const ext = extOf(s.path);
               const Icon = ext === "HTML" || ext === "HTM" ? FileCode2 : FileText;
+              const isBusy = busy.has(s.path);
               return (
-                <div key={s.path} className="flex items-center gap-3 px-4 py-4 transition-colors hover:bg-surface-2/40">
+                <div key={s.path} className="flex flex-wrap items-center gap-3 px-4 py-4 transition-colors hover:bg-surface-2/40">
                   <span className="grid size-8 shrink-0 place-items-center rounded-md border border-line bg-surface-2/60 text-ink-3">
                     <Icon className="size-4" strokeWidth={2} />
                   </span>
@@ -198,7 +309,21 @@ export function FileManager({ data, onChanged }: { data: SourcesResp; onChanged:
                       {onComputer.has(s.path) && <OnComputerBadge />}
                     </div>
                   </div>
-                  {s.href && <SeeLink href={s.href} label={s.title} />}
+                  <div className="flex w-full shrink-0 flex-wrap items-center justify-end gap-1.5 sm:w-auto">
+                    {s.href && <SeeLink href={s.href} label={s.title} />}
+                    <button
+                      type="button"
+                      ref={triggerRef(s.path)}
+                      onClick={() => openForm({ path: s.path, title: s.title, ...guessExam(s.title), edit: false })}
+                      disabled={isBusy || reindexing}
+                      aria-label={t("classifyAsExamFor", { title: s.title })}
+                      aria-expanded={classifying?.path === s.path}
+                      className={ACTION_BTN}
+                    >
+                      {t("classifyAsExam")}
+                    </button>
+                  </div>
+                  {formFor(s.path, s.title)}
                 </div>
               );
             })
@@ -253,5 +378,86 @@ function RefCheckbox({ checked, busy, onToggle, label }: { checked: boolean; bus
       </span>
       {t("reference")}
     </button>
+  );
+}
+
+/**
+ * Type d'épreuve et année d'une annale, en ligne sous le fichier. Le focus entre sur le type
+ * choisi à l'ouverture ; Échap ou « Annuler » ferme et rend le focus au bouton d'origine.
+ */
+function ClassifyForm({ initial, busy, onCancel, onSubmit }: {
+  initial: Classifying;
+  busy: boolean;
+  onCancel: () => void;
+  onSubmit: (kind: ExamKind, year: number | null) => void;
+}) {
+  const t = useTranslations("fileManager");
+  const id = useId();
+  const [kind, setKind] = useState<ExamKind>(initial.kind);
+  const [year, setYear] = useState(initial.year != null ? String(initial.year) : "");
+  const first = useRef<HTMLInputElement>(null);
+  const maxYear = new Date().getFullYear() + 1;
+
+  useEffect(() => { first.current?.focus(); }, []);
+
+  return (
+    <form
+      className="flex w-full flex-wrap items-end gap-3 rounded-md border border-line bg-surface-2/40 px-3 py-3"
+      aria-label={t(initial.edit ? "editExamLabelFor" : "classifyAsExamFor", { title: initial.title })}
+      onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onCancel(); } }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSubmit(kind, year.trim() ? Number(year) : null);
+      }}
+    >
+      <fieldset className="flex items-center gap-1.5">
+        <legend className="mb-1 text-[0.72rem] text-ink-3">{t("examKind")}</legend>
+        {(["final", "midterm"] as const).map((k) => (
+          <label
+            key={k}
+            className={cn(
+              "inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md border px-3 text-[0.8rem] font-medium",
+              "has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent has-[:focus-visible]:outline-offset-2",
+              kind === k ? "border-accent text-accent-hi" : "border-line text-ink-2",
+            )}
+          >
+            <input
+              ref={kind === k ? first : undefined}
+              type="radio"
+              name={`${id}-kind`}
+              value={k}
+              checked={kind === k}
+              onChange={() => setKind(k)}
+              className="size-4 accent-[var(--color-accent)]"
+            />
+            {t(k === "final" ? "kindFinal" : "kindMidterm")}
+          </label>
+        ))}
+      </fieldset>
+      <div className="flex flex-col">
+        <label htmlFor={`${id}-year`} className="mb-1 text-[0.72rem] text-ink-3">
+          {t("examYear")} <span className="text-ink-4">({t("examYearHint")})</span>
+        </label>
+        <input
+          id={`${id}-year`}
+          type="number"
+          inputMode="numeric"
+          min={1950}
+          max={maxYear}
+          step={1}
+          value={year}
+          onChange={(e) => setYear(e.target.value)}
+          className="min-h-11 w-28 rounded-lg border border-line-strong bg-surface-2/40 px-3 font-data text-[0.85rem] text-ink-1 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+        />
+      </div>
+      <div className="ml-auto flex items-center gap-1.5">
+        <Button type="button" variant="ghost" onClick={onCancel}>
+          {t("cancel")}
+        </Button>
+        <Button type="submit" variant="primary" loading={busy}>
+          {t(initial.edit ? "saveLabel" : "classifyAsExam")}
+        </Button>
+      </div>
+    </form>
   );
 }
