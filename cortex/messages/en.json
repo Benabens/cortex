@@ -286,7 +286,11 @@
     "job_course_unavailable": "This course is no longer available to your account (deleted or transferred); the generation was canceled.",
     "job_corpus_missing": "The course materials haven’t been processed yet. Add materials and prepare the course first.",
     "job_pdf_failed": "The PDF couldn’t be compiled; the exam stays readable in the app.",
-    "job_qcm_all_dropped": "No multiple-choice question was generated: the {dropped} questions designed were all discarded by the quality checks (off-syllabus, disputed key, distractors too easy). Try again; report it if it keeps happening for this course."
+    "job_qcm_all_dropped": "No multiple-choice question was generated: the {dropped} questions designed were all discarded by the quality checks (off-syllabus, disputed key, distractors too easy). Try again; report it if it keeps happening for this course.",
+    "classify_not_found": "File not found in this course: reload the list of sources, then try again.",
+    "classify_invalid": "Can’t classify it: pick past exam or course material, and for a past exam “final” or “midterm”, with a year between 1950 and {max}.",
+    "classify_busy": "An import is running for this course: try again once it’s done.",
+    "classify_name_taken": "Too many files already have this name in that category: rename the file, then try again."
   },
   "ingestReport": {
     "unreadable": "damaged file or unrecognised format: it could not be read. Export it again as a PDF, then upload it again.",
