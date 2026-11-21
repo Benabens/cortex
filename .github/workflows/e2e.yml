@@ -60,15 +60,16 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.google_reel && env.E2E_GOOGLE_EMAIL != ''
         run: npx playwright install --with-deps chrome && npm run e2e:google
       - name: Charge légère Linux (nuit)
-        # !cancelled() : la charge tourne même si une étape précédente a échoué.
-        if: ${{ !cancelled() && github.event_name == 'schedule' }}
+        # !cancelled() : la charge tourne même si une étape précédente a échoué. workflow_dispatch :
+        # pour vérifier la charge à la main sans attendre le cron (ex. après un correctif).
+        if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
         run: |
           mkdir -p e2e/.runtime/data
           AUTH_ENABLED=1 AUTH_SECRET=nightly-e2e AUTH_URL=http://127.0.0.1:3210 E2E_TEST_AUTH=1 E2E_TEST_RUN=1 \
           E2E_ALLOW_LOCAL_POSTGRES=1 \
           DB_DRIVER=postgres DATABASE_URL="$E2E_DATABASE_URL" CORTEX_DATA_DIR="$PWD/e2e/.runtime/data" \
           LLM_PROVIDER=openai-compatible LLM_BASE_URL=http://127.0.0.1:3210/api/e2e-llm LLM_API_KEY=e2e MCP_ENABLED=1 \
-          BILLING_ENABLED=1 SIGNUP_FREE_CREDITS=0.1 RATE_LIMIT_PER_MIN=unlimited npm run start -- --hostname 127.0.0.1 --port 3210 &
+          BILLING_ENABLED=1 SIGNUP_FREE_CREDITS=1 AI_BUDGET_MARGIN=unlimited RATE_LIMIT_PER_MIN=unlimited npm run start -- --hostname 127.0.0.1 --port 3210 &
           app_pid=$!
           trap 'kill "$app_pid" 2>/dev/null || true' EXIT
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:3210/api/health >/dev/null && break; sleep 1; done
