@@ -231,8 +231,11 @@ export async function assistGate(kind: string): Promise<GateIssue | null> {
   return "issue" in r ? r.issue : null;
 }
 
-/** Comme assistGate, mais rend la référence de la réservation quand elle passe (pour un remboursement ciblé). */
-export async function assistReserve(kind: string): Promise<{ issue: GateIssue } | { ref: string }> {
+/**
+ * Comme assistGate, mais rend la référence de la réservation quand elle passe (pour un remboursement
+ * ciblé). `ref` : celle d'une aide exécutée en job (forme `job:<user>:<cours>:<uuid>`, lib/drill-job).
+ */
+export async function assistReserve(kind: string, ref = `assist:${currentUser()}:${crypto.randomUUID()}`): Promise<{ issue: GateIssue } | { ref: string }> {
   // Moteur indisponible : refus AVANT toute réservation — un débit non
   // remboursable ne doit jamais précéder un appel qui ne partira pas.
   const { llmAvailable, llmUnavailableReason } = await import("@/lib/llm");
@@ -241,7 +244,6 @@ export async function assistReserve(kind: string): Promise<{ issue: GateIssue } 
     return { issue: reason ? refusal(503, "llm_engine_unavailable_reason", { reason }) : refusal(503, "llm_engine_unavailable") };
   }
   // `kind` (drill, check-solution…) est le libellé du compteur ; le tarif est celui d'« assist ».
-  const ref = `assist:${currentUser()}:${crypto.randomUUID()}`;
   const r = await reserveGeneration({ bucket: "assist", kind, costCenti: creditCost("assist"), ref });
   if (r.ok) return { ref };
   return { issue: r };
@@ -275,15 +277,27 @@ const REFUNDED_CODES = new Set(["UNAVAILABLE", "SPEND_CAP", ...BAD_OUTPUT_CODES]
 export async function assistCall<T>(kind: string, fn: () => Promise<T>): Promise<T> {
   const r = await assistReserve(kind);
   if ("issue" in r) throw new AssistRefused(r.issue);
+  return runAssistReserved(kind, r.ref, fn);
+}
+
+/**
+ * Exécute une aide DÉJÀ réservée (assistReserve), sous sa preuve de paiement, avec la règle de
+ * remboursement de assistCall. Sert aussi au worker d'un drill en job (scripts/run-job.ts).
+ */
+export async function runAssistReserved<T>(kind: string, ref: string, fn: () => Promise<T>): Promise<T> {
   try {
     const { runWithLlmAuthorization } = await import("@/lib/llm/authorization");
-    return await runWithLlmAuthorization({ kind: "assist", ref: r.ref }, fn);
+    return await runWithLlmAuthorization({ kind: "assist", ref }, fn);
   } catch (e) {
-    const code = llmErrorCode(e);
-    if (code && REFUNDED_CODES.has(code)) {
-      const { refundGeneration } = await import("./credits");
-      await refundGeneration(`assist ${kind}`, r.ref);
-    }
+    await refundAssistFailure(kind, ref, e);
     throw e;
   }
+}
+
+/** Rend une aide échouée par notre faute (REFUNDED_CODES) ; une panne du fournisseur reste débitée. Centièmes rendus. */
+export async function refundAssistFailure(kind: string, ref: string, e: unknown): Promise<number> {
+  const code = llmErrorCode(e);
+  if (!code || !REFUNDED_CODES.has(code)) return 0;
+  const { refundGeneration } = await import("./credits");
+  return refundGeneration(`assist ${kind}`, ref);
 }

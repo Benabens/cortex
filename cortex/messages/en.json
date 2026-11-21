@@ -1667,7 +1667,7 @@
     "etaLate": "Taking longer than usual; the generation continues",
     "etaNoHistory": "{eta} (estimate without history)",
     "stepQueued": "Queued…",
-    "stepRunning": "{type, select, qcm {Generating the multiple-choice exam…} exam {Generating the mock exam…} exercise {Generating the exercise…} lab {Generating the exercise…} ingest {Reading your files…} prepare {Preparing the course…} format {Reading the exam format…} blueprint {Analysing the course syllabus…} other {Working…}}",
+    "stepRunning": "{type, select, qcm {Generating the multiple-choice exam…} exam {Generating the mock exam…} exercise {Generating the exercise…} lab {Generating the exercise…} ingest {Reading your files…} prepare {Preparing the course…} format {Reading the exam format…} blueprint {Analysing the course syllabus…} drill {Writing the practice question…} other {Working…}}",
     "stepResumed": "Worker interrupted, resuming automatically (attempt {attempt}/{max}), progress kept.",
     "stepWaiting": "In line (position {position}): the server is at full capacity; your {what, select, ingest {import} other {generation}} starts as soon as a slot frees up.",
     "stepDone": "Done ✓",

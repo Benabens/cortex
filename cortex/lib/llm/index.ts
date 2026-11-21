@@ -65,11 +65,18 @@ export function llmUnavailableReason(name?: ProviderName): string | null {
  */
 const IN_FLIGHT_USAGE = new Set<number>();
 
-/** Taille de réponse maximale d'une aide (drill, correction, analyses) sur un fournisseur payant. */
+/** Taille de réponse d'une aide (correction, analyses) qui ne fixe pas la sienne, sur un fournisseur payant. */
 function assistMaxTokens(): number {
   const n = Number(process.env.ASSIST_MAX_TOKENS);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 6000;
 }
+
+/**
+ * Plafond d'une aide qui fixe sa propre taille (le drill : énoncé, indices et corrigé, réflexion
+ * comprise : 10 000 demandés). 12 k tokens de Sonnet 5 ≈ 0,12 $ ; le plafond par réservation
+ * (0,3 crédit × 0,9 $ = 0,27 $) borne de toute façon la somme des essais d'une même aide.
+ */
+export const ASSIST_MAX_TOKENS_CAP = 12_000;
 
 async function completeWith(provider: LlmProvider, req: CompleteRequest): Promise<CompleteResult> {
   // Attribution (llm_usage) : site d'appel capturé AVANT tout await (pile sync),
@@ -79,9 +86,10 @@ async function completeWith(provider: LlmProvider, req: CompleteRequest): Promis
   const proof = currentLlmProof();
   // Aide à 0,3 crédit sur un fournisseur payant : jamais opus, réponse bornée — son
   // plafond par réservation est petit et un remboursement ne la rejoue pas (audit fuites I5).
+  // La taille vient du site d'appel quand il la connaît (un drill ne tient pas dans le défaut
+  // d'une correction : coupé 3 fois à 6000 tokens, CS-250 du 21/11) ; sinon ASSIST_MAX_TOKENS.
   if (proof?.kind === "assist" && isPaidProvider(provider.name)) {
-    const max = assistMaxTokens();
-    req = { ...req, model: req.model === "haiku" ? "haiku" : "sonnet", maxTokens: Math.min(req.maxTokens ?? max, max) };
+    req = { ...req, model: req.model === "haiku" ? "haiku" : "sonnet", maxTokens: Math.min(req.maxTokens ?? assistMaxTokens(), ASSIST_MAX_TOKENS_CAP) };
   }
   const model = req.model ?? "opus";
   const labels = { provider: provider.name, model };
@@ -221,24 +229,44 @@ function rejection(e: unknown): { reason: string; truncated: boolean } | null {
  * `retryTruncated: false` : une réponse COUPÉE remonte tout de suite en LlmError
  * TRUNCATED, pour l'appelant qui sait découper sa demande (un lot d'exercices
  * redemandé à l'identique ressort coupé : job 2 de test-e2e-calcul-matriciel, 13/11).
+ * `onTruncated` : l'appelant CHANGE sa demande après une coupure (consigne plus courte,
+ * autre budget) ; elle est envoyée telle quelle, sans note. null, ou une seconde coupure
+ * de la demande changée : LlmError TRUNCATED, sans refaire l'appel qui vient d'échouer.
  */
 export async function completeJson<T = unknown>(
   req: CompleteRequest,
-  opts: { attempts?: number; check?: (value: T) => string | null | Promise<string | null>; retryTruncated?: boolean } = {},
+  opts: {
+    attempts?: number;
+    check?: (value: T) => string | null | Promise<string | null>;
+    retryTruncated?: boolean;
+    onTruncated?: (req: CompleteRequest) => CompleteRequest | null;
+  } = {},
 ): Promise<T> {
   const attempts = Math.max(1, opts.attempts ?? JSON_ATTEMPTS);
+  let cur = req;
+  let shrunk = false;
   let last = "";
   for (let n = 1; n <= attempts; n++) {
-    const prompt = n === 1 ? req.prompt : `${req.prompt}\n\n${retryNote(last, n, attempts)}`;
+    const prompt = last ? `${cur.prompt}\n\n${retryNote(last, n, attempts)}` : cur.prompt;
     try {
-      const value = extractJson<T>((await complete({ ...req, prompt })).text);
+      const value = extractJson<T>((await complete({ ...cur, prompt })).text);
       const issue = (await opts.check?.(value)) ?? null;
       if (!issue) return value;
       last = `réponse JSON lisible mais incomplète : ${issue}`;
     } catch (e) {
       const r = rejection(e);
       if (!r) throw e;
-      if (r.truncated && opts.retryTruncated === false) throw e instanceof LlmError ? e : new LlmError(r.reason, "TRUNCATED");
+      const stop = () => e instanceof LlmError ? e : new LlmError(r.reason, "TRUNCATED");
+      if (r.truncated && opts.retryTruncated === false) throw stop();
+      if (r.truncated && opts.onTruncated) {
+        const next = shrunk ? null : opts.onTruncated(cur);
+        if (!next) throw stop();
+        cur = next;
+        shrunk = true;
+        last = "";
+        console.error(`[llm] réponse JSON coupée (essai ${n}/${attempts}) : demande raccourcie`);
+        continue;
+      }
       last = r.truncated ? `${r.reason} Sois plus concis (explications plus courtes) pour que la réponse tienne en entier.` : r.reason;
     }
     console.error(`[llm] réponse JSON rejetée (essai ${n}/${attempts}) : ${last.slice(0, 200)}`);

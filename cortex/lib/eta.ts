@@ -36,7 +36,7 @@ export type Eta = {
 
 const MIN = 60_000;
 /** Sans historique : ordres de grandeur mesurés (banc du job 9 de CS-290 pour un examen QCM). */
-const DEFAULT_MS: Record<string, number> = { qcm: 12 * MIN, exam: 15 * MIN, exercise: 6 * MIN, "lab-exercise": 6 * MIN, prepare: 8 * MIN, blueprint: 6 * MIN, format: 3 * MIN, ingest: 3 * MIN };
+const DEFAULT_MS: Record<string, number> = { qcm: 12 * MIN, exam: 15 * MIN, exercise: 6 * MIN, "lab-exercise": 6 * MIN, prepare: 8 * MIN, blueprint: 6 * MIN, format: 3 * MIN, ingest: 3 * MIN, drill: 2 * MIN };
 /**
  * Durée par question commandée, sans historique (même banc : ≈ 12 min pour 7 QCM + 2 ouvertes).
  * Banc moteur du 04/11/2026 : une seule durée par type annonçait 12 min pour 10 comme pour 40 QCM.

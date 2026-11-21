@@ -218,10 +218,11 @@ test("hors EPFL : ni le drill ni l'architecte ne visent un final EPFL ni le styl
  * Empreintes relevées sur main (48274e9), avant ce correctif : les morceaux de prompt de cs-202 qui
  * ne dépendent pas du corpus (intro, lots, contraintes, style, difficulté), et les prompts complets du
  * drill et de la conception de l'architecte sur un corpus vide. Toute dérive doit être voulue.
+ * Drill relevé de nouveau le 21/11/2026 : format compact voulu (indice 5 = étape décisive, corrigé en étapes).
  */
 const CS202_PROMPTS = {
   intro: "37fb3a7a6e2ddc70", batch: "ac53fea0f4d5fa62", directives: "c3fa97a32f85bba3", qa: "8de728d4852bf582",
-  exam: "e95a9f80adb7a779", style: "83f76ef5fc705507", drill: "f1ef72a37fe700b9", design: "8bde0427880a5b3f",
+  exam: "e95a9f80adb7a779", style: "83f76ef5fc705507", drill: "6459e181bf8bcb9e", design: "8bde0427880a5b3f",
 };
 
 test("cs-202 : ses prompts restent identiques (style de l'enseignante et cible « final EPFL » compris)", async () => {

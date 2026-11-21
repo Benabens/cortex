@@ -4,6 +4,7 @@ import { localizeJob } from "@/lib/i18n/job-text";
 import { activeJob, getJob, jobEta, listJobs, type Job } from "@/lib/jobs";
 import { getBlockExam } from "@/lib/blocks";
 import { getQcmExam } from "@/lib/qcm";
+import { drillOfJob } from "@/lib/drill-job";
 import { redactMessage } from "@/lib/observability";
 import { ingestProblems } from "@/lib/ingest-report";
 import { clip, htmlToText } from "../content";
@@ -40,6 +41,13 @@ const output = z.object({
     })),
     truncated: z.boolean(),
   }).nullable().describe("Present when a mock-exam job (written or multiple-choice) is done."),
+  // Champ RACINE (seule la racine des schémas publiés tolère un champ ajouté, docs/MCP.md).
+  drill: z.object({
+    concept: z.string(),
+    statement: z.string(),
+    hints: z.array(z.string()).describe("Five hints, from vague to the decisive step: reveal them one at a time."),
+    solution: z.string(),
+  }).nullable().optional().describe("Present when a practice-question job (generate_drill) is done."),
   active: jobOut.nullable().describe("Without job_id: the generation currently running, if any."),
   recent: z.array(jobOut).describe("Without job_id: the latest generations."),
 });
@@ -145,15 +153,16 @@ export default defineTool({
   name: "get_job_status",
   title: "Track a generation",
   description:
-    "Returns the status, progress and current step of a long-running job started by generate_mock_exam (typically 10-35 minutes, longer for a large exam) or prepare_course. " +
+    "Returns the status, progress and current step of a long-running job started by generate_mock_exam (typically 10-35 minutes, longer for a large exam), generate_drill (1-3 minutes) or prepare_course. " +
     "When a mock exam (written or multiple-choice) is done, it also returns its questions, the solutions when include_solutions is true, and a link to the exam in Cortex. " +
+    "When a practice question is done, it returns the question, its five hints and its worked solution. " +
     "Without job_id, it returns the generation currently running and the latest ones. Read-only and free.",
   kind: "read",
   annotations: READ_ONLY_HINTS,
   userSummary: "getJobStatus",
   input: z.object({
     course: courseArg,
-    job_id: z.number().int().positive().optional().describe("The job_id returned by generate_mock_exam."),
+    job_id: z.number().int().positive().optional().describe("The job_id returned by generate_mock_exam, generate_drill or prepare_course."),
     include_solutions: z.boolean().optional().describe("Include the worked solutions of a finished mock exam (default false, so that the student can try first)."),
   }),
   output,
@@ -196,12 +205,21 @@ export default defineTool({
         : job.status === "queued" ? `About ${Math.max(1, Math.round(eta.remainingMs / 60_000))} min once started`
         : `About ${Math.max(1, Math.round(eta.remainingMs / 60_000))} min left`
         : null;
-      return { ...base, job: { ...jobView(job, ctx.appOrigin, c.id), remaining }, exam };
+      // Drill terminé : l'exercice entier, indices et corrigé compris (comme generate_drill le rendait).
+      const d = await drillOfJob(job);
+      const drill = d ? {
+        concept: clip(d.concept || "", 200),
+        statement: clip(htmlToText(d.statement_html), 6000),
+        hints: (d.hints ?? []).slice(0, 5).map((h) => clip(htmlToText(h), 1500)),
+        solution: clip(htmlToText(d.solution_html), 8000),
+      } : null;
+      return { ...base, job: { ...jobView(job, ctx.appOrigin, c.id), remaining }, exam, drill };
     });
   },
   summarize: (o) => {
     if (!o.job) return o.active ? `Generation job ${o.active.job_id} is running (${o.active.progress_pct}%).` : "No generation is running.";
     const j = o.job;
+    if (j.status === "done" && o.drill) return `The practice question (job ${j.job_id}) is ready. Offer the hints one at a time before showing the worked solution.`;
     if (j.status === "done") return `Generation job ${j.job_id} is complete.${o.exam ? ` ${o.exam.questions.length} question(s).` : ""}${(j.type === "ingest" || j.type === "prepare") && j.step ? ` ${j.step}` : ""}`;
     if (j.status === "error" || j.status === "canceled") return `Generation job ${j.job_id} ${j.status === "error" ? "failed" : "was canceled"}.`;
     return `Generation job ${j.job_id}: ${j.progress_pct}%${j.remaining ? `, ${j.remaining}` : ""}. Check again in one minute.`;

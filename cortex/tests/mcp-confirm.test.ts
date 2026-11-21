@@ -19,6 +19,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { finishDrillJob } from "./helpers/drill-job";
 import { after, before, test } from "node:test";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
@@ -162,6 +163,12 @@ async function modernRaw(token: string, clientName: string, params: Record<strin
   };
 }
 
+/** Confirmé, le drill part en job (lib/drill-job) : exécuté ici comme par le worker, il doit aboutir. */
+async function ranAsJob(user: string, r: Awaited<ReturnType<typeof call>>): Promise<void> {
+  assert.equal(status(r), "started", text(r));
+  assert.ok((await finishDrillJob(user, r.structuredContent)).ok, "le job drill aboutit");
+}
+
 // ───────────────────────────── tests ─────────────────────────────
 
 test("client qui annonce l'élicitation sans l'afficher (claude.ai, Cowork) : devis + jeton tout de suite, jamais de dialogue ; le jeton lance", { timeout: 20_000 }, async () => {
@@ -177,7 +184,7 @@ test("client qui annonce l'élicitation sans l'afficher (claude.ai, Cowork) : de
     assert.equal(await balance(ALICE), before, "un devis ne débite rien");
     assert.equal(llmCalls, calls, "un devis n'appelle pas le modèle");
     const done = await call(c, "generate_drill", { course: "ALI-1", concept: `intégrales ${name}`, confirmation_token: quoteOf(quote).confirmation_token });
-    assert.equal(status(done), "done", text(done));
+    await ranAsJob(ALICE, done);
     assert.equal(await balance(ALICE), before - 30);
     await c.close();
   }
@@ -189,7 +196,7 @@ test("Claude Code (affiche l'élicitation) : la personne confirme dans le dialog
   const c = await modernClient("claude-code", await tokenFor(ALICE), "accept", dialogs);
   const before = await balance(ALICE);
   const r = await call(c, "generate_drill", { course: "ALI-1", concept: "séries entières" });
-  assert.equal(status(r), "done", text(r));
+  await ranAsJob(ALICE, r);
   assert.equal(dialogs.length, 1);
   assert.equal(await balance(ALICE), before - 30);
   await c.close();
@@ -225,7 +232,7 @@ test("coût nul (propriétaire) : lancement direct, sans devis ni dialogue, quel
     const dialogs: string[] = [];
     const c = await modernClient(name, await tokenFor(OWNER), "never", dialogs);
     const r = await call(c, "generate_drill", { course: "OWN-1", concept: `suites ${name}` });
-    assert.equal(status(r), "done", `${name} : ${text(r)}`);
+    await ranAsJob(OWNER, r);
     assert.equal(dialogs.length, 0);
     await c.close();
   }
@@ -243,7 +250,9 @@ test("parallèle, flux par défaut : deux appels → deux devis, rien de lancé 
   assert.equal(await balance(ALICE), before);
   const tok = quoteOf(quotes[0]).confirmation_token;
   const runs = await Promise.all([1, 2, 3].map(() => call(c, "generate_drill", { course: "ALI-1", concept: "probabilités", confirmation_token: tok })));
-  assert.equal(runs.filter((r) => status(r) === "done").length, 1, "un jeton, une seule exécution");
+  const launched = runs.filter((r) => status(r) === "started");
+  assert.equal(launched.length, 1, "un jeton, une seule exécution");
+  await ranAsJob(ALICE, launched[0]);
   assert.equal(runs.filter((r) => errorCode(r) === "confirmation_invalid").length, 2);
   assert.equal(await balance(ALICE), before - 30);
   await c.close();
