@@ -26,7 +26,7 @@ import { stillBilling } from "@/lib/billing/subscription-windows";
  *  - `courses` possédés, `tenants` (registre), `gen_events`, `credit_transactions`,
  *    `active_jobs` (réservations en cours), `stripe_purchases` (achats),
  *    `subscriptions` et `stripe_invoices` (abonnement Pro), `stripe_customers`
- *    et `checkout_locks` (client Stripe, checkout ouvert), `stripe_payments`
+ *    et `checkout_locks` (client Stripe, checkout ouvert), `stripe_receipts` (reçus à envoyer), `stripe_payments`
  *    (montants encaissés), `terms_acceptances`,
  *    `question_reports` (signalements de questions et leurs commentaires) ;
  *  - chaque schéma tenant `t_<user>_<cours>` (Postgres, DROP … CASCADE) — donc
@@ -202,6 +202,7 @@ export async function deleteAccount(userId: string, deps: DeletionDeps = {}): Pr
     await authRun(`DELETE FROM stripe_invoices WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM stripe_payment_losses WHERE payment_intent IN (SELECT payment_intent FROM stripe_payments WHERE user_id = ?)`, userId);
     await authRun(`DELETE FROM stripe_payments WHERE user_id = ?`, userId);
+    await authRun(`DELETE FROM stripe_receipts WHERE user_id = ?`, userId);
     await authRun(`DELETE FROM index_usage WHERE user_id = ?`, userId);
     const legalId = legalTombstone();
     const retainedUntil = new Date(Date.now() + 5 * 365.25 * 86400_000).toISOString().slice(0, 19).replace("T", " ");

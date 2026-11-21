@@ -244,6 +244,20 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
     )`,
     `CREATE INDEX IF NOT EXISTS stripe_payments_pi_idx ON stripe_payments (payment_intent)`,
     `CREATE INDEX IF NOT EXISTS stripe_payments_user_idx ON stripe_payments (user_id, paid_at)`,
+    // Reçus Cortex à envoyer (lib/billing/receipts) : un par paiement encaissé, posé par le webhook.
+    `CREATE TABLE IF NOT EXISTS stripe_receipts (
+      source_id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      invoice_id TEXT,
+      plan TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      sent_at TEXT,
+      failed_at TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS stripe_receipts_user_idx ON stripe_receipts (user_id)`,
     // Pertes d'un paiement (remboursé cumulé, contesté, frais de litige), par payment_intent :
     // un remboursement arrivé AVANT l'achat s'y applique dès que l'achat est enregistré.
     `CREATE TABLE IF NOT EXISTS stripe_payment_losses (
@@ -609,6 +623,19 @@ const AUTH_DDL: Record<"sqlite" | "postgres", string[]> = {
     )`,
     `CREATE INDEX IF NOT EXISTS stripe_payments_pi_idx ON public.stripe_payments (payment_intent)`,
     `CREATE INDEX IF NOT EXISTS stripe_payments_user_idx ON public.stripe_payments (user_id, paid_at)`,
+    `CREATE TABLE IF NOT EXISTS public.stripe_receipts (
+      source_id text PRIMARY KEY,
+      kind text NOT NULL,
+      user_id text NOT NULL,
+      invoice_id text,
+      plan text,
+      attempts integer NOT NULL DEFAULT 0,
+      sent_at text,
+      failed_at text,
+      last_error text,
+      created_at text NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS stripe_receipts_user_idx ON public.stripe_receipts (user_id)`,
     // Pertes d'un paiement (remboursé cumulé, contesté, frais de litige), par payment_intent :
     // un remboursement arrivé AVANT l'achat s'y applique dès que l'achat est enregistré.
     `CREATE TABLE IF NOT EXISTS public.stripe_payment_losses (

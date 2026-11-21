@@ -4,6 +4,7 @@ import { errorText } from "@/lib/i18n/user-error";
 import type { Locale } from "@/lib/i18n/locale";
 import { billingEnabled, creditCost, fromCenti, getSubscription, listTransactions, purchasedBalanceCenti, subscriptionCreditsCenti } from "@/lib/billing/credits";
 import { dailyLimit, usedToday } from "@/lib/billing/guards";
+import { accountInvoices } from "@/lib/billing/invoices";
 import { listOffers } from "@/lib/billing/offers";
 import { contactEmail } from "@/lib/contact";
 import { legalEnglishUrl, legalLinks, purchasesAllowed, type PurchasesAllowed, stripeConfigured as stripeReady, termsState } from "@/lib/legal";
@@ -81,6 +82,7 @@ export async function GET(req: NextRequest) {
           subAmount: fromCenti(Number((t as { sub_amount?: number }).sub_amount ?? 0)),
         }))
       : [],
+    payments: on ? await accountInvoices(currentUser()) : [],
     offers: on ? await listOffers() : [],
   });
 }

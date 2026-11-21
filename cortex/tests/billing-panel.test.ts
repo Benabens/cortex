@@ -175,3 +175,19 @@ test("conditions de renouvellement affichées à côté des offres d'abonnement,
   assert.ok(!/[Rr]enouvellement/.test(packRow), "un pack ne se renouvelle pas");
   assert.match(packRow, /sans date d’expiration/);
 });
+
+test("paiements et factures : chaque paiement encaissé, son montant au centime et le lien vers sa facture PDF", async () => {
+  const html = await render(base({ payments: [
+    { id: "in_2", kind: "subscription", amountCents: 1490, currency: "eur", paidAt: "2026-11-10 10:00:00" },
+    { id: "cs_1", kind: "pack", amountCents: 630, currency: "eur", paidAt: "2026-11-01 10:00:00" },
+  ] }));
+  assert.match(html, /Paiements et factures/);
+  assert.match(html, /14,90 €/);
+  assert.match(html, /6,30 €/);
+  assert.match(html, /href="\/api\/billing\/invoices\/cs_1"/);
+  assert.match(html, /href="\/api\/billing\/invoices\/in_2"/);
+  assert.match(html, /Abonnement Pro/);
+  assert.match(html, /Pack de crédits/);
+  const none = await render(base({ payments: [] }));
+  assert.ok(!/Paiements et factures/.test(none), "rien à télécharger : pas de section");
+});

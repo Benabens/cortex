@@ -1,10 +1,11 @@
 import { apiError } from "@/lib/i18n/api-error";
 import { handleStripeEvent } from "@/lib/billing/stripe-events";
 import { readText, withBodyLimit } from "@/lib/upload-limit";
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { stripeClient } from "@/lib/billing/stripe-client";
 import { captureError, captureErrorThrottled } from "@/lib/observability";
+import { sendReceiptSoon } from "@/lib/billing/receipts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -84,6 +85,11 @@ export const POST = withBodyLimit(async function POST(req: NextRequest) {
         },
       },
     });
+    // Reçu Cortex de ce paiement, APRÈS la réponse : Stripe n'attend pas Resend (la file reprend un échec).
+    if (res.receipt) {
+      const source = res.receipt;
+      try { after(() => sendReceiptSoon(stripe, source)); } catch { void sendReceiptSoon(stripe, source); }
+    }
     // 200 = accusé (traité, doublon, ou échec PERMANENT type métadonnées
     // manquantes). Les échecs RETRYABLES lèvent → 500 → Stripe réessaie.
     return NextResponse.json(res, { status: 200 });

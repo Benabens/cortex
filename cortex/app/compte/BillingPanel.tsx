@@ -12,6 +12,7 @@ import { useLocale, useTranslations } from "use-intl/react";
 import { translator } from "@/lib/i18n/translate";
 import { useFmt } from "@/lib/i18n/use-fmt";
 import { fmt } from "@/lib/i18n/format";
+import { orderMoney } from "@/lib/billing/receipt-email";
 
 /**
  * ABONNEMENT & CRÉDITS — un seul écran pour comprendre son solde et payer :
@@ -63,8 +64,17 @@ type Billing = {
   /** Espace de stockage du compte, en Mo (null : pas de plafond). */
   storageQuotaMb?: number | null;
   transactions: Tx[];
+  /** Paiements encaissés du compte (lib/billing/invoices), facture PDF de chacun à la demande. */
+  payments?: Payment[];
   offers: Offer[];
 };
+
+export type Payment = { id: string; kind: "pack" | "subscription"; amountCents: number; currency: string; paidAt: string };
+
+/** Montant d'un paiement, au centime comme sur la facture : « 6,30 € », « €14.90 ». */
+function paymentAmount(p: Payment, locale: string): string {
+  return orderMoney(p.amountCents, p.currency, locale === "en" ? "en" : "fr");
+}
 
 /** Montant en français : « 14,90 € », « 149 € » (pas de décimales inutiles), « 9 € ». */
 export const money = (amount: number, currency: string) => fmt("fr").price(amount, currency);
@@ -441,6 +451,41 @@ export function BillingView({ data, busy, actionError, retour, onRefresh, onAcce
           </div>
         )}
       </Panel>
+
+      {/* ── Paiements et factures ── */}
+      {!!data.payments?.length && (
+        <Panel className="p-0">
+          <h3 className="px-5 pt-5 text-xl font-semibold text-ink-1">{t("payments")}</h3>
+          <p className="px-5 pt-1.5 text-[0.85rem] text-ink-3">{t("paymentsHint")}</p>
+          <div className="mt-4 overflow-x-auto rounded-b-[18px]" role="region" aria-label={t("paymentsLabel")} tabIndex={0}>
+            <table className="w-full text-[0.82rem]">
+              <thead className="bg-surface-2/50 text-left text-ink-3">
+                <tr>
+                  <th scope="col" className="px-5 py-3 font-medium">{t("date")}</th>
+                  <th scope="col" className="px-2 py-3 font-medium">{t("movement")}</th>
+                  <th scope="col" className="px-2 py-3 text-right font-medium">{t("amount")}</th>
+                  <th scope="col" className="px-5 py-3 text-right font-medium">{t("invoice")}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line-soft">
+                {data.payments.map((p) => (
+                  <tr key={p.id} className="text-ink-2">
+                    <td className="whitespace-nowrap px-5 py-3 tabular-nums text-ink-3">{f.date(p.paidAt)}</td>
+                    <td className="px-2 py-3">{t(p.kind === "subscription" ? "paymentSubscription" : "paymentPack")}</td>
+                    <td className="whitespace-nowrap px-2 py-3 text-right tabular-nums text-ink-1">{paymentAmount(p, locale)}</td>
+                    <td className="px-5 py-3 text-right">
+                      <a href={`/api/billing/invoices/${encodeURIComponent(p.id)}`} download aria-label={t("invoiceFor", { date: f.date(p.paidAt) })}
+                        className="rounded-sm text-accent-hi underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+                        {t("invoicePdf")}
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
 
       <LegalLine legal={data.legal} english={data.legalEnglish} contact={data.contact} />
     </section>

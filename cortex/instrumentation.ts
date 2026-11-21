@@ -139,6 +139,15 @@ export async function register() {
   } catch (e) {
     console.error("[instrumentation] rappels de reconduction non démarrés :", (e as Error)?.message);
   }
+  // Reçus Cortex après paiement (le reçu Stripe porte la marque du compte partagé) :
+  // reprise toutes les 5 minutes de ce que le webhook n'a pas pu envoyer.
+  try {
+    const { startReceiptScheduler } = await import("@/lib/billing/receipts");
+    const { stripeClient } = await import("@/lib/billing/stripe-client");
+    startReceiptScheduler(() => stripeClient(process.env.STRIPE_SECRET_KEY ?? ""));
+  } catch (e) {
+    console.error("[instrumentation] reçus Cortex non démarrés :", (e as Error)?.message);
+  }
 }
 
 /**
