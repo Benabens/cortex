@@ -1,0 +1,8 @@
+% Coréen (hangul) : chargé après cjk-fonts.tex quand le source en contient. Fandol n'a pas de
+% hangul : un sous-bloc xeCJK l'envoie vers les polices Un (paquet unfonts-core du bundle).
+% CJKspace garde les espaces entre deux mots coréens, que xeCJK retire par défaut (chinois).
+\xeCJKsetup{CJKspace=true}
+\xeCJKDeclareSubCJKBlock{Hangul}{"1100 -> "11FF, "3130 -> "318F, "A960 -> "A97F, "AC00 -> "D7AF, "D7B0 -> "D7FF}
+\setCJKmainfont{FandolSong-Regular.otf}[BoldFont=FandolSong-Bold.otf, Hangul={[BoldFont=UnBatangBold.ttf]UnBatang.ttf}]
+\setCJKsansfont{FandolHei-Regular.otf}[BoldFont=FandolHei-Bold.otf, Hangul={[BoldFont=UnDotumBold.ttf]UnDotum.ttf}]
+\setCJKmonofont{FandolFang-Regular.otf}[Hangul={UnDotum.ttf}]

@@ -357,10 +357,12 @@ const FONTSPEC = /\\usepackage(\[[^\]]*\])?\{fontspec\}/;
 
 /** Caractères que les polices CJK du bundle couvrent (chinois, kana japonais, ponctuation pleine chasse). */
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303F\uFF00-\uFFEF]/u;
+/** Hangul : xeCJK le traite comme du CJK, mais Fandol n'en a pas les glyphes (latex/hangul-fonts.tex). */
+const HANGUL = /\p{Script=Hangul}/u;
 
 /**
  * Le document avec une police Unicode s'il imprime une écriture au-delà de Latin-1 (cyrillique, grec,
- * chinois…) : le préambule (T1 + Latin Modern) n'en a pas les glyphes, ils sortaient blancs ou étaient
+ * chinois, coréen…) : le préambule (T1 + Latin Modern) n'en a pas les glyphes, ils sortaient blancs ou étaient
  * effacés en amont. Seul tectonic (XeTeX) sait charger ces polices ; un document en Latin-1 ne change
  * pas (empreintes des PDF existants, CS-202 compris).
  */
@@ -368,7 +370,8 @@ export function withUnicodeFonts(tex: string): string {
   if (FONTSPEC.test(tex) || !BEGIN_DOCUMENT.test(tex)) return tex;
   const printed = tex.replace(/(^|[^\\])%.*$/gm, "$1"); // les commentaires ne s'impriment pas
   if (!/[^\x00-\xFF]/u.test(printed)) return tex;
-  const blocks = ["unicode-fonts.tex", ...(CJK.test(printed) ? ["cjk-fonts.tex"] : [])].map(fontBlock);
+  const hangul = HANGUL.test(printed);
+  const blocks = ["unicode-fonts.tex", ...(CJK.test(printed) || hangul ? ["cjk-fonts.tex"] : []), ...(hangul ? ["hangul-fonts.tex"] : [])].map(fontBlock);
   return tex.replace(BEGIN_DOCUMENT, () => `${blocks.join("")}\\begin{document}`);
 }
 
@@ -376,7 +379,7 @@ const fontBlock = (f: string) => fs.readFileSync(path.join(LATEX_DIR, f), "utf8"
 
 /** Le source sans les polices de `withUnicodeFonts` : pdflatex ne les lit pas (il imprime ces lettres en blanc). */
 export function withoutUnicodeFonts(tex: string): string {
-  return ["cjk-fonts.tex", "unicode-fonts.tex"].map(fontBlock).reduce((t, b) => t.split(b).join(""), tex);
+  return ["hangul-fonts.tex", "cjk-fonts.tex", "unicode-fonts.tex"].map(fontBlock).reduce((t, b) => t.split(b).join(""), tex);
 }
 
 /** Ligne fautive d'une compilation : « error: x.tex:648: … » (tectonic) ou « l.648 » (journal pdflatex). */
