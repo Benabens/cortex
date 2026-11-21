@@ -341,8 +341,8 @@ jobs:
             cd /tmp/r
             /usr/local/bin/tectonic --chatter minimal --only-cached doc.tex
             text=$(pdftotext -enc UTF-8 doc.pdf - | perl -CSD -pe "s/[\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}]//g")
-            for s in "어떤 함수가 연속입니까" "איזו פונקציה רציפה" "أي دالة متصلة"; do echo "$text" | grep -qF "$s" || { echo "::error::$s absent du PDF"; echo "$text"; exit 1; }; done
-            for s in "רציפה פונקציה איזו" "متصلة دالة أي"; do if echo "$text" | grep -qF "$s"; then echo "::error::phrase à l envers : $s"; exit 1; fi; done
+            for s in "어떤 함수가 연속입니까" "איזו פונקציה רציפה" "أي دالة متصلة"; do echo "$text" | tr -d " " | grep -qF "${s// /}" || { echo "::error::$s absent du PDF"; echo "$text"; exit 1; }; done
+            for s in "רציפה פונקציה איזו" "متصلة دالة أي"; do if echo "$text" | tr -d " " | grep -qF "${s// /}"; then echo "::error::phrase à l envers : $s"; exit 1; fi; done
             echo "✓ coréen, hébreu et arabe imprimés hors ligne, dans l ordre de lecture"
           '
 
@@ -350,7 +350,7 @@ jobs:
       # l'image (tectonic 0.15 et poppler de Debian) : la CI des tests unitaires n'a pas tectonic.
       - name: Coréen, hébreu, arabe — tests du PDF dans l'image
         run: |
-          out=$(docker run --rm --entrypoint bash -e NODE_ENV= -e CORTEX_CLAUDE_BIN=/usr/bin/false cortex-app -c 'node --import tsx --test tests/pdf-rtl-hangul.test.ts 2>&1') || { echo "$out"; exit 1; }
+          out=$(docker run --rm --network none --entrypoint bash -e NODE_ENV= -e CORTEX_CLAUDE_BIN=/usr/bin/false cortex-app -c 'node --import tsx --test tests/pdf-rtl-hangul.test.ts 2>&1') || { echo "$out"; exit 1; }
           echo "$out" | tail -12
           echo "$out" | grep -q "skipped 0" || { echo "::error::tests du PDF sautés (tectonic ou pdftotext absent ?)"; exit 1; }
 
