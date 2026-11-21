@@ -214,7 +214,8 @@ test("plafond du jour par compte : min(fusible, max(plancher, ¼ B)), vérifié 
   assert.equal(r.ok, false);
   if (r.ok) return;
   assert.equal(r.status, 429);
-  assert.match(r.error, /demain/);
+  // La remise à zéro tombe à minuit UTC : avant 01:00 (heure suisse) le message dit « à 01:00 », après il dit « demain à 01:00 ».
+  assert.match(r.error, /(demain|remise à zéro) à \d{2}:\d{2}/);
   assert.equal(await credits.getBalanceCenti("daily"), 2000);
 });
 
