@@ -15,7 +15,7 @@
 # build), python3 + matplotlib + numpy + sympy (figures + vérif symbolique),
 # sqlite3 (réparation cs-202), poppler-utils (pdftoppm, vision des annales),
 # procps (ps — annulation de jobs), util-linux (unshare — sandbox), gcc
-# (vérif des exos C).
+# (vérif des exos C), tesseract (OCR des PDF scannés, lib/ocr).
 # ═══════════════════════════════════════════════════════════════════════════
 
 # ── Image de base : Node 22 (Debian slim), la même pour les trois étapes ──
@@ -67,6 +67,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-matplotlib python3-numpy python3-sympy \
     sqlite3 poppler-utils poppler-data procps util-linux gcc libc6-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# OCR des PDF scannés (lib/ocr) : tesseract et ses modèles anglais, français, allemand, italien,
+# espagnol, plus osd (orientation). Local et gratuit, lu hors ligne. Couche à part : son poids se
+# lit dans `docker history` (la CI l'affiche), et elle reste en cache quand l'app change.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr tesseract-ocr-osd tesseract-ocr-eng tesseract-ocr-fra \
+    tesseract-ocr-deu tesseract-ocr-ita tesseract-ocr-spa \
+    && rm -rf /var/lib/apt/lists/* \
+    && tesseract --list-langs
 
 # Outils client PostgreSQL (pg_dump / pg_restore / psql) pour les sauvegardes
 # quotidiennes (lib/backup). pg_dump REFUSE un serveur plus récent que lui
@@ -160,6 +169,8 @@ USER cortex
 #   NODE_ENV=production : `next start` le pose pour lui-même, mais prod-boot et
 #   les workers tsx tournent hors de Next ; explicite, il active leurs gardes de
 #   production (refus de démarrer sans auth, magic-link jamais loggé).
+#   CORTEX_OCR=1 : les pages scannées sont lues par tesseract pendant l'ingestion (lib/ocr) ;
+#   activé ici parce que l'image l'embarque, éteint hors de l'image (invariant 6).
 #   NEXT_MANUAL_SIG_HANDLE=1 : `next start` ne sort plus de lui-même au SIGTERM ;
 #   instrumentation.ts laisse finir les jobs en cours avant de sortir (lib/drain),
 #   dans le délai RAILWAY_DEPLOYMENT_DRAINING_SECONDS du service.
@@ -167,6 +178,7 @@ ENV NODE_ENV=production \
     CORTEX_TEX_BIN=/usr/local/bin/tectonic \
     NEXT_TELEMETRY_DISABLED=1 \
     NEXT_MANUAL_SIG_HANDLE=1 \
+    CORTEX_OCR=1 \
     PORT=3000 \
     CORTEX_SEED_COURSES= \
     SEED_NEW_TENANTS=0
