@@ -10,7 +10,7 @@ done
 mkdir -p /tmp/ocr && cd /tmp/ocr
 page() { # page <nom> <phrase>
   cat /app/cortex/latex/preamble.tex /app/cortex/latex/figures.tex /app/cortex/latex/generic.tex > "$1.tex"
-  printf '\n\\newcommand{\\FOOTDATE}{Smoke}\n\\begin{document}\n\\Large %s\n\\end{document}\n' "$2" >> "$1.tex"
+  printf '\n\\newcommand{\\FOOTDATE}{Smoke}\n\\begin{document}\n%s\n\\end{document}\n' "$2" >> "$1.tex"
   /usr/local/bin/tectonic --chatter minimal --only-cached "$1.tex"
   pdftoppm -gray -r 300 -f 1 -l 1 -singlefile "$1.pdf" "$1"
 }
